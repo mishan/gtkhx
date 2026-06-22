@@ -668,7 +668,7 @@ create_news_window (GtkWidget *parent_window, session *sess)
      * icon — gtkhx_pixmap_button's XPM-upscale path would render
      * it blurry. Use a plain GtkButton instead. */
     postButton
-        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/postnews.png",
+        = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/post_news.png",
                                _ ("Post News"), GTKHX_SCALE_WINDOW_BUTTONS, NULL, NULL);
     reloadButton
         = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.png",

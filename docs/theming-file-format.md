@@ -20,14 +20,70 @@ drop in someone else's.
 
 ## Where theme files live
 
-| Location | Purpose |
-|---|---|
-| `$XDG_CONFIG_HOME/gtkhx/themes/<name>.ini` | User themes. First place the loader looks. A user file with the same basename as a built-in shadows it. |
-| GResource `/com/nasledov/gtkhx/themes/<name>.ini` | Built-in themes (see list below). Compiled into the binary; always available. |
+A theme can live in either of two layouts:
 
-If `THEMENAME` is unset / empty, the loader uses `"default"`. A name
-containing `/` or `\` is rejected (defensive against escaping the
-themes directory).
+| Layout | Path | Purpose |
+|---|---|---|
+| Flat file | `$XDG_CONFIG_HOME/gtkhx/themes/<name>.ini` | Colour + scale only. No bundled icons. |
+| Directory bundle | `$XDG_CONFIG_HOME/gtkhx/themes/<name>/theme.ini` | Same `.ini` shape, but the surrounding directory can also ship icons at `<name>/icons/<logical>.png`. |
+| Built-in | GResource `/com/nasledov/gtkhx/themes/<name>.ini` or `<name>/theme.ini` | Compiled into the binary; the same flat-vs-bundle distinction applies. |
+
+The loader prefers the dir-form when both are present at the same
+name (it's the richer layout). On the GResource side it prefers
+the dir-form for the same reason. If `THEMENAME` is unset / empty,
+the loader uses `"default"`. A name containing `/` or `\` is
+rejected (defensive against escaping the themes directory).
+
+## Bundled icons
+
+A directory-form theme can override any of GtkHx's ~50 chrome icons
+by dropping a same-named PNG into `<name>/icons/`. Per-icon
+fallback: anything the bundle doesn't supply falls through to the
+built-in GResource pixmap (`/com/nasledov/gtkhx/pixmaps/<logical>.png`).
+A bundle that ships only `connect.png` works fine — every other icon
+keeps the stock glyph.
+
+```
+$XDG_CONFIG_HOME/gtkhx/themes/
+├── solarized.ini             # flat-form: colours/scales only
+├── mychunky/                 # dir-form bundle
+│   ├── theme.ini             # colours + scales (same schema as
+│   │                         #   flat-form .ini files)
+│   └── icons/                # optional; replaces individual
+│       ├── connect.png       #   chrome icons by logical name
+│       ├── tasks.png
+│       └── download.png
+└── …
+```
+
+The chrome icons currently swappable (logical names — drop a same-
+named .png into the bundle's `icons/` to override): `ban`,
+`broadcast`, `chat`, `connect`, `download`, `upload`, `up`, `down`,
+`start`, `refresh`, `mkdir`, `trash`, `pencil`, `preview`, `kick`,
+`ignore`, `info`, `message`, `news`, `news_folder`, `news_category`,
+`news_post`, `post_news`, `tasks`, `tracker`, `users`, `files`,
+`edit_user`, `new_user`, `move`, `options`, `quit`, plus the
+file-type icons `file`, `folder`, `folder_dropbox`, `file_alias`,
+`file_app`, `file_disk`, `file_html`, `file_image`, `file_movie`,
+`file_note`, `file_sit`, `file_text`, `file_zip`, `file_move`,
+`file_move_lr`, `file_move_rl`.
+
+Format constraints (v1):
+
+- **PNG only.** Other formats (SVG, WEBP, …) are rejected by the
+  loader.
+- **No size requirement** — icons render at the size the relevant
+  scale knob asks for. Pixel-art bundles should ship 16×16 source
+  PNGs and rely on the nearest-neighbour upscale baked into the
+  button helpers. Hand-crafted larger PNGs work too.
+- **The brand logo (`gtkhx.png`)** is deliberately NOT swappable —
+  it identifies the app.
+- **Hotline user icons (cicn)** are out of scope — they're
+  protocol-shaped and `cicn.c` handles them separately.
+
+SVG bundles via glycin / `hx-image-decode` (async decode, returns
+`GdkTexture` directly, decode-at-target-size for vectors) are the
+planned v2. See [theming-scoping.md](theming-scoping.md).
 
 ## Picking a theme
 
@@ -43,9 +99,9 @@ Two ways to switch themes; both fire the same reload + repaint:
    the `THEMENAME` cfgvar hook calls `gtkhx_theme_load_active()`.
 
 To pick up edits to the body of the active theme (i.e. you changed
-`default.ini` while the app is running), briefly switch `THEMENAME`
-to another theme and back — there's no filesystem watch on the
-theme file itself.
+`default.ini` or `mybundle/theme.ini` while the app is running),
+briefly switch `THEMENAME` to another theme and back — there's no
+filesystem watch on the theme file or its icons.
 
 ## Built-in themes
 

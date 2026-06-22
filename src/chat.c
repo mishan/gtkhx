@@ -3033,7 +3033,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
 
     msg_btn = gtk_button_new ();
     icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/msg.png", NULL);
+        "/com/nasledov/gtkhx/pixmaps/message.png", NULL);
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (msg_btn, pix);
     g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),

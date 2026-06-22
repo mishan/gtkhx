@@ -43,6 +43,7 @@
 #include "gtkutil.h"
 #include "cfgkeys.h"
 #include "gtkhx_theme.h"
+#include "gtkhx_icon.h"
 #include "prefs_parser.h"
 #include "options.h"
 #include "text_util.h"

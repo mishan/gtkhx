@@ -945,7 +945,7 @@ create_users_window (GtkWidget *parent_window, gpointer data)
 	 * the view_*_btn handlers read its current single-selection and
 	 * its borrowed session pointer. Same handlers drive the chat.c
 	 * pchat sidebars; see view_msg_btn above for the shape. */
-    msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/msg.png",
+    msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/message.png",
                                   _ ("Msg"), GTKHX_SCALE_WINDOW_BUTTONS,
                                   G_CALLBACK (view_msg_btn), view);
     kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",

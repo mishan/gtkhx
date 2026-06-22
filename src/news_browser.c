@@ -52,6 +52,7 @@
 #include "news_browser.h"
 #include "gtkutil.h"
 #include "gtkhx.h"
+#include "gtkhx_icon.h"
 #include "gtkurl.h"
 #include "hl_access.h"
 #include "hl_date.h"
@@ -322,7 +323,9 @@ load_icon_paintable (const char *resource)
     GdkTexture *tex;
     int w, h;
 
-    pb = gdk_pixbuf_new_from_resource (resource, NULL);
+    /* Route through the icon resolver so active-pack overrides
+	 * (e.g. $CONFIG/icons/<pack>/newsfld.png) shadow the built-in. */
+    pb = gtkhx_icon_load (resource);
     if (!pb) {
         return NULL;
     }
@@ -1975,11 +1978,11 @@ build_browser_window (void)
 
     /* ---- Icons (cached for the lifetime of the window) ---- */
     br->icon_folder
-        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newsfld.png");
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/news_folder.png");
     br->icon_category
-        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newscat.png");
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/news_category.png");
     br->icon_post
-        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/newspost.png");
+        = load_icon_paintable ("/com/nasledov/gtkhx/pixmaps/news_post.png");
 
     /* no standalone GtkWindow. The
      * browser content lives inside an HxPanel resident of the
@@ -2014,16 +2017,16 @@ build_browser_window (void)
         "/com/nasledov/gtkhx/pixmaps/refresh.png", _ ("Refresh"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_refresh_clicked), br);
     br->btn_new_folder = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/newsfld.png", _ ("New Folder"), GTKHX_SCALE_WINDOW_BUTTONS,
+        "/com/nasledov/gtkhx/pixmaps/news_folder.png", _ ("New Folder"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_new_folder_clicked), br);
     br->btn_new_category = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/newscat.png", _ ("New Category"), GTKHX_SCALE_WINDOW_BUTTONS,
+        "/com/nasledov/gtkhx/pixmaps/news_category.png", _ ("New Category"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_new_category_clicked), br);
     br->btn_new_post = gtkhx_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/pencil.png", _ ("New Post"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_new_post_clicked), br);
     br->btn_reply = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/postnews.png", _ ("Reply"), GTKHX_SCALE_WINDOW_BUTTONS,
+        "/com/nasledov/gtkhx/pixmaps/post_news.png", _ ("Reply"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_reply_clicked), br);
     br->btn_delete = gtkhx_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/trash.png", _ ("Delete"), GTKHX_SCALE_WINDOW_BUTTONS,

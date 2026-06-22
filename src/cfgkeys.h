@@ -187,9 +187,9 @@
 #define CFG_VOICE_PTT_KEY "VOICEPTTKEY"
 
 /* Theming: name of the active theme. Picks $CONFIG/themes/<name>.ini
- * (with the built-in default GResource as the fallback). All scale
- * and palette state lives in the theme file — this is the only
- * theming key in gtkhxrc. Empty / unset → "default". See
+ * (with the built-in default GResource as the fallback). All scale,
+ * palette, and icon-pack state lives in the theme file — this is
+ * the only theming key in gtkhxrc. Empty / unset → "default". See
  * gtkhx_theme.{c,h}, docs/theming-scoping.md,
  * docs/theming-file-format.md. */
 #define CFG_THEME_NAME "THEMENAME"

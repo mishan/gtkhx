@@ -59,6 +59,7 @@
 #include "chat.h"
 #include "msg.h"
 #include "gtkhx_session.h"
+#include "gtkhx_icon.h"
 #include "notify.h"
 #include "tracker.h"
 #include "voice_runtime.h"
@@ -1060,6 +1061,11 @@ on_theme_changed (GtkhxTheme *theme, gpointer user_data)
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
     gtkhx_refresh_css ();
     gtkhx_refresh_userlist_css (users_font_desc);
+    /* The icon pack is also part of the theme — drop any cached
+     * resolved pixbufs so buttons rebuilding via button_load_source
+     * pick up the new pack's images. Buttons subscribe to this same
+     * signal, so the rebuild happens in lockstep below. */
+    gtkhx_icon_invalidate_cache ();
 }
 
 static void

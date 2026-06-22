@@ -14,9 +14,9 @@
     <file>pixmaps/broadcast.png</file>
     <file>pixmaps/chat.png</file>
     <file>pixmaps/connect.png</file>
-    <file>pixmaps/dl.png</file>
+    <file>pixmaps/download.png</file>
     <file>pixmaps/down.png</file>
-    <file>pixmaps/edituser.png</file>
+    <file>pixmaps/edit_user.png</file>
     <file>pixmaps/files.png</file>
     <file>pixmaps/gtkhx.png</file>
     <!-- App icon. Aliased so GtkIconTheme finds them under the
@@ -43,15 +43,15 @@
     <file>pixmaps/kick.png</file>
     <file>pixmaps/mkdir.png</file>
     <file>pixmaps/move.png</file>
-    <file>pixmaps/msg.png</file>
+    <file>pixmaps/message.png</file>
     <file>pixmaps/news.png</file>
-    <file>pixmaps/newscat.png</file>
-    <file>pixmaps/newsfld.png</file>
-    <file>pixmaps/newspost.png</file>
+    <file>pixmaps/news_category.png</file>
+    <file>pixmaps/news_folder.png</file>
+    <file>pixmaps/news_post.png</file>
     <file>pixmaps/pencil.png</file>
-    <file>pixmaps/newuser.png</file>
+    <file>pixmaps/new_user.png</file>
     <file>pixmaps/options.png</file>
-    <file>pixmaps/postnews.png</file>
+    <file>pixmaps/post_news.png</file>
     <file>pixmaps/preview.png</file>
     <file>pixmaps/quit.png</file>
     <file>pixmaps/refresh.png</file>
@@ -59,7 +59,7 @@
     <file>pixmaps/tasks.png</file>
     <file>pixmaps/tracker.png</file>
     <file>pixmaps/trash.png</file>
-    <file>pixmaps/ul.png</file>
+    <file>pixmaps/upload.png</file>
     <file>pixmaps/up.png</file>
     <file>pixmaps/users.png</file>
 

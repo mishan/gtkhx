@@ -28,6 +28,7 @@ gtkhx_sources = files(
   'dock_layout.c',
   'dock_layout_parse.c',
   'gtkhx.c',
+  'gtkhx_icon.c',
   'gtkhx_log.c',
   'gtkhx_session.c',
   'gtkhx_theme.c',

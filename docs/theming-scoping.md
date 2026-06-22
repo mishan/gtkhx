@@ -315,28 +315,28 @@ test. Both of Misha's original complaints are addressed.
 
 What's still on the table, in rough order of value-per-effort:
 
-1. **Theme editor UI** — a Settings → Appearance theme picker combo
-   that lists themes found under `$CONFIG/themes/`, scale spin rows
-   (returning the affordance that the file-format refactor
-   temporarily removed), six color-picker rows for the UI-role
-   palette, a "Save as" path for forking a theme, and (eventually)
-   import / export. Storage is now in place — this phase is pure
-   UI work, plus a small write-back path so a Settings edit
-   modifies the active theme file. Considered out-of-scope for the
-   initial palette landing per Misha's "no UI, that's a whole
+1. **Theme editor UI** — a Settings → Appearance theme editor:
+   scale spin rows (returning the affordance that the file-format
+   refactor temporarily removed), six color-picker rows for the
+   UI-role palette, a "Save as" path for forking a theme, and
+   (eventually) import / export. Storage is in place — this phase
+   is pure UI work, plus a small write-back path so a Settings
+   edit modifies the active theme file. The theme *picker* shipped;
+   the *editor* is still out-of-scope per Misha's "that's a whole
    theme-editor thing" call.
-2. **`gtkhx_icon_load()` resolver + chrome icon-pack override** —
-   the self-contained axis-1 piece. ~50 logical names, all already
-   funnelling through `gdk_pixbuf_new_from_resource`. Adds an
-   `icon_pack` key to the theme file under a new `[icons]` group
-   (or extends `[gtkhx-theme]`). PNG packs are the synchronous
-   zero-Rust starting point; SVG packs are a follow-up that routes
-   through the existing `hx-image-decode` (glycin) pipeline at
-   decode-time-with-target-size, with the result cached per
-   `(logical name × target px)`.
+2. ✅ **Chrome icons bundle with themes** — landed on
+   `claude/icon-packs`. `src/gtkhx_icon.{c,h}` is the single
+   resolver chokepoint. Themes can ship as flat `.ini` (no icons)
+   or as a directory `<name>/theme.ini` plus `<name>/icons/*.png`;
+   per-icon GResource pixmap fallback keeps partial bundles
+   working. There's no separate icon-pack pref — picking a theme
+   picks the look end-to-end. SVG bundles via glycin /
+   `hx-image-decode` remain the v2 follow-up — async decode +
+   `GdkTexture` direct return + decode-at-target-size for
+   vectors, all precedented in that crate. Schema in
+   [theming-file-format.md](theming-file-format.md).
 3. **Follow-ups on the scaling refactor**: lift `chat_font` into a
    named theme axis (currently the chat/PM font is still a separate
-   non-theme pref); bring the task-row (non-button) icon under
-   `WINDOW_BUTTONS` or a new `TASKS_ROW_ICON` area; revisit the
-   compact chat-sidebar exclusion if a second `USERLIST_*` variant
-   turns out to be wanted.
+   non-theme pref); revisit the compact chat-sidebar exclusion if a
+   second `USERLIST_*` variant turns out to be wanted.
+   (`tasks_row_icon` already landed as `GTKHX_SCALE_TASKS_ROW_ICON`.)
