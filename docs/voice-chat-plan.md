@@ -240,8 +240,9 @@ wedge watchdog (60s glib timeout + always-on RTP counter probe).
 Shipped. `rust/crates/hxbridge/` lives in the workspace with
 `session_from_ptr`, `session_from_ptr_full`, and
 `emit_pointer_pair_signal`. The lifetime model is documented in
-`docs/rust-glib-interop.md`. The gtk-rs-core 0.22 / gstreamer-rs 0.25
-families are pinned in `rust/Cargo.toml`.
+`docs/rust-glib-interop.md`. The gtk-rs-core 0.21 / gstreamer-rs 0.24
+families are pinned in `rust/Cargo.toml` (downgraded from 0.22 / 0.25
+to fit Debian trixie's stock rustc 1.85 — see `rust-toolchain.toml`).
 
 The Cargo.lock blast-radius worry from the original doc materialised
 but was manageable — the CI cache restored fast enough that we didn't
@@ -603,8 +604,9 @@ Concrete shipping outcomes:
   main-thread state.
 - **`glib::MainContext::default().invoke` discipline** for
   cross-thread marshalling is established and tested.
-- **gtk-rs-core 0.22 + gstreamer-rs 0.25 + libadwaita-1 deps** are
-  in the workspace.
+- **gtk-rs-core 0.21 + gstreamer-rs 0.24 + libadwaita-1 deps** are
+  in the workspace. (Initially landed at the 0.22 / 0.25 family;
+  downgraded to fit Debian trixie's stock rustc 1.85.)
 
 What R4 (GtkhxSession in Rust) inherits:
 
