@@ -786,6 +786,14 @@ fe_init (void)
 
     memset (&icon_files, 0, sizeof (icon_files));
     prefs_read ();
+    /* Load the active theme before any widget construction. fe_init
+     * builds the toolbar / file-browser / users / etc. windows below;
+     * those button helpers subscribe to the theme "changed" signal
+     * and read scales live. Loading the theme here means the very
+     * first measure pass gets the right factors instead of building
+     * at the built-in default and then re-laying-out on the post-
+     * fe_init load. See gtkhx_theme.{c,h}. */
+    gtkhx_theme_load_active ();
     /* prep the screen-wide CSS provider once prefs are loaded
      * so the very first widget that gets gtkhx_apply_text_style() picks
      * up the right look on the first paint. */
@@ -852,6 +860,20 @@ on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
 {
     AdwStyleManager *sm = ADW_STYLE_MANAGER (object);
     (void)pspec;
+    (void)user_data;
+    gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+}
+
+/* GtkhxTheme::changed trampoline — when the active theme file is
+ * reloaded (THEMENAME edit, future Settings theme picker), re-pull
+ * every UI-role slot for the *currently active* light/dark variant
+ * and repaint every live xtext. Connected once from gtkhx_activate
+ * alongside the AdwStyleManager subscription. */
+static void
+on_theme_changed (GtkhxTheme *theme, gpointer user_data)
+{
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    (void)theme;
     (void)user_data;
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
 }
@@ -942,12 +964,18 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
      * light-mode set (manager says light) before any window opens.
      * Subsequent `notify::dark` fires (e.g. user flips THEME in
      * Settings, or follows-system and system goes dark) re-run
-     * gtkhx_apply_theme_palette to refresh every open xtext. */
+     * gtkhx_apply_theme_palette to refresh every open xtext.
+     * The theme's "changed" signal does the same when the active
+     * theme file is reloaded (THEMENAME changed, future Settings
+     * theme picker), reusing the variant the manager currently
+     * reports. */
     {
         AdwStyleManager *sm = adw_style_manager_get_default ();
         gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
         g_signal_connect (sm, "notify::dark",
                           G_CALLBACK (on_style_manager_dark_changed), NULL);
+        g_signal_connect (gtkhx_theme_get_default (), "changed",
+                          G_CALLBACK (on_theme_changed), NULL);
     }
 }
 

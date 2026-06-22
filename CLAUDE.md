@@ -270,13 +270,25 @@ duplicate paths, so a hashtable can't represent it cleanly).
   later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
   clause without explicit confirmation.
 
-## Theming (per-area scaling)
+## Theming (theme files)
 
-`src/gtkhx_theme.{c,h}` is the `GtkhxTheme` singleton. Four named scale areas —
-`GTKHX_SCALE_TOOLBAR`, `GTKHX_SCALE_WINDOW_BUTTONS`, `GTKHX_SCALE_USERLIST_ICON`,
-`GTKHX_SCALE_USERLIST_TEXT` — each backed by a `CFG_SCALE_*` int-percent pref in
-`cfgkeys.h`. `0` means "unset → use the default theme's factor"
-(`default_theme_pct[]`); a non-zero override replaces it.
+`src/gtkhx_theme.{c,h}` is the `GtkhxTheme` singleton. All per-axis
+theming state — four scale areas (`GTKHX_SCALE_TOOLBAR`,
+`GTKHX_SCALE_WINDOW_BUTTONS`, `GTKHX_SCALE_USERLIST_ICON`,
+`GTKHX_SCALE_USERLIST_TEXT`) and six chat palette UI-role colors
+(`GTKHX_PAL_{FG,BG,MARK_FG,MARK_BG,MARKER,HISTORY_MUTED}` × light/dark) —
+lives in **theme files**: GKeyFile-format `.ini` at `$CONFIG/themes/<name>.ini`
+with the built-in default shipped as a GResource at
+`/com/nasledov/gtkhx/themes/default.ini` (source at `src/themes/default.ini`).
+The only theming key in `gtkhxrc` is `CFG_THEME_NAME` ("THEMENAME"); the
+loader picks `$CONFIG/themes/<that>.ini` first and falls back to the
+GResource. Schema reference: `docs/theming-file-format.md`.
+
+`gtkhx_theme_load_active()` runs once in `fe_init()` before any widget
+construction (so the first measure pass gets the right factors). It emits
+`GtkhxTheme::changed`. A `THEMENAME` edit re-fires it via the
+`changed_theme_name` cfgvar hook; every subscriber (button helpers, user
+list, chat xtext) rescales and repaints in place.
 
 Call sites multiply their raw source size by `gtkhx_theme_scale(area)`. The old
 per-call `2` literals and `TOOLBAR_ICON_SCALE` / `TASKS_ICON_SCALE` constants are
@@ -284,19 +296,25 @@ gone — there is exactly one factor source per area, no hidden multipliers.
 Source art is the honest 100%; the default theme owns the historical 2× button
 and 1.25× user-list factors as explicit overrides.
 
+`chat.c::gtkhx_apply_theme_palette(dark)` pulls each UI-role slot via
+`gtkhx_theme_get_color(role, dark)`. The mIRC slots (0..31) stay in
+`chat.c::colors[]` because they're protocol-shaped, not theme-shaped (servers
+send specific indices; users don't get to remap "red").
+
 Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
 `GtkhxScaleArea`, subscribe to the theme `changed` signal, and auto-unsubscribe
 on finalize). The user list reads scales live in `measure`/`snapshot` — no
 per-cell state to refresh.
 
-Settings: "UI Scaling" group on the Appearance page with four `AdwSpinRow`s.
-Test: `tests/unit/test_theme_scale.c` pins the clamp matrix, defaults,
-unset→default fallback, and `changed` emission.
+**No Settings UI yet.** The user-facing theme editor (picker combo, scale spin
+rows, color pickers, save-as) is a separate later phase. For now, edit the
+`.ini` directly. `tests/unit/test_theme_scale.c` covers clamp matrix,
+defaults, GKeyFile round-trip, missing-key fallback, malformed-hex fallback,
+load-replaces-not-merges, and `changed` emission.
 
-Icon-pack replacement and the color/palette editor are scoped in
-`docs/theming-scoping.md` but not yet built. The compact chat-sidebar user list
-keeps a fixed 1.0 structural density and does not follow `USERLIST_*` — that
-carve-out is intentional, not a bug.
+Icon-pack replacement is scoped in `docs/theming-scoping.md` but not yet built.
+The compact chat-sidebar user list keeps a fixed 1.0 structural density and
+does not follow `USERLIST_*` — that carve-out is intentional, not a bug.
 
 ## Coverage
 

@@ -170,7 +170,25 @@ rebuilt.
 This keeps the door open to the "ship/share a theme" UX later and to bundling a
 couple of presets (e.g. "Classic", "Modern", "High-contrast").
 
-### Per-area scaling, done honestly — IMPLEMENTED
+### Per-area scaling, done honestly — IMPLEMENTED (now theme-file backed)
+
+> **Update — theme files landed.** The initial scaling impl cut a
+> corner and stuffed the four `scale_*` overrides into
+> `gtkhx_prefs` / `gtkhxrc`. That's been corrected: all per-axis
+> theming state — scales today, palette colors as of the same
+> branch, future axes too — now lives in a GKeyFile theme file at
+> `$CONFIG/themes/<name>.ini` (with the built-in default shipped
+> as a GResource). The only theming key in `gtkhxrc` is
+> `THEMENAME`. The four `CFG_SCALE_*` keys and the
+> `gtkhx_prefs.scale_*` fields are gone, the "UI Scaling" group
+> on the Settings → Appearance page is gone, and the on-disk
+> shape now matches what this scoping doc described from the
+> start (see the Storage paragraph under "Recommended
+> architecture"). Full schema reference:
+> [theming-file-format.md](theming-file-format.md). The C/H
+> shapes summarised below still hold — only the storage source
+> changed.
+
 
 Replace the single `CFG_UI_SCALE` + scattered base constants with a fixed set of
 named scales. The model that kills complaint #1: **the unscaled source art is the
@@ -297,18 +315,28 @@ test. Both of Misha's original complaints are addressed.
 
 What's still on the table, in rough order of value-per-effort:
 
-1. **`gtkhx_icon_load()` resolver + chrome icon-pack override** — the
-   self-contained axis-1 piece. ~50 logical names, all already funnelling
-   through `gdk_pixbuf_new_from_resource`. PNG packs are the synchronous
-   zero-Rust starting point; SVG packs are a follow-up that routes through the
-   existing `hx-image-decode` (glycin) pipeline at decode-time-with-target-size,
-   with the result cached per `(logical name × target px)`.
-2. **Palette → theme-sourced light/dark + Settings color editor** — most net-new
-   code, but on rails: `apply_theme_palette(dark)` already exists, the
-   `AdwStyleManager` dark-tracking is already wired, the mIRC 0–31 stay locked,
-   the editable subset is XTEXT_FG/BG + mark/marker/muted.
-3. **Follow-ups on the scaling refactor**: lift `chat_font` into a named area
-   so the chat/PM font is a theme knob rather than a separate font pref; bring
-   the task-row (non-button) icon under `WINDOW_BUTTONS` or a new
-   `TASKS_ROW_ICON` area; revisit the compact chat-sidebar exclusion if a
-   second `USERLIST_*` variant turns out to be wanted.
+1. **Theme editor UI** — a Settings → Appearance theme picker combo
+   that lists themes found under `$CONFIG/themes/`, scale spin rows
+   (returning the affordance that the file-format refactor
+   temporarily removed), six color-picker rows for the UI-role
+   palette, a "Save as" path for forking a theme, and (eventually)
+   import / export. Storage is now in place — this phase is pure
+   UI work, plus a small write-back path so a Settings edit
+   modifies the active theme file. Considered out-of-scope for the
+   initial palette landing per Misha's "no UI, that's a whole
+   theme-editor thing" call.
+2. **`gtkhx_icon_load()` resolver + chrome icon-pack override** —
+   the self-contained axis-1 piece. ~50 logical names, all already
+   funnelling through `gdk_pixbuf_new_from_resource`. Adds an
+   `icon_pack` key to the theme file under a new `[icons]` group
+   (or extends `[gtkhx-theme]`). PNG packs are the synchronous
+   zero-Rust starting point; SVG packs are a follow-up that routes
+   through the existing `hx-image-decode` (glycin) pipeline at
+   decode-time-with-target-size, with the result cached per
+   `(logical name × target px)`.
+3. **Follow-ups on the scaling refactor**: lift `chat_font` into a
+   named theme axis (currently the chat/PM font is still a separate
+   non-theme pref); bring the task-row (non-button) icon under
+   `WINDOW_BUTTONS` or a new `TASKS_ROW_ICON` area; revisit the
+   compact chat-sidebar exclusion if a second `USERLIST_*` variant
+   turns out to be wanted.

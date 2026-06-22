@@ -1,32 +1,45 @@
 /*
  * gtkhx_theme.h — themable presentation state.
  *
- * First landed for the per-area UI scaling work (see
- * docs/theming-scoping.md). GtkhxTheme is the singleton that owns the
- * user's theming choices and is the change-signal hub the rest of the
- * UI subscribes to. Today it carries the per-area scale knobs; icon
- * packs and the color palette plug into the same object and the same
- * "changed" signal as those axes land.
+ * GtkhxTheme is the singleton that owns the user's active theming
+ * choices (per-area scales, xtext palette, and future axes like icon
+ * pack name). Every consumer subscribes to its "changed" signal and
+ * re-reads via the gtkhx_theme_* accessors.
+ *
+ * All theming state lives in *theme files* — GKeyFile-format .ini at
+ * $CONFIG/themes/<name>.ini, with a built-in default shipped as a
+ * GResource (/com/nasledov/gtkhx/themes/default.ini). The active
+ * theme is named by the THEMENAME pref in gtkhxrc. Theme files are
+ * the only storage for this state; gtkhx_prefs does NOT carry
+ * scale_* / palette_* fields. The scoping doc
+ * (docs/theming-scoping.md) and the file-format reference
+ * (docs/theming-file-format.md) cover the why and the schema.
  *
  * The scale model is deliberately honest. The unscaled source art is
- * the true 100% — the 16x16 button pixmaps, the user-list icon's
- * natural size, the base font. A *theme* then supplies a per-area
- * scale, and the built-in "default theme" encodes the real factors
+ * the true 100% — the 16×16 button pixmaps, the user-list icon's
+ * natural size, the base font. A theme then supplies a per-area
+ * scale, and the built-in default theme encodes the real factors
  * GtkHx has always applied (toolbar / window buttons at 200%, the
  * standalone Users window at 125%) as explicit values rather than
- * pretending they're 100%. A user override, when set, replaces the
- * default-theme value for that area.
+ * pretending they're 100%. A user theme that omits a scale key
+ * inherits the built-in default for that area.
  *
  * Call sites pass *no* base multiplier — they hand gtkhx_theme_scale()
  * their raw source dimension and let the theme own the whole factor.
  * There is no global multiplier stacked on top of hidden per-area
  * constants (the misleading shape the earlier single-knob `ui-scale`
  * experiment had).
+ *
+ * User-facing controls for editing themes (a theme picker, color
+ * pickers, "save as") are deferred to a separate theme-editor phase.
+ * For now the only way to change a theme is to edit (or drop in) a
+ * .ini file under $CONFIG/themes/ and set THEMENAME in gtkhxrc.
  */
 #ifndef GTKHX_THEME_H
 #define GTKHX_THEME_H
 
 #include <glib-object.h>
+#include <gdk/gdk.h>
 
 G_BEGIN_DECLS
 
@@ -58,28 +71,71 @@ GtkhxTheme *gtkhx_theme_get_default (void);
 int gtkhx_theme_clamp_percent (int pct);
 
 /* The default theme's percentage for an area (the shipped factor:
- * 200 for buttons, 125 for the user list). Independent of any user
- * override — useful for a Settings "reset to default" affordance. */
+ * 200 for buttons, 125 for the user list). Independent of any loaded
+ * theme — useful for a Settings "reset to default" affordance and as
+ * the fallback when the active theme omits a scale key. */
 int gtkhx_theme_get_default_percent (GtkhxScaleArea area);
 
-/* Effective integer percentage for an area: the user override if set,
- * otherwise the default theme's value. Clamped. */
+/* Effective integer percentage for an area: the active theme's value
+ * if set, otherwise the built-in default. Clamped. */
 int gtkhx_theme_get_percent (GtkhxScaleArea area);
 
 /* Scale factor (percent / 100.0) for an area — the value a call site
  * multiplies into its base icon size or font size. */
 double gtkhx_theme_scale (GtkhxScaleArea area);
 
-/* Set an area's override percentage, write it back into gtkhx_prefs,
- * and emit "changed" if the value actually changed. A pct <= 0 clears
- * the override (the area reverts to the default theme's factor); a
- * positive value is clamped to [GTKHX_SCALE_MIN, GTKHX_SCALE_MAX]. */
-void gtkhx_theme_set_percent (GtkhxScaleArea area, int pct);
+/* ---- Palette (UI-role color slots) -----------------------------------
+ *
+ * The xtext chat palette has 38 slots (see chat.c::colors[] and
+ * xtext.h). Slots 0..31 are the mIRC palette — semantically locked
+ * because servers send specific color indices and expect specific
+ * colors. The remaining 6 are *UI roles* (foreground, background,
+ * selection foreground / background, marker line, history-muted
+ * secondary text), and these are the ones a theme can override.
+ *
+ * Each role carries two values: a *light* variant and a *dark*
+ * variant. The active one is selected by AdwStyleManager's `dark`
+ * property at apply time (see chat.c::gtkhx_apply_theme_palette) so
+ * the chat surface follows the system theme without the user having
+ * to redo their palette twice. */
 
-/* Normalise every area's prefs value in place (clamp) and emit
- * "changed". Call after a bulk prefs reload / Settings apply that
- * wrote the gtkhx_prefs.scale_* fields directly. */
-void gtkhx_theme_notify_changed (void);
+typedef enum {
+    GTKHX_PAL_FG,             /* XTEXT_FG (slot 34): default text fg */
+    GTKHX_PAL_BG,             /* XTEXT_BG (slot 35): default text bg */
+    GTKHX_PAL_MARK_FG,        /* XTEXT_MARK_FG (slot 32): selection fg */
+    GTKHX_PAL_MARK_BG,        /* XTEXT_MARK_BG (slot 33): selection bg */
+    GTKHX_PAL_MARKER,         /* XTEXT_MARKER (slot 36): marker line */
+    GTKHX_PAL_HISTORY_MUTED,  /* XTEXT_HISTORY_MUTED (slot 37): secondary */
+    GTKHX_PAL_N_ROLES
+} GtkhxPaletteRole;
+
+/* Built-in default theme: the GdkRGBA shipped for each (role, variant).
+ * Independent of any loaded theme — used as the fallback when the
+ * active theme file omits a key and as the "reset to default" value
+ * for a future theme editor. */
+GdkRGBA gtkhx_theme_get_default_color (GtkhxPaletteRole role, gboolean dark);
+
+/* Effective color for a (role, variant): the active theme's value if
+ * set, otherwise the built-in default. */
+GdkRGBA gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark);
+
+/* ---- Loader ----------------------------------------------------------
+ *
+ * Theme files are GKeyFile .ini at $CONFIG/themes/<name>.ini, with the
+ * built-in default at GResource /com/nasledov/gtkhx/themes/default.ini.
+ * See docs/theming-file-format.md for the schema. */
+
+/* Load the theme named by the THEMENAME pref (or "default" if unset).
+ * Tries $CONFIG/themes/<name>.ini first, falls back to the built-in
+ * default GResource. Emits "changed" on the singleton. Call once at
+ * startup and again when THEMENAME changes. */
+void gtkhx_theme_load_active (void);
+
+/* Load theme state from an already-parsed GKeyFile. Exposed for tests
+ * that want to drive a fixture without touching the filesystem.
+ * Replaces all loaded state (so missing keys revert to the built-in
+ * default — there is no "merge on top of previous"). Emits "changed". */
+void gtkhx_theme_load_from_keyfile (GKeyFile *kf);
 
 G_END_DECLS
 

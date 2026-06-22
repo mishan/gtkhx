@@ -85,5 +85,10 @@
     <file>pixmaps/file_zip.png</file>
     <file>pixmaps/folder.png</file>
     <file>pixmaps/folder_dropbox.png</file>
+
+    <!-- Built-in default theme (see gtkhx_theme.{c,h} and
+         docs/theming-file-format.md). Loaded as a GResource fallback
+         when $CONFIG/themes/<active>.ini isn't on disk. -->
+    <file>themes/default.ini</file>
   </gresource>
 </gresources>

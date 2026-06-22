@@ -145,24 +145,14 @@ struct gtkhx_prefs {
     unsigned char voice_ptt_enabled;
     char *voice_ptt_key;
 
-    /* Theming: per-area UI scale override, integer percentage against
-	 * the unscaled source art (see gtkhx_theme.{c,h} and
-	 * docs/theming-scoping.md). 0 means "no override → use the default
-	 * theme's factor" (buttons 200%, user list 125%), so a fresh prefs
-	 * file reproduces today's look. A non-zero value is an explicit
-	 * user override, clamped to [GTKHX_SCALE_MIN, GTKHX_SCALE_MAX].
-	 *
-	 *   scale_toolbar        — toolbar window button icons
-	 *   scale_window_buttons — action buttons in Users / Files / News /
-	 *                          Tasks / Tracker windows
-	 *   scale_userlist_icon  — user-list avatar icon
-	 *   scale_userlist_text  — user-list name text
-	 *
-	 * Persisted as CFG_SCALE_* ; read through gtkhx_theme_scale(). */
-    int scale_toolbar;
-    int scale_window_buttons;
-    int scale_userlist_icon;
-    int scale_userlist_text;
+    /* Theming: active theme name. Theme files live at
+	 * $CONFIG/themes/<name>.ini; the built-in default ships as a
+	 * GResource and loads when no on-disk file by that name is
+	 * found. Empty / NULL falls back to "default". All scale and
+	 * palette state lives in the theme file — this string is the
+	 * *only* theming knob in gtkhxrc. See gtkhx_theme.{c,h},
+	 * docs/theming-scoping.md, docs/theming-file-format.md. */
+    char *theme_name;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;
