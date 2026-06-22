@@ -37,7 +37,14 @@
  *       fake_server / duplex unit fixtures).
  *     - The coarse GtkhxConnectionState sequence the toolbar listens
  *       to fires in order: CONNECTING → TCP_CONNECTED → HANDSHAKE_DONE
- *       (same sequence the legacy GIOStream connect path emits).
+ *       (same sequence the legacy GIOStream connect path emits). As of
+ *       the "match legacy" task-timing change, HANDSHAKE_DONE fires at
+ *       the orchestrator's LOGIN_SENDING state — magic done, credentials
+ *       going out — i.e. BEFORE the replayed reply frame, exactly like
+ *       legacy's send_login. So the tests drive until the replayed
+ *       frame is recorded (drive_until_rcv) rather than waiting on a
+ *       post-frame state; the idx_handshake > idx_tcp ordering assert
+ *       then doubles as proof HANDSHAKE_DONE preceded the frame.
  *     - The orchestrator installs the bridge (hx_bridge_is_installed).
  *     - The LOGIN reply was REPLAYED to the C dispatch carrying the
  *       pinned trans (HX_LOGIN_TRANS == 1), the HTLS_HDR_TASK opcode,
@@ -154,6 +161,40 @@ drive_until (test_observer *obs, guint timeout_ms)
     obs->loop = NULL;
 }
 
+/* Quit the loop once the recording hx_rcv_hdr has captured at least one
+ * dispatched frame. Used by the tests that assert on the replayed
+ * LOGIN / step-2 reply: as of the "match legacy" task-timing change the
+ * coarse HANDSHAKE_DONE fires at LOGIN_SENDING — BEFORE the replayed
+ * frame — and the headless stub never runs rcv_task_login (so no
+ * LOGIN_READY follows). So there's no post-frame state event to wait
+ * on; poll the record instead. */
+static gboolean
+on_rcv_poll (gpointer u)
+{
+    test_observer *obs = u;
+    if (connect_test_rcv_count >= 1) {
+        obs->wait_arrived = TRUE;
+        g_main_loop_quit (obs->loop);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
+static void
+drive_until_rcv (test_observer *obs, guint timeout_ms)
+{
+    obs->loop = g_main_loop_new (NULL, FALSE);
+    obs->timeout_id = g_timeout_add (timeout_ms, on_observer_timeout, obs);
+    guint poll_id = g_timeout_add (5, on_rcv_poll, obs);
+    g_main_loop_run (obs->loop);
+    g_source_remove (poll_id);
+    if (obs->timeout_id) {
+        g_source_remove (obs->timeout_id);
+        obs->timeout_id = 0;
+    }
+    g_main_loop_unref (obs->loop);
+    obs->loop = NULL;
+}
+
 static test_observer *
 observer_new (GtkhxSession *sess, GtkhxConnectionState wait_for)
 {
@@ -206,8 +247,12 @@ test_orchestrator_login (void)
     memset (&test_htlc, 0, sizeof (test_htlc));
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    /* wait_for is set to LOGIN_READY (never emitted in this headless
+     * binary — rcv_task_login is stubbed) so the observer doesn't quit
+     * early on the now-earlier HANDSHAKE_DONE; drive_until_rcv quits on
+     * the replayed frame instead. */
     test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+                                       GTKHX_CONNECTION_LOGIN_READY);
 
     /* Sanity: bridge starts uninstalled. */
     g_assert_false (hx_bridge_is_installed ());
@@ -215,11 +260,12 @@ test_orchestrator_login (void)
     hx_connect (&test_htlc, host, (guint16) port, "guest", "",
                 /*secure=*/0, /*tls=*/0);
 
-    drive_until (obs, 10000);
+    drive_until_rcv (obs, 10000);
 
-    /* Reached HANDSHAKE_DONE — the orchestrator completed the full
-     * handshake against the real server. If mhxd is unreachable this
-     * is where the test fails loudly (no silent skip). */
+    /* The replayed LOGIN reply was dispatched — the orchestrator
+     * completed the full handshake against the real server. If mhxd is
+     * unreachable this is where the test fails loudly (no silent
+     * skip). */
     g_assert_true (obs->wait_arrived);
 
     /* Coarse connection-state sequence in order. */
@@ -300,11 +346,11 @@ test_orchestrator_capabilities_negotiated (void)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+                                       GTKHX_CONNECTION_LOGIN_READY);
 
     hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
                 /*secure=*/0, /*tls=*/0);
-    drive_until (obs, 10000);
+    drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
 
@@ -369,12 +415,12 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+                                       GTKHX_CONNECTION_LOGIN_READY);
     g_assert_false (hx_bridge_is_installed ());
 
     hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
                 /*secure=*/1, /*tls=*/0);
-    drive_until (obs, 10000);
+    drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
     g_assert_true (hx_bridge_is_installed ());
@@ -460,12 +506,12 @@ test_orchestrator_tls_login (void)
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_HANDSHAKE_DONE);
+                                       GTKHX_CONNECTION_LOGIN_READY);
     g_assert_false (hx_bridge_is_installed ());
 
     hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
                 /*secure=*/0, /*tls=*/1);
-    drive_until (obs, 10000);
+    drive_until_rcv (obs, 10000);
 
     g_assert_true (obs->wait_arrived);
     g_assert_true (hx_bridge_is_installed ());
@@ -505,10 +551,10 @@ test_orchestrator_tls_login (void)
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_observer *obs2 = observer_new (gtkhx,
-                                        GTKHX_CONNECTION_HANDSHAKE_DONE);
+                                        GTKHX_CONNECTION_LOGIN_READY);
     hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
                 /*secure=*/0, /*tls=*/1);
-    drive_until (obs2, 10000);
+    drive_until_rcv (obs2, 10000);
     g_assert_true (obs2->wait_arrived);
     g_assert_true (hx_bridge_is_installed ());
     observer_free (obs2, gtkhx);

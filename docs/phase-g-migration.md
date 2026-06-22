@@ -367,6 +367,36 @@ banner fetch, SELFINFO timer) headlessly still needs the R5 rcv seam
 header-level replay assertion remains the strongest automated proof
 until then.
 
+### Connect-task timing parity with legacy
+
+The orchestrator originally registered the "login" protocol task up
+front in `hx_connect_via_orchestrator` (it had to exist before the
+replayed reply could dispatch to it). That left the login task visible
+in the Tasks window *concurrently* with the coarse "Connecting" task
+for the whole connect — different from the legacy path, where the login
+task appears only once the connection is up and credentials are going
+out.
+
+Root cause: the two paths emit `HANDSHAKE_DONE` at different moments.
+Legacy emits it in `send_login` (magic done, login being sent) and then
+registers the login task; the orchestrator emitted it at the very end
+(after the login reply). So legacy means "entering login phase" while
+the orchestrator meant "login complete."
+
+Aligned by mapping the orchestrator's `LoginSending` state (already
+emitted by `send_login` on the plaintext/TLS paths; now also emitted
+after magic on the HOPE path) to the coarse `HANDSHAKE_DONE` view
+transition, and registering the login task there via
+`hx_orchestrator_register_login_task` (called from the bridge's
+`LOGIN_SENDING` state callback). `LoginSending` is emitted strictly
+before the replayed reply frame on the same ordered channel, so the
+task is registered in time. Rust's end-of-handshake state no longer
+drives a view transition; login completion is signalled by
+`LOGIN_READY` (emitted by `rcv_task_login` on the replayed reply), as
+in legacy. Net result: `CONNECTING` → `TCP_CONNECTED` → `HANDSHAKE_DONE`
+(+ login task appears) → reply → `LOGIN_READY` — the same Tasks-window
+sequence the legacy path produces.
+
 ### `claude/r3.3e-phase-g-delete-old-connect`
 
 Once `PHASE_G_DEFAULT_ON=1` has been validated against:

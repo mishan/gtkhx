@@ -31,6 +31,12 @@ extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
                                                  const char *fingerprint);
 
+/* Phase G: register the orchestrator's "login" protocol task. Called
+ * from the hxnet bridge's LOGIN_SENDING state callback so the login
+ * task appears at the same point the legacy connect path registers it
+ * (magic done, credentials going out) rather than up front. */
+extern void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
+
 /* Phase G default-flip control. While the orchestrator connect path
  * (hx_connect_via_orchestrator) bakes against the live server matrix it
  * stays opt-IN. Flipping it on by default is a ONE-LINE change: set

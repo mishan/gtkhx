@@ -405,6 +405,21 @@ pub async fn run_hope_lifecycle(
         bail!("magic: {e}");
     }
 
+    // Magic done, about to send credentials. The plaintext path emits
+    // this from send_login; HOPE builds its step frames directly, so
+    // emit it here too. The C bridge maps LoginSending to the coarse
+    // "transport ready / entering login phase" UI transition (delete
+    // the Connecting task, register the login task) — matching the
+    // legacy connect path's HANDSHAKE_DONE timing. Emitted once, before
+    // the step-1 send, so it precedes the replayed step-2 reply frame.
+    if evt_tx
+        .send(Event::State(ConnectionState::LoginSending))
+        .await
+        .is_err()
+    {
+        return;
+    }
+
     // ---- HOPE step 1 (plaintext) ----
     let mac_algs: [&[u8]; 3] = [b"HMAC-SHA256", b"HMAC-SHA1", b"HMAC-MD5"];
     let cipher_refs: Vec<&[u8]> = req.cipher_algs.iter().map(|v| v.as_slice()).collect();
