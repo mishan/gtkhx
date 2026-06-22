@@ -1565,6 +1565,7 @@ output_agreement (session *sess, const char *agreement, guint16 len)
     gtk_window_set_title (GTK_WINDOW (agreementwin), _ ("Agreement"));
 
     agreetext = gtk_text_view_new ();
+    gtk_text_view_set_monospace (GTK_TEXT_VIEW (agreetext), TRUE);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (agreetext), FALSE);
     gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (agreetext), FALSE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (agreetext), GTK_WRAP_WORD);
