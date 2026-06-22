@@ -118,13 +118,26 @@ rust_target_dir = meson.project_build_root() / 'rust-target'
 # R3.3) inherit the feature without needing a second flip.
 cargo_features = 'hxbridge/runtime'
 
+# --ignore-rust-version: several transitive deps (zbus / zvariant /
+# zvariant_derive / zvariant_utils / zbus_macros / zbus_names /
+# glycin-common / glycin-utils) carry `rust-version` >= 1.87 in
+# their Cargo.toml manifests, but their actual source compiles
+# cleanly on rustc 1.85 (Debian trixie's stock rustc, the project's
+# native-build floor). The MSRV labels are over-conservative; the
+# code itself doesn't use any post-1.85 language or stdlib feature.
+# Passing --ignore-rust-version tells cargo to stop treating the
+# label mismatch as a hard error. See rust-toolchain.toml for the
+# rationale on the 1.85 floor, and the gtk-rs-0.21 / gstreamer-rs-0.24
+# downgrade in Cargo.toml for the version-pin half of the same
+# Debian-stable story.
+#
 # Build the Rust workspace. The custom_target output is a stamp file that
 # Meson uses for dependency tracking; the actual artifacts are the .a
 # archives under rust_target_dir/release/.
 rust_build = custom_target('rust-workspace',
   command : [
     'sh', '-c',
-    '@0@ build --release --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
+    '@0@ build --release --ignore-rust-version --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
       cargo.full_path(),
       meson.current_source_dir() / 'Cargo.toml',
       rust_target_dir,

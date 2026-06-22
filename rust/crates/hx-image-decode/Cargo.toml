@@ -21,9 +21,9 @@ crate-type = ["staticlib", "rlib"]
 #     pkg-config `glycin-2` version on the host + in
 #     org.gnome.Platform 48). That's the user-facing version of
 #     "Glycin 2.x".
-#   - the Rust crate on crates.io is at 3.1.x with its own
-#     breaking-change history. Both target the same loader
-#     subprocess protocol (`/usr/libexec/glycin-loaders/2+/`).
+#   - the Rust crate on crates.io is at 3.x with its own breaking-
+#     change history. Both target the same loader subprocess
+#     protocol (`/usr/libexec/glycin-loaders/2+/`).
 #
 # We use the Rust crate directly — it spawns the loader
 # subprocesses itself, no libglycin-2 link surface. The loader
@@ -38,6 +38,13 @@ crate-type = ["staticlib", "rlib"]
 # permissively-licensed `glycin-ng` because we want the sandboxed
 # subprocess pipeline.
 #
+# Version pin: `~3.0` resolves into the 3.0.x line, which depends
+# on the gtk-rs 0.21 family (gdk4 0.10, gio/glib 0.21) — matching
+# the workspace pins. The 3.1.x line bumps to gtk-rs 0.22 (MSRV
+# rustc 1.92) which the workspace deliberately avoids; see
+# rust/Cargo.toml and rust-toolchain.toml. Step both together when
+# the rustc floor moves.
+#
 # Feature gates:
 #   default-features = false: the default pulls async-io plus a
 #     pile of tokio interop helpers; we only want async-io.
@@ -48,7 +55,7 @@ crate-type = ["staticlib", "rlib"]
 #   "gdk4": Frame::texture() returns a `gdk::Texture` we can hand
 #     directly to GdkPicture (Phase 9.D dialog) or stash on the
 #     xtext_media_data side-pointer (Phase 9.E inline render).
-glycin = { version = "3", default-features = false, features = ["async-io", "gdk4"] }
+glycin = { version = "~3.0", default-features = false, features = ["async-io", "gdk4"] }
 
 # GLib types + main-loop integration (decode-result callback runs on
 # the main thread via `glib::MainContext::spawn_local`).
@@ -57,6 +64,6 @@ gio = { workspace = true }
 
 # `gdk::Texture` for the FFI return type. gtk-rs ecosystem
 # convention: the crates.io name is `gdk4`, the package name in
-# source is `gdk`. The version pin matches the gtk4 0.11 family the
+# source is `gdk`. The version pin matches the gtk4 0.10 family the
 # workspace dependencies already lock.
-gdk = { package = "gdk4", version = "0.11" }
+gdk = { package = "gdk4", version = "0.10" }
