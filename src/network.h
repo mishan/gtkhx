@@ -31,6 +31,33 @@ extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
                                                  const char *fingerprint);
 
+/* Phase G: register the orchestrator's "login" protocol task. Called
+ * from the hxnet bridge's LOGIN_SENDING state callback so the login
+ * task appears at the same point the legacy connect path registers it
+ * (magic done, credentials going out) rather than up front. */
+extern void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
+
+/* Phase G default-flip control. While the orchestrator connect path
+ * (hx_connect_via_orchestrator) bakes against the live server matrix it
+ * stays opt-IN. Flipping it on by default is a ONE-LINE change: set
+ * this to 1. That makes the orchestrator the default and
+ * GTKHX_OLD_CONNECT=1 the escape hatch back to the legacy GIOStream
+ * path. Both env vars (GTKHX_NEW_CONNECT opt-in, GTKHX_OLD_CONNECT
+ * opt-out, opt-out wins) are honored now so the escape hatch is
+ * testable before the flip and the flip touches one constant.
+ *
+ * Defined in the header (not network.c) so the gate logic and the
+ * /phase_g/gate_default trip-wire test reference the SAME value — the
+ * test's expectation flips automatically when this does.
+ *
+ * Pre-flip checklist (docs/phase-g-migration.md): plaintext + HOPE vs
+ * mhxd (done), plaintext + caps + TLS vs Janus (done), 1.0/1.2 smoke
+ * vs hlserver.com (manual), and a human clicking through a real TLS
+ * trust-on-first-use dialog (CI only auto-accepts). */
+#ifndef PHASE_G_DEFAULT_ON
+#define PHASE_G_DEFAULT_ON 0
+#endif
+
 /* `secure` is the legacy hxd "secure server" password flag (not
  * transport security — it just selects an alternate password
  * encoding). `tls` is the transport-security flag: non-zero

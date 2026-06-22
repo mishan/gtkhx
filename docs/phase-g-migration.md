@@ -343,15 +343,73 @@ installs in `gtkhx.c::hxd_fd_set` — these were
 already wrapped after R3.3.e-4. Audit needed for any
 straggler.)
 
+### Default-flip prep (shipped)
+
+The gate polarity is now centralized in
+`src/network.c::hx_connect_use_orchestrator()`, driven by a single
+constant `PHASE_G_DEFAULT_ON` in `src/network.h` (currently `0`).
+Precedence: `GTKHX_OLD_CONNECT=1` (force legacy) beats
+`GTKHX_NEW_CONNECT=1` (force orchestrator); with neither set,
+`PHASE_G_DEFAULT_ON` decides. Both env vars are honored now so the
+opt-out escape hatch is exercised *before* it becomes load-bearing.
+
+Three deterministic Tier 3 guards pin the gate without needing a
+server (`test_phase_g_connect.c`): `/phase_g/gate_default`,
+`/phase_g/gate_opt_in`, `/phase_g/gate_opt_out_wins`. They observe the
+chosen path via the synchronous bridge-install signal (the orchestrator
+installs the bridge inside `hx_connect`; the legacy path doesn't).
+`gate_default` references the same `PHASE_G_DEFAULT_ON` the gate does,
+so its expectation flips automatically with the constant.
+
+**The actual flip** is then: change `PHASE_G_DEFAULT_ON` to `1` (one
+line; `gate_default` updates with it). Do that only after the live
+validation below is done — in particular a human clicking through a
+real TLS trust-on-first-use dialog, which CI's auto-accept can't prove.
+Asserting the downstream `rcv_task_login` effects (`htlc->version`,
+banner fetch, SELFINFO timer) headlessly still needs the R5 rcv seam
+(increment 3) — the headless test stubs `rcv_task_login`, so the
+header-level replay assertion remains the strongest automated proof
+until then.
+
+### Connect-task timing parity with legacy
+
+The orchestrator originally registered the "login" protocol task up
+front in `hx_connect_via_orchestrator` (it had to exist before the
+replayed reply could dispatch to it). That left the login task visible
+in the Tasks window *concurrently* with the coarse "Connecting" task
+for the whole connect — different from the legacy path, where the login
+task appears only once the connection is up and credentials are going
+out.
+
+Root cause: the two paths emit `HANDSHAKE_DONE` at different moments.
+Legacy emits it in `send_login` (magic done, login being sent) and then
+registers the login task; the orchestrator emitted it at the very end
+(after the login reply). So legacy means "entering login phase" while
+the orchestrator meant "login complete."
+
+Aligned by mapping the orchestrator's `LoginSending` state (already
+emitted by `send_login` on the plaintext/TLS paths; now also emitted
+after magic on the HOPE path) to the coarse `HANDSHAKE_DONE` view
+transition, and registering the login task there via
+`hx_orchestrator_register_login_task` (called from the bridge's
+`LOGIN_SENDING` state callback). `LoginSending` is emitted strictly
+before the replayed reply frame on the same ordered channel, so the
+task is registered in time. Rust's end-of-handshake state no longer
+drives a view transition; login completion is signalled by
+`LOGIN_READY` (emitted by `rcv_task_login` on the replayed reply), as
+in legacy. Net result: `CONNECTING` → `TCP_CONNECTED` → `HANDSHAKE_DONE`
+(+ login task appears) → reply → `LOGIN_READY` — the same Tasks-window
+sequence the legacy path produces.
+
 ### `claude/r3.3e-phase-g-delete-old-connect`
 
-Once GTKHX_NEW_CONNECT=1 has been validated against:
+Once `PHASE_G_DEFAULT_ON=1` has been validated against:
 
 - mhxd (1.x server with HOPE support)
 - hlserver.com (1.0/1.2 fallback)
 - Janus (1.9 + chat-history extension)
 
-…the gate flips to default-on, the env var becomes opt-OUT
+…the env var stays as the opt-OUT escape hatch
 (`GTKHX_OLD_CONNECT=1` keeps the legacy path), and a
 follow-up branch deletes:
 
@@ -514,15 +572,32 @@ round-trips) can't, until the UI coupling in `rcv.c` is unwound.
    guard. ~70 LOC across the two.
 
 2. **Route the harness's connect + login through the orchestrator.**
-   `hxnet`'s `open_plaintext` is GTK-free, so the harness could call
-   it for connect / login / negotiation instead of its hand-rolled
-   version, then read frames via the bridge. That makes the *login
-   phase* of all ~30 existing Tier 3 tests exercise production
-   networking for free, collapsing the two client implementations
-   into one for the part that's testable headless. Bigger change —
-   the harness is blocking-socket shaped and the orchestrator is
-   async, so the harness's `integration_recv_message` family needs
-   an actor/bridge-backed variant. Scoped as its own branch.
+   *(Shipped.)* `hxnet`'s lifecycle is GTK-free, so the harness now
+   drives connect / magic / LOGIN / negotiation through it instead of
+   its hand-rolled raw-socket version. Two pieces landed:
+
+   - **Foundation** — `hxnet_connection_open_plaintext_polling` (a
+     polling-mode sibling of `open_plaintext` that keeps the event
+     receiver for synchronous draining instead of the GLib callback
+     forwarder), proven by `tests/integration/test_orchestrator_harness.c`.
+
+   - **Bulk conversion** — an *orchestrated transport* in
+     `integration_harness.c`, selected at runtime by
+     `GTKHX_HARNESS_ORCHESTRATED`. The login entry points
+     (`integration_open_login_or_skip` / `_to_caps_or_skip`) open via
+     the polling FFI and return a synthetic fd in the `ORCH_FD_BASE`
+     range; `integration_send` / `integration_recv_message` /
+     `integration_close` detect that range and route through the actor
+     (`send_frame` / `try_recv_frame` / `destroy`), rebuilding the
+     22-byte header so every downstream chunk walker sees a
+     byte-identical `htlc->in`. Real fds (xfer data channels, tracker
+     sockets) stay below the base on the legacy path. No per-test
+     changes; the full Tier 3 suite passes under both transports. CI
+     runs the integration suite twice (legacy + orchestrated) so the
+     production connect+login path is continuously exercised against
+     the live servers. HOPE/TLS open helpers are not routed (they
+     drive their own crypto/transport) and remain covered by
+     `test_phase_g_connect`.
 
 3. **Post-login coverage on production `rcv`.** Blocked on R5 (UI →
    Rust) or a headless `rcv` seam that lets the dispatch handlers run
@@ -530,8 +605,8 @@ round-trips) can't, until the UI coupling in `rcv.c` is unwound.
    here so the dependency is explicit.
 
 Recommendation: keep increment 1 as the merge gate for capability
-regressions, do increment 2 on its own branch when the harness
-async-recv work is worth it, and let increment 3 fall out of R5.
+regressions, increment 2 is shipped (the suite runs under both
+transports in CI), and let increment 3 fall out of R5.
 
 ## Summary of branches the night left behind
 
