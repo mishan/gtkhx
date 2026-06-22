@@ -1407,6 +1407,22 @@ test('phase_g_connect', test_integration_phase_g_connect,
      suite   : 'integration',
      timeout : 30)
 
+# orchestrator_harness — increment 2 foundation. Pure-FFI test (no
+# C production source): drives the production plaintext connect+login
+# lifecycle from a synchronous, no-GLib-main-loop test via the polling
+# FFI (hxnet_connection_open_plaintext_polling), the way a Tier 3
+# harness routed through the orchestrator would. Proves a guest login
+# + post-login frame read end-to-end against a real server.
+test_integration_orchestrator_harness = executable(
+  'test_integration_orchestrator_harness',
+  'integration/test_orchestrator_harness.c',
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  include_directories : integration_test_inc,
+)
+test('orchestrator_harness', test_integration_orchestrator_harness,
+     suite   : 'integration',
+     timeout : 30)
+
 # real_tls — Tier 3 coverage for docs/tls-scoping.md Phase 1: the
 # Mobius / Janus separate-port TLS model, where the server speaks
 # HTLS-over-TLS from byte zero on a dedicated port. Drives the
