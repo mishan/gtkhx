@@ -185,8 +185,6 @@ gtask_icon_for (guint32 trans, struct htxf_conn *htxf)
  * GtkPicture with the same size request so the row's icon column
  * stays aligned with sibling rows that did get their icon. */
 #define GTASK_ICON_SRC_SIZE 16
-#define GTASK_ICON_SCALE 2
-#define GTASK_ICON_PX (GTASK_ICON_SRC_SIZE * GTASK_ICON_SCALE)
 static GtkWidget *
 gtask_make_icon (const char *resource_path)
 {
@@ -194,16 +192,26 @@ gtask_make_icon (const char *resource_path)
     GdkPixbuf *use_pb;
     GdkTexture *tex;
     GtkWidget *picture;
+    /* Theme-driven render size. The source art is 16×16; the active
+	 * theme's GTKHX_SCALE_TASKS_ROW_ICON factor (default 200% — the
+	 * historical 2× scale) lands the row icon at the user-tunable
+	 * size. Read at construction time; existing in-flight task rows
+	 * keep their construction-size on a Settings change, new tasks
+	 * pick up the new factor. Could subscribe per-row to the theme
+	 * `changed` signal for live rescale, but task rows are usually
+	 * short-lived (xfers complete) so it's not worth the bookkeeping. */
+    double scale = gtkhx_theme_scale (GTKHX_SCALE_TASKS_ROW_ICON);
+    int px = (int) (GTASK_ICON_SRC_SIZE * scale + 0.5);
 
     src = gdk_pixbuf_new_from_resource (resource_path, NULL);
     if (!src) {
         picture = gtk_picture_new ();
-        gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
+        gtk_widget_set_size_request (picture, px, px);
         return picture;
     }
-    if (GTASK_ICON_SCALE > 1) {
-        int w = gdk_pixbuf_get_width (src) * GTASK_ICON_SCALE;
-        int h = gdk_pixbuf_get_height (src) * GTASK_ICON_SCALE;
+    if (scale != 1.0) {
+        int w = (int) (gdk_pixbuf_get_width (src)  * scale + 0.5);
+        int h = (int) (gdk_pixbuf_get_height (src) * scale + 0.5);
         use_pb = gdk_pixbuf_scale_simple (src, w, h, GDK_INTERP_NEAREST);
         g_object_unref (src);
     } else {
@@ -216,14 +224,14 @@ gtask_make_icon (const char *resource_path)
 	 * gtkhx_pixmap_button's defensive shape. */
     if (!use_pb) {
         picture = gtk_picture_new ();
-        gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
+        gtk_widget_set_size_request (picture, px, px);
         return picture;
     }
     tex = gtkhx_texture_from_pixbuf (use_pb);
     if (!tex) {
         g_object_unref (use_pb);
         picture = gtk_picture_new ();
-        gtk_widget_set_size_request (picture, GTASK_ICON_PX, GTASK_ICON_PX);
+        gtk_widget_set_size_request (picture, px, px);
         return picture;
     }
     picture = gtk_picture_new_for_paintable (GDK_PAINTABLE (tex));
@@ -251,6 +259,8 @@ create_tasks (session *sess)
     gtklist = gtk_list_box_new ();
     gtk_list_box_set_selection_mode (GTK_LIST_BOX (gtklist),
                                      GTK_SELECTION_MULTIPLE);
+    /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
+    gtkhx_apply_listview_style (gtklist);
     g_object_ref_sink (gtklist);
 
     gtask_scroll = gtk_scrolled_window_new ();

@@ -966,6 +966,8 @@ tracker_section_new (const char *url, guint8 version, guint16 expected)
 
     sec->column_view = gtk_column_view_new (
         GTK_SELECTION_MODEL (g_object_ref (sec->selection)));
+    /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
+    gtkhx_apply_listview_style (sec->column_view);
     cv = GTK_COLUMN_VIEW (sec->column_view);
     /* Single-click activation is a touch aggressive — keep the
      * default (double-click / Enter to activate) so the Connect

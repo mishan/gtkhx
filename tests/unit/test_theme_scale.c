@@ -65,6 +65,8 @@ test_default_scale (void)
         gtkhx_theme_get_default_percent (GTKHX_SCALE_USERLIST_ICON), ==, 125);
     g_assert_cmpint (
         gtkhx_theme_get_default_percent (GTKHX_SCALE_USERLIST_TEXT), ==, 125);
+    g_assert_cmpint (
+        gtkhx_theme_get_default_percent (GTKHX_SCALE_TASKS_ROW_ICON), ==, 200);
 }
 
 /* GdkRGBA fields are `float`, not `double`, so a round-trip from a

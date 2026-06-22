@@ -57,6 +57,7 @@ typedef enum {
                                  * News / Tasks / Tracker windows */
     GTKHX_SCALE_USERLIST_ICON,  /* user-list avatar icon */
     GTKHX_SCALE_USERLIST_TEXT,  /* user-list name text */
+    GTKHX_SCALE_TASKS_ROW_ICON, /* per-task glyph in the tasks list */
     GTKHX_SCALE_N_AREAS
 } GtkhxScaleArea;
 

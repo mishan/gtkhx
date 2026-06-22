@@ -68,6 +68,7 @@ static const int default_theme_pct[GTKHX_SCALE_N_AREAS] = {
     200, /* GTKHX_SCALE_WINDOW_BUTTONS */
     125, /* GTKHX_SCALE_USERLIST_ICON */
     125, /* GTKHX_SCALE_USERLIST_TEXT */
+    200, /* GTKHX_SCALE_TASKS_ROW_ICON — matches historical GTASK_ICON_SCALE = 2 */
 };
 
 /* Built-in default palette. Matches the historical chat.c
@@ -280,6 +281,7 @@ static const char *const scale_key_name[GTKHX_SCALE_N_AREAS] = {
     [GTKHX_SCALE_WINDOW_BUTTONS] = "window_buttons",
     [GTKHX_SCALE_USERLIST_ICON]  = "userlist_icon",
     [GTKHX_SCALE_USERLIST_TEXT]  = "userlist_text",
+    [GTKHX_SCALE_TASKS_ROW_ICON] = "tasks_row_icon",
 };
 
 /* Mapping for the [palette.light] / [palette.dark] keys. */

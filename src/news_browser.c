@@ -2081,6 +2081,8 @@ build_browser_window (void)
     br->list_view
         = gtk_list_view_new (GTK_SELECTION_MODEL (br->selection), factory);
     gtk_list_view_set_show_separators (GTK_LIST_VIEW (br->list_view), FALSE);
+    /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
+    gtkhx_apply_listview_style (br->list_view);
 
     g_signal_connect (br->selection, "selection-changed",
                       G_CALLBACK (on_selection_changed), br);

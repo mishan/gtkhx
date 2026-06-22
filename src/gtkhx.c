@@ -252,6 +252,23 @@ gtkhx_refresh_css (void)
                                     (int) (bg.green * 255.0 + 0.5),
                                     (int) (bg.blue  * 255.0 + 0.5));
 
+    /* .gtkhx-listview — color-only theming for any list-shaped
+	 * surface (GtkColumnView, GtkListView, GtkListBox) that wants
+	 * the GtkHx theme's fg/bg without inheriting the .gtkhx-text
+	 * font or the .gtkhx-userlist row-padding override. Used by
+	 * tracker, tasks, files browser, news browser.
+	 *
+	 * Two CSS-node trees to cover. Both end in row{cell} but the
+	 * outer container's tag differs:
+	 *
+	 *   GtkColumnView → columnview > listview > row > cell
+	 *   GtkListView   → listview > row [> cell]
+	 *   GtkListBox    → list > row
+	 *
+	 * The header selector applies to GtkColumnView's title row.
+	 * Selection (row:selected) deliberately keeps the system theme
+	 * accent so selected rows stay visually distinct on a themed
+	 * background. */
     css = g_strdup_printf (
         ".gtkhx-text, .gtkhx-text text {"
         "  %s"
@@ -263,9 +280,20 @@ gtkhx_refresh_css (void)
         "  color: %s;"
         "  background-color: %s;"
         "  caret-color: %s;"
+        "}"
+        ".gtkhx-listview,"
+        ".gtkhx-listview > header,"
+        ".gtkhx-listview listview,"
+        ".gtkhx-listview listview > row:not(:selected),"
+        ".gtkhx-listview listview > row:not(:selected) > cell,"
+        ".gtkhx-listview list,"
+        ".gtkhx-listview list > row:not(:selected) {"
+        "  color: %s;"
+        "  background-color: %s;"
         "}",
         fontprops, fghex, bghex, fghex,
-        fghex, bghex, fghex);
+        fghex, bghex, fghex,
+        fghex, bghex);
 
     gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
@@ -280,6 +308,12 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 {
     gchar *fontprops;
     gchar *css;
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    gboolean dark = adw_style_manager_get_dark (sm);
+    GdkRGBA fg = gtkhx_theme_get_color (GTKHX_PAL_FG, dark);
+    GdkRGBA bg = gtkhx_theme_get_color (GTKHX_PAL_BG, dark);
+    gchar *fghex;
+    gchar *bghex;
 
     if (!gtkhx_userlist_css_provider) {
         gtkhx_userlist_css_provider = gtk_css_provider_new ();
@@ -287,11 +321,38 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
     }
 
     fontprops = pango_to_css_props (fd);
-    css = g_strdup_printf (".gtkhx-userlist { %s }", fontprops);
+    fghex = g_strdup_printf ("#%02x%02x%02x",
+                             (int) (fg.red   * 255.0 + 0.5),
+                             (int) (fg.green * 255.0 + 0.5),
+                             (int) (fg.blue  * 255.0 + 0.5));
+    bghex = g_strdup_printf ("#%02x%02x%02x",
+                             (int) (bg.red   * 255.0 + 0.5),
+                             (int) (bg.green * 255.0 + 0.5),
+                             (int) (bg.blue  * 255.0 + 0.5));
+
+    /* Font selector stays on .gtkhx-userlist itself (the users-list
+	 * font pref); theme fg/bg are painted across the column-view's
+	 * inner nodes (listview + non-selected rows + their cells) so
+	 * the surface matches the rest of the themed UI. Selected rows
+	 * keep the system theme's accent so the selection is still
+	 * visually distinct against a themed background. */
+    css = g_strdup_printf (
+        ".gtkhx-userlist { %s }"
+        ".gtkhx-userlist,"
+        ".gtkhx-userlist > header,"
+        ".gtkhx-userlist listview,"
+        ".gtkhx-userlist listview > row:not(:selected),"
+        ".gtkhx-userlist listview > row:not(:selected) > cell {"
+        "  color: %s;"
+        "  background-color: %s;"
+        "}",
+        fontprops, fghex, bghex);
 
     gtk_css_provider_load_from_string (gtkhx_userlist_css_provider, css);
 
     g_free (css);
+    g_free (fghex);
+    g_free (bghex);
     g_free (fontprops);
 }
 
@@ -348,6 +409,23 @@ gtkhx_apply_input_style (GtkWidget *w)
      * rationale and the per-class CSS payload. */
     if (!gtk_widget_has_css_class (w, "gtkhx-input")) {
         gtk_widget_add_css_class (w, "gtkhx-input");
+    }
+}
+
+void
+gtkhx_apply_listview_style (GtkWidget *w)
+{
+    if (!w) {
+        return;
+    }
+    if (!gtkhx_css_provider) {
+        gtkhx_refresh_css ();
+    }
+    /* List-shaped sibling of .gtkhx-text / .gtkhx-input — paints
+     * theme fg/bg on the column-view's listview, non-selected rows,
+     * and cells. See gtkhx_refresh_css for the CSS payload. */
+    if (!gtk_widget_has_css_class (w, "gtkhx-listview")) {
+        gtk_widget_add_css_class (w, "gtkhx-listview");
     }
 }
 
@@ -922,6 +1000,10 @@ on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
     (void)user_data;
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
     gtkhx_refresh_css ();
+    /* The users-list provider also encodes theme fg/bg now — keep
+     * the existing font (users_font_desc lives in users.c and is
+     * the source of truth for the userlist font pref). */
+    gtkhx_refresh_userlist_css (users_font_desc);
 }
 
 /* GtkhxTheme::changed trampoline — when the active theme file is
@@ -939,6 +1021,7 @@ on_theme_changed (GtkhxTheme *theme, gpointer user_data)
     (void)user_data;
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
     gtkhx_refresh_css ();
+    gtkhx_refresh_userlist_css (users_font_desc);
 }
 
 static void

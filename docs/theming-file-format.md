@@ -84,6 +84,7 @@ window_buttons = 200    # action buttons in Users / Files / News /
                         # Tasks / Tracker windows
 userlist_icon  = 125    # user-list avatar icon
 userlist_text  = 125    # user-list name text
+tasks_row_icon = 200    # per-task glyph in the tasks list
 
 # --- Chat palette: light variant --------------------------------------
 # Six UI-role color slots for the xtext chat widget. mIRC palette

@@ -273,9 +273,9 @@ duplicate paths, so a hashtable can't represent it cleanly).
 ## Theming (theme files)
 
 `src/gtkhx_theme.{c,h}` is the `GtkhxTheme` singleton. All per-axis
-theming state — four scale areas (`GTKHX_SCALE_TOOLBAR`,
+theming state — five scale areas (`GTKHX_SCALE_TOOLBAR`,
 `GTKHX_SCALE_WINDOW_BUTTONS`, `GTKHX_SCALE_USERLIST_ICON`,
-`GTKHX_SCALE_USERLIST_TEXT`) and six chat palette UI-role colors
+`GTKHX_SCALE_USERLIST_TEXT`, `GTKHX_SCALE_TASKS_ROW_ICON`) and six chat palette UI-role colors
 (`GTKHX_PAL_{FG,BG,MARK_FG,MARK_BG,MARKER,HISTORY_MUTED}` × light/dark) —
 lives in **theme files**: GKeyFile-format `.ini` at `$CONFIG/themes/<name>.ini`
 with the built-in default shipped as a GResource at
@@ -303,14 +303,22 @@ send specific indices; users don't get to remap "red").
 
 Non-xtext text surfaces (agreement window, news viewers, broadcast viewer,
 chat-subject entries, and the chat / PM / pchat input boxes) get the same
-theme `fg`/`bg`/`caret-color` via two CSS classes managed by
-`gtkhx_refresh_css`: `.gtkhx-text` (read-only surfaces — applies theme colors
-+ font) and `.gtkhx-input` (editable inputs — applies colors only; font stays
-on GTK's built-in `.monospace` class to avoid the documented ascender-clip
-bug). Both classes get re-emitted on `GtkhxTheme::changed` and on
-`AdwStyleManager::notify::dark`, so theme reloads and system-mode flips
-repaint immediately. Apply with `gtkhx_apply_text_style(w)` /
-`gtkhx_apply_input_style(w)`.
+theme `fg`/`bg`/`caret-color` via three CSS classes managed by
+`gtkhx_refresh_css`: `.gtkhx-text` (read-only text — applies theme colors +
+font), `.gtkhx-input` (editable inputs — colors only; font stays on GTK's
+built-in `.monospace` class to avoid the documented ascender-clip bug), and
+`.gtkhx-listview` (list-shaped surfaces — `GtkColumnView` / `GtkListView` /
+`GtkListBox`, colors only; selection keeps the system accent). The
+`.gtkhx-userlist` provider — separate because it also encodes the dedicated
+user-list font pref + per-row padding override — gains theme colors via
+`gtkhx_refresh_userlist_css`. All providers get re-emitted on
+`GtkhxTheme::changed` and on `AdwStyleManager::notify::dark`, so theme reloads
+and system-mode flips repaint immediately. Apply with `gtkhx_apply_text_style(w)`
+/ `gtkhx_apply_input_style(w)` / `gtkhx_apply_listview_style(w)`. Tagged today:
+agreement window, news / broadcast viewers, news_browser post-view (`.gtkhx-text`);
+chat / pchat / PM inputs and news_browser compose body (`.gtkhx-input`); tracker,
+tasks list, files browser panels, news_browser thread tree (`.gtkhx-listview`);
+users list (`.gtkhx-userlist`).
 
 Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
 `GtkhxScaleArea`, subscribe to the theme `changed` signal, and auto-unsubscribe
