@@ -210,6 +210,7 @@ where
             "consumer dropped before LoginSending state delivered",
         ));
     }
+    crate::proto_trace::trace(crate::proto_trace::Dir::Out, &frame);
     stream.write_all(&frame).await?;
     stream.flush().await?;
     Ok(())
