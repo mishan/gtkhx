@@ -562,6 +562,39 @@ test_orchestrator_connect_refused (void)
     g_unsetenv ("GTKHX_NEW_CONNECT");
 }
 
+/* HOPE-over-TLS is unsupported on every path. hx_connect must reject
+ * it synchronously — no orchestrator install, no connection attempt,
+ * no path that quietly does it. Needs no server (rejected before any
+ * connect). */
+static void
+test_hope_tls_rejected (void)
+{
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, "127.0.0.1", 5610, "guest", "",
+                /*secure=*/1, /*tls=*/1);
+
+    /* Rejected up front: no bridge, no fd, nothing started. */
+    g_assert_false (hx_bridge_is_installed ());
+    g_assert_cmpint (test_htlc.fd, ==, 0);
+
+    /* Same via the GTKHX_TLS env override (bookmarks/power-user path). */
+    g_setenv ("GTKHX_TLS", "1", TRUE);
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
+    hx_connect (&test_htlc, "127.0.0.1", 5500, "guest", "",
+                /*secure=*/1, /*tls=*/0);
+    g_assert_false (hx_bridge_is_installed ());
+    g_assert_cmpint (test_htlc.fd, ==, 0);
+
+    g_unsetenv ("GTKHX_TLS");
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+}
+
 int
 main (int argc, char *argv[])
 {
@@ -576,6 +609,7 @@ main (int argc, char *argv[])
     g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
     g_test_add_func ("/phase_g/connect_refused",
                      test_orchestrator_connect_refused);
+    g_test_add_func ("/phase_g/hope_tls_rejected", test_hope_tls_rejected);
 
     return g_test_run ();
 }

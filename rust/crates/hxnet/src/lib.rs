@@ -78,6 +78,14 @@ pub mod magic;
 pub mod tls;
 pub mod transform;
 
+/// Per-step timeout for the pre-frame handshake (DNS + TCP connect,
+/// TLS handshake, magic exchange, each LOGIN reply read). Matches the
+/// legacy GIOStream path's `MAGIC_TIMEOUT_SEC` (src/network.c). Without
+/// it a hung connect (unresponsive host) or a server that accepts the
+/// TCP connection but never speaks would leave the orchestrator task —
+/// and the connect/login UI task — stuck forever.
+pub const HANDSHAKE_TIMEOUT_SECS: u64 = 30;
+
 pub use command::Command;
 pub use connection::{Connection, ConnectionHandle, SpawnError};
 pub use event::{ConnectionState, Event, ShutdownReason};

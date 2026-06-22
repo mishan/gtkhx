@@ -135,9 +135,24 @@ where
         ));
     }
 
-    // Read the 22-byte header.
+    // Read the 22-byte header. Bounded by the handshake timeout so a
+    // server that goes silent after LOGIN doesn't wedge the connect
+    // (and the connect/login UI task) forever.
     let mut hdr_buf = [0u8; hotline_proto::HL_HDR_LEN];
-    stream.read_exact(&mut hdr_buf).await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
+        stream.read_exact(&mut hdr_buf),
+    )
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "LOGIN reply not received within {}s",
+                crate::HANDSHAKE_TIMEOUT_SECS
+            ),
+        )
+    })??;
 
     let decoded = decode_header_full(&hdr_buf, MAX_BODY_LEN + 2).ok_or_else(|| {
         io::Error::new(

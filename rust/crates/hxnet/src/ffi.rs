@@ -615,12 +615,24 @@ pub unsafe extern "C" fn hxnet_connection_destroy(
     if handle.is_null() {
         return;
     }
-    // Reclaim the Box; its Drop drops the cmd sender (actor
-    // exits), the events receiver (any in-flight events
-    // discarded), and the JoinHandle (the actor task continues
-    // to completion but we don't await it — it gets detached
-    // and dropped naturally on the runtime).
-    drop(Box::from_raw(handle));
+    let conn = Box::from_raw(handle);
+    // Abort the spawned lifecycle/actor task. Dropping a JoinHandle
+    // only *detaches* — the task keeps running. For a connection
+    // that's mid-handshake (DNS / TCP connect / magic / LOGIN), the
+    // task isn't yet polling the command channel, so dropping the
+    // cmd sender below would NOT stop it: it would keep running,
+    // holding the socket, and only self-terminate if/when it next
+    // tried to emit an event (never, if it's blocked on a hung
+    // connect or a silent server). That leak was the "hxnet in a bad
+    // state after disconnecting a hung connect" bug. abort() forces
+    // cancellation at the next await point and drops the task's
+    // TcpStream/TlsStream, closing the socket. For an already-exited
+    // actor (the normal shutdown path) abort() is a no-op.
+    conn._join.abort();
+    // Dropping the Box releases the cmd sender, the events receiver /
+    // callback state (the forwarder aborts its spawn_local, the pump
+    // detaches), all together.
+    drop(conn);
 }
 
 // ============================================================

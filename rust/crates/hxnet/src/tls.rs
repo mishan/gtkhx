@@ -170,7 +170,22 @@ pub async fn wrap_tls(
             format!("invalid TLS server name {host:?}: {e}"),
         )
     })?;
-    connector.connect(server_name, stream).await
+    // Bound the TLS handshake like the other pre-frame steps so a
+    // server that stalls mid-handshake doesn't hang the connect.
+    tokio::time::timeout(
+        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
+        connector.connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "TLS handshake did not complete within {}s",
+                crate::HANDSHAKE_TIMEOUT_SECS
+            ),
+        )
+    })?
 }
 
 #[cfg(test)]

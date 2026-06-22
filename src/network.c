@@ -2056,12 +2056,35 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     struct gtkhx_connect_ctx *ctx;
     GSocketClient *client;
 
+    /* HOPE-over-TLS is not a supported combination, on ANY path. TLS
+     * already secures the transport, so layering the HOPE cipher on
+     * top is redundant double-encryption we don't support. Reject it
+     * up front — before the orchestrator gate AND the legacy path
+     * below — rather than silently picking one. The Connect dialog
+     * greys out HOPE when TLS is on; this is the defensive backstop
+     * for bookmarks / programmatic callers. (Does not touch any
+     * existing connection: we return before the teardown preamble.) */
+    {
+        const char *tls_env = g_getenv ("GTKHX_TLS");
+        gboolean want_tls = tls || (tls_env && *tls_env);
+        if (secure && want_tls) {
+            hx_printf_prefix (htlc, 0, INFOPREFIX,
+                              _ ("HOPE-secure login over TLS is not "
+                                 "supported; use one or the other\n"));
+            error_dialog ("Error",
+                          "HOPE-secure login can't be combined with TLS. "
+                          "TLS already encrypts the connection — turn off "
+                          "the HOPE cipher (or turn off TLS) and reconnect.");
+            return;
+        }
+    }
+
     /* Phase G: hxnet-owns-the-whole-lifecycle, gated behind
      * GTKHX_NEW_CONNECT while it bakes. The orchestrator now covers
      * plaintext, HOPE-Secure-Login, and plaintext-over-TLS
-     * (separate-port model). Only HOPE-over-TLS (redundant double
-     * encryption) and secure-without-a-cipher fall through to the
-     * legacy GIOStream path. The GTKHX_TLS env override is folded into
+     * (separate-port model). HOPE-over-TLS is rejected above;
+     * secure-without-a-cipher falls through to the legacy GIOStream
+     * path. The GTKHX_TLS env override is folded into
      * want_tls so GTKHX_TLS=1 + GTKHX_NEW_CONNECT=1 takes the
      * orchestrator TLS path. */
     {
