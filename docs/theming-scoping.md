@@ -285,10 +285,27 @@ still goes through the existing font pref); task-row (non-button) icons still us
 
 Evenings/weekends: multiply by ~3, as the ROADMAP notes elsewhere.
 
-## Suggested first step
+## Status and suggested next step
 
-Land the **per-area scaling refactor** first, on a fresh `claude/theming` branch
-off `main`, cherry-picking the reusable `gtkutil.c` helpers from
-`claude/ui-scale`. It's the highest-value, lowest-risk piece, it directly answers
-both of Misha's complaints, and it forces the `GtkhxTheme` + change-signal
-skeleton into existence — which icon and color theming then plug into.
+The **per-area scaling refactor** shipped on `claude/theming` (see the
+"IMPLEMENTED" block above): `GtkhxTheme` singleton, four named scale areas, the
+default-as-data pattern, `theme-changed` signal bus, Settings UI, and a unit
+test. Both of Misha's original complaints are addressed.
+
+What's still on the table, in rough order of value-per-effort:
+
+1. **`gtkhx_icon_load()` resolver + chrome icon-pack override** — the
+   self-contained axis-1 piece. ~50 logical names, all already funnelling
+   through `gdk_pixbuf_new_from_resource`. PNG packs are the synchronous
+   zero-Rust starting point; SVG packs are a follow-up that routes through the
+   existing `hx-image-decode` (glycin) pipeline at decode-time-with-target-size,
+   with the result cached per `(logical name × target px)`.
+2. **Palette → theme-sourced light/dark + Settings color editor** — most net-new
+   code, but on rails: `apply_theme_palette(dark)` already exists, the
+   `AdwStyleManager` dark-tracking is already wired, the mIRC 0–31 stay locked,
+   the editable subset is XTEXT_FG/BG + mark/marker/muted.
+3. **Follow-ups on the scaling refactor**: lift `chat_font` into a named area
+   so the chat/PM font is a theme knob rather than a separate font pref; bring
+   the task-row (non-button) icon under `WINDOW_BUTTONS` or a new
+   `TASKS_ROW_ICON` area; revisit the compact chat-sidebar exclusion if a
+   second `USERLIST_*` variant turns out to be wanted.
