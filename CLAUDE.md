@@ -306,13 +306,13 @@ Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
 on finalize). The user list reads scales live in `measure`/`snapshot` — no
 per-cell state to refresh.
 
-**Settings UI is just a picker.** Settings → Appearance has a "Color theme"
+**Settings UI is just a picker.** Settings → Appearance has a "GtkHx theme"
 `AdwComboRow` bound to `CFG_THEME_NAME`, populated by
 `gtkhx_theme_list_available()` (enumerates GResource built-ins + `$CONFIG/themes/*.ini`;
 default-first then alphabetical-by-display; user files shadow same-name
 GResources). The scale knobs / color pickers / "save as" parts of the theme
 editor are a separate later phase. For now, edit the `.ini` directly to change
-a theme's body. Built-ins: `default`, `solarized`, `solarized-dark` (see
+a theme's body. Built-ins: `default`, `solarized` (see
 `src/themes/` and `docs/theming-file-format.md`).
 
 `tests/unit/test_theme_scale.c` covers clamp matrix, defaults, GKeyFile

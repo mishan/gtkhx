@@ -3168,7 +3168,7 @@ settings_page_general (AdwPreferencesPage *page)
         }
         adw_preferences_group_add (
             appearance_grp,
-            pref_combo_row (CFG_THEME_NAME, _ ("Color theme"),
+            pref_combo_row (CFG_THEME_NAME, _ ("GtkHx theme"),
                             theme_values, theme_labels, (int) n));
         /* pref_combo_row copies the strings into GtkStringList models,
          * so the parallel arrays can go now. The GtkhxThemeEntry

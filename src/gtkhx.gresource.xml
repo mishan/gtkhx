@@ -94,6 +94,5 @@
          shadows the GResource entry. -->
     <file>themes/default.ini</file>
     <file>themes/solarized.ini</file>
-    <file>themes/solarized-dark.ini</file>
   </gresource>
 </gresources>

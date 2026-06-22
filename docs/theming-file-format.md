@@ -33,7 +33,7 @@ themes directory).
 
 Two ways to switch themes; both fire the same reload + repaint:
 
-1. **Settings → Appearance → Color theme** — combo populated by
+1. **Settings → Appearance → GtkHx theme** — combo populated by
    `gtkhx_theme_list_available()`, which enumerates built-ins from
    GResource plus any `.ini` files under `$CONFIG/themes/`. Display
    names come from each file's `[gtkhx-theme] name` key, falling
@@ -49,13 +49,14 @@ theme file itself.
 
 ## Built-in themes
 
-GtkHx ships three themes baked into the binary:
+GtkHx ships two themes baked into the binary. Both supply distinct
+light + dark variants and let `AdwStyleManager`'s `dark` property
+(driven by Settings → Appearance → Theme) pick which one renders.
 
 | `THEMENAME` | Display | Description |
 |---|---|---|
-| `default` | Default | GtkHx's classic appearance. Adwaita-aligned light/dark variants that follow the system color scheme. |
-| `solarized` | Solarized Light | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette, light variant. Cream `#fdf6e3` background, body text in `#657b83`. The same look in both `palette.light` and `palette.dark`, so picking it forces the cream regardless of the system light/dark setting. |
-| `solarized-dark` | Solarized Dark | Solarized dark variant. Deep navy `#002b36` background, body text in `#839496`. Same "force the look" approach. |
+| `default` | Default | GtkHx's classic appearance. Adwaita-aligned `#fdfafa`/`#1d1d1d` light + `#000`/`#cccccc` dark, with the Adwaita accent blue for selection. |
+| `solarized` | Solarized | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette. `palette.light` holds the canonical Solarized Light values (cream `#fdf6e3` bg, `#657b83` body text); `palette.dark` holds Solarized Dark (`#002b36` bg, `#839496` body text). Picking "Solarized" gives you Solarized Light on a light desktop and Solarized Dark on a dark one — the way the palette was designed. |
 
 The built-ins live at `src/themes/<name>.ini` in the source tree.
 Copy one to `$CONFIG/themes/my-theme.ini` and edit as a starting

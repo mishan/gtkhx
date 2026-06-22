@@ -200,10 +200,12 @@ test_skips_non_ini_files (void)
     g_free (dir);
 }
 
-/* The built-in themes (default, solarized, solarized-dark) ride on
- * the linked-in GResource and surface through the resource_prefix
- * arg. With an empty user dir, all three should appear in the
- * sorted output. */
+/* The built-in themes (default, solarized) ride on the linked-in
+ * GResource and surface through the resource_prefix arg. With an
+ * empty user dir, both should appear in the sorted output.
+ * Solarized's light + dark variants live in *one* file — the
+ * active variant follows the system color scheme — so there's no
+ * separate solarized-dark entry. */
 static void
 test_built_in_themes_from_resource (void)
 {
@@ -211,20 +213,17 @@ test_built_in_themes_from_resource (void)
 
     GPtrArray *themes = gtkhx_theme_list_available_at (
         "/com/nasledov/gtkhx/themes/", dir);
-    /* Exactly the three built-ins we ship. If a fourth ever lands,
+    /* Exactly the two built-ins we ship. If a third ever lands,
 	 * adjust the count — better to fail loudly than have the test
 	 * silently drift. */
-    g_assert_cmpint (themes->len, ==, 3);
+    g_assert_cmpint (themes->len, ==, 2);
 
     g_assert_nonnull (entry_named (themes, "default"));
     GtkhxThemeEntry *s = entry_named (themes, "solarized");
     g_assert_nonnull (s);
-    g_assert_cmpstr (s->display, ==, "Solarized Light");
-    GtkhxThemeEntry *sd = entry_named (themes, "solarized-dark");
-    g_assert_nonnull (sd);
-    g_assert_cmpstr (sd->display, ==, "Solarized Dark");
+    g_assert_cmpstr (s->display, ==, "Solarized");
 
-    /* default pinned first; then alphabetical: Solarized Dark < Solarized Light. */
+    /* default pinned first. */
     GtkhxThemeEntry *e0 = g_ptr_array_index (themes, 0);
     g_assert_cmpstr (e0->name, ==, "default");
 
@@ -247,18 +246,16 @@ test_user_file_shadows_built_in (void)
 
     GPtrArray *themes = gtkhx_theme_list_available_at (
         "/com/nasledov/gtkhx/themes/", dir);
-    /* Still three entries (the user's solarized replaced the
+    /* Still two entries (the user's solarized replaced the
 	 * built-in one — no duplication). */
-    g_assert_cmpint (themes->len, ==, 3);
+    g_assert_cmpint (themes->len, ==, 2);
 
     GtkhxThemeEntry *s = entry_named (themes, "solarized");
     g_assert_nonnull (s);
     g_assert_cmpstr (s->display, ==, "User Solarized Override");
 
-    /* The built-in solarized-dark and default are unaffected. */
-    GtkhxThemeEntry *sd = entry_named (themes, "solarized-dark");
-    g_assert_nonnull (sd);
-    g_assert_cmpstr (sd->display, ==, "Solarized Dark");
+    /* The built-in default is unaffected. */
+    g_assert_nonnull (entry_named (themes, "default"));
 
     g_ptr_array_unref (themes);
     rmrf_dir (dir);
