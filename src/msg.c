@@ -538,6 +538,8 @@ create_msg (guint16 _uid, char *name)
     /* Theme monospace via gtk_text_view_set_monospace — see chat.c for
 	 * the rationale and gtkhx_apply_input_font for the implementation. */
     gtkhx_apply_input_font (msg->inputbuf);
+    /* GtkHx-theme fg/bg via .gtkhx-input. */
+    gtkhx_apply_input_style (msg->inputbuf);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (msg->inputbuf), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (msg->inputbuf), GTK_WRAP_WORD);
     /* Inner margins so the text isn't clipped by the input frame's
@@ -951,6 +953,9 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
     gtk_text_view_set_editable (GTK_TEXT_VIEW (textbox), FALSE);
     gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (textbox), FALSE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (textbox), GTK_WRAP_WORD);
+    /* Long-broadcast viewer — read-only, themed via .gtkhx-text so
+     * the body matches the rest of the chat surfaces. */
+    gtkhx_apply_text_style (textbox);
     tbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (textbox));
     gtk_text_buffer_set_text (tbuf, text, strlen (text));
 

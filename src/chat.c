@@ -2534,6 +2534,10 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
      * unresolved ascender-ink clip on newly typed glyphs at small
      * Monospace sizes. See gtkhx_apply_input_font in gtkhx.c. */
     gtkhx_apply_input_font (gchat->input);
+    /* Colors track the active GtkHx theme (.gtkhx-input class) —
+     * font path stays on .monospace because of the clip carve-out
+     * above. */
+    gtkhx_apply_input_style (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     {
@@ -2966,6 +2970,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gchat->input = gtk_text_view_new ();
     /* See create_chat_window — theme monospace, not the Settings font. */
     gtkhx_apply_input_font (gchat->input);
+    gtkhx_apply_input_style (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     {

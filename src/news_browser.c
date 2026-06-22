@@ -51,6 +51,7 @@
 #include "news15.h"
 #include "news_browser.h"
 #include "gtkutil.h"
+#include "gtkhx.h"
 #include "gtkurl.h"
 #include "hl_access.h"
 #include "hl_date.h"
@@ -1677,6 +1678,9 @@ open_compose_window (gnews_browser *br, const char *category_path,
     gtk_widget_set_margin_end (ctx->body_view, 4);
     gtk_widget_set_margin_top (ctx->body_view, 4);
     gtk_widget_set_margin_bottom (ctx->body_view, 4);
+    /* Compose surface — the user types the post body here. Themed
+     * via .gtkhx-input so the editor matches the chat / PM inputs. */
+    gtkhx_apply_input_style (ctx->body_view);
     gtkhx_widget_set_child (body_scroll, ctx->body_view);
     gtkhx_box_pack (content, body_scroll, TRUE, TRUE, 0);
 
@@ -2137,6 +2141,10 @@ build_browser_window (void)
     gtk_widget_set_margin_end (br->post_view, 12);
     gtk_widget_set_margin_top (br->post_view, 10);
     gtk_widget_set_margin_bottom (br->post_view, 10);
+    /* The selected post's body — primary read surface in the
+     * threaded-news browser. Themed via .gtkhx-text so it matches
+     * the news viewer and chat output. */
+    gtkhx_apply_text_style (br->post_view);
     buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
     gtk_text_buffer_set_text (
         buf, _ ("Select a post in the tree to view it here."), -1);

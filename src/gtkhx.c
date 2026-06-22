@@ -203,6 +203,10 @@ gtkhx_refresh_css (void)
 {
     gchar *fontprops;
     gchar *css;
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    gboolean dark = adw_style_manager_get_dark (sm);
+    GdkRGBA fg = gtkhx_theme_get_color (GTKHX_PAL_FG, dark);
+    GdkRGBA bg = gtkhx_theme_get_color (GTKHX_PAL_BG, dark);
 
     if (!gtkhx_css_provider) {
         gtkhx_css_provider = gtk_css_provider_new ();
@@ -211,28 +215,63 @@ gtkhx_refresh_css (void)
 
     fontprops = pango_to_css_props (gtkhx_font_desc);
 
-    /* The .gtkhx-text rule covers GtkEntry / GtkLabel / etc. directly,
-	 * and the descendant ".gtkhx-text text" rule reaches GtkTextView's
-	 * inner "text" CSS node so the input area picks up the same font.
+    /* Two themed rules:
 	 *
-	 * We deliberately do NOT set color / background-color / caret-color
-	 * here. The early Phase-5 version did, copying fg_col / bg_col from
-	 * the xtext output styling onto the chat input, subject entry,
-	 * private-message editor, and news viewer — which forced light-grey-
-	 * on-black on those widgets regardless of the user's Light / Dark
-	 * theme choice. xtext's chat-output area still uses fg_col / bg_col
-	 * directly (it draws its own contents with cairo), so the in-chat
-	 * line styling is unaffected; only the surrounding input / subject /
-	 * news widgets follow the system theme now, which is what the user
-	 * expects. */
-    css = g_strdup_printf (".gtkhx-text, .gtkhx-text text {"
-                           "  %s"
-                           "}",
-                           fontprops);
+	 *   .gtkhx-text   — read-only text surfaces (agreement window, news
+	 *                   bodies, broadcast viewer, gchat subject entry).
+	 *                   Gets the active theme's font AND fg/bg/caret
+	 *                   so themed surfaces match the chat output.
+	 *
+	 *   .gtkhx-input  — editable text views (chat / PM / pchat input
+	 *                   boxes). Gets ONLY the theme's fg/bg/caret —
+	 *                   font stays on the built-in .monospace class
+	 *                   (applied via gtkhx_apply_input_font). Setting
+	 *                   font on the input via .gtkhx-text-style CSS
+	 *                   triggered an ascender-ink clip on newly typed
+	 *                   glyphs at small Monospace sizes (Phase-5 bug);
+	 *                   colors don't have that problem.
+	 *
+	 * The descendant ".gtkhx-{text,input} text" rule reaches
+	 * GtkTextView's inner "text" CSS node so the actual body picks
+	 * up the same look (GtkTextView's outer node is just chrome).
+	 *
+	 * Earlier we deliberately omitted color/background-color here
+	 * because the source was a *single* hardcoded (fg_col, bg_col)
+	 * pair that forced light-grey-on-black on those widgets
+	 * regardless of the user's Light/Dark choice. The theme model
+	 * fixes that: each theme has explicit light + dark palette
+	 * variants, and we pick the variant via AdwStyleManager's `dark`
+	 * property — same dispatch the xtext palette uses — so the
+	 * applied colors always match the active light/dark mode. */
+    gchar *fghex = g_strdup_printf ("#%02x%02x%02x",
+                                    (int) (fg.red   * 255.0 + 0.5),
+                                    (int) (fg.green * 255.0 + 0.5),
+                                    (int) (fg.blue  * 255.0 + 0.5));
+    gchar *bghex = g_strdup_printf ("#%02x%02x%02x",
+                                    (int) (bg.red   * 255.0 + 0.5),
+                                    (int) (bg.green * 255.0 + 0.5),
+                                    (int) (bg.blue  * 255.0 + 0.5));
+
+    css = g_strdup_printf (
+        ".gtkhx-text, .gtkhx-text text {"
+        "  %s"
+        "  color: %s;"
+        "  background-color: %s;"
+        "  caret-color: %s;"
+        "}"
+        ".gtkhx-input, .gtkhx-input text {"
+        "  color: %s;"
+        "  background-color: %s;"
+        "  caret-color: %s;"
+        "}",
+        fontprops, fghex, bghex, fghex,
+        fghex, bghex, fghex);
 
     gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
     g_free (css);
+    g_free (fghex);
+    g_free (bghex);
     g_free (fontprops);
 }
 
@@ -292,6 +331,24 @@ gtkhx_apply_input_font (GtkWidget *w)
      * clip. ASCII-art preservation (the main reason to want monospace)
      * still works. */
     gtk_text_view_set_monospace (GTK_TEXT_VIEW (w), TRUE);
+}
+
+void
+gtkhx_apply_input_style (GtkWidget *w)
+{
+    if (!w) {
+        return;
+    }
+    if (!gtkhx_css_provider) {
+        gtkhx_refresh_css ();
+    }
+    /* Color-only sibling of .gtkhx-text — paints the active theme's
+     * fg / bg / caret on chat / PM / pchat input boxes without
+     * touching the font. See gtkhx_refresh_css for the carve-out
+     * rationale and the per-class CSS payload. */
+    if (!gtk_widget_has_css_class (w, "gtkhx-input")) {
+        gtk_widget_add_css_class (w, "gtkhx-input");
+    }
 }
 
 void
@@ -852,8 +909,10 @@ fe_init (void)
 
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
  * state off the manager and pushes it into the xtext palette plus
- * every live chat-output widget. Connected once from
- * gtkhx_activate. */
+ * every live chat-output widget; then rebuilds the .gtkhx-text /
+ * .gtkhx-input CSS provider so the agreement / news / chat-input
+ * surfaces re-paint with the dark variant of the active theme's
+ * fg/bg. Connected once from gtkhx_activate. */
 static void
 on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
                                gpointer user_data)
@@ -862,13 +921,16 @@ on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
     (void)pspec;
     (void)user_data;
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+    gtkhx_refresh_css ();
 }
 
 /* GtkhxTheme::changed trampoline — when the active theme file is
- * reloaded (THEMENAME edit, future Settings theme picker), re-pull
- * every UI-role slot for the *currently active* light/dark variant
- * and repaint every live xtext. Connected once from gtkhx_activate
- * alongside the AdwStyleManager subscription. */
+ * reloaded (THEMENAME edit, Settings theme picker), re-pull every
+ * UI-role slot for the *currently active* light/dark variant and
+ * repaint every live xtext; then rebuild the CSS provider for the
+ * non-xtext text surfaces (agreement, news, inputs). Connected
+ * once from gtkhx_activate alongside the AdwStyleManager
+ * subscription. */
 static void
 on_theme_changed (GtkhxTheme *theme, gpointer user_data)
 {
@@ -876,6 +938,7 @@ on_theme_changed (GtkhxTheme *theme, gpointer user_data)
     (void)theme;
     (void)user_data;
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+    gtkhx_refresh_css ();
 }
 
 static void
@@ -972,6 +1035,15 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     {
         AdwStyleManager *sm = adw_style_manager_get_default ();
         gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+        /* Re-emit the .gtkhx-text / .gtkhx-input CSS with the now-
+         * settled light/dark variant. fe_init's earlier refresh_css
+         * fired before AdwStyleManager had its final dark state, so
+         * the provider could be holding the wrong variant's fg/bg —
+         * that's fine for the toolbar (which doesn't use those
+         * classes) but the agreement / news / inputs about to be
+         * built in subsequent windows would have inherited the
+         * stale colors. */
+        gtkhx_refresh_css ();
         g_signal_connect (sm, "notify::dark",
                           G_CALLBACK (on_style_manager_dark_changed), NULL);
         g_signal_connect (gtkhx_theme_get_default (), "changed",
@@ -1597,6 +1669,11 @@ output_agreement (session *sess, const char *agreement, guint16 len)
     gtk_text_view_set_editable (GTK_TEXT_VIEW (agreetext), FALSE);
     gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (agreetext), FALSE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (agreetext), GTK_WRAP_WORD);
+    /* Follow the active GtkHx theme's fg/bg the same way the chat
+	 * output does. The agreement is the user's first read of the
+	 * server's voice; making it Solarized when the chat below it
+	 * is Solarized is the consistency call. */
+    gtkhx_apply_text_style (agreetext);
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (agreetext), 12);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (agreetext), 12);
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (agreetext), 12);

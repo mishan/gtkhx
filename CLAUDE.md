@@ -301,6 +301,17 @@ and 1.25× user-list factors as explicit overrides.
 `chat.c::colors[]` because they're protocol-shaped, not theme-shaped (servers
 send specific indices; users don't get to remap "red").
 
+Non-xtext text surfaces (agreement window, news viewers, broadcast viewer,
+chat-subject entries, and the chat / PM / pchat input boxes) get the same
+theme `fg`/`bg`/`caret-color` via two CSS classes managed by
+`gtkhx_refresh_css`: `.gtkhx-text` (read-only surfaces — applies theme colors
++ font) and `.gtkhx-input` (editable inputs — applies colors only; font stays
+on GTK's built-in `.monospace` class to avoid the documented ascender-clip
+bug). Both classes get re-emitted on `GtkhxTheme::changed` and on
+`AdwStyleManager::notify::dark`, so theme reloads and system-mode flips
+repaint immediately. Apply with `gtkhx_apply_text_style(w)` /
+`gtkhx_apply_input_style(w)`.
+
 Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
 `GtkhxScaleArea`, subscribe to the theme `changed` signal, and auto-unsubscribe
 on finalize). The user list reads scales live in `measure`/`snapshot` — no
