@@ -510,15 +510,32 @@ round-trips) can't, until the UI coupling in `rcv.c` is unwound.
    guard. ~70 LOC across the two.
 
 2. **Route the harness's connect + login through the orchestrator.**
-   `hxnet`'s `open_plaintext` is GTK-free, so the harness could call
-   it for connect / login / negotiation instead of its hand-rolled
-   version, then read frames via the bridge. That makes the *login
-   phase* of all ~30 existing Tier 3 tests exercise production
-   networking for free, collapsing the two client implementations
-   into one for the part that's testable headless. Bigger change —
-   the harness is blocking-socket shaped and the orchestrator is
-   async, so the harness's `integration_recv_message` family needs
-   an actor/bridge-backed variant. Scoped as its own branch.
+   *(Shipped.)* `hxnet`'s lifecycle is GTK-free, so the harness now
+   drives connect / magic / LOGIN / negotiation through it instead of
+   its hand-rolled raw-socket version. Two pieces landed:
+
+   - **Foundation** — `hxnet_connection_open_plaintext_polling` (a
+     polling-mode sibling of `open_plaintext` that keeps the event
+     receiver for synchronous draining instead of the GLib callback
+     forwarder), proven by `tests/integration/test_orchestrator_harness.c`.
+
+   - **Bulk conversion** — an *orchestrated transport* in
+     `integration_harness.c`, selected at runtime by
+     `GTKHX_HARNESS_ORCHESTRATED`. The login entry points
+     (`integration_open_login_or_skip` / `_to_caps_or_skip`) open via
+     the polling FFI and return a synthetic fd in the `ORCH_FD_BASE`
+     range; `integration_send` / `integration_recv_message` /
+     `integration_close` detect that range and route through the actor
+     (`send_frame` / `try_recv_frame` / `destroy`), rebuilding the
+     22-byte header so every downstream chunk walker sees a
+     byte-identical `htlc->in`. Real fds (xfer data channels, tracker
+     sockets) stay below the base on the legacy path. No per-test
+     changes; the full Tier 3 suite passes under both transports. CI
+     runs the integration suite twice (legacy + orchestrated) so the
+     production connect+login path is continuously exercised against
+     the live servers. HOPE/TLS open helpers are not routed (they
+     drive their own crypto/transport) and remain covered by
+     `test_phase_g_connect`.
 
 3. **Post-login coverage on production `rcv`.** Blocked on R5 (UI →
    Rust) or a headless `rcv` seam that lets the dispatch handlers run
@@ -526,8 +543,8 @@ round-trips) can't, until the UI coupling in `rcv.c` is unwound.
    here so the dependency is explicit.
 
 Recommendation: keep increment 1 as the merge gate for capability
-regressions, do increment 2 on its own branch when the harness
-async-recv work is worth it, and let increment 3 fall out of R5.
+regressions, increment 2 is shipped (the suite runs under both
+transports in CI), and let increment 3 fall out of R5.
 
 ## Summary of branches the night left behind
 
