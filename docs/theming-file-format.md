@@ -22,12 +22,44 @@ drop in someone else's.
 
 | Location | Purpose |
 |---|---|
-| `$XDG_CONFIG_HOME/gtkhx/themes/<name>.ini` | User themes. First place the loader looks. |
-| GResource `/com/nasledov/gtkhx/themes/default.ini` | Built-in default. Compiled into the binary; always available. Loaded when the requested name isn't on disk. |
+| `$XDG_CONFIG_HOME/gtkhx/themes/<name>.ini` | User themes. First place the loader looks. A user file with the same basename as a built-in shadows it. |
+| GResource `/com/nasledov/gtkhx/themes/<name>.ini` | Built-in themes (see list below). Compiled into the binary; always available. |
 
 If `THEMENAME` is unset / empty, the loader uses `"default"`. A name
 containing `/` or `\` is rejected (defensive against escaping the
 themes directory).
+
+## Picking a theme
+
+Two ways to switch themes; both fire the same reload + repaint:
+
+1. **Settings → Appearance → Color theme** — combo populated by
+   `gtkhx_theme_list_available()`, which enumerates built-ins from
+   GResource plus any `.ini` files under `$CONFIG/themes/`. Display
+   names come from each file's `[gtkhx-theme] name` key, falling
+   back to the basename. Order: `default` pinned first, everything
+   else alphabetical by display name.
+2. **Edit `THEMENAME` in `gtkhxrc`** directly. Same code path —
+   the `THEMENAME` cfgvar hook calls `gtkhx_theme_load_active()`.
+
+To pick up edits to the body of the active theme (i.e. you changed
+`default.ini` while the app is running), briefly switch `THEMENAME`
+to another theme and back — there's no filesystem watch on the
+theme file itself.
+
+## Built-in themes
+
+GtkHx ships three themes baked into the binary:
+
+| `THEMENAME` | Display | Description |
+|---|---|---|
+| `default` | Default | GtkHx's classic appearance. Adwaita-aligned light/dark variants that follow the system color scheme. |
+| `solarized` | Solarized Light | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette, light variant. Cream `#fdf6e3` background, body text in `#657b83`. The same look in both `palette.light` and `palette.dark`, so picking it forces the cream regardless of the system light/dark setting. |
+| `solarized-dark` | Solarized Dark | Solarized dark variant. Deep navy `#002b36` background, body text in `#839496`. Same "force the look" approach. |
+
+The built-ins live at `src/themes/<name>.ini` in the source tree.
+Copy one to `$CONFIG/themes/my-theme.ini` and edit as a starting
+point for a custom theme.
 
 ## Schema
 

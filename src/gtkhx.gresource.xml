@@ -86,9 +86,14 @@
     <file>pixmaps/folder.png</file>
     <file>pixmaps/folder_dropbox.png</file>
 
-    <!-- Built-in default theme (see gtkhx_theme.{c,h} and
+    <!-- Built-in themes (see gtkhx_theme.{c,h} and
          docs/theming-file-format.md). Loaded as a GResource fallback
-         when $CONFIG/themes/<active>.ini isn't on disk. -->
+         when $CONFIG/themes/<name>.ini isn't on disk, and enumerated
+         by gtkhx_theme_list_available() for the Settings picker.
+         A user .ini with the same basename in $CONFIG/themes/
+         shadows the GResource entry. -->
     <file>themes/default.ini</file>
+    <file>themes/solarized.ini</file>
+    <file>themes/solarized-dark.ini</file>
   </gresource>
 </gresources>

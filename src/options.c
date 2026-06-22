@@ -3148,14 +3148,45 @@ settings_page_general (AdwPreferencesPage *page)
     adw_preferences_group_add (
         appearance_grp,
         pref_combo_row (CFG_THEME, _ ("Theme"), vals, labels, 3));
+
+    /* Theme-file picker. Enumerates built-in themes (default,
+     * solarized, solarized-dark, …) plus any user files under
+     * $CONFIG/themes/, populates a combo bound to CFG_THEME_NAME.
+     * The existing changed_theme_name cfgvar hook calls
+     * gtkhx_theme_load_active() on selection, which re-emits
+     * GtkhxTheme::changed and repaints every subscriber (buttons,
+     * user list, chat xtext) live. */
+    {
+        g_autoptr (GPtrArray) themes = gtkhx_theme_list_available ();
+        guint n = themes->len;
+        const char **theme_values = g_new0 (const char *, n);
+        const char **theme_labels = g_new0 (const char *, n);
+        for (guint i = 0; i < n; i++) {
+            GtkhxThemeEntry *e = g_ptr_array_index (themes, i);
+            theme_values[i] = e->name;
+            theme_labels[i] = e->display;
+        }
+        adw_preferences_group_add (
+            appearance_grp,
+            pref_combo_row (CFG_THEME_NAME, _ ("Color theme"),
+                            theme_values, theme_labels, (int) n));
+        /* pref_combo_row copies the strings into GtkStringList models,
+         * so the parallel arrays can go now. The GtkhxThemeEntry
+         * strings get freed when the GPtrArray autoptr unwinds at
+         * the end of this scope. */
+        g_free (theme_values);
+        g_free (theme_labels);
+    }
+
     adw_preferences_page_add (page, appearance_grp);
 
     /* Per-area UI scaling and the chat palette live in the active
      * theme file (THEMENAME → $CONFIG/themes/<name>.ini). A theme
-     * editor — picker, scale knobs, color rows, save-as — is a
-     * separate later phase; for now the only way to change a theme
-     * is to edit (or drop in) the .ini and set THEMENAME in gtkhxrc.
-     * See gtkhx_theme.{c,h} and docs/theming-file-format.md. */
+     * editor — scale knobs, color rows, save-as — is a separate
+     * later phase; for now the combo above picks an existing theme
+     * and edits to a theme's body still mean editing the .ini
+     * directly. See gtkhx_theme.{c,h} and
+     * docs/theming-file-format.md. */
 
     paths_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (paths_grp, _ ("Paths"));

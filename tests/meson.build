@@ -219,6 +219,22 @@ test('cfgvars_sorted', test_cfgvars_sorted,
      args : [meson.project_source_root()],
      suite : 'unit')
 
+# Theme discovery (gtkhx_theme_list_available_at). Drives the
+# user-dir walk with tmp-dir fixtures, and the GResource walk
+# against the live built-ins (default + solarized + solarized-dark)
+# by linking gtkhx_resources into the test target — the resource's
+# generated constructor self-registers at process load so the
+# built-ins surface through g_resources_enumerate_children.
+test_theme_listing = executable('test_theme_listing',
+  'unit/test_theme_listing.c',
+  '../src/gtkhx_theme.c',
+  gtkhx_resources,
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('theme_listing', test_theme_listing,
+     suite : 'unit')
+
 # hxnet_ffi — smoke test for the hxnet C-callable FFI surface
 # (Phase R3.3.b). Builds a connected TCP loopback pair
 # (bind/listen/accept + connect on 127.0.0.1) → spawn_fd → round-

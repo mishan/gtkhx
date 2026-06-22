@@ -306,11 +306,19 @@ Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
 on finalize). The user list reads scales live in `measure`/`snapshot` — no
 per-cell state to refresh.
 
-**No Settings UI yet.** The user-facing theme editor (picker combo, scale spin
-rows, color pickers, save-as) is a separate later phase. For now, edit the
-`.ini` directly. `tests/unit/test_theme_scale.c` covers clamp matrix,
-defaults, GKeyFile round-trip, missing-key fallback, malformed-hex fallback,
-load-replaces-not-merges, and `changed` emission.
+**Settings UI is just a picker.** Settings → Appearance has a "Color theme"
+`AdwComboRow` bound to `CFG_THEME_NAME`, populated by
+`gtkhx_theme_list_available()` (enumerates GResource built-ins + `$CONFIG/themes/*.ini`;
+default-first then alphabetical-by-display; user files shadow same-name
+GResources). The scale knobs / color pickers / "save as" parts of the theme
+editor are a separate later phase. For now, edit the `.ini` directly to change
+a theme's body. Built-ins: `default`, `solarized`, `solarized-dark` (see
+`src/themes/` and `docs/theming-file-format.md`).
+
+`tests/unit/test_theme_scale.c` covers clamp matrix, defaults, GKeyFile
+round-trip, missing-key fallback, malformed-hex fallback, load-replaces-not-merges,
+and `changed` emission. `tests/unit/test_theme_listing.c` covers the discovery
+API (user-dir walk, GResource walk, sort order, shadowing).
 
 Icon-pack replacement is scoped in `docs/theming-scoping.md` but not yet built.
 The compact chat-sidebar user list keeps a fixed 1.0 structural density and

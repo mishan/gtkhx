@@ -460,7 +460,24 @@ gtkhx_theme_load_active (void)
         }
     }
 
-    /* Fall back to the built-in default GResource. If even that fails
+    /* If the user file wasn't on disk, try the same name in the
+	 * GResource themes prefix — that's how the built-ins (default,
+	 * solarized, solarized-dark) get loaded when the user hasn't
+	 * dropped a same-name override into $CONFIG/themes/. */
+    if (!kf) {
+        extern struct gtkhx_prefs gtkhx_prefs;
+        const char *name = gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name
+                           ? gtkhx_prefs.theme_name
+                           : "default";
+        if (!strchr (name, '/') && !strchr (name, '\\')) {
+            char *res = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s.ini",
+                                         name);
+            kf = load_keyfile_from_resource (res);
+            g_free (res);
+        }
+    }
+
+    /* Last-ditch fallback: the default GResource. If even that fails
 	 * (shouldn't — it ships in-binary), we load nothing and every
 	 * accessor returns its built-in default, which is the same shape
 	 * the user would see from a default-theme load anyway. */
@@ -473,10 +490,214 @@ gtkhx_theme_load_active (void)
         g_key_file_free (kf);
     } else {
         /* Still emit "changed" so subscribers reset to defaults on
-		 * the path where neither the user file nor the resource
-		 * loaded — keeps the boot sequence predictable. */
+		 * the path where no source loaded — keeps the boot sequence
+		 * predictable. */
         g_signal_emit (gtkhx_theme_get_default (), signals[SIGNAL_CHANGED], 0);
     }
 
     g_free (path);
+}
+
+/* ---- Discovery (theme picker) ---------------------------------------- */
+
+void
+gtkhx_theme_entry_free (GtkhxThemeEntry *e)
+{
+    if (!e) {
+        return;
+    }
+    g_free (e->name);
+    g_free (e->display);
+    g_free (e);
+}
+
+/* Read the [gtkhx-theme] name from a GKeyFile-format buffer. Returns
+ * a fresh string (caller frees) or NULL on missing / parse error.
+ * The buffer is borrowed; not mutated. */
+static char *
+read_display_name_from_bytes (const char *data, gsize len)
+{
+    GKeyFile *kf = g_key_file_new ();
+    char *display = NULL;
+
+    if (g_key_file_load_from_data (kf, data, len, G_KEY_FILE_NONE, NULL)) {
+        display = g_key_file_get_string (kf, "gtkhx-theme", "name", NULL);
+        if (display && !*display) {
+            g_free (display);
+            display = NULL;
+        }
+    }
+    g_key_file_free (kf);
+    return display;
+}
+
+/* Strip a trailing ".ini" if present; otherwise return a fresh copy.
+ * Used to convert a discovered filename to a theme name (the
+ * THEMENAME pref value). */
+static char *
+strip_ini_suffix (const char *filename)
+{
+    gsize n = strlen (filename);
+    if (n > 4 && g_ascii_strcasecmp (filename + n - 4, ".ini") == 0) {
+        return g_strndup (filename, n - 4);
+    }
+    return g_strdup (filename);
+}
+
+/* Pull the [gtkhx-theme] display name out of a theme file on disk.
+ * Caller frees. NULL on missing key / parse error / unreadable file. */
+static char *
+read_display_name_from_file (const char *path)
+{
+    char *contents = NULL;
+    gsize len = 0;
+    char *display;
+
+    if (!g_file_get_contents (path, &contents, &len, NULL)) {
+        return NULL;
+    }
+    display = read_display_name_from_bytes (contents, len);
+    g_free (contents);
+    return display;
+}
+
+/* Same, but from a GResource path under the registered themes
+ * prefix. Caller frees. NULL on parse error. */
+static char *
+read_display_name_from_resource (const char *resource_path)
+{
+    GBytes *bytes;
+    char *display = NULL;
+
+    bytes = g_resources_lookup_data (resource_path,
+                                     G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
+    if (bytes) {
+        gsize len;
+        const char *data = g_bytes_get_data (bytes, &len);
+        display = read_display_name_from_bytes (data, len);
+        g_bytes_unref (bytes);
+    }
+    return display;
+}
+
+/* Sort comparator: "default" pinned to the front, then alphabetical
+ * by display name (locale-aware). qsort-style: returns <0 if a
+ * sorts before b. */
+static gint
+theme_entry_cmp (gconstpointer ap, gconstpointer bp)
+{
+    const GtkhxThemeEntry *a = *(const GtkhxThemeEntry *const *)ap;
+    const GtkhxThemeEntry *b = *(const GtkhxThemeEntry *const *)bp;
+    gboolean a_default = g_strcmp0 (a->name, "default") == 0;
+    gboolean b_default = g_strcmp0 (b->name, "default") == 0;
+
+    if (a_default && !b_default) {
+        return -1;
+    }
+    if (b_default && !a_default) {
+        return 1;
+    }
+    /* Locale-aware so "Şarki" sorts under S rather than after Z, etc.
+	 * Display names are UTF-8 by GKeyFile contract. */
+    return g_utf8_collate (a->display ? a->display : "",
+                           b->display ? b->display : "");
+}
+
+GPtrArray *
+gtkhx_theme_list_available_at (const char *resource_prefix,
+                               const char *user_themes_dir)
+{
+    GPtrArray *out = g_ptr_array_new_with_free_func (
+        (GDestroyNotify) gtkhx_theme_entry_free);
+    /* Tracks names we've already added so user-dir entries shadow
+	 * GResource entries with the same basename. Borrows the
+	 * GtkhxThemeEntry::name pointer — destruction of the array
+	 * outlives this set. */
+    GHashTable *seen = g_hash_table_new (g_str_hash, g_str_equal);
+
+    /* Walk the user dir first so its entries take precedence. */
+    if (user_themes_dir) {
+        GDir *dir = g_dir_open (user_themes_dir, 0, NULL);
+        if (dir) {
+            const char *fn;
+            while ((fn = g_dir_read_name (dir)) != NULL) {
+                gsize n = strlen (fn);
+                if (n <= 4
+                    || g_ascii_strcasecmp (fn + n - 4, ".ini") != 0) {
+                    continue;
+                }
+                char *name = strip_ini_suffix (fn);
+                char *path = g_build_filename (user_themes_dir, fn, NULL);
+                char *display = read_display_name_from_file (path);
+                GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+                e->name = name;
+                e->display = display ? display : g_strdup (name);
+                g_ptr_array_add (out, e);
+                g_hash_table_add (seen, e->name);
+                g_free (path);
+            }
+            g_dir_close (dir);
+        }
+    }
+
+    /* Then enumerate the GResource prefix, skipping anything already
+	 * shadowed by a user-dir entry. */
+    if (resource_prefix) {
+        char **children = g_resources_enumerate_children (
+            resource_prefix, G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
+        if (children) {
+            for (char **p = children; *p; p++) {
+                gsize n = strlen (*p);
+                if (n <= 4
+                    || g_ascii_strcasecmp (*p + n - 4, ".ini") != 0) {
+                    continue;
+                }
+                char *name = strip_ini_suffix (*p);
+                if (g_hash_table_contains (seen, name)) {
+                    g_free (name);
+                    continue;
+                }
+                char *resource_path
+                    = g_strdup_printf ("%s%s%s", resource_prefix,
+                                       g_str_has_suffix (resource_prefix, "/")
+                                           ? ""
+                                           : "/",
+                                       *p);
+                char *display = read_display_name_from_resource (resource_path);
+                GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+                e->name = name;
+                e->display = display ? display : g_strdup (name);
+                g_ptr_array_add (out, e);
+                g_hash_table_add (seen, e->name);
+                g_free (resource_path);
+            }
+            g_strfreev (children);
+        }
+    }
+
+    /* Guarantee "default" is always there even if neither source
+	 * surfaced it (shouldn't happen — the GResource ships it — but
+	 * a Settings combo that's empty would be alarming). */
+    if (!g_hash_table_contains (seen, "default")) {
+        GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+        e->name = g_strdup ("default");
+        e->display = g_strdup ("Default");
+        g_ptr_array_add (out, e);
+    }
+
+    g_hash_table_unref (seen);
+
+    g_ptr_array_sort (out, theme_entry_cmp);
+
+    return out;
+}
+
+GPtrArray *
+gtkhx_theme_list_available (void)
+{
+    char *user_dir = g_build_filename (gtkhx_config_dir (), "themes", NULL);
+    GPtrArray *out = gtkhx_theme_list_available_at (
+        "/com/nasledov/gtkhx/themes/", user_dir);
+    g_free (user_dir);
+    return out;
 }

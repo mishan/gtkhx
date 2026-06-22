@@ -137,6 +137,41 @@ void gtkhx_theme_load_active (void);
  * default — there is no "merge on top of previous"). Emits "changed". */
 void gtkhx_theme_load_from_keyfile (GKeyFile *kf);
 
+/* ---- Discovery -------------------------------------------------------
+ *
+ * Enumerate the themes available to pick from: built-ins shipped as
+ * GResources under /com/nasledov/gtkhx/themes/<stem>.ini plus any
+ * user themes at $CONFIG/themes/<stem>.ini. A user file shadows a same-name
+ * GResource (so a user can override "default" or "solarized" with a
+ * personal variant just by dropping a file in place).
+ *
+ * Each entry carries both the *file basename* (which is what goes
+ * into the THEMENAME pref) and the *display name* (the
+ * [gtkhx-theme] name = ... key from the file, falling back to the
+ * basename if unset). The list is sorted with "default" first
+ * (the obvious starting point) then alphabetically by display name. */
+
+typedef struct {
+    char *name;     /* basename without .ini — the THEMENAME value */
+    char *display;  /* user-visible title from the file, or basename */
+} GtkhxThemeEntry;
+
+void gtkhx_theme_entry_free (GtkhxThemeEntry *e);
+G_DEFINE_AUTOPTR_CLEANUP_FUNC (GtkhxThemeEntry, gtkhx_theme_entry_free)
+
+/* Returns GPtrArray<GtkhxThemeEntry *> with element free-func set,
+ * so g_ptr_array_unref disposes the whole thing. Never returns NULL
+ * — at minimum the built-in "default" theme is always present. */
+GPtrArray *gtkhx_theme_list_available (void);
+
+/* Same as gtkhx_theme_list_available but driven by an explicit
+ * GResource enumeration prefix and a user-themes directory path,
+ * for tests that want to drive a fixture instead of the live
+ * GResource registry + $CONFIG. Either argument may be NULL to skip
+ * that source. */
+GPtrArray *gtkhx_theme_list_available_at (const char *resource_prefix,
+                                          const char *user_themes_dir);
+
 G_END_DECLS
 
 #endif /* ndef GTKHX_THEME_H */
