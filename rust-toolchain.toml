@@ -1,15 +1,23 @@
 [toolchain]
-# Floor is dictated by the gtk-rs 0.22 family (glib 0.22.6 requires rustc
-# 1.92). Bumped from 1.85 in Phase R3.0 along with the gtk-rs/gstreamer-rs
-# dep pulls. Tracks the deps' MSRV, not the latest stable.
+# Floor is dictated by Debian trixie (stable) shipping rustc 1.85.
+# The gtk-rs 0.21 family (glib 0.21.x) and gstreamer-rs 0.24 only
+# need 1.83, but several transitive deps in our tree (glycin-utils
+# 4.0.x, glycin-common 1.0.x, zbus 5.13.x) sit at MSRV 1.85 — so
+# 1.85 is the realistic floor.
+#
+# Why 1.85 and not 1.92: trixie-backports ships rustc 1.90 and
+# neither it nor trixie's 1.85 clears the gtk-rs 0.22 family's
+# 1.92 floor. Staying on 1.85 lets a native
+# `apt install rustc cargo && meson build` flow work on Debian
+# stable. The Flatpak path (GNOME 49 runtime) gets a newer rustc
+# via the Rust SDK extension and is unaffected; CI on Fedora 42's
+# rustc (currently >= 1.95) is also unaffected.
 #
 # Scope: this file is read by rustup, which honors it on `cargo`
 # invocation for local developers and any CI that uses rustup. The
 # project's CI installs rust via `dnf install rust cargo` from
 # Fedora 42 (see .github/workflows/tests.yml), which bypasses rustup —
-# the channel pin here does NOT apply there. Fedora's rust package
-# tracks current stable and currently ships >= 1.95, comfortably above
-# 1.92. The `meson test` job has an explicit `rustc --version`
-# assertion step (see workflow) to catch a Fedora rust regression
-# before the build proper.
-channel = "1.92"
+# the channel pin here does NOT apply there. The `meson test` job has
+# an explicit `rustc --version` assertion step (see workflow) to catch
+# a Fedora rust regression before the build proper.
+channel = "1.85"

@@ -87,21 +87,22 @@ threads_dep = dependency('threads')
 gsound_dep = dependency('gsound')
 
 # Phase 8.B: GStreamer system libraries. The Rust hxvoice-runtime
-# crate wraps these via gstreamer-sys (from the gstreamer-rs 0.25
+# crate wraps these via gstreamer-sys (from the gstreamer-rs 0.24
 # family pinned in rust/Cargo.toml's workspace.dependencies). The
 # system libs still need to be on the build host so cargo's build
 # script can find the .pc files and the final linker can resolve the
 # shared library symbols.
 #
-# Version floor: 1.20 ships webrtcbin's stable API surface and is
-# the minimum the gstreamer-rs 0.25 line will link against on the
-# bind-time check. The runtime floor for the gstreamer-webrtc-rs
-# crate is 1.26 (GNOME 48 runtime ships 1.26; GNOME 47 ships 1.24,
-# which is too old for the webrtc bindings even though it satisfies
-# the build-time floor). The Flatpak manifest needs to be on GNOME
-# 48 or later before Phase 8.C consumes the webrtc bindings —
-# tracked in docs/voice-chat-plan.md §5.B and
-# docs/rust-glib-interop.md "GStreamer runtime floor".
+# Version floor: 1.20 ships webrtcbin's stable API surface. The
+# gstreamer-rs 0.24 family's build-time floor for gstreamer-webrtc-sys
+# is 1.14, but the project locks the >= 1.20 floor here because that
+# is where webrtcbin stabilised. Debian trixie ships 1.24 and the
+# GNOME 49 Flatpak runtime ships 1.26 — both clear the floor and
+# both pair cleanly with gstreamer-rs 0.24. (The earlier rust pin
+# at the gstreamer-rs 0.25 family targeted 1.26 specifically; the
+# 0.24 downgrade undoes that coupling so Debian-native builds with
+# the distro's 1.24 just work.) Tracked in docs/voice-chat-plan.md
+# §5.B and docs/rust-glib-interop.md "GStreamer runtime floor".
 #
 # Plugin set:
 #   gstreamer-1.0       — core pipeline / element framework
@@ -118,7 +119,7 @@ gstreamer_dep        = dependency('gstreamer-1.0',        version : '>= 1.20')
 gstreamer_app_dep    = dependency('gstreamer-app-1.0',    version : '>= 1.20')
 gstreamer_audio_dep  = dependency('gstreamer-audio-1.0',  version : '>= 1.20')
 # gstreamer-webrtc-1.0 lives in gst-plugins-bad on most distros and on
-# the GNOME 48+ Flatpak runtime. Phase 8.B's loopback pipeline
+# the GNOME 49 Flatpak runtime. Phase 8.B's loopback pipeline
 # (audiotestsrc ! mulawenc ! mulawdec ! fakesink) doesn't actually
 # consume webrtcbin, but the runtime crate's Cargo.toml pulls in
 # gstreamer-sdp / gstreamer-webrtc anyway so the resolver locks

@@ -59,8 +59,9 @@ pub mod runtime;
 // Cargo.toml as optional deps under the `voice` feature, so they
 // resolve into Cargo.lock + cargo-sources.json vendoring at R3.0 time
 // rather than at 8.B PR time. The default build doesn't compile them
-// (the gstreamer-webrtc-sys build.rs needs GStreamer 1.26 dev libs
-// that won't land in the Flatpak runtime until the GNOME 48 bump).
+// (the gstreamer-webrtc-sys build.rs needs the matching GStreamer
+// dev libs — the 0.24 family's build floor is 1.14, but webrtc
+// signaling requires a runtime of >= 1.20).
 // The `as _` form pulls each crate into scope without binding a name
 // when the feature is on, which keeps `unused_crate_dependencies`
 // quiet and is the canonical idiom for "build-time dep, not yet a

@@ -53,9 +53,11 @@ async-channel = { workspace = true, optional = true }
 # no-network Flatpak vendoring. The default `cargo build` does NOT
 # compile them, which matters: the gstreamer-webrtc-sys / gstreamer-sys
 # family runs pkg-config at build.rs time and would fail on hosts
-# without the GStreamer 1.26 dev libs. Phase 8.B turns the `voice`
-# feature on; the Flatpak manifest is already on GNOME 49 which ships
-# GStreamer 1.26+.
+# without the GStreamer dev libs (the 0.24 family's build-time floor
+# is 1.14; meson.build enforces >= 1.20 for the project). Phase 8.B
+# turns the `voice` feature on; Debian trixie ships GStreamer 1.24
+# and the GNOME 49 Flatpak runtime ships 1.26 — both satisfy the
+# 0.24 bindings.
 gtk4 = { workspace = true, optional = true }
 libadwaita = { workspace = true, optional = true }
 gstreamer = { workspace = true, optional = true }

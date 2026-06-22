@@ -325,17 +325,28 @@ the foothold. The same rules apply to:
 
 ## GStreamer runtime floor
 
-Phase 8.0 (R3.0) pulls the `gstreamer-rs` 0.25 family into
-`workspace.dependencies` but does not consume the bindings yet. Phase
-8.B is when consumers go live, and that's when the runtime version
-floor matters:
+Phase 8.0 (R3.0) pulls the `gstreamer-rs` 0.24 family into
+`workspace.dependencies`. (Originally landed at 0.25 alongside the
+gtk-rs 0.22 family; both were downgraded one minor when the rustc 1.92
+MSRV the 0.22 / 0.25 line carried turned out to be incompatible with
+Debian trixie's stock rustc 1.85 — see `rust-toolchain.toml` and the
+workspace `Cargo.toml` comments for the full rationale.)
 
-- gstreamer-rs 0.25 tracks GStreamer **1.26**.
-- GNOME 47 Flatpak runtime ships GStreamer 1.24.
-- GNOME 48 brings 1.26.
+Phase 8.B is when consumers go live; the runtime version floor matters
+there:
 
-Action item for Phase 8.B (not 8.0): verify `com.nasledov.gtkhx.yml`'s
-runtime version, and bump to GNOME 48 or later before consuming the
-gstreamer-webrtc bindings. Phase 8.0 itself only requires that the
-crate graph builds (which works on any Rust target — no GStreamer
-runtime needed at build time).
+- gstreamer-rs 0.24 has a build-time floor of GStreamer 1.14 (per
+  gstreamer-webrtc-sys 0.24's `system-deps` probe) but project meson
+  pins it harder at >= 1.20, which is where webrtcbin stabilised.
+- Debian trixie ships GStreamer **1.24** — the natural pair for
+  gstreamer-rs 0.24.
+- GNOME 49 Flatpak runtime ships GStreamer **1.26** — also fine
+  against 0.24 bindings; the bindings just don't expose any 1.26-only
+  API surface to our code, and we use none of it.
+
+No GNOME-runtime bump is required for Phase 8.B with this dep tree.
+The earlier "must bump to GNOME 48 for GStreamer 1.26" action item was
+specific to the gstreamer-rs 0.25 family and is no longer load-bearing.
+If a future voice or media feature needs a 1.26-binding-level API
+(versus 1.26-runtime behaviour) we'd need to step the whole gtk-rs /
+gstreamer-rs / rustc trio back up — but nothing currently shipped does.

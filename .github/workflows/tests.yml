@@ -146,8 +146,15 @@ jobs:
             --print-errorlogs
 
       - name: cargo test (Rust workspace)
+        # --ignore-rust-version: several transitive deps (zbus,
+        # zvariant, glycin-common, glycin-utils) carry overly
+        # conservative rust-version labels (1.87 / 1.92) even
+        # though their code compiles cleanly on rustc 1.85 — our
+        # Debian-stable native-build floor. Same flag is used in
+        # rust/meson.build's cargo invocation; the project keeps
+        # both code paths in sync.
         run: |
-          cd rust && cargo test --workspace
+          cd rust && cargo test --workspace --ignore-rust-version
 
       - name: upload meson test logs
         if: always()

@@ -79,15 +79,18 @@ support (G.3 below), which adds a frames array + tick state to
 ### G.1 — Crate scaffold + magic-byte sniff (~150 LOC Rust)
 
 - New crate `rust/crates/hx-image-decode/`. Cargo deps as shipped:
-  - `glycin = "3"` (the Rust *crate* version is 3.x; the
+  - `glycin = "~3.0"` (the Rust *crate* version is 3.x; the
     underlying Glycin *project* is at 2.x — see "Glycin
     version pin" under Open questions for the
     disambiguation. Both speak the same loader subprocess
-    protocol at `/usr/libexec/glycin-loaders/2+/`.)
-  - `gdk = { package = "gdk4", version = "0.11" }` — pulls
+    protocol at `/usr/libexec/glycin-loaders/2+/`.) Pinned at
+    `~3.0` rather than `3` because 3.1.x pulls in the gtk-rs
+    0.22 family (MSRV rustc 1.92); 3.0.x stays on 0.21 (MSRV
+    1.85), which is what Debian trixie's stock rustc supports.
+  - `gdk = { package = "gdk4", version = "0.10" }` — pulls
     in the gtk-rs `gdk4` crate as `gdk` in source per the
     ecosystem convention.
-  - `glib` + `gio` from the workspace pins (0.22 family).
+  - `glib` + `gio` from the workspace pins (0.21 family).
   - `gdk-pixbuf` is **not** a dep here — that's the whole point.
 - Port `inline_media_sniff` + `inline_media_format_*` from C to Rust.
   Pure magic-byte logic; trivial.

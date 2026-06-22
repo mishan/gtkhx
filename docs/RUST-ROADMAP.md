@@ -77,7 +77,9 @@ costs more than the gain.
    as the current C code, so the AdwHeaderBar / AdwToast / AdwPreferencesDialog
    choices made in Phase 5 carry across unchanged. gtk4-rs is at 0.11+ as of
    May 2026 with active maintenance; libadwaita-rs synchronizes versions and
-   is widely used.
+   is widely used. The workspace is pinned to the 0.10 / 0.8 (gtk4-rs / libadwaita)
+   family — see `rust/Cargo.toml` for the Debian-stable rustc 1.85 floor that
+   keeps us off the 0.11 / 0.9 (MSRV 1.92) line.
 
 4. **Async runtime: tokio in a dedicated thread, GLib MainContext on the UI.**
    The documented gtk-rs pattern: `tokio::runtime::Runtime` lives on a worker
