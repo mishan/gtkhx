@@ -202,6 +202,23 @@ test_theme_scale = executable('test_theme_scale',
 test('theme_scale', test_theme_scale,
      suite : 'unit')
 
+# cfgvars[] sort-order regression test. The table in src/options.c
+# must be alphabetical by on-disk key string because cfgvar_for_name
+# uses bsearch() on it; there's a runtime assertion that g_errors at
+# launch, but a launch-time error is a "user discovers the bug" path
+# rather than a "CI discovers the bug" path. options.c is too
+# GTK-heavy to link into a unit test, so the test parses the source
+# text directly (src/cfgkeys.h + src/options.c) and walks the table
+# order. Source root passes through as argv[1].
+test_cfgvars_sorted = executable('test_cfgvars_sorted',
+  'unit/test_cfgvars_sorted.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('cfgvars_sorted', test_cfgvars_sorted,
+     args : [meson.project_source_root()],
+     suite : 'unit')
+
 # hxnet_ffi — smoke test for the hxnet C-callable FFI surface
 # (Phase R3.3.b). Builds a connected TCP loopback pair
 # (bind/listen/accept + connect on 127.0.0.1) → spawn_fd → round-
