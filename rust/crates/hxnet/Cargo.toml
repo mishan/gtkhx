@@ -26,6 +26,12 @@ hxcrypto-aead = { path = "../hxcrypto-aead" }
 # rekey rotation. We call the safe inner helper directly rather
 # than the C-shaped gtkhx_hmac_xxx wrapper.
 hxcrypto-hash = { path = "../hxcrypto-hash" }
+# Phase F-2 (post-HOPE cipher transition): the AEAD key
+# derivation uses HKDF-SHA256 directly. hxcrypto-aead has the
+# same HKDF helper internally but doesn't expose it; pulling
+# the primitives in here keeps Phase F-2 self-contained.
+hkdf = "0.12"
+sha2 = "0.10"
 # R3.3.e-4g: HopeBlowfishStream's write side needs OS randomness
 # for the marker-decision nibble. Same `getrandom(2)` backend
 # src/rand.c uses on the C side.
