@@ -334,6 +334,17 @@ main (int argc, char *argv[])
      * test sets and unsets the variable within its own scope. */
     g_unsetenv ("GTKHX_USE_HXNET");
 
+    /* This suite exercises the LEGACY hx_connect connect machinery
+     * (GSocketClient state machine + magic/LOGIN) plus the post-login
+     * GTKHX_USE_HXNET data-path bridge installed on top of it. Now that
+     * the Phase G orchestrator is the default connect path
+     * (PHASE_G_DEFAULT_ON=1), pin these tests to the legacy path with
+     * the GTKHX_OLD_CONNECT escape hatch — the orchestrator connect path
+     * has its own coverage in test_phase_g_connect.c. Drop this when
+     * delete-old-connect removes the legacy path (and this suite with
+     * it). */
+    g_setenv ("GTKHX_OLD_CONNECT", "1", TRUE);
+
     g_test_init (&argc, &argv, NULL);
     connect_test_init_fd_table ();
 

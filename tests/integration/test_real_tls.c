@@ -258,6 +258,14 @@ test_tls_full_handshake (void)
 int
 main (int argc, char **argv)
 {
+    /* Covers the LEGACY hx_connect tls=1 path (GSocketClient TLS
+     * handshake + accept-certificate handler). Now that the Phase G
+     * orchestrator is the default (PHASE_G_DEFAULT_ON=1), pin to the
+     * legacy path via the GTKHX_OLD_CONNECT escape hatch; the
+     * orchestrator TLS path is covered by test_phase_g_connect.c. Drop
+     * when delete-old-connect removes the legacy path. */
+    g_setenv ("GTKHX_OLD_CONNECT", "1", TRUE);
+
     g_test_init (&argc, &argv, NULL);
     connect_test_init_fd_table ();
 
