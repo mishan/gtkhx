@@ -1677,6 +1677,198 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
     )
 }
 
+/// Open a Hotline connection with hxnet driving the full
+/// plaintext-login lifecycle (Phase G of
+/// `hxnet-owns-the-whole-lifecycle`).
+///
+/// This is the next step up from
+/// [`hxnet_connection_open_tcp`]: instead of stopping after
+/// TCP connect, the spawned task walks magic exchange + LOGIN
+/// send + LOGIN reply receive before handing the stream to
+/// the frame-mode actor. State events fire at every transition
+/// (Resolving → Connecting → Connected → MagicExchange →
+/// LoginSending → LoginReplyWait → HandshakeDone), so the C
+/// side can drive the toolbar throbber off the same `on_state`
+/// callback wiring it already uses.
+///
+/// All input slices are non-NUL-terminated:
+///
+/// - `host` (length `host_len`) — DNS name or IP literal,
+///   UTF-8.
+/// - `login` (length `login_len`) — user login. Empty allowed
+///   ("guest").
+/// - `password` (length `password_len`) — empty allowed.
+/// - `name` (length `name_len`) — display name. Empty omits
+///   the chunk.
+///
+/// `icon`, `version`, and `caps` are host-endian `u16` values (NOT
+/// pre-swapped) — hxnet encodes them big-endian with `to_be_bytes()`
+/// when building the LOGIN chunks, so passing network-order here would
+/// double-swap on little-endian hosts. 0 omits the chunk. `caps` is
+/// the `HTLC_CAP_*` bitmask — pass the same bits the legacy LOGIN
+/// advertises so extensions (chat-history / inline-media / voice)
+/// negotiate. `trans` is the transaction id for the LOGIN frame —
+/// pick a non-zero value (production uses a counter).
+///
+/// **Plaintext only**: this FFI does NOT speak TLS or HOPE.
+/// Callers who need either route through the legacy
+/// `spawn_fd_*` path until Phase F (HOPE) and Phase B (TLS)
+/// are folded into the orchestrator.
+///
+/// # Safety
+///
+/// Every `*_ptr` / `*_len` pair must point at `len` readable
+/// bytes (or be `NULL` / 0 to indicate "omit"). UTF-8 validity
+/// is required for `host`; `login` / `password` / `name` are
+/// treated as opaque byte strings (production sends them
+/// XOR-0xFF obfuscated for the credentials, raw bytes for the
+/// name).
+///
+/// Callback pointers and `user_data` must remain valid for
+/// the connection's lifetime.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_plaintext(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    on_state: HxnetStateCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext: NULL on_event / on_shutdown"
+        );
+        return std::ptr::null_mut();
+    }
+    if trans == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext: trans=0 is reserved; pick a non-zero id"
+        );
+        return std::ptr::null_mut();
+    }
+
+    // slice::from_raw_parts is documented UB for
+    // `len * size_of::<T>() > isize::MAX`. Guard every length we turn
+    // into a slice below — same defensive discipline as the other FFI
+    // entry points — so a bogus length from C is a logged error.
+    if [host_len, login_len, password_len, name_len]
+        .iter()
+        .any(|&n| (n as u64) > (isize::MAX as u64))
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext: a length argument exceeds isize::MAX"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext: host is not valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // A NULL pointer with a non-zero length is a caller bug (it would
+    // silently drop the credential / name). Reject it rather than treat
+    // it as empty — same fail-fast contract as hxnet_connection_send_frame.
+    if (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext: NULL pointer with non-zero \
+             length for login / password / name"
+        );
+        return std::ptr::null_mut();
+    }
+
+    // Empty credential / name slices land as Vec<u8>::new(). login.rs
+    // then applies the per-field rule (matching src/login_packet.c):
+    // LOGIN is always emitted (a zero-length chunk when empty), PASSWORD
+    // is omitted entirely when empty (guest login — NOT a zero-length
+    // chunk), and NAME / ICON / VERSION / CAPABILITIES are each omitted
+    // when empty / zero.
+    let login_vec = if login_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(login, login_len).to_vec()
+    };
+    let password_vec = if password_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(password, password_len).to_vec()
+    };
+    let name_vec = if name_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(name, name_len).to_vec()
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext: Runtime::global panicked; \
+                 aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+
+    let req = crate::lifecycle::PlaintextOpenRequest {
+        host: host_str,
+        port,
+        login: login_vec,
+        password: password_vec,
+        name: name_vec,
+        icon,
+        version,
+        caps,
+        trans,
+    };
+
+    let join = rt.handle().spawn(async move {
+        crate::lifecycle::run_plaintext_lifecycle(req, cmd_rx, evt_tx).await;
+    });
+
+    wire_callback_state_with_on_state(
+        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+    )
+}
+
 /// Variant of `wire_callback_state` that routes
 /// `Event::State(...)` through an additional `on_state`
 /// callback instead of dropping it. Reuses the same
