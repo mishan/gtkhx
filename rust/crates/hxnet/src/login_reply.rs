@@ -49,6 +49,14 @@ pub const HTLS_HDR_TASK: u32 = 0x0001_0000;
 /// `HTLS_DATA_ERROR_TEXT` (0x0100) in `src/hotline.h`.
 pub const TAG_ERROR_TEXT: u16 = 0x0100;
 
+/// `HTLC_DATA_LOGIN` / `HTLS_DATA_LOGIN` echo tag (0x0069). The
+/// HOPE step-1 reply echoes the login when the server is running
+/// the *secure_login* variant — its presence (and matching
+/// `HMAC(login, sessionkey)`) is how the client decides to HMAC the
+/// step-2 login field rather than XOR-encode it. mhxd guest uses
+/// this variant; Janus guest does not.
+pub const TAG_LOGIN_ECHO: u16 = 0x0069;
+
 /// HOPE chunks the server might include. The C-side names
 /// (with the `0x0e..` prefix) are from `src/hotline.h`.
 pub const TAG_HOPE_APP_ID: u16 = 0x0e01;
@@ -83,6 +91,9 @@ pub struct LoginReply {
     pub cipher_mode: Option<Vec<u8>>,
     pub hope_app_id: Option<Vec<u8>>,
     pub hope_app_string: Option<Vec<u8>>,
+    /// The server's echo of the `DATA_LOGIN` chunk (HOPE step-1
+    /// reply). Drives the secure_login decision for step 2.
+    pub login_echo: Option<Vec<u8>>,
     /// The verbatim on-wire bytes of this reply: the 22-byte header
     /// followed by `body_len` chunk bytes. Retained so the Phase G
     /// orchestrator can replay the reply to the C side as a synthetic
@@ -130,9 +141,24 @@ where
         ));
     }
 
-    // Read the 22-byte header.
+    // Read the 22-byte header. Bounded by the handshake timeout so a
+    // server that goes silent after LOGIN doesn't wedge the connect
+    // (and the connect/login UI task) forever.
     let mut hdr_buf = [0u8; hotline_proto::HL_HDR_LEN];
-    stream.read_exact(&mut hdr_buf).await?;
+    tokio::time::timeout(
+        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
+        stream.read_exact(&mut hdr_buf),
+    )
+    .await
+    .map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::TimedOut,
+            format!(
+                "LOGIN reply not received within {}s",
+                crate::HANDSHAKE_TIMEOUT_SECS
+            ),
+        )
+    })??;
 
     // Decode with NO clamp (u32::MAX) so wire_len is the raw value,
     // then refuse oversized frames by the raw wire_len. Passing
@@ -175,9 +201,24 @@ where
     let mut body_buf = vec![0u8; hotline_proto::HL_HDR_LEN + body_len];
     body_buf[..hotline_proto::HL_HDR_LEN].copy_from_slice(&hdr_buf);
     if body_len > 0 {
-        stream
-            .read_exact(&mut body_buf[hotline_proto::HL_HDR_LEN..])
-            .await?;
+        // Bound the body read with the same handshake timeout as the
+        // header above: a server that sends a header advertising a
+        // body then stalls mid-body would otherwise hang the
+        // handshake forever. Every pre-frame read is bounded.
+        tokio::time::timeout(
+            std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
+            stream.read_exact(&mut body_buf[hotline_proto::HL_HDR_LEN..]),
+        )
+        .await
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                format!(
+                    "LOGIN reply body not received within {}s",
+                    crate::HANDSHAKE_TIMEOUT_SECS
+                ),
+            )
+        })??;
     }
 
     let mut reply = LoginReply {
@@ -190,6 +231,7 @@ where
     for chunk in ChunkIter::over_message(&body_buf, body_buf.len()) {
         match chunk.tag {
             TAG_ERROR_TEXT => reply.error_text = Some(chunk.data.to_vec()),
+            TAG_LOGIN_ECHO => reply.login_echo = Some(chunk.data.to_vec()),
             TAG_SESSIONKEY => reply.sessionkey = Some(chunk.data.to_vec()),
             TAG_MAC_ALG => reply.mac_alg = Some(chunk.data.to_vec()),
             TAG_S_DATA_CIPHER_ALG => reply.cipher_alg = Some(chunk.data.to_vec()),

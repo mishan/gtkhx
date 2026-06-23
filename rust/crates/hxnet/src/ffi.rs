@@ -25,11 +25,13 @@
 //! # Lifetime
 //!
 //! The handle owns the tokio task that's reading the fd. Calling
-//! [`hxnet_connection_destroy`] drops the [`ConnectionHandle`]
-//! which drops the command sender, which the actor sees as
-//! "handle dropped" — it flushes any pending writes and exits.
-//! The fd is closed when the wrapped `tokio::net::TcpStream`
-//! drops at the end of the actor's loop.
+//! [`hxnet_connection_destroy`] aborts that task and drops the
+//! [`ConnectionHandle`]. A running actor that's idling on the
+//! command channel would see the dropped sender as "handle
+//! dropped" and flush before exiting, but the abort means a
+//! blocked / mid-handshake actor is cancelled at its next await
+//! without that graceful flush. Either way the fd is closed when
+//! the wrapped `tokio::net::TcpStream` drops.
 //!
 //! # Safety contracts
 //!
@@ -599,10 +601,14 @@ pub unsafe extern "C" fn hxnet_connection_send_frame(
     }
 }
 
-/// Drop the handle. The actor sees `HandleDropped` and exits;
-/// pending writes are flushed best-effort. Any frames still in
-/// the event channel are dropped (the C side already had its
-/// chance via [`hxnet_connection_try_recv_frame`]).
+/// Drop the handle and abort its spawned task. The task is
+/// cancelled at its next await point (see the body for why an
+/// abort is required rather than just dropping the cmd sender), so
+/// for a mid-handshake or otherwise-blocked actor it does NOT
+/// necessarily observe `HandleDropped` or flush pending writes
+/// before its transport is dropped and the socket closed. Any
+/// frames still in the event channel are dropped too (the C side
+/// already had its chance via [`hxnet_connection_try_recv_frame`]).
 ///
 /// # Safety
 ///
@@ -615,12 +621,24 @@ pub unsafe extern "C" fn hxnet_connection_destroy(
     if handle.is_null() {
         return;
     }
-    // Reclaim the Box; its Drop drops the cmd sender (actor
-    // exits), the events receiver (any in-flight events
-    // discarded), and the JoinHandle (the actor task continues
-    // to completion but we don't await it — it gets detached
-    // and dropped naturally on the runtime).
-    drop(Box::from_raw(handle));
+    let conn = Box::from_raw(handle);
+    // Abort the spawned lifecycle/actor task. Dropping a JoinHandle
+    // only *detaches* — the task keeps running. For a connection
+    // that's mid-handshake (DNS / TCP connect / magic / LOGIN), the
+    // task isn't yet polling the command channel, so dropping the
+    // cmd sender below would NOT stop it: it would keep running,
+    // holding the socket, and only self-terminate if/when it next
+    // tried to emit an event (never, if it's blocked on a hung
+    // connect or a silent server). That leak was the "hxnet in a bad
+    // state after disconnecting a hung connect" bug. abort() forces
+    // cancellation at the next await point and drops the task's
+    // TcpStream/TlsStream, closing the socket. For an already-exited
+    // actor (the normal shutdown path) abort() is a no-op.
+    conn._join.abort();
+    // Dropping the Box releases the cmd sender, the events receiver /
+    // callback state (the forwarder aborts its spawn_local, the pump
+    // detaches), all together.
+    drop(conn);
 }
 
 // ============================================================
@@ -1513,6 +1531,32 @@ pub type HxnetStateCallback = Option<
     unsafe extern "C" fn(conn: *mut HxnetConnection, state: c_uint, user_data: *mut c_void),
 >;
 
+/// TLS certificate trust callback (TOFU bridge). Invoked at most once,
+/// on the tokio lifecycle task, right after the TLS handshake completes
+/// and before any LOGIN is sent — but ONLY when WebPKI validation
+/// against the native roots failed. A CA-valid cert is trusted silently
+/// and this callback is never called. Gets the peer leaf cert's SHA-256
+/// fingerprint as a `"sha256:<hex>"` byte string (NOT NUL-terminated
+/// — use `fp_len`). Returns non-zero to accept the connection, zero
+/// to reject (the lifecycle then closes the stream before LOGIN).
+///
+/// The C side keys this to its known-hosts TOFU store
+/// (`hx_tls_orchestrator_verify_cert` → `hx_tls_trust_lookup`) and
+/// may prompt the user (marshalled to the GLib main thread). It runs
+/// on the tokio thread, so it may block on that prompt — fine during
+/// a single connection's handshake.
+pub type HxnetVerifyCertCallback =
+    Option<unsafe extern "C" fn(fp: *const u8, fp_len: usize, user_data: *mut c_void) -> c_int>;
+
+/// `Send` wrapper for the opaque C `user_data` pointer so the TLS
+/// verify closure (which captures it) can move into the spawned
+/// lifecycle task. Raw pointers aren't `Send`; the FFI contract
+/// already requires `user_data` to outlive the connection and be
+/// used single-threaded, and the verify closure only ever runs on
+/// the one lifecycle task.
+struct SendUserData(*mut c_void);
+unsafe impl Send for SendUserData {}
+
 /// Connection-state mirror constants for the C side, matching the
 /// `#[repr(u32)]` discriminants on [`crate::ConnectionState`]. The
 /// `const _` block below asserts that match at compile time, so a
@@ -1862,6 +1906,349 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_lifecycle(req, cmd_rx, evt_tx).await;
+    });
+
+    wire_callback_state_with_on_state(
+        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+    )
+}
+
+/// Open a plaintext-Hotline-over-TLS connection (the Mobius / Janus
+/// separate-port model: TLS-from-byte-zero on a dedicated port, then
+/// the ordinary plaintext Hotline protocol over the encrypted
+/// stream). The TLS sibling of [`hxnet_connection_open_plaintext`];
+/// runs [`crate::lifecycle::run_plaintext_tls_lifecycle`].
+///
+/// Certificate trust is WebPKI-first: rustls validates the cert
+/// against the native trust roots, and a CA-valid cert (e.g. Let's
+/// Encrypt) is trusted silently — `verify_cert` is NOT consulted. Only
+/// when WebPKI validation fails is `verify_cert` invoked
+/// (post-handshake, with the leaf cert's `"sha256:<hex>"` fingerprint,
+/// before any LOGIN) to make the TOFU decision; it may reject. Passing
+/// `verify_cert = NULL` therefore leaves only *non-WebPKI* certs
+/// accept-any (CA-valid certs are still validated); callers that want
+/// TOFU enforcement on self-signed certs must supply it. See
+/// [`crate::tls`] and [`HxnetVerifyCertCallback`].
+///
+/// Other parameters and safety are identical to
+/// [`hxnet_connection_open_plaintext`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    on_state: HxnetStateCallback,
+    verify_cert: HxnetVerifyCertCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: NULL on_event / on_shutdown"
+        );
+        return std::ptr::null_mut();
+    }
+    if trans == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: trans=0 is reserved"
+        );
+        return std::ptr::null_mut();
+    }
+
+    // slice::from_raw_parts is documented UB for
+    // `len * size_of::<T>() > isize::MAX`. Guard every length we turn
+    // into a slice below — same defensive discipline as the other FFI
+    // entry points — so a bogus length from C is a logged error.
+    if [host_len, login_len, password_len, name_len]
+        .iter()
+        .any(|&n| (n as u64) > (isize::MAX as u64))
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: a length argument exceeds isize::MAX"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_tls: host is not valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // A NULL pointer with a non-zero length is a caller bug (it would
+    // silently drop the credential / name). Reject it rather than treat
+    // it as empty — same fail-fast contract as hxnet_connection_send_frame.
+    if (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls: NULL pointer with non-zero \
+             length for login / password / name"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let login_vec = if login_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(login, login_len).to_vec()
+    };
+    let password_vec = if password_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(password, password_len).to_vec()
+    };
+    let name_vec = if name_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(name, name_len).to_vec()
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_tls: Runtime::global \
+                 panicked; aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+
+    let req = crate::lifecycle::PlaintextOpenRequest {
+        host: host_str,
+        port,
+        login: login_vec,
+        password: password_vec,
+        name: name_vec,
+        icon,
+        version,
+        caps,
+        trans,
+    };
+
+    // Wrap the C verify callback in a Rust closure the lifecycle
+    // calls post-handshake with the cert fingerprint. The opaque
+    // user_data is shared with the other callbacks; the SendUserData
+    // wrapper lets the closure move into the spawned task.
+    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> =
+        verify_cert.map(|cb| {
+            let ud = SendUserData(user_data);
+            let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
+                let ud = &ud;
+                unsafe { cb(fp.as_ptr(), fp.len(), ud.0) != 0 }
+            });
+            boxed
+        });
+
+    let join = rt.handle().spawn(async move {
+        crate::lifecycle::run_plaintext_tls_lifecycle(
+            req,
+            verify_closure,
+            cmd_rx,
+            evt_tx,
+        )
+        .await;
+    });
+
+    wire_callback_state_with_on_state(
+        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+    )
+}
+
+/// Open a HOPE-Secure-Login connection with hxnet driving the full
+/// handshake — magic + step-1 + step-2 + cipher transition — and the
+/// post-handshake encrypted stream. The HOPE sibling of
+/// [`hxnet_connection_open_plaintext`]; runs
+/// [`crate::lifecycle::run_hope_lifecycle`].
+///
+/// `cipher_alg` (length `cipher_alg_len`) is the wire cipher label to
+/// advertise — `b"BLOWFISH"` or `b"CHACHA20-POLY1305"`. HOPE always
+/// negotiates a cipher, so an empty `cipher_alg` is rejected.
+///
+/// `trans` is the **step-1** transaction id; the orchestrator sends
+/// step 2 as `trans + 1`, and the step-2 reply (which gets replayed
+/// to the C side as `Event::Frame`) carries `trans + 1`. The C caller
+/// registers its login task under that value.
+///
+/// `caps` is advertised in the step-2 LOGIN (BE u16 `HTLC_CAP_*`);
+/// `icon` / `version` likewise. `name` is the display name sent in
+/// step 2 (HOPE includes it, unlike the plaintext path which defers
+/// the name to a later USER_CHANGE).
+///
+/// # Safety
+///
+/// Same as [`hxnet_connection_open_plaintext`], plus `cipher_alg`
+/// must point at `cipher_alg_len` readable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_hope(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    cipher_alg: *const u8,
+    cipher_alg_len: usize,
+    on_event: HxnetEventCallback,
+    on_shutdown: HxnetShutdownCallback,
+    on_state: HxnetStateCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!("hxnet", "hxnet_connection_open_hope: NULL or empty host");
+        return std::ptr::null_mut();
+    }
+    if on_event.is_none() || on_shutdown.is_none() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope: NULL on_event / on_shutdown"
+        );
+        return std::ptr::null_mut();
+    }
+    if trans == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope: trans=0 is reserved; pick a non-zero id"
+        );
+        return std::ptr::null_mut();
+    }
+    if cipher_alg.is_null() || cipher_alg_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope: HOPE requires a non-empty cipher_alg"
+        );
+        return std::ptr::null_mut();
+    }
+
+    // slice::from_raw_parts is documented UB for
+    // `len * size_of::<T>() > isize::MAX`. Guard every length we turn
+    // into a slice below — same defensive discipline as the other FFI
+    // entry points — so a bogus length from C is a logged error.
+    if [host_len, login_len, password_len, name_len, cipher_alg_len]
+        .iter()
+        .any(|&n| (n as u64) > (isize::MAX as u64))
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope: a length argument exceeds isize::MAX"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!("hxnet", "hxnet_connection_open_hope: host is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+
+    // A NULL pointer with a non-zero length is a caller bug (it would
+    // silently drop the credential / name). Reject it rather than treat
+    // it as empty — same fail-fast contract as hxnet_connection_send_frame.
+    if (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope: NULL pointer with non-zero \
+             length for login / password / name"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let login_vec = if login_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(login, login_len).to_vec()
+    };
+    let password_vec = if password_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(password, password_len).to_vec()
+    };
+    let name_vec = if name_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(name, name_len).to_vec()
+    };
+    let cipher_vec = std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec();
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
+        Runtime::global,
+    )) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_hope: Runtime::global panicked; \
+                 aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+
+    let req = crate::lifecycle::HopeOpenRequest {
+        host: host_str,
+        port,
+        login: login_vec,
+        password: password_vec,
+        name: name_vec,
+        icon,
+        version,
+        caps,
+        trans,
+        cipher_algs: vec![cipher_vec],
+    };
+
+    let join = rt.handle().spawn(async move {
+        crate::lifecycle::run_hope_lifecycle(req, cmd_rx, evt_tx).await;
     });
 
     wire_callback_state_with_on_state(

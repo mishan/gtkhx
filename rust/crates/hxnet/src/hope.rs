@@ -203,10 +203,19 @@ pub fn build_step1_login(req: &HopeStep1Request<'_>) -> io::Result<Vec<u8>> {
         ));
     }
 
+    // LOGIN + PASSWORD carry a single 0 byte, NOT a zero-length
+    // chunk. The spec says zero-length, but every server we've
+    // tested (mhxd, Janus) expects the 1-byte placeholder — an
+    // empty LOGIN/PASSWORD reads as a *plaintext* guest login, so
+    // the server accepts it and replies with an empty TASK instead
+    // of a HOPE step-1 reply (no sessionkey). Mirrors
+    // src/login_packet.c's HX_LOGIN_MODE_HOPE_STEP1. Caught against
+    // live Janus, which returned a 22-byte (hc=0) reply until this
+    // was fixed.
+    let zero_placeholder = [0u8; 1];
     let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(8);
-    // Empty login + password chunks.
-    chunks.push(PackChunk { tag: tag::LOGIN, data: &[] });
-    chunks.push(PackChunk { tag: tag::PASSWORD, data: &[] });
+    chunks.push(PackChunk { tag: tag::LOGIN, data: &zero_placeholder });
+    chunks.push(PackChunk { tag: tag::PASSWORD, data: &zero_placeholder });
     chunks.push(PackChunk { tag: TAG_MAC_ALG, data: &mac_list });
     chunks.push(PackChunk { tag: TAG_HOPE_APP_ID, data: app_id });
     if let Some(s) = req.app_string {
@@ -302,9 +311,17 @@ pub fn hmac_password(
 #[derive(Debug, Clone)]
 pub struct HopeStep2Request<'a> {
     pub trans: u32,
-    /// Real login bytes (XOR-0xFF on the wire — same as
-    /// plaintext login).
+    /// Real login bytes. Encoded on the wire as `HMAC(login,
+    /// sessionkey)` when `secure_login` is set, else XOR-0xFF (same
+    /// as plaintext login). See [`HopeStep2Request::secure_login`].
     pub login: &'a [u8],
+    /// Whether the server runs the secure_login variant (its step-1
+    /// reply echoed the login). When true, the step-2 LOGIN field is
+    /// the HMAC of the login under the sessionkey + chosen MAC,
+    /// matching `src/hope.c::hope_build_login_field`'s
+    /// `secure_login` branch. mhxd guest needs this; Janus guest
+    /// does not.
+    pub secure_login: bool,
     /// HMAC output from `hmac_password` — already digested.
     pub password_mac: &'a [u8],
     /// Algorithm choice from the step 1 reply.
@@ -315,12 +332,24 @@ pub struct HopeStep2Request<'a> {
     pub icon: u16,
     /// Client version (0 to omit).
     pub version: u16,
+    /// Capability bitmask (`HTLC_CAP_*`). Always emitted in step 2
+    /// (matching `src/login_packet.c` STEP2, which sends it
+    /// unconditionally — the server needs the caps echo to finalise
+    /// the session, and some servers reject a step-2 that omits it).
+    pub caps: u16,
 }
 
 /// Build the HOPE step 2 LOGIN frame.
 pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
-    // XOR-0xFF the login (same as plaintext).
-    let login_x: Vec<u8> = req.login.iter().map(|b| !b).collect();
+    // Encode the login field. secure_login servers (mhxd) expect
+    // HMAC(login, sessionkey) under the chosen MAC; everyone else
+    // (Janus guest) expects the plaintext XOR-0xFF form. Mirrors
+    // src/hope.c::hope_build_login_field.
+    let login_x: Vec<u8> = if req.secure_login {
+        hmac_password(req.login, &req.choice.sessionkey, &req.choice.mac_alg)?
+    } else {
+        req.login.iter().map(|b| !b).collect()
+    };
 
     // Re-encode the chosen cipher/compress as a single-entry
     // list, which is what step 2 echoes back to the server.
@@ -334,20 +363,21 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
 
     let icon_be = req.icon.to_be_bytes();
     let version_be = req.version.to_be_bytes();
+    let caps_be = req.caps.to_be_bytes();
 
-    let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(8);
+    let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(9);
     chunks.push(PackChunk { tag: tag::LOGIN, data: &login_x });
     chunks.push(PackChunk { tag: tag::PASSWORD, data: req.password_mac });
     chunks.push(PackChunk { tag: TAG_S_DATA_CIPHER_ALG, data: &cipher_list_back });
     if let Some(c) = &compress_list_back {
         chunks.push(PackChunk { tag: TAG_S_DATA_COMPRESS_ALG, data: c });
     }
-    if !req.name.is_empty() {
-        chunks.push(PackChunk { tag: tag::NAME, data: req.name });
-    }
-    if req.icon != 0 {
-        chunks.push(PackChunk { tag: tag::ICON, data: &icon_be });
-    }
+    // NAME + ICON — always emit, even empty/zero. Mirrors
+    // src/login_packet.c STEP2, which emits both unconditionally.
+    // mhxd rejects (and silently closes) a step-2 that omits them;
+    // Janus tolerates their absence. Caught against live mhxd.
+    chunks.push(PackChunk { tag: tag::NAME, data: req.name });
+    chunks.push(PackChunk { tag: tag::ICON, data: &icon_be });
     if req.version != 0 {
         chunks.push(PackChunk { tag: crate::login::TAG_VERSION, data: &version_be });
     }
@@ -359,6 +389,11 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
             data: &req.choice.cipher_mode,
         });
     }
+    // CAPABILITIES — always emit (mirrors src/login_packet.c STEP2).
+    chunks.push(PackChunk {
+        tag: crate::login::TAG_CAPABILITIES,
+        data: &caps_be,
+    });
 
     let needed = pack_message_size(&chunks);
     let mut out = vec![0u8; needed];
@@ -475,6 +510,8 @@ mod tests {
             name: b"Misha",
             icon: 0x7ffd,
             version: 0x00b9,
+            caps: 0x001f,
+            secure_login: false,
         };
         let frame = build_step2_login(&req).expect("build");
         assert_eq!(&frame[0..4], &HTLC_HDR_LOGIN.to_be_bytes());

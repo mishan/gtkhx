@@ -204,6 +204,8 @@ gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
  * which is fine for linking. */
 typedef void (*test_stub_state_cb) (struct hxnet_connection_opaque *conn,
                                     guint32 state, void *user_data);
+typedef int (*test_stub_verify_cb) (const guint8 *fp, gsize fp_len,
+                                    void *user_data);
 struct hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
@@ -226,6 +228,79 @@ hxnet_connection_open_plaintext (
     (void) on_event; (void) on_shutdown; (void) on_state; (void) user_data;
     g_assert_not_reached ();
     return NULL;
+}
+
+struct hxnet_connection_opaque *hxnet_connection_open_hope (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *cipher_alg,
+    gsize cipher_alg_len, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    void *user_data);
+struct hxnet_connection_opaque *
+hxnet_connection_open_hope (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *cipher_alg,
+    gsize cipher_alg_len, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    void *user_data)
+{
+    (void) host; (void) host_len; (void) port; (void) login;
+    (void) login_len; (void) password; (void) password_len; (void) name;
+    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
+    (void) cipher_alg; (void) cipher_alg_len;
+    (void) on_event; (void) on_shutdown; (void) on_state; (void) user_data;
+    g_assert_not_reached ();
+    return NULL;
+}
+
+struct hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    test_stub_verify_cb verify_cert, void *user_data);
+struct hxnet_connection_opaque *
+hxnet_connection_open_plaintext_tls (
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, test_stub_event_cb on_event,
+    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
+    test_stub_verify_cb verify_cert, void *user_data)
+{
+    (void) host; (void) host_len; (void) port; (void) login;
+    (void) login_len; (void) password; (void) password_len; (void) name;
+    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
+    (void) on_event; (void) on_shutdown; (void) on_state; (void) verify_cert;
+    (void) user_data;
+    g_assert_not_reached ();
+    return NULL;
+}
+
+/* hx_bridge_dispatch_shutdown reads network.c's `connected` flag to
+ * pick the shutdown log level. Tier 1 never drives that path, but the
+ * symbol must resolve — define it here (test never reads it). */
+int connected;
+
+/* bridge_on_verify_cert_cb (TLS TOFU trampoline) calls the production
+ * verify in network.c. Tier 1 never drives the TLS path, but the
+ * symbol must resolve. */
+struct htlc_conn;
+gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                          const char *fingerprint);
+gboolean
+hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
+                                 const char *fingerprint)
+{
+    (void) htlc;
+    (void) fingerprint;
+    g_assert_not_reached ();
+    return FALSE;
 }
 
 typedef struct _GtkhxSession GtkhxSession;
