@@ -630,8 +630,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
             // `usize`, so `<= 0` was a misleading shape (clippy's
             // "absurd extreme comparison" lint trigger).
             if written == 0 {
-                return Poll::Ready(Err(io::Error::new(
-                    io::ErrorKind::Other,
+                return Poll::Ready(Err(io::Error::other(
                     "AEAD seal failed",
                 )));
             }

@@ -1799,9 +1799,9 @@ const _: () = {
 /// `parse::parse_history_entry` reject conditions (sub-24-byte
 /// buffer, nick_len overruns, msg_len overruns); otherwise true.
 /// Surfaces nick / message as offsets into `data` — caller copies
-/// out by length (`g_malloc(len + 1)` + `memcpy(data + off, len)`
-/// + trailing NUL) since the owning struct in C wants heap-
-/// allocated strings AND the wire payload can contain embedded
+/// out by length (`g_malloc(len + 1)` + `memcpy(data + off, len)` +
+/// trailing NUL) since the owning struct in C wants heap-allocated
+/// strings AND the wire payload can contain embedded
 /// NULs that `g_strndup` would truncate at.
 ///
 /// # Safety
@@ -2661,10 +2661,21 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_list_chunks(
     build::build_file_list_chunks(dir, chunks_slice) as i32
 }
 
+/// Builder signature shared by the three FILE_NAME + optional DIR
+/// opcodes: the name bytes, an optional DIR, and the output chunk
+/// slice; returns the chunk count written.
+type FileNameDirBuilder = fn(&[u8], Option<&[u8]>, &mut [HxChunk]) -> usize;
+
 /// Common implementation for the three file-ops opcodes that share
 /// the FILE_NAME + optional DIR wire shape. `has_dir` is a 0/1 flag —
 /// when non-zero, emit DIR with the given bytes; when zero, omit it
 /// entirely (`dir_ptr` / `dir_len` are ignored in that case).
+///
+/// The argument count tracks the C call shape one-for-one (each
+/// pointer / length / flag is a distinct value the C side hands in);
+/// bundling them into a struct would only move the unpacking to the
+/// three call sites, so the lint is suppressed here deliberately.
+#[allow(clippy::too_many_arguments)]
 unsafe fn build_file_name_with_optional_dir_chunks(
     name_ptr: *const u8,
     name_len: usize,
@@ -2673,7 +2684,7 @@ unsafe fn build_file_name_with_optional_dir_chunks(
     dir_len: usize,
     chunks: *mut HxChunk,
     chunks_cap: usize,
-    inner: fn(&[u8], Option<&[u8]>, &mut [HxChunk]) -> usize,
+    inner: FileNameDirBuilder,
 ) -> i32 {
     const MAX_CHUNKS: usize = 2;
     if chunks.is_null() {
@@ -2918,8 +2929,8 @@ pub unsafe extern "C" fn gtkhx_proto_build_file_move_chunks(
     build::build_file_move_chunks(&req, chunks_slice) as i32
 }
 
-/// Build `HTLC_HDR_FILE_SYMLINK` chunks: FILE_NAME + DIR + DIR_RENAME
-/// + FILE_RENAME. `chunks_cap >= 4`. Returns 4 on success, 0 on
+/// Build `HTLC_HDR_FILE_SYMLINK` chunks: FILE_NAME + DIR + DIR_RENAME +
+/// FILE_RENAME. `chunks_cap >= 4`. Returns 4 on success, 0 on
 /// validation failure (NULL `chunks`, NULL payload pointer with
 /// non-zero len, oversize field, or short slice).
 ///

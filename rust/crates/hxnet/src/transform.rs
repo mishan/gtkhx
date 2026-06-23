@@ -251,6 +251,15 @@ where
 /// above is the matching `Copy` tag for places that only need to
 /// *describe* the negotiated layer (logging, FFI shape) without
 /// holding key material.
+///
+/// The `Blowfish` variant is large (~8 KiB — two full Blowfish key
+/// schedules), but a `CipherLayer` is built exactly once per
+/// connection and consumed immediately by [`compose`], which moves
+/// the states out to their long-lived home. There's never an array
+/// of these or a hot-path move, so boxing the variant would only buy
+/// a setup-time allocation for no real benefit — the size-difference
+/// lint is suppressed deliberately.
+#[allow(clippy::large_enum_variant)]
 pub enum CipherLayer {
     /// No cipher.
     None,

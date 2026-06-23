@@ -117,7 +117,7 @@ fn drain_pending_write<S: AsyncWrite + Unpin + ?Sized>(
 /// constant safety margin at the call site for the Sync-flush
 /// trailer.
 fn gzip_compress_bound(len: usize) -> usize {
-    len + (len + 16383) / 16384 * 5 + 6
+    len + len.div_ceil(16384) * 5 + 6
 }
 
 /// Ceiling on the per-stream compressed-input accumulation
@@ -480,8 +480,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
                     let consumed = (this.write_compress.total_in() - before_in) as usize;
                     let produced = (this.write_compress.total_out() - before_out) as usize;
                     if consumed != buf.len() {
-                        return Poll::Ready(Err(io::Error::new(
-                            io::ErrorKind::Other,
+                        return Poll::Ready(Err(io::Error::other(
                             "gzip compress: scratch buffer too small for sync flush",
                         )));
                     }
@@ -502,8 +501,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
                     // away from the underlying flate2 / zlib
                     // semantics — surface that specifically so a
                     // future maintainer knows where to look.
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Poll::Ready(Err(io::Error::other(
                         "gzip compress reported BufError despite \
                          pre-sized scratch (deflateBound mismatch?)",
                     )));
@@ -513,8 +511,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
                     // (corrupted internal state, etc.). Preserve
                     // the source error in the wrapping io::Error
                     // so the cause shows up in logs / debuggers.
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Poll::Ready(Err(io::Error::other(
                         format!("gzip compress failed: {e}"),
                     )));
                 }
@@ -1010,14 +1007,12 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Lz4Stream<S> {
             {
                 let mut enc = lz4_flex::frame::FrameEncoder::new(&mut framed);
                 if let Err(e) = enc.write_all(buf) {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Poll::Ready(Err(io::Error::other(
                         format!("lz4 frame encode failed: {e}"),
                     )));
                 }
                 if let Err(e) = enc.finish() {
-                    return Poll::Ready(Err(io::Error::new(
-                        io::ErrorKind::Other,
+                    return Poll::Ready(Err(io::Error::other(
                         format!("lz4 frame finalize failed: {e}"),
                     )));
                 }
@@ -1092,7 +1087,7 @@ pub struct ZstdStream<S> {
 impl<S> ZstdStream<S> {
     pub fn new(inner: S) -> io::Result<Self> {
         let read_decoder = zstd::stream::raw::Decoder::new()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+            .map_err(io::Error::other)?;
         Ok(Self {
             inner,
             read_decoder,
@@ -1300,7 +1295,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ZstdStream<S> {
                 )));
             }
             let framed = zstd::bulk::compress(buf, 0).map_err(|e| {
-                io::Error::new(io::ErrorKind::Other, format!("zstd compress failed: {e}"))
+                io::Error::other(format!("zstd compress failed: {e}"))
             })?;
             this.write_pending_frame = framed;
             this.write_pending_pos = 0;
