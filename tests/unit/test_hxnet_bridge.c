@@ -63,9 +63,20 @@ void hx_rcv_hdr (struct htlc_conn *htlc);
 void hx_htlc_close (struct htlc_conn *htlc, int expected);
 void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
 void debug_log (const char *cat, const char *fmt, ...);
+void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
+{
+    (void) htlc;
+    g_assert_not_reached ();
+}
+
+/* Stub: bridge_on_state_cb calls this on LOGIN_SENDING, but these
+ * unit tests drive the header-pack / dispatch paths directly and
+ * never feed a LOGIN_SENDING state, so it should never fire. */
+void
+hx_orchestrator_register_login_task (struct htlc_conn *htlc)
 {
     (void) htlc;
     g_assert_not_reached ();
