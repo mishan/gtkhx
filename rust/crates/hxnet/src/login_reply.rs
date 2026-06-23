@@ -127,6 +127,7 @@ impl LoginReply {
 pub async fn recv_login_reply<S>(
     stream: &mut S,
     evt_tx: &mpsc::Sender<Event>,
+    tolerate_pre_task: bool,
 ) -> io::Result<LoginReply>
 where
     S: tokio::io::AsyncRead + Unpin,
@@ -141,123 +142,176 @@ where
         ));
     }
 
-    // Read the 22-byte header. Bounded by the handshake timeout so a
-    // server that goes silent after LOGIN doesn't wedge the connect
-    // (and the connect/login UI task) forever.
-    let mut hdr_buf = [0u8; hotline_proto::HL_HDR_LEN];
-    tokio::time::timeout(
-        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
-        stream.read_exact(&mut hdr_buf),
-    )
-    .await
-    .map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::TimedOut,
-            format!(
-                "LOGIN reply not received within {}s",
-                crate::HANDSHAKE_TIMEOUT_SECS
-            ),
-        )
-    })??;
+    // Read frames until the TASK login reply arrives. Older Mac
+    // servers (RetroMac, MacDomain) push session frames —
+    // USER_SELFINFO, AGREEMENT, BANNER — BEFORE the TASK reply; the
+    // legacy rcv.c dispatch loop is order-agnostic, so we mirror that:
+    // when `tolerate_pre_task` is set we replay each non-TASK frame to
+    // the C side (so rcv.c handles it exactly as it would on the legacy
+    // path) and keep reading. HOPE step replies pass `false` — that
+    // handshake is tight and a stray frame there is genuinely
+    // unexpected. Bounded so a server that never sends TASK can't spin
+    // forever.
+    const MAX_PRE_TASK_FRAMES: u32 = 32;
+    let mut pre_task_frames: u32 = 0;
 
-    // Decode with NO clamp (u32::MAX) so wire_len is the raw value,
-    // then refuse oversized frames by the raw wire_len. Passing
-    // MAX_BODY_LEN+2 would let decode_header_full clamp body_len and
-    // we'd read a truncated frame, leaving the remainder on the stream
-    // and desyncing the next header read. Same ceiling check as
-    // connection.rs::read_one_frame (wire_len includes the 2-byte hc).
-    let decoded = decode_header_full(&hdr_buf, u32::MAX).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            "LOGIN reply header didn't decode",
-        )
-    })?;
+    // One overall deadline for the whole login-reply step — including any
+    // pre-TASK frames an old Mac server pushes first — so the step is
+    // bounded by HANDSHAKE_TIMEOUT_SECS *total* rather than per-read. A
+    // per-read bound would let a server drip-feed up to MAX_PRE_TASK_FRAMES
+    // frames each just under the timeout and stretch the connect/login UI
+    // task to minutes.
+    let deadline = tokio::time::Instant::now()
+        + std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS);
 
-    if decoded.type_ != HTLS_HDR_TASK {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "LOGIN reply: expected HTLS_HDR_TASK (0x{:x}), got 0x{:x}",
-                HTLS_HDR_TASK, decoded.type_
-            ),
-        ));
-    }
+    loop {
+        // Read the 22-byte header. Bounded by the shared deadline so a
+        // server that goes silent (or drip-feeds frames) can't wedge the
+        // connect (and the connect/login UI task) past the timeout.
+        let mut hdr_buf = [0u8; hotline_proto::HL_HDR_LEN];
+        tokio::time::timeout_at(deadline, stream.read_exact(&mut hdr_buf))
+            .await
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "LOGIN reply not received within {}s",
+                        crate::HANDSHAKE_TIMEOUT_SECS
+                    ),
+                )
+            })??;
 
-    if decoded.wire_len > MAX_BODY_LEN + 2 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!(
-                "LOGIN reply wire_len {} exceeds limit {}",
-                decoded.wire_len,
-                MAX_BODY_LEN + 2
-            ),
-        ));
-    }
-
-    // Read the body. body_len is the *wire* body length (after
-    // header), which already excludes the hc-counted 2 bytes
-    // that the chunk parser handles internally.
-    let body_len = decoded.body_len as usize;
-    let mut body_buf = vec![0u8; hotline_proto::HL_HDR_LEN + body_len];
-    body_buf[..hotline_proto::HL_HDR_LEN].copy_from_slice(&hdr_buf);
-    if body_len > 0 {
-        // Bound the body read with the same handshake timeout as the
-        // header above: a server that sends a header advertising a
-        // body then stalls mid-body would otherwise hang the
-        // handshake forever. Every pre-frame read is bounded.
-        tokio::time::timeout(
-            std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS),
-            stream.read_exact(&mut body_buf[hotline_proto::HL_HDR_LEN..]),
-        )
-        .await
-        .map_err(|_| {
+        // Decode with NO clamp (u32::MAX) so wire_len is the raw value,
+        // then refuse oversized frames by the raw wire_len. Passing
+        // MAX_BODY_LEN+2 here would let decode_header_full clamp body_len
+        // and we'd read a truncated frame, leaving the remainder on the
+        // stream and desyncing the next header read — especially bad now
+        // that we loop and replay pre-TASK frames. Same ceiling check as
+        // connection.rs::read_one_frame (wire_len includes the 2-byte hc).
+        let decoded = decode_header_full(&hdr_buf, u32::MAX).ok_or_else(|| {
             io::Error::new(
-                io::ErrorKind::TimedOut,
-                format!(
-                    "LOGIN reply body not received within {}s",
-                    crate::HANDSHAKE_TIMEOUT_SECS
-                ),
+                io::ErrorKind::InvalidData,
+                "LOGIN reply header didn't decode",
             )
-        })??;
-    }
+        })?;
 
-    let mut reply = LoginReply {
-        flag: decoded.flag,
-        trans: decoded.trans,
-        ..Default::default()
-    };
-
-    // Walk the chunks. Empty body = no chunks; the loop is a no-op.
-    for chunk in ChunkIter::over_message(&body_buf, body_buf.len()) {
-        match chunk.tag {
-            TAG_ERROR_TEXT => reply.error_text = Some(chunk.data.to_vec()),
-            TAG_LOGIN_ECHO => reply.login_echo = Some(chunk.data.to_vec()),
-            TAG_SESSIONKEY => reply.sessionkey = Some(chunk.data.to_vec()),
-            TAG_MAC_ALG => reply.mac_alg = Some(chunk.data.to_vec()),
-            TAG_S_DATA_CIPHER_ALG => reply.cipher_alg = Some(chunk.data.to_vec()),
-            TAG_S_DATA_CIPHER_MODE => reply.cipher_mode = Some(chunk.data.to_vec()),
-            TAG_HOPE_APP_ID => reply.hope_app_id = Some(chunk.data.to_vec()),
-            TAG_HOPE_APP_STRING => reply.hope_app_string = Some(chunk.data.to_vec()),
-            // TAG_S_DATA_COMPRESS_ALG is deliberately NOT captured: the
-            // orchestrator advertises an empty compress_algs list in HOPE
-            // step 1 (see run_hope_lifecycle), so a conformant server
-            // never sends a compression choice here. If/when compression
-            // is wired end-to-end (advertise + apply in compose()), add a
-            // `compress_alg` field and capture it — see the note in
-            // hope::select_algorithms.
-            // Other chunks are ignored at this layer. The HOPE
-            // state machine in Phase F consumes the typed
-            // fields it cares about.
-            _ => {}
+        if decoded.wire_len > MAX_BODY_LEN + 2 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "LOGIN reply wire_len {} exceeds limit {}",
+                    decoded.wire_len,
+                    MAX_BODY_LEN + 2
+                ),
+            ));
         }
+
+        // Read the body. body_len is the *wire* body length (after
+        // header), which already excludes the hc-counted 2 bytes that
+        // the chunk parser handles internally.
+        let body_len = decoded.body_len as usize;
+        let mut body_buf = vec![0u8; hotline_proto::HL_HDR_LEN + body_len];
+        body_buf[..hotline_proto::HL_HDR_LEN].copy_from_slice(&hdr_buf);
+        if body_len > 0 {
+            // Same shared deadline bounds the body read: a server that
+            // advertises a body then stalls mid-body would otherwise hang
+            // the handshake. The whole loop (headers + bodies) is bounded
+            // by the single `deadline`.
+            tokio::time::timeout_at(
+                deadline,
+                stream.read_exact(&mut body_buf[hotline_proto::HL_HDR_LEN..]),
+            )
+            .await
+            .map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!(
+                        "LOGIN reply body not received within {}s",
+                        crate::HANDSHAKE_TIMEOUT_SECS
+                    ),
+                )
+            })??;
+        }
+
+        crate::proto_trace::trace(crate::proto_trace::Dir::In, &body_buf);
+
+        if decoded.type_ != HTLS_HDR_TASK {
+            // Not the login reply. On the plaintext path, replay this
+            // pre-login push to the C side and keep waiting for TASK.
+            if !tolerate_pre_task {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "LOGIN reply: expected HTLS_HDR_TASK (0x{:x}), got 0x{:x}",
+                        HTLS_HDR_TASK, decoded.type_
+                    ),
+                ));
+            }
+            match crate::frame::Frame::from_raw(&body_buf) {
+                Some(frame) => {
+                    if evt_tx.send(Event::Frame(frame)).await.is_err() {
+                        return Err(io::Error::other(
+                            "consumer dropped while replaying a pre-login frame",
+                        ));
+                    }
+                }
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "pre-login frame failed to decode for replay",
+                    ));
+                }
+            }
+            pre_task_frames += 1;
+            if pre_task_frames > MAX_PRE_TASK_FRAMES {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "no TASK login reply after {pre_task_frames} pre-TASK \
+                         frames (limit {MAX_PRE_TASK_FRAMES})"
+                    ),
+                ));
+            }
+            continue;
+        }
+
+        // This is the TASK login reply.
+        let mut reply = LoginReply {
+            flag: decoded.flag,
+            trans: decoded.trans,
+            ..Default::default()
+        };
+
+        // Walk the chunks. Empty body = no chunks; the loop is a no-op.
+        for chunk in ChunkIter::over_message(&body_buf, body_buf.len()) {
+            match chunk.tag {
+                TAG_ERROR_TEXT => reply.error_text = Some(chunk.data.to_vec()),
+                TAG_LOGIN_ECHO => reply.login_echo = Some(chunk.data.to_vec()),
+                TAG_SESSIONKEY => reply.sessionkey = Some(chunk.data.to_vec()),
+                TAG_MAC_ALG => reply.mac_alg = Some(chunk.data.to_vec()),
+                TAG_S_DATA_CIPHER_ALG => reply.cipher_alg = Some(chunk.data.to_vec()),
+                TAG_S_DATA_CIPHER_MODE => reply.cipher_mode = Some(chunk.data.to_vec()),
+                TAG_HOPE_APP_ID => reply.hope_app_id = Some(chunk.data.to_vec()),
+                TAG_HOPE_APP_STRING => reply.hope_app_string = Some(chunk.data.to_vec()),
+                // TAG_S_DATA_COMPRESS_ALG is deliberately NOT captured:
+                // the orchestrator advertises an empty compress_algs list
+                // in HOPE step 1 (see run_hope_lifecycle), so a conformant
+                // server never sends a compression choice here. If/when
+                // compression is wired end-to-end (advertise + apply in
+                // compose()), add a `compress_alg` field and capture it —
+                // see the note in hope::select_algorithms.
+                // Other chunks are ignored at this layer. The HOPE
+                // state machine in Phase F consumes the typed fields it
+                // cares about.
+                _ => {}
+            }
+        }
+
+        // Retain the full wire frame (header + body) for the Phase G
+        // replay path.
+        reply.raw_frame = body_buf;
+        return Ok(reply);
     }
-
-    // Retain the full wire frame (header + body) for the Phase G
-    // replay path. The chunk walk above borrowed body_buf
-    // immutably; that borrow has ended, so we can move it in here.
-    reply.raw_frame = body_buf;
-
-    Ok(reply)
 }
 
 #[cfg(test)]
@@ -286,7 +340,7 @@ mod tests {
             server.write_all(&reply_bytes).await.expect("write");
         });
 
-        let reply = recv_login_reply(&mut client, &evt_tx).await.expect("recv");
+        let reply = recv_login_reply(&mut client, &evt_tx, true).await.expect("recv");
         assert!(reply.is_success());
         assert!(!reply.has_hope_handshake());
         assert!(reply.error_text.is_none());
@@ -323,7 +377,7 @@ mod tests {
             server.write_all(&reply_bytes).await.expect("write");
         });
 
-        let reply = recv_login_reply(&mut client, &evt_tx).await.expect("recv");
+        let reply = recv_login_reply(&mut client, &evt_tx, true).await.expect("recv");
         assert!(!reply.is_success());
         assert_eq!(reply.flag, 1);
         assert_eq!(reply.error_text.as_deref(), Some(b"login incorrect" as &[u8]));
@@ -362,7 +416,7 @@ mod tests {
             server.write_all(&reply_bytes).await.expect("write");
         });
 
-        let reply = recv_login_reply(&mut client, &evt_tx).await.expect("recv");
+        let reply = recv_login_reply(&mut client, &evt_tx, false).await.expect("recv");
         assert!(reply.is_success());
         assert!(reply.has_hope_handshake());
         assert_eq!(reply.sessionkey.as_deref(), Some(b"\x12\x34\x56\x78" as &[u8]));
@@ -394,9 +448,61 @@ mod tests {
             server.write_all(&wrong).await.expect("write");
         });
 
-        let err = recv_login_reply(&mut client, &evt_tx).await.unwrap_err();
+        // tolerate_pre_task=false (HOPE-style strict): a non-TASK frame
+        // is an error.
+        let err = recv_login_reply(&mut client, &evt_tx, false)
+            .await
+            .unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::InvalidData);
         let msg = err.to_string();
         assert!(msg.contains("expected HTLS_HDR_TASK"), "got: {msg}");
+    }
+
+    /// Older Mac servers (RetroMac, MacDomain) push USER_SELFINFO
+    /// before the TASK login reply. With tolerate_pre_task=true the
+    /// pre-TASK frame is replayed to the consumer as an Event::Frame
+    /// and the loop keeps reading until the TASK reply arrives.
+    /// Regression guard for the "expected HTLS_HDR_TASK, got 0x162"
+    /// connect failure.
+    #[tokio::test]
+    async fn recv_login_reply_tolerates_selfinfo_before_task() {
+        const HTLS_HDR_USER_SELFINFO: u32 = 0x0000_0162;
+        let (mut client, mut server) = duplex(512);
+        let (evt_tx, mut evt_rx) = mpsc::channel(8);
+
+        // SELFINFO first (no chunks needed for the test), then the
+        // real TASK login reply.
+        let selfinfo = {
+            let needed = pack_message_size(&[]);
+            let mut b = vec![0u8; needed];
+            pack_message(&mut b, HTLS_HDR_USER_SELFINFO, 0, 0, &[]).expect("pack");
+            b
+        };
+        let task = build_task_reply(0, &[]);
+
+        tokio::spawn(async move {
+            server.write_all(&selfinfo).await.expect("write selfinfo");
+            server.write_all(&task).await.expect("write task");
+        });
+
+        let reply = recv_login_reply(&mut client, &evt_tx, true)
+            .await
+            .expect("recv");
+        assert!(reply.is_success(), "TASK reply after SELFINFO succeeds");
+
+        // The SELFINFO frame was replayed for the C side to dispatch.
+        // (LoginReplyWait state is also emitted; filter to the frame.)
+        let mut saw_selfinfo = false;
+        while let Ok(evt) = evt_rx.try_recv() {
+            if let Event::Frame(f) = evt {
+                if f.header.type_ == HTLS_HDR_USER_SELFINFO {
+                    saw_selfinfo = true;
+                }
+            }
+        }
+        assert!(
+            saw_selfinfo,
+            "pre-TASK USER_SELFINFO must be replayed as an Event::Frame"
+        );
     }
 }

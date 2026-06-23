@@ -267,7 +267,10 @@ async fn run_plaintext_over<S>(
     }
 
     // Phase E: LOGIN reply receive.
-    let reply = match recv_login_reply(&mut stream, &evt_tx).await {
+    // tolerate_pre_task = true: plaintext servers (RetroMac, MacDomain)
+    // may send USER_SELFINFO / AGREEMENT before the TASK login reply;
+    // replay those and keep waiting for TASK, like the legacy rcv loop.
+    let reply = match recv_login_reply(&mut stream, &evt_tx, true).await {
         Ok(r) => r,
         Err(e) => {
             let _ = evt_tx
@@ -455,7 +458,9 @@ pub async fn run_hope_lifecycle(
         bail!("hope step1 flush: {e}");
     }
 
-    let step1_reply = match recv_login_reply(&mut stream, &evt_tx).await {
+    // HOPE handshake is tight — the step-1 reply is the next frame, no
+    // pre-TASK session pushes; keep it strict (tolerate_pre_task=false).
+    let step1_reply = match recv_login_reply(&mut stream, &evt_tx, false).await {
         Ok(r) => r,
         Err(e) => bail!("hope step1 reply: {e}"),
     };
@@ -596,7 +601,9 @@ pub async fn run_hope_lifecycle(
     };
 
     // ---- step-2 reply, read THROUGH the cipher (encrypted) ----
-    let step2_reply = match recv_login_reply(&mut wrapped, &evt_tx).await {
+    // HOPE step-2 reply is the next frame over the now-encrypted
+    // transport; keep it strict (tolerate_pre_task=false).
+    let step2_reply = match recv_login_reply(&mut wrapped, &evt_tx, false).await {
         Ok(r) => r,
         Err(e) => bail!("hope step2 reply: {e}"),
     };
