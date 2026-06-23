@@ -353,8 +353,8 @@ pub struct ChatSubjectRequest<'a> {
     pub subject: &'a [u8],
 }
 
-/// Build chunks for `HTLC_HDR_CHAT_SUBJECT` — `HTLC_DATA_CHAT_ID` (u32)
-/// + `HTLC_DATA_CHAT_SUBJECT` (bytes). 2 chunks; `chunks_cap >= 2`,
+/// Build chunks for `HTLC_HDR_CHAT_SUBJECT` — `HTLC_DATA_CHAT_ID` (u32) +
+/// `HTLC_DATA_CHAT_SUBJECT` (bytes). 2 chunks; `chunks_cap >= 2`,
 /// `scratch_cap >= 4`. Also rejects `subject.len() > u16::MAX` (the
 /// wire chunk length is 16-bit; without this check a 65 KiB subject
 /// would silently wrap and emit an invalid chunk).

@@ -151,18 +151,17 @@ pub fn parse_selfinfo(buf: &[u8], len: usize) -> SelfInfo<'_> {
 
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
-            tag::ACCESS => {
-                if chunk.data.len() == 8 {
+            tag::ACCESS
+                if chunk.data.len() == 8 => {
                     let mut a = [0u8; 8];
                     a.copy_from_slice(chunk.data);
                     out.access = u64::from_be_bytes(a);
                     out.seen |= SELFINFO_ACCESS;
                 }
-            }
-            tag::USER_LIST => {
+            tag::USER_LIST
                 // hl_userlist_hdr minus the data header: uid(2) icon(2)
                 // color(2) nlen(2) name[]. Need at least the fixed 8 bytes.
-                if chunk.data.len() >= 8 {
+                if chunk.data.len() >= 8 => {
                     let d = chunk.data;
                     out.uid = u16::from_be_bytes([d[0], d[1]]);
                     out.icon = u16::from_be_bytes([d[2], d[3]]);
@@ -175,13 +174,11 @@ pub fn parse_selfinfo(buf: &[u8], len: usize) -> SelfInfo<'_> {
                     out.cached_name = &d[8..8 + nlen];
                     out.seen |= SELFINFO_USER_LIST;
                 }
-            }
-            tag::COLOR => {
-                if chunk.data.len() == 4 {
+            tag::COLOR
+                if chunk.data.len() == 4 => {
                     out.nick_color = chunk.as_uint();
                     out.seen |= SELFINFO_NICK_COLOR;
                 }
-            }
             _ => {}
         }
     }
@@ -373,12 +370,11 @@ pub fn parse_banner(buf: &[u8], len: usize, max_url: usize) -> Banner {
 
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
-            tag::BANNER_TYPE => {
-                if chunk.data.len() == 4 {
+            tag::BANNER_TYPE
+                if chunk.data.len() == 4 => {
                     out.type_code.copy_from_slice(chunk.data);
                     out.got_type = true;
                 }
-            }
             tag::BANNER_URL => {
                 let take = chunk.data.len().min(max_url);
                 out.url = Some(chunk.data[..take].to_vec());
@@ -804,8 +800,8 @@ pub fn parse_file_list_entry(data: &[u8], off: usize) -> Option<(FileListEntry<'
 //     [10]     u8     — server name length N
 //   (name + desc come on separate reads in the async state machine.)
 
-/// Parsed fixed portion of one HTRK server record. The variable name
-/// + description bytes come on separate reads — the Rust parser only
+/// Parsed fixed portion of one HTRK server record. The variable name +
+/// description bytes come on separate reads — the Rust parser only
 /// covers the 11-byte fixed prefix, same split as the C extractor.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TrackerRecordFixed {
@@ -1036,7 +1032,7 @@ pub fn parse_tracker_v3_record(
     let mut pos: usize = 0;
 
     // 1 byte address type.
-    if rest.len() < 1 {
+    if rest.is_empty() {
         return None;
     }
     let addr_type = rest[pos];
@@ -1706,14 +1702,13 @@ pub fn parse_user_change(buf: &[u8], len: usize, max_name: usize) -> UserChange 
                 out.color = chunk.as_uint() as u16;
                 out.got_color = true;
             }
-            tag::COLOR => {
+            tag::COLOR
                 // Colored-Nicknames spec pins this field to exactly 4
                 // bytes (BE u32); reject any other width as malformed.
-                if chunk.data.len() == 4 {
+                if chunk.data.len() == 4 => {
                     out.nick_color = chunk.as_uint();
                     out.got_nick_color = true;
                 }
-            }
             tag::CHAT_ID => out.cid = chunk.as_uint(),
             _ => {}
         }
@@ -1911,12 +1906,11 @@ pub fn parse_account_read(
                     out.pass.clear();
                 }
             }
-            tag::ACCESS => {
-                if chunk.data.len() >= 8 {
+            tag::ACCESS
+                if chunk.data.len() >= 8 => {
                     out.access.copy_from_slice(&chunk.data[..8]);
                     out.got_access = true;
                 }
-            }
             _ => {}
         }
     }
@@ -2055,8 +2049,8 @@ pub fn parse_file_put_reply(buf: &[u8], len: usize) -> FilePutReply {
         match chunk.tag {
             tag::HTXF_REF => out.ref_ = chunk.as_uint(),
             tag::QUEUE => out.queue = chunk.as_uint(),
-            tag::RFLT => {
-                if chunk.data.len() >= 66 {
+            tag::RFLT
+                if chunk.data.len() >= 66 => {
                     out.data_pos = u32::from_be_bytes([
                         chunk.data[46],
                         chunk.data[47],
@@ -2070,7 +2064,6 @@ pub fn parse_file_put_reply(buf: &[u8], len: usize) -> FilePutReply {
                         chunk.data[65],
                     ]);
                 }
-            }
             _ => {}
         }
     }
@@ -2126,8 +2119,8 @@ pub fn parse_banner_get_reply(buf: &[u8], len: usize) -> BannerGetReply {
 /// `rcv_task_file_getinfo`). Mirrors the C extractor field-for-field.
 ///
 /// Strings are NOT NUL-terminated here — capping + termination happens
-/// at the FFI boundary. `name` is `strip_ansi`'d; `comment` is CR2LF
-/// + `strip_ansi`'d (multi-line). `type_` / `creator` are 4-byte
+/// at the FFI boundary. `name` is `strip_ansi`'d; `comment` is CR2LF +
+/// `strip_ansi`'d (multi-line). `type_` / `creator` are 4-byte
 /// HFS-style codes (or shorter if the server emitted fewer bytes);
 /// the C extractor copies up to 31 bytes and NUL-terminates, but in
 /// practice servers send exactly 4. We expose the raw bytes here and
@@ -2175,12 +2168,11 @@ pub fn parse_file_getinfo(
     let mut out = FileGetInfo::default();
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
-            tag::FILE_ICON => {
-                if chunk.data.len() >= 4 {
+            tag::FILE_ICON
+                if chunk.data.len() >= 4 => {
                     out.icon.copy_from_slice(&chunk.data[..4]);
                     out.got_icon = true;
                 }
-            }
             tag::FILE_TYPE => {
                 let take = chunk.data.len().min(max_type);
                 out.type_ = chunk.data[..take].to_vec();
@@ -2200,16 +2192,14 @@ pub fn parse_file_getinfo(
                 let take = chunk.data.len().min(max_name);
                 out.name = chunk.data[..take].to_vec();
             }
-            tag::FILE_DATE_CREATE => {
-                if chunk.data.len() >= 8 {
+            tag::FILE_DATE_CREATE
+                if chunk.data.len() >= 8 => {
                     out.date_create.copy_from_slice(&chunk.data[..8]);
                 }
-            }
-            tag::FILE_DATE_MODIFY => {
-                if chunk.data.len() >= 8 {
+            tag::FILE_DATE_MODIFY
+                if chunk.data.len() >= 8 => {
                     out.date_modify.copy_from_slice(&chunk.data[..8]);
                 }
-            }
             tag::FILE_COMMENT => {
                 let take = chunk.data.len().min(max_comment);
                 out.comment = chunk.data[..take].to_vec();
@@ -2559,7 +2549,7 @@ mod tests {
         // Server sends nlen=100 with 100 bytes available, but
         // caller's max_name=10. We get 10 bytes.
         let mut name = Vec::new();
-        name.extend(std::iter::repeat(b'x').take(100));
+        name.extend(std::iter::repeat_n(b'x', 100));
         let body = user_list_body(1, 0, 0, 100, &name, None);
         let r = parse_user_list_record(&body, 10).expect("ok");
         assert_eq!(r.name.len(), 10);
@@ -3955,7 +3945,7 @@ mod tests {
         data.extend_from_slice(&2u16.to_be_bytes());
         data.extend_from_slice(&0u16.to_be_bytes());
         data.push(200u8);
-        data.extend_from_slice(&vec![b'x'; 200]);
+        data.extend_from_slice(&[b'x'; 200]);
         let e = parse_news_categoryitem(&data, 16).expect("ok");
         assert_eq!(e.name.len(), 16);
     }
@@ -4382,8 +4372,8 @@ mod tests {
 
     #[test]
     fn account_read_caps_login_and_pass_at_max() {
-        let long = xor_ff(&vec![b'l'; 200]);
-        let long_pw = xor_ff(&vec![b'p'; 200]);
+        let long = xor_ff(&[b'l'; 200]);
+        let long_pw = xor_ff(&[b'p'; 200]);
         let mut body = Vec::new();
         body.extend(chunk(tag::LOGIN, &long));
         body.extend(chunk(tag::PASSWORD, &long_pw));
