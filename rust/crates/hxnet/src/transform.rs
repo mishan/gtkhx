@@ -198,6 +198,36 @@ where
         CipherLayer::Blowfish { read_state, write_state } => Box::new(
             crate::cipher::BlowfishStream::new(inner, read_state, write_state),
         ),
+        CipherLayer::HopeBlowfish {
+            read_state,
+            read_key,
+            write_state,
+            write_key,
+            session_key,
+            macalg,
+        } => {
+            // Mirror the legacy C send path's
+            // `compress_encode_type == COMPRESS_NONE` gate
+            // around the HOPE per-message rekey marker
+            // (src/cipher.c::cipher_check_rekey_marker). The
+            // marker is wire-incompatible with a compression
+            // layer on top because pre-spec servers don't
+            // expect a marker byte when they negotiated
+            // compression on. Read side still detects+strips
+            // incoming markers either way — servers that
+            // ignore this rule are honored.
+            let write_marker_enabled = matches!(compression, CompressionKind::None);
+            Box::new(crate::hope_blowfish::HopeBlowfishStream::new(
+                inner,
+                read_state,
+                read_key,
+                write_state,
+                write_key,
+                session_key,
+                macalg,
+                write_marker_enabled,
+            ))
+        }
         CipherLayer::ChaCha20Poly1305 { read, write } => {
             Box::new(crate::cipher::AeadStream::new(inner, read, write))
         }
@@ -230,6 +260,21 @@ pub enum CipherLayer {
     Blowfish {
         read_state: hxcrypto_stream::BlowfishOfb64State,
         write_state: hxcrypto_stream::BlowfishOfb64State,
+    },
+    /// HOPE-aware Blowfish-OFB-64. Same OFB primitive as
+    /// [`Self::Blowfish`] but the resulting transport carries the
+    /// per-message rekey marker logic
+    /// ([`crate::hope_blowfish::HopeBlowfishStream`]). The
+    /// session key and HMAC algorithm are passed in so the
+    /// adapter can run the same HMAC iteration loop the legacy C
+    /// `cipher_change_decode_key` runs.
+    HopeBlowfish {
+        read_state: hxcrypto_stream::BlowfishOfb64State,
+        read_key: Vec<u8>,
+        write_state: hxcrypto_stream::BlowfishOfb64State,
+        write_key: Vec<u8>,
+        session_key: Vec<u8>,
+        macalg: crate::hope_blowfish::HopeMacAlg,
     },
     /// ChaCha20-Poly1305 with independent per-direction state
     /// (each direction has its own key, counter, and AEAD dir

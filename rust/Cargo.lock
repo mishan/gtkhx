@@ -1465,10 +1465,12 @@ version = "0.1.0"
 dependencies = [
  "async-channel",
  "flate2",
+ "getrandom 0.3.4",
  "glib",
  "hotline-proto",
  "hxbridge",
  "hxcrypto-aead",
+ "hxcrypto-hash",
  "hxcrypto-stream",
  "lz4_flex",
  "tokio",
