@@ -54,9 +54,7 @@ use tokio_rustls::rustls::client::danger::{
 use tokio_rustls::rustls::client::WebPkiServerVerifier;
 use tokio_rustls::rustls::crypto::ring;
 use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName, UnixTime};
-use tokio_rustls::rustls::{
-    ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme,
-};
+use tokio_rustls::rustls::{ClientConfig, DigitallySignedStruct, RootCertStore, SignatureScheme};
 use tokio_rustls::TlsConnector;
 
 /// Certificate verifier that runs WebPKI validation against the
@@ -200,7 +198,10 @@ pub(crate) fn webpki_client_config() -> (ClientConfig, Arc<AtomicBool>) {
                 "TLS: WebPKI verifier could not be built (no usable \
                  roots); all certs route to TOFU"
             );
-            Arc::new(AlwaysTofu { webpki_ok: webpki_ok.clone(), provider: provider.clone() })
+            Arc::new(AlwaysTofu {
+                webpki_ok: webpki_ok.clone(),
+                provider: provider.clone(),
+            })
         }
     };
 

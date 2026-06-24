@@ -31,7 +31,9 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 /// matches right's read cipher (and vice versa), so anything
 /// left writes becomes plaintext when right reads, and same the
 /// other direction.
-fn blowfish_pair(key: &[u8]) -> (
+fn blowfish_pair(
+    key: &[u8],
+) -> (
     BlowfishStream<tokio::io::DuplexStream>,
     BlowfishStream<tokio::io::DuplexStream>,
 ) {
@@ -151,7 +153,9 @@ async fn blowfish_multi_write_state_persists_across_calls() {
 /// `dir`-tagged so the nonce sequences don't collide — we use
 /// the spec's `client_to_server` byte for the writer's nonce
 /// direction and `server_to_client` for the reader's.
-fn aead_pair(key: [u8; 32]) -> (
+fn aead_pair(
+    key: [u8; 32],
+) -> (
     AeadStream<tokio::io::DuplexStream>,
     AeadStream<tokio::io::DuplexStream>,
 ) {
@@ -279,10 +283,7 @@ async fn aead_oversized_length_prefix_rejected() {
     // cap (max + 1). The adapter sees this on its read path
     // and should reject.
     let bad_len = hxcrypto_aead::AEAD_MAX_FRAME_SIZE + 1;
-    server_side
-        .write_all(&bad_len.to_be_bytes())
-        .await
-        .unwrap();
+    server_side.write_all(&bad_len.to_be_bytes()).await.unwrap();
 
     let mut sink = [0u8; 16];
     let err = adapter.read(&mut sink).await.unwrap_err();
@@ -316,10 +317,7 @@ async fn aead_truncated_body_surfaces_unexpected_eof() {
     // drop. The adapter expects 100 body bytes but only sees
     // 10 before EOF.
     let claimed: u32 = 100;
-    server_side
-        .write_all(&claimed.to_be_bytes())
-        .await
-        .unwrap();
+    server_side.write_all(&claimed.to_be_bytes()).await.unwrap();
     server_side.write_all(&[0u8; 10]).await.unwrap();
     drop(server_side);
 
@@ -362,16 +360,10 @@ impl AsyncWrite for AlwaysPendingWriter {
     ) -> Poll<Result<usize, io::Error>> {
         Poll::Pending
     }
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
     }
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -412,16 +404,10 @@ impl AsyncWrite for PartialWriter {
             Poll::Pending
         }
     }
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
     }
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        _cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Poll::Ready(Ok(()))
     }
 }
@@ -438,7 +424,11 @@ async fn blowfish_partial_write_advances_state_by_accepted_count() {
     // positions and the decrypt would garble.
     let key = b"partial-write-key";
     let mut adapter = BlowfishStream::new(
-        PartialWriter { first_accepted: 5, seen: Vec::new(), calls: 0 },
+        PartialWriter {
+            first_accepted: 5,
+            seen: Vec::new(),
+            calls: 0,
+        },
         BlowfishOfb64State::new(key).unwrap(),
         BlowfishOfb64State::new(key).unwrap(),
     );
@@ -486,10 +476,26 @@ async fn aead_pending_inner_seals_exactly_once_per_frame() {
     // Build a paired AeadStream: server's read_state mirrors
     // client's write_state.
     let (a, b) = tokio::io::duplex(64 * 1024);
-    let left_write = AeadState { key, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
-    let left_read = AeadState { key, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
-    let right_write = AeadState { key, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
-    let right_read = AeadState { key, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
+    let left_write = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_CLIENT_TO_SERVER,
+    };
+    let left_read = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_SERVER_TO_CLIENT,
+    };
+    let right_write = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_SERVER_TO_CLIENT,
+    };
+    let right_read = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_CLIENT_TO_SERVER,
+    };
     let mut left = AeadStream::new(a, left_read, left_write);
     let mut right = AeadStream::new(b, right_read, right_write);
 
@@ -510,8 +516,16 @@ async fn aead_pending_inner_seals_exactly_once_per_frame() {
     // bogus Ready result on the way out.
     let pending_left = AeadStream::new(
         AlwaysPendingWriter,
-        AeadState { key, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT },
-        AeadState { key, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER },
+        AeadState {
+            key,
+            counter: 0,
+            dir: AEAD_DIR_SERVER_TO_CLIENT,
+        },
+        AeadState {
+            key,
+            counter: 0,
+            dir: AEAD_DIR_CLIENT_TO_SERVER,
+        },
     );
     let mut pending_left = pending_left;
     let waker = futures_noop_waker();
@@ -603,16 +617,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ChunkingWrapper<S> {
         let take = buf.len().min(this.chunk);
         Pin::new(&mut this.inner).poll_write(cx, &buf[..take])
     }
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
@@ -626,10 +634,26 @@ async fn aead_round_trip_under_chunking_backpressure() {
     // fails on the second poll's bytes.
     let key = [0xCDu8; 32];
     let (a, b) = tokio::io::duplex(32);
-    let left_write = AeadState { key, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
-    let left_read = AeadState { key, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
-    let right_write = AeadState { key, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
-    let right_read = AeadState { key, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
+    let left_write = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_CLIENT_TO_SERVER,
+    };
+    let left_read = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_SERVER_TO_CLIENT,
+    };
+    let right_write = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_SERVER_TO_CLIENT,
+    };
+    let right_read = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_CLIENT_TO_SERVER,
+    };
     let mut left = AeadStream::new(ChunkingWrapper::new(a, 7), left_read, left_write);
     let mut right = AeadStream::new(ChunkingWrapper::new(b, 5), right_read, right_write);
 
@@ -659,8 +683,16 @@ async fn aead_oversized_plaintext_rejected_with_invalid_input() {
     // anyway.
     let key = [0u8; 32];
     let (_server, client) = tokio::io::duplex(64);
-    let read_state = AeadState { key, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
-    let write_state = AeadState { key, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
+    let read_state = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_SERVER_TO_CLIENT,
+    };
+    let write_state = AeadState {
+        key,
+        counter: 0,
+        dir: AEAD_DIR_CLIENT_TO_SERVER,
+    };
     let mut adapter = AeadStream::new(client, read_state, write_state);
 
     // Build an oversized plaintext. AEAD_MAX_FRAME_SIZE caps

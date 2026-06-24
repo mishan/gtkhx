@@ -70,8 +70,8 @@ pub mod ffi;
 pub mod frame;
 pub mod hope;
 pub mod hope_blowfish;
-pub mod htxf;
 pub mod hope_keys;
+pub mod htxf;
 pub mod lifecycle;
 pub mod login;
 pub mod login_reply;
@@ -93,6 +93,5 @@ pub use connection::{Connection, ConnectionHandle, SpawnError};
 pub use event::{ConnectionState, Event, ShutdownReason};
 pub use frame::{Frame, MAX_BODY_LEN};
 pub use transform::{
-    compose, AsyncDuplex, BoxedDuplex, CipherKind, CipherLayer, CompressionKind,
-    TransformStack,
+    compose, AsyncDuplex, BoxedDuplex, CipherKind, CipherLayer, CompressionKind, TransformStack,
 };

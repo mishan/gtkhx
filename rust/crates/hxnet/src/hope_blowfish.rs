@@ -78,7 +78,6 @@ impl HopeMacAlg {
             HopeMacAlg::Md5 => "HMAC-MD5",
         }
     }
-
 }
 
 /// Rotate `key` in place by `iterations` HMAC rounds against
@@ -175,7 +174,10 @@ impl HopeRng for OsRng {
 enum ReadState {
     /// Accumulating bytes for the next header. `pos` is the
     /// count already inside `header_buf`.
-    Header { pos: usize, header_buf: [u8; HL_HDR_SIZE] },
+    Header {
+        pos: usize,
+        header_buf: [u8; HL_HDR_SIZE],
+    },
     /// Accumulating body bytes. `remaining` is what's still to
     /// come from inner.
     Body { remaining: usize },
@@ -188,7 +190,10 @@ enum WriteState {
     /// `pos` is the count already inside `plaintext_buf`.
     /// `frame_len` is `Some` once we've seen the full header
     /// (and therefore know how many body bytes to expect).
-    AccumulateFrame { pos: usize, frame_len: Option<usize> },
+    AccumulateFrame {
+        pos: usize,
+        frame_len: Option<usize>,
+    },
     /// Encrypted bytes ready to push to the inner stream.
     DrainCiphertext,
 }
@@ -344,7 +349,10 @@ impl<S, R: HopeRng> HopeBlowfishStream<S, R> {
         if new_len == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("hope_blowfish: HMAC rotation failed (alg={:?})", self.macalg),
+                format!(
+                    "hope_blowfish: HMAC rotation failed (alg={:?})",
+                    self.macalg
+                ),
             ));
         }
         if !self.read_state.set_key(&self.read_key) {
@@ -367,7 +375,10 @@ impl<S, R: HopeRng> HopeBlowfishStream<S, R> {
         if new_len == 0 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("hope_blowfish: HMAC rotation failed (alg={:?})", self.macalg),
+                format!(
+                    "hope_blowfish: HMAC rotation failed (alg={:?})",
+                    self.macalg
+                ),
             ));
         }
         if !self.write_state.set_key(&self.write_key) {
@@ -471,9 +482,7 @@ impl<S: AsyncRead + Unpin, R: HopeRng + Unpin> AsyncRead for HopeBlowfishStream<
                     ReadState::Body { remaining } => {
                         return Poll::Ready(Err(io::Error::new(
                             io::ErrorKind::UnexpectedEof,
-                            format!(
-                                "hope_blowfish: EOF mid-frame (Body remaining={remaining})"
-                            ),
+                            format!("hope_blowfish: EOF mid-frame (Body remaining={remaining})"),
                         )));
                     }
                 }
@@ -492,8 +501,7 @@ impl<S: AsyncRead + Unpin, R: HopeRng + Unpin> AsyncRead for HopeBlowfishStream<
                     ref mut pos,
                     ref mut header_buf,
                 } => {
-                    header_buf[*pos..*pos + got]
-                        .copy_from_slice(&scratch[..got]);
+                    header_buf[*pos..*pos + got].copy_from_slice(&scratch[..got]);
                     *pos += got;
                     if *pos == HL_HDR_SIZE {
                         // Header complete. Inspect the marker
@@ -525,9 +533,8 @@ impl<S: AsyncRead + Unpin, R: HopeRng + Unpin> AsyncRead for HopeBlowfishStream<
                         // desyncs the frame boundary (and the
                         // rekey rotation boundary with it) —
                         // not what we want.
-                        let wire_len = u32::from_be_bytes([
-                            hdr[12], hdr[13], hdr[14], hdr[15],
-                        ]) as usize;
+                        let wire_len =
+                            u32::from_be_bytes([hdr[12], hdr[13], hdr[14], hdr[15]]) as usize;
                         if wire_len < HC_SIZE {
                             return Poll::Ready(Err(io::Error::new(
                                 io::ErrorKind::InvalidData,
@@ -788,7 +795,8 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         // will be replaced with a fresh empty Vec for the next
         // frame's accumulation.
         let mut ciphertext = std::mem::take(&mut this.write_plaintext);
-        this.write_state.crypt_in_place(&mut ciphertext[..HL_HDR_SIZE]);
+        this.write_state
+            .crypt_in_place(&mut ciphertext[..HL_HDR_SIZE]);
 
         if fire {
             // ...rotate before encrypting the body.
@@ -806,7 +814,8 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         }
 
         // Encrypt the body.
-        this.write_state.crypt_in_place(&mut ciphertext[HL_HDR_SIZE..]);
+        this.write_state
+            .crypt_in_place(&mut ciphertext[HL_HDR_SIZE..]);
 
         // Stash ciphertext for draining and switch state. The
         // plaintext slot was emptied by `mem::take` above —
@@ -823,10 +832,7 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         Poll::Ready(Ok(take))
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
         // Drain any in-flight ciphertext before reporting flush
         // success. If we reported flushed-while-buffered, the
@@ -852,10 +858,7 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
         Pin::new(&mut this.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<io::Result<()>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<io::Result<()>> {
         let this = self.get_mut();
         if matches!(this.write_sm, WriteState::DrainCiphertext) {
             match drain_pending_ciphertext(
@@ -914,7 +917,7 @@ fn drain_pending_ciphertext<I: AsyncWrite + Unpin>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{AsyncReadExt, AsyncWriteExt, duplex};
+    use tokio::io::{duplex, AsyncReadExt, AsyncWriteExt};
 
     /// Test RNG: never fires the marker. Useful when we only
     /// want to exercise the framing-without-rekey path.
@@ -965,14 +968,10 @@ mod tests {
         let write_key = b"client-write-key-32bytes-padding".to_vec();
         let session_key = b"session-key-bytes-128bit--------".to_vec();
 
-        let client_read_state =
-            BlowfishOfb64State::new(&read_key).expect("read key valid");
-        let client_write_state =
-            BlowfishOfb64State::new(&write_key).expect("write key valid");
-        let server_read_state =
-            BlowfishOfb64State::new(&write_key).expect("write key valid");
-        let server_write_state =
-            BlowfishOfb64State::new(&read_key).expect("read key valid");
+        let client_read_state = BlowfishOfb64State::new(&read_key).expect("read key valid");
+        let client_write_state = BlowfishOfb64State::new(&write_key).expect("write key valid");
+        let server_read_state = BlowfishOfb64State::new(&write_key).expect("write key valid");
+        let server_write_state = BlowfishOfb64State::new(&read_key).expect("read key valid");
 
         let client = HopeBlowfishStream::with_rng(
             a,
@@ -1023,18 +1022,14 @@ mod tests {
 
     #[tokio::test]
     async fn round_trip_no_marker_single_frame() {
-        let (mut client, mut server) =
-            make_streams(NoMarkerRng, NoMarkerRng);
+        let (mut client, mut server) = make_streams(NoMarkerRng, NoMarkerRng);
         let frame = make_frame(0x6b, 1, b"hello world");
 
         client.write_all(&frame).await.expect("write_all");
         client.flush().await.expect("flush");
 
         let mut received = vec![0u8; frame.len()];
-        server
-            .read_exact(&mut received)
-            .await
-            .expect("read_exact");
+        server.read_exact(&mut received).await.expect("read_exact");
         assert_eq!(received, frame);
     }
 
@@ -1060,8 +1055,7 @@ mod tests {
     /// frame's header.
     #[tokio::test]
     async fn round_trip_empty_body_frames_back_to_back() {
-        let (mut client, mut server) =
-            make_streams(NoMarkerRng, NoMarkerRng);
+        let (mut client, mut server) = make_streams(NoMarkerRng, NoMarkerRng);
 
         // Frame 1: empty body. `body_len = 0`, wire `len = 2`
         // (just the hc). Same shape as a server TASK reply
@@ -1083,7 +1077,10 @@ mod tests {
         // and decrypted with the wrong expectation, causing
         // either a wrong body_len or an "EOF mid-frame" error.
         let frame_body = make_frame(0x6b, 2, b"follow-up-frame");
-        client.write_all(&frame_body).await.expect("write follow-up");
+        client
+            .write_all(&frame_body)
+            .await
+            .expect("write follow-up");
         client.flush().await.expect("flush follow-up");
 
         let mut received_body = vec![0u8; frame_body.len()];
@@ -1098,18 +1095,14 @@ mod tests {
     async fn round_trip_with_marker_rotates_both_sides() {
         // Client send-side fires the marker; server must
         // detect and rotate symmetrically.
-        let (mut client, mut server) =
-            make_streams(AlwaysMarkerRng { count: 5 }, NoMarkerRng);
+        let (mut client, mut server) = make_streams(AlwaysMarkerRng { count: 5 }, NoMarkerRng);
 
         let frame = make_frame(0x6b, 1, b"frame-with-rekey-body");
         client.write_all(&frame).await.expect("write_all");
         client.flush().await.expect("flush");
 
         let mut received = vec![0u8; frame.len()];
-        server
-            .read_exact(&mut received)
-            .await
-            .expect("read_exact");
+        server.read_exact(&mut received).await.expect("read_exact");
         // After the marker strip on the server side, what we
         // read should match the plaintext exactly.
         assert_eq!(received, frame);
@@ -1134,8 +1127,7 @@ mod tests {
         // Five frames in a row, every one fires the marker.
         // Catches state-machine bugs that only show up after
         // multiple rotations.
-        let (mut client, mut server) =
-            make_streams(AlwaysMarkerRng { count: 3 }, NoMarkerRng);
+        let (mut client, mut server) = make_streams(AlwaysMarkerRng { count: 3 }, NoMarkerRng);
 
         for i in 0..5u32 {
             let body = format!("frame-{i}-body");
@@ -1144,10 +1136,7 @@ mod tests {
             client.flush().await.expect("flush");
 
             let mut received = vec![0u8; frame.len()];
-            server
-                .read_exact(&mut received)
-                .await
-                .expect("read_exact");
+            server.read_exact(&mut received).await.expect("read_exact");
             assert_eq!(received, frame, "frame {i} mismatch");
         }
     }
@@ -1179,8 +1168,7 @@ mod tests {
         // need to encrypt our oversized header so it decodes
         // back to the oversized value the cap check should
         // reject. Use a side state with the same key.
-        let mut side_state =
-            BlowfishOfb64State::new(&read_key).unwrap();
+        let mut side_state = BlowfishOfb64State::new(&read_key).unwrap();
         // Patch the wire `len` field with the value that
         // decodes to body_len = MAX_BODY_LEN + 1 after the
         // adapter subtracts HC_SIZE — i.e. `len =
@@ -1231,10 +1219,8 @@ mod tests {
         // Client: standard read direction. Two states because
         // we'll roll our own server-side encryption with a
         // parallel BlowfishOfb64State.
-        let client_read_state =
-            BlowfishOfb64State::new(&read_key).expect("read key");
-        let client_write_state =
-            BlowfishOfb64State::new(&write_key).expect("write key");
+        let client_read_state = BlowfishOfb64State::new(&read_key).expect("read key");
+        let client_write_state = BlowfishOfb64State::new(&write_key).expect("write key");
         let mut client = HopeBlowfishStream::with_rng(
             client_inner,
             client_read_state,
@@ -1251,8 +1237,7 @@ mod tests {
         // encrypts the bytes we hand-craft into the duplex.
         // Same starting key/ivec/num as the client's read
         // state.
-        let mut server_state =
-            BlowfishOfb64State::new(&read_key).expect("server state");
+        let mut server_state = BlowfishOfb64State::new(&read_key).expect("server state");
 
         // ---- Frame 1: TASK reply, no marker ----
         // type=0x010000 (HTLS_HDR_TASK), trans=2, body 87 bytes.
@@ -1269,9 +1254,7 @@ mod tests {
             .await
             .expect("read frame1");
         // Plaintext header bytes — type=0x010000.
-        let type1 = u32::from_be_bytes([
-            received1[0], received1[1], received1[2], received1[3],
-        ]);
+        let type1 = u32::from_be_bytes([received1[0], received1[1], received1[2], received1[3]]);
         assert_eq!(type1, 0x010000, "frame 1 type should be HTLS_HDR_TASK");
 
         // ---- Frame 2: marker = 0x26 stamped on type ----
@@ -1307,9 +1290,7 @@ mod tests {
             .read_exact(&mut received2)
             .await
             .expect("read frame2");
-        let type2 = u32::from_be_bytes([
-            received2[0], received2[1], received2[2], received2[3],
-        ]);
+        let type2 = u32::from_be_bytes([received2[0], received2[1], received2[2], received2[3]]);
         assert_eq!(
             type2, opcode_low,
             "frame 2 marker should have been stripped (got 0x{type2:08x})"
@@ -1323,12 +1304,7 @@ mod tests {
     fn rotate_key_in_place_matches_iteration_loop() {
         let mut key = b"initial-key-32-bytes--padding---".to_vec();
         let session_key = b"session-key-128bits-------------".to_vec();
-        let len = rotate_key_in_place(
-            &mut key,
-            &session_key,
-            HopeMacAlg::Sha256,
-            3,
-        );
+        let len = rotate_key_in_place(&mut key, &session_key, HopeMacAlg::Sha256, 3);
         assert_eq!(len, 32);
         assert_eq!(key.len(), 32);
 
@@ -1336,8 +1312,7 @@ mod tests {
         let mut expected = b"initial-key-32-bytes--padding---".to_vec();
         for _ in 0..3 {
             let mut md = [0u8; 32];
-            let len =
-                hxcrypto_hash::hmac_xxx(&mut md, &expected, &session_key, "HMAC-SHA256");
+            let len = hxcrypto_hash::hmac_xxx(&mut md, &expected, &session_key, "HMAC-SHA256");
             assert_eq!(len, 32);
             expected.clear();
             expected.extend_from_slice(&md[..len as usize]);

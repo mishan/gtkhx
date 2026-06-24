@@ -155,8 +155,7 @@ impl TransformStack {
     /// case by passing the inner transport straight to
     /// `Connection::spawn`.
     pub fn is_passthrough(&self) -> bool {
-        matches!(self.cipher, CipherKind::None)
-            && matches!(self.compression, CompressionKind::None)
+        matches!(self.cipher, CipherKind::None) && matches!(self.compression, CompressionKind::None)
     }
 }
 
@@ -195,9 +194,14 @@ where
 {
     let with_cipher: BoxedDuplex = match cipher {
         CipherLayer::None => Box::new(inner),
-        CipherLayer::Blowfish { read_state, write_state } => Box::new(
-            crate::cipher::BlowfishStream::new(inner, read_state, write_state),
-        ),
+        CipherLayer::Blowfish {
+            read_state,
+            write_state,
+        } => Box::new(crate::cipher::BlowfishStream::new(
+            inner,
+            read_state,
+            write_state,
+        )),
         CipherLayer::HopeBlowfish {
             read_state,
             read_key,
@@ -234,15 +238,9 @@ where
     };
     Ok(match compression {
         CompressionKind::None => with_cipher,
-        CompressionKind::Gzip => {
-            Box::new(crate::compress::GzipStream::new(with_cipher))
-        }
-        CompressionKind::Lz4 => {
-            Box::new(crate::compress::Lz4Stream::new(with_cipher))
-        }
-        CompressionKind::Zstd => {
-            Box::new(crate::compress::ZstdStream::new(with_cipher)?)
-        }
+        CompressionKind::Gzip => Box::new(crate::compress::GzipStream::new(with_cipher)),
+        CompressionKind::Lz4 => Box::new(crate::compress::Lz4Stream::new(with_cipher)),
+        CompressionKind::Zstd => Box::new(crate::compress::ZstdStream::new(with_cipher)?),
     })
 }
 

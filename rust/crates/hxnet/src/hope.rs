@@ -45,8 +45,8 @@ use hotline_proto::messages::tag;
 
 use crate::login::HTLC_HDR_LOGIN;
 use crate::login_reply::{
-    TAG_HOPE_APP_ID, TAG_HOPE_APP_STRING, TAG_MAC_ALG, TAG_S_DATA_CIPHER_ALG,
-    TAG_S_DATA_CIPHER_MODE, TAG_S_DATA_COMPRESS_ALG, TAG_SESSIONKEY,
+    TAG_HOPE_APP_ID, TAG_HOPE_APP_STRING, TAG_MAC_ALG, TAG_SESSIONKEY, TAG_S_DATA_CIPHER_ALG,
+    TAG_S_DATA_CIPHER_MODE, TAG_S_DATA_COMPRESS_ALG,
 };
 
 /// Tag for the client's CIPHER_ALG list in the step 1 LOGIN.
@@ -214,19 +214,43 @@ pub fn build_step1_login(req: &HopeStep1Request<'_>) -> io::Result<Vec<u8>> {
     // was fixed.
     let zero_placeholder = [0u8; 1];
     let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(8);
-    chunks.push(PackChunk { tag: tag::LOGIN, data: &zero_placeholder });
-    chunks.push(PackChunk { tag: tag::PASSWORD, data: &zero_placeholder });
-    chunks.push(PackChunk { tag: TAG_MAC_ALG, data: &mac_list });
-    chunks.push(PackChunk { tag: TAG_HOPE_APP_ID, data: app_id });
+    chunks.push(PackChunk {
+        tag: tag::LOGIN,
+        data: &zero_placeholder,
+    });
+    chunks.push(PackChunk {
+        tag: tag::PASSWORD,
+        data: &zero_placeholder,
+    });
+    chunks.push(PackChunk {
+        tag: TAG_MAC_ALG,
+        data: &mac_list,
+    });
+    chunks.push(PackChunk {
+        tag: TAG_HOPE_APP_ID,
+        data: app_id,
+    });
     if let Some(s) = req.app_string {
-        chunks.push(PackChunk { tag: TAG_HOPE_APP_STRING, data: s });
+        chunks.push(PackChunk {
+            tag: TAG_HOPE_APP_STRING,
+            data: s,
+        });
     }
-    chunks.push(PackChunk { tag: TAG_C_DATA_CIPHER_ALG, data: &cipher_list });
+    chunks.push(PackChunk {
+        tag: TAG_C_DATA_CIPHER_ALG,
+        data: &cipher_list,
+    });
     if !req.compress_algs.is_empty() {
-        chunks.push(PackChunk { tag: TAG_C_DATA_COMPRESS_ALG, data: &compress_list });
+        chunks.push(PackChunk {
+            tag: TAG_C_DATA_COMPRESS_ALG,
+            data: &compress_list,
+        });
     }
     // Empty sessionkey — server fills it in.
-    chunks.push(PackChunk { tag: TAG_SESSIONKEY, data: &[] });
+    chunks.push(PackChunk {
+        tag: TAG_SESSIONKEY,
+        data: &[],
+    });
 
     let needed = pack_message_size(&chunks);
     let mut out = vec![0u8; needed];
@@ -257,7 +281,10 @@ pub fn select_algorithms(reply: &crate::login_reply::LoginReply) -> Option<HopeA
     let cipher_list = reply.cipher_alg.as_ref().and_then(|b| parse_alg_list(b))?;
     let mac_alg = mac_list.into_iter().next()?;
     let cipher_alg = cipher_list.into_iter().next()?;
-    let cipher_mode = reply.cipher_mode.clone().unwrap_or_else(|| b"STREAM".to_vec());
+    let cipher_mode = reply
+        .cipher_mode
+        .clone()
+        .unwrap_or_else(|| b"STREAM".to_vec());
     Some(HopeAlgorithmChoice {
         mac_alg,
         cipher_alg,
@@ -292,7 +319,10 @@ pub fn hmac_password(
     mac_alg_label: &[u8],
 ) -> io::Result<Vec<u8>> {
     let alg_str = std::str::from_utf8(mac_alg_label).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidInput, format!("MAC alg label not UTF-8: {e}"))
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("MAC alg label not UTF-8: {e}"),
+        )
     })?;
     // hxcrypto-hash's hmac_xxx writes into a fixed 32-byte
     // buffer and returns the digest length.
@@ -366,20 +396,41 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
     let caps_be = req.caps.to_be_bytes();
 
     let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(9);
-    chunks.push(PackChunk { tag: tag::LOGIN, data: &login_x });
-    chunks.push(PackChunk { tag: tag::PASSWORD, data: req.password_mac });
-    chunks.push(PackChunk { tag: TAG_S_DATA_CIPHER_ALG, data: &cipher_list_back });
+    chunks.push(PackChunk {
+        tag: tag::LOGIN,
+        data: &login_x,
+    });
+    chunks.push(PackChunk {
+        tag: tag::PASSWORD,
+        data: req.password_mac,
+    });
+    chunks.push(PackChunk {
+        tag: TAG_S_DATA_CIPHER_ALG,
+        data: &cipher_list_back,
+    });
     if let Some(c) = &compress_list_back {
-        chunks.push(PackChunk { tag: TAG_S_DATA_COMPRESS_ALG, data: c });
+        chunks.push(PackChunk {
+            tag: TAG_S_DATA_COMPRESS_ALG,
+            data: c,
+        });
     }
     // NAME + ICON — always emit, even empty/zero. Mirrors
     // src/login_packet.c STEP2, which emits both unconditionally.
     // mhxd rejects (and silently closes) a step-2 that omits them;
     // Janus tolerates their absence. Caught against live mhxd.
-    chunks.push(PackChunk { tag: tag::NAME, data: req.name });
-    chunks.push(PackChunk { tag: tag::ICON, data: &icon_be });
+    chunks.push(PackChunk {
+        tag: tag::NAME,
+        data: req.name,
+    });
+    chunks.push(PackChunk {
+        tag: tag::ICON,
+        data: &icon_be,
+    });
     if req.version != 0 {
-        chunks.push(PackChunk { tag: crate::login::TAG_VERSION, data: &version_be });
+        chunks.push(PackChunk {
+            tag: crate::login::TAG_VERSION,
+            data: &version_be,
+        });
     }
     // Echo cipher_mode if non-default — preserves the STREAM/
     // AEAD distinction the server expects.
@@ -409,8 +460,7 @@ mod tests {
 
     #[test]
     fn encode_alg_list_three_macs() {
-        let list =
-            encode_alg_list(&[b"HMAC-SHA256", b"HMAC-SHA1", b"HMAC-MD5"]).unwrap();
+        let list = encode_alg_list(&[b"HMAC-SHA256", b"HMAC-SHA1", b"HMAC-MD5"]).unwrap();
         // Byte-exact against the trace from production:
         // 00 03 0b HMAC-SHA256 09 HMAC-SHA1 08 HMAC-MD5
         let expected = b"\x00\x03\x0bHMAC-SHA256\x09HMAC-SHA1\x08HMAC-MD5";

@@ -93,11 +93,7 @@ impl<S> BlowfishStream<S> {
     /// states. The caller is responsible for deriving the
     /// states from the HOPE handshake's session key material
     /// (R3.3.d will move that derivation into hxnet too).
-    pub fn new(
-        inner: S,
-        read_state: BlowfishOfb64State,
-        write_state: BlowfishOfb64State,
-    ) -> Self {
+    pub fn new(inner: S, read_state: BlowfishOfb64State, write_state: BlowfishOfb64State) -> Self {
         Self {
             inner,
             read_state,
@@ -173,7 +169,8 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for BlowfishStream<S> {
         let mut scratch = buf.to_vec();
         let mut saved_ivec = [0u8; BLOWFISH_OFB64_BLOCK_SIZE];
         let mut saved_num = 0u32;
-        this.write_state.save_ofb_state(&mut saved_ivec, &mut saved_num);
+        this.write_state
+            .save_ofb_state(&mut saved_ivec, &mut saved_num);
         this.write_state.crypt_in_place(&mut scratch);
 
         match Pin::new(&mut this.inner).poll_write(cx, &scratch) {
@@ -219,17 +216,11 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for BlowfishStream<S> {
         }
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }
@@ -354,8 +345,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
             // If a previously-opened plaintext is still being
             // delivered, copy more of it to the caller.
             if this.read_plaintext_pos < this.read_plaintext.len() {
-                let remaining =
-                    &this.read_plaintext[this.read_plaintext_pos..];
+                let remaining = &this.read_plaintext[this.read_plaintext_pos..];
                 let n = remaining.len().min(buf.remaining());
                 buf.put_slice(&remaining[..n]);
                 this.read_plaintext_pos += n;
@@ -384,8 +374,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
             // Pending/Err/Ok truncate back to `len_before + got`
             // so we never leave junk zeros in the buffer.
             if this.read_buf.len() < hxcrypto_aead::AEAD_LENGTH_PREFIX {
-                let needed =
-                    hxcrypto_aead::AEAD_LENGTH_PREFIX - this.read_buf.len();
+                let needed = hxcrypto_aead::AEAD_LENGTH_PREFIX - this.read_buf.len();
                 let len_before = this.read_buf.len();
                 this.read_buf.resize(len_before + needed, 0);
                 let mut tmp = ReadBuf::new(&mut this.read_buf[len_before..]);
@@ -483,8 +472,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
             // size is ciphertext - tag bytes (length prefix is
             // not part of the ciphertext). We size pt_out
             // accordingly and pass the framed input verbatim.
-            let pt_capacity =
-                (length as usize).saturating_sub(hxcrypto_aead::AEAD_TAG_SIZE);
+            let pt_capacity = (length as usize).saturating_sub(hxcrypto_aead::AEAD_TAG_SIZE);
             let mut pt_out = vec![0u8; pt_capacity];
             let opened_len = unsafe {
                 hxcrypto_aead::gtkhx_aead_open(
@@ -605,9 +593,8 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
                 )));
             }
 
-            let frame_cap = hxcrypto_aead::AEAD_LENGTH_PREFIX
-                + buf.len()
-                + hxcrypto_aead::AEAD_TAG_SIZE;
+            let frame_cap =
+                hxcrypto_aead::AEAD_LENGTH_PREFIX + buf.len() + hxcrypto_aead::AEAD_TAG_SIZE;
             let mut framed = vec![0u8; frame_cap];
             // SAFETY: pointers come from owned Vecs of the
             // right length; gtkhx_aead_seal honours the
@@ -630,9 +617,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
             // `usize`, so `<= 0` was a misleading shape (clippy's
             // "absurd extreme comparison" lint trigger).
             if written == 0 {
-                return Poll::Ready(Err(io::Error::other(
-                    "AEAD seal failed",
-                )));
+                return Poll::Ready(Err(io::Error::other("AEAD seal failed")));
             }
             framed.truncate(written);
             this.write_pending_frame = framed;
@@ -642,10 +627,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
         }
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Drain any sealed bytes pending in write_pending_frame
         // before delegating to the inner flush. Otherwise the
@@ -660,10 +642,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
         Pin::new(&mut this.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Same as flush: drain pending sealed bytes first.
         // Otherwise shutdown silently truncates the stream by

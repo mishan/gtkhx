@@ -173,9 +173,7 @@ const _: () = {
         20
     };
     assert!(std::mem::offset_of!(HxnetFrame, body_ptr) == expected_body_ptr_off);
-    assert!(
-        std::mem::align_of::<HxnetFrame>() == std::mem::align_of::<*mut u8>()
-    );
+    assert!(std::mem::align_of::<HxnetFrame>() == std::mem::align_of::<*mut u8>());
     // Total size: body_ptr offset + pointer size. Pinning this
     // catches trailing-padding drift (e.g. someone adding a u32
     // after body_ptr that bumps the size by 8 on 64-bit due to
@@ -275,9 +273,7 @@ pub const HXNET_SEND_INVALID: c_int = -3;
 /// not-yet-connected) but is not a substitute for the caller
 /// passing the right kind of fd to begin with.
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_spawn_fd(
-    fd: c_int,
-) -> *mut HxnetConnection {
+pub unsafe extern "C" fn hxnet_connection_spawn_fd(fd: c_int) -> *mut HxnetConnection {
     if fd < 0 {
         glib::g_critical!("hxnet", "hxnet_connection_spawn_fd: negative fd");
         return std::ptr::null_mut();
@@ -286,9 +282,7 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd(
     // Resolve the runtime singleton behind catch_unwind — same
     // pattern as hxbridge::blocking::spawn_blocking_with_idle so
     // a runtime init panic can't unwind across the C ABI.
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -393,10 +387,7 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
     out_reason: *mut c_int,
 ) -> c_int {
     if handle.is_null() || out_frame.is_null() || out_reason.is_null() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_try_recv_frame: NULL arg"
-        );
+        glib::g_critical!("hxnet", "hxnet_connection_try_recv_frame: NULL arg");
         return HXNET_RECV_EMPTY;
     }
 
@@ -561,10 +552,7 @@ pub unsafe extern "C" fn hxnet_connection_send_frame(
     len: c_uint,
 ) -> c_int {
     if handle.is_null() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_send_frame: NULL handle"
-        );
+        glib::g_critical!("hxnet", "hxnet_connection_send_frame: NULL handle");
         return HXNET_SEND_INVALID;
     }
     if len > 0 && data.is_null() {
@@ -615,9 +603,7 @@ pub unsafe extern "C" fn hxnet_connection_send_frame(
 /// `handle` must be a non-NULL pointer previously returned by
 /// [`hxnet_connection_spawn_fd`] and not yet destroyed.
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_destroy(
-    handle: *mut HxnetConnection,
-) {
+pub unsafe extern "C" fn hxnet_connection_destroy(handle: *mut HxnetConnection) {
     if handle.is_null() {
         return;
     }
@@ -805,9 +791,7 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
         return std::ptr::null_mut();
     }
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -1064,14 +1048,10 @@ fn cipher_layer_from_config(
         HXNET_CIPHER_BLOWFISH | HXNET_CIPHER_HOPE_BLOWFISH => {
             let read_key_len = cfg.blowfish_read_key_len as usize;
             let write_key_len = cfg.blowfish_write_key_len as usize;
-            if read_key_len == 0
-                || read_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize
-            {
+            if read_key_len == 0 || read_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
                 return Err("blowfish_read_key_len out of range (1..=56)");
             }
-            if write_key_len == 0
-                || write_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize
-            {
+            if write_key_len == 0 || write_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
                 return Err("blowfish_write_key_len out of range (1..=56)");
             }
             let read_key = &cfg.blowfish_read_key[..read_key_len];
@@ -1093,16 +1073,14 @@ fn cipher_layer_from_config(
             // keys (the Janus case).
             let read_state = match hxcrypto_stream::BlowfishOfb64State::new(read_key) {
                 Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_read_ivec,
-                                        cfg.blowfish_read_num as u32);
+                    s.restore_ofb_state(&cfg.blowfish_read_ivec, cfg.blowfish_read_num as u32);
                     s
                 }
                 None => return Err("blowfish read state init failed"),
             };
             let write_state = match hxcrypto_stream::BlowfishOfb64State::new(write_key) {
                 Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_write_ivec,
-                                        cfg.blowfish_write_num as u32);
+                    s.restore_ofb_state(&cfg.blowfish_write_ivec, cfg.blowfish_write_num as u32);
                     s
                 }
                 None => return Err("blowfish write state init failed"),
@@ -1115,29 +1093,18 @@ fn cipher_layer_from_config(
             // the per-message rekey rotation needs.
             if cfg.cipher_kind == HXNET_CIPHER_HOPE_BLOWFISH {
                 let sk_len = cfg.hope_session_key_len as usize;
-                if sk_len == 0
-                    || sk_len > HXNET_HOPE_SESSION_KEY_MAX as usize
-                {
-                    return Err(
-                        "hope_session_key_len out of range (1..=64)",
-                    );
+                if sk_len == 0 || sk_len > HXNET_HOPE_SESSION_KEY_MAX as usize {
+                    return Err("hope_session_key_len out of range (1..=64)");
                 }
                 let macalg = match cfg.hope_macalg {
-                    HXNET_MACALG_SHA256 => {
-                        crate::hope_blowfish::HopeMacAlg::Sha256
-                    }
-                    HXNET_MACALG_SHA1 => {
-                        crate::hope_blowfish::HopeMacAlg::Sha1
-                    }
-                    HXNET_MACALG_MD5 => {
-                        crate::hope_blowfish::HopeMacAlg::Md5
-                    }
+                    HXNET_MACALG_SHA256 => crate::hope_blowfish::HopeMacAlg::Sha256,
+                    HXNET_MACALG_SHA1 => crate::hope_blowfish::HopeMacAlg::Sha1,
+                    HXNET_MACALG_MD5 => crate::hope_blowfish::HopeMacAlg::Md5,
                     _ => {
                         return Err("hope_macalg is not a known tag");
                     }
                 };
-                let session_key =
-                    cfg.hope_session_key[..sk_len].to_vec();
+                let session_key = cfg.hope_session_key[..sk_len].to_vec();
                 Ok(crate::transform::CipherLayer::HopeBlowfish {
                     read_state,
                     read_key: read_key.to_vec(),
@@ -1161,14 +1128,12 @@ fn cipher_layer_from_config(
             // two canonical SERVER_TO_CLIENT / CLIENT_TO_SERVER
             // tags before handing them to AeadState.
             if cfg.aead_read_dir != hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT
-                && cfg.aead_read_dir
-                    != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
+                && cfg.aead_read_dir != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
             {
                 return Err("aead_read_dir is not a defined direction tag");
             }
             if cfg.aead_write_dir != hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT
-                && cfg.aead_write_dir
-                    != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
+                && cfg.aead_write_dir != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
             {
                 return Err("aead_write_dir is not a defined direction tag");
             }
@@ -1179,9 +1144,7 @@ fn cipher_layer_from_config(
             // invariant. Refuse the obviously-broken config
             // up front.
             if cfg.aead_read_dir == cfg.aead_write_dir {
-                return Err(
-                    "aead_read_dir and aead_write_dir must disagree",
-                );
+                return Err("aead_read_dir and aead_write_dir must disagree");
             }
             Ok(crate::transform::CipherLayer::ChaCha20Poly1305 {
                 read: hxcrypto_aead::AeadState {
@@ -1295,9 +1258,7 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_transforms_and_callback(
         }
     };
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -1346,8 +1307,7 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_transforms_and_callback(
     };
 
     // Layer the cipher + compression on top of the raw TCP.
-    let boxed = match crate::transform::compose(tcp, cipher_layer, compression_kind)
-    {
+    let boxed = match crate::transform::compose(tcp, cipher_layer, compression_kind) {
         Ok(b) => b,
         Err(e) => {
             glib::g_critical!(
@@ -1424,8 +1384,7 @@ fn wire_callback_state(
     });
     let handle_ptr = Box::into_raw(handle_box);
 
-    let (ferry_tx, ferry_rx) =
-        async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
+    let (ferry_tx, ferry_rx) = async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
     let pump = rt.handle().spawn(async move {
         while let Some(evt) = events.recv().await {
             if ferry_tx.send(evt).await.is_err() {
@@ -1441,67 +1400,66 @@ fn wire_callback_state(
         handle_ptr,
     };
 
-    let forwarder =
-        hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| {
-            match evt {
-                Event::Frame(frame) => {
-                    let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
-                    unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
-                    // Hand the raw *mut pointer to the callback —
-                    // hxnet_frame_free writes through the struct
-                    // to zero body_ptr / body_len, so a *mut
-                    // here matches the callback's documented
-                    // contract and saves the C side a const-cast.
-                    let frame_ptr = out.as_mut_ptr();
-                    if let Some(on_event) = cb.on_event {
-                        unsafe {
-                            on_event(cb.handle_ptr, frame_ptr, cb.user_data);
-                        }
+    let forwarder = hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| {
+        match evt {
+            Event::Frame(frame) => {
+                let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
+                unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
+                // Hand the raw *mut pointer to the callback —
+                // hxnet_frame_free writes through the struct
+                // to zero body_ptr / body_len, so a *mut
+                // here matches the callback's documented
+                // contract and saves the C side a const-cast.
+                let frame_ptr = out.as_mut_ptr();
+                if let Some(on_event) = cb.on_event {
+                    unsafe {
+                        on_event(cb.handle_ptr, frame_ptr, cb.user_data);
                     }
-                }
-                Event::Shutdown(reason) => {
-                    // Log the *full* reason — including the
-                    // StreamError's inner io::Error string —
-                    // before we collapse it to an integer code
-                    // for the FFI callback. The integer alone
-                    // tells the C side which BUCKET the actor
-                    // died in (StreamError vs FrameTooLarge vs
-                    // EOF) but not which specific failure
-                    // produced it. Without this stderr line
-                    // the actual cause of a mid-burst death is
-                    // unrecoverable from user logs — the C
-                    // side's bridge_on_shutdown_cb may also
-                    // get pre-empted by a synchronous send
-                    // failure path that uninstalls the bridge
-                    // and swallows the deferred event entirely.
-                    eprintln!("hxnet: actor shutting down: {reason:?}");
-                    let code = shutdown_code(reason);
-                    if let Some(on_shutdown) = cb.on_shutdown {
-                        unsafe {
-                            on_shutdown(cb.handle_ptr, code, cb.user_data);
-                        }
-                    }
-                }
-                Event::State(state) => {
-                    // The post-HOPE callback FFI from R3.3.e-1
-                    // only carries Frame + Shutdown; the spawn
-                    // path adopts an already-connected fd so no
-                    // connect-time state events ever fire here.
-                    // When Phase A's connect-in-Rust spawn
-                    // function lands, it'll carry its own
-                    // on_state callback and route state events
-                    // through that. For now log + drop so any
-                    // future regression that wires a state-
-                    // event-emitting transform under the
-                    // existing spawn surfaces in dev logs
-                    // rather than silently disappearing.
-                    eprintln!(
-                        "hxnet: unexpected State({state:?}) on post-HOPE \
-                         callback path; ignoring (no consumer)"
-                    );
                 }
             }
-        });
+            Event::Shutdown(reason) => {
+                // Log the *full* reason — including the
+                // StreamError's inner io::Error string —
+                // before we collapse it to an integer code
+                // for the FFI callback. The integer alone
+                // tells the C side which BUCKET the actor
+                // died in (StreamError vs FrameTooLarge vs
+                // EOF) but not which specific failure
+                // produced it. Without this stderr line
+                // the actual cause of a mid-burst death is
+                // unrecoverable from user logs — the C
+                // side's bridge_on_shutdown_cb may also
+                // get pre-empted by a synchronous send
+                // failure path that uninstalls the bridge
+                // and swallows the deferred event entirely.
+                eprintln!("hxnet: actor shutting down: {reason:?}");
+                let code = shutdown_code(reason);
+                if let Some(on_shutdown) = cb.on_shutdown {
+                    unsafe {
+                        on_shutdown(cb.handle_ptr, code, cb.user_data);
+                    }
+                }
+            }
+            Event::State(state) => {
+                // The post-HOPE callback FFI from R3.3.e-1
+                // only carries Frame + Shutdown; the spawn
+                // path adopts an already-connected fd so no
+                // connect-time state events ever fire here.
+                // When Phase A's connect-in-Rust spawn
+                // function lands, it'll carry its own
+                // on_state callback and route state events
+                // through that. For now log + drop so any
+                // future regression that wires a state-
+                // event-emitting transform under the
+                // existing spawn surfaces in dev logs
+                // rather than silently disappearing.
+                eprintln!(
+                    "hxnet: unexpected State({state:?}) on post-HOPE \
+                         callback path; ignoring (no consumer)"
+                );
+            }
+        }
+    });
 
     let handle_ref = unsafe { &mut *handle_ptr };
     handle_ref._callback_state = Some(CallbackState {
@@ -1527,9 +1485,8 @@ fn wire_callback_state(
 /// `#[repr(u32)]` for the exact values. Fired on the GLib main
 /// thread (forwarded through `forward_to_main`), same
 /// shape as `on_event` / `on_shutdown`.
-pub type HxnetStateCallback = Option<
-    unsafe extern "C" fn(conn: *mut HxnetConnection, state: c_uint, user_data: *mut c_void),
->;
+pub type HxnetStateCallback =
+    Option<unsafe extern "C" fn(conn: *mut HxnetConnection, state: c_uint, user_data: *mut c_void)>;
 
 /// TLS certificate trust callback (TOFU bridge). Invoked at most once,
 /// on the tokio lifecycle task, right after the TLS handshake completes
@@ -1634,10 +1591,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
     user_data: *mut c_void,
 ) -> *mut HxnetConnection {
     if host.is_null() || host_len == 0 {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_open_tcp: NULL or empty host"
-        );
+        glib::g_critical!("hxnet", "hxnet_connection_open_tcp: NULL or empty host");
         return std::ptr::null_mut();
     }
     if on_event.is_none() || on_shutdown.is_none() {
@@ -1676,9 +1630,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
         }
     };
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -1703,7 +1655,9 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
                 // gets a single state-event surface to thread
                 // through. Phase A just spawns the actor right
                 // after.
-                let _ = evt_tx.send(Event::State(crate::ConnectionState::Connected)).await;
+                let _ = evt_tx
+                    .send(Event::State(crate::ConnectionState::Connected))
+                    .await;
                 Connection::run_actor(stream, cmd_rx, evt_tx).await;
             }
             Err(e) => {
@@ -1717,7 +1671,14 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
     });
 
     wire_callback_state_with_on_state(
-        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+        rt,
+        cmd,
+        events,
+        join,
+        on_event,
+        on_shutdown,
+        on_state,
+        user_data,
     )
 }
 
@@ -1876,9 +1837,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         std::slice::from_raw_parts(name, name_len).to_vec()
     };
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -1909,7 +1868,14 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     });
 
     wire_callback_state_with_on_state(
-        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+        rt,
+        cmd,
+        events,
+        join,
+        on_event,
+        on_shutdown,
+        on_state,
+        user_data,
     )
 }
 
@@ -2003,9 +1969,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         std::slice::from_raw_parts(name, name_len).to_vec()
     };
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -2164,9 +2128,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         std::slice::from_raw_parts(name, name_len).to_vec()
     };
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -2196,28 +2158,28 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     // calls post-handshake with the cert fingerprint. The opaque
     // user_data is shared with the other callbacks; the SendUserData
     // wrapper lets the closure move into the spawned task.
-    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> =
-        verify_cert.map(|cb| {
-            let ud = SendUserData(user_data);
-            let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
-                let ud = &ud;
-                unsafe { cb(fp.as_ptr(), fp.len(), ud.0) != 0 }
-            });
-            boxed
+    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> = verify_cert.map(|cb| {
+        let ud = SendUserData(user_data);
+        let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
+            let ud = &ud;
+            unsafe { cb(fp.as_ptr(), fp.len(), ud.0) != 0 }
         });
+        boxed
+    });
 
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_plaintext_tls_lifecycle(
-            req,
-            verify_closure,
-            cmd_rx,
-            evt_tx,
-        )
-        .await;
+        crate::lifecycle::run_plaintext_tls_lifecycle(req, verify_closure, cmd_rx, evt_tx).await;
     });
 
     wire_callback_state_with_on_state(
-        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+        rt,
+        cmd,
+        events,
+        join,
+        on_event,
+        on_shutdown,
+        on_state,
+        user_data,
     )
 }
 
@@ -2312,7 +2274,10 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     let host_str = match std::str::from_utf8(host_slice) {
         Ok(s) => s.to_string(),
         Err(_) => {
-            glib::g_critical!("hxnet", "hxnet_connection_open_hope: host is not valid UTF-8");
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_hope: host is not valid UTF-8"
+            );
             return std::ptr::null_mut();
         }
     };
@@ -2349,9 +2314,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     };
     let cipher_vec = std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec();
 
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -2383,7 +2346,14 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     });
 
     wire_callback_state_with_on_state(
-        rt, cmd, events, join, on_event, on_shutdown, on_state, user_data,
+        rt,
+        cmd,
+        events,
+        join,
+        on_event,
+        on_shutdown,
+        on_state,
+        user_data,
     )
 }
 
@@ -2428,8 +2398,7 @@ fn wire_callback_state_with_on_state(
     });
     let handle_ptr = Box::into_raw(handle_box);
 
-    let (ferry_tx, ferry_rx) =
-        async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
+    let (ferry_tx, ferry_rx) = async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
     let pump = rt.handle().spawn(async move {
         while let Some(evt) = events.recv().await {
             if ferry_tx.send(evt).await.is_err() {
@@ -2450,39 +2419,34 @@ fn wire_callback_state_with_on_state(
         handle_ptr,
     };
 
-    let forwarder =
-        hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| match evt {
-            Event::Frame(frame) => {
-                let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
-                unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
-                let frame_ptr = out.as_mut_ptr();
-                if let Some(on_event) = cb.on_event {
-                    unsafe {
-                        on_event(cb.handle_ptr, frame_ptr, cb.user_data);
-                    }
+    let forwarder = hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| match evt {
+        Event::Frame(frame) => {
+            let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
+            unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
+            let frame_ptr = out.as_mut_ptr();
+            if let Some(on_event) = cb.on_event {
+                unsafe {
+                    on_event(cb.handle_ptr, frame_ptr, cb.user_data);
                 }
             }
-            Event::Shutdown(reason) => {
-                eprintln!("hxnet: actor shutting down: {reason:?}");
-                let code = shutdown_code(reason);
-                if let Some(on_shutdown) = cb.on_shutdown {
-                    unsafe {
-                        on_shutdown(cb.handle_ptr, code, cb.user_data);
-                    }
+        }
+        Event::Shutdown(reason) => {
+            eprintln!("hxnet: actor shutting down: {reason:?}");
+            let code = shutdown_code(reason);
+            if let Some(on_shutdown) = cb.on_shutdown {
+                unsafe {
+                    on_shutdown(cb.handle_ptr, code, cb.user_data);
                 }
             }
-            Event::State(state) => {
-                if let Some(on_state) = state_cb.on_state {
-                    unsafe {
-                        on_state(
-                            state_cb.handle_ptr,
-                            state as c_uint,
-                            state_cb.user_data,
-                        );
-                    }
+        }
+        Event::State(state) => {
+            if let Some(on_state) = state_cb.on_state {
+                unsafe {
+                    on_state(state_cb.handle_ptr, state as c_uint, state_cb.user_data);
                 }
             }
-        });
+        }
+    });
 
     let handle_ref = unsafe { &mut *handle_ptr };
     handle_ref._callback_state = Some(CallbackState {

@@ -114,9 +114,7 @@ impl LoginReply {
     /// indicates the server is participating in HOPE
     /// handshake step 1.
     pub fn has_hope_handshake(&self) -> bool {
-        self.sessionkey.is_some()
-            || self.mac_alg.is_some()
-            || self.cipher_alg.is_some()
+        self.sessionkey.is_some() || self.mac_alg.is_some() || self.cipher_alg.is_some()
     }
 }
 
@@ -161,8 +159,8 @@ where
     // per-read bound would let a server drip-feed up to MAX_PRE_TASK_FRAMES
     // frames each just under the timeout and stretch the connect/login UI
     // task to minutes.
-    let deadline = tokio::time::Instant::now()
-        + std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS);
+    let deadline =
+        tokio::time::Instant::now() + std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS);
 
     loop {
         // Read the 22-byte header. Bounded by the shared deadline so a
@@ -340,7 +338,9 @@ mod tests {
             server.write_all(&reply_bytes).await.expect("write");
         });
 
-        let reply = recv_login_reply(&mut client, &evt_tx, true).await.expect("recv");
+        let reply = recv_login_reply(&mut client, &evt_tx, true)
+            .await
+            .expect("recv");
         assert!(reply.is_success());
         assert!(!reply.has_hope_handshake());
         assert!(reply.error_text.is_none());
@@ -349,8 +349,7 @@ mod tests {
         // round-trips through Frame::from_raw to the same opcode /
         // flag the C side will dispatch on.
         assert!(!reply.raw_frame.is_empty(), "raw_frame must be populated");
-        let frame = crate::Frame::from_raw(&reply.raw_frame)
-            .expect("raw_frame should decode");
+        let frame = crate::Frame::from_raw(&reply.raw_frame).expect("raw_frame should decode");
         assert_eq!(frame.header.type_, HTLS_HDR_TASK);
         assert_eq!(frame.header.flag, 0);
 
@@ -377,10 +376,15 @@ mod tests {
             server.write_all(&reply_bytes).await.expect("write");
         });
 
-        let reply = recv_login_reply(&mut client, &evt_tx, true).await.expect("recv");
+        let reply = recv_login_reply(&mut client, &evt_tx, true)
+            .await
+            .expect("recv");
         assert!(!reply.is_success());
         assert_eq!(reply.flag, 1);
-        assert_eq!(reply.error_text.as_deref(), Some(b"login incorrect" as &[u8]));
+        assert_eq!(
+            reply.error_text.as_deref(),
+            Some(b"login incorrect" as &[u8])
+        );
     }
 
     /// HOPE step-1 reply: extracts the cipher / MAC choice
@@ -416,10 +420,15 @@ mod tests {
             server.write_all(&reply_bytes).await.expect("write");
         });
 
-        let reply = recv_login_reply(&mut client, &evt_tx, false).await.expect("recv");
+        let reply = recv_login_reply(&mut client, &evt_tx, false)
+            .await
+            .expect("recv");
         assert!(reply.is_success());
         assert!(reply.has_hope_handshake());
-        assert_eq!(reply.sessionkey.as_deref(), Some(b"\x12\x34\x56\x78" as &[u8]));
+        assert_eq!(
+            reply.sessionkey.as_deref(),
+            Some(b"\x12\x34\x56\x78" as &[u8])
+        );
         assert_eq!(
             reply.mac_alg.as_deref(),
             Some(b"\x00\x01\x0bHMAC-SHA256" as &[u8])

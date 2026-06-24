@@ -57,18 +57,17 @@
 use tokio::io::AsyncWriteExt;
 use tokio::sync::mpsc;
 
-use crate::{
-    connect::resolve_and_connect, login::send_login, login::LoginRequest,
-    login_reply::recv_login_reply, magic::run_magic_exchange, Connection,
-    ConnectionState, Event, Frame, ShutdownReason,
-};
 use crate::hope::{
-    build_step1_login, build_step2_login, select_algorithms, HopeStep1Request,
-    HopeStep2Request,
+    build_step1_login, build_step2_login, select_algorithms, HopeStep1Request, HopeStep2Request,
 };
 use crate::hope_blowfish::HopeMacAlg;
 use crate::hope_keys::{compute_blowfish_chain, derive_aead_keys, HopeCipherKind};
 use crate::transform::{compose, CipherLayer, CompressionKind};
+use crate::{
+    connect::resolve_and_connect, login::send_login, login::LoginRequest,
+    login_reply::recv_login_reply, magic::run_magic_exchange, Connection, ConnectionState, Event,
+    Frame, ShutdownReason,
+};
 
 /// Parameters for the plaintext lifecycle. Strings are passed by
 /// owned `Vec<u8>` / `String` because the orchestrator runs as a
@@ -204,8 +203,7 @@ pub async fn run_plaintext_tls_lifecycle(
                     if !verify(&fp) {
                         let _ = evt_tx
                             .send(Event::Shutdown(ShutdownReason::StreamError(
-                                "tls certificate rejected by trust check"
-                                    .to_string(),
+                                "tls certificate rejected by trust check".to_string(),
                             )))
                             .await;
                         return;
@@ -308,8 +306,7 @@ async fn run_plaintext_over<S>(
         None => {
             let _ = evt_tx
                 .send(Event::Shutdown(ShutdownReason::StreamError(
-                    "login reply raw_frame failed to decode for replay"
-                        .to_string(),
+                    "login reply raw_frame failed to decode for replay".to_string(),
                 )))
                 .await;
             return;
@@ -492,14 +489,11 @@ pub async fn run_hope_lifecycle(
 
     // ---- derive keys (mirrors hope_store_chain_keys + the AEAD /
     // Blowfish key derivation in rcv.c) ----
-    let (password_mac, bfkeys) = match compute_blowfish_chain(
-        &req.password,
-        &choice.sessionkey,
-        &choice.mac_alg,
-    ) {
-        Ok(t) => t,
-        Err(e) => bail!("hope key derivation: {e}"),
-    };
+    let (password_mac, bfkeys) =
+        match compute_blowfish_chain(&req.password, &choice.sessionkey, &choice.mac_alg) {
+            Ok(t) => t,
+            Err(e) => bail!("hope key derivation: {e}"),
+        };
 
     // ---- HOPE step 2 (plaintext, raw socket) ----
     let step2 = match build_step2_login(&HopeStep2Request {
@@ -534,16 +528,14 @@ pub async fn run_hope_lifecycle(
     // (everything after the step-2 send is ciphered) ----
     let cipher_layer = match HopeCipherKind::from_label(&choice.cipher_alg) {
         Some(HopeCipherKind::Blowfish) => {
-            let read_state =
-                match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.decode_key) {
-                    Some(s) => s,
-                    None => bail!("blowfish read state init failed"),
-                };
-            let write_state =
-                match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.encode_key) {
-                    Some(s) => s,
-                    None => bail!("blowfish write state init failed"),
-                };
+            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.decode_key) {
+                Some(s) => s,
+                None => bail!("blowfish read state init failed"),
+            };
+            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.encode_key) {
+                Some(s) => s,
+                None => bail!("blowfish write state init failed"),
+            };
             let macalg = match mac_label_to_hopemacalg(&choice.mac_alg) {
                 Some(m) => m,
                 None => bail!(
@@ -567,8 +559,7 @@ pub async fn run_hope_lifecycle(
             // bfkeys.encode_key holds spec_decode — the same
             // (decode_key, encode_key) argument order the C side
             // passes to cipher_aead_derive_session_keys.
-            let aead =
-                derive_aead_keys(&choice.sessionkey, &bfkeys.decode_key, &bfkeys.encode_key);
+            let aead = derive_aead_keys(&choice.sessionkey, &bfkeys.decode_key, &bfkeys.encode_key);
             CipherLayer::ChaCha20Poly1305 {
                 read: hxcrypto_aead::AeadState {
                     key: aead.decode_key,
@@ -681,8 +672,7 @@ mod tests {
             let chunks: [PackChunk<'_>; 0] = [];
             let needed = pack_message_size(&chunks);
             let mut reply = vec![0u8; needed];
-            pack_message(&mut reply, 0x0001_0000, trans, 0, &chunks)
-                .expect("pack reply");
+            pack_message(&mut reply, 0x0001_0000, trans, 0, &chunks).expect("pack reply");
             s.write_all(&reply).await.expect("reply write");
 
             // Hold the connection open briefly so the actor can
@@ -715,11 +705,10 @@ mod tests {
         let mut login_frame_type: Option<u32> = None;
         let mut login_frame_flag: Option<u32> = None;
         let mut saw_login_frame_before_handshake = false;
-        while let Some(evt) =
-            tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
-                .await
-                .ok()
-                .flatten()
+        while let Some(evt) = tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
+            .await
+            .ok()
+            .flatten()
         {
             match evt {
                 Event::State(s) => {
@@ -760,10 +749,7 @@ mod tests {
             "state event ordering mismatch: {seen:?}",
         );
         assert!(saw_handshake_done, "expected HandshakeDone, saw {seen:?}");
-        assert!(
-            saw_shutdown,
-            "expected actor Shutdown after server drop"
-        );
+        assert!(saw_shutdown, "expected actor Shutdown after server drop");
 
         // Phase G replay assertions: the LOGIN reply came back as an
         // Event::Frame, it carried the TASK opcode + success flag,
@@ -815,8 +801,7 @@ mod tests {
             let needed = pack_message_size(&chunks);
             let mut reply = vec![0u8; needed];
             // flag = 1 = task failure.
-            pack_message(&mut reply, 0x0001_0000, trans, 1, &chunks)
-                .expect("pack reply");
+            pack_message(&mut reply, 0x0001_0000, trans, 1, &chunks).expect("pack reply");
             s.write_all(&reply).await.expect("reply write");
         });
 
@@ -836,11 +821,10 @@ mod tests {
 
         let mut shutdown_msg: Option<String> = None;
         let mut saw_handshake_done = false;
-        while let Some(evt) =
-            tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
-                .await
-                .ok()
-                .flatten()
+        while let Some(evt) = tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
+            .await
+            .ok()
+            .flatten()
         {
             match evt {
                 Event::State(ConnectionState::HandshakeDone) => {
@@ -879,8 +863,8 @@ mod tests {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(5510);
-        let cipher = std::env::var("GTKHX_LIVE_CIPHER")
-            .unwrap_or_else(|_| "CHACHA20-POLY1305".into());
+        let cipher =
+            std::env::var("GTKHX_LIVE_CIPHER").unwrap_or_else(|_| "CHACHA20-POLY1305".into());
         eprintln!("live_hope: port={port} cipher={cipher}");
         let req = HopeOpenRequest {
             host: "127.0.0.1".into(),
@@ -898,17 +882,18 @@ mod tests {
         let lc = tokio::spawn(run_hope_lifecycle(req, cmd_rx, evt_tx));
         let mut saw_hd = false;
         let mut saw_frame = false;
-        while let Some(evt) =
-            tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
-                .await
-                .ok()
-                .flatten()
+        while let Some(evt) = tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
+            .await
+            .ok()
+            .flatten()
         {
             match &evt {
                 Event::Frame(f) => {
                     eprintln!(
                         "EVT Frame type=0x{:x} trans={} flag={} body={}",
-                        f.header.type_, f.header.trans, f.header.flag,
+                        f.header.type_,
+                        f.header.trans,
+                        f.header.flag,
                         f.body.len()
                     );
                     saw_frame = true;
@@ -953,26 +938,25 @@ mod tests {
             trans: 1,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let verify: Option<Box<dyn Fn(&str) -> bool + Send>> =
-            Some(Box::new(|fp: &str| {
-                eprintln!("CERT fingerprint: {fp}");
-                true
-            }));
-        let lc =
-            tokio::spawn(run_plaintext_tls_lifecycle(req, verify, cmd_rx, evt_tx));
+        let verify: Option<Box<dyn Fn(&str) -> bool + Send>> = Some(Box::new(|fp: &str| {
+            eprintln!("CERT fingerprint: {fp}");
+            true
+        }));
+        let lc = tokio::spawn(run_plaintext_tls_lifecycle(req, verify, cmd_rx, evt_tx));
         let mut saw_hd = false;
         let mut saw_frame = false;
-        while let Some(evt) =
-            tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
-                .await
-                .ok()
-                .flatten()
+        while let Some(evt) = tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())
+            .await
+            .ok()
+            .flatten()
         {
             match &evt {
                 Event::Frame(f) => {
                     eprintln!(
                         "EVT Frame type=0x{:x} trans={} flag={} body={}",
-                        f.header.type_, f.header.trans, f.header.flag,
+                        f.header.type_,
+                        f.header.trans,
+                        f.header.flag,
                         f.body.len()
                     );
                     saw_frame = true;
@@ -1014,11 +998,10 @@ mod tests {
 
         let mut saw_connected = false;
         let mut shutdown_msg: Option<String> = None;
-        while let Some(evt) =
-            tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
-                .await
-                .ok()
-                .flatten()
+        while let Some(evt) = tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
+            .await
+            .ok()
+            .flatten()
         {
             match evt {
                 Event::State(ConnectionState::Connected) => saw_connected = true,
@@ -1065,8 +1048,7 @@ mod tests {
             let chunks: [PackChunk<'_>; 0] = [];
             let needed = pack_message_size(&chunks);
             let mut reply = vec![0u8; needed];
-            pack_message(&mut reply, 0x0001_0000, trans, 0, &chunks)
-                .expect("pack reply");
+            pack_message(&mut reply, 0x0001_0000, trans, 0, &chunks).expect("pack reply");
             s.write_all(&reply).await.expect("reply write");
 
             // Keep open so the actor has a chance to drain the
@@ -1090,17 +1072,19 @@ mod tests {
         // Pre-queue a Shutdown command before the actor exists.
         // The command channel buffers it; once the actor takes
         // over post-handshake it'll see Shutdown immediately.
-        handle.send(Command::Shutdown).await.expect("queue shutdown");
+        handle
+            .send(Command::Shutdown)
+            .await
+            .expect("queue shutdown");
 
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
 
         let mut saw_handshake_done = false;
         let mut saw_shutdown = false;
-        while let Some(evt) =
-            tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
-                .await
-                .ok()
-                .flatten()
+        while let Some(evt) = tokio::time::timeout(Duration::from_secs(2), evt_rx.recv())
+            .await
+            .ok()
+            .flatten()
         {
             match evt {
                 Event::State(ConnectionState::HandshakeDone) => {

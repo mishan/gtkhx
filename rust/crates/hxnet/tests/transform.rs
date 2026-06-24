@@ -207,9 +207,13 @@ async fn zstd_only_round_trip() {
 #[tokio::test]
 async fn aead_plus_gzip_round_trip() {
     let payload: Vec<u8> = (0..8192u32).flat_map(u32::to_be_bytes).collect();
-    round_trip(CipherKind::ChaCha20Poly1305, CompressionKind::Gzip, &payload)
-        .await
-        .unwrap();
+    round_trip(
+        CipherKind::ChaCha20Poly1305,
+        CompressionKind::Gzip,
+        &payload,
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -223,9 +227,13 @@ async fn aead_plus_lz4_round_trip() {
 #[tokio::test]
 async fn aead_plus_zstd_round_trip() {
     let payload: Vec<u8> = (0..8192u32).flat_map(u32::to_be_bytes).collect();
-    round_trip(CipherKind::ChaCha20Poly1305, CompressionKind::Zstd, &payload)
-        .await
-        .unwrap();
+    round_trip(
+        CipherKind::ChaCha20Poly1305,
+        CompressionKind::Zstd,
+        &payload,
+    )
+    .await
+    .unwrap();
 }
 
 #[tokio::test]
@@ -247,16 +255,13 @@ async fn connection_spawn_boxed_over_aead_plus_gzip() {
     use hxnet::{Connection, Event};
 
     let (left_inner, right_inner) = tokio::io::duplex(64 * 1024);
-    let (left_cipher, right_cipher) =
-        build_cipher_pair(CipherKind::ChaCha20Poly1305);
+    let (left_cipher, right_cipher) = build_cipher_pair(CipherKind::ChaCha20Poly1305);
 
     // Left side: hand the Connection actor a BoxedDuplex composed
     // of the full transform stack. The actor will see plaintext
     // Hotline frames.
-    let left_box: BoxedDuplex =
-        compose(left_inner, left_cipher, CompressionKind::Gzip).unwrap();
-    let (cmd, mut events, join) =
-        Connection::spawn_boxed(left_box).expect("spawn");
+    let left_box: BoxedDuplex = compose(left_inner, left_cipher, CompressionKind::Gzip).unwrap();
+    let (cmd, mut events, join) = Connection::spawn_boxed(left_box).expect("spawn");
 
     // Right side: a BoxedDuplex with the inverted stack. We push
     // a single Hotline-framed message in (22-byte header + body)
@@ -305,9 +310,7 @@ async fn connection_spawn_boxed_over_aead_plus_gzip() {
     // loop actually exits (rather than getting silently aborted
     // when the tokio test runtime is dropped) and any panic
     // inside the loop surfaces here instead of being lost.
-    let join_result =
-        tokio::time::timeout(std::time::Duration::from_secs(2), join).await;
-    let task_result =
-        join_result.expect("Connection actor task did not exit within timeout");
+    let join_result = tokio::time::timeout(std::time::Duration::from_secs(2), join).await;
+    let task_result = join_result.expect("Connection actor task did not exit within timeout");
     task_result.expect("Connection actor task panicked");
 }
