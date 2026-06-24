@@ -45,6 +45,8 @@
 #include "server_matrix.h"
 #include "integration_harness.h"
 #include "integration_tls.h"
+#include "htxf_io.h"
+#include <errno.h>
 
 static const hx_test_server *
 pick_tls_server (void)
@@ -141,10 +143,30 @@ test_file_get_round_trip_tls (void)
     hl_htxf_hdr_pack (hdr_buf, xfer_ref, xfer_size, HTXF_TYPE_FILE, 0);
     g_assert_true (integration_send_stream (xfer, hdr_buf, sizeof (hdr_buf)));
 
-    /* Stream the full body off the TLS subchannel. */
+    /* Stream the full body off the TLS subchannel through PRODUCTION
+     * htxf_io_read (not the harness read), so the TLS byte pump is
+     * production-tested — the combo the HTXF→Rust re-wire implements as
+     * HtxfChannel over connect_tls()'s rustls stream. Janus TLS file-get
+     * is plaintext-login-over-TLS, so the subchannel carries no AEAD:
+     * aead_active stays FALSE and htxf_io_read takes its passthrough leg
+     * over the (TLS-encrypted) GIOStream. */
+    struct htxf_conn xfer_conn;
+    memset (&xfer_conn, 0, sizeof (xfer_conn));
+    htxf_io_init (&xfer_conn);
+    g_assert_false (xfer_conn.aead_active);
+
     guint8 *payload = g_malloc (xfer_size);
-    g_assert_true (integration_recv_stream (xfer, payload, xfer_size,
-                                            /*timeout_ms=*/10000));
+    gsize got = 0;
+    while (got < xfer_size) {
+        ssize_t r = htxf_io_read (&xfer_conn, xfer, payload + got, xfer_size - got);
+        if (r <= 0) {
+            g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d (%s)",
+                            r, got, errno, g_strerror (errno));
+            break;
+        }
+        got += (gsize) r;
+    }
+    g_assert_cmpuint ((guint) got, ==, xfer_size);
 
     /* Substring-search for the seed bytes — the FILP wrapper has
      * fork headers + offsets in front of the actual file content,
@@ -163,6 +185,7 @@ test_file_get_round_trip_tls (void)
     g_assert_true (found);
 
     g_free (payload);
+    htxf_io_release (&xfer_conn);
     integration_close_stream (xfer);
     integration_release_htlc (&htlc);
     integration_close_stream (ctrl);

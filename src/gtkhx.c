@@ -1697,6 +1697,19 @@ main (int argc, char **argv, char **envp)
 
     memset (&the_session, 0, sizeof (session));
 
+    /* Defensively clear the test-only TLS-trust escape hatches at the
+     * very start of the production entry point, before any connection
+     * (and thus any cert decision) can happen. GTKHX_TLS_AUTO_ACCEPT
+     * (auto-pin/accept any cert) and GTKHX_TLS_TEST_PROMPT (substitute
+     * the TOFU prompt verdict) exist solely for the headless Tier 3
+     * harness — which has its own main() and never reaches here. Wiping
+     * them means that even if one leaked into a real user's environment,
+     * the shipped app still runs the real cert-trust decision (WebPKI /
+     * known-hosts / user prompt) and can't be silently tricked into
+     * trusting — or auto-rejecting — a server certificate. */
+    g_unsetenv ("GTKHX_TLS_AUTO_ACCEPT");
+    g_unsetenv ("GTKHX_TLS_TEST_PROMPT");
+
     /* Set the GLib program name early so GTK 4 picks it up as the
 	 * Wayland xdg_toplevel app_id (and the X11 WM_CLASS) on every
 	 * window's first commit. The default would be argv[0]

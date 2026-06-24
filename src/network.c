@@ -1743,7 +1743,9 @@ trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
  * the fingerprint up in the known-hosts store and accept silently
  * (TRUSTED, or the same cert already pinned for this host on another
  * port), auto-accept (GTKHX_TLS_AUTO_ACCEPT, for headless tests),
- * or prompt the user (UNKNOWN / MISMATCH), pinning on accept.
+ * or prompt the user (UNKNOWN / MISMATCH), pinning on accept. A
+ * GTKHX_TLS_TEST_PROMPT=accept|reject seam (test-only) substitutes the
+ * prompt verdict so headless tests can drive the reject path too.
  * Returns TRUE to accept the cert, FALSE to reject.
  *
  * Used by BOTH the legacy GTlsConnection accept-certificate handler
@@ -1790,13 +1792,42 @@ tls_trust_decide (const char *host, guint16 port, const char *fingerprint)
         return TRUE;
     }
 
-    /* Real user-facing TOFU prompt, marshalled to the main thread. */
-    GtkWindow *parent = NULL;
-    if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
-        parent = GTK_WINDOW (toolbar_window);
+    /* Test-only prompt-verdict seam. GTKHX_TLS_TEST_PROMPT=accept|reject
+     * substitutes the human's dialog click without a GUI, so headless
+     * Tier 3 can drive BOTH outcomes — including the reject path, which
+     * GTKHX_TLS_AUTO_ACCEPT can never exercise (it always accepts). The
+     * real classify (the lookup above) and the real pin-on-accept still
+     * run; only the click is stubbed. Production never sets this.
+     *
+     * Only the exact tokens "accept" / "reject" are honoured. Any other
+     * value (a typo, a stale or misconfigured export) is ignored and we
+     * fall through to the real prompt — never an implicit reject that
+     * silently bypasses the dialog. */
+    gboolean accepted;
+    const char *test_prompt = g_getenv ("GTKHX_TLS_TEST_PROMPT");
+    gboolean test_accept
+        = test_prompt && g_ascii_strcasecmp (test_prompt, "accept") == 0;
+    gboolean test_reject
+        = test_prompt && g_ascii_strcasecmp (test_prompt, "reject") == 0;
+    if (test_accept || test_reject) {
+        accepted = test_accept;
+        debug_log ("tls", "trust-decide: GTKHX_TLS_TEST_PROMPT=%s -> %s",
+                   test_prompt, accepted ? "accept" : "reject");
+    } else {
+        if (test_prompt && *test_prompt) {
+            debug_log ("tls",
+                       "trust-decide: ignoring GTKHX_TLS_TEST_PROMPT=%s "
+                       "(expected accept|reject) — using the real prompt",
+                       test_prompt);
+        }
+        /* Real user-facing TOFU prompt, marshalled to the main thread. */
+        GtkWindow *parent = NULL;
+        if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
+            parent = GTK_WINDOW (toolbar_window);
+        }
+        accepted = trust_dialog_run_thread_safe (parent, host, port,
+                                                 fingerprint, status);
     }
-    gboolean accepted = trust_dialog_run_thread_safe (parent, host, port,
-                                                      fingerprint, status);
     if (accepted) {
         schedule_trust_pin (host, port, fingerprint);
     }

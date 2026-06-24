@@ -173,7 +173,7 @@ fn native_root_store() -> RootCertStore {
 /// native roots and records the verdict in the returned flag. The
 /// provider is passed explicitly so we don't rely on a process-wide
 /// default being installed.
-fn webpki_client_config() -> (ClientConfig, Arc<AtomicBool>) {
+pub(crate) fn webpki_client_config() -> (ClientConfig, Arc<AtomicBool>) {
     let provider = Arc::new(ring::default_provider());
     let webpki_ok = Arc::new(AtomicBool::new(false));
     let inner = WebPkiServerVerifier::builder_with_provider(
@@ -289,7 +289,7 @@ pub fn peer_cert_fingerprint(stream: &TlsStream<TcpStream>) -> Option<String> {
     Some(fingerprint_sha256(leaf.as_ref()))
 }
 
-fn fingerprint_sha256(der: &[u8]) -> String {
+pub(crate) fn fingerprint_sha256(der: &[u8]) -> String {
     use sha2::{Digest, Sha256};
     use std::fmt::Write as _;
     let digest = Sha256::digest(der);
