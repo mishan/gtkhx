@@ -84,6 +84,95 @@ impl AeadState {
         nonce[11] = self.counter as u8;
         nonce
     }
+
+    /// Seal `plaintext` into a framed AEAD record in `out`:
+    /// `[4-byte BE body_len][ciphertext+tag]` where `body_len =
+    /// plaintext.len() + AEAD_TAG_SIZE`. Increments the counter on
+    /// success. Returns the framed length, or `None` if `out` is too
+    /// small or the plaintext exceeds the frame cap.
+    ///
+    /// Native entry point reused both by the `gtkhx_aead_seal` FFI
+    /// wrapper and by in-process Rust consumers (the HTXF subchannel),
+    /// so the wire-frame logic lives in exactly one place.
+    pub fn seal(&mut self, plaintext: &[u8], out: &mut [u8]) -> Option<usize> {
+        if plaintext.len() > (AEAD_MAX_FRAME_SIZE as usize) - AEAD_TAG_SIZE {
+            return None;
+        }
+        let framed_len = AEAD_LENGTH_PREFIX + plaintext.len() + AEAD_TAG_SIZE;
+        if out.len() < framed_len {
+            return None;
+        }
+        // Length prefix = ciphertext + tag (excludes the 4-byte prefix).
+        let body_len = (plaintext.len() + AEAD_TAG_SIZE) as u32;
+        out[0] = (body_len >> 24) as u8;
+        out[1] = (body_len >> 16) as u8;
+        out[2] = (body_len >> 8) as u8;
+        out[3] = body_len as u8;
+
+        let nonce_bytes = self.build_nonce();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let key = Key::from_slice(&self.key);
+        let cipher = ChaCha20Poly1305::new(key);
+        let payload = Payload { msg: plaintext, aad: &[] };
+        match cipher.encrypt(nonce, payload) {
+            Ok(ct) => {
+                out[AEAD_LENGTH_PREFIX..AEAD_LENGTH_PREFIX + ct.len()]
+                    .copy_from_slice(&ct);
+                self.counter += 1;
+                Some(framed_len)
+            }
+            Err(_) => None,
+        }
+    }
+
+    /// Total framed size (4-byte prefix + body) from a buffer's
+    /// length prefix, or `None` if `framed` is shorter than the prefix
+    /// or the declared body length is out of range. Lets a streaming
+    /// reader learn how many bytes make one frame before it has them
+    /// all.
+    pub fn peek_frame_size(framed: &[u8]) -> Option<usize> {
+        if framed.len() < AEAD_LENGTH_PREFIX {
+            return None;
+        }
+        let body_len = ((framed[0] as u32) << 24)
+            | ((framed[1] as u32) << 16)
+            | ((framed[2] as u32) << 8)
+            | (framed[3] as u32);
+        if body_len < AEAD_TAG_SIZE as u32 || body_len > AEAD_MAX_FRAME_SIZE {
+            return None;
+        }
+        Some(AEAD_LENGTH_PREFIX + body_len as usize)
+    }
+
+    /// Open one complete framed record from the front of `framed`
+    /// (which must hold at least `peek_frame_size` bytes). Writes the
+    /// plaintext to `out`, increments the counter, and returns the
+    /// plaintext length — or `None` on a short/oversized frame, a
+    /// too-small `out`, or an authentication failure.
+    pub fn open(&mut self, framed: &[u8], out: &mut [u8]) -> Option<usize> {
+        let frame_total = Self::peek_frame_size(framed)?;
+        if framed.len() < frame_total {
+            return None;
+        }
+        let pt_len = frame_total - AEAD_LENGTH_PREFIX - AEAD_TAG_SIZE;
+        if out.len() < pt_len {
+            return None;
+        }
+        let nonce_bytes = self.build_nonce();
+        let nonce = Nonce::from_slice(&nonce_bytes);
+        let key = Key::from_slice(&self.key);
+        let cipher = ChaCha20Poly1305::new(key);
+        let ct_and_tag = &framed[AEAD_LENGTH_PREFIX..frame_total];
+        let payload = Payload { msg: ct_and_tag, aad: &[] };
+        match cipher.decrypt(nonce, payload) {
+            Ok(pt) => {
+                out[..pt_len].copy_from_slice(&pt);
+                self.counter += 1;
+                Some(pt_len)
+            }
+            Err(_) => None,
+        }
+    }
 }
 
 // ---- HKDF-SHA256 --------------------------------------------------------
@@ -488,6 +577,45 @@ mod tests {
             assert_eq!(&decrypted, plaintext);
             assert_eq!(decode_state.counter, 1);
         }
+    }
+
+    // Pin byte-for-byte parity between the native AeadState methods
+    // (used in-process by the HTXF subchannel) and the FFI wrappers
+    // (used by the C control channel). They share the wire frame
+    // format, so a divergence here would mean the HTXF Rust path and
+    // the C path framed bytes differently — a silent interop break.
+    #[test]
+    fn native_methods_match_ffi_byte_for_byte() {
+        let plaintext = b"parity check: native vs ffi";
+        let framed_cap = AEAD_LENGTH_PREFIX + plaintext.len() + AEAD_TAG_SIZE;
+
+        // Same starting state for both paths.
+        let mk = || AeadState { key: [0x5au8; 32], counter: 7, dir: AEAD_DIR_SERVER_TO_CLIENT };
+
+        let mut st_native = mk();
+        let mut framed_native = vec![0u8; framed_cap];
+        let n = st_native.seal(plaintext, &mut framed_native).expect("native seal");
+        assert_eq!(n, framed_cap);
+
+        let mut st_ffi = mk();
+        let mut framed_ffi = vec![0u8; framed_cap];
+        let m = unsafe {
+            gtkhx_aead_seal(&mut st_ffi, plaintext.as_ptr(), plaintext.len(),
+                            framed_ffi.as_mut_ptr(), framed_ffi.len())
+        };
+        assert_eq!(m, framed_cap);
+
+        // Same ciphertext bytes and same counter advance.
+        assert_eq!(framed_native, framed_ffi, "native seal != FFI seal");
+        assert_eq!(st_native.counter, st_ffi.counter);
+
+        // peek + open parity.
+        assert_eq!(AeadState::peek_frame_size(&framed_native), Some(framed_cap));
+        let mut dec_native = vec![0u8; plaintext.len()];
+        let mut st_dec = AeadState { key: [0x5au8; 32], counter: 7, dir: AEAD_DIR_SERVER_TO_CLIENT };
+        let d = st_dec.open(&framed_native, &mut dec_native).expect("native open");
+        assert_eq!(d, plaintext.len());
+        assert_eq!(&dec_native, plaintext);
     }
 
     #[test]

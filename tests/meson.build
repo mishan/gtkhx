@@ -1463,6 +1463,59 @@ test('orchestrator_harness', test_integration_orchestrator_harness,
 # need — it's standalone (depends on integration_harness.c's
 # hx_integration_connect_to which we provide as an unused-static
 # tucked into the test, see below).
+# real_htxf_connect — Tier 3 coverage for PRODUCTION htxf_connect, the
+# subchannel-connect function the HTXF->Rust H2 re-wire rewrites (no
+# other test calls it). Links production network.c (for htxf_connect)
+# alongside the harness control helpers; the harness's hlwrite_chunks /
+# hx_htlc_close stubs are __attribute__((weak)) so network.c's strong
+# definitions win. Same big production source list as real_tls plus the
+# harness control files (integration_harness/tls/tracker_matrix +
+# chat_history that the harness references).
+test_integration_real_htxf_connect = executable('test_integration_real_htxf_connect',
+  'integration/test_real_htxf_connect.c',
+  'integration/connect_test_stubs.c',
+  'integration/integration_harness.c',
+  'integration/integration_tls.c',
+  'integration/tracker_matrix.c',
+  'integration/server_matrix.c',
+  '../src/network.c',
+  '../src/hxnet_bridge.c',
+  '../src/tls_trust.c',
+  '../src/network_decode.c',
+  '../src/connect_magic.c',
+  '../src/login_packet.c',
+  '../src/agreement_packet.c',
+  '../src/chat_history.c',
+  '../src/cipher.c',
+  '../src/cipher_aead.c',
+  '../src/compress.c',
+  '../src/inline_media.c',
+  '../src/proto_helpers.c',
+  '../src/proto_trace.c',
+  '../src/gtkhx_session.c',
+  '../src/gtkhx_log.c',
+  '../src/debug.c',
+  '../src/text_util.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/hope.c',
+  '../src/algo_list.c',
+  '../src/tracker_parser.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
+  '../src/tracker_event.c',
+  '../src/hl_code.c',
+  '../src/tasks_table.c',
+  '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  include_directories : integration_test_inc,
+)
+test('real_htxf_connect', test_integration_real_htxf_connect,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 30)
+
 test_integration_real_tls = executable('test_integration_real_tls',
   'integration/test_real_tls.c',
   'integration/connect_test_stubs.c',
@@ -1917,6 +1970,20 @@ test_integration_file_get = executable('test_integration_file_get',
   link_with           : integration_harness_lib,
 )
 test('file_get', test_integration_file_get,
+     suite   : 'integration',
+     timeout : 30)
+
+# file_get_htxf_io — plaintext (no-AEAD) HTXF subchannel byte pump
+# driven through the PRODUCTION htxf_io_read passthrough leg, the one
+# mode the htxf_io tests didn't cover (every other one armed AEAD).
+# Parity oracle / regression guard for the HTXF→Rust H2 re-wire.
+test_integration_file_get_htxf_io = executable('test_integration_file_get_htxf_io',
+  'integration/test_file_get_htxf_io.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_get_htxf_io', test_integration_file_get_htxf_io,
      suite   : 'integration',
      timeout : 30)
 

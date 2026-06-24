@@ -47,15 +47,21 @@
  * non-static with the hx_integration_ prefix so server_matrix
  * doesn't have to duplicate the addrinfo dance. The legacy
  * integration_connect() still routes through here. */
-/* Stub for the production hlwrite_chunks defined in network.c.
+/* WEAK stub for the production hlwrite_chunks defined in network.c.
  * chat_history.c references it for hx_get_chat_history's production
- * send path, but Tier 3 binaries don't link network.c (it would
+ * send path, but most Tier 3 binaries don't link network.c (it would
  * drag in the whole GIOChannel / cipher / compress / signal stack).
+ *
+ * Marked __attribute__((weak)) (like hx_htlc_close below) so a Tier 3
+ * binary that DOES link production network.c — e.g. a test exercising
+ * the real htxf_connect — gets network.c's strong definition and this
+ * stub yields, instead of a duplicate-symbol link error. Harness-only
+ * binaries (no network.c) fall back to this stub.
  *
  * The harness's own send path uses hlpack_chunks + integration_send
  * directly (see integration_send_get_chat_history); production-only
  * code paths that go through hlwrite_chunks shouldn't be reachable
- * here. If a test ever hits this, we want a loud failure rather
+ * here. If a test ever hits this stub, we want a loud failure rather
  * than a silent empty send.
  *
  * Re-declare the extern locally rather than include network.h —
@@ -63,7 +69,7 @@
  * leaking into the harness link surface. */
 extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                             const struct hx_chunk *chunks, int hc);
-void
+__attribute__((weak)) void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
 {
