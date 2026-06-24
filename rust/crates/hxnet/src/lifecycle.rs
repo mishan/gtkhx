@@ -573,6 +573,11 @@ pub async fn run_hope_lifecycle(
                 },
             }
         }
+        // No cipher negotiated (empty cipher_alg): the server ran the
+        // secure-login MAC authentication but selected no transport
+        // cipher (mhxd's non-cipher_only mode). Everything after step 2
+        // stays plaintext — CipherLayer::None is the passthrough.
+        None if choice.cipher_alg.is_empty() => CipherLayer::None,
         None => bail!(
             "server chose unsupported cipher {:?}",
             String::from_utf8_lossy(&choice.cipher_alg)

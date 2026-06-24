@@ -688,7 +688,10 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
 {
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
-    g_return_val_if_fail (cipher_alg != NULL && *cipher_alg, FALSE);
+    /* cipher_alg may be NULL/empty: that selects HOPE secure-login with
+     * no transport cipher (HMAC auth over plaintext — mhxd's
+     * non-cipher_only mode). The FFI treats len==0 as "no cipher". */
+    g_return_val_if_fail (cipher_alg != NULL, FALSE);
 
     if (bridge_handle) {
         g_critical ("hxnet_bridge: orchestrated HOPE install attempted while "
