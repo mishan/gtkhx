@@ -2247,10 +2247,14 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         );
         return std::ptr::null_mut();
     }
-    if cipher_alg.is_null() || cipher_alg_len == 0 {
+    // cipher_alg is OPTIONAL: NULL / empty means "no cipher" — the
+    // server runs the HMAC secure-login over a plaintext transport
+    // (mhxd's non-cipher_only mode). A NULL pointer with a non-zero
+    // length is still a caller bug (it would silently drop the cipher).
+    if cipher_alg.is_null() && cipher_alg_len != 0 {
         glib::g_critical!(
             "hxnet",
-            "hxnet_connection_open_hope: HOPE requires a non-empty cipher_alg"
+            "hxnet_connection_open_hope: NULL cipher_alg with non-zero length"
         );
         return std::ptr::null_mut();
     }
@@ -2312,7 +2316,11 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     } else {
         std::slice::from_raw_parts(name, name_len).to_vec()
     };
-    let cipher_vec = std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec();
+    let cipher_vec = if cipher_alg_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec()
+    };
 
     let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
@@ -2338,7 +2346,15 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         version,
         caps,
         trans,
-        cipher_algs: vec![cipher_vec],
+        // Empty cipher_vec → advertise an empty cipher list in step 1
+        // ("no cipher offered"), not a one-entry list with an empty
+        // string. The server reads an empty list as "negotiate no
+        // cipher".
+        cipher_algs: if cipher_vec.is_empty() {
+            Vec::new()
+        } else {
+            vec![cipher_vec]
+        },
     };
 
     let join = rt.handle().spawn(async move {

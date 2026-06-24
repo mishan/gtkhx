@@ -273,14 +273,23 @@ pub struct HopeAlgorithmChoice {
 }
 
 /// Extract the server's algorithm choices from a step-1 reply.
-/// Returns `None` if any required field is missing
-/// (sessionkey, mac_alg, cipher_alg).
+/// Returns `None` if a *required* field is missing (sessionkey or
+/// mac_alg). The cipher is OPTIONAL: an absent or empty cipher list
+/// means the server negotiated no cipher (HMAC-authenticated login over
+/// a plaintext transport — mhxd's non-`cipher_only` secure-login mode),
+/// and `cipher_alg` comes back empty. A cipher list that is present and
+/// non-empty but unparseable is still treated as an error (`None`), so
+/// a malformed cipher on a genuinely-ciphered login fails loudly rather
+/// than silently downgrading to plaintext.
 pub fn select_algorithms(reply: &crate::login_reply::LoginReply) -> Option<HopeAlgorithmChoice> {
     let sessionkey = reply.sessionkey.clone()?;
     let mac_list = reply.mac_alg.as_ref().and_then(|b| parse_alg_list(b))?;
-    let cipher_list = reply.cipher_alg.as_ref().and_then(|b| parse_alg_list(b))?;
     let mac_alg = mac_list.into_iter().next()?;
-    let cipher_alg = cipher_list.into_iter().next()?;
+    let cipher_alg = match reply.cipher_alg.as_ref() {
+        None => Vec::new(),
+        Some(b) if b.is_empty() => Vec::new(),
+        Some(b) => parse_alg_list(b).and_then(|l| l.into_iter().next())?,
+    };
     let cipher_mode = reply
         .cipher_mode
         .clone()
@@ -381,9 +390,18 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
         req.login.iter().map(|b| !b).collect()
     };
 
-    // Re-encode the chosen cipher/compress as a single-entry
-    // list, which is what step 2 echoes back to the server.
-    let cipher_list_back = encode_alg_list(&[&req.choice.cipher_alg])?;
+    // Re-encode the chosen cipher/compress as a single-entry list,
+    // which is what step 2 echoes back to the server. When no cipher
+    // was negotiated (empty cipher_alg), omit the CIPHER_ALG chunk
+    // entirely rather than echo a one-entry list with an empty string —
+    // the server treats a present-but-invalid cipher list as a hard
+    // error and closes the connection (mhxd rcv.c step-2 handler), while
+    // an absent chunk correctly means "no cipher".
+    let cipher_list_back = if req.choice.cipher_alg.is_empty() {
+        None
+    } else {
+        Some(encode_alg_list(&[&req.choice.cipher_alg])?)
+    };
     let compress_list_back = req
         .choice
         .compress_alg
@@ -404,10 +422,12 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
         tag: tag::PASSWORD,
         data: req.password_mac,
     });
-    chunks.push(PackChunk {
-        tag: TAG_S_DATA_CIPHER_ALG,
-        data: &cipher_list_back,
-    });
+    if let Some(c) = &cipher_list_back {
+        chunks.push(PackChunk {
+            tag: TAG_S_DATA_CIPHER_ALG,
+            data: c,
+        });
+    }
     if let Some(c) = &compress_list_back {
         chunks.push(PackChunk {
             tag: TAG_S_DATA_COMPRESS_ALG,
@@ -522,6 +542,74 @@ mod tests {
     fn select_algorithms_missing_sessionkey_returns_none() {
         let reply = LoginReply::default();
         assert!(select_algorithms(&reply).is_none());
+    }
+
+    #[test]
+    fn select_algorithms_empty_cipher_means_no_cipher() {
+        // mhxd's non-cipher_only secure-login: sessionkey + MAC present,
+        // an empty (length-0) cipher list. The choice should carry an
+        // empty cipher_alg (no transport cipher), not return None.
+        let mut reply = LoginReply::default();
+        reply.sessionkey = Some(vec![0u8; 64]);
+        reply.mac_alg = Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap());
+        reply.cipher_alg = Some(Vec::new()); // empty cipher list
+
+        let choice = select_algorithms(&reply).expect("choice");
+        assert_eq!(&choice.mac_alg, b"HMAC-SHA256");
+        assert!(choice.cipher_alg.is_empty(), "no cipher negotiated");
+    }
+
+    #[test]
+    fn select_algorithms_absent_cipher_means_no_cipher() {
+        // Cipher chunk entirely absent → also no cipher.
+        let mut reply = LoginReply::default();
+        reply.sessionkey = Some(vec![0u8; 64]);
+        reply.mac_alg = Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap());
+        reply.cipher_alg = None;
+
+        let choice = select_algorithms(&reply).expect("choice");
+        assert!(choice.cipher_alg.is_empty());
+    }
+
+    #[test]
+    fn build_step2_login_omits_cipher_chunk_when_no_cipher() {
+        // No-cipher secure login: step 2 must NOT echo a CIPHER_ALG
+        // chunk (an empty-entry list would make mhxd close the
+        // connection). It still carries LOGIN (HMAC) + PASSWORD.
+        let choice = HopeAlgorithmChoice {
+            mac_alg: b"HMAC-SHA256".to_vec(),
+            cipher_alg: Vec::new(),
+            cipher_mode: b"STREAM".to_vec(),
+            compress_alg: None,
+            sessionkey: vec![0u8; 64],
+        };
+        let mac = hmac_password(b"pw", &choice.sessionkey, &choice.mac_alg).expect("hmac");
+        let req = HopeStep2Request {
+            trans: 2,
+            login: b"guest",
+            password_mac: &mac,
+            choice: &choice,
+            name: b"",
+            icon: 0,
+            version: 185,
+            caps: 0x001f,
+            secure_login: true,
+        };
+        let frame = build_step2_login(&req).expect("build");
+
+        use hotline_proto::wire::ChunkIter;
+        let mut saw_cipher = false;
+        let mut saw_login = false;
+        for chunk in ChunkIter::over_message(&frame, frame.len()) {
+            if chunk.tag == TAG_S_DATA_CIPHER_ALG {
+                saw_cipher = true;
+            }
+            if chunk.tag == tag::LOGIN {
+                saw_login = true;
+            }
+        }
+        assert!(!saw_cipher, "step 2 must omit CIPHER_ALG when no cipher");
+        assert!(saw_login, "step 2 must still carry the LOGIN chunk");
     }
 
     #[test]

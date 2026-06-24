@@ -456,6 +456,74 @@ test_orchestrator_hope_chacha20 (void)
     run_hope_orchestrator_against (HX_TEST_CAP_CHACHA20, "CHACHA20-POLY1305");
 }
 
+/* Drive the production hx_connect HOPE-Secure-Login path with NO cipher
+ * selected (secure=1, htlc->cipheralg empty) against mhxd — the
+ * HMAC-authenticated login over a plaintext transport that mhxd's
+ * non-cipher_only mode supports (hxd.conf: cipher_only 0). This is the
+ * case that used to fall through to the legacy GIOStream connect path;
+ * the orchestrator now handles it (the Rust lifecycle composes
+ * CipherLayer::None when the server negotiates no cipher, and step 2
+ * omits the CIPHER_ALG chunk). Proves the full no-cipher handshake
+ * round-trips to the replayed step-2 reply. mhxd specifically — a
+ * cipher_only server would reject step 1. */
+static void
+test_orchestrator_hope_no_cipher (void)
+{
+    const hx_test_server *srv = NULL;
+    GPtrArray *cand = hx_test_servers_with (HX_TEST_CAP_HOPE);
+    if (cand) {
+        for (guint i = 0; i < cand->len; i++) {
+            const hx_test_server *s = g_ptr_array_index (cand, i);
+            if (g_strcmp0 (s->name, "mhxd") == 0) {
+                srv = s;
+                break;
+            }
+        }
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no mhxd matrix entry with HOPE; start the mhxd container or "
+            "set GTKHX_TEST_SERVERS=mhxd.");
+        return;
+    }
+
+    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+    /* cipheralg intentionally left empty — secure auth, no cipher. */
+    g_strlcpy (test_htlc.name, "PhaseGHopeNoCipher", sizeof (test_htlc.name));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
+    g_assert_false (hx_bridge_is_installed ());
+
+    hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
+                /*secure=*/1, /*tls=*/0);
+    drive_until_rcv (obs, 10000);
+
+    g_assert_true (obs->wait_arrived);
+    g_assert_true (hx_bridge_is_installed ());
+
+    /* HOPE replays the step-2 reply (HX_LOGIN_TRANS+1); mhxd accepted
+     * the no-cipher secure login (error bit clear). */
+    g_assert_cmpuint (connect_test_rcv_count, >=, 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_assert_false (hx_bridge_is_installed ());
+    g_unsetenv ("GTKHX_NEW_CONNECT");
+    g_ptr_array_unref (cand);
+}
+
 /* Drive the production hx_connect TLS path (GTKHX_NEW_CONNECT=1,
  * tls=1, secure=0) against a matrix server's dedicated TLS port —
  * the Mobius/Janus separate-port model: TLS handshake from byte zero,
@@ -740,6 +808,8 @@ main (int argc, char *argv[])
                      test_orchestrator_capabilities_negotiated);
     g_test_add_func ("/phase_g/hope_blowfish", test_orchestrator_hope_blowfish);
     g_test_add_func ("/phase_g/hope_chacha20", test_orchestrator_hope_chacha20);
+    g_test_add_func ("/phase_g/hope_no_cipher",
+                     test_orchestrator_hope_no_cipher);
     g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
     g_test_add_func ("/phase_g/connect_refused",
                      test_orchestrator_connect_refused);

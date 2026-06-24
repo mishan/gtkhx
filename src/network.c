@@ -2220,17 +2220,18 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
                                              /*tls=*/FALSE);
                 return;
             }
-            if (!want_tls && secure && htlc->cipheralg[0]) {
-                /* HOPE-Secure-Login with a negotiable cipher. */
+            if (!want_tls && secure) {
+                /* HOPE-Secure-Login. With a negotiable cipher set
+                 * (htlc->cipheralg) the orchestrator negotiates it;
+                 * with no cipher it does the HMAC secure-login over a
+                 * plaintext transport (mhxd's non-cipher_only mode —
+                 * the Rust lifecycle handles an empty cipher list).
+                 * secure+tls was already rejected up front. */
                 hx_connect_via_orchestrator (htlc, serverstr, port, login,
                                              pass, /*secure=*/TRUE,
                                              /*tls=*/FALSE);
                 return;
             }
-            /* secure-without-a-negotiable-cipher (HOPE requested but
-             * htlc->cipheralg unset): fall through to the legacy path.
-             * secure+tls was already rejected up front, so it can't
-             * reach here. */
         }
     }
 
