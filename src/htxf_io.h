@@ -8,145 +8,119 @@
  */
 
 /*
- * htxf_io.{c,h} — read/write wrappers for the HTXF file-transfer
- * subchannel that route through ChaCha20-Poly1305 AEAD when the
- * control channel negotiated it (HOPE-ChaCha20-Poly1305 Phase E).
+ * htxf_io.{c,h} — thin C shim over hxnet's Rust HTXF (file-transfer)
+ * subchannel transport (rust/crates/hxnet/src/htxf.rs).
  *
- * Wire shape, plaintext mode:
- *     g_input_stream_read(in, ...)   ≡  htxf_io_read(htxf, io, buf, len)
- *     g_output_stream_write_all(...) ≡  htxf_io_write(htxf, io, buf, len)
+ * Since the HTXF→Rust H2 re-wire the byte pump, the AEAD framing
+ * (ChaCha20-Poly1305 length-prefixed frames), the optional rustls TLS
+ * wrap, and the socket fd all live in the hxnet crate. struct htxf_conn
+ * carries the opaque channel handle in `htxf->hx`; this shim:
  *
- * `io` is the GIOStream of the GSocketConnection htxf_connect
- * returned. The wrappers extract its input / output streams
- * internally. Using GIOStream (rather than a raw socket fd) lets
- * the same code path absorb a future TLS wrap — replacing the
- * GSocketConnection's stream with a GTlsClientConnection wrapping
- * it (docs/tls-scoping.md Phase 2) needs no edits below this line.
+ *   - htxf_connect (network.c) opens the channel via hxnet_htxf_open,
+ *     handing over a connected blocking fd, the packed preamble, and
+ *     (when the control channel negotiated CIPHER_MODE_AEAD) the
+ *     per-transfer ChaCha20 keys derived into htxf->xfer_encode /
+ *     xfer_decode.
+ *   - the xfers.c / banner.c workers stream bytes through
+ *     htxf_io_read / htxf_io_write, which forward to hxnet_htxf_read /
+ *     hxnet_htxf_write and translate the Rust `-1` error into the
+ *     errno-set `< 1` idiom the worker loops already use.
+ *   - htxf_io_release closes the channel at worker teardown.
  *
- * Wire shape, AEAD mode (Phase E2 — htxf_connect flips
- * htxf->aead_active = TRUE after deriving xfer_encode / xfer_decode
- * via cipher_aead_derive_transfer_keys):
- *
- *   write — Seal each call's plaintext as one length-prefixed
- *           framed ChaCha20-Poly1305 frame, then write the framed
- *           bytes to the socket. The 4-byte big-endian length
- *           prefix lets the peer know how much ciphertext to
- *           accumulate before calling Open.
- *
- *   read  — Maintain a plaintext accumulator. When the caller
- *           asks for N bytes, serve from the accumulator first;
- *           if it's empty, read enough ciphertext from the socket
- *           to assemble at least one frame, Open it, append the
- *           plaintext to the accumulator, then serve. Repeats
- *           until the caller's request is satisfied or the socket
- *           EOFs / errors.
- *
- * The wrappers preserve the existing read()/write() error
- * semantics — 0 / negative return values still indicate
- * end-of-stream / error — so xfers.c's `if (read(s,...) < 1)`
- * idioms keep working without per-call-site logic changes.
- *
- * Per-direction state (encode for outbound, decode for inbound)
- * plus the read accumulator live on struct htxf_conn so the
- * lifetime is one ChaCha20 context pair per transfer. Counters
- * start at 0 for every transfer (cipher_aead_derive_transfer_keys
- * zeros them) — different transfers within the same control
- * channel session never share a nonce.
- *
- * NOT covered here:
- *
- *   - The control channel itself (htlc_conn). That lives in
- *     cipher.c / network.c and was wired up by Phase D.
- *   - banner.c's HTXF worker (which has its own read_n / write_n
- *     and uses struct htxf_fetch, not struct htxf_conn). Phase
- *     E3 follow-up.
+ * The shim exists (rather than calling hxnet_htxf_* directly from the
+ * workers) to keep errno semantics and the handle cast in one place.
  */
 
 #ifndef __htxf_io_h
 #define __htxf_io_h
 
 #include "config.h"
-#include <gio/gio.h>
 #include <glib.h>
 #include <sys/types.h> /* ssize_t */
 
+#include "cipher_aead.h" /* chacha_aead_state */
+
 struct htxf_conn;
 
-/* Per-htxf_conn AEAD I/O state. One instance per transfer; lives
- * inline on struct htxf_conn so the worker thread can drive it
- * without an extra heap allocation. Zero-initialised at
- * xfer_new time and reclaimed by htxf_io_release at xfer_delete
- * time. */
-struct htxf_aead_io {
-    /* Receive plaintext accumulator. Bytes successfully Open'd
-	 * but not yet consumed by the caller. Grown as needed (one
-	 * AEAD frame at a time, capped at CIPHER_AEAD_MAX_FRAME_SIZE
-	 * payload size). NULL until first use. */
-    guint8 *plain_buf;
-    gsize plain_cap;
-    gsize plain_len;
-    gsize plain_pos;
+/* Opaque hxnet HTXF channel handle (Rust `HtxfConn`). The C side never
+ * dereferences it — it's stored on htxf->hx and passed back to the
+ * hxnet_htxf_* calls below. */
+typedef struct HtxfConn HtxfConn;
 
-    /* Receive ciphertext accumulator. Bytes read from the socket
-	 * but not yet a complete frame. Grown as needed. NULL until
-	 * first use. */
-    guint8 *cipher_buf;
-    gsize cipher_cap;
-    gsize cipher_len;
-};
+/* ---- hxnet HTXF subchannel FFI ------------------------------------
+ * Defined in rust/crates/hxnet/src/htxf.rs. Declared here so both this
+ * shim (read/write/timeout/close) and network.c::htxf_connect (open)
+ * see one prototype. */
 
-/* Zero-init the I/O state. Idempotent on an already-zero struct
- * (xfer_new memsets the parent htxf_conn). Call sites that
- * memset() the parent struct don't strictly need this, but it
- * keeps the intent explicit. */
+/* TOFU verify-cert callback for a TLS subchannel whose peer cert did
+ * not chain to a public root: receives the "sha256:<hex>" leaf
+ * fingerprint, returns non-zero to accept the connection. */
+typedef int (*hxnet_htxf_verify_cb_t) (const guint8 *fp, gsize fp_len,
+                                       void *user_data);
+
+/* Open an HTXF subchannel over an already-connected, blocking `fd`
+ * (which this call adopts — the C side must not close it). `tls != 0`
+ * TLS-handshakes the fd with rustls (host = SNI / TOFU name);
+ * `preamble` is written raw before AEAD arms; non-NULL
+ * `aead_encode` / `aead_decode` arm per-transfer AEAD framing. Returns
+ * an owned handle, or NULL on bad arguments / TLS rejection / IO error
+ * (the adopted fd is closed on every failure path). */
+extern HtxfConn *hxnet_htxf_open (int fd, int tls, const guint8 *host,
+                                  size_t host_len, const guint8 *preamble,
+                                  size_t preamble_len,
+                                  const chacha_aead_state *aead_encode,
+                                  const chacha_aead_state *aead_decode,
+                                  hxnet_htxf_verify_cb_t verify_cert,
+                                  void *user_data);
+
+/* Blocking read of up to `len` bytes (`0` = clean EOF, `-1` on error). */
+extern ssize_t hxnet_htxf_read (HtxfConn *handle, guint8 *buf, size_t len);
+
+/* Blocking write of `len` bytes — one AEAD frame when armed (returns
+ * `len` on success, `-1` on error). */
+extern ssize_t hxnet_htxf_write (HtxfConn *handle, const guint8 *buf,
+                                 size_t len);
+
+/* Arm (ms > 0) or clear (ms == 0) a per-read timeout on the underlying
+ * socket. Returns 0 / -1. */
+extern int hxnet_htxf_set_read_timeout (HtxfConn *handle, guint32 timeout_ms);
+
+/* Close the channel and free the handle (drops the socket / TLS
+ * session). Safe with NULL. */
+extern void hxnet_htxf_close (HtxfConn *handle);
+
+/* ---- C-side shim --------------------------------------------------- */
+
+/* Zero the handle slot. struct htxf_conn is memset by every caller
+ * before use, so this is mostly explicit-intent; safe to call before
+ * htxf_connect opens the channel. */
 extern void htxf_io_init (struct htxf_conn *htxf);
 
-/* Free the read accumulator buffers and zero the state. Called
- * from the xfer worker exit path; safe to call multiple times.
- * Does NOT touch the AEAD key material — that lives in
- * htxf->xfer_encode / xfer_decode, which are zeroed by their
- * own owner (struct htxf_conn) when the htxf_conn frees. */
+/* Close the hxnet channel and clear htxf->hx. Idempotent — safe to
+ * call on a never-opened htxf and to call more than once. */
 extern void htxf_io_release (struct htxf_conn *htxf);
 
-/* Read up to `len` bytes from `io` into `buf`.
- *
- * Plaintext path: g_input_stream_read on io's input stream.
- *
- * AEAD path: serves up to `len` bytes from the plaintext
- * accumulator, refilling from the input stream as needed.
- *
- * Returns bytes copied to buf (>0), 0 on clean EOF, -1 on error.
- * errno is set to one of:
- *   EINVAL  io is NULL
- *   EIO     stream read error, AEAD tag verification failure,
- *           truncated frame mid-stream, malformed / oversized
- *           AEAD length prefix
- * GError details (where one was produced by GIO) surface through
- * debug_log under the xfer / xfer-aead categories. Close enough to
- * read(2) semantics that the historical `if (r < 1)` idioms in
- * xfers.c keep working without per-site logic changes. */
-extern ssize_t htxf_io_read (struct htxf_conn *htxf, GIOStream *io,
-                             void *buf, size_t len);
+/* Read up to `len` bytes into `buf`. Returns bytes read (>0), 0 on
+ * clean EOF, -1 on error. On error errno is EINVAL when the channel
+ * isn't open (htxf / htxf->hx NULL — a caller bug) and EIO for a
+ * transport / framing error from hxnet. Close enough to read(2)
+ * semantics that the historical `if (r < 1)` idioms keep working
+ * without per-site logic changes. */
+extern ssize_t htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len);
 
-/* Write exactly `len` bytes from `buf` to `io`.
- *
- * Plaintext path: g_output_stream_write_all on io's output
- * stream (loops over partial writes internally — short writes
- * can't surface).
- *
- * AEAD path: Seal's the buffer as one frame, writes the framed
- * bytes through the output stream.
- *
- * Returns `len` on success (matches the caller's
- * `if (htxf_io_write (...) != n)` check) or -1 on error. errno is
- * set to one of:
- *   EINVAL    io is NULL
- *   EMSGSIZE  AEAD path, plaintext exceeds the spec cap
- *             (CIPHER_AEAD_MAX_FRAME_SIZE - tag)
- *   EIO       stream write error, AEAD seal failure
- * GError details (where one was produced by GIO) surface through
- * debug_log under the xfer / xfer-aead categories. */
-extern ssize_t htxf_io_write (struct htxf_conn *htxf, GIOStream *io,
-                              const void *buf, size_t len);
+/* Write exactly `len` bytes from `buf` (one AEAD frame when armed).
+ * Returns `len` on success (matches `if (htxf_io_write (...) != n)`
+ * checks), -1 on error. On error errno is EINVAL when the channel
+ * isn't open (htxf / htxf->hx NULL) and EIO for a transport / seal
+ * error from hxnet. */
+extern ssize_t htxf_io_write (struct htxf_conn *htxf, const void *buf,
+                              size_t len);
+
+/* Arm/clear a per-read timeout (ms; 0 = block indefinitely). Used by
+ * the folder-drain path to slurp whatever the server has in flight and
+ * then give up. Returns 0 on success, -1 on error (errno EINVAL when
+ * the channel isn't open, EIO on a hxnet setsockopt failure). */
+extern int htxf_io_set_read_timeout (struct htxf_conn *htxf,
+                                     guint32 timeout_ms);
 
 #endif /* __htxf_io_h */

@@ -2435,7 +2435,37 @@ hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
     return conn;
 }
 
-GSocketConnection *
+/* TLS TOFU trampoline for the HTXF subchannel. hxnet's rustls verifier
+ * calls this with the peer leaf fingerprint ONLY when WebPKI validation
+ * against the native roots failed (a CA-valid cert is trusted silently
+ * and never reaches here). Key the known-hosts decision on the
+ * subchannel's own host:port (htxf->serverhost / serverport) — the same
+ * endpoint the pre-rewire C GTlsConnection accept-cert handler keyed on,
+ * so the trust schema is unchanged. user_data is the struct htxf_conn. */
+static int
+htxf_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
+{
+    struct htxf_conn *htxf = user_data;
+    if (!htxf || !fp) {
+        return 0; /* reject: no context / no fingerprint */
+    }
+    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    return tls_trust_decide (htxf->serverhost, htxf->serverport, fp_str) ? 1
+                                                                         : 0;
+}
+
+/* Public host:port-keyed subchannel cert verify for callers outside
+ * network.c (banner.c's HTXF worker). Same decision as the static
+ * htxf_verify_cert_cb above; exposed because tls_trust_decide is
+ * file-static. */
+gboolean
+hx_tls_verify_subchannel_cert (const char *host, guint16 port,
+                               const char *fingerprint)
+{
+    return tls_trust_decide (host, port, fingerprint);
+}
+
+gboolean
 htxf_connect (struct htxf_conn *htxf)
 {
     GSocketConnection *conn;
@@ -2446,7 +2476,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * inside the body, but the preceding lines unconditionally
 	 * dereferenced htxf, so the guard was dead anyway. Assert and
 	 * fail loud rather than papering over a programmer error. */
-    g_return_val_if_fail (htxf != NULL, NULL);
+    g_return_val_if_fail (htxf != NULL, FALSE);
 
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
 	 * caps include the bit AND the transfer actually needs 64-bit
@@ -2470,30 +2500,46 @@ htxf_connect (struct htxf_conn *htxf)
                       && htxf->total_size > 0xFFFFFFFFULL;
     htxf->opt.large = size64 ? 1 : 0;
 
-    /* Mirror the control channel's TLS mode onto this HTXF
-     * subchannel — separate-port model expects TLS-HTXF on
-     * port+1 to pair with TLS-HTLS. htxf->htlc is non-NULL on
-     * every existing caller (xfers.c file_get/put/folder paths
-     * and xfer_go all populate it), so reading htlc->tls here is
-     * safe; the g_return_val_if_fail above guards the
-     * htxf-itself-NULL case. */
-    char xfer_tls = (htxf->htlc != NULL) ? htxf->htlc->tls : 0;
+    /* Plaintext TCP connect via GSocketClient — keeps IPv4/IPv6
+	 * fallback and SOCKS (GProxyResolver) for free. TLS is NOT done
+	 * here anymore: the separate-port TLS wrap moved into hxnet's
+	 * rustls path (hxnet_htxf_open below), off the shared C
+	 * GTlsConnection accept-cert handler. So this connect is always
+	 * plaintext; we extract the connected fd and hand ownership to
+	 * hxnet. */
     conn = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport,
-                                    errbuf, sizeof (errbuf), xfer_tls);
+                                    errbuf, sizeof (errbuf), /*tls=*/0);
     if (!conn) {
-        return NULL;
+        debug_log ("xfer", "htxf_connect: TCP connect to %s:%u failed: %s",
+                   htxf->serverhost, (unsigned) htxf->serverport, errbuf);
+        return FALSE;
+    }
+
+    /* Take ownership of the connected fd by dup'ing it out of the
+	 * GSocketConnection, then unref the conn (its GSocket finaliser
+	 * closes the original fd; the dup is an independent reference to
+	 * the same connection). hxnet_htxf_open adopts the dup. We've
+	 * done no IO on the conn yet, so nothing is buffered. */
+    int dupfd = -1;
+    {
+        GSocket *sock = g_socket_connection_get_socket (conn);
+        int sfd = sock ? g_socket_get_fd (sock) : -1;
+        if (sfd >= 0) {
+            dupfd = dup (sfd);
+        }
+    }
+    g_object_unref (conn);
+    if (dupfd < 0) {
+        debug_log ("xfer", "htxf_connect: could not dup connected fd");
+        return FALSE;
     }
 
     /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
 	 * is set). hx_htxf_subchannel_pack_preamble handles the
 	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
-	 * zeroing for the 24-byte variant.
-	 *
-	 * The handshake write goes through GIOStream so a future TLS
-	 * wrap (docs/tls-scoping.md Phase 2) catches these bytes on
-	 * the same path as the rest of the subchannel.
-	 * g_output_stream_write_all blocks until the whole buffer
-	 * lands or an error fires. */
+	 * zeroing for the 24-byte variant. hxnet_htxf_open writes it
+	 * raw (before any AEAD arms) — the server matches the subchannel
+	 * to the queued transfer by ref before any cipher state exists. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     guint16 type
         = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
@@ -2502,41 +2548,22 @@ htxf_connect (struct htxf_conn *htxf)
         htxf->ref, htxf->total_size,
         type, /*flags=*/0, size64);
     if (hdr_len == 0) {
-        g_object_unref (conn);
-        return NULL;
-    }
-    GOutputStream *out = g_io_stream_get_output_stream (G_IO_STREAM (conn));
-    if (!g_output_stream_write_all (out, hdr_buf, hdr_len, NULL, NULL, NULL)) {
-        g_object_unref (conn);
-        return NULL;
+        close (dupfd);
+        return FALSE;
     }
 
-    /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming (Phase E2).
-	 *
-	 * Once the plaintext handshake has been sent, derive a
-	 * per-transfer ChaCha20 key pair off the control channel's
-	 * session_key plus our HTXF ref number and flip the htxf_io
-	 * wrappers (Phase E1) into framed-AEAD mode. The handshake
-	 * itself stays plaintext per spec — only the body bytes
-	 * (FILP forks, folder commands, file data, etc.) flow
-	 * through AEAD frames.
-	 *
-	 * Derivation mixes ref into the salt so two transfers within
-	 * the same control-channel session can never share a nonce
-	 * even if their plaintext byte streams happen to match.
-	 * Counters start at 0 per transfer (the derive helper zeros
-	 * them).
-	 *
-	 * Only fires when:
-	 *   - the htxf is bound to a control channel (htlc non-NULL),
-	 *   - that control channel negotiated CIPHER_MODE_AEAD (the
-	 *     server picked CHACHA20-POLY1305 in the HOPE Step 2
-	 *     reply — see rcv_task_login),
-	 *   - cipher support is compiled in.
-	 *
-	 * Other transfers (no HOPE, or HOPE with a stream cipher)
-	 * leave aead_active = FALSE and the wrappers behave exactly
-	 * like read()/write(). */
+    /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming. When the control
+	 * channel negotiated CIPHER_MODE_AEAD, derive a per-transfer
+	 * ChaCha20 key pair off the control session_key + our HTXF ref
+	 * (the derivation mixes ref into the salt so two transfers in one
+	 * session can never share a nonce; counters start at 0) into
+	 * htxf->xfer_encode / xfer_decode and pass them to
+	 * hxnet_htxf_open, which owns the seal/open framing thereafter.
+	 * The preamble itself always travels plaintext per spec. Other
+	 * transfers (no HOPE, or HOPE with a stream cipher) leave
+	 * aead_active = FALSE and hxnet runs the channel in passthrough. */
+    const chacha_aead_state *aead_enc = NULL;
+    const chacha_aead_state *aead_dec = NULL;
     if (htxf->htlc && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
         hx_htxf_subchannel_arm_aead (
             htxf,
@@ -2544,12 +2571,32 @@ htxf_connect (struct htxf_conn *htxf)
             &htxf->htlc->cipher_encode_state.chacha,
             &htxf->htlc->cipher_decode_state.chacha,
             htxf->ref);
+        aead_enc = &htxf->xfer_encode;
+        aead_dec = &htxf->xfer_decode;
         debug_log ("xfer-aead",
                    "ref=%u: AEAD active (control session_key=%u bytes)",
                    htxf->ref, htxf->htlc->sklen);
     }
 
-    return conn;
+    /* Mirror the control channel's TLS mode onto this subchannel —
+	 * separate-port model pairs TLS-HTXF on port+1 with TLS-HTLS.
+	 * The rustls handshake + WebPKI→TOFU trust gate run inside
+	 * hxnet_htxf_open; htxf_verify_cert_cb bridges a WebPKI failure
+	 * back to the C known-hosts decision. hxnet adopts dupfd and
+	 * closes it on any failure. */
+    int xfer_tls = (htxf->htlc != NULL) ? htxf->htlc->tls : 0;
+    htxf->hx = hxnet_htxf_open (
+        dupfd, xfer_tls,
+        (const guint8 *) htxf->serverhost, strlen (htxf->serverhost),
+        hdr_buf, hdr_len,
+        aead_enc, aead_dec,
+        htxf_verify_cert_cb, htxf);
+    if (!htxf->hx) {
+        debug_log ("xfer", "htxf_connect: hxnet_htxf_open failed (ref=%u)",
+                   htxf->ref);
+        return FALSE;
+    }
+    return TRUE;
 }
 
 /*

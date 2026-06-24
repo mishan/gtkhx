@@ -33,6 +33,7 @@ use std::io::{self, Read, Write};
 use std::net::TcpStream;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hxcrypto_aead::{AeadState, AEAD_LENGTH_PREFIX, AEAD_TAG_SIZE};
 use tokio_rustls::rustls::pki_types::ServerName;
@@ -97,6 +98,7 @@ impl<S> HtxfChannel<S> {
         self.inner
     }
 }
+
 
 impl<S: Write> HtxfChannel<S> {
     /// Send `buf`. With AEAD active this seals `buf` into exactly one
@@ -346,6 +348,16 @@ impl HtxfInner {
             HtxfInner::Tls(c) => c.write(buf),
         }
     }
+    fn set_read_timeout(&self, dur: Option<Duration>) -> io::Result<()> {
+        // Reach the blocking TcpStream under each channel's inner
+        // transport. The plaintext channel's inner *is* the TcpStream;
+        // the TLS channel wraps it in StreamOwned (`.sock`). Both
+        // fields are private but reachable from this module.
+        match self {
+            HtxfInner::Plain(c) => c.inner.set_read_timeout(dur),
+            HtxfInner::Tls(c) => c.inner.sock.set_read_timeout(dur),
+        }
+    }
 }
 
 /// Opaque handle the C side holds for one transfer subchannel.
@@ -544,6 +556,39 @@ pub unsafe extern "C" fn hxnet_htxf_write(
     match h.inner.write(data) {
         Ok(n) => n as isize,
         Err(_) => -1,
+    }
+}
+
+/// Set the blocking read timeout on the underlying socket. `timeout_ms`
+/// of 0 restores indefinite blocking; non-zero arms a per-read deadline
+/// after which a read returns `-1` (the OS surfaces `WouldBlock`, which
+/// the channel does not retry). The C folder-drain path uses this to
+/// reproduce the old `g_socket_condition_timed_wait` "slurp what's in
+/// flight, then give up" behaviour without a separate pollable handle.
+/// Returns `0` on success, `-1` on a NULL handle or a setsockopt error.
+///
+/// # Safety
+/// `handle` must be a live handle from [`hxnet_htxf_open`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_set_read_timeout(
+    handle: *mut HtxfConn,
+    timeout_ms: u32,
+) -> c_int {
+    if handle.is_null() {
+        return -1;
+    }
+    let h = &mut *handle;
+    let dur = if timeout_ms == 0 {
+        None
+    } else {
+        Some(Duration::from_millis(timeout_ms as u64))
+    };
+    match h.inner.set_read_timeout(dur) {
+        Ok(()) => 0,
+        Err(e) => {
+            glib::g_critical!("hxnet", "hxnet_htxf_set_read_timeout: {}", e);
+            -1
+        }
     }
 }
 

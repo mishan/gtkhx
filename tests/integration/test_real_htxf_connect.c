@@ -56,12 +56,12 @@
  * (passthrough, AEAD, or TLS leg depending on how htxf was armed)
  * and asserts the seed bytes "hello world" appear. */
 static void
-drain_and_check (struct htxf_conn *htxf, GIOStream *io, guint64 xfer_size)
+drain_and_check (struct htxf_conn *htxf, guint64 xfer_size)
 {
     guint8 *payload = g_malloc (xfer_size);
     gsize got = 0;
     while (got < xfer_size) {
-        ssize_t r = htxf_io_read (htxf, io, payload + got, xfer_size - got);
+        ssize_t r = htxf_io_read (htxf, payload + got, xfer_size - got);
         if (r <= 0) {
             g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d (%s)",
                             r, got, errno, g_strerror (errno));
@@ -147,8 +147,7 @@ test_htxf_connect_file_get_plaintext (void)
     htxf.total_size = xfer_size;
 
     /* THE function under test: production htxf_connect. */
-    GSocketConnection *conn = htxf_connect (&htxf);
-    if (!conn) {
+    if (!htxf_connect (&htxf)) {
         g_test_fail_printf ("htxf_connect failed (HTXF port %u reachable? "
                             "publish -p %u:%u or set GTKHX_TEST_XFER_PORT).",
                             (unsigned) xfer_port, (unsigned) xfer_port,
@@ -160,9 +159,8 @@ test_htxf_connect_file_get_plaintext (void)
     g_assert_false (htxf.aead_active);
 
     /* Drain the body through production htxf_io_read (passthrough leg). */
-    drain_and_check (&htxf, G_IO_STREAM (conn), xfer_size);
+    drain_and_check (&htxf, xfer_size);
 
-    g_object_unref (conn);
     htxf_io_release (&htxf);
     integration_release_htlc (&htlc);
     integration_close (fd);
@@ -268,8 +266,7 @@ test_htxf_connect_file_get_aead (void)
     htxf.ref = reply.ref;
     htxf.total_size = reply.size;
 
-    GSocketConnection *conn = htxf_connect (&htxf);
-    if (!conn) {
+    if (!htxf_connect (&htxf)) {
         g_test_fail_printf ("htxf_connect failed (HTXF port %u on %s "
                             "reachable?)",
                             (unsigned) srv->xfer_port, srv->host);
@@ -279,9 +276,8 @@ test_htxf_connect_file_get_aead (void)
     }
     g_assert_true (htxf.aead_active);
 
-    drain_and_check (&htxf, G_IO_STREAM (conn), reply.size);
+    drain_and_check (&htxf, reply.size);
 
-    g_object_unref (conn);
     htxf_io_release (&htxf);
     integration_release_htlc (&htlc);
     integration_close (fd);
@@ -378,8 +374,7 @@ test_htxf_connect_file_get_tls (void)
     htxf.ref = reply.ref;
     htxf.total_size = reply.size;
 
-    GSocketConnection *conn = htxf_connect (&htxf);
-    if (!conn) {
+    if (!htxf_connect (&htxf)) {
         g_test_fail_printf ("htxf_connect (TLS) failed (TLS HTXF port %u "
                             "on %s reachable?)",
                             (unsigned) srv->tls_xfer_port, srv->host);
@@ -389,9 +384,8 @@ test_htxf_connect_file_get_tls (void)
     }
     g_assert_false (htxf.aead_active);
 
-    drain_and_check (&htxf, G_IO_STREAM (conn), reply.size);
+    drain_and_check (&htxf, reply.size);
 
-    g_object_unref (conn);
     htxf_io_release (&htxf);
     integration_release_htlc (&htlc);
     integration_close_stream (ctrl);

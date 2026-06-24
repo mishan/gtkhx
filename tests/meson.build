@@ -1083,25 +1083,17 @@ test_aead = executable('test_aead',
 test('aead', test_aead,
      suite : 'proto')
 
-# htxf_io wrappers (htxf_io_read / htxf_io_write) round-tripped over
-# GMemoryInputStream / GMemoryOutputStream wrapped in GSimpleIOStream.
-# Pins plaintext + AEAD round-trip, multi-frame sequencing through
-# the receive-side accumulator, oversized-write rejection (EMSGSIZE),
-# and the truncated-frame / tag-tamper paths that must surface
-# errno=EIO to the worker. The Tier 3 matrix covers the happy path
-# against live mhxd / janus, but a framing-edge regression would
-# pass Tier 3 if servers send small enough frames — Tier 2 catches
-# that class with a deterministic in-memory transport.
-test_htxf_io = executable('test_htxf_io',
-  'proto/test_htxf_io.c',
-  '../src/htxf_io.c',
-  '../src/cipher_aead.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep],
-  include_directories : proto_test_inc,
-)
-test('htxf_io', test_htxf_io,
-     suite : 'proto')
+# NOTE: the former Tier-2 test_htxf_io target is gone. It exercised the
+# hand-rolled C AEAD byte pump in htxf_io.c (plaintext / AEAD round-trip,
+# multi-frame sequencing, oversized-write rejection, truncated-frame /
+# tag-tamper paths). That framing moved into the hxnet crate during the
+# HTXF→Rust H2 re-wire (rust/crates/hxnet/src/htxf.rs), where the same
+# cases are covered by unit tests (passthrough_roundtrip,
+# aead_single_frame_roundtrip, aead_multi_frame_and_partial_reads,
+# aead_tampered_frame_errors, aead_truncated_frame_errors) plus an
+# FFI-over-a-real-socket integration test. htxf_io.c is now a thin
+# errno-translating shim with nothing framing-specific left to unit-test
+# in C.
 
 # network_decode — receive-side qbuf-to-qbuf decoder split out of
 # network.c specifically so this test can drive its three branches
@@ -1973,19 +1965,12 @@ test('file_get', test_integration_file_get,
      suite   : 'integration',
      timeout : 30)
 
-# file_get_htxf_io — plaintext (no-AEAD) HTXF subchannel byte pump
-# driven through the PRODUCTION htxf_io_read passthrough leg, the one
-# mode the htxf_io tests didn't cover (every other one armed AEAD).
-# Parity oracle / regression guard for the HTXF→Rust H2 re-wire.
-test_integration_file_get_htxf_io = executable('test_integration_file_get_htxf_io',
-  'integration/test_file_get_htxf_io.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-)
-test('file_get_htxf_io', test_integration_file_get_htxf_io,
-     suite   : 'integration',
-     timeout : 30)
+# NOTE: the former file_get_htxf_io target is gone. It drove the
+# plaintext passthrough leg of the C byte pump through a hand-rolled
+# subchannel. The H2 re-wire moved that pump into the hxnet crate, and
+# the full production path (htxf_connect -> htxf_io_read) is now covered
+# across plaintext / AEAD / TLS by test_real_htxf_connect's three
+# siblings, so this hand-rolled variant is redundant.
 
 # banner — verify the post-AGREEMENTAGREE banner broadcast.
 # is_parallel: false because the htxf_mode subtest picks the first
