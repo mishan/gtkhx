@@ -143,28 +143,21 @@ test_file_get_round_trip_tls (void)
     hl_htxf_hdr_pack (hdr_buf, xfer_ref, xfer_size, HTXF_TYPE_FILE, 0);
     g_assert_true (integration_send_stream (xfer, hdr_buf, sizeof (hdr_buf)));
 
-    /* Stream the full body off the TLS subchannel through PRODUCTION
-     * htxf_io_read (not the harness read), so the TLS byte pump is
-     * production-tested — the combo the HTXF→Rust re-wire implements as
-     * HtxfChannel over connect_tls()'s rustls stream. Janus TLS file-get
-     * is plaintext-login-over-TLS, so the subchannel carries no AEAD:
-     * aead_active stays FALSE and htxf_io_read takes its passthrough leg
-     * over the (TLS-encrypted) GIOStream. */
-    struct htxf_conn xfer_conn;
-    memset (&xfer_conn, 0, sizeof (xfer_conn));
-    htxf_io_init (&xfer_conn);
-    g_assert_false (xfer_conn.aead_active);
-
+    /* Stream the full body off the TLS subchannel via the harness
+     * GIOStream read. (Production htxf_io_read over a real
+     * htxf_connect-opened TLS subchannel — the HtxfChannel-over-rustls
+     * byte pump the HTXF→Rust re-wire implements — is covered
+     * end-to-end by test_real_htxf_connect's TLS sibling. This test
+     * stays focused on the harness TLS xfer-connect path: TLS control
+     * login + FILE_GET + a TLS subchannel transfer that round-trips.) */
+    GInputStream *in = g_io_stream_get_input_stream (xfer);
     guint8 *payload = g_malloc (xfer_size);
     gsize got = 0;
-    while (got < xfer_size) {
-        ssize_t r = htxf_io_read (&xfer_conn, xfer, payload + got, xfer_size - got);
-        if (r <= 0) {
-            g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d (%s)",
-                            r, got, errno, g_strerror (errno));
-            break;
-        }
-        got += (gsize) r;
+    GError *rerr = NULL;
+    if (!g_input_stream_read_all (in, payload, xfer_size, &got, NULL, &rerr)) {
+        g_test_message ("TLS body read_all failed at got=%zu: %s", got,
+                        rerr ? rerr->message : "(no error)");
+        g_clear_error (&rerr);
     }
     g_assert_cmpuint ((guint) got, ==, xfer_size);
 
@@ -185,7 +178,6 @@ test_file_get_round_trip_tls (void)
     g_assert_true (found);
 
     g_free (payload);
-    htxf_io_release (&xfer_conn);
     integration_close_stream (xfer);
     integration_release_htlc (&htlc);
     integration_close_stream (ctrl);

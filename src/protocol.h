@@ -26,11 +26,12 @@
 
 #include "cipher.h"
 
-/* htxf_io.h defines struct htxf_aead_io, which is embedded as a
- * value field on struct htxf_conn below for the HOPE-ChaCha20-
- * Poly1305 HTXF subchannel (Phase E). The header has no
- * dependencies on protocol.h types itself — pulls in glib +
- * sys/types only — so the include is safe here. */
+/* htxf_io.h declares the thin C shim over hxnet's Rust HTXF
+ * subchannel transport (hxnet_htxf_*). struct htxf_conn below carries
+ * the opaque Rust handle (`void *hx`); the byte pump + AEAD framing
+ * live in the hxnet crate (rust/crates/hxnet/src/htxf.rs) since the
+ * HTXF→Rust H2 re-wire. The header pulls in glib + sys/types only, so
+ * the include is safe here. */
 #include "htxf_io.h"
 
 /* the connection and transfer structs used
@@ -155,26 +156,24 @@ struct htxf_conn {
 
     /* HOPE ChaCha20-Poly1305 HTXF subchannel state (Phase E).
 	 *
-	 * aead_active gates whether xfers.c's per-transfer
-	 * htxf_io_read / htxf_io_write wrappers route through the
-	 * AEAD path or fall through to plain read()/write(). Set by
-	 * htxf_connect on connections whose control channel
-	 * negotiated CIPHER_MODE_AEAD after calling
-	 * cipher_aead_derive_transfer_keys to populate
-	 * xfer_encode / xfer_decode (counters start at 0, never
-	 * reused across transfers — derivation mixes the HTXF ref
-	 * number into the per-transfer key).
+	 * aead_active records whether htxf_connect armed AEAD on this
+	 * transfer (control channel negotiated CIPHER_MODE_AEAD). It's
+	 * informational now — the framing itself lives in the Rust
+	 * hxnet HTXF channel behind `hx`. htxf_connect derives the
+	 * per-transfer keys into xfer_encode / xfer_decode (counters
+	 * start at 0, never reused across transfers — derivation mixes
+	 * the HTXF ref number into the per-transfer key) and hands them
+	 * to hxnet_htxf_open, which owns the seal/open state thereafter.
 	 *
-	 * aead_io owns the receive-side ciphertext + plaintext
-	 * accumulators the wrapper needs to assemble one frame at
-	 * a time before calling cipher_aead_open. Sender-side
-	 * doesn't need an accumulator: each htxf_io_write produces
-	 * exactly one frame on the wire. Reclaimed by
+	 * hx is the opaque hxnet HTXF channel handle (Rust HtxfConn *).
+	 * It owns the socket fd (and any TLS session), the AEAD framing
+	 * state, and the receive accumulators. Opened by htxf_connect,
+	 * driven by htxf_io_read / htxf_io_write, closed by
 	 * htxf_io_release at xfer worker teardown. */
     chacha_aead_state xfer_encode;
     chacha_aead_state xfer_decode;
     gboolean aead_active;
-    struct htxf_aead_io aead_io;
+    void *hx;
 };
 
 struct htlc_conn {

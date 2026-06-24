@@ -31,6 +31,14 @@ extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
                                                  const char *fingerprint);
 
+/* host:port-keyed variant of the TOFU verify, for the HTXF subchannel
+ * workers (banner.c) that snapshot the endpoint rather than hold an
+ * htlc. Same known-hosts decision, keyed on the subchannel's own
+ * host:port — the endpoint the pre-rewire GTlsConnection handler used.
+ * Returns TRUE to accept, FALSE to reject. */
+extern gboolean hx_tls_verify_subchannel_cert (const char *host, guint16 port,
+                                               const char *fingerprint);
+
 /* Phase G: register the orchestrator's "login" protocol task. Called
  * from the hxnet bridge's LOGIN_SENDING state callback so the login
  * task appears at the same point the legacy connect path registers it
@@ -90,20 +98,18 @@ extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 
 extern void kill_threads (void);
 
-/* Open the HTXF subchannel for `htxf` and send the 16/24-byte
- * plaintext preamble. Returns a connected GSocketConnection that
- * the caller owns (g_object_unref drops both the GIO machinery
- * and the underlying socket). On failure returns NULL.
+/* Open the HTXF subchannel for `htxf`: plaintext TCP connect (SOCKS /
+ * IPv4-IPv6 fallback via GSocketClient), hand the connected fd to
+ * hxnet_htxf_open along with the packed 16/24-byte preamble, the
+ * per-transfer AEAD keys (when the control channel negotiated
+ * CIPHER_MODE_AEAD), and the TLS flag. hxnet owns the socket, the
+ * optional rustls wrap, and the AEAD framing thereafter; the handle
+ * is stored on htxf->hx. Returns TRUE on success, FALSE on connect /
+ * handshake / open failure (the fd is closed on every failure path).
  *
- * Worker threads cast the returned conn to GIOStream and feed it
- * to htxf_io_read / htxf_io_write — both now stream-shaped and
- * AEAD-aware. The dup() + manual O_NONBLOCK toggle the old
- * fd-returning shape needed are gone; GSocketConnection is
- * blocking by default and the GIOStream APIs handle EINTR.
- *
- * AEAD subchannel keys (HOPE+ChaCha20) are armed before return
- * when the control channel negotiated CIPHER_MODE_AEAD. */
-extern GSocketConnection *htxf_connect (struct htxf_conn *htxf);
+ * Worker threads then stream bytes through htxf_io_read /
+ * htxf_io_write and close the channel via htxf_io_release. */
+extern gboolean htxf_connect (struct htxf_conn *htxf);
 
 /* Worker-thread blocking GSocketClient connect to host:port.
  * Returns a connected GSocketConnection on success (caller owns,

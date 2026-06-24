@@ -226,54 +226,43 @@ test_hope_chacha20_banner_htxf (void)
 
     /* Shared preamble packer mirrors production banner.c +
      * network.c::htxf_connect. Banners are never >4 GiB so size64
-     * stays FALSE; the 16-byte legacy variant comes out. */
+     * stays FALSE; the 16-byte legacy variant comes out. hxnet_htxf_open
+     * writes it raw before arming AEAD, so we don't send it ourselves. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     size_t hdr_len = hx_htxf_subchannel_pack_preamble (
         hdr_buf, sizeof (hdr_buf),
         ref, size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
-    g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 
-    /* Now arm the per-transfer AEAD state for the body. Shared
-     * builder does htxf_io_init + cipher_aead_derive_transfer_keys
-     * (mixing the ref into the salt so each subchannel gets its
-     * own key pair) + aead_active=TRUE — same call production uses. */
+    /* Derive the per-transfer AEAD keys into xfer.xfer_encode/decode
+     * (mixing the ref into the salt so each subchannel gets its own key
+     * pair) — same call production uses. Then hand the connected fd,
+     * preamble, and keys to hxnet, which adopts the fd, writes the
+     * plaintext preamble, and frames the body AEAD. Mirrors the
+     * production banner.c worker. tls=0: this is a plaintext subchannel
+     * (the harness already negotiated HOPE on the control channel). */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
+    htxf_io_init (&xfer);
     hx_htxf_subchannel_arm_aead (
         &xfer,
         htlc.sessionkey, htlc.sklen,
         &hope.encode_state, &hope.decode_state,
         ref);
+    xfer.hx = hxnet_htxf_open (xfer_fd, /*tls=*/0, /*host=*/NULL, 0,
+                              hdr_buf, hdr_len,
+                              &xfer.xfer_encode, &xfer.xfer_decode,
+                              /*verify_cert=*/NULL, /*user_data=*/NULL);
+    g_assert_nonnull (xfer.hx);
 
-    /* Wrap the raw fd from the harness in a GSocketConnection so we
-     * can hand a GIOStream to the Phase B htxf_io_read API. The
-     * GSocket adopts the fd (takes ownership), so we drop the
-     * integration_close call below — g_object_unref on the conn
-     * closes via the GSocket finaliser. */
-    GError *err = NULL;
-    GSocket *xfer_sock = g_socket_new_from_fd (xfer_fd, &err);
-    g_assert_no_error (err);
-    g_assert_nonnull (xfer_sock);
-    GSocketConnection *xfer_conn
-        = g_socket_connection_factory_create_connection (xfer_sock);
-    g_object_unref (xfer_sock);
-    /* The factory only returns NULL when the socket's family/type
-     * combination has no registered GSocketConnection subclass.
-     * AF_INET + SOCK_STREAM (what the harness produces) is always
-     * registered as GTcpConnection. Assert so a future harness
-     * shape change doesn't pass a NULL through to G_IO_STREAM(). */
-    g_assert_nonnull (xfer_conn);
-    GIOStream *xfer_io = G_IO_STREAM (xfer_conn);
-
-    /* Read `size` body bytes through htxf_io_read — consumes AEAD
-     * frames off the socket and reassembles the plaintext payload. */
+    /* Read `size` body bytes through htxf_io_read — the hxnet channel
+     * consumes AEAD frames off the socket and reassembles plaintext. */
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = htxf_io_read (&xfer, xfer_io, bytes + got, size - got);
+        ssize_t r = htxf_io_read (&xfer, bytes + got, size - got);
         if (r <= 0) {
             g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d "
                             "(%s)",
@@ -283,7 +272,6 @@ test_hope_chacha20_banner_htxf (void)
         got += (gsize) r;
     }
     g_assert_cmpuint ((guint) got, ==, size);
-    g_object_unref (xfer_conn);
     htxf_io_release (&xfer);
 
     g_test_message ("first 4 bytes: %02x %02x %02x %02x",

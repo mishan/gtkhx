@@ -655,117 +655,120 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
                size, f->generation);
 }
 
+/* TLS TOFU trampoline for the banner HTXF subchannel. hxnet calls
+ * this only when WebPKI validation failed; key the known-hosts
+ * decision on the subchannel's own host:port (the endpoint the
+ * pre-rewire GTlsConnection accept-cert handler used). user_data is
+ * the struct htxf_fetch, which snapshotted serverhost/serverport at
+ * spawn time. */
+static int
+banner_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
+{
+    struct htxf_fetch *f = user_data;
+    if (!f || !fp) {
+        return 0;
+    }
+    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    return hx_tls_verify_subchannel_cert (f->serverhost, f->serverport, fp_str)
+               ? 1
+               : 0;
+}
+
 static void
 banner_htxf_worker_run (void *arg)
 {
     struct htxf_fetch *f = arg;
-    GSocketConnection *conn = NULL;
-    GIOStream *io = NULL;
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     char errbuf[256] = { 0 };
+    GSocketConnection *conn = NULL;
+    int dupfd = -1;
 
+    /* Transient htxf_conn the worker owns for its whole lifetime —
+     * carries the hxnet channel handle (`hx`) plus the per-transfer
+     * AEAD keys. No list membership needed. */
+    struct htxf_conn xfer;
+    memset (&xfer, 0, sizeof (xfer));
+    xfer.ref = f->ref;
+    htxf_io_init (&xfer);
+
+    /* Plaintext TCP connect (SOCKS / IPv4-IPv6 fallback via
+     * GSocketClient); the optional TLS wrap is done by hxnet below,
+     * not here. Extract the connected fd and hand ownership over. */
     conn = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
-                                    sizeof (errbuf), f->tls);
+                                    sizeof (errbuf), /*tls=*/0);
     if (!conn) {
         debug_log ("banner", "htxf connect failed: %s", errbuf);
         goto out;
     }
-    /* g_clear_object on conn at the bottom closes the underlying
-	 * socket fd via the GSocket finaliser. */
-    io = G_IO_STREAM (conn);
+    {
+        GSocket *sock = g_socket_connection_get_socket (conn);
+        int sfd = sock ? g_socket_get_fd (sock) : -1;
+        if (sfd >= 0) {
+            dupfd = dup (sfd);
+        }
+    }
+    g_object_unref (conn);
+    if (dupfd < 0) {
+        debug_log ("banner", "htxf could not dup connected fd");
+        goto out;
+    }
 
-    /* type=HTXF_TYPE_BANNER so Mac-native servers route this
-	 * subchannel through their banner-send path rather than the
-	 * generic single-file path. Shared builder packs the 16-byte
-	 * preamble — see htxf_subchannel.h for the full rationale
-	 * (notably: the preamble is ALWAYS plaintext on the wire so
-	 * the server can match this subchannel to the queued transfer
-	 * by ref before any cipher state is available). Banner transfers
-	 * are never large enough to need the 24-byte SIZE64 variant. */
+    /* type=HTXF_TYPE_BANNER so Mac-native servers route this subchannel
+     * through their banner-send path. The preamble ALWAYS travels
+     * plaintext (the server matches the subchannel to the queued
+     * transfer by ref before any cipher state exists) — hxnet_htxf_open
+     * writes it raw before arming AEAD. Banner transfers never need the
+     * 24-byte SIZE64 variant. */
     size_t hdr_len = hx_htxf_subchannel_pack_preamble (
         hdr_buf, sizeof (hdr_buf),
         f->ref, f->size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);
     if (hdr_len == 0) {
-        /* Builder refused to pack — typically a sizing-bug that
-         * caller has to fix (buf too small, or impossible flag
-         * combination). errno isn't set on this path, so don't
-         * pretend it is. */
         debug_log ("banner",
                    "htxf header build failed (preamble builder returned 0)");
-        goto out;
-    }
-    GError *err = NULL;
-    if (!g_output_stream_write_all (
-            g_io_stream_get_output_stream (io),
-            hdr_buf, hdr_len, NULL, NULL, &err)) {
-        debug_log ("banner", "htxf header write failed: %s",
-                   err ? err->message : "(no error info)");
-        g_clear_error (&err);
+        close (dupfd);
         goto out;
     }
 
-    /* Body path. Under HOPE+ChaCha20 the bytes following the
-	 * plaintext preamble are framed AEAD packets; otherwise raw
-	 * stream. Build a transient struct htxf_conn that mirrors what
-	 * network.c::htxf_connect sets up for a regular transfer —
-	 * shared hx_htxf_subchannel_arm_aead does the per-transfer key
-	 * derivation (mixing in the ref so each subchannel gets its
-	 * own key) and flips aead_active. htxf_io_read does the rest.
-	 *
-	 * Stack-allocate the htxf_conn since the worker owns it for
-	 * its entire lifetime and we don't need it on a list. */
+    /* Under HOPE+ChaCha20 the body bytes after the preamble are framed
+     * AEAD packets. Derive the per-transfer key pair (mixing in ref so
+     * each subchannel gets its own key) into xfer.xfer_encode/decode
+     * and hand them to hxnet, which owns the framing thereafter. */
+    const chacha_aead_state *aead_enc = NULL;
+    const chacha_aead_state *aead_dec = NULL;
     if (f->aead_active) {
-        struct htxf_conn xfer;
-        memset (&xfer, 0, sizeof (xfer));
-        xfer.ref = f->ref;
-        hx_htxf_subchannel_arm_aead (
-            &xfer,
-            f->sessionkey, f->sklen,
-            &f->ctrl_encode, &f->ctrl_decode,
-            f->ref);
+        hx_htxf_subchannel_arm_aead (&xfer, f->sessionkey, f->sklen,
+                                     &f->ctrl_encode, &f->ctrl_decode,
+                                     f->ref);
+        aead_enc = &xfer.xfer_encode;
+        aead_dec = &xfer.xfer_decode;
+    }
 
+    xfer.hx = hxnet_htxf_open (
+        dupfd, f->tls,
+        (const guint8 *) f->serverhost, strlen (f->serverhost),
+        hdr_buf, hdr_len, aead_enc, aead_dec,
+        banner_verify_cert_cb, f);
+    if (!xfer.hx) {
+        debug_log ("banner", "htxf hxnet_htxf_open failed");
+        goto out;
+    }
+
+    /* Drain the body through the hxnet channel — passthrough for
+     * plaintext, AEAD-deframing when armed. Same loop either way. */
+    {
         guint8 *p = f->bytes;
         gsize remain = f->size;
         while (remain) {
-            ssize_t r = htxf_io_read (&xfer, io, p, remain);
+            ssize_t r = htxf_io_read (&xfer, p, remain);
             if (r <= 0) {
                 debug_log ("banner",
-                           "htxf body read failed (AEAD) at < %zu bytes: %s",
+                           "htxf body read failed at < %zu bytes: %s",
                            (size_t) remain, g_strerror (errno));
-                htxf_io_release (&xfer);
                 goto out;
             }
             p += r;
             remain -= (gsize) r;
-        }
-
-        htxf_io_release (&xfer);
-    } else
-    {
-        GError *body_err = NULL;
-        gsize got = 0;
-        gboolean ok = g_input_stream_read_all (
-            g_io_stream_get_input_stream (io),
-            f->bytes, f->size, &got, NULL, &body_err);
-        if (!ok || got != f->size) {
-            /* read_all sets body_err only when the stream errored.
-             * A clean EOF mid-read returns TRUE with got < count
-             * and NO GError — and errno is unrelated to GIO, so
-             * g_strerror(errno) would print stale junk ("Success",
-             * an unrelated syscall error from earlier in the
-             * worker, etc.). Distinguish the two cases explicitly. */
-            if (body_err) {
-                debug_log ("banner",
-                           "htxf body read failed at < %zu bytes: %s",
-                           (size_t) (f->size - got), body_err->message);
-            } else {
-                debug_log ("banner",
-                           "htxf body unexpected EOF (%zu of %u bytes)",
-                           got, f->size);
-            }
-            g_clear_error (&body_err);
-            goto out;
         }
     }
 
@@ -775,14 +778,14 @@ banner_htxf_worker_run (void *arg)
                f->generation);
 
 out:
-    /* g_clear_object closes the underlying socket fd via the
-	 * GSocket finaliser. NULL-safe. */
-    g_clear_object (&conn);
+    /* htxf_io_release closes the hxnet channel (drops the fd / TLS
+     * session). NULL-safe — no-op if open never succeeded. */
+    htxf_io_release (&xfer);
 
     /* The hxbridge shim posts banner_htxf_completion_run onto the
-	 * captured main context automatically as soon as this worker
-	 * returns. The user_data pointer (this `f`) flows through
-	 * unchanged. */
+     * captured main context automatically as soon as this worker
+     * returns. The user_data pointer (this `f`) flows through
+     * unchanged. */
 }
 
 static void
