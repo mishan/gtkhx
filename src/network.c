@@ -188,12 +188,6 @@ ping_stop (void)
     }
 }
 
-/* Forward decl — defined alongside install_check_idle further
- * down. hx_htlc_close calls this to drop any still-pending
- * install idle so a reconnect that reuses the htlc_conn slot
- * doesn't see a stale callback fire on the new handshake. */
-static void cancel_pending_install_idle (void);
-
 void
 hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
@@ -287,15 +281,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * the wrapped TcpStream's Drop closes the duped fd. Safe
      * to call whether or not the bridge was active. */
     hx_bridge_uninstall ();
-
-    /* If the deferred install idle was scheduled but never fired
-     * (e.g. teardown happened before htlc->out drained), drop it
-     * now. Critical to do this BEFORE the htlc_conn slot is reused
-     * by a reconnect — otherwise a stale idle could install hxnet
-     * over the new handshake's fd. The pending_install_source_id
-     * symbol + cancel helper live near install_check_idle further
-     * down; forward-declared at the top of the file. */
-    cancel_pending_install_idle ();
 
     /* GSocketConnection owns the fd; releasing it closes
 	 * the socket. Replaces the legacy close(fd) call. */
@@ -604,211 +589,6 @@ control_remove_all_sources (void)
  * snapshots the current counter / ivec value, so hxnet picks
  * up exactly where the C side left off.
  */
-/* Idle source ctx — snapshots the fd at scheduling time so we
- * can detect a reconnect that recycles the same htlc_conn struct
- * before the idle fires. If htlc->fd has changed by the time we
- * run, we're a stale callback from the previous connection and
- * must NOT install — the new connection is mid-handshake and
- * arming hxnet over its fd would corrupt the in-flight wire. */
-typedef struct {
-    struct htlc_conn *htlc;
-    int               expected_fd;
-} install_idle_ctx;
-
-/* Source id of the currently-pending install idle, or 0 if
- * none. hx_htlc_close removes the source via this id so a stale
- * idle can't fire after teardown. Single-threaded access — the
- * idle source dispatches on the main loop, hx_install_hxnet_post_
- * hope is called from the main loop, hx_htlc_close is called from
- * the main loop. */
-static guint pending_install_source_id = 0;
-
-static void
-install_idle_ctx_free (gpointer data)
-{
-    g_free (data);
-}
-
-static gboolean
-install_check_idle (gpointer user_data)
-{
-    install_idle_ctx *ctx = user_data;
-    struct htlc_conn *htlc = ctx->htlc;
-    if (!htlc || htlc->fd == 0) {
-        pending_install_source_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    if (htlc->fd != ctx->expected_fd) {
-        /* Reconnect raced us — the htlc_conn slot was reused for
-         * a new connection (different fd) before this idle fired.
-         * The new handshake is in flight; do not install over it. */
-        g_debug ("hxnet install: stale idle (expected_fd=%d, current "
-                 "htlc->fd=%d); discarding",
-                 ctx->expected_fd, htlc->fd);
-        pending_install_source_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    if (hx_bridge_is_installed ()) {
-        /* Someone else installed first (e.g. a reconnect raced
-         * with us); we have nothing to do. */
-        pending_install_source_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    if (htlc->out.len > 0) {
-        /* Legacy write source still has bytes to flush. Yield
-         * back to the main loop; we'll re-check next iteration.
-         * (Returning G_SOURCE_CONTINUE on an idle source keeps
-         * it in the queue without re-firing during this
-         * iteration's dispatch.) */
-        return G_SOURCE_CONTINUE;
-    }
-    if (htlc->in.pos != 0) {
-        /* The legacy GIOStream's read path may have decrypted
-         * bytes from the socket that the rcv state machine
-         * hasn't finished consuming yet — they're sitting at
-         * htlc->in.buf[0..pos] waiting for the next htlc->rcv()
-         * call. If we installed hxnet now, hxnet would start
-         * reading the NEXT undelivered socket byte, but its
-         * cipher state has been advanced past those leftover
-         * bytes too — the positions match but the WIRE FRAME
-         * BOUNDARIES are off by `htlc->in.pos` bytes, hxnet
-         * would treat the next 22 bytes it reads as a frame
-         * header even though those bytes are mid-frame on the
-         * wire, producing garbage that the actor surfaces as a
-         * StreamError.
-         *
-         * Note: the right indicator is `pos != 0`, not
-         * `len > 0`. `len` is the *bytes-remaining-to-receive*
-         * counter that the rcv state machine re-arms to
-         * SIZEOF_HL_HDR after every fully-consumed frame, so
-         * `len > 0` is true almost continuously and would
-         * prevent the install from ever firing. `pos != 0`
-         * specifically captures "we've buffered some bytes but
-         * haven't dispatched them yet". Wait for the rcv state
-         * machine to fully consume htlc->in before handing off;
-         * usually one more main-loop iteration. Caught by
-         * tests/integration/test_hope_blowfish_hxnet.c, which
-         * reproduces the bug against live Janus and the fix
-         * here unblocks it. */
-        return G_SOURCE_CONTINUE;
-    }
-
-    int dup_fd = dup (htlc->fd);
-    if (dup_fd < 0) {
-        g_critical (
-            "hxnet install: dup(htlc->fd=%d) failed (%s); staying "
-            "on legacy GIOStream path (set GTKHX_USE_HXNET=0 to "
-            "silence)",
-            htlc->fd, g_strerror (errno));
-        pending_install_source_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    /* Set FD_CLOEXEC so the duped control socket fd doesn't
-     * leak into exec'd child processes. Don't use the
-     * fd_closeonexec helper higher up in this file — its `on`
-     * parameter is inverted (on=1 *clears* FD_CLOEXEC, on=0
-     * sets it), which has bitten everyone who ever called it.
-     * Direct fcntl is unambiguous. Failure here is non-fatal —
-     * the worst case is the fd survives an unrelated exec()
-     * which gtkhx never does in production. */
-    int flags = fcntl (dup_fd, F_GETFD, 0);
-    if (flags == -1 || fcntl (dup_fd, F_SETFD, flags | FD_CLOEXEC) == -1) {
-        g_warning ("hxnet install: failed to set FD_CLOEXEC on dup_fd=%d (%s)",
-                   dup_fd, g_strerror (errno));
-    }
-
-    if (!hx_bridge_install_with_hope_state (htlc, dup_fd)) {
-        /* The bridge logs its own g_critical and closes
-         * dup_fd on the failure path; we just stay on the
-         * legacy path. */
-        pending_install_source_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-
-    /* Disarm the legacy sources — control_on_readable and
-     * control_on_writable must not race hxnet on the kernel
-     * buffer. */
-    control_remove_all_sources ();
-
-    /* Clear the cipher / compress state so the C-side
-     * encoders (cipher_encode, compress_encode in hlwrite)
-     * see NONE/NONE and skip in-place encoding. The transform
-     * stack inside hxnet now owns the negotiated cipher /
-     * compression. We don't free the state-object slots
-     * here — hx_htlc_close already does that on teardown,
-     * and freeing here would risk a use-after-free if any
-     * in-flight rcv path happens to dereference them. */
-    htlc->cipher_encode_type = CIPHER_NONE;
-    htlc->cipher_decode_type = CIPHER_NONE;
-    htlc->compress_encode_type = COMPRESS_NONE;
-    htlc->compress_decode_type = COMPRESS_NONE;
-    pending_install_source_id = 0;
-    return G_SOURCE_REMOVE;
-}
-
-/* R3.3.e-4e: hxnet is the default. Set GTKHX_USE_HXNET=0 to
- * opt out and stay on the legacy GIOStream path. Any other
- * value (including the env-var being unset) opts in.
- *
- * Why a string compare rather than a boolean: we keep the same
- * env-var name as the 4c/4d opt-in flag so test harnesses and
- * shell aliases don't need to change; we just flip the
- * polarity. "0" is the universally-understood opt-out token.
- * "off" / "false" / "no" are not honored — keep the surface
- * minimal so there's no ambiguity in bug reports. */
-static gboolean
-hxnet_opt_in (void)
-{
-    const char *v = g_getenv ("GTKHX_USE_HXNET");
-    if (v != NULL && g_strcmp0 (v, "0") == 0) {
-        return FALSE;
-    }
-    return TRUE;
-}
-
-void
-hx_install_hxnet_post_hope (struct htlc_conn *htlc)
-{
-    if (!hxnet_opt_in ()) {
-        return;
-    }
-    if (!htlc || htlc->tls || htlc->fd == 0) {
-        return;
-    }
-    if (hx_bridge_is_installed ()) {
-        return;
-    }
-    if (pending_install_source_id != 0) {
-        /* An install idle is already pending. Don't double-
-         * schedule — the first one will fire when htlc->out
-         * drains. */
-        return;
-    }
-    /* See the doc-comment on install_check_idle for why we
-     * defer rather than install synchronously. The ctx
-     * snapshots the fd we expect to install over so a stale
-     * callback can detect a reconnect-on-same-htlc race and
-     * abort. */
-    install_idle_ctx *ctx = g_new0 (install_idle_ctx, 1);
-    ctx->htlc        = htlc;
-    ctx->expected_fd = htlc->fd;
-    pending_install_source_id = g_idle_add_full (
-        G_PRIORITY_DEFAULT_IDLE, install_check_idle, ctx,
-        install_idle_ctx_free);
-}
-
-/* Called from hx_htlc_close: drop any pending install idle so a
- * stale callback can't fire on a reconnect that reuses the same
- * htlc_conn slot. Safe to call when no source is pending. */
-static void
-cancel_pending_install_idle (void)
-{
-    if (pending_install_source_id != 0) {
-        g_source_remove (pending_install_source_id);
-        pending_install_source_id = 0;
-    }
-}
-
 /* Mirror of htlc_stream_read for the outbound side. Same return
  * shape: >=0 bytes written, -1 transient, -2 fatal. */
 static ssize_t
@@ -953,77 +733,14 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
     hx_post_login_fetches (htlc);
 }
 
-/* async connect via GSocketClient.
- *
- * Replaces the legacy pthread worker (hx_thread_connect) that did
- * blocking DNS / connect / magic-exchange / login-send off the main
- * thread, then handed the fd back via gtkhx_invoke_sync. The new
- * flow is a chain of GSocketClient / GInputStream / GOutputStream
- * async callbacks on the GMainContext default loop:
- *
- *   hx_connect
- *     → g_socket_client_connect_to_host_async  (DNS + TCP connect)
- *       → on_async_connected
- *           write HTLC_MAGIC via g_output_stream_write_all_async
- *           → on_magic_sent
- *               read HTLS_MAGIC via g_input_stream_read_all_async,
- *               arm a 30 s magic-timeout cancellable
- *               → on_magic_received
- *                   validate magic, init htlc qbuf state, populate
- *                   htlc->ip_addr from GSocketAddress, install the fd
- *                   watch, send LOGIN, free the ctx.
- *
- * Cancellation goes through current_cancel — hx_htlc_close
- * cancels it, which short-circuits any in-flight async op and
- * lands in connect_fail on the next callback.
- *
- * No worker thread, no gtkhx_invoke_sync, no post_session_int /
- * post_int / post_task_new — the legacy login flow used those to
- * marshal back to main; in the async version we're already on main
- * inside every callback. */
-typedef enum {
-    GTKHX_CONNECT_STATE_IDLE,
-    GTKHX_CONNECT_STATE_RESOLVING,
-    GTKHX_CONNECT_STATE_WRITING_MAGIC,
-    GTKHX_CONNECT_STATE_READING_MAGIC,
-    GTKHX_CONNECT_STATE_DONE,
-} GtkhxConnectState;
-
-/* Phase 3 TLS: identifying tuple threaded through the
- * GSocketClient::event signal to the accept-certificate handler.
- * Defined here so gtkhx_connect_ctx below can hold one inline.
- * The accept handler body lives later in the file; this
- * forward declaration just gives the struct its layout. */
+/* Identifying tuple threaded through the GSocketClient::event signal
+ * to the TLS accept-certificate handler (still used by the tracker
+ * TLS connect, tracker_fetch_connect). The accept handler body lives
+ * later in the file; this gives the struct its layout. */
 struct tls_endpoint {
     const char *host;
     guint16 port;
 };
-
-struct gtkhx_connect_ctx {
-    struct htlc_conn *htlc;
-    char *serverstr;
-    char *login;
-    char *pass;
-    int secure;
-    int tls; /* TLS Phase 1: wrap control socket from byte zero */
-    guint16 port;
-
-    /* identifying tuple for the accept-certificate
-     * handler. Populated when tls=1 right before the
-     * GSocketClient connect kicks off; .host borrows from
-     * serverstr (same lifetime). */
-    struct tls_endpoint tls_endpoint;
-
-    GSocketConnection *conn;
-    GCancellable *cancel;
-    guint magic_timeout_id;
-
-    char magic[HTLS_MAGIC_LEN];
-
-    GtkhxConnectState state;
-};
-
-#define MAGIC_TIMEOUT_SEC 30
 
 
 /* Phase 3 TLS: deferred pin payload. Stamping a new known-hosts

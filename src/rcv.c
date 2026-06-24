@@ -1750,540 +1750,258 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
                                               : _ ("successful"));
     }
 
-    if (pass) {
-        /* HOPE Step 1 reply handling.
+    /* The HOPE step-1→step-2 handshake the legacy connect path drove
+     * here is gone — the orchestrator (hxnet) owns the whole HOPE
+     * handshake in Rust and replays only the final reply, so this task
+     * always runs the post-login completion below (pass is always
+     * NULL). */
+    if (!task_inerror (htlc)) {
+        play_sound (LOGIN);
+        changetitlesconnected (sess);
+        setbtns (sess, 1);
+        set_status_bar (2);
+        connected = 1;
+
+        /* Reset post-login fetch state before scheduling so
+		 * a reconnection during this process state starts clean.
 		 *
-		 * The data layer (chunk walking, algorithm-name extraction,
-		 * MAC-chain crypto, session-key validation, login-field
-		 * encoding, reply-alg-list packing) lives in src/hope.c —
-		 * we hand it the htlc + a few client-side knobs and it
-		 * returns parsed data. Side effects (UI logging, error
-		 * tear-down, hlwrite, cipher/compress init) stay here in
-		 * the orchestrator. */
-        struct hope_step1_reply sel;
-        enum hope_step1_err herr
-            = hope_parse_step1_reply (htlc, htlc->macalg, &sel);
-
-        if (herr == HOPE_ERR_NO_MAC_ALG) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX, "No macalg from server\n");
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-        if (herr == HOPE_ERR_BAD_MAC_ALG) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Malformed macalg list from server\n");
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-        if (herr == HOPE_ERR_SHORT_SESSIONKEY) {
-            /* hope_parse_step1_reply intentionally only updates
-			 * htlc->sklen on success; pull the actual observed
-			 * length out of the reply struct so the message
-			 * reflects what the server sent. */
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "sessionkey length (%u) not big enough\n",
-                              (unsigned) sel.observed_sklen);
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-        if (herr != HOPE_OK) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "HOPE Step 1 parse error %d\n", (int) herr);
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-        /* hope_parse_step1_reply outputs the server-picked macalg
-		 * in sel.macalg; copy back into htlc->macalg so the rest
-		 * of the code (and downstream messages) sees the agreed
-		 * value rather than our pre-negotiation preference. */
-        g_strlcpy (htlc->macalg, sel.macalg, sizeof (htlc->macalg));
-
-        /* Session-key IP:port advisory check. NAT or MITM produces a
-		 * mismatch; warn but continue (shxd-family clients disconnect
-		 * — friendlier behind home-NAT). */
-        char ip_warn[256];
-        if (hope_validate_sessionkey_ip (htlc->sessionkey, htlc->sklen,
-                                         htlc->ip_addr, htlc->serverport,
-                                         ip_warn, sizeof (ip_warn))) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX, "%s", ip_warn);
-        }
-
-        if (task_inerror (htlc)) {
-            g_free (pass);
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-        task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-
-        /* HTLC_DATA_LOGIN field encoding (HMAC variant for
-		 * secure_login, hl_code XOR otherwise). */
-        guint8 login[32];
-        size_t llen = hope_build_login_field (
-            htlc->login, sel.secure_login,
-            htlc->sessionkey, htlc->sklen, htlc->macalg,
-            login, sizeof (login));
-        /* llen==0 is legitimate in the XOR variant when htlc->login
-		 * is empty (e.g. anonymous-guest bookmarks against Janus,
-		 * which echoes an empty HTLS_DATA_LOGIN chunk so the
-		 * sel.secure_login probe stays 0). Only treat 0 as a bad-
-		 * macalg failure in the HMAC variant — HMAC-of-anything
-		 * always emits 16/20/32 bytes for a valid algorithm. The
-		 * pre-refactor inline code didn't trip this either; the
-		 * regression came in when the size_t return value started
-		 * conflating "failure" with "empty XOR output". */
-        if (sel.secure_login && !llen) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "bad HMAC algorithm %s\n", htlc->macalg);
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-
-        /* HMAC chain: password_mac + spec encode_key + spec decode_key.
-		 * Spec-aligned outputs; we map into htlc->cipher_{en,de}code_key
-		 * with the legacy-storage swap below (encode_key → decode slot,
-		 * decode_key → encode slot — see hope.h's docstring). */
-        uint8_t password_mac[HOPE_MAC_MAX];
-        uint8_t spec_encode_key[HOPE_MAC_MAX];
-        uint8_t spec_decode_key[HOPE_MAC_MAX];
-        size_t pmaclen = hope_compute_chain (
-            pass, htlc->sessionkey, htlc->sklen, htlc->macalg,
-            password_mac, spec_encode_key, spec_decode_key);
-        if (!pmaclen) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "bad HMAC algorithm %s\n", htlc->macalg);
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-
-        guint8 compressalglist[64];
-        size_t compressalglistlen = 0;
-        if (!htlc->compressalg[0] || !strcmp (htlc->compressalg, "NONE")) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "WARNING: this connection is not compressed\n");
-        } else if (!sel.s_compressalg[0] || !sel.c_compressalg[0]) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "No compress algorithm from server\n");
-            hx_htlc_close (htlc, 0);
-            return;
-        } else if (!valid_compress (sel.c_compressalg)) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Bad client compress algorithm %s\n",
-                              sel.c_compressalg);
-            hx_htlc_close (htlc, 0);
-            return;
-        } else if (!valid_compress (sel.s_compressalg)) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Bad server compress algorithm %s\n",
-                              sel.s_compressalg);
-            hx_htlc_close (htlc, 0);
-            return;
-        } else {
-            compressalglistlen = hope_build_alg_reply (
-                sel.s_compressalg, compressalglist, sizeof (compressalglist));
-        }
-
-        guint8 cipheralglist[64];
-        size_t cipheralglistlen = 0;
-        if (!htlc->cipheralg[0] || !strcmp (htlc->cipheralg, "NONE")) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "WARNING: this connection is not encrypted\n");
-        } else if (!sel.s_cipheralg[0] || !sel.c_cipheralg[0]) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "No cipher algorithm from server\n");
-            hx_htlc_close (htlc, 0);
-            return;
-        } else if (!valid_cipher (sel.c_cipheralg)) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Bad client cipher algorithm %s\n",
-                              sel.c_cipheralg);
-            hx_htlc_close (htlc, 0);
-            return;
-        } else if (!valid_cipher (sel.s_cipheralg)) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "Bad server cipher algorithm %s\n",
-                              sel.s_cipheralg);
-            hx_htlc_close (htlc, 0);
-            return;
-        } else {
-            cipheralglistlen = hope_build_alg_reply (
-                sel.s_cipheralg, cipheralglist, sizeof (cipheralglist));
-            /* Map spec-aligned chain outputs into GtkHx's legacy
-			 * storage convention via the shared helper. The slot
-			 * swap (encode_key → decode slot, decode_key → encode
-			 * slot) is the same one the Tier 3 harness applies in
-			 * send_hope_step2; sharing keeps the convention single-
-			 * sourced. See hope.h. */
-            hope_store_chain_keys (htlc, spec_encode_key, spec_decode_key,
-                                   pmaclen);
-        }
-
-        /* Hand the pre-computed HOPE fields to the shared chunk
-		 * builder. Same chunk ordering / gating as before; the
-		 * harness uses the same builder via send_hope_step2, so
-		 * any future Step 2 protocol tweak only edits login_packet.c.
-		 * DATA_CAPABILITIES set mirrors the legacy LOGIN's set
-		 * (network.c around line 1159): large-files, text-encoding,
-		 * chat-history. */
-        hx_login_request req = {
-            .mode = HX_LOGIN_MODE_HOPE_STEP2,
-            .icon = htlc->icon,
-            .display_name = htlc->name,
-            /* Advertise ourselves as Hotline 1.8.5 (185) so mhxd's
-			 * rcv_login sets can_ping; without this the HOPE
-			 * post-login PING timer would fire task-errors on the
-			 * server side every 60 s. Same value the legacy LOGIN
-			 * advertises (network.c::send_login). */
-            .client_version = 185,
-            .caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                  | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
-                  | HTLC_CAP_INLINE_MEDIA,
-            .login_field = login,
-            .login_field_len = (guint16) llen,
-            .password_mac = password_mac,
-            .password_mac_len = (guint16) pmaclen,
-            .cipher_alg_reply = cipheralglist,
-            .cipher_alg_reply_len = (guint16) cipheralglistlen,
-            .compress_alg_reply = compressalglist,
-            .compress_alg_reply_len = (guint16) compressalglistlen,
-        };
-        struct hx_chunk step2_chunks[HX_LOGIN_MAX_CHUNKS];
-        guint8 step2_scratch[HX_LOGIN_SCRATCH_SIZE];
-        int hc = hx_login_build_chunks (&req, step2_chunks,
-                                        HX_LOGIN_MAX_CHUNKS, step2_scratch,
-                                        sizeof (step2_scratch));
-        /* Builder returns 0 on argument / overflow validation
-		 * failures. Treat as a handshake failure rather than
-		 * assert-trap (assertions can be disabled with
-		 * G_DISABLE_ASSERT) and avoid sending a malformed LOGIN. */
-        if (hc <= 0) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "HOPE Step 2 LOGIN builder failed\n");
-            g_free (pass);
-            hx_htlc_close (htlc, 0);
-            return;
-        }
-        hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, step2_chunks, hc);
-        g_free (pass);
-
-        if (compressalglistlen) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "compress: server %s client %s\n",
-                              sel.c_compressalg, sel.s_compressalg);
-            htlc->compress_encode_type
-                = compress_id_from_name (sel.c_compressalg);
-            compress_encode_init (htlc);
-            htlc->compress_decode_type
-                = compress_id_from_name (sel.s_compressalg);
-            compress_decode_init (htlc);
-        }
-
-        if (cipheralglistlen) {
-            hx_printf_prefix (htlc, 0, INFOPREFIX,
-                              "cipher: server %s client %s\n",
-                              sel.c_cipheralg, sel.s_cipheralg);
-            htlc->cipher_decode_type
-                = hope_cipher_id_from_name (sel.s_cipheralg);
-            htlc->cipher_encode_type
-                = hope_cipher_id_from_name (sel.c_cipheralg);
-
-            /* HOPE-ChaCha20-Poly1305: when both directions resolve
-			 * to CHACHA20, flip cipher_mode to AEAD and stretch
-			 * the MAC-derived keys to 256 bits via HKDF-SHA256.
-			 * The spec's "encode_key" goes into our DECODE slot
-			 * and vice versa — server's outbound key is what we
-			 * use to read; see cipher_aead_derive_session_keys'
-			 * docstring for the full rationale. We pass our
-			 * (already mapped) storage slots in the spec-aligned
-			 * argument order. */
-            if (hope_cipher_is_aead (sel.s_cipheralg)
-                && hope_cipher_is_aead (sel.c_cipheralg)) {
-                /* AEAD ciphers (ChaCha20-Poly1305 today) always
-				 * use AEAD framing — server_says_aead is just the
-				 * server's confirmation; the cipher name alone
-				 * determines the mode. */
-                htlc->cipher_mode = CIPHER_MODE_AEAD;
-                cipher_aead_derive_session_keys (
-                    &htlc->cipher_encode_state.chacha,
-                    &htlc->cipher_decode_state.chacha,
-                    htlc->sessionkey, htlc->sklen,
-                    htlc->cipher_decode_key, htlc->cipher_decode_keylen,
-                    htlc->cipher_encode_key, htlc->cipher_encode_keylen);
-            } else {
-                htlc->cipher_mode = CIPHER_MODE_STREAM;
+		 * The check on already_fetched used to cover a race where
+		 * SELFINFO arrived before the login TASK reply and fired
+		 * the fetches already; that race no longer matters because
+		 * SELFINFO is not a fetch trigger anymore (fetches fire
+		 * from hx_send_agreement_agree). The check is harmless
+		 * to keep — it's a no-op when the flag is FALSE, which is
+		 * the new common case. The fetched-bit itself lives on
+		 * htlc->flags.post_login_fetched now (so the files browser
+		 * can read it); the running timer id is still our local
+		 * static. */
+        gboolean already_fetched = htlc->flags.post_login_fetched;
+        if (!already_fetched) {
+            htlc->flags.post_login_fetched = 0;
+            if (post_login_timer_id) {
+                g_source_remove (post_login_timer_id);
+                post_login_timer_id = 0;
             }
-            cipher_encode_init (htlc);
-            cipher_decode_init (htlc);
         }
 
-        /* R3.3.e-4d/4e: HOPE step-2 is complete and any
-         * negotiated cipher / compression state is fully
-         * initialised. Unless TLS is active or the user opted
-         * out via GTKHX_USE_HXNET=0, hand the fd over to hxnet
-         * now with the matching transform stack. The helper
-         * handles all gate / TLS / fd checks internally. After
-         * this returns successfully, htlc->cipher_*_type and
-         * compress_*_type are cleared to NONE so the C-side
-         * encoders downstream of hlwrite skip in-place encoding
-         * (hxnet's transform stack now owns it). */
-        hx_install_hxnet_post_hope (htlc);
-    } else {
-        if (!task_inerror (htlc)) {
-            play_sound (LOGIN);
-            changetitlesconnected (sess);
-            setbtns (sess, 1);
-            set_status_bar (2);
-            connected = 1;
+        /* Phase 9.A: clear inline-media advisory limits BEFORE
+		 * walking the LOGIN reply. Each MAX_* field is
+		 * independently optional on the wire (spec: "Clients
+		 * MUST tolerate any individual field being absent"),
+		 * so the chunk walker below only writes the ones the
+		 * server advertised — any field omitted from this
+		 * particular LOGIN would otherwise inherit a stale
+		 * value from a prior session on the same htlc_conn
+		 * struct (network.c::hx_htlc_close also zeroes them
+		 * on disconnect, but a server reconfiguration mid-
+		 * lifetime that re-LOGINs without going through
+		 * close would otherwise still carry stale fields).
+		 * htlc->caps is overwritten outright by the chunk
+		 * walker; these can't piggyback on that. */
+        inline_media_reset_advisory_limits (htlc);
 
-            /* R3.3.e-4d/4e: non-HOPE login completion (1.0/1.2
-             * server, or any HOPE-capable server that didn't
-             * negotiate a cipher/compress this session). Same
-             * hxnet install hook as the HOPE branch — for
-             * cipher_*_type == NONE it spawns the bridge with
-             * a passthrough transform stack. No-op when the
-             * user opts out via GTKHX_USE_HXNET=0. */
-            hx_install_hxnet_post_hope (htlc);
-
-            /* Reset post-login fetch state before scheduling so
-			 * a reconnection during this process state starts clean.
-			 *
-			 * The check on already_fetched used to cover a race where
-			 * SELFINFO arrived before the login TASK reply and fired
-			 * the fetches already; that race no longer matters because
-			 * SELFINFO is not a fetch trigger anymore (fetches fire
-			 * from hx_send_agreement_agree). The check is harmless
-			 * to keep — it's a no-op when the flag is FALSE, which is
-			 * the new common case. The fetched-bit itself lives on
-			 * htlc->flags.post_login_fetched now (so the files browser
-			 * can read it); the running timer id is still our local
-			 * static. */
-            gboolean already_fetched = htlc->flags.post_login_fetched;
-            if (!already_fetched) {
-                htlc->flags.post_login_fetched = 0;
-                if (post_login_timer_id) {
-                    g_source_remove (post_login_timer_id);
-                    post_login_timer_id = 0;
+        dh_start (htlc)
+        {
+            switch (_type) {
+            case HTLS_DATA_UID:
+                dh_getint (uid);
+                htlc->uid = uid;
+                break;
+            case HTLS_DATA_VERSION: /* Hotline 1.5+ servers only */
+                dh_getint (version);
+                htlc->version = version;
+                break;
+            case HTLS_DATA_SERVERNAME: /* Hotline 1.5+ servers only */
+                len = (_len > sizeof (servername) - 1)
+                          ? sizeof (servername) - 1
+                          : _len;
+                memcpy (servername, dh->data, len);
+                CR2LF (servername, len);
+                strip_ansi (servername, len);
+                servername[len] = 0;
+                if (server_addr) {
+                    g_free (server_addr);
                 }
-            }
-
-            /* Phase 9.A: clear inline-media advisory limits BEFORE
-			 * walking the LOGIN reply. Each MAX_* field is
-			 * independently optional on the wire (spec: "Clients
-			 * MUST tolerate any individual field being absent"),
-			 * so the chunk walker below only writes the ones the
-			 * server advertised — any field omitted from this
-			 * particular LOGIN would otherwise inherit a stale
-			 * value from a prior session on the same htlc_conn
-			 * struct (network.c::hx_htlc_close also zeroes them
-			 * on disconnect, but a server reconfiguration mid-
-			 * lifetime that re-LOGINs without going through
-			 * close would otherwise still carry stale fields).
-			 * htlc->caps is overwritten outright by the chunk
-			 * walker; these can't piggyback on that. */
-            inline_media_reset_advisory_limits (htlc);
-
-            dh_start (htlc)
-            {
-                switch (_type) {
-                case HTLS_DATA_UID:
-                    dh_getint (uid);
-                    htlc->uid = uid;
-                    break;
-                case HTLS_DATA_VERSION: /* Hotline 1.5+ servers only */
-                    dh_getint (version);
-                    htlc->version = version;
-                    break;
-                case HTLS_DATA_SERVERNAME: /* Hotline 1.5+ servers only */
-                    len = (_len > sizeof (servername) - 1)
-                              ? sizeof (servername) - 1
-                              : _len;
-                    memcpy (servername, dh->data, len);
-                    CR2LF (servername, len);
-                    strip_ansi (servername, len);
-                    servername[len] = 0;
-                    if (server_addr) {
-                        g_free (server_addr);
+                /* server names from old Hotline servers are
+				 * 8-bit Mac Roman text, not UTF-8 — and gtk_window_set_title
+				 * et al. assert UTF-8. gtkhx_text_to_utf8 handles the
+				 * already-UTF-8 / Mac-Roman / fall-back-to-substitute
+				 * cascade. */
+                server_addr = gtkhx_text_to_utf8 (
+                    servername, strlen (servername), NULL);
+                changetitlesconnected (sess);
+                break;
+            case HTLS_DATA_CAPABILITIES:
+                /* DATA_CAPABILITIES echo from the server — the bits
+				 * the server agreed to enable for this session.
+				 * Per spec the field is a variable-width big-endian
+				 * unsigned integer (typically 2 bytes, extensible
+				 * to 8). hl_capabilities_decode (proto_helpers)
+				 * normalises whatever width arrived into our 64-
+				 * bit field. Bits we don't recognise are silently
+				 * preserved per the spec's "ignore unknown bits"
+				 * requirement — they don't affect behaviour but
+				 * leave the door open if a server advertises a cap
+				 * we'll start using later. */
+                {
+                    guint64 caps
+                        = hl_capabilities_decode (dh->data, _len);
+                    htlc->caps = caps;
+                    if (caps & HTLC_CAP_LARGE_FILES) {
+                        hx_printf_prefix (
+                            htlc, 0, INFOPREFIX,
+                            _ ("server confirmed large-file (64-bit) "
+                               "mode for this session\n"));
                     }
-                    /* server names from old Hotline servers are
-					 * 8-bit Mac Roman text, not UTF-8 — and gtk_window_set_title
-					 * et al. assert UTF-8. gtkhx_text_to_utf8 handles the
-					 * already-UTF-8 / Mac-Roman / fall-back-to-substitute
-					 * cascade. */
-                    server_addr = gtkhx_text_to_utf8 (
-                        servername, strlen (servername), NULL);
-                    changetitlesconnected (sess);
-                    break;
-                case HTLS_DATA_CAPABILITIES:
-                    /* DATA_CAPABILITIES echo from the server — the bits
-					 * the server agreed to enable for this session.
-					 * Per spec the field is a variable-width big-endian
-					 * unsigned integer (typically 2 bytes, extensible
-					 * to 8). hl_capabilities_decode (proto_helpers)
-					 * normalises whatever width arrived into our 64-
-					 * bit field. Bits we don't recognise are silently
-					 * preserved per the spec's "ignore unknown bits"
-					 * requirement — they don't affect behaviour but
-					 * leave the door open if a server advertises a cap
-					 * we'll start using later. */
-                    {
-                        guint64 caps
-                            = hl_capabilities_decode (dh->data, _len);
-                        htlc->caps = caps;
-                        if (caps & HTLC_CAP_LARGE_FILES) {
-                            hx_printf_prefix (
-                                htlc, 0, INFOPREFIX,
-                                _ ("server confirmed large-file (64-bit) "
-                                   "mode for this session\n"));
-                        }
-                        if (caps & HTLC_CAP_TEXT_ENCODING) {
-                            hx_printf_prefix (
-                                htlc, 0, INFOPREFIX,
-                                _ ("server confirmed UTF-8 text encoding "
-                                   "for this session\n"));
-                        }
-                        if (caps & HTLC_CAP_CHAT_HISTORY) {
-                            hx_printf_prefix (
-                                htlc, 0, INFOPREFIX,
-                                _ ("server confirmed chat-history extension "
-                                   "for this session\n"));
-                        }
-                        if (caps & HTLC_CAP_INLINE_MEDIA) {
-                            hx_printf_prefix (
-                                htlc, 0, INFOPREFIX,
-                                _ ("server confirmed inline-media extension "
-                                   "for this session\n"));
-                        }
+                    if (caps & HTLC_CAP_TEXT_ENCODING) {
+                        hx_printf_prefix (
+                            htlc, 0, INFOPREFIX,
+                            _ ("server confirmed UTF-8 text encoding "
+                               "for this session\n"));
                     }
-                    break;
-                case HTLS_DATA_CHAT_MEDIA_MAX_BYTES:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->media_max_bytes = v;
+                    if (caps & HTLC_CAP_CHAT_HISTORY) {
+                        hx_printf_prefix (
+                            htlc, 0, INFOPREFIX,
+                            _ ("server confirmed chat-history extension "
+                               "for this session\n"));
                     }
-                    break;
-                case HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->media_max_dimension = v;
+                    if (caps & HTLC_CAP_INLINE_MEDIA) {
+                        hx_printf_prefix (
+                            htlc, 0, INFOPREFIX,
+                            _ ("server confirmed inline-media extension "
+                               "for this session\n"));
                     }
-                    break;
-                case HTLS_DATA_CHAT_MEDIA_MAX_PIXELS:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->media_max_pixels = v;
-                    }
-                    break;
-                case HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->media_chunk_size = v;
-                    }
-                    break;
-                case HTLS_DATA_CHAT_MEDIA_MAX_FRAMES:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->media_max_frames = v;
-                    }
-                    break;
-                case HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->media_max_duration_ms = v;
-                    }
-                    break;
-                case HTLS_DATA_HISTORY_MAX_MSGS:
-                    /* Chat-history retention hint — server's max
-					 * message count. uint32 big-endian; 0 means
-					 * unlimited. Spec note: hints only, the
-					 * authoritative end-of-history signal is
-					 * DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->history_max_msgs = v;
-                    }
-                    break;
-                case HTLS_DATA_HISTORY_MAX_DAYS:
-                    if (_len >= 4) {
-                        guint32 v;
-                        HN32 (&v, dh->data);
-                        htlc->history_max_days = v;
-                    }
-                    break;
                 }
+                break;
+            case HTLS_DATA_CHAT_MEDIA_MAX_BYTES:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_bytes = v;
+                }
+                break;
+            case HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_dimension = v;
+                }
+                break;
+            case HTLS_DATA_CHAT_MEDIA_MAX_PIXELS:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_pixels = v;
+                }
+                break;
+            case HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_chunk_size = v;
+                }
+                break;
+            case HTLS_DATA_CHAT_MEDIA_MAX_FRAMES:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_frames = v;
+                }
+                break;
+            case HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->media_max_duration_ms = v;
+                }
+                break;
+            case HTLS_DATA_HISTORY_MAX_MSGS:
+                /* Chat-history retention hint — server's max
+				 * message count. uint32 big-endian; 0 means
+				 * unlimited. Spec note: hints only, the
+				 * authoritative end-of-history signal is
+				 * DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->history_max_msgs = v;
+                }
+                break;
+            case HTLS_DATA_HISTORY_MAX_DAYS:
+                if (_len >= 4) {
+                    guint32 v;
+                    HN32 (&v, dh->data);
+                    htlc->history_max_days = v;
+                }
+                break;
             }
-            dh_end ();
+        }
+        dh_end ();
 
-            /* Phase 9.A: log the server's advertised inline-media
-			 * limits at debug-category "media". Routed through a
-			 * stable helper so future logging adjustments don't
-			 * spider out across rcv.c. */
-            if (htlc->caps & HTLC_CAP_INLINE_MEDIA) {
-                inline_media_log_advertised_limits (htlc);
-            }
+        /* Phase 9.A: log the server's advertised inline-media
+		 * limits at debug-category "media". Routed through a
+		 * stable helper so future logging adjustments don't
+		 * spider out across rcv.c. */
+        if (htlc->caps & HTLC_CAP_INLINE_MEDIA) {
+            inline_media_log_advertised_limits (htlc);
+        }
 
-            /* Re-run setbtns now that HTLS_DATA_VERSION has been
-			 * parsed out of this same LOGIN reply. The earlier
-			 * setbtns at the top of this branch fires before the
-			 * chunk walker, so htlc->version is still 0 there —
-			 * which leaves news15_btn (the 1.5+ threaded-News
-			 * toolbar button) stuck disabled on every 1.5+ server
-			 * since its gate is is_15plus = (version >= 150).
-			 * The other buttons setbtns touches don't depend on
-			 * version, so running it twice is just an idempotent
-			 * refresh. */
-            setbtns (sess, 1);
+        /* Re-run setbtns now that HTLS_DATA_VERSION has been
+		 * parsed out of this same LOGIN reply. The earlier
+		 * setbtns at the top of this branch fires before the
+		 * chunk walker, so htlc->version is still 0 there —
+		 * which leaves news15_btn (the 1.5+ threaded-News
+		 * toolbar button) stuck disabled on every 1.5+ server
+		 * since its gate is is_15plus = (version >= 150).
+		 * The other buttons setbtns touches don't depend on
+		 * version, so running it twice is just an idempotent
+		 * refresh. */
+        setbtns (sess, 1);
 
-            /* PING keepalive only on confirmed 1.5+ servers.
-			 * htlc->version is populated by the HTLS_DATA_VERSION
-			 * chunk just parsed above; servers that don't advertise
-			 * a version (1.0/1.2 originals like hlserver.com) leave
-			 * it at 0, and sending HTLC_HDR_PING to them earns a
-			 * task-error toast every minute ("Uh, no.") plus the
-			 * ERROR sound. >= 150 is the bar — that covers every
-			 * server we've seen (Badmoon at 190, mhxd at 150+) that
-			 * implements PING, and excludes the ones that don't. */
-            if (htlc->version >= 150) {
-                ping_start (htlc);
-            }
+        /* PING keepalive only on confirmed 1.5+ servers.
+		 * htlc->version is populated by the HTLS_DATA_VERSION
+		 * chunk just parsed above; servers that don't advertise
+		 * a version (1.0/1.2 originals like hlserver.com) leave
+		 * it at 0, and sending HTLC_HDR_PING to them earns a
+		 * task-error toast every minute ("Uh, no.") plus the
+		 * ERROR sound. >= 150 is the bar — that covers every
+		 * server we've seen (Badmoon at 190, mhxd at 150+) that
+		 * implements PING, and excludes the ones that don't. */
+        if (htlc->version >= 150) {
+            ping_start (htlc);
+        }
 
-            /* 1.0/1.2 detection: the server did not include an
-			 * HTLS_DATA_VERSION chunk in this LOGIN reply, so it
-			 * doesn't speak the 1.5 agreement / AGREEMENTAGREE
-			 * flow. The LOGIN packet we sent followed the 1.5
-			 * spec (no HTLC_DATA_NAME), so the server has no name
-			 * for us yet — USER_GETLIST replies would return our
-			 * record with an uninitialised name field (fogWraith's
-			 * hlserver.com trace showed exactly this: "00 07 00
-			 * 86 00 00 00 05 f0 d0 73 28 2d"). Deliver NAME + ICON
-			 * via USER_CHANGE now, and fire the post-login fetches
-			 * immediately — no agreement is coming, so there is no
-			 * "after AGREEMENTAGREE" boundary to wait for.
-			 *
-			 * 1.5+ servers (version >= 150 here) take the AGREEMENT-
-			 * AGREE path: gtkhx.c::concurrence on the Agree click,
-			 * or hx_rcv_agreement_file's HX_AGREEMENT_NONE auto-
-			 * send when the account has AccessNoAgreement. Both
-			 * call hx_post_login_fetches after the wire send. The
-			 * 2s fallback timer below arms as a last resort if the
-			 * agreement opcode doesn't arrive at all. */
-            if (htlc->version == 0 && !already_fetched) {
-                hx_change_name_icon (htlc);
-                hx_post_login_fetches (htlc);
-            } else if (!already_fetched) {
-                /* do NOT fire HTLC_HDR_USER_GETLIST yet —
-				 * wait for AGREEMENTAGREE to go out (or its no-
-				 * agreement auto-send). The fallback timer covers
-				 * 1.5+ servers that misbehave and don't send any
-				 * agreement opcode. */
-                post_login_timer_id
-                    = g_timeout_add_seconds (2, post_login_fallback, htlc);
-            }
+        /* 1.0/1.2 detection: the server did not include an
+		 * HTLS_DATA_VERSION chunk in this LOGIN reply, so it
+		 * doesn't speak the 1.5 agreement / AGREEMENTAGREE
+		 * flow. The LOGIN packet we sent followed the 1.5
+		 * spec (no HTLC_DATA_NAME), so the server has no name
+		 * for us yet — USER_GETLIST replies would return our
+		 * record with an uninitialised name field (fogWraith's
+		 * hlserver.com trace showed exactly this: "00 07 00
+		 * 86 00 00 00 05 f0 d0 73 28 2d"). Deliver NAME + ICON
+		 * via USER_CHANGE now, and fire the post-login fetches
+		 * immediately — no agreement is coming, so there is no
+		 * "after AGREEMENTAGREE" boundary to wait for.
+		 *
+		 * 1.5+ servers (version >= 150 here) take the AGREEMENT-
+		 * AGREE path: gtkhx.c::concurrence on the Agree click,
+		 * or hx_rcv_agreement_file's HX_AGREEMENT_NONE auto-
+		 * send when the account has AccessNoAgreement. Both
+		 * call hx_post_login_fetches after the wire send. The
+		 * 2s fallback timer below arms as a last resort if the
+		 * agreement opcode doesn't arrive at all. */
+        if (htlc->version == 0 && !already_fetched) {
+            hx_change_name_icon (htlc);
+            hx_post_login_fetches (htlc);
+        } else if (!already_fetched) {
+            /* do NOT fire HTLC_HDR_USER_GETLIST yet —
+			 * wait for AGREEMENTAGREE to go out (or its no-
+			 * agreement auto-send). The fallback timer covers
+			 * 1.5+ servers that misbehave and don't send any
+			 * agreement opcode. */
+            post_login_timer_id
+                = g_timeout_add_seconds (2, post_login_fallback, htlc);
         }
     }
 }
