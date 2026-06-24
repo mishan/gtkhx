@@ -91,16 +91,8 @@ struct log *server_log = NULL;
 /* pthread_t conn_tid is gone. The connect
  * + magic-exchange flow runs on the main loop via GSocketClient's
  * async API; cancellation goes through current_cancel. */
-static GSocketConnection *current_conn; /* owns the post-handshake fd */
 static GCancellable *current_cancel;
 
-/* Forward decls for the control-channel GPollable source helpers.
- * Definitions live further down (alongside the read/write
- * callbacks) but hx_htlc_close above needs to call
- * control_remove_all_sources before they're defined. */
-static void control_arm_write_source (struct htlc_conn *htlc);
-static void control_remove_write_source (void);
-static void control_remove_all_sources (void);
 
 int connected;
 
@@ -270,21 +262,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
                                          GTKHX_CONNECTION_DISCONNECTED);
     close_connected_windows (sess);
-    /* Detach the GPollable read/write sources before dropping
-     * current_conn so the callbacks can't fire on a freed
-     * stream. */
-    control_remove_all_sources ();
 
-    /* R3.3.e-4c: tear down the hxnet handle if it was installed
-     * (see hx_install_hxnet_post_hope). Drops the
+    /* Tear down the hxnet handle if it was installed. Drops the
      * ConnectionHandle, which the actor sees as HandleDropped;
      * the wrapped TcpStream's Drop closes the duped fd. Safe
      * to call whether or not the bridge was active. */
     hx_bridge_uninstall ();
 
-    /* GSocketConnection owns the fd; releasing it closes
-	 * the socket. Replaces the legacy close(fd) call. */
-    g_clear_object (&current_conn);
     htlc->ip_addr[0] = '\0';
 
     if (htlc->in.buf) {
@@ -471,184 +455,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  * dragging in this file's async-connect / tracker / GTK pile. The
  * implementations are byte-for-byte unchanged from when they lived
  * here as static aead_pump_frames + decode. */
-
-#define READ_BUFSIZE 0x4000
-
-/* ============================================================
- * Control-channel write source (GPollable)
- * ============================================================
- *
- * The legacy control connection ran two GPollable watch sources on
- * current_conn's GIOStream: a permanent read source and a lazily-
- * armed write source. The read source was removed with the legacy
- * connect path — the hxnet orchestrator now owns the control-channel
- * read side. Only the write source remains:
- *
- *   control_write_src_id  installed lazily when there's data in
- *                         htlc->out (control_arm_write_source),
- *                         removed when the buffer drains (inside the
- *                         writable callback). It is armed only for
- *                         the legacy-write fallback in hlwrite when
- *                         the hxnet bridge isn't installed.
- *
- * It fires on the main thread when the wrapped stream has writable
- * socket capacity (modulo any TLS-internal buffering).
- *
- * hxd_files[] is still consumed by commands.c's /exec pipe
- * plumbing, so the array stays — we just don't populate it for
- * the control fd anymore. */
-static guint control_read_src_id;
-static guint control_write_src_id;
-
-static gboolean control_on_writable (GObject *source, gpointer user_data);
-
-/* Idempotent: a hot send path that queues into htlc->out and
- * then calls control_arm_write_source from inside a callback
- * already holding the source can call this without paying
- * for a double-install. */
-static void
-control_arm_write_source (struct htlc_conn *htlc)
-{
-    GOutputStream *out_stream;
-    GSource *src;
-
-    /* The hxnet path drives writes via hx_bridge_send_frame; the
-     * GIOStream's output source must stay disarmed so it doesn't
-     * race with hxnet's send loop on the kernel buffer. */
-    if (hx_bridge_is_installed ()) {
-        return;
-    }
-    if (!current_conn || control_write_src_id != 0) {
-        return;
-    }
-    out_stream = g_io_stream_get_output_stream (G_IO_STREAM (current_conn));
-    src = g_pollable_output_stream_create_source (
-        G_POLLABLE_OUTPUT_STREAM (out_stream), NULL);
-    g_source_set_callback (src, G_SOURCE_FUNC (control_on_writable),
-                           htlc, NULL);
-    control_write_src_id = g_source_attach (src, NULL);
-    g_source_unref (src);
-}
-
-static void
-control_remove_write_source (void)
-{
-    if (control_write_src_id) {
-        g_source_remove (control_write_src_id);
-        control_write_src_id = 0;
-    }
-}
-
-static void
-control_remove_all_sources (void)
-{
-    if (control_read_src_id) {
-        g_source_remove (control_read_src_id);
-        control_read_src_id = 0;
-    }
-    control_remove_write_source ();
-}
-
-/* Phase R3.3.e-4d hxnet post-HOPE install. Called from rcv.c
- * after HOPE step-2 completes (or after a non-HOPE login
- * succeeds — for 1.0/1.2 servers the cipher / compression
- * state stays NONE/NONE and the bridge installs in
- * passthrough mode). See network.h for the contract.
- *
- * # Why this defers via g_idle_add instead of installing
- * synchronously
- *
- * rcv_task_login sends the HOPE step 2 LOGIN message via
- * hlwrite_chunks *before* it returns. Those plaintext step-2
- * bytes sit in htlc->out and rely on the GIOStream write
- * source firing on the next main-loop iteration to reach the
- * wire. If we installed hxnet synchronously here and removed
- * the legacy write source, those step-2 bytes would be
- * orphaned and the server would never see the second LOGIN
- * frame — the connection appears to hang after step 1 (a
- * symptom we hit against VesperNet's Janus with
- * ChaCha20-Poly1305).
- *
- * Instead we schedule a default-priority idle which fires
- * *after* the write source has had its chance: when the idle
- * callback runs and observes htlc->out.len == 0, the bridge
- * install (dup fd, hand off, disarm sources, clear cipher
- * state) goes through. If htlc->out is still draining, the
- * idle yields back via G_SOURCE_CONTINUE so the next main
- * loop iteration can write more. G_PRIORITY_DEFAULT_IDLE
- * (200) is lower priority than G_PRIORITY_DEFAULT (0) of the
- * write source, so in any iteration where the socket is
- * writable, the drain happens before our idle even ticks.
- *
- * Counter consistency: any encrypted bytes the server sends
- * between rcv_task_login returning and the install firing get
- * decrypted by the legacy cipher_decode path, which advances
- * htlc->cipher_*_state.chacha.counter (AEAD) or the
- * BlowfishOfb64State (stream cipher). When the bridge
- * eventually installs, hx_bridge_install_with_hope_state
- * snapshots the current counter / ivec value, so hxnet picks
- * up exactly where the C side left off.
- */
-/* Mirror of htlc_stream_read for the outbound side. Same return
- * shape: >=0 bytes written, -1 transient, -2 fatal. */
-static ssize_t
-htlc_stream_write (struct htlc_conn *htlc, const void *buf, size_t buflen)
-{
-    GOutputStream *out_stream;
-    GError *err = NULL;
-    gssize r;
-
-    if (!current_conn) {
-        return -2;
-    }
-    out_stream = g_io_stream_get_output_stream (G_IO_STREAM (current_conn));
-    r = g_pollable_output_stream_write_nonblocking (
-        G_POLLABLE_OUTPUT_STREAM (out_stream), buf, buflen, NULL, &err);
-    if (r < 0) {
-        if (err && err->domain == G_IO_ERROR
-            && err->code == G_IO_ERROR_WOULD_BLOCK) {
-            g_clear_error (&err);
-            return -1;
-        }
-        hx_printf_prefix (htlc, 0, INFOPREFIX, "stream write: %s\n",
-                          err ? err->message : "unknown error");
-        g_clear_error (&err);
-        return -2;
-    }
-    return (ssize_t) r;
-}
-
-/* Writable callback. The GPollable output source is attached
- * by control_arm_write_source from the hlwrite path (whenever
- * data lands in htlc->out) and detaches itself when the buffer
- * drains. */
-static gboolean
-control_on_writable (GObject *source G_GNUC_UNUSED, gpointer user_data)
-{
-    struct htlc_conn *htlc = user_data;
-    ssize_t r;
-
-    r = htlc_stream_write (htlc, &htlc->out.buf[htlc->out.pos],
-                           htlc->out.len);
-    if (r == -1) {
-        return G_SOURCE_CONTINUE; /* transient, keep source. */
-    }
-    if (r < 0) {
-        hx_printf_prefix (htlc, 0, INFOPREFIX,
-                          "htlc_write: stream error\n");
-        hx_htlc_close (htlc, 0);
-        return G_SOURCE_REMOVE;
-    }
-    htlc->out.pos += r;
-    htlc->out.len -= r;
-    if (!htlc->out.len) {
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        control_write_src_id = 0;
-        return G_SOURCE_REMOVE;
-    }
-    return G_SOURCE_CONTINUE;
-}
 
 /* The post_* marshal helpers (post_prog / post_ts / post_log) lived
  * here until the tracker fetch went async (see hx_tracker_list_async
@@ -3034,9 +2840,8 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
             htlc->out.len -= len;
             if (!htlc->out.len) {
                 /* Queue drained — reset pos to 0 so the qbuf reuses its
-                 * buffer from the start, matching the legacy
-                 * control_on_writable invariant (avoids accumulating
-                 * unused prefix space over a long hxnet session). */
+                 * buffer from the start (avoids accumulating unused
+                 * prefix space over a long hxnet session). */
                 htlc->out.pos = 0;
             }
         } else {
@@ -3073,23 +2878,19 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
         return;
     }
 
-    control_arm_write_source (htlc);
-    if (htlc->compress_encode_type != COMPRESS_NONE) {
-        len = compress_encode (htlc, this_off, len);
-        /* compress_encode fails closed via hx_htlc_close when the
-         * Rust codec can't produce output — see the comment block in
-         * src/compress.c::compress_encode for the rationale. Once
-         * the connection is torn down, htlc->fd is zero and any
-         * further cipher_encode call would operate on a stale buffer
-         * that the socket-write loop will never flush. Skip out of
-         * the rest of this send so we don't pretend to send a
-         * message we couldn't compress. */
-        if (!htlc->fd) {
-            return;
-        }
-    }
-    if (htlc->cipher_encode_type != CIPHER_NONE) {
-        cipher_encode (htlc, this_off, len);
+    /* No bridge installed → no connection. The orchestrator installs
+     * the bridge synchronously at connect time and hlwrite only runs on
+     * a live session, so reaching here means a stray send racing
+     * teardown. Drop the just-packed bytes (same out bookkeeping as the
+     * bridge success path) rather than queue them on a socket that no
+     * longer exists. The legacy GIOStream write-source + in-place
+     * cipher/compress encode path is gone — hxnet's transform stack
+     * owns encoding now. */
+    debug_log ("net", "hlwrite: no bridge installed; dropping %u packed bytes",
+               len);
+    htlc->out.len -= len;
+    if (!htlc->out.len) {
+        htlc->out.pos = 0;
     }
 }
 
@@ -3169,9 +2970,8 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
             htlc->out.len -= len;
             if (!htlc->out.len) {
                 /* Queue drained — reset pos to 0 so the qbuf reuses its
-                 * buffer from the start, matching the legacy
-                 * control_on_writable invariant (avoids accumulating
-                 * unused prefix space over a long hxnet session). */
+                 * buffer from the start (avoids accumulating unused
+                 * prefix space over a long hxnet session). */
                 htlc->out.pos = 0;
             }
         } else {
@@ -3187,15 +2987,15 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
         return;
     }
 
-    control_arm_write_source (htlc);
-    if (htlc->compress_encode_type != COMPRESS_NONE) {
-        len = compress_encode (htlc, this_off, len);
-        if (!htlc->fd) {
-            return;
-        }
-    }
-    if (htlc->cipher_encode_type != CIPHER_NONE) {
-        cipher_encode (htlc, this_off, len);
+    /* No bridge installed → no connection; drop the just-packed bytes.
+     * See the matching comment in hlwrite — the legacy GIOStream
+     * write-source + in-place encode path is gone. */
+    debug_log ("net",
+               "hlwrite_chunks: no bridge installed; dropping %u packed bytes",
+               len);
+    htlc->out.len -= len;
+    if (!htlc->out.len) {
+        htlc->out.pos = 0;
     }
 }
 
