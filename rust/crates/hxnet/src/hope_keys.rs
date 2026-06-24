@@ -90,10 +90,8 @@ pub fn compute_blowfish_chain(
     mac_alg_label: &[u8],
 ) -> io::Result<(Vec<u8>, BlowfishKeys)> {
     let password_mac = crate::hope::hmac_password(password, sessionkey, mac_alg_label)?;
-    let spec_encode =
-        crate::hope::hmac_password(password, &password_mac, mac_alg_label)?;
-    let spec_decode =
-        crate::hope::hmac_password(password, &spec_encode, mac_alg_label)?;
+    let spec_encode = crate::hope::hmac_password(password, &password_mac, mac_alg_label)?;
+    let spec_decode = crate::hope::hmac_password(password, &spec_encode, mac_alg_label)?;
 
     // Cross spec_encode / spec_decode into the client's
     // encode_key / decode_key. Same crossing the C side's
@@ -147,7 +145,10 @@ pub fn derive_aead_keys(
     hk_enc
         .expand(b"hope-chacha-decode", &mut enc)
         .expect("HKDF-SHA256 expand of 32 bytes is infallible");
-    AeadKeys { encode_key: enc, decode_key: dec }
+    AeadKeys {
+        encode_key: enc,
+        decode_key: dec,
+    }
 }
 
 #[cfg(test)]
@@ -156,7 +157,10 @@ mod tests {
 
     #[test]
     fn cipher_kind_from_label() {
-        assert_eq!(HopeCipherKind::from_label(b"BLOWFISH"), Some(HopeCipherKind::Blowfish));
+        assert_eq!(
+            HopeCipherKind::from_label(b"BLOWFISH"),
+            Some(HopeCipherKind::Blowfish)
+        );
         assert_eq!(
             HopeCipherKind::from_label(b"CHACHA20-POLY1305"),
             Some(HopeCipherKind::ChaCha20Poly1305)
@@ -168,8 +172,7 @@ mod tests {
     #[test]
     fn compute_blowfish_chain_produces_keys_of_mac_digest_size() {
         let (password_mac, keys) =
-            compute_blowfish_chain(b"hunter2", b"sessionkey1234", b"HMAC-SHA256")
-                .expect("chain");
+            compute_blowfish_chain(b"hunter2", b"sessionkey1234", b"HMAC-SHA256").expect("chain");
         assert_eq!(password_mac.len(), 32, "SHA256 password_mac");
         assert_eq!(keys.encode_key.len(), 32);
         assert_eq!(keys.decode_key.len(), 32);
@@ -184,10 +187,8 @@ mod tests {
 
     #[test]
     fn compute_blowfish_chain_deterministic() {
-        let (m1, k1) =
-            compute_blowfish_chain(b"hunter2", b"sk1234", b"HMAC-SHA256").expect("1");
-        let (m2, k2) =
-            compute_blowfish_chain(b"hunter2", b"sk1234", b"HMAC-SHA256").expect("2");
+        let (m1, k1) = compute_blowfish_chain(b"hunter2", b"sk1234", b"HMAC-SHA256").expect("1");
+        let (m2, k2) = compute_blowfish_chain(b"hunter2", b"sk1234", b"HMAC-SHA256").expect("2");
         assert_eq!(m1, m2);
         assert_eq!(k1.encode_key, k2.encode_key);
         assert_eq!(k1.decode_key, k2.decode_key);
@@ -195,10 +196,8 @@ mod tests {
 
     #[test]
     fn compute_blowfish_chain_different_password_different_keys() {
-        let (_, k1) =
-            compute_blowfish_chain(b"hunter2", b"sk", b"HMAC-SHA256").expect("1");
-        let (_, k2) =
-            compute_blowfish_chain(b"other", b"sk", b"HMAC-SHA256").expect("2");
+        let (_, k1) = compute_blowfish_chain(b"hunter2", b"sk", b"HMAC-SHA256").expect("1");
+        let (_, k2) = compute_blowfish_chain(b"other", b"sk", b"HMAC-SHA256").expect("2");
         assert_ne!(k1.encode_key, k2.encode_key);
     }
 
@@ -217,7 +216,10 @@ mod tests {
         let spec_enc = vec![0x12u8; 32];
         let spec_dec = vec![0x34u8; 32];
         let keys = derive_aead_keys(&sk, &spec_enc, &spec_dec);
-        assert_ne!(keys.encode_key, [0u8; 32], "HKDF output shouldn't be all-zeros");
+        assert_ne!(
+            keys.encode_key, [0u8; 32],
+            "HKDF output shouldn't be all-zeros"
+        );
         assert_ne!(keys.decode_key, [0u8; 32]);
         assert_ne!(keys.encode_key, keys.decode_key);
     }

@@ -67,7 +67,11 @@ pub async fn resolve_and_connect(
     // treat that as caller-initiated cancellation by returning
     // io::Error::other; the spawn-side maps any error from here to a
     // StreamError shutdown (see hxnet_connection_open_* in ffi.rs).
-    if evt_tx.send(Event::State(ConnectionState::Resolving)).await.is_err() {
+    if evt_tx
+        .send(Event::State(ConnectionState::Resolving))
+        .await
+        .is_err()
+    {
         return Err(io::Error::other(
             "consumer dropped before Resolving event delivered",
         ));
@@ -88,9 +92,12 @@ pub async fn resolve_and_connect(
     };
     let resolved: Vec<SocketAddr> = match tokio::net::lookup_host((host, port)).await {
         Ok(iter) => iter.collect(),
-        Err(e) => return Err(io::Error::new(io::ErrorKind::NotFound, format!(
-            "lookup_host({display}): {e}"
-        ))),
+        Err(e) => {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("lookup_host({display}): {e}"),
+            ))
+        }
     };
 
     if resolved.is_empty() {
@@ -104,12 +111,15 @@ pub async fn resolve_and_connect(
     // fallback shape on dual-stack networks. Tests with
     // IP-literal inputs see a single-entry result that's
     // trivially in either bucket.
-    let (mut v4, mut v6): (Vec<_>, Vec<_>) =
-        resolved.into_iter().partition(|a| a.is_ipv4());
+    let (mut v4, mut v6): (Vec<_>, Vec<_>) = resolved.into_iter().partition(|a| a.is_ipv4());
     v4.append(&mut v6);
     let candidates = v4;
 
-    if evt_tx.send(Event::State(ConnectionState::Connecting)).await.is_err() {
+    if evt_tx
+        .send(Event::State(ConnectionState::Connecting))
+        .await
+        .is_err()
+    {
         return Err(io::Error::other(
             "consumer dropped before Connecting event delivered",
         ));
@@ -121,19 +131,19 @@ pub async fn resolve_and_connect(
     // timeout so an unresponsive host (SYN black-hole) fails
     // instead of hanging the whole connect — the C side then
     // tears down cleanly via the shutdown path.
-    let connect_timeout =
-        std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS);
+    let connect_timeout = std::time::Duration::from_secs(crate::HANDSHAKE_TIMEOUT_SECS);
     let mut last_err: Option<io::Error> = None;
     for addr in candidates {
-        match tokio::time::timeout(connect_timeout, TcpStream::connect(addr)).await
-        {
+        match tokio::time::timeout(connect_timeout, TcpStream::connect(addr)).await {
             Ok(Ok(stream)) => return Ok(stream),
             Ok(Err(e)) => last_err = Some(e),
             Err(_elapsed) => {
                 last_err = Some(io::Error::new(
                     io::ErrorKind::TimedOut,
-                    format!("connect to {addr} timed out after {}s",
-                            crate::HANDSHAKE_TIMEOUT_SECS),
+                    format!(
+                        "connect to {addr} timed out after {}s",
+                        crate::HANDSHAKE_TIMEOUT_SECS
+                    ),
                 ));
             }
         }
@@ -175,9 +185,8 @@ mod tests {
 
         let (evt_tx, mut evt_rx) = mpsc::channel(8);
 
-        let connect_handle = tokio::spawn(async move {
-            resolve_and_connect("127.0.0.1", port, &evt_tx).await
-        });
+        let connect_handle =
+            tokio::spawn(async move { resolve_and_connect("127.0.0.1", port, &evt_tx).await });
 
         // Consume state events as they fire.
         let first = evt_rx.recv().await.expect("first event");
@@ -191,7 +200,10 @@ mod tests {
             "second event should be Connecting, got {second:?}"
         );
 
-        let mut stream = connect_handle.await.expect("connect task").expect("connect ok");
+        let mut stream = connect_handle
+            .await
+            .expect("connect task")
+            .expect("connect ok");
 
         // Round-trip 4 bytes through the established stream to
         // prove the connection works.
@@ -208,8 +220,7 @@ mod tests {
         let (evt_tx, _evt_rx) = mpsc::channel(8);
         // `.invalid` is reserved by RFC 2606 and guaranteed not
         // to resolve.
-        let result =
-            resolve_and_connect("nope.invalid", 5500, &evt_tx).await;
+        let result = resolve_and_connect("nope.invalid", 5500, &evt_tx).await;
         assert!(result.is_err(), "expected resolve failure");
         let err = result.unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::NotFound);
@@ -221,8 +232,7 @@ mod tests {
         // Pick a port we know nothing is listening on. Loopback
         // port 1 (tcpmux) is reserved and not bound in CI
         // containers.
-        let result =
-            resolve_and_connect("127.0.0.1", 1, &evt_tx).await;
+        let result = resolve_and_connect("127.0.0.1", 1, &evt_tx).await;
         assert!(result.is_err(), "expected connect refusal");
     }
 }

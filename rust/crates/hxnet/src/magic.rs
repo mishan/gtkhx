@@ -52,14 +52,15 @@ pub const HTLS_MAGIC: &[u8; 8] = b"TRTP\x00\x00\x00\x00";
 ///   - inner stream write/read failure (kernel error, EOF mid-magic),
 ///   - server reply length other than `HTLS_MAGIC.len()`,
 ///   - server reply bytes don't match `HTLS_MAGIC`.
-pub async fn run_magic_exchange<S>(
-    stream: &mut S,
-    evt_tx: &mpsc::Sender<Event>,
-) -> io::Result<()>
+pub async fn run_magic_exchange<S>(stream: &mut S, evt_tx: &mpsc::Sender<Event>) -> io::Result<()>
 where
     S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
 {
-    if evt_tx.send(Event::State(ConnectionState::MagicExchange)).await.is_err() {
+    if evt_tx
+        .send(Event::State(ConnectionState::MagicExchange))
+        .await
+        .is_err()
+    {
         return Err(io::Error::other(
             "consumer dropped before MagicExchange state delivered",
         ));
@@ -120,7 +121,9 @@ mod tests {
             server.write_all(HTLS_MAGIC).await.expect("server write");
         });
 
-        run_magic_exchange(&mut client, &evt_tx).await.expect("exchange");
+        run_magic_exchange(&mut client, &evt_tx)
+            .await
+            .expect("exchange");
         server_task.await.unwrap();
 
         let evt = evt_rx.recv().await.expect("state event");

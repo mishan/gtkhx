@@ -67,8 +67,16 @@ impl<S> HtxfChannel<S> {
     pub fn new_plain(inner: S) -> Self {
         Self {
             inner,
-            encode: AeadState { key: [0; 32], counter: 0, dir: 0 },
-            decode: AeadState { key: [0; 32], counter: 0, dir: 0 },
+            encode: AeadState {
+                key: [0; 32],
+                counter: 0,
+                dir: 0,
+            },
+            decode: AeadState {
+                key: [0; 32],
+                counter: 0,
+                dir: 0,
+            },
             aead_active: false,
             rx_plain: Vec::new(),
             rx_plain_pos: 0,
@@ -98,7 +106,6 @@ impl<S> HtxfChannel<S> {
         self.inner
     }
 }
-
 
 impl<S: Write> HtxfChannel<S> {
     /// Send `buf`. With AEAD active this seals `buf` into exactly one
@@ -186,7 +193,10 @@ impl<S: Read> HtxfChannel<S> {
             return Ok(false);
         }
         let frame_total = AeadState::peek_frame_size(&prefix).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidData, "HTXF AEAD: bad frame length prefix")
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "HTXF AEAD: bad frame length prefix",
+            )
         })?;
         // Reuse the per-channel inbound scratch (bounded by
         // peek_frame_size ≤ AEAD_MAX_FRAME_SIZE, so resize can't blow up).
@@ -195,7 +205,8 @@ impl<S: Read> HtxfChannel<S> {
         self.rx_framed[..AEAD_LENGTH_PREFIX].copy_from_slice(&prefix);
         // The body must arrive in full — a frame boundary already passed,
         // so EOF mid-body is a truncation error, not a clean close.
-        self.inner.read_exact(&mut self.rx_framed[AEAD_LENGTH_PREFIX..])?;
+        self.inner
+            .read_exact(&mut self.rx_framed[AEAD_LENGTH_PREFIX..])?;
 
         // Open straight into the reusable rx_plain buffer (disjoint
         // field borrows: self.decode + self.rx_framed + self.rx_plain).
@@ -205,7 +216,10 @@ impl<S: Read> HtxfChannel<S> {
         self.decode
             .open(&self.rx_framed, &mut self.rx_plain)
             .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "HTXF AEAD: frame open/auth failed")
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "HTXF AEAD: frame open/auth failed",
+                )
             })?;
         self.rx_plain_pos = 0;
         Ok(true)
@@ -305,7 +319,11 @@ pub fn connect_tls(tcp: TcpStream, host: &str) -> io::Result<HtxfTlsConnect> {
         .map(|leaf| crate::tls::fingerprint_sha256(leaf.as_ref()));
     let webpki_ok = webpki_ok_flag.load(Ordering::Relaxed);
 
-    Ok(HtxfTlsConnect { stream, webpki_ok, fingerprint })
+    Ok(HtxfTlsConnect {
+        stream,
+        webpki_ok,
+        fingerprint,
+    })
 }
 
 // ====================================================================
@@ -369,7 +387,11 @@ pub struct HtxfConn {
 /// fields are all `Copy`; this avoids assuming the struct derives it.
 unsafe fn copy_aead_state(p: *const AeadState) -> AeadState {
     let s = &*p;
-    AeadState { key: s.key, counter: s.counter, dir: s.dir }
+    AeadState {
+        key: s.key,
+        counter: s.counter,
+        dir: s.dir,
+    }
 }
 
 /// Open an HTXF subchannel over an already-connected, blocking `fd`
@@ -421,7 +443,10 @@ pub unsafe extern "C" fn hxnet_htxf_open(
 
     // slice::from_raw_parts is UB for len * size_of > isize::MAX.
     if (host_len as u64) > (isize::MAX as u64) || (preamble_len as u64) > (isize::MAX as u64) {
-        glib::g_critical!("hxnet", "hxnet_htxf_open: length argument exceeds isize::MAX");
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_htxf_open: length argument exceeds isize::MAX"
+        );
         return std::ptr::null_mut();
     }
     if (preamble_len != 0 && preamble.is_null())
@@ -458,7 +483,10 @@ pub unsafe extern "C" fn hxnet_htxf_open(
 
     if tls != 0 {
         if host.is_null() || host_len == 0 {
-            glib::g_critical!("hxnet", "hxnet_htxf_open: TLS requested with NULL/empty host");
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_htxf_open: TLS requested with NULL/empty host"
+            );
             return std::ptr::null_mut(); // tcp dropped → fd closed
         }
         let host_str = match std::str::from_utf8(slice::from_raw_parts(host, host_len)) {
@@ -489,7 +517,10 @@ pub unsafe extern "C" fn hxnet_htxf_open(
             }
         }
         let mut stream = conn.stream;
-        if let Err(e) = stream.write_all(preamble_slice).and_then(|()| stream.flush()) {
+        if let Err(e) = stream
+            .write_all(preamble_slice)
+            .and_then(|()| stream.flush())
+        {
             glib::g_critical!("hxnet", "hxnet_htxf_open: preamble write (TLS): {}", e);
             return std::ptr::null_mut();
         }
@@ -497,7 +528,9 @@ pub unsafe extern "C" fn hxnet_htxf_open(
             Some((enc, dec)) => HtxfChannel::new_aead(stream, enc, dec),
             None => HtxfChannel::new_plain(stream),
         };
-        Box::into_raw(Box::new(HtxfConn { inner: HtxfInner::Tls(Box::new(ch)) }))
+        Box::into_raw(Box::new(HtxfConn {
+            inner: HtxfInner::Tls(Box::new(ch)),
+        }))
     } else {
         let mut tcp = tcp;
         if let Err(e) = tcp.write_all(preamble_slice).and_then(|()| tcp.flush()) {
@@ -508,7 +541,9 @@ pub unsafe extern "C" fn hxnet_htxf_open(
             Some((enc, dec)) => HtxfChannel::new_aead(tcp, enc, dec),
             None => HtxfChannel::new_plain(tcp),
         };
-        Box::into_raw(Box::new(HtxfConn { inner: HtxfInner::Plain(ch) }))
+        Box::into_raw(Box::new(HtxfConn {
+            inner: HtxfInner::Plain(ch),
+        }))
     }
 }
 
@@ -520,16 +555,16 @@ pub unsafe extern "C" fn hxnet_htxf_open(
 /// `handle` must be a live handle from [`hxnet_htxf_open`]; `buf` valid
 /// for `len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_htxf_read(
-    handle: *mut HtxfConn,
-    buf: *mut u8,
-    len: usize,
-) -> isize {
+pub unsafe extern "C" fn hxnet_htxf_read(handle: *mut HtxfConn, buf: *mut u8, len: usize) -> isize {
     if handle.is_null() || (buf.is_null() && len != 0) || (len as u64) > (isize::MAX as u64) {
         return -1;
     }
     let h = &mut *handle;
-    let out = if len == 0 { &mut [][..] } else { slice::from_raw_parts_mut(buf, len) };
+    let out = if len == 0 {
+        &mut [][..]
+    } else {
+        slice::from_raw_parts_mut(buf, len)
+    };
     match h.inner.read(out) {
         Ok(n) => n as isize,
         Err(_) => -1,
@@ -552,7 +587,11 @@ pub unsafe extern "C" fn hxnet_htxf_write(
         return -1;
     }
     let h = &mut *handle;
-    let data = if len == 0 { &[][..] } else { slice::from_raw_parts(buf, len) };
+    let data = if len == 0 {
+        &[][..]
+    } else {
+        slice::from_raw_parts(buf, len)
+    };
     match h.inner.write(data) {
         Ok(n) => n as isize,
         Err(_) => -1,
@@ -618,10 +657,18 @@ mod tests {
     /// reader's `decode` must start identical (same key/dir/counter=0)
     /// to interoperate, exactly like the two ends of a real transfer.
     fn enc() -> AeadState {
-        AeadState { key: key(), counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER }
+        AeadState {
+            key: key(),
+            counter: 0,
+            dir: AEAD_DIR_CLIENT_TO_SERVER,
+        }
     }
     fn dec() -> AeadState {
-        AeadState { key: key(), counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER }
+        AeadState {
+            key: key(),
+            counter: 0,
+            dir: AEAD_DIR_CLIENT_TO_SERVER,
+        }
     }
 
     #[test]
@@ -747,8 +794,16 @@ mod tests {
             assert_eq!(&pre, b"PRE");
             // Server decodes the client's CLIENT_TO_SERVER frames and
             // encodes its replies SERVER_TO_CLIENT.
-            let s_enc = AeadState { key: k, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
-            let s_dec = AeadState { key: k, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
+            let s_enc = AeadState {
+                key: k,
+                counter: 0,
+                dir: AEAD_DIR_SERVER_TO_CLIENT,
+            };
+            let s_dec = AeadState {
+                key: k,
+                counter: 0,
+                dir: AEAD_DIR_CLIENT_TO_SERVER,
+            };
             let mut sch = HtxfChannel::new_aead(sock, s_enc, s_dec);
             let mut buf = [0u8; 64];
             let n = sch.read(&mut buf).unwrap();
@@ -758,15 +813,29 @@ mod tests {
 
         let client = TcpStream::connect(addr).unwrap();
         let fd = client.into_raw_fd();
-        let enc = AeadState { key: k, counter: 0, dir: AEAD_DIR_CLIENT_TO_SERVER };
-        let dec = AeadState { key: k, counter: 0, dir: AEAD_DIR_SERVER_TO_CLIENT };
+        let enc = AeadState {
+            key: k,
+            counter: 0,
+            dir: AEAD_DIR_CLIENT_TO_SERVER,
+        };
+        let dec = AeadState {
+            key: k,
+            counter: 0,
+            dir: AEAD_DIR_SERVER_TO_CLIENT,
+        };
 
         let h = unsafe {
             hxnet_htxf_open(
-                fd, 0, std::ptr::null(), 0,
-                b"PRE".as_ptr(), 3,
-                &enc, &dec,
-                None, std::ptr::null_mut(),
+                fd,
+                0,
+                std::ptr::null(),
+                0,
+                b"PRE".as_ptr(),
+                3,
+                &enc,
+                &dec,
+                None,
+                std::ptr::null_mut(),
             )
         };
         assert!(!h.is_null());

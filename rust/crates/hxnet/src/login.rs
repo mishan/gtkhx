@@ -153,21 +153,39 @@ pub fn build_login_frame(req: &LoginRequest<'_>) -> io::Result<Vec<u8>> {
     let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(6);
     // LOGIN is always emitted (zero-length for an empty login name);
     // PASSWORD only when non-empty, per src/login_packet.c.
-    chunks.push(PackChunk { tag: tag::LOGIN, data: &login_x });
+    chunks.push(PackChunk {
+        tag: tag::LOGIN,
+        data: &login_x,
+    });
     if !password_in.is_empty() {
-        chunks.push(PackChunk { tag: tag::PASSWORD, data: &pass_x });
+        chunks.push(PackChunk {
+            tag: tag::PASSWORD,
+            data: &pass_x,
+        });
     }
     if !req.name.is_empty() {
-        chunks.push(PackChunk { tag: tag::NAME, data: req.name });
+        chunks.push(PackChunk {
+            tag: tag::NAME,
+            data: req.name,
+        });
     }
     if req.icon != 0 {
-        chunks.push(PackChunk { tag: tag::ICON, data: &icon_be });
+        chunks.push(PackChunk {
+            tag: tag::ICON,
+            data: &icon_be,
+        });
     }
     if req.version != 0 {
-        chunks.push(PackChunk { tag: TAG_VERSION, data: &version_be });
+        chunks.push(PackChunk {
+            tag: TAG_VERSION,
+            data: &version_be,
+        });
     }
     if req.caps != 0 {
-        chunks.push(PackChunk { tag: TAG_CAPABILITIES, data: &caps_be });
+        chunks.push(PackChunk {
+            tag: TAG_CAPABILITIES,
+            data: &caps_be,
+        });
     }
 
     let needed = pack_message_size(&chunks);
@@ -369,7 +387,11 @@ mod tests {
             pos += 4 + len;
         }
         let caps_data = found.expect("LOGIN must include an HTLC_DATA_CAPABILITIES chunk");
-        assert_eq!(caps_data, CAPS.to_be_bytes(), "caps bitmask must round-trip big-endian");
+        assert_eq!(
+            caps_data,
+            CAPS.to_be_bytes(),
+            "caps bitmask must round-trip big-endian"
+        );
 
         // caps == 0 omits the chunk (matches legacy send_caps gate).
         let req0 = LoginRequest { caps: 0, ..req };

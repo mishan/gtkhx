@@ -26,13 +26,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 /// Build a header byte sequence for a frame with `body_len` body
 /// bytes following.
-fn build_header(
-    type_: u32,
-    trans: u32,
-    flag: u32,
-    body_len: u32,
-    hc: u16,
-) -> [u8; 22] {
+fn build_header(type_: u32, trans: u32, flag: u32, body_len: u32, hc: u16) -> [u8; 22] {
     // Wire `len` is body_len + sizeof(hc=2). hc itself is INSIDE
     // the header bytes (positions 20-21); body_len here counts the
     // bytes AFTER the 22-byte header.
@@ -135,8 +129,7 @@ async fn handles_partial_reads_across_header_and_body_boundaries() {
 #[tokio::test]
 async fn write_command_lands_on_the_wire() {
     let (mut server, client) = tokio::io::duplex(4096);
-    let (handle, _events, _join) =
-        Connection::spawn(client).expect("spawn under tokio runtime");
+    let (handle, _events, _join) = Connection::spawn(client).expect("spawn under tokio runtime");
 
     // Build a complete frame as bytes and ship it as one command.
     let mut payload = Vec::new();
@@ -157,8 +150,7 @@ async fn write_command_lands_on_the_wire() {
 async fn eof_emits_shutdown_event_then_closes() {
     let (server, client) = tokio::io::duplex(4096);
 
-    let (_handle, mut events, join) =
-        Connection::spawn(client).expect("spawn under tokio runtime");
+    let (_handle, mut events, join) = Connection::spawn(client).expect("spawn under tokio runtime");
 
     // Close the server side without writing anything. The actor
     // sees EOF on its very first read attempt.
@@ -226,8 +218,7 @@ async fn oversized_frame_is_rejected_with_shutdown() {
 #[tokio::test]
 async fn explicit_shutdown_command_exits_the_actor() {
     let (_server, client) = tokio::io::duplex(4096);
-    let (handle, mut events, join) =
-        Connection::spawn(client).expect("spawn under tokio runtime");
+    let (handle, mut events, join) = Connection::spawn(client).expect("spawn under tokio runtime");
 
     handle
         .send(Command::Shutdown)
@@ -245,8 +236,7 @@ async fn explicit_shutdown_command_exits_the_actor() {
 #[tokio::test]
 async fn dropping_all_handles_exits_the_actor() {
     let (_server, client) = tokio::io::duplex(4096);
-    let (handle, mut events, join) =
-        Connection::spawn(client).expect("spawn under tokio runtime");
+    let (handle, mut events, join) = Connection::spawn(client).expect("spawn under tokio runtime");
 
     let clone1 = handle.clone();
     let clone2 = clone1.clone();
@@ -265,8 +255,7 @@ async fn dropping_all_handles_exits_the_actor() {
 #[tokio::test]
 async fn shutdown_helper_is_best_effort_noop_on_closed_actor() {
     let (server, client) = tokio::io::duplex(4096);
-    let (handle, mut events, join) =
-        Connection::spawn(client).expect("spawn under tokio runtime");
+    let (handle, mut events, join) = Connection::spawn(client).expect("spawn under tokio runtime");
 
     drop(server); // actor sees EOF immediately
     let _ = events.recv().await; // drain Shutdown(Eof)
@@ -283,8 +272,8 @@ async fn try_send_returns_full_when_command_channel_is_saturated() {
     // Capacity-1 command channel. We don't poll events (and don't
     // attach a server) so the actor parks on its first write.
     let (_server, client) = tokio::io::duplex(4096);
-    let (handle, _events, _join) = Connection::spawn_with_capacities(client, 1, 8)
-        .expect("spawn under tokio runtime");
+    let (handle, _events, _join) =
+        Connection::spawn_with_capacities(client, 1, 8).expect("spawn under tokio runtime");
 
     // First command parks the actor's write loop (no reader on the
     // other side of `_server`, server buffer eventually fills).
@@ -307,11 +296,8 @@ async fn try_send_returns_full_when_command_channel_is_saturated() {
 async fn frame_helper_constructor_round_trips_header_fields() {
     // Doc-style sanity check: hand-build a Header via the proto
     // crate, wrap it, body it, and re-extract.
-    let header = hotline_proto::parse::decode_header_full(
-        &build_header(0x6c, 7, 1, 3, 0),
-        4096,
-    )
-    .expect("test header decodes");
+    let header = hotline_proto::parse::decode_header_full(&build_header(0x6c, 7, 1, 3, 0), 4096)
+        .expect("test header decodes");
     let f = Frame::new(header, b"abc".to_vec());
     assert_eq!(f.header.type_, 0x6c);
     assert_eq!(f.header.trans, 7);

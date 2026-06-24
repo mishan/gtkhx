@@ -331,16 +331,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ChunkingWrapper<S> {
         let take = buf.len().min(this.chunk);
         Pin::new(&mut this.inner).poll_write(cx, &buf[..take])
     }
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_flush(cx)
     }
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
     }
 }

@@ -170,8 +170,7 @@ const COMPRESS_WRITE_HEADROOM: usize = 64 * 1024;
 ///
 /// hxnet's actor caps `MAX_BODY_LEN` at 1 MiB, so any
 /// legitimate write is comfortably below this limit regardless.
-const COMPRESS_WRITE_INPUT_MAX: usize =
-    COMPRESS_READ_BUF_CEILING - COMPRESS_WRITE_HEADROOM;
+const COMPRESS_WRITE_INPUT_MAX: usize = COMPRESS_READ_BUF_CEILING - COMPRESS_WRITE_HEADROOM;
 
 /// Build an [`io::Error`] for a write that exceeds the
 /// per-call input ceiling. Factored out so each adapter's
@@ -261,8 +260,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for GzipStream<S> {
         loop {
             // Drain previously-decompressed plaintext first.
             if this.read_plaintext_pos < this.read_plaintext.len() {
-                let remaining =
-                    &this.read_plaintext[this.read_plaintext_pos..];
+                let remaining = &this.read_plaintext[this.read_plaintext_pos..];
                 let n = remaining.len().min(buf.remaining());
                 buf.put_slice(&remaining[..n]);
                 this.read_plaintext_pos += n;
@@ -455,10 +453,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
             // scale linearly with buf.len()) and allocating
             // `out`. See COMPRESS_WRITE_INPUT_MAX.
             if buf.len() > COMPRESS_WRITE_INPUT_MAX {
-                return Poll::Ready(Err(oversized_write_error(
-                    "gzip",
-                    buf.len(),
-                )));
+                return Poll::Ready(Err(oversized_write_error("gzip", buf.len())));
             }
             // zlib's deflateBound formula: input + ceil(input
             // / 16384) * 5 + 6. flate2 doesn't expose
@@ -475,7 +470,10 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
             let mut out = vec![0u8; cap];
             let before_in = this.write_compress.total_in();
             let before_out = this.write_compress.total_out();
-            match this.write_compress.compress(buf, &mut out, FlushCompress::Sync) {
+            match this
+                .write_compress
+                .compress(buf, &mut out, FlushCompress::Sync)
+            {
                 Ok(Status::Ok) | Ok(Status::StreamEnd) => {
                     let consumed = (this.write_compress.total_in() - before_in) as usize;
                     let produced = (this.write_compress.total_out() - before_out) as usize;
@@ -511,18 +509,15 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
                     // (corrupted internal state, etc.). Preserve
                     // the source error in the wrapping io::Error
                     // so the cause shows up in logs / debuggers.
-                    return Poll::Ready(Err(io::Error::other(
-                        format!("gzip compress failed: {e}"),
-                    )));
+                    return Poll::Ready(Err(io::Error::other(format!(
+                        "gzip compress failed: {e}"
+                    ))));
                 }
             }
         }
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Drain any compressed bytes pending in
         // write_pending_frame before delegating to the inner
@@ -542,10 +537,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for GzipStream<S> {
         Pin::new(&mut this.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Same as flush: drain pending compressed bytes first.
         // Otherwise shutdown silently truncates the stream by
@@ -773,8 +765,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for Lz4Stream<S> {
 
         loop {
             if this.read_plaintext_pos < this.read_plaintext.len() {
-                let remaining =
-                    &this.read_plaintext[this.read_plaintext_pos..];
+                let remaining = &this.read_plaintext[this.read_plaintext_pos..];
                 let n = remaining.len().min(buf.remaining());
                 buf.put_slice(&remaining[..n]);
                 this.read_plaintext_pos += n;
@@ -804,8 +795,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for Lz4Stream<S> {
                 // O(frame_size).
                 let prev = this.read_last_decode_attempt_size;
                 let grew_enough = prev == 0
-                    || this.read_raw_buf.len()
-                        >= prev + LZ4_REDECODE_MIN_GROWTH
+                    || this.read_raw_buf.len() >= prev + LZ4_REDECODE_MIN_GROWTH
                     || this.read_raw_buf.len() >= prev * 3 / 2;
                 if grew_enough {
                     this.read_last_decode_attempt_size = this.read_raw_buf.len();
@@ -864,8 +854,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for Lz4Stream<S> {
                         // shutdown.
                         let prev = this.read_last_decode_attempt_size;
                         if this.read_raw_buf.len() != prev {
-                            this.read_last_decode_attempt_size =
-                                this.read_raw_buf.len();
+                            this.read_last_decode_attempt_size = this.read_raw_buf.len();
                             if let Some((plain, consumed)) =
                                 try_decode_lz4_frame(&this.read_raw_buf)?
                             {
@@ -928,11 +917,8 @@ impl<S: AsyncRead + Unpin> AsyncRead for Lz4Stream<S> {
                     // path; this branch only kicks in when the
                     // peer is feeding us in dribs.
                     let prev = this.read_last_decode_attempt_size;
-                    if !this.read_raw_buf.is_empty()
-                        && this.read_raw_buf.len() != prev
-                    {
-                        this.read_last_decode_attempt_size =
-                            this.read_raw_buf.len();
+                    if !this.read_raw_buf.is_empty() && this.read_raw_buf.len() != prev {
+                        this.read_last_decode_attempt_size = this.read_raw_buf.len();
                         match try_decode_lz4_frame(&this.read_raw_buf)? {
                             Some((plain, consumed)) => {
                                 this.read_raw_buf.drain(..consumed);
@@ -998,23 +984,20 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Lz4Stream<S> {
             }
             // DoS-safety ceiling — see COMPRESS_WRITE_INPUT_MAX.
             if buf.len() > COMPRESS_WRITE_INPUT_MAX {
-                return Poll::Ready(Err(oversized_write_error(
-                    "lz4",
-                    buf.len(),
-                )));
+                return Poll::Ready(Err(oversized_write_error("lz4", buf.len())));
             }
             let mut framed = Vec::with_capacity(buf.len() + 32);
             {
                 let mut enc = lz4_flex::frame::FrameEncoder::new(&mut framed);
                 if let Err(e) = enc.write_all(buf) {
-                    return Poll::Ready(Err(io::Error::other(
-                        format!("lz4 frame encode failed: {e}"),
-                    )));
+                    return Poll::Ready(Err(io::Error::other(format!(
+                        "lz4 frame encode failed: {e}"
+                    ))));
                 }
                 if let Err(e) = enc.finish() {
-                    return Poll::Ready(Err(io::Error::other(
-                        format!("lz4 frame finalize failed: {e}"),
-                    )));
+                    return Poll::Ready(Err(io::Error::other(format!(
+                        "lz4 frame finalize failed: {e}"
+                    ))));
                 }
             }
             this.write_pending_frame = framed;
@@ -1024,10 +1007,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Lz4Stream<S> {
         }
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Drain any compressed bytes pending in
         // write_pending_frame before delegating to the inner
@@ -1047,10 +1027,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for Lz4Stream<S> {
         Pin::new(&mut this.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Same as flush: drain pending compressed bytes first.
         // Otherwise shutdown silently truncates the stream by
@@ -1086,8 +1063,7 @@ pub struct ZstdStream<S> {
 
 impl<S> ZstdStream<S> {
     pub fn new(inner: S) -> io::Result<Self> {
-        let read_decoder = zstd::stream::raw::Decoder::new()
-            .map_err(io::Error::other)?;
+        let read_decoder = zstd::stream::raw::Decoder::new().map_err(io::Error::other)?;
         Ok(Self {
             inner,
             read_decoder,
@@ -1126,8 +1102,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for ZstdStream<S> {
 
         loop {
             if this.read_plaintext_pos < this.read_plaintext.len() {
-                let remaining =
-                    &this.read_plaintext[this.read_plaintext_pos..];
+                let remaining = &this.read_plaintext[this.read_plaintext_pos..];
                 let n = remaining.len().min(buf.remaining());
                 buf.put_slice(&remaining[..n]);
                 this.read_plaintext_pos += n;
@@ -1155,10 +1130,8 @@ impl<S: AsyncRead + Unpin> AsyncRead for ZstdStream<S> {
             // find the capacity already in place and resize is
             // a no-op). Same pattern as GzipStream.
             this.read_plaintext.resize(DECODE_READ_CHUNK, 0);
-            let mut in_buf =
-                zstd::stream::raw::InBuffer::around(&this.read_raw_buf);
-            let mut out_buf =
-                zstd::stream::raw::OutBuffer::around(&mut this.read_plaintext);
+            let mut in_buf = zstd::stream::raw::InBuffer::around(&this.read_raw_buf);
+            let mut out_buf = zstd::stream::raw::OutBuffer::around(&mut this.read_plaintext);
             match this.read_decoder.run(&mut in_buf, &mut out_buf) {
                 Ok(_) => {
                     let consumed = in_buf.pos();
@@ -1289,24 +1262,17 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ZstdStream<S> {
             }
             // DoS-safety ceiling — see COMPRESS_WRITE_INPUT_MAX.
             if buf.len() > COMPRESS_WRITE_INPUT_MAX {
-                return Poll::Ready(Err(oversized_write_error(
-                    "zstd",
-                    buf.len(),
-                )));
+                return Poll::Ready(Err(oversized_write_error("zstd", buf.len())));
             }
-            let framed = zstd::bulk::compress(buf, 0).map_err(|e| {
-                io::Error::other(format!("zstd compress failed: {e}"))
-            })?;
+            let framed = zstd::bulk::compress(buf, 0)
+                .map_err(|e| io::Error::other(format!("zstd compress failed: {e}")))?;
             this.write_pending_frame = framed;
             this.write_pending_pos = 0;
             this.write_pending_plaintext_len = buf.len();
         }
     }
 
-    fn poll_flush(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Drain any compressed bytes pending in
         // write_pending_frame before delegating to the inner
@@ -1326,10 +1292,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for ZstdStream<S> {
         Pin::new(&mut this.inner).poll_flush(cx)
     }
 
-    fn poll_shutdown(
-        self: Pin<&mut Self>,
-        cx: &mut Context<'_>,
-    ) -> Poll<Result<(), io::Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), io::Error>> {
         let this = self.get_mut();
         // Same as flush: drain pending compressed bytes first.
         // Otherwise shutdown silently truncates the stream by

@@ -93,9 +93,9 @@ pub enum SpawnError {
 impl std::fmt::Display for SpawnError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SpawnError::NoRuntime => f.write_str(
-                "Connection::spawn called outside any tokio runtime",
-            ),
+            SpawnError::NoRuntime => {
+                f.write_str("Connection::spawn called outside any tokio runtime")
+            }
         }
     }
 }
@@ -179,11 +179,7 @@ impl Connection {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        Self::spawn_with_capacities(
-            stream,
-            DEFAULT_COMMAND_CAPACITY,
-            DEFAULT_EVENT_CAPACITY,
-        )
+        Self::spawn_with_capacities(stream, DEFAULT_COMMAND_CAPACITY, DEFAULT_EVENT_CAPACITY)
     }
 
     /// Same as [`Self::spawn`] but lets callers override the
@@ -197,8 +193,7 @@ impl Connection {
     where
         S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
     {
-        let handle = tokio::runtime::Handle::try_current()
-            .map_err(|_| SpawnError::NoRuntime)?;
+        let handle = tokio::runtime::Handle::try_current().map_err(|_| SpawnError::NoRuntime)?;
 
         let (cmd_tx, cmd_rx) = mpsc::channel::<Command>(command_capacity);
         let (evt_tx, evt_rx) = mpsc::channel::<Event>(event_capacity);
@@ -262,13 +257,8 @@ impl Connection {
     /// the call would trigger).
     pub fn spawn_boxed(
         stream: crate::transform::BoxedDuplex,
-    ) -> Result<(ConnectionHandle, mpsc::Receiver<Event>, JoinHandle<()>), SpawnError>
-    {
-        Self::spawn_with_capacities(
-            stream,
-            DEFAULT_COMMAND_CAPACITY,
-            DEFAULT_EVENT_CAPACITY,
-        )
+    ) -> Result<(ConnectionHandle, mpsc::Receiver<Event>, JoinHandle<()>), SpawnError> {
+        Self::spawn_with_capacities(stream, DEFAULT_COMMAND_CAPACITY, DEFAULT_EVENT_CAPACITY)
     }
 }
 
