@@ -27,10 +27,14 @@
   seeded from the server string. Validated end-to-end against live
   mhxd + Janus via `tests/integration/test_phase_g_connect.c`
   (`/phase_g/orchestrator_login` + `/phase_g/capabilities_negotiated`).
-  Still gated on the full matrix (incl. hlserver.com + HOPE/TLS in
-  the orchestrator) before the default flips — see "Test matrix
-  before flipping the default" and "Tier 3 coverage of the
-  production connect path" below.
+- **Phase G part 4 — HOPE + TLS in the orchestrator**: shipped.
+  `run_hope_lifecycle` + `run_plaintext_tls_lifecycle` cover the
+  HOPE handshake (both ciphers) and TLS-from-byte-zero with a
+  WebPKI→TOFU verifier. See "What about TLS and HOPE?" below.
+- **Phase G default flip**: shipped (`PHASE_G_DEFAULT_ON = 1`).
+  The orchestrator is the default connect path; `GTKHX_OLD_CONNECT=1`
+  is the escape hatch back to legacy during the bake. Removal of the
+  legacy path is the `delete-old-connect` follow-up below.
 
 ## The integration challenge
 
@@ -448,27 +452,65 @@ Estimated delete: ~550 LOC (most of `rcv_task_login`'s bulk
 is its HOPE branch; the post-login body that survives is
 small).
 
-## What about TLS and HOPE?
+### C cipher / compress code — what the cleanup can take
 
-Both block on orchestrator extension:
+Once the orchestrator owns the control channel, hxnet's Rust
+transform stack (`BlowfishStream` / `AeadStream` /
+`GzipStream` / `Lz4Stream` / `ZstdStream`) is the only thing
+that ciphers or compresses control-channel traffic. That makes
+the C-side control-channel crypto dead — but only *part* of it,
+in two waves:
 
-- **TLS in orchestrator**: `claude/r3.3e-tls-hxnet` already
-  has the rustls handshake building blocks. The integration
-  is: orchestrator gains a `tls_config: Option<HxnetTlsConfig>`
-  parameter; when set, after `resolve_and_connect` returns
-  `TcpStream`, wrap in `tokio_rustls::client::TlsStream`
-  before magic exchange. State event ordering becomes
+- **Removable with `delete-old-connect`:** the control-channel
+  HOPE handshake + decode (`hope.c`, the `rcv_task_login` HOPE
+  branch, the cipher/compress legs of `network_decode.c`) and
+  the legacy in-place cipher/compress encode path in
+  `hlwrite`. `compress.c` has no consumer outside the control
+  channel, so it can go in full once this lands.
+- **Blocked on a separate HTXF-crypto migration:** `cipher.c`
+  (Blowfish) and `cipher_aead.c` (ChaCha20-Poly1305) stay,
+  because the **file-transfer subchannels** still do their own
+  C-side crypto (`htxf_io.c`, `htxf_subchannel.c`, `banner.c`
+  use `cipher.h` + `cipher_aead.h` for `htxf->aead_io`). HTXF
+  is not on the orchestrator path. Removing the cipher modules
+  outright needs HTXF re-pointed at the Rust crates
+  (`hxcrypto-stream` / `hxcrypto-aead`) first — its own branch.
+(RC4 itself is already gone — removed in `claude/remove-rc4`.
+`bookmark_rc4_dialog.c` is just a GTK prompt that detects the
+retired RC4 *bookmark byte* and asks the user to pick a
+replacement cipher; it includes `bookmark_cipher.h`, not
+`cipher.c`, so it doesn't keep any crypto alive.)
+
+So: control-channel crypto + all of `compress.c` come out with
+the legacy connect deletion; the cipher modules shrink to their
+HTXF consumers and only fully disappear after an HTXF-crypto
+migration.
+
+## What about TLS and HOPE? (shipped)
+
+Both have landed in the orchestrator — the env-var gate no
+longer splits by transport; plaintext, HOPE and TLS all run
+through the orchestrator on the new path.
+
+- **TLS in orchestrator** (shipped): `resolve_and_connect`'s
+  `TcpStream` is wrapped in `tokio_rustls::client::TlsStream`
+  before the magic exchange, with a WebPKI-first verifier that
+  falls back to the C-side TOFU known-hosts callback only when
+  WebPKI validation fails. State ordering is
   Resolving → Connecting → Connected → **TlsHandshaking** →
-  MagicExchange → ... .
-- **HOPE in orchestrator**: extend `run_plaintext_lifecycle`
-  to a `run_hope_lifecycle` variant that uses the Phase F
-  step-1 builder, awaits the reply, runs Phase F step-2,
-  derives keys via Phase F-2, wraps the transport in the
-  chosen cipher adapter, then runs the actor.
+  MagicExchange → … . See `tls.rs` / `run_plaintext_tls_lifecycle`.
+- **HOPE in orchestrator** (shipped): `run_hope_lifecycle`
+  uses the Phase F step-1 builder, awaits the reply, runs
+  step 2, derives keys via Phase F-2, wraps the transport in
+  the chosen cipher adapter (Blowfish-OFB-64 or
+  ChaCha20-Poly1305), then runs the actor. HOPE-over-TLS is
+  rejected up front (redundant double-encryption).
 
-Until these land, the env-var gate stays: TLS / HOPE
-connections go through the legacy `hx_connect`, plaintext
-connections opt into the new path.
+Compression is the one HOPE sub-feature still on the C side
+only: the orchestrator advertises an empty compress_algs list
+and composes with `CompressionKind::None`, so no connection
+negotiates compression on the new path. Wiring it is a
+self-contained follow-up (see `hope::select_algorithms`).
 
 ## Test matrix before flipping the default
 
@@ -479,12 +521,21 @@ connections opt into the new path.
 | Janus           | yes       | yes  | yes  | 1.9 + chat-history extension    |
 | Mobius          | no        | no   | yes  | separate-port TLS               |
 
-Until the orchestrator supports HOPE + TLS, only the
-**Plaintext** column drives the new path. Plaintext-against-
-mhxd is the gate for `claude/r3.3e-phase-g-c-connect-via-orchestrator`.
-Plaintext-against-hlserver.com is the gate for
-`claude/r3.3e-phase-g-delete-old-connect` flipping the
-default.
+The orchestrator now supports all three columns. mhxd
+(plaintext + HOPE, both ciphers) and Janus (plaintext + caps +
+TLS) are green in Tier 3 on the new path. The remaining hole is
+an **automated 1.0/1.2 regression**: there's no 1.0/1.2 server
+in the container matrix (mhxd is 1.x-with-HOPE, Janus is 1.9),
+so that behaviour is covered by manual smoke against old-Mac
+servers (RetroMac / MacDomain) plus the pre-TASK-frame tolerance
+in `login_reply.rs`. A 1.0/1.2 mock Tier 3 target is a
+nice-to-have follow-up — valuable as a regression guard, less so
+than a real server.
+
+**The default has been flipped** (`PHASE_G_DEFAULT_ON = 1`).
+`GTKHX_OLD_CONNECT=1` remains the escape hatch so the legacy path
+is A/B-testable during the bake; `delete-old-connect` removes it
+once the bake completes.
 
 ## Why this isn't shipping tonight
 

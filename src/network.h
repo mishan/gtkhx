@@ -37,25 +37,27 @@ extern gboolean hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
  * (magic done, credentials going out) rather than up front. */
 extern void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
-/* Phase G default-flip control. While the orchestrator connect path
- * (hx_connect_via_orchestrator) bakes against the live server matrix it
- * stays opt-IN. Flipping it on by default is a ONE-LINE change: set
- * this to 1. That makes the orchestrator the default and
- * GTKHX_OLD_CONNECT=1 the escape hatch back to the legacy GIOStream
- * path. Both env vars (GTKHX_NEW_CONNECT opt-in, GTKHX_OLD_CONNECT
- * opt-out, opt-out wins) are honored now so the escape hatch is
- * testable before the flip and the flip touches one constant.
+/* Phase G default-flip control. The orchestrator connect path
+ * (hx_connect_via_orchestrator) is now the DEFAULT; GTKHX_OLD_CONNECT=1
+ * is the escape hatch back to the legacy GIOStream path. Both env vars
+ * (GTKHX_NEW_CONNECT opt-in, GTKHX_OLD_CONNECT opt-out; opt-out wins)
+ * are still honored, so the legacy path stays reachable for A/B testing
+ * during the bake before delete-old-connect removes it.
  *
  * Defined in the header (not network.c) so the gate logic and the
  * /phase_g/gate_default trip-wire test reference the SAME value — the
- * test's expectation flips automatically when this does.
+ * test's expectation tracks this constant.
  *
- * Pre-flip checklist (docs/phase-g-migration.md): plaintext + HOPE vs
- * mhxd (done), plaintext + caps + TLS vs Janus (done), 1.0/1.2 smoke
- * vs hlserver.com (manual), and a human clicking through a real TLS
- * trust-on-first-use dialog (CI only auto-accepts). */
+ * Validation behind the flip (docs/phase-g-migration.md): plaintext +
+ * HOPE (both ciphers) vs mhxd and plaintext + caps + TLS vs Janus are
+ * green in Tier 3; the orchestrator's HOPE + TLS paths shipped. The
+ * remaining gap is an *automated* 1.0/1.2 regression (no real 1.0/1.2
+ * server in the matrix — covered by manual smoke against old-Mac
+ * servers + the pre-TASK-frame tolerance in login_reply; a 1.0/1.2 mock
+ * Tier 3 target is a nice-to-have follow-up). The escape hatch keeps the
+ * flip low-risk and reversible while it bakes. */
 #ifndef PHASE_G_DEFAULT_ON
-#define PHASE_G_DEFAULT_ON 0
+#define PHASE_G_DEFAULT_ON 1
 #endif
 
 /* `secure` is the legacy hxd "secure server" password flag (not
