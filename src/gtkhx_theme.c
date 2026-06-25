@@ -248,6 +248,12 @@ parse_hex_color (const char *s)
     for (i = 0; i < 6; i++) {
         char c = p[i];
         int nib;
+        /* Stop at the terminator before indexing further: a string
+		 * shorter than 6 hex digits ("#abc", "", …) cleanly falls back
+		 * to the default instead of walking past the NUL. */
+        if (c == '\0') {
+            return -1;
+        }
         if (c >= '0' && c <= '9') {
             nib = c - '0';
         } else if (c >= 'a' && c <= 'f') {
