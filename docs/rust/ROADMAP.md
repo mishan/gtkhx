@@ -958,10 +958,9 @@ without disrupting the other.
 
 ---
 
-## Phase R∞ — Things we're explicitly not doing
+## Out of scope — things we're explicitly not doing
 
-For the same reason `ROADMAP.md` has Phase ∞: keeping the "if it ever
-happens" pile separate from the actual plan.
+Keeping the "if it ever happens" pile separate from the actual plan.
 
 - **Rewriting xtext in Rust.** Possible (gtk4-rs lets us subclass
   `GtkWidget`), and someone may want it eventually, but HexChat's vendored
@@ -969,8 +968,6 @@ happens" pile separate from the actual plan.
 - **A reusable `libhotline` crate API.** We're producing one structurally,
   but we are not committing to API stability for outside consumers. If a
   TUI client emerges and wants it, they can fork the version they like.
-- **TLS-over-Hotline.** Still the same Phase ∞ social/server-side problem
-  as in `ROADMAP.md`. Rust doesn't change the calculus.
 - **Plugin system reincarnation.** The dlopen ABI stays dead. If we
   reintroduce scripting hooks (Lua / Wasmtime), that's a fresh design
   conversation, not a port goal.
