@@ -74,7 +74,6 @@
 #include "tracker_parser.h"
 #include "tracker_v3.h"
 #include "tracker_event.h"
-#include "connect_magic.h"
 
 char *server_addr;
 guint16 server_port;

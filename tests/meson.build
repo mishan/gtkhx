@@ -715,22 +715,6 @@ test_tracker_v3_meta = executable('test_tracker_v3_meta',
 test('tracker_v3_meta', test_tracker_v3_meta,
      suite : 'proto')
 
-# connect_magic — HTLS_MAGIC validator carved out of network.c's
-# async connect state machine (on_magic_received). Replaces a
-# strncmp-based comparison that had a NUL-terminator bug — HTLS
-# _MAGIC contains embedded NULs so strncmp would stop early and
-# accept malformed-but-NUL-prefixed magic bytes as valid. The
-# strncmp_nul_terminator_bug subtest pins the bug input as a
-# permanent regression marker.
-test_connect_magic = executable('test_connect_magic',
-  'proto/test_connect_magic.c',
-  '../src/connect_magic.c',
-  dependencies        : proto_test_deps,
-  include_directories : test_inc,
-)
-test('connect_magic', test_connect_magic,
-     suite : 'proto')
-
 # hlwrite — round-trip the wire packer (hlpack, extracted from
 # hlwrite() in network.c) through the dh_start walker. Proves the
 # send-side encoder and the receive-side decoder agree on the wire
@@ -1136,33 +1120,6 @@ test('handshake', test_integration_handshake,
      suite   : 'integration',
      timeout : 30)
 
-# fake_connect — drive a faithful client-side mirror of hx_connect's
-# GSocketClient async state machine (network.c::hx_connect →
-# on_async_connected → on_magic_sent → on_magic_received) against a
-# scriptable in-process TCP listener (fake_server.{c,h}). No real
-# Hotline server needed; runs purely on the GMainLoop default
-# context. Covers happy-path magic exchange plus the failure modes
-# the production state machine has to handle: wrong magic, server
-# drops before reply, short magic, connect-refused, hung server.
-#
-# This test does NOT link production hx_connect itself — that's a
-# follow-up gated on resolving the link-surface explosion at
-# network.c::send_login (which drags in rcv.c, the fd table, chat,
-# the task subsystem, etc.). The mirror exercises the EXACT same
-# GIO primitives in the EXACT same order, with the magic comparison
-# going through the production hx_connect_validate_server_magic
-# helper, so the wire-shape invariants are pinned end-to-end.
-test_integration_fake_connect = executable('test_integration_fake_connect',
-  'integration/test_fake_connect.c',
-  'integration/fake_server.c',
-  '../src/connect_magic.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-)
-test('fake_connect', test_integration_fake_connect,
-     suite   : 'integration',
-     timeout : 30)
-
 # real_connect — Tier 3 coverage for the production connect path:
 # the "hxnet-owns-the-whole-lifecycle" orchestrator connect
 # (docs/rust/phase-g-migration.md). Drives the production hx_connect
@@ -1181,7 +1138,6 @@ test_integration_real_connect = executable(
   '../src/network.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
-  '../src/connect_magic.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/inline_media.c',
@@ -1243,7 +1199,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/network.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
-  '../src/connect_magic.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',

@@ -71,8 +71,8 @@ react_after_read (hx_fake_server *srv)
     case HX_FAKE_BEHAVIOR_SEND_WRONG_MAGIC: {
         /* 8 bytes that aren't HTLS_MAGIC — first byte matches
          * 'T' so a TCP-level-noise classifier would pass but the
-         * full memcmp in hx_connect_validate_server_magic
-         * catches the mismatch. */
+         * orchestrator's full-length magic compare (hxnet's
+         * magic.rs) catches the mismatch. */
         static const guint8 garbage[8]
             = { 'T', 'R', 'O', 'L', 'L', 0xff, 0xfe, 0xfd };
         g_output_stream_write_all_async (out, garbage, sizeof (garbage),
