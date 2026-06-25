@@ -98,7 +98,6 @@ static GCancellable *current_cancel;
  * Definitions live further down (alongside the read/write
  * callbacks) but hx_htlc_close above needs to call
  * control_remove_all_sources before they're defined. */
-static void control_arm_read_source (struct htlc_conn *htlc);
 static void control_arm_write_source (struct htlc_conn *htlc);
 static void control_remove_write_source (void);
 static void control_remove_all_sources (void);
@@ -324,9 +323,10 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     }
     htlc->out.pos = 0;
     htlc->out.len = 0;
-    /* hxd_files[fd] no longer used for the control channel (the
-     * GPollable sources installed in send_login replaced the
-     * legacy hxd_fd_set GIOChannel watch); no slot to clear. */
+    /* hxd_files[fd] no longer used for the control channel — the
+     * hxnet orchestrator owns the control socket, so there is no
+     * hxd_fd_set GIOChannel watch on it to register; no slot to
+     * clear. */
     htlc->fd = 0;
     htlc->uid = 0;
     htlc->color = 0;
@@ -489,58 +489,25 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
 #define READ_BUFSIZE 0x4000
 
-static void
-update_task (struct htlc_conn *htlc)
-{
-    if (htlc->in.pos >= SIZEOF_HL_HDR) {
-        struct hl_hdr *h = 0;
-        u_int32_t off = 0;
-
-        /* find the last packet */
-        while (off + 20 <= htlc->in.pos) {
-            h = (struct hl_hdr *)(&htlc->in.buf[off]);
-            off += 20 + ntohl (h->len);
-        }
-        if (h && (ntohl (h->type) & 0xffffff) == HTLS_HDR_TASK) {
-            struct task *tsk = task_with_trans (&the_session, ntohl (h->trans));
-            if (tsk) {
-                tsk->pos = htlc->in.pos;
-                tsk->len = htlc->in.len;
-                gtkhx_session_emit_task_update (gtkhx_session_get_default (),
-                                                &the_session, tsk);
-            }
-        }
-    }
-}
-
 /* ============================================================
- * Control-channel I/O via GPollable sources
+ * Control-channel write source (GPollable)
  * ============================================================
  *
- * The control connection runs on top of current_conn's GIOStream.
- * Two watch sources, attached to the default main context:
+ * The legacy control connection ran two GPollable watch sources on
+ * current_conn's GIOStream: a permanent read source and a lazily-
+ * armed write source. The read source was removed with the legacy
+ * connect path — the hxnet orchestrator now owns the control-channel
+ * read side. Only the write source remains:
  *
- *   control_read_src_id   permanent for the connection's life
- *                         (installed in send_login, removed in
- *                         hx_htlc_close).
  *   control_write_src_id  installed lazily when there's data in
  *                         htlc->out (control_arm_write_source),
- *                         removed when the buffer drains
- *                         (inside the writable callback).
+ *                         removed when the buffer drains (inside the
+ *                         writable callback). It is armed only for
+ *                         the legacy-write fallback in hlwrite when
+ *                         the hxnet bridge isn't installed.
  *
- * Each source fires on the main thread when the wrapped stream
- * has application-level read / write capacity — i.e. plaintext
- * bytes available, or decrypted TLS bytes ready for the read
- * side, and writable socket capacity (modulo any TLS-internal
- * buffering) for the write side.
- *
- * Replaces the previous hxd_fd_set GIOChannel-on-raw-fd watch
- * that drove the legacy htlc_read(int fd) / htlc_write(int fd)
- * callbacks. That watch fired on kernel-level socket activity,
- * which was a good approximation in plaintext but didn't see
- * TLS-buffered decrypted data (multi-record-per-segment case);
- * the GPollable sources are aware of that buffering and fire
- * at the right moment.
+ * It fires on the main thread when the wrapped stream has writable
+ * socket capacity (modulo any TLS-internal buffering).
  *
  * hxd_files[] is still consumed by commands.c's /exec pipe
  * plumbing, so the array stays — we just don't populate it for
@@ -548,29 +515,7 @@ update_task (struct htlc_conn *htlc)
 static guint control_read_src_id;
 static guint control_write_src_id;
 
-static gboolean control_on_readable (GObject *source, gpointer user_data);
 static gboolean control_on_writable (GObject *source, gpointer user_data);
-
-static void
-control_arm_read_source (struct htlc_conn *htlc)
-{
-    GInputStream *in_stream;
-    GSource *src;
-
-    g_return_if_fail (current_conn != NULL);
-    g_return_if_fail (control_read_src_id == 0);
-
-    in_stream = g_io_stream_get_input_stream (G_IO_STREAM (current_conn));
-    src = g_pollable_input_stream_create_source (
-        G_POLLABLE_INPUT_STREAM (in_stream), NULL);
-    /* G_SOURCE_FUNC silences -Wcast-function-type. The actual
-     * callback signature is GPollableSourceFunc — same shape that
-     * g_pollable_input_stream_create_source wires up internally. */
-    g_source_set_callback (src, G_SOURCE_FUNC (control_on_readable),
-                           htlc, NULL);
-    control_read_src_id = g_source_attach (src, NULL);
-    g_source_unref (src);
-}
 
 /* Idempotent: a hot send path that queues into htlc->out and
  * then calls control_arm_write_source from inside a callback
@@ -864,155 +809,6 @@ cancel_pending_install_idle (void)
     }
 }
 
-/* Read bytes off the control connection's GIOStream. Returns:
- *   >0  : bytes read into buf
- *    0  : EOF — caller should close
- *   -1  : transient (would-block); caller leaves the buffer
- *         where it is and waits for the next source fire
- *   -2  : fatal stream error; caller closes (and logs the
- *         GError message so a TLS alert / expired cert /
- *         broken pipe surfaces to the user). */
-static ssize_t
-htlc_stream_read (struct htlc_conn *htlc, void *buf, size_t buflen)
-{
-    GInputStream *in_stream;
-    GError *err = NULL;
-    gssize r;
-
-    if (!current_conn) {
-        return -2;
-    }
-    in_stream = g_io_stream_get_input_stream (G_IO_STREAM (current_conn));
-    r = g_pollable_input_stream_read_nonblocking (
-        G_POLLABLE_INPUT_STREAM (in_stream), buf, buflen, NULL, &err);
-    if (r < 0) {
-        if (err && err->domain == G_IO_ERROR
-            && err->code == G_IO_ERROR_WOULD_BLOCK) {
-            g_clear_error (&err);
-            return -1;
-        }
-        hx_printf_prefix (htlc, 0, INFOPREFIX, "stream read: %s\n",
-                          err ? err->message : "unknown error");
-        g_clear_error (&err);
-        return -2;
-    }
-    return (ssize_t) r;
-}
-
-/* Readable callback. The GPollable source fires when application
- * data is available — which for TLS means "decrypted bytes
- * buffered or new ciphertext to decrypt."
- *
- * We loop read → decode → read inside one callback so a payload
- * larger than READ_BUFSIZE drains fully even when GTlsConnection
- * has decrypted bytes internally buffered: kernel readability
- * has already been spent on the first read, so the source won't
- * re-fire just because more decrypted bytes are sitting in the
- * TLS layer. Stopping after one read+decode pass would stall the
- * receive path on big payloads (banners over TLS, multi-record
- * news posts, large file-list replies).
- *
- * Termination: we exit the loop the moment a read returns
- * WOULD_BLOCK, EOF, or fatal — those are the three signals that
- * say "no more application data is going to materialise this
- * watch fire."
- */
-static gboolean
-control_on_readable (GObject *source G_GNUC_UNUSED, gpointer user_data)
-{
-    struct htlc_conn *htlc = user_data;
-    struct qbuf *in = &htlc->read_in;
-    ssize_t r;
-    gboolean stream_drained = FALSE;
-
-    for (;;) {
-        if (!in->len) {
-            qbuf_set (in, in->pos, READ_BUFSIZE);
-            in->len = 0;
-        }
-
-        /* Skip the read if we don't have buffer space — hx_decode
-         * below will consume some bytes and free capacity for the
-         * next iteration. Avoids spurious WOULD_BLOCK calls when
-         * the buffer is genuinely full.
-         *
-         * Index into &in->buf[in->pos], not in->pos + in->len:
-         * hx_decode compacts any unprocessed bytes back to the
-         * start of the buffer via memmove and sets both pos and
-         * len to the count of leftover bytes, so in->pos IS the
-         * end-of-data write offset. Adding len on top doubles
-         * the offset and leaves a gap of uninitialised bytes
-         * between the leftover frame data and the new read. */
-        if (!stream_drained && in->len < READ_BUFSIZE) {
-            r = htlc_stream_read (htlc, &in->buf[in->pos],
-                                  READ_BUFSIZE - in->len);
-            if (r == -1) {
-                /* would-block — stream is fully drained for now.
-                 * Continue into the decode loop to consume what
-                 * we already have, then exit the outer loop. */
-                stream_drained = TRUE;
-            } else if (r <= 0) {
-                hx_printf_prefix (htlc, 0, INFOPREFIX,
-                                  "htlc_read: stream %s\n",
-                                  r == 0 ? "EOF" : "error");
-                hx_htlc_close (htlc, 0);
-                return G_SOURCE_REMOVE;
-            } else {
-                in->len += r;
-            }
-        }
-
-        /* Decode as many frames as we can with the buffer's
-         * current contents. */
-        gboolean decoded_any = FALSE;
-        while (hx_decode (htlc)) {
-            decoded_any = TRUE;
-            update_task (htlc);
-            if (htlc->rcv) {
-                if (htlc->rcv == hx_rcv_hdr) {
-                    hx_rcv_hdr (htlc);
-                    /* hx_rcv_hdr may have closed the connection
-                     * via an inner code path (e.g. a frame that
-                     * triggered a tear-down in a task handler).
-                     * current_conn is cleared by hx_htlc_close,
-                     * so it's our liveness marker now that
-                     * hxd_files no longer is. */
-                    if (!current_conn) {
-                        return G_SOURCE_REMOVE;
-                    }
-                } else {
-                    /* body is fully buffered now;
-                     * dump its data chunks before dispatch.
-                     * No-op when "proto" debug category is
-                     * disabled. */
-                    proto_trace_recv_chunks (htlc);
-                    htlc->rcv (htlc);
-                    if (!current_conn) {
-                        return G_SOURCE_REMOVE;
-                    }
-                    goto reset;
-                }
-            } else {
-            reset:
-                htlc->rcv = hx_rcv_hdr;
-                qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR);
-            }
-        }
-        update_task (htlc);
-
-        /* Exit when the stream said WOULD_BLOCK AND we made no
-         * decode progress this iteration — either we have
-         * partial frame data waiting for more bytes, or the
-         * buffer was full but decode freed nothing. Both mean
-         * there's nothing useful to do until the next source
-         * fire. */
-        if (stream_drained && !decoded_any) {
-            break;
-        }
-    }
-    return G_SOURCE_CONTINUE;
-}
-
 /* Mirror of htlc_stream_read for the outbound side. Same return
  * shape: >=0 bytes written, -1 transient, -2 fatal. */
 static ssize_t
@@ -1229,356 +1025,6 @@ struct gtkhx_connect_ctx {
 
 #define MAGIC_TIMEOUT_SEC 30
 
-static void connect_ctx_free (struct gtkhx_connect_ctx *ctx);
-static void connect_fail (struct gtkhx_connect_ctx *ctx, const char *stage,
-                          GError *err);
-static void send_login (struct gtkhx_connect_ctx *ctx);
-
-/* Populate htlc->ip_addr from the GSocketConnection's remote endpoint
- * — the numeric peer address, used by connection-event log lines
- * ("<ip>: connection closed", "<ip>:<port>: login successful"). The
- * post-connect contract is that ip_addr is a NUL-terminated string;
- * "?" if the address can't be read for some reason. */
-static gboolean
-populate_htlc_remote_ip (struct htlc_conn *htlc, GSocketConnection *conn)
-{
-    GSocketAddress *remote;
-    GInetSocketAddress *inet_remote;
-    GInetAddress *inet_addr;
-    char *str;
-
-    remote = g_socket_connection_get_remote_address (conn, NULL);
-    if (!remote) {
-        return FALSE;
-    }
-
-    if (!G_IS_INET_SOCKET_ADDRESS (remote)) {
-        g_object_unref (remote);
-        g_strlcpy (htlc->ip_addr, "?", sizeof (htlc->ip_addr));
-        return TRUE;
-    }
-
-    inet_remote = G_INET_SOCKET_ADDRESS (remote);
-    inet_addr = g_inet_socket_address_get_address (inet_remote);
-    str = g_inet_address_to_string (inet_addr);
-    g_strlcpy (htlc->ip_addr, str ? str : "?", sizeof (htlc->ip_addr));
-    g_free (str);
-    g_object_unref (remote);
-    return TRUE;
-}
-
-static gboolean
-magic_timeout_cb (gpointer data)
-{
-    struct gtkhx_connect_ctx *ctx = data;
-
-    ctx->magic_timeout_id = 0;
-    if (ctx->cancel) {
-        g_cancellable_cancel (ctx->cancel);
-    }
-    return G_SOURCE_REMOVE;
-}
-
-static void
-connect_fail (struct gtkhx_connect_ctx *ctx, const char *stage, GError *err)
-{
-    struct htlc_conn *htlc = ctx->htlc;
-
-    /* Cancelled by the caller (e.g. user clicked Disconnect or
-	 * a re-connect arrived): don't toast a noisy log. */
-    if (err && g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-        connect_ctx_free (ctx);
-        return;
-    }
-
-    hx_printf_prefix (htlc, 0, INFOPREFIX, "%s: %s\n", stage,
-                      err ? err->message : _ ("failed"));
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
-                                         GTKHX_CONNECTION_DISCONNECTED);
-    connect_ctx_free (ctx);
-}
-
-static void
-connect_ctx_free (struct gtkhx_connect_ctx *ctx)
-{
-    if (ctx->magic_timeout_id) {
-        g_source_remove (ctx->magic_timeout_id);
-        ctx->magic_timeout_id = 0;
-    }
-    g_clear_object (&ctx->conn);
-    g_clear_object (&ctx->cancel);
-    /* current_cancel is a borrowed ref to ctx->cancel; clear it
-	 * so hx_htlc_close (or a subsequent hx_connect) doesn't try
-	 * to cancel a dead cancellable. */
-    g_clear_object (&current_cancel);
-    g_free (ctx->serverstr);
-    g_free (ctx->login);
-    g_free (ctx->pass);
-    g_free (ctx);
-}
-
-static void
-on_magic_received (GObject *source, GAsyncResult *res, gpointer data)
-{
-    struct gtkhx_connect_ctx *ctx = data;
-    GError *err = NULL;
-    gsize got = 0;
-
-    if (ctx->magic_timeout_id) {
-        g_source_remove (ctx->magic_timeout_id);
-        ctx->magic_timeout_id = 0;
-    }
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (source), res, &got,
-                                         &err)) {
-        connect_fail (ctx, _ ("reading server magic"), err);
-        g_clear_error (&err);
-        return;
-    }
-    /* Validator is in connect_magic.c — see its docstring for why
-	 * we use memcmp instead of strncmp. The pre-extraction strncmp
-	 * had a NUL-terminator bug: HTLS_MAGIC contains embedded NULs
-	 * so strncmp would accept the 8-byte sequence "TRTP\0XYZ" as
-	 * valid (X/Y/Z never compared). memcmp doesn't stop early. */
-    if (!hx_connect_validate_server_magic ((const guint8 *)ctx->magic, got)) {
-        connect_fail (ctx, _ ("invalid hotline server"), NULL);
-        return;
-    }
-
-    send_login (ctx);
-}
-
-static void
-on_magic_sent (GObject *source, GAsyncResult *res, gpointer data)
-{
-    struct gtkhx_connect_ctx *ctx = data;
-    GError *err = NULL;
-    gsize wrote = 0;
-    GInputStream *in;
-
-    if (!g_output_stream_write_all_finish (G_OUTPUT_STREAM (source), res,
-                                           &wrote, &err)) {
-        connect_fail (ctx, _ ("writing client magic"), err);
-        g_clear_error (&err);
-        return;
-    }
-
-    ctx->state = GTKHX_CONNECT_STATE_READING_MAGIC;
-    in = g_io_stream_get_input_stream (G_IO_STREAM (ctx->conn));
-    ctx->magic_timeout_id
-        = g_timeout_add_seconds (MAGIC_TIMEOUT_SEC, magic_timeout_cb, ctx);
-    g_input_stream_read_all_async (in, ctx->magic, HTLS_MAGIC_LEN,
-                                   G_PRIORITY_DEFAULT, ctx->cancel,
-                                   on_magic_received, ctx);
-}
-
-static void
-on_async_connected (GObject *source, GAsyncResult *res, gpointer data)
-{
-    struct gtkhx_connect_ctx *ctx = data;
-    GError *err = NULL;
-    GSocketConnection *conn;
-    GOutputStream *out;
-
-    conn = g_socket_client_connect_to_host_finish (G_SOCKET_CLIENT (source),
-                                                   res, &err);
-    if (!conn) {
-        connect_fail (ctx, _ ("connect"), err);
-        g_clear_error (&err);
-        return;
-    }
-    ctx->conn = conn;
-    ctx->state = GTKHX_CONNECT_STATE_WRITING_MAGIC;
-
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
-                                         GTKHX_CONNECTION_TCP_CONNECTED);
-    hx_printf_prefix (ctx->htlc, 0, INFOPREFIX, _ ("connected to %s\n"),
-                      server_addr);
-
-    out = g_io_stream_get_output_stream (G_IO_STREAM (conn));
-    g_output_stream_write_all_async (out, HTLC_MAGIC, HTLC_MAGIC_LEN,
-                                     G_PRIORITY_DEFAULT, ctx->cancel,
-                                     on_magic_sent, ctx);
-}
-
-/* Finalize the connect after the magic round-trip succeeds: stash
- * the GSocketConnection on the current_conn global (it owns the
- * fd; hx_htlc_close unrefs it), populate htlc->ip_addr from the
- * remote endpoint, initialise the qbuf state, install the GPollable
- * input source via control_arm_read_source, and send the LOGIN
- * packet.
- *
- * The secure-login flag in ctx->secure picks between the HOPE
- * MAC-ALG / CIPHER-ALG / COMPRESS-ALG negotiation packet and the
- * legacy plaintext LOGIN. */
-static void
-send_login (struct gtkhx_connect_ctx *ctx)
-{
-    struct htlc_conn *htlc = ctx->htlc;
-    GSocket *sock;
-    int s;
-
-    if (!populate_htlc_remote_ip (htlc, ctx->conn)) {
-        connect_fail (ctx, _ ("remote address"), NULL);
-        return;
-    }
-
-    sock = g_socket_connection_get_socket (ctx->conn);
-    s = g_socket_get_fd (sock);
-
-    /* Clear the per-socket I/O timeout that GSocketClient set
-     * for the magic-exchange phase (MAGIC_TIMEOUT_SEC). The
-     * value persists on the GSocket past the connect call and
-     * GTlsConnection / GPollable*Stream honour it — leaving it
-     * armed makes any 30+ second idle period on an established
-     * connection (a quiet TLS session with no inbound chatter)
-     * surface as G_IO_ERROR_TIMED_OUT and we close. The legacy
-     * raw read(fd) path didn't see this timeout, so the bug
-     * only showed up after the GIOStream / GPollable rewrite.
-     *
-     * Keepalive at the application layer is handled by
-     * ping_start (60s HTLC_HDR_PING) and at the transport
-     * layer by the kernel's TCP keepalive defaults; neither
-     * needs help from a hard read-timeout on the socket. */
-    g_socket_set_timeout (sock, 0);
-
-    /* Stash the GSocketConnection so it stays alive past ctx_free —
-	 * hx_htlc_close unrefs current_conn, which closes the fd. */
-    g_clear_object (&current_conn);
-    current_conn = g_object_ref (ctx->conn);
-
-    /* Initialise htlc state. */
-    htlc->fd = s;
-    htlc->trans = 1;
-    memset (&htlc->in, 0, sizeof (struct qbuf));
-    memset (&htlc->out, 0, sizeof (struct qbuf));
-    htlc->rcv = hx_rcv_hdr;
-    qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR);
-
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
-                                         GTKHX_CONNECTION_HANDSHAKE_DONE);
-
-    set_nonblocking (s);
-    fd_closeonexec (s, 1);
-
-    connected = 1;
-    htlc->gdk_input = 1;
-    /* control-channel I/O is driven by GPollable
-     * sources on current_conn's input / output streams (see the
-     * control_arm_* helpers). The legacy hxd_fd_set GIOChannel
-     * watch was tied to the raw socket fd and didn't see
-     * TLS-internal buffering; the pollable sources do.
-     * hxd_files[] stays unset for the control fd — only the
-     * /exec pipe consumers in commands.c use it now.
-     *
-     * R3.3.e-4d: the hxnet bridge install moved out of
-     * send_login and into the post-HOPE / post-login hook
-     * `hx_install_hxnet_post_hope` (called from rcv.c). The
-     * GIOStream + GPollable read source still drives the
-     * magic + LOGIN + HOPE handshake; once HOPE selects a
-     * cipher (or login succeeds on a non-HOPE server) we
-     * hand the fd over to hxnet with the negotiated
-     * transform stack. That avoids needing a mid-session
-     * cipher-mode switch on the actor side. */
-    control_arm_read_source (htlc);
-
-    if (ctx->login) {
-        strcpy (htlc->login, ctx->login);
-    }
-
-    /* All the chunk-assembly logic for both HOPE Step 1 and legacy
-	 * LOGIN now lives in src/login_packet.c so the integration test
-	 * harness drives the same wire encoder. The thin per-mode setup
-	 * here (rcv_task_login registration, htlc->macalg seed, app_string
-	 * formatting, capability bitmask) stays — that's all production-
-	 * specific glue. */
-    struct hx_chunk login_chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 login_scratch[HX_LOGIN_SCRATCH_SIZE];
-    hx_login_request req = { 0 };
-    int hc;
-
-    if (ctx->secure) {
-        task_new (htlc, RCV_TASK_FN (rcv_task_login),
-                  ctx->pass ? g_strdup (ctx->pass) : g_strdup (""), 0, "login");
-
-        /* HOPE-Secure-Login: seed htlc->macalg with the strongest
-		 * preference so a malformed Step 1 reply still leaves us in
-		 * a known state. login_packet.c hardcodes the full
-		 * preference list (SHA256 → SHA1 → MD5) per the spec. */
-        strcpy (htlc->macalg, "HMAC-SHA256");
-
-        char app_string[64];
-        g_snprintf (app_string, sizeof app_string, "GtkHx %s", VERSION);
-
-        req.mode = HX_LOGIN_MODE_HOPE_STEP1;
-        req.hope_app_id = "GTKx";
-        req.hope_app_string = app_string;
-        /* HOPE cipher advertisement. Single-entry list of the user's
-		 * configured algorithm. Phase 5+ NOTE: this could grow into a
-		 * strongest-first multi-entry list once HTXF subchannel AEAD
-		 * (Phase E) lands. */
-        if (htlc->cipheralg[0]) {
-            req.cipheralg = htlc->cipheralg;
-        }
-        if (htlc->compressalg[0]) {
-            req.compressalg = htlc->compressalg;
-        }
-    } else {
-        task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-
-        /* DATA_CAPABILITIES bitmask. We advertise:
-		 *   bit 0  CAP_LARGE_FILES    "I can handle 64-bit sizes."
-		 *   bit 1  CAP_TEXT_ENCODING  "I speak UTF-8."
-		 *   bit 4  CAP_CHAT_HISTORY   "I can request server-stored
-		 *                             chat history via TRAN 700."
-		 *
-		 * Servers that support the spec echo the bits they accept
-		 * back in the LOGIN reply. Unknown bits are ignored per
-		 * spec; servers that don't recognise the chunk silently
-		 * fall back to legacy 32-bit Mac Roman framing — same
-		 * behaviour as without this chunk.
-		 *
-		 * Advertise ourselves as Hotline 1.8.5 (185). Matches what
-		 * the integration test harness sends; bumps mhxd's
-		 * can_ping bit so HTLC_HDR_PING keepalives are accepted.
-		 *
-		 * LOGIN is the 1.5-spec shape: no HTLC_DATA_NAME chunk.
-		 * 1.5+ servers will get our nick via AGREEMENTAGREE after
-		 * the user dismisses the agreement window (or via the auto-
-		 * send in hx_rcv_agreement_file's HX_AGREEMENT_NONE branch
-		 * when the account has AccessNoAgreement). 1.0/1.2 servers
-		 * never send agreement and never accept AGREEMENTAGREE; for
-		 * those, rcv_task_login detects the absence of an
-		 * HTLS_DATA_VERSION chunk in the reply and fires
-		 * hx_change_name_icon (USER_CHANGE) directly. */
-        req.mode = HX_LOGIN_MODE_LEGACY;
-        req.icon = htlc->icon;
-        req.login_name = ctx->login; /* NULL = anonymous */
-        req.password = (ctx->pass && *ctx->pass) ? ctx->pass : NULL;
-        req.display_name = NULL; /* production sends NAME via USER_CHANGE later */
-        req.client_version = 185;
-        req.caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
-                 | HTLC_CAP_INLINE_MEDIA;
-        req.send_caps = 1;
-    }
-
-    hc = hx_login_build_chunks (&req, login_chunks, HX_LOGIN_MAX_CHUNKS,
-                                login_scratch, sizeof (login_scratch));
-    /* Builder returns 0 on argument / overflow validation failure.
-	 * Sending hc=0 would produce a header-only frame the server
-	 * would reject (or trip hlpack_chunks's g_return_if_fail
-	 * guardrails). Route through connect_fail so the user sees a
-	 * sensible toast instead of a silent hang. */
-    if (hc <= 0) {
-        connect_fail (ctx, _ ("building LOGIN packet"), NULL);
-        return;
-    }
-    hlwrite_chunks (htlc, HTLC_HDR_LOGIN, 0, login_chunks, hc);
-
-    ctx->state = GTKHX_CONNECT_STATE_DONE;
-    connect_ctx_free (ctx);
-}
 
 /* Phase 3 TLS: deferred pin payload. Stamping a new known-hosts
  * entry from inside the accept-certificate signal handler turned
@@ -1974,10 +1420,11 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
     htlc->trans = saved;
 }
 
-/* Phase G (hxnet-owns-the-whole-lifecycle). Gated behind
- * GTKHX_NEW_CONNECT in hx_connect. Replaces the legacy GSocketClient
- * connect + GPollable handshake with the hxnet orchestrator: hxnet
- * owns the socket from byte zero, drives the whole handshake itself
+/* Phase G (hxnet-owns-the-whole-lifecycle). The sole control-channel
+ * connect path — hx_connect dispatches here unconditionally now that
+ * the legacy GSocketClient connect + GPollable handshake (and its
+ * gate) are gone. hxnet owns the socket from byte zero, drives the
+ * whole handshake itself
  * (magic + LOGIN for plaintext; magic + HOPE step1/step2 + cipher
  * transition for secure; TLS handshake then plaintext LOGIN for tls),
  * and replays the final reply to us as a synthetic frame so
@@ -1985,8 +1432,8 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
  * `secure` selects the HOPE path (htlc->cipheralg must be set); `tls`
  * selects TLS-from-byte-zero (separate-port model). The two are never
  * both set when this is called — hx_connect rejects secure+tls
- * (redundant double-encryption) up front, before the orchestrator
- * gate, so it never reaches this function. */
+ * (redundant double-encryption) up front, before dispatching here,
+ * so it never reaches this function. */
 static void
 hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
                              guint16 port, const char *login, const char *pass,
@@ -2119,51 +1566,22 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     }
 }
 
-/* Phase G default-flip control. PHASE_G_DEFAULT_ON lives in network.h
- * (shared with the /phase_g/gate_default trip-wire test). Precedence:
- * an explicit GTKHX_OLD_CONNECT=1 (force legacy) beats an explicit
- * GTKHX_NEW_CONNECT (force orchestrator) — a user debugging a
- * connection issue can always force the legacy path. With neither set,
- * PHASE_G_DEFAULT_ON decides. */
-
-/* TRUE when `name` is present, non-empty, and not "0". A missing var,
- * an empty value (`VAR=`), and the explicit "0" opt-out token all read
- * as "not set" — so a stray empty assignment doesn't silently flip the
- * gate. "0" matches the GTKHX_USE_HXNET convention in hxnet_opt_in. */
-static gboolean
-env_flag_set (const char *name)
-{
-    const char *v = g_getenv (name);
-    return v != NULL && *v != '\0' && g_strcmp0 (v, "0") != 0;
-}
-
-/* TRUE when hx_connect should route through the Phase G orchestrator
- * rather than the legacy GIOStream connect path. Centralizes the gate
- * polarity so the default-flip is a single constant change. */
-static gboolean
-hx_connect_use_orchestrator (void)
-{
-    if (env_flag_set ("GTKHX_OLD_CONNECT")) {
-        return FALSE; /* explicit opt-out wins */
-    }
-    if (env_flag_set ("GTKHX_NEW_CONNECT")) {
-        return TRUE; /* explicit opt-in */
-    }
-    return PHASE_G_DEFAULT_ON;
-}
+/* hxnet's orchestrator owns the whole connect lifecycle. The legacy
+ * GSocketClient connect path and the GTKHX_NEW_CONNECT / GTKHX_OLD_CONNECT
+ * gate (and the PHASE_G_DEFAULT_ON constant behind it) were removed with
+ * delete-old-connect, so hx_connect unconditionally dispatches to
+ * hx_connect_via_orchestrator below — the only choice left is which
+ * transport mode (plaintext / TLS / HOPE) it runs. */
 
 void
 hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
             const char *login, const char *pass, char secure, char tls)
 {
-    struct gtkhx_connect_ctx *ctx;
-    GSocketClient *client;
-
     /* HOPE-over-TLS is not a supported combination, on ANY path. TLS
      * already secures the transport, so layering the HOPE cipher on
      * top is redundant double-encryption we don't support. Reject it
-     * up front — before the orchestrator gate AND the legacy path
-     * below — rather than silently picking one. The Connect dialog
+     * up front — before dispatching to the orchestrator below — rather
+     * than silently picking one. The Connect dialog
      * greys out HOPE when TLS is on; this is the defensive backstop
      * for bookmarks / programmatic callers. We leave an *established*
      * connection alone (return before the teardown preamble), but we
@@ -2190,191 +1608,28 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
         }
     }
 
-    /* Phase G: hxnet-owns-the-whole-lifecycle. The path selection is
-     * centralized in hx_connect_use_orchestrator() (opt-in/opt-out env
-     * vars + PHASE_G_DEFAULT_ON) so the eventual default-flip is a
-     * one-line change. The orchestrator now covers plaintext,
-     * HOPE-Secure-Login, and plaintext-over-TLS (separate-port model).
-     * HOPE-over-TLS is rejected above; secure-without-a-cipher falls
-     * through to the legacy GIOStream path. The GTKHX_TLS env override
-     * is folded into want_tls so GTKHX_TLS=1 takes the orchestrator TLS
-     * path when the orchestrator is selected. */
-    {
-        const char *tls_env = g_getenv ("GTKHX_TLS");
-        gboolean want_tls = tls || (tls_env && *tls_env);
-        if (hx_connect_use_orchestrator ()) {
-            if (want_tls && !secure) {
-                /* Plaintext LOGIN over TLS-from-byte-zero. Cert trust
-                 * is the same TOFU check the legacy path uses, run
-                 * post-handshake via the bridge's verify_cert callback
-                 * (hx_tls_orchestrator_verify_cert). */
-                hx_connect_via_orchestrator (htlc, serverstr, port, login,
-                                             pass, /*secure=*/FALSE,
-                                             /*tls=*/TRUE);
-                return;
-            }
-            if (!want_tls && !secure) {
-                /* Plaintext. */
-                hx_connect_via_orchestrator (htlc, serverstr, port, login,
-                                             pass, /*secure=*/FALSE,
-                                             /*tls=*/FALSE);
-                return;
-            }
-            if (!want_tls && secure) {
-                /* HOPE-Secure-Login. With a negotiable cipher set
-                 * (htlc->cipheralg) the orchestrator negotiates it;
-                 * with no cipher it does the HMAC secure-login over a
-                 * plaintext transport (mhxd's non-cipher_only mode —
-                 * the Rust lifecycle handles an empty cipher list).
-                 * secure+tls was already rejected up front. */
-                hx_connect_via_orchestrator (htlc, serverstr, port, login,
-                                             pass, /*secure=*/TRUE,
-                                             /*tls=*/FALSE);
-                return;
-            }
-        }
+    /* hxnet owns the whole connect lifecycle. The orchestrator covers
+     * every supported case: plaintext, plaintext-over-TLS (separate-port
+     * model), and HOPE-Secure-Login — with a negotiated cipher, or, for
+     * a non-cipher_only server, HMAC authentication over a plaintext
+     * transport. HOPE-over-TLS is rejected above. The GTKHX_TLS env
+     * override folds into want_tls. */
+    const char *tls_env = g_getenv ("GTKHX_TLS");
+    gboolean want_tls = tls || (tls_env && *tls_env);
+    if (want_tls && !secure) {
+        /* Plaintext LOGIN over TLS-from-byte-zero. */
+        hx_connect_via_orchestrator (htlc, serverstr, port, login, pass,
+                                     /*secure=*/FALSE, /*tls=*/TRUE);
+    } else if (secure) {
+        /* HOPE-Secure-Login (cipher negotiated, or no-cipher HMAC auth
+         * over plaintext). secure+tls was rejected up front. */
+        hx_connect_via_orchestrator (htlc, serverstr, port, login, pass,
+                                     /*secure=*/TRUE, /*tls=*/FALSE);
+    } else {
+        /* Plaintext. */
+        hx_connect_via_orchestrator (htlc, serverstr, port, login, pass,
+                                     /*secure=*/FALSE, /*tls=*/FALSE);
     }
-
-    /* GTKHX_TLS=1 env-var override. While Phase 4 (Connect dialog
-	 * TLS toggle) is unimplemented, this is how the test harness
-	 * and power users flip TLS on without rebuilding. Anything
-	 * non-empty counts as truthy — matches the convention the rest
-	 * of the GTKHX_* env vars follow. */
-    if (!tls) {
-        const char *env = g_getenv ("GTKHX_TLS");
-        if (env && *env) {
-            tls = 1;
-        }
-    }
-
-    /* Cancel any in-flight async connect (user kicked off another
-	 * connect, or the previous one is still resolving). */
-    if (current_cancel) {
-        g_cancellable_cancel (current_cancel);
-        g_clear_object (&current_cancel);
-    }
-
-    if (htlc->fd) {
-        hx_htlc_close (htlc, 1);
-    }
-    hx_clear_chat (htlc, 0, 1);
-
-    g_free (server_addr);
-    server_addr = g_strdup_printf ("%s:%u", serverstr, port);
-    server_port = port;
-
-    /* the AFTER= cursor
-	 * is per-server, but the xtext scrollback we just wiped via
-	 * hx_clear_chat is per-connect. Reset the cursor every time we
-	 * connect (or reconnect) — the catch-up's invariant is "the
-	 * messages newer than this cursor are not yet on screen", and
-	 * since we just cleared the screen, NO messages are on screen,
-	 * so the cursor should be 0. Otherwise:
-	 *
-	 *   1. First connect: server returns 50 history entries with
-	 *      msgids up to N. Cursor becomes N. xtext shows them.
-	 *   2. User clicks Reconnect (same host:port).
-	 *   3. hx_clear_chat wipes xtext above.
-	 *   4. If we'd kept the cursor at N, post-login catch-up sends
-	 *      AFTER=N and the server correctly returns zero new
-	 *      entries — and the chat window stays blank.
-	 *
-	 * The "per-server" distinction below is now only about logging
-	 * server switches; the reset itself is unconditional. (Server-
-	 * switch logging still useful for the "did the cursor really
-	 * get reset?" debug case.)
-	 *
-	 * Compare against the previous serverhost / serverport BEFORE
-	 * we overwrite them just below. First-ever connect: serverhost
-	 * is "" and the cursor is already 0, so the reset is a harmless
-	 * no-op. */
-    if ((strcmp (htlc->serverhost, serverstr) != 0
-         || htlc->serverport != port)
-        && htlc->chat_history_last_msgid != 0) {
-        debug_log ("chat-history",
-                   "switching servers (%s:%u → %s:%u); "
-                   "resetting AFTER cursor from %" G_GUINT64_FORMAT,
-                   htlc->serverhost[0] ? htlc->serverhost : "(none)",
-                   htlc->serverport, serverstr, port,
-                   htlc->chat_history_last_msgid);
-    } else if (htlc->chat_history_last_msgid != 0) {
-        debug_log ("chat-history",
-                   "same-server reconnect (%s:%u); "
-                   "resetting AFTER cursor from %" G_GUINT64_FORMAT
-                   " (xtext was wiped, initial-load path will fire)",
-                   serverstr, port, htlc->chat_history_last_msgid);
-    }
-    htlc->chat_history_last_msgid = 0;
-
-    /* Stamp the server endpoint onto htlc so the HTXF subchannel
-	 * (port+1) and post-connect log messages don't have to query a
-	 * separate "what server did we connect to" oracle. */
-    g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
-    htlc->serverport = port;
-
-    /* also stamp the tls flag so HTXF subchannel connects
-     * (xfers.c::htxf_connect via htxf->htlc, banner.c via the
-     * fetch snapshot) know to wrap their data ports too. The
-     * Mobius / Janus separate-port model pairs TLS-HTLS on port N
-     * with TLS-HTXF on port N+1, so reusing the existing port+1
-     * arithmetic just works without a separate tls_xfer_port
-     * concept on the production side. */
-    htlc->tls = tls;
-
-#if 0 /* XXX */
-	server_log = create_log(server_addr);
-#endif
-
-    ctx = g_new0 (struct gtkhx_connect_ctx, 1);
-    ctx->htlc = htlc;
-    ctx->serverstr = g_strdup (serverstr);
-    ctx->port = port;
-    ctx->login = g_strdup (login);
-    ctx->pass = g_strdup (pass);
-    ctx->secure = (unsigned char) secure;
-    ctx->tls = (unsigned char) tls;
-    ctx->cancel = g_cancellable_new ();
-    current_cancel = g_object_ref (ctx->cancel);
-    ctx->state = GTKHX_CONNECT_STATE_RESOLVING;
-
-    htlc->gdk_input = 0;
-    hx_printf_prefix (htlc, 0, INFOPREFIX,
-                      tls ? _ ("connecting to %s (TLS)\n")
-                          : _ ("connecting to %s\n"),
-                      server_addr);
-    gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
-                                         GTKHX_CONNECTION_CONNECTING);
-
-    client = g_socket_client_new ();
-    /* GSocketClient defaults already prefer IPv4 if both are
-	 * available and try each resolved address in turn — same fallback
-	 * behaviour the legacy getaddrinfo loop had. */
-    g_socket_client_set_timeout (client, MAGIC_TIMEOUT_SEC);
-    if (tls) {
-        /* TLS from byte zero (Mobius / Janus separate-port
-		 * model — no STARTTLS, no in-band negotiation). GIO routes
-		 * the underlying socket through whatever TLS backend
-		 * glib-networking provides (GnuTLS or OpenSSL depending on
-		 * distro / runtime); we don't link a TLS lib directly. The
-		 * event signal lets us attach accept-certificate during the
-		 * TLS_HANDSHAKING phase — see on_socket_client_event. */
-        g_socket_client_set_tls (client, TRUE);
-        /* user_data is a tls_endpoint stashed on the
-         * connect ctx (ep_host points at the same memory as
-         * ctx->serverstr, alive until the connect completes).
-         * Lives long enough — the GSocketClient is unref'd
-         * below but the underlying handshake completes before
-         * the connect callback fires, and the signal handler
-         * only runs during the handshake. */
-        ctx->tls_endpoint.host = ctx->serverstr;
-        ctx->tls_endpoint.port = port;
-        g_signal_connect (client, "event",
-                          G_CALLBACK (on_socket_client_event),
-                          &ctx->tls_endpoint);
-    }
-    g_socket_client_connect_to_host_async (client, serverstr, port, ctx->cancel,
-                                           on_async_connected, ctx);
-    g_object_unref (client);
 }
 
 /* Synchronous worker-thread connect helper. Used by the HTXF

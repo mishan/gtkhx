@@ -14,9 +14,9 @@
  *
  * Unlike test_real_connect_hxnet.c (which drives the production
  * hx_connect against the in-process fake_server and stops at the
- * magic exchange), this test drives the production hx_connect with
- * GTKHX_NEW_CONNECT=1 against a REAL mhxd container so the whole
- * orchestrator runs end to end:
+ * magic exchange), this test drives the production hx_connect
+ * against a REAL mhxd container so the whole orchestrator runs end
+ * to end:
  *
  *   hx_connect → hx_connect_via_orchestrator
  *     → hx_bridge_install_orchestrated_plaintext
@@ -86,6 +86,7 @@
 #include "gtkhx_session.h"     /* GtkhxConnectionState */
 #include "hxnet_bridge.h"      /* hx_bridge_is_installed */
 #include "server_matrix.h"     /* hx_test_servers_with — cap-aware server pick */
+#include "tls_trust.h"         /* hx_tls_trust_pin (TLS mismatch-reject test) */
 
 /* From connect_test_stubs.c. */
 extern void connect_test_init_fd_table (void);
@@ -243,9 +244,7 @@ test_orchestrator_login (void)
     g_assert_cmpint (port, <=, 65535);
 
     /* Force the orchestrator path on; force the post-HOPE hxnet
-     * opt-out env var clear so neither interferes with the gate. */
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
-    g_unsetenv ("GTKHX_TLS");
+     * opt-out env var clear so neither interferes with the gate. */    g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -306,8 +305,6 @@ test_orchestrator_login (void)
     }
     /* hx_htlc_close uninstalls the bridge. */
     g_assert_false (hx_bridge_is_installed ());
-
-    g_unsetenv ("GTKHX_NEW_CONNECT");
 }
 
 /* Increment 1: prove the orchestrator advertises capabilities
@@ -341,8 +338,6 @@ test_orchestrator_capabilities_negotiated (void)
             "container or set GTKHX_TEST_SERVERS=janus.");
         return;
     }
-
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
     g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
@@ -371,13 +366,11 @@ test_orchestrator_capabilities_negotiated (void)
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
-    }
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-    g_ptr_array_unref (cand);
+    }    g_ptr_array_unref (cand);
 }
 
 /* Drive the production hx_connect HOPE-Secure-Login path through the
- * orchestrator (GTKHX_NEW_CONNECT=1, secure=1) against a matrix
+ * orchestrator (secure=1) against a matrix
  * server advertising `required_cap`, with `cipheralg` configured on
  * the htlc. Asserts the full handshake reaches HANDSHAKE_DONE, the
  * bridge installs, and the replayed step-2 reply dispatched to the C
@@ -408,8 +401,6 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
             required_cap, cipheralg);
         return;
     }
-
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
     g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
@@ -439,9 +430,7 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-    g_ptr_array_unref (cand);
+    g_assert_false (hx_bridge_is_installed ());    g_ptr_array_unref (cand);
 }
 
 static void
@@ -489,8 +478,6 @@ test_orchestrator_hope_no_cipher (void)
             "set GTKHX_TEST_SERVERS=mhxd.");
         return;
     }
-
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
     g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
@@ -519,13 +506,11 @@ test_orchestrator_hope_no_cipher (void)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-    g_ptr_array_unref (cand);
+    g_assert_false (hx_bridge_is_installed ());    g_ptr_array_unref (cand);
 }
 
-/* Drive the production hx_connect TLS path (GTKHX_NEW_CONNECT=1,
- * tls=1, secure=0) against a matrix server's dedicated TLS port —
+/* Drive the production hx_connect TLS path (tls=1, secure=0) against
+ * a matrix server's dedicated TLS port —
  * the Mobius/Janus separate-port model: TLS handshake from byte zero,
  * then a plaintext LOGIN over the encrypted stream. Asserts the full
  * sequence reaches HANDSHAKE_DONE through the orchestrator's rustls
@@ -573,7 +558,6 @@ test_orchestrator_tls_login (void)
     g_autofree char *known_hosts = g_build_filename (tmpdir, "known_hosts", NULL);
     g_setenv ("GTKHX_KNOWN_HOSTS", known_hosts, TRUE);
     g_setenv ("GTKHX_TLS_AUTO_ACCEPT", "1", TRUE);
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
     g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
@@ -636,8 +620,87 @@ test_orchestrator_tls_login (void)
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
     g_assert_false (hx_bridge_is_installed ());
+    g_unsetenv ("GTKHX_KNOWN_HOSTS");
+    g_unlink (known_hosts);
+    g_rmdir (tmpdir);
+    g_ptr_array_unref (cand);
+}
 
-    g_unsetenv ("GTKHX_NEW_CONNECT");
+/* TLS TOFU reject path on the orchestrator: pin a bogus fingerprint so
+ * the real cert resolves MISMATCH, and drive the prompt verdict to
+ * "reject" via the GTKHX_TLS_TEST_PROMPT seam. The orchestrator's
+ * verify_cert bridge must reject the cert, the lifecycle must close the
+ * stream before any LOGIN, and the connection must surface as
+ * DISCONNECTED — never HANDSHAKE_DONE. (Migrated from the legacy
+ * test_real_tls mismatch test when delete-old-connect removed that
+ * suite; the accept/pin/silent-accept paths are covered by
+ * test_orchestrator_tls_login above.) */
+static void
+test_orchestrator_tls_mismatch_rejected (void)
+{
+    GPtrArray *cand = hx_test_servers_with (HX_TEST_CAP_TLS);
+    const hx_test_server *srv = NULL;
+    if (cand) {
+        for (guint i = 0; i < cand->len; i++) {
+            const hx_test_server *s = g_ptr_array_index (cand, i);
+            if (s->tls_port != 0) {
+                srv = s;
+                break;
+            }
+        }
+    }
+    if (!srv) {
+        if (cand) {
+            g_ptr_array_unref (cand);
+        }
+        g_test_fail_printf (
+            "no TLS-capable server in matrix (need HX_TEST_CAP_TLS + a "
+            "tls_port; Janus).");
+        return;
+    }
+
+    /* Isolated known-hosts with a bogus pin for this host:port → the
+     * real Janus cert can't match → MISMATCH. */
+    g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-rej-XXXXXX", NULL);
+    g_assert_nonnull (tmpdir);
+    g_autofree char *known_hosts =
+        g_build_filename (tmpdir, "known_hosts", NULL);
+    (void) g_unlink (known_hosts);
+    g_setenv ("GTKHX_KNOWN_HOSTS", known_hosts, TRUE);
+    const char *bogus =
+        "sha256:00112233445566778899aabbccddeeff"
+        "00112233445566778899aabbccddeeff";
+    /* The pin MUST succeed — if it silently failed the real cert would
+     * resolve UNKNOWN, not MISMATCH, and the test would pass by rejecting
+     * at the prompt seam without ever exercising the mismatch path. */
+    g_assert_true (hx_tls_trust_pin (srv->host, srv->tls_port, bogus));
+
+    /* Drive the prompt verdict to reject; AUTO_ACCEPT off so the seam
+     * (not an auto-accept) decides. */
+    g_unsetenv ("GTKHX_TLS_AUTO_ACCEPT");
+    g_setenv ("GTKHX_TLS_TEST_PROMPT", "reject", TRUE);
+    g_unsetenv ("GTKHX_TLS");
+    connect_test_reset_rcv_record ();
+    memset (&test_htlc, 0, sizeof (test_htlc));
+
+    GtkhxSession *gtkhx = gtkhx_session_get_default ();
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
+
+    hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
+                /*secure=*/0, /*tls=*/1);
+    drive_until (obs, 10000);
+
+    /* Rejected cert → DISCONNECTED, and HANDSHAKE_DONE never fired. */
+    g_assert_true (obs->wait_arrived);
+    g_assert_cmpint (observer_index_of (obs, GTKHX_CONNECTION_HANDSHAKE_DONE),
+                     ==, -1);
+    g_assert_cmpuint (connect_test_rcv_count, ==, 0);
+
+    observer_free (obs, gtkhx);
+    if (test_htlc.fd) {
+        hx_htlc_close (&test_htlc, /*expected=*/1);
+    }
+    g_unsetenv ("GTKHX_TLS_TEST_PROMPT");
     g_unsetenv ("GTKHX_KNOWN_HOSTS");
     g_unlink (known_hosts);
     g_rmdir (tmpdir);
@@ -654,9 +717,7 @@ test_orchestrator_tls_login (void)
  * unbound, so the connect is refused. */
 static void
 test_orchestrator_connect_refused (void)
-{
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
-    g_unsetenv ("GTKHX_TLS");
+{    g_unsetenv ("GTKHX_TLS");
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -678,9 +739,7 @@ test_orchestrator_connect_refused (void)
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
-    }
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-}
+    }}
 
 /* HOPE-over-TLS is unsupported on every path. hx_connect must reject
  * it synchronously — no orchestrator install, no connection attempt,
@@ -688,9 +747,7 @@ test_orchestrator_connect_refused (void)
  * connect). */
 static void
 test_hope_tls_rejected (void)
-{
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
-    g_unsetenv ("GTKHX_TLS");
+{    g_unsetenv ("GTKHX_TLS");
     memset (&test_htlc, 0, sizeof (test_htlc));
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
     g_assert_false (hx_bridge_is_installed ());
@@ -711,91 +768,7 @@ test_hope_tls_rejected (void)
     g_assert_false (hx_bridge_is_installed ());
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
-    g_unsetenv ("GTKHX_TLS");
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-}
-
-/* ---- Phase G default-flip prep: gate-selection guards ------------ *
- *
- * These pin the path-selection logic in
- * src/network.c::hx_connect_use_orchestrator (the centralized gate the
- * eventual default-flip toggles via PHASE_G_DEFAULT_ON). They observe
- * which path hx_connect chose WITHOUT needing a live server: the
- * orchestrator path installs the bridge SYNCHRONOUSLY before
- * hx_connect returns (fd=-1 sentinel, then the tokio connect runs
- * async), while the legacy GIOStream path returns with no bridge
- * installed. So hx_bridge_is_installed() sampled immediately after
- * hx_connect returns — before we pump the main loop — is a clean,
- * deterministic signal for which gate branch ran.
- *
- * We connect to 127.0.0.1:1 (unbound → refused) so the async attempt
- * always fails and tears down cleanly; the gate decision has already
- * been observed by then.
- */
-static void
-assert_gate_selects_orchestrator (gboolean expect_orchestrator)
-{
-    g_unsetenv ("GTKHX_TLS");
-    connect_test_reset_rcv_record ();
-    memset (&test_htlc, 0, sizeof (test_htlc));
-
-    GtkhxSession *gtkhx = gtkhx_session_get_default ();
-    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
-    g_assert_false (hx_bridge_is_installed ());
-
-    hx_connect (&test_htlc, "127.0.0.1", 1, "guest", "",
-                /*secure=*/0, /*tls=*/0);
-
-    /* Sampled synchronously, before the main loop runs: only the
-     * orchestrator path installs the bridge inside hx_connect. */
-    g_assert_cmpint (hx_bridge_is_installed (), ==, expect_orchestrator);
-
-    /* Let the refused connect tear down on whichever path. */
-    drive_until (obs, 10000);
-    g_assert_true (obs->wait_arrived);
-
-    observer_free (obs, gtkhx);
-    if (test_htlc.fd) {
-        hx_htlc_close (&test_htlc, /*expected=*/1);
-    }
-    g_assert_false (hx_bridge_is_installed ());
-}
-
-/* Default (neither env var set): PHASE_G_DEFAULT_ON decides. While it's
- * 0 the legacy path is the default, so no bridge install. This
- * assertion is the deliberate trip-wire for the flip: when
- * PHASE_G_DEFAULT_ON becomes 1, this expectation flips to TRUE in the
- * same commit — a visible, reviewed part of changing the default. */
-static void
-test_gate_default (void)
-{
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-    g_unsetenv ("GTKHX_OLD_CONNECT");
-    assert_gate_selects_orchestrator (PHASE_G_DEFAULT_ON ? TRUE : FALSE);
-}
-
-/* Explicit opt-in selects the orchestrator regardless of the default. */
-static void
-test_gate_opt_in (void)
-{
-    g_unsetenv ("GTKHX_OLD_CONNECT");
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
-    assert_gate_selects_orchestrator (TRUE);
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-}
-
-/* Explicit opt-out beats explicit opt-in: a user can always force the
- * legacy path. This is the escape hatch that makes the flip safe — and
- * it's testable now, before it becomes load-bearing. */
-static void
-test_gate_opt_out_wins (void)
-{
-    g_setenv ("GTKHX_NEW_CONNECT", "1", TRUE);
-    g_setenv ("GTKHX_OLD_CONNECT", "1", TRUE);
-    assert_gate_selects_orchestrator (FALSE);
-    g_unsetenv ("GTKHX_NEW_CONNECT");
-    g_unsetenv ("GTKHX_OLD_CONNECT");
-}
+    g_unsetenv ("GTKHX_TLS");}
 
 int
 main (int argc, char *argv[])
@@ -811,14 +784,11 @@ main (int argc, char *argv[])
     g_test_add_func ("/phase_g/hope_no_cipher",
                      test_orchestrator_hope_no_cipher);
     g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
+    g_test_add_func ("/phase_g/tls_mismatch_rejected",
+                     test_orchestrator_tls_mismatch_rejected);
     g_test_add_func ("/phase_g/connect_refused",
                      test_orchestrator_connect_refused);
     g_test_add_func ("/phase_g/hope_tls_rejected", test_hope_tls_rejected);
-
-    /* Default-flip prep: gate-selection guards (no server needed). */
-    g_test_add_func ("/phase_g/gate_default", test_gate_default);
-    g_test_add_func ("/phase_g/gate_opt_in", test_gate_opt_in);
-    g_test_add_func ("/phase_g/gate_opt_out_wins", test_gate_opt_out_wins);
 
     return g_test_run ();
 }

@@ -45,29 +45,6 @@ extern gboolean hx_tls_verify_subchannel_cert (const char *host, guint16 port,
  * (magic done, credentials going out) rather than up front. */
 extern void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
-/* Phase G default-flip control. The orchestrator connect path
- * (hx_connect_via_orchestrator) is now the DEFAULT; GTKHX_OLD_CONNECT=1
- * is the escape hatch back to the legacy GIOStream path. Both env vars
- * (GTKHX_NEW_CONNECT opt-in, GTKHX_OLD_CONNECT opt-out; opt-out wins)
- * are still honored, so the legacy path stays reachable for A/B testing
- * during the bake before delete-old-connect removes it.
- *
- * Defined in the header (not network.c) so the gate logic and the
- * /phase_g/gate_default trip-wire test reference the SAME value — the
- * test's expectation tracks this constant.
- *
- * Validation behind the flip (docs/phase-g-migration.md): plaintext +
- * HOPE (both ciphers) vs mhxd and plaintext + caps + TLS vs Janus are
- * green in Tier 3; the orchestrator's HOPE + TLS paths shipped. The
- * remaining gap is an *automated* 1.0/1.2 regression (no real 1.0/1.2
- * server in the matrix — covered by manual smoke against old-Mac
- * servers + the pre-TASK-frame tolerance in login_reply; a 1.0/1.2 mock
- * Tier 3 target is a nice-to-have follow-up). The escape hatch keeps the
- * flip low-risk and reversible while it bakes. */
-#ifndef PHASE_G_DEFAULT_ON
-#define PHASE_G_DEFAULT_ON 1
-#endif
-
 /* `secure` is the legacy hxd "secure server" password flag (not
  * transport security — it just selects an alternate password
  * encoding). `tls` is the transport-security flag: non-zero
