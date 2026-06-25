@@ -33,7 +33,6 @@
 #include <sys/time.h>
 #include <time.h>
 #include "hx.h"
-#include "hope.h"
 #include "login_packet.h"
 #include "cipher_aead.h"
 #include "gtkhx_session.h"

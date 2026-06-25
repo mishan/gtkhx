@@ -1047,28 +1047,6 @@ test_msg_event = executable('test_msg_event',
 test('msg_event', test_msg_event,
      suite : 'proto')
 
-# hope — Tier 2 known-answer tests for the HOPE-Secure-Login state
-# machine (src/hope.c). Covers the pure helpers extracted out of
-# rcv_task_login during the claude/hope-state-machine refactor:
-# algorithm-list reply builder, cipher-name lookups, the HMAC
-# chain (password_mac → encode_key → decode_key) with SHA-256
-# KAT vectors, LOGIN field encoding (XOR vs. HMAC variants),
-# session-key IP:port validation. Compiles hope.c, algo_list.c,
-# and hl_code.c in directly; hmac_xxx is the Rust hxcrypto-hash
-# crate now (Phase R1), wired via rust_hxcrypto_hash_dep — none of
-# the linked source files need GTK or Adwaita, so the test binary
-# stays self-contained the way the rest of Tier 2 does.
-test_hope = executable('test_hope',
-  'proto/test_hope.c',
-  '../src/hope.c',
-  '../src/algo_list.c',
-  '../src/hl_code.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep],
-  include_directories : proto_test_inc,
-)
-test('hope', test_hope,
-     suite : 'proto')
-
 # ChaCha20-Poly1305 AEAD frame codec. Tier 2 KAT: seal/open round-
 # trip, counter advance, tamper rejection, peek behaviour. Pins the
 # wire-format invariants that the (currently-skipped) Tier 3
@@ -1095,36 +1073,6 @@ test('aead', test_aead,
 # FFI-over-a-real-socket integration test. htxf_io.c is now a thin
 # errno-translating shim with nothing framing-specific left to unit-test
 # in C.
-
-# network_decode — receive-side qbuf-to-qbuf decoder split out of
-# network.c specifically so this test can drive its three branches
-# (plaintext / stream cipher / AEAD framing) against canned bytes.
-# Pulls in the full cipher stack (cipher.c + cipher_aead.c + qbuf.c
-# — the same set the Tier 3 harness linked in for HOPE coverage)
-# plus a couple of stub symbols for hx_htlc_close + hx_printf_prefix
-# that the test binary provides inline. The
-# AEAD failure subtests exercise the close-on-error path; the
-# stubs zero htlc->fd to mirror hx_htlc_close's one observable
-# side effect from hx_decode's perspective.
-test_network_decode = executable('test_network_decode',
-  'proto/test_network_decode.c',
-  '../src/network_decode.c',
-  '../src/cipher.c',
-  '../src/cipher_aead.c',
-  '../src/qbuf.c',
-  '../src/rand.c',
-  '../src/debug.c',
-  # Nettle's blowfish_set_key / blowfish_encrypt come in via
-  # proto_test_deps's nettle_dep already; the test driver uses
-  # them directly on the encode side to synthesize ciphertext
-  # (production's decode path runs through the Rust crate via
-  # rust_hxcrypto_stream_dep).
-  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep,
-                                           rust_hxcrypto_stream_dep],
-  include_directories : proto_test_inc,
-)
-test('network_decode', test_network_decode,
-     suite : 'proto')
 
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
@@ -1176,30 +1124,20 @@ integration_harness_lib = static_library(
   '../src/agreement_packet.c',
   '../src/chat_history.c',
   # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
-  # ChaCha20-Poly1305 frame codec for HOPE Step 2 AEAD; cipher.c
-  # brings the stream-cipher (Blowfish OFB-64) seal/open + the
-  # HMAC-chained rekey rotation that mirrors production's
-  # rcv.c::hx_rcv_hdr behaviour; random_bytes is provided by the
-  # C src/rand.c (getrandom(2) with /dev/urandom fallback);
-  # hmac_xxx is provided by the Rust
-  # hxcrypto-hash crate via rust_hxcrypto_hash_dep (Phase R1; the C
-  # symbol is hmac_xxx, an inline shim in protocol.h that delegates
-  # to gtkhx_hmac_xxx); hope.c brings the HMAC chain + chunk walker;
-  # algo_list.c is its transitive dep. After Phase R1 the crypto
-  # primitives all come from Rust crates (rust_hxcrypto_{hash,
-  # stream,aead}_dep below); cipher.c / cipher_aead.c / hope.c
-  # survive as thin C dispatchers + protocol state machines that
-  # only need glib at link time. The harness still links the C
-  # source files (not just calls the FFI) so the Tier 3 HOPE+stream
-  # tests drive the same dispatch and rekey state machine
-  # production uses.
+  # ChaCha20-Poly1305 frame codec; cipher.c brings the stream-cipher
+  # (Blowfish OFB-64) seal/open. Random bytes come from C src/rand.c
+  # (getrandom(2) with /dev/urandom fallback); the hash/cipher
+  # primitives themselves come from the Rust hxcrypto crates (Phase R1).
+  # The Tier 3 HOPE login now runs through the production orchestrator
+  # (Rust owns the crypto), so these C files are referenced only by the
+  # legacy framing branches still left in the harness send/recv_message
+  # _hope wrappers — slated for removal alongside cipher.c.
   '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   '../src/qbuf.c',
   '../src/rand.c',
-  '../src/hope.c',
   '../src/algo_list.c',
   '../src/debug.c',
   # The harness login entry points drive connect + magic + LOGIN through
@@ -1266,7 +1204,6 @@ test_integration_real_connect = executable(
   '../src/network.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
-  '../src/network_decode.c',
   '../src/connect_magic.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
@@ -1282,7 +1219,6 @@ test_integration_real_connect = executable(
   '../src/text_util.c',
   '../src/qbuf.c',
   '../src/rand.c',
-  '../src/hope.c',
   '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
@@ -1333,7 +1269,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/network.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
-  '../src/network_decode.c',
   '../src/connect_magic.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
@@ -1350,7 +1285,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/text_util.c',
   '../src/qbuf.c',
   '../src/rand.c',
-  '../src/hope.c',
   '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',

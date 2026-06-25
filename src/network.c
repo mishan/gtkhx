@@ -76,7 +76,6 @@ extern void gtkhx_blowfish_ofb64_free (BlowfishOfb64State *state);
 #include "hl_code.h"
 #include "proto_helpers.h"
 #include "htxf_subchannel.h"
-#include "network_decode.h"
 #include "tracker_parser.h"
 #include "tracker_v3.h"
 #include "tracker_event.h"
@@ -450,17 +449,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     g_free (server_addr);
     server_addr = NULL;
 }
-/* pump complete AEAD frames
- * from htlc->read_in into htlc->aead_plain. Returns the number
- * of plaintext bytes newly available in aead_plain (relative to
- * its pos). Authentication failure or oversized frame returns 0
- * and disconnects htlc (via hx_htlc_close); the caller treats
- * htlc->fd == 0 as "stop processing". */
-/* hx_aead_pump_frames + hx_decode live in network_decode.c so the
- * Tier 2 test suite can drive them against canned bytes without
- * dragging in this file's async-connect / tracker / GTK pile. The
- * implementations are byte-for-byte unchanged from when they lived
- * here as static aead_pump_frames + decode. */
 
 /* The post_* marshal helpers (post_prog / post_ts / post_log) lived
  * here until the tracker fetch went async (see hx_tracker_list_async
