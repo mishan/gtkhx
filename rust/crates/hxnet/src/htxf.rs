@@ -30,9 +30,10 @@
 //! passthrough (older / unencrypted servers).
 
 use std::io::{self, Read, Write};
-use std::net::TcpStream;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::mem::ManuallyDrop;
+use std::net::{Shutdown, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use hxcrypto_aead::{AeadState, AEAD_LENGTH_PREFIX, AEAD_TAG_SIZE};
@@ -376,11 +377,92 @@ impl HtxfInner {
             HtxfInner::Tls(c) => c.inner.sock.set_read_timeout(dur),
         }
     }
+    /// Duplicate the underlying socket handle (same fd via `try_clone`).
+    /// The clone shares the kernel socket, so calling `shutdown` on it
+    /// from another thread interrupts a blocking read/write parked on
+    /// the worker's channel — that's the whole point: a cancel handle
+    /// the main thread can act on without touching the worker-owned
+    /// `HtxfConn`. Reaches the same private TcpStream `set_read_timeout`
+    /// does.
+    fn try_clone_socket(&self) -> Option<TcpStream> {
+        match self {
+            HtxfInner::Plain(c) => c.inner.try_clone().ok(),
+            HtxfInner::Tls(c) => c.inner.sock.try_clone().ok(),
+        }
+    }
+}
+
+/// Thread-safe cancellation token for one HTXF subchannel — the
+/// foundation for cooperative transfer cancel (Phase R3 X1,
+/// `docs/rust/xfers-tokio-scoping.md`).
+///
+/// Lifecycle: created on the **main thread** before the transfer worker
+/// starts (`hxnet_htxf_abort_new`); armed with the channel's socket once
+/// the **worker** opens the subchannel (`hxnet_htxf_abort_arm`); the main
+/// thread flips it on cancel (`hxnet_htxf_abort`), which both raises the
+/// flag the worker's read/write observe AND shuts the socket down so a
+/// *currently parked* blocking read/write wakes promptly. Reference
+/// counted (`Arc`): one ref held by the C side (freed via
+/// `hxnet_htxf_abort_free`), one cloned into the `HtxfConn` at arm time
+/// (dropped when the channel closes). The token frees when the last ref
+/// drops, in whichever order those happen.
+pub struct HtxfAbort {
+    aborted: AtomicBool,
+    /// A `try_clone` of the channel's socket, used only to `shutdown` it
+    /// and wake a parked worker read/write. `None` until armed. The
+    /// `Mutex` guards the cross-thread arm (worker) vs. abort (main)
+    /// access; the critical sections are a single field move / shutdown
+    /// call, never held across IO.
+    sock: Mutex<Option<TcpStream>>,
+}
+
+impl HtxfAbort {
+    fn new() -> Self {
+        Self {
+            aborted: AtomicBool::new(false),
+            sock: Mutex::new(None),
+        }
+    }
+
+    /// Store the wake-socket. If `abort` already fired before we got
+    /// here (cancel raced the connect), shut the socket down immediately
+    /// so the worker's imminent first read/write doesn't park.
+    fn arm(&self, sock: TcpStream) {
+        let mut guard = self.sock.lock().unwrap();
+        if self.aborted.load(Ordering::SeqCst) {
+            let _ = sock.shutdown(Shutdown::Both);
+        }
+        *guard = Some(sock);
+    }
+
+    /// Flip to aborted and shut the wake-socket down (if armed) to
+    /// unblock a parked read/write. Idempotent.
+    fn abort(&self) {
+        self.aborted.store(true, Ordering::SeqCst);
+        if let Some(s) = self.sock.lock().unwrap().as_ref() {
+            let _ = s.shutdown(Shutdown::Both);
+        }
+    }
+
+    fn is_aborted(&self) -> bool {
+        self.aborted.load(Ordering::SeqCst)
+    }
 }
 
 /// Opaque handle the C side holds for one transfer subchannel.
 pub struct HtxfConn {
     inner: HtxfInner,
+    /// Cancellation token shared with the C side. `None` until
+    /// `hxnet_htxf_abort_arm` clones a ref in. Read/write check it so an
+    /// abort fails the transfer fast rather than returning the post-
+    /// shutdown `Ok(0)` EOF as a clean end-of-stream.
+    abort: Option<Arc<HtxfAbort>>,
+}
+
+impl HtxfConn {
+    fn is_aborted(&self) -> bool {
+        self.abort.as_ref().is_some_and(|a| a.is_aborted())
+    }
 }
 
 /// Open an HTXF subchannel over an already-connected, blocking `fd`
@@ -545,6 +627,7 @@ pub unsafe extern "C" fn hxnet_htxf_open(
         };
         Box::into_raw(Box::new(HtxfConn {
             inner: HtxfInner::Tls(Box::new(ch)),
+            abort: None,
         }))
     } else {
         let mut tcp = tcp;
@@ -558,6 +641,7 @@ pub unsafe extern "C" fn hxnet_htxf_open(
         };
         Box::into_raw(Box::new(HtxfConn {
             inner: HtxfInner::Plain(ch),
+            abort: None,
         }))
     }
 }
@@ -575,13 +659,26 @@ pub unsafe extern "C" fn hxnet_htxf_read(handle: *mut HtxfConn, buf: *mut u8, le
         return -1;
     }
     let h = &mut *handle;
+    // Cancelled before we even issued the read — fail fast.
+    if h.is_aborted() {
+        return -1;
+    }
     let out = if len == 0 {
         &mut [][..]
     } else {
         slice::from_raw_parts_mut(buf, len)
     };
     match h.inner.read(out) {
-        Ok(n) => n as isize,
+        // A read that completed (or returned a post-shutdown Ok(0) EOF)
+        // after an abort must surface as an error, not a clean 0 the
+        // worker loop would mistake for end-of-stream.
+        Ok(n) => {
+            if h.is_aborted() {
+                -1
+            } else {
+                n as isize
+            }
+        }
         Err(_) => -1,
     }
 }
@@ -602,13 +699,22 @@ pub unsafe extern "C" fn hxnet_htxf_write(
         return -1;
     }
     let h = &mut *handle;
+    if h.is_aborted() {
+        return -1;
+    }
     let data = if len == 0 {
         &[][..]
     } else {
         slice::from_raw_parts(buf, len)
     };
     match h.inner.write(data) {
-        Ok(n) => n as isize,
+        Ok(n) => {
+            if h.is_aborted() {
+                -1
+            } else {
+                n as isize
+            }
+        }
         Err(_) => -1,
     }
 }
@@ -643,6 +749,70 @@ pub unsafe extern "C" fn hxnet_htxf_set_read_timeout(
             glib::g_critical!("hxnet", "hxnet_htxf_set_read_timeout: {}", e);
             -1
         }
+    }
+}
+
+/// Create a new, unarmed cancellation token. Called on the main thread
+/// before the transfer worker starts. Returns an owned `Arc` ref as a
+/// raw pointer; the caller must hand it back to [`hxnet_htxf_abort_free`]
+/// exactly once when the transfer struct is destroyed. Never NULL.
+#[no_mangle]
+pub extern "C" fn hxnet_htxf_abort_new() -> *const HtxfAbort {
+    Arc::into_raw(Arc::new(HtxfAbort::new()))
+}
+
+/// Arm `token` with `handle`'s socket and clone a token ref into
+/// `handle` so its read/write can observe the aborted flag. Called once
+/// by the worker right after [`hxnet_htxf_open`] succeeds. No-op if
+/// either argument is NULL or the socket can't be duplicated. Does not
+/// consume the caller's `token` ref.
+///
+/// # Safety
+/// `handle` must be a live handle from [`hxnet_htxf_open`]; `token` must
+/// be a live pointer from [`hxnet_htxf_abort_new`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_abort_arm(handle: *mut HtxfConn, token: *const HtxfAbort) {
+    if handle.is_null() || token.is_null() {
+        return;
+    }
+    // Borrow the C-owned Arc without dropping its ref (ManuallyDrop so
+    // the implicit drop at scope end doesn't decrement).
+    let arc = ManuallyDrop::new(Arc::from_raw(token));
+    let h = &mut *handle;
+    if let Some(sock) = h.inner.try_clone_socket() {
+        arc.arm(sock);
+    }
+    // Clone a ref for the HtxfConn (+1); dropped when the channel closes.
+    h.abort = Some(Arc::clone(&arc));
+}
+
+/// Flip `token` to aborted and shut its wake-socket down so a parked
+/// read/write returns promptly. Called on the main thread from the
+/// transfer-cancel path. NULL-safe. Does NOT free the token — the worker
+/// may still hold a ref.
+///
+/// # Safety
+/// `token` must be a live pointer from [`hxnet_htxf_abort_new`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_abort(token: *const HtxfAbort) {
+    if token.is_null() {
+        return;
+    }
+    let arc = ManuallyDrop::new(Arc::from_raw(token));
+    arc.abort();
+}
+
+/// Drop the C side's ref to `token`. NULL-safe. The `HtxfConn` may still
+/// hold a ref (released when the channel closes); the token frees when
+/// the last ref drops.
+///
+/// # Safety
+/// `token` must be a live pointer from [`hxnet_htxf_abort_new`], not
+/// already freed.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_abort_free(token: *const HtxfAbort) {
+    if !token.is_null() {
+        drop(Arc::from_raw(token));
     }
 }
 
@@ -891,6 +1061,87 @@ mod tests {
         assert_eq!(&out[..n as usize], b"pong");
 
         unsafe { hxnet_htxf_close(h) };
+        server.join().unwrap();
+    }
+
+    // A worker parked in a blocking read of a stalled transfer must be
+    // woken by a main-thread abort and surface -1 — the X1 cooperative-
+    // cancel foundation. Mirrors the real split: the handle is "owned"
+    // by the reader thread; only the abort token crosses to the canceller.
+    #[test]
+    fn ffi_abort_unblocks_parked_read() {
+        use std::io::Read;
+        use std::net::{TcpListener, TcpStream};
+        use std::os::unix::io::IntoRawFd;
+        use std::thread;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        // Server holds the connection open, sending nothing, so the
+        // client read parks. It unblocks (read → 0) when the client side
+        // is shut down / closed at the end of the test.
+        let server = thread::spawn(move || {
+            let (mut sock, _) = listener.accept().unwrap();
+            let mut buf = [0u8; 16];
+            let _ = sock.read(&mut buf);
+        });
+
+        let client = TcpStream::connect(addr).unwrap();
+        let fd = client.into_raw_fd();
+        let h = unsafe {
+            hxnet_htxf_open(
+                fd,
+                0,
+                std::ptr::null(),
+                0,
+                std::ptr::null(),
+                0, // no preamble
+                std::ptr::null(),
+                0,
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(!h.is_null());
+
+        let token = hxnet_htxf_abort_new();
+        unsafe { hxnet_htxf_abort_arm(h, token) };
+
+        // Raw pointers aren't Send; hand the handle to the reader thread
+        // through a wrapper. The reader is the sole accessor of `h` while
+        // it runs, matching the single-threaded-handle contract.
+        struct SendPtr(*mut HtxfConn);
+        unsafe impl Send for SendPtr {}
+        let hp = SendPtr(h);
+
+        let reader = thread::spawn(move || {
+            let hp = hp;
+            let mut buf = [0u8; 16];
+            let start = Instant::now();
+            let r = unsafe { hxnet_htxf_read(hp.0, buf.as_mut_ptr(), buf.len()) };
+            (r, start.elapsed())
+        });
+
+        // Let the reader actually park in recv() before we abort.
+        thread::sleep(Duration::from_millis(100));
+        unsafe { hxnet_htxf_abort(token) };
+
+        let (r, elapsed) = reader.join().unwrap();
+        assert_eq!(r, -1, "aborted read must return -1");
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "abort should wake the parked read promptly, took {elapsed:?}"
+        );
+
+        // A subsequent read still reports the abort (flag latched).
+        let mut buf = [0u8; 4];
+        let r2 = unsafe { hxnet_htxf_read(h, buf.as_mut_ptr(), buf.len()) };
+        assert_eq!(r2, -1);
+
+        unsafe { hxnet_htxf_close(h) };
+        unsafe { hxnet_htxf_abort_free(token) };
         server.join().unwrap();
     }
 

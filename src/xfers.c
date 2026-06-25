@@ -108,6 +108,10 @@ htxf_unref (struct htxf_conn *htxf)
 	 * subchannel Phase E wrappers might have allocated. No-op
 	 * on a transfer that ran in plaintext mode. */
     htxf_io_release (htxf);
+    /* Drop the C side's ref to the cancellation token. The hxnet channel
+	 * (closed by htxf_io_release just above) already dropped its ref, so
+	 * this frees the token. NULL-safe on a transfer that never opened. */
+    htxf_io_abort_free (htxf);
     g_free (htxf);
 }
 
@@ -461,6 +465,11 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
 	 * (in xfer_ready_write). */
     htxf->refcount = 1;
     htxf->canceled = FALSE;
+
+    /* Allocate the cancellation token now, on the main thread, so it's
+	 * live for the htxf's whole lifetime — armed later by htxf_connect
+	 * (worker), triggered by xfer_delete (main), freed in htxf_unref. */
+    htxf_io_abort_init (htxf);
 
     xfers = g_realloc (xfers, (nxfers + 1) * sizeof (struct htxf_conn *));
     xfers[nxfers] = htxf;
@@ -1732,6 +1741,10 @@ xfers_delete_all (void)
     for (i = 0; i < nxfers; i++) {
         struct htxf_conn *htxf = xfers[i];
         htxf->canceled = TRUE;
+        /* Shut the subchannel socket down to wake a parked worker.
+		 * pthread_cancel stays for X1 as a backstop; once the worker
+		 * moves onto tokio's blocking pool (X3) it's the abort alone. */
+        htxf_io_abort (htxf);
         if (htxf->tid) {
             pthread_cancel (htxf->tid);
         }
@@ -1792,6 +1805,12 @@ xfer_delete (struct htxf_conn *htxf)
     }
 
     htxf->canceled = TRUE;
+    /* Wake a worker parked in a blocking subchannel read/write by
+	 * shutting its socket down; the htxf_io_read/_write canceled-check
+	 * then turns the resulting error into a clean exit. pthread_cancel
+	 * remains the X1 backstop (removed when the worker becomes a tokio
+	 * blocking task in X3). */
+    htxf_io_abort (htxf);
     if (htxf->tid) {
         pthread_cancel (htxf->tid);
     }

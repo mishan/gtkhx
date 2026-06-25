@@ -54,6 +54,17 @@ htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len)
         errno = EINVAL;
         return -1;
     }
+    /* Cooperative-cancel boundary (Phase R3 X1). Checking htxf->canceled
+     * here makes every worker read site across all four xfers.c workers
+     * observe a cancel without each loop needing its own check — the
+     * loops already bail on a `< 1` return. The hxnet abort token
+     * (htxf_io_abort) handles the orthogonal case of a read already
+     * parked in recv(); this catches a cancel that lands between reads.
+     * Banner's transient htxf has canceled == 0, so this is a no-op there. */
+    if (htxf->canceled) {
+        errno = ECANCELED;
+        return -1;
+    }
     ssize_t r = hxnet_htxf_read ((HtxfConn *) htxf->hx, (guint8 *) buf, len);
     if (r < 0) {
         debug_log ("xfer", "htxf_io_read: hxnet channel error");
@@ -68,6 +79,11 @@ htxf_io_write (struct htxf_conn *htxf, const void *buf, size_t len)
 {
     if (!htxf || !htxf->hx) {
         errno = EINVAL;
+        return -1;
+    }
+    /* Cooperative-cancel boundary — see htxf_io_read. */
+    if (htxf->canceled) {
+        errno = ECANCELED;
         return -1;
     }
     ssize_t w
@@ -96,4 +112,43 @@ htxf_io_set_read_timeout (struct htxf_conn *htxf, guint32 timeout_ms)
         return -1;
     }
     return 0;
+}
+
+/* ---- Cancellation token (Phase R3 X1) ------------------------------ */
+
+void
+htxf_io_abort_init (struct htxf_conn *htxf)
+{
+    if (!htxf || htxf->abort) {
+        return;
+    }
+    htxf->abort = (void *) hxnet_htxf_abort_new ();
+}
+
+void
+htxf_io_abort_arm (struct htxf_conn *htxf)
+{
+    if (!htxf || !htxf->hx || !htxf->abort) {
+        return;
+    }
+    hxnet_htxf_abort_arm ((HtxfConn *) htxf->hx, (const HtxfAbort *) htxf->abort);
+}
+
+void
+htxf_io_abort (struct htxf_conn *htxf)
+{
+    if (!htxf || !htxf->abort) {
+        return;
+    }
+    hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
+}
+
+void
+htxf_io_abort_free (struct htxf_conn *htxf)
+{
+    if (!htxf || !htxf->abort) {
+        return;
+    }
+    hxnet_htxf_abort_free ((const HtxfAbort *) htxf->abort);
+    htxf->abort = NULL;
 }

@@ -112,7 +112,51 @@ extern int hxnet_htxf_set_read_timeout (HtxfConn *handle, guint32 timeout_ms);
  * session). Safe with NULL. */
 extern void hxnet_htxf_close (HtxfConn *handle);
 
+/* ---- hxnet HTXF cancellation token --------------------------------
+ * Cooperative-cancel foundation (Phase R3 X1). A token is created on
+ * the main thread before the transfer worker starts, armed with the
+ * channel's socket once it opens (worker), and aborted from the main
+ * thread to shut that socket down and unblock a parked blocking
+ * read/write. Reference-counted: hxnet_htxf_abort_new yields the C
+ * side's ref (freed with hxnet_htxf_abort_free); hxnet_htxf_abort_arm
+ * clones a ref into the channel handle (released when the channel
+ * closes). Defined in rust/crates/hxnet/src/htxf.rs. */
+
+/* Opaque Rust HtxfAbort cancellation token. */
+typedef struct HtxfAbort HtxfAbort;
+
+/* Create an unarmed token (never NULL). Free with
+ * hxnet_htxf_abort_free exactly once. */
+extern const HtxfAbort *hxnet_htxf_abort_new (void);
+
+/* Arm `token` with `handle`'s socket and clone a ref into `handle` so
+ * its read/write observe the aborted flag. Worker-thread call, once,
+ * right after hxnet_htxf_open. No-op on NULL args. */
+extern void hxnet_htxf_abort_arm (HtxfConn *handle, const HtxfAbort *token);
+
+/* Flip `token` to aborted and shut its socket down to unblock a parked
+ * read/write. Main-thread call. NULL-safe. Does NOT free. */
+extern void hxnet_htxf_abort (const HtxfAbort *token);
+
+/* Drop the C side's ref to `token`. NULL-safe. */
+extern void hxnet_htxf_abort_free (const HtxfAbort *token);
+
 /* ---- C-side shim --------------------------------------------------- */
+
+/* Allocate the cancellation token onto htxf->abort. Main-thread call
+ * at transfer creation. No-op if a token is already present. */
+extern void htxf_io_abort_init (struct htxf_conn *htxf);
+
+/* Arm htxf->abort with htxf->hx's socket. Worker-thread call, once,
+ * after the channel is open. No-op if either is NULL. */
+extern void htxf_io_abort_arm (struct htxf_conn *htxf);
+
+/* Trigger cancellation: unblock a parked htxf_io_read / _write by
+ * shutting the subchannel socket down. Main-thread call. NULL-safe. */
+extern void htxf_io_abort (struct htxf_conn *htxf);
+
+/* Free htxf->abort and clear the slot. Called at htxf teardown. */
+extern void htxf_io_abort_free (struct htxf_conn *htxf);
 
 /* Zero the handle slot. struct htxf_conn is memset by every caller
  * before use, so this is mostly explicit-intent; safe to call before

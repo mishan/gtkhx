@@ -1336,6 +1336,13 @@ htxf_connect (struct htxf_conn *htxf)
                    htxf->ref);
         return FALSE;
     }
+
+    /* Arm the cancellation token (allocated at xfer_new) with the now-
+	 * open channel's socket, so a main-thread xfer_delete can shut the
+	 * subchannel down and unblock this worker's blocking reads/writes.
+	 * Cheap and idempotent; NULL-safe on the banner transient path,
+	 * which doesn't route through htxf_connect. */
+    htxf_io_abort_arm (htxf);
     return TRUE;
 }
 

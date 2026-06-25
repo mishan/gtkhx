@@ -174,6 +174,19 @@ struct htxf_conn {
     chacha_aead_state xfer_decode;
     gboolean aead_active;
     void *hx;
+
+    /* Thread-safe cancellation token for the HTXF subchannel (Rust
+	 * HtxfAbort *, opaque here). Created on the main thread at
+	 * xfer_new, armed with the channel's socket by htxf_connect once
+	 * `hx` is open (worker thread), and triggered by xfer_delete /
+	 * xfers_delete_all (main thread) to shut the socket down and
+	 * unblock a worker parked in a blocking htxf_io_read / _write.
+	 * Distinct from `hx` precisely because main and worker touch it
+	 * concurrently — `hx` is worker-owned and racy to read from the
+	 * main thread, whereas the token is reference-counted and safe to
+	 * abort from either side. NULL on a transfer whose worker never
+	 * started (e.g. cancelled while queued). Freed in htxf_unref. */
+    void *abort;
 };
 
 struct htlc_conn {
