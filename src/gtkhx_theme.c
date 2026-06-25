@@ -779,47 +779,74 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
     if (user_themes_dir) {
         GDir *dir = g_dir_open (user_themes_dir, 0, NULL);
         if (dir) {
+            /* Buffer the names so we can make two ordered passes over
+             * them: dir-form bundles first, then flat .ini files. That
+             * makes the documented "dir-form preferred" rule
+             * deterministic regardless of readdir order, and the
+             * seen-set stops a flat <name>.ini from also listing a
+             * <name>/ bundle of the same name. */
+            GPtrArray *names = g_ptr_array_new_with_free_func (g_free);
             const char *fn;
+            int pass;
+
             while ((fn = g_dir_read_name (dir)) != NULL) {
                 if (fn[0] == '.') {
                     continue;
                 }
-                char *child = g_build_filename (user_themes_dir, fn, NULL);
-                char *name = NULL;
-                char *display = NULL;
-
-                if (g_file_test (child, G_FILE_TEST_IS_DIR)) {
-                    /* Dir-form: <child>/theme.ini must exist. */
-                    char *manifest
-                        = g_build_filename (child, "theme.ini", NULL);
-                    if (g_file_test (manifest, G_FILE_TEST_IS_REGULAR)) {
-                        name = g_strdup (fn);
-                        display = read_display_name_from_file (manifest);
-                    }
-                    g_free (manifest);
-                } else if ((g_str_has_suffix (fn, ".ini")
-                            || g_str_has_suffix (fn, ".INI"))
-                           && g_file_test (child, G_FILE_TEST_IS_REGULAR)) {
-                    /* Flat-form: strip the .ini suffix. Require a
-					 * regular file so a FIFO / dead symlink /
-					 * other non-regular entry named "foo.ini"
-					 * doesn't surface as an unselectable theme
-					 * (gtkhx_theme_load_active needs IS_REGULAR
-					 * to open it). */
-                    name = strip_ini_suffix (fn);
-                    display = read_display_name_from_file (child);
-                }
-
-                if (name) {
-                    GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
-                    e->name = name;
-                    e->display = display ? display : g_strdup (name);
-                    g_ptr_array_add (out, e);
-                    g_hash_table_add (seen, e->name);
-                }
-                g_free (child);
+                g_ptr_array_add (names, g_strdup (fn));
             }
             g_dir_close (dir);
+
+            /* pass 0 = dir-form bundles, pass 1 = flat .ini */
+            for (pass = 0; pass < 2; pass++) {
+                guint i;
+                for (i = 0; i < names->len; i++) {
+                    const char *cn = names->pdata[i];
+                    char *child = g_build_filename (user_themes_dir, cn, NULL);
+                    gboolean is_dir = g_file_test (child, G_FILE_TEST_IS_DIR);
+                    char *name = NULL;
+                    char *display = NULL;
+
+                    if (pass == 0 && is_dir) {
+                        /* Dir-form: <child>/theme.ini must exist. */
+                        char *manifest
+                            = g_build_filename (child, "theme.ini", NULL);
+                        if (g_file_test (manifest, G_FILE_TEST_IS_REGULAR)) {
+                            name = g_strdup (cn);
+                            display = read_display_name_from_file (manifest);
+                        }
+                        g_free (manifest);
+                    } else if (pass == 1 && !is_dir
+                               && (g_str_has_suffix (cn, ".ini")
+                                   || g_str_has_suffix (cn, ".INI"))
+                               && g_file_test (child,
+                                               G_FILE_TEST_IS_REGULAR)) {
+                        /* Flat-form: strip the .ini suffix. Require
+						 * a regular file so a FIFO / dead symlink /
+						 * other non-regular entry named "foo.ini"
+						 * doesn't surface as an unselectable theme
+						 * (gtkhx_theme_load_active needs IS_REGULAR
+						 * to open it). */
+                        name = strip_ini_suffix (cn);
+                        display = read_display_name_from_file (child);
+                    }
+
+                    if (name) {
+                        if (g_hash_table_contains (seen, name)) {
+                            g_free (name);
+                            g_free (display);
+                        } else {
+                            GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+                            e->name = name;
+                            e->display = display ? display : g_strdup (name);
+                            g_ptr_array_add (out, e);
+                            g_hash_table_add (seen, e->name);
+                        }
+                    }
+                    g_free (child);
+                }
+            }
+            g_ptr_array_free (names, TRUE);
         }
     }
 
@@ -833,49 +860,61 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
         if (children) {
             const char *sep
                 = g_str_has_suffix (resource_prefix, "/") ? "" : "/";
-            for (char **p = children; *p; p++) {
-                char *name = NULL;
-                char *display = NULL;
-                gsize n = strlen (*p);
+            int pass;
 
-                if (n > 0 && (*p)[n - 1] == '/') {
-                    /* Dir-form: child is "subdir/"; check for
-                     * <prefix>/subdir/theme.ini. */
-                    char *subdir = g_strndup (*p, n - 1);
-                    char *manifest_res = g_strdup_printf (
-                        "%s%s%s/theme.ini", resource_prefix, sep, subdir);
-                    display = read_display_name_from_resource (manifest_res);
-                    if (display
-                        || g_resources_get_info (
-                            manifest_res, G_RESOURCE_LOOKUP_FLAGS_NONE,
-                            NULL, NULL, NULL)) {
-                        name = subdir;
-                        subdir = NULL;
+            /* Two ordered passes, same "dir-form preferred" rule as the
+             * user dir: pass 0 takes <name>/ bundles, pass 1 takes flat
+             * <name>.ini, and the seen-set drops a flat entry when a
+             * bundle of the same name (or a user theme) already won.
+             * GResource enumeration returns dirs with a trailing "/",
+             * files without — same as a normal VFS walk. */
+            for (pass = 0; pass < 2; pass++) {
+                for (char **p = children; *p; p++) {
+                    char *name = NULL;
+                    char *display = NULL;
+                    gsize n = strlen (*p);
+                    gboolean is_dir = (n > 0 && (*p)[n - 1] == '/');
+
+                    if (pass == 0 && is_dir) {
+                        /* Dir-form: child is "subdir/"; check for
+                         * <prefix>/subdir/theme.ini. */
+                        char *subdir = g_strndup (*p, n - 1);
+                        char *manifest_res = g_strdup_printf (
+                            "%s%s%s/theme.ini", resource_prefix, sep, subdir);
+                        display = read_display_name_from_resource (manifest_res);
+                        if (display
+                            || g_resources_get_info (
+                                manifest_res, G_RESOURCE_LOOKUP_FLAGS_NONE,
+                                NULL, NULL, NULL)) {
+                            name = subdir;
+                            subdir = NULL;
+                        }
+                        g_free (subdir);
+                        g_free (manifest_res);
+                    } else if (pass == 1 && !is_dir && n > 4
+                               && g_ascii_strcasecmp (*p + n - 4, ".ini")
+                                      == 0) {
+                        name = strip_ini_suffix (*p);
+                        char *resource_path = g_strdup_printf (
+                            "%s%s%s", resource_prefix, sep, *p);
+                        display = read_display_name_from_resource (resource_path);
+                        g_free (resource_path);
                     }
-                    g_free (subdir);
-                    g_free (manifest_res);
-                } else if (n > 4
-                           && g_ascii_strcasecmp (*p + n - 4, ".ini") == 0) {
-                    name = strip_ini_suffix (*p);
-                    char *resource_path = g_strdup_printf (
-                        "%s%s%s", resource_prefix, sep, *p);
-                    display = read_display_name_from_resource (resource_path);
-                    g_free (resource_path);
-                }
 
-                if (!name) {
-                    continue;
+                    if (!name) {
+                        continue;
+                    }
+                    if (g_hash_table_contains (seen, name)) {
+                        g_free (name);
+                        g_free (display);
+                        continue;
+                    }
+                    GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+                    e->name = name;
+                    e->display = display ? display : g_strdup (name);
+                    g_ptr_array_add (out, e);
+                    g_hash_table_add (seen, e->name);
                 }
-                if (g_hash_table_contains (seen, name)) {
-                    g_free (name);
-                    g_free (display);
-                    continue;
-                }
-                GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
-                e->name = name;
-                e->display = display ? display : g_strdup (name);
-                g_ptr_array_add (out, e);
-                g_hash_table_add (seen, e->name);
             }
             g_strfreev (children);
         }

@@ -275,6 +275,48 @@ test_null_sources_yields_default_only (void)
     g_ptr_array_unref (themes);
 }
 
+/* When a flat <name>.ini and a dir-form <name>/theme.ini both exist
+ * under the user dir, the listing must surface "name" exactly once and
+ * prefer the dir-form bundle (its display name wins). */
+static void
+test_dir_form_preferred_over_flat (void)
+{
+    char *dir = make_tmp_themes_dir ();
+    char *bundle = g_build_filename (dir, "foo", NULL);
+    char *manifest;
+    guint count = 0;
+    GtkhxThemeEntry *e;
+    GPtrArray *themes;
+
+    /* Flat form. */
+    write_theme_file (dir, "foo.ini", "[gtkhx-theme]\nname = FlatFoo\n");
+    /* Dir form, same basename. */
+    g_assert_cmpint (g_mkdir (bundle, 0700), ==, 0);
+    write_theme_file (bundle, "theme.ini", "[gtkhx-theme]\nname = BundleFoo\n");
+
+    themes = gtkhx_theme_list_available_at (NULL, dir);
+
+    for (guint i = 0; i < themes->len; i++) {
+        GtkhxThemeEntry *it = g_ptr_array_index (themes, i);
+        if (g_strcmp0 (it->name, "foo") == 0) {
+            count++;
+        }
+    }
+    g_assert_cmpint (count, ==, 1); /* no duplicate */
+    e = entry_named (themes, "foo");
+    g_assert_nonnull (e);
+    g_assert_cmpstr (e->display, ==, "BundleFoo"); /* dir-form won */
+
+    g_ptr_array_unref (themes);
+    manifest = g_build_filename (bundle, "theme.ini", NULL);
+    g_unlink (manifest);
+    g_rmdir (bundle);
+    g_free (manifest);
+    g_free (bundle);
+    rmrf_dir (dir);
+    g_free (dir);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -295,5 +337,7 @@ main (int argc, char **argv)
                      test_user_file_shadows_built_in);
     g_test_add_func ("/theme-listing/null-sources-yields-default-only",
                      test_null_sources_yields_default_only);
+    g_test_add_func ("/theme-listing/dir-form-preferred-over-flat",
+                     test_dir_form_preferred_over_flat);
     return g_test_run ();
 }

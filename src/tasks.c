@@ -206,7 +206,7 @@ gtask_make_icon (const char *resource_path)
     int px = (int) (GTASK_ICON_SRC_SIZE * scale + 0.5);
 
     /* Route through the icon resolver so the active theme's bundled
-	 * icons (e.g. $CONFIG/themes/<theme>/icons/dl.png) shadow the
+	 * icons (e.g. $CONFIG/themes/<theme>/icons/download.png) shadow the
 	 * stock pixmap. */
     src = gtkhx_icon_load (resource_path);
     if (!src) {

@@ -324,7 +324,7 @@ load_icon_paintable (const char *resource)
     int w, h;
 
     /* Route through the icon resolver so the active theme's bundled
-	 * icons (e.g. $CONFIG/themes/<theme>/icons/newsfld.png) shadow
+	 * icons (e.g. $CONFIG/themes/<theme>/icons/news_folder.png) shadow
 	 * the stock pixmap. */
     pb = gtkhx_icon_load (resource);
     if (!pb) {
