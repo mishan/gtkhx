@@ -1202,13 +1202,11 @@ integration_harness_lib = static_library(
   '../src/hope.c',
   '../src/algo_list.c',
   '../src/debug.c',
-  # Phase G increment 2: the orchestrated transport (selected at
-  # runtime via GTKHX_HARNESS_ORCHESTRATED) drives connect + magic +
-  # LOGIN through the production hxnet orchestrator via the polling
-  # FFI (hxnet_connection_open_plaintext_polling / try_recv_frame /
-  # send_frame). That pulls in the hxnet staticlib and its compression
-  # dependency. Harmless for legacy-transport runs — the linker keeps
-  # the archive members the FFI references either way.
+  # The harness login entry points drive connect + magic + LOGIN through
+  # the production hxnet orchestrator via the polling FFI
+  # (hxnet_connection_open_plaintext_polling / try_recv_frame /
+  # send_frame), so the suite pulls in the hxnet staticlib and its
+  # compression dependency.
   dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
   include_directories : integration_test_inc,
 )

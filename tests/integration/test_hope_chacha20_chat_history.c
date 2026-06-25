@@ -185,9 +185,6 @@ test_hope_chacha20_chat_history_round_trip (void)
      * production actor (Rust) owns the cipher and the harness hope
      * session stays zeroed — the chat-history round-trip below is the
      * end-to-end proof. */
-    if (!integration_harness_orchestrated ()) {
-        g_assert_true (hope.aead_active);
-    }
 
     /* HOPE Step 2 advertises HTLC_CAP_CHAT_HISTORY (see
      * integration_open_login_hope_or_skip), so the server's echo

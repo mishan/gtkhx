@@ -124,26 +124,6 @@ extern void integration_close (int fd);
 extern int integration_open_or_skip (void);
 
 /*
- * TRUE when GTKHX_HARNESS_ORCHESTRATED is set (and not "0").
- *
- * In that mode the login entry points (integration_open_login_or_skip
- * and integration_open_login_to_caps_or_skip) drive connect + magic +
- * LOGIN through the production hxnet orchestrator instead of the raw
- * blocking-socket handshake, returning a synthetic fd that
- * integration_send / integration_recv_message / integration_close
- * transparently route through the actor. Existing tests need no
- * changes; CI runs the integration suite under both transports so the
- * production connect path is continuously exercised against live
- * servers. The HOPE / TLS open helpers are not affected — they drive
- * their own transport and stay on the legacy raw path regardless.
- *
- * Exposed so a test that genuinely can't run orchestrated (e.g. one
- * that needs raw control over the pre-login byte stream) could branch
- * on it; today none do.
- */
-extern gboolean integration_harness_orchestrated (void);
-
-/*
  * Connect with a short timeout to an explicit host:port pair —
  * used by server_matrix.c so the matrix walker doesn't have to
  * duplicate the addrinfo + non-blocking-connect dance. Returns
