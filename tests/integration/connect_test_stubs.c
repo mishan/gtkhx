@@ -9,9 +9,9 @@
 
 /*
  * tests/integration/connect_test_stubs.c — minimal stubs for the
- * test_real_connect binary, which links production src/network.c
- * to exercise hx_connect's async state machine end-to-end against
- * the fake-server harness.
+ * production-connect Tier 3 binaries (real_connect,
+ * real_htxf_connect), which link production src/network.c to exercise
+ * hx_connect / htxf_connect end-to-end against a real server.
  *
  * network.c references a handful of symbols that come from other
  * production translation units (gtkhx.c, chat.c, tasks.c, rcv.c,
@@ -194,13 +194,11 @@ rcv_login_reset (void)
 {
 }
 
-/* hx_rcv_hdr is the production receive callback. In the legacy
- * connect tests (fake server, GTKHX_NEW_CONNECT unset) the test
- * never drives a receive, so it's a one-shot pointer that's never
- * called. In the Phase G orchestrator path, though,
- * hx_bridge_dispatch_frame stages the replayed LOGIN-reply header
- * into htlc->in.buf and calls htlc->rcv (== this stub) — so we
- * record the dispatched frame's header fields here. The real
+/* hx_rcv_hdr is the production receive callback. In the Phase G
+ * orchestrator path, hx_bridge_dispatch_frame stages the replayed
+ * LOGIN-reply header into htlc->in.buf and calls htlc->rcv (== this
+ * stub) — so we record the dispatched frame's header fields here. The
+ * real
  * production hx_rcv_hdr lives in rcv.c and drags the whole UI
  * stack; the orchestrator test only needs to prove the reply was
  * replayed to the C dispatch with the pinned trans / TASK opcode /

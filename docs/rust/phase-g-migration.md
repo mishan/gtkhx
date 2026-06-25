@@ -34,7 +34,7 @@ is no legacy path and no gate left to flip.
 | Post-login `rcv` coverage headless (increment 3) | blocked on R5 | see "Tier 3 coverage" below |
 
 Validated end-to-end against live mhxd + Janus via
-`tests/integration/test_phase_g_connect.c` (`/phase_g/*`).
+`tests/integration/test_real_connect.c` (`/real_connect/*`).
 
 The remainder of this document is the **design record** behind those
 decisions — kept because the connect path's silent-failure modes
@@ -356,7 +356,7 @@ straggler.)
 
 > **Superseded by `delete-old-connect` (WAVE 1).** The gate, the
 > `PHASE_G_DEFAULT_ON` constant, both env vars, and the three
-> `/phase_g/gate_*` Tier 3 guards described below no longer exist —
+> `/real_connect/gate_*` Tier 3 guards described below no longer exist —
 > the orchestrator is the only path. Kept for the record of how the
 > flip was staged.
 
@@ -369,8 +369,8 @@ Precedence: `GTKHX_OLD_CONNECT=1` (force legacy) beats
 opt-out escape hatch is exercised *before* it becomes load-bearing.
 
 Three deterministic Tier 3 guards pin the gate without needing a
-server (`test_phase_g_connect.c`): `/phase_g/gate_default`,
-`/phase_g/gate_opt_in`, `/phase_g/gate_opt_out_wins`. They observe the
+server (`test_real_connect.c`): `/real_connect/gate_default`,
+`/real_connect/gate_opt_in`, `/real_connect/gate_opt_out_wins`. They observe the
 chosen path via the synchronous bridge-install signal (the orchestrator
 installs the bridge inside `hx_connect`; the legacy path doesn't).
 `gate_default` references the same `PHASE_G_DEFAULT_ON` the gate does,
@@ -615,7 +615,7 @@ tree:
    the extension against the *harness's* login — it never touches the
    production client's LOGIN builder.
 2. **`connect_test_stubs.c`** tests (`real_connect`,
-   `real_connect_hxnet`, `phase_g_connect`) — these *do* drive
+   `real_connect_hxnet`, `real_connect`) — these *do* drive
    production `network.c::hx_connect`, but stub `rcv.c` + the UI.
 
 The capabilities bitmask lives in the production LOGIN builders
@@ -631,14 +631,14 @@ directly into the GTK/libadwaita UI (chat, user list, news, files).
 A headless test binary can't link that — which is *why* the harness
 reimplements the wire path and why `connect_test_stubs.c` stubs
 `rcv_task_login`. So **connect + login + negotiation** can run
-headless against production code (that's what `phase_g_connect`
+headless against production code (that's what `real_connect`
 does), but **post-login protocol handling** (chat/news/file
 round-trips) can't, until the UI coupling in `rcv.c` is unwound.
 
 ### Plan — three increments, smallest payoff first
 
-1. **Negotiation assertion in `phase_g_connect`** — ✅ shipped
-   (`5555249`). `/phase_g/capabilities_negotiated` drives the
+1. **Negotiation assertion in `real_connect`** — ✅ shipped
+   (`5555249`). `/real_connect/capabilities_negotiated` drives the
    production orchestrator against a cap-aware matrix server (Janus)
    and asserts the server echoed `HTLC_DATA_CAPABILITIES` back —
    the direct guard for the class of bug above. The recording
@@ -673,7 +673,7 @@ round-trips) can't, until the UI coupling in `rcv.c` is unwound.
      production connect+login path is continuously exercised against
      the live servers. HOPE/TLS open helpers are not routed (they
      drive their own crypto/transport) and remain covered by
-     `test_phase_g_connect`.
+     `test_real_connect`.
 
 3. **Post-login coverage on production `rcv`.** Blocked on R5 (UI →
    Rust) or a headless `rcv` seam that lets the dispatch handlers run

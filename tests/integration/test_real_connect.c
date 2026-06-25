@@ -8,15 +8,12 @@
  */
 
 /*
- * tests/integration/test_phase_g_connect.c — Tier 3 coverage for the
- * Phase G "hxnet-owns-the-whole-lifecycle" plaintext connect path
- * (docs/rust/phase-g-migration.md).
+ * tests/integration/test_real_connect.c — Tier 3 coverage for the
+ * production connect path: the "hxnet-owns-the-whole-lifecycle"
+ * orchestrator connect (docs/rust/phase-g-migration.md).
  *
- * Unlike test_real_connect_hxnet.c (which drives the production
- * hx_connect against the in-process fake_server and stops at the
- * magic exchange), this test drives the production hx_connect
- * against a REAL mhxd container so the whole orchestrator runs end
- * to end:
+ * This test drives the production hx_connect against a REAL mhxd
+ * container so the whole orchestrator runs end to end:
  *
  *   hx_connect → hx_connect_via_orchestrator
  *     → hx_bridge_install_orchestrated_plaintext
@@ -100,10 +97,10 @@ extern guint16 connect_test_first_rcv_caps_value;
 
 /* server_matrix.c references hx_integration_connect_to (via the
  * unused-here hx_test_server_connect). This test never calls it, but
- * the symbol must resolve under -Wl,--no-undefined. Stub it — same
- * approach test_real_tls uses when it compiles server_matrix.c in
- * directly rather than linking the full harness lib (whose
- * hlwrite_chunks stub would collide with production network.c). */
+ * the symbol must resolve under -Wl,--no-undefined. Stub it — this
+ * test compiles server_matrix.c in directly rather than linking the
+ * full harness lib (whose hlwrite_chunks stub would collide with
+ * production network.c). */
 int hx_integration_connect_to (const char *host, int port, int timeout_ms);
 int
 hx_integration_connect_to (const char *host, int port, int timeout_ms)
@@ -116,7 +113,7 @@ hx_integration_connect_to (const char *host, int port, int timeout_ms)
 
 /* Mirror of HX_LOGIN_TRANS in src/network.c — the pinned LOGIN
  * transaction id the orchestrator stamps and the server echoes. */
-#define PHASE_G_LOGIN_TRANS 1u
+#define REAL_CONNECT_LOGIN_TRANS 1u
 
 typedef struct {
     GMainLoop *loop;
@@ -295,7 +292,7 @@ test_orchestrator_login (void)
      * quirk, not mhxd). */
     g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
     /* Pinned trans round-tripped through the real server. */
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS);
     /* mhxd accepted the guest login — error bit clear. */
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
@@ -423,7 +420,7 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
      * (step 1 = HX_LOGIN_TRANS, step 2 = +1). */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
     g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS + 1);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
     observer_free (obs, gtkhx);
@@ -499,7 +496,7 @@ test_orchestrator_hope_no_cipher (void)
      * the no-cipher secure login (error bit clear). */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
     g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS + 1);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
     observer_free (obs, gtkhx);
@@ -579,7 +576,7 @@ test_orchestrator_tls_login (void)
      * path. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
     g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, PHASE_G_LOGIN_TRANS);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
     /* Flush the deferred pin (schedule_trust_pin → g_idle_add) and
@@ -776,19 +773,19 @@ main (int argc, char *argv[])
     g_test_init (&argc, &argv, NULL);
     connect_test_init_fd_table ();
 
-    g_test_add_func ("/phase_g/orchestrator_login", test_orchestrator_login);
-    g_test_add_func ("/phase_g/capabilities_negotiated",
+    g_test_add_func ("/real_connect/orchestrator_login", test_orchestrator_login);
+    g_test_add_func ("/real_connect/capabilities_negotiated",
                      test_orchestrator_capabilities_negotiated);
-    g_test_add_func ("/phase_g/hope_blowfish", test_orchestrator_hope_blowfish);
-    g_test_add_func ("/phase_g/hope_chacha20", test_orchestrator_hope_chacha20);
-    g_test_add_func ("/phase_g/hope_no_cipher",
+    g_test_add_func ("/real_connect/hope_blowfish", test_orchestrator_hope_blowfish);
+    g_test_add_func ("/real_connect/hope_chacha20", test_orchestrator_hope_chacha20);
+    g_test_add_func ("/real_connect/hope_no_cipher",
                      test_orchestrator_hope_no_cipher);
-    g_test_add_func ("/phase_g/tls_login", test_orchestrator_tls_login);
-    g_test_add_func ("/phase_g/tls_mismatch_rejected",
+    g_test_add_func ("/real_connect/tls_login", test_orchestrator_tls_login);
+    g_test_add_func ("/real_connect/tls_mismatch_rejected",
                      test_orchestrator_tls_mismatch_rejected);
-    g_test_add_func ("/phase_g/connect_refused",
+    g_test_add_func ("/real_connect/connect_refused",
                      test_orchestrator_connect_refused);
-    g_test_add_func ("/phase_g/hope_tls_rejected", test_hope_tls_rejected);
+    g_test_add_func ("/real_connect/hope_tls_rejected", test_hope_tls_rejected);
 
     return g_test_run ();
 }
