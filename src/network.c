@@ -435,6 +435,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     htlc->gzip_inflate_total_out = 0;
     memset (htlc->sessionkey, 0, sizeof (htlc->sessionkey));
     htlc->sklen = 0;
+    /* Release the opaque HOPE AEAD material handle seeded at login. */
+    if (htlc->hope_aead) {
+        hxnet_hope_aead_free (htlc->hope_aead);
+        htlc->hope_aead = NULL;
+    }
 
 #if 0 /* XXX */
 	close_log(server_log);
@@ -1341,20 +1346,19 @@ htxf_connect (struct htxf_conn *htxf)
 	 * The preamble itself always travels plaintext per spec. Other
 	 * transfers (no HOPE, or HOPE with a stream cipher) leave
 	 * aead_active = FALSE and hxnet runs the channel in passthrough. */
-    const chacha_aead_state *aead_enc = NULL;
-    const chacha_aead_state *aead_dec = NULL;
-    if (htxf->htlc && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
-        hx_htxf_subchannel_arm_aead (
-            htxf,
-            htxf->htlc->sessionkey, htxf->htlc->sklen,
-            &htxf->htlc->cipher_encode_state.chacha,
-            &htxf->htlc->cipher_decode_state.chacha,
-            htxf->ref);
-        aead_enc = &htxf->xfer_encode;
-        aead_dec = &htxf->xfer_decode;
+    /* The per-transfer ChaCha20-Poly1305 keys are derived INSIDE
+     * hxnet_htxf_open from the control connection's retained HOPE
+     * material (htlc->hope_aead, an opaque handle seeded at login) plus
+     * this transfer's ref — the control session key never comes back to
+     * C. A NULL handle (no HOPE, a stream cipher, or no-cipher) selects
+     * plaintext passthrough. */
+    const HxnetHopeAead *hope_aead =
+        (htxf->htlc != NULL) ? (const HxnetHopeAead *) htxf->htlc->hope_aead
+                             : NULL;
+    if (hope_aead) {
         debug_log ("xfer-aead",
-                   "ref=%u: AEAD active (control session_key=%u bytes)",
-                   htxf->ref, htxf->htlc->sklen);
+                   "ref=%u: AEAD active (orchestrated HOPE material)",
+                   htxf->ref);
     }
 
     /* Mirror the control channel's TLS mode onto this subchannel —
@@ -1368,7 +1372,7 @@ htxf_connect (struct htxf_conn *htxf)
         dupfd, xfer_tls,
         (const guint8 *) htxf->serverhost, strlen (htxf->serverhost),
         hdr_buf, hdr_len,
-        aead_enc, aead_dec,
+        hope_aead, htxf->ref,
         htxf_verify_cert_cb, htxf);
     if (!htxf->hx) {
         debug_log ("xfer", "htxf_connect: hxnet_htxf_open failed (ref=%u)",

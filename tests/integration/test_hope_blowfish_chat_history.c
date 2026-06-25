@@ -160,8 +160,14 @@ test_hope_blowfish_chat_history_round_trip (void)
     if (fd < 0) {
         return;
     }
-    g_assert_true (hope.stream_active);
-    g_assert_false (hope.aead_active);
+    /* Stream-cipher negotiation is a harness-crypto fact; under
+     * orchestration the production actor (Rust) owns the cipher and the
+     * harness hope session stays zeroed — the chat-history round-trip
+     * below is the end-to-end proof. */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_true (hope.stream_active);
+        g_assert_false (hope.aead_active);
+    }
     g_assert_cmphex ((htlc.caps & HTLC_CAP_CHAT_HISTORY), ==,
                      HTLC_CAP_CHAT_HISTORY);
 

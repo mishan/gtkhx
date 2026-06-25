@@ -23,6 +23,7 @@
 #include "proto_helpers.h"
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
 #include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
+#include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
 
 /* Forward declaration of the production header decoder
  * (proto_helpers.c). hx_rcv_hdr decodes the buffered header by
@@ -476,6 +477,13 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
     void *user_data);
 
+/* Retained HOPE AEAD material getter (rust/crates/hxnet/src/ffi.rs):
+ * returns an opaque HxnetHopeAead handle for a HOPE-ChaCha20 control
+ * connection, or NULL otherwise. HxnetHopeAead is declared in
+ * htxf_io.h (included above). */
+extern HxnetHopeAead *hxnet_connection_hope_aead_material (
+    hxnet_connection_opaque *conn);
+
 /* hx_tls_orchestrator_verify_cert (production TOFU verify, defined in
  * network.c) and hx_orchestrator_register_login_task are both declared
  * in network.h, included above. */
@@ -720,6 +728,23 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
     bridge_handle = h;
     bridge_htlc   = htlc;
     return TRUE;
+}
+
+/* Return an opaque HOPE AEAD material handle for the currently installed
+ * orchestrated connection, or NULL when none is installed or the control
+ * channel did not negotiate ChaCha20-Poly1305 (plaintext / Blowfish /
+ * no-cipher leave the retained slot empty). The caller owns the handle
+ * and must free it with hxnet_hope_aead_free. Called at login completion
+ * (rcv_task_login) to seed htlc->hope_aead so HTXF subchannels can derive
+ * their per-transfer keys in-process — by which point the handshake is
+ * done and the material slot is populated. */
+HxnetHopeAead *
+hx_bridge_orchestrated_hope_aead (void)
+{
+    if (!bridge_handle) {
+        return NULL;
+    }
+    return hxnet_connection_hope_aead_material (bridge_handle);
 }
 
 /* TLS TOFU trampoline: hxnet calls this on the lifecycle task with the

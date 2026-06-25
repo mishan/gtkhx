@@ -47,6 +47,21 @@ struct htxf_conn;
  * hxnet_htxf_* calls below. */
 typedef struct HtxfConn HtxfConn;
 
+/* Opaque handle to a HOPE control-channel's retained AEAD material
+ * (Rust `HxnetHopeAead`). Obtained from
+ * hxnet_connection_hope_aead_material (the orchestrated control
+ * connection's retained material, via hx_bridge_orchestrated_hope_aead)
+ * or hxnet_hope_aead_from_material (the legacy harness's own C
+ * handshake), and passed to hxnet_htxf_open so the subchannel derives
+ * its per-transfer keys in-process. The session key never crosses the
+ * FFI as bytes — only this opaque token does. Free with
+ * hxnet_hope_aead_free. */
+typedef struct HxnetHopeAead HxnetHopeAead;
+
+/* Free a HxnetHopeAead handle (NULL-safe). Declared in
+ * rust/crates/hxnet/src/ffi.rs. */
+extern void hxnet_hope_aead_free (HxnetHopeAead *h);
+
 /* ---- hxnet HTXF subchannel FFI ------------------------------------
  * Defined in rust/crates/hxnet/src/htxf.rs. Declared here so both this
  * shim (read/write/timeout/close) and network.c::htxf_connect (open)
@@ -61,15 +76,17 @@ typedef int (*hxnet_htxf_verify_cb_t) (const guint8 *fp, gsize fp_len,
 /* Open an HTXF subchannel over an already-connected, blocking `fd`
  * (which this call adopts — the C side must not close it). `tls != 0`
  * TLS-handshakes the fd with rustls (host = SNI / TOFU name);
- * `preamble` is written raw before AEAD arms; non-NULL
- * `aead_encode` / `aead_decode` arm per-transfer AEAD framing. Returns
- * an owned handle, or NULL on bad arguments / TLS rejection / IO error
- * (the adopted fd is closed on every failure path). */
+ * `preamble` is written raw before AEAD arms. A non-NULL `hope_aead`
+ * arms per-transfer AEAD framing: the keys are derived in-process from
+ * that control-channel material + `xfer_ref`, so the session key never
+ * crosses the FFI. NULL = plaintext passthrough. Returns an owned
+ * handle, or NULL on bad arguments / TLS rejection / IO error (the
+ * adopted fd is closed on every failure path). */
 extern HtxfConn *hxnet_htxf_open (int fd, int tls, const guint8 *host,
                                   size_t host_len, const guint8 *preamble,
                                   size_t preamble_len,
-                                  const chacha_aead_state *aead_encode,
-                                  const chacha_aead_state *aead_decode,
+                                  const HxnetHopeAead *hope_aead,
+                                  guint32 xfer_ref,
                                   hxnet_htxf_verify_cb_t verify_cert,
                                   void *user_data);
 

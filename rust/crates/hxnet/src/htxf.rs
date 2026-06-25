@@ -383,17 +383,6 @@ pub struct HtxfConn {
     inner: HtxfInner,
 }
 
-/// Copy a C-provided `AeadState` (== `chacha_aead_state`) by value. The
-/// fields are all `Copy`; this avoids assuming the struct derives it.
-unsafe fn copy_aead_state(p: *const AeadState) -> AeadState {
-    let s = &*p;
-    AeadState {
-        key: s.key,
-        counter: s.counter,
-        dir: s.dir,
-    }
-}
-
 /// Open an HTXF subchannel over an already-connected, blocking `fd`
 /// (which this call adopts — the C side must NOT close it afterward).
 ///
@@ -403,9 +392,11 @@ unsafe fn copy_aead_state(p: *const AeadState) -> AeadState {
 ///   rejects the connection. `host` is the SNI / TOFU hostname.
 /// - `preamble` (length `preamble_len`) is written raw over the
 ///   (TLS-wrapped) stream before AEAD is armed — the HTXF header.
-/// - `aead_encode` / `aead_decode` non-NULL arm AEAD framing with those
-///   per-direction states (the transfer keys the C side derived); NULL
-///   selects plaintext passthrough.
+/// - `hope_aead` non-NULL arms AEAD framing: the per-transfer keys are
+///   derived in-process from the control connection's retained HOPE
+///   material (obtained via `hxnet_connection_hope_aead_material`) and
+///   `xfer_ref`, so the session key never crosses the FFI. NULL selects
+///   plaintext passthrough (no HOPE, or HOPE with a stream cipher).
 ///
 /// Returns an owned handle, or NULL on bad arguments, a TLS/TOFU
 /// rejection, or an IO error (the adopted fd is closed in every failure
@@ -413,8 +404,10 @@ unsafe fn copy_aead_state(p: *const AeadState) -> AeadState {
 ///
 /// # Safety
 /// `fd` must be a valid, connected, blocking socket fd this call may
-/// adopt. `host` / `preamble` / `aead_*` must be valid for their lengths
-/// (or NULL where documented). The handle must be used single-threaded.
+/// adopt. `host` / `preamble` must be valid for their lengths (or NULL
+/// where documented); `hope_aead` must be NULL or a live handle from
+/// `hxnet_connection_hope_aead_material`. The handle must be used
+/// single-threaded.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_htxf_open(
     fd: c_int,
@@ -423,8 +416,8 @@ pub unsafe extern "C" fn hxnet_htxf_open(
     host_len: usize,
     preamble: *const u8,
     preamble_len: usize,
-    aead_encode: *const AeadState,
-    aead_decode: *const AeadState,
+    hope_aead: *const crate::ffi::HxnetHopeAead,
+    xfer_ref: u32,
     verify_cert: HxnetVerifyCertCallback,
     user_data: *mut c_void,
 ) -> *mut HtxfConn {
@@ -449,12 +442,10 @@ pub unsafe extern "C" fn hxnet_htxf_open(
         );
         return std::ptr::null_mut();
     }
-    if (preamble_len != 0 && preamble.is_null())
-        || ((aead_encode.is_null()) != (aead_decode.is_null()))
-    {
+    if preamble_len != 0 && preamble.is_null() {
         glib::g_critical!(
             "hxnet",
-            "hxnet_htxf_open: NULL preamble with non-zero len, or only one AEAD state"
+            "hxnet_htxf_open: NULL preamble with non-zero len"
         );
         return std::ptr::null_mut();
     }
@@ -475,10 +466,34 @@ pub unsafe extern "C" fn hxnet_htxf_open(
     } else {
         slice::from_raw_parts(preamble, preamble_len)
     };
-    let aead = if aead_encode.is_null() {
+    // Derive the per-transfer AEAD keys in-process from the control
+    // connection's retained HOPE material + this transfer's ref. The
+    // session key stays inside Rust — only the opaque handle crossed the
+    // FFI. NULL handle = plaintext passthrough.
+    let aead = if hope_aead.is_null() {
         None
     } else {
-        Some((copy_aead_state(aead_encode), copy_aead_state(aead_decode)))
+        let m = &(*hope_aead).material;
+        let mut xfer_encode = AeadState {
+            key: [0u8; 32],
+            counter: 0,
+            dir: 0,
+        };
+        let mut xfer_decode = AeadState {
+            key: [0u8; 32],
+            counter: 0,
+            dir: 0,
+        };
+        hxcrypto_aead::gtkhx_aead_derive_transfer_keys(
+            &mut xfer_encode,
+            &mut xfer_decode,
+            m.session_key.as_ptr(),
+            m.session_key.len(),
+            &m.ctrl_encode,
+            &m.ctrl_decode,
+            xfer_ref,
+        );
+        Some((xfer_encode, xfer_decode))
     };
 
     if tls != 0 {
@@ -785,6 +800,46 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let k = key();
+        // The transfer keys are now derived INSIDE hxnet_htxf_open from
+        // the control connection's retained HOPE material + the transfer
+        // ref. Build that material here and derive the matching
+        // per-transfer states for the server thread so both ends agree.
+        let session_key = vec![0x5au8; 64];
+        let ctrl_encode = AeadState {
+            key: k,
+            counter: 0,
+            dir: AEAD_DIR_CLIENT_TO_SERVER,
+        };
+        let ctrl_decode = AeadState {
+            key: k,
+            counter: 0,
+            dir: AEAD_DIR_SERVER_TO_CLIENT,
+        };
+        let xref: u32 = 42;
+        let mut xe = AeadState {
+            key: [0u8; 32],
+            counter: 0,
+            dir: 0,
+        };
+        let mut xd = AeadState {
+            key: [0u8; 32],
+            counter: 0,
+            dir: 0,
+        };
+        unsafe {
+            hxcrypto_aead::gtkhx_aead_derive_transfer_keys(
+                &mut xe,
+                &mut xd,
+                session_key.as_ptr(),
+                session_key.len(),
+                &ctrl_encode,
+                &ctrl_decode,
+                xref,
+            );
+        }
+        // Server's outgoing = SERVER_TO_CLIENT = xfer_decode (xd);
+        // incoming = CLIENT_TO_SERVER = xfer_encode (xe).
+        let (s_enc, s_dec) = (xd, xe);
 
         let server = thread::spawn(move || {
             let (mut sock, _) = listener.accept().unwrap();
@@ -792,18 +847,6 @@ mod tests {
             let mut pre = [0u8; 3];
             sock.read_exact(&mut pre).unwrap();
             assert_eq!(&pre, b"PRE");
-            // Server decodes the client's CLIENT_TO_SERVER frames and
-            // encodes its replies SERVER_TO_CLIENT.
-            let s_enc = AeadState {
-                key: k,
-                counter: 0,
-                dir: AEAD_DIR_SERVER_TO_CLIENT,
-            };
-            let s_dec = AeadState {
-                key: k,
-                counter: 0,
-                dir: AEAD_DIR_CLIENT_TO_SERVER,
-            };
             let mut sch = HtxfChannel::new_aead(sock, s_enc, s_dec);
             let mut buf = [0u8; 64];
             let n = sch.read(&mut buf).unwrap();
@@ -813,15 +856,14 @@ mod tests {
 
         let client = TcpStream::connect(addr).unwrap();
         let fd = client.into_raw_fd();
-        let enc = AeadState {
-            key: k,
-            counter: 0,
-            dir: AEAD_DIR_CLIENT_TO_SERVER,
-        };
-        let dec = AeadState {
-            key: k,
-            counter: 0,
-            dir: AEAD_DIR_SERVER_TO_CLIENT,
+        // Client passes the opaque HOPE material handle; hxnet_htxf_open
+        // derives the same xe/xd internally from material + xref.
+        let hope = crate::ffi::HxnetHopeAead {
+            material: crate::lifecycle::HopeAeadMaterial {
+                session_key,
+                ctrl_encode,
+                ctrl_decode,
+            },
         };
 
         let h = unsafe {
@@ -832,8 +874,8 @@ mod tests {
                 0,
                 b"PRE".as_ptr(),
                 3,
-                &enc,
-                &dec,
+                &hope as *const _,
+                xref,
                 None,
                 std::ptr::null_mut(),
             )

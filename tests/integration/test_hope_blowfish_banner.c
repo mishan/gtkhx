@@ -93,8 +93,14 @@ test_hope_blowfish_banner_htxf (void)
     if (fd < 0) {
         return;
     }
-    g_assert_true (hope.stream_active);
-    g_assert_false (hope.aead_active);
+    /* Stream-cipher negotiation is a harness-crypto fact; under
+     * orchestration the production actor (Rust) owns the cipher and the
+     * harness hope session stays zeroed — the banner fetch below is the
+     * end-to-end proof. */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_true (hope.stream_active);
+        g_assert_false (hope.aead_active);
+    }
 
     /* Janus only fires HTLS_HDR_BANNER after the client sends
      * AGREEMENTAGREE — the post-login push sequence is gated on

@@ -64,6 +64,13 @@
 #include "htxf_subchannel.h"
 #include "debug.h"
 
+/* Build a HOPE AEAD material handle from the legacy harness's own C
+ * handshake state (rust/crates/hxnet/src/ffi.rs). HxnetHopeAead +
+ * hxnet_hope_aead_free come from htxf_io.h. */
+extern HxnetHopeAead *hxnet_hope_aead_from_material (
+    const guint8 *session_key, gsize session_key_len,
+    const chacha_aead_state *ctrl_encode, const chacha_aead_state *ctrl_decode);
+
 static const hx_test_server *
 pick_banner_chacha20_server (void)
 {
@@ -134,7 +141,13 @@ test_hope_chacha20_banner_htxf (void)
     if (fd < 0) {
         return;
     }
-    g_assert_true (hope.aead_active);
+    /* AEAD negotiation is a harness-crypto fact; under orchestration the
+     * production actor (Rust) owns the cipher and the harness hope
+     * session stays zeroed — the encrypted round-trip below is the
+     * end-to-end proof. */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_true (hope.aead_active);
+    }
 
     /* Janus (and any 1.5-spec-compliant server) only fires
      * HTLS_HDR_BANNER after the client sends AGREEMENTAGREE — the
@@ -235,25 +248,28 @@ test_hope_chacha20_banner_htxf (void)
         /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
 
-    /* Derive the per-transfer AEAD keys into xfer.xfer_encode/decode
-     * (mixing the ref into the salt so each subchannel gets its own key
-     * pair) — same call production uses. Then hand the connected fd,
-     * preamble, and keys to hxnet, which adopts the fd, writes the
-     * plaintext preamble, and frames the body AEAD. Mirrors the
-     * production banner.c worker. tls=0: this is a plaintext subchannel
-     * (the harness already negotiated HOPE on the control channel). */
+    /* hxnet_htxf_open derives the per-transfer AEAD keys in-process from
+     * an opaque HOPE material handle + ref, then adopts the fd, writes
+     * the plaintext preamble, and frames the body AEAD. Under
+     * orchestration the harness already seeded htlc.hope_aead from the
+     * production actor; on the legacy transport the harness ran its own
+     * C handshake, so build a handle from that session state. tls=0:
+     * plaintext subchannel (HOPE was negotiated on the control channel). */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
     htxf_io_init (&xfer);
-    hx_htxf_subchannel_arm_aead (
-        &xfer,
-        htlc.sessionkey, htlc.sklen,
-        &hope.encode_state, &hope.decode_state,
-        ref);
+    HxnetHopeAead *owned = NULL;
+    const HxnetHopeAead *banner_aead = (const HxnetHopeAead *) htlc.hope_aead;
+    if (!banner_aead) {
+        owned = hxnet_hope_aead_from_material (htlc.sessionkey, htlc.sklen,
+                                               &hope.encode_state,
+                                               &hope.decode_state);
+        banner_aead = owned;
+    }
     xfer.hx = hxnet_htxf_open (xfer_fd, /*tls=*/0, /*host=*/NULL, 0,
                               hdr_buf, hdr_len,
-                              &xfer.xfer_encode, &xfer.xfer_decode,
+                              banner_aead, ref,
                               /*verify_cert=*/NULL, /*user_data=*/NULL);
     g_assert_nonnull (xfer.hx);
 
@@ -273,6 +289,9 @@ test_hope_chacha20_banner_htxf (void)
     }
     g_assert_cmpuint ((guint) got, ==, size);
     htxf_io_release (&xfer);
+    if (owned) {
+        hxnet_hope_aead_free (owned);
+    }
 
     g_test_message ("first 4 bytes: %02x %02x %02x %02x",
                     bytes[0], bytes[1], bytes[2], bytes[3]);

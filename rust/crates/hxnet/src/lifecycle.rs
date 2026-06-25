@@ -379,10 +379,29 @@ fn mac_label_to_hopemacalg(label: &[u8]) -> Option<HopeMacAlg> {
 ///    `Event::Frame` before `HandshakeDone` — same Option B shape as
 ///    the plaintext path — then hand the wrapped transport to the
 ///    actor.
+/// Control-channel HOPE AEAD material, retained so an HTXF subchannel
+/// can derive its per-transfer keys in-process without the session key
+/// ever crossing the FFI back to C. Populated by [`run_hope_lifecycle`]
+/// just before the cipher transition when ChaCha20-Poly1305 is
+/// negotiated; left `None` for plaintext / Blowfish / no-cipher.
+#[derive(Clone)]
+pub struct HopeAeadMaterial {
+    pub session_key: Vec<u8>,
+    /// client -> server control-channel AEAD state.
+    pub ctrl_encode: hxcrypto_aead::AeadState,
+    /// server -> client control-channel AEAD state.
+    pub ctrl_decode: hxcrypto_aead::AeadState,
+}
+
+/// Shared slot the HOPE lifecycle writes once (before the cipher layer
+/// is consumed) and the FFI getter reads after login.
+pub type HopeAeadSlot = std::sync::Arc<std::sync::Mutex<Option<HopeAeadMaterial>>>;
+
 pub async fn run_hope_lifecycle(
     req: HopeOpenRequest,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
+    hope_slot: HopeAeadSlot,
 ) {
     macro_rules! bail {
         ($($arg:tt)*) => {{
@@ -526,6 +545,7 @@ pub async fn run_hope_lifecycle(
 
     // ---- build the negotiated cipher layer; encryption starts here
     // (everything after the step-2 send is ciphered) ----
+    let mut hope_material: Option<HopeAeadMaterial> = None;
     let cipher_layer = match HopeCipherKind::from_label(&choice.cipher_alg) {
         Some(HopeCipherKind::Blowfish) => {
             let read_state = match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.decode_key) {
@@ -560,18 +580,30 @@ pub async fn run_hope_lifecycle(
             // (decode_key, encode_key) argument order the C side
             // passes to cipher_aead_derive_session_keys.
             let aead = derive_aead_keys(&choice.sessionkey, &bfkeys.decode_key, &bfkeys.encode_key);
-            CipherLayer::ChaCha20Poly1305 {
-                read: hxcrypto_aead::AeadState {
-                    key: aead.decode_key,
-                    counter: 0,
-                    dir: hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT,
-                },
-                write: hxcrypto_aead::AeadState {
-                    key: aead.encode_key,
-                    counter: 0,
-                    dir: hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER,
-                },
-            }
+            // server -> client
+            let read = hxcrypto_aead::AeadState {
+                key: aead.decode_key,
+                counter: 0,
+                dir: hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT,
+            };
+            // client -> server
+            let write = hxcrypto_aead::AeadState {
+                key: aead.encode_key,
+                counter: 0,
+                dir: hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER,
+            };
+            // Retain the control-channel AEAD material so an HTXF
+            // subchannel can derive its per-transfer keys in-process,
+            // without the session key ever crossing the FFI back to C.
+            // ctrl_encode = client->server (write); ctrl_decode =
+            // server->client (read). AeadState is Copy, so the same
+            // values seed the live cipher layer below.
+            hope_material = Some(HopeAeadMaterial {
+                session_key: choice.sessionkey.clone(),
+                ctrl_encode: write,
+                ctrl_decode: read,
+            });
+            CipherLayer::ChaCha20Poly1305 { read, write }
         }
         // No cipher negotiated (empty cipher_alg): the server ran the
         // secure-login MAC authentication but selected no transport
@@ -583,6 +615,16 @@ pub async fn run_hope_lifecycle(
             String::from_utf8_lossy(&choice.cipher_alg)
         ),
     };
+
+    // Publish the retained AEAD material (if any) so a later HTXF
+    // subchannel can derive transfer keys off it. Written before the
+    // cipher layer is consumed by compose(); the FFI getter reads it
+    // after login, long after this point.
+    if let Some(m) = hope_material {
+        if let Ok(mut slot) = hope_slot.lock() {
+            *slot = Some(m);
+        }
+    }
 
     if evt_tx
         .send(Event::State(ConnectionState::CipherTransition))
@@ -884,7 +926,8 @@ mod tests {
             cipher_algs: vec![cipher.into_bytes()],
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let lc = tokio::spawn(run_hope_lifecycle(req, cmd_rx, evt_tx));
+        let hope_slot: HopeAeadSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let lc = tokio::spawn(run_hope_lifecycle(req, cmd_rx, evt_tx, hope_slot));
         let mut saw_hd = false;
         let mut saw_frame = false;
         while let Some(evt) = tokio::time::timeout(Duration::from_secs(8), evt_rx.recv())

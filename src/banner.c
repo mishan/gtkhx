@@ -119,26 +119,12 @@ struct htxf_fetch {
      * is the only path needed — no STARTTLS, no protocol
      * negotiation. */
     char tls;
-    /* HOPE+ChaCha20 AEAD state, snapshot at spawn time. When the
-	 * control channel negotiated CIPHER_MODE_AEAD, the HTXF
-	 * subchannel for the banner fetch needs the same per-transfer
-	 * AEAD framing the regular file path (network.c::htxf_connect)
-	 * sets up — the server seals every byte after the initial
-	 * connect, including the 16-byte HTXF preamble. Production used
-	 * to drive the worker with raw read()/write(), which worked
-	 * only against servers that didn't use the AEAD subchannel
-	 * (mhxd today); against Janus the JPEG body came through
-	 * AEAD-framed and the magic-byte check downstream saw the
-	 * 4-byte length prefix instead of "ffd8...".
-	 *
-	 * aead_active gates whether the worker builds a struct
-	 * htxf_conn and uses htxf_io_read / htxf_io_write or falls
-	 * back to the legacy raw path. */
-    gboolean aead_active;
-    chacha_aead_state ctrl_encode;
-    chacha_aead_state ctrl_decode;
-    uint8_t sessionkey[64];
-    guint16 sklen;
+    /* Opaque HOPE control-channel AEAD material handle (Rust
+     * HxnetHopeAead*), borrowed from htlc->hope_aead at spawn. NULL
+     * unless the control channel negotiated ChaCha20-Poly1305;
+     * hxnet_htxf_open derives the per-transfer keys from it, so the
+     * worker never touches the session key or cipher state. */
+    void *hope_aead;
 };
 
 static guint htxf_generation = 0;
@@ -622,20 +608,14 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
      * stores the TLS HTLS port (5600) in TLS mode. */
     f->tls = htlc->tls;
 
-    /* Snapshot the HOPE AEAD context so the worker can derive its
-	 * per-transfer keys (cipher_aead_derive_transfer_keys mixes the
-	 * ref in) and run htxf_io_read/_write the same way regular file
-	 * transfers do. Only valid when the control channel actually
-	 * negotiated CHACHA20-POLY1305 — leaves aead_active=FALSE
-	 * otherwise and the worker keeps the legacy raw read/write
-	 * path. */
-    if (htlc->cipher_mode == CIPHER_MODE_AEAD) {
-        f->aead_active = TRUE;
-        f->ctrl_encode = htlc->cipher_encode_state.chacha;
-        f->ctrl_decode = htlc->cipher_decode_state.chacha;
-        memcpy (f->sessionkey, htlc->sessionkey, sizeof (htlc->sessionkey));
-        f->sklen = htlc->sklen;
-    }
+    /* Borrow the control connection's opaque HOPE AEAD material handle
+     * (seeded on htlc at login when ChaCha20-Poly1305 was negotiated).
+     * The worker hands it to hxnet_htxf_open, which derives the
+     * per-transfer keys in-process — no session key or cipher state
+     * crosses into this fetch. NULL (plaintext / Blowfish / no-cipher)
+     * leaves the subchannel plaintext. The handle is owned by htlc and
+     * outlives this short post-login fetch. */
+    f->hope_aead = htlc->hope_aead;
 
     /* Hand the fetch off to tokio's blocking pool via hxbridge.
      * The shim runs `banner_htxf_worker_run` on a dedicated
@@ -731,23 +711,15 @@ banner_htxf_worker_run (void *arg)
     }
 
     /* Under HOPE+ChaCha20 the body bytes after the preamble are framed
-     * AEAD packets. Derive the per-transfer key pair (mixing in ref so
-     * each subchannel gets its own key) into xfer.xfer_encode/decode
-     * and hand them to hxnet, which owns the framing thereafter. */
-    const chacha_aead_state *aead_enc = NULL;
-    const chacha_aead_state *aead_dec = NULL;
-    if (f->aead_active) {
-        hx_htxf_subchannel_arm_aead (&xfer, f->sessionkey, f->sklen,
-                                     &f->ctrl_encode, &f->ctrl_decode,
-                                     f->ref);
-        aead_enc = &xfer.xfer_encode;
-        aead_dec = &xfer.xfer_decode;
-    }
-
+     * AEAD packets. hxnet_htxf_open derives the per-transfer key pair
+     * (mixing in ref so each subchannel gets its own key) from the
+     * borrowed HOPE material handle and owns the framing thereafter;
+     * a NULL handle leaves the body plaintext. */
     xfer.hx = hxnet_htxf_open (
         dupfd, f->tls,
         (const guint8 *) f->serverhost, strlen (f->serverhost),
-        hdr_buf, hdr_len, aead_enc, aead_dec,
+        hdr_buf, hdr_len,
+        (const HxnetHopeAead *) f->hope_aead, f->ref,
         banner_verify_cert_cb, f);
     if (!xfer.hx) {
         debug_log ("banner", "htxf hxnet_htxf_open failed");

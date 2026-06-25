@@ -282,6 +282,15 @@ struct htlc_conn {
 	 * on this to pick between the byte-stream XOR path (Blowfish)
 	 * and the framed Seal/Open path (ChaCha20-Poly1305). */
     u_int8_t cipher_mode;
+    /* Opaque HOPE control-channel AEAD material handle (Rust
+	 * HxnetHopeAead*), or NULL. Set after login when the orchestrated
+	 * HOPE handshake negotiated ChaCha20-Poly1305 (or, on the legacy
+	 * Tier 3 harness transport, built from the harness's own C cipher
+	 * state). Lets an HTXF subchannel derive its per-transfer keys
+	 * in-process via hxnet_htxf_open, without the session key crossing
+	 * back to C. Freed with hxnet_hope_aead_free on connection
+	 * teardown. */
+    void *hope_aead;
     /* AEAD decoded-plaintext accumulator. network.c::decode() in
 	 * AEAD mode opens complete length-prefixed frames out of
 	 * read_in and stores their plaintext here. The same decode()
