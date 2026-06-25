@@ -201,6 +201,44 @@ pub unsafe extern "C" fn gtkhx_bridge_spawn_blocking_with_idle(
     spawn_blocking_with_idle(worker, completion, user_data);
 }
 
+/// Queue `func(user_data)` to run on the GLib main loop, callable from
+/// any thread. Behaviourally identical to the legacy
+/// `gtkhx_post_to_main` (`g_main_context_invoke(NULL, func, data)`) it
+/// replaces — `func` is a `GSourceFunc`, run on the **global default**
+/// main context (the one the UI iterates), and its `G_SOURCE_REMOVE` /
+/// `G_SOURCE_CONTINUE` return value is honoured exactly as
+/// `g_main_context_invoke` honours it.
+///
+/// This exists so the xfers.c transfer worker's progress / cleanup
+/// posts (`post_file_update` / `post_xfer_cleanup`) marshal back to the
+/// main thread through hxbridge rather than through `gtkthreads.c` —
+/// the last step before `gtkthreads.c` (whose only remaining export is
+/// `gtkhx_post_to_main`) can retire (Phase R3 X2 → X4,
+/// `docs/rust/xfers-tokio-scoping.md`). It is intentionally a pure-GLib
+/// shim with no tokio dependency; it lives beside
+/// `spawn_blocking_with_idle` because both are the worker→main
+/// marshalling surface the transfer worker uses.
+///
+/// # Safety
+///
+/// `func`, when non-null, must be a valid `GSourceFunc`. `user_data`
+/// must remain valid until `func` runs on the main loop (the C-side
+/// caller's dispatcher frees it).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_bridge_post_to_main(
+    func: glib::ffi::GSourceFunc,
+    user_data: *mut c_void,
+) {
+    if func.is_none() {
+        glib::g_critical!("hxbridge", "gtkhx_bridge_post_to_main: NULL func");
+        return;
+    }
+    // NULL context = the global default main context, exactly as the
+    // legacy gtkhx_post_to_main passed. g_main_context_invoke is
+    // thread-safe: a worker thread enqueues, the main thread runs it.
+    glib::ffi::g_main_context_invoke(std::ptr::null_mut(), func, user_data);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -533,6 +571,53 @@ mod tests {
             unsafe {
                 drop(Box::from_raw(raw as *mut Arc<TestState>));
             }
+        }
+    }
+
+    #[test]
+    fn post_to_main_runs_func_on_default_context() {
+        // gtkhx_bridge_post_to_main queues onto the GLOBAL default main
+        // context (not a thread-default), so acquire it for exclusivity
+        // against other tests that touch the default context.
+        let ctx = MainContext::default();
+        let _guard = ctx.acquire().expect("acquire default main context");
+
+        static RAN: AtomicU32 = AtomicU32::new(0);
+        RAN.store(0, Ordering::SeqCst);
+
+        unsafe extern "C" fn cb(_data: *mut c_void) -> glib::ffi::gboolean {
+            RAN.fetch_add(1, Ordering::SeqCst);
+            glib::ffi::GFALSE // G_SOURCE_REMOVE — run once
+        }
+
+        unsafe {
+            gtkhx_bridge_post_to_main(Some(cb), std::ptr::null_mut());
+        }
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline && RAN.load(Ordering::SeqCst) == 0 {
+            ctx.iteration(false);
+        }
+        assert_eq!(
+            RAN.load(Ordering::SeqCst),
+            1,
+            "posted GSourceFunc ran exactly once on the default main context"
+        );
+    }
+
+    #[test]
+    fn post_to_main_null_func_is_a_clean_noop() {
+        // NULL GSourceFunc must g_critical and return without queuing
+        // anything — no panic across the FFI boundary.
+        let ctx = MainContext::default();
+        let _guard = ctx.acquire().expect("acquire default main context");
+        unsafe {
+            gtkhx_bridge_post_to_main(None, std::ptr::null_mut());
+        }
+        // Nothing to assert beyond "did not crash"; pump a few times to
+        // give any erroneously-queued source a chance to misbehave.
+        for _ in 0..16 {
+            ctx.iteration(false);
         }
     }
 }

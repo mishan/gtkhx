@@ -55,6 +55,14 @@ int nxfers = 0;
 struct htxf_conn **xfers = 0;
 static void xfer_remove_from_list (struct htxf_conn *htxf);
 
+/* Phase R3 X2: worker→main marshalling now goes through hxbridge
+ * (rust/crates/hxbridge/src/blocking.rs) rather than gtkthreads.c's
+ * gtkhx_post_to_main. Same g_main_context_invoke(NULL, ...) semantics,
+ * relocated so gtkthreads.c can retire once xfers.c — its last caller —
+ * stops using it (X4). Declared inline like banner.c's
+ * gtkhx_bridge_spawn_blocking_with_idle. */
+extern void gtkhx_bridge_post_to_main (GSourceFunc func, gpointer user_data);
+
 /*
  * Reference counting and the worker → main marshal helpers.
  *
@@ -138,7 +146,7 @@ post_file_update (struct htxf_conn *htxf)
 {
     struct fu_job *j = g_new0 (struct fu_job, 1);
     j->htxf = htxf_ref (htxf);
-    gtkhx_post_to_main (fu_dispatch, j);
+    gtkhx_bridge_post_to_main (fu_dispatch, j);
 }
 
 struct cleanup_job {
@@ -166,7 +174,7 @@ post_xfer_cleanup (struct htxf_conn *htxf)
 	 * directly — no additional ref taken here. cleanup_dispatch
 	 * unrefs on the worker's behalf. */
     j->htxf = htxf;
-    gtkhx_post_to_main (cleanup_dispatch, j);
+    gtkhx_bridge_post_to_main (cleanup_dispatch, j);
 }
 
 static void
