@@ -1123,16 +1123,11 @@ integration_harness_lib = static_library(
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',
-  # HOPE-Secure-Login crypto plumbing. cipher_aead.c brings the
-  # ChaCha20-Poly1305 frame codec; cipher.c brings the stream-cipher
-  # (Blowfish OFB-64) seal/open. Random bytes come from C src/rand.c
-  # (getrandom(2) with /dev/urandom fallback); the hash/cipher
-  # primitives themselves come from the Rust hxcrypto crates (Phase R1).
-  # The Tier 3 HOPE login now runs through the production orchestrator
-  # (Rust owns the crypto), so these C files are referenced only by the
-  # legacy framing branches still left in the harness send/recv_message
-  # _hope wrappers — slated for removal alongside cipher.c.
-  '../src/cipher.c',
+  # cipher_aead.c brings the ChaCha20-Poly1305 frame codec, still
+  # referenced by the harness send/recv_message_hope AEAD branches and by
+  # the HTXF-AEAD path. The Tier 3 HOPE login runs through the production
+  # orchestrator (Rust owns the control-channel crypto); the stream
+  # cipher + its C dispatch (cipher.c) are gone.
   '../src/cipher_aead.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
@@ -1207,7 +1202,6 @@ test_integration_real_connect = executable(
   '../src/connect_magic.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
-  '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/compress.c',
   '../src/inline_media.c',
@@ -1273,7 +1267,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',
-  '../src/cipher.c',
   '../src/cipher_aead.c',
   '../src/compress.c',
   '../src/inline_media.c',

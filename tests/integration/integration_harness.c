@@ -1143,10 +1143,9 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
 {
     /* HOPE-aware send. Same chunk-building path as the plain
      * variant — hx_get_chat_history_build_chunks → hlpack_chunks —
-     * but routed through cipher_aead_seal (AEAD) / cipher_encode
-     * (stream) via integration_send_message_hope so the bytes are
-     * framed correctly for whatever cipher_mode the session
-     * negotiated. */
+     * but routed through cipher_aead_seal (AEAD) or a plain send via
+     * integration_send_message_hope, matching the cipher_mode the
+     * session negotiated. */
     guint32 trans = htlc->trans;
 
     /* Build the chunks first so we can hand them to hlpack_chunks
@@ -1183,15 +1182,6 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
                                                  &framed_n);
         gboolean ok = framed && integration_send (fd, framed, framed_n);
         g_free (framed);
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        return ok ? trans : 0;
-    }
-    if (hope && hope->stream_active) {
-        cipher_encode (htlc, 0, htlc->out.len);
-        gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
         g_free (htlc->out.buf);
         htlc->out.buf = NULL;
         htlc->out.pos = 0;
@@ -1778,24 +1768,6 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
         return ok;
     }
 
-    if (hope && hope->stream_active) {
-        /* Stream-cipher (Blowfish OFB-64) send path. cipher
-         * _encode does the work production does: optionally stamp a
-         * 1..63-iteration rekey marker into the type field's high
-         * byte (~3/16 random probability), do_encode the header,
-         * cipher_change_encode_key, then do_encode the rest of the
-         * buffer. No length prefix on the wire — the message length
-         * is carried in the header itself. We call the same
-         * cipher_encode the production network.c path uses, so the
-         * harness exercises the exact rekey state machine. */
-        cipher_encode (htlc, 0, htlc->out.len);
-        gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        return ok;
-    }
 
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
@@ -1822,8 +1794,8 @@ integration_send_agreementagree_hope (int                       fd,
      * that drains for the banner times out into a skip.
      *
      * Framing path mirrors integration_send_get_chat_history_hope:
-     * hlpack_chunks → cipher_aead_seal / cipher_encode / plain send,
-     * matching the cipher_mode the session negotiated. The harness
+     * hlpack_chunks → cipher_aead_seal / plain send, matching the
+     * cipher_mode the session negotiated. The harness
      * passes display_name verbatim (typically ASCII for tests);
      * production calls gtkhx_text_for_wire at the caller for UTF-8
      * vs Mac Roman, which is identical to ASCII for the test
@@ -1865,15 +1837,6 @@ integration_send_agreementagree_hope (int                       fd,
         htlc->out.len = 0;
         return ok;
     }
-    if (hope && hope->stream_active) {
-        cipher_encode (htlc, 0, htlc->out.len);
-        gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        return ok;
-    }
 
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
@@ -1883,29 +1846,6 @@ integration_send_agreementagree_hope (int                       fd,
     return ok;
 }
 
-
-/* Apply htlc's stream cipher (Blowfish OFB-64) to `n` raw
- * bytes in place. Used for both the encrypted header and the
- * encrypted body of an incoming message after a successful
- * HOPE+stream-cipher negotiation. Mirrors production's network.c
- * ::htlc_read, which runs cipher_decode over the raw socket bytes
- * before they reach htlc->in.buf; the harness reads exactly the
- * bytes it needs from the socket, so the cipher_decode call is one
- * shot per chunk. */
-static void
-stream_cipher_decode_inplace (struct htlc_conn *htlc, guint8 *bytes, gsize n)
-{
-    if (n == 0) {
-        return;
-    }
-    struct qbuf in = { .pos = 0, .len = (guint32) n, .buf = bytes };
-    struct qbuf out = { .pos = 0, .len = 0, .buf = NULL };
-    guint32 inused = 0;
-    cipher_decode (htlc, &out, &in, (guint32) n, &inused);
-    g_assert_cmpuint (inused, ==, (guint32) n);
-    memcpy (bytes, out.buf, n);
-    g_free (out.buf);
-}
 
 /* Append bytes to hope->rx_accum, growing as needed. */
 static void
@@ -2013,92 +1953,5 @@ integration_recv_message_hope (int fd, struct htlc_conn *htlc,
         return FALSE;
     }
 
-    if (hope && hope->stream_active) {
-        /* Stream-cipher (Blowfish OFB-64) recv path. Mirrors the
-         * production network.c::htlc_read + rcv.c::hx_rcv_hdr split:
-         *
-         *   1. Read the 20-byte header off the socket, decrypt in
-         *      place with cipher_decode.
-         *   2. Inspect the decrypted type's high byte. If non-zero we
-         *      hit the legacy HOPE rekey marker — rotate the decode
-         *      key by that many HMAC iterations (cipher_change_decode
-         *      _key) before any further bytes are decrypted, and
-         *      clear the marker from the in-buffer so the harness's
-         *      hdr_type() helper sees the real opcode.
-         *   3. Decode wire_len/body_len from the now-clean header,
-         *      validate against MAX_HOTLINE_PACKET_LEN.
-         *   4. Read body_len ciphertext bytes, decrypt in place,
-         *      append to htlc->in.buf right after the header.
-         *
-         * cipher_decode + cipher_change_decode_key are the SAME
-         * functions production calls, so any decode desync here is
-         * a desync in production too. */
-        g_free (htlc->in.buf);
-        htlc->in.buf = NULL;
-        htlc->in.pos = 0;
-        htlc->in.len = 0;
-
-        fd_set rfds;
-        FD_ZERO (&rfds);
-        FD_SET (fd, &rfds);
-        struct timeval tv = {
-            .tv_sec = timeout_ms / 1000,
-            .tv_usec = (timeout_ms % 1000) * 1000,
-        };
-        int sr = select (fd + 1, &rfds, NULL, NULL, &tv);
-        if (sr <= 0) {
-            return FALSE;
-        }
-
-        guint8 hdr_bytes[SIZEOF_HL_HDR];
-        if (!integration_recv (fd, hdr_bytes, SIZEOF_HL_HDR)) {
-            return FALSE;
-        }
-        stream_cipher_decode_inplace (htlc, hdr_bytes, SIZEOF_HL_HDR);
-
-        /* Shared rekey-marker detection in cipher.c — same function
-         * production's rcv.c::hx_rcv_hdr calls. On a hit the helper
-         * rotates the per-connection decode key and clears the high
-         * byte from `type`; we additionally zero hdr_bytes[0] so the
-         * subsequent memcpy into htlc->in.buf leaves the test's
-         * hdr_type() macro reading the real opcode (production
-         * dispatches off the local type variable and doesn't need
-         * to clean the buffer). */
-        guint32 type = ((guint32) hdr_bytes[0] << 24)
-                       | ((guint32) hdr_bytes[1] << 16)
-                       | ((guint32) hdr_bytes[2] << 8)
-                       | ((guint32) hdr_bytes[3]);
-        if (cipher_check_rekey_marker (htlc, &type)) {
-            hope->decode_rekey_count++;
-            hdr_bytes[0] = 0;
-        }
-
-        guint32 wire_len = 0, body_len = 0;
-        if (!hl_hdr_decode (hdr_bytes, NULL, NULL, NULL, NULL, &wire_len,
-                            &body_len)) {
-            return FALSE;
-        }
-        if (wire_len > MAX_HOTLINE_PACKET_LEN) {
-            return FALSE;
-        }
-
-        gsize total = SIZEOF_HL_HDR + body_len;
-        htlc->in.buf = g_malloc (total);
-        memcpy (htlc->in.buf, hdr_bytes, SIZEOF_HL_HDR);
-        if (body_len > 0) {
-            if (!integration_recv (fd, htlc->in.buf + SIZEOF_HL_HDR,
-                                   body_len)) {
-                g_free (htlc->in.buf);
-                htlc->in.buf = NULL;
-                return FALSE;
-            }
-            stream_cipher_decode_inplace (htlc,
-                                          htlc->in.buf + SIZEOF_HL_HDR,
-                                          body_len);
-        }
-        htlc->in.pos = total;
-        htlc->in.len = total;
-        return TRUE;
-    }
     return integration_recv_message (fd, htlc, timeout_ms);
 }

@@ -5,8 +5,8 @@
  * After Phase R1 this file is a thin C dispatcher; all
  * cryptographic computation lives in rust/crates/hxcrypto-aead.
  * The cipher_aead_* C symbols below preserve the legacy signature
- * so call sites in cipher.c, network_decode.c, htxf_io.c, and the
- * Tier 2 / Tier 3 tests don't need to change.
+ * so call sites in htxf_io.c and the Tier 2 / Tier 3 tests don't
+ * need to change.
  *
  * The chacha_aead_state struct (declared in cipher.h) is
  * #[repr(C)]-matched against the Rust AeadState struct — the FFI
@@ -16,10 +16,9 @@
  * on both sides so a field reorder trips a build error rather
  * than a misalignment at decrypt time.
  *
- * Pure code; no Hotline protocol structs touched here. Callers in
- * cipher.c (control connection), network.c / network_decode.c
- * (read accumulator), and xfers.c (HTXF subchannel) drive the
- * integration.
+ * Pure code; no Hotline protocol structs touched here. The HTXF
+ * subchannel path (htxf_io.c / xfers.c) and the Tier 3 harness drive
+ * the integration.
  */
 
 #include "config.h"

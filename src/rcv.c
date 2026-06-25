@@ -1419,16 +1419,12 @@ hx_rcv_hdr (struct htlc_conn *htlc)
     hl_hdr_decode (htlc->in.buf, &type, &trace_trans, &trace_flag, NULL,
                    &wire_len, &len);
 
-    /* Stream-cipher rekey marker — shared detection in cipher.c.
-	 * Production and the Tier 3 harness now route through the same
-	 * helper; see cipher_check_rekey_marker's doc for the spec
-	 * background and the user-visible failure mode it gates against
-	 * ("unknown header type 0x3d000162" / "0x2f010000" from servers
-	 * that exercise the legacy HOPE stream-cipher rekey trick). On
-	 * a hit the helper rotates the per-connection decode key and
-	 * clears the marker byte from `type` so the dispatch switch
-	 * below sees the real opcode. */
-    cipher_check_rekey_marker (htlc, &type);
+    /* The legacy HOPE stream-cipher rekey marker (a count stamped into
+	 * the type field's high byte on Blowfish-OFB-64 connections) is
+	 * handled entirely in the hxnet orchestrator now: hope_blowfish.rs
+	 * rotates the decode key and strips the marker before forwarding the
+	 * decrypted frame, so by the time the header reaches this C dispatch
+	 * `type` already carries the real opcode. No C-side check needed. */
 
     proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 

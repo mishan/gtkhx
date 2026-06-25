@@ -31,9 +31,9 @@ extern void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt,
 /* INFOPREFIX is the formatting sigil hx_printf_prefix wraps user-
  * visible status lines with (the [hx] tag visible in chat
  * windows). Defined in gtkhx.c; declared here rather than in
- * session.h so non-widget callers (network_decode.c, the test
- * stubs that satisfy the linker) don't have to pull in the GTK
- * surface session.h drags along. */
+ * session.h so non-widget callers (the test stubs that satisfy the
+ * linker) don't have to pull in the GTK surface session.h drags
+ * along. */
 extern const char *INFOPREFIX;
 
 #endif /* HX_GTKHX_LOG_H */

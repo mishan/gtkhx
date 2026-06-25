@@ -11,7 +11,6 @@ gtkhx_sources = files(
   'chat_history.c',
   'chat_tabs.c',
   'cicn.c',
-  'cipher.c',
   'cipher_aead.c',
   'commands.c',
   'compress.c',
