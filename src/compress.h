@@ -48,31 +48,18 @@ union compress_state {
 struct htlc_conn;
 struct qbuf;
 
-extern u_int32_t compress_decode (struct htlc_conn *htlc, struct qbuf *out,
-                                  struct qbuf *in, u_int32_t max,
-                                  u_int32_t *inusedp);
-extern u_int32_t compress_encode (struct htlc_conn *htlc, u_int32_t pos,
-                                  u_int32_t len);
-extern void compress_encode_init (struct htlc_conn *htlc);
-extern void compress_decode_init (struct htlc_conn *htlc);
-extern void compress_encode_end (struct htlc_conn *htlc);
-extern void compress_decode_end (struct htlc_conn *htlc);
+/* The C compression dispatch (compress.c — compress_encode / decode /
+ * _init / _end / id_from_name) was retired once the hxnet orchestrator
+ * took over the control-channel transport: zlib/gzip compression now
+ * runs inside the Rust `hxcompress` crate. Only the shared types above
+ * (COMPRESS_* ids + the compress_state union the htlc_conn fields use)
+ * and the compress_encode_bufsize helper below survive here. */
 
-/* Map a HOPE algorithm name ("GZIP" / "LZ4" / "ZSTD") to its
- * COMPRESS_* numeric id. Returns COMPRESS_NONE for "NONE", the
- * empty string, or any name not recognised in this build. Used
- * by rcv.c when applying the server's algorithm selection from
- * the HOPE Step 2 reply. */
-extern u_int16_t compress_id_from_name (const char *name);
-
-/* Worst-case output buffer size for compress_encode on an input of
- * `len` bytes. Computes `2 * len + 1024` in u64 internally;
- * returns 0 if the u32 result would overflow (any len > ~2 GiB).
- * Defined `static inline` here so the Tier 1 test in
- * tests/unit/test_compress_bufsize.c can drive the overflow guard
- * without linking compress.c (which transitively pulls GTK via
- * hx.h). Production callers in compress.c get the same body
- * inlined and check the 0-return before allocating. */
+/* Worst-case output buffer size for a gzip-deflate of an input of `len`
+ * bytes. Computes `2 * len + 1024` in u64 internally; returns 0 if the
+ * u32 result would overflow (any len > ~2 GiB). Defined `static inline`
+ * here so the Tier 1 test in tests/unit/test_compress_bufsize.c can drive
+ * the overflow guard without linking any compression backend. */
 #include <stdint.h>
 static inline u_int32_t
 compress_encode_bufsize (u_int32_t len)

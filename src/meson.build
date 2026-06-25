@@ -12,7 +12,6 @@ gtkhx_sources = files(
   'chat_tabs.c',
   'cicn.c',
   'commands.c',
-  'compress.c',
   'connect_magic.c',
   'connect.c',
   'debug.c',
