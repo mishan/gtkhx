@@ -114,6 +114,11 @@ pub struct HxnetConnection {
     /// flush + exit — so the underscore prefix marks it
     /// reserved-for-future-use.
     _join: JoinHandle<()>,
+    /// HOPE control-channel AEAD material slot. `Some` only on a HOPE
+    /// connection; the lifecycle fills it when ChaCha20-Poly1305 is
+    /// negotiated. Read by `hxnet_connection_hope_aead_material` so an
+    /// HTXF subchannel can derive transfer keys in-process.
+    hope_aead: Option<crate::lifecycle::HopeAeadSlot>,
 }
 
 /// Callback-mode FFI state. Holds the tokio→async_channel pump
@@ -359,6 +364,7 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd(fd: c_int) -> *mut HxnetConne
         events: Some(events),
         _callback_state: None,
         _join: join,
+        hope_aead: None,
     });
     Box::into_raw(handle)
 }
@@ -1381,6 +1387,7 @@ fn wire_callback_state(
         events: None,
         _callback_state: None,
         _join: join,
+        hope_aead: None,
     });
     let handle_ptr = Box::into_raw(handle_box);
 
@@ -2004,6 +2011,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         events: Some(events),
         _callback_state: None,
         _join: join,
+        hope_aead: None,
     });
     Box::into_raw(handle)
 }
@@ -2357,11 +2365,14 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         },
     };
 
+    let hope_slot: crate::lifecycle::HopeAeadSlot =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let lifecycle_slot = hope_slot.clone();
     let join = rt.handle().spawn(async move {
-        crate::lifecycle::run_hope_lifecycle(req, cmd_rx, evt_tx).await;
+        crate::lifecycle::run_hope_lifecycle(req, cmd_rx, evt_tx, lifecycle_slot).await;
     });
 
-    wire_callback_state_with_on_state(
+    let handle = wire_callback_state_with_on_state(
         rt,
         cmd,
         events,
@@ -2370,7 +2381,296 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         on_shutdown,
         on_state,
         user_data,
-    )
+    );
+    // Attach the HOPE AEAD slot so an HTXF subchannel can later derive
+    // transfer keys off the negotiated session material.
+    if !handle.is_null() {
+        unsafe {
+            (*handle).hope_aead = Some(hope_slot);
+        }
+    }
+    handle
+}
+
+/// Polling-mode sibling of [`hxnet_connection_open_hope`]: runs the
+/// same production HOPE-Secure-Login lifecycle ([`run_hope_lifecycle`]:
+/// magic + step-1 / step-2 + cipher transition, then the encrypted
+/// actor), but exposes events through the polling API
+/// ([`hxnet_connection_try_recv_frame`]) instead of the GLib callback
+/// forwarder.
+///
+/// This lets the synchronous Tier 3 test harness drive its HOPE tests
+/// (`test_hope_blowfish` / `_chacha20` / `_hmac` / `_banner` /
+/// `_chat_history`, …) through the **production** crypto stack instead
+/// of the harness's own C `hope.c` / `cipher.c` reimplementation — so
+/// the tests verify the shipped client's wire format, not dead C code.
+/// The replayed step-2 LOGIN reply arrives as the first
+/// `HXNET_RECV_FRAME`; subsequent server frames follow as the actor
+/// reads (and transparently decrypts) them. Outbound frames go via
+/// [`hxnet_connection_send_frame`] and are encrypted by the actor.
+///
+/// `cipher_alg` is OPTIONAL exactly as in [`hxnet_connection_open_hope`]
+/// (NULL / empty ⇒ no-cipher HMAC secure login over a plaintext
+/// transport). Same parameter / safety contract as that function, minus
+/// the callbacks.
+///
+/// [`run_hope_lifecycle`]: crate::lifecycle::run_hope_lifecycle
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    cipher_alg: *const u8,
+    cipher_alg_len: usize,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope_polling: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+    if trans == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope_polling: trans=0 is reserved"
+        );
+        return std::ptr::null_mut();
+    }
+    // cipher_alg is OPTIONAL (see hxnet_connection_open_hope): NULL /
+    // empty ⇒ no cipher. A NULL pointer with a non-zero length is a
+    // caller bug that would silently drop the cipher.
+    if cipher_alg.is_null() && cipher_alg_len != 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope_polling: NULL cipher_alg with non-zero length"
+        );
+        return std::ptr::null_mut();
+    }
+    // slice::from_raw_parts is UB for len * size_of::<T> > isize::MAX.
+    if [host_len, login_len, password_len, name_len, cipher_alg_len]
+        .iter()
+        .any(|&n| (n as u64) > (isize::MAX as u64))
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope_polling: a length argument exceeds isize::MAX"
+        );
+        return std::ptr::null_mut();
+    }
+    if (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_hope_polling: NULL pointer with non-zero \
+             length for login / password / name"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_hope_polling: host is not valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    let login_vec = if login_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(login, login_len).to_vec()
+    };
+    let password_vec = if password_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(password, password_len).to_vec()
+    };
+    let name_vec = if name_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(name, name_len).to_vec()
+    };
+    let cipher_vec = if cipher_alg_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(cipher_alg, cipher_alg_len).to_vec()
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_hope_polling: Runtime::global panicked; \
+                 aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+    let req = crate::lifecycle::HopeOpenRequest {
+        host: host_str,
+        port,
+        login: login_vec,
+        password: password_vec,
+        name: name_vec,
+        icon,
+        version,
+        caps,
+        trans,
+        cipher_algs: if cipher_vec.is_empty() {
+            Vec::new()
+        } else {
+            vec![cipher_vec]
+        },
+    };
+    let hope_slot: crate::lifecycle::HopeAeadSlot =
+        std::sync::Arc::new(std::sync::Mutex::new(None));
+    let lifecycle_slot = hope_slot.clone();
+    let join = rt.handle().spawn(async move {
+        crate::lifecycle::run_hope_lifecycle(req, cmd_rx, evt_tx, lifecycle_slot).await;
+    });
+
+    // Polling-mode handle: keep the event receiver for try_recv_frame;
+    // no callback forwarder.
+    let handle = Box::new(HxnetConnection {
+        cmd,
+        events: Some(events),
+        _callback_state: None,
+        _join: join,
+        hope_aead: Some(hope_slot),
+    });
+    Box::into_raw(handle)
+}
+
+/// Opaque handle to a HOPE control-channel's retained AEAD material.
+/// Obtained from [`hxnet_connection_hope_aead_material`] and passed to
+/// [`hxnet_htxf_open`] so an HTXF subchannel can derive its per-transfer
+/// keys in-process. The session key never crosses the FFI as bytes —
+/// only this opaque token does. Free with [`hxnet_hope_aead_free`].
+pub struct HxnetHopeAead {
+    pub(crate) material: crate::lifecycle::HopeAeadMaterial,
+}
+
+/// Return an opaque handle to `conn`'s HOPE control-channel AEAD
+/// material, or NULL when `conn` is not a HOPE connection or did not
+/// negotiate a ChaCha20-Poly1305 cipher (plaintext / Blowfish /
+/// no-cipher leave the slot empty). The handle owns a copy of the
+/// material, so it is independent of `conn`'s lifetime; free it with
+/// [`hxnet_hope_aead_free`].
+///
+/// # Safety
+/// `conn` must be a valid pointer from one of the open functions, not
+/// yet destroyed.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_hope_aead_material(
+    conn: *mut HxnetConnection,
+) -> *mut HxnetHopeAead {
+    if conn.is_null() {
+        return std::ptr::null_mut();
+    }
+    let conn = &*conn;
+    let slot = match &conn.hope_aead {
+        Some(s) => s,
+        None => return std::ptr::null_mut(),
+    };
+    let material = match slot.lock() {
+        Ok(g) => match g.as_ref() {
+            Some(m) => m.clone(),
+            None => return std::ptr::null_mut(),
+        },
+        Err(_) => return std::ptr::null_mut(),
+    };
+    Box::into_raw(Box::new(HxnetHopeAead { material }))
+}
+
+/// Build a HOPE AEAD material handle from caller-provided control-channel
+/// material (session key + the two per-direction control `AeadState`s,
+/// which are layout-compatible with C's `chacha_aead_state`). Used by the
+/// legacy Tier 3 harness transport, which runs its own C-side HOPE
+/// handshake and therefore has the material in hand rather than retained
+/// in a Rust control connection. Returns NULL on a NULL/empty argument.
+/// Free with [`hxnet_hope_aead_free`].
+///
+/// # Safety
+/// `session_key` must be valid for `session_key_len`; `ctrl_encode` /
+/// `ctrl_decode` must each point at a valid `AeadState`.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_hope_aead_from_material(
+    session_key: *const u8,
+    session_key_len: usize,
+    ctrl_encode: *const hxcrypto_aead::AeadState,
+    ctrl_decode: *const hxcrypto_aead::AeadState,
+) -> *mut HxnetHopeAead {
+    if session_key.is_null()
+        || session_key_len == 0
+        || ctrl_encode.is_null()
+        || ctrl_decode.is_null()
+        || (session_key_len as u64) > (isize::MAX as u64)
+    {
+        return std::ptr::null_mut();
+    }
+    let material = crate::lifecycle::HopeAeadMaterial {
+        session_key: std::slice::from_raw_parts(session_key, session_key_len).to_vec(),
+        ctrl_encode: *ctrl_encode,
+        ctrl_decode: *ctrl_decode,
+    };
+    Box::into_raw(Box::new(HxnetHopeAead { material }))
+}
+
+/// Clone a HOPE AEAD material handle into a new, independently owned
+/// handle. The copy carries its own `HopeAeadMaterial`, so its lifetime
+/// is decoupled from the source — a caller can hand the clone to a
+/// worker that outlives the original (e.g. banner.c's HTXF fetch, where
+/// the control connection's `htlc->hope_aead` may be freed on disconnect
+/// while the blocking transfer is still in flight). Returns NULL when
+/// `h` is NULL. Free with [`hxnet_hope_aead_free`].
+///
+/// # Safety
+/// `h` must be NULL or a live pointer from one of the handle-producing
+/// functions, not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_hope_aead_clone(
+    h: *const HxnetHopeAead,
+) -> *mut HxnetHopeAead {
+    if h.is_null() {
+        return std::ptr::null_mut();
+    }
+    let src = &*h;
+    Box::into_raw(Box::new(HxnetHopeAead {
+        material: src.material.clone(),
+    }))
+}
+
+/// Free a handle from [`hxnet_connection_hope_aead_material`],
+/// [`hxnet_hope_aead_from_material`], or [`hxnet_hope_aead_clone`]. NULL
+/// is a no-op; double-free is undefined.
+///
+/// # Safety
+/// `h` must be NULL or a live pointer from one of those functions.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_hope_aead_free(h: *mut HxnetHopeAead) {
+    if !h.is_null() {
+        drop(Box::from_raw(h));
+    }
 }
 
 /// Variant of `wire_callback_state` that routes
@@ -2411,6 +2711,7 @@ fn wire_callback_state_with_on_state(
         events: None,
         _callback_state: None,
         _join: join,
+        hope_aead: None,
     });
     let handle_ptr = Box::into_raw(handle_box);
 

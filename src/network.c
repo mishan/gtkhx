@@ -61,6 +61,7 @@
 #include "network.h"
 #include "banner.h"
 #include "debug.h"
+#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_open, hxnet_hope_aead_free */
 #include "cipher_aead.h"
 #include "cipher.h"
 #include "voice_runtime.h"
@@ -435,6 +436,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     htlc->gzip_inflate_total_out = 0;
     memset (htlc->sessionkey, 0, sizeof (htlc->sessionkey));
     htlc->sklen = 0;
+    /* Release the opaque HOPE AEAD material handle seeded at login. */
+    if (htlc->hope_aead) {
+        hxnet_hope_aead_free (htlc->hope_aead);
+        htlc->hope_aead = NULL;
+    }
 
 #if 0 /* XXX */
 	close_log(server_log);
@@ -1332,29 +1338,24 @@ htxf_connect (struct htxf_conn *htxf)
     }
 
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming. When the control
-	 * channel negotiated CIPHER_MODE_AEAD, derive a per-transfer
-	 * ChaCha20 key pair off the control session_key + our HTXF ref
-	 * (the derivation mixes ref into the salt so two transfers in one
-	 * session can never share a nonce; counters start at 0) into
-	 * htxf->xfer_encode / xfer_decode and pass them to
-	 * hxnet_htxf_open, which owns the seal/open framing thereafter.
-	 * The preamble itself always travels plaintext per spec. Other
-	 * transfers (no HOPE, or HOPE with a stream cipher) leave
-	 * aead_active = FALSE and hxnet runs the channel in passthrough. */
-    const chacha_aead_state *aead_enc = NULL;
-    const chacha_aead_state *aead_dec = NULL;
-    if (htxf->htlc && htxf->htlc->cipher_mode == CIPHER_MODE_AEAD) {
-        hx_htxf_subchannel_arm_aead (
-            htxf,
-            htxf->htlc->sessionkey, htxf->htlc->sklen,
-            &htxf->htlc->cipher_encode_state.chacha,
-            &htxf->htlc->cipher_decode_state.chacha,
-            htxf->ref);
-        aead_enc = &htxf->xfer_encode;
-        aead_dec = &htxf->xfer_decode;
-        debug_log ("xfer-aead",
-                   "ref=%u: AEAD active (control session_key=%u bytes)",
-                   htxf->ref, htxf->htlc->sklen);
+	 * channel negotiated ChaCha20-Poly1305, the per-transfer keys are
+	 * derived INSIDE hxnet_htxf_open from the control connection's
+	 * retained HOPE material (htlc->hope_aead, an opaque handle seeded at
+	 * login) plus this transfer's ref — mixing ref into the salt so two
+	 * transfers in one session can never share a nonce, counters from 0 —
+	 * and hxnet owns the seal/open framing thereafter. The session key
+	 * never comes back to C. The preamble itself always travels plaintext
+	 * per spec. A NULL handle (no HOPE, a stream cipher, or no-cipher)
+	 * selects plaintext passthrough. The handle is seeded the same way on
+	 * either Tier 3 transport — by the orchestrated login from the actor's
+	 * retained material, or by the legacy harness via
+	 * hxnet_hope_aead_from_material — so this path is transport-agnostic. */
+    const HxnetHopeAead *hope_aead =
+        (htxf->htlc != NULL) ? (const HxnetHopeAead *) htxf->htlc->hope_aead
+                             : NULL;
+    if (hope_aead) {
+        debug_log ("xfer-aead", "ref=%u: AEAD active (HOPE material present)",
+                   htxf->ref);
     }
 
     /* Mirror the control channel's TLS mode onto this subchannel —
@@ -1368,7 +1369,7 @@ htxf_connect (struct htxf_conn *htxf)
         dupfd, xfer_tls,
         (const guint8 *) htxf->serverhost, strlen (htxf->serverhost),
         hdr_buf, hdr_len,
-        aead_enc, aead_dec,
+        hope_aead, htxf->ref,
         htxf_verify_cert_cb, htxf);
     if (!htxf->hx) {
         debug_log ("xfer", "htxf_connect: hxnet_htxf_open failed (ref=%u)",

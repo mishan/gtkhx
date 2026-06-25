@@ -160,6 +160,18 @@ extern hxnet_connection *hxnet_connection_open_plaintext_polling (
     const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len,
     guint16 icon, guint16 version, guint16 caps, guint32 trans);
+/* HOPE-Secure-Login sibling of the polling open. cipher_alg is the wire
+ * cipher label ("BLOWFISH" / "CHACHA20-POLY1305"), or NULL/empty for a
+ * no-cipher HMAC secure login. The actor runs the full step-1/step-2
+ * handshake + cipher transition in Rust and replays the step-2 reply as
+ * the first polled frame. */
+extern hxnet_connection *hxnet_connection_open_hope_polling (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    const guint8 *cipher_alg, gsize cipher_alg_len);
 extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
                                             hxnet_frame_t *out_frame,
                                             int *out_reason);
@@ -167,6 +179,15 @@ extern int hxnet_connection_send_frame (hxnet_connection *handle,
                                         const guint8 *data, guint len);
 extern void hxnet_connection_destroy (hxnet_connection *handle);
 extern void hxnet_frame_free (hxnet_frame_t *frame);
+/* Opaque HOPE AEAD material handle (Rust HxnetHopeAead). The harness
+ * seeds htlc->hope_aead from it (orchestrated) or builds one from its own
+ * C handshake state (legacy, via hxnet_hope_aead_from_material in the
+ * banner test). Passed to hxnet_htxf_open so the subchannel derives its
+ * per-transfer keys in-process. */
+typedef struct HxnetHopeAead HxnetHopeAead;
+extern HxnetHopeAead *hxnet_connection_hope_aead_material (
+    hxnet_connection *handle);
+extern void hxnet_hope_aead_free (HxnetHopeAead *h);
 
 /* Synthetic-fd space for orchestrated control connections. Picked far
  * above any real socket fd so orch_lookup can branch on the value
@@ -308,6 +329,63 @@ orch_open_login (struct htlc_conn *htlc, const char *host, int port,
      * network.c htlc->trans = reply_trans + 1 convention. */
     if (htlc) {
         htlc->trans = 2;
+    }
+    return fd;
+}
+
+/* HOPE-Secure-Login sibling of orch_open_login: drive the full step-1 /
+ * step-2 handshake + cipher transition through the production
+ * orchestrator (hxnet's run_hope_lifecycle) and register the resulting
+ * actor as a synthetic fd. `cipheralg` is the wire cipher label
+ * ("BLOWFISH" / "CHACHA20-POLY1305"), or NULL for a no-cipher HMAC
+ * secure login. Returns the synthetic fd (with the post-login drain
+ * still to run, exactly like orch_open_login), or -1 on failure. The
+ * caller's integration_hope_session stays zeroed: the actor owns all
+ * crypto, so the harness's AEAD / stream framing in
+ * integration_{send,recv}_message_hope is bypassed for the synthetic
+ * fd (those wrappers pass through to integration_{send,recv}_message,
+ * which route ORCH fds to the actor). */
+static int
+orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
+                      const char *login, const char *password,
+                      const char *display_name, guint16 icon, guint16 caps,
+                      const char *cipheralg)
+{
+    if (!login) {
+        login = "guest";
+    }
+    const char *name = (display_name && *display_name) ? display_name : "";
+    const char *pass = password ? password : "";
+    const char *calg = cipheralg ? cipheralg : "";
+    hxnet_connection *h = hxnet_connection_open_hope_polling (
+        (const guint8 *) host, strlen (host), (guint16) port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) pass, strlen (pass),
+        (const guint8 *) name, strlen (name),
+        icon, /*version=*/185, caps, /*trans=*/1,
+        (const guint8 *) calg, strlen (calg));
+    if (!h) {
+        g_test_fail_printf (
+            "hxnet_connection_open_hope_polling(%s:%d, cipher=%s) returned "
+            "NULL — orchestrator could not complete the HOPE handshake.",
+            host, port, calg[0] ? calg : "(none)");
+        return -1;
+    }
+    int fd = orch_register (h);
+    if (fd < 0) {
+        hxnet_connection_destroy (h);
+        g_test_fail_printf ("orchestrated transport table full (>%d "
+                            "concurrent connections).",
+                            ORCH_MAX);
+        return -1;
+    }
+
+    /* The orchestrator sent step 1 as trans=1 and step 2 as trans=2;
+     * the replayed step-2 reply carries trans=2. Seed htlc->trans past
+     * it so the first post-login send the test makes gets a unique
+     * nonzero trans (mirrors orch_open_login's +1 seed for plaintext). */
+    if (htlc) {
+        htlc->trans = 3;
     }
     return fd;
 }
@@ -661,6 +739,17 @@ integration_release_htlc (struct htlc_conn *htlc)
     g_free (htlc->out.buf);
     htlc->in.buf = NULL;
     htlc->out.buf = NULL;
+    /* htlc->hope_aead is an owned HxnetHopeAead* (a copy of the control
+     * channel's HOPE material, independent of the connection's lifetime —
+     * see hxnet_connection_hope_aead_material). It is seeded either by the
+     * orchestrated login or by a test that builds its own handle on the
+     * legacy transport and stashes it here (test_real_htxf_connect via
+     * hxnet_hope_aead_from_material). Free it here — the single owner — so
+     * it doesn't leak across the test run. NULL-safe. A test that needs to
+     * free the handle *early* (before release) must NULL the field after
+     * doing so, or this would double-free. */
+    hxnet_hope_aead_free ((HxnetHopeAead *) htlc->hope_aead);
+    htlc->hope_aead = NULL;
 }
 
 /* Pack + synchronously send one LOGIN packet built by the shared
@@ -1572,167 +1661,188 @@ integration_open_login_hope_or_skip (
     memset (htlc, 0, sizeof (*htlc));
     memset (hope, 0, sizeof (*hope));
 
-    /* Step 0: TCP + magic handshake. */
-    int fd = hx_test_server_connect (srv);
-    if (fd < 0) {
-        gchar *msg = g_strdup_printf (
-            "integration server %s not reachable at %s:%d — start the "
-            "container first (see tests/%s/README.md).",
-            srv->name, srv->host, (int) srv->port, srv->name);
-        g_test_fail_printf (msg);
-        g_free (msg);
-        return -1;
-    }
-    if (!integration_handshake (fd)) {
-        integration_close (fd);
-        g_test_fail_printf ("magic handshake failed against %s", srv->name);
-        return -1;
-    }
-
-    /* Stamp htlc with the connected endpoint so hope_validate_sessionkey_ip
-     * has something to compare against (Janus tolerates the warning;
-     * production logs it). */
-    g_strlcpy (htlc->ip_addr, srv->host, sizeof (htlc->ip_addr));
-    htlc->serverport = (guint16) srv->port;
-    g_strlcpy (htlc->login, username ? username : "guest",
-               sizeof (htlc->login));
-    /* Seed our preferred macalg so hope_parse_step1_reply can detect
-     * secure_login when the server echoes it. */
-    g_strlcpy (htlc->macalg, "HMAC-SHA256", sizeof (htlc->macalg));
-    if (cipheralg) {
-        g_strlcpy (htlc->cipheralg, cipheralg, sizeof (htlc->cipheralg));
-    }
-    if (compressalg) {
-        g_strlcpy (htlc->compressalg, compressalg,
-                   sizeof (htlc->compressalg));
-    }
-    htlc->trans = 1;
-
-    /* Step 1: send LOGIN with empty creds + algorithm advertisement. */
-    {
-        char app_string[64];
-        g_snprintf (app_string, sizeof app_string,
-                    "gtkhx-tier3-harness/%s", VERSION);
-        const hx_login_request req = {
-            .mode = HX_LOGIN_MODE_HOPE_STEP1,
-            .hope_app_id = "GTKx",
-            .hope_app_string = app_string,
-            .cipheralg = cipheralg,
-            .compressalg = compressalg,
-        };
-        struct hx_chunk step1_chunks[HX_LOGIN_MAX_CHUNKS];
-        guint8 step1_scratch[HX_LOGIN_SCRATCH_SIZE];
-        int hc = hx_login_build_chunks (&req, step1_chunks,
-                                        HX_LOGIN_MAX_CHUNKS,
-                                        step1_scratch,
-                                        sizeof (step1_scratch));
-        if (hc <= 0) {
-            integration_close (fd);
-            g_test_fail_printf ("HOPE Step 1 chunk build failed");
+    int fd;
+    if (integration_harness_orchestrated ()) {
+        /* Drive the whole HOPE handshake through the production
+         * orchestrator (run_hope_lifecycle in Rust): magic + step1 +
+         * step2 + cipher transition, with the step-2 reply replayed as
+         * the first polled frame for the shared drain below. The hope
+         * session stays zeroed — the actor owns crypto, so the
+         * integration_*_message_hope wrappers pass the synthetic fd
+         * through to the actor (they engage their own AEAD / stream
+         * framing only when hope->aead_active / stream_active, which
+         * the orchestrated path never sets). */
+        fd = orch_open_login_hope (htlc, srv->host, srv->port, username,
+                                   password, display_name, icon,
+                                   HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
+                                       | HTLC_CAP_CHAT_HISTORY,
+                                   cipheralg);
+        if (fd < 0) {
             return -1;
         }
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, step1_chunks, hc);
-        if (!integration_send (fd, htlc->out.buf, htlc->out.len)) {
+    } else {
+        /* Step 0: TCP + magic handshake. */
+        fd = hx_test_server_connect (srv);
+        if (fd < 0) {
+            gchar *msg = g_strdup_printf (
+                "integration server %s not reachable at %s:%d — start the "
+                "container first (see tests/%s/README.md).",
+                srv->name, srv->host, (int) srv->port, srv->name);
+            g_test_fail_printf (msg);
+            g_free (msg);
+            return -1;
+        }
+        if (!integration_handshake (fd)) {
+            integration_close (fd);
+            g_test_fail_printf ("magic handshake failed against %s", srv->name);
+            return -1;
+        }
+
+        /* Stamp htlc with the connected endpoint so hope_validate_sessionkey_ip
+         * has something to compare against (Janus tolerates the warning;
+         * production logs it). */
+        g_strlcpy (htlc->ip_addr, srv->host, sizeof (htlc->ip_addr));
+        htlc->serverport = (guint16) srv->port;
+        g_strlcpy (htlc->login, username ? username : "guest",
+                   sizeof (htlc->login));
+        /* Seed our preferred macalg so hope_parse_step1_reply can detect
+         * secure_login when the server echoes it. */
+        g_strlcpy (htlc->macalg, "HMAC-SHA256", sizeof (htlc->macalg));
+        if (cipheralg) {
+            g_strlcpy (htlc->cipheralg, cipheralg, sizeof (htlc->cipheralg));
+        }
+        if (compressalg) {
+            g_strlcpy (htlc->compressalg, compressalg,
+                       sizeof (htlc->compressalg));
+        }
+        htlc->trans = 1;
+
+        /* Step 1: send LOGIN with empty creds + algorithm advertisement. */
+        {
+            char app_string[64];
+            g_snprintf (app_string, sizeof app_string,
+                        "gtkhx-tier3-harness/%s", VERSION);
+            const hx_login_request req = {
+                .mode = HX_LOGIN_MODE_HOPE_STEP1,
+                .hope_app_id = "GTKx",
+                .hope_app_string = app_string,
+                .cipheralg = cipheralg,
+                .compressalg = compressalg,
+            };
+            struct hx_chunk step1_chunks[HX_LOGIN_MAX_CHUNKS];
+            guint8 step1_scratch[HX_LOGIN_SCRATCH_SIZE];
+            int hc = hx_login_build_chunks (&req, step1_chunks,
+                                            HX_LOGIN_MAX_CHUNKS,
+                                            step1_scratch,
+                                            sizeof (step1_scratch));
+            if (hc <= 0) {
+                integration_close (fd);
+                g_test_fail_printf ("HOPE Step 1 chunk build failed");
+                return -1;
+            }
             g_free (htlc->out.buf);
             htlc->out.buf = NULL;
+            htlc->out.pos = 0;
+            htlc->out.len = 0;
+            hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, step1_chunks, hc);
+            if (!integration_send (fd, htlc->out.buf, htlc->out.len)) {
+                g_free (htlc->out.buf);
+                htlc->out.buf = NULL;
+                integration_close (fd);
+                g_test_fail_printf ("HOPE Step 1 send failed");
+                return -1;
+            }
+            g_free (htlc->out.buf);
+            htlc->out.buf = NULL;
+            htlc->out.pos = 0;
+            htlc->out.len = 0;
+        }
+
+        /* Step 1 reply: a TASK with sessionkey + algorithm chunks. */
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/5000)) {
+            integration_release_htlc (htlc);
             integration_close (fd);
-            g_test_fail_printf ("HOPE Step 1 send failed");
+            g_test_fail_printf ("HOPE Step 1 reply timeout");
             return -1;
         }
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-    }
-
-    /* Step 1 reply: a TASK with sessionkey + algorithm chunks. */
-    if (!integration_recv_message (fd, htlc, /*timeout_ms=*/5000)) {
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        g_test_fail_printf ("HOPE Step 1 reply timeout");
-        return -1;
-    }
-    if (hdr_type (htlc) != HTLS_HDR_TASK) {
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        g_test_fail_printf ("HOPE Step 1 reply wasn't a TASK (got 0x%x)",
-                            hdr_type (htlc));
-        return -1;
-    }
-    if (hdr_flag (htlc) & 1) {
-        char err[256];
-        gsize err_len = 0;
-        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
-            g_test_fail_printf ("HOPE Step 1 task-error: \"%s\"", err);
-        } else {
-            g_test_fail_printf ("HOPE Step 1 task-error (no chunk)");
+        if (hdr_type (htlc) != HTLS_HDR_TASK) {
+            integration_release_htlc (htlc);
+            integration_close (fd);
+            g_test_fail_printf ("HOPE Step 1 reply wasn't a TASK (got 0x%x)",
+                                hdr_type (htlc));
+            return -1;
         }
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        return -1;
-    }
+        if (hdr_flag (htlc) & 1) {
+            char err[256];
+            gsize err_len = 0;
+            if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+                g_test_fail_printf ("HOPE Step 1 task-error: \"%s\"", err);
+            } else {
+                g_test_fail_printf ("HOPE Step 1 task-error (no chunk)");
+            }
+            integration_release_htlc (htlc);
+            integration_close (fd);
+            return -1;
+        }
 
-    struct hope_step1_reply sel;
-    enum hope_step1_err herr = hope_parse_step1_reply (htlc, htlc->macalg,
-                                                       &sel);
-    if (herr != HOPE_OK) {
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        g_test_fail_printf ("hope_parse_step1_reply: err=%d", (int) herr);
-        return -1;
-    }
-    /* Server's macalg pick overwrites our preference. */
-    g_strlcpy (htlc->macalg, sel.macalg, sizeof (htlc->macalg));
+        struct hope_step1_reply sel;
+        enum hope_step1_err herr = hope_parse_step1_reply (htlc, htlc->macalg,
+                                                           &sel);
+        if (herr != HOPE_OK) {
+            integration_release_htlc (htlc);
+            integration_close (fd);
+            g_test_fail_printf ("hope_parse_step1_reply: err=%d", (int) herr);
+            return -1;
+        }
+        /* Server's macalg pick overwrites our preference. */
+        g_strlcpy (htlc->macalg, sel.macalg, sizeof (htlc->macalg));
 
-    /* Step 2: authenticated LOGIN. */
-    if (!send_hope_step2 (fd, htlc, username ? username : "guest", password,
-                          display_name, icon,
-                          HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                              | HTLC_CAP_CHAT_HISTORY,
-                          sel.secure_login, sel.s_cipheralg,
-                          sel.s_compressalg)) {
-        integration_release_htlc (htlc);
-        integration_close (fd);
-        g_test_fail_printf ("HOPE Step 2 send failed");
-        return -1;
-    }
+        /* Step 2: authenticated LOGIN. */
+        if (!send_hope_step2 (fd, htlc, username ? username : "guest", password,
+                              display_name, icon,
+                              HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
+                                  | HTLC_CAP_CHAT_HISTORY,
+                              sel.secure_login, sel.s_cipheralg,
+                              sel.s_compressalg)) {
+            integration_release_htlc (htlc);
+            integration_close (fd);
+            g_test_fail_printf ("HOPE Step 2 send failed");
+            return -1;
+        }
 
-    /* If we negotiated ChaCha20-Poly1305, derive AEAD session keys
-     * now — every byte after this point on the wire is framed AEAD. */
-    if (hope_cipher_is_aead (sel.s_cipheralg)
-        && hope_cipher_is_aead (sel.c_cipheralg)) {
-        cipher_aead_derive_session_keys (
-            &hope->encode_state, &hope->decode_state, htlc->sessionkey,
-            htlc->sklen, htlc->cipher_decode_key, htlc->cipher_decode_keylen,
-            htlc->cipher_encode_key, htlc->cipher_encode_keylen);
-        hope->aead_active = 1;
-    } else if (sel.s_cipheralg[0] && sel.c_cipheralg[0]
-               && hope_cipher_id_from_name (sel.s_cipheralg) != CIPHER_NONE
-               && hope_cipher_id_from_name (sel.c_cipheralg) != CIPHER_NONE) {
-        /* Stream-cipher (Blowfish OFB-64) post-Step-2 setup.
-         * Mirrors production's rcv.c HOPE Step 2 reply handler:
-         *   - cipher_{decode,encode}_type from the negotiated names
-         *   - cipher_mode = STREAM
-         *   - cipher_{encode,decode}_init reads cipher_{encode,decode
-         *     }_key (already populated by send_hope_step2) and
-         *     primes the per-direction Blowfish state.
-         *
-         * From this point on every byte on the wire (both directions)
-         * goes through cipher_encode / cipher_decode. The harness's
-         * integration_{send,recv}_message_hope wrappers call those
-         * functions on outgoing / incoming bytes, including the per-
-         * message random rekey-stamp on send and rekey-marker
-         * detection + cipher_change_decode_key on recv. */
-        htlc->cipher_decode_type = hope_cipher_id_from_name (sel.s_cipheralg);
-        htlc->cipher_encode_type = hope_cipher_id_from_name (sel.c_cipheralg);
-        htlc->cipher_mode = CIPHER_MODE_STREAM;
-        cipher_encode_init (htlc);
-        cipher_decode_init (htlc);
-        hope->stream_active = 1;
+        /* If we negotiated ChaCha20-Poly1305, derive AEAD session keys
+         * now — every byte after this point on the wire is framed AEAD. */
+        if (hope_cipher_is_aead (sel.s_cipheralg)
+            && hope_cipher_is_aead (sel.c_cipheralg)) {
+            cipher_aead_derive_session_keys (
+                &hope->encode_state, &hope->decode_state, htlc->sessionkey,
+                htlc->sklen, htlc->cipher_decode_key, htlc->cipher_decode_keylen,
+                htlc->cipher_encode_key, htlc->cipher_encode_keylen);
+            hope->aead_active = 1;
+        } else if (sel.s_cipheralg[0] && sel.c_cipheralg[0]
+                   && hope_cipher_id_from_name (sel.s_cipheralg) != CIPHER_NONE
+                   && hope_cipher_id_from_name (sel.c_cipheralg) != CIPHER_NONE) {
+            /* Stream-cipher (Blowfish OFB-64) post-Step-2 setup.
+             * Mirrors production's rcv.c HOPE Step 2 reply handler:
+             *   - cipher_{decode,encode}_type from the negotiated names
+             *   - cipher_mode = STREAM
+             *   - cipher_{encode,decode}_init reads cipher_{encode,decode
+             *     }_key (already populated by send_hope_step2) and
+             *     primes the per-direction Blowfish state.
+             *
+             * From this point on every byte on the wire (both directions)
+             * goes through cipher_encode / cipher_decode. The harness's
+             * integration_{send,recv}_message_hope wrappers call those
+             * functions on outgoing / incoming bytes, including the per-
+             * message random rekey-stamp on send and rekey-marker
+             * detection + cipher_change_decode_key on recv. */
+            htlc->cipher_decode_type = hope_cipher_id_from_name (sel.s_cipheralg);
+            htlc->cipher_encode_type = hope_cipher_id_from_name (sel.c_cipheralg);
+            htlc->cipher_mode = CIPHER_MODE_STREAM;
+            cipher_encode_init (htlc);
+            cipher_decode_init (htlc);
+            hope->stream_active = 1;
+        }
     }
 
     /* Drain post-login messages until SELFINFO arrives (matches the
@@ -1811,6 +1921,19 @@ integration_open_login_hope_or_skip (
             if (htlc->name[0] == 0 && display_name && *display_name) {
                 g_strlcpy ((char *) htlc->name, display_name,
                            sizeof (htlc->name));
+            }
+            /* Orchestrated path: the HOPE handshake is now complete, so
+             * the actor's retained AEAD material is populated. Seed
+             * htlc->hope_aead so an HTXF subchannel (banner / file) can
+             * derive its per-transfer keys in-process, mirroring
+             * production's rcv_task_login. NULL for non-AEAD. (The legacy
+             * path leaves htlc->hope_aead NULL; tests that need it build
+             * one from the harness session via hxnet_hope_aead_from_material.) */
+            if (integration_harness_orchestrated ()) {
+                hxnet_connection *oh = orch_lookup (fd);
+                if (oh) {
+                    htlc->hope_aead = hxnet_connection_hope_aead_material (oh);
+                }
             }
             return fd;
         }

@@ -190,6 +190,16 @@ extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
 extern gboolean hx_bridge_is_installed (void);
 
 /*
+ * Opaque HOPE AEAD material handle for the installed orchestrated
+ * connection, or NULL (no connection, or no ChaCha20-Poly1305
+ * negotiated). Caller owns it and frees with hxnet_hope_aead_free.
+ * HxnetHopeAead is declared in htxf_io.h. See the definition in
+ * hxnet_bridge.c for the lifecycle contract (call after login).
+ */
+struct HxnetHopeAead;
+extern struct HxnetHopeAead *hx_bridge_orchestrated_hope_aead (void);
+
+/*
  * Sentinel returned by [`hx_bridge_send_frame`] when no hxnet
  * connection is currently installed. Sits outside the
  * HXNET_SEND_* range (0, -1, -2, -3) so callers can

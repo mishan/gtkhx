@@ -40,6 +40,7 @@ pub const AEAD_DIR_CLIENT_TO_SERVER: u8 = 0x01;
 
 /// AEAD state for one direction of a connection.
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct AeadState {
     pub key: [u8; 32],
     pub counter: u64,

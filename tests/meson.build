@@ -2140,27 +2140,6 @@ test('hope_blowfish', test_integration_hope_blowfish,
      suite   : 'integration',
      timeout : 60)
 
-# hope_blowfish_hxnet — R3.3.e-4g reproducer for the HopeBlowfishStream-
-# against-Janus marker-strip failure. Drives HOPE-Blowfish login via
-# the existing harness (same code path test_hope_blowfish.c uses), then
-# hand-rolls an hxnet_transform_config from the live cipher state and
-# spawns an hxnet connection via the FFI. A short PING burst gives
-# Janus reasons to keep replying; the test asserts that every server
-# frame's type opcode arrived with its high byte cleared (i.e. the
-# HopeBlowfishStream stripped the rekey marker, if any fired). With
-# ~30 frames and 3/16 marker probability the odds of NOT exercising
-# at least one strip are vanishingly small.
-test_integration_hope_blowfish_hxnet = executable(
-  'test_integration_hope_blowfish_hxnet',
-  'integration/test_hope_blowfish_hxnet.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxbridge_dep],
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-)
-test('hope_blowfish_hxnet', test_integration_hope_blowfish_hxnet,
-     suite   : 'integration',
-     timeout : 60)
-
 # hope_chacha20_chat_history — Tier 3 for the fogWraith chat-history
 # extension under HOPE+ChaCha20-Poly1305 AEAD framing. Janus is the
 # only matrix entry advertising both bits; the test skips cleanly

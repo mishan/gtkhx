@@ -96,10 +96,16 @@ test_hope_blowfish_login_and_ping (void)
         return;
     }
 
-    /* If we got here, the HOPE state machine completed and the
-     * harness has switched to CIPHER_MODE_STREAM. Verify. */
-    g_assert_true (hope.stream_active);
-    g_assert_false (hope.aead_active);
+    /* If we got here, the HOPE state machine completed. Under the legacy
+     * harness transport the harness owns the cipher and switches to
+     * CIPHER_MODE_STREAM; under orchestration the production actor (Rust)
+     * owns the cipher and the harness hope session stays zeroed — there
+     * the ping round-trips below are the end-to-end proof the Rust
+     * Blowfish transport is wire-compatible with the server. */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_true (hope.stream_active);
+        g_assert_false (hope.aead_active);
+    }
 
     /* Send 32 PINGs. The legacy HOPE rekey marker stamps the header
      * type's high byte with probability 3/16 per outgoing message;
@@ -143,8 +149,13 @@ test_hope_blowfish_login_and_ping (void)
 
     /* The point of this whole test: verify the rotation actually
      * fired at least once on the recv path. See the loop comment
-     * above for the probability argument. */
-    g_assert_cmpuint (hope.decode_rekey_count, >, 0);
+     * above for the probability argument. decode_rekey_count is a
+     * harness-crypto counter; under orchestration the rekey machinery
+     * lives inside the Rust transport, so the count stays zero and the
+     * successful encrypted ping round-trips above are the proof. */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_cmpuint (hope.decode_rekey_count, >, 0);
+    }
 
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);

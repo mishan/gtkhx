@@ -111,9 +111,14 @@ test_hope_chacha20_login_and_ping (void)
     }
 
     /* If we got here, the HOPE state machine completed without
-     * task-error, AEAD was negotiated, and the harness has switched
-     * to framed I/O. Verify the negotiation result. */
-    g_assert_true (hope.aead_active);
+     * task-error. Under the legacy harness transport AEAD was
+     * negotiated and the harness switched to framed I/O; under
+     * orchestration the production actor (Rust) owns the AEAD and the
+     * harness hope session stays zeroed — there the encrypted
+     * round-trips below are the end-to-end proof. */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_true (hope.aead_active);
+    }
 
     /* Now exercise the AEAD wire end-to-end: send a PING through
      * the encryptor, drain to the TASK reply through the decryptor.

@@ -185,6 +185,21 @@ hxnet_frame_free (struct hxnet_frame_t *f)
     g_assert_not_reached ();
 }
 
+/* Phase G HTXF-AEAD: hx_bridge_orchestrated_hope_aead() calls the Rust
+ * material getter to seed htlc->hope_aead. Tier 1 never installs a
+ * connection, so a g_assert_not_reached stub satisfies the link without
+ * dragging in the staticlib. */
+struct HxnetHopeAead;
+struct HxnetHopeAead *hxnet_connection_hope_aead_material (
+    struct hxnet_connection_opaque *conn);
+struct HxnetHopeAead *
+hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn)
+{
+    (void) conn;
+    g_assert_not_reached ();
+    return NULL;
+}
+
 /* R3.3.e-4d's hx_bridge_install_with_hope_state pulls in the
  * Blowfish OFB state-snapshot helper from hxcrypto-stream. The
  * Tier 1 test never invokes the install path, so a

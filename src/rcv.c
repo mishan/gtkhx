@@ -53,6 +53,7 @@
 #include "users.h"
 #include "usermod.h"
 #include "hxnet_bridge.h"
+#include "htxf_io.h"             /* hxnet_hope_aead_free (HOPE AEAD handle) */
 #include "rcv.h"
 #include "news15.h"
 #include "hfs.h"
@@ -1761,6 +1762,17 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
         setbtns (sess, 1);
         set_status_bar (2);
         connected = 1;
+
+        /* Seed the opaque HOPE AEAD material handle (if the orchestrated
+         * control channel negotiated ChaCha20-Poly1305). The handshake
+         * is complete by now, so the retained material is populated;
+         * HTXF subchannels (banner.c / xfers.c) read htlc->hope_aead to
+         * derive their per-transfer keys in-process. NULL for plaintext
+         * / Blowfish / no-cipher. Freed on connection teardown. */
+        if (htlc->hope_aead) {
+            hxnet_hope_aead_free (htlc->hope_aead);
+        }
+        htlc->hope_aead = hx_bridge_orchestrated_hope_aead ();
 
         /* Reset post-login fetch state before scheduling so
 		 * a reconnection during this process state starts clean.
