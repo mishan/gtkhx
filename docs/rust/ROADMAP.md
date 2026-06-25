@@ -614,10 +614,11 @@ where the concurrency motivation pays off.
    HTXF fetch (now a tokio blocking-pool job via
    `gtkhx_bridge_spawn_blocking_with_idle`), and `tracker.c` (rewritten as a
    main-loop `GSocketClient` async state machine — no thread). `preview.c`
-   keeps `gtkhx_post_to_main` until **R5** by design. That leaves **`xfers.c`
-   as the sole remaining `pthread_create` and `gtkhx_post_to_main`
-   consumer** — once its transfer worker becomes a tokio task (item 4),
-   `gtkthreads.c` has no callers and deletes with it.
+   marshals worker→main via `g_idle_add` directly, so it was never a
+   `gtkhx_post_to_main` consumer. That leaves **`xfers.c` as the sole
+   remaining `pthread_create` and `gtkhx_post_to_main` consumer** — once
+   its transfer worker becomes a tokio task (item 4), `gtkthreads.c` has no
+   callers and deletes with it.
 4. ⏳ **`xfers.c` → tokio tasks.** *Half-done.* The HTXF byte transport
    itself already moved to Rust during the HTXF→hxnet re-wire: each transfer
    opens the subchannel via `hxnet_htxf_open` and streams through
@@ -628,7 +629,11 @@ where the concurrency motivation pays off.
    progress posts — convert the worker to a tokio task so progress flows over
    a per-transfer channel into the transfer window. This is the last
    `pthread_create` in the tree (folder transfers' `folder_get_thread` /
-   `folder_put_thread` ride the same worker).
+   `folder_put_thread` ride the same worker). Scoped in
+   `docs/rust/xfers-tokio-scoping.md`; the byte transport is already Rust,
+   so the conversion lifts the existing C workers onto tokio's blocking
+   pool (the `banner.c` pattern) — the real work is making cancellation
+   cooperative (no `pthread_cancel` on the blocking pool).
 5. ⏳ **`banner.c` URL-mode → reqwest.** This is the remaining banner work:
    the URL-mode fetch is still C/`libsoup-3` (`#ifdef HAVE_LIBSOUP`). In Rust
    we switch to `reqwest` (or `hyper` if reqwest's dep tree feels too heavy).
@@ -636,8 +641,9 @@ where the concurrency motivation pays off.
    subchannel (`hxnet_htxf_open` + a tokio blocking-pool worker), so only the
    HTTP/URL leg is left.
 6. ⏭ **`preview.c` async parses** (Poppler, GtkSourceView) — *deferred to
-   R5, not R3.* These are GTK-side concerns that marshal back through
-   `gtkhx_post_to_main`. Leave them in C for now; they're not on the
+   R5, not R3.* These are GTK-side concerns; the preview workers marshal
+   back via `g_idle_add` directly (not `gtkhx_post_to_main`). Leave them in
+   C for now; they're not on the
    connection's hot path. Phase R5 picks them up when the corresponding
    window moves.
 7. ⏳ **Audit every `g_idle_add` / `g_timeout_add` site in the codebase.**
@@ -771,8 +777,8 @@ outside vendored xtext, and `gtkthreads.c` is deleted. As of this writing
 that is **one conversion away**: `xfers.c`'s transfer worker is the only
 remaining `pthread_create` and the only remaining `gtkhx_post_to_main`
 consumer (the `network.c` / `banner.c` / `tracker.c` workers are already
-gone; `preview.c` keeps `gtkhx_post_to_main` until R5 by design, so it
-doesn't count against this criterion). Connection is already a tokio task
+gone; `preview.c` marshals via `g_idle_add` directly, so it was never a
+`gtkhx_post_to_main` consumer). Connection is already a tokio task
 (the orchestrator); transfers' byte path already is too — only the C
 worker wrapper remains. The remaining non-thread network items (banner
 URL-mode → reqwest, tracker fetch → hxnet) can land independently. The
