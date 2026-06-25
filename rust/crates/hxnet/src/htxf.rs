@@ -424,22 +424,37 @@ impl HtxfAbort {
         }
     }
 
-    /// Store the wake-socket. If `abort` already fired before we got
-    /// here (cancel raced the connect), shut the socket down immediately
-    /// so the worker's imminent first read/write doesn't park.
+    /// Take the sock lock, recovering from poisoning rather than
+    /// panicking. `arm` / `abort` are reached from `extern "C"` entry
+    /// points, so a panic unwinding across the FFI boundary would be UB;
+    /// the lock only ever guards a short field move + `shutdown`, so it
+    /// is never expected to be poisoned, but recover defensively.
+    fn lock_sock(&self) -> std::sync::MutexGuard<'_, Option<TcpStream>> {
+        self.sock.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Store the wake-socket. Checked under the lock against `aborted`
+    /// so it can't race `abort`: if `abort` already fired (cancel raced
+    /// the connect), shut this socket down and drop it — there's nothing
+    /// left to wake, and keeping the clone would just hold an fd open.
     fn arm(&self, sock: TcpStream) {
-        let mut guard = self.sock.lock().unwrap();
+        let mut guard = self.lock_sock();
         if self.aborted.load(Ordering::SeqCst) {
             let _ = sock.shutdown(Shutdown::Both);
+            return; // drop sock — nothing to wake
         }
         *guard = Some(sock);
     }
 
     /// Flip to aborted and shut the wake-socket down (if armed) to
-    /// unblock a parked read/write. Idempotent.
+    /// unblock a parked read/write. `take`s the socket so the clone is
+    /// dropped right after shutdown rather than lingering in the token.
+    /// Holds the lock across the flag store + take so it can't race
+    /// `arm`. Idempotent (a second call finds the socket already taken).
     fn abort(&self) {
+        let mut guard = self.lock_sock();
         self.aborted.store(true, Ordering::SeqCst);
-        if let Some(s) = self.sock.lock().unwrap().as_ref() {
+        if let Some(s) = guard.take() {
             let _ = s.shutdown(Shutdown::Both);
         }
     }
@@ -764,8 +779,11 @@ pub extern "C" fn hxnet_htxf_abort_new() -> *const HtxfAbort {
 /// Arm `token` with `handle`'s socket and clone a token ref into
 /// `handle` so its read/write can observe the aborted flag. Called once
 /// by the worker right after [`hxnet_htxf_open`] succeeds. No-op if
-/// either argument is NULL or the socket can't be duplicated. Does not
-/// consume the caller's `token` ref.
+/// either argument is NULL, or if `handle`'s socket can't be duplicated
+/// — in that case the handle is left unarmed (its read/write won't
+/// observe the flag), and cancellation falls back to the C-side
+/// `htxf->canceled` boundary check, which is checked on every transfer
+/// read/write regardless. Does not consume the caller's `token` ref.
 ///
 /// # Safety
 /// `handle` must be a live handle from [`hxnet_htxf_open`]; `token` must
@@ -775,13 +793,18 @@ pub unsafe extern "C" fn hxnet_htxf_abort_arm(handle: *mut HtxfConn, token: *con
     if handle.is_null() || token.is_null() {
         return;
     }
+    let h = &mut *handle;
+    // Only arm if we can duplicate the socket — otherwise there's no
+    // handle to wake a parked read/write, so leave `h.abort` None and
+    // let the C-side canceled check carry cancellation. Keeps the
+    // invariant "h.abort is Some ⇒ the token can wake this channel".
+    let Some(sock) = h.inner.try_clone_socket() else {
+        return;
+    };
     // Borrow the C-owned Arc without dropping its ref (ManuallyDrop so
     // the implicit drop at scope end doesn't decrement).
     let arc = ManuallyDrop::new(Arc::from_raw(token));
-    let h = &mut *handle;
-    if let Some(sock) = h.inner.try_clone_socket() {
-        arc.arm(sock);
-    }
+    arc.arm(sock);
     // Clone a ref for the HtxfConn (+1); dropped when the channel closes.
     h.abort = Some(Arc::clone(&arc));
 }

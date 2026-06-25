@@ -184,8 +184,10 @@ struct htxf_conn {
 	 * Distinct from `hx` precisely because main and worker touch it
 	 * concurrently — `hx` is worker-owned and racy to read from the
 	 * main thread, whereas the token is reference-counted and safe to
-	 * abort from either side. NULL on a transfer whose worker never
-	 * started (e.g. cancelled while queued). Freed in htxf_unref. */
+	 * abort from either side. Always non-NULL on an xfers.c transfer
+	 * (xfer_init allocates it before the worker can start); NULL only
+	 * on the banner.c transient-htxf path, which drives hxnet_htxf_*
+	 * directly without a token. Freed in htxf_unref. */
     void *abort;
 };
 
