@@ -39,11 +39,40 @@ use hx_image_decode::ffi::{
     HxInlineMediaDecoded,
 };
 
-/// Path on the host where glycin loaders live. Skip the
-/// integration tests if it's missing — typically a slim CI
-/// container without the gnome-platform pieces.
+/// Path on the host where glycin loaders live.
 fn glycin_loaders_available() -> bool {
     Path::new("/usr/libexec/glycin-loaders/2+/glycin-image-rs").exists()
+}
+
+/// Glycin-loader gate for the decode tests. Returns `true` when the
+/// loaders are present and the test should run.
+///
+/// When they're absent the behaviour depends on the environment:
+///
+///   - **Under CI** (`CI` env var, which GitHub Actions always sets) a
+///     missing loader is a HARD failure. A silent skip there would let a
+///     real decode regression sail through a green run — the exact
+///     footgun the project's no-silent-skips rule guards against. If this
+///     fires in CI, the fix is to install the loaders (the `glycin-loaders`
+///     package) in the job, not to skip.
+///   - **Locally** (a slim dev box with no gnome-platform pieces) it
+///     skips with a notice, so `cargo test` stays usable off-desktop.
+fn require_glycin() -> bool {
+    if glycin_loaders_available() {
+        return true;
+    }
+    if std::env::var_os("CI").is_some() {
+        panic!(
+            "glycin loaders missing at /usr/libexec/glycin-loaders/2+/ under CI: \
+             install the glycin-loaders package so this decode test runs — \
+             refusing to silently skip"
+        );
+    }
+    eprintln!(
+        "skipping glycin decode test: loaders missing at \
+         /usr/libexec/glycin-loaders/2+/ (set CI=1 to make this fatal)"
+    );
+    false
 }
 
 /// Resolve the project's tests/common fixture path. The
@@ -172,10 +201,7 @@ fn run_in_main_thread<F: FnOnce()>(f: F) {
 
 #[test]
 fn png_fixture_decodes() {
-    if !glycin_loaders_available() {
-        eprintln!(
-            "skipping: glycin loaders missing at /usr/libexec/glycin-loaders/2+/"
-        );
+    if !require_glycin() {
         return;
     }
     run_in_main_thread(|| {
@@ -190,8 +216,7 @@ fn png_fixture_decodes() {
 
 #[test]
 fn jpeg_fixture_decodes() {
-    if !glycin_loaders_available() {
-        eprintln!("skipping: glycin loaders missing");
+    if !require_glycin() {
         return;
     }
     run_in_main_thread(|| {
@@ -206,8 +231,7 @@ fn jpeg_fixture_decodes() {
 
 #[test]
 fn gif_fixture_decodes() {
-    if !glycin_loaders_available() {
-        eprintln!("skipping: glycin loaders missing");
+    if !require_glycin() {
         return;
     }
     // The shipped GIF fixture is a single-frame static — it

@@ -115,6 +115,7 @@ jobs:
             desktop-file-utils appstream \
             libpanel-devel \
             libseccomp-devel lcms2-devel \
+            glycin-loaders \
             git rust cargo
 
       - name: assert rustc meets MSRV
@@ -153,6 +154,21 @@ jobs:
         # Debian-stable native-build floor. Same flag is used in
         # rust/meson.build's cargo invocation; the project keeps
         # both code paths in sync.
+        #
+        # CI=true (GitHub sets it) turns hx-image-decode's
+        # glycin-loader gate from a silent skip into a hard failure
+        # (tests/decode.rs::require_glycin) — the loaders are installed
+        # above (glycin-loaders), so a skip here means something broke,
+        # and a silent skip masks decode regressions in a green run.
+        #
+        # GLYCIN_SANDBOX_SELECTOR=not-sandboxed: glycin runs each image
+        # loader in a bubblewrap sandbox by default, which the
+        # unprivileged CI container can't set up (no nested user
+        # namespaces). The fixtures are trusted in-tree test images, so
+        # disabling the sandbox lets the loaders actually decode instead
+        # of erroring on a failed bwrap spawn.
+        env:
+          GLYCIN_SANDBOX_SELECTOR: not-sandboxed
         run: |
           cd rust && cargo test --workspace --ignore-rust-version
 
