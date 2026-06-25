@@ -1,6 +1,6 @@
 # HTXF (file transfer) → Rust migration — scoping
 
-> Sibling to `docs/phase-g-migration.md`. Phase G moved the **control
+> Sibling to `docs/rust/phase-g-migration.md`. Phase G moved the **control
 > channel** onto the hxnet orchestrator. This doc scopes moving the
 > **HTXF data subchannel** (file transfers + banner fetch) off its
 > remaining C transport glue onto Rust.

@@ -296,7 +296,7 @@ async fn run_plaintext_over<S>(
 
     // Phase G (Option B): replay the LOGIN reply to the consumer as a
     // synthetic frame, BEFORE HandshakeDone — see the plaintext-path
-    // rationale in docs/phase-g-migration.md "Option B".
+    // rationale in docs/rust/phase-g-migration.md "Option B".
     match Frame::from_raw(&reply.raw_frame) {
         Some(frame) => {
             if evt_tx.send(Event::Frame(frame)).await.is_err() {

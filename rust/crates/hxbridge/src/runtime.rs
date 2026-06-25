@@ -1,6 +1,6 @@
 //! Tokio runtime hosted on a dedicated OS thread (Phase R3.1).
 //!
-//! Per `docs/RUST-ROADMAP.md` §R3 work items 1–2: every R3+ worker —
+//! Per `docs/rust/ROADMAP.md` §R3 work items 1–2: every R3+ worker —
 //! the upcoming `hxnet` Connection actor, the banner.c HTXF port
 //! (R3.2), the xfers.c transfer workers (R3.4) — needs a single
 //! shared tokio runtime to schedule against. The roadmap's

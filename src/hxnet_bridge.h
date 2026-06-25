@@ -121,7 +121,7 @@ extern void hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason);
  * hxnet_connection_open_plaintext), so the C side never has a real
  * fd. The
  * orchestrator replays the LOGIN reply back as a synthetic frame
- * (Option B in docs/phase-g-migration.md) so the C-side rcv
+ * (Option B in docs/rust/phase-g-migration.md) so the C-side rcv
  * dispatch (rcv_task_login) runs unchanged.
  *
  * The bridge's own event / shutdown / state callbacks are wired

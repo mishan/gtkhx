@@ -17,7 +17,7 @@
  * own magic + LOGIN + recv over a raw blocking socket — a second
  * client wire implementation that never exercises the production
  * connect code (that's why the capabilities regression slipped
- * through; see docs/phase-g-migration.md "Tier 3 coverage of the
+ * through; see docs/rust/phase-g-migration.md "Tier 3 coverage of the
  * production connect path"). hxnet_connection_open_plaintext_polling
  * runs the SAME production lifecycle the GUI uses
  * (run_plaintext_lifecycle: DNS + TCP + magic + LOGIN + LOGIN-reply +

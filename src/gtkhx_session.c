@@ -493,7 +493,7 @@ gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
     /* Phase R3.0 reference port: route the emit through the Rust
      * hxbridge crate. This is the canonical "drive a C-side signal
      * emit from Rust" example documented in
-     * docs/rust-glib-interop.md. The wrapping uses from_glib_none
+     * docs/rust/glib-interop.md. The wrapping uses from_glib_none
      * (one extra g_object_ref) so the session stays alive across
      * the synchronous emit even if a connected C handler runs
      * g_object_unref. Picked as the foothold because task-update

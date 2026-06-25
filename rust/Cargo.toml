@@ -32,12 +32,12 @@ members = [
 #   to the workspace. If a future voice or media feature needs a
 #   1.26-binding API (vs. a 1.26-runtime behavior), step the whole
 #   family up; nothing today does. See docs/voice-chat-plan.md §5.B
-#   and docs/rust-glib-interop.md "GStreamer runtime floor".
+#   and docs/rust/glib-interop.md "GStreamer runtime floor".
 #
 # Pinning at major.minor rather than exact patch lets `cargo update`
 # pick up bug-fix releases within the line without ABI surprises.
 #
-# Phase R3.1 (per RUST-ROADMAP.md §R3 work items 1–3) lands the tokio
+# Phase R3.1 (per docs/rust/ROADMAP.md §R3 work items 1–3) lands the tokio
 # runtime and the async-channel ferry through hxbridge. Both stay
 # feature-gated so the default hxbridge build (the staticlib linked
 # into the C binary today) doesn't pay the compile cost until a

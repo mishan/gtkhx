@@ -1,5 +1,5 @@
 //! Synchronous HTXF (file-transfer) subchannel transport — H2 of the
-//! HTXF→Rust migration (`docs/htxf-rust-migration-scoping.md`).
+//! HTXF→Rust migration (`docs/rust/htxf-migration-scoping.md`).
 //!
 //! A file transfer runs on its own short-lived TCP connection to the
 //! server, driven by a **blocking** C pthread worker (`xfers.c`,

@@ -14,7 +14,7 @@
 #   hotline-proto   — Phase R2 wire protocol parsers + builders.
 #   hxbridge        — Phase R3.0 Rust ↔ GLib bridge (C-owned GObject
 #                     wrapping + signal emit). Lifetime model documented
-#                     in docs/rust-glib-interop.md.
+#                     in docs/rust/glib-interop.md.
 #   hxvoice-runtime — Phase 8.B GStreamer-based voice runtime. Phase
 #                     8.B exposes only gtkhx_voice_init (gst::init
 #                     wrapper); per-session runtime handle + state

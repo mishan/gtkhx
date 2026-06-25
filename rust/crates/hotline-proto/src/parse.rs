@@ -1,7 +1,7 @@
 //! Typed parsers for individual server messages.
 //!
 //! Phase R2 grows this module one opcode at a time (see the extraction
-//! order in `docs/RUST-ROADMAP.md`). Each parser takes a fully-assembled
+//! order in `docs/rust/ROADMAP.md`). Each parser takes a fully-assembled
 //! message buffer (header + body, the C side's `htlc->in.buf[..in.pos]`)
 //! and returns a strongly-typed event; the C dispatcher keeps the dispatch
 //! table and the `GtkhxSession` signal emit.

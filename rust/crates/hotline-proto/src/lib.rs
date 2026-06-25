@@ -1,6 +1,6 @@
 //! Typed Rust representation of the Hotline wire protocol.
 //!
-//! This crate is the Phase R2 extraction target from `docs/RUST-ROADMAP.md`:
+//! This crate is the Phase R2 extraction target from `docs/rust/ROADMAP.md`:
 //! a typed, well-tested representation of every Hotline 1.0/1.2/1.5/1.9
 //! message, plus a parser and serializer. It replaces the hand-written
 //! `HN16`/`HN32` byte-swap macros and the `dh_start`/`dh_getint` chunk-walk

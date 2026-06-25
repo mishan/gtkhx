@@ -1252,9 +1252,10 @@ test('fake_connect', test_integration_fake_connect,
 
 # phase_g_connect — Tier 3 coverage for the Phase G
 # "hxnet-owns-the-whole-lifecycle" plaintext connect path
-# (docs/phase-g-migration.md). Same production source-pile as
-# real_connect_hxnet, but drives hx_connect with GTKHX_NEW_CONNECT=1
-# against a REAL mhxd container so the whole orchestrator runs end
+# (docs/rust/phase-g-migration.md). Drives the production hx_connect
+# (which now dispatches to the hxnet orchestrator unconditionally —
+# the connect-path gate was removed with delete-old-connect) against a
+# REAL mhxd container so the whole orchestrator runs end
 # to end (DNS + TCP + magic + LOGIN + LOGIN-reply + Option-B replay).
 # Asserts mhxd accepted the guest login and the reply was replayed to
 # the C dispatch with the pinned trans + success flag. No fake_server

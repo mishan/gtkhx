@@ -1,7 +1,7 @@
 # Rust ↔ GLib interop — the GtkHx convention
 
 > Companion to `docs/voice-chat-plan.md` §5 (Phase R3.0) and
-> `RUST-ROADMAP.md` §R3.
+> `ROADMAP.md` §R3 (this directory).
 >
 > **Status note (June 2026):** the Phase 8.x references throughout this
 > document were written when those phases were upcoming. All of 8.A

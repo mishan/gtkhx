@@ -1,40 +1,45 @@
-# Phase G — `hx_connect` Migration Plan
+# Phase G — Rust connect-lifecycle migration (`hxnet` orchestrator)
 
-> Sibling document to `docs/hxnet-connection-lifecycle-scoping.md`.
-> The scoping doc says **what** Phase G does; this doc says
-> **how** to do it without breaking the C side's wire-format
-> assumptions.
+> Part of the **Rust networking migration** (`docs/rust/ROADMAP.md`).
+> "Phase G" is the step where the Rust `hxnet` crate takes ownership
+> of the *entire* control-channel connect lifecycle — DNS, TCP,
+> the magic handshake, LOGIN, and the LOGIN reply — instead of the
+> legacy C `hx_connect` GSocketClient state machine.
+>
+> This doc began as a migration *plan*; the migration is now
+> **complete**, so it reads as the design record plus a running
+> status. The "Design rationale" and later sections preserve the
+> decisions (Option A vs B, the trans/install ordering, the staged
+> delete) for anyone touching the connect path later.
 
-## Status
+## Current status — complete
 
-- **Phase G part 1**: shipped on branch `claude/r3.3e-hxnet-open-ffi`.
-  New FFI symbol `hxnet_connection_open_plaintext` wires the
-  Phase G-prelude lifecycle orchestrator
-  (`crate::lifecycle::run_plaintext_lifecycle`) onto the
-  existing callback-mode handle plumbing
-  (`wire_callback_state_with_on_state`).
-- **Phase G part 2**: this doc.
-- **Phase G part 3**: shipped on branch `claude/r3.3e-phase-g`
-  (plaintext, gated behind `GTKHX_NEW_CONNECT`). Option B replay in
-  the orchestrator (`Frame::from_raw` + `LoginReply::raw_frame` +
-  the pre-`HandshakeDone` `Event::Frame`); the C-side
-  `hx_connect_via_orchestrator` + `hx_bridge_install_orchestrated_plaintext`
-  per the corrected sketch below (trans pinning, `fd=-1` sentinel,
-  synchronous bridge install, state-callback mapping). Capabilities
-  (the `HTLC_DATA_CAPABILITIES` chunk, tag 0x01F0, carrying the
-  bitmask value 0x001F) are advertised through the
-  `open_plaintext` FFI so extensions negotiate; `htlc->ip_addr` is
-  seeded from the server string. Validated end-to-end against live
-  mhxd + Janus via `tests/integration/test_phase_g_connect.c`
-  (`/phase_g/orchestrator_login` + `/phase_g/capabilities_negotiated`).
-- **Phase G part 4 — HOPE + TLS in the orchestrator**: shipped.
-  `run_hope_lifecycle` + `run_plaintext_tls_lifecycle` cover the
-  HOPE handshake (both ciphers) and TLS-from-byte-zero with a
-  WebPKI→TOFU verifier. See "What about TLS and HOPE?" below.
-- **Phase G default flip**: shipped (`PHASE_G_DEFAULT_ON = 1`).
-  The orchestrator is the default connect path; `GTKHX_OLD_CONNECT=1`
-  is the escape hatch back to legacy during the bake. Removal of the
-  legacy path is the `delete-old-connect` follow-up below.
+The orchestrator is the **only** control-channel connect path. There
+is no legacy path and no gate left to flip.
+
+| Step | State | Where |
+|------|-------|-------|
+| FFI foundation (`hxnet_connection_open_plaintext`) | shipped | `lifecycle::run_plaintext_lifecycle` + `wire_callback_state_with_on_state` |
+| Option B reply replay | shipped | `LoginReply::raw_frame` → pre-`HandshakeDone` `Event::Frame` |
+| C `hx_connect` on the orchestrator | shipped | `hx_bridge_install_orchestrated_plaintext` (trans pinning, `fd=-1` sentinel, synchronous install) |
+| Capabilities negotiation | shipped | `HTLC_DATA_CAPABILITIES` (tag 0x01F0) advertised via the open FFI |
+| HOPE + TLS in the orchestrator | shipped | `run_hope_lifecycle` + `run_plaintext_tls_lifecycle` (WebPKI→TOFU) |
+| HOPE **no-cipher** (secure login over plaintext) | shipped | `select_algorithms` treats cipher as optional → `CipherLayer::None`; `claude/hope-no-cipher` |
+| HTXF file-transfer subchannels on Rust | shipped | `hxnet::htxf` + `htxf_io.c` shim; `claude/htxf-h2-rewire` |
+| Default flip → orchestrator-only | shipped | gate + `PHASE_G_DEFAULT_ON` removed in `delete-old-connect` |
+| **delete-old-connect WAVE 1** (gate + legacy connect machinery) | shipped | `claude/delete-old-connect-exec` |
+| **delete-old-connect WAVE 2** (install-over-socket + rcv HOPE branch + legacy `hlwrite` send path) | shipped | `claude/delete-old-connect-wave2` |
+| **WAVE 3** — C crypto module removal (`hope.c`, `compress.c`, `cipher.c` audit) | **TODO** | see "C cipher / compress" below |
+| Compression on the new path | not wired | orchestrator advertises empty compress list; follow-up |
+| Post-login `rcv` coverage headless (increment 3) | blocked on R5 | see "Tier 3 coverage" below |
+
+Validated end-to-end against live mhxd + Janus via
+`tests/integration/test_phase_g_connect.c` (`/phase_g/*`).
+
+The remainder of this document is the **design record** behind those
+decisions — kept because the connect path's silent-failure modes
+(trans pinning, install ordering, the `fd=-1` sentinel) are subtle
+and worth preserving for future work.
 
 ## The integration challenge
 
@@ -347,7 +352,13 @@ installs in `gtkhx.c::hxd_fd_set` — these were
 already wrapped after R3.3.e-4. Audit needed for any
 straggler.)
 
-### Default-flip prep (shipped)
+### Default-flip prep (historical — the gate has since been deleted)
+
+> **Superseded by `delete-old-connect` (WAVE 1).** The gate, the
+> `PHASE_G_DEFAULT_ON` constant, both env vars, and the three
+> `/phase_g/gate_*` Tier 3 guards described below no longer exist —
+> the orchestrator is the only path. Kept for the record of how the
+> flip was staged.
 
 The gate polarity is now centralized in
 `src/network.c::hx_connect_use_orchestrator()`, driven by a single
@@ -405,86 +416,95 @@ in legacy. Net result: `CONNECTING` → `TCP_CONNECTED` → `HANDSHAKE_DONE`
 (+ login task appears) → reply → `LOGIN_READY` — the same Tasks-window
 sequence the legacy path produces.
 
-### `claude/r3.3e-phase-g-delete-old-connect`
+### delete-old-connect — shipped in two waves
 
-Once `PHASE_G_DEFAULT_ON=1` has been validated against:
+After the orchestrator was validated against mhxd (1.x + HOPE),
+hlserver.com (1.0/1.2 fallback) and Janus (1.9 + chat-history), the
+legacy path was removed. The escape hatch (`GTKHX_OLD_CONNECT`) and
+the `PHASE_G_DEFAULT_ON` constant went with it — the orchestrator is
+now unconditional. The deletion landed in two stacked branches.
 
-- mhxd (1.x server with HOPE support)
-- hlserver.com (1.0/1.2 fallback)
-- Janus (1.9 + chat-history extension)
+**WAVE 1 — `claude/delete-old-connect-exec`** (~-2100 LOC). Removed:
 
-…the env var stays as the opt-OUT escape hatch
-(`GTKHX_OLD_CONNECT=1` keeps the legacy path), and a
-follow-up branch deletes:
+- the gate itself: `hx_connect_use_orchestrator`, `env_flag_set`,
+  the `GTKHX_OLD_CONNECT` / `GTKHX_NEW_CONNECT` env vars,
+  `PHASE_G_DEFAULT_ON`;
+- the legacy async-connect + magic state machine:
+  `on_async_connected`, `on_magic_sent` / `on_magic_replied`,
+  `send_login`, `connect_ctx_free`, **`connect_fail`**,
+  `populate_htlc_remote_ip`, `magic_timeout_cb`;
+- the legacy GIOStream read path: `control_arm_read_source`,
+  `control_on_readable`, `htlc_stream_read`, `update_task`.
 
-- `struct gtkhx_connect_ctx` and its 11 fields
-- `connect_ctx_free`
-- `send_login`
-- `populate_htlc_remote_ip`
-- `magic_timeout_cb`
-- `on_async_connected`
-- `on_magic_sent` / `on_magic_replied` / etc.
-- the HOPE `if (pass)` branch of `rcv_task_login` (step-1
-  parse + key derivation + step-2 send) — dead once
-  `run_hope_lifecycle` owns the crypto. **The rest of
-  `rcv_task_login` stays.** Its `!pass` post-login body
-  (version / banner / servername / capabilities /
-  `USER_CHANGE` / SELFINFO-timer) is exactly what the
-  replayed Frame runs under Option B, and what Option A
-  would call directly. Deleting the whole function would
-  strand every post-login side effect — the synthetic Frame
-  has nothing else to dispatch to ("the existing post-login
-  dispatch in rcv.c" *is* `rcv_task_login`).
-- the GPollable read/write source plumbing
-  (`control_arm_read_source`, `control_write_drain`, etc.)
-- `on_socket_client_event` (the TLS accept-cert handler —
-  becomes the Rust `on_verify_cert` callback once TLS is
-  folded into the orchestrator)
+  *Correction to the earlier plan:* `connect_fail` was **not**
+  retained. The orchestrator path routes failure through its own
+  state-callback → `GtkhxSession` error signal, so the standalone
+  legacy failure sink had no remaining caller and was deleted with
+  the rest. `on_socket_client_event` / `tls_accept_certificate` *were*
+  kept — the tracker's TLS connect (`tracker_fetch_connect` via
+  `hx_sync_connect_to_host`) still uses them.
 
-**Retained, not deleted:** `connect_fail`. It's the shared
-failure/dialog routine, and the orchestrator path's state
-callback reuses it for the `HXNET_STATE_*` error states (step
-4 of the sketch). When the legacy connect flow goes away,
-`connect_fail` stays as the single failure sink — or gets
-inlined into the state callback, but it doesn't disappear.
+**WAVE 2 — `claude/delete-old-connect-wave2`** (~-450 LOC), two commits:
 
-Estimated delete: ~550 LOC (most of `rcv_task_login`'s bulk
-is its HOPE branch; the post-login body that survives is
-small).
+- *2a — install-over-socket path + rcv HOPE branch.* The old
+  "install hxnet over an already-connected legacy socket" mechanism
+  (`GTKHX_USE_HXNET` / `hx_install_hxnet_post_hope` / `hxnet_opt_in`
+  + the deferred-install idle machinery + the bridge installers
+  `hx_bridge_install_with_hope_state` / `_passthrough`) only existed
+  to bridge the now-deleted legacy connect into hxnet, so it went.
+  With it went the HOPE `if (pass)` branch of `rcv_task_login`
+  (step-1 parse + key derivation + step-2 send) — unreachable now
+  that the orchestrator registers the login task with `pass = NULL`
+  and `run_hope_lifecycle` owns the crypto. Also the dead
+  `gtkhx_connect_ctx` struct, `GtkhxConnectState` enum and
+  `MAGIC_TIMEOUT_SEC`. (`struct tls_endpoint` stays — tracker uses it.)
+- *2b — legacy `hlwrite` send path.* `hlwrite` / `hlwrite_chunks`
+  now always ship through `hx_bridge_send_frame` (the bridge is
+  always installed on a live session). The legacy else-branch and
+  the whole GPollable write machinery
+  (`control_arm_write_source`, `control_on_writable`,
+  `control_remove_*_source`, `htlc_stream_write`, the source-id
+  vars, `READ_BUFSIZE`, the unused `current_conn`) are gone.
 
-### C cipher / compress code — what the cleanup can take
+**The rest of `rcv_task_login` stays.** Its `!pass` post-login body
+(version / banner / servername / capabilities / `USER_CHANGE` /
+SELFINFO-timer) is exactly what the replayed Frame runs under
+Option B — deleting the whole function would strand every post-login
+side effect.
 
-Once the orchestrator owns the control channel, hxnet's Rust
-transform stack (`BlowfishStream` / `AeadStream` /
-`GzipStream` / `Lz4Stream` / `ZstdStream`) is the only thing
-that ciphers or compresses control-channel traffic. That makes
-the C-side control-channel crypto dead — but only *part* of it,
-in two waves:
+### WAVE 3 — C cipher / compress module removal (TODO)
 
-- **Removable with `delete-old-connect`:** the control-channel
-  HOPE handshake + decode (`hope.c`, the `rcv_task_login` HOPE
-  branch, the cipher/compress legs of `network_decode.c`) and
-  the legacy in-place cipher/compress encode path in
-  `hlwrite`. `compress.c` has no consumer outside the control
-  channel, so it can go in full once this lands.
-- **Blocked on a separate HTXF-crypto migration:** `cipher.c`
-  (Blowfish) and `cipher_aead.c` (ChaCha20-Poly1305) stay,
-  because the **file-transfer subchannels** still do their own
-  C-side crypto (`htxf_io.c`, `htxf_subchannel.c`, `banner.c`
-  use `cipher.h` + `cipher_aead.h` for `htxf->aead_io`). HTXF
-  is not on the orchestrator path. Removing the cipher modules
-  outright needs HTXF re-pointed at the Rust crates
-  (`hxcrypto-stream` / `hxcrypto-aead`) first — its own branch.
-(RC4 itself is already gone — removed in `claude/remove-rc4`.
-`bookmark_rc4_dialog.c` is just a GTK prompt that detects the
-retired RC4 *bookmark byte* and asks the user to pick a
-replacement cipher; it includes `bookmark_cipher.h`, not
-`cipher.c`, so it doesn't keep any crypto alive.)
+Both blockers that previously kept the C-side crypto modules alive
+are now cleared. hxnet's Rust transform stack
+(`BlowfishStream` / `AeadStream` / `GzipStream` / `Lz4Stream` /
+`ZstdStream`) ciphers and compresses **all** control-channel traffic,
+and the **HTXF file-transfer subchannels are now on Rust too**
+(`hxnet::htxf` + the `htxf_io.c` shim; `cipher_aead.c` was already
+removed when that landed). So the C crypto modules have lost, or are
+about to lose, their last consumers:
 
-So: control-channel crypto + all of `compress.c` come out with
-the legacy connect deletion; the cipher modules shrink to their
-HTXF consumers and only fully disappear after an HTXF-crypto
-migration.
+- **`compress.c`** — no consumer outside the (now-Rust) control
+  channel. Removable in full.
+- **`hope.c`** — the C-side HOPE handshake helpers
+  (`hope_parse_step1_reply` / `hope_build_login_field` /
+  `hope_store_chain_keys` / `hope_build_alg_reply`). Their last
+  caller was the `rcv_task_login` HOPE `if (pass)` branch, deleted
+  in WAVE 2a. Verify no stragglers, then remove.
+- **`cipher.c`** (Blowfish) — needs a consumer audit. HTXF moved to
+  Rust, so confirm nothing on the C side still pulls in `cipher.h`
+  before removing.
+
+(RC4 is already gone — `claude/remove-rc4`. `bookmark_rc4_dialog.c`
+is just a GTK prompt that detects the retired RC4 *bookmark byte* and
+asks the user to pick a replacement; it includes `bookmark_cipher.h`,
+not `cipher.c`, so it keeps no crypto alive.)
+
+This is the natural next branch (`claude/delete-old-connect-wave3` or
+similar). It is **gated on a careful dead-consumer audit** — remove
+the entry points, then let `-Wunused-function` and the linker surface
+the now-dead statics, deleting iteratively (the same compiler-guided
+method WAVE 1 and 2 used). Extern functions don't warn, so they must
+be removed explicitly.
 
 ## What about TLS and HOPE? (shipped)
 
@@ -537,7 +557,12 @@ than a real server.
 is A/B-testable during the bake; `delete-old-connect` removes it
 once the bake completes.
 
-## Why this isn't shipping tonight
+## Why this didn't ship in one night (historical)
+
+> All three risk axes below were worked through and the migration
+> shipped. Kept as the record of what made the C-side surgery
+> delicate — the same hazards apply to anyone touching the connect
+> path again.
 
 Three risk axes:
 

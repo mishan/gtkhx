@@ -153,7 +153,7 @@ where
 /// directly. Thin wrapper over `MainContext::default().spawn_local`
 /// that the crate's own consumers (e.g. [`forward_to_main`]) use;
 /// production callers should write the canonical form themselves
-/// per `docs/rust-glib-interop.md`'s "no `hxbridge::spawn_local`
+/// per `docs/rust/glib-interop.md`'s "no `hxbridge::spawn_local`
 /// wrapper" rule. This is `pub(crate)` for that reason.
 #[allow(dead_code)] // Reserved for follow-up R3.x crate-internal use.
 pub(crate) fn spawn_local<F>(fut: F) -> glib::JoinHandle<F::Output>
