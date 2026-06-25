@@ -64,7 +64,6 @@
 #include "proto_helpers.h"
 #include "server_matrix.h"
 #include "integration_harness.h"
-#include "integration_tls.h"
 
 /* Drain budget for chat broadcasts. Same value the fd-based
  * test_chat_roundtrip uses — sub-second cross-talk from concurrent
@@ -104,9 +103,9 @@ test_login_round_trip (void)
     }
 
     struct htlc_conn htlc;
-    GIOStream *io = integration_open_login_tls_or_skip (
+    int fd = integration_open_login_tls_or_skip (
         srv, &htlc, "TLS-Login Tier-3", 412);
-    if (!io) {
+    if (fd < 0) {
         /* integration_open_login_tls_or_skip already called
          * g_test_fail_printf with the specific failure mode. */
         return;
@@ -124,7 +123,7 @@ test_login_round_trip (void)
     g_assert_cmpuint (htlc.in.len, >=, SIZEOF_HL_HDR);
 
     integration_release_htlc (&htlc);
-    integration_close_stream (io);
+    integration_close (fd);
 }
 
 static void
@@ -139,9 +138,9 @@ test_chat_round_trip (void)
     }
 
     struct htlc_conn htlc;
-    GIOStream *io = integration_open_login_tls_or_skip (
+    int fd = integration_open_login_tls_or_skip (
         srv, &htlc, "TLS-Chat Tier-3", 412);
-    if (!io) {
+    if (fd < 0) {
         return;
     }
 
@@ -154,7 +153,7 @@ test_chat_round_trip (void)
                 "TLS-marker-%08x \xe2\x98\x83 \xe6\x97\xa5\xe6\x9c\xac",
                 g_random_int ());
 
-    g_assert_true (integration_send_chat_stream (io, &htlc, marker));
+    g_assert_true (integration_send_chat (fd, &htlc, marker));
 
     /* Drain for any chat broadcast carrying our marker. Don't
      * filter on uid — Janus's SELFINFO doesn't populate htlc->uid
@@ -165,8 +164,7 @@ test_chat_round_trip (void)
     struct hx_chat_msg cm;
     gboolean found = FALSE;
     for (int i = 0; i < TLS_CHAT_DRAIN_BUDGET; i++) {
-        if (!integration_recv_message_stream (io, &htlc,
-                                              /*timeout_ms=*/3000)) {
+        if (!integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
             break;
         }
         if (hdr_type (&htlc) != HTLS_HDR_CHAT) {
@@ -186,7 +184,7 @@ test_chat_round_trip (void)
     g_assert_cmphex (cm.cid, ==, 0);
 
     integration_release_htlc (&htlc);
-    integration_close_stream (io);
+    integration_close (fd);
 }
 
 int
