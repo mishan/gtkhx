@@ -533,6 +533,39 @@ proper tokio runtime. The Hotline connection (`network.c`), file transfers
 tasks. UI handlers stay on the GLib main context and consume events via
 channels.
 
+**Status (current).** The big rock — the `hxnet` connection lifecycle
+(work items 1 + 2) — is **done and then some**: the orchestrator owns
+connect + magic + LOGIN + the HOPE handshake + ciphers + compression,
+it's the *default and only* path (the `GTKHX_USE_HXNET` gate and the
+legacy `network.c` connect/decode path were removed by delete-old-connect),
+the HTXF subchannel byte transport + TLS moved to Rust, and the C crypto
+dispatchers are deleted. The sub-phase table below records the build-up to
+the env-var-gated install; everything after that (default-flip, legacy
+removal, HTXF→Rust, crypto deletion) shipped in the Phase G / WAVE work
+tracked in `docs/rust/phase-g-migration.md` and the dead-C-code cleanups.
+
+What actually remains in R3 is the worker-thread / non-control-channel
+tail:
+
+- **`xfers.c` transfer worker → tokio** (work item 4). The HTXF *byte
+  transport* (socket I/O + ChaCha20 AEAD + rustls TLS) already moved to
+  Rust via `htxf_io.c` / `hxnet_htxf_open`; what's left is the per-transfer
+  **pthread worker** in `xfers.c` — the *last* `pthread_create` in the
+  tree (xfers.c ~L1686) — plus its `gtkhx_post_to_main` progress posts.
+- **Banner HTTP (URL-mode) → `reqwest`** (work item 5). Still C/`libsoup`
+  (`banner.c`, `#ifdef HAVE_LIBSOUP`). The file-mode HTXF banner already
+  runs over Rust (`hxnet_htxf_open` + a tokio blocking-pool worker).
+- **Tracker network → `hxnet`** (the worker formerly in item 3). No longer
+  a pthread worker — `tracker.c` is already a main-loop `GSocketClient`
+  async state machine — but the network code is still C, not hxnet/tokio.
+- **Retire `gtkthreads.c`** (item 3) — falls out for free once the xfers.c
+  worker is a tokio task (it's the last `gtkhx_post_to_main` consumer).
+- **`g_idle_add` / `g_timeout_add` audit** (item 7) — partly a doc pass.
+
+`preview.c` (item 6) stays in C until **R5** by design. So the exit
+criterion ("no `pthread_create` outside vendored xtext") is one
+conversion away — xfers.c.
+
 > **Current state of `gtkthreads.c`:** the original Phase 4-era GTK 4 port
 > kept a recursive-mutex + custom `GMainContext` poll wrapper that simulated
 > the old GTK 2/3 `gdk_threads_enter` / `_leave` contract. That bridge was
@@ -552,7 +585,9 @@ where the concurrency motivation pays off.
 
 **Work items**
 
-1. **`hxnet` crate: `crates/hxnet/`.** Owns:
+1. ✅ **`hxnet` crate: `crates/hxnet/`.** *(Shipped — see the R3.3
+   sub-phase table below, then the Phase G default-flip + legacy removal.)*
+   Owns:
    - The TCP connection (`tokio::net::TcpStream`).
    - The HOPE state machine (re-use `hxcrypto-*` + `hotline-proto`).
    - A `Connection` actor: spawns a tokio task that reads from the socket,
@@ -561,7 +596,8 @@ where the concurrency motivation pays off.
      a paired `Receiver<HotlineCommand>`.
    - Ping keepalive (currently every 60s in `network.c`) as a
      `tokio::time::interval`.
-2. **Bridge to GLib main context.** A small wrapper crate
+2. ✅ **Bridge to GLib main context.** *(Shipped: `crates/hxbridge/` + the
+   `src/hxnet_bridge.{c,h}` translation layer.)* A small wrapper crate
    (`crates/hxbridge/`) spawns the tokio runtime on a dedicated thread and
    exposes a `start_connection()` function that returns paired
    `glib::Sender<HotlineEvent>` / `glib::Receiver<HotlineCommand>` channels
@@ -571,34 +607,51 @@ where the concurrency motivation pays off.
    sees the events arrive. See the
    [balena-io rust-async-interop example](https://github.com/balena-io-experimental/rust-async-interop)
    for the canonical shape.
-3. **Retire `gtkthreads.c` with its last worker.** The file is already down
-   to one function (`gtkhx_post_to_main` over `g_main_context_invoke`); its
-   callers are the legacy pthread workers in `network.c` (connection
-   thread), `xfers.c` (transfer dispatch), `banner.c` (HTTP fetch),
-   `preview.c` (Poppler / GtkSourceView async parse), and `tracker.c` (list
-   worker). Each of those workers becomes a tokio task in steps 1, 4, 5 of
-   this phase; their replacement runs on the tokio runtime and forwards
-   events through the bridge (step 2) instead of calling
-   `gtkhx_post_to_main` directly. Once the last `pthread_create` call goes
-   away, `gtkhx_post_to_main` has no consumers and `gtkthreads.c` deletes
-   with it.
-4. **`xfers.c` → tokio tasks.** Each file transfer (`htxf_conn` direction)
-   becomes a tokio task that streams bytes. Folder transfers (the `folder_get_thread`
-   / `folder_put_thread` already shipped per memory) port across as `async fn`s.
-   Progress updates flow over a per-transfer channel into the UI's transfer
-   window.
-5. **`banner.c` URL-mode → reqwest.** `libsoup-3` was the right choice for C
-   because `libsoup-3` is the GLib HTTP client; in Rust we switch to `reqwest`
-   (or `hyper` if reqwest's dep tree feels too heavy). The file-mode HTXF
-   path is just an instance of step 4.
-6. **`preview.c` async parses** (Poppler, GtkSourceView) — these are
-   GTK-side concerns that marshal back through `gtkhx_post_to_main`. Leave
-   them in C for now; they're not on the connection's hot path. Phase R5
-   picks them up when the corresponding window moves.
-7. **Audit every `g_idle_add` / `g_timeout_add` site in the codebase.** Each
-   one is a candidate for replacement with a tokio-side channel or an
+3. ⏳ **Retire `gtkthreads.c` with its last worker.** The file is down to one
+   function (`gtkhx_post_to_main` over `g_main_context_invoke`). Most of the
+   workers the original plan listed are already gone: the `network.c`
+   connection thread (replaced by the hxnet orchestrator), the `banner.c`
+   HTXF fetch (now a tokio blocking-pool job via
+   `gtkhx_bridge_spawn_blocking_with_idle`), and `tracker.c` (rewritten as a
+   main-loop `GSocketClient` async state machine — no thread). `preview.c`
+   keeps `gtkhx_post_to_main` until **R5** by design. That leaves **`xfers.c`
+   as the sole remaining `pthread_create` and `gtkhx_post_to_main`
+   consumer** — once its transfer worker becomes a tokio task (item 4),
+   `gtkthreads.c` has no callers and deletes with it.
+4. ⏳ **`xfers.c` → tokio tasks.** *Half-done.* The HTXF byte transport
+   itself already moved to Rust during the HTXF→hxnet re-wire: each transfer
+   opens the subchannel via `hxnet_htxf_open` and streams through
+   `htxf_io_read` / `htxf_io_write` (`htxf_io.c`), which handle the socket,
+   ChaCha20 AEAD framing, and rustls TLS in the `hxnet` crate. What remains
+   in C is the per-transfer **pthread worker** that drives that loop
+   (`xfers.c`, the `pthread_create` near L1686) plus its `gtkhx_post_to_main`
+   progress posts — convert the worker to a tokio task so progress flows over
+   a per-transfer channel into the transfer window. This is the last
+   `pthread_create` in the tree (folder transfers' `folder_get_thread` /
+   `folder_put_thread` ride the same worker).
+5. ⏳ **`banner.c` URL-mode → reqwest.** This is the remaining banner work:
+   the URL-mode fetch is still C/`libsoup-3` (`#ifdef HAVE_LIBSOUP`). In Rust
+   we switch to `reqwest` (or `hyper` if reqwest's dep tree feels too heavy).
+   The *file-mode* HTXF banner already moved off C — it fetches over the Rust
+   subchannel (`hxnet_htxf_open` + a tokio blocking-pool worker), so only the
+   HTTP/URL leg is left.
+6. ⏭ **`preview.c` async parses** (Poppler, GtkSourceView) — *deferred to
+   R5, not R3.* These are GTK-side concerns that marshal back through
+   `gtkhx_post_to_main`. Leave them in C for now; they're not on the
+   connection's hot path. Phase R5 picks them up when the corresponding
+   window moves.
+7. ⏳ **Audit every `g_idle_add` / `g_timeout_add` site in the codebase.**
+   Each one is a candidate for replacement with a tokio-side channel or an
    `Interval`. Some stay (the post-login SELFINFO fallback timer, for
    example, is fine as a GLib timeout). Document which.
+8. ⏳ **Tracker network → `hxnet`.** *(Was folded into item 3's pthread list;
+   broken out here because it's no longer a thread.)* `tracker.c`'s HTRK
+   fetch was already moved off pthreads into a main-loop `GSocketClient`
+   async state machine — but it's still C network code (DNS + TCP + the v1
+   / v3 tracker wire format) rather than hxnet/tokio. Moving it into the
+   `hxnet` crate (or a sibling) is the last bit of non-control-channel
+   network code still living in C. Not on the `pthread_create` exit path,
+   so it can land independently of items 3–4.
 
 ### Work-item 1 detail: R3.3 sub-phases
 
@@ -623,6 +676,7 @@ broke into a planned chain of sub-phases. Status as of writing:
 | R3.3.e-4f | ✅ shipped | Superseded by **Phase G + delete-old-connect** (see `docs/rust/phase-g-migration.md`). Rather than deleting *only* the non-TLS legacy loop, Phase G moved the whole connect lifecycle (incl. TLS-from-byte-zero and HOPE) into the `hxnet` orchestrator, then `delete-old-connect` WAVE 1 + WAVE 2 removed the entire legacy `GIOStream` + GPollable read/write machinery, the `control_*` helpers, the in-place `cipher`/`compress` encode call sites in `hlwrite`, and the `GTKHX_USE_HXNET` install-over-socket path from R3.3.e-4c–4e. The C crypto *modules* themselves (`hope.c` / `compress.c` / `cipher.c`) are the remaining **WAVE 3** cleanup. |
 | R3.3.e-4h | not started, on-demand | Retry/drain mechanism for `hx_bridge_send_frame` returning `HXNET_SEND_FULL`. Today's policy is "treat FULL as a fatal actor-wedge signal" — paired with `DEFAULT_COMMAND_CAPACITY = 256` it should never fire under realistic workloads. If profiling ever shows FULL hitting in practice (heavy bursts on a slow consumer), the right fix is an ordered drain idle: leave bytes in `htlc->out` on FULL, arm a `g_idle_add` retry, and queue subsequent `hlwrite` calls behind the drain so frame ordering is preserved. Until then, closing-on-FULL is correct because FULL with cap=256 means the tokio task is genuinely stuck. |
 | R3.3.e-5 | ✅ harness-coverage / live matrix follow-up | Tier 3 `test_real_connect_hxnet.c` exercises the env-var path through the fake server. Live mhxd / Janus / hlserver.com matrix runs are the follow-up. |
+| R3.3.f (Phase G + WAVE) | ✅ shipped | Beyond the env-var-gated install above: the orchestrator (`hxnet`) was made the connect **default**, then the *only* path — `GTKHX_USE_HXNET`, the legacy `network.c` async-connect/decode state machine, the `control_*` / `htlc_stream_*` helpers, and the C crypto/compress/magic dispatchers (`cipher.c`, `cipher_aead.c`, `compress.c`, `hope.c`, `network_decode.c`, `connect_magic.c`) were all deleted. The HTXF subchannel + its TLS moved to Rust (`htxf_io.c` → `hxnet_htxf_open`). Tracked in `docs/rust/phase-g-migration.md` and the dead-C-code cleanup commits. **This is the real "R3.3 done" line** — the table rows above are the historical build-up. |
 
 #### How R3.3.e-4d ended up resolving the open lifecycle questions
 
@@ -683,13 +737,17 @@ rejected because it would have blocked deleting the `control_*` /
   unchanged. Use them as the regression gate for this phase.
 
 **Exit criteria:** No `pthread_create` / `g_thread_new` calls remain
-outside vendored xtext. `gtkthreads.c` deletes when its last consumer
-goes away (the workers in `network.c` / `xfers.c` / `banner.c` /
-`tracker.c`; `preview.c` keeps `gtkhx_post_to_main` until R5 picks up the
-preview windows). Connection, transfers, banner fetch are all tokio
-tasks. The `MAX_CONN > 1` half-built abstraction can finally be
-abstracted properly because a connection is a struct in Rust, not a
-global.
+outside vendored xtext, and `gtkthreads.c` is deleted. As of this writing
+that is **one conversion away**: `xfers.c`'s transfer worker is the only
+remaining `pthread_create` and the only remaining `gtkhx_post_to_main`
+consumer (the `network.c` / `banner.c` / `tracker.c` workers are already
+gone; `preview.c` keeps `gtkhx_post_to_main` until R5 by design, so it
+doesn't count against this criterion). Connection is already a tokio task
+(the orchestrator); transfers' byte path already is too — only the C
+worker wrapper remains. The remaining non-thread network items (banner
+URL-mode → reqwest, tracker fetch → hxnet) can land independently. The
+`MAX_CONN > 1` half-built abstraction can finally be abstracted properly
+because a connection is a struct in Rust, not a global.
 
 ---
 
