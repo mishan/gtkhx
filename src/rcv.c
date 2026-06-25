@@ -34,7 +34,7 @@
 #include <time.h>
 #include "hx.h"
 #include "login_packet.h"
-#include "cipher_aead.h"
+#include "cipher.h"
 #include "gtkhx_session.h"
 #include "network.h"
 #include "xfers.h"

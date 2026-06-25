@@ -36,7 +36,6 @@
 #include "proto_helpers.h"
 #include "network.h"
 #include "cipher.h"
-#include "cipher_aead.h"
 #include "htxf_io.h"
 #include "htxf_subchannel.h"
 #include "banner.h"

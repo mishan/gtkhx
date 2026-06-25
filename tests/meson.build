@@ -1047,20 +1047,6 @@ test_msg_event = executable('test_msg_event',
 test('msg_event', test_msg_event,
      suite : 'proto')
 
-# ChaCha20-Poly1305 AEAD frame codec. Tier 2 KAT: seal/open round-
-# trip, counter advance, tamper rejection, peek behaviour. Pins the
-# wire-format invariants that the (currently-skipped) Tier 3
-# test_hope_chacha20 would exercise against a live server. See
-# tests/proto/test_aead.c's preamble for the gating context.
-test_aead = executable('test_aead',
-  'proto/test_aead.c',
-  '../src/cipher_aead.c',
-  '../src/debug.c', # cipher_aead's debug_log() trace hooks
-  dependencies        : proto_test_deps + [rust_hxcrypto_aead_dep],
-  include_directories : proto_test_inc,
-)
-test('aead', test_aead,
-     suite : 'proto')
 
 # NOTE: the former Tier-2 test_htxf_io target is gone. It exercised the
 # hand-rolled C AEAD byte pump in htxf_io.c (plaintext / AEAD round-trip,
@@ -1123,12 +1109,11 @@ integration_harness_lib = static_library(
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',
-  # cipher_aead.c brings the ChaCha20-Poly1305 frame codec, still
-  # referenced by the harness send/recv_message_hope AEAD branches and by
-  # the HTXF-AEAD path. The Tier 3 HOPE login runs through the production
-  # orchestrator (Rust owns the control-channel crypto); the stream
-  # cipher + its C dispatch (cipher.c) are gone.
-  '../src/cipher_aead.c',
+  # The Tier 3 HOPE login + HTXF transfers run through the production
+  # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
+  # (cipher.c stream, cipher_aead.c AEAD) are gone. htxf_io.c +
+  # htxf_subchannel.c remain as the thin C shim / preamble packer over
+  # the Rust HTXF channel.
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   '../src/qbuf.c',
@@ -1202,7 +1187,6 @@ test_integration_real_connect = executable(
   '../src/connect_magic.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
-  '../src/cipher_aead.c',
   '../src/compress.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
@@ -1267,7 +1251,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',
-  '../src/cipher_aead.c',
   '../src/compress.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',

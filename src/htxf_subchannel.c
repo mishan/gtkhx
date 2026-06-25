@@ -15,7 +15,6 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "cipher_aead.h"
 #include "htxf_io.h"
 #include "htxf_subchannel.h"
 
@@ -67,21 +66,3 @@ hx_htxf_subchannel_pack_preamble (guint8 *buf, size_t cap,
     return SIZEOF_HTXF_HDR + sizeof (be);
 }
 
-void
-hx_htxf_subchannel_arm_aead (struct htxf_conn *xfer,
-                             const guint8 *session_key, gsize session_key_len,
-                             const chacha_aead_state *ctrl_encode,
-                             const chacha_aead_state *ctrl_decode,
-                             guint32 ref)
-{
-    if (!xfer) {
-        return;
-    }
-    htxf_io_init (xfer);
-    cipher_aead_derive_transfer_keys (
-        &xfer->xfer_encode, &xfer->xfer_decode,
-        session_key, session_key_len,
-        ctrl_encode, ctrl_decode,
-        ref);
-    xfer->aead_active = TRUE;
-}
