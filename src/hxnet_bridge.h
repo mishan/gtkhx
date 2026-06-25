@@ -112,87 +112,14 @@ extern void hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason);
  */
 
 /*
- * Adopt `fd` as the underlying TCP socket and spawn an hxnet
- * Connection actor on it with a passthrough transform stack
- * (cipher=NONE, compression=NONE). The actor's `on_event`
- * callback routes through hx_bridge_dispatch_frame on the
- * supplied htlc; `on_shutdown` routes through
- * hx_bridge_dispatch_shutdown.
- *
- * Ownership: hxnet takes the fd. The C side must NOT
- * `close(fd)` after a successful return — that's
- * double-close UB.
- *
- * Returns TRUE on success. On failure, logs via `g_critical`,
- * leaves the bridge uninstalled, and closes the fd before
- * returning — either here (a pre-spawn reject, e.g. a prior
- * install still live) or via hxnet's spawn path once it has
- * adopted the fd. Either way the caller must never close it.
- *
- * Precondition: no prior install is live (call
- * hx_bridge_uninstall first if you're recycling).
- */
-extern gboolean hx_bridge_install_passthrough (struct htlc_conn *htlc,
-                                               int fd);
-
-/*
- * Adopt `fd` and spawn an hxnet Connection actor with a
- * transform stack reconstructed from `htlc`'s post-HOPE cipher
- * state. Phase R3.3.e-4d (HOPE-over-hxnet).
- *
- * Reads the negotiated cipher / compression choice from:
- *
- *   htlc->cipher_encode_type    — CIPHER_NONE / CIPHER_BLOWFISH /
- *                                 CIPHER_CHACHA20_POLY1305
- *   htlc->cipher_decode_type
- *   htlc->cipher_encode_state   — union cipher_state
- *   htlc->cipher_decode_state
- *   htlc->cipher_encode_key     — Blowfish only (the symmetric
- *                                 key used to construct
- *                                 BlowfishOfb64State)
- *   htlc->cipher_encode_keylen
- *   (decode counterparts likewise)
- *
- * For Blowfish: extracts the live OFB ivec via
- * `gtkhx_blowfish_ofb64_save_state` so the negotiated stream
- * position survives the handoff, and reuses the symmetric key
- * stored on htlc. For ChaCha20-Poly1305: copies the
- * chacha_aead_state's key / counter / dir directly — they map
- * 1:1 to hxcrypto-aead's `AeadState`.
- *
- * Compression is wired through the same way (HOPE-negotiated
- * GZIP / LZ4 / ZSTD become the matching adapter in the
- * transform stack).
- *
- * Ownership: same as `hx_bridge_install_passthrough` — hxnet
- * adopts `fd`; the C side must not close() it after success.
- *
- * Returns TRUE on success. On failure (cipher state not
- * extractable, hxnet spawn refused), logs via g_critical,
- * leaves the bridge uninstalled, hxnet closes the fd.
- *
- * Precondition: no prior install is live; `htlc->fd > 0`;
- * negotiated cipher state has been fully initialised by
- * cipher_*_init.
- *
- * R3.3.e-4d (this PR) ships the bridge-side helper only. The
- * matching production switch in rcv.c (move install from
- * send_login to post-HOPE; drop the cipher-active tear-down)
- * is the follow-up R3.3.e-4d-cont commit.
- */
-extern gboolean hx_bridge_install_with_hope_state (struct htlc_conn *htlc,
-                                                   int fd);
-
-/*
  * Phase G (hxnet-owns-the-whole-lifecycle): open a plaintext
  * Hotline connection with hxnet driving the entire pre-frame
  * lifecycle (DNS + TCP + magic + LOGIN + LOGIN-reply), then
  * install the resulting handle as the live bridge.
  *
- * Unlike hx_bridge_install_passthrough / _with_hope_state — which
- * adopt an already-connected fd the C side handshook itself — this
- * entry calls hxnet_connection_open_plaintext, so hxnet owns the
- * socket from byte zero and the C side never has a real fd. The
+ * hxnet owns the socket from byte zero (it calls
+ * hxnet_connection_open_plaintext), so the C side never has a real
+ * fd. The
  * orchestrator replays the LOGIN reply back as a synthetic frame
  * (Option B in docs/phase-g-migration.md) so the C-side rcv
  * dispatch (rcv_task_login) runs unchanged.
