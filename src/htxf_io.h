@@ -58,6 +58,14 @@ typedef struct HtxfConn HtxfConn;
  * hxnet_hope_aead_free. */
 typedef struct HxnetHopeAead HxnetHopeAead;
 
+/* Clone a HxnetHopeAead into a new, independently owned handle (NULL in
+ * → NULL out). The copy's lifetime is decoupled from the source, so a
+ * worker that may outlive the original handle (banner.c's HTXF fetch,
+ * which can race a disconnect that frees htlc->hope_aead) can own its
+ * own copy. Free with hxnet_hope_aead_free. Declared in
+ * rust/crates/hxnet/src/ffi.rs. */
+extern HxnetHopeAead *hxnet_hope_aead_clone (const HxnetHopeAead *h);
+
 /* Free a HxnetHopeAead handle (NULL-safe). Declared in
  * rust/crates/hxnet/src/ffi.rs. */
 extern void hxnet_hope_aead_free (HxnetHopeAead *h);

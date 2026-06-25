@@ -61,6 +61,7 @@
 #include "network.h"
 #include "banner.h"
 #include "debug.h"
+#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_open, hxnet_hope_aead_free */
 #include "cipher_aead.h"
 #include "cipher.h"
 #include "voice_runtime.h"

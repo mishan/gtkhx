@@ -120,10 +120,12 @@ struct htxf_fetch {
      * negotiation. */
     char tls;
     /* Opaque HOPE control-channel AEAD material handle (Rust
-     * HxnetHopeAead*), borrowed from htlc->hope_aead at spawn. NULL
-     * unless the control channel negotiated ChaCha20-Poly1305;
-     * hxnet_htxf_open derives the per-transfer keys from it, so the
-     * worker never touches the session key or cipher state. */
+     * HxnetHopeAead*), an OWNED clone of htlc->hope_aead taken at spawn
+     * (decoupled from htlc's lifetime — see the clone site). NULL unless
+     * the control channel negotiated ChaCha20-Poly1305; hxnet_htxf_open
+     * derives the per-transfer keys from it, so the worker never touches
+     * the session key or cipher state. Freed with hxnet_hope_aead_free
+     * when the fetch struct is freed. */
     void *hope_aead;
 };
 
@@ -608,14 +610,23 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
      * stores the TLS HTLS port (5600) in TLS mode. */
     f->tls = htlc->tls;
 
-    /* Borrow the control connection's opaque HOPE AEAD material handle
+    /* Clone the control connection's opaque HOPE AEAD material handle
      * (seeded on htlc at login when ChaCha20-Poly1305 was negotiated).
      * The worker hands it to hxnet_htxf_open, which derives the
      * per-transfer keys in-process — no session key or cipher state
      * crosses into this fetch. NULL (plaintext / Blowfish / no-cipher)
-     * leaves the subchannel plaintext. The handle is owned by htlc and
-     * outlives this short post-login fetch. */
-    f->hope_aead = htlc->hope_aead;
+     * leaves the subchannel plaintext.
+     *
+     * We clone rather than borrow htlc->hope_aead: the blocking HTXF
+     * worker can still be in flight when the connection drops, and
+     * hx_htlc_close frees htlc->hope_aead (banner_clear only bumps the
+     * fetch generation, it doesn't join the worker). An owned copy
+     * decouples the worker's handle from htlc's lifetime — freed when
+     * the fetch struct is freed in banner_htxf_completion_run. The
+     * clone happens here on the main thread, where htlc->hope_aead is
+     * still alive (spawn and hx_htlc_close are both main-thread). */
+    f->hope_aead = hxnet_hope_aead_clone (
+        (const HxnetHopeAead *) htlc->hope_aead);
 
     /* Hand the fetch off to tokio's blocking pool via hxbridge.
      * The shim runs `banner_htxf_worker_run` on a dedicated
@@ -786,6 +797,7 @@ banner_htxf_completion_run (void *data)
     banner_start_image_decode (f->bytes, f->bytes_len);
 
 cleanup:
+    hxnet_hope_aead_free (f->hope_aead);
     g_free (f->bytes);
     g_free (f);
 }

@@ -275,13 +275,12 @@ test_htxf_connect_file_get_aead (void)
      * the production actor (mirroring rcv_task_login). On the legacy
      * transport the harness ran its own C handshake, so build the
      * handle from that session state and stamp it on htlc the way
-     * production does. */
-    HxnetHopeAead *owned = NULL;
+     * production does. Either way htlc.hope_aead is an owned handle that
+     * integration_release_htlc frees at teardown. */
     if (!htlc.hope_aead) {
-        owned = hxnet_hope_aead_from_material (htlc.sessionkey, htlc.sklen,
-                                               &hope.encode_state,
-                                               &hope.decode_state);
-        htlc.hope_aead = owned;
+        htlc.hope_aead = hxnet_hope_aead_from_material (
+            htlc.sessionkey, htlc.sklen, &hope.encode_state,
+            &hope.decode_state);
     }
     g_assert_nonnull (htlc.hope_aead);
 
@@ -298,10 +297,6 @@ test_htxf_connect_file_get_aead (void)
         g_test_fail_printf ("htxf_connect failed (HTXF port %u on %s "
                             "reachable?)",
                             (unsigned) srv->xfer_port, srv->host);
-        if (owned) {
-            htlc.hope_aead = NULL;
-            hxnet_hope_aead_free (owned);
-        }
         integration_release_htlc (&htlc);
         integration_close (fd);
         return;
@@ -315,10 +310,6 @@ test_htxf_connect_file_get_aead (void)
     drain_and_check (&htxf, reply.size);
 
     htxf_io_release (&htxf);
-    if (owned) {
-        htlc.hope_aead = NULL;
-        hxnet_hope_aead_free (owned);
-    }
     integration_release_htlc (&htlc);
     integration_close (fd);
 }

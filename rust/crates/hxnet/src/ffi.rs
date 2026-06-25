@@ -2636,9 +2636,33 @@ pub unsafe extern "C" fn hxnet_hope_aead_from_material(
     Box::into_raw(Box::new(HxnetHopeAead { material }))
 }
 
-/// Free a handle from [`hxnet_connection_hope_aead_material`] or
-/// [`hxnet_hope_aead_from_material`]. NULL is a no-op; double-free is
-/// undefined.
+/// Clone a HOPE AEAD material handle into a new, independently owned
+/// handle. The copy carries its own `HopeAeadMaterial`, so its lifetime
+/// is decoupled from the source — a caller can hand the clone to a
+/// worker that outlives the original (e.g. banner.c's HTXF fetch, where
+/// the control connection's `htlc->hope_aead` may be freed on disconnect
+/// while the blocking transfer is still in flight). Returns NULL when
+/// `h` is NULL. Free with [`hxnet_hope_aead_free`].
+///
+/// # Safety
+/// `h` must be NULL or a live pointer from one of the handle-producing
+/// functions, not yet freed.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_hope_aead_clone(
+    h: *const HxnetHopeAead,
+) -> *mut HxnetHopeAead {
+    if h.is_null() {
+        return std::ptr::null_mut();
+    }
+    let src = &*h;
+    Box::into_raw(Box::new(HxnetHopeAead {
+        material: src.material.clone(),
+    }))
+}
+
+/// Free a handle from [`hxnet_connection_hope_aead_material`],
+/// [`hxnet_hope_aead_from_material`], or [`hxnet_hope_aead_clone`]. NULL
+/// is a no-op; double-free is undefined.
 ///
 /// # Safety
 /// `h` must be NULL or a live pointer from one of those functions.
