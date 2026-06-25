@@ -118,6 +118,14 @@ test_set_percent_writes_and_emits (void)
     gtkhx_theme_set_percent (GTKHX_SCALE_WINDOW_BUTTONS, 10);
     g_assert_cmpint (gtkhx_prefs.scale_window_buttons, ==, GTKHX_SCALE_MIN);
     g_assert_cmpint (changed_count, ==, 2);
+
+    /* pct <= 0 clears the override (stores the 0 sentinel) so the area
+     * reverts to the default theme, and emits the change. */
+    gtkhx_theme_set_percent (GTKHX_SCALE_WINDOW_BUTTONS, 0);
+    g_assert_cmpint (gtkhx_prefs.scale_window_buttons, ==, 0);
+    g_assert_cmpint (changed_count, ==, 3);
+    g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_WINDOW_BUTTONS), ==,
+                     200);
 }
 
 int

@@ -70,8 +70,10 @@ int gtkhx_theme_get_percent (GtkhxScaleArea area);
  * multiplies into its base icon size or font size. */
 double gtkhx_theme_scale (GtkhxScaleArea area);
 
-/* Set an area's percentage, write it back into gtkhx_prefs, and emit
- * "changed" if the clamped value actually changed. */
+/* Set an area's override percentage, write it back into gtkhx_prefs,
+ * and emit "changed" if the value actually changed. A pct <= 0 clears
+ * the override (the area reverts to the default theme's factor); a
+ * positive value is clamped to [GTKHX_SCALE_MIN, GTKHX_SCALE_MAX]. */
 void gtkhx_theme_set_percent (GtkhxScaleArea area, int pct);
 
 /* Normalise every area's prefs value in place (clamp) and emit

@@ -1,8 +1,11 @@
 # Theming — feasibility & scoping
 
-Status: scoping / feasibility. No code yet. This doc surveys what exists, judges
-how hard each piece of "make GtkHx themable" is, and proposes an architecture
-that subsumes the existing `claude/ui-scale` branch instead of shipping it as-is.
+Status: per-area UI scaling is **implemented** on `claude/theming` (GtkhxTheme +
+Settings UI + tests — see the "IMPLEMENTED" section below); icon replacement and
+the color palette are scoped here and tracked on the `claude/icon-packs` and
+`claude/theming-palette` branches. This doc surveys what exists, judges how hard
+each piece of "make GtkHx themable" is, and proposes the architecture the three
+branches build out.
 
 ## Goal (from Misha)
 

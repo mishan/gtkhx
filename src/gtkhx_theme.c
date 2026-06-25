@@ -5,7 +5,7 @@
 #include "config.h"
 
 #include "gtkhx_theme.h"
-#include "hx.h" /* gtkhx_prefs */
+#include "prefs.h" /* gtkhx_prefs — pure data, keeps this module GTK-free */
 
 struct _GtkhxTheme {
     GObject parent_instance;
@@ -135,12 +135,16 @@ void
 gtkhx_theme_set_percent (GtkhxScaleArea area, int pct)
 {
     int *slot = prefs_slot (area);
-    int clamped = gtkhx_theme_clamp_percent (pct);
+    /* pct <= 0 clears the override (stores the 0 sentinel) so the area
+	 * falls back to the default theme — mirrors how get_percent reads
+	 * the field, and gives a Settings "Reset to default" something to
+	 * call. A positive value is clamped into range. */
+    int newval = (pct <= 0) ? 0 : gtkhx_theme_clamp_percent (pct);
 
-    if (!slot || *slot == clamped) {
+    if (!slot || *slot == newval) {
         return;
     }
-    *slot = clamped;
+    *slot = newval;
     g_signal_emit (gtkhx_theme_get_default (), signals[SIGNAL_CHANGED], 0);
 }
 

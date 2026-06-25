@@ -186,9 +186,12 @@
 #define CFG_VOICE_PTT_ENABLED "VOICEPTTENABLED"
 #define CFG_VOICE_PTT_KEY "VOICEPTTKEY"
 
-/* Theming: per-area UI scale knobs (integer percent, 100 == shipped
- * default appearance for that area). See struct gtkhx_prefs.scale_*,
- * gtkhx_theme.{c,h}, and docs/theming-scoping.md. */
+/* Theming: per-area UI scale overrides (integer percent of the
+ * unscaled source art; 100 == source size). The shipped defaults are
+ * not 100 — the default theme renders buttons at 200% and the user
+ * list at 125% — and 0 means "no override, use the default theme's
+ * factor". See struct gtkhx_prefs.scale_*, gtkhx_theme.{c,h}, and
+ * docs/theming-scoping.md. */
 #define CFG_SCALE_TOOLBAR "SCALETOOLBAR"
 #define CFG_SCALE_WINDOW_BUTTONS "SCALEWINDOWBUTTONS"
 #define CFG_SCALE_USERLIST_ICON "SCALEUSERLISTICON"

@@ -144,12 +144,12 @@ extern GdkTexture *gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf);
 
 /*
  * build a GtkButton with a pixel-art XPM icon loaded from a
- * GResource path. The pixbuf is scaled up by an integer factor with
- * nearest-neighbor interpolation before becoming the button's child,
- * which preserves the crisp pixel-art look at modern desktop sizes
- * (16px sources upscaled to 32px work well). Pass scale = 1 for the
- * legacy 1x rendering, scale = 2 for the standard "bigger toolbar
- * button" treatment.
+ * GResource path. The pixbuf is scaled up with nearest-neighbor
+ * interpolation before becoming the button's child, which preserves
+ * the crisp pixel-art look at modern desktop sizes (16px sources land
+ * at e.g. 32px under the default theme). The scale factor is owned by
+ * the theme, selected by `area` (below) — there is no caller-supplied
+ * integer multiplier.
  *
  * If cb is non-NULL it's wired to the button's "clicked" signal with
  * user_data; if cb is NULL the caller is responsible for hooking up
