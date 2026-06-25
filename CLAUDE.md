@@ -22,18 +22,15 @@ The big rocks, by line count:
 | `src/options.c`         | ~1900| Settings (AdwPreferencesDialog) + GKeyFile persistence.       |
 | `src/rcv.c`             | ~1700| Hotline protocol receive path.                                |
 | `src/chat.c`            | ~1500| Chat window UI (xtext output, GtkTextView input).             |
-| `src/files.c`           | ~1500| File browser UI (gtk_hlist_compat).                           |
+| `src/files.c`           | ~1500| File browser UI (GtkColumnView).                             |
 | `src/news15.c`          | ~1300| Threaded news (1.5 protocol).                                 |
 | `src/network.c`         | ~1300| Connection / pthread worker, hlwrite, ping keepalive.         |
 | `src/users.c`           | ~1000| User list UI + right-click popup.                             |
 | `src/connect.c`         |  ~900| Connect dialog (AdwDialog) + bookmark management.             |
 | `src/gtkhx.c`           |  ~900| `main()`, GIOChannel-based fd plumbing, GtkApplication init.  |
-| `src/gtk_hlist_compat.c`|  ~800| Shim: GtkHList API over GtkTreeView+GtkListStore.             |
 | `src/commands.c`        |  ~~~ | Hotline protocol send path (paired with `rcv.c`).             |
-| `src/cipher.c`          |  ~~~ | Per-connection cipher (Blowfish); HOPE negotiation.           |
-| `src/compress.c`        |  ~~~ | zlib compression layer; HOPE negotiation.                     |
-| `src/hmac.c`            |  ~~~ | HMAC-MD5 / HMAC-SHA / HMAC-HAVAL.                             |
-| `src/md5.c` `src/sha.c` `src/haval.c` | ~~~ | Hash primitives (Phase 5 follow-up: replace with GLib/Nettle). |
+| `src/compress.c`        |  ~~~ | Thin C dispatcher over the Rust `hxcompress` crate. Dead in production (the orchestrator compresses in Rust); deletable like cipher.c was. |
+| `src/htxf_io.c` `src/htxf_subchannel.c` | ~~~ | C shim + preamble packer over hxnet's Rust HTXF subchannel. |
 | `src/plugin.c`          |  ~~~ | dlopen plugin loader. **Compiled out** (`USE_PLUGIN` undef).  |
 | `src/gtkthreads.c`      |  ~~~ | GRecMutex + custom poll wrapper for worker↔main serialization.|
 | `src/debug.c/.h`        |  ~~~ | Categorised runtime logger (`GTKHX_DEBUG=cat1,cat2`).         |
@@ -65,9 +62,11 @@ Re-add fresh packaging when ready to ship.)
 `meson.build` pins `gtk4 >= 4.6` and `libadwaita-1 >= 1.6`. `meson setup build &&
 meson compile -C build` produces a working binary.
 
-The custom GtkCList fork is gone (replaced by `gtk_hlist_compat` over GtkTreeView+
-GtkListStore — five consumers, ~392 sites); xtext is HexChat's modern fork. The
-GtkApplication / activate plumbing in `gtkhx.c` drives all window construction.
+The custom GtkCList fork is gone; its five list consumers (`tracker.c`, `news15.c`,
+`options.c`, `users.c`, `files.c`) now use `GtkColumnView` directly — the interim
+`gtk_hlist_compat` shim over GtkTreeView+GtkListStore has itself been removed. xtext
+is HexChat's modern fork. The GtkApplication / activate plumbing in `gtkhx.c` drives
+all window construction.
 
 What's runnable and reasonably polished on this branch:
 
@@ -83,8 +82,11 @@ What's runnable and reasonably polished on this branch:
 - Tracker has a `GtkSearchEntry` and action buttons in the headerbar.
 - Settings icon picker is a `GtkFlowBox` grid of 56 px GtkPicture-rendered icons (was
   a 18-px-row GtkHList).
-- Hotline protocol layer (`rcv.c` / `commands.c` / `hotline.h` / `cipher.c` /
-  `compress.c`) is unchanged — wire-format compat with 1.2/1.5/1.9 servers preserved.
+- Hotline protocol layer: the C send/receive dispatch (`rcv.c` / `commands.c` /
+  `hotline.h`) is unchanged; connect + magic + LOGIN + the HOPE handshake, ciphers
+  (Blowfish OFB-64 + ChaCha20-Poly1305 AEAD), and zlib compression all moved into the
+  Rust `hxnet` orchestrator + `hxcrypto-*` / `hxcompress` crates. Wire-format compat
+  with 1.2/1.5/1.9 servers is preserved there.
 - Chat / private-message text is sanitised through `gtkhx_text_to_utf8` (Mac Roman →
   UTF-8 with U+FFFD fallback) before reaching xtext/Pango.
 - Sound playback is in-process via GSound; no fork+exec of an external player.
@@ -219,19 +221,21 @@ duplicate paths, so a hashtable can't represent it cleanly).
   used to provide, just on a non-deprecated foundation. Per-window UI dispatch from
   workers prefers `g_idle_add` (see preview.c) so the worker doesn't hold the lock
   during slow GTK operations.
-- **`gtk_hlist_compat`.** Five consumers (`tracker.c`, `news15.c`, `options.c`,
-  `users.c`, `files.c`) still use the GtkHList API. The compat shim wraps
-  GtkTreeView+GtkListStore. Eventually we want `GtkColumnView` per consumer and the
-  shim deleted; for now the shim works and isn't on fire.
-- **HOPE handshake.** `cipher.c` and `compress.c` negotiate the optional HOPE
-  encryption/compression extension during connection setup. Don't change the negotiated
-  format — only the implementation underneath. `hmac.c` checks for `"HMAC-HAVAL"` MAC at
-  lines 65, 111. Verify whether any extant Hotline server still advertises HAVAL before
-  deleting `haval.[ch]`.
-- **Crypto is moving to Nettle + GLib hashes** (see ROADMAP). Don't introduce new
-  dependencies on `md5.c`/`sha.c`/`haval.c`/`rand.c` — those files are slated for
-  replacement. `cipher.c` already has an `#ifdef OPENSSL` branch via `cipher_openssl.h`;
-  Nettle becomes the new primary path.
+- **List widgets are `GtkColumnView`.** The five former GtkHList consumers
+  (`tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`) were migrated to
+  `GtkColumnView` and the interim `gtk_hlist_compat` shim (and the older GtkCList
+  fork before it) deleted.
+- **HOPE handshake + crypto live in Rust.** Connect + magic + LOGIN + the optional
+  HOPE encryption/compression negotiation, the ciphers (Blowfish OFB-64 stream +
+  ChaCha20-Poly1305 AEAD, incl. the per-message stream rekey), the HMAC chain, and
+  zlib compression all run inside the `hxnet` orchestrator + the `hxcrypto-{hash,
+  stream,aead}` / `hxcompress` Rust crates. The C dispatchers that used to do this
+  (`cipher.c`, `cipher_aead.c`, `hope.c`, `hmac.c`, `md5.c`, `sha.c`, `haval.c`,
+  `network_decode.c`) are gone. **Don't change the negotiated wire format** — only the
+  Rust implementation underneath; 1.2/1.5/1.9 compat is a hard requirement.
+  `compress.c` is the last such C dispatcher still in the tree, dead in production and
+  deletable like the others (see the file table). `chacha_aead_state` (a repr(C)
+  struct in `cipher.h`) survives as the FFI bridge type for the HTXF AEAD material.
 - **License: GPL-2.0-or-later** ("version 2 of the License, or (at your option) any
   later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
   clause without explicit confirmation.
@@ -300,8 +304,9 @@ third-party screenshots. See ROADMAP Phase ∞ and the long-form notes in memory
   CVS-import commit). One logical change per commit, descriptive bodies. No `Co-Authored-By:
   Claude` trailers unless Misha asks.
 - **Don't re-litigate roadmap decisions** without a strong reason. The locked-in choices
-  (Meson, Nettle+GLib crypto, vendor HexChat's xtext, drop plugin API, GPL-2.0-or-later,
-  single-conn during ports) were made deliberately. ROADMAP.md is the source of truth.
+  (Meson, crypto in Rust `hxcrypto-*` crates, vendor HexChat's xtext, drop plugin API,
+  GPL-2.0-or-later, single-conn during ports) were made deliberately. ROADMAP.md is the
+  source of truth.
 - **Don't break Hotline 1.2/1.5 wire compat.** Modern transport security is a Phase ∞
   effort that requires inventing a new protocol layer AND server-side cooperation
   (mhxd is the natural target). It is explicitly out of scope for the GTK ports.
