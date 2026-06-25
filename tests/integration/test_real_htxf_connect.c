@@ -51,6 +51,15 @@
 #include "integration_tls.h"
 #include "server_matrix.h"
 
+/* Build a HOPE AEAD material handle from the legacy harness's own C
+ * handshake state (rust/crates/hxnet/src/ffi.rs). Only needed on the
+ * legacy transport — the orchestrated login seeds htlc->hope_aead from
+ * the production actor directly. HxnetHopeAead + hxnet_hope_aead_free
+ * come from htxf_io.h. */
+extern HxnetHopeAead *hxnet_hope_aead_from_material (
+    const guint8 *session_key, gsize session_key_len,
+    const chacha_aead_state *ctrl_encode, const chacha_aead_state *ctrl_decode);
+
 /* Shared body-drain + substring check used by all three siblings.
  * Drains exactly xfer_size bytes through production htxf_io_read
  * (passthrough, AEAD, or TLS leg depending on how htxf was armed)
@@ -168,12 +177,15 @@ test_htxf_connect_file_get_plaintext (void)
 
 /*
  * AEAD sibling: same production htxf_connect, but the control channel
- * negotiated HOPE-ChaCha20-Poly1305, so htxf_connect arms the
- * per-transfer AEAD frame codec off the control cipher state. We
- * mirror what production rcv.c leaves on htlc at transfer time —
- * cipher_mode = CIPHER_MODE_AEAD plus the two ChaCha control states —
- * then let htxf_connect derive the transfer keys and flip
- * aead_active. Body drains through the AEAD leg of htxf_io_read.
+ * negotiated HOPE-ChaCha20-Poly1305. htxf_connect hands the control
+ * connection's retained HOPE material handle (htlc->hope_aead) to
+ * hxnet_htxf_open, which derives the per-transfer ChaCha20-Poly1305
+ * keys in-process (mixing in ref) and frames the body AEAD — the
+ * session key never crosses back into C. Under orchestration the login
+ * helper seeds htlc->hope_aead; on the legacy transport we build the
+ * handle from the harness's own C handshake state. Body drains through
+ * the AEAD leg of htxf_io_read; a correct "hello world" round-trip is
+ * the proof AEAD armed.
  */
 static const hx_test_server *
 pick_aead_server (void)
@@ -208,7 +220,14 @@ test_htxf_connect_file_get_aead (void)
     if (fd < 0) {
         return;
     }
-    g_assert_true (hope.aead_active);
+    /* AEAD negotiation is a harness-crypto fact only on the legacy
+     * transport. Under orchestration the production actor (Rust) owns
+     * the cipher and the harness hope session stays zeroed — the
+     * encrypted body round-trip via htxf_io_read below is the
+     * end-to-end proof. (Same gating as test_hope_chacha20_banner.) */
+    if (!integration_harness_orchestrated ()) {
+        g_assert_true (hope.aead_active);
+    }
 
     /* FILE_GET test.txt over the AEAD control channel. */
     const char *fname = "test.txt";
@@ -248,14 +267,23 @@ test_htxf_connect_file_get_aead (void)
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024);
 
-    /* Stamp the control cipher state onto htlc the way production
-     * rcv.c does after a HOPE-ChaCha20 negotiation, so htxf_connect's
-     * AEAD-arm fires. sessionkey/sklen are already populated by the
-     * login helper; the derive reads the control states' keys (fixed
-     * at login), so the post-FILE_GET counter positions don't matter. */
-    htlc.cipher_mode = CIPHER_MODE_AEAD;
-    htlc.cipher_encode_state.chacha = hope.encode_state;
-    htlc.cipher_decode_state.chacha = hope.decode_state;
+    /* htxf_connect derives the per-transfer ChaCha20-Poly1305 keys
+     * INSIDE hxnet_htxf_open from the control connection's retained HOPE
+     * material (htlc->hope_aead, an opaque handle) plus this transfer's
+     * ref — the session key never crosses back into C. Under
+     * orchestration the login helper already seeded htlc.hope_aead from
+     * the production actor (mirroring rcv_task_login). On the legacy
+     * transport the harness ran its own C handshake, so build the
+     * handle from that session state and stamp it on htlc the way
+     * production does. */
+    HxnetHopeAead *owned = NULL;
+    if (!htlc.hope_aead) {
+        owned = hxnet_hope_aead_from_material (htlc.sessionkey, htlc.sklen,
+                                               &hope.encode_state,
+                                               &hope.decode_state);
+        htlc.hope_aead = owned;
+    }
+    g_assert_nonnull (htlc.hope_aead);
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
@@ -270,15 +298,27 @@ test_htxf_connect_file_get_aead (void)
         g_test_fail_printf ("htxf_connect failed (HTXF port %u on %s "
                             "reachable?)",
                             (unsigned) srv->xfer_port, srv->host);
+        if (owned) {
+            htlc.hope_aead = NULL;
+            hxnet_hope_aead_free (owned);
+        }
         integration_release_htlc (&htlc);
         integration_close (fd);
         return;
     }
-    g_assert_true (htxf.aead_active);
 
+    /* htxf_connect no longer flips htxf->aead_active — AEAD framing now
+     * lives entirely inside the hxnet channel (keyed off the hope_aead
+     * handle). The proof that AEAD armed is the body round-trip: if the
+     * subchannel were running plaintext passthrough, the AEAD-framed
+     * bytes on the wire wouldn't decode to "hello world". */
     drain_and_check (&htxf, reply.size);
 
     htxf_io_release (&htxf);
+    if (owned) {
+        htlc.hope_aead = NULL;
+        hxnet_hope_aead_free (owned);
+    }
     integration_release_htlc (&htlc);
     integration_close (fd);
 }
