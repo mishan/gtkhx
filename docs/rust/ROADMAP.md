@@ -668,7 +668,20 @@ where the concurrency motivation pays off.
    Same underlying decision as item 8 — once `hxnet` owns proxy-aware
    connect, the control channel, HTXF, and the tracker can all stop
    special-casing it. Pure cleanup; no behaviour change, gated on the
-   `tokio-socks` work existing first.
+   `tokio-socks` work (item 10) existing first.
+10. ⏳ **Central SOCKS / proxy support in `hxnet` (`tokio-socks`).**
+    *Prerequisite for items 8 and 9, and worth doing first on its own
+    merits.* The control channel already connects via
+    `tokio::net::TcpStream` in `resolve_and_connect`, which never consults
+    `GProxyResolver` — so the main connection silently lost the
+    transparent SOCKS the pre-orchestrator `GSocketClient` connect had.
+    (HTXF + tracker still get it because their connect is still C.) Adding
+    `tokio-socks` at the single connect primitive (`resolve_and_connect`,
+    four in-crate callers) both *restores* proxy support for the control
+    channel and lets items 8/9 move their connects into Rust without
+    losing it. The transport change is small; the real decision is where
+    proxy config comes from (query `GProxyResolver` in C and pass the URI
+    in, vs. env vars). Scoped in `docs/rust/socks-proxy-scoping.md`.
 
 ### Work-item 1 detail: R3.3 sub-phases
 
