@@ -808,9 +808,15 @@ pub unsafe extern "C" fn hxnet_htxf_abort_arm(handle: *mut HtxfConn, token: *con
     // Borrow the C-owned Arc without dropping its ref (ManuallyDrop so
     // the implicit drop at scope end doesn't decrement).
     let arc = ManuallyDrop::new(Arc::from_raw(token));
-    arc.arm(sock);
-    // Clone a ref for the HtxfConn (+1); dropped when the channel closes.
+    // Publish the token to the handle BEFORE arming the wake-socket, so
+    // read/write observe the aborted flag the instant the socket becomes
+    // shut-down-able. If we armed first, a concurrent abort in the gap
+    // could shut the socket down (waking a parked read) while `h.abort`
+    // was still None — the post-shutdown Ok(0) would then read back as a
+    // clean EOF instead of a cancel. Clone a ref for the HtxfConn (+1);
+    // dropped when the channel closes.
     h.abort = Some(Arc::clone(&arc));
+    arc.arm(sock);
 }
 
 /// Flip `token` to aborted and shut its wake-socket down so a parked
@@ -1135,6 +1141,13 @@ mod tests {
 
         let token = hxnet_htxf_abort_new();
         unsafe { hxnet_htxf_abort_arm(h, token) };
+
+        // Fail-fast guard: if a regression (or platform quirk) ever stops
+        // abort from waking the parked read, reader.join() below would
+        // hang the whole test run. A read timeout makes the read return
+        // on its own after 3s, so the test fails on the elapsed assertion
+        // instead of wedging.
+        unsafe { hxnet_htxf_set_read_timeout(h, 3000) };
 
         // Raw pointers aren't Send; hand the handle to the reader thread
         // through a wrapper. The reader is the sole accessor of `h` while
