@@ -2262,17 +2262,33 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         }
     };
 
-    let login_vec = if login_len == 0 || login.is_null() {
+    // A NULL pointer with a non-zero length is a caller bug (it would
+    // silently drop the credential / name). Reject it rather than treat
+    // it as empty — same fail-fast contract as the callback sibling
+    // hxnet_connection_open_plaintext_tls.
+    if (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls_polling: NULL pointer with \
+             non-zero length for login / password / name"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let login_vec = if login_len == 0 {
         Vec::new()
     } else {
         std::slice::from_raw_parts(login, login_len).to_vec()
     };
-    let password_vec = if password_len == 0 || password.is_null() {
+    let password_vec = if password_len == 0 {
         Vec::new()
     } else {
         std::slice::from_raw_parts(password, password_len).to_vec()
     };
-    let name_vec = if name_len == 0 || name.is_null() {
+    let name_vec = if name_len == 0 {
         Vec::new()
     } else {
         std::slice::from_raw_parts(name, name_len).to_vec()

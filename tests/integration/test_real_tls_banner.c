@@ -180,9 +180,12 @@ test_banner_htxf_mode_tls (void)
 
     /* Pack the HTXF preamble with HTXF_TYPE_BANNER — Janus refuses
      * a banner ref on a FILE-typed connection. Production banner
-     * worker uses the same packer (see banner.c). The preamble
-     * always travels plaintext-inside-TLS; hxnet_htxf_open writes it
-     * raw before any cipher state exists. */
+     * worker uses the same packer (see banner.c). The preamble carries
+     * no HTXF/HOPE AEAD framing — hxnet_htxf_open writes it before any
+     * such per-transfer cipher state is armed, so the server can match
+     * the subchannel to the queued transfer by ref. (It's still inside
+     * the TLS record layer here: on this TLS-from-byte-zero subchannel
+     * every application byte, preamble included, is encrypted by TLS.) */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     size_t hdr_len = hx_htxf_subchannel_pack_preamble (
         hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
