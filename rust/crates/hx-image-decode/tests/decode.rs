@@ -1,10 +1,10 @@
 //! End-to-end decode tests driving glycin against real image
 //! bytes. These run in `cargo test -p hx-image-decode` if the
-//! host has the glycin loader binaries at
-//! `/usr/libexec/glycin-loaders/2+/` (org.gnome.Platform 47+
-//! and modern Debian/Ubuntu/Fedora installs all do). When the
-//! loaders are absent the tests skip themselves rather than
-//! fail — same shape as the C `g_test_skip` pattern in Tier 2.
+//! host has glycin loaders installed (detected via their config
+//! under `$XDG_DATA_DIRS/glycin-loaders/*/conf.d/` — see
+//! `glycin_loaders_available`). When the loaders are absent the
+//! tests skip on a dev box but fail loudly under CI (the `CI`
+//! env var) so a missing-loader CI image can't mask a regression.
 //!
 //! The fixtures (PNG, JPEG, GIF) come from `tests/common/`
 //! which the Tier 3 banner suite already uses. They're small
@@ -39,9 +39,41 @@ use hx_image_decode::ffi::{
     HxInlineMediaDecoded,
 };
 
-/// Path on the host where glycin loaders live.
+/// Whether glycin image loaders are installed on this host.
+///
+/// glycin discovers loaders through config files at
+/// `$XDG_DATA_DIRS/glycin-loaders/<api>+/conf.d/*.conf` (the `Exec=` in
+/// each points at the loader binary). We probe for that config rather
+/// than a hardcoded binary path because the binary's location varies by
+/// distro — `/usr/libexec/glycin-loaders/…` on Debian/GNOME, `/usr/lib64`
+/// on Fedora — and the API-version dir (`1+`, `2+`, …) tracks the glycin
+/// release, whereas the config always lives under the data dirs glycin
+/// itself searches. Keying off the config keeps the gate honest across
+/// CI (Fedora) and dev boxes (Debian/Ubuntu) without guessing paths.
 fn glycin_loaders_available() -> bool {
-    Path::new("/usr/libexec/glycin-loaders/2+/glycin-image-rs").exists()
+    let data_dirs = std::env::var("XDG_DATA_DIRS")
+        .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
+    data_dirs
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .map(|d| Path::new(d).join("glycin-loaders"))
+        .any(|root| glycin_conf_present_under(&root))
+}
+
+/// True if `root` (a `…/glycin-loaders` directory) holds at least one
+/// `<api>+/conf.d/*.conf` loader config, for any API-version subdir.
+fn glycin_conf_present_under(root: &Path) -> bool {
+    let Ok(versions) = std::fs::read_dir(root) else {
+        return false;
+    };
+    versions.filter_map(Result::ok).any(|ver| {
+        let confd = ver.path().join("conf.d");
+        std::fs::read_dir(&confd).is_ok_and(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|e| e.path().extension().is_some_and(|x| x == "conf"))
+        })
+    })
 }
 
 /// Glycin-loader gate for the decode tests. Returns `true` when the
@@ -63,14 +95,14 @@ fn require_glycin() -> bool {
     }
     if std::env::var_os("CI").is_some() {
         panic!(
-            "glycin loaders missing at /usr/libexec/glycin-loaders/2+/ under CI: \
-             install the glycin-loaders package so this decode test runs — \
-             refusing to silently skip"
+            "glycin loaders not found via $XDG_DATA_DIRS/glycin-loaders/*/conf.d \
+             under CI: install the glycin-loaders package so this decode test \
+             runs — refusing to silently skip"
         );
     }
     eprintln!(
-        "skipping glycin decode test: loaders missing at \
-         /usr/libexec/glycin-loaders/2+/ (set CI=1 to make this fatal)"
+        "skipping glycin decode test: no loader config under \
+         $XDG_DATA_DIRS/glycin-loaders/*/conf.d (set CI=1 to make this fatal)"
     );
     false
 }
