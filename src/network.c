@@ -1338,27 +1338,23 @@ htxf_connect (struct htxf_conn *htxf)
     }
 
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming. When the control
-	 * channel negotiated CIPHER_MODE_AEAD, derive a per-transfer
-	 * ChaCha20 key pair off the control session_key + our HTXF ref
-	 * (the derivation mixes ref into the salt so two transfers in one
-	 * session can never share a nonce; counters start at 0) into
-	 * htxf->xfer_encode / xfer_decode and pass them to
-	 * hxnet_htxf_open, which owns the seal/open framing thereafter.
-	 * The preamble itself always travels plaintext per spec. Other
-	 * transfers (no HOPE, or HOPE with a stream cipher) leave
-	 * aead_active = FALSE and hxnet runs the channel in passthrough. */
-    /* The per-transfer ChaCha20-Poly1305 keys are derived INSIDE
-     * hxnet_htxf_open from the control connection's retained HOPE
-     * material (htlc->hope_aead, an opaque handle seeded at login) plus
-     * this transfer's ref — the control session key never comes back to
-     * C. A NULL handle (no HOPE, a stream cipher, or no-cipher) selects
-     * plaintext passthrough. */
+	 * channel negotiated ChaCha20-Poly1305, the per-transfer keys are
+	 * derived INSIDE hxnet_htxf_open from the control connection's
+	 * retained HOPE material (htlc->hope_aead, an opaque handle seeded at
+	 * login) plus this transfer's ref — mixing ref into the salt so two
+	 * transfers in one session can never share a nonce, counters from 0 —
+	 * and hxnet owns the seal/open framing thereafter. The session key
+	 * never comes back to C. The preamble itself always travels plaintext
+	 * per spec. A NULL handle (no HOPE, a stream cipher, or no-cipher)
+	 * selects plaintext passthrough. The handle is seeded the same way on
+	 * either Tier 3 transport — by the orchestrated login from the actor's
+	 * retained material, or by the legacy harness via
+	 * hxnet_hope_aead_from_material — so this path is transport-agnostic. */
     const HxnetHopeAead *hope_aead =
         (htxf->htlc != NULL) ? (const HxnetHopeAead *) htxf->htlc->hope_aead
                              : NULL;
     if (hope_aead) {
-        debug_log ("xfer-aead",
-                   "ref=%u: AEAD active (orchestrated HOPE material)",
+        debug_log ("xfer-aead", "ref=%u: AEAD active (HOPE material present)",
                    htxf->ref);
     }
 

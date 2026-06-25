@@ -739,13 +739,15 @@ integration_release_htlc (struct htlc_conn *htlc)
     g_free (htlc->out.buf);
     htlc->in.buf = NULL;
     htlc->out.buf = NULL;
-    /* The orchestrated HOPE login seeds htlc->hope_aead with an owned
-     * HxnetHopeAead* (a copy of the actor's material, independent of the
-     * connection's lifetime — see hxnet_connection_hope_aead_material).
-     * Free it here so it doesn't leak across the test run. NULL-safe.
-     * Tests that build their own handle on the legacy transport and
-     * stash it here (test_real_htxf_connect) NULL the field before
-     * releasing, so this never double-frees. */
+    /* htlc->hope_aead is an owned HxnetHopeAead* (a copy of the control
+     * channel's HOPE material, independent of the connection's lifetime —
+     * see hxnet_connection_hope_aead_material). It is seeded either by the
+     * orchestrated login or by a test that builds its own handle on the
+     * legacy transport and stashes it here (test_real_htxf_connect via
+     * hxnet_hope_aead_from_material). Free it here — the single owner — so
+     * it doesn't leak across the test run. NULL-safe. A test that needs to
+     * free the handle *early* (before release) must NULL the field after
+     * doing so, or this would double-free. */
     hxnet_hope_aead_free ((HxnetHopeAead *) htlc->hope_aead);
     htlc->hope_aead = NULL;
 }
