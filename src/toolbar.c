@@ -50,7 +50,6 @@
 #include "about.h"
 #include "banner.h"
 #include "bookmarks.h"
-#include "gtkthreads.h"
 #include "plugin.h"
 #include "toolbar.h"
 #include "hx_panel.h"
