@@ -904,7 +904,7 @@ on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
  * stamps the LOGIN frame with this trans, the server echoes it in
  * the TASK reply, and the synthetic-frame replay dispatches to the
  * login task we register under the same value. See
- * docs/phase-g-migration.md. */
+ * docs/rust/phase-g-migration.md. */
 #define HX_LOGIN_TRANS 1u
 
 /* Trans the replayed LOGIN (or HOPE step-2) reply will carry, stashed

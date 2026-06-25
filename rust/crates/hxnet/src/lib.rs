@@ -1,7 +1,7 @@
 //! Hotline Connection actor for GtkHx (Phase R3.3.a scaffold).
 //!
 //! `hxnet` is the eventual home of the Connection lifecycle that
-//! `src/network.c` owns today. The roadmap target (`docs/RUST-ROADMAP.md`
+//! `src/network.c` owns today. The roadmap target (`docs/rust/ROADMAP.md`
 //! §R3 work item 1) is a tokio-driven actor that:
 //!
 //! 1. Owns a `tokio::net::TcpStream` (or any `AsyncRead + AsyncWrite`).

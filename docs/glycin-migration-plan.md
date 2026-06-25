@@ -44,14 +44,14 @@ the CVE history of in-process image decoders, which is the security
 motivation Phase B was always going to need eventually.
 
 This plan does NOT block on the broader R3+ work in
-`docs/RUST-ROADMAP.md`. The decoder is a clean leaf — pure compute over
+`docs/rust/ROADMAP.md`. The decoder is a clean leaf — pure compute over
 byte input, returns `GdkTexture`. Glycin is async-only so we ripple
 that through two call sites in C (dialog + chat.c auto-fetch), but
 both already tolerate async.
 
 ## What stays C, what moves to Rust
 
-Per `RUST-ROADMAP.md` locked-in decision #6 (`xtext` is not rewritten)
+Per `docs/rust/ROADMAP.md` locked-in decision #6 (`xtext` is not rewritten)
 and decision #8 (single-conn + UI windows stay C until R5), the only
 part of the inline-media stack that's a viable Rust target today is the
 decoder. Specifically:
@@ -301,8 +301,8 @@ implementation looked like."
   machines tie into the task lifecycle, which is heavily C until R3
   (network) and R5 (chat window). They migrate naturally with the
   chat window.
-- Rewriting `xtext.c` Phase E changes in Rust. Per RUST-ROADMAP
-  locked-in decision #6, xtext stays vendored C.
+- Rewriting `xtext.c` Phase E changes in Rust. Per
+  `docs/rust/ROADMAP.md` locked-in decision #6, xtext stays vendored C.
 - Banner image decode (`banner.c`). The decoder crate is shaped so
   banner.c could consume it later, but porting banner.c is not part
   of this work.
@@ -316,7 +316,7 @@ implementation looked like."
   loaders for the GNOME platform.
 - [Glycin docs.rs](https://docs.rs/glycin/latest/glycin/) — Rust API
   reference.
-- `docs/RUST-ROADMAP.md` — phased Rust port (R0–R7 + R∞).
+- `docs/rust/ROADMAP.md` — phased Rust port (R0–R7 + R∞).
 - `docs/inline-media-plan.md` — fogWraith Inline-Media capability spec
   and Phase A → F status.
 - `fogWraith/Hotline/Docs/Protocol/Capabilities-Inline-Media.md` — wire

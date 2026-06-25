@@ -112,7 +112,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  * The legacy harness hand-rolls connect + magic + LOGIN + recv over a
  * raw blocking socket — a second client wire implementation that never
  * exercises the production connect path (the gap that let the
- * capabilities regression ship; see docs/phase-g-migration.md).
+ * capabilities regression ship; see docs/rust/phase-g-migration.md).
  *
  * When GTKHX_HARNESS_ORCHESTRATED is set, the login entry points
  * (integration_open_login_or_skip + _to_caps_or_skip) instead drive

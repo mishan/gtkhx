@@ -144,7 +144,7 @@ Stripping it down to the client's contract:
   arbitrary threads; the runtime marshals via
   `glib::MainContext::default().invoke` and the
   `MAIN_THREAD_RUNTIMES` thread-local registry. The pattern is
-  documented in `docs/rust-glib-interop.md`.
+  documented in `docs/rust/glib-interop.md`.
 
 ---
 
@@ -240,7 +240,7 @@ wedge watchdog (60s glib timeout + always-on RTP counter probe).
 Shipped. `rust/crates/hxbridge/` lives in the workspace with
 `session_from_ptr`, `session_from_ptr_full`, and
 `emit_pointer_pair_signal`. The lifetime model is documented in
-`docs/rust-glib-interop.md`. The gtk-rs-core 0.21 / gstreamer-rs 0.24
+`docs/rust/glib-interop.md`. The gtk-rs-core 0.21 / gstreamer-rs 0.24
 families are pinned in `rust/Cargo.toml` (downgraded from 0.22 / 0.25
 to fit Debian trixie's stock rustc 1.85 — see `rust-toolchain.toml`).
 
@@ -594,7 +594,7 @@ Concrete shipping outcomes:
 
 - **`hxbridge`** is in the workspace as the canonical home for
   C-GObject wrapping. Lifetime model documented in
-  `docs/rust-glib-interop.md`. Used by `hxvoice-runtime` today; R3+
+  `docs/rust/glib-interop.md`. Used by `hxvoice-runtime` today; R3+
   work extends it.
 - **The `MAIN_THREAD_RUNTIMES` thread-local registry pattern** —
   `hxvoice-runtime` uses it to look up `&VoiceRuntime` from

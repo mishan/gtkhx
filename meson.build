@@ -102,7 +102,7 @@ gsound_dep = dependency('gsound')
 # at the gstreamer-rs 0.25 family targeted 1.26 specifically; the
 # 0.24 downgrade undoes that coupling so Debian-native builds with
 # the distro's 1.24 just work.) Tracked in docs/voice-chat-plan.md
-# §5.B and docs/rust-glib-interop.md "GStreamer runtime floor".
+# §5.B and docs/rust/glib-interop.md "GStreamer runtime floor".
 #
 # Plugin set:
 #   gstreamer-1.0       — core pipeline / element framework

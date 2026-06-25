@@ -1,6 +1,6 @@
 //! Rust ↔ GLib bridge for GtkHx (Phases R3.0 + R3.1, see
-//! `docs/voice-chat-plan.md` §5, `docs/RUST-ROADMAP.md` §R3, and
-//! `docs/rust-glib-interop.md` for the lifetime-model rationale).
+//! `docs/voice-chat-plan.md` §5, `docs/rust/ROADMAP.md` §R3, and
+//! `docs/rust/glib-interop.md` for the lifetime-model rationale).
 //!
 //! Phase R3.0 ships the C-owned-GObject wrapping helpers and a single
 //! reference signal emit (this file). Phase R3.1 — the [`runtime`]
@@ -138,7 +138,7 @@ pub unsafe fn session_from_ptr_full(ptr: *mut c_void) -> glib::Object {
 /// Emit a `(G_TYPE_POINTER, G_TYPE_POINTER)` signal on a C-owned
 /// `GtkhxSession`. This is the canonical Phase R3.0 reference for
 /// "how do I drive a C-side signal emit from Rust" — see
-/// `docs/rust-glib-interop.md` for the rationale.
+/// `docs/rust/glib-interop.md` for the rationale.
 ///
 /// Wraps `session_ptr` via [`session_from_ptr_full`] so the session
 /// stays alive across the emit even if a connected C handler runs

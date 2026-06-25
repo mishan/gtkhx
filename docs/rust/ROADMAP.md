@@ -620,7 +620,7 @@ broke into a planned chain of sub-phases. Status as of writing:
 | R3.3.e-4d | ✅ shipped | HOPE-over-hxnet for ChaCha20-Poly1305 and the no-cipher / no-compression path. `hx_install_hxnet_post_hope` runs after `cipher_*_init` in `rcv_task_login` (HOPE path) and on the non-HOPE login-success branch. `hx_bridge_install_with_hope_state` builds `HxnetTransformConfig` from `htlc->cipher_*_state` (ChaCha20-Poly1305 directly off `chacha_aead_state`) and `htlc->compress_*_type`. Install is deferred via `g_idle_add` until `htlc->out` drains so HOPE step-2 LOGIN bytes flush through the legacy write source before we tear it down — caught against VesperNet's Janus with ChaCha20-Poly1305. Duped fd gets `CLOEXEC`. HOPE-Blowfish ships via R3.3.e-4g (below). |
 | R3.3.e-4g | ✅ shipped | HOPE-aware Blowfish over hxnet. New `crate::hope_blowfish::HopeBlowfishStream` adapter — a frame-aware `AsyncRead+AsyncWrite` that mirrors the legacy `cipher_check_rekey_marker` + `cipher_change_decode_key` rekey protocol. Read side parses incoming 22-byte headers, inspects the type field's high byte for the rekey marker, HMAC-rotates the read schedule by that count against the session key, strips the marker. Write side mirrors with ~3/16 probability per outgoing frame. `HxnetTransformConfig` grew a `HXNET_CIPHER_HOPE_BLOWFISH` kind plus session-key / `hope_macalg` fields (struct now 304 bytes); the C bridge populates them from `htlc->sessionkey` / `htlc->macalg` and the FFI builds the new `CipherLayer::HopeBlowfish` variant. Per-direction Blowfish keys are also honored. The Tier 3 `test_hope_blowfish_hxnet` reproducer caught the actual bug: `install_check_idle` previously only waited for `htlc->out` to drain, but if `htlc->in` had leftover decrypted bytes the rcv state machine hadn't yet consumed, the cipher position vs. the wire frame boundary went out of phase by `htlc->in.pos` bytes — hxnet read mid-frame and surfaced `StreamError`. Fixed by adding an `htlc->in.pos == 0` check to the deferred install loop. (The qbuf's `.len` field is the bytes-still-needed counter — re-armed to `SIZEOF_HL_HDR` after every consumed frame — so it stays non-zero almost continuously; `.pos` is the bytes-already-buffered indicator that actually answers "is there anything mid-frame?".) |
 | R3.3.e-4e | ✅ shipped | Flipped the default: `hx_install_hxnet_post_hope` runs unless `GTKHX_USE_HXNET=0` is set. `hxnet_opt_in()` helper in `network.c` centralises the polarity. Tier 3 test now runs the install/uninstall path with the env-var unset, plus a dedicated opt-out test scopes `GTKHX_USE_HXNET=0`. |
-| R3.3.e-4f | not started | Delete the legacy `GIOStream` + GPollable read/write loop, `compress_encode` / `cipher_encode` in-place call sites, the `control_*` helpers. TLS connections still keep `GIOStream` until TLS-over-hxnet (see below). |
+| R3.3.e-4f | ✅ shipped | Superseded by **Phase G + delete-old-connect** (see `docs/rust/phase-g-migration.md`). Rather than deleting *only* the non-TLS legacy loop, Phase G moved the whole connect lifecycle (incl. TLS-from-byte-zero and HOPE) into the `hxnet` orchestrator, then `delete-old-connect` WAVE 1 + WAVE 2 removed the entire legacy `GIOStream` + GPollable read/write machinery, the `control_*` helpers, the in-place `cipher`/`compress` encode call sites in `hlwrite`, and the `GTKHX_USE_HXNET` install-over-socket path from R3.3.e-4c–4e. The C crypto *modules* themselves (`hope.c` / `compress.c` / `cipher.c`) are the remaining **WAVE 3** cleanup. |
 | R3.3.e-4h | not started, on-demand | Retry/drain mechanism for `hx_bridge_send_frame` returning `HXNET_SEND_FULL`. Today's policy is "treat FULL as a fatal actor-wedge signal" — paired with `DEFAULT_COMMAND_CAPACITY = 256` it should never fire under realistic workloads. If profiling ever shows FULL hitting in practice (heavy bursts on a slow consumer), the right fix is an ordered drain idle: leave bytes in `htlc->out` on FULL, arm a `g_idle_add` retry, and queue subsequent `hlwrite` calls behind the drain so frame ordering is preserved. Until then, closing-on-FULL is correct because FULL with cap=256 means the tokio task is genuinely stuck. |
 | R3.3.e-5 | ✅ harness-coverage / live matrix follow-up | Tier 3 `test_real_connect_hxnet.c` exercises the env-var path through the fake server. Live mhxd / Janus / hlserver.com matrix runs are the follow-up. |
 
@@ -644,32 +644,25 @@ broke into a planned chain of sub-phases. Status as of writing:
   `cipher_decode` path, which advances the live cipher state
   object; the bridge snapshots that state at install time.
 
-### TLS over hxnet
+### TLS over hxnet — shipped (option 1)
 
-Out of scope for R3.3.e — the existing C-side `GTlsConnection` path
-keeps owning TLS connections. Three options exist:
+**Shipped in Phase G.** Option 1 (the `tokio-rustls` adapter) was
+taken: `run_plaintext_tls_lifecycle` wraps the `TcpStream` in
+`tokio_rustls::client::TlsStream` from byte zero, with a WebPKI-first
+verifier that falls back to the C-side trust-on-first-use known-hosts
+store (`hx_tls_orchestrator_verify_cert`) only when WebPKI validation
+fails. SNI plumbing and the GTK trust-prompt bridge are wired. HOPE-on-TLS
+is rejected up front (redundant double-encryption). The control channel
+no longer keeps any C-side `GTlsConnection`; TLS for the **HTXF
+subchannels** likewise moved to rustls when HTXF migrated
+(`hx_tls_verify_subchannel_cert`). See `docs/rust/phase-g-migration.md`
+and `docs/tls-scoping.md`.
 
-1. **`tokio-rustls` adapter** (preferred long-term). Same shape as
-   the cipher adapters — wrap any `AsyncRead + AsyncWrite` with a
-   TLS layer that fits into `transform::compose` underneath the
-   HOPE cipher (HOPE-on-TLS is redundant encryption — pointless
-   but harmless). Substantial work: cert validation against
-   gtkhx's existing `tls_trust.c` known-hosts store, SNI plumbing,
-   trust-on-first-use UX bridging from Rust back into the GTK
-   dialog.
-2. **TLS-terminates-in-C, plaintext over `socketpair`.** Keep
-   `GTlsConnection`; bridge decrypted bytes through a
-   `socketpair(AF_UNIX, SOCK_STREAM, 0)` into hxnet. Adds an
-   extra `read` + `write` syscall + memcpy per byte direction.
-   Tactical only — useful as a stepping stone but not a long-term
-   destination.
-3. **Permanent split**: TLS stays on the legacy `GIOStream` path
-   forever. Cheap in the short term, but means `control_*` and
-   `htlc_stream_*` helpers can never be deleted.
-
-The expected path is option 1 as a Phase R3.4 or R3.5 effort with
-its own scoping doc. Until then, R3.3.e-4f only deletes the
-non-TLS portion of the legacy GIOStream path; TLS keeps it.
+For the record, the options that were *not* taken: (2) TLS-terminates-in-C
+with plaintext bridged over a `socketpair` — tactical stepping stone
+only; (3) a permanent split leaving TLS on the legacy `GIOStream` path —
+rejected because it would have blocked deleting the `control_*` /
+`htlc_stream_*` helpers (which delete-old-connect has since removed).
 
 **Gotchas**
 

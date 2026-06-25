@@ -10,7 +10,7 @@
 /*
  * tests/integration/test_phase_g_connect.c — Tier 3 coverage for the
  * Phase G "hxnet-owns-the-whole-lifecycle" plaintext connect path
- * (docs/phase-g-migration.md).
+ * (docs/rust/phase-g-migration.md).
  *
  * Unlike test_real_connect_hxnet.c (which drives the production
  * hx_connect against the in-process fake_server and stops at the
@@ -51,7 +51,7 @@
  *       and a clear error bit — i.e. mhxd accepted the guest login AND
  *       the Option-B replay + trans-pinning round-trips correctly.
  *       This is the regression guard for the two silent-failure axes
- *       called out in docs/phase-g-migration.md (trans mismatch and
+ *       called out in docs/rust/phase-g-migration.md (trans mismatch and
  *       install ordering): either one would leave the replayed frame
  *       undispatched, so connect_test_rcv_count would stay 0.
  *
@@ -288,7 +288,7 @@ test_orchestrator_login (void)
      * the server's post-login pushes (SELFINFO / user-list) dispatch
      * afterwards. A count of 0 would mean the replayed frame never
      * dispatched — the trans-mismatch / install-ordering silent
-     * failures from docs/phase-g-migration.md. */
+     * failures from docs/rust/phase-g-migration.md. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
     /* mhxd sends the plain 0x00010000 TASK opcode for every TASK
      * reply (the high-16-bit opcode-echo variant is a Heidrun-family

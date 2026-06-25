@@ -280,7 +280,7 @@ The fogWraith spec adds voice chat to Hotline via a server-side SFU: clients neg
 Locked-in choices (kept for the historical record):
 
 - **WebRTC stack: gstreamer-rs + gstreamer-webrtc-rs** in the `hxvoice-runtime` crate. The original plan staged a C `webrtcbin` first with a Rust runtime as the post-R3/R4 follow-up; in practice the all-Rust runtime landed during 8.C without needing the broader R3/R4 prerequisites. See voice-chat-plan §3 and §11.
-- **Hybrid Rust/C split** per `docs/RUST-ROADMAP.md` Phase R2 + the `hxvoice` and `hxvoice-runtime` crates:
+- **Hybrid Rust/C split** per `docs/rust/ROADMAP.md` Phase R2 + the `hxvoice` and `hxvoice-runtime` crates:
   - **Wire protocol → Rust** (`rust/crates/hotline-proto/src/voice.rs`): typed builders/parsers, SDP-summary + ICE-JSON + participant-blob walkers, mid-label decoder. Same shape chat-history / tracker-v3 / news use.
   - **Session state machine → Rust** (`rust/crates/hxvoice/`): pure `SessionMachine` with `step(Event) -> Vec<Action>`. No GLib, no GStreamer, no GTK — just typed events in, typed actions out. Owns the renegotiation queue, mid→UID map, mute flag, timeout policy, implicit-leave logic. Tested against the spec's annotated lifecycle examples + targeted regressions.
   - **GStreamer pipeline + webrtcbin runtime → Rust** (`rust/crates/hxvoice-runtime/`): owns the `gst::Pipeline` / `webrtcbin` instances, runs the SDP / ICE / pad-added / connection-state dispatch, threads the per-pad RTP-activity counter through the receive bins for the voice indicator. Talks to C via the `gtkhx_voice_runtime_*` FFI surface.
