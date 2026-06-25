@@ -23,7 +23,7 @@ connection and HTXF subchannels already are.
   HTXF-style "C connects, hands fd to Rust" split. We're explicitly *not*
   preserving SOCKS via GLib's `GProxyResolver` here; proxy support is a
   later `tokio-socks` add (already noted as the plan in
-  `hxnet/src/connect.rs`), accepted as a temporary gap, not a blocker.
+  `rust/crates/hxnet/src/connect.rs`), accepted as a temporary gap, not a blocker.
 
 ## Current state (what's already done)
 
@@ -111,7 +111,7 @@ the module — no fd round-trip to C:
 **Proxy note:** `tokio::net::TcpStream::connect` is not proxy-aware, so
 this drops the transparent SOCKS that the current `GSocketClient` path
 gets from `GProxyResolver`. That's an accepted, temporary gap — when it
-matters, `hxnet/src/connect.rs` already names `tokio-socks` as the add,
+matters, `rust/crates/hxnet/src/connect.rs` already names `tokio-socks` as the add,
 and doing it once in `hxnet` covers the main connection, HTXF, and the
 tracker together rather than per-call.
 
