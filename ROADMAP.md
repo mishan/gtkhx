@@ -14,7 +14,7 @@ A quick orientation, since everything below references it:
 - **Toolkit:** GTK+ 1.2, Glib 1.2, optional gdk-pixbuf 0.x.
 - **Build:** autoconf (`configure.in`, not `.ac`) + automake; gettext (`fr` translation); `gtk-config`-era macros.
 - **Threading:** custom `gtkthreads.c` — pipe + `pthread_cond` + `gdk_input_add`. Predates `g_main_context_invoke()` and friends.
-- **Protocol compat:** Full backward compatibility with Hotline 1.2 and 1.5 is a **hard requirement**. The wire-format and HOPE negotiation code is not to be modernized in a way that breaks legacy servers — modern transport security is a separate Phase ∞ project that requires server-side cooperation.
+- **Protocol compat:** Full backward compatibility with Hotline 1.2 and 1.5 is a **hard requirement**. The wire-format and HOPE negotiation code is not to be modernized in a way that breaks legacy servers. Modern transport security landed separately via the dedicated-TLS-port model (Phase 7), which needs no changes to the legacy wire format.
 - **Reference server:** [mhxd](https://github.com/kangsterizer/mhxd) (2023 merge of three `hxd` forks) is the natural test target. Same codebase family as GtkHx's protocol stack.
 - **Networking:** raw sockets, optional IPv6 via `getaddrinfo`. Connection runs on a pthread.
 - **Crypto:** in-tree MD5, SHA, HAVAL, HMAC; OpenSSL only for `RAND_bytes` and the cipher state structs (Blowfish/RC4; IDEA disabled via `CONFIG_NO_IDEA`).
@@ -33,7 +33,7 @@ A quick orientation, since everything below references it:
 
 ---
 
-## Phase 0 — Hygiene & baseline
+## Phase 0 — Hygiene & baseline ✅
 
 **Goal:** Get the tree into a state where modern tooling can actually look at it without choking, and where every later phase has a clean starting point.
 
@@ -49,7 +49,7 @@ A quick orientation, since everything below references it:
 
 ---
 
-## Phase 1 — Modernize C and build, freeze GTK 1.2 baseline
+## Phase 1 — Modernize C and build, freeze GTK 1.2 baseline ✅
 
 **Goal:** Make the code compile under a modern C compiler with strict warnings, even if we still reference GTK 1.2 conceptually. Most of this work is GTK-version-agnostic and pays dividends on every subsequent phase.
 
@@ -70,7 +70,7 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 
 ---
 
-## Phase 2 — Port to GTK+ 2
+## Phase 2 — Port to GTK+ 2 ✅
 
 **Goal:** Get a binary that runs on a modern Linux desktop, even if it looks dated. This is the **biggest single jump** because of the two custom widgets and the signal API change.
 
@@ -107,7 +107,7 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 
 ---
 
-## Phase 3 — Port to GTK+ 3
+## Phase 3 — Port to GTK+ 3 ✅
 
 **Goal:** Modern theming, cairo drawing, no deprecated APIs. After Phase 2 this is mostly cleanup.
 
@@ -127,7 +127,7 @@ The reality: **GTK+ 1.2 is gone from every modern distro.** You'd need a vintage
 
 ---
 
-## Phase 4 — Port to GTK 4
+## Phase 4 — Port to GTK 4 ✅
 
 **Goal:** Land on the current toolkit. The breaking changes here are conceptual, not just renames. Following the Phase 3 pattern: bump the meson dep first, then drive the resulting punch list to zero with mostly-mechanical sub-phases, ending on a runnable binary.
 
@@ -257,9 +257,9 @@ These are independent of the GTK climb and can be slotted in earlier (some of th
 
 ---
 
-## Phase 7 — TLS (separate-port model, no protocol changes)
+## Phase 7 — TLS (separate-port model, no protocol changes) ✅
 
-Mobius (and now Janus) shipped plain TLS on a dedicated port (5600 HTLS-TLS, 5601 HTXF-TLS) with no in-band negotiation — connect, TLS handshake, then speak the regular Hotline 1.x protocol over the encrypted stream. That's a far smaller swing than the Hotline-NG redesign in the section below, and gives us real modern transport security against existing servers without ecosystem-wide cooperation. See `docs/tls-scoping.md` for the full plan.
+Mobius (and now Janus) shipped plain TLS on a dedicated port (5600 HTLS-TLS, 5601 HTXF-TLS) with no in-band negotiation — connect, TLS handshake, then speak the regular Hotline 1.x protocol over the encrypted stream. It needs no new protocol layer and gives us real modern transport security against existing servers without ecosystem-wide cooperation. See `docs/tls-scoping.md` for the full plan.
 
 Sub-phases:
 
@@ -305,9 +305,11 @@ Phase 8 follow-ups (small):
 
 ---
 
-## Phase 9 — Inline media (fogWraith capability extension)
+## Phase 9 — Inline media (fogWraith capability extension) ✅
 
 The fogWraith spec adds inline images to chat via a server-validated upload/download pipeline: capable clients send `TranUploadMedia` (750) to get an opaque media handle, attach the handle + canonical MIME to a normal `TranChatSend` / `TranSendInstantMsg`, and capable recipients fetch the canonical bytes via `TranDownloadMedia` (751). Capability bit 3 (`HTLC_CAP_INLINE_MEDIA = 0x0008`) is already reserved in `src/hotline.h`. Full plan at `docs/inline-media-plan.md`.
+
+**Status**: shipped. All sub-phases (9.A–9.F) landed, including the inline render path via multi-subline padding in xtext; the deferred items below (animated GIF, etc.) remain as noted.
 
 The honest design risk is the receive-render path: xtext's vertical layout is line-uniform everywhere (`fontsize × subline_count`), and no existing patch in HexChat's lineage carries inline images. The plan splits "spec conformance" from "true inline render" so the wire stack ships against real servers before any xtext surgery lands.
 
@@ -328,23 +330,6 @@ Locked-in choices:
 - **JPEG / PNG / GIF only.** Spec-mandated; explicit reject of SVG / WebP / AVIF / HEIC at sniff time.
 
 Janus is the inline-media Tier 3 target. Confirming Janus's actual support is the first step of 9.F (look for capability echo of bit 3 + the `DATA_CHAT_MEDIA_MAX_*` advisory fields in the LOGIN reply); the fallback if support isn't there is a Go mock server under `tests/integration/mock-server/inline-media/`.
-
----
-
-## Phase ∞ — Modernized Hotline protocol (joint with mhxd)
-
-This is the back-of-the-roadmap "if we ever want real modern crypto" section. Calling it out separately because it's a fundamentally different kind of work.
-
-The existing Hotline 1.x protocol is plaintext over TCP, with optional Blowfish/RC4 negotiated via HOPE — neither of which is meaningful security in 2026 (RC4 is broken, Blowfish-CBC has small-block issues). To get real modern transport security we'd have to:
-
-1. **Design a new protocol layer** — call it Hotline-NG, or just rev the HOPE handshake to negotiate "TLS 1.3 from here on." Either works; the latter is less disruptive.
-2. **Implement it on the server side.** mhxd is the obvious target since we'd be working with it as our reference server anyway. This is where contributing back upstream matters.
-3. **Implement it on the client side in GtkHx**, gated behind a server capability flag so legacy 1.2/1.5 servers continue to work.
-4. **Get other clients/servers to adopt it.** This is the part that makes this Phase ∞ — the Hotline ecosystem is a handful of users on a handful of servers, and convincing any of them to upgrade is a social problem, not a technical one.
-
-**Realistic framing:** treat this as "nice if it happens, don't block on it." The crypto-stack choice (Nettle for Hotline ciphers, GLib for hashes) deliberately leaves room to add GnuTLS later as a separate dependency *only* if we get to the point where there's a server that supports it.
-
-**A more pragmatic intermediate:** if you just want client↔server traffic off the wire in plaintext, a VPN/WireGuard tunnel between client and server is an ops-level fix that doesn't require touching either codebase.
 
 ---
 
@@ -388,7 +373,7 @@ Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiab
   it's a userland PRNG that has to be seeded from the kernel CSPRNG
   anyway, so all it would add is state-management complexity.
 
-**What this is *not*:** This is *not* a path to TLS. There is no Hotline server in the wild speaking TLS — the protocol predates that ever being a thing, and Hotline is dead enough that nobody's adding it. Real modern transport security is a separate, much bigger initiative: see "Phase ∞ — Modernized Hotline protocol" below.
+**What this is *not*:** This crypto-stack work is about the legacy HOPE ciphers (Blowfish, the retired RC4), not transport security. Modern transport security shipped separately via the dedicated-TLS-port model — Mobius and Janus expose plain TLS on a separate port with no protocol changes, and GtkHx speaks it end-to-end. See Phase 7.
 
 ---
 
