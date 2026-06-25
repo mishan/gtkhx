@@ -89,10 +89,12 @@ struct htxf_conn {
 	 * canceled flag set and skip their work, and the last unref
 	 * frees. No use-after-free; no race window.
 	 *
-	 * Mutate refcount only via g_atomic_int_*. Mutate `canceled`
-	 * only on the main thread (so the worker reads a coherent
-	 * value via volatile-equivalent access — gint reads are
-	 * atomic on every architecture we run on). */
+	 * Mutate refcount only via g_atomic_int_*. `canceled` is now
+	 * cross-thread too — the main thread stores it (xfer_delete /
+	 * xfers_delete_all) and the worker reads it at every transfer
+	 * read/write boundary (htxf_io_read/_write) — so every access,
+	 * read and write, goes through g_atomic_int_* (it's a gint-width
+	 * gboolean for exactly this reason). */
     gint refcount;
     gboolean canceled;
     guint32 ref; /* xfer id */

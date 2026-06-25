@@ -60,13 +60,25 @@ htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len)
      * loops already bail on a `< 1` return. The hxnet abort token
      * (htxf_io_abort) handles the orthogonal case of a read already
      * parked in recv(); this catches a cancel that lands between reads.
-     * Banner's transient htxf has canceled == 0, so this is a no-op there. */
-    if (htxf->canceled) {
+     * Banner's transient htxf has canceled == 0, so this is a no-op there.
+     *
+     * htxf->canceled is written by the main thread (xfer_delete /
+     * xfers_delete_all) and read here on the worker thread, so every
+     * access goes through g_atomic_int_* to avoid a data race. */
+    if (g_atomic_int_get (&htxf->canceled)) {
         errno = ECANCELED;
         return -1;
     }
     ssize_t r = hxnet_htxf_read ((HtxfConn *) htxf->hx, (guint8 *) buf, len);
     if (r < 0) {
+        /* A cancel may have landed while we were parked inside the hxnet
+         * read (the abort token shut the socket down to wake us). Re-check
+         * so an abort-driven wakeup reads back as ECANCELED rather than a
+         * spurious EIO "channel error" the worker would log as a fault. */
+        if (g_atomic_int_get (&htxf->canceled)) {
+            errno = ECANCELED;
+            return -1;
+        }
         debug_log ("xfer", "htxf_io_read: hxnet channel error");
         errno = EIO;
         return -1;
@@ -81,14 +93,21 @@ htxf_io_write (struct htxf_conn *htxf, const void *buf, size_t len)
         errno = EINVAL;
         return -1;
     }
-    /* Cooperative-cancel boundary — see htxf_io_read. */
-    if (htxf->canceled) {
+    /* Cooperative-cancel boundary — see htxf_io_read (atomic access to
+     * the cross-thread canceled flag, same rationale). */
+    if (g_atomic_int_get (&htxf->canceled)) {
         errno = ECANCELED;
         return -1;
     }
     ssize_t w
         = hxnet_htxf_write ((HtxfConn *) htxf->hx, (const guint8 *) buf, len);
     if (w < 0) {
+        /* An abort-driven wakeup mid-write classifies as cancel, not a
+         * channel fault — see htxf_io_read. */
+        if (g_atomic_int_get (&htxf->canceled)) {
+            errno = ECANCELED;
+            return -1;
+        }
         debug_log ("xfer", "htxf_io_write: hxnet channel error");
         errno = EIO;
         return -1;

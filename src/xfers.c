@@ -122,7 +122,10 @@ static gboolean
 fu_dispatch (gpointer data)
 {
     struct fu_job *j = data;
-    if (!j->htxf->canceled) {
+    /* canceled is a cross-thread flag (worker reads it in htxf_io_read/
+	 * _write); access it atomically everywhere for a single coherent
+	 * memory model, even though this dispatcher runs on the main thread. */
+    if (!g_atomic_int_get (&j->htxf->canceled)) {
         gtkhx_session_emit_file_update (gtkhx_session_get_default (),
                                         &the_session, j->htxf);
     }
@@ -464,7 +467,10 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
 	 * worker thread will take its own ref before pthread_create
 	 * (in xfer_ready_write). */
     htxf->refcount = 1;
-    htxf->canceled = FALSE;
+    /* canceled is read on the worker thread (htxf_io_read/_write); use
+	 * atomics for every access. This initial store is before any worker
+	 * exists, but stay consistent with the cross-thread stores below. */
+    g_atomic_int_set (&htxf->canceled, FALSE);
 
     /* Allocate the cancellation token now, on the main thread, so it's
 	 * live for the htxf's whole lifetime — armed later by htxf_connect
@@ -1740,7 +1746,8 @@ xfers_delete_all (void)
 
     for (i = 0; i < nxfers; i++) {
         struct htxf_conn *htxf = xfers[i];
-        htxf->canceled = TRUE;
+        /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
+        g_atomic_int_set (&htxf->canceled, TRUE);
         /* Shut the subchannel socket down to wake a parked worker.
 		 * pthread_cancel stays for X1 as a backstop; once the worker
 		 * moves onto tokio's blocking pool (X3) it's the abort alone. */
@@ -1804,7 +1811,8 @@ xfer_delete (struct htxf_conn *htxf)
         return;
     }
 
-    htxf->canceled = TRUE;
+    /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
+    g_atomic_int_set (&htxf->canceled, TRUE);
     /* Wake a worker parked in a blocking subchannel read/write by
 	 * shutting its socket down; the htxf_io_read/_write canceled-check
 	 * then turns the resulting error into a clean exit. pthread_cancel

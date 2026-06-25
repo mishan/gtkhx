@@ -794,10 +794,14 @@ pub unsafe extern "C" fn hxnet_htxf_abort_arm(handle: *mut HtxfConn, token: *con
         return;
     }
     let h = &mut *handle;
-    // Only arm if we can duplicate the socket — otherwise there's no
-    // handle to wake a parked read/write, so leave `h.abort` None and
-    // let the C-side canceled check carry cancellation. Keeps the
-    // invariant "h.abort is Some ⇒ the token can wake this channel".
+    // Only arm if we can duplicate the socket: the clone is what lets the
+    // token wake a *parked* read/write. If the dup fails we leave
+    // `h.abort` None and let the C-side canceled check carry cancellation.
+    // (Note this is "h.abort is Some ⇒ a wake-socket was handed to the
+    // token", not a guarantee the wake always fires: HtxfAbort::arm drops
+    // the socket if an abort already raced ahead of arm — see its doc — so
+    // in that rare case the latched flag is still observed but an
+    // already-parked read can't be woken.)
     let Some(sock) = h.inner.try_clone_socket() else {
         return;
     };
