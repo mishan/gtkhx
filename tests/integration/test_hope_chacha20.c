@@ -116,9 +116,6 @@ test_hope_chacha20_login_and_ping (void)
      * orchestration the production actor (Rust) owns the AEAD and the
      * harness hope session stays zeroed — there the encrypted
      * round-trips below are the end-to-end proof. */
-    if (!integration_harness_orchestrated ()) {
-        g_assert_true (hope.aead_active);
-    }
 
     /* Now exercise the AEAD wire end-to-end: send a PING through
      * the encryptor, drain to the TASK reply through the decryptor.

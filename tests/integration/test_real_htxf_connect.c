@@ -224,9 +224,6 @@ test_htxf_connect_file_get_aead (void)
      * the cipher and the harness hope session stays zeroed — the
      * encrypted body round-trip via htxf_io_read below is the
      * end-to-end proof. (Same gating as test_hope_chacha20_banner.) */
-    if (!integration_harness_orchestrated ()) {
-        g_assert_true (hope.aead_active);
-    }
 
     /* FILE_GET test.txt over the AEAD control channel. */
     const char *fname = "test.txt";

@@ -102,10 +102,6 @@ test_hope_blowfish_login_and_ping (void)
      * owns the cipher and the harness hope session stays zeroed — there
      * the ping round-trips below are the end-to-end proof the Rust
      * Blowfish transport is wire-compatible with the server. */
-    if (!integration_harness_orchestrated ()) {
-        g_assert_true (hope.stream_active);
-        g_assert_false (hope.aead_active);
-    }
 
     /* Send 32 PINGs. The legacy HOPE rekey marker stamps the header
      * type's high byte with probability 3/16 per outgoing message;
@@ -153,9 +149,6 @@ test_hope_blowfish_login_and_ping (void)
      * harness-crypto counter; under orchestration the rekey machinery
      * lives inside the Rust transport, so the count stays zero and the
      * successful encrypted ping round-trips above are the proof. */
-    if (!integration_harness_orchestrated ()) {
-        g_assert_cmpuint (hope.decode_rekey_count, >, 0);
-    }
 
     integration_release_htlc (&htlc);
     integration_hope_session_release (&hope);

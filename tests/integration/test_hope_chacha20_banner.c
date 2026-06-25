@@ -145,9 +145,6 @@ test_hope_chacha20_banner_htxf (void)
      * production actor (Rust) owns the cipher and the harness hope
      * session stays zeroed — the encrypted round-trip below is the
      * end-to-end proof. */
-    if (!integration_harness_orchestrated ()) {
-        g_assert_true (hope.aead_active);
-    }
 
     /* Janus (and any 1.5-spec-compliant server) only fires
      * HTLS_HDR_BANNER after the client sends AGREEMENTAGREE — the
