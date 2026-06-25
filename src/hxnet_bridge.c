@@ -806,7 +806,6 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
  * already living on htlc, then spawns the actor with that
  * stack. */
 #include "cipher.h" /* CIPHER_*, chacha_aead_state */
-#include "cipher_aead.h" /* CIPHER_AEAD_DIR_* tags */
 #include "compress.h" /* COMPRESS_* */
 #include "protocol.h" /* struct htlc_conn cipher_*_key fields */
 

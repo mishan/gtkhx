@@ -31,7 +31,7 @@
 #include "login_packet.h"
 #include "agreement_packet.h"
 #include "chat_history.h"
-#include "cipher_aead.h"
+#include "cipher.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
 
@@ -1141,11 +1141,10 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
                                         guint32 channel_id, guint64 before,
                                         guint64 after, guint16 limit)
 {
-    /* HOPE-aware send. Same chunk-building path as the plain
-     * variant — hx_get_chat_history_build_chunks → hlpack_chunks —
-     * but routed through cipher_aead_seal (AEAD) or a plain send via
-     * integration_send_message_hope, matching the cipher_mode the
-     * session negotiated. */
+    /* HOPE-aware send. Same chunk-building path as the plain variant
+     * (hx_get_chat_history_build_chunks → hlpack_chunks), then a plain
+     * send: the orchestrator owns the control-channel crypto, so the
+     * harness just writes the framed bytes through the synthetic fd. */
     guint32 trans = htlc->trans;
 
     /* Build the chunks first so we can hand them to hlpack_chunks
@@ -1172,22 +1171,6 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
     htlc->out.pos = 0;
     htlc->out.len = 0;
     hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
-
-    if (hope && hope->aead_active) {
-        /* Shared seal-and-alloc helper — same cap math as the rest
-         * of the AEAD send paths. */
-        gsize framed_n = 0;
-        guint8 *framed = cipher_aead_seal_alloc (&hope->encode_state,
-                                                 htlc->out.buf, htlc->out.len,
-                                                 &framed_n);
-        gboolean ok = framed && integration_send (fd, framed, framed_n);
-        g_free (framed);
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        return ok ? trans : 0;
-    }
 
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
@@ -1606,7 +1589,6 @@ integration_hope_session_release (integration_hope_session *hope)
     hope->aead_active = 0;
 }
 
-
 int
 integration_open_login_hope_or_skip (
     const hx_test_server *srv, struct htlc_conn *htlc,
@@ -1750,25 +1732,6 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
     hlpack (htlc, type, flag, hc, ap);
     va_end (ap);
 
-    if (hope && hope->aead_active) {
-        /* Frame the just-packed message: 4-byte BE length prefix +
-         * ciphertext + 16-byte Poly1305 tag. Shared seal-and-alloc
-         * helper keeps the cap math (LENGTH_PREFIX + pt_len + TAG)
-         * in one place — see cipher_aead.h. */
-        gsize framed_n = 0;
-        guint8 *framed = cipher_aead_seal_alloc (&hope->encode_state,
-                                                 htlc->out.buf, htlc->out.len,
-                                                 &framed_n);
-        gboolean ok = framed && integration_send (fd, framed, framed_n);
-        g_free (framed);
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        return ok;
-    }
-
-
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
     htlc->out.buf = NULL;
@@ -1794,8 +1757,8 @@ integration_send_agreementagree_hope (int                       fd,
      * that drains for the banner times out into a skip.
      *
      * Framing path mirrors integration_send_get_chat_history_hope:
-     * hlpack_chunks → cipher_aead_seal / plain send, matching the
-     * cipher_mode the session negotiated. The harness
+     * hlpack_chunks → plain send (the orchestrator owns the crypto).
+     * The harness
      * passes display_name verbatim (typically ASCII for tests);
      * production calls gtkhx_text_for_wire at the caller for UTF-8
      * vs Mac Roman, which is identical to ASCII for the test
@@ -1822,22 +1785,6 @@ integration_send_agreementagree_hope (int                       fd,
     htlc->out.len = 0;
     hlpack_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
 
-    if (hope && hope->aead_active) {
-        /* Shared seal-and-alloc helper — same cap math as the rest
-         * of the AEAD send paths. */
-        gsize framed_n = 0;
-        guint8 *framed = cipher_aead_seal_alloc (&hope->encode_state,
-                                                 htlc->out.buf, htlc->out.len,
-                                                 &framed_n);
-        gboolean ok = framed && integration_send (fd, framed, framed_n);
-        g_free (framed);
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-        htlc->out.pos = 0;
-        htlc->out.len = 0;
-        return ok;
-    }
-
     gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
     g_free (htlc->out.buf);
     htlc->out.buf = NULL;
@@ -1846,112 +1793,9 @@ integration_send_agreementagree_hope (int                       fd,
     return ok;
 }
 
-
-/* Append bytes to hope->rx_accum, growing as needed. */
-static void
-rx_accum_append (integration_hope_session *hope, const guint8 *bytes,
-                 gsize n)
-{
-    if (hope->rx_accum_len + n > hope->rx_accum_cap) {
-        gsize new_cap = hope->rx_accum_cap ? hope->rx_accum_cap * 2 : 4096;
-        while (new_cap < hope->rx_accum_len + n) {
-            new_cap *= 2;
-        }
-        hope->rx_accum = g_realloc (hope->rx_accum, new_cap);
-        hope->rx_accum_cap = new_cap;
-    }
-    memcpy (hope->rx_accum + hope->rx_accum_len, bytes, n);
-    hope->rx_accum_len += n;
-}
-
-/* Try to consume one full AEAD frame from hope->rx_accum. Returns
- * the plaintext length on success (with htlc->in populated) and
- * shifts any leftover bytes to the start of the accumulator. Returns
- * -1 on AEAD-open failure (test should fail loudly). Returns 0 if
- * not enough bytes have arrived yet. */
-static gssize
-try_consume_aead_frame (struct htlc_conn *htlc,
-                       integration_hope_session *hope)
-{
-    if (!hope->aead_active) {
-        return 0;
-    }
-    size_t frame_size = cipher_aead_peek_frame_size (hope->rx_accum,
-                                                     hope->rx_accum_len);
-    if (!frame_size || hope->rx_accum_len < frame_size) {
-        return 0;
-    }
-
-    /* Plaintext = frame - prefix - tag. */
-    gsize pt_cap = frame_size - CIPHER_AEAD_LENGTH_PREFIX
-                   - CIPHER_AEAD_TAG_SIZE;
-    g_free (htlc->in.buf);
-    htlc->in.buf = g_malloc (pt_cap > 0 ? pt_cap : 1);
-    size_t pt_len = cipher_aead_open (&hope->decode_state, hope->rx_accum,
-                                      frame_size, htlc->in.buf, pt_cap);
-    if (!pt_len) {
-        g_free (htlc->in.buf);
-        htlc->in.buf = NULL;
-        return -1;
-    }
-    htlc->in.pos = pt_len;
-    htlc->in.len = pt_len;
-
-    /* Shift leftover bytes down. */
-    gsize leftover = hope->rx_accum_len - frame_size;
-    if (leftover) {
-        memmove (hope->rx_accum, hope->rx_accum + frame_size, leftover);
-    }
-    hope->rx_accum_len = leftover;
-    return (gssize) pt_len;
-}
-
-
 gboolean
 integration_recv_message_hope (int fd, struct htlc_conn *htlc,
                               integration_hope_session *hope, int timeout_ms)
 {
-    if (hope && hope->aead_active) {
-        /* First check whether we already have a buffered frame. */
-        gssize n = try_consume_aead_frame (htlc, hope);
-        if (n > 0) {
-            return TRUE;
-        }
-        if (n < 0) {
-            return FALSE;
-        }
-
-        /* Read more bytes from the socket until a full frame
-         * accumulates. Cap iterations so a misbehaving server can't
-         * stall us indefinitely. */
-        for (int iter = 0; iter < 32; iter++) {
-            fd_set rfds;
-            FD_ZERO (&rfds);
-            FD_SET (fd, &rfds);
-            struct timeval tv = {
-                .tv_sec = timeout_ms / 1000,
-                .tv_usec = (timeout_ms % 1000) * 1000,
-            };
-            int sr = select (fd + 1, &rfds, NULL, NULL, &tv);
-            if (sr <= 0) {
-                return FALSE;
-            }
-            guint8 chunk[4096];
-            ssize_t got = read (fd, chunk, sizeof (chunk));
-            if (got <= 0) {
-                return FALSE;
-            }
-            rx_accum_append (hope, chunk, (gsize) got);
-            gssize m = try_consume_aead_frame (htlc, hope);
-            if (m > 0) {
-                return TRUE;
-            }
-            if (m < 0) {
-                return FALSE;
-            }
-        }
-        return FALSE;
-    }
-
     return integration_recv_message (fd, htlc, timeout_ms);
 }

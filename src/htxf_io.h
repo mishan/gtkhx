@@ -38,7 +38,7 @@
 #include <glib.h>
 #include <sys/types.h> /* ssize_t */
 
-#include "cipher_aead.h" /* chacha_aead_state */
+#include "cipher.h"
 
 struct htxf_conn;
 

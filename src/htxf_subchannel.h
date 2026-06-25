@@ -68,8 +68,6 @@
 #include <stdint.h>
 #include <stddef.h>
 
-#include "cipher_aead.h"
-
 struct htxf_conn;
 
 /* Maximum bytes the preamble builder writes. 16 for the legacy
@@ -116,29 +114,5 @@ extern size_t hx_htxf_subchannel_pack_preamble (
     guint32 ref, guint64 total_size,
     guint16 type, guint16 flags,
     gboolean size64);
-
-/*
- * Arm `xfer` for per-transfer ChaCha20-Poly1305 AEAD framing of
- * the subchannel body. Mirror of what network.c::htxf_connect
- * does after writing the plaintext preamble:
- *
- *   - htxf_io_init (zeros the receive-side aead_io accumulator)
- *   - cipher_aead_derive_transfer_keys (HKDF off the session_key
- *     + ctrl encode/decode states + ref — mixes ref into the salt
- *     so two transfers within one session can never share a nonce)
- *   - aead_active = TRUE so subsequent htxf_io_read / htxf_io
- *     _write seal/open through the per-transfer keys
- *
- * Caller is responsible for the gate — only invoke this when the
- * parent control channel actually negotiated CIPHER_MODE_AEAD.
- * The non-AEAD callers leave aead_active=FALSE and the htxf_io
- * wrappers fall through to raw read()/write().
- */
-extern void hx_htxf_subchannel_arm_aead (
-    struct htxf_conn *xfer,
-    const guint8 *session_key, gsize session_key_len,
-    const chacha_aead_state *ctrl_encode,
-    const chacha_aead_state *ctrl_decode,
-    guint32 ref);
 
 #endif /* HX_HTXF_SUBCHANNEL_H */
