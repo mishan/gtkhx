@@ -90,7 +90,7 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
  * binaries that link cipher.c without network.c. Test harness
  * behaviour: g_critical (visible failure) and zero htlc->fd so any
  * subsequent integration_send/recv loop terminates. Tests that DO
- * link network.c (test_integration_real_connect, real_tls) get the
+ * link network.c (real_connect, real_htxf_connect) get the
  * real symbol and skip this stub via the link-order resolution. */
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 __attribute__((weak)) void
@@ -132,7 +132,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  *
  * The HOPE and TLS open helpers are deliberately NOT routed here: they
  * drive their own crypto/transport over a raw fd and are covered by
- * the dedicated orchestrator tests (test_phase_g_connect). Setting the
+ * the dedicated orchestrator tests (test_real_connect). Setting the
  * env var leaves those paths on the legacy transport.
  */
 

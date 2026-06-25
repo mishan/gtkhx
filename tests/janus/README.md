@@ -168,8 +168,9 @@ Also enabled:
   SAN=DNS:localhost,IP:127.0.0.1, 10-year validity, 2048-bit RSA)
   into `Server/tls/` before the seed step (the seed-time Janus
   process refuses to start without it). Janus is the canonical TLS
-  test target — `test_integration_real_tls` and the Tier 3 TLS
-  matrix rows depend on this. The Phase 1 client trust path
+  test target — `real_connect` (tls_login / tls_mismatch_rejected),
+  the `real_tls_login` / `_banner` / `_file_get` suite, and the Tier 3
+  TLS matrix rows depend on this. The Phase 1 client trust path
   accepts any cert via an accept-certificate stub; the Phase 3
   trust UI lands the actual pinning flow.
 

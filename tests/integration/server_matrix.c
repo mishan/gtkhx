@@ -92,9 +92,9 @@ const hx_test_server hx_test_server_matrix[] = {
          * HTLS / HTXF TLS ports. Host-side mapping follows the same
          * +10 convention the plain ports use (5600→5610,
          * 5601→5611). Janus is the only matrix entry advertising
-         * HX_TEST_CAP_TLS today; the cap-filter routes
-         * test_real_tls (Phase 1) and the upcoming Phase 2 HTXF
-         * TLS tests here. */
+         * HX_TEST_CAP_TLS today; the cap-filter routes the TLS Tier 3
+         * tests (real_connect's tls_login / tls_mismatch_rejected
+         * and the real_tls_login / _banner / _file_get suite) here. */
         .name          = "janus",
         .host          = "127.0.0.1",
         .port          = 5510,

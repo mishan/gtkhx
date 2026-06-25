@@ -14,7 +14,7 @@
  *     htlc_conn and a body handler hook; they're integration-
  *     shaped and are covered by the Tier 3 suite now that the
  *     bridge is wired into the production connect path
- *     (e.g. test_real_connect_hxnet, test_hope_blowfish_hxnet).
+ *     (e.g. real_connect, test_hope_blowfish_hxnet).
  *     Tier 1 here verifies the translation contract those callers
  *     rely on.
  *

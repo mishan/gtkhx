@@ -36,9 +36,10 @@ proto_test_deps = test_deps + [
   rust_hotline_proto_dep,
   # Phase R3.0: src/gtkhx_session.c::gtkhx_session_emit_task_update
   # delegates to gtkhx_bridge_emit_pointer_pair_signal in hxbridge.
-  # The integration harness + real_connect / real_tls tests link
-  # gtkhx_session.c directly and need the staticlib. Same "linker
-  # drops unused members" caveat for tests that don't reference it.
+  # The integration harness + the production-connect Tier 3 tests
+  # (real_connect, real_htxf_connect) link gtkhx_session.c directly
+  # and need the staticlib. Same "linker drops unused members" caveat
+  # for tests that don't reference it.
   rust_hxbridge_dep,
 ]
 
@@ -1250,8 +1251,8 @@ test('fake_connect', test_integration_fake_connect,
      suite   : 'integration',
      timeout : 30)
 
-# phase_g_connect — Tier 3 coverage for the Phase G
-# "hxnet-owns-the-whole-lifecycle" plaintext connect path
+# real_connect — Tier 3 coverage for the production connect path:
+# the "hxnet-owns-the-whole-lifecycle" orchestrator connect
 # (docs/rust/phase-g-migration.md). Drives the production hx_connect
 # (which now dispatches to the hxnet orchestrator unconditionally —
 # the connect-path gate was removed with delete-old-connect) against a
@@ -1260,9 +1261,9 @@ test('fake_connect', test_integration_fake_connect,
 # Asserts mhxd accepted the guest login and the reply was replayed to
 # the C dispatch with the pinned trans + success flag. No fake_server
 # — this one needs a live server, so it fails loudly if mhxd is down.
-test_integration_phase_g_connect = executable(
-  'test_integration_phase_g_connect',
-  'integration/test_phase_g_connect.c',
+test_integration_real_connect = executable(
+  'test_integration_real_connect',
+  'integration/test_real_connect.c',
   'integration/connect_test_stubs.c',
   'integration/server_matrix.c',
   '../src/network.c',
@@ -1297,7 +1298,7 @@ test_integration_phase_g_connect = executable(
   dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
   include_directories : integration_test_inc,
 )
-test('phase_g_connect', test_integration_phase_g_connect,
+test('real_connect', test_integration_real_connect,
      suite   : 'integration',
      timeout : 30)
 
@@ -1317,46 +1318,14 @@ test('orchestrator_harness', test_integration_orchestrator_harness,
      suite   : 'integration',
      timeout : 30)
 
-# real_tls — Tier 3 coverage for docs/tls-scoping.md Phase 1: the
-# Mobius / Janus separate-port TLS model, where the server speaks
-# HTLS-over-TLS from byte zero on a dedicated port. Drives the
-# real production hx_connect with tls=1 against the matrix entry
-# advertising HX_TEST_CAP_TLS (today: Janus on 5610), and asserts
-# the GtkhxSession::connection-state-changed signal sequence
-# completes through to HANDSHAKE_DONE — i.e. TCP connect + GnuTLS
-# handshake + HTLS magic exchange all succeeded over the wrapped
-# socket.
-#
-# Same link surface as test_real_connect (production network.c +
-# its cipher / hope / proto pile, plus connect_test_stubs.c for
-# the UI / fd-table no-ops) but additionally links the
-# integration harness static lib for hx_test_servers_with /
-# server_matrix access — without it the test can't find Janus's
-# tls_port. The connect_test_stubs.c rcv_login_reset and other
-# UI shims still apply because the boundary is the same: the
-# test stops at HANDSHAKE_DONE; no LOGIN reply is consumed.
-#
-# Fails loudly (not g_test_skip) when no TLS-capable server is
-# configured — per the "no silent skips" feedback, a missing
-# matrix entry should surface in CI as a failed test, not a green
-# run. To run a build without the Janus container, use
-# `meson test --no-suite integration` (matching how the rest of
-# the Tier 3 suite handles "no Docker matrix" today).
-# Compile server_matrix.c in directly rather than link_with
-# integration_harness_lib. The harness lib carries its own
-# hlwrite_chunks stub (test-side wire writer) that would collide
-# with the production hlwrite_chunks pulled in from src/network.c
-# below. server_matrix.c is the only harness file we actually
-# need — it's standalone (depends on integration_harness.c's
-# hx_integration_connect_to which we provide as an unused-static
-# tucked into the test, see below).
 # real_htxf_connect — Tier 3 coverage for PRODUCTION htxf_connect, the
 # subchannel-connect function the HTXF->Rust H2 re-wire rewrites (no
 # other test calls it). Links production network.c (for htxf_connect)
 # alongside the harness control helpers; the harness's hlwrite_chunks /
 # hx_htlc_close stubs are __attribute__((weak)) so network.c's strong
-# definitions win. Same big production source list as real_tls plus the
-# harness control files (integration_harness/tls/tracker_matrix +
+# definitions win. Links the full production connect source pile
+# (network.c + cipher / hope / proto / htxf_io) plus the harness
+# control files (integration_harness/tls/tracker_matrix +
 # chat_history that the harness references).
 test_integration_real_htxf_connect = executable('test_integration_real_htxf_connect',
   'integration/test_real_htxf_connect.c',
@@ -1404,9 +1373,9 @@ test('real_htxf_connect', test_integration_real_htxf_connect,
      timeout     : 30)
 
 # real_tls_login — Phase 1 close-out coverage: full login + chat
-# round-trip over TLS. test_real_tls (above) pins the connect-
-# state-machine progression via production hx_connect; this binary
-# uses the GIOStream-based harness (tests/integration/integration_tls.c)
+# round-trip over TLS. real_connect's /real_connect/tls_login pins the
+# connect-state-machine progression via production hx_connect; this
+# binary uses the GIOStream-based harness (tests/integration/integration_tls.c)
 # to actually speak the Hotline protocol over the wrapped socket
 # end-to-end against Janus's tls_port. Asserts SELFINFO parses
 # cleanly after TLS decrypt + a non-ASCII chat body round-trips
