@@ -1318,10 +1318,8 @@ htxf_connect (struct htxf_conn *htxf)
 	 * and hxnet owns the seal/open framing thereafter. The session key
 	 * never comes back to C. The preamble itself always travels plaintext
 	 * per spec. A NULL handle (no HOPE, a stream cipher, or no-cipher)
-	 * selects plaintext passthrough. The handle is seeded the same way on
-	 * either Tier 3 transport — by the orchestrated login from the actor's
-	 * retained material, or by the legacy harness via
-	 * hxnet_hope_aead_from_material — so this path is transport-agnostic. */
+	 * selects plaintext passthrough. The handle is seeded at login from
+	 * the orchestrator's retained HOPE material. */
     const HxnetHopeAead *hope_aead =
         (htxf->htlc != NULL) ? (const HxnetHopeAead *) htxf->htlc->hope_aead
                              : NULL;

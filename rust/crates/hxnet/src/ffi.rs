@@ -2753,40 +2753,6 @@ pub unsafe extern "C" fn hxnet_connection_hope_aead_material(
     Box::into_raw(Box::new(HxnetHopeAead { material }))
 }
 
-/// Build a HOPE AEAD material handle from caller-provided control-channel
-/// material (session key + the two per-direction control `AeadState`s,
-/// which are layout-compatible with C's `chacha_aead_state`). Used by the
-/// legacy Tier 3 harness transport, which runs its own C-side HOPE
-/// handshake and therefore has the material in hand rather than retained
-/// in a Rust control connection. Returns NULL on a NULL/empty argument.
-/// Free with [`hxnet_hope_aead_free`].
-///
-/// # Safety
-/// `session_key` must be valid for `session_key_len`; `ctrl_encode` /
-/// `ctrl_decode` must each point at a valid `AeadState`.
-#[no_mangle]
-pub unsafe extern "C" fn hxnet_hope_aead_from_material(
-    session_key: *const u8,
-    session_key_len: usize,
-    ctrl_encode: *const hxcrypto_aead::AeadState,
-    ctrl_decode: *const hxcrypto_aead::AeadState,
-) -> *mut HxnetHopeAead {
-    if session_key.is_null()
-        || session_key_len == 0
-        || ctrl_encode.is_null()
-        || ctrl_decode.is_null()
-        || (session_key_len as u64) > (isize::MAX as u64)
-    {
-        return std::ptr::null_mut();
-    }
-    let material = crate::lifecycle::HopeAeadMaterial {
-        session_key: std::slice::from_raw_parts(session_key, session_key_len).to_vec(),
-        ctrl_encode: *ctrl_encode,
-        ctrl_decode: *ctrl_decode,
-    };
-    Box::into_raw(Box::new(HxnetHopeAead { material }))
-}
-
 /// Clone a HOPE AEAD material handle into a new, independently owned
 /// handle. The copy carries its own `HopeAeadMaterial`, so its lifetime
 /// is decoupled from the source — a caller can hand the clone to a
@@ -2811,9 +2777,8 @@ pub unsafe extern "C" fn hxnet_hope_aead_clone(
     }))
 }
 
-/// Free a handle from [`hxnet_connection_hope_aead_material`],
-/// [`hxnet_hope_aead_from_material`], or [`hxnet_hope_aead_clone`]. NULL
-/// is a no-op; double-free is undefined.
+/// Free a handle from [`hxnet_connection_hope_aead_material`] or
+/// [`hxnet_hope_aead_clone`]. NULL is a no-op; double-free is undefined.
 ///
 /// # Safety
 /// `h` must be NULL or a live pointer from one of those functions.
