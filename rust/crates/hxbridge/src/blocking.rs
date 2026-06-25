@@ -577,8 +577,12 @@ mod tests {
     #[test]
     fn post_to_main_runs_func_on_default_context() {
         // gtkhx_bridge_post_to_main queues onto the GLOBAL default main
-        // context (not a thread-default), so acquire it for exclusivity
-        // against other tests that touch the default context.
+        // context (not a thread-default). Serialise against every other
+        // default-context test (here + lib.rs) via the crate-wide lock,
+        // then acquire — otherwise parallel acquire() can fail.
+        let _ser = crate::DEFAULT_CTX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let ctx = MainContext::default();
         let _guard = ctx.acquire().expect("acquire default main context");
 
@@ -609,6 +613,9 @@ mod tests {
     fn post_to_main_null_func_is_a_clean_noop() {
         // NULL GSourceFunc must g_critical and return without queuing
         // anything — no panic across the FFI boundary.
+        let _ser = crate::DEFAULT_CTX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let ctx = MainContext::default();
         let _guard = ctx.acquire().expect("acquire default main context");
         unsafe {
