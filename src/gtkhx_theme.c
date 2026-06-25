@@ -155,7 +155,16 @@ gtkhx_theme_notify_changed (void)
 
     for (a = 0; a < GTKHX_SCALE_N_AREAS; a++) {
         int *slot = prefs_slot ((GtkhxScaleArea)a);
-        if (slot && *slot > 0) {
+        if (!slot) {
+            continue;
+        }
+        /* Non-positive (including a negative from a corrupt / hand-
+		 * edited prefs file) collapses to the canonical 0 "unset"
+		 * sentinel so it can't be persisted back out as a stray
+		 * negative; a positive value is clamped into range. */
+        if (*slot <= 0) {
+            *slot = 0;
+        } else {
             *slot = gtkhx_theme_clamp_percent (*slot);
         }
     }

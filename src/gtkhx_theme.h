@@ -23,8 +23,8 @@
  * constants (the misleading shape the earlier single-knob `ui-scale`
  * experiment had).
  */
-#ifndef __gtkhx_THEME_H
-#define __gtkhx_THEME_H
+#ifndef GTKHX_THEME_H
+#define GTKHX_THEME_H
 
 #include <glib-object.h>
 
@@ -83,4 +83,4 @@ void gtkhx_theme_notify_changed (void);
 
 G_END_DECLS
 
-#endif /* ndef __gtkhx_THEME_H */
+#endif /* ndef GTKHX_THEME_H */

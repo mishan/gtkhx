@@ -1008,10 +1008,14 @@ gtkhx_pixmap_button (const char *resource_name, const char *tooltip,
 {
     GtkWidget *btn = gtk_button_new ();
 
-    /* Resource names are compile-time string literals with static
-     * lifetime, so store the pointer directly — no strdup / free. */
-    g_object_set_data (G_OBJECT (btn), BTN_KEY_RESOURCE,
-                       (gpointer)resource_name);
+    /* Own a copy of the resource name: button_load_source dereferences
+     * it on every theme "changed" emission, which can outlive a
+     * caller's stack/heap buffer. g_strdup + g_free destroy-notify
+     * keeps it alive for the button's lifetime regardless of what the
+     * caller passed. (g_strdup(NULL) is NULL — button_load_source
+     * null-checks.) */
+    g_object_set_data_full (G_OBJECT (btn), BTN_KEY_RESOURCE,
+                            g_strdup (resource_name), g_free);
     button_finish_setup (btn, area, tooltip, cb, user_data);
     return btn;
 }
