@@ -8,7 +8,7 @@ items 8 (tracker → hxnet) and 9 (revisit HTXF's C-side connect).
 
 - **The main control channel already lost transparent SOCKS.** When the
   orchestrator became the default-and-only connect path, the control
-  channel started connecting via `tokio::TcpStream` in
+  channel started connecting via `tokio::net::TcpStream` in
   `hxnet::connect::resolve_and_connect`, which never consults
   `GProxyResolver`. The legacy `GSocketClient` connect that *did* honour
   it is gone. So proxy support is currently **inconsistent**: control
