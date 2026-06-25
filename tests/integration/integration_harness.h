@@ -316,6 +316,19 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
                                         guint16 icon, guint16 caps);
 
 /*
+ * TLS sibling of integration_open_login_or_skip: connect + magic +
+ * guest LOGIN + drain-to-SELFINFO over TLS-from-byte-zero, driven by the
+ * production rustls transport (the GnuTLS GIOStream harness was retired).
+ * Returns a synthetic fd for the fd-based integration_send/recv helpers,
+ * or -1 (g_test_fail_printf already called). Pre-filter the matrix with
+ * hx_test_servers_with (HX_TEST_CAP_TLS) to pick `srv`.
+ */
+extern int
+integration_open_login_tls_or_skip (const hx_test_server *srv,
+                                    struct htlc_conn *htlc,
+                                    const char *display_name, guint16 icon);
+
+/*
  * Send HTLC_HDR_GET_CHAT_HISTORY (TRAN 700) for `channel_id`
  * with the same "0 means omit" cursor / limit semantics as
  * src/chat_history.c::hx_get_chat_history. Returns the trans

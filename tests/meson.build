@@ -1166,7 +1166,6 @@ integration_test_inc = include_directories('integration', '../src')
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
-  'integration/integration_tls.c',
   'integration/server_matrix.c',
   'integration/tracker_matrix.c',
   '../src/proto_helpers.c',
@@ -1331,7 +1330,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   'integration/test_real_htxf_connect.c',
   'integration/connect_test_stubs.c',
   'integration/integration_harness.c',
-  'integration/integration_tls.c',
   'integration/tracker_matrix.c',
   'integration/server_matrix.c',
   '../src/network.c',
@@ -1375,14 +1373,15 @@ test('real_htxf_connect', test_integration_real_htxf_connect,
 # real_tls_login — Phase 1 close-out coverage: full login + chat
 # round-trip over TLS. real_connect's /real_connect/tls_login pins the
 # connect-state-machine progression via production hx_connect; this
-# binary uses the GIOStream-based harness (tests/integration/integration_tls.c)
-# to actually speak the Hotline protocol over the wrapped socket
-# end-to-end against Janus's tls_port. Asserts SELFINFO parses
-# cleanly after TLS decrypt + a non-ASCII chat body round-trips
-# intact through TLS-encrypt-on-send + TLS-decrypt-on-recv.
+# binary actually speaks the Hotline protocol over the wrapped socket
+# end-to-end against Janus's tls_port, driving the control channel
+# through PRODUCTION rustls (the orchestrator's TLS polling FFI — see
+# integration_open_login_tls_or_skip). Asserts SELFINFO parses cleanly
+# after TLS decrypt + a non-ASCII chat body round-trips intact through
+# TLS-encrypt-on-send + TLS-decrypt-on-recv.
 #
-# Doesn't link production src/network.c (the protocol-only harness
-# is enough); link surface stays minimal.
+# Links integration_harness_lib only — the production rustls transport
+# rides the hxnet staticlib the harness already pulls in.
 test_integration_real_tls_login = executable('test_integration_real_tls_login',
   'integration/test_real_tls_login.c',
   dependencies        : proto_test_deps,
@@ -1395,24 +1394,16 @@ test('real_tls_login', test_integration_real_tls_login,
      is_parallel : false,
      timeout     : 60)
 
-# real_tls_file_get / real_tls_banner — Phase 2 coverage: HTXF
-# subchannel over TLS. The control channel is wrapped (same as
-# Phase 1) PLUS the second TCP connection that carries the file/
-# banner body. Mirrors test_file_get.c and the htxf_mode banner
-# subtest but with TLS at both endpoints. The TLS HTXF socket
-# uses Janus's tls_xfer_port (5611 host-mapped).
-test_integration_real_tls_file_get = executable(
-  'test_integration_real_tls_file_get',
-  'integration/test_real_tls_file_get.c',
-  dependencies        : proto_test_deps,
-  include_directories : integration_test_inc,
-  link_with           : integration_harness_lib,
-)
-test('real_tls_file_get', test_integration_real_tls_file_get,
-     suite       : 'integration',
-     is_parallel : false,
-     timeout     : 60)
-
+# real_tls_banner — Phase 2 coverage: HTXF banner subchannel over TLS.
+# The control channel logs in through production rustls (the
+# orchestrator), and the banner-image body rides a second TLS
+# subchannel opened via the SAME hxnet_htxf_open(tls=1) path banner.c's
+# production worker uses, drained through htxf_io_read. The TLS HTXF
+# socket uses Janus's tls_xfer_port (5611 host-mapped).
+#
+# (TLS file-mode HTXF body round-trip is covered by real_htxf_connect's
+# file_get_tls sibling, which drives production htxf_connect over TLS —
+# so there's no separate real_tls_file_get binary.)
 test_integration_real_tls_banner = executable(
   'test_integration_real_tls_banner',
   'integration/test_real_tls_banner.c',

@@ -172,6 +172,20 @@ extern hxnet_connection *hxnet_connection_open_hope_polling (
     const guint8 *name, gsize name_len,
     guint16 icon, guint16 version, guint16 caps, guint32 trans,
     const guint8 *cipher_alg, gsize cipher_alg_len);
+/* TLS-from-byte-zero sibling of the polling open (production rustls,
+ * Mobius/Janus separate-port model). `verify_cert` decides trust on a
+ * WebPKI failure — self-signed test certs need it; the harness passes an
+ * accept-any callback (it runs on the tokio task, so it must be
+ * thread-safe). */
+typedef int (*hxnet_verify_cb_t) (const guint8 *fp, gsize fp_len,
+                                  void *user_data);
+extern hxnet_connection *hxnet_connection_open_plaintext_tls_polling (
+    const guint8 *host, gsize host_len, guint16 port,
+    const guint8 *login, gsize login_len,
+    const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len,
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    hxnet_verify_cb_t verify_cert, void *user_data);
 extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
                                             hxnet_frame_t *out_frame,
                                             int *out_reason);
@@ -386,6 +400,63 @@ orch_open_login_hope (struct htlc_conn *htlc, const char *host, int port,
      * nonzero trans (mirrors orch_open_login's +1 seed for plaintext). */
     if (htlc) {
         htlc->trans = 3;
+    }
+    return fd;
+}
+
+/* Accept-any TLS verify callback for the Tier 3 harness. Janus's cert is
+ * self-signed (WebPKI fails), so the production rustls path consults this
+ * to make the trust decision; the harness unconditionally accepts. Runs
+ * on the tokio lifecycle task — stateless, so thread-safe. */
+static int
+tls_test_accept_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
+{
+    (void) fp;
+    (void) fp_len;
+    (void) user_data;
+    return 1;
+}
+
+/* TLS-from-byte-zero sibling of orch_open_login: drive a plaintext
+ * Hotline login over production rustls (separate-port model) and register
+ * the actor as a synthetic fd. The TLS tests are always rustls now (no
+ * GnuTLS harness), so this path runs regardless of
+ * GTKHX_HARNESS_ORCHESTRATED. Returns the synthetic fd, or -1. */
+static int
+orch_open_login_tls (struct htlc_conn *htlc, const char *host, int port,
+                     const char *login, const char *display_name,
+                     guint16 icon, guint16 caps)
+{
+    if (!login) {
+        login = "guest";
+    }
+    const char *name = (display_name && *display_name) ? display_name : "";
+    hxnet_connection *h = hxnet_connection_open_plaintext_tls_polling (
+        (const guint8 *) host, strlen (host), (guint16) port,
+        (const guint8 *) login, strlen (login),
+        (const guint8 *) "", 0,             /* guest: empty password */
+        (const guint8 *) name, strlen (name),
+        icon, /*version=*/185, caps, /*trans=*/1,
+        tls_test_accept_cert_cb, NULL);
+    if (!h) {
+        g_test_fail_printf (
+            "hxnet_connection_open_plaintext_tls_polling(%s:%d) returned NULL "
+            "— rustls handshake / connect failed (TLS port mapped?).",
+            host, port);
+        return -1;
+    }
+    int fd = orch_register (h);
+    if (fd < 0) {
+        hxnet_connection_destroy (h);
+        g_test_fail_printf ("orchestrated transport table full (>%d "
+                            "concurrent connections).",
+                            ORCH_MAX);
+        return -1;
+    }
+    /* Plaintext LOGIN over TLS: reply trans is HX_LOGIN_TRANS (1); seed
+     * past it (mirrors orch_open_login). */
+    if (htlc) {
+        htlc->trans = 2;
     }
     return fd;
 }
@@ -1522,6 +1593,68 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
         g_strlcpy ((char *) htlc->name, display_name, sizeof (htlc->name));
     }
 
+    return fd;
+}
+
+/* Open + guest-login over TLS, draining to SELFINFO. Returns a synthetic
+ * fd (the orchestrated transport's actor handle) or -1 with
+ * g_test_fail_printf already called. Caller closes via integration_close
+ * and does I/O with the fd-based integration_send/recv helpers, exactly
+ * like the plaintext/HOPE opens. ALWAYS production rustls — the GnuTLS
+ * GIOStream harness was retired (harness-TLS migration), so this runs
+ * regardless of GTKHX_HARNESS_ORCHESTRATED (TLS is inherently a rustls
+ * concern). */
+int
+integration_open_login_tls_or_skip (const hx_test_server *srv,
+                                    struct htlc_conn *htlc,
+                                    const char *display_name, guint16 icon)
+{
+    memset (htlc, 0, sizeof (*htlc));
+    if (!srv || srv->tls_port == 0) {
+        g_test_fail_printf (
+            "integration_open_login_tls_or_skip: no TLS-capable server "
+            "(need HX_TEST_CAP_TLS + tls_port; start the Janus container "
+            "with TLS ports mapped).");
+        return -1;
+    }
+
+    /* Plaintext Hotline over TLS-from-byte-zero on the dedicated port,
+     * driven by the production orchestrator. caps=0 — the TLS tests
+     * don't exercise capability negotiation. */
+    int fd = orch_open_login_tls (htlc, srv->host, srv->tls_port, "guest",
+                                  display_name, icon, /*caps=*/0);
+    if (fd < 0) {
+        return -1;
+    }
+    /* Mark TLS so an HTXF subchannel the test opens mirrors it. */
+    htlc->tls = 1;
+
+    guint32 type = integration_drain_until_selfinfo_or_error (fd, htlc, 8);
+    if (type == HTLS_HDR_TASK) {
+        char err[256];
+        gsize err_len = 0;
+        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+            g_test_fail_printf ("server rejected guest login over TLS: \"%s\"",
+                                err);
+        } else {
+            g_test_fail_printf (
+                "server rejected guest login over TLS (no error chunk).");
+        }
+        integration_release_htlc (htlc);
+        integration_close (fd);
+        return -1;
+    }
+    if (type != HTLS_HDR_USER_SELFINFO) {
+        g_test_fail_printf (
+            "timed out waiting for SELFINFO after guest login over TLS.");
+        integration_release_htlc (htlc);
+        integration_close (fd);
+        return -1;
+    }
+    hx_selfinfo_parse (htlc);
+    if (htlc->name[0] == 0 && display_name && *display_name) {
+        g_strlcpy ((char *) htlc->name, display_name, sizeof (htlc->name));
+    }
     return fd;
 }
 

@@ -2191,6 +2191,157 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     )
 }
 
+/// Polling-mode sibling of [`hxnet_connection_open_plaintext_tls`]: runs
+/// the same production TLS-from-byte-zero lifecycle
+/// ([`crate::lifecycle::run_plaintext_tls_lifecycle`]) but exposes events
+/// through the polling API ([`hxnet_connection_try_recv_frame`]) instead
+/// of the GLib callback forwarder. Unlike the plaintext / HOPE polling
+/// opens, this one KEEPS the `verify_cert` callback: TLS trust is decided
+/// during the handshake on the lifecycle task (WebPKI-first, then the
+/// TOFU callback on WebPKI failure), so a self-signed test cert needs a
+/// callback that accepts it. The callback must be thread-safe (it runs on
+/// the tokio task, not a GLib main loop).
+///
+/// Lets the synchronous Tier 3 harness drive its TLS tests through the
+/// **production** rustls transport instead of the GnuTLS GIOStream
+/// harness. Same parameter / safety contract as
+/// [`hxnet_connection_open_plaintext_tls`], minus the event/shutdown/state
+/// callbacks.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    verify_cert: HxnetVerifyCertCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetConnection {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls_polling: NULL or empty host"
+        );
+        return std::ptr::null_mut();
+    }
+    if trans == 0 {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls_polling: trans=0 is reserved"
+        );
+        return std::ptr::null_mut();
+    }
+    if [host_len, login_len, password_len, name_len]
+        .iter()
+        .any(|&n| (n as u64) > (isize::MAX as u64))
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls_polling: a length argument exceeds isize::MAX"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let host_slice = std::slice::from_raw_parts(host, host_len);
+    let host_str = match std::str::from_utf8(host_slice) {
+        Ok(s) => s.to_string(),
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_tls_polling: host is not valid UTF-8"
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
+    // A NULL pointer with a non-zero length is a caller bug (it would
+    // silently drop the credential / name). Reject it rather than treat
+    // it as empty — same fail-fast contract as the callback sibling
+    // hxnet_connection_open_plaintext_tls.
+    if (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_connection_open_plaintext_tls_polling: NULL pointer with \
+             non-zero length for login / password / name"
+        );
+        return std::ptr::null_mut();
+    }
+
+    let login_vec = if login_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(login, login_len).to_vec()
+    };
+    let password_vec = if password_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(password, password_len).to_vec()
+    };
+    let name_vec = if name_len == 0 {
+        Vec::new()
+    } else {
+        std::slice::from_raw_parts(name, name_len).to_vec()
+    };
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_tls_polling: Runtime::global \
+                 panicked; aborting to avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+
+    let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
+    let req = crate::lifecycle::PlaintextOpenRequest {
+        host: host_str,
+        port,
+        login: login_vec,
+        password: password_vec,
+        name: name_vec,
+        icon,
+        version,
+        caps,
+        trans,
+    };
+    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> = verify_cert.map(|cb| {
+        let ud = SendUserData(user_data);
+        let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
+            let ud = &ud;
+            unsafe { cb(fp.as_ptr(), fp.len(), ud.0) != 0 }
+        });
+        boxed
+    });
+    let join = rt.handle().spawn(async move {
+        crate::lifecycle::run_plaintext_tls_lifecycle(req, verify_closure, cmd_rx, evt_tx).await;
+    });
+
+    // Polling-mode handle: keep the event receiver for try_recv_frame;
+    // no callback forwarder.
+    let handle = Box::new(HxnetConnection {
+        cmd,
+        events: Some(events),
+        _callback_state: None,
+        _join: join,
+        hope_aead: None,
+    });
+    Box::into_raw(handle)
+}
+
 /// Open a HOPE-Secure-Login connection with hxnet driving the full
 /// handshake — magic + step-1 + step-2 + cipher transition — and the
 /// post-handshake encrypted stream. The HOPE sibling of

@@ -48,7 +48,6 @@
 #include "htxf_io.h"
 #include "network.h"             /* htxf_connect */
 #include "integration_harness.h"
-#include "integration_tls.h"
 #include "server_matrix.h"
 
 /* Build a HOPE AEAD material handle from the legacy harness's own C
@@ -358,19 +357,19 @@ test_htxf_connect_file_get_tls (void)
      * set once in main() before any threads spawn (g_setenv after
      * thread creation is not thread-safe). */
     struct htlc_conn htlc;
-    GIOStream *ctrl = integration_open_login_tls_or_skip (
+    int ctrl = integration_open_login_tls_or_skip (
         srv, &htlc, "HtxfConnect-TLS Tier-3", 416);
-    if (!ctrl) {
+    if (ctrl < 0) {
         return;
     }
 
     const char *fname = "test.txt";
     guint32 our_trans = htlc.trans;
-    g_assert_true (integration_send_message_stream (
+    g_assert_true (integration_send_message (
         ctrl, &htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
         (int) HTLC_DATA_FILE_NAME, (int) strlen (fname), (guint8 *) fname));
 
-    g_assert_true (integration_drain_until_task_trans_stream (
+    g_assert_true (integration_drain_until_task_trans (
         ctrl, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
@@ -382,7 +381,7 @@ test_htxf_connect_file_get_tls (void)
             g_test_fail_printf ("file_get refused (no error chunk)");
         }
         integration_release_htlc (&htlc);
-        integration_close_stream (ctrl);
+        integration_close (ctrl);
         return;
     }
 
@@ -410,7 +409,7 @@ test_htxf_connect_file_get_tls (void)
                             "on %s reachable?)",
                             (unsigned) srv->tls_xfer_port, srv->host);
         integration_release_htlc (&htlc);
-        integration_close_stream (ctrl);
+        integration_close (ctrl);
         return;
     }
     g_assert_false (htxf.aead_active);
@@ -419,7 +418,7 @@ test_htxf_connect_file_get_tls (void)
 
     htxf_io_release (&htxf);
     integration_release_htlc (&htlc);
-    integration_close_stream (ctrl);
+    integration_close (ctrl);
 }
 
 int
