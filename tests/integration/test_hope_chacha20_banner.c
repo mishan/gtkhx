@@ -64,13 +64,6 @@
 #include "htxf_subchannel.h"
 #include "debug.h"
 
-/* Build a HOPE AEAD material handle from the legacy harness's own C
- * handshake state (rust/crates/hxnet/src/ffi.rs). HxnetHopeAead +
- * hxnet_hope_aead_free come from htxf_io.h. */
-extern HxnetHopeAead *hxnet_hope_aead_from_material (
-    const guint8 *session_key, gsize session_key_len,
-    const chacha_aead_state *ctrl_encode, const chacha_aead_state *ctrl_decode);
-
 static const hx_test_server *
 pick_banner_chacha20_server (void)
 {
@@ -247,26 +240,18 @@ test_hope_chacha20_banner_htxf (void)
 
     /* hxnet_htxf_open derives the per-transfer AEAD keys in-process from
      * an opaque HOPE material handle + ref, then adopts the fd, writes
-     * the plaintext preamble, and frames the body AEAD. Under
-     * orchestration the harness already seeded htlc.hope_aead from the
-     * production actor; on the legacy transport the harness ran its own
-     * C handshake, so build a handle from that session state. tls=0:
-     * plaintext subchannel (HOPE was negotiated on the control channel). */
+     * the plaintext preamble, and frames the body AEAD. The orchestrated
+     * login already seeded htlc.hope_aead from the production actor.
+     * tls=0: plaintext subchannel (HOPE was negotiated on the control
+     * channel). */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
     htxf_io_init (&xfer);
-    HxnetHopeAead *owned = NULL;
-    const HxnetHopeAead *banner_aead = (const HxnetHopeAead *) htlc.hope_aead;
-    if (!banner_aead) {
-        owned = hxnet_hope_aead_from_material (htlc.sessionkey, htlc.sklen,
-                                               &hope.encode_state,
-                                               &hope.decode_state);
-        banner_aead = owned;
-    }
+    g_assert_nonnull (htlc.hope_aead);
     xfer.hx = hxnet_htxf_open (xfer_fd, /*tls=*/0, /*host=*/NULL, 0,
                               hdr_buf, hdr_len,
-                              banner_aead, ref,
+                              (const HxnetHopeAead *) htlc.hope_aead, ref,
                               /*verify_cert=*/NULL, /*user_data=*/NULL);
     g_assert_nonnull (xfer.hx);
 
@@ -286,9 +271,6 @@ test_hope_chacha20_banner_htxf (void)
     }
     g_assert_cmpuint ((guint) got, ==, size);
     htxf_io_release (&xfer);
-    if (owned) {
-        hxnet_hope_aead_free (owned);
-    }
 
     g_test_message ("first 4 bytes: %02x %02x %02x %02x",
                     bytes[0], bytes[1], bytes[2], bytes[3]);

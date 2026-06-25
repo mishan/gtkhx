@@ -50,15 +50,6 @@
 #include "integration_harness.h"
 #include "server_matrix.h"
 
-/* Build a HOPE AEAD material handle from the legacy harness's own C
- * handshake state (rust/crates/hxnet/src/ffi.rs). Only needed on the
- * legacy transport — the orchestrated login seeds htlc->hope_aead from
- * the production actor directly. HxnetHopeAead + hxnet_hope_aead_free
- * come from htxf_io.h. */
-extern HxnetHopeAead *hxnet_hope_aead_from_material (
-    const guint8 *session_key, gsize session_key_len,
-    const chacha_aead_state *ctrl_encode, const chacha_aead_state *ctrl_decode);
-
 /* Shared body-drain + substring check used by all three siblings.
  * Drains exactly xfer_size bytes through production htxf_io_read
  * (passthrough, AEAD, or TLS leg depending on how htxf was armed)
@@ -266,18 +257,10 @@ test_htxf_connect_file_get_aead (void)
     /* htxf_connect derives the per-transfer ChaCha20-Poly1305 keys
      * INSIDE hxnet_htxf_open from the control connection's retained HOPE
      * material (htlc->hope_aead, an opaque handle) plus this transfer's
-     * ref — the session key never crosses back into C. Under
-     * orchestration the login helper already seeded htlc.hope_aead from
-     * the production actor (mirroring rcv_task_login). On the legacy
-     * transport the harness ran its own C handshake, so build the
-     * handle from that session state and stamp it on htlc the way
-     * production does. Either way htlc.hope_aead is an owned handle that
+     * ref — the session key never crosses back into C. The orchestrated
+     * login already seeded htlc.hope_aead from the production actor
+     * (mirroring rcv_task_login); it's an owned handle that
      * integration_release_htlc frees at teardown. */
-    if (!htlc.hope_aead) {
-        htlc.hope_aead = hxnet_hope_aead_from_material (
-            htlc.sessionkey, htlc.sklen, &hope.encode_state,
-            &hope.decode_state);
-    }
     g_assert_nonnull (htlc.hope_aead);
 
     struct htxf_conn htxf;

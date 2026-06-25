@@ -191,11 +191,9 @@ extern int hxnet_connection_send_frame (hxnet_connection *handle,
                                         const guint8 *data, guint len);
 extern void hxnet_connection_destroy (hxnet_connection *handle);
 extern void hxnet_frame_free (hxnet_frame_t *frame);
-/* Opaque HOPE AEAD material handle (Rust HxnetHopeAead). The harness
- * seeds htlc->hope_aead from it (orchestrated) or builds one from its own
- * C handshake state (legacy, via hxnet_hope_aead_from_material in the
- * banner test). Passed to hxnet_htxf_open so the subchannel derives its
- * per-transfer keys in-process. */
+/* Opaque HOPE AEAD material handle (Rust HxnetHopeAead). The orchestrated
+ * login seeds htlc->hope_aead from it; passed to hxnet_htxf_open so the
+ * subchannel derives its per-transfer keys in-process. */
 typedef struct HxnetHopeAead HxnetHopeAead;
 extern HxnetHopeAead *hxnet_connection_hope_aead_material (
     hxnet_connection *handle);
@@ -801,13 +799,11 @@ integration_release_htlc (struct htlc_conn *htlc)
     htlc->out.buf = NULL;
     /* htlc->hope_aead is an owned HxnetHopeAead* (a copy of the control
      * channel's HOPE material, independent of the connection's lifetime —
-     * see hxnet_connection_hope_aead_material). It is seeded either by the
-     * orchestrated login or by a test that builds its own handle on the
-     * legacy transport and stashes it here (test_real_htxf_connect via
-     * hxnet_hope_aead_from_material). Free it here — the single owner — so
-     * it doesn't leak across the test run. NULL-safe. A test that needs to
-     * free the handle *early* (before release) must NULL the field after
-     * doing so, or this would double-free. */
+     * see hxnet_connection_hope_aead_material), seeded by the orchestrated
+     * login. Free it here — the single owner — so it doesn't leak across
+     * the test run. NULL-safe. A test that needs to free the handle
+     * *early* (before release) must NULL the field after doing so, or this
+     * would double-free. */
     hxnet_hope_aead_free ((HxnetHopeAead *) htlc->hope_aead);
     htlc->hope_aead = NULL;
 }
