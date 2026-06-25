@@ -29,7 +29,6 @@ The big rocks, by line count:
 | `src/connect.c`         |  ~900| Connect dialog (AdwDialog) + bookmark management.             |
 | `src/gtkhx.c`           |  ~900| `main()`, GIOChannel-based fd plumbing, GtkApplication init.  |
 | `src/commands.c`        |  ~~~ | Hotline protocol send path (paired with `rcv.c`).             |
-| `src/compress.c`        |  ~~~ | Thin C dispatcher over the Rust `hxcompress` crate. Dead in production (the orchestrator compresses in Rust); deletable like cipher.c was. |
 | `src/htxf_io.c` `src/htxf_subchannel.c` | ~~~ | C shim + preamble packer over hxnet's Rust HTXF subchannel. |
 | `src/plugin.c`          |  ~~~ | dlopen plugin loader. **Compiled out** (`USE_PLUGIN` undef).  |
 | `src/gtkthreads.c`      |  ~~~ | GRecMutex + custom poll wrapper for worker↔main serialization.|
@@ -230,12 +229,13 @@ duplicate paths, so a hashtable can't represent it cleanly).
   ChaCha20-Poly1305 AEAD, incl. the per-message stream rekey), the HMAC chain, and
   zlib compression all run inside the `hxnet` orchestrator + the `hxcrypto-{hash,
   stream,aead}` / `hxcompress` Rust crates. The C dispatchers that used to do this
-  (`cipher.c`, `cipher_aead.c`, `hope.c`, `hmac.c`, `md5.c`, `sha.c`, `haval.c`,
-  `network_decode.c`) are gone. **Don't change the negotiated wire format** — only the
-  Rust implementation underneath; 1.2/1.5/1.9 compat is a hard requirement.
-  `compress.c` is the last such C dispatcher still in the tree, dead in production and
-  deletable like the others (see the file table). `chacha_aead_state` (a repr(C)
-  struct in `cipher.h`) survives as the FFI bridge type for the HTXF AEAD material.
+  (`cipher.c`, `cipher_aead.c`, `compress.c`, `hope.c`, `hmac.c`, `md5.c`, `sha.c`,
+  `haval.c`, `network_decode.c`) are all gone. **Don't change the negotiated wire
+  format** — only the Rust implementation underneath; 1.2/1.5/1.9 compat is a hard
+  requirement. `chacha_aead_state` (a repr(C) struct in `cipher.h`) survives as the
+  FFI bridge type for the HTXF AEAD material; `compress.h` keeps the `COMPRESS_*` ids,
+  the `compress_state` union, and the `compress_encode_bufsize` inline a Tier 1 test
+  drives.
 - **License: GPL-2.0-or-later** ("version 2 of the License, or (at your option) any
   later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
   clause without explicit confirmation.

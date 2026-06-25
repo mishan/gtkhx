@@ -393,20 +393,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_free (htlc->aead_plain.buf);
         memset (&htlc->aead_plain, 0, sizeof (htlc->aead_plain));
     }
-    if (htlc->compress_encode_type != COMPRESS_NONE) {
-        hx_printf_prefix (htlc, 0, INFOPREFIX,
-                          "GZIP deflate: in: %lu  out: %lu\n",
-                          (unsigned long)htlc->gzip_deflate_total_in,
-                          (unsigned long)htlc->gzip_deflate_total_out);
-        compress_encode_end (htlc);
-    }
-    if (htlc->compress_decode_type != COMPRESS_NONE) {
-        hx_printf_prefix (htlc, 0, INFOPREFIX,
-                          "GZIP inflate: in: %lu  out: %lu\n",
-                          (unsigned long)htlc->gzip_inflate_total_in,
-                          (unsigned long)htlc->gzip_inflate_total_out);
-        compress_decode_end (htlc);
-    }
+    /* No per-direction compression state to tear down: the orchestrator
+     * (hxnet, via the Rust hxcompress crate) owns the control-channel
+     * compression now, so the legacy C compress_*_state / gzip counters
+     * are never populated on htlc. The zeroing below clears the
+     * (always-zero) fields defensively. */
     memset (&htlc->compress_encode_state, 0,
             sizeof (htlc->compress_encode_state));
     memset (&htlc->compress_decode_state, 0,
