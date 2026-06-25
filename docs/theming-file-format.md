@@ -55,7 +55,7 @@ light + dark variants and let `AdwStyleManager`'s `dark` property
 
 | `THEMENAME` | Display | Description |
 |---|---|---|
-| `default` | Default | GtkHx's classic appearance. Adwaita-aligned `#fdfafa`/`#1d1d1d` light + `#000`/`#cccccc` dark, with the Adwaita accent blue for selection. |
+| `default` | Default | GtkHx's classic appearance. Adwaita-aligned `#fafafa`/`#1d1d1d` light + `#000`/`#cccccc` dark, with the Adwaita accent blue for selection. |
 | `solarized` | Solarized | Ethan Schoonover's [Solarized](https://ethanschoonover.com/solarized/) palette. `palette.light` holds the canonical Solarized Light values (cream `#fdf6e3` bg, `#657b83` body text); `palette.dark` holds Solarized Dark (`#002b36` bg, `#839496` body text). Picking "Solarized" gives you Solarized Light on a light desktop and Solarized Dark on a dark one — the way the palette was designed. |
 
 The built-ins live at `src/themes/<name>.ini` in the source tree.

@@ -464,7 +464,7 @@ gtkhx_theme_load_active (void)
 
     /* If the user file wasn't on disk, try the same name in the
 	 * GResource themes prefix — that's how the built-ins (default,
-	 * solarized, solarized-dark) get loaded when the user hasn't
+	 * solarized) get loaded when the user hasn't
 	 * dropped a same-name override into $CONFIG/themes/. */
     if (!kf) {
         extern struct gtkhx_prefs gtkhx_prefs;

@@ -221,8 +221,8 @@ test('cfgvars_sorted', test_cfgvars_sorted,
 
 # Theme discovery (gtkhx_theme_list_available_at). Drives the
 # user-dir walk with tmp-dir fixtures, and the GResource walk
-# against the live built-ins (default + solarized + solarized-dark)
-# by linking gtkhx_resources into the test target — the resource's
+# against the live built-ins (default + solarized) by linking
+# gtkhx_resources into the test target — the resource's
 # generated constructor self-registers at process load so the
 # built-ins surface through g_resources_enumerate_children.
 test_theme_listing = executable('test_theme_listing',

@@ -3150,7 +3150,7 @@ settings_page_general (AdwPreferencesPage *page)
         pref_combo_row (CFG_THEME, _ ("Theme"), vals, labels, 3));
 
     /* Theme-file picker. Enumerates built-in themes (default,
-     * solarized, solarized-dark, …) plus any user files under
+     * solarized) plus any user files under
      * $CONFIG/themes/, populates a combo bound to CFG_THEME_NAME.
      * The existing changed_theme_name cfgvar hook calls
      * gtkhx_theme_load_active() on selection, which re-emits

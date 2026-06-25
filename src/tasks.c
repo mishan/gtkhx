@@ -33,6 +33,7 @@
 #include "panel_registry.h"
 #include "network.h"
 #include "gtkutil.h"
+#include "gtkhx_theme.h" /* gtkhx_theme_scale, GTKHX_SCALE_TASKS_ROW_ICON */
 #include "human_readable.h"
 #include "gtkhx.h"
 #include "xfers.h"

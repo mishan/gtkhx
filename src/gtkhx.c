@@ -52,6 +52,7 @@
 #include "tasks.h"
 #include "network.h"
 #include "gtkutil.h"
+#include "gtkhx_theme.h" /* gtkhx_theme_get_color, GTKHX_PAL_* */
 #include "debug.h"
 #include "toolbar.h"
 #include "dock_layout.h"
