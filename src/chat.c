@@ -49,6 +49,7 @@
 #include "inline_media_download.h"
 #include "inline_media.h"
 #include "gtkutil.h"
+#include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "xtext.h"
 #include "users.h"
 #include "voice_panel.h"
@@ -3032,8 +3033,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtkhx_refresh_userlist_css (users_font_desc);
 
     msg_btn = gtk_button_new ();
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/message.png", NULL);
+    icon = (GdkPixmap *)gtkhx_icon_load (
+        "/com/nasledov/gtkhx/pixmaps/message.png");
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (msg_btn, pix);
     g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),
@@ -3042,8 +3043,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     icon = 0, pix = 0;
 
     kick_btn = gtk_button_new ();
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/kick.png", NULL);
+    icon = (GdkPixmap *)gtkhx_icon_load (
+        "/com/nasledov/gtkhx/pixmaps/kick.png");
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (kick_btn, pix);
     g_signal_connect (kick_btn, "clicked", G_CALLBACK (view_kick_btn),
@@ -3052,8 +3053,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     icon = 0, pix = 0;
 
     info_btn = gtk_button_new ();
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/info.png", NULL);
+    icon = (GdkPixmap *)gtkhx_icon_load (
+        "/com/nasledov/gtkhx/pixmaps/info.png");
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (info_btn, pix);
     g_signal_connect (info_btn, "clicked", G_CALLBACK (view_info_btn),
@@ -3064,8 +3065,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     ban_btn = gtk_button_new ();
     g_signal_connect (ban_btn, "clicked", G_CALLBACK (view_ban_btn),
                       gchat->userlist);
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/ban.png", NULL);
+    icon = (GdkPixmap *)gtkhx_icon_load (
+        "/com/nasledov/gtkhx/pixmaps/ban.png");
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (ban_btn, pix);
     gtk_widget_set_tooltip_text (ban_btn, _ ("Ban"));
@@ -3075,8 +3076,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtk_widget_set_tooltip_text (chat_btn, _ ("Private Chat"));
     g_signal_connect (chat_btn, "clicked", G_CALLBACK (view_chat_btn),
                       gchat->userlist);
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/chat.png", NULL);
+    icon = (GdkPixmap *)gtkhx_icon_load (
+        "/com/nasledov/gtkhx/pixmaps/chat.png");
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (chat_btn, pix);
     icon = 0, pix = 0;
@@ -3085,8 +3086,8 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtk_widget_set_tooltip_text (igno_btn, _ ("Ignore"));
     g_signal_connect (igno_btn, "clicked", G_CALLBACK (view_igno_btn),
                       gchat->userlist);
-    icon = (GdkPixmap *)gdk_pixbuf_new_from_resource (
-        "/com/nasledov/gtkhx/pixmaps/ignore.png", NULL);
+    icon = (GdkPixmap *)gtkhx_icon_load (
+        "/com/nasledov/gtkhx/pixmaps/ignore.png");
     pix = gtkhx_image_new_from_pixbuf ((GdkPixbuf *)icon);
     gtkhx_widget_set_child (igno_btn, pix);
 

@@ -323,8 +323,9 @@ load_icon_paintable (const char *resource)
     GdkTexture *tex;
     int w, h;
 
-    /* Route through the icon resolver so active-pack overrides
-	 * (e.g. $CONFIG/icons/<pack>/newsfld.png) shadow the built-in. */
+    /* Route through the icon resolver so the active theme's bundled
+	 * icons (e.g. $CONFIG/themes/<theme>/icons/newsfld.png) shadow
+	 * the stock pixmap. */
     pb = gtkhx_icon_load (resource);
     if (!pb) {
         return NULL;

@@ -146,11 +146,14 @@ struct gtkhx_prefs {
     char *voice_ptt_key;
 
     /* Theming: active theme name. Theme files live at
-	 * $CONFIG/themes/<name>.ini; the built-in default ships as a
+	 * $CONFIG/themes/<name>.ini (or a bundle dir
+	 * $CONFIG/themes/<name>/ with an icons/ subdir); the built-in
+	 * default ships as a
 	 * GResource and loads when no on-disk file by that name is
 	 * found. Empty / NULL falls back to "default". All scale,
-	 * palette, AND icon-pack state lives in the theme file (the
-	 * `[gtkhx-theme] icon_pack` key inside it) — this string is
+	 * palette, and icon state lives in the theme — scales and
+	 * colors in the .ini, icons as PNGs under a bundle dir's
+	 * icons/ subdir. This string is
 	 * the *only* theming knob in gtkhxrc. See gtkhx_theme.{c,h},
 	 * docs/theming-scoping.md, docs/theming-file-format.md. */
     char *theme_name;

@@ -309,13 +309,13 @@ test_no_active_theme_falls_back_to_pixmaps (void)
 int
 main (int argc, char **argv)
 {
-    /* gtk_init() registers types we need for gdk_pixbuf_save — and
-     * lets the GResource auto-constructor run before we test the
-     * fallback path. The test runs in a non-display environment
-     * (CI) so we use a no-display init: the resources we need (PNG
-     * loaders, pixbuf machinery) only need GLib + GdkPixbuf, not a
-     * display, but gtk_init() does the type-registration cleanly. */
-    gtk_init ();
+    /* gtk_init_check() rather than gtk_init(): this test only needs
+     * GLib + GdkPixbuf (the PNG loaders and the GResource
+     * auto-constructor that self-registers at load), none of which
+     * require a display. gtk_init() aborts on a headless CI runner
+     * with no GdkDisplay; gtk_init_check() degrades to FALSE instead,
+     * which is fine here — we ignore the result. */
+    (void)gtk_init_check ();
 
     g_test_init (&argc, &argv, NULL);
     g_test_add_func ("/icon-pack/load-hits-theme-bundle",

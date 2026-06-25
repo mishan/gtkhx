@@ -205,8 +205,9 @@ gtask_make_icon (const char *resource_path)
     double scale = gtkhx_theme_scale (GTKHX_SCALE_TASKS_ROW_ICON);
     int px = (int) (GTASK_ICON_SRC_SIZE * scale + 0.5);
 
-    /* Route through the icon resolver so active-pack overrides
-	 * (e.g. $CONFIG/icons/<pack>/dl.png) shadow the built-in. */
+    /* Route through the icon resolver so the active theme's bundled
+	 * icons (e.g. $CONFIG/themes/<theme>/icons/dl.png) shadow the
+	 * stock pixmap. */
     src = gtkhx_icon_load (resource_path);
     if (!src) {
         picture = gtk_picture_new ();

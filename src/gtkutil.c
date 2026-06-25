@@ -926,13 +926,13 @@ button_scaled_size (GdkPixbuf *src, GtkhxScaleArea area, int *out_w,
  * gtkhx_pixbuf_button) is the stable source — return a ref to it
  * directly. The resource-path branch (BTN_KEY_RESOURCE set by
  * gtkhx_pixmap_button) goes through gtkhx_icon_load so the active
- * theme's bundled icons ($CONFIG/themes/<theme>/icons/<basename>.png)
- * can shadow the built-in pixmap per icon — the resolver's own
- * cache absorbs the repeated-decode cost across theme "changed"
- * fan-outs. We deliberately do NOT stash the resolver's result in
- * BTN_KEY_PIXBUF — that would survive a theme switch and keep the
- * old theme's icon on screen even after gtkhx_icon_invalidate_cache
- * drops the resolver-side entry. */
+ * theme's bundled icons ($CONFIG/themes/<theme>/icons/<basename>.png,
+ * or the theme's GResource dir) can shadow the stock pixmap per
+ * icon — the resolver's own cache absorbs the repeated-decode cost
+ * across theme "changed" fan-outs. We deliberately do NOT stash the
+ * resolver's result in BTN_KEY_PIXBUF — that would survive a theme
+ * switch and keep the old theme's icon on screen even after
+ * gtkhx_icon_invalidate_cache drops the resolver-side entry. */
 static GdkPixbuf *
 button_load_source (GtkWidget *btn)
 {

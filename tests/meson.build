@@ -235,11 +235,11 @@ test_theme_listing = executable('test_theme_listing',
 test('theme_listing', test_theme_listing,
      suite : 'unit')
 
-# Icon-pack resolver + discovery. Drives the user-pack lookup with
-# tmp-dir PNG fixtures, the GResource fallback via the linked-in
-# gtkhx_resources (so e.g. "tasks" resolves to the shipped pixmap),
-# and discovery against fixture dirs that contain real subdir
-# packs + a stray file + a dotdir to confirm filtering.
+# Icon resolver (gtkhx_icon_load + cache invalidation). Drives the
+# theme-bundle lookup with tmp-dir PNG fixtures and the stock-pixmap
+# fallback via the linked-in gtkhx_resources (so e.g. "tasks" resolves
+# to the shipped pixmap), and checks the cache hands back the same
+# pixbuf until invalidated.
 test_icon_pack = executable('test_icon_pack',
   'unit/test_icon_pack.c',
   '../src/gtkhx_icon.c',
