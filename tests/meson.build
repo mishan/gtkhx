@@ -18,16 +18,12 @@ test_deps = [
   gtk_dep,
 ]
 
-# Tier 2/3 tests link a couple of source files that still use
-# Nettle's blowfish_set_key / blowfish_encrypt directly from the
-# test-side to synthesize ciphertext for round-trip checks (the
-# production decode path now goes through the Rust hxcrypto-stream
-# crate). Nettle stays here so those tests still find the symbols;
-# Phase R1 already moved the crypto primitives (hash, stream
-# cipher, AEAD, compression) to Rust crates, so neither protocol.h
-# nor compress.h pull C-library cipher headers anymore.
+# All crypto primitives (hash, stream cipher, AEAD, compression) live in
+# the Rust hxcrypto-* / hxcompress crates since Phase R1, and the C
+# dispatchers that wrapped them (cipher.c, cipher_aead.c, hope.c) plus the
+# nettle-using tests are gone — so neither the tests nor protocol.h /
+# compress.h pull in any C cipher library. No nettle dependency here.
 proto_test_deps = test_deps + [
-  nettle_dep,
   # Phase R2: src/proto_helpers.c (compiled into most proto tests)
   # now calls into the Rust hotline-proto crate for the SELFINFO
   # parse, so every test that links proto_helpers.c needs the
@@ -81,9 +77,10 @@ test_text_util = executable('test_text_util',
 test('text_util', test_text_util,
      suite : 'unit')
 
-# byte_swap — HN16 / HN32 macros from protocol.h. Header-only macros,
-# but protocol.h pulls in cipher.h / compress.h, so the test needs
-# nettle + zlib on its dep list. Worth it: these macros are the
+# byte_swap — HN16 / HN32 macros from protocol.h. Header-only macros;
+# protocol.h pulls in cipher.h / compress.h for the htlc_conn state
+# types, but those are now header-only (the crypto/compress backends are
+# Rust), so test_deps suffices. Worth it: these macros are the
 # load-bearing piece of every chunk parse in rcv.c.
 test_byte_swap = executable('test_byte_swap',
   'unit/test_byte_swap.c',
@@ -409,8 +406,8 @@ test('human_readable', test_human_readable,
 # layout test: re-encode the magic + ref + len + (type/reserved)
 # fields and pin the bytes. Catches the "Oni Tracks folder hang"
 # regression (always-zero type field) and any future struct
-# rearrangement. Pulls in proto_test_deps because hotline.h
-# transitively wants nettle + zlib via protocol.h.
+# rearrangement. Pulls in proto_test_deps because proto_helpers.c
+# needs the Rust hotline-proto staticlib.
 test_htxf_hdr = executable('test_htxf_hdr',
   'unit/test_htxf_hdr.c',
   '../src/proto_helpers.c',

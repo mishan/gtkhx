@@ -77,7 +77,6 @@ adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
 panel_dep   = dependency('libpanel-1', version : '>= 1.4')
 glib_dep    = dependency('glib-2.0',  version : '>= 2.56')
 gthread_dep = dependency('gthread-2.0')
-nettle_dep  = dependency('nettle',    version : '>= 3.0')
 threads_dep = dependency('threads')
 
 # Phase 5: GSound replaces the legacy fork+execlp("play") path in sound.c.
@@ -207,7 +206,6 @@ deps = [
   panel_dep,
   glib_dep,
   gthread_dep,
-  nettle_dep,
   threads_dep,
   gsound_dep,
   gstreamer_dep,
@@ -368,7 +366,6 @@ summary(
     'GSound'        : gsound_dep.version(),
     'libadwaita'    : adw_dep.version(),
     'libpanel'      : panel_dep.version(),
-    'Nettle'        : nettle_dep.version(),
     'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
