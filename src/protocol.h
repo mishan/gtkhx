@@ -78,12 +78,12 @@ struct htxf_conn {
 	 * Owners that increment refcount on acquire and decrement on
 	 * release:
 	 *   1  the xfers[] array (xfer_new → xfer_remove_from_list)
-	 *   1  the worker thread (xfer_ready_write → cleanup_dispatch)
+	 *   1  the worker (xfer_ready_write → xfer_completion_entry)
 	 *   N  each pending post_* idle (post_*  → its dispatcher)
 	 *
-	 * xfer_delete (called from rcv.c when the server cancels, and
-	 * from xfer_ready_write's err_fd path) sets `canceled` and
-	 * removes the htxf from xfers[] (which drops the xfers[] ref).
+	 * xfer_delete (called from rcv.c when the server cancels) sets
+	 * `canceled` and removes the htxf from xfers[] (which drops the
+	 * xfers[] ref).
 	 * If the worker and queued idles still hold refs, the htxf
 	 * stays alive, the worker exits cleanly, idles run with the
 	 * canceled flag set and skip their work, and the last unref
@@ -103,7 +103,6 @@ struct htxf_conn {
     guint8 type;
     guint32 queue; /* position in server queue */
     int fd;
-    pthread_t tid;
 
     /* HTXF subchannel target: same hostname as the main control
 	 * channel, port + 1. Stored as plain strings so the worker

@@ -24,7 +24,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <signal.h>
 #include <sys/socket.h>
 #include <sys/select.h>
 #include <netinet/in.h>
@@ -63,6 +62,14 @@ static void xfer_remove_from_list (struct htxf_conn *htxf);
  * gtkhx_bridge_spawn_blocking_with_idle. */
 extern void gtkhx_bridge_post_to_main (GSourceFunc func, gpointer user_data);
 
+/* Phase R3 X3: the transfer worker runs on hxbridge's tokio blocking
+ * pool instead of a per-transfer pthread. Same shim banner.c uses — the
+ * worker callback runs on the blocking pool, the completion callback on
+ * the GLib main loop once it returns. Declared inline like banner.c. */
+extern void gtkhx_bridge_spawn_blocking_with_idle (void (*worker) (void *),
+                                                   void (*completion) (void *),
+                                                   void *user_data);
+
 /*
  * Reference counting and the worker → main marshal helpers.
  *
@@ -70,14 +77,14 @@ extern void gtkhx_bridge_post_to_main (GSourceFunc func, gpointer user_data);
  * struct htxf_conn (protocol.h) for the ownership model. In short:
  *
  *   - xfers[] holds 1 ref per htxf; dropped by xfer_remove_from_list
- *     when xfer_delete (server-cancel from rcv.c, err_fd from
- *     xfer_ready_write) or cleanup_dispatch (worker normal exit)
- *     unlinks the htxf.
- *   - The worker thread holds 1 ref taken in xfer_ready_write
- *     before pthread_create; dropped by cleanup_dispatch on its
- *     behalf when the worker queues post_xfer_cleanup at exit.
- *   - Each pending post_file_update / post_xfer_cleanup idle holds
- *     1 ref while it's queued; dropped by its dispatcher.
+ *     when xfer_delete (server-cancel from rcv.c) or
+ *     xfer_completion_entry (worker normal exit) unlinks the htxf.
+ *   - The worker holds 1 ref taken in xfer_ready_write before the
+ *     transfer is handed to the blocking pool; dropped by
+ *     xfer_completion_entry, which the bridge runs on the main thread
+ *     once the worker returns.
+ *   - Each pending post_file_update idle holds 1 ref while it's
+ *     queued; dropped by its dispatcher.
  *
  * htxf_conn is freed only when all owners have unref'd. Cancel —
  * either server-initiated or app-shutdown — sets htxf->canceled so
@@ -149,47 +156,18 @@ post_file_update (struct htxf_conn *htxf)
     gtkhx_bridge_post_to_main (fu_dispatch, j);
 }
 
-struct cleanup_job {
-    struct htxf_conn *htxf;
-};
-static gboolean
-cleanup_dispatch (gpointer data)
-{
-    struct cleanup_job *j = data;
-    j->htxf->tid = 0;
-    /* Unlink from xfers[] if the server didn't already cancel us
-	 * out of it; xfer_remove_from_list is a no-op on a not-found
-	 * pointer. */
-    xfer_remove_from_list (j->htxf);
-    /* Drop the worker thread's ref. */
-    htxf_unref (j->htxf);
-    g_free (j);
-    return G_SOURCE_REMOVE;
-}
+/* Worker → main completion. gtkhx_bridge_spawn_blocking_with_idle runs
+ * this on the GLib main thread once the transfer worker returns — AFTER
+ * every file_update idle the worker queued (same GMainContext, FIFO).
+ * Mirrors the old cleanup_dispatch: unlink from xfers[] (a no-op if the
+ * server already cancelled us out) and drop the worker's ref. The
+ * htxf->tid bookkeeping is gone with the pthread. */
 static void
-post_xfer_cleanup (struct htxf_conn *htxf)
+xfer_completion_entry (void *arg)
 {
-    struct cleanup_job *j = g_new0 (struct cleanup_job, 1);
-    /* The worker thread's ref is handed off to the cleanup job
-	 * directly — no additional ref taken here. cleanup_dispatch
-	 * unrefs on the worker's behalf. */
-    j->htxf = htxf;
-    gtkhx_bridge_post_to_main (cleanup_dispatch, j);
-}
-
-static void
-ignore_signals (sigset_t *oldset)
-{
-    sigset_t set;
-
-    sigfillset (&set);
-    sigprocmask (SIG_BLOCK, &set, oldset);
-}
-
-static void
-unignore_signals (sigset_t *oldset)
-{
-    sigprocmask (SIG_SETMASK, oldset, 0);
+    struct htxf_conn *htxf = arg;
+    xfer_remove_from_list (htxf);
+    htxf_unref (htxf);
 }
 
 /* Does either fork (data or resource) of the local path exist? */
@@ -970,10 +948,10 @@ ret:
      * socket fd (and any rustls session) it owns. */
     htxf_io_release (htxf);
 
-    /* Cleanup is marshaled to the main thread so it runs AFTER
-	 * every file_update idle posted above — GMainContext FIFO
-	 * ordering keeps htxf alive for every pending dispatcher. */
-    post_xfer_cleanup (htxf);
+    /* Cleanup runs in xfer_completion_entry on the main thread once
+	 * this worker returns — after every file_update idle queued above
+	 * (same GMainContext, FIFO), so htxf stays alive for every pending
+	 * dispatcher. */
     return NULL;
 }
 
@@ -1179,7 +1157,6 @@ ret:
 	 * post_file_update; this is the catch-all. */
     g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
 
-    post_xfer_cleanup (htxf);
     return NULL;
 }
 
@@ -1363,9 +1340,7 @@ ret:
     (void)retval;
     htxf_io_release (htxf);
 
-    /* See get_thread for the cleanup-via-marshal rationale. */
-    post_xfer_cleanup (htxf);
-
+    /* Cleanup runs in xfer_completion_entry — see get_thread. */
     return NULL;
 }
 
@@ -1669,64 +1644,52 @@ ret:
 	 * sensible post-completion. */
     g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
 
-    post_xfer_cleanup (htxf);
     return NULL;
+}
+
+/* Worker entry on hxbridge's tokio blocking pool. Dispatches to the
+ * right transfer body and returns; cleanup happens separately in
+ * xfer_completion_entry once this returns. Runs OFF the main thread —
+ * the same contract the pthread had — so it never touches GTK directly,
+ * only marshals via post_file_update. opt.folder picks the FILE_NEXT
+ * folder-stream worker; plain XFER_GET / XFER_PUT use the single-file
+ * workers. */
+static void
+xfer_worker_entry (void *arg)
+{
+    struct htxf_conn *htxf = arg;
+    if (htxf->opt.folder) {
+        if (htxf->type == XFER_GET) {
+            folder_get_thread (htxf);
+        } else {
+            folder_put_thread (htxf);
+        }
+    } else {
+        if (htxf->type == XFER_GET) {
+            get_thread (htxf);
+        } else {
+            put_thread (htxf);
+        }
+    }
 }
 
 void
 xfer_ready_write (struct htxf_conn *htxf)
 {
-    sigset_t oldset;
-    struct sigaction act, tstpact, contact;
-    pthread_t tid;
-    int err;
-
-    ignore_signals (&oldset);
-    act.sa_flags = 0;
-    act.sa_handler = SIG_DFL;
-    sigfillset (&act.sa_mask);
-    sigaction (SIGTSTP, &act, &tstpact);
-    sigaction (SIGCONT, &act, &contact);
-
-    /* Take the worker thread's reference BEFORE pthread_create so
-	 * the htxf can't be freed mid-spawn if some other path drops
-	 * the xfers[] ref between here and the worker's first
-	 * htxf_ref call. cleanup_dispatch drops this ref on the
-	 * worker's behalf at exit. */
+    /* Take the worker's reference BEFORE handing the transfer to the
+	 * blocking pool, so the htxf can't be freed mid-spawn if some other
+	 * path drops the xfers[] ref. xfer_completion_entry drops this ref
+	 * on the worker's behalf once the worker returns.
+	 *
+	 * No pthread_create, no SIGTSTP / SIGCONT mask dance: the worker
+	 * runs on hxbridge's tokio blocking pool and the completion is
+	 * marshalled back to the main thread for us. The shim can't fail
+	 * softly — a runtime-startup failure aborts the process (same
+	 * fatal posture as the banner.c HTXF worker) — so there's no
+	 * pthread_create error path to handle here anymore. */
     htxf_ref (htxf);
-
-    /* Dispatch to the folder thread when opt.folder is set so
-	 * the worker drives the FILE_NEXT state machine and per-leaf
-	 * file_recv_one / file_send_one calls. Plain XFER_GET /
-	 * XFER_PUT fall through to the single-file threads. */
-    void *(*entry) (void *);
-    if (htxf->opt.folder) {
-        entry
-            = (htxf->type == XFER_GET) ? folder_get_thread : folder_put_thread;
-    } else {
-        entry = (htxf->type == XFER_GET) ? get_thread : put_thread;
-    }
-    err = pthread_create (&tid, 0, entry, htxf);
-
-    sigaction (SIGTSTP, &tstpact, 0);
-    sigaction (SIGCONT, &contact, 0);
-    unignore_signals (&oldset);
-
-    if (err) {
-        /* pthread_create failed — we'll never get a
-		 * cleanup_dispatch to drop the ref, so drop it here. */
-        htxf_unref (htxf);
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          "xfer: pthread_create: %s\n", strerror (err));
-        goto err_fd;
-    }
-    htxf->tid = tid;
-    //	pthread_detach(tid);
-
-    return;
-
-err_fd:
-    xfer_delete (htxf);
+    gtkhx_bridge_spawn_blocking_with_idle (xfer_worker_entry,
+                                           xfer_completion_entry, htxf);
 }
 
 void
@@ -1756,13 +1719,12 @@ xfers_delete_all (void)
         struct htxf_conn *htxf = xfers[i];
         /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
         g_atomic_int_set (&htxf->canceled, TRUE);
-        /* Shut the subchannel socket down to wake a parked worker.
-		 * pthread_cancel stays for X1 as a backstop; once the worker
-		 * moves onto tokio's blocking pool (X3) it's the abort alone. */
+        /* Shut the subchannel socket down to wake a worker parked in a
+		 * blocking read/write; the htxf_io_read/_write canceled-check
+		 * then unwinds it cleanly. The worker now runs on tokio's
+		 * blocking pool, which can't be force-cancelled — cooperative
+		 * abort is the whole mechanism (no pthread_cancel). */
         htxf_io_abort (htxf);
-        if (htxf->tid) {
-            pthread_cancel (htxf->tid);
-        }
         htxf_unref (htxf); /* drop xfers[] ref */
     }
     nxfers = 0;
@@ -1807,11 +1769,10 @@ xfer_remove_from_list (struct htxf_conn *htxf)
 
 /* Public: cancel an in-flight transfer.
  *
- * Called from rcv.c when the server sends a cancel / error and from
- * xfer_ready_write's err_fd path when pthread_create fails. Sets
- * htxf->canceled so any pending or future dispatchers skip their
- * work, kicks the worker thread (best-effort — pthread_cancel is
- * async), and unlinks from xfers[] (which drops the array's ref). */
+ * Called from rcv.c when the server sends a cancel / error. Sets
+ * htxf->canceled so any pending or future dispatchers skip their work,
+ * shuts the subchannel socket down to wake a parked worker, and unlinks
+ * from xfers[] (which drops the array's ref). */
 void
 xfer_delete (struct htxf_conn *htxf)
 {
@@ -1823,13 +1784,10 @@ xfer_delete (struct htxf_conn *htxf)
     g_atomic_int_set (&htxf->canceled, TRUE);
     /* Wake a worker parked in a blocking subchannel read/write by
 	 * shutting its socket down; the htxf_io_read/_write canceled-check
-	 * then turns the resulting error into a clean exit. pthread_cancel
-	 * remains the X1 backstop (removed when the worker becomes a tokio
-	 * blocking task in X3). */
+	 * then turns the resulting error into a clean exit. The worker runs
+	 * on tokio's blocking pool (no pthread_cancel) — cooperative abort
+	 * is the whole mechanism. */
     htxf_io_abort (htxf);
-    if (htxf->tid) {
-        pthread_cancel (htxf->tid);
-    }
     xfer_remove_from_list (htxf);
 }
 
