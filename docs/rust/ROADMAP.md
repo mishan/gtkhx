@@ -651,7 +651,24 @@ where the concurrency motivation pays off.
    / v3 tracker wire format) rather than hxnet/tokio. Moving it into the
    `hxnet` crate (or a sibling) is the last bit of non-control-channel
    network code still living in C. Not on the `pthread_create` exit path,
-   so it can land independently of items 3–4.
+   so it can land independently of items 3–4. Scoped in
+   `docs/rust/tracker-hxnet-scoping.md`; the decision there is to let Rust
+   own the whole transport (connect + TLS + fallback) and defer SOCKS to a
+   central `tokio-socks` add rather than keep the connect in C.
+9. ⏳ **Revisit HTXF's C-side connect (SOCKS fd-handoff).** `xfers.c` /
+   `banner.c` still do the plaintext `GSocketClient` TCP connect in C and
+   hand the connected fd into Rust via `FromRawFd` (`hxnet::htxf`'s `open`
+   / `connect_tls`). That split exists for *one* reason: keeping the
+   connect in C preserves transparent SOCKS via `GProxyResolver`, since
+   `tokio::net::TcpStream` isn't proxy-aware (see the doc comments in
+   `htxf.rs` ~L279/L334 and `connect.rs`). Once SOCKS is handled centrally
+   in `hxnet` (the `tokio-socks` add named in `connect.rs`), revisit this:
+   let Rust own the HTXF connect too and collapse the fd-handoff, so
+   `xfers.c` / `banner.c` shed their `GSocketClient` connect + fd plumbing.
+   Same underlying decision as item 8 — once `hxnet` owns proxy-aware
+   connect, the control channel, HTXF, and the tracker can all stop
+   special-casing it. Pure cleanup; no behaviour change, gated on the
+   `tokio-socks` work existing first.
 
 ### Work-item 1 detail: R3.3 sub-phases
 
