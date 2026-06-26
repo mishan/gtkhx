@@ -156,18 +156,39 @@ post_file_update (struct htxf_conn *htxf)
     gtkhx_bridge_post_to_main (fu_dispatch, j);
 }
 
-/* Worker → main completion. gtkhx_bridge_spawn_blocking_with_idle runs
- * this on the GLib main thread once the transfer worker returns — AFTER
- * every file_update idle the worker queued (same GMainContext, FIFO).
- * Mirrors the old cleanup_dispatch: unlink from xfers[] (a no-op if the
- * server already cancelled us out) and drop the worker's ref. The
- * htxf->tid bookkeeping is gone with the pthread. */
+/* The actual transfer teardown, run on the GLOBAL default main context
+ * (the one post_file_update queues its progress idles on). Unlink from
+ * xfers[] (a no-op if the server already cancelled us out) and drop the
+ * worker's ref. Returns G_SOURCE_REMOVE — runs once. */
+static gboolean
+xfer_cleanup_dispatch (gpointer data)
+{
+    struct htxf_conn *htxf = data;
+    xfer_remove_from_list (htxf);
+    htxf_unref (htxf);
+    return G_SOURCE_REMOVE;
+}
+
+/* Worker → main completion, invoked by gtkhx_bridge_spawn_blocking_with_
+ * idle once the transfer worker returns. The bridge runs this on the
+ * context it captured at spawn time (thread-default — the main thread's
+ * global default context in production). post_file_update, however,
+ * queues its progress idles on the GLOBAL default context (via
+ * gtkhx_bridge_post_to_main → g_main_context_invoke(NULL, ...)). Were
+ * those two contexts ever to diverge, cleaning up directly here could
+ * unlink+unref the htxf before a still-queued file_update idle runs.
+ *
+ * So we don't tear down here — we re-post the teardown onto the global
+ * default context too (gtkhx_bridge_post_to_main). Because the worker
+ * posted all its file_updates before returning, and this re-post happens
+ * after the worker returned, the cleanup is guaranteed to land AFTER
+ * every queued file_update on that one context — preserving the
+ * FIFO / lifetime ordering regardless of which context the bridge picked.
+ * The worker's ref keeps htxf alive across the extra hop. */
 static void
 xfer_completion_entry (void *arg)
 {
-    struct htxf_conn *htxf = arg;
-    xfer_remove_from_list (htxf);
-    htxf_unref (htxf);
+    gtkhx_bridge_post_to_main (xfer_cleanup_dispatch, arg);
 }
 
 /* Does either fork (data or resource) of the local path exist? */
