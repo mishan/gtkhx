@@ -173,14 +173,16 @@ jobs:
         # above (glycin-loaders), so a skip here means something broke,
         # and a silent skip masks decode regressions in a green run.
         #
-        # GLYCIN_SANDBOX_SELECTOR=not-sandboxed: glycin runs each image
-        # loader in a bubblewrap sandbox by default, which the
-        # unprivileged CI container can't set up (no nested user
-        # namespaces). The fixtures are trusted in-tree test images, so
-        # disabling the sandbox lets the loaders actually decode instead
-        # of erroring on a failed bwrap spawn.
+        # GTKHX_GLYCIN_NO_SANDBOX=1: glycin runs each loader under bwrap
+        # by default (its Auto sandbox selector), which an unprivileged
+        # CI container can't spawn (no usable user namespaces) — the
+        # decode then fails and maps to UnsupportedFormat. glycin 3.x has
+        # no env knob for the sandbox, so src/decode.rs reads this var and
+        # selects NotSandboxed via the API. The fixtures are trusted
+        # in-tree images. (tests/decode.rs also sets it itself, so this is
+        # belt-and-suspenders / documentation.)
         env:
-          GLYCIN_SANDBOX_SELECTOR: not-sandboxed
+          GTKHX_GLYCIN_NO_SANDBOX: "1"
         run: |
           cd rust && cargo test --workspace --ignore-rust-version
 

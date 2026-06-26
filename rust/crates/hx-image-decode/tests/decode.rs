@@ -200,6 +200,14 @@ fn drive_until_done(deadline: Duration) -> DecodeResult {
 }
 
 fn decode_fixture(path: &str) -> DecodeResult {
+    // Force glycin's unsandboxed loader path (see src/decode.rs): its
+    // default Auto sandbox runs bwrap, which can't spawn in CI
+    // containers or some dev sandboxes — there the decode would fail
+    // and map to UnsupportedFormat. The fixtures are trusted in-tree
+    // images. Set process-wide (decode tests are serialised by
+    // MAIN_CTX_LOCK, and the value never varies) so the test passes
+    // regardless of how the runner configures its environment.
+    std::env::set_var("GTKHX_GLYCIN_NO_SANDBOX", "1");
     let bytes = std::fs::read(fixture_path(path))
         .unwrap_or_else(|e| panic!("read fixture {}: {}", path, e));
     // Spec defaults: caps NULL → glycin sees the spec floor.

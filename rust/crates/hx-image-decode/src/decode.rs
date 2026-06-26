@@ -31,9 +31,13 @@
 //!
 //! Sandboxing: glycin defaults to `SandboxSelector::Auto` — picks
 //! bwrap on the host, flatpak-spawn when we're inside a Flatpak
-//! sandbox, plain fork on systems without bwrap. We don't
-//! override; the auto choice is what every other glycin consumer
-//! (Loupe, Image Viewer) ships with.
+//! sandbox. We keep Auto in production (the choice every other glycin
+//! consumer — Loupe, Image Viewer — ships with) so server-supplied
+//! images stay sandboxed. The one override: when
+//! `GTKHX_GLYCIN_NO_SANDBOX` is set we select `NotSandboxed`, for CI /
+//! test environments where bwrap can't run (an unprivileged container
+//! has no usable user namespaces). glycin 3.x exposes no env knob for
+//! this — the selector is API-only — so the override lives here.
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -293,10 +297,20 @@ async fn run_glycin_decode(
 ) -> Result<DecodeOk, GlycinErr> {
     // glycin::Loader::new_bytes is the GLib-Bytes-in entry point;
     // glycin keeps a ref + passes the buffer to the subprocess via
-    // memfd. The default sandbox selector picks bwrap on the host
-    // and flatpak-spawn inside a Flatpak runtime — we don't
-    // override.
-    let image = glycin::Loader::new_bytes(gbytes)
+    // memfd. The default sandbox selector (Auto) picks bwrap on the
+    // host and flatpak-spawn inside a Flatpak runtime.
+    let mut loader = glycin::Loader::new_bytes(gbytes);
+    // Test/CI escape hatch: glycin 3.x has no env knob for the sandbox
+    // (the selector is API-only), and its Auto choice runs each loader
+    // under bwrap — which an unprivileged CI container can't spawn, so
+    // the decode fails and maps to UnsupportedFormat. The decode test
+    // fixtures are trusted in-tree images, so GTKHX_GLYCIN_NO_SANDBOX=1
+    // forces the unsandboxed loader path. Unset in production, so
+    // server-supplied images keep the Auto sandbox.
+    if std::env::var_os("GTKHX_GLYCIN_NO_SANDBOX").is_some() {
+        loader.sandbox_selector(glycin::SandboxSelector::NotSandboxed);
+    }
+    let image = loader
         .load()
         .await
         .map_err(|ctx| GlycinErr {
