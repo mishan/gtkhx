@@ -23,16 +23,22 @@ use std::time::{Duration, Instant};
 /// serialises every test that touches the default MainContext.
 static MAIN_CTX_LOCK: Mutex<()> = Mutex::new(());
 
-/// Stub for the C-side telemetry bridge so the integration
-/// test binary links. In the real binary
-/// `src/inline_media_decode.c` provides this and routes the
-/// message through `debug_log("media", ...)`. The decoder's
-/// telemetry path calls it on decode-start / -done / -failed;
-/// for tests we drop the message — `cargo test`'s captured
-/// stdout is the right place for diagnostics, not the GtkHx
-/// debug-log gate.
+/// Stub for the C-side telemetry bridge so the integration test binary
+/// links. In the real binary `src/inline_media_decode.c` provides this
+/// and routes the message through `debug_log("media", ...)`. The
+/// decoder's telemetry path calls it on decode-start / -done / -failed
+/// — the -failed line carries glycin's error category. We print to
+/// stderr (visible with `cargo test -- --nocapture`, and on a failing
+/// test cargo prints captured output anyway), so a CI decode failure is
+/// self-diagnosing instead of needing a guess-and-rerun cycle.
 #[no_mangle]
-pub extern "C" fn hx_image_decode_log(_msg: *const std::ffi::c_char) {}
+pub extern "C" fn hx_image_decode_log(msg: *const std::ffi::c_char) {
+    if msg.is_null() {
+        return;
+    }
+    let s = unsafe { std::ffi::CStr::from_ptr(msg) }.to_string_lossy();
+    eprintln!("[hx-image-decode] {s}");
+}
 
 use hx_image_decode::ffi::{
     inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free,
@@ -133,6 +139,11 @@ struct DecodeResult {
     width: i32,
     height: i32,
     mime: Option<String>,
+    /// Glycin's error string on the failure path (the ErrorCtx the
+    /// decoder stashes — includes glycin's "Used config" dump, which
+    /// names the loader dirs + API version it searched). Surfaced in
+    /// the fixture assertions so a CI failure is self-diagnosing.
+    error_message: Option<String>,
 }
 
 thread_local! {
@@ -150,6 +161,15 @@ extern "C" fn collect_cb(
         } else {
             Some(
                 std::ffi::CStr::from_ptr(r.canonical_mime)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        };
+        let error_message = if r.error_message.is_null() {
+            None
+        } else {
+            Some(
+                std::ffi::CStr::from_ptr(r.error_message)
                     .to_string_lossy()
                     .into_owned(),
             )
@@ -176,6 +196,7 @@ extern "C" fn collect_cb(
             width,
             height,
             mime,
+            error_message,
         };
         LAST_RESULT.with(|cell| *cell.borrow_mut() = Some(result));
     }
@@ -246,7 +267,15 @@ fn png_fixture_decodes() {
     }
     run_in_main_thread(|| {
         let r = decode_fixture("banner_http.png");
-        assert_eq!(r.error_code, 0);
+        assert_eq!(
+            r.error_code, 0,
+            "glycin decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?}). error_code 2 = UnsupportedFormat, \
+             which the decoder also returns for any glycin loader error \
+             (e.g. no loader installed for the format / loader API mismatch \
+             — glycin's message names the config it searched).",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
         assert!(r.has_texture);
         assert!(!r.has_frames, "PNG is static; no frames array expected");
         assert!(r.width > 0 && r.height > 0);
@@ -261,7 +290,15 @@ fn jpeg_fixture_decodes() {
     }
     run_in_main_thread(|| {
         let r = decode_fixture("banner_htxf.jpg");
-        assert_eq!(r.error_code, 0);
+        assert_eq!(
+            r.error_code, 0,
+            "glycin decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?}). error_code 2 = UnsupportedFormat, \
+             which the decoder also returns for any glycin loader error \
+             (e.g. no loader installed for the format / loader API mismatch \
+             — glycin's message names the config it searched).",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
         assert!(r.has_texture);
         assert!(!r.has_frames);
         assert!(r.width > 0 && r.height > 0);
@@ -282,7 +319,15 @@ fn gif_fixture_decodes() {
     // against Janus.
     run_in_main_thread(|| {
         let r = decode_fixture("banner_htxf.gif");
-        assert_eq!(r.error_code, 0);
+        assert_eq!(
+            r.error_code, 0,
+            "glycin decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?}). error_code 2 = UnsupportedFormat, \
+             which the decoder also returns for any glycin loader error \
+             (e.g. no loader installed for the format / loader API mismatch \
+             — glycin's message names the config it searched).",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
         assert!(r.has_texture);
         assert!(r.width > 0 && r.height > 0);
         assert_eq!(r.mime.as_deref(), Some("image/gif"));

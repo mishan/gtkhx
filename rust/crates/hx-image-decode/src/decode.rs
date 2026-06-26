@@ -246,9 +246,18 @@ pub(crate) fn decode_async(
                     bytes_len,
                 );
             }
-            Err(GlycinErr { code, message }) => {
+            Err(GlycinErr {
+                code,
+                message,
+                detail,
+            }) => {
                 decoded_set_error(result, code, message, sniffed);
-                log_decode_failed(sniffed, message, started.elapsed());
+                // Telemetry takes glycin's full error text when present
+                // (its "Used config" dump names the loader dirs + API
+                // version it searched — the diagnosis for a "no loader
+                // for this format" failure); else the static category.
+                let reason = detail.as_deref().unwrap_or(message);
+                log_decode_failed(sniffed, reason, started.elapsed());
             }
         }
 
@@ -285,6 +294,14 @@ enum DecodeOk {
 struct GlycinErr {
     code: u16,
     message: &'static str,
+    /// Glycin's own error text (its `ErrorCtx` Display), when the
+    /// failure came from glycin rather than our own cap checks. Carries
+    /// the detail the `'static` `message` can't — including glycin's
+    /// "Used config" dump (the loader dirs + API version it searched),
+    /// which is exactly what's needed to diagnose a "no loader for this
+    /// format" failure. Routed to the telemetry / debug log only; the
+    /// wire-facing `message` stays the static category.
+    detail: Option<String>,
 }
 
 async fn run_glycin_decode(
@@ -315,12 +332,11 @@ async fn run_glycin_decode(
         .await
         .map_err(|ctx| GlycinErr {
             code: MEDIA_ERR_UNSUPPORTED,
-            // Glycin's ErrorCtx is descriptive in debug logs but
-            // we can't borrow it as 'static. The category is
-            // what matters at the wire level; the formatted
-            // message goes to debug_log via the telemetry path,
-            // which holds its own buffer.
+            // The category is what matters at the wire level; glycin's
+            // full ErrorCtx (descriptive, but not 'static) rides the
+            // `detail` field to the telemetry / debug log.
             message: glycin_err_category(&ctx),
+            detail: Some(format!("{ctx}")),
         })?;
 
     // Dimension cap: glycin parsed the header during load();
@@ -336,18 +352,21 @@ async fn run_glycin_decode(
         return Err(GlycinErr {
             code: MEDIA_ERR_UNSUPPORTED,
             message: "decoder reported zero-dimension image",
+            detail: None,
         });
     }
     if w > max_dimension || h > max_dimension {
         return Err(GlycinErr {
             code: MEDIA_ERR_TOO_LARGE,
             message: "image dimension exceeds cap",
+            detail: None,
         });
     }
     if (w as u64) * (h as u64) > max_pixels as u64 {
         return Err(GlycinErr {
             code: MEDIA_ERR_TOO_LARGE,
             message: "image pixel count exceeds cap",
+            detail: None,
         });
     }
 
@@ -359,6 +378,7 @@ async fn run_glycin_decode(
     let first = image.next_frame().await.map_err(|ctx| GlycinErr {
         code: MEDIA_ERR_UNSUPPORTED,
         message: glycin_err_category(&ctx),
+        detail: Some(format!("{ctx}")),
     })?;
     let first_delay = first.delay();
     let first_tex = first.texture();
