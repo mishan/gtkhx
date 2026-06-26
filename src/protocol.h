@@ -17,7 +17,6 @@
 #include <sys/types.h> /* u_int8_t / u_int16_t / u_int32_t */
 #include <sys/time.h>
 #include <time.h>
-#include <pthread.h>
 
 #include "compat.h"
 #include "hotline.h"

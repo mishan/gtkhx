@@ -63,9 +63,9 @@ static void xfer_remove_from_list (struct htxf_conn *htxf);
 extern void gtkhx_bridge_post_to_main (GSourceFunc func, gpointer user_data);
 
 /* Phase R3 X3: the transfer worker runs on hxbridge's tokio blocking
- * pool instead of a per-transfer pthread. Same shim banner.c uses — the
- * worker callback runs on the blocking pool, the completion callback on
- * the GLib main loop once it returns. Declared inline like banner.c. */
+ * pool. Same shim banner.c uses — the worker callback runs on the
+ * blocking pool, the completion callback on the GLib main loop once it
+ * returns. Declared inline like banner.c. */
 extern void gtkhx_bridge_spawn_blocking_with_idle (void (*worker) (void *),
                                                    void (*completion) (void *),
                                                    void *user_data);
@@ -477,8 +477,8 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     htxf->type = type;
     htxf->queue = -1;
     /* refcount = 1 represents the xfers[] array's ownership. The
-	 * worker thread will take its own ref before pthread_create
-	 * (in xfer_ready_write). */
+	 * worker takes its own ref in xfer_ready_write before the
+	 * transfer is handed to the blocking pool. */
     htxf->refcount = 1;
     /* canceled is read on the worker thread (htxf_io_read/_write); use
 	 * atomics for every access. This initial store is before any worker
@@ -1676,9 +1676,9 @@ ret:
 
 /* Worker entry on hxbridge's tokio blocking pool. Dispatches to the
  * right transfer body and returns; cleanup happens separately in
- * xfer_completion_entry once this returns. Runs OFF the main thread —
- * the same contract the pthread had — so it never touches GTK directly,
- * only marshals via post_file_update. opt.folder picks the FILE_NEXT
+ * xfer_completion_entry once this returns. Runs OFF the main thread, so
+ * it never touches GTK directly — only marshals via post_file_update.
+ * opt.folder picks the FILE_NEXT
  * folder-stream worker; plain XFER_GET / XFER_PUT use the single-file
  * workers. */
 static void
@@ -1708,12 +1708,11 @@ xfer_ready_write (struct htxf_conn *htxf)
 	 * path drops the xfers[] ref. xfer_completion_entry drops this ref
 	 * on the worker's behalf once the worker returns.
 	 *
-	 * No pthread_create, no SIGTSTP / SIGCONT mask dance: the worker
-	 * runs on hxbridge's tokio blocking pool and the completion is
-	 * marshalled back to the main thread for us. The shim can't fail
-	 * softly — a runtime-startup failure aborts the process (same
-	 * fatal posture as the banner.c HTXF worker) — so there's no
-	 * pthread_create error path to handle here anymore. */
+	 * The worker runs on hxbridge's tokio blocking pool and the
+	 * completion is marshalled back to the main thread for us. The shim
+	 * can't fail softly — a runtime-startup failure aborts the process
+	 * (same fatal posture as the banner.c HTXF worker) — so there's no
+	 * spawn error path to handle here. */
     htxf_ref (htxf);
     gtkhx_bridge_spawn_blocking_with_idle (xfer_worker_entry,
                                            xfer_completion_entry, htxf);
@@ -1748,9 +1747,9 @@ xfers_delete_all (void)
         g_atomic_int_set (&htxf->canceled, TRUE);
         /* Shut the subchannel socket down to wake a worker parked in a
 		 * blocking read/write; the htxf_io_read/_write canceled-check
-		 * then unwinds it cleanly. The worker now runs on tokio's
-		 * blocking pool, which can't be force-cancelled — cooperative
-		 * abort is the whole mechanism (no pthread_cancel). */
+		 * then unwinds it cleanly. The worker runs on tokio's blocking
+		 * pool, which can't be force-cancelled — cooperative abort is
+		 * the whole mechanism. */
         htxf_io_abort (htxf);
         htxf_unref (htxf); /* drop xfers[] ref */
     }
@@ -1812,8 +1811,8 @@ xfer_delete (struct htxf_conn *htxf)
     /* Wake a worker parked in a blocking subchannel read/write by
 	 * shutting its socket down; the htxf_io_read/_write canceled-check
 	 * then turns the resulting error into a clean exit. The worker runs
-	 * on tokio's blocking pool (no pthread_cancel) — cooperative abort
-	 * is the whole mechanism. */
+	 * on tokio's blocking pool, which can't be force-cancelled —
+	 * cooperative abort is the whole mechanism. */
     htxf_io_abort (htxf);
     xfer_remove_from_list (htxf);
 }

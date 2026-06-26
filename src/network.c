@@ -31,7 +31,6 @@
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <gio/gio.h>
-#include <pthread.h>
 #include <errno.h>
 #include <sys/time.h>
 #include <sys/select.h>
@@ -81,9 +80,8 @@ guint16 server_port;
 struct log *server_log = NULL;
 #endif
 
-/* pthread_t conn_tid is gone. The connect
- * + magic-exchange flow runs on the main loop via GSocketClient's
- * async API; cancellation goes through current_cancel. */
+/* The connect + magic-exchange flow runs on the main loop via
+ * GSocketClient's async API; cancellation goes through current_cancel. */
 static GCancellable *current_cancel;
 
 
@@ -425,9 +423,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
 /* The post_* marshal helpers (post_prog / post_ts / post_log) lived
  * here until the tracker fetch went async (see hx_tracker_list_async
- * below). Their only consumer was the pthread tracker worker, and
- * the worker is gone now — every callback in the new design runs on
- * the main loop, so the trackconn_prog_update / track_prog_update /
+ * below). The worker that consumed them is gone — every callback in
+ * the new design runs on the main loop, so the trackconn_prog_update /
+ * track_prog_update /
  * gtkhx_session_emit_tracker_server_create / hx_printf_prefix calls
  * happen directly. */
 
@@ -1123,9 +1121,10 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
 }
 
 /* Synchronous worker-thread connect helper. Used by the HTXF
- * transfer workers in xfers.c and banner.c — both run on a pthread
- * whose only excuse for existing is the blocking byte-streaming
- * loop, so a sync GSocketClient call here keeps them simple.
+ * transfer workers in xfers.c and banner.c — both run on tokio's
+ * blocking pool, whose only excuse for existing is the blocking
+ * byte-streaming loop, so a sync GSocketClient call here keeps them
+ * simple.
  *
  * Returns a connected GSocketConnection the caller owns
  * (g_object_unref drops both the GIO machinery and the underlying
@@ -1357,10 +1356,10 @@ htxf_connect (struct htxf_conn *htxf)
  * trips it; the in-flight callbacks see G_IO_ERROR_CANCELLED and
  * unwind cleanly.
  *
- * The legacy version of this code ran on a pthread, woke itself
- * out of blocking I/O via SIGUSR1, and pumped UI updates through
- * the post_* marshal helpers above. None of that is needed when
- * every step runs on the main loop already.
+ * This fetch runs entirely on the main loop; the thread-and-signal
+ * version it replaced (with its own SIGUSR1 wakeup and post_* UI
+ * marshalling) is gone — none of that is needed when every step
+ * already runs on the main loop.
  *
  * Protocol shape (per-tracker, after TCP connect):
  *

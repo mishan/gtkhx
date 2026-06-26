@@ -3,13 +3,6 @@
 
 #include <gio/gio.h>
 
-/* we only want pthread.h if we're not in debug mode */
-#ifndef DEBUG
-#include <pthread.h>
-
-extern pthread_t conn_tid;
-#endif
-
 extern char *server_addr;
 extern guint16 server_port;
 extern struct log *server_log;

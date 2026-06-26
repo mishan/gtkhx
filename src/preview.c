@@ -144,7 +144,7 @@ struct hx_preview {
 	 * streaming + queued done_dispatch but the idle hasn't run
 	 * yet — closing the window in that window would invoke
 	 * xfer_delete on an htxf whose worker has already exited,
-	 * causing pthread_cancel on a stale tid.
+	 * a redundant cancel of an already-finished transfer.
 	 *
 	 * Accessed across threads (worker writes, main reads), hence
 	 * the atomic. */
