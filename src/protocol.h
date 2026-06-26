@@ -93,10 +93,11 @@ struct htxf_conn {
 	 * cross-thread too — the main thread stores it (xfer_delete /
 	 * xfers_delete_all) and the worker reads it at every transfer
 	 * read/write boundary (htxf_io_read/_write) — so every access,
-	 * read and write, goes through g_atomic_int_* (it's a gint-width
-	 * gboolean for exactly this reason). */
+	 * read and write, goes through g_atomic_int_*. It's a plain gint
+	 * (0/1 for FALSE/TRUE) to match those APIs' types — same pattern
+	 * as preview.c's stream_finished. */
     gint refcount;
-    gboolean canceled;
+    gint canceled;
     guint32 ref; /* xfer id */
     guint8 gone;
     guint8 type;
