@@ -209,6 +209,23 @@ test_hxnet_ffi = executable('test_hxnet_ffi',
 test('hxnet_ffi', test_hxnet_ffi,
      suite : 'unit')
 
+# htxf_cancel — the HTXF cooperative-cancel C shim (Phase R3 X1). Drives
+# the real htxf_io.c shim + the hxnet abort token over a TCP loopback
+# pair: the canceled-flag boundary check, abort waking a parked transport
+# read, ECANCELED reclassification, NULL-safety, and the token lifecycle
+# under ASan. Links htxf_io.c + debug.c (for debug_log) + the hxnet
+# staticlib; no GUI tree. The full xfers.c worker path is covered by the
+# Tier 3 transfer matrix on the happy path.
+test_htxf_cancel = executable('test_htxf_cancel',
+  'unit/test_htxf_cancel.c',
+  '../src/htxf_io.c',
+  '../src/debug.c',
+  dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
+  include_directories : test_inc,
+)
+test('htxf_cancel', test_htxf_cancel,
+     suite : 'unit')
+
 # hxnet_bridge — translation layer between hxnet's HxnetFrame
 # callback shape and the existing rcv state machine in src/rcv.c.
 # Phase R3.3.e-4a ships only the header-packing leg as a Tier 1
