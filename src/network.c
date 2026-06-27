@@ -20,6 +20,7 @@
 #include "config.h"
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h> /* offsetof — used by the HxnetTrackerEvent ABI asserts */
 #include <unistd.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -1501,14 +1502,25 @@ tracker_verify_cert_cb (const guint8 *host, gsize host_len, guint16 port,
     return tls_trust_decide (host_str, port, fp_str) ? 1 : 0;
 }
 
+/* Owned copy of a (ptr, len) wire string. The hxnet FFI exports an empty
+ * string as (NULL, 0) — g_strndup chokes on a NULL pointer — so map that
+ * to an owned "" rather than a GLib critical / NULL downstream. */
+static char *
+tracker_dup_str (const guint8 *ptr, gsize len)
+{
+    if (!ptr || len == 0) {
+        return g_strdup ("");
+    }
+    return g_strndup ((const char *) ptr, len);
+}
+
 /* Re-emit one drained fetch event as the legacy view signals. */
 static void
 tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
 {
     switch (ev->kind) {
     case HXNET_TRK_KIND_BEGIN: {
-        g_autofree char *url
-            = g_strndup ((const char *) ev->url_ptr, ev->url_len);
+        g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
         tracker_batch_version = ev->version;
         tracker_batch_server_i = 1;
         gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
@@ -1517,8 +1529,7 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
         break;
     }
     case HXNET_TRK_KIND_RECORD: {
-        g_autofree char *url
-            = g_strndup ((const char *) ev->url_ptr, ev->url_len);
+        g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
         HxTrackerServer *e = NULL;
         if (tracker_batch_version == 1) {
             /* v1 record: MacRoman name/desc (the v1 constructor
@@ -1552,10 +1563,9 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
         break;
     }
     case HXNET_TRK_KIND_ERROR: {
-        g_autofree char *url
-            = g_strndup ((const char *) ev->url_ptr, ev->url_len);
+        g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
         g_autofree char *msg
-            = g_strndup ((const char *) ev->message_ptr, ev->message_len);
+            = tracker_dup_str (ev->message_ptr, ev->message_len);
         hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
                           _ ("tracker: %1$s: %2$s\n"), url, msg);
         break;
@@ -1584,6 +1594,16 @@ tracker_fetch_drain (gpointer user_data)
     HxnetTrackerEvent ev;
 
     for (;;) {
+        /* tracker_fetch_dispatch_event emits view signals, and a
+         * subscriber can re-enter (e.g. trigger a Refresh / disconnect)
+         * and run tracker_kill_threads, which removes this source and
+         * closes the handle mid-drain. Re-check at the top of every
+         * iteration so we never poll a NULL handle (the `continue` after
+         * a dispatched event comes back through here). */
+        if (!current_tracker_fetch) {
+            tracker_drain_source_id = 0;
+            return G_SOURCE_REMOVE;
+        }
         int rc = hxnet_tracker_fetch_poll (current_tracker_fetch, &ev);
         if (rc == HXNET_TRK_POLL_EVENT) {
             tracker_fetch_dispatch_event (sess, &ev);
