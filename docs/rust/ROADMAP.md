@@ -525,7 +525,7 @@ to R3.
 
 ---
 
-## Phase R3 — Networking & async core
+## Phase R3 — Networking & async core ✅ (SOCKS/proxy deferred)
 
 **Goal:** Replace the `pthread + g_main_context_invoke` machinery with a
 proper tokio runtime. The Hotline connection (`network.c`), file transfers
@@ -533,38 +533,50 @@ proper tokio runtime. The Hotline connection (`network.c`), file transfers
 tasks. UI handlers stay on the GLib main context and consume events via
 channels.
 
-**Status (current).** The big rock — the `hxnet` connection lifecycle
-(work items 1 + 2) — is **done and then some**: the orchestrator owns
-connect + magic + LOGIN + the HOPE handshake + ciphers + compression,
-it's the *default and only* path (the `GTKHX_USE_HXNET` gate and the
-legacy `network.c` connect/decode path were removed by delete-old-connect),
-the HTXF subchannel byte transport + TLS moved to Rust, and the C crypto
-dispatchers are deleted. The sub-phase table below records the build-up to
-the env-var-gated install; everything after that (default-flip, legacy
-removal, HTXF→Rust, crypto deletion) shipped in the Phase G / WAVE work
-tracked in `docs/rust/phase-g-migration.md` and the dead-C-code cleanups.
+**Status (current): R3 is effectively complete.** The big rock — the
+`hxnet` connection lifecycle (work items 1 + 2) — is **done and then
+some**: the orchestrator owns connect + magic + LOGIN + the HOPE
+handshake + ciphers + compression, it's the *default and only* path (the
+`GTKHX_USE_HXNET` gate and the legacy `network.c` connect/decode path
+were removed by delete-old-connect), the HTXF subchannel byte transport +
+TLS moved to Rust, and the C crypto dispatchers are deleted. The
+worker-thread / non-control-channel tail has since shipped too: the
+`xfers.c` transfer worker is a tokio task (item 4), `gtkthreads.c` is
+deleted (item 3), the HTRK tracker fetch moved into `hxnet` (item 8), and
+the URL-mode banner fetch moved to `ureq` with `libsoup` dropped (item 5).
+The only genuinely-deferred R3 work is central SOCKS/proxy support
+(item 9). (`preview.c`, item 6, was never an R3 work item — it's a
+call-out noting that those GTK-side async parses belong to R5.) The
+sub-phase table below records the build-up to the env-var-gated install;
+everything after that (default-flip, legacy removal, HTXF→Rust, crypto
+deletion) shipped in the Phase G / WAVE work tracked in
+`docs/rust/phase-g-migration.md` and the dead-C-code cleanups.
 
-What actually remains in R3 is the worker-thread / non-control-channel
-tail:
+**Update (June 2026): the worker-thread / non-control-channel tail has
+shipped.** What was outstanding above is now done:
 
-- **`xfers.c` transfer worker → tokio** (work item 4). The HTXF *byte
-  transport* (socket I/O + ChaCha20 AEAD + rustls TLS) already moved to
-  Rust via `htxf_io.c` / `hxnet_htxf_open`; what's left is the per-transfer
-  **pthread worker** in `xfers.c` — the *last* `pthread_create` in the
-  tree (xfers.c ~L1686) — plus its `gtkhx_post_to_main` progress posts.
-- **Banner HTTP (URL-mode) → `reqwest`** (work item 5). Still C/`libsoup`
-  (`banner.c`, `#ifdef HAVE_LIBSOUP`). The file-mode HTXF banner already
-  runs over Rust (`hxnet_htxf_open` + a tokio blocking-pool worker).
-- **Tracker network → `hxnet`** (the worker formerly in item 3). No longer
-  a pthread worker — `tracker.c` is already a main-loop `GSocketClient`
-  async state machine — but the network code is still C, not hxnet/tokio.
-- **Retire `gtkthreads.c`** (item 3) — falls out for free once the xfers.c
-  worker is a tokio task (it's the last `gtkhx_post_to_main` consumer).
-- **`g_idle_add` / `g_timeout_add` audit** (item 7) — partly a doc pass.
+- **`xfers.c` transfer worker → tokio** (work item 4) — ✅ shipped. The
+  per-transfer pthread worker (the *last* `pthread_create` in the tree)
+  is now a tokio blocking-pool task with cooperative cancellation; folder
+  transfers ride the same path. `gtkthreads.c` deleted with it (item 3).
+- **Tracker network → `hxnet`** (work item 8) — ✅ shipped. The HTRK
+  fetch (connect + TLS + v3/v1 probe-fallback + parsing) moved into the
+  `hxnet` crate behind `hxnet_tracker_fetch_*`; `network.c`'s ~1100-line
+  GSocketClient state machine is gone.
+- **Banner HTTP (URL-mode) → Rust** (work item 5) — ✅ shipped. Now a
+  blocking `ureq` GET on the tokio blocking pool (`hxnet_banner_fetch_*`);
+  `libsoup` dropped as a dependency. (`ureq`, not `reqwest` — see the
+  item-5 note for the dependency-weight rationale.)
+- **`g_idle_add` / `g_timeout_add` audit** (item 7) — ✅ documented (the
+  surviving GLib timers / idles and why each stays).
 
-`preview.c` (item 6) stays in C until **R5** by design. So the exit
-criterion ("no `pthread_create` outside vendored xtext") is one
-conversion away — xfers.c.
+The exit criterion is met: **no `pthread_create` outside vendored
+`xtext`**, no `gtkthreads.c`, and every non-control-channel network path
+(HTXF, tracker, banner) now runs through `hxnet`/tokio. The one
+genuinely-deferred R3 item is central SOCKS/proxy support (item 9) — a
+post-R3 follow-up; the control channel + HTXF + tracker accept the
+transparent-SOCKS gap until `tokio-socks` lands. (`preview.c`, item 6, is
+not deferred R3 work — it's a call-out for R5.)
 
 > **Current state of `gtkthreads.c`:** the original Phase 4-era GTK 4 port
 > kept a recursive-mutex + custom `GMainContext` poll wrapper that simulated
@@ -607,87 +619,106 @@ where the concurrency motivation pays off.
    sees the events arrive. See the
    [balena-io rust-async-interop example](https://github.com/balena-io-experimental/rust-async-interop)
    for the canonical shape.
-3. ⏳ **Retire `gtkthreads.c` with its last worker.** The file is down to one
-   function (`gtkhx_post_to_main` over `g_main_context_invoke`). Most of the
-   workers the original plan listed are already gone: the `network.c`
-   connection thread (replaced by the hxnet orchestrator), the `banner.c`
-   HTXF fetch (now a tokio blocking-pool job via
-   `gtkhx_bridge_spawn_blocking_with_idle`), and `tracker.c` (rewritten as a
-   main-loop `GSocketClient` async state machine — no thread). `preview.c`
-   marshals worker→main via `g_idle_add` directly, so it was never a
-   `gtkhx_post_to_main` consumer. That leaves **`xfers.c` as the sole
-   remaining `pthread_create` and `gtkhx_post_to_main` consumer** — once
-   its transfer worker becomes a tokio task (item 4), `gtkthreads.c` has no
-   callers and deletes with it.
-4. ⏳ **`xfers.c` → tokio tasks.** *Half-done.* The HTXF byte transport
-   itself already moved to Rust during the HTXF→hxnet re-wire: each transfer
-   opens the subchannel via `hxnet_htxf_open` and streams through
-   `htxf_io_read` / `htxf_io_write` (`htxf_io.c`), which handle the socket,
-   ChaCha20 AEAD framing, and rustls TLS in the `hxnet` crate. What remains
-   in C is the per-transfer **pthread worker** that drives that loop
-   (`xfers.c`, the `pthread_create` near L1686) plus its `gtkhx_post_to_main`
-   progress posts — convert the worker to a tokio task so progress flows over
-   a per-transfer channel into the transfer window. This is the last
-   `pthread_create` in the tree (folder transfers' `folder_get_thread` /
-   `folder_put_thread` ride the same worker). Scoped in
-   `docs/rust/xfers-tokio-scoping.md`; the byte transport is already Rust,
-   so the conversion lifts the existing C workers onto tokio's blocking
-   pool (the `banner.c` pattern) — the real work is making cancellation
-   cooperative (no `pthread_cancel` on the blocking pool).
-5. ⏳ **`banner.c` URL-mode → reqwest.** This is the remaining banner work:
-   the URL-mode fetch is still C/`libsoup-3` (`#ifdef HAVE_LIBSOUP`). In Rust
-   we switch to `reqwest` (or `hyper` if reqwest's dep tree feels too heavy).
-   The *file-mode* HTXF banner already moved off C — it fetches over the Rust
-   subchannel (`hxnet_htxf_open` + a tokio blocking-pool worker), so only the
-   HTTP/URL leg is left.
+3. ✅ **Retire `gtkthreads.c` with its last worker.** *(Shipped with item
+   4.)* Once `xfers.c`'s transfer worker became a tokio blocking-pool task,
+   `gtkhx_post_to_main` had no callers and `gtkthreads.c` was deleted. The
+   worker→main marshalling that remained (xfers progress) moved to
+   `gtkhx_bridge_post_to_main` / `g_idle_add`. No `pthread_create` or
+   `gtkthreads.c` remains outside vendored `xtext`.
+4. ✅ **`xfers.c` → tokio tasks.** *(Shipped — phases X1–X5, scoped in
+   `docs/rust/xfers-tokio-scoping.md`.)* The per-transfer pthread worker
+   (the last `pthread_create` in the tree; folder transfers ride it too) is
+   now a tokio blocking-pool task spawned via
+   `gtkhx_bridge_spawn_blocking_with_idle`, with cooperative cancellation:
+   an Arc-backed `HtxfAbort` token (`hxnet_htxf_abort_*`) shuts the
+   subchannel socket down to wake a parked blocking read, and the worker
+   reclassifies the wakeup as `ECANCELED` rather than a transport fault.
+   `pthread_cancel` / the signal-mask dance are gone; progress flows over
+   the bridge to the transfer window. Cancellation is covered by the unit
+   test `tests/unit/test_htxf_cancel.c`; Tier 3 (`test_real_htxf_connect`)
+   exercises the transfer matrix on the happy path.
+5. ✅ **`banner.c` URL-mode → Rust (`ureq`).** *(Shipped.)* The URL-mode
+   fetch moved off C/`libsoup-3` to a blocking `ureq` GET (rustls TLS,
+   8 MiB cap, timeouts) run on the tokio blocking pool — the same
+   `spawn_blocking` shape the file-mode HTXF banner uses — drained through
+   the one-shot `hxnet_banner_fetch_*` poll FFI. `libsoup` is no longer a
+   dependency; URL-mode is unconditional (the `HAVE_LIBSOUP` gate is gone).
+   **Chose `ureq` over `reqwest`** after measuring: `reqwest` (rustls-tls,
+   default-features off) pulled +64 crates — the full `hyper`/`tower` async
+   HTTP stack plus QUIC + WASM crates a one-shot image GET never uses —
+   versus `ureq`'s +31, and `ureq`'s blocking API fits the existing
+   blocking-pool worker. A flooding server is bounded by a process-wide
+   semaphore on concurrent blocking GETs. Concurrent blocking GETs can't
+   be interrupted mid-read (same constraint the HTXF banner lives with),
+   but banners are small and `banner_clear` drops stale results.
 6. ⏭ **`preview.c` async parses** (Poppler, GtkSourceView) — *deferred to
    R5, not R3.* These are GTK-side concerns; the preview workers marshal
    back via `g_idle_add` directly (not `gtkhx_post_to_main`). Leave them in
    C for now; they're not on the
    connection's hot path. Phase R5 picks them up when the corresponding
    window moves.
-7. ⏳ **Audit every `g_idle_add` / `g_timeout_add` site in the codebase.**
-   Each one is a candidate for replacement with a tokio-side channel or an
-   `Interval`. Some stay (the post-login SELFINFO fallback timer, for
-   example, is fine as a GLib timeout). Document which.
-8. ⏳ **Tracker network → `hxnet`.** *(Was folded into item 3's pthread list;
-   broken out here because it's no longer a thread.)* `tracker.c`'s HTRK
-   fetch was already moved off pthreads into a main-loop `GSocketClient`
-   async state machine — but it's still C network code (DNS + TCP + the v1
-   / v3 tracker wire format) rather than hxnet/tokio. Moving it into the
-   `hxnet` crate (or a sibling) is the last bit of non-control-channel
-   network code still living in C. Not on the `pthread_create` exit path,
-   so it can land independently of items 3–4. Scoped in
-   `docs/rust/tracker-hxnet-scoping.md`; the decision there is to let Rust
-   own the whole transport (connect + TLS + fallback) and defer SOCKS to a
-   central `tokio-socks` add rather than keep the connect in C.
-9. ⏳ **Revisit HTXF's C-side connect (SOCKS fd-handoff).** `xfers.c` /
-   `banner.c` still do the plaintext `GSocketClient` TCP connect in C and
-   hand the connected fd into Rust via `FromRawFd` (`hxnet::htxf`'s `open`
-   / `connect_tls`). That split exists for *one* reason: keeping the
-   connect in C preserves transparent SOCKS via `GProxyResolver`, since
-   `tokio::net::TcpStream` isn't proxy-aware (see the doc comments in
-   `htxf.rs` ~L279/L334 and `connect.rs`). Once SOCKS is handled centrally
-   in `hxnet` (the `tokio-socks` add named in `connect.rs`), revisit this:
-   let Rust own the HTXF connect too and collapse the fd-handoff, so
-   `xfers.c` / `banner.c` shed their `GSocketClient` connect + fd plumbing.
-   Same underlying decision as item 8 — once `hxnet` owns proxy-aware
-   connect, the control channel, HTXF, and the tracker can all stop
-   special-casing it. Pure cleanup; no behaviour change, gated on the
-   `tokio-socks` work (item 10) existing first.
-10. ⏳ **Central SOCKS / proxy support in `hxnet` (`tokio-socks`).**
-    *Prerequisite for items 8 and 9, and worth doing first on its own
-    merits.* The control channel already connects via
-    `tokio::net::TcpStream` in `resolve_and_connect`, which never consults
-    `GProxyResolver` — so the main connection silently lost the
-    transparent SOCKS the pre-orchestrator `GSocketClient` connect had.
-    (HTXF + tracker still get it because their connect is still C.) Adding
-    `tokio-socks` at the single connect primitive (`resolve_and_connect`,
-    four in-crate callers) both *restores* proxy support for the control
-    channel and lets items 8/9 move their connects into Rust without
-    losing it. The transport change is small; the real decision is where
-    proxy config comes from (query `GProxyResolver` in C and pass the URI
-    in, vs. env vars). Scoped in `docs/rust/socks-proxy-scoping.md`.
+7. ✅ **Audit every `g_idle_add` / `g_timeout_add` site.** *(Done — doc
+   pass.)* Outcome: every remaining site is legitimately GLib-side and
+   stays. They fall into categories none of which are control-channel
+   network I/O (all of that moved to `hxnet`/tokio):
+   - **Vendored:** `xtext.c` scroll/selection timers — vendored widget,
+     out of scope.
+   - **GLib-native timers:** the ping keepalive (`network.c`,
+     `g_timeout_add` every 60 s) and the post-login `SELFINFO` fallback
+     (`rcv.c`, `g_timeout_add_seconds`) are exactly what a GLib timeout is
+     for — no benefit from a tokio `Interval` since they drive C/UI state.
+   - **Worker→main marshalling:** `xfers.c`, `sound.c`, `preview.c`,
+     `files_local_provider.c` use `g_idle_add` to hop a worker result onto
+     the main thread. Correct as-is; the workers are already tokio/blocking
+     and the idle is the GLib-side landing.
+   - **Main-loop drains:** the tracker (`network.c`) and banner (`banner.c`)
+     fetch drains poll their hxnet handle on a `g_timeout`. A tokio→GLib
+     channel would also work but the 50 ms drain is simple and correct.
+   - **UI debounce / deferred setup:** `toolbar.c`, `options.c`,
+     `dock_layout.c`, `files_panel.c`, `gtkhx.c` — pure GTK-side, stay.
+   - **R5-deferred:** `preview.c`'s async-parse marshalling moves with the
+     preview window in R5 (item 6).
+8. ✅ **Tracker network → `hxnet`.** *(Shipped — phases T1–T4, scoped in
+   `docs/rust/tracker-hxnet-scoping.md`.)* The HTRK fetch moved into the
+   `hxnet` crate: `tracker.rs` (per-connection v3-probe / v1 engine over
+   the hotline-proto parsers) + `tracker_fetch.rs` (serial URL walk with
+   the connect / TLS-first→plain / v3-probe→v1 fallback ladder and a
+   process-global TLS verdict cache), behind the `hxnet_tracker_fetch_*`
+   poll FFI. `network.c`'s ~1100-line `GSocketClient` state machine,
+   watchdog, and verdict cache are deleted; the thin C bridge drains
+   events on the main loop and re-emits the existing
+   `tracker-batch-begin` / `tracker-server-create` signals (so `tracker.c`
+   is untouched). TLS reuses the control-path rustls + a host:port-keyed
+   TOFU verify; the SOCKS gap is accepted pending item 9. Covered by the
+   socket-level Tier 3 wire tests plus a bridge-level
+   `test_tracker_fetch.c` driving the FFI against the live matrix.
+9. ⏳ **Central SOCKS / proxy support in `hxnet` (`tokio-socks`).** *The one
+   genuinely-deferred R3 item.* The control channel connects via
+   `tokio::net::TcpStream` in `resolve_and_connect`, which never consults
+   `GProxyResolver` — so the main connection silently lost the transparent
+   SOCKS the pre-orchestrator `GSocketClient` connect had. (The tracker
+   lost it too once item 8 moved its connect into Rust; the HTXF subchannel
+   still has it because its connect is still C.) Adding `tokio-socks` at
+   the single connect primitive (`resolve_and_connect`, now used by the
+   control channel *and* the tracker) restores proxy support across the
+   board. The transport change is small; the real decision is where proxy
+   config comes from (query `GProxyResolver` in C and pass the URI in,
+   vs. env vars). Scoped in `docs/rust/socks-proxy-scoping.md`.
+
+   *Follow-on cleanup once this lands (not a tracked item):* the HTXF
+   subchannel connect is still done in C and the connected fd handed to
+   Rust (`hxnet_htxf_open` adopts it via `std::net::TcpStream::from_raw_fd`
+   in `htxf.rs`) precisely to keep `GProxyResolver`'s SOCKS. Once `hxnet`
+   owns proxy-aware connect, that fd-handoff can be collapsed so the HTXF
+   connect moves fully into Rust too — pure cleanup, no behaviour change.
+
+**R3 exit criteria — met.** `meson compile` produces a binary where the
+Hotline control channel, file transfers (HTXF), the HTRK tracker, and the
+URL-mode banner all run through the `hxnet`/tokio stack; there is **no
+`pthread_create` outside vendored `xtext`**, `gtkthreads.c` is gone, and
+`libsoup` is no longer a dependency. The only deferred R3 item is central
+SOCKS/proxy support (item 9 → post-R3 follow-up). (`preview.c`, item 6,
+was a call-out for R5, never an R3 work item.)
 
 ### Work-item 1 detail: R3.3 sub-phases
 
