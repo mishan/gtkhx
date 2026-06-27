@@ -1345,92 +1345,124 @@ htxf_connect (struct htxf_conn *htxf)
 }
 
 /*
- * Tracker fetch — async state machine on the main loop.
- * ======================================================
+ * Tracker fetch — hxnet/tokio orchestrated (R3 item 8, T2).
+ * =========================================================
  *
- * Each "run" walks gtkhx_prefs.tracker[] serially. Each per-tracker
- * fetch builds its own fetch_ctx, runs through the protocol with
- * GSocketClient + GInputStream async callbacks, then chains to the
- * next tracker (or finalises the run if exhausted). Cancellation
- * goes through the run's GCancellable — tracker_kill_threads()
- * trips it; the in-flight callbacks see G_IO_ERROR_CANCELLED and
- * unwind cleanly.
+ * The serial URL walk, the connect / TLS / v3-probe fallback ladder,
+ * and all HTRK wire parsing now live in the Rust hxnet crate
+ * (rust/crates/hxnet/src/tracker_fetch.rs + tracker.rs), reusing the
+ * same tokio connect + rustls + TOFU stack as the main session. What's
+ * left here is the thin C glue:
  *
- * This fetch runs entirely on the main loop; the thread-and-signal
- * version it replaced (with its own SIGUSR1 wakeup and post_* UI
- * marshalling) is gone — none of that is needed when every step
- * already runs on the main loop.
+ *   - hx_tracker_list_async builds the URL list from gtkhx_prefs and
+ *     opens a fetch (hxnet_tracker_fetch_open), then starts a main-loop
+ *     timeout that drains fetch events.
+ *   - the drain re-emits the EXISTING tracker-batch-begin /
+ *     tracker-server-create signals and ticks track_prog_update,
+ *     exactly as the old hand-rolled state machine did, so tracker.c
+ *     (the view) is unchanged.
+ *   - tracker_kill_threads closes the handle (which cancels the walk)
+ *     and removes the drain source.
  *
- * Protocol shape (per-tracker, after TCP connect):
+ * The verdict cache, the v3 watchdog, and the ~1100 lines of
+ * GSocketClient async callbacks the C used to carry are gone — that
+ * logic is the Rust runner's now. The verdict cache is per-fetch on the
+ * Rust side (TLS re-probed each Refresh), a minor change from the old
+ * process-global cache.
  *
- *   The client unconditionally sends an 8-byte v3 handshake
- *   ("HTRK" + version 0x0003 + feature bits). v1/v2 trackers read
- *   the 6 bytes they expect and start sending the listing; the
- *   extra 2 bytes from us sit harmlessly in their RX buffer until
- *   the connection closes. v3 trackers respond with 8 bytes and
- *   wait for a listing request.
- *
- *   We always read 6 bytes first. If the version field is 0x0003
- *   we read 2 more (feature flags) and switch to the v3 chain;
- *   otherwise we stay on the v1 chain, which is the original
- *   record-by-record read pattern.
- *
- * v1 chain (after the 6-byte response, version 0x0001 / 0x0002):
- *   read 8 more bytes (the rest of the 14-byte v1 response header;
- *        nservers at offset 10 (u16 BE) of the combined buffer)
- *   per server:
- *     read 8 bytes : IP(4) + port(2) + nusers(2)
- *                    -- if first byte is 0, this is a padding slot
- *                       (IPs can't start with 0); skip without
- *                       decrementing nservers
- *     read 3 bytes : 2 reserved + name_len(1)
- *     read name_len bytes : server name (Mac-Roman-ish; CR→LF + strip_ansi)
- *     read 1 byte  : desc_len
- *     read desc_len bytes : description
- *
- * v3 chain (after the 8-byte handshake response, version 0x0003):
- *   write 4 bytes : listing-request (type=1 + field_count=0)
- *   read 10 bytes : response header (type + total_size + total +
- *                   record_count)
- *   read total_size bytes (capped) : back-to-back server records
- *   walk records via hx_tracker_v3_parse_record, emit one
- *   HxTrackerServer event per record. TLV trailers are walked
- *   over to advance the cursor; Phase A doesn't surface them.
+ * Unlike the old reader — which interleaved per-record progress ticks
+ * as bytes arrived — the Rust engine returns a whole listing at once,
+ * so a tracker's records arrive as a burst; progress ticks per tracker
+ * rather than per record within a tracker.
  */
 
-struct tracker_run_ctx; /* fwd */
+/* ---- hxnet tracker-fetch FFI (mirror of rust/crates/hxnet/src/ffi.rs;
+ * hand-synced, like the HXNET_STATE_* / HxnetFrame mirrors). The
+ * _Static_asserts below pin the struct ABI against the Rust offset_of
+ * asserts so drift on either side is a compile error. ---------------- */
 
-/* Cap on total v3 response payload (records blob) we'll read.
- * Spec allows u32 = 4 GiB; we cap at 16 MiB to avoid a hostile
- * tracker hanging us on a g_malloc + read_all. At an average ~80
- * bytes/record that's ~200k servers — beyond anything we expect
- * to see in production. Crossing the cap aborts the listing
- * with a chat-output line. */
-#define HX_TRACKER_V3_MAX_PAYLOAD (16u * 1024u * 1024u)
+typedef struct HxnetTrackerFetch HxnetTrackerFetch;
 
-/* Probe-then-fallback watchdog (milliseconds). After sending the
- * v3 magic, we wait this long for the first 6 bytes of response
- * before declaring "tracker doesn't speak v3, fall back to v1".
- *
- * Real-world v1 trackers (hxtrackd, hltracker.com, mhxd's bundled
- * tracker, basically every pre-v3-spec tracker) memcmp the full
- * 6-byte HTRK_MAGIC ("HTRK\0\1") and fall through silently when
- * byte 5 is 0x03 instead of 0x01. The connection stays open with
- * no data — we'd block forever without a watchdog.
- *
- * 2000 ms is generous: a real spec-compliant v3 tracker should
- * reply in well under a second on a healthy network. Override via
- * GTKHX_TRACKER_V3_PROBE_MS env var (see hx_tracker_v3_probe_ms
- * below) for slow test rigs or when manually testing against a
- * tracker on a high-latency link. */
+#define HXNET_TRK_KIND_BEGIN  0u
+#define HXNET_TRK_KIND_RECORD 1u
+#define HXNET_TRK_KIND_ERROR  2u
+#define HXNET_TRK_KIND_DONE   3u
+
+#define HXNET_TRK_POLL_EMPTY  0
+#define HXNET_TRK_POLL_EVENT  1
+#define HXNET_TRK_POLL_CLOSED (-1)
+
+/* Host-aware TOFU verify: (tracker host, leaf "sha256:<hex>" fp) ->
+ * non-zero to accept. The host is passed because one walk spans many
+ * trackers through this single callback. */
+typedef int (*hxnet_tracker_verify_cb_t) (const guint8 *host, gsize host_len,
+                                          const guint8 *fp, gsize fp_len,
+                                          void *user_data);
+
+/* POD view of one fetch event. Pointer fields borrow the handle's
+ * current event and are valid only until the next poll/close — the
+ * HxTrackerServer constructors copy immediately. Layout mirrors the
+ * repr(C) HxnetTrackerEvent in ffi.rs. */
+typedef struct {
+    guint32 kind;
+    guint8 version;
+    guint8 addr_type;
+    guint16 count;
+    guint16 total;
+    guint16 port;
+    guint16 nusers;
+    guint16 tlv_count;
+    const guint8 *url_ptr;
+    gsize url_len;
+    const guint8 *address_ptr;
+    gsize address_len;
+    const guint8 *name_ptr;
+    gsize name_len;
+    const guint8 *desc_ptr;
+    gsize desc_len;
+    const guint8 *tlv_ptr;
+    gsize tlv_len;
+    const guint8 *message_ptr;
+    gsize message_len;
+} HxnetTrackerEvent;
+
+_Static_assert (offsetof (HxnetTrackerEvent, kind) == 0, "kind offset");
+_Static_assert (offsetof (HxnetTrackerEvent, version) == 4, "version offset");
+_Static_assert (offsetof (HxnetTrackerEvent, addr_type) == 5,
+                "addr_type offset");
+_Static_assert (offsetof (HxnetTrackerEvent, count) == 6, "count offset");
+_Static_assert (offsetof (HxnetTrackerEvent, total) == 8, "total offset");
+_Static_assert (offsetof (HxnetTrackerEvent, port) == 10, "port offset");
+_Static_assert (offsetof (HxnetTrackerEvent, nusers) == 12, "nusers offset");
+_Static_assert (offsetof (HxnetTrackerEvent, tlv_count) == 14,
+                "tlv_count offset");
+_Static_assert (offsetof (HxnetTrackerEvent, url_ptr) == 16, "url_ptr offset");
+
+extern HxnetTrackerFetch *
+hxnet_tracker_fetch_open (const char *const *urls, gsize n, guint16 features,
+                          guint32 probe_ms,
+                          hxnet_tracker_verify_cb_t verify_cert,
+                          void *user_data);
+extern int hxnet_tracker_fetch_poll (HxnetTrackerFetch *handle,
+                                     HxnetTrackerEvent *out);
+extern void hxnet_tracker_fetch_close (HxnetTrackerFetch *handle);
+
+/* ---- bridge state (main thread only) ---------------------------- */
+
+static HxnetTrackerFetch *current_tracker_fetch;
+static guint tracker_drain_source_id;
+/* Wire version of the batch in progress, set on BEGIN; picks the v1 vs
+ * v3 HxTrackerServer constructor for the records that follow. */
+static guint8 tracker_batch_version;
+/* 1-based progress counter within the current batch. */
+static int tracker_batch_server_i;
+
+/* Read the v3-probe watchdog timeout once per fetch. strtol with sane
+ * clamps — values <100ms are pointless and >60000ms hangs the UI for a
+ * minute; anything outside the range or unparseable uses the default.
+ * Overridable via GTKHX_TRACKER_V3_PROBE_MS for slow test rigs. */
 #define HX_TRACKER_V3_PROBE_TIMEOUT_MS 2000
 
-/* Read the watchdog timeout once per fetch start. Parsed via
- * strtol with sane clamps — values <100ms are pointless (a real
- * v3 reply still needs to arrive) and >60000ms means we hang the
- * UI for a minute, which isn't what anyone wants either. Anything
- * outside the range or unparseable falls back to the compile-time
- * default. */
 static guint
 hx_tracker_v3_probe_ms (void)
 {
@@ -1443,1263 +1475,167 @@ hx_tracker_v3_probe_ms (void)
     if (endp == env || *endp != '\0' || v < 100 || v > 60000) {
         debug_log ("tracker",
                    "ignoring GTKHX_TRACKER_V3_PROBE_MS=%s "
-                   "(must be an integer in [100, 60000]); "
-                   "using default %u ms",
+                   "(must be an integer in [100, 60000]); using default %u ms",
                    env, (unsigned) HX_TRACKER_V3_PROBE_TIMEOUT_MS);
         return HX_TRACKER_V3_PROBE_TIMEOUT_MS;
     }
     return (guint) v;
 }
 
-struct tracker_fetch_ctx {
-    struct tracker_run_ctx *run; /* parent run; lifetime-tied */
-    char *serverstr;
-    guint16 port;
-
-    GSocketConnection *conn;
-    GInputStream *in;
-    GOutputStream *out;
-
-    /* Parse scratch. buf is sized for the biggest fixed-size read
-     * (the 14-byte v1 response header — v3's 10-byte header and
-     * 8-byte handshake both fit). name/desc are sized to the
-     * v1 1-byte length field's max. */
-    guint8 buf[16];
-    char name[256];
-    char desc[256];
-
-    /* Negotiated handshake values. v1/v2 trackers leave
-     * v3_features == 0; v3 trackers populate it from the 8-byte
-     * response. */
-    guint16 version;
-    guint16 v3_features;
-
-    /* Probe-then-fallback state. First connection attempt sends
-     * the 8-byte v3 magic with use_v3 = 1; if the watchdog fires
-     * (real-world v1 trackers reject the 0x0003 version byte
-     * silently), we close the conn, set use_v3 = 0, and reopen
-     * with the 6-byte v1 magic.
-     *
-     * attempt_cancel is a per-attempt GCancellable that the
-     * watchdog cancels. Chained to run->cancel via
-     * g_cancellable_connect so a user-driven run abort propagates.
-     * Distinguishing "watchdog cancelled this attempt" from "user
-     * aborted the run" in the read callback is just
-     * g_cancellable_is_cancelled (run->cancel). */
-    int use_v3;
-    int v3_probe_timed_out;
-    GCancellable *attempt_cancel;
-    gulong attempt_cancel_link;
-    guint v3_probe_timeout_id;
-
-    /* Phase D TLS state. use_tls = 1 means the next connect attempt
-     * goes through gtls (g_socket_client_set_tls). tls_attempted
-     * is set as soon as we kick off a TLS connect so a failure
-     * callback can tell "TLS just failed → try plain" apart from
-     * "plain failed, no fallback to try". tls_endpoint feeds the
-     * shared on_socket_client_event TOFU handler so trust pins for
-     * tracker certs land in the same known_hosts file the main
-     * Hotline session uses — .host borrows ctx->serverstr's
-     * lifetime, valid for the duration of the connect. */
-    int use_tls;
-    int tls_attempted;
-    struct tls_endpoint tls_endpoint;
-
-    /* v3 listing-request scratch + listing-response buffer.
-     * v3_payload is allocated to hold `total_size` bytes once we
-     * have the response header; freed in tracker_fetch_free. */
-    guint8 v3_req_buf[4];
-    guint8 v3_resp_hdr[HTRK_V3_RESP_HDR_LEN];
-    guint8 *v3_payload;
-    gsize v3_payload_len;
-
-    /* v1 path scratch (record-by-record). */
-    guint16 nservers; /* remaining to read */
-    int server_i;     /* 1-based index of next-completed server,
-                       * for the progress widget */
-    int total;        /* set once after the header is read */
-    struct in_addr cur_addr;
-    guint16 cur_port;
-    guint16 cur_nusers;
-    guint8 cur_name_len;
-    guint8 cur_desc_len;
-};
-
-struct tracker_run_ctx {
-    gboolean aborted; /* tracker_kill_threads set this */
-    session *sess;
-    GCancellable *cancel;
-    char **trackers; /* owned strdup of gtkhx_prefs.tracker[] */
-    int n_trackers;
-    int current_index;
-    struct tracker_fetch_ctx *cur_ctx;
-};
-
-static struct tracker_run_ctx *current_tracker_run;
-
-/* Phase D TLS verdict cache.
- *
- * Per-tracker memory of "this tracker speaks TLS" vs "this tracker
- * doesn't, don't re-pay the failed handshake on every Refresh."
- * Keyed on the tracker URL string (the same g_strdup'd string we
- * use for the prefs entry); values are pointer-cast enums.
- *
- * Lifetime: scoped to the process (cleared on hx_tracker_kill_
- * threads only when a fresh hx_tracker_list_async would otherwise
- * pay full re-probe cost). Re-probed at next launch so a tracker
- * that adds TLS support gets picked up next time the user starts
- * GtkHx — no manual cache clear, no stale "this tracker has no
- * TLS" bit lingering across upgrades.
- *
- * NULL key (g_str_hash + g_str_equal + g_free for keys + NULL
- * value destroy since the values are just enum-sized pointers). */
-typedef enum {
-    HX_TRACKER_TLS_UNKNOWN = 0, /* never tried */
-    HX_TRACKER_TLS_OK,          /* TLS handshake succeeded */
-    HX_TRACKER_TLS_NO,          /* TLS handshake failed; use plain */
-} hx_tracker_tls_verdict;
-
-static GHashTable *tracker_tls_verdict_cache;
-
-static hx_tracker_tls_verdict
-tracker_tls_verdict_lookup (const char *url)
+/* TOFU verify keyed on (tracker host, HTRK_TCPPORT). Runs on the hxnet
+ * worker thread; tls_trust_decide marshals any user prompt to the main
+ * thread, exactly as htxf_verify_cert_cb does. A WebPKI-valid cert is
+ * trusted in Rust and never reaches here. */
+static int
+tracker_verify_cert_cb (const guint8 *host, gsize host_len, const guint8 *fp,
+                        gsize fp_len, void *user_data G_GNUC_UNUSED)
 {
-    if (!url || !tracker_tls_verdict_cache) {
-        return HX_TRACKER_TLS_UNKNOWN;
+    if (!host || !fp) {
+        return 0; /* reject: no context / no fingerprint */
     }
-    return (hx_tracker_tls_verdict) GPOINTER_TO_UINT (
-        g_hash_table_lookup (tracker_tls_verdict_cache, url));
+    g_autofree char *host_str = g_strndup ((const char *) host, host_len);
+    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    return tls_trust_decide (host_str, HTRK_TCPPORT, fp_str) ? 1 : 0;
+}
+
+/* Re-emit one drained fetch event as the legacy view signals. */
+static void
+tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
+{
+    switch (ev->kind) {
+    case HXNET_TRK_KIND_BEGIN: {
+        g_autofree char *url
+            = g_strndup ((const char *) ev->url_ptr, ev->url_len);
+        tracker_batch_version = ev->version;
+        tracker_batch_server_i = 1;
+        gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
+                                                url, ev->version, ev->count);
+        track_prog_update (sess, url, 0, (int) ev->count);
+        break;
+    }
+    case HXNET_TRK_KIND_RECORD: {
+        g_autofree char *url
+            = g_strndup ((const char *) ev->url_ptr, ev->url_len);
+        HxTrackerServer *e = NULL;
+        if (tracker_batch_version == 1) {
+            /* v1 record: MacRoman name/desc (the v1 constructor
+             * transcodes), IPv4 address in network byte order. */
+            struct in_addr addr;
+            memset (&addr, 0, sizeof addr);
+            if (ev->address_len >= 4) {
+                memcpy (&addr.s_addr, ev->address_ptr, 4);
+            }
+            e = hx_tracker_server_new_v1 (
+                addr, ev->port, ev->nusers, (const char *) ev->name_ptr,
+                ev->name_len, (const char *) ev->desc_ptr, ev->desc_len,
+                (int) ev->total);
+        } else {
+            /* v3 record: UTF-8 name/desc, addr_type-tagged address. */
+            e = hx_tracker_server_new_v3 (
+                ev->addr_type, ev->address_ptr, ev->address_len, ev->port,
+                ev->nusers, (const char *) ev->name_ptr, ev->name_len,
+                (const char *) ev->desc_ptr, ev->desc_len, ev->tlv_count,
+                ev->tlv_len ? ev->tlv_ptr : NULL, ev->tlv_len,
+                (int) ev->total);
+        }
+        if (e) {
+            gtkhx_session_emit_tracker_server_create (
+                gtkhx_session_get_default (), e);
+            hx_tracker_server_free (e);
+            track_prog_update (sess, url, tracker_batch_server_i,
+                               (int) ev->total);
+            tracker_batch_server_i++;
+        }
+        break;
+    }
+    case HXNET_TRK_KIND_ERROR: {
+        g_autofree char *url
+            = g_strndup ((const char *) ev->url_ptr, ev->url_len);
+        g_autofree char *msg
+            = g_strndup ((const char *) ev->message_ptr, ev->message_len);
+        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+                          _ ("tracker: %1$s: %2$s\n"), url, msg);
+        break;
+    }
+    case HXNET_TRK_KIND_DONE:
+    default:
+        break;
+    }
 }
 
 static void
-tracker_tls_verdict_record (const char *url, hx_tracker_tls_verdict v)
+tracker_fetch_cleanup (void)
 {
-    if (!url) {
-        return;
+    if (current_tracker_fetch) {
+        hxnet_tracker_fetch_close (current_tracker_fetch);
+        current_tracker_fetch = NULL;
     }
-    if (!tracker_tls_verdict_cache) {
-        tracker_tls_verdict_cache
-            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
-    }
-    g_hash_table_replace (tracker_tls_verdict_cache, g_strdup (url),
-                          GUINT_TO_POINTER ((guint) v));
 }
 
-/* Forward decls — the protocol is a chain of one-bounce callbacks. */
-static void tracker_fetch_start (struct tracker_run_ctx *run);
-static void tracker_fetch_connect (struct tracker_fetch_ctx *ctx);
-static void tracker_fetch_retry_v1 (struct tracker_fetch_ctx *ctx);
-static void tracker_fetch_retry_plain (struct tracker_fetch_ctx *ctx);
-static void on_tracker_connected (GObject *src, GAsyncResult *r, gpointer u);
-static void on_tracker_magic_sent (GObject *src, GAsyncResult *r, gpointer u);
-static void on_tracker_attempt_cancelled (GCancellable *src, gpointer u);
-static gboolean on_tracker_v3_probe_timeout (gpointer u);
-/* Shared: read 6 bytes, branch on version. */
-static void on_tracker_response_6 (GObject *src, GAsyncResult *r, gpointer u);
-/* v1 chain. */
-static void on_tracker_v1_rest_read (GObject *src, GAsyncResult *r,
-                                     gpointer u);
-static void read_next_server_hdr (struct tracker_fetch_ctx *ctx);
-static void on_server_hdr_read (GObject *src, GAsyncResult *r, gpointer u);
-static void on_server_rest_read (GObject *src, GAsyncResult *r, gpointer u);
-static void on_server_name_read (GObject *src, GAsyncResult *r, gpointer u);
-static void on_server_desc_len_read (GObject *src, GAsyncResult *r, gpointer u);
-static void on_server_desc_read (GObject *src, GAsyncResult *r, gpointer u);
-static void tracker_emit_v1_server (struct tracker_fetch_ctx *ctx);
-/* v3 chain. */
-static void on_tracker_v3_features_read (GObject *src, GAsyncResult *r,
-                                         gpointer u);
-static void on_tracker_v3_request_sent (GObject *src, GAsyncResult *r,
-                                        gpointer u);
-static void on_tracker_v3_resp_hdr_read (GObject *src, GAsyncResult *r,
-                                         gpointer u);
-static void on_tracker_v3_payload_read (GObject *src, GAsyncResult *r,
-                                        gpointer u);
-static void tracker_v3_walk_and_emit (struct tracker_fetch_ctx *ctx,
-                                      guint16 record_count);
-/* Done / free. */
-static void tracker_fetch_done (struct tracker_fetch_ctx *ctx);
-static void tracker_fetch_free (struct tracker_fetch_ctx *ctx);
-static void tracker_run_free (struct tracker_run_ctx *run);
-
+/* Main-loop drain: pull every ready event this tick, then either keep
+ * the timer (more may come) or tear down on a closed channel. */
 static gboolean
-err_is_cancel (GError *err)
+tracker_fetch_drain (gpointer user_data)
 {
-    return err && g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED);
+    session *sess = user_data;
+    HxnetTrackerEvent ev;
+
+    for (;;) {
+        int rc = hxnet_tracker_fetch_poll (current_tracker_fetch, &ev);
+        if (rc == HXNET_TRK_POLL_EVENT) {
+            tracker_fetch_dispatch_event (sess, &ev);
+            continue;
+        }
+        if (rc == HXNET_TRK_POLL_EMPTY) {
+            return G_SOURCE_CONTINUE;
+        }
+        /* HXNET_TRK_POLL_CLOSED — the walk finished and its events are
+         * drained. The G_SOURCE_REMOVE below drops this source, so just
+         * clear our id and free the handle. */
+        tracker_drain_source_id = 0;
+        tracker_fetch_cleanup ();
+        return G_SOURCE_REMOVE;
+    }
 }
 
 void
 hx_tracker_list_async (session *sess)
 {
-    struct tracker_run_ctx *run;
-    int i;
-
-    /* Cancel any in-flight run. Its in-flight callback (if any) will
-	 * see the cancellation, walk through tracker_fetch_done, and free
-	 * the orphaned run from there. */
-    if (current_tracker_run) {
-        struct tracker_run_ctx *old = current_tracker_run;
-        current_tracker_run = NULL;
-        old->aborted = TRUE;
-        if (old->cur_ctx) {
-            g_cancellable_cancel (old->cancel);
-        } else {
-            /* No in-flight callback to do the cleanup — handle it
-			 * synchronously here. */
-            tracker_run_free (old);
-        }
-    }
+    /* Cancel any in-flight fetch before starting a new one. */
+    tracker_kill_threads ();
 
     if (gtkhx_prefs.num_tracker <= 0) {
         return;
     }
 
-    run = g_new0 (struct tracker_run_ctx, 1);
-    run->sess = sess;
-    run->cancel = g_cancellable_new ();
-    run->n_trackers = gtkhx_prefs.num_tracker;
-    run->trackers = g_new0 (char *, run->n_trackers);
-    for (i = 0; i < run->n_trackers; i++) {
-        run->trackers[i] = g_strdup (gtkhx_prefs.tracker[i]);
+    int n = gtkhx_prefs.num_tracker;
+    const char **urls = g_new (const char *, (gsize) n);
+    for (int i = 0; i < n; i++) {
+        urls[i] = gtkhx_prefs.tracker[i];
     }
-    run->current_index = 0;
+    current_tracker_fetch = hxnet_tracker_fetch_open (
+        (const char *const *) urls, (gsize) n, HTRK_V3_FEAT_IPV6,
+        hx_tracker_v3_probe_ms (), tracker_verify_cert_cb, NULL);
+    g_free (urls);
+    if (!current_tracker_fetch) {
+        return;
+    }
 
-    current_tracker_run = run;
-    tracker_fetch_start (run);
+    tracker_batch_version = 0;
+    tracker_batch_server_i = 1;
+    /* Drain on the main loop. 50 ms keeps the list lively without
+     * busy-spinning; each tick re-emits whatever the walk produced. */
+    tracker_drain_source_id = g_timeout_add (50, tracker_fetch_drain, sess);
 }
 
 void
 tracker_kill_threads (void)
 {
-    struct tracker_run_ctx *run = current_tracker_run;
-
-    if (!run) {
-        return;
+    if (tracker_drain_source_id) {
+        g_source_remove (tracker_drain_source_id);
+        tracker_drain_source_id = 0;
     }
-
-    current_tracker_run = NULL;
-    run->aborted = TRUE;
-    if (run->cur_ctx) {
-        /* In-flight callback will unwind and free. */
-        g_cancellable_cancel (run->cancel);
-    } else {
-        tracker_run_free (run);
-    }
-}
-
-static void
-tracker_run_free (struct tracker_run_ctx *run)
-{
-    int i;
-    if (!run) {
-        return;
-    }
-    if (current_tracker_run == run) {
-        current_tracker_run = NULL;
-    }
-    g_clear_object (&run->cancel);
-    for (i = 0; i < run->n_trackers; i++) {
-        g_free (run->trackers[i]);
-    }
-    g_free (run->trackers);
-    g_free (run);
-}
-
-/* Watchdog source-fire callback — called on the main loop ~2s after
- * the v3 magic write completes if the response read hasn't returned
- * yet. We can't cancel the read on the run cancellable (that aborts
- * the whole tracker run); instead we cancel a per-attempt cancellable
- * which fires the chained callback below that sets v3_probe_timed_out
- * before the read callback sees the cancel. */
-static gboolean
-on_tracker_v3_probe_timeout (gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    ctx->v3_probe_timeout_id = 0;
-    ctx->v3_probe_timed_out = 1;
-    if (ctx->attempt_cancel) {
-        debug_log ("tracker",
-                   "%s: v3 probe timed out after %u ms; will fall back to v1",
-                   ctx->serverstr, hx_tracker_v3_probe_ms ());
-        g_cancellable_cancel (ctx->attempt_cancel);
-    }
-    return G_SOURCE_REMOVE;
-}
-
-/* Chained when run->cancel is fired by tracker_kill_threads. Cancels
- * the per-attempt cancellable so any in-flight async ops on the
- * attempt unwind. (Without this chain, attempt_cancel would never
- * see the user-driven abort.) */
-static void
-on_tracker_attempt_cancelled (GCancellable *src G_GNUC_UNUSED, gpointer u)
-{
-    GCancellable *attempt = u;
-    if (attempt) {
-        g_cancellable_cancel (attempt);
-    }
-}
-
-/* Reset per-attempt state and kick off the GSocketClient connect.
- * Called once from tracker_fetch_start (initial attempt) and once
- * from tracker_fetch_retry_v1 (the v1 fallback). use_v3 must be
- * stamped on ctx before calling — that's what
- * on_tracker_connected reads to decide which magic to send. */
-static void
-tracker_fetch_connect (struct tracker_fetch_ctx *ctx)
-{
-    GSocketClient *client;
-
-    /* Fresh attempt_cancel; the previous one (if any) was used by
-     * the watchdog cancel and is now in permanent cancelled state. */
-    g_clear_object (&ctx->attempt_cancel);
-    ctx->attempt_cancel = g_cancellable_new ();
-    /* Chain run->cancel into attempt_cancel so a user-driven abort
-     * propagates. g_cancellable_connect returns the handler id; we
-     * keep it so the cancel-callback can be cleanly removed on
-     * fetch_free (avoids the attempt's destructor firing for an
-     * already-freed ctx if the run cancellable lives longer). */
-    ctx->attempt_cancel_link
-        = g_cancellable_connect (ctx->run->cancel,
-                                 G_CALLBACK (on_tracker_attempt_cancelled),
-                                 ctx->attempt_cancel, NULL);
-
-    /* GSocketClient honours GProxyResolver by default — SOCKS /
-     * HTTP CONNECT proxies configured at the desktop level
-     * (gsettings / libproxy) work transparently here. */
-    client = g_socket_client_new ();
-
-    /* Phase D TLS: when ctx->use_tls is set, flip the GSocketClient
-     * into TLS mode and hook the shared TOFU accept-certificate
-     * handler. The handler writes its trust decision into the same
-     * known_hosts file the main Hotline session uses, so a tracker
-     * fingerprint pin and a session-server fingerprint pin coexist
-     * without stepping on each other. tls_attempted is set right
-     * before the async kicks off so on_tracker_connected's failure
-     * branch can tell "TLS handshake just failed" apart from "plain
-     * connect failed." */
-    if (ctx->use_tls) {
-        g_socket_client_set_tls (client, TRUE);
-        ctx->tls_endpoint.host = ctx->serverstr;
-        ctx->tls_endpoint.port = ctx->port;
-        g_signal_connect (client, "event",
-                          G_CALLBACK (on_socket_client_event),
-                          &ctx->tls_endpoint);
-        ctx->tls_attempted = 1;
-        debug_log ("tracker", "%s: attempting TLS connect", ctx->serverstr);
-    }
-
-    /* Connect attempt itself uses the run cancellable — if the user
-     * aborts during DNS / TCP connect we want to unwind immediately;
-     * we don't want a watchdog-triggered attempt_cancel to kill the
-     * connect, only the response read. */
-    g_socket_client_connect_to_host_async (client, ctx->serverstr, ctx->port,
-                                           ctx->run->cancel,
-                                           on_tracker_connected, ctx);
-    g_object_unref (client);
-}
-
-static void
-tracker_fetch_start (struct tracker_run_ctx *run)
-{
-    struct tracker_fetch_ctx *ctx;
-    hx_tracker_tls_verdict cached;
-
-    ctx = g_new0 (struct tracker_fetch_ctx, 1);
-    ctx->run = run;
-    ctx->serverstr = g_strdup (run->trackers[run->current_index]);
-    ctx->port = HTRK_TCPPORT;
-    /* First attempt: try v3. The probe-then-fallback below
-     * downgrades to v1 if the tracker doesn't respond within
-     * HX_TRACKER_V3_PROBE_TIMEOUT_MS. Real-world pre-v3-spec v1
-     * trackers (hxtrackd, hltracker.com, ...) memcmp the full
-     * 6-byte HTRK_MAGIC and silently ignore connections whose
-     * version byte is 0x03 instead of 0x01 — so the watchdog is
-     * what makes the fallback work. */
-    ctx->use_v3 = 1;
-
-    /* Phase D TLS: try TLS first unless the verdict cache says
-     * this tracker is plain-only. UNKNOWN (first time we see
-     * this tracker in this session) → try TLS. OK → try TLS
-     * (silently accepts via TOFU on the second + later fetches
-     * since the fingerprint is pinned). NO → skip TLS, go
-     * straight to plain. Re-probes happen on each fresh process
-     * launch (cache is in-memory only). */
-    cached = tracker_tls_verdict_lookup (ctx->serverstr);
-    ctx->use_tls = (cached != HX_TRACKER_TLS_NO);
-    if (cached == HX_TRACKER_TLS_NO) {
-        debug_log ("tracker",
-                   "%s: cached TLS verdict = NO; skipping TLS attempt",
-                   ctx->serverstr);
-    }
-
-    run->cur_ctx = ctx;
-
-    trackconn_prog_update (run->sess, ctx->serverstr, 0, 2);
-
-    tracker_fetch_connect (ctx);
-}
-
-/* TLS handshake failed on the first attempt — close the conn,
- * record the verdict so the next Refresh skips TLS, and reopen
- * with plain TCP. The v3-probe-then-v1-fallback machinery still
- * runs on top, so we end up with the full TLS-fail → plain → v3
- * probe → v1 fallback ladder for the worst case. */
-static void
-tracker_fetch_retry_plain (struct tracker_fetch_ctx *ctx)
-{
-    debug_log ("tracker",
-               "%s: TLS handshake failed; falling back to plain TCP",
-               ctx->serverstr);
-    tracker_tls_verdict_record (ctx->serverstr, HX_TRACKER_TLS_NO);
-    ctx->use_tls = 0;
-
-    g_clear_object (&ctx->conn);
-    ctx->in = NULL;
-    ctx->out = NULL;
-
-    if (ctx->attempt_cancel && ctx->attempt_cancel_link) {
-        g_cancellable_disconnect (ctx->run->cancel, ctx->attempt_cancel_link);
-        ctx->attempt_cancel_link = 0;
-    }
-
-    tracker_fetch_connect (ctx);
-}
-
-/* Close the v3-attempt connection and restart with use_v3 = 0 so
- * the next on_tracker_connected sends the 6-byte v1 magic. Called
- * by on_tracker_response_6 when the watchdog has fired (or the
- * tracker returned garbage). */
-static void
-tracker_fetch_retry_v1 (struct tracker_fetch_ctx *ctx)
-{
-    /* Cancel + clear the watchdog (defensive — it should already
-     * have fired and be at id=0, but a same-tick race where the
-     * read callback ran before the timeout source fired is
-     * possible). */
-    if (ctx->v3_probe_timeout_id) {
-        g_source_remove (ctx->v3_probe_timeout_id);
-        ctx->v3_probe_timeout_id = 0;
-    }
-    ctx->v3_probe_timed_out = 0;
-    ctx->use_v3 = 0;
-    debug_log ("tracker",
-               "%s: retrying with v1 magic (pre-spec v1 trackers reject "
-               "the 0x0003 version byte)", ctx->serverstr);
-
-    /* Close the v3-attempt conn — the server is in a stuck state
-     * (received 6 bytes that don't match its magic, fell through
-     * with no action). New conn, fresh attempt_cancel. */
-    g_clear_object (&ctx->conn);
-    ctx->in = NULL;
-    ctx->out = NULL;
-
-    /* g_cancellable_disconnect the previous link before we drop
-     * the cancellable in tracker_fetch_connect; the chain handler
-     * holds a pointer to the cancellable we're about to free. */
-    if (ctx->attempt_cancel && ctx->attempt_cancel_link) {
-        g_cancellable_disconnect (ctx->run->cancel,
-                                  ctx->attempt_cancel_link);
-        ctx->attempt_cancel_link = 0;
-    }
-
-    tracker_fetch_connect (ctx);
-}
-
-static void
-on_tracker_connected (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-
-    ctx->conn = g_socket_client_connect_to_host_finish (G_SOCKET_CLIENT (src),
-                                                        res, &err);
-    if (!ctx->conn) {
-        /* Phase D: a failed TLS handshake on the first attempt
-         * triggers the plain-TCP fallback rather than surfacing as a
-         * connect error. Distinguish "TLS handshake itself failed"
-         * (G_TLS_ERROR domain — bad cert, no TLS server here, etc.)
-         * from "couldn't even reach the host" (G_IO_ERROR domain —
-         * DNS, refused, timeout). The latter isn't a TLS problem; a
-         * plain retry on a host we can't reach won't help and would
-         * just double the user's wait. Cancellations route through
-         * tracker_fetch_done unchanged. */
-        if (ctx->tls_attempted && err && err->domain == G_TLS_ERROR
-            && !err_is_cancel (err)) {
-            debug_log ("tracker",
-                       "%s: TLS error during connect (%s); will retry plain",
-                       ctx->serverstr, err->message);
-            g_clear_error (&err);
-            tracker_fetch_retry_plain (ctx);
-            return;
-        }
-        if (!err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err ? err->message : _ ("connect failed"));
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Connect succeeded. If we got here on a TLS attempt, the
-     * handshake completed cleanly + the cert was trusted (or pinned
-     * via TOFU). Record the verdict so subsequent fetches skip the
-     * "is this tracker even TLS?" probe overhead. */
-    if (ctx->use_tls) {
-        tracker_tls_verdict_record (ctx->serverstr, HX_TRACKER_TLS_OK);
-    }
-
-    ctx->in = g_io_stream_get_input_stream (G_IO_STREAM (ctx->conn));
-    ctx->out = g_io_stream_get_output_stream (G_IO_STREAM (ctx->conn));
-
-    trackconn_prog_update (ctx->run->sess, ctx->serverstr, 2, 2);
-
-    gsize magic_len;
-    if (ctx->use_v3) {
-        /* Send 8-byte v3 handshake. The spec says v1 trackers will
-         * read 6 bytes and respond; in practice every pre-spec v1
-         * tracker we've tested (hxtrackd, hltracker.com, mhxd's
-         * bundled hxtrackd) memcmp's the full 6-byte HTRK_MAGIC
-         * against "HTRK\\0\\1" and silently ignores the connection
-         * when byte 5 is 0x03. The probe-then-fallback watchdog
-         * below catches that case. */
-        if (!hx_tracker_v3_pack_handshake (ctx->buf, sizeof (ctx->buf),
-                                           HTRK_V3_FEAT_IPV6)) {
-            tracker_fetch_done (ctx);
-            return;
-        }
-        magic_len = HTRK_V3_HANDSHAKE_LEN;
-        debug_log ("tracker",
-                   "%s: probing v3 handshake (8 bytes, features=0x%04x)",
-                   ctx->serverstr, (unsigned) HTRK_V3_FEAT_IPV6);
-    } else {
-        /* v1 fallback: 6-byte HTRK_MAGIC ("HTRK\\0\\1"). Every
-         * existing tracker accepts this. */
-        memcpy (ctx->buf, HTRK_MAGIC, HTRK_MAGIC_LEN);
-        magic_len = HTRK_MAGIC_LEN;
-        debug_log ("tracker", "%s: sending v1 handshake (6 bytes)",
-                   ctx->serverstr);
-    }
-    g_output_stream_write_all_async (ctx->out, ctx->buf, magic_len,
-                                     G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                     on_tracker_magic_sent, ctx);
-}
-
-static void
-on_tracker_magic_sent (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_output_stream_write_all_finish (G_OUTPUT_STREAM (src), res, &n,
-                                           &err)) {
-        if (!err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err ? err->message : _ ("magic write failed"));
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    track_prog_update (ctx->run->sess, ctx->serverstr, 0, 0);
-
-    /* Read 6 bytes of the response. If version is 0x0003 we'll
-     * read 2 more (feature flags) and head down the v3 chain;
-     * otherwise (1 or 2) we read the remaining 8 bytes of the
-     * 14-byte v1 reply header and head down the v1 chain.
-     *
-     * Use attempt_cancel (not run->cancel) so the watchdog can
-     * tear THIS read down without aborting the whole tracker
-     * run. The watchdog only arms on a v3 probe; the v1 fallback
-     * path doesn't time out because v1 trackers reply promptly. */
-    if (ctx->use_v3) {
-        /* Watchdog has to be set up BEFORE the read goes out so
-         * we don't race a server that ignores us instantly. */
-        if (ctx->v3_probe_timeout_id) {
-            g_source_remove (ctx->v3_probe_timeout_id);
-        }
-        ctx->v3_probe_timeout_id
-            = g_timeout_add (hx_tracker_v3_probe_ms (),
-                             on_tracker_v3_probe_timeout, ctx);
-    }
-    g_input_stream_read_all_async (ctx->in, ctx->buf, 6, G_PRIORITY_DEFAULT,
-                                   ctx->attempt_cancel,
-                                   on_tracker_response_6, ctx);
-}
-
-static void
-on_tracker_response_6 (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-    gboolean read_ok = g_input_stream_read_all_finish (G_INPUT_STREAM (src),
-                                                       res, &n, &err);
-
-    /* Always tear down the probe watchdog before we look at the
-     * read result. If it already fired, v3_probe_timeout_id == 0
-     * — g_source_remove(0) is safe (returns FALSE, no warning
-     * historically; modern GLib criticals on 0, so guard). */
-    if (ctx->v3_probe_timeout_id) {
-        g_source_remove (ctx->v3_probe_timeout_id);
-        ctx->v3_probe_timeout_id = 0;
-    }
-
-    /* Probe-then-fallback decision. The watchdog cancels
-     * attempt_cancel, which makes the read finish with
-     * G_IO_ERROR_CANCELLED. Distinguish "watchdog fired" from
-     * "user aborted the run":
-     *
-     *   - If run->cancel is also cancelled → user aborted; unwind.
-     *   - Else if v3_probe_timed_out → watchdog; retry with v1.
-     *   - Else (read just failed for some other reason) → real
-     *     error; bail.
-     *
-     * A short read on the v3 attempt (n < 6) without a flagged
-     * cancellation still means "server closed without speaking" —
-     * also treat that as a v1 retry trigger when use_v3 is set. */
-    if (!read_ok || n != 6) {
-        if (g_cancellable_is_cancelled (ctx->run->cancel)) {
-            g_clear_error (&err);
-            tracker_fetch_done (ctx);
-            return;
-        }
-        if (ctx->use_v3) {
-            /* Either the watchdog fired (v3_probe_timed_out is
-             * set) or the server hung up / sent short. Either
-             * way, the tracker isn't speaking v3 — fall back. */
-            g_clear_error (&err);
-            tracker_fetch_retry_v1 (ctx);
-            return;
-        }
-        /* Plain v1 attempt failed — that's a real error. */
-        if (err && !err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err->message);
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Pre-decode the version field. The parser also validates the
-     * "HTRK" magic prefix; if the bytes don't look like a tracker
-     * response at all we abort. */
-    guint16 ver = 0, feat = 0;
-    if (!hx_tracker_v3_parse_handshake_response (ctx->buf, 6, &ver, &feat)) {
-        if (ctx->use_v3) {
-            /* The server sent SOMETHING but not a recognisable
-             * HTRK magic. A pre-spec v1 tracker that wedged on
-             * our v3 magic might send junk before closing; retry
-             * with v1. */
-            debug_log ("tracker",
-                       "%s: unrecognised reply during v3 probe; "
-                       "falling back to v1",
-                       ctx->serverstr);
-            tracker_fetch_retry_v1 (ctx);
-            return;
-        }
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: bad magic in response\n"),
-                          ctx->serverstr);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    ctx->version = ver;
-
-    if (ver == HTRK_VERSION_V3) {
-        debug_log ("tracker",
-                   "%s: tracker speaks v3; reading 2-byte feature flags",
-                   ctx->serverstr);
-        /* Continue reading the trailing 2 bytes of features into
-         * the same scratch buffer at offset 6 so the v3 parser
-         * has the full 8-byte handshake response in one slice. */
-        g_input_stream_read_all_async (ctx->in, ctx->buf + 6, 2,
-                                       G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                       on_tracker_v3_features_read, ctx);
-        return;
-    }
-
-    if (ver == HTRK_VERSION_V1 || ver == HTRK_VERSION_V2) {
-        /* Server responded with a v1- or v2-shaped magic. This can
-         * happen on either:
-         *   - The v3 probe path: a spec-compliant v3-aware tracker
-         *     reading 6 bytes, seeing 0x0003 in the request, and
-         *     replying v1 because it doesn't actually implement v3.
-         *     Or, more realistically, a pre-spec tracker that
-         *     happened to reply quickly enough with v1 magic
-         *     (unlikely in practice — we only get here if the
-         *     server IS spec-compliant about reading 6 bytes).
-         *   - The v1 fallback path: pre-spec v1 trackers (the
-         *     common case after the watchdog fires).
-         *
-         * Either way, read the remaining 8 bytes of the 14-byte v1
-         * reply header into buf[6..13] and dispatch to the v1
-         * record-by-record chain. */
-        debug_log ("tracker",
-                   "%s: tracker speaks v%u; using v1 record path",
-                   ctx->serverstr, (unsigned) ver);
-        g_input_stream_read_all_async (ctx->in, ctx->buf + 6, 8,
-                                       G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                       on_tracker_v1_rest_read, ctx);
-        return;
-    }
-
-    /* Anything outside the {V1, V2, V3} allowlist is a tracker
-     * we don't know how to talk to — a future v4 with a different
-     * post-handshake shape, or some non-HTRK service that happens
-     * to start with "HTRK". The 14-byte v1 reply header layout
-     * would be wrong; better to bail than drive bogus record
-     * reads from an unsupported wire format. */
-    hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                      _ ("tracker: %1$s: unsupported HTRK version %2$u\n"),
-                      ctx->serverstr, (unsigned) ver);
-    debug_log ("tracker",
-               "%s: unsupported HTRK version 0x%04x; bailing",
-               ctx->serverstr, (unsigned) ver);
-    tracker_fetch_done (ctx);
-}
-
-static void
-on_tracker_v1_rest_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != 8) {
-        if (err && !err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err->message);
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* tracker_parser.c::hx_tracker_reply_parse_header pulls the
-     * u16 BE at offset [10..11]. Pure helper so
-     * test_tracker_parser pins the wire shape; see
-     * tracker_parser.h for the full HTRK reply layout. */
-    hx_tracker_reply_parse_header (ctx->buf, 14, &ctx->nservers);
-    ctx->total = ctx->nservers;
-    ctx->server_i = 1;
-
-    /* Tell the view we're about to start emitting v1 records for this
-     * tracker URL. The view uses this to create / recycle a per-tracker
-     * section (and pick which columns to show — v1 sections suppress
-     * Country / Caps since v1 records can't carry those TLVs). The
-     * batch-begin / record-arrival ordering is guaranteed by the fact
-     * that tracker_run_ctx walks trackers sequentially. */
-    gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
-                                            ctx->serverstr,
-                                            /*version=*/1,
-                                            ctx->nservers);
-
-    track_prog_update (ctx->run->sess, ctx->serverstr, 0, ctx->total);
-
-    read_next_server_hdr (ctx);
-}
-
-static void
-read_next_server_hdr (struct tracker_fetch_ctx *ctx)
-{
-    if (!ctx->nservers) {
-        tracker_fetch_done (ctx);
-        return;
-    }
-    g_input_stream_read_all_async (ctx->in, ctx->buf, 8, G_PRIORITY_DEFAULT,
-                                   ctx->run->cancel, on_server_hdr_read, ctx);
-}
-
-static void
-on_server_hdr_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != 8) {
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    if (hx_tracker_record_is_padding (ctx->buf, 1)) {
-        /* Padding slot — IPs can't start with 0. Read the next
-		 * server header without advancing the counter. */
-        read_next_server_hdr (ctx);
-        return;
-    }
-
-    g_input_stream_read_all_async (ctx->in, ctx->buf + 8, 3, G_PRIORITY_DEFAULT,
-                                   ctx->run->cancel, on_server_rest_read, ctx);
-}
-
-static void
-on_server_rest_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != 3) {
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Pure parse of the 11-byte fixed record prefix. See
-	 * tracker_parser.h for the byte layout — addr / port /
-	 * nusers / reserved[2] / name_len. */
-    {
-        hx_tracker_record_fixed rec;
-        hx_tracker_record_parse_fixed (ctx->buf, 11, &rec);
-        ctx->cur_addr     = rec.addr;
-        ctx->cur_port     = rec.port;
-        ctx->cur_nusers   = rec.nusers;
-        ctx->cur_name_len = rec.name_len;
-    }
-
-    if (ctx->cur_name_len == 0) {
-        ctx->name[0] = 0;
-        g_input_stream_read_all_async (ctx->in, ctx->buf, 1, G_PRIORITY_DEFAULT,
-                                       ctx->run->cancel,
-                                       on_server_desc_len_read, ctx);
-        return;
-    }
-
-    g_input_stream_read_all_async (ctx->in, ctx->name, ctx->cur_name_len,
-                                   G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                   on_server_name_read, ctx);
-}
-
-static void
-on_server_name_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != ctx->cur_name_len) {
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    ctx->name[ctx->cur_name_len] = 0;
-    hx_tracker_normalize_text (ctx->name, ctx->cur_name_len);
-
-    g_input_stream_read_all_async (ctx->in, ctx->buf, 1, G_PRIORITY_DEFAULT,
-                                   ctx->run->cancel, on_server_desc_len_read,
-                                   ctx);
-}
-
-static void
-on_server_desc_len_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != 1) {
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    ctx->cur_desc_len = ctx->buf[0];
-    if (ctx->cur_desc_len == 0) {
-        ctx->desc[0] = 0;
-        tracker_emit_v1_server (ctx);
-        return;
-    }
-    memset (ctx->desc, 0, sizeof (ctx->desc));
-    g_input_stream_read_all_async (ctx->in, ctx->desc, ctx->cur_desc_len,
-                                   G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                   on_server_desc_read, ctx);
-}
-
-static void
-on_server_desc_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != ctx->cur_desc_len) {
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    ctx->desc[ctx->cur_desc_len] = 0;
-    hx_tracker_normalize_text (ctx->desc, ctx->cur_desc_len);
-
-    tracker_emit_v1_server (ctx);
-}
-
-static void
-tracker_emit_v1_server (struct tracker_fetch_ctx *ctx)
-{
-    /* Build the boxed event from the v1 record. The constructor
-     * runs MacRoman → UTF-8 transcoding on the name + desc, so by
-     * the time tracker.c sees them they're Pango-safe. The signal
-     * emitter borrows the event for the duration of the emit;
-     * boxed-type machinery handles refcount semantics for any
-     * subscriber that wants to keep it.
-     *
-     * v1 records have no TLV trailer — tlv_count=0 + tlv_bytes=NULL
-     * + tlv_bytes_len=0 — so subscribers can tell v1 vs. v3 records
-     * apart by checking event->addr_type (always 0x04 for v1) and
-     * event->tlv_bytes (NULL for v1). */
-    HxTrackerServer *ev = hx_tracker_server_new_v1 (
-        ctx->cur_addr, ctx->cur_port, ctx->cur_nusers,
-        ctx->name, ctx->cur_name_len,
-        ctx->desc, ctx->cur_desc_len,
-        ctx->total);
-    gtkhx_session_emit_tracker_server_create (gtkhx_session_get_default (), ev);
-    hx_tracker_server_free (ev);
-
-    track_prog_update (ctx->run->sess, ctx->serverstr, ctx->server_i,
-                       ctx->total);
-    ctx->server_i++;
-    ctx->nservers--;
-    read_next_server_hdr (ctx);
-}
-
-/* -------- v3 chain -------------------------------------------- */
-
-static void
-on_tracker_v3_features_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != 2) {
-        if (err && !err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err->message);
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Re-parse the full 8-byte response now that we have all of
-     * it; same magic / version validation as the 6-byte call. */
-    guint16 ver = 0, feat = 0;
-    if (!hx_tracker_v3_parse_handshake_response (ctx->buf, 8, &ver, &feat)) {
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: bad v3 handshake response\n"),
-                          ctx->serverstr);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    ctx->v3_features = feat;
-    debug_log ("tracker", "%s: v3 negotiated; tracker features=0x%04x",
-               ctx->serverstr, (unsigned) feat);
-
-    if (feat & HTRK_V3_FEAT_CLIENT_AUTH) {
-        /* Spec says: when FEAT_CLIENT_AUTH is set, we'd need to
-         * send an AUTH request before the listing. We don't have
-         * UI for tracker creds yet (none of the public trackers
-         * we test against require auth) — bail loudly so the user
-         * sees why no servers showed up rather than wonder. */
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: requires client auth (not "
-                             "supported yet)\n"),
-                          ctx->serverstr);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Send the 4-byte minimum-viable listing request. */
-    gsize req_len = 0;
-    if (!hx_tracker_v3_pack_listing_request_simple (
-            ctx->v3_req_buf, sizeof (ctx->v3_req_buf), &req_len)) {
-        tracker_fetch_done (ctx);
-        return;
-    }
-    g_output_stream_write_all_async (ctx->out, ctx->v3_req_buf, req_len,
-                                     G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                     on_tracker_v3_request_sent, ctx);
-}
-
-static void
-on_tracker_v3_request_sent (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_output_stream_write_all_finish (G_OUTPUT_STREAM (src), res, &n,
-                                           &err)) {
-        if (!err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err ? err->message
-                                  : _ ("v3 listing request write failed"));
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Read the 10-byte v3 response header. */
-    g_input_stream_read_all_async (
-        ctx->in, ctx->v3_resp_hdr, HTRK_V3_RESP_HDR_LEN, G_PRIORITY_DEFAULT,
-        ctx->run->cancel, on_tracker_v3_resp_hdr_read, ctx);
-}
-
-static void
-on_tracker_v3_resp_hdr_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != HTRK_V3_RESP_HDR_LEN) {
-        if (err && !err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err->message);
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    guint16 type = 0, total_servers = 0, record_count = 0;
-    guint32 total_size = 0;
-    if (!hx_tracker_v3_parse_response_header (ctx->v3_resp_hdr,
-                                              HTRK_V3_RESP_HDR_LEN, &type,
-                                              &total_size, &total_servers,
-                                              &record_count)) {
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: bad v3 response header\n"),
-                          ctx->serverstr);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    debug_log ("tracker",
-               "%s: v3 response — total_size=%u total=%u records=%u",
-               ctx->serverstr, (unsigned) total_size,
-               (unsigned) total_servers, (unsigned) record_count);
-
-    /* Per-batch total drives the track_prog_update progress ticker
-     * AND the HxTrackerServer.total field that subscribers see.
-     * Use record_count (records IN THIS message), not total_servers
-     * (full match count across all pages). When the tracker
-     * paginates (total_servers > record_count) — Phase A doesn't
-     * request pagination yet, but a v3 tracker MAY chunk anyway —
-     * using total_servers leaves the progress widget short of done
-     * after we've emitted the whole batch we have. */
-    ctx->total = (int) record_count;
-    ctx->server_i = 1;
-    track_prog_update (ctx->run->sess, ctx->serverstr, 0, ctx->total);
-
-    /* Tell the view we're about to start emitting v3 records for this
-     * tracker. Even when record_count is 0 we still emit so the view
-     * creates the (empty) section — feedback that the tracker WAS
-     * contacted and replied, even if it had nothing to list. */
-    gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
-                                            ctx->serverstr,
-                                            /*version=*/3,
-                                            record_count);
-
-    if (total_size == 0 && record_count == 0) {
-        /* Empty listing — clean finish, no records to read. */
-        tracker_fetch_done (ctx);
-        return;
-    }
-    if (total_size == 0 || record_count == 0) {
-        /* Inconsistent header: one is zero but not the other.
-         * Either the tracker promised records with no payload to
-         * carry them, or sent a payload-sized response with no
-         * records to read. Both are malformed; bail loudly rather
-         * than treat as empty. */
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: malformed v3 response header "
-                             "(total_size=%2$u, record_count=%3$u)\n"),
-                          ctx->serverstr, (unsigned) total_size,
-                          (unsigned) record_count);
-        tracker_fetch_done (ctx);
-        return;
-    }
-    if (total_size > HX_TRACKER_V3_MAX_PAYLOAD) {
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: v3 response too large "
-                             "(%2$u bytes, cap %3$u)\n"),
-                          ctx->serverstr, (unsigned) total_size,
-                          (unsigned) HX_TRACKER_V3_MAX_PAYLOAD);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    /* Stash record_count so the post-read walker knows how many
-     * records to expect. Reuse the v1-side nservers slot. */
-    ctx->nservers = record_count;
-    ctx->v3_payload_len = total_size;
-    ctx->v3_payload = g_malloc (total_size);
-
-    g_input_stream_read_all_async (ctx->in, ctx->v3_payload, total_size,
-                                   G_PRIORITY_DEFAULT, ctx->run->cancel,
-                                   on_tracker_v3_payload_read, ctx);
-}
-
-static void
-on_tracker_v3_payload_read (GObject *src, GAsyncResult *res, gpointer u)
-{
-    struct tracker_fetch_ctx *ctx = u;
-    GError *err = NULL;
-    gsize n = 0;
-
-    if (!g_input_stream_read_all_finish (G_INPUT_STREAM (src), res, &n, &err)
-        || n != ctx->v3_payload_len) {
-        if (err && !err_is_cancel (err)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: %2$s\n"), ctx->serverstr,
-                              err->message);
-        }
-        g_clear_error (&err);
-        tracker_fetch_done (ctx);
-        return;
-    }
-
-    tracker_v3_walk_and_emit (ctx, ctx->nservers);
-    tracker_fetch_done (ctx);
-}
-
-static void
-tracker_v3_walk_and_emit (struct tracker_fetch_ctx *ctx, guint16 record_count)
-{
-    /* Walk the response payload record-by-record. Each
-     * parse_record call borrows pointers into ctx->v3_payload —
-     * no copies until we hand the bytes to hx_tracker_server_new_v3
-     * which g_strndups / g_bytes_news what it keeps. */
-    const guint8 *buf = ctx->v3_payload;
-    gsize remaining = ctx->v3_payload_len;
-    guint16 i;
-    for (i = 0; i < record_count; i++) {
-        hx_tracker_v3_record rec = { 0 };
-        gsize consumed = 0;
-        if (!hx_tracker_v3_parse_record (buf, remaining, &rec, &consumed)) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                              _ ("tracker: %1$s: malformed record %2$u/%3$u "
-                                 "in v3 response\n"),
-                              ctx->serverstr, (unsigned) (i + 1),
-                              (unsigned) record_count);
-            return;
-        }
-
-        HxTrackerServer *ev = hx_tracker_server_new_v3 (
-            rec.addr_type, rec.address, rec.address_len, rec.port, rec.nusers,
-            (const char *) rec.name, rec.name_len,
-            (const char *) rec.desc, rec.desc_len,
-            rec.tlv_count, rec.tlv_bytes, rec.tlv_bytes_len, ctx->total);
-        if (ev) {
-            gtkhx_session_emit_tracker_server_create (
-                gtkhx_session_get_default (), ev);
-            hx_tracker_server_free (ev);
-
-            track_prog_update (ctx->run->sess, ctx->serverstr, ctx->server_i,
-                               ctx->total);
-            ctx->server_i++;
-        } else {
-            debug_log ("tracker",
-                       "%s: dropping record %u (constructor rejected "
-                       "addr_type=0x%02x)",
-                       ctx->serverstr, (unsigned) (i + 1),
-                       (unsigned) rec.addr_type);
-        }
-
-        buf += consumed;
-        remaining -= consumed;
-    }
-
-    /* Trailing-bytes check, symmetric with the strict-leftover
-     * contract in hx_tracker_v3_walk_tlvs. After consuming
-     * record_count records, the cursor should land exactly at
-     * the end of the payload — total_size is what the response
-     * header declared and we read that many bytes off the wire.
-     * Anything left over means the tracker emitted a record_count
-     * that's smaller than the actual content, or padded the
-     * payload past the last declared record. Either way we'd be
-     * silently discarding wire data; log loudly so a malformed
-     * tracker (or a v3 spec mismatch) surfaces. */
-    if (remaining != 0) {
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
-                          _ ("tracker: %1$s: v3 response had %2$u trailing "
-                             "bytes after %3$u records\n"),
-                          ctx->serverstr, (unsigned) remaining,
-                          (unsigned) record_count);
-        debug_log ("tracker",
-                   "%s: v3 trailing bytes — record_count=%u, "
-                   "first leftover byte=0x%02x",
-                   ctx->serverstr, (unsigned) record_count,
-                   (unsigned) *buf);
-    }
-}
-
-static void
-tracker_fetch_done (struct tracker_fetch_ctx *ctx)
-{
-    struct tracker_run_ctx *run = ctx->run;
-
-    run->cur_ctx = NULL;
-    tracker_fetch_free (ctx);
-
-    if (run->aborted) {
-        tracker_run_free (run);
-        return;
-    }
-
-    run->current_index++;
-    if (run->current_index >= run->n_trackers) {
-        tracker_run_free (run);
-        return;
-    }
-    tracker_fetch_start (run);
-}
-
-static void
-tracker_fetch_free (struct tracker_fetch_ctx *ctx)
-{
-    if (!ctx) {
-        return;
-    }
-    if (ctx->v3_probe_timeout_id) {
-        g_source_remove (ctx->v3_probe_timeout_id);
-        ctx->v3_probe_timeout_id = 0;
-    }
-    /* Disconnect the run-cancel → attempt-cancel chain BEFORE
-     * dropping attempt_cancel — the chained handler holds a raw
-     * pointer to it and would otherwise read freed memory if the
-     * run cancellable fires after free. */
-    if (ctx->attempt_cancel && ctx->attempt_cancel_link) {
-        g_cancellable_disconnect (ctx->run->cancel,
-                                  ctx->attempt_cancel_link);
-        ctx->attempt_cancel_link = 0;
-    }
-    g_clear_object (&ctx->attempt_cancel);
-    g_clear_object (&ctx->conn);
-    g_free (ctx->serverstr);
-    g_free (ctx->v3_payload);    /* NULL-safe; only set on v3 path */
-    g_free (ctx);
+    tracker_fetch_cleanup ();
 }
 
 void
@@ -2711,8 +1647,8 @@ kill_threads (void)
         g_cancellable_cancel (current_cancel);
         g_clear_object (&current_cancel);
     }
-    /* And the async tracker fetch, which has its own GCancellable
-	 * inside current_tracker_run. */
+    /* And the async tracker fetch, which has its own cancellation
+	 * inside current_tracker_fetch. */
     tracker_kill_threads ();
 }
 
