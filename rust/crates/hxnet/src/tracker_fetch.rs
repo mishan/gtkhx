@@ -42,10 +42,17 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use tokio::io::{AsyncRead, AsyncWrite};
+use std::pin::Pin;
+use std::task::{Context, Poll};
+
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::sync::mpsc;
 
 use crate::tracker::{self, Outcome, TrackerRecord};
+
+/// Default tracker TCP port (HTRK), used when a URL carries no `:port`.
+/// Mirror of the C `HTRK_TCPPORT`.
+pub const HTRK_TCPPORT: u16 = 5498;
 
 /// Which transport a single connect attempt should use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -283,6 +290,154 @@ pub async fn run_fetch<C: TrackerConnector>(
         }
     }
     let _ = out.send(TrackerEvent::Done).await;
+}
+
+// ---- Production connector (TCP + rustls) ---------------------------------
+
+/// A connected tracker stream — plain TCP or rustls-over-TCP. Both
+/// halves are `Unpin`, so the [`AsyncRead`] / [`AsyncWrite`] impls just
+/// project to the active variant. The TLS variant is boxed because
+/// `TlsStream` is large.
+pub enum TrackerTransport {
+    Plain(tokio::net::TcpStream),
+    Tls(Box<tokio_rustls::client::TlsStream<tokio::net::TcpStream>>),
+}
+
+impl AsyncRead for TrackerTransport {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            TrackerTransport::Plain(s) => Pin::new(s).poll_read(cx, buf),
+            TrackerTransport::Tls(s) => Pin::new(s.as_mut()).poll_read(cx, buf),
+        }
+    }
+}
+
+impl AsyncWrite for TrackerTransport {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        match self.get_mut() {
+            TrackerTransport::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            TrackerTransport::Tls(s) => Pin::new(s.as_mut()).poll_write(cx, buf),
+        }
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            TrackerTransport::Plain(s) => Pin::new(s).poll_flush(cx),
+            TrackerTransport::Tls(s) => Pin::new(s.as_mut()).poll_flush(cx),
+        }
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.get_mut() {
+            TrackerTransport::Plain(s) => Pin::new(s).poll_shutdown(cx),
+            TrackerTransport::Tls(s) => Pin::new(s.as_mut()).poll_shutdown(cx),
+        }
+    }
+}
+
+/// Split a tracker URL into `(host, port)`, defaulting the port to
+/// [`HTRK_TCPPORT`]. Mirrors what `g_network_address_parse` did for the
+/// legacy `g_socket_client_connect_to_host (serverstr, HTRK_TCPPORT)`:
+/// a bare host keeps the default; a `host:port` suffix overrides it; an
+/// IPv6 literal must be bracketed (`[::1]` or `[::1]:5498`) so its
+/// colons aren't mistaken for a port separator.
+fn parse_host_port(url: &str) -> (String, u16) {
+    let url = url.trim();
+    // Bracketed IPv6 literal, optionally with a port.
+    if let Some(rest) = url.strip_prefix('[') {
+        if let Some(close) = rest.find(']') {
+            let host = &rest[..close];
+            let after = &rest[close + 1..];
+            let port = after
+                .strip_prefix(':')
+                .and_then(|p| p.parse::<u16>().ok())
+                .unwrap_or(HTRK_TCPPORT);
+            return (host.to_owned(), port);
+        }
+    }
+    // host:port only when there's exactly one colon and a numeric tail —
+    // a bare IPv6 literal (multiple colons) keeps the default port.
+    if let Some((host, tail)) = url.rsplit_once(':') {
+        if !host.contains(':') {
+            if let Ok(port) = tail.parse::<u16>() {
+                return (host.to_owned(), port);
+            }
+        }
+    }
+    (url.to_owned(), HTRK_TCPPORT)
+}
+
+/// TOFU verify callback: given a leaf cert's `"sha256:<hex>"`
+/// fingerprint, returns `true` to accept the connection. Wraps the
+/// C-side trust check (marshalled to the GLib main thread).
+pub type VerifyFn = Box<dyn Fn(&str) -> bool + Send>;
+
+/// Production [`TrackerConnector`]: tokio TCP connect, with an optional
+/// rustls wrap for [`Transport::Tls`]. The TOFU gate matches the
+/// control-connection path (`lifecycle::run_plaintext_tls_lifecycle`):
+/// a WebPKI-valid cert is trusted silently; otherwise `verify` is
+/// consulted with the leaf `"sha256:<hex>"` fingerprint and may reject.
+pub struct TcpTlsConnector {
+    /// TOFU verify callback (the C trust check, marshalled). `None`
+    /// accepts any non-WebPKI cert — only safe for tests / probes.
+    pub verify: Option<VerifyFn>,
+}
+
+impl TrackerConnector for TcpTlsConnector {
+    type Stream = TrackerTransport;
+
+    async fn connect(
+        &mut self,
+        url: &str,
+        transport: Transport,
+    ) -> Result<Self::Stream, ConnectError> {
+        let (host, port) = parse_host_port(url);
+
+        // resolve_and_connect emits two lifecycle events; a small bounded
+        // channel held only for the call absorbs them (no consumer needed
+        // here — the tracker walk has its own event stream).
+        let (evt_tx, _evt_rx) = mpsc::channel(4);
+        let tcp = crate::connect::resolve_and_connect(&host, port, &evt_tx)
+            .await
+            .map_err(|e| ConnectError::Transport(e.to_string()))?;
+
+        match transport {
+            Transport::Plain => Ok(TrackerTransport::Plain(tcp)),
+            Transport::Tls => {
+                let (tls, webpki_ok) = crate::tls::wrap_tls(tcp, &host)
+                    .await
+                    .map_err(|e| ConnectError::Tls(e.to_string()))?;
+                // WebPKI-valid → trust silently; else fall to the TOFU gate.
+                if !webpki_ok.load(std::sync::atomic::Ordering::Relaxed) {
+                    if let Some(verify) = self.verify.as_ref() {
+                        match crate::tls::peer_cert_fingerprint(&tls) {
+                            Some(fp) => {
+                                if !verify(&fp) {
+                                    return Err(ConnectError::Tls(
+                                        "certificate rejected by trust check".to_owned(),
+                                    ));
+                                }
+                            }
+                            None => {
+                                return Err(ConnectError::Tls(
+                                    "peer presented no certificate".to_owned(),
+                                ));
+                            }
+                        }
+                    }
+                }
+                Ok(TrackerTransport::Tls(Box::new(tls)))
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -587,6 +742,70 @@ mod tests {
             &events[1],
             TrackerEvent::Record { record, .. } if record.name == b"abc" && record.port == 5500
         ));
+    }
+
+    #[test]
+    fn parse_host_port_cases() {
+        assert_eq!(parse_host_port("tracker.example.com"), ("tracker.example.com".into(), HTRK_TCPPORT));
+        assert_eq!(parse_host_port("tracker.example.com:5499"), ("tracker.example.com".into(), 5499));
+        assert_eq!(parse_host_port("127.0.0.1:1234"), ("127.0.0.1".into(), 1234));
+        // Bare IPv6 literal: colons are address, not a port.
+        assert_eq!(parse_host_port("::1"), ("::1".into(), HTRK_TCPPORT));
+        // Bracketed IPv6, with and without a port.
+        assert_eq!(parse_host_port("[::1]"), ("::1".into(), HTRK_TCPPORT));
+        assert_eq!(parse_host_port("[2001:db8::1]:5499"), ("2001:db8::1".into(), 5499));
+        // Non-numeric tail is part of the host, not a port.
+        assert_eq!(parse_host_port("host:notaport"), ("host:notaport".into(), HTRK_TCPPORT));
+    }
+
+    #[tokio::test]
+    async fn production_connector_v1_over_plain_tcp() {
+        // Drive run_fetch with the REAL TcpTlsConnector against an
+        // in-process listener that speaks a v1 listing. Verdict is
+        // pre-seeded No so the connector skips TLS (the listener is
+        // plain), exercising resolve_and_connect + run_v1 over a real
+        // socket end-to-end.
+        let mut reply = v1_header(1);
+        reply.extend_from_slice(&v1_record([8, 8, 8, 8], 5500, 5, b"real", b"x"));
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut sock, _) = listener.accept().await.unwrap();
+            // Drain the 6-byte v1 magic the engine sends, then reply.
+            let mut magic = [0u8; 6];
+            sock.read_exact(&mut magic).await.unwrap();
+            sock.write_all(&reply).await.unwrap();
+            sock.flush().await.unwrap();
+        });
+
+        let mut conn = TcpTlsConnector { verify: None };
+        let mut verdicts = VerdictCache::new();
+        let url = format!("127.0.0.1:{}", addr.port());
+        verdicts.record(&url, TlsVerdict::No);
+        let (tx, rx) = mpsc::channel(64);
+        run_fetch(
+            &mut conn,
+            &[url.clone()],
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
+        drop(tx);
+        server.await.unwrap();
+
+        let events = collect(rx).await;
+        assert!(matches!(
+            &events[0],
+            TrackerEvent::BatchBegin { url: u, version: 1, count: 1 } if *u == url
+        ));
+        assert!(matches!(
+            &events[1],
+            TrackerEvent::Record { record, .. } if record.name == b"real" && record.nusers == 5
+        ));
+        assert!(matches!(events.last(), Some(TrackerEvent::Done)));
     }
 
     #[tokio::test]
