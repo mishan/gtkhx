@@ -66,9 +66,17 @@ pub enum Transport {
 /// Why a connect attempt failed — the distinction drives the fallback.
 #[derive(Debug)]
 pub enum ConnectError {
-    /// TLS handshake / certificate failure. The runner falls back to
-    /// plain TCP and records a `No` verdict for the URL.
+    /// TLS handshake / protocol failure (no TLS server here, version
+    /// mismatch, etc.). The runner records a `No` verdict and falls back
+    /// to plain TCP — the tracker simply doesn't speak TLS.
     Tls(String),
+    /// The peer's certificate was rejected by the TOFU trust check (or it
+    /// presented none). A *hard* failure: the runner does NOT fall back
+    /// to plaintext and does NOT record a verdict. Silently downgrading
+    /// after the trust store / user rejected a cert would be a security
+    /// downgrade — matches the control-connection TLS lifecycle, which
+    /// aborts on trust rejection.
+    TrustRejected(String),
     /// Couldn't establish the TCP connection at all (DNS, refused,
     /// timeout). No fallback helps — the URL is reported as failed.
     Transport(String),
@@ -78,6 +86,7 @@ impl std::fmt::Display for ConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ConnectError::Tls(m) => write!(f, "TLS: {m}"),
+            ConnectError::TrustRejected(m) => write!(f, "TLS trust: {m}"),
             ConnectError::Transport(m) => write!(f, "{m}"),
         }
     }
@@ -178,10 +187,15 @@ async fn connect_with_fallback<C: TrackerConnector>(
                 verdicts.record(url, TlsVerdict::Ok);
                 return Ok(s);
             }
-            // TLS handshake failed — remember it and drop to plain.
+            // TLS handshake failed — the tracker doesn't speak TLS.
+            // Remember it and drop to plain.
             Err(ConnectError::Tls(_)) => {
                 verdicts.record(url, TlsVerdict::No);
             }
+            // The cert was rejected by the trust check. Hard stop: do NOT
+            // record a verdict and do NOT fall back to plaintext — that
+            // would silently downgrade past a rejected cert.
+            Err(e @ ConnectError::TrustRejected(_)) => return Err(e),
             // Host unreachable — a plain retry won't help.
             Err(e @ ConnectError::Transport(_)) => return Err(e),
         }
@@ -425,13 +439,15 @@ impl TrackerConnector for TcpTlsConnector {
                         match crate::tls::peer_cert_fingerprint(&tls) {
                             Some(fp) => {
                                 if !verify(&fp) {
-                                    return Err(ConnectError::Tls(
+                                    // Trust rejection is a hard failure, not
+                                    // a "no TLS" signal — never downgrade.
+                                    return Err(ConnectError::TrustRejected(
                                         "certificate rejected by trust check".to_owned(),
                                     ));
                                 }
                             }
                             None => {
-                                return Err(ConnectError::Tls(
+                                return Err(ConnectError::TrustRejected(
                                     "peer presented no certificate".to_owned(),
                                 ));
                             }
@@ -466,6 +482,9 @@ mod tests {
         Silent,
         /// Fail the connect at the TLS layer (→ plain fallback).
         FailTls,
+        /// Fail the connect because the cert was trust-rejected
+        /// (→ hard failure, no fallback, no verdict).
+        FailTrust,
         /// Fail the connect at the transport layer (→ URL fails).
         FailTransport,
     }
@@ -497,6 +516,7 @@ mod tests {
             self.calls.push((url.to_owned(), transport));
             match self.plans.pop_front().expect("connect with no scripted plan") {
                 Plan::FailTls => Err(ConnectError::Tls("scripted".into())),
+                Plan::FailTrust => Err(ConnectError::TrustRejected("scripted".into())),
                 Plan::FailTransport => Err(ConnectError::Transport("scripted".into())),
                 Plan::Silent => {
                     let (client, mut server) = tokio::io::duplex(64 * 1024);
@@ -551,8 +571,9 @@ mod tests {
         r
     }
 
-    /// A minimal v3 listing reply: 6-byte handshake response + 10-byte
-    /// listing-response header + `records` blob.
+    /// A minimal v3 listing reply: 8-byte handshake response (HTRK +
+    /// u16 version + u16 features) + 10-byte listing-response header +
+    /// `records` blob.
     fn v3_reply(records: &[u8], record_count: u16) -> Vec<u8> {
         let mut r = Vec::new();
         // 8-byte handshake response: HTRK + version 3 + 2 feature bytes
@@ -666,11 +687,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cached_no_verdict_skips_tls() {
-        let mut script = v1_header(0);
-        // empty listing is fine; we only assert the transport choice.
-        let _ = &mut script;
+    async fn trust_rejection_does_not_downgrade() {
+        // TLS connects but the cert is trust-rejected. The runner must
+        // NOT fall back to plaintext and must NOT record a verdict —
+        // silently downgrading past a rejected cert would be insecure.
+        let mut conn = ScriptedConnector::new(vec![Plan::FailTrust]);
+        let (tx, rx) = mpsc::channel(64);
+        let mut verdicts = VerdictCache::new();
+        run_fetch(&mut conn, &urls(&["t1"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        drop(tx);
 
+        let events = collect(rx).await;
+        // Only the TLS attempt — no plain fallback connect.
+        assert_eq!(conn.calls, vec![("t1".to_string(), Transport::Tls)]);
+        // Verdict stays Unknown — we did NOT conclude "no TLS".
+        assert_eq!(verdicts.lookup("t1"), TlsVerdict::Unknown);
+        assert!(matches!(
+            &events[0],
+            TrackerEvent::BatchError { url, .. } if url == "t1"
+        ));
+        assert!(matches!(events.last(), Some(TrackerEvent::Done)));
+    }
+
+    #[tokio::test]
+    async fn cached_no_verdict_skips_tls() {
+        // Empty listing is fine; we only assert the transport choice.
         let mut conn = ScriptedConnector::new(vec![Plan::Reply(v1_header(0))]);
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
