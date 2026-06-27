@@ -241,6 +241,16 @@ pub unsafe extern "C" fn gtkhx_bridge_emit_pointer_pair_signal(
     emit_pointer_pair_signal(session_ptr, name, arg0, arg1);
 }
 
+/// Serialises every test that acquires the process-wide
+/// `glib::MainContext::default()`. Only one thread may own that context
+/// at a time, and `cargo test` runs tests in parallel by default, so
+/// without this two default-context tests (here and in `blocking`) can
+/// race `acquire()` and one fails with "context already acquired". Every
+/// such test takes this lock first. Recover from poisoning so one
+/// panicking test doesn't cascade-fail the rest.
+#[cfg(test)]
+pub(crate) static DEFAULT_CTX_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -568,6 +578,9 @@ mod tests {
 
     #[test]
     fn spawn_local_actually_polls_future() {
+        let _ser = crate::DEFAULT_CTX_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
         let ctx = glib::MainContext::default();
         let _guard = ctx.acquire().expect("acquired default main context");
 

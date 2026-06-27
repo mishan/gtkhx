@@ -386,7 +386,7 @@ struct htlc_conn {
  * cross-thread access to the global xfers[] array between worker
  * threads (get_thread, put_thread, the connect worker) and main.
  * After every xfer-related mutator was moved onto the main thread
- * (via gtkhx_post_to_main / gtkhx_invoke_sync), the mutex had no
+ * (via main-context idle posts), the mutex had no
  * job left and was removed. The fields-of-htlc_conn entry for
  * htxf_mutex is gone above, so don't reintroduce these macros
  * without also adding back the field. */

@@ -45,7 +45,6 @@
 #include "gtkhx_session.h"
 #include "hxnet_bridge.h"
 #include "rcv.h"
-#include "gtkthreads.h"
 #include "gtkutil.h"
 #include "chat.h"
 #include "tasks.h"
