@@ -62,9 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # Fedora ships current gtk4 / libadwaita / nettle. Pinned to
-      # a major so a Fedora 43 release with surprise breakage doesn't
-      # red the suite the day it lands; bump deliberately.
-      image: fedora:42
+      # a major so a Fedora 44 release with surprise breakage doesn't
+      # red the suite the day it lands; bump deliberately. On 43 for
+      # the glycin 3.x generation: its glycin-loaders ship the 2+
+      # loader protocol the `glycin` 3.x crate (and the GNOME 49
+      # Flatpak runtime we target) need — Fedora 42 only had 1+, so
+      # the hx-image-decode tests couldn't find a compatible loader.
+      image: fedora:43
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -115,6 +119,7 @@ jobs:
             desktop-file-utils appstream \
             libpanel-devel \
             libseccomp-devel lcms2-devel \
+            glycin-loaders \
             git rust cargo
 
       - name: assert rustc meets MSRV
@@ -153,6 +158,23 @@ jobs:
         # Debian-stable native-build floor. Same flag is used in
         # rust/meson.build's cargo invocation; the project keeps
         # both code paths in sync.
+        #
+        # CI=true (GitHub sets it) turns hx-image-decode's
+        # glycin-loader gate from a silent skip into a hard failure
+        # (tests/decode.rs::require_glycin) — the loaders are installed
+        # above (glycin-loaders), so a skip here means something broke,
+        # and a silent skip masks decode regressions in a green run.
+        #
+        # GTKHX_GLYCIN_NO_SANDBOX=1: glycin runs each loader under bwrap
+        # by default (its Auto sandbox selector), which an unprivileged
+        # CI container can't spawn (no usable user namespaces) — the
+        # decode then fails and maps to UnsupportedFormat. glycin 3.x has
+        # no env knob for the sandbox, so src/decode.rs reads this var and
+        # selects NotSandboxed via the API. The fixtures are trusted
+        # in-tree images. (tests/decode.rs also sets it itself, so this is
+        # belt-and-suspenders / documentation.)
+        env:
+          GTKHX_GLYCIN_NO_SANDBOX: "1"
         run: |
           cd rust && cargo test --workspace --ignore-rust-version
 
@@ -334,7 +356,7 @@ jobs:
             -v "$PWD:/src" -w /src \
             -e GTKHX_TEST_HOST=127.0.0.1 \
             -e GTKHX_TEST_PORT=5500 \
-            fedora:42 bash -c '
+            fedora:43 bash -c '
               dnf -y install \
                 meson ninja-build pkgconf-pkg-config gcc \
                 gtk4-devel libadwaita-devel \

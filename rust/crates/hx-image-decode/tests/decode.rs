@@ -1,10 +1,10 @@
 //! End-to-end decode tests driving glycin against real image
 //! bytes. These run in `cargo test -p hx-image-decode` if the
-//! host has the glycin loader binaries at
-//! `/usr/libexec/glycin-loaders/2+/` (org.gnome.Platform 47+
-//! and modern Debian/Ubuntu/Fedora installs all do). When the
-//! loaders are absent the tests skip themselves rather than
-//! fail — same shape as the C `g_test_skip` pattern in Tier 2.
+//! host has glycin loaders installed (detected via their config
+//! under `$XDG_DATA_DIRS/glycin-loaders/*/conf.d/` — see
+//! `glycin_loaders_available`). When the loaders are absent the
+//! tests skip on a dev box but fail loudly under CI (the `CI`
+//! env var) so a missing-loader CI image can't mask a regression.
 //!
 //! The fixtures (PNG, JPEG, GIF) come from `tests/common/`
 //! which the Tier 3 banner suite already uses. They're small
@@ -23,27 +23,94 @@ use std::time::{Duration, Instant};
 /// serialises every test that touches the default MainContext.
 static MAIN_CTX_LOCK: Mutex<()> = Mutex::new(());
 
-/// Stub for the C-side telemetry bridge so the integration
-/// test binary links. In the real binary
-/// `src/inline_media_decode.c` provides this and routes the
-/// message through `debug_log("media", ...)`. The decoder's
-/// telemetry path calls it on decode-start / -done / -failed;
-/// for tests we drop the message — `cargo test`'s captured
-/// stdout is the right place for diagnostics, not the GtkHx
-/// debug-log gate.
+/// Stub for the C-side telemetry bridge so the integration test binary
+/// links. In the real binary `src/inline_media_decode.c` provides this
+/// and routes the message through `debug_log("media", ...)`. The
+/// decoder's telemetry path calls it on decode-start / -done / -failed
+/// — the -failed line carries glycin's error category. We print to
+/// stderr (visible with `cargo test -- --nocapture`, and on a failing
+/// test cargo prints captured output anyway), so a CI decode failure is
+/// self-diagnosing instead of needing a guess-and-rerun cycle.
 #[no_mangle]
-pub extern "C" fn hx_image_decode_log(_msg: *const std::ffi::c_char) {}
+pub extern "C" fn hx_image_decode_log(msg: *const std::ffi::c_char) {
+    if msg.is_null() {
+        return;
+    }
+    let s = unsafe { std::ffi::CStr::from_ptr(msg) }.to_string_lossy();
+    eprintln!("[hx-image-decode] {s}");
+}
 
 use hx_image_decode::ffi::{
     inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free,
     HxInlineMediaDecoded,
 };
 
-/// Path on the host where glycin loaders live. Skip the
-/// integration tests if it's missing — typically a slim CI
-/// container without the gnome-platform pieces.
+/// Whether glycin image loaders are installed on this host.
+///
+/// glycin discovers loaders through config files at
+/// `$XDG_DATA_DIRS/glycin-loaders/<api>+/conf.d/*.conf` (the `Exec=` in
+/// each points at the loader binary). We probe for that config rather
+/// than a hardcoded binary path because the binary's location varies by
+/// distro — `/usr/libexec/glycin-loaders/…` on Debian/GNOME, `/usr/lib64`
+/// on Fedora — and the API-version dir (`1+`, `2+`, …) tracks the glycin
+/// release, whereas the config always lives under the data dirs glycin
+/// itself searches. Keying off the config keeps the gate honest across
+/// CI (Fedora) and dev boxes (Debian/Ubuntu) without guessing paths.
 fn glycin_loaders_available() -> bool {
-    Path::new("/usr/libexec/glycin-loaders/2+/glycin-image-rs").exists()
+    let data_dirs = std::env::var("XDG_DATA_DIRS")
+        .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
+    data_dirs
+        .split(':')
+        .filter(|d| !d.is_empty())
+        .map(|d| Path::new(d).join("glycin-loaders"))
+        .any(|root| glycin_conf_present_under(&root))
+}
+
+/// True if `root` (a `…/glycin-loaders` directory) holds at least one
+/// `<api>+/conf.d/*.conf` loader config, for any API-version subdir.
+fn glycin_conf_present_under(root: &Path) -> bool {
+    let Ok(versions) = std::fs::read_dir(root) else {
+        return false;
+    };
+    versions.filter_map(Result::ok).any(|ver| {
+        let confd = ver.path().join("conf.d");
+        std::fs::read_dir(&confd).is_ok_and(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .any(|e| e.path().extension().is_some_and(|x| x == "conf"))
+        })
+    })
+}
+
+/// Glycin-loader gate for the decode tests. Returns `true` when the
+/// loaders are present and the test should run.
+///
+/// When they're absent the behaviour depends on the environment:
+///
+///   - **Under CI** (`CI` env var, which GitHub Actions always sets) a
+///     missing loader is a HARD failure. A silent skip there would let a
+///     real decode regression sail through a green run — the exact
+///     footgun the project's no-silent-skips rule guards against. If this
+///     fires in CI, the fix is to install the loaders (the `glycin-loaders`
+///     package) in the job, not to skip.
+///   - **Locally** (a slim dev box with no gnome-platform pieces) it
+///     skips with a notice, so `cargo test` stays usable off-desktop.
+fn require_glycin() -> bool {
+    if glycin_loaders_available() {
+        return true;
+    }
+    if std::env::var_os("CI").is_some() {
+        panic!(
+            "glycin loaders not found via $XDG_DATA_DIRS/glycin-loaders/*/conf.d \
+             under CI: install the glycin-loaders package so this decode test \
+             runs — refusing to silently skip"
+        );
+    }
+    eprintln!(
+        "skipping glycin decode test: no loader config under \
+         $XDG_DATA_DIRS/glycin-loaders/*/conf.d (set CI=1 to make this fatal)"
+    );
+    false
 }
 
 /// Resolve the project's tests/common fixture path. The
@@ -72,6 +139,11 @@ struct DecodeResult {
     width: i32,
     height: i32,
     mime: Option<String>,
+    /// Glycin's error string on the failure path (the ErrorCtx the
+    /// decoder stashes — includes glycin's "Used config" dump, which
+    /// names the loader dirs + API version it searched). Surfaced in
+    /// the fixture assertions so a CI failure is self-diagnosing.
+    error_message: Option<String>,
 }
 
 thread_local! {
@@ -89,6 +161,15 @@ extern "C" fn collect_cb(
         } else {
             Some(
                 std::ffi::CStr::from_ptr(r.canonical_mime)
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        };
+        let error_message = if r.error_message.is_null() {
+            None
+        } else {
+            Some(
+                std::ffi::CStr::from_ptr(r.error_message)
                     .to_string_lossy()
                     .into_owned(),
             )
@@ -115,6 +196,7 @@ extern "C" fn collect_cb(
             width,
             height,
             mime,
+            error_message,
         };
         LAST_RESULT.with(|cell| *cell.borrow_mut() = Some(result));
     }
@@ -139,6 +221,14 @@ fn drive_until_done(deadline: Duration) -> DecodeResult {
 }
 
 fn decode_fixture(path: &str) -> DecodeResult {
+    // Force glycin's unsandboxed loader path (see src/decode.rs): its
+    // default Auto sandbox runs bwrap, which can't spawn in CI
+    // containers or some dev sandboxes — there the decode would fail
+    // and map to UnsupportedFormat. The fixtures are trusted in-tree
+    // images. Set process-wide (decode tests are serialised by
+    // MAIN_CTX_LOCK, and the value never varies) so the test passes
+    // regardless of how the runner configures its environment.
+    std::env::set_var("GTKHX_GLYCIN_NO_SANDBOX", "1");
     let bytes = std::fs::read(fixture_path(path))
         .unwrap_or_else(|e| panic!("read fixture {}: {}", path, e));
     // Spec defaults: caps NULL → glycin sees the spec floor.
@@ -172,15 +262,20 @@ fn run_in_main_thread<F: FnOnce()>(f: F) {
 
 #[test]
 fn png_fixture_decodes() {
-    if !glycin_loaders_available() {
-        eprintln!(
-            "skipping: glycin loaders missing at /usr/libexec/glycin-loaders/2+/"
-        );
+    if !require_glycin() {
         return;
     }
     run_in_main_thread(|| {
         let r = decode_fixture("banner_http.png");
-        assert_eq!(r.error_code, 0);
+        assert_eq!(
+            r.error_code, 0,
+            "glycin decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?}). error_code 2 = UnsupportedFormat, \
+             which the decoder also returns for any glycin loader error \
+             (e.g. no loader installed for the format / loader API mismatch \
+             — glycin's message names the config it searched).",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
         assert!(r.has_texture);
         assert!(!r.has_frames, "PNG is static; no frames array expected");
         assert!(r.width > 0 && r.height > 0);
@@ -190,13 +285,20 @@ fn png_fixture_decodes() {
 
 #[test]
 fn jpeg_fixture_decodes() {
-    if !glycin_loaders_available() {
-        eprintln!("skipping: glycin loaders missing");
+    if !require_glycin() {
         return;
     }
     run_in_main_thread(|| {
         let r = decode_fixture("banner_htxf.jpg");
-        assert_eq!(r.error_code, 0);
+        assert_eq!(
+            r.error_code, 0,
+            "glycin decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?}). error_code 2 = UnsupportedFormat, \
+             which the decoder also returns for any glycin loader error \
+             (e.g. no loader installed for the format / loader API mismatch \
+             — glycin's message names the config it searched).",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
         assert!(r.has_texture);
         assert!(!r.has_frames);
         assert!(r.width > 0 && r.height > 0);
@@ -206,8 +308,7 @@ fn jpeg_fixture_decodes() {
 
 #[test]
 fn gif_fixture_decodes() {
-    if !glycin_loaders_available() {
-        eprintln!("skipping: glycin loaders missing");
+    if !require_glycin() {
         return;
     }
     // The shipped GIF fixture is a single-frame static — it
@@ -218,7 +319,15 @@ fn gif_fixture_decodes() {
     // against Janus.
     run_in_main_thread(|| {
         let r = decode_fixture("banner_htxf.gif");
-        assert_eq!(r.error_code, 0);
+        assert_eq!(
+            r.error_code, 0,
+            "glycin decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?}). error_code 2 = UnsupportedFormat, \
+             which the decoder also returns for any glycin loader error \
+             (e.g. no loader installed for the format / loader API mismatch \
+             — glycin's message names the config it searched).",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
         assert!(r.has_texture);
         assert!(r.width > 0 && r.height > 0);
         assert_eq!(r.mime.as_deref(), Some("image/gif"));

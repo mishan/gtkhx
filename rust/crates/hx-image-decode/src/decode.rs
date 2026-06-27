@@ -31,9 +31,13 @@
 //!
 //! Sandboxing: glycin defaults to `SandboxSelector::Auto` — picks
 //! bwrap on the host, flatpak-spawn when we're inside a Flatpak
-//! sandbox, plain fork on systems without bwrap. We don't
-//! override; the auto choice is what every other glycin consumer
-//! (Loupe, Image Viewer) ships with.
+//! sandbox. We keep Auto in production (the choice every other glycin
+//! consumer — Loupe, Image Viewer — ships with) so server-supplied
+//! images stay sandboxed. The one override: when
+//! `GTKHX_GLYCIN_NO_SANDBOX` is set we select `NotSandboxed`, for CI /
+//! test environments where bwrap can't run (an unprivileged container
+//! has no usable user namespaces). glycin 3.x exposes no env knob for
+//! this — the selector is API-only — so the override lives here.
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -242,9 +246,18 @@ pub(crate) fn decode_async(
                     bytes_len,
                 );
             }
-            Err(GlycinErr { code, message }) => {
+            Err(GlycinErr {
+                code,
+                message,
+                detail,
+            }) => {
                 decoded_set_error(result, code, message, sniffed);
-                log_decode_failed(sniffed, message, started.elapsed());
+                // Telemetry takes glycin's full error text when present
+                // (its "Used config" dump names the loader dirs + API
+                // version it searched — the diagnosis for a "no loader
+                // for this format" failure); else the static category.
+                let reason = detail.as_deref().unwrap_or(message);
+                log_decode_failed(sniffed, reason, started.elapsed());
             }
         }
 
@@ -281,6 +294,14 @@ enum DecodeOk {
 struct GlycinErr {
     code: u16,
     message: &'static str,
+    /// Glycin's own error text (its `ErrorCtx` Display), when the
+    /// failure came from glycin rather than our own cap checks. Carries
+    /// the detail the `'static` `message` can't — including glycin's
+    /// "Used config" dump (the loader dirs + API version it searched),
+    /// which is exactly what's needed to diagnose a "no loader for this
+    /// format" failure. Routed to the telemetry / debug log only; the
+    /// wire-facing `message` stays the static category.
+    detail: Option<String>,
 }
 
 async fn run_glycin_decode(
@@ -293,20 +314,29 @@ async fn run_glycin_decode(
 ) -> Result<DecodeOk, GlycinErr> {
     // glycin::Loader::new_bytes is the GLib-Bytes-in entry point;
     // glycin keeps a ref + passes the buffer to the subprocess via
-    // memfd. The default sandbox selector picks bwrap on the host
-    // and flatpak-spawn inside a Flatpak runtime — we don't
-    // override.
-    let image = glycin::Loader::new_bytes(gbytes)
+    // memfd. The default sandbox selector (Auto) picks bwrap on the
+    // host and flatpak-spawn inside a Flatpak runtime.
+    let mut loader = glycin::Loader::new_bytes(gbytes);
+    // Test/CI escape hatch: glycin 3.x has no env knob for the sandbox
+    // (the selector is API-only), and its Auto choice runs each loader
+    // under bwrap — which an unprivileged CI container can't spawn, so
+    // the decode fails and maps to UnsupportedFormat. The decode test
+    // fixtures are trusted in-tree images, so GTKHX_GLYCIN_NO_SANDBOX=1
+    // forces the unsandboxed loader path. Unset in production, so
+    // server-supplied images keep the Auto sandbox.
+    if std::env::var_os("GTKHX_GLYCIN_NO_SANDBOX").is_some() {
+        loader.sandbox_selector(glycin::SandboxSelector::NotSandboxed);
+    }
+    let image = loader
         .load()
         .await
         .map_err(|ctx| GlycinErr {
             code: MEDIA_ERR_UNSUPPORTED,
-            // Glycin's ErrorCtx is descriptive in debug logs but
-            // we can't borrow it as 'static. The category is
-            // what matters at the wire level; the formatted
-            // message goes to debug_log via the telemetry path,
-            // which holds its own buffer.
+            // The category is what matters at the wire level; glycin's
+            // full ErrorCtx (descriptive, but not 'static) rides the
+            // `detail` field to the telemetry / debug log.
             message: glycin_err_category(&ctx),
+            detail: Some(format!("{ctx}")),
         })?;
 
     // Dimension cap: glycin parsed the header during load();
@@ -322,18 +352,21 @@ async fn run_glycin_decode(
         return Err(GlycinErr {
             code: MEDIA_ERR_UNSUPPORTED,
             message: "decoder reported zero-dimension image",
+            detail: None,
         });
     }
     if w > max_dimension || h > max_dimension {
         return Err(GlycinErr {
             code: MEDIA_ERR_TOO_LARGE,
             message: "image dimension exceeds cap",
+            detail: None,
         });
     }
     if (w as u64) * (h as u64) > max_pixels as u64 {
         return Err(GlycinErr {
             code: MEDIA_ERR_TOO_LARGE,
             message: "image pixel count exceeds cap",
+            detail: None,
         });
     }
 
@@ -345,6 +378,7 @@ async fn run_glycin_decode(
     let first = image.next_frame().await.map_err(|ctx| GlycinErr {
         code: MEDIA_ERR_UNSUPPORTED,
         message: glycin_err_category(&ctx),
+        detail: Some(format!("{ctx}")),
     })?;
     let first_delay = first.delay();
     let first_tex = first.texture();

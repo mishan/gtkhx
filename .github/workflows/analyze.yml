@@ -49,7 +49,7 @@ jobs:
     name: ASan + UBSan (unit + proto)
     runs-on: ubuntu-latest
     container:
-      image: fedora:42
+      image: fedora:43
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -129,7 +129,7 @@ jobs:
     name: GCC -fanalyzer
     runs-on: ubuntu-latest
     container:
-      image: fedora:42
+      image: fedora:43
     continue-on-error: true
     steps:
       - name: checkout
@@ -195,7 +195,7 @@ jobs:
     name: clang-tidy
     runs-on: ubuntu-latest
     container:
-      image: fedora:42
+      image: fedora:43
     continue-on-error: true
     steps:
       - name: checkout
