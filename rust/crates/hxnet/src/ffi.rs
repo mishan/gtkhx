@@ -2908,3 +2908,282 @@ unsafe impl Send for SendStateCallback {}
 // FFI growth (e.g. user_data parameters on callback variants).
 #[allow(dead_code)]
 fn _silence_unused_c_void(_p: *mut c_void) {}
+
+// ===================================================================
+// Tracker fetch FFI (R3 item 8, T2)
+// ===================================================================
+//
+// The C bridge (network.c::hx_tracker_list_async) opens a walk with a
+// list of tracker URLs, then drains events on the GLib main loop via a
+// timeout source, re-emitting the existing tracker-batch-begin /
+// tracker-server-create signals. Mirrors the hxnet_connection_*_polling
+// handle/drain shape: spawn run_fetch on the global runtime, keep the
+// event receiver for poll, drop + abort on close.
+
+use crate::tracker_fetch::{
+    run_fetch, TcpTlsConnector, TrackerEvent, VerdictCache, VerifyFn,
+};
+
+/// Opaque handle for an in-flight tracker fetch walk. Created by
+/// [`hxnet_tracker_fetch_open`], drained by [`hxnet_tracker_fetch_poll`],
+/// freed by [`hxnet_tracker_fetch_close`].
+pub struct HxnetTrackerFetch {
+    events: mpsc::Receiver<TrackerEvent>,
+    join: JoinHandle<()>,
+    /// Backing store for the borrowed pointers handed out by the last
+    /// poll. Replaced on the next poll (invalidating the prior
+    /// pointers) and dropped on close.
+    current: Option<TrackerEvent>,
+}
+
+/// `kind` discriminants in [`HxnetTrackerEvent`]. Mirrored by the C
+/// bridge (hand-synced, like the HXNET_STATE_* constants).
+pub const HXNET_TRK_KIND_BEGIN: u32 = 0;
+pub const HXNET_TRK_KIND_RECORD: u32 = 1;
+pub const HXNET_TRK_KIND_ERROR: u32 = 2;
+pub const HXNET_TRK_KIND_DONE: u32 = 3;
+
+/// [`hxnet_tracker_fetch_poll`] return codes.
+pub const HXNET_TRK_POLL_EMPTY: c_int = 0;
+pub const HXNET_TRK_POLL_EVENT: c_int = 1;
+pub const HXNET_TRK_POLL_CLOSED: c_int = -1;
+
+/// Plain-old-data view of one [`TrackerEvent`], filled by
+/// [`hxnet_tracker_fetch_poll`]. Pointer fields BORROW the handle's
+/// `current` event and are valid only until the next `poll` or `close`
+/// on that handle; the C side copies what it needs immediately (it
+/// builds an `HxTrackerServer` whose constructor g_strndups the text).
+/// Unused fields for a given `kind` are zeroed / NULL.
+#[repr(C)]
+pub struct HxnetTrackerEvent {
+    pub kind: u32,
+    /// BEGIN: record-path version (1 or 3).
+    pub version: u8,
+    /// RECORD: address type (0x04 / 0x06 / 0x48).
+    pub addr_type: u8,
+    /// BEGIN: record count for the batch.
+    pub count: u16,
+    /// RECORD: batch total (== the batch's BEGIN count).
+    pub total: u16,
+    /// RECORD: TCP port.
+    pub port: u16,
+    /// RECORD: user count.
+    pub nusers: u16,
+    /// RECORD: number of TLV entries in `tlv_*`.
+    pub tlv_count: u16,
+    /// BEGIN / RECORD / ERROR: tracker URL.
+    pub url_ptr: *const u8,
+    pub url_len: usize,
+    /// RECORD: address bytes (IPv4 = 4, IPv6 = 16, hostname = UTF-8).
+    pub address_ptr: *const u8,
+    pub address_len: usize,
+    /// RECORD: server name (MacRoman wire bytes, already normalised).
+    pub name_ptr: *const u8,
+    pub name_len: usize,
+    /// RECORD: server description.
+    pub desc_ptr: *const u8,
+    pub desc_len: usize,
+    /// RECORD: raw v3 TLV blob (empty for v1).
+    pub tlv_ptr: *const u8,
+    pub tlv_len: usize,
+    /// ERROR: human-readable failure message.
+    pub message_ptr: *const u8,
+    pub message_len: usize,
+}
+
+// Pin the cross-language ABI layout from the Rust side, same discipline
+// as HxnetFrame. The fixed scalar prefix is 16 bytes; the pointer pairs
+// start at the pointer alignment boundary (16 on 64-bit). The C bridge
+// mirrors this with _Static_assert when slice 2 lands.
+const _: () = {
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, kind) == 0);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, version) == 4);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, addr_type) == 5);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, count) == 6);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, total) == 8);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, port) == 10);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, nusers) == 12);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, tlv_count) == 14);
+    // url_ptr is the first pointer; it follows the 16-byte scalar prefix
+    // at the pointer alignment boundary (no extra padding needed since
+    // 16 is already a multiple of 8 / 4).
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, url_ptr) == 16);
+    assert!(std::mem::align_of::<HxnetTrackerEvent>() == std::mem::align_of::<*const u8>());
+};
+
+/// Fill `out` from `ev`, borrowing `ev`'s buffers. `out` must be
+/// non-NULL. Unused fields are zeroed.
+unsafe fn fill_tracker_event(out: *mut HxnetTrackerEvent, ev: &TrackerEvent) {
+    // Start from an all-zero struct so every unused field is NULL / 0.
+    std::ptr::write_bytes(out, 0, 1);
+    let o = &mut *out;
+    match ev {
+        TrackerEvent::BatchBegin { url, version, count } => {
+            o.kind = HXNET_TRK_KIND_BEGIN;
+            o.version = *version;
+            o.count = *count;
+            o.url_ptr = url.as_ptr();
+            o.url_len = url.len();
+        }
+        TrackerEvent::Record { url, total, record } => {
+            o.kind = HXNET_TRK_KIND_RECORD;
+            o.total = *total;
+            o.addr_type = record.addr_type;
+            o.port = record.port;
+            o.nusers = record.nusers;
+            o.tlv_count = record.tlv_count;
+            o.url_ptr = url.as_ptr();
+            o.url_len = url.len();
+            o.address_ptr = record.address.as_ptr();
+            o.address_len = record.address.len();
+            o.name_ptr = record.name.as_ptr();
+            o.name_len = record.name.len();
+            o.desc_ptr = record.desc.as_ptr();
+            o.desc_len = record.desc.len();
+            o.tlv_ptr = record.tlv_bytes.as_ptr();
+            o.tlv_len = record.tlv_bytes.len();
+        }
+        TrackerEvent::BatchError { url, message } => {
+            o.kind = HXNET_TRK_KIND_ERROR;
+            o.url_ptr = url.as_ptr();
+            o.url_len = url.len();
+            o.message_ptr = message.as_ptr();
+            o.message_len = message.len();
+        }
+        TrackerEvent::Done => {
+            o.kind = HXNET_TRK_KIND_DONE;
+        }
+    }
+}
+
+/// Open a tracker fetch walk over `n` NUL-terminated URL strings
+/// (`host` or `host:port`; default port 5498). `features` is the v3
+/// handshake feature bitmask, `probe_ms` the v3-probe watchdog in
+/// milliseconds. `verify_cert` (with `user_data`) is the TOFU trust
+/// check consulted for non-WebPKI TLS certs; NULL accepts any
+/// non-WebPKI cert (probe/test use only).
+///
+/// Returns an owned handle (free with [`hxnet_tracker_fetch_close`]) or
+/// NULL on bad arguments.
+///
+/// # Safety
+///
+/// `urls` must point at `n` readable `*const c_char`, each a valid
+/// NUL-terminated UTF-8 string living for the duration of this call.
+/// `user_data` must outlive the returned handle.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_tracker_fetch_open(
+    urls: *const *const std::os::raw::c_char,
+    n: usize,
+    features: u16,
+    probe_ms: u32,
+    verify_cert: HxnetVerifyCertCallback,
+    user_data: *mut c_void,
+) -> *mut HxnetTrackerFetch {
+    if urls.is_null() && n != 0 {
+        glib::g_critical!("hxnet", "hxnet_tracker_fetch_open: NULL urls with n != 0");
+        return std::ptr::null_mut();
+    }
+
+    let mut url_vec: Vec<String> = Vec::with_capacity(n);
+    for i in 0..n {
+        let p = *urls.add(i);
+        if p.is_null() {
+            glib::g_critical!("hxnet", "hxnet_tracker_fetch_open: NULL url at index {}", i);
+            return std::ptr::null_mut();
+        }
+        match std::ffi::CStr::from_ptr(p).to_str() {
+            Ok(s) => url_vec.push(s.to_owned()),
+            Err(_) => {
+                glib::g_critical!(
+                    "hxnet",
+                    "hxnet_tracker_fetch_open: url at index {} is not valid UTF-8",
+                    i
+                );
+                return std::ptr::null_mut();
+            }
+        }
+    }
+
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_tracker_fetch_open: Runtime::global panicked; aborting"
+            );
+            std::process::abort();
+        }
+    };
+
+    let verify: Option<VerifyFn> = verify_cert.map(|cb| {
+        let ud = SendUserData(user_data);
+        let boxed: VerifyFn = Box::new(move |fp: &str| {
+            let ud = &ud;
+            unsafe { cb(fp.as_ptr(), fp.len(), ud.0) != 0 }
+        });
+        boxed
+    });
+
+    let probe_timeout = std::time::Duration::from_millis(probe_ms as u64);
+    let (tx, rx) = mpsc::channel::<TrackerEvent>(64);
+    let join = rt.handle().spawn(async move {
+        let mut connector = TcpTlsConnector { verify };
+        let mut verdicts = VerdictCache::new();
+        run_fetch(&mut connector, &url_vec, features, probe_timeout, &mut verdicts, &tx).await;
+    });
+
+    Box::into_raw(Box::new(HxnetTrackerFetch {
+        events: rx,
+        join,
+        current: None,
+    }))
+}
+
+/// Drain one event into `out`. Returns [`HXNET_TRK_POLL_EVENT`] (a new
+/// event was written, its borrowed pointers valid until the next poll /
+/// close), [`HXNET_TRK_POLL_EMPTY`] (nothing ready now — try again),
+/// or [`HXNET_TRK_POLL_CLOSED`] (the walk task finished and the channel
+/// is drained — stop polling and close the handle).
+///
+/// # Safety
+///
+/// `handle` must be a live pointer from [`hxnet_tracker_fetch_open`] and
+/// `out` must point at a writable [`HxnetTrackerEvent`].
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_tracker_fetch_poll(
+    handle: *mut HxnetTrackerFetch,
+    out: *mut HxnetTrackerEvent,
+) -> c_int {
+    if handle.is_null() || out.is_null() {
+        return HXNET_TRK_POLL_CLOSED;
+    }
+    let h = &mut *handle;
+    match h.events.try_recv() {
+        Ok(ev) => {
+            h.current = Some(ev);
+            fill_tracker_event(out, h.current.as_ref().unwrap());
+            HXNET_TRK_POLL_EVENT
+        }
+        Err(mpsc::error::TryRecvError::Empty) => HXNET_TRK_POLL_EMPTY,
+        Err(mpsc::error::TryRecvError::Disconnected) => HXNET_TRK_POLL_CLOSED,
+    }
+}
+
+/// Cancel (if still running) and free a tracker fetch handle. NULL-safe.
+/// Aborts the walk task and drops the receiver, which also wakes the
+/// task if it's parked on a send.
+///
+/// # Safety
+///
+/// `handle` must be NULL or a live pointer from
+/// [`hxnet_tracker_fetch_open`], not used afterwards.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_tracker_fetch_close(handle: *mut HxnetTrackerFetch) {
+    if handle.is_null() {
+        return;
+    }
+    let h = Box::from_raw(handle);
+    h.join.abort();
+    drop(h);
+}
