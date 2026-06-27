@@ -963,10 +963,18 @@ mod tests {
 
     #[tokio::test]
     async fn truncated_v1_record_is_short_read() {
-        // Header promises 1 server but the stream ends mid-record.
+        // Header promises 1 server but the stream ends mid-record. Use
+        // with_closing_server: the server drops after the partial bytes
+        // so the engine's read_exact sees EOF (→ ShortRead). with_server
+        // would instead hold the connection open, leaving the engine
+        // blocked forever waiting for the 2 missing bytes (the hang that
+        // showed up as a CI timeout).
         let mut script = v1_header(1);
         script.extend_from_slice(&[1, 2, 3, 4, 0x15, 0x7c]); // only 6 of the 8 head bytes
-        let err = with_server(&v1_client_magic(), script, |mut c| async move { run_v1(&mut c).await })
+        let err =
+            with_closing_server(&v1_client_magic(), script, |mut c| async move {
+                run_v1(&mut c).await
+            })
             .await
             .unwrap_err();
         assert!(matches!(err, TrackerError::ShortRead));
