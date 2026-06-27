@@ -54,8 +54,31 @@ htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len)
         errno = EINVAL;
         return -1;
     }
+    /* Cooperative-cancel boundary (Phase R3 X1). Checking htxf->canceled
+     * here makes every worker read site across all four xfers.c workers
+     * observe a cancel without each loop needing its own check — the
+     * loops already bail on a `< 1` return. The hxnet abort token
+     * (htxf_io_abort) handles the orthogonal case of a read already
+     * parked in recv(); this catches a cancel that lands between reads.
+     * Banner's transient htxf has canceled == 0, so this is a no-op there.
+     *
+     * htxf->canceled is written by the main thread (xfer_delete /
+     * xfers_delete_all) and read here on the worker thread, so every
+     * access goes through g_atomic_int_* to avoid a data race. */
+    if (g_atomic_int_get (&htxf->canceled)) {
+        errno = ECANCELED;
+        return -1;
+    }
     ssize_t r = hxnet_htxf_read ((HtxfConn *) htxf->hx, (guint8 *) buf, len);
     if (r < 0) {
+        /* A cancel may have landed while we were parked inside the hxnet
+         * read (the abort token shut the socket down to wake us). Re-check
+         * so an abort-driven wakeup reads back as ECANCELED rather than a
+         * spurious EIO "channel error" the worker would log as a fault. */
+        if (g_atomic_int_get (&htxf->canceled)) {
+            errno = ECANCELED;
+            return -1;
+        }
         debug_log ("xfer", "htxf_io_read: hxnet channel error");
         errno = EIO;
         return -1;
@@ -70,9 +93,21 @@ htxf_io_write (struct htxf_conn *htxf, const void *buf, size_t len)
         errno = EINVAL;
         return -1;
     }
+    /* Cooperative-cancel boundary — see htxf_io_read (atomic access to
+     * the cross-thread canceled flag, same rationale). */
+    if (g_atomic_int_get (&htxf->canceled)) {
+        errno = ECANCELED;
+        return -1;
+    }
     ssize_t w
         = hxnet_htxf_write ((HtxfConn *) htxf->hx, (const guint8 *) buf, len);
     if (w < 0) {
+        /* An abort-driven wakeup mid-write classifies as cancel, not a
+         * channel fault — see htxf_io_read. */
+        if (g_atomic_int_get (&htxf->canceled)) {
+            errno = ECANCELED;
+            return -1;
+        }
         debug_log ("xfer", "htxf_io_write: hxnet channel error");
         errno = EIO;
         return -1;
@@ -96,4 +131,43 @@ htxf_io_set_read_timeout (struct htxf_conn *htxf, guint32 timeout_ms)
         return -1;
     }
     return 0;
+}
+
+/* ---- Cancellation token (Phase R3 X1) ------------------------------ */
+
+void
+htxf_io_abort_init (struct htxf_conn *htxf)
+{
+    if (!htxf || htxf->abort) {
+        return;
+    }
+    htxf->abort = (void *) hxnet_htxf_abort_new ();
+}
+
+void
+htxf_io_abort_arm (struct htxf_conn *htxf)
+{
+    if (!htxf || !htxf->hx || !htxf->abort) {
+        return;
+    }
+    hxnet_htxf_abort_arm ((HtxfConn *) htxf->hx, (const HtxfAbort *) htxf->abort);
+}
+
+void
+htxf_io_abort (struct htxf_conn *htxf)
+{
+    if (!htxf || !htxf->abort) {
+        return;
+    }
+    hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
+}
+
+void
+htxf_io_abort_free (struct htxf_conn *htxf)
+{
+    if (!htxf || !htxf->abort) {
+        return;
+    }
+    hxnet_htxf_abort_free ((const HtxfAbort *) htxf->abort);
+    htxf->abort = NULL;
 }
