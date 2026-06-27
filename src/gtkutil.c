@@ -28,7 +28,6 @@
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <time.h>
-#include <pthread.h>
 #include "hx.h"
 #include "news.h"
 #include "network.h"

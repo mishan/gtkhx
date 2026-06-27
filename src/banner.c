@@ -58,9 +58,9 @@ struct task;
 extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv,
                               void *ptr, void *data, const char *str);
 
-/* Phase R3.2: tokio-blocking-pool replacement for the pthread + idle
- * pair this worker used to run on. Implementation lives in the
- * `hxbridge::blocking` module (rust/crates/hxbridge/src/blocking.rs);
+/* Phase R3.2: runs the HTXF fetch on tokio's blocking pool, posting
+ * the completion back to the GLib main loop. Implementation lives in
+ * the `hxbridge::blocking` module (rust/crates/hxbridge/src/blocking.rs);
  * the worker callback runs on tokio's dedicated blocking pool, the
  * completion runs on whatever GMainContext was thread-default at
  * the call site — which in production is the GLib main context the
@@ -543,7 +543,7 @@ on_soup_send_done (GObject *source, GAsyncResult *result, gpointer user_data)
  * (reconnect, banner_clear, new banner). The worker itself can't
  * be interrupted mid-read (GIO blocking calls inside a tokio
  * spawn_blocking task — the same constraint POSIX blocking
- * sockets put on the legacy pthread path), but it always
+ * sockets impose on any blocking worker), but it always
  * finishes within seconds — banner data is small (a few KB to
  * ~50 KB in practice). The R3.3 hxnet rewrite that swaps GIO
  * for tokio::net::TcpStream is what eventually gives us a real

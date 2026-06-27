@@ -252,18 +252,16 @@ close_tracker_window (GtkWindow *window, gpointer data)
     return FALSE;
 }
 
-/* the pthread_t / SIGUSR1 /
- * pthread_kill / pthread_join dance that used to live here is gone.
- * The tracker fetch now runs on the main loop via GSocketClient +
+/* The tracker fetch runs on the main loop via GSocketClient +
  * GInputStream async; cancellation is a g_cancellable_cancel against
  * a GCancellable held inside network.c's tracker_run_ctx.
  * tracker_kill_threads() in network.c trips that cancellation; the
  * in-flight async callback unwinds cleanly.
  *
- * Net effect: no thread to spawn, no signal handler, no joinable
- * handle to manage, and the UAF that the old (Phase 5) code spent
- * a paragraph defending against (track_tid pointing at freed
- * libpthread state) is structurally impossible. */
+ * Net effect: no worker thread to spawn, no signal handler, no
+ * joinable handle to manage, and the cancel-after-free UAF the old
+ * (Phase 5) design spent a paragraph defending against is
+ * structurally impossible. */
 
 static void
 tracker_getlist (GtkWidget *widget, gpointer data)

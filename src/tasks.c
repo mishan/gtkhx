@@ -711,10 +711,10 @@ task_stop (GtkWidget *widget, gpointer data)
 			 * pointer to NULL the moment the htxf leaves the
 			 * live xfers[] list, before any unref that might
 			 * free the slab. A pre-signal cancel-after-hang
-			 * crash (pthread_cancel called with poison tid
-			 * after the worker exited) lives in the git
-			 * history as a defensive xfers[]-scan in this
-			 * spot; the signal-based clear obsoletes it. */
+			 * crash (cancelling a worker that had already
+			 * exited) lives in the git history as a defensive
+			 * xfers[]-scan in this spot; the signal-based clear
+			 * obsoletes it. */
             xfer_delete (gtsk->htxf);
             gtask_delete (sess, gtsk);
         } else if (gtsk->trans == (guint32)-127

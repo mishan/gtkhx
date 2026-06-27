@@ -11,7 +11,7 @@
  * src/banner_dispatch.h — pure helpers carved out of banner.c so
  * tests/proto/test_banner_dispatch.c can pin the URL-vs-file mode
  * dispatch and the HTXF reply sanity checks without dragging in the
- * GTK widget / libsoup / pthread side of banner.c.
+ * GTK widget / libsoup / HTXF-worker side of banner.c.
  *
  * Both helpers were inlined in banner_handle_message / banner_handle
  * _htxf_reply previously. They each cover a decision the protocol

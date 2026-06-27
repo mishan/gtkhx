@@ -10,7 +10,7 @@
 /*
  * src/banner_dispatch.c — pure dispatch helpers carved out of
  * banner.c so the Tier 2 test suite can drive them without
- * dragging in GtkPicture / libsoup / pthread. See banner_dispatch.h
+ * dragging in GtkPicture / libsoup / the HTXF worker. See banner_dispatch.h
  * for the contract; behaviour is byte-for-byte identical to the
  * inline versions in banner_handle_message + banner_handle_htxf
  * _reply.
