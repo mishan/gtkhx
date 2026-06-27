@@ -141,19 +141,12 @@ fontconfig_dep = dependency('fontconfig', version : '>= 2.13')
 libseccomp_dep = dependency('libseccomp', version : '>= 2.5')
 lcms2_dep      = dependency('lcms2',      version : '>= 2.14')
 
-# Phase 5: libsoup-3 powers the URL-mode banner fetcher in banner.c.
-# Modern Hotline servers can advertise a banner via HTLS_HDR_BANNER as
-# either an http(s) URL (URL-mode) or as bytes pulled over the HTXF
-# subchannel (file-mode). Both modes display in the toolbar's banner
-# row; URL-mode needs an HTTP client to actually retrieve the bytes.
-#
-# Optional: when libsoup-3 isn't on the build host, banner.c falls
-# back to a click-to-open caption for URL-mode banners — the URL is
-# shown as a clickable line that opens in the user's default browser.
-# File-mode (HTXF) is unaffected. The HAVE_LIBSOUP define gates the
-# fetch / decode code path inside banner.c.
-soup_dep = dependency('libsoup-3.0', version : '>= 3.0',
-                      required : false)
+# R3 item 5 (June 2026): the URL-mode banner fetcher moved off
+# libsoup-3 to a Rust hxnet banner fetch (a blocking ureq GET on the
+# tokio blocking pool — see rust/crates/hxnet/src/banner_http.rs and
+# banner.c). The HTTP client now rides the hxnet staticlib the binary
+# already links, so libsoup is no longer a dependency and URL-mode is
+# unconditional (no HAVE_LIBSOUP gate / click-to-open fallback).
 
 # Phase 5+: optional preview viewers driven by the type-aware
 # dispatcher in src/preview.c.
@@ -213,7 +206,6 @@ deps = [
   gstreamer_audio_dep,
   gstreamer_sdp_dep,
   gstreamer_webrtc_dep,
-  soup_dep,
   poppler_dep,
   sourceview_dep,
   imagemagick_dep,
@@ -366,7 +358,6 @@ summary(
     'GSound'        : gsound_dep.version(),
     'libadwaita'    : adw_dep.version(),
     'libpanel'      : panel_dep.version(),
-    'libsoup-3.0'   : soup_dep.found()       ? soup_dep.version()       : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
     'ImageMagick'   : imagemagick_dep.found() ? imagemagick_dep.version() : 'no',

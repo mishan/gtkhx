@@ -102,6 +102,11 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 # known-hosts gate). 0.7 is the rustls-0.23 / pki-types-1.x line and
 # builds on the workspace's rustc-1.85 floor.
 rustls-native-certs = "0.7"
+# R3 item 5: banner URL-mode fetch. A small blocking GET run on the
+# tokio blocking pool (the file-mode HTXF banner's spawn_blocking
+# shape), so a sync client fits. default-features off drops gzip +
+# native-tls; `tls` selects ureq's rustls backend (webpki roots).
+ureq = { version = "2.12", default-features = false, features = ["tls"] }
 
 [dev-dependencies]
 # `#[tokio::test]` + `tokio::io::duplex` for in-memory paired

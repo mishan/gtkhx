@@ -60,6 +60,7 @@
 //!
 //! See [`Connection`] for the API entry points.
 
+pub mod banner_http;
 pub mod cipher;
 pub mod command;
 pub mod compress;

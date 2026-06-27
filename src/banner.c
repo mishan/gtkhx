@@ -8,15 +8,18 @@
  *     window (a GtkPicture wrapped in a clickable area, with a
  *     dim "Server banner" caption that doubles as a fallback when
  *     the image can't be fetched / decoded).
- *   - The URL-mode fetch state machine: libsoup-3 async GET, then
- *     async decode via the glycin loader (the same sandboxed
- *     subprocess pipeline the inline-media path uses), then
- *     `gtk_picture_set_paintable` with the resulting
- *     `GdkTexture`. Cancellable on `banner_clear` (both the
- *     libsoup fetch and the in-flight glycin decode).
- *   - The HTXF-mode fetch will land in a follow-up commit; for
- *     now the file-mode banner shows the type-only caption and
- *     does NOT issue HTLC_HDR_BANNER_GET yet.
+ *   - The URL-mode fetch state machine: a Rust hxnet banner fetch
+ *     (a blocking ureq GET on the tokio blocking pool, R3 item 5),
+ *     drained on a main-loop timeout, then async decode via the
+ *     glycin loader (the same sandboxed subprocess pipeline the
+ *     inline-media path uses), then `gtk_picture_set_paintable` with
+ *     the resulting `GdkTexture`. Cancellable on `banner_clear` (both
+ *     the fetch handle and the in-flight glycin decode).
+ *   - The HTXF (file-mode) fetch: banner_handle_message issues
+ *     HTLC_HDR_DOWNLOAD_BANNER, and banner_handle_htxf_reply runs the
+ *     download on the tokio blocking pool (hxnet_htxf_open) before
+ *     handing the bytes to the same glycin decode helper. A
+ *     fetch-generation counter drops stale results on banner_clear.
  *
  * Released under GPL-2.0-or-later. See COPYING.
  */
@@ -26,9 +29,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <gtk/gtk.h>
-#ifdef HAVE_LIBSOUP
-#include <libsoup/soup.h>
-#endif
 #include "compat.h"
 #include "debug.h"
 #include "hotline.h"
@@ -40,6 +40,7 @@
 #include "htxf_subchannel.h"
 #include "banner.h"
 #include "banner_dispatch.h"
+#include "banner_http_ffi.h"
 /* Glycin migration (June 2026): banner decode used to call
  * gdk_pixbuf_new_from_stream directly, then promote to a
  * GdkTexture via the deprecated gdk_texture_new_for_pixbuf.
@@ -85,10 +86,11 @@ extern void gtkhx_bridge_spawn_blocking_with_idle (
 static GtkWidget *banner_root = NULL;    /* outer GtkBox */
 static GtkWidget *banner_picture = NULL; /* GtkPicture */
 static GtkWidget *banner_caption = NULL; /* GtkLabel */
-#ifdef HAVE_LIBSOUP
-static SoupSession *soup_session = NULL;
-static GCancellable *fetch_cancel = NULL;
-#endif
+/* URL-mode fetch state (R3 item 5). The libsoup async GET became a Rust
+ * hxnet banner fetch (ureq on the tokio blocking pool); url_fetch is the
+ * in-flight handle, drained on a main-loop timeout. */
+static HxnetBannerFetch *url_fetch = NULL;
+static guint url_drain_source_id = 0;
 static char *current_url = NULL; /* for click-to-open */
 
 /* HTXF fetch state — single in-flight banner fetch tracked
@@ -149,11 +151,10 @@ static void banner_show_texture (GdkTexture *tex);
 static void banner_start_image_decode (const guint8 *bytes, gsize len);
 static void on_banner_decode_done (HxInlineMediaDecoded *decoded,
                                    gpointer user_data);
-#ifdef HAVE_LIBSOUP
 static void banner_start_url_fetch (const char *url);
-static void on_soup_send_done (GObject *source, GAsyncResult *result,
-                               gpointer user_data);
-#endif
+static void banner_url_fetch_close (void);
+static void banner_cancel_url_fetch (void);
+static gboolean banner_url_drain (gpointer user_data);
 static void on_banner_clicked (GtkGestureClick *gesture, int n_press, double x,
                                double y, gpointer user_data);
 
@@ -238,18 +239,16 @@ banner_handle_message (struct htlc_conn *htlc, const char *type,
 	 * normalisation. */
     if (hx_banner_type_is_url (type)) {
         if (has_url && url && *url) {
-            /* URL-mode: cache the URL for click-to-open. With
-			 * libsoup present we kick off an inline fetch and
-			 * swap in the decoded image when it lands; without
-			 * libsoup we leave the URL caption in place and
-			 * rely on the click handler to open the URL. */
+            /* URL-mode: cache the URL for click-to-open, then kick off
+			 * an inline fetch (hxnet/ureq) and swap in the decoded
+			 * image when it lands. The URL caption stays up until the
+			 * image arrives, and remains as the fallback if the fetch
+			 * fails. */
             g_free (current_url);
             current_url = g_strdup (url);
             gtk_widget_set_tooltip_text (banner_root, url);
             banner_show_caption (url);
-#ifdef HAVE_LIBSOUP
             banner_start_url_fetch (url);
-#endif
         } else {
             /* URL mode advertised but no URL chunk — server is
 			 * misconfigured. Show a friendly caption and bail. */
@@ -281,12 +280,14 @@ banner_handle_message (struct htlc_conn *htlc, const char *type,
 void
 banner_clear (void)
 {
-#ifdef HAVE_LIBSOUP
-    if (fetch_cancel) {
-        g_cancellable_cancel (fetch_cancel);
-        g_clear_object (&fetch_cancel);
-    }
-#endif
+    /* Cancel any in-flight URL-mode fetch: removes the drain timer and
+     * closes the hxnet handle. Closing aborts the async wrapper task and
+     * drops its result, but the underlying blocking ureq GET can't be
+     * interrupted mid-read — it runs to its read timeout on the blocking
+     * pool (bounded by the process-wide fetch semaphore). We just stop
+     * caring about its result. */
+    banner_cancel_url_fetch ();
+
     /* Bump the HTXF fetch generation so any in-flight file-mode
 	 * worker'"'"'s completion idle (when it eventually fires) sees a
 	 * mismatch and silently drops its result. */
@@ -430,95 +431,94 @@ on_banner_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
     inline_media_decoded_free (decoded);
 }
 
-/* libsoup async fetch ----------------------------------------------- */
+/* URL-mode fetch (hxnet/ureq) --------------------------------------- *
+ *
+ * banner_start_url_fetch opens a Rust banner fetch (a blocking ureq GET
+ * on the tokio blocking pool) and drains its one-shot result on a
+ * main-loop timeout. On success the bytes go to the shared glycin decode
+ * helper; on failure the URL caption already shown stays as the
+ * fallback. banner_clear / a new banner cancel via
+ * banner_cancel_url_fetch. */
 
-#ifdef HAVE_LIBSOUP
-static SoupSession *
-ensure_session (void)
+static void
+banner_url_fetch_close (void)
 {
-    if (!soup_session) {
-        soup_session = soup_session_new ();
-        /* Sensible defaults; we don't need persistent cookies or
-		 * other per-app session state for banner fetches. */
-        soup_session_set_user_agent (soup_session, "GtkHx/Phase5 ");
-        soup_session_set_timeout (soup_session, 10);
-        soup_session_set_idle_timeout (soup_session, 20);
+    if (url_fetch) {
+        hxnet_banner_fetch_close (url_fetch);
+        url_fetch = NULL;
     }
-    return soup_session;
+}
+
+static void
+banner_cancel_url_fetch (void)
+{
+    if (url_drain_source_id) {
+        g_source_remove (url_drain_source_id);
+        url_drain_source_id = 0;
+    }
+    banner_url_fetch_close ();
+}
+
+static gboolean
+banner_url_drain (gpointer user_data G_GNUC_UNUSED)
+{
+    HxnetBannerOut out;
+    int rc = hxnet_banner_fetch_poll (url_fetch, &out);
+
+    if (rc == HXNET_BANNER_PENDING) {
+        return G_SOURCE_CONTINUE;
+    }
+
+    if (rc == HXNET_BANNER_DONE) {
+        if (out.bytes_ptr && out.bytes_len) {
+            /* The decode helper copies the bytes synchronously, so it's
+             * safe to close (free) the handle right after. */
+            banner_start_image_decode (out.bytes_ptr, out.bytes_len);
+        } else {
+            debug_log ("banner", "url fetch returned an empty body");
+            banner_show_caption (_ ("Server banner: empty response"));
+        }
+    } else { /* HXNET_BANNER_ERROR */
+        /* err_ptr is a borrowed, non-NUL-terminated buffer; the `%.*s`
+         * precision bounds the read. Clamp the gsize length to G_MAXINT
+         * first so the (int) cast can't truncate to a negative value (a
+         * negative precision would disable the limit and over-read). */
+        int msg_len = out.err_len > (gsize) G_MAXINT ? G_MAXINT
+                                                     : (int) out.err_len;
+        debug_log ("banner", "url fetch failed: %.*s", msg_len,
+                   out.err_ptr ? (const char *) out.err_ptr : "");
+        banner_show_caption (_ ("Server banner: fetch failed"));
+    }
+
+    /* One-shot: the source removes itself, so just clear our id and free
+     * the handle (don't g_source_remove from inside the callback). */
+    url_drain_source_id = 0;
+    banner_url_fetch_close ();
+    return G_SOURCE_REMOVE;
 }
 
 static void
 banner_start_url_fetch (const char *url)
 {
-    SoupMessage *msg;
-    GUri *uri;
-    GError *err = NULL;
+    /* Defensive: banner_clear already cancelled any prior fetch. */
+    banner_cancel_url_fetch ();
 
-    uri = g_uri_parse (url, G_URI_FLAGS_NONE, &err);
-    if (!uri) {
-        debug_log ("banner", "URL parse failed: %s", err ? err->message : "?");
-        g_clear_error (&err);
-        banner_show_caption (_ ("Server banner: URL is not parseable"));
+    url_fetch = hxnet_banner_fetch_open ((const guint8 *) url, strlen (url));
+    if (!url_fetch) {
+        /* Bad URL / argument — the caption (the URL itself) stays up. */
+        debug_log ("banner", "hxnet_banner_fetch_open rejected URL");
         return;
     }
-    msg = soup_message_new_from_uri ("GET", uri);
-    g_uri_unref (uri);
-
-    fetch_cancel = g_cancellable_new ();
-
-    soup_session_send_and_read_async (ensure_session (), msg,
-                                      G_PRIORITY_DEFAULT, fetch_cancel,
-                                      on_soup_send_done, msg);
+    /* 50 ms drain — the fetch lands quickly for a small banner image. */
+    url_drain_source_id = g_timeout_add (50, banner_url_drain, NULL);
+    if (url_drain_source_id == 0) {
+        /* Couldn't arm the drain (vanishingly rare). Don't leak the
+         * handle + its worker — close it now rather than wait for the
+         * next banner_clear. */
+        debug_log ("banner", "g_timeout_add failed; closing url fetch");
+        banner_url_fetch_close ();
+    }
 }
-
-static void
-on_soup_send_done (GObject *source, GAsyncResult *result, gpointer user_data)
-{
-    SoupSession *session = SOUP_SESSION (source);
-    SoupMessage *msg = SOUP_MESSAGE (user_data);
-    GError *err = NULL;
-    GBytes *bytes;
-    guint status;
-    gsize data_len = 0;
-    const guint8 *data;
-
-    bytes = soup_session_send_and_read_finish (session, result, &err);
-
-    /* The cancellable was bound to this fetch; the next fetch
-	 * (or banner_clear) will create a new one. Clear our handle
-	 * so banner_clear's cancel-then-clear path doesn't try to
-	 * cancel a finished operation. */
-    g_clear_object (&fetch_cancel);
-
-    if (!bytes) {
-        debug_log ("banner", "soup fetch failed: %s", err ? err->message : "?");
-        if (err && !g_error_matches (err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
-            banner_show_caption (_ ("Server banner: fetch failed"));
-        }
-        g_clear_error (&err);
-        g_object_unref (msg);
-        return;
-    }
-
-    status = soup_message_get_status (msg);
-    if (status < 200 || status >= 300) {
-        debug_log ("banner", "soup fetch http %u", status);
-        banner_show_caption (_ ("Server banner: HTTP error"));
-        g_bytes_unref (bytes);
-        g_object_unref (msg);
-        return;
-    }
-
-    /* Hand the bytes off to glycin via the shared async decode
-	 * helper. `bytes` content is copied into the decoder's
-	 * internal glib::Bytes wrapper synchronously, so we can
-	 * unref the GBytes the moment the call returns. */
-    data = g_bytes_get_data (bytes, &data_len);
-    banner_start_image_decode (data, data_len);
-    g_bytes_unref (bytes);
-    g_object_unref (msg);
-}
-#endif /* HAVE_LIBSOUP — closes the #ifdef around banner_start_url_fetch */
 
 /* ------------------------------------------------------------------- *
  * HTXF (file-mode) fetch

@@ -128,15 +128,6 @@ conf.set('HAVE_STDLIB_H',   1)
 conf.set('HAVE_LIMITS_H',   1)
 conf.set('HAVE_LIBINTL_H',  1)
 
-# libsoup-3 is optional. When found, banner.c builds the URL-mode
-# fetcher that decodes server banners inline; without it, URL-mode
-# banners render as a clickable line that opens in the user's
-# default browser. File-mode banners (HTXF subchannel) are
-# unaffected either way.
-if soup_dep.found()
-  conf.set('HAVE_LIBSOUP', 1)
-endif
-
 # Phase 5+: optional preview viewers. Each define gates a single
 # struct hx_viewer in src/preview.c; without it the corresponding
 # file type falls through to the catch-all text viewer.
