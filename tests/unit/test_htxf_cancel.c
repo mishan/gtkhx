@@ -34,6 +34,7 @@
 #include <netinet/in.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/time.h> /* struct timeval for SO_RCVTIMEO */
 #include <unistd.h>
 
 #include "compat.h"
@@ -137,6 +138,10 @@ struct reader_ctx {
     ssize_t result;
     int saved_errno;
     gint64 elapsed_us;
+    /* Set (atomically) the instant before the worker calls
+	 * htxf_io_read, so the main thread can wait for the reader to be
+	 * about to park rather than guessing with a fixed sleep. */
+    gint entered;
 };
 
 static gpointer
@@ -146,6 +151,12 @@ parked_reader (gpointer data)
     guint8 buf[16];
     gint64 start = g_get_monotonic_time ();
     errno = 0;
+    /* Announce we're about to enter the (blocking) transport read. The
+	 * main thread waits for this before cancelling, so the cancel
+	 * genuinely races a parked recv rather than landing before the read
+	 * even started (which would pass via the canceled-flag short-circuit
+	 * and prove nothing about waking a blocked read). */
+    g_atomic_int_set (&ctx->entered, 1);
     ctx->result = htxf_io_read (ctx->xfer, buf, sizeof (buf));
     ctx->saved_errno = errno;
     ctx->elapsed_us = g_get_monotonic_time () - start;
@@ -169,16 +180,26 @@ test_abort_wakes_parked_read (void)
     htxf_io_abort_init (&xfer); /* main-thread token alloc */
     htxf_io_abort_arm (&xfer);  /* arm with the channel's socket */
 
-    /* Fail-fast guard: if abort ever stops waking the read, the 3 s
-	 * read timeout returns instead of wedging the whole test run. */
-    g_assert_cmpint (htxf_io_set_read_timeout (&xfer, 3000), ==, 0);
+    /* Fail-fast backstop: if abort ever stops waking the read, the read
+	 * timeout returns on its own instead of wedging the whole test run.
+	 * The elapsed assertion below is keyed to this so a timeout-driven
+	 * return (≈ READ_TIMEOUT_MS) fails while an abort-driven wake
+	 * (tens of ms) passes — robust to CI scheduling variance. */
+    const guint READ_TIMEOUT_MS = 3000;
+    g_assert_cmpint (htxf_io_set_read_timeout (&xfer, READ_TIMEOUT_MS), ==, 0);
 
     struct reader_ctx ctx = { .xfer = &xfer, .result = 0, .saved_errno = 0,
-                              .elapsed_us = 0 };
+                              .elapsed_us = 0, .entered = 0 };
     GThread *t = g_thread_new ("parked-reader", parked_reader, &ctx);
 
-    /* Give the reader time to actually park in the transport read. */
-    g_usleep (100 * 1000);
+    /* Wait until the reader has reached the read call, then a short
+	 * extra beat so it's actually parked in recv() — not a fixed guess.
+	 * Bounded so a reader that never starts can't hang the test. */
+    for (int i = 0; i < 5000 && !g_atomic_int_get (&ctx.entered); i++) {
+        g_usleep (1000);
+    }
+    g_assert_cmpint (g_atomic_int_get (&ctx.entered), ==, 1);
+    g_usleep (50 * 1000); /* let the recv() actually block */
 
     /* Cancel exactly as xfer_delete does: latch the flag, then abort. */
     g_atomic_int_set (&xfer.canceled, TRUE);
@@ -189,8 +210,10 @@ test_abort_wakes_parked_read (void)
     g_assert_cmpint (ctx.result, ==, -1);
     /* Reclassified as cancel, not a transport fault. */
     g_assert_cmpint (ctx.saved_errno, ==, ECANCELED);
-    /* Woke promptly — well under the 3 s timeout backstop. */
-    g_assert_cmpint (ctx.elapsed_us, <, 2 * G_USEC_PER_SEC);
+    /* Woke via the abort, not the timeout backstop: well under the
+	 * configured read timeout (half of it leaves ample CI margin). */
+    g_assert_cmpint (ctx.elapsed_us, <,
+                     (gint64) READ_TIMEOUT_MS * 1000 / 2);
 
     htxf_io_release (&xfer);
     htxf_io_abort_free (&xfer);
@@ -198,10 +221,18 @@ test_abort_wakes_parked_read (void)
 }
 
 /* ------------------------------------------------------------------ *
- * Test: abort fired BEFORE the channel is armed still cancels — the
- * token latches the flag, and arming a socket already aborted shuts it
- * down rather than storing a live fd. (Mirrors the connect-races-cancel
- * window in production.) */
+ * Test: abort fired BEFORE the channel is armed still tears the socket
+ * down — the connect-races-cancel window. The token latches the aborted
+ * flag with no socket yet; when arm runs late it sees the latch and
+ * shuts the socket down (rather than storing a live fd).
+ *
+ * Crucially this does NOT set htxf->canceled, so it can't pass via the
+ * htxf_io_read canceled-flag short-circuit (which never touches the
+ * transport). We observe the real effect from the server side: the
+ * client socket the late arm shut down delivers EOF. If the
+ * abort-before-arm latch broke (arm stored the socket instead of
+ * shutting it), the server read would block and the recv timeout would
+ * fail the test. */
 static void
 test_abort_before_arm (void)
 {
@@ -212,16 +243,19 @@ test_abort_before_arm (void)
     open_passthrough (&xfer, sv[1]);
     htxf_io_abort_init (&xfer);
 
-    /* Cancel before arming. */
-    g_atomic_int_set (&xfer.canceled, TRUE);
+    /* Abort BEFORE arm (no socket on the token yet), then arm late. */
     htxf_io_abort (&xfer);
     htxf_io_abort_arm (&xfer);
 
-    guint8 buf[16];
-    errno = 0;
-    ssize_t r = htxf_io_read (&xfer, buf, sizeof (buf));
-    g_assert_cmpint (r, ==, -1);
-    g_assert_cmpint (errno, ==, ECANCELED);
+    /* The late arm must have shut the client socket (shutdown both
+	 * directions), so the server side sees EOF. A recv timeout keeps a
+	 * broken latch from hanging the test. */
+    struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
+    g_assert_cmpint (
+        setsockopt (sv[0], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof (tv)), ==, 0);
+    guint8 b = 0;
+    ssize_t n = read (sv[0], &b, 1);
+    g_assert_cmpint (n, ==, 0); /* clean EOF — the socket was shut down */
 
     htxf_io_release (&xfer);
     htxf_io_abort_free (&xfer);
