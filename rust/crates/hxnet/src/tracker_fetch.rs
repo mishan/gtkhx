@@ -393,16 +393,20 @@ fn parse_host_port(url: &str) -> (String, u16) {
     (url.to_owned(), HTRK_TCPPORT)
 }
 
-/// TOFU verify callback: given a leaf cert's `"sha256:<hex>"`
-/// fingerprint, returns `true` to accept the connection. Wraps the
+/// TOFU verify callback: given the tracker `host` and a leaf cert's
+/// `"sha256:<hex>"` fingerprint, returns `true` to accept. The host is
+/// threaded through because one walk spans many trackers but shares a
+/// single callback, and the trust decision is keyed on host:port (the
+/// C side calls `tls_trust_decide(host, HTRK_TCPPORT, fp)`). Wraps the
 /// C-side trust check (marshalled to the GLib main thread).
-pub type VerifyFn = Box<dyn Fn(&str) -> bool + Send>;
+pub type VerifyFn = Box<dyn Fn(&str, &str) -> bool + Send>;
 
 /// Production [`TrackerConnector`]: tokio TCP connect, with an optional
 /// rustls wrap for [`Transport::Tls`]. The TOFU gate matches the
 /// control-connection path (`lifecycle::run_plaintext_tls_lifecycle`):
 /// a WebPKI-valid cert is trusted silently; otherwise `verify` is
-/// consulted with the leaf `"sha256:<hex>"` fingerprint and may reject.
+/// consulted with the host + leaf `"sha256:<hex>"` fingerprint and may
+/// reject.
 pub struct TcpTlsConnector {
     /// TOFU verify callback (the C trust check, marshalled). `None`
     /// accepts any non-WebPKI cert — only safe for tests / probes.
@@ -438,7 +442,7 @@ impl TrackerConnector for TcpTlsConnector {
                     if let Some(verify) = self.verify.as_ref() {
                         match crate::tls::peer_cert_fingerprint(&tls) {
                             Some(fp) => {
-                                if !verify(&fp) {
+                                if !verify(&host, &fp) {
                                     // Trust rejection is a hard failure, not
                                     // a "no TLS" signal — never downgrade.
                                     return Err(ConnectError::TrustRejected(
