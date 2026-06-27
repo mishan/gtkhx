@@ -156,10 +156,10 @@ post_file_update (struct htxf_conn *htxf)
     gtkhx_bridge_post_to_main (fu_dispatch, j);
 }
 
-/* The actual transfer teardown, run on the GLOBAL default main context
- * (the one post_file_update queues its progress idles on). Unlink from
- * xfers[] (a no-op if the server already cancelled us out) and drop the
- * worker's ref. Returns G_SOURCE_REMOVE — runs once. */
+/* The actual transfer teardown, deferred onto the GLOBAL default main
+ * context as an idle source. Unlink from xfers[] (a no-op if the server
+ * already cancelled us out) and drop the worker's ref. Returns
+ * G_SOURCE_REMOVE — runs once. */
 static gboolean
 xfer_cleanup_dispatch (gpointer data)
 {
@@ -170,25 +170,31 @@ xfer_cleanup_dispatch (gpointer data)
 }
 
 /* Worker → main completion, invoked by gtkhx_bridge_spawn_blocking_with_
- * idle once the transfer worker returns. The bridge runs this on the
- * context it captured at spawn time (thread-default — the main thread's
- * global default context in production). post_file_update, however,
- * queues its progress idles on the GLOBAL default context (via
- * gtkhx_bridge_post_to_main → g_main_context_invoke(NULL, ...)). Were
- * those two contexts ever to diverge, cleaning up directly here could
- * unlink+unref the htxf before a still-queued file_update idle runs.
+ * idle once the transfer worker returns. The teardown must run AFTER
+ * every progress idle the worker already queued via post_file_update
+ * (g_main_context_invoke(NULL, ...) at G_PRIORITY_DEFAULT on the global
+ * default context) — running it early would unlink+unref the htxf out
+ * from under a still-pending file_update dispatcher (emitting
+ * xfer-destroyed / starting the next transfer too soon, and letting a
+ * late file_update fire after destruction).
  *
- * So we don't tear down here — we re-post the teardown onto the global
- * default context too (gtkhx_bridge_post_to_main). Because the worker
- * posted all its file_updates before returning, and this re-post happens
- * after the worker returned, the cleanup is guaranteed to land AFTER
- * every queued file_update on that one context — preserving the
- * FIFO / lifetime ordering regardless of which context the bridge picked.
- * The worker's ref keeps htxf alive across the extra hop. */
+ * We can't re-post via gtkhx_bridge_post_to_main here: it wraps
+ * g_main_context_invoke, which runs the callback SYNCHRONOUSLY when
+ * called from the thread that owns the target context — and this
+ * completion already runs on the main thread, the owner of the global
+ * default context. That would tear down immediately, ahead of the
+ * queued file_updates, defeating the ordering.
+ *
+ * Instead attach a real idle source with g_idle_add. It is always
+ * asynchronous (dispatched in a later iteration, never inline), and its
+ * G_PRIORITY_DEFAULT_IDLE priority sits strictly below the file_updates'
+ * G_PRIORITY_DEFAULT, so the teardown is guaranteed to run after every
+ * pending file_update on the same (global default) context. The worker's
+ * ref keeps htxf alive until the idle fires. */
 static void
 xfer_completion_entry (void *arg)
 {
-    gtkhx_bridge_post_to_main (xfer_cleanup_dispatch, arg);
+    g_idle_add (xfer_cleanup_dispatch, arg);
 }
 
 /* Does either fork (data or resource) of the local path exist? */
