@@ -1354,6 +1354,26 @@ test('tracker_v3_tls_listing', test_integration_tracker_v3_tls,
      suite       : 'integration',
      timeout     : 30)
 
+# tracker_fetch — Tier 3 coverage for the hxnet tracker-fetch BRIDGE
+# end-to-end (R3 item 8, T4). Drives the production hxnet_tracker_fetch_*
+# FFI (the same surface network.c's bridge uses) over the whole matrix
+# URL list: serial walk + connect/TLS/probe fallback + listing + the
+# HxnetTrackerEvent ABI marshalling, asserting real begin/record/done
+# events arrive. Links integration_harness_lib only — the FFI rides the
+# hxnet staticlib the harness already pulls in. Honours
+# GTKHX_TRACKER_V3_PROBE_MS; 60 s timeout leaves room for a v1-only
+# tracker's probe-timeout + TLS-first attempt.
+test_integration_tracker_fetch = executable(
+  'test_integration_tracker_fetch',
+  'integration/test_tracker_fetch.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('tracker_fetch', test_integration_tracker_fetch,
+     suite       : 'integration',
+     timeout     : 60)
+
 # tracker_v1_listing — Tier 3 coverage for the v1 fallback wire
 # path against any v1-only target in the matrix. Pins the wire
 # shape after the production state machine's watchdog has expired
