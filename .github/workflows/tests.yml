@@ -150,18 +150,6 @@ jobs:
           meson test -C build --suite unit --suite proto \
             --print-errorlogs
 
-      - name: diagnose glycin loader layout
-        # Self-documenting log of where Fedora's glycin-loaders package
-        # put its loaders + configs. hx-image-decode's gate keys off the
-        # config dir ($XDG_DATA_DIRS/glycin-loaders/*/conf.d), but the
-        # loader binary's path is distro-specific (libexec vs lib64); if
-        # the decode tests ever fail here, this step tells us the exact
-        # layout without a guessing round-trip. Never fails the job.
-        run: |
-          echo "== rpm -ql glycin-loaders =="; rpm -ql glycin-loaders || true
-          echo "== loader binaries =="; find /usr -name 'glycin-image-rs' 2>/dev/null || true
-          echo "== loader configs =="; ls -R /usr/share/glycin-loaders 2>/dev/null || true
-
       - name: cargo test (Rust workspace)
         # --ignore-rust-version: several transitive deps (zbus,
         # zvariant, glycin-common, glycin-utils) carry overly
