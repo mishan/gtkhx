@@ -78,6 +78,7 @@ pub mod login_reply;
 pub mod magic;
 pub mod proto_trace;
 pub mod tls;
+pub mod tracker;
 pub mod transform;
 
 /// Per-step timeout for the pre-frame handshake (DNS + TCP connect,
