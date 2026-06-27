@@ -394,13 +394,15 @@ fn parse_host_port(url: &str) -> (String, u16) {
     (url.to_owned(), HTRK_TCPPORT)
 }
 
-/// TOFU verify callback: given the tracker `host` and a leaf cert's
-/// `"sha256:<hex>"` fingerprint, returns `true` to accept. The host is
-/// threaded through because one walk spans many trackers but shares a
-/// single callback, and the trust decision is keyed on host:port (the
-/// C side calls `tls_trust_decide(host, HTRK_TCPPORT, fp)`). Wraps the
-/// C-side trust check (marshalled to the GLib main thread).
-pub type VerifyFn = Box<dyn Fn(&str, &str) -> bool + Send>;
+/// TOFU verify callback: given the tracker `host`, the `port` it was
+/// reached on, and a leaf cert's `"sha256:<hex>"` fingerprint, returns
+/// `true` to accept. Host *and* port are threaded through because one
+/// walk spans many trackers through a single callback and the trust
+/// decision is keyed on the actual endpoint — a tracker on `host:5499`
+/// is pinned separately from one on `host:5498` (the C side calls
+/// `tls_trust_decide(host, port, fp)`). Wraps the C-side trust check
+/// (marshalled to the GLib main thread).
+pub type VerifyFn = Box<dyn Fn(&str, u16, &str) -> bool + Send>;
 
 /// Production [`TrackerConnector`]: tokio TCP connect, with an optional
 /// rustls wrap for [`Transport::Tls`]. The TOFU gate matches the
@@ -443,7 +445,7 @@ impl TrackerConnector for TcpTlsConnector {
                     if let Some(verify) = self.verify.as_ref() {
                         match crate::tls::peer_cert_fingerprint(&tls) {
                             Some(fp) => {
-                                if !verify(&host, &fp) {
+                                if !verify(&host, port, &fp) {
                                     // Trust rejection is a hard failure, not
                                     // a "no TLS" signal — never downgrade.
                                     return Err(ConnectError::TrustRejected(

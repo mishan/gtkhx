@@ -2950,14 +2950,16 @@ pub const HXNET_TRK_POLL_CLOSED: c_int = -1;
 
 /// Host-aware TOFU verify callback for the tracker walk. Unlike the
 /// connection FFI's [`HxnetVerifyCertCallback`] (one connection = one
-/// host), a tracker walk spans many hosts through a single callback, so
-/// the tracker's host is passed alongside the `"sha256:<hex>"` leaf
-/// fingerprint. Returns non-zero to accept. The C side keys the trust
-/// decision on `(host, HTRK_TCPPORT)` via `tls_trust_decide`.
+/// host), a tracker walk spans many endpoints through a single callback,
+/// so the tracker's `host` and `port` are passed alongside the
+/// `"sha256:<hex>"` leaf fingerprint. Returns non-zero to accept. The C
+/// side keys the trust decision on `(host, port)` via `tls_trust_decide`,
+/// so different ports on one host pin (and prompt) independently.
 pub type HxnetTrackerVerifyCallback = Option<
     unsafe extern "C" fn(
         host: *const u8,
         host_len: usize,
+        port: u16,
         fp: *const u8,
         fp_len: usize,
         user_data: *mut c_void,
@@ -3170,9 +3172,9 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
 
     let verify: Option<VerifyFn> = verify_cert.map(|cb| {
         let ud = SendUserData(user_data);
-        let boxed: VerifyFn = Box::new(move |host: &str, fp: &str| {
+        let boxed: VerifyFn = Box::new(move |host: &str, port: u16, fp: &str| {
             let ud = &ud;
-            unsafe { cb(host.as_ptr(), host.len(), fp.as_ptr(), fp.len(), ud.0) != 0 }
+            unsafe { cb(host.as_ptr(), host.len(), port, fp.as_ptr(), fp.len(), ud.0) != 0 }
         });
         boxed
     });

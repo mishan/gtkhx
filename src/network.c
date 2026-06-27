@@ -1366,9 +1366,10 @@ htxf_connect (struct htxf_conn *htxf)
  *
  * The verdict cache, the v3 watchdog, and the ~1100 lines of
  * GSocketClient async callbacks the C used to carry are gone — that
- * logic is the Rust runner's now. The verdict cache is per-fetch on the
- * Rust side (TLS re-probed each Refresh), a minor change from the old
- * process-global cache.
+ * logic is the Rust runner's now. The TLS verdict cache moved to the
+ * Rust side but stays process-global (snapshotted per walk), so a
+ * Refresh still skips a known-failing TLS handshake — same behaviour as
+ * the old C cache.
  *
  * Unlike the old reader — which interleaved per-record progress ticks
  * as bytes arrived — the Rust engine returns a whole listing at once,
@@ -1392,12 +1393,13 @@ typedef struct HxnetTrackerFetch HxnetTrackerFetch;
 #define HXNET_TRK_POLL_EVENT  1
 #define HXNET_TRK_POLL_CLOSED (-1)
 
-/* Host-aware TOFU verify: (tracker host, leaf "sha256:<hex>" fp) ->
- * non-zero to accept. The host is passed because one walk spans many
- * trackers through this single callback. */
+/* Host-aware TOFU verify: (tracker host, port, leaf "sha256:<hex>" fp)
+ * -> non-zero to accept. Host AND port are passed because one walk spans
+ * many endpoints through this single callback, and trust is keyed on
+ * (host, port) so different ports on one host pin independently. */
 typedef int (*hxnet_tracker_verify_cb_t) (const guint8 *host, gsize host_len,
-                                          const guint8 *fp, gsize fp_len,
-                                          void *user_data);
+                                          guint16 port, const guint8 *fp,
+                                          gsize fp_len, void *user_data);
 
 /* POD view of one fetch event. Pointer fields borrow the handle's
  * current event and are valid only until the next poll/close — the
@@ -1482,20 +1484,21 @@ hx_tracker_v3_probe_ms (void)
     return (guint) v;
 }
 
-/* TOFU verify keyed on (tracker host, HTRK_TCPPORT). Runs on the hxnet
+/* TOFU verify keyed on the tracker's (host, port). Runs on the hxnet
  * worker thread; tls_trust_decide marshals any user prompt to the main
  * thread, exactly as htxf_verify_cert_cb does. A WebPKI-valid cert is
  * trusted in Rust and never reaches here. */
 static int
-tracker_verify_cert_cb (const guint8 *host, gsize host_len, const guint8 *fp,
-                        gsize fp_len, void *user_data G_GNUC_UNUSED)
+tracker_verify_cert_cb (const guint8 *host, gsize host_len, guint16 port,
+                        const guint8 *fp, gsize fp_len,
+                        void *user_data G_GNUC_UNUSED)
 {
     if (!host || !fp) {
         return 0; /* reject: no context / no fingerprint */
     }
     g_autofree char *host_str = g_strndup ((const char *) host, host_len);
     g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
-    return tls_trust_decide (host_str, HTRK_TCPPORT, fp_str) ? 1 : 0;
+    return tls_trust_decide (host_str, port, fp_str) ? 1 : 0;
 }
 
 /* Re-emit one drained fetch event as the legacy view signals. */
