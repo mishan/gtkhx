@@ -62,9 +62,13 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # Fedora ships current gtk4 / libadwaita / nettle. Pinned to
-      # a major so a Fedora 43 release with surprise breakage doesn't
-      # red the suite the day it lands; bump deliberately.
-      image: fedora:42
+      # a major so a Fedora 44 release with surprise breakage doesn't
+      # red the suite the day it lands; bump deliberately. On 43 for
+      # the glycin 3.x generation: its glycin-loaders ship the 2+
+      # loader protocol the `glycin` 3.x crate (and the GNOME 49
+      # Flatpak runtime we target) need — Fedora 42 only had 1+, so
+      # the hx-image-decode tests couldn't find a compatible loader.
+      image: fedora:43
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -364,7 +368,7 @@ jobs:
             -v "$PWD:/src" -w /src \
             -e GTKHX_TEST_HOST=127.0.0.1 \
             -e GTKHX_TEST_PORT=5500 \
-            fedora:42 bash -c '
+            fedora:43 bash -c '
               dnf -y install \
                 meson ninja-build pkgconf-pkg-config gcc \
                 gtk4-devel libadwaita-devel \
