@@ -3010,10 +3010,16 @@ pub struct HxnetTrackerEvent {
 }
 
 // Pin the cross-language ABI layout from the Rust side, same discipline
-// as HxnetFrame. The fixed scalar prefix is 16 bytes; the pointer pairs
-// start at the pointer alignment boundary (16 on 64-bit). The C bridge
-// mirrors this with _Static_assert when slice 2 lands.
+// as HxnetFrame. The 16-byte scalar prefix is followed by 6 (ptr, len)
+// pairs — all pointer-sized fields — at successive `P`-byte offsets,
+// where `P = size_of::<usize>()`. Pinning EVERY field offset (not just
+// up to url_ptr) plus the total size catches a reorder or type change of
+// any field on either side at compile time rather than corrupting the
+// decode at runtime. Expressed in terms of `P` so the asserts hold on
+// 32- and 64-bit targets. The C bridge mirrors this with _Static_assert
+// (src/network.c on T2; src/tracker_fetch_ffi.h once extracted).
 const _: () = {
+    let p = std::mem::size_of::<*const u8>();
     assert!(std::mem::offset_of!(HxnetTrackerEvent, kind) == 0);
     assert!(std::mem::offset_of!(HxnetTrackerEvent, version) == 4);
     assert!(std::mem::offset_of!(HxnetTrackerEvent, addr_type) == 5);
@@ -3022,10 +3028,20 @@ const _: () = {
     assert!(std::mem::offset_of!(HxnetTrackerEvent, port) == 10);
     assert!(std::mem::offset_of!(HxnetTrackerEvent, nusers) == 12);
     assert!(std::mem::offset_of!(HxnetTrackerEvent, tlv_count) == 14);
-    // url_ptr is the first pointer; it follows the 16-byte scalar prefix
-    // at the pointer alignment boundary (no extra padding needed since
-    // 16 is already a multiple of 8 / 4).
+    // Pointer/len pairs, in declared order, at 16 + k*P.
     assert!(std::mem::offset_of!(HxnetTrackerEvent, url_ptr) == 16);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, url_len) == 16 + p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, address_ptr) == 16 + 2 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, address_len) == 16 + 3 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, name_ptr) == 16 + 4 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, name_len) == 16 + 5 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, desc_ptr) == 16 + 6 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, desc_len) == 16 + 7 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, tlv_ptr) == 16 + 8 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, tlv_len) == 16 + 9 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, message_ptr) == 16 + 10 * p);
+    assert!(std::mem::offset_of!(HxnetTrackerEvent, message_len) == 16 + 11 * p);
+    assert!(std::mem::size_of::<HxnetTrackerEvent>() == 16 + 12 * p);
     assert!(std::mem::align_of::<HxnetTrackerEvent>() == std::mem::align_of::<*const u8>());
 };
 
@@ -3053,14 +3069,15 @@ unsafe fn fill_tracker_event(out: *mut HxnetTrackerEvent, ev: &TrackerEvent) {
             o.count = *count;
             (o.url_ptr, o.url_len) = slice_ptr_len(url.as_bytes());
         }
-        TrackerEvent::Record { url, total, record } => {
+        TrackerEvent::Record { total, record } => {
+            // url_ptr stays NULL for records — the C bridge uses the
+            // batch URL it stashed on BatchBegin.
             o.kind = HXNET_TRK_KIND_RECORD;
             o.total = *total;
             o.addr_type = record.addr_type;
             o.port = record.port;
             o.nusers = record.nusers;
             o.tlv_count = record.tlv_count;
-            (o.url_ptr, o.url_len) = slice_ptr_len(url.as_bytes());
             (o.address_ptr, o.address_len) = slice_ptr_len(&record.address);
             (o.name_ptr, o.name_len) = slice_ptr_len(&record.name);
             (o.desc_ptr, o.desc_len) = slice_ptr_len(&record.desc);
@@ -3147,7 +3164,21 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
             return std::ptr::null_mut();
         }
         match std::ffi::CStr::from_ptr(p).to_str() {
-            Ok(s) => url_vec.push(s.to_owned()),
+            Ok(s) => {
+                // Reject empty / whitespace-only entries at the boundary
+                // so they fail deterministically here rather than turning
+                // into an empty host + odd resolver / trust-cb inputs
+                // deeper in the walk.
+                if s.trim().is_empty() {
+                    glib::g_critical!(
+                        "hxnet",
+                        "hxnet_tracker_fetch_open: url at index {} is empty / whitespace",
+                        i
+                    );
+                    return std::ptr::null_mut();
+                }
+                url_vec.push(s.to_owned());
+            }
             Err(_) => {
                 glib::g_critical!(
                     "hxnet",

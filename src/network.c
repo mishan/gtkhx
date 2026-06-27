@@ -1429,6 +1429,10 @@ typedef struct {
     gsize message_len;
 } HxnetTrackerEvent;
 
+/* Pin EVERY field offset (gsize is pointer-sized, so the 6 (ptr, len)
+ * pairs pack at 16 + k*sizeof(void*)) plus the total size, so a reorder
+ * or type change of any field on either side is a compile error rather
+ * than a runtime decode corruption. */
 _Static_assert (offsetof (HxnetTrackerEvent, kind) == 0, "kind offset");
 _Static_assert (offsetof (HxnetTrackerEvent, version) == 4, "version offset");
 _Static_assert (offsetof (HxnetTrackerEvent, addr_type) == 5,
@@ -1440,6 +1444,40 @@ _Static_assert (offsetof (HxnetTrackerEvent, nusers) == 12, "nusers offset");
 _Static_assert (offsetof (HxnetTrackerEvent, tlv_count) == 14,
                 "tlv_count offset");
 _Static_assert (offsetof (HxnetTrackerEvent, url_ptr) == 16, "url_ptr offset");
+_Static_assert (offsetof (HxnetTrackerEvent, url_len) == 16 + sizeof (void *),
+                "url_len offset");
+_Static_assert (offsetof (HxnetTrackerEvent, address_ptr)
+                    == 16 + 2 * sizeof (void *),
+                "address_ptr offset");
+_Static_assert (offsetof (HxnetTrackerEvent, address_len)
+                    == 16 + 3 * sizeof (void *),
+                "address_len offset");
+_Static_assert (offsetof (HxnetTrackerEvent, name_ptr)
+                    == 16 + 4 * sizeof (void *),
+                "name_ptr offset");
+_Static_assert (offsetof (HxnetTrackerEvent, name_len)
+                    == 16 + 5 * sizeof (void *),
+                "name_len offset");
+_Static_assert (offsetof (HxnetTrackerEvent, desc_ptr)
+                    == 16 + 6 * sizeof (void *),
+                "desc_ptr offset");
+_Static_assert (offsetof (HxnetTrackerEvent, desc_len)
+                    == 16 + 7 * sizeof (void *),
+                "desc_len offset");
+_Static_assert (offsetof (HxnetTrackerEvent, tlv_ptr)
+                    == 16 + 8 * sizeof (void *),
+                "tlv_ptr offset");
+_Static_assert (offsetof (HxnetTrackerEvent, tlv_len)
+                    == 16 + 9 * sizeof (void *),
+                "tlv_len offset");
+_Static_assert (offsetof (HxnetTrackerEvent, message_ptr)
+                    == 16 + 10 * sizeof (void *),
+                "message_ptr offset");
+_Static_assert (offsetof (HxnetTrackerEvent, message_len)
+                    == 16 + 11 * sizeof (void *),
+                "message_len offset");
+_Static_assert (sizeof (HxnetTrackerEvent) == 16 + 12 * sizeof (void *),
+                "HxnetTrackerEvent size");
 
 extern HxnetTrackerFetch *
 hxnet_tracker_fetch_open (const char *const *urls, gsize n, guint16 features,
@@ -1459,6 +1497,10 @@ static guint tracker_drain_source_id;
 static guint8 tracker_batch_version;
 /* 1-based progress counter within the current batch. */
 static int tracker_batch_server_i;
+/* URL of the batch in progress, stashed on BEGIN. RECORD events no
+ * longer carry a url (the Rust side drops it to avoid a per-record
+ * allocation), so progress updates key on this. Freed on cleanup. */
+static char *tracker_batch_url;
 
 /* Read the v3-probe watchdog timeout once per fetch. strtol with sane
  * clamps — values <100ms are pointless and >60000ms hangs the UI for a
@@ -1494,8 +1536,10 @@ tracker_verify_cert_cb (const guint8 *host, gsize host_len, guint16 port,
                         const guint8 *fp, gsize fp_len,
                         void *user_data G_GNUC_UNUSED)
 {
-    if (!host || !fp) {
-        return 0; /* reject: no context / no fingerprint */
+    if (!host || host_len == 0 || !fp || fp_len == 0) {
+        /* Reject: no host / no fingerprint. An empty host would key the
+         * trust cache on "" and produce a confusing prompt. */
+        return 0;
     }
     g_autofree char *host_str = g_strndup ((const char *) host, host_len);
     g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
@@ -1520,16 +1564,20 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
 {
     switch (ev->kind) {
     case HXNET_TRK_KIND_BEGIN: {
-        g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
+        /* Take ownership of the batch URL for the records that follow. */
+        g_free (tracker_batch_url);
+        tracker_batch_url = tracker_dup_str (ev->url_ptr, ev->url_len);
         tracker_batch_version = ev->version;
         tracker_batch_server_i = 1;
         gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
-                                                url, ev->version, ev->count);
-        track_prog_update (sess, url, 0, (int) ev->count);
+                                                tracker_batch_url, ev->version,
+                                                ev->count);
+        track_prog_update (sess, tracker_batch_url, 0, (int) ev->count);
         break;
     }
     case HXNET_TRK_KIND_RECORD: {
-        g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
+        /* Records carry no url; progress keys on the stashed batch url. */
+        const char *url = tracker_batch_url ? tracker_batch_url : "";
         HxTrackerServer *e = NULL;
         if (tracker_batch_version == 1) {
             /* v1 record: MacRoman name/desc (the v1 constructor
@@ -1556,7 +1604,7 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
             gtkhx_session_emit_tracker_server_create (
                 gtkhx_session_get_default (), e);
             hx_tracker_server_free (e);
-            track_prog_update (sess, url, tracker_batch_server_i,
+            track_prog_update (sess, (char *) url, tracker_batch_server_i,
                                (int) ev->total);
             tracker_batch_server_i++;
         }
@@ -1583,6 +1631,7 @@ tracker_fetch_cleanup (void)
         hxnet_tracker_fetch_close (current_tracker_fetch);
         current_tracker_fetch = NULL;
     }
+    g_clear_pointer (&tracker_batch_url, g_free);
 }
 
 /* Main-loop drain: pull every ready event this tick, then either keep

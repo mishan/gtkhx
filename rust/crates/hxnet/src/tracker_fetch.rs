@@ -160,13 +160,12 @@ pub enum TrackerEvent {
         version: u8,
         count: u16,
     },
-    /// One server record for the current batch. `total` is the batch
-    /// size (what the legacy `HxTrackerServer.total` field carries).
-    Record {
-        url: String,
-        total: u16,
-        record: TrackerRecord,
-    },
+    /// One server record for the current batch. Carries no `url` — the
+    /// consumer associates it with the most recent `BatchBegin` (the C
+    /// bridge already stashes the batch URL on begin), which avoids a
+    /// fresh URL allocation + larger mpsc payload per record. `total` is
+    /// the batch size (what the legacy `HxTrackerServer.total` carries).
+    Record { total: u16, record: TrackerRecord },
     /// A tracker could not be fetched (connect failure or a hard
     /// protocol error). Mirrors the C `hx_printf_prefix` error line.
     BatchError { url: String, message: String },
@@ -227,12 +226,10 @@ async fn emit_listing(
         return false;
     }
     for record in listing.records {
+        // No per-record url allocation — Record is associated with the
+        // BatchBegin above by the consumer.
         if out
-            .send(TrackerEvent::Record {
-                url: url.to_owned(),
-                total: count,
-                record,
-            })
+            .send(TrackerEvent::Record { total: count, record })
             .await
             .is_err()
         {
