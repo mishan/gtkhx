@@ -3027,8 +3027,19 @@ const _: () = {
     assert!(std::mem::align_of::<HxnetTrackerEvent>() == std::mem::align_of::<*const u8>());
 };
 
+/// `(ptr, len)` for a byte slice, using a NULL pointer for an empty
+/// slice rather than `as_ptr()`'s non-NULL dangling pointer — C consumers
+/// commonly gate on `ptr != NULL`.
+fn slice_ptr_len(b: &[u8]) -> (*const u8, usize) {
+    if b.is_empty() {
+        (std::ptr::null(), 0)
+    } else {
+        (b.as_ptr(), b.len())
+    }
+}
+
 /// Fill `out` from `ev`, borrowing `ev`'s buffers. `out` must be
-/// non-NULL. Unused fields are zeroed.
+/// non-NULL. Unused fields are zeroed; empty buffers get a NULL pointer.
 unsafe fn fill_tracker_event(out: *mut HxnetTrackerEvent, ev: &TrackerEvent) {
     // Start from an all-zero struct so every unused field is NULL / 0.
     std::ptr::write_bytes(out, 0, 1);
@@ -3038,8 +3049,7 @@ unsafe fn fill_tracker_event(out: *mut HxnetTrackerEvent, ev: &TrackerEvent) {
             o.kind = HXNET_TRK_KIND_BEGIN;
             o.version = *version;
             o.count = *count;
-            o.url_ptr = url.as_ptr();
-            o.url_len = url.len();
+            (o.url_ptr, o.url_len) = slice_ptr_len(url.as_bytes());
         }
         TrackerEvent::Record { url, total, record } => {
             o.kind = HXNET_TRK_KIND_RECORD;
@@ -3048,28 +3058,41 @@ unsafe fn fill_tracker_event(out: *mut HxnetTrackerEvent, ev: &TrackerEvent) {
             o.port = record.port;
             o.nusers = record.nusers;
             o.tlv_count = record.tlv_count;
-            o.url_ptr = url.as_ptr();
-            o.url_len = url.len();
-            o.address_ptr = record.address.as_ptr();
-            o.address_len = record.address.len();
-            o.name_ptr = record.name.as_ptr();
-            o.name_len = record.name.len();
-            o.desc_ptr = record.desc.as_ptr();
-            o.desc_len = record.desc.len();
-            o.tlv_ptr = record.tlv_bytes.as_ptr();
-            o.tlv_len = record.tlv_bytes.len();
+            (o.url_ptr, o.url_len) = slice_ptr_len(url.as_bytes());
+            (o.address_ptr, o.address_len) = slice_ptr_len(&record.address);
+            (o.name_ptr, o.name_len) = slice_ptr_len(&record.name);
+            (o.desc_ptr, o.desc_len) = slice_ptr_len(&record.desc);
+            (o.tlv_ptr, o.tlv_len) = slice_ptr_len(&record.tlv_bytes);
         }
         TrackerEvent::BatchError { url, message } => {
             o.kind = HXNET_TRK_KIND_ERROR;
-            o.url_ptr = url.as_ptr();
-            o.url_len = url.len();
-            o.message_ptr = message.as_ptr();
-            o.message_len = message.len();
+            (o.url_ptr, o.url_len) = slice_ptr_len(url.as_bytes());
+            (o.message_ptr, o.message_len) = slice_ptr_len(message.as_bytes());
         }
         TrackerEvent::Done => {
             o.kind = HXNET_TRK_KIND_DONE;
         }
     }
+}
+
+/// Process-global TLS verdict cache. Tracker walks are serialized (a new
+/// `hx_tracker_list_async` cancels any in-flight one), so a snapshot at
+/// walk start + a store at walk end keeps the cache across Refreshes
+/// without holding a lock across the walk's `.await`s.
+fn tracker_verdicts() -> &'static std::sync::Mutex<VerdictCache> {
+    static V: std::sync::OnceLock<std::sync::Mutex<VerdictCache>> = std::sync::OnceLock::new();
+    V.get_or_init(|| std::sync::Mutex::new(VerdictCache::new()))
+}
+
+fn tracker_verdicts_snapshot() -> VerdictCache {
+    tracker_verdicts()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone()
+}
+
+fn tracker_verdicts_store(v: VerdictCache) {
+    *tracker_verdicts().lock().unwrap_or_else(|e| e.into_inner()) = v;
 }
 
 /// Open a tracker fetch walk over `n` NUL-terminated URL strings
@@ -3098,6 +3121,19 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
 ) -> *mut HxnetTrackerFetch {
     if urls.is_null() && n != 0 {
         glib::g_critical!("hxnet", "hxnet_tracker_fetch_open: NULL urls with n != 0");
+        return std::ptr::null_mut();
+    }
+    // `urls.add(i)` for i in 0..n is UB if n * size_of::<*const c_char>()
+    // overruns isize::MAX. Bound n the same way the other FFI entrypoints
+    // bound their length arguments.
+    if (n as u64).saturating_mul(std::mem::size_of::<*const c_void>() as u64)
+        > (isize::MAX as u64)
+    {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_tracker_fetch_open: url count {} is implausibly large",
+            n
+        );
         return std::ptr::null_mut();
     }
 
@@ -3145,8 +3181,14 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
     let (tx, rx) = mpsc::channel::<TrackerEvent>(64);
     let join = rt.handle().spawn(async move {
         let mut connector = TcpTlsConnector { verify };
-        let mut verdicts = VerdictCache::new();
+        // Snapshot the process-global verdict cache so a Refresh doesn't
+        // re-pay a known-failing TLS handshake, then write the result
+        // back when the walk completes. Snapshot/restore bracket the
+        // `.await` (no lock held across it); a cancelled walk that never
+        // reaches the writeback just loses its updates, which is fine.
+        let mut verdicts = tracker_verdicts_snapshot();
         run_fetch(&mut connector, &url_vec, features, probe_timeout, &mut verdicts, &tx).await;
+        tracker_verdicts_store(verdicts);
     });
 
     Box::into_raw(Box::new(HxnetTrackerFetch {
@@ -3172,6 +3214,10 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_poll(
     out: *mut HxnetTrackerEvent,
 ) -> c_int {
     if handle.is_null() || out.is_null() {
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_tracker_fetch_poll: NULL handle or out pointer"
+        );
         return HXNET_TRK_POLL_CLOSED;
     }
     let h = &mut *handle;

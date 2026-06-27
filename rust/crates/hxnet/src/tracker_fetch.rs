@@ -107,8 +107,9 @@ pub enum TlsVerdict {
 }
 
 /// URL → [`TlsVerdict`] map. The runner reads it to decide whether to
-/// attempt TLS, and updates it as attempts resolve.
-#[derive(Debug, Default)]
+/// attempt TLS, and updates it as attempts resolve. `Clone` so the FFI
+/// can snapshot a process-global cache for a walk and write it back.
+#[derive(Debug, Default, Clone)]
 pub struct VerdictCache {
     map: HashMap<String, TlsVerdict>,
 }
@@ -271,7 +272,7 @@ async fn fetch_one<C: TrackerConnector>(
 
     match tracker::run_v3_probe(&mut stream, features, probe_timeout).await {
         Ok(Outcome::Listing(listing)) => return emit_listing(out, url, listing).await,
-        Ok(Outcome::ProbeTimedOut) => { /* fall through to the v1 reopen */ }
+        Ok(Outcome::ProbeInconclusive) => { /* fall through to the v1 reopen */ }
         Err(e) => return emit_error(out, url, e.to_string()).await,
     }
 
@@ -636,7 +637,7 @@ mod tests {
 
     #[tokio::test]
     async fn v1_tracker_needs_probe_reopen() {
-        // First connection: silent (EOF during probe → ProbeTimedOut).
+        // First connection: silent (EOF during probe → ProbeInconclusive).
         // Second connection (reopen): a v1 reply.
         let mut script = v1_header(1);
         script.extend_from_slice(&v1_record([9, 9, 9, 9], 6000, 0, b"late", b""));
