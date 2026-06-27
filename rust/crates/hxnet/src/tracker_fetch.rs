@@ -196,11 +196,15 @@ async fn emit_listing(
     url: &str,
     listing: tracker::TrackerListing,
 ) -> bool {
+    // Capture the Copy header fields before moving `listing.records` out,
+    // so the loop body doesn't read from a partially-moved value.
+    let version = listing.version;
+    let count = listing.expected;
     if out
         .send(TrackerEvent::BatchBegin {
             url: url.to_owned(),
-            version: listing.version,
-            count: listing.expected,
+            version,
+            count,
         })
         .await
         .is_err()
@@ -211,7 +215,7 @@ async fn emit_listing(
         if out
             .send(TrackerEvent::Record {
                 url: url.to_owned(),
-                total: listing.expected,
+                total: count,
                 record,
             })
             .await
