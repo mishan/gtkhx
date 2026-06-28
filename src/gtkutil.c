@@ -919,19 +919,38 @@ button_scaled_size (GdkPixbuf *src, GtkhxScaleArea area, int *out_w,
 }
 
 /* Load the source pixbuf for a tracked button. Returns a new ref the
- * caller owns, or NULL if neither source is available. */
+ * caller owns, or NULL if neither source is available.
+ *
+ * Caches the decoded GResource pixbuf in BTN_KEY_PIXBUF on first
+ * load so subsequent theme "changed" emissions (e.g. dragging a
+ * scale spin row, which fans out one signal per tick across every
+ * tracked button) don't re-decode the same PNG over and over. The
+ * cache is per-button and dropped when the button itself is
+ * destroyed (set_data_full's destroy hint takes care of the
+ * g_object_unref). BTN_KEY_RESOURCE never changes on a live button
+ * — it's set once at construction and is the unique key — so the
+ * cached pixbuf stays valid for the button's lifetime. */
 static GdkPixbuf *
 button_load_source (GtkWidget *btn)
 {
-    const char *resource_name
-        = g_object_get_data (G_OBJECT (btn), BTN_KEY_RESOURCE);
     GdkPixbuf *source_pb = g_object_get_data (G_OBJECT (btn), BTN_KEY_PIXBUF);
-
-    if (resource_name) {
-        return gdk_pixbuf_new_from_resource (resource_name, NULL);
-    }
     if (source_pb) {
         return g_object_ref (source_pb);
+    }
+
+    const char *resource_name
+        = g_object_get_data (G_OBJECT (btn), BTN_KEY_RESOURCE);
+    if (resource_name) {
+        GdkPixbuf *pb = gdk_pixbuf_new_from_resource (resource_name, NULL);
+        if (pb) {
+            /* Cache for next time. set_data_full holds its own
+			 * reference via the destroy hint; we hand the caller a
+			 * fresh ref on top. */
+            g_object_set_data_full (G_OBJECT (btn), BTN_KEY_PIXBUF,
+                                    g_object_ref (pb),
+                                    (GDestroyNotify) g_object_unref);
+        }
+        return pb;
     }
     return NULL;
 }
