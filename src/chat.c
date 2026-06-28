@@ -34,6 +34,7 @@
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
+#include "gtkhx_theme.h"
 #include "hx_panel.h"
 #include "panel_registry.h"
 #include "toolbar.h"
@@ -186,54 +187,49 @@ GdkRGBA colors[] = {
 /* Refresh palette slots that depend on Light / Dark and push the
  * new palette into every live xtext widget. The mIRC slots (0..31)
  * are theme-agnostic — same red is "red" in both modes, server
- * authors expect those exact values. Only the UI roles change:
+ * authors expect those exact values. The six UI-role slots (32..37)
+ * come from the active theme (gtkhx_theme_get_color); a theme that
+ * omits a slot falls back to the built-in default, which matches
+ * the historical light/dark constants byte-for-byte. The historical
+ * defaults for reference:
  *
  *   Light  XTEXT_FG            = #1d1d1d  (near-black on white)
  *          XTEXT_BG            = #fafafa  (matches Adwaita's view bg)
  *          MARK_FG             = #ffffff  (selection contrast)
  *          MARK_BG             = #3584e4  (Adwaita accent blue)
  *          XTEXT_HISTORY_MUTED = #5e5e5e  (~5.7:1 vs #fafafa)
- *   Dark   XTEXT_FG            = #cccccc  (current light-grey on black)
+ *   Dark   XTEXT_FG            = #cccccc
  *          XTEXT_BG            = #000000
  *          MARK_FG             = #eeeeee
  *          MARK_BG             = #204a87  (Tango blue, the original)
  *          XTEXT_HISTORY_MUTED = #9a9a9a  (~7:1 vs #000000)
  *
  * Called once at startup from gtkhx_activate after the
- * AdwStyleManager has settled on Light or Dark, and again any
- * time the manager's `dark` property flips. */
+ * AdwStyleManager has settled on Light or Dark; again any time the
+ * manager's `dark` property flips; and again any time the theme's
+ * "changed" signal fires (theme file reload, future Settings edit). */
 void
 gtkhx_apply_theme_palette (gboolean dark)
 {
-    if (dark) {
-        colors[32] = (GdkRGBA){ 0xee / 255.0, 0xee / 255.0, 0xee / 255.0, 1.0 };
-        colors[33]
-            = (GdkRGBA){ 0x20 / 255.0, 0x4a / 255.0, 0x87 / 255.0, 1.0 };
-        colors[34]
-            = (GdkRGBA){ 0xcc / 255.0, 0xcc / 255.0, 0xcc / 255.0, 1.0 };
-        colors[35] = (GdkRGBA){ 0.0, 0.0, 0.0, 1.0 };
-        /* XTEXT_HISTORY_MUTED — chat-history secondary text. On a
-		 * black bg #9a9a9a reads as "noticeably dimmer than the
-		 * live #cccccc fg" (about 30% less luminance) without
-		 * vanishing into the background. */
-        colors[XTEXT_HISTORY_MUTED]
-            = (GdkRGBA){ 0x9a / 255.0, 0x9a / 255.0, 0x9a / 255.0, 1.0 };
-    } else {
-        colors[32] = (GdkRGBA){ 1.0, 1.0, 1.0, 1.0 };
-        colors[33]
-            = (GdkRGBA){ 0x35 / 255.0, 0x84 / 255.0, 0xe4 / 255.0, 1.0 };
-        colors[34]
-            = (GdkRGBA){ 0x1d / 255.0, 0x1d / 255.0, 0x1d / 255.0, 1.0 };
-        colors[35]
-            = (GdkRGBA){ 0xfa / 255.0, 0xfa / 255.0, 0xfa / 255.0, 1.0 };
-        /* XTEXT_HISTORY_MUTED — chat-history secondary text. On
-		 * #fafafa #5e5e5e gives ~5.7:1 contrast — well above WCAG
-		 * AA's 4.5:1 floor for body text, while still reading as
-		 * "secondary" relative to the near-black #1d1d1d live fg
-		 * (~14:1). The fixed mIRC slot 14 used previously (#777777)
-		 * was only ~4:1 against white — borderline on light bg. */
-        colors[XTEXT_HISTORY_MUTED]
-            = (GdkRGBA){ 0x5e / 255.0, 0x5e / 255.0, 0x5e / 255.0, 1.0 };
+    /* Slot ↔ role mapping. The slot numbers (32..37) match
+	 * xtext.h's XTEXT_* defines exactly; the roles are the
+	 * theme-file-visible names. */
+    static const struct {
+        int slot;
+        GtkhxPaletteRole role;
+    } role_to_slot[] = {
+        { XTEXT_MARK_FG,        GTKHX_PAL_MARK_FG },
+        { XTEXT_MARK_BG,        GTKHX_PAL_MARK_BG },
+        { XTEXT_FG,             GTKHX_PAL_FG },
+        { XTEXT_BG,             GTKHX_PAL_BG },
+        { XTEXT_MARKER,         GTKHX_PAL_MARKER },
+        { XTEXT_HISTORY_MUTED,  GTKHX_PAL_HISTORY_MUTED },
+    };
+    size_t i;
+
+    for (i = 0; i < G_N_ELEMENTS (role_to_slot); i++) {
+        colors[role_to_slot[i].slot]
+            = gtkhx_theme_get_color (role_to_slot[i].role, dark);
     }
 
     /* Push the new palette into every live xtext widget. Chat /
@@ -2538,6 +2534,10 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
      * unresolved ascender-ink clip on newly typed glyphs at small
      * Monospace sizes. See gtkhx_apply_input_font in gtkhx.c. */
     gtkhx_apply_input_font (gchat->input);
+    /* Colors track the active GtkHx theme (.gtkhx-input class) —
+     * font path stays on .monospace because of the clip carve-out
+     * above. */
+    gtkhx_apply_input_style (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     {
@@ -2970,6 +2970,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gchat->input = gtk_text_view_new ();
     /* See create_chat_window — theme monospace, not the Settings font. */
     gtkhx_apply_input_font (gchat->input);
+    gtkhx_apply_input_style (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     {

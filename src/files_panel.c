@@ -12,6 +12,7 @@
 #include <gtk/gtk.h>
 
 #include "hx.h"        /* the_session */
+#include "gtkhx.h"     /* gtkhx_apply_listview_style */
 #include "debug.h"     /* debug_log — GTKHX_DEBUG=files for inline-rename trace */
 #include "hl_access.h" /* HL_ACCESS_* + hl_access_has */
 #include "files.h"     /* ICON_* */
@@ -1326,6 +1327,8 @@ files_panel_new (HxFilesProvider *provider, files_panel_swap_cb swap_cb,
 
         p->column_view
             = gtk_column_view_new (GTK_SELECTION_MODEL (p->selection));
+        /* Follow the active GtkHx theme's fg/bg via .gtkhx-listview. */
+        gtkhx_apply_listview_style (p->column_view);
         gtk_column_view_set_show_row_separators (
             GTK_COLUMN_VIEW (p->column_view), FALSE);
         gtk_column_view_set_show_column_separators (

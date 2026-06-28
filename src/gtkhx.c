@@ -52,6 +52,7 @@
 #include "tasks.h"
 #include "network.h"
 #include "gtkutil.h"
+#include "gtkhx_theme.h" /* gtkhx_theme_get_color, GTKHX_PAL_* */
 #include "debug.h"
 #include "toolbar.h"
 #include "dock_layout.h"
@@ -203,6 +204,10 @@ gtkhx_refresh_css (void)
 {
     gchar *fontprops;
     gchar *css;
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    gboolean dark = adw_style_manager_get_dark (sm);
+    GdkRGBA fg = gtkhx_theme_get_color (GTKHX_PAL_FG, dark);
+    GdkRGBA bg = gtkhx_theme_get_color (GTKHX_PAL_BG, dark);
 
     if (!gtkhx_css_provider) {
         gtkhx_css_provider = gtk_css_provider_new ();
@@ -211,28 +216,121 @@ gtkhx_refresh_css (void)
 
     fontprops = pango_to_css_props (gtkhx_font_desc);
 
-    /* The .gtkhx-text rule covers GtkEntry / GtkLabel / etc. directly,
-	 * and the descendant ".gtkhx-text text" rule reaches GtkTextView's
-	 * inner "text" CSS node so the input area picks up the same font.
+    /* Two themed rules:
 	 *
-	 * We deliberately do NOT set color / background-color / caret-color
-	 * here. The early Phase-5 version did, copying fg_col / bg_col from
-	 * the xtext output styling onto the chat input, subject entry,
-	 * private-message editor, and news viewer — which forced light-grey-
-	 * on-black on those widgets regardless of the user's Light / Dark
-	 * theme choice. xtext's chat-output area still uses fg_col / bg_col
-	 * directly (it draws its own contents with cairo), so the in-chat
-	 * line styling is unaffected; only the surrounding input / subject /
-	 * news widgets follow the system theme now, which is what the user
-	 * expects. */
-    css = g_strdup_printf (".gtkhx-text, .gtkhx-text text {"
-                           "  %s"
-                           "}",
-                           fontprops);
+	 *   .gtkhx-text   — read-only text surfaces (agreement window, news
+	 *                   bodies, broadcast viewer, gchat subject entry).
+	 *                   Gets the active theme's font AND fg/bg/caret
+	 *                   so themed surfaces match the chat output.
+	 *
+	 *   .gtkhx-input  — editable text views (chat / PM / pchat input
+	 *                   boxes). Gets ONLY the theme's fg/bg/caret —
+	 *                   font stays on the built-in .monospace class
+	 *                   (applied via gtkhx_apply_input_font). Setting
+	 *                   font on the input via .gtkhx-text-style CSS
+	 *                   triggered an ascender-ink clip on newly typed
+	 *                   glyphs at small Monospace sizes (Phase-5 bug);
+	 *                   colors don't have that problem.
+	 *
+	 * The descendant ".gtkhx-{text,input} text" rule reaches
+	 * GtkTextView's inner "text" CSS node so the actual body picks
+	 * up the same look (GtkTextView's outer node is just chrome).
+	 *
+	 * Earlier we deliberately omitted color/background-color here
+	 * because the source was a *single* hardcoded (fg_col, bg_col)
+	 * pair that forced light-grey-on-black on those widgets
+	 * regardless of the user's Light/Dark choice. The theme model
+	 * fixes that: each theme has explicit light + dark palette
+	 * variants, and we pick the variant via AdwStyleManager's `dark`
+	 * property — same dispatch the xtext palette uses — so the
+	 * applied colors always match the active light/dark mode. */
+    gchar *fghex = g_strdup_printf ("#%02x%02x%02x",
+                                    (int) (fg.red   * 255.0 + 0.5),
+                                    (int) (fg.green * 255.0 + 0.5),
+                                    (int) (fg.blue  * 255.0 + 0.5));
+    gchar *bghex = g_strdup_printf ("#%02x%02x%02x",
+                                    (int) (bg.red   * 255.0 + 0.5),
+                                    (int) (bg.green * 255.0 + 0.5),
+                                    (int) (bg.blue  * 255.0 + 0.5));
+
+    /* .gtkhx-listview — color-only theming for any list-shaped
+	 * surface (GtkColumnView, GtkListView, GtkListBox) that wants
+	 * the GtkHx theme's fg/bg without inheriting the .gtkhx-text
+	 * font or the .gtkhx-userlist row-padding override. Used by
+	 * tracker, tasks, files browser, news browser.
+	 *
+	 * Two cases to cover, because the class is sometimes applied
+	 * to a parent of the listview/list node and sometimes directly
+	 * to it:
+	 *
+	 *   GtkColumnView (tracker, files panels): class sits on the
+	 *     `columnview` node, so the rows are .gtkhx-listview
+	 *     descendants — `listview > row` / `> row > cell` match.
+	 *   GtkListView (news_browser): class sits on the `listview`
+	 *     node itself; rows are direct children → `.gtkhx-listview
+	 *     > row` matches.
+	 *   GtkListBox (tasks): class sits on the `list` node itself;
+	 *     rows are direct children → same direct-child rule.
+	 *
+	 * Both descendant and direct-child selectors are emitted so a
+	 * caller can apply .gtkhx-listview at either layer without
+	 * worrying about the node tree. The header selector applies to
+	 * GtkColumnView's title row. Selection (row:selected) keeps the
+	 * system theme accent so selected rows stay visually distinct
+	 * on a themed background. */
+    /* The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
+	 * get painted — chat is the surface the palette was designed
+	 * for, and built-in defaults are tuned for it.
+	 *
+	 * The listview-shaped surfaces (.gtkhx-listview, tracker / users
+	 * / tasks / files / news rows) only get painted when the active
+	 * theme has *explicitly* set FG or BG. That gates the "force
+	 * chat colors onto sidebar lists" behavior to themes that opted
+	 * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
+	 * theme that omits the FG/BG keys (or the shipped "default"
+	 * theme after dropping them from default.ini) leaves the listview
+	 * surfaces at the system theme's defaults. */
+    GString *css_buf = g_string_new (NULL);
+    g_string_append_printf (
+        css_buf,
+        ".gtkhx-text, .gtkhx-text text {"
+        "  %s"
+        "  color: %s;"
+        "  background-color: %s;"
+        "  caret-color: %s;"
+        "}"
+        ".gtkhx-input, .gtkhx-input text {"
+        "  color: %s;"
+        "  background-color: %s;"
+        "  caret-color: %s;"
+        "}",
+        fontprops, fghex, bghex, fghex,
+        fghex, bghex, fghex);
+    if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
+        || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        g_string_append_printf (
+            css_buf,
+            ".gtkhx-listview,"
+            ".gtkhx-listview > header,"
+            ".gtkhx-listview listview,"
+            ".gtkhx-listview listview > row:not(:selected),"
+            ".gtkhx-listview listview > row:not(:selected) > cell,"
+            ".gtkhx-listview list,"
+            ".gtkhx-listview list > row:not(:selected),"
+            ".gtkhx-listview > row:not(:selected),"
+            ".gtkhx-listview > row:not(:selected) > cell {"
+            "  color: %s;"
+            "  background-color: %s;"
+            "}",
+            fghex, bghex);
+    }
+    css = g_string_free (css_buf, FALSE);
 
     gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
     g_free (css);
+    g_free (fghex);
+    g_free (bghex);
     g_free (fontprops);
 }
 
@@ -241,6 +339,12 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 {
     gchar *fontprops;
     gchar *css;
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    gboolean dark = adw_style_manager_get_dark (sm);
+    GdkRGBA fg = gtkhx_theme_get_color (GTKHX_PAL_FG, dark);
+    GdkRGBA bg = gtkhx_theme_get_color (GTKHX_PAL_BG, dark);
+    gchar *fghex;
+    gchar *bghex;
 
     if (!gtkhx_userlist_css_provider) {
         gtkhx_userlist_css_provider = gtk_css_provider_new ();
@@ -248,11 +352,45 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
     }
 
     fontprops = pango_to_css_props (fd);
-    css = g_strdup_printf (".gtkhx-userlist { %s }", fontprops);
+    fghex = g_strdup_printf ("#%02x%02x%02x",
+                             (int) (fg.red   * 255.0 + 0.5),
+                             (int) (fg.green * 255.0 + 0.5),
+                             (int) (fg.blue  * 255.0 + 0.5));
+    bghex = g_strdup_printf ("#%02x%02x%02x",
+                             (int) (bg.red   * 255.0 + 0.5),
+                             (int) (bg.green * 255.0 + 0.5),
+                             (int) (bg.blue  * 255.0 + 0.5));
+
+    /* Font selector stays on .gtkhx-userlist itself (the users-list
+	 * font pref) regardless of theme — separate user pref the
+	 * userlist always honors. Theme fg/bg are painted across the
+	 * column-view's inner nodes ONLY when the active theme has
+	 * explicitly set FG or BG; themes that didn't opt in (and the
+	 * shipped default) leave the userlist at system colors. Headers
+	 * always keep system styling so column titles stay legible.
+	 * Selection (row:selected) keeps the system accent. */
+    GString *css_buf = g_string_new (NULL);
+    g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
+    if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
+        || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        g_string_append_printf (
+            css_buf,
+            ".gtkhx-userlist,"
+            ".gtkhx-userlist listview,"
+            ".gtkhx-userlist listview > row:not(:selected),"
+            ".gtkhx-userlist listview > row:not(:selected) > cell {"
+            "  color: %s;"
+            "  background-color: %s;"
+            "}",
+            fghex, bghex);
+    }
+    css = g_string_free (css_buf, FALSE);
 
     gtk_css_provider_load_from_string (gtkhx_userlist_css_provider, css);
 
     g_free (css);
+    g_free (fghex);
+    g_free (bghex);
     g_free (fontprops);
 }
 
@@ -292,6 +430,41 @@ gtkhx_apply_input_font (GtkWidget *w)
      * clip. ASCII-art preservation (the main reason to want monospace)
      * still works. */
     gtk_text_view_set_monospace (GTK_TEXT_VIEW (w), TRUE);
+}
+
+void
+gtkhx_apply_input_style (GtkWidget *w)
+{
+    if (!w) {
+        return;
+    }
+    if (!gtkhx_css_provider) {
+        gtkhx_refresh_css ();
+    }
+    /* Color-only sibling of .gtkhx-text — paints the active theme's
+     * fg / bg / caret on chat / PM / pchat input boxes without
+     * touching the font. See gtkhx_refresh_css for the carve-out
+     * rationale and the per-class CSS payload. */
+    if (!gtk_widget_has_css_class (w, "gtkhx-input")) {
+        gtk_widget_add_css_class (w, "gtkhx-input");
+    }
+}
+
+void
+gtkhx_apply_listview_style (GtkWidget *w)
+{
+    if (!w) {
+        return;
+    }
+    if (!gtkhx_css_provider) {
+        gtkhx_refresh_css ();
+    }
+    /* List-shaped sibling of .gtkhx-text / .gtkhx-input — paints
+     * theme fg/bg on the column-view's listview, non-selected rows,
+     * and cells. See gtkhx_refresh_css for the CSS payload. */
+    if (!gtk_widget_has_css_class (w, "gtkhx-listview")) {
+        gtk_widget_add_css_class (w, "gtkhx-listview");
+    }
 }
 
 void
@@ -786,6 +959,14 @@ fe_init (void)
 
     memset (&icon_files, 0, sizeof (icon_files));
     prefs_read ();
+    /* Load the active theme before any widget construction. fe_init
+     * builds the toolbar / file-browser / users / etc. windows below;
+     * those button helpers subscribe to the theme "changed" signal
+     * and read scales live. Loading the theme here means the very
+     * first measure pass gets the right factors instead of building
+     * at the built-in default and then re-laying-out on the post-
+     * fe_init load. See gtkhx_theme.{c,h}. */
+    gtkhx_theme_load_active ();
     /* prep the screen-wide CSS provider once prefs are loaded
      * so the very first widget that gets gtkhx_apply_text_style() picks
      * up the right look on the first paint. */
@@ -844,8 +1025,10 @@ fe_init (void)
 
 /* AdwStyleManager::notify::dark trampoline — reads the new dark
  * state off the manager and pushes it into the xtext palette plus
- * every live chat-output widget. Connected once from
- * gtkhx_activate. */
+ * every live chat-output widget; then rebuilds the .gtkhx-text /
+ * .gtkhx-input CSS provider so the agreement / news / chat-input
+ * surfaces re-paint with the dark variant of the active theme's
+ * fg/bg. Connected once from gtkhx_activate. */
 static void
 on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
                                gpointer user_data)
@@ -854,6 +1037,29 @@ on_style_manager_dark_changed (GObject *object, GParamSpec *pspec,
     (void)pspec;
     (void)user_data;
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+    gtkhx_refresh_css ();
+    /* The users-list provider also encodes theme fg/bg now — keep
+     * the existing font (users_font_desc lives in users.c and is
+     * the source of truth for the userlist font pref). */
+    gtkhx_refresh_userlist_css (users_font_desc);
+}
+
+/* GtkhxTheme::changed trampoline — when the active theme file is
+ * reloaded (THEMENAME edit, Settings theme picker), re-pull every
+ * UI-role slot for the *currently active* light/dark variant and
+ * repaint every live xtext; then rebuild the CSS provider for the
+ * non-xtext text surfaces (agreement, news, inputs). Connected
+ * once from gtkhx_activate alongside the AdwStyleManager
+ * subscription. */
+static void
+on_theme_changed (GtkhxTheme *theme, gpointer user_data)
+{
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    (void)theme;
+    (void)user_data;
+    gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+    gtkhx_refresh_css ();
+    gtkhx_refresh_userlist_css (users_font_desc);
 }
 
 static void
@@ -942,12 +1148,27 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
      * light-mode set (manager says light) before any window opens.
      * Subsequent `notify::dark` fires (e.g. user flips THEME in
      * Settings, or follows-system and system goes dark) re-run
-     * gtkhx_apply_theme_palette to refresh every open xtext. */
+     * gtkhx_apply_theme_palette to refresh every open xtext.
+     * The theme's "changed" signal does the same when the active
+     * theme file is reloaded (THEMENAME changed, future Settings
+     * theme picker), reusing the variant the manager currently
+     * reports. */
     {
         AdwStyleManager *sm = adw_style_manager_get_default ();
         gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
+        /* Re-emit the .gtkhx-text / .gtkhx-input CSS with the now-
+         * settled light/dark variant. fe_init's earlier refresh_css
+         * fired before AdwStyleManager had its final dark state, so
+         * the provider could be holding the wrong variant's fg/bg —
+         * that's fine for the toolbar (which doesn't use those
+         * classes) but the agreement / news / inputs about to be
+         * built in subsequent windows would have inherited the
+         * stale colors. */
+        gtkhx_refresh_css ();
         g_signal_connect (sm, "notify::dark",
                           G_CALLBACK (on_style_manager_dark_changed), NULL);
+        g_signal_connect (gtkhx_theme_get_default (), "changed",
+                          G_CALLBACK (on_theme_changed), NULL);
     }
 }
 
@@ -1569,6 +1790,11 @@ output_agreement (session *sess, const char *agreement, guint16 len)
     gtk_text_view_set_editable (GTK_TEXT_VIEW (agreetext), FALSE);
     gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (agreetext), FALSE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (agreetext), GTK_WRAP_WORD);
+    /* Follow the active GtkHx theme's fg/bg the same way the chat
+	 * output does. The agreement is the user's first read of the
+	 * server's voice; making it Solarized when the chat below it
+	 * is Solarized is the consistency call. */
+    gtkhx_apply_text_style (agreetext);
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (agreetext), 12);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (agreetext), 12);
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (agreetext), 12);

@@ -186,16 +186,13 @@
 #define CFG_VOICE_PTT_ENABLED "VOICEPTTENABLED"
 #define CFG_VOICE_PTT_KEY "VOICEPTTKEY"
 
-/* Theming: per-area UI scale overrides (integer percent of the
- * unscaled source art; 100 == source size). The shipped defaults are
- * not 100 — the default theme renders buttons at 200% and the user
- * list at 125% — and 0 means "no override, use the default theme's
- * factor". See struct gtkhx_prefs.scale_*, gtkhx_theme.{c,h}, and
- * docs/theming-scoping.md. */
-#define CFG_SCALE_TOOLBAR "SCALETOOLBAR"
-#define CFG_SCALE_WINDOW_BUTTONS "SCALEWINDOWBUTTONS"
-#define CFG_SCALE_USERLIST_ICON "SCALEUSERLISTICON"
-#define CFG_SCALE_USERLIST_TEXT "SCALEUSERLISTTEXT"
+/* Theming: name of the active theme. Picks $CONFIG/themes/<name>.ini
+ * (with the built-in default GResource as the fallback). All scale
+ * and palette state lives in the theme file — this is the only
+ * theming key in gtkhxrc. Empty / unset → "default". See
+ * gtkhx_theme.{c,h}, docs/theming-scoping.md,
+ * docs/theming-file-format.md. */
+#define CFG_THEME_NAME "THEMENAME"
 
 /* GKeyFile section name for the prefs file. */
 #define CFG_KEYFILE_GROUP "gtkhx"

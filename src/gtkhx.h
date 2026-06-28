@@ -29,6 +29,20 @@ extern void gtkhx_apply_text_style (GtkWidget *w);
  * gtkhx.c for the full history. */
 extern void gtkhx_apply_input_font (GtkWidget *w);
 
+/* Tag an editable text widget (chat / pchat / PM input) with the
+ * .gtkhx-input CSS class so it picks up the active theme's fg / bg /
+ * caret colors. Independent of gtkhx_apply_input_font: that one
+ * applies the monospace font class; this one only paints colors.
+ * The two are usually called together. */
+extern void gtkhx_apply_input_style (GtkWidget *w);
+
+/* Tag a list-shaped widget (GtkColumnView / GtkListView) with the
+ * .gtkhx-listview CSS class so its rows and the empty area below
+ * them follow the active theme's fg/bg. Used for tracker, files
+ * browser, and news browser. Selection styling is left to the
+ * system theme so selected rows stay visually distinct. */
+extern void gtkhx_apply_listview_style (GtkWidget *w);
+
 /* Same idea for the user list font (independent prefs entry, no
  * fg/bg). Tags the widget with the .gtkhx-userlist class. */
 extern void gtkhx_apply_userlist_style (GtkWidget *w);

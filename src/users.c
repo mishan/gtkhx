@@ -28,6 +28,7 @@
 #include <ctype.h>
 #include "hx.h"
 #include "gtkhx_session.h"
+#include "gtkhx_theme.h"
 #include "hx_panel.h"
 #include "panel_registry.h"
 #include "toolbar.h"
@@ -1078,7 +1079,34 @@ users_clear (struct htlc_conn *htlc, struct chat *chat)
 GdkRGBA *
 user_color_gdk (guint16 color)
 {
-    if ((color % 4) == 0) {
+    /* Theme-supplied overrides win when set. The 4-slot status
+	 * palette (active/idle/admin/admin-idle) maps 1:1 onto
+	 * GtkhxUserColor by `color % 4`. Solarized (and any theme that
+	 * sets [users.light]/[users.dark]) keeps names readable against
+	 * its themed listview background — without an override, names
+	 * inherit the GTK foreground via gtk_widget_get_color in the
+	 * snapshot path, which on a themed row reads as gray/cream and
+	 * clashes with the rest of the chrome.
+	 *
+	 * The buffer is static — every caller copies the GdkRGBA out
+	 * of the returned pointer before doing anything else with it
+	 * (cell renderer paths in users_view.c and msg.c both
+	 * dereference once for the snapshot or Pango span). User-list
+	 * rendering is main-thread-only, so no concurrent reads. */
+    static GdkRGBA themed;
+    AdwStyleManager *sm = adw_style_manager_get_default ();
+    gboolean dark = sm ? adw_style_manager_get_dark (sm) : FALSE;
+    GtkhxUserColor slot = (GtkhxUserColor)(color % 4);
+
+    if (gtkhx_theme_get_user_color (slot, dark, &themed)) {
+        return &themed;
+    }
+
+    /* No theme override → preserve historical behaviour: regular
+	 * users use the GTK foreground (NULL → caller falls back to
+	 * gtk_widget_get_color), admin/idle/admin-idle use the hardcoded
+	 * gdk_user_colors[] palette. */
+    if (slot == GTKHX_USER_COLOR_ACTIVE) {
         return NULL;
     }
     return &gdk_user_colors[color % 4];
