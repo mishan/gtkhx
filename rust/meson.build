@@ -86,6 +86,7 @@ rust_sources = files(
   'crates/hxvoice-runtime/src/runtime.rs',
   'crates/hxvoice-runtime/src/ffi.rs',
   'crates/hx-image-decode/src/lib.rs',
+  'crates/hx-image-decode/src/compat.rs',
   'crates/hx-image-decode/src/sniff.rs',
   'crates/hx-image-decode/src/ffi.rs',
   'crates/hx-image-decode/src/caps.rs',
@@ -121,6 +122,79 @@ rust_target_dir = meson.project_build_root() / 'rust-target'
 # R3.3) inherit the feature without needing a second flip.
 cargo_features = 'hxbridge/runtime'
 
+# Inline-media image decoder backend (docs/glycin-migration-plan.md).
+# -Dglycin_compat selects which glycin loader generation hx-image-decode
+# targets, by flipping a cargo feature on that crate:
+#
+#   '2': glycin 3.x / 2+ loaders. The crate's own default feature is
+#       already glycin-v3, so we just append it explicitly (harmless, and
+#       keeps the cargo line self-documenting). Defaults stay on, so every
+#       workspace member builds as before.
+#
+#   '1': glycin 2.x / 1+ loaders (Debian stable). This MUST suppress the
+#       crate's default glycin-v3 — enabling both backends at once is a
+#       hard compile_error (src/compat.rs) — so we pass
+#       --no-default-features. Because that flag is workspace-wide, it
+#       also drops the *other* members' defaults; only hxcompress has
+#       load-bearing ones (lz4 + zstd), so we re-supply exactly those.
+#       Any future member that grows a default feature must be added
+#       here too.
+#
+#   'auto' (default): probe the build host for the newest installed
+#       loader generation and resolve to '2' or '1'. For native builds
+#       the build host IS the target host, so this picks the backend that
+#       will actually find loaders at runtime; for the Flatpak build the
+#       configure step runs inside the runtime (which the manifest still
+#       pins to '2' explicitly, so it never depends on the probe).
+glycin_opt = get_option('glycin_compat')
+if glycin_opt == 'auto'
+  # Scan, newest-first, for a registered loader generation. glycin itself
+  # discovers loaders via `<datadir>/glycin[-loaders]/<gen>+/conf.d/*.conf`
+  # across $XDG_DATA_DIRS, so the presence of those .conf files is the
+  # authoritative "decoding will work here" signal; the libexec dirs are a
+  # secondary fallback. Prints '2', '1', or 'none'.
+  glycin_probe = '''
+    f1=0; f2=0
+    roots="$(printf %s "${XDG_DATA_DIRS:-/usr/local/share:/usr/share}" | tr : " ") /usr/share /usr/local/share"
+    for base in $roots; do
+      for sub in glycin glycin-loaders; do
+        for c in "$base/$sub/2+/conf.d/"*.conf; do [ -e "$c" ] && f2=1; done
+        for c in "$base/$sub/1+/conf.d/"*.conf; do [ -e "$c" ] && f1=1; done
+      done
+    done
+    for d in /usr/libexec/glycin-loaders /usr/lib/*/glycin-loaders /usr/lib64/glycin-loaders; do
+      [ -d "$d/2+" ] && f2=1
+      [ -d "$d/1+" ] && f1=1
+    done
+    if [ "$f2" = 1 ]; then echo 2; elif [ "$f1" = 1 ]; then echo 1; else echo none; fi
+  '''
+  glycin_detect = run_command(find_program('sh'), '-c', glycin_probe, check : false)
+  glycin_found = glycin_detect.stdout().strip()
+  if glycin_found == '1'
+    glycin_gen = '1'
+    message('glycin loader auto-detect: found the 1+ generation → glycin 2.x backend.')
+  elif glycin_found == '2'
+    glycin_gen = '2'
+    message('glycin loader auto-detect: found the 2+ generation → glycin 3.x backend.')
+  else
+    glycin_gen = '2'
+    warning('glycin loader auto-detect: no glycin loaders found on the build ' +
+            'host; defaulting to the 2+ / glycin 3.x backend. If this build ' +
+            'targets a 1+-only runtime (e.g. Debian stable), pass ' +
+            '-Dglycin_compat=1.')
+  endif
+else
+  glycin_gen = glycin_opt
+endif
+
+if glycin_gen == '1'
+  cargo_no_default = '--no-default-features'
+  cargo_features = cargo_features + ',hxcompress/lz4,hxcompress/zstd,hx-image-decode/glycin-v2'
+else
+  cargo_no_default = ''
+  cargo_features = cargo_features + ',hx-image-decode/glycin-v3'
+endif
+
 # --ignore-rust-version: several transitive deps (zbus / zvariant /
 # zvariant_derive / zvariant_utils / zbus_macros / zbus_names /
 # glycin-common / glycin-utils) carry `rust-version` >= 1.87 in
@@ -140,12 +214,13 @@ cargo_features = 'hxbridge/runtime'
 rust_build = custom_target('rust-workspace',
   command : [
     'sh', '-c',
-    '@0@ build --release --ignore-rust-version --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
+    '@0@ build --release --ignore-rust-version @5@ --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
       cargo.full_path(),
       meson.current_source_dir() / 'Cargo.toml',
       rust_target_dir,
       cargo_features,
       '@OUTPUT@',
+      cargo_no_default,
     ),
   ],
   depend_files : rust_sources,
