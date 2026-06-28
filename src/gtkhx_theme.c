@@ -258,9 +258,22 @@ gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
 const char *
 gtkhx_theme_active_name (void)
 {
-    return (gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name)
-           ? gtkhx_prefs.theme_name
-           : "default";
+    const char *name = (gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name)
+                       ? gtkhx_prefs.theme_name
+                       : "default";
+    /* Same defensive rejection the loader applies (see
+     * safe_active_theme_name): a name with a path separator could
+     * escape the themes directory. Without this check the icon
+     * resolver would try to load
+     *   $CONFIG/themes/<bad-name>/icons/<logical>.png
+     * with the path separator embedded, fail every lookup, and
+     * never serve the user the default-theme bundled icons either.
+     * Treating bad names as "default" matches the loader's behavior
+     * end-to-end. */
+    if (strchr (name, '/') || strchr (name, '\\')) {
+        return "default";
+    }
+    return name;
 }
 
 /* ---- Hex parser ------------------------------------------------------- */

@@ -254,11 +254,21 @@ gtkhx_refresh_css (void)
                                     (int) (bg.green * 255.0 + 0.5),
                                     (int) (bg.blue  * 255.0 + 0.5));
 
-    /* .gtkhx-listview — color-only theming for any list-shaped
-	 * surface (GtkColumnView, GtkListView, GtkListBox) that wants
-	 * the GtkHx theme's fg/bg without inheriting the .gtkhx-text
-	 * font or the .gtkhx-userlist row-padding override. Used by
-	 * tracker, tasks, files browser, news browser.
+    /* .gtkhx-listview — color theming for list-shaped surfaces
+	 * (GtkColumnView, GtkListView, GtkListBox): tracker, tasks,
+	 * files browser, news browser.
+	 *
+	 * Only emitted for *non-default* themes. The built-in "default"
+	 * theme is supposed to feel like vanilla GtkHx + system colors
+	 * — its [palette] values are tuned for the chat output, not for
+	 * sidebar lists, and forcing #fafafa on a user's GNOME dark
+	 * desktop's listview was visually wrong. A user who picks
+	 * Solarized signed up for the cream-on-cream look across every
+	 * surface; the default theme stays out of the way.
+	 *
+	 * Header rows (.gtkhx-listview > header on GtkColumnView) are
+	 * never themed — column titles always render in the system
+	 * theme so they stay legible on any background.
 	 *
 	 * Two cases to cover, because the class is sometimes applied
 	 * to a parent of the listview/list node and sometimes directly
@@ -275,22 +285,20 @@ gtkhx_refresh_css (void)
 	 *
 	 * Both descendant and direct-child selectors are emitted so a
 	 * caller can apply .gtkhx-listview at either layer without
-	 * worrying about the node tree. The header selector applies to
-	 * GtkColumnView's title row. Selection (row:selected) keeps the
-	 * system theme accent so selected rows stay visually distinct
-	 * on a themed background. */
-    /* The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
+	 * worrying about the node tree. Headers (.gtkhx-listview >
+	 * header) stay system-themed so column titles are always
+	 * legible. Selection (row:selected) keeps the system accent.
+	 *
+	 * The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
 	 * get painted — chat is the surface the palette was designed
 	 * for, and built-in defaults are tuned for it.
 	 *
-	 * The listview-shaped surfaces (.gtkhx-listview, tracker / users
-	 * / tasks / files / news rows) only get painted when the active
+	 * The listview-shaped surfaces only get painted when the active
 	 * theme has *explicitly* set FG or BG. That gates the "force
 	 * chat colors onto sidebar lists" behavior to themes that opted
 	 * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
-	 * theme that omits the FG/BG keys (or the shipped "default"
-	 * theme after dropping them from default.ini) leaves the listview
-	 * surfaces at the system theme's defaults. */
+	 * theme that omits FG/BG (the shipped default, post-cleanup)
+	 * leaves the listview surfaces at the system theme. */
     GString *css_buf = g_string_new (NULL);
     g_string_append_printf (
         css_buf,
@@ -312,7 +320,6 @@ gtkhx_refresh_css (void)
         g_string_append_printf (
             css_buf,
             ".gtkhx-listview,"
-            ".gtkhx-listview > header,"
             ".gtkhx-listview listview,"
             ".gtkhx-listview listview > row:not(:selected),"
             ".gtkhx-listview listview > row:not(:selected) > cell,"
@@ -367,9 +374,10 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 	 * userlist always honors. Theme fg/bg are painted across the
 	 * column-view's inner nodes ONLY when the active theme has
 	 * explicitly set FG or BG; themes that didn't opt in (and the
-	 * shipped default) leave the userlist at system colors. Headers
-	 * always keep system styling so column titles stay legible.
-	 * Selection (row:selected) keeps the system accent. */
+	 * shipped default after the default.ini cleanup) leave the
+	 * userlist at system colors. Headers always keep system styling
+	 * so column titles stay legible. Selection (row:selected)
+	 * keeps the system accent. */
     GString *css_buf = g_string_new (NULL);
     g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)

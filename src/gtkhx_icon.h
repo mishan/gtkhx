@@ -34,8 +34,8 @@
  *
  * See docs/theming-file-format.md for the theme bundle layout.
  */
-#ifndef __gtkhx_ICON_H
-#define __gtkhx_ICON_H
+#ifndef GTKHX_ICON_H
+#define GTKHX_ICON_H
 
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include <glib.h>
@@ -60,4 +60,4 @@ void gtkhx_icon_invalidate_cache (void);
 
 G_END_DECLS
 
-#endif /* ndef __gtkhx_ICON_H */
+#endif /* ndef GTKHX_ICON_H */
