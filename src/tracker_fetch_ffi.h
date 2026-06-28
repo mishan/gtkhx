@@ -126,13 +126,15 @@ _Static_assert (sizeof (HxnetTrackerEvent) == 16 + 12 * sizeof (void *),
 
 /* Open a tracker fetch walk over `n` NUL-terminated "host" / "host:port"
  * URL strings (default port 5498). `features` is the v3 handshake
- * feature bitmask, `probe_ms` the v3-probe watchdog. `verify_cert`
- * (+ user_data) is the host-keyed TOFU check for non-WebPKI TLS certs;
- * NULL accepts any non-WebPKI cert. Returns an owned handle (free with
- * hxnet_tracker_fetch_close) or NULL on bad arguments. */
+ * feature bitmask, `probe_ms` the v3-probe watchdog. `proxy_uri` is an
+ * optional NUL-terminated "socks5://..." URI to tunnel the whole walk
+ * through (NULL = direct; a malformed/unsupported URI fails the open).
+ * `verify_cert` (+ user_data) is the host-keyed TOFU check for non-WebPKI
+ * TLS certs; NULL accepts any non-WebPKI cert. Returns an owned handle
+ * (free with hxnet_tracker_fetch_close) or NULL on bad arguments. */
 extern HxnetTrackerFetch *
 hxnet_tracker_fetch_open (const char *const *urls, gsize n, guint16 features,
-                          guint32 probe_ms,
+                          guint32 probe_ms, const char *proxy_uri,
                           hxnet_tracker_verify_cb_t verify_cert,
                           void *user_data);
 

@@ -1405,9 +1405,33 @@ hx_tracker_list_async (session *sess)
     for (int i = 0; i < n; i++) {
         urls[i] = gtkhx_prefs.tracker[i];
     }
+
+    /* Single SOCKS proxy for the whole walk (the user's choice over a
+     * per-URL array): resolve it once for the first tracker's endpoint,
+     * which the common uniform-proxy config (all_proxy / GNOME settings)
+     * applies to every tracker anyway. A "host" or "host:port" URL string;
+     * default the port to the HTRK 5498 the walk itself uses. */
+    g_autofree char *proxy_uri = NULL;
+    {
+        const char *u = urls[0];
+        const char *colon = strrchr (u, ':');
+        guint16 pport = HTRK_TCPPORT;
+        g_autofree char *phost = NULL;
+        if (colon && colon[1] != '\0') {
+            phost = g_strndup (u, (gsize) (colon - u));
+            int v = atoi (colon + 1);
+            if (v > 0 && v <= 65535) {
+                pport = (guint16) v;
+            }
+        } else {
+            phost = g_strdup (u);
+        }
+        proxy_uri = hx_bridge_lookup_socks_proxy (phost, pport);
+    }
+
     current_tracker_fetch = hxnet_tracker_fetch_open (
         (const char *const *) urls, (gsize) n, HTRK_V3_FEAT_IPV6,
-        hx_tracker_v3_probe_ms (), tracker_verify_cert_cb, NULL);
+        hx_tracker_v3_probe_ms (), proxy_uri, tracker_verify_cert_cb, NULL);
     g_free (urls);
     if (!current_tracker_fetch) {
         return;

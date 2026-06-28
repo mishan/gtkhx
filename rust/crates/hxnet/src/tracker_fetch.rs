@@ -411,6 +411,11 @@ pub struct TcpTlsConnector {
     /// TOFU verify callback (the C trust check, marshalled). `None`
     /// accepts any non-WebPKI cert — only safe for tests / probes.
     pub verify: Option<VerifyFn>,
+    /// Optional SOCKS proxy to tunnel every tracker connect through.
+    /// `None` connects direct. A single proxy applies to the whole walk
+    /// (sourced once in C from `GProxyResolver`); see
+    /// `hxnet_tracker_fetch_open`.
+    pub proxy: Option<crate::connect::ProxyConfig>,
 }
 
 impl TrackerConnector for TcpTlsConnector {
@@ -427,9 +432,10 @@ impl TrackerConnector for TcpTlsConnector {
         // channel held only for the call absorbs them (no consumer needed
         // here — the tracker walk has its own event stream).
         let (evt_tx, _evt_rx) = mpsc::channel(4);
-        let tcp = crate::connect::resolve_and_connect(&host, port, None, &evt_tx)
-            .await
-            .map_err(|e| ConnectError::Transport(e.to_string()))?;
+        let tcp =
+            crate::connect::resolve_and_connect(&host, port, self.proxy.as_ref(), &evt_tx)
+                .await
+                .map_err(|e| ConnectError::Transport(e.to_string()))?;
 
         match transport {
             Transport::Plain => Ok(TrackerTransport::Plain(tcp)),
@@ -828,7 +834,10 @@ mod tests {
             sock.flush().await.unwrap();
         });
 
-        let mut conn = TcpTlsConnector { verify: None };
+        let mut conn = TcpTlsConnector {
+            verify: None,
+            proxy: None,
+        };
         let mut verdicts = VerdictCache::new();
         let url = format!("127.0.0.1:{}", addr.port());
         verdicts.record(&url, TlsVerdict::No);

@@ -109,9 +109,16 @@ test_tracker_fetch_listing (void)
     }
 
     guint32 pms = probe_ms ();
+    /* GTKHX_TEST_SOCKS, when set, tunnels the whole walk through that
+     * SOCKS proxy — exercises the tracker proxy path end to end against
+     * the real tracker. Unset (the default) connects direct. */
+    const char *proxy_uri = g_getenv ("GTKHX_TEST_SOCKS");
+    if (proxy_uri && !*proxy_uri) {
+        proxy_uri = NULL;
+    }
     HxnetTrackerFetch *fetch = hxnet_tracker_fetch_open (
         (const char *const *) urls, url_strs->len, HTRK_V3_FEAT_IPV6, pms,
-        accept_all_verify, NULL);
+        proxy_uri, accept_all_verify, NULL);
     g_free (urls);
     g_assert_nonnull (fetch);
 
