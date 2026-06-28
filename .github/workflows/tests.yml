@@ -118,7 +118,7 @@ jobs:
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
-            libseccomp-devel lcms2-devel \
+            libseccomp-devel lcms2-devel fontconfig-devel \
             glycin-loaders \
             git rust cargo
 
@@ -177,6 +177,24 @@ jobs:
           GTKHX_GLYCIN_NO_SANDBOX: "1"
         run: |
           cd rust && cargo test --workspace --ignore-rust-version
+
+      - name: cargo test (hx-image-decode glycin-v2 / 1+ backend)
+        # The v2 backend (glycin 2.x / 1+ loaders — the Debian-stable
+        # target, selected by Meson -Dglycin_compat=1) lives behind the
+        # non-default `glycin-v2` feature, so the default-feature build and
+        # `cargo test --workspace` above never compile it. Build it here so
+        # the v2-only paths (temp-file staging, Loader::new(gio::File),
+        # ImageInfo field access, the glib-0.20 unsafe into_glib_ptr) can't
+        # silently rot.
+        #
+        # `--lib` only: Fedora 43 ships the 2+ loaders, so a v2 *runtime*
+        # decode would find no compatible 1+ loader. The lib unit tests are
+        # pure (sniff / ffi_result / ffi) and exercise the compile; the
+        # tests/decode.rs integration decode is intentionally excluded
+        # (it needs a 1+ loader present, which this image doesn't have).
+        run: |
+          cd rust && cargo test -p hx-image-decode --lib \
+            --no-default-features --features glycin-v2 --ignore-rust-version
 
       - name: upload meson test logs
         if: always()

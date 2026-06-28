@@ -496,26 +496,53 @@ struct TempImageFile {
 impl TempImageFile {
     fn create(bytes: &[u8]) -> std::io::Result<Self> {
         use std::io::Write;
-        use std::sync::atomic::{AtomicU64, Ordering};
-        // Per-process counter keeps concurrent decodes from colliding
-        // on a path; `create_new` below is the actual race guard.
-        static SEQ: AtomicU64 = AtomicU64::new(0);
 
-        let mut path = std::env::temp_dir();
-        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
-        path.push(format!("gtkhx-imgdec-{}-{}.bin", std::process::id(), seq));
+        let dir = std::env::temp_dir();
+        // The name carries a fresh random UUID (122 bits of entropy)
+        // rather than a predictable pid+counter, and `create_new` makes
+        // the open atomic. Together that stops another local user on a
+        // shared temp dir from pre-creating the path to force decodes to
+        // fail; on the astronomically unlikely collision we just retry
+        // with new entropy. `0600` keeps the staged bytes unreadable by
+        // other users while they exist.
+        let mut last_err = None;
+        for _ in 0..16 {
+            let name = format!(
+                "gtkhx-imgdec-{}-{}.bin",
+                std::process::id(),
+                crate::compat::glib::uuid_string_random()
+            );
+            let path = dir.join(name);
 
-        let mut opts = std::fs::OpenOptions::new();
-        opts.write(true).create_new(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.mode(0o600);
+            let mut opts = std::fs::OpenOptions::new();
+            opts.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                opts.mode(0o600);
+            }
+            match opts.open(&path) {
+                Ok(mut f) => {
+                    // Bind the guard before the writes so a write/flush
+                    // failure still unlinks the file via Drop on the `?`.
+                    let me = Self { path };
+                    f.write_all(bytes)?;
+                    f.flush()?;
+                    return Ok(me);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    last_err = Some(e);
+                    continue;
+                }
+                Err(e) => return Err(e),
+            }
         }
-        let mut f = opts.open(&path)?;
-        f.write_all(bytes)?;
-        f.flush()?;
-        Ok(Self { path })
+        Err(last_err.unwrap_or_else(|| {
+            std::io::Error::new(
+                std::io::ErrorKind::AlreadyExists,
+                "temp decode-staging name kept colliding",
+            )
+        }))
     }
 
     fn gfile(&self) -> crate::compat::gio::File {
@@ -538,4 +565,47 @@ mod tests {
     // integration tests (lazy_init a MainContext + run
     // pollster::block_on against fixtures). Sniff-layer tests
     // sit in `sniff::tests` and exercise the pure path.
+
+    // The v2 temp-file staging helper, on the other hand, is pure
+    // filesystem plumbing — exercise it directly so the glycin-v2
+    // backend (which the default-feature build never compiles) has
+    // unit coverage in the CI v2 leg.
+    #[cfg(feature = "glycin-v2")]
+    #[test]
+    fn temp_image_file_round_trips_and_cleans_up() {
+        use super::TempImageFile;
+
+        let payload = b"\xFF\xD8\xFF\x00 not really a jpeg, just bytes";
+        let guard = TempImageFile::create(payload).expect("staging should succeed");
+        let path = guard.path.clone();
+
+        // Exists while the guard is alive, holds exactly what we wrote,
+        // and (on unix) is private to us.
+        assert!(path.exists(), "staged file should exist");
+        assert_eq!(std::fs::read(&path).unwrap(), payload);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "staged file must be 0600");
+        }
+
+        // The gio::File handle points at the same path. (`path()` is a
+        // GFile trait method, so the prelude has to be in scope.)
+        use crate::compat::gio::prelude::FileExt;
+        assert_eq!(guard.gfile().path().as_deref(), Some(path.as_path()));
+
+        // Drop unlinks it.
+        drop(guard);
+        assert!(!path.exists(), "Drop should remove the staged file");
+    }
+
+    #[cfg(feature = "glycin-v2")]
+    #[test]
+    fn temp_image_file_names_are_unique() {
+        use super::TempImageFile;
+        let a = TempImageFile::create(b"a").unwrap();
+        let b = TempImageFile::create(b"b").unwrap();
+        assert_ne!(a.path, b.path, "fresh UUID per staging");
+    }
 }
