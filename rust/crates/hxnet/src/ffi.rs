@@ -1706,7 +1706,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
 /// # Safety
 ///
 /// `ptr` must point at `len` readable bytes or be `NULL`.
-unsafe fn parse_proxy_arg(
+pub(crate) unsafe fn parse_proxy_arg(
     ptr: *const u8,
     len: usize,
 ) -> Result<Option<crate::connect::ProxyConfig>, String> {

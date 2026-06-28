@@ -96,6 +96,26 @@ extern HtxfConn *hxnet_htxf_open (int fd, int tls, const guint8 *host,
                                   hxnet_htxf_verify_cb_t verify_cert,
                                   void *user_data);
 
+/* Connect an HTXF subchannel to host:port (optionally through a SOCKS
+ * proxy) entirely in Rust, then open it — the production entry that
+ * replaces the C-side GSocketClient connect + fd hand-off. `proxy_uri`
+ * (length proxy_uri_len) is an optional "socks5://..." URI; NULL/0
+ * connects direct, a malformed/unsupported URI fails the open. `host` is
+ * required (connect target + TLS SNI / TOFU name). All other args match
+ * hxnet_htxf_open. The connect runs on the tokio runtime (bounded by the
+ * shared handshake timeout) and blocks the calling worker for the result.
+ * Returns an owned handle, or NULL on a bad argument / connect / TLS /
+ * TOFU failure. Defined in rust/crates/hxnet/src/htxf.rs. */
+extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
+                                     guint16 port, const guint8 *proxy_uri,
+                                     size_t proxy_uri_len, int tls,
+                                     const guint8 *preamble,
+                                     size_t preamble_len,
+                                     const HxnetHopeAead *hope_aead,
+                                     guint32 xfer_ref,
+                                     hxnet_htxf_verify_cb_t verify_cert,
+                                     void *user_data);
+
 /* Blocking read of up to `len` bytes (`0` = clean EOF, `-1` on error). */
 extern ssize_t hxnet_htxf_read (HtxfConn *handle, guint8 *buf, size_t len);
 

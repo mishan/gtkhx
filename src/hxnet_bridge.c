@@ -694,8 +694,8 @@ bridge_redact_uri_userinfo (const char *uri)
     return g_strdup (uri);
 }
 
-static char *
-bridge_lookup_socks_proxy (const char *host, guint16 port)
+char *
+hx_bridge_lookup_socks_proxy (const char *host, guint16 port)
 {
     GProxyResolver *resolver = g_proxy_resolver_get_default ();
     if (!resolver) {
@@ -775,7 +775,7 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
      * user_data is the htlc for all three callbacks. */
     /* open_plaintext parses proxy_uri synchronously (before spawning the
      * lifecycle task), so this g_autofree URI is safe to free on return. */
-    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
+    g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
@@ -823,7 +823,7 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
     /* Same synchronous-install-before-return discipline as the
      * plaintext variant: the bridge handle must be live before the
      * forwarder can deliver the replayed step-2 reply. */
-    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
+    g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_hope (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
@@ -896,7 +896,7 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
     pass  = pass  ? pass  : "";
     name  = name  ? name  : "";
 
-    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
+    g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext_tls (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),

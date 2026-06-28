@@ -200,6 +200,17 @@ struct HxnetHopeAead;
 extern struct HxnetHopeAead *hx_bridge_orchestrated_hope_aead (void);
 
 /*
+ * Ask GProxyResolver whether (host, port) is reached through a SOCKS
+ * proxy; returns the proxy URI (caller g_free's) or NULL for direct.
+ * Shared by the control-channel install paths and the HTXF subchannel
+ * connect (network.c / banner.c) so every connect honours the same proxy
+ * config. Only SOCKS results are returned; non-SOCKS (e.g. http://) are
+ * warned + skipped. See the definition in hxnet_bridge.c for the
+ * lookup-URI scheme + the synchronous-lookup note.
+ */
+extern char *hx_bridge_lookup_socks_proxy (const char *host, guint16 port);
+
+/*
  * Sentinel returned by [`hx_bridge_send_frame`] when no hxnet
  * connection is currently installed. Sits outside the
  * HXNET_SEND_* range (0, -1, -2, -3) so callers can

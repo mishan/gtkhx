@@ -35,6 +35,7 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "network.h"
+#include "hxnet_bridge.h"      /* hx_bridge_lookup_socks_proxy */
 #include "cipher.h"
 #include "htxf_io.h"
 #include "htxf_subchannel.h"
@@ -114,16 +115,15 @@ struct htxf_fetch {
     char serverhost[HOSTLEN];
     guint16 serverport;
     /* TLS mode snapshot from htlc->tls at spawn time. When set,
-     * the worker passes tls=1 to hx_sync_connect_to_host, which
-     * wraps the HTXF subchannel in a GTlsClientConnection just
-     * like the control channel was. Separate-port model: this
-     * is the only path needed — no STARTTLS, no protocol
-     * negotiation. */
+     * the worker passes tls=1 to hxnet_htxf_connect, which wraps the
+     * HTXF subchannel in rustls just like the control channel.
+     * Separate-port model: this is the only path needed — no STARTTLS,
+     * no protocol negotiation. */
     char tls;
     /* Opaque HOPE control-channel AEAD material handle (Rust
      * HxnetHopeAead*), an OWNED clone of htlc->hope_aead taken at spawn
      * (decoupled from htlc's lifetime — see the clone site). NULL unless
-     * the control channel negotiated ChaCha20-Poly1305; hxnet_htxf_open
+     * the control channel negotiated ChaCha20-Poly1305; hxnet_htxf_connect
      * derives the per-transfer keys from it, so the worker never touches
      * the session key or cipher state. Freed with hxnet_hope_aead_free
      * when the fetch struct is freed. */
@@ -669,9 +669,10 @@ banner_htxf_worker_run (void *arg)
 {
     struct htxf_fetch *f = arg;
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    char errbuf[256] = { 0 };
-    GSocketConnection *conn = NULL;
-    int dupfd = -1;
+    /* Declared up here (NULL-init) so every `goto out` path has it
+     * defined for the g_autofree cleanup — the first goto is before the
+     * lookup below. */
+    g_autofree char *proxy_uri = NULL;
 
     /* Transient htxf_conn the worker owns for its whole lifetime —
      * carries the hxnet channel handle (`hx`) plus the per-transfer
@@ -681,32 +682,10 @@ banner_htxf_worker_run (void *arg)
     xfer.ref = f->ref;
     htxf_io_init (&xfer);
 
-    /* Plaintext TCP connect (SOCKS / IPv4-IPv6 fallback via
-     * GSocketClient); the optional TLS wrap is done by hxnet below,
-     * not here. Extract the connected fd and hand ownership over. */
-    conn = hx_sync_connect_to_host (f->serverhost, f->serverport, errbuf,
-                                    sizeof (errbuf), /*tls=*/0);
-    if (!conn) {
-        debug_log ("banner", "htxf connect failed: %s", errbuf);
-        goto out;
-    }
-    {
-        GSocket *sock = g_socket_connection_get_socket (conn);
-        int sfd = sock ? g_socket_get_fd (sock) : -1;
-        if (sfd >= 0) {
-            dupfd = dup (sfd);
-        }
-    }
-    g_object_unref (conn);
-    if (dupfd < 0) {
-        debug_log ("banner", "htxf could not dup connected fd");
-        goto out;
-    }
-
     /* type=HTXF_TYPE_BANNER so Mac-native servers route this subchannel
      * through their banner-send path. The preamble ALWAYS travels
      * plaintext (the server matches the subchannel to the queued
-     * transfer by ref before any cipher state exists) — hxnet_htxf_open
+     * transfer by ref before any cipher state exists) — hxnet_htxf_connect
      * writes it raw before arming AEAD. Banner transfers never need the
      * 24-byte SIZE64 variant. */
     size_t hdr_len = hx_htxf_subchannel_pack_preamble (
@@ -716,23 +695,28 @@ banner_htxf_worker_run (void *arg)
     if (hdr_len == 0) {
         debug_log ("banner",
                    "htxf header build failed (preamble builder returned 0)");
-        close (dupfd);
         goto out;
     }
 
-    /* Under HOPE+ChaCha20 the body bytes after the preamble are framed
-     * AEAD packets. hxnet_htxf_open derives the per-transfer key pair
-     * (mixing in ref so each subchannel gets its own key) from the
-     * borrowed HOPE material handle and owns the framing thereafter;
-     * a NULL handle leaves the body plaintext. */
-    xfer.hx = hxnet_htxf_open (
-        dupfd, f->tls,
+    /* hxnet owns the whole connect now: DNS + IPv4/IPv6 fallback +
+     * optional SOCKS tunnel (resolved here the same way the control
+     * channel does) + the optional TLS wrap, all in Rust. No C-side
+     * GSocketClient connect + fd dup/adopt. Under HOPE+ChaCha20 the body
+     * bytes after the preamble are framed AEAD packets; hxnet_htxf_connect
+     * derives the per-transfer key pair (mixing in ref so each subchannel
+     * gets its own key) from the borrowed HOPE material handle and owns
+     * the framing thereafter; a NULL handle leaves the body plaintext. */
+    proxy_uri = hx_bridge_lookup_socks_proxy (f->serverhost, f->serverport);
+    xfer.hx = hxnet_htxf_connect (
         (const guint8 *) f->serverhost, strlen (f->serverhost),
+        f->serverport,
+        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
+        f->tls,
         hdr_buf, hdr_len,
         (const HxnetHopeAead *) f->hope_aead, f->ref,
         banner_verify_cert_cb, f);
     if (!xfer.hx) {
-        debug_log ("banner", "htxf hxnet_htxf_open failed");
+        debug_log ("banner", "htxf hxnet_htxf_connect failed");
         goto out;
     }
 
