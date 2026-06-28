@@ -1,5 +1,5 @@
-#ifndef __compress_h
-#define __compress_h
+#ifndef GTKHX_COMPRESS_H
+#define GTKHX_COMPRESS_H
 
 
 #include "config.h"

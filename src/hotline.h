@@ -1,5 +1,5 @@
-#ifndef _HOTLINE_H
-#define _HOTLINE_H
+#ifndef GTKHX_HOTLINE_H
+#define GTKHX_HOTLINE_H
 
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
 #define ZERO_SIZE_ARRAY_SIZE 0
@@ -709,4 +709,4 @@ struct hl_user_data {
 #define SIZEOF_HTXF_HDR (16)
 #define SIZEOF_HTRK_HDR (12)
 
-#endif /* ndef _HOTLINE_H */
+#endif /* ndef GTKHX_HOTLINE_H */

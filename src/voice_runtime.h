@@ -26,8 +26,8 @@
  * surfaces as a link-time undefined symbol.
  */
 
-#ifndef _VOICE_RUNTIME_H
-#define _VOICE_RUNTIME_H
+#ifndef GTKHX_VOICE_RUNTIME_H
+#define GTKHX_VOICE_RUNTIME_H
 
 /* Standard library headers go OUTSIDE extern "C" so C++ consumers
  * pick up the standard-library declarations with their natural
@@ -378,4 +378,4 @@ extern void gtkhx_voice_runtime_task_error (gtkhx_voice_runtime *rt,
 }
 #endif
 
-#endif /* _VOICE_RUNTIME_H */
+#endif /* GTKHX_VOICE_RUNTIME_H */

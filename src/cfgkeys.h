@@ -26,8 +26,8 @@
  * insert before bsearch does anything subtle.
  */
 
-#ifndef __gtkhx_CFGKEYS_H
-#define __gtkhx_CFGKEYS_H 1
+#ifndef GTKHX_CFGKEYS_H
+#define GTKHX_CFGKEYS_H 1
 
 /* Identity */
 #define CFG_NICK "NICK"
@@ -189,4 +189,4 @@
 /* GKeyFile section name for the prefs file. */
 #define CFG_KEYFILE_GROUP "gtkhx"
 
-#endif /* ndef __gtkhx_CFGKEYS_H */
+#endif /* ndef GTKHX_CFGKEYS_H */

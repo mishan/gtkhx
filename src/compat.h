@@ -7,8 +7,8 @@
  * protocol.h instead.
  */
 
-#ifndef __gtkhx_COMPAT_H
-#define __gtkhx_COMPAT_H 1
+#ifndef GTKHX_COMPAT_H
+#define GTKHX_COMPAT_H 1
 
 #include <stdlib.h> /* strtoul for atou32/atou16 */
 
@@ -106,4 +106,4 @@ extern int inet_ntoa_r (struct in_addr in, char *buf, size_t buflen);
 #define debug(args...)
 #endif
 
-#endif /* ndef __gtkhx_COMPAT_H */
+#endif /* ndef GTKHX_COMPAT_H */

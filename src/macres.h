@@ -1,5 +1,5 @@
-#ifndef _MACRES_H
-#define _MACRES_H
+#ifndef GTKHX_MACRES_H
+#define GTKHX_MACRES_H
 
 #include <unistd.h>
 #if defined(HAVE_CONFIG_H)
@@ -69,4 +69,4 @@ extern void macres_file_print (macres_file *mrf);
 extern void macres_file_delete (macres_file *mrf);
 extern int macres_add_resource (macres_file *mrf, guint32 type, gint16 resid, const guint8 *name, guint8 namelen, const guint8 *data, guint32 datalen);
 
-#endif /* _MACRES_H */
+#endif /* GTKHX_MACRES_H */

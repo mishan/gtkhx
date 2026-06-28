@@ -26,8 +26,8 @@
  * opcodes: HTLS_HDR_USER_SELFINFO and the HTLS_HDR_TASK header fields.
  */
 
-#ifndef _HOTLINE_PROTO_H
-#define _HOTLINE_PROTO_H
+#ifndef GTKHX_HOTLINE_PROTO_H
+#define GTKHX_HOTLINE_PROTO_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -1616,4 +1616,4 @@ extern int32_t gtkhx_proto_build_download_media_chunks (
     struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
-#endif /* _HOTLINE_PROTO_H */
+#endif /* GTKHX_HOTLINE_PROTO_H */

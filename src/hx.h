@@ -17,12 +17,12 @@
  * "hx.h" keep building unchanged.
  */
 
-#ifndef __hxd_HX_H
-#define __hxd_HX_H 1
+#ifndef GTKHX_HX_H
+#define GTKHX_HX_H 1
 
 #include "compat.h"
 #include "protocol.h"
 #include "prefs.h"
 #include "session.h"
 
-#endif /* ndef __hxd_HX_H */
+#endif /* ndef GTKHX_HX_H */

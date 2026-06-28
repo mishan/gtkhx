@@ -21,8 +21,8 @@
  * but still unused); the union/struct entries are gone.
  */
 
-#ifndef __cipher_h
-#define __cipher_h
+#ifndef GTKHX_CIPHER_H
+#define GTKHX_CIPHER_H
 
 #include "config.h"
 
@@ -134,4 +134,4 @@ struct qbuf;
  * + the hxcrypto crates. Only the shared types above survive here, used
  * by the htlc_conn cipher_state fields. */
 
-#endif /* __cipher_h */
+#endif /* GTKHX_CIPHER_H */

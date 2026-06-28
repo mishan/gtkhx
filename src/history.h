@@ -19,8 +19,8 @@
    have a copy of the license, write to the Free Software Foundation,
    59 Temple Place, Suite 330, Boston, MA 02111 USA. */
 
-#ifndef _HISTORY_H_
-#define _HISTORY_H_
+#ifndef GTKHX_HISTORY_H
+#define GTKHX_HISTORY_H
 
 #ifdef __cplusplus
 extern "C" {
@@ -145,4 +145,4 @@ extern HIST_ENTRY *next_history __P ((void *));
 }
 #endif
 
-#endif /* !_HISTORY_H_ */
+#endif /* !GTKHX_HISTORY_H */

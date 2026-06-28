@@ -6,8 +6,8 @@
  * this header when it's only touching the prefs struct.
  */
 
-#ifndef __gtkhx_PREFS_H
-#define __gtkhx_PREFS_H 1
+#ifndef GTKHX_PREFS_H
+#define GTKHX_PREFS_H 1
 
 #include "compat.h"
 
@@ -153,4 +153,4 @@ struct hx_sounds {
     unsigned char invite, chat, error, file, join, login, msg, news, part;
 };
 
-#endif /* ndef __gtkhx_PREFS_H */
+#endif /* ndef GTKHX_PREFS_H */
