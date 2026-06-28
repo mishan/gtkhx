@@ -13,6 +13,7 @@
 
 #include "hx.h"        /* the_session */
 #include "gtkhx.h"     /* gtkhx_apply_listview_style */
+#include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "debug.h"     /* debug_log — GTKHX_DEBUG=files for inline-rename trace */
 #include "hl_access.h" /* HL_ACCESS_* + hl_access_has */
 #include "files.h"     /* ICON_* */
@@ -204,7 +205,11 @@ load_icon_paintable (const char *resource)
     GdkTexture *tex;
     int w, h;
 
-    pb = gdk_pixbuf_new_from_resource (resource, NULL);
+    /* Route through gtkhx_icon_load so active-theme bundled icons
+	 * (e.g. $CONFIG/themes/<theme>/icons/file_image.png) shadow the
+	 * stock pixmap — the file-browser uses the same resolver as the
+	 * rest of the chrome. */
+    pb = gtkhx_icon_load (resource);
     if (!pb) {
         return NULL;
     }

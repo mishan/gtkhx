@@ -156,10 +156,22 @@ gtkhx_icon_load (const char *name_or_path)
         return NULL;
     }
 
-    /* Cache hit? Return a fresh reference. */
+    /* Cache key is "<active-theme>/<logical>" — including the
+	 * active-theme prefix keeps entries from the previous theme
+	 * from being served after a switch, even if the theme
+	 * "changed" handler order means a button rebuild runs before
+	 * gtkhx_icon_invalidate_cache. (Belt-and-braces — the
+	 * invalidate path still runs, but key-by-theme makes the cache
+	 * correct independent of that ordering. A "/" separator is
+	 * fine because active_theme() rejects names with path
+	 * separators — see active_theme.) */
+    const char *theme = active_theme ();
+    char *cache_key = g_strdup_printf ("%s/%s", theme, logical);
+
     if (icon_cache) {
-        GdkPixbuf *cached = g_hash_table_lookup (icon_cache, logical);
+        GdkPixbuf *cached = g_hash_table_lookup (icon_cache, cache_key);
         if (cached) {
+            g_free (cache_key);
             g_free (logical);
             return g_object_ref (cached);
         }
@@ -167,7 +179,6 @@ gtkhx_icon_load (const char *name_or_path)
 
     /* Lookup order: user theme bundle → built-in theme bundle →
 	 * stock pixmaps. */
-    const char *theme = active_theme ();
     GdkPixbuf *pb = load_from_user_theme (theme, logical);
     if (!pb) {
         pb = load_from_builtin_theme (theme, logical);
@@ -181,11 +192,12 @@ gtkhx_icon_load (const char *name_or_path)
             icon_cache = g_hash_table_new_full (g_str_hash, g_str_equal,
                                                 g_free, g_object_unref);
         }
-        /* Cache holds its own reference; hand the caller a fresh one. */
-        g_hash_table_insert (icon_cache, g_strdup (logical),
-                             g_object_ref (pb));
+        /* Cache holds its own reference; hand the caller a fresh one.
+		 * Insert transfers ownership of cache_key to the hash table. */
+        g_hash_table_insert (icon_cache, cache_key, g_object_ref (pb));
+    } else {
+        g_free (cache_key);
     }
-
     g_free (logical);
     return pb;
 }
