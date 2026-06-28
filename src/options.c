@@ -1372,13 +1372,53 @@ pref_spin_row (const char *cfgname, const char *title, const char *subtitle,
     return row;
 }
 
+/* "Reset to default" handler for the scale spin rows. Writes the
+ * canonical 0 sentinel via gtkhx_theme_set_percent (which clears
+ * the override + emits "changed" so live UI rescales) and updates
+ * the spin's displayed value to the default-theme percent so the
+ * row reflects the new effective value. We block on_spin_row_value
+ * around the synthetic set so the spin-row notification doesn't
+ * round-trip and persist a clamped override back into the pref. */
+static void
+on_scale_reset (GtkButton *btn, gpointer user_data)
+{
+    struct cfgvar *v = user_data;
+    GtkhxScaleArea area = (GtkhxScaleArea)GPOINTER_TO_INT (
+        g_object_get_data (G_OBJECT (btn), "pref-scale-area"));
+    AdwSpinRow *row = g_object_get_data (G_OBJECT (btn), "pref-scale-row");
+
+    if (!v || v->type != INT || !row) {
+        return;
+    }
+
+    /* Clear the override at the model layer first. */
+    gtkhx_theme_set_percent (area, 0);
+
+    /* Snap the spin display back to the default percent. Block our
+	 * notify::value handler so the change doesn't loop back into
+	 * on_spin_row_value and immediately re-write the slot. */
+    g_signal_handlers_block_by_func (row, on_spin_row_value, v);
+    adw_spin_row_set_value (row, gtkhx_theme_get_default_percent (area));
+    g_signal_handlers_unblock_by_func (row, on_spin_row_value, v);
+
+    /* Persist the new (zero) override to disk through the standard
+	 * pref-write path. Doesn't fire the changefunc again — the value
+	 * came from the model and the theme "changed" already fired
+	 * inside gtkhx_theme_set_percent. */
+    prefs_write ();
+}
+
 /* Spin row for a per-area UI scale (Settings → Appearance → UI
  * Scaling). Unlike pref_spin_row it seeds the displayed value from the
  * *effective* percentage (gtkhx_theme_get_percent), not the raw pref —
  * the raw pref is 0 ("unset → default theme") until the user moves the
  * row, and feeding 0 into a [50,300] spin would clamp to 50 and write
  * a bogus override on open. The value is set before the notify handler
- * is connected, so seeding doesn't itself fire a write. */
+ * is connected, so seeding doesn't itself fire a write. A Reset
+ * suffix-button writes the 0 sentinel back so the row can return to
+ * "follow the default theme" — without it the user could only ever
+ * pick numbers in [SCALE_MIN, SCALE_MAX] and the unset state would
+ * be unreachable from Settings. */
 static GtkWidget *
 pref_scale_spin_row (const char *cfgname, GtkhxScaleArea area,
                      const char *title, const char *subtitle)
@@ -1398,6 +1438,19 @@ pref_scale_spin_row (const char *cfgname, GtkhxScaleArea area,
     adw_spin_row_set_value (ADW_SPIN_ROW (row), gtkhx_theme_get_percent (area));
     v->widget = row;
     g_signal_connect (row, "notify::value", G_CALLBACK (on_spin_row_value), v);
+
+    /* Reset button — clears the user override (writes 0 sentinel)
+	 * and snaps the spin back to the default-theme percent. */
+    GtkWidget *reset = gtk_button_new_with_label (_ ("Reset"));
+    gtk_widget_set_valign (reset, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (
+        reset, _ ("Clear the override and follow the active theme's value."));
+    g_object_set_data (G_OBJECT (reset), "pref-scale-area",
+                       GINT_TO_POINTER ((int)area));
+    g_object_set_data (G_OBJECT (reset), "pref-scale-row", row);
+    g_signal_connect (reset, "clicked", G_CALLBACK (on_scale_reset), v);
+    adw_action_row_add_suffix (ADW_ACTION_ROW (row), reset);
+
     return row;
 }
 
