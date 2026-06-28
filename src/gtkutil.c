@@ -957,12 +957,18 @@ button_load_source (GtkWidget *btn)
 
 /* Rebuild a button's GtkPicture child from its tracked source at the
  * current theme scale. Called once at construction and on every theme
- * "changed" emission (connected swapped, so btn arrives first). */
+ * "changed" emission (connected swapped via g_signal_connect_object,
+ * so the user_data btn arrives first and the GtkhxTheme instance
+ * arrives second). Signature has to match that swapped shape even
+ * when called directly — passing NULL for the unused theme arg from
+ * the direct call site keeps both call paths going through one
+ * prototype. */
 static void
-button_refresh_picture (GtkWidget *btn)
+button_refresh_picture (GtkWidget *btn, gpointer unused_theme)
 {
     GtkhxScaleArea area = (GtkhxScaleArea)GPOINTER_TO_INT (
         g_object_get_data (G_OBJECT (btn), BTN_KEY_AREA));
+    (void)unused_theme;
     GdkPixbuf *src, *use_pb;
     GdkTexture *tex;
     GtkWidget *picture;
@@ -1009,7 +1015,7 @@ button_finish_setup (GtkWidget *btn, GtkhxScaleArea area, const char *tooltip,
                      GCallback cb, gpointer user_data)
 {
     g_object_set_data (G_OBJECT (btn), BTN_KEY_AREA, GINT_TO_POINTER (area));
-    button_refresh_picture (btn);
+    button_refresh_picture (btn, NULL);
     g_signal_connect_object (gtkhx_theme_get_default (), "changed",
                              G_CALLBACK (button_refresh_picture), btn,
                              G_CONNECT_SWAPPED);
