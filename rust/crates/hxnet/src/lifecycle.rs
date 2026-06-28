@@ -104,7 +104,7 @@ pub async fn run_plaintext_lifecycle(
 ) {
     // Phase A: DNS + TCP connect. resolve_and_connect emits
     // Resolving + Connecting itself.
-    let stream = match resolve_and_connect(&req.host, req.port, &evt_tx).await {
+    let stream = match resolve_and_connect(&req.host, req.port, None, &evt_tx).await {
         Ok(s) => s,
         Err(e) => {
             let _ = evt_tx
@@ -146,7 +146,7 @@ pub async fn run_plaintext_tls_lifecycle(
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
-    let tcp = match resolve_and_connect(&req.host, req.port, &evt_tx).await {
+    let tcp = match resolve_and_connect(&req.host, req.port, None, &evt_tx).await {
         Ok(s) => s,
         Err(e) => {
             let _ = evt_tx
@@ -414,7 +414,7 @@ pub async fn run_hope_lifecycle(
         }};
     }
 
-    let mut stream = match resolve_and_connect(&req.host, req.port, &evt_tx).await {
+    let mut stream = match resolve_and_connect(&req.host, req.port, None, &evt_tx).await {
         Ok(s) => s,
         Err(e) => bail!("connect: {e}"),
     };

@@ -176,7 +176,14 @@ jobs:
         env:
           GTKHX_GLYCIN_NO_SANDBOX: "1"
         run: |
-          cd rust && cargo test --workspace --ignore-rust-version
+          # Run the workspace twice: once with hxnet's default features
+          # (the no-`socks` build embedders get) and once with
+          # --features hxnet/socks (what the gtkhx binary builds), so
+          # both the cfg(not(feature = "socks")) and cfg(feature =
+          # "socks") paths stay green.
+          cd rust
+          cargo test --workspace --ignore-rust-version
+          cargo test --workspace --ignore-rust-version --features hxnet/socks
 
       - name: cargo test (hx-image-decode glycin-v2 / 1+ backend)
         # The v2 backend (glycin 2.x / 1+ loaders — the Debian-stable

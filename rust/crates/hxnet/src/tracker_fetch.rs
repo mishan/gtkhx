@@ -427,7 +427,7 @@ impl TrackerConnector for TcpTlsConnector {
         // channel held only for the call absorbs them (no consumer needed
         // here — the tracker walk has its own event stream).
         let (evt_tx, _evt_rx) = mpsc::channel(4);
-        let tcp = crate::connect::resolve_and_connect(&host, port, &evt_tx)
+        let tcp = crate::connect::resolve_and_connect(&host, port, None, &evt_tx)
             .await
             .map_err(|e| ConnectError::Transport(e.to_string()))?;
 
