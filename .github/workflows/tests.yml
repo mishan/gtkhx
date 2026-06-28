@@ -254,6 +254,13 @@ jobs:
         run: |
           docker build -t gtkhx-argus tests/argus
 
+      - name: build socks proxy test container
+        # microsocks SOCKS5 proxy (tests/socks-proxy/) — the
+        # test_integration_socks Tier 3 test routes the production
+        # connect through it to mhxd.
+        run: |
+          docker build -t gtkhx-socks tests/socks-proxy
+
       - name: start mhxd
         run: |
           docker run -d --name gtkhx-mhxd \
@@ -371,6 +378,20 @@ jobs:
             sleep 1
           done
 
+      - name: start socks proxy
+        # microsocks under --network host so its CONNECT forwards reach
+        # mhxd's published 127.0.0.1:5500 the same way the test runner
+        # does. The test_integration_socks binary defaults
+        # GTKHX_TEST_SOCKS to socks5://127.0.0.1:1080.
+        run: |
+          docker run -d --name gtkhx-socks --network host gtkhx-socks
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            if (echo > /dev/tcp/127.0.0.1/1080) 2>/dev/null; then
+              echo "socks proxy is up"; break
+            fi
+            sleep 1
+          done
+
       # The build itself runs in a Fedora container so we have the
       # right libadwaita; the test binaries then talk to mhxd +
       # janus on the runner's localhost via the docker port
@@ -381,6 +402,7 @@ jobs:
             -v "$PWD:/src" -w /src \
             -e GTKHX_TEST_HOST=127.0.0.1 \
             -e GTKHX_TEST_PORT=5500 \
+            -e GTKHX_TEST_SOCKS=socks5://127.0.0.1:1080 \
             fedora:43 bash -c '
               dnf -y install \
                 meson ninja-build pkgconf-pkg-config gcc \
@@ -426,6 +448,10 @@ jobs:
       - name: dump argus logs on failure
         if: failure()
         run: docker logs gtkhx-argus || true
+
+      - name: dump socks proxy logs on failure
+        if: failure()
+        run: docker logs gtkhx-socks || true
 
       - name: upload meson test logs
         if: always()

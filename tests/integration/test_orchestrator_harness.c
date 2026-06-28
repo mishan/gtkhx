@@ -68,7 +68,8 @@ extern hxnet_connection *hxnet_connection_open_plaintext_polling (
     const guint8 *login, gsize login_len,
     const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint16 caps, guint32 trans);
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    const guint8 *proxy_uri, gsize proxy_uri_len);
 
 extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
                                             hxnet_frame_t *out_frame,
@@ -121,7 +122,8 @@ test_login_via_orchestrator (void)
         /*icon=*/0, /*version=*/185,
         /*caps=*/HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
                | HTLC_CAP_CHAT_HISTORY,
-        /*trans=*/1);
+        /*trans=*/1,
+        /*proxy_uri=*/NULL, /*proxy_uri_len=*/0);
     g_assert_nonnull (h);
 
     /* First frame: the replayed LOGIN reply. The whole connect +

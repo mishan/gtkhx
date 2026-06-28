@@ -120,7 +120,7 @@ whether to support it or document the new path as SOCKS-only.
   `resolve_and_connect`, and `ProxyConfig` parsing. Unit-tested against a
   loopback mock SOCKS5 server. Callers pass `None`, so it was a pure
   addition with zero behaviour change.
-- **S2 — Config sourcing + control channel. DONE (bar the Tier 3 test).**
+- **S2 — Config sourcing + control channel. DONE.**
   Added the C `bridge_lookup_socks_proxy` helper (`GProxyResolver`, queried
   with the `none://host:port` scheme that `GSocketClient` itself uses for a
   raw TCP connect) and threaded `proxy_uri` / `proxy_uri_len` through the
@@ -129,7 +129,10 @@ whether to support it or document the new path as SOCKS-only.
   is GProxyResolver-only (no env-var fallback in C — `GProxyResolver`'s
   default already honours `all_proxy` / GNOME settings). Only SOCKS proxy
   results are honoured; a non-SOCKS (e.g. `http://`) result is warned and
-  skipped. **Remaining:** the Tier 3 SOCKS-proxy-container test.
+  skipped. Tier 3 coverage landed too: a microsocks proxy container
+  (`tests/socks-proxy/`) + `tests/integration/test_integration_socks.c`
+  drives the production connect through the proxy to mhxd (via-proxy login
+  + dead-proxy negative control), wired into the integration CI job.
 - **S3 — Rides the connect moves.** The tracker (item 8, done) + the
   HTXF subchannel pass the same proxy URI once their connects are in Rust;
   their C `GSocketClient` connects are deleted.

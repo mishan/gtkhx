@@ -1710,7 +1710,17 @@ unsafe fn parse_proxy_arg(
     ptr: *const u8,
     len: usize,
 ) -> Result<Option<crate::connect::ProxyConfig>, String> {
-    if ptr.is_null() || len == 0 {
+    // NULL + zero length is the "no proxy" sentinel. A NULL pointer with a
+    // non-zero length is a caller bug — fail fast (same contract as the
+    // login / name slices above) rather than silently dropping a
+    // configured proxy and connecting direct.
+    if ptr.is_null() {
+        if len != 0 {
+            return Err("proxy_uri is NULL but proxy_uri_len is non-zero".to_string());
+        }
+        return Ok(None);
+    }
+    if len == 0 {
         return Ok(None);
     }
     if (len as u64) > (isize::MAX as u64) {
@@ -1946,7 +1956,10 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 /// production C dispatch does).
 ///
 /// Same parameter / safety contract as
-/// [`hxnet_connection_open_plaintext`], minus the callbacks.
+/// [`hxnet_connection_open_plaintext`], minus the callbacks — including
+/// the optional `proxy_uri` / `proxy_uri_len` (NULL/0 = connect direct).
+/// The proxy params let the Tier 3 harness drive a proxied connect
+/// through the production path (the SOCKS-proxy integration test).
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
     host: *const u8,
@@ -1962,6 +1975,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
     version: u16,
     caps: u16,
     trans: u32,
+    proxy_uri: *const u8,
+    proxy_uri_len: usize,
 ) -> *mut HxnetConnection {
     if host.is_null() || host_len == 0 {
         glib::g_critical!(
@@ -2031,6 +2046,18 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         }
     };
 
+    let proxy = match parse_proxy_arg(proxy_uri, proxy_uri_len) {
+        Ok(p) => p,
+        Err(e) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_connection_open_plaintext_polling: {}",
+                e
+            );
+            return std::ptr::null_mut();
+        }
+    };
+
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
     let req = crate::lifecycle::PlaintextOpenRequest {
         host: host_str,
@@ -2042,10 +2069,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         version,
         caps,
         trans,
-        // Polling variant: no proxy. The Tier 3 harness drives this path
-        // directly against test servers; SOCKS coverage rides the
-        // production callback functions (and a deferred Tier 3 proxy test).
-        proxy: None,
+        proxy,
     };
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_lifecycle(req, cmd_rx, evt_tx).await;
@@ -2375,7 +2399,11 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         version,
         caps,
         trans,
-        proxy: None, // polling variant connects direct (see plaintext polling)
+        // This TLS polling open is direct-only: it takes no proxy_uri
+        // param (unlike hxnet_connection_open_plaintext_polling, which the
+        // SOCKS integration test drives through a proxy). Add one here if a
+        // proxied-TLS harness path is ever needed.
+        proxy: None,
     };
     let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> = verify_cert.map(|cb| {
         let ud = SendUserData(user_data);
@@ -2762,7 +2790,10 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         } else {
             vec![cipher_vec]
         },
-        proxy: None, // polling variant connects direct (see plaintext polling)
+        // This HOPE polling open is direct-only: it takes no proxy_uri
+        // param. (Only hxnet_connection_open_plaintext_polling does, for
+        // the SOCKS integration test.)
+        proxy: None,
     };
     let hope_slot: crate::lifecycle::HopeAeadSlot =
         std::sync::Arc::new(std::sync::Mutex::new(None));

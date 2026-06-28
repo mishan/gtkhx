@@ -661,7 +661,39 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
  * tunnel a raw Hotline stream through an HTTP-CONNECT proxy, so a non-SOCKS
  * proxy result is logged and skipped (connect direct) rather than silently
  * mishandled. "direct://" entries mean no proxy and are skipped.
+ *
+ * This is the *synchronous* g_proxy_resolver_lookup, called on the GLib
+ * main thread from the connect-install path. For the default resolver
+ * backends — GSettings (GNOME) and the env-var GSimpleProxyResolver — the
+ * lookup is an in-memory rule match and doesn't block. A backend that
+ * executes a PAC script / WPAD could block the UI here; making the install
+ * path async (g_proxy_resolver_lookup_async, with the open_* FFI call
+ * deferred into the completion callback) is the fix if that ever matters,
+ * but it restructures the synchronous "bridge_handle set before return"
+ * install contract, so it's deliberately deferred.
  */
+/* Return a g_strdup'd copy of a proxy URI with any `user:pass@` userinfo
+ * replaced by `***@`, so logging it can't leak proxy credentials (e.g. an
+ * `all_proxy=http://user:pass@proxy:8080` the resolver hands back). Caller
+ * frees. */
+static char *
+bridge_redact_uri_userinfo (const char *uri)
+{
+    const char *scheme_end = strstr (uri, "://");
+    if (!scheme_end) {
+        return g_strdup (uri);
+    }
+    const char *authority = scheme_end + 3;
+    const char *at = strchr (authority, '@');
+    const char *slash = strchr (authority, '/');
+    /* Only an `@` before the first path `/` is userinfo. */
+    if (at && (!slash || at < slash)) {
+        return g_strdup_printf ("%.*s://***@%s",
+                                (int) (scheme_end - uri), uri, at + 1);
+    }
+    return g_strdup (uri);
+}
+
 static char *
 bridge_lookup_socks_proxy (const char *host, guint16 port)
 {
@@ -670,7 +702,17 @@ bridge_lookup_socks_proxy (const char *host, guint16 port)
         return NULL;
     }
 
-    g_autofree char *uri = g_strdup_printf ("none://%s:%u", host, port);
+    /* Percent-escape the host before interpolating it, so a character
+     * that's reserved in URI syntax doesn't make g_proxy_resolver_lookup
+     * reject the lookup as malformed — notably an IPv6 zone id's `%`
+     * (fe80::1%eth0 → fe80::1%25eth0). Keep `:` unescaped so IPv6 colons
+     * survive. Then bracket IPv6 literals so the URI stays well-formed
+     * (none://[2001:db8::1]:5500, not none://2001:db8::1:5500); a bare `:`
+     * in host marks an unbracketed IPv6 literal. */
+    g_autofree char *esc_host = g_uri_escape_string (host, ":", FALSE);
+    g_autofree char *uri = strchr (host, ':')
+        ? g_strdup_printf ("none://[%s]:%u", esc_host, port)
+        : g_strdup_printf ("none://%s:%u", esc_host, port);
     GError *err = NULL;
     char **proxies = g_proxy_resolver_lookup (resolver, uri, NULL, &err);
     if (err) {
@@ -693,10 +735,12 @@ bridge_lookup_socks_proxy (const char *host, guint16 port)
         }
         /* Non-SOCKS, non-direct (e.g. http://): we can't tunnel Hotline
          * through it. Warn loudly so a misrouted connection is diagnosable
-         * rather than silently bypassing the configured proxy. */
+         * rather than silently bypassing the configured proxy — but redact
+         * any userinfo first so proxy credentials don't hit the log. */
+        g_autofree char *redacted = bridge_redact_uri_userinfo (*p);
         g_warning ("hxnet_bridge: ignoring non-SOCKS proxy %s for %s "
                    "(only SOCKS proxies are supported); connecting direct",
-                   *p, uri);
+                   redacted, uri);
     }
     g_strfreev (proxies);
     return result;
