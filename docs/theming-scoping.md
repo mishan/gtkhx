@@ -340,3 +340,145 @@ What's still on the table, in rough order of value-per-effort:
    non-theme pref); revisit the compact chat-sidebar exclusion if a
    second `USERLIST_*` variant turns out to be wanted.
    (`tasks_row_icon` already landed as `GTKHX_SCALE_TASKS_ROW_ICON`.)
+
+---
+
+## Parked: CSS-as-theme-file vs. our .ini schema
+
+The current model uses a GKeyFile `.ini` for theme state plus a
+small set of `.gtkhx-*` CSS providers that the loader emits at
+runtime from the .ini's palette values. An alternative is to let
+themes BE CSS files — written by the user in standard GTK CSS,
+loaded directly via `GtkCssProvider`. Worth thinking about; not
+worth implementing right now. Capturing the trade-off here so
+the decision is informed when we come back to it.
+
+### What's actually CSS-shaped in our model
+
+Already pure CSS (lives in `gtkhx_refresh_css` /
+`gtkhx_refresh_userlist_css`):
+
+- `.gtkhx-text` / `.gtkhx-input` — read-only text view + editable
+  input fg/bg/caret. Already a CSS provider; a user-supplied CSS
+  file could replace it 1:1.
+- `.gtkhx-listview` / `.gtkhx-userlist` — listview row colors,
+  including the `:not(:hover):not(:active)` carve-out so hover
+  feedback survives.
+
+Not CSS-shaped — these can't move to CSS without first restructuring
+the C-side machinery:
+
+- **Per-area scales** (`GTKHX_SCALE_TOOLBAR`,
+  `GTKHX_SCALE_WINDOW_BUTTONS`, `GTKHX_SCALE_USERLIST_ICON`,
+  `GTKHX_SCALE_USERLIST_TEXT`, `GTKHX_SCALE_TASKS_ROW_ICON`).
+  These multiply *source* pixmap sizes at PNG-decode time inside
+  `gtkutil.c::button_load_source`, `tasks.c::gtask_make_icon`, and
+  the user-list `measure`/`snapshot`. They're not styling — they're
+  load-time integer factors fed back into C. GTK CSS has no native
+  way to express "decode a 16×16 PNG at 200% via nearest-neighbour
+  before handing it to a button."
+- **xtext chat palette** (38 GdkRGBA slots, see
+  `chat.c::gtkhx_apply_theme_palette` and `gtk_xtext_set_palette`).
+  xtext is a custom widget that draws with cairo from its own
+  `colors[]` array; it never consults `gtk_widget_get_style_context`.
+  The palette has to be a C-readable structure.
+- **User-list name colors** (`GTKHX_USER_COLOR_ACTIVE` …
+  `GTKHX_USER_COLOR_ADMIN_IDLE`, queried in
+  `users.c::user_color_gdk`). `hx_user_cell_name_snapshot` calls
+  `gtk_snapshot_append_layout(snapshot, layout, &fg_color)` with
+  an explicit `GdkRGBA`. Same story: no CSS consultation.
+- **Icon-pack bundling** (`gtkhx_icon.{c,h}` resolver looking up
+  `$CONFIG/themes/<name>/icons/<logical>.png`). File resolution,
+  not styling.
+
+### Four viable paths
+
+1. **Hybrid** — keep the `.ini` for the non-CSS-shaped state
+   (scales / xtext palette / user-list / icon-pack name), ALSO
+   load an optional `style.css` companion from the theme bundle as
+   a `GtkCssProvider` layered over the existing `.gtkhx-*`
+   providers. Modest implementation (loader-hook + provider
+   attach); both audiences happy — trivial themes stay readable
+   key=value, theme authors who want full CSS power for the
+   CSS-shaped surfaces get it. UX wart: a theme bundle can carry
+   two files (`theme.ini` + `style.css`).
+
+2. **Pure CSS, full migration** — make scales custom CSS
+   properties (`--gtkhx-scale-toolbar: 200%;`, queried via
+   `gtk_style_context_lookup_color`-style machinery, with a small
+   parser to pull integer percents out of CSS variables). Rework
+   xtext to consult CSS for its palette (significant — xtext is
+   ~4500 LOC and the cairo draw path nowhere touches the GTK
+   style context today). Rework `users_view.c::hx_user_cell_name_snapshot`
+   to consult CSS for name colors (smaller, but the cell-snapshot
+   path also has to invalidate on theme changes). Drop the `.ini`
+   entirely. Win: theme authors learn one format that's already
+   familiar from web/GTK. Cost: weeks of work; real regression risk
+   in the chat rendering; xtext gains a CSS-consultation surface
+   we'd have to maintain against future xtext upstream merges from
+   HexChat. Authors of trivial themes (a colour swap) end up
+   writing more CSS than they would key=values.
+
+3. **Status quo + style.css as a power-user hook** — don't change
+   the loader at all. Document that a theme bundle may ship a
+   `style.css` next to `theme.ini`; the loader attaches it as a
+   `GtkCssProvider` (one-line wiring). All the existing `.gtkhx-*`
+   rules keep emitting from the .ini. Smallest possible change,
+   narrowest audience (those who'd write CSS for it). Effectively
+   path 1 minus the layering question (just "and also CSS is here
+   if you want it"). Could absorb path 1 later without breaking
+   anything.
+
+4. **Drop the theme-file format, just expose CSS** — stop shipping
+   `default.ini` / `solarized.ini`, stop loading theme files.
+   Bundled icons go away (no theme bundle to put them in). Users
+   do everything through a single CSS file. Loses scales, palette
+   overrides, user-list color overrides, icon-pack bundling
+   entirely — accepts they're only worthwhile if expressible in
+   pure CSS. Most aggressive simplification; loses real
+   capability.
+
+### Lean
+
+Path 1 (hybrid) is the smallest change that gets the "you can
+write CSS if you want" power-user affordance without the xtext /
+snapshot surgery path 2 demands. Theme authors who don't want to
+touch CSS keep the readable `.ini` for the common cases (colour
+swap, scale tweak, drop in some icons); authors who want to do
+something fancy with hover states or per-cell styling drop a
+`style.css` next to the `theme.ini`. The two-files-per-bundle wart
+is mild.
+
+Path 2 is the right long-term endpoint if the GtkHx community
+grows enough theme authors that the .ini schema starts feeling
+limiting — but at that point the xtext / snapshot rework is
+amortized across a real user base. Today it'd be a lot of work
+for a small audience.
+
+Path 3 is path 1 deferred; could land as a stepping stone if path
+1's loader-hook turns out larger than expected.
+
+Path 4 is probably not worth it — the scales and palette
+overrides solve real problems (the Solarized + chunky-icons combo
+that motivated the bundle model in the first place; the
+admin/idle name colors that motivated the user-color theme axis).
+Throwing them away to land on one format is a regression for
+users who picked Solarized expecting it to work.
+
+### What to do when we come back
+
+If path 1: add a `style.css` loader hook to `gtkhx_theme.c::gtkhx_theme_load_active`,
+attach it via `gtk_style_context_add_provider_for_display` at
+`PRIORITY_APPLICATION + 1` (above our `.gtkhx-*` rules so it can
+override them). One-section doc addition to
+`theming-file-format.md`. ~50 LOC + the doc.
+
+If path 2: scope as its own multi-week phase. xtext CSS
+consultation is the long pole. Bench against real Solarized + a
+hand-written custom theme to make sure the chat output doesn't
+regress.
+
+Either way, no urgency — current model works and the user-facing
+feedback we've gotten so far has all been about specific theme
+behaviours (hover states, name colours, listview backgrounds),
+not about wanting a different schema.
