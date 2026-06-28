@@ -1,7 +1,16 @@
 # `xfers.c` transfer worker → tokio scoping (Phase R3, work item 4)
 
+> **Status: SHIPPED (June 2026), phases X1–X5.** The transfer worker runs
+> on the tokio blocking pool with cooperative cancellation
+> (`hxnet_htxf_abort_*`); the last `pthread_create` and `gtkthreads.c` are
+> gone. Cancellation is covered by the unit test
+> `tests/unit/test_htxf_cancel.c`; Tier 3 (`test_real_htxf_connect`)
+> drives the transfer matrix on the happy path. The text below is the
+> original (pre-implementation) scoping, retained for rationale — it
+> describes the starting state in the present tense.
+
 Scoping for converting the file-transfer worker off its `pthread` and onto
-the tokio runtime. This is the **R3 exit-criterion item**: `xfers.c` holds
+the tokio runtime. This was the **R3 exit-criterion item**: `xfers.c` held
 the last `pthread_create` in the tree and the last callers of
 `gtkthreads.c`.
 

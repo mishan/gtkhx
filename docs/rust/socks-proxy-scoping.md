@@ -1,8 +1,11 @@
 # SOCKS / proxy support in hxnet (`tokio-socks`) — scoping
 
 Scoping for adding central SOCKS-proxy support to the `hxnet` connect
-path. This is the prerequisite named in `connect.rs` and in Phase R3 work
-items 8 (tracker → hxnet) and 9 (revisit HTXF's C-side connect).
+path. This is **Phase R3 work item 9** (the one genuinely-deferred R3
+item) — the prerequisite named in `connect.rs` for restoring transparent
+SOCKS on the orchestrated control channel and the tracker (item 8, now in
+Rust), and for the follow-on of moving the HTXF subchannel's C-side
+connect into Rust too.
 
 ## TL;DR
 
@@ -16,9 +19,9 @@ items 8 (tracker → hxnet) and 9 (revisit HTXF's C-side connect).
   HTXF and the tracker still get it because their connect is C/
   `GSocketClient`.
 - **Adding `tokio-socks` centrally does double duty:** it *restores*
-  proxy support for the control channel and *unblocks* moving HTXF and the
-  tracker fully into Rust (items 8/9) without losing it. Worth doing
-  first, before those two.
+  proxy support for the control channel and *unblocks* moving the
+  remaining C-side connects (the HTXF subchannel; the tracker, item 8,
+  already moved) fully into Rust without losing it. Worth doing first.
 - **The transport change is small** — one connect primitive
   (`resolve_and_connect`, four in-crate callers). The real design question
   is **where the proxy config comes from**, since `GProxyResolver`'s
@@ -96,9 +99,10 @@ whether to support it or document the new path as SOCKS-only.
   it into `resolve_and_connect`.
 - C: one helper that runs `g_proxy_resolver_lookup` for a target and
   returns the chosen URI (or NULL). Reused by the control-channel connect
-  now, and by the tracker (item 8) and HTXF (item 9) opens when they move
-  to Rust.
-- Net effect for items 8/9: they pass the proxy URI to Rust and drop their
+  now (and by the tracker, which has since moved to Rust — item 8), and by
+  the HTXF opens once their fd-handoff connect moves to Rust (the
+  follow-on cleanup noted under item 9).
+- Net effect: the tracker + HTXF pass the proxy URI to Rust and drop their
   `GSocketClient` connects — the C connect goes away entirely.
 
 ## Phasing
@@ -111,8 +115,9 @@ whether to support it or document the new path as SOCKS-only.
   helper and thread `proxy_uri` through the control-channel open FFI. This
   **restores SOCKS for the main connection.** Validate Tier 3 through a
   SOCKS proxy container.
-- **S3 — Rides items 8/9.** Tracker + HTXF pass the same proxy URI when
-  they move to Rust; their C `GSocketClient` connects are deleted.
+- **S3 — Rides the connect moves.** The tracker (item 8, done) + the
+  HTXF subchannel pass the same proxy URI once their connects are in Rust;
+  their C `GSocketClient` connects are deleted.
 
 ## Testing
 
@@ -147,6 +152,6 @@ whether to support it or document the new path as SOCKS-only.
 The Rust core is the "~50 LOC" the `connect.rs` comment predicted. The
 bulk is S2: the C `GProxyResolver` helper, threading `proxy_uri` through
 the open FFIs, and a Tier 3 proxy container. Roughly a few focused days,
-independent of items 8/9 — and worth sequencing *first*, since it also
-closes the current control-channel proxy regression rather than only
-enabling cleanup.
+independent of the tracker / HTXF connect moves — and worth sequencing
+*first*, since it also closes the current control-channel proxy
+regression rather than only enabling cleanup.

@@ -1,5 +1,11 @@
 # Tracker → hxnet scoping (Phase R3, work item 8)
 
+> **Status: SHIPPED (June 2026), phases T1–T4.** `hxnet::tracker` +
+> `hxnet::tracker_fetch` own the fetch behind `hxnet_tracker_fetch_*`;
+> the C `GSocketClient` state machine is deleted. Tier 3
+> `test_tracker_fetch.c` drives the FFI against the live matrix. Retained
+> for the design rationale. SOCKS deferred to item 10.
+
 Scoping for moving the tracker fetch off its hand-rolled C async state
 machine and onto the `hxnet` (tokio) transport, the way the main
 connection and HTXF subchannels already are.
