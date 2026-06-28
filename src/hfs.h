@@ -1,5 +1,5 @@
-#ifndef __hxd_HFS_H
-#define __hxd_HFS_H
+#ifndef GTKHX_HFS_H
+#define GTKHX_HFS_H
 
 #include "hx.h"
 #include <sys/stat.h>
@@ -148,4 +148,4 @@ extern void comment_write (const char *path, char *comment, int comlen);
 
 extern void hfs_set_config (long fork, long file_perm, long dir_perm, char *comment);
 
-#endif /* __hxd_HFS_H */
+#endif /* GTKHX_HFS_H */

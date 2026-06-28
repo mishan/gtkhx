@@ -31,8 +31,8 @@
  * workers) to keep errno semantics and the handle cast in one place.
  */
 
-#ifndef __htxf_io_h
-#define __htxf_io_h
+#ifndef GTKHX_HTXF_IO_H
+#define GTKHX_HTXF_IO_H
 
 #include "config.h"
 #include <glib.h>
@@ -190,4 +190,4 @@ extern ssize_t htxf_io_write (struct htxf_conn *htxf, const void *buf,
 extern int htxf_io_set_read_timeout (struct htxf_conn *htxf,
                                      guint32 timeout_ms);
 
-#endif /* __htxf_io_h */
+#endif /* GTKHX_HTXF_IO_H */

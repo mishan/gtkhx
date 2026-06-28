@@ -9,8 +9,8 @@
  * include protocol.h directly instead.
  */
 
-#ifndef __gtkhx_SESSION_H
-#define __gtkhx_SESSION_H 1
+#ifndef GTKHX_SESSION_H
+#define GTKHX_SESSION_H 1
 
 #include <gtk/gtk.h>
 
@@ -495,4 +495,4 @@ struct cached_filelist {
 extern void timer_add_secs (time_t secs, int (*fn) (void *), void *ptr);
 extern void timer_delete_ptr (void *ptr);
 
-#endif /* ndef __gtkhx_SESSION_H */
+#endif /* ndef GTKHX_SESSION_H */

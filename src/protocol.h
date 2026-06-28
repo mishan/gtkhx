@@ -10,8 +10,8 @@
  * session.h instead.
  */
 
-#ifndef __gtkhx_PROTOCOL_H
-#define __gtkhx_PROTOCOL_H 1
+#ifndef GTKHX_PROTOCOL_H
+#define GTKHX_PROTOCOL_H 1
 
 #include <glib.h>
 #include <sys/types.h> /* u_int8_t / u_int16_t / u_int32_t */
@@ -629,4 +629,4 @@ strip_ansi (char *buf, int len)
     }
 }
 
-#endif /* ndef __gtkhx_PROTOCOL_H */
+#endif /* ndef GTKHX_PROTOCOL_H */

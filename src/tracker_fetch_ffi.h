@@ -18,8 +18,8 @@
  * test_tracker_fetch.c drives it directly against a live tracker.
  */
 
-#ifndef __tracker_fetch_ffi_h
-#define __tracker_fetch_ffi_h
+#ifndef GTKHX_TRACKER_FETCH_FFI_H
+#define GTKHX_TRACKER_FETCH_FFI_H
 
 #include <stddef.h> /* offsetof */
 #include <glib.h>
@@ -148,4 +148,4 @@ extern void hxnet_tracker_fetch_close (HxnetTrackerFetch *handle);
 
 G_END_DECLS
 
-#endif /* __tracker_fetch_ffi_h */
+#endif /* GTKHX_TRACKER_FETCH_FFI_H */

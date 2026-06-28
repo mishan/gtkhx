@@ -5,8 +5,8 @@
  * downgrade (ioctlsocket vs fcntl, WSAGetLastError vs errno).
  */
 
-#ifndef __gtkhx_inet_h
-#define __gtkhx_inet_h 1
+#ifndef GTKHX_INET_H
+#define GTKHX_INET_H 1
 
 #define set_blocking(sok) fcntl (sok, F_SETFL, 0)
 #define set_nonblocking(sok) fcntl (sok, F_SETFL, O_NONBLOCK)

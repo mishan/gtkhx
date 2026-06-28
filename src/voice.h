@@ -43,8 +43,8 @@
  *     toolbar at the user-facing layer.
  */
 
-#ifndef _VOICE_H
-#define _VOICE_H
+#ifndef GTKHX_VOICE_H
+#define GTKHX_VOICE_H
 
 #include <glib.h>
 
@@ -79,4 +79,4 @@ extern gboolean hx_send_voice_ice (struct htlc_conn *htlc, guint32 cid,
 extern gboolean hx_send_voice_mute (struct htlc_conn *htlc, guint32 cid,
                                     gboolean muted);
 
-#endif /* _VOICE_H */
+#endif /* GTKHX_VOICE_H */

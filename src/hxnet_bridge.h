@@ -27,8 +27,8 @@
  * R3.3.e-4c.
  */
 
-#ifndef _HXNET_BRIDGE_H
-#define _HXNET_BRIDGE_H
+#ifndef GTKHX_HXNET_BRIDGE_H
+#define GTKHX_HXNET_BRIDGE_H
 
 #include <glib.h>
 #include <stdint.h>
@@ -240,4 +240,4 @@ extern void hx_bridge_uninstall (void);
 
 G_END_DECLS
 
-#endif /* _HXNET_BRIDGE_H */
+#endif /* GTKHX_HXNET_BRIDGE_H */
