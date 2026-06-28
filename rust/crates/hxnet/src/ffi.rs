@@ -1655,7 +1655,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
     let join = rt.handle().spawn(async move {
-        match crate::connect::resolve_and_connect(&host_str, port, &evt_tx).await {
+        match crate::connect::resolve_and_connect(&host_str, port, None, &evt_tx).await {
             Ok(stream) => {
                 // Emit Connected here (vs. inside resolve_and_connect)
                 // so the future post-connect setup (TLS / etc.)

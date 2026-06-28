@@ -120,7 +120,10 @@ rust_target_dir = meson.project_build_root() / 'rust-target'
 # gtkhx_bridge_spawn_blocking_with_idle in lieu of pthread_create.
 # Subsequent R3.x consumers (xfers.c in R3.4, hxnet Connection actor in
 # R3.3) inherit the feature without needing a second flip.
-cargo_features = 'hxbridge/runtime'
+# hxnet/socks: SOCKS proxy support in the connect primitive (R3 item 9).
+# Opt-in at the crate level so embedders skip the tokio-socks dep; the
+# gtkhx binary wants it, so the production build turns it on here.
+cargo_features = 'hxbridge/runtime,hxnet/socks'
 
 # Inline-media image decoder backend (docs/glycin-migration-plan.md).
 # -Dglycin_compat selects which glycin loader generation hx-image-decode

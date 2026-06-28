@@ -12,6 +12,14 @@ publish = false
 [lib]
 crate-type = ["staticlib", "rlib"]
 
+[features]
+# SOCKS proxy support in resolve_and_connect (R3 item 9). Opt-in so
+# embedders that don't need proxying skip the tokio-socks dep. The gtkhx
+# build enables it (rust/meson.build); CI tests with it on. The
+# ProxyConfig type + URI parsing are always available; only the actual
+# tokio-socks tunnel + the SOCKS connect tests are gated.
+socks = ["dep:tokio-socks"]
+
 [dependencies]
 hotline-proto = { path = "../hotline-proto" }
 # R3.3.c cipher adapters: BlowfishStream uses the Blowfish-OFB-64
@@ -102,6 +110,13 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring",
 # known-hosts gate). 0.7 is the rustls-0.23 / pki-types-1.x line and
 # builds on the workspace's rustc-1.85 floor.
 rustls-native-certs = "0.7"
+# R3 item 9: central SOCKS proxy support for the connect primitive
+# (resolve_and_connect). MIT-licensed, GPL-2.0-or-later compatible.
+# Optional + gated behind the `socks` feature (below) so embedders that
+# don't need proxy support don't pull the extra deps. default-features
+# off drops the futures-io integration; the `tokio` feature gives the
+# Socks{4,5}Stream::connect impls over tokio's TcpStream.
+tokio-socks = { version = "0.5", default-features = false, features = ["tokio"], optional = true }
 # R3 item 5: banner URL-mode fetch. A small blocking GET run on the
 # tokio blocking pool (the file-mode HTXF banner's spawn_blocking
 # shape), so a sync client fits. default-features off drops gzip +

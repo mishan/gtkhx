@@ -44,7 +44,15 @@ FFI (one site). That's the single point the proxy branch plugs into.
 
 ### 1. Transport mechanic (small, well-bounded)
 
-- Add the `tokio-socks` crate (MIT; GPL-2.0-or-later compatible).
+- Add the `tokio-socks` crate (MIT; GPL-2.0-or-later compatible) as an
+  **optional** dependency behind a non-default `socks` Cargo feature, so
+  embedders that don't need proxying skip the extra deps. The `ProxyConfig`
+  type + URI parsing are always compiled (cheap, no deps); only the
+  `tokio-socks` tunnel and the SOCKS connect tests are feature-gated. The
+  gtkhx build turns the feature on (`hxnet/socks` in `rust/meson.build`);
+  CI tests with it on. A build without the feature that's nonetheless
+  handed a proxy fails loudly (`ErrorKind::Unsupported`) rather than
+  silently connecting direct.
 - When a SOCKS proxy is configured, `resolve_and_connect` connects TCP to
   the proxy, runs the SOCKS5 (or SOCKS4) handshake targeting `(host,
   port)`, then calls `Socks5Stream::into_inner()` to recover a plain
