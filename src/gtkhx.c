@@ -317,16 +317,25 @@ gtkhx_refresh_css (void)
         fghex, bghex, fghex);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
         || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        /* Row selectors carry :not(:hover):not(:active) so the
+		 * system theme's hover overlay and click-feedback rules
+		 * still win for those pseudo-classes — without that
+		 * exclusion our PRIORITY_APPLICATION background paints
+		 * over the system's :hover overlay and the user sees no
+		 * feedback when mousing over rows. The outer columnview /
+		 * listview / list nodes (no row state) and the cells (read
+		 * row state via parent matching) keep the theme bg in the
+		 * steady state. */
         g_string_append_printf (
             css_buf,
             ".gtkhx-listview,"
             ".gtkhx-listview listview,"
-            ".gtkhx-listview listview > row:not(:selected),"
-            ".gtkhx-listview listview > row:not(:selected) > cell,"
+            ".gtkhx-listview listview > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview listview > row:not(:selected):not(:hover):not(:active) > cell,"
             ".gtkhx-listview list,"
-            ".gtkhx-listview list > row:not(:selected),"
-            ".gtkhx-listview > row:not(:selected),"
-            ".gtkhx-listview > row:not(:selected) > cell {"
+            ".gtkhx-listview list > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview > row:not(:selected):not(:hover):not(:active) > cell {"
             "  color: %s;"
             "  background-color: %s;"
             "}",
@@ -382,12 +391,16 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
     g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
         || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        /* :not(:hover):not(:active) so the system theme's hover
+		 * overlay + click feedback still paint over our theme bg.
+		 * Same reasoning as the .gtkhx-listview rule in
+		 * gtkhx_refresh_css. */
         g_string_append_printf (
             css_buf,
             ".gtkhx-userlist,"
             ".gtkhx-userlist listview,"
-            ".gtkhx-userlist listview > row:not(:selected),"
-            ".gtkhx-userlist listview > row:not(:selected) > cell {"
+            ".gtkhx-userlist listview > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-userlist listview > row:not(:selected):not(:hover):not(:active) > cell {"
             "  color: %s;"
             "  background-color: %s;"
             "}",
