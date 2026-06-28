@@ -524,14 +524,17 @@ load_keyfile_from_resource (const char *resource_path)
     GKeyFile *kf;
     GError *err = NULL;
 
+    /* "Not present" is a normal outcome — load_builtin_theme tries
+	 * the dir-form first and the flat-form second, so the dir-form
+	 * lookup for a flat-form built-in (e.g. solarized) misses on
+	 * every successful load. Returning NULL silently lets the
+	 * fallback chain in gtkhx_theme_load_active do its job without
+	 * spamming the console. A genuine corruption (file present but
+	 * unparseable) still warns below. */
     bytes = g_resources_lookup_data (resource_path,
                                      G_RESOURCE_LOOKUP_FLAGS_NONE, &err);
     if (!bytes) {
-        if (err) {
-            g_warning ("gtkhx_theme: no resource %s: %s",
-                       resource_path, err->message);
-            g_clear_error (&err);
-        }
+        g_clear_error (&err);
         return NULL;
     }
 
