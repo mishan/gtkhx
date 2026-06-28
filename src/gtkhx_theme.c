@@ -537,16 +537,25 @@ load_keyfile_from_resource (const char *resource_path)
     GKeyFile *kf;
     GError *err = NULL;
 
-    /* "Not present" is a normal outcome — load_builtin_theme tries
-	 * the dir-form first and the flat-form second, so the dir-form
-	 * lookup for a flat-form built-in (e.g. solarized) misses on
-	 * every successful load. Returning NULL silently lets the
-	 * fallback chain in gtkhx_theme_load_active do its job without
-	 * spamming the console. A genuine corruption (file present but
-	 * unparseable) still warns below. */
+    /* "Not present" (G_RESOURCE_ERROR_NOT_FOUND) is a normal outcome
+	 * — load_builtin_theme tries the dir-form first and the flat-form
+	 * second, so the dir-form lookup for a flat-form built-in (e.g.
+	 * solarized) misses on every successful load. Returning NULL
+	 * silently for NOT_FOUND lets the fallback chain in
+	 * gtkhx_theme_load_active do its job without spamming the
+	 * console. Other GResource errors (internal resource-table
+	 * corruption, IO failures inside the bundle reader) DO get
+	 * warned about — they're real bugs worth surfacing rather than
+	 * silently treating as "no such theme". A genuine parse failure
+	 * (file present but unparseable) still warns below. */
     bytes = g_resources_lookup_data (resource_path,
                                      G_RESOURCE_LOOKUP_FLAGS_NONE, &err);
     if (!bytes) {
+        if (err && !g_error_matches (err, G_RESOURCE_ERROR,
+                                     G_RESOURCE_ERROR_NOT_FOUND)) {
+            g_warning ("gtkhx_theme: resource lookup %s: %s",
+                       resource_path, err->message);
+        }
         g_clear_error (&err);
         return NULL;
     }
@@ -833,8 +842,9 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                         }
                         g_free (manifest);
                     } else if (pass == 1 && !is_dir
-                               && (g_str_has_suffix (cn, ".ini")
-                                   || g_str_has_suffix (cn, ".INI"))
+                               && strlen (cn) > 4
+                               && g_ascii_strcasecmp (cn + strlen (cn) - 4,
+                                                      ".ini") == 0
                                && g_file_test (child,
                                                G_FILE_TEST_IS_REGULAR)) {
                         /* Flat-form: strip the .ini suffix. Require

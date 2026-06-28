@@ -3040,9 +3040,13 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     g_signal_connect (msg_btn, "clicked", G_CALLBACK (view_msg_btn),
                       gchat->userlist);
     gtk_widget_set_tooltip_text (msg_btn, _ ("Msg"));
-    /* gtkhx_image_new_from_pixbuf copies the pixbuf into a texture
-	 * and doesn't keep a ref; drop ours so the pixbuf isn't leaked.
-	 * g_clear_object is NULL-safe for the icon-load-failed path. */
+    /* gtkhx_image_new_from_pixbuf wraps the pixbuf in a texture
+	 * that holds its own ref on the pixbuf bytes via the GBytes
+	 * free-func — the texture stays valid for the GtkImage's
+	 * lifetime independent of our local reference. Drop ours so
+	 * the gtkhx_icon_load ref isn't leaked. The if-guard handles
+	 * the gtkhx_icon_load-returned-NULL path (g_object_unref isn't
+	 * NULL-safe). */
     if (icon) {
         g_object_unref (icon);
     }

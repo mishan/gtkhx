@@ -91,7 +91,8 @@ static GdkPixbuf *
 load_from_user_theme (const char *theme, const char *logical)
 {
     /* Defensive: reject theme names with a path separator (matches
-	 * gtkhx_theme's active_theme_path check). */
+	 * the safe_active_theme_name / gtkhx_theme_active_name check
+	 * in gtkhx_theme.c). */
     if (strchr (theme, '/') || strchr (theme, '\\')) {
         return NULL;
     }
