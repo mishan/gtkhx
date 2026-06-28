@@ -122,6 +122,16 @@ GdkRGBA gtkhx_theme_get_default_color (GtkhxPaletteRole role, gboolean dark);
  * set, otherwise the built-in default. */
 GdkRGBA gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark);
 
+/* TRUE iff the active theme file explicitly set this (role, variant).
+ * Distinguishes "theme intentionally chose this colour" from "theme
+ * omitted the key and inherits the built-in default". Used by
+ * gtkhx.c::gtkhx_refresh_css to decide whether to color the
+ * listview-shaped surfaces (tracker / users / tasks / files / news
+ * row backgrounds): if the active theme didn't opt in to chat fg/bg,
+ * leave those surfaces at the system theme instead of forcing the
+ * built-in defaults onto them. */
+gboolean gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark);
+
 /* ---- Loader ----------------------------------------------------------
  *
  * Theme files are GKeyFile .ini at $CONFIG/themes/<name>.ini, with the

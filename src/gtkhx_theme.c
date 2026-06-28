@@ -217,6 +217,16 @@ gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark)
     return rgba;
 }
 
+gboolean
+gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark)
+{
+    GtkhxTheme *self = gtkhx_theme_get_default ();
+    if (role < 0 || role >= GTKHX_PAL_N_ROLES) {
+        return FALSE;
+    }
+    return self->palette_rgb[role][dark ? 1 : 0] >= 0;
+}
+
 /* ---- Hex parser ------------------------------------------------------- */
 
 /* Parse "#rrggbb" / "#RRGGBB" into 0x00RRGGBB. Returns -1 (the

@@ -259,18 +259,40 @@ gtkhx_refresh_css (void)
 	 * font or the .gtkhx-userlist row-padding override. Used by
 	 * tracker, tasks, files browser, news browser.
 	 *
-	 * Two CSS-node trees to cover. Both end in row{cell} but the
-	 * outer container's tag differs:
+	 * Two cases to cover, because the class is sometimes applied
+	 * to a parent of the listview/list node and sometimes directly
+	 * to it:
 	 *
-	 *   GtkColumnView → columnview > listview > row > cell
-	 *   GtkListView   → listview > row [> cell]
-	 *   GtkListBox    → list > row
+	 *   GtkColumnView (tracker, files panels): class sits on the
+	 *     `columnview` node, so the rows are .gtkhx-listview
+	 *     descendants — `listview > row` / `> row > cell` match.
+	 *   GtkListView (news_browser): class sits on the `listview`
+	 *     node itself; rows are direct children → `.gtkhx-listview
+	 *     > row` matches.
+	 *   GtkListBox (tasks): class sits on the `list` node itself;
+	 *     rows are direct children → same direct-child rule.
 	 *
-	 * The header selector applies to GtkColumnView's title row.
-	 * Selection (row:selected) deliberately keeps the system theme
-	 * accent so selected rows stay visually distinct on a themed
-	 * background. */
-    css = g_strdup_printf (
+	 * Both descendant and direct-child selectors are emitted so a
+	 * caller can apply .gtkhx-listview at either layer without
+	 * worrying about the node tree. The header selector applies to
+	 * GtkColumnView's title row. Selection (row:selected) keeps the
+	 * system theme accent so selected rows stay visually distinct
+	 * on a themed background. */
+    /* The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
+	 * get painted — chat is the surface the palette was designed
+	 * for, and built-in defaults are tuned for it.
+	 *
+	 * The listview-shaped surfaces (.gtkhx-listview, tracker / users
+	 * / tasks / files / news rows) only get painted when the active
+	 * theme has *explicitly* set FG or BG. That gates the "force
+	 * chat colors onto sidebar lists" behavior to themes that opted
+	 * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
+	 * theme that omits the FG/BG keys (or the shipped "default"
+	 * theme after dropping them from default.ini) leaves the listview
+	 * surfaces at the system theme's defaults. */
+    GString *css_buf = g_string_new (NULL);
+    g_string_append_printf (
+        css_buf,
         ".gtkhx-text, .gtkhx-text text {"
         "  %s"
         "  color: %s;"
@@ -281,20 +303,28 @@ gtkhx_refresh_css (void)
         "  color: %s;"
         "  background-color: %s;"
         "  caret-color: %s;"
-        "}"
-        ".gtkhx-listview,"
-        ".gtkhx-listview > header,"
-        ".gtkhx-listview listview,"
-        ".gtkhx-listview listview > row:not(:selected),"
-        ".gtkhx-listview listview > row:not(:selected) > cell,"
-        ".gtkhx-listview list,"
-        ".gtkhx-listview list > row:not(:selected) {"
-        "  color: %s;"
-        "  background-color: %s;"
         "}",
         fontprops, fghex, bghex, fghex,
-        fghex, bghex, fghex,
-        fghex, bghex);
+        fghex, bghex, fghex);
+    if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
+        || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        g_string_append_printf (
+            css_buf,
+            ".gtkhx-listview,"
+            ".gtkhx-listview > header,"
+            ".gtkhx-listview listview,"
+            ".gtkhx-listview listview > row:not(:selected),"
+            ".gtkhx-listview listview > row:not(:selected) > cell,"
+            ".gtkhx-listview list,"
+            ".gtkhx-listview list > row:not(:selected),"
+            ".gtkhx-listview > row:not(:selected),"
+            ".gtkhx-listview > row:not(:selected) > cell {"
+            "  color: %s;"
+            "  background-color: %s;"
+            "}",
+            fghex, bghex);
+    }
+    css = g_string_free (css_buf, FALSE);
 
     gtk_css_provider_load_from_string (gtkhx_css_provider, css);
 
@@ -332,22 +362,29 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
                              (int) (bg.blue  * 255.0 + 0.5));
 
     /* Font selector stays on .gtkhx-userlist itself (the users-list
-	 * font pref); theme fg/bg are painted across the column-view's
-	 * inner nodes (listview + non-selected rows + their cells) so
-	 * the surface matches the rest of the themed UI. Selected rows
-	 * keep the system theme's accent so the selection is still
-	 * visually distinct against a themed background. */
-    css = g_strdup_printf (
-        ".gtkhx-userlist { %s }"
-        ".gtkhx-userlist,"
-        ".gtkhx-userlist > header,"
-        ".gtkhx-userlist listview,"
-        ".gtkhx-userlist listview > row:not(:selected),"
-        ".gtkhx-userlist listview > row:not(:selected) > cell {"
-        "  color: %s;"
-        "  background-color: %s;"
-        "}",
-        fontprops, fghex, bghex);
+	 * font pref) regardless of theme — separate user pref the
+	 * userlist always honors. Theme fg/bg are painted across the
+	 * column-view's inner nodes ONLY when the active theme has
+	 * explicitly set FG or BG; themes that didn't opt in (and the
+	 * shipped default) leave the userlist at system colors. Headers
+	 * always keep system styling so column titles stay legible.
+	 * Selection (row:selected) keeps the system accent. */
+    GString *css_buf = g_string_new (NULL);
+    g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
+    if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
+        || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        g_string_append_printf (
+            css_buf,
+            ".gtkhx-userlist,"
+            ".gtkhx-userlist listview,"
+            ".gtkhx-userlist listview > row:not(:selected),"
+            ".gtkhx-userlist listview > row:not(:selected) > cell {"
+            "  color: %s;"
+            "  background-color: %s;"
+            "}",
+            fghex, bghex);
+    }
+    css = g_string_free (css_buf, FALSE);
 
     gtk_css_provider_load_from_string (gtkhx_userlist_css_provider, css);
 
