@@ -93,8 +93,17 @@ struct _HxUserCellName {
 
     /* Style — set once at construction. */
     int text_x_offset;
-    double pixel_scale;
+    /* When TRUE this cell follows the GTKHX_SCALE_USERLIST_* theme
+	 * areas (the standalone Users window); icon, text and geometry
+	 * read the live theme scale at measure / snapshot time so a
+	 * Settings change rescales without rebuilding cells. When FALSE
+	 * (the compact chat-sidebar list) the cell stays at its fixed
+	 * structural density, unthemed. */
+    gboolean themed;
     gboolean text_outline;
+    /* Base row height, tuned at the default-theme icon scale.
+	 * Themed cells scale it live with the icon area; see
+	 * cell_effective_row_height. */
     int row_height;
 };
 
@@ -198,8 +207,46 @@ hx_user_cell_name_set_row (HxUserCellName *cell, HxUserRow *row)
     gtk_widget_queue_draw (GTK_WIDGET (cell));
 }
 
-/* Build the Pango layout for the row's name, applying the
- * pixel_scale to whatever font users_font_desc currently holds.
+/* Live theme scales for a cell. Themed cells (standalone Users window)
+ * track the user's GTKHX_SCALE_USERLIST_* knobs; compact cells stay at
+ * 1.0. Read fresh on every measure / snapshot so a Settings change
+ * takes effect on the next queue_resize / queue_draw with no per-cell
+ * state to refresh. */
+static double
+cell_icon_scale (HxUserCellName *cell)
+{
+    return cell->themed ? gtkhx_theme_scale (GTKHX_SCALE_USERLIST_ICON) : 1.0;
+}
+
+static double
+cell_text_scale (HxUserCellName *cell)
+{
+    return cell->themed ? gtkhx_theme_scale (GTKHX_SCALE_USERLIST_TEXT) : 1.0;
+}
+
+/* Effective row height. The configured row_height was tuned at the
+ * default-theme icon scale (125% for the Users window), so scale it by
+ * how far the current icon scale departs from that default — at the
+ * default it returns the configured value unchanged. */
+static int
+cell_effective_row_height (HxUserCellName *cell)
+{
+    double def;
+    int h;
+
+    if (!cell->themed) {
+        return cell->row_height;
+    }
+    def = gtkhx_theme_get_default_percent (GTKHX_SCALE_USERLIST_ICON) / 100.0;
+    if (def <= 0.0) {
+        def = 1.0;
+    }
+    h = (int)(cell->row_height * cell_icon_scale (cell) / def + 0.5);
+    return h < 1 ? 1 : h;
+}
+
+/* Build the Pango layout for the row's name, applying the live text
+ * scale to whatever font users_font_desc currently holds.
  * Caller frees with g_object_unref. */
 static PangoLayout *
 make_layout (HxUserCellName *cell)
@@ -218,13 +265,15 @@ make_layout (HxUserCellName *cell)
     } else {
         fd = pango_font_description_from_string ("Sans 10");
     }
-    /* Scale font size by pixel_scale. Pango sizes are in 1024ths
-     * of a point. */
-    if (cell->pixel_scale != 1.0) {
-        int size = pango_font_description_get_size (fd);
-        if (size > 0) {
-            pango_font_description_set_size (
-                fd, (gint) (size * cell->pixel_scale));
+    /* Scale font size by the live text scale. Pango sizes are in
+     * 1024ths of a point. */
+    {
+        double tscale = cell_text_scale (cell);
+        if (tscale != 1.0) {
+            int size = pango_font_description_get_size (fd);
+            if (size > 0) {
+                pango_font_description_set_size (fd, (gint)(size * tscale));
+            }
         }
     }
     pango_layout_set_font_description (layout, fd);
@@ -267,12 +316,11 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
      * scaled_lpad so the visible art lines up with the cell's
      * left edge. */
     if (cell->icon) {
-        double iw = gdk_paintable_get_intrinsic_width (cell->icon)
-                    * cell->pixel_scale;
-        double ih = gdk_paintable_get_intrinsic_height (cell->icon)
-                    * cell->pixel_scale;
+        double iscale = cell_icon_scale (cell);
+        double iw = gdk_paintable_get_intrinsic_width (cell->icon) * iscale;
+        double ih = gdk_paintable_get_intrinsic_height (cell->icon) * iscale;
         double iy = (height - ih) / 2.0;
-        double ix = -(cell->icon_left_pad * cell->pixel_scale);
+        double ix = -(cell->icon_left_pad * iscale);
         gtk_snapshot_save (snapshot);
         gtk_snapshot_translate (
             snapshot, &GRAPHENE_POINT_INIT ((float) ix, (float) iy));
@@ -285,7 +333,9 @@ hx_user_cell_name_snapshot (GtkWidget *widget, GtkSnapshot *snapshot)
      * foreground so light/dark theme tracking keeps working. */
     layout = make_layout (cell);
     pango_layout_get_pixel_extents (layout, &ink, &log);
-    text_x = (int) (cell->text_x_offset * cell->pixel_scale);
+    /* Text starts past the icon region, so its x-offset follows the
+	 * icon scale (keeps the name clear of a larger / smaller icon). */
+    text_x = (int) (cell->text_x_offset * cell_icon_scale (cell));
     text_y = (height - log.height) / 2;
 
     row_fg = hx_user_row_get_foreground (cell->row);
@@ -345,14 +395,15 @@ hx_user_cell_name_measure (GtkWidget *widget, GtkOrientation orientation,
         *natural_baseline = -1;
     }
     if (orientation == GTK_ORIENTATION_VERTICAL) {
-        *minimum = *natural = cell->row_height;
+        *minimum = *natural = cell_effective_row_height (cell);
     } else {
-        /* Natural width = text offset + room for a typical 16-char
-         * name at the current font size. GtkColumnView gives us
-         * whatever the column's set_fixed_width says, so this is
-         * only a hint to the layout machinery. */
-        *minimum = (int) (cell->text_x_offset * cell->pixel_scale);
-        *natural = *minimum + (int) (140 * cell->pixel_scale);
+        /* Natural width = text offset (icon-scaled, clears the icon)
+         * + room for a typical name at the current text scale.
+         * GtkColumnView gives us whatever the column's
+         * set_fixed_width says, so this is only a hint to the layout
+         * machinery. */
+        *minimum = (int) (cell->text_x_offset * cell_icon_scale (cell));
+        *natural = *minimum + (int) (140 * cell_text_scale (cell));
     }
 }
 
@@ -371,18 +422,18 @@ static void
 hx_user_cell_name_init (HxUserCellName *cell)
 {
     cell->text_x_offset = 22;
-    cell->pixel_scale = 1.0;
+    cell->themed = FALSE;
     cell->text_outline = FALSE;
     cell->row_height = 18;
 }
 
 static GtkWidget *
-hx_user_cell_name_new (int text_x_offset, double pixel_scale,
+hx_user_cell_name_new (int text_x_offset, gboolean themed,
                        gboolean text_outline, int row_height)
 {
     HxUserCellName *cell = g_object_new (HX_TYPE_USER_CELL_NAME, NULL);
     cell->text_x_offset = text_x_offset;
-    cell->pixel_scale = pixel_scale;
+    cell->themed = themed;
     cell->text_outline = text_outline;
     cell->row_height = row_height;
     return GTK_WIDGET (cell);
@@ -400,7 +451,7 @@ struct _HxUserListView {
 
     /* Style parameters derived from `style` at construction. */
     int row_height;
-    double pixel_scale;
+    gboolean themed; /* follows GTKHX_SCALE_USERLIST_* (Users window) */
     gboolean text_outline;
     int text_x_offset;
     int col_uid_width;
@@ -561,7 +612,7 @@ static void
 name_setup (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
 {
     HxUserListView *v = d;
-    GtkWidget *cell = hx_user_cell_name_new (v->text_x_offset, v->pixel_scale,
+    GtkWidget *cell = hx_user_cell_name_new (v->text_x_offset, v->themed,
                                              v->text_outline, v->row_height);
     (void)f;
     gtk_list_item_set_child (item, cell);
@@ -879,6 +930,22 @@ on_view_secondary_press (GtkGestureClick *gesture, int n_press, double x,
 /* Public constructors and mutators                              */
 /* ============================================================ */
 
+/* Theme "changed" handler. Cells read the live scale at measure /
+ * snapshot, so all we do is invalidate layout + paint: queue_resize
+ * re-runs measure (new row height / widths) and queue_draw repaints
+ * the icons + text at the new scale. Connected only for themed views;
+ * auto-disconnects when the view is finalized (connect_object). */
+static void
+on_theme_changed (GtkhxTheme *theme, gpointer user_data)
+{
+    HxUserListView *v = user_data;
+    (void)theme;
+    if (v->column_view) {
+        gtk_widget_queue_resize (v->column_view);
+        gtk_widget_queue_draw (v->column_view);
+    }
+}
+
 HxUserListView *
 hx_user_list_view_new (session *sess, HxUserListStyle style)
 {
@@ -897,7 +964,7 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
 		 * onto our value. 26 gives the 1.25×-scaled 16-18 px icons
 		 * a few px of breathing room above and below. */
         v->row_height = 26;
-        v->pixel_scale = 1.25;
+        v->themed = TRUE;
         v->text_outline = TRUE;
         v->text_x_offset = 36;
         v->col_uid_width = 35;
@@ -905,7 +972,7 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
         v->show_titles = TRUE;
     } else {
         v->row_height = 18;
-        v->pixel_scale = 1.0;
+        v->themed = FALSE;
         v->text_outline = FALSE;
         /* text_x_offset bumped from 22 → 36. The Users window
 		 * applied the same bump for the same reason: 22 cleared
@@ -1060,6 +1127,14 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
                           G_CALLBACK (on_view_secondary_press), NULL);
         gtk_widget_add_controller (v->column_view,
                                    GTK_EVENT_CONTROLLER (rclick));
+    }
+
+    /* Live-rescale on Settings changes (themed Users window only; the
+	 * compact sidebar keeps its fixed structural density). */
+    if (v->themed) {
+        g_signal_connect_object (gtkhx_theme_get_default (), "changed",
+                                 G_CALLBACK (on_theme_changed), v,
+                                 G_CONNECT_DEFAULT);
     }
 
     return v;

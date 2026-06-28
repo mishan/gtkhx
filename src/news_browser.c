@@ -2007,22 +2007,22 @@ build_browser_window (void)
 	 * cluttered. The buttons render their icons via the same
 	 * gtkhx_pixmap_button helper the toolbar uses. */
     br->btn_refresh = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/refresh.png", _ ("Refresh"), 2,
+        "/com/nasledov/gtkhx/pixmaps/refresh.png", _ ("Refresh"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_refresh_clicked), br);
     br->btn_new_folder = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/newsfld.png", _ ("New Folder"), 2,
+        "/com/nasledov/gtkhx/pixmaps/newsfld.png", _ ("New Folder"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_new_folder_clicked), br);
     br->btn_new_category = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/newscat.png", _ ("New Category"), 2,
+        "/com/nasledov/gtkhx/pixmaps/newscat.png", _ ("New Category"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_new_category_clicked), br);
     br->btn_new_post = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/pencil.png", _ ("New Post"), 2,
+        "/com/nasledov/gtkhx/pixmaps/pencil.png", _ ("New Post"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_new_post_clicked), br);
     br->btn_reply = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/postnews.png", _ ("Reply"), 2,
+        "/com/nasledov/gtkhx/pixmaps/postnews.png", _ ("Reply"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_reply_clicked), br);
     br->btn_delete = gtkhx_pixmap_button (
-        "/com/nasledov/gtkhx/pixmaps/trash.png", _ ("Delete"), 2,
+        "/com/nasledov/gtkhx/pixmaps/trash.png", _ ("Delete"), GTKHX_SCALE_WINDOW_BUTTONS,
         G_CALLBACK (on_delete_clicked), br);
 
     /* the AdwHeaderBar with Refresh /

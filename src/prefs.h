@@ -144,6 +144,25 @@ struct gtkhx_prefs {
      * the byte verbatim — 0 or 1. */
     unsigned char voice_ptt_enabled;
     char *voice_ptt_key;
+
+    /* Theming: per-area UI scale override, integer percentage against
+	 * the unscaled source art (see gtkhx_theme.{c,h} and
+	 * docs/theming-scoping.md). 0 means "no override → use the default
+	 * theme's factor" (buttons 200%, user list 125%), so a fresh prefs
+	 * file reproduces today's look. A non-zero value is an explicit
+	 * user override, clamped to [GTKHX_SCALE_MIN, GTKHX_SCALE_MAX].
+	 *
+	 *   scale_toolbar        — toolbar window button icons
+	 *   scale_window_buttons — action buttons in Users / Files / News /
+	 *                          Tasks / Tracker windows
+	 *   scale_userlist_icon  — user-list avatar icon
+	 *   scale_userlist_text  — user-list name text
+	 *
+	 * Persisted as CFG_SCALE_* ; read through gtkhx_theme_scale(). */
+    int scale_toolbar;
+    int scale_window_buttons;
+    int scale_userlist_icon;
+    int scale_userlist_text;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;

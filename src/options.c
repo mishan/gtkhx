@@ -42,6 +42,7 @@
 #include "tray.h"
 #include "gtkutil.h"
 #include "cfgkeys.h"
+#include "gtkhx_theme.h"
 #include "prefs_parser.h"
 #include "options.h"
 #include "text_util.h"
@@ -153,6 +154,16 @@ struct gtkhx_prefs gtkhx_prefs = {
     NULL, /* voice_output_device */
     0,    /* voice_ptt_enabled */
     NULL, /* voice_ptt_key */
+
+    /* Theming per-area UI scales. 0 == "no user override → use the
+	 * default theme's value" (toolbar/window buttons 200%, user list
+	 * 125%), so a fresh prefs file reproduces today's appearance while
+	 * Settings still shows the honest factor. A Settings change stores
+	 * an explicit percentage here. See gtkhx_theme.{c,h}. */
+    0, /* scale_toolbar */
+    0, /* scale_window_buttons */
+    0, /* scale_userlist_icon */
+    0, /* scale_userlist_text */
 };
 
 static void parse_tracker (session *);
@@ -733,6 +744,18 @@ changed_voice_output_device (session *sess)
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 }
 
+/* changefunc for the per-area UI scale spin rows. on_spin_row_value
+ * has already written the new percentage into the gtkhx_prefs.scale_*
+ * field by the time this runs; gtkhx_theme_notify_changed() clamps it
+ * in place and emits the theme "changed" signal so every subscribed
+ * button / user-list view rescales live. */
+static void
+changed_scale (session *sess)
+{
+    (void)sess;
+    gtkhx_theme_notify_changed ();
+}
+
 struct cfgvar {
     /* name of variable as it appears in conf file */
     const char *name;
@@ -879,6 +902,30 @@ struct cfgvar {
     { CFG_OPEN_TASKS, { &gtkhx_prefs.geo.tasks.init }, BOOLEAN, 0, NULL, NULL },
     { CFG_OPEN_USERS, { &gtkhx_prefs.geo.users.init }, BOOLEAN, 0, NULL, NULL },
     { CFG_QUEUEDL, { &gtkhx_prefs.queuedl }, BOOLEAN, 0, NULL, NULL },
+    { CFG_SCALE_TOOLBAR,
+      { &gtkhx_prefs.scale_toolbar },
+      INT,
+      0,
+      changed_scale,
+      NULL },
+    { CFG_SCALE_USERLIST_ICON,
+      { &gtkhx_prefs.scale_userlist_icon },
+      INT,
+      0,
+      changed_scale,
+      NULL },
+    { CFG_SCALE_USERLIST_TEXT,
+      { &gtkhx_prefs.scale_userlist_text },
+      INT,
+      0,
+      changed_scale,
+      NULL },
+    { CFG_SCALE_WINDOW_BUTTONS,
+      { &gtkhx_prefs.scale_window_buttons },
+      INT,
+      0,
+      changed_scale,
+      NULL },
     { CFG_SHOWBACK, { &gtkhx_prefs.showback }, BOOLEAN, 0, NULL, NULL },
     { CFG_SHOWJOIN, { &gtkhx_prefs.showjoin }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_CHAT, { &hxsnd.chat }, BOOLEAN, 0, NULL, NULL },
@@ -1322,6 +1369,88 @@ pref_spin_row (const char *cfgname, const char *title, const char *subtitle,
     adw_spin_row_set_value (ADW_SPIN_ROW (row), initial);
     v->widget = row;
     g_signal_connect (row, "notify::value", G_CALLBACK (on_spin_row_value), v);
+    return row;
+}
+
+/* "Reset to default" handler for the scale spin rows. Writes the
+ * canonical 0 sentinel via gtkhx_theme_set_percent (which clears
+ * the override + emits "changed" so live UI rescales) and updates
+ * the spin's displayed value to the default-theme percent so the
+ * row reflects the new effective value. We block on_spin_row_value
+ * around the synthetic set so the spin-row notification doesn't
+ * round-trip and persist a clamped override back into the pref. */
+static void
+on_scale_reset (GtkButton *btn, gpointer user_data)
+{
+    struct cfgvar *v = user_data;
+    GtkhxScaleArea area = (GtkhxScaleArea)GPOINTER_TO_INT (
+        g_object_get_data (G_OBJECT (btn), "pref-scale-area"));
+    AdwSpinRow *row = g_object_get_data (G_OBJECT (btn), "pref-scale-row");
+
+    if (!v || v->type != INT || !row) {
+        return;
+    }
+
+    /* Clear the override at the model layer first. */
+    gtkhx_theme_set_percent (area, 0);
+
+    /* Snap the spin display back to the default percent. Block our
+	 * notify::value handler so the change doesn't loop back into
+	 * on_spin_row_value and immediately re-write the slot. */
+    g_signal_handlers_block_by_func (row, on_spin_row_value, v);
+    adw_spin_row_set_value (row, gtkhx_theme_get_default_percent (area));
+    g_signal_handlers_unblock_by_func (row, on_spin_row_value, v);
+
+    /* Persist the new (zero) override to disk through the standard
+	 * pref-write path. Doesn't fire the changefunc again — the value
+	 * came from the model and the theme "changed" already fired
+	 * inside gtkhx_theme_set_percent. */
+    prefs_write ();
+}
+
+/* Spin row for a per-area UI scale (Settings → Appearance → UI
+ * Scaling). Unlike pref_spin_row it seeds the displayed value from the
+ * *effective* percentage (gtkhx_theme_get_percent), not the raw pref —
+ * the raw pref is 0 ("unset → default theme") until the user moves the
+ * row, and feeding 0 into a [50,300] spin would clamp to 50 and write
+ * a bogus override on open. The value is set before the notify handler
+ * is connected, so seeding doesn't itself fire a write. A Reset
+ * suffix-button writes the 0 sentinel back so the row can return to
+ * "follow the default theme" — without it the user could only ever
+ * pick numbers in [SCALE_MIN, SCALE_MAX] and the unset state would
+ * be unreachable from Settings. */
+static GtkWidget *
+pref_scale_spin_row (const char *cfgname, GtkhxScaleArea area,
+                     const char *title, const char *subtitle)
+{
+    struct cfgvar *v = cfgvar_for_name (cfgname);
+    GtkWidget *row = adw_spin_row_new_with_range (GTKHX_SCALE_MIN,
+                                                  GTKHX_SCALE_MAX, 5);
+
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
+    if (subtitle && *subtitle) {
+        adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
+    }
+    if (!v || v->type != INT) {
+        gtk_widget_set_sensitive (row, FALSE);
+        return row;
+    }
+    adw_spin_row_set_value (ADW_SPIN_ROW (row), gtkhx_theme_get_percent (area));
+    v->widget = row;
+    g_signal_connect (row, "notify::value", G_CALLBACK (on_spin_row_value), v);
+
+    /* Reset button — clears the user override (writes 0 sentinel)
+	 * and snaps the spin back to the default-theme percent. */
+    GtkWidget *reset = gtk_button_new_with_label (_ ("Reset"));
+    gtk_widget_set_valign (reset, GTK_ALIGN_CENTER);
+    gtk_widget_set_tooltip_text (
+        reset, _ ("Clear the override and follow the active theme's value."));
+    g_object_set_data (G_OBJECT (reset), "pref-scale-area",
+                       GINT_TO_POINTER ((int)area));
+    g_object_set_data (G_OBJECT (reset), "pref-scale-row", row);
+    g_signal_connect (reset, "clicked", G_CALLBACK (on_scale_reset), v);
+    adw_action_row_add_suffix (ADW_ACTION_ROW (row), reset);
+
     return row;
 }
 
@@ -3105,7 +3234,7 @@ settings_page_misc (AdwPreferencesPage *page)
 static void
 settings_page_general (AdwPreferencesPage *page)
 {
-    AdwPreferencesGroup *appearance_grp, *paths_grp;
+    AdwPreferencesGroup *appearance_grp, *scaling_grp, *paths_grp;
     static const char *vals[]
         = { CFG_THEME_SYSTEM, CFG_THEME_LIGHT, CFG_THEME_DARK };
     const char *labels[3];
@@ -3124,6 +3253,44 @@ settings_page_general (AdwPreferencesPage *page)
         appearance_grp,
         pref_combo_row (CFG_THEME, _ ("Theme"), vals, labels, 3));
     adw_preferences_page_add (page, appearance_grp);
+
+    /* UI Scaling. Each knob is a percentage of the unscaled source
+     * art; the default-theme factors (buttons 200%, user list 125%)
+     * are what these rows show until the user overrides them, and a
+     * change rescales the live UI immediately. See gtkhx_theme.{c,h}
+     * and docs/theming-scoping.md. */
+    scaling_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (scaling_grp, _ ("UI Scaling"));
+    adw_preferences_group_set_description (
+        scaling_grp,
+        _ ("Size of toolbar / window icons and the user list, as a "
+           "percentage of the original artwork. 100% is the unscaled "
+           "source."));
+    adw_preferences_group_add (
+        scaling_grp,
+        pref_scale_spin_row (CFG_SCALE_TOOLBAR, GTKHX_SCALE_TOOLBAR,
+                             _ ("Toolbar icons"),
+                             _ ("Main toolbar buttons (default 200%)")));
+    adw_preferences_group_add (
+        scaling_grp,
+        pref_scale_spin_row (
+            CFG_SCALE_WINDOW_BUTTONS, GTKHX_SCALE_WINDOW_BUTTONS,
+            _ ("Window buttons"),
+            _ ("Action buttons in Users / Files / News / Tasks / "
+               "Tracker windows (default 200%)")));
+    adw_preferences_group_add (
+        scaling_grp,
+        pref_scale_spin_row (CFG_SCALE_USERLIST_ICON, GTKHX_SCALE_USERLIST_ICON,
+                             _ ("User list icons"),
+                             _ ("Avatar icons in the Users window "
+                                "(default 125%)")));
+    adw_preferences_group_add (
+        scaling_grp,
+        pref_scale_spin_row (CFG_SCALE_USERLIST_TEXT, GTKHX_SCALE_USERLIST_TEXT,
+                             _ ("User list text"),
+                             _ ("Name text in the Users window "
+                                "(default 125%)")));
+    adw_preferences_page_add (page, scaling_grp);
 
     paths_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (paths_grp, _ ("Paths"));

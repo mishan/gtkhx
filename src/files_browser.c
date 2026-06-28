@@ -1970,7 +1970,7 @@ open_files_browser (void)
 	 *            verbatim when the center column flipped to Copy
 	 *            semantics. Rename of the PNGs deferred to keep
 	 *            this diff focused on UX rather than asset moves. */
-#define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, 2, NULL, NULL)
+#define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, GTKHX_SCALE_WINDOW_BUTTONS, NULL, NULL)
     refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.png");
     mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.png");
     copy_lr_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/file_move_lr.png");

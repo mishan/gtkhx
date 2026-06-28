@@ -379,14 +379,18 @@ Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiab
 
 ## Effort sketch (very rough)
 
-| Phase | Scope | Rough effort |
-|---|---|---|
-| 0 | Hygiene & CI | 1–2 days |
-| 1 | Build modernization, C cleanup | 1–2 weeks |
-| 2 | GTK 2 port (gtk_hlist, xtext, signals, threads) | 4–8 weeks — the big one |
-| 3 | GTK 3 port (cairo, threading, deprecations) | 2–3 weeks |
-| 4 | GTK 4 port (event controllers, GtkBuilder, GtkColumnView) | 3–5 weeks |
-| 5 | Modernizations (TLS, packaging, tests) | ongoing |
+| Phase | Scope | Rough effort | Status |
+|---|---|---|---|
+| 0 | Hygiene & CI | 1–2 days | ✅ |
+| 1 | Build modernization, C cleanup | 1–2 weeks | ✅ |
+| 2 | GTK 2 port (gtk_hlist, xtext, signals, threads) | 4–8 weeks — the big one | ✅ |
+| 3 | GTK 3 port (cairo, threading, deprecations) | 2–3 weeks | ✅ |
+| 4 | GTK 4 port (event controllers, GtkBuilder, GtkColumnView) | 3–5 weeks | ✅ |
+| 5 | Modernizations (packaging, tests, prefs UX) | ongoing | mostly ✅ |
+| 7 | TLS (separate-port model, sub-phases 1–5) | 2–3 weeks | ✅ |
+| 8 | Voice chat (fogWraith, sub-phases A–G) | 6–10 weeks — Rust runtime was the long pole | ✅ |
+| 9 | Inline media (fogWraith, sub-phases A–F) | 3–5 weeks | scoped |
+| ∞ | Modernized Hotline protocol (Hotline-NG) | n/a — social problem | parked |
 
 Done in evenings/weekends, multiply by ~3.
 

@@ -44,6 +44,13 @@ typedefs. `src/hotline.h` is the wire-protocol constants/structs.
 
 Other top-level dirs:
 
+- `rust/crates/` — Rust components linked into the C binary via `hxbridge` FFI.
+  `hotline-proto` (typed wire-protocol builders/parsers: voice, inline-media,
+  chat-history, tracker-v3), `hxvoice` + `hxvoice-runtime` (voice state machine
+  and gstreamer-rs/webrtcbin runtime, see ROADMAP Phase 8), `hx-image-decode`
+  (glycin-backed decoder used by inline-media / banner / chat / theming SVG
+  path), `hxnet`, `hxcompress`, `hxcrypto-{hash,stream,aead}`. See
+  `docs/RUST-ROADMAP.md` for the migration plan.
 - `plugins/sample/` — example plugin. Build-disabled (`USE_PLUGIN` undef).
 - `plugins/eliza/` — toy ELIZA chatbot plugin. Build-disabled.
 - `po/` — translations. French only.
@@ -90,7 +97,7 @@ What's runnable and reasonably polished on this branch:
   UTF-8 with U+FFFD fallback) before reaching xtext/Pango.
 - Sound playback is in-process via GSound; no fork+exec of an external player.
 
-Phase 5 protocol-aware work landed:
+Phase 5+ work landed (highlights — see ROADMAP for the full list):
 
 - `HTLC_HDR_PING` keepalive every 60 s while connected, gated on `htlc->version >= 150`
   so 1.0/1.2 servers don't error-spam our toasts.
@@ -100,6 +107,29 @@ Phase 5 protocol-aware work landed:
   `HL_ACCESS_READ_NEWS` is unset; users.c hides Kick/Ban menu and toolbar buttons when
   `HL_ACCESS_DISCONNECT_USERS` is unset; toolbar greys out News / Post / News (1.5+)
   buttons by version + access bits.
+- **Phase 7 TLS (separate-port model)** — all five sub-phases shipped on
+  `claude/tls-phase1-control-channel`. Control channel + HTXF subchannels (xfers
+  + banner) over `GTlsConnection`; TOFU trust DB with SHA-256 fingerprint pinning
+  and an Adwaita prompt; Connect dialog "Use TLS" `AdwSwitchRow` with port
+  auto-flip (5500↔5600) and HOPE/cipher/compress grey-out; bookmark format gained
+  a 4th flag byte (zero-pads on read for pre-TLS files). Tier 3 covers the full
+  matrix against Janus.
+- **Phase 8 voice chat (fogWraith)** — end-to-end against Janus VoiceRoom.
+  Wire protocol + session machine in Rust (`hotline-proto::voice`, `hxvoice`),
+  webrtcbin runtime in Rust (`hxvoice-runtime`, gstreamer-rs + gstreamer-webrtc-rs),
+  UI in C (`voice.{c,h}`, `voice_panel.{c,h}`, `voice_model.{c,h}`, voice indicator
+  column in users_view). DTLS-SRTP / PCMU. Capability bit 2 (`HTLC_CAP_VOICE`).
+- **RC4 retired** on `claude/remove-rc4`. Stable cipher-byte vocabulary in
+  `bookmark_cipher.{c,h}` (independent of `valid_ciphers[]` ordering); legacy
+  RC4 bookmarks trigger a replacement-picker dialog and the file is rewritten
+  in place.
+- **Packaging** — Flatpak manifest (`com.nasledov.gtkhx.yml`, GNOME 49),
+  AppStream metadata, desktop file. RPM + `debian/` removed; distro story is
+  Flatpak.
+- **Static analysis + sanitizers in CI** — `.github/workflows/analyze.yml` runs
+  GCC `-fanalyzer`, clang-tidy, and an ASan+UBSan unit/proto run on every push.
+  Findings upload as artifacts; non-blocking until categories get flipped to
+  mandatory.
 
 What's degraded and remaining:
 
@@ -239,6 +269,34 @@ duplicate paths, so a hashtable can't represent it cleanly).
 - **License: GPL-2.0-or-later** ("version 2 of the License, or (at your option) any
   later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
   clause without explicit confirmation.
+
+## Theming (per-area scaling)
+
+`src/gtkhx_theme.{c,h}` is the `GtkhxTheme` singleton. Four named scale areas —
+`GTKHX_SCALE_TOOLBAR`, `GTKHX_SCALE_WINDOW_BUTTONS`, `GTKHX_SCALE_USERLIST_ICON`,
+`GTKHX_SCALE_USERLIST_TEXT` — each backed by a `CFG_SCALE_*` int-percent pref in
+`cfgkeys.h`. `0` means "unset → use the default theme's factor"
+(`default_theme_pct[]`); a non-zero override replaces it.
+
+Call sites multiply their raw source size by `gtkhx_theme_scale(area)`. The old
+per-call `2` literals and `TOOLBAR_ICON_SCALE` / `TASKS_ICON_SCALE` constants are
+gone — there is exactly one factor source per area, no hidden multipliers.
+Source art is the honest 100%; the default theme owns the historical 2× button
+and 1.25× user-list factors as explicit overrides.
+
+Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
+`GtkhxScaleArea`, subscribe to the theme `changed` signal, and auto-unsubscribe
+on finalize). The user list reads scales live in `measure`/`snapshot` — no
+per-cell state to refresh.
+
+Settings: "UI Scaling" group on the Appearance page with four `AdwSpinRow`s.
+Test: `tests/unit/test_theme_scale.c` pins the clamp matrix, defaults,
+unset→default fallback, and `changed` emission.
+
+Icon-pack replacement and the color/palette editor are scoped in
+`docs/theming-scoping.md` but not yet built. The compact chat-sidebar user list
+keeps a fixed 1.0 structural density and does not follow `USERLIST_*` — that
+carve-out is intentional, not a bug.
 
 ## Coverage
 

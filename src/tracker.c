@@ -2361,10 +2361,10 @@ create_tracker_window (GtkWidget *widget, gpointer data)
 	 * row beneath. Refresh + Connect on the leading edge, the live
 	 * found-count "N / M" indicator on the trailing edge. */
     refreshbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/refresh.png",
-                                      _ ("Refresh tracker list"), 2,
+                                      _ ("Refresh tracker list"), GTKHX_SCALE_WINDOW_BUTTONS,
                                       G_CALLBACK (tracker_getlist), sess);
     connbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/connect.png",
-                                   _ ("Connect to selected server"), 2,
+                                   _ ("Connect to selected server"), GTKHX_SCALE_WINDOW_BUTTONS,
                                    G_CALLBACK (tracker_connect), 0);
     /* Save Bookmark — record the selected server in the user's
      * bookmarks dir. GNOME placeholder icon (the same one Files
@@ -2382,7 +2382,8 @@ create_tracker_window (GtkWidget *widget, gpointer data)
      * consistent across windows. */
     detailsbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
                                       _ ("Show details for selected server"),
-                                      2, G_CALLBACK (tracker_details), NULL);
+                                      GTKHX_SCALE_WINDOW_BUTTONS,
+                                      G_CALLBACK (tracker_details), NULL);
 
     header = adw_header_bar_new ();
     adw_header_bar_pack_start (ADW_HEADER_BAR (header), refreshbtn);
