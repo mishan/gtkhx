@@ -16,6 +16,7 @@
 #include <unistd.h>             /* close() — fd cleanup on pre-spawn failure */
 
 #include <glib.h>
+#include <gio/gio.h>            /* GProxyResolver (SOCKS proxy lookup) */
 
 #include "compat.h"             /* MAX_HOTLINE_PACKET_LEN */
 #include "hxnet_bridge.h"
@@ -446,6 +447,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len,
     guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
@@ -460,6 +462,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_hope (
     const guint8 *name, gsize name_len,
     guint16 icon, guint16 version, guint16 caps, guint32 trans,
     const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
@@ -473,6 +476,7 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len,
     guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
     void *user_data);
@@ -641,6 +645,63 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
     }
 }
 
+/*
+ * Ask GProxyResolver whether the system is configured to reach
+ * (host, port) through a SOCKS proxy, and if so return its URI
+ * (g_strdup'd — caller frees) for the orchestrated open_* FFIs to
+ * tunnel through. Returns NULL for "connect direct".
+ *
+ * The query URI uses the "none" scheme, matching what GSocketClient
+ * itself passes for a raw TCP (non-URL) connect: scheme-agnostic proxy
+ * rules (e.g. an `all_proxy` / ALL_PROXY env var, or a GNOME system-wide
+ * SOCKS proxy) then apply. Hotline has no registered URI scheme, so a
+ * scheme-specific HTTP/HTTPS rule must not steal this lookup.
+ *
+ * Only SOCKS results are honoured: tokio-socks (the Rust transport) can't
+ * tunnel a raw Hotline stream through an HTTP-CONNECT proxy, so a non-SOCKS
+ * proxy result is logged and skipped (connect direct) rather than silently
+ * mishandled. "direct://" entries mean no proxy and are skipped.
+ */
+static char *
+bridge_lookup_socks_proxy (const char *host, guint16 port)
+{
+    GProxyResolver *resolver = g_proxy_resolver_get_default ();
+    if (!resolver) {
+        return NULL;
+    }
+
+    g_autofree char *uri = g_strdup_printf ("none://%s:%u", host, port);
+    GError *err = NULL;
+    char **proxies = g_proxy_resolver_lookup (resolver, uri, NULL, &err);
+    if (err) {
+        g_warning ("hxnet_bridge: proxy lookup for %s failed: %s",
+                   uri, err->message);
+        g_error_free (err);
+        return NULL;
+    }
+
+    char *result = NULL;
+    for (char **p = proxies; p && *p; p++) {
+        if (g_str_has_prefix (*p, "socks")) {
+            /* socks://, socks4://, socks5:// — the URI ProxyConfig::from_uri
+             * parses on the Rust side. */
+            result = g_strdup (*p);
+            break;
+        }
+        if (g_str_has_prefix (*p, "direct")) {
+            continue; /* no proxy for this destination */
+        }
+        /* Non-SOCKS, non-direct (e.g. http://): we can't tunnel Hotline
+         * through it. Warn loudly so a misrouted connection is diagnosable
+         * rather than silently bypassing the configured proxy. */
+        g_warning ("hxnet_bridge: ignoring non-SOCKS proxy %s for %s "
+                   "(only SOCKS proxies are supported); connecting direct",
+                   *p, uri);
+    }
+    g_strfreev (proxies);
+    return result;
+}
+
 gboolean
 hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
                                           const char *host, guint16 port,
@@ -668,12 +729,16 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
      * is what makes the orchestrator's replayed LOGIN-reply frame
      * pass hx_bridge_dispatch_frame's hx_bridge_is_installed() gate.
      * user_data is the htlc for all three callbacks. */
+    /* open_plaintext parses proxy_uri synchronously (before spawning the
+     * lifecycle task), so this g_autofree URI is safe to free on return. */
+    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
         (const guint8 *) pass, strlen (pass),
         (const guint8 *) name, strlen (name),
         icon, version, caps, trans,
+        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
     if (!h) {
         /* open_plaintext logs its own g_critical on the failure
@@ -714,6 +779,7 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
     /* Same synchronous-install-before-return discipline as the
      * plaintext variant: the bridge handle must be live before the
      * forwarder can deliver the replayed step-2 reply. */
+    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_hope (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
@@ -721,6 +787,7 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
         (const guint8 *) name, strlen (name),
         icon, version, caps, trans,
         (const guint8 *) cipher_alg, strlen (cipher_alg),
+        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
     if (!h) {
         return FALSE;
@@ -785,12 +852,14 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
     pass  = pass  ? pass  : "";
     name  = name  ? name  : "";
 
+    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext_tls (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
         (const guint8 *) pass, strlen (pass),
         (const guint8 *) name, strlen (name),
         icon, version, caps, trans,
+        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
         bridge_on_verify_cert_cb, htlc);
     if (!h) {

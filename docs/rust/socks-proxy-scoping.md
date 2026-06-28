@@ -115,14 +115,21 @@ whether to support it or document the new path as SOCKS-only.
 
 ## Phasing
 
-- **S1 — Rust transport, no wiring.** Add `tokio-socks`, the proxy branch
-  in `resolve_and_connect`, and `ProxyConfig` parsing. Unit-test against a
-  loopback mock SOCKS5 server. Callers pass `None`, so this is a pure
+- **S1 — Rust transport, no wiring. DONE.** Added `tokio-socks` (opt-in
+  behind a non-default `socks` feature), the proxy branch in
+  `resolve_and_connect`, and `ProxyConfig` parsing. Unit-tested against a
+  loopback mock SOCKS5 server. Callers pass `None`, so it was a pure
   addition with zero behaviour change.
-- **S2 — Config sourcing + control channel.** Add the C `GProxyResolver`
-  helper and thread `proxy_uri` through the control-channel open FFI. This
-  **restores SOCKS for the main connection.** Validate Tier 3 through a
-  SOCKS proxy container.
+- **S2 — Config sourcing + control channel. DONE (bar the Tier 3 test).**
+  Added the C `bridge_lookup_socks_proxy` helper (`GProxyResolver`, queried
+  with the `none://host:port` scheme that `GSocketClient` itself uses for a
+  raw TCP connect) and threaded `proxy_uri` / `proxy_uri_len` through the
+  three control-channel open FFIs (plaintext / TLS / HOPE) + their request
+  structs. This **restores SOCKS for the main connection.** Config source
+  is GProxyResolver-only (no env-var fallback in C — `GProxyResolver`'s
+  default already honours `all_proxy` / GNOME settings). Only SOCKS proxy
+  results are honoured; a non-SOCKS (e.g. `http://`) result is warned and
+  skipped. **Remaining:** the Tier 3 SOCKS-proxy-container test.
 - **S3 — Rides the connect moves.** The tracker (item 8, done) + the
   HTXF subchannel pass the same proxy URI once their connects are in Rust;
   their C `GSocketClient` connects are deleted.
@@ -141,11 +148,15 @@ whether to support it or document the new path as SOCKS-only.
 
 ## Risks / open questions
 
-1. **Config source (A/B/C).** The main decision; it gates the FFI shape.
-   Recommend A, env fallback optional.
-2. **HTTP CONNECT proxies.** Out of `tokio-socks` scope — support with a
-   shim or document as unsupported. `GProxyResolver` returning an `http://`
-   proxy must at least fail clearly, not silently connect direct.
+1. **Config source (A/B/C). RESOLVED → GProxyResolver-only (C).** No
+   env-var fallback in C; `GProxyResolver`'s default backend already reads
+   `all_proxy` / `ALL_PROXY` / GNOME settings. The FFI takes a parsed
+   `socks5://` URI string.
+2. **HTTP CONNECT proxies.** Out of `tokio-socks` scope. An explicit
+   `http(s)://` URI passed to `ProxyConfig::from_uri` is rejected loudly;
+   a `GProxyResolver` *result* of `http://` is warned and skipped (we
+   can't tunnel a raw Hotline stream through HTTP-CONNECT). Revisit if a
+   network that only offers an HTTP proxy turns up.
 3. **Remote vs. local DNS.** Go socks5h (remote) when proxied; note the
    behaviour change from today's local resolve, and that the direct path
    is unaffected.

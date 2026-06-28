@@ -1689,6 +1689,38 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
     )
 }
 
+/// Parse an optional proxy URI argument shared by the three lifecycle
+/// `open_*` entry points into a [`ProxyConfig`].
+///
+/// - `NULL` pointer or zero length → `Ok(None)` (connect direct).
+/// - A valid `socks5://` / `socks4://` URI → `Ok(Some(cfg))`.
+/// - A malformed or unsupported URI (including `http(s)://`, which
+///   tokio-socks can't tunnel) → `Err(msg)`. Callers treat this as a
+///   hard failure and return NULL rather than silently connecting
+///   direct past a configured proxy — the same fail-loud contract as the
+///   feature-off path in `resolve_and_connect`.
+///
+/// The returned error never echoes the raw URI's userinfo (see
+/// `ProxyConfig::from_uri`), so logging it can't leak a proxy password.
+///
+/// # Safety
+///
+/// `ptr` must point at `len` readable bytes or be `NULL`.
+unsafe fn parse_proxy_arg(
+    ptr: *const u8,
+    len: usize,
+) -> Result<Option<crate::connect::ProxyConfig>, String> {
+    if ptr.is_null() || len == 0 {
+        return Ok(None);
+    }
+    if (len as u64) > (isize::MAX as u64) {
+        return Err("proxy_uri length exceeds isize::MAX".to_string());
+    }
+    let bytes = std::slice::from_raw_parts(ptr, len);
+    let uri = std::str::from_utf8(bytes).map_err(|_| "proxy_uri is not valid UTF-8".to_string())?;
+    crate::connect::ProxyConfig::from_uri(uri).map(Some)
+}
+
 /// Open a Hotline connection with hxnet driving the full
 /// plaintext-login lifecycle (Phase G of
 /// `hxnet-owns-the-whole-lifecycle`).
@@ -1753,6 +1785,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     version: u16,
     caps: u16,
     trans: u32,
+    proxy_uri: *const u8,
+    proxy_uri_len: usize,
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
@@ -1856,6 +1890,14 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         }
     };
 
+    let proxy = match parse_proxy_arg(proxy_uri, proxy_uri_len) {
+        Ok(p) => p,
+        Err(e) => {
+            glib::g_critical!("hxnet", "hxnet_connection_open_plaintext: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
+
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
     let req = crate::lifecycle::PlaintextOpenRequest {
@@ -1868,6 +1910,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
         version,
         caps,
         trans,
+        proxy,
     };
 
     let join = rt.handle().spawn(async move {
@@ -1999,6 +2042,10 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
         version,
         caps,
         trans,
+        // Polling variant: no proxy. The Tier 3 harness drives this path
+        // directly against test servers; SOCKS coverage rides the
+        // production callback functions (and a deferred Tier 3 proxy test).
+        proxy: None,
     };
     let join = rt.handle().spawn(async move {
         crate::lifecycle::run_plaintext_lifecycle(req, cmd_rx, evt_tx).await;
@@ -2050,6 +2097,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     version: u16,
     caps: u16,
     trans: u32,
+    proxy_uri: *const u8,
+    proxy_uri_len: usize,
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
@@ -2148,6 +2197,14 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         }
     };
 
+    let proxy = match parse_proxy_arg(proxy_uri, proxy_uri_len) {
+        Ok(p) => p,
+        Err(e) => {
+            glib::g_critical!("hxnet", "hxnet_connection_open_plaintext_tls: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
+
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
     let req = crate::lifecycle::PlaintextOpenRequest {
@@ -2160,6 +2217,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
         version,
         caps,
         trans,
+        proxy,
     };
 
     // Wrap the C verify callback in a Rust closure the lifecycle
@@ -2317,6 +2375,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         version,
         caps,
         trans,
+        proxy: None, // polling variant connects direct (see plaintext polling)
     };
     let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> = verify_cert.map(|cb| {
         let ud = SendUserData(user_data);
@@ -2383,6 +2442,8 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
     trans: u32,
     cipher_alg: *const u8,
     cipher_alg_len: usize,
+    proxy_uri: *const u8,
+    proxy_uri_len: usize,
     on_event: HxnetEventCallback,
     on_shutdown: HxnetShutdownCallback,
     on_state: HxnetStateCallback,
@@ -2493,6 +2554,14 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         }
     };
 
+    let proxy = match parse_proxy_arg(proxy_uri, proxy_uri_len) {
+        Ok(p) => p,
+        Err(e) => {
+            glib::g_critical!("hxnet", "hxnet_connection_open_hope: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
+
     let (cmd, events, cmd_rx, evt_tx) = Connection::make_channels();
 
     let req = crate::lifecycle::HopeOpenRequest {
@@ -2514,6 +2583,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
         } else {
             vec![cipher_vec]
         },
+        proxy,
     };
 
     let hope_slot: crate::lifecycle::HopeAeadSlot =
@@ -2692,6 +2762,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
         } else {
             vec![cipher_vec]
         },
+        proxy: None, // polling variant connects direct (see plaintext polling)
     };
     let hope_slot: crate::lifecycle::HopeAeadSlot =
         std::sync::Arc::new(std::sync::Mutex::new(None));
