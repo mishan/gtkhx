@@ -86,6 +86,10 @@ pub struct PlaintextOpenRequest {
     /// LOGIN does so extensions negotiate.
     pub caps: u16,
     pub trans: u32,
+    /// Optional SOCKS proxy to tunnel the connection through. `None`
+    /// connects direct. Sourced in C from `GProxyResolver` and parsed by
+    /// the FFI; see `connect::ProxyConfig`.
+    pub proxy: Option<crate::connect::ProxyConfig>,
 }
 
 /// Drive the plaintext-Hotline lifecycle end-to-end. On success,
@@ -104,7 +108,7 @@ pub async fn run_plaintext_lifecycle(
 ) {
     // Phase A: DNS + TCP connect. resolve_and_connect emits
     // Resolving + Connecting itself.
-    let stream = match resolve_and_connect(&req.host, req.port, None, &evt_tx).await {
+    let stream = match resolve_and_connect(&req.host, req.port, req.proxy.as_ref(), &evt_tx).await {
         Ok(s) => s,
         Err(e) => {
             let _ = evt_tx
@@ -146,7 +150,7 @@ pub async fn run_plaintext_tls_lifecycle(
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
-    let tcp = match resolve_and_connect(&req.host, req.port, None, &evt_tx).await {
+    let tcp = match resolve_and_connect(&req.host, req.port, req.proxy.as_ref(), &evt_tx).await {
         Ok(s) => s,
         Err(e) => {
             let _ = evt_tx
@@ -345,6 +349,9 @@ pub struct HopeOpenRequest {
     /// `[b"CHACHA20-POLY1305", b"BLOWFISH"]`). The server picks one
     /// and echoes it in the step-1 reply.
     pub cipher_algs: Vec<Vec<u8>>,
+    /// Optional SOCKS proxy to tunnel through; `None` connects direct.
+    /// See [`PlaintextOpenRequest::proxy`].
+    pub proxy: Option<crate::connect::ProxyConfig>,
 }
 
 /// Map a wire MAC-algorithm label onto the rekey enum the
@@ -414,7 +421,7 @@ pub async fn run_hope_lifecycle(
         }};
     }
 
-    let mut stream = match resolve_and_connect(&req.host, req.port, None, &evt_tx).await {
+    let mut stream = match resolve_and_connect(&req.host, req.port, req.proxy.as_ref(), &evt_tx).await {
         Ok(s) => s,
         Err(e) => bail!("connect: {e}"),
     };
@@ -738,6 +745,7 @@ mod tests {
             version: 150,
             caps: 0,
             trans: 1,
+            proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
@@ -862,6 +870,7 @@ mod tests {
             version: 150,
             caps: 0,
             trans: 1,
+            proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
@@ -924,6 +933,7 @@ mod tests {
             caps: 0x001F,
             trans: 1,
             cipher_algs: vec![cipher.into_bytes()],
+            proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let hope_slot: HopeAeadSlot = std::sync::Arc::new(std::sync::Mutex::new(None));
@@ -984,6 +994,7 @@ mod tests {
             version: 185,
             caps: 0x001F,
             trans: 1,
+            proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let verify: Option<Box<dyn Fn(&str) -> bool + Send>> = Some(Box::new(|fp: &str| {
@@ -1040,6 +1051,7 @@ mod tests {
             version: 0,
             caps: 0,
             trans: 1,
+            proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
         let lifecycle = tokio::spawn(run_plaintext_lifecycle(req, cmd_rx, evt_tx));
@@ -1114,6 +1126,7 @@ mod tests {
             version: 150,
             caps: 0,
             trans: 1,
+            proxy: None,
         };
         let (handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
 

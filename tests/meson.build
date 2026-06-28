@@ -1243,6 +1243,21 @@ test('orchestrator_harness', test_integration_orchestrator_harness,
      suite   : 'integration',
      timeout : 30)
 
+# socks — Tier 3 coverage for the SOCKS proxy transport (R3 item 9).
+# Same pure-FFI polling path as orchestrator_harness, but routes the
+# production connect through a real SOCKS5 proxy (the tests/socks-proxy
+# container, GTKHX_TEST_SOCKS) to mhxd: a guest login over the tunnel
+# plus a dead-proxy negative control proving the proxy isn't bypassed.
+test_integration_socks = executable(
+  'test_integration_socks',
+  'integration/test_integration_socks.c',
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  include_directories : integration_test_inc,
+)
+test('socks', test_integration_socks,
+     suite   : 'integration',
+     timeout : 60)
+
 # real_htxf_connect — Tier 3 coverage for PRODUCTION htxf_connect, the
 # subchannel-connect function the HTXF->Rust H2 re-wire rewrites (no
 # other test calls it). Links production network.c (for htxf_connect)

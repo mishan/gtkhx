@@ -157,7 +157,8 @@ extern hxnet_connection *hxnet_connection_open_plaintext_polling (
     const guint8 *login, gsize login_len,
     const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint16 caps, guint32 trans);
+    guint16 icon, guint16 version, guint16 caps, guint32 trans,
+    const guint8 *proxy_uri, gsize proxy_uri_len);
 /* HOPE-Secure-Login sibling of the polling open. cipher_alg is the wire
  * cipher label ("BLOWFISH" / "CHACHA20-POLY1305"), or NULL/empty for a
  * no-cipher HMAC secure login. The actor runs the full step-1/step-2
@@ -304,7 +305,8 @@ orch_open_login (struct htlc_conn *htlc, const char *host, int port,
         (const guint8 *) login, strlen (login),
         (const guint8 *) "", 0,             /* guest: empty password */
         (const guint8 *) name, strlen (name),
-        icon, /*version=*/185, caps, /*trans=*/1);
+        icon, /*version=*/185, caps, /*trans=*/1,
+        /*proxy_uri=*/NULL, /*proxy_uri_len=*/0);
     if (!h) {
         g_test_fail_printf (
             "hxnet_connection_open_plaintext_polling(%s:%d) returned NULL — "
