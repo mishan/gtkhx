@@ -147,6 +147,11 @@ cargo_features = 'hxbridge/runtime'
 #       configure step runs inside the runtime (which the manifest still
 #       pins to '2' explicitly, so it never depends on the probe).
 glycin_opt = get_option('glycin_compat')
+if glycin_opt == 'auto' and meson.is_cross_build()
+  warning('glycin loader auto-detect probes the BUILD host, which may not ' +
+          'match the target runtime in a cross build. Set -Dglycin_compat=2 ' +
+          '(2+ loaders) or =1 (1+ loaders) explicitly for the target.')
+endif
 if glycin_opt == 'auto'
   # Scan, newest-first, for a registered loader generation. glycin itself
   # discovers loaders via `<datadir>/glycin[-loaders]/<gen>+/conf.d/*.conf`
