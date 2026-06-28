@@ -316,6 +316,52 @@ test_load_emits_changed (void)
     g_key_file_free (kf);
 }
 
+/* User-list name colors: theme keys [users.light]/[users.dark]
+ * round-trip via gtkhx_theme_get_user_color; the accessor returns
+ * FALSE for slots the theme didn't set (caller falls back to its
+ * hardcoded default). */
+static void
+test_load_user_colors (void)
+{
+    GKeyFile *kf = g_key_file_new ();
+    GdkRGBA out;
+
+    g_key_file_set_string (kf, "users.light", "active",     "#112233");
+    g_key_file_set_string (kf, "users.light", "admin",      "#dc322f");
+    g_key_file_set_string (kf, "users.dark",  "idle",       "#445566");
+    g_key_file_set_string (kf, "users.dark",  "admin_idle", "#aabbcc");
+
+    gtkhx_theme_load_from_keyfile (kf);
+
+    /* Light: active + admin set, idle + admin_idle not. */
+    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ACTIVE,
+                                               FALSE, &out));
+    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0x11);
+    g_assert_cmpint ((int) (out.green * 255.0 + 0.5), ==, 0x22);
+    g_assert_cmpint ((int) (out.blue  * 255.0 + 0.5), ==, 0x33);
+    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN,
+                                               FALSE, &out));
+    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0xdc);
+    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_IDLE,
+                                                FALSE, &out));
+    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN_IDLE,
+                                                FALSE, &out));
+
+    /* Dark: idle + admin_idle set, active + admin not. */
+    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ACTIVE,
+                                                TRUE, &out));
+    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN,
+                                                TRUE, &out));
+    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_IDLE,
+                                               TRUE, &out));
+    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0x44);
+    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN_IDLE,
+                                               TRUE, &out));
+    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0xaa);
+
+    g_key_file_free (kf);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -334,5 +380,6 @@ main (int argc, char **argv)
     g_test_add_func ("/theme/load-replaces-not-merges",
                      test_load_replaces_not_merges);
     g_test_add_func ("/theme/load-emits-changed", test_load_emits_changed);
+    g_test_add_func ("/theme/load-user-colors", test_load_user_colors);
     return g_test_run ();
 }

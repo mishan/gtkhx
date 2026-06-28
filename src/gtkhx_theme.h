@@ -132,6 +132,36 @@ GdkRGBA gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark);
  * built-in defaults onto them. */
 gboolean gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark);
 
+/* ---- User-list name colors ------------------------------------------
+ *
+ * Names in the user list are colored by 2-bit status (idle / admin)
+ * via a 4-slot palette: regular / idle / admin / admin-idle. The
+ * historical defaults live in gtkhx.c::init_colors
+ * (defaults_gdk_user_colors) and remain the fallback when a theme
+ * doesn't opt in. A theme that DOES set these (Solarized does) gets
+ * its values applied so names stay readable against the themed chat
+ * background instead of inheriting CSS color from the row.
+ *
+ * Loaded via [users.light] / [users.dark] sections in the theme
+ * file with keys `active`, `idle`, `admin`, `admin_idle`. Per-(slot,
+ * variant) opt-in: a theme can set only the two it cares about and
+ * the others fall back to the historical default. */
+
+typedef enum {
+    GTKHX_USER_COLOR_ACTIVE,      /* regular user */
+    GTKHX_USER_COLOR_IDLE,        /* idle / away */
+    GTKHX_USER_COLOR_ADMIN,       /* admin */
+    GTKHX_USER_COLOR_ADMIN_IDLE,  /* admin + idle */
+    GTKHX_USER_COLOR_N
+} GtkhxUserColor;
+
+/* Fill *out with the active theme's user-list color for (slot,
+ * variant) and return TRUE. If the theme didn't set this slot,
+ * leave *out untouched and return FALSE — the caller falls back to
+ * its historical default. */
+gboolean gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark,
+                                     GdkRGBA *out);
+
 /* ---- Loader ----------------------------------------------------------
  *
  * Theme files are GKeyFile .ini at $CONFIG/themes/<name>.ini, with the

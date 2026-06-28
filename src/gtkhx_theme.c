@@ -46,6 +46,11 @@ struct _GtkhxTheme {
 	 * → fall back to default_palette_{light,dark}[]. Two variants per
 	 * role (index 0 = light, index 1 = dark). */
     int palette_rgb[GTKHX_PAL_N_ROLES][2];
+
+    /* Loaded user-list name color overrides, same packed-int shape as
+	 * palette_rgb. -1 = "not set" → caller (users.c::user_color_gdk)
+	 * keeps its historical default. */
+    int user_color_rgb[GTKHX_USER_COLOR_N][2];
 };
 
 G_DEFINE_FINAL_TYPE (GtkhxTheme, gtkhx_theme, G_TYPE_OBJECT)
@@ -124,6 +129,10 @@ gtkhx_theme_init (GtkhxTheme *self)
     for (r = 0; r < GTKHX_PAL_N_ROLES; r++) {
         self->palette_rgb[r][0] = -1;
         self->palette_rgb[r][1] = -1;
+    }
+    for (r = 0; r < GTKHX_USER_COLOR_N; r++) {
+        self->user_color_rgb[r][0] = -1;
+        self->user_color_rgb[r][1] = -1;
     }
 }
 
@@ -227,6 +236,25 @@ gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark)
     return self->palette_rgb[role][dark ? 1 : 0] >= 0;
 }
 
+gboolean
+gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
+{
+    GtkhxTheme *self = gtkhx_theme_get_default ();
+    int packed;
+    if (slot < 0 || slot >= GTKHX_USER_COLOR_N || !out) {
+        return FALSE;
+    }
+    packed = self->user_color_rgb[slot][dark ? 1 : 0];
+    if (packed < 0) {
+        return FALSE;
+    }
+    out->red   = ((packed >> 16) & 0xff) / 255.0;
+    out->green = ((packed >>  8) & 0xff) / 255.0;
+    out->blue  = ((packed      ) & 0xff) / 255.0;
+    out->alpha = 1.0;
+    return TRUE;
+}
+
 /* ---- Hex parser ------------------------------------------------------- */
 
 /* Parse "#rrggbb" / "#RRGGBB" into 0x00RRGGBB. Returns -1 (the
@@ -313,6 +341,15 @@ static const char *const palette_key_name[GTKHX_PAL_N_ROLES] = {
 #define SCALE_GROUP "scale"
 #define PALETTE_LIGHT_GROUP "palette.light"
 #define PALETTE_DARK_GROUP "palette.dark"
+#define USERS_LIGHT_GROUP "users.light"
+#define USERS_DARK_GROUP "users.dark"
+
+static const char *const user_color_key_name[GTKHX_USER_COLOR_N] = {
+    [GTKHX_USER_COLOR_ACTIVE]     = "active",
+    [GTKHX_USER_COLOR_IDLE]       = "idle",
+    [GTKHX_USER_COLOR_ADMIN]      = "admin",
+    [GTKHX_USER_COLOR_ADMIN_IDLE] = "admin_idle",
+};
 
 static void
 load_palette_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
@@ -344,6 +381,39 @@ load_palette_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
     }
 }
 
+/* Same shape as load_palette_group, but writes into user_color_rgb
+ * and walks the active/idle/admin/admin_idle key set. Separate from
+ * load_palette_group only because the underlying arrays have
+ * different bounds and key tables — the body would otherwise be a
+ * straight clone. */
+static void
+load_user_color_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
+                       int variant_idx)
+{
+    int s;
+
+    if (!g_key_file_has_group (kf, group)) {
+        return;
+    }
+    for (s = 0; s < GTKHX_USER_COLOR_N; s++) {
+        char *raw;
+        int packed;
+
+        if (!g_key_file_has_key (kf, group, user_color_key_name[s], NULL)) {
+            continue;
+        }
+        raw = g_key_file_get_string (kf, group, user_color_key_name[s], NULL);
+        packed = parse_hex_color (raw);
+        if (packed >= 0) {
+            self->user_color_rgb[s][variant_idx] = packed;
+        } else {
+            g_warning ("gtkhx_theme: bad color in [%s] %s = %s",
+                       group, user_color_key_name[s], raw ? raw : "");
+        }
+        g_free (raw);
+    }
+}
+
 void
 gtkhx_theme_load_from_keyfile (GKeyFile *kf)
 {
@@ -363,6 +433,10 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     for (r = 0; r < GTKHX_PAL_N_ROLES; r++) {
         self->palette_rgb[r][0] = -1;
         self->palette_rgb[r][1] = -1;
+    }
+    for (r = 0; r < GTKHX_USER_COLOR_N; r++) {
+        self->user_color_rgb[r][0] = -1;
+        self->user_color_rgb[r][1] = -1;
     }
 
     /* NULL keyfile: nothing else to parse — fall through to the
@@ -403,6 +477,11 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     /* [palette.light] / [palette.dark] */
     load_palette_group (self, kf, PALETTE_LIGHT_GROUP, 0);
     load_palette_group (self, kf, PALETTE_DARK_GROUP, 1);
+
+    /* [users.light] / [users.dark] — user-list name colors
+     * (active / idle / admin / admin_idle). */
+    load_user_color_group (self, kf, USERS_LIGHT_GROUP, 0);
+    load_user_color_group (self, kf, USERS_DARK_GROUP, 1);
 
     g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
 }

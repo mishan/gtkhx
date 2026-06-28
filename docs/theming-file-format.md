@@ -122,6 +122,35 @@ mark_fg       = #eeeeee
 mark_bg       = #204a87
 marker        = #cc0000
 history_muted = #9a9a9a
+
+# --- User-list name colors --------------------------------------------
+# Four-slot palette for the user-list name text, keyed by the
+# 2-bit status field (idle / admin). Without overrides, names use
+# the historical defaults in src/gtkhx.c (regular → GTK
+# foreground, idle → grey, admin → red, admin-idle → light pink).
+# A theme that colors the listview background via `fg`/`bg` above
+# usually wants to override these too so names stay readable
+# against the themed row.
+#
+#   active     — regular user (status & 3 == 0)
+#   idle       — idle / away (status & 3 == 1)
+#   admin      — admin (status & 3 == 2)
+#   admin_idle — admin + idle (status & 3 == 3)
+#
+# Each slot is independently optional: omit a key to inherit the
+# historical default for that slot. The Colored-Nicknames
+# extension's per-user RGB still wins over both theme and default.
+[users.light]
+active     = #586e75
+idle       = #93a1a1
+admin      = #dc322f
+admin_idle = #871f1d
+
+[users.dark]
+active     = #93a1a1
+idle       = #586e75
+admin      = #dc322f
+admin_idle = #871f1d
 ```
 
 The full built-in default is at `src/themes/default.ini` in the
