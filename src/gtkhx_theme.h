@@ -30,10 +30,12 @@
  * constants (the misleading shape the earlier single-knob `ui-scale`
  * experiment had).
  *
- * User-facing controls for editing themes (a theme picker, color
- * pickers, "save as") are deferred to a separate theme-editor phase.
- * For now the only way to change a theme is to edit (or drop in) a
- * .ini file under $CONFIG/themes/ and set THEMENAME in gtkhxrc.
+ * User-facing controls: a Settings → Appearance "GtkHx theme"
+ * combo picks from the discovered themes (built-in + user). Editing
+ * a theme's body (scale spin rows, color pickers, "save as") is
+ * deferred to a separate theme-editor phase. For now the only way
+ * to *change* a theme's contents is to edit (or drop in) a .ini
+ * file under $CONFIG/themes/.
  */
 #ifndef GTKHX_THEME_H
 #define GTKHX_THEME_H

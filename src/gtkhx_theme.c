@@ -341,18 +341,25 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     int a;
     int r;
 
-    if (!kf) {
-        return;
-    }
-
     /* Reset everything to "unset" first — load_from_keyfile is a
-	 * replacement, not a merge. */
+	 * replacement, not a merge. Done unconditionally so a NULL
+	 * argument is a clean "load empty theme" (resets state to
+	 * built-in defaults + still emits "changed"). The header
+	 * contract documents that behavior; callers / tests rely on
+	 * it as the "reset to defaults" primitive. */
     for (a = 0; a < GTKHX_SCALE_N_AREAS; a++) {
         self->scale_pct[a] = 0;
     }
     for (r = 0; r < GTKHX_PAL_N_ROLES; r++) {
         self->palette_rgb[r][0] = -1;
         self->palette_rgb[r][1] = -1;
+    }
+
+    /* NULL keyfile: nothing else to parse — fall through to the
+	 * "changed" emit so subscribers reset in lockstep. */
+    if (!kf) {
+        g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
+        return;
     }
 
     /* [scale] */
@@ -634,8 +641,18 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                     || g_ascii_strcasecmp (fn + n - 4, ".ini") != 0) {
                     continue;
                 }
-                char *name = strip_ini_suffix (fn);
                 char *path = g_build_filename (user_themes_dir, fn, NULL);
+                /* gtkhx_theme_load_active requires G_FILE_TEST_IS_REGULAR
+				 * to load the file. A directory named "foo.ini" would
+				 * surface in the picker but be silently unselectable,
+				 * which is confusing. Skip non-regular entries here so
+				 * the picker only ever shows themes the loader can
+				 * actually open. */
+                if (!g_file_test (path, G_FILE_TEST_IS_REGULAR)) {
+                    g_free (path);
+                    continue;
+                }
+                char *name = strip_ini_suffix (fn);
                 char *display = read_display_name_from_file (path);
                 GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
                 e->name = name;
