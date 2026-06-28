@@ -49,7 +49,11 @@ Other top-level dirs:
   chat-history, tracker-v3), `hxvoice` + `hxvoice-runtime` (voice state machine
   and gstreamer-rs/webrtcbin runtime, see ROADMAP Phase 8), `hx-image-decode`
   (glycin-backed decoder used by inline-media / banner / chat / theming SVG
-  path), `hxnet`, `hxcompress`, `hxcrypto-{hash,stream,aead}`. See
+  path; ships **both** glycin backends — `2+` loaders via crate 3.x,
+  `1+` loaders via crate 2.x for Debian stable, selected by Meson
+  `-Dglycin_compat` which **auto-detects** the host's loader generation by
+  default (or force `2`/`1`), see `docs/glycin-migration-plan.md`), `hxnet`,
+  `hxcompress`, `hxcrypto-{hash,stream,aead}`. See
   `docs/RUST-ROADMAP.md` for the migration plan.
 - `plugins/sample/` — example plugin. Build-disabled (`USE_PLUGIN` undef).
 - `plugins/eliza/` — toy ELIZA chatbot plugin. Build-disabled.

@@ -295,6 +295,14 @@ modules:
     buildsystem: meson
     config-opts:
       - --buildtype=release
+      # GNOME 49 ships glycin's 2+ loader generation, so the image
+      # decoder uses the glycin 3.x backend. Pinned explicitly rather
+      # than relying on the meson default (`auto`, which probes the build
+      # host) so the Flatpak build is deterministic regardless of what
+      # the build environment happens to have installed. (Native builds
+      # default to auto-detect; Debian-stable packagers can also force
+      # -Dglycin_compat=1 — see docs/glycin-migration-plan.md.)
+      - -Dglycin_compat=2
     build-options:
       env:
         CARGO_HOME: /run/build/gtkhx/cargo

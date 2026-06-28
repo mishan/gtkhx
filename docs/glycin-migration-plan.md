@@ -34,6 +34,79 @@ The pre-glycin Phase E branch (`claude/inline-media-phase-e`)
 stays as the reference checkpoint for the pixbuf-loader path; it
 does not merge to main.
 
+## Follow-up (June 2026) — dual loader-generation support
+
+The original G.1–G.6 work pinned the `glycin` crate at `~3.0`, which
+talks glycin's **`2+` loader generation** (`/usr/libexec/glycin-loaders/2+/`).
+That generation ships in GNOME 48+ / the Flatpak runtime — but **not on
+Debian stable**. Debian 13 (trixie) packages `glycin-loaders` 1.2.x,
+which installs only the **`1+`** generation. A 3.x-crate build there
+finds no compatible loader at runtime and every decode falls through to
+`UnsupportedFormat` — inline media silently degrades to the placeholder
+row. (Earlier notes in this doc that called trixie / `org.gnome.Platform`
+a `2+` / "glycin 2.x crate" host were wrong about the generation; see the
+corrected mapping below.)
+
+Per upstream's compatibility table the generations map to crate majors
+like so:
+
+| loader generation | compatible glycin crate | gtk-rs family            |
+|-------------------|-------------------------|--------------------------|
+| `1+`              | crate **1.x and 2.x**   | 0.20 (gdk4 0.9, g* 0.20) |
+| `2+`              | crate **3.x**           | 0.21 (gdk4 0.10, g* 0.21)|
+
+So GtkHx now carries **both** backends, selected by a Meson option:
+
+- `-Dglycin_compat=auto` (default) → probe the build host for the newest
+  installed loader generation and resolve to `2` or `1` (falling back to
+  `2` with a warning if no loaders are found). For native builds the
+  build host is the target host, so this picks the backend that will
+  actually find loaders at runtime — no flag needed.
+- `-Dglycin_compat=2` → glycin crate `~3.0`, `2+` loaders. GNOME 48+.
+  The Flatpak build pins this explicitly (its configure step runs inside
+  the runtime, so it never relies on the probe).
+- `-Dglycin_compat=1` → glycin crate `~2.1`, `1+` loaders. Debian
+  stable and other older runtimes.
+
+The probe (in `rust/meson.build`) scans `$XDG_DATA_DIRS` for
+`glycin[-loaders]/<gen>+/conf.d/*.conf` registrations — the same files
+glycin itself reads to find loaders — newest generation first, with the
+`/usr/libexec/glycin-loaders/<gen>+/` binary dirs as a fallback signal.
+
+Design (in `rust/crates/hx-image-decode`):
+
+- The two glycin majors pull different gtk-rs families (0.21 vs 0.20).
+  That coexists safely **only because this crate is a leaf**: everything
+  it hands to C crosses as a raw `*mut GdkTexture` / `*mut GArray`
+  (`ffi_result.rs`), never as a Rust gtk-rs type shared with another
+  workspace crate. `src/compat.rs` aliases the active family to the
+  in-crate names `glib`/`gio`/`gdk`/`glycin`; the rest of the crate is
+  version-agnostic.
+- The deps are renamed + `optional` (`glycin3`/`glib3`/… vs
+  `glycin2`/`glib2`/…), selected by the mutually-exclusive features
+  `glycin-v3` (default) / `glycin-v2`. Enabling both is a `compile_error!`.
+- Only the two glycin-touching spots actually diverge: construction
+  (3.x `Loader::new_bytes(Bytes)` vs 2.x `Loader::new(gio::File)` — 2.x
+  has no bytes constructor, so the v2 path stages the payload through a
+  `0600` temp file whose content glycin streams to the sandboxed loader,
+  unlinked by a Drop guard once decoding finishes) and the dimension
+  read (3.x `Image::details()` methods vs 2.x `Image::info()` fields).
+  Everything else (`sandbox_selector`, `load`, `next_frame`, `delay`,
+  `texture`, `ErrorCtx`, GIF animation) is identical across both.
+- Meson wiring: `auto` resolves to `2` or `1` first (see above). The
+  resolved `2` path leaves cargo defaults on (v3). The resolved `1` path
+  passes `--no-default-features` to suppress the crate's default
+  `glycin-v3` (additively combining both backends is the `compile_error!`
+  above); because that flag is workspace-wide it also drops other
+  members' defaults, so the cargo line re-supplies the only load-bearing
+  ones (`hxcompress/lz4` + `/zstd`).
+
+**What `-Dglycin_compat=1` costs:** nothing for GtkHx's allowlist. The
+`1+` loaders (`glycin-image-rs`) decode JPEG / PNG / GIF — including
+animated GIF — which is exactly the spec allowlist. The glycin 2→3 jump
+added image *editing* / creation APIs and broader format/metadata work
+the decode-only path never touches.
+
 
 
 Glycin is the modern GTK image loader — sandboxed (each format's decoder
@@ -273,16 +346,12 @@ implementation looked like."
    later — its banner PNG decode is a natural sibling) or
    `inline-media-decode` (single-purpose, clear scope)? Leaning toward
    `hx-image-decode` for future reuse.
-2. **Glycin version pin.** Floor at the Glycin 2.x project line
-   (libglycin-2 2.1.x on the host, in org.gnome.Platform 48). The
-   Rust crate we depend on (`glycin` on crates.io) has its own
-   independent version stream and is at 3.1.x currently — same
-   product, different versioning. Both speak the same loader
-   subprocess protocol at `/usr/libexec/glycin-loaders/2+/`. The
-   Rust crate's 3.x major reflects breaking changes in the *Rust*
-   API since extraction; it isn't a new "Glycin 3" product. The
-   Cargo.toml on `hx-image-decode` carries this same disambiguation
-   so future readers don't trip on the apparent number jump.
+2. **Glycin version pin.** *(Resolved — see "Follow-up (June 2026) —
+   dual loader-generation support" above.)* The crate's version stream
+   and the loader *generation* (`1+` / `2+`) are what matter, and they
+   are not interchangeable: crate `~3.0` needs `2+` loaders, crate `~2.1`
+   needs `1+`. We now ship both, selected by `-Dglycin_compat`. The
+   `hx-image-decode/Cargo.toml` header carries the full mapping table.
 3. **Loader sandboxing telemetry.** Glycin spawns a subprocess per
    decode; this surfaces in `ps`. Worth adding a debug-category
    `media` log line at decode start/end so the perf cost is visible

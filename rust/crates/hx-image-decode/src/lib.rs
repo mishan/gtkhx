@@ -39,6 +39,10 @@
 
 #![allow(unsafe_op_in_unsafe_fn)]
 
+/// gtk-rs + glycin version aliases. `#[doc(hidden)] pub` so the
+/// out-of-library integration test crate can reuse the same family.
+#[doc(hidden)]
+pub mod compat;
 pub(crate) mod caps;
 pub mod decode;
 pub mod ffi;

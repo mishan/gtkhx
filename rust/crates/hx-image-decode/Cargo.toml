@@ -14,56 +14,61 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# Glycin's two versioning streams, which look confusingly
-# divergent at first glance:
+# ---------------------------------------------------------------------------
+# Dual glycin backend — pick exactly one via the `glycin-v2` / `glycin-v3`
+# features (see [features] below; selected from Meson via -Dglycin_compat).
+# ---------------------------------------------------------------------------
 #
-#   - the project / C library `libglycin-2` is at 2.1.x (the
-#     pkg-config `glycin-2` version on the host + in
-#     org.gnome.Platform 48). That's the user-facing version of
-#     "Glycin 2.x".
-#   - the Rust crate on crates.io is at 3.x with its own breaking-
-#     change history. Both target the same loader subprocess
-#     protocol (`/usr/libexec/glycin-loaders/2+/`).
+# Glycin ships its loaders in numbered *compatibility* generations
+# (`/usr/libexec/glycin-loaders/<gen>+/`) and the crates.io `glycin`
+# crate version maps onto a generation:
 #
-# We use the Rust crate directly — it spawns the loader
-# subprocesses itself, no libglycin-2 link surface. The loader
-# binaries (glycin-image-rs for the JPEG/PNG/GIF allowlist; the
-# heif / svg / jxl loaders also live in `2+/` but our sniff
-# layer rejects those formats before they ever see bytes) are
-# what ship in the platform runtime.
+#   | glycin crate | loader gen | gtk-rs family             | ships in               |
+#   |--------------|------------|---------------------------|------------------------|
+#   | 3.0.x        | 2+         | 0.21 (gdk4 0.10, g* 0.21) | GNOME 48+, Flatpak 49  |
+#   | 2.1.x        | 1+         | 0.20 (gdk4 0.9,  g* 0.20) | Debian 13 (trixie) etc.|
 #
-# Licence: MPL-2.0 OR LGPL-2.1-or-later. Both are GPL-2-compatible
-# (LGPL-2.1 expressly permits GPL-2 redistribution; MPL-2.0 is
-# explicitly designed to be GPL-compatible). Picked over the
-# permissively-licensed `glycin-ng` because we want the sandboxed
-# subprocess pipeline.
+# Per upstream's compat table, the `1+` loaders are compatible with the
+# glycin crate 1.x AND 2.x; the `2+` loaders need crate 3.x. Debian stable
+# only packages the `1+` generation (`glycin-loaders` 1.2.x), so a 3.x-only
+# build silently fails every decode there. We therefore keep BOTH backends
+# and let the packager choose.
 #
-# Version pin: `~3.0` resolves into the 3.0.x line, which depends
-# on the gtk-rs 0.21 family (gdk4 0.10, gio/glib 0.21) — matching
-# the workspace pins. The 3.1.x line bumps to gtk-rs 0.22 (MSRV
-# rustc 1.92) which the workspace deliberately avoids; see
-# rust/Cargo.toml and rust-toolchain.toml. Step both together when
-# the rustc floor moves.
+# The two glycin majors target different gtk-rs releases, so each backend
+# pulls its own gdk4/glib/gio family. That is safe here only because this
+# crate is a leaf: every value it hands to C crosses as a raw
+# `*mut GdkTexture` / `*mut GArray` (see ffi_result.rs), never as a Rust
+# gtk-rs type shared with another workspace crate. `src/compat.rs` aliases
+# whichever family is active to the in-crate names `glib` / `gio` / `gdk` /
+# `glycin`, so the rest of the crate is version-agnostic.
 #
-# Feature gates:
-#   default-features = false: the default pulls async-io plus a
-#     pile of tokio interop helpers; we only want async-io.
-#   "async-io": glycin spawns its loader subprocess and IPCs with
-#     it via zbus on async-io's reactor. Plays cleanly with the
-#     GLib main loop because we drive the future from
-#     `glib::MainContext::spawn_local`, which polls cooperatively.
-#   "gdk4": Frame::texture() returns a `gdk::Texture` we can hand
-#     directly to GdkPicture (Phase 9.D dialog) or stash on the
-#     xtext_media_data side-pointer (Phase 9.E inline render).
-glycin = { version = "~3.0", default-features = false, features = ["async-io", "gdk4"] }
+# Glycin licence (both majors): MPL-2.0 OR LGPL-2.1-or-later — GPL-2
+# compatible. glycin `default-features = false` + `async-io` keeps us off
+# the tokio interop helpers; `gdk4` gives `Frame::texture() -> gdk::Texture`.
 
-# GLib types + main-loop integration (decode-result callback runs on
-# the main thread via `glib::MainContext::spawn_local`).
-glib = { workspace = true }
-gio = { workspace = true }
+# --- glycin 3.x / 2+ loaders (default; GNOME 48+, Flatpak) ---
+glycin3 = { package = "glycin", version = "~3.0", default-features = false, features = ["async-io", "gdk4"], optional = true }
+glib3   = { package = "glib",  version = "0.21", optional = true }
+gio3    = { package = "gio",   version = "0.21", optional = true }
+gdk3    = { package = "gdk4",  version = "0.10", optional = true }
 
-# `gdk::Texture` for the FFI return type. gtk-rs ecosystem
-# convention: the crates.io name is `gdk4`, the package name in
-# source is `gdk`. The version pin matches the gtk4 0.10 family the
-# workspace dependencies already lock.
-gdk = { package = "gdk4", version = "0.10" }
+# --- glycin 2.x / 1+ loaders (Debian stable + older runtimes) ---
+# 2.1.x is the last 2.x line; it has no `Loader::new_bytes`, so the v2
+# backend streams the payload through a short-lived temp file (see
+# decode.rs `TempImageFile`). gtk-rs 0.20 here coexists with the
+# workspace's 0.21 only inside this crate.
+glycin2 = { package = "glycin", version = "~2.1", default-features = false, features = ["async-io", "gdk4"], optional = true }
+glib2   = { package = "glib",  version = "0.20", optional = true }
+gio2    = { package = "gio",   version = "0.20", optional = true }
+gdk2    = { package = "gdk4",  version = "0.9",  optional = true }
+
+[features]
+# Default to the 3.x / 2+ backend so a bare `cargo build` / `cargo test`
+# and the existing CI (`cargo test --workspace`) keep building exactly what
+# they did before. The Meson `-Dglycin_compat=1` path passes
+# `--no-default-features --features hx-image-decode/glycin-v2` (plus a
+# re-supply of the other members' defaults) to compile the v2 backend
+# instead. Enabling both at once is a hard error (see src/compat.rs).
+default   = ["glycin-v3"]
+glycin-v3 = ["dep:glycin3", "dep:glib3", "dep:gio3", "dep:gdk3"]
+glycin-v2 = ["dep:glycin2", "dep:glib2", "dep:gio2", "dep:gdk2"]

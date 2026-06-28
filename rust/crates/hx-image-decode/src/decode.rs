@@ -44,8 +44,9 @@ use std::ffi::c_void;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
-use glib::Bytes;
-use glib::MainContext;
+// gtk-rs family + glycin major are version-selected — see crate::compat.
+use crate::compat::glib::{Bytes, MainContext};
+use crate::compat::{gdk, glycin};
 
 use crate::caps::HxInlineMediaCaps;
 use crate::ffi_result::{
@@ -312,11 +313,28 @@ async fn run_glycin_decode(
     max_duration_ms: u32,
     _sniffed: Format,
 ) -> Result<DecodeOk, GlycinErr> {
-    // glycin::Loader::new_bytes is the GLib-Bytes-in entry point;
-    // glycin keeps a ref + passes the buffer to the subprocess via
-    // memfd. The default sandbox selector (Auto) picks bwrap on the
-    // host and flatpak-spawn inside a Flatpak runtime.
-    let mut loader = glycin::Loader::new_bytes(gbytes);
+    // Backend construction differs. glycin 3.x has `Loader::new_bytes`,
+    // a GLib-Bytes-in entry point — glycin keeps a ref + passes the
+    // buffer to the subprocess via memfd. glycin 2.x has no bytes
+    // constructor, so the v2 path stages the payload into a private
+    // temp file and hands glycin a `gio::File`; glycin streams the
+    // file *content* over a socket to the loader (the sandbox never
+    // sees the path), and `_tmp_guard`'s Drop unlinks it once the
+    // decode future is done reading. Either way the default sandbox
+    // selector (Auto) picks bwrap on the host and flatpak-spawn inside
+    // a Flatpak runtime.
+    #[cfg(feature = "glycin-v3")]
+    let (mut loader, _tmp_guard) = (glycin::Loader::new_bytes(gbytes), ());
+    #[cfg(feature = "glycin-v2")]
+    let (mut loader, _tmp_guard) = {
+        let guard = TempImageFile::create(&gbytes).map_err(|e| GlycinErr {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: "glycin decode failed",
+            detail: Some(format!("temp-file decode staging failed: {e}")),
+        })?;
+        let loader = glycin::Loader::new(guard.gfile());
+        (loader, guard)
+    };
     // Test/CI escape hatch: glycin 3.x has no env knob for the sandbox
     // (the selector is API-only), and its Auto choice runs each loader
     // under bwrap — which an unprivileged CI container can't spawn, so
@@ -339,15 +357,23 @@ async fn run_glycin_decode(
             detail: Some(format!("{ctx}")),
         })?;
 
-    // Dimension cap: glycin parsed the header during load();
-    // ImageDetails (returned by Image::details()) exposes
-    // width / height accessors. Reject before the pixel-data
-    // step of next_frame() runs — keeps the loader from
-    // allocating a multi-megabyte frame buffer for a payload
-    // we're about to throw away.
-    let details = image.details();
-    let w = details.width();
-    let h = details.height();
+    // Dimension cap: glycin parsed the header during load(). Reject
+    // before the pixel-data step of next_frame() runs — keeps the
+    // loader from allocating a multi-megabyte frame buffer for a
+    // payload we're about to throw away. The accessor differs by
+    // backend: glycin 3.x exposes `Image::details()` (ImageDetails
+    // width/height methods), glycin 2.x exposes `Image::info()`
+    // (ImageInfo width/height fields).
+    #[cfg(feature = "glycin-v3")]
+    let (w, h) = {
+        let details = image.details();
+        (details.width(), details.height())
+    };
+    #[cfg(feature = "glycin-v2")]
+    let (w, h) = {
+        let info = image.info();
+        (info.width, info.height)
+    };
     if w == 0 || h == 0 {
         return Err(GlycinErr {
             code: MEDIA_ERR_UNSUPPORTED,
@@ -451,6 +477,57 @@ fn glycin_err_category(_ctx: &glycin::ErrorCtx) -> &'static str {
     // (e.g. "loader unsupported" vs "loader crashed") can move
     // off this to match-on-Error if it pays off.
     "glycin decode failed"
+}
+
+/// v2-only: glycin 2.x's `Loader` only accepts a `gio::File`, so the
+/// in-memory payload is staged to a private temp file for the duration
+/// of one decode. glycin reads the file's *content* in our process and
+/// streams it to the loader subprocess over a socket — the bwrap/
+/// flatpak-spawn sandbox never sees this path (only SVG's
+/// `ExposeBaseDir` mounts the directory, and SVG is rejected at the
+/// sniff gate long before this). The guard's Drop unlinks the file once
+/// the decode future has finished reading it.
+#[cfg(feature = "glycin-v2")]
+struct TempImageFile {
+    path: std::path::PathBuf,
+}
+
+#[cfg(feature = "glycin-v2")]
+impl TempImageFile {
+    fn create(bytes: &[u8]) -> std::io::Result<Self> {
+        use std::io::Write;
+        use std::sync::atomic::{AtomicU64, Ordering};
+        // Per-process counter keeps concurrent decodes from colliding
+        // on a path; `create_new` below is the actual race guard.
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+
+        let mut path = std::env::temp_dir();
+        let seq = SEQ.fetch_add(1, Ordering::Relaxed);
+        path.push(format!("gtkhx-imgdec-{}-{}.bin", std::process::id(), seq));
+
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            opts.mode(0o600);
+        }
+        let mut f = opts.open(&path)?;
+        f.write_all(bytes)?;
+        f.flush()?;
+        Ok(Self { path })
+    }
+
+    fn gfile(&self) -> crate::compat::gio::File {
+        crate::compat::gio::File::for_path(&self.path)
+    }
+}
+
+#[cfg(feature = "glycin-v2")]
+impl Drop for TempImageFile {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 #[cfg(test)]

@@ -44,6 +44,10 @@ use hx_image_decode::ffi::{
     inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free,
     HxInlineMediaDecoded,
 };
+// Borrow the crate's version-selected gtk-rs family so the test's raw
+// GArray / GdkTexture FFI calls match whichever glycin backend is built
+// (0.21 under glycin-v3, 0.20 under glycin-v2). See crate::compat.
+use hx_image_decode::compat::{gdk, glib};
 
 /// Whether glycin image loaders are installed on this host.
 ///

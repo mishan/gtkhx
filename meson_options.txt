@@ -7,3 +7,17 @@ option('tests',
   type        : 'boolean',
   value       : true,
   description : 'Build the unit test suite. See tests/PROPOSAL.md.')
+
+option('glycin_compat',
+  type        : 'combo',
+  choices     : ['auto', '2', '1'],
+  value       : 'auto',
+  description : 'glycin loader-compatibility generation the inline-media ' +
+                'image decoder targets. "auto" (default) probes the build ' +
+                'host for the newest installed loader generation and picks ' +
+                'the matching backend (falling back to "2" if none is ' +
+                'found). "2" = the 2+ loaders (glycin crate 3.x, gtk-rs ' +
+                '0.21; GNOME 48+, Flatpak). "1" = the 1+ loaders (glycin ' +
+                'crate 2.x, gtk-rs 0.20; Debian stable / older runtimes). ' +
+                'Selects the cargo feature on rust/crates/hx-image-decode. ' +
+                'See docs/glycin-migration-plan.md.')
