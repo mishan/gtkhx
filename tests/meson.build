@@ -1637,6 +1637,20 @@ test('emoji_roundtrip', test_integration_emoji_roundtrip,
      suite   : 'integration',
      timeout : 30)
 
+# gif_icons — fogWraith GIF-icons extension (TRAN 1861-1864). No
+# capability bit, so it runs against the default matrix server; both
+# mhxd and Janus implement it. Set/get round-trip, getlist, the
+# ICON_CHANGE broadcast to a second client, and clear.
+test_integration_gif_icons = executable('test_integration_gif_icons',
+  'integration/test_gif_icons.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('gif_icons', test_integration_gif_icons,
+     suite   : 'integration',
+     timeout : 30)
+
 # msg_roundtrip — A→B private message via HTLC_HDR_MSG. B parses
 # the broadcast through hx_msg_extract (a Tier 2 helper) and
 # verifies uid + name + body all round-trip.

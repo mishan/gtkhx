@@ -13,10 +13,27 @@ discovered by probing, not negotiated in the LOGIN handshake. See
 
 ## Status (June 2026)
 
-Scoped, not started. **Janus support is confirmed end-to-end** (see
+**Phase 10.A (wire foundation) shipped.** The Rust `hotline-proto::gif_icons`
+module (builders + whole-message parsers + GIF-signature validator) with Tier
+2 fixtures, the FFI shims, the four opcodes + two fields in `hotline.h`, the C
+send path + probe-and-fallback (`src/gif_icons.{c,h}`), the receive handlers +
+`HTLS_HDR_ICON_CHANGE` dispatch in `rcv.c`, and the `GtkhxSession`
+`gif-icon-changed` / `gif-icon-data` signals all landed. Parsing lives
+entirely in Rust (whole-message `ChunkIter` walkers); the C handlers pass
+`htlc->in.buf/pos` in and emit signals — no `dh_start` walking. Tier 3
+(`tests/integration/test_gif_icons.c`) covers set→get round-trip, getlist,
+the ICON_CHANGE broadcast to a second client, and clear — green against both
+mhxd and Janus. No UI yet (that's 10.B+).
+
+A harness gap surfaced and was fixed along the way: Janus delivers the
+session uid in the LOGIN TASK reply (like NAME/CAPABILITIES), not in
+SELFINFO, so `integration_open_login_or_skip` left `htlc->uid == 0` on Janus.
+The harness now stashes the login-reply uid and preserves it across
+`hx_selfinfo_parse` — benefits any future Janus test needing the uid.
+
+**Janus support is confirmed end-to-end** (see
 [Janus verification](#janus-verification-confirmed) below) — all four
-transactions round-trip against the live container, so the Tier 3 target is
-ready before any code lands.
+transactions round-trip against the live container.
 
 ## Relationship to the legacy CICN icons
 
@@ -262,10 +279,11 @@ chat-history early phases, which predated a public implementation).
 
 ## Sub-phases
 
-- **10.A — Wire foundation.** `hotline-proto::gif_icons` module + FFI shims,
-  the four opcodes + two fields in `hotline.h` (carefully named), C
-  dispatch in `rcv.c`/`commands.c`, the `GtkhxSession` signal. Tier 2
-  fixtures. No UI. Probe-and-fallback (timeout watchdog) wired but headless.
+- **10.A — Wire foundation.** ✅ Shipped. `hotline-proto::gif_icons` module +
+  FFI shims, the four opcodes + two fields in `hotline.h`, C dispatch in
+  `rcv.c` + senders in `gif_icons.c`, the `GtkhxSession` signals. Tier 2
+  fixtures + Tier 3 round-trip (vs mhxd + Janus). No UI. Probe-and-fallback
+  (timeout watchdog) wired but headless.
 - **10.B — Receive + cache + still render.** Per-uid GIF cache, bounded
   decode via the preview loader, 1864→re-fetch, and **static** avatar
   render in the user list (frame 0). End of 10.B the client displays other

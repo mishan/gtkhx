@@ -56,6 +56,7 @@
 #include "tls_trust.h"
 #include "tls_trust_dialog.h"
 #include "inline_media.h"
+#include "gif_icons.h"
 #include "toolbar.h"
 #include "tracker.h"
 #include "network.h"
@@ -217,6 +218,17 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * fields directly (and matches the pattern history_max_*
 	 * uses one line up). */
     inline_media_reset_advisory_limits (htlc);
+
+    /* GIF-icons probe state — drop the watchdog timer (if still armed)
+	 * and reset to UNKNOWN so a reconnect re-probes cleanly. Inlined
+	 * (rather than calling into gif_icons.c) to avoid pulling the
+	 * task_new / rcv_task_icon_* dependency chain into every test
+	 * harness that links network.c. */
+    if (htlc->gif_icons_probe_timer) {
+        g_source_remove (htlc->gif_icons_probe_timer);
+        htlc->gif_icons_probe_timer = 0;
+    }
+    htlc->gif_icons_state = GIF_ICONS_UNKNOWN;
 
 #ifdef HAVE_VOICE
     /* Phase 8.D runtime wiring: tear down the voice runtime.

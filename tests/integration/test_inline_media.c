@@ -63,6 +63,8 @@
 #include "config.h"
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 #include <glib.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 #include "compat.h"   /* PACKED — required before hotline.h */
@@ -72,6 +74,18 @@
 #include "hotline_proto.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
+
+/* Process-unique chat marker so a test can find its own relayed chat
+ * among the parallel Tier 3 binaries' traffic — and so the drain works
+ * on Janus, whose HTLS_HDR_CHAT broadcasts carry uid 0 (no sender
+ * stamp). Mirrors make_marker in test_chat_history. */
+static void
+im_make_marker (char *out, gsize cap)
+{
+    guint64 r = (((guint64) g_random_int ()) << 32) ^ (guint64) g_random_int ();
+    r ^= ((guint64) getpid () << 16) ^ (guint64) time (NULL);
+    g_snprintf (out, cap, "HX-%016" G_GINT64_MODIFIER "x", r);
+}
 
 /* hlwrite stays stubbed — production async-write entry that never
  * makes sense in a Tier 3 binary. Same shape as test_chat_history.c. */
@@ -848,18 +862,28 @@ test_inline_media_chat_with_media_round_trip (void)
 
     /* Send chat with media. Janus relays the broadcast back to us
 	 * (we're a member of public chat). */
-    g_assert_true (send_chat_with_media (fd, &htlc, "see attached",
-                                         handle, handle_len, mime));
+    /* Tag the body with a unique marker: Janus's HTLS_HDR_CHAT
+	 * broadcasts carry uid 0 (it doesn't stamp the sender), so the
+	 * relay can't be scoped to our own message by uid — match the
+	 * marker instead, which also dodges concurrent test binaries'
+	 * chat noise. */
+    char marker[24];
+    im_make_marker (marker, sizeof (marker));
+    char *chat_body = g_strdup_printf ("see attached %s", marker);
+    gboolean chat_sent = send_chat_with_media (fd, &htlc, chat_body, handle,
+                                               handle_len, mime);
+    g_free (chat_body);
+    g_assert_true (chat_sent);
 
-    /* Drain to the broadcast — filter on our own uid so the
-	 * relay we asserted on is ours, not another concurrent test
-	 * binary's chat noise. The chunk walker in
-	 * integration_drain_until_chat consumes the body fields, but
-	 * htlc->in.buf is left intact for the media-meta walk
-	 * below. */
+    /* Drain to our own relayed broadcast by matching the unique body
+	 * marker — Janus stamps HTLS_HDR_CHAT broadcasts with uid 0, so a
+	 * uid filter can't identify ours, and the marker also skips other
+	 * concurrent test binaries' chat noise. The walker consumes the
+	 * body fields, but htlc->in.buf is left intact for the media-meta
+	 * walk below. */
     struct hx_chat_msg msg;
     g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &msg, 16));
+        integration_drain_until_chat_marker (fd, &htlc, marker, &msg, 16));
 
     struct gtkhx_proto_chat_media_meta meta;
     int status = gtkhx_proto_extract_chat_media_meta (htlc.in.buf,
@@ -919,12 +943,16 @@ test_inline_media_download_round_trip (void)
 	 * to ourselves above implicitly via public chat, but Janus's
 	 * exact policy here is operator-discretion — emitting the
 	 * chat is the spec-conformant way to enter the auth set). */
-    g_assert_true (
-        send_chat_with_media (fd, &htlc, "downloading", handle, handle_len,
-                              "image/png"));
+    char dl_marker[24];
+    im_make_marker (dl_marker, sizeof (dl_marker));
+    char *dl_body = g_strdup_printf ("downloading %s", dl_marker);
+    gboolean dl_sent = send_chat_with_media (fd, &htlc, dl_body, handle,
+                                             handle_len, "image/png");
+    g_free (dl_body);
+    g_assert_true (dl_sent);
     struct hx_chat_msg msg;
     g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &msg, 16));
+        integration_drain_until_chat_marker (fd, &htlc, dl_marker, &msg, 16));
 
     /* Now request the bytes. */
     guint32 dl_trans = send_download_media (fd, &htlc, handle, handle_len);
@@ -1018,11 +1046,16 @@ test_inline_media_chunked_download_round_trip (void)
 
     /* Enter the authorization set via a chat-relay, same shape
 	 * download_round_trip uses. */
-    g_assert_true (send_chat_with_media (fd, &htlc, "chunked-dl", handle,
-                                         handle_len, "image/png"));
+    char cdl_marker[24];
+    im_make_marker (cdl_marker, sizeof (cdl_marker));
+    char *cdl_body = g_strdup_printf ("chunked-dl %s", cdl_marker);
+    gboolean cdl_sent = send_chat_with_media (fd, &htlc, cdl_body, handle,
+                                              handle_len, "image/png");
+    g_free (cdl_body);
+    g_assert_true (cdl_sent);
     struct hx_chat_msg msg;
     g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &msg, 16));
+        integration_drain_until_chat_marker (fd, &htlc, cdl_marker, &msg, 16));
 
     /* Chunk 0: bare TranDownloadMedia (no PART_INDEX). */
     guint32 dl_trans = send_download_media (fd, &htlc, handle, handle_len);

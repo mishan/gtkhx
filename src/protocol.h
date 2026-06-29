@@ -378,6 +378,20 @@ struct htlc_conn {
 	 * per the locked UX decisions — duplicates are preferable
 	 * to silent gaps. */
     guint64 chat_history_last_msgid;
+    /* GIF-icons extension (fogWraith GIF-Icons.md). No capability
+	 * bit — support is discovered by probing ICON_GETLIST after login
+	 * and watching for a reply, since servers silently drop unknown
+	 * opcodes rather than returning a task error. gif_icons_state is
+	 * one of the GIF_ICONS_* values in gif_icons.h (UNKNOWN until the
+	 * probe resolves). gif_icons_probe_timer is the watchdog
+	 * g_timeout source id (0 when inactive). */
+    int gif_icons_state;
+    guint gif_icons_probe_timer;
+    /* trans id of the post-login ICON_GETLIST probe, so the watchdog
+	 * can dismiss its Tasks-window row if no reply ever arrives (a
+	 * legacy server silently drops the unknown opcode, so the task
+	 * would otherwise linger forever). */
+    guint32 gif_icons_probe_trans;
 };
 
 /* LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize

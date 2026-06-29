@@ -49,6 +49,8 @@ enum {
     SIGNAL_CHAT_SUBJECT,
     SIGNAL_CHAT_INVITATION,
     SIGNAL_CHAT_HISTORY_BATCH,
+    SIGNAL_GIF_ICON_CHANGED,
+    SIGNAL_GIF_ICON_DATA,
     SIGNAL_MSG,
     SIGNAL_AGREEMENT,
     SIGNAL_NEWS_FILE,
@@ -129,6 +131,28 @@ gtkhx_session_class_init (GtkhxSessionClass *klass)
                         G_TYPE_UINT,    /* cid (guint32)            */
                         G_TYPE_POINTER, /* GPtrArray<HxHistoryEntry*>* */
                         G_TYPE_BOOLEAN); /* has_more                */
+
+    /* "gif-icon-changed" — GIF-icons extension. Payload:
+	 * (htlc *, uid). Fired on an ICON_CHANGE (1864) broadcast, which
+	 * carries only the uid; a view re-fetches via hx_icon_get(). */
+    signals[SIGNAL_GIF_ICON_CHANGED]
+        = g_signal_new ("gif-icon-changed", G_TYPE_FROM_CLASS (klass),
+                        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 2,
+                        G_TYPE_POINTER, /* struct htlc_conn * */
+                        G_TYPE_UINT);   /* uid (guint16 widened) */
+
+    /* "gif-icon-data" — GIF-icons extension. Payload:
+	 * (htlc *, uid, gpointer gif, guint len). Fired from an ICON_GET
+	 * reply or per ICON_GETLIST entry. The gif pointer is valid only
+	 * during the emit — subscribers decode / copy before returning;
+	 * len == 0 means the avatar was cleared. */
+    signals[SIGNAL_GIF_ICON_DATA]
+        = g_signal_new ("gif-icon-data", G_TYPE_FROM_CLASS (klass),
+                        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 4,
+                        G_TYPE_POINTER, /* struct htlc_conn * */
+                        G_TYPE_UINT,    /* uid               */
+                        G_TYPE_POINTER, /* const guint8 *gif */
+                        G_TYPE_UINT);   /* len               */
 
     /* "msg" — incoming private message. Phase 5+: payload is a
 	 * boxed HxMsgEvent (uid + name + body + is_self/is_broadcast
@@ -340,6 +364,26 @@ gtkhx_session_emit_chat_history_batch (GtkhxSession     *self,
 {
     g_signal_emit (self, signals[SIGNAL_CHAT_HISTORY_BATCH], 0, htlc, cid,
                    entries, has_more);
+}
+
+void
+gtkhx_session_emit_gif_icon_changed (GtkhxSession     *self,
+                                     struct htlc_conn *htlc,
+                                     guint16           uid)
+{
+    g_signal_emit (self, signals[SIGNAL_GIF_ICON_CHANGED], 0, htlc,
+                   (guint) uid);
+}
+
+void
+gtkhx_session_emit_gif_icon_data (GtkhxSession     *self,
+                                  struct htlc_conn *htlc,
+                                  guint16           uid,
+                                  gconstpointer     gif,
+                                  guint             len)
+{
+    g_signal_emit (self, signals[SIGNAL_GIF_ICON_DATA], 0, htlc, (guint) uid,
+                   (gpointer) gif, len);
 }
 
 void
