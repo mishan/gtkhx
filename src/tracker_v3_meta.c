@@ -321,42 +321,27 @@ hx_tracker_v3_meta_new_from_bytes (GBytes *bytes, guint16 tlv_count)
     return hx_tracker_v3_meta_new (p, n, tlv_count);
 }
 
-HxTrackerV3Meta *
-hx_tracker_v3_meta_copy (HxTrackerV3Meta *src)
-{
-    if (!src) {
-        return NULL;
-    }
-    HxTrackerV3Meta *c = g_new0 (HxTrackerV3Meta, 1);
-    *c = *src; /* shallow copy first */
-    c->server_software = g_strdup (src->server_software);
-    c->country_code    = g_strdup (src->country_code);
-    c->region          = g_strdup (src->region);
-    c->language        = g_strdup (src->language);
-    c->rules_url       = g_strdup (src->rules_url);
-    c->banner_url      = g_strdup (src->banner_url);
-    c->icon_url        = g_strdup (src->icon_url);
-    c->contact_url     = g_strdup (src->contact_url);
-    c->tags            = g_strdup (src->tags);
-    c->hope_ciphers    = g_strdup (src->hope_ciphers);
-    return c;
-}
-
-void
-hx_tracker_v3_meta_free (HxTrackerV3Meta *m)
-{
-    if (!m) {
-        return;
-    }
-    g_free (m->server_software);
-    g_free (m->country_code);
-    g_free (m->region);
-    g_free (m->language);
-    g_free (m->rules_url);
-    g_free (m->banner_url);
-    g_free (m->icon_url);
-    g_free (m->contact_url);
-    g_free (m->tags);
-    g_free (m->hope_ciphers);
-    g_free (m);
-}
+/* Phase R4.2b: hx_tracker_v3_meta_copy / hx_tracker_v3_meta_free moved to
+ * Rust — rust/crates/gtkhx-boxed/src/tracker.rs. The struct stays
+ * C-visible (hx_tracker_v3_meta_new above fills it; consumers read
+ * fields). The Rust free is still called from C (this file's _new error
+ * path and tracker_event.c / tracker_row.c), now resolved against the
+ * gtkhx-boxed staticlib. The Rust side treats this struct as an opaque
+ * sized buffer and fixes up the ten owned char* fields by byte offset,
+ * so size + those ten offsets are pinned here. */
+_Static_assert (sizeof (HxTrackerV3Meta) == 216,
+                "HxTrackerV3Meta size must match the Rust opaque mirror "
+                "in gtkhx-boxed::tracker");
+/* G_STRUCT_OFFSET (not <stddef.h>'s offsetof) for consistency with the
+ * rest of the tree; pins the ten owned char* fields the Rust offset-
+ * based copy/free fix up. */
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, server_software) == 0, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, country_code) == 8, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, region) == 16, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, language) == 24, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, rules_url) == 48, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, banner_url) == 56, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, icon_url) == 64, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, contact_url) == 88, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, tags) == 112, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, hope_ciphers) == 152, "meta str offset");

@@ -15,19 +15,24 @@
 //! transparent to the consumer — it never sees whether the emitting
 //! type was defined in C or Rust.
 //!
-//! # Boxed-type payloads (R4.1 vs R4.2)
+//! # Boxed-type payloads
 //!
 //! Three signals carry boxed payloads — `chat` (`HxChatEvent`), `msg`
-//! (`HxMsgEvent`), and `tracker-server-create` (`HxTrackerServer`). In
-//! this phase (R4.1) those boxed types stay defined in C
-//! (`proto_helpers.c`, `tracker_event.c`); we reference their `GType`s
-//! through the existing `hx_*_get_type()` accessors via FFI. Re-hosting
-//! the boxed types themselves in Rust is Phase R4.2. The signal-emit
-//! marshaling here uses `g_value_set_boxed`, which copies the payload
-//! via the boxed type's copy func for the duration of the emission —
-//! byte-for-byte the same lifetime the old `g_signal_emit(self, sig,
-//! 0, …, event)` varargs collection produced (boxed params without
-//! `G_SIGNAL_TYPE_STATIC_SCOPE` are copied at collect time).
+//! (`HxMsgEvent`), and `tracker-server-create` (`HxTrackerServer`). As of
+//! Phase R4.2 those boxed types live in Rust in the sibling `gtkhx-boxed`
+//! crate; this crate references their `GType`s through the same
+//! `hx_*_get_type()` C-ABI accessors as before (now resolving against
+//! `gtkhx-boxed` instead of `proto_helpers.c` / `tracker_event.c`). We go
+//! through the extern accessors rather than a direct Rust dependency on
+//! `gtkhx-boxed` on purpose: a `staticlib` crate bundles its rlib deps,
+//! so depending on `gtkhx-boxed` here would emit the boxed `_get_type` /
+//! `_copy` / `_free` symbols into *both* archives and collide at final
+//! link. The extern keeps a single definition. The signal-emit marshaling
+//! uses `g_value_set_boxed`, which copies the payload via the boxed type's
+//! copy func for the duration of the emission — byte-for-byte the same
+//! lifetime the old `g_signal_emit(self, sig, 0, …, event)` varargs
+//! collection produced (boxed params without `G_SIGNAL_TYPE_STATIC_SCOPE`
+//! are copied at collect time).
 //!
 //! # Lifetime model
 //!
@@ -47,7 +52,9 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
 // ----------------------------------------------------------------------
-// Boxed-type GType accessors (defined in C; R4.2 moves them to Rust).
+// Boxed-type GType accessors (defined in the gtkhx-boxed crate as of
+// R4.2; resolved here via their C ABI — see the crate-level note on why
+// we extern rather than take a Rust dependency on gtkhx-boxed).
 //
 // `signals()` must reference these GTypes when it registers the boxed
 // payload signals, and calling the accessor *forces* the boxed type to
@@ -62,10 +69,11 @@ extern "C" {
     fn hx_tracker_server_get_type() -> glib::ffi::GType;
 }
 
-// Under `cargo test` there is no C side to link against, so stub the
-// three accessors with real Rust-registered boxed types. This lets the
-// in-crate tests exercise the full registration + boxed-emit path
-// (the cargo test binary can't resolve the C symbols otherwise).
+// Under `cargo test` there is no other archive to link against, so stub
+// the three accessors with real Rust-registered boxed types. This lets
+// the in-crate tests exercise the full registration + boxed-emit path
+// (the standalone cargo test binary can't resolve the external symbols
+// otherwise — it doesn't link gtkhx-boxed).
 #[cfg(test)]
 use test_boxed_stubs::{
     hx_chat_event_get_type, hx_msg_event_get_type, hx_tracker_server_get_type,
@@ -371,18 +379,33 @@ pub extern "C" fn gtkhx_session_get_type() -> glib::ffi::GType {
 /// thread-safe to *register* but the singleton is a UI object).
 #[no_mangle]
 pub extern "C" fn gtkhx_session_get_default() -> *mut c_void {
-    // Store the raw pointer as usize (Send + Sync) so OnceLock is happy;
-    // the GObject ref the constructor returns is intentionally leaked
-    // (mem::forget) to give the singleton a permanent reference.
-    static SINGLETON: OnceLock<usize> = OnceLock::new();
-    let ptr = *SINGLETON.get_or_init(|| {
-        let obj = glib::Object::new::<GtkhxSession>();
-        let raw = obj.as_ptr() as usize;
-        std::mem::forget(obj);
-        raw
-    });
-    ptr as *mut c_void
+    // Cache the singleton in a `SendPtr` newtype rather than a `usize`:
+    // a pointer→integer→pointer round-trip drops provenance under
+    // Rust's strict-provenance model, and GLib *will* dereference this
+    // pointer. Storing the real `*mut c_void` keeps provenance intact
+    // end-to-end. The GObject ref the constructor returns is leaked
+    // (`mem::forget`) so the singleton holds a permanent reference, as
+    // the old C `gtkhx_session_get_default` did.
+    static SINGLETON: OnceLock<SendPtr> = OnceLock::new();
+    SINGLETON
+        .get_or_init(|| {
+            let obj = glib::Object::new::<GtkhxSession>();
+            let raw = obj.as_ptr() as *mut c_void;
+            std::mem::forget(obj);
+            SendPtr(raw)
+        })
+        .0
 }
+
+/// Send+Sync wrapper so a raw `*mut c_void` can live in a `static
+/// OnceLock`. SAFETY: the pointer is written exactly once (the
+/// singleton is immutable after init) and is only ever dereferenced on
+/// the GLib main thread; sharing the pointer *value* across threads is
+/// sound, and we never form a `&mut` to the pointee from here.
+#[derive(Copy, Clone)]
+struct SendPtr(*mut c_void);
+unsafe impl Send for SendPtr {}
+unsafe impl Sync for SendPtr {}
 
 // ----------------------------------------------------------------------
 // FFI: emit wrappers (one per signal; ABI matches gtkhx_session.h)

@@ -8,6 +8,7 @@ members = [
     "crates/hotline-proto",
     "crates/hxbridge",
     "crates/gtkhx-session",
+    "crates/gtkhx-boxed",
     "crates/hxnet",
     "crates/hxvoice",
     "crates/hxvoice-runtime",

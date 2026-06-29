@@ -208,6 +208,7 @@ rust_deps = [
   rust_hotline_proto_dep,
   rust_hxbridge_dep,
   rust_gtkhx_session_dep,
+  rust_gtkhx_boxed_dep,
   rust_hxnet_dep,
   rust_hx_image_decode_dep,
 ]
