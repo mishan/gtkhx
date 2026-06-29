@@ -51,6 +51,16 @@ gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len)
     return NULL;
 }
 
+/* Same deal for the phase E6 emoji-shortcode toggle accessor, which
+ * proto_helpers.c now consults in its chat / msg decode path — also
+ * unreachable from the header-decode entry exercised here. */
+gboolean gtkhx_text_emoji_shortcodes_enabled (void);
+gboolean
+gtkhx_text_emoji_shortcodes_enabled (void)
+{
+    return FALSE;
+}
+
 /* hxnet_bridge.c references the production rcv state machine
  * (hx_rcv_hdr) and qbuf_set / hx_htlc_close to drive a real
  * htlc_conn. Those are exercised by R3.3.e-4b's wider

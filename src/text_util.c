@@ -44,6 +44,24 @@
 #include "hotline_proto.h"  /* gtkhx_proto_text_to_utf8 */
 #include "text_util.h"
 
+/* Emoji ↔ :shortcode: conversion toggle (phase E6). Module-local so this
+ * TU stays free of the gtkhx_prefs global; the Settings layer pushes the
+ * user's CFG_EMOJI_SHORTCODES value in via the setter. Default ON. See the
+ * header for the full rationale. */
+static gboolean emoji_shortcodes_enabled = TRUE;
+
+void
+gtkhx_text_set_emoji_shortcodes_enabled (gboolean enabled)
+{
+    emoji_shortcodes_enabled = enabled ? TRUE : FALSE;
+}
+
+gboolean
+gtkhx_text_emoji_shortcodes_enabled (void)
+{
+    return emoji_shortcodes_enabled;
+}
+
 /* GTKHX_TEXT_TO_UTF8_MAX_LEN is defined in text_util.h alongside the
  * prototype. Pathological `len` values above it are rejected here as
  * empty output rather than risk:
@@ -164,7 +182,7 @@ gtkhx_text_for_wire (const char *utf8, gsize utf8_len, gboolean utf8_mode,
 
         gsize sc_len;
         char *sc = NULL;
-        if (utf8_len > 0) {
+        if (gtkhx_text_emoji_shortcodes_enabled () && utf8_len > 0) {
             gsize cap = utf8_len * 2 + 64;
             sc = g_malloc (cap);
             gsize need = gtkhx_proto_emoji_to_shortcodes (
@@ -192,8 +210,11 @@ gtkhx_text_for_wire (const char *utf8, gsize utf8_len, gboolean utf8_mode,
             }
             sc_len = need;
         } else {
-            sc = g_strdup ("");
-            sc_len = 0;
+            /* Conversion disabled (or empty input): pass the UTF-8 through
+			 * to Mac Roman unchanged — emoji then fall back to '?' exactly
+			 * as they did pre-E2. g_strndup(.., 0) yields "". */
+            sc = g_strndup (utf8, utf8_len);
+            sc_len = utf8_len;
         }
 
         /* Encode the shortcoded UTF-8 to Mac Roman.

@@ -198,22 +198,20 @@ means the displayed *and copied* text is the emoji, Slack-style. This is
 intended. It also means the (future, currently `#if 0`'d) chat logger in
 `xoutput_chat` would log emoji, not shortcodes — fine.
 
-**As built (E3).** The decode runs in `hx_chat_event_new` (public/private
-chat) and `hx_msg_event_new` (PMs) via a shared
+**As built (E3, revised in E6).** The decode runs in `hx_chat_event_new`
+(public/private chat) and `hx_msg_event_new` (PMs) via a shared
 `hx_decode_emoji_shortcodes` helper over `gtkhx_proto_shortcodes_to_emoji`.
-For a parsed `Nick: body` line only the body region is converted and
-`body_len` is recomputed (the nick column stays literal and `is_self` is
-decided against the un-decoded nick first); an unsplit prose line is
-converted whole; info lines are skipped. News is deliberately **not**
-wired (open question 1 — chat + PM only in v1).
-
-One known edge from `hx_chat_split_nick_body`: a line with *no* real nick
-but a shortcode mid-prose (e.g. `*** waves :tada:`) has its first colon
-eaten as a (bogus) nick separator, so that shortcode won't decode. Lines
-with a real `Nick:` prefix, or lines that fail the split outright (no
-colon, colon-at-start, or pre-colon > 31 bytes), decode correctly. The
-mis-split case is rare server prose and not worth complicating the
-splitter for; revisit if it ever bites.
+For chat it converts the **whole line** up front — before the info-prefix
+check and the nick split — then runs the split on the decoded text so the
+sender/body offsets stay consistent. Whole-line (rather than body-only)
+was a deliberate revision: the E6 Tier 3 test found that mhxd formats
+public chat *without* a `Nick:` colon (` *** Name message`), so a body-only
+scope let a shortcode's own colon get mistaken for the nick separator and
+skipped the conversion. Whole-line is safe for the nick column because the
+grammar only matches colon-delimited **lowercase** tokens — a `Nick:`
+prefix (colon on one side only, or any uppercase) never matches — and info
+lines carry no shortcodes. News is deliberately **not** wired (open
+question 1 — chat + PM only in v1).
 
 ### Rendering — no new work expected
 
@@ -425,10 +423,11 @@ Each ends on something testable, per the roadmap's house style.
   pathological lengths/expansion). Tier 2 test: an emoji-bearing string
   with `utf8_mode=FALSE` carries `:joy:` on the wire and Mac Roman survives.
 - **E3 — Receive/display. ✅** Decode wired into `hx_chat_event_new`
-  (public/private chat) and `hx_msg_event_new` (PM) via a shared helper.
-  Tier 2 tests over `HxChatEvent` / `HxMsgEvent`: body `:tada:` decodes to
-  🎉, nick stays literal, `body_len` recomputed, non-shortcode colons left
-  alone. News deliberately excluded for v1 (open question 1).
+  (public/private chat, whole-line — see the revision note above) and
+  `hx_msg_event_new` (PM) via a shared helper. Tier 2 tests over
+  `HxChatEvent` / `HxMsgEvent`: `:tada:` decodes to 🎉, the nick stays
+  literal, unsplit lines decode, non-shortcode colons (`10:30`, `C:\`) are
+  left alone. News deliberately excluded for v1 (open question 1).
 - **E4 — Rendering verification. ✅ (by reasoning).** Converted emoji are
   ordinary UTF-8 codepoints, identical to what the existing picker inserts
   and to what already renders for received emoji on UTF-8 servers, so no
@@ -448,11 +447,18 @@ Each ends on something testable, per the roadmap's house style.
   commit. Wired into all three inputs (chat, pchat, PM). Depends only on E1.
   The popup's live behaviour can't be exercised headlessly; the ranked
   match data is covered by Rust tests and the whole app builds clean.
-- **E6 — Preference + docs.** Add Chat-page toggle(s) (see Open
-  questions), update this doc and the ROADMAP Phase 5 "UX features" list.
-  Consider a Tier 3 round-trip between two harness clients against mhxd
-  (Mac Roman) to pin the end-to-end path as a regression guard, per the
-  "prefer Tier 3 repro" project norm.
+- **E6 — Preference + docs + Tier 3. ✅** Two Settings → Chat → Emoji
+  toggles: `CFG_EMOJI_SHORTCODES` (the conversion, both directions) and
+  `CFG_EMOJI_TYPEAHEAD` (the popup), both default ON. The conversion flag
+  lives as a module-local toggle in `text_util.c`
+  (`gtkhx_text_set_emoji_shortcodes_enabled`) so the dependency-light
+  encode/decode TUs stay free of the `gtkhx_prefs` global for their unit
+  tests; Settings pushes it via the cfgvar changefunc and the prefs-load
+  apply path. The typeahead flag is read live in `emoji.c`. Tier 3
+  `emoji_roundtrip`: A encodes 🎉→`:tada:` through the real legacy send
+  path, mhxd relays it (proving Mac Roman survives), B decodes back to 🎉 —
+  this is the test that surfaced the whole-line-decode revision. Tier 1
+  toggle-off tests on both directions. ROADMAP Phase 5 UX list updated.
 
 ## Test plan
 
@@ -472,9 +478,11 @@ Each ends on something testable, per the roadmap's house style.
   clean full-app build plus a release-time manual smoke test; the trigger
   detection lives in `emoji.c::ta_current_token` and would need a GTK
   display to unit-test, so it isn't auto-tested today.
-- **Tier 3 (E6):** two orchestrated clients on Dockerized mhxd (legacy /
-  Mac Roman): client A picks 😂, client B receives and renders 😂. Guards
-  the full pipeline and the "don't break Mac Roman" requirement.
+- **Tier 3 (E6): ✅** `test_emoji_roundtrip` — two clients on the live
+  (Mac Roman) mhxd: A encodes 🎉 through the real legacy send path to
+  `:tada:`, mhxd relays it verbatim (asserts the wire form is pure ASCII,
+  guarding "don't break Mac Roman"), B decodes it back to 🎉 through
+  `hx_chat_event_new`. Guards the full E2 + E3 pipeline end-to-end.
 
 ## Open questions
 
@@ -486,12 +494,10 @@ Each ends on something testable, per the roadmap's house style.
 2. **Emoticons (`:)`, `:D`, `<3`)?** Slack/Discord also auto-convert a
    small emoticon set. Out of scope for v1 (different grammar, higher
    false-positive risk), but a natural follow-up.
-3. **Preference granularity.** One master toggle, or separate
-   send/receive/typeahead toggles? A single "Convert emoji to/from
-   :shortcodes:" checkbox on the Chat settings page may be enough, but the
-   **typeahead popup** is a distinct UX that some users will want to
-   disable independently (it pops up whenever they type a colon). Likely
-   two toggles: the conversion behaviour, and the typeahead popup.
+3. **Preference granularity. → Resolved (E6):** two toggles — one for the
+   conversion (both directions share it, since they're a matched pair) and
+   a separate one for the typeahead popup, which is a distinct UX a user
+   may want off independently. Both default ON, on Settings → Chat → Emoji.
 4. **Typeahead match scope & ranking.** Prefix-match canonical names only,
    or also alias names (so `:+1` finds 👍)? Recommendation: include
    aliases in the query, rank exact > canonical-prefix > alias-prefix.

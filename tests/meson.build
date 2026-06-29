@@ -1623,6 +1623,20 @@ test('two_client_chat', test_integration_two_client_chat,
      suite   : 'integration',
      timeout : 30)
 
+# emoji_roundtrip — A encodes an emoji-bearing line through the legacy
+# send path (emoji → :tada:), B decodes the broadcast back to the emoji.
+# Exercises phase E2 + E3 end-to-end against the Mac Roman mhxd and guards
+# the "don't break Mac Roman" requirement (wire form stays ASCII).
+test_integration_emoji_roundtrip = executable('test_integration_emoji_roundtrip',
+  'integration/test_emoji_roundtrip.c',
+  dependencies        : proto_test_deps,
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('emoji_roundtrip', test_integration_emoji_roundtrip,
+     suite   : 'integration',
+     timeout : 30)
+
 # msg_roundtrip — A→B private message via HTLC_HDR_MSG. B parses
 # the broadcast through hx_msg_extract (a Tier 2 helper) and
 # verifies uid + name + body all round-trip.

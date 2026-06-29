@@ -100,4 +100,19 @@ extern char *gtkhx_text_for_wire (const char *utf8, gsize utf8_len,
                                   gboolean utf8_mode, gboolean is_body,
                                   gsize *out_len);
 
+/*
+ * Emoji ↔ :shortcode: conversion toggle (phase E6).
+ *
+ * This single flag gates BOTH directions of the conversion: the
+ * legacy-server send encode in gtkhx_text_for_wire (this file) and the
+ * always-on receive decode in proto_helpers.c's chat / PM builders. Both
+ * translation units are deliberately kept free of the gtkhx_prefs global
+ * (so their unit tests link without it), so the state lives here as a
+ * module-local default-ON flag that the Settings layer pushes in via the
+ * setter (from CFG_EMOJI_SHORTCODES's changefunc and the prefs-load apply
+ * path). Defaults to enabled so tests and barebones init see conversion on.
+ */
+extern void gtkhx_text_set_emoji_shortcodes_enabled (gboolean enabled);
+extern gboolean gtkhx_text_emoji_shortcodes_enabled (void);
+
 #endif /* HX_TEXT_UTIL_H */

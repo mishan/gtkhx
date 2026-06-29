@@ -64,6 +64,13 @@
  * hard-coded. */
 #define CFG_CHAT_HISTORY_INITIAL "CHATHISTORYINITIAL"
 
+/* Emoji shortcodes (phase E6). EMOJISHORTCODES gates the emoji ↔
+ * :shortcode: conversion (legacy-server send encode + always-on receive
+ * decode); EMOJITYPEAHEAD gates the inline `:prefix` suggestion popup.
+ * Both BOOLEAN, both default ON. */
+#define CFG_EMOJI_SHORTCODES "EMOJISHORTCODES"
+#define CFG_EMOJI_TYPEAHEAD "EMOJITYPEAHEAD"
+
 /* Same-window navigation for the files browser. The matching
  * NEWS_SAMEWINDOW key was retired in Phase 6 when the legacy
  * two-window news UI was removed; an old gtkhxrc that still has
