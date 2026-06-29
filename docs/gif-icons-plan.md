@@ -25,6 +25,9 @@ entirely in Rust (whole-message `ChunkIter` walkers); the C handlers pass
 the ICON_CHANGE broadcast to a second client, and clear — green against both
 mhxd and Janus. No UI yet (that's 10.B+).
 
+**Phase 10.B (receive + cache + still render) shipped.** Other users'
+GIF avatars now appear in the user list. See the 10.B sub-phase below.
+
 A harness gap surfaced and was fixed along the way: Janus delivers the
 session uid in the LOGIN TASK reply (like NAME/CAPABILITIES), not in
 SELFINFO, so `integration_open_login_or_skip` left `htlc->uid == 0` on Janus.
@@ -284,10 +287,18 @@ chat-history early phases, which predated a public implementation).
   `rcv.c` + senders in `gif_icons.c`, the `GtkhxSession` signals. Tier 2
   fixtures + Tier 3 round-trip (vs mhxd + Janus). No UI. Probe-and-fallback
   (timeout watchdog) wired but headless.
-- **10.B — Receive + cache + still render.** Per-uid GIF cache, bounded
-  decode via the preview loader, 1864→re-fetch, and **static** avatar
-  render in the user list (frame 0). End of 10.B the client displays other
-  users' avatars. Tier 3 set/get/list/broadcast against Janus.
+- **10.B — Receive + cache + still render.** ✅ Shipped. Per-uid GIF avatar
+  cache (`src/gif_avatar.{c,h}`) backed by the bounded, sandboxed
+  inline-media decoder (`inline_media_decode_async`, STRICT = JPEG/PNG/GIF,
+  magic sniff + dimension/pixel/byte caps); `gif-icon-data` → decode + cache
+  + refresh rows, `gif-icon-changed` → `hx_icon_get` re-fetch. Avatars route
+  through the **same** user-list cell path as cicn icons (intrinsic px ×
+  theme scale + wide-banner left-shift), so a GIF authored at icon / banner
+  dimensions renders identically — per Misha, GIF icons are sized like the
+  classic `icons.rsrc` / banner (`99-badmoon.rsrc`) icons. Still frame only
+  (animation is 10.D). Cache cleared on disconnect (public users-clear). The
+  10.A Tier 3 wire suite still covers set/get/list/broadcast; render is
+  GTK-UI (verified by build + manual).
 - **10.C — Send UX.** Identity-settings GIF picker (choose / preview /
   clear / downscale), capability-gated. Round-trips your own avatar.
 - **10.D — Animation + pause.** Animated rendering off the frame clock for

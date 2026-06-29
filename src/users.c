@@ -1296,3 +1296,39 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         }
     }
 }
+
+void
+users_refresh_avatar (guint16 uid)
+{
+    session *sess = &the_session;
+
+    /* GIF avatar for `uid` changed in the gif_avatar cache — nudge
+	 * every list that shows this user so the cell re-reads it. Mirrors
+	 * user_change's fan-out: each pchat sidebar, then the standalone
+	 * Users window (public chat). We look the hx_user up per chat
+	 * because the row<->user mapping is keyed on the struct pointer,
+	 * which differs per chat. */
+    if (sess->gchats) {
+        GHashTableIter iter;
+        gpointer key, val;
+        g_hash_table_iter_init (&iter, sess->gchats);
+        while (g_hash_table_iter_next (&iter, &key, &val)) {
+            struct gtkhx_chat *gchat = val;
+            if (!gchat || !gchat->userlist || !gchat->chat) {
+                continue;
+            }
+            struct hx_user *u = hx_user_with_uid (gchat->chat, uid);
+            if (u) {
+                hx_user_list_view_refresh_avatar (gchat->userlist, u);
+            }
+        }
+    }
+
+    if (sess->users_view && gtkhx_prefs.geo.users.open) {
+        struct chat *pub = chat_with_cid (sess, 0);
+        struct hx_user *u = pub ? hx_user_with_uid (pub, uid) : NULL;
+        if (u) {
+            hx_user_list_view_refresh_avatar (sess->users_view, u);
+        }
+    }
+}

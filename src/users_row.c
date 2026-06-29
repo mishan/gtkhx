@@ -106,6 +106,15 @@ hx_user_row_set_state (HxUserRow *r, const char *nam, guint16 icon,
     g_signal_emit (r, signals[SIGNAL_CHANGED], 0);
 }
 
+void
+hx_user_row_touch (HxUserRow *r)
+{
+    if (!r) {
+        return;
+    }
+    g_signal_emit (r, signals[SIGNAL_CHANGED], 0);
+}
+
 struct hx_user *
 hx_user_row_get_user (HxUserRow *r)
 {

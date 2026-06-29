@@ -58,6 +58,13 @@ extern HxUserRow *hx_user_row_new (struct hx_user *user, const char *nam,
 extern void hx_user_row_set_state (HxUserRow *row, const char *nam,
                                    guint16 icon, guint16 color);
 
+/* Fire "changed" without mutating any state. Used when something the
+ * cell reads outside the row's own fields changed — e.g. this user's
+ * GIF avatar landed in the avatar cache — so the cell re-snapshots and
+ * picks it up. The sort key is unchanged, so the row keeps its
+ * position. */
+extern void hx_user_row_touch (HxUserRow *row);
+
 /* Field accessors. Strings are NUL-terminated UTF-8 owned by the
  * row; callers MUST NOT free. user_color_gdk-style foreground is
  * NULL for the "regular user, theme default" slot. */

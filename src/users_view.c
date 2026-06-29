@@ -27,6 +27,7 @@
 #include "users.h"  /* users_font_desc + user_popup_show */
 #include "users_row.h"
 #include "users_view.h"
+#include "gif_avatar.h" /* gtkhx_avatar_get — GIF avatars (Phase 10.B) */
 #ifdef HAVE_VOICE
 #include "voice_model.h"
 #endif
@@ -84,8 +85,16 @@ struct _HxUserCellName {
     HxUserRow *row;        /* borrowed */
     gulong row_changed_id; /* notify handler on row */
 
-    GdkPaintable *icon;    /* resolved from row->icon via load_icon */
+    GdkPaintable *icon;    /* resolved from row->icon via load_icon, OR
+                            * the GIF avatar texture when one is cached
+                            * for this row's uid (using_avatar) */
     guint16 icon_id_cached;
+    /* TRUE when `icon` currently holds a GIF avatar rather than a
+	 * cicn sprite. Avatars take precedence over the 16-bit icon id and
+	 * render through the identical snapshot path (intrinsic size *
+	 * scale + wide-banner shift), so a GIF authored at icon / banner
+	 * dimensions looks just like its cicn equivalent. */
+    gboolean using_avatar;
     /* Cached per-icon left padding so the wide-banner shift is
 	 * computed at icon-load time, not every snapshot. 0 for narrow
 	 * icons (which render starting at the cell's left edge). For
@@ -146,6 +155,38 @@ hx_user_cell_name_refresh_icon (HxUserCellName *cell)
     GdkPixbuf *mask_unused = NULL;
     guint16 icon_id = cell->row ? hx_user_row_get_icon (cell->row) : 0;
 
+    /* GIF avatar takes precedence over the 16-bit icon id. The cached
+	 * texture is the source of truth (gif_avatar.c); we route it through
+	 * the same cell->icon field + snapshot path as a cicn sprite so the
+	 * avatar is sized identically — intrinsic px * theme scale, with the
+	 * wide-banner left-shift for banner-width art. */
+    guint16 uid = cell->row ? hx_user_row_get_uid (cell->row) : 0;
+    GdkTexture *avatar = uid ? gtkhx_avatar_get (uid) : NULL;
+    if (avatar) {
+        GdkPaintable *ap = GDK_PAINTABLE (avatar);
+        if (cell->using_avatar && cell->icon == ap) {
+            return; /* already showing this exact avatar */
+        }
+        g_clear_object (&cell->icon);
+        cell->icon = g_object_ref (ap);
+        cell->using_avatar = TRUE;
+        /* Force a cicn re-resolve if the avatar is later cleared. */
+        cell->icon_id_cached = 0;
+        int w = gdk_texture_get_width (avatar);
+        cell->icon_left_pad = (w >= HX_USER_WIDE_ICON_THRESHOLD)
+                                  ? MIN (HX_USER_WIDE_ICON_LEFT_PAD, w)
+                                  : 0;
+        return;
+    }
+
+    /* No avatar — fall back to the cicn sprite for the 16-bit icon id.
+	 * Drop a stale avatar first so the cached-id fast path is valid. */
+    if (cell->using_avatar) {
+        g_clear_object (&cell->icon);
+        cell->using_avatar = FALSE;
+        cell->icon_id_cached = 0;
+    }
+
     if (icon_id == cell->icon_id_cached && cell->icon) {
         return;
     }
@@ -197,6 +238,7 @@ hx_user_cell_name_set_row (HxUserCellName *cell, HxUserRow *row)
     }
     g_clear_object (&cell->row);
     cell->icon_id_cached = 0;
+    cell->using_avatar = FALSE;
     g_clear_object (&cell->icon);
 
     if (row) {
@@ -1222,6 +1264,23 @@ hx_user_list_view_update (HxUserListView *v, struct hx_user *user,
      * to re-evaluate this row's position. Selection stays on the
      * row identity, so an arrow-key cursor doesn't jump on
      * rename. */
+}
+
+void
+hx_user_list_view_refresh_avatar (HxUserListView *v, struct hx_user *user)
+{
+    HxUserRow *row;
+
+    if (!v || !user) {
+        return;
+    }
+    row = g_hash_table_lookup (v->by_user, user);
+    if (row) {
+        /* Re-fires the row's "changed" so the cell re-resolves its icon
+		 * — refresh_icon now consults the avatar cache. State (name /
+		 * icon / color) is untouched, so the sort position holds. */
+        hx_user_row_touch (row);
+    }
 }
 
 void
