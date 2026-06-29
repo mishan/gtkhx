@@ -7,8 +7,8 @@ SOCKS on the orchestrated control channel and the tracker (item 8, now in
 Rust), and for the follow-on of moving the HTXF subchannel's C-side
 connect into Rust too.
 
-> **Status: DONE (S1 + S2 merged; S3 on `claude/socks-s3-tracker-htxf`,
-> pending merge).** All three network paths — control channel, HTXF
+> **Status: DONE** (S1 transport, S2 control channel, S3 tracker + HTXF
+> connect moves). All three network paths — control channel, HTXF
 > subchannel, and tracker — now connect through the same `GProxyResolver`-
 > sourced SOCKS proxy via `resolve_and_connect`; the C `GSocketClient`
 > connects are gone. The TL;DR + "current state" table below describe the

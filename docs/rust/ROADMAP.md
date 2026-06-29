@@ -525,7 +525,7 @@ to R3.
 
 ---
 
-## Phase R3 — Networking & async core ✅ (SOCKS/proxy deferred)
+## Phase R3 — Networking & async core ✅
 
 **Goal:** Replace the `pthread + g_main_context_invoke` machinery with a
 proper tokio runtime. The Hotline connection (`network.c`), file transfers
@@ -544,8 +544,11 @@ worker-thread / non-control-channel tail has since shipped too: the
 `xfers.c` transfer worker is a tokio task (item 4), `gtkthreads.c` is
 deleted (item 3), the HTRK tracker fetch moved into `hxnet` (item 8), and
 the URL-mode banner fetch moved to `ureq` with `libsoup` dropped (item 5).
-The only genuinely-deferred R3 work is central SOCKS/proxy support
-(item 9). (`preview.c`, item 6, was never an R3 work item — it's a
+Central SOCKS/proxy support (item 9), the last genuinely-deferred R3 work,
+has since shipped too (S1 transport, S2 control channel, S3 tracker + HTXF
+connect moves) — all three network paths now connect through the same
+`GProxyResolver`-sourced proxy.
+(`preview.c`, item 6, was never an R3 work item — it's a
 call-out noting that those GTK-side async parses belong to R5.) The
 sub-phase table below records the build-up to the env-var-gated install;
 everything after that (default-flip, legacy removal, HTXF→Rust, crypto
@@ -572,11 +575,12 @@ shipped.** What was outstanding above is now done:
 
 The exit criterion is met: **no `pthread_create` outside vendored
 `xtext`**, no `gtkthreads.c`, and every non-control-channel network path
-(HTXF, tracker, banner) now runs through `hxnet`/tokio. The one
-genuinely-deferred R3 item is central SOCKS/proxy support (item 9) — a
-post-R3 follow-up; the control channel + HTXF + tracker accept the
-transparent-SOCKS gap until `tokio-socks` lands. (`preview.c`, item 6, is
-not deferred R3 work — it's a call-out for R5.)
+(HTXF, tracker, banner) now runs through `hxnet`/tokio. Central SOCKS/proxy
+support (item 9) has since shipped on top (S1 transport, S2 control
+channel, S3 tracker + HTXF connect moves), so the control channel, HTXF,
+and tracker all tunnel through a `GProxyResolver`-sourced SOCKS proxy; the
+transparent-SOCKS gap is closed. (`preview.c`, item 6, is not deferred R3
+work — it's a call-out for R5.)
 
 > **Current state of `gtkthreads.c`:** the original Phase 4-era GTK 4 port
 > kept a recursive-mutex + custom `GMainContext` poll wrapper that simulated
@@ -689,36 +693,43 @@ where the concurrency motivation pays off.
    events on the main loop and re-emits the existing
    `tracker-batch-begin` / `tracker-server-create` signals (so `tracker.c`
    is untouched). TLS reuses the control-path rustls + a host:port-keyed
-   TOFU verify; the SOCKS gap is accepted pending item 9. Covered by the
+   TOFU verify; the tracker now tunnels through the same `GProxyResolver`-
+   sourced SOCKS proxy as the rest (item 9, S3). Covered by the
    socket-level Tier 3 wire tests plus a bridge-level
    `test_tracker_fetch.c` driving the FFI against the live matrix.
-9. ⏳ **Central SOCKS / proxy support in `hxnet` (`tokio-socks`).** *The one
-   genuinely-deferred R3 item.* The control channel connects via
-   `tokio::net::TcpStream` in `resolve_and_connect`, which never consults
-   `GProxyResolver` — so the main connection silently lost the transparent
-   SOCKS the pre-orchestrator `GSocketClient` connect had. (The tracker
-   lost it too once item 8 moved its connect into Rust; the HTXF subchannel
-   still has it because its connect is still C.) Adding `tokio-socks` at
-   the single connect primitive (`resolve_and_connect`, now used by the
-   control channel *and* the tracker) restores proxy support across the
-   board. The transport change is small; the real decision is where proxy
-   config comes from (query `GProxyResolver` in C and pass the URI in,
-   vs. env vars). Scoped in `docs/rust/socks-proxy-scoping.md`.
+9. ✅ **Central SOCKS / proxy support in `hxnet` (`tokio-socks`).** Shipped
+   in three slices (S1 transport, S2 control channel, S3 tracker + HTXF
+   connect moves). `tokio-socks` (opt-in behind a non-default `socks`
+   Cargo feature) plugs into the single connect primitive,
+   `resolve_and_connect`, so every path that uses it tunnels through the
+   same proxy:
+   - **S1** — the `ProxyConfig` parser + the proxy branch in
+     `resolve_and_connect` (remote DNS / socks5h; the direct `proxy = None`
+     path is byte-identical to before).
+   - **S2** — the C `bridge_lookup_socks_proxy` (`GProxyResolver`, queried
+     with the `none://host:port` scheme `GSocketClient` itself uses) feeds
+     a `socks5://` URI through the three control-channel `open_*` FFIs.
+     Config is GProxyResolver-only (no env-var fallback in C — its default
+     backend already reads `all_proxy` / GNOME settings).
+   - **S3** — the tracker (`hxnet_tracker_fetch_open` gained a proxy URI)
+     and the HTXF subchannel (the connect moved fully into Rust via
+     `hxnet_htxf_connect`, retiring the C `GSocketClient` connect + the
+     fd-handoff `hxnet_htxf_open` adopted; that entry survives only for
+     socketpair tests). A shared IPv6-aware `src/host_port.{c,h}` replaced
+     the hand-rolled `host:port` splits.
 
-   *Follow-on cleanup once this lands (not a tracked item):* the HTXF
-   subchannel connect is still done in C and the connected fd handed to
-   Rust (`hxnet_htxf_open` adopts it via `std::net::TcpStream::from_raw_fd`
-   in `htxf.rs`) precisely to keep `GProxyResolver`'s SOCKS. Once `hxnet`
-   owns proxy-aware connect, that fd-handoff can be collapsed so the HTXF
-   connect moves fully into Rust too — pure cleanup, no behaviour change.
+   Scoped in `docs/rust/socks-proxy-scoping.md`; deferred follow-ups there
+   (async `GProxyResolver` lookup for PAC/WPAD, an in-app proxy pref,
+   HTTP-CONNECT proxies).
 
 **R3 exit criteria — met.** `meson compile` produces a binary where the
 Hotline control channel, file transfers (HTXF), the HTRK tracker, and the
 URL-mode banner all run through the `hxnet`/tokio stack; there is **no
 `pthread_create` outside vendored `xtext`**, `gtkthreads.c` is gone, and
-`libsoup` is no longer a dependency. The only deferred R3 item is central
-SOCKS/proxy support (item 9 → post-R3 follow-up). (`preview.c`, item 6,
-was a call-out for R5, never an R3 work item.)
+`libsoup` is no longer a dependency. Central SOCKS/proxy support (item 9)
+shipped on top, so all of those paths tunnel through a `GProxyResolver`-
+sourced SOCKS proxy. (`preview.c`, item 6, was a call-out for R5, never an
+R3 work item.)
 
 ### Work-item 1 detail: R3.3 sub-phases
 
