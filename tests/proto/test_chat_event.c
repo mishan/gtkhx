@@ -29,6 +29,7 @@
 #include <string.h>
 #include <glib.h>
 #include "proto_helpers.h"
+#include "text_util.h" /* gtkhx_text_set_emoji_shortcodes_enabled (E6) */
 
 /* ---------- Basic split: "Nick: body" ---------- */
 
@@ -607,6 +608,19 @@ test_chat_event_leaves_non_shortcodes (void)
     hx_chat_event_free (e);
 }
 
+/* Phase E6: with the toggle off, the decode is a no-op — the body keeps
+ * its literal :shortcode: text. */
+static void
+test_chat_event_decode_respects_toggle (void)
+{
+    gtkhx_text_set_emoji_shortcodes_enabled (FALSE);
+    const char *raw = " misha:  :tada: party";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    g_assert_cmpstr (e->line, ==, raw); /* unchanged */
+    hx_chat_event_free (e);
+    gtkhx_text_set_emoji_shortcodes_enabled (TRUE); /* restore default */
+}
+
 int
 main (int argc, char **argv)
 {
@@ -656,6 +670,8 @@ main (int argc, char **argv)
                      test_chat_event_decodes_emoji_when_unsplit);
     g_test_add_func ("/proto/chat_event/leaves_non_shortcodes",
                      test_chat_event_leaves_non_shortcodes);
+    g_test_add_func ("/proto/chat_event/decode_respects_toggle",
+                     test_chat_event_decode_respects_toggle);
 
     g_test_add_func ("/proto/chat_event/copy_preserves_fields",
                      test_chat_event_copy_preserves_fields);

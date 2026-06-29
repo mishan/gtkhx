@@ -13,6 +13,7 @@
 #include "compat.h" /* _() gettext wrapper */
 #include "emoji.h"
 #include "hotline_proto.h" /* gtkhx_proto_shortcode_matches */
+#include "prefs.h"         /* gtkhx_prefs.emoji_typeahead */
 
 /*
  * The on-pick handler. GtkEmojiChooser::emoji-picked fires once per
@@ -256,6 +257,14 @@ static void
 ta_update (EmojiTypeahead *ta)
 {
     if (ta->suppress) {
+        return;
+    }
+
+    /* Phase E6: the popup is independently toggleable (Settings → Chat →
+	 * Emoji). Read live so flipping it takes effect immediately, including
+	 * on already-open input windows. */
+    if (!gtkhx_prefs.emoji_typeahead) {
+        ta_hide (ta);
         return;
     }
 

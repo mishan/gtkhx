@@ -103,6 +103,10 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* inrate_limit */
     0, /* logging */
 
+    /* Emoji shortcodes — both default ON (init_variables re-asserts). */
+    1, /* emoji_shortcodes */
+    1, /* emoji_typeahead */
+
     /* HexChat-style autocopy controls. Default-on for text
 	 * matches every modern chat client (HexChat, Discord, Slack, etc.)
 	 * and matches the Settings mockup. Stamp / color stay off — most
@@ -567,6 +571,18 @@ changed_font (session *sess)
     }
 }
 
+/* changefunc for CFG_EMOJI_SHORTCODES (phase E6). Push the toggle into
+ * text_util.c, which both the send encode (gtkhx_text_for_wire) and the
+ * receive decode (proto_helpers chat / PM builders) consult. Kept out of
+ * those dependency-light translation units' direct gtkhx_prefs reach so
+ * their unit tests don't have to link the prefs global. */
+static void
+changed_emoji_shortcodes (session *sess)
+{
+    (void)sess;
+    gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
+}
+
 #if 0 /* XXX */
 static void changed_logging (session *sess)
 {
@@ -817,6 +833,23 @@ struct cfgvar {
       STRING,
       0,
       changed_downloadpath,
+      NULL },
+    /* Emoji shortcodes (phase E6). emoji_shortcodes drives both the
+	 * legacy-server send encode and the always-on receive decode; its
+	 * changefunc pushes the value to the text_util/proto_helpers toggle.
+	 * emoji_typeahead drives the inline :prefix popup and is read live in
+	 * emoji.c, so it needs no changefunc. */
+    { CFG_EMOJI_SHORTCODES,
+      { &gtkhx_prefs.emoji_shortcodes },
+      BOOLEAN,
+      0,
+      changed_emoji_shortcodes,
+      NULL },
+    { CFG_EMOJI_TYPEAHEAD,
+      { &gtkhx_prefs.emoji_typeahead },
+      BOOLEAN,
+      0,
+      NULL,
       NULL },
     /* file_samewin pref: retired in Phase 5 with the legacy single-pane
 	 * files browser. Loaded values from old gtkhxrc files are silently
@@ -1595,6 +1628,11 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_prefs.notify_broadcast = 1;
     gtkhx_prefs.notify_omit_focused = 1;
 
+    /* Emoji shortcodes — both on by default (Mac Roman fallback +
+	 * Slack-style typeahead). */
+    gtkhx_prefs.emoji_shortcodes = 1;
+    gtkhx_prefs.emoji_typeahead = 1;
+
     /* Voice device defaults: empty string === "use system default
 	 * via autoaudiosrc / autoaudiosink". The Rust runtime side
 	 * normalises NULL and "" identically, so we just allocate an
@@ -1898,6 +1936,12 @@ apply_loaded_xtext_prefs (void)
     gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
     gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
     gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
+
+    /* Same load-vs-changefunc concern: prefs_read doesn't fire
+	 * changefuncs, so push the loaded emoji-shortcode toggle into the
+	 * text_util/proto_helpers conversion gate explicitly. (Typeahead is
+	 * read live from gtkhx_prefs in emoji.c, so it needs no push.) */
+    gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
     /* Stamp format is widget-aware but the module-global it stashes
 	 * into is read by xtext_get_stamp_str. Pass NULL for the widget
 	 * here — at this point no xtext widgets exist yet (chat windows
@@ -2559,6 +2603,31 @@ settings_page_chat (AdwPreferencesPage *page)
 
     adw_preferences_group_add (font_grp, entry_row);
     adw_preferences_page_add (page, font_grp);
+
+    /* Emoji shortcodes (phase E6). Two independent toggles: the
+	 * conversion (emoji ↔ :shortcode: on the wire / at display) and the
+	 * inline typeahead popup. */
+    {
+        AdwPreferencesGroup *emoji_grp
+            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (emoji_grp, _ ("Emoji"));
+        adw_preferences_group_set_description (
+            emoji_grp,
+            _ ("When conversion is on, emoji you send on servers that don't "
+               "support Unicode go out as text shortcodes like \":joy:\" "
+               "instead of \"?\", and incoming shortcodes are shown as emoji "
+               "on every server."));
+        adw_preferences_group_add (
+            emoji_grp,
+            pref_switch_row (CFG_EMOJI_SHORTCODES,
+                             _ ("Convert emoji to/from :shortcodes:"), NULL));
+        adw_preferences_group_add (
+            emoji_grp,
+            pref_switch_row (
+                CFG_EMOJI_TYPEAHEAD, _ ("Suggest shortcodes as you type"),
+                _ ("Show a popup of matching emoji when you type \":\"")));
+        adw_preferences_page_add (page, emoji_grp);
+    }
 
     behavior_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (behavior_grp, _ ("Behavior"));

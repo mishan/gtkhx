@@ -458,6 +458,22 @@ test_for_wire_legacy_non_emoji_unmappable_still_substitutes (void)
     g_free (out);
 }
 
+/* Phase E6: with the conversion toggle off, the legacy path no longer
+ * rewrites emoji — they hit the Mac Roman '?' fallback as before E2. */
+static void
+test_for_wire_legacy_emoji_toggle_off (void)
+{
+    gtkhx_text_set_emoji_shortcodes_enabled (FALSE);
+    const char in[] = "ok\xf0\x9f\x98\x8a"; /* "ok😊" */
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, FALSE, &len);
+    g_assert_cmpint (out[0], ==, 'o');
+    g_assert_cmpint (out[1], ==, 'k');
+    g_assert_cmpint (out[2], ==, '?');
+    g_free (out);
+    gtkhx_text_set_emoji_shortcodes_enabled (TRUE); /* restore default */
+}
+
 /* UTF-8 mode must NOT rewrite emoji — the wire carries the real
  * codepoint when the server speaks UTF-8. */
 static void
@@ -586,6 +602,8 @@ main (int argc, char **argv)
                      test_for_wire_legacy_emoji_to_shortcode);
     g_test_add_func ("/text_util/for_wire/legacy_non_emoji_unmappable_still_substitutes",
                      test_for_wire_legacy_non_emoji_unmappable_still_substitutes);
+    g_test_add_func ("/text_util/for_wire/legacy_emoji_toggle_off",
+                     test_for_wire_legacy_emoji_toggle_off);
     g_test_add_func ("/text_util/for_wire/utf8_mode_keeps_emoji",
                      test_for_wire_utf8_mode_keeps_emoji);
     g_test_add_func ("/text_util/for_wire/legacy_emoji_with_body_crlf",

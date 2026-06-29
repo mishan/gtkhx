@@ -72,6 +72,18 @@ struct gtkhx_prefs {
     unsigned char inrate_limit;
     unsigned char logging;
 
+    /* Emoji shortcodes (phase E6), both default ON:
+	 *   emoji_shortcodes — convert emoji ↔ :shortcode: text. Drives the
+	 *     legacy-server send encode (gtkhx_text_for_wire) and the
+	 *     always-on receive decode (proto_helpers chat / PM builders),
+	 *     both via the gtkhx_text_emoji_shortcodes_enabled() toggle in
+	 *     text_util.c. Persisted as CFG_EMOJI_SHORTCODES.
+	 *   emoji_typeahead — show the inline `:prefix` suggestion popup as
+	 *     the user types (emoji.c). Read live. Persisted as
+	 *     CFG_EMOJI_TYPEAHEAD. */
+    unsigned char emoji_shortcodes;
+    unsigned char emoji_typeahead;
+
     /* HexChat-style xtext autocopy controls — driven by
 	 * Settings → Advanced → Auto Copy Behavior, persisted as the
 	 * AUTOCOPY_TEXT / AUTOCOPY_STAMP / AUTOCOPY_COLOR keys, applied

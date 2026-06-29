@@ -912,7 +912,11 @@ static const char hx_info_prefix[] = " \00310[\00303hx\00310]\003 ";
 static char *
 hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
 {
-    if (len == 0) {
+    /* Phase E6: honour the user's emoji-shortcode toggle (the same flag
+	 * gates the send encode). Disabled → leave the text verbatim. The flag
+	 * lives in text_util.c so this TU stays free of the gtkhx_prefs global
+	 * for its unit tests. */
+    if (len == 0 || !gtkhx_text_emoji_shortcodes_enabled ()) {
         return NULL;
     }
     gsize cap = len + 16;
@@ -950,6 +954,28 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
     e->line = gtkhx_text_to_utf8 (raw, raw_len, &line_len);
     e->line_len = line_len;
 
+    /* Phase E3/E6: decode :shortcodes: → emoji across the WHOLE line,
+	 * before the info-prefix check and the nick split. Whole-line (not
+	 * body-only) is deliberate: some servers format public chat without a
+	 * "Nick:" colon (e.g. " *** Name message"), so scoping to the
+	 * post-colon "body" would let a shortcode's own colon be mistaken for
+	 * the nick separator and skip the conversion. Decoding first is safe
+	 * for the nick column because the grammar only matches colon-delimited
+	 * lowercase tokens — a "Nick:" prefix (colon on one side only, or
+	 * uppercase) never matches — and for info lines, whose mIRC-coloured
+	 * "[hx]" prefix carries no shortcodes (the decoder skips colour runs
+	 * regardless). The split below then runs on the final decoded text so
+	 * the sender/body offsets stay consistent. */
+    {
+        gsize dlen = 0;
+        char *dec = hx_decode_emoji_shortcodes (e->line, e->line_len, &dlen);
+        if (dec) {
+            g_free (e->line);
+            e->line = dec;
+            e->line_len = dlen;
+        }
+    }
+
     /* Detect the info-prefix branch up front — info lines should
 	 * skip both the sender/body split and any highlight matching
 	 * downstream. */
@@ -970,33 +996,6 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
             if (self_nick && *self_nick && sl > 0 && strlen (self_nick) == sl
                 && memcmp (e->line + so, self_nick, sl) == 0) {
                 e->is_self = TRUE;
-            }
-        }
-
-        /* Phase E3: decode :shortcodes: to emoji in the visible body. On a
-		 * split "Nick: body" line only the body region is converted so the
-		 * nick column stays literal; an unsplit prose / emote line is all
-		 * body. is_self was already decided above against the (un-decoded)
-		 * nick, so it's unaffected. Info lines never reach here. */
-        gsize roff = e->sender_len > 0 ? e->body_off : 0;
-        gsize rlen = e->sender_len > 0 ? e->body_len : e->line_len;
-        gsize dlen = 0;
-        char *dec = hx_decode_emoji_shortcodes (e->line + roff, rlen, &dlen);
-        if (dec) {
-            gsize tail_off = roff + rlen;
-            gsize tail_len = e->line_len - tail_off;
-            gsize new_len = roff + dlen + tail_len;
-            char *nl = g_malloc (new_len + 1);
-            memcpy (nl, e->line, roff);
-            memcpy (nl + roff, dec, dlen);
-            memcpy (nl + roff + dlen, e->line + tail_off, tail_len);
-            nl[new_len] = '\0';
-            g_free (dec);
-            g_free (e->line);
-            e->line = nl;
-            e->line_len = new_len;
-            if (e->sender_len > 0) {
-                e->body_len = dlen;
             }
         }
     }
