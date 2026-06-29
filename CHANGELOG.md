@@ -1,3 +1,19 @@
+## 1.1.1-dev
+
+- User Interface
+  - GtkHx theme support
+  - Emoji shortcode support with typeahead completion
+  - Agreement text is now rendered in a monospace font
+- Code Modernization
+  - GtkHx's networking code is now in Rust
+  - Address GTK+ 4 deprecations
+- Hotline Protocol
+  - GIF icon support
+- Compatibility Fixes
+  - Support for glycin 1+ and 2+ loaders
+  - rustc dependency dropped to 1.8.5
+  - Voice chat and its dependencies are now optional
+
 ## 1.1.0
 
 - Voice chat
