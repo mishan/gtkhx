@@ -44,6 +44,7 @@
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "hxnet_bridge.h"
+#include "host_port.h"
 #include "rcv.h"
 #include "gtkutil.h"
 #include "chat.h"
@@ -60,7 +61,7 @@
 #include "network.h"
 #include "banner.h"
 #include "debug.h"
-#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_open, hxnet_hope_aead_free */
+#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
 #include "cipher.h"
 #include "voice_runtime.h"
 #include "voice_model.h"
@@ -505,16 +506,6 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
     hx_post_login_fetches (htlc);
 }
 
-/* Identifying tuple threaded through the GSocketClient::event signal
- * to the TLS accept-certificate handler (still used by the tracker
- * TLS connect, tracker_fetch_connect). The accept handler body lives
- * later in the file; this gives the struct its layout. */
-struct tls_endpoint {
-    const char *host;
-    guint16 port;
-};
-
-
 /* Phase 3 TLS: deferred pin payload. Stamping a new known-hosts
  * entry from inside the accept-certificate signal handler turned
  * out to hang the TLS handshake — the handler runs on glib-
@@ -592,12 +583,11 @@ schedule_trust_pin (const char *host, guint16 port, const char *fingerprint)
 
 /* Marshal hx_tls_trust_dialog_run_sync to the main thread.
  *
- * The accept-certificate signal can fire on a worker thread:
- * hx_sync_connect_to_host (HTXF subchannel workers in xfers.c
- * + banner.c) drives a sync GSocketClient connect from a non-
- * main thread, and glib-networking emits accept-certificate on
- * whichever thread is currently inside the handshake. Dialog
- * APIs (libadwaita, the nested GMainLoop in hx_tls_trust_dialog_
+ * The TOFU decision can run on a worker thread: the HTXF subchannel
+ * workers (xfers.c + banner.c) connect via hxnet_htxf_connect on tokio's
+ * blocking pool, and hxnet's rustls verifier calls back into
+ * tls_trust_decide (through htxf_verify_cert_cb) on that worker thread.
+ * Dialog APIs (libadwaita, the nested GMainLoop in hx_tls_trust_dialog_
  * run_sync) require the main thread — calling them from a worker
  * crashes or deadlocks.
  *
@@ -683,10 +673,10 @@ trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
  * prompt verdict so headless tests can drive the reject path too.
  * Returns TRUE to accept the cert, FALSE to reject.
  *
- * Used by BOTH the legacy GTlsConnection accept-certificate handler
- * (tls_accept_certificate, which computes the fingerprint from a
- * GTlsCertificate) and the orchestrator's post-handshake verify
- * (hx_tls_orchestrator_verify_cert, fingerprint computed in Rust).
+ * Used by the orchestrator's post-handshake verify
+ * (hx_tls_orchestrator_verify_cert for the control channel,
+ * htxf_verify_cert_cb for the HTXF subchannel) — both run hxnet's
+ * rustls handshake and call here with the fingerprint computed in Rust.
  * Safe off the main thread — the prompt marshals via
  * trust_dialog_run_thread_safe. */
 static gboolean
@@ -784,84 +774,6 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
         return FALSE;
     }
     return tls_trust_decide (htlc->serverhost, htlc->serverport, fingerprint);
-}
-
-/* Phase 3 TLS: TOFU accept-certificate handler. Pulls (host,
- * port) from the tls_endpoint (passed as user_data via the
- * GSocketClient event signal),
- * computes the cert fingerprint, looks it up in the user's
- * known-hosts file, and either silently accepts (TRUSTED),
- * pins-then-accepts after a TOFU prompt (UNKNOWN), or warns
- * loudly before accepting/rejecting (MISMATCH).
- *
- * GTKHX_TLS_AUTO_ACCEPT=1 in the environment bypasses the
- * dialog: any UNKNOWN cert is auto-pinned, any MISMATCH is
- * auto-trusted (with a noisy log line). Used by the Tier 3
- * test harness, which has no GtkApplication and would deadlock
- * waiting on the prompt's nested GMainLoop. Also handy for
- * scripted first-run pinning. Default-off — production users
- * always see the prompt.
- *
- * The signal contract is sync (return TRUE/FALSE). When the
- * signal fires on a worker thread (HTXF subchannel connects
- * — see trust_dialog_run_thread_safe above), the dialog is
- * marshalled to the main thread. */
-static gboolean
-tls_accept_certificate (GTlsConnection *conn G_GNUC_UNUSED,
-                        GTlsCertificate *peer_cert,
-                        GTlsCertificateFlags errors,
-                        gpointer user_data)
-{
-    struct tls_endpoint *ep = user_data;
-    const char *host = (ep && ep->host) ? ep->host : "?";
-    guint16 port = ep ? ep->port : 0;
-
-    g_autofree gchar *fingerprint = hx_tls_trust_fingerprint (peer_cert);
-    if (!fingerprint) {
-        /* No DER blob on the cert — shouldn't happen, but if it
-         * does we have no way to identify the cert so we have to
-         * reject. */
-        debug_log ("tls",
-                   "accept-certificate: no fingerprint available for %s:%u",
-                   host, (unsigned) port);
-        return FALSE;
-    }
-
-    debug_log ("tls", "accept-certificate: %s:%u errors=0x%x", host,
-               (unsigned) port, (unsigned) errors);
-    /* The decision (lookup → any-port → auto-accept → prompt → pin)
-     * is shared with the orchestrator path; see tls_trust_decide. */
-    return tls_trust_decide (host, port, fingerprint);
-}
-
-/* The GSocketClient event signal fires through every phase of the
- * connect-and-wrap sequence. We're interested in the TLS_HANDSHAKING
- * phase because that's the only phase where the connection arg is a
- * GTlsClientConnection we can attach accept-certificate to. Earlier
- * phases give a plain GSocketConnection (or NULL); later phases'
- * cert decision has already happened.
- *
- * `user_data` is a `struct tls_endpoint *` (the async connect
- * path passes &ctx->tls_endpoint, the sync HTXF connect path
- * passes a stack-local endpoint) — forwarded as-is to the
- * accept-certificate handler so it can read (host, port) for
- * the trust lookup. Lifetime is the caller's; we just borrow
- * the pointer for the duration of the handshake. */
-static void
-on_socket_client_event (GSocketClient *client G_GNUC_UNUSED,
-                        GSocketClientEvent event,
-                        GSocketConnectable *connectable G_GNUC_UNUSED,
-                        GIOStream *connection,
-                        gpointer user_data)
-{
-    if (event != G_SOCKET_CLIENT_TLS_HANDSHAKING) {
-        return;
-    }
-    if (!connection || !G_IS_TLS_CONNECTION (connection)) {
-        return;
-    }
-    g_signal_connect (connection, "accept-certificate",
-                      G_CALLBACK (tls_accept_certificate), user_data);
 }
 
 /* Phase G: pinned LOGIN transaction id. LOGIN is always the first
@@ -1121,66 +1033,6 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
     }
 }
 
-/* Synchronous worker-thread connect helper. Used by the HTXF
- * transfer workers in xfers.c and banner.c — both run on tokio's
- * blocking pool, whose only excuse for existing is the blocking
- * byte-streaming loop, so a sync GSocketClient call here keeps them
- * simple.
- *
- * Returns a connected GSocketConnection the caller owns
- * (g_object_unref drops both the GIO machinery and the underlying
- * socket fd). On failure returns NULL and writes the GError
- * message to errbuf (truncated to errbuf_len) if both are
- * non-NULL. host/port go straight through to GSocketClient —
- * IPv4/IPv6 fallback and SOCKS proxy resolution (via
- * GProxyResolver) come for free.
- *
- * Workers cast the returned conn to GIOStream and stream bytes
- * through htxf_io_read / htxf_io_write (both stream-shaped and
- * AEAD-aware since Phase B). The fd is owned by the
- * GSocketConnection — don't close(2) it; unref the conn and
- * GSocket's finaliser closes the fd. */
-GSocketConnection *
-hx_sync_connect_to_host (const char *host, guint16 port, char *errbuf,
-                         gsize errbuf_len, char tls)
-{
-    GSocketClient *client;
-    GSocketConnection *conn;
-    GError *err = NULL;
-
-    client = g_socket_client_new ();
-    /* optional TLS wrap on the HTXF subchannel. Same
-     * shape as hx_connect's control-channel TLS plumbing — flip
-     * set_tls before the connect and hook accept-everything via
-     * the GSocketClient event signal at TLS_HANDSHAKING. Phase 3:
-     * the handler now does a real TOFU lookup; the endpoint
-     * struct on the stack tells it which host:port we're
-     * connecting to. The struct lives until this function
-     * returns, which outlives the connect call. */
-    struct tls_endpoint endpoint = { .host = host, .port = port };
-    if (tls) {
-        g_socket_client_set_tls (client, TRUE);
-        g_signal_connect (client, "event",
-                          G_CALLBACK (on_socket_client_event),
-                          &endpoint);
-    }
-    conn = g_socket_client_connect_to_host (client, host, port, NULL, &err);
-    g_object_unref (client);
-    if (!conn) {
-        if (errbuf && errbuf_len && err) {
-            g_strlcpy (errbuf, err->message, errbuf_len);
-        }
-        g_clear_error (&err);
-        return NULL;
-    }
-    /* GSocketConnection is blocking by default — exactly what the
-	 * worker threads want. The old fd-returning variant had to
-	 * dup() and explicitly clear O_NONBLOCK because g_socket_get_fd
-	 * surfaces whatever flags GSocket happens to have set; on the
-	 * GSocketConnection-shaped API neither dance is needed. */
-    return conn;
-}
-
 /* TLS TOFU trampoline for the HTXF subchannel. hxnet's rustls verifier
  * calls this with the peer leaf fingerprint ONLY when WebPKI validation
  * against the native roots failed (a CA-valid cert is trusted silently
@@ -1214,8 +1066,6 @@ hx_tls_verify_subchannel_cert (const char *host, guint16 port,
 gboolean
 htxf_connect (struct htxf_conn *htxf)
 {
-    GSocketConnection *conn;
-    char errbuf[256];
     /* htxf is required — every caller in the codebase (xfers.c,
 	 * news worker, banner worker, xfer_go) allocates the struct
 	 * before calling. The original code had a vestigial NULL guard
@@ -1246,44 +1096,10 @@ htxf_connect (struct htxf_conn *htxf)
                       && htxf->total_size > 0xFFFFFFFFULL;
     htxf->opt.large = size64 ? 1 : 0;
 
-    /* Plaintext TCP connect via GSocketClient — keeps IPv4/IPv6
-	 * fallback and SOCKS (GProxyResolver) for free. TLS is NOT done
-	 * here anymore: the separate-port TLS wrap moved into hxnet's
-	 * rustls path (hxnet_htxf_open below), off the shared C
-	 * GTlsConnection accept-cert handler. So this connect is always
-	 * plaintext; we extract the connected fd and hand ownership to
-	 * hxnet. */
-    conn = hx_sync_connect_to_host (htxf->serverhost, htxf->serverport,
-                                    errbuf, sizeof (errbuf), /*tls=*/0);
-    if (!conn) {
-        debug_log ("xfer", "htxf_connect: TCP connect to %s:%u failed: %s",
-                   htxf->serverhost, (unsigned) htxf->serverport, errbuf);
-        return FALSE;
-    }
-
-    /* Take ownership of the connected fd by dup'ing it out of the
-	 * GSocketConnection, then unref the conn (its GSocket finaliser
-	 * closes the original fd; the dup is an independent reference to
-	 * the same connection). hxnet_htxf_open adopts the dup. We've
-	 * done no IO on the conn yet, so nothing is buffered. */
-    int dupfd = -1;
-    {
-        GSocket *sock = g_socket_connection_get_socket (conn);
-        int sfd = sock ? g_socket_get_fd (sock) : -1;
-        if (sfd >= 0) {
-            dupfd = dup (sfd);
-        }
-    }
-    g_object_unref (conn);
-    if (dupfd < 0) {
-        debug_log ("xfer", "htxf_connect: could not dup connected fd");
-        return FALSE;
-    }
-
     /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
 	 * is set). hx_htxf_subchannel_pack_preamble handles the
 	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
-	 * zeroing for the 24-byte variant. hxnet_htxf_open writes it
+	 * zeroing for the 24-byte variant. hxnet_htxf_connect writes it
 	 * raw (before any AEAD arms) — the server matches the subchannel
 	 * to the queued transfer by ref before any cipher state exists. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
@@ -1294,13 +1110,20 @@ htxf_connect (struct htxf_conn *htxf)
         htxf->ref, htxf->total_size,
         type, /*flags=*/0, size64);
     if (hdr_len == 0) {
-        close (dupfd);
         return FALSE;
     }
 
+    /* Resolve the SOCKS proxy (if any) for this subchannel target the
+	 * same way the control channel does, then let hxnet own the whole
+	 * connect: DNS + IPv4/IPv6 fallback + optional SOCKS tunnel all run
+	 * in Rust (resolve_and_connect), so there's no C-side GSocketClient
+	 * connect + fd dup/adopt anymore. */
+    g_autofree char *proxy_uri =
+        hx_bridge_lookup_socks_proxy (htxf->serverhost, htxf->serverport);
+
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming. When the control
 	 * channel negotiated ChaCha20-Poly1305, the per-transfer keys are
-	 * derived INSIDE hxnet_htxf_open from the control connection's
+	 * derived INSIDE hxnet_htxf_connect from the control connection's
 	 * retained HOPE material (htlc->hope_aead, an opaque handle seeded at
 	 * login) plus this transfer's ref — mixing ref into the salt so two
 	 * transfers in one session can never share a nonce, counters from 0 —
@@ -1319,19 +1142,21 @@ htxf_connect (struct htxf_conn *htxf)
 
     /* Mirror the control channel's TLS mode onto this subchannel —
 	 * separate-port model pairs TLS-HTXF on port+1 with TLS-HTLS.
-	 * The rustls handshake + WebPKI→TOFU trust gate run inside
-	 * hxnet_htxf_open; htxf_verify_cert_cb bridges a WebPKI failure
-	 * back to the C known-hosts decision. hxnet adopts dupfd and
-	 * closes it on any failure. */
+	 * hxnet_htxf_connect does the TCP connect (+ optional SOCKS tunnel),
+	 * the rustls handshake, and the WebPKI→TOFU trust gate internally;
+	 * htxf_verify_cert_cb bridges a WebPKI failure back to the C
+	 * known-hosts decision. */
     int xfer_tls = (htxf->htlc != NULL) ? htxf->htlc->tls : 0;
-    htxf->hx = hxnet_htxf_open (
-        dupfd, xfer_tls,
+    htxf->hx = hxnet_htxf_connect (
         (const guint8 *) htxf->serverhost, strlen (htxf->serverhost),
+        htxf->serverport,
+        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
+        xfer_tls,
         hdr_buf, hdr_len,
         hope_aead, htxf->ref,
         htxf_verify_cert_cb, htxf);
     if (!htxf->hx) {
-        debug_log ("xfer", "htxf_connect: hxnet_htxf_open failed (ref=%u)",
+        debug_log ("xfer", "htxf_connect: hxnet_htxf_connect failed (ref=%u)",
                    htxf->ref);
         return FALSE;
     }
@@ -1581,9 +1406,27 @@ hx_tracker_list_async (session *sess)
     for (int i = 0; i < n; i++) {
         urls[i] = gtkhx_prefs.tracker[i];
     }
+
+    /* Single SOCKS proxy for the whole walk (the user's choice over a
+     * per-URL array): resolve it once for the first tracker's endpoint,
+     * which the common uniform-proxy config (all_proxy / GNOME settings)
+     * applies to every tracker anyway. gtkhx_parse_host_port handles
+     * "host" / "host:port" / "[ipv6]:port" correctly; on a malformed URL
+     * we skip the lookup (connect direct — the bad URL fails later in the
+     * walk regardless). */
+    g_autofree char *proxy_uri = NULL;
+    {
+        g_autofree char *phost = NULL;
+        guint16 pport = 0;
+        if (gtkhx_parse_host_port (urls[0], HTRK_TCPPORT, &phost, &pport,
+                                   NULL)) {
+            proxy_uri = hx_bridge_lookup_socks_proxy (phost, pport);
+        }
+    }
+
     current_tracker_fetch = hxnet_tracker_fetch_open (
         (const char *const *) urls, (gsize) n, HTRK_V3_FEAT_IPV6,
-        hx_tracker_v3_probe_ms (), tracker_verify_cert_cb, NULL);
+        hx_tracker_v3_probe_ms (), proxy_uri, tracker_verify_cert_cb, NULL);
     g_free (urls);
     if (!current_tracker_fetch) {
         return;

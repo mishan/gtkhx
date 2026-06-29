@@ -39,6 +39,7 @@ gtkhx_sources = files(
   'gtkutil.c',
   'hfs.c',
   'history.c',
+  'host_port.c',
   'hotline_url.c',
   'htxf_io.c',
   'htxf_subchannel.c',

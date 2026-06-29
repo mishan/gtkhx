@@ -68,48 +68,18 @@ extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 
 extern void kill_threads (void);
 
-/* Open the HTXF subchannel for `htxf`: plaintext TCP connect (SOCKS /
- * IPv4-IPv6 fallback via GSocketClient), hand the connected fd to
- * hxnet_htxf_open along with the packed 16/24-byte preamble, the
- * per-transfer AEAD keys (when the control channel negotiated
- * CIPHER_MODE_AEAD), and the TLS flag. hxnet owns the socket, the
- * optional rustls wrap, and the AEAD framing thereafter; the handle
- * is stored on htxf->hx. Returns TRUE on success, FALSE on connect /
- * handshake / open failure (the fd is closed on every failure path).
+/* Open the HTXF subchannel for `htxf`: look up the SOCKS proxy for the
+ * target, then hand the host:port (+ proxy, the packed 16/24-byte
+ * preamble, the per-transfer AEAD keys when the control channel
+ * negotiated CIPHER_MODE_AEAD, and the TLS flag) to hxnet_htxf_connect.
+ * hxnet does the whole connect itself — DNS + IPv4/IPv6 fallback +
+ * optional SOCKS tunnel — and owns the socket, the optional rustls wrap,
+ * and the AEAD framing thereafter; the handle is stored on htxf->hx.
+ * Returns TRUE on success, FALSE on connect / handshake / open failure.
  *
  * Worker threads then stream bytes through htxf_io_read /
  * htxf_io_write and close the channel via htxf_io_release. */
 extern gboolean htxf_connect (struct htxf_conn *htxf);
-
-/* Worker-thread blocking GSocketClient connect to host:port.
- * Returns a connected GSocketConnection on success (caller owns,
- * g_object_unref drops both the GIO objects and the socket fd),
- * NULL on failure. SOCKS proxying flows through GProxyResolver
- * automatically — same as the rest of GIO. Used by HTXF (file
- * transfer) workers in xfers.c and banner.c.
- *
- * Writes the GError message to errbuf (truncated to errbuf_len)
- * if both are non-NULL on failure.
- *
- * `tls` (Phase 2): when non-zero, flips
- * g_socket_client_set_tls(client, TRUE) before the connect and
- * hooks the same TOFU accept-certificate handler at the
- * G_SOCKET_CLIENT_TLS_HANDSHAKING phase that hx_connect uses
- * (see network.c::tls_accept_certificate). Trust lookups hit
- * the same $CONFIG/known_hosts file, so the HTXF subchannel
- * cert is pinned per (host, port) just like the control
- * channel. Callers should pass htlc->tls so the subchannel
- * mirrors the control channel.
- *
- * The returned GSocketConnection is actually a
- * GTlsClientConnection in the tls=1 case; the rest of the GIO
- * stream APIs (g_io_stream_get_input_stream etc.) work the same
- * way on both shapes. */
-extern GSocketConnection *hx_sync_connect_to_host (const char *host,
-                                                   guint16 port,
-                                                   char *errbuf,
-                                                   gsize errbuf_len,
-                                                   char tls);
 
 extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
                      ...);

@@ -16,8 +16,9 @@
  * wrap, and the socket fd all live in the hxnet crate. struct htxf_conn
  * carries the opaque channel handle in `htxf->hx`; this shim:
  *
- *   - htxf_connect (network.c) opens the channel via hxnet_htxf_open,
- *     handing over a connected blocking fd, the packed preamble, and
+ *   - htxf_connect (network.c) opens the channel via hxnet_htxf_connect,
+ *     which does the connect itself (optional SOCKS) — no fd hand-off —
+ *     then takes the packed preamble and
  *     (when the control channel negotiated CIPHER_MODE_AEAD) the
  *     per-transfer ChaCha20 keys derived into htxf->xfer_encode /
  *     xfer_decode.
@@ -51,7 +52,7 @@ typedef struct HtxfConn HtxfConn;
  * (Rust `HxnetHopeAead`). Obtained from
  * hxnet_connection_hope_aead_material (the control connection's retained
  * material, via hx_bridge_orchestrated_hope_aead) and passed to
- * hxnet_htxf_open so the subchannel derives its per-transfer keys
+ * hxnet_htxf_connect so the subchannel derives its per-transfer keys
  * in-process. The session key never crosses the FFI as bytes — only this
  * opaque token does. Free with hxnet_hope_aead_free. */
 typedef struct HxnetHopeAead HxnetHopeAead;
@@ -96,6 +97,26 @@ extern HtxfConn *hxnet_htxf_open (int fd, int tls, const guint8 *host,
                                   hxnet_htxf_verify_cb_t verify_cert,
                                   void *user_data);
 
+/* Connect an HTXF subchannel to host:port (optionally through a SOCKS
+ * proxy) entirely in Rust, then open it — the production entry that
+ * replaces the C-side GSocketClient connect + fd hand-off. `proxy_uri`
+ * (length proxy_uri_len) is an optional "socks5://..." URI; NULL/0
+ * connects direct, a malformed/unsupported URI fails the open. `host` is
+ * required (connect target + TLS SNI / TOFU name). All other args match
+ * hxnet_htxf_open. The connect runs on the tokio runtime (bounded by the
+ * shared handshake timeout) and blocks the calling worker for the result.
+ * Returns an owned handle, or NULL on a bad argument / connect / TLS /
+ * TOFU failure. Defined in rust/crates/hxnet/src/htxf.rs. */
+extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
+                                     guint16 port, const guint8 *proxy_uri,
+                                     size_t proxy_uri_len, int tls,
+                                     const guint8 *preamble,
+                                     size_t preamble_len,
+                                     const HxnetHopeAead *hope_aead,
+                                     guint32 xfer_ref,
+                                     hxnet_htxf_verify_cb_t verify_cert,
+                                     void *user_data);
+
 /* Blocking read of up to `len` bytes (`0` = clean EOF, `-1` on error). */
 extern ssize_t hxnet_htxf_read (HtxfConn *handle, guint8 *buf, size_t len);
 
@@ -131,7 +152,7 @@ extern const HtxfAbort *hxnet_htxf_abort_new (void);
 
 /* Arm `token` with `handle`'s socket and clone a ref into `handle` so
  * its read/write observe the aborted flag. Worker-thread call, once,
- * right after hxnet_htxf_open. No-op on NULL args. */
+ * right after hxnet_htxf_connect. No-op on NULL args. */
 extern void hxnet_htxf_abort_arm (HtxfConn *handle, const HtxfAbort *token);
 
 /* Flip `token` to aborted and shut its socket down to unblock a parked

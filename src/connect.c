@@ -34,6 +34,7 @@
 #include "toolbar.h"
 #include "connect.h"
 #include "bookmark_cipher.h"
+#include "host_port.h"
 #include "bookmark_rc4_dialog.h"
 #include "bookmarks.h"
 #include "hotline_url.h"
@@ -620,7 +621,7 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
     char login[64];
     char pass[64];
     char zeros[256];
-    char *p, port[HOSTLEN];
+    char port[HOSTLEN];
     size_t len, len_total;
 
     (void)dialog;
@@ -653,17 +654,19 @@ convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
     strip_lf (pass);
     fclose (bm);
 
+    /* Split "host" / "host:port" / "[ipv6]:port" via the shared IPv6-aware
+     * helper. On a malformed value leave server as-is with no port. */
     port[0] = '\0';
-    if ((p = strrchr (server, ':'))) {
-        size_t i, slen = strlen (server);
-        for (i = 0; i < slen; i++) {
-            if (&(server[i]) == p) {
-                server[i] = 0;
-                break;
+    {
+        g_autofree char *chost = NULL;
+        guint16 cport = 0;
+        gboolean had = FALSE;
+        if (gtkhx_parse_host_port (server, 0, &chost, &cport, &had)) {
+            g_strlcpy (server, chost, sizeof (server));
+            if (had) {
+                g_snprintf (port, sizeof (port), "%u", (unsigned) cport);
             }
         }
-        p++;
-        g_snprintf (port, sizeof (port), "%u", atoi (p));
     }
 
     set_the_entries (server, login, pass, port, 0, 0, 0, 0);
@@ -830,7 +833,6 @@ bookmark_parse (const char *name, struct bookmark_parsed *out,
     char junk[132];
     char header[5];
     unsigned char len_addr;
-    char *p;
     size_t len;
 
     if (out_legacy_path) {
@@ -900,17 +902,20 @@ bookmark_parse (const char *name, struct bookmark_parsed *out,
 
     close (bm);
 
+    /* Split "host" / "host:port" / "[ipv6]:port" via the shared IPv6-aware
+     * helper. On a malformed value leave out->server as-is with no port. */
     out->port[0] = '\0';
-    if ((p = strrchr (out->server, ':'))) {
-        size_t i;
-        for (i = 0; i < strlen (out->server); i++) {
-            if (&out->server[i] == p) {
-                out->server[i] = 0;
-                break;
+    {
+        g_autofree char *chost = NULL;
+        guint16 cport = 0;
+        gboolean had = FALSE;
+        if (gtkhx_parse_host_port (out->server, 0, &chost, &cport, &had)) {
+            g_strlcpy (out->server, chost, sizeof (out->server));
+            if (had) {
+                g_snprintf (out->port, sizeof (out->port), "%u",
+                            (unsigned) cport);
             }
         }
-        p++;
-        g_snprintf (out->port, sizeof (out->port), "%u", atoi (p));
     }
     return 0;
 

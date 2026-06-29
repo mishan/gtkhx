@@ -1706,7 +1706,7 @@ pub unsafe extern "C" fn hxnet_connection_open_tcp(
 /// # Safety
 ///
 /// `ptr` must point at `len` readable bytes or be `NULL`.
-unsafe fn parse_proxy_arg(
+pub(crate) unsafe fn parse_proxy_arg(
     ptr: *const u8,
     len: usize,
 ) -> Result<Option<crate::connect::ProxyConfig>, String> {
@@ -3230,13 +3230,16 @@ fn tracker_verdicts_store(v: VerdictCache) {
 ///
 /// `urls` must point at `n` readable `*const c_char`, each a valid
 /// NUL-terminated UTF-8 string living for the duration of this call.
-/// `user_data` must outlive the returned handle.
+/// `proxy_uri` is an optional NUL-terminated `socks5://…` URI to tunnel
+/// the whole walk through (NULL = direct); a malformed / unsupported URI
+/// fails the open (returns NULL). `user_data` must outlive the handle.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_tracker_fetch_open(
     urls: *const *const std::os::raw::c_char,
     n: usize,
     features: u16,
     probe_ms: u32,
+    proxy_uri: *const std::os::raw::c_char,
     verify_cert: HxnetTrackerVerifyCallback,
     user_data: *mut c_void,
 ) -> *mut HxnetTrackerFetch {
@@ -3312,10 +3315,26 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
         boxed
     });
 
+    // Optional single SOCKS proxy for the whole walk (sourced once in C).
+    // A malformed / unsupported URI fails the open rather than silently
+    // connecting direct past a configured proxy.
+    let proxy = if proxy_uri.is_null() {
+        None
+    } else {
+        let bytes = std::ffi::CStr::from_ptr(proxy_uri).to_bytes();
+        match parse_proxy_arg(bytes.as_ptr(), bytes.len()) {
+            Ok(p) => p,
+            Err(e) => {
+                glib::g_critical!("hxnet", "hxnet_tracker_fetch_open: {}", e);
+                return std::ptr::null_mut();
+            }
+        }
+    };
+
     let probe_timeout = std::time::Duration::from_millis(probe_ms as u64);
     let (tx, rx) = mpsc::channel::<TrackerEvent>(64);
     let join = rt.handle().spawn(async move {
-        let mut connector = TcpTlsConnector { verify };
+        let mut connector = TcpTlsConnector { verify, proxy };
         // Snapshot the process-global verdict cache so a Refresh doesn't
         // re-pay a known-failing TLS handshake, then write the result
         // back when the walk completes. Snapshot/restore bracket the

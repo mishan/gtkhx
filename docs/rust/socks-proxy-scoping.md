@@ -7,6 +7,15 @@ SOCKS on the orchestrated control channel and the tracker (item 8, now in
 Rust), and for the follow-on of moving the HTXF subchannel's C-side
 connect into Rust too.
 
+> **Status: DONE** (S1 transport, S2 control channel, S3 tracker + HTXF
+> connect moves). All three network paths — control channel, HTXF
+> subchannel, and tracker — now connect through the same `GProxyResolver`-
+> sourced SOCKS proxy via `resolve_and_connect`; the C `GSocketClient`
+> connects are gone. The TL;DR + "current state" table below describe the
+> *original* problem this work set out to fix and are kept for context;
+> see the per-phase **Phasing** section for what shipped and **Deferred /
+> optional follow-ups** for what's intentionally left.
+
 ## TL;DR
 
 - **The main control channel already lost transparent SOCKS.** When the
@@ -133,21 +142,45 @@ whether to support it or document the new path as SOCKS-only.
   (`tests/socks-proxy/`) + `tests/integration/test_integration_socks.c`
   drives the production connect through the proxy to mhxd (via-proxy login
   + dead-proxy negative control), wired into the integration CI job.
-- **S3 — Rides the connect moves.** The tracker (item 8, done) + the
-  HTXF subchannel pass the same proxy URI once their connects are in Rust;
-  their C `GSocketClient` connects are deleted.
+- **S3 — Rides the connect moves. DONE.** Both remaining paths now honour
+  the same proxy:
+  - **Tracker:** `hxnet_tracker_fetch_open` gained a `proxy_uri`;
+    `TcpTlsConnector` threads it into `resolve_and_connect` for every
+    tracker connect. A single proxy applies to the whole walk, resolved
+    once in C (`hx_bridge_lookup_socks_proxy`) for the first tracker —
+    the uniform-proxy case `all_proxy` / GNOME settings target anyway.
+  - **HTXF:** the subchannel connect moved into Rust
+    (`hxnet_htxf_connect`: `resolve_and_connect` driven from the blocking
+    worker via the runtime + a channel), so the C `GSocketClient` connect
+    + fd dup + `hxnet_htxf_open(fd)` adoption are gone (the fd-adopting
+    `hxnet_htxf_open` survives only as a socketpair test entry). The dead
+    `hx_sync_connect_to_host` + its `GSocketClient` TLS accept-cert
+    plumbing were deleted.
+  - A shared IPv6-aware `src/host_port.{c,h}` (`gtkhx_parse_host_port` /
+    `gtkhx_join_host_port`) replaced the hand-rolled `strrchr(':')` splits
+    across network/bookmarks/connect/tls_trust/tracker/bridge.
+  - Tested end to end against the live mhxd + Argus + hxtrackd matrix
+    (file/folder transfers, banner, HOPE banners, tracker v1/v3/TLS), with
+    the proxy paths exercised through a real SOCKS5 proxy (an
+    `hxnet_htxf_connect`-through-proxy unit test + `tracker_fetch` via
+    `GTKHX_TEST_SOCKS`).
 
-## Testing
+## Testing (as shipped)
 
-- **Rust unit:** a minimal loopback SOCKS5 responder (or `tokio-socks`
-  test utilities) — assert connect-through-proxy, remote-DNS target
-  selection, and authenticated vs. anonymous handshakes.
-- **Tier 3:** stand up a SOCKS5 proxy (dante / 3proxy / `ssh -D`) in the
-  matrix and assert the control channel (then HTXF / tracker) reach
-  mhxd / Janus *only* via the proxy — ideally with direct egress blocked
-  in the test netns so a proxy bypass fails loudly rather than silently
-  succeeding.
-- **Regression:** the `proxy = None` path stays byte-identical to today.
+- **Rust unit:** a loopback SOCKS5 responder in `connect.rs` asserts
+  connect-through-proxy, remote-DNS target selection, and authenticated
+  vs. anonymous handshakes; an `hxnet_htxf_connect`-through-proxy test in
+  `htxf.rs` covers the HTXF path.
+- **Tier 3:** a microsocks SOCKS5 proxy container (`tests/socks-proxy/`) +
+  `tests/integration/test_integration_socks.c` drive the production
+  connect through the proxy to mhxd. Instead of a netns with direct egress
+  blocked, a **dead-proxy negative control** proves the proxy isn't
+  bypassed (a connect that ignored the proxy would wrongly succeed against
+  the directly-reachable mhxd). The tracker proxy path is exercised by
+  pointing `tracker_fetch` at a real proxy via `GTKHX_TEST_SOCKS`.
+  *Possible hardening:* a true blocked-egress netns is stricter still, but
+  the negative control covers the main bypass risk.
+- **Regression:** the `proxy = None` path stays byte-identical to direct.
 
 ## Risks / open questions
 
@@ -160,14 +193,35 @@ whether to support it or document the new path as SOCKS-only.
    a `GProxyResolver` *result* of `http://` is warned and skipped (we
    can't tunnel a raw Hotline stream through HTTP-CONNECT). Revisit if a
    network that only offers an HTTP proxy turns up.
-3. **Remote vs. local DNS.** Go socks5h (remote) when proxied; note the
-   behaviour change from today's local resolve, and that the direct path
-   is unaffected.
-4. **TLS over the tunnel.** Unchanged in principle (rustls wraps the
-   tunnelled stream), but verify the SNI / cert verification still sees the
-   real target hostname, not the proxy's.
-5. **Proxy auth secrets.** If authenticated proxies are in scope, creds
-   come from the URI / env only for now — no pref storage of secrets.
+3. **Remote vs. local DNS. RESOLVED.** The proxied branch passes the
+   target as a domain tuple so the proxy resolves it (socks5h / socks4a
+   remote DNS); the direct path keeps its local `lookup_host` + v4-first
+   fallback.
+4. **TLS over the tunnel. RESOLVED.** rustls wraps the tunnelled stream
+   and `wrap_tls` / `connect_tls` use the real target hostname for SNI +
+   the TOFU fingerprint, not the proxy's — verified by the live TLS
+   tracker listing test through the proxy.
+5. **Proxy auth secrets.** Authenticated proxies work (the `user:pass@`
+   from the resolver's URI); the password is redacted in `Debug` / logs /
+   error paths. Still no in-app pref storage of proxy creds — they come
+   from the system / env config only.
+
+## Deferred / optional follow-ups
+
+- **Async proxy lookup.** `g_proxy_resolver_lookup` is synchronous on the
+  GLib main thread (`bridge_lookup_socks_proxy`). The default backends
+  (GNOME GSettings, the env-var `GSimpleProxyResolver`) match rules in
+  memory and don't block, but a PAC/WPAD backend could stall the UI during
+  connect. The fix (`g_proxy_resolver_lookup_async` with the `open_*` call
+  deferred into the completion callback) restructures the synchronous
+  "`bridge_handle` set before return" install contract, so it was
+  deliberately deferred. See the note in `hxnet_bridge.c`.
+- **In-app proxy pref.** Config is GProxyResolver-only, so a proxy comes
+  from OS / GNOME settings or `all_proxy`. A "SOCKS proxy host:port" row in
+  Settings (the old option C) would let users set one without touching
+  system / env config — UX-only, not required.
+- **HTTP-CONNECT proxies.** Still out of scope (item 2); add a CONNECT
+  shim only if an HTTP-only-proxy network turns up.
 
 ## Effort
 

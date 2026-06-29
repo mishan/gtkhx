@@ -339,6 +339,7 @@ pub fn connect_tls(tcp: TcpStream, host: &str) -> io::Result<HtxfTlsConnect> {
 // a blocking pthread — no tokio.
 
 use crate::ffi::HxnetVerifyCertCallback;
+use hxbridge::runtime::Runtime;
 use std::ffi::c_void;
 use std::os::raw::c_int;
 use std::os::unix::io::FromRawFd;
@@ -480,8 +481,180 @@ impl HtxfConn {
     }
 }
 
+/// Derive the per-transfer AEAD key pair from the control connection's
+/// retained HOPE material + this transfer's `xfer_ref`, or `None` when
+/// `hope_aead` is NULL (no HOPE / stream cipher / no-cipher → plaintext
+/// passthrough). The session key stays inside Rust; only the opaque
+/// handle crossed the FFI.
+///
+/// # Safety
+/// `hope_aead` must be NULL or a live handle from
+/// `hxnet_connection_hope_aead_material`.
+unsafe fn htxf_derive_aead(
+    hope_aead: *const crate::ffi::HxnetHopeAead,
+    xfer_ref: u32,
+) -> Option<(AeadState, AeadState)> {
+    if hope_aead.is_null() {
+        return None;
+    }
+    let m = &(*hope_aead).material;
+    let mut xfer_encode = AeadState {
+        key: [0u8; 32],
+        counter: 0,
+        dir: 0,
+    };
+    let mut xfer_decode = AeadState {
+        key: [0u8; 32],
+        counter: 0,
+        dir: 0,
+    };
+    hxcrypto_aead::gtkhx_aead_derive_transfer_keys(
+        &mut xfer_encode,
+        &mut xfer_decode,
+        m.session_key.as_ptr(),
+        m.session_key.len(),
+        &m.ctrl_encode,
+        &m.ctrl_decode,
+        xfer_ref,
+    );
+    Some((xfer_encode, xfer_decode))
+}
+
+/// Finish opening an HTXF subchannel over a connected, blocking `tcp`:
+/// optionally TLS-wrap + TOFU-gate, write the plaintext preamble, then
+/// arm AEAD (or plaintext passthrough) and box the channel. Shared by the
+/// fd-adopting [`hxnet_htxf_open`] and the connect-in-Rust
+/// [`hxnet_htxf_connect`]. `tcp` is closed on every failure path (it's
+/// dropped). `host` is only consulted for `tls`.
+///
+/// # Safety
+/// `verify_cert` / `user_data` follow the [`HxnetVerifyCertCallback`]
+/// contract.
+unsafe fn htxf_finish(
+    tcp: TcpStream,
+    tls: bool,
+    host: Option<&str>,
+    preamble: &[u8],
+    aead: Option<(AeadState, AeadState)>,
+    verify_cert: HxnetVerifyCertCallback,
+    user_data: *mut c_void,
+) -> *mut HtxfConn {
+    // Force blocking mode. This path is synchronous (sync rustls handshake
+    // + blocking read/write); a non-blocking socket would make the
+    // handshake / transfer reads fail with WouldBlock. The adopted-fd
+    // entry can't trust the caller, and a tokio TcpStream::into_std() comes
+    // back non-blocking — so normalise here for both.
+    if let Err(e) = tcp.set_nonblocking(false) {
+        glib::g_critical!("hxnet", "hxnet_htxf: set_nonblocking(false): {}", e);
+        return std::ptr::null_mut();
+    }
+
+    if tls {
+        let host_str = match host {
+            Some(h) if !h.is_empty() => h,
+            _ => {
+                glib::g_critical!("hxnet", "hxnet_htxf: TLS requested with NULL/empty host");
+                return std::ptr::null_mut(); // tcp dropped → fd closed
+            }
+        };
+        let conn = match connect_tls(tcp, host_str) {
+            Ok(c) => c,
+            Err(e) => {
+                glib::g_critical!("hxnet", "hxnet_htxf: TLS handshake: {}", e);
+                return std::ptr::null_mut();
+            }
+        };
+        // WebPKI→TOFU: only consult the C known-hosts callback when the
+        // cert didn't chain to a public root, mirroring the control
+        // channel. No callback ⇒ refuse an untrusted cert (fail safe).
+        if !conn.webpki_ok {
+            let accepted = match (verify_cert, conn.fingerprint.as_deref()) {
+                (Some(cb), Some(fp)) => cb(fp.as_ptr(), fp.len(), user_data) != 0,
+                _ => false,
+            };
+            if !accepted {
+                glib::g_message!("hxnet", "hxnet_htxf: TLS cert rejected by TOFU gate");
+                return std::ptr::null_mut(); // conn dropped → fd closed
+            }
+        }
+        let mut stream = conn.stream;
+        if let Err(e) = stream.write_all(preamble).and_then(|()| stream.flush()) {
+            glib::g_critical!("hxnet", "hxnet_htxf: preamble write (TLS): {}", e);
+            return std::ptr::null_mut();
+        }
+        let ch = match aead {
+            Some((enc, dec)) => HtxfChannel::new_aead(stream, enc, dec),
+            None => HtxfChannel::new_plain(stream),
+        };
+        Box::into_raw(Box::new(HtxfConn {
+            inner: HtxfInner::Tls(Box::new(ch)),
+            abort: None,
+        }))
+    } else {
+        let mut tcp = tcp;
+        if let Err(e) = tcp.write_all(preamble).and_then(|()| tcp.flush()) {
+            glib::g_critical!("hxnet", "hxnet_htxf: preamble write: {}", e);
+            return std::ptr::null_mut();
+        }
+        let ch = match aead {
+            Some((enc, dec)) => HtxfChannel::new_aead(tcp, enc, dec),
+            None => HtxfChannel::new_plain(tcp),
+        };
+        Box::into_raw(Box::new(HtxfConn {
+            inner: HtxfInner::Plain(ch),
+            abort: None,
+        }))
+    }
+}
+
+/// Run the async [`resolve_and_connect`](crate::connect::resolve_and_connect)
+/// to completion from a synchronous (blocking-pool) caller and hand back a
+/// blocking std `TcpStream`. The HTXF worker runs on tokio's blocking pool,
+/// so it can't `block_on` the runtime directly; instead we spawn the connect
+/// onto the runtime and block this thread on a channel for the result. The
+/// connect is bounded by `HANDSHAKE_TIMEOUT_SECS` inside resolve_and_connect.
+unsafe fn htxf_blocking_connect(
+    host: &str,
+    port: u16,
+    proxy: Option<crate::connect::ProxyConfig>,
+) -> io::Result<TcpStream> {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
+        Ok(rt) => rt,
+        Err(_) => {
+            glib::g_critical!(
+                "hxnet",
+                "hxnet_htxf_connect: Runtime::global panicked; aborting to \
+                 avoid unwinding across the FFI boundary"
+            );
+            std::process::abort();
+        }
+    };
+    let host = host.to_owned();
+    let (tx, rx) = std::sync::mpsc::sync_channel::<io::Result<TcpStream>>(1);
+    rt.handle().spawn(async move {
+        // A small bounded channel absorbs the Resolving/Connecting events
+        // resolve_and_connect emits; nothing consumes them here. into_std
+        // runs inside the runtime so the stream deregisters from the
+        // reactor cleanly before it crosses back to the blocking worker.
+        let (evt_tx, _evt_rx) = tokio::sync::mpsc::channel::<crate::Event>(4);
+        let res = match crate::connect::resolve_and_connect(&host, port, proxy.as_ref(), &evt_tx)
+            .await
+        {
+            Ok(tcp) => tcp.into_std(),
+            Err(e) => Err(e),
+        };
+        let _ = tx.send(res);
+    });
+    rx.recv()
+        .map_err(|_| io::Error::other("htxf connect task dropped before delivering a result"))?
+}
+
 /// Open an HTXF subchannel over an already-connected, blocking `fd`
 /// (which this call adopts — the C side must NOT close it afterward).
+///
+/// This is the low-level fd-adopting entry, used by tests that inject a
+/// socketpair / their own connected fd. Production connects in-process via
+/// [`hxnet_htxf_connect`] instead (no fd crosses the FFI).
 ///
 /// - `tls != 0`: TLS-handshake the fd with rustls, reusing the control
 ///   channel's WebPKI→TOFU verifier. On WebPKI failure the `verify_cert`
@@ -547,118 +720,130 @@ pub unsafe extern "C" fn hxnet_htxf_open(
         return std::ptr::null_mut();
     }
 
-    // Force blocking mode. This path is synchronous (sync rustls
-    // handshake + blocking read/write); a non-blocking fd would make
-    // the handshake and the transfer reads fail with WouldBlock, which
-    // the C worker would treat as a hard error. Make the documented
-    // "blocking fd" contract robust rather than trusting the caller —
-    // matches the explicit fd-mode setup the other hxnet FFI entries do.
-    if let Err(e) = tcp.set_nonblocking(false) {
-        glib::g_critical!("hxnet", "hxnet_htxf_open: set_nonblocking(false): {}", e);
+    let preamble_slice: &[u8] = if preamble_len == 0 {
+        &[]
+    } else {
+        slice::from_raw_parts(preamble, preamble_len)
+    };
+    let aead = htxf_derive_aead(hope_aead, xfer_ref);
+    // Host is only consulted for TLS; a plaintext transfer ignores it
+    // (preserving the original "host unused when !tls" behaviour).
+    let host_opt: Option<&str> = if tls != 0 && !host.is_null() && host_len != 0 {
+        match std::str::from_utf8(slice::from_raw_parts(host, host_len)) {
+            Ok(s) => Some(s),
+            Err(_) => {
+                glib::g_critical!("hxnet", "hxnet_htxf_open: host is not valid UTF-8");
+                return std::ptr::null_mut();
+            }
+        }
+    } else {
+        None
+    };
+
+    htxf_finish(
+        tcp,
+        tls != 0,
+        host_opt,
+        preamble_slice,
+        aead,
+        verify_cert,
+        user_data,
+    )
+}
+
+/// Connect an HTXF subchannel to `host:port` (optionally through a SOCKS
+/// proxy) entirely in Rust, then open it — the production entry that
+/// replaces the C-side GSocketClient connect + fd hand-off. Same TLS /
+/// preamble / AEAD semantics as [`hxnet_htxf_open`], minus the adopted fd.
+///
+/// - `proxy_uri` (length `proxy_uri_len`) is an optional `socks5://…`
+///   URI to tunnel through; NULL / 0 connects direct. A malformed or
+///   unsupported URI fails the open (returns NULL) rather than silently
+///   connecting direct.
+/// - `host` is required (it's the connect target *and* the TLS SNI / TOFU
+///   hostname).
+///
+/// Returns an owned handle, or NULL on bad arguments, a connect / TLS /
+/// TOFU failure.
+///
+/// # Safety
+/// Every `*_ptr` / `*_len` pair must point at `len` readable bytes (or be
+/// NULL / 0 where documented). `hope_aead` must be NULL or a live handle;
+/// callback pointers follow the [`HxnetVerifyCertCallback`] contract.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_connect(
+    host: *const u8,
+    host_len: usize,
+    port: u16,
+    proxy_uri: *const u8,
+    proxy_uri_len: usize,
+    tls: c_int,
+    preamble: *const u8,
+    preamble_len: usize,
+    hope_aead: *const crate::ffi::HxnetHopeAead,
+    xfer_ref: u32,
+    verify_cert: HxnetVerifyCertCallback,
+    user_data: *mut c_void,
+) -> *mut HtxfConn {
+    if host.is_null() || host_len == 0 {
+        glib::g_critical!("hxnet", "hxnet_htxf_connect: NULL or empty host");
         return std::ptr::null_mut();
     }
+    if (host_len as u64) > (isize::MAX as u64) || (preamble_len as u64) > (isize::MAX as u64) {
+        glib::g_critical!("hxnet", "hxnet_htxf_connect: length argument exceeds isize::MAX");
+        return std::ptr::null_mut();
+    }
+    if preamble_len != 0 && preamble.is_null() {
+        glib::g_critical!("hxnet", "hxnet_htxf_connect: NULL preamble with non-zero len");
+        return std::ptr::null_mut();
+    }
+
+    let host_str = match std::str::from_utf8(slice::from_raw_parts(host, host_len)) {
+        Ok(s) => s,
+        Err(_) => {
+            glib::g_critical!("hxnet", "hxnet_htxf_connect: host is not valid UTF-8");
+            return std::ptr::null_mut();
+        }
+    };
+    let proxy = match crate::ffi::parse_proxy_arg(proxy_uri, proxy_uri_len) {
+        Ok(p) => p,
+        Err(e) => {
+            glib::g_critical!("hxnet", "hxnet_htxf_connect: {}", e);
+            return std::ptr::null_mut();
+        }
+    };
 
     let preamble_slice: &[u8] = if preamble_len == 0 {
         &[]
     } else {
         slice::from_raw_parts(preamble, preamble_len)
     };
-    // Derive the per-transfer AEAD keys in-process from the control
-    // connection's retained HOPE material + this transfer's ref. The
-    // session key stays inside Rust — only the opaque handle crossed the
-    // FFI. NULL handle = plaintext passthrough.
-    let aead = if hope_aead.is_null() {
-        None
-    } else {
-        let m = &(*hope_aead).material;
-        let mut xfer_encode = AeadState {
-            key: [0u8; 32],
-            counter: 0,
-            dir: 0,
-        };
-        let mut xfer_decode = AeadState {
-            key: [0u8; 32],
-            counter: 0,
-            dir: 0,
-        };
-        hxcrypto_aead::gtkhx_aead_derive_transfer_keys(
-            &mut xfer_encode,
-            &mut xfer_decode,
-            m.session_key.as_ptr(),
-            m.session_key.len(),
-            &m.ctrl_encode,
-            &m.ctrl_decode,
-            xfer_ref,
-        );
-        Some((xfer_encode, xfer_decode))
-    };
+    let aead = htxf_derive_aead(hope_aead, xfer_ref);
 
-    if tls != 0 {
-        if host.is_null() || host_len == 0 {
+    let tcp = match htxf_blocking_connect(host_str, port, proxy) {
+        Ok(s) => s,
+        Err(e) => {
             glib::g_critical!(
                 "hxnet",
-                "hxnet_htxf_open: TLS requested with NULL/empty host"
+                "hxnet_htxf_connect: connect to {}:{} failed: {}",
+                host_str,
+                port,
+                e
             );
-            return std::ptr::null_mut(); // tcp dropped → fd closed
-        }
-        let host_str = match std::str::from_utf8(slice::from_raw_parts(host, host_len)) {
-            Ok(s) => s,
-            Err(_) => {
-                glib::g_critical!("hxnet", "hxnet_htxf_open: host is not valid UTF-8");
-                return std::ptr::null_mut();
-            }
-        };
-        let conn = match connect_tls(tcp, host_str) {
-            Ok(c) => c,
-            Err(e) => {
-                glib::g_critical!("hxnet", "hxnet_htxf_open: TLS handshake: {}", e);
-                return std::ptr::null_mut();
-            }
-        };
-        // WebPKI→TOFU: only consult the C known-hosts callback when the
-        // cert didn't chain to a public root, mirroring the control
-        // channel. No callback ⇒ refuse an untrusted cert (fail safe).
-        if !conn.webpki_ok {
-            let accepted = match (verify_cert, conn.fingerprint.as_deref()) {
-                (Some(cb), Some(fp)) => cb(fp.as_ptr(), fp.len(), user_data) != 0,
-                _ => false,
-            };
-            if !accepted {
-                glib::g_message!("hxnet", "hxnet_htxf_open: TLS cert rejected by TOFU gate");
-                return std::ptr::null_mut(); // conn dropped → fd closed
-            }
-        }
-        let mut stream = conn.stream;
-        if let Err(e) = stream
-            .write_all(preamble_slice)
-            .and_then(|()| stream.flush())
-        {
-            glib::g_critical!("hxnet", "hxnet_htxf_open: preamble write (TLS): {}", e);
             return std::ptr::null_mut();
         }
-        let ch = match aead {
-            Some((enc, dec)) => HtxfChannel::new_aead(stream, enc, dec),
-            None => HtxfChannel::new_plain(stream),
-        };
-        Box::into_raw(Box::new(HtxfConn {
-            inner: HtxfInner::Tls(Box::new(ch)),
-            abort: None,
-        }))
-    } else {
-        let mut tcp = tcp;
-        if let Err(e) = tcp.write_all(preamble_slice).and_then(|()| tcp.flush()) {
-            glib::g_critical!("hxnet", "hxnet_htxf_open: preamble write: {}", e);
-            return std::ptr::null_mut();
-        }
-        let ch = match aead {
-            Some((enc, dec)) => HtxfChannel::new_aead(tcp, enc, dec),
-            None => HtxfChannel::new_plain(tcp),
-        };
-        Box::into_raw(Box::new(HtxfConn {
-            inner: HtxfInner::Plain(ch),
-            abort: None,
-        }))
-    }
+    };
+
+    let host_opt = if tls != 0 { Some(host_str) } else { None };
+    htxf_finish(
+        tcp,
+        tls != 0,
+        host_opt,
+        preamble_slice,
+        aead,
+        verify_cert,
+        user_data,
+    )
 }
 
 /// Blocking read of up to `len` plaintext bytes into `buf`. Returns the
@@ -1196,5 +1381,115 @@ mod tests {
         let mut out = [0u8; 32];
         let err = rx.read(&mut out).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    /// End-to-end: `hxnet_htxf_connect` must tunnel through a SOCKS5 proxy
+    /// to the target and write the preamble over the tunnel — proving the
+    /// production HTXF connect path (which replaced the C GSocketClient
+    /// connect + fd adoption) honours the proxy. Uses a real in-process
+    /// SOCKS5 forwarding proxy + a mock target, so it needs no servers.
+    #[cfg(feature = "socks")]
+    #[test]
+    fn htxf_connect_tunnels_through_socks_proxy() {
+        use std::io::{Read, Write};
+        use std::net::{TcpListener, TcpStream as StdTcp};
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        // Target "HTXF server": read the 16-byte preamble, report it back.
+        let target = TcpListener::bind("127.0.0.1:0").unwrap();
+        let target_addr = target.local_addr().unwrap();
+        let (pre_tx, pre_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok((mut s, _)) = target.accept() {
+                let mut buf = [0u8; 16];
+                if s.read_exact(&mut buf).is_ok() {
+                    let _ = pre_tx.send(buf.to_vec());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+
+        // Minimal SOCKS5 CONNECT proxy that forwards to the requested
+        // target and reports the (host, port) it was asked to reach.
+        let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
+        let proxy_addr = proxy.local_addr().unwrap();
+        let (seen_tx, seen_rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            if let Ok((mut c, _)) = proxy.accept() {
+                let mut head = [0u8; 2];
+                c.read_exact(&mut head).unwrap();
+                let mut methods = vec![0u8; head[1] as usize];
+                c.read_exact(&mut methods).unwrap();
+                c.write_all(&[0x05, 0x00]).unwrap(); // no-auth
+                let mut req = [0u8; 4];
+                c.read_exact(&mut req).unwrap();
+                let host = match req[3] {
+                    0x01 => {
+                        let mut a = [0u8; 4];
+                        c.read_exact(&mut a).unwrap();
+                        std::net::Ipv4Addr::from(a).to_string()
+                    }
+                    0x03 => {
+                        let mut l = [0u8; 1];
+                        c.read_exact(&mut l).unwrap();
+                        let mut d = vec![0u8; l[0] as usize];
+                        c.read_exact(&mut d).unwrap();
+                        String::from_utf8(d).unwrap()
+                    }
+                    other => panic!("unexpected ATYP {other}"),
+                };
+                let mut pbuf = [0u8; 2];
+                c.read_exact(&mut pbuf).unwrap();
+                let port = u16::from_be_bytes(pbuf);
+                let _ = seen_tx.send((host.clone(), port));
+                let mut up = StdTcp::connect((host.as_str(), port)).unwrap();
+                c.write_all(&[0x05, 0, 0, 0x01, 0, 0, 0, 0, 0, 0]).unwrap();
+                let mut c2 = c.try_clone().unwrap();
+                let mut up2 = up.try_clone().unwrap();
+                let t = std::thread::spawn(move || {
+                    let _ = std::io::copy(&mut c2, &mut up2);
+                });
+                let _ = std::io::copy(&mut up, &mut c);
+                let _ = t.join();
+            }
+        });
+
+        let host = target_addr.ip().to_string();
+        let port = target_addr.port();
+        let proxy_uri = format!("socks5://{proxy_addr}");
+        let preamble: [u8; 16] = *b"HTXF-preamble-16";
+        let handle = unsafe {
+            hxnet_htxf_connect(
+                host.as_ptr(),
+                host.len(),
+                port,
+                proxy_uri.as_ptr(),
+                proxy_uri.len(),
+                0, // tls
+                preamble.as_ptr(),
+                preamble.len(),
+                std::ptr::null(),
+                1,
+                None,
+                std::ptr::null_mut(),
+            )
+        };
+        assert!(!handle.is_null(), "hxnet_htxf_connect returned NULL");
+
+        // The proxy was asked to CONNECT to our target — proves the tunnel.
+        let (seen_host, seen_port) = seen_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("proxy saw no CONNECT");
+        assert_eq!(seen_port, port);
+        assert_eq!(seen_host, host);
+
+        // The target received exactly our preamble over the tunnel.
+        let got = pre_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("target received no preamble");
+        assert_eq!(got, preamble);
+
+        unsafe { hxnet_htxf_close(handle) };
     }
 }

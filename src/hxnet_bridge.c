@@ -25,6 +25,7 @@
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
 #include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
 #include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
+#include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
 
 /* Forward declaration of the production header decoder
  * (proto_helpers.c). hx_rcv_hdr decodes the buffered header by
@@ -694,8 +695,8 @@ bridge_redact_uri_userinfo (const char *uri)
     return g_strdup (uri);
 }
 
-static char *
-bridge_lookup_socks_proxy (const char *host, guint16 port)
+char *
+hx_bridge_lookup_socks_proxy (const char *host, guint16 port)
 {
     GProxyResolver *resolver = g_proxy_resolver_get_default ();
     if (!resolver) {
@@ -706,13 +707,11 @@ bridge_lookup_socks_proxy (const char *host, guint16 port)
      * that's reserved in URI syntax doesn't make g_proxy_resolver_lookup
      * reject the lookup as malformed — notably an IPv6 zone id's `%`
      * (fe80::1%eth0 → fe80::1%25eth0). Keep `:` unescaped so IPv6 colons
-     * survive. Then bracket IPv6 literals so the URI stays well-formed
-     * (none://[2001:db8::1]:5500, not none://2001:db8::1:5500); a bare `:`
-     * in host marks an unbracketed IPv6 literal. */
+     * survive, then let gtkhx_join_host_port bracket the IPv6 literal so
+     * the URI stays well-formed (none://[2001:db8::1]:5500). */
     g_autofree char *esc_host = g_uri_escape_string (host, ":", FALSE);
-    g_autofree char *uri = strchr (host, ':')
-        ? g_strdup_printf ("none://[%s]:%u", esc_host, port)
-        : g_strdup_printf ("none://%s:%u", esc_host, port);
+    g_autofree char *hostport = gtkhx_join_host_port (esc_host, port);
+    g_autofree char *uri = g_strdup_printf ("none://%s", hostport);
     GError *err = NULL;
     char **proxies = g_proxy_resolver_lookup (resolver, uri, NULL, &err);
     if (err) {
@@ -775,7 +774,7 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
      * user_data is the htlc for all three callbacks. */
     /* open_plaintext parses proxy_uri synchronously (before spawning the
      * lifecycle task), so this g_autofree URI is safe to free on return. */
-    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
+    g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
@@ -823,7 +822,7 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
     /* Same synchronous-install-before-return discipline as the
      * plaintext variant: the bridge handle must be live before the
      * forwarder can deliver the replayed step-2 reply. */
-    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
+    g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_hope (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
@@ -896,7 +895,7 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
     pass  = pass  ? pass  : "";
     name  = name  ? name  : "";
 
-    g_autofree char *proxy_uri = bridge_lookup_socks_proxy (host, port);
+    g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext_tls (
         (const guint8 *) host, strlen (host), port,
         (const guint8 *) login, strlen (login),
