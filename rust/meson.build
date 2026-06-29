@@ -70,10 +70,14 @@ rust_sources = files(
   # (HxMsgEvent done in R4.2a), so this crate's externs resolve against
   # gtkhx-boxed instead of proto_helpers.c / tracker_event.c.
   'crates/gtkhx-session/src/lib.rs',
-  # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent so far),
-  # self-contained (glib only) so proto unit tests can pull their
-  # _copy/_free without dragging gtkhx-session's C externs.
+  # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent, HxChatEvent
+  # + HxChatMedia, HxTrackerServer + HxTrackerV3Meta), self-contained
+  # (glib only) so proto unit tests can pull their _copy/_free without
+  # dragging gtkhx-session's C externs.
   'crates/gtkhx-boxed/src/lib.rs',
+  'crates/gtkhx-boxed/src/msg.rs',
+  'crates/gtkhx-boxed/src/chat.rs',
+  'crates/gtkhx-boxed/src/tracker.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
   'crates/hxnet/src/cipher.rs',

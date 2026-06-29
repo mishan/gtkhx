@@ -1003,30 +1003,10 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
     return e;
 }
 
-static HxChatMedia *
-hx_chat_media_copy (const HxChatMedia *m)
-{
-    if (!m) {
-        return NULL;
-    }
-    HxChatMedia *c = g_new0 (HxChatMedia, 1);
-    c->id_len = m->id_len;
-    if (m->id_len) {
-        c->id = g_malloc (m->id_len);
-        memcpy (c->id, m->id, m->id_len);
-    }
-    c->mime_len = m->mime_len;
-    if (m->mime) {
-        c->mime = g_strndup (m->mime, m->mime_len);
-    }
-    c->width = m->width;
-    c->height = m->height;
-    c->bytes = m->bytes;
-    c->width_present = m->width_present;
-    c->height_present = m->height_present;
-    c->bytes_present = m->bytes_present;
-    return c;
-}
+/* Phase R4.2c: hx_chat_media_copy moved to Rust (gtkhx-boxed::chat,
+ * private media_copy helper) along with the HxChatEvent boxed copy that
+ * was its only caller. hx_chat_media_free stays here because
+ * hx_chat_event_attach_media (below) still calls it. */
 
 static void
 hx_chat_media_free (HxChatMedia *m)
@@ -1039,30 +1019,19 @@ hx_chat_media_free (HxChatMedia *m)
     g_free (m);
 }
 
-HxChatEvent *
-hx_chat_event_copy (HxChatEvent *e)
-{
-    HxChatEvent *c;
-    if (!e) {
-        return NULL;
-    }
-    c = g_new0 (HxChatEvent, 1);
-    *c = *e; /* shallow copy first */
-    c->line = g_strndup (e->line, e->line_len);
-    c->media = hx_chat_media_copy (e->media);
-    return c;
-}
-
-void
-hx_chat_event_free (HxChatEvent *e)
-{
-    if (!e) {
-        return;
-    }
-    g_free (e->line);
-    hx_chat_media_free (e->media);
-    g_free (e);
-}
+/* Phase R4.2c: hx_chat_event_copy / hx_chat_event_free and the boxed-type
+ * registration (hx_chat_event_get_type) moved to Rust —
+ * rust/crates/gtkhx-boxed/src/chat.rs. The struct stays C-visible
+ * (hx_chat_event_new + hx_chat_event_attach_media fill it; consumers and
+ * the placeholder formatters read fields), so the Rust mirrors'
+ * #[repr(C)] layouts are pinned against these asserts; bump both sides
+ * together if either struct changes shape. */
+_Static_assert (sizeof (HxChatEvent) == 72,
+                "HxChatEvent layout must match the Rust #[repr(C)] mirror "
+                "in gtkhx-boxed::chat (field offsets pinned there)");
+_Static_assert (sizeof (HxChatMedia) == 56,
+                "HxChatMedia layout must match the Rust #[repr(C)] mirror "
+                "in gtkhx-boxed::chat (field offsets pinned there)");
 
 void
 hx_chat_event_attach_media (HxChatEvent *ev,
@@ -1271,8 +1240,8 @@ hx_chat_media_parse_token (const char *word, guint *out_token)
     return TRUE;
 }
 
-G_DEFINE_BOXED_TYPE (HxChatEvent, hx_chat_event, hx_chat_event_copy,
-                     hx_chat_event_free)
+/* HxChatEvent boxed-type registration (hx_chat_event_get_type) moved to
+ * Rust in R4.2c — see gtkhx-boxed::chat. */
 
 /* ---- HxMsgEvent ---------------------------------------------------- */
 

@@ -909,7 +909,7 @@ relying on it for whole windows in R5.
 all view-side handlers in C consume them unchanged. Tier 3 e2e tests pass
 (chat, news, file list, transfers, tracker, login). **Met by R4.1.**
 
-### R4.2 — re-host the boxed types in Rust (in progress)
+### R4.2 — re-host the boxed types in Rust ✅
 
 R4.1 left work item 2 (re-host the boxed types) undone: the boxed payloads
 `HxChatEvent` / `HxMsgEvent` (`proto_helpers.c`) and `HxTrackerServer`
@@ -952,20 +952,36 @@ from R4.1 — it keeps externing the boxed `GType`s, which now resolve against
   deep-copy, NULL-safety, `g_boxed_copy` round-trip); Tier 2 `msg_event` (now
   calls the Rust `_copy`) + Tier 3 `msg_roundtrip` / `msg_self` /
   `msg_to_unknown_uid` green.
-- **R4.2b — `HxTrackerServer`** (pending). Its `_copy`/`_free` deep-copy a
-  `GBytes` (easy) **and** an `HxTrackerV3Meta*` via `hx_tracker_v3_meta_copy`
-  / `_free` (C). To keep `gtkhx-boxed` self-contained, `HxTrackerV3Meta`'s
-  copy/free (a ~40-field `#[repr(C)]` mirror with 10 owned strings) must move
-  in the same step — otherwise tracker's copy/free reintroduce undefined C
-  externs.
-- **R4.2c — `HxChatEvent` + `HxChatMedia`** (pending). Self-contained once the
-  nested `HxChatMedia` copy/free port alongside (both pure-glib: `g_strndup`
-  line + `id`/`mime` byte copies). No external C deps, so it slots into
-  `gtkhx-boxed` cleanly.
+- **R4.2c — `HxChatEvent` + `HxChatMedia` ✅.** Moved to `gtkhx-boxed::chat`
+  (72-byte / 56-byte `#[repr(C)]` mirrors). The nested `HxChatMedia` copy/free
+  ported alongside as private Rust helpers (pure glib — `g_strndup` line +
+  `id`/`mime` byte copies). `proto_helpers.c` keeps `hx_chat_event_new`,
+  `hx_chat_event_attach_media`, the placeholder formatters, and
+  `hx_chat_media_free` (still used by `attach_media`) + two `_Static_assert`s.
+  5 cargo tests; Tier 2 `chat_event` / `inline_media` + Tier 3 chat suite green.
+- **R4.2b — `HxTrackerServer` + `HxTrackerV3Meta` ✅.** Moved to
+  `gtkhx-boxed::tracker`. `HxTrackerServer` is a 72-byte `#[repr(C)]` mirror;
+  its copy/free deep-copy the `GBytes` (`g_bytes_ref`/`_unref`) and the meta.
+  `HxTrackerV3Meta`'s copy/free moved too (required to keep the crate
+  self-contained) — but rather than transcribe its ~40 fields, it's modelled
+  as an opaque 216-byte buffer and the copy/free fix up only its **ten owned
+  `char*` fields by byte offset** (the C code did `*c = *src` then `g_strdup`
+  each). Size + those ten offsets are pinned by `_Static_assert`s in
+  `tracker_v3_meta.c`; the C producers (`hx_tracker_server_new_v1`/`_v3`,
+  `hx_tracker_v3_meta_new`) and the `hx_tracker_v3_meta_free` call sites in C
+  (the `_new` error path, `tracker_row.c`) now resolve against `gtkhx-boxed`.
+  6 cargo tests; Tier 2 `tracker_v3_meta` + Tier 3 tracker suite (v1/v3/TLS/
+  fetch) green.
 
-Once all three land, `gtkhx-session`'s `#[cfg(not(test))] extern "C"` block and
-the `#[cfg(test)]` boxed stubs both disappear — the session calls
-`gtkhx_boxed::hx_*_get_type` directly.
+`gtkhx-session` is unchanged from R4.1 except doc comments: it keeps externing
+the three boxed `_get_type`s, which now resolve against `gtkhx-boxed`. The
+`#[cfg(not(test))] extern "C"` block and the `#[cfg(test)]` boxed stubs both
+**stay** — collapsing them into a direct Rust dependency on `gtkhx-boxed` would
+make the `gtkhx-session` `staticlib` bundle `gtkhx-boxed`'s rlib and emit the
+boxed `_get_type`/`_copy`/`_free` symbols into two archives, colliding at final
+link. The extern indirection keeps a single definition. (A future option, if
+the stubs ever chafe, is a `[dev-dependencies]` edge on `gtkhx-boxed` so only
+the test build sees the real types — production stays extern.)
 
 ---
 

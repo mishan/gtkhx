@@ -225,43 +225,13 @@ hx_tracker_server_new_v3 (guint8 addr_type, const guint8 *address,
     return e;
 }
 
-HxTrackerServer *
-hx_tracker_server_copy (HxTrackerServer *e)
-{
-    if (!e) {
-        return NULL;
-    }
-    HxTrackerServer *c = g_new0 (HxTrackerServer, 1);
-    c->addr_type = e->addr_type;
-    c->address   = g_strdup (e->address ? e->address : "");
-    c->port      = e->port;
-    c->nusers    = e->nusers;
-    c->name      = g_strdup (e->name ? e->name : "");
-    c->desc      = g_strdup (e->desc ? e->desc : "");
-    c->tlv_count = e->tlv_count;
-    c->tlv_bytes = e->tlv_bytes ? g_bytes_ref (e->tlv_bytes) : NULL;
-    /* Deep-copy the parsed meta so subscribers that keep the
-     * copied event past the emit get their own owned strings. */
-    c->meta      = hx_tracker_v3_meta_copy (e->meta);
-    c->total     = e->total;
-    return c;
-}
-
-void
-hx_tracker_server_free (HxTrackerServer *e)
-{
-    if (!e) {
-        return;
-    }
-    g_free (e->address);
-    g_free (e->name);
-    g_free (e->desc);
-    if (e->tlv_bytes) {
-        g_bytes_unref (e->tlv_bytes);
-    }
-    hx_tracker_v3_meta_free (e->meta);
-    g_free (e);
-}
-
-G_DEFINE_BOXED_TYPE (HxTrackerServer, hx_tracker_server, hx_tracker_server_copy,
-                     hx_tracker_server_free)
+/* Phase R4.2b: hx_tracker_server_copy / hx_tracker_server_free and the
+ * boxed-type registration (hx_tracker_server_get_type) moved to Rust —
+ * rust/crates/gtkhx-boxed/src/tracker.rs. The struct stays C-visible
+ * (hx_tracker_server_new_v1/_v3 above fill it; consumers read fields),
+ * so the Rust #[repr(C)] mirror's layout is pinned against this assert.
+ * The Rust copy/free deep-copy the GBytes (ref/unref) and the
+ * HxTrackerV3Meta (whose copy/free also moved). */
+_Static_assert (sizeof (HxTrackerServer) == 72,
+                "HxTrackerServer layout must match the Rust #[repr(C)] "
+                "mirror in gtkhx-boxed::tracker (field offsets pinned there)");
