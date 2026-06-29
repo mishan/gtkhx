@@ -166,6 +166,33 @@ pub fn shortcodes_to_emoji(input: &str) -> String {
     out
 }
 
+/// Prefix query for the typeahead popup. Given the partial name the user
+/// has typed after an opening colon (no colons, e.g. "jo"), return up to
+/// `max` `(shortcode, emoji)` matches, ranked: an exact name match first,
+/// then by ascending name length, then alphabetically — so the shortest,
+/// most likely-intended shortcodes surface at the top. Searches every
+/// DECODE name (aliases + CLDR), so `:+1` finds 👍 and `:thu` finds
+/// `thumbsup`/`thumbsdown`/etc. An empty prefix returns nothing (the popup
+/// only opens once there's at least one character to match).
+pub fn shortcode_matches(prefix: &str, max: usize) -> Vec<(&'static str, &'static str)> {
+    if prefix.is_empty() || max == 0 {
+        return Vec::new();
+    }
+    let mut hits: Vec<&'static (&'static str, &'static str)> = DECODE
+        .iter()
+        .filter(|(name, _)| name.starts_with(prefix))
+        .collect();
+    hits.sort_by(|a, b| {
+        // false (exact) sorts before true (non-exact); then short before
+        // long; then alphabetical for a stable, deterministic order.
+        let ka = (a.0 != prefix, a.0.len(), a.0);
+        let kb = (b.0 != prefix, b.0.len(), b.0);
+        ka.cmp(&kb)
+    });
+    hits.truncate(max);
+    hits.iter().map(|(n, e)| (*n, *e)).collect()
+}
+
 /// Copy `s` into `dst`, truncating at the last UTF-8 char boundary that
 /// fits, and return the **full** byte length `s` needs (snprintf-style).
 /// When the return value exceeds `dst.len()` the output was truncated; the
@@ -341,6 +368,40 @@ mod tests {
         let mut buf = [0u8; 16];
         let n = emoji_to_shortcodes_into(&[0xFF, b'h', b'i'], &mut buf);
         assert!(n > 0);
+    }
+
+    #[test]
+    fn matches_basic_and_ranked() {
+        // Exact name ranks first even though longer names also start with it.
+        let m = shortcode_matches("joy", 8);
+        assert_eq!(m[0].0, "joy");
+        assert_eq!(m[0].1, "😂");
+        // Every result actually starts with the prefix.
+        assert!(m.iter().all(|(n, _)| n.starts_with("joy")));
+
+        // Prefix that hits several: results are capped and prefix-filtered.
+        let m2 = shortcode_matches("thumb", 3);
+        assert!(m2.len() <= 3 && !m2.is_empty());
+        assert!(m2.iter().all(|(n, _)| n.starts_with("thumb")));
+
+        // Shorter names rank before longer ones for the same prefix.
+        let m3 = shortcode_matches("fire", 8);
+        assert_eq!(m3[0].0, "fire");
+        assert!(m3.windows(2).all(|w| w[0].0.len() <= w[1].0.len()));
+    }
+
+    #[test]
+    fn matches_empty_and_unknown() {
+        assert!(shortcode_matches("", 8).is_empty());
+        assert!(shortcode_matches("joy", 0).is_empty());
+        assert!(shortcode_matches("zzzznotaprefix", 8).is_empty());
+    }
+
+    #[test]
+    fn matches_finds_punctuation_aliases() {
+        // "+1" is a real alias for 👍; a "+" prefix must reach it.
+        let m = shortcode_matches("+", 8);
+        assert!(m.iter().any(|(n, e)| *n == "+1" && *e == "👍"));
     }
 
     #[test]

@@ -30,4 +30,20 @@
  * trivial case in our codebase since both live in the same window. */
 extern GtkWidget *hx_emoji_button_new (GtkWidget *target_text_view);
 
+/*
+ * Attach the inline `:shortcode:` typeahead to a chat-style GtkTextView
+ * (phase E5). As the user types a `:prefix`, a non-focus-stealing popover
+ * of matching shortcodes appears anchored at the caret; Up/Down move the
+ * selection, Tab/Enter commit the highlighted emoji glyph (replacing the
+ * partial `:prefix` token, exactly as the picker would insert it), Esc
+ * dismisses, and a row click also commits. It's effectively a
+ * keyboard-driven picker.
+ *
+ * Call once per input at window construction, alongside hx_emoji_button_new.
+ * The state is owned by the text view (stored via g_object_set_data_full)
+ * and torn down with it; `target_text_view` must therefore outlive nothing
+ * extra — same trivial single-window ownership as the button.
+ */
+extern void hx_emoji_typeahead_attach (GtkWidget *target_text_view);
+
 #endif /* HX_EMOJI_H */

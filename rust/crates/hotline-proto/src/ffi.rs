@@ -3968,6 +3968,58 @@ pub unsafe extern "C" fn gtkhx_proto_shortcodes_to_emoji(
     crate::emoji::shortcodes_to_emoji_into(s, buf)
 }
 
+/// Prefix query for the emoji typeahead popup (phase E5). `prefix` is the
+/// partial shortcode name (no colons) typed after an opening colon. Writes
+/// up to `max` matches into `dst` as a run of `name\temoji\n` records and
+/// returns the number of records written. Records are whole-only: a record
+/// that wouldn't fit in `dst` is dropped (and stops the run), so the caller
+/// just sizes `dst` generously (`max * 128` comfortably holds the longest
+/// name + any emoji). Ranking is exact-first, then shortest, then
+/// alphabetical (see [`crate::emoji::shortcode_matches`]).
+///
+/// # Safety
+/// `prefix` valid for `prefix_len` bytes or NULL (treated as empty); `dst`
+/// valid (writable) for `dst_cap` bytes or NULL/zero-cap (then nothing is
+/// written and 0 is returned). A non-UTF-8 prefix yields 0.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_shortcode_matches(
+    prefix: *const u8,
+    prefix_len: usize,
+    dst: *mut u8,
+    dst_cap: usize,
+    max: usize,
+) -> usize {
+    if dst.is_null() || dst_cap == 0 || dst_cap > isize::MAX as usize {
+        return 0;
+    }
+    let p = as_slice(prefix, prefix_len);
+    let prefix_str = match std::str::from_utf8(p) {
+        Ok(s) => s,
+        Err(_) => return 0,
+    };
+    let matches = crate::emoji::shortcode_matches(prefix_str, max);
+    let buf = slice::from_raw_parts_mut(dst, dst_cap);
+
+    let mut pos = 0usize;
+    let mut count = 0usize;
+    for (name, emoji) in matches {
+        let rec = name.len() + 1 + emoji.len() + 1; // name \t emoji \n
+        if pos + rec > dst_cap {
+            break;
+        }
+        buf[pos..pos + name.len()].copy_from_slice(name.as_bytes());
+        pos += name.len();
+        buf[pos] = b'\t';
+        pos += 1;
+        buf[pos..pos + emoji.len()].copy_from_slice(emoji.as_bytes());
+        pos += emoji.len();
+        buf[pos] = b'\n';
+        pos += 1;
+        count += 1;
+    }
+    count
+}
+
 // ---- Voice-chat extension (Phase 8.A) ---------------------------------
 //
 // FFI surface for the wire-protocol layer added in
