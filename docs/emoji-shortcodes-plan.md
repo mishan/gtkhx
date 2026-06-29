@@ -388,10 +388,10 @@ Each ends on something testable, per the roadmap's house style.
   Rust unit tests: spot-check round-trips, a whole-table canonical
   round-trip / collision guard (`every_canonical_round_trips`), alias +
   CLDR decode, no-match passthrough, control-byte skipping. No C yet.
-- **E2 — FFI + send.** Add the two `#[no_mangle]` shims in `ffi.rs`. Wire
-  encode into `gtkhx_text_for_wire`'s legacy branch. Tier 2 test: feed an
-  emoji-bearing string with `utf8_mode=FALSE`, assert the wire bytes carry
-  `:joy:` and Mac Roman survives.
+- **E2 — FFI + send. ✅** The two `#[no_mangle]` shims in `ffi.rs`. Encode
+  wired into `gtkhx_text_for_wire`'s legacy branch (with a guard against
+  pathological lengths/expansion). Tier 2 test: an emoji-bearing string
+  with `utf8_mode=FALSE` carries `:joy:` on the wire and Mac Roman survives.
 - **E3 — Receive/display.** Wire decode into `hx_chat_event_new` (and the
   PM/news body builders). Tier 2 test over `HxChatEvent`: body `:joy:`
   decodes to 😂, colour runs preserved, info-prefix untouched.

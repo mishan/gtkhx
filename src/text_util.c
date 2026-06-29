@@ -133,20 +133,90 @@ gtkhx_text_for_wire (const char *utf8, gsize utf8_len, gboolean utf8_mode,
         wire = g_strndup (utf8, utf8_len);
         wire_len = utf8_len;
     } else {
-        /* Legacy mode: encode to Mac Roman.
+        /* Legacy mode. First rewrite any emoji to their ASCII
+		 * `:shortcode:` form (phase E2) so they survive Mac Roman as
+		 * readable text (":joy:") instead of becoming the '?'
+		 * g_convert fallback. The rewrite is a no-op for text with no
+		 * emoji, so the common case pays only one Rust scan.
+		 *
+		 * gtkhx_proto_emoji_to_shortcodes is snprintf-style: it
+		 * returns the FULL required length. `:shortcode:` expansion
+		 * is up to ~7× per input byte, so we try a 2× + slack buffer
+		 * first (covers any realistic message) and re-allocate to the
+		 * exact size on the rare overflow. */
+        /* Pathological-length guard. We size the rewrite buffer as
+		 * `utf8_len * 2 + 64`; that multiply must not overflow gsize, the
+		 * resulting cap must stay under the Rust FFI's isize::MAX slice
+		 * ceiling (else the shim writes nothing yet still reports a
+		 * required length <= cap, leaving `sc` uninitialised before it
+		 * reaches g_convert), and sc_len must stay within G_MAXSSIZE so the
+		 * (gssize) cast handed to g_convert below can't wrap negative (which
+		 * would make iconv scan to a NUL). sc_len <= cap <= utf8_len*2 + 64,
+		 * so bounding utf8_len by (G_MAXSSIZE - 64) / 2 covers all three at
+		 * once. Real chat text is orders of magnitude below this; treat
+		 * anything above as empty, mirroring gtkhx_text_to_utf8. */
+        if (utf8_len > ((gsize) G_MAXSSIZE - 64) / 2) {
+            if (out_len) {
+                *out_len = 0;
+            }
+            return g_strdup ("");
+        }
+
+        gsize sc_len;
+        char *sc = NULL;
+        if (utf8_len > 0) {
+            gsize cap = utf8_len * 2 + 64;
+            sc = g_malloc (cap);
+            gsize need = gtkhx_proto_emoji_to_shortcodes (
+                (const uint8_t *) utf8, utf8_len, (uint8_t *) sc, cap);
+            if (need > cap) {
+                /* The required size is unbounded per input byte (shortcode
+				 * expansion is up to ~7×), so the utf8_len guard above does
+				 * NOT bound `need`. Re-check it explicitly: a `need` past
+				 * G_MAXSSIZE (== isize::MAX on 64-bit) would make the re-call
+				 * pass an oversize cap the Rust shim refuses — it would write
+				 * nothing yet still return a length, leaving `sc`
+				 * uninitialised — and would wrap the (gssize) cast to
+				 * g_convert. Bail to empty instead. Unreachable for real
+				 * chat text (a u16-bounded body can't expand this far). */
+                if (need > (gsize) G_MAXSSIZE) {
+                    g_free (sc);
+                    if (out_len) {
+                        *out_len = 0;
+                    }
+                    return g_strdup ("");
+                }
+                sc = g_realloc (sc, need);
+                need = gtkhx_proto_emoji_to_shortcodes (
+                    (const uint8_t *) utf8, utf8_len, (uint8_t *) sc, need);
+            }
+            sc_len = need;
+        } else {
+            sc = g_strdup ("");
+            sc_len = 0;
+        }
+
+        /* Encode the shortcoded UTF-8 to Mac Roman.
 		 * g_convert_with_fallback substitutes the supplied fallback
 		 * string ('?') for any codepoint outside the target
 		 * encoding's repertoire. We pass the empty error sink — a
 		 * NULL return would only happen on iconv-not-available,
 		 * which is essentially impossible on a glibc / musl /
 		 * macOS / Win build. Defend against it anyway and fall back
-		 * to the input bytes (lossy but better than a NULL deref). */
-        wire = g_convert_with_fallback (utf8, (gssize)utf8_len, "MACINTOSH",
+		 * to the shortcoded UTF-8 buffer `sc` (lossy but better than a
+		 * NULL deref) — see the if(!wire) branch below. */
+        wire = g_convert_with_fallback (sc, (gssize)sc_len, "MACINTOSH",
                                         "UTF-8", "?", NULL, &wire_len, NULL);
         if (!wire) {
-            wire = g_strndup (utf8, utf8_len);
-            wire_len = utf8_len;
+            /* iconv unavailable — hand back the shortcoded UTF-8 itself.
+			 * g_strndup (not a bare pointer steal) so the result is
+			 * NUL-terminated like the pre-E2 fallback was: the Rust shim
+			 * deliberately does not append a NUL, and some callers print
+			 * this buffer as a C string on error paths. */
+            wire = g_strndup (sc, sc_len);
+            wire_len = sc_len;
         }
+        g_free (sc);
 
         /* Phase E3: LF → CR normalisation for body fields on
 		 * legacy clients. The spec calls this out: "Outbound

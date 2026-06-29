@@ -1273,6 +1273,43 @@ extern size_t gtkhx_proto_pack_message (uint8_t *out, size_t out_cap,
 extern size_t gtkhx_proto_text_to_utf8 (const uint8_t *src, size_t len,
                                         uint8_t *dst, size_t cap);
 
+/* ---- Emoji shortcodes (phase E2/E3) ---- */
+
+/* Rewrite emoji clusters in `src[0..len)` to `:shortcode:` text (ASCII,
+ * e.g. 😂 → ":joy:"), writing UTF-8 into `dst`. Used by the legacy
+ * (non-UTF-8) send path before Mac Roman conversion so emoji survive as
+ * readable text instead of the '?' g_convert fallback.
+ *
+ * Returns the FULL number of bytes the output requires (snprintf-style),
+ * which is NOT capped at `cap`. When `dst` is a usable buffer (see below),
+ * a return value <= cap means the whole output was written; > cap means it
+ * was truncated at a UTF-8 char boundary and the caller should re-allocate
+ * to at least the returned size and call again. `:shortcode:` expansion is
+ * unbounded per input byte (up to ~7×), which is why this reports a
+ * required size rather than over-allocating like the 3× Mac Roman path
+ * above.
+ *
+ * No-op-ish returns (nothing written, required length still returned —
+ * so a <= cap return does NOT imply bytes were written in these cases):
+ *   - `dst == NULL` or `cap == 0`, OR
+ *   - `cap > isize::MAX` — the Rust shim refuses to build an oversize
+ *     slice and treats `dst` as zero-capacity. Callers must size buffers
+ *     well below this (chat text is microscopic by comparison).
+ * `src == NULL` is treated as empty input regardless of `len`, and a
+ * `len > isize::MAX` is likewise treated as empty. No trailing NUL is
+ * appended. */
+extern size_t gtkhx_proto_emoji_to_shortcodes (const uint8_t *src, size_t len,
+                                               uint8_t *dst, size_t cap);
+
+/* Inverse of gtkhx_proto_emoji_to_shortcodes: replace known `:shortcode:`
+ * tokens in `src[0..len)` with their emoji, writing UTF-8 into `dst`. Used
+ * at chat display time (phase E3) on every server. Unknown tokens and
+ * stray colons pass through unchanged; mIRC colour-code runs are preserved.
+ * Same snprintf-style return contract and NULL/cap handling as
+ * gtkhx_proto_emoji_to_shortcodes. */
+extern size_t gtkhx_proto_shortcodes_to_emoji (const uint8_t *src, size_t len,
+                                               uint8_t *dst, size_t cap);
+
 /* ---- Voice-chat extension (Phase 8.A) -----------------------------
  *
  * Builders for HTLC_HDR_VOICE_* and parsers for HTLS_HDR_VOICE_* /

@@ -166,6 +166,42 @@ pub fn shortcodes_to_emoji(input: &str) -> String {
     out
 }
 
+/// Copy `s` into `dst`, truncating at the last UTF-8 char boundary that
+/// fits, and return the **full** byte length `s` needs (snprintf-style).
+/// When the return value exceeds `dst.len()` the output was truncated; the
+/// caller re-calls with a buffer of at least the returned size. Writing a
+/// truncated prefix in that case is harmless — the caller discards it.
+fn emit(s: &str, dst: &mut [u8]) -> usize {
+    let bytes = s.as_bytes();
+    if !dst.is_empty() {
+        let mut n = bytes.len().min(dst.len());
+        if n < bytes.len() {
+            while n > 0 && (bytes[n] & 0b1100_0000) == 0b1000_0000 {
+                n -= 1;
+            }
+        }
+        if n > 0 {
+            dst[..n].copy_from_slice(&bytes[..n]);
+        }
+    }
+    bytes.len()
+}
+
+/// Buffer-fill encode for the FFI. `input` is interpreted as UTF-8
+/// (lossily — the send path feeds valid UTF-8, but be defensive). Writes
+/// the `:shortcode:`-rewritten text into `dst` and returns the full
+/// required length per [`emit`].
+pub fn emoji_to_shortcodes_into(input: &[u8], dst: &mut [u8]) -> usize {
+    emit(&emoji_to_shortcodes(&String::from_utf8_lossy(input)), dst)
+}
+
+/// Buffer-fill decode for the FFI. Counterpart of
+/// [`emoji_to_shortcodes_into`]; replaces known `:shortcode:` tokens with
+/// emoji. Returns the full required length per [`emit`].
+pub fn shortcodes_to_emoji_into(input: &[u8], dst: &mut [u8]) -> usize {
+    emit(&shortcodes_to_emoji(&String::from_utf8_lossy(input)), dst)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -274,6 +310,37 @@ mod tests {
         let sc = emoji_to_shortcodes(keycap);
         assert!(sc.starts_with(':') && sc.ends_with(':'), "got {sc:?}");
         assert_eq!(shortcodes_to_emoji(&sc), keycap);
+    }
+
+    #[test]
+    fn into_reports_full_length_and_truncates_at_boundary() {
+        // Ample buffer: full write, return == byte length.
+        let mut big = [0u8; 64];
+        let n = emoji_to_shortcodes_into("😂".as_bytes(), &mut big);
+        assert_eq!(n, ":joy:".len());
+        assert_eq!(&big[..n], b":joy:");
+
+        // Too-small buffer: return is the *required* length (> cap), and
+        // the prefix written never splits a codepoint.
+        let mut small = [0u8; 3];
+        let need = shortcodes_to_emoji_into(":joy:".as_bytes(), &mut small);
+        assert_eq!(need, "😂".len()); // 4 bytes needed
+        assert!(need > small.len());
+        // "😂" is 4 bytes; nothing fits in 3 without splitting → 0 written.
+        assert_eq!(&small, &[0u8; 3]);
+
+        // Empty buffer is allowed and just reports the needed size.
+        // 👍 canonical is the shortest name, "+1" → ":+1:".
+        let need2 = emoji_to_shortcodes_into("👍".as_bytes(), &mut []);
+        assert_eq!(need2, ":+1:".len());
+    }
+
+    #[test]
+    fn into_handles_invalid_utf8_lossily() {
+        // Lone 0xFF is not valid UTF-8; must not panic.
+        let mut buf = [0u8; 16];
+        let n = emoji_to_shortcodes_into(&[0xFF, b'h', b'i'], &mut buf);
+        assert!(n > 0);
     }
 
     #[test]
