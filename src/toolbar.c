@@ -994,7 +994,7 @@ create_toolbar_window (session *sess)
      * existing panel via the registry AND triggers a NEWSDIRLIST
      * when connected, so the user sees fresh content on each open
      * instead of having to hit Refresh after the first build. */
-    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/newsfld.png",
+    news15_btn = make_pixmap_button ("/com/nasledov/gtkhx/pixmaps/news_folder.png",
                                      _ ("News (1.5+)"),
                                      G_CALLBACK (open_news_browser), sess);
     gtk_box_append (GTK_BOX (hbox), news15_btn);

@@ -235,6 +235,22 @@ test_theme_listing = executable('test_theme_listing',
 test('theme_listing', test_theme_listing,
      suite : 'unit')
 
+# Icon resolver (gtkhx_icon_load + cache invalidation). Drives the
+# theme-bundle lookup with tmp-dir PNG fixtures and the stock-pixmap
+# fallback via the linked-in gtkhx_resources (so e.g. "tasks" resolves
+# to the shipped pixmap), and checks the cache hands back the same
+# pixbuf until invalidated.
+test_icon_pack = executable('test_icon_pack',
+  'unit/test_icon_pack.c',
+  '../src/gtkhx_icon.c',
+  '../src/gtkhx_theme.c',
+  gtkhx_resources,
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('icon_pack', test_icon_pack,
+     suite : 'unit')
+
 # hxnet_ffi — smoke test for the hxnet C-callable FFI surface
 # (Phase R3.3.b). Builds a connected TCP loopback pair
 # (bind/listen/accept + connect on 127.0.0.1) → spawn_fd → round-

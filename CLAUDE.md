@@ -343,7 +343,20 @@ round-trip, missing-key fallback, malformed-hex fallback, load-replaces-not-merg
 and `changed` emission. `tests/unit/test_theme_listing.c` covers the discovery
 API (user-dir walk, GResource walk, sort order, shadowing).
 
-Icon-pack replacement is scoped in `docs/theming-scoping.md` but not yet built.
+`src/gtkhx_icon.{c,h}` is the chrome-icon resolver. Every chrome PNG load
+(buttons + task-row glyphs + news-thread row icons) goes through
+`gtkhx_icon_load(name_or_path)`. Themes can ship as a flat `.ini` (colours +
+scales only) or as a directory bundle at `$CONFIG/themes/<name>/theme.ini`
+plus `$CONFIG/themes/<name>/icons/<logical>.png` — the resolver looks up
+user-bundle → built-in-bundle GResource → stock GResource pixmap per icon, so
+a partial bundle that ships just a few overrides keeps every other icon
+stock. There is no separate icon-pack pref: picking a theme picks the look
+end-to-end. The theme `changed` handler in `gtkhx.c` calls
+`gtkhx_icon_invalidate_cache()` so a theme switch repaints buttons via
+`button_load_source` → `gtkhx_icon_load`. Brand assets (the app logo) and
+Hotline user icons (cicn) are deliberately NOT covered. Schema reference:
+`docs/theming-file-format.md`.
+
 The compact chat-sidebar user list keeps a fixed 1.0 structural density and
 does not follow `USERLIST_*` — that carve-out is intentional, not a bug.
 

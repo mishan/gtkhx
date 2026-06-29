@@ -59,6 +59,7 @@
 #include "chat.h"
 #include "msg.h"
 #include "gtkhx_session.h"
+#include "gtkhx_icon.h"
 #include "notify.h"
 #include "tracker.h"
 #include "voice_runtime.h"
@@ -253,11 +254,21 @@ gtkhx_refresh_css (void)
                                     (int) (bg.green * 255.0 + 0.5),
                                     (int) (bg.blue  * 255.0 + 0.5));
 
-    /* .gtkhx-listview — color-only theming for any list-shaped
-	 * surface (GtkColumnView, GtkListView, GtkListBox) that wants
-	 * the GtkHx theme's fg/bg without inheriting the .gtkhx-text
-	 * font or the .gtkhx-userlist row-padding override. Used by
-	 * tracker, tasks, files browser, news browser.
+    /* .gtkhx-listview — color theming for list-shaped surfaces
+	 * (GtkColumnView, GtkListView, GtkListBox): tracker, tasks,
+	 * files browser, news browser.
+	 *
+	 * Only emitted for *non-default* themes. The built-in "default"
+	 * theme is supposed to feel like vanilla GtkHx + system colors
+	 * — its [palette] values are tuned for the chat output, not for
+	 * sidebar lists, and forcing #fafafa on a user's GNOME dark
+	 * desktop's listview was visually wrong. A user who picks
+	 * Solarized signed up for the cream-on-cream look across every
+	 * surface; the default theme stays out of the way.
+	 *
+	 * Header rows (.gtkhx-listview > header on GtkColumnView) are
+	 * never themed — column titles always render in the system
+	 * theme so they stay legible on any background.
 	 *
 	 * Two cases to cover, because the class is sometimes applied
 	 * to a parent of the listview/list node and sometimes directly
@@ -274,22 +285,20 @@ gtkhx_refresh_css (void)
 	 *
 	 * Both descendant and direct-child selectors are emitted so a
 	 * caller can apply .gtkhx-listview at either layer without
-	 * worrying about the node tree. The header selector applies to
-	 * GtkColumnView's title row. Selection (row:selected) keeps the
-	 * system theme accent so selected rows stay visually distinct
-	 * on a themed background. */
-    /* The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
+	 * worrying about the node tree. Headers (.gtkhx-listview >
+	 * header) stay system-themed so column titles are always
+	 * legible. Selection (row:selected) keeps the system accent.
+	 *
+	 * The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
 	 * get painted — chat is the surface the palette was designed
 	 * for, and built-in defaults are tuned for it.
 	 *
-	 * The listview-shaped surfaces (.gtkhx-listview, tracker / users
-	 * / tasks / files / news rows) only get painted when the active
+	 * The listview-shaped surfaces only get painted when the active
 	 * theme has *explicitly* set FG or BG. That gates the "force
 	 * chat colors onto sidebar lists" behavior to themes that opted
 	 * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
-	 * theme that omits the FG/BG keys (or the shipped "default"
-	 * theme after dropping them from default.ini) leaves the listview
-	 * surfaces at the system theme's defaults. */
+	 * theme that omits FG/BG (the shipped default, post-cleanup)
+	 * leaves the listview surfaces at the system theme. */
     GString *css_buf = g_string_new (NULL);
     g_string_append_printf (
         css_buf,
@@ -308,17 +317,25 @@ gtkhx_refresh_css (void)
         fghex, bghex, fghex);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
         || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        /* Row selectors carry :not(:hover):not(:active) so the
+		 * system theme's hover overlay and click-feedback rules
+		 * still win for those pseudo-classes — without that
+		 * exclusion our PRIORITY_APPLICATION background paints
+		 * over the system's :hover overlay and the user sees no
+		 * feedback when mousing over rows. The outer columnview /
+		 * listview / list nodes (no row state) and the cells (read
+		 * row state via parent matching) keep the theme bg in the
+		 * steady state. */
         g_string_append_printf (
             css_buf,
             ".gtkhx-listview,"
-            ".gtkhx-listview > header,"
             ".gtkhx-listview listview,"
-            ".gtkhx-listview listview > row:not(:selected),"
-            ".gtkhx-listview listview > row:not(:selected) > cell,"
+            ".gtkhx-listview listview > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview listview > row:not(:selected):not(:hover):not(:active) > cell,"
             ".gtkhx-listview list,"
-            ".gtkhx-listview list > row:not(:selected),"
-            ".gtkhx-listview > row:not(:selected),"
-            ".gtkhx-listview > row:not(:selected) > cell {"
+            ".gtkhx-listview list > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview > row:not(:selected):not(:hover):not(:active) > cell {"
             "  color: %s;"
             "  background-color: %s;"
             "}",
@@ -366,19 +383,24 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
 	 * userlist always honors. Theme fg/bg are painted across the
 	 * column-view's inner nodes ONLY when the active theme has
 	 * explicitly set FG or BG; themes that didn't opt in (and the
-	 * shipped default) leave the userlist at system colors. Headers
-	 * always keep system styling so column titles stay legible.
-	 * Selection (row:selected) keeps the system accent. */
+	 * shipped default after the default.ini cleanup) leave the
+	 * userlist at system colors. Headers always keep system styling
+	 * so column titles stay legible. Selection (row:selected)
+	 * keeps the system accent. */
     GString *css_buf = g_string_new (NULL);
     g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
         || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
+        /* :not(:hover):not(:active) so the system theme's hover
+		 * overlay + click feedback still paint over our theme bg.
+		 * Same reasoning as the .gtkhx-listview rule in
+		 * gtkhx_refresh_css. */
         g_string_append_printf (
             css_buf,
             ".gtkhx-userlist,"
             ".gtkhx-userlist listview,"
-            ".gtkhx-userlist listview > row:not(:selected),"
-            ".gtkhx-userlist listview > row:not(:selected) > cell {"
+            ".gtkhx-userlist listview > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-userlist listview > row:not(:selected):not(:hover):not(:active) > cell {"
             "  color: %s;"
             "  background-color: %s;"
             "}",
@@ -1060,6 +1082,11 @@ on_theme_changed (GtkhxTheme *theme, gpointer user_data)
     gtkhx_apply_theme_palette (adw_style_manager_get_dark (sm));
     gtkhx_refresh_css ();
     gtkhx_refresh_userlist_css (users_font_desc);
+    /* The icon pack is also part of the theme — drop any cached
+     * resolved pixbufs so buttons rebuilding via button_load_source
+     * pick up the new pack's images. Buttons subscribe to this same
+     * signal, so the rebuild happens in lockstep below. */
+    gtkhx_icon_invalidate_cache ();
 }
 
 static void

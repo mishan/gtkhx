@@ -255,6 +255,27 @@ gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
     return TRUE;
 }
 
+const char *
+gtkhx_theme_active_name (void)
+{
+    const char *name = (gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name)
+                       ? gtkhx_prefs.theme_name
+                       : "default";
+    /* Same defensive rejection the loader applies (see
+     * safe_active_theme_name): a name with a path separator could
+     * escape the themes directory. Without this check the icon
+     * resolver would try to load
+     *   $CONFIG/themes/<bad-name>/icons/<logical>.png
+     * with the path separator embedded, fail every lookup, and
+     * never serve the user the default-theme bundled icons either.
+     * Treating bad names as "default" matches the loader's behavior
+     * end-to-end. */
+    if (strchr (name, '/') || strchr (name, '\\')) {
+        return "default";
+    }
+    return name;
+}
+
 /* ---- Hex parser ------------------------------------------------------- */
 
 /* Parse "#rrggbb" / "#RRGGBB" into 0x00RRGGBB. Returns -1 (the
@@ -486,27 +507,22 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
 }
 
-/* Resolve the on-disk path for the active theme. Returns a freshly
- * allocated string the caller frees, or NULL if no usable name. */
-static char *
-active_theme_path (void)
+/* Return the safe active-theme name (the THEMENAME pref value or
+ * "default", with path-separator rejection). The returned pointer
+ * is borrowed (lives in gtkhx_prefs or is a literal); caller does
+ * NOT free. */
+static const char *
+safe_active_theme_name (void)
 {
-    const char *name;
-    extern struct gtkhx_prefs gtkhx_prefs;
-
-    name = gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name
-           ? gtkhx_prefs.theme_name
-           : "default";
-
-    /* Defensive: a name with a path separator could escape the themes
-	 * directory. Reject and fall back to "default". */
+    const char *name = gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name
+                       ? gtkhx_prefs.theme_name
+                       : "default";
     if (strchr (name, '/') || strchr (name, '\\')) {
         g_warning ("gtkhx_theme: rejecting theme name %s (path separator)",
                    name);
-        name = "default";
+        return "default";
     }
-
-    return g_strdup_printf ("%s/themes/%s.ini", gtkhx_config_dir (), name);
+    return name;
 }
 
 /* Read a theme from a GResource path into a freshly-allocated
@@ -521,14 +537,26 @@ load_keyfile_from_resource (const char *resource_path)
     GKeyFile *kf;
     GError *err = NULL;
 
+    /* "Not present" (G_RESOURCE_ERROR_NOT_FOUND) is a normal outcome
+	 * — load_builtin_theme tries the dir-form first and the flat-form
+	 * second, so the dir-form lookup for a flat-form built-in (e.g.
+	 * solarized) misses on every successful load. Returning NULL
+	 * silently for NOT_FOUND lets the fallback chain in
+	 * gtkhx_theme_load_active do its job without spamming the
+	 * console. Other GResource errors (internal resource-table
+	 * corruption, IO failures inside the bundle reader) DO get
+	 * warned about — they're real bugs worth surfacing rather than
+	 * silently treating as "no such theme". A genuine parse failure
+	 * (file present but unparseable) still warns below. */
     bytes = g_resources_lookup_data (resource_path,
                                      G_RESOURCE_LOOKUP_FLAGS_NONE, &err);
     if (!bytes) {
-        if (err) {
-            g_warning ("gtkhx_theme: no resource %s: %s",
+        if (err && !g_error_matches (err, G_RESOURCE_ERROR,
+                                     G_RESOURCE_ERROR_NOT_FOUND)) {
+            g_warning ("gtkhx_theme: resource lookup %s: %s",
                        resource_path, err->message);
-            g_clear_error (&err);
         }
+        g_clear_error (&err);
         return NULL;
     }
 
@@ -545,40 +573,90 @@ load_keyfile_from_resource (const char *resource_path)
     return kf;
 }
 
-void
-gtkhx_theme_load_active (void)
+/* Try a user-side theme file at one of two layouts:
+ *
+ *   $CONFIG/themes/<name>/theme.ini   (dir-form bundle; preferred
+ *                                       because it can ship icons
+ *                                       alongside)
+ *   $CONFIG/themes/<name>.ini         (flat-form; no bundled icons)
+ *
+ * Returns an allocated GKeyFile on success (caller frees with
+ * g_key_file_free), NULL otherwise. */
+static GKeyFile *
+load_user_theme (const char *name)
 {
-    char *path = active_theme_path ();
+    /* Dir-form first — it's the richer layout. */
+    char *dir_path = g_strdup_printf ("%s/themes/%s/theme.ini",
+                                      gtkhx_config_dir (), name);
     GKeyFile *kf = NULL;
+    GError *err = NULL;
 
-    if (path && g_file_test (path, G_FILE_TEST_IS_REGULAR)) {
-        GError *err = NULL;
+    if (g_file_test (dir_path, G_FILE_TEST_IS_REGULAR)) {
         kf = g_key_file_new ();
-        if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, &err)) {
-            g_warning ("gtkhx_theme: load %s failed: %s — falling back to "
-                       "built-in default",
-                       path, err ? err->message : "(unknown)");
+        if (!g_key_file_load_from_file (kf, dir_path, G_KEY_FILE_NONE,
+                                        &err)) {
+            g_warning ("gtkhx_theme: load %s failed: %s", dir_path,
+                       err ? err->message : "(unknown)");
             g_clear_error (&err);
             g_key_file_free (kf);
             kf = NULL;
         }
     }
+    g_free (dir_path);
 
-    /* If the user file wasn't on disk, try the same name in the
-	 * GResource themes prefix — that's how the built-ins (default,
-	 * solarized) get loaded when the user hasn't
-	 * dropped a same-name override into $CONFIG/themes/. */
-    if (!kf) {
-        extern struct gtkhx_prefs gtkhx_prefs;
-        const char *name = gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name
-                           ? gtkhx_prefs.theme_name
-                           : "default";
-        if (!strchr (name, '/') && !strchr (name, '\\')) {
-            char *res = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s.ini",
-                                         name);
-            kf = load_keyfile_from_resource (res);
-            g_free (res);
+    if (kf) {
+        return kf;
+    }
+
+    char *flat_path = g_strdup_printf ("%s/themes/%s.ini",
+                                       gtkhx_config_dir (), name);
+    if (g_file_test (flat_path, G_FILE_TEST_IS_REGULAR)) {
+        kf = g_key_file_new ();
+        if (!g_key_file_load_from_file (kf, flat_path, G_KEY_FILE_NONE,
+                                        &err)) {
+            g_warning ("gtkhx_theme: load %s failed: %s", flat_path,
+                       err ? err->message : "(unknown)");
+            g_clear_error (&err);
+            g_key_file_free (kf);
+            kf = NULL;
         }
+    }
+    g_free (flat_path);
+    return kf;
+}
+
+/* Same shape but for the GResource side. Tries dir-form
+ * (/com/nasledov/gtkhx/themes/<name>/theme.ini) then flat-form
+ * (.../themes/<name>.ini). NULL on miss. */
+static GKeyFile *
+load_builtin_theme (const char *name)
+{
+    char *dir_res = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s/theme.ini",
+                                     name);
+    GKeyFile *kf = load_keyfile_from_resource (dir_res);
+    g_free (dir_res);
+    if (kf) {
+        return kf;
+    }
+    char *flat_res = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s.ini",
+                                      name);
+    kf = load_keyfile_from_resource (flat_res);
+    g_free (flat_res);
+    return kf;
+}
+
+void
+gtkhx_theme_load_active (void)
+{
+    const char *name = safe_active_theme_name ();
+    GKeyFile *kf = load_user_theme (name);
+
+    /* If the user side didn't have the theme, try the same name in
+	 * the GResource themes prefix — that's how the built-ins (default,
+	 * solarized) get loaded when the user hasn't dropped a same-name
+	 * override into $CONFIG/themes/. */
+    if (!kf) {
+        kf = load_builtin_theme (name);
     }
 
     /* Last-ditch fallback: the default GResource. If even that fails
@@ -598,8 +676,6 @@ gtkhx_theme_load_active (void)
 		 * predictable. */
         g_signal_emit (gtkhx_theme_get_default (), signals[SIGNAL_CHANGED], 0);
     }
-
-    g_free (path);
 }
 
 /* ---- Discovery (theme picker) ---------------------------------------- */
@@ -665,6 +741,20 @@ read_display_name_from_file (const char *path)
     return display;
 }
 
+/* TRUE if `name` is safe to use as an active-theme name. Mirrors
+ * the rejection rule applied by safe_active_theme_name /
+ * gtkhx_theme_active_name at load time: any embedded path
+ * separator could escape the themes directory. Surfacing such a
+ * name in the picker would produce a phantom entry that
+ * "selects" but loads as "default" — confusing. The discovery
+ * walks apply this check before adding an entry so the picker
+ * only ever lists themes the loader can actually open. */
+static gboolean
+theme_name_is_safe (const char *name)
+{
+    return name && !strchr (name, '/') && !strchr (name, '\\');
+}
+
 /* Same, but from a GResource path under the registered themes
  * prefix. Caller frees. NULL on parse error. */
 static char *
@@ -719,71 +809,165 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
 	 * outlives this set. */
     GHashTable *seen = g_hash_table_new (g_str_hash, g_str_equal);
 
-    /* Walk the user dir first so its entries take precedence. */
+    /* Walk the user dir first so its entries take precedence.
+	 * A "theme" surfaces either as a flat .ini file
+	 * (<name>.ini, no bundled icons) OR a directory containing a
+	 * theme.ini (<name>/theme.ini, can ship icons under
+	 * <name>/icons/). Skip dotfiles and anything that doesn't
+	 * match either shape. */
     if (user_themes_dir) {
         GDir *dir = g_dir_open (user_themes_dir, 0, NULL);
         if (dir) {
+            /* Buffer the names so we can make two ordered passes over
+             * them: dir-form bundles first, then flat .ini files. That
+             * makes the documented "dir-form preferred" rule
+             * deterministic regardless of readdir order, and the
+             * seen-set stops a flat <name>.ini from also listing a
+             * <name>/ bundle of the same name. */
+            GPtrArray *names = g_ptr_array_new_with_free_func (g_free);
             const char *fn;
+            int pass;
+
             while ((fn = g_dir_read_name (dir)) != NULL) {
-                gsize n = strlen (fn);
-                if (n <= 4
-                    || g_ascii_strcasecmp (fn + n - 4, ".ini") != 0) {
+                if (fn[0] == '.') {
                     continue;
                 }
-                char *path = g_build_filename (user_themes_dir, fn, NULL);
-                /* gtkhx_theme_load_active requires G_FILE_TEST_IS_REGULAR
-				 * to load the file. A directory named "foo.ini" would
-				 * surface in the picker but be silently unselectable,
-				 * which is confusing. Skip non-regular entries here so
-				 * the picker only ever shows themes the loader can
-				 * actually open. */
-                if (!g_file_test (path, G_FILE_TEST_IS_REGULAR)) {
-                    g_free (path);
-                    continue;
-                }
-                char *name = strip_ini_suffix (fn);
-                char *display = read_display_name_from_file (path);
-                GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
-                e->name = name;
-                e->display = display ? display : g_strdup (name);
-                g_ptr_array_add (out, e);
-                g_hash_table_add (seen, e->name);
-                g_free (path);
+                g_ptr_array_add (names, g_strdup (fn));
             }
             g_dir_close (dir);
+
+            /* pass 0 = dir-form bundles, pass 1 = flat .ini */
+            for (pass = 0; pass < 2; pass++) {
+                guint i;
+                for (i = 0; i < names->len; i++) {
+                    const char *cn = names->pdata[i];
+                    char *child = g_build_filename (user_themes_dir, cn, NULL);
+                    gboolean is_dir = g_file_test (child, G_FILE_TEST_IS_DIR);
+                    char *name = NULL;
+                    char *display = NULL;
+
+                    if (pass == 0 && is_dir) {
+                        /* Dir-form: <child>/theme.ini must exist. */
+                        char *manifest
+                            = g_build_filename (child, "theme.ini", NULL);
+                        if (g_file_test (manifest, G_FILE_TEST_IS_REGULAR)) {
+                            name = g_strdup (cn);
+                            display = read_display_name_from_file (manifest);
+                        }
+                        g_free (manifest);
+                    } else if (pass == 1 && !is_dir
+                               && strlen (cn) > 4
+                               && g_ascii_strcasecmp (cn + strlen (cn) - 4,
+                                                      ".ini") == 0
+                               && g_file_test (child,
+                                               G_FILE_TEST_IS_REGULAR)) {
+                        /* Flat-form: strip the .ini suffix. Require
+						 * a regular file so a FIFO / dead symlink /
+						 * other non-regular entry named "foo.ini"
+						 * doesn't surface as an unselectable theme
+						 * (gtkhx_theme_load_active needs IS_REGULAR
+						 * to open it). */
+                        name = strip_ini_suffix (cn);
+                        display = read_display_name_from_file (child);
+                    }
+
+                    if (name && !theme_name_is_safe (name)) {
+                        /* Path-separator in the directory or .ini
+						 * basename — the loader would reject it
+						 * anyway, so don't surface it in the picker. */
+                        g_free (name);
+                        g_free (display);
+                        name = NULL;
+                    }
+                    if (name) {
+                        if (g_hash_table_contains (seen, name)) {
+                            g_free (name);
+                            g_free (display);
+                        } else {
+                            GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+                            e->name = name;
+                            e->display = display ? display : g_strdup (name);
+                            g_ptr_array_add (out, e);
+                            g_hash_table_add (seen, e->name);
+                        }
+                    }
+                    g_free (child);
+                }
+            }
+            g_ptr_array_free (names, TRUE);
         }
     }
 
     /* Then enumerate the GResource prefix, skipping anything already
-	 * shadowed by a user-dir entry. */
+	 * shadowed by a user-dir entry. GResource enumeration returns
+	 * dirs with a trailing "/", files without — same as a normal
+	 * VFS walk. */
     if (resource_prefix) {
         char **children = g_resources_enumerate_children (
             resource_prefix, G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
         if (children) {
-            for (char **p = children; *p; p++) {
-                gsize n = strlen (*p);
-                if (n <= 4
-                    || g_ascii_strcasecmp (*p + n - 4, ".ini") != 0) {
-                    continue;
+            const char *sep
+                = g_str_has_suffix (resource_prefix, "/") ? "" : "/";
+            int pass;
+
+            /* Two ordered passes, same "dir-form preferred" rule as the
+             * user dir: pass 0 takes <name>/ bundles, pass 1 takes flat
+             * <name>.ini, and the seen-set drops a flat entry when a
+             * bundle of the same name (or a user theme) already won.
+             * GResource enumeration returns dirs with a trailing "/",
+             * files without — same as a normal VFS walk. */
+            for (pass = 0; pass < 2; pass++) {
+                for (char **p = children; *p; p++) {
+                    char *name = NULL;
+                    char *display = NULL;
+                    gsize n = strlen (*p);
+                    gboolean is_dir = (n > 0 && (*p)[n - 1] == '/');
+
+                    if (pass == 0 && is_dir) {
+                        /* Dir-form: child is "subdir/"; check for
+                         * <prefix>/subdir/theme.ini. */
+                        char *subdir = g_strndup (*p, n - 1);
+                        char *manifest_res = g_strdup_printf (
+                            "%s%s%s/theme.ini", resource_prefix, sep, subdir);
+                        display = read_display_name_from_resource (manifest_res);
+                        if (display
+                            || g_resources_get_info (
+                                manifest_res, G_RESOURCE_LOOKUP_FLAGS_NONE,
+                                NULL, NULL, NULL)) {
+                            name = subdir;
+                            subdir = NULL;
+                        }
+                        g_free (subdir);
+                        g_free (manifest_res);
+                    } else if (pass == 1 && !is_dir && n > 4
+                               && g_ascii_strcasecmp (*p + n - 4, ".ini")
+                                      == 0) {
+                        name = strip_ini_suffix (*p);
+                        char *resource_path = g_strdup_printf (
+                            "%s%s%s", resource_prefix, sep, *p);
+                        display = read_display_name_from_resource (resource_path);
+                        g_free (resource_path);
+                    }
+
+                    if (!name) {
+                        continue;
+                    }
+                    if (!theme_name_is_safe (name)) {
+                        g_free (name);
+                        g_free (display);
+                        continue;
+                    }
+                    if (g_hash_table_contains (seen, name)) {
+                        g_free (name);
+                        g_free (display);
+                        continue;
+                    }
+                    GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
+                    e->name = name;
+                    e->display = display ? display : g_strdup (name);
+                    g_ptr_array_add (out, e);
+                    g_hash_table_add (seen, e->name);
                 }
-                char *name = strip_ini_suffix (*p);
-                if (g_hash_table_contains (seen, name)) {
-                    g_free (name);
-                    continue;
-                }
-                char *resource_path
-                    = g_strdup_printf ("%s%s%s", resource_prefix,
-                                       g_str_has_suffix (resource_prefix, "/")
-                                           ? ""
-                                           : "/",
-                                       *p);
-                char *display = read_display_name_from_resource (resource_path);
-                GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
-                e->name = name;
-                e->display = display ? display : g_strdup (name);
-                g_ptr_array_add (out, e);
-                g_hash_table_add (seen, e->name);
-                g_free (resource_path);
             }
             g_strfreev (children);
         }

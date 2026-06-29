@@ -36,6 +36,7 @@
 #include "gtkhx_theme.h" /* gtkhx_theme_scale, GTKHX_SCALE_TASKS_ROW_ICON */
 #include "human_readable.h"
 #include "gtkhx.h"
+#include "gtkhx_icon.h"
 #include "xfers.h"
 #include "sound.h"
 #include "toolbar.h"
@@ -152,8 +153,8 @@ gtask_apply_smaller_font (GtkLabel *label, double scale)
 }
 
 /* Resolve a gresource path for the row icon column. We use the
- * same retro pixmaps the toolbar carries (dl/ul/tracker/connect/
- * tasks) so the Tasks window keeps the period-appropriate look
+ * same retro pixmaps the toolbar carries (download/upload/tracker/
+ * connect/tasks) so the Tasks window keeps the period-appropriate look
  * instead of jumping into Adwaita's symbolic icon set. The pixmaps
  * are 16x16 originals; gtask_make_icon scales 2x to 32px to match
  * the toolbar treatment. */
@@ -162,8 +163,8 @@ gtask_icon_for (guint32 trans, struct htxf_conn *htxf)
 {
     if (htxf) {
         return htxf->type == XFER_GET
-                   ? "/com/nasledov/gtkhx/pixmaps/dl.png"
-                   : "/com/nasledov/gtkhx/pixmaps/ul.png";
+                   ? "/com/nasledov/gtkhx/pixmaps/download.png"
+                   : "/com/nasledov/gtkhx/pixmaps/upload.png";
     }
     switch ((gint32) trans) {
     case -127: /* tracker list */
@@ -204,7 +205,10 @@ gtask_make_icon (const char *resource_path)
     double scale = gtkhx_theme_scale (GTKHX_SCALE_TASKS_ROW_ICON);
     int px = (int) (GTASK_ICON_SRC_SIZE * scale + 0.5);
 
-    src = gdk_pixbuf_new_from_resource (resource_path, NULL);
+    /* Route through the icon resolver so the active theme's bundled
+	 * icons (e.g. $CONFIG/themes/<theme>/icons/download.png) shadow the
+	 * stock pixmap. */
+    src = gtkhx_icon_load (resource_path);
     if (!src) {
         picture = gtk_picture_new ();
         gtk_widget_set_size_request (picture, px, px);

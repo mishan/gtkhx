@@ -162,6 +162,11 @@ typedef enum {
 gboolean gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark,
                                      GdkRGBA *out);
 
+/* Active theme name — the THEMENAME pref value, or "default" if
+ * the pref is unset / empty. Never NULL. Caller does NOT free.
+ * Used by gtkhx_icon to find the active theme's bundled icons. */
+const char *gtkhx_theme_active_name (void);
+
 /* ---- Loader ----------------------------------------------------------
  *
  * Theme files are GKeyFile .ini at $CONFIG/themes/<name>.ini, with the

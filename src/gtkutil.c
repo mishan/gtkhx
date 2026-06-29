@@ -29,6 +29,7 @@
 #include <sys/time.h>
 #include <time.h>
 #include "hx.h"
+#include "gtkhx_icon.h"
 #include "news.h"
 #include "network.h"
 #include "toolbar.h"
@@ -921,15 +922,17 @@ button_scaled_size (GdkPixbuf *src, GtkhxScaleArea area, int *out_w,
 /* Load the source pixbuf for a tracked button. Returns a new ref the
  * caller owns, or NULL if neither source is available.
  *
- * Caches the decoded GResource pixbuf in BTN_KEY_PIXBUF on first
- * load so subsequent theme "changed" emissions (e.g. dragging a
- * scale spin row, which fans out one signal per tick across every
- * tracked button) don't re-decode the same PNG over and over. The
- * cache is per-button and dropped when the button itself is
- * destroyed (set_data_full's destroy hint takes care of the
- * g_object_unref). BTN_KEY_RESOURCE never changes on a live button
- * — it's set once at construction and is the unique key — so the
- * cached pixbuf stays valid for the button's lifetime. */
+ * The caller-supplied pixbuf path (BTN_KEY_PIXBUF set by
+ * gtkhx_pixbuf_button) is the stable source — return a ref to it
+ * directly. The resource-path branch (BTN_KEY_RESOURCE set by
+ * gtkhx_pixmap_button) goes through gtkhx_icon_load so the active
+ * theme's bundled icons ($CONFIG/themes/<theme>/icons/<basename>.png,
+ * or the theme's GResource dir) can shadow the stock pixmap per
+ * icon — the resolver's own cache absorbs the repeated-decode cost
+ * across theme "changed" fan-outs. We deliberately do NOT stash the
+ * resolver's result in BTN_KEY_PIXBUF — that would survive a theme
+ * switch and keep the old theme's icon on screen even after
+ * gtkhx_icon_invalidate_cache drops the resolver-side entry. */
 static GdkPixbuf *
 button_load_source (GtkWidget *btn)
 {
@@ -941,16 +944,7 @@ button_load_source (GtkWidget *btn)
     const char *resource_name
         = g_object_get_data (G_OBJECT (btn), BTN_KEY_RESOURCE);
     if (resource_name) {
-        GdkPixbuf *pb = gdk_pixbuf_new_from_resource (resource_name, NULL);
-        if (pb) {
-            /* Cache for next time. set_data_full holds its own
-			 * reference via the destroy hint; we hand the caller a
-			 * fresh ref on top. */
-            g_object_set_data_full (G_OBJECT (btn), BTN_KEY_PIXBUF,
-                                    g_object_ref (pb),
-                                    (GDestroyNotify) g_object_unref);
-        }
-        return pb;
+        return gtkhx_icon_load (resource_name);
     }
     return NULL;
 }
