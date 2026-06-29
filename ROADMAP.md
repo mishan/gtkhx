@@ -346,7 +346,8 @@ Locked-in choices:
 - **No capability bit** — probe Get Icon List (1861) after login with a ~2 s watchdog; silent fallback on timeout. Safe against every legacy server.
 - **Animated avatars, with a pause control** — render animated GIFs in the user list (animating only visible `GtkColumnView` cells), plus an "Animate avatar icons" pref that falls back to a still first frame when off. (Inline media chose first-frame-only for v1; GIF avatars go further by request.)
 - **Reuse the inline-media bounded decoder** (`src/preview.{c,h}` worker loader, magic-byte sniff + size caps), narrowed to GIF.
-- **Naming care in `hotline.h`** — `HTLC_HDR_ICON_GET` (0x0e90) is the unrelated legacy Mac cicn icon-get; new constants take a `GIF_ICON` prefix. Fields 0x0300/0x0301 coincide numerically with tracker-v3 TLV IDs but live in a separate namespace.
+- **Legacy CICN icons and GIF are one feature, two payloads.** The icon transactions (0x0745–0x0748) are shared; legacy carried a Mac cicn resource in field 0x0e90, fogWraith carries a GIF in 0x0300 (+ packed list 0x0301). cicn-over-wire is **vestigial** — no reachable server serves it (mhxd and Janus both discard a 0x0e90 payload; verified June 2026), so GtkHx implements the GIF payload only and leaves 0x0e90 reserved. The standard 16-bit icon-ID system (0x0068) is separate and already rendered today.
+- **Header bug fixed during scoping.** `HTLC_HDR_ICON_GET` in `src/hotline.h` had been mis-defined as `0x0e90` (the cicn data-field number); the real opcode is `0x0747`. Dormant (proto_trace-only), now corrected. 10.A adds the remaining opcodes/fields using mhxd's exact constant names (`HTLC_HDR_ICON_GETLIST/_SET/_GET`, `HTLS_HDR_ICON_CHANGE`, `HTLS_DATA_ICON_GIF/_LIST`). Fields 0x0300/0x0301 coincide numerically with tracker-v3 TLV IDs but live in a separate namespace.
 
 Sub-phases (detail in `docs/gif-icons-plan.md`):
 

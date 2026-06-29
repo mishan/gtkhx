@@ -18,6 +18,40 @@ Scoped, not started. **Janus support is confirmed end-to-end** (see
 transactions round-trip against the live container, so the Tier 3 target is
 ready before any code lands.
 
+## Relationship to the legacy CICN icons
+
+Custom per-user icons are **one feature with two payload encodings on the
+same transactions**, not two features:
+
+- **Transactions** `ICON_GETLIST` (0x0745), `ICON_SET` (0x0746),
+  `ICON_GET` (0x0747), `ICON_CHANGE` (0x0748) are shared.
+- **Legacy** carried a Mac **cicn** resource in field `0x0e90`
+  (`HTLS_DATA_ICON_CICN`).
+- **fogWraith GIF** carries a **GIF** in field `0x0300`
+  (`DATA_ICON_GIF`) plus the packed list entry `0x0301`
+  (`HTLS_DATA_ICON_LIST`).
+
+Two things were settled during scoping (June 2026):
+
+1. **Header bug fixed.** `src/hotline.h` had `HTLC_HDR_ICON_GET` defined as
+   `0x0e90` — that's the cicn *data field* number, not the opcode. The real
+   icon-get opcode is `0x0747`. The constant was dormant (only
+   `proto_trace.c` referenced it), so the bug never fired. Corrected to
+   `0x0747`.
+2. **Legacy cicn-over-wire is vestigial — dropped.** No reachable server
+   serves a cicn payload. Verified by probing both: setting an icon via
+   field `0x0e90` and reading it back, **mhxd discards it** (returns the
+   previously-set GIF) and **Janus discards it** (returns no icon data).
+   mhxd's *header* defines `HTLS_DATA_ICON_CICN` but no `.c` file ever reads
+   or writes it; its handlers are GIF-only. Even the sibling `ghx` client
+   never fetched peer cicn icons. So GtkHx implements the **GIF** payload
+   only; the `0x0e90` slot stays reserved but unused.
+
+The standard **16-bit icon ID** (`DATA_ICON` / 0x0068) that indexes the
+bundled icon set is a separate, already-working system — `cicn.c` decodes
+those resources and the user list renders them today. This plan is purely
+about the per-user uploaded **GIF avatar** layered on top.
+
 ## What the extension does
 
 The standard Hotline protocol gives each user a 16-bit icon ID
@@ -42,29 +76,25 @@ reconnects (server-dependent). Servers impose a size cap (spec suggests
 
 ### Transactions (1861–1864 / 0x0745–0x0748)
 
-| Dec | Hex | Name | Direction | Proposed C constant |
+| Dec | Hex | Name | Direction | C constant (matches mhxd) |
 |---|---|---|---|---|
-| 1861 | 0x0745 | Get Icon List | C→S | `HTLC_HDR_GIF_ICON_GET_LIST` |
-| 1862 | 0x0746 | Set Icon | C→S | `HTLC_HDR_GIF_ICON_SET` |
-| 1863 | 0x0747 | Get Icon | C→S | `HTLC_HDR_GIF_ICON_GET` |
-| 1864 | 0x0748 | Icon Change | S→C | `HTLS_HDR_GIF_ICON_CHANGE` |
+| 1861 | 0x0745 | Get Icon List | C→S | `HTLC_HDR_ICON_GETLIST` |
+| 1862 | 0x0746 | Set Icon | C→S | `HTLC_HDR_ICON_SET` |
+| 1863 | 0x0747 | Get Icon | C→S | `HTLC_HDR_ICON_GET` |
+| 1864 | 0x0748 | Icon Change | S→C | `HTLS_HDR_ICON_CHANGE` |
 
-> **Naming collision — read this.** `HTLC_HDR_ICON_GET` already exists at
-> `0x00000e90` (`src/hotline.h:604`) — that's the **legacy Mac cicn**
-> icon-get, unrelated to this extension, and `HTLS_DATA_ICON_CICN` (0x0e90)
-> is its data field. The new 0x0747 opcode must **not** reuse the bare
-> `ICON_GET` name. Prefix every new constant with `GIF_ICON` to keep the two
-> systems unambiguous in `proto_trace.c` and everywhere else.
-
-Mirror the voice-opcode style in `hotline.h` — `((guint32)0x00000745)` with
-a `/* 1861 client->server */` comment.
+Use mhxd's exact constant names (`mhxd/src/common/hotline.h`) so the two
+codebases cross-read cleanly. `HTLC_HDR_ICON_GET` already exists in
+`src/hotline.h` (value corrected to `0x0747` during scoping — it had been
+mis-defined as `0x0e90`); 10.A adds the other three. Mirror the voice-opcode
+style — `((guint32)0x00000745)` with a `/* 1861 client->server */` comment.
 
 ### Fields
 
-| Dec | Hex | Name | Proposed C constant |
+| Dec | Hex | Name | C constant (matches mhxd) |
 |---|---|---|---|
-| 768 | 0x0300 | GIF Icon Data | `HTLC/HTLS_DATA_GIF_ICON_DATA` |
-| 769 | 0x0301 | Icon List Entry | `HTLS_DATA_GIF_ICON_LIST_ENTRY` |
+| 768 | 0x0300 | GIF Icon Data | `HTLC/HTLS_DATA_ICON_GIF` |
+| 769 | 0x0301 | Icon List Entry | `HTLS_DATA_ICON_LIST` |
 | 103 | 0x0067 | User ID | `HTLC/HTLS_DATA_UID` (exists) |
 
 > **Numeric coincidence (not a real collision).** `0x0300` / `0x0301`
