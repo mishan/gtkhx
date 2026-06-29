@@ -64,6 +64,10 @@ rust_sources = files(
   'crates/hxbridge/src/blocking.rs',
   'crates/hxbridge/src/channel.rs',
   'crates/hxbridge/src/runtime.rs',
+  # Phase R4 — GtkhxSession as a Rust glib::subclass GObject (replaces
+  # src/gtkhx_session.c). References the C boxed GTypes (HxChatEvent /
+  # HxMsgEvent / HxTrackerServer) via FFI until R4.2 re-hosts them.
+  'crates/gtkhx-session/src/lib.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
   'crates/hxnet/src/cipher.rs',
@@ -101,6 +105,7 @@ rust_sources = files(
   'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
+  'crates/gtkhx-session/Cargo.toml',
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
@@ -336,6 +341,24 @@ rust_hxbridge_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxbridge',
+  ],
+)
+
+# GtkhxSession GObject (Phase R4). The model→view signal hub, now a
+# Rust glib::subclass type. Exports the C ABI the deleted
+# src/gtkhx_session.c used to: gtkhx_session_get_type,
+# gtkhx_session_get_default, and the 26 gtkhx_session_emit_* wrappers.
+# The staticlib has undefined references to the C boxed-type accessors
+# (hx_chat_event_get_type / hx_msg_event_get_type /
+# hx_tracker_server_get_type) which the linking C target resolves from
+# proto_helpers.c / tracker_event.c — same leaf-up "C resolves Rust's
+# externs at final link" shape the other crates use. Pulls in glib/
+# gobject (already C-side deps), no new system-library surface.
+rust_gtkhx_session_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lgtkhx_session',
   ],
 )
 
