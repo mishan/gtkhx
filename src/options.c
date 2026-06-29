@@ -48,8 +48,10 @@
 #include "text_util.h"
 #include "tracker.h"
 #include "debug.h"
+#ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_ptt_keyspec.h"
+#endif
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
@@ -710,6 +712,7 @@ changed_tray (session *sess)
     gtkhx_tray_set_enabled (gtkhx_prefs.tray);
 }
 
+#ifdef HAVE_VOICE
 /* Settings → Voice → "Input device" combobox. Pushes the user's
  * pick through to the Rust runtime via FFI; the next VoiceRuntime
  * construction (typically the next Join Voice click) builds the
@@ -739,6 +742,7 @@ changed_voice_output_device (session *sess)
     (void)sess;
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 }
+#endif /* HAVE_VOICE */
 
 /* changefunc for the active-theme name. A change here (manually
  * editing gtkhxrc, or — in a future theme-editor phase — Settings
@@ -949,17 +953,30 @@ struct cfgvar {
     { CFG_TRAY, { &gtkhx_prefs.tray }, BOOLEAN, 0, changed_tray, NULL },
     { CFG_USER_XSIZE, { &gtkhx_prefs.geo.users.xsize }, INT, 0, NULL, NULL },
     { CFG_USER_YSIZE, { &gtkhx_prefs.geo.users.ysize }, INT, 0, NULL, NULL },
+    /* The device prefs persist in gtkhxrc regardless of whether voice
+     * is compiled in (so a build without voice doesn't drop a user's
+     * saved picks). The change-callbacks push the value into the Rust
+     * runtime, so they only exist when HAVE_VOICE — otherwise the
+     * entries carry a NULL changefunc and are pure storage. */
     { CFG_VOICE_INPUT_DEVICE,
       { &gtkhx_prefs.voice_input_device },
       STRING,
       0,
+#ifdef HAVE_VOICE
       changed_voice_input_device,
+#else
+      NULL,
+#endif
       NULL },
     { CFG_VOICE_OUTPUT_DEVICE,
       { &gtkhx_prefs.voice_output_device },
       STRING,
       0,
+#ifdef HAVE_VOICE
       changed_voice_output_device,
+#else
+      NULL,
+#endif
       NULL },
     /* Phase 8.E follow-up: push-to-talk. PTT_ENABLED is a plain
      * BOOLEAN; PTT_KEY is a STRING that holds the canonical key
@@ -2796,6 +2813,7 @@ settings_page_notifications (AdwPreferencesPage *page)
     adw_preferences_page_add (page, mentions);
 }
 
+#ifdef HAVE_VOICE
 /* Phase 8.E: Voice device pickers. Queries gtkhx_voice_list_input_
  * /output_devices at page-build time (no live monitoring yet — a
  * Settings re-open after plugging a new mic re-runs the scan), then
@@ -3089,6 +3107,7 @@ settings_page_voice (AdwPreferencesPage *page)
      * cfgvars) don't fit any of the generic pref_* row helpers. */
     settings_page_voice_ptt_group (page);
 }
+#endif /* HAVE_VOICE */
 
 /* Misc holds Auto Reply plus the two genuinely cross-cutting
  * behaviours (queue downloads, show pchats at back). Single-page
@@ -3287,8 +3306,10 @@ create_options_window (GtkWidget *widget, gpointer data)
                        settings_page_chat);
     settings_add_page (dlg, _ ("Sound"), "audio-speakers-symbolic",
                        settings_page_sound);
+#ifdef HAVE_VOICE
     settings_add_page (dlg, _ ("Voice"), "audio-input-microphone-symbolic",
                        settings_page_voice);
+#endif
     settings_add_page (dlg, _ ("Notifications"),
                        "preferences-system-notifications-symbolic",
                        settings_page_notifications);

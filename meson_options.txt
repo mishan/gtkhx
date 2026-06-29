@@ -21,3 +21,17 @@ option('glycin_compat',
                 'crate 2.x, gtk-rs 0.20; Debian stable / older runtimes). ' +
                 'Selects the cargo feature on rust/crates/hx-image-decode. ' +
                 'See docs/glycin-migration-plan.md.')
+
+option('voice',
+  type        : 'feature',
+  value       : 'auto',
+  description : 'Voice chat (fogWraith WebRTC extension). Requires the '       +
+                'GStreamer 1.20+ stack (core / app / audio / sdp / webrtc) '   +
+                'and pulls in the hxvoice + hxvoice-runtime Rust crates. '     +
+                '"auto" (default) compiles voice in when the GStreamer stack ' +
+                'is found and silently drops it otherwise; "enabled" makes a ' +
+                'missing GStreamer stack a hard configure error; "disabled" '  +
+                'compiles voice out even when GStreamer is present. When off, '+
+                'the voice crates are not built, the GStreamer libs are not '  +
+                'linked, HTLC_CAP_VOICE is not advertised, and all voice UI '  +
+                'is removed. See docs/voice-chat-plan.md.')

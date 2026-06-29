@@ -61,7 +61,7 @@ jobs:
     name: build + unit + proto
     runs-on: ubuntu-latest
     container:
-      # Fedora ships current gtk4 / libadwaita / nettle. Pinned to
+      # Fedora ships current gtk4 / libadwaita. Pinned to
       # a major so a Fedora 44 release with surprise breakage doesn't
       # red the suite the day it lands; bump deliberately. On 43 for
       # the glycin 3.x generation: its glycin-loaders ship the 2+
@@ -106,7 +106,6 @@ jobs:
             meson ninja-build pkgconf-pkg-config gcc \
             gtk4-devel libadwaita-devel \
             glib2-devel gobject-introspection-devel \
-            nettle-devel zlib-devel \
             gsound-devel \
             libnice-gstreamer1 \
             libsoup3-devel \
@@ -208,6 +207,65 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: meson-logs-build-and-test
+          path: build/meson-logs/
+
+  build-no-voice:
+    name: build + unit + proto (voice disabled)
+    runs-on: ubuntu-latest
+    container:
+      image: fedora:43
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install build deps (no GStreamer)
+        # Deliberately omits every GStreamer / libnice package that
+        # build-and-test installs. -Dvoice=disabled compiles the voice
+        # feature out: the hxvoice / hxvoice-runtime crates aren't built
+        # (rust/meson.build excludes them) and the GStreamer system libs
+        # aren't linked, so this job proves GtkHx builds end-to-end on a
+        # host with no GStreamer development stack at all — the whole
+        # point of making voice optional.
+        run: |
+          dnf -y install \
+            meson ninja-build pkgconf-pkg-config gcc \
+            gtk4-devel libadwaita-devel \
+            glib2-devel gobject-introspection-devel \
+            gsound-devel \
+            gettext-devel \
+            desktop-file-utils appstream \
+            libpanel-devel \
+            libseccomp-devel lcms2-devel \
+            glycin-loaders \
+            git rust cargo
+
+      - name: meson setup (voice disabled)
+        run: meson setup build -Dvoice=disabled
+
+      - name: meson compile
+        run: meson compile -C build
+
+      - name: meson test (unit + proto)
+        run: |
+          meson test -C build --suite unit --suite proto \
+            --print-errorlogs
+
+      - name: cargo test (Rust workspace, voice crates excluded)
+        # Mirror the meson exclusion: with voice off the binary never
+        # links hxvoice-runtime, and this host has no GStreamer, so the
+        # gstreamer-rs-dependent crates can't (and shouldn't) build here.
+        env:
+          GTKHX_GLYCIN_NO_SANDBOX: "1"
+        run: |
+          cd rust && cargo test --workspace \
+            --exclude hxvoice --exclude hxvoice-runtime \
+            --ignore-rust-version
+
+      - name: upload meson test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-build-no-voice
           path: build/meson-logs/
 
   integration:
@@ -408,7 +466,6 @@ jobs:
                 meson ninja-build pkgconf-pkg-config gcc \
                 gtk4-devel libadwaita-devel \
                 glib2-devel gobject-introspection-devel \
-                nettle-devel zlib-devel \
                 gsound-devel \
                 gstreamer1-devel \
                 gstreamer1-plugins-base-devel \

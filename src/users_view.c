@@ -27,7 +27,9 @@
 #include "users.h"  /* users_font_desc + user_popup_show */
 #include "users_row.h"
 #include "users_view.h"
+#ifdef HAVE_VOICE
 #include "voice_model.h"
+#endif
 
 /* Right-click handler — pops user_popup over the row under (x,y).
  * Installed by hx_user_list_view_new on the column view; locates
@@ -638,6 +640,7 @@ name_unbind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     hx_user_cell_name_set_row (cell, NULL);
 }
 
+#ifdef HAVE_VOICE
 /* ---- Voice indicator column ---------------------------------- */
 /*
  * Renders a single small icon per row reflecting the user's voice
@@ -836,6 +839,7 @@ voice_unbind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
     gtk_image_clear (img);
     gtk_widget_set_visible (GTK_WIDGET (img), FALSE);
 }
+#endif /* HAVE_VOICE */
 
 /* ---- Activate (double-click / Enter) — open msgwin ---------- */
 
@@ -951,9 +955,13 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
 {
     HxUserListView *v = g_object_new (HX_TYPE_USER_LIST_VIEW, NULL);
     GtkColumnView *cv;
-    GtkColumnViewColumn *col_uid, *col_voice, *col_name;
-    GtkListItemFactory *factory_uid, *factory_voice, *factory_name;
+    GtkColumnViewColumn *col_uid, *col_name;
+    GtkListItemFactory *factory_uid, *factory_name;
     GtkSorter *sorter_uid, *sorter_name;
+#ifdef HAVE_VOICE
+    GtkColumnViewColumn *col_voice;
+    GtkListItemFactory *factory_voice;
+#endif
 
     v->sess = sess;
     v->style = style;
@@ -1022,6 +1030,7 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
     gtk_column_view_append_column (cv, col_uid);
     g_object_unref (col_uid);
 
+#ifdef HAVE_VOICE
     /* Voice indicator column. Sits between UID and Name so the eye
      * naturally scans uid → state → name. 22 px is wide enough for
      * the 12 px symbolic icon plus minimal padding; the column has
@@ -1046,6 +1055,7 @@ hx_user_list_view_new (session *sess, HxUserListStyle style)
     gtk_column_view_column_set_resizable (col_voice, FALSE);
     gtk_column_view_append_column (cv, col_voice);
     g_object_unref (col_voice);
+#endif /* HAVE_VOICE */
 
     /* Name column — uses the custom HxUserCellName widget. */
     factory_name = gtk_signal_list_item_factory_new ();

@@ -581,6 +581,11 @@ test_hx_user_hash = executable('test_hx_user_hash',
 test('hx_user_hash', test_hx_user_hash,
      suite : 'unit')
 
+# Voice unit tests are built only when voice is compiled in (-Dvoice /
+# the voice_enabled boolean from the top-level meson.build) — they
+# compile the voice_*.c sources that are excluded from the binary when
+# voice is off.
+if voice_enabled
 # voice_ptt_keyspec — PTT key-spec vocabulary + canonicalisation.
 # Pure functions over GDK keysyms; the unit test drives them
 # without any GTK widget construction. gtk_init_check is called so
@@ -613,6 +618,7 @@ test_voice_model = executable('test_voice_model',
 )
 test('voice_model', test_voice_model,
      suite : 'unit')
+endif # voice_enabled
 
 # inline_media_decode — Phase 9.B bounded image decoder.
 # Sniff cases over hand-crafted prefixes pin the JPEG / PNG / GIF
@@ -1050,7 +1056,9 @@ test('chat_history', test_chat_history,
 # mid-label / SDP-summary / ICE-JSON extractors. The Rust crate has
 # its own dense unit tests for the same code; this file pins the
 # C-side observable behaviour. Source: fogWraith
-# Capabilities-Voice.md.
+# Capabilities-Voice.md. Built only when voice is compiled in — it
+# compiles ../src/voice.c.
+if voice_enabled
 test_voice = executable('test_voice',
   'proto/test_voice.c',
   '../src/voice.c',
@@ -1063,6 +1071,7 @@ test_voice = executable('test_voice',
 )
 test('voice', test_voice,
      suite : 'proto')
+endif # voice_enabled
 
 # inline_media — fogWraith inline-media extension wire shape (Phase 9.A).
 # Pins HTLC_CAP_INLINE_MEDIA (bit 3 = 0x0008), the 0x0201-0x0212 field
@@ -2254,6 +2263,12 @@ test('folder_put', test_integration_folder_put,
 # disconnect_cleanup) open two connections each, so the cost is
 # higher than the single-client tests but still well under the
 # 60 s timeout.
+#
+# Built only when voice is compiled in (-Dvoice / voice_enabled).
+# The matrix infrastructure (server_matrix.c's HX_TEST_CAP_VOICE /
+# voice_port fields) stays compiled regardless — only these
+# end-to-end binaries are gated.
+if voice_enabled
 test_integration_voice_join = executable('test_integration_voice_join',
   'integration/test_voice_join.c',
   dependencies        : proto_test_deps,
@@ -2352,3 +2367,4 @@ test('voice_rejoin_cycle', test_integration_voice_rejoin_cycle,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 60)
+endif # voice_enabled

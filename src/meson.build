@@ -96,14 +96,29 @@ gtkhx_sources = files(
   'users.c',
   'users_row.c',
   'users_view.c',
+  'xfers.c',
+  'xtext.c',
+)
+
+# Voice chat (fogWraith WebRTC extension) C sources. Compiled in only
+# when voice_enabled (see -Dvoice / the top-level meson.build). When off,
+# these files are dropped, the HAVE_VOICE define below is unset, and every
+# call site in the always-compiled files is guarded by #ifdef HAVE_VOICE.
+# voice.c            — wire-out helpers (hx_send_voice_*).
+# voice_model.c      — per-uid voice presence/state GObject (no GStreamer).
+# voice_panel.c      — per-chat-tab Join/Leave/Mute toolbar + runtime wire.
+# voice_ptt.c        — push-to-talk key controller.
+# voice_ptt_keyspec.c— pure PTT key-spec vocabulary / canonicalisation.
+voice_sources = files(
   'voice.c',
   'voice_model.c',
   'voice_panel.c',
   'voice_ptt.c',
   'voice_ptt_keyspec.c',
-  'xfers.c',
-  'xtext.c',
 )
+if voice_enabled
+  gtkhx_sources += voice_sources
+endif
 
 # -----------------------------------------------------------------------------
 # Generated config.h — replaces autotools' AC_DEFINE machinery.
@@ -144,6 +159,14 @@ if imagemagick_dep.found()
   conf.set('HAVE_IMAGEMAGICK', 1)
 endif
 
+# Voice chat. Gates the voice_*.c sources (above) and every voice call
+# site in the always-compiled files (gtkhx.c, chat.c, toolbar.c,
+# options.c, users_view.c, network.c, rcv.c). Driven by -Dvoice +
+# the GStreamer probe in the top-level meson.build.
+if voice_enabled
+  conf.set('HAVE_VOICE', 1)
+endif
+
 # Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,
 # gtk_signal_connect, gtk_widget_set_usize). Per ROADMAP, the dlopen
 # plugin API is slated for removal, so rather than rewrite it for GTK 3
@@ -171,10 +194,27 @@ gtkhx_resources = gnome.compile_resources(
   c_name     : 'gtkhx',
 )
 
+# The hxvoice-runtime staticlib is linked only when voice is compiled in;
+# with voice off the crate isn't built (rust/meson.build), so referencing
+# -lhxvoice_runtime here would fail at link time.
+rust_deps = [
+  rust_hxcrypto_hash_dep,
+  rust_hxcrypto_aead_dep,
+  rust_hxcrypto_stream_dep,
+  rust_hxcompress_dep,
+  rust_hotline_proto_dep,
+  rust_hxbridge_dep,
+  rust_hxnet_dep,
+  rust_hx_image_decode_dep,
+]
+if voice_enabled
+  rust_deps += rust_hxvoice_runtime_dep
+endif
+
 executable('gtkhx',
   gtkhx_sources,
   gtkhx_resources,
-  dependencies        : deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hotline_proto_dep, rust_hxbridge_dep, rust_hxnet_dep, rust_hxvoice_runtime_dep, rust_hx_image_decode_dep],
+  dependencies        : deps + rust_deps,
   include_directories : include_directories('.'),
   install             : true,
 )

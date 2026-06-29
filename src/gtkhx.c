@@ -62,8 +62,10 @@
 #include "gtkhx_icon.h"
 #include "notify.h"
 #include "tracker.h"
+#ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_model.h"
+#endif
 #include "tray.h"
 #include "xtext.h"
 #include "options.h"
@@ -1003,6 +1005,7 @@ fe_init (void)
     tasks_init (&the_session);
     msg_windows_init (&the_session);
 
+#ifdef HAVE_VOICE
     /* Voice indicator model. Lives for the whole session lifetime
      * — users_view subscribes once at window construction time and
      * the model survives reconnects (state cleared inside
@@ -1010,6 +1013,7 @@ fe_init (void)
      * "indicator-changed" signal during fe_init's window-creation
      * sweep below. */
     the_session.voice_model = hx_voice_model_new ();
+#endif
 
     gtkhx_connect_signals (gtkhx_session_get_default ());
 
@@ -1264,6 +1268,7 @@ init (int argc, char **argv)
      * create_toolbar_window in toolbar.c about NULL gtkhx_app at
      * this point in init). */
     panel_init ();
+#ifdef HAVE_VOICE
     /* Phase 8.B: initialise GStreamer for the voice runtime. Idempotent;
      * the Rust hxvoice-runtime wraps gst::init which checks its own
      * "already initialised" flag. Order doesn't matter relative to
@@ -1275,6 +1280,7 @@ init (int argc, char **argv)
         g_warning (
             "gtkhx_voice_init failed; voice features will be unavailable");
     }
+#endif
     fe_init ();
 }
 

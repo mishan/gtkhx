@@ -72,6 +72,23 @@ Re-add fresh packaging when ready to ship.)
 `meson.build` pins `gtk4 >= 4.6` and `libadwaita-1 >= 1.6`. `meson setup build &&
 meson compile -C build` produces a working binary.
 
+**Voice chat (Phase 8) is an optional build feature.** The `-Dvoice` meson
+option (`auto` / `enabled` / `disabled`, default `auto`) gates it on the
+GStreamer 1.20+ stack (`gstreamer-1.0` / `-app` / `-audio` / `-sdp` /
+`-webrtc`). `auto` compiles voice in when GStreamer is found and silently
+drops it otherwise; `enabled` makes a missing stack a hard configure error.
+When off, the `hxvoice` / `hxvoice-runtime` Rust crates aren't built (so no
+GStreamer is needed at build time at all), the GStreamer libs aren't linked,
+`HTLC_CAP_VOICE` isn't advertised at LOGIN, and every voice C source + call
+site is compiled out behind the `HAVE_VOICE` define. The gate plumbing:
+`voice_enabled` in the top-level `meson.build` → `HAVE_VOICE` in
+`src/meson.build` + `--workspace --exclude hxvoice hxvoice-runtime` in
+`rust/meson.build` → `#ifdef HAVE_VOICE` guards in `gtkhx.c`, `chat.c`,
+`toolbar.c`, `options.c`, `users_view.c`, `network.c`, `rcv.c`, `gtkutil.c`.
+The voice unit/proto/integration tests are likewise gated in
+`tests/meson.build`; CI's `build-no-voice` job builds the whole binary with
+`-Dvoice=disabled` on a GStreamer-free image to keep the path green.
+
 The custom GtkCList fork is gone; its five list consumers (`tracker.c`, `news15.c`,
 `options.c`, `users.c`, `files.c`) now use `GtkColumnView` directly — the interim
 `gtk_hlist_compat` shim over GtkTreeView+GtkListStore has itself been removed. xtext

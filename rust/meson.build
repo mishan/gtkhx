@@ -203,6 +203,22 @@ else
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'
 endif
 
+# Voice crate gating. When voice is compiled out (see -Dvoice / the
+# `voice_enabled` boolean in the top-level meson.build), exclude the two
+# voice crates from the workspace build: hxvoice-runtime pulls in the
+# gstreamer-rs family (and therefore needs the GStreamer system libs at
+# build time), and hxvoice is its only consumer. Nothing else in the
+# C-linked crate set depends on either, so `--workspace --exclude` is a
+# clean cut — the build then needs no GStreamer present at all. With
+# voice on, the empty string leaves the default all-members build intact.
+# The `pkg/feature` syntax in cargo_features stays valid alongside
+# `--workspace`.
+if voice_enabled
+  cargo_voice_args = ''
+else
+  cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime'
+endif
+
 # --ignore-rust-version: several transitive deps (zbus / zvariant /
 # zvariant_derive / zvariant_utils / zbus_macros / zbus_names /
 # glycin-common / glycin-utils) carry `rust-version` >= 1.87 in
@@ -222,13 +238,14 @@ endif
 rust_build = custom_target('rust-workspace',
   command : [
     'sh', '-c',
-    '@0@ build --release --ignore-rust-version @5@ --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
+    '@0@ build --release --ignore-rust-version @5@ @6@ --manifest-path @1@ --target-dir @2@ --features @3@ && touch @4@'.format(
       cargo.full_path(),
       meson.current_source_dir() / 'Cargo.toml',
       rust_target_dir,
       cargo_features,
       '@OUTPUT@',
       cargo_no_default,
+      cargo_voice_args,
     ),
   ],
   depend_files : rust_sources,
@@ -354,6 +371,10 @@ rust_hxnet_dep = declare_dependency(
 # libraries probed at the top-level meson.build). The system libs are
 # already in `deps` on the gtkhx executable, so the link surface
 # doesn't grow.
+# Declared unconditionally (a declare_dependency is lazy — it only puts
+# -lhxvoice_runtime on a link line when something actually consumes it).
+# src/meson.build adds it to the gtkhx executable only when voice_enabled,
+# which is the same condition under which cargo built the staticlib above.
 rust_hxvoice_runtime_dep = declare_dependency(
   sources : rust_build,
   link_args : [
