@@ -397,6 +397,15 @@ pub mod tag {
     /// `0x0500` — Colored-Nicknames extension: 0x00RRGGBB (u32 BE).
     pub const COLOR: u16 = 0x0500;
 
+    /// `0x0300` — GIF-icons extension: raw GIF avatar bytes
+    /// (GIF87a/GIF89a). On an ICON_SET request (empty clears) and an
+    /// ICON_GET reply. Numerically coincides with a tracker-v3 TLV ID
+    /// but that's a separate namespace. Parser: [`crate::gif_icons`].
+    pub const ICON_GIF: u16 = 0x0300;
+    /// `0x0301` — GIF-icons extension: one packed entry per user in an
+    /// ICON_GETLIST reply — u16 uid (BE) + u16 gif_len (BE) + gif bytes.
+    pub const ICON_LIST: u16 = 0x0301;
+
     /// `0x0065` — HTLS_DATA_NEWS body (1.0 flat news only; aliases BODY).
     /// The chat / msg / agreement readers each look at this same tag
     /// from inside the opcode's parser — see the module comment about

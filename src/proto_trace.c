@@ -129,8 +129,14 @@ proto_hdr_name (guint32 type)
         return "HTLC_HDR_POSTTHREAD";
     case HTLC_HDR_DELETETHREAD:
         return "HTLC_HDR_DELETETHREAD";
+    case HTLC_HDR_ICON_GETLIST:
+        return "HTLC_HDR_ICON_GETLIST";
+    case HTLC_HDR_ICON_SET:
+        return "HTLC_HDR_ICON_SET";
     case HTLC_HDR_ICON_GET:
         return "HTLC_HDR_ICON_GET";
+    case HTLS_HDR_ICON_CHANGE:
+        return "HTLS_HDR_ICON_CHANGE";
     case HTLC_HDR_FILE_HASH:
         return "HTLC_HDR_FILE_HASH";
 

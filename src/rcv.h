@@ -68,6 +68,20 @@ extern void rcv_task_news_file (struct htlc_conn *htlc);
  * repeat it. */
 extern void rcv_task_chat_history (struct htlc_conn *htlc,
                                    void             *channel_ptr);
+/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The
+ * send wrappers in gif_icons.c register these via task_new before the
+ * matching hlwrite_chunks. Both delegate parsing to the Rust
+ * hotline-proto crate and emit GtkhxSession::gif-icon-data.
+ *   _get      — ICON_GET (1863) reply: UID + ICON_GIF. uid_ptr is
+ *               GUINT_TO_POINTER(uid) from the send wrapper.
+ *   _getlist  — ICON_GETLIST (1861) reply: 0..N packed ICON_LIST
+ *               entries; also resolves the probe to SUPPORTED. */
+extern void rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr);
+extern void rcv_task_icon_getlist (struct htlc_conn *htlc);
+/* ICON_CHANGE (1864) broadcast: UID only. Emits gif-icon-changed so a
+ * view can re-fetch the avatar via hx_icon_get. */
+extern void hx_rcv_icon_change (struct htlc_conn *htlc);
+
 extern void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat,
                                 int text);
 extern void rcv_task_user_list_switch (struct htlc_conn *htlc,

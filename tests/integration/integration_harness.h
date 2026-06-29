@@ -495,6 +495,20 @@ extern gboolean integration_drain_until_chat (int fd, struct htlc_conn *htlc,
                                               int max_messages);
 
 /*
+ * Variant of integration_drain_until_chat that matches on a unique
+ * substring in the chat body instead of the sender uid. Use this for
+ * chats relayed by Janus, whose HTLS_HDR_CHAT broadcasts carry uid 0
+ * (no sender stamp) so a uid filter can't scope to our own message.
+ * `marker` should be high-entropy enough to be unique across the
+ * parallel Tier 3 binaries (see make_marker in test_chat_history).
+ */
+extern gboolean integration_drain_until_chat_marker (int fd,
+                                                     struct htlc_conn *htlc,
+                                                     const char *marker,
+                                                     struct hx_chat_msg *out,
+                                                     int max_messages);
+
+/*
  * Drain server messages on `fd` until we see an HTLS_HDR_TASK whose
  * trans field matches `wanted_trans`. The matched message lives in
  * htlc->in afterwards; caller can read hdr_flag (error bit) and walk

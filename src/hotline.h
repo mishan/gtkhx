@@ -612,14 +612,17 @@ struct hl_user_data {
  * The constant was dormant (only proto_trace.c referenced it), so
  * the bug never fired.
  *
- * The full opcode + GIF field set (mhxd's HTLC_HDR_ICON_GETLIST /
- * _SET / _GET, HTLS_HDR_ICON_CHANGE, HTLS_DATA_ICON_GIF / _LIST)
- * lands with the GIF-icons implementation - see Phase 10 in
- * ROADMAP.md and docs/gif-icons-plan.md. Legacy cicn-over-wire
- * (an 0x0e90 payload on these same transactions) is vestigial: no
- * reachable server implements it - mhxd and Janus both discard a
- * cicn payload and are GIF-only (verified June 2026). */
-#define HTLC_HDR_ICON_GET ((guint32)0x00000747)
+ * Constant names match mhxd's (mhxd/src/common/hotline.h) so the
+ * two codebases cross-read. Legacy cicn-over-wire (a 0x0e90 payload
+ * on these same transactions) is vestigial: no reachable server
+ * implements it - mhxd and Janus both discard a cicn payload and are
+ * GIF-only (verified June 2026). GtkHx implements the GIF payload
+ * (HTLS_DATA_ICON_GIF / 0x0300) only. See Phase 10 in ROADMAP.md and
+ * docs/gif-icons-plan.md. */
+#define HTLC_HDR_ICON_GETLIST ((guint32)0x00000745) /* 1861 client->server */
+#define HTLC_HDR_ICON_SET ((guint32)0x00000746)     /* 1862 client->server */
+#define HTLC_HDR_ICON_GET ((guint32)0x00000747)     /* 1863 client->server */
+#define HTLS_HDR_ICON_CHANGE ((guint32)0x00000748)  /* 1864 server->client */
 #define HTLC_HDR_FILE_HASH ((guint32)0x00000ee0)
 
 /* HTLC_HDR_GET_CHAT_HISTORY = 700: chat-history extension request.
@@ -693,6 +696,18 @@ struct hl_user_data {
  * GIF payload (HTLS_DATA_ICON_GIF / 0x0300); no reachable server
  * serves a cicn payload here. Kept as a reserved slot. */
 #define HTLS_DATA_ICON_CICN ((guint16)0x0e90)
+
+/* GIF-icons extension payload fields (fogWraith GIF-Icons.md).
+ *
+ * DATA_ICON_GIF (0x0300) — raw GIF bytes (GIF87a/GIF89a). Carried on
+ *   ICON_SET requests (empty clears) and ICON_GET replies. Numerically
+ *   coincides with HTRK_V3_TLV_PROTOCOL_VERSION but that's a separate
+ *   tracker-v3 TLV namespace, not a Hotline DATA field.
+ * DATA_ICON_LIST (0x0301) — one packed entry per user in an
+ *   ICON_GETLIST reply: u16 uid (BE) + u16 gif_len (BE) + gif bytes. */
+#define HTLC_DATA_ICON_GIF ((guint16)0x0300)
+#define HTLS_DATA_ICON_GIF ((guint16)0x0300)
+#define HTLS_DATA_ICON_LIST ((guint16)0x0301)
 
 /* HOPE */
 /* HOPE-Secure-Login identification chunks. App ID/String are the

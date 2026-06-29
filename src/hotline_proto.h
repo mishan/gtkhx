@@ -1666,4 +1666,50 @@ extern int32_t gtkhx_proto_build_download_media_chunks (
     struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
+/* ---- GIF-icons extension (fogWraith GIF-Icons.md) ---- */
+
+/* True if buf begins with a GIF87a/GIF89a signature. */
+extern bool gtkhx_proto_gif_icon_is_gif (const uint8_t *buf, size_t len);
+
+/* Build the single ICON_SET (1862) chunk. gif_len == 0 (or NULL
+ * gif_ptr) builds a clear request (zero-length ICON_GIF field).
+ * chunks_cap >= 1. Returns 1 on success, 0 on oversize / no room. */
+extern int32_t gtkhx_proto_build_icon_set_chunks (
+    const uint8_t *gif_ptr, size_t gif_len,
+    struct hx_chunk *chunks, size_t chunks_cap);
+
+/* Build the single ICON_GET (1863) chunk: a UID field. chunks_cap >= 1,
+ * scratch_cap >= 2. Returns 1 on success, 0 on undersized buffers. */
+extern int32_t gtkhx_proto_build_icon_get_chunks (
+    uint16_t uid, struct hx_chunk *chunks, size_t chunks_cap,
+    uint8_t *scratch, size_t scratch_cap);
+
+/* One unpacked avatar entry. gif_ptr borrows into the reply buffer;
+ * copy out before the buffer is recycled. */
+struct gtkhx_proto_icon_entry {
+    uint16_t uid;
+    const uint8_t *gif_ptr;
+    size_t gif_len;
+};
+
+/* Parse an ICON_GET (1863) reply. UID is required; a missing ICON_GIF
+ * is reported as a cleared avatar (out->gif_len == 0). Returns true and
+ * fills *out when a UID is present, false otherwise. out must be
+ * non-NULL. */
+extern bool gtkhx_proto_parse_icon_get_reply (
+    const uint8_t *buf, size_t len, struct gtkhx_proto_icon_entry *out);
+
+/* Parse an ICON_CHANGE (1864) broadcast: UID only. Returns true and
+ * writes *out_uid when present, false otherwise. */
+extern bool gtkhx_proto_parse_icon_change (
+    const uint8_t *buf, size_t len, uint16_t *out_uid);
+
+/* Walk an ICON_GETLIST (1861) reply, writing up to cap unpacked
+ * entries into out (each gif_ptr borrows into buf). Returns the TOTAL
+ * number of valid entries, which may exceed cap; pass out=NULL/cap=0
+ * for a count-only pass, then allocate and call again. */
+extern size_t gtkhx_proto_parse_icon_list (
+    const uint8_t *buf, size_t len,
+    struct gtkhx_proto_icon_entry *out, size_t cap);
+
 #endif /* GTKHX_HOTLINE_PROTO_H */

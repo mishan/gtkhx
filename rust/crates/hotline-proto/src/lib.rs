@@ -42,6 +42,7 @@
 pub mod build;
 pub mod emoji;
 mod emoji_table;
+pub mod gif_icons;
 pub mod inline_media;
 pub mod messages;
 pub mod parse;

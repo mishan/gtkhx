@@ -63,6 +63,7 @@
 #include "banner.h"
 #include "chat_history.h"
 #include "inline_media.h"
+#include "gif_icons.h"
 #include "hl_access.h"
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
@@ -137,6 +138,12 @@ hx_post_login_fetches (struct htlc_conn *htlc)
               chat_with_cid (&the_session, 0), 0, "who");
     /* USER_GETLIST is a zero-chunk opcode. */
     hlwrite_chunks (htlc, HTLC_HDR_USER_GETLIST, 0, NULL, 0);
+
+    /* GIF-icons extension: probe for support (no capability bit). Sends
+	 * ICON_GETLIST and arms a watchdog; a reply marks the session
+	 * supported and delivers any avatars already set, a timeout marks
+	 * it unsupported. Safe against legacy servers. */
+    hx_icon_probe (htlc);
 
     /* Chat-history extension: if the server echoed our cap bit in
 	 * the LOGIN reply, request a batch for public chat (channel 0).
@@ -1508,6 +1515,9 @@ hx_rcv_hdr (struct htlc_conn *htlc)
         htlc->rcv = hx_rcv_voice_room_status;
         break;
 #endif /* HAVE_VOICE */
+    case HTLS_HDR_ICON_CHANGE:
+        htlc->rcv = hx_rcv_icon_change;
+        break;
     default:
         g_print ("0x%08x\n", type);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
@@ -2039,6 +2049,119 @@ rcv_task_news_file (struct htlc_conn *htlc)
     }
     gtkhx_session_emit_news_file (gtkhx_session_get_default (), htlc,
                                   (char *)news_buf, news_len);
+}
+
+/* GIF-icons extension (fogWraith GIF-Icons.md). Parsing lives in the
+ * Rust hotline-proto crate (crate::gif_icons via the gtkhx_proto_*
+ * shims); these handlers pass htlc->in.buf/pos straight in and only
+ * emit GtkhxSession signals — no chunk walking on the C side. */
+
+/* Emit gif-icon-data, upholding the signal's "raw GIF bytes or empty"
+ * contract. A non-empty payload that fails the GIF87a/89a signature
+ * check is network-supplied garbage (buggy / hostile server) — we drop
+ * it to a clear (len 0) so no subscriber tries to decode it and any
+ * stale avatar is removed. (The avatar decoder re-validates as
+ * defence-in-depth, but the signal itself must not carry non-GIF
+ * bytes.) */
+static void
+emit_gif_avatar_validated (GtkhxSession *sess, struct htlc_conn *htlc,
+                           guint16 uid, const guint8 *gif, guint len)
+{
+    if (len == 0) {
+        /* Cleared — never forward a (possibly dangling) non-NULL ptr for
+		 * an empty payload; subscribers see (NULL, 0). */
+        gif = NULL;
+    } else if (!gtkhx_proto_gif_icon_is_gif (gif, len)) {
+        debug_log ("icon",
+                   "avatar payload for uid=%u is not a GIF (%u bytes); "
+                   "treating as cleared",
+                   (unsigned) uid, len);
+        gif = NULL;
+        len = 0;
+    }
+    gtkhx_session_emit_gif_icon_data (sess, htlc, uid, gif, len);
+}
+
+/* ICON_GET (1863) task reply: UID + ICON_GIF. */
+void
+rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr)
+{
+    (void) uid_ptr; /* uid is echoed in the reply; we read it from there */
+    struct gtkhx_proto_icon_entry e;
+    if (!gtkhx_proto_parse_icon_get_reply (htlc->in.buf, htlc->in.pos, &e)) {
+        debug_log ("icon", "ICON_GET reply missing UID");
+        return;
+    }
+    /* A get reply implies the server speaks the extension. gif_len == 0
+	 * is a valid "avatar cleared" result — we still emit it so the view
+	 * drops any stale cached avatar. */
+    htlc->gif_icons_state = GIF_ICONS_SUPPORTED;
+    debug_log ("icon", "ICON_GET reply: uid=%u gif_len=%zu", (unsigned) e.uid,
+               e.gif_len);
+    emit_gif_avatar_validated (gtkhx_session_get_default (), htlc, e.uid,
+                               e.gif_ptr, (guint) e.gif_len);
+}
+
+/* ICON_GETLIST (1861) task reply: 0..N packed ICON_LIST entries. Also
+ * the resolution point for the post-login probe. */
+void
+rcv_task_icon_getlist (struct htlc_conn *htlc)
+{
+    /* The reply arriving at all means the server supports the
+	 * extension — flip the probe state and disarm the watchdog. */
+    htlc->gif_icons_state = GIF_ICONS_SUPPORTED;
+    if (htlc->gif_icons_probe_timer) {
+        g_source_remove (htlc->gif_icons_probe_timer);
+        htlc->gif_icons_probe_timer = 0;
+    }
+
+    /* Count first (out=NULL), then allocate exactly and fill — the
+	 * Rust walker returns the total even when out is NULL. The count is
+	 * server-controlled, so clamp it: a uid is a u16, so a well-formed
+	 * list has at most 65536 entries; a hostile/buggy reply with massive
+	 * duplication shouldn't drive a huge allocation + emit storm. */
+    size_t n = gtkhx_proto_parse_icon_list (htlc->in.buf, htlc->in.pos, NULL, 0);
+    /* A uid is u16, so the space is 65536 distinct values (0..65535) —
+	 * clamp to that, not G_MAXUINT16, so a full list isn't off-by-one. */
+    const size_t max_entries = (size_t) G_MAXUINT16 + 1;
+    if (n > max_entries) {
+        debug_log ("icon", "ICON_GETLIST reply: clamping %zu entries to %zu", n,
+                   max_entries);
+        n = max_entries;
+    }
+    debug_log ("icon", "ICON_GETLIST reply: %zu entr%s", n,
+               n == 1 ? "y" : "ies");
+    if (n == 0) {
+        return;
+    }
+    struct gtkhx_proto_icon_entry *entries
+        = g_new0 (struct gtkhx_proto_icon_entry, n);
+    size_t got
+        = gtkhx_proto_parse_icon_list (htlc->in.buf, htlc->in.pos, entries, n);
+    if (got > n) {
+        got = n; /* defensive: never iterate past the allocation */
+    }
+    GtkhxSession *sess = gtkhx_session_get_default ();
+    for (size_t i = 0; i < got; i++) {
+        emit_gif_avatar_validated (sess, htlc, entries[i].uid,
+                                   entries[i].gif_ptr,
+                                   (guint) entries[i].gif_len);
+    }
+    g_free (entries);
+}
+
+/* ICON_CHANGE (1864) server broadcast: UID only. */
+void
+hx_rcv_icon_change (struct htlc_conn *htlc)
+{
+    guint16 uid = 0;
+    if (!gtkhx_proto_parse_icon_change (htlc->in.buf, htlc->in.pos, &uid)) {
+        debug_log ("icon", "ICON_CHANGE broadcast missing UID");
+        return;
+    }
+    debug_log ("icon", "ICON_CHANGE: uid=%u", (unsigned) uid);
+    gtkhx_session_emit_gif_icon_changed (gtkhx_session_get_default (), htlc,
+                                         uid);
 }
 
 /* TRAN_GET_CHAT_HISTORY (700) reply walker. The reply carries:

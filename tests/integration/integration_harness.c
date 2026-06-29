@@ -893,18 +893,36 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
     return send_login_packet (fd, htlc, &req);
 }
 
+/* Wall-clock safety bound for the drain helpers below. The per-message
+ * recv timeout (3 s) already ends the wait when the stream goes quiet;
+ * this only bites under a *continuous* flood of unrelated frames. It's
+ * generous so a legitimately slow reply on a busy shared server still
+ * lands. */
+#define INTEGRATION_DRAIN_DEADLINE_US (30 * G_USEC_PER_SEC)
+
+/* Cross-talk note: the Tier 3 binaries run in parallel against shared
+ * servers, so every drain sees other sessions' traffic AND unsolicited
+ * server broadcasts (chat, USER_CHANGE, ICON_CHANGE, …). `max_messages`
+ * therefore counts only frames of the *category we're waiting on* (e.g.
+ * TASK replies, CHAT messages) that simply aren't ours — unrelated
+ * frame types are skipped for free so a burst of, say, ICON_CHANGE
+ * broadcasts from a concurrent test can't starve the search. The
+ * deadline + the recv timeout bound the loop either way. */
 gboolean
 integration_drain_until_task_trans (int fd, struct htlc_conn *htlc,
                                     guint32 wanted_trans, int max_messages)
 {
-    for (int i = 0; i < max_messages; i++) {
+    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
+    int seen = 0;
+    while (seen < max_messages && g_get_monotonic_time () < deadline) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
             return FALSE;
         }
         if (hdr_type (htlc) != HTLS_HDR_TASK) {
-            continue;
+            continue; /* unrelated broadcast — doesn't count */
         }
         if (hdr_trans (htlc) != wanted_trans) {
+            seen++; /* a TASK reply, just not the one we sent */
             continue;
         }
         return TRUE;
@@ -917,12 +935,14 @@ integration_drain_until_chat (int fd, struct htlc_conn *htlc,
                               guint16 wanted_uid, struct hx_chat_msg *out,
                               int max_messages)
 {
-    for (int i = 0; i < max_messages; i++) {
+    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
+    int seen = 0;
+    while (seen < max_messages && g_get_monotonic_time () < deadline) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
             return FALSE;
         }
         if (hdr_type (htlc) != HTLS_HDR_CHAT) {
-            continue;
+            continue; /* unrelated broadcast — doesn't count */
         }
         if (!hx_chat_extract (htlc, out)) {
             continue;
@@ -930,6 +950,38 @@ integration_drain_until_chat (int fd, struct htlc_conn *htlc,
         if (out->uid == wanted_uid) {
             return TRUE;
         }
+        seen++; /* a chat, just not from the uid we want */
+    }
+    return FALSE;
+}
+
+gboolean
+integration_drain_until_chat_marker (int fd, struct htlc_conn *htlc,
+                                     const char *marker, struct hx_chat_msg *out,
+                                     int max_messages)
+{
+    /* Like integration_drain_until_chat, but matches on a unique
+	 * substring in the chat body rather than the sender uid. Required
+	 * for chats relayed by Janus: its HTLS_HDR_CHAT broadcasts carry
+	 * uid 0 (it doesn't stamp the sender), so a uid filter can't scope
+	 * to our own message. A high-entropy marker is the robust
+	 * cross-talk discriminator (same approach test_chat_history uses). */
+    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
+    int seen = 0;
+    while (seen < max_messages && g_get_monotonic_time () < deadline) {
+        if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
+            return FALSE;
+        }
+        if (hdr_type (htlc) != HTLS_HDR_CHAT) {
+            continue; /* unrelated broadcast — doesn't count */
+        }
+        if (!hx_chat_extract (htlc, out)) {
+            continue;
+        }
+        if (out->text && marker && strstr (out->text, marker)) {
+            return TRUE;
+        }
+        seen++; /* a chat, just not the one we sent */
     }
     return FALSE;
 }
@@ -963,7 +1015,13 @@ gboolean
 integration_drain_until_type (int fd, struct htlc_conn *htlc,
                               guint16 wanted_type, int max_messages)
 {
-    for (int i = 0; i < max_messages; i++) {
+    /* No per-instance filter here — any frame of `wanted_type` is the
+	 * hit — so there's nothing "of the right category but wrong" to
+	 * count. Bound purely by the recv timeout (stream quiet) and the
+	 * deadline, so unrelated cross-talk can't make us give up early. */
+    (void) max_messages;
+    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
+    while (g_get_monotonic_time () < deadline) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
             return FALSE;
         }
@@ -1008,13 +1066,17 @@ integration_drain_until_chat_user_event (int fd, struct htlc_conn *htlc,
                                          guint32 wanted_cid,
                                          guint16 wanted_uid, int max_messages)
 {
-    for (int i = 0; i < max_messages; i++) {
+    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
+    int seen = 0;
+    while (seen < max_messages && g_get_monotonic_time () < deadline) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
             return FALSE;
         }
         if (hdr_type (htlc) != wanted_type) {
-            continue;
+            continue; /* unrelated broadcast — doesn't count */
         }
+        seen++; /* a frame of the awaited type; counts whether or not
+                 * it turns out to be the cid/uid we want */
 
         guint32 got_cid = 0;
         guint16 got_uid = 0;
@@ -1252,11 +1314,14 @@ guint32
 integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                                            int max_messages)
 {
-    if (max_messages <= 0) {
-        max_messages = 8;
-    }
-
-    for (int i = 0; i < max_messages; i++) {
+    /* Bounded by the recv timeout (login stream goes quiet) + the
+	 * wall-clock deadline, not a frame count: the login interleaving
+	 * (TASK reply, agreement, banner, …) plus unrelated broadcasts on a
+	 * busy shared server (e.g. ICON_CHANGE from a concurrent test) must
+	 * not make us give up before SELFINFO arrives. */
+    (void) max_messages;
+    gint64 deadline = g_get_monotonic_time () + INTEGRATION_DRAIN_DEADLINE_US;
+    while (g_get_monotonic_time () < deadline) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/3000)) {
             return 0;
         }
@@ -1291,6 +1356,17 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
                                      : _len;
                     memcpy (htlc->name, dh->data, nlen);
                     htlc->name[nlen] = '\0';
+                } else if (_type == HTLS_DATA_UID
+                           && _len == sizeof (guint16)
+                           && type == HTLS_HDR_TASK && htlc->uid == 0) {
+                    /* 1.9-style servers (Janus) carry our own uid in
+					 * the TASK login reply (HTLS_DATA_UID), not in the
+					 * SELFINFO that follows — so hx_selfinfo_parse can't
+					 * recover it. Stash it here; the open helpers prefer
+					 * the SELFINFO uid (mhxd) and fall back to this. */
+                    guint16 v;
+                    memcpy (&v, dh->data, sizeof v);
+                    htlc->uid = ntohs (v);
                 } else if (_type == HTLS_DATA_CAPABILITIES && _len > 0) {
                     htlc->caps = hl_capabilities_decode (dh->data, _len);
                 } else if (_type == HTLS_DATA_CHAT_MEDIA_MAX_BYTES
@@ -1385,7 +1461,14 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 
     /* Parse SELFINFO into htlc->access / uid / icon so the caller
 	 * can read its session state directly. */
+    /* On Janus the SELFINFO carries no uid (it arrived in the TASK
+	 * login reply and was stashed during the drain above); preserve
+	 * that stashed value when hx_selfinfo_parse can't supply one. */
+    guint16 stashed_uid = htlc->uid;
     hx_selfinfo_parse (htlc);
+    if (htlc->uid == 0) {
+        htlc->uid = stashed_uid;
+    }
 
     /* hx_selfinfo_parse intentionally does NOT write htlc->name
 	 * (Phase 5 policy: server-supplied nick is display-only and
@@ -1479,7 +1562,16 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
         return -1;
     }
 
+    /* On Janus the SELFINFO carries no uid (it arrived in the TASK
+	 * login reply and was stashed into htlc->uid during the drain);
+	 * preserve it across hx_selfinfo_parse, same as the non-caps open
+	 * helper. Without this the uid is lost here and any uid-filtered
+	 * drain (e.g. inline_media's chat_with_media) never matches. */
+    guint16 stashed_uid = htlc->uid;
     hx_selfinfo_parse (htlc);
+    if (htlc->uid == 0) {
+        htlc->uid = stashed_uid;
+    }
 
     /* Same NAME-recovery cascade as integration_open_login_or_skip:
 	 * drain captured a HTLS_DATA_NAME if present; else SELFINFO's

@@ -5164,6 +5164,176 @@ const _: fn() = || {
     let _ = MediaErrorCode::Generic;
 };
 
+// ===========================================================================
+// GIF-icons extension (fogWraith GIF-Icons.md). See crate::gif_icons.
+// ===========================================================================
+
+/// True if `buf` begins with a `GIF87a` / `GIF89a` signature. Mirrors
+/// the server-side validation the C send path runs before `ICON_SET`
+/// and before decoding a fetched avatar.
+///
+/// # Safety
+/// `buf` valid for `len` bytes, or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_gif_icon_is_gif(buf: *const u8, len: usize) -> bool {
+    crate::gif_icons::is_gif(as_slice(buf, len))
+}
+
+/// Build the single `ICON_SET` (1862) chunk. `gif_len == 0` (or NULL
+/// `gif_ptr`) builds a *clear* request — a zero-length `ICON_GIF`
+/// field. Returns 1 on success, 0 on undersized `chunks` or an
+/// oversize payload.
+///
+/// # Safety
+/// `gif_ptr` valid for `gif_len` bytes (or NULL with `gif_len == 0`);
+/// `chunks` valid for `chunks_cap` `HxChunk` slots (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_icon_set_chunks(
+    gif_ptr: *const u8,
+    gif_len: usize,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+) -> i32 {
+    if chunks.is_null() || chunks_cap < 1 {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, 1);
+    let gif = as_slice(gif_ptr, gif_len);
+    crate::gif_icons::build_icon_set_chunks(gif, chunks_slice) as i32
+}
+
+/// Build the single `ICON_GET` (1863) chunk: a `UID` field. Returns 1
+/// on success, 0 on undersized buffers.
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` slots (or NULL); `scratch` valid
+/// for `scratch_cap` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_build_icon_get_chunks(
+    uid: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: usize,
+    scratch: *mut u8,
+    scratch_cap: usize,
+) -> i32 {
+    const MAX_SCRATCH: usize = 2;
+    if chunks.is_null() || scratch.is_null() || chunks_cap < 1 || scratch_cap < MAX_SCRATCH {
+        return 0;
+    }
+    let chunks_slice = slice::from_raw_parts_mut(chunks, 1);
+    let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
+    crate::gif_icons::build_icon_get_chunks(uid, chunks_slice, scratch_slice) as i32
+}
+
+/// C-ABI mirror of [`crate::gif_icons::IconEntry`]. `gif_ptr` borrows
+/// into the input buffer and is valid until that buffer is recycled.
+/// `gif_ptr` is NULL exactly when `gif_len == 0` (cleared avatar).
+#[repr(C)]
+pub struct IconEntryOut {
+    pub uid: u16,
+    pub gif_ptr: *const u8,
+    pub gif_len: usize,
+}
+
+/// An empty Rust slice's `as_ptr()` is a non-NULL dangling pointer.
+/// Hand a real NULL across the FFI for the empty / cleared case so no
+/// C consumer can deref it when `gif_len == 0`.
+fn gif_data_ptr(gif: &[u8]) -> *const u8 {
+    if gif.is_empty() {
+        std::ptr::null()
+    } else {
+        gif.as_ptr()
+    }
+}
+
+/// Parse an `ICON_GET` reply. `UID` is required; a missing `ICON_GIF`
+/// is reported as a cleared avatar (`out.gif_len == 0`). Returns true
+/// and populates `out` when a `UID` is present; false otherwise.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL). `out` MUST be a valid
+/// writable pointer — a NULL `out` returns false without parsing
+/// (there is no validate-only mode).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_icon_get_reply(
+    buf: *const u8,
+    len: usize,
+    out: *mut IconEntryOut,
+) -> bool {
+    if out.is_null() {
+        return false;
+    }
+    let s = as_slice(buf, len);
+    let Some(e) = crate::gif_icons::parse_icon_get_reply(ChunkIter::over_message(s, s.len())) else {
+        return false;
+    };
+    *out = IconEntryOut {
+        uid: e.uid,
+        gif_ptr: gif_data_ptr(e.gif),
+        gif_len: e.gif.len(),
+    };
+    true
+}
+
+/// Parse an `ICON_CHANGE` broadcast (`UID` only). Returns true and
+/// writes `*out_uid` when present; false otherwise.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out_uid` writable or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_icon_change(
+    buf: *const u8,
+    len: usize,
+    out_uid: *mut u16,
+) -> bool {
+    let s = as_slice(buf, len);
+    match crate::gif_icons::parse_icon_change(ChunkIter::over_message(s, s.len())) {
+        Some(uid) => {
+            if !out_uid.is_null() {
+                *out_uid = uid;
+            }
+            true
+        }
+        None => false,
+    }
+}
+
+/// Walk an `ICON_GETLIST` reply, writing up to `cap` unpacked entries
+/// into `out`. Returns the **total** number of valid entries in the
+/// reply (which may exceed `cap`); the caller can pass `out == NULL` /
+/// `cap == 0` for a count-only pass, then allocate and call again.
+/// Each entry's `gif_ptr` borrows into `buf`.
+///
+/// # Safety
+/// `buf` valid for `len` bytes (or NULL); `out` valid for `cap`
+/// `IconEntryOut` slots (or NULL when `cap == 0`).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_icon_list(
+    buf: *const u8,
+    len: usize,
+    out: *mut IconEntryOut,
+    cap: usize,
+) -> usize {
+    let s = as_slice(buf, len);
+    let out_slice = if out.is_null() || cap == 0 {
+        &mut [][..]
+    } else {
+        slice::from_raw_parts_mut(out, cap)
+    };
+    let mut total = 0usize;
+    for e in crate::gif_icons::parse_icon_list(ChunkIter::over_message(s, s.len())) {
+        if total < out_slice.len() {
+            out_slice[total] = IconEntryOut {
+                uid: e.uid,
+                gif_ptr: gif_data_ptr(e.gif),
+                gif_len: e.gif.len(),
+            };
+        }
+        total += 1;
+    }
+    total
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -106,6 +106,26 @@ void gtkhx_session_emit_chat_history_batch (GtkhxSession     *self,
                                             GPtrArray        *entries,
                                             gboolean          has_more);
 
+/* GIF-icons extension (fogWraith GIF-Icons.md).
+ *
+ * "gif-icon-changed" (htlc *, uid): a user set or cleared their GIF
+ * avatar. The ICON_CHANGE broadcast carries only the uid; a view that
+ * wants to display the new avatar re-fetches it via hx_icon_get().
+ *
+ * "gif-icon-data" (htlc *, uid, gpointer gif, guint len): raw GIF
+ * bytes for a user, from an ICON_GET reply or an ICON_GETLIST entry.
+ * The pointer is valid only during the emit — subscribers decode /
+ * copy before returning. len == 0 means the user has no avatar
+ * (cleared). */
+void gtkhx_session_emit_gif_icon_changed (GtkhxSession     *self,
+                                          struct htlc_conn *htlc,
+                                          guint16           uid);
+void gtkhx_session_emit_gif_icon_data (GtkhxSession     *self,
+                                       struct htlc_conn *htlc,
+                                       guint16           uid,
+                                       gconstpointer     gif,
+                                       guint             len);
+
 /* The "msg" (private message) signal payload is a boxed HxMsgEvent
  * for the same reason "chat" carries an HxChatEvent: every
  * subscriber gets the same UTF-8-sanitised, self-classified view
