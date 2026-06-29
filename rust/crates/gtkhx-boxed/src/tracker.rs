@@ -187,24 +187,31 @@ pub unsafe extern "C" fn hx_tracker_server_free(e: *mut HxTrackerServer) {
     g_free(e as *mut c_void);
 }
 
+/// `GBoxedCopyFunc`-shaped shim: matches `unsafe extern "C" fn(gpointer)
+/// -> gpointer` exactly and delegates to the typed
+/// [`hx_tracker_server_copy`], so the registration needs no `transmute`.
+///
+/// # Safety
+/// `p` is NULL or a valid `HxTrackerServer*`.
+unsafe extern "C" fn boxed_copy(p: *mut c_void) -> *mut c_void {
+    hx_tracker_server_copy(p as *mut HxTrackerServer) as *mut c_void
+}
+
+/// `GBoxedFreeFunc`-shaped shim — see [`boxed_copy`].
+///
+/// # Safety
+/// `p` is NULL or a valid `HxTrackerServer*`.
+unsafe extern "C" fn boxed_free(p: *mut c_void) {
+    hx_tracker_server_free(p as *mut HxTrackerServer);
+}
+
 /// `HX_TYPE_TRACKER_SERVER` accessor — the C ABI the old
 /// `G_DEFINE_BOXED_TYPE (HxTrackerServer, hx_tracker_server, …)` exported.
 #[no_mangle]
 pub extern "C" fn hx_tracker_server_get_type() -> GType {
     static TYPE: OnceLock<usize> = OnceLock::new();
     unsafe {
-        register_once(
-            &TYPE,
-            c"HxTrackerServer".as_ptr(),
-            Some(std::mem::transmute::<
-                unsafe extern "C" fn(*mut HxTrackerServer) -> *mut HxTrackerServer,
-                unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-            >(hx_tracker_server_copy)),
-            Some(std::mem::transmute::<
-                unsafe extern "C" fn(*mut HxTrackerServer),
-                unsafe extern "C" fn(*mut c_void),
-            >(hx_tracker_server_free)),
-        )
+        register_once(&TYPE, c"HxTrackerServer".as_ptr(), Some(boxed_copy), Some(boxed_free))
     }
 }
 

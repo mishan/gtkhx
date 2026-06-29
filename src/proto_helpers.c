@@ -1282,10 +1282,10 @@ hx_msg_event_new (guint16 uid, const char *name, gsize name_len,
 
 /* Phase R4.2a: hx_msg_event_copy / hx_msg_event_free and the boxed-type
  * registration (hx_msg_event_get_type) moved to Rust —
- * rust/crates/gtkhx-session/src/boxed.rs. The struct stays C-visible
+ * rust/crates/gtkhx-boxed/src/msg.rs. The struct stays C-visible
  * (hx_msg_event_new above fills it; consumers read fields), so the Rust
  * mirror's #[repr(C)] layout is pinned against this assert; bump both
  * sides together if HxMsgEvent ever changes shape. */
 _Static_assert (sizeof (HxMsgEvent) == 48,
                 "HxMsgEvent layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-session::boxed (field offsets pinned there)");
+                "in gtkhx-boxed::msg (field offsets pinned there)");

@@ -72,25 +72,31 @@ pub unsafe extern "C" fn hx_msg_event_free(e: *mut HxMsgEvent) {
     g_free(e as *mut c_void);
 }
 
+/// `GBoxedCopyFunc`-shaped shim: matches `unsafe extern "C" fn(gpointer)
+/// -> gpointer` exactly and delegates to the typed [`hx_msg_event_copy`],
+/// so the boxed-type registration needs no `transmute` (which would
+/// silently become UB if the typed signature ever drifted).
+///
+/// # Safety
+/// `p` is NULL or a valid `HxMsgEvent*`.
+unsafe extern "C" fn boxed_copy(p: *mut c_void) -> *mut c_void {
+    hx_msg_event_copy(p as *mut HxMsgEvent) as *mut c_void
+}
+
+/// `GBoxedFreeFunc`-shaped shim — see [`boxed_copy`].
+///
+/// # Safety
+/// `p` is NULL or a valid `HxMsgEvent*`.
+unsafe extern "C" fn boxed_free(p: *mut c_void) {
+    hx_msg_event_free(p as *mut HxMsgEvent);
+}
+
 /// `HX_TYPE_MSG_EVENT` accessor — the C ABI the old
 /// `G_DEFINE_BOXED_TYPE (HxMsgEvent, hx_msg_event, …)` exported.
 #[no_mangle]
 pub extern "C" fn hx_msg_event_get_type() -> GType {
     static TYPE: OnceLock<usize> = OnceLock::new();
-    unsafe {
-        register_once(
-            &TYPE,
-            c"HxMsgEvent".as_ptr(),
-            Some(std::mem::transmute::<
-                unsafe extern "C" fn(*mut HxMsgEvent) -> *mut HxMsgEvent,
-                unsafe extern "C" fn(*mut c_void) -> *mut c_void,
-            >(hx_msg_event_copy)),
-            Some(std::mem::transmute::<
-                unsafe extern "C" fn(*mut HxMsgEvent),
-                unsafe extern "C" fn(*mut c_void),
-            >(hx_msg_event_free)),
-        )
-    }
+    unsafe { register_once(&TYPE, c"HxMsgEvent".as_ptr(), Some(boxed_copy), Some(boxed_free)) }
 }
 
 #[cfg(test)]
