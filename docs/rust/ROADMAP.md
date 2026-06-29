@@ -831,6 +831,39 @@ because a connection is a struct in Rust, not a global.
 
 ## Phase R4 — GtkhxSession in Rust
 
+**Status: R4.1 shipped** on `claude/phase-r4`. The `GtkhxSession` GObject is
+now the Rust `glib::subclass` crate `rust/crates/gtkhx-session/`; `src/gtkhx_session.c`
+is deleted, `src/gtkhx_session.h` stays unchanged. The crate exports the
+identical C ABI the old TU did — `gtkhx_session_get_type`,
+`gtkhx_session_get_default`, and all 26 `gtkhx_session_emit_*` wrappers — so
+every C model-side emitter and view-side `gtkhx_connect_signals` /
+`on_<name>_signal` adapter compiles and links unchanged. All 26 signals are
+registered in `ObjectImpl::signals()` with param types transcribed exactly
+from the old `g_signal_new()` calls (registration order mirrors the old
+`SIGNAL_*` enum so signal IDs stay stable).
+
+Boxed-payload signals (`chat`/`HxChatEvent`, `msg`/`HxMsgEvent`,
+`tracker-server-create`/`HxTrackerServer`) reference the **C-defined** boxed
+`GType`s through their existing `hx_*_get_type()` accessors via FFI — the
+staticlib's undefined references resolve against `proto_helpers.c` /
+`tracker_event.c` at final link (leaf-up "C resolves Rust's externs"). Emit
+marshals boxed payloads with `g_value_set_boxed`, which copies via the boxed
+type's copy func for the emit duration — byte-for-byte the lifetime the old
+`g_signal_emit` varargs collection produced for a non-static-scope boxed param.
+Emit wraps the incoming `GtkhxSession*` with `from_glib_none` (the
+re-entrancy-safe "full form" from `docs/rust/glib-interop.md`).
+
+Validation: 7 in-crate `cargo test` cases (signal-count, pointer/scalar/
+string/boxed round-trips, singleton stability, NULL-session safety); the full
+`meson` build links the `gtkhx` binary + the two integration targets
+(`real_connect`, `real_htxf_connect`) that compile against the crate; Tier 1/2
+(66 unit+proto) green; Tier 3 vs mhxd/Janus/argus/hxtrackd green for every test
+that flows events through the session (`real_connect`, `real_htxf_connect`,
+`chat_roundtrip`, `user_list_grows`, `tracker_fetch`, the HOPE/news/voice/file
+suites). Re-hosting the boxed types themselves in Rust is **R4.2** (see below).
+
+The original goal text follows for reference.
+
 **Goal:** The model→view signal hub becomes a Rust `glib::subclass`-derived
 GObject. Same name (`GtkhxSession`), same signals, same boxed-type payloads.
 C code subscribing on the view side sees no difference.
@@ -872,9 +905,23 @@ relying on it for whole windows in R5.
   signals are introspectable for tooling. Optional; defer to Phase R5+ if
   it doesn't fall out for free.
 
-**Exit criteria:** `gtkhx_session.c` deleted. All 25 signals emit from Rust;
+**Exit criteria:** `gtkhx_session.c` deleted. All 26 signals emit from Rust;
 all view-side handlers in C consume them unchanged. Tier 3 e2e tests pass
-(chat, news, file list, transfers, tracker, login).
+(chat, news, file list, transfers, tracker, login). **Met by R4.1.**
+
+### R4.2 — re-host the boxed types in Rust (next)
+
+R4.1 left work item 2 (re-host the boxed types) deliberately undone: the
+boxed payloads `HxChatEvent` / `HxMsgEvent` (constructors + media-attach +
+nick/body split in `proto_helpers.c`) and `HxTrackerServer` (`tracker_event.c`)
+stay defined in C, and the Rust session references their `GType`s via FFI. R4.2
+moves them into Rust — `hotline-proto` for the genuinely wire-format ones
+(`HxChatEvent` / `HxMsgEvent`, whose `hx_chat_event_new` parses raw wire bytes)
+and a small boxed-type module for `HxTrackerServer`, each via `#[derive(glib::Boxed)]`
+exposing `hx_*_get_type` / `_copy` / `_free` with the same C ABI. Once they
+land, `gtkhx-session`'s `#[cfg(not(test))] extern "C"` block for the three
+accessors collapses into a direct Rust `static_type()` call and the
+`#[cfg(test)]` boxed stubs disappear.
 
 ---
 

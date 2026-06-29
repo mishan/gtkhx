@@ -33,10 +33,18 @@ proto_test_deps = test_deps + [
   # Phase R3.0: src/gtkhx_session.c::gtkhx_session_emit_task_update
   # delegates to gtkhx_bridge_emit_pointer_pair_signal in hxbridge.
   # The integration harness + the production-connect Tier 3 tests
-  # (real_connect, real_htxf_connect) link gtkhx_session.c directly
-  # and need the staticlib. Same "linker drops unused members" caveat
-  # for tests that don't reference it.
+  # (real_connect, real_htxf_connect) need the staticlib. Same "linker
+  # drops unused members" caveat for tests that don't reference it.
   rust_hxbridge_dep,
+  # Phase R4: GtkhxSession moved to the Rust `gtkhx-session` crate, so
+  # the gtkhx_session_get_default + gtkhx_session_emit_* symbols the
+  # real_connect / real_htxf_connect targets used to get from
+  # gtkhx_session.c now come from this staticlib. Its undefined
+  # references to the boxed-type accessors (hx_*_get_type) resolve
+  # against proto_helpers.c / tracker_event.c, which those targets
+  # also link. Archive members aren't pulled for tests that don't
+  # touch a gtkhx_session symbol.
+  rust_gtkhx_session_dep,
 ]
 
 test_inc = include_directories('../src')
@@ -1246,7 +1254,8 @@ test_integration_real_connect = executable(
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
-  '../src/gtkhx_session.c',
+  # gtkhx_session.c → Rust crate (Phase R4); linked via
+  # rust_gtkhx_session_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
   '../src/text_util.c',
@@ -1324,7 +1333,8 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
-  '../src/gtkhx_session.c',
+  # gtkhx_session.c → Rust crate (Phase R4); linked via
+  # rust_gtkhx_session_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
   '../src/text_util.c',

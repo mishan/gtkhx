@@ -1,0 +1,21 @@
+[package]
+name = "gtkhx-session"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R4: GtkhxSession model→view signal hub as a Rust glib::subclass GObject"
+publish = false
+
+[lib]
+# staticlib: the C side links the FFI symbols (gtkhx_session_get_type,
+#            gtkhx_session_get_default, every gtkhx_session_emit_*) that
+#            the deleted src/gtkhx_session.c used to provide.
+# rlib:      future Rust consumers (Phase R5 UI windows) hold a typed
+#            GtkhxSession handle from the glib::subclass derivation.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Same glib pin as the rest of the workspace (gtk-rs-core 0.21 family).
+# Builds against the libglib-2.0 / libgobject-2.0 the C binary already
+# links, so the system-library surface doesn't grow.
+glib = { workspace = true }

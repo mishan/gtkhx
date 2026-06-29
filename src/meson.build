@@ -32,7 +32,8 @@ gtkhx_sources = files(
   'gtkhx.c',
   'gtkhx_icon.c',
   'gtkhx_log.c',
-  'gtkhx_session.c',
+  # gtkhx_session.c removed in Phase R4 — GtkhxSession is now the Rust
+  # glib::subclass crate `gtkhx-session` (rust_gtkhx_session_dep below).
   'gtkhx_theme.c',
   'hx_panel.c',
   'hx_panel_frame.c',
@@ -206,6 +207,7 @@ rust_deps = [
   rust_hxcompress_dep,
   rust_hotline_proto_dep,
   rust_hxbridge_dep,
+  rust_gtkhx_session_dep,
   rust_hxnet_dep,
   rust_hx_image_decode_dep,
 ]
