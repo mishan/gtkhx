@@ -601,7 +601,25 @@ struct hl_user_data {
 #define HTLS_DATA_SERVERNAME ((guint16)0x00a2)
 #define HTLS_DATA_NOAGREEMENT ((guint16)0x009a)
 
-#define HTLC_HDR_ICON_GET ((guint32)0x00000e90)
+/* Custom per-user icon transactions (1861-1864 / 0x0745-0x0748):
+ * a per-user avatar keyed by UID, independent of the standard
+ * 16-bit icon ID (HTLC_DATA_ICON / 0x0068, which GtkHx already
+ * renders from the bundled icon set via cicn.c + load_icon).
+ *
+ * The icon-get opcode is 0x0747. An earlier revision of this header
+ * mis-defined it as 0x0e90 - but 0x0e90 is the legacy cicn *data*
+ * field (HTLS_DATA_ICON_CICN, below), not an opcode. Corrected here.
+ * The constant was dormant (only proto_trace.c referenced it), so
+ * the bug never fired.
+ *
+ * The full opcode + GIF field set (mhxd's HTLC_HDR_ICON_GETLIST /
+ * _SET / _GET, HTLS_HDR_ICON_CHANGE, HTLS_DATA_ICON_GIF / _LIST)
+ * lands with the GIF-icons implementation - see Phase 10 in
+ * ROADMAP.md and docs/gif-icons-plan.md. Legacy cicn-over-wire
+ * (an 0x0e90 payload on these same transactions) is vestigial: no
+ * reachable server implements it - mhxd and Janus both discard a
+ * cicn payload and are GIF-only (verified June 2026). */
+#define HTLC_HDR_ICON_GET ((guint32)0x00000747)
 #define HTLC_HDR_FILE_HASH ((guint32)0x00000ee0)
 
 /* HTLC_HDR_GET_CHAT_HISTORY = 700: chat-history extension request.
@@ -670,6 +688,10 @@ struct hl_user_data {
 #define HTLS_DATA_HASH_MD5 ((guint16)0x0e80)
 #define HTLS_DATA_HASH_HAVAL ((guint16)0x0e81)
 #define HTLS_DATA_HASH_SHA1 ((guint16)0x0e82)
+/* Legacy Mac cicn-resource icon payload field. Vestigial: the
+ * icon transactions (0x0745-0x0748) in practice only ever carry the
+ * GIF payload (HTLS_DATA_ICON_GIF / 0x0300); no reachable server
+ * serves a cicn payload here. Kept as a reserved slot. */
 #define HTLS_DATA_ICON_CICN ((guint16)0x0e90)
 
 /* HOPE */
