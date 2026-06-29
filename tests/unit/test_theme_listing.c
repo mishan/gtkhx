@@ -200,6 +200,35 @@ test_skips_non_ini_files (void)
     g_free (dir);
 }
 
+/* Theme names with embedded path separators are unsafe — the
+ * loader rejects them at active_theme_path / safe_active_theme_name,
+ * so surfacing them in the picker would create unselectable
+ * entries that silently fall back to "default". Discovery
+ * rejects them too. (POSIX disallows '/' inside a filename, so
+ * only the backslash case is testable via a real on-disk
+ * fixture; the slash case is dead code on Linux but the
+ * predicate guards both for portability and for the GResource
+ * walk where the rule still applies.) */
+static void
+test_skips_unsafe_theme_names (void)
+{
+    char *dir = make_tmp_themes_dir ();
+    /* Flat-form file with a backslash in the basename — would
+	 * surface as theme name "foo\\bar" without the filter, which
+	 * the loader then rejects. */
+    write_theme_file (dir, "foo\\bar.ini",
+                      "[gtkhx-theme]\nname = Phantom\n");
+
+    GPtrArray *themes = gtkhx_theme_list_available_at (NULL, dir);
+    /* Synthetic default only — phantom should be filtered. */
+    g_assert_cmpint (themes->len, ==, 1);
+    g_assert_null (entry_named (themes, "foo\\bar"));
+
+    g_ptr_array_unref (themes);
+    rmrf_dir (dir);
+    g_free (dir);
+}
+
 /* The built-in themes (default, solarized) ride on the linked-in
  * GResource and surface through the resource_prefix arg. With an
  * empty user dir, both should appear in the sorted output.
@@ -331,6 +360,8 @@ main (int argc, char **argv)
                      test_sort_default_first_then_alphabetical);
     g_test_add_func ("/theme-listing/skips-non-ini-files",
                      test_skips_non_ini_files);
+    g_test_add_func ("/theme-listing/skips-unsafe-theme-names",
+                     test_skips_unsafe_theme_names);
     g_test_add_func ("/theme-listing/built-in-themes-from-resource",
                      test_built_in_themes_from_resource);
     g_test_add_func ("/theme-listing/user-file-shadows-built-in",

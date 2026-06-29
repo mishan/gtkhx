@@ -741,6 +741,20 @@ read_display_name_from_file (const char *path)
     return display;
 }
 
+/* TRUE if `name` is safe to use as an active-theme name. Mirrors
+ * the rejection rule applied by safe_active_theme_name /
+ * gtkhx_theme_active_name at load time: any embedded path
+ * separator could escape the themes directory. Surfacing such a
+ * name in the picker would produce a phantom entry that
+ * "selects" but loads as "default" — confusing. The discovery
+ * walks apply this check before adding an entry so the picker
+ * only ever lists themes the loader can actually open. */
+static gboolean
+theme_name_is_safe (const char *name)
+{
+    return name && !strchr (name, '/') && !strchr (name, '\\');
+}
+
 /* Same, but from a GResource path under the registered themes
  * prefix. Caller frees. NULL on parse error. */
 static char *
@@ -857,6 +871,14 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                         display = read_display_name_from_file (child);
                     }
 
+                    if (name && !theme_name_is_safe (name)) {
+                        /* Path-separator in the directory or .ini
+						 * basename — the loader would reject it
+						 * anyway, so don't surface it in the picker. */
+                        g_free (name);
+                        g_free (display);
+                        name = NULL;
+                    }
                     if (name) {
                         if (g_hash_table_contains (seen, name)) {
                             g_free (name);
@@ -928,6 +950,11 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                     }
 
                     if (!name) {
+                        continue;
+                    }
+                    if (!theme_name_is_safe (name)) {
+                        g_free (name);
+                        g_free (display);
                         continue;
                     }
                     if (g_hash_table_contains (seen, name)) {
