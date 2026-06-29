@@ -7,11 +7,12 @@ GtkHx is a GTK+ Hotline Client originally based on Hx.
 - Support for extended Hotline protocol features and capabilities
   - Voice chat
   - Inline media
-  - Blowfish and ChaCha20-Poly1305 cipher support
   - Native UTF-8
+  - GIF icons
   - Large file transfers
   - Chat history
   - Colored names
+  - Blowfish and ChaCha20-Poly1305 cipher support
 - Tracker v3 support
 - File preview supports common image types, QuickDraw PICTs, PDFs, and markdown / source files
 - Orthogonal file manager interface for file transfers
