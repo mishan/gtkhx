@@ -1,0 +1,287 @@
+//! Emoji <-> `:shortcode:` conversion.
+//!
+//! Hotline servers that don't negotiate `CAP_TEXT_ENCODING` carry text as
+//! Mac Roman, which has no emoji. Rather than let `gtkhx_text_for_wire`
+//! turn every emoji into `?`, we rewrite emoji to their Slack/Discord-style
+//! `:joy:` shortcodes on the way out (pure ASCII, survives Mac Roman) and
+//! rewrite known `:shortcode:` tokens back to emoji at display time.
+//!
+//! Two directions, both pure string transforms over the tables in
+//! [`crate::emoji_table`]:
+//!
+//! - [`emoji_to_shortcodes`] — encode, used in the legacy send path. Walks
+//!   the text and replaces the longest emoji cluster it can match at each
+//!   position with `:canonical:`. Only fully-qualified emoji are encode
+//!   sources (see the table generator).
+//! - [`shortcodes_to_emoji`] — decode, used at chat display time. Replaces
+//!   every `:name:` token whose `name` is a known shortcode with the emoji;
+//!   leaves all other text — including unmatched `:tokens:` and stray
+//!   colons — untouched.
+//!
+//! The shortcode grammar is `[a-z0-9_+-]+` between two colons, matching the
+//! generator's filter. Decode skips over mIRC colour-code runs (`\x03` plus
+//! its numeric spec) so a colour code can never be mistaken for shortcode
+//! text or split a token.
+//!
+//! See `docs/emoji-shortcodes-plan.md` (phase E1).
+
+use crate::emoji_table::{DECODE, ENCODE, MAX_ENCODE_CHARS};
+
+/// mIRC colour control byte (ETX). HexChat's xtext / our chat path use the
+/// `\x03NN[,NN]` convention for coloured runs.
+const MIRC_COLOR: char = '\u{0003}';
+
+/// True for characters allowed inside a `:shortcode:` token.
+#[inline]
+fn is_shortcode_char(c: char) -> bool {
+    c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '+' || c == '-'
+}
+
+/// Could `c` begin an emoji cluster in [`ENCODE`]? Every encode key starts
+/// with a non-ASCII byte except the keycap emoji, which start with `#`, `*`,
+/// or a digit. Skipping the binary-search probe for ordinary ASCII keeps
+/// encode linear over plain text.
+#[inline]
+fn could_start_emoji(c: char) -> bool {
+    !c.is_ascii() || c == '#' || c == '*' || c.is_ascii_digit()
+}
+
+fn shortcode_for_emoji(cluster: &str) -> Option<&'static str> {
+    ENCODE
+        .binary_search_by(|(k, _)| (*k).cmp(cluster))
+        .ok()
+        .map(|i| ENCODE[i].1)
+}
+
+fn emoji_for_shortcode(name: &str) -> Option<&'static str> {
+    DECODE
+        .binary_search_by(|(k, _)| (*k).cmp(name))
+        .ok()
+        .map(|i| DECODE[i].1)
+}
+
+/// Encode: replace emoji clusters with `:shortcode:`. Unmatched text
+/// (including emoji with no canonical shortcode) is passed through
+/// verbatim. Used by the legacy (non-UTF-8) send path.
+pub fn emoji_to_shortcodes(input: &str) -> String {
+    let chars: Vec<(usize, char)> = input.char_indices().collect();
+    let n = chars.len();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < n {
+        let (start, c) = chars[i];
+        if could_start_emoji(c) {
+            // Longest-match: try the longest cluster first so multi-codepoint
+            // sequences (ZWJ families, keycaps, skin-tone combos) win over
+            // their leading codepoint.
+            let max_l = MAX_ENCODE_CHARS.min(n - i);
+            let mut matched = false;
+            for l in (1..=max_l).rev() {
+                let end = if i + l < n { chars[i + l].0 } else { input.len() };
+                let sub = &input[start..end];
+                if let Some(sc) = shortcode_for_emoji(sub) {
+                    out.push(':');
+                    out.push_str(sc);
+                    out.push(':');
+                    i += l;
+                    matched = true;
+                    break;
+                }
+            }
+            if matched {
+                continue;
+            }
+        }
+        out.push(c);
+        i += 1;
+    }
+
+    out
+}
+
+/// Decode: replace every known `:shortcode:` token with its emoji. Unknown
+/// tokens and stray colons are left exactly as they were. mIRC colour runs
+/// are copied through untouched. Used at chat display time on every server.
+pub fn shortcodes_to_emoji(input: &str) -> String {
+    let chars: Vec<(usize, char)> = input.char_indices().collect();
+    let n = chars.len();
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+
+    while i < n {
+        let c = chars[i].1;
+
+        // Copy a mIRC colour code verbatim: ETX, up to 2 fg digits, then an
+        // optional ",NN" bg part. Colour specs hold no colons, so this only
+        // matters to keep a colon-adjacent code from being mis-scanned.
+        if c == MIRC_COLOR {
+            out.push(c);
+            i += 1;
+            let mut d = 0;
+            while i < n && d < 2 && chars[i].1.is_ascii_digit() {
+                out.push(chars[i].1);
+                i += 1;
+                d += 1;
+            }
+            if i + 1 < n && chars[i].1 == ',' && chars[i + 1].1.is_ascii_digit() {
+                out.push(',');
+                i += 1;
+                let mut d2 = 0;
+                while i < n && d2 < 2 && chars[i].1.is_ascii_digit() {
+                    out.push(chars[i].1);
+                    i += 1;
+                    d2 += 1;
+                }
+            }
+            continue;
+        }
+
+        if c == ':' {
+            // Read a candidate name: one or more shortcode chars, then ':'.
+            let mut j = i + 1;
+            while j < n && is_shortcode_char(chars[j].1) {
+                j += 1;
+            }
+            if j < n && j > i + 1 && chars[j].1 == ':' {
+                let name = &input[chars[i + 1].0..chars[j].0];
+                if let Some(em) = emoji_for_shortcode(name) {
+                    out.push_str(em);
+                    i = j + 1;
+                    continue;
+                }
+            }
+            // Not a known shortcode — emit just the opening colon and let the
+            // scan resume at the next char (so the closing colon of a failed
+            // token can still open the next one).
+            out.push(':');
+            i += 1;
+            continue;
+        }
+
+        out.push(c);
+        i += 1;
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_sorted_and_searchable() {
+        // Binary search relies on both tables being sorted by key.
+        assert!(ENCODE.windows(2).all(|w| w[0].0 < w[1].0), "ENCODE unsorted");
+        assert!(DECODE.windows(2).all(|w| w[0].0 < w[1].0), "DECODE unsorted");
+        assert!(!ENCODE.is_empty() && !DECODE.is_empty());
+    }
+
+    #[test]
+    fn every_canonical_round_trips() {
+        // Collision guard: every ENCODE canonical shortcode must decode back
+        // to the exact emoji it encodes from. If a future dataset change made
+        // two emoji share a canonical shortcode, DECODE (first-wins) would
+        // map that shortcode to only one of them and the other would silently
+        // round-trip to the wrong emoji — this catches it across the whole
+        // table, not just the handful of spot-checks above.
+        for (emoji, sc) in ENCODE {
+            assert_eq!(
+                emoji_for_shortcode(sc),
+                Some(*emoji),
+                "canonical :{sc}: does not decode back to {emoji:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn encode_basic() {
+        assert_eq!(emoji_to_shortcodes("😂"), ":joy:");
+        assert_eq!(emoji_to_shortcodes("hi 😂!"), "hi :joy:!");
+        // Canonical is the shortest grammar-valid name: 👍 → "+1" (not the
+        // longer "thumbsup"), ❤️ → "heart".
+        assert_eq!(emoji_to_shortcodes("👍 ❤️"), ":+1: :heart:");
+    }
+
+    #[test]
+    fn encode_passthrough_plain_text() {
+        let s = "no emoji here, just text 123 #hash *star C:\\path";
+        assert_eq!(emoji_to_shortcodes(s), s);
+    }
+
+    #[test]
+    fn decode_basic() {
+        assert_eq!(shortcodes_to_emoji(":joy:"), "😂");
+        assert_eq!(shortcodes_to_emoji("hi :joy:!"), "hi 😂!");
+        assert_eq!(shortcodes_to_emoji(":thumbsup: :heart:"), "👍 ❤️");
+    }
+
+    #[test]
+    fn decode_accepts_aliases_and_cldr() {
+        // gemoji alias, Slack alias, and CLDR English name all decode.
+        let joy = shortcodes_to_emoji(":joy:");
+        assert_eq!(shortcodes_to_emoji(":face_with_tears_of_joy:"), joy);
+        let up = shortcodes_to_emoji(":thumbsup:");
+        assert_eq!(shortcodes_to_emoji(":+1:"), up);
+    }
+
+    #[test]
+    fn round_trip_common_set() {
+        for e in ["😂", "👍", "🎉", "🔥", "🚀", "😀", "💯"] {
+            let sc = emoji_to_shortcodes(e);
+            assert_ne!(sc, e, "{e} did not encode");
+            assert_eq!(shortcodes_to_emoji(&sc), e, "round-trip failed for {e}");
+        }
+    }
+
+    #[test]
+    fn decode_leaves_unknown_and_stray_colons() {
+        assert_eq!(shortcodes_to_emoji(":notareal_shortcode:"), ":notareal_shortcode:");
+        assert_eq!(shortcodes_to_emoji("10:30:00"), "10:30:00");
+        assert_eq!(shortcodes_to_emoji("C:\\path"), "C:\\path");
+        assert_eq!(shortcodes_to_emoji("ratio a:b"), "ratio a:b");
+        assert_eq!(shortcodes_to_emoji("http://x"), "http://x");
+        assert_eq!(shortcodes_to_emoji("::"), "::");
+        assert_eq!(shortcodes_to_emoji(""), "");
+    }
+
+    #[test]
+    fn decode_adjacent_and_recoverable_colons() {
+        // ":foo:joy:" — :foo: is unknown, but :joy: inside still resolves.
+        assert_eq!(shortcodes_to_emoji(":zzznope:joy:"), ":zzznope😂");
+        // Two valid tokens back to back.
+        assert_eq!(shortcodes_to_emoji(":joy::fire:"), "😂🔥");
+        // Leading extra colon before a valid token.
+        assert_eq!(shortcodes_to_emoji(":::joy:"), "::😂");
+    }
+
+    #[test]
+    fn decode_skips_mirc_colour() {
+        // ETX + "04" colour spec, then a real token — colour copied verbatim.
+        let input = "\u{3}04:joy:\u{3}";
+        assert_eq!(shortcodes_to_emoji(input), "\u{3}04😂\u{3}");
+        // fg,bg spec.
+        let input2 = "\u{3}04,01 hi :fire:";
+        assert_eq!(shortcodes_to_emoji(input2), "\u{3}04,01 hi 🔥");
+    }
+
+    #[test]
+    fn encode_longest_match_wins() {
+        // A keycap (#-VS16-keycap) must beat a bare '#'. The cluster encodes
+        // to a single shortcode rather than leaving '#' plus combining marks.
+        let keycap = "#\u{fe0f}\u{20e3}";
+        let sc = emoji_to_shortcodes(keycap);
+        assert!(sc.starts_with(':') && sc.ends_with(':'), "got {sc:?}");
+        assert_eq!(shortcodes_to_emoji(&sc), keycap);
+    }
+
+    #[test]
+    fn encode_then_decode_mixed_message() {
+        let msg = "great work 🎉 ship it 🚀!";
+        let wire = emoji_to_shortcodes(msg);
+        assert!(!wire.contains('🎉') && !wire.contains('🚀'));
+        assert!(wire.is_ascii(), "wire form must be ASCII: {wire:?}");
+        assert_eq!(shortcodes_to_emoji(&wire), msg);
+    }
+}
