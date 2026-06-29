@@ -45,12 +45,15 @@ proto_test_deps = test_deps + [
   # also link. Archive members aren't pulled for tests that don't
   # touch a gtkhx_session symbol.
   rust_gtkhx_session_dep,
-  # Phase R4.2: the boxed payload value-types (HxMsgEvent so far) moved
-  # out of proto_helpers.c into the self-contained gtkhx-boxed crate.
-  # Proto tests that link proto_helpers.c and exercise hx_msg_event_*
-  # (e.g. test_msg_event calls hx_msg_event_copy/_free) resolve those
-  # against this archive. It's self-contained, so pulling those symbols
-  # never drags gtkhx-session's C externs in.
+  # Phase R4.2: the boxed payload value-types (HxMsgEvent, HxChatEvent +
+  # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
+  # proto_helpers.c / tracker_event.c / tracker_v3_meta.c into the
+  # self-contained gtkhx-boxed crate. Proto tests that link those
+  # producers and exercise the boxed copy/free (e.g. test_msg_event /
+  # test_chat_event call hx_*_event_copy/_free; the tracker tests'
+  # meta_free call sites) resolve them against this archive. It's
+  # self-contained, so pulling those symbols never drags gtkhx-session's
+  # C externs in.
   rust_gtkhx_boxed_dep,
 ]
 

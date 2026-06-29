@@ -1028,10 +1028,32 @@ hx_chat_media_free (HxChatMedia *m)
  * together if either struct changes shape. */
 _Static_assert (sizeof (HxChatEvent) == 72,
                 "HxChatEvent layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-boxed::chat (field offsets pinned there)");
+                "in gtkhx-boxed::chat");
 _Static_assert (sizeof (HxChatMedia) == 56,
                 "HxChatMedia layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-boxed::chat (field offsets pinned there)");
+                "in gtkhx-boxed::chat");
+/* Field offsets too — size alone misses reorderings / padding changes
+ * that keep the total. Mirror gtkhx-boxed::chat's offset_of! asserts. */
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, cid) == 0, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, line) == 8, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, line_len) == 16, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_off) == 24, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_len) == 32, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, body_off) == 40, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, body_len) == 48, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, is_info) == 56, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, is_self) == 60, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, media) == 64, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, id) == 0, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, id_len) == 8, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, mime) == 16, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, mime_len) == 24, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, width) == 32, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, height) == 36, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, bytes) == 40, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, width_present) == 44, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, height_present) == 48, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, bytes_present) == 52, "field offset");
 
 void
 hx_chat_event_attach_media (HxChatEvent *ev,
@@ -1288,4 +1310,13 @@ hx_msg_event_new (guint16 uid, const char *name, gsize name_len,
  * sides together if HxMsgEvent ever changes shape. */
 _Static_assert (sizeof (HxMsgEvent) == 48,
                 "HxMsgEvent layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-boxed::msg (field offsets pinned there)");
+                "in gtkhx-boxed::msg");
+/* Field offsets too — size alone misses reorderings / padding changes
+ * that keep the total. Mirror gtkhx-boxed::msg's offset_of! asserts. */
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, uid) == 0, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, name) == 8, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, name_len) == 16, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, body) == 24, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, body_len) == 32, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_self) == 40, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_broadcast) == 44, "field offset");

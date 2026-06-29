@@ -234,4 +234,17 @@ hx_tracker_server_new_v3 (guint8 addr_type, const guint8 *address,
  * HxTrackerV3Meta (whose copy/free also moved). */
 _Static_assert (sizeof (HxTrackerServer) == 72,
                 "HxTrackerServer layout must match the Rust #[repr(C)] "
-                "mirror in gtkhx-boxed::tracker (field offsets pinned there)");
+                "mirror in gtkhx-boxed::tracker");
+/* Field offsets too — a size-only pin misses field reorderings /
+ * padding changes that keep the total size. Mirror gtkhx-boxed::tracker's
+ * offset_of! asserts exactly. */
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, addr_type) == 0, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, address) == 8, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, port) == 16, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, nusers) == 18, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, name) == 24, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, desc) == 32, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_count) == 40, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_bytes) == 48, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, meta) == 56, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, total) == 64, "field offset");

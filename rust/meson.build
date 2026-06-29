@@ -66,9 +66,10 @@ rust_sources = files(
   'crates/hxbridge/src/runtime.rs',
   # Phase R4 — GtkhxSession as a Rust glib::subclass GObject (replaces
   # src/gtkhx_session.c). References the C boxed GTypes via FFI; R4.2
-  # re-hosts those boxed types into the gtkhx-boxed crate one at a time
-  # (HxMsgEvent done in R4.2a), so this crate's externs resolve against
-  # gtkhx-boxed instead of proto_helpers.c / tracker_event.c.
+  # re-hosted all three boxed payload types (HxMsgEvent, HxChatEvent,
+  # HxTrackerServer) into the gtkhx-boxed crate, so this crate's externs
+  # now resolve against gtkhx-boxed instead of proto_helpers.c /
+  # tracker_event.c.
   'crates/gtkhx-session/src/lib.rs',
   # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent, HxChatEvent
   # + HxChatMedia, HxTrackerServer + HxTrackerV3Meta), self-contained
@@ -374,10 +375,11 @@ rust_gtkhx_session_dep = declare_dependency(
 )
 
 # Boxed signal-payload value-types (Phase R4.2). gtkhx-boxed holds the
-# GObject boxed types carried by GtkhxSession signals — `HxMsgEvent` so
-# far, with `HxChatEvent` / `HxTrackerServer` to follow in R4.2b/c. It
-# exports the C ABI the deleted G_DEFINE_BOXED_TYPE registrations in
-# proto_helpers.c / tracker_event.c used to (hx_*_get_type / _copy /
+# GObject boxed types carried by GtkhxSession signals — all three:
+# HxMsgEvent (msg.rs), HxChatEvent + HxChatMedia (chat.rs), and
+# HxTrackerServer + HxTrackerV3Meta (tracker.rs). It exports the C ABI
+# the deleted G_DEFINE_BOXED_TYPE registrations in proto_helpers.c /
+# tracker_event.c / tracker_v3_meta.c used to (hx_*_get_type / _copy /
 # _free). Self-contained (glib only): a C target that pulls a _copy /
 # _free symbol links this archive alone without dragging gtkhx-session's
 # still-C boxed externs in via codegen-unit merging. Both the gtkhx

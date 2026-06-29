@@ -332,13 +332,16 @@ hx_tracker_v3_meta_new_from_bytes (GBytes *bytes, guint16 tlv_count)
 _Static_assert (sizeof (HxTrackerV3Meta) == 216,
                 "HxTrackerV3Meta size must match the Rust opaque mirror "
                 "in gtkhx-boxed::tracker");
-_Static_assert (offsetof (HxTrackerV3Meta, server_software) == 0, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, country_code) == 8, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, region) == 16, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, language) == 24, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, rules_url) == 48, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, banner_url) == 56, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, icon_url) == 64, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, contact_url) == 88, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, tags) == 112, "meta str offset");
-_Static_assert (offsetof (HxTrackerV3Meta, hope_ciphers) == 152, "meta str offset");
+/* G_STRUCT_OFFSET (not <stddef.h>'s offsetof) for consistency with the
+ * rest of the tree; pins the ten owned char* fields the Rust offset-
+ * based copy/free fix up. */
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, server_software) == 0, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, country_code) == 8, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, region) == 16, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, language) == 24, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, rules_url) == 48, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, banner_url) == 56, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, icon_url) == 64, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, contact_url) == 88, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, tags) == 112, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, hope_ciphers) == 152, "meta str offset");
