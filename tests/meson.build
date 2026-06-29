@@ -281,6 +281,7 @@ test('htxf_cancel', test_htxf_cancel,
 test_hxnet_bridge = executable('test_hxnet_bridge',
   'unit/test_hxnet_bridge.c',
   '../src/hxnet_bridge.c',
+  '../src/host_port.c',
   '../src/proto_helpers.c',
   dependencies        : test_deps + [rust_hotline_proto_dep],
   include_directories : test_inc,
@@ -297,6 +298,7 @@ test('hxnet_bridge', test_hxnet_bridge,
 test_bookmarks = executable('test_bookmarks',
   'unit/test_bookmarks.c',
   '../src/bookmarks_io.c',
+  '../src/host_port.c',
   dependencies        : test_deps,
   include_directories : test_inc,
 )
@@ -531,10 +533,23 @@ test('hl_code', test_hl_code,
 test_tls_trust = executable('test_tls_trust',
   'unit/test_tls_trust.c',
   '../src/tls_trust.c',
+  '../src/host_port.c',
   dependencies        : test_deps,
   include_directories : test_inc,
 )
 test('tls_trust', test_tls_trust,
+     suite : 'unit')
+
+# host_port — the shared "host:port" parse/join helper (IPv6-aware),
+# replacing the hand-rolled strrchr(':') splits that mis-handled IPv6
+# literals across bookmarks_io / connect / tls_trust / network.
+test_host_port = executable('test_host_port',
+  'unit/test_host_port.c',
+  '../src/host_port.c',
+  dependencies        : test_deps,
+  include_directories : test_inc,
+)
+test('host_port', test_host_port,
      suite : 'unit')
 
 # hx_user_hash — Phase 1.5 replaces the intrusive hx_user linked
@@ -1198,6 +1213,7 @@ test_integration_real_connect = executable(
   'integration/connect_test_stubs.c',
   'integration/server_matrix.c',
   '../src/network.c',
+  '../src/host_port.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
   '../src/login_packet.c',
@@ -1274,6 +1290,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   'integration/tracker_matrix.c',
   'integration/server_matrix.c',
   '../src/network.c',
+  '../src/host_port.c',
   '../src/hxnet_bridge.c',
   '../src/tls_trust.c',
   '../src/login_packet.c',

@@ -25,6 +25,7 @@
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
 #include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
 #include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
+#include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
 
 /* Forward declaration of the production header decoder
  * (proto_helpers.c). hx_rcv_hdr decodes the buffered header by
@@ -706,13 +707,11 @@ hx_bridge_lookup_socks_proxy (const char *host, guint16 port)
      * that's reserved in URI syntax doesn't make g_proxy_resolver_lookup
      * reject the lookup as malformed — notably an IPv6 zone id's `%`
      * (fe80::1%eth0 → fe80::1%25eth0). Keep `:` unescaped so IPv6 colons
-     * survive. Then bracket IPv6 literals so the URI stays well-formed
-     * (none://[2001:db8::1]:5500, not none://2001:db8::1:5500); a bare `:`
-     * in host marks an unbracketed IPv6 literal. */
+     * survive, then let gtkhx_join_host_port bracket the IPv6 literal so
+     * the URI stays well-formed (none://[2001:db8::1]:5500). */
     g_autofree char *esc_host = g_uri_escape_string (host, ":", FALSE);
-    g_autofree char *uri = strchr (host, ':')
-        ? g_strdup_printf ("none://[%s]:%u", esc_host, port)
-        : g_strdup_printf ("none://%s:%u", esc_host, port);
+    g_autofree char *hostport = gtkhx_join_host_port (esc_host, port);
+    g_autofree char *uri = g_strdup_printf ("none://%s", hostport);
     GError *err = NULL;
     char **proxies = g_proxy_resolver_lookup (resolver, uri, NULL, &err);
     if (err) {

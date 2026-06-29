@@ -44,6 +44,7 @@
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "hxnet_bridge.h"
+#include "host_port.h"
 #include "rcv.h"
 #include "gtkutil.h"
 #include "chat.h"
@@ -60,7 +61,7 @@
 #include "network.h"
 #include "banner.h"
 #include "debug.h"
-#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_open, hxnet_hope_aead_free */
+#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
 #include "cipher.h"
 #include "voice_runtime.h"
 #include "voice_model.h"
@@ -672,10 +673,10 @@ trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
  * prompt verdict so headless tests can drive the reject path too.
  * Returns TRUE to accept the cert, FALSE to reject.
  *
- * Used by BOTH the legacy GTlsConnection accept-certificate handler
- * (tls_accept_certificate, which computes the fingerprint from a
- * GTlsCertificate) and the orchestrator's post-handshake verify
- * (hx_tls_orchestrator_verify_cert, fingerprint computed in Rust).
+ * Used by the orchestrator's post-handshake verify
+ * (hx_tls_orchestrator_verify_cert for the control channel,
+ * htxf_verify_cert_cb for the HTXF subchannel) — both run hxnet's
+ * rustls handshake and call here with the fingerprint computed in Rust.
  * Safe off the main thread — the prompt marshals via
  * trust_dialog_run_thread_safe. */
 static gboolean
@@ -1122,7 +1123,7 @@ htxf_connect (struct htxf_conn *htxf)
 
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming. When the control
 	 * channel negotiated ChaCha20-Poly1305, the per-transfer keys are
-	 * derived INSIDE hxnet_htxf_open from the control connection's
+	 * derived INSIDE hxnet_htxf_connect from the control connection's
 	 * retained HOPE material (htlc->hope_aead, an opaque handle seeded at
 	 * login) plus this transfer's ref — mixing ref into the salt so two
 	 * transfers in one session can never share a nonce, counters from 0 —
@@ -1409,24 +1410,18 @@ hx_tracker_list_async (session *sess)
     /* Single SOCKS proxy for the whole walk (the user's choice over a
      * per-URL array): resolve it once for the first tracker's endpoint,
      * which the common uniform-proxy config (all_proxy / GNOME settings)
-     * applies to every tracker anyway. A "host" or "host:port" URL string;
-     * default the port to the HTRK 5498 the walk itself uses. */
+     * applies to every tracker anyway. gtkhx_parse_host_port handles
+     * "host" / "host:port" / "[ipv6]:port" correctly; on a malformed URL
+     * we skip the lookup (connect direct — the bad URL fails later in the
+     * walk regardless). */
     g_autofree char *proxy_uri = NULL;
     {
-        const char *u = urls[0];
-        const char *colon = strrchr (u, ':');
-        guint16 pport = HTRK_TCPPORT;
         g_autofree char *phost = NULL;
-        if (colon && colon[1] != '\0') {
-            phost = g_strndup (u, (gsize) (colon - u));
-            int v = atoi (colon + 1);
-            if (v > 0 && v <= 65535) {
-                pport = (guint16) v;
-            }
-        } else {
-            phost = g_strdup (u);
+        guint16 pport = 0;
+        if (gtkhx_parse_host_port (urls[0], HTRK_TCPPORT, &phost, &pport,
+                                   NULL)) {
+            proxy_uri = hx_bridge_lookup_socks_proxy (phost, pport);
         }
-        proxy_uri = hx_bridge_lookup_socks_proxy (phost, pport);
     }
 
     current_tracker_fetch = hxnet_tracker_fetch_open (

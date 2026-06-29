@@ -164,7 +164,7 @@ struct htxf_conn {
 	 * per-transfer keys into xfer_encode / xfer_decode (counters
 	 * start at 0, never reused across transfers — derivation mixes
 	 * the HTXF ref number into the per-transfer key) and hands them
-	 * to hxnet_htxf_open, which owns the seal/open state thereafter.
+	 * to hxnet_htxf_connect, which owns the seal/open state thereafter.
 	 *
 	 * hx is the opaque hxnet HTXF channel handle (Rust HtxfConn *).
 	 * It owns the socket fd (and any TLS session), the AEAD framing
@@ -303,7 +303,7 @@ struct htlc_conn {
 	 * HOPE handshake negotiated ChaCha20-Poly1305 (or, on the legacy
 	 * Tier 3 harness transport, built from the harness's own C cipher
 	 * state). Lets an HTXF subchannel derive its per-transfer keys
-	 * in-process via hxnet_htxf_open, without the session key crossing
+	 * in-process via hxnet_htxf_connect, without the session key crossing
 	 * back to C. Freed with hxnet_hope_aead_free on connection
 	 * teardown. */
     void *hope_aead;

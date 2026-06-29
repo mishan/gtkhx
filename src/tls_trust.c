@@ -43,6 +43,7 @@
 #include <gio/gio.h>
 
 #include "tls_trust.h"
+#include "host_port.h"
 
 /* Forward-declared in network.c / bookmarks_io.c — don't pull
  * the whole gtkhx.h pile in. The path resolver caches and lives
@@ -140,44 +141,23 @@ parse_host_field (const char *line, gchar **host_out, guint16 *port_out)
         return 0;
     }
 
-    /* Split optional :port. IPv6 brackets [::1]:5600 not
-     * supported — Hotline hosts are bare hostnames or IPv4
-     * literals in every server we've ever talked to. If a future
-     * IPv6 host needs pinning, the line can be hand-authored
-     * sans port and the lookup falls back to the host-only
-     * match. */
+    /* Split host[:port] via the shared IPv6-aware helper. A hostname-only
+     * entry (no port) leaves *port_out = 0, which host_port_match treats as
+     * the "any port" wildcard. A present-but-malformed port (non-numeric,
+     * trailing garbage like "5500garbage", or out of 1..65535) makes the
+     * helper fail and we skip the whole entry — never widening a typo into
+     * the any-port wildcard. Bracketed IPv6 ([::1]:5600) is handled too;
+     * an unbracketed IPv6 literal is taken as host-only (no port). */
     gchar *field = g_strndup (start, fieldlen);
-    char *colon = strrchr (field, ':');
-    if (colon) {
-        /* The suffix after the colon must parse as a complete
-         * port number in 1..65535. atoi would have accepted
-         * partial parses ("5500garbage" → 5500) which is the
-         * same trust-widening shape as "host:foo" — a typo
-         * silently turning into a real pin. g_ascii_strtoll
-         * with endptr validation rejects any non-numeric tail.
-         * On failure (including overflow, empty suffix, or
-         * trailing garbage) the whole entry is malformed and
-         * we skip the line; falling back to port=0 would
-         * trigger the host_port_match "any port" wildcard,
-         * which is exactly what we want to avoid. A genuine
-         * hostname-only entry has no colon at all, and that
-         * path doesn't hit this branch. */
-        const char *port_str = colon + 1;
-        gchar *endptr = NULL;
-        errno = 0;
-        gint64 portv = g_ascii_strtoll (port_str, &endptr, 10);
-        if (errno != 0
-            || endptr == port_str
-            || *endptr != '\0'
-            || portv < 1
-            || portv > 65535) {
-            g_free (field);
-            return 0;
-        }
-        *colon = '\0';
-        *port_out = (guint16) portv;
+    char *host = NULL;
+    guint16 port = 0;
+    gboolean ok = gtkhx_parse_host_port (field, 0, &host, &port, NULL);
+    g_free (field);
+    if (!ok) {
+        return 0;
     }
-    *host_out = field;
+    *host_out = host;
+    *port_out = port;
     /* Return the offset from `line` (not `start`) so the caller's
      * subsequent locate_fingerprint(line, host_end) walks past
      * both the leading whitespace and the host token. */
@@ -441,18 +421,19 @@ hx_tls_trust_pin (const char *host, guint16 port, const char *fingerprint)
      * known_hosts is per-user trust state.
      *
      * NOTE: we deliberately do NOT call g_mkdir_with_parents on
-     * the destination directory here. When this function is
-     * called from inside the GSocketClient accept-certificate
-     * signal handler (network.c::tls_accept_certificate), any
-     * g_mkdir_with_parents call wedges the TLS handshake on
-     * glib-networking + GnuTLS — the handshake never completes,
-     * Janus eventually logs "perform handshake: read handshake:
-     * EOF". The bisect was tight: every other GLib + file op
-     * combination in this function passes; only adding
-     * g_mkdir_with_parents back triggers the hang. Suspect
-     * either an internal GLib lock or a GIO file-monitor side
-     * effect on /tmp; root cause is in glib-networking and
-     * outside this repo to fix. The config directory is
+     * the destination directory here. This dates to when the TLS
+     * trust decision ran inside glib-networking's GSocketClient
+     * accept-certificate handler: any g_mkdir_with_parents call
+     * wedged the GnuTLS handshake (it never completed; Janus
+     * eventually logged "perform handshake: read handshake: EOF").
+     * The bisect was tight — every other GLib + file op in this
+     * function passed; only adding g_mkdir_with_parents back
+     * triggered the hang (suspected internal GLib lock or a GIO
+     * file-monitor side effect on /tmp). The glib-networking TLS
+     * path is gone now (both the control channel and the HTXF
+     * subchannel handshake through hxnet's rustls and call here
+     * via tls_trust_decide), but the mkdir stays dropped anyway:
+     * it was never needed. The config directory is
      * created by gtkhx_config_dir() at app startup, and the
      * test harness sets GTKHX_KNOWN_HOSTS to a path under /tmp
      * which always exists, so dropping the mkdir is safe in

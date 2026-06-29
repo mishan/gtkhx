@@ -17,7 +17,7 @@
  *     the fetch handle and the in-flight glycin decode).
  *   - The HTXF (file-mode) fetch: banner_handle_message issues
  *     HTLC_HDR_DOWNLOAD_BANNER, and banner_handle_htxf_reply runs the
- *     download on the tokio blocking pool (hxnet_htxf_open) before
+ *     download on the tokio blocking pool (hxnet_htxf_connect) before
  *     handing the bytes to the same glycin decode helper. A
  *     fetch-generation counter drops stale results on banner_clear.
  *
@@ -611,7 +611,7 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
 
     /* Clone the control connection's opaque HOPE AEAD material handle
      * (seeded on htlc at login when ChaCha20-Poly1305 was negotiated).
-     * The worker hands it to hxnet_htxf_open, which derives the
+     * The worker hands it to hxnet_htxf_connect, which derives the
      * per-transfer keys in-process — no session key or cipher state
      * crosses into this fetch. NULL (plaintext / Blowfish / no-cipher)
      * leaves the subchannel plaintext.

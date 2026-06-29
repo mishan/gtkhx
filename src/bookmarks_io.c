@@ -36,6 +36,7 @@
 #include <glib.h>
 
 #include "bookmarks.h"
+#include "host_port.h"
 
 /* Forward-declare gtkhx_config_dir() rather than #include "gtkhx.h":
  * that header transitively pulls in <gtk/gtk.h> (it declares helpers
@@ -268,7 +269,6 @@ hx_bookmark_load (const char *name)
     char junk[132];
     char len_addr;
     char server_buf[256];
-    char *colon;
     size_t len;
 
     if (!path) {
@@ -358,15 +358,27 @@ hx_bookmark_load (const char *name)
         out->tls = 0;
     }
 
-    /* server_buf is "host:port" — split. */
-    colon = strrchr (server_buf, ':');
-    if (colon) {
-        *colon = '\0';
-        g_strlcpy (out->port, colon + 1, sizeof (out->port));
-    } else {
-        out->port[0] = '\0';
+    /* server_buf is "host" / "host:port" / "[ipv6]:port" — split via the
+     * shared IPv6-aware helper (out->port is a string, empty = default).
+     * On a malformed value keep the whole string as the host with no port
+     * (lenient back-compat for hand-edited / old bookmarks). */
+    {
+        g_autofree char *bhost = NULL;
+        guint16 bport = 0;
+        gboolean had = FALSE;
+        if (gtkhx_parse_host_port (server_buf, 0, &bhost, &bport, &had)) {
+            g_strlcpy (out->server, bhost, sizeof (out->server));
+            if (had) {
+                g_snprintf (out->port, sizeof (out->port), "%u",
+                            (unsigned) bport);
+            } else {
+                out->port[0] = '\0';
+            }
+        } else {
+            g_strlcpy (out->server, server_buf, sizeof (out->server));
+            out->port[0] = '\0';
+        }
     }
-    g_strlcpy (out->server, server_buf, sizeof (out->server));
 
     close (bm);
     return g_steal_pointer (&out);

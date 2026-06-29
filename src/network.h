@@ -68,14 +68,14 @@ extern void hx_connect (struct htlc_conn *htlc, const char *serverstr,
 
 extern void kill_threads (void);
 
-/* Open the HTXF subchannel for `htxf`: plaintext TCP connect (SOCKS /
- * IPv4-IPv6 fallback via GSocketClient), hand the connected fd to
- * hxnet_htxf_open along with the packed 16/24-byte preamble, the
- * per-transfer AEAD keys (when the control channel negotiated
- * CIPHER_MODE_AEAD), and the TLS flag. hxnet owns the socket, the
- * optional rustls wrap, and the AEAD framing thereafter; the handle
- * is stored on htxf->hx. Returns TRUE on success, FALSE on connect /
- * handshake / open failure (the fd is closed on every failure path).
+/* Open the HTXF subchannel for `htxf`: look up the SOCKS proxy for the
+ * target, then hand the host:port (+ proxy, the packed 16/24-byte
+ * preamble, the per-transfer AEAD keys when the control channel
+ * negotiated CIPHER_MODE_AEAD, and the TLS flag) to hxnet_htxf_connect.
+ * hxnet does the whole connect itself — DNS + IPv4/IPv6 fallback +
+ * optional SOCKS tunnel — and owns the socket, the optional rustls wrap,
+ * and the AEAD framing thereafter; the handle is stored on htxf->hx.
+ * Returns TRUE on success, FALSE on connect / handshake / open failure.
  *
  * Worker threads then stream bytes through htxf_io_read /
  * htxf_io_write and close the channel via htxf_io_release. */

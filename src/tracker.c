@@ -40,6 +40,7 @@
 #include "toolbar.h"
 #include "tracker.h"
 #include "tracker_row.h"
+#include "host_port.h"
 
 static GtkWidget *tracker_window;
 static GtkWidget *tracker_sections_box; /* vbox of per-tracker GtkExpanders */
@@ -2052,7 +2053,6 @@ show_server_details (HxTrackerRow *server)
     guint16 port;
     guint16 nusers;
     char title_buf[256];
-    char addrport[256];
     char nbuf[32];
     int n;
 
@@ -2095,18 +2095,12 @@ show_server_details (HxTrackerRow *server)
         n += details_add_str_row (grp, _ ("Name"), name);
     }
     if (address && *address) {
-        /* Bracket the address when it contains a colon so an IPv6
-         * literal (either from an IPV6-type wire record or from a
-         * HOSTNAME-type record carrying an IPv6 literal, which is
-         * what Argus emits for promoted servers) doesn't render as
-         * `2001:db8::1:5500` and leave the reader guessing where the
-         * port starts. RFC 3986 §3.2.2 bracket form. IPv4 and bare
-         * hostnames have no colons, so they pass through unchanged. */
-        if (strchr (address, ':') != NULL) {
-            g_snprintf (addrport, sizeof (addrport), "[%s]:%u", address, port);
-        } else {
-            g_snprintf (addrport, sizeof (addrport), "%s:%u", address, port);
-        }
+        /* gtkhx_join_host_port brackets an IPv6 literal (from an IPV6-type
+         * wire record, or a HOSTNAME-type record carrying an IPv6 literal,
+         * which is what Argus emits for promoted servers) so it renders as
+         * `[2001:db8::1]:5500` rather than leaving the reader guessing where
+         * the port starts (RFC 3986 §3.2.2). IPv4 / hostnames pass through. */
+        g_autofree char *addrport = gtkhx_join_host_port (address, port);
         n += details_add_str_row (grp, _ ("Address"), addrport);
     }
     if (desc && *desc) {
