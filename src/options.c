@@ -46,6 +46,7 @@
 #include "prefs_parser.h"
 #include "options.h"
 #include "gif_icons.h"  /* hx_icon_save / _set / _clear + GIF_ICONS_* state */
+#include "gif_avatar.h" /* gtkhx_avatar_set_animation_enabled (10.D pref) */
 #include "toolbar.h"    /* toolbar_show_toast */
 #include "hotline_proto.h" /* gtkhx_proto_gif_icon_is_gif */
 #include "text_util.h"
@@ -169,6 +170,8 @@ struct gtkhx_prefs gtkhx_prefs = {
 	 * the theme file ($CONFIG/themes/<name>.ini, fallback to GResource).
 	 * See gtkhx_theme.{c,h} and docs/theming-file-format.md. */
     NULL, /* theme_name */
+
+    1, /* animate_avatars — default ON (init_variables re-asserts) */
 };
 
 static void parse_tracker (session *);
@@ -588,6 +591,16 @@ changed_emoji_shortcodes (session *sess)
     gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
 }
 
+/* changefunc for CFG_ANIMATE_AVATARS (Phase 10.D). Push the toggle into
+ * gif_avatar.c, which starts/stops its frame timer and repaints avatars
+ * as either animated or a still first frame. */
+static void
+changed_animate_avatars (session *sess)
+{
+    (void)sess;
+    gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
+}
+
 #if 0 /* XXX */
 static void changed_logging (session *sess)
 {
@@ -802,6 +815,16 @@ struct cfgvar {
     void (*changefunc) (session *);
     GtkWidget *widget;
 } cfgvars[] = {
+    /* GIF-icons (Phase 10.D): animate avatars. Kept first to preserve
+	 * the alphabetical key order ("ANIMATEAVATARS" < "AUTOCOPY…") that
+	 * the bsearch in this table requires. changefunc pushes the toggle
+	 * into gif_avatar.c so a live change starts/stops animation. */
+    { CFG_ANIMATE_AVATARS,
+      { &gtkhx_prefs.animate_avatars },
+      BOOLEAN,
+      0,
+      changed_animate_avatars,
+      NULL },
     { CFG_AUTOCOPY_COLOR,
       { &gtkhx_prefs.autocopy_color },
       BOOLEAN,
@@ -1653,6 +1676,9 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_prefs.emoji_shortcodes = 1;
     gtkhx_prefs.emoji_typeahead = 1;
 
+    /* GIF-icons (Phase 10.D): animate avatars on by default. */
+    gtkhx_prefs.animate_avatars = 1;
+
     /* Voice device defaults: empty string === "use system default
 	 * via autoaudiosrc / autoaudiosink". The Rust runtime side
 	 * normalises NULL and "" identically, so we just allocate an
@@ -1962,6 +1988,11 @@ apply_loaded_xtext_prefs (void)
 	 * text_util/proto_helpers conversion gate explicitly. (Typeahead is
 	 * read live from gtkhx_prefs in emoji.c, so it needs no push.) */
     gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
+
+    /* GIF-icons (Phase 10.D): same concern — push the loaded
+	 * animate-avatars toggle into gif_avatar.c so a persisted OFF takes
+	 * effect at startup, not only after the user touches the setting. */
+    gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
     /* Stamp format is widget-aware but the module-global it stashes
 	 * into is read by xtext_get_stamp_str. Pass NULL for the widget
 	 * here — at this point no xtext widgets exist yet (chat windows
@@ -2990,6 +3021,15 @@ settings_page_identity (AdwPreferencesPage *page)
         adw_action_row_add_suffix (gif_row, clear);
 
         adw_preferences_group_add (gif_grp, GTK_WIDGET (gif_row));
+
+        /* Animate avatars (Phase 10.D). Off renders the still first
+		 * frame; per-user pause (click / right-click) is separate. */
+        adw_preferences_group_add (
+            gif_grp,
+            pref_switch_row (CFG_ANIMATE_AVATARS, _ ("Animate GIF avatars"),
+                             _ ("Play animated avatars in the user list. Turn "
+                                "off to show a still frame.")));
+
         adw_preferences_page_add (page, gif_grp);
     }
 

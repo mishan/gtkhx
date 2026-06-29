@@ -46,6 +46,7 @@
 #include "rcv.h"
 #include "users.h"
 #include "users_view.h"
+#include "gif_avatar.h" /* gtkhx_avatar_is_animated / _is_paused / _set_paused */
 
 /* Every userlist call site is HxUserListView-backed; selection
  * comes from the view's GtkSingleSelection, right-click pops via
@@ -323,6 +324,21 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
     }
 }
 
+/* Toggle this user's GIF-avatar animation (Phase 10.D). Only offered
+ * when the user actually has an animated avatar (see user_popup_show). */
+static void
+on_user_toggle_anim (GSimpleAction *action, GVariant *param, gpointer user_data)
+{
+    struct UserActionCtx *ctx = user_data;
+    (void)action;
+    (void)param;
+    if (!ctx->user) {
+        return;
+    }
+    gtkhx_avatar_set_paused (ctx->user->uid,
+                             !gtkhx_avatar_is_paused (ctx->user->uid));
+}
+
 /* Tthe GActionEntry table that drove the old GtkPopoverMenu
  * is gone — the bare-popover rewrite invokes the on_user_* handlers
  * directly via on_user_btn_clicked. The handler signatures still
@@ -533,6 +549,19 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
                               _ ("Private Message"), on_user_msg);
     user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
                               _ ("Private Chat"), on_user_pchat);
+
+    /* GIF-icons (Phase 10.D): pause / resume this user's animated
+	 * avatar. Only shown when they actually have an animated one — the
+	 * discoverable counterpart to clicking the avatar directly. */
+    if (gtkhx_avatar_is_animated (user->uid)) {
+        gtk_box_append (GTK_BOX (vbox),
+                        gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+        user_popup_append_button (
+            GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
+            gtkhx_avatar_is_paused (user->uid) ? _ ("Resume Animation")
+                                               : _ ("Pause Animation"),
+            on_user_toggle_anim);
+    }
 
     /* ctx outlives any one button-click — bound to the popover,
      * freed when it's unparented. The on_user_btn_clicked closure

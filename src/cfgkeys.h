@@ -71,6 +71,10 @@
 #define CFG_EMOJI_SHORTCODES "EMOJISHORTCODES"
 #define CFG_EMOJI_TYPEAHEAD "EMOJITYPEAHEAD"
 
+/* GIF-icons extension (Phase 10.D): animate GIF avatars in the user
+ * list. BOOLEAN, default ON. */
+#define CFG_ANIMATE_AVATARS "ANIMATEAVATARS"
+
 /* Same-window navigation for the files browser. The matching
  * NEWS_SAMEWINDOW key was retired in Phase 6 when the legacy
  * two-window news UI was removed; an old gtkhxrc that still has

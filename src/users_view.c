@@ -116,6 +116,16 @@ struct _HxUserCellName {
 	 * Themed cells scale it live with the icon area; see
 	 * cell_effective_row_height. */
     int row_height;
+
+    /* Click-to-pause deferral (Phase 10.D). A single primary click on an
+	 * animated avatar toggles its pause, but we can't act on the first
+	 * press: it might be the opening press of a double-click (which opens
+	 * the PM via on_view_activate). So we arm a timeout for the double-
+	 * click interval and only toggle if no second press lands.
+	 * pause_click_uid is the uid captured at press time (robust against
+	 * cell recycling); pause_click_source is the pending timeout. */
+    guint pause_click_source;
+    guint16 pause_click_uid;
 };
 
 G_DEFINE_FINAL_TYPE (HxUserCellName, hx_user_cell_name, GTK_TYPE_WIDGET)
@@ -124,6 +134,11 @@ static void
 hx_user_cell_name_dispose (GObject *object)
 {
     HxUserCellName *cell = HX_USER_CELL_NAME (object);
+
+    if (cell->pause_click_source) {
+        g_source_remove (cell->pause_click_source);
+        cell->pause_click_source = 0;
+    }
 
     if (cell->row && cell->row_changed_id) {
         g_signal_handler_disconnect (cell->row, cell->row_changed_id);
@@ -462,6 +477,83 @@ hx_user_cell_name_class_init (HxUserCellNameClass *klass)
     widget_class->measure = hx_user_cell_name_measure;
 }
 
+/* Deferred single-click fired: no second press arrived within the
+ * double-click window, so this really was a single click on the avatar —
+ * toggle the captured uid's pause (re-checking it's still animated). */
+static gboolean
+pause_click_fire (gpointer user_data)
+{
+    HxUserCellName *cell = HX_USER_CELL_NAME (user_data);
+    guint16 uid = cell->pause_click_uid;
+
+    cell->pause_click_source = 0;
+    cell->pause_click_uid = 0;
+    if (uid != 0 && gtkhx_avatar_is_animated (uid)) {
+        gtkhx_avatar_set_paused (uid, !gtkhx_avatar_is_paused (uid));
+    }
+    return G_SOURCE_REMOVE;
+}
+
+/* The system double-click interval in ms (default 250 if unavailable). */
+static guint
+cell_double_click_ms (HxUserCellName *cell)
+{
+    GtkSettings *settings = gtk_widget_get_settings (GTK_WIDGET (cell));
+    int t = 250;
+    if (settings) {
+        g_object_get (settings, "gtk-double-click-time", &t, NULL);
+    }
+    return t > 0 ? (guint) t : 250;
+}
+
+/* Click-to-pause (Phase 10.D): a primary click that lands on an *animated*
+ * avatar toggles that user's animation pause. We deliberately do NOT claim
+ * the sequence and the toggle is deferred by the double-click interval: a
+ * second press cancels it so double-click-to-open (on_view_activate) keeps
+ * working on the avatar. (Claiming the first press, or running in CAPTURE
+ * phase to suppress, would deny the column view the presses it needs to
+ * detect the double-click — so we let selection proceed and only act on a
+ * confirmed single click.) Clicks on the name or a still icon are ignored. */
+static void
+on_cell_icon_pressed (GtkGestureClick *gesture, int n_press, double x,
+                      double y, gpointer user_data)
+{
+    HxUserCellName *cell = HX_USER_CELL_NAME (user_data);
+    (void) y;
+    (void) gesture;
+
+    /* Second (or later) press → a double-click is forming. Cancel the
+	 * pending single-click toggle and let on_view_activate open the PM. */
+    if (n_press != 1) {
+        if (cell->pause_click_source) {
+            g_source_remove (cell->pause_click_source);
+            cell->pause_click_source = 0;
+            cell->pause_click_uid = 0;
+        }
+        return;
+    }
+    if (!cell->row) {
+        return;
+    }
+    guint16 uid = hx_user_row_get_uid (cell->row);
+    if (uid == 0 || !gtkhx_avatar_is_animated (uid)) {
+        return;
+    }
+    /* Hit-test the icon column (icon renders from the start edge up to
+	 * the text offset). Outside it → leave it for normal selection. */
+    double icon_w = cell->text_x_offset * cell_icon_scale (cell);
+    if (x >= icon_w) {
+        return;
+    }
+    /* Arm the deferred toggle; supersede any stale pending one. */
+    if (cell->pause_click_source) {
+        g_source_remove (cell->pause_click_source);
+    }
+    cell->pause_click_uid = uid;
+    cell->pause_click_source
+        = g_timeout_add (cell_double_click_ms (cell), pause_click_fire, cell);
+}
+
 static void
 hx_user_cell_name_init (HxUserCellName *cell)
 {
@@ -469,6 +561,13 @@ hx_user_cell_name_init (HxUserCellName *cell)
     cell->themed = FALSE;
     cell->text_outline = FALSE;
     cell->row_height = 18;
+
+    GtkGesture *click = gtk_gesture_click_new ();
+    gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
+                                   GDK_BUTTON_PRIMARY);
+    g_signal_connect (click, "pressed", G_CALLBACK (on_cell_icon_pressed),
+                      cell);
+    gtk_widget_add_controller (GTK_WIDGET (cell), GTK_EVENT_CONTROLLER (click));
 }
 
 static GtkWidget *
