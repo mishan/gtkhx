@@ -3900,6 +3900,74 @@ pub unsafe extern "C" fn gtkhx_proto_text_to_utf8(
     crate::text::to_utf8_into(s, buf)
 }
 
+// ---- Emoji shortcodes (phase E2) --------------------------------------
+//
+// FFI for `rust/crates/hotline-proto/src/emoji.rs`. The legacy (non-UTF-8)
+// send path in src/text_util.c calls the encode shim before Mac Roman
+// conversion so emoji ride the wire as ASCII `:joy:` instead of `?`; the
+// chat display path (phase E3) calls the decode shim. Both mirror the
+// `gtkhx_proto_text_to_utf8` buffer convention but with snprintf-style
+// length reporting (see below), since `:shortcode:` expansion is unbounded
+// per input byte (up to ~7x) and a fixed over-allocation would be wasteful.
+
+/// Rewrite emoji clusters in `src` to `:shortcode:` text, writing UTF-8
+/// into `dst`. Returns the **full** number of bytes the output requires
+/// (snprintf-style). No trailing NUL is appended.
+///
+/// A return value `<= cap` means the whole output was written *only when
+/// `dst` is a usable buffer*. `dst` is treated as unusable — nothing is
+/// written, but the required length is still returned — when `dst` is NULL,
+/// `cap == 0`, or `cap > isize::MAX` (the Rust side refuses to build a slice
+/// that large). So a `<= cap` return does NOT by itself imply bytes were
+/// written: callers must independently know `dst`/`cap` were valid. With a
+/// usable buffer, a return `> cap` means the output was truncated at a char
+/// boundary and the caller should re-call with a buffer of at least the
+/// returned size. (`cap > isize::MAX` never happens for the real callers,
+/// which size buffers from u16-bounded chat fields.)
+///
+/// # Safety
+/// `src` valid for `len` bytes or NULL (treated as empty); `dst` valid
+/// (writable) for `cap` bytes, or NULL / zero-cap / oversize-cap (treated
+/// as unusable per above).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_emoji_to_shortcodes(
+    src: *const u8,
+    len: usize,
+    dst: *mut u8,
+    cap: usize,
+) -> usize {
+    let s = as_slice(src, len);
+    let buf: &mut [u8] = if dst.is_null() || cap == 0 || cap > isize::MAX as usize {
+        &mut []
+    } else {
+        slice::from_raw_parts_mut(dst, cap)
+    };
+    crate::emoji::emoji_to_shortcodes_into(s, buf)
+}
+
+/// Replace known `:shortcode:` tokens in `src` with emoji, writing UTF-8
+/// into `dst`. Same snprintf-style return contract as
+/// [`gtkhx_proto_emoji_to_shortcodes`]. Unknown tokens and stray colons
+/// pass through unchanged; mIRC colour runs are preserved.
+///
+/// # Safety
+/// Same as [`gtkhx_proto_emoji_to_shortcodes`].
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_shortcodes_to_emoji(
+    src: *const u8,
+    len: usize,
+    dst: *mut u8,
+    cap: usize,
+) -> usize {
+    let s = as_slice(src, len);
+    let buf: &mut [u8] = if dst.is_null() || cap == 0 || cap > isize::MAX as usize {
+        &mut []
+    } else {
+        slice::from_raw_parts_mut(dst, cap)
+    };
+    crate::emoji::shortcodes_to_emoji_into(s, buf)
+}
+
 // ---- Voice-chat extension (Phase 8.A) ---------------------------------
 //
 // FFI surface for the wire-protocol layer added in

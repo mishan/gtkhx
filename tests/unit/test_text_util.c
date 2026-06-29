@@ -423,23 +423,64 @@ test_for_wire_legacy_curly_quotes (void)
     g_free (out);
 }
 
-/* Legacy mode: characters outside the Mac Roman repertoire (e.g.
- * emoji) get replaced with '?' (0x3F) per the spec. */
+/* Legacy mode (phase E2): emoji are rewritten to their ASCII
+ * `:shortcode:` form *before* Mac Roman conversion, so they ride the wire
+ * as readable text instead of the '?' substitute. U+1F60A SMILING FACE
+ * WITH SMILING EYES → ":blush:". */
 static void
-test_for_wire_legacy_unmappable_substitute (void)
+test_for_wire_legacy_emoji_to_shortcode (void)
 {
-    /* U+1F60A SMILING FACE WITH SMILING EYES — 4 UTF-8 bytes,
-	 * definitely not in Mac Roman. */
-    const char in[] = "ok\xf0\x9f\x98\x8a";
+    const char in[] = "ok\xf0\x9f\x98\x8a";  /* "ok😊" */
     gsize len = 0;
     char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, FALSE, &len);
-    /* Must be three bytes: "ok?" (or however many "?" the iconv
-	 * picked — at least one substitute character). The important
-	 * invariant is that there are no high bytes left and the ASCII
-	 * prefix survived. */
+    g_assert_cmpmem (out, len, "ok:blush:", 9);
+    /* No '?' substitute and no high bytes survived. */
+    g_assert_null (memchr (out, '?', len));
+    for (gsize i = 0; i < len; i++) {
+        g_assert_true ((guint8) out[i] < 0x80);
+    }
+    g_free (out);
+}
+
+/* Legacy mode: a codepoint with no shortcode AND no Mac Roman mapping
+ * still falls back to '?'. U+0950 DEVANAGARI OM is neither an emoji (so
+ * the rewrite leaves it alone) nor in Mac Roman (so g_convert substitutes
+ * it) — confirms the rewrite didn't displace the '?' fallback. */
+static void
+test_for_wire_legacy_non_emoji_unmappable_still_substitutes (void)
+{
+    const char in[] = "om\xe0\xa5\x90";  /* "om" + U+0950 */
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, FALSE, &len);
     g_assert_cmpint (out[0], ==, 'o');
-    g_assert_cmpint (out[1], ==, 'k');
+    g_assert_cmpint (out[1], ==, 'm');
     g_assert_cmpint (out[2], ==, '?');
+    g_free (out);
+}
+
+/* UTF-8 mode must NOT rewrite emoji — the wire carries the real
+ * codepoint when the server speaks UTF-8. */
+static void
+test_for_wire_utf8_mode_keeps_emoji (void)
+{
+    const char in[] = "ok\xf0\x9f\x98\x8a";  /* "ok😊" */
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), /*utf8_mode=*/TRUE, FALSE,
+                                     &len);
+    g_assert_cmpmem (out, len, in, strlen (in));
+    g_free (out);
+}
+
+/* Legacy mode + is_body: emoji rewrite composes with LF→CR — the
+ * shortcode is inserted, then LFs around it become CRs. */
+static void
+test_for_wire_legacy_emoji_with_body_crlf (void)
+{
+    const char in[] = "hi \xf0\x9f\x8e\x89\nbye";  /* "hi 🎉\nbye" */
+    gsize len = 0;
+    char *out = gtkhx_text_for_wire (in, strlen (in), FALSE, /*is_body=*/TRUE,
+                                     &len);
+    g_assert_cmpmem (out, len, "hi :tada:\rbye", 13);
     g_free (out);
 }
 
@@ -541,8 +582,14 @@ main (int argc, char **argv)
                      test_for_wire_legacy_e_acute_round_trips);
     g_test_add_func ("/text_util/for_wire/legacy_curly_quotes",
                      test_for_wire_legacy_curly_quotes);
-    g_test_add_func ("/text_util/for_wire/legacy_unmappable_substitute",
-                     test_for_wire_legacy_unmappable_substitute);
+    g_test_add_func ("/text_util/for_wire/legacy_emoji_to_shortcode",
+                     test_for_wire_legacy_emoji_to_shortcode);
+    g_test_add_func ("/text_util/for_wire/legacy_non_emoji_unmappable_still_substitutes",
+                     test_for_wire_legacy_non_emoji_unmappable_still_substitutes);
+    g_test_add_func ("/text_util/for_wire/utf8_mode_keeps_emoji",
+                     test_for_wire_utf8_mode_keeps_emoji);
+    g_test_add_func ("/text_util/for_wire/legacy_emoji_with_body_crlf",
+                     test_for_wire_legacy_emoji_with_body_crlf);
     g_test_add_func ("/text_util/for_wire/legacy_body_lf_to_cr",
                      test_for_wire_legacy_body_lf_to_cr);
     g_test_add_func ("/text_util/for_wire/legacy_name_keeps_lf",
