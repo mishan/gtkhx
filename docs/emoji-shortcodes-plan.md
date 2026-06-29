@@ -198,6 +198,23 @@ means the displayed *and copied* text is the emoji, Slack-style. This is
 intended. It also means the (future, currently `#if 0`'d) chat logger in
 `xoutput_chat` would log emoji, not shortcodes — fine.
 
+**As built (E3).** The decode runs in `hx_chat_event_new` (public/private
+chat) and `hx_msg_event_new` (PMs) via a shared
+`hx_decode_emoji_shortcodes` helper over `gtkhx_proto_shortcodes_to_emoji`.
+For a parsed `Nick: body` line only the body region is converted and
+`body_len` is recomputed (the nick column stays literal and `is_self` is
+decided against the un-decoded nick first); an unsplit prose line is
+converted whole; info lines are skipped. News is deliberately **not**
+wired (open question 1 — chat + PM only in v1).
+
+One known edge from `hx_chat_split_nick_body`: a line with *no* real nick
+but a shortcode mid-prose (e.g. `*** waves :tada:`) has its first colon
+eaten as a (bogus) nick separator, so that shortcode won't decode. Lines
+with a real `Nick:` prefix, or lines that fail the split outright (no
+colon, colon-at-start, or pre-colon > 31 bytes), decode correctly. The
+mis-split case is rare server prose and not worth complicating the
+splitter for; revisit if it ever bites.
+
 ### Rendering — no new work expected
 
 Emoji already render in GtkHx: the picker inserts them into the input, and
@@ -392,9 +409,11 @@ Each ends on something testable, per the roadmap's house style.
   wired into `gtkhx_text_for_wire`'s legacy branch (with a guard against
   pathological lengths/expansion). Tier 2 test: an emoji-bearing string
   with `utf8_mode=FALSE` carries `:joy:` on the wire and Mac Roman survives.
-- **E3 — Receive/display.** Wire decode into `hx_chat_event_new` (and the
-  PM/news body builders). Tier 2 test over `HxChatEvent`: body `:joy:`
-  decodes to 😂, colour runs preserved, info-prefix untouched.
+- **E3 — Receive/display. ✅** Decode wired into `hx_chat_event_new`
+  (public/private chat) and `hx_msg_event_new` (PM) via a shared helper.
+  Tier 2 tests over `HxChatEvent` / `HxMsgEvent`: body `:tada:` decodes to
+  🎉, nick stays literal, `body_len` recomputed, non-shortcode colons left
+  alone. News deliberately excluded for v1 (open question 1).
 - **E4 — Rendering verification.** Confirm converted emoji render in xtext
   identically to picker-inserted ones; handle any font-fallback surprise.
 - **E5 — Typeahead popup.** The match-query FFI

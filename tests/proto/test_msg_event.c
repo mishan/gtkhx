@@ -304,12 +304,45 @@ test_msg_event_copy_null_returns_null (void)
     g_assert_null (hx_msg_event_copy (NULL));
 }
 
+/* Phase E3: :shortcode: → emoji in the PM body; the sender name stays
+ * literal. */
+static void
+test_msg_event_decodes_emoji_in_body (void)
+{
+    const char *body = "nice work :tada:";
+    HxMsgEvent *e = hx_msg_event_new (3, "bob", 3, body, strlen (body), NULL);
+
+    g_assert_cmpstr (e->body, ==, "nice work \xf0\x9f\x8e\x89");
+    g_assert_cmpuint (e->body_len, ==, strlen (e->body));
+    g_assert_cmpstr (e->name, ==, "bob");
+
+    hx_msg_event_free (e);
+}
+
+/* Unknown / non-shortcode colon text in a PM is left untouched. */
+static void
+test_msg_event_leaves_non_shortcodes (void)
+{
+    const char *body = "call at 9:00 re :notacode:";
+    HxMsgEvent *e = hx_msg_event_new (3, "bob", 3, body, strlen (body), NULL);
+
+    g_assert_cmpstr (e->body, ==, body);
+    g_assert_cmpuint (e->body_len, ==, strlen (body));
+
+    hx_msg_event_free (e);
+}
+
 int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
 
     g_test_add_func ("/proto/msg_event/typical", test_msg_event_typical);
+
+    g_test_add_func ("/proto/msg_event/decodes_emoji_in_body",
+                     test_msg_event_decodes_emoji_in_body);
+    g_test_add_func ("/proto/msg_event/leaves_non_shortcodes",
+                     test_msg_event_leaves_non_shortcodes);
 
     g_test_add_func ("/proto/msg_event/broadcast_when_uid_zero",
                      test_msg_event_broadcast_when_uid_zero);
