@@ -10,6 +10,15 @@ Spec pinned at
 <https://github.com/fogWraith/Hotline/blob/525e94e2208dc2ffb1ed65d69d681c7fd356e169/Docs/Protocol/Capabilities-Voice.md>
 (`525e94e`, 2026-04-05).
 
+**Optional at build time.** Voice is gated behind the `-Dvoice` meson
+option (`auto` / `enabled` / `disabled`, default `auto`): it compiles in
+when the GStreamer 1.20+ stack is present and drops out cleanly when it
+isn't. With voice off, the `hxvoice` / `hxvoice-runtime` crates aren't
+built, the GStreamer libs aren't linked, `HTLC_CAP_VOICE` isn't
+advertised, and every voice C source / call site / test is compiled out
+behind the `HAVE_VOICE` define. The gate plumbing is documented in
+`CLAUDE.md` ("Voice chat (Phase 8) is an optional build feature").
+
 ## At-a-glance status
 
 | Phase | Description | Status | Branch / commit |

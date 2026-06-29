@@ -64,8 +64,10 @@
 #include "chat_history.h"
 #include "inline_media.h"
 #include "hl_access.h"
+#ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_model.h"
+#endif
 
 static size_t news_len = 0;
 static guint8 *news_buf = 0;
@@ -497,6 +499,7 @@ hx_rcv_task (struct htlc_conn *htlc)
         task_error (htlc);
         error = 1;
     }
+#ifdef HAVE_VOICE
     /* Phase 8.D runtime wiring: a TASK error reply for one of the
      * voice opcodes (600 JOIN, 601 LEAVE, 603 SDP_ANSWER, 606
      * MUTE — 604 ICE doesn't register a task) needs to reach the
@@ -530,6 +533,7 @@ hx_rcv_task (struct htlc_conn *htlc)
                                             text);
         }
     }
+#endif /* HAVE_VOICE */
     if (tsk) {
         /* XXX tsk->rcv might call task_delete */
         /* HTXF transfer tasks own an htxf_conn that needs to be
@@ -974,6 +978,7 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
     }
 }
 
+#ifdef HAVE_VOICE
 /* ---- Voice-chat extension (Phase 8.A) ---------------------------- */
 /*
  * The handlers below parse the body via the Rust hotline-proto::voice
@@ -1406,6 +1411,7 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
     (void) htlc;
     debug_log ("voice", "← VOICE %u ack (cid=%u)", opcode, cid);
 }
+#endif /* HAVE_VOICE */
 
 void
 hx_rcv_hdr (struct htlc_conn *htlc)
@@ -1491,6 +1497,7 @@ hx_rcv_hdr (struct htlc_conn *htlc)
     case HTLS_HDR_QUEUE:
         htlc->rcv = hx_rcv_xfer_queue;
         break;
+#ifdef HAVE_VOICE
     case HTLS_HDR_VOICE_SDP_OFFER:
         htlc->rcv = hx_rcv_voice_sdp_offer;
         break;
@@ -1500,6 +1507,7 @@ hx_rcv_hdr (struct htlc_conn *htlc)
     case HTLS_HDR_VOICE_ROOM_STATUS:
         htlc->rcv = hx_rcv_voice_room_status;
         break;
+#endif /* HAVE_VOICE */
     default:
         g_print ("0x%08x\n", type);
         hx_printf_prefix (htlc, 0, INFOPREFIX,

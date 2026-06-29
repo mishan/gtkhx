@@ -277,6 +277,8 @@ The fogWraith spec adds voice chat to Hotline via a server-side SFU: clients neg
 
 **Status**: Phase 8.A through 8.G have all shipped. End-to-end voice works against the Janus VoiceRoom container with DTLS-SRTP audio + the seven new opcodes wired through the Rust runtime, plus the per-uid voice indicator column in the user list. The post-R3-R4 follow-up below also already shipped — the C-side GStreamer glue replaced itself with `hxvoice-runtime` (gstreamer-rs + gstreamer-webrtc-rs) early in 8.C rather than waiting for R3/R4.
 
+**Voice is now an optional build feature.** The `-Dvoice` meson option (`auto` / `enabled` / `disabled`, default `auto`) gates the whole extension on the GStreamer 1.20+ stack. With `auto` a build host without GStreamer drops voice silently; `enabled` makes the missing stack a hard error. When off, the `hxvoice` / `hxvoice-runtime` crates aren't compiled (no GStreamer needed at build time), the GStreamer libs aren't linked, `HTLC_CAP_VOICE` isn't advertised, and all voice C sources / call sites / tests are compiled out behind `HAVE_VOICE`. See the "Voice chat (Phase 8) is an optional build feature" note in `CLAUDE.md` for the exact gate plumbing.
+
 Locked-in choices (kept for the historical record):
 
 - **WebRTC stack: gstreamer-rs + gstreamer-webrtc-rs** in the `hxvoice-runtime` crate. The original plan staged a C `webrtcbin` first with a Rust runtime as the post-R3/R4 follow-up; in practice the all-Rust runtime landed during 8.C without needing the broader R3/R4 prerequisites. See voice-chat-plan §3 and §11.

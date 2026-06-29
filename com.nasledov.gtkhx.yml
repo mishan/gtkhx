@@ -17,18 +17,13 @@
 # Runtime choice: GNOME 49 (the GNOME 48 runtime went end-of-life
 # 2026-03-24). 49 ships GTK 4.20 / libadwaita 1.8 / glib 2.86,
 # well above GtkHx's meson floor (gtk4 >= 4.6, libadwaita >= 1.6).
-# nettle, zlib, and gtksourceview-5 (syntax-highlighted source
-# preview viewer) are present in the runtime; libcanberra, gsound,
-# poppler-glib, libpanel, and imagemagick are NOT (gsound stopped
-# being included around the GNOME 47/48 transition; poppler-glib
-# was dropped in 49; the runtime never had libcanberra; libpanel
-# isn't part of the GNOME runtime; imagemagick is too large to
-# ship by default). We build those as inline modules below.
-#
-# lz4 and zstd compression used to be inline modules too; both
-# are now consumed via the Rust hxcompress crate which builds the
-# compressors as part of the Rust workspace, so they no longer
-# appear in this manifest.
+# gtksourceview-5 (syntax-highlighted source preview viewer) is
+# present in the runtime; libcanberra, gsound, poppler-glib,
+# libpanel, and imagemagick are NOT (gsound stopped being included
+# around the GNOME 47/48 transition; poppler-glib was dropped in 49;
+# the runtime never had libcanberra; libpanel isn't part of the
+# GNOME runtime; imagemagick is too large to ship by default). We
+# build those as inline modules below.
 #
 # poppler-glib and gtksourceview-5 are declared optional in the
 # meson build; both are auto-detected and HAVE_POPPLER /

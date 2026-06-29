@@ -44,7 +44,9 @@
 #include "xtext.h"
 #include "gtkutil.h"
 #include "hl_access.h"
+#ifdef HAVE_VOICE
 #include "voice_panel.h"
+#endif
 #include "inline_media_attach.h"
 
 /* GtkAccelGroup / gtk_accel_group_new /
@@ -349,6 +351,7 @@ setbtns (session *sess, int stat)
         set_app_action_enabled ("user_edit", FALSE);
     }
 
+#ifdef HAVE_VOICE
     /* Phase 8.D: refresh the per-chat voice toolbars. The chat
      * windows open before LOGIN finishes, so their
      * construction-time refresh runs against caps=0 / access=0
@@ -360,6 +363,7 @@ setbtns (session *sess, int stat)
      * (stat==0), the refresh hides them again — htlc->caps will
      * have been cleared by network.c. */
     voice_panel_refresh_all_chats (sess);
+#endif /* HAVE_VOICE */
 
     /* Same gating discipline for the Phase 9.C inline-media
 	 * attach buttons: visible only when the server echoed

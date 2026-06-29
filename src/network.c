@@ -63,8 +63,10 @@
 #include "debug.h"
 #include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
 #include "cipher.h"
+#ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_model.h"
+#endif
 
 #include "login_packet.h"
 #include "agreement_packet.h"
@@ -216,6 +218,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * uses one line up). */
     inline_media_reset_advisory_limits (htlc);
 
+#ifdef HAVE_VOICE
     /* Phase 8.D runtime wiring: tear down the voice runtime.
      * gtkhx_voice_runtime_free walks the state machine to its
      * Drop, which cancels armed timers, evicts the thread-local
@@ -235,6 +238,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     if (sess->voice_model) {
         hx_voice_model_clear (sess->voice_model);
     }
+#endif /* HAVE_VOICE */
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
 	 * exchange). Safe to call whether or not one's running. */
@@ -933,8 +937,13 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
 	 * Without this chunk the server never sees our capabilities and
 	 * silently falls back to the legacy feature set. */
     guint16 caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                 | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_VOICE
+                 | HTLC_CAP_CHAT_HISTORY
                  | HTLC_CAP_INLINE_MEDIA;
+#ifdef HAVE_VOICE
+    /* Only advertise voice when the runtime is actually compiled in —
+     * otherwise a server would offer voice we can't honour. */
+    caps |= HTLC_CAP_VOICE;
+#endif
     /* HOPE sends the display name in step 2; the plaintext paths defer
      * it to a post-login USER_CHANGE, so they omit the name here. */
     gboolean ok;

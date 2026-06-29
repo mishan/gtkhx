@@ -52,7 +52,9 @@
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "xtext.h"
 #include "users.h"
+#ifdef HAVE_VOICE
 #include "voice_panel.h"
+#endif
 #include "users_view.h"
 #include "gtkhx.h"
 #include "chat.h"
@@ -2507,11 +2509,13 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
     gtk_widget_set_margin_end (vstack, 5);
     gtk_widget_set_margin_top (vstack, 5);
     gtk_widget_set_margin_bottom (vstack, 5);
+#ifdef HAVE_VOICE
     /* Phase 8.D: voice toolbar above the chat output. Public-chat
      * cid is 0; voice_panel hides itself if HTLC_CAP_VOICE wasn't
      * echoed, so on servers without voice support it costs nothing. */
     gchat->voice_panel = voice_panel_new (sess, 0);
     gtk_box_append (GTK_BOX (vstack), gchat->voice_panel);
+#endif
     gtk_widget_set_vexpand (outputframe, TRUE);
     gtk_widget_set_vexpand (inputframe, FALSE);
     gtk_box_append (GTK_BOX (vstack), outputframe);
@@ -2947,10 +2951,12 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
 	 * create_chat_window above for the rationale. */
     {
         GtkWidget *vstack = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+#ifdef HAVE_VOICE
         /* Phase 8.D: voice toolbar at the top of each private
          * chat tab, room-scoped via the chat's cid. */
         gchat->voice_panel = voice_panel_new (sess, chat->cid);
         gtk_box_append (GTK_BOX (vstack), gchat->voice_panel);
+#endif
         gtk_widget_set_vexpand (outputframe, TRUE);
         gtk_widget_set_vexpand (inputframe, FALSE);
         gtk_box_append (GTK_BOX (vstack), outputframe);

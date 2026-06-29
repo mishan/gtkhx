@@ -114,9 +114,19 @@ gsound_dep = dependency('gsound')
 # fail early if the Phase 8.C dep graph isn't present on this host;
 # better a clear "package not found" at configure time than a cryptic
 # Rust link error mid-build.
-gstreamer_dep        = dependency('gstreamer-1.0',        version : '>= 1.20')
-gstreamer_app_dep    = dependency('gstreamer-app-1.0',    version : '>= 1.20')
-gstreamer_audio_dep  = dependency('gstreamer-audio-1.0',  version : '>= 1.20')
+#
+# Optional since the -Dvoice feature option (default 'auto'): each
+# probe is `required : voice_opt`, so with -Dvoice=auto a missing
+# GStreamer stack just resolves voice off (not-found, no error), with
+# -Dvoice=enabled it's a hard configure error, and with -Dvoice=disabled
+# the probes are skipped entirely. `voice_enabled` below is the single
+# boolean every voice-gated build decision keys off — it drives the
+# HAVE_VOICE define (src/meson.build), the hxvoice/hxvoice-runtime crate
+# build (rust/meson.build), and the voice C sources + test targets.
+voice_opt = get_option('voice')
+gstreamer_dep        = dependency('gstreamer-1.0',        version : '>= 1.20', required : voice_opt)
+gstreamer_app_dep    = dependency('gstreamer-app-1.0',    version : '>= 1.20', required : voice_opt)
+gstreamer_audio_dep  = dependency('gstreamer-audio-1.0',  version : '>= 1.20', required : voice_opt)
 # gstreamer-webrtc-1.0 lives in gst-plugins-bad on most distros and on
 # the GNOME 49 Flatpak runtime. Phase 8.B's loopback pipeline
 # (audiotestsrc ! mulawenc ! mulawdec ! fakesink) doesn't actually
@@ -126,8 +136,15 @@ gstreamer_audio_dep  = dependency('gstreamer-audio-1.0',  version : '>= 1.20')
 # webrtcbin on doesn't churn dependent crate versions. Build host
 # needs gst-plugins-bad-dev (Debian/Ubuntu) or
 # gstreamer1-plugins-bad-free-devel (Fedora) by configure time.
-gstreamer_sdp_dep    = dependency('gstreamer-sdp-1.0',    version : '>= 1.20')
-gstreamer_webrtc_dep = dependency('gstreamer-webrtc-1.0', version : '>= 1.20')
+gstreamer_sdp_dep    = dependency('gstreamer-sdp-1.0',    version : '>= 1.20', required : voice_opt)
+gstreamer_webrtc_dep = dependency('gstreamer-webrtc-1.0', version : '>= 1.20', required : voice_opt)
+
+# Voice is on only when the whole stack resolved. With -Dvoice=enabled
+# the dependency() calls above would already have errored out on any
+# missing piece, so this is just the 'auto' all-or-nothing fold.
+voice_enabled = gstreamer_dep.found() and gstreamer_app_dep.found() \
+                and gstreamer_audio_dep.found() and gstreamer_sdp_dep.found() \
+                and gstreamer_webrtc_dep.found()
 
 # Glycin migration G.2: the hx-image-decode Rust crate pulls in
 # glycin → gufo / lcms2 / libseccomp / fontconfig as transitive
@@ -201,11 +218,6 @@ deps = [
   gthread_dep,
   threads_dep,
   gsound_dep,
-  gstreamer_dep,
-  gstreamer_app_dep,
-  gstreamer_audio_dep,
-  gstreamer_sdp_dep,
-  gstreamer_webrtc_dep,
   poppler_dep,
   sourceview_dep,
   imagemagick_dep,
@@ -219,6 +231,20 @@ deps = [
   libseccomp_dep,
   lcms2_dep,
 ]
+
+# Voice GStreamer system libs link into the executable only when voice
+# is compiled in. The Rust hxvoice-runtime staticlib references their
+# symbols; with voice off the crate isn't built (rust/meson.build) so
+# nothing needs them on the link line.
+if voice_enabled
+  deps += [
+    gstreamer_dep,
+    gstreamer_app_dep,
+    gstreamer_audio_dep,
+    gstreamer_sdp_dep,
+    gstreamer_webrtc_dep,
+  ]
+endif
 
 # Phase R1: zlib, liblz4, and libzstd are no longer linked into the
 # main binary — the HOPE transport compression dispatcher moved to
@@ -358,6 +384,7 @@ summary(
     'GSound'        : gsound_dep.version(),
     'libadwaita'    : adw_dep.version(),
     'libpanel'      : panel_dep.version(),
+    'Voice (GStreamer)' : voice_enabled ? gstreamer_dep.version() : 'no',
     'poppler-glib'  : poppler_dep.found()    ? poppler_dep.version()    : 'no',
     'gtksourceview-5' : sourceview_dep.found() ? sourceview_dep.version() : 'no',
     'ImageMagick'   : imagemagick_dep.found() ? imagemagick_dep.version() : 'no',

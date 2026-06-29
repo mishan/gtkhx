@@ -41,7 +41,9 @@
 #include "chat.h"
 #include "tasks.h"
 #include "options.h"
+#ifdef HAVE_VOICE
 #include "voice_ptt.h"
+#endif
 #include "connect.h"
 #include "files.h"
 #include "hl_access.h"
@@ -1291,6 +1293,7 @@ create_toolbar_window (session *sess)
     }
     sess->toolbar_window = toolbar_window;
 
+#ifdef HAVE_VOICE
     /* Phase 8.E follow-up: install the push-to-talk key controller.
      * Window-scoped (not chat-input-scoped) so PTT works while
      * focus is anywhere in the app — users list, news, files
@@ -1301,6 +1304,7 @@ create_toolbar_window (session *sess)
      * Idempotent — safe to call again on reconnect-after-disconnect
      * if that ever wires through here. */
     hx_voice_ptt_attach (toolbar_window, sess);
+#endif
 
     /* eager-construct the sidebar
      * panels (Users + Tasks) so the sidebar has real residents
