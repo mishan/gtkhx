@@ -1571,6 +1571,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtkhx-boxed"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+]
+
+[[package]]
 name = "gtkhx-session"
 version = "0.1.0"
 dependencies = [

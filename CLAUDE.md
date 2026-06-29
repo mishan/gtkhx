@@ -209,10 +209,16 @@ exports the same C ABI — `gtkhx_session_get_type` /
 `gtkhx_session_get_default` / the 26 `gtkhx_session_emit_<name>`
 wrappers — so model- and view-side C is unchanged. Each `emit_*`
 builds the signal's `GValue`s in Rust and calls
-`emit_by_name_with_values`. Boxed payloads (`HxChatEvent` /
-`HxMsgEvent` / `HxTrackerServer`) are still C-defined; the crate
-references their `GType`s via FFI until **R4.2** re-hosts them.
-View-side handlers are static
+`emit_by_name_with_values`. Boxed payloads are being re-hosted into the
+self-contained Rust crate `rust/crates/gtkhx-boxed/` one type at a time
+(**R4.2**): `HxMsgEvent` moved (R4.2a) — `#[repr(C)]` mirror with
+`hx_msg_event_{get_type,copy,free}` exporting the old C ABI, layout
+pinned by `_Static_assert` in `proto_helpers.c`; `HxChatEvent` and
+`HxTrackerServer` are still C-defined and referenced via FFI for now.
+gtkhx-boxed is a separate crate from gtkhx-session so a proto unit test
+pulling a `_copy`/`_free` symbol links that self-contained archive alone
+without dragging gtkhx-session's not-yet-ported boxed externs in via
+codegen-unit merging. View-side handlers are static
 adapter functions in `gtkhx.c` (`on_<name>_signal`) that bridge the
 GObject marshaller signature to the legacy `output_*` /
 `user_create` / etc. functions in `chat.c` / `users.c` / `news*.c` /

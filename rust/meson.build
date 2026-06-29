@@ -65,9 +65,15 @@ rust_sources = files(
   'crates/hxbridge/src/channel.rs',
   'crates/hxbridge/src/runtime.rs',
   # Phase R4 — GtkhxSession as a Rust glib::subclass GObject (replaces
-  # src/gtkhx_session.c). References the C boxed GTypes (HxChatEvent /
-  # HxMsgEvent / HxTrackerServer) via FFI until R4.2 re-hosts them.
+  # src/gtkhx_session.c). References the C boxed GTypes via FFI; R4.2
+  # re-hosts those boxed types into the gtkhx-boxed crate one at a time
+  # (HxMsgEvent done in R4.2a), so this crate's externs resolve against
+  # gtkhx-boxed instead of proto_helpers.c / tracker_event.c.
   'crates/gtkhx-session/src/lib.rs',
+  # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent so far),
+  # self-contained (glib only) so proto unit tests can pull their
+  # _copy/_free without dragging gtkhx-session's C externs.
+  'crates/gtkhx-boxed/src/lib.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
   'crates/hxnet/src/cipher.rs',
@@ -106,6 +112,7 @@ rust_sources = files(
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
   'crates/gtkhx-session/Cargo.toml',
+  'crates/gtkhx-boxed/Cargo.toml',
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
@@ -359,6 +366,24 @@ rust_gtkhx_session_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lgtkhx_session',
+  ],
+)
+
+# Boxed signal-payload value-types (Phase R4.2). gtkhx-boxed holds the
+# GObject boxed types carried by GtkhxSession signals — `HxMsgEvent` so
+# far, with `HxChatEvent` / `HxTrackerServer` to follow in R4.2b/c. It
+# exports the C ABI the deleted G_DEFINE_BOXED_TYPE registrations in
+# proto_helpers.c / tracker_event.c used to (hx_*_get_type / _copy /
+# _free). Self-contained (glib only): a C target that pulls a _copy /
+# _free symbol links this archive alone without dragging gtkhx-session's
+# still-C boxed externs in via codegen-unit merging. Both the gtkhx
+# binary and the proto unit tests that link the matching producer
+# (proto_helpers.c) carry this dep.
+rust_gtkhx_boxed_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lgtkhx_boxed',
   ],
 )
 

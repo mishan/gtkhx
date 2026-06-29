@@ -371,18 +371,33 @@ pub extern "C" fn gtkhx_session_get_type() -> glib::ffi::GType {
 /// thread-safe to *register* but the singleton is a UI object).
 #[no_mangle]
 pub extern "C" fn gtkhx_session_get_default() -> *mut c_void {
-    // Store the raw pointer as usize (Send + Sync) so OnceLock is happy;
-    // the GObject ref the constructor returns is intentionally leaked
-    // (mem::forget) to give the singleton a permanent reference.
-    static SINGLETON: OnceLock<usize> = OnceLock::new();
-    let ptr = *SINGLETON.get_or_init(|| {
-        let obj = glib::Object::new::<GtkhxSession>();
-        let raw = obj.as_ptr() as usize;
-        std::mem::forget(obj);
-        raw
-    });
-    ptr as *mut c_void
+    // Cache the singleton in a `SendPtr` newtype rather than a `usize`:
+    // a pointer→integer→pointer round-trip drops provenance under
+    // Rust's strict-provenance model, and GLib *will* dereference this
+    // pointer. Storing the real `*mut c_void` keeps provenance intact
+    // end-to-end. The GObject ref the constructor returns is leaked
+    // (`mem::forget`) so the singleton holds a permanent reference, as
+    // the old C `gtkhx_session_get_default` did.
+    static SINGLETON: OnceLock<SendPtr> = OnceLock::new();
+    SINGLETON
+        .get_or_init(|| {
+            let obj = glib::Object::new::<GtkhxSession>();
+            let raw = obj.as_ptr() as *mut c_void;
+            std::mem::forget(obj);
+            SendPtr(raw)
+        })
+        .0
 }
+
+/// Send+Sync wrapper so a raw `*mut c_void` can live in a `static
+/// OnceLock`. SAFETY: the pointer is written exactly once (the
+/// singleton is immutable after init) and is only ever dereferenced on
+/// the GLib main thread; sharing the pointer *value* across threads is
+/// sound, and we never form a `&mut` to the pointee from here.
+#[derive(Copy, Clone)]
+struct SendPtr(*mut c_void);
+unsafe impl Send for SendPtr {}
+unsafe impl Sync for SendPtr {}
 
 // ----------------------------------------------------------------------
 // FFI: emit wrappers (one per signal; ABI matches gtkhx_session.h)
