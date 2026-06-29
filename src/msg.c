@@ -641,6 +641,8 @@ create_msgwin (guint16 uid, char *name)
     GtkWidget *emoji_btn = hx_emoji_button_new (msg->inputbuf);
     gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
     gtk_box_append (GTK_BOX (input_hbox), emoji_btn);
+    /* Inline :shortcode: typeahead on the same input (phase E5). */
+    hx_emoji_typeahead_attach (msg->inputbuf);
 
     inputframe = gtk_frame_new (0);
     gtkhx_widget_set_child (inputframe, input_hbox);

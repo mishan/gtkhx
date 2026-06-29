@@ -316,6 +316,21 @@ too — the always-on receive pass renders it on display — but it diverges
 from the picker and shows raw text in the composer. Recommend committing
 the glyph.)
 
+**As built (E5).** `hx_emoji_typeahead_attach(view)` in `emoji.c`,
+called next to `hx_emoji_button_new` for all three inputs (public chat,
+private chat, PM). State (`EmojiTypeahead`) is owned by the view via
+`g_object_set_data_full`; the popover is `set_parent`ed to the view so GTK
+tears it down with the window. Trigger detection (`ta_current_token`)
+backward-scans `[a-z0-9_+-]` from the caret to an opening `:` that's at
+line start or after whitespace, requiring ≥ `TA_MIN_PREFIX` (2) chars; it
+re-runs on the buffer's `changed` and `notify::cursor-position`. Matches
+come from `gtkhx_proto_shortcode_matches` (cap 8). The capture-phase
+`GtkEventControllerKey` consumes Up/Down/Tab/Enter/Esc only while open, so
+the chat input's bubble-phase handler (Tab nick-completion, Return-to-send,
+Up/Down history) is untouched otherwise. Commit deletes the `:prefix` and
+inserts the glyph under a `begin/end_user_action` group, with a `suppress`
+flag so the resulting buffer edits don't re-enter the updater.
+
 ## Edge cases & rules
 
 - **Match grammar.** Only `:[a-z0-9_+-]+:` tokens that hit the table
@@ -414,14 +429,25 @@ Each ends on something testable, per the roadmap's house style.
   Tier 2 tests over `HxChatEvent` / `HxMsgEvent`: body `:tada:` decodes to
   🎉, nick stays literal, `body_len` recomputed, non-shortcode colons left
   alone. News deliberately excluded for v1 (open question 1).
-- **E4 — Rendering verification.** Confirm converted emoji render in xtext
-  identically to picker-inserted ones; handle any font-fallback surprise.
-- **E5 — Typeahead popup.** The match-query FFI
-  (`gtkhx_proto_shortcode_matches` + Rust ranking/cap, with unit tests),
-  then `hx_emoji_typeahead_attach` in `emoji.c`: trigger detection,
-  capture-phase key controller, non-autohide popover at the caret, commit
-  = insert glyph. Wire into all three inputs. This is the largest UI piece;
-  it depends only on E1 (the table), not on E2/E3.
+- **E4 — Rendering verification. ✅ (by reasoning).** Converted emoji are
+  ordinary UTF-8 codepoints, identical to what the existing picker inserts
+  and to what already renders for received emoji on UTF-8 servers, so no
+  xtext/widget change is needed — Pango pulls colour glyphs from the system
+  emoji font. A live side-by-side pixel check needs a display and is out of
+  reach in the headless CI sandbox; flagged for a manual smoke test at
+  release time. No code lands in this sub-phase.
+- **E5 — Typeahead popup. ✅** Match-query FFI
+  `gtkhx_proto_shortcode_matches` (ranked exact→shortest→alpha, capped,
+  whole-record `name\temoji\n` fill) with Rust unit tests, plus
+  `hx_emoji_typeahead_attach` in `emoji.c`: backward-scan trigger detection
+  (opening colon at line-start/after-space, ≥2 prefix chars), a
+  capture-phase `GtkEventControllerKey` that only consumes
+  Up/Down/Tab/Enter/Esc while the popover is open, a non-autohide
+  `GtkPopover` of `GtkListBox` rows anchored at the caret, and commit =
+  insert the emoji glyph (replacing the partial token), plus row-click
+  commit. Wired into all three inputs (chat, pchat, PM). Depends only on E1.
+  The popup's live behaviour can't be exercised headlessly; the ranked
+  match data is covered by Rust tests and the whole app builds clean.
 - **E6 — Preference + docs.** Add Chat-page toggle(s) (see Open
   questions), update this doc and the ROADMAP Phase 5 "UX features" list.
   Consider a Tier 3 round-trip between two harness clients against mhxd
@@ -439,12 +465,13 @@ Each ends on something testable, per the roadmap's house style.
 - **Tier 2 wire fixtures (E2/E3):** send-side asserts wire bytes; receive
   side asserts `HxChatEvent.body` and that `sender_off/body_off`,
   highlight, and info-prefix detection still line up after substitution.
-- **Typeahead (E5):** Rust unit tests on `shortcode_matches` (ranking,
-  cap, prefix vs alias-prefix, empty/no-match). The popup UI itself is
-  exercised manually / by light interaction checks — trigger detection
-  against tricky buffers (`http://`, `C:\`, mid-word colons, token at line
-  start vs after a word) is the part worth a focused unit test on the
-  detection helper, which can live in C and be tested in isolation.
+- **Typeahead (E5): ✅ for the data path.** Rust unit tests on
+  `shortcode_matches` (exact-first ranking, shortest-next ordering, cap,
+  punctuation-alias prefix like `+`, empty/zero-max/no-match). The popover
+  UI can't be exercised headlessly (no display in CI), so it's covered by a
+  clean full-app build plus a release-time manual smoke test; the trigger
+  detection lives in `emoji.c::ta_current_token` and would need a GTK
+  display to unit-test, so it isn't auto-tested today.
 - **Tier 3 (E6):** two orchestrated clients on Dockerized mhxd (legacy /
   Mac Roman): client A picks 😂, client B receives and renders 😂. Guards
   the full pipeline and the "don't break Mac Roman" requirement.

@@ -1310,6 +1310,19 @@ extern size_t gtkhx_proto_emoji_to_shortcodes (const uint8_t *src, size_t len,
 extern size_t gtkhx_proto_shortcodes_to_emoji (const uint8_t *src, size_t len,
                                                uint8_t *dst, size_t cap);
 
+/* Prefix query for the emoji typeahead popup (phase E5). `prefix[0..len)`
+ * is the partial shortcode name (no colons) the user has typed after an
+ * opening colon, e.g. "jo". Writes up to `max` matches into `dst` as a run
+ * of "name\temoji\n" records and returns the number of records written.
+ * Records are whole-only — one that wouldn't fit is dropped and ends the
+ * run — so size `dst` generously (max * 128 comfortably holds the longest
+ * name plus any emoji). Ranking: exact match first, then shortest name,
+ * then alphabetical. `dst == NULL`, `cap == 0`, `cap > isize::MAX`, or a
+ * non-UTF-8 prefix all yield 0. No trailing NUL. */
+extern size_t gtkhx_proto_shortcode_matches (const uint8_t *prefix, size_t len,
+                                             uint8_t *dst, size_t cap,
+                                             size_t max);
+
 /* ---- Voice-chat extension (Phase 8.A) -----------------------------
  *
  * Builders for HTLC_HDR_VOICE_* and parsers for HTLS_HDR_VOICE_* /
