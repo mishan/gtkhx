@@ -898,6 +898,43 @@ hx_highlight_match (const char *body, gsize body_len, const char *const *words)
 static const char hx_info_prefix[] = " \00310[\00303hx\00310]\003 ";
 #define HX_INFO_PREFIX_LEN (sizeof (hx_info_prefix) - 1)
 
+/* Phase E3: render Slack/Discord-style :shortcodes: as emoji at display
+ * time (the inverse of the legacy send-path rewrite in
+ * gtkhx_text_for_wire). Returns a newly-allocated, NUL-terminated decoded
+ * copy of src[0..len) with *out_len set, or NULL when nothing changed (so
+ * the caller can keep the original buffer and skip a copy — the common
+ * case for text with no shortcodes).
+ *
+ * Decode only ever shrinks or keeps length for normal shortcodes, but a
+ * short alias mapping to a long ZWJ cluster could in principle grow, so we
+ * use the shim's snprintf-style required-length return and a 2nd pass on
+ * the rare overflow. */
+static char *
+hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
+{
+    if (len == 0) {
+        return NULL;
+    }
+    gsize cap = len + 16;
+    char *dec = g_malloc (cap + 1);
+    gsize need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *) src, len,
+                                                  (uint8_t *) dec, cap);
+    if (need > cap) {
+        dec = g_realloc (dec, need + 1);
+        need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *) src, len,
+                                                (uint8_t *) dec, need);
+    }
+    if (need == len && memcmp (dec, src, len) == 0) {
+        g_free (dec); /* unchanged — let the caller keep the original */
+        return NULL;
+    }
+    dec[need] = '\0';
+    if (out_len) {
+        *out_len = need;
+    }
+    return dec;
+}
+
 HxChatEvent *
 hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
                    const char *self_nick)
@@ -933,6 +970,33 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
             if (self_nick && *self_nick && sl > 0 && strlen (self_nick) == sl
                 && memcmp (e->line + so, self_nick, sl) == 0) {
                 e->is_self = TRUE;
+            }
+        }
+
+        /* Phase E3: decode :shortcodes: to emoji in the visible body. On a
+		 * split "Nick: body" line only the body region is converted so the
+		 * nick column stays literal; an unsplit prose / emote line is all
+		 * body. is_self was already decided above against the (un-decoded)
+		 * nick, so it's unaffected. Info lines never reach here. */
+        gsize roff = e->sender_len > 0 ? e->body_off : 0;
+        gsize rlen = e->sender_len > 0 ? e->body_len : e->line_len;
+        gsize dlen = 0;
+        char *dec = hx_decode_emoji_shortcodes (e->line + roff, rlen, &dlen);
+        if (dec) {
+            gsize tail_off = roff + rlen;
+            gsize tail_len = e->line_len - tail_off;
+            gsize new_len = roff + dlen + tail_len;
+            char *nl = g_malloc (new_len + 1);
+            memcpy (nl, e->line, roff);
+            memcpy (nl + roff, dec, dlen);
+            memcpy (nl + roff + dlen, e->line + tail_off, tail_len);
+            nl[new_len] = '\0';
+            g_free (dec);
+            g_free (e->line);
+            e->line = nl;
+            e->line_len = new_len;
+            if (e->sender_len > 0) {
+                e->body_len = dlen;
             }
         }
     }
@@ -1227,6 +1291,18 @@ hx_msg_event_new (guint16 uid, const char *name, gsize name_len,
     e->name_len = nlen;
     e->body = gtkhx_text_to_utf8 (body, body_len, &blen);
     e->body_len = blen;
+
+    /* Phase E3: decode :shortcodes: to emoji in the PM body (the name
+	 * stays literal). Standalone buffer, so no offset juggling. */
+    {
+        gsize dlen = 0;
+        char *dec = hx_decode_emoji_shortcodes (e->body, e->body_len, &dlen);
+        if (dec) {
+            g_free (e->body);
+            e->body = dec;
+            e->body_len = dlen;
+        }
+    }
 
     if (self_nick && *self_nick && nlen > 0 && strlen (self_nick) == nlen
         && memcmp (e->name, self_nick, nlen) == 0) {

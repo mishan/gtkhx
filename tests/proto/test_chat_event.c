@@ -533,6 +533,80 @@ test_chat_event_media_parse_token_finds_embedded (void)
     g_assert_false (hx_chat_media_parse_token ("hxmedia:9", NULL));
 }
 
+/* ---------- Phase E3: :shortcode: → emoji at display time ---------- */
+
+/* A "Nick: body" line: the body's :shortcode: becomes an emoji, the nick
+ * column stays literal, and body_len is updated to the decoded length. */
+static void
+test_chat_event_decodes_emoji_in_body (void)
+{
+    const char *raw = " misha:  :tada: party";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+
+    /* :tada: → 🎉 in the body; the " misha:  " head is untouched. */
+    g_assert_cmpstr (e->line, ==, " misha:  \xf0\x9f\x8e\x89 party");
+    g_assert_cmpuint (e->line_len, ==, strlen (e->line));
+    /* Nick still resolves and matches. */
+    g_assert_cmpuint (e->sender_len, ==, 5);
+    g_assert_true (memcmp (e->line + e->sender_off, "misha", 5) == 0);
+    /* Body slice now points at the decoded text. */
+    g_assert_cmpuint (e->body_len, ==, strlen ("\xf0\x9f\x8e\x89 party"));
+    g_assert_true (memcmp (e->line + e->body_off, "\xf0\x9f\x8e\x89 party",
+                           e->body_len)
+                   == 0);
+
+    hx_chat_event_free (e);
+}
+
+/* A colon-shaped token in the NICK must not be decoded — only the body is
+ * converted. (The nick "joy" with a trailing colon is the separator, not a
+ * :joy: shortcode.) */
+static void
+test_chat_event_does_not_decode_nick (void)
+{
+    /* If the whole line were decoded, ":joy:" formed across the nick colon
+	 * boundary could misfire. Here the body has the shortcode and the nick
+	 * is plain — verify the nick text survives verbatim. */
+    const char *raw = " bob:  hi :fire:";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+
+    g_assert_cmpstr (e->line, ==, " bob:  hi \xf0\x9f\x94\xa5");
+    g_assert_cmpuint (e->sender_len, ==, 3);
+    g_assert_true (memcmp (e->line + e->sender_off, "bob", 3) == 0);
+
+    hx_chat_event_free (e);
+}
+
+/* No-sender line (here: starts with a colon, so the nick split finds an
+ * empty nick and bails). The whole line is treated as body, so the
+ * shortcode still decodes. */
+static void
+test_chat_event_decodes_emoji_when_unsplit (void)
+{
+    const char *raw = ":tada: everyone";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+
+    g_assert_cmpuint (e->sender_len, ==, 0);
+    g_assert_cmpstr (e->line, ==, "\xf0\x9f\x8e\x89 everyone");
+    g_assert_cmpuint (e->line_len, ==, strlen (e->line));
+
+    hx_chat_event_free (e);
+}
+
+/* Unknown / non-shortcode colon runs are left exactly as-is (no false
+ * positives on timestamps, ratios, unknown tokens). */
+static void
+test_chat_event_leaves_non_shortcodes (void)
+{
+    const char *raw = " misha:  meet at 10:30, ratio 4:3, :notacode:";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+
+    g_assert_cmpstr (e->line, ==, raw);
+    g_assert_cmpuint (e->line_len, ==, strlen (raw));
+
+    hx_chat_event_free (e);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -572,6 +646,16 @@ main (int argc, char **argv)
                      test_chat_event_utf8_passthrough);
     g_test_add_func ("/proto/chat_event/mac_roman_converts",
                      test_chat_event_mac_roman_converts);
+
+    /* Phase E3 — :shortcode: → emoji decode at display time. */
+    g_test_add_func ("/proto/chat_event/decodes_emoji_in_body",
+                     test_chat_event_decodes_emoji_in_body);
+    g_test_add_func ("/proto/chat_event/does_not_decode_nick",
+                     test_chat_event_does_not_decode_nick);
+    g_test_add_func ("/proto/chat_event/decodes_emoji_when_unsplit",
+                     test_chat_event_decodes_emoji_when_unsplit);
+    g_test_add_func ("/proto/chat_event/leaves_non_shortcodes",
+                     test_chat_event_leaves_non_shortcodes);
 
     g_test_add_func ("/proto/chat_event/copy_preserves_fields",
                      test_chat_event_copy_preserves_fields);
