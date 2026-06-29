@@ -45,6 +45,9 @@
 #include "gtkhx_theme.h"
 #include "prefs_parser.h"
 #include "options.h"
+#include "gif_icons.h"  /* hx_icon_save / _set / _clear + GIF_ICONS_* state */
+#include "toolbar.h"    /* toolbar_show_toast */
+#include "hotline_proto.h" /* gtkhx_proto_gif_icon_is_gif */
 #include "text_util.h"
 #include "tracker.h"
 #include "debug.h"
@@ -2690,6 +2693,216 @@ settings_page_chat (AdwPreferencesPage *page)
     }
 }
 
+/* ---- Custom GIF avatar picker (GIF-icons extension, Phase 10.C) --- */
+
+/* GTKHX_AVATAR_MAX_BYTES (the spec-recommended 32 KiB upload cap) is
+ * defined in gif_icons.h so the picker and the persistence layer share
+ * one source of truth. We reject larger files client-side with a clear
+ * message rather than earn a server rejection. (Auto-downscale is
+ * deferred: gdk-pixbuf has no GIF encoder, so recompressing to GIF would
+ * need ImageMagick.) */
+
+/* Cap the preview decode. GdkPixbufLoader's "size-prepared" fires once
+ * the header (dimensions) is parsed but before the full raster decode,
+ * so a highly-compressed GIF that advertises huge dimensions gets scaled
+ * down to a sane preview size here rather than allocating a giant canvas
+ * on the UI thread. (The avatar that's actually sent/rendered still goes
+ * through the bounded, sandboxed gif_avatar decoder; this only bounds the
+ * local Settings preview.) */
+#define AVATAR_PREVIEW_MAX_DIM 512
+static void
+avatar_loader_size_prepared (GdkPixbufLoader *ld, int w, int h, gpointer data)
+{
+    (void) data;
+    int big = w > h ? w : h;
+    if (big <= AVATAR_PREVIEW_MAX_DIM) {
+        return;
+    }
+    double s = (double) AVATAR_PREVIEW_MAX_DIM / big;
+    int nw = (int) (w * s);
+    int nh = (int) (h * s);
+    gdk_pixbuf_loader_set_size (ld, nw > 0 ? nw : 1, nh > 0 ? nh : 1);
+}
+
+static void
+avatar_preview_from_gif (GtkWidget *preview, const guchar *bytes, gsize len)
+{
+    GdkTexture *tex = NULL;
+    GdkPixbufLoader *ld = gdk_pixbuf_loader_new ();
+    g_signal_connect (ld, "size-prepared",
+                      G_CALLBACK (avatar_loader_size_prepared), NULL);
+    /* close() must run exactly once regardless of how write() fared, so
+	 * sequence the two calls into separate statements rather than relying
+	 * on && short-circuit (which would skip close() when write() fails,
+	 * and tempt a second close() in an else branch). */
+    gboolean wrote = gdk_pixbuf_loader_write (ld, bytes, len, NULL);
+    gboolean closed = gdk_pixbuf_loader_close (ld, NULL);
+    if (wrote && closed) {
+        GdkPixbuf *pb = gdk_pixbuf_loader_get_pixbuf (ld); /* borrowed */
+        if (pb) {
+            tex = gtkhx_texture_from_pixbuf (pb);
+        }
+    }
+    gtk_picture_set_paintable (GTK_PICTURE (preview),
+                               tex ? GDK_PAINTABLE (tex) : NULL);
+    g_clear_object (&tex);
+    g_object_unref (ld);
+}
+
+static void
+on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
+{
+    GtkWidget *preview = user_data; /* reffed by on_avatar_choose_clicked */
+    GError *err = NULL;
+    GFile *file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (src), res, &err);
+
+    if (!file) {
+        if (err
+            && !g_error_matches (err, GTK_DIALOG_ERROR,
+                                 GTK_DIALOG_ERROR_DISMISSED)) {
+            char *m
+                = g_strdup_printf (_ ("File picker failed: %s"), err->message);
+            toolbar_show_toast (m);
+            g_free (m);
+        }
+        g_clear_error (&err);
+        g_object_unref (preview);
+        return;
+    }
+
+    /* Preflight the size before reading the whole file into memory —
+	 * picking a huge file shouldn't cause a long synchronous read +
+	 * allocation on the UI thread just to reject it afterward. One
+	 * stat() on local files; cheap. If size can't be queried (some
+	 * network mounts) we fall through and the post-read cap catches it. */
+    GFileInfo *finfo = g_file_query_info (
+        file, G_FILE_ATTRIBUTE_STANDARD_SIZE, G_FILE_QUERY_INFO_NONE, NULL,
+        NULL);
+    if (finfo) {
+        goffset sz = g_file_info_get_size (finfo);
+        g_object_unref (finfo);
+        if (sz > GTKHX_AVATAR_MAX_BYTES) {
+            /* Size is checked before the GIF-signature validation below,
+			 * so a large non-GIF lands here too — keep the wording neutral. */
+            char *m = g_strdup_printf (
+                _ ("That file is %.1f KB — the limit is %d KB. Pick a smaller "
+                   "one."),
+                sz / 1024.0, GTKHX_AVATAR_MAX_BYTES / 1024);
+            toolbar_show_toast (m);
+            g_free (m);
+            g_object_unref (file);
+            g_object_unref (preview);
+            return;
+        }
+    }
+
+    char *contents = NULL;
+    gsize len = 0;
+    GError *load_err = NULL;
+    if (!g_file_load_contents (file, NULL, &contents, &len, NULL, &load_err)) {
+        char *m = g_strdup_printf (_ ("Couldn't read the file: %s"),
+                                   load_err ? load_err->message : "?");
+        toolbar_show_toast (m);
+        g_free (m);
+        g_clear_error (&load_err);
+        g_object_unref (file);
+        g_object_unref (preview);
+        return;
+    }
+    g_object_unref (file);
+
+    if (len == 0) {
+        toolbar_show_toast (_ ("That file is empty."));
+        g_free (contents);
+        g_object_unref (preview);
+        return;
+    }
+    if (len > GTKHX_AVATAR_MAX_BYTES) {
+        char *m = g_strdup_printf (
+            _ ("That file is %.1f KB — the limit is %d KB. Pick a smaller "
+               "one."),
+            len / 1024.0, GTKHX_AVATAR_MAX_BYTES / 1024);
+        toolbar_show_toast (m);
+        g_free (m);
+        g_free (contents);
+        g_object_unref (preview);
+        return;
+    }
+    if (!gtkhx_proto_gif_icon_is_gif ((const guint8 *) contents, len)) {
+        toolbar_show_toast (_ ("That file isn't a GIF image."));
+        g_free (contents);
+        g_object_unref (preview);
+        return;
+    }
+
+    /* Persist the choice regardless of the current connection, then
+	 * send it if (and only if) the live server supports the extension.
+	 * If not, it'll be sent automatically the next time we connect to a
+	 * capable server (hx_icon_send_saved, from the post-login probe). */
+    if (!hx_icon_save ((const guint8 *) contents, len)) {
+        toolbar_show_toast (
+            _ ("Couldn't save the avatar to disk — check permissions."));
+        g_free (contents);
+        g_object_unref (preview);
+        return;
+    }
+    avatar_preview_from_gif (preview, (const guchar *) contents, len);
+    if (the_session.htlc.gif_icons_state == GIF_ICONS_SUPPORTED) {
+        hx_icon_set (&the_session.htlc, (const guint8 *) contents, len);
+        toolbar_show_toast (_ ("Avatar updated."));
+    } else {
+        toolbar_show_toast (_ ("Avatar saved — it'll be sent when you connect "
+                               "to a server that supports GIF icons."));
+    }
+    g_free (contents);
+    g_object_unref (preview);
+}
+
+static void
+on_avatar_choose_clicked (GtkButton *btn, gpointer user_data)
+{
+    GtkWidget *preview = user_data; /* borrowed; reffed for the async call */
+    GtkFileDialog *fd = gtk_file_dialog_new ();
+    gtk_file_dialog_set_title (fd, _ ("Choose GIF avatar"));
+
+    GtkFileFilter *f = gtk_file_filter_new ();
+    gtk_file_filter_set_name (f, _ ("GIF images"));
+    gtk_file_filter_add_mime_type (f, "image/gif");
+    GListStore *filters = g_list_store_new (GTK_TYPE_FILE_FILTER);
+    g_list_store_append (filters, f);
+    g_object_unref (f);
+    gtk_file_dialog_set_filters (fd, G_LIST_MODEL (filters));
+    g_object_unref (filters);
+
+    GtkWindow *parent = NULL;
+    GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (btn));
+    if (GTK_IS_WINDOW (root)) {
+        parent = GTK_WINDOW (root);
+    }
+    gtk_file_dialog_open (fd, parent, NULL, on_avatar_file_chosen,
+                          g_object_ref (preview));
+    g_object_unref (fd);
+}
+
+static void
+on_avatar_clear_clicked (GtkButton *btn, gpointer user_data)
+{
+    GtkWidget *preview = user_data;
+    (void) btn;
+    gboolean removed = hx_icon_forget ();
+    gtk_picture_set_paintable (GTK_PICTURE (preview), NULL);
+    /* Tell the server to drop it too, if we're on a capable one. */
+    if (the_session.htlc.gif_icons_state == GIF_ICONS_SUPPORTED) {
+        hx_icon_clear (&the_session.htlc);
+    }
+    /* Don't claim it's cleared if the persisted file survived deletion —
+	 * it'll reload and re-send next start. */
+    toolbar_show_toast (removed
+                            ? _ ("Avatar cleared.")
+                            : _ ("Avatar cleared for now, but the saved "
+                                 "file could not be deleted."));
+}
+
 /* Phase 5 follow-up: the old standalone General page (just NICK) folds
  * into the Identity page since they're both "who am I to the server"
  * settings. Display name first, then icon ID, then the resource picker.
@@ -2726,6 +2939,59 @@ settings_page_identity (AdwPreferencesPage *page)
                        _ ("Numeric ID from the loaded icon resource files"), 0,
                        65535, 1));
     adw_preferences_page_add (page, id_grp);
+
+    /* Custom GIF avatar (GIF-icons extension, Phase 10.C). Independent
+	 * of the numeric icon above — a GIF other capable clients see in
+	 * place of your icon, rendered like a normal icon / wide banner.
+	 * You can pick one any time; it's persisted ($CONFIG/avatar.gif)
+	 * and sent automatically once you're on a server that supports the
+	 * extension, so the picker is never gated on the live connection. */
+    {
+        AdwPreferencesGroup *gif_grp
+            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (gif_grp, _ ("Custom GIF avatar"));
+        adw_preferences_group_set_description (
+            gif_grp,
+            _ ("A GIF other users see in place of your icon. Best authored at "
+               "icon size (or wide-banner size); max 32 KB. Sent "
+               "automatically when you connect to a server that supports it."));
+
+        AdwActionRow *gif_row = ADW_ACTION_ROW (adw_action_row_new ());
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (gif_row),
+                                       _ ("Avatar"));
+
+        GtkWidget *preview = gtk_picture_new ();
+        gtk_widget_set_size_request (preview, 48, 48);
+        gtk_widget_set_valign (preview, GTK_ALIGN_CENTER);
+        gtk_picture_set_content_fit (GTK_PICTURE (preview),
+                                     GTK_CONTENT_FIT_CONTAIN);
+        /* Seed from the saved avatar (the user's choice), not the live
+		 * per-session cache — so it shows even before connecting. */
+        {
+            GBytes *saved = hx_icon_load_saved ();
+            if (saved) {
+                gsize slen = 0;
+                const guchar *sdata = g_bytes_get_data (saved, &slen);
+                avatar_preview_from_gif (preview, sdata, slen);
+                g_bytes_unref (saved);
+            }
+        }
+        adw_action_row_add_prefix (gif_row, preview);
+
+        GtkWidget *choose = gtk_button_new_with_label (_ ("Choose…"));
+        gtk_widget_set_valign (choose, GTK_ALIGN_CENTER);
+        g_signal_connect (choose, "clicked",
+                          G_CALLBACK (on_avatar_choose_clicked), preview);
+        GtkWidget *clear = gtk_button_new_with_label (_ ("Clear"));
+        gtk_widget_set_valign (clear, GTK_ALIGN_CENTER);
+        g_signal_connect (clear, "clicked",
+                          G_CALLBACK (on_avatar_clear_clicked), preview);
+        adw_action_row_add_suffix (gif_row, choose);
+        adw_action_row_add_suffix (gif_row, clear);
+
+        adw_preferences_group_add (gif_grp, GTK_WIDGET (gif_row));
+        adw_preferences_page_add (page, gif_grp);
+    }
 
     picker_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (picker_grp, _ ("Available icons"));

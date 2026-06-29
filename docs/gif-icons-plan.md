@@ -28,6 +28,12 @@ mhxd and Janus. No UI yet (that's 10.B+).
 **Phase 10.B (receive + cache + still render) shipped.** Other users'
 GIF avatars now appear in the user list. See the 10.B sub-phase below.
 
+**Phase 10.C (send UX) shipped.** A "Custom GIF avatar" picker on the
+Settings → Identity page lets you choose / preview / clear your own
+avatar at any time; the choice is persisted and sent automatically once
+you're on a server that supports the extension. See the 10.C sub-phase
+below.
+
 A harness gap surfaced and was fixed along the way: Janus delivers the
 session uid in the LOGIN TASK reply (like NAME/CAPABILITIES), not in
 SELFINFO, so `integration_open_login_or_skip` left `htlc->uid == 0` on Janus.
@@ -299,8 +305,26 @@ chat-history early phases, which predated a public implementation).
   (animation is 10.D). Cache cleared on disconnect (public users-clear). The
   10.A Tier 3 wire suite still covers set/get/list/broadcast; render is
   GTK-UI (verified by build + manual).
-- **10.C — Send UX.** Identity-settings GIF picker (choose / preview /
-  clear / downscale), capability-gated. Round-trips your own avatar.
+- **10.C — Send UX.** ✅ Shipped. A "Custom GIF avatar" group on the Settings
+  → Identity page (`options.c`): a preview `GtkPicture`, a "Choose…" button
+  (`GtkFileDialog`, GIF filter) and a "Clear" button. Choosing validates the
+  GIF signature (`gtkhx_proto_gif_icon_is_gif`) + a 32 KB cap and updates the
+  preview.
+
+  **Choice is decoupled from capability.** Rather than gate the picker on the
+  live server, the avatar is *persisted* (`$CONFIG/avatar.gif`,
+  `hx_icon_save` / `hx_icon_load_saved` / `hx_icon_forget`) the moment it's
+  chosen — even offline or on a non-supporting server. It's sent immediately
+  if the current server is capable, and otherwise **sent automatically on the
+  next connect to a capable server** (`hx_icon_send_saved`, called from the
+  post-login probe in `rcv_task_icon_getlist` once support is confirmed).
+  Clear forgets the saved file and, if connected+capable, sends a clear. The
+  preview seeds from the saved file so it shows before connecting.
+
+  **Downscale deferred:** gdk-pixbuf has no GIF *encoder*, so recompressing
+  oversize GIFs to GIF would need ImageMagick; for now an oversize file is
+  rejected with an actionable message. Revisit on demand (ImageMagick is
+  already a dependency).
 - **10.D — Animation + pause.** Animated rendering off the frame clock for
   visible rows, plus the "Animate avatar icons" pref (still fallback when
   off). Honour reduce-motion if free.

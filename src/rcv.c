@@ -2115,6 +2115,11 @@ rcv_task_icon_getlist (struct htlc_conn *htlc)
         htlc->gif_icons_probe_timer = 0;
     }
 
+    /* The server is confirmed capable — push our saved avatar (if the
+	 * user picked one while offline / on a non-supporting server). No-op
+	 * when there's nothing saved. */
+    hx_icon_send_saved (htlc);
+
     /* Count first (out=NULL), then allocate exactly and fill — the
 	 * Rust walker returns the total even when out is NULL. The count is
 	 * server-controlled, so clamp it: a uid is a u16, so a well-formed
