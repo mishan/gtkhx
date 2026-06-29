@@ -92,6 +92,12 @@ extern void hx_user_list_view_remove (HxUserListView *v, struct hx_user *user);
 extern void hx_user_list_view_update (HxUserListView *v, struct hx_user *user,
                                       const char *nam, guint16 icon,
                                       guint16 color);
+/* Re-snapshot `user`'s row to pick up a GIF avatar change (Phase 10.B).
+ * No state mutation — the avatar lives in the gif_avatar cache, keyed
+ * by uid; this just nudges the cell to re-read it. No-op if the view
+ * has no row for `user`. */
+extern void hx_user_list_view_refresh_avatar (HxUserListView *v,
+                                              struct hx_user *user);
 extern void hx_user_list_view_clear (HxUserListView *v);
 
 /* Return the user under the live single-selection, or NULL if no

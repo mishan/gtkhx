@@ -48,6 +48,8 @@
 #include "news_browser.h"
 #include "files_remote_provider.h"
 #include "users.h"
+#include "gif_icons.h"  /* hx_icon_get — re-fetch on ICON_CHANGE */
+#include "gif_avatar.h" /* gtkhx_avatar_update / _clear_all */
 #include "files.h"
 #include "tasks.h"
 #include "network.h"
@@ -1513,6 +1515,38 @@ on_users_clear_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)emitter;
     (void)user_data;
     users_clear (htlc, chat);
+    /* Clearing the public user list is the view-side disconnect
+	 * boundary. GIF avatars are per-session server-side, so drop the
+	 * whole cache (and cancel any in-flight decodes) — a reconnect
+	 * re-probes and re-fetches from scratch. */
+    if (chat && chat->cid == 0) {
+        gtkhx_avatar_clear_all ();
+    }
+}
+
+/* GIF-icons extension (Phase 10.B). gif-icon-data carries a user's raw
+ * GIF (or empty = cleared); hand it to the avatar cache, which decodes
+ * (bounded, async) and refreshes the affected user-list rows. */
+static void
+on_gif_icon_data_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                         guint uid, gpointer gif, guint len, gpointer user_data)
+{
+    (void)emitter;
+    (void)htlc;
+    (void)user_data;
+    gtkhx_avatar_update ((guint16)uid, (const guint8 *)gif, (gsize)len);
+}
+
+/* gif-icon-changed carries only a uid (the ICON_CHANGE broadcast). Pull
+ * the new avatar; the ICON_GET reply re-emits gif-icon-data, which the
+ * handler above caches + renders. */
+static void
+on_gif_icon_changed_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                            guint uid, gpointer user_data)
+{
+    (void)emitter;
+    (void)user_data;
+    hx_icon_get (htlc, (guint16)uid);
 }
 
 static void
@@ -1731,6 +1765,10 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_user_change_signal), NULL);
     g_signal_connect (emitter, "users-clear",
                       G_CALLBACK (on_users_clear_signal), NULL);
+    g_signal_connect (emitter, "gif-icon-data",
+                      G_CALLBACK (on_gif_icon_data_signal), NULL);
+    g_signal_connect (emitter, "gif-icon-changed",
+                      G_CALLBACK (on_gif_icon_changed_signal), NULL);
     g_signal_connect (emitter, "user-info", G_CALLBACK (on_user_info_signal),
                       NULL);
     g_signal_connect (emitter, "file-info", G_CALLBACK (on_file_info_signal),
