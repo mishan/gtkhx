@@ -1,4 +1,4 @@
-## 1.1.1-dev
+## 1.2.0-dev
 
 - User Interface
   - GtkHx theme support
