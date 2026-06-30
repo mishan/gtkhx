@@ -9,9 +9,6 @@ Bookmarks:
 - Ship some bookmarks for more servers
 - Built-in bookmarks should be written once as real bookmark files on config dir creation, instead of being hardcoded in the Connect dialog
 
-Icons:
-- Support GIF icon extension https://github.com/fogWraith/Hotline/blob/main/Docs/Protocol/GIF-Icons.md
-
 Docs:
 - Rewrite README.md to explain this project better
 

@@ -340,25 +340,25 @@ Janus is the inline-media Tier 3 target. Confirming Janus's actual support is th
 
 The fogWraith spec adds per-user custom **GIF avatars** to Hotline, independent of the standard 16-bit icon ID. The design is **pull-based**: the server stores GIF data per session but never pushes it. When a user sets or clears their icon, the server broadcasts an **Icon Change (1864)** notification carrying only the user's ID; clients re-fetch the image on demand via **Get Icon (1863)**. Four transactions (1861–1864 / 0x0745–0x0748) and two new field IDs (0x0300 GIF data, 0x0301 packed list entry) ride the existing TCP control channel. Full plan at `docs/gif-icons-plan.md`.
 
-**Status**: scoped, not started. **Janus support confirmed end-to-end** (2026-06-28) — set / get / get-list all round-trip a real `GIF89a`, and the 1864 broadcast reaches a second client carrying only the changed UID. No Go mock server needed.
+**Status**: ✅ shipped (10.A–10.D); 10.E is this docs pass. End-to-end against mhxd + Janus: set / get / get-list round-trip a real `GIF89a`, the 1864 broadcast reaches other clients, avatars render (animated) in the user list, and the Settings → Identity picker sets / clears your own. **Janus support confirmed** (2026-06-28). No Go mock server needed.
 
 Structural difference from the other fogWraith extensions: **the spec defines no `DATA_CAPABILITIES` bit.** Per the locked-in decision, GtkHx does **not** invent one — support is discovered by **probe-and-fallback**. Critically, Janus (and presumably others) *silently drops* unknown opcodes with no reply, so the probe must use a **timeout watchdog**, not an error-code check — the same pattern as the tracker-v3 probe (`hx_tracker_v3_probe_ms()`).
 
 Locked-in choices:
 
 - **No capability bit** — probe Get Icon List (1861) after login with a ~2 s watchdog; silent fallback on timeout. Safe against every legacy server.
-- **Animated avatars, with a pause control** — render animated GIFs in the user list (animating only visible `GtkColumnView` cells), plus an "Animate avatar icons" pref that falls back to a still first frame when off. (Inline media chose first-frame-only for v1; GIF avatars go further by request.)
-- **Reuse the inline-media bounded decoder** (`src/preview.{c,h}` worker loader, magic-byte sniff + size caps), narrowed to GIF.
+- **Animated avatars, with a pause control** — render animated GIFs in the user list, plus an "Animate GIF avatars" pref that falls back to a still first frame when off, and a per-user pause (click the avatar / right-click menu). (Inline media chose first-frame-only for v1; GIF avatars go further by request.) *As shipped (10.D): a single shared frame timer drives all avatars — simpler than per-cell frame clocks and fine at user-list scale — and it stops when nothing is animating.*
+- **Reuse the inline-media bounded decoder** (`inline_media_decode_async`, magic-byte sniff + dimension/pixel/byte caps, sandboxed), narrowed to GIF.
 - **Legacy CICN icons and GIF are one feature, two payloads.** The icon transactions (0x0745–0x0748) are shared; legacy carried a Mac cicn resource in field 0x0e90, fogWraith carries a GIF in 0x0300 (+ packed list 0x0301). cicn-over-wire is **vestigial** — no reachable server serves it (mhxd and Janus both discard a 0x0e90 payload; verified June 2026), so GtkHx implements the GIF payload only and leaves 0x0e90 reserved. The standard 16-bit icon-ID system (0x0068) is separate and already rendered today.
 - **Header bug fixed during scoping.** `HTLC_HDR_ICON_GET` in `src/hotline.h` had been mis-defined as `0x0e90` (the cicn data-field number); the real opcode is `0x0747`. Dormant (proto_trace-only), now corrected. 10.A adds the remaining opcodes/fields using mhxd's exact constant names (`HTLC_HDR_ICON_GETLIST/_SET/_GET`, `HTLS_HDR_ICON_CHANGE`, `HTLS_DATA_ICON_GIF/_LIST`). Fields 0x0300/0x0301 coincide numerically with tracker-v3 TLV IDs but live in a separate namespace.
 
 Sub-phases (detail in `docs/gif-icons-plan.md`):
 
-- **10.A** — wire foundation: `hotline-proto::gif_icons` + FFI, opcodes/fields in `hotline.h`, `rcv.c`/`commands.c` dispatch, `GtkhxSession` signal, probe-and-fallback. Tier 2 fixtures. No UI.
-- **10.B** — receive + per-uid cache + 1864→re-fetch + static avatar render in the user list. Tier 3 vs Janus.
-- **10.C** — send UX: GIF picker in identity settings (choose / preview / clear / downscale), capability-gated.
-- **10.D** — animation + the pause pref.
-- **10.E** — docs.
+- **10.A** ✅ — wire foundation: `hotline-proto::gif_icons` + FFI, opcodes/fields in `hotline.h`, `rcv.c` dispatch + senders in `src/gif_icons.{c,h}`, `GtkhxSession` `gif-icon-*` signals, probe-and-fallback. Tier 2 fixtures + Tier 3 (`tests/integration/test_gif_icons.c`).
+- **10.B** ✅ — receive + per-uid avatar cache (`src/gif_avatar.{c,h}`, bounded sandboxed decode) + 1864→re-fetch + still avatar render in the user list (same cell path as cicn icons).
+- **10.C** ✅ — send UX: GIF picker on Settings → Identity (choose / preview / clear). **Decoupled from capability** — the choice is persisted (`$CONFIG/avatar.gif`) and auto-sent on the next connect to a capable server, so the picker is never gated. Downscale deferred (gdk-pixbuf has no GIF encoder).
+- **10.D** ✅ — animation: all frames decoded + played by a shared frame timer; global "Animate GIF avatars" pref (`CFG_ANIMATE_AVATARS`); per-user pause via click-on-avatar + a right-click "Pause/Resume Animation" menu item.
+- **10.E** ✅ — docs: this entry, the effort table, `docs/gif-icons-plan.md`, README, CHANGELOG, and the man page.
 
 ---
 
@@ -419,7 +419,7 @@ Hotline's wire protocol needs MD5 (auth challenge/response), HMAC (with negotiab
 | 7 | TLS (separate-port model, sub-phases 1–5) | 2–3 weeks | ✅ |
 | 8 | Voice chat (fogWraith, sub-phases A–G) | 6–10 weeks — Rust runtime was the long pole | ✅ |
 | 9 | Inline media (fogWraith, sub-phases A–F) | 3–5 weeks | scoped |
-| 10 | GIF icons (fogWraith, sub-phases A–E) | 2–3 weeks | scoped |
+| 10 | GIF icons (fogWraith, sub-phases A–E) | 2–3 weeks | ✅ |
 | ∞ | Modernized Hotline protocol (Hotline-NG) | n/a — social problem | parked |
 
 Done in evenings/weekends, multiply by ~3.

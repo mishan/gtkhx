@@ -342,8 +342,10 @@ chat-history early phases, which predated a public implementation).
   and a **"Pause/Resume Animation"** right-click menu item (shown only for
   animated avatars) as the discoverable equivalent. The timer only runs while
   ≥1 animated, unpaused avatar exists and the pref is on.
-- **10.E — Docs.** Update this doc + ROADMAP; README/man-page mention in the
-  next release-notes pass.
+- **10.E — Docs.** ✅ Shipped. This doc + the ROADMAP Phase 10 entry / effort
+  table marked complete. (The man page is options-only — no feature list to
+  amend; the README feature list and CHANGELOG entry are left to the
+  maintainer's release-notes pass.)
 
 ## Open questions / risks
 
