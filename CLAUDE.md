@@ -206,8 +206,8 @@ Model-side emitters: since **Phase R4.1** the `GtkhxSession` GObject
 is the Rust `glib::subclass` crate `rust/crates/gtkhx-session/`
 (`src/gtkhx_session.c` deleted; `src/gtkhx_session.h` unchanged). It
 exports the same C ABI — `gtkhx_session_get_type` /
-`gtkhx_session_get_default` / the 26 `gtkhx_session_emit_<name>`
-wrappers — so model- and view-side C is unchanged. Each `emit_*`
+`gtkhx_session_get_default` / the couple-dozen `gtkhx_session_emit_<name>`
+wrappers (one per signal) — so model- and view-side C is unchanged. Each `emit_*`
 builds the signal's `GValue`s in Rust and calls
 `emit_by_name_with_values`. Boxed payloads (`HxMsgEvent`, `HxChatEvent`
 + `HxChatMedia`, `HxTrackerServer` + `HxTrackerV3Meta`) were re-hosted

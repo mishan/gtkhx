@@ -835,9 +835,9 @@ because a connection is a struct in Rust, not a global.
 now the Rust `glib::subclass` crate `rust/crates/gtkhx-session/`; `src/gtkhx_session.c`
 is deleted, `src/gtkhx_session.h` stays unchanged. The crate exports the
 identical C ABI the old TU did — `gtkhx_session_get_type`,
-`gtkhx_session_get_default`, and all 26 `gtkhx_session_emit_*` wrappers — so
-every C model-side emitter and view-side `gtkhx_connect_signals` /
-`on_<name>_signal` adapter compiles and links unchanged. All 26 signals are
+`gtkhx_session_get_default`, and every `gtkhx_session_emit_*` wrapper (one per
+signal) — so every C model-side emitter and view-side `gtkhx_connect_signals` /
+`on_<name>_signal` adapter compiles and links unchanged. Every signal is
 registered in `ObjectImpl::signals()` with param types transcribed exactly
 from the old `g_signal_new()` calls (registration order mirrors the old
 `SIGNAL_*` enum so signal IDs stay stable).
@@ -853,11 +853,11 @@ type's copy func for the emit duration — byte-for-byte the lifetime the old
 Emit wraps the incoming `GtkhxSession*` with `from_glib_none` (the
 re-entrancy-safe "full form" from `docs/rust/glib-interop.md`).
 
-Validation: 7 in-crate `cargo test` cases (signal-count, pointer/scalar/
+Validation: in-crate `cargo test` cases (signal-count, pointer/scalar/
 string/boxed round-trips, singleton stability, NULL-session safety); the full
 `meson` build links the `gtkhx` binary + the two integration targets
-(`real_connect`, `real_htxf_connect`) that compile against the crate; Tier 1/2
-(66 unit+proto) green; Tier 3 vs mhxd/Janus/argus/hxtrackd green for every test
+(`real_connect`, `real_htxf_connect`) that compile against the crate; the
+Tier 1/2 unit+proto suite green; Tier 3 vs mhxd/Janus/argus/hxtrackd green for every test
 that flows events through the session (`real_connect`, `real_htxf_connect`,
 `chat_roundtrip`, `user_list_grows`, `tracker_fetch`, the HOPE/news/voice/file
 suites). Re-hosting the boxed types themselves in Rust is **R4.2** (see below).
@@ -905,7 +905,7 @@ relying on it for whole windows in R5.
   signals are introspectable for tooling. Optional; defer to Phase R5+ if
   it doesn't fall out for free.
 
-**Exit criteria:** `gtkhx_session.c` deleted. All 26 signals emit from Rust;
+**Exit criteria:** `gtkhx_session.c` deleted. Every signal emits from Rust;
 all view-side handlers in C consume them unchanged. Tier 3 e2e tests pass
 (chat, news, file list, transfers, tracker, login). **Met by R4.1.**
 
@@ -948,7 +948,7 @@ from R4.1 — it keeps externing the boxed `GType`s, which now resolve against
 - **R4.2a — `HxMsgEvent` ✅.** Moved to `gtkhx-boxed` (`#[repr(C)]` 48-byte
   mirror; `hx_msg_event_{get_type,copy,free}` exported with the original C ABI;
   `proto_helpers.c` keeps `hx_msg_event_new` + the struct + a
-  `_Static_assert(sizeof == 48)`). 4 in-crate cargo tests (boxed registration,
+  `_Static_assert(sizeof == 48)`). In-crate cargo tests (boxed registration,
   deep-copy, NULL-safety, `g_boxed_copy` round-trip); Tier 2 `msg_event` (now
   calls the Rust `_copy`) + Tier 3 `msg_roundtrip` / `msg_self` /
   `msg_to_unknown_uid` green.
@@ -958,7 +958,7 @@ from R4.1 — it keeps externing the boxed `GType`s, which now resolve against
   `id`/`mime` byte copies). `proto_helpers.c` keeps `hx_chat_event_new`,
   `hx_chat_event_attach_media`, the placeholder formatters, and
   `hx_chat_media_free` (still used by `attach_media`) + two `_Static_assert`s.
-  5 cargo tests; Tier 2 `chat_event` / `inline_media` + Tier 3 chat suite green.
+  In-crate cargo tests; Tier 2 `chat_event` / `inline_media` + Tier 3 chat suite green.
 - **R4.2b — `HxTrackerServer` + `HxTrackerV3Meta` ✅.** Moved to
   `gtkhx-boxed::tracker`. `HxTrackerServer` is a 72-byte `#[repr(C)]` mirror;
   its copy/free deep-copy the `GBytes` (`g_bytes_ref`/`_unref`) and the meta.
@@ -970,8 +970,8 @@ from R4.1 — it keeps externing the boxed `GType`s, which now resolve against
   `tracker_v3_meta.c`; the C producers (`hx_tracker_server_new_v1`/`_v3`,
   `hx_tracker_v3_meta_new`) and the `hx_tracker_v3_meta_free` call sites in C
   (the `_new` error path, `tracker_row.c`) now resolve against `gtkhx-boxed`.
-  6 cargo tests; Tier 2 `tracker_v3_meta` + Tier 3 tracker suite (v1/v3/TLS/
-  fetch) green.
+  In-crate cargo tests; Tier 2 `tracker_v3_meta` + Tier 3 tracker suite (v1/v3/
+  TLS/fetch) green.
 
 `gtkhx-session` is unchanged from R4.1 except doc comments: it keeps externing
 the three boxed `_get_type`s, which now resolve against `gtkhx-boxed`. The
