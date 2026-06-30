@@ -359,7 +359,7 @@ rust_hxbridge_dep = declare_dependency(
 # GtkhxSession GObject (Phase R4). The model→view signal hub, now a
 # Rust glib::subclass type. Exports the C ABI the deleted
 # src/gtkhx_session.c used to: gtkhx_session_get_type,
-# gtkhx_session_get_default, and the 26 gtkhx_session_emit_* wrappers.
+# gtkhx_session_get_default, and one gtkhx_session_emit_* wrapper per signal.
 # The staticlib has undefined references to the C boxed-type accessors
 # (hx_chat_event_get_type / hx_msg_event_get_type /
 # hx_tracker_server_get_type) which the linking C target resolves from

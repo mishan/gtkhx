@@ -7,7 +7,7 @@
 //!
 //!   - `gtkhx_session_get_type` (the `G_DECLARE_FINAL_TYPE` accessor),
 //!   - `gtkhx_session_get_default` (the process-lifetime singleton),
-//!   - the 26 `gtkhx_session_emit_*` wrappers.
+//!   - one `gtkhx_session_emit_*` wrapper per signal.
 //!
 //! C view-side code (`gtkhx.c::gtkhx_connect_signals` and the
 //! `on_<name>_signal` adapters, plus every model-side `emit_*` caller)
@@ -873,9 +873,10 @@ mod tests {
 
     #[test]
     fn registers_all_signals() {
-        // The imp's signal vector is the source of truth — one entry per
-        // SIGNAL_* the old gtkhx_session.c enum carried: the original 26
-        // plus the two GIF-icons signals (gif-icon-changed / -data).
+        // One entry per signal the model→view contract carries. This exact
+        // count is a deliberate drift-catcher: adding or removing a signal
+        // without updating it (and the matching emit wrapper) trips here.
+        // Bump it in lockstep when the signal set changes.
         assert_eq!(imp::GtkhxSession::signals().len(), 28);
     }
 
