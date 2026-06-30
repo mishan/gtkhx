@@ -2361,14 +2361,44 @@ impl VoiceRuntime {
                 }
             }
 
-            // ---- Mute dispatch (Phase 8.C step 6+) ----
+            // ---- Mute dispatch ----
             //
-            // The send leg lands with step 6 (the audio capture
-            // pipeline + RTP send chain); the mute arm needs
-            // the send leg's element handles to drop buffers,
-            // so it can't usefully land before then.
-            Action::SetSendPipelineMute { .. } => {
-                // Step 6 fills this in.
+            // Apply the local mute to the send leg by toggling the
+            // `volume` element's `mute` property — when set, the
+            // captured microphone audio is replaced with digital
+            // silence before it reaches the encoder, so a "muted"
+            // user genuinely stops transmitting their mic (not just
+            // server-side enforcement via the 606 flag). The element
+            // is looked up by name; `Bin::by_name` recurses into the
+            // send bin. If the pipeline or element is absent (e.g.
+            // the pipeline-less test runtime, or a teardown race),
+            // the action is a no-op — the next mute action after a
+            // rebuild re-applies the state.
+            Action::SetSendPipelineMute { muted } => {
+                let pipeline = self.inner.borrow().pipeline.clone();
+                if let Some(pipeline) = pipeline {
+                    match pipeline.by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME)
+                    {
+                        Some(volume) => {
+                            volume.set_property("mute", muted);
+                            crate::debug::log!(
+                                "voice-pipe",
+                                "send-leg mute set to {muted} via `{}`",
+                                crate::audio::SEND_VOLUME_ELEMENT_NAME
+                            );
+                        }
+                        None => {
+                            gstreamer::warning!(
+                                gstreamer::CAT_RUST,
+                                "hxvoice: SetSendPipelineMute({muted}) could \
+                                 not find the send `volume` element \
+                                 `{}` — local mic mute not applied (the \
+                                 server-side 606 flag still gates audio).",
+                                crate::audio::SEND_VOLUME_ELEMENT_NAME
+                            );
+                        }
+                    }
+                }
             }
 
             // hxvoice::Action is #[non_exhaustive] — the wildcard
@@ -4855,6 +4885,49 @@ mod tests {
         assert!(
             pipeline.by_name("hxvoice-webrtcbin").is_some(),
             "webrtcbin must be a child of the hxvoice pipeline"
+        );
+    }
+
+    /// End-to-end: a `MuteToggleRequested` event drives the
+    /// `SetSendPipelineMute` dispatch arm, which flips the send
+    /// `volume` element's `mute` property — the real client-side
+    /// mic cut. Starts unmuted, mutes, unmutes. This is the
+    /// regression guard for the previously-no-op mute arm.
+    #[test]
+    fn mute_toggle_sets_send_volume_mute_property() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+
+        // The send bin + its volume element exist from construction.
+        let pipeline = runtime
+            .inner
+            .borrow()
+            .pipeline
+            .clone()
+            .expect("with-pipeline runtime has a pipeline");
+        let vol = pipeline
+            .by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME)
+            .expect("send volume element present in the pipeline");
+        assert!(
+            !vol.property::<bool>("mute"),
+            "send volume starts unmuted"
+        );
+
+        // MuteToggleRequested is only honoured in an active-room
+        // state, so join first (Idle → JoinSent).
+        runtime.handle_event(Event::JoinRequested { cid: 0 });
+
+        runtime.handle_event(Event::MuteToggleRequested { muted: true });
+        assert!(
+            vol.property::<bool>("mute"),
+            "mute=true must reach the send volume element"
+        );
+
+        runtime.handle_event(Event::MuteToggleRequested { muted: false });
+        assert!(
+            !vol.property::<bool>("mute"),
+            "unmute must reach the send volume element"
         );
     }
 

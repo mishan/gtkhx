@@ -122,6 +122,13 @@ Stripping it down to the client's contract:
   implicit leave.
 - **Mute** as a server-side enforced flag (606). Push-to-talk is just
   rapid mute/unmute from the client's side. **Mute and PTT shipped.**
+  Mute is now also enforced **locally**: the
+  `Action::SetSendPipelineMute` arm — previously a no-op, so a "muted"
+  client kept streaming its mic to the server and relied entirely on
+  the server to drop it — toggles a `volume` element's `mute` in the
+  send bin, replacing the captured mic with digital silence before it
+  is encoded. Silence (not a `valve` drop) keeps RTP flowing at the
+  normal rate so the NAT/ICE path stays warm.
 - **Disconnect = automatic leave.** Server cleans up if the TCP
   control connection drops. **Shipped** — runtime teardown on
   session free + `Action::TearDown` drives the pipeline back to

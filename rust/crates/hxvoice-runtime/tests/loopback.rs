@@ -102,6 +102,35 @@ fn loopback_audiotestsrc_to_fakesink_reaches_playing() {
         .expect("set_state(Null) on teardown");
 }
 
+/// The send bin carries a named `volume` element that acts as the
+/// local mute control, and its `mute` property toggles cleanly.
+/// `SetSendPipelineMute` (in the runtime) finds this element by name
+/// and flips `mute`; this pins that the element exists, is named as
+/// the dispatch arm expects, starts unmuted, and is togglable.
+#[test]
+fn send_bin_exposes_named_volume_mute() {
+    hxvoice_runtime::init();
+
+    let bin = hxvoice_runtime::audio::make_send_bin("hxvoice-send-test", None)
+        .expect(
+            "send bin must build — check gst-plugins-good (mulawenc / \
+             rtppcmupay) + gst-plugins-base (audioconvert / audioresample / \
+             volume)",
+        );
+    use gst::prelude::*;
+    let vol = bin
+        .by_name(hxvoice_runtime::audio::SEND_VOLUME_ELEMENT_NAME)
+        .expect("send bin must contain the named volume element");
+
+    // Starts unmuted (mic open), mutes, and unmutes — all via the
+    // same `mute` property the dispatch arm drives.
+    assert!(!vol.property::<bool>("mute"), "send volume starts unmuted");
+    vol.set_property("mute", true);
+    assert!(vol.property::<bool>("mute"), "mute=true takes effect");
+    vol.set_property("mute", false);
+    assert!(!vol.property::<bool>("mute"), "unmute takes effect");
+}
+
 /// Smoke-test the DeviceMonitor enumeration entry point.
 ///
 /// We don't assert on the device count — CI containers have no

@@ -475,6 +475,13 @@ fn attach_buffer_probe(
     });
 }
 
+/// Element name of the `volume` element in the send bin, used as the
+/// local mute control. The `SetSendPipelineMute` dispatch arm in
+/// `runtime.rs` looks it up by this name via `pipeline.by_name(…)` to
+/// toggle the mic, so the producer here and the consumer there must
+/// agree on the string.
+pub const SEND_VOLUME_ELEMENT_NAME: &str = "hxvoice-send-volume";
+
 /// Build a send-leg `gst::Bin` that captures audio from the system
 /// microphone, encodes to μ-law, payloads as RTP/PCMU, and exposes
 /// a single source pad ready to link to `webrtcbin`'s sink request
@@ -483,9 +490,14 @@ fn attach_buffer_probe(
 /// Chain:
 ///
 /// ```text
-/// autoaudiosrc -> audioconvert -> audioresample -> capsfilter(PCM 8 kHz mono)
-///              -> mulawenc -> rtppcmupay -> (ghost src)
+/// autoaudiosrc -> audioconvert -> volume -> audioresample
+///              -> capsfilter(PCM 8 kHz mono) -> mulawenc
+///              -> rtppcmupay -> (ghost src)
 /// ```
+///
+/// The `volume` element ([`SEND_VOLUME_ELEMENT_NAME`]) is the local
+/// mute control — see [`make_send_bin`]'s body and the
+/// `SetSendPipelineMute` dispatch in `runtime.rs`.
 ///
 /// `autoaudiosrc` is GStreamer's auto-plugger that picks the host
 /// default capture device — `pulsesrc` on a PulseAudio /
@@ -527,12 +539,32 @@ pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> 
     // 8.E follow-ups.
     let src = make_source(device_name)?;
     let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
+    // Local mute control. A `volume` element whose `mute` property,
+    // when set TRUE, replaces the captured microphone audio with
+    // digital silence *before* it reaches the encoder. This is the
+    // real, client-side mute: with it engaged, no microphone content
+    // is encoded, payloaded, or sent — the 606 wire flag is only the
+    // server-side enforcement, this is the local guarantee that a
+    // "muted" user is genuinely not transmitting their mic.
+    //
+    // We mute via the `mute` property (silence) rather than dropping
+    // the stream (e.g. a `valve`): silent PCMU keeps flowing at the
+    // normal ~50 pps, which keeps the RTP / NAT path warm. Going
+    // fully silent on the wire would let an idle NAT binding lapse —
+    // exactly the kind of idle-transport fragility we want to avoid.
+    // `volume` lives in gst-plugins-base alongside audioconvert /
+    // audioresample, so if those resolve, so does this.
+    let volume = gst::ElementFactory::make("volume")
+        .name(SEND_VOLUME_ELEMENT_NAME)
+        .build()
+        .ok()?;
     let res = gst::ElementFactory::make("audioresample").build().ok()?;
     let caps = make_pcm8khz_caps_filter()?;
     let enc = make_mulaw_encoder()?;
     let pay = gst::ElementFactory::make("rtppcmupay").build().ok()?;
-    bin.add_many([&src, &conv, &res, &caps, &enc, &pay]).ok()?;
-    gst::Element::link_many([&src, &conv, &res, &caps, &enc, &pay]).ok()?;
+    bin.add_many([&src, &conv, &volume, &res, &caps, &enc, &pay]).ok()?;
+    gst::Element::link_many([&src, &conv, &volume, &res, &caps, &enc, &pay])
+        .ok()?;
     // Diagnostic probe: count buffers as they exit the
     // payloader. If both peers receive exactly one packet over
     // a working WebRTC session and then go silent, the question
