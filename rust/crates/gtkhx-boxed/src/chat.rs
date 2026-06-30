@@ -195,6 +195,7 @@ mod tests {
     /// Build a heap `HxChatEvent` the way a C producer would.
     unsafe fn make_event(cid: u32, line: &str, with_media: bool) -> *mut HxChatEvent {
         let e = g_malloc0(size_of::<HxChatEvent>()) as *mut HxChatEvent;
+        assert!(!e.is_null(), "g_malloc0 returned NULL");
         (*e).cid = cid;
         (*e).line = g_strndup(line.as_ptr() as *const c_char, line.len());
         (*e).line_len = line.len();
@@ -235,7 +236,9 @@ mod tests {
     fn copy_deep_copies_line_and_media() {
         unsafe {
             let a = make_event(7, "alice: hello there", true);
+            assert!(!a.is_null());
             let b = hx_chat_event_copy(a);
+            assert!(!b.is_null());
             assert_ne!(a, b);
             // line is a distinct allocation with the same bytes.
             assert_ne!((*a).line, (*b).line);
@@ -269,7 +272,9 @@ mod tests {
     fn copy_handles_media_absent() {
         unsafe {
             let a = make_event(0, "no media here", false);
+            assert!(!a.is_null());
             let b = hx_chat_event_copy(a);
+            assert!(!b.is_null());
             assert!((*b).media.is_null());
             assert_eq!(cstr((*b).line, (*b).line_len), "no media here");
             hx_chat_event_free(a);
@@ -290,7 +295,9 @@ mod tests {
         unsafe {
             let t = hx_chat_event_get_type();
             let a = make_event(3, "bob: hi", true);
+            assert!(!a.is_null());
             let b = glib::gobject_ffi::g_boxed_copy(t, a as *mut c_void) as *mut HxChatEvent;
+            assert!(!b.is_null());
             assert_ne!(a, b);
             assert_eq!(cstr((*b).line, (*b).line_len), "bob: hi");
             assert_eq!(cstr((*(*b).media).mime, (*(*b).media).mime_len), "image/png");
