@@ -340,20 +340,35 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
                 ensure_voice_runtime (sess);
             if (rt) {
                 gtkhx_voice_runtime_join (rt, cid);
-                /* Spec recommends joining muted by default.
-                 * Drive the state machine's self.muted to TRUE so
-                 * it stays in sync with what the toolbar shows;
-                 * the MuteChanged signal that this fires updates
-                 * KEY_MUTED + ships the VOICE_MUTE wire frame.
+                /* Spec recommends joining muted by default. Two
+                 * steps, IN THIS ORDER:
                  *
-                 * Without this, the C side's optimistic
-                 * KEY_MUTED=TRUE would diverge from the state
-                 * machine's default (self.muted=false), and the
-                 * user's first Unmute click would hit the
-                 * redundant-mute no-op branch — wire frame ships
-                 * but no MuteChanged signal fires, so the label
-                 * stays stuck on 'Unmute' until a second click
-                 * actually transitions the machine. */
+                 *   1. Send the VOICE_MUTE (606) wire frame so the
+                 *      server actually learns we joined muted. This
+                 *      MUST be the UI's job: the bridge
+                 *      (voice_runtime_send_wire_frame_cb) deliberately
+                 *      SKIPS runtime-emitted MUTE frames on the
+                 *      assumption the UI already sent them (kept
+                 *      UI-driven for PTT latency). So the matching
+                 *      606 the state machine emits in step 2 is
+                 *      swallowed there — without this explicit send,
+                 *      the start-muted intent never reaches the wire.
+                 *      (Same defect class as the LEAVE "Fix #3" the
+                 *      bridge comment describes.)
+                 *
+                 *   2. Drive the state machine's self.muted to TRUE so
+                 *      it stays in sync with what the toolbar shows;
+                 *      the MuteChanged signal that this fires updates
+                 *      KEY_MUTED.
+                 *
+                 * Without step 2, the optimistic KEY_MUTED=TRUE would
+                 * diverge from the state machine's default
+                 * (self.muted=false), and the user's first Unmute
+                 * click would hit the redundant-mute no-op branch —
+                 * no MuteChanged signal fires, so the label stays
+                 * stuck on 'Unmute' until a second click actually
+                 * transitions the machine. */
+                (void) hx_send_voice_mute (&sess->htlc, cid, TRUE);
                 gtkhx_voice_runtime_mute (rt, 1);
             } else {
                 /* Runtime construction failed (GStreamer not
