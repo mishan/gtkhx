@@ -31,7 +31,7 @@ behind the `HAVE_VOICE` define. The gate plumbing is documented in
 | 8.E | Settings → Voice device pickers | **Shipped** | merged from `claude/voice-phase-e-devices` |
 | 8.F | Tier 3 integration matrix vs Janus | **Shipped** | merged from `claude/voice-phase-f-tests` |
 | 8.G | Per-uid voice indicators in user list | **Shipped** (in-voice + muted) | `claude/voice-speaker-indicator` |
-| follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening, real-VAD speaker detection | **Mixed** — wedge, soft-Media, PTT shipped; Start-muted / Auto-join / real-VAD open | `claude/voice-wedge-deadline` (wedge), `claude/voice-speaker-indicator` (soft-Media) |
+| follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening, real-VAD speaker detection | **Mixed** — wedge, soft-Media, PTT, real-VAD shipped; Start-muted / Auto-join open | `claude/voice-wedge-deadline` (wedge), `claude/voice-speaker-indicator` (soft-Media), `claude/voice-vad-level` (real-VAD) |
 
 What also shipped that wasn't in the original plan:
 
@@ -86,11 +86,12 @@ What also shipped that wasn't in the original plan:
   not in voice, dim speaker when they're in voice, mic-disabled when
   they're muted. Driven by a new GObject `HxVoiceModel` keyed on uid,
   ingested from the existing `VOICE_PARTICIPANTS` blob path (no new
-  wire) and updated synchronously. The "actively speaking" arm is
-  scaffolded end-to-end (per-pad RTP counter in `hxvoice-runtime`,
-  `SignalKind::SpeakerChanged`, `HxVoiceModel::set_speaking`) but
-  deliberately demoted to IN_VOICE in render until real VAD ships —
-  see §12 step 7 below for the rationale and revert path.
+  wire) and updated synchronously. The "actively speaking" arm
+  (`SignalKind::SpeakerChanged`, `HxVoiceModel::set_speaking`) shipped
+  its real signal on `claude/voice-vad-level`: a GStreamer `level`
+  RMS detector replaced the per-pad RTP-arrival proxy, and
+  `HX_VOICE_INDICATOR_SHIPS_SPEAKING` is now on. See §12 step 4 for
+  the design and the kept-as-revert-switch gate.
 
 ---
 
@@ -410,11 +411,12 @@ reflecting their voice state. Three render values:
 | IN_VOICE  | uid is in voice, not muted              | `audio-volume-low-symbolic`       |
 | MUTED     | uid is in voice + server-flagged muted  | `microphone-disabled-symbolic`    |
 
-A fourth value `SPEAKING` exists in the `HxVoiceIndicator` enum and
-the runtime plumbing fires its underlying signal, but the C-side
-`compute_indicator` deliberately demotes SPEAKING → IN_VOICE in the
-current shipping configuration. The reason — and the revert path —
-live in §12 step 7 below.
+A fourth value `SPEAKING` (`audio-volume-high-symbolic`) renders when
+the runtime's voice-activity detector reports the uid above the
+speaking threshold. Originally demoted to IN_VOICE pending real VAD;
+since `claude/voice-vad-level` it renders for real
+(`HX_VOICE_INDICATOR_SHIPS_SPEAKING == 1`). The gate is kept as a
+one-line revert switch. Design in §12 step 4.
 
 Architecture:
 
@@ -430,7 +432,7 @@ Architecture:
               ┌─ HxVoiceModel (per-uid {in_voice, muted, speaking}) ─┐
               │                                                       │
               ▲                                                       ▼
-runtime per-pad RTP probe                      "indicator-changed" (uid, ind)
+runtime `level` RMS VAD                         "indicator-changed" (uid, ind)
               │                                                       │
               ▲                                                       ▼
         SignalKind::SpeakerChanged                        users_view voice column
@@ -449,12 +451,14 @@ Key pieces:
   (`indicator-changed`) fires per real visible flip.
 - **`src/users_view.c`** — new 22 px column between UID and Name.
   Each cell subscribes to the model once and filters by row uid.
-- **`hxvoice-runtime`** — `Inner::per_user_rtp_buffers:
-  Arc<Mutex<HashMap<u16, Arc<AtomicU64>>>>` allocated lazily in
-  `connect_pad_added` when `parse_voice_mid_label` resolves the pad's
-  mid to `User(uid)`. A 200 ms `glib::timeout_add_local`
-  (`speaker_tick`) diffs the counters against a previous snapshot
-  and fires `SignalKind::SpeakerChanged` per uid whose state flips.
+- **`hxvoice-runtime`** — `Inner::per_user_voice_activity:
+  Arc<Mutex<HashMap<u16, Arc<AtomicU64>>>>` (renamed from
+  `per_user_rtp_buffers` when VAD landed). `handle_level_message`
+  bumps a uid's counter from the `level` element's RMS bus messages
+  when the reading clears `SPEAKING_RMS_THRESHOLD_DB`. A 200 ms
+  `glib::timeout_add_local` (`speaker_tick`) diffs the counters
+  against a previous snapshot and fires `SignalKind::SpeakerChanged`
+  per uid whose state flips.
 - **`SignalCallbacks`** grew two slots — `speaker_changed` (uid,
   is_speaking) and `error` (text) — wired through the FFI mirror,
   C header, and `voice_panel.c` handlers. The Error slot routes
@@ -462,19 +466,23 @@ Key pieces:
   timeouts now surface as visible AdwToasts instead of silent state
   churn.
 
-Limitations and the cleanup path for "speaking":
+Speaking detection (now real VAD, `claude/voice-vad-level`):
 
-- The runtime probe counts every PCMU buffer that lands on a
-  participant's receive bin, but PCMU + WebRTC + `mulawenc` has no
-  VAD — 50 pps arrive continuously while a peer is unmuted, with no
-  per-packet volume information. Reporting "speaking" from the probe
-  alone is therefore equivalent to "unmuted + pipeline alive", which
-  the mute bit already conveys.
-- Until real VAD ships, `voice_model.c::compute_indicator` falls
-  through to IN_VOICE for the SPEAKING case behind a
-  `#if HX_VOICE_INDICATOR_SHIPS_SPEAKING` gate. Flipping the gate
-  to 1 (and updating the matching expectation in
-  `tests/unit/test_voice_model.c`) re-enables the SPEAKING render.
+- The original per-pad probe counted every PCMU buffer landing on a
+  receive bin. PCMU + WebRTC + `mulawenc` has no silence suppression,
+  so 50 pps arrive continuously while a peer is unmuted regardless of
+  speech — "speaking" off arrival alone was just "unmuted + pipeline
+  alive", barely more than the mute bit.
+- Replaced by a GStreamer `level` element on each receive bin's
+  decoded PCM. `handle_level_message` thresholds the per-window RMS
+  at `SPEAKING_RMS_THRESHOLD_DB` (-50 dB) and drives
+  `per_user_voice_activity`; `speaker_tick`'s existing diff turns
+  that into SPEAKING with a ~one-tick (200 ms) hangover. The global
+  `rtp_buffers_received` RTP counter stays for the wedge watchdog.
+- `HX_VOICE_INDICATOR_SHIPS_SPEAKING` is now `1` and the
+  `test_voice_model.c` expectations assert the SPEAKING render; the
+  gate is retained as the one-line revert switch if the threshold
+  needs to be silenced in the field.
 
 ---
 
@@ -688,30 +696,42 @@ Voice works end-to-end. The remaining roadmap:
    step waits for the upstream Audio portal to land. Zero code
    changes; `gst::DeviceMonitor` in the Phase 8.E device picker
    enumerates through PipeWire the same way it did before.
-4. **Real voice-activity detection** for the speaker indicator. The
-   Phase 8.G plumbing already wires runtime → C end-to-end; what's
-   missing is a volume-graded signal to feed it. Two paths:
+4. **Real voice-activity detection** for the speaker indicator —
+   ✅ **shipped** via path (a), client-side VAD with GStreamer
+   `level`. As built (`claude/voice-vad-level`):
 
-   a. **Client-side VAD via GStreamer `level`.** Insert the `level`
-      element into each receive bin's decoded PCM path
-      (`mulawdec ! audioconvert ! level interval=100ms ! audioresample
-      ! autoaudiosink`); hook the bus for `"level"` messages; threshold
-      the RMS at around -45 to -50 dB; feed the result into
-      `Inner::per_user_speaking` instead of (or in addition to) the
-      per-pad RTP-arrival probe. ~100–150 LOC of Rust. No server
-      changes. CPU cost is negligible: per participant ~8 kHz × 1 ch ×
-      one RMS sum per 100 ms interval ≈ 8 000 sample-ops/sec; even
-      a 16-participant room runs at <1 % of one core.
+   - A `level` element sits on each receive bin's decoded PCM tap
+     (`mulawdec ! audioconvert ! level ! audioresample !
+     autoaudiosink`) in `audio.rs::make_receive_bin`, posting a
+     per-channel RMS message every 100 ms
+     (`LEVEL_MESSAGE_INTERVAL_NS`).
+   - The pipeline bus watch routes `"level"` messages to
+     `runtime.rs::handle_level_message`, which maps the posting
+     element back to its receive bin's uid, thresholds the RMS at
+     `SPEAKING_RMS_THRESHOLD_DB` (-50 dB), and bumps that uid's
+     voice-activity counter.
+   - The per-uid counter (renamed `per_user_rtp_buffers` →
+     `per_user_voice_activity`) is now driven by these RMS bumps,
+     **not** the old per-pad RTP-arrival probe — PCMU has no silence
+     suppression, so RTP arrival meant "unmuted + alive", not
+     "speaking". The existing 200 ms `speaker_tick` diff/emit machine
+     is unchanged: a counter that advanced in the window → speaking,
+     with a natural ~one-tick hangover. The global
+     `rtp_buffers_received` RTP probe stays as the wedge-watchdog
+     liveness signal.
+   - `HX_VOICE_INDICATOR_SHIPS_SPEAKING` is now `1` in
+     `src/voice_model.c`; `test_speaking_overlay` and
+     `_signal_emitted` assert the SPEAKING render. New Rust unit
+     tests cover the dB threshold, the bin-name → uid parse, and a
+     real-pipeline `level`-message extraction.
 
-   b. **RFC 6464 `audio-level` header extension.** Best signal quality
-      eventually but requires fogWraith `Capabilities-Voice.md` to
-      ratify the extension and Janus to advertise it. Calendar-coupled
-      to upstream; don't block on this.
-
-   When either lands, flip `HX_VOICE_INDICATOR_SHIPS_SPEAKING` to 1 in
-   `src/voice_model.c` and update the matching expectations in
-   `tests/unit/test_voice_model.c::test_speaking_overlay` and
-   `_signal_emitted` (both annotate the flip point inline).
+   Path (b) — **RFC 6464 `audio-level` header extension** — remains
+   the better-quality eventual option but requires fogWraith
+   `Capabilities-Voice.md` to ratify the extension and Janus to
+   advertise it. Calendar-coupled to upstream; not pursued. The
+   `HX_VOICE_INDICATOR_SHIPS_SPEAKING` gate is kept as the one-line
+   revert switch should the `level` threshold prove too noisy in the
+   field.
 
 5. **Phase ∞**: video, group video, etc. Out of scope; would need
    its own capability bit and a new scoping doc.

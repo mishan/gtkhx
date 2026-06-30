@@ -38,26 +38,27 @@
 #include "voice_model.h"
 
 /* Whether to emit HX_VOICE_INDICATOR_SPEAKING from compute_indicator
- * based on the runtime's per-pad RTP-activity probe. See the long
- * comment on compute_indicator() for the full background:
+ * based on the runtime's speaking signal. Now ON: hxvoice-runtime
+ * ships client-side voice-activity detection — a GStreamer `level`
+ * element on each receive bin's decoded PCM tap measures per-window
+ * RMS, and the runtime thresholds it (see
+ * hxvoice-runtime::runtime::SPEAKING_RMS_THRESHOLD_DB) before
+ * driving SignalKind::SpeakerChanged → hx_voice_model_set_speaking.
  *
- *   - PCMU has no VAD, so RTP packets arrive at 50 pps continuously
- *     while a peer is unmuted regardless of whether they're actually
- *     making sound. Reporting "speaking" off RTP-arrival alone is
- *     misleading.
- *   - The plumbing stays end-to-end so the eventual VAD upgrade (via
- *     GStreamer `level` or RFC 6464 `audio-level`) is a one-line
- *     flip here.
+ * So the `speaking` flag now means "this peer's audio is actually
+ * above the speaking threshold", not the old "unmuted + pipeline
+ * alive" proxy, and rendering it as SPEAKING is honest.
  *
- * This macro is private to voice_model.c — flip to 1 when real
- * volume-graded speaking detection lands on the runtime side, then
- * update the matching expectations in
- * tests/unit/test_voice_model.c::test_speaking_overlay and
- * test_signal_emitted (both already annotate the flip point with
- * comments). The test does NOT define its own copy of this symbol;
- * it asserts on the externally-visible behaviour (which uid's
- * `get_indicator()` returns) that the macro controls. */
-#define HX_VOICE_INDICATOR_SHIPS_SPEAKING 0
+ * This macro is private to voice_model.c. It is kept (rather than
+ * deleted) as the single revert switch should the threshold prove
+ * too noisy in the field — setting it back to 0 restores the
+ * IN_VOICE fallthrough without touching the plumbing. The matching
+ * expectations live in tests/unit/test_voice_model.c::
+ * test_speaking_overlay and test_signal_emitted. The test does NOT
+ * define its own copy of this symbol; it asserts on the
+ * externally-visible behaviour (which uid's `get_indicator()`
+ * returns) that the macro controls. */
+#define HX_VOICE_INDICATOR_SHIPS_SPEAKING 1
 
 struct entry {
     gboolean in_voice;
@@ -97,34 +98,21 @@ compute_indicator (const struct entry *e)
     if (e->muted) {
         return HX_VOICE_INDICATOR_MUTED;
     }
-    /* SPEAKING is deliberately demoted to IN_VOICE in the current
-     * shipping configuration. Why: the runtime's per-pad RTP-
-     * activity probe (`per_user_rtp_buffers` in hxvoice-runtime)
-     * fires for every PCMU buffer that lands on a participant's
-     * receive bin, but PCMU + WebRTC + mulawenc has no VAD —
-     * 50 packets/sec arrive continuously while a peer is unmuted
-     * regardless of whether they're actually making sound. So
-     * "speaking" reported by the probe really just means "unmuted
-     * and pipeline alive", which is barely more than the mute
-     * bit alone tells us.
+    /* SPEAKING reflects real client-side voice-activity detection.
+     * hxvoice-runtime runs a GStreamer `level` element on each
+     * receive bin's decoded PCM (`per_user_voice_activity` in the
+     * runtime) and only reports a uid as speaking once its RMS
+     * clears the speaking threshold — so this is genuine "producing
+     * audible sound right now", not the old "unmuted + pipeline
+     * alive" proxy off raw RTP arrival (PCMU has no silence
+     * suppression, so packets flow continuously regardless of
+     * speech). The signal path is runtime level message →
+     * SignalKind::SpeakerChanged → hx_voice_model_set_speaking →
+     * entry->speaking. Full design in docs/voice-chat-plan.md §12.
      *
-     * The PLUMBING stays end-to-end (runtime probe → SignalKind::
-     * SpeakerChanged → hx_voice_model_set_speaking → entry->speaking)
-     * so the eventual VAD upgrade is a one-line revert of this
-     * arm. Two paths to real speaker detection are documented in
-     * docs/voice-chat-plan.md §12:
-     *
-     *   - Client-side VAD via the GStreamer `level` element on
-     *     each receive bin's decoded PCM tap. ~100-150 LOC,
-     *     no server changes, ships actual volume-based detection.
-     *
-     *   - RFC 6464 audio-level header extension. Best quality but
-     *     requires fogWraith Capabilities-Voice.md to ratify the
-     *     extension and Janus to advertise it; calendar-coupled
-     *     to upstream.
-     *
-     * Until one of those lands, falling through to IN_VOICE keeps
-     * the indicator honest. */
+     * Gated on HX_VOICE_INDICATOR_SHIPS_SPEAKING (now 1) so the
+     * render can be reverted to the IN_VOICE fallthrough in one line
+     * if the threshold ever proves too noisy. */
 #if HX_VOICE_INDICATOR_SHIPS_SPEAKING
     if (e->speaking) {
         return HX_VOICE_INDICATOR_SPEAKING;

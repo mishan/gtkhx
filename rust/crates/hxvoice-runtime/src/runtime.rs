@@ -397,8 +397,8 @@ pub type MuteChangedCallback =
 
 /// C-callback for `SignalKind::SpeakerChanged`. `uid` is the
 /// Hotline user id whose speaking state just flipped; `is_speaking`
-/// is 0 or 1. The runtime invokes this from the periodic per-pad
-/// RTP-activity evaluator (default cadence 200 ms) on the GLib
+/// is 0 or 1. The runtime invokes this from the periodic
+/// voice-activity evaluator (default cadence 200 ms) on the GLib
 /// main thread, so the C side does NOT need its own marshalling.
 pub type SpeakerChangedCallback = unsafe extern "C" fn(
     user_data: *mut core::ffi::c_void,
@@ -933,43 +933,47 @@ struct Inner {
     /// through JoinSent) — a fresh room is a fresh session for
     /// wedge purposes.
     has_been_connected_since_join: bool,
-    /// Per-user-id receive-leg RTP buffer counters. Allocated
-    /// lazily on `pad-added` for each new mid → user_id mapping;
-    /// the [`start_receive_bin`] probe captures a clone of the
-    /// `Arc` and writes to it from the GStreamer streaming
-    /// thread, while the speaker-activity evaluator
-    /// ([`speaker_tick`]) reads on the main thread. The
-    /// [`Mutex`] is held only briefly during allocation /
-    /// snapshot — the probe writes via the cloned `Arc` without
-    /// touching the map.
+    /// Per-user-id voice-activity counters. Each entry counts the
+    /// `level`-element RMS windows that cleared the speaking
+    /// threshold for that uid; [`handle_level_message`] does the
+    /// entry-or-insert + increment from the pipeline bus watch, and
+    /// the speaker-activity evaluator ([`speaker_tick`]) reads
+    /// deltas. Both run on the GLib main thread, so the [`Mutex`]
+    /// only ever guards same-thread access (it stays an
+    /// `Arc<Mutex<…>>` for symmetry with the streaming-thread
+    /// `rtp_buffers_received` counter and the test hooks; contention
+    /// is nil).
     ///
     /// Indexed by Hotline user id (16 bits, parsed from the SDP
-    /// `a=mid:user-{uid}` label). The mid `send` is excluded —
-    /// it carries the local-user send leg, which doesn't get a
-    /// receive bin and therefore can't contribute to per-pad RTP
-    /// counters.
+    /// `a=mid:user-{uid}` label via the receive bin's name). The
+    /// `send` mid is excluded — it's the local-user send leg, which
+    /// has no receive bin and posts no remote-side `level` messages.
+    ///
+    /// Driving this off the `level` element's RMS rather than RTP
+    /// packet arrival is the whole point of the VAD work: PCMU has
+    /// no silence suppression, so RTP flows at a constant ~50 pps
+    /// whether or not the remote is making sound. RMS thresholding
+    /// distinguishes actual speech (see [`SPEAKING_RMS_THRESHOLD_DB`]).
     ///
     /// Why `Mutex<HashMap>` rather than `DashMap`: this map
     /// changes at most a handful of times per session
     /// (new participant joins), so contention is non-existent
     /// and the std-only dependency surface is cheaper than
     /// adding `dashmap`.
-    per_user_rtp_buffers:
+    per_user_voice_activity:
         Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
-    /// Previous-tick snapshot of [`per_user_rtp_buffers`] —
+    /// Previous-tick snapshot of [`per_user_voice_activity`] —
     /// used by [`speaker_tick`] to compute deltas. A uid with a
     /// non-zero delta since the last tick is considered
     /// "speaking"; equality is "silent". Updated at end-of-tick.
     ///
     /// **Lifecycle.** Entries are added on every tick that
     /// observes a new uid in the live map. Neither this snapshot
-    /// nor `per_user_rtp_buffers` is pruned on receive-bin
+    /// nor `per_user_voice_activity` is pruned on receive-bin
     /// teardown — there's no code path that removes a uid once
-    /// it's been seen, and the receive-bin teardown holds its own
-    /// `Arc<AtomicU64>` clone (the streaming-thread probe closure)
-    /// so dropping the bin doesn't even decrement the strong-count
-    /// on the live map's entry. Both maps therefore grow
-    /// monotonically across the runtime's lifetime.
+    /// it's been seen. Both maps therefore grow monotonically
+    /// across the runtime's lifetime (and are cleared wholesale on
+    /// session teardown / rebuild).
     ///
     /// Memory cost: `n_distinct_uids` × (`u16` key + `u64` value +
     /// HashMap overhead) ≈ 10–40 bytes per uid ever seen.
@@ -978,7 +982,7 @@ struct Inner {
     /// natural hook is a `LeaveRequested` or `TearDown` dispatch
     /// arm that walks `inner.receive_bins.keys()` and prunes both
     /// maps for any uid no longer represented.
-    per_user_rtp_prev_snapshot: HashMap<u16, u64>,
+    per_user_activity_prev_snapshot: HashMap<u16, u64>,
     /// Cached "is this uid speaking right now?" state from the
     /// most recent [`speaker_tick`] pass. Drives the
     /// `SignalKind::SpeakerChanged` emit decision: the runtime
@@ -1101,8 +1105,8 @@ impl VoiceRuntime {
                 wedge_watchdog_armed_flag: false,
                 last_seen_peer_state: None,
                 has_been_connected_since_join: false,
-                per_user_rtp_buffers: bits.per_user_rtp_buffers,
-                per_user_rtp_prev_snapshot: HashMap::new(),
+                per_user_voice_activity: bits.per_user_voice_activity,
+                per_user_activity_prev_snapshot: HashMap::new(),
                 per_user_speaking: HashMap::new(),
                 speaker_timer_source: None,
             })),
@@ -1113,7 +1117,7 @@ impl VoiceRuntime {
         // and best-effort — see `arm_speaker_timer` for the
         // test-fallback semantics. Production: starts immediately,
         // emits SpeakerChanged signals every
-        // SPEAKER_EVAL_INTERVAL_MS as RTP activity flips.
+        // SPEAKER_EVAL_INTERVAL_MS as voice activity flips.
         runtime.arm_speaker_timer();
         Ok(runtime)
     }
@@ -1147,10 +1151,10 @@ impl VoiceRuntime {
                 wedge_watchdog_armed_flag: false,
                 last_seen_peer_state: None,
                 has_been_connected_since_join: false,
-                per_user_rtp_buffers: Arc::new(std::sync::Mutex::new(
+                per_user_voice_activity: Arc::new(std::sync::Mutex::new(
                     HashMap::new(),
                 )),
-                per_user_rtp_prev_snapshot: HashMap::new(),
+                per_user_activity_prev_snapshot: HashMap::new(),
                 per_user_speaking: HashMap::new(),
                 speaker_timer_source: None,
             })),
@@ -1172,17 +1176,18 @@ impl VoiceRuntime {
 /// (in `dispatch_inner`) consume the same shape.
 ///
 /// Each rebuild produces fresh `Arc<AtomicU64>` allocations for the
-/// two RTP-activity counters. Reusing the previous session's
+/// global `rtp_buffers_received` wedge-watchdog counter and the
+/// per-user voice-activity map. Reusing the previous session's
 /// counters would leak the wedge-watchdog snapshot delta from one
-/// session into the next, and the per-pad probes drop their
-/// streaming-thread closure handles when the receive bins drop
+/// session into the next, and the receive-bin RTP probe drops its
+/// streaming-thread closure handle when the receive bins drop
 /// during the Null transition.
 struct PipelineBits {
     pipeline: gstreamer::Pipeline,
     webrtcbin: gstreamer::Element,
     bus_watch_guard: Option<gstreamer::bus::BusWatchGuard>,
     rtp_buffers_received: Arc<AtomicU64>,
-    per_user_rtp_buffers:
+    per_user_voice_activity:
         Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
 }
 
@@ -1404,12 +1409,12 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
         // to the same counter — no risk of a "probe writes one
         // counter, watchdog reads a different one" mismatch.
         let rtp_buffers_received = Arc::new(AtomicU64::new(0));
-        // Per-user RTP-activity counters. Allocated UPFRONT so
-        // `connect_pad_added` and `Inner` agree on the live
-        // collection — the streaming-thread closure populates new
-        // uids on the fly; the main-thread evaluator reads
-        // snapshots on each tick.
-        let per_user_rtp_buffers = Arc::new(std::sync::Mutex::new(
+        // Per-user voice-activity counters. Allocated UPFRONT so
+        // `Inner` and the `level`-message bus handler share the live
+        // collection — `handle_level_message` populates new uids on
+        // the fly (main thread); the evaluator reads snapshots on
+        // each tick (main thread).
+        let per_user_voice_activity = Arc::new(std::sync::Mutex::new(
             HashMap::<u16, Arc<AtomicU64>>::new(),
         ));
         // Wire the on-ice-candidate signal BEFORE registering.
@@ -1424,11 +1429,32 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
             &pipeline,
             runtime_id,
             Arc::clone(&rtp_buffers_received),
-            Arc::clone(&per_user_rtp_buffers),
         );
         connect_connection_state_notify(&webrtcbin, runtime_id);
         connect_on_new_transceiver(&webrtcbin);
-        let bus_watch_guard = attach_pipeline_bus_watch(&pipeline);
+        let bus_watch_guard = attach_pipeline_bus_watch(&pipeline, runtime_id);
+        if bus_watch_guard.is_none() {
+            // No bus watch means three things silently stop working
+            // for this session: GStreamer error/warning triage
+            // logging, and — since the VAD landed — the `level`
+            // element's RMS messages that drive the per-uid speaker
+            // indicator (so SPEAKING never lights up). The only way
+            // `attach_pipeline_bus_watch` returns `None` in
+            // production is a failure to acquire the default
+            // `MainContext` (the cargo-parallel-test loser-of-the-
+            // race path is expected and harmless; production runs
+            // single-threaded on the main thread and shouldn't hit
+            // it). Make it loud so a field report is diagnosable
+            // rather than a mystery "indicator never moves".
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: could not attach the pipeline bus watch \
+                 (default MainContext unavailable). Voice will still \
+                 connect, but pipeline error/warning logging and the \
+                 `level`-based speaker indicator are disabled for this \
+                 session."
+            );
+        }
         // Transition the pipeline out of Null so webrtcbin's
         // internal peer connection becomes usable. While the
         // pipeline is in Null, webrtcbin reports its peer
@@ -1502,7 +1528,7 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
             webrtcbin,
             bus_watch_guard,
             rtp_buffers_received,
-            per_user_rtp_buffers,
+            per_user_voice_activity,
         })
     }
 
@@ -1573,13 +1599,13 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         // source releases cleanly. `bus_watch_guard` is held only
         // for its drop side effect anyway.
         inner.bus_watch_guard = None;
-        // Per-user RTP tracking is per-session — drop it so the
-        // next session starts from an empty speaker-evaluator
+        // Per-user voice-activity tracking is per-session — drop it
+        // so the next session starts from an empty speaker-evaluator
         // baseline.
-        if let Ok(mut map) = inner.per_user_rtp_buffers.lock() {
+        if let Ok(mut map) = inner.per_user_voice_activity.lock() {
             map.clear();
         }
-        inner.per_user_rtp_prev_snapshot.clear();
+        inner.per_user_activity_prev_snapshot.clear();
         inner.per_user_speaking.clear();
         // Pull the webrtcbin slot now so the late bus-message
         // handlers that read it during the Null transition see
@@ -1661,10 +1687,10 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         inner.bus_watch_guard = bits.bus_watch_guard;
         inner.rtp_buffers_received = bits.rtp_buffers_received;
         inner.wedge_watchdog_last_snapshot = 0;
-        inner.per_user_rtp_buffers = bits.per_user_rtp_buffers;
+        inner.per_user_voice_activity = bits.per_user_voice_activity;
     }
     // Re-arm the periodic speaker-activity evaluator against the
-    // fresh `per_user_rtp_buffers` allocation. The old timer was
+    // fresh `per_user_voice_activity` allocation. The old timer was
     // cancelled above; this restores production cadence so the
     // next session emits SpeakerChanged signals at the same
     // 200 ms interval.
@@ -1972,14 +1998,14 @@ impl VoiceRuntime {
         speaker_tick(self);
     }
 
-    /// Read the current counter value for a given uid, allocating
-    /// a fresh entry at zero if the uid hasn't been seen before.
-    /// Test-only hook used by the speaker_tick unit tests to
-    /// simulate streaming-thread activity without a real receive
-    /// bin.
+    /// Bump a uid's voice-activity counter, allocating a fresh
+    /// entry at zero if the uid hasn't been seen before. Test-only
+    /// hook used by the speaker_tick unit tests to simulate an
+    /// above-threshold `level` RMS window without a real receive
+    /// bin or pipeline (mirrors what [`handle_level_message`] does).
     #[doc(hidden)]
-    pub fn bump_per_user_rtp_for_test(&self, uid: u16) {
-        let map_arc = self.inner.borrow().per_user_rtp_buffers.clone();
+    pub fn bump_per_user_activity_for_test(&self, uid: u16) {
+        let map_arc = self.inner.borrow().per_user_voice_activity.clone();
         let mut guard = match map_arc.lock() {
             Ok(g) => g,
             Err(_) => return,
@@ -2300,37 +2326,17 @@ impl VoiceRuntime {
                 {
                     stop_receive_bin(&pipeline, &existing);
                 }
-                let (counter, per_user_counter) = {
+                let counter = {
                     let inner = self.inner.borrow();
-                    let global = Arc::clone(&inner.rtp_buffers_received);
-                    // Same uid-derivation as connect_pad_added's
-                    // synchronous path. Pre-allocates the per-user
-                    // counter so the StartReceivePipeline dispatch
-                    // arm and the streaming-thread probe share the
-                    // same Arc.
-                    let per_user = match hotline_proto::voice::parse_voice_mid_label(
-                        mid.as_bytes(),
-                    ) {
-                        Some(hotline_proto::voice::MidLabel::User(uid)) => {
-                            inner.per_user_rtp_buffers.lock().ok().map(
-                                |mut guard| {
-                                    Arc::clone(guard.entry(uid).or_insert_with(
-                                        || Arc::new(AtomicU64::new(0)),
-                                    ))
-                                },
-                            )
-                        }
-                        _ => None,
-                    };
-                    (global, per_user)
+                    Arc::clone(&inner.rtp_buffers_received)
                 };
-                if let Some(bin) = start_receive_bin(
-                    &pipeline,
-                    &pad,
-                    &mid,
-                    &counter,
-                    per_user_counter.as_ref(),
-                ) {
+                // The per-uid speaker-activity counter is driven by
+                // the `level` element's RMS bus messages
+                // (`handle_level_message`), not from here, so this
+                // path only needs the global wedge-watchdog counter.
+                if let Some(bin) =
+                    start_receive_bin(&pipeline, &pad, &mid, &counter)
+                {
                     self.inner
                         .borrow_mut()
                         .receive_bins
@@ -2817,9 +2823,6 @@ fn connect_pad_added(
     pipeline: &gstreamer::Pipeline,
     runtime_id: u64,
     rtp_buffers_received: Arc<AtomicU64>,
-    per_user_rtp_buffers: Arc<
-        std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>,
-    >,
 ) {
     let main_ctx = gstreamer::glib::MainContext::default();
     let pipeline = pipeline.clone();
@@ -2885,43 +2888,14 @@ fn connect_pad_added(
         // (recording the bin in receive_bins so LeaveRequested
         // can tear it down).
         //
-        // Per-user RTP counter: derive the uid from the mid via
-        // `parse_voice_mid_label` (the spec's a=mid:user-{uid}
-        // format) and pull-or-insert the Arc<AtomicU64> from the
-        // shared map. `MidLabel::Send` is the local-user send leg
-        // and has no remote-side audio, so it gets `None` and no
-        // counter is created.
-        let per_user_counter = match hotline_proto::voice::parse_voice_mid_label(
-            mid.as_bytes(),
-        ) {
-            Some(hotline_proto::voice::MidLabel::User(uid)) => {
-                match per_user_rtp_buffers.lock() {
-                    Ok(mut guard) => Some(Arc::clone(
-                        guard
-                            .entry(uid)
-                            .or_insert_with(|| Arc::new(AtomicU64::new(0))),
-                    )),
-                    Err(_) => {
-                        // Poisoned mutex — extremely unlikely given
-                        // we only ever hold this lock for the
-                        // entry-or-insert above and the snapshot
-                        // copy in speaker_tick. Skip the per-user
-                        // counter and let the receive bin proceed
-                        // without it; the global wedge-watchdog
-                        // counter still records this pad.
-                        None
-                    }
-                }
-            }
-            _ => None,
-        };
-        let recv_bin = start_receive_bin(
-            &pipeline,
-            pad,
-            &mid,
-            &rtp_buffers_received,
-            per_user_counter.as_ref(),
-        );
+        // The per-uid speaker-activity counter is no longer driven
+        // from here. It's fed by the `level` element's RMS bus
+        // messages (`handle_level_message`), which run on the main
+        // thread and own the `per_user_voice_activity` map directly,
+        // so `start_receive_bin` only needs the global wedge-watchdog
+        // counter on this path.
+        let recv_bin =
+            start_receive_bin(&pipeline, pad, &mid, &rtp_buffers_received);
         let pad = pad.clone();
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
@@ -3245,6 +3219,109 @@ fn map_peer_connection_state(
     }
 }
 
+/// RMS power (dB, relative to full scale) at or above which a
+/// receive leg is considered "actively speaking" for the user-list
+/// indicator.
+///
+/// The `level` element reports per-window RMS as a non-positive
+/// decibel value: 0 dB is full scale, `-inf` is digital silence,
+/// and normal speech on an open mic lands roughly in the -30 to
+/// -45 dB range with the noise floor below -55 dB. -50 dB sits in
+/// the gap — high enough to reject ambient hiss / line noise, low
+/// enough to catch quiet talkers. It's within the -45..-50 dB band
+/// the voice-chat plan (§12 step 4a) scoped, biased to the
+/// sensitive end so we don't drop soft speech. Tunable in one place
+/// if real-world rooms want it tighter.
+const SPEAKING_RMS_THRESHOLD_DB: f64 = -50.0;
+
+/// Name prefix every receive bin carries (`hxvoice-recv-<mid>`).
+/// Shared between [`start_receive_bin`], which builds the name, and
+/// [`uid_from_recv_bin_name`], which parses the uid back out of a
+/// `level` message's source element parent — so the two can't drift.
+const RECV_BIN_PREFIX: &str = "hxvoice-recv-";
+
+/// `true` when an RMS reading clears the speaking threshold. Pure
+/// so the threshold decision is unit-testable without a pipeline.
+/// `f64::NEG_INFINITY` (the `level` element's silence sentinel)
+/// compares below every finite threshold, so digital silence is
+/// correctly "not speaking".
+fn rms_db_indicates_speaking(db: f64) -> bool {
+    db >= SPEAKING_RMS_THRESHOLD_DB
+}
+
+/// Recover the Hotline user id from a receive bin's element name.
+///
+/// Receive bins are named `hxvoice-recv-<mid>` where `<mid>` is the
+/// SDP mid label (`user-<uid>` for a remote leg, `send` for the
+/// local send leg). Returns `Some(uid)` only for `user-<uid>`
+/// labels; the send leg and any unparseable name yield `None`.
+fn uid_from_recv_bin_name(name: &str) -> Option<u16> {
+    let mid = name.strip_prefix(RECV_BIN_PREFIX)?;
+    match hotline_proto::voice::parse_voice_mid_label(mid.as_bytes()) {
+        Some(hotline_proto::voice::MidLabel::User(uid)) => Some(uid),
+        _ => None,
+    }
+}
+
+/// Pull the loudest per-channel RMS (dB) out of a `level` element
+/// message structure. The `rms` field is a `glib::ValueArray` of
+/// one `f64` per channel; voice is mono so there's normally a
+/// single entry, but we take the max defensively in case a future
+/// pipeline carries stereo. Returns `None` if the field is absent
+/// or empty.
+fn level_message_max_rms_db(s: &gstreamer::StructureRef) -> Option<f64> {
+    let rms = s.get::<gstreamer::glib::ValueArray>("rms").ok()?;
+    let mut max: Option<f64> = None;
+    for v in rms.iter() {
+        if let Ok(db) = v.get::<f64>() {
+            max = Some(max.map_or(db, |m| m.max(db)));
+        }
+    }
+    max
+}
+
+/// Handle one `"level"` element bus message: map the posting
+/// element back to its receive bin's uid, threshold the RMS, and
+/// bump that uid's voice-activity counter when it clears the
+/// threshold. The periodic [`speaker_tick`] turns those bumps into
+/// `SignalKind::SpeakerChanged` flips with a ~one-tick hangover.
+///
+/// Runs on the main thread (the bus watch is `add_watch_local`), so
+/// it reaches the runtime via `with_main_thread_runtime` and mutates
+/// the activity map under its mutex directly. Below-threshold
+/// windows are simply not counted — a uid that goes quiet stops
+/// advancing and `speaker_tick` flips it back to not-speaking.
+fn handle_level_message(
+    runtime_id: u64,
+    src: Option<&gstreamer::Object>,
+    s: &gstreamer::StructureRef,
+) {
+    // The message source is the `level` element; its parent is the
+    // receive bin whose name encodes the uid.
+    let Some(uid) = src
+        .and_then(|o| o.parent())
+        .and_then(|bin| uid_from_recv_bin_name(bin.name().as_str()))
+    else {
+        return;
+    };
+    let Some(rms_db) = level_message_max_rms_db(s) else {
+        return;
+    };
+    if !rms_db_indicates_speaking(rms_db) {
+        return;
+    }
+    with_main_thread_runtime(runtime_id, |rt| {
+        let map_arc = rt.inner.borrow().per_user_voice_activity.clone();
+        let Ok(mut guard) = map_arc.lock() else {
+            return;
+        };
+        guard
+            .entry(uid)
+            .or_insert_with(|| Arc::new(AtomicU64::new(0)))
+            .fetch_add(1, Ordering::Relaxed);
+    });
+}
+
 /// Attach a main-loop bus watch to the pipeline so GStreamer
 /// errors and warnings surface in our logs with element context.
 /// Doesn't (yet) translate bus errors into state-machine events
@@ -3262,6 +3339,7 @@ fn map_peer_connection_state(
 /// context can't be acquired.
 fn attach_pipeline_bus_watch(
     pipeline: &gstreamer::Pipeline,
+    runtime_id: u64,
 ) -> Option<gstreamer::bus::BusWatchGuard> {
     let bus = pipeline.bus()?;
     // `add_watch_local` attaches a source to the default
@@ -3317,6 +3395,17 @@ fn attach_pipeline_bus_watch(
                         w.debug()
                     );
                 }
+                MessageView::Element(e) => {
+                    // The `level` element in each receive bin posts a
+                    // `"level"` element message per RMS window. Route
+                    // it to the per-uid voice-activity counter that
+                    // drives the speaker indicator.
+                    if let Some(s) = e.structure() {
+                        if s.name() == "level" {
+                            handle_level_message(runtime_id, e.src(), s);
+                        }
+                    }
+                }
                 _ => {}
             }
             gstreamer::glib::ControlFlow::Continue
@@ -3340,7 +3429,6 @@ fn start_receive_bin(
     src_pad: &gstreamer::Pad,
     mid: &str,
     rtp_buffers_received: &Arc<AtomicU64>,
-    per_user_counter: Option<&Arc<AtomicU64>>,
 ) -> Option<gstreamer::Bin> {
     // Diagnostic: probe webrtcbin's src_0 BEFORE we link the
     // depay bin to it. If this probe never fires while the
@@ -3368,7 +3456,7 @@ fn start_receive_bin(
             gstreamer::PadProbeReturn::Ok
         });
     }
-    let bin_name = format!("hxvoice-recv-{mid}");
+    let bin_name = format!("{RECV_BIN_PREFIX}{mid}");
     let output_device = crate::audio::output_device();
     let bin = match crate::audio::make_receive_bin(
         &bin_name,
@@ -3431,16 +3519,8 @@ fn start_receive_bin(
     // the link so we're observing the path the buffers
     // actually flow through.
     let counter = Arc::clone(rtp_buffers_received);
-    let per_user = per_user_counter.cloned();
     sink_pad.add_probe(gstreamer::PadProbeType::BUFFER, move |_pad, _info| {
         counter.fetch_add(1, Ordering::Relaxed);
-        // Per-user count when the mid carried a User(uid) label.
-        // Same relaxed-atomic-add cost as the global counter
-        // above; the speaker-activity evaluator polls these on
-        // the main thread.
-        if let Some(ref uc) = per_user {
-            uc.fetch_add(1, Ordering::Relaxed);
-        }
         gstreamer::PadProbeReturn::Ok
     });
     if bin.sync_state_with_parent().is_err() {
@@ -3738,15 +3818,17 @@ fn wedge_watchdog_tick(runtime: &VoiceRuntime) {
     });
 }
 
-/// Tick interval for the per-pad RTP-activity evaluator.
+/// Tick interval for the voice-activity evaluator.
 /// 200 ms is the same cadence the Phase 8 plan called out: short
 /// enough that the speaker indicator feels live (Discord's
 /// pulse-on-speak runs at ~100 ms, Zoom around 150 ms), long
 /// enough that the per-tick overhead — one HashMap snapshot, one
 /// HashMap diff, at most a couple of signal callbacks — is
-/// negligible. Sub-100 ms would also race with the natural gaps
-/// between PCMU 20 ms RTP packets, causing the "speaking" state
-/// to flicker in/out within a single utterance.
+/// negligible. It's also a clean multiple of the `level` element's
+/// 100 ms RMS window ([`crate::audio::LEVEL_MESSAGE_INTERVAL_NS`]),
+/// so each tick sees at least one (usually two) fresh RMS messages
+/// per uid and the resulting one-tick hangover smooths over the
+/// short gaps between words within a single utterance.
 const SPEAKER_EVAL_INTERVAL_MS: u32 = 200;
 
 /// Arm the periodic speaker-activity evaluator. Idempotent.
@@ -3811,23 +3893,31 @@ fn cancel_speaker_timer(runtime: &VoiceRuntime) {
     }
 }
 
-/// Per-tick evaluator: snapshot `per_user_rtp_buffers`, diff
+/// Per-tick evaluator: snapshot `per_user_voice_activity`, diff
 /// against the prev snapshot, transition each uid to speaking /
 /// silent, emit `SignalKind::SpeakerChanged` for any uid whose
 /// state flipped.
 ///
+/// A uid whose counter advanced since the previous tick had at
+/// least one above-threshold RMS window in this interval, so it
+/// reads as speaking; an unchanged counter reads as silent. The
+/// counter is bumped by [`handle_level_message`] off the `level`
+/// element's RMS, so this is true voice activity, not mere RTP
+/// arrival.
+///
 /// Why a separate `prev` map rather than just clearing the live
-/// counters: clearing the live counters would race with the
-/// streaming-thread probe (the probe might bump the counter
-/// between our read and our write, losing that bump). Comparing
-/// against a frozen snapshot is race-free — relaxed loads only.
+/// counters: both the writer ([`handle_level_message`]) and this
+/// reader run on the main thread, so a lost bump isn't the worry —
+/// keeping a frozen prev snapshot avoids mutating the shared map
+/// here at all, so the brief lock is read-only and the diff math
+/// stays trivially correct.
 fn speaker_tick(runtime: &VoiceRuntime) {
     // Snapshot the live counter values + collect the uid list
     // under the mutex, then drop the lock before the diff /
     // emit pass. This keeps the lock window microscopic and
     // avoids holding it across the `backend.borrow_mut()` below.
     let snapshot: Vec<(u16, u64)> = {
-        let map_arc = runtime.inner.borrow().per_user_rtp_buffers.clone();
+        let map_arc = runtime.inner.borrow().per_user_voice_activity.clone();
         let Ok(guard) = map_arc.lock() else {
             return;
         };
@@ -3845,7 +3935,7 @@ fn speaker_tick(runtime: &VoiceRuntime) {
         let mut inner = runtime.inner.borrow_mut();
         for (uid, current) in &snapshot {
             let prev = inner
-                .per_user_rtp_prev_snapshot
+                .per_user_activity_prev_snapshot
                 .get(uid)
                 .copied()
                 .unwrap_or(0);
@@ -3856,7 +3946,7 @@ fn speaker_tick(runtime: &VoiceRuntime) {
                 flips.push((*uid, speaking));
                 inner.per_user_speaking.insert(*uid, speaking);
             }
-            inner.per_user_rtp_prev_snapshot.insert(*uid, *current);
+            inner.per_user_activity_prev_snapshot.insert(*uid, *current);
         }
     }
 
@@ -4216,7 +4306,7 @@ mod tests {
     // The evaluator runs `speaker_tick` periodically (200ms in
     // production via glib::timeout_add_local); these tests drive
     // it manually via `speaker_tick_for_test`, mutate the per-user
-    // counters via `bump_per_user_rtp_for_test`, and assert on the
+    // counters via `bump_per_user_activity_for_test`, and assert on the
     // SpeakerChanged signal emissions captured by RecordingBackend.
 
     fn speaker_emits(backend: &Rc<RefCell<RecordingBackend>>) -> Vec<(u16, bool)> {
@@ -4245,7 +4335,7 @@ mod tests {
     fn speaker_tick_after_activity_emits_speaking_true() {
         let (runtime, backend) = rec();
         // Streaming-thread analogue: probe bumped uid 7's counter.
-        runtime.bump_per_user_rtp_for_test(7);
+        runtime.bump_per_user_activity_for_test(7);
         runtime.speaker_tick_for_test();
         let emits = speaker_emits(&backend);
         assert_eq!(emits, vec![(7, true)]);
@@ -4254,7 +4344,7 @@ mod tests {
     #[test]
     fn speaker_tick_steady_state_does_not_re_emit() {
         let (runtime, backend) = rec();
-        runtime.bump_per_user_rtp_for_test(7);
+        runtime.bump_per_user_activity_for_test(7);
         runtime.speaker_tick_for_test();
         // Activity stops — counter doesn't advance between ticks.
         runtime.speaker_tick_for_test();
@@ -4269,12 +4359,12 @@ mod tests {
     fn speaker_tick_resume_emits_speaking_true_again() {
         let (runtime, backend) = rec();
         // Tick 1: activity → speaking.
-        runtime.bump_per_user_rtp_for_test(7);
+        runtime.bump_per_user_activity_for_test(7);
         runtime.speaker_tick_for_test();
         // Tick 2: no new activity → silent.
         runtime.speaker_tick_for_test();
         // Tick 3: activity resumed → speaking again.
-        runtime.bump_per_user_rtp_for_test(7);
+        runtime.bump_per_user_activity_for_test(7);
         runtime.speaker_tick_for_test();
         let emits = speaker_emits(&backend);
         assert_eq!(emits, vec![(7, true), (7, false), (7, true)]);
@@ -4283,11 +4373,11 @@ mod tests {
     #[test]
     fn speaker_tick_handles_multiple_uids_independently() {
         let (runtime, backend) = rec();
-        runtime.bump_per_user_rtp_for_test(3);
-        runtime.bump_per_user_rtp_for_test(5);
+        runtime.bump_per_user_activity_for_test(3);
+        runtime.bump_per_user_activity_for_test(5);
         runtime.speaker_tick_for_test();
         // Only uid 5 stays active across the second tick.
-        runtime.bump_per_user_rtp_for_test(5);
+        runtime.bump_per_user_activity_for_test(5);
         runtime.speaker_tick_for_test();
         let emits = speaker_emits(&backend);
         // Order within a single tick is unspecified (HashMap
@@ -4296,6 +4386,111 @@ mod tests {
         assert!(emits.contains(&(5, true)));
         assert!(emits.contains(&(3, false)));
         assert!(!emits.contains(&(5, false)));
+    }
+
+    // ---- Client-side VAD (level element) ----
+
+    #[test]
+    fn rms_db_threshold_is_inclusive_and_rejects_silence() {
+        // At or above the threshold reads as speaking; the boundary
+        // is inclusive.
+        assert!(rms_db_indicates_speaking(0.0));
+        assert!(rms_db_indicates_speaking(-4.9));
+        assert!(rms_db_indicates_speaking(SPEAKING_RMS_THRESHOLD_DB));
+        // Below the threshold is silent, including the `level`
+        // element's `-inf` digital-silence sentinel.
+        assert!(!rms_db_indicates_speaking(SPEAKING_RMS_THRESHOLD_DB - 0.1));
+        assert!(!rms_db_indicates_speaking(-60.0));
+        assert!(!rms_db_indicates_speaking(f64::NEG_INFINITY));
+    }
+
+    #[test]
+    fn uid_recovered_from_receive_bin_name() {
+        assert_eq!(uid_from_recv_bin_name("hxvoice-recv-user-5"), Some(5));
+        assert_eq!(
+            uid_from_recv_bin_name("hxvoice-recv-user-65535"),
+            Some(65535)
+        );
+        // The local send leg carries no remote uid.
+        assert_eq!(uid_from_recv_bin_name("hxvoice-recv-send"), None);
+        // Names without a parseable user-<uid> mid don't resolve.
+        assert_eq!(uid_from_recv_bin_name("hxvoice-recv-bogus"), None);
+        assert_eq!(uid_from_recv_bin_name("some-other-element"), None);
+        // The name `start_receive_bin` actually builds must round-trip
+        // back to the uid — pins the prefix shared between the two.
+        let name = format!("{RECV_BIN_PREFIX}user-9");
+        assert_eq!(uid_from_recv_bin_name(&name), Some(9));
+    }
+
+    /// End-to-end against the host's real `level` element: build a
+    /// loud-sine pipeline, capture a `"level"` bus message, and prove
+    /// `level_message_max_rms_db` pulls a finite RMS out of the
+    /// `GValueArray` that reads as speaking. This is the host-side
+    /// guard on the GValueArray field-type assumption — a silent
+    /// regression in gstreamer-rs's representation of `rms` would
+    /// turn the extraction into a permanent `None` (speaker indicator
+    /// stuck off) that the pure-logic tests above can't catch.
+    #[test]
+    fn level_message_rms_extracted_from_real_pipeline() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let pipeline = gstreamer::Pipeline::new();
+        let src = gstreamer::ElementFactory::make("audiotestsrc")
+            .property("is-live", false)
+            .build()
+            .expect("audiotestsrc plugin available");
+        let conv = gstreamer::ElementFactory::make("audioconvert")
+            .build()
+            .expect("audioconvert plugin available");
+        let caps = crate::audio::make_pcm8khz_caps_filter()
+            .expect("capsfilter element");
+        let level =
+            crate::audio::make_level_meter().expect("level plugin available");
+        // Shorter interval than production so a message lands fast.
+        level.set_property("interval", 50_000_000u64);
+        let sink = gstreamer::ElementFactory::make("fakesink")
+            .property("sync", false)
+            .build()
+            .expect("fakesink plugin available");
+        pipeline
+            .add_many([&src, &conv, &caps, &level, &sink])
+            .expect("add elements");
+        gstreamer::Element::link_many([&src, &conv, &caps, &level, &sink])
+            .expect("link elements");
+        pipeline
+            .set_state(gstreamer::State::Playing)
+            .expect("pipeline reaches Playing");
+
+        // Poll the bus synchronously — no main loop needed, so this
+        // is robust under cargo's parallel test runner where the
+        // default MainContext may be owned by another thread.
+        let bus = pipeline.bus().expect("pipeline has a bus");
+        let deadline =
+            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let mut got: Option<f64> = None;
+        while std::time::Instant::now() < deadline {
+            let Some(msg) = bus.timed_pop_filtered(
+                Some(gstreamer::ClockTime::from_mseconds(200)),
+                &[gstreamer::MessageType::Element],
+            ) else {
+                continue;
+            };
+            if let gstreamer::MessageView::Element(e) = msg.view() {
+                if let Some(s) = e.structure() {
+                    if s.name() == "level" {
+                        got = level_message_max_rms_db(s);
+                        break;
+                    }
+                }
+            }
+        }
+        let _ = pipeline.set_state(gstreamer::State::Null);
+
+        let db = got.expect("a 'level' message carrying rms should arrive");
+        assert!(db.is_finite(), "loud sine RMS should be finite, got {db}");
+        assert!(
+            rms_db_indicates_speaking(db),
+            "a full-volume sine should read as speaking, got {db} dB"
+        );
     }
 
     #[test]
