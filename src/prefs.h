@@ -169,6 +169,14 @@ struct gtkhx_prefs {
 	 * the *only* theming knob in gtkhxrc. See gtkhx_theme.{c,h},
 	 * docs/theming-scoping.md, docs/theming-file-format.md. */
     char *theme_name;
+
+    /* GIF-icons extension (Phase 10.D): animate GIF avatars in the
+	 * user list. Default ON. When OFF, avatars render as the still
+	 * first frame. Per-user pause (click an animated avatar, or the
+	 * right-click menu) is a separate, transient override. Persisted as
+	 * CFG_ANIMATE_AVATARS. Plain unsigned char so cfgvars[] can take
+	 * its address. */
+    unsigned char animate_avatars;
 };
 
 extern struct gtkhx_prefs gtkhx_prefs;

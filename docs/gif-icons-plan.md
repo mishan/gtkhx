@@ -34,6 +34,11 @@ avatar at any time; the choice is persisted and sent automatically once
 you're on a server that supports the extension. See the 10.C sub-phase
 below.
 
+**Phase 10.D (animation + pause) shipped.** Animated GIF avatars play in
+the user list, gated by a global "Animate GIF avatars" pref plus a
+per-user pause you trigger by clicking an animated avatar or via the
+right-click menu. See the 10.D sub-phase below.
+
 A harness gap surfaced and was fixed along the way: Janus delivers the
 session uid in the LOGIN TASK reply (like NAME/CAPABILITIES), not in
 SELFINFO, so `integration_open_login_or_skip` left `htlc->uid == 0` on Janus.
@@ -325,9 +330,18 @@ chat-history early phases, which predated a public implementation).
   oversize GIFs to GIF would need ImageMagick; for now an oversize file is
   rejected with an actionable message. Revisit on demand (ImageMagick is
   already a dependency).
-- **10.D — Animation + pause.** Animated rendering off the frame clock for
-  visible rows, plus the "Animate avatar icons" pref (still fallback when
-  off). Honour reduce-motion if free.
+- **10.D — Animation + pause.** ✅ Shipped. Animated GIFs are decoded to all
+  their frames (`gif_avatar.c`; decode caps raised to 256 frames / 30 s) and
+  played by a single shared frame timer (`gtkhx_avatar_get` returns the
+  current frame, so the cell needs no animation state). Three controls:
+  the global **"Animate GIF avatars"** pref (`CFG_ANIMATE_AVATARS`, default
+  on; off → still first frame) on Settings → Identity; a **per-user pause**
+  (`gtkhx_avatar_set_paused`) you trigger by **clicking an animated avatar**
+  in the user list (a cell `GtkGestureClick` that claims the press only on
+  the icon column of an animated avatar, so selection still works elsewhere);
+  and a **"Pause/Resume Animation"** right-click menu item (shown only for
+  animated avatars) as the discoverable equivalent. The timer only runs while
+  ≥1 animated, unpaused avatar exists and the pref is on.
 - **10.E — Docs.** Update this doc + ROADMAP; README/man-page mention in the
   next release-notes pass.
 
