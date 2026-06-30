@@ -230,6 +230,7 @@ mod tests {
     /// fixup deep-copies the right fields and leaves NULLs NULL.
     unsafe fn make_meta() -> *mut HxTrackerV3Meta {
         let m = g_malloc0(size_of::<HxTrackerV3Meta>()) as *mut HxTrackerV3Meta;
+        assert!(!m.is_null(), "g_malloc0 returned NULL");
         *str_field(m, 0) = g_strdup(c"mhxd 2.0".as_ptr()); // server_software
         *str_field(m, 152) = g_strdup(c"chacha20".as_ptr()); // hope_ciphers
         m
@@ -239,7 +240,9 @@ mod tests {
     fn meta_copy_deep_copies_only_string_fields() {
         unsafe {
             let a = make_meta();
+            assert!(!a.is_null());
             let b = hx_tracker_v3_meta_copy(a);
+            assert!(!b.is_null());
             assert_ne!(a, b);
             // server_software + hope_ciphers deep-copied (distinct ptr, same text).
             assert_ne!(*str_field(a, 0), *str_field(b, 0));
@@ -255,6 +258,7 @@ mod tests {
 
     unsafe fn make_server(with_meta: bool, with_tlv: bool) -> *mut HxTrackerServer {
         let e = g_malloc0(size_of::<HxTrackerServer>()) as *mut HxTrackerServer;
+        assert!(!e.is_null(), "g_malloc0 returned NULL");
         (*e).addr_type = 0x04;
         (*e).address = g_strdup(c"203.0.113.42".as_ptr());
         (*e).port = 5500;
@@ -287,7 +291,9 @@ mod tests {
     fn server_copy_deep_copies_strings_bytes_and_meta() {
         unsafe {
             let a = make_server(true, true);
+            assert!(!a.is_null());
             let b = hx_tracker_server_copy(a);
+            assert!(!b.is_null());
             assert_ne!(a, b);
             assert_eq!((*b).addr_type, 0x04);
             assert_eq!((*b).port, 5500);
@@ -316,8 +322,10 @@ mod tests {
         unsafe {
             // No meta, no tlv, and a NULL address → "" (never NULL).
             let e = g_malloc0(size_of::<HxTrackerServer>()) as *mut HxTrackerServer;
+            assert!(!e.is_null());
             (*e).addr_type = 0x48;
             let b = hx_tracker_server_copy(e);
+            assert!(!b.is_null());
             assert!(!(*b).address.is_null());
             assert_eq!(cstr((*b).address), "");
             assert_eq!(cstr((*b).name), "");
@@ -343,7 +351,9 @@ mod tests {
         unsafe {
             let t = hx_tracker_server_get_type();
             let a = make_server(true, false);
+            assert!(!a.is_null());
             let b = glib::gobject_ffi::g_boxed_copy(t, a as *mut c_void) as *mut HxTrackerServer;
+            assert!(!b.is_null());
             assert_ne!(a, b);
             assert_eq!(cstr((*b).name), "Test Server");
             glib::gobject_ffi::g_boxed_free(t, b as *mut c_void);

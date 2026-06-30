@@ -107,6 +107,7 @@ mod tests {
     /// strings), so copy/free exercise the real allocation path.
     unsafe fn make(uid: u16, name: &str, body: &str, is_self: bool) -> *mut HxMsgEvent {
         let e = g_malloc0(size_of::<HxMsgEvent>()) as *mut HxMsgEvent;
+        assert!(!e.is_null(), "g_malloc0 returned NULL");
         (*e).uid = uid;
         (*e).is_broadcast = (uid == 0) as i32;
         (*e).is_self = is_self as i32;
@@ -135,6 +136,7 @@ mod tests {
     fn copy_is_a_deep_copy() {
         unsafe {
             let a = make(42, "alice", "hello world", true);
+            assert!(!a.is_null());
             let b = hx_msg_event_copy(a);
             assert!(!b.is_null());
             assert_ne!(a, b);
@@ -164,7 +166,9 @@ mod tests {
         unsafe {
             let t = hx_msg_event_get_type();
             let a = make(7, "bob", "hi", false);
+            assert!(!a.is_null());
             let b = glib::gobject_ffi::g_boxed_copy(t, a as *mut c_void) as *mut HxMsgEvent;
+            assert!(!b.is_null());
             assert_ne!(a, b);
             assert_eq!(cstr((*b).name, (*b).name_len), "bob");
             glib::gobject_ffi::g_boxed_free(t, b as *mut c_void);
