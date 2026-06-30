@@ -19,10 +19,11 @@
  *      after every such frame to refresh the {in_voice, muted}
  *      bits per uid.
  *
- *   2. The hxvoice-runtime per-pad RTP-activity evaluator. Fires
- *      a SignalCallbacks::speaker_changed callback per uid when
- *      its talking state flips; the C handler in voice_panel.c
- *      calls hx_voice_model_set_speaking.
+ *   2. The hxvoice-runtime voice-activity evaluator (a GStreamer
+ *      `level` RMS detector on each receive bin). Fires a
+ *      SignalCallbacks::speaker_changed callback per uid when its
+ *      talking state flips; the C handler in voice_panel.c calls
+ *      hx_voice_model_set_speaking.
  *
  *   3. Disconnect / VoiceRuntime teardown clears the model.
  *
@@ -71,15 +72,16 @@ G_DECLARE_FINAL_TYPE (HxVoiceModel, hx_voice_model, HX, VOICE_MODEL, GObject)
  *   IN_VOICE   — uid is in voice chat, not currently speaking,
  *                not muted. Dim speaker glyph.
  *   SPEAKING   — uid is in voice chat AND actively speaking
- *                (the runtime's per-pad RTP probe observed
- *                buffers in the last ~200 ms tick). Highlighted
- *                speaker glyph.
+ *                (the runtime's GStreamer `level` voice-activity
+ *                detector saw this peer's RMS clear the speaking
+ *                threshold within the last ~200 ms tick).
+ *                Highlighted speaker glyph.
  *   MUTED      — uid is in voice chat AND server-flagged as
  *                muted. Microphone-slash glyph. Overrides
  *                IN_VOICE/SPEAKING for the same uid because a
  *                muted participant can't be producing audio
- *                from the listener's perspective even if the
- *                RTP probe spuriously trips.
+ *                from the listener's perspective even if a
+ *                residual RMS reading spuriously trips.
  *
  * Match the enum in client code via `switch` (it's exhaustive).
  *

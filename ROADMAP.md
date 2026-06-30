@@ -298,12 +298,12 @@ Sub-phases — all shipped (full detail in `docs/voice-chat-plan.md`):
 - **8.D** — UI: chat-tab toolbar + signal bridge + bridge backend.
 - **8.E** — Settings device pickers.
 - **8.F** — Tier 3 integration matrix vs Janus.
-- **8.G** — Per-uid voice indicator column in the user list. In-voice + muted ship; "actively speaking" plumbing is in place but demoted to IN_VOICE pending real VAD (GStreamer `level` or RFC 6464). See voice-chat-plan §12 step 4.
+- **8.G** — Per-uid voice indicator column in the user list. In-voice + muted + "actively speaking" all ship; speaking is driven by real client-side VAD (a GStreamer `level` RMS detector on each receive bin, `claude/voice-vad-level`). See voice-chat-plan §12 step 4.
 
 Phase 8 follow-ups (small):
 
 - "Start muted" toggle, PTT keybind capture, "Auto-join voice when joining a chat room" toggle in `settings_page_voice()`.
-- Real volume-graded speaker detection (the §12 step 4 flip).
+- ✅ Real volume-graded speaker detection — shipped via client-side VAD (GStreamer `level`, `claude/voice-vad-level`); `HX_VOICE_INDICATOR_SHIPS_SPEAKING` is now on.
 - Flatpak mic-capture permission — partially shipped on `claude/flatpak-pipewire-mic`: kept `--socket=pulseaudio` and added `--filesystem=xdg-run/pipewire-0` for native PipeWire access. The dedicated Audio portal (would give a per-app permission prompt) is still upstream-discussion-only.
 
 ---

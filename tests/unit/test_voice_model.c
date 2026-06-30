@@ -18,7 +18,7 @@
  *   empty                — fresh model: every uid reads NONE.
  *   ingest_basic         — single participant, not muted: IN_VOICE.
  *   ingest_muted         — mute bit set: MUTED.
- *   speaking_overlay     — RTP probe flips IN_VOICE → SPEAKING and
+ *   speaking_overlay     — VAD reading flips IN_VOICE → SPEAKING and
  *                          back; MUTED dominates over SPEAKING.
  *   leavers_cleared      — uid that disappears from a fresh blob
  *                          drops to NONE.
@@ -167,23 +167,21 @@ test_ingest_muted (void)
 static void
 test_speaking_overlay (void)
 {
-    /* Until real VAD ships (see voice_model.c::
-     * HX_VOICE_INDICATOR_SHIPS_SPEAKING), set_speaking is honored
-     * internally but compute_indicator demotes SPEAKING → IN_VOICE
-     * at render time. The MUTED-beats-SPEAKING precedence still
-     * holds end-to-end because that path runs before the demotion. */
+    /* With real VAD shipping (voice_model.c::
+     * HX_VOICE_INDICATOR_SHIPS_SPEAKING == 1), compute_indicator
+     * renders the speaking flag as SPEAKING. MUTED still dominates
+     * because that precedence runs before the speaking arm. */
     HxVoiceModel *m = hx_voice_model_new ();
     part_entry ents[] = { { 13, 0x0000 } };
     GByteArray *b = make_blob (ents, G_N_ELEMENTS (ents));
     hx_voice_model_ingest_participants (m, b->data, b->len);
 
-    /* Speaking flip — model accepts the input, indicator stays
-     * IN_VOICE because of the demotion. Flip
-     * HX_VOICE_INDICATOR_SHIPS_SPEAKING in voice_model.c when VAD
-     * ships and update this assertion to expect SPEAKING. */
+    /* Speaking flip — an above-threshold VAD reading (the runtime's
+     * level-element RMS) sets speaking, and the indicator becomes
+     * SPEAKING. */
     hx_voice_model_set_speaking (m, 13, TRUE);
     g_assert_cmpuint (hx_voice_model_get_indicator (m, 13), ==,
-                      HX_VOICE_INDICATOR_IN_VOICE);
+                      HX_VOICE_INDICATOR_SPEAKING);
 
     hx_voice_model_set_speaking (m, 13, FALSE);
     g_assert_cmpuint (hx_voice_model_get_indicator (m, 13), ==,
@@ -281,16 +279,13 @@ test_signal_emitted (void)
     hx_voice_model_ingest_participants (m, b1->data, b1->len);
     g_assert_cmpuint (r->records->len, ==, prev_len);
 
-    /* Speaking flip: model's last_indicator stays IN_VOICE because
-     * compute_indicator demotes SPEAKING in the current shipping
-     * configuration. The signal therefore does NOT fire — no
-     * visible state change, no emit. Flip the assertion when VAD
-     * ships and the demotion is reverted (see voice_model.c::
-     * HX_VOICE_INDICATOR_SHIPS_SPEAKING). */
+    /* Speaking flip: with VAD shipping, the computed indicator moves
+     * IN_VOICE → SPEAKING, a visible change, so the signal fires
+     * exactly once with the new SPEAKING value. */
     guint speak_prev_len = r->records->len;
     hx_voice_model_set_speaking (m, 13, TRUE);
-    g_assert_cmpuint (r->records->len, ==, speak_prev_len);
-    g_assert_false (recorder_saw (r, 13, HX_VOICE_INDICATOR_SPEAKING));
+    g_assert_cmpuint (r->records->len, ==, speak_prev_len + 1);
+    g_assert_true (recorder_saw (r, 13, HX_VOICE_INDICATOR_SPEAKING));
 
     /* Leaver sweep: emit (13, NONE) when the next blob omits us. */
     hx_voice_model_ingest_participants (m, NULL, 0);

@@ -262,6 +262,44 @@ pub fn make_mulaw_decoder() -> Option<gst::Element> {
     gst::ElementFactory::make("mulawdec").build().ok()
 }
 
+/// Interval (nanoseconds) between `level` element bus messages.
+///
+/// 100 ms is the `level` element's own default; we set it
+/// explicitly so the voice-activity-detection cadence is documented
+/// at the source rather than inherited silently. At PCMU's 8 kHz
+/// that's an 800-sample RMS window per message — long enough to be
+/// stable against a single loud sample, short enough that the
+/// 200 ms `speaker_tick` evaluator always sees at least one fresh
+/// message per window. See `runtime.rs::handle_level_message`.
+pub const LEVEL_MESSAGE_INTERVAL_NS: u64 = 100_000_000;
+
+/// Build a `level` element configured to post RMS messages on the
+/// pipeline bus for client-side voice-activity detection.
+///
+/// The `level` element measures per-channel RMS / peak power over
+/// each [`LEVEL_MESSAGE_INTERVAL_NS`] window and posts it as a
+/// `"level"` element message on the pipeline bus. The runtime's bus
+/// watch (`runtime.rs::handle_level_message`) reads the RMS, applies
+/// a dB threshold, and drives the per-uid speaker indicator off
+/// actual loudness instead of mere RTP-packet arrival (PCMU has no
+/// silence suppression, so packets flow continuously whether or not
+/// the remote is making sound — see the long comment on
+/// `voice_model.c::compute_indicator`).
+///
+/// `level` ships in `gst-plugins-good`, the same package as the
+/// `rtppcmudepay` / `mulawdec` elements the receive bin requires, so
+/// it's normally present. Returns `None` if the factory call fails;
+/// [`make_receive_bin`] treats that as "no VAD" and builds the
+/// receive bin without it rather than dropping audio.
+pub fn make_level_meter() -> Option<gst::Element> {
+    let level = gst::ElementFactory::make("level").build().ok()?;
+    // Post a message per interval (the default, set explicitly for
+    // clarity) and pin the interval to our documented cadence.
+    level.set_property("post-messages", true);
+    level.set_property("interval", LEVEL_MESSAGE_INTERVAL_NS);
+    Some(level)
+}
+
 /// Build a caps filter that pins audio to 8 kHz mono 16-bit signed
 /// linear PCM — the codec input PCMU expects. Inserted between the
 /// resampler and the encoder in the eventual voice pipeline so
@@ -284,11 +322,12 @@ pub fn make_pcm8khz_caps_filter() -> Option<gst::Element> {
 
 /// Build a receive-leg `gst::Bin` for one inbound voice track.
 ///
-/// The shape mirrors the fogWraith voice spec's mandated codec:
+/// The shape mirrors the fogWraith voice spec's mandated codec, with
+/// an optional `level` meter tapped in for voice-activity detection:
 ///
 /// ```text
 /// (ghost sink) -> rtppcmudepay -> mulawdec -> audioconvert
-///              -> audioresample -> autoaudiosink
+///              -> [level] -> audioresample -> autoaudiosink
 /// ```
 ///
 /// The ghost pad is exposed as the bin's `"sink"` pad, ready for
@@ -298,12 +337,19 @@ pub fn make_pcm8khz_caps_filter() -> Option<gst::Element> {
 /// / ALSA, depending on what's installed); the eventual settings
 /// UI (Phase 8.E) will swap that for the user-picked device.
 ///
-/// Returns `None` if any factory call fails (typically a missing
-/// runtime plugin — `gst-plugins-good` ships `rtppcmudepay`,
-/// `mulawdec`, `autoaudiosink`, and the audio-conversion elements
-/// are in `gst-plugins-base`). Caller should log and skip the
-/// receive leg; the session keeps running, the user just doesn't
-/// hear that one remote.
+/// **VAD is optional.** The `level` element drives the per-uid
+/// speaker indicator, but it is *not* required for audio. If the
+/// `level` plugin is unavailable, the bin is built without it: voice
+/// still works, the speaker indicator just never lights up. Only the
+/// audio-path elements (`rtppcmudepay` / `mulawdec` / `audioconvert`
+/// / `audioresample` / the sink) are load-bearing.
+///
+/// Returns `None` only if one of those load-bearing factory calls
+/// fails (a missing runtime plugin — `gst-plugins-good` ships
+/// `rtppcmudepay` / `mulawdec` / `autoaudiosink`, and the
+/// audio-conversion elements are in `gst-plugins-base`). Caller
+/// should log and skip the receive leg; the session keeps running,
+/// the user just doesn't hear that one remote.
 ///
 /// `name` becomes the bin's element name so pipeline introspection
 /// can tell receive legs apart — convention is `"hxvoice-recv-<mid>"`.
@@ -320,8 +366,33 @@ pub fn make_receive_bin(
     // None falls back to autoaudiosink; an explicit name resolves
     // via DeviceMonitor against the `Audio/Sink` class.
     let sink = make_sink(device_name)?;
+    // Voice-activity meter, tapped on the decoded PCM after
+    // audioconvert (normalised raw format) and before audioresample.
+    // OPTIONAL: if the `level` plugin isn't installed we drop it from
+    // the chain — VAD-driven speaker indicators go dark but audio is
+    // unaffected. `level` ships in gst-plugins-good alongside the
+    // codec elements above, so the `None` branch is a belt-and-
+    // suspenders fallback for an unusual partial install, not an
+    // expected path.
+    let level = make_level_meter();
+    if level.is_none() {
+        gst::warning!(
+            gst::CAT_RUST,
+            "hxvoice: `level` element unavailable — voice-activity \
+             speaker indicators are disabled (audio is unaffected). \
+             Install gst-plugins-good to enable VAD."
+        );
+    }
     bin.add_many([&depay, &dec, &conv, &res, &sink]).ok()?;
-    gst::Element::link_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+    if let Some(ref level) = level {
+        bin.add(level).ok()?;
+        // depay -> dec -> conv -> level -> res -> sink
+        gst::Element::link_many([&depay, &dec, &conv, level, &res, &sink])
+            .ok()?;
+    } else {
+        // depay -> dec -> conv -> res -> sink (no VAD tap)
+        gst::Element::link_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+    }
     // Diagnostic: attach pad probes at FOUR points along the
     // receive chain so we can tell exactly where buffers stop
     // flowing. With "receive bin LINKED" already logged but no

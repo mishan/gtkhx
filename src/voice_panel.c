@@ -661,9 +661,10 @@ voice_runtime_error_cb (void *user_data, const char *text)
 }
 
 /* Signal handler: voice_runtime emitted SignalKind::SpeakerChanged
- * from the per-pad RTP-activity evaluator (every ~200 ms when
- * activity flips). Forwards the flip into the canonical voice
- * model; the user list view subscribes to the model and repaints.
+ * from the GStreamer `level` voice-activity evaluator (every ~200 ms
+ * when a uid's RMS crosses the speaking threshold). Forwards the
+ * flip into the canonical voice model; the user list view subscribes
+ * to the model and repaints.
  *
  * Decoupled from the panel UI deliberately — the speaker indicator
  * lives in the user list column, not on the voice panel. The
