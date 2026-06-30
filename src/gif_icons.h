@@ -20,6 +20,15 @@
 
 struct htlc_conn;
 
+/* Spec-recommended max avatar upload size (fogWraith GIF-Icons.md). This
+ * is the single source of truth for the cap: the Settings picker rejects
+ * larger files with it, and the persistence layer (hx_icon_save /
+ * hx_icon_load_saved) enforces the same value so a hand-edited or
+ * legacy $CONFIG/avatar.gif can't slip a larger payload past the UI and
+ * earn a server rejection on auto-send. The u16 wire-length field would
+ * permit up to 0xffff, but we hold to the 32 KiB recommendation. */
+#define GTKHX_AVATAR_MAX_BYTES (32 * 1024)
+
 /* Probe-and-fallback negotiation state (the extension defines no
  * capability bit). Stored in htlc->gif_icons_state. */
 enum {
@@ -46,5 +55,36 @@ void hx_icon_set (struct htlc_conn *htlc, const guint8 *gif, gsize len);
 
 /* Clear our own avatar (ICON_SET with an empty payload). */
 void hx_icon_clear (struct htlc_conn *htlc);
+
+/* ---- Persisted avatar -------------------------------------------------
+ *
+ * The user's chosen GIF avatar is stored at $CONFIG/avatar.gif,
+ * independent of any connection — they can pick one while offline (or
+ * on a server that doesn't support the extension), and it's sent
+ * automatically once a capable server is found (hx_icon_send_saved,
+ * called from the post-login probe). This decouples "choose an avatar"
+ * from "the current server supports avatars." */
+
+/* Persist `gif` as the saved avatar. Validates the GIF signature and
+ * rejects a non-GIF payload or one over GTKHX_AVATAR_MAX_BYTES (32 KiB) —
+ * the same cap the Settings picker enforces. Returns TRUE on success
+ * (validated + written to disk). */
+gboolean hx_icon_save (const guint8 *gif, gsize len);
+
+/* Forget the persisted avatar. Returns TRUE if the saved file is now gone
+ * (deleted, or never existed), FALSE if it could not be removed (e.g.
+ * permissions / I/O) and will reappear next start. The in-memory cache is
+ * cleared either way. */
+gboolean hx_icon_forget (void);
+
+/* Read the saved avatar, or NULL if none is stored / it's invalid.
+ * Caller owns the returned GBytes. Backed by an in-memory cache so the
+ * disk is touched at most once per process. */
+GBytes *hx_icon_load_saved (void);
+
+/* If the session is GIF-icon-capable and a saved avatar exists, send
+ * it (ICON_SET). Called from the post-login probe once support is
+ * confirmed; a no-op otherwise. */
+void hx_icon_send_saved (struct htlc_conn *htlc);
 
 #endif /* GTKHX_GIF_ICONS_H */
