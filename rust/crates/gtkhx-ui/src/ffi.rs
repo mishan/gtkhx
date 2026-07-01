@@ -2,10 +2,10 @@
 //! helpers the ported windows call, plus the `HxBookmark` `#[repr(C)]`
 //! mirror. These resolve at final link against the C binary (the
 //! gtkhx_* util helpers, the bookmark API, the connect dialog, the
-//! `tracker_bridge.c` session/prefs shim) — the same leaf-up "C resolves
-//! Rust's externs" shape the R4 crates use. Window-specific externs
-//! (e.g. the tracker boxed payload + its network entry points) live in
-//! the owning module (`tracker::ffi`).
+//! `tracker_bridge.c` / `gtkhx_ui_bridge.c` session shims) — the same
+//! leaf-up "C resolves Rust's externs" shape the R4 crates use. Window-
+//! specific externs (e.g. the tracker boxed payload + its network entry
+//! points, or the user-editor wire senders) live in the owning module.
 
 use std::ffi::c_char;
 use std::os::raw::{c_int, c_void};
@@ -13,8 +13,17 @@ use std::os::raw::{c_int, c_void};
 // gtk / glib / gio raw pointer aliases (kept local so callers read
 // without importing the whole ffi trees).
 pub type GtkWidget = gtk4::ffi::GtkWidget;
+pub type GtkWindow = gtk4::ffi::GtkWindow;
 pub type GApplication = gio::ffi::GApplication;
 pub type GError = glib::ffi::GError;
+
+/// GtkHx version, embedded from meson's `project(version:)` at build time
+/// (rust/meson.build sets `GTKHX_VERSION` in the cargo env). Falls back to
+/// "dev" for a bare `cargo build` outside meson.
+pub const VERSION: &str = match option_env!("GTKHX_VERSION") {
+    Some(v) => v,
+    None => "dev",
+};
 
 /// `GTKHX_SCALE_WINDOW_BUTTONS` — second value of the `GtkhxScaleArea`
 /// enum (`gtkhx_theme.h`); the themable area action buttons use.
@@ -60,8 +69,17 @@ extern "C" {
         user_data: *mut c_void,
     ) -> *mut GtkWidget;
     pub fn gtkhx_apply_listview_style(w: *mut GtkWidget);
+    /// Theme fg/bg/font for a read-only text surface (agreement / news
+    /// viewers). See gtkhx_theme.h `.gtkhx-text`.
+    pub fn gtkhx_apply_text_style(w: *mut GtkWidget);
     pub fn init_keyaccel(w: *mut GtkWidget);
+    /// Dialog-style bail-out shortcuts (Esc / Ctrl+W close, Ctrl+Q quit,
+    /// Ctrl+K connect), capture-phase.
+    pub fn init_keyaccel_dialog(w: *mut GtkWidget);
     pub fn gtkhx_dialog_add_close_shortcuts(dialog: *mut GtkWidget);
+    /// The application-active toplevel (`gtk_application_get_active_window`),
+    /// used as a transient-for parent. May be NULL.
+    pub fn gtkhx_active_window() -> *mut GtkWindow;
     /// `[host]:port` for IPv6 literals, `host:port` otherwise. Result is
     /// `g_malloc`'d — free with `g_free`.
     pub fn gtkhx_join_host_port(host: *const c_char, port: u16) -> *mut c_char;
