@@ -47,7 +47,27 @@ struct _HxRemoteFilesProvider {
 	 * this the user just sees an empty panel and has no idea why
 	 * the navigation didn't produce rows. */
     gboolean listing_error;
+    /* Watchdog for an in-flight FILE_LIST. Some servers silently drop
+	 * the request (no reply, no task error) when the account lacks a
+	 * server-side "list files" permission — mhxd gates HTLC_HDR_FILE_LIST
+	 * on access_extra.file_list and installs no rcv handler in that case,
+	 * and classic-Mac servers (MacSecret) behave the same. That permission
+	 * isn't in the access bitmap the client receives, so we can't
+	 * pre-check it; instead a timer resolves the pending listing to an
+	 * error state rather than spinning the panel forever. 0 = disarmed. */
+    guint list_timeout_id;
+    /* Trans of the in-flight FILE_LIST's task (task_new keys on
+	 * htlc->trans). Kept so the watchdog can delete the orphaned "ls"
+	 * task — otherwise its Tasks-window row lingers forever when the
+	 * server never replies. 0 = none in flight. */
+    guint32 list_task_trans;
 };
+
+/* Seconds to wait for a FILE_LIST reply before giving up. Generous
+ * enough that a slow-but-working server building a large directory
+ * doesn't false-trip, short enough that a silent drop doesn't leave the
+ * panel stuck. */
+#define REMOTE_FILE_LIST_TIMEOUT_S 12
 
 static void
 hx_remote_files_provider_iface_init (HxFilesProviderInterface *iface);
@@ -81,6 +101,10 @@ static void
 hx_remote_files_provider_finalize (GObject *obj)
 {
     HxRemoteFilesProvider *self = HX_REMOTE_FILES_PROVIDER (obj);
+    if (self->list_timeout_id) {
+        g_source_remove (self->list_timeout_id);
+        self->list_timeout_id = 0;
+    }
     g_clear_object (&self->listing);
     g_free (self->current_path);
     /* If we're in pending_listings, the table holds the ref that's
@@ -137,6 +161,52 @@ remote_get_unavailable_reason (HxFilesProvider *self)
     return NULL;
 }
 
+/* Delete the orphaned "ls" task whose reply is never coming, so its
+ * Tasks-window row doesn't linger. NOT for the normal reply path — there
+ * hx_rcv_task deletes the task itself after dispatching. */
+static void
+remote_list_drop_task (HxRemoteFilesProvider *self)
+{
+    if (self->list_task_trans) {
+        struct task *tsk
+            = task_with_trans (&the_session, self->list_task_trans);
+        if (tsk) {
+            task_delete (&the_session, tsk);
+        }
+        self->list_task_trans = 0;
+    }
+}
+
+/* Watchdog: no FILE_LIST reply arrived in time. Delete the orphaned task
+ * and resolve the pending listing to an error state (mirrors the
+ * task-error path) so the panel stops spinning and the task row clears.
+ * See the list_timeout_id field comment for why a server can drop the
+ * request without any reply. */
+static gboolean
+remote_list_timeout (gpointer data)
+{
+    HxRemoteFilesProvider *self = data;
+
+    self->list_timeout_id = 0;
+    if (!pending_listings || !g_hash_table_contains (pending_listings, self)) {
+        /* A reply (or error) already resolved this — nothing to do. */
+        return G_SOURCE_REMOVE;
+    }
+
+    /* Keep a ref across the table removal: dropping the table's ref could
+	 * otherwise finalize us mid-cleanup. */
+    HxRemoteFilesProvider *keep = g_object_ref (self);
+    g_hash_table_remove (pending_listings, self);
+
+    remote_list_drop_task (keep);
+    g_list_store_remove_all (keep->listing);
+    keep->listing_error = TRUE;
+    g_signal_emit_by_name (keep, "navigated", keep->current_path);
+
+    g_object_unref (keep);
+    return G_SOURCE_REMOVE;
+}
+
 /* ---- Wire send ----
  *
  * Fires HTLC_HDR_FILE_LIST without going through the legacy
@@ -157,6 +227,14 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
 
     ensure_pending_table ();
 
+    /* A superseding request cancels the previous watchdog and drops its
+	 * now-orphaned task; a fresh one is armed below once we've sent. */
+    if (self->list_timeout_id) {
+        g_source_remove (self->list_timeout_id);
+        self->list_timeout_id = 0;
+    }
+    remote_list_drop_task (self);
+
     cfl = g_malloc0 (sizeof (struct cached_filelist));
     cfl->path = g_strdup (path && *path ? path : "/");
 
@@ -172,9 +250,15 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     int hc = (int)gtkhx_proto_build_file_list_chunks (
         hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
     if (hc > 0) {
-        task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl,
-                  self, "ls");
+        struct task *tsk = task_new (
+            &the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl, self, "ls");
+        /* Remember the trans so the watchdog can delete this task if the
+		 * server never replies (task_new keyed it on htlc->trans). */
+        self->list_task_trans = tsk->trans;
         hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, chunks, hc);
+        /* Arm the no-reply watchdog (see remote_list_timeout). */
+        self->list_timeout_id = g_timeout_add_seconds (
+            REMOTE_FILE_LIST_TIMEOUT_S, remote_list_timeout, self);
     }
     g_free (hldir);
 }
@@ -286,6 +370,13 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
 	 * dropped mid-parse if the table removes us first. */
     self = g_object_ref (HX_REMOTE_FILES_PROVIDER (data));
     g_hash_table_remove (pending_listings, data);
+    if (self->list_timeout_id) {
+        g_source_remove (self->list_timeout_id);
+        self->list_timeout_id = 0;
+    }
+    /* The reply arrived — hx_rcv_task deletes the task after this
+	 * dispatch returns, so just forget the trans (don't drop it here). */
+    self->list_task_trans = 0;
 
     populate_from_chunks (self, cfl);
 
@@ -345,6 +436,12 @@ hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
 
     self = g_object_ref (HX_REMOTE_FILES_PROVIDER (data));
     g_hash_table_remove (pending_listings, data);
+    if (self->list_timeout_id) {
+        g_source_remove (self->list_timeout_id);
+        self->list_timeout_id = 0;
+    }
+    /* Task error: hx_rcv_task deletes the task itself; just forget it. */
+    self->list_task_trans = 0;
 
     g_list_store_remove_all (self->listing);
     self->listing_error = TRUE;
