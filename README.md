@@ -13,13 +13,16 @@ GtkHx is a GTK+ Hotline Client originally based on Hx.
   - Chat history
   - Colored names
   - Blowfish and ChaCha20-Poly1305 cipher support
-- Tracker v3 support
-- File preview supports common image types, QuickDraw PICTs, PDFs, and markdown / source files
-- Orthogonal file manager interface for file transfers
-- Server banner support
-- Systray and app notifications
-- Supports light and dark themes
+  - Tracker v3
+- File previews
+  - Common image types via glycin
+  - QuickDraw PICTs via ImageMagick
+  - PDFs via libpoppler
+  - markdown / source files via libgtksourceview
+- Orthogonal file manager
 - Customizable UI allows for single window and multi window layouts
+- Themable, with support for light and dark themes
+- Systray and app notifications
 
 ## Building:
 
