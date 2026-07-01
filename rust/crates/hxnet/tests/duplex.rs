@@ -41,6 +41,30 @@ fn build_header(type_: u32, trans: u32, flag: u32, body_len: u32, hc: u16) -> [u
     buf
 }
 
+/// Like [`build_header`] but with a DISTINCT wire `len` (TotalSize, at
+/// offset 12) and `len2` (DataSize, at offset 16). Both are wire values
+/// (body bytes + sizeof(hc)=2). Servers set TotalSize > DataSize when a
+/// transaction's whole-message size exceeds what a single frame carries;
+/// the read path must frame the stream by DataSize (len2), this frame's
+/// actual size.
+fn build_header_split(
+    type_: u32,
+    trans: u32,
+    flag: u32,
+    total_wire: u32,
+    data_wire: u32,
+    hc: u16,
+) -> [u8; 22] {
+    let mut buf = [0u8; 22];
+    buf[0..4].copy_from_slice(&type_.to_be_bytes());
+    buf[4..8].copy_from_slice(&trans.to_be_bytes());
+    buf[8..12].copy_from_slice(&flag.to_be_bytes());
+    buf[12..16].copy_from_slice(&total_wire.to_be_bytes()); // len / TotalSize
+    buf[16..20].copy_from_slice(&data_wire.to_be_bytes()); // len2 / DataSize
+    buf[20..22].copy_from_slice(&hc.to_be_bytes());
+    buf
+}
+
 #[tokio::test]
 async fn reads_a_single_frame() {
     let (mut server, client) = tokio::io::duplex(4096);
@@ -91,6 +115,61 @@ async fn reads_two_frames_in_sequence() {
 
     assert_eq!(f1.header.trans, 10);
     assert_eq!(&f1.body, b"aaaa");
+    assert_eq!(f2.header.trans, 11);
+    assert_eq!(&f2.body, b"bbbb");
+}
+
+/// Regression (the MacSecret / large-reply desync): a frame whose wire
+/// `len` (TotalSize, offset 12) is LARGER than its `len2` (DataSize,
+/// offset 16 — this frame's actual byte count) must be framed by DataSize.
+/// The read loop reads exactly this frame's body and stays aligned for the
+/// following frame. If it (re)regresses to framing by TotalSize it
+/// over-reads past the boundary — blocking forever waiting for bytes that
+/// never come, and desyncing the stream — so a second, ordinary frame
+/// right after would never arrive intact. The `timeout`s turn that
+/// regression into a fast failure instead of a hang.
+#[tokio::test]
+async fn frames_by_datasize_when_totalsize_is_larger() {
+    use std::time::Duration;
+
+    let (mut server, client) = tokio::io::duplex(4096);
+    let (_handle, mut events, _join) =
+        Connection::spawn(client).expect("spawn under tokio runtime");
+
+    // Frame 1: TotalSize claims a 1000-byte transaction, but this frame
+    // carries only 4 body bytes (DataSize = 4 + 2 hc). A reader that
+    // trusted TotalSize would try to read ~1000 bytes and stall.
+    let hdr1 = build_header_split(0x65, 10, 0, /*total_wire=*/ 1000 + 2, /*data_wire=*/ 4 + 2, 0);
+    // Frame 2: an ordinary complete frame immediately after — only read
+    // intact if frame 1 consumed exactly its DataSize.
+    let hdr2 = build_header(0x66, 11, 0, 4, 0);
+    server.write_all(&hdr1).await.unwrap();
+    server.write_all(b"aaaa").await.unwrap();
+    server.write_all(&hdr2).await.unwrap();
+    server.write_all(b"bbbb").await.unwrap();
+
+    let f1 = match tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .expect("frame 1 timely (a TotalSize-framing regression would hang here)")
+        .expect("event channel open")
+    {
+        Event::Frame(f) => f,
+        e => panic!("unexpected: {e:?}"),
+    };
+    let f2 = match tokio::time::timeout(Duration::from_secs(5), events.recv())
+        .await
+        .expect("frame 2 timely (stream stayed aligned)")
+        .expect("event channel open")
+    {
+        Event::Frame(f) => f,
+        e => panic!("unexpected: {e:?}"),
+    };
+
+    // Frame 1 body is DataSize-sized (4), NOT TotalSize-sized (1000).
+    assert_eq!(f1.header.trans, 10);
+    assert_eq!(f1.header.body_len, 4, "body sized by DataSize (len2), not TotalSize");
+    assert_eq!(&f1.body, b"aaaa");
+    // Frame 2 arrived intact ⇒ the read loop stayed aligned.
     assert_eq!(f2.header.trans, 11);
     assert_eq!(&f2.body, b"bbbb");
 }
