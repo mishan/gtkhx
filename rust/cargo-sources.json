@@ -3382,6 +3382,19 @@
   {
     "type": "archive",
     "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/thiserror/thiserror-1.0.69.crate",
+    "sha256": "b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52",
+    "dest": "cargo/vendor/thiserror-1.0.69"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"b6aaf5339b578ea85b50e080feb250a3e8ae8cfcdff9a461c9ec2904bc923f52\", \"files\": {}}",
+    "dest": "cargo/vendor/thiserror-1.0.69",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
     "url": "https://static.crates.io/crates/thiserror/thiserror-2.0.18.crate",
     "sha256": "4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4",
     "dest": "cargo/vendor/thiserror-2.0.18"
@@ -3390,6 +3403,19 @@
     "type": "inline",
     "contents": "{\"package\": \"4288b5bcbc7920c07a1149a35cf9590a2aa808e0bc1eafaade0b80947865fbc4\", \"files\": {}}",
     "dest": "cargo/vendor/thiserror-2.0.18",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/thiserror-impl/thiserror-impl-1.0.69.crate",
+    "sha256": "4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1",
+    "dest": "cargo/vendor/thiserror-impl-1.0.69"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"4fee6c4efc90059e10f81e6d42c60a18f76588c3d74cb83a0b242a2b6c7504c1\", \"files\": {}}",
+    "dest": "cargo/vendor/thiserror-impl-1.0.69",
     "dest-filename": ".cargo-checksum.json"
   },
   {
@@ -3455,6 +3481,19 @@
     "type": "inline",
     "contents": "{\"package\": \"1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61\", \"files\": {}}",
     "dest": "cargo/vendor/tokio-rustls-0.26.4",
+    "dest-filename": ".cargo-checksum.json"
+  },
+  {
+    "type": "archive",
+    "archive-type": "tar-gzip",
+    "url": "https://static.crates.io/crates/tokio-socks/tokio-socks-0.5.3.crate",
+    "sha256": "a7e2948f60dbe26b35f2c7fb74ac2854c1fddded0fe9d7548fcc674a246f7615",
+    "dest": "cargo/vendor/tokio-socks-0.5.3"
+  },
+  {
+    "type": "inline",
+    "contents": "{\"package\": \"a7e2948f60dbe26b35f2c7fb74ac2854c1fddded0fe9d7548fcc674a246f7615\", \"files\": {}}",
+    "dest": "cargo/vendor/tokio-socks-0.5.3",
     "dest-filename": ".cargo-checksum.json"
   },
   {

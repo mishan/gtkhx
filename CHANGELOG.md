@@ -4,11 +4,14 @@
   - GtkHx theme support
   - Emoji shortcode support with typeahead completion
   - Agreement text is now rendered in a monospace font
+  - Cleaner Settings dialog
 - Code Modernization
   - GtkHx's networking code is now in Rust
   - Address GTK+ 4 deprecations
 - Hotline Protocol
   - GIF icon support
+- Bug Fixes
+  - Various voice chat fixes
 - Compatibility Fixes
   - Support for glycin 1+ and 2+ loaders
   - rustc dependency dropped to 1.8.5
