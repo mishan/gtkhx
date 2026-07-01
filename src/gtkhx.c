@@ -516,6 +516,19 @@ const char *INFOPREFIX = " \00310[\00303hx\00310]\003 ";
 
 session the_session;
 
+/*
+ * hx_active_session — the currently-focused session (multi-conn seam,
+ * see docs/multi-connection-scoping.md phase M0). N == 1 today, so this
+ * returns the single session. When the connection tab strip lands this
+ * becomes a lookup of the focused tab's session; every UI call site that
+ * routes through here follows automatically.
+ */
+session *
+hx_active_session (void)
+{
+    return &the_session;
+}
+
 /* Forward declaration of the application object owned by loop(). hx_quit()
  * needs to call g_application_quit on it, but loop() comes much later
  * in this TU and gtkhx_app's definition lives there.

@@ -453,10 +453,45 @@ typedef struct _session {
     unsigned int connected : 1;
 } session;
 
-/* Single-session world. Phase 5 will revisit when multi-conn lands;
- * the historical sessions[MAX_CONN] / sess_from_htlc() pretended to be
- * an array but always returned &sessions[0]. */
+/* Single-session world today (N == 1). The multi-connection routing
+ * seam below (see docs/multi-connection-scoping.md, phase M0) replaces
+ * direct `&the_session` access so the single global can later become
+ * one of N sessions without re-touching call sites.
+ *
+ * The historical sessions[MAX_CONN] / sess_from_htlc() pretended to be
+ * an array but always returned &sessions[0]; this reintroduces
+ * sess_from_htlc() as an exact accessor rather than a fiction. */
 extern session the_session;
+
+/*
+ * sess_from_htlc(htlc) — the session that OWNS this connection.
+ *
+ * Model-side code (rcv.c, network.c, …) already holds the htlc for a
+ * received event and must route by it: an event belongs to a specific
+ * connection, not the focused one. `struct htlc_conn` is embedded in
+ * `session` (the `htlc` field), and that embedded instance is the only
+ * htlc_conn in the tree, so container_of is exact — and stays correct
+ * when sessions become heap-allocated (each session carries its own
+ * embedded htlc). NULL in, NULL out.
+ */
+static inline session *
+sess_from_htlc (struct htlc_conn *htlc)
+{
+    if (htlc == NULL)
+        return NULL;
+    return (session *) ((char *) htlc - G_STRUCT_OFFSET (session, htlc));
+}
+
+/*
+ * hx_active_session() — the currently-focused session.
+ *
+ * UI-side code (a button click, a menu action, a dialog) acts on
+ * whichever connection the user is looking at. Today there is exactly
+ * one, so this returns &the_session; when the connection tab strip
+ * lands (phase M3) it becomes "the focused tab's session" and every
+ * UI call site follows without further edits.
+ */
+extern session *hx_active_session (void);
 
 extern char last_msg_nick[32];
 /* INFOPREFIX's extern decl moved to gtkhx_log.h so non-widget
