@@ -542,6 +542,41 @@ in practice. What did matter:
   but hasn't shipped. Revisit when it does.
 - **GStreamer 1.20 floor.** Fine in practice. GNOME runtime 49 ships
   1.26.
+- **Receive bins must be keyed by webrtcbin pad, not by mid.** When
+  the local user is the lone first joiner, Janus negotiates its single
+  transceiver as `a=mid:send` and bundles every remote's audio onto
+  it — so all remote audio arrives under `mid=send`. The original code
+  keyed receive bins (and named them) by mid, so a peer leaving and
+  rejoining (new SSRC ⇒ a fresh webrtcbin src pad with the SAME mid)
+  collided with the stale bin, and the first joiner stopped hearing
+  the rejoiner. Fix: key (and name) receive bins by the webrtcbin pad
+  name (`hxvoice-recv-<mid>__<pad>`, mid kept for VAD), and wire
+  `webrtcbin.pad-removed` → tear down that pad's bin (the runtime had
+  never connected `pad-removed`, though the state machine already had
+  the `WebrtcPadRemoved → StopReceivePipeline` arm). Reproduced and
+  guarded end-to-end against live Janus by
+  `tests/integration/test_voice_rejoin_media.c` — a two-client media
+  Tier 3 test (RED before the fix: A's RTP counter `before=100
+  after=100`; GREEN after: `before=100 after=200`).
+- **VAD speaker attribution on the bundled `mid=send` leg is a
+  best-effort cname read, and is inherently unreliable.** Same
+  lone-first-joiner topology: A's remote audio arrives under `mid=send`,
+  whose bin name carries no uid, so the speaker indicator can't
+  attribute it from the mid. `handle_level_message` falls back to the
+  per-SSRC cname (`ssrc-<N>-cname=voice-<uid>`) read off the demuxed
+  receive pad's `current_caps`. That cname originates in the server's
+  SDP `a=ssrc … cname:voice-<uid>` lines (NOT RTCP SDES) — a non-spec
+  extra; the spec's track-to-user mapping is mid-based. Whether it
+  surfaces in the pad caps is subject to the same webrtcbin
+  shared-transceiver race as the receive pad itself, so on the bundled
+  leg attribution succeeds in some sessions and not others, while the
+  per-user `mid:user-<uid>` leg attributes every time. The
+  `/integration/voice/vad_speaker` Tier 3 test exercises the fallback
+  and passes (single-process harness always wins the race); it is a
+  positive guard, not a reproduction of the GUI's intermittent failure.
+  Root cause and the deterministic fix are server-side — see the Janus
+  renegotiation bug note (server must send `mid:user-<newUID>` recvonly
+  sections instead of bundling onto `mid:send`).
 
 Closed gotchas (no longer relevant):
 

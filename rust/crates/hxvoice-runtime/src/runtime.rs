@@ -822,6 +822,19 @@ struct Inner {
     /// link; `StopReceivePipeline` removes the entry, sets the
     /// bin to `Null`, and lets it drop out of the pipeline.
     receive_bins: HashMap<String, gstreamer::Bin>,
+    /// VAD speaker-attribution cache: receive-bin element name →
+    /// resolved uid. Only the bundled `mid=send` legs land here — the
+    /// per-user `user-<uid>` case is parsed straight from the bin name
+    /// each time (a cheap string split). For the bundled case the uid
+    /// only comes from the RTCP cname on the upstream pad's caps
+    /// ([`uid_from_recv_pad_cname`]), which allocates a format string
+    /// and walks the caps structure; `level` RMS messages arrive
+    /// ~10×/s per remote, so we cache the first successful resolution
+    /// and reuse it. Bin element names embed the (unique-per-lifetime)
+    /// webrtcbin pad name, so an entry can never alias a different
+    /// remote; the matching bin's teardown in `connect_pad_removed`
+    /// evicts the entry.
+    recv_bin_uid_cache: HashMap<String, u16>,
     /// `BusWatchGuard` returned by `attach_pipeline_bus_watch`'s
     /// `add_watch_local`. Dropping this guard removes the watch
     /// source from the main context; we keep it parked here so
@@ -1098,6 +1111,7 @@ impl VoiceRuntime {
                 answer_generation: 0,
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
+                recv_bin_uid_cache: HashMap::new(),
                 bus_watch_guard: bits.bus_watch_guard,
                 rtp_buffers_received: bits.rtp_buffers_received,
                 wedge_watchdog_source: None,
@@ -1144,6 +1158,7 @@ impl VoiceRuntime {
                 answer_generation: 0,
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
+                recv_bin_uid_cache: HashMap::new(),
                 bus_watch_guard: None,
                 rtp_buffers_received: Arc::new(AtomicU64::new(0)),
                 wedge_watchdog_source: None,
@@ -1430,6 +1445,7 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
             runtime_id,
             Arc::clone(&rtp_buffers_received),
         );
+        connect_pad_removed(&webrtcbin, runtime_id);
         connect_connection_state_notify(&webrtcbin, runtime_id);
         connect_on_new_transceiver(&webrtcbin);
         let bus_watch_guard = attach_pipeline_bus_watch(&pipeline, runtime_id);
@@ -1574,6 +1590,7 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
         // walked to Null by the parent pipeline transition
         // below; explicit drop here is bookkeeping, not lifecycle.
         inner.receive_bins.clear();
+        inner.recv_bin_uid_cache.clear();
         inner.pending_pads.clear();
         inner.answer_generation = 0;
         inner.last_seen_peer_state = None;
@@ -2311,18 +2328,15 @@ impl VoiceRuntime {
                     // for this mid (if any) stays installed.
                     return;
                 };
-                // We have a fresh pad. Tear down any pre-existing
-                // receive bin for this mid before adding a new
-                // one — renegotiation can bring a second
-                // pad-added for the same mid (a recycled slot, a
-                // re-offer that re-declares the same media line);
-                // without this teardown, start_receive_bin's
-                // `pipeline.add(&bin)` would fail on the
-                // duplicate "hxvoice-recv-{mid}" element name and
-                // the OLD bin would stay linked, wedging
-                // playback.
+                // Key the bin by the webrtcbin PAD name, not the mid.
+                // Tear down any pre-existing bin for this exact pad
+                // before rebuilding (a pad re-fired for the same slot).
+                // Bins for OTHER pads on the same mid (the bundled
+                // `mid=send` case) are left alone — they belong to
+                // different remote SSRCs and `pad-removed` reaps them.
+                let pad_key = pad.name().to_string();
                 if let Some(existing) =
-                    self.inner.borrow_mut().receive_bins.remove(&mid)
+                    self.inner.borrow_mut().receive_bins.remove(&pad_key)
                 {
                     stop_receive_bin(&pipeline, &existing);
                 }
@@ -2340,7 +2354,7 @@ impl VoiceRuntime {
                     self.inner
                         .borrow_mut()
                         .receive_bins
-                        .insert(mid, bin);
+                        .insert(pad_key, bin);
                 }
             }
 
@@ -2349,16 +2363,32 @@ impl VoiceRuntime {
             // through renegotiation). Pop the bin, set it to
             // Null, remove it from the pipeline so it drops.
             Action::StopReceivePipeline { mid } => {
-                let (pipeline, bin) = {
-                    let mut inner = self.inner.borrow_mut();
-                    (
-                        inner.pipeline.clone(),
-                        inner.receive_bins.remove(&mid),
-                    )
-                };
-                if let (Some(pipeline), Some(bin)) = (pipeline, bin) {
-                    stop_receive_bin(&pipeline, &bin);
-                }
+                // No-op by design. Receive bins are keyed by webrtcbin
+                // PAD name, because a bundled `mid=send` transceiver
+                // carries several receive pads (one per remote SSRC) —
+                // so a mid is the wrong granularity to tear one down,
+                // and "remove every bin for this mid" would kill
+                // sibling remotes that are still active. The
+                // authoritative, per-pad teardown is
+                // `connect_pad_removed`, which fires for the exact pad
+                // whose SSRC / transceiver went away. The state machine
+                // only produces this action from `WebrtcPadRemoved`,
+                // which the runtime no longer emits now that
+                // pad-removed drives teardown directly.
+                //
+                // Log loudly if it ever does fire: that means someone
+                // reintroduced a WebrtcPadRemoved emission and is now
+                // relying on this arm to tear a bin down — which it
+                // won't. Surfacing it here turns a silent "bins leak /
+                // remote never torn down" regression into a visible
+                // warning in CI and debug logs.
+                gstreamer::warning!(
+                    gstreamer::CAT_RUST,
+                    "unexpected StopReceivePipeline(mid={mid}) — teardown \
+                     is owned by connect_pad_removed; this arm does not \
+                     remove any bin. Did a WebrtcPadRemoved emission come \
+                     back?"
+                );
             }
 
             // ---- Mute dispatch ----
@@ -2496,6 +2526,11 @@ fn apply_remote_offer_and_chain_answer(
     runtime_id: u64,
     generation: u64,
 ) {
+    crate::debug::log!(
+        "voice-sdp",
+        "REMOTE OFFER ({} bytes):\n{sdp}",
+        sdp.len()
+    );
     let Some(desc) = build_session_description(sdp, WebRTCSDPType::Offer)
     else {
         return;
@@ -2548,6 +2583,11 @@ fn apply_remote_offer_and_chain_answer(
 /// the matching `SendWireFrame(603)` separately so the server
 /// gets the answer.
 fn apply_local_answer(webrtcbin: &gstreamer::Element, sdp: &str) {
+    crate::debug::log!(
+        "voice-sdp",
+        "LOCAL ANSWER ({} bytes):\n{sdp}",
+        sdp.len()
+    );
     let Some(desc) = build_session_description(sdp, WebRTCSDPType::Answer)
     else {
         return;
@@ -2959,10 +2999,16 @@ fn connect_pad_added(
                             | SessionState::Connected,
                     );
                     if active {
+                        // Key by the webrtcbin PAD name, not the mid:
+                        // a bundled `mid=send` transceiver carries one
+                        // receive pad per remote SSRC, so keying by
+                        // mid would collide a rejoiner's fresh pad with
+                        // a stale one. `pad-removed` tears each down by
+                        // the same key.
                         rt.inner
                             .borrow_mut()
                             .receive_bins
-                            .insert(mid.clone(), bin.clone());
+                            .insert(pad.name().to_string(), bin.clone());
                     } else {
                         // Salvage the pipeline handle, then tear
                         // the bin down. The pipeline handle is
@@ -3049,6 +3095,63 @@ fn connect_pad_added(
                         );
                     }
                 });
+            });
+        });
+    });
+}
+
+/// Wire `webrtcbin.pad-removed` so a removed receive pad's bin is
+/// torn down promptly.
+///
+/// webrtcbin removes a src pad when its backing SSRC / transceiver
+/// goes away — a remote participant leaves, an SSRC times out, or a
+/// renegotiation recycles a slot. Without reaping the bin here it
+/// lingers in the pipeline forever. In the bundled `mid=send`
+/// topology (the local user is the lone first joiner, so Janus routes
+/// every remote onto its one transceiver) that stale bin is exactly
+/// what made the first joiner stop hearing a peer who rejoined: the
+/// rejoiner's new pad couldn't get a clean receive bin while the dead
+/// one squatted. Receive bins are keyed by pad name, so the lookup
+/// here is exact — only the departed pad's bin is removed; other
+/// remotes sharing the same mid are untouched.
+///
+/// Fires on a GStreamer worker thread; marshals to the main thread
+/// via `MainContext::invoke`, the same shape as `connect_pad_added`
+/// and `connect_connection_state_notify`.
+fn connect_pad_removed(webrtcbin: &gstreamer::Element, runtime_id: u64) {
+    let main_ctx = gstreamer::glib::MainContext::default();
+    webrtcbin.connect_pad_removed(move |_bin, pad| {
+        if pad.direction() != gstreamer::PadDirection::Src {
+            // Sink (send-leg request) pad removal is not our concern.
+            return;
+        }
+        let pad_key = pad.name().to_string();
+        let main_ctx = main_ctx.clone();
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                let (pipeline, bin) = {
+                    let mut inner = rt.inner.borrow_mut();
+                    (
+                        inner.pipeline.clone(),
+                        inner.receive_bins.remove(&pad_key),
+                    )
+                };
+                if let (Some(pipeline), Some(bin)) = (pipeline, bin) {
+                    crate::debug::log!(
+                        "voice-pipe",
+                        "tearing down receive bin for removed pad {pad_key}"
+                    );
+                    // Evict the VAD uid cache entry for this bin so a
+                    // long session with many rejoins doesn't accumulate
+                    // dead entries (bin names are unique per pad
+                    // lifetime, so a stale entry can't mis-attribute —
+                    // this is purely to bound the map).
+                    rt.inner
+                        .borrow_mut()
+                        .recv_bin_uid_cache
+                        .remove(bin.name().as_str());
+                    stop_receive_bin(&pipeline, &bin);
+                }
             });
         });
     });
@@ -3270,6 +3373,28 @@ const SPEAKING_RMS_THRESHOLD_DB: f64 = -50.0;
 /// `level` message's source element parent — so the two can't drift.
 const RECV_BIN_PREFIX: &str = "hxvoice-recv-";
 
+/// Separator between the `<mid>` and the `<pad-name>` in a receive
+/// bin's element name (`hxvoice-recv-<mid>__<pad-name>`).
+///
+/// Receive bins are keyed and named by the **webrtcbin source pad**,
+/// not by the mid, because a single mid can back several receive pads
+/// over time: when the local user is the lone first joiner, Janus
+/// bundles every remote onto its one `sendrecv` transceiver, so all
+/// remote audio arrives under `mid=send`, and a peer leaving + a new
+/// SSRC arriving on rejoin produces a fresh pad with the SAME mid.
+/// Keying by mid collided those (duplicate element name, stale bin)
+/// and was the cause of "first joiner stops hearing a peer that
+/// rejoins". The mid is still embedded in the name so the VAD layer
+/// ([`uid_from_recv_bin_name`]) can recover it; `__` never appears in
+/// a mid (`send` / `user-<n>`) or a webrtcbin pad name (`src_<n>`).
+const RECV_BIN_PAD_SEP: &str = "__";
+
+/// Build a receive bin's element name from its mid and webrtcbin pad
+/// name. Unique per pad; the mid stays recoverable for VAD.
+fn recv_bin_name(mid: &str, pad_name: &str) -> String {
+    format!("{RECV_BIN_PREFIX}{mid}{RECV_BIN_PAD_SEP}{pad_name}")
+}
+
 /// `true` when an RMS reading clears the speaking threshold. Pure
 /// so the threshold decision is unit-testable without a pipeline.
 /// `f64::NEG_INFINITY` (the `level` element's silence sentinel)
@@ -3281,16 +3406,58 @@ fn rms_db_indicates_speaking(db: f64) -> bool {
 
 /// Recover the Hotline user id from a receive bin's element name.
 ///
-/// Receive bins are named `hxvoice-recv-<mid>` where `<mid>` is the
-/// SDP mid label (`user-<uid>` for a remote leg, `send` for the
-/// local send leg). Returns `Some(uid)` only for `user-<uid>`
-/// labels; the send leg and any unparseable name yield `None`.
+/// Receive bins are named `hxvoice-recv-<mid>__<pad-name>` where
+/// `<mid>` is the SDP mid label (`user-<uid>` for a remote leg,
+/// `send` for the bundled/local leg). Returns `Some(uid)` only for
+/// `user-<uid>` mids; the `send` mid and any unparseable name yield
+/// `None`. The trailing `__<pad-name>` is stripped before parsing.
 fn uid_from_recv_bin_name(name: &str) -> Option<u16> {
-    let mid = name.strip_prefix(RECV_BIN_PREFIX)?;
+    let rest = name.strip_prefix(RECV_BIN_PREFIX)?;
+    // Drop the `__<pad-name>` suffix to isolate the mid.
+    let mid = match rest.split_once(RECV_BIN_PAD_SEP) {
+        Some((mid, _pad)) => mid,
+        None => rest,
+    };
     match hotline_proto::voice::parse_voice_mid_label(mid.as_bytes()) {
         Some(hotline_proto::voice::MidLabel::User(uid)) => Some(uid),
         _ => None,
     }
+}
+
+/// Parse a `voice-<uid>` RTCP cname into a Hotline user id. The
+/// fogWraith voice spec stamps every participant's audio SSRC with
+/// `cname:voice-<uid>`; that's the only place the uid lives for a
+/// bundled receive leg.
+fn parse_voice_cname(cname: &str) -> Option<u16> {
+    cname.strip_prefix("voice-").and_then(|n| n.parse::<u16>().ok())
+}
+
+/// Fallback uid resolution for a bundled `mid=send` receive bin,
+/// whose element name carries no user id.
+///
+/// When the local user is the lone first joiner, Janus bundles every
+/// remote onto its single `mid=send` transceiver, so
+/// [`uid_from_recv_bin_name`] returns `None`. The speaker is still
+/// identifiable from the RTCP cname (`voice-<uid>`), which webrtcbin
+/// surfaces on the demuxed receive pad's caps as
+/// `ssrc-<N>-cname`. That field isn't present at pad-added time (it
+/// rides in with RTCP SDES) but is by the time `level` RMS messages
+/// flow, which is when [`handle_level_message`] calls this.
+///
+/// `bin` is the receive `gst::Bin` (the `level` element's parent);
+/// we walk its ghost `sink` pad up to the webrtcbin src pad and read
+/// the cname off its negotiated caps.
+fn uid_from_recv_pad_cname(bin: &gstreamer::Object) -> Option<u16> {
+    let element = bin.downcast_ref::<gstreamer::Element>()?;
+    let sink = element.static_pad("sink")?;
+    let peer = sink.peer()?;
+    let caps = peer.current_caps()?;
+    let s = caps.structure(0)?;
+    let ssrc = s.get::<u32>("ssrc").ok()?;
+    let cname = s
+        .get::<String>(format!("ssrc-{ssrc}-cname").as_str())
+        .ok()?;
+    parse_voice_cname(&cname)
 }
 
 /// Pull the loudest per-channel RMS (dB) out of a `level` element
@@ -3327,20 +3494,66 @@ fn handle_level_message(
     s: &gstreamer::StructureRef,
 ) {
     // The message source is the `level` element; its parent is the
-    // receive bin whose name encodes the uid.
-    let Some(uid) = src
-        .and_then(|o| o.parent())
-        .and_then(|bin| uid_from_recv_bin_name(bin.name().as_str()))
-    else {
+    // receive bin. Resolve the speaker uid from the bin name's mid
+    // (the per-user case), falling back to the RTCP cname off the
+    // upstream pad for the bundled `mid=send` case where the mid
+    // carries no uid.
+    let Some(bin) = src.and_then(|o| o.parent()) else {
         return;
     };
+    // Threshold first: below-threshold frames are the common case and
+    // don't need a uid at all, so we skip the (possibly caps-walking)
+    // resolution for them.
     let Some(rms_db) = level_message_max_rms_db(s) else {
         return;
     };
     if !rms_db_indicates_speaking(rms_db) {
         return;
     }
+    // The per-user `user-<uid>` bin name yields the uid by a cheap
+    // string split — do it inline. The bundled `mid=send` case has no
+    // uid in the name; resolving it walks the upstream pad's caps for
+    // the RTCP cname, so that path is cached per bin (see
+    // `recv_bin_uid_cache`).
+    let mid_uid = uid_from_recv_bin_name(bin.name().as_str());
     with_main_thread_runtime(runtime_id, |rt| {
+        let uid = match mid_uid {
+            Some(u) => u,
+            None => {
+                let key = bin.name().to_string();
+                let cached =
+                    rt.inner.borrow().recv_bin_uid_cache.get(&key).copied();
+                match cached {
+                    Some(u) => u,
+                    None => {
+                        let Some(u) = uid_from_recv_pad_cname(&bin) else {
+                            // No `ssrc-<N>-cname` on the bundled leg's
+                            // pad caps yet — can't attribute this
+                            // speaker. Try again on a later message.
+                            crate::debug::log!(
+                                "voice-vad",
+                                "speaking on bundled bin={} but no caps \
+                                 cname yet — unattributed",
+                                bin.name()
+                            );
+                            return;
+                        };
+                        crate::debug::log!(
+                            "voice-vad",
+                            "resolved bundled speaker bin={} -> uid={u} \
+                             (caps cname)",
+                            bin.name()
+                        );
+                        rt.inner
+                            .borrow_mut()
+                            .recv_bin_uid_cache
+                            .insert(key, u);
+                        u
+                    }
+                }
+            }
+        };
+        crate::debug::log!("voice-vad", "speaking uid={uid}");
         let map_arc = rt.inner.borrow().per_user_voice_activity.clone();
         let Ok(mut guard) = map_arc.lock() else {
             return;
@@ -3486,7 +3699,7 @@ fn start_receive_bin(
             gstreamer::PadProbeReturn::Ok
         });
     }
-    let bin_name = format!("{RECV_BIN_PREFIX}{mid}");
+    let bin_name = recv_bin_name(mid, src_pad.name().as_str());
     let output_device = crate::audio::output_device();
     let bin = match crate::audio::make_receive_bin(
         &bin_name,
@@ -4446,10 +4659,39 @@ mod tests {
         // Names without a parseable user-<uid> mid don't resolve.
         assert_eq!(uid_from_recv_bin_name("hxvoice-recv-bogus"), None);
         assert_eq!(uid_from_recv_bin_name("some-other-element"), None);
-        // The name `start_receive_bin` actually builds must round-trip
-        // back to the uid — pins the prefix shared between the two.
-        let name = format!("{RECV_BIN_PREFIX}user-9");
-        assert_eq!(uid_from_recv_bin_name(&name), Some(9));
+        // The pad-unique form `start_receive_bin` actually builds
+        // (`hxvoice-recv-<mid>__<pad>`) must still recover the mid's
+        // uid — the `__<pad>` suffix is stripped.
+        assert_eq!(
+            uid_from_recv_bin_name("hxvoice-recv-user-7__src_0"),
+            Some(7)
+        );
+        assert_eq!(uid_from_recv_bin_name("hxvoice-recv-send__src_1"), None);
+        // recv_bin_name + uid_from_recv_bin_name round-trip, and the
+        // name is unique per pad for the same mid (the bundled
+        // mid=send case the fix turns on).
+        let n0 = recv_bin_name("user-9", "src_0");
+        let n1 = recv_bin_name("user-9", "src_1");
+        assert_ne!(n0, n1, "same mid, different pad must yield distinct names");
+        assert_eq!(uid_from_recv_bin_name(&n0), Some(9));
+        assert_eq!(uid_from_recv_bin_name(&n1), Some(9));
+        let s0 = recv_bin_name("send", "src_0");
+        let s1 = recv_bin_name("send", "src_1");
+        assert_ne!(s0, s1, "bundled mid=send must still be unique per pad");
+    }
+
+    #[test]
+    fn voice_cname_parses_uid() {
+        // The bundled-mid=send fallback: uid comes from the RTCP
+        // cname `voice-<uid>`.
+        assert_eq!(parse_voice_cname("voice-245"), Some(245));
+        assert_eq!(parse_voice_cname("voice-0"), Some(0));
+        assert_eq!(parse_voice_cname("voice-65535"), Some(65535));
+        // Non-voice cnames (webrtcbin's own `user…@host`) don't resolve.
+        assert_eq!(parse_voice_cname("user874754547@host-73c068f0"), None);
+        assert_eq!(parse_voice_cname("voice-"), None);
+        assert_eq!(parse_voice_cname("voice-nope"), None);
+        assert_eq!(parse_voice_cname("245"), None);
     }
 
     /// End-to-end against the host's real `level` element: build a

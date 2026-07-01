@@ -467,6 +467,29 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_active_cid(
     }
 }
 
+/// Total RTP buffers received across all receive legs since the
+/// current pipeline was built. Monotonic within a session; resets to
+/// 0 when the runtime rebuilds its pipeline on `Action::TearDown`.
+///
+/// This is a media-liveness signal for the Tier 3 voice harness: a
+/// client that is receiving a remote participant's audio sees this
+/// counter advance (~50/s per active sender at PCMU's 20 ms ptime).
+/// It needs no audio device — it counts buffers off the receive
+/// bin's depay sink, so it advances even for digital-silence PCMU.
+/// NULL-safe (returns 0).
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_rtp_buffers_received(
+    rt: *mut VoiceRuntime,
+) -> u64 {
+    match unsafe { rt_from_ptr(rt) } {
+        Some(rt) => rt.rtp_buffers_received_for_test(),
+        None => 0,
+    }
+}
+
 /// Free a runtime created with [`gtkhx_voice_runtime_new`].
 ///
 /// # Safety

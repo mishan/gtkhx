@@ -321,6 +321,18 @@ extern int gtkhx_voice_runtime_active_cid (gtkhx_voice_runtime *rt,
                                            uint32_t *out_cid);
 
 /*
+ * Total RTP buffers received across all receive legs since the
+ * pipeline was (re)built. Advances (~50/s per active remote sender)
+ * while audio is flowing in; resets to 0 on the internal pipeline
+ * rebuild. Media-liveness signal for the Tier 3 voice harness — it
+ * counts buffers off the receive bin, so it advances even for
+ * digital-silence PCMU and needs no audio device. NULL-safe
+ * (returns 0).
+ */
+extern uint64_t gtkhx_voice_runtime_rtp_buffers_received (
+    gtkhx_voice_runtime *rt);
+
+/*
  * Free a runtime. Safe to call with NULL. The caller must not use
  * the pointer after this call returns.
  */

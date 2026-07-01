@@ -431,14 +431,29 @@ impl SessionMachine {
                 })
             }
 
-            // Renegotiation: a new offer arrived after we're
-            // already Connected. Same shape as the initial offer
-            // but no JoinReply timer to cancel. The wrong-cid
-            // guard (see JoinSent arm above) applies here too —
-            // even more important during Connected, where we
-            // already have a live media path that a stale 602
+            // Renegotiation: a new offer arrived after our own
+            // negotiation finished (Connected) OR while it was still
+            // finishing (Connecting — first answer sent, ICE/DTLS
+            // still completing). Both are handled the same way and
+            // must be: when a second participant joins right after
+            // us, Janus sends the renegotiation offer that adds their
+            // receive leg while we're often still `Connecting`. If we
+            // dropped it (no arm) we'd never build the receive bin and
+            // never hear them. Processing it now is safe — webrtcbin's
+            // signaling state is `stable` (our local answer is set) as
+            // soon as we leave OfferPending, so `set-remote-description`
+            // applies cleanly, and unlike the OfferPending case there
+            // is no in-flight answer flow to serialise against.
+            //
+            // Same shape as the initial (JoinSent) offer but no
+            // JoinReply timer to cancel. The wrong-cid guard (see the
+            // JoinSent arm above) applies here too — even more
+            // important with a live/near-live media path a stale 602
             // could blow up.
-            (SessionState::Connected, Event::SdpOfferReceived { cid, sdp }) => {
+            (
+                SessionState::Connected | SessionState::Connecting,
+                Event::SdpOfferReceived { cid, sdp },
+            ) => {
                 if self.active_cid != Some(cid) {
                     return Vec::new();
                 }
@@ -1527,6 +1542,51 @@ mod tests {
              the queued-offer kick-off; got order={kinds:?}"
         );
         // Now the queued offer's mids are cached.
+        assert_eq!(m.mid_to_user.get("user-99").copied(), Some(99));
+    }
+
+    #[test]
+    fn renegotiation_offer_while_connecting_is_processed_not_dropped() {
+        // A second participant can join while we're still finishing
+        // our OWN negotiation: first answer sent, ICE/DTLS still
+        // completing → state Connecting. Janus then sends the
+        // renegotiation offer that adds their receive leg. With no
+        // Connecting arm for SdpOfferReceived that offer was silently
+        // dropped, so we never built the receive bin and never heard
+        // the joiner ("second participant not heard at all").
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 5 });
+        m.step(Event::SdpOfferReceived { cid: 5, sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        assert_eq!(
+            m.state(),
+            SessionState::Connecting,
+            "setup: first answer should have advanced us to Connecting"
+        );
+
+        // The renegotiation offer arrives mid-Connecting: it must be
+        // processed (SetRemoteDescription + CreateAnswer), not dropped.
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 5,
+            sdp: "v=0\na=mid:user-99\n".into(),
+        });
+        assert_eq!(
+            m.state(),
+            SessionState::OfferPending,
+            "a renegotiation offer in Connecting must start an answer flow"
+        );
+        let kinds: Vec<&str> = acts
+            .iter()
+            .map(|a| match a {
+                Action::SetRemoteDescription { .. } => "set_remote",
+                Action::CreateAnswer => "create_answer",
+                _ => "other",
+            })
+            .collect();
+        assert!(kinds.contains(&"set_remote"), "got {kinds:?}");
+        assert!(kinds.contains(&"create_answer"), "got {kinds:?}");
+        // The offer's mids are cached so the new receive leg maps to
+        // the right uid.
         assert_eq!(m.mid_to_user.get("user-99").copied(), Some(99));
     }
 
