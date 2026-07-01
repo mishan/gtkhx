@@ -2754,6 +2754,14 @@ pchat_close (guint32 cid)
     if (gchat == NULL)
         return;
 
+    /* Unparent the emoji typeahead popover from the input before the
+     * tab's content tree is disposed — GtkTextView::dispose otherwise
+     * spins forever on the foreign popover child and freezes the app.
+     * Same fix as the PM tab close path. */
+    if (gchat->input) {
+        hx_emoji_typeahead_detach (gchat->input);
+    }
+
     hx_part_chat (&sess->htlc, cid);
     gchat_delete (sess, gchat);
 }

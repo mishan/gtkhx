@@ -582,6 +582,13 @@ msg_tab_on_close (guint16 uid)
 {
     struct msgwin *msg = msgwin_with_uid (uid);
     if (msg != NULL) {
+        /* Unparent the emoji typeahead popover from the input before
+         * AdwTabView disposes the content tree — otherwise
+         * GtkTextView::dispose spins forever on the foreign popover
+         * child and the app freezes. See hx_emoji_typeahead_detach. */
+        if (msg->inputbuf) {
+            hx_emoji_typeahead_detach (msg->inputbuf);
+        }
         msgwin_delete (msg);
     }
 }

@@ -46,4 +46,15 @@ extern GtkWidget *hx_emoji_button_new (GtkWidget *target_text_view);
  */
 extern void hx_emoji_typeahead_attach (GtkWidget *target_text_view);
 
+/*
+ * Tear the typeahead down before its hosting GtkTextView is disposed.
+ * MUST be called from the close path of any input that gets destroyed
+ * at runtime (private-message tabs, private-chat tabs) — otherwise
+ * GtkTextView's dispose loops forever trying to remove the popover
+ * (which was parented onto it), freezing the app. See the definition
+ * for the full rationale. No-op if the view was never attached or is
+ * already detached.
+ */
+extern void hx_emoji_typeahead_detach (GtkWidget *target_text_view);
+
 #endif /* HX_EMOJI_H */

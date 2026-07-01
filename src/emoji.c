@@ -111,11 +111,18 @@ hx_emoji_button_new (GtkWidget *target_text_view)
 
 typedef struct {
     GtkTextView *view;     /* the input; owns this struct via set_data_full */
-    GtkWidget *popover;    /* child of view (set_parent); GTK frees it      */
+    GtkWidget *popover;    /* child of view (set_parent) — see detach note  */
     GtkWidget *listbox;    /* suggestion rows                               */
     gboolean open;         /* is the popover currently shown?               */
     gboolean suppress;     /* guard re-entrancy while we edit the buffer    */
     int tok_start_off;     /* char offset of the ':' that opened the token  */
+    /* Bookkeeping so hx_emoji_typeahead_detach can fully unwire before
+     * the view is disposed (see the detach comment for why that's
+     * necessary). */
+    GtkTextBuffer *buffer;         /* the view's buffer (borrowed)          */
+    gulong changed_id;             /* "changed" on buffer                    */
+    gulong cursor_id;              /* "notify::cursor-position" on buffer    */
+    GtkEventController *key_ctrl;  /* capture-phase key controller on view   */
 } EmojiTypeahead;
 
 static gboolean
@@ -440,9 +447,11 @@ hx_emoji_typeahead_attach (GtkWidget *target_text_view)
                       G_CALLBACK (ta_row_activated), ta);
 
     GtkTextBuffer *buf = gtk_text_view_get_buffer (ta->view);
-    g_signal_connect (buf, "changed", G_CALLBACK (ta_on_changed), ta);
-    g_signal_connect (buf, "notify::cursor-position",
-                      G_CALLBACK (ta_on_cursor), ta);
+    ta->buffer = buf;
+    ta->changed_id
+        = g_signal_connect (buf, "changed", G_CALLBACK (ta_on_changed), ta);
+    ta->cursor_id = g_signal_connect (buf, "notify::cursor-position",
+                                      G_CALLBACK (ta_on_cursor), ta);
 
     /* Capture phase so nav/commit/dismiss keys are seen before the chat
      * input's bubble-phase handler — but only consumed while open. */
@@ -450,9 +459,58 @@ hx_emoji_typeahead_attach (GtkWidget *target_text_view)
     gtk_event_controller_set_propagation_phase (kc, GTK_PHASE_CAPTURE);
     g_signal_connect (kc, "key-pressed", G_CALLBACK (ta_key_pressed), ta);
     gtk_widget_add_controller (target_text_view, kc);
+    ta->key_ctrl = kc; /* borrowed — owned by the view's controller list */
 
-    /* The view owns the state; GTK frees the parented popover with the
-     * view, so teardown is just g_free. */
+    /* The view owns the state via qdata; g_free reclaims the struct at
+     * the view's finalize. The parented popover, however, must be
+     * unparented BEFORE the view is disposed — see the detach comment.
+     * Callers that tear a chat/PM tab down invoke
+     * hx_emoji_typeahead_detach at the close chokepoint to do exactly
+     * that; this destroy-notify is the fallback for the never-closed
+     * public chat input (its view is never disposed, so the popover
+     * lifetime rides along harmlessly). */
     g_object_set_data_full (G_OBJECT (target_text_view), "hx-emoji-typeahead",
                             ta, g_free);
+}
+
+/* Explicitly unwire + unparent the typeahead before the hosting view
+ * is disposed. This is REQUIRED on any input that gets destroyed at
+ * runtime (PM tabs, private-chat tabs): the popover is a child of the
+ * GtkTextView via gtk_widget_set_parent, and GtkTextView::dispose
+ * loops gtk_text_view_remove over its children — that call rejects the
+ * foreign popover ("GtkPopover is not a child of GtkTextView") without
+ * unparenting it, so the loop spins forever and the app freezes. The
+ * qdata destroy-notify (g_free) runs at finalize, far too late to
+ * break that dispose-time loop, so the close path must call this first.
+ *
+ * Safe to call more than once and on a view that was never attached
+ * (no-op). After this runs the qdata is gone, so the view's eventual
+ * finalize won't double-free. */
+void
+hx_emoji_typeahead_detach (GtkWidget *target_text_view)
+{
+    if (!GTK_IS_TEXT_VIEW (target_text_view)) {
+        return;
+    }
+    /* steal, not get: we take over teardown from the qdata destroy-
+     * notify so it doesn't also g_free the struct. */
+    EmojiTypeahead *ta = g_object_steal_data (G_OBJECT (target_text_view),
+                                              "hx-emoji-typeahead");
+    if (!ta) {
+        return;
+    }
+    if (ta->buffer) {
+        g_clear_signal_handler (&ta->changed_id, ta->buffer);
+        g_clear_signal_handler (&ta->cursor_id, ta->buffer);
+    }
+    if (ta->key_ctrl) {
+        gtk_widget_remove_controller (target_text_view, ta->key_ctrl);
+    }
+    if (ta->popover) {
+        /* Only ref on the popover is the parent's, so unparent frees
+         * it. Do this while the view is still alive (pre-dispose). */
+        gtk_widget_unparent (ta->popover);
+        ta->popover = NULL;
+    }
+    g_free (ta);
 }
