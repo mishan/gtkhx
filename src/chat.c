@@ -2508,13 +2508,9 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
     gtk_widget_set_margin_end (vstack, 5);
     gtk_widget_set_margin_top (vstack, 5);
     gtk_widget_set_margin_bottom (vstack, 5);
-#ifdef HAVE_VOICE
-    /* Phase 8.D: voice toolbar above the chat output. Public-chat
-     * cid is 0; voice_panel hides itself if HTLC_CAP_VOICE wasn't
-     * echoed, so on servers without voice support it costs nothing. */
-    gchat->voice_panel = voice_panel_new (sess, 0);
-    gtk_box_append (GTK_BOX (vstack), gchat->voice_panel);
-#endif
+    /* Voice controls for the public room (cid 0) now live in the
+     * standalone Users window's button bar (see create_users_window),
+     * not here — the chat window keeps its full real estate. */
     gtk_widget_set_vexpand (outputframe, TRUE);
     gtk_widget_set_vexpand (inputframe, FALSE);
     gtk_box_append (GTK_BOX (vstack), outputframe);
@@ -2960,12 +2956,9 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
 	 * create_chat_window above for the rationale. */
     {
         GtkWidget *vstack = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-#ifdef HAVE_VOICE
-        /* Phase 8.D: voice toolbar at the top of each private
-         * chat tab, room-scoped via the chat's cid. */
-        gchat->voice_panel = voice_panel_new (sess, chat->cid);
-        gtk_box_append (GTK_BOX (vstack), gchat->voice_panel);
-#endif
+        /* Voice controls now live in this pchat's user-list button bar
+         * (hbuttonbox below), room-scoped via chat->cid — see the
+         * voice_panel_new call after the action buttons. */
         gtk_widget_set_vexpand (outputframe, TRUE);
         gtk_widget_set_vexpand (inputframe, FALSE);
         gtk_box_append (GTK_BOX (vstack), outputframe);
@@ -3153,6 +3146,14 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtkhx_box_pack (hbuttonbox, kick_btn, 0, 0, 2);
     gtkhx_box_pack (hbuttonbox, ban_btn, 0, 0, 0);
     gtkhx_box_pack (hbuttonbox, igno_btn, 0, 0, 0);
+
+#ifdef HAVE_VOICE
+    /* Voice Join/Leave + Mute icon controls for this private room,
+     * scoped to chat->cid. Sit at the end of the user-list action
+     * bar; hidden entirely unless the server echoed HTLC_CAP_VOICE. */
+    gchat->voice_panel = voice_panel_new (sess, chat->cid);
+    gtkhx_box_pack (hbuttonbox, gchat->voice_panel, 0, 0, 4);
+#endif
 
     user_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 

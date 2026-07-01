@@ -46,6 +46,7 @@
 #include "rcv.h"
 #include "users.h"
 #include "users_view.h"
+#include "voice_panel.h" /* voice_panel_new — Join/Mute icon controls */
 #include "gif_avatar.h" /* gtkhx_avatar_is_animated / _is_paused / _set_paused */
 
 /* Every userlist call site is HxUserListView-backed; selection
@@ -1013,6 +1014,13 @@ create_users_window (GtkWidget *parent_window, gpointer data)
     gtk_widget_set_margin_bottom (button_bar, 4);
     gtk_box_append (GTK_BOX (button_bar), msgbtn);
     gtk_box_append (GTK_BOX (button_bar), chatbtn);
+#ifdef HAVE_VOICE
+    /* Public-room (cid 0) voice Join/Leave + Mute icon controls.
+     * The controls live with the user list rather than the chat
+     * window; hidden entirely unless the server echoed
+     * HTLC_CAP_VOICE. Grouped with Msg/Chat on the start side. */
+    gtk_box_append (GTK_BOX (button_bar), voice_panel_new (sess, 0));
+#endif
     {
         GtkWidget *spacer = gtk_label_new (NULL);
         gtk_widget_set_hexpand (spacer, TRUE);

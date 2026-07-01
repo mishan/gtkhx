@@ -129,11 +129,13 @@ struct gtkhx_chat {
     GtkWidget *output;
     GtkWidget *input;
     GtkWidget *subject;
-    /* Phase 8.D: voice toolbar at the top of the chat tab. NULL
-     * before the chat window is created; populated by
-     * voice_panel_new in create_{chat,pchat}_window. Hidden
-     * when HTLC_CAP_VOICE wasn't echoed (which is the common
-     * case on most servers). */
+    /* Voice Join/Mute icon controls for a private chat, hosted in
+     * that pchat's user-list action bar (create_pchat_window). NULL
+     * for the public chat — its controls live in the standalone
+     * Users window instead (create_users_window), and the voice
+     * panels are tracked in voice_panel.c's own registry rather than
+     * through this field. Hidden when HTLC_CAP_VOICE wasn't echoed
+     * (the common case on most servers). */
     GtkWidget *voice_panel;
     /* per-pchat
 	 * sidebar is now an HxUserListView GObject (GtkColumnView-

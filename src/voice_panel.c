@@ -227,6 +227,27 @@ ensure_voice_runtime (session *sess)
  * the handler again. */
 #define KEY_SUPPRESS "voice-panel-suppress"
 
+/* Registry of every live voice panel (borrowed pointers). The
+ * runtime state/mute signal callbacks used to find panels by walking
+ * sess->gchats for gchat->voice_panel, which only works for panels
+ * that hang off a gtkhx_chat. Since the controls now live in the
+ * user-list surfaces — the public room's controls sit in the
+ * standalone Users window, which is NOT a gchat sidebar — that walk
+ * can't reach them. This flat registry (keyed at update time on each
+ * panel's KEY_CID) covers both surfaces uniformly. Panels add
+ * themselves in voice_panel_new and remove themselves on
+ * GtkWidget::destroy. */
+static GPtrArray *voice_panels;
+
+static void
+on_panel_destroy (GtkWidget *panel, gpointer user_data)
+{
+    (void)user_data;
+    if (voice_panels) {
+        g_ptr_array_remove_fast (voice_panels, panel);
+    }
+}
+
 static gboolean
 panel_should_show (struct htlc_conn *htlc)
 {
@@ -269,10 +290,14 @@ update_button_labels (GtkWidget *panel)
     session *sess = g_object_get_data (G_OBJECT (panel), KEY_SESS);
     gboolean access_ok = sess && panel_is_enabled (&sess->htlc);
 
-    /* Join Voice ↔ Leave Voice */
+    /* Join Voice ↔ Leave Voice. Icon-only now that the controls live
+     * in the user-list button bar; the tooltip carries the words.
+     * call-start/call-stop are stock symbolic icons (adwaita-icon-
+     * theme), so no bundled art is needed. */
     if (join_btn) {
-        gtk_button_set_label (GTK_BUTTON (join_btn),
-                              joined ? _ ("Leave Voice") : _ ("Join Voice"));
+        gtk_button_set_icon_name (GTK_BUTTON (join_btn),
+                                  joined ? "call-stop-symbolic"
+                                         : "call-start-symbolic");
         if (!access_ok) {
             /* Access bit missing — spec-mandated permission
              * tooltip. Keep over the normal one when the panel
@@ -299,8 +324,10 @@ update_button_labels (GtkWidget *panel)
     if (mute_btn) {
         gtk_widget_set_sensitive (GTK_WIDGET (mute_btn),
                                   joined && access_ok);
-        gtk_button_set_label (GTK_BUTTON (mute_btn),
-                              muted ? _ ("Unmute") : _ ("Mute"));
+        gtk_button_set_icon_name (
+            GTK_BUTTON (mute_btn),
+            muted ? "microphone-sensitivity-muted-symbolic"
+                  : "audio-input-microphone-symbolic");
         gtk_widget_set_tooltip_text (
             GTK_WIDGET (mute_btn),
             muted ? _ ("Restore your microphone")
@@ -463,10 +490,11 @@ on_mute_toggled (GtkToggleButton *btn, gpointer user_data)
 GtkWidget *
 voice_panel_new (session *sess, guint32 cid)
 {
-    GtkWidget *panel = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_add_css_class (panel, "toolbar");
-    gtk_widget_set_margin_top (panel, 2);
-    gtk_widget_set_margin_bottom (panel, 2);
+    /* A tight two-icon-button box designed to sit inline with the
+     * other icon buttons in the user-list button bar (msg / chat /
+     * kick / ban / …). No "toolbar" chrome or margins — it blends
+     * into the surrounding bar. */
+    GtkWidget *panel = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 2);
 
     /* Stash session + cid so the click handlers can reach them
      * without needing a custom struct. */
@@ -474,8 +502,10 @@ voice_panel_new (session *sess, guint32 cid)
     g_object_set_data (G_OBJECT (panel), KEY_CID,
                        GUINT_TO_POINTER (cid));
 
-    GtkWidget *join_btn = gtk_toggle_button_new_with_label (_ ("Join Voice"));
-    GtkWidget *mute_btn = gtk_toggle_button_new_with_label (_ ("Mute"));
+    /* Icon-only toggle buttons; update_button_labels sets the actual
+     * icon per state (call-start/stop, mic/mic-muted) + the tooltip. */
+    GtkWidget *join_btn = gtk_toggle_button_new ();
+    GtkWidget *mute_btn = gtk_toggle_button_new ();
     g_object_set_data (G_OBJECT (panel), KEY_JOIN_BTN, join_btn);
     g_object_set_data (G_OBJECT (panel), KEY_MUTE_BTN, mute_btn);
 
@@ -494,6 +524,14 @@ voice_panel_new (session *sess, guint32 cid)
 
     /* Apply visibility + enabled state for the current htlc. */
     voice_panel_refresh (panel, sess);
+
+    /* Register for signal-driven state updates; auto-deregister when
+     * the widget is destroyed (tab close / session teardown). */
+    if (!voice_panels) {
+        voice_panels = g_ptr_array_new ();
+    }
+    g_ptr_array_add (voice_panels, panel);
+    g_signal_connect (panel, "destroy", G_CALLBACK (on_panel_destroy), NULL);
 
     return panel;
 }
@@ -565,8 +603,6 @@ voice_runtime_state_changed_cb (void *user_data, gtkhx_voice_state state)
 {
     (void) user_data;
     session *sess = &the_session;
-    if (!sess->gchats)
-        return;
 
     gboolean joined_now = state_is_joined (state);
 
@@ -592,25 +628,22 @@ voice_runtime_state_changed_cb (void *user_data, gtkhx_voice_state state)
                has_active ? "" : "(none) ",
                (unsigned int) active_cid);
 
-    GHashTableIter iter;
-    gpointer key, val;
-    g_hash_table_iter_init (&iter, sess->gchats);
-    while (g_hash_table_iter_next (&iter, &key, &val)) {
-        struct gtkhx_chat *gchat = val;
-        if (!gchat || !gchat->voice_panel)
-            continue;
-        guint32 cid = GPOINTER_TO_UINT (key);
-        gboolean is_active = has_active && cid == active_cid;
-        panel_set_bool (gchat->voice_panel, KEY_JOINED,
-                        joined_now && is_active);
-        /* Leaving / Idle on a previously-joined panel needs muted
-         * cleared too — otherwise a subsequent Join sees a stale
-         * Unmute label, which update_button_labels disabled-state
-         * gate would otherwise paper over. */
-        if (!joined_now || !is_active) {
-            panel_set_bool (gchat->voice_panel, KEY_MUTED, FALSE);
+    if (voice_panels) {
+        for (guint i = 0; i < voice_panels->len; i++) {
+            GtkWidget *panel = g_ptr_array_index (voice_panels, i);
+            guint32 cid = GPOINTER_TO_UINT (
+                g_object_get_data (G_OBJECT (panel), KEY_CID));
+            gboolean is_active = has_active && cid == active_cid;
+            panel_set_bool (panel, KEY_JOINED, joined_now && is_active);
+            /* Leaving / Idle on a previously-joined panel needs muted
+             * cleared too — otherwise a subsequent Join sees a stale
+             * muted icon, which update_button_labels' disabled-state
+             * gate would otherwise paper over. */
+            if (!joined_now || !is_active) {
+                panel_set_bool (panel, KEY_MUTED, FALSE);
+            }
+            update_button_labels (panel);
         }
-        update_button_labels (gchat->voice_panel);
     }
 
     /* When we transition to a non-joined state (LEAVING terminal
@@ -633,7 +666,7 @@ voice_runtime_mute_changed_cb (void *user_data, int muted)
 {
     (void) user_data;
     session *sess = &the_session;
-    if (!sess->gchats || !sess->voice_runtime)
+    if (!sess->voice_runtime)
         return;
 
     uint32_t active_cid = 0;
@@ -643,12 +676,17 @@ voice_runtime_mute_changed_cb (void *user_data, int muted)
                    muted);
         return;
     }
-    struct gtkhx_chat *gchat = g_hash_table_lookup (
-        sess->gchats, GUINT_TO_POINTER (active_cid));
-    if (!gchat || !gchat->voice_panel)
+    if (!voice_panels)
         return;
-    panel_set_bool (gchat->voice_panel, KEY_MUTED, muted ? TRUE : FALSE);
-    update_button_labels (gchat->voice_panel);
+    for (guint i = 0; i < voice_panels->len; i++) {
+        GtkWidget *panel = g_ptr_array_index (voice_panels, i);
+        guint32 cid = GPOINTER_TO_UINT (
+            g_object_get_data (G_OBJECT (panel), KEY_CID));
+        if (cid == active_cid) {
+            panel_set_bool (panel, KEY_MUTED, muted ? TRUE : FALSE);
+            update_button_labels (panel);
+        }
+    }
 }
 
 /* Signal handler: voice_runtime emitted SignalKind::Error.
@@ -719,15 +757,16 @@ voice_panel_set_muted (GtkWidget *panel, gboolean muted)
 void
 voice_panel_refresh_all_chats (session *sess)
 {
-    if (!sess || !sess->gchats)
+    if (!sess || !voice_panels)
         return;
-    GHashTableIter iter;
-    gpointer val;
-    g_hash_table_iter_init (&iter, sess->gchats);
-    while (g_hash_table_iter_next (&iter, NULL, &val)) {
-        struct gtkhx_chat *gchat = val;
-        if (gchat && gchat->voice_panel) {
-            voice_panel_refresh (gchat->voice_panel, sess);
+    /* Refresh every registered panel bound to this session — covers
+     * the public room's controls in the Users window plus every
+     * pchat sidebar's controls, regardless of which surface hosts
+     * them. */
+    for (guint i = 0; i < voice_panels->len; i++) {
+        GtkWidget *panel = g_ptr_array_index (voice_panels, i);
+        if (g_object_get_data (G_OBJECT (panel), KEY_SESS) == sess) {
+            voice_panel_refresh (panel, sess);
         }
     }
 }
