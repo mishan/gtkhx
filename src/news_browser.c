@@ -56,6 +56,7 @@
 #include "gtkurl.h"
 #include "hl_access.h"
 #include "hl_date.h"
+#include "debug.h"
 
 /* ---------- HxNewsNode (one GObject per tree row) ---------- */
 
@@ -590,6 +591,22 @@ on_factory_unbind (GtkSignalListItemFactory *factory, GtkListItem *list_item,
 
 /* ---------- RPC dispatch ---------- */
 
+/* Whether it's worth speaking the 1.5 threaded-news protocol to the
+ * current server. It needs BOTH the 1.5 protocol — the server advertised
+ * HTLS_DATA_VERSION >= 150 — AND read-news permission. A 1.0/1.2-class
+ * server (version 0: the classic servers that don't advertise a version)
+ * doesn't implement NEWSDIRLIST and rejects it with a task error, so we
+ * don't auto-fire it there; the flat News window (news.c) is the news UI
+ * for those. hl_access_permits keeps a permission-less legacy account
+ * (empty access map) allowed — the version gate is what excludes it. */
+static gboolean
+threaded_news_available (void)
+{
+    const guint8 *access = (const guint8 *) &the_session.htlc.access;
+    return the_session.htlc.version >= 150
+           && hl_access_permits (access, HL_ACCESS_READ_NEWS);
+}
+
 /* Fire HTLC_HDR_NEWSDIRLIST. `target` is the HxNewsNode whose
  * `children` store should be populated; NULL means a root fetch
  * (populate the browser's root_store instead). */
@@ -598,6 +615,19 @@ fetch_dirlist (gnews_browser *br, HxNewsNode *target)
 {
     struct gnews_folder *stub;
     (void)br;
+
+    /* Don't send NEWSDIRLIST to a server that can't answer it (1.0/1.2, or
+	 * no read-news permission) — it just earns a task-error toast on login.
+	 * Covers both the auto-fires (LOGIN_READY / panel-presented) and a
+	 * manual root Refresh; a legacy server's tree stays empty so node
+	 * expansions never reach here. */
+    if (!threaded_news_available ()) {
+        debug_log ("news",
+                   "skipping NEWSDIRLIST — server version %u lacks 1.5 "
+                   "threaded news (or account lacks read-news)",
+                   (unsigned) the_session.htlc.version);
+        return;
+    }
 
     ensure_pending_tables ();
 

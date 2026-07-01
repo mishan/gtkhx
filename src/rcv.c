@@ -501,8 +501,19 @@ hx_rcv_task (struct htlc_conn *htlc)
     gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &trans);
     tsk = task_with_trans (&the_session, trans);
 
+    /* Speculative bootstrap probes whose rejection is expected and
+	 * non-actionable: the GIF-icons capability probe (no cap/access bit
+	 * and no version tie, so a task error is just "unsupported"). Their
+	 * own rcv handler records the verdict on the error path (dispatched
+	 * below), so suppress the generic error toast + ERROR sound for them
+	 * — otherwise every login to a server without the extension nags the
+	 * user about a request they never made. */
+    gboolean silent_probe = tsk && tsk->str && !strcmp (tsk->str, "icon-list");
+
     if (task_inerror (htlc)) {
-        task_error (htlc);
+        if (!silent_probe) {
+            task_error (htlc);
+        }
         error = 1;
     }
 #ifdef HAVE_VOICE
@@ -566,11 +577,12 @@ hx_rcv_task (struct htlc_conn *htlc)
 		 * have per-task state to free; the error toast above is
 		 * enough and we skip them as before. */
         gboolean dispatch_on_error
-            = tsk->str
-              && (!strcmp (tsk->str, "xfer_go")
-                  || !strcmp (tsk->str, "xfer_go_folder")
-                  || !strcmp (tsk->str, "upload-media")
-                  || !strcmp (tsk->str, "download-media"));
+            = silent_probe
+              || (tsk->str
+                  && (!strcmp (tsk->str, "xfer_go")
+                      || !strcmp (tsk->str, "xfer_go_folder")
+                      || !strcmp (tsk->str, "upload-media")
+                      || !strcmp (tsk->str, "download-media")));
         if (tsk->rcv && (!error || dispatch_on_error)) {
             tsk->rcv (htlc, tsk->ptr, tsk->data);
         }
@@ -2108,6 +2120,26 @@ rcv_task_icon_getlist (struct htlc_conn *htlc)
 {
     /* The reply arriving at all means the server supports the
 	 * extension — flip the probe state and disarm the watchdog. */
+    /* GIF-icons has no capability/access bit and no version tie (a 1.5+
+     * server may or may not implement it), so support is detected purely
+     * by this probe. An ERROR reply is the "not supported" answer, exactly
+     * like the watchdog's no-reply timeout — mark unsupported, disarm the
+     * watchdog, and return WITHOUT a user toast (hx_rcv_task suppresses
+     * task_error for the "icon-list" task and dispatches us on the error
+     * path so we record the verdict). A speculative probe's rejection is
+     * expected and non-actionable. */
+    if (task_inerror (htlc)) {
+        htlc->gif_icons_state = GIF_ICONS_UNSUPPORTED;
+        if (htlc->gif_icons_probe_timer) {
+            g_source_remove (htlc->gif_icons_probe_timer);
+            htlc->gif_icons_probe_timer = 0;
+        }
+        debug_log ("icon",
+                   "ICON_GETLIST rejected (task error) — server lacks the "
+                   "GIF-icons extension; probe verdict UNSUPPORTED");
+        return;
+    }
+
     htlc->gif_icons_state = GIF_ICONS_SUPPORTED;
     if (htlc->gif_icons_probe_timer) {
         g_source_remove (htlc->gif_icons_probe_timer);

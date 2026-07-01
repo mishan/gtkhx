@@ -450,15 +450,7 @@ reload_news (GtkWidget *widget, gpointer data)
 	 * GTKHX_DEBUG=news what's happening. */
     {
         const guint8 *access = (const guint8 *)&sess->htlc.access;
-        gboolean any_bit_set = FALSE;
-        int i;
-        for (i = 0; i < 8; i++) {
-            if (access[i]) {
-                any_bit_set = TRUE;
-                break;
-            }
-        }
-        if (any_bit_set && !hl_access_has (access, HL_ACCESS_READ_NEWS)) {
+        if (!hl_access_permits (access, HL_ACCESS_READ_NEWS)) {
             debug_log ("news", "skipping HTLC_HDR_NEWS_GETFILE — account lacks "
                                "HL_ACCESS_READ_NEWS (bit 20)");
             return;
