@@ -715,8 +715,9 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     gchar *display_nick = NULL;
     const char *display_body = NULL;
     gsize display_body_len = 0;
-    const char *self_nick = (hx_active_session ()->htlc.name[0] != '\0')
-                                ? (const char *)hx_active_session ()->htlc.name
+    session *sess = hx_active_session ();
+    const char *self_nick = (sess->htlc.name[0] != '\0')
+                                ? (const char *)sess->htlc.name
                                 : NULL;
 
     if (is_info && name_len > 0) {
@@ -1639,8 +1640,9 @@ xprintline (GtkWidget *text, char *chat, size_t len)
     gsize body_off = 0, body_len = 0;
     gboolean is_info = FALSE;
     gboolean said_by_self = FALSE;
-    const char *self_nick = (hx_active_session ()->htlc.name[0] != '\0')
-                                ? (const char *)hx_active_session ()->htlc.name
+    session *sess = hx_active_session ();
+    const char *self_nick = (sess->htlc.name[0] != '\0')
+                                ? (const char *)sess->htlc.name
                                 : NULL;
 
     /* Recognise any line that opens with the INFOPREFIX-style

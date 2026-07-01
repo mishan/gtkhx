@@ -399,12 +399,18 @@ exec_ready_read (int fd)
         exec_close (fd);
     } else {
         buf[r] = 0;
-        if (hxd_files[fd].conn.htlc == &hx_active_session ()->htlc) {
+        /* conn.htlc holds the connection that started the command in
+         * `/exec -o` mode (see the setter in COMMAND(exec)), or NULL for
+         * a plain `/exec` whose output prints locally. Route -o output
+         * back to that originating connection — not hx_active_session(),
+         * which can differ from it once multiple connections exist. */
+        struct htlc_conn *out_htlc = hxd_files[fd].conn.htlc;
+        if (out_htlc) {
             LF2CR (buf, r);
             if (buf[r - 1] == '\r') {
                 buf[r - 1] = 0;
             }
-            hx_send_chat (&hx_active_session ()->htlc, buf, hxd_files[fd].cid, 0);
+            hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
         } else {
             hx_printf (&hx_active_session ()->htlc, hxd_files[fd].cid, "%s", buf);
         }
