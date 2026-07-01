@@ -1842,20 +1842,22 @@ on_connection_state (GtkhxSession *sess, guint state, gpointer user_data)
         return;
     }
 
-    /* On DISCONNECTED, drop the remote panel's stale listing so
-     * the user doesn't see content they no longer have access to
-     * — the rows would silently outlive the session otherwise.
-     * Local providers are no-op here (clear_listing is a remote-
-     * only call). */
+    /* On DISCONNECTED, drop the remote panel's stale listing and
+     * reset it to the server root so the user doesn't see content
+     * they no longer have access to — the rows would silently outlive
+     * the session otherwise — and so a later connection to a different
+     * server doesn't inherit this one's deep path (nonexistent there,
+     * leaving "Up" stuck). Reset-to-root is a remote-only call; local
+     * providers aren't touched. */
     if (state == GTKHX_CONNECTION_DISCONNECTED) {
         if (br->left_provider
             && HX_IS_REMOTE_FILES_PROVIDER (br->left_provider)) {
-            hx_remote_files_provider_clear_listing (
+            hx_remote_files_provider_reset_to_root (
                 HX_REMOTE_FILES_PROVIDER (br->left_provider));
         }
         if (br->right_provider
             && HX_IS_REMOTE_FILES_PROVIDER (br->right_provider)) {
-            hx_remote_files_provider_clear_listing (
+            hx_remote_files_provider_reset_to_root (
                 HX_REMOTE_FILES_PROVIDER (br->right_provider));
         }
     }
