@@ -1,12 +1,16 @@
 # Multi-connection scoping
 
-**Status: scoping only. No decisions locked in.** This is the design
-survey for `MAX_CONN > 1` — the long-deferred ability to be connected
-to several Hotline servers at once. It exists to make the trade-offs
-legible before anyone writes code, and to record the two pivotal
-decisions that are deliberately still open: **when** this lands
-relative to the Rust port, and **how** per-connection panels relate to
-the docking layout.
+**Status: scoping — the two pivotal decisions remain open. Phase M0
+(the behavior-preserving session-routing seam) has shipped as an
+enabling step; see "M0 implementation notes" below.** This is the
+design survey for `MAX_CONN > 1` — the long-deferred ability to be
+connected to several Hotline servers at once. It exists to make the
+trade-offs legible before anyone commits, and to record the two pivotal
+decisions that are deliberately still open: **when** this lands relative
+to the Rust port, and **how** per-connection panels relate to the
+docking layout. M0 was safe to land ahead of those decisions because it
+changes no behavior (N == 1) — it only makes "which session" an
+accessor call instead of a hardcoded global.
 
 Companion reading: `docs/docking.md` and `docs/docking-splits.md` (the
 dock the UI would extend), `docs/rust/ROADMAP.md` Phase R7 (where the
@@ -313,18 +317,50 @@ destination, but more than a v1.
 
 If the "middle path" on Axis 1 is chosen, a plausible decomposition:
 
-| Phase | Scope | Depends on |
-|-------|-------|-----------|
-| M0 | Reify a connection object; make `session` a collection; route `the_session` sites through a `current`/`active` accessor. No behavior change (N still = 1). | — |
-| M1 | Per-connection `GtkhxSession`; signal routing to per-connection UI subtree. Still single active connection. | M0 |
-| M2 | Voice arbiter: global token + preempt-on-acquire; per-session voice models retained. | M0 |
-| M3 | Connection tab strip (`AdwTabView`); pick layout Model A or B; per-Chat-panel `chat_tabs`. | M1 |
-| M4 | Global transfer queue with per-connection tags; per-connection loss banner; bookmarks "open in new tab". | M3 |
-| M5 | Layout persistence across connections; Tier 3 two-server isolation test. | M3 |
+| Phase | Scope | Depends on | Status |
+|-------|-------|-----------|--------|
+| M0 | Session-routing seam: `sess_from_htlc(htlc)` + `hx_active_session()` accessors replace direct `&the_session` access everywhere. Model code routes received events by connection; UI code routes by focused session. No behavior change (N == 1). | — | ✅ shipped |
+| M1 | Per-connection `GtkhxSession`; signal routing to per-connection UI subtree. Still single active connection. | M0, M3-lite | ⬜ |
+| M2 | Voice arbiter: global token + preempt-on-acquire; per-session voice models retained. | session collection | ⬜ |
+| M3 | Reify the connection/session as a heap object behind a collection + factory (the `the_session` construction sites); connection tab strip (`AdwTabView`); pick layout Model A or B; per-Chat-panel `chat_tabs`. | M0 | ⬜ |
+| M4 | Global transfer queue with per-connection tags; per-connection loss banner; bookmarks "open in new tab". | M3 | ⬜ |
+| M5 | Layout persistence across connections; Tier 3 two-server isolation test. | M3 | ⬜ |
 
-M0–M2 are the model plumbing (could land pre-R7); M3–M5 are UI-shaped
-(natural to ride with the R5 window ports). This is a sketch to make the
-shape discussable, not a plan of record.
+M0 is the model plumbing that's valuable and safe today (behavior-
+preserving, landed pre-R7). M1/M2 want at least a session collection to
+exist first (there's nothing to route *to* while N == 1), so they now
+depend on the M3 reification rather than standing alone. M3–M5 are
+UI-shaped (natural to ride with the R5 window ports). This is a sketch
+to make the shape discussable, not a plan of record.
+
+### M0 implementation notes (shipped)
+
+Landed on `claude/multi-conn-m0-session-seam` in three commits:
+
+1. **The seam.** `session.h` gains `sess_from_htlc(htlc)` — an exact
+   `container_of` over the `htlc_conn` embedded in `session` (the only
+   instance in the tree, so it's correct now and once sessions are
+   heap-allocated) — and `hx_active_session()` (returns `&the_session`
+   for N == 1; defined in `gtkhx.c`).
+2. **Model side routes by connection.** `rcv.c`, `network.c`,
+   `commands.c`, `xfers.c`, `usermod.c`, `gif_icons.c`, `tasks.c`,
+   `inline_media_*`, `notify.c`: an inbound event resolves its session
+   from the connection it already holds (`sess_from_htlc(htlc)`, or the
+   transfer's `htxf->htlc`). Where the connection had been reached as
+   `the_session.htlc`, it collapses to the actual `htlc` param.
+3. **UI side routes by focused session.** All window/dialog code uses
+   `hx_active_session()`. Display handlers that receive `htlc` from the
+   signal (chat/user/news output) route by it instead — more correct.
+
+Deliberately **not** converted (the concrete `the_session` stays):
+the construction/teardown sites in `gtkhx.c` (`fe_init`, `hx_quit`,
+`main`, `hotline_client_init`) — where the one session is born and dies,
+i.e. the future M3 factory — and two `options.c` static `cfgvar` table
+entries that need a compile-time-constant address (`&the_session.htlc.
+{icon,name}`). Both are documented inline.
+
+Verified: full build clean under `-Wall -Wextra` (no warnings); 68
+Tier 1/2 unit + proto tests pass. Rust crates untouched.
 
 ---
 
