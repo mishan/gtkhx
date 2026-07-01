@@ -401,10 +401,15 @@ setbtns (session *sess, int stat)
     if (!stat) {
         gtk_widget_set_sensitive (news_btn, FALSE);
     } else {
+        /* hl_access_permits (not hl_access_has): a legacy / minimal server
+         * that sends no access bitmap (all zeros — e.g. the 1.0/1.2-class
+         * ones) still serves legacy news, and news.c fires NEWS_GETFILE in
+         * that case. Gate the button by the same rule so it isn't greyed
+         * out on a server where News actually works. */
         const guint8 *access = (const guint8 *)&sess->htlc.access;
-        gboolean can_read = hl_access_has (access, HL_ACCESS_READ_NEWS);
-
-        gtk_widget_set_sensitive (news_btn, can_read);
+        gtk_widget_set_sensitive (news_btn,
+                                  hl_access_permits (access,
+                                                     HL_ACCESS_READ_NEWS));
     }
 }
 

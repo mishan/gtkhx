@@ -137,4 +137,34 @@ hl_access_has (const guint8 *access, int bit)
     return (access[bit >> 3] & (0x80 >> (bit & 7))) != 0;
 }
 
+/* TRUE if ANY bit in the 8-byte bitmap is set. Used as a proxy for
+ * "the server actually sent us an access bitmap": an all-zero map means
+ * either pre-login or a legacy / minimal server (e.g. the 1.0/1.2-class
+ * ones that don't advertise a version and send an empty login reply)
+ * that never populated it. */
+static inline gboolean
+hl_access_any_set (const guint8 *access)
+{
+    int i;
+    for (i = 0; i < 8; i++) {
+        if (access[i]) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+/* Permissive gate: TRUE if `bit` is set, OR if the server sent no access
+ * bitmap at all (all zeros). The all-zeros case is a legacy / minimal
+ * server that doesn't report permissions — assume the action is allowed
+ * and let the server reject it if not, rather than pre-disabling a feature
+ * that actually works. This is the single source of truth for "may the
+ * account do X?" so the auto-fetch gate (news.c) and the toolbar
+ * sensitivity gate (gtkutil.c) can't drift apart. */
+static inline gboolean
+hl_access_permits (const guint8 *access, int bit)
+{
+    return !hl_access_any_set (access) || hl_access_has (access, bit);
+}
+
 #endif /* HX_HL_ACCESS_H */
