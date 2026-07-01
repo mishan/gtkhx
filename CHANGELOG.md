@@ -1,3 +1,14 @@
+## 1.2.1-dev
+
+- User Interface
+  - Move Join Voice/Mute buttons to the User list
+- Bug Fixes
+  - Make sure Files browser resets to root directory between sessions
+  - Fix emoji picker related crash when closing private chat/message tabs
+  - Fix issue with GtkHx reporting task errors for ICON_GETLIST when unavailable
+  - Don't auto fetch 1.5+ News if server version is <150
+  - Fix Hotline protocol regression with large frames introduced in Rust hxnet migration
+
 ## 1.2.0
 
 - User Interface
