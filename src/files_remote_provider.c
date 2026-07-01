@@ -379,20 +379,24 @@ hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self)
 }
 
 void
-hx_remote_files_provider_clear_listing (HxRemoteFilesProvider *self)
+hx_remote_files_provider_reset_to_root (HxRemoteFilesProvider *self)
 {
     if (!self) {
         return;
     }
     g_list_store_remove_all (self->listing);
     self->listing_error = FALSE;
-    /* Re-emit "navigated" with the existing current_path so the
-     * panel's status footer (which reflects row counts) refreshes.
-     * The path itself doesn't change — we're not navigating away,
-     * we're just clearing stale rows the user shouldn't see while
-     * disconnected. */
-    g_signal_emit_by_name (self, "navigated",
-                           self->current_path ? self->current_path : "/");
+    /* Return to the server root. The provider is created once and
+     * reused across connections, so a stale deep path from the server
+     * we just left would otherwise carry into the next session — where
+     * it doesn't exist, leaving "Up" unable to walk back to a valid
+     * parent. Resetting here means the next connection always starts
+     * listing from "/". */
+    g_free (self->current_path);
+    self->current_path = g_strdup ("/");
+    /* Re-emit "navigated" so the panel's path bar + status footer
+     * reflect the reset root and the now-empty listing. */
+    g_signal_emit_by_name (self, "navigated", self->current_path);
 }
 
 /* ---- Interface implementations ---- */

@@ -48,15 +48,19 @@ extern gboolean hx_remote_files_provider_handle_file_list_error (gpointer cfl,
 extern gboolean
 hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self);
 
-/* Drop every row and reset the listing-error flag. Called from
- * the connection-state hook on DISCONNECTED so the remote panel
- * doesn't show stale content while the user is logged out — the
- * panel's update_status path picks up the empty listing + the
- * provider's "not connected" unavailable-reason and paints the
- * disconnected hint. Re-emits "navigated" so the panel's status
- * footer updates. */
+/* Drop every row, reset the listing-error flag, and return the
+ * current directory to the server root ("/"). Called from the
+ * connection-state hook on DISCONNECTED so the remote panel doesn't
+ * show stale content while the user is logged out — the panel's
+ * update_status path picks up the empty listing + the provider's
+ * "not connected" unavailable-reason and paints the disconnected hint.
+ * Resetting the path matters because the provider outlives the
+ * session: without it, a subsequent connection to a *different* server
+ * would inherit the previous server's deep path (nonexistent there, so
+ * "Up" can't recover). Re-emits "navigated" with "/" so the panel's
+ * path bar + status footer update. */
 extern void
-hx_remote_files_provider_clear_listing (HxRemoteFilesProvider *self);
+hx_remote_files_provider_reset_to_root (HxRemoteFilesProvider *self);
 
 G_END_DECLS
 
