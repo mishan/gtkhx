@@ -816,7 +816,7 @@ output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
         return;
     }
 
-    sess = &the_session;
+    sess = sess_from_htlc (htlc);
     if (!sess) {
         return;
     }
@@ -865,7 +865,7 @@ output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
         return;
     }
 
-    sess = &the_session;
+    sess = sess_from_htlc (htlc);
     if (!sess) {
         return;
     }

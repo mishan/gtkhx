@@ -302,7 +302,7 @@ COMMAND (msg)
     }
     uid = atou32 (name);
     if (!uid) {
-        struct chat *chat = chat_with_cid (&the_session, 0);
+        struct chat *chat = chat_with_cid (sess_from_htlc (htlc), 0);
         user = hx_user_with_name (chat, name);
         if (!user) {
             hx_printf_prefix (htlc, cid, INFOPREFIX,
@@ -315,7 +315,7 @@ COMMAND (msg)
     last_msg_nick[31] = 0;
 
     if (!user) {
-        struct chat *chat = chat_with_cid (&the_session, 0);
+        struct chat *chat = chat_with_cid (sess_from_htlc (htlc), 0);
         user = hx_user_with_uid (chat, uid);
     }
     if (user) {
@@ -399,14 +399,20 @@ exec_ready_read (int fd)
         exec_close (fd);
     } else {
         buf[r] = 0;
-        if (hxd_files[fd].conn.htlc == &the_session.htlc) {
+        /* conn.htlc holds the connection that started the command in
+         * `/exec -o` mode (see the setter in COMMAND(exec)), or NULL for
+         * a plain `/exec` whose output prints locally. Route -o output
+         * back to that originating connection — not hx_active_session(),
+         * which can differ from it once multiple connections exist. */
+        struct htlc_conn *out_htlc = hxd_files[fd].conn.htlc;
+        if (out_htlc) {
             LF2CR (buf, r);
             if (buf[r - 1] == '\r') {
                 buf[r - 1] = 0;
             }
-            hx_send_chat (&the_session.htlc, buf, hxd_files[fd].cid, 0);
+            hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
         } else {
-            hx_printf (&the_session.htlc, hxd_files[fd].cid, "%s", buf);
+            hx_printf (&hx_active_session ()->htlc, hxd_files[fd].cid, "%s", buf);
         }
     }
 }
@@ -514,7 +520,7 @@ COMMAND (ignore)
 {
     guint32 uid;
     struct hx_user *user = 0;
-    struct chat *chat = chat_with_cid (&the_session, 0);
+    struct chat *chat = chat_with_cid (sess_from_htlc (htlc), 0);
 
     if (argc < 2) {
         hx_printf_prefix (htlc, cid, INFOPREFIX, "usage: %s <uid>\n", argv[0]);
@@ -664,7 +670,7 @@ hx_command (char *str, guint32 cid)
             }
             argv[argc] = 0;
 
-            cmd->fun (argc, argv, str, &the_session.htlc, cid);
+            cmd->fun (argc, argv, str, &hx_active_session ()->htlc, cid);
             g_free (s);
             if (argv != auto_argv) {
                 g_free (argv);
@@ -675,6 +681,6 @@ hx_command (char *str, guint32 cid)
     } while (cmd <= last_command && cmd->name[0] == *str);
 
 notfound:
-    hx_printf_prefix (&the_session.htlc, cid, INFOPREFIX,
+    hx_printf_prefix (&hx_active_session ()->htlc, cid, INFOPREFIX,
                       "%.*s: command not found\n", (int)(p - str), str);
 }

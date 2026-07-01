@@ -143,7 +143,7 @@ static const char *
 remote_get_unavailable_reason (HxFilesProvider *self)
 {
     (void)self;
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return _ ("Not connected to a server.");
     }
     /* htlc->fd is set as soon as the TCP socket comes up — well
@@ -155,7 +155,7 @@ remote_get_unavailable_reason (HxFilesProvider *self)
      * joined" disconnect on stricter 1.5+ servers. The flag is
      * raised in rcv.c::hx_post_login_fetches and reset in
      * hx_htlc_close. */
-    if (!the_session.htlc.flags.post_login_fetched) {
+    if (!hx_active_session ()->htlc.flags.post_login_fetched) {
         return _ ("Logging in…");
     }
     return NULL;
@@ -169,9 +169,9 @@ remote_list_drop_task (HxRemoteFilesProvider *self)
 {
     if (self->list_task_trans) {
         struct task *tsk
-            = task_with_trans (&the_session, self->list_task_trans);
+            = task_with_trans (hx_active_session (), self->list_task_trans);
         if (tsk) {
-            task_delete (&the_session, tsk);
+            task_delete (hx_active_session (), tsk);
         }
         self->list_task_trans = 0;
     }
@@ -221,7 +221,7 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     guint16 hldirlen;
     guint8 *hldir;
 
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return;
     }
 
@@ -251,11 +251,11 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
         hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
     if (hc > 0) {
         struct task *tsk = task_new (
-            &the_session.htlc, RCV_TASK_FN (rcv_task_file_list), cfl, self, "ls");
+            &hx_active_session ()->htlc, RCV_TASK_FN (rcv_task_file_list), cfl, self, "ls");
         /* Remember the trans so the watchdog can delete this task if the
 		 * server never replies (task_new keyed it on htlc->trans). */
         self->list_task_trans = tsk->trans;
-        hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_LIST, 0, chunks, hc);
+        hlwrite_chunks (&hx_active_session ()->htlc, HTLC_HDR_FILE_LIST, 0, chunks, hc);
         /* Arm the no-reply watchdog (see remote_list_timeout). */
         self->list_timeout_id = g_timeout_add_seconds (
             REMOTE_FILE_LIST_TIMEOUT_S, remote_list_timeout, self);
@@ -584,11 +584,11 @@ remote_mkdir (HxFilesProvider *self, const char *name, GError **err)
     if (!name || !*name) {
         return FALSE;
     }
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return FALSE;
     }
     path = remote_child_path (r, name);
-    hx_make_dir (&the_session.htlc, path);
+    hx_make_dir (&hx_active_session ()->htlc, path);
     g_free (path);
 
     /* Settle with a re-list of the current directory. The wire
@@ -609,11 +609,11 @@ remote_delete_entry (HxFilesProvider *self, const char *name, GError **err)
     if (!name || !*name) {
         return FALSE;
     }
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return FALSE;
     }
     path = remote_child_path (r, name);
-    hx_file_delete (&the_session.htlc, path);
+    hx_file_delete (&hx_active_session ()->htlc, path);
     g_free (path);
     remote_send_file_list (r, r->current_path);
     return TRUE;
@@ -630,12 +630,12 @@ remote_rename (HxFilesProvider *self, const char *old_name,
     if (!old_name || !new_name) {
         return FALSE;
     }
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return FALSE;
     }
     src = remote_child_path (r, old_name);
     dst = remote_child_path (r, new_name);
-    hx_file_move (&the_session.htlc, src, dst);
+    hx_file_move (&hx_active_session ()->htlc, src, dst);
     g_free (src);
     g_free (dst);
     remote_send_file_list (r, r->current_path);
@@ -657,10 +657,10 @@ remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
     if (!e || hx_file_entry_is_dir (e)) {
         return;
     }
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return;
     }
-    if (!hl_access_has ((const guint8 *)&the_session.htlc.access,
+    if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc.access,
                         HL_ACCESS_DOWNLOAD_FILES)) {
         return;
     }

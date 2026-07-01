@@ -479,7 +479,7 @@ tracker_rerun_search (void)
         }
         current_search = g_regex_new (str, flags, 0, &err);
         if (!current_search) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+            hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX,
                               "Tracker regex: %s\n",
                               err ? err->message : "compile failed");
             g_clear_error (&err);
@@ -1612,16 +1612,16 @@ on_section_activate (GtkColumnView *cv, guint pos, gpointer data)
         return;
     }
 
-    memset (the_session.htlc.compressalg, 0,
-            sizeof (the_session.htlc.compressalg));
-    memset (the_session.htlc.cipheralg, 0,
-            sizeof (the_session.htlc.cipheralg));
+    memset (hx_active_session ()->htlc.compressalg, 0,
+            sizeof (hx_active_session ()->htlc.compressalg));
+    memset (hx_active_session ()->htlc.cipheralg, 0,
+            sizeof (hx_active_session ()->htlc.cipheralg));
 
     tracker_row_pick_security (row, &port, &tls, &secure, &cipher_byte);
     cipher_name = bookmark_cipher_name (cipher_byte);
     if (cipher_name) {
-        g_strlcpy (the_session.htlc.cipheralg, cipher_name,
-                   sizeof (the_session.htlc.cipheralg));
+        g_strlcpy (hx_active_session ()->htlc.cipheralg, cipher_name,
+                   sizeof (hx_active_session ()->htlc.cipheralg));
     }
 
     /* Phase E: address is the printable string the boxed event
@@ -1629,7 +1629,7 @@ on_section_activate (GtkColumnView *cv, guint pos, gpointer data)
      * hostname. hx_connect's first arg is a host string that
      * GSocketClient resolves via getaddrinfo, so all three forms
      * route through the same resolver and connect happily. */
-    hx_connect (&the_session.htlc, hx_tracker_row_get_address (row), port,
+    hx_connect (&hx_active_session ()->htlc, hx_tracker_row_get_address (row), port,
                 "", "", secure ? 1 : 0, tls ? 1 : 0);
     g_object_unref (row);
 }
@@ -1788,7 +1788,7 @@ tracker_connect (void)
         return;
     }
 
-    create_connect_window (0, &the_session);
+    create_connect_window (0, hx_active_session ());
 
     /* Phase E: hand the connect-dialog the address string verbatim
      * (IPv4 dotted-quad, IPv6 colon-hex, or hostname). The dialog

@@ -602,8 +602,8 @@ on_factory_unbind (GtkSignalListItemFactory *factory, GtkListItem *list_item,
 static gboolean
 threaded_news_available (void)
 {
-    const guint8 *access = (const guint8 *) &the_session.htlc.access;
-    return the_session.htlc.version >= 150
+    const guint8 *access = (const guint8 *) &hx_active_session ()->htlc.access;
+    return hx_active_session ()->htlc.version >= 150
            && hl_access_permits (access, HL_ACCESS_READ_NEWS);
 }
 
@@ -625,7 +625,7 @@ fetch_dirlist (gnews_browser *br, HxNewsNode *target)
         debug_log ("news",
                    "skipping NEWSDIRLIST — server version %u lacks 1.5 "
                    "threaded news (or account lacks read-news)",
-                   (unsigned) the_session.htlc.version);
+                   (unsigned) hx_active_session ()->htlc.version);
         return;
     }
 
@@ -649,7 +649,7 @@ fetch_dirlist (gnews_browser *br, HxNewsNode *target)
         target->loaded = TRUE;
     }
 
-    hx_news15_fldr_list (&the_session.htlc, stub);
+    hx_news15_fldr_list (&hx_active_session ()->htlc, stub);
 }
 
 /* Fire HTLC_HDR_NEWSCATLIST for a category node. `target` is the
@@ -674,7 +674,7 @@ fetch_catlist (gnews_browser *br, HxNewsNode *target)
 
     target->loaded = TRUE;
 
-    hx_news15_cat_list (&the_session.htlc, stub);
+    hx_news15_cat_list (&hx_active_session ()->htlc, stub);
 }
 
 /* ---------- Reply handlers (called from gtkhx.c signal adapters) ---------- */
@@ -980,7 +980,7 @@ fetch_thread (gnews_browser *br, HxNewsNode *target)
     g_hash_table_insert (pending_threads, stub_item, g_object_ref (target));
     target->body_fetching = TRUE;
 
-    hx_news15_get_post (&the_session.htlc, stub_item);
+    hx_news15_get_post (&hx_active_session ()->htlc, stub_item);
 }
 
 /* Render the currently-selected post into the right pane. If the
@@ -1197,12 +1197,12 @@ create_response (AdwAlertDialog *dialog, const char *response,
     if (ctx->kind == NB_KIND_FOLDER) {
         char *new_path
             = build_child_path (ctx->parent ? ctx->parent->path : "/", text);
-        hx_news15_mkdir (&the_session.htlc, new_path);
+        hx_news15_mkdir (&hx_active_session ()->htlc, new_path);
         g_free (new_path);
     } else {
         char *parent
             = ctx->parent ? g_strdup (ctx->parent->path) : g_strdup ("/");
-        hx_news15_mkcat (&the_session.htlc, parent, text);
+        hx_news15_mkcat (&hx_active_session ()->htlc, parent, text);
         g_free (parent);
     }
 
@@ -1323,9 +1323,9 @@ delete_response (AdwAlertDialog *dialog, const char *response,
     }
 
     if (ctx->kind == NB_KIND_POST) {
-        hx_news15_delete_thread (&the_session.htlc, ctx->path, ctx->postid);
+        hx_news15_delete_thread (&hx_active_session ()->htlc, ctx->path, ctx->postid);
     } else {
-        hx_news15_delete (&the_session.htlc, ctx->path);
+        hx_news15_delete (&hx_active_session ()->htlc, ctx->path);
     }
 
     /* Settle with a root refresh. The model doesn't keep a
@@ -1493,7 +1493,7 @@ compose_do_post (GtkButton *btn, gpointer user_data)
     gtk_text_buffer_get_end_iter (buf, &b);
     body = gtk_text_buffer_get_text (buf, &a, &b, FALSE);
 
-    hx_news15_post_thread (&the_session.htlc, ctx->category_path, subject,
+    hx_news15_post_thread (&hx_active_session ()->htlc, ctx->category_path, subject,
                            ctx->parent_postid, body ? body : (char *)"");
 
     g_free (body);
@@ -1814,7 +1814,7 @@ sync_action_buttons (gnews_browser *br)
 {
     HxNewsNode *node = selected_node (br);
     int kind = node ? node->kind : 0;
-    const guint8 *access = (const guint8 *)&the_session.htlc.access;
+    const guint8 *access = (const guint8 *)&hx_active_session ()->htlc.access;
     int delete_bit;
 
     /* Visibility */

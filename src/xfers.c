@@ -142,7 +142,7 @@ fu_dispatch (gpointer data)
 	 * memory model, even though this dispatcher runs on the main thread. */
     if (!g_atomic_int_get (&j->htxf->canceled)) {
         gtkhx_session_emit_file_update (gtkhx_session_get_default (),
-                                        &the_session, j->htxf);
+                                        sess_from_htlc (j->htxf->htlc), j->htxf);
     }
     htxf_unref (j->htxf);
     g_free (j);
@@ -314,7 +314,7 @@ xfer_go (struct htxf_conn *htxf)
 		 * pass UTF-8); convert back to Mac Roman in legacy mode.
 		 * is_body = FALSE — filenames are single-line. */
         {
-            gboolean utf8 = (the_session.htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
+            gboolean utf8 = (htxf->htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
             gsize nm_wire_len = 0;
             char *nm_wire = gtkhx_text_for_wire (
                 htxf->remotename, htxf->remotename_len, utf8, FALSE,
@@ -338,9 +338,9 @@ xfer_go (struct htxf_conn *htxf)
                 hldirlen, resuming ? 1 : 0, resuming ? rflt : NULL, chunks,
                 G_N_ELEMENTS (chunks));
             if (hc > 0) {
-                task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_get),
+                task_new (htxf->htlc, RCV_TASK_FN (rcv_task_file_get),
                           htxf, 0, "xfer_go");
-                hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_GET, 0, chunks,
+                hlwrite_chunks (htxf->htlc, HTLC_HDR_FILE_GET, 0, chunks,
                                 hc);
             }
             g_free (hldir);
@@ -353,7 +353,7 @@ xfer_go (struct htxf_conn *htxf)
 		 * companion (sent only when CAP_LARGE_FILES was negotiated). */
         guint32 size_host = (guint32)MIN (htxf->total_size,
                                           (guint64)0xFFFFFFFFUL);
-        gboolean large = (the_session.htlc.caps & HTLC_CAP_LARGE_FILES) != 0;
+        gboolean large = (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0;
 
         /* Initialise before the ternary — when the no-dir branch
 		 * takes the NULL path, path_to_hldir never runs and
@@ -371,7 +371,7 @@ xfer_go (struct htxf_conn *htxf)
         bool has_preview = exists_remote (htxf->remotepath);
 
         /* Phase E (follow-up): encode remotename. */
-        gboolean utf8 = (the_session.htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
+        gboolean utf8 = (htxf->htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
         gsize nm_wire_len = 0;
         char *nm_wire
             = gtkhx_text_for_wire (htxf->remotename, htxf->remotename_len,
@@ -391,9 +391,9 @@ xfer_go (struct htxf_conn *htxf)
             htxf->total_size, chunks, G_N_ELEMENTS (chunks), scratch,
             sizeof (scratch));
         if (hc > 0) {
-            task_new (&the_session.htlc, RCV_TASK_FN (rcv_task_file_put), htxf,
+            task_new (htxf->htlc, RCV_TASK_FN (rcv_task_file_put), htxf,
                       0, "xfer_go");
-            hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_PUT, 0, chunks,
+            hlwrite_chunks (htxf->htlc, HTLC_HDR_FILE_PUT, 0, chunks,
                             hc);
         }
         g_free (nm_wire);
@@ -494,10 +494,10 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     xfers[nxfers] = htxf;
     nxfers++;
 
-    htxf->htlc = &the_session.htlc;
+    htxf->htlc = &hx_active_session ()->htlc;
     htxf->total_pos = 0;
     htxf->total_size = 1;
-    gtkhx_session_emit_file_update (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_file_update (gtkhx_session_get_default (), sess_from_htlc (htxf->htlc),
                                     htxf);
 
     return htxf;
@@ -1726,7 +1726,7 @@ xfer_tasks_update (struct htlc_conn *htlc)
     for (i = 0; i < nxfers; i++) {
         if (xfers[i]->htlc == htlc) {
             gtkhx_session_emit_file_update (gtkhx_session_get_default (),
-                                            &the_session, xfers[i]);
+                                            sess_from_htlc (htlc), xfers[i]);
         }
     }
 }
@@ -1784,7 +1784,7 @@ xfer_remove_from_list (struct htxf_conn *htxf)
         }
         nxfers--;
         gtkhx_session_emit_xfer_destroyed (gtkhx_session_get_default (),
-                                           &the_session, htxf);
+                                           sess_from_htlc (htxf->htlc), htxf);
         htxf_unref (htxf); /* drop the xfers[] ref */
         if (nxfers) {
             xfer_go (xfers[0]);

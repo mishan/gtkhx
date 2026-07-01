@@ -120,7 +120,7 @@ keyaccel_tracker_cb (GtkWidget *w, GVariant *args, gpointer data)
     (void)w;
     (void)args;
     (void)data;
-    create_tracker_window (NULL, &the_session);
+    create_tracker_window (NULL, hx_active_session ());
     return TRUE;
 }
 

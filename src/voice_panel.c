@@ -195,7 +195,7 @@ static void voice_runtime_error_cb (void *user_data, const char *text);
  * signal-in bridge (so the panel's joined / muted state reflects
  * authoritative state-machine state instead of optimistic UI).
  * user_data is &sess->htlc; from there the signal handlers reach
- * sess via the the_session singleton. Both stay valid until
+ * sess via hx_active_session (). Both stay valid until
  * network.c::hx_htlc_close frees the runtime on disconnect. */
 static struct gtkhx_voice_runtime *
 ensure_voice_runtime (session *sess)
@@ -593,16 +593,16 @@ state_is_joined (gtkhx_voice_state state)
 }
 
 /* Signal handler: voice_runtime emitted SignalKind::StateChanged.
- * user_data is &htlc; we use the_session to walk the session's
- * gchats (single-session for now — see CLAUDE.md note on the
- * sess_from_htlc lie). Updates KEY_JOINED on every panel: TRUE
- * only on the panel matching the runtime's active cid, FALSE on
- * all others. */
+ * user_data is &htlc; we reach the runtime + voice model via
+ * hx_active_session () (the focused session — single-session today)
+ * and iterate the voice_panels registry. Updates KEY_JOINED on every
+ * panel: TRUE only on the panel matching the runtime's active cid,
+ * FALSE on all others. */
 static void
 voice_runtime_state_changed_cb (void *user_data, gtkhx_voice_state state)
 {
     (void) user_data;
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
 
     gboolean joined_now = state_is_joined (state);
 
@@ -665,7 +665,7 @@ static void
 voice_runtime_mute_changed_cb (void *user_data, int muted)
 {
     (void) user_data;
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
     if (!sess->voice_runtime)
         return;
 
@@ -728,7 +728,7 @@ voice_runtime_speaker_changed_cb (void *user_data, uint16_t uid,
                                   int is_speaking)
 {
     (void) user_data;
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
     if (!sess->voice_model) {
         return;
     }

@@ -277,7 +277,7 @@ set_name_comment (GtkWidget *btn, gpointer data)
 	 * also go through the encoder. is_body = FALSE — file/name
 	 * fields are single-line; comment is multi-line but the spec
 	 * lists DATA_FILE_COMMENT as is_body too. */
-    struct htlc_conn *htlc = &the_session.htlc;
+    struct htlc_conn *htlc = &hx_active_session ()->htlc;
     gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
     gsize file_len = 0, name_len = 0, comments_len = 0;
     char *file_wire = gtkhx_text_for_wire (file, strlen (file), utf8, FALSE,

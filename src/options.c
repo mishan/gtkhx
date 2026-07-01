@@ -505,7 +505,7 @@ changed_timestamp (session *sess)
 }
 
 /* re-enabled. The Settings nick/icon controls used to be
- * inert — changing them updated gtkhx_prefs / the_session.htlc but
+ * inert — changing them updated gtkhx_prefs / the session's htlc but
  * never told the server, so the user list still showed your old
  * nick/icon until reconnect. hlwrite is already a no-op when
  * htlc->fd is 0 (network.c:1448), so this is safe to call before
@@ -516,7 +516,7 @@ static void
 changed_nickoricon (session *sess)
 {
     (void)sess;
-    hx_change_name_icon (&the_session.htlc);
+    hx_change_name_icon (&hx_active_session ()->htlc);
 }
 
 /* Colored-Nicknames extension — mirror the pref onto the
@@ -536,20 +536,20 @@ changed_nick_color (session *sess)
 {
     (void)sess;
     guint32 nc = (guint32)gtkhx_prefs.nick_color;
-    the_session.htlc.nick_color = nc;
-    hx_change_name_icon (&the_session.htlc);
+    hx_active_session ()->htlc.nick_color = nc;
+    hx_change_name_icon (&hx_active_session ()->htlc);
 
     /* Locally re-render our own row in the public chat user list.
 	 * Pre-login (no uid yet, or no chat container yet) just no-ops —
 	 * apply_loaded_xtext_prefs stamps the loaded pref onto htlc, and
 	 * the SELFINFO-driven hx_user_new for self picks it up the same
 	 * way it picks up the loaded nick. */
-    struct chat *pub = chat_with_cid (&the_session, 0);
-    if (pub && the_session.htlc.uid) {
-        struct hx_user *self = hx_user_with_uid (pub, the_session.htlc.uid);
+    struct chat *pub = chat_with_cid (hx_active_session (), 0);
+    if (pub && hx_active_session ()->htlc.uid) {
+        struct hx_user *self = hx_user_with_uid (pub, hx_active_session ()->htlc.uid);
         if (self) {
             self->nick_color = nc;
-            user_change (&the_session.htlc, pub, self, self->name, self->icon,
+            user_change (&hx_active_session ()->htlc, pub, self, self->name, self->icon,
                          self->color);
         }
     }
@@ -893,6 +893,12 @@ struct cfgvar {
       NULL,
       NULL },
     { CFG_ICON,
+      /* Static cfgvar table entries need a compile-time-constant address,
+       * so these identity fields (icon/name) bind to the concrete
+       * the_session storage rather than the hx_active_session() accessor.
+       * Multi-conn reworks prefs<->identity binding — per-connection
+       * identity is an open M-phase question; for now this is the one
+       * session. */
       { &the_session.htlc.icon },
       UINT16,
       0,
@@ -904,7 +910,7 @@ struct cfgvar {
     { CFG_NEWS_XSIZE, { &gtkhx_prefs.geo.news.xsize }, INT, 0, NULL, NULL },
     { CFG_NEWS_YSIZE, { &gtkhx_prefs.geo.news.ysize }, INT, 0, NULL, NULL },
     { CFG_NICK,
-      { the_session.htlc.name },
+      { the_session.htlc.name },  /* concrete storage — see CFG_ICON note above */
       STRING32,
       0,
       changed_nickoricon,
@@ -1188,7 +1194,7 @@ icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
  *
  * Wiring convention: the row owns a "cfgvar" qdata pointer (the same
  * struct cfgvar * the helper looked up). The notify callback reads
- * that, updates *v->variable.X, fires v->changefunc(&the_session)
+ * that, updates *v->variable.X, fires v->changefunc(hx_active_session ())
  * if non-NULL, then prefs_write() so the change persists.
  *
  * No Cancel button — AdwPreferencesWindow is live-apply. Closing the
@@ -1199,7 +1205,7 @@ static void
 pref_apply (struct cfgvar *v)
 {
     if (v->changefunc) {
-        v->changefunc (&the_session);
+        v->changefunc (hx_active_session ());
     }
     prefs_write ();
 }
@@ -1816,7 +1822,7 @@ prefs_allocate (char *tag, char *rest)
     }
 
     if (result->changefunc) {
-        (*(result->changefunc)) (&the_session);
+        (*(result->changefunc)) (hx_active_session ());
     }
 }
 
@@ -1982,7 +1988,7 @@ apply_loaded_xtext_prefs (void)
 	 * doesn't fire on prefs_read, so without an explicit copy here
 	 * htlc->nick_color stays at network.c's HX_NICK_COLOR_NONE
 	 * default and we'd silently never advertise. */
-    the_session.htlc.nick_color = (guint32)gtkhx_prefs.nick_color;
+    hx_active_session ()->htlc.nick_color = (guint32)gtkhx_prefs.nick_color;
 
     gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
     gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
@@ -2900,8 +2906,8 @@ on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
         return;
     }
     avatar_preview_from_gif (preview, (const guchar *) contents, len);
-    if (the_session.htlc.gif_icons_state == GIF_ICONS_SUPPORTED) {
-        hx_icon_set (&the_session.htlc, (const guint8 *) contents, len);
+    if (hx_active_session ()->htlc.gif_icons_state == GIF_ICONS_SUPPORTED) {
+        hx_icon_set (&hx_active_session ()->htlc, (const guint8 *) contents, len);
         toolbar_show_toast (_ ("Avatar updated."));
     } else {
         toolbar_show_toast (_ ("Avatar saved — it'll be sent when you connect "
@@ -2945,8 +2951,8 @@ on_avatar_clear_clicked (GtkButton *btn, gpointer user_data)
     gboolean removed = hx_icon_forget ();
     gtk_picture_set_paintable (GTK_PICTURE (preview), NULL);
     /* Tell the server to drop it too, if we're on a capable one. */
-    if (the_session.htlc.gif_icons_state == GIF_ICONS_SUPPORTED) {
-        hx_icon_clear (&the_session.htlc);
+    if (hx_active_session ()->htlc.gif_icons_state == GIF_ICONS_SUPPORTED) {
+        hx_icon_clear (&hx_active_session ()->htlc);
     }
     /* Don't claim it's cleared if the persisted file survived deletion —
 	 * it'll reload and re-send next start. */

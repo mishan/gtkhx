@@ -18,7 +18,7 @@
 #include "hotline_proto.h"
 #include "network.h"  /* hlwrite_chunks */
 #include "gtkhx_session.h" /* `session` typedef needed by tasks.h */
-#include "session.h"  /* the_session (for gtask_delete_tsk on probe timeout) */
+#include "session.h"  /* sess_from_htlc (for gtask_delete_tsk on probe timeout) */
 #include "tasks.h"    /* task_new, gtask_delete_tsk */
 #include "rcv.h"      /* rcv_task_icon_get / _getlist */
 #include "gif_icons.h"
@@ -57,7 +57,7 @@ gif_icons_probe_timeout (gpointer data)
 		 * gtask row (not the model task), so a late reply — slow
 		 * server, not an unsupporting one — still dispatches through
 		 * hx_rcv_task -> rcv_task_icon_getlist and loads avatars. */
-        gtask_delete_tsk (&the_session, htlc->gif_icons_probe_trans);
+        gtask_delete_tsk (sess_from_htlc (htlc), htlc->gif_icons_probe_trans);
     }
     return G_SOURCE_REMOVE;
 }

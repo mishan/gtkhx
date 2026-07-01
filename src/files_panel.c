@@ -11,7 +11,7 @@
 
 #include <gtk/gtk.h>
 
-#include "hx.h"        /* the_session */
+#include "hx.h"        /* session + hx_active_session () */
 #include "gtkhx.h"     /* gtkhx_apply_listview_style */
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "debug.h"     /* debug_log — GTKHX_DEBUG=files for inline-rename trace */
@@ -1034,11 +1034,11 @@ update_status (files_panel *p)
     if (p->provider && HX_IS_REMOTE_FILES_PROVIDER (p->provider)
         && hx_remote_files_provider_has_listing_error (
             HX_REMOTE_FILES_PROVIDER (p->provider))) {
-        const guint8 *bits = (const guint8 *)&the_session.htlc.access;
+        const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc.access;
         gboolean can_upload = hl_access_has (bits, HL_ACCESS_UPLOAD_FILES);
         gboolean can_view_dropbox
             = hl_access_has (bits, HL_ACCESS_VIEW_DROP_BOXES);
-        if (the_session.htlc.fd && can_upload && !can_view_dropbox) {
+        if (hx_active_session ()->htlc.fd && can_upload && !can_view_dropbox) {
             text = g_strdup (
                 _ ("Folder is upload-only — drop files here to upload"));
         } else {

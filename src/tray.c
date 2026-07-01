@@ -511,7 +511,7 @@ menu_method_call (GDBusConnection *conn, const char *sender,
                 break;
             case MENU_CONNECT:
                 gtkhx_tray_show_all_windows ();
-                create_connect_window (NULL, &the_session);
+                create_connect_window (NULL, hx_active_session ());
                 break;
             case MENU_DISCONNECT:
                 disconnect_clicked ();

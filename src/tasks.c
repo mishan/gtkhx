@@ -1124,7 +1124,7 @@ task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
           const char *str)
 {
     struct task *tsk;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     tsk = g_malloc0 (sizeof (struct task));
     tsk->trans = htlc->trans;

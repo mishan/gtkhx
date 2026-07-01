@@ -516,6 +516,19 @@ const char *INFOPREFIX = " \00310[\00303hx\00310]\003 ";
 
 session the_session;
 
+/*
+ * hx_active_session — the currently-focused session (multi-conn seam,
+ * see docs/multi-connection-scoping.md phase M0). N == 1 today, so this
+ * returns the single session. When the connection tab strip lands this
+ * becomes a lookup of the focused tab's session; every UI call site that
+ * routes through here follows automatically.
+ */
+session *
+hx_active_session (void)
+{
+    return &the_session;
+}
+
 /* Forward declaration of the application object owned by loop(). hx_quit()
  * needs to call g_application_quit on it, but loop() comes much later
  * in this TU and gtkhx_app's definition lives there.
@@ -721,7 +734,7 @@ hxd_fd_set (int fd, int rw)
     GIOChannel *channel;
 
     if (fd >= 1024) {
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+        hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX,
                           "gtkhx: fd %d >= 1024", fd);
         hx_quit ();
     }
@@ -755,7 +768,7 @@ hxd_fd_clr (int fd, int rw)
     int tag;
 
     if (fd >= 1024) {
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+        hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX,
                           "gtkhx: fd %d >= 1024", fd);
         hx_quit ();
     }
@@ -998,9 +1011,18 @@ fe_init (void)
     gtkhx_refresh_css ();
     init_icons ();
 
-    /* hashtable-backed session collections. chats_init
-     * additionally seeds the table with the public chat (cid=0),
-     * which must always exist while the table does. */
+    /* Single-session construction site. fe_init (here), hx_quit's
+     * teardown, main()'s zero-init, and hotline_client_init's identity
+     * setup are the only places that touch the concrete `the_session`
+     * storage rather than the sess_from_htlc() / hx_active_session()
+     * accessors — because this is where the one session is born and
+     * dies. Multi-conn (phase M3) turns these into a session factory
+     * over a collection; every accessor-routed call site downstream
+     * follows without further edits.
+     *
+     * hashtable-backed session collections. chats_init additionally
+     * seeds the table with the public chat (cid=0), which must always
+     * exist while the table does. */
     chats_init (&the_session);
     gchats_init (&the_session);
     tasks_init (&the_session);
@@ -1692,7 +1714,7 @@ static void
 on_connection_state_changed_signal (GtkhxSession *emitter, guint state,
                                     gpointer user_data)
 {
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
     (void)emitter;
     (void)user_data;
 
@@ -2106,7 +2128,7 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
 {
     if (*str) {
 #ifdef USE_PLUGIN
-        if (EMIT_SIGNAL (XP_SND_CHAT, &the_session, str, &cid, 0, 0, 0) == 1) {
+        if (EMIT_SIGNAL (XP_SND_CHAT, sess_from_htlc (htlc), str, &cid, 0, 0, 0) == 1) {
             return;
         }
 #endif

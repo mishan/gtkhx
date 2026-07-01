@@ -181,7 +181,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
     char buf[HOSTLEN];
 
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     ping_stop ();
     rcv_login_reset ();
@@ -828,7 +828,7 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
     }
     /* Idempotent: never double-register (LOGIN_SENDING fires once, but
      * guard anyway so a stray repeat can't strand a duplicate row). */
-    if (task_with_trans (&the_session, orchestrator_login_reply_trans)) {
+    if (task_with_trans (sess_from_htlc (htlc), orchestrator_login_reply_trans)) {
         return;
     }
     guint32 saved = htlc->trans;
@@ -1356,7 +1356,7 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
         g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
         g_autofree char *msg
             = tracker_dup_str (ev->message_ptr, ev->message_len);
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX,
+        hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
                           _ ("tracker: %1$s: %2$s\n"), url, msg);
         break;
     }
