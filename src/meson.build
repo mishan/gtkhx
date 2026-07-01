@@ -86,10 +86,11 @@ gtkhx_sources = files(
   'tls_trust.c',
   'tls_trust_dialog.c',
   'toolbar.c',
-  'tracker.c',
+  # tracker.c + tracker_row.c ported to Rust (gtkhx-ui crate, Phase R5).
+  # tracker_bridge.c is the thin session/prefs shim the Rust window calls.
+  'tracker_bridge.c',
   'tracker_event.c',
   'tracker_parser.c',
-  'tracker_row.c',
   'tracker_v3.c',
   'tracker_v3_meta.c',
   'tray.c',
@@ -200,6 +201,10 @@ rust_deps = [
   rust_hotline_proto_dep,
   rust_hxbridge_dep,
   rust_gtkhx_session_dep,
+  # gtkhx-ui (Phase R5 windows) must precede gtkhx-boxed on the link line:
+  # it has undefined refs to hx_tracker_v3_meta_copy/_free which the later
+  # gtkhx-boxed archive resolves.
+  rust_gtkhx_ui_dep,
   rust_gtkhx_boxed_dep,
   rust_hxnet_dep,
   rust_hx_image_decode_dep,

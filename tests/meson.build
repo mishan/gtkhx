@@ -1287,6 +1287,53 @@ test('real_connect', test_integration_real_connect,
      suite   : 'integration',
      timeout : 30)
 
+# tracker_signals — Tier 3 coverage for the tracker fetch -> view-signal
+# boundary: the exact input the (Rust) Tracker window consumes. Drives the
+# PRODUCTION hx_tracker_list_async -> tracker_fetch_dispatch_event path in
+# network.c against the live matrix trackers and asserts the emitted
+# GtkhxSession tracker-batch-begin / tracker-server-create signals (a plain
+# GObject, so headless — no GdkDisplay needed). Complements test_tracker_
+# fetch, which stops at the hxnet FFI below the network.c HxTrackerServer
+# construction + signal emit. Same source pile as real_connect (network.c +
+# connect_test_stubs.c stubs the GUI refs, incl. the no-op track_prog_update
+# so the tasks-window widgets never get built), plus tracker_matrix.c for
+# hx_test_trackers_with.
+test_integration_tracker_signals = executable(
+  'test_integration_tracker_signals',
+  'integration/test_tracker_signals.c',
+  'integration/connect_test_stubs.c',
+  'integration/server_matrix.c',
+  'integration/tracker_matrix.c',
+  '../src/network.c',
+  '../src/host_port.c',
+  '../src/hxnet_bridge.c',
+  '../src/tls_trust.c',
+  '../src/login_packet.c',
+  '../src/agreement_packet.c',
+  '../src/inline_media.c',
+  '../src/proto_helpers.c',
+  '../src/proto_trace.c',
+  '../src/gtkhx_log.c',
+  '../src/debug.c',
+  '../src/text_util.c',
+  '../src/qbuf.c',
+  '../src/rand.c',
+  '../src/algo_list.c',
+  '../src/tracker_parser.c',
+  '../src/tracker_v3.c',
+  '../src/tracker_v3_meta.c',
+  '../src/tracker_event.c',
+  '../src/hl_code.c',
+  '../src/tasks_table.c',
+  '../src/htxf_io.c',
+  '../src/htxf_subchannel.c',
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  include_directories : integration_test_inc,
+)
+test('tracker_signals', test_integration_tracker_signals,
+     suite   : 'integration',
+     timeout : 60)
+
 # orchestrator_harness — increment 2 foundation. Pure-FFI test (no
 # C production source): drives the production plaintext connect+login
 # lifecycle from a synchronous, no-GLib-main-loop test via the polling

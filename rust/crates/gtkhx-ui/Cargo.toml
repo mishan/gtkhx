@@ -1,0 +1,46 @@
+[package]
+name = "gtkhx-ui"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5: GtkHx window UIs in gtk4-rs (one module per window)"
+publish = false
+
+[lib]
+# staticlib: the C side links the FFI symbols this crate exports — each
+#            ported window's public entry points that its deleted
+#            src/<window>.c used to provide. The Tracker window (first
+#            module) exports create_tracker_window, tracker_batch_begin,
+#            tracker_server_create, tracker_clear, tracker_search_refresh.
+#            Same leaf-up "C resolves Rust's externs at final link" shape
+#            the R4 crates use: this staticlib has undefined references to
+#            the not-yet-ported C helpers it calls (the gtkhx_* util
+#            helpers, the bookmark API, the connect dialog, the
+#            tracker_bridge.c session/prefs shim, hx_tracker_list_async,
+#            and hx_tracker_v3_meta_copy/_free from gtkhx-boxed) which the
+#            linking C target resolves.
+# rlib:      lets later work share helpers if useful; nothing consumes it
+#            as an rlib today.
+#
+# ONE crate for all Phase R5 windows (not one crate per window): the
+# windows are tightly interrelated (they open each other's dialogs) and
+# share infrastructure — the session/prefs C bridge, the `tr` gettext
+# helper, the GtkColumnView list-model idiom, the gtkhx-boxed payloads.
+# One gtk4-rs link unit; each window is a module under src/.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
+# pinned in the workspace (rust/Cargo.toml, gtk-rs-core 0.21 family) and
+# compiled behind hxbridge's `voice` feature; this crate is the first to
+# consume them unconditionally. They build against the libgtk-4 /
+# libadwaita-1 the C binary already links, so the system-library surface
+# doesn't grow (meson floor: gtk4 >= 4.10, libadwaita-1 >= 1.6).
+glib = { workspace = true }
+gio = { workspace = true }
+gtk4 = { workspace = true }
+# v1_5 enables the AdwDialog / AdwToolbarView bindings + AdwActionRow
+# subtitle-selectable (transitively v1_4 / v1_3). The runtime libadwaita
+# is already >= 1.6 (meson floor), and the C tracker used these same
+# widgets, so the binding-feature gate just needs turning on.
+libadwaita = { workspace = true, features = ["v1_5"] }

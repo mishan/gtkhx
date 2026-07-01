@@ -995,13 +995,53 @@ This phase is the longest in calendar time and the most parallelizable
 across small commits. Each window port is independent; pick the smallest one
 that's bothering us in any given week.
 
+**Status: R5.1 (Tracker window) shipped** on `claude/r5-tracker-rust`. It
+established the crate structure and the gtk4-rs idioms the rest of the
+phase reuses:
+
+- **One crate for all R5 windows, `rust/crates/gtkhx-ui`, module per
+  window** — not a crate each. The windows are tightly interrelated (they
+  open each other's dialogs) and share infrastructure (the session/prefs C
+  bridge, the `tr` gettext shim, the `GtkColumnView` model-chain idiom, the
+  `gtkhx-boxed` payloads). Shared code lives at the crate root
+  (`lib.rs`, `ffi.rs`, `tr.rs`); the tracker is `src/tracker/`.
+- **Leaf-up C ABI**: each window module `#[no_mangle]`-exports the symbols
+  its deleted `src/<window>.c` used to provide, so the C callers link
+  unchanged (same shape as the R4 crates).
+- **`src/tracker_bridge.c`** — a thin, permanent C shim for the Rust UI's
+  narrow access to not-yet-ported global state (`the_session.htlc` for
+  connect, `gtkhx_prefs`, the chat logger), routed through the multi-conn
+  **M0 seam** (`hx_active_session()` for UI actions, `sess_from_htlc()`
+  model-side). Every future window reuses `gtkhx_tracker_connect_apply` /
+  `_log_info` and follows the same M0 routing — a port from a pre-M0 file
+  silently drops it otherwise.
+- **`HxTrackerRow` is a Rust `glib::subclass`**; typed `HxTrackerV3Meta`
+  `#[repr(C)]` mirror (`gtkhx-boxed` keeps it opaque) pinned by const
+  asserts against the C `_Static_assert`s.
+- **Two hard-won gtk4-rs traps** every later window must respect: (a) the
+  app inits GTK from C, so gtk4-rs's own init flag is unset — call
+  `gtk::set_initialized()` at each construction site or every widget/model
+  constructor aborts; (b) **never write qdata (`set_data`) onto
+  `GtkColumnView`'s internal cell/row widgets** — it corrupts GTK's cell
+  recycling and frees a live cell (first-row use-after-free surfacing as a
+  `GTK_IS_ACCESSIBLE` failure). Right-click row detection stashes the row
+  position on the cell's own label instead.
+- **Tier 3**: `tests/integration/test_tracker_signals.c` drives the
+  production `hx_tracker_list_async` → `tracker_fetch_dispatch_event` →
+  `GtkhxSession` signal path against the live matrix trackers and asserts
+  the boxed `HxTrackerServer` payloads — the window's exact input contract,
+  headless (the gtk4-rs window can't be built without a display, so a
+  window-level Tier 3 isn't feasible on the display-less CI).
+
 **Suggested order**
 
-1. **Tracker window** (`tracker.c` + `tracker_parser.c` consumed in R2). The
-   smallest top-level UI: AdwHeaderBar + search entry + a `GtkColumnView`
-   over the tracker server list. ~600 LOC C → maybe 250 LOC Rust. Best
-   place to learn the gtk4-rs idioms because the data model is flat and the
-   widget is one we *want* `GtkColumnView` for anyway.
+1. ✅ **Tracker window** (`tracker.c` + `tracker_row.c`) — shipped (R5.1,
+   see status above). The smallest top-level UI: AdwHeaderBar + search
+   entry + a `GtkColumnView` over the tracker server list. Best place to
+   learn the gtk4-rs idioms because the data model is flat and the widget
+   is one we *want* `GtkColumnView` for anyway. Came in roughly break-even
+   on LOC once the one-time crate scaffolding is counted; the marginal
+   cost of later windows should trend negative.
 2. **About / Agreement / User Editor.** Tiny dialogs, mostly layout. Quick
    wins.
 3. **Connect dialog + bookmark management** (`connect.c`, `bookmarks.c`,

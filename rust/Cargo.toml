@@ -9,6 +9,7 @@ members = [
     "crates/hxbridge",
     "crates/gtkhx-session",
     "crates/gtkhx-boxed",
+    "crates/gtkhx-ui",
     "crates/hxnet",
     "crates/hxvoice",
     "crates/hxvoice-runtime",
