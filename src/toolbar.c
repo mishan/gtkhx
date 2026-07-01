@@ -179,7 +179,7 @@ on_broadcast_response (AdwAlertDialog *dialog, const char *response,
     if (len > 0xfffe) {
         len = 0xfffe; /* HTLC_DATA_MSG length is u16; clamp. */
     }
-    hx_send_broadcast (&the_session.htlc, text, (guint16)len);
+    hx_send_broadcast (&hx_active_session ()->htlc, text, (guint16)len);
 }
 
 /* AdwEntryRow swallows Enter for its own entry-activated signal,
@@ -197,7 +197,7 @@ on_broadcast_entry_activated (AdwEntryRow *entry, gpointer data)
         if (len > 0xfffe) {
             len = 0xfffe;
         }
-        hx_send_broadcast (&the_session.htlc, text, (guint16)len);
+        hx_send_broadcast (&hx_active_session ()->htlc, text, (guint16)len);
     }
     adw_dialog_close (ADW_DIALOG (dialog));
 }
@@ -218,7 +218,7 @@ on_broadcast_button_clicked (GtkButton *btn, gpointer user_data)
     (void)btn;
     (void)user_data;
 
-    if (!the_session.htlc.fd) {
+    if (!hx_active_session ()->htlc.fd) {
         return;
     }
 
@@ -394,10 +394,10 @@ disconnect_clicked (void)
 {
     if (!connected) {
         kill_threads ();
-        setbtns (&the_session, 0);
+        setbtns (hx_active_session (), 0);
         set_status_bar (0);
-        set_disconnect_btn (&the_session, 0);
-        conn_task_update (&the_session, 2);
+        set_disconnect_btn (hx_active_session (), 0);
+        conn_task_update (hx_active_session (), 2);
         /* hx_htlc_close (which set connected=0) already detached
          * the GPollable sources and released current_conn, so the
          * legacy hxd_fd_clr + close(fd) cleanup here would either
@@ -405,13 +405,13 @@ disconnect_clicked (void)
          * already owned (and possibly closed) by the released
          * GSocketConnection. Just clear the gdk_input bookkeeping
          * flag and emit the user-visible notice. */
-        the_session.htlc.gdk_input = 0;
-        hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX, "%s: %s\n",
+        hx_active_session ()->htlc.gdk_input = 0;
+        hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX, "%s: %s\n",
                           server_addr, _ ("connection closed"));
     }
 
-    else if (the_session.htlc.fd) {
-        hx_htlc_close (&the_session.htlc, 1);
+    else if (hx_active_session ()->htlc.fd) {
+        hx_htlc_close (&hx_active_session ()->htlc, 1);
     }
 }
 
@@ -1318,7 +1318,7 @@ create_toolbar_window (session *sess)
     create_news_window  (toolbar_window, sess);
     create_chat_window  (toolbar_window, sess);
     /* open_files_browser doesn't take a (parent, sess) signature;
-     * it reads the_session directly. Eager-construct so the Files
+     * it reads the active session directly. Eager-construct so the Files
      * toolbar button's toolbar_show_panel lookup always hits. */
     open_files_browser  ();
     /* Same shape as open_files_browser: no (parent, sess) — the

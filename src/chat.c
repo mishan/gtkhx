@@ -239,7 +239,7 @@ gtkhx_apply_theme_palette (gboolean dark)
 	 * private-message outputs hang off msgwin in sess->msg_windows.
 	 * News uses a plain GtkTextView (theme-driven CSS), not an
 	 * xtext, so it picks up the system theme without help. */
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
     if (sess->gchats) {
         GHashTableIter iter;
         gpointer val;
@@ -333,7 +333,7 @@ void
 hx_chat_join (struct htlc_conn *htlc, guint32 cid)
 {
     struct chat *chat;
-    chat = chat_with_cid (&the_session, cid);
+    chat = chat_with_cid (sess_from_htlc (htlc), cid);
 
     /* Self-invite edge case: when the user creates a private chat
 	 * with their own UID, the server replies to CHAT_CREATE with the
@@ -346,7 +346,7 @@ hx_chat_join (struct htlc_conn *htlc, guint32 cid)
 	 * never opened. We always send the JOIN now; chat_new is only
 	 * called when the chat hasn't been pre-registered. */
     if (!chat) {
-        chat = chat_new (&the_session, cid);
+        chat = chat_new (sess_from_htlc (htlc), cid);
     }
 
     /* chunk layout moved to gtkhx_proto_build_chat_join_chunks.
@@ -367,7 +367,7 @@ hx_part_chat (struct htlc_conn *htlc, guint32 cid)
 {
     struct chat *chat;
 
-    chat = chat_with_cid (&the_session, cid);
+    chat = chat_with_cid (sess_from_htlc (htlc), cid);
     /* chat_with_cid is a hashtable lookup that returns NULL on miss.
 	 * The caller passes in a cid we expect to know about, but a
 	 * race between the UI close and a server-side chat-delete could
@@ -715,8 +715,8 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     gchar *display_nick = NULL;
     const char *display_body = NULL;
     gsize display_body_len = 0;
-    const char *self_nick = (the_session.htlc.name[0] != '\0')
-                                ? (const char *)the_session.htlc.name
+    const char *self_nick = (hx_active_session ()->htlc.name[0] != '\0')
+                                ? (const char *)hx_active_session ()->htlc.name
                                 : NULL;
 
     if (is_info && name_len > 0) {
@@ -911,7 +911,7 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
 	 * lives on the gchat's media_handles, which was rebuilt
 	 * fresh). The texture quietly drops. */
     struct gtkhx_chat *gchat
-        = gchat_with_cid (&the_session, ctx->cid);
+        = gchat_with_cid (hx_active_session (), ctx->cid);
     if (gchat && gchat->output) {
         xtext_buffer *buf = GTK_XTEXT (gchat->output)->buffer;
         textentry *ent
@@ -966,7 +966,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     if (!e) {
         return;
     }
-    gchat = gchat_with_cid (&the_session, e->cid);
+    gchat = gchat_with_cid (sess_from_htlc (htlc), e->cid);
     if (!gchat) {
         return;
     }
@@ -1077,14 +1077,14 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 			 * from rcv.c via hx_chat_event_attach_media — the
 			 * deep-copy on event_attach_media keeps it valid
 			 * for the synchronous send call. */
-            if (inline_media_cap_ok (&the_session.htlc)
+            if (inline_media_cap_ok (htlc)
                 && e->media->id_len > 0 && e->media->id_len <= 65535) {
                 struct hx_media_autofetch_ctx *ctx
                     = g_new0 (struct hx_media_autofetch_ctx, 1);
                 ctx->cid = gchat->cid;
                 ctx->token = token;
                 hx_inline_media_download * dl = inline_media_download_start (
-                    &the_session.htlc, e->media->id, e->media->id_len,
+                    htlc, e->media->id, e->media->id_len,
                     on_inline_media_autofetch_done, ctx);
                 if (!dl) {
                     g_free(ctx);
@@ -1128,7 +1128,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     if (!entries) {
         return;
     }
-    gchat = gchat_with_cid (&the_session, cid);
+    gchat = gchat_with_cid (sess_from_htlc (htlc), cid);
     if (!gchat) {
         return;
     }
@@ -1380,7 +1380,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
  * either.
  *
  * The xtext widget that emitted the signal is passed in as
- * `xtext`; we walk the_session.gchats to find which gchat owns
+ * `xtext`; we walk the active session's gchats to find which gchat owns
  * it (chat output, not pchat output userlist). */
 
 static struct gtkhx_chat *
@@ -1389,10 +1389,10 @@ find_gchat_by_output (GtkWidget *xtext)
     GHashTableIter it;
     gpointer key, val;
 
-    if (!the_session.gchats) {
+    if (!hx_active_session ()->gchats) {
         return NULL;
     }
-    g_hash_table_iter_init (&it, the_session.gchats);
+    g_hash_table_iter_init (&it, hx_active_session ()->gchats);
     while (g_hash_table_iter_next (&it, &key, &val)) {
         struct gtkhx_chat *g = val;
         if (g && g->output == xtext) {
@@ -1435,7 +1435,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
                    "Load-older click: no gchat matches the xtext widget");
         return;
     }
-    htlc = &the_session.htlc;
+    htlc = &hx_active_session ()->htlc;
 
     /* Guard: don't fire a second request while the first is
 	 * still in flight. The receive path (output_chat_history_batch)
@@ -1576,7 +1576,7 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     debug_log ("media",
                "inline-media click: dispatch token=%u mime=%s id_len=%zu",
                token, m->mime ? m->mime : "?", m->id_len);
-    inline_media_show_dialog (xtext, &the_session.htlc, m->id, m->id_len,
+    inline_media_show_dialog (xtext, &hx_active_session ()->htlc, m->id, m->id_len,
                               m->mime, m->width_present ? m->width : 0,
                               m->height_present ? m->height : 0,
                               m->bytes_present ? m->bytes : 0);
@@ -1639,8 +1639,8 @@ xprintline (GtkWidget *text, char *chat, size_t len)
     gsize body_off = 0, body_len = 0;
     gboolean is_info = FALSE;
     gboolean said_by_self = FALSE;
-    const char *self_nick = (the_session.htlc.name[0] != '\0')
-                                ? (const char *)the_session.htlc.name
+    const char *self_nick = (hx_active_session ()->htlc.name[0] != '\0')
+                                ? (const char *)hx_active_session ()->htlc.name
                                 : NULL;
 
     /* Recognise any line that opens with the INFOPREFIX-style
@@ -1771,7 +1771,7 @@ void
 chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
                        gpointer body, gpointer user_data)
 {
-    xoutput_chat (&the_session, cid, (char *)body);
+    xoutput_chat (sess_from_htlc (htlc), cid, (char *)body);
 }
 
 static int
@@ -2216,7 +2216,7 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
         switch (keyval) {
         case 'k':
         case 'K':
-            create_connect_window (0, &the_session);
+            create_connect_window (0, hx_active_session ());
             return TRUE;
         }
     } else if ((state & GDK_SHIFT_MASK) && keyval == GDK_KEY_Return) {
@@ -2437,7 +2437,7 @@ change_subject (GtkWidget *widget, gpointer data)
     const char *subject;
 
     subject = gtk_editable_get_text (GTK_EDITABLE (widget));
-    hx_change_subject (&the_session.htlc, GPOINTER_TO_INT (data),
+    hx_change_subject (&hx_active_session ()->htlc, GPOINTER_TO_INT (data),
                        (char *)subject);
 }
 
@@ -2744,7 +2744,7 @@ pchat_new (session *sess, struct chat *chat)
 static void
 pchat_close (guint32 cid)
 {
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
     struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
 
     if (gchat == NULL)
@@ -2805,7 +2805,7 @@ chat_invite_response (AdwAlertDialog *dialog, const char *response,
 void
 output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
 {
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
     (void)htlc;
 
@@ -2879,7 +2879,7 @@ output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
     g_signal_connect (dialog, "response", G_CALLBACK (chat_invite_response),
                       ctx);
 
-    adw_dialog_present (dialog, GTK_WIDGET (the_session.chat_window));
+    adw_dialog_present (dialog, GTK_WIDGET (sess_from_htlc (htlc)->chat_window));
     g_free (body);
 }
 
@@ -2911,7 +2911,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     GtkWidget *pix;
     GdkPixmap *icon;
     char *title;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat = pchat_new (sess, chat);
 
 
@@ -3194,7 +3194,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
 void
 hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
 {
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat = gchat_with_cid (sess, cid);
 
     /* gchat_with_cid is the UI-side hashtable lookup. If the chat

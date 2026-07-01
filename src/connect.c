@@ -361,10 +361,10 @@ void
 connect_reconnect_last (void)
 {
     if (!last_conn.valid || !last_conn.server || !last_conn.server[0]) {
-        create_connect_window (NULL, &the_session);
+        create_connect_window (NULL, hx_active_session ());
         return;
     }
-    connect_with_args (&the_session, last_conn.server, last_conn.port,
+    connect_with_args (hx_active_session (), last_conn.server, last_conn.port,
                        last_conn.login, last_conn.pass, last_conn.secure,
                        last_conn.compress, last_conn.cipher, last_conn.tls);
 }
@@ -1138,7 +1138,7 @@ connect_open_bookmark_by_name (const char *name)
         bm.cipher = (char) new_byte;
     }
 
-    connect_with_args (&the_session, bm.server, port, bm.login, bm.pass,
+    connect_with_args (hx_active_session (), bm.server, port, bm.login, bm.pass,
                        bm.secure, bm.compress, bm.cipher, bm.tls);
 }
 
@@ -1160,7 +1160,7 @@ connect_open_builtin_bookmark (int idx)
         return;
     }
 
-    connect_with_args (&the_session, server, 5500, "", "", 0, 0, 0, 0);
+    connect_with_args (hx_active_session (), server, 5500, "", "", 0, 0, 0, 0);
 }
 
 /* ---------------------------------------------------------------- */
@@ -1183,7 +1183,7 @@ connect_open_hotline_url (const char *url)
 	 * parameters; users who want HOPE or TLS for this server should
 	 * save the URL as a bookmark first (Save Bookmark popup item)
 	 * and edit the bookmark's security settings. */
-    connect_with_args (&the_session, parts.host, port, parts.login, parts.pass,
+    connect_with_args (hx_active_session (), parts.host, port, parts.login, parts.pass,
                        0, 0, 0, 0);
     return TRUE;
 }
@@ -1333,13 +1333,13 @@ bookmark_save_response (AdwAlertDialog *dialog, const char *response,
     path = g_build_filename (dir, editable_name, NULL);
 
     if (g_mkdir_with_parents (dir, 0770) != 0) {
-        hx_printf_prefix (&the_session.htlc, 0,
+        hx_printf_prefix (&hx_active_session ()->htlc, 0,
                           "Could not create bookmarks dir \"%s\": %s", dir,
                           g_strerror (errno));
         goto out;
     }
     if (!(bookmark = fopen (path, "w"))) {
-        hx_printf_prefix (&the_session.htlc, 0,
+        hx_printf_prefix (&hx_active_session ()->htlc, 0,
                           "Could not open \"%s\" for writing.", path);
         goto out;
     }
@@ -1674,6 +1674,6 @@ create_connect_window (GtkWidget *btn, gpointer data)
 void
 connect_bookmark_name (char *name)
 {
-    create_connect_window (0, &the_session);
+    create_connect_window (0, hx_active_session ());
     open_bookmark (0, name);
 }

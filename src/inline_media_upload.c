@@ -679,7 +679,7 @@ rcv_task_upload_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
     guint32 cur_trans = 0;
     struct task *cur = NULL;
     if (gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &cur_trans)) {
-        cur = task_with_trans (&the_session, cur_trans);
+        cur = task_with_trans (sess_from_htlc (htlc), cur_trans);
     }
     if (!cur) {
         debug_log ("media",

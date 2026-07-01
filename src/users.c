@@ -1095,7 +1095,7 @@ create_users_window (GtkWidget *parent_window, gpointer data)
 void
 users_clear (struct htlc_conn *htlc, struct chat *chat)
 {
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     (void)htlc;
     (void)chat;
 
@@ -1209,7 +1209,7 @@ void
 user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
              const char *nam, guint16 icon, guint16 color)
 {
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat;
 
     if (chat->cid) {
@@ -1243,7 +1243,7 @@ void
 user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
 {
     struct gtkhx_chat *gchat;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     (void)htlc;
     if (chat->cid) {
@@ -1267,7 +1267,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
              const char *nam, guint16 icon, guint16 color)
 {
     struct gtkhx_chat *gchat;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     (void)htlc;
 
@@ -1337,7 +1337,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 void
 users_refresh_avatar (guint16 uid)
 {
-    session *sess = &the_session;
+    session *sess = hx_active_session ();
 
     /* GIF avatar for `uid` changed in the gif_avatar cache — nudge
 	 * every list that shows this user so the cell re-reads it. Mirrors
