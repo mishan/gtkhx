@@ -1585,6 +1585,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtkhx-ui"
+version = "0.1.0"
+dependencies = [
+ "gio 0.21.5",
+ "glib 0.21.5",
+ "gtk4",
+ "libadwaita",
+]
+
+[[package]]
 name = "gufo-common"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

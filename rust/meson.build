@@ -79,6 +79,16 @@ rust_sources = files(
   'crates/gtkhx-boxed/src/msg.rs',
   'crates/gtkhx-boxed/src/chat.rs',
   'crates/gtkhx-boxed/src/tracker.rs',
+  # Phase R5 — gtkhx-ui: the window UIs in gtk4-rs (first gtk4-rs UI
+  # crate). One module per ported window; the Tracker window is the first.
+  'crates/gtkhx-ui/src/lib.rs',
+  'crates/gtkhx-ui/src/ffi.rs',
+  'crates/gtkhx-ui/src/tr.rs',
+  'crates/gtkhx-ui/src/tracker/mod.rs',
+  'crates/gtkhx-ui/src/tracker/ffi.rs',
+  'crates/gtkhx-ui/src/tracker/meta.rs',
+  'crates/gtkhx-ui/src/tracker/row.rs',
+  'crates/gtkhx-ui/src/tracker/actions.rs',
   # Phase R3.3 — hxnet Connection actor + FFI surface.
   'crates/hxnet/src/lib.rs',
   'crates/hxnet/src/cipher.rs',
@@ -118,6 +128,7 @@ rust_sources = files(
   'crates/hxbridge/Cargo.toml',
   'crates/gtkhx-session/Cargo.toml',
   'crates/gtkhx-boxed/Cargo.toml',
+  'crates/gtkhx-ui/Cargo.toml',
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
@@ -390,6 +401,26 @@ rust_gtkhx_boxed_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lgtkhx_boxed',
+  ],
+)
+
+# gtkhx-ui GtkHx window UIs (Phase R5). The first gtk4-rs UI crate: each
+# ported window exports the C ABI its deleted src/<window>.c provided.
+# The Tracker window (first module) exports create_tracker_window /
+# tracker_batch_begin / tracker_server_create / tracker_clear /
+# tracker_search_refresh, which the C callers (toolbar.c, gtkhx.c signal
+# adapters, options.c) resolve against here. The staticlib has undefined
+# refs to the gtkhx_* util helpers, the bookmark API, the connect dialog,
+# the tracker_bridge.c session/prefs shim, and hx_tracker_v3_meta_copy/
+# _free (gtkhx-boxed) — all resolved at final link by the C objects /
+# the gtkhx-boxed archive (listed AFTER this one in src/meson.build).
+# Pulls in libgtk-4 / libadwaita-1 / libgio-2.0, already C-side deps, so
+# the system-library surface doesn't grow.
+rust_gtkhx_ui_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lgtkhx_ui',
   ],
 )
 
