@@ -1,4 +1,4 @@
-## 1.2.1-dev
+## 1.2.1
 
 - User Interface
   - Move Join Voice/Mute buttons to the User list
