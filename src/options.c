@@ -83,7 +83,6 @@ static GtkSingleSelection *tracker_selection = NULL;
 struct gtkhx_prefs gtkhx_prefs = {
     0,                /* num_tracker */
     CFG_THEME_SYSTEM, /* theme: see CFG_THEME_* in cfgkeys.h */
-    "",               /* auto_reply_msg */
     "fixed",          /* font */
     ".",              /* download_path */
     "[%H:%M:%S] ",    /* stamp_format — strftime(3); see CFG_STAMP_FORMAT */
@@ -98,9 +97,7 @@ struct gtkhx_prefs gtkhx_prefs = {
       { 300, 400, 442, 50, 0, 1 } },
     1, /* queuedl */
     1, /* showjoin */
-    0, /* showback */
     0, /* tray (init_variables sets default) */
-    0, /* auto_reply */
     0, /* timestamp */
     0, /* word_wrap */
     1, /* track_case */
@@ -181,6 +178,12 @@ struct icon_viewer {
     unsigned int nfound;
     GtkWidget *icon_list; /* multi-column flowbox for narrow icons */
     GtkWidget *wide_list; /* one-per-row flowbox for wide banners */
+    /* The icon picker is now a popup opened from the Identity page's
+     * "Browse…" button rather than an inline group. This holds the live
+     * popup AdwDialog (or NULL) so a selection can dismiss it and the
+     * Settings teardown can close it. icon_list / wide_list point into
+     * this popup's flowboxes while it's open. */
+    GtkWidget *picker_dialog;
 };
 
 /* A wide cicn (Mac banner-style icon) is anything wider than this
@@ -364,10 +367,14 @@ list_icons (void)
             while (g_main_context_pending (NULL)) {
                 g_main_context_iteration (NULL, TRUE);
             }
-            if (!options_window) {
-                /* Dialog closed mid-render. winners owns the
-				 * remaining macres_res entries; destroying the
-				 * table frees them via the destroy_func. */
+            /* The picker now lives in its own AdwDialog, which the
+             * user can close mid-render — yielding above runs its
+             * "closed" handler, which nulls iv->icon_list / wide_list.
+             * Bail before appending into the now-destroyed flowboxes
+             * (also covers the whole Settings dialog closing, which
+             * frees iv). winners owns the remaining macres_res entries;
+             * destroying the table frees them via the destroy_func. */
+            if (!options_window || !iv || iv->icon_list != icon_list) {
                 g_hash_table_destroy (winners);
                 return;
             }
@@ -376,7 +383,7 @@ list_icons (void)
 
     g_hash_table_destroy (winners);
 
-    if (nfound >= 2) {
+    if (nfound >= 2 && options_window && iv && iv->icon_list == icon_list) {
         gtk_flow_box_invalidate_sort (GTK_FLOW_BOX (icon_list));
         if (iv->wide_list) {
             gtk_flow_box_invalidate_sort (GTK_FLOW_BOX (iv->wide_list));
@@ -843,13 +850,6 @@ struct cfgvar {
       0,
       changed_autocopy_text,
       NULL },
-    { CFG_AUTOREPLY_MSG,
-      { &gtkhx_prefs.auto_reply_msg },
-      STRING,
-      0,
-      NULL,
-      NULL },
-    { CFG_AUTOREPLY_ON, { &gtkhx_prefs.auto_reply }, BOOLEAN, 0, NULL, NULL },
     { CFG_CHAT_HISTORY_INITIAL,
       { &gtkhx_prefs.chat_history_initial },
       INT,
@@ -961,7 +961,6 @@ struct cfgvar {
     { CFG_OPEN_TASKS, { &gtkhx_prefs.geo.tasks.init }, BOOLEAN, 0, NULL, NULL },
     { CFG_OPEN_USERS, { &gtkhx_prefs.geo.users.init }, BOOLEAN, 0, NULL, NULL },
     { CFG_QUEUEDL, { &gtkhx_prefs.queuedl }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SHOWBACK, { &gtkhx_prefs.showback }, BOOLEAN, 0, NULL, NULL },
     { CFG_SHOWJOIN, { &gtkhx_prefs.showjoin }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_CHAT, { &hxsnd.chat }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_ERROR, { &hxsnd.error }, BOOLEAN, 0, NULL, NULL },
@@ -1168,6 +1167,12 @@ icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
     v = cfgvar_for_name (CFG_ICON);
     if (v && v->widget && ADW_IS_SPIN_ROW (v->widget)) {
         adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);
+    }
+    /* Picking an icon dismisses the Browse popup; the value we just
+     * stamped onto the spin row drives the Identity page's inline
+     * preview via its notify::value handler. */
+    if (iv && iv->picker_dialog) {
+        adw_dialog_close (ADW_DIALOG (iv->picker_dialog));
     }
 }
 
@@ -2207,14 +2212,15 @@ parse_tracker_list (void)
     }
 }
 
-/* bookkeeping that runs on every dialog teardown path —
- * Cancel button, OK button (close-on-OK), and the user clicking the
- * window's close X. We attach to GtkWidget::destroy because in GTK 4
- * gtk_window_destroy() does NOT emit close-request: the close-request
- * signal is only fired for user-initiated close attempts (or
- * gtk_window_close()). Hooking destroy catches every path the
- * teardown can take, so options_window never points at a freed
- * GObject the next time create_options_window runs. */
+/* bookkeeping that runs on every dialog teardown path. Wired to
+ * AdwDialog::closed (see create_options_window), which AdwDialog emits
+ * once the dialog is actually closed — whether by Esc, the header-bar
+ * close button, adw_dialog_close(), or the parent window going away.
+ * That's the single teardown chokepoint for an AdwDialog (there's no
+ * separate confirm-vs-destroy split like GtkWindow's close-request vs
+ * destroy), so hooking it catches every path and guarantees
+ * options_window never points at a freed GObject the next time
+ * create_options_window runs. */
 static void
 close_options_bookkeeping (GtkWidget *widget, gpointer data)
 {
@@ -2222,6 +2228,12 @@ close_options_bookkeeping (GtkWidget *widget, gpointer data)
     (void)widget;
     (void)data;
     options_window = 0;
+    /* If the icon Browse popup is still up, dismiss it before we free
+     * iv — its "closed" handler (on_icon_picker_closed) nulls the
+     * pointers, and the guard there tolerates iv already being NULL. */
+    if (iv && iv->picker_dialog) {
+        adw_dialog_close (ADW_DIALOG (iv->picker_dialog));
+    }
     g_free (iv);
     iv = NULL;
 
@@ -2556,15 +2568,12 @@ settings_page_sound (AdwPreferencesPage *page)
     adw_preferences_page_add (page, events);
 }
 
-/* Phase 5 follow-up: the old standalone Font page only ever applied
- * to the xtext-based chat / private-message widgets, so it folds into
- * the Chat page as a Font group. SHOWJOIN and OLD_NICKCOMP also live
- * here now (moved from Misc → Behavior) since they're chat-window
- * concerns rather than session-wide misc. */
+/* Chat → Appearance: how chat text looks. Chat output, timestamp
+ * format, and the display font. */
 static void
-settings_page_chat (AdwPreferencesPage *page)
+settings_page_chat_appearance (AdwPreferencesPage *page)
 {
-    AdwPreferencesGroup *output_grp, *font_grp, *behavior_grp;
+    AdwPreferencesGroup *output_grp, *font_grp;
     GtkWidget *entry_row, *btn;
 
     output_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2596,48 +2605,6 @@ settings_page_chat (AdwPreferencesPage *page)
         adw_preferences_page_add (page, stamp_grp);
     }
 
-    /* Highlight words — comma-separated extras to flag in chat
-     * (own nick is always implicit so the field stays empty by
-     * default). Matched lines render bold red. */
-    {
-        AdwPreferencesGroup *hl_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (hl_grp, _ ("Highlight"));
-        adw_preferences_group_set_description (
-            hl_grp, _ ("Comma-separated words to highlight in chat (in "
-                       "addition to your own nick). Matches are case-"
-                       "insensitive at word boundaries."));
-        adw_preferences_group_add (
-            hl_grp, pref_entry_row (CFG_HIGHLIGHT_WORDS, _ ("Words")));
-        adw_preferences_page_add (page, hl_grp);
-    }
-
-    /* fogWraith chat-history extension (Janus and any
-     * future server that implements Capabilities-Chat-History.md).
-     * Single spin row for the initial pull count — also used as
-     * the per-click Load-older count, with a 50-floor in the
-     * click handler so the affordance still works when initial
-     * is set to 0. */
-    {
-        AdwPreferencesGroup *hist_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (hist_grp, _ ("Chat history"));
-        adw_preferences_group_set_description (
-            hist_grp, _ ("Servers that implement the chat-history "
-                         "extension (e.g. Janus) replay recent chat "
-                         "to you on login. 0 disables the initial "
-                         "pull; the \"Load older messages\" link in "
-                         "chat still works to fetch on demand."));
-        adw_preferences_group_add (
-            hist_grp,
-            pref_spin_row (CFG_CHAT_HISTORY_INITIAL,
-                           _ ("Initial messages to fetch"),
-                           _ ("Also used as the page size for "
-                              "\"Load older messages\""),
-                           0, 0xffff, 1));
-        adw_preferences_page_add (page, hist_grp);
-    }
-
     font_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (font_grp, _ ("Font"));
     adw_preferences_group_set_description (
@@ -2654,31 +2621,14 @@ settings_page_chat (AdwPreferencesPage *page)
 
     adw_preferences_group_add (font_grp, entry_row);
     adw_preferences_page_add (page, font_grp);
+}
 
-    /* Emoji shortcodes (phase E6). Two independent toggles: the
-	 * conversion (emoji ↔ :shortcode: on the wire / at display) and the
-	 * inline typeahead popup. */
-    {
-        AdwPreferencesGroup *emoji_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (emoji_grp, _ ("Emoji"));
-        adw_preferences_group_set_description (
-            emoji_grp,
-            _ ("When conversion is on, emoji you send on servers that don't "
-               "support Unicode go out as text shortcodes like \":joy:\" "
-               "instead of \"?\", and incoming shortcodes are shown as emoji "
-               "on every server."));
-        adw_preferences_group_add (
-            emoji_grp,
-            pref_switch_row (CFG_EMOJI_SHORTCODES,
-                             _ ("Convert emoji to/from :shortcodes:"), NULL));
-        adw_preferences_group_add (
-            emoji_grp,
-            pref_switch_row (
-                CFG_EMOJI_TYPEAHEAD, _ ("Suggest shortcodes as you type"),
-                _ ("Show a popup of matching emoji when you type \":\"")));
-        adw_preferences_page_add (page, emoji_grp);
-    }
+/* Chat → Behavior: how chat acts. Join/leave + nick completion, the
+ * xtext auto-copy controls, and highlight words. */
+static void
+settings_page_chat_behavior (AdwPreferencesPage *page)
+{
+    AdwPreferencesGroup *behavior_grp;
 
     behavior_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (behavior_grp, _ ("Behavior"));
@@ -2722,6 +2672,78 @@ settings_page_chat (AdwPreferencesPage *page)
                              NULL));
         adw_preferences_page_add (page, autocopy_grp);
     }
+
+    /* Highlight words — comma-separated extras to flag in chat
+     * (own nick is always implicit so the field stays empty by
+     * default). Matched lines render bold red. The same list is
+     * mirrored on Notifications → Behavior → Mention Words. */
+    {
+        AdwPreferencesGroup *hl_grp
+            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+        adw_preferences_group_set_title (hl_grp, _ ("Highlight"));
+        adw_preferences_group_set_description (
+            hl_grp, _ ("Comma-separated words to highlight in chat (in "
+                       "addition to your own nick). Matches are case-"
+                       "insensitive at word boundaries."));
+        adw_preferences_group_add (
+            hl_grp, pref_entry_row (CFG_HIGHLIGHT_WORDS, _ ("Words")));
+        adw_preferences_page_add (page, hl_grp);
+    }
+}
+
+/* Chat → History: fogWraith chat-history extension (Janus and any
+ * future server that implements Capabilities-Chat-History.md). Single
+ * spin row for the initial pull count — also used as the per-click
+ * Load-older page size, with a 50-floor in the click handler so the
+ * affordance still works when initial is set to 0. */
+static void
+settings_page_chat_history (AdwPreferencesPage *page)
+{
+    AdwPreferencesGroup *hist_grp
+        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (hist_grp, _ ("Chat history"));
+    adw_preferences_group_set_description (
+        hist_grp, _ ("Servers that implement the chat-history "
+                     "extension (e.g. Janus) replay recent chat "
+                     "to you on login. 0 disables the initial "
+                     "pull; the \"Load older messages\" link in "
+                     "chat still works to fetch on demand."));
+    adw_preferences_group_add (
+        hist_grp,
+        pref_spin_row (CFG_CHAT_HISTORY_INITIAL,
+                       _ ("Initial messages to fetch"),
+                       _ ("Also used as the page size for "
+                          "\"Load older messages\""),
+                       0, 0xffff, 1));
+    adw_preferences_page_add (page, hist_grp);
+}
+
+/* Chat → Emoji: emoji shortcodes (phase E6). Two independent toggles:
+ * the conversion (emoji ↔ :shortcode: on the wire / at display) and the
+ * inline typeahead popup. */
+static void
+settings_page_chat_emoji (AdwPreferencesPage *page)
+{
+    AdwPreferencesGroup *emoji_grp
+        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (emoji_grp, _ ("Emoji"));
+    adw_preferences_group_set_description (
+        emoji_grp,
+        _ ("When conversion is on, emoji you send on servers that don't "
+           "support Unicode go out as text shortcodes like \":joy:\" "
+           "instead of \"?\", and incoming shortcodes are shown as emoji "
+           "on every server."));
+    adw_preferences_group_add (
+        emoji_grp,
+        pref_switch_row (CFG_EMOJI_SHORTCODES,
+                         _ ("Convert emoji to/from :shortcodes:"), NULL));
+    adw_preferences_group_add (
+        emoji_grp,
+        pref_switch_row (CFG_EMOJI_TYPEAHEAD,
+                         _ ("Suggest shortcodes as you type"),
+                         _ ("Show a popup of matching emoji when you type "
+                            "\":\"")));
+    adw_preferences_page_add (page, emoji_grp);
 }
 
 /* ---- Custom GIF avatar picker (GIF-icons extension, Phase 10.C) --- */
@@ -2934,6 +2956,195 @@ on_avatar_clear_clicked (GtkButton *btn, gpointer user_data)
                                  "file could not be deleted."));
 }
 
+/* --- Identity icon: inline preview + Browse popup ----------------- *
+ *
+ * The Identity page shows the currently-selected icon next to an
+ * editable numeric ID (an AdwSpinRow) plus a "Browse…" button. Browse
+ * pops a grid of every icon in the loaded resource files; activating
+ * one stamps its ID onto the spin row (which repaints the inline
+ * preview) and closes the popup. */
+
+/* Render icon `resid` from the loaded resource files into `picture`.
+ * load_icon walks icon_files by ID and hands back an owned pixbuf,
+ * falling back to the default icon when the ID isn't found. */
+static void
+identity_icon_preview_update (GtkWidget *picture, guint resid)
+{
+    GdkPixbuf *pb = NULL;
+
+    load_icon (NULL, (guint16)resid, &icon_files, 1, &pb, NULL);
+    if (pb) {
+        GdkTexture *tex = gtkhx_texture_from_pixbuf (pb);
+        gtk_picture_set_paintable (GTK_PICTURE (picture),
+                                   tex ? GDK_PAINTABLE (tex) : NULL);
+        if (tex) {
+            g_object_unref (tex);
+        }
+        g_object_unref (pb);
+    } else {
+        gtk_picture_set_paintable (GTK_PICTURE (picture), NULL);
+    }
+}
+
+/* notify::value on the icon-ID spin row — repaint the inline preview.
+ * Persistence is handled separately by on_spin_row_value (also wired by
+ * pref_spin_row); this handler only touches the preview. */
+static void
+identity_icon_value_changed (GObject *row, GParamSpec *pspec, gpointer data)
+{
+    GtkWidget *preview = data;
+    (void)pspec;
+    identity_icon_preview_update (
+        preview, (guint)adw_spin_row_get_value (ADW_SPIN_ROW (row)));
+}
+
+/* The Browse popup closed (selection, Esc, or window close): drop our
+ * dangling pointers into its now-destroyed flowboxes. */
+static void
+on_icon_picker_closed (AdwDialog *dlg, gpointer data)
+{
+    (void)dlg;
+    (void)data;
+    if (iv) {
+        iv->picker_dialog = NULL;
+        iv->icon_list = NULL;
+        iv->wide_list = NULL;
+    }
+}
+
+/* Build one of the picker's flowboxes with the shared configuration.
+ * `wide` selects the one-per-row banner strip vs. the multi-column grid
+ * — the same two-flowbox split the inline picker used before. */
+static GtkWidget *
+icon_picker_make_flowbox (gboolean wide)
+{
+    GtkWidget *fb = gtk_flow_box_new ();
+
+    gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (fb), GTK_SELECTION_SINGLE);
+    gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (fb), wide ? FALSE : TRUE);
+    gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (fb), wide ? 1 : 2);
+    gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (fb), wide ? 1 : 4);
+    gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (fb), 4);
+    gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (fb), 4);
+    gtk_flow_box_set_sort_func (GTK_FLOW_BOX (fb), icon_picker_sort_cb, NULL,
+                                NULL);
+    g_signal_connect (fb, "child-activated",
+                      G_CALLBACK (icon_flow_child_activated), iv);
+    return fb;
+}
+
+/* Deferred to idle so the popup's first layout pass has run: find the
+ * flowbox child whose resid matches the current icon ID, select it, and
+ * grab its focus — a focused child inside a GtkScrolledWindow gets
+ * scrolled into view automatically. */
+static gboolean
+icon_picker_scroll_to_selected (gpointer data)
+{
+    guint want = GPOINTER_TO_UINT (data);
+    GtkFlowBox *boxes[2];
+    int b;
+
+    if (!iv) {
+        return G_SOURCE_REMOVE;
+    }
+    boxes[0] = iv->icon_list ? GTK_FLOW_BOX (iv->icon_list) : NULL;
+    boxes[1] = iv->wide_list ? GTK_FLOW_BOX (iv->wide_list) : NULL;
+
+    for (b = 0; b < 2; b++) {
+        GtkWidget *child;
+
+        if (!boxes[b]) {
+            continue;
+        }
+        for (child = gtk_widget_get_first_child (GTK_WIDGET (boxes[b])); child;
+             child = gtk_widget_get_next_sibling (child)) {
+            guint id;
+
+            if (!GTK_IS_FLOW_BOX_CHILD (child)) {
+                continue;
+            }
+            id = GPOINTER_TO_UINT (
+                g_object_get_data (G_OBJECT (child), "resid"));
+            if (id == want) {
+                gtk_flow_box_select_child (boxes[b],
+                                          GTK_FLOW_BOX_CHILD (child));
+                gtk_widget_grab_focus (child);
+                return G_SOURCE_REMOVE;
+            }
+        }
+    }
+    return G_SOURCE_REMOVE;
+}
+
+/* "Browse…" clicked — pop the icon grid, presented on the Settings
+ * dialog. list_icons() fills the flowboxes once they exist. */
+static void
+on_icon_browse_clicked (GtkButton *btn, gpointer data)
+{
+    AdwDialog *dlg;
+    GtkWidget *tv, *scroll, *picker_box;
+    (void)btn;
+    (void)data;
+
+    if (!iv) {
+        return;
+    }
+
+    /* Already open — bring the existing popup forward rather than
+     * spawning a second one (which would orphan the first with stale
+     * iv->picker_dialog / icon_list / wide_list pointers). */
+    if (iv->picker_dialog) {
+        adw_dialog_present (ADW_DIALOG (iv->picker_dialog), options_window);
+        return;
+    }
+
+    dlg = ADW_DIALOG (adw_dialog_new ());
+    adw_dialog_set_title (dlg, _ ("Choose Icon"));
+    adw_dialog_set_content_width (dlg, 420);
+    adw_dialog_set_content_height (dlg, 520);
+    gtk_widget_set_size_request (GTK_WIDGET (dlg), 300, 360);
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
+
+    picker_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
+    gtk_widget_set_margin_top (picker_box, 6);
+    gtk_widget_set_margin_bottom (picker_box, 6);
+    gtk_widget_set_margin_start (picker_box, 6);
+    gtk_widget_set_margin_end (picker_box, 6);
+    iv->icon_list = icon_picker_make_flowbox (FALSE);
+    iv->wide_list = icon_picker_make_flowbox (TRUE);
+    gtk_box_append (GTK_BOX (picker_box), iv->icon_list);
+    gtk_box_append (GTK_BOX (picker_box), iv->wide_list);
+
+    scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
+                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand (scroll, TRUE);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), picker_box);
+
+    tv = adw_toolbar_view_new ();
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (tv), adw_header_bar_new ());
+    adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (tv), scroll);
+    adw_dialog_set_child (dlg, tv);
+
+    iv->picker_dialog = GTK_WIDGET (dlg);
+    g_signal_connect (dlg, "closed", G_CALLBACK (on_icon_picker_closed), NULL);
+
+    adw_dialog_present (dlg, options_window);
+
+    list_icons ();
+
+    /* Preselect + scroll to the icon currently set on the spin row. */
+    {
+        struct cfgvar *v = cfgvar_for_name (CFG_ICON);
+        guint cur = 0;
+
+        if (v && v->widget && ADW_IS_SPIN_ROW (v->widget)) {
+            cur = (guint)adw_spin_row_get_value (ADW_SPIN_ROW (v->widget));
+        }
+        g_idle_add (icon_picker_scroll_to_selected, GUINT_TO_POINTER (cur));
+    }
+}
+
 /* Phase 5 follow-up: the old standalone General page (just NICK) folds
  * into the Identity page since they're both "who am I to the server"
  * settings. Display name first, then icon ID, then the resource picker.
@@ -2944,15 +3155,11 @@ on_avatar_clear_clicked (GtkButton *btn, gpointer user_data)
 static void
 settings_page_identity (AdwPreferencesPage *page)
 {
-    AdwPreferencesGroup *name_grp, *id_grp, *picker_grp;
-    GtkWidget *picker_row, *vbox, *scroll, *icon_list, *wide_list;
+    AdwPreferencesGroup *name_grp, *id_grp;
 
     /* g_malloc0 — zero-fill the struct so any read of
-     * iv->icon_list / nfound / icon_high before they're set later in
-     * this function returns 0 / NULL deterministically. The previous
-     * g_malloc gave us a struct full of whatever was at that address,
-     * which is exactly the kind of "crashes without gdb, runs fine
-     * with gdb" Heisenbug glibc's allocator likes to deliver. */
+     * iv->icon_list / nfound / icon_high / picker_dialog before the
+     * Browse popup sets them returns 0 / NULL deterministically. */
     iv = g_malloc0 (sizeof (struct icon_viewer));
 
     name_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2964,11 +3171,40 @@ settings_page_identity (AdwPreferencesPage *page)
 
     id_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (id_grp, _ ("Identity icon"));
-    adw_preferences_group_add (
-        id_grp,
-        pref_spin_row (CFG_ICON, _ ("Icon ID"),
-                       _ ("Numeric ID from the loaded icon resource files"), 0,
-                       65535, 1));
+    {
+        /* pref_spin_row hands back an AdwSpinRow (an AdwActionRow
+		 * subclass), so we can hang a live preview of the selected icon
+		 * on the prefix and a "Browse…" button (which pops the full
+		 * icon grid) on the suffix. The numeric ID stays directly
+		 * editable in the spin entry. */
+        GtkWidget *icon_row = pref_spin_row (
+            CFG_ICON, _ ("Icon ID"),
+            _ ("Numeric ID from the loaded icon resource files"), 0, 65535, 1);
+
+        if (ADW_IS_SPIN_ROW (icon_row)) {
+            GtkWidget *preview = gtk_picture_new ();
+            GtkWidget *browse;
+
+            gtk_widget_set_size_request (preview, 40, 40);
+            gtk_widget_set_valign (preview, GTK_ALIGN_CENTER);
+            gtk_picture_set_content_fit (GTK_PICTURE (preview),
+                                         GTK_CONTENT_FIT_CONTAIN);
+            identity_icon_preview_update (
+                preview,
+                (guint)adw_spin_row_get_value (ADW_SPIN_ROW (icon_row)));
+            g_signal_connect (icon_row, "notify::value",
+                              G_CALLBACK (identity_icon_value_changed),
+                              preview);
+            adw_action_row_add_prefix (ADW_ACTION_ROW (icon_row), preview);
+
+            browse = gtk_button_new_with_label (_ ("Browse…"));
+            gtk_widget_set_valign (browse, GTK_ALIGN_CENTER);
+            g_signal_connect (browse, "clicked",
+                              G_CALLBACK (on_icon_browse_clicked), NULL);
+            adw_action_row_add_suffix (ADW_ACTION_ROW (icon_row), browse);
+        }
+        adw_preferences_group_add (id_grp, icon_row);
+    }
     adw_preferences_page_add (page, id_grp);
 
     /* Custom GIF avatar (GIF-icons extension, Phase 10.C). Independent
@@ -3032,84 +3268,6 @@ settings_page_identity (AdwPreferencesPage *page)
 
         adw_preferences_page_add (page, gif_grp);
     }
-
-    picker_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (picker_grp, _ ("Available icons"));
-    adw_preferences_group_set_description (
-        picker_grp, _ ("Click an entry to copy its ID into the field above"));
-
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_margin_top (vbox, 6);
-    gtk_widget_set_margin_bottom (vbox, 6);
-    gtk_widget_set_margin_start (vbox, 6);
-    gtk_widget_set_margin_end (vbox, 6);
-
-    scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
-                                    GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    /* Picker height tuned to ~3 rows of 56px icons + their labels
-	 * visible at a time, plus a little extra for the wide-banner
-	 * area below the narrow grid. */
-    gtk_widget_set_size_request (scroll, -1, 380);
-
-    /* Two flowboxes share one scrolled window so the picker reads
-     * as a single unified list: the multi-column grid for narrow
-     * icons sits on top, the one-per-row strip of wide banner
-     * icons sits directly under it inside the same scroll area. */
-    {
-        GtkWidget *picker_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-
-        icon_list = gtk_flow_box_new ();
-        gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (icon_list),
-                                         GTK_SELECTION_SINGLE);
-        gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (icon_list), TRUE);
-        /* Two columns minimum, four maximum. With 56px icons, four
-         * columns fits comfortably in the typical settings dialog
-         * width without horizontal cramming. */
-        gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (icon_list), 2);
-        gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (icon_list), 4);
-        gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (icon_list), 4);
-        gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (icon_list), 4);
-        gtk_flow_box_set_sort_func (GTK_FLOW_BOX (icon_list),
-                                    icon_picker_sort_cb, NULL, NULL);
-        g_signal_connect (icon_list, "child-activated",
-                          G_CALLBACK (icon_flow_child_activated), iv);
-
-        wide_list = gtk_flow_box_new ();
-        gtk_flow_box_set_selection_mode (GTK_FLOW_BOX (wide_list),
-                                         GTK_SELECTION_SINGLE);
-        /* homogeneous=FALSE so each child keeps the banner's natural
-         * scaled width; 1/1 children per line forces one banner per
-         * row regardless of available width. */
-        gtk_flow_box_set_homogeneous (GTK_FLOW_BOX (wide_list), FALSE);
-        gtk_flow_box_set_min_children_per_line (GTK_FLOW_BOX (wide_list), 1);
-        gtk_flow_box_set_max_children_per_line (GTK_FLOW_BOX (wide_list), 1);
-        gtk_flow_box_set_row_spacing (GTK_FLOW_BOX (wide_list), 4);
-        gtk_flow_box_set_column_spacing (GTK_FLOW_BOX (wide_list), 4);
-        gtk_flow_box_set_sort_func (GTK_FLOW_BOX (wide_list),
-                                    icon_picker_sort_cb, NULL, NULL);
-        g_signal_connect (wide_list, "child-activated",
-                          G_CALLBACK (icon_flow_child_activated), iv);
-
-        gtk_box_append (GTK_BOX (picker_box), icon_list);
-        gtk_box_append (GTK_BOX (picker_box), wide_list);
-
-        gtkhx_widget_set_child (scroll, picker_box);
-    }
-    gtk_box_append (GTK_BOX (vbox), scroll);
-
-    picker_row = adw_preferences_row_new ();
-    gtk_list_box_row_set_selectable (GTK_LIST_BOX_ROW (picker_row), FALSE);
-    gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (picker_row), FALSE);
-    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (picker_row), vbox);
-    adw_preferences_group_add (picker_grp, picker_row);
-
-    iv->icon_list = icon_list;
-    iv->wide_list = wide_list;
-    iv->nfound = 0;
-    iv->icon_high = 0;
-
-    adw_preferences_page_add (page, picker_grp);
 }
 
 /* Notifications page. One row per event class that can
@@ -3119,9 +3277,9 @@ settings_page_identity (AdwPreferencesPage *page)
  * + CFG_HIGHLIGHT_WORDS, comma-separated), so what gets
  * highlighted visually is what triggers a notification. */
 static void
-settings_page_notifications (AdwPreferencesPage *page)
+settings_page_notify_events (AdwPreferencesPage *page)
 {
-    AdwPreferencesGroup *events, *behavior, *mentions;
+    AdwPreferencesGroup *events;
 
     events = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (events, _ ("Events"));
@@ -3163,6 +3321,14 @@ settings_page_notifications (AdwPreferencesPage *page)
                          _ ("Admin-issued announcement to every user")));
 
     adw_preferences_page_add (page, events);
+}
+
+/* Notifications → Behavior: the focused-window suppression toggle, plus
+ * the mention-word list (mirrored from Chat → Behavior → Highlight). */
+static void
+settings_page_notify_behavior (AdwPreferencesPage *page)
+{
+    AdwPreferencesGroup *behavior, *mentions;
 
     behavior = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (behavior, _ ("Behavior"));
@@ -3484,47 +3650,31 @@ settings_page_voice (AdwPreferencesPage *page)
 }
 #endif /* HAVE_VOICE */
 
-/* Misc holds Auto Reply plus the two genuinely cross-cutting
- * behaviours (queue downloads, show pchats at back). Single-page
- * behaviours live with their page (showjoin / old_nickcomp on Chat,
- * tracker_case on Trackers). */
+/* File Transfers page (under the General category): where downloads
+ * land plus the queue-vs-parallel toggle. Both moved off the old
+ * General "Paths" group / Misc "Behavior" group. */
 static void
-settings_page_misc (AdwPreferencesPage *page)
+settings_page_file_transfers (AdwPreferencesPage *page)
 {
-    AdwPreferencesGroup *behavior, *autoreply;
-
-    autoreply = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (autoreply, _ ("Auto Reply"));
+    AdwPreferencesGroup *grp
+        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (grp, _ ("Downloads"));
     adw_preferences_group_add (
-        autoreply,
-        pref_switch_row (CFG_AUTOREPLY_ON, _ ("Enable auto reply"), NULL));
+        grp, pref_entry_row (CFG_DOWNLOAD, _ ("Download directory")));
     adw_preferences_group_add (
-        autoreply, pref_entry_row (CFG_AUTOREPLY_MSG, _ ("Reply message")));
-    adw_preferences_page_add (page, autoreply);
-
-    behavior = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (behavior, _ ("Behavior"));
-    adw_preferences_group_add (
-        behavior,
-        pref_switch_row (
-            CFG_SHOWBACK, _ ("Show private messages at back"),
-            _ ("Don't raise the chat window when a private message arrives")));
-    adw_preferences_group_add (
-        behavior,
+        grp,
         pref_switch_row (
             CFG_QUEUEDL, _ ("Queue file transfers"),
             _ ("Run downloads one at a time instead of in parallel")));
-    adw_preferences_page_add (page, behavior);
+    adw_preferences_page_add (page, grp);
 }
 
-/* General page consolidates Appearance (theme combo) + Paths
- * (download directory). Both pages were small enough to feel
- * silly as standalone sidebar entries — folding them together gives
- * a tidier first stop in the Settings sidebar. */
+/* General page: Appearance (theme combos) + System Integration (tray).
+ * The download directory moved to the File Transfers page. */
 static void
 settings_page_general (AdwPreferencesPage *page)
 {
-    AdwPreferencesGroup *appearance_grp, *paths_grp;
+    AdwPreferencesGroup *appearance_grp;
     static const char *vals[]
         = { CFG_THEME_SYSTEM, CFG_THEME_LIGHT, CFG_THEME_DARK };
     const char *labels[3];
@@ -3582,12 +3732,6 @@ settings_page_general (AdwPreferencesPage *page)
      * directly. See gtkhx_theme.{c,h} and
      * docs/theming-file-format.md. */
 
-    paths_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (paths_grp, _ ("Paths"));
-    adw_preferences_group_add (
-        paths_grp, pref_entry_row (CFG_DOWNLOAD, _ ("Download directory")));
-    adw_preferences_page_add (page, paths_grp);
-
     /* System integration. The tray icon needs a StatusNotifierItem
      * host in the desktop environment — KDE Plasma, Cinnamon, MATE,
      * Budgie and XFCE support it natively; GNOME Shell needs the
@@ -3608,30 +3752,144 @@ settings_page_general (AdwPreferencesPage *page)
     }
 }
 
-/* Helper: build a fresh AdwPreferencesPage with title + icon and run the
- * draw_func against it. Centralizes the metadata so adding pages stays
- * a one-liner. */
+/* Sidebar-driven Settings navigation.
+ *
+ * Settings was previously an AdwPreferencesDialog, whose built-in
+ * navigation is a top AdwViewSwitcher (icon tabs across the header,
+ * adaptively collapsing to a bottom bar). This rebuilds it as a plain
+ * AdwDialog wrapping an AdwNavigationSplitView: a left GtkListBox
+ * sidebar of categories — grouped under section headers via the
+ * list-box header func — and a right content pane that swaps
+ * AdwPreferencesPage children in a GtkStack. The settings_page_*()
+ * draw functions are unchanged: each still fills an AdwPreferencesPage,
+ * only the outer container differs. (Note: dropping AdwPreferencesDialog
+ * also drops its built-in search entry — the sidebar is the navigation
+ * affordance now.)
+ *
+ * AdwNavigationSplitView is available since libadwaita 1.4 and the
+ * sidebar is a plain GtkListBox with the .navigation-sidebar style
+ * class, so this needs no bump of the meson libadwaita pin. */
+
+#ifndef N_
+#define N_(s) (s)
+#endif
+
+struct settings_entry {
+    const char *section; /* section header, or NULL to continue previous */
+    const char *name;    /* stable GtkStack child name */
+    const char *title;   /* sidebar + content-header display title */
+    const char *icon;    /* symbolic icon name */
+    void (*draw) (AdwPreferencesPage *);
+};
+
+/* Flat sidebar list, grouped under section headers. Order here is the
+ * order rows appear; a non-NULL .section starts a new header group. */
+static const struct settings_entry settings_entries[] = {
+    { N_ ("General"), "general", N_ ("General"),
+      "preferences-system-symbolic", settings_page_general },
+    { NULL, "identity", N_ ("Identity"), "user-info-symbolic",
+      settings_page_identity },
+    { NULL, "filexfer", N_ ("File Transfers"), "folder-download-symbolic",
+      settings_page_file_transfers },
+    { N_ ("Chat"), "chat_appearance", N_ ("Appearance"),
+      "user-available-symbolic", settings_page_chat_appearance },
+    { NULL, "chat_behavior", N_ ("Behavior"), "preferences-other-symbolic",
+      settings_page_chat_behavior },
+    { NULL, "chat_history", N_ ("History"), "document-open-recent-symbolic",
+      settings_page_chat_history },
+    { NULL, "chat_emoji", N_ ("Emoji"), "face-smile-symbolic",
+      settings_page_chat_emoji },
+    { N_ ("Notifications"), "notify_events", N_ ("Events"),
+      "preferences-system-notifications-symbolic", settings_page_notify_events },
+    { NULL, "notify_behavior", N_ ("Behavior"), "preferences-other-symbolic",
+      settings_page_notify_behavior },
+    { N_ ("Audio"), "sound", N_ ("Sound"), "audio-speakers-symbolic",
+      settings_page_sound },
+#ifdef HAVE_VOICE
+    { NULL, "voice", N_ ("Voice"), "audio-input-microphone-symbolic",
+      settings_page_voice },
+#endif
+    { N_ ("Network"), "trackers", N_ ("Trackers"), "network-server-symbolic",
+      settings_page_tracker },
+};
+
+/* GtkListBox header func: draw a section label above the first row of
+ * each section. Every row carries its (already-translated) section text
+ * in "section" qdata, so a header is inserted whenever a row's section
+ * differs from the row above it. */
 static void
-settings_add_page (AdwPreferencesDialog *dlg, const char *title,
-                   const char *icon, void (*draw_func) (AdwPreferencesPage *))
+settings_sidebar_header (GtkListBoxRow *row, GtkListBoxRow *before,
+                         gpointer data)
 {
-    AdwPreferencesPage *page
-        = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
-    adw_preferences_page_set_title (page, title);
-    if (icon) {
-        adw_preferences_page_set_icon_name (page, icon);
+    const char *section = g_object_get_data (G_OBJECT (row), "section");
+    const char *prev
+        = before ? g_object_get_data (G_OBJECT (before), "section") : NULL;
+    GtkWidget *label;
+    (void)data;
+
+    if (!section || (before && g_strcmp0 (section, prev) == 0)) {
+        gtk_list_box_row_set_header (row, NULL);
+        return;
     }
-    if (draw_func) {
-        draw_func (page);
+
+    label = gtk_label_new (section);
+    gtk_widget_add_css_class (label, "heading");
+    gtk_widget_add_css_class (label, "dim-label");
+    gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
+    gtk_widget_set_margin_start (label, 12);
+    gtk_widget_set_margin_end (label, 12);
+    gtk_widget_set_margin_top (label, before ? 12 : 6);
+    gtk_widget_set_margin_bottom (label, 3);
+    gtk_list_box_row_set_header (row, label);
+}
+
+/* Sidebar selection → swap the content stack, retitle the content
+ * header, and (when collapsed) navigate to the content pane. The
+ * split view / stack / content page are stashed as qdata on the
+ * list box so this handler needs no module-static state. */
+static void
+settings_row_selected (GtkListBox *box, GtkListBoxRow *row, gpointer data)
+{
+    GtkStack *stack;
+    AdwNavigationSplitView *split;
+    AdwNavigationPage *content;
+    const char *name, *title;
+    (void)data;
+
+    if (!row) {
+        return;
     }
-    adw_preferences_dialog_add (dlg, page);
+    stack = g_object_get_data (G_OBJECT (box), "stack");
+    split = g_object_get_data (G_OBJECT (box), "split");
+    content = g_object_get_data (G_OBJECT (box), "content-page");
+    name = g_object_get_data (G_OBJECT (row), "page-name");
+    title = g_object_get_data (G_OBJECT (row), "page-title");
+
+    if (stack && name) {
+        gtk_stack_set_visible_child_name (stack, name);
+    }
+    if (content && title) {
+        adw_navigation_page_set_title (content, title);
+    }
+    if (split) {
+        adw_navigation_split_view_set_show_content (split, TRUE);
+    }
 }
 
 void
 create_options_window (GtkWidget *widget, gpointer data)
 {
-    AdwPreferencesDialog *dlg;
+    AdwDialog *dlg;
+    AdwNavigationSplitView *split;
+    AdwNavigationPage *sidebar_page, *content_page;
+    AdwToolbarView *sidebar_tv, *content_tv;
+    AdwBreakpoint *bp;
+    GtkWidget *listbox, *sidebar_scroll, *stack;
     GtkWidget *parent;
+    GtkListBoxRow *first_row = NULL;
+    GValue collapsed = G_VALUE_INIT;
+    const char *cur_section = NULL;
+    size_t i;
     session *sess = data;
 
     (void)widget;
@@ -3643,28 +3901,24 @@ create_options_window (GtkWidget *widget, gpointer data)
         return;
     }
 
-    /* AdwPreferencesDialog (libadwaita 1.6+) replaces
-	 * AdwPreferencesWindow, which became deprecated alongside the
-	 * old AdwAboutWindow / AdwMessageDialog when the new adaptive
-	 * AdwDialog family arrived. The settings construction is
-	 * essentially unchanged — same 9 pages with the same draw
-	 * functions — but the outer container is the dialog now,
-	 * presented via adw_dialog_present rather than gtk_window_present.
-	 *
-	 * AdwDialog auto-handles transient_for / modal-against-parent /
-	 * proper sizing, so the explicit gtk_window_set_transient_for +
-	 * gtk_window_set_modal pair is gone. Default size still pinned
-	 * to 840x640 via set_content_width/height — wide enough that the
-	 * 9-page top AdwViewSwitcher fits horizontally before libadwaita
-	 * adaptively collapses it to a bottom bar. */
-    dlg = ADW_PREFERENCES_DIALOG (adw_preferences_dialog_new ());
-    adw_dialog_set_title (ADW_DIALOG (dlg), _ ("GtkHx Preferences"));
-    adw_dialog_set_content_width (ADW_DIALOG (dlg), 840);
-    adw_dialog_set_content_height (ADW_DIALOG (dlg), 640);
+    /* Outer container is a plain AdwDialog (the project's meson floor is
+	 * libadwaita >= 1.6): it
+	 * auto-handles transient_for / modal-against-parent / adaptive
+	 * sizing. content_width is the *preferred* size and must be wide
+	 * enough for the sidebar + a preferences page side-by-side, or Adw
+	 * warns "AdwNavigationSplitView exceeds AdwDialog width". The
+	 * width/height-request set the collapsed *minimum* — without them
+	 * Adw warns "AdwDialog does not have a minimum size". Below the
+	 * breakpoint the split view collapses to a single navigable pane,
+	 * so the minimum only needs to fit one pane. */
+    dlg = ADW_DIALOG (adw_dialog_new ());
+    adw_dialog_set_title (dlg, _ ("GtkHx Preferences"));
+    adw_dialog_set_content_width (dlg, 920);
+    adw_dialog_set_content_height (dlg, 680);
+    gtk_widget_set_size_request (GTK_WIDGET (dlg), 360, 480);
 
     /* Esc closes via AdwDialog's built-in close_response; wire Ctrl+W
-	 * (close) and Ctrl+Q (app.quit) for keyboard parity with the
-	 * rest of the app. */
+	 * (close) and Ctrl+Q (app.quit) for keyboard parity. */
     gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
 
     g_object_set_data (G_OBJECT (dlg), "sess", sess);
@@ -3673,31 +3927,116 @@ create_options_window (GtkWidget *widget, gpointer data)
 
     options_window = GTK_WIDGET (dlg);
 
-    settings_add_page (dlg, _ ("General"), "preferences-system-symbolic",
-                       settings_page_general);
-    settings_add_page (dlg, _ ("Identity"), "user-info-symbolic",
-                       settings_page_identity);
-    settings_add_page (dlg, _ ("Chat"), "user-available-symbolic",
-                       settings_page_chat);
-    settings_add_page (dlg, _ ("Sound"), "audio-speakers-symbolic",
-                       settings_page_sound);
-#ifdef HAVE_VOICE
-    settings_add_page (dlg, _ ("Voice"), "audio-input-microphone-symbolic",
-                       settings_page_voice);
-#endif
-    settings_add_page (dlg, _ ("Notifications"),
-                       "preferences-system-notifications-symbolic",
-                       settings_page_notifications);
-    settings_add_page (dlg, _ ("Trackers"), "network-server-symbolic",
-                       settings_page_tracker);
-    settings_add_page (dlg, _ ("Misc"), "applications-other-symbolic",
-                       settings_page_misc);
+    /* Content stack: one AdwPreferencesPage per settings_entry. */
+    stack = gtk_stack_new ();
+    gtk_widget_set_hexpand (stack, TRUE);
+    gtk_widget_set_vexpand (stack, TRUE);
 
-    adw_dialog_present (ADW_DIALOG (dlg), parent);
+    /* Sidebar category list. */
+    listbox = gtk_list_box_new ();
+    gtk_list_box_set_selection_mode (GTK_LIST_BOX (listbox),
+                                     GTK_SELECTION_SINGLE);
+    gtk_widget_add_css_class (listbox, "navigation-sidebar");
+    gtk_list_box_set_header_func (GTK_LIST_BOX (listbox),
+                                  settings_sidebar_header, NULL, NULL);
 
-    /* Populate the icon picker now that its hlist exists. list_icons
-	 * walks the loaded resource files and inserts a row per icon. */
-    list_icons ();
+    for (i = 0; i < sizeof (settings_entries) / sizeof (settings_entries[0]);
+         i++) {
+        const struct settings_entry *e = &settings_entries[i];
+        AdwPreferencesPage *page
+            = ADW_PREFERENCES_PAGE (adw_preferences_page_new ());
+        GtkWidget *row, *rbox, *img, *lbl;
+        const char *title = _ (e->title);
+
+        if (e->section) {
+            cur_section = _ (e->section);
+        }
+
+        adw_preferences_page_set_title (page, title);
+        if (e->draw) {
+            e->draw (page);
+        }
+        gtk_stack_add_named (GTK_STACK (stack), GTK_WIDGET (page), e->name);
+
+        row = gtk_list_box_row_new ();
+        rbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
+        gtk_widget_set_margin_start (rbox, 6);
+        gtk_widget_set_margin_end (rbox, 6);
+        gtk_widget_set_margin_top (rbox, 8);
+        gtk_widget_set_margin_bottom (rbox, 8);
+        img = gtk_image_new_from_icon_name (e->icon);
+        lbl = gtk_label_new (title);
+        gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
+        gtk_box_append (GTK_BOX (rbox), img);
+        gtk_box_append (GTK_BOX (rbox), lbl);
+        gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), rbox);
+
+        /* qdata drives the header func + selection handler. name is a
+		 * static literal (no dup); section/title are gettext returns
+		 * (stable, but dup'd for lifetime safety across teardown). */
+        g_object_set_data_full (G_OBJECT (row), "section",
+                                g_strdup (cur_section), g_free);
+        g_object_set_data (G_OBJECT (row), "page-name", (gpointer)e->name);
+        g_object_set_data_full (G_OBJECT (row), "page-title",
+                                g_strdup (title), g_free);
+        gtk_list_box_append (GTK_LIST_BOX (listbox), row);
+        if (!first_row) {
+            first_row = GTK_LIST_BOX_ROW (row);
+        }
+    }
+
+    sidebar_scroll = gtk_scrolled_window_new ();
+    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (sidebar_scroll),
+                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (sidebar_scroll),
+                                   listbox);
+    gtk_widget_set_vexpand (sidebar_scroll, TRUE);
+
+    /* Sidebar pane: header bar + scrolled category list. */
+    sidebar_tv = ADW_TOOLBAR_VIEW (adw_toolbar_view_new ());
+    adw_toolbar_view_add_top_bar (sidebar_tv, adw_header_bar_new ());
+    adw_toolbar_view_set_content (sidebar_tv, sidebar_scroll);
+    sidebar_page = ADW_NAVIGATION_PAGE (
+        adw_navigation_page_new (GTK_WIDGET (sidebar_tv), _ ("Preferences")));
+
+    /* Content pane: header bar (title tracks the selected page) + stack. */
+    content_tv = ADW_TOOLBAR_VIEW (adw_toolbar_view_new ());
+    adw_toolbar_view_add_top_bar (content_tv, adw_header_bar_new ());
+    adw_toolbar_view_set_content (content_tv, stack);
+    content_page = ADW_NAVIGATION_PAGE (
+        adw_navigation_page_new (GTK_WIDGET (content_tv), _ ("General")));
+
+    split = ADW_NAVIGATION_SPLIT_VIEW (adw_navigation_split_view_new ());
+    adw_navigation_split_view_set_sidebar (split, sidebar_page);
+    adw_navigation_split_view_set_content (split, content_page);
+    adw_navigation_split_view_set_max_sidebar_width (split, 240);
+
+    g_object_set_data (G_OBJECT (listbox), "stack", stack);
+    g_object_set_data (G_OBJECT (listbox), "split", split);
+    g_object_set_data (G_OBJECT (listbox), "content-page", content_page);
+    g_signal_connect (listbox, "row-selected",
+                      G_CALLBACK (settings_row_selected), NULL);
+
+    adw_dialog_set_child (dlg, GTK_WIDGET (split));
+
+    /* Adaptive: collapse to a single navigable pane on narrow widths. */
+    bp = adw_breakpoint_new (
+        adw_breakpoint_condition_parse ("max-width: 500sp"));
+    g_value_init (&collapsed, G_TYPE_BOOLEAN);
+    g_value_set_boolean (&collapsed, TRUE);
+    adw_breakpoint_add_setter (bp, G_OBJECT (split), "collapsed", &collapsed);
+    g_value_unset (&collapsed);
+    adw_dialog_add_breakpoint (dlg, bp);
+
+    /* Select the first category so the content pane isn't blank. */
+    if (first_row) {
+        gtk_list_box_select_row (GTK_LIST_BOX (listbox), first_row);
+    }
+
+    adw_dialog_present (dlg, parent);
+    /* The icon picker is no longer inline — it's populated on demand
+	 * when the Identity page's "Browse…" button opens the popup, so
+	 * there's no list_icons() call here. */
 }
 
 G_GNUC_END_IGNORE_DEPRECATIONS

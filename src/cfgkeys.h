@@ -37,13 +37,8 @@
  * Persisted as a plain decimal integer in gtkhxrc. */
 #define CFG_NICK_COLOR "NICKCOLOR"
 
-/* Auto-reply */
-#define CFG_AUTOREPLY_ON "AUTOREPLYON"
-#define CFG_AUTOREPLY_MSG "AUTOREPLYMSG"
-
 /* Behavior toggles */
 #define CFG_QUEUEDL "QUEUEDL"
-#define CFG_SHOWBACK "SHOWBACK"
 #define CFG_SHOWJOIN "SHOWJOIN"
 #define CFG_TRACKER_CASE "TRACKER_CASE"
 #define CFG_OLD_NICKCOMP "OLD_NICKCOMPLETION"

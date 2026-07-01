@@ -25,7 +25,6 @@ struct gtkhx_prefs {
 	 * "system" follows the desktop-wide org.freedesktop.appearance
 	 * setting; the others force the corresponding scheme. */
     char *theme;
-    char *auto_reply_msg;
     char *font;
     char *download_path;
     /* strftime(3) format for the xtext per-line timestamp
@@ -55,7 +54,6 @@ struct gtkhx_prefs {
 
     unsigned char queuedl;
     unsigned char showjoin;
-    unsigned char showback;
     /* show a system-tray icon (StatusNotifierItem). When
 	 * on, the toolbar's close button hides all windows instead of
 	 * quitting; click on the tray icon toggles visibility; the
@@ -63,7 +61,6 @@ struct gtkhx_prefs {
 	 * Settings → General → "Show tray icon" drives this. Default
 	 * ON; the tray module silently no-ops if no SNI host is around. */
     unsigned char tray;
-    unsigned char auto_reply;
     unsigned char timestamp;
     unsigned char word_wrap;
     unsigned char track_case;
