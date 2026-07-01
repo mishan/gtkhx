@@ -2415,4 +2415,29 @@ test('voice_rejoin_cycle', test_integration_voice_rejoin_cycle,
      suite       : 'integration',
      is_parallel : false,
      timeout     : 60)
+
+# voice_rejoin_media — MEDIA-level Tier 3 repro: two real VoiceRuntimes
+# (webrtcbin + ICE/DTLS/SRTP) against Janus. A joins alone (bundled
+# sendrecv "send" transceiver), B joins, B leaves + rejoins; the test
+# asserts A keeps receiving B's RTP across the rejoin. Needs the voice
+# runtime staticlib + the GStreamer stack linked (unlike the
+# signaling-only voice tests above), and UDP reachability to Janus.
+test_integration_voice_rejoin_media = executable(
+  'test_integration_voice_rejoin_media',
+  'integration/test_voice_rejoin_media.c',
+  dependencies        : proto_test_deps + [
+    rust_hxvoice_runtime_dep,
+    gstreamer_dep,
+    gstreamer_app_dep,
+    gstreamer_audio_dep,
+    gstreamer_sdp_dep,
+    gstreamer_webrtc_dep,
+  ],
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('voice_rejoin_media', test_integration_voice_rejoin_media,
+     suite       : 'integration',
+     is_parallel : false,
+     timeout     : 180)
 endif # voice_enabled

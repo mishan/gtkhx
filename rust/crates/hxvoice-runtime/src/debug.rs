@@ -23,6 +23,15 @@
 //!   ptime (50 packets/sec) that's ~1 s of live audio per log line.
 //!   Useful for "is audio actually flowing?" questions and pinpointing
 //!   where it stops if it isn't.
+//! - `voice-sdp` — the raw remote OFFER and local ANSWER SDP as they
+//!   pass through the negotiation. Verbose (a full SDP blob per line),
+//!   but the ground truth for "what mids / ssrc-cname / directions did
+//!   the server actually send?" questions.
+//! - `voice-vad` — speaker-attribution decisions: the uid a `level`
+//!   speaking frame resolved to, and — for the bundled `mid=send` leg —
+//!   whether the RTCP cname was found in the pad caps or the frame went
+//!   unattributed. Useful for "why isn't the speaker indicator
+//!   lighting up?" questions.
 //!
 //! ## Usage
 //!

@@ -197,7 +197,34 @@ pub fn list_output_devices() -> Vec<AudioDevice> {
 /// Returns `None` if neither path can construct an element (e.g.
 /// `autoaudiosrc` plugin missing on a stripped-down build host,
 /// vanishingly rare on a desktop runtime).
+///
+/// **Test hook:** if `GTKHX_VOICE_TEST_AUDIO_SRC` is set in the
+/// environment, returns a live `audiotestsrc` instead of any real
+/// capture device. The Tier 3 voice media harness sets this so a
+/// sender reliably produces RTP on a headless / device-less host —
+/// the receiver-side assertions (RTP buffers flowing) then don't
+/// depend on a working microphone. Never set in production.
 pub fn make_source(device_name: Option<&str>) -> Option<gst::Element> {
+    if let Some(val) = std::env::var_os("GTKHX_VOICE_TEST_AUDIO_SRC") {
+        // `is-live=true` paces buffers in real time so rtppcmupay
+        // emits at the normal ~50 pps, matching a real capture leg.
+        //
+        // The value selects the waveform. Default is `silence` (PCMU
+        // still flows — the RTP-flow harness counts buffers, not
+        // loudness — and nothing blasts a tone if the hook is ever set
+        // on a desktop). Set it to `sine`/`tone` for a full-scale tone
+        // when a test needs the receiver's `level` VAD to fire
+        // (e.g. the speaker-indicator harness).
+        let wave = match val.to_str() {
+            Some("sine") | Some("tone") => "sine",
+            _ => "silence",
+        };
+        return gst::ElementFactory::make("audiotestsrc")
+            .property("is-live", true)
+            .property_from_str("wave", wave)
+            .build()
+            .ok();
+    }
     if let Some(name) = device_name {
         // Resolve by exact name through the DeviceMonitor first; the
         // GstDevice exposes a `create_element` that hands back a
