@@ -73,13 +73,16 @@ pub struct HeaderDecoded {
     pub trans: u32,
     pub flag: u32,
     pub hc: u16,
-    /// Raw on-wire `len` field. Production logging surfaces this verbatim
-    /// (so traces show the server's claim even when it's pathological);
-    /// callers that need the safe body byte count use `body_len` instead.
+    /// Raw on-wire per-frame length — the offset-16 `len2` (DataSize)
+    /// field, i.e. *this frame's* byte count (see `decode_header_full` for
+    /// why DataSize, not the offset-12 TotalSize). Surfaced verbatim
+    /// (uncapped) so traces + the `FrameTooLarge` ceiling see the server's
+    /// claim even when pathological; callers that need the safe body byte
+    /// count use `body_len` instead.
     pub wire_len: u32,
     /// Body bytes after `hc`, clamped at `max_packet_len - sizeof(hc)`.
-    /// The wire `len` field counts `body bytes + hc(=2)`; subtract 2 to
-    /// get the body, and clamp at the packet ceiling to guard the
+    /// The per-frame `len2` field counts `body bytes + hc(=2)`; subtract 2
+    /// to get the body, and clamp at the packet ceiling to guard the
     /// downstream allocators in `network.c::hx_decode`.
     pub body_len: u32,
 }
@@ -94,7 +97,20 @@ pub struct HeaderDecoded {
 /// the raw `wire_len` we surface for logging.
 pub fn decode_header_full(buf: &[u8], max_packet_len: u32) -> Option<HeaderDecoded> {
     let h = Header::parse(buf)?;
-    let capped = h.len.min(max_packet_len);
+    // Frame the stream by the offset-16 field (`len2`), NOT offset-12
+    // (`len`). The Hotline transaction header carries both a TotalSize and
+    // a DataSize; in this protocol family they sit at offsets 12 and 16
+    // respectively (mhxd names them `totlen` / `len`). DataSize (offset 16
+    // = our `len2`) is *this frame's* byte count — the field the reference
+    // server sizes its read by (`mhxd/src/hx/hx_rcv.c::hx_rcv_hdr`:
+    // `len = ntohl(h->len) - 2`, where its `h->len` is offset 16). TotalSize
+    // (offset 12 = our `len`) is the whole-transaction size and can exceed a
+    // single frame when a server fragments a large reply; framing by it
+    // over-reads and desyncs the stream (observed as a `FrameTooLarge` or
+    // an "unknown header type" the frame after a big reply). For every
+    // non-fragmenting server the two fields are equal, so this is a no-op
+    // there and a fix against fragmenting ones.
+    let capped = h.len2.min(max_packet_len);
     let hc_size = std::mem::size_of::<u16>() as u32;
     let body_len = capped.saturating_sub(hc_size);
     Some(HeaderDecoded {
@@ -102,7 +118,7 @@ pub fn decode_header_full(buf: &[u8], max_packet_len: u32) -> Option<HeaderDecod
         trans: h.trans,
         flag: h.flag,
         hc: h.hc,
-        wire_len: h.len,
+        wire_len: h.len2,
         body_len,
     })
 }
@@ -2274,6 +2290,20 @@ mod tests {
 
     const MAX_PACKET: u32 = 0x100000;
 
+    /// Hand-pack a header with DISTINCT offset-12 `len` (TotalSize) and
+    /// offset-16 `len2` (DataSize) — the fragmenting-server shape.
+    fn header_bytes_with_len_len2(len: u32, len2: u32) -> Vec<u8> {
+        let mut v = Vec::new();
+        v.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // type (TASK)
+        v.extend_from_slice(&7u32.to_be_bytes()); // trans
+        v.extend_from_slice(&0u32.to_be_bytes()); // flag
+        v.extend_from_slice(&len.to_be_bytes()); // len (offset 12, TotalSize)
+        v.extend_from_slice(&len2.to_be_bytes()); // len2 (offset 16, DataSize)
+        v.extend_from_slice(&0u16.to_be_bytes()); // hc
+        assert_eq!(v.len(), HL_HDR_LEN);
+        v
+    }
+
     #[test]
     fn decode_header_full_basic_subtracts_hc() {
         // wire_len = 18 (body 16 + sizeof(hc) 2). body_len = 16.
@@ -2284,6 +2314,20 @@ mod tests {
         assert_eq!(d.flag, 0);
         assert_eq!(d.wire_len, 18);
         assert_eq!(d.body_len, 16);
+    }
+
+    /// A frame from a fragmenting server carries TotalSize (offset 12) >
+    /// this-frame DataSize (offset 16). The decoder must size the body from
+    /// DataSize (len2) so the stream stays aligned — reading TotalSize would
+    /// over-read into the next frame (the reported connect desync).
+    #[test]
+    fn decode_header_full_frames_by_len2_not_len() {
+        // TotalSize claims a 27712-byte transaction; this frame carries only
+        // 4098 bytes (4096 body + 2 hc).
+        let h = header_bytes_with_len_len2(27712, 4098);
+        let d = decode_header_full(&h, MAX_PACKET).unwrap();
+        assert_eq!(d.wire_len, 4098, "framed by DataSize (len2), not TotalSize");
+        assert_eq!(d.body_len, 4096);
     }
 
     #[test]
