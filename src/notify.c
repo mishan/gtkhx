@@ -55,7 +55,7 @@ static GtkApplication *notify_app;
 static gboolean
 body_mentions_us (const char *body)
 {
-    const char *self_nick = the_session.htlc.name;
+    const char *self_nick = hx_active_session ()->htlc.name;
     gboolean matched = FALSE;
     GPtrArray *words;
     gchar **extras = NULL;
@@ -103,7 +103,7 @@ window_is_active (GtkWidget *w)
 static GtkWidget *
 chat_window_for_cid (guint32 cid)
 {
-    struct gtkhx_chat *gc = gchat_with_cid (&the_session, cid);
+    struct gtkhx_chat *gc = gchat_with_cid (hx_active_session (), cid);
     return gc ? gc->window : NULL;
 }
 

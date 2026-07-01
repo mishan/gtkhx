@@ -134,7 +134,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 	 * reply and then reload_news, the latter of which is itself
 	 * gated on HL_ACCESS_READ_NEWS. */
     task_new (htlc, RCV_TASK_FN (rcv_task_news_users),
-              chat_with_cid (&the_session, 0), 0, "who");
+              chat_with_cid (sess_from_htlc (htlc), 0), 0, "who");
     /* USER_GETLIST is a zero-chunk opcode. */
     hlwrite_chunks (htlc, HTLC_HDR_USER_GETLIST, 0, NULL, 0);
 
@@ -266,7 +266,7 @@ void
 hx_rcv_chat (struct htlc_conn *htlc)
 {
     struct hx_chat_msg msg;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct chat *hx_chat = chat_with_cid (sess, 0);
 
     /* Chunk parse + CR2LF/strip_ansi + leading-LF strip lives in
@@ -325,7 +325,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
     {
         HxChatEvent *ev = hx_chat_event_new (
             msg.text, msg.text_len, msg.cid,
-            the_session.htlc.name[0] ? the_session.htlc.name : NULL);
+            htlc->name[0] ? htlc->name : NULL);
         if (media_status == GTKHX_PROTO_MEDIA_META_PRESENT) {
             hx_chat_event_attach_media (
                 ev, media_meta.id_ptr, media_meta.id_len,
@@ -353,7 +353,7 @@ void
 hx_rcv_msg (struct htlc_conn *htlc)
 {
     struct hx_msg_msg pm;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct chat *chat = chat_with_cid (sess, 0);
     struct hx_user *user = 0;
     guint32 hdr_type = 0;
@@ -391,7 +391,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 		 * UTF-8-sanitised, self-classified view). */
         HxMsgEvent *ev = hx_msg_event_new (
             pm.uid, pm.name, pm.name_len, pm.msg, pm.msg_len,
-            the_session.htlc.name[0] ? the_session.htlc.name : NULL);
+            htlc->name[0] ? htlc->name : NULL);
         gtkhx_session_emit_msg (gtkhx_session_get_default (), ev);
         hx_msg_event_free (ev);
     } else {
@@ -457,12 +457,12 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
 
 #ifdef USE_PLUGIN
     guint16 plugin_len = (guint16)body_len;
-    if (EMIT_SIGNAL (XP_RCV_AGREE, &the_session, buf, &plugin_len, 0, 0, 0)
+    if (EMIT_SIGNAL (XP_RCV_AGREE, sess_from_htlc (htlc), buf, &plugin_len, 0, 0, 0)
         == 1) {
         return;
     }
 #endif
-    gtkhx_session_emit_agreement (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_agreement (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                   buf, (guint16)body_len);
 }
 
@@ -499,7 +499,7 @@ hx_rcv_task (struct htlc_conn *htlc)
 	 * short buffer leaves trans at 0, which task_with_trans treats
 	 * as "no such task" — the same safe fallthrough as before. */
     gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &trans);
-    tsk = task_with_trans (&the_session, trans);
+    tsk = task_with_trans (sess_from_htlc (htlc), trans);
 
     /* Speculative bootstrap probes whose rejection is expected and
 	 * non-actionable: the GIF-icons capability probe (no cap/access bit
@@ -527,7 +527,7 @@ hx_rcv_task (struct htlc_conn *htlc)
      * for non-xfer error paths, so this is the only place voice
      * error replies get inspected. */
     if (error && tsk && tsk->str) {
-        session *sess = &the_session;
+        session *sess = sess_from_htlc (htlc);
         uint32_t opcode = 0;
         if (!strcmp (tsk->str, "voice-join")) {
             opcode = HTLC_HDR_VOICE_JOIN;
@@ -604,7 +604,7 @@ hx_rcv_task (struct htlc_conn *htlc)
 		 * (which echoes the request opcode in the TASK reply type
 		 * and now reaches hx_rcv_task after the dispatch mask fix). */
         if (htlc->fd) {
-            task_delete (&the_session, tsk);
+            task_delete (sess_from_htlc (htlc), tsk);
         }
     } else {
         /*	hx_printf_prefix(0, INFOPREFIX, "got task 0x%08x\n", trans); */
@@ -617,7 +617,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     struct hx_user_change_msg uc;
     struct chat *chat;
     struct hx_user *user;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     if (task_inerror (htlc)) {
         return;
@@ -782,7 +782,7 @@ hx_rcv_user_part (struct htlc_conn *htlc)
     struct hx_user_part_msg pm;
     struct chat *chat;
     struct hx_user *user;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     if (!hx_user_part_extract (htlc, &pm)) {
         return;
@@ -814,7 +814,7 @@ hx_rcv_chat_subject (struct htlc_conn *htlc)
 {
     struct hx_chat_subject_msg sm;
     struct chat *chat;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     if (!hx_chat_subject_extract (htlc, &sm)) {
         return;
@@ -872,7 +872,7 @@ void
 hx_rcv_chat_invite (struct htlc_conn *htlc)
 {
     struct hx_chat_invite_msg im;
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
     struct chat *chat = chat_with_cid (sess, 0);
     struct hx_user *user = 0;
 
@@ -912,7 +912,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
     htlc->flags.logged_in = 1;
 
-    setbtns (&the_session, 1);
+    setbtns (sess_from_htlc (htlc), 1);
 
     /* Note: SELFINFO is NOT where we fire post-login fetches. In
 	 * the 1.5 flow SELFINFO (TranUserAccess) arrives BEFORE the
@@ -988,7 +988,7 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
         return;
     }
     htxf->queue = xq.queueid;
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                    htxf);
 
     if (!htxf->queue) {
@@ -1075,7 +1075,7 @@ hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
      * bytes from the wire aren't NUL-terminated — copy + NUL the
      * scratch buffer before handing off. */
     {
-        session *sess = &the_session;
+        session *sess = sess_from_htlc (htlc);
         (void) htlc;
         if (sess && sess->voice_runtime && sdp_ptr && sdp_len > 0) {
             char *sdp_str = g_malloc (sdp_len + 1);
@@ -1127,7 +1127,7 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
          * rather than
          * dropping it. Otherwise the state machine never sees
          * the server finishing its ICE gathering. */
-        session *sess = &the_session;
+        session *sess = sess_from_htlc (htlc);
         if (sess && sess->voice_runtime) {
             gtkhx_voice_runtime_ice_candidate (sess->voice_runtime,
                                                r.cid, NULL);
@@ -1171,7 +1171,7 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
      * required-key validation) and feeds webrtcbin's
      * add-ice-candidate signal via Action::AddRemoteIce. */
     {
-        session *sess = &the_session;
+        session *sess = sess_from_htlc (htlc);
         (void) htlc;
         if (sess && sess->voice_runtime && ice_ptr && ice_len > 0) {
             char *json_str = g_malloc (ice_len + 1);
@@ -1241,7 +1241,7 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc)
      * (same parser the typed walk above used) and feeds the state
      * machine's mid_to_user / participants caches. */
     {
-        session *sess = &the_session;
+        session *sess = sess_from_htlc (htlc);
         (void) htlc;
         if (sess && sess->voice_runtime) {
             gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
@@ -1389,7 +1389,7 @@ rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
      * generation walk, ParticipantsUpdated populates the
      * mid_to_user cache the pad-added path needs. */
     {
-        session *sess = &the_session;
+        session *sess = sess_from_htlc (htlc);
         (void) htlc;
         if (sess && sess->voice_runtime) {
             gtkhx_voice_runtime_room_status (sess->voice_runtime, r.cid,
@@ -1752,7 +1752,7 @@ rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text)
     /* this is only used for login events  */
     rcv_task_user_list (htlc, chat, text);
 
-    reload_news (0, &the_session);
+    reload_news (0, sess_from_htlc (htlc));
 }
 
 void
@@ -1763,7 +1763,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     guint16 version;
     guint16 len;
     char servername[8192 + 1];
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
 
@@ -2373,7 +2373,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 void
 rcv_task_user_list_switch (struct htlc_conn *htlc, struct chat *chat)
 {
-    session *sess = &the_session;
+    session *sess = sess_from_htlc (htlc);
 
     if (task_inerror (htlc)) {
         chat_delete (sess, chat);
@@ -2475,10 +2475,10 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
                 int hc = (int)gtkhx_proto_build_file_list_chunks (
                     hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
                 if (hc > 0) {
-                    task_new (&the_session.htlc,
+                    task_new (htlc,
                               RCV_TASK_FN (rcv_task_file_list), ncfl, 0,
                               "ls_complete");
-                    hlwrite_chunks (&the_session.htlc, HTLC_HDR_FILE_LIST, 0,
+                    hlwrite_chunks (htlc, HTLC_HDR_FILE_LIST, 0,
                                     chunks, hc);
                 }
                 g_free (hldir);
@@ -2672,7 +2672,7 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
             htxf->gone = 0;
             timer_add_secs (1, xfer_go_timer, htxf);
         } else {
-            gtask_delete_htxf (&the_session, htxf);
+            gtask_delete_htxf (sess_from_htlc (htlc), htxf);
             xfer_delete (htxf);
         }
         return;
@@ -2705,7 +2705,7 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                    htxf); /* we most certainly want
 														 to output its position
 														 in the queue */
@@ -2766,7 +2766,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
             htxf->gone = 0;
             timer_add_secs (1, xfer_go_timer, htxf);
         } else {
-            gtask_delete_htxf (&the_session, htxf);
+            gtask_delete_htxf (sess_from_htlc (htlc), htxf);
             xfer_delete (htxf);
         }
         return;
@@ -2805,7 +2805,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                    htxf);
 
     if (!htxf->queue) {
@@ -2820,7 +2820,7 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     struct stat sb;
 
     if (task_inerror (htlc)) {
-        gtask_delete_htxf (&the_session, htxf);
+        gtask_delete_htxf (sess_from_htlc (htlc), htxf);
         xfer_delete (htxf);
         return;
     }
@@ -2859,7 +2859,7 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                    htxf);
 
     if (!htxf->queue) {
@@ -2879,7 +2879,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     guint32 ref = 0, queue = 0;
 
     if (task_inerror (htlc)) {
-        gtask_delete_htxf (&the_session, htxf);
+        gtask_delete_htxf (sess_from_htlc (htlc), htxf);
         xfer_delete (htxf);
         return;
     }
@@ -2903,7 +2903,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), &the_session,
+    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                    htxf);
 
     if (!htxf->queue) {
