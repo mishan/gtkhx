@@ -52,7 +52,6 @@
 #include "about.h"
 #include "banner.h"
 #include "bookmarks.h"
-#include "plugin.h"
 #include "toolbar.h"
 #include "hx_panel.h"
 #include "hx_panel_frame.h"

@@ -37,7 +37,6 @@
 #include "gtkutil.h"
 #include "history.h"
 #include "xtext.h"
-#include "plugin.h"
 #include "rcv.h"
 #include "tasks.h"
 #include "connect.h"

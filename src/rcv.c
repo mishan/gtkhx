@@ -48,7 +48,6 @@
 #include "msg.h"
 #include "news.h"
 #include "sound.h"
-#include "plugin.h"
 #include "users.h"
 #include "usermod.h"
 #include "hxnet_bridge.h"

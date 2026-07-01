@@ -72,7 +72,6 @@ gtkhx_sources = files(
   'path_util.c',
   'pict_embed.c',
   'pict_magick.c',
-  'plugin.c',
   'prefs_parser.c',
   'preview.c',
   'proto_helpers.c',
@@ -169,13 +168,6 @@ endif
 if voice_enabled
   conf.set('HAVE_VOICE', 1)
 endif
-
-# Plugin loader is GTK-1.2-bound (gtk_clist_*, gtk_file_selection_*,
-# gtk_signal_connect, gtk_widget_set_usize). Per ROADMAP, the dlopen
-# plugin API is slated for removal, so rather than rewrite it for GTK 3
-# we leave USE_PLUGIN undefined. The contents of plugin.c and plugin.h
-# are entirely under #ifdef USE_PLUGIN and compile to a no-op.
-# conf.set('USE_PLUGIN',      1)
 
 configure_file(
   output        : 'config.h',

@@ -61,7 +61,6 @@
 #include "chat_tabs.h"
 #include "gtkurl.h"
 #include "emoji.h"
-#include "plugin.h"
 #include "tasks.h"
 #include "rcv.h"
 #include "connect.h"

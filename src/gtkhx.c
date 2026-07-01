@@ -72,7 +72,6 @@
 #include "xtext.h"
 #include "options.h"
 #include "xfers.h"
-#include "plugin.h"
 #include "commands.h"
 #include "log.h"
 #include "gtkhx.h"
