@@ -19,7 +19,6 @@ mod tr;
 
 pub mod about;
 pub mod agreement;
-pub mod connect;
 pub mod tracker;
 pub mod useredit;
 

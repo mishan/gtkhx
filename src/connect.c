@@ -1,0 +1,1679 @@
+/*
+ * Copyright (C) 2000-2026 Misha Nasledov <misha@nasledov.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but
+ * WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General
+ * Public License for more details.
+ *
+ * You should have received a copy of the GNU General
+ * Public License along with this program; if not, write to the
+ * Free Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ */
+#include "config.h"
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <gtk/gtk.h>
+#include <adwaita.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <netinet/in.h>
+#include "hx.h"
+#include "chat.h"
+#include "gtkutil.h"
+#include "gtkhx.h"
+#include "toolbar.h"
+#include "connect.h"
+#include "bookmark_cipher.h"
+#include "host_port.h"
+#include "bookmark_rc4_dialog.h"
+#include "bookmarks.h"
+#include "hotline_url.h"
+
+/* the file-level G_GNUC_BEGIN_IGNORE_DEPRECATIONS pragma
+ * that used to live here suppressed warnings from the GtkComboBoxText
+ * dropdowns + the GtkDialog bookmark prompts. Both migrations are
+ * done (AdwComboRow / AdwAlertDialog), so the pragma is no longer
+ * needed and the matching G_GNUC_END is also gone from the bottom
+ * of the file. */
+
+static GtkWidget *connect_window;
+static GtkWidget *address_entry;
+static GtkWidget *login_entry;
+static GtkWidget *password_entry;
+static GtkWidget *port_entry;
+static GtkWidget *hope;
+static GtkWidget *compress_menu;
+static GtkWidget *cipher_menu;
+/* Phase 4 (TLS). When TLS is on the connection runs the unchanged
+ * Hotline wire protocol over a TLS-wrapped TCP socket on the server's
+ * dedicated TLS port (defaults: 5600 control / 5601 transfer).
+ * Toggling this:
+ *   - auto-flips the port between the plaintext default (5500) and
+ *     the TLS default (5600). Custom ports are left alone.
+ *   - greys out HOPE + cipher + compress (TLS-on-HOPE is wasted CPU
+ *     and double-encryption; the server-side TLS port is expected
+ *     to be the canonical secure endpoint). */
+static GtkWidget *tls_switch;
+
+
+#define DEFAULT_CIPHER "BLOWFISH"
+/* RC4 was once the first entry here and the default cipher offered to
+ * old Hotline servers. It was removed in claude/remove-rc4 because RC4
+ * is a known-broken stream cipher and shipping it under a "Secure"
+ * label gives users a false sense of security — plaintext is more
+ * honest, BLOWFISH is still acceptable as a minimum bar, and
+ * CHACHA20-POLY1305 is the modern choice.
+ *
+ * This array is UI-only: it's the model behind the connect dialog's
+ * AdwComboRow and the bookmarks dialog's matching combo. The on-disk
+ * cipher byte uses a SEPARATE stable vocabulary defined in
+ * bookmark_cipher.h, so reordering / shortening this array doesn't
+ * shift the meaning of any bookmark byte. The translation helpers
+ * connect_dropdown_to_cipher_byte and connect_cipher_byte_to_dropdown
+ * live at the boundary. */
+char *valid_ciphers[] = { "BLOWFISH",
+                          /* preferred AEAD cipher, advertised when the
+						   * connection is encrypted. The negotiation sends
+						   * a multi-entry list strongest-first; server
+						   * picks whichever it supports. */
+                          "CHACHA20-POLY1305",
+                          0 };
+
+unsigned char
+connect_dropdown_to_cipher_byte (unsigned int dropdown_idx)
+{
+    unsigned int n_valid = 0;
+
+    if (dropdown_idx == 0) {
+        return BOOKMARK_CIPHER_BYTE_NONE;
+    }
+    while (valid_ciphers[n_valid]) {
+        n_valid++;
+    }
+    if (dropdown_idx > n_valid) {
+        return BOOKMARK_CIPHER_BYTE_NONE;
+    }
+    return bookmark_cipher_byte_from_name (valid_ciphers[dropdown_idx - 1]);
+}
+
+unsigned int
+connect_cipher_byte_to_dropdown (unsigned char byte)
+{
+    const char *name;
+    unsigned int i;
+
+    if (byte == BOOKMARK_CIPHER_BYTE_NONE) {
+        return 0;
+    }
+    name = bookmark_cipher_name (byte);
+    if (!name) {
+        return 0;
+    }
+    for (i = 0; valid_ciphers[i]; i++) {
+        if (strcmp (valid_ciphers[i], name) == 0) {
+            return i + 1;
+        }
+    }
+    /* Name resolved (e.g. "RC4") but is not in the live dropdown.
+     * Caller's RC4 intercept should have caught this; surface as
+     * "no cipher" defensively so the connect path doesn't auto-
+     * pick a different cipher under the user's nose. */
+    return 0;
+}
+
+int
+valid_cipher (const char *cipheralg)
+{
+    unsigned int i;
+
+    for (i = 0; valid_ciphers[i]; i++) {
+        if (!strcmp (valid_ciphers[i], cipheralg)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+
+#define DEFAULT_COMPRESS "GZIP"
+/* Order matters here — the connect dialog shows these in the
+ * compression picker, and the first-listed is the default. ZSTD
+ * first (best ratio per the HOPE-Secure-Login spec), LZ4 second
+ * (fastest), GZIP last (universally supported, the legacy
+ * default).
+ *
+ * Phase R1 moved the codec implementations into the Rust
+ * hxcompress crate, which always bundles flate2 + lz4_flex +
+ * zstd. The historical HAVE_LZ4 / HAVE_ZSTD probes that used to
+ * gate this list lost their defining sites with that move — they
+ * fell silent and the dialog showed GZIP only. Gates dropped. */
+char *valid_compressors[] = {
+    "ZSTD",
+    "LZ4",
+    "GZIP",
+    0
+};
+
+int
+valid_compress (const char *compressalg)
+{
+    unsigned int i;
+
+    for (i = 0; valid_compressors[i]; i++) {
+        if (!strcmp (valid_compressors[i], compressalg)) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
+
+/* list_n lives in src/algo_list.c now — extracted so the Tier 1
+ * test can drive its malformed-input cases (the NULL-deref crash
+ * on an empty list called out by the HOPE-Secure-Login spec) and
+ * the bounds-checks can be tightened without GTK in the way. */
+
+/* Wired to AdwDialog::closed — fires after the dialog has dismissed
+ * (close-X, ESC, or our own adw_dialog_close from server_connect).
+ * All we do is clear the singleton pointer so the next
+ * create_connect_window builds a fresh dialog. */
+static void
+close_connect_window (void)
+{
+    connect_window = 0;
+}
+
+/* ---- Last-connection cache --------------------------------------------
+ *
+ * Captures the parameters used for the most recent connect_with_args
+ * call so they survive past hx_htlc_close (which frees server_addr).
+ * Used by:
+ *   - create_connect_window to pre-fill the form when re-opening the
+ *     Connect dialog after a disconnect
+ *   - connect_reconnect_last to fire a fresh connect attempt against
+ *     the same server without showing the dialog (the Reconnect
+ *     banner button after an unexpected disconnect)
+ *
+ * Cleared on app exit; not persisted to disk. The bookmark mechanism
+ * is the durable equivalent. valid is 0 until the user has actually
+ * connected once during this run.
+ */
+static struct {
+    int valid;
+    char *server;
+    guint16 port;
+    char *login;
+    char *pass;
+    char secure;
+    char compress;
+    char cipher;
+    char tls;
+} last_conn = { 0, NULL, 0, NULL, NULL, 0, 0, 0, 0 };
+
+static void
+last_conn_set (const char *server, guint16 port, const char *login,
+               const char *pass, char secure, char compress, char cipher,
+               char tls)
+{
+    /* Strdup the inputs *before* freeing the old slots — the caller
+     * may have passed pointers that alias our existing fields. The
+     * reconnect-banner path goes through connect_reconnect_last,
+     * which passes last_conn.server straight through to
+     * connect_with_args, which calls us with server == last_conn
+     * .server. Free-then-strdup would read from the just-freed slot
+     * and either crash or land garbage in the cache (visible to the
+     * user as "connecting to v灡SU" / "Invalid URI" on the second
+     * reconnect attempt). */
+    char *new_server = g_strdup (server ? server : "");
+    char *new_login  = g_strdup (login  ? login  : "");
+    char *new_pass   = g_strdup (pass   ? pass   : "");
+
+    g_free (last_conn.server);
+    g_free (last_conn.login);
+    g_free (last_conn.pass);
+
+    last_conn.server = new_server;
+    last_conn.login  = new_login;
+    last_conn.pass   = new_pass;
+    last_conn.port = port;
+    last_conn.secure = secure;
+    last_conn.compress = compress;
+    last_conn.cipher = cipher;
+    last_conn.tls = tls;
+    last_conn.valid = 1;
+}
+
+void
+connect_set_entries (const char *address, const char *login,
+                     const char *password, guint16 port)
+{
+    char buf[HOSTLEN];
+    g_snprintf (buf, sizeof (buf), "%u", port);
+
+    if (address) {
+        gtk_editable_set_text (GTK_EDITABLE (address_entry), address);
+    }
+    if (login) {
+        gtk_editable_set_text (GTK_EDITABLE (login_entry), login);
+    }
+    if (password) {
+        gtk_editable_set_text (GTK_EDITABLE (password_entry), password);
+    }
+
+    gtk_editable_set_text (GTK_EDITABLE (port_entry), buf);
+}
+
+/* shared "actually connect" path. Plumbs the compress /
+ * cipher algorithm strings onto sess->htlc (zeroing them when the
+ * connection isn't HOPE-secure or when no algorithm is selected),
+ * resolves the port string, and fires hx_connect.
+ *
+ * Used by server_connect (form-driven) and the SplitButton bookmark
+ * paths (data-driven, dialog-bypassing).
+ *
+ * compress / cipher are the AdwComboRow indexes (0 == NONE), the
+ * non-zero values index into valid_compressors[] / valid_ciphers[]. */
+static void
+connect_with_args (session *sess, const char *server, guint16 port,
+                   const char *login, const char *pass, char secure,
+                   char compress, char cipher, char tls)
+{
+    (void)compress;
+    (void)cipher;
+
+    /* TLS and HOPE are mutually exclusive end-to-end transports.
+     * If TLS is on, force-disable HOPE + cipher + compress so the
+     * legacy bookmark with "secure=1,compress=1,cipher=1,tls=1"
+     * doesn't double-encrypt or trigger the HOPE handshake against
+     * a TLS port that's expecting raw HTLS. The Connect dialog's
+     * coupling helper greys these out in the UI; this is the
+     * data-layer enforcement for bookmark / programmatic paths. */
+    if (tls) {
+        secure = 0;
+        compress = 0;
+        cipher = 0;
+    }
+
+    memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
+    if (secure && compress) {
+        const char *compress_algo = valid_compressors[compress - 1];
+        if (compress_algo && valid_compress (compress_algo)) {
+            size_t colen = strlen (compress_algo);
+            if (colen >= sizeof (sess->htlc.compressalg)) {
+                colen = sizeof (sess->htlc.compressalg) - 1;
+            }
+            memcpy (sess->htlc.compressalg, compress_algo, colen);
+            sess->htlc.compressalg[colen] = 0;
+        }
+    }
+    memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
+    if (secure && cipher) {
+        /* Resolve the stable bookmark cipher byte to a HOPE
+         * cipher-name string. The RC4 byte (cipher=1) would resolve
+         * to "RC4" here; the connect-time intercept upstream of this
+         * function (connect_open_bookmark_by_name + peers) runs the
+         * migration dialog and rewrites the byte before we get
+         * called. Any RC4 byte that reaches this point is therefore
+         * a defensive case — drop to "no cipher" rather than try to
+         * advertise a cipher we no longer support. */
+        const char *cipher_algo
+            = bookmark_cipher_name ((unsigned char) cipher);
+        if (cipher_algo && valid_cipher (cipher_algo)) {
+            size_t cilen = strlen (cipher_algo);
+            if (cilen >= sizeof (sess->htlc.cipheralg)) {
+                cilen = sizeof (sess->htlc.cipheralg) - 1;
+            }
+            memcpy (sess->htlc.cipheralg, cipher_algo, cilen);
+            sess->htlc.cipheralg[cilen] = 0;
+        }
+    }
+
+    last_conn_set (server, port, login, pass, secure, compress, cipher, tls);
+
+    /* From here on use last_conn.{server,login,pass} rather than the
+     * incoming parameters: when this function is called from
+     * connect_reconnect_last, those parameters aliased last_conn's
+     * fields, which last_conn_set just freed-and-replaced. The fresh
+     * cache copies hold the same data with guaranteed-valid lifetime
+     * for the synchronous portion of hx_connect (which g_strdup's
+     * what it needs before going async via GSocketClient). */
+    hx_connect (&sess->htlc, last_conn.server, port,
+                last_conn.login, last_conn.pass, secure, tls);
+}
+
+/* Reconnect to the most-recently-used server, no dialog. Wired to
+ * the toolbar's "Lost connection — Reconnect" banner button. If
+ * the user hasn't connected yet this run (e.g. cold start with the
+ * banner somehow already showing — defensive), fall back to opening
+ * the Connect dialog so they have something to fill in. */
+void
+connect_reconnect_last (void)
+{
+    if (!last_conn.valid || !last_conn.server || !last_conn.server[0]) {
+        create_connect_window (NULL, hx_active_session ());
+        return;
+    }
+    connect_with_args (hx_active_session (), last_conn.server, last_conn.port,
+                       last_conn.login, last_conn.pass, last_conn.secure,
+                       last_conn.compress, last_conn.cipher, last_conn.tls);
+}
+
+static void
+server_connect (GtkWidget *widget, gpointer data)
+{
+    const char *server, *login, *pass, *portstr;
+    int secure;
+    session *sess = data;
+    guint16 port = 5500;
+    char compress = 0, cipher = 0;
+    char tls = 0;
+    (void)widget;
+
+    login = gtk_editable_get_text (GTK_EDITABLE (login_entry));
+    server = gtk_editable_get_text (GTK_EDITABLE (address_entry));
+    pass = gtk_editable_get_text (GTK_EDITABLE (password_entry));
+    portstr = gtk_editable_get_text (GTK_EDITABLE (port_entry));
+    secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
+    compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
+    /* Translate the dropdown index to a stable bookmark cipher byte
+     * before passing it down — connect_with_args + last_conn cache
+     * the value, and the cache may later get written to the bookmark
+     * file via the reconnect / save path. Keeping the byte in the
+     * stable vocabulary everywhere it flows makes that round-trip
+     * lossless. */
+    cipher = connect_dropdown_to_cipher_byte (
+        adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu)));
+    if (tls_switch) {
+        tls = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
+    }
+
+    if (portstr && portstr[0]) {
+        port = atoi (portstr);
+    }
+
+    connect_with_args (sess, server, port, login, pass, (char)secure, compress,
+                       cipher, tls);
+
+    if (connect_window) {
+        adw_dialog_close (ADW_DIALOG (connect_window));
+        connect_window = 0;
+    }
+}
+
+/* ---- HOPE / cipher / compress coupling -------------------------------
+ *
+ * The cipher and compress combo rows are meaningless unless HOPE is
+ * enabled — neither side of the connection sets them up otherwise.
+ * Two pieces of UX:
+ *
+ *  1. Grey out (set insensitive) the cipher and compress combos when
+ *     HOPE is off, so the dependency is visible at a glance. Doing
+ *     this in a notify::active handler so it tracks the switch live.
+ *
+ *  2. If the user (or a loaded bookmark) ends up with a non-NONE
+ *     cipher or compress but HOPE off — silent plaintext-with-a-
+ *     selected-cipher is the wrong failure mode for a security
+ *     feature — flip HOPE on. Belt-and-suspenders against the
+ *     greying-out approach (which prevents the situation from ever
+ *     arising via the UI, but a legacy bookmark could still load
+ *     that state).
+ */
+
+static void
+hope_coupling_sync_sensitivity (void)
+{
+    gboolean tls_on = FALSE;
+    gboolean on;
+    if (!hope) {
+        return;
+    }
+    if (tls_switch) {
+        tls_on = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
+    }
+    /* TLS overrides HOPE — the secure-port endpoint expects raw HTLS
+     * over the TLS-wrapped socket. Grey out HOPE plus its dependent
+     * combos so the user can't accidentally pick double-encryption,
+     * and force HOPE off in the underlying widget state so the saved
+     * bookmark / live connect carries (tls=1, secure=0). */
+    if (tls_on) {
+        if (adw_switch_row_get_active (ADW_SWITCH_ROW (hope))) {
+            adw_switch_row_set_active (ADW_SWITCH_ROW (hope), FALSE);
+        }
+        gtk_widget_set_sensitive (hope, FALSE);
+        if (compress_menu) {
+            gtk_widget_set_sensitive (compress_menu, FALSE);
+        }
+        if (cipher_menu) {
+            gtk_widget_set_sensitive (cipher_menu, FALSE);
+        }
+        return;
+    }
+    gtk_widget_set_sensitive (hope, TRUE);
+    on = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
+    if (compress_menu) {
+        gtk_widget_set_sensitive (compress_menu, on);
+    }
+    if (cipher_menu) {
+        gtk_widget_set_sensitive (cipher_menu, on);
+    }
+}
+
+/* TLS port defaults — TLS-on flips 5500 → 5600 (the typical TLS port);
+ * TLS-off flips back. Custom ports (anything that doesn't match either
+ * default) are left alone so a user-typed value survives toggling. */
+static void
+on_tls_active_notify (GObject *obj, GParamSpec *pspec, gpointer data)
+{
+    gboolean on;
+    const char *portstr;
+    (void) pspec;
+    (void) data;
+    if (!ADW_IS_SWITCH_ROW (obj) || !port_entry) {
+        return;
+    }
+    on = adw_switch_row_get_active (ADW_SWITCH_ROW (obj));
+    portstr = gtk_editable_get_text (GTK_EDITABLE (port_entry));
+    if (on && portstr && g_str_equal (portstr, "5500")) {
+        gtk_editable_set_text (GTK_EDITABLE (port_entry), "5600");
+    } else if (!on && portstr && g_str_equal (portstr, "5600")) {
+        gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
+    }
+    hope_coupling_sync_sensitivity ();
+}
+
+static void
+on_hope_active_notify (GObject *obj, GParamSpec *pspec, gpointer data)
+{
+    (void)obj;
+    (void)pspec;
+    (void)data;
+    hope_coupling_sync_sensitivity ();
+}
+
+static void
+on_secure_combo_selected_notify (GObject *obj, GParamSpec *pspec,
+                                 gpointer data)
+{
+    (void)pspec;
+    (void)data;
+    if (!hope || !ADW_IS_COMBO_ROW (obj)) {
+        return;
+    }
+    /* Item 0 in both combo models is "NONE". A non-zero selection
+     * means the user picked a real algorithm — force HOPE on so the
+     * choice actually takes effect. Idempotent if HOPE is already on. */
+    if (adw_combo_row_get_selected (ADW_COMBO_ROW (obj)) != 0
+        && !adw_switch_row_get_active (ADW_SWITCH_ROW (hope))) {
+        adw_switch_row_set_active (ADW_SWITCH_ROW (hope), TRUE);
+    }
+}
+
+void
+set_the_entries (char *address, char *login, char *password, char *port,
+                 char secure, char compress, char cipher, char tls)
+{
+    if (address && address[0]) {
+        gtk_editable_set_text (GTK_EDITABLE (address_entry), address);
+    } else {
+        gtk_editable_set_text (GTK_EDITABLE (address_entry), "");
+    }
+    if (login && login[0]) {
+        gtk_editable_set_text (GTK_EDITABLE (login_entry), login);
+    } else {
+        gtk_editable_set_text (GTK_EDITABLE (login_entry), "");
+    }
+    if (password && password[0]) {
+        gtk_editable_set_text (GTK_EDITABLE (password_entry), password);
+    } else {
+        gtk_editable_set_text (GTK_EDITABLE (password_entry), "");
+    }
+    if (port && port[0]) {
+        gtk_editable_set_text (GTK_EDITABLE (port_entry), port);
+    } else {
+        gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
+    }
+
+    /* Repair legacy bookmarks where a user picked a cipher or
+     * compression algorithm but forgot to flick the HOPE switch
+     * before saving. Pre-coupling-fix UI let that state through and
+     * the connection silently went plaintext. After this point the
+     * UI prevents it (the combos go insensitive when HOPE is off);
+     * normalise here so the bookmark-loaded state matches the new
+     * UI invariant. */
+    if (!secure && (compress != 0 || cipher != 0)) {
+        secure = 1;
+    }
+
+    if (hope) {
+        adw_switch_row_set_active (ADW_SWITCH_ROW (hope),
+                                   secure ? TRUE : FALSE);
+    }
+    if (compress_menu) {
+        adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), compress);
+    }
+    if (cipher_menu) {
+        /* The `cipher` argument is a stable bookmark cipher byte
+         * (see bookmark_cipher.h), not a dropdown index — translate
+         * before stuffing it into the AdwComboRow. A byte naming a
+         * cipher the dropdown no longer offers (RC4, primarily)
+         * resolves to dropdown index 0 ("no cipher"), so a stray
+         * RC4 byte that escaped the intercept upstream lands with
+         * a visibly-no-cipher form rather than silently picking the
+         * first available cipher. */
+        adw_combo_row_set_selected (
+            ADW_COMBO_ROW (cipher_menu),
+            connect_cipher_byte_to_dropdown ((unsigned char) cipher));
+    }
+    if (tls_switch) {
+        adw_switch_row_set_active (ADW_SWITCH_ROW (tls_switch),
+                                   tls ? TRUE : FALSE);
+    }
+
+    /* Either set_the_entries was called with a bookmark before the
+     * coupling notify handlers fired (preload path) or it's
+     * mid-session via Connect dialog reuse — sync sensitivity
+     * unconditionally so the combos match the new HOPE state. */
+    hope_coupling_sync_sensitivity ();
+}
+
+static void open_bookmark (GtkWidget *widget, gpointer data);
+
+static void
+strip_lf (char *buf)
+{
+    int i, len = strlen (buf);
+
+    for (i = 0; i < len; i++) {
+        if (buf[i] == '\n') {
+            buf[i] = '\0';
+            return;
+        }
+    }
+
+    return;
+}
+
+/* legacy-bookmark conversion runs from the AdwAlertDialog
+ * "convert" response. Path is passed through user_data; freed via
+ * the dialog's "closed" signal once the response is handled.
+ *
+ * Old shape was a click handler on the OK button that pulled the
+ * dialog pointer out of qdata so it could destroy itself. With
+ * AdwAlertDialog the dialog auto-dismisses when the response
+ * handler returns, so the explicit destroy is gone — we only do
+ * the file-rewrite work here. */
+static void
+convert_bookmark (AdwAlertDialog *dialog, const char *response, gpointer data)
+{
+    FILE *bm;
+    char server[128];
+    char login[64];
+    char pass[64];
+    char zeros[256];
+    char port[HOSTLEN];
+    size_t len, len_total;
+
+    (void)dialog;
+
+    if (g_strcmp0 (response, "convert") != 0) {
+        return;
+    }
+
+    bm = fopen ((char *)data, "r");
+    if (!bm) {
+        fprintf (stderr, "Could not open '%s' for reading...Aborting\n",
+                 (char *)data);
+        exit (1);
+    }
+    memset (zeros, 0, 256);
+
+    /* Bail if the bookmark file is shorter than the three lines we
+	 * need. Without these checks, a truncated file leaves later
+	 * strlen()/strrchr() walking uninitialised stack — crash on a
+	 * malformed bookmark. */
+    if (!fgets (server, 128, bm) || !fgets (login, 64, bm)
+        || !fgets (pass, 64, bm)) {
+        fprintf (stderr, "Bookmark file '%s' truncated; aborting\n",
+                 (char *)data);
+        fclose (bm);
+        exit (1);
+    }
+    server[strlen (server) - 1] = '\0';
+    login[strlen (login) - 1] = '\0';
+    strip_lf (pass);
+    fclose (bm);
+
+    /* Split "host" / "host:port" / "[ipv6]:port" via the shared IPv6-aware
+     * helper. On a malformed value leave server as-is with no port. */
+    port[0] = '\0';
+    {
+        g_autofree char *chost = NULL;
+        guint16 cport = 0;
+        gboolean had = FALSE;
+        if (gtkhx_parse_host_port (server, 0, &chost, &cport, &had)) {
+            g_strlcpy (server, chost, sizeof (server));
+            if (had) {
+                g_snprintf (port, sizeof (port), "%u", (unsigned) cport);
+            }
+        }
+    }
+
+    set_the_entries (server, login, pass, port, 0, 0, 0, 0);
+
+    bm = fopen (data, "w");
+    if (!bm) {
+        fprintf (stderr, "Could not open '%s' for writing...Aborting\n",
+                 (char *)data);
+        return;
+    }
+
+    fprintf (bm, "HTsc%c%c", 0, 1);
+    fwrite (zeros, 1, 129, bm);
+
+    len = strlen (login);
+    len_total = 33 - len;
+    fprintf (bm, "%c", (int)len);
+    fprintf (bm, "%s", login);
+    fwrite (zeros, 1, len_total, bm);
+
+    len = strlen (pass);
+    len_total = 33 - len;
+    fprintf (bm, "%c", (int)len);
+    fprintf (bm, "%s", pass);
+    fwrite (zeros, 1, len_total, bm);
+
+    len = strlen (server);
+    len_total = 256 - len;
+    fprintf (bm, "%c", (int)len);
+    fprintf (bm, "%s", server);
+
+    /* secure:0, compress:0, cipher:0, tls:0 */
+    fprintf (bm, "%c%c%c%c", 0, 0, 0, 0);
+    fwrite (zeros, 1, len_total - 4, bm);
+
+    fclose (bm);
+}
+
+static void
+prompt_conversion_closed (AdwDialog *dialog, gpointer data)
+{
+    (void)dialog;
+    g_free (data);
+}
+
+static void
+prompt_conversion (char *name)
+{
+    AdwDialog *dialog;
+    char *path = g_strdup (name);
+
+    dialog = adw_alert_dialog_new (
+        _ ("Convert Bookmark"),
+        _ ("This bookmark is written in an old GtkHx format. "
+           "Would you like to convert it to the new format?"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "no", _ ("_No"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "convert",
+                                   _ ("_Convert"));
+    adw_alert_dialog_set_response_appearance (
+        ADW_ALERT_DIALOG (dialog), "convert", ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog),
+                                           "convert");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "no");
+
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
+    g_signal_connect (dialog, "response", G_CALLBACK (convert_bookmark), path);
+    g_signal_connect (dialog, "closed", G_CALLBACK (prompt_conversion_closed),
+                      path);
+
+    adw_dialog_present (dialog,
+                        toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
+}
+
+/* bookmarks live under $CONFIG/bookmarks/. Legacy
+ * ~/.hx/bookmarks/ is consulted as a read-fallback only — bookmarks
+ * saved from this version always go to the new path. */
+static char *
+bookmarks_dir_primary (void)
+{
+    return g_build_filename (gtkhx_config_dir (), "bookmarks", NULL);
+}
+
+static char *
+bookmarks_dir_legacy (void)
+{
+    const char *home = g_getenv ("HOME");
+    if (!home || !*home) {
+        home = g_get_home_dir ();
+    }
+    if (!home) {
+        return NULL;
+    }
+    return g_build_filename (home, ".hx", "bookmarks", NULL);
+}
+
+/* Resolve a bookmark name to an open fd and the path it came from.
+ * Tries $CONFIG/bookmarks/<name> first; if absent, falls back to the
+ * legacy ~/.hx/bookmarks/<name>. Caller g_frees *out_path on the
+ * non-error return. Returns -1 with *out_path set to NULL on failure. */
+static int
+open_bookmark_file (const char *name, char **out_path)
+{
+    char *primary = bookmarks_dir_primary ();
+    char *path = g_build_filename (primary, name, NULL);
+    int bm = open (path, O_RDONLY);
+
+    g_free (primary);
+
+    if (bm < 0 && errno == ENOENT) {
+        char *legacy = bookmarks_dir_legacy ();
+        if (legacy) {
+            char *legacy_path = g_build_filename (legacy, name, NULL);
+            bm = open (legacy_path, O_RDONLY);
+            if (bm >= 0) {
+                g_free (path);
+                path = legacy_path;
+            } else {
+                g_free (legacy_path);
+            }
+            g_free (legacy);
+        }
+    }
+
+    if (bm < 0) {
+        g_free (path);
+        *out_path = NULL;
+    } else {
+        *out_path = path;
+    }
+    return bm;
+}
+
+/* parsed contents of an HTsc-format bookmark file.
+ * server/port are split (port populated only if the bookmark stored
+ * "host:port"); login/pass are NUL-terminated within their 33-byte
+ * fields. */
+struct bookmark_parsed {
+    char server[128];
+    char login[33];
+    char pass[33];
+    char port[HOSTLEN];
+    char secure;
+    char compress;
+    char cipher;
+    char tls;          /* Phase 4: TLS over dedicated server port */
+};
+
+/* read the new-format (HTsc) bookmark at $name and fill *out.
+ * Returns 0 on success.
+ *  -1: bookmark doesn't exist
+ *  -2: file is in the legacy format (caller should run prompt_conversion)
+ *  -3: short read / corrupt file
+ *
+ * On the legacy-format path the caller gets the file path through
+ * *out_legacy_path so it can hand it to prompt_conversion; the path
+ * is g_strdup'd, caller g_frees. */
+static int
+bookmark_parse (const char *name, struct bookmark_parsed *out,
+                char **out_legacy_path)
+{
+    char *path = NULL;
+    int bm = open_bookmark_file (name, &path);
+    char junk[132];
+    char header[5];
+    unsigned char len_addr;
+    size_t len;
+
+    if (out_legacy_path) {
+        *out_legacy_path = NULL;
+    }
+    if (bm < 0) {
+        return -1;
+    }
+
+    memset (out, 0, sizeof (*out));
+
+    if (read (bm, header, 4) != 4) {
+        goto bad;
+    }
+    header[4] = '\0';
+    if (strcmp (header, "HTsc") != 0) {
+        close (bm);
+        if (out_legacy_path) {
+            *out_legacy_path = path;
+        } else {
+            g_free (path);
+        }
+        return -2;
+    }
+    g_free (path);
+
+    if (read (bm, junk, 132) != 132) {
+        goto bad;
+    }
+    if (read (bm, out->login, 33) != 33) {
+        goto bad;
+    }
+    if (read (bm, &len_addr, 1) != 1) {
+        goto bad;
+    }
+    if (read (bm, out->pass, 33) != 33) {
+        goto bad;
+    }
+    if (read (bm, &len_addr, 1) != 1) {
+        goto bad;
+    }
+
+    len = len_addr;
+    if (len >= sizeof (out->server)) {
+        goto bad;
+    }
+    if (read (bm, out->server, len) != (ssize_t)len) {
+        goto bad;
+    }
+    out->server[len] = 0;
+
+    if (read (bm, &out->secure, 1) != 1) {
+        goto bad;
+    }
+    if (read (bm, &out->compress, 1) != 1) {
+        goto bad;
+    }
+    if (read (bm, &out->cipher, 1) != 1) {
+        goto bad;
+    }
+    /* TLS flag — 4th byte after the server field. Old
+	 * bookmarks zero-padded the slot, so a short read returns 0
+	 * = TLS off, which is the right back-compat default. */
+    if (read (bm, &out->tls, 1) != 1) {
+        out->tls = 0;
+    }
+
+    close (bm);
+
+    /* Split "host" / "host:port" / "[ipv6]:port" via the shared IPv6-aware
+     * helper. On a malformed value leave out->server as-is with no port. */
+    out->port[0] = '\0';
+    {
+        g_autofree char *chost = NULL;
+        guint16 cport = 0;
+        gboolean had = FALSE;
+        if (gtkhx_parse_host_port (out->server, 0, &chost, &cport, &had)) {
+            g_strlcpy (out->server, chost, sizeof (out->server));
+            if (had) {
+                g_snprintf (out->port, sizeof (out->port), "%u",
+                            (unsigned) cport);
+            }
+        }
+    }
+    return 0;
+
+bad:
+    close (bm);
+    return -3;
+}
+
+/* Phase 5 legacy entry point — fills the connect-dialog widgets from
+ * a saved bookmark. Used internally by code that opens the dialog
+ * first (the SplitButton menu uses connect_open_bookmark_by_name
+ * instead, which connects directly without showing the dialog). */
+static void
+open_bookmark (GtkWidget *widget, gpointer data)
+{
+    struct bookmark_parsed bm;
+    char *legacy_path = NULL;
+    const char *name = (const char *)data;
+    int rc;
+    (void)widget;
+
+    rc = bookmark_parse (name, &bm, &legacy_path);
+    if (rc == -1) {
+        g_warning ("%s \"%s\"\n", _ ("No such bookmark"), name);
+        return;
+    }
+    if (rc == -2) {
+        prompt_conversion (legacy_path);
+        g_free (legacy_path);
+        return;
+    }
+    if (rc != 0) {
+        g_warning ("%s \"%s\"\n", _ ("Could not read bookmark"), name);
+        return;
+    }
+
+    /* RC4 migration on the preload path. Without this, an RC4
+     * bookmark would land in the form with HOPE enabled and the
+     * cipher dropdown at "no cipher" (set_the_entries translates
+     * the stable RC4 byte to dropdown 0), and a subsequent Connect
+     * click would silently send a plaintext connection without
+     * asking the user. Prompting here mirrors what
+     * connect_open_bookmark_by_name does for direct-connect; the
+     * dialog persists the user's choice to the bookmark file. On
+     * cancel, abandon the preload — leaves the form in whatever
+     * state it was in. */
+    if (bm.secure && bm.cipher == BOOKMARK_CIPHER_BYTE_RC4) {
+        int new_byte = hx_bookmark_rc4_dialog_run_sync (
+            gtkhx_active_window (), name);
+        if (new_byte < 0) {
+            return;
+        }
+        bm.cipher = (char) new_byte;
+    }
+
+    set_the_entries (bm.server, bm.login, bm.pass, bm.port, bm.secure,
+                     bm.compress, bm.cipher, bm.tls);
+}
+
+/* scan a bookmarks dir and append each entry as a menu item
+ * targeting app.open_bookmark with the bookmark name as a string
+ * variant. Skips dotfiles (".", "..", and any hidden override files)
+ * and de-dupes against names already in the menu so the legacy
+ * ~/.hx/bookmarks/ pass doesn't add doubles for entries that exist
+ * in both locations. */
+static gboolean
+menu_already_has_bookmark (GMenu *menu, const char *name)
+{
+    int i, n = g_menu_model_get_n_items (G_MENU_MODEL (menu));
+    for (i = 0; i < n; i++) {
+        GVariant *target;
+        const char *existing;
+        gboolean match = FALSE;
+
+        target = g_menu_model_get_item_attribute_value (
+            G_MENU_MODEL (menu), i, G_MENU_ATTRIBUTE_TARGET, NULL);
+        if (!target) {
+            continue;
+        }
+        existing = g_variant_get_string (target, NULL);
+        match = g_strcmp0 (existing, name) == 0;
+        g_variant_unref (target);
+        if (match) {
+            return TRUE;
+        }
+    }
+    return FALSE;
+}
+
+static void
+build_bookmark_menu_from_dir (GMenu *menu, const char *path)
+{
+    struct dirent *ent;
+    DIR *dir;
+
+    if (!path || !(dir = opendir (path))) {
+        return;
+    }
+
+    while ((ent = readdir (dir))) {
+        GMenuItem *item;
+
+        if (*ent->d_name == '.') {
+            continue;
+        }
+        if (menu_already_has_bookmark (menu, ent->d_name)) {
+            continue;
+        }
+
+        item = g_menu_item_new (ent->d_name, NULL);
+        g_menu_item_set_action_and_target_value (
+            item, "app.open_bookmark", g_variant_new_string (ent->d_name));
+        g_menu_append_item (menu, item);
+        g_object_unref (item);
+    }
+    closedir (dir);
+}
+
+/* same display names the connect-dialog combo uses (in
+ * create_connect_window's builtin_names array). Indexes here MUST
+ * line up with builtin_bookmark's switch on GPOINTER_TO_INT(data) —
+ * 1..4 maps to hlserver / cafelinux / nasledov / singrafix. */
+static const char *const builtin_bookmark_names[] = {
+    NULL, /* index 0 unused */
+    "Hotline Communications",
+};
+#define BUILTIN_BOOKMARK_MAX 1
+
+GMenu *
+connect_build_bookmark_menu (void)
+{
+    GMenu *menu = g_menu_new ();
+    GMenu *builtins = g_menu_new ();
+    GMenu *saved = g_menu_new ();
+    char *primary = bookmarks_dir_primary ();
+    char *legacy = bookmarks_dir_legacy ();
+    int i;
+
+    /* Built-in section: hardcoded "well-known" Hotline servers from
+	 * the connect dialog's builtin list. They target a separate
+	 * action (app.connect_builtin) with an integer parameter so the
+	 * action handler can dispatch to builtin_bookmark by index. */
+    for (i = 1; i <= BUILTIN_BOOKMARK_MAX; i++) {
+        GMenuItem *item = g_menu_item_new (builtin_bookmark_names[i], NULL);
+        g_menu_item_set_action_and_target_value (item, "app.connect_builtin",
+                                                 g_variant_new_int32 (i));
+        g_menu_append_item (builtins, item);
+        g_object_unref (item);
+    }
+    g_menu_append_section (menu, NULL, G_MENU_MODEL (builtins));
+    g_object_unref (builtins);
+
+    /* Saved bookmarks: scanned from disk. Appended as a separate
+	 * section so the GtkPopoverMenu draws a separator between the
+	 * built-ins and the user-saved entries. */
+    build_bookmark_menu_from_dir (saved, primary);
+    build_bookmark_menu_from_dir (saved, legacy);
+    if (g_menu_model_get_n_items (G_MENU_MODEL (saved)) > 0) {
+        g_menu_append_section (menu, NULL, G_MENU_MODEL (saved));
+    }
+    g_object_unref (saved);
+
+    g_free (primary);
+    g_free (legacy);
+    return menu;
+}
+
+/* connect to a saved bookmark directly — no dialog. The
+ * SplitButton dropdown calls this when the user picks a bookmark.
+ * Parses the file via bookmark_parse, sets up the session's
+ * compress/cipher state, and calls hx_connect.
+ *
+ * Legacy-format bookmarks fall back to the prompt_conversion flow,
+ * which opens an AdwAlertDialog and rewrites the file in-place;
+ * after conversion the user has to click the bookmark again to
+ * connect. We don't auto-retry because converting + connecting
+ * silently would hide the format change from the user. */
+void
+connect_open_bookmark_by_name (const char *name)
+{
+    struct bookmark_parsed bm;
+    char *legacy_path = NULL;
+    int rc;
+    guint16 port = 5500;
+
+    if (!name || !*name) {
+        return;
+    }
+
+    rc = bookmark_parse (name, &bm, &legacy_path);
+    if (rc == -1) {
+        g_warning ("%s \"%s\"\n", _ ("No such bookmark"), name);
+        return;
+    }
+    if (rc == -2) {
+        prompt_conversion (legacy_path);
+        g_free (legacy_path);
+        return;
+    }
+    if (rc != 0) {
+        g_warning ("%s \"%s\"\n", _ ("Could not read bookmark"), name);
+        return;
+    }
+
+    if (bm.port[0]) {
+        port = atoi (bm.port);
+    }
+
+    /* RC4 migration: if the bookmark was saved with the legacy RC4
+     * cipher (stable byte 1), prompt the user for a replacement
+     * before connecting. The dialog also writes the chosen byte
+     * back to the bookmark file so subsequent opens of the same
+     * bookmark don't re-prompt. Cancel = abandon the connection. */
+    if (bm.secure && bm.cipher == BOOKMARK_CIPHER_BYTE_RC4) {
+        int new_byte = hx_bookmark_rc4_dialog_run_sync (
+            gtkhx_active_window (), name);
+        if (new_byte < 0) {
+            return;
+        }
+        bm.cipher = (char) new_byte;
+    }
+
+    connect_with_args (hx_active_session (), bm.server, port, bm.login, bm.pass,
+                       bm.secure, bm.compress, bm.cipher, bm.tls);
+}
+
+/* connect to a built-in "well-known" Hotline server. After
+ * the recent cleanup only Hotline Communications (idx 1, hlserver.com)
+ * remains; the switch is preserved as a structure so adding more
+ * built-ins later is a single new case. */
+void
+connect_open_builtin_bookmark (int idx)
+{
+    const char *server;
+
+    switch (idx) {
+    case 1:
+        server = "hlserver.com";
+        break;
+    default:
+        g_warning ("connect_open_builtin_bookmark: unknown idx %d", idx);
+        return;
+    }
+
+    connect_with_args (hx_active_session (), server, 5500, "", "", 0, 0, 0, 0);
+}
+
+/* ---------------------------------------------------------------- */
+/* hotline:// URL handlers                                          */
+/* ---------------------------------------------------------------- */
+
+gboolean
+connect_open_hotline_url (const char *url)
+{
+    HotlineUrlParts parts;
+    guint16 port;
+
+    if (!hotline_url_parse (url, &parts)) {
+        return FALSE;
+    }
+    port = parts.port ? parts.port : 5500;
+
+    /* Plain Hotline — no HOPE / no TLS / no compress / no cipher.
+	 * The hotline:// URL form doesn't carry transport-security
+	 * parameters; users who want HOPE or TLS for this server should
+	 * save the URL as a bookmark first (Save Bookmark popup item)
+	 * and edit the bookmark's security settings. */
+    connect_with_args (hx_active_session (), parts.host, port, parts.login, parts.pass,
+                       0, 0, 0, 0);
+    return TRUE;
+}
+
+gboolean
+connect_save_hotline_url_as_bookmark (const char *url, char **out_name,
+                                      GError **err)
+{
+    HotlineUrlParts parts;
+    HxBookmark *bm;
+    char *display_name;
+    gboolean ok;
+
+    if (out_name) {
+        *out_name = NULL;
+    }
+
+    if (!hotline_url_parse (url, &parts)) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_INVAL,
+                     _ ("Couldn't parse hotline:// URL"));
+        return FALSE;
+    }
+
+    display_name = hx_bookmark_safe_filename (parts.host);
+    if (!display_name) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_INVAL,
+                     _ ("Couldn't derive a bookmark name from URL"));
+        return FALSE;
+    }
+
+    /* Refuse to clobber an existing bookmark with the same name —
+	 * matches the tracker_save_bookmark_for_row contract so the user
+	 * gets a "rename the existing one" prompt instead of a silent
+	 * overwrite. */
+    {
+        g_autoptr (HxBookmark) existing = hx_bookmark_load (display_name);
+        if (existing) {
+            g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_EXIST,
+                         _ ("Bookmark \"%s\" already exists. Manage it from "
+                            "the Bookmarks dialog."),
+                         display_name);
+            g_free (display_name);
+            return FALSE;
+        }
+    }
+
+    bm = hx_bookmark_new ();
+    if (!bm) {
+        g_set_error (err, G_FILE_ERROR, G_FILE_ERROR_NOMEM,
+                     _ ("Out of memory"));
+        g_free (display_name);
+        return FALSE;
+    }
+
+    bm->name = display_name; /* takes ownership */
+    g_strlcpy (bm->server, parts.host, sizeof (bm->server));
+    if (parts.port) {
+        g_snprintf (bm->port, sizeof (bm->port), "%u", (unsigned)parts.port);
+    } else {
+        bm->port[0] = '\0'; /* empty == default 5500 */
+    }
+    g_strlcpy (bm->login, parts.login, sizeof (bm->login));
+    g_strlcpy (bm->pass, parts.pass, sizeof (bm->pass));
+    /* No HOPE / TLS / compress / cipher — URL form doesn't carry them. */
+    bm->secure = 0;
+    bm->compress = 0;
+    bm->cipher = 0;
+    bm->tls = 0;
+
+    ok = hx_bookmark_save (bm, err);
+    if (ok) {
+        if (out_name) {
+            *out_name = g_strdup (bm->name);
+        }
+        /* Refresh the toolbar SplitButton's bookmark dropdown so the
+		 * just-saved entry shows up without an app restart — same
+		 * follow-up the dialog save path + bookmarks.c CRUD do. */
+        toolbar_refresh_bookmarks ();
+    }
+    hx_bookmark_free (bm);
+    return ok;
+}
+
+/* bookmark save migrates to AdwAlertDialog with the name
+ * entry as extra-child. The response handler reads the entry, does
+ * the file-write work, and lets the dialog auto-dismiss. The
+ * cancel_save click handler is gone — "cancel" response (and ESC,
+ * via close_response) handle it. */
+static void
+bookmark_save_response (AdwAlertDialog *dialog, const char *response,
+                        gpointer data)
+{
+    GtkEditable *name_entry;
+    const char *name;
+    const char *server, *login, *pass, *port;
+    char secure;
+    char compress = 0, cipher = 0;
+    char tls = 0;
+    char *dir, *path = NULL, *server_str;
+    FILE *bookmark = NULL;
+    size_t len, len_total;
+    char zeros[256];
+    char *editable_name;
+    size_t i;
+
+    (void)data;
+
+    if (g_strcmp0 (response, "save") != 0) {
+        return;
+    }
+
+    name_entry = GTK_EDITABLE (adw_alert_dialog_get_extra_child (dialog));
+    name = name_entry ? gtk_editable_get_text (name_entry) : NULL;
+    if (!name || !*name) {
+        error_dialog (_ ("Error"),
+                      _ ("You must specify a name for this bookmark "
+                         "with at least one character."));
+        return;
+    }
+
+    server = gtk_editable_get_text (GTK_EDITABLE (address_entry));
+    login = gtk_editable_get_text (GTK_EDITABLE (login_entry));
+    pass = gtk_editable_get_text (GTK_EDITABLE (password_entry));
+    port = gtk_editable_get_text (GTK_EDITABLE (port_entry));
+    secure = adw_switch_row_get_active (ADW_SWITCH_ROW (hope));
+    compress = adw_combo_row_get_selected (ADW_COMBO_ROW (compress_menu));
+    /* Save-to-bookmark: stable byte vocabulary, not the live
+     * dropdown index. See connect_dropdown_to_cipher_byte. */
+    cipher = connect_dropdown_to_cipher_byte (
+        adw_combo_row_get_selected (ADW_COMBO_ROW (cipher_menu)));
+    if (tls_switch) {
+        tls = adw_switch_row_get_active (ADW_SWITCH_ROW (tls_switch));
+    }
+
+    dir = bookmarks_dir_primary ();
+    server_str = g_strdup_printf ("%s:%s", server, port);
+    memset (zeros, 0, 256);
+
+    /* Convert any '/' in the name to '\\' to avoid path traversal. */
+    editable_name = g_strdup (name);
+    len = strlen (editable_name);
+    for (i = 0; i < len; i++) {
+        if (editable_name[i] == '/') {
+            editable_name[i] = '\\';
+        }
+    }
+    path = g_build_filename (dir, editable_name, NULL);
+
+    if (g_mkdir_with_parents (dir, 0770) != 0) {
+        hx_printf_prefix (&hx_active_session ()->htlc, 0,
+                          "Could not create bookmarks dir \"%s\": %s", dir,
+                          g_strerror (errno));
+        goto out;
+    }
+    if (!(bookmark = fopen (path, "w"))) {
+        hx_printf_prefix (&hx_active_session ()->htlc, 0,
+                          "Could not open \"%s\" for writing.", path);
+        goto out;
+    }
+
+    fprintf (bookmark, "HTsc%c%c", 0, 1);
+    fwrite (zeros, 1, 129, bookmark);
+
+    len = strlen (login);
+    len_total = 33 - len;
+    fprintf (bookmark, "%c%s", (int)len, login);
+    fwrite (zeros, 1, len_total, bookmark);
+
+    len = strlen (pass);
+    len_total = 33 - len;
+    fprintf (bookmark, "%c%s", (int)len, pass);
+    fwrite (zeros, 1, len_total, bookmark);
+
+    len = strlen (server_str);
+    len_total = 256 - len;
+    fprintf (bookmark, "%c%s", (int)len, server_str);
+
+    /* flags[3] (tls) is a forward-compatible extension —
+	 * pre-TLS readers stop at flags[2] and ignore the rest of the
+	 * 256-byte block; pre-TLS files have a zero in flags[3] from
+	 * the original zero-padding, which loads as tls=0 = off. */
+    fprintf (bookmark, "%c%c%c%c", secure, compress, cipher, tls);
+    len_total -= 4;
+    fwrite (zeros, 1, len_total, bookmark);
+
+    fclose (bookmark);
+
+    /* refresh the SplitButton's bookmark dropdown so the
+	 * just-saved entry shows up without an app restart. Skipped on
+	 * the failure paths via the goto out below. */
+    toolbar_refresh_bookmarks ();
+
+out:
+    g_free (path);
+    g_free (dir);
+    g_free (server_str);
+    g_free (editable_name);
+}
+
+static void
+save_dialog_entry_activate (GtkEntry *entry, gpointer data)
+{
+    (void)entry;
+    g_signal_emit_by_name (data, "response", "save");
+}
+
+static void
+save_dialog (GtkWidget *widget, gpointer data)
+{
+    AdwDialog *dialog;
+    GtkWidget *name_entry;
+
+    (void)widget;
+    (void)data;
+
+    dialog = adw_alert_dialog_new (_ ("Save Bookmark"),
+                                   _ ("Enter a name for this bookmark."));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
+                                   _ ("_Cancel"));
+    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "save",
+                                   _ ("_Save"));
+    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "save",
+                                              ADW_RESPONSE_SUGGESTED);
+    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "save");
+    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
+
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
+
+    name_entry = gtk_entry_new ();
+    gtk_entry_set_activates_default (GTK_ENTRY (name_entry), TRUE);
+    g_signal_connect (name_entry, "activate",
+                      G_CALLBACK (save_dialog_entry_activate), dialog);
+    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), name_entry);
+
+    g_signal_connect (dialog, "response", G_CALLBACK (bookmark_save_response),
+                      NULL);
+
+    adw_dialog_present (dialog,
+                        toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
+}
+
+/* AdwDialog with AdwPreferencesGroup form rows replaces the
+ * hand-laid GtkGrid + GtkFrame + per-cell label/entry layout. The
+ * bookmark combo is gone — the SplitButton dropdown on the toolbar
+ * Connect button does that job now, and there's no point repeating
+ * the menu inside the dialog itself.
+ *
+ * Layout:
+ *   AdwHeaderBar
+ *     end:  Save Bookmark…   (pill button)
+ *     end:  Connect           (pill button, suggested-action)
+ *   AdwPreferencesGroup "Server"
+ *     description: help text
+ *     AdwEntryRow Server, AdwSpinRow Port
+ *   AdwPreferencesGroup "Account"
+ *     AdwEntryRow Login, AdwPasswordEntryRow Password
+ *   AdwPreferencesGroup "Connection"
+ *     AdwSwitchRow Secure (HOPE)
+ *     AdwComboRow Compress / Cipher
+ *
+ * Cancel is the close-X on the headerbar; ESC dismisses. The header's
+ * Connect button is the default response so Enter from any of the
+ * entry rows submits. */
+void
+create_connect_window (GtkWidget *btn, gpointer data)
+{
+    AdwDialog *dlg;
+    GtkWidget *toolbar_view, *header;
+    GtkWidget *content, *clamp;
+    GtkWidget *connect_action_btn, *save_action_btn;
+    AdwPreferencesGroup *server_grp, *account_grp, *conn_grp;
+    session *sess = data;
+    (void)btn;
+
+    if (connect_window) {
+        adw_dialog_present (ADW_DIALOG (connect_window), NULL);
+        return;
+    }
+
+    dlg = ADW_DIALOG (adw_dialog_new ());
+    adw_dialog_set_title (dlg, _ ("Connect"));
+    adw_dialog_set_content_width (dlg, 480);
+    adw_dialog_set_content_height (dlg, 560);
+
+    /* Ctrl+W / Ctrl+Q on the dialog. Esc is wired by AdwDialog
+	 * itself through close_response. */
+    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
+
+    connect_window = GTK_WIDGET (dlg);
+    g_signal_connect (dlg, "closed", G_CALLBACK (close_connect_window), NULL);
+
+    /* Header bar: Save..., Connect (suggested) on the end. Close-X
+	 * is automatic on the start (handled by AdwDialog). */
+    header = adw_header_bar_new ();
+
+    save_action_btn = gtk_button_new_with_label (_ ("Save Bookmark…"));
+    g_signal_connect (save_action_btn, "clicked", G_CALLBACK (save_dialog),
+                      NULL);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), save_action_btn);
+
+    connect_action_btn = gtk_button_new_with_label (_ ("Connect"));
+    gtk_widget_add_css_class (connect_action_btn, "suggested-action");
+    g_signal_connect (connect_action_btn, "clicked",
+                      G_CALLBACK (server_connect), sess);
+    adw_header_bar_pack_end (ADW_HEADER_BAR (header), connect_action_btn);
+
+    /* AdwToolbarView wraps the headerbar + scrollable content. */
+    toolbar_view = adw_toolbar_view_new ();
+    adw_toolbar_view_add_top_bar (ADW_TOOLBAR_VIEW (toolbar_view), header);
+
+    /* Content vbox holding the preference groups. AdwClamp keeps the
+	 * form a comfortable width (no edge-to-edge stretching on wide
+	 * dialogs) and centers it horizontally. */
+    content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 18);
+    gtk_widget_set_margin_top (content, 18);
+    gtk_widget_set_margin_bottom (content, 18);
+    gtk_widget_set_margin_start (content, 18);
+    gtk_widget_set_margin_end (content, 18);
+
+    /* ------------------------------ Server group ------------------------------ */
+    server_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (server_grp, _ ("Server"));
+    adw_preferences_group_set_description (
+        server_grp,
+        _ ("Enter the server address. If you have an account, fill in your "
+           "login and password below; otherwise leave them blank."));
+
+    /* AdwEntryRow / AdwPasswordEntryRow implement GtkEditable but
+	 * are NOT GtkEntries — the GTK_ENTRY() cast fails the type
+	 * check and gtk_entry_set_activates_default emits a Gtk-CRITICAL.
+	 * Adwaita provides its own activates-default property for
+	 * exactly this case. */
+    address_entry = adw_entry_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (address_entry),
+                                   _ ("Server"));
+    adw_entry_row_set_activates_default (ADW_ENTRY_ROW (address_entry), TRUE);
+    adw_preferences_group_add (server_grp, address_entry);
+
+    port_entry = adw_entry_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (port_entry),
+                                   _ ("Port"));
+    gtk_editable_set_text (GTK_EDITABLE (port_entry), "5500");
+    adw_entry_row_set_activates_default (ADW_ENTRY_ROW (port_entry), TRUE);
+    adw_preferences_group_add (server_grp, port_entry);
+
+    gtk_box_append (GTK_BOX (content), GTK_WIDGET (server_grp));
+
+    /* ----------------------------- Account group ----------------------------- */
+    account_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (account_grp, _ ("Account"));
+
+    login_entry = adw_entry_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (login_entry),
+                                   _ ("Login"));
+    adw_entry_row_set_activates_default (ADW_ENTRY_ROW (login_entry), TRUE);
+    adw_preferences_group_add (account_grp, login_entry);
+
+    password_entry = adw_password_entry_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (password_entry),
+                                   _ ("Password"));
+    adw_entry_row_set_activates_default (ADW_ENTRY_ROW (password_entry), TRUE);
+    adw_preferences_group_add (account_grp, password_entry);
+
+    gtk_box_append (GTK_BOX (content), GTK_WIDGET (account_grp));
+
+    /* --------------------------- Connection group --------------------------- */
+    conn_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
+    adw_preferences_group_set_title (conn_grp, _ ("Connection"));
+
+    /* TLS comes first in the group so when it's toggled the user
+     * sees HOPE + cipher + compress grey out visually below it.
+     * notify::active on this switch auto-flips the default port
+     * (5500↔5600) and re-syncs sensitivity of the rows below. */
+    tls_switch = adw_switch_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (tls_switch),
+                                   _ ("Use TLS"));
+    adw_action_row_set_subtitle (
+        ADW_ACTION_ROW (tls_switch),
+        _ ("Connect to the server's TLS port. Disables HOPE and "
+           "compression — they're not meaningful over a TLS-encrypted "
+           "stream."));
+    adw_switch_row_set_active (ADW_SWITCH_ROW (tls_switch), FALSE);
+    g_signal_connect (tls_switch, "notify::active",
+                      G_CALLBACK (on_tls_active_notify), NULL);
+    adw_preferences_group_add (conn_grp, tls_switch);
+
+    hope = adw_switch_row_new ();
+    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (hope),
+                                   _ ("Secure (HOPE)"));
+    adw_action_row_set_subtitle (
+        ADW_ACTION_ROW (hope),
+        _ ("Encrypt and optionally compress the connection"));
+    adw_switch_row_set_active (ADW_SWITCH_ROW (hope), FALSE);
+    /* Live-track HOPE on/off to grey out the cipher/compress combos
+     * when HOPE is off — see the helper for the rationale. */
+    g_signal_connect (hope, "notify::active",
+                      G_CALLBACK (on_hope_active_notify), NULL);
+    adw_preferences_group_add (conn_grp, hope);
+
+    {
+        GtkStringList *list = gtk_string_list_new (NULL);
+        int i;
+        gtk_string_list_append (list, "NONE");
+        for (i = 0; valid_compressors[i]; i++) {
+            gtk_string_list_append (list, valid_compressors[i]);
+        }
+        compress_menu = adw_combo_row_new ();
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (compress_menu),
+                                       _ ("Compression"));
+        adw_combo_row_set_model (ADW_COMBO_ROW (compress_menu),
+                                 G_LIST_MODEL (list));
+        adw_combo_row_set_selected (ADW_COMBO_ROW (compress_menu), 0);
+        g_object_unref (list);
+        /* If the user (or a programmatic loader) picks a non-NONE
+         * compress while HOPE is off, flip HOPE on. */
+        g_signal_connect (compress_menu, "notify::selected",
+                          G_CALLBACK (on_secure_combo_selected_notify), NULL);
+        adw_preferences_group_add (conn_grp, compress_menu);
+    }
+
+    {
+        GtkStringList *list = gtk_string_list_new (NULL);
+        int i;
+        gtk_string_list_append (list, "NONE");
+        for (i = 0; valid_ciphers[i]; i++) {
+            gtk_string_list_append (list, valid_ciphers[i]);
+        }
+        cipher_menu = adw_combo_row_new ();
+        adw_preferences_row_set_title (ADW_PREFERENCES_ROW (cipher_menu),
+                                       _ ("Cipher"));
+        adw_combo_row_set_model (ADW_COMBO_ROW (cipher_menu),
+                                 G_LIST_MODEL (list));
+        adw_combo_row_set_selected (ADW_COMBO_ROW (cipher_menu), 0);
+        g_object_unref (list);
+        /* Same auto-on-HOPE rule as compress_menu. */
+        g_signal_connect (cipher_menu, "notify::selected",
+                          G_CALLBACK (on_secure_combo_selected_notify), NULL);
+        adw_preferences_group_add (conn_grp, cipher_menu);
+    }
+
+    /* Apply initial sensitivity now that all three widgets exist —
+     * fresh dialog with HOPE off greys the combos. The
+     * last_conn-preload block below resets HOPE/cipher/compress and
+     * relies on the same notify handlers + the explicit re-sync
+     * below to land at a coherent state. */
+    hope_coupling_sync_sensitivity ();
+
+    gtk_box_append (GTK_BOX (content), GTK_WIDGET (conn_grp));
+
+    /* AdwClamp wrapping content keeps the form readable on wide
+	 * dialogs (max-width ~600 by default). Wrap in a scrolled
+	 * window so the dialog can still shrink on small screens
+	 * without clipping the bottom group. */
+    clamp = adw_clamp_new ();
+    adw_clamp_set_child (ADW_CLAMP (clamp), content);
+    {
+        GtkWidget *scrolled = gtk_scrolled_window_new ();
+        gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scrolled),
+                                        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+        gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scrolled), clamp);
+        adw_toolbar_view_set_content (ADW_TOOLBAR_VIEW (toolbar_view),
+                                      scrolled);
+    }
+
+    adw_dialog_set_child (dlg, toolbar_view);
+
+    /* Default-widget so Enter from any AdwEntryRow submits Connect. */
+    gtk_widget_set_receives_default (connect_action_btn, TRUE);
+
+    /* If we connected during this run, pre-populate the form with
+	 * those values. Reconnect-after-disconnect is the obvious case
+	 * — the user expects the dialog to show the server they were
+	 * just on, not a blank form. Route through set_the_entries so
+	 * the legacy-bookmark normalization (cipher/compress non-NONE
+	 * forces secure on) applies here too. */
+    if (last_conn.valid && last_conn.server && last_conn.server[0]) {
+        char portbuf[16];
+        g_snprintf (portbuf, sizeof (portbuf), "%u", last_conn.port);
+        set_the_entries (last_conn.server, last_conn.login, last_conn.pass,
+                         portbuf, last_conn.secure, last_conn.compress,
+                         last_conn.cipher, last_conn.tls);
+    }
+
+    adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
+    gtk_widget_grab_focus (address_entry);
+}
+
+void
+connect_bookmark_name (char *name)
+{
+    create_connect_window (0, hx_active_session ());
+    open_bookmark (0, name);
+}

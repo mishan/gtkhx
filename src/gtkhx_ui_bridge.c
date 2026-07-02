@@ -21,11 +21,10 @@
 
 #include "config.h"
 
-#include <string.h>
 #include <gtk/gtk.h>
 
 #include "session.h"  /* session, hx_htlc_close */
-#include "network.h"  /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
+#include "network.h"  /* hx_send_agreement_agree, hx_htlc_close */
 #include "gtkhx_ui_bridge.h"
 
 void
@@ -56,29 +55,4 @@ struct htlc_conn *
 gtkhx_active_htlc (void)
 {
     return &hx_active_session ()->htlc;
-}
-
-void
-gtkhx_connect_apply (session *sess, const char *server, guint16 port,
-                     const char *login, const char *pass, char secure,
-                     const char *compress_name, const char *cipher_name,
-                     char tls)
-{
-    if (!sess) {
-        return;
-    }
-
-    memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
-    if (compress_name && *compress_name) {
-        g_strlcpy (sess->htlc.compressalg, compress_name,
-                   sizeof (sess->htlc.compressalg));
-    }
-    memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
-    if (cipher_name && *cipher_name) {
-        g_strlcpy (sess->htlc.cipheralg, cipher_name,
-                   sizeof (sess->htlc.cipheralg));
-    }
-
-    hx_connect (&sess->htlc, server, port, login ? login : "",
-                pass ? pass : "", secure, tls);
 }
