@@ -1042,8 +1042,22 @@ phase reuses:
    is one we *want* `GtkColumnView` for anyway. Came in roughly break-even
    on LOC once the one-time crate scaffolding is counted; the marginal
    cost of later windows should trend negative.
-2. **About / Agreement / User Editor.** Tiny dialogs, mostly layout. Quick
-   wins.
+2. ✅ **About / Agreement / User Editor** — shipped (R5.2, on
+   `claude/r5-about-agreement-usereditor`). `about.rs` (logo + credits;
+   version embedded from meson via `option_env!("GTKHX_VERSION")`),
+   `agreement.rs` (the server-agreement window, extracted from `gtkhx.c`;
+   `gtkhx_show_agreement` is called by the `on_agreement_signal` adapter and
+   the window is handed back to `sess->agreementwin` so the disconnect
+   cleanup still closes it), and `useredit.rs` (AdwPreferencesPage with the
+   access-bit AdwSwitchRows). The User Editor kept the wire senders
+   (`hx_useredit_create/delete/open`) + the byte-order access-bit table in C
+   and reads the table via new `gtkhx_useredit_access_*` accessors; the
+   account-read reply fills the dialog through a C-callback trampoline, with
+   editor state in an id-keyed thread-local map (Copy id in the handlers →
+   no ref cycles, and a reply after close is a safe no-op). New
+   `src/gtkhx_ui_bridge.c` is the session shim for the non-tracker windows.
+   Net: three windows for +1031/−854 lines (the User Editor's UI grew
+   slightly, but usermod.c/gtkhx.c/about.c shrank a lot).
 3. **Connect dialog + bookmark management** (`connect.c`, `bookmarks.c`,
    `bookmarks_io.c`). Modest size; tests the AdwDialog + GAction patterns.
 4. **Tasks window** (`tasks.c`, `tasks_table.c`). Slightly more state but

@@ -506,7 +506,6 @@ gtkhx_apply_userlist_style (GtkWidget *w)
         gtk_widget_add_css_class (w, "gtkhx-userlist");
     }
 }
-static GtkWidget *agreetext;
 static struct timer *timer_list;
 
 static int rinput_tags[1024];
@@ -1352,8 +1351,9 @@ output_user_info (guint16 uid, const char *nam, const char *info, guint16 len)
  * the gtkhx.c output_chat stub — the renderer is
  * chat.c::output_chat_from_event, which takes the pre-parsed
  * HxChatEvent directly. */
-static void output_agreement (session *sess, const char *agreement,
-                              guint16 len);
+/* Agreement window ported to Rust (gtkhx-ui, agreement.rs). */
+extern void gtkhx_show_agreement (session *sess, const char *agreement,
+                                  guint16 len);
 
 /* Phase 3+ signal adapters — bridge the GObject marshaller signature
  * (instance, signal args (with guint16 widened to guint), user_data)
@@ -1422,7 +1422,8 @@ on_agreement_signal (GtkhxSession *emitter, gpointer sess, gpointer agreement,
 {
     (void)emitter;
     (void)user_data;
-    output_agreement ((session *)sess, (const char *)agreement, (guint16)len);
+    gtkhx_show_agreement ((session *)sess, (const char *)agreement,
+                          (guint16)len);
 }
 
 static void
@@ -1812,138 +1813,6 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (chat_log_line_handler), NULL);
     g_signal_connect (emitter, "connection-state-changed",
                       G_CALLBACK (on_connection_state_changed_signal), NULL);
-}
-
-static void
-concurrence (GtkWidget *widget, gpointer data)
-{
-    session *sess = data;
-    (void)widget;
-
-    /* deliver NAME + ICON to the server when the user
-	 * clicks Agree. AGREEMENTAGREE carries both — same payload
-	 * regardless of whether login was already auto-completed (1.9-
-	 * style: SELFINFO before AGREEMENT) or gated on this very click
-	 * (mhxd-style: AGREEMENT before SELFINFO).
-	 *
-	 *   - mhxd-style: the server calls finish_login from inside
-	 *     rcv_agreementagree, completing login here.
-	 *   - 1.9-style: flags.in_login on the server side is already
-	 *     0 by this point, so finish_login is skipped — but the
-	 *     server still reads NAME + ICON from the chunks (sets us
-	 *     under the right nick) AND emits HTLS_HDR_BANNER from the
-	 *     same handler on banner-configured servers.
-	 *
-	 * Earlier code split this into AGREEMENTAGREE vs. USER_CHANGE
-	 * gated on flags.logged_in, on the theory that 1.9 servers
-	 * disconnect on AGREEMENTAGREE for an already-logged-in session.
-	 * Re-reading mhxd's rcv_agreementagree, that diagnosis was almost
-	 * certainly wrong — there's no disconnect path on already-logged-
-	 * in. The split was also breaking banner delivery on every 1.9
-	 * server, because no AGREEMENTAGREE means no banner trigger. */
-    if (sess->htlc.fd) {
-        hx_send_agreement_agree (&sess->htlc);
-    }
-
-    gtkhx_widget_destroy (sess->agreementwin);
-    sess->agreementwin = 0;
-}
-
-static void
-disagreement (GtkWidget *widget, gpointer data)
-{
-    session *sess = data;
-
-    if (sess->htlc.fd) {
-        hx_htlc_close (&sess->htlc, 1);
-    }
-}
-
-static void
-output_agreement (session *sess, const char *agreement, guint16 len)
-{
-    GtkWidget *agreementwin;
-    GtkWidget *agreebtn;
-    GtkWidget *disagreebtn;
-    GtkWidget *vbox;
-    GtkWidget *hbox;
-    GtkWidget *agree_scroll;
-    GtkTextBuffer *agree_buf;
-
-    agreementwin = gtk_window_new ();
-    /* AdwHeaderBar across all GtkHx windows for visual
-	 * consistency (chat, news, files, tasks, users, preview, this). */
-    gtk_window_set_titlebar (GTK_WINDOW (agreementwin), adw_header_bar_new ());
-    gtk_window_set_default_size (GTK_WINDOW (agreementwin), 460, 540);
-    gtk_window_set_title (GTK_WINDOW (agreementwin), _ ("Agreement"));
-
-    agreetext = gtk_text_view_new ();
-    gtk_text_view_set_monospace (GTK_TEXT_VIEW (agreetext), TRUE);
-    gtk_text_view_set_editable (GTK_TEXT_VIEW (agreetext), FALSE);
-    gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (agreetext), FALSE);
-    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (agreetext), GTK_WRAP_WORD);
-    /* Follow the active GtkHx theme's fg/bg the same way the chat
-	 * output does. The agreement is the user's first read of the
-	 * server's voice; making it Solarized when the chat below it
-	 * is Solarized is the consistency call. */
-    gtkhx_apply_text_style (agreetext);
-    gtk_text_view_set_left_margin (GTK_TEXT_VIEW (agreetext), 12);
-    gtk_text_view_set_right_margin (GTK_TEXT_VIEW (agreetext), 12);
-    gtk_text_view_set_top_margin (GTK_TEXT_VIEW (agreetext), 12);
-    gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (agreetext), 12);
-    agree_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (agreetext));
-    gtk_text_buffer_set_text (agree_buf, agreement, len);
-
-    agree_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (agree_scroll),
-                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    gtkhx_widget_set_child (agree_scroll, agreetext);
-
-    /* Adwaita action-class buttons. .suggested-action paints
-	 * Agree in the accent colour, .destructive-action paints Disagree
-	 * red — the visual treatment HIG-compliant Adwaita apps use for
-	 * a primary / dismissive button pair. */
-    agreebtn = gtk_button_new_with_label (_ ("Agree"));
-    gtk_widget_add_css_class (agreebtn, "suggested-action");
-    gtk_widget_add_css_class (agreebtn, "pill");
-
-    disagreebtn = gtk_button_new_with_label (_ ("Disagree"));
-    gtk_widget_add_css_class (disagreebtn, "destructive-action");
-    gtk_widget_add_css_class (disagreebtn, "pill");
-
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 12);
-    /* Right-align the button row, with margins for breathing room.
-	 * The previous layout packed both buttons left-aligned and
-	 * flush against each other — visually cramped and not where
-	 * users expect dialog buttons. */
-    gtk_widget_set_halign (hbox, GTK_ALIGN_END);
-    gtk_widget_set_margin_start (hbox, 12);
-    gtk_widget_set_margin_end (hbox, 12);
-    gtk_widget_set_margin_top (hbox, 12);
-    gtk_widget_set_margin_bottom (hbox, 12);
-
-    g_signal_connect (agreebtn, "clicked", G_CALLBACK (concurrence), sess);
-    g_signal_connect (disagreebtn, "clicked", G_CALLBACK (disagreement), sess);
-
-    gtkhx_widget_set_child (agreementwin, vbox);
-    gtkhx_box_pack (vbox, agree_scroll, TRUE, TRUE, 0);
-    gtkhx_box_pack (vbox, hbox, FALSE, FALSE, 0);
-    /* Disagree on the left, Agree on the right (HIG-conventional;
-	 * the affirmative action sits where Enter lives). */
-    gtkhx_box_pack (hbox, disagreebtn, FALSE, FALSE, 0);
-    gtkhx_box_pack (hbox, agreebtn, FALSE, FALSE, 0);
-
-    /* pressing Enter activates Agree. The text view is
-	 * read-only so it doesn't consume Return; setting the default
-	 * widget here is what makes Enter trigger the affirmative
-	 * action when nothing else has focus. */
-    gtk_widget_set_receives_default (agreebtn, TRUE);
-    gtk_window_set_default_widget (GTK_WINDOW (agreementwin), agreebtn);
-
-    init_keyaccel (agreementwin);
-    gtk_window_present (GTK_WINDOW (agreementwin));
-    sess->agreementwin = agreementwin;
 }
 
 /* hx_output is gone. Every notification it used to

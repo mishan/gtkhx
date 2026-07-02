@@ -1,5 +1,5 @@
 gtkhx_sources = files(
-  'about.c',
+  # about.c ported to Rust (gtkhx-ui about.rs); about.h keeps the C ABI decl.
   'algo_list.c',
   'banner.c',
   'banner_dispatch.c',
@@ -89,6 +89,9 @@ gtkhx_sources = files(
   # tracker.c + tracker_row.c ported to Rust (gtkhx-ui crate, Phase R5).
   # tracker_bridge.c is the thin session/prefs shim the Rust window calls.
   'tracker_bridge.c',
+  # gtkhx_ui_bridge.c — session shim for the other Rust windows (agreement /
+  # user editor). usermod.c is now the wire senders + access table only.
+  'gtkhx_ui_bridge.c',
   'tracker_event.c',
   'tracker_parser.c',
   'tracker_v3.c',

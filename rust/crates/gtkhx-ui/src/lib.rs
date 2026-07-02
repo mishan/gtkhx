@@ -17,7 +17,10 @@
 mod ffi;
 mod tr;
 
+pub mod about;
+pub mod agreement;
 pub mod tracker;
+pub mod useredit;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
@@ -31,4 +34,25 @@ pub mod tracker;
 /// early-returns once the binding is marked.
 pub(crate) fn ensure_gtk_init() {
     unsafe { gtk4::set_initialized() };
+}
+
+/// C `char*` → owned `String` (empty on NULL). UTF-8 lossy.
+///
+/// # Safety
+/// `p` is NULL or a valid NUL-terminated C string.
+pub(crate) unsafe fn cstr(p: *const std::ffi::c_char) -> String {
+    if p.is_null() {
+        String::new()
+    } else {
+        std::ffi::CStr::from_ptr(p).to_string_lossy().into_owned()
+    }
+}
+
+/// `&str` → `CString`, dropping any interior NUL (never fails).
+pub(crate) fn cs(s: &str) -> std::ffi::CString {
+    std::ffi::CString::new(s).unwrap_or_else(|e| {
+        let mut v = e.into_vec();
+        v.retain(|&b| b != 0);
+        std::ffi::CString::new(v).unwrap()
+    })
 }
