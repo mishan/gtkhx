@@ -7,7 +7,6 @@ gtkhx_sources = files(
   'bookmark_rc4_dialog.c',
   'bookmarks.c',
   'bookmarks_io.c',
-  'cipher_vocab.c',
   'chat.c',
   'chat_history.c',
   'chat_tabs.c',
@@ -15,8 +14,7 @@ gtkhx_sources = files(
   'gif_avatar.c',
   'gif_icons.c',
   'commands.c',
-  # connect.c ported to Rust (gtkhx-ui connect.rs); connect.h keeps the C ABI
-  # decls. The shared cipher/compress vocab moved to cipher_vocab.c.
+  'connect.c',
   'debug.c',
   'emoji.c',
   'filelist_walker.c',
