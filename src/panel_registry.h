@@ -68,7 +68,8 @@ G_BEGIN_DECLS
 #define HX_PANEL_ID_NEWS      "news"
 #define HX_PANEL_ID_NEWS15    "news15"
 #define HX_PANEL_ID_FILES     "files"
-#define HX_PANEL_ID_TRACKER   "tracker"
+/* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
+ * not a docked panel — it has never had an HxPanel. */
 
 /* Register / lookup / unregister. register_panel is normally
  * called from each HxPanel-owning factory once the panel is

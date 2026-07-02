@@ -11,9 +11,11 @@
  * hx_panel.h — HxPanel : PanelWidget subclass.
  *
  * Phase 1 / docking. The base unit of GtkHx's dockable UI. Each of
- * the existing tool windows (chat / news / news 1.5 / users /
- * tasks / tracker / files) becomes one HxPanel in Phase 2; the
- * dynamic per-chat / per-PM windows become HxPanels in Phase 3.
+ * the dockable tool windows (chat / news / news 1.5 / users /
+ * tasks / files) becomes one HxPanel in Phase 2; the dynamic
+ * per-chat / per-PM windows become HxPanels in Phase 3. (The
+ * Tracker is deliberately NOT docked — it is a standalone top-level
+ * window and has no HxPanel.)
  *
  * Compared to a raw PanelWidget, HxPanel adds:
  *
@@ -61,8 +63,8 @@ G_DECLARE_FINAL_TYPE (HxPanel, hx_panel, HX, PANEL, PanelWidget)
  * needs to know which case it is dealing with to flip the
  * revealer back on after Redock. */
 typedef enum {
-    HX_PANEL_KIND_CENTER,    /* chat, news, news 1.5, files, tracker */
-    HX_PANEL_KIND_SIDEBAR,   /* users, tasks */
+    HX_PANEL_KIND_CENTER,    /* chat, news 1.5 (news browser), files */
+    HX_PANEL_KIND_SIDEBAR,   /* users, tasks, news */
     HX_PANEL_KIND_DYNAMIC,   /* private chats, private messages */
 } HxPanelKind;
 

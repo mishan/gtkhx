@@ -1085,6 +1085,20 @@ phase reuses:
 
 **Gotchas**
 
+- **Most of these windows are docked in libpanel — one strategy for all of
+  them.** Chat, Users, News, News browser (1.5), Tasks, and Files are not
+  standalone windows: each is an `HxPanel` (a `PanelWidget` subclass) inside
+  the toolbar's `PanelDock`. gtk4-rs has no libpanel bindings. The decision
+  (see **[dock-porting-scoping.md](dock-porting-scoping.md)**) is to keep
+  libpanel + the dock infra in C and add one reusable `dock_bridge.c`: a
+  ported window builds its content tree + handlers in Rust and registers via
+  the bridge (`gtkhx_dock_raise_if_open` / `gtkhx_dock_embed` /
+  `_embed_dynamic`), never naming a libpanel type. The bridge is built with
+  the first docked-window port (Users is the natural first). The standalone
+  windows shipped so far (Tracker, and the About/Agreement/User-Editor/
+  Connect dialogs) never touched libpanel, which is why this only surfaces
+  now. **The Tracker is NOT docked** — it's a standalone top-level window
+  (stale "tracker is a CENTER panel" comments were corrected).
 - **The `gtk_hlist_compat` shim is the choke point.** Five consumers use it:
   `tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`. Each window's
   port also kills its `gtk_hlist_compat` usage. The shim file itself
