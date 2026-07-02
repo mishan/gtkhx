@@ -1058,8 +1058,22 @@ phase reuses:
    `src/gtkhx_ui_bridge.c` is the session shim for the non-tracker windows.
    Net: three windows for +1031/−854 lines (the User Editor's UI grew
    slightly, but usermod.c/gtkhx.c/about.c shrank a lot).
-3. **Connect dialog + bookmark management** (`connect.c`, `bookmarks.c`,
-   `bookmarks_io.c`). Modest size; tests the AdwDialog + GAction patterns.
+3. ✅ **Connect dialog** (`connect.c`, ~1.7k LOC) — shipped (R5.3, on
+   `claude/r5-connect-dialog`). `connect.rs` owns the AdwDialog form + all
+   the service functions its C callers link (bookmark SplitButton menu,
+   direct-connect-by-name, builtin bookmarks, reconnect-last cache,
+   `hotline://` URL open/save). Two boundaries kept in C: the cipher /
+   compression picker vocabulary (`valid_ciphers[]` etc.) was extracted to a
+   new shared `cipher_vocab.c` so the still-C `bookmarks.c` dialog keeps
+   indexing it (Rust reads it via `cipher_vocab_*` accessors, not a C data
+   array); and on-disk bookmark I/O delegates to the byte-identical
+   `hx_bookmark_*` (`bookmarks_io.c`) rather than re-implementing the HTsc
+   layout — one source of truth for the wire-compatible format. A new
+   `gtkhx_connect_apply` bridge keeps the `sess->htlc.{compressalg,cipheralg}`
+   pokes + `hx_connect` on the C side. The rare legacy pre-HTsc bookmark
+   conversion is re-implemented in Rust (reads the 3-line text file, re-saves
+   via `hx_bookmark_save`). `bookmarks.c` / `bookmarks_io.c` themselves stay C
+   for now (the Bookmarks *management* dialog is a later item).
 4. **Tasks window** (`tasks.c`, `tasks_table.c`). Slightly more state but
    still flat.
 5. **News browser** (`news_browser.c` — the unified Phase 6 UI per memory).
