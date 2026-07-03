@@ -27,7 +27,7 @@ extern guint16 hx_user_uid (const struct hx_user *user);
 /* user->name (the char[32] display name), or NULL if user is NULL. Lets
  * the Rust HxUserListView (users_view.rs) pass the name to create_msgwin
  * on activate without knowing the struct layout. */
-extern char *hx_user_name (struct hx_user *user);
+extern const char *hx_user_name (const struct hx_user *user);
 
 /* Colored-Nicknames preference. Prefers user->nick_color
  * (RGB) when set, else falls back to user_color_gdk's status palette

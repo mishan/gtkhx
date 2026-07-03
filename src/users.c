@@ -1006,8 +1006,8 @@ hx_user_uid (const struct hx_user *user)
     return user ? user->uid : 0;
 }
 
-char *
-hx_user_name (struct hx_user *user)
+const char *
+hx_user_name (const struct hx_user *user)
 {
     return user ? user->name : NULL;
 }

@@ -124,10 +124,16 @@ impl HxUserRow {
         }
     }
 
-    /// The display name as raw bytes (no trailing NUL), for the
-    /// case-insensitive name sort — mirrors the old cmp_name byte compare.
-    pub(crate) fn name_bytes(&self) -> Vec<u8> {
-        self.imp().name.borrow().to_bytes().to_vec()
+    /// Case-insensitive name comparison against another row, borrowing both
+    /// names in place (no allocation) — the exact ordering the old C
+    /// `cmp_name` used (ASCII lowercase, then shorter-first). The
+    /// Name-column sorter runs this on every comparison, so it must not
+    /// clone the name.
+    pub(crate) fn cmp_name_ci(&self, other: &HxUserRow) -> std::cmp::Ordering {
+        // Two distinct RefCells (different objects) → no double-borrow.
+        let a = self.imp().name.borrow();
+        let b = other.imp().name.borrow();
+        cmp_ci_bytes(a.to_bytes(), b.to_bytes())
     }
 
     /// Construct a row over borrowed `user` with the C name string, for the
@@ -205,6 +211,20 @@ unsafe fn cstring_from(p: *const c_char) -> CString {
     } else {
         CStr::from_ptr(p).to_owned()
     }
+}
+
+/// Case-insensitive byte-by-byte compare — the exact ordering the old C
+/// `cmp_name` used (ASCII lowercase, then shorter-first).
+fn cmp_ci_bytes(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let n = a.len().min(b.len());
+    for i in 0..n {
+        match a[i].to_ascii_lowercase().cmp(&b[i].to_ascii_lowercase()) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// Borrow a C-passed `HxUserRow *` without touching its refcount.

@@ -80,7 +80,7 @@ extern "C" {
         x: f64,
         y: f64,
     );
-    fn hx_user_name(user: *mut c_void) -> *mut c_char;
+    fn hx_user_name(user: *const c_void) -> *const c_char;
     fn hx_user_uid(user: *const c_void) -> u16;
 
     // msg.c / chat_tabs.c — open or raise the PM window.
@@ -143,9 +143,10 @@ mod imp {
         pub store: RefCell<Option<gio::ListStore>>,
         pub selection: RefCell<Option<gtk::SingleSelection>>,
         pub column_view: RefCell<Option<gtk::ColumnView>>,
-        /// O(1) hx_user* → row. Keyed on the user pointer (as usize); the
-        /// row is held with a strong ref here in addition to the store's.
-        pub by_user: RefCell<HashMap<usize, HxUserRow>>,
+        /// O(1) hx_user* → row. Keyed on the borrowed user pointer (raw
+        /// pointers hash/compare by address); the row is held with a strong
+        /// ref here in addition to the store's.
+        pub by_user: RefCell<HashMap<*mut c_void, HxUserRow>>,
         /// Theme singleton + "changed" handler, disconnected on dispose so
         /// a destroyed view leaves no dead handler on the process-lifetime
         /// theme object (matches the old g_signal_connect_object).
@@ -207,7 +208,7 @@ impl HxUserListView {
 
     /// Look up the row bound to `user`, if any.
     fn row_for(&self, user: *mut c_void) -> Option<HxUserRow> {
-        self.imp().by_user.borrow().get(&(user as usize)).cloned()
+        self.imp().by_user.borrow().get(&user).cloned()
     }
 
     /// Build the whole widget tree + model chain for `style`.
@@ -328,8 +329,10 @@ impl HxUserListView {
         }
         let uid = unsafe { hx_user_uid(user as *const c_void) };
         if unsafe { msgwin_with_uid(uid) }.is_null() {
-            let name = unsafe { hx_user_name(user) };
-            unsafe { create_msgwin(uid, name) };
+            // hx_user_name returns a borrowed const char*; create_msgwin
+            // takes char* (it copies the name), so cast for the FFI call.
+            let name = unsafe { hx_user_name(user as *const c_void) };
+            unsafe { create_msgwin(uid, name as *mut c_char) };
         } else {
             unsafe { gtkhx_chat_tabs_raise_msg(uid) };
         }
@@ -471,29 +474,15 @@ fn make_name_column(
     col.set_expand(true);
     col.set_resizable(true);
 
+    // Compare borrowed names in place — no per-comparison allocation.
     let sorter = gtk::CustomSorter::new(|a, b| {
-        let na = a.downcast_ref::<HxUserRow>().map(|r| r.name_bytes()).unwrap_or_default();
-        let nb = b.downcast_ref::<HxUserRow>().map(|r| r.name_bytes()).unwrap_or_default();
-        cmp_name_bytes(&na, &nb).into()
+        match (a.downcast_ref::<HxUserRow>(), b.downcast_ref::<HxUserRow>()) {
+            (Some(ra), Some(rb)) => ra.cmp_name_ci(rb).into(),
+            _ => gtk::Ordering::Equal,
+        }
     });
     col.set_sorter(Some(&sorter));
     col
-}
-
-/// Case-insensitive byte-by-byte compare — the exact ordering the old C
-/// `cmp_name` used (ASCII lowercase, then shorter-first).
-fn cmp_name_bytes(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
-    use std::cmp::Ordering;
-    let n = a.len().min(b.len());
-    for i in 0..n {
-        let ca = a[i].to_ascii_lowercase();
-        let cb = b[i].to_ascii_lowercase();
-        match ca.cmp(&cb) {
-            Ordering::Equal => {}
-            ord => return ord,
-        }
-    }
-    a.len().cmp(&b.len())
 }
 
 /// One-shot global CSS provider stripping Adwaita's columnview row/cell
@@ -600,10 +589,7 @@ pub unsafe extern "C" fn hx_user_list_view_add(
         return;
     }
     let row = HxUserRow::new_row(user, nam, icon, color);
-    view.imp()
-        .by_user
-        .borrow_mut()
-        .insert(user as usize, row.clone());
+    view.imp().by_user.borrow_mut().insert(user, row.clone());
     if let Some(store) = view.store() {
         store.append(&row);
     }
@@ -619,7 +605,7 @@ pub unsafe extern "C" fn hx_user_list_view_remove(v: *mut c_void, user: *mut c_v
         return;
     }
     let view = borrow(v);
-    let removed = view.imp().by_user.borrow_mut().remove(&(user as usize));
+    let removed = view.imp().by_user.borrow_mut().remove(&user);
     let Some(row) = removed else {
         return;
     };
