@@ -27,20 +27,17 @@
 
 #ifdef HAVE_VOICE
 
-/* Stash the GtkListItem on the cell (+ its row widget) under the same
- * "user-list-item" qdata key the Rust view's uid/name binds use, so the
- * right-click handler can recover the row position from a click on any
- * column's cell. Local copy of the view's helper. */
+/* Stash the GtkListItem on `cell` — the factory-created GtkImage — under the
+ * "user-list-item" qdata key the Rust view's uid/name binds also use, so the
+ * right-click handler can recover the row from a click on this cell. Do NOT
+ * walk up and write onto GtkColumnView's internal cell/row widgets: that
+ * corrupts its cell lifecycle and frees a live row on the first append (a
+ * GTK_IS_ACCESSIBLE abort in gtk_list_item_base_update). Same fix as the Rust
+ * stash_list_item in users_view.rs. */
 static void
 stash_list_item (GtkWidget *cell, GtkListItem *item)
 {
-    GtkWidget *cell_w, *row_w;
     g_object_set_data (G_OBJECT (cell), "user-list-item", item);
-    cell_w = gtk_widget_get_parent (cell);
-    row_w = cell_w ? gtk_widget_get_parent (cell_w) : NULL;
-    if (row_w) {
-        g_object_set_data (G_OBJECT (row_w), "user-list-item", item);
-    }
 }
 
 /*

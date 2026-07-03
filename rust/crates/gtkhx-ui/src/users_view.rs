@@ -101,15 +101,18 @@ fn wptr<W: IsA<gtk::Widget>>(w: &W) -> *mut gtk::ffi::GtkWidget {
 /// qdata (see LIST_ITEM_KEY). Borrowed pointer, no destroy-notify — matches
 /// the old C `stash_list_item`.
 fn stash_list_item(cell: &gtk::Widget, item: &gtk::ListItem) {
+    // Stash ONLY on `cell` — the widget the factory created (the
+    // HxUserCellName / uid Label / voice GtkImage). Do NOT walk up and write
+    // qdata onto GtkColumnView's internal cell/row widgets: doing so corrupts
+    // its cell lifecycle and frees a live row on the first append, aborting in
+    // gtk_list_item_base_update's accessibility update (GTK_IS_ACCESSIBLE
+    // assertion). Same lesson the tracker window's POS_KEY stash follows.
+    // On right-click, find_list_item walks up from the picked widget to this
+    // cell, which fills its column, so coverage is unchanged in practice.
     let key = LIST_ITEM_KEY.as_ptr() as *const c_char;
     let ip = item.as_ptr() as glib::ffi::gpointer;
     unsafe {
         glib::gobject_ffi::g_object_set_data(cell.as_ptr() as *mut _, key, ip);
-        if let Some(cell_w) = cell.parent() {
-            if let Some(row_w) = cell_w.parent() {
-                glib::gobject_ffi::g_object_set_data(row_w.as_ptr() as *mut _, key, ip);
-            }
-        }
     }
 }
 
