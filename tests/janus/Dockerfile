@@ -63,7 +63,7 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 # updates the public binary. Same sha256-pin model — any change at
 # the URL produces a checksum mismatch here and we bump deliberately.
 ARG JANUS_URL=https://misha.nasledov.com/janus-linux-amd64.tar.gz
-ARG JANUS_SHA256=3b352d1decc22ab4347f7ecf6d4458a47d7e83c20bdd2191f83e3bc5747405b6
+ARG JANUS_SHA256=02db495ccd8c2c2d0df741474ae74c09cfc63e5f89948f766728f6c75e468d8d
 
 WORKDIR /build
 RUN curl -fsSL "$JANUS_URL" -o janus.tar.gz \
