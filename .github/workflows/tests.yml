@@ -69,57 +69,44 @@ jobs:
       # Flatpak runtime we target) need — Fedora 42 only had 1+, so
       # the hx-image-decode tests couldn't find a compatible loader.
       image: fedora:43
-    # CARGO_TARGET_DIR points `cargo test` at the *same* target dir meson's
-    # `cargo build` uses (build/rust-target), so the two share one on-disk
-    # build tree (and one restored cache) instead of compiling the workspace
-    # into two separate directories.
+    # This job builds the tree TWICE in sequence and replaces the old
+    # separate build-and-test + build-no-voice jobs:
+    #
+    #   1. voice DISABLED, with no GStreamer stack installed — proves GtkHx
+    #      still configures + builds + tests on a host with no GStreamer dev
+    #      packages at all (the whole point of -Dvoice being optional).
+    #   2. install the GStreamer stack, then voice ENABLED — the normal build.
+    #
+    # Both builds share ONE Cargo target dir (rust-cargo-target, relocated out
+    # of the meson build dir via -Dcargo_target_dir so the cache can restore
+    # before `meson setup`). So build 2 only compiles the extra voice crates +
+    # relinks rather than recompiling the ~300-crate graph a second time —
+    # folding the two former jobs into one removes a whole duplicate dependency
+    # compile (and one container spin-up + base dnf install), at the cost of
+    # running the two builds sequentially instead of in parallel.
     env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/build/rust-target
+      CARGO_TARGET_DIR: ${{ github.workspace }}/rust-cargo-target
+      GTKHX_GLYCIN_NO_SANDBOX: "1"
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
-      - name: install build deps
-        # desktop-file-utils → update-desktop-database (required by
-        # meson.build's gnome.post_install at setup time, even though
-        # it's a no-op until `meson install`) AND desktop-file-validate
-        # (consumed by the validate-desktop meson test).
-        # appstream → appstreamcli for the validate-metainfo test.
-        # gtk-update-icon-cache is bundled with the gtk4 runtime on
-        # Fedora; pulled in transitively by gtk4-devel.
+      - name: install base build deps (no GStreamer)
+        # Deliberately omits every GStreamer / libnice / libsoup package so
+        # the voice-disabled build below runs on a genuinely GStreamer-free
+        # host. The GStreamer stack is installed later, before the
+        # voice-enabled build.
         #
-        # GStreamer (Phase 8.B): the top-level meson.build probes
-        # gstreamer-1.0, -app-1.0, -audio-1.0, -sdp-1.0, -webrtc-1.0
-        # at configure time. The first three live in
-        # gstreamer1-plugins-base-devel; webrtc + sdp live in
-        # gstreamer1-plugins-bad-free-devel. gstreamer1-devel provides
-        # the core gstreamer-1.0 .pc and pulls the rest transitively
-        # on Fedora, but listing all three explicitly keeps the
-        # configure-time gap clear if any of them get split out
-        # downstream.
-        #
-        # GStreamer runtime plugins for `cargo test`: the
-        # hxvoice-runtime crate's Tier 2 loopback test
-        # (tests/loopback.rs) factory-checks `mulawenc` /
-        # `mulawdec` / `autoaudiosrc` / `autoaudiosink`, which
-        # live in `gstreamer1-plugins-good` — not pulled in
-        # transitively by any of the `-devel` packages above.
-        # Without this the loopback test panics with "mulawenc
-        # plugin available" / "autoaudiosrc fallback element
-        # should be constructable".
+        # desktop-file-utils → update-desktop-database (meson.build's
+        # gnome.post_install at setup) + desktop-file-validate (validate-desktop
+        # test). appstream → appstreamcli (validate-metainfo). gtk-update-icon-
+        # cache comes transitively with gtk4-devel.
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
             gtk4-devel libadwaita-devel \
             glib2-devel gobject-introspection-devel \
             gsound-devel \
-            libnice-gstreamer1 \
-            libsoup3-devel \
-            gstreamer1-devel \
-            gstreamer1-plugins-base-devel \
-            gstreamer1-plugins-bad-free-devel \
-            gstreamer1-plugins-bad-free-extras \
-            gstreamer1-plugins-good \
             gettext-devel \
             desktop-file-utils appstream \
             libpanel-devel \
@@ -144,85 +131,89 @@ jobs:
             exit 1
           fi
 
-      - name: meson setup
-        # Runs before the cache restore on purpose: `meson setup` refuses a
-        # build dir that already contains files, and the restored cache
-        # populates build/rust-target. Setup creates build/ (with no
-        # rust-target yet); the cache lands the target tree right after.
-        run: meson setup build
-
       - name: cache rust build
-        # Restores ~/.cargo (registry + git + compiled tool cache) and the
-        # shared target dir (build/rust-target, used by both meson's cargo
-        # build and the cargo test steps below). On a warm cache the ~300-
-        # crate dependency graph — gtk-rs, gstreamer-rs, glycin, tokio,
-        # rustls — is not recompiled, which is the dominant cost here.
-        # Keyed on Cargo.lock + rustc version automatically; a lockfile or
-        # toolchain change invalidates it cleanly.
+        # Restores ~/.cargo + the relocated target dir (rust-cargo-target).
+        # It lives OUTSIDE any meson build dir, so — unlike the in-build-dir
+        # layout — it can be restored up-front without tripping meson's
+        # non-empty-build-dir check, and one cache serves both builds below.
+        # Keyed on Cargo.lock + rustc automatically.
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: "rust -> ${{ github.workspace }}/build/rust-target"
+          workspaces: "rust -> ${{ github.workspace }}/rust-cargo-target"
 
-      - name: meson compile
+      # ---- Build 1: voice DISABLED, no GStreamer present -------------------
+      - name: meson setup (voice disabled)
+        run: |
+          meson setup build-novoice -Dvoice=disabled \
+            -Dcargo_target_dir=${{ github.workspace }}/rust-cargo-target
+
+      - name: meson compile (voice disabled)
+        run: meson compile -C build-novoice
+
+      - name: meson test (voice disabled)
+        run: |
+          meson test -C build-novoice --suite unit --suite proto \
+            --print-errorlogs
+
+      - name: cargo test (voice crates excluded)
+        # With voice off the binary never links hxvoice-runtime, and this host
+        # has no GStreamer, so the gstreamer-rs crates can't (and shouldn't)
+        # build here — mirror the meson exclusion.
+        run: |
+          cd rust && cargo test --workspace \
+            --exclude hxvoice --exclude hxvoice-runtime \
+            --ignore-rust-version
+
+      # ---- install GStreamer, then Build 2: voice ENABLED ------------------
+      - name: install GStreamer stack
+        # gstreamer1-devel provides the core gstreamer-1.0 .pc; -plugins-base-
+        # devel has app/audio, -plugins-bad-free-devel has webrtc/sdp (the five
+        # meson.build probes for voice). -plugins-good ships mulawenc/mulawdec/
+        # autoaudiosrc/autoaudiosink that hxvoice-runtime's loopback Tier 2
+        # test factory-checks. libsoup3-devel + libnice-gstreamer1 complete the
+        # voice-enabled dep set.
+        run: |
+          dnf -y install \
+            libnice-gstreamer1 \
+            libsoup3-devel \
+            gstreamer1-devel \
+            gstreamer1-plugins-base-devel \
+            gstreamer1-plugins-bad-free-devel \
+            gstreamer1-plugins-bad-free-extras \
+            gstreamer1-plugins-good
+
+      - name: meson setup (voice enabled)
+        run: |
+          meson setup build \
+            -Dcargo_target_dir=${{ github.workspace }}/rust-cargo-target
+
+      - name: meson compile (voice enabled)
         run: meson compile -C build
 
-      - name: meson test (unit + proto)
+      - name: meson test (voice enabled)
         run: |
           meson test -C build --suite unit --suite proto \
             --print-errorlogs
 
-      - name: cargo test (Rust workspace)
-        # --ignore-rust-version: several transitive deps (zbus,
-        # zvariant, glycin-common, glycin-utils) carry overly
-        # conservative rust-version labels (1.87 / 1.92) even
-        # though their code compiles cleanly on rustc 1.85 — our
-        # Debian-stable native-build floor. Same flag is used in
-        # rust/meson.build's cargo invocation; the project keeps
-        # both code paths in sync.
-        #
-        # CI=true (GitHub sets it) turns hx-image-decode's
-        # glycin-loader gate from a silent skip into a hard failure
-        # (tests/decode.rs::require_glycin) — the loaders are installed
-        # above (glycin-loaders), so a skip here means something broke,
-        # and a silent skip masks decode regressions in a green run.
-        #
-        # GTKHX_GLYCIN_NO_SANDBOX=1: glycin runs each loader under bwrap
-        # by default (its Auto sandbox selector), which an unprivileged
-        # CI container can't spawn (no usable user namespaces) — the
-        # decode then fails and maps to UnsupportedFormat. glycin 3.x has
-        # no env knob for the sandbox, so src/decode.rs reads this var and
-        # selects NotSandboxed via the API. The fixtures are trusted
-        # in-tree images. (tests/decode.rs also sets it itself, so this is
-        # belt-and-suspenders / documentation.)
-        env:
-          GTKHX_GLYCIN_NO_SANDBOX: "1"
+      - name: cargo test (full workspace)
+        # --ignore-rust-version: several transitive deps (zbus, zvariant,
+        # glycin-common, glycin-utils) carry conservative rust-version labels
+        # their code doesn't actually need; same flag as rust/meson.build.
+        # CI=true (GitHub sets it) turns hx-image-decode's glycin-loader gate
+        # into a hard failure so a decode regression can't hide as a skip.
+        # Second pass scopes the socks cfg flip to just hxnet (the only crate
+        # with that split) instead of a second full --workspace run.
         run: |
-          # First pass: the whole workspace with default features (the
-          # no-`socks` build embedders get). Second pass: only hxnet with
-          # its `socks` feature on — that's the sole crate carrying a
-          # cfg(feature = "socks") / cfg(not(...)) split, so re-running the
-          # *entire* workspace just to flip it recompiles ~300 unaffected
-          # crates for nothing. Scoping to `-p hxnet` exercises the same
-          # code paths (the gtkhx binary builds hxnet/socks) at a fraction
-          # of the compile cost.
           cd rust
           cargo test --workspace --ignore-rust-version
           cargo test -p hxnet --ignore-rust-version --features socks
 
       - name: cargo test (hx-image-decode glycin-v2 / 1+ backend)
-        # The v2 backend (glycin 2.x / 1+ loaders — the Debian-stable
-        # target, selected by Meson -Dglycin_compat=1) lives behind the
-        # non-default `glycin-v2` feature, so the default-feature build and
-        # `cargo test --workspace` above never compile it. Build it here so
-        # the v2-only paths (temp-file staging, Loader::new(gio::File),
-        # ImageInfo field access, the glib-0.20 unsafe into_glib_ptr) can't
-        # silently rot.
-        #
-        # `--lib` only: Fedora 43 ships the 2+ loaders, so a v2 *runtime*
-        # decode would find no compatible 1+ loader. The lib unit tests are
-        # pure (sniff / ffi_result / ffi) and exercise the compile; the
-        # tests/decode.rs integration decode is intentionally excluded
-        # (it needs a 1+ loader present, which this image doesn't have).
+        # The v2 backend (glycin 2.x / 1+ loaders, Meson -Dglycin_compat=1)
+        # lives behind the non-default `glycin-v2` feature, so the builds above
+        # never compile it. --lib only: Fedora 43 ships 2+ loaders, so a v2
+        # runtime decode would find no compatible 1+ loader; the lib unit tests
+        # are pure and just exercise the compile.
         run: |
           cd rust && cargo test -p hx-image-decode --lib \
             --no-default-features --features glycin-v2 --ignore-rust-version
@@ -232,79 +223,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: meson-logs-build-and-test
-          path: build/meson-logs/
-
-  build-no-voice:
-    name: build + unit + proto (voice disabled)
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:43
-    # See build-and-test — a single shared/cached target dir for meson's
-    # cargo build and cargo test.
-    env:
-      CARGO_TARGET_DIR: ${{ github.workspace }}/build/rust-target
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-
-      - name: install build deps (no GStreamer)
-        # Deliberately omits every GStreamer / libnice package that
-        # build-and-test installs. -Dvoice=disabled compiles the voice
-        # feature out: the hxvoice / hxvoice-runtime crates aren't built
-        # (rust/meson.build excludes them) and the GStreamer system libs
-        # aren't linked, so this job proves GtkHx builds end-to-end on a
-        # host with no GStreamer development stack at all — the whole
-        # point of making voice optional.
-        run: |
-          dnf -y install \
-            meson ninja-build pkgconf-pkg-config gcc \
-            gtk4-devel libadwaita-devel \
-            glib2-devel gobject-introspection-devel \
-            gsound-devel \
-            gettext-devel \
-            desktop-file-utils appstream \
-            libpanel-devel \
-            libseccomp-devel lcms2-devel \
-            glycin-loaders \
-            git rust cargo
-
-      - name: meson setup (voice disabled)
-        # Before the cache restore — see build-and-test's meson setup note.
-        run: meson setup build -Dvoice=disabled
-
-      - name: cache rust build
-        # See build-and-test's cache step. This job builds a different
-        # feature set (voice excluded), so Swatinem keys it separately —
-        # no cross-contamination with the voice-enabled job's cache.
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "rust -> ${{ github.workspace }}/build/rust-target"
-
-      - name: meson compile
-        run: meson compile -C build
-
-      - name: meson test (unit + proto)
-        run: |
-          meson test -C build --suite unit --suite proto \
-            --print-errorlogs
-
-      - name: cargo test (Rust workspace, voice crates excluded)
-        # Mirror the meson exclusion: with voice off the binary never
-        # links hxvoice-runtime, and this host has no GStreamer, so the
-        # gstreamer-rs-dependent crates can't (and shouldn't) build here.
-        env:
-          GTKHX_GLYCIN_NO_SANDBOX: "1"
-        run: |
-          cd rust && cargo test --workspace \
-            --exclude hxvoice --exclude hxvoice-runtime \
-            --ignore-rust-version
-
-      - name: upload meson test logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: meson-logs-build-no-voice
-          path: build/meson-logs/
+          path: |
+            build/meson-logs/
+            build-novoice/meson-logs/
 
   integration:
     name: integration vs mhxd + janus + argus + hxtrackd
@@ -314,9 +235,39 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
+      - name: set up docker buildx
+        # Enables the gha layer-cache backend for the test-container builds
+        # below. Janus + Argus pull sha256-pinned tarballs from the network,
+        # so a warm layer cache skips both the download and the image rebuild.
+        uses: docker/setup-buildx-action@v3
+
+      - name: cache integration rust build
+        # The integration binary is built inside the nested Fedora container
+        # below, writing into the mounted /src tree. With the Cargo target dir
+        # relocated out of the meson build dir (-Dcargo_target_dir) and a
+        # mounted CARGO_HOME, both live under /src and survive the container,
+        # so a plain runner-side cache warms the ~300-crate compile. (Swatinem
+        # rust-cache isn't usable here — cargo lives only inside the container,
+        # not on the runner.) Keyed on Cargo.lock; cargo re-fingerprints its
+        # artifacts if the container's rustc changes, so a stale entry is
+        # rebuilt, never miscompiled.
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-cargo-target
+            .cargo-home
+          key: integration-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            integration-rust-
+
       - name: build mhxd test container
-        run: |
-          docker build -t gtkhx-mhxd tests/mhxd
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/mhxd
+          tags: gtkhx-mhxd
+          load: true
+          cache-from: type=gha,scope=mhxd
+          cache-to: type=gha,mode=max,scope=mhxd
 
       - name: build janus test container
         # Janus build pulls a sha256-pinned tarball from
@@ -325,8 +276,13 @@ jobs:
         # for the full story). Network failure here surfaces as a
         # red CI step rather than silently disappearing into a
         # later "janus not reachable" test failure.
-        run: |
-          docker build -t gtkhx-janus tests/janus
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/janus
+          tags: gtkhx-janus
+          load: true
+          cache-from: type=gha,scope=janus
+          cache-to: type=gha,mode=max,scope=janus
 
       - name: build hxtrackd test container
         # hxtrackd is mhxd's bundled pre-spec v1 tracker — built
@@ -335,8 +291,13 @@ jobs:
         # binary. Coverage for the probe-then-fallback path in
         # network.c (v3 magic times out against v1-only trackers,
         # client retries with v1 magic). See tests/hxtrackd/README.md.
-        run: |
-          docker build -t gtkhx-hxtrackd tests/hxtrackd
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/hxtrackd
+          tags: gtkhx-hxtrackd
+          load: true
+          cache-from: type=gha,scope=hxtrackd
+          cache-to: type=gha,mode=max,scope=hxtrackd
 
       - name: build argus test container
         # Argus build pulls a sha256-pinned tarball from
@@ -347,15 +308,25 @@ jobs:
         # time + verified. Network failure here surfaces as a red
         # CI step rather than disappearing into a later
         # "argus not reachable" test failure.
-        run: |
-          docker build -t gtkhx-argus tests/argus
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/argus
+          tags: gtkhx-argus
+          load: true
+          cache-from: type=gha,scope=argus
+          cache-to: type=gha,mode=max,scope=argus
 
       - name: build socks proxy test container
         # microsocks SOCKS5 proxy (tests/socks-proxy/) — the
         # test_integration_socks Tier 3 test routes the production
         # connect through it to mhxd.
-        run: |
-          docker build -t gtkhx-socks tests/socks-proxy
+        uses: docker/build-push-action@v6
+        with:
+          context: tests/socks-proxy
+          tags: gtkhx-socks
+          load: true
+          cache-from: type=gha,scope=socks
+          cache-to: type=gha,mode=max,scope=socks
 
       - name: start mhxd
         run: |
@@ -499,7 +470,9 @@ jobs:
             -e GTKHX_TEST_HOST=127.0.0.1 \
             -e GTKHX_TEST_PORT=5500 \
             -e GTKHX_TEST_SOCKS=socks5://127.0.0.1:1080 \
+            -e CARGO_HOME=/src/.cargo-home \
             fedora:43 bash -c '
+              set -e
               dnf -y install \
                 meson ninja-build pkgconf-pkg-config gcc \
                 gtk4-devel libadwaita-devel \
@@ -515,7 +488,10 @@ jobs:
                 libpanel-devel \
                 libseccomp-devel lcms2-devel \
                 git rust cargo
-              meson setup build
+              # Relocate the Cargo target dir onto the mounted /src tree (out
+              # of the meson build dir) so the runner-side cache step can
+              # persist it; CARGO_HOME (-e above) is mounted for the same reason.
+              meson setup build -Dcargo_target_dir=/src/rust-cargo-target
               meson compile -C build
               # Integration suite. The login entry points drive connect +
               # magic + LOGIN through the production hxnet orchestrator —
@@ -524,8 +500,17 @@ jobs:
               # connect path is continuously exercised against the live
               # servers, the gap that once let the capabilities regression
               # ship.
+              set +e
               meson test -C build --suite integration \
                 --print-errorlogs
+              rc=$?
+              # The container runs as root, so the cached dirs come out
+              # root-owned; hand them back to the mount owner so the post-job
+              # cache save (which runs as the runner user) can read them.
+              # Must never mask the test result.
+              chown -R "$(stat -c %u:%g /src)" \
+                /src/rust-cargo-target /src/.cargo-home 2>/dev/null || true
+              exit $rc
             '
 
       - name: dump mhxd logs on failure

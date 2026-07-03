@@ -147,7 +147,18 @@ rust_sources = files(
 # above is the load-bearing dep-graph file that drives this custom_target's
 # re-execution when versions move.
 
-rust_target_dir = meson.project_build_root() / 'rust-target'
+# Cargo target dir. Defaults inside the meson build dir (historical
+# behaviour, keeps `rm -rf build` clean). The `cargo_target_dir` option lets
+# CI relocate it to a stable path outside the build dir — required for
+# cache-restoring the Rust build before `meson setup` (which refuses a
+# non-empty build dir) and for sharing one compiled target tree across the
+# voice-disabled + voice-enabled builds in a single job. See meson_options.txt.
+_rust_target_opt = get_option('cargo_target_dir')
+if _rust_target_opt == ''
+  rust_target_dir = meson.project_build_root() / 'rust-target'
+else
+  rust_target_dir = _rust_target_opt
+endif
 
 # Phase R3.2 turns the hxbridge `runtime` cargo feature on so the
 # tokio runtime + blocking-pool shim + tokio→GLib channel ferry land
