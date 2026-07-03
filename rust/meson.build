@@ -95,6 +95,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/tls_trust_dialog.rs',
   'crates/gtkhx-ui/src/useredit.rs',
   'crates/gtkhx-ui/src/user_row.rs',
+  'crates/gtkhx-ui/src/users_view.rs',
   'crates/gtkhx-ui/src/users.rs',
   'crates/gtkhx-ui/src/tasks.rs',
   'crates/gtkhx-ui/src/news.rs',

@@ -1006,6 +1006,12 @@ hx_user_uid (const struct hx_user *user)
     return user ? user->uid : 0;
 }
 
+const char *
+hx_user_name (const struct hx_user *user)
+{
+    return user ? user->name : NULL;
+}
+
 GdkRGBA *
 user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
 {

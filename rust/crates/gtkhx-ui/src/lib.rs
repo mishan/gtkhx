@@ -36,6 +36,10 @@ pub mod useredit;
 // R5.8: HxUserRow — the users/chat list row model GObject (was
 // users_row.c). Exports the hx_user_row_* C ABI users_view.c links against.
 pub mod user_row;
+// R5.9: HxUserListView — the GtkColumnView-backed user list. Exports the
+// hx_user_list_view_* C ABI users.c / chat.c link against; the custom Name
+// cell + voice column stay C behind FFI (users_cell.c / users_voice_col.c).
+pub mod users_view;
 // R5.7: the Users window shell (raise + dock registration + lifecycle).
 // The custom view widget + action-button handlers stay C behind
 // users_bridge.c / dock_bridge.c; create_users_window is now this module's

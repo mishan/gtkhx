@@ -108,6 +108,69 @@ glib::wrapper! {
 }
 
 impl HxUserRow {
+    /// The borrowed `struct hx_user *` this row wraps (may be NULL).
+    pub(crate) fn user_ptr(&self) -> *mut c_void {
+        self.imp().user.get()
+    }
+
+    /// The row's uid (0 for a NULL user). Delegates to the C `hx_user_uid`
+    /// so the struct layout stays pinned C-side.
+    pub(crate) fn uid_of(&self) -> u16 {
+        let u = self.imp().user.get();
+        if u.is_null() {
+            0
+        } else {
+            unsafe { hx_user_uid(u) }
+        }
+    }
+
+    /// Case-insensitive name comparison against another row, borrowing both
+    /// names in place (no allocation) — the exact ordering the old C
+    /// `cmp_name` used (ASCII lowercase, then shorter-first). The
+    /// Name-column sorter runs this on every comparison, so it must not
+    /// clone the name.
+    pub(crate) fn cmp_name_ci(&self, other: &HxUserRow) -> std::cmp::Ordering {
+        // Two distinct RefCells (different objects) → no double-borrow.
+        let a = self.imp().name.borrow();
+        let b = other.imp().name.borrow();
+        cmp_ci_bytes(a.to_bytes(), b.to_bytes())
+    }
+
+    /// Construct a row over borrowed `user` with the C name string, for the
+    /// Rust `HxUserListView`. Same body as `hx_user_row_new`.
+    ///
+    /// # Safety
+    /// `nam` is NULL or a valid C string; `user` a borrowed `hx_user *`.
+    pub(crate) unsafe fn new_row(
+        user: *mut c_void,
+        nam: *const c_char,
+        icon: u16,
+        color: u16,
+    ) -> Self {
+        let obj = glib::Object::new::<HxUserRow>();
+        let imp = obj.imp();
+        imp.user.set(user);
+        imp.name.replace(cstring_from(nam));
+        imp.icon.set(icon);
+        imp.color.set(color);
+        obj.refresh_fg();
+        obj
+    }
+
+    /// In-place state mutate + fire "changed" (typed wrapper over the C-ABI
+    /// `hx_user_row_set_state` body).
+    ///
+    /// # Safety
+    /// `nam` is NULL or a valid C string.
+    pub(crate) unsafe fn set_state_row(&self, nam: *const c_char, icon: u16, color: u16) {
+        self.set_state_rs(nam, icon, color);
+    }
+
+    /// Fire "changed" without mutating state (avatar refresh).
+    pub(crate) fn touch_row(&self) {
+        self.emit_by_name::<()>("changed", &[]);
+    }
+
     /// Recompute the cached foreground from the row's user + status.
     /// Always calls `user_nick_color_gdk`, including with a NULL user: it's
     /// NULL-safe and still returns the status-palette color (away/admin) or
@@ -148,6 +211,20 @@ unsafe fn cstring_from(p: *const c_char) -> CString {
     } else {
         CStr::from_ptr(p).to_owned()
     }
+}
+
+/// Case-insensitive byte-by-byte compare — the exact ordering the old C
+/// `cmp_name` used (ASCII lowercase, then shorter-first).
+fn cmp_ci_bytes(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let n = a.len().min(b.len());
+    for i in 0..n {
+        match a[i].to_ascii_lowercase().cmp(&b[i].to_ascii_lowercase()) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+    }
+    a.len().cmp(&b.len())
 }
 
 /// Borrow a C-passed `HxUserRow *` without touching its refcount.
