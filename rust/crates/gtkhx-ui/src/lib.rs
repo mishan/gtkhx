@@ -53,6 +53,10 @@ pub mod tasks;
 // dock_bridge; the news content (viewers, search, fetch/post RPC) stays C
 // in news.c. create_news_window is now this module's #[no_mangle] export.
 pub mod news;
+// R5.12: the News browser (1.5 threaded news, CENTER) window shell. Dock
+// registration via dock_bridge; the browser content + fetch/RPC stay C in
+// news_browser.c. create_news_browser_window is this module's export.
+pub mod news_browser;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
