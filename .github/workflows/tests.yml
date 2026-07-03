@@ -69,6 +69,12 @@ jobs:
       # Flatpak runtime we target) need — Fedora 42 only had 1+, so
       # the hx-image-decode tests couldn't find a compatible loader.
       image: fedora:43
+    # CARGO_TARGET_DIR points `cargo test` at the *same* target dir meson's
+    # `cargo build` uses (build/rust-target), so the two share one on-disk
+    # build tree (and one restored cache) instead of compiling the workspace
+    # into two separate directories.
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/build/rust-target
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -139,7 +145,23 @@ jobs:
           fi
 
       - name: meson setup
+        # Runs before the cache restore on purpose: `meson setup` refuses a
+        # build dir that already contains files, and the restored cache
+        # populates build/rust-target. Setup creates build/ (with no
+        # rust-target yet); the cache lands the target tree right after.
         run: meson setup build
+
+      - name: cache rust build
+        # Restores ~/.cargo (registry + git + compiled tool cache) and the
+        # shared target dir (build/rust-target, used by both meson's cargo
+        # build and the cargo test steps below). On a warm cache the ~300-
+        # crate dependency graph — gtk-rs, gstreamer-rs, glycin, tokio,
+        # rustls — is not recompiled, which is the dominant cost here.
+        # Keyed on Cargo.lock + rustc version automatically; a lockfile or
+        # toolchain change invalidates it cleanly.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> ${{ github.workspace }}/build/rust-target"
 
       - name: meson compile
         run: meson compile -C build
@@ -175,14 +197,17 @@ jobs:
         env:
           GTKHX_GLYCIN_NO_SANDBOX: "1"
         run: |
-          # Run the workspace twice: once with hxnet's default features
-          # (the no-`socks` build embedders get) and once with
-          # --features hxnet/socks (what the gtkhx binary builds), so
-          # both the cfg(not(feature = "socks")) and cfg(feature =
-          # "socks") paths stay green.
+          # First pass: the whole workspace with default features (the
+          # no-`socks` build embedders get). Second pass: only hxnet with
+          # its `socks` feature on — that's the sole crate carrying a
+          # cfg(feature = "socks") / cfg(not(...)) split, so re-running the
+          # *entire* workspace just to flip it recompiles ~300 unaffected
+          # crates for nothing. Scoping to `-p hxnet` exercises the same
+          # code paths (the gtkhx binary builds hxnet/socks) at a fraction
+          # of the compile cost.
           cd rust
           cargo test --workspace --ignore-rust-version
-          cargo test --workspace --ignore-rust-version --features hxnet/socks
+          cargo test -p hxnet --ignore-rust-version --features socks
 
       - name: cargo test (hx-image-decode glycin-v2 / 1+ backend)
         # The v2 backend (glycin 2.x / 1+ loaders — the Debian-stable
@@ -214,6 +239,10 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: fedora:43
+    # See build-and-test — a single shared/cached target dir for meson's
+    # cargo build and cargo test.
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/build/rust-target
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -240,7 +269,16 @@ jobs:
             git rust cargo
 
       - name: meson setup (voice disabled)
+        # Before the cache restore — see build-and-test's meson setup note.
         run: meson setup build -Dvoice=disabled
+
+      - name: cache rust build
+        # See build-and-test's cache step. This job builds a different
+        # feature set (voice excluded), so Swatinem keys it separately —
+        # no cross-contamination with the voice-enabled job's cache.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> ${{ github.workspace }}/build/rust-target"
 
       - name: meson compile
         run: meson compile -C build
