@@ -10,6 +10,8 @@
 #define MSG 6
 #define NEWS_POST 7
 #define USER_PART 8
+#define VOICE_JOIN 9
+#define VOICE_LEAVE 10
 
 extern struct hx_sounds hxsnd;
 extern void play_sound (int sound);

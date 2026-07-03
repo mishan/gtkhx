@@ -134,6 +134,14 @@ extern void hx_voice_model_ingest_participants (HxVoiceModel *self,
 extern void hx_voice_model_set_speaking (HxVoiceModel *self, uint16_t uid,
                                          gboolean is_speaking);
 
+/* Record our own uid so the join/leave notification sounds can
+ * exclude it. We always know we joined/left ourselves — the toolbar
+ * button did it — so playing a sound for our own presence change is
+ * just noise. Set once on voice-runtime start (voice_panel.c
+ * on_join_toggled). Passing 0 (a uid the server never assigns to a
+ * real user) effectively disables the self-exclusion. */
+extern void hx_voice_model_set_self_uid (HxVoiceModel *self, uint16_t uid);
+
 /* Clear all per-uid state, transitioning every active uid back to
  * NONE. Used at voice-runtime teardown (session disconnect, Leave
  * sweep) so stale indicators don't survive the reconnect.

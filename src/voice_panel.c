@@ -402,6 +402,13 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
                  * talk (outgoing VAD). Set before join so it's in place
                  * before any send-leg level message. */
                 gtkhx_voice_runtime_set_self_uid (rt, sess->htlc.uid);
+                /* And tell the voice model who we are so the join/leave
+                 * notification sounds skip our own presence changes
+                 * (we always know we joined/left ourselves). */
+                if (sess->voice_model) {
+                    hx_voice_model_set_self_uid (sess->voice_model,
+                                                 sess->htlc.uid);
+                }
                 gtkhx_voice_runtime_join (rt, cid);
                 /* Spec recommends joining muted by default. Two
                  * steps, IN THIS ORDER:

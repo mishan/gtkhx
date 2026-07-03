@@ -41,7 +41,50 @@
 #include <string.h>
 #include <glib.h>
 
+#include "sound.h"
 #include "voice_model.h"
+
+/* ---- play_sound stub -------------------------------------------- *
+ *
+ * voice_model.c calls play_sound(VOICE_JOIN/VOICE_LEAVE) on presence
+ * transitions. The real implementation lives in sound.c (GSound +
+ * g_idle_add), which this unit test deliberately does NOT link — we
+ * only want to observe *which* sounds the model would trigger, not
+ * actually play them. This synchronous stub records each call so the
+ * join/leave gating test can assert on the sequence. (The `hxsnd`
+ * extern in sound.h is only a declaration; nothing here references
+ * the symbol, so no definition is needed.) */
+
+static GArray *g_sound_calls; /* of int */
+
+void
+play_sound (int sound)
+{
+    if (g_sound_calls) {
+        g_array_append_val (g_sound_calls, sound);
+    }
+}
+
+static void
+sound_calls_reset (void)
+{
+    if (!g_sound_calls) {
+        g_sound_calls = g_array_new (FALSE, FALSE, sizeof (int));
+    }
+    g_array_set_size (g_sound_calls, 0);
+}
+
+static guint
+sound_calls_count (int sound)
+{
+    guint c = 0;
+    for (guint i = 0; g_sound_calls && i < g_sound_calls->len; i++) {
+        if (g_array_index (g_sound_calls, int, i) == sound) {
+            c++;
+        }
+    }
+    return c;
+}
 
 /* ---- Wire-format helpers --------------------------------------- */
 
@@ -296,6 +339,75 @@ test_signal_emitted (void)
     g_object_unref (m);
 }
 
+/* Join/leave notification sounds: the model plays VOICE_JOIN /
+ * VOICE_LEAVE on genuine presence transitions, but
+ *   - never for the initial roster (the first ingest after a
+ *     join/clear seeds silently), and
+ *   - never for our own uid (set via set_self_uid). */
+static void
+test_join_leave_sounds (void)
+{
+    HxVoiceModel *m = hx_voice_model_new ();
+    sound_calls_reset ();
+
+    /* We are uid 13. */
+    hx_voice_model_set_self_uid (m, 13);
+
+    /* Initial roster: us + one peer already present. Seeds silently
+     * — no chime for anyone. */
+    part_entry roster[] = { { 13, 0 }, { 14, 0 } };
+    GByteArray *b0 = make_blob (roster, G_N_ELEMENTS (roster));
+    hx_voice_model_ingest_participants (m, b0->data, b0->len);
+    g_assert_cmpuint (sound_calls_count (VOICE_JOIN), ==, 0);
+    g_assert_cmpuint (sound_calls_count (VOICE_LEAVE), ==, 0);
+
+    /* Peer 15 joins after the seed: exactly one VOICE_JOIN. */
+    part_entry join[] = { { 13, 0 }, { 14, 0 }, { 15, 0 } };
+    GByteArray *b1 = make_blob (join, G_N_ELEMENTS (join));
+    hx_voice_model_ingest_participants (m, b1->data, b1->len);
+    g_assert_cmpuint (sound_calls_count (VOICE_JOIN), ==, 1);
+    g_assert_cmpuint (sound_calls_count (VOICE_LEAVE), ==, 0);
+
+    /* Peer 15 leaves: exactly one VOICE_LEAVE. */
+    sound_calls_reset ();
+    part_entry leave[] = { { 13, 0 }, { 14, 0 } };
+    GByteArray *b2 = make_blob (leave, G_N_ELEMENTS (leave));
+    hx_voice_model_ingest_participants (m, b2->data, b2->len);
+    g_assert_cmpuint (sound_calls_count (VOICE_JOIN), ==, 0);
+    g_assert_cmpuint (sound_calls_count (VOICE_LEAVE), ==, 1);
+
+    /* Our own leave (13 drops out) is silent — self-exclusion. */
+    sound_calls_reset ();
+    part_entry self_gone[] = { { 14, 0 } };
+    GByteArray *b3 = make_blob (self_gone, G_N_ELEMENTS (self_gone));
+    hx_voice_model_ingest_participants (m, b3->data, b3->len);
+    g_assert_cmpuint (sound_calls_count (VOICE_LEAVE), ==, 0);
+
+    /* Our own re-join is likewise silent. */
+    sound_calls_reset ();
+    part_entry self_back[] = { { 13, 0 }, { 14, 0 } };
+    GByteArray *b4 = make_blob (self_back, G_N_ELEMENTS (self_back));
+    hx_voice_model_ingest_participants (m, b4->data, b4->len);
+    g_assert_cmpuint (sound_calls_count (VOICE_JOIN), ==, 0);
+
+    /* clear() re-arms the seed gate: the next roster after a clear
+     * is again an initial roster and must not chime. */
+    sound_calls_reset ();
+    hx_voice_model_clear (m);
+    part_entry reseed[] = { { 13, 0 }, { 14, 0 }, { 16, 0 } };
+    GByteArray *b5 = make_blob (reseed, G_N_ELEMENTS (reseed));
+    hx_voice_model_ingest_participants (m, b5->data, b5->len);
+    g_assert_cmpuint (sound_calls_count (VOICE_JOIN), ==, 0);
+
+    g_byte_array_unref (b0);
+    g_byte_array_unref (b1);
+    g_byte_array_unref (b2);
+    g_byte_array_unref (b3);
+    g_byte_array_unref (b4);
+    g_byte_array_unref (b5);
+    g_object_unref (m);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -310,6 +422,7 @@ main (int argc, char **argv)
                      test_speaking_unknown_uid);
     g_test_add_func ("/voice_model/clear", test_clear);
     g_test_add_func ("/voice_model/signal_emitted", test_signal_emitted);
+    g_test_add_func ("/voice_model/join_leave_sounds", test_join_leave_sounds);
 
     return g_test_run ();
 }

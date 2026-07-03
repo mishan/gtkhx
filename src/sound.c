@@ -28,7 +28,7 @@
 #include "gtkhx.h"
 #include "sound.h"
 
-struct hx_sounds hxsnd = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+struct hx_sounds hxsnd = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 
 /* resolve a sound file by name across the layered sound
  * search path:
@@ -200,6 +200,16 @@ play_sound_idle_cb (gpointer data)
     case USER_PART:
         if (hxsnd.part) {
             play ("part.wav");
+        }
+        break;
+    case VOICE_JOIN:
+        if (hxsnd.voice_join) {
+            play ("voice_join.wav");
+        }
+        break;
+    case VOICE_LEAVE:
+        if (hxsnd.voice_leave) {
+            play ("voice_leave.wav");
         }
         break;
     }
