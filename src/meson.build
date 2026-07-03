@@ -89,7 +89,8 @@ gtkhx_sources = files(
   'tasks_table.c',
   'text_util.c',
   'tls_trust.c',
-  'tls_trust_dialog.c',
+  # tls_trust_dialog.c ported to Rust (gtkhx-ui tls_trust_dialog.rs);
+  # tls_trust_dialog.h keeps the C ABI decl network.c calls.
   'toolbar.c',
   # tracker.c + tracker_row.c ported to Rust (gtkhx-ui crate, Phase R5).
   # tracker_bridge.c is the thin session/prefs shim the Rust window calls.

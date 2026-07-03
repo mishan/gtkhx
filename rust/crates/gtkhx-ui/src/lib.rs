@@ -23,6 +23,7 @@ pub mod bookmarks;
 pub mod cipher_vocab;
 pub mod connect;
 pub mod rc4_dialog;
+pub mod tls_trust_dialog;
 pub mod tracker;
 pub mod useredit;
 

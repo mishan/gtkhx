@@ -73,6 +73,70 @@ pub fn tr_fmt(msgid: &str, args: &[&str]) -> String {
     s
 }
 
+/// Translate `msgid` and substitute an ordered list of already-stringified
+/// arguments for its printf-style placeholders. Handles both **sequential**
+/// (`%s`, `%u`, …) and gettext **positional** (`%1$s`, `%2$u`, …) forms,
+/// `%%` literals, and repeated positional references — so a translation may
+/// switch to positional specifiers or reorder/repeat arguments without the
+/// UI showing raw `%…` tokens. The conversion letter is ignored (every value
+/// is inserted verbatim), so string and numeric arguments share one path.
+/// Sequential placeholders consume `args` left to right; positional ones
+/// index directly. A placeholder with no matching argument is dropped.
+pub fn tr_argv(msgid: &str, args: &[&str]) -> String {
+    let s = tr(msgid);
+    let mut out = String::with_capacity(s.len() + 16);
+    let mut chars = s.chars().peekable();
+    let mut seq = 0usize;
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.peek().copied() {
+            Some('%') => {
+                chars.next();
+                out.push('%');
+            }
+            // positional %N$<letter>
+            Some(d) if d.is_ascii_digit() => {
+                let mut num = String::new();
+                while let Some(&d) = chars.peek() {
+                    if d.is_ascii_digit() {
+                        num.push(d);
+                        chars.next();
+                    } else {
+                        break;
+                    }
+                }
+                if chars.peek() == Some(&'$') {
+                    chars.next(); // '$'
+                    chars.next(); // conversion letter
+                    if let Ok(n) = num.parse::<usize>() {
+                        if (1..=args.len()).contains(&n) {
+                            out.push_str(args[n - 1]);
+                        }
+                    }
+                } else {
+                    // Not a positional spec — emit the '%' + digits verbatim.
+                    out.push('%');
+                    out.push_str(&num);
+                }
+            }
+            // sequential %<letter>
+            Some(d) if d.is_ascii_alphabetic() => {
+                chars.next(); // conversion letter
+                if seq < args.len() {
+                    out.push_str(args[seq]);
+                    seq += 1;
+                }
+            }
+            // lone '%' at end / before punctuation — emit verbatim.
+            _ => out.push('%'),
+        }
+    }
+    out
+}
+
 /// Plural-aware translate: `singular` for n == 1, `plural` otherwise
 /// (subject to the catalog's plural rule).
 pub fn trn(singular: &str, plural: &str, n: u64) -> String {
