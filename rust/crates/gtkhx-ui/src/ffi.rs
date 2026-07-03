@@ -162,3 +162,10 @@ pub const BOOKMARK_CIPHER_BYTE_NONE: u8 = 0;
 pub const BOOKMARK_CIPHER_BYTE_RC4: u8 = 1;
 pub const BOOKMARK_CIPHER_BYTE_BLOWFISH: u8 = 2;
 pub const BOOKMARK_CIPHER_BYTE_CHACHA20_POLY1305: u8 = 3;
+
+/// `hx_tls_trust_status::HX_TLS_TRUST_MISMATCH` (`tls_trust.h`, where the
+/// enum is TRUSTED=0 / UNKNOWN=1 / MISMATCH=2). Authoritative FFI-side mirror
+/// used across the ABI boundary by the TLS-trust dialog. A `_Static_assert`
+/// in `tls_trust.c` pins the full C enum to these values so the two can't
+/// silently drift if the enum is ever reordered or extended.
+pub const HX_TLS_TRUST_MISMATCH: c_int = 2;

@@ -45,6 +45,16 @@
 #include "tls_trust.h"
 #include "host_port.h"
 
+/* The TLS-trust dialog moved to Rust (gtkhx-ui tls_trust_dialog.rs) and
+ * branches on the hx_tls_trust_status value it receives across the ABI as a
+ * plain int, mirrored in rust/crates/gtkhx-ui/src/ffi.rs. Pin the C enum's
+ * numeric values here so a reorder/extension breaks the build loudly instead
+ * of silently diverging from the Rust side. */
+_Static_assert (HX_TLS_TRUST_TRUSTED == 0 && HX_TLS_TRUST_UNKNOWN == 1
+                    && HX_TLS_TRUST_MISMATCH == 2,
+                "hx_tls_trust_status values are mirrored as HX_TLS_TRUST_* in "
+                "rust/crates/gtkhx-ui/src/ffi.rs; keep them in sync");
+
 /* Forward-declared in network.c / bookmarks_io.c — don't pull
  * the whole gtkhx.h pile in. The path resolver caches and lives
  * in gtkhx.c. */
