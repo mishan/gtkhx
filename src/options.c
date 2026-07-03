@@ -66,19 +66,11 @@ static struct icon_viewer *iv;
 
 GtkWidget *options_window = NULL;
 
-/* Tracker page (Settings → Trackers): GListStore<GtkStringObject *>
- * is the source of truth; the GtkColumnView reads through a
- * GtkSingleSelection wrapping the store. The widget pointer is
- * kept so close_options_bookkeeping doesn't have to know the
- * model topology — the existing teardown chain unrefs the view,
- * which drops the selection's ref on the model, etc. The store
- * pointer is the one we mutate from add_tracker / remove_tracker.
- * Module-static rather than per-page-local so parse_tracker_list
- * (the Save path) can read the model without plumbing a widget
- * pointer through every dialog handler. */
-static GtkWidget *tracker_list = NULL;
-static GListStore *tracker_store = NULL;
-static GtkSingleSelection *tracker_selection = NULL;
+/* The Tracker settings page moved to Rust (gtkhx-ui options.rs); it owns its
+ * own GListStore + GtkColumnView and serialises back through
+ * gtkhx_prefs_set_string(CFG_TRACKER, …), whose parse_tracker changefunc
+ * re-derives gtkhx_prefs.tracker[]. The former module-static store/selection/
+ * view and the add/remove/parse_tracker_list helpers are gone. */
 
 struct gtkhx_prefs gtkhx_prefs = {
     0,                /* num_tracker */
@@ -1219,6 +1211,123 @@ pref_apply (struct cfgvar *v)
     prefs_write ();
 }
 
+/* ---- Rust settings-form bridge (Phase R5) ------------------------
+ *
+ * The settings *form* is moving to Rust (gtkhx-ui options.rs); the
+ * cfgvar registry, the changed_* apply hooks, and the on-disk
+ * persistence (prefs_write) stay here. These typed by-name accessors
+ * (an extension of the existing gtkhx_prefs_set_bool family) let the
+ * Rust rows read a pref's current value and write a new one — a write
+ * also fires the cfgvar's changefunc + persists, exactly like the C
+ * rows (on_switch_row_active / on_entry_row_text / …) did, so the apply
+ * semantics can't drift. BOOLEAN writes reuse gtkhx_prefs_set_bool
+ * (below). STRING writes honour the `allocated` bit; both string types
+ * short-circuit an unchanged value (matching the C handlers, which skip
+ * redundant changefunc runs / wire packets). */
+int
+gtkhx_prefs_type (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    return v ? (int) v->type : 0;
+}
+
+int
+gtkhx_prefs_get_bool (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v || v->type != BOOLEAN) {
+        return 0;
+    }
+    return *v->variable.uchar ? 1 : 0;
+}
+
+int
+gtkhx_prefs_get_int (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v) {
+        return 0;
+    }
+    switch (v->type) {
+    case INT:
+        return *v->variable.integer;
+    case UINT16:
+        return (int) *v->variable.uint16;
+    case TIME_T:
+        return (int) *v->variable.timet;
+    default:
+        return 0;
+    }
+}
+
+void
+gtkhx_prefs_set_int (const char *name, int val)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v) {
+        return;
+    }
+    switch (v->type) {
+    case INT:
+        *v->variable.integer = val;
+        break;
+    case UINT16:
+        *v->variable.uint16 = (guint16) val;
+        break;
+    case TIME_T:
+        *v->variable.timet = (time_t) val;
+        break;
+    default:
+        return;
+    }
+    pref_apply (v);
+}
+
+/* Returns a g_malloc'd copy (caller frees with g_free); never NULL. */
+char *
+gtkhx_prefs_get_string (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v) {
+        return g_strdup ("");
+    }
+    if (v->type == STRING) {
+        return g_strdup (*v->variable.str ? *v->variable.str : "");
+    }
+    if (v->type == STRING32) {
+        return g_strndup (v->variable.str32, 31);
+    }
+    return g_strdup ("");
+}
+
+void
+gtkhx_prefs_set_string (const char *name, const char *val)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v || !val) {
+        return;
+    }
+    if (v->type == STRING) {
+        if (*v->variable.str && strcmp (*v->variable.str, val) == 0) {
+            return;
+        }
+        if (v->allocated) {
+            g_free (*v->variable.str);
+        }
+        *v->variable.str = g_strdup (val);
+        v->allocated = 1;
+    } else if (v->type == STRING32) {
+        if (strncmp (v->variable.str32, val, 31) == 0) {
+            return;
+        }
+        strncpy (v->variable.str32, val, 31);
+        v->variable.str32[31] = '\0';
+    } else {
+        return;
+    }
+    pref_apply (v);
+}
+
 static void
 on_switch_row_active (AdwSwitchRow *row, GParamSpec *pspec, gpointer data)
 {
@@ -2176,57 +2285,6 @@ parse_tracker (session *sess)
     }
 }
 
-/* Re-derive gtkhx_prefs.tracker[] + tracker_str from whatever the
- * GListStore<GtkStringObject *> currently holds. Called from the
- * add / remove handlers below; the result feeds prefs_write +
- * the next hx_tracker_list_async. The serialised tracker_str is
- * comma-separated to match the on-disk gtkhxrc format the
- * cfgvar handles. */
-static void
-parse_tracker_list (void)
-{
-    guint n;
-    size_t len = 0;
-    int i;
-
-    if (gtkhx_prefs.tracker) {
-        for (i = 0; i != gtkhx_prefs.num_tracker; ++i) {
-            g_free (gtkhx_prefs.tracker[i]);
-        }
-        g_free (gtkhx_prefs.tracker);
-        gtkhx_prefs.tracker = NULL;
-    }
-
-    n = tracker_store
-            ? g_list_model_get_n_items (G_LIST_MODEL (tracker_store))
-            : 0;
-    gtkhx_prefs.num_tracker = (int) n;
-    gtkhx_prefs.tracker = n ? g_malloc (n * sizeof (char *)) : NULL;
-    if ((*cfgvar_for_name (CFG_TRACKER)).allocated) {
-        g_free (gtkhx_prefs.tracker_str);
-    }
-    gtkhx_prefs.tracker_str = g_malloc0 (1);
-
-    for (guint j = 0; j < n; j++) {
-        GtkStringObject *so
-            = g_list_model_get_item (G_LIST_MODEL (tracker_store), j);
-        const char *tracker = gtk_string_object_get_string (so);
-        size_t trackersize = strlen (tracker) + 1;
-        gtkhx_prefs.tracker_str
-            = g_realloc (gtkhx_prefs.tracker_str, len + trackersize + 1);
-        if (j) {
-            gtkhx_prefs.tracker_str[len] = ',';
-            memcpy (gtkhx_prefs.tracker_str + len + 1, tracker, trackersize);
-            len++;
-        } else {
-            memcpy (gtkhx_prefs.tracker_str + len, tracker, trackersize);
-        }
-        len += trackersize - 1;
-        gtkhx_prefs.tracker[j] = g_strdup (tracker);
-        g_object_unref (so);
-    }
-}
-
 /* bookkeeping that runs on every dialog teardown path. Wired to
  * AdwDialog::closed (see create_options_window), which AdwDialog emits
  * once the dialog is actually closed — whether by Esc, the header-bar
@@ -2252,15 +2310,9 @@ close_options_bookkeeping (GtkWidget *widget, gpointer data)
     g_free (iv);
     iv = NULL;
 
-    /* Tracker page model chain: drop our parallel refs on the
-     * store + selection so they don't dangle past the dialog's
-     * widget tree teardown. The column view holds its own refs
-     * via gtk_column_view_new and disposes them in its own
-     * unref chain; we just need to make sure the module-static
-     * pointers aren't usable after the dialog is gone. */
-    tracker_list = NULL;
-    g_clear_object (&tracker_selection);
-    g_clear_object (&tracker_store);
+    /* The Tracker page (now Rust) owns its own GListStore + selection; they
+     * drop with the dialog's widget tree, so there's nothing to clear here. */
+
     /* per-cfgvar widget pointers are populated as Settings
 	 * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
 	 * point at AdwPreferencesRow children of the dialog. Once the dialog
@@ -2311,466 +2363,10 @@ gtkhx_prefs_set_bool (const char *name, int value)
     pref_apply (v);
 }
 
-static void
-fontsel_response (GtkDialog *dialog, gint response, gpointer user_data)
-{
-    GtkWidget *entry = user_data;
-
-    if (response == GTK_RESPONSE_OK) {
-        char *font = gtk_font_chooser_get_font (GTK_FONT_CHOOSER (dialog));
-        if (font) {
-            gtk_editable_set_text (GTK_EDITABLE (entry), font);
-            g_free (font);
-        }
-    }
-    gtkhx_widget_destroy (GTK_WIDGET (dialog));
-}
-
-static void
-create_fontsel (GtkWidget *btn, GtkWidget *entry)
-{
-    GtkWindow *parent = gtkhx_active_window ();
-    GtkWidget *fontsel
-        = gtk_font_chooser_dialog_new (_ ("Browse Fonts"), parent);
-    (void)btn;
-
-    /* The Settings AdwDialog is presented modal against the main
-     * window; without transient_for + modal here, GTK keeps the
-     * input grab on Settings and the font chooser receives no
-     * keyboard or mouse events until Settings is dismissed. (Also
-     * silences "GtkDialog mapped without a transient parent".) */
-    gtk_window_set_modal (GTK_WINDOW (fontsel), TRUE);
-
-    if (gtkhx_prefs.font && *gtkhx_prefs.font) {
-        gtk_font_chooser_set_font (GTK_FONT_CHOOSER (fontsel),
-                                   gtkhx_prefs.font);
-    }
-
-    g_signal_connect (fontsel, "response", G_CALLBACK (fontsel_response),
-                      entry);
-
-    gtk_window_present (GTK_WINDOW (fontsel));
-}
-
-static void
-add_tracker (GtkWidget *add, GtkWidget *entry)
-{
-    const char *text = gtk_editable_get_text (GTK_EDITABLE (entry));
-    GtkStringObject *so;
-    (void)add;
-
-    if (!text || !*text || !tracker_store) {
-        return;
-    }
-    /* GtkStringObject's constructor copies the input — the
-     * GListStore then owns one strong ref; we drop our ref after
-     * append. */
-    so = gtk_string_object_new (text);
-    g_list_store_append (tracker_store, so);
-    g_object_unref (so);
-
-    gtk_editable_set_text (GTK_EDITABLE (entry), "");
-    parse_tracker_list ();
-    prefs_write ();
-}
-
-static void
-remove_tracker (GtkWidget *del, gpointer data)
-{
-    guint pos;
-    (void)del;
-    (void)data;
-
-    if (!tracker_store || !tracker_selection) {
-        return;
-    }
-    /* GtkSingleSelection reports GTK_INVALID_LIST_POSITION when no
-     * row is selected — bail rather than try to remove position 0
-     * by mistake. */
-    pos = gtk_single_selection_get_selected (tracker_selection);
-    if (pos == GTK_INVALID_LIST_POSITION) {
-        return;
-    }
-    g_list_store_remove (tracker_store, pos);
-    parse_tracker_list ();
-    prefs_write ();
-}
-
-/* Column factory pair for the single "URL" column on the Settings
- * tracker list. setup creates a left-aligned, ellipsised GtkLabel
- * once per recycled list item; bind reads the URL out of the
- * row's GtkStringObject and updates the label. */
-static void
-tracker_url_setup (GtkSignalListItemFactory *f, GtkListItem *item,
-                   gpointer d)
-{
-    GtkWidget *lbl = gtk_label_new (NULL);
-    (void)f;
-    (void)d;
-    gtk_label_set_xalign (GTK_LABEL (lbl), 0.0f);
-    gtk_label_set_ellipsize (GTK_LABEL (lbl), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_margin_start (lbl, 6);
-    gtk_widget_set_margin_end (lbl, 6);
-    gtk_list_item_set_child (item, lbl);
-}
-
-static void
-tracker_url_bind (GtkSignalListItemFactory *f, GtkListItem *item, gpointer d)
-{
-    GtkLabel *lbl = GTK_LABEL (gtk_list_item_get_child (item));
-    GtkStringObject *so = gtk_list_item_get_item (item);
-    (void)f;
-    (void)d;
-    gtk_label_set_text (lbl, so ? gtk_string_object_get_string (so) : "");
-}
-
-/* Tracker page: Add / Remove a GListStore-backed list of URL
- * strings displayed in a GtkColumnView. The column view sits
- * inside a custom AdwPreferencesRow so it lives flush with the
- * other Adw pages rather than as a floating chunk of GTK. */
-static void
-settings_page_tracker (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *grp;
-    GtkWidget *row;
-    GtkWidget *vbox, *scroll, *ent_hbox, *btnhbox;
-    GtkWidget *lbl, *entry, *add_btn, *remove_btn;
-    GtkColumnViewColumn *col;
-    GtkListItemFactory *factory;
-    int i;
-
-    grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (grp, _ ("Trackers"));
-    adw_preferences_group_set_description (
-        grp, _ ("Servers polled when the Tracker window opens"));
-
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_top (vbox, 6);
-    gtk_widget_set_margin_bottom (vbox, 6);
-    gtk_widget_set_margin_start (vbox, 6);
-    gtk_widget_set_margin_end (vbox, 6);
-
-    /* Build the model chain bottom-up: GListStore is the truth;
-     * GtkSingleSelection wraps it so the column view has a
-     * selection model to render off (and remove_tracker reads
-     * the selected position from). The store ref the selection
-     * takes is the long-lived one — we drop ours at function
-     * end since the selection (and through it the column view)
-     * keeps the chain alive for the dialog's lifetime. */
-    tracker_store = g_list_store_new (GTK_TYPE_STRING_OBJECT);
-    tracker_selection = gtk_single_selection_new (
-        G_LIST_MODEL (g_object_ref (tracker_store)));
-    gtk_single_selection_set_autoselect (tracker_selection, FALSE);
-    gtk_single_selection_set_can_unselect (tracker_selection, TRUE);
-    gtk_single_selection_set_selected (tracker_selection,
-                                       GTK_INVALID_LIST_POSITION);
-
-    tracker_list = gtk_column_view_new (
-        GTK_SELECTION_MODEL (g_object_ref (tracker_selection)));
-    gtk_column_view_set_show_column_separators (
-        GTK_COLUMN_VIEW (tracker_list), FALSE);
-    gtk_column_view_set_show_row_separators (GTK_COLUMN_VIEW (tracker_list),
-                                             FALSE);
-
-    factory = gtk_signal_list_item_factory_new ();
-    g_signal_connect (factory, "setup", G_CALLBACK (tracker_url_setup), NULL);
-    g_signal_connect (factory, "bind", G_CALLBACK (tracker_url_bind), NULL);
-    col = gtk_column_view_column_new (_ ("URL"), factory);
-    gtk_column_view_column_set_expand (col, TRUE);
-    gtk_column_view_column_set_resizable (col, TRUE);
-    gtk_column_view_append_column (GTK_COLUMN_VIEW (tracker_list), col);
-    g_object_unref (col);
-
-    scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
-                                    GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    gtk_scrolled_window_set_child (GTK_SCROLLED_WINDOW (scroll), tracker_list);
-    gtk_widget_set_size_request (scroll, -1, 220);
-    gtk_box_append (GTK_BOX (vbox), scroll);
-
-    ent_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    lbl = gtk_label_new (_ ("Address:"));
-    entry = gtk_entry_new ();
-    gtk_widget_set_hexpand (entry, TRUE);
-    gtk_box_append (GTK_BOX (ent_hbox), lbl);
-    gtk_box_append (GTK_BOX (ent_hbox), entry);
-    gtk_box_append (GTK_BOX (vbox), ent_hbox);
-
-    btnhbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    gtk_widget_set_halign (btnhbox, GTK_ALIGN_END);
-    add_btn = gtk_button_new_with_label (_ ("Add"));
-    gtk_widget_add_css_class (add_btn, "suggested-action");
-    g_signal_connect (add_btn, "clicked", G_CALLBACK (add_tracker), entry);
-    remove_btn = gtk_button_new_with_label (_ ("Remove"));
-    gtk_widget_add_css_class (remove_btn, "destructive-action");
-    /* The remove handler reads tracker_store + tracker_selection
-     * directly from module-static state; no per-widget data
-     * needed. */
-    g_signal_connect (remove_btn, "clicked", G_CALLBACK (remove_tracker),
-                      NULL);
-    gtk_box_append (GTK_BOX (btnhbox), remove_btn);
-    gtk_box_append (GTK_BOX (btnhbox), add_btn);
-    gtk_box_append (GTK_BOX (vbox), btnhbox);
-
-    row = adw_preferences_row_new ();
-    gtk_list_box_row_set_selectable (GTK_LIST_BOX_ROW (row), FALSE);
-    gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (row), FALSE);
-    gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), vbox);
-    adw_preferences_group_add (grp, row);
-
-    /* Seed the store from the current pref. GtkStringObject's
-     * constructor copies the input; we drop our ref after
-     * append (the store keeps one). */
-    for (i = 0; i < gtkhx_prefs.num_tracker; i++) {
-        GtkStringObject *so = gtk_string_object_new (gtkhx_prefs.tracker[i]);
-        g_list_store_append (tracker_store, so);
-        g_object_unref (so);
-    }
-
-    adw_preferences_page_add (page, grp);
-
-    /* Tracker-specific search option in its own Search group. */
-    {
-        AdwPreferencesGroup *search_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (search_grp, _ ("Search"));
-        adw_preferences_group_add (
-            search_grp,
-            pref_switch_row (CFG_TRACKER_CASE,
-                             _ ("Case-sensitive tracker search"), NULL));
-        adw_preferences_page_add (page, search_grp);
-    }
-}
-
 /* No Interface page anymore — the new files browser is always a
  * single window. Legacy FILE_SAMEWINDOW prefs are dropped from the
  * cfgvars table; any pre-existing key in an old gtkhxrc is silently
  * ignored on load. */
-
-static void
-settings_page_sound (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *master, *events;
-
-    master = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (master, _ ("Sounds"));
-    adw_preferences_group_add (
-        master,
-        pref_switch_row (CFG_SOUNDS_ON, _ ("Play sounds"),
-                         _ ("Master switch for chat and transfer alerts")));
-    adw_preferences_page_add (page, master);
-
-    events = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (events, _ ("Events"));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_INVITE, _ ("Chat invitation"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_CHAT, _ ("Chat message"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_ERROR, _ ("Error"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_FILE, _ ("Transfer complete"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_JOIN, _ ("Join"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_LOGIN, _ ("Login"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_MSG, _ ("Private message"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_NEWS, _ ("News post"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_SND_PART, _ ("Leave"), NULL));
-#ifdef HAVE_VOICE
-    /* Voice chat join/leave chimes — only offered when voice is
-     * compiled in. Without HAVE_VOICE these rows are absent (not
-     * greyed): there's no voice feature to alert about. */
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (CFG_SND_VOICE_JOIN, _ ("Voice chat join"), NULL));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (CFG_SND_VOICE_LEAVE, _ ("Voice chat leave"), NULL));
-#endif /* HAVE_VOICE */
-    adw_preferences_page_add (page, events);
-}
-
-/* Chat → Appearance: how chat text looks. Chat output, timestamp
- * format, and the display font. */
-static void
-settings_page_chat_appearance (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *output_grp, *font_grp;
-    GtkWidget *entry_row, *btn;
-
-    output_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (output_grp, _ ("Chat output"));
-    adw_preferences_group_add (
-        output_grp,
-        pref_switch_row (CFG_TIMESTAMP, _ ("Show timestamps"), NULL));
-    adw_preferences_group_add (
-        output_grp, pref_switch_row (CFG_WORDWRAP, _ ("Word wrap"), NULL));
-    adw_preferences_group_add (
-        output_grp,
-        pref_spin_row (CFG_XBUF_MAX, _ ("Scrollback lines"),
-                       _ ("0 keeps unlimited scrollback"), 0, 0xffff, 1));
-    adw_preferences_page_add (page, output_grp);
-
-    /* timestamp format. Separate group so the strftime
-     * hint can live as a group description without making the
-     * Chat-output group feel cluttered. */
-    {
-        AdwPreferencesGroup *stamp_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (stamp_grp, _ ("Timestamp format"));
-        adw_preferences_group_set_description (
-            stamp_grp, _ ("strftime(3) format string. Default: "
-                          "\"[%H:%M:%S] \". See `man 3 strftime` for the full "
-                          "list of conversion specifiers."));
-        adw_preferences_group_add (
-            stamp_grp, pref_entry_row (CFG_STAMP_FORMAT, _ ("Format")));
-        adw_preferences_page_add (page, stamp_grp);
-    }
-
-    font_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (font_grp, _ ("Font"));
-    adw_preferences_group_set_description (
-        font_grp, _ ("Pango font description, e.g. \"Monospace 11\""));
-
-    entry_row = pref_entry_row (CFG_FONT, _ ("Font"));
-
-    /* Add a Browse button as a suffix on the entry row so users get a
-	 * native font picker without leaving the prefs context. */
-    btn = gtk_button_new_with_label (_ ("Browse"));
-    gtk_widget_set_valign (btn, GTK_ALIGN_CENTER);
-    g_signal_connect (btn, "clicked", G_CALLBACK (create_fontsel), entry_row);
-    adw_entry_row_add_suffix (ADW_ENTRY_ROW (entry_row), btn);
-
-    adw_preferences_group_add (font_grp, entry_row);
-    adw_preferences_page_add (page, font_grp);
-}
-
-/* Chat → Behavior: how chat acts. Join/leave + nick completion, the
- * xtext auto-copy controls, and highlight words. */
-static void
-settings_page_chat_behavior (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *behavior_grp;
-
-    behavior_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (behavior_grp, _ ("Behavior"));
-    adw_preferences_group_add (
-        behavior_grp,
-        pref_switch_row (CFG_SHOWJOIN, _ ("Show join / leave in chat"), NULL));
-    adw_preferences_group_add (
-        behavior_grp,
-        pref_switch_row (CFG_OLD_NICKCOMP, _ ("Old-style nick completion"),
-                         _ ("Match against the most recently typed prefix "
-                            "instead of all users")));
-    adw_preferences_page_add (page, behavior_grp);
-
-    /* HexChat-style auto-copy controls. Three independent
-     * toggles drive xtext's drag-end clipboard behaviour. The three
-     * gtk_xtext_set_autocopy_* setters take care of propagating the
-     * value to the widget; the changefunc on each cfgvar calls the
-     * matching setter. */
-    {
-        AdwPreferencesGroup *autocopy_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (autocopy_grp,
-                                         _ ("Auto Copy Behavior"));
-        adw_preferences_group_set_description (
-            autocopy_grp,
-            _ ("Drag-select in chat / news / private message text "
-               "to populate the clipboard. Ctrl-V or middle-click "
-               "pastes the selection elsewhere."));
-        adw_preferences_group_add (
-            autocopy_grp,
-            pref_switch_row (CFG_AUTOCOPY_TEXT,
-                             _ ("Automatically copy selected text"), NULL));
-        adw_preferences_group_add (
-            autocopy_grp,
-            pref_switch_row (CFG_AUTOCOPY_STAMP,
-                             _ ("Automatically include timestamps"), NULL));
-        adw_preferences_group_add (
-            autocopy_grp,
-            pref_switch_row (CFG_AUTOCOPY_COLOR,
-                             _ ("Automatically include color information"),
-                             NULL));
-        adw_preferences_page_add (page, autocopy_grp);
-    }
-
-    /* Highlight words — comma-separated extras to flag in chat
-     * (own nick is always implicit so the field stays empty by
-     * default). Matched lines render bold red. The same list is
-     * mirrored on Notifications → Behavior → Mention Words. */
-    {
-        AdwPreferencesGroup *hl_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (hl_grp, _ ("Highlight"));
-        adw_preferences_group_set_description (
-            hl_grp, _ ("Comma-separated words to highlight in chat (in "
-                       "addition to your own nick). Matches are case-"
-                       "insensitive at word boundaries."));
-        adw_preferences_group_add (
-            hl_grp, pref_entry_row (CFG_HIGHLIGHT_WORDS, _ ("Words")));
-        adw_preferences_page_add (page, hl_grp);
-    }
-}
-
-/* Chat → History: fogWraith chat-history extension (Janus and any
- * future server that implements Capabilities-Chat-History.md). Single
- * spin row for the initial pull count — also used as the per-click
- * Load-older page size, with a 50-floor in the click handler so the
- * affordance still works when initial is set to 0. */
-static void
-settings_page_chat_history (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *hist_grp
-        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (hist_grp, _ ("Chat history"));
-    adw_preferences_group_set_description (
-        hist_grp, _ ("Servers that implement the chat-history "
-                     "extension (e.g. Janus) replay recent chat "
-                     "to you on login. 0 disables the initial "
-                     "pull; the \"Load older messages\" link in "
-                     "chat still works to fetch on demand."));
-    adw_preferences_group_add (
-        hist_grp,
-        pref_spin_row (CFG_CHAT_HISTORY_INITIAL,
-                       _ ("Initial messages to fetch"),
-                       _ ("Also used as the page size for "
-                          "\"Load older messages\""),
-                       0, 0xffff, 1));
-    adw_preferences_page_add (page, hist_grp);
-}
-
-/* Chat → Emoji: emoji shortcodes (phase E6). Two independent toggles:
- * the conversion (emoji ↔ :shortcode: on the wire / at display) and the
- * inline typeahead popup. */
-static void
-settings_page_chat_emoji (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *emoji_grp
-        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (emoji_grp, _ ("Emoji"));
-    adw_preferences_group_set_description (
-        emoji_grp,
-        _ ("When conversion is on, emoji you send on servers that don't "
-           "support Unicode go out as text shortcodes like \":joy:\" "
-           "instead of \"?\", and incoming shortcodes are shown as emoji "
-           "on every server."));
-    adw_preferences_group_add (
-        emoji_grp,
-        pref_switch_row (CFG_EMOJI_SHORTCODES,
-                         _ ("Convert emoji to/from :shortcodes:"), NULL));
-    adw_preferences_group_add (
-        emoji_grp,
-        pref_switch_row (CFG_EMOJI_TYPEAHEAD,
-                         _ ("Suggest shortcodes as you type"),
-                         _ ("Show a popup of matching emoji when you type "
-                            "\":\"")));
-    adw_preferences_page_add (page, emoji_grp);
-}
 
 /* ---- Custom GIF avatar picker (GIF-icons extension, Phase 10.C) --- */
 
@@ -3296,90 +2892,6 @@ settings_page_identity (AdwPreferencesPage *page)
     }
 }
 
-/* Notifications page. One row per event class that can
- * fire a desktop notification, plus a global "don't notify when
- * the relevant window is focused" toggle. Mention matching uses
- * the same word list as the chat highlight colouring (own nick
- * + CFG_HIGHLIGHT_WORDS, comma-separated), so what gets
- * highlighted visually is what triggers a notification. */
-static void
-settings_page_notify_events (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *events;
-
-    events = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (events, _ ("Events"));
-    adw_preferences_group_set_description (
-        events, _ ("Show a desktop notification when these events happen."));
-
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_NOTIFY_MSG, _ ("Private message"),
-                                 _ ("Someone sends you a 1-to-1 message")));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (CFG_NOTIFY_PCHAT_INVITE, _ ("Private chat invitation"),
-                         _ ("Someone invites you to a private chat")));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (
-            CFG_NOTIFY_CHAT_HIGHLIGHT, _ ("Mention in public chat"),
-            _ ("Your name or a highlight word appears in a chat message")));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (
-            CFG_NOTIFY_PCHAT_HIGHLIGHT, _ ("Mention in private chat"),
-            _ ("Your name or a highlight word appears in a private chat")));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (CFG_NOTIFY_CHAT, _ ("Every public chat message"),
-                         _ ("Noisy — only useful on quiet servers")));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_NOTIFY_PCHAT,
-                                 _ ("Every private chat message"), NULL));
-    adw_preferences_group_add (
-        events, pref_switch_row (CFG_NOTIFY_NEWS, _ ("New news post"), NULL));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (CFG_NOTIFY_XFER, _ ("File transfer complete"), NULL));
-    adw_preferences_group_add (
-        events,
-        pref_switch_row (CFG_NOTIFY_BROADCAST, _ ("Server broadcast"),
-                         _ ("Admin-issued announcement to every user")));
-
-    adw_preferences_page_add (page, events);
-}
-
-/* Notifications → Behavior: the focused-window suppression toggle, plus
- * the mention-word list (mirrored from Chat → Behavior → Highlight). */
-static void
-settings_page_notify_behavior (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *behavior, *mentions;
-
-    behavior = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (behavior, _ ("Behavior"));
-    adw_preferences_group_add (
-        behavior,
-        pref_switch_row (CFG_NOTIFY_OMIT_FOCUSED,
-                         _ ("Don't notify when the relevant window is focused"),
-                         _ ("If a chat or private message window is already "
-                            "active, don't pop a notification on top of it")));
-    adw_preferences_page_add (page, behavior);
-
-    /* Mirror the Chat page's highlight-word entry so users can
-     * configure it from either place. Edits in either flow
-     * the same gtkhx_prefs.highlight_words string. */
-    mentions = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (mentions, _ ("Mention Words"));
-    adw_preferences_group_set_description (
-        mentions, _ ("Comma-separated. Your nickname is always matched in "
-                     "addition to this list. The same list drives chat "
-                     "message highlighting."));
-    adw_preferences_group_add (
-        mentions, pref_entry_row (CFG_HIGHLIGHT_WORDS, _ ("Highlight words")));
-    adw_preferences_page_add (page, mentions);
-}
-
 #ifdef HAVE_VOICE
 /* Phase 8.E: Voice device pickers. Queries gtkhx_voice_list_input_
  * /output_devices at page-build time (no live monitoring yet — a
@@ -3676,108 +3188,6 @@ settings_page_voice (AdwPreferencesPage *page)
 }
 #endif /* HAVE_VOICE */
 
-/* File Transfers page (under the General category): where downloads
- * land plus the queue-vs-parallel toggle. Both moved off the old
- * General "Paths" group / Misc "Behavior" group. */
-static void
-settings_page_file_transfers (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *grp
-        = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (grp, _ ("Downloads"));
-    adw_preferences_group_add (
-        grp, pref_entry_row (CFG_DOWNLOAD, _ ("Download directory")));
-    adw_preferences_group_add (
-        grp,
-        pref_switch_row (
-            CFG_QUEUEDL, _ ("Queue file transfers"),
-            _ ("Run downloads one at a time instead of in parallel")));
-    adw_preferences_page_add (page, grp);
-}
-
-/* General page: Appearance (theme combos) + System Integration (tray).
- * The download directory moved to the File Transfers page. */
-static void
-settings_page_general (AdwPreferencesPage *page)
-{
-    AdwPreferencesGroup *appearance_grp;
-    static const char *vals[]
-        = { CFG_THEME_SYSTEM, CFG_THEME_LIGHT, CFG_THEME_DARK };
-    const char *labels[3];
-
-    labels[0] = _ ("Follow system");
-    labels[1] = _ ("Light");
-    labels[2] = _ ("Dark");
-
-    appearance_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-    adw_preferences_group_set_title (appearance_grp, _ ("Appearance"));
-    adw_preferences_group_set_description (
-        appearance_grp,
-        _ ("Color scheme. \"Follow system\" tracks the desktop's "
-           "light/dark preference."));
-    adw_preferences_group_add (
-        appearance_grp,
-        pref_combo_row (CFG_THEME, _ ("Theme"), vals, labels, 3));
-
-    /* Theme-file picker. Enumerates built-in themes (default,
-     * solarized) plus any user files under
-     * $CONFIG/themes/, populates a combo bound to CFG_THEME_NAME.
-     * The existing changed_theme_name cfgvar hook calls
-     * gtkhx_theme_load_active() on selection, which re-emits
-     * GtkhxTheme::changed and repaints every subscriber (buttons,
-     * user list, chat xtext) live. */
-    {
-        g_autoptr (GPtrArray) themes = gtkhx_theme_list_available ();
-        guint n = themes->len;
-        const char **theme_values = g_new0 (const char *, n);
-        const char **theme_labels = g_new0 (const char *, n);
-        for (guint i = 0; i < n; i++) {
-            GtkhxThemeEntry *e = g_ptr_array_index (themes, i);
-            theme_values[i] = e->name;
-            theme_labels[i] = e->display;
-        }
-        adw_preferences_group_add (
-            appearance_grp,
-            pref_combo_row (CFG_THEME_NAME, _ ("GtkHx theme"),
-                            theme_values, theme_labels, (int) n));
-        /* pref_combo_row copies the strings into GtkStringList models,
-         * so the parallel arrays can go now. The GtkhxThemeEntry
-         * strings get freed when the GPtrArray autoptr unwinds at
-         * the end of this scope. */
-        g_free (theme_values);
-        g_free (theme_labels);
-    }
-
-    adw_preferences_page_add (page, appearance_grp);
-
-    /* Per-area UI scaling and the chat palette live in the active
-     * theme file (THEMENAME → $CONFIG/themes/<name>.ini). A theme
-     * editor — scale knobs, color rows, save-as — is a separate
-     * later phase; for now the combo above picks an existing theme
-     * and edits to a theme's body still mean editing the .ini
-     * directly. See gtkhx_theme.{c,h} and
-     * docs/theming-file-format.md. */
-
-    /* System integration. The tray icon needs a StatusNotifierItem
-     * host in the desktop environment — KDE Plasma, Cinnamon, MATE,
-     * Budgie and XFCE support it natively; GNOME Shell needs the
-     * AppIndicator extension. On a desktop without one, this toggle
-     * is effectively inert (the icon registers but nothing renders
-     * it). */
-    {
-        AdwPreferencesGroup *system_grp
-            = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
-        adw_preferences_group_set_title (system_grp, _ ("System Integration"));
-        adw_preferences_group_add (
-            system_grp,
-            pref_switch_row (CFG_TRAY, _ ("Show tray icon"),
-                             _ ("Display a status icon in the system tray. "
-                                "Closing the main window hides to tray; click "
-                                "the icon to toggle GtkHx's windows.")));
-        adw_preferences_page_add (page, system_grp);
-    }
-}
-
 /* Sidebar-driven Settings navigation.
  *
  * Settings was previously an AdwPreferencesDialog, whose built-in
@@ -3810,33 +3220,49 @@ struct settings_entry {
 
 /* Flat sidebar list, grouped under section headers. Order here is the
  * order rows appear; a non-NULL .section starts a new header group. */
+/* Rust page builders (gtkhx-ui options.rs, Phase R5.6) — build the ported
+ * pages' content into a C-created AdwPreferencesPage. The two custom-widget
+ * pages (Identity + Voice) stay C for now and keep their C draw functions
+ * below. */
+extern void gtkhx_options_rs_page_general (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_file_transfers (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_chat_appearance (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_chat_behavior (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_chat_history (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_chat_emoji (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_notify_events (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_notify_behavior (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_sound (AdwPreferencesPage *);
+extern void gtkhx_options_rs_page_tracker (AdwPreferencesPage *);
+
 static const struct settings_entry settings_entries[] = {
     { N_ ("General"), "general", N_ ("General"),
-      "preferences-system-symbolic", settings_page_general },
+      "preferences-system-symbolic", gtkhx_options_rs_page_general },
     { NULL, "identity", N_ ("Identity"), "user-info-symbolic",
       settings_page_identity },
     { NULL, "filexfer", N_ ("File Transfers"), "folder-download-symbolic",
-      settings_page_file_transfers },
+      gtkhx_options_rs_page_file_transfers },
     { N_ ("Chat"), "chat_appearance", N_ ("Appearance"),
-      "user-available-symbolic", settings_page_chat_appearance },
+      "user-available-symbolic", gtkhx_options_rs_page_chat_appearance },
     { NULL, "chat_behavior", N_ ("Behavior"), "preferences-other-symbolic",
-      settings_page_chat_behavior },
+      gtkhx_options_rs_page_chat_behavior },
     { NULL, "chat_history", N_ ("History"), "document-open-recent-symbolic",
-      settings_page_chat_history },
+      gtkhx_options_rs_page_chat_history },
     { NULL, "chat_emoji", N_ ("Emoji"), "face-smile-symbolic",
-      settings_page_chat_emoji },
+      gtkhx_options_rs_page_chat_emoji },
     { N_ ("Notifications"), "notify_events", N_ ("Events"),
-      "preferences-system-notifications-symbolic", settings_page_notify_events },
+      "preferences-system-notifications-symbolic",
+      gtkhx_options_rs_page_notify_events },
     { NULL, "notify_behavior", N_ ("Behavior"), "preferences-other-symbolic",
-      settings_page_notify_behavior },
+      gtkhx_options_rs_page_notify_behavior },
     { N_ ("Audio"), "sound", N_ ("Sound"), "audio-speakers-symbolic",
-      settings_page_sound },
+      gtkhx_options_rs_page_sound },
 #ifdef HAVE_VOICE
     { NULL, "voice", N_ ("Voice"), "audio-input-microphone-symbolic",
       settings_page_voice },
 #endif
     { N_ ("Network"), "trackers", N_ ("Trackers"), "network-server-symbolic",
-      settings_page_tracker },
+      gtkhx_options_rs_page_tracker },
 };
 
 /* GtkListBox header func: draw a section label above the first row of

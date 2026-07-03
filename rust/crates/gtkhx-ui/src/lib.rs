@@ -22,6 +22,10 @@ pub mod agreement;
 pub mod bookmarks;
 pub mod cipher_vocab;
 pub mod connect;
+// R5.6: the Settings form. 10 of 11 pages are Rust and wired live via the
+// gtkhx_options_rs_page_* exports (options.c's create_options_window +
+// settings_entries[] call them). Identity + Voice remain C.
+pub mod options;
 pub mod rc4_dialog;
 pub mod tls_trust_dialog;
 pub mod tracker;
