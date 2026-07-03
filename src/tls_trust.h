@@ -125,4 +125,45 @@ hx_tls_trust_pin (const char *host, guint16 port, const char *fingerprint);
  */
 extern gchar *hx_tls_trust_known_hosts_path (void);
 
+
+/*
+ * Thread-safe test seams (integration tests in practice).
+ *
+ * The multi-threaded Tier 3 tests used to steer the TLS trust / connect
+ * behaviour by mutating environment variables (GTKHX_TLS_AUTO_ACCEPT /
+ * GTKHX_TLS_TEST_PROMPT / GTKHX_KNOWN_HOSTS / GTKHX_TLS) with
+ * g_setenv/g_unsetenv. But the TLS verify callback runs on the hxnet
+ * (tokio) worker thread and reads those vars with g_getenv, so a
+ * main-thread g_setenv racing a worker-thread g_getenv is a data race on
+ * the global `environ` (setenv can realloc it) -> a SIGSEGV under the
+ * wrong timing. See tests/integration/test_real_connect.c.
+ *
+ * These setters install a process-global override that the connect /
+ * verify code consults FIRST, so a test never has to touch `environ`
+ * after the worker threads exist. Each override defaults to "unset", in
+ * which case the corresponding env var is consulted exactly as before --
+ * so env-configured harnesses (which set the var once in main() before
+ * any thread spawns) and the single-threaded Tier 1 trust tests keep
+ * working unchanged, and production (which never sets an override) is
+ * byte-for-byte identical. Backed by atomics / a mutex; call from any
+ * thread.
+ *
+ * The tri-state ints are: <0 = unset (consult env), 0 = force off,
+ * >0 = force on.
+ */
+void hx_tls_test_set_auto_accept (int tri);
+void hx_tls_test_set_force_tls (int tri);
+/* prompt verdict: 0 = unset (consult env / show the real prompt),
+ * 1 = accept, 2 = reject. */
+void hx_tls_test_set_prompt_verdict (int verdict);
+/* known-hosts path override; NULL clears it (consult env / default).
+ * The string is copied. */
+void hx_tls_test_set_known_hosts (const char *path);
+
+/* Resolvers used by the connect / verify code: override first, else the
+ * env var. */
+gboolean hx_tls_test_auto_accept (void);
+gboolean hx_tls_test_force_tls (void);
+int      hx_tls_test_prompt_verdict (void);
+
 #endif /* HX_TLS_TRUST_H */

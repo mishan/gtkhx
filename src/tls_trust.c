@@ -50,6 +50,96 @@
  * in gtkhx.c. */
 extern const char *gtkhx_config_dir (void);
 
+/* ---- Thread-safe test seams (see tls_trust.h) ------------------ */
+
+/* tri-state: <0 unset (consult env), 0 force off, >0 force on. */
+static gint hx_tls_test_auto_accept_ov = -1;
+static gint hx_tls_test_force_tls_ov = -1;
+/* prompt: 0 unset (consult env), 1 accept, 2 reject. */
+static gint hx_tls_test_prompt_ov = 0;
+/* GMutex may be statically zero-initialised and used without g_mutex_init. */
+static GMutex hx_tls_test_known_hosts_mutex;
+static char *hx_tls_test_known_hosts_ov = NULL; /* guarded by the mutex */
+
+void
+hx_tls_test_set_auto_accept (int tri)
+{
+    g_atomic_int_set (&hx_tls_test_auto_accept_ov, tri);
+}
+
+void
+hx_tls_test_set_force_tls (int tri)
+{
+    g_atomic_int_set (&hx_tls_test_force_tls_ov, tri);
+}
+
+void
+hx_tls_test_set_prompt_verdict (int verdict)
+{
+    g_atomic_int_set (&hx_tls_test_prompt_ov, verdict);
+}
+
+void
+hx_tls_test_set_known_hosts (const char *path)
+{
+    g_mutex_lock (&hx_tls_test_known_hosts_mutex);
+    g_free (hx_tls_test_known_hosts_ov);
+    hx_tls_test_known_hosts_ov = path ? g_strdup (path) : NULL;
+    g_mutex_unlock (&hx_tls_test_known_hosts_mutex);
+}
+
+gboolean
+hx_tls_test_auto_accept (void)
+{
+    gint o = g_atomic_int_get (&hx_tls_test_auto_accept_ov);
+    if (o >= 0) {
+        return o != 0;
+    }
+    const char *e = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
+    return e && *e;
+}
+
+gboolean
+hx_tls_test_force_tls (void)
+{
+    gint o = g_atomic_int_get (&hx_tls_test_force_tls_ov);
+    if (o >= 0) {
+        return o != 0;
+    }
+    const char *e = g_getenv ("GTKHX_TLS");
+    return e && *e;
+}
+
+int
+hx_tls_test_prompt_verdict (void)
+{
+    gint o = g_atomic_int_get (&hx_tls_test_prompt_ov);
+    if (o != 0) {
+        return o; /* 1 accept, 2 reject */
+    }
+    const char *e = g_getenv ("GTKHX_TLS_TEST_PROMPT");
+    if (e && g_ascii_strcasecmp (e, "accept") == 0) {
+        return 1;
+    }
+    if (e && g_ascii_strcasecmp (e, "reject") == 0) {
+        return 2;
+    }
+    return 0;
+}
+
+/* Returns a g_strdup copy of the known-hosts path override, or NULL if
+ * unset. Caller frees. */
+static char *
+hx_tls_test_known_hosts_override (void)
+{
+    g_mutex_lock (&hx_tls_test_known_hosts_mutex);
+    char *p = hx_tls_test_known_hosts_ov
+                  ? g_strdup (hx_tls_test_known_hosts_ov)
+                  : NULL;
+    g_mutex_unlock (&hx_tls_test_known_hosts_mutex);
+    return p;
+}
+
 /* ---- Fingerprint compute --------------------------------------- */
 
 gchar *
@@ -91,6 +181,14 @@ hx_tls_trust_known_hosts_path (void)
      * (we don't reuse that one because it would also pull in
      * bookmarks / gtkhxrc which the tls_trust tests don't care
      * about). */
+    /* Thread-safe test override wins over the env var (see the
+     * test-seam note in tls_trust.h): the multi-threaded Tier 3
+     * tests set it instead of g_setenv to avoid the environ race. */
+    char *ov = hx_tls_test_known_hosts_override ();
+    if (ov) {
+        return ov; /* already a g_strdup copy */
+    }
+
     const char *env = g_getenv ("GTKHX_KNOWN_HOSTS");
     if (env && *env) {
         return g_strdup (env);
