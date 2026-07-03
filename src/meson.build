@@ -112,7 +112,8 @@ gtkhx_sources = files(
   'uniquify_path.c',
   'usermod.c',
   'users.c',
-  'users_row.c',
+  # users_row.c ported to Rust (gtkhx-ui `user_row`, Phase R5.8); its
+  # hx_user_row_* C ABI now resolves against the crate.
   'users_view.c',
   'xfers.c',
   'xtext.c',

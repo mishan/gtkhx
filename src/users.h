@@ -19,6 +19,11 @@ extern GdkRGBA gdk_user_colors[4];
  * (hard-coding black would be invisible on dark themes). */
 extern GdkRGBA *user_color_gdk (guint16 color);
 
+/* user->uid, or 0 if NULL. A tiny accessor so the Rust HxUserRow
+ * (rust/crates/gtkhx-ui/src/user_row.rs) reads the uid without pinning
+ * the struct hx_user field layout on its side. */
+extern guint16 hx_user_uid (const struct hx_user *user);
+
 /* Colored-Nicknames preference. Prefers user->nick_color
  * (RGB) when set, else falls back to user_color_gdk's status palette
  * (Admin/Guest/Away). `status` is the user's 2-bit status field

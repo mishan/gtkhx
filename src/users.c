@@ -1000,6 +1000,12 @@ user_color_gdk (guint16 color)
  * invisible on dark themes). The renderer treats NULL as
  * "use theme default", so call sites can pass the result
  * through unconditionally. */
+guint16
+hx_user_uid (const struct hx_user *user)
+{
+    return user ? user->uid : 0;
+}
+
 GdkRGBA *
 user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
 {
