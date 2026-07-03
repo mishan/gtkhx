@@ -83,7 +83,13 @@
 #include "gtkhx_session.h"     /* GtkhxConnectionState */
 #include "hxnet_bridge.h"      /* hx_bridge_is_installed */
 #include "server_matrix.h"     /* hx_test_servers_with — cap-aware server pick */
-#include "tls_trust.h"         /* hx_tls_trust_pin (TLS mismatch-reject test) */
+#include "tls_trust.h"         /* hx_tls_trust_pin + the thread-safe TLS
+                                * test seams (hx_tls_test_set_*): the TLS
+                                * subtests steer trust/connect behaviour
+                                * through these instead of g_setenv, because
+                                * the verify callback reads the config on the
+                                * hxnet worker thread and g_setenv racing
+                                * g_getenv on `environ` is a SIGSEGV. */
 
 /* From connect_test_stubs.c. */
 extern void connect_test_init_fd_table (void);
@@ -241,7 +247,8 @@ test_orchestrator_login (void)
     g_assert_cmpint (port, <=, 65535);
 
     /* Force the orchestrator path on; force the post-HOPE hxnet
-     * opt-out env var clear so neither interferes with the gate. */    g_unsetenv ("GTKHX_TLS");
+     * opt-out (force TLS off via the thread-safe test seam, not g_setenv)
+     * so neither interferes with the gate. */    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -335,7 +342,7 @@ test_orchestrator_capabilities_negotiated (void)
             "container or set GTKHX_TEST_SERVERS=janus.");
         return;
     }
-    g_unsetenv ("GTKHX_TLS");
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -398,7 +405,7 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
             required_cap, cipheralg);
         return;
     }
-    g_unsetenv ("GTKHX_TLS");
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     g_strlcpy (test_htlc.cipheralg, cipheralg, sizeof (test_htlc.cipheralg));
@@ -475,7 +482,7 @@ test_orchestrator_hope_no_cipher (void)
             "set GTKHX_TEST_SERVERS=mhxd.");
         return;
     }
-    g_unsetenv ("GTKHX_TLS");
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     /* cipheralg intentionally left empty — secure auth, no cipher. */
@@ -553,9 +560,9 @@ test_orchestrator_tls_login (void)
     g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-tofu-XXXXXX", NULL);
     g_assert_nonnull (tmpdir);
     g_autofree char *known_hosts = g_build_filename (tmpdir, "known_hosts", NULL);
-    g_setenv ("GTKHX_KNOWN_HOSTS", known_hosts, TRUE);
-    g_setenv ("GTKHX_TLS_AUTO_ACCEPT", "1", TRUE);
-    g_unsetenv ("GTKHX_TLS");
+    hx_tls_test_set_known_hosts (known_hosts);
+    hx_tls_test_set_auto_accept (1);
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -602,7 +609,7 @@ test_orchestrator_tls_login (void)
      * headless binary, so if the TRUSTED lookup failed and the prompt
      * fired, the test would crash.) This is the end-to-end proof that
      * the orchestrator honours a pinned cert. */
-    g_unsetenv ("GTKHX_TLS_AUTO_ACCEPT");
+    hx_tls_test_set_auto_accept (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_observer *obs2 = observer_new (gtkhx,
@@ -617,7 +624,7 @@ test_orchestrator_tls_login (void)
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
     g_assert_false (hx_bridge_is_installed ());
-    g_unsetenv ("GTKHX_KNOWN_HOSTS");
+    hx_tls_test_set_known_hosts (NULL);
     g_unlink (known_hosts);
     g_rmdir (tmpdir);
     g_ptr_array_unref (cand);
@@ -625,7 +632,7 @@ test_orchestrator_tls_login (void)
 
 /* TLS TOFU reject path on the orchestrator: pin a bogus fingerprint so
  * the real cert resolves MISMATCH, and drive the prompt verdict to
- * "reject" via the GTKHX_TLS_TEST_PROMPT seam. The orchestrator's
+ * "reject" via the prompt-verdict test seam. The orchestrator's
  * verify_cert bridge must reject the cert, the lifecycle must close the
  * stream before any LOGIN, and the connection must surface as
  * DISCONNECTED — never HANDSHAKE_DONE. (Migrated from the legacy
@@ -663,7 +670,7 @@ test_orchestrator_tls_mismatch_rejected (void)
     g_autofree char *known_hosts =
         g_build_filename (tmpdir, "known_hosts", NULL);
     (void) g_unlink (known_hosts);
-    g_setenv ("GTKHX_KNOWN_HOSTS", known_hosts, TRUE);
+    hx_tls_test_set_known_hosts (known_hosts);
     const char *bogus =
         "sha256:00112233445566778899aabbccddeeff"
         "00112233445566778899aabbccddeeff";
@@ -674,9 +681,9 @@ test_orchestrator_tls_mismatch_rejected (void)
 
     /* Drive the prompt verdict to reject; AUTO_ACCEPT off so the seam
      * (not an auto-accept) decides. */
-    g_unsetenv ("GTKHX_TLS_AUTO_ACCEPT");
-    g_setenv ("GTKHX_TLS_TEST_PROMPT", "reject", TRUE);
-    g_unsetenv ("GTKHX_TLS");
+    hx_tls_test_set_auto_accept (0);
+    hx_tls_test_set_prompt_verdict (2);
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -697,8 +704,8 @@ test_orchestrator_tls_mismatch_rejected (void)
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_unsetenv ("GTKHX_TLS_TEST_PROMPT");
-    g_unsetenv ("GTKHX_KNOWN_HOSTS");
+    hx_tls_test_set_prompt_verdict (0);
+    hx_tls_test_set_known_hosts (NULL);
     g_unlink (known_hosts);
     g_rmdir (tmpdir);
     g_ptr_array_unref (cand);
@@ -714,7 +721,7 @@ test_orchestrator_tls_mismatch_rejected (void)
  * unbound, so the connect is refused. */
 static void
 test_orchestrator_connect_refused (void)
-{    g_unsetenv ("GTKHX_TLS");
+{    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
 
@@ -744,7 +751,7 @@ test_orchestrator_connect_refused (void)
  * connect). */
 static void
 test_hope_tls_rejected (void)
-{    g_unsetenv ("GTKHX_TLS");
+{    hx_tls_test_set_force_tls (0);
     memset (&test_htlc, 0, sizeof (test_htlc));
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
     g_assert_false (hx_bridge_is_installed ());
@@ -757,7 +764,7 @@ test_hope_tls_rejected (void)
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
     /* Same via the GTKHX_TLS env override (bookmarks/power-user path). */
-    g_setenv ("GTKHX_TLS", "1", TRUE);
+    hx_tls_test_set_force_tls (1);
     memset (&test_htlc, 0, sizeof (test_htlc));
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
     hx_connect (&test_htlc, "127.0.0.1", 5500, "guest", "",
@@ -765,7 +772,7 @@ test_hope_tls_rejected (void)
     g_assert_false (hx_bridge_is_installed ());
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
-    g_unsetenv ("GTKHX_TLS");}
+    hx_tls_test_set_force_tls (0);}
 
 int
 main (int argc, char *argv[])

@@ -720,8 +720,7 @@ tls_trust_decide (const char *host, guint16 port, const char *fingerprint)
     /* Headless / scripted escape hatch. Tier 3 sets this; production
      * never does. MISMATCH is logged loudly so a silent override
      * can't hide a real fingerprint change. */
-    const char *auto_accept = g_getenv ("GTKHX_TLS_AUTO_ACCEPT");
-    if (auto_accept && *auto_accept) {
+    if (hx_tls_test_auto_accept ()) {
         if (status == HX_TLS_TRUST_MISMATCH) {
             g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS MISMATCH for "
                        "%s:%u (fp=%s) — the pinned fingerprint differs from "
@@ -745,22 +744,16 @@ tls_trust_decide (const char *host, guint16 port, const char *fingerprint)
      * fall through to the real prompt — never an implicit reject that
      * silently bypasses the dialog. */
     gboolean accepted;
-    const char *test_prompt = g_getenv ("GTKHX_TLS_TEST_PROMPT");
-    gboolean test_accept
-        = test_prompt && g_ascii_strcasecmp (test_prompt, "accept") == 0;
-    gboolean test_reject
-        = test_prompt && g_ascii_strcasecmp (test_prompt, "reject") == 0;
-    if (test_accept || test_reject) {
-        accepted = test_accept;
-        debug_log ("tls", "trust-decide: GTKHX_TLS_TEST_PROMPT=%s -> %s",
-                   test_prompt, accepted ? "accept" : "reject");
+    /* Test prompt seam (thread-safe override, else the GTKHX_TLS_TEST_PROMPT
+     * env token) substitutes the human's dialog click so headless Tier 3
+     * can drive BOTH outcomes — including reject, which auto-accept can't.
+     * 0 = no seam -> show the real prompt; 1 = accept; 2 = reject. */
+    int verdict = hx_tls_test_prompt_verdict ();
+    if (verdict != 0) {
+        accepted = (verdict == 1);
+        debug_log ("tls", "trust-decide: test prompt seam -> %s",
+                   accepted ? "accept" : "reject");
     } else {
-        if (test_prompt && *test_prompt) {
-            debug_log ("tls",
-                       "trust-decide: ignoring GTKHX_TLS_TEST_PROMPT=%s "
-                       "(expected accept|reject) — using the real prompt",
-                       test_prompt);
-        }
         /* Real user-facing TOFU prompt, marshalled to the main thread. */
         GtkWindow *parent = NULL;
         if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
@@ -1012,8 +1005,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
      * this rejected request would complete later and surface
      * unexpectedly. */
     {
-        const char *tls_env = g_getenv ("GTKHX_TLS");
-        gboolean want_tls = tls || (tls_env && *tls_env);
+        gboolean want_tls = tls || hx_tls_test_force_tls ();
         if (secure && want_tls) {
             if (current_cancel) {
                 g_cancellable_cancel (current_cancel);
@@ -1036,8 +1028,7 @@ hx_connect (struct htlc_conn *htlc, const char *serverstr, guint16 port,
      * a non-cipher_only server, HMAC authentication over a plaintext
      * transport. HOPE-over-TLS is rejected above. The GTKHX_TLS env
      * override folds into want_tls. */
-    const char *tls_env = g_getenv ("GTKHX_TLS");
-    gboolean want_tls = tls || (tls_env && *tls_env);
+    gboolean want_tls = tls || hx_tls_test_force_tls ();
     if (want_tls && !secure) {
         /* Plaintext LOGIN over TLS-from-byte-zero. */
         hx_connect_via_orchestrator (htlc, serverstr, port, login, pass,
