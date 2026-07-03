@@ -1219,6 +1219,123 @@ pref_apply (struct cfgvar *v)
     prefs_write ();
 }
 
+/* ---- Rust settings-form bridge (Phase R5) ------------------------
+ *
+ * The settings *form* is moving to Rust (gtkhx-ui options.rs); the
+ * cfgvar registry, the changed_* apply hooks, and the on-disk
+ * persistence (prefs_write) stay here. These typed by-name accessors
+ * (an extension of the existing gtkhx_prefs_set_bool family) let the
+ * Rust rows read a pref's current value and write a new one — a write
+ * also fires the cfgvar's changefunc + persists, exactly like the C
+ * rows (on_switch_row_active / on_entry_row_text / …) did, so the apply
+ * semantics can't drift. BOOLEAN writes reuse gtkhx_prefs_set_bool
+ * (below). STRING writes honour the `allocated` bit; both string types
+ * short-circuit an unchanged value (matching the C handlers, which skip
+ * redundant changefunc runs / wire packets). */
+int
+gtkhx_prefs_type (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    return v ? (int) v->type : 0;
+}
+
+int
+gtkhx_prefs_get_bool (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v || v->type != BOOLEAN) {
+        return 0;
+    }
+    return *v->variable.uchar ? 1 : 0;
+}
+
+int
+gtkhx_prefs_get_int (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v) {
+        return 0;
+    }
+    switch (v->type) {
+    case INT:
+        return *v->variable.integer;
+    case UINT16:
+        return (int) *v->variable.uint16;
+    case TIME_T:
+        return (int) *v->variable.timet;
+    default:
+        return 0;
+    }
+}
+
+void
+gtkhx_prefs_set_int (const char *name, int val)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v) {
+        return;
+    }
+    switch (v->type) {
+    case INT:
+        *v->variable.integer = val;
+        break;
+    case UINT16:
+        *v->variable.uint16 = (guint16) val;
+        break;
+    case TIME_T:
+        *v->variable.timet = (time_t) val;
+        break;
+    default:
+        return;
+    }
+    pref_apply (v);
+}
+
+/* Returns a g_malloc'd copy (caller frees with g_free); never NULL. */
+char *
+gtkhx_prefs_get_string (const char *name)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v) {
+        return g_strdup ("");
+    }
+    if (v->type == STRING) {
+        return g_strdup (*v->variable.str ? *v->variable.str : "");
+    }
+    if (v->type == STRING32) {
+        return g_strndup (v->variable.str32, 31);
+    }
+    return g_strdup ("");
+}
+
+void
+gtkhx_prefs_set_string (const char *name, const char *val)
+{
+    struct cfgvar *v = cfgvar_for_name (name);
+    if (!v || !val) {
+        return;
+    }
+    if (v->type == STRING) {
+        if (*v->variable.str && strcmp (*v->variable.str, val) == 0) {
+            return;
+        }
+        if (v->allocated) {
+            g_free (*v->variable.str);
+        }
+        *v->variable.str = g_strdup (val);
+        v->allocated = 1;
+    } else if (v->type == STRING32) {
+        if (strncmp (v->variable.str32, val, 31) == 0) {
+            return;
+        }
+        strncpy (v->variable.str32, val, 31);
+        v->variable.str32[31] = '\0';
+    } else {
+        return;
+    }
+    pref_apply (v);
+}
+
 static void
 on_switch_row_active (AdwSwitchRow *row, GParamSpec *pspec, gpointer data)
 {
