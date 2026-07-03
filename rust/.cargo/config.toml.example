@@ -1,0 +1,33 @@
+# Local, opt-in cargo config for faster builds.
+#
+# Copy this file to `rust/.cargo/config.toml` (which is gitignored) to enable
+# it. It is deliberately NOT committed as the active config: forcing a
+# particular linker would add a hard build dependency, which we avoid so the
+# documented `apt install rustc cargo && meson build` flow keeps working on
+# Debian stable (see ../rust-toolchain.toml for the native-build story). CI
+# opts into mold on its own (see .github/workflows/tests.yml); this file is
+# purely for local developer convenience.
+#
+# The single biggest local win for this dependency graph is the linker. With
+# ~300 crates plus gtk-rs/gstreamer-rs/glycin, *link* time dominates the
+# incremental edit-build loop. mold (or lld) is dramatically faster than the
+# default bfd/gold linker.
+#
+# Prereqs:
+#   Fedora:        sudo dnf install mold
+#   Debian/Ubuntu: sudo apt install mold        (trixie / 24.04+)
+#   Arch:          sudo pacman -S mold
+#
+# Then uncomment the block for your platform.
+
+# --- mold (recommended) ------------------------------------------------------
+# [target.x86_64-unknown-linux-gnu]
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# [target.aarch64-unknown-linux-gnu]
+# rustflags = ["-C", "link-arg=-fuse-ld=mold"]
+
+# --- lld (alternative, if you prefer LLVM's linker) --------------------------
+# Requires `lld` installed (dnf/apt install lld).
+# [target.x86_64-unknown-linux-gnu]
+# rustflags = ["-C", "link-arg=-fuse-ld=lld"]

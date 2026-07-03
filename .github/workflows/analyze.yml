@@ -50,6 +50,12 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: fedora:43
+    # Link the Rust staticlibs + the (sanitized) C binary with mold. The
+    # cargo build meson drives is a plain release build (sanitizer flags
+    # don't reach cargo), so the linker swap is a safe, pure speedup.
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      CC_LD: mold
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -80,6 +86,7 @@ jobs:
             desktop-file-utils appstream \
             libpanel-devel \
             libseccomp-devel lcms2-devel \
+            mold \
             git rust cargo
 
       - name: meson setup (sanitizers)
@@ -94,6 +101,15 @@ jobs:
             -Db_sanitize=address,undefined \
             -Db_lundef=false \
             -Dbuildtype=debug
+
+      - name: cache rust build
+        # After meson setup (which won't configure a non-empty build dir)
+        # and before compile. Warm cache skips recompiling the dependency
+        # graph. The cargo build is plain release, identical to the other
+        # jobs' — but keyed to this build dir, so it's a separate entry.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> ${{ github.workspace }}/build-asan/rust-target"
 
       - name: meson compile
         run: meson compile -C build-asan
@@ -131,6 +147,9 @@ jobs:
     container:
       image: fedora:43
     continue-on-error: true
+    env:
+      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
+      CC_LD: mold
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -154,6 +173,7 @@ jobs:
             desktop-file-utils appstream \
             libpanel-devel \
             libseccomp-devel lcms2-devel \
+            mold \
             git rust cargo
 
       - name: meson setup (-fanalyzer)
@@ -163,6 +183,12 @@ jobs:
         run: |
           meson setup build-analyzer \
             -Dc_args='-fanalyzer -Wno-analyzer-too-complex'
+
+      - name: cache rust build
+        # After meson setup, before compile — see the sanitize job.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> ${{ github.workspace }}/build-analyzer/rust-target"
 
       - name: compile + capture warnings
         # Tee the full output for the artifact, and produce a

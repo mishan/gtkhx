@@ -78,3 +78,24 @@ gstreamer-rtp = "0.24"
 # future and runs cleanly on the GLib executor.
 tokio = { version = "1.40", default-features = false }
 async-channel = "2.3"
+
+# --- Compile-speed profile tuning --------------------------------------------
+# These settings change neither the wire format nor any runtime behavior — they
+# only trade a little debuginfo fidelity for faster codegen + link, which is
+# what actually hurts on low-power dev machines and cold CI runs. The gtk-rs +
+# gstreamer-rs + glycin dependency graph carries an enormous amount of DWARF;
+# generating and then linking full debuginfo for ~300 crates dominates every
+# incremental rebuild.
+#
+# `debug = "line-tables-only"` keeps file:line in panic/backtrace output (so
+# test failures and `RUST_BACKTRACE=1` stay useful) while dropping the variable-
+# level DWARF that costs the most to emit and link. Overflow checks and
+# `debug_assert!` are untouched (still on in dev/test), so assertion + overflow
+# coverage in `cargo test` is unchanged.
+[profile.dev]
+debug = "line-tables-only"
+
+# `cargo test` compiles the workspace in the dev profile too; keep the same
+# reduced-debuginfo win for the test harness build.
+[profile.test]
+debug = "line-tables-only"
