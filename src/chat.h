@@ -97,7 +97,14 @@ extern void chat_log_line_handler (GtkhxSession *emitter,
                                    gpointer body, gpointer user_data);
 extern void generate_colors (GtkWidget *widget);
 extern void create_chat (session *sess);
+/* create_chat_window is the gtkhx-ui `chat` Rust shell (dock registration via
+ * dock_bridge, CENTER area); these are its C content-build + post-embed hooks,
+ * mirroring users_bridge.c / news_browser.c. build_content builds the public
+ * chat + the AdwTabView hosting the pchat/PM tabs and returns the content box;
+ * after_embed carries the session onto the panel + focuses the input. */
 extern void create_chat_window (GtkWidget *toolbar_window, gpointer data);
+extern GtkWidget *gtkhx_chat_build_content (session *sess);
+extern void gtkhx_chat_after_embed (session *sess);
 extern struct gtkhx_chat *pchat_new (session *sess, struct chat *chat);
 extern void output_chat_subject (struct htlc_conn *htlc, guint32 cid,
                                  char *buf);
