@@ -577,6 +577,53 @@ in practice. What did matter:
   Root cause and the deterministic fix are server-side — see the Janus
   renegotiation bug note (server must send `mid:user-<newUID>` recvonly
   sections instead of bundling onto `mid:send`).
+- **RESOLVED server-side (spec + Janus update, July 2026).** fogWraith
+  fixed both the spec (Capabilities-Voice.md commit "Clarify direction
+  attributes…") and Janus. Every participant — including the first
+  joiner — now gets a dedicated per-user `a=mid:user-<uid>` section, so
+  there is no bundled `mid=send` receive leg and the race is gone: audio
+  and VAD both resolve from the mid, reliably, in both directions. The
+  bundled-leg cname fallback above is now dead code against a current
+  server; it's kept only for older/non-compliant ones. Two client-facing
+  changes the update requires (both landed):
+  - **Leave = `a=inactive`, not `port=0`.** A departed participant's
+    section keeps its `mid` but flips to `a=inactive` (port stays 9).
+    webrtcbin fires NO `pad-removed` on that transition, so the state
+    machine parses `a=inactive` out of the offer and emits
+    `StopReceivePipeline{mid}`; the runtime tears down every receive bin
+    for that mid (`mid_from_recv_bin_name`). Without this the departed
+    bin leaks and a rejoin (fresh SSRC ⇒ new pad on the reactivated mid)
+    piles up a duplicate. The `m=audio 0` (`has_disabled_slot`) detector
+    is now vestigial — the current server never uses port 0.
+  - **Stable mids + back-to-back renegotiation.** A `mid` is never
+    reassigned (`user-<uid>` always = that uid), and the server may send
+    a consolidated follow-up offer right after our answer; the state
+    machine's existing `queued_offer` serialisation + the Connecting/
+    Connected offer arms handle consecutive offer/answer cycles.
+  Guarded by hxvoice unit tests
+  (`inactive_user_section_emits_stop_receive_pipeline`,
+  `active_only_offer_emits_no_stop_receive_pipeline`) and the live-Janus
+  media Tier 3 suite.
+
+- **STILL OPEN — residual server-side (Pion) race, July 2026.** A
+  separate, flaky failure remains: the *first* joiner intermittently
+  never hears a *second* joiner. Root-caused from the server's Pion log
+  to `SetHandleUndeclaredSSRCWithoutAnswer` — the joiner answers then
+  publishes, and its first mic RTP occasionally reaches the SFU before
+  the SFU has applied the answer, so Pion drops the "undeclared" SSRC,
+  `OnTrack` never fires, and the publisher is never forwarded. The fix is
+  server-side (the one-line Pion `SettingEngine` flag). The client is
+  correct and symmetric; a client publish-delay does NOT close it
+  (webrtcbin emits its send SSRC before any delay we can impose — tried
+  and reverted), and the only client action that works is a full
+  leave+rejoin of the joiner (too disruptive to automate). Because it
+  only reproduces with two *real* GtkHx GUI processes (the VoiceRuntime
+  test harness can't trigger the timing), the repro is scripted:
+  `tools/voice-gui-repro.sh` runs two headless gtkhx under `gtk4-broadwayd`
+  + a virtual mic and asserts the asymmetry; `tools/voice-gui-repro-loop.sh`
+  loops to catch the flake. The `GTKHX_VOICE_AUTOJOIN` /
+  `GTKHX_VOICE_AUTOUNMUTE_MS` env hooks in `voice_panel.c` drive the real
+  Join/unmute path for those scripts (no-op unless set).
 
 Closed gotchas (no longer relevant):
 

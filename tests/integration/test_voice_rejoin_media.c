@@ -17,17 +17,25 @@
  * `VoiceRuntime`s — webrtcbin + ICE/DTLS/SRTP against the live Janus
  * — and asserts on actual RTP flow.
  *
- * Topology under test (the one that breaks):
- *   - A joins the empty room first. Janus negotiates A's single
- *     transceiver as `a=mid:send`, then flips it to `sendrecv` and
- *     BUNDLES every remote's audio onto it (A never gets a per-user
- *     `user-<uid>` recv m-line).
- *   - B joins second and gets a proper per-user recv leg for A.
- *   - B LEAVES and REJOINS. webrtcbin reuses A's send transceiver's
- *     receive pad and spins a fresh pad for B's new SSRC; because the
- *     receive bins are keyed by mid (all "send" for A) and there's no
- *     pad-removed teardown, A's receive path for B does not survive
- *     the rejoin and A stops hearing B.
+ * Scenario: A joins the empty room first, B joins second, then B
+ * LEAVES and REJOINS; the test asserts A keeps receiving B's RTP
+ * across the rejoin.
+ *
+ * Against a spec-compliant server (fogWraith Capabilities-Voice.md as
+ * of the direction/mid-stability clarification) every participant —
+ * including the first joiner — gets a dedicated per-user
+ * `a=mid:user-<uid>` receive section; on leave that section flips to
+ * `a=inactive` (port stays 9) and on rejoin it reactivates to
+ * `a=sendonly`. The client tears the receive leg down on `a=inactive`
+ * (webrtcbin fires no pad-removed there) and rebuilds it on
+ * reactivation, so the rejoin is clean and A never stops hearing B.
+ *
+ * Historical note: the pre-fix Janus instead bundled every remote onto
+ * the first joiner's single `mid=send` transceiver (flipped to
+ * sendrecv), whose receive pad-add was a webrtcbin race — that's the
+ * bug this test was originally written to reproduce. The receive bins
+ * are still keyed by webrtcbin pad name (and torn down on pad-removed)
+ * to stay correct against such servers.
  *
  * Signal: `gtkhx_voice_runtime_rtp_buffers_received(A.rt)` — the
  * count of RTP buffers A has received off its receive bin(s). It
@@ -713,11 +721,14 @@ out:
 /*                                                                     */
 /* Both clients send a real tone (GTKHX_VOICE_TEST_AUDIO_SRC=sine), so */
 /* each receiver's `level` VAD should clear the speaking threshold and */
-/* fire SpeakerChanged for the sender's uid. The interesting case is   */
-/* A: as the lone first joiner it receives B under the bundled         */
-/* `mid=send`, which carries no uid — so attributing B's speech        */
-/* depends on the RTCP cname (`voice-<uid>`) fallback in the runtime.  */
-/* B's per-user `user-<uid>` mid is the control that already works.    */
+/* fire SpeakerChanged for the sender's uid — asserted BOTH ways.      */
+/*                                                                     */
+/* Against a spec-compliant server (per-user `mid:user-<uid>` sections */
+/* for everyone, including the first joiner) both directions resolve   */
+/* the speaker straight from the mid — reliably. The runtime still     */
+/* keeps a bundled `mid=send` RTCP-cname fallback for older servers    */
+/* that collapse the first joiner's receive onto its send transceiver, */
+/* but a current server never exercises it.                            */
 /* ------------------------------------------------------------------ */
 
 typedef enum {
@@ -852,8 +863,10 @@ test_voice_vad_speaker (void)
         g_test_fail_printf ("%s", d.failmsg);
     } else {
         g_test_message (
-            "VAD: A attributed B(uid=%u) speaking (bundled mid=send via "
-            "cname), B attributed A(uid=%u) speaking (per-user mid).",
+            "VAD: A attributed B(uid=%u) and B attributed A(uid=%u) "
+            "speaking. Against a spec-compliant server both resolve via "
+            "the per-user mid:user-<uid> leg; the bundled mid=send cname "
+            "fallback remains only for older/non-compliant servers.",
             (unsigned) B.htlc.uid, (unsigned) A.htlc.uid);
     }
 
