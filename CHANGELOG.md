@@ -1,3 +1,12 @@
+## 1.2.2-dev
+
+- Voice
+  - Voice activity detection for self
+  - Sounds for join / leave events
+  - Update to follow latest version of the voice chat spec
+- Code Modernization
+  - Parts of GtkHx's UI are now written in Rust
+
 ## 1.2.1
 
 - User Interface
@@ -16,6 +25,7 @@
   - Emoji shortcode support with typeahead completion
   - Agreement text is now rendered in a monospace font
   - Cleaner Settings dialog
+  - Voice activity detection
 - Code Modernization
   - GtkHx's networking code is now in Rust
   - Address GTK+ 4 deprecations
