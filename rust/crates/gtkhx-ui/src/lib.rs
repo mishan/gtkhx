@@ -57,6 +57,10 @@ pub mod news;
 // registration via dock_bridge; the browser content + fetch/RPC stay C in
 // news_browser.c. create_news_browser_window is this module's export.
 pub mod news_browser;
+// R5.13: the Chat window shell (public chat, CENTER; hosts the pchat/PM tabs).
+// Dock registration via dock_bridge; chat content + xtext + wire senders stay
+// C in chat.c. create_chat_window is this module's #[no_mangle] export.
+pub mod chat;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

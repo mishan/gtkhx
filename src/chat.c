@@ -2443,27 +2443,36 @@ change_subject (GtkWidget *widget, gpointer data)
                        (char *)subject);
 }
 
-void
-create_chat_window (GtkWidget *parent_window, gpointer data)
+/* If the dock embed fails (the should-never-happen "toolbar dock not built
+ * yet"), the Rust shell has dock_bridge destroy this content. The public-chat
+ * gchat is persistent (session-owned), so clear its pointers into the now-dead
+ * widget tree here so nothing dereferences freed widgets afterwards. Also runs
+ * harmlessly at app teardown when the panel's content is destroyed. */
+static void
+chat_content_destroyed (GtkWidget *w, gpointer user_data)
+{
+    struct gtkhx_chat *gchat = user_data;
+    (void)w;
+    gchat->window           = NULL;
+    gchat->input            = NULL;
+    gchat->subject          = NULL;
+    gchat->media_attach_btn = NULL;
+}
+
+/* Content build for the Rust Chat window shell (gtkhx-ui `chat`). The dock
+ * registration moved to Rust via dock_bridge; this builds the public-chat
+ * content + the AdwTabView that hosts the per-conversation (private chat /
+ * private message) tabs, and returns the panel content box. The pchat/PM
+ * tabs, xtext output, and wire senders all stay C. */
+GtkWidget *
+gtkhx_chat_build_content (session *sess)
 {
     GtkWidget *hbox;
     GtkWidget *outputframe, *inputframe, *subj_frame;
     GtkWidget *vbox, *subj_hbox;
     struct gtkhx_chat *gchat;
-    HxPanel *panel;
-    session *sess = data;
 
-    (void)parent_window;  /* vestigial — see users.c */
-
-    /* public chat is a permanent
-     * resident of the toolbar's center PanelGrid. First call
-     * builds and inserts; later calls raise. */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_CHAT);
-    if (panel != NULL) {
-        hx_panel_ensure_attached (panel);
-        panel_widget_raise (PANEL_WIDGET (panel));
-        return;
-    }
+    g_return_val_if_fail (sess != NULL, NULL);
 
     gchat = gchat_with_cid (sess, 0);
     /* gchats_init seeds cid=0 (public chat) on session bring-up;
@@ -2472,8 +2481,8 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
      * Bail loudly on the invariant break — we can't build a chat
      * panel without a backing gtkhx_chat struct. */
     if (!gchat) {
-        g_warning ("create_chat_window: no public-chat gchat — skipping");
-        return;
+        g_warning ("gtkhx_chat_build_content: no public-chat gchat — skipping");
+        return NULL;
     }
 
     vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
@@ -2625,42 +2634,41 @@ create_chat_window (GtkWidget *parent_window, gpointer data)
         gtk_box_append (GTK_BOX (panel_box), GTK_WIDGET (tab_bar));
         gtk_box_append (GTK_BOX (panel_box), tab_view);
 
-        panel = hx_panel_new (HX_PANEL_ID_CHAT,
-                              HX_PANEL_KIND_CENTER,
-                              PANEL_AREA_CENTER);
-        panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Chat"));
-        panel_widget_set_icon_name (PANEL_WIDGET (panel),
-                                    "user-available-symbolic");
-        panel_widget_set_child     (PANEL_WIDGET (panel), panel_box);
+        /* notify.c walks back from the public chat to a focusable top-level
+         * via gchat->window — point it at the content box, not the dock
+         * panel (which the Rust shell now owns). window_is_active() checks
+         * GTK_IS_WINDOW(panel_box) → false, so notifications always fire for
+         * public chat, exactly as when this was the panel widget. */
+        gchat->window = panel_box;
+        g_signal_connect (panel_box, "destroy",
+                          G_CALLBACK (chat_content_destroyed), gchat);
+        return panel_box;
+    }
+}
+
+void
+gtkhx_chat_after_embed (session *sess)
+{
+    struct gtkhx_chat *gchat;
+    HxPanel *panel;
+
+    g_return_if_fail (sess != NULL);
+
+    /* Carry the session on the dock panel for the panel-level handlers
+     * (the chat_tabs close dispatcher reads it back). The panel is
+     * available from the registry once dock_bridge embedded us. */
+    panel = hx_panel_registry_lookup (HX_PANEL_ID_CHAT);
+    if (panel != NULL) {
         g_object_set_data (G_OBJECT (panel), "sess", sess);
     }
 
-    if (toolbar_center_frame != NULL) {
-        panel_frame_add (PANEL_FRAME (toolbar_center_frame),
-                         PANEL_WIDGET (panel));
-        hx_panel_set_home_frame (panel, toolbar_center_frame);
-    } else {
-        g_critical ("create_chat_window: toolbar dock not built yet");
-    }
-
-    /* Registry takes the owning ref; do NOT g_object_unref after.
-     * See users.c for the ref-count walk-through — short version:
-     * gtk_widget_set_parent sinks the floating ref instead of adding
-     * a new one, so unrefing here drops the registry's ref and the
-     * next Close-all-pages destroys the panel. */
-    hx_panel_registry_register (panel);
-
     gtkhx_prefs.geo.chat.open = 1;
     gtkhx_prefs.geo.chat.init = 1;
-    gtk_widget_grab_focus (gchat->input);
 
-    /* notify.c walks back from the public chat to a focusable
-     * top-level via gchat->window — point it at the panel widget;
-     * window_is_active() will check GTK_IS_WINDOW (panel) → false
-     * → notifications always fire for public chat. Phase 4 work
-     * can teach window_is_active() to walk up to the GtkRoot and
-     * additionally check that the panel's tab is the visible one. */
-    gchat->window = GTK_WIDGET (panel);
+    gchat = gchat_with_cid (sess, 0);
+    if (gchat != NULL && gchat->input != NULL) {
+        gtk_widget_grab_focus (gchat->input);
+    }
 }
 
 struct gtkhx_chat *
