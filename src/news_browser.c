@@ -1996,6 +1996,31 @@ on_window_close (GtkWindow *window, gpointer user_data)
 
 /* ---------- Window construction ---------- */
 
+/* Teardown when the content box is destroyed. The normal case is app exit;
+ * the important case is a failed dock embed — dock_bridge destroys the content
+ * it was handed, and without this the session-level connection-state handler
+ * would keep firing on_connection_state into a dead browser (a UAF), and the
+ * process singleton the_browser would dangle at a freed widget tree. Disconnect
+ * the handler and drop the singleton. br itself is deliberately NOT freed here:
+ * this runs at the *start* of the content box's destruction, so the child
+ * teardown still to come can run factory callbacks that read br. That leaves br
+ * leaked only on the should-never-happen "toolbar dock not built" embed
+ * failure — an acceptable trade for not risking a destroy-order UAF. */
+static void
+news_browser_content_destroyed (GtkWidget *w, gpointer user_data)
+{
+    gnews_browser *br = user_data;
+    (void)w;
+    if (br->conn_state_handler) {
+        g_signal_handler_disconnect (gtkhx_session_get_default (),
+                                     br->conn_state_handler);
+        br->conn_state_handler = 0;
+    }
+    if (the_browser == br) {
+        the_browser = NULL;
+    }
+}
+
 /* Content build for the Rust News-browser shell (gtkhx-ui `news_browser`).
  * The dock registration moved to Rust via dock_bridge; this builds the whole
  * gnews_browser + its content tree and returns the content box. Unlike the
@@ -2246,6 +2271,11 @@ gtkhx_news_browser_build_content (void)
     /* Initial state: no selection → New Folder + New Category visible
      * (operating at the root); Reply + Delete hidden. */
     sync_action_buttons (br);
+
+    /* Clean up the session handler + singleton if this content is ever
+     * destroyed (embed failure, or app exit) — see the handler above. */
+    g_signal_connect (content_vbox, "destroy",
+                      G_CALLBACK (news_browser_content_destroyed), br);
 
     return content_vbox;
 }
