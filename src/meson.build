@@ -114,6 +114,9 @@ gtkhx_sources = files(
   'users.c',
   # users_row.c ported to Rust (gtkhx-ui `user_row`, Phase R5.8); its
   # hx_user_row_* C ABI now resolves against the crate.
+  # users_cell.c — the custom Name-column cell (HxUserCellName), split out
+  # of users_view.c so the Rust view port (Phase R5.9) can keep it C.
+  'users_cell.c',
   'users_view.c',
   'xfers.c',
   'xtext.c',
