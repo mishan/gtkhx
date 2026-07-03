@@ -19,6 +19,10 @@ mod tr;
 
 pub mod about;
 pub mod agreement;
+pub mod bookmarks;
+pub mod cipher_vocab;
+pub mod connect;
+pub mod rc4_dialog;
 pub mod tracker;
 pub mod useredit;
 

@@ -36,6 +36,18 @@ extern void gtkhx_session_set_agreementwin (struct _session *sess,
 struct htlc_conn;
 extern struct htlc_conn *gtkhx_active_htlc (void);
 
+/* Connect dialog (connect.rs). Set the session's HOPE compress / cipher
+ * algorithm names (NULL or "" clears them) and fire hx_connect. Keeps
+ * the sess->htlc.{compressalg,cipheralg} field pokes in C so the Rust
+ * Connect dialog doesn't mirror the htlc_conn struct. `compress_name` /
+ * `cipher_name` are already-resolved HOPE algorithm names (the Rust
+ * side does the dropdown-index / stable-byte → name translation). */
+extern void gtkhx_connect_apply (struct _session *sess, const char *server,
+                                 guint16 port, const char *login,
+                                 const char *pass, char secure,
+                                 const char *compress_name,
+                                 const char *cipher_name, char tls);
+
 G_END_DECLS
 
 #endif /* HX_GTKHX_UI_BRIDGE_H */

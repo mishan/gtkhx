@@ -4,9 +4,12 @@ gtkhx_sources = files(
   'banner.c',
   'banner_dispatch.c',
   'bookmark_cipher.c',
-  'bookmark_rc4_dialog.c',
-  'bookmarks.c',
+  # bookmark_rc4_dialog.c ported to Rust (gtkhx-ui rc4_dialog.rs).
+  # bookmarks.c (management dialog) ported to Rust (gtkhx-ui bookmarks.rs);
+  # bookmarks.h keeps the C ABI decls. CRUD stays in bookmarks_io.c.
   'bookmarks_io.c',
+  # cipher_vocab.c folded into the Rust gtkhx-ui crate (cipher_vocab.rs) when
+  # the Bookmarks dialog joined the Connect dialog in Rust (R5.3).
   'chat.c',
   'chat_history.c',
   'chat_tabs.c',
@@ -14,7 +17,9 @@ gtkhx_sources = files(
   'gif_avatar.c',
   'gif_icons.c',
   'commands.c',
-  'connect.c',
+  # connect.c ported to Rust (gtkhx-ui connect.rs); connect.h keeps the C ABI
+  # decls. The shared cipher/compress vocab is in the Rust crate too
+  # (cipher_vocab.rs), as is the Bookmarks dialog (bookmarks.rs).
   'debug.c',
   'emoji.c',
   'filelist_walker.c',
