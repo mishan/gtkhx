@@ -113,13 +113,28 @@ extern "C" {
     /// change hook (keeps the Settings switch in lockstep).
     pub fn gtkhx_prefs_set_bool(name: *const c_char, value: c_int);
 
-    // ---- bookmark API (bookmarks.c / bookmark_cipher.c) --------------
+    // ---- bookmark API (bookmarks_io.c / bookmark_cipher.c) -----------
     pub fn hx_bookmark_new() -> *mut HxBookmark;
     pub fn hx_bookmark_free(bm: *mut HxBookmark);
     pub fn hx_bookmark_load(name: *const c_char) -> *mut HxBookmark;
     pub fn hx_bookmark_save(bm: *const HxBookmark, err: *mut *mut GError) -> glib::ffi::gboolean;
     pub fn hx_bookmark_safe_filename(name: *const c_char) -> *mut c_char;
+    /// GList of newly-allocated UTF-8 bookmark filenames, collation-sorted.
+    /// Free with `g_list_free_full(list, g_free)`.
+    pub fn hx_bookmark_list() -> *mut glib::ffi::GList;
+    pub fn hx_bookmark_delete(name: *const c_char, err: *mut *mut GError) -> glib::ffi::gboolean;
+    pub fn hx_bookmark_rename(
+        old_name: *const c_char,
+        new_name: *const c_char,
+        err: *mut *mut GError,
+    ) -> glib::ffi::gboolean;
     pub fn bookmark_cipher_name(byte: u8) -> *const c_char;
+    pub fn bookmark_cipher_byte_from_name(name: *const c_char) -> u8;
+
+    // ---- toolbar (toolbar.c) -----------------------------------------
+    /// Rebuild the toolbar Connect-button dropdown after a bookmark
+    /// create / rename / delete.
+    pub fn toolbar_refresh_bookmarks();
 
     // ---- tracker_bridge.c (new, permanent session/prefs shim) --------
     // Narrow accessors into not-yet-ported global C session/prefs state.
@@ -143,5 +158,7 @@ extern "C" {
 
 /// Stable bookmark cipher-byte vocabulary (`bookmark_cipher.h`).
 pub const BOOKMARK_CIPHER_BYTE_NONE: u8 = 0;
+/// Legacy RC4 slot — never offered, prompts the replacement dialog on load.
+pub const BOOKMARK_CIPHER_BYTE_RC4: u8 = 1;
 pub const BOOKMARK_CIPHER_BYTE_BLOWFISH: u8 = 2;
 pub const BOOKMARK_CIPHER_BYTE_CHACHA20_POLY1305: u8 = 3;

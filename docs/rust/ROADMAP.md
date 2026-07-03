@@ -1058,8 +1058,26 @@ phase reuses:
    `src/gtkhx_ui_bridge.c` is the session shim for the non-tracker windows.
    Net: three windows for +1031/−854 lines (the User Editor's UI grew
    slightly, but usermod.c/gtkhx.c/about.c shrank a lot).
-3. **Connect dialog + bookmark management** (`connect.c`, `bookmarks.c`,
-   `bookmarks_io.c`). Modest size; tests the AdwDialog + GAction patterns.
+3. ✅ **Connect dialog + Bookmarks dialog** (`connect.c` ~1.7k LOC +
+   `bookmarks.c` ~880 LOC) — shipped (R5.3, on `claude/r5-connect-dialog`).
+   `connect.rs` owns the AdwDialog form + all the service functions its C
+   callers link (bookmark SplitButton menu, direct-connect-by-name, builtin
+   bookmarks, reconnect-last cache, `hotline://` URL open/save). `bookmarks.rs`
+   owns the management dialog (the GtkPaned list + AdwPreferencesPage detail
+   form, New / Save / Delete / rename with save-rollback, RC4-migration on
+   select). Both share the cipher / compression picker vocabulary, which lives
+   in the crate-local `cipher_vocab.rs` module now — the earlier interim
+   extraction to a shared C `cipher_vocab.c` (kept so the then-still-C
+   `bookmarks.c` could index the arrays) was folded into Rust once that dialog
+   moved too, so the C `valid_ciphers[]` / `valid_compress()` / dropdown↔byte
+   translators are gone. On-disk bookmark I/O still delegates to the
+   byte-identical `hx_bookmark_*` (`bookmarks_io.c`, GTK-free, Tier-1 tested) —
+   one source of truth for the wire-compatible HTsc format — and the stable
+   cipher byte ↔ name map stays in `bookmark_cipher.c` (Rust calls it via FFI).
+   A `gtkhx_connect_apply` bridge keeps the `sess->htlc.{compressalg,cipheralg}`
+   pokes + `hx_connect` on the C side. The rare legacy pre-HTsc bookmark
+   conversion is re-implemented in Rust (reads the 3-line text file, re-saves
+   via `hx_bookmark_save`).
 4. **Tasks window** (`tasks.c`, `tasks_table.c`). Slightly more state but
    still flat.
 5. **News browser** (`news_browser.c` — the unified Phase 6 UI per memory).

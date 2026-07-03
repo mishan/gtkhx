@@ -11,19 +11,32 @@ decision per window.
 The bulk of the still-C UI — **Chat, Users, News, News browser (1.5), Tasks,
 Files** — are not standalone windows. Each is an `HxPanel` (a subclass of
 libpanel's `PanelWidget`) docked into a `PanelFrame` inside the toolbar
-window's `PanelDock`. gtk4-rs has no libpanel bindings, and libpanel is a
-fast-moving GNOME-Builder library.
+window's `PanelDock`.
 
-**Recommendation:** do **not** bind libpanel in Rust. Keep libpanel + the
-`HxPanel` / dock infrastructure (`hx_panel.c`, `panel_registry.c`,
-`hx_panel_frame.c`, `hx_split.c`, `dock_layout*.c`) in C, and add **one
-small, reusable C "dock-embed" bridge** (`dock_bridge.c`). Each ported
-window builds its *content widget tree* + handlers in Rust and hands the
-content to the bridge, which does the `hx_panel_new` / `panel_frame_add` /
-registry plumbing. This is the same leaf-up shape as `tracker_bridge.c` /
-`gtkhx_ui_bridge.c`, keeps the wire/session boundary where it already is,
-and involves zero throwaway once Files/xfers land (the bridge is permanent
-until the dock itself is someday ported, which is out of scope for R5).
+Rust bindings for libpanel **do** exist — the gtk-rs "World" crate
+[`libpanel`](https://crates.io/crates/libpanel) (`libpanel-sys` +
+`libpanel`). But the current release (0.6.0) is built against
+**gtk4-sys ^0.11**, i.e. the gtk-rs **0.22** generation, while this project
+is pinned to **gtk4 0.10 / glib 0.21 / libadwaita 0.8** (the gtk-rs 0.21
+family, for the Debian-stable floor — see `rust/Cargo.toml`). Two `-sys`
+generations of GTK can't coexist in one binary, so the crate isn't usable
+until we bump the whole gtk-rs stack. So it's a real option, just not a
+*today* option — and it wouldn't remove the bulk of the work anyway (see
+Option B).
+
+**Recommendation:** for now, do **not** pull libpanel into Rust. Keep
+libpanel + the `HxPanel` / dock infrastructure (`hx_panel.c`,
+`panel_registry.c`, `hx_panel_frame.c`, `hx_split.c`, `dock_layout*.c`) in C,
+and add **one small, reusable C "dock-embed" bridge** (`dock_bridge.c`).
+Each ported window builds its *content widget tree* + handlers in Rust and
+hands the content to the bridge, which does the `hx_panel_new` /
+`panel_frame_add` / registry plumbing. This is the same leaf-up shape as
+`tracker_bridge.c` / `gtkhx_ui_bridge.c`, keeps the wire/session boundary
+where it already is, works on the pinned gtk-rs 0.21 stack with no version
+churn, and unblocks the docked-window ports immediately. Adopting
+`libpanel-rs` (Option B) becomes worthwhile later — once the gtk-rs stack is
+bumped to 0.22+ *and* we're ready to port the dock infrastructure itself,
+which is the large part regardless of bindings.
 
 ## Current state
 
@@ -129,18 +142,30 @@ dock::embed(HX_ID_TASKS, KIND_SIDEBAR, AREA_BOTTOM, &tr("Tasks"),
   placement vs sidebar); the dock itself never becomes Rust-native (a
   non-goal for R5).
 
-### B. Bind libpanel + HxPanel in Rust (gir or hand-written)
+### B. Use the `libpanel-rs` crate + port `HxPanel` to a Rust subclass
 
-Generate `libpanel-rs` from libpanel's `.gir` and expose/port `HxPanel` as
-a Rust `glib::subclass` of `PanelWidget`.
+Adopt the gtk-rs "World" [`libpanel`](https://crates.io/crates/libpanel)
+crate and reimplement `HxPanel` as a Rust `glib::subclass` of
+`panel::Widget`, so Rust windows drive the dock directly.
 
-- **Pros:** idiomatic; Rust windows drive the dock directly; no bridge.
-- **Cons:** large, ongoing cost. libpanel has no stable published Rust
-  bindings; we'd own a gir crate pinned to the GNOME version we ship
-  (Flatpak GNOME 49 today), tracking API churn. Subclassing `PanelWidget`
-  from Rust needs the full base-class bindings *and* the subclass vtable
-  plumbing. This is strictly more work than Option A and front-loads it
-  before any window benefit — the wrong order for a leaf-up migration.
+- **Pros:** idiomatic; no C dock bridge; a maintained upstream crate, so we
+  don't hand-write or `gir`-generate bindings ourselves.
+- **Cons / blockers:**
+  - **Version mismatch (today's blocker).** `libpanel` 0.6.0 needs
+    gtk4-sys ^0.11 (gtk-rs 0.22); we're pinned to gtk4 0.10 (gtk-rs 0.21)
+    for the Debian-stable floor. Can't mix two `-sys` generations, so this
+    is gated on bumping the entire gtk-rs stack first.
+  - **It doesn't remove the bulk of the work.** The heavy part isn't
+    `HxPanel` (a thin subclass) — it's `panel_registry.c`,
+    `hx_panel_frame.c`, `hx_split.c`, `dock_layout*.c` and the toolbar's
+    dock construction (several thousand lines wired to libpanel types).
+    Getting a *window's content* into a panel needs almost none of that; a
+    Rust-native dock means porting all of it, on top of the subclass work.
+  - Front-loads a large, stack-wide change before any single window
+    benefits — the wrong order for a leaf-up migration.
+
+  Worth revisiting once the gtk-rs stack is on 0.22+ and porting the dock
+  infrastructure itself is on the table.
 
 ### C. Port the dock infrastructure to Rust first
 
@@ -154,9 +179,9 @@ Rust before the windows.
 
 **Option A.** Add `dock_bridge.{c,h}`; keep libpanel/HxPanel/dock infra in
 C. Ported docked windows build content + handlers in Rust and register
-through the bridge. Revisit a Rust-native dock (Option B) only if/when
-libpanel gains maintained bindings *and* the dock infra is the last C UI
-standing — explicitly out of scope for R5.
+through the bridge. Revisit a Rust-native dock via `libpanel-rs` (Option B)
+only once the gtk-rs stack is bumped to 0.22+ *and* the dock infra is the
+last C UI standing — explicitly out of scope for R5.
 
 ## Application to each window (leaf-up order)
 
