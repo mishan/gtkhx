@@ -490,7 +490,9 @@ msgwin_apply_user_change (struct msgwin *msg, const char *nam, guint16 icon,
     msg_apply_user_view (msg, nam, icon, color, TRUE);
 }
 
-static struct msgwin *
+/* Non-static since the Rust create_msgwin (gtkhx-ui `msg`) calls it to build
+ * the model + leaf widgets before assembling the PM tab layout. */
+struct msgwin *
 create_msg (guint16 _uid, char *name)
 {
     struct msgwin *msg;
@@ -593,132 +595,45 @@ msg_tab_on_close (guint16 uid)
     }
 }
 
-struct msgwin *
-create_msgwin (guint16 uid, char *name)
+/* Widget accessors + setters for the Rust create_msgwin (gtkhx-ui `msg`),
+ * which builds the PM tab layout around the leaf widgets create_msg made.
+ * The leaf widgets (xtext output, scrollbar, input) come out; the assembled
+ * window + the info-pane widgets Rust creates go back in. */
+GtkWidget *
+hx_msgwin_outputbuf (struct msgwin *msg)
 {
-    GtkWidget *hbox;
-    GtkWidget *outputframe, *inputframe;
-    GtkWidget *vpane;
-    GtkWidget *info_box, *outer_vbox;
-    struct msgwin *msg;
-    char *title;
-
-    msg = create_msg (uid, name);
-
-    /* Title moves from gtk_window_set_title to the AdwTabPage's
-     * "title" property after we've added the tab below. */
-    title = g_strdup_printf ("%s (%u)", name, uid);
-
-    /* the window-level layout (default-size,
-     * resizable, margins) is gone — the tab content sits inside the
-     * Chat panel's tab view, which the dock controls. */
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-
-    outputframe = gtk_frame_new (0);
-    gtkhx_widget_set_child (outputframe, hbox);
-    gtkhx_box_pack (hbox, msg->outputbuf, 1, 1, 0);
-    gtkhx_box_pack (hbox, msg->vscroll, 0, 0, 0);
-
-    /* wrap the GtkTextView inputbuf in a scrolled window
-	 * with content-driven natural height (1 line minimum, 5 line
-	 * max). Matches the chat window'"'"'s auto-grow input box. */
-    GtkWidget *input_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (input_scroll),
-                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_widget_set_overflow (input_scroll, GTK_OVERFLOW_VISIBLE);
-    gtk_scrolled_window_set_propagate_natural_height (
-        GTK_SCROLLED_WINDOW (input_scroll), TRUE);
-    gtk_scrolled_window_set_min_content_height (
-        GTK_SCROLLED_WINDOW (input_scroll), 28);
-    gtk_scrolled_window_set_max_content_height (
-        GTK_SCROLLED_WINDOW (input_scroll), 120);
-    gtkhx_widget_set_child (input_scroll, msg->inputbuf);
-
-    /* Wrap the scrolled input in an hbox so the emoji-picker button
-	 * has somewhere to sit alongside it. The chat windows already
-	 * had an hbox here for layout reasons; PM previously didn'"'"'t need
-	 * one because nothing sat next to the input. */
-    GtkWidget *input_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtk_widget_set_hexpand (input_scroll, TRUE);
-    gtk_box_append (GTK_BOX (input_hbox), input_scroll);
-
-    /* Bottom-aligned so the button stays next to the last visible
-	 * line as the input auto-grows. Same convention as chat.c. */
-    GtkWidget *emoji_btn = hx_emoji_button_new (msg->inputbuf);
-    gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
-    gtk_box_append (GTK_BOX (input_hbox), emoji_btn);
-    /* Inline :shortcode: typeahead on the same input (phase E5). */
-    hx_emoji_typeahead_attach (msg->inputbuf);
-
-    inputframe = gtk_frame_new (0);
-    gtkhx_widget_set_child (inputframe, input_hbox);
-
-    /* Drop GtkPaned in favour of a plain vertical box. Output
-	 * vexpand=TRUE eats remaining vertical space; input stays at
-	 * its natural (content-sized, capped) height. */
-    vpane = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_vexpand (outputframe, TRUE);
-    gtk_widget_set_vexpand (inputframe, FALSE);
-    gtk_box_append (GTK_BOX (vpane), outputframe);
-    gtk_box_append (GTK_BOX (vpane), inputframe);
-    (gtk_widget_set_margin_start (vpane, 5),
-     gtk_widget_set_margin_end (vpane, 5), gtk_widget_set_margin_top (vpane, 5),
-     gtk_widget_set_margin_bottom (vpane, 5));
-
-    /* Recipient info pane: small horizontal strip with icon + name +
-	 * status sitting between the headerbar and the chat paned. The
-	 * vbox just below is the new top-level child of the window —
-	 * info pane on top, paned filling the rest. */
-    msg->info_image = gtk_image_new ();
-    gtk_image_set_pixel_size (GTK_IMAGE (msg->info_image), 32);
-    gtk_widget_set_size_request (msg->info_image, 32, 32);
-
-    msg->info_label = gtk_label_new (NULL);
-    gtk_label_set_xalign (GTK_LABEL (msg->info_label), 0.0);
-    gtk_label_set_yalign (GTK_LABEL (msg->info_label), 0.5);
-    gtk_label_set_use_markup (GTK_LABEL (msg->info_label), TRUE);
-    gtk_label_set_ellipsize (GTK_LABEL (msg->info_label), PANGO_ELLIPSIZE_END);
-    gtk_widget_set_hexpand (msg->info_label, TRUE);
-
-    info_box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 10);
-    gtk_widget_set_margin_start (info_box, 10);
-    gtk_widget_set_margin_end (info_box, 10);
-    gtk_widget_set_margin_top (info_box, 6);
-    gtk_widget_set_margin_bottom (info_box, 4);
-    gtk_box_append (GTK_BOX (info_box), msg->info_image);
-    gtk_box_append (GTK_BOX (info_box), msg->info_label);
-
-    outer_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append (GTK_BOX (outer_vbox), info_box);
-    gtk_box_append (GTK_BOX (outer_vbox),
-                    gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
-    gtk_widget_set_vexpand (vpane, TRUE);
-    gtk_box_append (GTK_BOX (outer_vbox), vpane);
-
-    /* msg->window points at the AdwTabPage's
-     * content widget — outer_vbox here. Code paths that key off
-     * msg->window (init_keyaccel, etc.) keep compiling unchanged.
-     * The tab is appended to the Chat panel's tab view; the close-
-     * request handler is replaced by the chat_tabs close
-     * dispatcher (see msg_tab_on_close below). */
-    msg->window = outer_vbox;
-    g_object_set_data (G_OBJECT (msg->window), "msg", msg);
-
-    gtkhx_chat_tabs_add_msg (outer_vbox, uid, title);
-    g_free (title);
-
-    /* Populate from the cached user list now that the widgets exist. */
-    msgwin_refresh_user_info (msg);
-
-    /* Surface the new tab to the user the same way the standalone
-     * window used to present itself: raise the Chat dock panel,
-     * select the new tab. */
-    gtkhx_chat_tabs_raise_msg (uid);
-
-    init_keyaccel (msg->window);
-    gtk_widget_grab_focus (msg->inputbuf);
-
-    return msg;
+    return msg ? msg->outputbuf : NULL;
+}
+GtkWidget *
+hx_msgwin_vscroll (struct msgwin *msg)
+{
+    return msg ? msg->vscroll : NULL;
+}
+GtkWidget *
+hx_msgwin_inputbuf (struct msgwin *msg)
+{
+    return msg ? msg->inputbuf : NULL;
+}
+void
+hx_msgwin_set_window (struct msgwin *msg, GtkWidget *w)
+{
+    if (msg) {
+        msg->window = w;
+    }
+}
+void
+hx_msgwin_set_info_image (struct msgwin *msg, GtkWidget *w)
+{
+    if (msg) {
+        msg->info_image = w;
+    }
+}
+void
+hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w)
+{
+    if (msg) {
+        msg->info_label = w;
+    }
 }
 
 /* Render a private message into its msgwin's xtext, with the

@@ -6,9 +6,19 @@
  * gtkhx.c calls it before the first create_msgwin at startup. */
 extern void msg_windows_init (session *sess);
 
+/* create_msgwin is the gtkhx-ui `msg` Rust shell: it builds the PM tab layout
+ * around the model + leaf widgets create_msg makes, then adds the tab. The
+ * accessors/setters below are the seam it uses (create_msg is C, the layout
+ * assembly is Rust). */
 extern struct msgwin *create_msgwin (guint16 uid, char *name);
+extern struct msgwin *create_msg (guint16 uid, char *name);
+extern GtkWidget *hx_msgwin_outputbuf (struct msgwin *msg);
+extern GtkWidget *hx_msgwin_vscroll (struct msgwin *msg);
+extern GtkWidget *hx_msgwin_inputbuf (struct msgwin *msg);
+extern void hx_msgwin_set_window (struct msgwin *msg, GtkWidget *w);
+extern void hx_msgwin_set_info_image (struct msgwin *msg, GtkWidget *w);
+extern void hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w);
 extern struct msgwin *msgwin_with_uid (guint16 uid);
-extern struct msgwin *create_msgwin (guint16 uid, char *name);
 extern void msg_output (char *name, guint16 uid, char *buf);
 
 /* msg-signal renderer. Same as msg_output but reads from
