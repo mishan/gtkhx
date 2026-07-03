@@ -30,6 +30,14 @@ pub mod rc4_dialog;
 pub mod tls_trust_dialog;
 pub mod tracker;
 pub mod useredit;
+// R5.8: HxUserRow — the users/chat list row model GObject (was
+// users_row.c). Exports the hx_user_row_* C ABI users_view.c links against.
+pub mod user_row;
+// R5.7: the Users window shell (raise + dock registration + lifecycle).
+// The custom view widget + action-button handlers stay C behind
+// users_bridge.c / dock_bridge.c; create_users_window is now this module's
+// #[no_mangle] export.
+pub mod users;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

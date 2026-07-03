@@ -29,9 +29,6 @@
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "gtkhx_theme.h"
-#include "hx_panel.h"
-#include "panel_registry.h"
-#include "toolbar.h"
 #include "hl_access.h"
 #include "cicn.h"
 #include "hotline_proto.h"
@@ -919,180 +916,6 @@ view_chat_btn (GtkWidget *w, gpointer data)
 }
 
 void
-create_users_window (GtkWidget *parent_window, gpointer data)
-{
-    GtkWidget *scroll;
-    GtkWidget *cv_widget;
-    GtkWidget *content_vbox;
-    GtkWidget *button_bar;
-    HxUserListView *view;
-    HxPanel *panel;
-    session *sess = data;
-
-    /* the parent_window argument is
-     * vestigial — we don't reparent the panel to it (it's already
-     * a resident of the toolbar's sidebar frame). Kept on the
-     * signature so the existing gtkhx.c auto-open and toolbar
-     * button call sites compile unchanged. */
-    (void)parent_window;
-
-    /* the standalone Users GtkWindow
-     * is gone. The panel is a permanent resident of the toolbar
-     * window's start-area PanelFrame — first call constructs it
-     * and slots it in; later calls just raise it to focus. */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_USERS);
-    if (panel != NULL) {
-        hx_panel_ensure_attached (panel);
-        panel_widget_raise (PANEL_WIDGET (panel));
-        return;
-    }
-
-    /* HxUserListView wraps a GtkColumnView with a custom
-     * snapshot()-rendered Name cell that gives us the Mac-classic
-     * icon-as-background + name-on-top look. STYLE_USERS picks the
-     * standalone window's chrome: 24-px row height, 1.25× pixel
-     * scale, text outline, 36-px text offset. The view also installs
-     * its own right-click gesture that pops user_popup. */
-    view = hx_user_list_view_new (sess, HX_USER_LIST_STYLE_USERS);
-    cv_widget = hx_user_list_view_get_widget (view);
-
-    if (!users_font_desc) {
-        users_font_desc = pango_font_description_from_string ("Sans 10");
-    }
-    /* Refresh the CSS provider that paints the .gtkhx-userlist
-	 * class so the global font / fg / bg tracking the rest of the
-	 * app does also covers our column-view cells. The view applied
-	 * the class to its column_view widget at construction. */
-    gtkhx_refresh_userlist_css (users_font_desc);
-
-    scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (scroll),
-                                    GTK_POLICY_NEVER, GTK_POLICY_ALWAYS);
-    gtk_widget_set_vexpand (scroll, TRUE);
-    gtkhx_widget_set_child (scroll, cv_widget);
-
-    /* Per-user action buttons. `data' is the HxUserListView itself —
-	 * the view_*_btn handlers read its current single-selection and
-	 * its borrowed session pointer. Same handlers drive the chat.c
-	 * pchat sidebars; see view_msg_btn above for the shape. */
-    msgbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/message.png",
-                                  _ ("Msg"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                  G_CALLBACK (view_msg_btn), view);
-    kickbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
-                                   _ ("Kick"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_kick_btn), view);
-    infobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/info.png",
-                                   _ ("User Info"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_info_btn), view);
-    banbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png",
-                                  _ ("Ban"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                  G_CALLBACK (view_ban_btn), view);
-    chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
-                                   _ ("Private Chat"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_chat_btn), view);
-    ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.png",
-                                   _ ("Ignore"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_igno_btn), view);
-
-    gtk_widget_set_sensitive (msgbtn, FALSE);
-    gtk_widget_set_sensitive (kickbtn, FALSE);
-    gtk_widget_set_sensitive (infobtn, FALSE);
-    gtk_widget_set_sensitive (banbtn, FALSE);
-    gtk_widget_set_sensitive (chatbtn, FALSE);
-    gtk_widget_set_sensitive (ignobtn, FALSE);
-
-    /* the headerbar in the old
-     * standalone Users window held Msg / Chat on the start and Ignore /
-     * Ban / Kick / Info on the end. A PanelWidget's tab strip is too
-     * narrow to host action buttons, so they relocate to a slim
-     * GtkBox at the top of the panel content. Spacing + halign keep
-     * the start / end grouping that the headerbar layout implied. */
-    button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (button_bar,  6);
-    gtk_widget_set_margin_end   (button_bar,  6);
-    gtk_widget_set_margin_top   (button_bar,  6);
-    gtk_widget_set_margin_bottom (button_bar, 4);
-    gtk_box_append (GTK_BOX (button_bar), msgbtn);
-    gtk_box_append (GTK_BOX (button_bar), chatbtn);
-#ifdef HAVE_VOICE
-    /* Public-room (cid 0) voice Join/Leave + Mute icon controls.
-     * The controls live with the user list rather than the chat
-     * window; hidden entirely unless the server echoed
-     * HTLC_CAP_VOICE. Grouped with Msg/Chat on the start side. */
-    gtk_box_append (GTK_BOX (button_bar), voice_panel_new (sess, 0));
-#endif
-    {
-        GtkWidget *spacer = gtk_label_new (NULL);
-        gtk_widget_set_hexpand (spacer, TRUE);
-        gtk_box_append (GTK_BOX (button_bar), spacer);
-    }
-    gtk_box_append (GTK_BOX (button_bar), infobtn);
-    gtk_box_append (GTK_BOX (button_bar), kickbtn);
-    gtk_box_append (GTK_BOX (button_bar), banbtn);
-    gtk_box_append (GTK_BOX (button_bar), ignobtn);
-
-    content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_box_append (GTK_BOX (content_vbox), button_bar);
-    gtk_box_append (GTK_BOX (content_vbox), scroll);
-
-    /* The panel itself. SIDEBAR + PANEL_AREA_END routes it to the
-     * toolbar window's right-side PanelFrame on the (Phase 4)
-     * Redock path and tells the registry how to home it after an
-     * Undock. */
-    panel = hx_panel_new (HX_PANEL_ID_USERS,
-                          HX_PANEL_KIND_SIDEBAR,
-                          PANEL_AREA_END);
-    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Users"));
-    panel_widget_set_icon_name (PANEL_WIDGET (panel),
-                                "system-users-symbolic");
-    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
-
-    /* Side areas auto-collapse when empty (Phase 0 finding #5).
-     * Toggling the side area reveal is the toolbar button's job. */
-    if (toolbar_end_frame != NULL) {
-        panel_frame_add (PANEL_FRAME (toolbar_end_frame),
-                         PANEL_WIDGET (panel));
-        hx_panel_set_home_frame (panel, toolbar_end_frame);
-    } else {
-        g_critical ("create_users_window: toolbar dock not built yet");
-    }
-
-    /* hx_panel_registry_register strong-refs the panel so it
-     * survives a Close-all-pages on its frame: libpanel's close path
-     * destroys the AdwTabPage (which drops both the page->child ref
-     * and the bin's parent-child ref), so the registry's ref is the
-     * only thing keeping the widget alive between close and the
-     * next toolbar-button-driven re-attach.
-     *
-     * Do NOT g_object_unref(panel) after register. hx_panel_new's
-     * initial ref is the GTK4 floating ref, which panel_frame_add
-     * already claimed via gtk_widget_set_parent's g_object_ref_sink
-     * (clears floating, no new ref). Unrefing here drops the
-     * registry's owning ref instead — the table holds the pointer
-     * but no ownership, and the next close destroys the panel out
-     * from under it. */
-    hx_panel_registry_register (panel);
-
-    sess->users_view = view;
-
-    /* Auto-open + size persistence are Phase 4 work (layout
-     * restore). For Phase 2 we just present the panel and trust
-     * libpanel's defaults for sidebar width. */
-    gtkhx_prefs.geo.users.open = 1;
-    gtkhx_prefs.geo.users.init = 1;
-
-    if (connected == 1) {
-        gtk_widget_set_sensitive (msgbtn, TRUE);
-        gtk_widget_set_sensitive (banbtn, TRUE);
-        gtk_widget_set_sensitive (infobtn, TRUE);
-        gtk_widget_set_sensitive (kickbtn, TRUE);
-        gtk_widget_set_sensitive (chatbtn, TRUE);
-        gtk_widget_set_sensitive (ignobtn, TRUE);
-        user_list (sess);
-    }
-}
-
-void
 users_clear (struct htlc_conn *htlc, struct chat *chat)
 {
     session *sess = sess_from_htlc (htlc);
@@ -1177,6 +1000,12 @@ user_color_gdk (guint16 color)
  * invisible on dark themes). The renderer treats NULL as
  * "use theme default", so call sites can pass the result
  * through unconditionally. */
+guint16
+hx_user_uid (const struct hx_user *user)
+{
+    return user ? user->uid : 0;
+}
+
 GdkRGBA *
 user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
 {
