@@ -220,6 +220,15 @@ GPtrArray *gtkhx_theme_list_available (void);
 GPtrArray *gtkhx_theme_list_available_at (const char *resource_prefix,
                                           const char *user_themes_dir);
 
+/* Snapshot accessors for the Rust settings "GtkHx theme" combo — begin
+ * snapshots gtkhx_theme_list_available() and returns the count; name/display
+ * read entry i (strings borrowed, valid until end frees the snapshot). Not
+ * re-entrant. See gtkhx_theme.c. */
+int gtkhx_theme_names_begin (void);
+const char *gtkhx_theme_names_name (int i);
+const char *gtkhx_theme_names_display (int i);
+void gtkhx_theme_names_end (void);
+
 G_END_DECLS
 
 #endif /* ndef GTKHX_THEME_H */

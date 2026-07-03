@@ -999,3 +999,55 @@ gtkhx_theme_list_available (void)
     g_free (user_dir);
     return out;
 }
+
+/* ---- snapshot accessors for the Rust settings theme combo ---------
+ *
+ * gtkhx_theme_list_available() hands back a fresh GPtrArray<GtkhxThemeEntry*>
+ * each call; rather than expose GPtrArray internals + the entry struct across
+ * FFI, the Rust "GtkHx theme" combo snapshots the list once (begin → n), reads
+ * name/display by index (strings borrowed, valid until end), then frees it
+ * (end). Not re-entrant — the combo is built synchronously in one pass. */
+static GPtrArray *hx_theme_names_snapshot;
+
+int
+gtkhx_theme_names_begin (void)
+{
+    g_clear_pointer (&hx_theme_names_snapshot, g_ptr_array_unref);
+    hx_theme_names_snapshot = gtkhx_theme_list_available ();
+    if (!hx_theme_names_snapshot) {
+        return 0;
+    }
+    /* Clamp the guint length to G_MAXINT so an absurd theme count can't
+     * overflow the int return into a negative value (which the Rust side
+     * would turn into a huge allocation). */
+    guint len = hx_theme_names_snapshot->len;
+    return len > (guint) G_MAXINT ? G_MAXINT : (int) len;
+}
+
+const char *
+gtkhx_theme_names_name (int i)
+{
+    if (!hx_theme_names_snapshot || i < 0
+        || (guint) i >= hx_theme_names_snapshot->len) {
+        return "";
+    }
+    return ((GtkhxThemeEntry *) g_ptr_array_index (hx_theme_names_snapshot, i))
+        ->name;
+}
+
+const char *
+gtkhx_theme_names_display (int i)
+{
+    if (!hx_theme_names_snapshot || i < 0
+        || (guint) i >= hx_theme_names_snapshot->len) {
+        return "";
+    }
+    return ((GtkhxThemeEntry *) g_ptr_array_index (hx_theme_names_snapshot, i))
+        ->display;
+}
+
+void
+gtkhx_theme_names_end (void)
+{
+    g_clear_pointer (&hx_theme_names_snapshot, g_ptr_array_unref);
+}

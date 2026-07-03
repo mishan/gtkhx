@@ -38,7 +38,11 @@ crate-type = ["staticlib", "rlib"]
 # doesn't grow (meson floor: gtk4 >= 4.10, libadwaita-1 >= 1.6).
 glib = { workspace = true }
 gio = { workspace = true }
-gtk4 = { workspace = true }
+# v4_10 enables the GtkColorDialog / GtkColorDialogButton bindings the
+# settings nick-colour row uses. The runtime GTK is already >= 4.10 (meson
+# floor) and the C options.c used GtkColorDialogButton, so this just turns
+# the binding-feature gate on.
+gtk4 = { workspace = true, features = ["v4_10"] }
 # v1_5 enables the AdwDialog / AdwToolbarView bindings + AdwActionRow
 # subtitle-selectable (transitively v1_4 / v1_3). The runtime libadwaita
 # is already >= 1.6 (meson floor), and the C tracker used these same
