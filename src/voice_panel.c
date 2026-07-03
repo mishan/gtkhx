@@ -397,6 +397,11 @@ on_join_toggled (GtkToggleButton *btn, gpointer user_data)
             struct gtkhx_voice_runtime *rt =
                 ensure_voice_runtime (sess);
             if (rt) {
+                /* Tell the runtime our own uid so the send leg's level
+                 * VAD lights THIS user's speaker indicator when they
+                 * talk (outgoing VAD). Set before join so it's in place
+                 * before any send-leg level message. */
+                gtkhx_voice_runtime_set_self_uid (rt, sess->htlc.uid);
                 gtkhx_voice_runtime_join (rt, cid);
                 /* Spec recommends joining muted by default. Two
                  * steps, IN THIS ORDER:

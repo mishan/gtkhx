@@ -835,6 +835,13 @@ struct Inner {
     /// remote; the matching bin's teardown in `connect_pad_removed`
     /// evicts the entry.
     recv_bin_uid_cache: HashMap<String, u16>,
+    /// The LOCAL user's Hotline uid, set by the C side via
+    /// [`crate::ffi::gtkhx_voice_runtime_set_self_uid`] when joining
+    /// voice. `handle_level_message` uses it to attribute the send
+    /// leg's `level` RMS (this client's own outgoing audio) to the
+    /// right speaker indicator. `None` until set — send-side VAD is a
+    /// no-op until the C side tells us who we are.
+    self_uid: Option<u16>,
     /// `BusWatchGuard` returned by `attach_pipeline_bus_watch`'s
     /// `add_watch_local`. Dropping this guard removes the watch
     /// source from the main context; we keep it parked here so
@@ -1112,6 +1119,7 @@ impl VoiceRuntime {
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
                 recv_bin_uid_cache: HashMap::new(),
+                self_uid: None,
                 bus_watch_guard: bits.bus_watch_guard,
                 rtp_buffers_received: bits.rtp_buffers_received,
                 wedge_watchdog_source: None,
@@ -1159,6 +1167,7 @@ impl VoiceRuntime {
                 pending_pads: HashMap::new(),
                 receive_bins: HashMap::new(),
                 recv_bin_uid_cache: HashMap::new(),
+                self_uid: None,
                 bus_watch_guard: None,
                 rtp_buffers_received: Arc::new(AtomicU64::new(0)),
                 wedge_watchdog_source: None,
@@ -1308,7 +1317,7 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
         // either way.
         let input_device = crate::audio::input_device();
         let send_bin = crate::audio::make_send_bin(
-            "hxvoice-send-bin",
+            crate::audio::SEND_BIN_NAME,
             input_device.as_deref(),
         )
             .ok_or_else(|| {
@@ -1715,6 +1724,15 @@ fn reset_and_rebuild_pipeline(runtime: &VoiceRuntime) {
 }
 
 impl VoiceRuntime {
+    /// Record the local user's Hotline uid so the send leg's `level`
+    /// VAD (outgoing audio) attributes to the local user's own speaker
+    /// indicator. Called from the C side when joining voice, before any
+    /// send-leg `level` message can arrive. Survives pipeline rebuilds
+    /// (the uid isn't reset there).
+    pub fn set_self_uid(&self, uid: u16) {
+        self.inner.borrow_mut().self_uid = Some(uid);
+    }
+
     /// Drive one transition. Pumps `event` through the state
     /// machine, walks the returned action list, dispatches each
     /// effect.
@@ -3546,9 +3564,25 @@ fn handle_level_message(
     // uid in the name; resolving it walks the upstream pad's caps for
     // the RTCP cname, so that path is cached per bin (see
     // `recv_bin_uid_cache`).
+    let is_send = bin.name().as_str() == crate::audio::SEND_BIN_NAME;
     let mid_uid = uid_from_recv_bin_name(bin.name().as_str());
     with_main_thread_runtime(runtime_id, |rt| {
-        let uid = match mid_uid {
+        // Outgoing VAD: the send bin's `level` meter attributes to the
+        // LOCAL user (self_uid), not to a remote receive-bin uid.
+        let uid = if is_send {
+            match rt.inner.borrow().self_uid {
+                Some(u) => u,
+                None => {
+                    crate::debug::log!(
+                        "voice-vad",
+                        "send-leg speaking but self uid not set yet — \
+                         outgoing VAD not attributed"
+                    );
+                    return;
+                }
+            }
+        } else {
+            match mid_uid {
             Some(u) => u,
             None => {
                 let key = bin.name().to_string();
@@ -3582,6 +3616,7 @@ fn handle_level_message(
                         u
                     }
                 }
+            }
             }
         };
         crate::debug::log!("voice-vad", "speaking uid={uid}");
@@ -5201,6 +5236,60 @@ mod tests {
         assert!(
             !vol.property::<bool>("mute"),
             "unmute must reach the send volume element"
+        );
+    }
+
+    /// `set_self_uid` records the local uid so the send leg's `level`
+    /// VAD (outgoing audio) can attribute to the local user's own
+    /// speaker indicator. Unset by default.
+    #[test]
+    fn set_self_uid_records_local_uid_for_outgoing_vad() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        assert_eq!(
+            runtime.inner.borrow().self_uid,
+            None,
+            "self uid unset until the C side sets it on join"
+        );
+        runtime.set_self_uid(97);
+        assert_eq!(
+            runtime.inner.borrow().self_uid,
+            Some(97),
+            "set_self_uid records the local uid"
+        );
+    }
+
+    /// The send bin carries a `level` meter (after the mute `volume`)
+    /// so outgoing audio drives the local speaker indicator. Its RMS
+    /// messages are routed to `self_uid` in `handle_level_message`.
+    #[test]
+    fn send_bin_has_level_meter_for_outgoing_vad() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime should construct with a fresh pipeline");
+        let pipeline = runtime
+            .inner
+            .borrow()
+            .pipeline
+            .clone()
+            .expect("with-pipeline runtime has a pipeline");
+        let send_bin = pipeline
+            .by_name(crate::audio::SEND_BIN_NAME)
+            .expect("send bin present in the pipeline")
+            .downcast::<gstreamer::Bin>()
+            .expect("send bin is a GstBin");
+        let mut it = send_bin.iterate_elements();
+        let mut has_level = false;
+        while let Ok(Some(el)) = it.next() {
+            if el.type_().name() == "GstLevel" {
+                has_level = true;
+                break;
+            }
+        }
+        assert!(
+            has_level,
+            "send bin must contain a `level` meter for outgoing VAD"
         );
     }
 
