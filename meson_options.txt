@@ -35,3 +35,16 @@ option('voice',
                 'the voice crates are not built, the GStreamer libs are not '  +
                 'linked, HTLC_CAP_VOICE is not advertised, and all voice UI '  +
                 'is removed. See docs/voice-chat-plan.md.')
+
+option('cargo_target_dir',
+  type        : 'string',
+  value       : '',
+  description : 'Absolute path for the Cargo target directory used by the '     +
+                'Rust workspace build. Empty (default) keeps it inside the '    +
+                'meson build dir at <builddir>/rust-target, matching the '      +
+                'historical behaviour. Point it at a stable path OUTSIDE the '  +
+                'build dir (e.g. in CI) so the Rust build can be cache-restored '+
+                'before "meson setup" runs and shared across several meson '    +
+                'build dirs / cargo test — none of which is possible when the ' +
+                'target dir lives under the (must-be-empty-at-setup) build '    +
+                'dir. Local and Flatpak builds leave this unset.')
