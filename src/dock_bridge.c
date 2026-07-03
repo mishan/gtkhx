@@ -104,6 +104,13 @@ dock_embed_common (const char   *id,
     panel_area = dock_area_to_panel_area (area, &home_frame);
     if (home_frame == NULL) {
         g_critical ("gtkhx_dock_embed(%s): toolbar dock not built yet", id);
+        /* Consume `content` on the failure path too so the caller never
+         * has to reason about a still-floating widget it handed us: sink
+         * the floating ref and drop it. */
+        if (content != NULL) {
+            g_object_ref_sink (content);
+            g_object_unref (content);
+        }
         return NULL;
     }
 
@@ -127,7 +134,7 @@ dock_embed_common (const char   *id,
     return panel;
 }
 
-void
+gboolean
 gtkhx_dock_embed (const char   *id,
                   GtkhxDockKind kind,
                   GtkhxDockArea area,
@@ -135,10 +142,11 @@ gtkhx_dock_embed (const char   *id,
                   const char   *icon_name,
                   GtkWidget    *content)
 {
-    g_return_if_fail (id != NULL);
-    g_return_if_fail (GTK_IS_WIDGET (content));
+    g_return_val_if_fail (id != NULL, FALSE);
+    g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
-    dock_embed_common (id, kind, area, title, icon_name, content);
+    return dock_embed_common (id, kind, area, title, icon_name, content)
+           != NULL;
 }
 
 /* Close-trampoline payload. Lives on the panel via g_object_set_data_full
@@ -173,7 +181,7 @@ dock_dyn_close_trampoline (HxPanel *panel, gpointer user_data)
     }
 }
 
-void
+gboolean
 gtkhx_dock_embed_dynamic (const char   *id,
                           GtkhxDockArea area,
                           const char   *title,
@@ -186,13 +194,19 @@ gtkhx_dock_embed_dynamic (const char   *id,
     HxPanel      *panel;
     DockDynClose *c;
 
-    g_return_if_fail (id != NULL);
-    g_return_if_fail (GTK_IS_WIDGET (content));
+    g_return_val_if_fail (id != NULL, FALSE);
+    g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
     panel = dock_embed_common (id, GTKHX_DOCK_KIND_DYNAMIC, area,
                                title, icon_name, content);
     if (panel == NULL) {
-        return;
+        /* Embed failed (content already destroyed by dock_embed_common).
+         * The close callback was never installed, so run the caller's
+         * teardown now so its backing state still gets released. */
+        if (destroy != NULL && user_data != NULL) {
+            destroy (user_data);
+        }
+        return FALSE;
     }
 
     c = g_new0 (DockDynClose, 1);
@@ -205,4 +219,5 @@ gtkhx_dock_embed_dynamic (const char   *id,
     g_object_set_data_full (G_OBJECT (panel), "gtkhx-dock-dyn-close",
                             c, dock_dyn_close_free);
     hx_panel_set_close_handler (panel, dock_dyn_close_trampoline, c);
+    return TRUE;
 }

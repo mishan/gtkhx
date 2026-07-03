@@ -43,7 +43,7 @@ mod dock {
             title: *const c_char,
             icon_name: *const c_char,
             content: *mut gtk4::ffi::GtkWidget,
-        );
+        ) -> glib::ffi::gboolean;
     }
 
     /// TRUE iff a panel with `id` was already registered (re-attached +
@@ -54,7 +54,9 @@ mod dock {
     }
 
     /// Embed `content` as a static docked panel titled `title_key`
-    /// (translated) with `icon_name`, at `kind`/`area`.
+    /// (translated) with `icon_name`, at `kind`/`area`. Returns TRUE on
+    /// success; on failure `content` has already been destroyed by the
+    /// bridge, so the caller just skips its post-embed work.
     pub fn embed(
         id: &str,
         kind: i32,
@@ -62,7 +64,7 @@ mod dock {
         title_key: &str,
         icon_name: &str,
         content: *mut gtk4::ffi::GtkWidget,
-    ) {
+    ) -> bool {
         let cid = crate::cs(id);
         let ctitle = crate::cs(&tr(title_key));
         let cicon = crate::cs(icon_name);
@@ -74,7 +76,7 @@ mod dock {
                 ctitle.as_ptr(),
                 cicon.as_ptr(),
                 content,
-            );
+            ) != glib::ffi::GFALSE
         }
     }
 }
@@ -112,14 +114,16 @@ pub unsafe extern "C" fn create_users_window(_parent: *mut c_void, data: *mut c_
         return;
     }
 
-    dock::embed(
+    // On failure the bridge has already destroyed `content`; skip the
+    // post-embed lifecycle so we don't mark a non-existent panel open.
+    if dock::embed(
         HX_ID_USERS,
         dock::KIND_SIDEBAR,
         dock::AREA_END,
         "Users",
         "system-users-symbolic",
         content,
-    );
-
-    gtkhx_users_bridge_after_embed(sess);
+    ) {
+        gtkhx_users_bridge_after_embed(sess);
+    }
 }

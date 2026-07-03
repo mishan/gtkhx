@@ -109,18 +109,15 @@ glib::wrapper! {
 
 impl HxUserRow {
     /// Recompute the cached foreground from the row's user + status.
-    /// NULL user → no cached fg (theme default), matching the C guard-free
-    /// path for the normal non-NULL case while staying safe for the
-    /// documented placeholder case.
+    /// Always calls `user_nick_color_gdk`, including with a NULL user: it's
+    /// NULL-safe and still returns the status-palette color (away/admin) or
+    /// NULL for the theme-default slot, so a placeholder row keeps its
+    /// status coloring exactly as the deleted C `hx_user_row_refresh_fg`
+    /// did. NULL return → no cached fg (fall through to the theme default).
     fn refresh_fg(&self) {
         let imp = self.imp();
-        let user = imp.user.get();
-        if user.is_null() {
-            imp.has_fg.set(false);
-            return;
-        }
         let mut tmp = Rgba::default();
-        let ret = unsafe { user_nick_color_gdk(user, imp.color.get(), &mut tmp) };
+        let ret = unsafe { user_nick_color_gdk(imp.user.get(), imp.color.get(), &mut tmp) };
         if ret.is_null() {
             imp.has_fg.set(false);
         } else {

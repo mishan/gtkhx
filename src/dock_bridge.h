@@ -70,15 +70,18 @@ gboolean gtkhx_dock_raise_if_open (const char *id);
  * home frame for `area`, records the home frame, and registers it (the
  * registry strong-refs it so it survives Close-all-pages).
  *
- * `content` is consumed the way panel_widget_set_child consumes it (the
- * panel takes the reference); do not unref it afterwards. No-op with a
- * g_critical if the toolbar dock isn't built yet. */
-void gtkhx_dock_embed (const char   *id,
-                       GtkhxDockKind kind,
-                       GtkhxDockArea area,
-                       const char   *title,
-                       const char   *icon_name,
-                       GtkWidget    *content);
+ * Returns TRUE on success. `content` is *always consumed* either way: on
+ * success the panel takes its reference; on failure (the toolbar dock
+ * isn't built yet — a g_critical) it is sunk and destroyed here, so the
+ * caller never has to clean it up. Callers should skip any post-embed work
+ * (e.g. after_embed) when this returns FALSE. Do not touch `content` after
+ * the call regardless. */
+gboolean gtkhx_dock_embed (const char   *id,
+                           GtkhxDockKind kind,
+                           GtkhxDockArea area,
+                           const char   *title,
+                           const char   *icon_name,
+                           GtkWidget    *content);
 
 /* Dynamic-panel variant (per-pchat / per-PM tabs): same embed, plus a
  * close trampoline. When the tab is closed, `on_close(user_data)` fires
@@ -87,15 +90,20 @@ void gtkhx_dock_embed (const char   *id,
  * caller conceptually but the bridge keeps it alive for the panel's
  * lifetime; if `destroy` is non-NULL it runs on `user_data` when the
  * panel finalizes. The panel is always created with
- * GTKHX_DOCK_KIND_DYNAMIC. */
-void gtkhx_dock_embed_dynamic (const char   *id,
-                               GtkhxDockArea area,
-                               const char   *title,
-                               const char   *icon_name,
-                               GtkWidget    *content,
-                               void        (*on_close) (gpointer user_data),
-                               gpointer      user_data,
-                               GDestroyNotify destroy);
+ * GTKHX_DOCK_KIND_DYNAMIC.
+ *
+ * Returns TRUE on success. Same `content` ownership as gtkhx_dock_embed
+ * (always consumed — embedded on success, destroyed on failure). On
+ * failure the close callback is never installed and `destroy` is run on
+ * `user_data` immediately so the caller's teardown still fires. */
+gboolean gtkhx_dock_embed_dynamic (const char   *id,
+                                   GtkhxDockArea area,
+                                   const char   *title,
+                                   const char   *icon_name,
+                                   GtkWidget    *content,
+                                   void        (*on_close) (gpointer user_data),
+                                   gpointer      user_data,
+                                   GDestroyNotify destroy);
 
 G_END_DECLS
 
