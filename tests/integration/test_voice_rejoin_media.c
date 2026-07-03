@@ -102,7 +102,54 @@ typedef struct {
      * (VAD), via the speaker-changed signal. Used by the speaker
      * attribution test. */
     GArray *spoke_uids; /* of guint16 */
+    /* Send-track SSRC-declaration audit (fogWraith Capabilities-Voice
+     * "Send SSRC Declaration"): every SDP answer this client's runtime
+     * produces MUST declare the microphone stream's SSRC in the send
+     * section (a=ssrc:<n> cname:<name>). Without it the server falls
+     * back to payload-type matching, which is the exact failure that
+     * dropped the first joiner's audio. We count answers seen vs
+     * answers carrying the declaration; the test asserts they match. */
+    int answers_seen;
+    int answers_with_send_ssrc;
 } voice_client;
+
+/* Does the SDP answer `sdp` (len `len`) declare a send-track SSRC?
+ * The answer's `send` media section must carry an `a=ssrc:<n>
+ * cname:<name>` line before the next `m=` line. Returns TRUE iff so. */
+static gboolean
+answer_declares_send_ssrc (const char *sdp, size_t len)
+{
+    char *buf = g_strndup (sdp, len);
+    gboolean ok = FALSE;
+    char **lines = g_strsplit (buf, "\n", -1);
+    gboolean in_send = FALSE;
+    gboolean saw_ssrc = FALSE, saw_cname = FALSE;
+    for (int i = 0; lines[i]; i++) {
+        char *ln = g_strchomp (lines[i]);
+        if (g_str_has_prefix (ln, "m=")) {
+            /* Entering a new media section closes the send one. */
+            if (in_send && saw_ssrc && saw_cname) {
+                ok = TRUE;
+                break;
+            }
+            in_send = FALSE;
+            saw_ssrc = saw_cname = FALSE;
+        } else if (g_strcmp0 (ln, "a=mid:send") == 0) {
+            in_send = TRUE;
+        } else if (in_send && g_str_has_prefix (ln, "a=ssrc:")) {
+            saw_ssrc = TRUE;
+            if (strstr (ln, "cname:")) {
+                saw_cname = TRUE;
+            }
+        }
+    }
+    if (in_send && saw_ssrc && saw_cname) {
+        ok = TRUE; /* send section ran to end of SDP */
+    }
+    g_strfreev (lines);
+    g_free (buf);
+    return ok;
+}
 
 /* Has this client's VAD ever reported `uid` speaking? */
 static gboolean
@@ -164,6 +211,12 @@ on_send_wire_frame (void *user_data, uint32_t opcode, const uint8_t *body,
                                   (int) HTLC_DATA_CHAT_ID, 4, &cid_be);
         break;
     case HTLC_HDR_VOICE_SDP_ANSWER:
+        /* Audit the send-track SSRC declaration on the way past (spec
+         * REQUIRED — see answer_declares_send_ssrc). */
+        c->answers_seen++;
+        if (answer_declares_send_ssrc ((const char *) payload, plen)) {
+            c->answers_with_send_ssrc++;
+        }
         integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_SDP_ANSWER,
                                   0, 2, (int) HTLC_DATA_CHAT_ID, 4, &cid_be,
                                   (int) HTLC_DATA_VOICE_SDP, (int) plen,
@@ -691,6 +744,18 @@ test_voice_rejoin_media (void)
                         d.before_rejoin_rx, d.after_rejoin_rx);
         g_assert_cmpuint (d.after_rejoin_rx, >=, d.before_rejoin_rx + RX_MARGIN);
     }
+
+    /* Spec REQUIRED (fogWraith "Send SSRC Declaration"): every SDP
+     * answer both runtimes produced must declare the microphone
+     * stream's SSRC + cname in the send section. This is the client-
+     * side guarantee that keeps the server off its payload-type
+     * fallback — the fallback is what dropped the first joiner's audio
+     * in the original bug. Guards against a future GStreamer/webrtcbin
+     * change silently dropping the a=ssrc line. */
+    g_assert_cmpint (A.answers_seen, >, 0);
+    g_assert_cmpint (A.answers_with_send_ssrc, ==, A.answers_seen);
+    g_assert_cmpint (B.answers_seen, >, 0);
+    g_assert_cmpint (B.answers_with_send_ssrc, ==, B.answers_seen);
 
     /* Best-effort leave so Janus reaps the room, then drain briefly. */
     if (B.rt) {
