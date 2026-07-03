@@ -268,19 +268,33 @@ impl HxUserListView {
         imp.selection.replace(Some(selection));
         imp.column_view.replace(Some(column_view.clone()));
 
-        // Double-click / Enter → open the PM window.
+        // Double-click / Enter → open the PM window. Capture a WEAK self:
+        // the view holds a strong ref to column_view, which owns this
+        // closure, so a strong self clone here would form a
+        // view → column_view → closure → view reference cycle and leak the
+        // whole graph when C unrefs the view.
         {
-            let this = self.clone();
-            column_view.connect_activate(move |_, pos| this.on_activate(pos));
+            let weak = self.downgrade();
+            column_view.connect_activate(move |_, pos| {
+                if let Some(this) = weak.upgrade() {
+                    this.on_activate(pos);
+                }
+            });
         }
 
         // Right-click → user popover. Capture phase, same as the C gesture.
+        // Weak self again — the gesture controller is owned by column_view,
+        // so a strong clone would form the same cycle as connect_activate.
         if !sess.is_null() {
             let rclick = gtk::GestureClick::new();
             rclick.set_button(gtk::gdk::BUTTON_SECONDARY);
             rclick.set_propagation_phase(gtk::PropagationPhase::Capture);
-            let this = self.clone();
-            rclick.connect_pressed(move |g, _n, x, y| this.on_secondary_press(g, x, y));
+            let weak = self.downgrade();
+            rclick.connect_pressed(move |g, _n, x, y| {
+                if let Some(this) = weak.upgrade() {
+                    this.on_secondary_press(g, x, y);
+                }
+            });
             column_view.add_controller(rclick);
         }
 
