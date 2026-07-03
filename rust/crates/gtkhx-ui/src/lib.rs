@@ -61,6 +61,11 @@ pub mod news_browser;
 // Dock registration via dock_bridge; chat content + xtext + wire senders stay
 // C in chat.c. create_chat_window is this module's #[no_mangle] export.
 pub mod chat;
+// R5.14: Private Message content — create_msgwin builds the PM tab's content
+// tree (output frame, input + emoji, recipient info pane) in gtk4-rs around
+// the C create_msg model/leaf widgets. The msgwin struct + chat_tabs + wire
+// senders stay C.
+pub mod msg;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
