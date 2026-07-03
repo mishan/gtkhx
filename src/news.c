@@ -23,7 +23,6 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <libpanel.h>
 #include <gdk/gdk.h>
 #include <gdk/gdkkeysyms.h>
 #include <sys/time.h>
@@ -31,8 +30,6 @@
 #include <netinet/in.h>
 
 #include "hx.h"
-#include "hx_panel.h"
-#include "panel_registry.h"
 #include "toolbar.h"
 #include "hl_access.h"
 #include "hotline_proto.h"
@@ -630,8 +627,14 @@ create_post_window (GtkWidget *widget, gpointer data)
     gtk_widget_grab_focus (postprompt);
 }
 
-void
-create_news_window (GtkWidget *parent_window, session *sess)
+/* Content build for the Rust News window shell (gtkhx-ui `news`). Mirrors
+ * users_bridge.c / tasks.c: the dock registration moved to Rust via
+ * dock_bridge; the news content (buttons, read-only text view, search bar)
+ * is assembled here and handed back as one still-floating container. The
+ * search-ctx + Ctrl+F controller attach to the content widgets rather than
+ * the dock panel (which the shell now owns) — see below. */
+GtkWidget *
+gtkhx_news_build_content (session *sess)
 {
     GtkWidget *news_scroll;
     GtkWidget *content_vbox;
@@ -639,21 +642,9 @@ create_news_window (GtkWidget *parent_window, session *sess)
     GtkWidget *news_text;
     GtkWidget *postButton, *reloadButton, *findButton;
     GtkWidget *search_bar;
-    HxPanel   *panel;
     struct news_search_ctx *search_ctx;
 
-    (void)parent_window;  /* vestigial — see users.c */
-
-    /* News panel lives in the
-     * toolbar's center PanelGrid. First call constructs it, later
-     * calls raise it (which also flips the grid's current visible
-     * tab to News if it was on Chat / Files). */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
-    if (panel != NULL) {
-        hx_panel_ensure_attached (panel);
-        panel_widget_raise (PANEL_WIDGET (panel));
-        return;
-    }
+    g_return_val_if_fail (sess != NULL, NULL);
 
     /* 2x-scaled buttons via the shared helper. Find is
      * added at unscaled size (1) since it's a stock GTK symbolic
@@ -729,26 +720,18 @@ create_news_window (GtkWidget *parent_window, session *sess)
     gtk_widget_set_sensitive (postButton, FALSE);
     gtk_widget_set_sensitive (reloadButton, FALSE);
 
-    panel = hx_panel_new (HX_PANEL_ID_NEWS,
-                          HX_PANEL_KIND_SIDEBAR,
-                          PANEL_AREA_START);
-    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("News"));
-    panel_widget_set_icon_name (PANEL_WIDGET (panel),
-                                "text-x-generic-symbolic");
-    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
-
-    /* Hang the search-ctx off the panel widget (instead of the
-     * now-defunct news_window) so the GtkTextView consumers below
-     * can find it via registry → panel → object-data. */
-    g_object_set_data_full (G_OBJECT (panel), "search-ctx", search_ctx,
+    /* Search-ctx hangs off the news text view (was the dock panel, which
+     * the Rust shell now owns and the content build can't reach). The
+     * output_news_* consumers look it up via sess->news_text. */
+    g_object_set_data_full (G_OBJECT (news_text), "search-ctx", search_ctx,
                             news_search_ctx_free);
 
-    /* Ctrl+F shortcut + Esc/printable-key capture. Both used to
-     * attach to news_window; they attach to the panel widget now.
-     * GtkShortcutController on the panel still routes when focus
-     * is anywhere inside the panel's subtree. */
+    /* Ctrl+F shortcut + printable-key capture attach to the content box
+     * rather than the panel. content_vbox is the panel's whole subtree, so
+     * a capture-phase controller here routes the same key events the
+     * panel-level one did. */
     gtk_search_bar_set_key_capture_widget (GTK_SEARCH_BAR (search_bar),
-                                           GTK_WIDGET (panel));
+                                           content_vbox);
     {
         GtkEventController *sc = gtk_shortcut_controller_new ();
         gtk_event_controller_set_propagation_phase (sc, GTK_PHASE_CAPTURE);
@@ -757,31 +740,26 @@ create_news_window (GtkWidget *parent_window, session *sess)
             gtk_shortcut_new (
                 gtk_keyval_trigger_new (GDK_KEY_f, GDK_CONTROL_MASK),
                 gtk_callback_action_new (on_find_shortcut, search_ctx, NULL)));
-        gtk_widget_add_controller (GTK_WIDGET (panel), sc);
+        gtk_widget_add_controller (content_vbox, sc);
     }
-
-    if (toolbar_sidebar_frame != NULL) {
-        panel_frame_add (PANEL_FRAME (toolbar_sidebar_frame),
-                         PANEL_WIDGET (panel));
-        hx_panel_set_home_frame (panel, toolbar_sidebar_frame);
-    } else {
-        g_critical ("create_news_window: toolbar dock not built yet");
-    }
-
-    /* Registry takes the owning ref; do NOT g_object_unref after.
-     * See users.c for the ref-count walk-through. */
-    hx_panel_registry_register (panel);
-
-    gtkhx_prefs.geo.news.open = 1;
-    gtkhx_prefs.geo.news.init = 1;
 
     sess->news_text    = news_text;
     sess->postButton   = postButton;
     sess->reloadButton = reloadButton;
+    return content_vbox;
+}
+
+void
+gtkhx_news_after_embed (session *sess)
+{
+    g_return_if_fail (sess != NULL);
+
+    gtkhx_prefs.geo.news.open = 1;
+    gtkhx_prefs.geo.news.init = 1;
 
     if (connected == 1) {
-        gtk_widget_set_sensitive (postButton, TRUE);
-        gtk_widget_set_sensitive (reloadButton, TRUE);
+        gtk_widget_set_sensitive (sess->postButton, TRUE);
+        gtk_widget_set_sensitive (sess->reloadButton, TRUE);
     }
 }
 
@@ -789,19 +767,12 @@ void
 open_news (GtkWidget *widget, gpointer data)
 {
     session *sess = data;
-    HxPanel *panel;
 
-    /* News is a permanent resident of
-     * the toolbar's center PanelGrid. The toolbar button just
-     * raises it; the first connect triggers the hx_get_news()
-     * fetch since the panel exists but the buffer is empty. */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
-    if (panel != NULL) {
-        hx_panel_ensure_attached (panel);
-        panel_widget_raise (PANEL_WIDGET (panel));
-    } else {
-        create_news_window (widget, sess);
-    }
+    /* create_news_window (the Rust shell) raises the panel if it already
+     * exists and builds + docks it otherwise, so the toolbar button just
+     * calls it unconditionally; the first connect triggers hx_get_news()
+     * since the panel exists but the buffer is empty. */
+    create_news_window (widget, sess);
     if (connected) {
         hx_get_news (&sess->htlc);
     }
@@ -841,10 +812,8 @@ output_news_post (struct htlc_conn *htlc, char *news, guint16 len)
 	 * picks up its highlights too. No-op if the bar is hidden or the
 	 * entry is empty. */
     {
-        HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
-        struct news_search_ctx *sctx = panel
-            ? g_object_get_data (G_OBJECT (panel), "search-ctx")
-            : NULL;
+        struct news_search_ctx *sctx
+            = g_object_get_data (G_OBJECT (sess->news_text), "search-ctx");
         if (sctx) {
             news_search_run (sctx);
         }
@@ -882,12 +851,7 @@ output_news_file (struct htlc_conn *htlc, char *news, guint16 len)
     /* Same Find-still-active reconciliation as output_news_post —
 	 * the bulk-load path appends the whole news file in one go, and
 	 * the user might have a query already typed. */
-    {
-        HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS);
-        sctx = panel
-            ? g_object_get_data (G_OBJECT (panel), "search-ctx")
-            : NULL;
-    }
+    sctx = g_object_get_data (G_OBJECT (sess->news_text), "search-ctx");
     if (sctx) {
         news_search_run (sctx);
     }

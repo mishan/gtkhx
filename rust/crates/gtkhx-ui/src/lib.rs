@@ -45,6 +45,10 @@ pub mod users;
 // The task list content + transfer-model coupling stay C in tasks.c;
 // create_tasks_window is now this module's #[no_mangle] export.
 pub mod tasks;
+// R5.11: the News window shell (1.0/1.2 flat news). Dock registration via
+// dock_bridge; the news content (viewers, search, fetch/post RPC) stays C
+// in news.c. create_news_window is now this module's #[no_mangle] export.
+pub mod news;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
