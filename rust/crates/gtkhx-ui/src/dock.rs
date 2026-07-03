@@ -10,18 +10,16 @@ use std::ffi::c_char;
 use crate::tr::tr;
 
 // GtkhxDockKind.
-#[allow(dead_code)]
 pub const KIND_CENTER: i32 = 0;
 pub const KIND_SIDEBAR: i32 = 1;
+// Reserved for the per-pchat / per-PM dynamic panels (Chat port).
 #[allow(dead_code)]
 pub const KIND_DYNAMIC: i32 = 2;
 
 // GtkhxDockArea → toolbar_{sidebar,end,bottom,center}_frame.
-#[allow(dead_code)]
 pub const AREA_START: i32 = 0;
 pub const AREA_END: i32 = 1;
 pub const AREA_BOTTOM: i32 = 2;
-#[allow(dead_code)]
 pub const AREA_CENTER: i32 = 3;
 
 extern "C" {

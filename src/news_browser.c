@@ -1996,8 +1996,16 @@ on_window_close (GtkWindow *window, gpointer user_data)
 
 /* ---------- Window construction ---------- */
 
-static gnews_browser *
-build_browser_window (void)
+/* Content build for the Rust News-browser shell (gtkhx-ui `news_browser`).
+ * The dock registration moved to Rust via dock_bridge; this builds the whole
+ * gnews_browser + its content tree and returns the content box. Unlike the
+ * other docked windows the browser integrates the panel as its window
+ * object, so br->window points at content_vbox (a widget in the panel's tree
+ * once embedded — enough for dialog parenting / root-walking / keyaccel) and
+ * the one genuinely panel-level hook (PanelWidget::presented) is wired in
+ * gtkhx_news_browser_after_embed once the panel exists. */
+GtkWidget *
+gtkhx_news_browser_build_content (void)
 {
     gnews_browser *br = g_new0 (gnews_browser, 1);
     GtkWidget *paned, *left_scroll, *right_box, *right_scroll;
@@ -2005,7 +2013,8 @@ build_browser_window (void)
     GtkWidget *content_vbox;
     GtkListItemFactory *factory;
     GtkTextBuffer *buf;
-    HxPanel *panel;
+
+    the_browser = br;
 
     /* ---- Icons (cached for the lifetime of the window) ---- */
     br->icon_folder
@@ -2220,51 +2229,39 @@ build_browser_window (void)
                     gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
     gtk_box_append (GTK_BOX (content_vbox), paned);
 
-    panel = hx_panel_new (HX_PANEL_ID_NEWS15,
-                          HX_PANEL_KIND_CENTER,
-                          PANEL_AREA_CENTER);
-    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("News (1.5+)"));
-    panel_widget_set_icon_name (PANEL_WIDGET (panel),
-                                "text-x-generic-symbolic");
-    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
-
-    /* Hook PanelWidget::presented so a tab switch onto News while
-     * connected and empty fires the initial NEWSDIRLIST without
-     * the user needing to hit Refresh — the toolbar-button entry
-     * point already does this, this covers the tab-strip path. */
-    g_signal_connect (panel, "presented",
-                      G_CALLBACK (on_panel_presented), br);
-
-    /* Connection-state changes from any source drive the
-     * disconnected banner + the auto-fetch on LOGIN_READY. */
+    /* Connection-state changes from any source drive the disconnected
+     * banner + the auto-fetch on LOGIN_READY. */
     br->conn_state_handler = g_signal_connect (
         gtkhx_session_get_default (), "connection-state-changed",
         G_CALLBACK (on_connection_state), br);
 
-    /* br->window points at the panel widget so adw_dialog_present
-     * parents, gtk_widget_get_root walks, init_keyaccel
-     * controllers etc. keep compiling unchanged. The one site
-     * that actually wanted a GtkWindow (compose-window
-     * transient-for) switched to toolbar_window above. */
-    br->window = GTK_WIDGET (panel);
+    /* br->window points at the content box, not the dock panel (which the
+     * Rust shell now owns). It only needs to be a widget in the panel's
+     * window tree so adw_dialog_present parents, gtk_widget_get_root walks,
+     * and the keyaccel controllers route — content_vbox is exactly that once
+     * embedded. The one site that wanted a real GtkWindow (compose-window
+     * transient-for) uses toolbar_window instead. */
+    br->window = content_vbox;
 
-    if (toolbar_center_frame != NULL) {
-        panel_frame_add (PANEL_FRAME (toolbar_center_frame),
-                         PANEL_WIDGET (panel));
-        hx_panel_set_home_frame (panel, toolbar_center_frame);
-    } else {
-        g_critical ("build_browser_window: toolbar dock not built yet");
-    }
-
-    /* Registry takes the owning ref; do NOT g_object_unref after.
-     * See users.c for the ref-count walk-through. */
-    hx_panel_registry_register (panel);
-
-    /* Initial state: no selection → New Folder + New Category
-	 * visible (operating at the root); Reply + Delete hidden. */
+    /* Initial state: no selection → New Folder + New Category visible
+     * (operating at the root); Reply + Delete hidden. */
     sync_action_buttons (br);
 
-    return br;
+    return content_vbox;
+}
+
+void
+gtkhx_news_browser_after_embed (void)
+{
+    /* The one panel-level hook: PanelWidget::presented, so a tab switch onto
+     * News while connected + empty fires the initial NEWSDIRLIST without a
+     * manual Refresh (the toolbar-button entry point covers its own path).
+     * The panel is available from the registry once dock_bridge embedded us. */
+    HxPanel *panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS15);
+    if (panel != NULL && the_browser != NULL) {
+        g_signal_connect (panel, "presented",
+                          G_CALLBACK (on_panel_presented), the_browser);
+    }
 }
 
 /* ---------- Entry point ---------- */
@@ -2272,51 +2269,29 @@ build_browser_window (void)
 void
 open_news_browser (GtkWidget *widget, struct _session *sess)
 {
-    HxPanel *panel;
+    /* Was the panel already up before this open? create_news_browser_window
+     * (the Rust shell) raises it if so and otherwise builds + docks it, so we
+     * snapshot the state first to decide the fetch behaviour below. */
+    gboolean was_open
+        = (hx_panel_registry_lookup (HX_PANEL_ID_NEWS15) != NULL);
 
-    (void)widget;
-    (void)sess;
+    create_news_browser_window (widget, sess);
 
-    /* the browser panel lives in the
-     * toolbar's center PanelGrid. First call (the eager-construct
-     * from create_toolbar_window) builds it before any
-     * connection — so we skip the NEWSDIRLIST until we're actually
-     * connected. Later calls (user clicks the toolbar button) just
-     * raise + optionally re-fetch.
-     *
-     * The fetch-on-open behaviour matches News (1.0)'s open_news:
-     * each explicit open while connected pulls a fresh tree so the
-     * user doesn't have to hit Refresh manually after a quiet
-     * period. The Refresh button on the panel still works for
-     * mid-session reloads. */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_NEWS15);
-    if (panel != NULL) {
-        hx_panel_ensure_attached (panel);
-        panel_widget_raise (PANEL_WIDGET (panel));
-        if (connected && the_browser != NULL) {
-            g_list_store_remove_all (the_browser->root_store);
-            fetch_dirlist (the_browser, NULL);
-        }
-        return;
+    if (!was_open && the_browser != NULL) {
+        /* Freshly built: wire Ctrl+Q / Ctrl+K / Ctrl+T via init_keyaccel on
+         * br->window (the content box) in capture phase so the column view's
+         * focus chain doesn't swallow the accelerators. */
+        init_keyaccel (the_browser->window);
     }
 
-    the_browser = build_browser_window ();
-    /* Wire Ctrl+Q (quit), Ctrl+K (connect dialog), Ctrl+T (tracker)
-	 * via init_keyaccel. Ctrl+W is also in init_keyaccel's bindings,
-	 * but its handler checks GTK_IS_WINDOW and bails on a panel —
-	 * the panel's tab close is the X on the libpanel tab strip.
-	 * Controllers attach in capture phase so the column-view's
-	 * internal focus chain doesn't swallow the accelerators, and
-	 * they live on the panel widget (br->window) so they stay in
-	 * scope while the panel is focused. */
-    init_keyaccel (the_browser->window);
-
-    /* kick off the root NEWSDIRLIST so the top level
-	 * populates as soon as the panel appears — but only when
-	 * connected. Eager-construct from create_toolbar_window runs
-	 * pre-connection and just leaves the tree empty; the first
-	 * user-driven open after connect fills it in. */
-    if (connected) {
+    /* Fetch-on-open matches News (1.0): each explicit open while connected
+     * pulls a fresh tree (a re-open also clears the old one first) so the
+     * user needn't hit Refresh after a quiet period. Eager-construct before
+     * any connection just leaves the tree empty. */
+    if (connected && the_browser != NULL) {
+        if (was_open) {
+            g_list_store_remove_all (the_browser->root_store);
+        }
         fetch_dirlist (the_browser, NULL);
     }
 }

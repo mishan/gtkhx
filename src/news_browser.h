@@ -36,6 +36,16 @@ typedef struct _gnews_browser gnews_browser;
  * toolbar callback for the News (1.5+) button. */
 extern void open_news_browser (GtkWidget *widget, struct _session *sess);
 
+/* create_news_browser_window is the gtkhx-ui `news_browser` Rust shell (dock
+ * registration via dock_bridge, CENTER area); these are its C content-build +
+ * post-embed hooks. build_content builds the whole gnews_browser + content
+ * tree (stashing it in the_browser) and returns the content box; after_embed
+ * wires the one panel-level hook (PanelWidget::presented) once embedded. */
+extern void create_news_browser_window (GtkWidget *widget,
+                                        struct _session *sess);
+extern GtkWidget *gtkhx_news_browser_build_content (void);
+extern void gtkhx_news_browser_after_embed (void);
+
 /* Reply-routing hooks called from gtkhx.c::on_news_*_signal. The
  * browser registers in-flight fetches (via stub gnews_folder /
  * gnews_catalog / news_item pointers fed to the existing
