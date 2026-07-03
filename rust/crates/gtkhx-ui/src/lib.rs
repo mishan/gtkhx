@@ -16,6 +16,9 @@
 
 mod ffi;
 mod tr;
+// Shared wrapper over the C dock-embed bridge, used by every docked-window
+// shell (Users, Tasks, …). See dock_bridge.c.
+mod dock;
 
 pub mod about;
 pub mod agreement;
@@ -38,6 +41,10 @@ pub mod user_row;
 // users_bridge.c / dock_bridge.c; create_users_window is now this module's
 // #[no_mangle] export.
 pub mod users;
+// R5.10: the Tasks window shell (raise + dock registration + lifecycle).
+// The task list content + transfer-model coupling stay C in tasks.c;
+// create_tasks_window is now this module's #[no_mangle] export.
+pub mod tasks;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

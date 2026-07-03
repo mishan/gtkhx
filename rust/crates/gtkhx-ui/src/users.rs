@@ -14,72 +14,15 @@
 //! The custom view widget + its button handlers are the next Users
 //! increment; they stay C behind the bridge until then.
 
-use std::ffi::{c_char, c_void};
+use std::ffi::c_void;
 
-use crate::tr::tr;
+use crate::dock;
 
 /// Opaque C `session *`.
 type Session = c_void;
 
 /// Stable panel id — matches `HX_PANEL_ID_USERS` (`panel_registry.h`).
 const HX_ID_USERS: &str = "users";
-
-/// The libpanel dock-embed shim (`dock_bridge.c`). The `kind`/`area`
-/// ints mirror `GtkhxDockKind` / `GtkhxDockArea` in `dock_bridge.h`.
-mod dock {
-    use super::{c_char, tr};
-
-    /// `GTKHX_DOCK_KIND_SIDEBAR`.
-    pub const KIND_SIDEBAR: i32 = 1;
-    /// `GTKHX_DOCK_AREA_END` (toolbar_end_frame — the Users home).
-    pub const AREA_END: i32 = 1;
-
-    extern "C" {
-        fn gtkhx_dock_raise_if_open(id: *const c_char) -> glib::ffi::gboolean;
-        fn gtkhx_dock_embed(
-            id: *const c_char,
-            kind: i32,
-            area: i32,
-            title: *const c_char,
-            icon_name: *const c_char,
-            content: *mut gtk4::ffi::GtkWidget,
-        ) -> glib::ffi::gboolean;
-    }
-
-    /// TRUE iff a panel with `id` was already registered (re-attached +
-    /// raised, so the caller returns early instead of rebuilding).
-    pub fn raise_if_open(id: &str) -> bool {
-        let cid = crate::cs(id);
-        unsafe { gtkhx_dock_raise_if_open(cid.as_ptr()) != glib::ffi::GFALSE }
-    }
-
-    /// Embed `content` as a static docked panel titled `title_key`
-    /// (translated) with `icon_name`, at `kind`/`area`. Returns TRUE on
-    /// success; on failure `content` has already been destroyed by the
-    /// bridge, so the caller just skips its post-embed work.
-    pub fn embed(
-        id: &str,
-        kind: i32,
-        area: i32,
-        title_key: &str,
-        icon_name: &str,
-        content: *mut gtk4::ffi::GtkWidget,
-    ) -> bool {
-        let cid = crate::cs(id);
-        let ctitle = crate::cs(&tr(title_key));
-        let cicon = crate::cs(icon_name);
-        unsafe {
-            gtkhx_dock_embed(
-                cid.as_ptr(),
-                kind,
-                area,
-                ctitle.as_ptr(),
-                cicon.as_ptr(),
-                content,
-            ) != glib::ffi::GFALSE
-        }
-    }
-}
 
 extern "C" {
     /// Build the Users panel content (button bar over the scrolled view),
