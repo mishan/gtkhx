@@ -30,6 +30,11 @@ pub mod rc4_dialog;
 pub mod tls_trust_dialog;
 pub mod tracker;
 pub mod useredit;
+// R5.7: the Users window shell (raise + dock registration + lifecycle).
+// The custom view widget + action-button handlers stay C behind
+// users_bridge.c / dock_bridge.c; create_users_window is now this module's
+// #[no_mangle] export.
+pub mod users;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

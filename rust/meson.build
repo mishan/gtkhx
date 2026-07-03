@@ -93,6 +93,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/rc4_dialog.rs',
   'crates/gtkhx-ui/src/tls_trust_dialog.rs',
   'crates/gtkhx-ui/src/useredit.rs',
+  'crates/gtkhx-ui/src/users.rs',
   'crates/gtkhx-ui/src/tracker/mod.rs',
   'crates/gtkhx-ui/src/tracker/ffi.rs',
   'crates/gtkhx-ui/src/tracker/meta.rs',
