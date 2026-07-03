@@ -226,6 +226,31 @@ ensure_voice_runtime (session *sess)
  * gtk_toggle_button_set_active() inside our handler doesn't fire
  * the handler again. */
 #define KEY_SUPPRESS "voice-panel-suppress"
+/* AUTOJOIN test-hook state (see the block above voice_panel_new).
+ * KEY_AUTOJOIN_DONE guards the one-shot join; the *_ID slots hold the
+ * GLib source ids (as GUINT_TO_POINTER) for the poll + unmute timeouts
+ * so on_panel_destroy can cancel any still-pending source before the
+ * panel is freed. Each callback clears its own id on the self-removing
+ * path so the destroy handler never g_source_remove()s an already-gone
+ * (possibly GLib-recycled) id. */
+#define KEY_AUTOJOIN_DONE      "voice-panel-autojoin-done"
+#define KEY_AUTOJOIN_POLL_ID   "voice-panel-autojoin-poll-id"
+#define KEY_AUTOJOIN_UNMUTE_ID "voice-panel-autojoin-unmute-id"
+/* Upper bound (ms) on GTKHX_VOICE_AUTOUNMUTE_MS, so a negative or huge
+ * value can't wrap/truncate the guint cast into a multi-day timeout. */
+#define AUTOJOIN_UNMUTE_MAX_MS 300000
+
+/* Cancel a pending AUTOJOIN timeout stored under `key` (if any) and
+ * clear the slot. Called from the panel's destroy handler. */
+static void
+autojoin_cancel_source (GtkWidget *panel, const char *key)
+{
+    guint id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (panel), key));
+    if (id != 0) {
+        g_source_remove (id);
+        g_object_set_data (G_OBJECT (panel), key, NULL);
+    }
+}
 
 /* Registry of every live voice panel (borrowed pointers). The
  * runtime state/mute signal callbacks used to find panels by walking
@@ -243,6 +268,12 @@ static void
 on_panel_destroy (GtkWidget *panel, gpointer user_data)
 {
     (void)user_data;
+    /* Cancel any still-pending AUTOJOIN timeouts so their callbacks
+     * can't fire against this now-destroyed panel (use-after-free on
+     * KEY_SESS / KEY_JOIN_BTN during teardown). No-op in normal use —
+     * these slots are only ever set when GTKHX_VOICE_AUTOJOIN is on. */
+    autojoin_cancel_source (panel, KEY_AUTOJOIN_POLL_ID);
+    autojoin_cancel_source (panel, KEY_AUTOJOIN_UNMUTE_ID);
     if (voice_panels) {
         g_ptr_array_remove_fast (voice_panels, panel);
     }
@@ -487,6 +518,79 @@ on_mute_toggled (GtkToggleButton *btn, gpointer user_data)
     }
 }
 
+/* ---- Headless test hook: auto-join voice (GTKHX_VOICE_AUTOJOIN) ----
+ *
+ * When GTKHX_VOICE_AUTOJOIN is set in the environment, drive the REAL
+ * GUI join path (activating the Join toggle exactly as a user click
+ * would, then auto-unmuting after GTKHX_VOICE_AUTOUNMUTE_MS — default
+ * 4000) as soon as the server advertises voice. This lets two real
+ * GtkHx processes be scripted headlessly to reproduce the Janus
+ * first-joiner forwarding bug, which the VoiceRuntime test harness
+ * cannot trigger (it needs the full GUI's signaling/media timing).
+ * No effect at all unless the env var is set. */
+
+static gboolean
+autojoin_unmute_cb (gpointer user_data)
+{
+    GtkWidget *panel = user_data;
+    /* Self-removing: clear the stored id first so the destroy handler
+     * won't later g_source_remove() an id GLib may have recycled. */
+    g_object_set_data (G_OBJECT (panel), KEY_AUTOJOIN_UNMUTE_ID, NULL);
+    session *sess = g_object_get_data (G_OBJECT (panel), KEY_SESS);
+    guint32 cid =
+        GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (panel), KEY_CID));
+    if (sess && sess->voice_runtime) {
+        (void) hx_send_voice_mute (&sess->htlc, cid, FALSE);
+        gtkhx_voice_runtime_mute (sess->voice_runtime, 0);
+        debug_log ("voice", "AUTOJOIN: unmuted (cid=%u)", cid);
+    }
+    return G_SOURCE_REMOVE;
+}
+
+static gboolean
+autojoin_poll_cb (gpointer user_data)
+{
+    GtkWidget *panel = user_data;
+    if (panel_get_bool (panel, KEY_AUTOJOIN_DONE)) {
+        g_object_set_data (G_OBJECT (panel), KEY_AUTOJOIN_POLL_ID, NULL);
+        return G_SOURCE_REMOVE;
+    }
+    session *sess = g_object_get_data (G_OBJECT (panel), KEY_SESS);
+    GtkWidget *join_btn = g_object_get_data (G_OBJECT (panel), KEY_JOIN_BTN);
+    if (!sess || !join_btn) {
+        return G_SOURCE_CONTINUE;
+    }
+    /* Hold until the server has echoed voice support and the Join
+     * button is live, then activate it once. */
+    if (!panel_is_enabled (&sess->htlc)
+        || !gtk_widget_get_sensitive (join_btn)) {
+        return G_SOURCE_CONTINUE;
+    }
+    panel_set_bool (panel, KEY_AUTOJOIN_DONE, TRUE);
+    debug_log ("voice", "AUTOJOIN: activating Join button");
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (join_btn), TRUE);
+
+    gint64 unmute_ms = 4000;
+    const char *u = g_getenv ("GTKHX_VOICE_AUTOUNMUTE_MS");
+    if (u && *u) {
+        unmute_ms = g_ascii_strtoll (u, NULL, 10);
+    }
+    /* Clamp so a negative / oversized value can't wrap the guint cast. */
+    if (unmute_ms < 0) {
+        unmute_ms = 0;
+    } else if (unmute_ms > AUTOJOIN_UNMUTE_MAX_MS) {
+        unmute_ms = AUTOJOIN_UNMUTE_MAX_MS;
+    }
+    guint unmute_id =
+        g_timeout_add ((guint) unmute_ms, autojoin_unmute_cb, panel);
+    g_object_set_data (G_OBJECT (panel), KEY_AUTOJOIN_UNMUTE_ID,
+                       GUINT_TO_POINTER (unmute_id));
+    /* Poll is self-removing now; clear its stored id so the destroy
+     * handler doesn't touch a source GLib is about to reclaim. */
+    g_object_set_data (G_OBJECT (panel), KEY_AUTOJOIN_POLL_ID, NULL);
+    return G_SOURCE_REMOVE;
+}
+
 GtkWidget *
 voice_panel_new (session *sess, guint32 cid)
 {
@@ -532,6 +636,15 @@ voice_panel_new (session *sess, guint32 cid)
     }
     g_ptr_array_add (voice_panels, panel);
     g_signal_connect (panel, "destroy", G_CALLBACK (on_panel_destroy), NULL);
+
+    /* Headless test hook — no-op unless GTKHX_VOICE_AUTOJOIN is set.
+     * Track the poll source id so on_panel_destroy can cancel it if the
+     * panel dies before the join fires. */
+    if (g_getenv ("GTKHX_VOICE_AUTOJOIN")) {
+        guint poll_id = g_timeout_add (500, autojoin_poll_cb, panel);
+        g_object_set_data (G_OBJECT (panel), KEY_AUTOJOIN_POLL_ID,
+                           GUINT_TO_POINTER (poll_id));
+    }
 
     return panel;
 }

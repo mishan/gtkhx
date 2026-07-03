@@ -2358,37 +2358,56 @@ impl VoiceRuntime {
                 }
             }
 
-            // StopReceivePipeline: the matching mid's receive
-            // leg goes away (participant left, mid recycled
-            // through renegotiation). Pop the bin, set it to
-            // Null, remove it from the pipeline so it drops.
+            // StopReceivePipeline: a `user-N` section went
+            // `a=inactive` (spec leave marker — port stays 9, direction
+            // flips to inactive) so the participant's receive leg must
+            // go away. webrtcbin does NOT fire `pad-removed` on an
+            // inactive transition — the src pad lingers — so we tear the
+            // bin(s) down ourselves here, driven by the state machine
+            // parsing `a=inactive` out of the offer.
+            //
+            // Under the per-user mid model each `mid:user-N` carries a
+            // single remote, so removing every receive bin whose bin
+            // name encodes this mid is exactly right; it also sweeps up
+            // any stale duplicate a prior leave/rejoin left behind
+            // (`connect_pad_removed` still handles the SSRC-timeout /
+            // real pad-removed path independently).
             Action::StopReceivePipeline { mid } => {
-                // No-op by design. Receive bins are keyed by webrtcbin
-                // PAD name, because a bundled `mid=send` transceiver
-                // carries several receive pads (one per remote SSRC) —
-                // so a mid is the wrong granularity to tear one down,
-                // and "remove every bin for this mid" would kill
-                // sibling remotes that are still active. The
-                // authoritative, per-pad teardown is
-                // `connect_pad_removed`, which fires for the exact pad
-                // whose SSRC / transceiver went away. The state machine
-                // only produces this action from `WebrtcPadRemoved`,
-                // which the runtime no longer emits now that
-                // pad-removed drives teardown directly.
-                //
-                // Log loudly if it ever does fire: that means someone
-                // reintroduced a WebrtcPadRemoved emission and is now
-                // relying on this arm to tear a bin down — which it
-                // won't. Surfacing it here turns a silent "bins leak /
-                // remote never torn down" regression into a visible
-                // warning in CI and debug logs.
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "unexpected StopReceivePipeline(mid={mid}) — teardown \
-                     is owned by connect_pad_removed; this arm does not \
-                     remove any bin. Did a WebrtcPadRemoved emission come \
-                     back?"
-                );
+                let (pipeline, victims) = {
+                    let mut inner = self.inner.borrow_mut();
+                    let pipeline = inner.pipeline.clone();
+                    let keys: Vec<String> = inner
+                        .receive_bins
+                        .iter()
+                        .filter(|(_, bin)| {
+                            let name = bin.name();
+                            mid_from_recv_bin_name(name.as_str())
+                                == Some(mid.as_str())
+                        })
+                        .map(|(k, _)| k.clone())
+                        .collect();
+                    let mut victims: Vec<gstreamer::Bin> = Vec::new();
+                    for k in keys {
+                        if let Some(bin) = inner.receive_bins.remove(&k) {
+                            inner
+                                .recv_bin_uid_cache
+                                .remove(bin.name().as_str());
+                            victims.push(bin);
+                        }
+                    }
+                    (pipeline, victims)
+                };
+                if let Some(pipeline) = pipeline {
+                    for bin in victims {
+                        crate::debug::log!(
+                            "voice-pipe",
+                            "tearing down receive bin for inactive \
+                             mid={mid}: {}",
+                            bin.name()
+                        );
+                        stop_receive_bin(&pipeline, &bin);
+                    }
+                }
             }
 
             // ---- Mute dispatch ----
@@ -3422,6 +3441,18 @@ fn uid_from_recv_bin_name(name: &str) -> Option<u16> {
         Some(hotline_proto::voice::MidLabel::User(uid)) => Some(uid),
         _ => None,
     }
+}
+
+/// Recover the SDP mid label (`user-<uid>` or `send`) from a receive
+/// bin's element name (`hxvoice-recv-<mid>__<pad-name>`), stripping the
+/// `__<pad-name>` suffix. Used to tear down every bin for a given mid
+/// when the state machine reports it went `a=inactive`.
+fn mid_from_recv_bin_name(name: &str) -> Option<&str> {
+    let rest = name.strip_prefix(RECV_BIN_PREFIX)?;
+    Some(match rest.split_once(RECV_BIN_PAD_SEP) {
+        Some((mid, _pad)) => mid,
+        None => rest,
+    })
 }
 
 /// Parse a `voice-<uid>` RTCP cname into a Hotline user id. The

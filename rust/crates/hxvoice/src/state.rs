@@ -423,9 +423,13 @@ impl SessionMachine {
                     return Vec::new();
                 }
                 self.cache_offer_mids(&sdp);
+                let inactive = Self::inactive_recv_mids(&sdp);
                 self.bind_cid_for_offer(cid);
-                self.set_state(SessionState::OfferPending, |actions| {
+                self.set_state(SessionState::OfferPending, move |actions| {
                     actions.push(Action::CancelTimer { kind: TimerKind::JoinReply });
+                    for mid in inactive {
+                        actions.push(Action::StopReceivePipeline { mid });
+                    }
                     actions.push(Action::SetRemoteDescription { sdp });
                     actions.push(Action::CreateAnswer);
                 })
@@ -458,8 +462,12 @@ impl SessionMachine {
                     return Vec::new();
                 }
                 self.cache_offer_mids(&sdp);
+                let inactive = Self::inactive_recv_mids(&sdp);
                 self.bind_cid_for_offer(cid);
-                self.set_state(SessionState::OfferPending, |actions| {
+                self.set_state(SessionState::OfferPending, move |actions| {
+                    for mid in inactive {
+                        actions.push(Action::StopReceivePipeline { mid });
+                    }
                     actions.push(Action::SetRemoteDescription { sdp });
                     actions.push(Action::CreateAnswer);
                 })
@@ -551,6 +559,10 @@ impl SessionMachine {
                 {
                     if self.active_cid == Some(queued_cid) {
                         self.cache_offer_mids(&queued_sdp);
+                        for mid in Self::inactive_recv_mids(&queued_sdp) {
+                            answer_actions
+                                .push(Action::StopReceivePipeline { mid });
+                        }
                         self.bind_cid_for_offer(queued_cid);
                         answer_actions
                             .push(Action::SetRemoteDescription { sdp: queued_sdp });
@@ -1061,6 +1073,42 @@ impl SessionMachine {
                 }
             }
         }
+    }
+
+    /// `user-N` mids in the offer whose media section is `a=inactive`
+    /// — the spec's departed-participant marker (Capabilities-Voice.md,
+    /// Track-to-User Mapping: on leave the section keeps its `mid` but
+    /// goes `a=inactive`, port stays 9; "a section is live only while
+    /// its offered direction is `a=sendonly`").
+    ///
+    /// We return these so the caller can tear down the receive leg for
+    /// a departed user: webrtcbin does NOT fire `pad-removed` on an
+    /// inactive transition (the pad lingers), so without an explicit
+    /// teardown the old receive bin leaks and, on a rejoin (a fresh
+    /// SSRC ⇒ a new pad for the same reactivated mid), a duplicate bin
+    /// piles up.
+    ///
+    /// Section-scoped parse: track the current section's `mid` (reset
+    /// at each `m=` line) and record it if that section carries
+    /// `a=inactive`.
+    fn inactive_recv_mids(sdp: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cur_mid: Option<String> = None;
+        for line in sdp.lines() {
+            let line = line.trim_end_matches('\r');
+            if line.starts_with("m=") {
+                cur_mid = None;
+            } else if let Some(rest) = line.strip_prefix("a=mid:") {
+                cur_mid = Some(rest.to_string());
+            } else if line == "a=inactive" {
+                if let Some(mid) = &cur_mid {
+                    if mid.starts_with("user-") {
+                        out.push(mid.clone());
+                    }
+                }
+            }
+        }
+        out
     }
 
     /// Update `active_cid` when an offer arrives. Defensive: the
@@ -1588,6 +1636,76 @@ mod tests {
         // The offer's mids are cached so the new receive leg maps to
         // the right uid.
         assert_eq!(m.mid_to_user.get("user-99").copied(), Some(99));
+    }
+
+    #[test]
+    fn inactive_user_section_emits_stop_receive_pipeline() {
+        // New spec leave model (Capabilities-Voice.md, Track-to-User
+        // Mapping): a departed participant's section keeps its mid but
+        // goes a=inactive (port stays 9). webrtcbin doesn't fire
+        // pad-removed on an inactive transition, so the offer arm must
+        // emit StopReceivePipeline to tear the receive leg down — BEFORE
+        // SetRemoteDescription applies the renegotiation.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "v=0\nm=audio 9 x\na=mid:send\na=recvonly\n\
+                  m=audio 9 x\na=mid:user-5\na=sendonly\n"
+                .into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        assert_eq!(m.state(), SessionState::Connecting);
+
+        // user-5 leaves: its section flips to a=inactive.
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "v=0\nm=audio 9 x\na=mid:send\na=recvonly\n\
+                  m=audio 9 x\na=mid:user-5\na=inactive\n"
+                .into(),
+        });
+        let stop_pos = acts.iter().position(|a| {
+            matches!(a, Action::StopReceivePipeline { mid } if mid == "user-5")
+        });
+        assert!(
+            stop_pos.is_some(),
+            "expected StopReceivePipeline for inactivated user-5; got {acts:?}"
+        );
+        let setremote_pos = acts
+            .iter()
+            .position(|a| matches!(a, Action::SetRemoteDescription { .. }));
+        assert!(
+            stop_pos < setremote_pos,
+            "StopReceivePipeline must precede SetRemoteDescription; got {acts:?}"
+        );
+    }
+
+    #[test]
+    fn active_only_offer_emits_no_stop_receive_pipeline() {
+        // A plain join/renegotiation with only sendonly user sections
+        // must NOT emit any teardown — nobody left.
+        let mut m = machine();
+        m.step(Event::JoinRequested { cid: 7 });
+        m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "v=0\nm=audio 9 x\na=mid:send\na=recvonly\n\
+                  m=audio 9 x\na=mid:user-5\na=sendonly\n"
+                .into(),
+        });
+        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        let acts = m.step(Event::SdpOfferReceived {
+            cid: 7,
+            sdp: "v=0\nm=audio 9 x\na=mid:send\na=recvonly\n\
+                  m=audio 9 x\na=mid:user-5\na=sendonly\n\
+                  m=audio 9 x\na=mid:user-8\na=sendonly\n"
+                .into(),
+        });
+        assert!(
+            !acts
+                .iter()
+                .any(|a| matches!(a, Action::StopReceivePipeline { .. })),
+            "no user left → no teardown; got {acts:?}"
+        );
     }
 
     #[test]
