@@ -35,6 +35,7 @@
 #include <glib.h>
 
 #include "hotline_proto.h"
+#include "sound.h"
 #include "voice_model.h"
 
 /* Whether to emit HX_VOICE_INDICATOR_SPEAKING from compute_indicator
@@ -72,6 +73,19 @@ struct _HxVoiceModel {
     /* key: GUINT_TO_POINTER (uid as guint16), value: owned `struct
      * entry *` freed via g_free. */
     GHashTable *by_uid;
+    /* Our own uid, so join/leave notification sounds can skip our
+     * own presence changes (we always know we joined/left — the
+     * toolbar button did it). 0 == not set / self-exclusion off. */
+    guint16 self_uid;
+    /* Whether at least one participants blob has been ingested. The
+     * first blob after joining is the initial roster — every uid in
+     * it is a "join" transition from the model's empty starting
+     * point, but the user doesn't want a burst of join chimes for
+     * people who were already in the room when they arrived. So the
+     * first ingest seeds silently; only subsequent ingests play
+     * join/leave sounds. Reset by hx_voice_model_clear so a
+     * reconnect re-seeds. */
+    gboolean seeded;
 };
 
 G_DEFINE_FINAL_TYPE (HxVoiceModel, hx_voice_model, G_TYPE_OBJECT)
@@ -261,11 +275,19 @@ hx_voice_model_ingest_participants (HxVoiceModel *self, const uint8_t *blob,
         guint16 uid = ents[i].user_id;
         gboolean muted = (ents[i].flags & 0x0001) != 0;
         struct entry *e = get_or_create_entry (self, uid);
+        gboolean was_in_voice = e->in_voice;
         e->in_voice = TRUE;
         e->muted = muted;
         /* speaking flag preserved across this call — the RTP
          * probe owns it. */
         recompute_and_maybe_emit (self, uid, e);
+        /* Play a join chime for a genuine presence transition
+         * (someone who wasn't in voice a moment ago now is), but
+         * only after the initial roster has been seeded and never
+         * for our own uid. */
+        if (self->seeded && !was_in_voice && uid != self->self_uid) {
+            play_sound (VOICE_JOIN);
+        }
     }
 
     /* Second pass: transition uids that disappeared from the room.
@@ -296,6 +318,13 @@ hx_voice_model_ingest_participants (HxVoiceModel *self, const uint8_t *blob,
         e->muted = FALSE;
         e->speaking = FALSE;
         recompute_and_maybe_emit (self, uid, e);
+        /* Play a leave chime for the departing uid, subject to the
+         * same seeded + not-self gate as the join case. seeded is
+         * always TRUE here in practice (a leaver implies a prior
+         * ingest that set presence), but check it for symmetry. */
+        if (self->seeded && uid != self->self_uid) {
+            play_sound (VOICE_LEAVE);
+        }
         /* Drop the entry from the table. Keeping it around would
          * cost ~30-40 bytes per uid ever seen, which is
          * negligible per uid but unbounded under a malicious
@@ -305,6 +334,18 @@ hx_voice_model_ingest_participants (HxVoiceModel *self, const uint8_t *blob,
          * cheap (one g_new0 + one hashtable insert). */
         g_hash_table_remove (self->by_uid, leaver_key);
     }
+
+    /* Mark the model seeded once the initial roster is in. From the
+     * next ingest onward, presence transitions play join/leave
+     * chimes (above). */
+    self->seeded = TRUE;
+}
+
+void
+hx_voice_model_set_self_uid (HxVoiceModel *self, uint16_t uid)
+{
+    g_return_if_fail (HX_IS_VOICE_MODEL (self));
+    self->self_uid = uid;
 }
 
 void
@@ -360,6 +401,11 @@ hx_voice_model_clear (HxVoiceModel *self)
      * being built; safe to call here because the per-uid signal
      * emission is finished. */
     g_hash_table_remove_all (self->by_uid);
+
+    /* Re-arm the seed gate: the next participants blob after a
+     * clear (e.g. a reconnect + re-join) is once again an initial
+     * roster and must not chime for everyone already present. */
+    self->seeded = FALSE;
 }
 
 HxVoiceIndicator

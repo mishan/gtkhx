@@ -181,6 +181,7 @@ extern struct gtkhx_prefs gtkhx_prefs;
 struct hx_sounds {
     unsigned char on;
     unsigned char invite, chat, error, file, join, login, msg, news, part;
+    unsigned char voice_join, voice_leave;
 };
 
 #endif /* ndef GTKHX_PREFS_H */

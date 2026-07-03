@@ -272,6 +272,8 @@ install_data(
     'sounds/message.wav',
     'sounds/newspost.wav',
     'sounds/part.wav',
+    'sounds/voice_join.wav',
+    'sounds/voice_leave.wav',
   ),
   install_dir : get_option('datadir') / 'gtkhx' / 'sounds',
 )

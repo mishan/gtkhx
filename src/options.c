@@ -978,6 +978,15 @@ struct cfgvar {
     { CFG_SND_NEWS, { &hxsnd.news }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_PART, { &hxsnd.part }, BOOLEAN, 0, NULL, NULL },
     { CFG_SOUNDS_ON, { &hxsnd.on }, BOOLEAN, 0, NULL, NULL },
+    /* Voice join/leave sounds. Kept as pure storage regardless of
+     * HAVE_VOICE (like the CFG_VOICE_*_DEVICE prefs above) so a build
+     * without voice doesn't drop a user's saved toggles; only the
+     * Settings rows are compiled out when voice is absent. Positioned
+     * here to keep the table sorted by key string
+     * (SOUNDSON < SOUNDVOICEJOIN < SOUNDVOICELEAVE < TASKXSIZE) for
+     * the bsearch in cfgvar_for_name. */
+    { CFG_SND_VOICE_JOIN, { &hxsnd.voice_join }, BOOLEAN, 0, NULL, NULL },
+    { CFG_SND_VOICE_LEAVE, { &hxsnd.voice_leave }, BOOLEAN, 0, NULL, NULL },
     { CFG_TASK_XSIZE, { &gtkhx_prefs.geo.tasks.xsize }, INT, 0, NULL, NULL },
     { CFG_TASK_YSIZE, { &gtkhx_prefs.geo.tasks.ysize }, INT, 0, NULL, NULL },
     { CFG_THEME, { &gtkhx_prefs.theme }, STRING, 0, changed_theme, NULL },
@@ -2571,6 +2580,17 @@ settings_page_sound (AdwPreferencesPage *page)
         events, pref_switch_row (CFG_SND_NEWS, _ ("News post"), NULL));
     adw_preferences_group_add (
         events, pref_switch_row (CFG_SND_PART, _ ("Leave"), NULL));
+#ifdef HAVE_VOICE
+    /* Voice chat join/leave chimes — only offered when voice is
+     * compiled in. Without HAVE_VOICE these rows are absent (not
+     * greyed): there's no voice feature to alert about. */
+    adw_preferences_group_add (
+        events,
+        pref_switch_row (CFG_SND_VOICE_JOIN, _ ("Voice chat join"), NULL));
+    adw_preferences_group_add (
+        events,
+        pref_switch_row (CFG_SND_VOICE_LEAVE, _ ("Voice chat leave"), NULL));
+#endif /* HAVE_VOICE */
     adw_preferences_page_add (page, events);
 }
 
