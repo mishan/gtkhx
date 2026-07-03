@@ -31,16 +31,6 @@ meson setup build
 cd build && meson compile && meson install
 ```
 
-### Faster local builds (optional)
-
-The Rust dependency graph is large, and link time dominates the incremental
-edit-build loop. Installing [mold](https://github.com/rui314/mold) and copying
-`rust/.cargo/config.toml.example` to `rust/.cargo/config.toml` switches the
-linker to mold locally — often a big cut in rebuild time. It's opt-in (and
-gitignored) so it never becomes a hard build dependency; the default
-`apt install rustc cargo && meson build` flow is unaffected. CI enables mold on
-its own.
-
 ## Testing:
 
 A local mhxd instance should be running for the integration tests to run. An

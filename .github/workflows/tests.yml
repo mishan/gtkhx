@@ -69,15 +69,11 @@ jobs:
       # Flatpak runtime we target) need — Fedora 42 only had 1+, so
       # the hx-image-decode tests couldn't find a compatible loader.
       image: fedora:43
-    # RUSTFLAGS / CC_LD route both the Rust staticlib links and the C binary
-    # link through mold — link time dominates this dependency graph, so this
-    # is a meaningful per-build saving. CARGO_TARGET_DIR points `cargo test`
-    # at the *same* target dir meson's `cargo build` uses (build/rust-target),
-    # so the two share one on-disk build tree (and one restored cache) instead
-    # of compiling the workspace into two separate directories.
+    # CARGO_TARGET_DIR points `cargo test` at the *same* target dir meson's
+    # `cargo build` uses (build/rust-target), so the two share one on-disk
+    # build tree (and one restored cache) instead of compiling the workspace
+    # into two separate directories.
     env:
-      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-      CC_LD: mold
       CARGO_TARGET_DIR: ${{ github.workspace }}/build/rust-target
     steps:
       - name: checkout
@@ -129,7 +125,6 @@ jobs:
             libpanel-devel \
             libseccomp-devel lcms2-devel fontconfig-devel \
             glycin-loaders \
-            mold \
             git rust cargo
 
       - name: assert rustc meets MSRV
@@ -244,11 +239,9 @@ jobs:
     runs-on: ubuntu-latest
     container:
       image: fedora:43
-    # See build-and-test for the rationale — mold-linked builds + a single
-    # shared/cached target dir for meson's cargo build and cargo test.
+    # See build-and-test — a single shared/cached target dir for meson's
+    # cargo build and cargo test.
     env:
-      RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-      CC_LD: mold
       CARGO_TARGET_DIR: ${{ github.workspace }}/build/rust-target
     steps:
       - name: checkout
@@ -273,7 +266,6 @@ jobs:
             libpanel-devel \
             libseccomp-devel lcms2-devel \
             glycin-loaders \
-            mold \
             git rust cargo
 
       - name: meson setup (voice disabled)
@@ -507,8 +499,6 @@ jobs:
             -e GTKHX_TEST_HOST=127.0.0.1 \
             -e GTKHX_TEST_PORT=5500 \
             -e GTKHX_TEST_SOCKS=socks5://127.0.0.1:1080 \
-            -e RUSTFLAGS="-C link-arg=-fuse-ld=mold" \
-            -e CC_LD=mold \
             fedora:43 bash -c '
               dnf -y install \
                 meson ninja-build pkgconf-pkg-config gcc \
@@ -524,7 +514,6 @@ jobs:
                 desktop-file-utils appstream \
                 libpanel-devel \
                 libseccomp-devel lcms2-devel \
-                mold \
                 git rust cargo
               meson setup build
               meson compile -C build

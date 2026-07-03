@@ -151,8 +151,3 @@ setup.log
 
 # Rust build output (Cargo workspace lives in rust/)
 /rust/target/
-
-# Local cargo config (e.g. an opt-in mold/lld linker override). The tracked
-# template is rust/.cargo/config.toml.example — copy it to config.toml to
-# enable it locally without forcing the linker choice on everyone else.
-/rust/.cargo/config.toml
