@@ -23,14 +23,11 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <libpanel.h>
 #include <netinet/in.h>
 #include <sys/time.h>
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_session.h"
-#include "hx_panel.h"
-#include "panel_registry.h"
 #include "network.h"
 #include "gtkutil.h"
 #include "gtkhx_theme.h" /* gtkhx_theme_scale, GTKHX_SCALE_TASKS_ROW_ICON */
@@ -39,7 +36,7 @@
 #include "gtkhx_icon.h"
 #include "xfers.h"
 #include "sound.h"
-#include "toolbar.h"
+#include "toolbar.h" /* disconnect_clicked, toolbar_show_toast */
 #include "tasks.h"
 #include "tasks_table.h"
 
@@ -902,27 +899,20 @@ tasks_pixmap_button (const char *resource_name, const char *tooltip,
                                 GTKHX_SCALE_WINDOW_BUTTONS, cb, user_data);
 }
 
-void
-create_tasks_window (GtkWidget *widget, gpointer data)
+/* Content build for the Rust Tasks window shell (gtkhx-ui `tasks`). The
+ * dock registration moved to Rust via dock_bridge; the C content leaves —
+ * the Stop/Start/Up/Down action buttons wired to the static task_* handlers
+ * plus the task-list scroller built in create_tasks — are assembled here
+ * and handed back as one still-floating container. Mirrors
+ * users_bridge.c::gtkhx_users_bridge_build_content. */
+GtkWidget *
+gtkhx_tasks_build_content (session *sess)
 {
     GtkWidget *stopbtn, *gobtn, *upbtn, *dnbtn;
     GtkWidget *content_vbox;
     GtkWidget *button_bar;
-    HxPanel   *panel;
-    session   *sess = data;
 
-    (void)widget;  /* vestigial parent_window arg, see users.c */
-
-    /* same pattern as Users — the
-     * Tasks panel lives in the toolbar's bottom-area PanelFrame
-     * (home_area=PANEL_AREA_BOTTOM, added to toolbar_bottom_frame
-     * below). First call constructs + slots in; later calls raise. */
-    panel = hx_panel_registry_lookup (HX_PANEL_ID_TASKS);
-    if (panel != NULL) {
-        hx_panel_ensure_attached (panel);
-        panel_widget_raise (PANEL_WIDGET (panel));
-        return;
-    }
+    g_return_val_if_fail (sess != NULL, NULL);
 
     stopbtn
         = tasks_pixmap_button ("/com/nasledov/gtkhx/pixmaps/kick.png",
@@ -936,10 +926,9 @@ create_tasks_window (GtkWidget *widget, gpointer data)
                                  _ ("Move Xfer Down in Queue"),
                                  G_CALLBACK (task_dn), sess);
 
-    /* the four headerbar action
-     * buttons (Stop/Start on start, Up/Down on end) relocate to a
-     * slim top-of-content GtkBox. Same start/end grouping as the
-     * old headerbar via an hexpand spacer between. */
+    /* The four action buttons (Stop/Start on start, Up/Down on end)
+     * relocate to a slim top-of-content GtkBox with an hexpand spacer
+     * keeping the start/end grouping the old headerbar implied. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
     gtk_widget_set_margin_start (button_bar,  6);
     gtk_widget_set_margin_end   (button_bar,  6);
@@ -958,26 +947,13 @@ create_tasks_window (GtkWidget *widget, gpointer data)
     content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
     gtk_box_append (GTK_BOX (content_vbox), button_bar);
     gtk_box_append (GTK_BOX (content_vbox), sess->gtask_scroll);
+    return content_vbox;
+}
 
-    panel = hx_panel_new (HX_PANEL_ID_TASKS,
-                          HX_PANEL_KIND_SIDEBAR,
-                          PANEL_AREA_BOTTOM);
-    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Tasks"));
-    panel_widget_set_icon_name (PANEL_WIDGET (panel),
-                                "view-list-symbolic");
-    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
-
-    if (toolbar_bottom_frame != NULL) {
-        panel_frame_add (PANEL_FRAME (toolbar_bottom_frame),
-                         PANEL_WIDGET (panel));
-        hx_panel_set_home_frame (panel, toolbar_bottom_frame);
-    } else {
-        g_critical ("create_tasks_window: toolbar dock not built yet");
-    }
-
-    /* Registry takes the owning ref; do NOT g_object_unref after.
-     * See users.c for the ref-count walk-through. */
-    hx_panel_registry_register (panel);
+void
+gtkhx_tasks_after_embed (session *sess)
+{
+    g_return_if_fail (sess != NULL);
 
     gtkhx_prefs.geo.tasks.open = 1;
     gtkhx_prefs.geo.tasks.init = 1;

@@ -11,7 +11,12 @@ extern void gtask_delete_htxf (session *sess, struct htxf_conn *htxf);
  * leaves the live xfers[] list. */
 extern void gtask_clear_htxf (session *sess, struct htxf_conn *htxf);
 extern void task_update (session *sess, struct task *tsk);
+/* create_tasks_window is the gtkhx-ui `tasks` Rust shell (dock registration
+ * via dock_bridge); these two are its C content-build + post-embed
+ * lifecycle hooks, mirroring users_bridge.c. */
 extern void create_tasks_window (GtkWidget *widget, gpointer data);
+extern GtkWidget *gtkhx_tasks_build_content (session *sess);
+extern void gtkhx_tasks_after_embed (session *sess);
 extern void file_update (session *sess, struct htxf_conn *htxf);
 extern void task_delete (session *sess, struct task *tsk);
 extern void task_error (struct htlc_conn *htlc);
