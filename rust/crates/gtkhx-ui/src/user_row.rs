@@ -108,6 +108,63 @@ glib::wrapper! {
 }
 
 impl HxUserRow {
+    /// The borrowed `struct hx_user *` this row wraps (may be NULL).
+    pub(crate) fn user_ptr(&self) -> *mut c_void {
+        self.imp().user.get()
+    }
+
+    /// The row's uid (0 for a NULL user). Delegates to the C `hx_user_uid`
+    /// so the struct layout stays pinned C-side.
+    pub(crate) fn uid_of(&self) -> u16 {
+        let u = self.imp().user.get();
+        if u.is_null() {
+            0
+        } else {
+            unsafe { hx_user_uid(u) }
+        }
+    }
+
+    /// The display name as raw bytes (no trailing NUL), for the
+    /// case-insensitive name sort — mirrors the old cmp_name byte compare.
+    pub(crate) fn name_bytes(&self) -> Vec<u8> {
+        self.imp().name.borrow().to_bytes().to_vec()
+    }
+
+    /// Construct a row over borrowed `user` with the C name string, for the
+    /// Rust `HxUserListView`. Same body as `hx_user_row_new`.
+    ///
+    /// # Safety
+    /// `nam` is NULL or a valid C string; `user` a borrowed `hx_user *`.
+    pub(crate) unsafe fn new_row(
+        user: *mut c_void,
+        nam: *const c_char,
+        icon: u16,
+        color: u16,
+    ) -> Self {
+        let obj = glib::Object::new::<HxUserRow>();
+        let imp = obj.imp();
+        imp.user.set(user);
+        imp.name.replace(cstring_from(nam));
+        imp.icon.set(icon);
+        imp.color.set(color);
+        obj.refresh_fg();
+        obj
+    }
+
+    /// In-place state mutate + fire "changed" (typed wrapper over the C-ABI
+    /// `hx_user_row_set_state` body).
+    ///
+    /// # Safety
+    /// `nam` is NULL or a valid C string.
+    pub(crate) unsafe fn set_state_row(&self, nam: *const c_char, icon: u16, color: u16) {
+        self.set_state_rs(nam, icon, color);
+    }
+
+    /// Fire "changed" without mutating state (avatar refresh).
+    pub(crate) fn touch_row(&self) {
+        self.emit_by_name::<()>("changed", &[]);
+    }
+
     /// Recompute the cached foreground from the row's user + status.
     /// Always calls `user_nick_color_gdk`, including with a NULL user: it's
     /// NULL-safe and still returns the status-palette color (away/admin) or
