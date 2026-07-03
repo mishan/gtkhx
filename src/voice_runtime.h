@@ -352,6 +352,12 @@ extern void gtkhx_voice_runtime_leave (gtkhx_voice_runtime *rt, uint32_t cid);
 /* Fire Event::MuteToggleRequested { muted }. */
 extern void gtkhx_voice_runtime_mute (gtkhx_voice_runtime *rt, int muted);
 
+/* Record the local user's Hotline uid so the send leg's level VAD lights
+ * the local user's own speaker indicator when they talk. Call once when
+ * joining voice. */
+extern void gtkhx_voice_runtime_set_self_uid (gtkhx_voice_runtime *rt,
+                                              uint16_t uid);
+
 /* Fire Event::SdpOfferReceived { cid, sdp }. sdp is a NUL-terminated
  * C string; NULL is treated as empty (and dropped by the state
  * machine's downstream parser). */

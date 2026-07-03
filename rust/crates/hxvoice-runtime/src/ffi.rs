@@ -582,6 +582,23 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_mute(
     });
 }
 
+/// Record the local user's Hotline uid so the send leg's `level` VAD
+/// can light the LOCAL user's own speaker indicator when they talk.
+/// Call once when joining voice (the uid is stable for the session).
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_set_self_uid(
+    rt: *mut VoiceRuntime,
+    uid: u16,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.set_self_uid(uid);
+}
+
 /// Fire `Event::SdpOfferReceived { cid, sdp }`. Called from
 /// `rcv_task_voice_join` / `hx_rcv_voice_sdp_offer` after the
 /// server's 602 reply lands and the SDP has been extracted.

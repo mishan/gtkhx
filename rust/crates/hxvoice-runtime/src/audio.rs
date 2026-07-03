@@ -509,6 +509,12 @@ fn attach_buffer_probe(
 /// agree on the string.
 pub const SEND_VOLUME_ELEMENT_NAME: &str = "hxvoice-send-volume";
 
+/// Name of the send `gst::Bin`. The runtime passes this to
+/// [`make_send_bin`] and matches on it in `handle_level_message` to
+/// route the send leg's `level` RMS windows to the LOCAL user's speaker
+/// indicator (outgoing VAD) instead of a remote uid.
+pub const SEND_BIN_NAME: &str = "hxvoice-send-bin";
+
 /// Build a send-leg `gst::Bin` that captures audio from the system
 /// microphone, encodes to μ-law, payloads as RTP/PCMU, and exposes
 /// a single source pad ready to link to `webrtcbin`'s sink request
@@ -589,9 +595,27 @@ pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> 
     let caps = make_pcm8khz_caps_filter()?;
     let enc = make_mulaw_encoder()?;
     let pay = gst::ElementFactory::make("rtppcmupay").build().ok()?;
-    bin.add_many([&src, &conv, &volume, &res, &caps, &enc, &pay]).ok()?;
-    gst::Element::link_many([&src, &conv, &volume, &res, &caps, &enc, &pay])
-        .ok()?;
+    // Outgoing VAD: a `level` meter right AFTER the mute `volume`, so it
+    // measures what we actually transmit — muting (volume silence) reads
+    // as not-speaking, unmuted speech reads as speaking. Its RMS windows
+    // post `level` bus messages that `handle_level_message` routes to the
+    // LOCAL user's speaker indicator (this bin is `SEND_BIN_NAME`). The
+    // meter is optional: if the `level` element is unavailable we build
+    // the send bin without it (no outgoing VAD, audio still flows) — the
+    // same graceful degradation the receive bin uses.
+    let level = make_level_meter();
+    if let Some(level) = &level {
+        bin.add_many([&src, &conv, &volume, level, &res, &caps, &enc, &pay])
+            .ok()?;
+        gst::Element::link_many([&src, &conv, &volume, level, &res, &caps,
+                                 &enc, &pay])
+            .ok()?;
+    } else {
+        bin.add_many([&src, &conv, &volume, &res, &caps, &enc, &pay]).ok()?;
+        gst::Element::link_many([&src, &conv, &volume, &res, &caps, &enc,
+                                 &pay])
+            .ok()?;
+    }
     // Diagnostic probe: count buffers as they exit the
     // payloader. If both peers receive exactly one packet over
     // a working WebRTC session and then go silent, the question
