@@ -1117,6 +1117,15 @@ phase reuses:
   Connect dialogs) never touched libpanel, which is why this only surfaces
   now. **The Tracker is NOT docked** — it's a standalone top-level window
   (stale "tracker is a CENTER panel" comments were corrected).
+- **`preview.c` is standalone too, but external-viewer-heavy.** The file
+  preview window is a `GtkWindow` (no dock), so it's free of the libpanel
+  question — but it has four viewers (text / image / PDF / source) and
+  cross-thread HTXF-worker marshaling. Its Rust port hinges on `sourceview5`
+  + a poppler crate aligning with the pinned gtk4 0.10, gated behind Cargo
+  features like the existing `HAVE_POPPLER` / `HAVE_GTKSOURCEVIEW`. See
+  **[preview-porting-scoping.md](preview-porting-scoping.md)**. Standalone
+  dialogs/windows already ported: Tracker (R5.1), About/Agreement/User Editor
+  (R5.2), Connect/Bookmarks/RC4 (R5.3), TLS-trust (R5.4).
 - **The `gtk_hlist_compat` shim is the choke point.** Five consumers use it:
   `tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`. Each window's
   port also kills its `gtk_hlist_compat` usage. The shim file itself
