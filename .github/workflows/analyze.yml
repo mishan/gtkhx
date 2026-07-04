@@ -1,32 +1,26 @@
 # GtkHx code analysis — sanitizers + static analyzers.
 #
-# Three jobs that complement the tests.yml functional suite:
+# Two jobs that complement the tests.yml functional suite:
 #
-#   sanitize       — ASan + UBSan over unit + proto tests. Catches
-#                    use-after-free, OOB reads/writes, undefined
-#                    integer overflow, NULL dereferences, etc. Runs
-#                    the same test binaries the normal CI runs, just
-#                    instrumented.
+#   sanitize-and-analyze — ASan + UBSan over unit + proto tests (blocking),
+#                    then GCC's -fanalyzer static pass (advisory). Both build
+#                    the C tree, but the Rust staticlibs are byte-identical
+#                    between them (sanitizer / analyzer flags never reach the
+#                    `cargo build --release` custom_target), so a single shared
+#                    cargo target dir lets the ~300-crate Rust graph compile
+#                    ONCE — only the C objects are re-compiled with each set of
+#                    flags. The -fanalyzer steps are step-level
+#                    continue-on-error so analyzer findings never red the job;
+#                    the ASan/UBSan test result does block.
 #
-#   gcc-analyzer   — GCC's static analyzer (-fanalyzer) over the
-#                    whole tree. Finds NULL derefs, leaks, double-
-#                    frees, out-of-bounds writes statically.
+#   clang-tidy     — Runs the .clang-tidy config across src/. Kept separate:
+#                    it only needs compile_commands.json (no full compile, no
+#                    Rust build), so it shares nothing with the build above.
 #
-#   clang-tidy     — Runs the .clang-tidy config in the repo root
-#                    across src/. Catches portability issues, code-
-#                    style consistency violations, modernization
-#                    opportunities.
-#
-# All three are continue-on-error for now. The first run will surface
-# ~50+ -fanalyzer warnings in vintage C paths (xtext, dfa, cipher,
-# etc.) that we don't intend to fix in one go — these jobs exist as
-# a "what's new vs. baseline" signal, with uploaded artifacts for the
-# triage queue. Once a category gets cleaned up, flip its job to
-# mandatory.
-#
-# The full sanitize run on unit+proto adds ~1 min on top of the
-# normal build, gcc-analyzer adds ~2 min, clang-tidy ~3 min. None of
-# them blocks tests.yml — they run in parallel with it.
+# The -fanalyzer / clang-tidy passes surface ~50+ findings in vintage C paths
+# (xtext, dfa, cipher, …) we don't intend to fix in one go — they exist as a
+# "what's new vs. baseline" signal with uploaded artifacts for the triage
+# queue. Flip a category to blocking once it's clean.
 
 name: analyze
 
@@ -45,8 +39,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  sanitize:
-    name: ASan + UBSan (unit + proto)
+  sanitize-and-analyze:
+    name: ASan + UBSan (unit + proto) + GCC -fanalyzer
     runs-on: ubuntu-latest
     container:
       image: fedora:43
@@ -55,13 +49,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: install build deps
-        # GStreamer (Phase 8.B): meson.build probes gstreamer-1.0,
-        # -app-1.0, -audio-1.0, -sdp-1.0, -webrtc-1.0. The sanitize /
-        # gcc-analyzer / clang-tidy jobs all do a full configure +
-        # compile of the C tree, so they need the same dev packages
-        # the build-and-test job installs. Without these, meson setup
-        # exits with "Dependency gstreamer-1.0 not found" and the
-        # whole job goes red.
+        # Union of the ASan + analyzer dep sets. libasan / libubsan back the
+        # sanitized build; the GStreamer stack + desktop-file-utils / appstream
+        # are needed for meson to configure (it probes gstreamer-1.0 etc. and
+        # references update-desktop-database at setup time).
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -82,40 +73,40 @@ jobs:
             libseccomp-devel lcms2-devel \
             git rust cargo
 
+      - name: cache rust build
+        # ONE shared cargo target dir (rust-cargo-target) for both the ASan and
+        # the -fanalyzer build below. It lives outside either meson build dir,
+        # so it restores cleanly before `meson setup` and — because the Rust
+        # staticlibs are plain `--release` in both — the analyzer build reuses
+        # what the ASan build compiled. Keyed on Cargo.lock + rustc.
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "rust -> ${{ github.workspace }}/rust-cargo-target"
+
+      # ---- ASan + UBSan (blocking) -----------------------------------------
       - name: meson setup (sanitizers)
-        # b_sanitize: combines AddressSanitizer + UndefinedBehavior
-        #   Sanitizer flags on every compile and link.
-        # b_lundef=false: ASan injects undefined symbols at link time
-        #   that meson would otherwise reject under -Wl,-z,defs.
-        # buildtype=debug: keep frame pointers + line info so ASan
-        #   reports are readable.
+        # b_sanitize: AddressSanitizer + UndefinedBehaviorSanitizer on every C
+        #   compile + link. b_lundef=false: ASan injects undefined symbols the
+        #   default -Wl,-z,defs would reject. buildtype=debug: readable frames.
+        # cargo_target_dir: the shared dir, so this build's Rust compile is the
+        #   one the analyzer build reuses.
         run: |
           meson setup build-asan \
             -Db_sanitize=address,undefined \
             -Db_lundef=false \
-            -Dbuildtype=debug
+            -Dbuildtype=debug \
+            -Dcargo_target_dir=${{ github.workspace }}/rust-cargo-target
 
-      - name: cache rust build
-        # After meson setup (which won't configure a non-empty build dir)
-        # and before compile. Warm cache skips recompiling the dependency
-        # graph. The cargo build is plain release, identical to the other
-        # jobs' — but keyed to this build dir, so it's a separate entry.
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "rust -> ${{ github.workspace }}/build-asan/rust-target"
-
-      - name: meson compile
+      - name: meson compile (sanitizers)
+        # Builds the Rust workspace into the shared target dir + the ASan/UBSan
+        # C objects. (The Rust staticlibs aren't sanitizer-instrumented — meson
+        # doesn't pass -fsanitize to cargo — same as before; ASan covers the C.)
         run: meson compile -C build-asan
 
       - name: meson test (unit + proto under ASan/UBSan)
-        # detect_leaks=0: GtkHx doesn't tear down every malloc on
-        #   shutdown (and we don't need it to). Disabling leak
-        #   detection focuses ASan on the real bugs — use-after-free,
-        #   OOB, double-free.
-        # halt_on_error=0: keep going past the first UBSan finding so
-        #   we get the full set in one CI run.
-        # print_stacktrace=1: UBSan stack traces by default are
-        #   address-only; this enables symbolised frames.
+        # detect_leaks=0: GtkHx doesn't tear down every alloc on shutdown.
+        # halt_on_error=0: collect the full UBSan set in one run.
+        # print_stacktrace=1: symbolised UBSan frames.
         env:
           ASAN_OPTIONS: detect_leaks=0:abort_on_error=0:print_summary=1
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=0
@@ -123,65 +114,29 @@ jobs:
           meson test -C build-asan --suite unit --suite proto \
             --print-errorlogs
 
-      - name: upload meson test logs
+      - name: upload sanitize logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: meson-logs-sanitize
           path: build-asan/meson-logs/
 
-  gcc-analyzer:
-    # GCC's -fanalyzer is a path-sensitive symbolic-execution checker
-    # that runs alongside the normal compile. Finds NULL derefs, OOB,
-    # double-free, leaks, use-after-free. Much slower than a plain
-    # build — pin the runner to a hot cache when iterating.
-    name: GCC -fanalyzer
-    runs-on: ubuntu-latest
-    container:
-      image: fedora:43
-    continue-on-error: true
-    steps:
-      - name: checkout
-        uses: actions/checkout@v4
-
-      - name: install build deps
-        # See sanitize job above for the GStreamer rationale.
-        run: |
-          dnf -y install \
-            meson ninja-build pkgconf-pkg-config gcc \
-            gtk4-devel libadwaita-devel \
-            glib2-devel gobject-introspection-devel \
-            nettle-devel zlib-devel \
-            gsound-devel \
-            gstreamer1-devel \
-            gstreamer1-plugins-base-devel \
-            gstreamer1-plugins-bad-free-devel \
-            gstreamer1-plugins-bad-free-extras \
-            gstreamer1-plugins-good \
-            libsoup3-devel \
-            gettext-devel \
-            desktop-file-utils appstream \
-            libpanel-devel \
-            libseccomp-devel lcms2-devel \
-            git rust cargo
-
+      # ---- GCC -fanalyzer (advisory; reuses the shared Rust build) ---------
       - name: meson setup (-fanalyzer)
-        # Wno-analyzer-too-complex: gives up on the analysis early
-        #   for big functions instead of crashing the compile. We'd
-        #   rather lose coverage on the heaviest few than red CI.
+        # Same shared cargo target dir: the Rust staticlibs are already built
+        # (identical `--release` output), so this build only re-compiles the C
+        # objects with -fanalyzer. Wno-analyzer-too-complex: bail on the
+        # heaviest functions rather than crash the compile.
+        continue-on-error: true
         run: |
           meson setup build-analyzer \
-            -Dc_args='-fanalyzer -Wno-analyzer-too-complex'
-
-      - name: cache rust build
-        # After meson setup, before compile — see the sanitize job.
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "rust -> ${{ github.workspace }}/build-analyzer/rust-target"
+            -Dc_args='-fanalyzer -Wno-analyzer-too-complex' \
+            -Dcargo_target_dir=${{ github.workspace }}/rust-cargo-target
 
       - name: compile + capture warnings
-        # Tee the full output for the artifact, and produce a
-        # categorised summary that's easy to skim in the CI log.
+        # continue-on-error: -fanalyzer findings (and the occasional analyzer
+        # ICE) are advisory — they upload as artifacts and never red the job.
+        continue-on-error: true
         run: |
           set -o pipefail
           meson compile -C build-analyzer 2>&1 \
@@ -204,9 +159,10 @@ jobs:
             build-analyzer/analyzer-summary.txt
 
   clang-tidy:
-    # Runs the .clang-tidy config at the repo root across every
-    # entry in compile_commands.json. The config is conservative —
-    # see .clang-tidy for which check groups are enabled.
+    # Runs the .clang-tidy config at the repo root across every entry in
+    # compile_commands.json. Kept as its own job: it only needs the
+    # compile-commands database (meson setup) — no full compile, no Rust
+    # build — so it shares nothing with the build above.
     name: clang-tidy
     runs-on: ubuntu-latest
     container:
@@ -217,11 +173,8 @@ jobs:
         uses: actions/checkout@v4
 
       - name: install build deps + clang-tools-extra
-        # clang-tools-extra ships clang-tidy + run-clang-tidy. We
-        # still build with gcc — clang-tidy only needs the compile-
-        # commands database to know how to invoke its frontend per
-        # translation unit.
-        # See sanitize job above for the GStreamer rationale.
+        # clang-tools-extra ships clang-tidy + run-clang-tidy. We still build
+        # with gcc — clang-tidy only needs the compile-commands database.
         run: |
           dnf -y install \
             meson ninja-build pkgconf-pkg-config gcc \
@@ -246,11 +199,9 @@ jobs:
         run: meson setup build-tidy
 
       - name: run clang-tidy across src/
-        # run-clang-tidy parallelises across cores and respects the
-        # repo's .clang-tidy. -p points it at the compile-commands.
-        # The .c-only filter avoids dragging in the system headers
-        # we ignore via HeaderFilterRegex anyway.
-        # ALWAYS exit 0 so the artifact upload still runs.
+        # run-clang-tidy parallelises across cores and respects the repo's
+        # .clang-tidy. -p points it at the compile-commands. ALWAYS exit 0 so
+        # the artifact upload still runs.
         run: |
           set +e
           run-clang-tidy -p build-tidy -j "$(nproc)" \
