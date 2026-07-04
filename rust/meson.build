@@ -138,6 +138,10 @@ rust_sources = files(
   'crates/hx-image-decode/src/decode.rs',
   'crates/hx-image-decode/src/ffi_result.rs',
   'crates/hx-image-decode/src/telemetry.rs',
+  # CI feature-unification shim (crates/feature-unify) — pins Cargo
+  # features so the voice-off/voice-on builds share their dependency
+  # compiles. Empty lib; see its Cargo.toml.
+  'crates/feature-unify/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
   'crates/hxcrypto-hash/Cargo.toml',
@@ -153,6 +157,7 @@ rust_sources = files(
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
+  'crates/feature-unify/Cargo.toml',
 )
 # cargo-sources.json is regenerated from Cargo.lock for the Flatpak
 # offline build; it is not consumed by `cargo build` directly. Cargo.lock

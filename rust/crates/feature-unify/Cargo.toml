@@ -1,0 +1,38 @@
+[package]
+name = "feature-unify"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "CI Cargo-feature unification shim — not linked into the binary (see src/lib.rs)."
+publish = false
+
+[lib]
+crate-type = ["rlib"]
+
+# --- Feature unification for the two-build CI job ----------------------------
+# The `build-and-test` job builds the workspace twice sharing ONE Cargo target
+# dir: first voice-DISABLED (`--workspace --exclude hxvoice hxvoice-runtime`,
+# on a host with no GStreamer), then voice-ENABLED. The voice crates enable
+# extra features on these four low-level crates — hxvoice pulls
+# `hashbrown/default-hasher`; gstreamer-rs (via hxvoice-runtime) pulls
+# `either/use_std`, `num-traits/i128`, `smallvec/write`. When the first build
+# EXCLUDES the voice crates those features vanish, which changes each crate's
+# fingerprint and cascades a recompile of ~108 downstream crates (glib, gtk4,
+# gio, libadwaita, rustls, tokio, glycin, …) in the second build.
+#
+# This crate is always built (it's a plain workspace member, excluded from
+# neither build) and re-declares exactly those extra features, so both builds
+# resolve them identically and the shared crates compile once. It is never
+# linked or referenced — its only job is to pin the feature set.
+#
+# Keep in sync if a `cargo update` shifts what the voice stack enables. To
+# check for a residual delta, diff the resolved features of the two builds:
+#   RUSTC_BOOTSTRAP=1 cargo build -Zunstable-options --unit-graph --release \
+#     --features hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3 > full.json
+#   (add `--workspace --exclude hxvoice --exclude hxvoice-runtime` for novoice)
+# and compare the per-crate "features" arrays.
+[dependencies]
+either = { version = "1", features = ["use_std"] }
+hashbrown = { version = "0.17", features = ["default-hasher"] }
+num-traits = { version = "0.2", features = ["i128"] }
+smallvec = { version = "1", features = ["write"] }
