@@ -38,8 +38,17 @@ pub mod useredit;
 pub mod user_row;
 // R5.9: HxUserListView — the GtkColumnView-backed user list. Exports the
 // hx_user_list_view_* C ABI users.c / chat.c link against; the custom Name
-// cell + voice column stay C behind FFI (users_cell.c / users_voice_col.c).
+// cell stays C behind FFI (users_cell.c).
 pub mod users_view;
+// R5.18: the user-list voice-indicator column (was users_voice_col.c).
+// Behind the `voice` feature; a NULL stub otherwise. Exports
+// gtkhx_users_voice_column_new that users_view.rs appends.
+pub mod users_voice_col;
+// R5.19: the per-chat voice toolbar (was voice_panel.c). Wholly behind the
+// `voice` feature — its C callers (chat.c / users_bridge.c / gtkutil.c) are
+// #ifdef HAVE_VOICE, so no voice-off stub is needed. Exports voice_panel_*.
+#[cfg(feature = "voice")]
+pub mod voice_panel;
 // R5.7: the Users window shell (raise + dock registration + lifecycle).
 // The custom view widget + action-button handlers stay C behind
 // users_bridge.c / dock_bridge.c; create_users_window is now this module's

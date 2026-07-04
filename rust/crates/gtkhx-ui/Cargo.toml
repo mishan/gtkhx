@@ -49,3 +49,15 @@ gtk4 = { workspace = true, features = ["v4_10"] }
 # floor), and the C dialogs used these same widgets, so the binding-feature
 # gate just needs turning on.
 libadwaita = { workspace = true, features = ["v1_6"] }
+
+[features]
+# `voice` gates the user-list voice-indicator column (users_voice_col) and
+# the per-chat voice toolbar (voice_panel), which reach the voice model /
+# runtime / wire senders (hxvoice-runtime + voice_model.c + voice.c). Turned
+# on by rust/meson.build only when the top-level `-Dvoice` gate is enabled
+# (voice_enabled) — the same switch that compiles the C voice sources and
+# builds the hxvoice / hxvoice-runtime crates. With the feature off, both
+# modules compile to NULL-returning / no-op stubs so the C ABI symbols the
+# always-compiled callers link against (gtkhx_users_voice_column_new,
+# voice_panel_*) still resolve.
+voice = []
