@@ -1750,6 +1750,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxchat-model"
+version = "0.1.0"
+
+[[package]]
 name = "hxchat-send"
 version = "0.1.0"
 dependencies = [
