@@ -84,9 +84,15 @@ impl HxMember {
         imp.ignore.set(m.ignore);
     }
 
-    /// Overwrite the member's fields in place (a rename / recolour) without
-    /// creating a new object — keeping GObject identity + selection — then emit
-    /// `"changed"` so a bound cell re-snapshots this one row.
+    /// Overwrite the member's *wire-sourced* fields in place (a rename /
+    /// recolour) without creating a new object — keeping GObject identity +
+    /// selection — then emit `"changed"` so a bound cell re-snapshots this one
+    /// row.
+    ///
+    /// The `ignore` flag is **preserved**, not copied from `m`: it's a
+    /// client-local state the model owns (set via [`HxMemberModel::set_ignore`]),
+    /// not something the wire USER_CHANGE carries, so a presence update must not
+    /// clear it. `uid` is likewise left alone (it's the model key).
     fn set_from(&self, m: &Member) {
         // An update must be for the same uid — uid is the model key + index.
         // A mismatched Member here would silently desync HxMemberModel's
@@ -96,8 +102,19 @@ impl HxMember {
             m.uid,
             "HxMember::set_from called with a different uid"
         );
-        self.store(m);
+        let imp = self.imp();
+        imp.icon.set(m.icon);
+        imp.status.set(m.status);
+        imp.nick_color.set(m.nick_color);
+        imp.name.replace(m.name.clone());
         self.emit_by_name::<()>("changed", &[]);
+    }
+
+    /// Set the client-local `ignore` flag. No `"changed"` signal — `ignore`
+    /// isn't a rendered property (it filters incoming messages, it doesn't
+    /// change the row's appearance), so a re-snapshot would be wasted work.
+    fn set_ignore(&self, ignore: bool) {
+        self.imp().ignore.set(ignore);
     }
 
     pub fn uid(&self) -> u16 {
@@ -247,6 +264,36 @@ impl HxMemberModel {
         let imp = self.imp();
         let i = *imp.index.borrow().get(&uid)?;
         Some(imp.items.borrow()[i].clone())
+    }
+
+    /// Set the client-local `ignore` flag on the member with `uid`. Returns
+    /// whether a member was found. Survives later `upsert` presence updates
+    /// (see [`HxMember::set_from`]).
+    pub fn set_ignore(&self, uid: u16, ignore: bool) -> bool {
+        // Clone the item out before mutating so no `items` borrow is held
+        // across the call (matches the `upsert` reentrancy discipline, even
+        // though `set_ignore` emits no signal).
+        let Some(m) = self.get(uid) else {
+            return false;
+        };
+        m.set_ignore(ignore);
+        true
+    }
+
+    /// The `ignore` flag for `uid`, or `false` when the member is absent.
+    pub fn get_ignore(&self, uid: u16) -> bool {
+        self.get(uid).map(|m| m.ignore()).unwrap_or(false)
+    }
+
+    /// Flip the `ignore` flag for `uid` and return the new state (`false` and
+    /// no change if the member is absent).
+    pub fn toggle_ignore(&self, uid: u16) -> bool {
+        let next = !self.get_ignore(uid);
+        if self.set_ignore(uid, next) {
+            next
+        } else {
+            false
+        }
     }
 }
 

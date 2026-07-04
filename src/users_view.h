@@ -67,10 +67,10 @@ typedef enum {
     HX_USER_LIST_STYLE_CHAT,      /* chat / pchat sidebar */
 } HxUserListStyle;
 
-/* Construct a fresh view. `sess` is borrowed for the lifetime
- * of the view — feeds the right-click handler so it can drive
- * the existing user_popup. */
-extern HxUserListView *hx_user_list_view_new (session *sess,
+/* Construct a fresh view for chat `cid` (0 = public / Users window).
+ * `sess` is borrowed for the lifetime of the view — feeds the right-click
+ * handler so it can resolve the acted-on member by (cid, uid). */
+extern HxUserListView *hx_user_list_view_new (session *sess, guint32 cid,
                                               HxUserListStyle style);
 
 /* Return the top-level widget to pack into a window. The widget
@@ -80,32 +80,34 @@ extern HxUserListView *hx_user_list_view_new (session *sess,
  * border, etc.). */
 extern GtkWidget *hx_user_list_view_get_widget (HxUserListView *v);
 
-/* Row management. Each `struct hx_user *` is a borrowed pointer;
- * the row holds it without ownership. Caller is responsible for
- * making sure the hx_user outlives any row entries that point
- * at it (in practice: the per-chat `chat->users` GHashTable
- * outlives the view). */
-extern void hx_user_list_view_add (HxUserListView *v, struct hx_user *user,
+/* Row management by member value (M4b.4b-i: uid + display fields, no
+ * borrowed hx_user*). The row copies what it needs and holds no pointer
+ * into any C store. */
+extern void hx_user_list_view_add (HxUserListView *v, guint16 uid,
                                    const char *nam, guint16 icon,
-                                   guint16 color);
-extern void hx_user_list_view_remove (HxUserListView *v, struct hx_user *user);
-extern void hx_user_list_view_update (HxUserListView *v, struct hx_user *user,
+                                   guint16 color, guint32 nick_color);
+extern void hx_user_list_view_remove (HxUserListView *v, guint16 uid);
+extern void hx_user_list_view_update (HxUserListView *v, guint16 uid,
                                       const char *nam, guint16 icon,
-                                      guint16 color);
-/* Re-snapshot `user`'s row to pick up a GIF avatar change (Phase 10.B).
- * No state mutation — the avatar lives in the gif_avatar cache, keyed
- * by uid; this just nudges the cell to re-read it. No-op if the view
- * has no row for `user`. */
-extern void hx_user_list_view_refresh_avatar (HxUserListView *v,
-                                              struct hx_user *user);
+                                      guint16 color, guint32 nick_color);
+/* Re-snapshot member `uid`'s row to pick up a GIF avatar change (Phase
+ * 10.B). No state mutation — the avatar lives in the gif_avatar cache,
+ * keyed by uid; this just nudges the cell to re-read it. No-op if the
+ * view has no row for `uid`. */
+extern void hx_user_list_view_refresh_avatar (HxUserListView *v, guint16 uid);
 extern void hx_user_list_view_clear (HxUserListView *v);
 
-/* Return the user under the live single-selection, or NULL if no
- * row is selected. This is what the headerbar toolbar buttons
- * (Msg / Kick / Info / Ban / Chat / Ignore) consult to know
- * which user to act on — replaces the old `user_storow` global
- * that was stamped on every primary press. */
-extern struct hx_user *hx_user_list_view_get_selected_user (HxUserListView *v);
+/* Return the uid under the live single-selection, or 0 if no row is
+ * selected. This is what the headerbar toolbar buttons (Msg / Kick /
+ * Info / Ban / Chat / Ignore) consult to know which user to act on;
+ * they resolve the struct hx_user (when still needed) via
+ * hx_user_with_uid(chat_with_cid(sess, cid), uid). M4b.3b-ii: the
+ * selection identity is the uid, not a borrowed hx_user*. */
+extern guint16 hx_user_list_view_get_selected_uid (HxUserListView *v);
+
+/* The chat id this view lists (0 = public). Pairs with the selected
+ * uid to resolve a member against sess->chats. */
+extern guint32 hx_user_list_view_get_cid (HxUserListView *v);
 
 /* Apply font changes from the global users_font_desc (Settings
  * → Misc → User-list font). Called on prefs change so live views

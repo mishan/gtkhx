@@ -394,7 +394,7 @@ void
 msgwin_refresh_user_info (struct msgwin *msg)
 {
     struct chat *pubchat;
-    struct hx_user *user = NULL;
+    struct hx_member_info mi;
 
     if (!msg) {
         return;
@@ -407,10 +407,10 @@ msgwin_refresh_user_info (struct msgwin *msg)
 	 * against a NULL chat / chat->users so we don't need an extra
 	 * mid-disconnect guard. */
     pubchat = chat_with_cid (hx_active_session (), 0);
-    user = hx_user_with_uid (pubchat, *msg->uid);
 
-    if (user) {
-        msg_apply_user_view (msg, user->name, user->icon, user->color, TRUE);
+    if (pubchat
+        && hx_member_model_get_info (pubchat->member_model, *msg->uid, &mi)) {
+        msg_apply_user_view (msg, mi.name, mi.icon, mi.status, TRUE);
     } else {
         msg_apply_user_view (msg, NULL, 0, 0, FALSE);
     }

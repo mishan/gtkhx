@@ -49,7 +49,8 @@ build_view (session *sess)
      * picks the standalone chrome: 24-px rows, 1.25× pixel scale, text
      * outline, 36-px text offset. The view installs its own right-click
      * gesture that pops user_popup. */
-    view = hx_user_list_view_new (sess, HX_USER_LIST_STYLE_USERS);
+    /* The standalone Users window always lists the public chat (cid 0). */
+    view = hx_user_list_view_new (sess, 0, HX_USER_LIST_STYLE_USERS);
     cv_widget = hx_user_list_view_get_widget (view);
 
     if (!users_font_desc) {

@@ -29,6 +29,17 @@ extern guint16 hx_user_uid (const struct hx_user *user);
  * on activate without knowing the struct layout. */
 extern const char *hx_user_name (const struct hx_user *user);
 
+/* user->nick_color (0x00RRGGBB, or HX_NICK_COLOR_NONE when unset / NULL
+ * user). M4b.3b: lets HxUserRow cache the nick_color so it can recompute
+ * its foreground without dereferencing a live struct hx_user*. */
+extern guint32 hx_user_nick_color (const struct hx_user *user);
+
+/* Pointer-free variant of user_nick_color_gdk: same result computed from a
+ * raw nick_color + status instead of a struct hx_user*. HX_NICK_COLOR_NONE
+ * falls through to the status palette. See user_nick_color_gdk below. */
+extern GdkRGBA *user_nick_color_rgb (guint32 nick_color, guint16 status,
+                                     GdkRGBA *out);
+
 /* Colored-Nicknames preference. Prefers user->nick_color
  * (RGB) when set, else falls back to user_color_gdk's status palette
  * (Admin/Guest/Away). `status` is the user's 2-bit status field
@@ -73,8 +84,8 @@ extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
  *
  * `anchor` is the widget the popover gets parented to (and where
  * pointing-to coords are taken from); `x`/`y` are widget-local. */
-extern void user_popup_show (GtkWidget *anchor, struct hx_user *user,
-                             session *sess, double x, double y);
+extern void user_popup_show (GtkWidget *anchor, session *sess, guint32 cid,
+                             guint16 uid, double x, double y);
 
 /* Shared headerbar / sidebar button handlers. `data` is the
  * HxUserListView* the button is attached to — selection + session

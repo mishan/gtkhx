@@ -119,6 +119,200 @@ pub unsafe extern "C" fn hx_member_model_clear(model: *mut c_void) {
     }
 }
 
+/// `void hx_member_model_set_ignore(void *model, guint16 uid, gboolean ignore)`
+/// — set the client-local ignore flag on `uid` (M4b.4a; the model is now the
+/// authoritative store for it, not `hx_user::ignore`). No-op if absent.
+///
+/// # Safety
+/// `model` valid or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_set_ignore(
+    model: *mut c_void,
+    uid: u16,
+    ignore: glib::ffi::gboolean,
+) {
+    if let Some(model) = model_ref(model) {
+        model.set_ignore(uid, ignore != glib::ffi::GFALSE);
+    }
+}
+
+/// `gboolean hx_member_model_get_ignore(void *model, guint16 uid)` — the
+/// ignore flag for `uid`, or FALSE when absent / NULL model.
+///
+/// # Safety
+/// `model` valid or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> glib::ffi::gboolean {
+    match model_ref(model) {
+        Some(model) if model.get_ignore(uid) => glib::ffi::GTRUE,
+        _ => glib::ffi::GFALSE,
+    }
+}
+
+/// `gboolean hx_member_model_toggle_ignore(void *model, guint16 uid)` — flip
+/// `uid`'s ignore flag and return the new state (FALSE and no change if
+/// absent / NULL model).
+///
+/// # Safety
+/// `model` valid or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_toggle_ignore(
+    model: *mut c_void,
+    uid: u16,
+) -> glib::ffi::gboolean {
+    match model_ref(model) {
+        Some(model) if model.toggle_ignore(uid) => glib::ffi::GTRUE,
+        _ => glib::ffi::GFALSE,
+    }
+}
+
+/// `#[repr(C)]` fill-out struct for [`hx_member_model_get_info`] — mirrors
+/// `struct hx_member_info` in `chat_members.h`. `status` is the Admin/Guest/
+/// Away bitmap (the field C called `hx_user::color`); `name` is NUL-terminated
+/// (32-byte buffer, matching the old `hx_user::name[32]`).
+#[repr(C)]
+pub struct HxMemberInfo {
+    pub uid: u16,
+    pub icon: u16,
+    pub status: u16,
+    pub nick_color: u32,
+    pub name: [c_char; 32],
+}
+
+// Pin the layout against the C `struct hx_member_info` (chat_members.h) —
+// Rust writes it, C reads it, so a drift would be a silent memory bug.
+const _: () = {
+    use std::mem::{offset_of, size_of};
+    assert!(offset_of!(HxMemberInfo, uid) == 0);
+    assert!(offset_of!(HxMemberInfo, icon) == 2);
+    assert!(offset_of!(HxMemberInfo, status) == 4);
+    assert!(offset_of!(HxMemberInfo, nick_color) == 8);
+    assert!(offset_of!(HxMemberInfo, name) == 12);
+    assert!(size_of::<HxMemberInfo>() == 44);
+};
+
+/// Copy an `HxMember`'s display fields into a C `HxMemberInfo` (name truncated
+/// + NUL-terminated into the fixed 32-byte buffer, matching the old
+/// `hx_user::name[32]`).
+fn fill_member_info(m: &HxMember, o: &mut HxMemberInfo) {
+    o.uid = m.uid();
+    o.icon = m.icon();
+    o.status = m.status();
+    o.nick_color = m.nick_color().unwrap_or(HX_NICK_COLOR_NONE);
+    m.with_name(|n| {
+        let bytes = n.as_bytes();
+        let cap = o.name.len() - 1; // reserve the NUL
+        let k = bytes.len().min(cap);
+        for (i, &b) in bytes[..k].iter().enumerate() {
+            o.name[i] = b as c_char;
+        }
+        o.name[k] = 0;
+    });
+}
+
+/// `gboolean hx_member_model_get_info(void *model, guint16 uid,
+/// struct hx_member_info *out)` — copy the member's display fields into `out`.
+/// Returns FALSE (out untouched) when the member is absent / args NULL. The
+/// C read path that used to `hx_user_with_uid(...)->field` (M4b.4b-ii).
+///
+/// # Safety
+/// `model` valid or NULL; `out` NULL or a valid `struct hx_member_info *`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_get_info(
+    model: *mut c_void,
+    uid: u16,
+    out: *mut HxMemberInfo,
+) -> glib::ffi::gboolean {
+    if out.is_null() {
+        return glib::ffi::GFALSE;
+    }
+    let Some(model) = model_ref(model) else {
+        return glib::ffi::GFALSE;
+    };
+    let Some(m) = model.get(uid) else {
+        return glib::ffi::GFALSE;
+    };
+    fill_member_info(&m, &mut *out);
+    glib::ffi::GTRUE
+}
+
+/// `guint16 hx_member_model_find_by_name(void *model, const char *name)` — the
+/// uid of the member whose name matches `name` exactly, or 0 if none (the C
+/// `hx_user_with_name` linear scan; one caller, `/msg <name>`).
+///
+/// # Safety
+/// `model` valid or NULL; `name` NULL or a C string.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_find_by_name(
+    model: *mut c_void,
+    name: *const c_char,
+) -> u16 {
+    if name.is_null() {
+        return 0;
+    }
+    let Some(model) = model_ref(model) else {
+        return 0;
+    };
+    let target = CStr::from_ptr(name).to_string_lossy();
+    let n = model.n_items();
+    for i in 0..n {
+        if let Some(m) = model.item(i).and_then(|o| o.downcast::<HxMember>().ok()) {
+            if m.with_name(|nm| nm == target) {
+                return m.uid();
+            }
+        }
+    }
+    0
+}
+
+/// `guint hx_member_model_count(void *model)` — the member count (0 if NULL).
+///
+/// # Safety
+/// `model` valid or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_count(model: *mut c_void) -> u32 {
+    model_ref(model).map(|m| m.n_items()).unwrap_or(0)
+}
+
+/// `gboolean hx_member_model_contains(void *model, guint16 uid)` — whether
+/// `uid` is a member (FALSE if absent / NULL).
+///
+/// # Safety
+/// `model` valid or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_contains(model: *mut c_void, uid: u16) -> glib::ffi::gboolean {
+    match model_ref(model) {
+        Some(model) if model.get(uid).is_some() => glib::ffi::GTRUE,
+        _ => glib::ffi::GFALSE,
+    }
+}
+
+/// `gboolean hx_member_model_get_at(void *model, guint index,
+/// struct hx_member_info *out)` — copy the member at insertion `index` into
+/// `out` (for a full walk, `count` + `get_at`; the `user_list` repopulate).
+/// FALSE if out-of-range / NULL args.
+///
+/// # Safety
+/// `model` valid or NULL; `out` NULL or a valid `struct hx_member_info *`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_member_model_get_at(
+    model: *mut c_void,
+    index: u32,
+    out: *mut HxMemberInfo,
+) -> glib::ffi::gboolean {
+    if out.is_null() {
+        return glib::ffi::GFALSE;
+    }
+    let Some(model) = model_ref(model) else {
+        return glib::ffi::GFALSE;
+    };
+    let Some(m) = model.item(index).and_then(|o| o.downcast::<HxMember>().ok()) else {
+        return glib::ffi::GFALSE;
+    };
+    fill_member_info(&m, &mut *out);
+    glib::ffi::GTRUE
+}
+
 /// `gboolean hx_nick_complete(void *model, const char *input, gsize cursor,
 /// gboolean reverse, gunichar suffix, char **out_text, int *out_cursor,
 /// char **out_info)` — the tested M1 nick completion over the model's members.

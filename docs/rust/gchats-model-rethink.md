@@ -228,29 +228,75 @@ two-tables-times-N.
 
 ## Phasing (leaf-up, always compiling, wire-compat untouched)
 
-- **M1 — pure model + nick completion.** Stand up `hxchat-model` with
-  `Conversation` / `Member` / `MemberList` and the completion methods, fully
-  unit-tested. Bridge it to the C model: either have `rcv.c` fill the Rust
-  model through FFI setters with `chat->users` becoming a thin view, or (bolder)
-  replace `chat->users` outright and give C accessors. **The input handler +
-  nick completion port rides in here**: `tab_nick_comp` / `tab_nick_comp_next`
-  / `nick_comp_chng` become calls into the tested Rust methods, and
-  `chat_input_key_pressed` becomes a thin key handler (Enter → the already-Rust
-  `hx_send_chat`; Up/Down → readline history; Tab → the model). This is the
-  increment Misha's steer front-loads.
+- ✅ **M1 — pure model + nick completion.** *Shipped.* Stood up `hxchat-model`
+  with `Member` / `MemberList` and the tested completion (`complete_styled`).
+  `chat.c::tab_nick_comp` calls into it via `hx_nick_complete`; the input
+  handler's Tab branch is now a thin call into the Rust completer. (`chat->users`
+  stays the C authoritative store for now — see M2/M4b.)
 
-- **M2 — members as a ListModel.** Make membership a `gio::ListModel` and bind
-  `HxUserListView` to it directly, retiring the separate list-store population
-  and shrinking the `GtkhxSession` user-signal fan-out to model mutations.
+- ✅ **M2 — members as a ListModel (Option A).** *Shipped.* Membership is a
+  `gio::ListModel` (`HxMember` / `HxMemberModel`, `hxmember-model`), and each
+  chat owns an authoritative `struct chat::member_model` fed by the `users.c`
+  fan-out. Landed as **Option A** (authoritative model, view observes) rather
+  than the bolder "bind `HxUserListView` to it directly and retire the row
+  store": the rendered list keeps its own `HxUserRow` store (the C snapshot
+  cell + selection need `hx_user*`), and the model is the *data* source of
+  truth for consumers (completion). Fully binding the view to the model — and
+  retiring the parallel `chat->users` — is folded into **M4b**.
 
-- **M3 — collapse the gchat.** Introduce `ConversationView`; move the readline
-  history, the chat-history render cursors, and the media table onto it as
-  typed sub-structs; delete the `chat` back-pointer + duplicated `cid`.
+- ✅ **M3 — collapse the gchat.** *Shipped, adjusted.* Rather than introduce a
+  single `ConversationView` GObject up front, the god-struct's sub-concerns
+  were extracted one at a time: the readline history → Rust `InputHistory`
+  (retired `history.c`; also wired into PM inputs); the media token table →
+  Rust `MediaTable` (`gtkhx-boxed`; retired the `GHashTable` + `media_next_id`);
+  the chat-history render cursors → a named C `struct hx_chat_history_render`
+  (**stays C** — its two `textentry*` are raw pointers into xtext internals and
+  can't cross FFI); and the raw `gtkhx_chat->chat` back-pointer dropped (derive
+  via `chat_with_cid`, keeping `cid` as the view's identity).
 
-- **M4 — retire the C structs.** Once every consumer (`rcv.c`, `users.c`,
-  `notify.c`, `inline_media_attach.c`, …) goes through the model's FFI or is
-  itself ported, delete `struct chat` / `struct gtkhx_chat` and the two
-  per-session hashtables.
+- **M4 — retire the C structs.** *In progress.* The survey found the model and
+  view are **not 1:1 in lifetime** (private-chat models appear first on
+  `USER_CHANGE`; the view attaches lazily in `create_pchat_window` and detaches
+  first on close), so this can't be one atomic "delete both structs" step. It
+  splits:
+  - ✅ **M4a — one registry.** *Shipped.* Collapsed `sess->gchats` into
+    `sess->chats`: the model (`struct chat`, always present) is the single
+    per-conversation entry and owns an optional `struct chat::view`.
+    `gchat_with_cid` is now a thin wrapper over `chat_with_cid(sess, cid)->view`;
+    `create_chat` / `pchat_new` attach the view to its model; `gchat_delete` /
+    `pchat_close` detach + free it while the model lingers; `chat_free` frees a
+    still-attached view. Every `sess->gchats` iteration (theme, options, users
+    fan-out, inline-media refresh, teardown) now walks `sess->chats` and takes
+    `->view` (skipping window-less models). Kills the two-tables-in-lockstep
+    hazard (issue #1).
+  - **M4b — retire the structs.** *In progress.* Fold the membership
+    duplication (`chat->users` vs `member_model`, issue #3) into one
+    authoritative store the view binds to, and — once a
+    `Conversation`/`ConversationView` object the view references exists —
+    delete `struct chat` / `struct gtkhx_chat` and the last loose `cid`,
+    routing every remaining consumer (`rcv.c`, `users.c`, `notify.c`,
+    `inline_media_attach.c`, …) through the model's FFI or porting it. The
+    coupling (rcv.c hot-path field writes, the view's render-time `hx_user*`
+    deref, and `ignore` living only in `chat->users`) makes this a
+    five-step effort — see
+    **[m4b-membership-dedup.md](m4b-membership-dedup.md)**. Shipped so far:
+    **M4b.1** (kickoff — deleted the write-only `chat->nusers`) and **M4b.2**
+    (`HxMemberModel` gains `set_ignore`/`get_ignore`/`toggle_ignore` +
+    `upsert` preserves `ignore`, unit-tested — the model can now own the
+    flag), and **M4b.3a** (the user-list view's row map re-keyed on uid rather
+    than the `hx_user*` address), and **M4b.3b-i** (`HxUserRow` renders from a
+    cached uid/nick_color instead of dereferencing the pointer), and
+    **M4b.3b-ii-A** (the view learns its `cid`; the selection API + toolbar /
+    activate resolve members by `(cid, uid)`), and **M4b.3b-ii-B** (the
+    right-click popup re-keyed on `(cid, uid)`, and the `HxUserRow` `hx_user*`
+    field + dormant C-ABI row ctors deleted). **The view/UI now hold no
+    `hx_user*` at all**, which unblocked **M4b.4a** (the `ignore` flag moved
+    onto the per-chat `HxMemberModel` — new set/get/toggle FFI, every read
+    (`rcv.c`) + write (`users.c` / `commands.c`) routed through it,
+    `hx_user::ignore` deleted). **M4b.4b** (point `rcv.c`'s field writes at
+    `hx_member_model_upsert`, route the remaining reads through a model
+    read-FFI, and delete `chat->users` + `struct hx_user`) is the last big
+    slice.
 
 Each phase leaves a working binary and keeps the `GtkhxSession` signal boundary
 intact (or subsumes it deliberately), rather than fighting it.

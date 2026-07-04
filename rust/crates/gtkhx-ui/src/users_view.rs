@@ -72,16 +72,15 @@ extern "C" {
     // gtkhx.c — apply the .gtkhx-userlist CSS class + font.
     fn gtkhx_apply_userlist_style(w: *mut gtk::ffi::GtkWidget);
 
-    // users.c — right-click popover + the struct hx_user accessors.
+    // users.c — right-click popover, resolved by (cid, uid). M4b.3b-ii-B.
     fn user_popup_show(
         anchor: *mut gtk::ffi::GtkWidget,
-        user: *mut c_void,
         sess: *mut Session,
+        cid: u32,
+        uid: u16,
         x: f64,
         y: f64,
     );
-    fn hx_user_name(user: *const c_void) -> *const c_char;
-    fn hx_user_uid(user: *const c_void) -> u16;
 
     // msg.c / chat_tabs.c — open or raise the PM window.
     fn msgwin_with_uid(uid: u16) -> *mut c_void;
@@ -143,13 +142,19 @@ mod imp {
 
     pub struct HxUserListView {
         pub sess: Cell<*mut Session>,
+        /// The chat id this view lists (0 = public/Users window; a pchat's
+        /// cid otherwise). M4b.3b-ii: lets the selection/popup path resolve
+        /// members by (cid, uid) instead of a borrowed `hx_user*`.
+        pub cid: Cell<u32>,
         pub store: RefCell<Option<gio::ListStore>>,
         pub selection: RefCell<Option<gtk::SingleSelection>>,
         pub column_view: RefCell<Option<gtk::ColumnView>>,
-        /// O(1) hx_user* → row. Keyed on the borrowed user pointer (raw
-        /// pointers hash/compare by address); the row is held with a strong
-        /// ref here in addition to the store's.
-        pub by_user: RefCell<HashMap<*mut c_void, HxUserRow>>,
+        /// O(1) uid → row. Keyed on the member's uid (M4b.3a) rather than the
+        /// borrowed `hx_user*` address, so the map survives `chat->users`
+        /// (and the `hx_user` structs) being retired — uid is 1:1 with the
+        /// pointer within a chat, since `chat->users` is itself uid-keyed. The
+        /// row is held with a strong ref here in addition to the store's.
+        pub by_uid: RefCell<HashMap<u16, HxUserRow>>,
         /// Theme singleton + "changed" handler, disconnected on dispose so
         /// a destroyed view leaves no dead handler on the process-lifetime
         /// theme object (matches the old g_signal_connect_object).
@@ -161,10 +166,11 @@ mod imp {
         fn default() -> Self {
             Self {
                 sess: Cell::new(std::ptr::null_mut()),
+                cid: Cell::new(0),
                 store: RefCell::new(None),
                 selection: RefCell::new(None),
                 column_view: RefCell::new(None),
-                by_user: RefCell::new(HashMap::new()),
+                by_uid: RefCell::new(HashMap::new()),
                 theme_conn: RefCell::new(None),
             }
         }
@@ -209,9 +215,9 @@ impl HxUserListView {
         self.imp().column_view.borrow().clone()
     }
 
-    /// Look up the row bound to `user`, if any.
-    fn row_for(&self, user: *mut c_void) -> Option<HxUserRow> {
-        self.imp().by_user.borrow().get(&user).cloned()
+    /// Look up the row for `uid`, if any.
+    fn row_for(&self, uid: u16) -> Option<HxUserRow> {
+        self.imp().by_uid.borrow().get(&uid).cloned()
     }
 
     /// Build the whole widget tree + model chain for `style`.
@@ -326,16 +332,14 @@ impl HxUserListView {
         let Some(row) = sel.item(pos).and_downcast::<HxUserRow>() else {
             return;
         };
-        let user = row.user_ptr();
-        if user.is_null() {
+        let uid = row.uid_of();
+        if uid == 0 {
             return;
         }
-        let uid = unsafe { hx_user_uid(user as *const c_void) };
         if unsafe { msgwin_with_uid(uid) }.is_null() {
-            // hx_user_name returns a borrowed const char*; create_msgwin
-            // takes char* (it copies the name), so cast for the FFI call.
-            let name = unsafe { hx_user_name(user as *const c_void) };
-            unsafe { create_msgwin(uid, name as *mut c_char) };
+            // The row's cached name; create_msgwin copies it, so a borrowed
+            // pointer valid for the call is enough (no hx_user* deref).
+            row.with_name_ptr(|name| unsafe { create_msgwin(uid, name as *mut c_char) });
         } else {
             unsafe { gtkhx_chat_tabs_raise_msg(uid) };
         }
@@ -373,11 +377,12 @@ impl HxUserListView {
         let Some(row) = sel.item(pos).and_downcast::<HxUserRow>() else {
             return;
         };
-        let user = row.user_ptr();
-        if user.is_null() {
+        let uid = row.uid_of();
+        if uid == 0 {
             return;
         }
-        unsafe { user_popup_show(wptr(&cv_widget), user, sess, x, y) };
+        let cid = self.imp().cid.get();
+        unsafe { user_popup_show(wptr(&cv_widget), sess, cid, uid, x, y) };
     }
 }
 
@@ -540,19 +545,37 @@ pub extern "C" fn hx_user_list_view_get_type() -> glib::ffi::GType {
     <HxUserListView as StaticType>::static_type().into_glib()
 }
 
-/// Construct a fresh view over borrowed `sess`. Returns transfer-full.
+/// Construct a fresh view over borrowed `sess`, for chat `cid`. Returns
+/// transfer-full.
 ///
 /// # Safety
 /// `sess` is a valid `session *` (or NULL). Main-thread only.
 #[no_mangle]
-pub unsafe extern "C" fn hx_user_list_view_new(sess: *mut c_void, style: i32) -> *mut c_void {
+pub unsafe extern "C" fn hx_user_list_view_new(
+    sess: *mut c_void,
+    cid: u32,
+    style: i32,
+) -> *mut c_void {
     crate::ensure_gtk_init();
     let obj = glib::Object::new::<HxUserListView>();
+    obj.imp().cid.set(cid);
     obj.build(sess, style);
     // Transfer-full: hand our owned ref to C, leak the Rust wrapper.
     let raw = obj.as_ptr() as *mut c_void;
     std::mem::forget(obj);
     raw
+}
+
+/// The chat id this view lists (0 if NULL).
+///
+/// # Safety
+/// `v` is NULL or a valid `HxUserListView *`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_user_list_view_get_cid(v: *mut c_void) -> u32 {
+    if v.is_null() {
+        return 0;
+    }
+    borrow(v).imp().cid.get()
 }
 
 /// The GtkColumnView widget to pack (borrowed).
@@ -570,46 +593,47 @@ pub unsafe extern "C" fn hx_user_list_view_get_widget(v: *mut c_void) -> *mut gt
     }
 }
 
-/// Add (or refresh-if-present) a row for `user`.
+/// Add (or refresh-if-present) a row for member `uid` (M4b.4b-i: values only,
+/// no `hx_user*`).
 ///
 /// # Safety
-/// `v` NULL or valid; `user` a borrowed `hx_user *`; `nam` NULL or a C string.
+/// `v` NULL or valid; `nam` NULL or a C string.
 #[no_mangle]
 pub unsafe extern "C" fn hx_user_list_view_add(
     v: *mut c_void,
-    user: *mut c_void,
+    uid: u16,
     nam: *const c_char,
     icon: u16,
     color: u16,
+    nick_color: u32,
 ) {
-    if v.is_null() || user.is_null() {
+    if v.is_null() {
         return;
     }
     let view = borrow(v);
     // Already present → treat as an in-place refresh (bug-shaped double add).
-    if let Some(row) = view.row_for(user) {
-        row.set_state_row(nam, icon, color);
+    if let Some(row) = view.row_for(uid) {
+        row.set_state_row(nam, icon, color, nick_color);
         return;
     }
-    let row = HxUserRow::new_row(user, nam, icon, color);
-    view.imp().by_user.borrow_mut().insert(user, row.clone());
+    let row = HxUserRow::new_row(uid, nam, icon, color, nick_color);
+    view.imp().by_uid.borrow_mut().insert(uid, row.clone());
     if let Some(store) = view.store() {
         store.append(&row);
     }
 }
 
-/// Remove the row for `user`.
+/// Remove member `uid`'s row.
 ///
 /// # Safety
-/// `v` NULL or valid; `user` a borrowed `hx_user *`.
+/// `v` NULL or valid.
 #[no_mangle]
-pub unsafe extern "C" fn hx_user_list_view_remove(v: *mut c_void, user: *mut c_void) {
-    if v.is_null() || user.is_null() {
+pub unsafe extern "C" fn hx_user_list_view_remove(v: *mut c_void, uid: u16) {
+    if v.is_null() {
         return;
     }
     let view = borrow(v);
-    let removed = view.imp().by_user.borrow_mut().remove(&user);
-    let Some(row) = removed else {
+    let Some(row) = view.imp().by_uid.borrow_mut().remove(&uid) else {
         return;
     };
     if let Some(store) = view.store() {
@@ -619,39 +643,40 @@ pub unsafe extern "C" fn hx_user_list_view_remove(v: *mut c_void, user: *mut c_v
     }
 }
 
-/// Update `user`'s row state (name / icon / color).
+/// Update member `uid`'s row state (name / icon / color / nick_color).
 ///
 /// # Safety
-/// `v` NULL or valid; `user` a borrowed `hx_user *`; `nam` NULL or a C string.
+/// `v` NULL or valid; `nam` NULL or a C string.
 #[no_mangle]
 pub unsafe extern "C" fn hx_user_list_view_update(
     v: *mut c_void,
-    user: *mut c_void,
+    uid: u16,
     nam: *const c_char,
     icon: u16,
     color: u16,
+    nick_color: u32,
 ) {
-    if v.is_null() || user.is_null() {
+    if v.is_null() {
         return;
     }
     let view = borrow(v);
-    match view.row_for(user) {
-        Some(row) => row.set_state_row(nam, icon, color),
-        // Update for an unknown user → treat as add (missed create race).
-        None => hx_user_list_view_add(v, user, nam, icon, color),
+    match view.row_for(uid) {
+        Some(row) => row.set_state_row(nam, icon, color, nick_color),
+        // Update for an unknown uid → treat as add (missed create race).
+        None => hx_user_list_view_add(v, uid, nam, icon, color, nick_color),
     }
 }
 
-/// Re-fire the row's "changed" so its cell re-resolves the GIF avatar.
+/// Re-fire member `uid`'s row "changed" so its cell re-resolves the GIF avatar.
 ///
 /// # Safety
-/// `v` NULL or valid; `user` a borrowed `hx_user *`.
+/// `v` NULL or valid.
 #[no_mangle]
-pub unsafe extern "C" fn hx_user_list_view_refresh_avatar(v: *mut c_void, user: *mut c_void) {
-    if v.is_null() || user.is_null() {
+pub unsafe extern "C" fn hx_user_list_view_refresh_avatar(v: *mut c_void, uid: u16) {
+    if v.is_null() {
         return;
     }
-    if let Some(row) = borrow(v).row_for(user) {
+    if let Some(row) = borrow(v).row_for(uid) {
         row.touch_row();
     }
 }
@@ -669,28 +694,29 @@ pub unsafe extern "C" fn hx_user_list_view_clear(v: *mut c_void) {
     if let Some(store) = view.store() {
         store.remove_all();
     }
-    view.imp().by_user.borrow_mut().clear();
+    view.imp().by_uid.borrow_mut().clear();
 }
 
-/// The `struct hx_user *` under the live selection, or NULL.
+/// The uid under the live selection, or 0 (no selection). M4b.3b-ii: the
+/// selection identity is now the uid, not a borrowed `hx_user*`.
 ///
 /// # Safety
 /// `v` NULL or a valid `HxUserListView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_user_list_view_get_selected_user(v: *mut c_void) -> *mut c_void {
+pub unsafe extern "C" fn hx_user_list_view_get_selected_uid(v: *mut c_void) -> u16 {
     if v.is_null() {
-        return std::ptr::null_mut();
+        return 0;
     }
     let Some(sel) = borrow(v).selection() else {
-        return std::ptr::null_mut();
+        return 0;
     };
     let pos = sel.selected();
     if pos == INVALID {
-        return std::ptr::null_mut();
+        return 0;
     }
     match sel.item(pos).and_downcast::<HxUserRow>() {
-        Some(row) => row.user_ptr(),
-        None => std::ptr::null_mut(),
+        Some(row) => row.uid_of(),
+        None => 0,
     }
 }
 
