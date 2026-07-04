@@ -114,6 +114,41 @@ typedef struct textentry textentry;
 
 /* ---- Chat windows ------------------------------------------------- */
 
+/* fogWraith chat-history extension render cursors, grouped (M3).
+ * Was five loose gtkhx_chat fields; contained here so their
+ * widget-coupled lifetime is one named object. The two textentry*
+ * are raw pointers into xtext's internal buffer entries — they stay a
+ * C view concern, which is why this render state isn't a Rust
+ * sub-model like chat_history / media_table. Embedded in gtkhx_chat
+ * (zero-init'd by its g_malloc0); reset to zero on (re)render. */
+struct hx_chat_history_render {
+    /* Smallest message_id we've already rendered for this chat. Used
+     * as the BEFORE= cursor on "Load older" fetches so the server
+     * returns strictly older entries. 0 means no anchor yet (no
+     * history batch arrived) and a "Load older" click is a bare-cursor
+     * request (server's default window). */
+    guint64    oldest_msgid;
+    /* Last batch's has_more flag, mirrored here so the renderer + the
+     * click handler can consult it without re-walking the xtext
+     * buffer. */
+    gboolean   has_more;
+    /* TRUE while a "Load older" fetch is in-flight; the click handler
+     * refuses a second request until the receive path clears it. */
+    gboolean   loading;
+    /* textentry of the opening "── chat history (N) ──" divider, saved
+     * on initial render. Insert-point for all subsequent Load-Older
+     * inserts: older entries + the refreshed sentinel land just BEFORE
+     * this anchor, so older content stays inside the chat-history block
+     * instead of jumping above the server-notice preamble that
+     * hx_printf wrote first. */
+    textentry *anchor_ent;
+    /* textentry of the currently-rendered "↑ Load older" sentinel row,
+     * or NULL when none is rendered. Refreshed every batch: removed via
+     * gtk_xtext_remove_entry, then re-inserted before the anchor if
+     * has_more is still true on the new batch. */
+    textentry *load_older_ent;
+};
+
 /* no more next/prev. Open chat-window
  * UI lives in session->gchats, a GHashTable<u32 cid, struct
  * gtkhx_chat*>. cid=0 is the public chat's window (created at
@@ -148,44 +183,13 @@ struct gtkhx_chat {
      * chat_history_draft field is gone). */
     void *chat_history;
 
-    /* fogWraith chat-history extension state (Phase 3+).
-     *
-     * history_oldest_msgid — smallest message_id we've already
-     *   rendered for this chat. Used as the BEFORE= cursor on
-     *   "Load older" fetches so the server returns strictly
-     *   older entries. 0 means we have no anchor yet (no
-     *   history batch arrived) and a "Load older" click would
-     *   be a bare-cursor request (server's default window).
-     *
-     * history_has_more — last batch's has_more flag, mirrored
-     *   here so the renderer + click handler can both consult
-     *   it without re-walking the xtext buffer.
-     *
-     * history_loading — TRUE while a "Load older" fetch is
-     *   in-flight. Click handler refuses to fire a second
-     *   request until the first completes (the receive path
-     *   clears the flag).
-     *
-     * history_anchor_ent — pointer to the xtext textentry of
-     *   the opening "── chat history (N) ──" divider, saved
-     *   on initial render. Acts as the insert-point for all
-     *   subsequent Load-Older inserts: new older entries +
-     *   the refreshed sentinel land just BEFORE this anchor,
-     *   so older content stays inside the chat-history block
-     *   instead of jumping above the server-notice preamble
-     *   ("[hx] connecting to ...") that hx_printf wrote first.
-     *
-     * history_load_older_ent — pointer to the textentry of
-     *   the currently-rendered "↑ Load older" sentinel row,
-     *   or NULL when no sentinel is rendered. Refreshed on
-     *   every batch: removed via gtk_xtext_remove_entry, then
-     *   re-inserted before the anchor if has_more is still
-     *   true on the new batch. */
-    guint64    history_oldest_msgid;
-    gboolean   history_has_more;
-    gboolean   history_loading;
-    textentry *history_anchor_ent;
-    textentry *history_load_older_ent;
+    /* fogWraith chat-history extension render cursors (Phase 3+),
+     * grouped into one named sub-object — see struct
+     * hx_chat_history_render above for the per-field notes. The
+     * anchor / load-older textentry* are raw pointers into xtext and
+     * can be invalidated by entry trims, so treat them as live only
+     * during a render pass. */
+    struct hx_chat_history_render render;
 
     /* Inline-media extension (Phase 9.C UI). Pointer to the
 	 * paperclip 'Attach Image' button in this chat's input row.
