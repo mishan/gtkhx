@@ -1,0 +1,21 @@
+[package]
+name = "hxchat-send"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5: chat wire-out senders (the Rust port of chat.c's send path)"
+publish = false
+
+[lib]
+# staticlib: chat.h's callers (toolbar.c, users.c, chat.c input handler, …)
+#            link hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join /
+#            hx_part_chat / hx_change_subject that chat.c used to provide.
+# rlib:      lets a future fully-Rust chat window call the senders directly.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# glib for the g_free'd text buffer + the gboolean cap flag.
+glib = { workspace = true }
+# Native chat chunk builders (build::build_chat_*_chunks) + the HTLC_HDR_*
+# opcode enum (messages::ClientHdr) — no C-ABI gtkhx_proto_* shim in the path.
+hotline-proto = { path = "../hotline-proto" }
