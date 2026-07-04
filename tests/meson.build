@@ -1052,19 +1052,17 @@ test_chat_history = executable('test_chat_history',
 test('chat_history', test_chat_history,
      suite : 'proto')
 
-# voice — fogWraith voice-chat extension wire shape (Phase 8.A).
-# Pins the new field IDs (DATA_VOICE_SDP/ICE/CODEC/MUTED/PARTICIPANTS at
-# 0x01F5-0x01F9), the 600-606 opcode block, the CAP_VOICE gate on the
-# send wrappers, and the FFI ABI of the typed reply / participant /
-# mid-label / SDP-summary / ICE-JSON extractors. The Rust crate has
-# its own dense unit tests for the same code; this file pins the
-# C-side observable behaviour. Source: fogWraith
-# Capabilities-Voice.md. Built only when voice is compiled in — it
-# compiles ../src/voice.c.
+# voice — fogWraith voice-chat extension receive/parse FFI ABI (Phase 8.A).
+# Pins the field IDs (DATA_VOICE_SDP/ICE/CODEC/MUTED/PARTICIPANTS at
+# 0x01F5-0x01F9), the 600-606 opcode block, and the FFI ABI of the typed
+# reply / participant / mid-label / SDP-summary / ICE-JSON extractors +
+# builder. The send wrappers (hx_send_voice_*) moved to the hxvoice-send
+# Rust crate along with src/voice.c; their cap-gate + wire-shape cases run
+# under `cargo test -p hxvoice-send`, so this no longer compiles voice.c.
+# Source: fogWraith Capabilities-Voice.md.
 if voice_enabled
 test_voice = executable('test_voice',
   'proto/test_voice.c',
-  '../src/voice.c',
   '../src/proto_helpers.c',
   '../src/text_util.c',
   '../src/debug.c',

@@ -1,0 +1,20 @@
+[package]
+name = "hxvoice-send"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5: voice-chat wire-out senders (hx_send_voice_*), the Rust port of src/voice.c"
+publish = false
+
+[lib]
+# staticlib: the C side (rcv.c) + the sibling gtkhx-ui voice modules link the
+#            hx_send_voice_* symbols this crate exports.
+# rlib:      lets a fully-Rust voice stack call the senders directly later.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# glib for the gboolean ABI + g_debug logging. Same workspace pin.
+glib = { workspace = true }
+# The native (Rust) voice chunk builders + the repr(C) HxChunk type — no C-ABI
+# shim in the path, and it makes the send logic cargo-testable.
+hotline-proto = { path = "../hotline-proto" }
