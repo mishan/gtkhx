@@ -104,13 +104,24 @@ pub unsafe extern "C" fn gtkhx_text_to_utf8(
         return g_dup(input);
     }
 
-    // Slow path: native Mac Roman decode (every byte maps to a codepoint).
-    let decoded = hotline_proto::text::to_utf8(input);
-    let out = decoded.as_bytes();
+    // Slow path: native Mac Roman decode straight into a g_malloc'd buffer —
+    // no intermediate String + second copy (this runs on every payload from a
+    // legacy server). Worst-case expansion is 3 UTF-8 bytes per input byte, so
+    // `len * 3` always holds the whole decode; `len <= TO_UTF8_MAX_LEN =
+    // (isize::MAX - 1) / 3` (guarded above) means `len * 3 + 1` can't overflow.
+    // g_realloc trims to the exact written length afterwards.
+    let cap = len * 3 + 1;
+    let buf = glib::ffi::g_malloc(cap) as *mut u8;
+    let dst = std::slice::from_raw_parts_mut(buf, len * 3);
+    let written = hotline_proto::text::to_utf8_into(input, dst);
+    *buf.add(written) = 0;
+    // Shrink to the bytes actually used (+ the NUL); the leading `written + 1`
+    // bytes — including the NUL just written — are preserved across the move.
+    let buf = glib::ffi::g_realloc(buf as glib::ffi::gpointer, written + 1) as *mut c_char;
     if !out_len.is_null() {
-        *out_len = out.len();
+        *out_len = written;
     }
-    g_dup(out)
+    buf
 }
 
 /// `char *gtkhx_text_for_wire(const char *utf8, gsize utf8_len, gboolean
