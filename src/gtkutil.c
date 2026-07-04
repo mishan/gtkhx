@@ -545,7 +545,7 @@ close_connected_windows (session *sess)
 	 * singleton owned by its open_files_browser entry point and
 	 * cleans itself up via the close-request handler. */
 
-    /* walk the gchats hashtable, closing every non-public
+    /* walk sess->chats, closing the view of every non-public
 	 * pchat tab via the chat_tabs API. The public chat (cid=0) UI
 	 * persists across reconnects, like its model-side counterpart
 	 * in sess->chats.
@@ -564,14 +564,18 @@ close_connected_windows (session *sess)
 	 * a real leak on every disconnect. Routing through the
 	 * close-page dispatcher keeps the AdwTabView, the registry
 	 * index, and gchat lifecycle consistent. */
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
         GArray *cids = g_array_new (FALSE, FALSE, sizeof (guint32));
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             guint32 cid = GPOINTER_TO_UINT (key);
-            if (cid != 0)
+            struct chat *c = val;
+            /* M4a: only non-public conversations that actually have an
+			 * open window need closing (models without a view have no
+			 * tab to tear down). */
+            if (cid != 0 && c->view)
                 g_array_append_val (cids, cid);
         }
         for (guint i = 0; i < cids->len; i++) {

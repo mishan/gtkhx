@@ -456,16 +456,17 @@ hx_inline_media_attach_button_new (struct gtkhx_chat *gchat,
 void
 inline_media_attach_refresh_all_chats (session *sess)
 {
-    if (!sess || !sess->gchats) {
+    if (!sess || !sess->chats) {
         return;
     }
     gboolean show = (sess->htlc.caps & HTLC_CAP_INLINE_MEDIA) != 0;
 
     GHashTableIter iter;
     gpointer val;
-    g_hash_table_iter_init (&iter, sess->gchats);
+    g_hash_table_iter_init (&iter, sess->chats);
     while (g_hash_table_iter_next (&iter, NULL, &val)) {
-        struct gtkhx_chat *gchat = val;
+        struct chat *c = val;
+        struct gtkhx_chat *gchat = c->view;
         if (gchat && gchat->media_attach_btn) {
             gtk_widget_set_visible (gchat->media_attach_btn, show);
         }

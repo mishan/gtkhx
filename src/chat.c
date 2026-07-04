@@ -235,18 +235,19 @@ gtkhx_apply_theme_palette (gboolean dark)
     }
 
     /* Push the new palette into every live xtext widget. Chat /
-	 * private-chat outputs hang off gtkhx_chat in sess->gchats;
+	 * private-chat outputs hang off each model's view (chat->view) in sess->chats;
 	 * private-message outputs hang off msgwin in sess->msg_windows.
 	 * News uses a plain GtkTextView (theme-driven CSS), not an
 	 * xtext, so it picks up the system theme without help. */
     session *sess = hx_active_session ();
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct gtkhx_chat *gchat = val;
-            if (gchat->output) {
+            struct chat *c = val;
+            struct gtkhx_chat *gchat = c->view;
+            if (gchat && gchat->output) {
                 gtk_xtext_set_palette (GTK_XTEXT (gchat->output), colors);
                 gtk_xtext_refresh (GTK_XTEXT (gchat->output));
             }
@@ -372,6 +373,12 @@ users_table_new (void)
     return g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
 }
 
+/* Forward decls: chat_free (the model destroy-notify) tears down an
+ * attached view via gchat_free, and chats_init installs pchat_close as
+ * the tab-close handler. Both are defined further down. */
+static void gchat_free (gpointer p);
+static void pchat_close (guint32 cid);
+
 static void
 chat_free (gpointer p)
 {
@@ -385,6 +392,14 @@ chat_free (gpointer p)
     }
     if (chat->member_model) {
         hx_member_model_free (chat->member_model);
+    }
+    /* M4a: the model owns its view. Normally the view is detached (freed,
+     * chat->view NULLed) by gchat_delete / pchat_close before the model
+     * goes; this frees a still-attached view so deleting a model can't
+     * leak its window struct. */
+    if (chat->view) {
+        gchat_free (chat->view);
+        chat->view = NULL;
     }
     g_free (chat);
 }
@@ -404,6 +419,11 @@ chats_init (session *sess)
     chat_new (sess, 0);
     /* M2 wire-up (Option A): the authoritative public-chat membership model.
      * Created once, fed by the users.c fan-out, read by tab_nick_comp. */
+
+    /* Route user-clicks on a private-chat tab's X through pchat_close
+     * (which sends hx_part_chat and tears down the view). Idempotent.
+     * (M4a: moved here from the now-removed gchats_init.) */
+    gtkhx_chat_tabs_set_close_pchat_handler (pchat_close);
 }
 
 struct chat *
@@ -475,39 +495,31 @@ gchat_free (gpointer p)
     g_free (gchat);
 }
 
-/* Forward decl so gchats_init can install pchat_close as the tab-
- * close handler before its definition (further down the file). */
-static void pchat_close (guint32 cid);
-
-void
-gchats_init (session *sess)
-{
-    if (!sess->gchats) {
-        sess->gchats = g_hash_table_new_full (g_direct_hash, g_direct_equal,
-                                              NULL, gchat_free);
-    }
-    /* route user-clicks on a private-chat tab's
-     * X through pchat_close (which sends hx_part_chat and tears
-     * down the gchat). Idempotent. */
-    gtkhx_chat_tabs_set_close_pchat_handler (pchat_close);
-}
-
+/* M4a: the view is reached through its model — chat_with_cid(sess,
+ * cid)->view — so gchat_with_cid is a thin wrapper and there is no
+ * separate gchats table (gchats_init is gone; chats_init installs the
+ * tab-close handler now). */
 struct gtkhx_chat *
 gchat_with_cid (session *sess, guint32 cid)
 {
-    if (!sess->gchats) {
-        return NULL;
-    }
-    return g_hash_table_lookup (sess->gchats, GUINT_TO_POINTER (cid));
+    struct chat *chat = chat_with_cid (sess, cid);
+    return chat ? chat->view : NULL;
 }
 
 void
 gchat_delete (session *sess, struct gtkhx_chat *gchat)
 {
-    if (!gchat || !sess->gchats) {
+    if (!gchat) {
         return;
     }
-    g_hash_table_remove (sess->gchats, GUINT_TO_POINTER (gchat->cid));
+    /* Detach the view from its model (the entry lingers as a window-less
+     * model) and free the view struct. The model stays in sess->chats
+     * until chat_delete. */
+    struct chat *chat = chat_with_cid (sess, gchat->cid);
+    if (chat && chat->view == gchat) {
+        chat->view = NULL;
+    }
+    gchat_free (gchat);
 }
 
 /* Render a single chat line into an xtext buffer with the
@@ -1198,7 +1210,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
  * either.
  *
  * The xtext widget that emitted the signal is passed in as
- * `xtext`; we walk the active session's gchats to find which gchat owns
+ * `xtext`; we walk the active session's chats (each model's view) to find which gchat owns
  * it (chat output, not pchat output userlist). */
 
 static struct gtkhx_chat *
@@ -1207,12 +1219,13 @@ find_gchat_by_output (GtkWidget *xtext)
     GHashTableIter it;
     gpointer key, val;
 
-    if (!hx_active_session ()->gchats) {
+    if (!hx_active_session ()->chats) {
         return NULL;
     }
-    g_hash_table_iter_init (&it, hx_active_session ()->gchats);
+    g_hash_table_iter_init (&it, hx_active_session ()->chats);
     while (g_hash_table_iter_next (&it, &key, &val)) {
-        struct gtkhx_chat *g = val;
+        struct chat *c = val;
+        struct gtkhx_chat *g = c->view;
         if (g && g->output == xtext) {
             return g;
         }
@@ -1878,9 +1891,9 @@ create_chat (session *sess)
     gchat->render.anchor_ent      = NULL;
     gchat->render.load_older_ent  = NULL;
 
-    /* Public chat (cid=0) UI gets seeded into the table on the
-     * single create_chat call at session init. */
-    g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (0u), gchat);
+    /* M4a: attach the public-chat view to its model (seeded eagerly by
+     * chats_init, so chat_with_cid(sess, 0) is non-NULL here). */
+    chat_with_cid (sess, 0)->view = gchat;
 }
 
 static void
@@ -1926,7 +1939,7 @@ gtkhx_chat_build_leaves (session *sess)
     g_return_val_if_fail (sess != NULL, NULL);
 
     gchat = gchat_with_cid (sess, 0);
-    /* gchats_init seeds cid=0 (public chat) on session bring-up; this only
+    /* chats_init seeds cid=0 (public chat) on session bring-up; this only
      * fires post-login, so the lookup is invariant non-NULL. Bail loudly on
      * the invariant break — we can't build a chat panel without the struct. */
     if (!gchat) {
@@ -2074,13 +2087,15 @@ pchat_new (session *sess, struct chat *chat)
     gchat->render.loading         = FALSE;
     gchat->render.anchor_ent      = NULL;
     gchat->render.load_older_ent  = NULL;
-    g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (gchat->cid), gchat);
+    /* M4a: attach this view to its model (the `chat` arg, already in
+     * sess->chats) instead of a separate gchats entry. */
+    chat->view = gchat;
 
     return gchat;
 }
 
 /* Invoked from the chat_tabs close-page dispatcher with the cid of
- * the tab being closed. Look up the gchat from sess->gchats; if it's
+ * the tab being closed. Look up the view via gchat_with_cid; if it's
  * still there, send the protocol-side leave and tear down the gchat
  * struct (which removes it from the hashtable via gchat_delete's
  * value-destroy notify). */

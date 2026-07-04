@@ -308,12 +308,13 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
 
-    if (ctx->sess->gchats) {
+    if (ctx->sess->chats) {
         GHashTableIter iter;
-        gpointer key;
-        g_hash_table_iter_init (&iter, ctx->sess->gchats);
-        while (g_hash_table_iter_next (&iter, &key, NULL)) {
-            if (GPOINTER_TO_UINT (key) != 0) {
+        gpointer key, val;
+        g_hash_table_iter_init (&iter, ctx->sess->chats);
+        while (g_hash_table_iter_next (&iter, &key, &val)) {
+            struct chat *c = val;
+            if (GPOINTER_TO_UINT (key) != 0 && c->view) {
                 with_cid = 1;
                 break;
             }
@@ -802,18 +803,14 @@ prompt_chat (session *sess, guint16 _uid)
     gtkhx_widget_set_child (scroll, listbox);
     gtk_widget_set_size_request (scroll, 350, 200);
 
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            gchat = val;
-            if (!gchat->cid) {
-                continue;
-            }
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            if (!c) {
-                continue;
+            struct chat *c = val;
+            if (!c->cid || !c->view) {
+                continue;   /* skip the public chat + window-less models */
             }
             GtkWidget *row = prompt_chat_make_row (c->cid, c->subject);
             gtk_list_box_append (GTK_LIST_BOX (listbox), row);
@@ -987,12 +984,13 @@ view_chat_btn (GtkWidget *w, gpointer data)
     if (!user || !sess) {
         return;
     }
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
-        gpointer key;
-        g_hash_table_iter_init (&iter, sess->gchats);
-        while (g_hash_table_iter_next (&iter, &key, NULL)) {
-            if (GPOINTER_TO_UINT (key) != 0) {
+        gpointer key, val;
+        g_hash_table_iter_init (&iter, sess->chats);
+        while (g_hash_table_iter_next (&iter, &key, &val)) {
+            struct chat *c = val;
+            if (GPOINTER_TO_UINT (key) != 0 && c->view) {
                 with_cid = 1;
                 break;
             }
@@ -1239,18 +1237,17 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 	 * BEFORE the Users-window update so the recursion shape is the
 	 * same as the legacy code; both arms compute the foreground
 	 * from the freshly-parsed `color`. */
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             if (GPOINTER_TO_UINT (key) == 0) {
-                continue;
+                continue;   /* public chat handled via the standalone view */
             }
-            gchat = val;
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            if (!c) {
-                continue;
+            struct chat *c = val;
+            if (!c->view) {
+                continue;   /* only open private-chat windows */
             }
             struct hx_user *u = hx_user_with_uid (c, user->uid);
             if (u) {
@@ -1295,17 +1292,14 @@ users_refresh_avatar (guint16 uid)
 	 * Users window (public chat). We look the hx_user up per chat
 	 * because the row<->user mapping is keyed on the struct pointer,
 	 * which differs per chat. */
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
-            struct gtkhx_chat *gchat = val;
+            struct chat *c = val;
+            struct gtkhx_chat *gchat = c->view;
             if (!gchat || !gchat->userlist) {
-                continue;
-            }
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            if (!c) {
                 continue;
             }
             struct hx_user *u = hx_user_with_uid (c, uid);

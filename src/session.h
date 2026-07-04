@@ -149,12 +149,12 @@ struct hx_chat_history_render {
     textentry *load_older_ent;
 };
 
-/* no more next/prev. Open chat-window
- * UI lives in session->gchats, a GHashTable<u32 cid, struct
- * gtkhx_chat*>. cid=0 is the public chat's window (created at
- * startup by create_chat); pchat windows go in keyed on their
- * cid. Lookup by cid is O(1) via gchat_with_cid; the value
- * destroy notify (gchat_free in chat.c) reclaims the struct. */
+/* The per-conversation window/view (M4a). No longer stored in its own
+ * table: it hangs off the matching model (struct chat::view) in
+ * sess->chats, keyed by cid. cid=0 is the public chat's window (created
+ * at startup by create_chat); pchat windows attach in pchat_new. Lookup
+ * by cid is O(1) via gchat_with_cid (chat_with_cid(sess, cid)->view);
+ * gchat_free reclaims the struct. */
 struct gtkhx_chat {
     GtkWidget *window;
     GtkWidget *vscroll;
@@ -175,11 +175,11 @@ struct gtkhx_chat {
 	 * header doesn't have to pull in users_view.h — the field
 	 * is read/written from chat.c + users.c only. */
     struct _HxUserListView *userlist;
-    /* The window's identity: its chat id (also the sess->gchats key). The
-     * matching model object lives in sess->chats under the same cid — look it
-     * up with chat_with_cid(sess, cid) rather than caching a raw struct chat*
-     * back-pointer here (the old `chat` field, dropped in M3). One less copy to
-     * keep in lockstep with the chats table. */
+    /* The window's identity: its chat id. The matching model object is the
+     * sess->chats entry under this cid, and it owns this view via chat::view
+     * (M4a) — look it up with chat_with_cid(sess, cid) rather than caching a
+     * raw struct chat* back-pointer here (the old `chat` field, dropped in
+     * M3). */
     guint32 cid;
     /* Chat input line history — a Rust InputHistory (hxchat-model), created by
      * hx_input_history_new, driven by chat_input_key_pressed's Return/Up/Down,
@@ -357,6 +357,16 @@ struct chat {
      * when no user-list view exists), and read by tab_nick_comp for input in
      * this chat. Freed in chat_free. */
     void *member_model;
+    /* M4a: the open window/view for this conversation, or NULL when the
+     * model has no window yet. The model (this struct) is the single
+     * per-conversation registry entry — sess->chats — and owns the view
+     * rather than the old parallel sess->gchats table keyed by the same
+     * cid. Public chat (cid 0): created eagerly, persists for the session.
+     * Private chats: model appears first (on USER_CHANGE), view attaches
+     * lazily in create_pchat_window and detaches (freed) in gchat_delete /
+     * pchat_close while the model lingers. gchat_with_cid returns this;
+     * chat_free frees it if still set. */
+    struct gtkhx_chat *view;
 };
 
 /* ---- The session struct ------------------------------------------- */
@@ -402,12 +412,6 @@ typedef struct _session {
     GtkWidget *reloadButton;
 
     GtkWidget *agreementwin;
-
-    /* open chat-window UI keyed on cid. Replaces the
-	 * doubly-linked gchat_list. The public chat (cid=0) is added
-	 * by create_chat at startup; pchat_new adds private-chat
-	 * windows. */
-    GHashTable *gchats;
 
     struct gtask *gtask_list;
     GtkWidget *gtklist, *gtask_scroll;

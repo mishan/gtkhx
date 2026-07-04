@@ -1157,6 +1157,38 @@ below for the honest ledger of the many small pieces that remain.
     docked shell registers into, so it ports late (with or after R6's
     `main()` move). After this, `gtkhx.c` only contains `main()`.
 
+### Chat-model re-think (M1–M4)
+
+The per-chat model (`struct chat`) and window (`struct gtkhx_chat`) are being
+reshaped into Rust rather than field-for-field ported. Full design +
+rationale: **[gchats-model-rethink.md](gchats-model-rethink.md)**. Phasing,
+leaf-up:
+
+- ✅ **M1 — pure model + nick completion.** `hxchat-model` crate
+  (`Member` / `MemberList` / `Conversation`) with the tested `complete_styled`
+  nick-completion; `chat.c::tab_nick_comp` calls into it.
+- ✅ **M2 — members as a `gio::ListModel` (Option A).** `hxmember-model`
+  (`HxMember` / `HxMemberModel`); each chat owns an authoritative
+  `struct chat::member_model` fed by the `users.c` fan-out and read for
+  completion. The rendered `HxUserListView` keeps its own row store; the model
+  is the data source of truth.
+- ✅ **M3 — collapse the gchat.** The readline history → Rust `InputHistory`
+  (retired `history.c`, also wired into PM inputs); the inline-media handle
+  table → Rust `MediaTable` (`gtkhx-boxed`, retired the `GHashTable` +
+  `media_next_id`); the chat-history render cursors grouped into
+  `struct hx_chat_history_render` (stays C — the `textentry*` point into
+  xtext); and the raw `gtkhx_chat->chat` back-pointer dropped (derive via
+  `chat_with_cid`).
+- **M4 — retire the two per-session tables.** *In progress.* **M4a
+  (this change): collapsed `sess->gchats` into `sess->chats`** — the model
+  (`struct chat`, always present) is the single per-conversation registry
+  entry and owns an optional `struct chat::view` (the window), killing the
+  two-tables-in-lockstep hazard. `gchat_with_cid` is now a thin wrapper over
+  `chat_with_cid(sess, cid)->view`. **M4b (remaining):** fold the membership
+  duplication (`chat->users` vs `member_model`) and, once a
+  `Conversation`/`ConversationView` object the view references exists, retire
+  `struct chat` / `struct gtkhx_chat` and the last loose `cid`.
+
 ### Inventory — what's still C
 
 With every window's *shell* now Rust, the remaining R5 surface is (a) a set of
@@ -1207,8 +1239,9 @@ pool; the small ones are now drained, three larger items remain):
 - **News content** — the read-only viewers, in-buffer search, the threaded
   tree model, and the fetch/post RPC in `news.c` / `news_browser.c`.
 - **Chat content** — the xtext output widget (vendored, stays C forever), the
-  input key handling / readline history, the wire senders, and `chat_tabs.c`
-  (~380 LOC, the `AdwTabView` tab management).
+  input key handling (the line history itself is now the Rust `InputHistory`,
+  M3), the wire senders, and `chat_tabs.c` (~380 LOC, the `AdwTabView` tab
+  management). See the chat-model re-think above for the model side.
 - **Files content** — the whole two-panel browser: the two `files_panel`
   GtkColumnViews, DnD, the providers (`files_provider.c`,
   `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,
