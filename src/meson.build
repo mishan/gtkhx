@@ -233,10 +233,15 @@ rust_deps = [
   rust_gtkhx_boxed_dep,
   rust_hxnet_dep,
   rust_hx_image_decode_dep,
+  # chat wire-out senders (Rust port of chat.c's send path). Must precede
+  # rust_hxtext_dep on the link line: hxchat-send has an undefined ref to
+  # gtkhx_text_for_wire that the later hxtext archive resolves. Same
+  # static-archive rule (consumer before provider) as gtkhx-ui → gtkhx-boxed
+  # above; the C callers of gtkhx_text_for_wire happen to pull it first today,
+  # but don't rely on that as they get ported.
+  rust_hxchat_send_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
-  # chat wire-out senders (Rust port of chat.c's send path).
-  rust_hxchat_send_dep,
 ]
 if voice_enabled
   rust_deps += rust_hxvoice_runtime_dep
