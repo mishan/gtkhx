@@ -354,8 +354,14 @@ pub fn make_pcm8khz_caps_filter() -> Option<gst::Element> {
 ///
 /// ```text
 /// (ghost sink) -> rtppcmudepay -> mulawdec -> audioconvert
-///              -> [level] -> audioresample -> autoaudiosink
+///              -> [level] -> volume -> audioresample -> autoaudiosink
 /// ```
+///
+/// The `volume` element ([`RECV_VOLUME_ELEMENT_NAME`]) is the
+/// per-listener playback gain behind the user-list volume slider. It
+/// sits *after* the `level` VAD tap on purpose: the speaker indicator
+/// should reflect whether the remote is actually talking, independent
+/// of how loud this client has chosen to play them back.
 ///
 /// The ghost pad is exposed as the bin's `"sink"` pad, ready for
 /// the caller (Phase 8.C step 5's `start_receive_bin`) to link to
@@ -388,6 +394,17 @@ pub fn make_receive_bin(
     let depay = gst::ElementFactory::make("rtppcmudepay").build().ok()?;
     let dec = gst::ElementFactory::make("mulawdec").build().ok()?;
     let conv = gst::ElementFactory::make("audioconvert").build().ok()?;
+    // Per-listener playback gain. `volume` starts at unity (1.0); the
+    // runtime's `set_user_volume` path sets its `volume` property in
+    // response to the user-list slider, and re-applies a stored gain
+    // when this bin is (re)built on a rejoin. `volume` lives in
+    // gst-plugins-base alongside audioconvert / audioresample, so if
+    // those resolve so does this — but treat it as load-bearing and
+    // fail the bin build if it's missing, matching the send leg.
+    let volume = gst::ElementFactory::make("volume")
+        .name(RECV_VOLUME_ELEMENT_NAME)
+        .build()
+        .ok()?;
     let res = gst::ElementFactory::make("audioresample").build().ok()?;
     // Output device — same Some/None pattern as the send leg.
     // None falls back to autoaudiosink; an explicit name resolves
@@ -410,15 +427,17 @@ pub fn make_receive_bin(
              Install gst-plugins-good to enable VAD."
         );
     }
-    bin.add_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+    bin.add_many([&depay, &dec, &conv, &volume, &res, &sink]).ok()?;
     if let Some(ref level) = level {
         bin.add(level).ok()?;
-        // depay -> dec -> conv -> level -> res -> sink
-        gst::Element::link_many([&depay, &dec, &conv, level, &res, &sink])
+        // depay -> dec -> conv -> level -> volume -> res -> sink
+        gst::Element::link_many([&depay, &dec, &conv, level, &volume, &res,
+                                 &sink])
             .ok()?;
     } else {
-        // depay -> dec -> conv -> res -> sink (no VAD tap)
-        gst::Element::link_many([&depay, &dec, &conv, &res, &sink]).ok()?;
+        // depay -> dec -> conv -> volume -> res -> sink (no VAD tap)
+        gst::Element::link_many([&depay, &dec, &conv, &volume, &res, &sink])
+            .ok()?;
     }
     // Diagnostic: attach pad probes at FOUR points along the
     // receive chain so we can tell exactly where buffers stop
@@ -508,6 +527,20 @@ fn attach_buffer_probe(
 /// toggle the mic, so the producer here and the consumer there must
 /// agree on the string.
 pub const SEND_VOLUME_ELEMENT_NAME: &str = "hxvoice-send-volume";
+
+/// Element name of the per-listener `volume` element in every receive
+/// bin — the playback-gain control behind the user-list right-click
+/// volume slider. The runtime's `set_user_volume` path resolves a
+/// uid's receive bin(s) and looks this element up **within that bin**
+/// via `bin.by_name(…)` to set its `volume` property (0.0 = silence,
+/// 1.0 = unity, up to 10.0 = boost). Producer here and consumer in
+/// `runtime.rs` must agree on the string.
+///
+/// GStreamer element names only need to be unique within their
+/// immediate parent bin, so every receive bin can reuse this same
+/// name without collision — the lookup is always scoped to one bin,
+/// never `pipeline.by_name` (which would return an arbitrary match).
+pub const RECV_VOLUME_ELEMENT_NAME: &str = "hxvoice-recv-volume";
 
 /// Name of the send `gst::Bin`. The runtime passes this to
 /// [`make_send_bin`] and matches on it in `handle_level_message` to

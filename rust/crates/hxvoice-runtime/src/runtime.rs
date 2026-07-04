@@ -842,6 +842,25 @@ struct Inner {
     /// right speaker indicator. `None` until set — send-side VAD is a
     /// no-op until the C side tells us who we are.
     self_uid: Option<u16>,
+    /// Per-listener playback gain per remote Hotline uid — the state
+    /// behind the user-list right-click volume slider. `1.0` is unity
+    /// (the `volume` element's default); `0.0` is silence; values above
+    /// `1.0` boost (clamped to `[0.0, MAX_USER_VOLUME]` in
+    /// [`VoiceRuntime::set_user_volume`]).
+    ///
+    /// Session-scoped and authoritative: the live [`set_user_volume`]
+    /// path both records the gain here and pushes it onto every
+    /// currently-linked receive bin for the uid, and
+    /// [`apply_stored_volume_to_bin`] replays it whenever a receive bin
+    /// is (re)built — so a mid-call rejoin (which tears down and rebuilds
+    /// the bin) keeps the user's chosen level. A uid absent from this
+    /// map plays at unity.
+    ///
+    /// NOT reset on pipeline rebuild / `TearDown` (unlike the VAD maps
+    /// above): a room-switch or renegotiation shouldn't forget the
+    /// user's volume choices. The whole map dies with the runtime on
+    /// session disconnect, which is the intended "session only" scope.
+    per_user_volume: HashMap<u16, f64>,
     /// `BusWatchGuard` returned by `attach_pipeline_bus_watch`'s
     /// `add_watch_local`. Dropping this guard removes the watch
     /// source from the main context; we keep it parked here so
@@ -1120,6 +1139,7 @@ impl VoiceRuntime {
                 receive_bins: HashMap::new(),
                 recv_bin_uid_cache: HashMap::new(),
                 self_uid: None,
+                per_user_volume: HashMap::new(),
                 bus_watch_guard: bits.bus_watch_guard,
                 rtp_buffers_received: bits.rtp_buffers_received,
                 wedge_watchdog_source: None,
@@ -1168,6 +1188,7 @@ impl VoiceRuntime {
                 receive_bins: HashMap::new(),
                 recv_bin_uid_cache: HashMap::new(),
                 self_uid: None,
+                per_user_volume: HashMap::new(),
                 bus_watch_guard: None,
                 rtp_buffers_received: Arc::new(AtomicU64::new(0)),
                 wedge_watchdog_source: None,
@@ -1731,6 +1752,105 @@ impl VoiceRuntime {
     /// (the uid isn't reset there).
     pub fn set_self_uid(&self, uid: u16) {
         self.inner.borrow_mut().self_uid = Some(uid);
+    }
+
+    /// Set the per-listener playback gain for a remote participant.
+    ///
+    /// `gain` is a linear multiplier: `0.0` mutes them locally, `1.0`
+    /// is unity, values above `1.0` boost. It's clamped to
+    /// `[0.0, MAX_USER_VOLUME]` and any non-finite input (NaN / ±inf
+    /// from a bad FFI caller) is treated as unity so the pipeline never
+    /// sees a garbage property value.
+    ///
+    /// The gain is recorded on the runtime (session-scoped, keyed by
+    /// uid) AND pushed immediately onto every currently-linked receive
+    /// bin for that uid. Recording it is what makes it survive the
+    /// bin teardown/rebuild a mid-call rejoin performs —
+    /// [`apply_stored_volume_to_bin`] replays the stored value when the
+    /// new bin is built.
+    ///
+    /// A uid with no live receive bin yet (e.g. the slider is dragged
+    /// before their audio track negotiates) still has its gain stored,
+    /// so it applies as soon as the bin comes up. Setting a uid back to
+    /// exactly `1.0` keeps the entry (unity) rather than removing it —
+    /// cheap, and it documents an explicit user choice.
+    pub fn set_user_volume(&self, uid: u16, gain: f64) {
+        let gain = if gain.is_finite() {
+            gain.clamp(0.0, MAX_USER_VOLUME)
+        } else {
+            1.0
+        };
+        let bins: Vec<gstreamer::Bin> = {
+            let mut inner = self.inner.borrow_mut();
+            inner.per_user_volume.insert(uid, gain);
+            // Snapshot the receive bins that resolve to this uid so we
+            // can set their volume property without holding the borrow
+            // across the GStreamer calls.
+            inner
+                .receive_bins
+                .values()
+                .filter(|bin| self.recv_bin_matches_uid(bin, uid))
+                .cloned()
+                .collect()
+        };
+        for bin in bins {
+            set_bin_volume(&bin, gain);
+        }
+        crate::debug::log!(
+            "voice-pipe",
+            "set playback volume for uid {uid} to {gain}"
+        );
+    }
+
+    /// Read the stored per-listener gain for a uid, or `1.0` (unity)
+    /// when the user never moved that uid's slider. Exposed mainly so
+    /// the C side can initialise the slider position and so tests can
+    /// assert the stored state.
+    pub fn user_volume(&self, uid: u16) -> f64 {
+        self.inner
+            .borrow()
+            .per_user_volume
+            .get(&uid)
+            .copied()
+            .unwrap_or(1.0)
+    }
+
+    /// Does this receive bin carry audio for `uid`? Resolves the uid
+    /// from the bin's element name (the per-user `mid:user-<uid>` case),
+    /// falling back to the RTCP-cname cache the VAD layer populates for
+    /// bundled `mid=send` legs. Mirrors the attribution
+    /// `handle_level_message` uses, so the volume slider follows the
+    /// same "which bin belongs to whom" logic the speaker indicator does.
+    fn recv_bin_matches_uid(&self, bin: &gstreamer::Bin, uid: u16) -> bool {
+        if uid_from_recv_bin_name(bin.name().as_str()) == Some(uid) {
+            return true;
+        }
+        self.inner
+            .borrow()
+            .recv_bin_uid_cache
+            .get(bin.name().as_str())
+            .copied()
+            == Some(uid)
+    }
+
+    /// Replay the stored per-user gain onto a freshly (re)built receive
+    /// bin. Called from the receive-bin insertion sites so a mid-call
+    /// rejoin — which tears the bin down and builds a new one — restores
+    /// the volume the user picked earlier in the session. No-op (leaves
+    /// the bin at its unity default) when the uid can't be resolved or
+    /// has no stored, non-unity gain.
+    fn apply_stored_volume_to_bin(&self, bin: &gstreamer::Bin) {
+        let Some(uid) = uid_from_recv_bin_name(bin.name().as_str()) else {
+            // Bundled `mid=send` legs can't be attributed at build time
+            // (uid only arrives later via the RTCP cname). The live
+            // setter re-applies once the cache resolves, so nothing to
+            // do here.
+            return;
+        };
+        let gain = self.inner.borrow().per_user_volume.get(&uid).copied();
+        if let Some(gain) = gain {
+            set_bin_volume(bin, gain);
+        }
     }
 
     /// Drive one transition. Pumps `event` through the state
@@ -2369,6 +2489,10 @@ impl VoiceRuntime {
                 if let Some(bin) =
                     start_receive_bin(&pipeline, &pad, &mid, &counter)
                 {
+                    // Replay any per-user playback gain the user set
+                    // earlier this session so a rejoin keeps their
+                    // chosen level.
+                    self.apply_stored_volume_to_bin(&bin);
                     self.inner
                         .borrow_mut()
                         .receive_bins
@@ -3046,6 +3170,10 @@ fn connect_pad_added(
                             .borrow_mut()
                             .receive_bins
                             .insert(pad.name().to_string(), bin.clone());
+                        // Replay any per-user playback gain the user
+                        // set earlier this session onto the fresh bin
+                        // (rejoin / renegotiation rebuilds it).
+                        rt.apply_stored_volume_to_bin(bin);
                     } else {
                         // Salvage the pipeline handle, then tear
                         // the bin down. The pipeline handle is
@@ -3404,6 +3532,14 @@ fn map_peer_connection_state(
 /// if real-world rooms want it tighter.
 const SPEAKING_RMS_THRESHOLD_DB: f64 = -50.0;
 
+/// Upper clamp for a per-user playback gain set via
+/// [`VoiceRuntime::set_user_volume`]. The GStreamer `volume` element
+/// accepts `[0.0, 10.0]`; we expose the full boost range but cap at
+/// the element's own ceiling so a bad FFI value can't trip a
+/// property-set warning. The UI slider uses a much narrower range
+/// (0–150%); this is just the defensive backstop.
+const MAX_USER_VOLUME: f64 = 10.0;
+
 /// Name prefix every receive bin carries (`hxvoice-recv-<mid>`).
 /// Shared between [`start_receive_bin`], which builds the name, and
 /// [`uid_from_recv_bin_name`], which parses the uid back out of a
@@ -3430,6 +3566,27 @@ const RECV_BIN_PAD_SEP: &str = "__";
 /// name. Unique per pad; the mid stays recoverable for VAD.
 fn recv_bin_name(mid: &str, pad_name: &str) -> String {
     format!("{RECV_BIN_PREFIX}{mid}{RECV_BIN_PAD_SEP}{pad_name}")
+}
+
+/// Set the playback-gain `volume` property on a receive bin's
+/// [`crate::audio::RECV_VOLUME_ELEMENT_NAME`] element. The lookup is
+/// scoped to the given bin (never `pipeline.by_name`) so sibling bins
+/// sharing the element name don't alias. No-op if the element is
+/// absent (a partial GStreamer install that couldn't build the volume
+/// stage — the bin build would already have failed in that case, so
+/// this is belt-and-suspenders).
+fn set_bin_volume(bin: &gstreamer::Bin, gain: f64) {
+    if let Some(volume) = bin.by_name(crate::audio::RECV_VOLUME_ELEMENT_NAME) {
+        volume.set_property("volume", gain);
+    } else {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: receive bin `{}` has no `{}` element — playback \
+             volume not applied",
+            bin.name(),
+            crate::audio::RECV_VOLUME_ELEMENT_NAME
+        );
+    }
 }
 
 /// `true` when an RMS reading clears the speaking threshold. Pure
@@ -4610,6 +4767,54 @@ mod tests {
         );
     }
 
+    // ---- Per-user playback volume --------------------------------
+    //
+    // The pipeline-less test runtime has no receive bins to push the
+    // gain onto, so these exercise the stored-state half of
+    // `set_user_volume` / `user_volume` (clamp, non-finite handling,
+    // round-trip). The GStreamer half — that a live receive bin's
+    // `volume` element actually moves — is covered by the Tier 3
+    // voice media harness against Janus.
+
+    #[test]
+    fn user_volume_defaults_to_unity() {
+        let (runtime, _backend) = rec();
+        assert_eq!(runtime.user_volume(7), 1.0);
+    }
+
+    #[test]
+    fn set_user_volume_round_trips() {
+        let (runtime, _backend) = rec();
+        runtime.set_user_volume(7, 0.5);
+        assert_eq!(runtime.user_volume(7), 0.5);
+        // Per-uid, independent.
+        assert_eq!(runtime.user_volume(8), 1.0);
+        runtime.set_user_volume(7, 1.25);
+        assert_eq!(runtime.user_volume(7), 1.25);
+    }
+
+    #[test]
+    fn set_user_volume_clamps_range() {
+        let (runtime, _backend) = rec();
+        runtime.set_user_volume(1, -3.0);
+        assert_eq!(runtime.user_volume(1), 0.0, "negative gain clamps to 0");
+        runtime.set_user_volume(2, 1_000.0);
+        assert_eq!(
+            runtime.user_volume(2),
+            MAX_USER_VOLUME,
+            "over-boost clamps to the volume element's ceiling"
+        );
+    }
+
+    #[test]
+    fn set_user_volume_rejects_non_finite() {
+        let (runtime, _backend) = rec();
+        runtime.set_user_volume(3, f64::NAN);
+        assert_eq!(runtime.user_volume(3), 1.0, "NaN falls back to unity");
+        runtime.set_user_volume(4, f64::INFINITY);
+        assert_eq!(runtime.user_volume(4), 1.0, "inf falls back to unity");
+    }
+
     // ---- Speaker-activity evaluator ------------------------------
     //
     // The evaluator runs `speaker_tick` periodically (200ms in
@@ -5236,6 +5441,30 @@ mod tests {
         assert!(
             !vol.property::<bool>("mute"),
             "unmute must reach the send volume element"
+        );
+    }
+
+    /// The per-listener `volume` element exists in a freshly-built
+    /// receive bin, starts at unity, and `set_bin_volume` moves it —
+    /// the GStreamer half of the user-list volume slider.
+    #[test]
+    fn receive_bin_volume_element_present_and_settable() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let bin = crate::audio::make_receive_bin("hxvoice-recv-user-5__src_0", None)
+            .expect("receive bin builds");
+        let vol = bin
+            .by_name(crate::audio::RECV_VOLUME_ELEMENT_NAME)
+            .expect("receive volume element present in the bin");
+        assert_eq!(
+            vol.property::<f64>("volume"),
+            1.0,
+            "receive volume starts at unity"
+        );
+        set_bin_volume(&bin, 0.25);
+        assert_eq!(
+            vol.property::<f64>("volume"),
+            0.25,
+            "set_bin_volume must reach the receive volume element"
         );
     }
 

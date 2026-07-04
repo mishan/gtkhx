@@ -358,6 +358,31 @@ extern void gtkhx_voice_runtime_mute (gtkhx_voice_runtime *rt, int muted);
 extern void gtkhx_voice_runtime_set_self_uid (gtkhx_voice_runtime *rt,
                                               uint16_t uid);
 
+/*
+ * Per-listener playback gain for a remote participant — the value
+ * behind the user-list right-click volume slider.
+ *
+ * `gain` is a linear multiplier: 0.0 mutes them locally, 1.0 is
+ * unity, values above 1.0 boost. Clamped to [0.0, 10.0] on the Rust
+ * side; any non-finite value is treated as unity. The gain is
+ * session-scoped (keyed by uid) and re-applied automatically when the
+ * participant's receive bin is rebuilt on a mid-call rejoin — the C
+ * side just pushes the slider value and forgets about it.
+ *
+ * NULL-safe on the runtime pointer (drops the call). Main-thread only.
+ */
+extern void gtkhx_voice_runtime_set_user_volume (gtkhx_voice_runtime *rt,
+                                                 uint16_t uid,
+                                                 double gain);
+
+/*
+ * Read back the stored gain for a uid so the slider can initialise to
+ * the user's earlier choice. Returns 1.0 (unity) for a uid never
+ * adjusted, and for a NULL runtime.
+ */
+extern double gtkhx_voice_runtime_user_volume (gtkhx_voice_runtime *rt,
+                                               uint16_t uid);
+
 /* Fire Event::SdpOfferReceived { cid, sdp }. sdp is a NUL-terminated
  * C string; NULL is treated as empty (and dropped by the state
  * machine's downstream parser). */
