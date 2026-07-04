@@ -127,16 +127,15 @@ gtkhx_sources = files(
 # these files are dropped, the HAVE_VOICE define below is unset, and every
 # call site in the always-compiled files is guarded by #ifdef HAVE_VOICE.
 # voice.c            — wire-out helpers (hx_send_voice_*).
-# voice_model.c      — per-uid voice presence/state GObject (no GStreamer).
 # voice_bridge.c     — session/htlc field accessors for the Rust voice UI
 #                      (users_voice_col + voice_panel moved to gtkhx-ui's
 #                      `voice` feature).
 # voice_ptt.c        — push-to-talk key controller.
 # voice_ptt_keyspec.c— pure PTT key-spec vocabulary / canonicalisation.
-# (voice_panel.c retired — ported to rust/crates/gtkhx-ui/src/voice_panel.rs.)
+# (voice_panel.c retired — ported to rust/crates/gtkhx-ui/src/voice_panel.rs.
+#  voice_model.c retired — ported to the hxvoice-model Rust crate.)
 voice_sources = files(
   'voice.c',
-  'voice_model.c',
   'voice_bridge.c',
   'voice_ptt.c',
   'voice_ptt_keyspec.c',
@@ -233,6 +232,8 @@ rust_deps = [
 ]
 if voice_enabled
   rust_deps += rust_hxvoice_runtime_dep
+  # HxVoiceModel moved to the hxvoice-model Rust crate (voice_model.c retired).
+  rust_deps += rust_hxvoice_model_dep
 endif
 
 executable('gtkhx',

@@ -1818,6 +1818,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxvoice-model"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+ "hotline-proto",
+]
+
+[[package]]
 name = "hxvoice-runtime"
 version = "0.1.0"
 dependencies = [
