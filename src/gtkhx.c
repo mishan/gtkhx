@@ -1306,40 +1306,11 @@ init (int argc, char **argv)
     fe_init ();
 }
 
-static void
-output_user_info (guint16 uid, const char *nam, const char *info, guint16 len)
-{
-    if (len > 0) {
-        GtkWidget *info_window;
-        GtkWidget *info_text;
-        GtkWidget *info_scroll;
-        GtkTextBuffer *info_buf;
-        char infotitle[45];
-
-        info_window = gtk_window_new ();
-        gtk_widget_set_size_request (info_window, 260, 250);
-
-        g_snprintf (infotitle, sizeof (infotitle), _ ("User Info: %1$s (%2$u)"),
-                    nam, uid);
-        gtk_window_set_title (GTK_WINDOW (info_window), infotitle);
-
-        info_text = gtk_text_view_new ();
-        gtk_text_view_set_editable (GTK_TEXT_VIEW (info_text), FALSE);
-        gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (info_text), FALSE);
-        info_buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (info_text));
-        gtk_text_buffer_set_text (info_buf, info, len);
-
-        info_scroll = gtk_scrolled_window_new ();
-        gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (info_scroll),
-                                        GTK_POLICY_AUTOMATIC,
-                                        GTK_POLICY_AUTOMATIC);
-        gtkhx_widget_set_child (info_scroll, info_text);
-        gtkhx_widget_set_child (info_window, info_scroll);
-
-        init_keyaccel (info_window);
-        gtk_window_present (GTK_WINDOW (info_window));
-    }
-}
+/* output_user_info (the Get-User-Info result window) ported to Rust
+ * (gtkhx-ui user_info.rs); the on_user_info_signal adapter below links
+ * against the #[no_mangle] export via this forward declaration. */
+extern void output_user_info (guint16 uid, const char *nam, const char *info,
+                              guint16 len);
 
 /* Forward declarations for the file-local view functions the
  * Phase 3 adapter handlers below call. The functions themselves
