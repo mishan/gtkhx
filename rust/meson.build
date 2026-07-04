@@ -144,6 +144,7 @@ rust_sources = files(
   'crates/hxchat-send/src/tests.rs',
   'crates/hxchat-model/src/lib.rs',
   'crates/hxchat-model/src/tests.rs',
+  'crates/hxchat-model/src/input_history.rs',
   'crates/hxmember-model/src/lib.rs',
   'crates/hxmember-model/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',

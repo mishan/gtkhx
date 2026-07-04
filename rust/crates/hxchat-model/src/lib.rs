@@ -27,6 +27,9 @@
 
 use std::collections::HashMap;
 
+mod input_history;
+pub use input_history::InputHistory;
+
 /// A per-user nickname colour (Colored-Nicknames extension): `Some(0x00RRGGBB)`
 /// or `None` for "no colour set" (the C `HX_NICK_COLOR_NONE` 0xFFFFFFFF
 /// sentinel, replaced here by the type system).
