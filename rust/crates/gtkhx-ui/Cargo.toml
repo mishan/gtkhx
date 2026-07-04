@@ -43,8 +43,9 @@ gio = { workspace = true }
 # floor) and the C options.c used GtkColorDialogButton, so this just turns
 # the binding-feature gate on.
 gtk4 = { workspace = true, features = ["v4_10"] }
-# v1_5 enables the AdwDialog / AdwToolbarView bindings + AdwActionRow
-# subtitle-selectable (transitively v1_4 / v1_3). The runtime libadwaita
-# is already >= 1.6 (meson floor), and the C tracker used these same
-# widgets, so the binding-feature gate just needs turning on.
-libadwaita = { workspace = true, features = ["v1_5"] }
+# v1_6 enables AdwSpinner (inline-media dialog) on top of the AdwDialog /
+# AdwToolbarView bindings + AdwActionRow subtitle-selectable (transitively
+# v1_5 / v1_4 / v1_3). The runtime libadwaita is already >= 1.6 (meson
+# floor), and the C dialogs used these same widgets, so the binding-feature
+# gate just needs turning on.
+libadwaita = { workspace = true, features = ["v1_6"] }
