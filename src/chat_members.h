@@ -37,6 +37,19 @@ extern gboolean hx_nick_complete (void *model, const char *input, gsize cursor,
                                   gboolean old_style, char **out_text,
                                   int *out_cursor, char **out_info);
 
+/*
+ * Chat input line history — the Rust InputHistory (hxchat-model) replacing the
+ * gchat->chat_history GNU-readline HISTORY + chat_history_draft. Owned by C as
+ * an opaque pointer. record() = readline add_history + using_history; up/down
+ * return a g_malloc'd line to show (caller g_free's) or FALSE for no change.
+ */
+extern void *hx_input_history_new (void);
+extern void hx_input_history_free (void *hist);
+extern void hx_input_history_record (void *hist, const char *line);
+extern gboolean hx_input_history_up (void *hist, const char *current,
+                                     char **out);
+extern gboolean hx_input_history_down (void *hist, char **out);
+
 G_END_DECLS
 
 #endif /* HX_CHAT_MEMBERS_H */

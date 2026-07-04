@@ -83,12 +83,9 @@ struct msgwin {
 	 * idle state. */
     GtkWidget *info_image;
     GtkWidget *info_label;
+    /* PM input line history — a Rust InputHistory (hxchat-model), like
+     * gtkhx_chat::chat_history. Owns the Up-arrow draft internally. */
     void *history;
-    /* See gtkhx_chat::chat_history_draft. Same idea: stashed
-     * input-buffer text from the moment the user first pressed
-     * Up at the bottom-of-history "draft" position, restored
-     * on Down past the most recent entry. */
-    char *history_draft;
 };
 
 /* ---- Custom timer wheel (gtkhx.c) --------------------------------- */
@@ -145,15 +142,11 @@ struct gtkhx_chat {
     struct _HxUserListView *userlist;
     guint32 cid;
     struct chat *chat;
-    void *chat_history;   /* GNU readline command-line history. */
-    /* Stashed input-buffer text from the moment the user first
-     * pressed Up at the bottom-of-history "draft" position. When
-     * Down navigates back past the most recent history entry,
-     * this is restored into the buffer so the user doesn't lose
-     * a partially-typed message to up-arrow. NULL when no draft
-     * has been captured for the current navigation cycle. Freed
-     * (via g_free) before being reassigned and at chat teardown. */
-    char *chat_history_draft;
+    /* Chat input line history — a Rust InputHistory (hxchat-model), created by
+     * hx_input_history_new, driven by chat_input_key_pressed's Return/Up/Down,
+     * freed in chat_free. Owns the Up-arrow draft internally (the old separate
+     * chat_history_draft field is gone). */
+    void *chat_history;
 
     /* fogWraith chat-history extension state (Phase 3+).
      *
