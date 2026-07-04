@@ -49,6 +49,12 @@ gtk4 = { workspace = true, features = ["v4_10"] }
 # floor), and the C dialogs used these same widgets, so the binding-feature
 # gate just needs turning on.
 libadwaita = { workspace = true, features = ["v1_6"] }
+# Native emoji `:shortcode:` matcher for the typeahead (emoji.rs) — the same
+# crate the C-ABI gtkhx_proto_* shims wrap, used here directly. Pure Rust; the
+# unused #[no_mangle] exports dead-strip out of gtkhx-ui's archive, so no
+# duplicate-symbol clash with the separately-linked hotline-proto staticlib
+# (same as hxnet / hxvoice-* which already depend on it).
+hotline-proto = { path = "../hotline-proto" }
 
 [features]
 # `voice` gates the user-list voice-indicator column (users_voice_col) and

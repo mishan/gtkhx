@@ -107,6 +107,10 @@ pub mod user_info;
 // GtkTextView + Cancel/Post header; the wire sender hx_post_news stays C.
 // create_post_window is this module's #[no_mangle] export.
 pub mod create_post;
+// R5.25: the emoji picker button + inline `:shortcode:` typeahead (was
+// emoji.c). GTK wiring only — the shortcode match list comes from
+// hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
+pub mod emoji;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
