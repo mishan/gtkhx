@@ -1,0 +1,21 @@
+[package]
+name = "hxmember-model"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5 M2: chat membership as a gio::ListModel (HxMember / HxMemberModel) over the pure hxchat-model"
+publish = false
+
+[lib]
+# rlib: consumed by gtkhx-ui when HxUserListView binds to the model (next M2
+# increment). staticlib: reserved for the FFI seam rcv.c will mutate through.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# glib + gio give the GObject + gio::ListModel surface; no gtk / no C externs,
+# so `cargo test -p hxmember-model` runs headless (unlike gtkhx-ui, which
+# externs the C send-path / widget symbols and can't be unit-linked alone).
+glib = { workspace = true }
+gio = { workspace = true }
+# The pure conversation/membership model this wraps as a live list model.
+hxchat-model = { path = "../hxchat-model" }

@@ -1800,6 +1800,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxmember-model"
+version = "0.1.0"
+dependencies = [
+ "gio 0.21.5",
+ "glib 0.21.5",
+ "hxchat-model",
+]
+
+[[package]]
 name = "hxnet"
 version = "0.1.0"
 dependencies = [
