@@ -618,24 +618,9 @@ test_voice_ptt_keyspec = executable('test_voice_ptt_keyspec',
 test('voice_ptt_keyspec', test_voice_ptt_keyspec,
      suite : 'unit')
 
-# voice_model — per-uid voice presence + state used to drive the
-# speaker indicator column in the user list. Pure GObject + GLib
-# data structure; no GTK, no GStreamer. Pins down the indicator-
-# policy contract (MUTED beats SPEAKING, leavers drop to NONE,
-# set_speaking on an unknown uid is a no-op) plus the
-# "indicator-changed" signal emission discipline (one emit per
-# uid whose computed indicator actually flipped, none for
-# unchanged-flip ingest passes). Pulls in the hotline-proto Rust
-# staticlib (via proto_test_deps) because voice_model.c calls
-# gtkhx_proto_parse_voice_participants to walk the wire blob.
-test_voice_model = executable('test_voice_model',
-  'unit/test_voice_model.c',
-  '../src/voice_model.c',
-  dependencies        : proto_test_deps,
-  include_directories : test_inc,
-)
-test('voice_model', test_voice_model,
-     suite : 'unit')
+# voice_model — the indicator-policy + signal-emission contract moved to the
+# hxvoice-model Rust crate along with the port (voice_model.c retired). Its
+# tests run under `cargo test -p hxvoice-model`, so there's no C target here.
 endif # voice_enabled
 
 # inline_media_decode — Phase 9.B bounded image decoder.

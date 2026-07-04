@@ -1,0 +1,24 @@
+[package]
+name = "hxvoice-model"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5: per-uid voice presence model (HxVoiceModel) as a Rust glib::subclass GObject"
+publish = false
+
+[lib]
+# staticlib: the C side links the FFI symbols (hx_voice_model_get_type,
+#            hx_voice_model_new, _ingest_participants, _set_speaking,
+#            _set_self_uid, _clear, _get_indicator) that the deleted
+#            src/voice_model.c used to provide.
+# rlib:      lets Rust consumers (the gtkhx-ui `voice` modules, a future
+#            fully-Rust voice stack) hold a typed HxVoiceModel if useful.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# glib for the GObject subclass + the "indicator-changed" signal. Same pin
+# as the rest of the workspace; builds against the libglib/libgobject the C
+# binary already links, so the system-library surface doesn't grow.
+glib = { workspace = true }
+# The DATA_VOICE_PARTICIPANTS blob parser (typed Rust API, not the C ABI).
+hotline-proto = { path = "../hotline-proto" }

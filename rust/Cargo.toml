@@ -12,6 +12,7 @@ members = [
     "crates/gtkhx-ui",
     "crates/hxnet",
     "crates/hxvoice",
+    "crates/hxvoice-model",
     "crates/hxvoice-runtime",
     "crates/hx-image-decode",
     "crates/feature-unify",

@@ -129,6 +129,8 @@ rust_sources = files(
   'crates/hxvoice/src/event.rs',
   'crates/hxvoice/src/action.rs',
   'crates/hxvoice/src/state.rs',
+  'crates/hxvoice-model/src/lib.rs',
+  'crates/hxvoice-model/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -158,6 +160,7 @@ rust_sources = files(
   'crates/gtkhx-ui/Cargo.toml',
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
+  'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -290,7 +293,7 @@ if voice_enabled
   # hxbridge/runtime + hxnet/socks entries already are.
   cargo_features = cargo_features + ',gtkhx-ui/voice'
 else
-  cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime'
+  cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime --exclude hxvoice-model'
 endif
 
 # --ignore-rust-version: several transitive deps (zbus / zvariant /
@@ -514,6 +517,21 @@ rust_hxvoice_runtime_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxvoice_runtime',
+  ],
+)
+
+# Per-uid voice presence model (HxVoiceModel), the Rust port of
+# src/voice_model.c. Same lazy-dependency treatment as hxvoice_runtime:
+# declared unconditionally but only linked when voice_enabled (src/meson.build),
+# which is the same condition under which cargo built the staticlib (the crate
+# is in the --exclude list for the voice-off build above). The gtkhx-ui `voice`
+# modules + rcv.c / gtkhx.c / network.c / users.c resolve hx_voice_model_*
+# against this archive.
+rust_hxvoice_model_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxvoice_model',
   ],
 )
 
