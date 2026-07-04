@@ -79,6 +79,9 @@ pub mod news_browser;
 // Dock registration via dock_bridge; chat content + xtext + wire senders stay
 // C in chat.c. create_chat_window is this module's #[no_mangle] export.
 pub mod chat;
+// M2 wire-up (Option A): the C ABI over the session-owned HxMemberModel +
+// the M1 nick completion (hx_member_model_* / hx_nick_complete).
+pub mod chat_members;
 // R5.14: Private Message content — create_msgwin builds the PM tab's content
 // tree (output frame, input + emoji, recipient info pane) in gtk4-rs around
 // the C create_msg model/leaf widgets. The msgwin struct + chat_tabs + wire

@@ -79,6 +79,19 @@ fn address_form_ambiguous_extends_to_common_prefix() {
 }
 
 #[test]
+fn old_style_ambiguous_completes_to_first_match() {
+    // Old-style: an ambiguous prefix completes to the first candidate fully,
+    // no common-prefix extension or candidate list (vs. the new-style default).
+    let c = complete_styled(&["alan", "alice"], "a", 1, false, ':', true).unwrap();
+    assert_eq!(c.text, "alan: "); // first sorted candidate, fully
+    assert!(c.info.is_empty());
+    // New-style over the same input only extends to the common prefix.
+    let n = complete(&["alan", "alice"], "a", 1, false, ':').unwrap();
+    assert_eq!(n.text, "al");
+    assert_eq!(n.info.len(), 2);
+}
+
+#[test]
 fn address_form_ambiguous_no_further_prefix_reports_only() {
     // "al" is already the common prefix of alan/alice → no extension.
     let c = complete(&["alan", "alice"], "al", 2, false, ':').unwrap();

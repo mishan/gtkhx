@@ -1608,6 +1608,8 @@ dependencies = [
  "glib 0.21.5",
  "gtk4",
  "hotline-proto",
+ "hxchat-model",
+ "hxmember-model",
  "libadwaita",
 ]
 

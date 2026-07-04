@@ -350,6 +350,12 @@ struct chat {
     guint32 nusers;
     GHashTable *users;
     char subject[256];
+    /* M2 wire-up (Option A): authoritative membership for this chat as a Rust
+     * HxMemberModel (opaque GObject*, hxmember-model). Created in chat_new,
+     * fed by the users.c fan-out (before the view gate, so it's populated even
+     * when no user-list view exists), and read by tab_nick_comp for input in
+     * this chat. Freed in chat_free. */
+    void *member_model;
 };
 
 /* ---- The session struct ------------------------------------------- */
