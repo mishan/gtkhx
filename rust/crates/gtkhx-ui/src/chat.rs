@@ -170,9 +170,11 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     // Rust shell owns). window_is_active() checks GTK_IS_WINDOW(panel_box) →
     // false, so notifications always fire for public chat, as before.
     hx_gchat_set_window(gchat, wptr(&panel_box));
-    let gchat_addr = gchat as usize;
+    // Capture the raw `*mut Gchat` directly (it's Copy + 'static) — no
+    // pointer→usize→pointer round-trip, which would strip provenance under
+    // strict-provenance and make the later deref UB (see hxbridge's notes).
     panel_box.connect_destroy(move |_| unsafe {
-        gtkhx_chat_clear_content_ptrs(gchat_addr as *mut Gchat);
+        gtkhx_chat_clear_content_ptrs(gchat);
     });
 
     into_floating_ptr(panel_box)
