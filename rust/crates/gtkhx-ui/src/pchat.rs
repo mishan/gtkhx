@@ -129,8 +129,15 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     vstack.set_vexpand(true);
     vbox.append(&vstack);
 
-    // User sidebar (C helper) on the right of the pane.
-    let user_sidebar: gtk::Widget = from_glib_none(gtkhx_pchat_user_sidebar(htlc, chat));
+    // User sidebar (C helper) on the right of the pane. It returns NULL if the
+    // gchat lookup fails; from_glib_none on NULL is UB, so fall back to an
+    // empty box (the pane still needs an end child) rather than wrap NULL.
+    let sidebar_ptr = gtkhx_pchat_user_sidebar(htlc, chat);
+    let user_sidebar: gtk::Widget = if sidebar_ptr.is_null() {
+        gtk::Box::new(gtk::Orientation::Vertical, 0).upcast()
+    } else {
+        from_glib_none(sidebar_ptr)
+    };
 
     let hpane = gtk::Paned::new(gtk::Orientation::Horizontal);
     hpane.set_start_child(Some(&vbox));

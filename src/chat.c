@@ -2959,9 +2959,10 @@ gtkhx_pchat_new (struct htlc_conn *htlc, struct chat *chat)
     session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat = pchat_new (sess, chat);
 
-    gchat->subject = gtk_entry_new ();
+    /* Reuse the subject entry pchat_new already created + styled + ref-sank —
+     * overwriting gchat->subject with a fresh gtk_entry_new would leak that
+     * one. Just populate its text and wire the activate handler. */
     gtk_editable_set_text (GTK_EDITABLE (gchat->subject), chat->subject);
-    gtkhx_apply_text_style (gchat->subject);
     g_signal_connect (gchat->subject, "activate", G_CALLBACK (change_subject),
                       GINT_TO_POINTER (chat->cid));
 
