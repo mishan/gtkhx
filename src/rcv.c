@@ -386,11 +386,29 @@ hx_rcv_msg (struct htlc_conn *htlc)
     is_broadcast = (hdr_type == HTLS_HDR_MSG_BROADCAST);
 
     if (!is_broadcast && pm.uid > 0) {
+        /* Some servers (mhxd on a self-directed PM) deliver the message
+		 * with the sender UID but an empty NAME chunk, which rendered as
+		 * "<> body" and — because HxMsgEvent's is_self test is name-based —
+		 * mis-coloured the self-echo as incoming. Resolve a display name
+		 * from the uid when the wire omits it: our own nick for a self-PM,
+		 * else the sender's user-list entry. With the name filled in, the
+		 * is_self classification inside hx_msg_event_new also works. */
+        const char *disp_name = pm.name;
+        gsize disp_name_len = pm.name_len;
+        if (disp_name_len == 0) {
+            if (pm.uid == htlc->uid && htlc->name[0]) {
+                disp_name = htlc->name;
+                disp_name_len = strlen (htlc->name);
+            } else if (user && user->name[0]) {
+                disp_name = user->name;
+                disp_name_len = strlen (user->name);
+            }
+        }
         /* msg signal payload is a boxed HxMsgEvent
 		 * (parsed once; every subscriber sees the same
 		 * UTF-8-sanitised, self-classified view). */
         HxMsgEvent *ev = hx_msg_event_new (
-            pm.uid, pm.name, pm.name_len, pm.msg, pm.msg_len,
+            pm.uid, disp_name, disp_name_len, pm.msg, pm.msg_len,
             htlc->name[0] ? htlc->name : NULL);
         gtkhx_session_emit_msg (gtkhx_session_get_default (), ev);
         hx_msg_event_free (ev);
