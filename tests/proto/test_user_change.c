@@ -332,6 +332,176 @@ test_user_change_null_out_returns_false (void)
     wire_fixture_free (&htlc);
 }
 
+/* ============================================================
+ * hx_user_change_plan_resolve — the pure decision layer (M4b.4b).
+ * Builds the parsed struct directly (no wire) and pins the rename /
+ * colour-preserve / self-detect decisions that hx_rcv_user_change relies on.
+ * ============================================================ */
+
+/* Build a parsed USER_CHANGE struct without going through the wire. */
+static struct hx_user_change_msg
+mk_uc (guint16 uid, const char *name, guint16 icon, guint16 color,
+       gboolean got_color, guint32 nick_color, gboolean got_nick_color)
+{
+    struct hx_user_change_msg uc;
+    memset (&uc, 0, sizeof uc);
+    uc.uid = uid;
+    uc.icon = icon;
+    uc.color = color;
+    uc.got_color = got_color;
+    uc.nick_color = got_nick_color ? nick_color : HX_NICK_COLOR_NONE;
+    uc.got_nick_color = got_nick_color;
+    uc.cid = 0;
+    if (name) {
+        g_strlcpy (uc.name, name, sizeof uc.name);
+        uc.name_len = (guint16)strlen (uc.name);
+    }
+    return uc;
+}
+
+static void
+test_resolve_new_user_is_create (void)
+{
+    struct hx_user_change_msg uc = mk_uc (42, "Bob", 412, 3, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, /*old_exists=*/FALSE, 0,
+                                 HX_NICK_COLOR_NONE, NULL,
+                                 /*self_uid=*/5, "Me", &p);
+    g_assert_true (p.is_new);
+    g_assert_false (p.is_self);
+    g_assert_false (p.skip_self_create);
+    g_assert_false (p.do_rename_notice);
+    g_assert_cmphex (p.eff_color, ==, 3);
+    g_assert_cmphex (p.eff_nick_color, ==, HX_NICK_COLOR_NONE);
+    g_assert_false (p.adopt_self_uid);
+}
+
+static void
+test_resolve_rename_fires_notice (void)
+{
+    struct hx_user_change_msg uc = mk_uc (42, "Bobby", 412, 3, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, /*old_exists=*/TRUE, /*old_status=*/3,
+                                 HX_NICK_COLOR_NONE, /*old_name=*/"Bob",
+                                 /*self_uid=*/5, "Me", &p);
+    g_assert_false (p.is_new);
+    g_assert_true (p.do_rename_notice);
+}
+
+static void
+test_resolve_same_name_no_notice (void)
+{
+    /* An icon/colour-only USER_CHANGE (name unchanged) must not print
+     * "X is now known as X". */
+    struct hx_user_change_msg uc = mk_uc (42, "Bob", 999, 1, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, TRUE, 3, HX_NICK_COLOR_NONE, "Bob", 5,
+                                 "Me", &p);
+    g_assert_false (p.do_rename_notice);
+}
+
+static void
+test_resolve_color_preserved_when_absent (void)
+{
+    /* !got_color on an existing user → keep the old status bitmap. */
+    struct hx_user_change_msg uc = mk_uc (42, "Bob", 412, 0, FALSE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, TRUE, /*old_status=*/2, HX_NICK_COLOR_NONE,
+                                 "Bob", 5, "Me", &p);
+    g_assert_cmphex (p.eff_color, ==, 2);
+}
+
+static void
+test_resolve_color_taken_when_present (void)
+{
+    struct hx_user_change_msg uc = mk_uc (42, "Bob", 412, 1, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, TRUE, 2, HX_NICK_COLOR_NONE, "Bob", 5,
+                                 "Me", &p);
+    g_assert_cmphex (p.eff_color, ==, 1);
+}
+
+static void
+test_resolve_nick_color_preserved_when_absent (void)
+{
+    /* !got_nick_color on an existing user → keep the old RGB colour (a
+     * rename mustn't wipe someone's custom colour). */
+    struct hx_user_change_msg uc = mk_uc (42, "Bob", 412, 3, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, TRUE, 3, /*old_nick_color=*/0x00abcdef,
+                                 "Bob", 5, "Me", &p);
+    g_assert_cmphex (p.eff_nick_color, ==, 0x00abcdefu);
+}
+
+static void
+test_resolve_nick_color_taken_when_present (void)
+{
+    struct hx_user_change_msg uc
+        = mk_uc (42, "Bob", 412, 3, TRUE, 0x00112233, TRUE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, TRUE, 3, 0x00abcdef, "Bob", 5, "Me", &p);
+    g_assert_cmphex (p.eff_nick_color, ==, 0x00112233u);
+}
+
+static void
+test_resolve_self_change_no_rename (void)
+{
+    /* uid == self_uid → is_self, and never a rename notice about ourselves. */
+    struct hx_user_change_msg uc = mk_uc (5, "MeNew", 412, 3, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, TRUE, 3, HX_NICK_COLOR_NONE, "Me",
+                                 /*self_uid=*/5, "Me", &p);
+    g_assert_true (p.is_self);
+    g_assert_false (p.do_rename_notice);
+}
+
+static void
+test_resolve_self_uid_adoption (void)
+{
+    /* self_uid==0 (SELFINFO didn't carry it) + the broadcast name matches
+     * our nick → adopt uc.uid as ours. */
+    struct hx_user_change_msg uc = mk_uc (77, "Me", 412, 3, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, /*old_exists=*/FALSE, 0, HX_NICK_COLOR_NONE,
+                                 NULL, /*self_uid=*/0, "Me", &p);
+    g_assert_true (p.adopt_self_uid);
+    g_assert_true (p.is_self);
+    g_assert_true (p.skip_self_create); /* new + self → don't add our own row */
+}
+
+static void
+test_resolve_no_self_adoption_on_name_mismatch (void)
+{
+    struct hx_user_change_msg uc = mk_uc (77, "Stranger", 412, 3, TRUE, 0, FALSE);
+    struct hx_user_change_plan p;
+    hx_user_change_plan_resolve (&uc, FALSE, 0, HX_NICK_COLOR_NONE, NULL, 0, "Me",
+                                 &p);
+    g_assert_false (p.adopt_self_uid);
+    g_assert_false (p.is_self);
+    g_assert_false (p.skip_self_create);
+}
+
+static void
+test_resolve_null_args_safe (void)
+{
+    struct hx_user_change_msg uc = mk_uc (1, "X", 0, 0, FALSE, 0, FALSE);
+    struct hx_user_change_plan p;
+    /* NULL uc must not crash AND must leave *out fully zeroed (a safe
+     * no-op plan) so a caller that ignores the failure still reads
+     * well-defined fields. Pre-fill p with 1s to prove it's cleared. */
+    memset (&p, 0xFF, sizeof p);
+    hx_user_change_plan_resolve (NULL, TRUE, 0, 0, "X", 1, "X", &p);
+    g_assert_false (p.is_self);
+    g_assert_false (p.is_new);
+    g_assert_false (p.skip_self_create);
+    g_assert_false (p.do_rename_notice);
+    g_assert_false (p.adopt_self_uid);
+    g_assert_cmphex (p.eff_color, ==, 0);
+    g_assert_cmphex (p.eff_nick_color, ==, 0);
+    /* NULL out must not crash. */
+    hx_user_change_plan_resolve (&uc, TRUE, 0, 0, "X", 1, "X", NULL);
+}
+
 int
 main (int argc, char **argv)
 {
@@ -372,6 +542,31 @@ main (int argc, char **argv)
 
     g_test_add_func ("/proto/user_change/null_out_returns_false",
                      test_user_change_null_out_returns_false);
+
+    /* Pure decision layer (hx_user_change_plan_resolve). */
+    g_test_add_func ("/proto/user_change/resolve/new_user_is_create",
+                     test_resolve_new_user_is_create);
+    g_test_add_func ("/proto/user_change/resolve/rename_fires_notice",
+                     test_resolve_rename_fires_notice);
+    g_test_add_func ("/proto/user_change/resolve/same_name_no_notice",
+                     test_resolve_same_name_no_notice);
+    g_test_add_func ("/proto/user_change/resolve/color_preserved_when_absent",
+                     test_resolve_color_preserved_when_absent);
+    g_test_add_func ("/proto/user_change/resolve/color_taken_when_present",
+                     test_resolve_color_taken_when_present);
+    g_test_add_func (
+        "/proto/user_change/resolve/nick_color_preserved_when_absent",
+        test_resolve_nick_color_preserved_when_absent);
+    g_test_add_func ("/proto/user_change/resolve/nick_color_taken_when_present",
+                     test_resolve_nick_color_taken_when_present);
+    g_test_add_func ("/proto/user_change/resolve/self_change_no_rename",
+                     test_resolve_self_change_no_rename);
+    g_test_add_func ("/proto/user_change/resolve/self_uid_adoption",
+                     test_resolve_self_uid_adoption);
+    g_test_add_func ("/proto/user_change/resolve/no_self_adoption_on_mismatch",
+                     test_resolve_no_self_adoption_on_name_mismatch);
+    g_test_add_func ("/proto/user_change/resolve/null_args_safe",
+                     test_resolve_null_args_safe);
 
     return g_test_run ();
 }

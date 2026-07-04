@@ -391,6 +391,47 @@ extern gboolean hx_user_change_extract (struct htlc_conn *htlc,
                                         struct hx_user_change_msg *out);
 
 /*
+ * Pure decision layer for hx_rcv_user_change (M4b.4b): given a parsed
+ * USER_CHANGE and the *existing* member state (from the membership store —
+ * chat->users today, the HxMemberModel after M4b.4b-iii-B), decide what the
+ * handler should do, with no side effects. The handler applies the plan
+ * (emit create/change, adopt self uid, print the rename notice, mirror onto
+ * htlc). Extracting it means the fiddly rename / colour-preserve / self-detect
+ * logic is Tier-2 testable without the GUI signal machinery.
+ *
+ * Inputs:
+ *   uc              — the parsed USER_CHANGE.
+ *   old_exists      — TRUE if the member is already known (change vs create).
+ *   old_status      — the member's current status bitmap (uc->color-shaped),
+ *                     used to preserve colour when the wire omits DATA_COLOUR.
+ *   old_nick_color  — the member's current RGB nick colour (or
+ *                     HX_NICK_COLOR_NONE), preserved when the wire omits
+ *                     DATA_COLOR.
+ *   old_name        — the member's current display name (for rename
+ *                     detection). May be NULL / "" when old_exists is FALSE.
+ *   self_uid        — htlc->uid (0 if the server hasn't told us yet).
+ *   self_name       — htlc->name (our local nick), for the SELFINFO-less
+ *                     self-detection some 1.9 servers force.
+ */
+struct hx_user_change_plan {
+    gboolean adopt_self_uid;   /* caller: htlc->uid = uc->uid */
+    gboolean is_self;          /* the change is about us */
+    gboolean is_new;           /* create (TRUE) vs change (FALSE) */
+    gboolean skip_self_create; /* is_new && is_self — don't add our own row */
+    gboolean do_rename_notice; /* print "X is now known as Y" */
+    guint16 eff_color;         /* status bitmap to render/store */
+    guint32 eff_nick_color;    /* RGB nick colour to render/store */
+};
+extern void hx_user_change_plan_resolve (const struct hx_user_change_msg *uc,
+                                         gboolean old_exists,
+                                         guint16 old_status,
+                                         guint32 old_nick_color,
+                                         const char *old_name,
+                                         guint16 self_uid,
+                                         const char *self_name,
+                                         struct hx_user_change_plan *out);
+
+/*
  * Result of parsing a HTLS_HDR_XFER_QUEUE message.
  *
  * Two chunks:

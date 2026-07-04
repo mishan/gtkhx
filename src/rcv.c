@@ -648,97 +648,72 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     /* Local aliases — keep the rest of the handler readable. */
     guint16 uid = uc.uid;
     guint16 icon = uc.icon;
-    guint16 color = uc.color;
-    gboolean got_color = uc.got_color;
     guint32 nick_color = uc.nick_color;
     gboolean got_nick_color = uc.got_nick_color;
     guint32 cid = uc.cid;
     char *name = uc.name;
     guint16 nlen = uc.name_len;
 
-    /* self-detection by name. Some 1.9-style servers
-	 * (e.g. The Mobius Strip) omit USER_LIST from SELFINFO, so
-	 * htlc->uid stays 0 after login. The first USER_CHANGE
-	 * broadcast we receive is the server echoing back the
-	 * USER_CHANGE we just sent (post-SELFINFO) — its name
-	 * matches our local htlc->name and carries our newly-assigned
-	 * UID. Adopt that UID as ours. Without this, the rest of the
-	 * handler treats the broadcast as a stranger joining: it
-	 * adds a row before the USER_LIST reply arrives (so we end
-	 * up at the top of the user list) and announces "join: <us>"
-	 * in chat. */
-    if (htlc->uid == 0 && uid != 0 && nlen > 0
-        && strlen ((const char *)htlc->name) == (size_t)nlen
-        && memcmp (htlc->name, name, nlen) == 0) {
+    /* Resolve every change decision in one pure, Tier-2-tested helper
+     * (hx_user_change_plan_resolve; tests/proto/test_user_change.c): self
+     * detection (incl. the SELFINFO-less uid adoption some 1.9 servers
+     * force by omitting USER_LIST from SELFINFO, leaving htlc->uid 0),
+     * new-vs-change, the colour / nick-colour preserve rules, and whether
+     * to print a rename notice. Old state still comes from chat->users
+     * here; M4b.4b-iii-B swaps that source to the model. */
+    chat = chat_with_cid (sess, cid);
+    if (!chat) {
+        chat = chat_new (sess, cid);
+    }
+    user = hx_user_with_uid (chat, uid);
+
+    struct hx_user_change_plan plan;
+    hx_user_change_plan_resolve (&uc, /*old_exists=*/user != NULL,
+                                 user ? user->color : 0,
+                                 user ? user->nick_color : HX_NICK_COLOR_NONE,
+                                 user ? user->name : NULL, htlc->uid,
+                                 (const char *)htlc->name, &plan);
+
+    if (plan.adopt_self_uid) {
         htlc->uid = uid;
         debug_log ("login",
                    "adopted self uid=%u from USER_CHANGE "
                    "broadcast (SELFINFO didn't carry it)",
                    (unsigned)uid);
     }
-    gboolean is_self = (uid != 0 && uid == htlc->uid);
 
-    chat = chat_with_cid (sess, cid);
-    if (!chat) {
-        chat = chat_new (sess, cid);
-    }
-    user = hx_user_with_uid (chat, uid);
-    if (!user) {
-        if (is_self) {
-            /* Don't add our own row here. The USER_LIST reply
-			 * (or any subsequent broadcast that mentions us)
-			 * will create it in the proper position. Adding it
-			 * now would put us at the top of the user list and
-			 * spam a "join: <us>" line in chat. */
+    if (plan.is_new) {
+        if (plan.skip_self_create) {
+            /* Don't add our own row here. The USER_LIST reply (or any
+             * subsequent broadcast that mentions us) creates it in the
+             * proper position; adding it now would put us at the top of
+             * the user list and spam a "join: <us>" line in chat. */
             return;
         }
         user = hx_user_new (chat, uid);
-        /* Colored-Nicknames: stamp the per-user nick_color
-		 * onto the user struct BEFORE emitting user-create. The render
-		 * path reads user->nick_color directly (the signal payload
-		 * doesn't carry it, unlike the legacy `color` status byte),
-		 * so emitting first leaves the row painted from a stale
-		 * HX_NICK_COLOR_NONE — the user appears uncoloured until the
-		 * next USER_CHANGE for an unrelated reason rebuilds the row. */
-        if (got_nick_color) {
-            user->nick_color = nick_color;
-        }
+        /* Colored-Nicknames: stamp nick_color BEFORE emitting user-create.
+         * The render path reads user->nick_color directly (the signal
+         * payload doesn't carry it), so emitting first would paint the row
+         * from a stale HX_NICK_COLOR_NONE. */
+        user->nick_color = plan.eff_nick_color;
         gtkhx_session_emit_user_create (gtkhx_session_get_default (), htlc,
-                                        chat, user, name, icon, color);
+                                        chat, user, name, icon,
+                                        plan.eff_color);
         play_sound (USER_JOIN);
         if (gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, cid, INFOPREFIX, _ ("join: %s\n"), name);
         }
-    }
-
-    else {
-        if (!got_color) {
-            color = user->color;
-        }
-        /* Colored-Nicknames: stamp the per-user nick_color
-		 * onto the user struct BEFORE emitting user-change. The render
-		 * path (users.c::user_change → user_nick_color_gdk) reads
-		 * user->nick_color directly because the signal payload doesn't
-		 * carry it (unlike the legacy `color` status byte, which is
-		 * passed as an arg). Emitting before this assignment leaves
-		 * the row painted from a stale value — that's why a color
-		 * change from another client (or our own echoed back from a
-		 * server that supports the extension) wasn't visible. */
-        if (got_nick_color) {
-            user->nick_color = nick_color;
-        }
+    } else {
+        /* Same nick_color-before-emit ordering as the create path. */
+        user->nick_color = plan.eff_nick_color;
         gtkhx_session_emit_user_change (gtkhx_session_get_default (), htlc,
-                                        chat, user, name, icon, color);
-        /* print "X is now known as Y" only when the name
-		 * actually changed AND it isn't us. Suppressing the self
-		 * case keeps the post-SELFINFO USER_CHANGE we push (to set
-		 * our nick on the server) from spamming a redundant
-		 * "misha is now known as misha" notice. Also bail on
-		 * ignored users early so we neither toast nor log them. */
+                                        chat, user, name, icon,
+                                        plan.eff_color);
+        /* Bail on ignored users before we toast or log them. */
         if (hx_member_model_get_ignore (chat->member_model, uid)) {
             return;
         }
-        if (uid != htlc->uid && nlen > 0 && strcmp (name, user->name) != 0) {
+        if (plan.do_rename_notice) {
             hx_printf_prefix (htlc, cid, INFOPREFIX,
                               _ ("%1$s is now known as %2$s\n"), user->name,
                               name);
@@ -751,9 +726,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     if (icon) {
         user->icon = icon;
     }
-    if (got_color) {
-        user->color = color;
-    }
+    user->color = plan.eff_color;
     /* Colored-Nicknames: the per-user nick_color was
 	 * stamped onto the user struct above, BEFORE emitting the
 	 * user-create / user-change signal — the render path reads it
