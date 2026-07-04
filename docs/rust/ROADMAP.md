@@ -829,9 +829,9 @@ because a connection is a struct in Rust, not a global.
 
 ---
 
-## Phase R4 — GtkhxSession in Rust
+## Phase R4 — GtkhxSession in Rust ✅
 
-**Status: R4.1 shipped** on `claude/phase-r4`. The `GtkhxSession` GObject is
+**Status: shipped** (R4.1 + R4.2). The `GtkhxSession` GObject is
 now the Rust `glib::subclass` crate `rust/crates/gtkhx-session/`; `src/gtkhx_session.c`
 is deleted, `src/gtkhx_session.h` stays unchanged. The crate exports the
 identical C ABI the old TU did — `gtkhx_session_get_type`,
@@ -1033,6 +1033,32 @@ phase reuses:
   headless (the gtk4-rs window can't be built without a display, so a
   window-level Tier 3 isn't feasible on the display-less CI).
 
+**Status update — every window's dock/entry shell is now Rust.** As of the
+Files shell port, all ten "Suggested order" windows have their
+`create_*_window` / `open_*` entry point in the `gtkhx-ui` crate, plus the
+Settings form, the standalone dialogs, and the private-chat / private-message
+tabs. What moved to Rust and what stays C splits into two shapes:
+
+- **Shell ports** (dock registration + lifecycle in Rust; the window's
+  *content* stays C behind a `gtkhx_<win>_build_content` seam that returns a
+  still-floating container the Rust shell hands to `dock_bridge`): **Users**
+  (R5.7), **Tasks** (R5.10), **News 1.0/1.2** (R5.11), **News browser 1.5**
+  (R5.12), **Chat** (R5.13), **Files** (R5.16). The dock-bridge pattern proved
+  out across all six docked windows; nothing needed the dynamic-panel path
+  (`gtkhx_dock_embed_dynamic` stays reserved) because private chats / PMs are
+  `AdwTabView` tabs inside the one Chat panel, not separate dock panels.
+- **Content ports** (the widget tree itself built in gtk4-rs, C kept only for
+  genuinely-C leaves — vendored xtext, wire senders, the model structs — behind
+  small accessor/setter seams): the **user list** (`HxUserListView` +
+  `HxUserRow`, R5.8/R5.9), and the **private-message** (R5.14) and
+  **private-chat** (R5.15) tab content trees.
+
+Plus the earlier standalone work: **Settings form** (R5.6, 10 of 11 pages),
+**TLS-trust prompt** (R5.4), **RC4-replacement dialog** (folded into R5.3).
+
+See the **[Inventory — what's still C](#inventory--whats-still-c)** subsection
+below for the honest ledger of the many small pieces that remain.
+
 **Suggested order**
 
 1. ✅ **Tracker window** (`tracker.c` + `tracker_row.c`) — shipped (R5.1,
@@ -1078,45 +1104,143 @@ phase reuses:
    pokes + `hx_connect` on the C side. The rare legacy pre-HTsc bookmark
    conversion is re-implemented in Rust (reads the 3-line text file, re-saves
    via `hx_bookmark_save`).
-4. **Tasks window** (`tasks.c`, `tasks_table.c`). Slightly more state but
-   still flat.
-5. **News browser** (`news_browser.c` — the unified Phase 6 UI per memory).
-   First window with significant async (fetch-list, fetch-thread,
-   threaded display). Good test of the R3 tokio bridge from the UI side.
-6. **Settings / preferences** (`options.c` — currently ~1,900 LOC). Big one,
-   but it's mostly form construction; `AdwPreferencesDialog` + bound
-   GSettings (or our own GKeyFile shim) does most of the work. Possibly
-   land before the news browser if the icon picker GtkFlowBox feels easier
-   than threaded news.
-7. **Users list** (`users.c`). Coupled to chat; moves with or just before
-   the chat window.
-8. **Files browser** (`files.c`, `files_browser.c`, `files_panel.c`,
-   `files_*.c` — the whole sub-system). The most complex non-chat window.
-   Drag-and-drop with `GtkDropTarget`, virtual folders, transfer integration.
-9. **Chat window** (`chat.c`). Heavy because of xtext integration. The xtext
-   widget stays as vendored C; we wrap it in a tiny gtk4-rs subclass so the
-   Rust chat code can hold one and call into it. mIRC color parsing,
-   nick-completion key handling, history navigation all in Rust around the
-   widget.
-10. **Toolbar + main window** (`toolbar.c`, `gtkhx.c`'s window creation).
-    The last C UI file. After this, `gtkhx.c` only contains `main()`.
+4. ✅ **Settings / preferences** (`options.c`) — shipped (R5.6). 10 of 11
+   `AdwPreferencesDialog` pages built by the Rust `options` module via typed
+   pref-bridge accessors over the C `cfgvars[]` registry; the C split-view
+   framework calls each Rust page builder through its `.draw` pointer. Only
+   the two custom-widget pages (Identity icon/GIF picker, Voice GStreamer
+   device combos + PTT capture) keep their C draw functions.
+5. ✅ **Users list** (`users.c`, `users_row.c`, `users_view.c`) — shipped
+   (R5.8/R5.9). Full *content* port: `HxUserListView` (the GtkColumnView +
+   model chain + sorters + gestures) and `HxUserRow` (the row-model GObject)
+   are Rust; the custom Name cell (`users_cell.c`) and the voice-indicator
+   column (`users_voice_col.c`) stay C behind FFI. The Users *window shell*
+   is R5.7. **Still C:** the action-button handlers (`view_*_btn`), the
+   right-click user popover (`user_popup_show` + its GActions), and the
+   `user_create/delete/change/user_list` model↔view glue (see inventory).
+6. ✅ **Tasks window** (`tasks.c`) — shipped (R5.10, shell). The `GtkListBox`
+   of per-transfer `gtask` rows + progress + queue-reorder + the
+   transfer-model coupling stay C; only the dock shell moved.
+7. ✅ **News** — shipped as two shells: **News 1.0/1.2** (`news.c`, R5.11) and
+   the **News browser 1.5** (`news_browser.c`, R5.12). Viewers, in-buffer
+   search, the threaded tree, and the fetch/post RPC stay C.
+8. ✅ **Chat window** (`chat.c`) — shipped (R5.13, shell). xtext output +
+   input + wire senders stay C; the `AdwTabView` that hosts the pchat/PM tabs
+   is C (`chat_tabs.c`). The pchat/PM tab *content trees* were separately
+   content-ported (R5.14 `msg.rs` / R5.15 `pchat.rs`).
+9. ✅ **Files browser** (`files_browser.c` + the `files_*.c` sub-system) —
+   shipped (R5.16, shell). The two `files_panel` GtkColumnViews, DnD
+   (`GtkDropTarget`), the providers (`files_provider.c`,
+   `files_local_provider.c`, `files_remote_provider.c`), transfer
+   integration, the Norton-style shortcut set, and the rename/mkdir/move/
+   get-info sub-dialogs all stay C — the biggest remaining *content* port.
+10. **Toolbar + main window** (`toolbar.c`, `gtkhx.c`'s window creation) —
+    **still C.** The toolbar owns the whole `PanelDock` construction every
+    docked shell registers into, so it ports late (with or after R6's
+    `main()` move). After this, `gtkhx.c` only contains `main()`.
+
+### Inventory — what's still C
+
+With every window's *shell* now Rust, the remaining R5 surface is (a) a set of
+small standalone dialogs, (b) the *content* still living behind the shells, and
+(c) shared UI infrastructure. This is the honest ledger of "much more that is
+still in C" as of the shell-completion milestone.
+
+**A. Standalone dialogs / windows not yet ported** (self-contained — the best
+next-target pool, each is a small independent PR):
+
+- **User Info window** — `gtkhx.c::output_user_info` (the *Get User Info*
+  result display). The request side (`hx_get_user_info` in `users.c`) is a
+  wire sender and stays C.
+- **Create Post composer** — `news.c::create_post_window` / `close_post_window`
+  (the news-post editor). `hx_post_news` is the C wire sender.
+- **Broadcast composer** — the admin-broadcast compose dialog (entry in
+  `toolbar.c` / `network.c`; `hx_send_broadcast` sender in `msg.c`).
+- **Inline-media view dialog** — `inline_media_dialog.c` (~540 LOC,
+  click-to-view media popup).
+- **Emoji picker + `:shortcode:` typeahead** — `emoji.c` (~520 LOC;
+  `hx_emoji_button_new` / `hx_emoji_typeahead_attach`, consumed by the chat /
+  pchat / PM inputs, which is why those content ports call it via FFI).
+- **Preview window** — `preview.c` (~1540 LOC): text / image / PDF / source
+  viewers + HTXF-worker marshalling. Still deferred — hinges on `sourceview5`
+  + a poppler crate aligning with the pinned gtk4 0.10 (see
+  [preview-porting-scoping.md](preview-porting-scoping.md)).
+- **System tray** — `tray.c` (~880 LOC).
+- **Files path-completion popover** — `files_complete.c` (~690 LOC).
+
+**B. Content still C inside a Rust window shell** (each is a *content* port like
+`users_view` / `msg` / `pchat` were — the big remaining category):
+
+- **Users controller glue** — `view_*_btn` action handlers, the right-click
+  `user_popup_show` popover + its `GAction`s, the `user_create/delete/change/
+  user_list` model↔view glue, the colour helpers (`user_color_gdk` /
+  `user_nick_color_gdk`), and the wire senders (`hx_kick_user`,
+  `hx_get_user_info`, `hx_change_name_icon`). Deliberately deferred — it's
+  controller/wire glue tied to the C `hx_user` / `chat` structs, not a clean
+  UI leaf (revisit when the chat model ports).
+- **Custom cells / columns** — `users_cell.c` (the snapshot-rendered Name
+  cell) and `users_voice_col.c` (the voice-indicator column) stay C behind the
+  `HxUserListView` FFI.
+- **Tasks content** — the `gtask` row build, progress / queue-badge updates,
+  the up/down queue reorder, and `task_update` / `file_update` (transfer
+  progress) in `tasks.c`.
+- **News content** — the read-only viewers, in-buffer search, the threaded
+  tree model, and the fetch/post RPC in `news.c` / `news_browser.c`.
+- **Chat content** — the xtext output widget (vendored, stays C forever), the
+  input key handling / readline history, the wire senders, and `chat_tabs.c`
+  (~380 LOC, the `AdwTabView` tab management).
+- **Files content** — the whole two-panel browser: the two `files_panel`
+  GtkColumnViews, DnD, the providers (`files_provider.c`,
+  `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,
+  `files_entry.c`, `filelist_walker.c`), transfer integration, and the
+  rename / mkdir / move / get-info sub-dialogs. The largest content port left.
+- **Voice UI** — `voice_panel.c` (~900 LOC, the per-room Join/Leave/Mute
+  controls) alongside `users_voice_col.c`.
+
+**C. Shared UI infrastructure still C** (ports late; some may stay):
+
+- `gtkutil.c` (~1100 LOC): themed pixmap buttons, dialog helpers,
+  `init_keyaccel`, the `.gtkhx-*` style appliers — pervasive; each helper
+  migrates when its last C caller does.
+- `notify.c` (~380, desktop notifications), `gtkurl.c` (URL click handling),
+  `sound.c` (GSound), `gtkhx_theme.c` / `gtkhx_icon.c` (theming singletons),
+  `gtkhx_log.c` (chat logger).
+- `gtkhx.c` — `main()` + `GtkApplication` init + the `GtkhxSession`
+  signal→view adapters (`on_*_signal`) + `output_user_info` → **R6**.
+- `toolbar.c` + the libpanel dock infra (`hx_panel*.c`, `panel_registry.c`,
+  `hx_split.c`, `dock_layout*.c`, `dock_bridge.c`) — the dock **stays C by
+  design** (see [dock-porting-scoping.md](dock-porting-scoping.md)); the
+  toolbar ports with/after R6.
+
+**Permanent seams, not TODOs:** each shell port leaves a thin C
+`gtkhx_<win>_build_content` (+ optional `_after_embed`); each content port
+leaves a small accessor/setter seam (`hx_msgwin_*`, `hx_gchat_*`, the
+`HxUserListView` FFI). These are the leaf-up boundary and stay until the
+corresponding deeper layer (model, wire, xtext) is itself ported — they are not
+churn to be removed.
 
 **Gotchas**
 
-- **Most of these windows are docked in libpanel — one strategy for all of
-  them.** Chat, Users, News, News browser (1.5), Tasks, and Files are not
-  standalone windows: each is an `HxPanel` (a `PanelWidget` subclass) inside
-  the toolbar's `PanelDock`. gtk4-rs has no libpanel bindings. The decision
-  (see **[dock-porting-scoping.md](dock-porting-scoping.md)**) is to keep
-  libpanel + the dock infra in C and add one reusable `dock_bridge.c`: a
-  ported window builds its content tree + handlers in Rust and registers via
-  the bridge (`gtkhx_dock_raise_if_open` / `gtkhx_dock_embed` /
-  `_embed_dynamic`), never naming a libpanel type. The bridge is built with
-  the first docked-window port (Users is the natural first). The standalone
-  windows shipped so far (Tracker, and the About/Agreement/User-Editor/
-  Connect dialogs) never touched libpanel, which is why this only surfaces
-  now. **The Tracker is NOT docked** — it's a standalone top-level window
-  (stale "tracker is a CENTER panel" comments were corrected).
+- ✅ **Most of these windows are docked in libpanel — one strategy for all of
+  them.** *(Shipped — `src/dock_bridge.{c,h}`, built with the Users shell
+  R5.7 and reused by Tasks / News / News browser / Chat / Files.)* Chat,
+  Users, News, News browser (1.5), Tasks, and Files are each an `HxPanel` (a
+  `PanelWidget` subclass) inside the toolbar's `PanelDock`; gtk4-rs has no
+  libpanel bindings, so (per
+  **[dock-porting-scoping.md](dock-porting-scoping.md)**) libpanel + the dock
+  infra stay C and the Rust shells register through the bridge
+  (`gtkhx_dock_raise_if_open` / `gtkhx_dock_embed` / `_embed_dynamic`) without
+  naming a libpanel type. The kind/area enums cross as small ints mirrored in
+  the crate's `dock` module; a shared `crate::dock` wrapper backs every shell.
+  `gtkhx_dock_embed_dynamic` shipped but is currently unused — pchat/PM turned
+  out to be `AdwTabView` tabs, not dynamic dock panels. **The Tracker is NOT
+  docked** — standalone top-level window.
+  - Windows that integrate the panel as their *window object* (News browser,
+    Files) point `br->window` at the content box (a widget in the panel's
+    tree once embedded) rather than the dock panel the shell owns; a
+    content-`"destroy"` teardown disconnects any session handler on the
+    embed-failure path (do **not** free the backing struct there — `destroy`
+    fires at the *start* of teardown, so child callbacks may still read it).
 - **`preview.c` is standalone too, but external-viewer-heavy.** The file
   preview window is a `GtkWindow` (no dock), so it's free of the libpanel
   question — but it has four viewers (text / image / PDF / source) and
@@ -1126,10 +1250,11 @@ phase reuses:
   **[preview-porting-scoping.md](preview-porting-scoping.md)**. Standalone
   dialogs/windows already ported: Tracker (R5.1), About/Agreement/User Editor
   (R5.2), Connect/Bookmarks/RC4 (R5.3), TLS-trust (R5.4).
-- **The `gtk_hlist_compat` shim is the choke point.** Five consumers use it:
-  `tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`. Each window's
-  port also kills its `gtk_hlist_compat` usage. The shim file itself
-  disappears with the last consumer (chat or files, probably).
+- ✅ **The `gtk_hlist_compat` shim is gone** (Phase 5 modernization, before
+  R5 started): its five consumers (`tracker.c`, `news15.c`, `options.c`,
+  `users.c`, `files.c`) were migrated to `GtkColumnView` directly and the
+  interim shim (and the older GtkCList fork) deleted. Every R5 list widget is
+  a `GtkColumnView` / `GtkListView` / `GtkListBox` from the start.
 - **`xtext.c` keeps existing.** We don't fight that battle. The chat window
   port (step 9) creates a `XText`-like wrapper struct on the Rust side that
   owns a `XText` widget and offers a safe API.
@@ -1278,15 +1403,29 @@ chat-history work in `ROADMAP.md`. Same caveats as before: multiply for life.
 
 ## Suggested next concrete step
 
-Start with **Phase R0 step 5**: replace `rand.c` with `crates/hxrand/`. It's
-~50 LOC of C, has one dependency direction (consumed by `cipher.c` and a few
-other call sites), no GTK touch, and validates the entire meson + cargo +
-cbindgen + Tier 3 + CI integration on a piece of code we can re-port in an
-afternoon if something's wrong.
+R0–R4 are done, and R5 has every window's *shell* in Rust. The frontier now is
+finishing R5 — draining the [inventory above](#inventory--whats-still-c). Two
+good pools of work, both leaf-up:
 
-If the build integration falls into place quickly, jump straight into Phase
-R1 on the same branch. If it takes longer than expected, land R0 alone, sit
-with it for a release cycle, and revisit when the integration feels boring.
+1. **Small standalone dialogs** (inventory §A) — each an independent, bite-sized
+   PR that doesn't touch the dock or the model: the **User Info window**
+   (`output_user_info`), the **Create Post** composer, the **Broadcast** dialog,
+   the **inline-media view** dialog, and the **emoji picker**. These are the
+   `msg.rs` / `pchat.rs` shape (build the widget tree in gtk4-rs, keep the wire
+   sender + any model struct in C behind a tiny accessor seam) and are the
+   lowest-risk way to keep momentum.
+
+2. **Content ports behind the shells** (inventory §B) — larger, in rough order
+   of value: the **Files** two-panel browser content (biggest), the **Tasks**
+   `gtask` list, and the **News** viewers. Each mirrors the `users_view`
+   content port: build the tree in Rust, keep genuinely-C leaves (xtext,
+   providers, transfer workers) behind FFI.
+
+Deliberately deferred: the **Users controller glue** (`view_*_btn` /
+`user_popup_show` / model↔view) waits for the chat model; **`preview.c`** waits
+on the poppler / sourceview crate alignment; **`toolbar.c` + the dock infra**
+port with/after **R6** (`main()` + `GtkApplication`), since the toolbar owns the
+`PanelDock` every shell registers into and the dock stays C by design.
 
 ---
 
