@@ -175,8 +175,12 @@ struct gtkhx_chat {
 	 * header doesn't have to pull in users_view.h — the field
 	 * is read/written from chat.c + users.c only. */
     struct _HxUserListView *userlist;
+    /* The window's identity: its chat id (also the sess->gchats key). The
+     * matching model object lives in sess->chats under the same cid — look it
+     * up with chat_with_cid(sess, cid) rather than caching a raw struct chat*
+     * back-pointer here (the old `chat` field, dropped in M3). One less copy to
+     * keep in lockstep with the chats table. */
     guint32 cid;
-    struct chat *chat;
     /* Chat input line history — a Rust InputHistory (hxchat-model), created by
      * hx_input_history_new, driven by chat_input_key_pressed's Return/Up/Down,
      * freed in chat_free. Owns the Up-arrow draft internally (the old separate
