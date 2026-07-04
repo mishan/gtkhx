@@ -11,6 +11,10 @@ gtkhx_sources = files(
   # cipher_vocab.c folded into the Rust gtkhx-ui crate (cipher_vocab.rs) when
   # the Bookmarks dialog joined the Connect dialog in Rust (R5.3).
   'chat.c',
+  # chat_send_bridge.c — model/caps shims for the Rust chat wire-senders
+  # (hxchat-send crate; the hx_send_chat / hx_chat_* senders moved out of
+  # chat.c). Links via rust_hxchat_send_dep below.
+  'chat_send_bridge.c',
   'chat_history.c',
   'chat_tabs.c',
   'cicn.c',
@@ -231,6 +235,8 @@ rust_deps = [
   rust_hx_image_decode_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
+  # chat wire-out senders (Rust port of chat.c's send path).
+  rust_hxchat_send_dep,
 ]
 if voice_enabled
   rust_deps += rust_hxvoice_runtime_dep

@@ -140,6 +140,8 @@ rust_sources = files(
   'crates/hxvoice-send/src/tests.rs',
   'crates/hxtext/src/lib.rs',
   'crates/hxtext/src/tests.rs',
+  'crates/hxchat-send/src/lib.rs',
+  'crates/hxchat-send/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -172,6 +174,7 @@ rust_sources = files(
   'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
+  'crates/hxchat-send/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -393,6 +396,19 @@ rust_hotline_proto_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhotline_proto',
+  ],
+)
+
+# hxchat-send (Phase R5) — the Rust port of chat.c's send path. Exports the
+# hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join / hx_part_chat /
+# hx_change_subject C ABI the chat.h callers link against; implemented over
+# hotline-proto's native chat builders. Unconditional (chat is always built),
+# so it's part of the default --workspace cargo build.
+rust_hxchat_send_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxchat_send',
   ],
 )
 
