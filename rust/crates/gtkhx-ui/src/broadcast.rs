@@ -94,6 +94,14 @@ fn send_broadcast(text: &str) {
     }
 
     unsafe {
+        // The dialog may have outlived the connection (dropped between open and
+        // Send/Enter). If we're no longer connected, hlwrite_chunks would no-op
+        // on the unset htlc->fd but task_new would still register a phantom
+        // task — so bail before either. Mirrors the connected gate the C send
+        // path relies on.
+        if gtkhx_active_connected() == glib::ffi::GFALSE {
+            return;
+        }
         let htlc = gtkhx_active_htlc();
         let utf8_mode = gtkhx_active_text_encoding();
 
