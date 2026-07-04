@@ -634,7 +634,7 @@ pub unsafe extern "C" fn voice_panel_new(
     PANELS.with(|p| p.borrow_mut().push(widget.downgrade()));
     {
         let w = Rc::downgrade(&inner);
-        panel.connect_destroy(move |_| {
+        panel.connect_destroy(move |dying| {
             if let Some(i) = w.upgrade() {
                 if let Some(id) = i.autojoin_poll.borrow_mut().take() {
                     id.remove();
@@ -643,7 +643,20 @@ pub unsafe extern "C" fn voice_panel_new(
                     id.remove();
                 }
             }
-            PANELS.with(|p| p.borrow_mut().retain(|x| x.upgrade().is_some()));
+            // Explicitly drop THIS panel from the registry (and prune dead
+            // weaks). "destroy" fires during dispose — before finalize — so a
+            // weak upgrade still succeeds here; pruning only dead refs would
+            // leave the just-destroyed widget in the registry, and a runtime
+            // signal callback could still iterate it and call
+            // update_button_labels on a torn-down subtree (GTK criticals).
+            // Match by pointer identity to remove exactly this one.
+            // Same GObject address; cast GtkBox* → GtkWidget* to compare
+            // against the registry's WeakRef<Widget> upgrades.
+            let dying_ptr = dying.as_ptr() as *mut gtk::ffi::GtkWidget;
+            PANELS.with(|p| {
+                p.borrow_mut()
+                    .retain(|x| x.upgrade().is_some_and(|up| up.as_ptr() != dying_ptr));
+            });
         });
     }
 
