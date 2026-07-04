@@ -2173,16 +2173,12 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
  * chat window is captured at hx_quit() in gtkhx.c gtkhx_save_window_positions
  * alongside position. */
 
-static GtkWidget *chat_hbox;
-static GtkWidget *wind_tmp;
-
-/* chat_close retired. Public chat is
- * a permanent resident of the toolbar's center PanelGrid; the
- * destroy-time chat_hbox re-parent trick that used to live here is
- * unneeded because the panel never goes away. Kept the wind_tmp /
- * chat_hbox file-statics so create_chat() can still parent xtext
- * into a holding box before create_chat_window relocates it into
- * the panel content. */
+/* chat_close retired. Public chat is a permanent resident of the toolbar's
+ * center PanelGrid; the destroy-time re-parent trick that used to live here is
+ * unneeded because the panel never goes away. The old wind_tmp / chat_hbox
+ * staging file-statics are gone too — create_chat() now leaves the xtext
+ * output + scrollbar parentless (ref-sunk) and the Rust content build
+ * (chat.rs::build_content) packs them into the output frame. */
 
 void
 generate_colors (GtkWidget *widget)
@@ -2251,31 +2247,16 @@ create_chat (session *sess)
     vscroll
         = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
 
+    /* Keep the xtext output + its scrollbar alive parentless (ref-sunk)
+	 * until the Rust content build (chat.rs::build_content) reads them back
+	 * via hx_gchat_output / hx_gchat_vscroll and packs them into the output
+	 * frame — same handoff pchat_new uses. The old chat_hbox / wind_tmp
+	 * staging (a throwaway GtkWindow that parented the xtext early so a
+	 * GTK 1.2/2 realize could fire before the panel opened) is gone: under
+	 * GTK 4 widgets are windowless and take appended output lines while
+	 * parentless, so no early parent is needed. */
     g_object_ref_sink (text);
     g_object_ref_sink (vscroll);
-
-    chat_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    /* dropped GTK 1.2-era set_size_request derived from saved
-	 * xsize/ysize. set_size_request sets BOTH minimum and natural
-	 * size in GTK 4 — so saving a wide chat window then re-opening it
-	 * baked the previous width in as a hard floor that prevented the
-	 * user from shrinking it. With hexpand/vexpand+FILL on the inner
-	 * widgets (handled by gtkhx_box_pack with expand=fill=1) the
-	 * window now resizes freely down to chat_window's own
-	 * set_size_request floor. */
-
-    g_object_ref_sink (chat_hbox);
-    gtkhx_box_pack (chat_hbox, text, 1, 1, 0);
-    gtkhx_box_pack (chat_hbox, vscroll, 0, 0, 0);
-
-    wind_tmp = gtk_window_new ();
-    gtkhx_widget_set_child (wind_tmp, chat_hbox);
-    /* dropped explicit gtk_widget_realize(text). Forcing
-	 * realize before the toplevel maps was a GTK 1.2/2 idiom; under
-	 * GTK 4 widgets are windowless and realize automatically once
-	 * their root widget is shown. The early-realize call here was
-	 * the trigger for a gtk_css_node_insert_after critical at
-	 * startup. */
 
     gchat->chat_history = history_new ();
     gchat->cid = 0;
@@ -2307,111 +2288,64 @@ change_subject (GtkWidget *widget, gpointer data)
                        (char *)subject);
 }
 
-/* If the dock embed fails (the should-never-happen "toolbar dock not built
- * yet"), the Rust shell has dock_bridge destroy this content. The public-chat
- * gchat is persistent (session-owned), so clear its pointers into the now-dead
- * widget tree here so nothing dereferences freed widgets afterwards. Also runs
- * harmlessly at app teardown when the panel's content is destroyed. */
-static void
-chat_content_destroyed (GtkWidget *w, gpointer user_data)
+/* Clear the public-chat gchat's pointers into its (now-dead) widget tree.
+ * Connected to the panel content box's "destroy" from the Rust content build
+ * (chat.rs::build_content). The public-chat gchat is persistent (session-
+ * owned), so if the dock embed fails — the should-never-happen "toolbar dock
+ * not built yet", where the Rust shell has dock_bridge destroy the content —
+ * or at app teardown, these must be nulled so nothing dereferences freed
+ * widgets afterwards. */
+void
+gtkhx_chat_clear_content_ptrs (struct gtkhx_chat *gchat)
 {
-    struct gtkhx_chat *gchat = user_data;
-    (void)w;
+    if (!gchat) {
+        return;
+    }
     gchat->window           = NULL;
     gchat->input            = NULL;
     gchat->subject          = NULL;
     gchat->media_attach_btn = NULL;
 }
 
-/* Content build for the Rust Chat window shell (gtkhx-ui `chat`). The dock
- * registration moved to Rust via dock_bridge; this builds the public-chat
- * content + the AdwTabView that hosts the per-conversation (private chat /
- * private message) tabs, and returns the panel content box. The pchat/PM
- * tabs, xtext output, and wire senders all stay C. */
-GtkWidget *
-gtkhx_chat_build_content (session *sess)
+/* Create the public-chat gchat's C-coupled leaf widgets — the subject entry,
+ * the input text view (+ its key controller / qdata), and the inline-media
+ * attach button — and store them on the gchat. The xtext output + scrollbar
+ * were already made by create_chat() at session init; the surrounding box tree
+ * + the AdwTabView are assembled in Rust (chat.rs::build_content), which reads
+ * every leaf back via the hx_gchat_* accessors. Mirrors gtkhx_pchat_new. */
+struct gtkhx_chat *
+gtkhx_chat_build_leaves (session *sess)
 {
-    GtkWidget *hbox;
-    GtkWidget *outputframe, *inputframe, *subj_frame;
-    GtkWidget *vbox, *subj_hbox;
     struct gtkhx_chat *gchat;
 
     g_return_val_if_fail (sess != NULL, NULL);
 
     gchat = gchat_with_cid (sess, 0);
-    /* gchats_init seeds cid=0 (public chat) on session bring-up;
-     * gchat_with_cid(sess, 0) is invariant non-NULL on every path
-     * that reaches create_chat_window (which only fires post-login).
-     * Bail loudly on the invariant break — we can't build a chat
-     * panel without a backing gtkhx_chat struct. */
+    /* gchats_init seeds cid=0 (public chat) on session bring-up; this only
+     * fires post-login, so the lookup is invariant non-NULL. Bail loudly on
+     * the invariant break — we can't build a chat panel without the struct. */
     if (!gchat) {
-        g_warning ("gtkhx_chat_build_content: no public-chat gchat — skipping");
+        g_warning ("gtkhx_chat_build_leaves: no public-chat gchat — skipping");
         return NULL;
     }
 
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    (gtk_widget_set_margin_start (vbox, 5), gtk_widget_set_margin_end (vbox, 5),
-     gtk_widget_set_margin_top (vbox, 5),
-     gtk_widget_set_margin_bottom (vbox, 5));
-
     gchat->subject = gtk_entry_new ();
-    /* chats_init seeds cid=0 (public chat) before the table is
-     * usable; chat_with_cid(sess, 0) is invariant non-NULL on this
-     * path (we're inside create_chat_window, post-login).
-     * Defensive ?: anyway — costs nothing, makes the analyzer
-     * happy, and survives a hypothetical refactor that breaks the
-     * invariant. */
     {
         struct chat *pub = chat_with_cid (sess, 0);
         gtk_editable_set_text (GTK_EDITABLE (gchat->subject),
                                pub ? pub->subject : "");
     }
-    subj_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    subj_frame = gtk_frame_new (0);
-    gtkhx_widget_set_child (subj_frame, subj_hbox);
-    gtkhx_box_pack (subj_hbox, gchat->subject, 1, 1, 0);
-    gtkhx_box_pack (vbox, subj_frame, 0, 1, 0);
     gtkhx_apply_text_style (gchat->subject);
     g_signal_connect (gchat->subject, "activate", G_CALLBACK (change_subject),
                       GINT_TO_POINTER (0));
 
-    outputframe = gtk_frame_new (0);
-    inputframe = gtk_frame_new (0);
-
-    GtkWidget *vstack = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_start (vstack, 5);
-    gtk_widget_set_margin_end (vstack, 5);
-    gtk_widget_set_margin_top (vstack, 5);
-    gtk_widget_set_margin_bottom (vstack, 5);
-    /* Voice controls for the public room (cid 0) now live in the
-     * standalone Users window's button bar (see create_users_window),
-     * not here — the chat window keeps its full real estate. */
-    gtk_widget_set_vexpand (outputframe, TRUE);
-    gtk_widget_set_vexpand (inputframe, FALSE);
-    gtk_box_append (GTK_BOX (vstack), outputframe);
-    gtk_box_append (GTK_BOX (vstack), inputframe);
-
-    gtkhx_box_pack (vbox, vstack, 1, 1, 0);
-
-    if (wind_tmp) {
-        gtkhx_widget_remove_child (wind_tmp, chat_hbox);
-        gtkhx_widget_destroy (wind_tmp);
-    }
-
-    gtkhx_widget_set_child (outputframe, chat_hbox);
-
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtkhx_widget_set_child (inputframe, hbox);
-
     gchat->input = gtk_text_view_new ();
-    /* Theme monospace via gtk_text_view_set_monospace. We deliberately
-     * do NOT use the Settings font here — applying it triggered an
-     * unresolved ascender-ink clip on newly typed glyphs at small
-     * Monospace sizes. See gtkhx_apply_input_font in gtkhx.c. */
+    /* Theme monospace via gtk_text_view_set_monospace (gtkhx_apply_input_font).
+     * We deliberately do NOT use the Settings font here — applying it triggered
+     * an unresolved ascender-ink clip on newly typed glyphs at small Monospace
+     * sizes. See gtkhx_apply_input_font in gtkhx.c. Colours still track the
+     * active GtkHx theme via the .gtkhx-input class. */
     gtkhx_apply_input_font (gchat->input);
-    /* Colors track the active GtkHx theme (.gtkhx-input class) —
-     * font path stays on .monospace because of the clip carve-out
-     * above. */
     gtkhx_apply_input_style (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
@@ -2423,91 +2357,21 @@ gtkhx_chat_build_content (session *sess)
     }
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
-    /* Inner margins so the text doesn't sit flush against the
-     * rounded-corner frame (the left+top corner used to clip the
-     * leading character + first line of the input). */
+    /* Inner margins so the text doesn't sit flush against the rounded-corner
+     * frame (the left+top corner used to clip the leading character). */
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (gchat->input), 6);
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (gchat->input), 4);
     gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
 
-    {
-        GtkWidget *input_scroll = gtk_scrolled_window_new ();
-        gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (input_scroll),
-                                        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-        /* Auto-grow input behaviour: the scrolled window reports a
-         * natural height that matches the embedded GtkTextView'"'"'s
-         * content, clamped between a single-line minimum and a
-         * 5-line maximum. Below the min the input gets the floor;
-         * above the max the scrollbar takes over. The font size
-         * varies per theme so we pick generous pixel approximations
-         * (28px ≈ 1 line of body text, 120px ≈ 5 lines). */
-        gtk_scrolled_window_set_propagate_natural_height (
-            GTK_SCROLLED_WINDOW (input_scroll), TRUE);
-        gtk_scrolled_window_set_min_content_height (
-            GTK_SCROLLED_WINDOW (input_scroll), 28);
-        gtk_scrolled_window_set_max_content_height (
-            GTK_SCROLLED_WINDOW (input_scroll), 120);
-        gtkhx_widget_set_child (input_scroll, gchat->input);
-        gtkhx_box_pack (hbox, input_scroll, 1, 1, 0);
+    /* Phase 9.C inline-media attach. Initially hidden; the
+     * setbtns->inline_media_attach_refresh_all_chats path flips it visible once
+     * the LOGIN reply confirms CAP_INLINE_MEDIA. Most servers don't ship the
+     * extension, so it stays hidden there — same shape as the voice gating. */
+    gchat->media_attach_btn
+        = hx_inline_media_attach_button_new (gchat, &sess->htlc);
 
-        /* Emoji-picker button sits to the right of the input, bottom-
-         * aligned so it stays next to the last visible line as the
-         * input auto-grows (28→120 px). hx_emoji_button_new wires up
-         * the GtkEmojiChooser popover + insert-at-cursor handler. */
-        GtkWidget *emoji_btn = hx_emoji_button_new (gchat->input);
-        gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
-        gtk_box_append (GTK_BOX (hbox), emoji_btn);
-        /* Inline :shortcode: typeahead on the same input (phase E5). */
-        hx_emoji_typeahead_attach (gchat->input);
-
-        /* Phase 9.C inline-media attach. Initially hidden; the
-		 * setbtns→inline_media_attach_refresh_all_chats path
-		 * flips it visible once the LOGIN reply confirms
-		 * CAP_INLINE_MEDIA. Most Hotline servers don't ship the
-		 * extension, so the button stays hidden on those
-		 * sessions — same shape as the voice toolbar gating. */
-        gchat->media_attach_btn = hx_inline_media_attach_button_new (
-            gchat, &sess->htlc);
-        gtk_widget_set_valign (gchat->media_attach_btn, GTK_ALIGN_END);
-        gtk_box_append (GTK_BOX (hbox), gchat->media_attach_btn);
-    }
-
-    /* the Chat panel's content is an AdwTabView
-     * rather than the public-chat vbox directly. The public chat
-     * goes into a pinned tab at position 0; per-conversation tabs
-     * (private chats, private messages) get appended alongside it
-     * by chat_tabs.c-using code. The tab view fills the panel's
-     * vexpand region; a small AdwTabBar sits above it so the
-     * user can switch / close conversations without going to the
-     * dock's tab strip. */
-    {
-        GtkWidget *tab_view  = gtkhx_chat_tabs_init ();
-        AdwTabBar *tab_bar   = ADW_TAB_BAR (adw_tab_bar_new ());
-        GtkWidget *panel_box;
-
-        adw_tab_bar_set_view (tab_bar, ADW_TAB_VIEW (tab_view));
-        /* Hide the bar when there's only the pinned public-chat
-         * tab — single-tab strips just take vertical space. */
-        adw_tab_bar_set_autohide (tab_bar, TRUE);
-
-        gtkhx_chat_tabs_add_public (vbox, _ ("Chat"));
-
-        panel_box = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-        gtk_widget_set_vexpand (tab_view, TRUE);
-        gtk_box_append (GTK_BOX (panel_box), GTK_WIDGET (tab_bar));
-        gtk_box_append (GTK_BOX (panel_box), tab_view);
-
-        /* notify.c walks back from the public chat to a focusable top-level
-         * via gchat->window — point it at the content box, not the dock
-         * panel (which the Rust shell now owns). window_is_active() checks
-         * GTK_IS_WINDOW(panel_box) → false, so notifications always fire for
-         * public chat, exactly as when this was the panel widget. */
-        gchat->window = panel_box;
-        g_signal_connect (panel_box, "destroy",
-                          G_CALLBACK (chat_content_destroyed), gchat);
-        return panel_box;
-    }
+    return gchat;
 }
 
 void

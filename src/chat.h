@@ -103,7 +103,12 @@ extern void create_chat (session *sess);
  * chat + the AdwTabView hosting the pchat/PM tabs and returns the content box;
  * after_embed carries the session onto the panel + focuses the input. */
 extern void create_chat_window (GtkWidget *toolbar_window, gpointer data);
-extern GtkWidget *gtkhx_chat_build_content (session *sess);
+/* gtkhx_chat_build_content moved to Rust (gtkhx-ui chat.rs::build_content).
+ * These are the C leaf seams it calls: build_leaves makes the public chat's
+ * C-coupled leaf widgets (subject / input / media button), and
+ * clear_content_ptrs is the panel-content "destroy" handler. */
+extern struct gtkhx_chat *gtkhx_chat_build_leaves (session *sess);
+extern void gtkhx_chat_clear_content_ptrs (struct gtkhx_chat *gchat);
 extern void gtkhx_chat_after_embed (session *sess);
 extern struct gtkhx_chat *pchat_new (session *sess, struct chat *chat);
 extern void output_chat_subject (struct htlc_conn *htlc, guint32 cid,
