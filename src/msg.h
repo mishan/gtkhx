@@ -50,10 +50,7 @@ extern void msgwin_apply_user_change (struct msgwin *msg, const char *nam,
 extern void hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg,
                          guint16 len, void *p);
 
-/* Send a server-wide broadcast (HTLC_HDR_MSG_BROADCAST). Requires
- * HL_ACCESS_CAN_BROADCAST on the account; the toolbar button is
- * hidden otherwise but the server still enforces it. */
-extern void hx_send_broadcast (struct htlc_conn *htlc, const char *msg,
-                               guint16 len);
+/* hx_send_broadcast (the HTLC_HDR_MSG_BROADCAST wire sender) moved to Rust
+ * (gtkhx-ui broadcast.rs) alongside the Broadcast composer. */
 
 #endif

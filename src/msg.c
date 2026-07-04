@@ -82,62 +82,9 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
     g_free (wire);
 }
 
-/* Send an admin broadcast — HTLC_HDR_MSG_BROADCAST opcode with a
- * single HTLC_DATA_MSG body chunk. No UID (the server routes to
- * every connected user). Server-side gating: HL_ACCESS_CAN_BROADCAST
- * is required; the toolbar button is hidden when the account lacks
- * the bit so we don't even let the user try, but the server still
- * enforces it.
- *
- * Body goes through gtkhx_text_for_wire so UTF-8 ↔ Mac Roman and
- * LF→CR happen the same way they do for normal messages. */
-void
-hx_send_broadcast (struct htlc_conn *htlc, const char *msg, guint16 len)
-{
-    gboolean utf8;
-    gsize wire_len = 0;
-    char *wire;
-    const char *valid_end = NULL;
-    gsize safe_len = len;
-
-    if (!msg || len == 0) {
-        return;
-    }
-
-    /* Callers clamp by byte count (e.g. 0xfffe in on_broadcast_response)
-	 * which can split a multi-byte UTF-8 sequence at the tail. Walk
-	 * back to the last complete codepoint so we never hand
-	 * gtkhx_text_for_wire malformed UTF-8 — the legacy (Mac Roman)
-	 * branch of that helper uses g_convert_with_fallback() and
-	 * silently emits raw input bytes on conversion failure, which
-	 * would put garbled multibyte fragments on the wire. */
-    if (!g_utf8_validate_len (msg, len, &valid_end) && valid_end) {
-        safe_len = (gsize)(valid_end - msg);
-    }
-    if (safe_len == 0) {
-        return;
-    }
-
-    utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
-    wire = gtkhx_text_for_wire (msg, safe_len, utf8, /*is_body=*/TRUE,
-                                &wire_len);
-
-    /* chunk layout moved to
-	 * gtkhx_proto_build_broadcast_chunks. No scratch (single body
-	 * chunk, no integer fields). Build chunks BEFORE registering the
-	 * task — see hx_send_msg for the rationale (task_new snapshots
-	 * htlc->trans into a pending entry; the increment happens inside
-	 * hlpack_chunks during packing). A builder failure must not leave
-	 * a phantom task behind. */
-    struct hx_chunk chunks[1];
-    int hc = (int)gtkhx_proto_build_broadcast_chunks (
-        (const uint8_t *)wire, wire_len, chunks, G_N_ELEMENTS (chunks));
-    if (hc > 0) {
-        task_new (htlc, 0, 0, 0, "broadcast");
-        hlwrite_chunks (htlc, HTLC_HDR_MSG_BROADCAST, 0, chunks, hc);
-    }
-    g_free (wire);
-}
+/* hx_send_broadcast (the admin-broadcast wire sender) moved to Rust
+ * (gtkhx-ui broadcast.rs) alongside the Broadcast composer, its only
+ * caller. */
 
 /* msgwin lifecycle on GHashTable.
  *
