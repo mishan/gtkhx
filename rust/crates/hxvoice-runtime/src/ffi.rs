@@ -599,6 +599,49 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_set_self_uid(
     rt.set_self_uid(uid);
 }
 
+/// Set the per-listener playback gain for a remote participant —
+/// the value behind the user-list right-click volume slider.
+///
+/// `gain` is a linear multiplier: `0.0` mutes them locally, `1.0` is
+/// unity, values above `1.0` boost. It's clamped to `[0.0, 10.0]` and
+/// any non-finite value is treated as unity, so a stray FFI value
+/// can't feed the GStreamer `volume` element garbage. The gain is
+/// session-scoped, keyed by uid, and re-applied when the participant's
+/// receive bin is rebuilt on a mid-call rejoin.
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. No memory params
+/// beyond the pointer. Must be called from the main thread.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_set_user_volume(
+    rt: *mut VoiceRuntime,
+    uid: u16,
+    gain: f64,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.set_user_volume(uid, gain);
+}
+
+/// Read the stored per-listener gain for a uid, or `1.0` (unity) when
+/// the user never adjusted that uid's slider. Used by the C side to
+/// initialise the slider position when it opens the popover.
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. Returns `1.0` for a
+/// NULL runtime.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_user_volume(
+    rt: *mut VoiceRuntime,
+    uid: u16,
+) -> f64 {
+    match unsafe { rt_from_ptr(rt) } {
+        Some(rt) => rt.user_volume(uid),
+        None => 1.0,
+    }
+}
+
 /// Fire `Event::SdpOfferReceived { cid, sdp }`. Called from
 /// `rcv_task_voice_join` / `hx_rcv_voice_sdp_offer` after the
 /// server's 602 reply lands and the SDP has been extracted.

@@ -44,6 +44,10 @@
 #include "users.h"
 #include "users_view.h"
 #include "voice_panel.h" /* voice_panel_new — Join/Mute icon controls */
+#ifdef HAVE_VOICE
+#include "voice_model.h"   /* hx_voice_model_get_indicator — in-voice check */
+#include "voice_runtime.h" /* gtkhx_voice_runtime_set_user_volume — slider */
+#endif
 #include "gif_avatar.h" /* gtkhx_avatar_is_animated / _is_paused / _set_paused */
 
 /* Every userlist call site is HxUserListView-backed; selection
@@ -449,6 +453,73 @@ user_popup_install_css (void)
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
+#ifdef HAVE_VOICE
+/* GtkRange::value-changed on the per-user volume slider. The scale
+ * reads 0..150 (percent); the runtime wants a linear gain, so divide
+ * by 100 (100% == unity 1.0, 150% == 1.5× boost). ctx outlives the
+ * scale (both are owned by the popover), so borrowing sess + uid
+ * through it is safe for the slider's lifetime. */
+static void
+on_user_volume_changed (GtkRange *range, gpointer user_data)
+{
+    struct UserActionCtx *ctx = user_data;
+    double gain;
+
+    if (!ctx || !ctx->user || !ctx->sess || !ctx->sess->voice_runtime) {
+        return;
+    }
+    gain = gtk_range_get_value (range) / 100.0;
+    gtkhx_voice_runtime_set_user_volume (ctx->sess->voice_runtime,
+                                         ctx->user->uid, gain);
+}
+
+/* Append a "Volume" label + horizontal GtkScale (0..150 %) to the
+ * popover's vbox, initialised to the user's stored gain. Only called
+ * when the user is actually in the voice room (indicator != NONE), so
+ * the control never shows up for someone who can't be heard. */
+static void
+user_popup_append_volume (GtkBox *vbox, struct UserActionCtx *ctx)
+{
+    GtkWidget *label, *scale;
+    double stored;
+
+    label = gtk_label_new (_ ("Volume"));
+    gtk_label_set_xalign (GTK_LABEL (label), 0.0);
+    gtk_widget_set_margin_start (label, 8);
+    gtk_widget_set_margin_end (label, 8);
+    gtk_box_append (vbox, label);
+
+    /* 0..150 %, 5% steps; 100% is unity. Value shown as the drag
+     * happens so the user gets numeric feedback without a dialog. */
+    scale = gtk_scale_new_with_range (GTK_ORIENTATION_HORIZONTAL,
+                                      0.0, 150.0, 5.0);
+    gtk_scale_set_draw_value (GTK_SCALE (scale), TRUE);
+    gtk_scale_set_value_pos (GTK_SCALE (scale), GTK_POS_RIGHT);
+    gtk_widget_set_hexpand (scale, TRUE);
+    gtk_widget_set_size_request (scale, 160, -1);
+    gtk_widget_set_margin_start (scale, 8);
+    gtk_widget_set_margin_end (scale, 8);
+    /* Mark unity so 100% is easy to find by feel. */
+    gtk_scale_add_mark (GTK_SCALE (scale), 100.0, GTK_POS_BOTTOM, NULL);
+
+    /* The runtime clamps stored gain up to 10.0 (1000%), but the scale
+     * only represents 0..150%. Clamp the initial position to the
+     * scale's range so the widget reflects a value it can actually
+     * show — don't lean on GTK's internal clamping, which would leave
+     * the thumb at 150% while playback stayed higher. In practice the
+     * slider can only ever store 0..150% itself; this guards a value
+     * set by some future caller / bad FFI. */
+    stored = gtkhx_voice_runtime_user_volume (ctx->sess->voice_runtime,
+                                              ctx->user->uid) * 100.0;
+    stored = CLAMP (stored, 0.0, 150.0);
+    gtk_range_set_value (GTK_RANGE (scale), stored);
+
+    g_signal_connect (scale, "value-changed",
+                      G_CALLBACK (on_user_volume_changed), ctx);
+    gtk_box_append (vbox, scale);
+}
+#endif /* HAVE_VOICE */
+
 /* The user_popup_show entry point is what HxUserListView's
  * right-click gesture and any future in-file callers use; the
  * old static `user_popup' wrapper retired with the legacy
@@ -560,6 +631,21 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
                                                : _ ("Pause Animation"),
             on_user_toggle_anim);
     }
+
+#ifdef HAVE_VOICE
+    /* Voice: per-listener volume slider, only when this user is
+     * actually in the voice room (indicator != NONE means present).
+     * A dialog-free inline GtkScale — drag to set how loud you hear
+     * this person; session-scoped, applied live. */
+    if (sess->voice_model
+        && hx_voice_model_get_indicator (sess->voice_model, user->uid)
+               != HX_VOICE_INDICATOR_NONE
+        && sess->voice_runtime) {
+        gtk_box_append (GTK_BOX (vbox),
+                        gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
+        user_popup_append_volume (GTK_BOX (vbox), ctx);
+    }
+#endif /* HAVE_VOICE */
 
     /* ctx outlives any one button-click — bound to the popover,
      * freed when it's unparented. The on_user_btn_clicked closure
