@@ -2906,94 +2906,71 @@ output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
  * the new window position. configure-event is gone in GTK 4 and
  * Wayland doesn't expose true window-relative transparency anyway. */
 
-struct gtkhx_chat *
-create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
+/* Content-build helpers for the Rust private-chat window (gtkhx-ui `pchat`).
+ * create_pchat_window moved to Rust: it assembles the tab layout around the
+ * C-coupled leaf widgets these helpers build. Mirrors msg.c's create_msg +
+ * hx_msgwin_* accessor seam. */
+
+guint32
+hx_chat_cid (struct chat *chat)
 {
-    GtkWidget *vbox, *hbox;
-    GtkWidget *outputframe, *inputframe, *userframe, *topframe;
-    GtkWidget *pchat_hbox;
-    GtkWidget *pchat_window;
-    GtkWidget *subj_hbox;
-    GtkWidget *subj_frame;
-    GtkWidget *vpane;
-    GtkWidget *hpane;
-    GtkWidget *scroll;
-    GtkWidget *user_vbox;
-    GtkWidget *hbuttonbox;
-    GtkWidget *msg_btn;
-    GtkWidget *kick_btn;
-    GtkWidget *ban_btn;
-    GtkWidget *info_btn;
-    GtkWidget *igno_btn;
-    GtkWidget *chat_btn;
-    GtkWidget *pix;
-    GdkPixmap *icon;
-    char *title;
+    return chat ? chat->cid : 0;
+}
+
+GtkWidget *
+hx_gchat_output (struct gtkhx_chat *g)
+{
+    return g ? g->output : NULL;
+}
+GtkWidget *
+hx_gchat_vscroll (struct gtkhx_chat *g)
+{
+    return g ? g->vscroll : NULL;
+}
+GtkWidget *
+hx_gchat_input (struct gtkhx_chat *g)
+{
+    return g ? g->input : NULL;
+}
+GtkWidget *
+hx_gchat_subject (struct gtkhx_chat *g)
+{
+    return g ? g->subject : NULL;
+}
+GtkWidget *
+hx_gchat_media_btn (struct gtkhx_chat *g)
+{
+    return g ? g->media_attach_btn : NULL;
+}
+void
+hx_gchat_set_window (struct gtkhx_chat *g, GtkWidget *w)
+{
+    if (g) {
+        g->window = w;
+    }
+}
+
+/* Create the pchat gchat + its C-coupled leaf widgets: output/vscroll (via
+ * pchat_new), plus the input text view, subject entry, and inline-media
+ * button. Rust assembles the layout around them. */
+struct gtkhx_chat *
+gtkhx_pchat_new (struct htlc_conn *htlc, struct chat *chat)
+{
     session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat = pchat_new (sess, chat);
 
-
-    /* pchat content lives in a tab on the Chat
-     * panel's tab view. No standalone window. The tab's title is
-     * the chat title; pchat_window points at the tab content widget
-     * (the hpane) so other code keying off gchat->window keeps
-     * compiling. */
-    title = g_strdup_printf ("%s: 0x%08x", _ ("Private Chat"), chat->cid);
-
-    vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    (gtk_widget_set_margin_start (vbox, 5), gtk_widget_set_margin_end (vbox, 5),
-     gtk_widget_set_margin_top (vbox, 5),
-     gtk_widget_set_margin_bottom (vbox, 5));
-
-    subj_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    subj_frame = gtk_frame_new (0);
-    gtkhx_widget_set_child (subj_frame, subj_hbox);
     gchat->subject = gtk_entry_new ();
-    gtkhx_box_pack (subj_hbox, gchat->subject, 1, 1, 0);
     gtk_editable_set_text (GTK_EDITABLE (gchat->subject), chat->subject);
-    gtkhx_box_pack (vbox, subj_frame, 0, 1, 0);
     gtkhx_apply_text_style (gchat->subject);
     g_signal_connect (gchat->subject, "activate", G_CALLBACK (change_subject),
                       GINT_TO_POINTER (chat->cid));
 
-    outputframe = gtk_frame_new (0);
-
-    inputframe = gtk_frame_new (0);
-
-    /* drop GtkPaned in favour of a plain box so the input
-	 * area can shrink to a single line by default and auto-grow up
-	 * to a 5-line cap as the user types. See the matching note in
-	 * create_chat_window above for the rationale. */
-    {
-        GtkWidget *vstack = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-        /* Voice controls now live in this pchat's user-list button bar
-         * (hbuttonbox below), room-scoped via chat->cid — see the
-         * voice_panel_new call after the action buttons. */
-        gtk_widget_set_vexpand (outputframe, TRUE);
-        gtk_widget_set_vexpand (inputframe, FALSE);
-        gtk_box_append (GTK_BOX (vstack), outputframe);
-        gtk_box_append (GTK_BOX (vstack), inputframe);
-        gtkhx_box_pack (vbox, vstack, 1, 1, 0);
-    }
-    (void)vpane;
-
-    pchat_hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-
-    gtkhx_box_pack (pchat_hbox, gchat->output, 1, 1, 0);
-    gtkhx_box_pack (pchat_hbox, gchat->vscroll, 0, 0, 0);
-    gtkhx_widget_set_child (outputframe, pchat_hbox);
-
-    hbox = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 0);
-    gtkhx_widget_set_child (inputframe, hbox);
-
     gchat->input = gtk_text_view_new ();
-    /* See create_chat_window — theme monospace, not the Settings font. */
     gtkhx_apply_input_font (gchat->input);
     gtkhx_apply_input_style (gchat->input);
     g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
     g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
     {
-        /* pchat input — same controller as the main chat. */
         GtkEventController *kctrl = gtk_event_controller_key_new ();
         g_signal_connect (kctrl, "key-pressed",
                           G_CALLBACK (chat_input_key_pressed), NULL);
@@ -3001,42 +2978,30 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     }
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
-    /* Inner margins — see the matching block in the main-chat
-	 * input setup for the rationale (rounded-frame clip). */
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (gchat->input), 6);
-    /* Same as create_chat_window — see comment there. */
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (gchat->input), 4);
     gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
-    {
-        GtkWidget *pchat_input_scroll = gtk_scrolled_window_new ();
-        gtk_scrolled_window_set_policy (
-            GTK_SCROLLED_WINDOW (pchat_input_scroll), GTK_POLICY_NEVER,
-            GTK_POLICY_AUTOMATIC);
-        gtk_scrolled_window_set_propagate_natural_height (
-            GTK_SCROLLED_WINDOW (pchat_input_scroll), TRUE);
-        gtk_scrolled_window_set_min_content_height (
-            GTK_SCROLLED_WINDOW (pchat_input_scroll), 28);
-        gtk_scrolled_window_set_max_content_height (
-            GTK_SCROLLED_WINDOW (pchat_input_scroll), 120);
-        gtkhx_widget_set_child (pchat_input_scroll, gchat->input);
-        gtkhx_box_pack (hbox, pchat_input_scroll, 1, 1, 0);
 
-        /* Emoji picker — see create_chat_window for the rationale.
-         * Identical wiring on the private-chat path. */
-        GtkWidget *emoji_btn = hx_emoji_button_new (gchat->input);
-        gtk_widget_set_valign (emoji_btn, GTK_ALIGN_END);
-        gtk_box_append (GTK_BOX (hbox), emoji_btn);
-        /* Inline :shortcode: typeahead on the same input (phase E5). */
-        hx_emoji_typeahead_attach (gchat->input);
+    gchat->media_attach_btn
+        = hx_inline_media_attach_button_new (gchat, &sess->htlc);
+    return gchat;
+}
 
-        /* Phase 9.C inline-media attach — same cap-gated
-		 * visibility as the main chat input, scoped to this
-		 * pchat's cid. */
-        gchat->media_attach_btn = hx_inline_media_attach_button_new (
-            gchat, &sess->htlc);
-        gtk_widget_set_valign (gchat->media_attach_btn, GTK_ALIGN_END);
-        gtk_box_append (GTK_BOX (hbox), gchat->media_attach_btn);
+/* Build the pchat user sidebar (HxUserListView + action buttons + voice
+ * panel). Returns the user_vbox for the Rust layout to pack into the hpane. */
+GtkWidget *
+gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
+{
+    session *sess = sess_from_htlc (htlc);
+    struct gtkhx_chat *gchat = gchat_with_cid (sess, chat->cid);
+    GtkWidget *user_vbox, *userframe, *topframe, *scroll, *hbuttonbox;
+    GtkWidget *msg_btn, *kick_btn, *ban_btn, *info_btn, *igno_btn, *chat_btn;
+    GtkWidget *pix;
+    GdkPixmap *icon;
+
+    if (!gchat) {
+        return NULL;
     }
 
     /* HxUserListView GObject (STYLE_CHAT — 18-px rows, 1.0× scale,
@@ -3180,33 +3145,7 @@ create_pchat_window (struct htlc_conn *htlc, struct chat *chat)
     gtkhx_box_pack (user_vbox, topframe, 0, 0, 0);
     gtkhx_box_pack (user_vbox, userframe, 1, 1, 0);
 
-    hpane = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
-    gtk_paned_set_start_child (GTK_PANED (hpane), vbox);
-    gtk_paned_set_end_child (GTK_PANED (hpane), user_vbox);
-    gtk_paned_set_position (GTK_PANED (hpane), 435);
-
-    /* gchat->window points at the tab content
-     * widget (hpane). Existing code that uses gchat->window — the
-     * init_keyaccel below, sub-dialogs parented through
-     * gtkhx_widget_get_root, etc. — keeps compiling unchanged.
-     * pchat_window stays declared above for the same duck-typing
-     * reason. */
-    pchat_window = hpane;
-    gchat->window = pchat_window;
-    g_object_set_data (G_OBJECT (pchat_window), "sess", sess);
-
-    gtkhx_chat_tabs_add_pchat (pchat_window, chat->cid, title);
-    g_free (title);
-
-    /* Surface the new tab + raise the Chat panel. Same idea as the
-     * old gtk_window_present (the standalone window made itself
-     * visible on creation). */
-    gtkhx_chat_tabs_raise_pchat (chat->cid);
-
-    init_keyaccel (pchat_window);
-    gtk_widget_grab_focus (gchat->input);
-
-    return gchat;
+    return user_vbox;
 }
 
 void

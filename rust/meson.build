@@ -103,6 +103,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/chat.rs',
   'crates/gtkhx-ui/src/msg.rs',
   'crates/gtkhx-ui/src/files.rs',
+  'crates/gtkhx-ui/src/pchat.rs',
   'crates/gtkhx-ui/src/tracker/mod.rs',
   'crates/gtkhx-ui/src/tracker/ffi.rs',
   'crates/gtkhx-ui/src/tracker/meta.rs',
