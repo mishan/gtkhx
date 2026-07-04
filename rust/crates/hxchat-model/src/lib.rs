@@ -235,20 +235,36 @@ fn cycle(cur: usize, len: usize, reverse: bool) -> usize {
     }
 }
 
-/// Nick-complete the token under the caret in `input`.
-///
-/// `names_sorted` is the deterministic (case-insensitive sorted) candidate
-/// list. `cursor` is a char offset into `input`. `reverse` steps the cycle
-/// backwards (Shift+Tab). `suffix` is appended after a nick completed at the
-/// very start of the buffer (address form, e.g. `nick: `).
-///
-/// Returns `None` when there's nothing to do (empty token, no matches).
+/// Nick-complete the token under the caret in `input` (new-style: an ambiguous
+/// prefix extends to the longest common prefix + lists candidates). Thin
+/// wrapper over [`complete_styled`] with `old_style = false`.
 pub fn complete(
     names_sorted: &[&str],
     input: &str,
     cursor: usize,
     reverse: bool,
     suffix: char,
+) -> Option<Completion> {
+    complete_styled(names_sorted, input, cursor, reverse, suffix, false)
+}
+
+/// Nick-complete the token under the caret in `input`.
+///
+/// `names_sorted` is the deterministic (case-insensitive sorted) candidate
+/// list. `cursor` is a char offset into `input`. `reverse` steps the cycle
+/// backwards (Shift+Tab). `suffix` is appended after a nick completed at the
+/// very start of the buffer (address form, e.g. `nick: `). `old_style` (the
+/// Settings toggle) completes an ambiguous prefix to the first candidate fully
+/// instead of extending to the common prefix + listing candidates.
+///
+/// Returns `None` when there's nothing to do (empty token, no matches).
+pub fn complete_styled(
+    names_sorted: &[&str],
+    input: &str,
+    cursor: usize,
+    reverse: bool,
+    suffix: char,
+    old_style: bool,
 ) -> Option<Completion> {
     let chars: Vec<char> = input.chars().collect();
     let pos = cursor.min(chars.len());
@@ -330,20 +346,26 @@ pub fn complete(
         }
     }
 
+    // Complete the token to `name` fully (address form adds the suffix).
+    let single = |name: &str| -> Completion {
+        if address_form {
+            Completion {
+                text: format!("{name}{suffix} "),
+                cursor: None,
+                info: Vec::new(),
+            }
+        } else {
+            rebuild(name)
+        }
+    };
+
     match matches.len() {
         0 => None,
-        1 => {
-            let name = matches[0];
-            if address_form {
-                Some(Completion {
-                    text: format!("{name}{suffix} "),
-                    cursor: None,
-                    info: Vec::new(),
-                })
-            } else {
-                Some(rebuild(name))
-            }
-        }
+        1 => Some(single(matches[0])),
+        // Old-style (Settings "Old-style nick completion"): an ambiguous prefix
+        // completes to the first candidate fully — no common-prefix extension,
+        // no candidate list (matches the C's old_nickcompletion branch).
+        _ if old_style => Some(single(matches[0])),
         _ => {
             // Ambiguous: extend the token to the longest common prefix (if it's
             // longer than what's typed) and surface the candidate list.

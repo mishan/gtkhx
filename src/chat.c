@@ -58,6 +58,7 @@
 #include "users_view.h"
 #include "gtkhx.h"
 #include "chat.h"
+#include "chat_members.h"
 #include "chat_tabs.h"
 #include "gtkurl.h"
 #include "emoji.h"
@@ -383,6 +384,9 @@ chat_free (gpointer p)
     if (chat->users) {
         g_hash_table_destroy (chat->users);
     }
+    if (chat->member_model) {
+        hx_member_model_free (chat->member_model);
+    }
     g_free (chat);
 }
 
@@ -399,6 +403,8 @@ chats_init (session *sess)
 	 * top-level chat messages are routed. Create it eagerly so
 	 * chat_with_cid(sess, 0) is always non-NULL. */
     chat_new (sess, 0);
+    /* M2 wire-up (Option A): the authoritative public-chat membership model.
+     * Created once, fed by the users.c fan-out, read by tab_nick_comp. */
 }
 
 struct chat *
@@ -409,6 +415,9 @@ chat_new (session *sess, guint32 cid)
     chat = g_malloc0 (sizeof (struct chat));
     chat->cid = cid;
     chat->users = users_table_new ();
+    /* M2 wire-up (Option A): this chat's authoritative membership model,
+     * fed by the users.c fan-out, read by tab_nick_comp. */
+    chat->member_model = hx_member_model_new ();
 
     g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);
     return chat;
@@ -1640,398 +1649,55 @@ chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
     xoutput_chat (sess_from_htlc (htlc), cid, (char *)body);
 }
 
+/* Nick completion. The C tab_nick_comp / tab_nick_comp_next / nick_comp_chng /
+ * public_chat_users_sorted machinery (~250 lines of raw-buffer + GSList work)
+ * moved to Rust in the M2 wire-up: the tested hxchat-model::complete over the
+ * authoritative membership model for the chat the input belongs to (each
+ * struct chat's member_model), reached via hx_nick_complete. The Rust version
+ * also fixes two latent C bugs the old code had — Tab-cycling that computed the
+ * next nick then discarded it, and mid-buffer caret math that landed one char
+ * inside the name. (The old code always completed against the public chat;
+ * private-chat inputs now complete against their own participants.)
+ *
+ * `pos` is a char offset (the GtkTextBuffer insert mark). `reverse` steps the
+ * Tab-cycle backwards (Shift+Tab). */
 static int
-nick_comp_get_nick (char *tx, char *n)
+tab_nick_comp (session *sess, void *member_model, char *text, gboolean reverse,
+               int pos, GtkWidget *entry)
 {
-    size_t c, len = strlen (tx);
+    char *ctext = NULL, *cinfo = NULL;
+    int ccursor = -1;
 
-    for (c = 0; c < len; c++) {
-        if (tx[c] == ':' || tx[c] == ',' || tx[c] == ':') {
-            n[c] = 0;
-            return 0;
-        }
-        if (tx[c] == ' ' || tx[c] == '.' || tx[c] == 0) {
-            return -1;
-        }
-        n[c] = tx[c];
+    if (!member_model) {
+        return 0;
     }
-    return -1;
-}
-
-/* materialise the public chat's users into a name-sorted
- * GPtrArray so tab-completion has a deterministic walk order across
- * calls. Before the GHashTable migration the underlying linked list
- * happened to be in join order, which was arbitrary anyway — sorting
- * by name gives the user a more useful experience while we have to
- * materialise an array. Caller owns the returned array and must
- * g_ptr_array_free (arr, TRUE); the user pointers are NOT owned. */
-static int
-hx_user_name_cmp (gconstpointer a, gconstpointer b)
-{
-    const struct hx_user *ua = *(const struct hx_user *const *)a;
-    const struct hx_user *ub = *(const struct hx_user *const *)b;
-    return g_ascii_strcasecmp (ua->name, ub->name);
-}
-
-static GPtrArray *
-public_chat_users_sorted (session *sess)
-{
-    GPtrArray *arr = g_ptr_array_new ();
-    struct chat *pub = chat_with_cid (sess, 0);
-    if (pub && pub->users) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, pub->users);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            g_ptr_array_add (arr, val);
-        }
-        g_ptr_array_sort (arr, hx_user_name_cmp);
-    }
-    return arr;
-}
-
-static void
-nick_comp_chng (session *sess, char *text, int updown)
-{
-    char nick[64];
-    size_t len;
-    GPtrArray *arr;
-
-    if (nick_comp_get_nick (text, nick) == -1) {
-        return;
-    }
-    len = strlen (nick);
-
-    arr = public_chat_users_sorted (sess);
-    for (guint i = 0; i < arr->len; i++) {
-        struct hx_user *user = arr->pdata[i];
-        size_t slen = strlen (user->name);
-        if (len != slen) {
-            continue;
-        }
-        if (strncasecmp (user->name, nick, len) == 0) {
-            if (updown == 0) {
-                /* Step forward: pick the next nick in sort order
-				 * whose length differs (matches the original
-				 * length-mismatch skip semantics). Bail at the
-				 * end of the list. */
-                guint j;
-                for (j = i + 1; j < arr->len; j++) {
-                    struct hx_user *u = arr->pdata[j];
-                    if (strlen (u->name) == len) {
-                        continue;
-                    }
-                    snprintf (nick, sizeof (nick), "%s%c ", u->name, ':');
-                    goto done;
-                }
-                goto done;
-            } else {
-                /* Step backward: pick the most recent prior nick
-				 * whose length differed from the current
-				 * candidate. */
-                if (i == 0) {
-                    goto done;
-                }
-                for (guint j = i; j-- > 0;) {
-                    struct hx_user *u = arr->pdata[j];
-                    if (strlen (u->name) == len) {
-                        continue;
-                    }
-                    snprintf (nick, sizeof (nick), "%s%c ", u->name, ':');
-                    goto done;
-                }
-                goto done;
-            }
-        }
-    }
-done:
-    g_ptr_array_free (arr, TRUE);
-}
-
-static int
-tab_nick_comp_next (session *sess, char *b4, char *nick, char *c5, int shift)
-{
-    char buf[4096];
-    GPtrArray *arr = public_chat_users_sorted (sess);
-    gboolean handled = FALSE;
-
-    for (guint i = 0; i < arr->len; i++) {
-        struct hx_user *user = arr->pdata[i];
-        if (strcmp (user->name, nick) != 0) {
-            continue;
-        }
-        handled = TRUE;
-        if (shift) {
-            if (i > 0) {
-                struct hx_user *last = arr->pdata[i - 1];
-                snprintf (buf, 4096, "%s %s%s", b4, last->name, c5);
-            } else {
-                snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
-            }
-        } else {
-            if (i + 1 < arr->len) {
-                struct hx_user *next = arr->pdata[i + 1];
-                snprintf (buf, 4096, "%s %s%s", b4, next->name, c5);
-            } else if (arr->len > 0) {
-                struct hx_user *first = arr->pdata[0];
-                snprintf (buf, 4096, "%s %s%s", b4, first->name, c5);
-            } else {
-                snprintf (buf, 4096, "%s %s%s", b4, nick, c5);
-            }
-        }
-        break;
-    }
-    g_ptr_array_free (arr, TRUE);
-    if (!handled) {
+    if (!hx_nick_complete (member_model, text, (gsize)pos, reverse,
+                           (gunichar)':', gtkhx_prefs.old_nickcompletion,
+                           &ctext, &ccursor, &cinfo)) {
         return 0;
     }
 
-    return 1;
-}
-
-static int
-tab_nick_comp (session *sess, char *text, int shift, int pos, GtkWidget *entry)
-{
-    struct hx_user *user = 0, *match_user = 0;
-    char not_nick_chars[16] = "";
-    int first = 0, i, j, match_count = 0;
-    int cursor_pos = -1;
-    size_t len, slen, match_pos = 0;
-    char buf[2048], nick_buf[2048] = { 0 }, *b4 = NULL, *c5 = NULL,
-                    *match_text = NULL, *nick = NULL, *current_nick = NULL,
-                    match_char = -1, *ptr;
-    GSList *match_list = NULL, *first_match = NULL, *node1 = NULL,
-           *node2 = NULL, *next = NULL;
-
-    len = strlen (text);
-
-    /* Is the text more than just a nick? */
-
-    g_snprintf (not_nick_chars, sizeof (not_nick_chars), " .?%c", ':');
-
-    if (strcspn (text, not_nick_chars) != strlen (text)) {
-        /* If we're doing old-style nick completion and the text input widget
-		 * contains a string of the format: "nicknameSUFFIX" or"nicknameSUFFIX ",
-		 * where SUFFIX is the Nickname Completion Suffix character, then cycle
-		 * through the available nicknames.
-		 */
-        if (gtkhx_prefs.old_nickcompletion) {
-            char *space = strchr (text, ' ');
-
-            if ((!space || space == &text[len - 1])
-                && text[len - (space ? 2 : 1)] == ':') {
-                /* This causes the nickname to cycle. */
-                nick_comp_chng (sess, text, shift);
-                return 0;
-            }
-        }
-        j = pos;
-
-        /* len is size_t (unsigned); j is int. Compare directly to avoid
-		 * the underflow trap an 'len - j < 0' check would walk into. */
-        if (j < 0 || (size_t)j > len) {
-            return 0;
-        }
-
-        b4 = (char *)g_malloc (len + 1);
-        c5 = (char *)g_malloc (len + 1);
-        memmove (c5, &text[j], len - j);
-        c5[len - j] = 0;
-        memcpy (b4, text, len + 1);
-
-        for (i = j - 1; i > -1; i--) {
-            if (b4[i] == ' ') {
-                b4[i] = 0;
-                break;
-            }
-            b4[i] = 0;
-        }
-        memmove (text, &text[i + 1], (j - i) + 1);
-        text[(j - i) - 1] = 0;
-
-        if (tab_nick_comp_next (sess, b4, text, c5, shift)) {
-            g_free (b4);
-            g_free (c5);
-            return 0;
-        }
-        first = 0;
-    } else {
-        first = 1;
+    /* Ambiguous prefix → echo the candidate list to chat output (the Rust
+     * completer returns it space-joined, case-insensitively sorted, with no
+     * trailing space). */
+    if (cinfo) {
+        hx_printf (&sess->htlc, 0, "%s", cinfo);
+        g_free (cinfo);
     }
-
-    len = strlen (text);
-
-    if (text[0] == 0) {
-        return 0;
-    }
-
-    /* make a list of matches — walk the public chat's user hashtable. */
-    {
-        struct chat *pub = chat_with_cid (sess, 0);
-        if (pub && pub->users) {
-            GHashTableIter iter;
-            gpointer val;
-            g_hash_table_iter_init (&iter, pub->users);
-            while (g_hash_table_iter_next (&iter, NULL, &val)) {
-                user = val;
-                slen = strlen (user->name);
-                if (len > slen) {
-                    continue;
-                }
-                if (strncasecmp (user->name, text, len) == 0) {
-                    match_list = g_slist_prepend (match_list, user);
-                }
-            }
-        }
-    }
-    match_list = g_slist_reverse (match_list); /* faster then _append */
-    match_count = g_slist_length (match_list);
-
-    /* no matches, return */
-    if (match_count == 0) {
-        if (!first) {
-            g_free (b4);
-            g_free (c5);
-        }
-        return 0;
-    }
-    first_match = match_list;
-    match_pos = len;
-
-    /* remove duplicate entries */
-    for (node1 = match_list; node1; node1 = g_slist_next (node1)) {
-        for (node2 = match_list; node2; node2 = next) {
-            next = g_slist_next (node2);
-            if (node1 && node2 && (node1 != node2) && node1->data && node2->data
-                && (node1->data != node2->data)
-                && !strcasecmp (((struct hx_user *)node1->data)->name,
-                                ((struct hx_user *)node2->data)->name)) {
-                /* g_slist_remove returns the (possibly new) list head;
-				 * dropping it leaks the change for any case where
-				 * node2 was the head node, AND triggers
-				 * -Wunused-result on the warn_unused_result
-				 * attribute. Capture and re-seat. */
-                match_list = g_slist_remove (match_list, node2->data);
-                match_count--;
-            }
-        }
-    }
-
-    if (!gtkhx_prefs.old_nickcompletion && match_count > 1) {
-        while (1) {
-            while (match_list) {
-                current_nick = g_malloc (
-                    strlen (((struct hx_user *)match_list->data)->name) + 1);
-                strcpy (current_nick,
-                        ((struct hx_user *)match_list->data)->name);
-                if (match_char == -1) {
-                    match_char = current_nick[match_pos];
-                    match_list = g_slist_next (match_list);
-                    g_free (current_nick);
-                    continue;
-                }
-                if (tolower (current_nick[match_pos]) != tolower (match_char)) {
-                    match_text = g_malloc (match_pos + 1);
-                    current_nick[match_pos] = '\0';
-                    strcpy (match_text, current_nick);
-                    free (current_nick);
-                    match_pos = -1;
-                    break;
-                }
-                match_list = g_slist_next (match_list);
-                g_free (current_nick);
-            }
-
-            if (match_pos == (size_t)-1) {
-                break;
-            }
-
-            match_list = first_match;
-            match_char = -1;
-            ++match_pos;
-        }
-        match_list = first_match;
-    } else {
-        match_user = (struct hx_user *)match_list->data;
-    }
-
-    /* no match, if we found more common chars among matches, display
-	   them in entry */
-    if (match_user == NULL) {
-        size_t nb_off = 0;
-        while (match_list) {
-            int n;
-            nick = ((struct hx_user *)match_list->data)->name;
-            n = snprintf (nick_buf + nb_off, sizeof (nick_buf) - nb_off, "%s ",
-                          nick);
-            if (n < 0 || (size_t)n >= sizeof (nick_buf) - nb_off) {
-                break;
-            }
-            nb_off += (size_t)n;
-            match_list = g_slist_next (match_list);
-        }
-        hx_printf (&sess->htlc, 0, "%s", nick_buf);
-        /* Reaching here implies the while(1) above broke via the
-		 * match_pos = -1 path, which only fires after match_text
-		 * was g_malloc'd. The analyzer can't prove the cross-loop
-		 * dependency. g_critical + skip the substitution if the
-		 * invariant ever breaks rather than g_assert (which
-		 * compiles out under G_DISABLE_ASSERT) or g_error (which
-		 * would abort the app on a recoverable display glitch). */
-        if (match_text == NULL) {
-            g_critical ("chat: nick-completion match_text NULL after "
-                        "match_pos = -1 path — skipping substitution");
-            if (!first) {
-                g_free (b4);
-                g_free (c5);
-            }
-        } else {
-            if (first) {
-                snprintf (buf, sizeof (buf), "%s", match_text);
-            } else {
-                snprintf (buf, sizeof (buf), "%s %s%s", b4, match_text, c5);
-                cursor_pos = strlen (b4) + strlen (match_text);
-                g_free (b4);
-                g_free (c5);
-            }
-            g_free (match_text);
-        }
-    }
-
-    else {
-        if (first) {
-            snprintf (buf, sizeof (buf), "%s%c ", match_user->name, ':');
-        } else {
-            snprintf (buf, sizeof (buf), "%s %s%s", b4, match_user->name, c5);
-            cursor_pos = strlen (b4) + strlen (match_user->name);
-            if (b4) {
-                g_free (b4);
-            }
-            if (c5) {
-                g_free (c5);
-            }
-        }
-    }
-
-    ptr = buf;
-    while (*ptr == ' ') {
-        ptr++;
-    }
-
-    {
+    if (ctext) {
         GtkTextBuffer *ebuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (entry));
-        gtk_text_buffer_set_text (ebuf, ptr, -1);
-        if (cursor_pos >= 0) {
-            GtkTextIter cursor_iter;
+        gtk_text_buffer_set_text (ebuf, ctext, -1);
+        if (ccursor >= 0) {
+            GtkTextIter it;
             int total = gtk_text_buffer_get_char_count (ebuf);
-            if (cursor_pos > total) {
-                cursor_pos = total;
+            if (ccursor > total) {
+                ccursor = total;
             }
-            gtk_text_buffer_get_iter_at_offset (ebuf, &cursor_iter, cursor_pos);
-            gtk_text_buffer_place_cursor (ebuf, &cursor_iter);
+            gtk_text_buffer_get_iter_at_offset (ebuf, &it, ccursor);
+            gtk_text_buffer_place_cursor (ebuf, &it);
         }
+        g_free (ctext);
     }
-
     return 0;
 }
 
@@ -2109,14 +1775,24 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
         gtk_text_buffer_delete (buf, &start, &end);
         gtk_text_view_set_editable (text, TRUE);
         return TRUE;
-    } else if (keyval == GDK_KEY_Tab) {
+    } else if (keyval == GDK_KEY_Tab || keyval == GDK_KEY_ISO_Left_Tab) {
         GtkTextIter start, end;
         char *p;
+        /* Shift+Tab (GDK reports it as ISO_Left_Tab) cycles backwards.
+         * Handle it here too so it completes rather than moving focus. */
+        gboolean reverse
+            = (keyval == GDK_KEY_ISO_Left_Tab) || (state & GDK_SHIFT_MASK);
 
         gtk_text_buffer_get_start_iter (buf, &start);
         gtk_text_buffer_get_end_iter (buf, &end);
         p = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
-        tab_nick_comp (sess, p, 1, point, widget);
+        /* Complete against the members of the chat this input belongs to
+         * (public or private) — gchat->cid keys the model. */
+        {
+            struct chat *c = chat_with_cid (sess, gchat->cid);
+            tab_nick_comp (sess, c ? c->member_model : NULL, p, reverse, point,
+                           widget);
+        }
         g_free (p);
         gtk_widget_grab_focus (GTK_WIDGET (text));
         return TRUE;

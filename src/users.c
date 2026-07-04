@@ -35,6 +35,7 @@
 #include "network.h"
 #include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
 #include "chat.h"
+#include "chat_members.h"
 #include "gtkhx.h"
 #include "msg.h"
 #include "chat_tabs.h"
@@ -1006,7 +1007,12 @@ users_clear (struct htlc_conn *htlc, struct chat *chat)
 {
     session *sess = sess_from_htlc (htlc);
     (void)htlc;
-    (void)chat;
+
+    /* M2 wire-up (A): drop this chat's authoritative membership too
+     * (disconnect / reconnect resets the user list). Before the view gate. */
+    if (chat && chat->member_model) {
+        hx_member_model_clear (chat->member_model);
+    }
 
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
@@ -1133,6 +1139,14 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat;
 
+    /* M2 wire-up (A): feed this chat's authoritative membership model before
+     * any view gate, so it stays populated even when the chat has no user-list
+     * view open. Read by tab_nick_comp for input in this chat. */
+    if (chat->member_model) {
+        hx_member_model_upsert (chat->member_model, user->uid, nam, icon, color,
+                                user->nick_color);
+    }
+
     if (chat->cid) {
         /* Per-pchat sidebar — HxUserListView, STYLE_CHAT. The
 		 * pchat window's userlist GObject is created lazily by
@@ -1167,6 +1181,9 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
     session *sess = sess_from_htlc (htlc);
 
     (void)htlc;
+    if (chat->member_model) {
+        hx_member_model_remove (chat->member_model, user->uid);
+    }
     if (chat->cid) {
         gchat = gchat_with_cid (sess, chat->cid);
         if (!gchat || !gchat->userlist) {
@@ -1191,6 +1208,11 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     session *sess = sess_from_htlc (htlc);
 
     (void)htlc;
+
+    if (chat->member_model) {
+        hx_member_model_upsert (chat->member_model, user->uid, nam, icon, color,
+                                user->nick_color);
+    }
 
     if (chat->cid) {
         gchat = gchat_with_cid (sess, chat->cid);

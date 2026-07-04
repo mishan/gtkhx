@@ -58,6 +58,11 @@ libadwaita = { workspace = true, features = ["v1_6"] }
 # duplicate-symbol clash with the separately-linked hotline-proto staticlib
 # (same as hxnet / hxvoice-* which already depend on it).
 hotline-proto = { path = "../hotline-proto" }
+# M2 wire-up (Option A): the user list owns an authoritative HxMemberModel
+# (membership as a gio::ListModel) built from hxchat_model::Member data. Pure
+# Rust (glib/gio only, no extra C surface) — rides in gtkhx-ui's archive.
+hxchat-model = { path = "../hxchat-model" }
+hxmember-model = { path = "../hxmember-model" }
 
 [features]
 # `voice` gates the user-list voice-indicator column (users_voice_col) and
