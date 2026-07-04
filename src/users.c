@@ -502,9 +502,17 @@ user_popup_append_volume (GtkBox *vbox, struct UserActionCtx *ctx)
     /* Mark unity so 100% is easy to find by feel. */
     gtk_scale_add_mark (GTK_SCALE (scale), 100.0, GTK_POS_BOTTOM, NULL);
 
+    /* The runtime clamps stored gain up to 10.0 (1000%), but the scale
+     * only represents 0..150%. Clamp the initial position to the
+     * scale's range so the widget reflects a value it can actually
+     * show — don't lean on GTK's internal clamping, which would leave
+     * the thumb at 150% while playback stayed higher. In practice the
+     * slider can only ever store 0..150% itself; this guards a value
+     * set by some future caller / bad FFI. */
     stored = gtkhx_voice_runtime_user_volume (ctx->sess->voice_runtime,
-                                              ctx->user->uid);
-    gtk_range_set_value (GTK_RANGE (scale), stored * 100.0);
+                                              ctx->user->uid) * 100.0;
+    stored = CLAMP (stored, 0.0, 150.0);
+    gtk_range_set_value (GTK_RANGE (scale), stored);
 
     g_signal_connect (scale, "value-changed",
                       G_CALLBACK (on_user_volume_changed), ctx);

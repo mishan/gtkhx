@@ -1785,11 +1785,20 @@ impl VoiceRuntime {
             inner.per_user_volume.insert(uid, gain);
             // Snapshot the receive bins that resolve to this uid so we
             // can set their volume property without holding the borrow
-            // across the GStreamer calls.
-            inner
-                .receive_bins
+            // across the GStreamer calls. Resolve the match against the
+            // already-borrowed `inner` (disjoint field borrows) rather
+            // than re-borrowing `self.inner` through a helper — the
+            // latter would panic "already mutably borrowed" here.
+            let Inner {
+                ref receive_bins,
+                ref recv_bin_uid_cache,
+                ..
+            } = *inner;
+            receive_bins
                 .values()
-                .filter(|bin| self.recv_bin_matches_uid(bin, uid))
+                .filter(|bin| {
+                    recv_bin_matches_uid(bin, uid, recv_bin_uid_cache)
+                })
                 .cloned()
                 .collect()
         };
@@ -1815,30 +1824,14 @@ impl VoiceRuntime {
             .unwrap_or(1.0)
     }
 
-    /// Does this receive bin carry audio for `uid`? Resolves the uid
-    /// from the bin's element name (the per-user `mid:user-<uid>` case),
-    /// falling back to the RTCP-cname cache the VAD layer populates for
-    /// bundled `mid=send` legs. Mirrors the attribution
-    /// `handle_level_message` uses, so the volume slider follows the
-    /// same "which bin belongs to whom" logic the speaker indicator does.
-    fn recv_bin_matches_uid(&self, bin: &gstreamer::Bin, uid: u16) -> bool {
-        if uid_from_recv_bin_name(bin.name().as_str()) == Some(uid) {
-            return true;
-        }
-        self.inner
-            .borrow()
-            .recv_bin_uid_cache
-            .get(bin.name().as_str())
-            .copied()
-            == Some(uid)
-    }
-
     /// Replay the stored per-user gain onto a freshly (re)built receive
     /// bin. Called from the receive-bin insertion sites so a mid-call
     /// rejoin — which tears the bin down and builds a new one — restores
     /// the volume the user picked earlier in the session. No-op (leaves
-    /// the bin at its unity default) when the uid can't be resolved or
-    /// has no stored, non-unity gain.
+    /// the bin at its unity default) when the uid can't be resolved from
+    /// the bin name or has no entry in `per_user_volume`; a uid whose
+    /// stored gain happens to be exactly `1.0` is still applied (a
+    /// harmless set to the element's default).
     fn apply_stored_volume_to_bin(&self, bin: &gstreamer::Bin) {
         let Some(uid) = uid_from_recv_bin_name(bin.name().as_str()) else {
             // Bundled `mid=send` legs can't be attributed at build time
@@ -3575,6 +3568,27 @@ fn recv_bin_name(mid: &str, pad_name: &str) -> String {
 /// absent (a partial GStreamer install that couldn't build the volume
 /// stage — the bin build would already have failed in that case, so
 /// this is belt-and-suspenders).
+/// Does this receive bin carry audio for `uid`? Resolves the uid from
+/// the bin's element name (the per-user `mid:user-<uid>` case), falling
+/// back to the RTCP-cname cache the VAD layer populates for bundled
+/// `mid=send` legs. Mirrors the attribution `handle_level_message`
+/// uses, so the volume slider follows the same "which bin belongs to
+/// whom" logic the speaker indicator does.
+///
+/// Free function (takes the cache by reference) rather than a method so
+/// callers that already hold an `Inner` borrow can resolve the match
+/// without re-borrowing `self.inner` — see `set_user_volume`.
+fn recv_bin_matches_uid(
+    bin: &gstreamer::Bin,
+    uid: u16,
+    recv_bin_uid_cache: &HashMap<String, u16>,
+) -> bool {
+    if uid_from_recv_bin_name(bin.name().as_str()) == Some(uid) {
+        return true;
+    }
+    recv_bin_uid_cache.get(bin.name().as_str()).copied() == Some(uid)
+}
+
 fn set_bin_volume(bin: &gstreamer::Bin, gain: f64) {
     if let Some(volume) = bin.by_name(crate::audio::RECV_VOLUME_ELEMENT_NAME) {
         volume.set_property("volume", gain);
@@ -4813,6 +4827,49 @@ mod tests {
         assert_eq!(runtime.user_volume(3), 1.0, "NaN falls back to unity");
         runtime.set_user_volume(4, f64::INFINITY);
         assert_eq!(runtime.user_volume(4), 1.0, "inf falls back to unity");
+    }
+
+    /// Live-apply path with a receive bin present in the map. This is
+    /// the regression guard for the "already mutably borrowed" panic:
+    /// `set_user_volume` holds a `borrow_mut` while filtering the
+    /// receive bins, and the filter must resolve the uid match against
+    /// the already-borrowed `Inner` (not re-borrow `self.inner`). With
+    /// zero bins the filter closure never runs and the bug is
+    /// invisible, so this test seeds a bin whose name resolves to the
+    /// target uid and asserts both no-panic and that the gain reached
+    /// the bin's `volume` element.
+    #[test]
+    fn set_user_volume_applies_to_live_receive_bin() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let (runtime, _backend) = rec();
+        let bin = crate::audio::make_receive_bin("hxvoice-recv-user-9__src_0", None)
+            .expect("receive bin builds");
+        runtime
+            .inner
+            .borrow_mut()
+            .receive_bins
+            .insert("src_0".to_string(), bin.clone());
+
+        // Must not panic while the filter closure walks the seeded bin.
+        // Use an exactly-f32-representable gain (0.5) — the `volume`
+        // element round-trips its property through single precision.
+        runtime.set_user_volume(9, 0.5);
+
+        let vol = bin
+            .by_name(crate::audio::RECV_VOLUME_ELEMENT_NAME)
+            .expect("receive volume element present");
+        assert_eq!(
+            vol.property::<f64>("volume"),
+            0.5,
+            "gain must reach the live receive bin's volume element"
+        );
+        // A uid that doesn't match the seeded bin is a no-op on it.
+        runtime.set_user_volume(10, 0.25);
+        assert_eq!(
+            vol.property::<f64>("volume"),
+            0.5,
+            "setting a different uid's volume must not touch this bin"
+        );
     }
 
     // ---- Speaker-activity evaluator ------------------------------
