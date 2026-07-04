@@ -41,7 +41,6 @@
 #include "network.h"
 #include "hotline_proto.h"
 #include "proto_helpers.h" /* struct hx_chunk (stack-allocated below) */
-#include "history.h"
 #include "chat_history.h"
 #include "inline_media_attach.h"
 #include "inline_media_decode.h"
@@ -461,13 +460,12 @@ gchat_free (gpointer p)
 	 * gchat is created in create_chat with userlist=NULL so this is
 	 * a no-op there. */
     g_clear_object (&gchat->userlist);
-    /* The readline-history state itself (chat_history) is leaked
-     * by historical convention — same Phase-1 mechanical-migration
-     * scope note as msgwin_free in msg.c. The draft buffer added
-     * for Up-arrow recovery is new and small, so free it here so
-     * the comment in session.h ("Freed via g_free … at chat
-     * teardown") is actually true. */
-    g_free (gchat->chat_history_draft);
+    /* The chat input line history is now a Rust InputHistory (owns the
+     * Up-arrow draft internally); free it. */
+    if (gchat->chat_history) {
+        hx_input_history_free (gchat->chat_history);
+        gchat->chat_history = NULL;
+    }
     /* Phase 9.D inline-media: drop the per-chat handle table. The
 	 * destroy func (hx_chat_media_free, registered at table-create
 	 * time) frees each HxChatMedia. */
@@ -1727,7 +1725,6 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
     GtkTextMark *insert_mark;
     GtkTextIter insert_iter;
     guint point;
-    HIST_ENTRY *hent = NULL;
     struct gtkhx_chat *gchat = g_object_get_data (G_OBJECT (widget), "gchat");
     session *sess = g_object_get_data (G_OBJECT (widget), "sess");
     (void)keycode;
@@ -1764,8 +1761,7 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
         gtk_text_buffer_get_end_iter (buf, &end);
         termed_buf = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
 
-        add_history (gchat->chat_history, termed_buf);
-        using_history (gchat->chat_history);
+        hx_input_history_record (gchat->chat_history, termed_buf);
 
         hotline_client_input (&sess->htlc, termed_buf, gchat->cid,
                               (state & GDK_CONTROL_MASK) ? 1 : 0);
@@ -1797,49 +1793,37 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
         gtk_widget_grab_focus (GTK_WIDGET (text));
         return TRUE;
     } else if (keyval == GDK_KEY_Up) {
-        /* If we're at the bottom-of-history "draft" position
-         * (current_history returns NULL only when offset ==
-         * length), capture whatever the user has typed so far so
-         * Down can restore it. Bash-style: edits to a history
-         * entry while paging through are NOT preserved — only the
-         * original draft, snapshotted on first Up. */
-        if (current_history (gchat->chat_history) == NULL) {
-            GtkTextIter s, e;
-            g_free (gchat->chat_history_draft);
-            gtk_text_buffer_get_start_iter (buf, &s);
-            gtk_text_buffer_get_end_iter (buf, &e);
-            gchat->chat_history_draft =
-                gtk_text_buffer_get_text (buf, &s, &e, FALSE);
+        /* The draft snapshot (capture the in-progress line on the first Up,
+         * restore it on Down past the newest entry) is encapsulated in the
+         * Rust InputHistory. Pass the current buffer text in; a non-NULL
+         * result is the line to show. */
+        GtkTextIter s, e;
+        char *cur, *nt = NULL;
+
+        gtk_text_buffer_get_start_iter (buf, &s);
+        gtk_text_buffer_get_end_iter (buf, &e);
+        cur = gtk_text_buffer_get_text (buf, &s, &e, FALSE);
+        if (hx_input_history_up (gchat->chat_history, cur, &nt)) {
+            GtkTextIter end;
+            gtk_text_buffer_set_text (buf, nt, -1);
+            gtk_text_buffer_get_end_iter (buf, &end);
+            gtk_text_buffer_place_cursor (buf, &end);
+            g_free (nt);
+            g_free (cur);
+            return TRUE;
         }
-        hent = previous_history (gchat->chat_history);
+        g_free (cur);
     } else if (keyval == GDK_KEY_Down) {
-        /* Skip next_history when we're already at the draft
-         * position — otherwise the next_history-past-end
-         * detection would clobber whatever the user is in the
-         * middle of typing. */
-        if (current_history (gchat->chat_history) != NULL) {
-            hent = next_history (gchat->chat_history);
-            if (!hent) {
-                /* Just stepped past the most recent entry back to
-                 * the draft position — restore the saved draft. */
-                const char *draft = gchat->chat_history_draft
-                                  ? gchat->chat_history_draft : "";
-                GtkTextIter end;
-                gtk_text_buffer_set_text (buf, draft, strlen (draft));
-                gtk_text_buffer_get_end_iter (buf, &end);
-                gtk_text_buffer_place_cursor (buf, &end);
-                return TRUE;
-            }
+        char *nt = NULL;
+
+        if (hx_input_history_down (gchat->chat_history, &nt)) {
+            GtkTextIter end;
+            gtk_text_buffer_set_text (buf, nt, -1);
+            gtk_text_buffer_get_end_iter (buf, &end);
+            gtk_text_buffer_place_cursor (buf, &end);
+            g_free (nt);
+            return TRUE;
         }
-    }
-
-    if (hent) {
-        GtkTextIter end;
-
-        gtk_text_buffer_set_text (buf, hent->line, strlen (hent->line));
-        gtk_text_buffer_get_end_iter (buf, &end);
-        gtk_text_buffer_place_cursor (buf, &end);
-        return TRUE;
     }
 
     return FALSE;
@@ -1934,7 +1918,7 @@ create_chat (session *sess)
     g_object_ref_sink (text);
     g_object_ref_sink (vscroll);
 
-    gchat->chat_history = history_new ();
+    gchat->chat_history = hx_input_history_new ();
     gchat->cid = 0;
     gchat->subject = 0;
     gchat->output = text;
@@ -2139,7 +2123,7 @@ pchat_new (session *sess, struct chat *chat)
     gchat->vscroll = vscroll;
     gchat->subject = subject;
     gchat->userlist = NULL;
-    gchat->chat_history = history_new ();
+    gchat->chat_history = hx_input_history_new ();
     gchat->history_oldest_msgid    = 0;
     gchat->history_has_more        = FALSE;
     gchat->history_loading         = FALSE;

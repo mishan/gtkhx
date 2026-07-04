@@ -27,6 +27,7 @@
 #include <netinet/in.h>
 #include "hx.h"
 #include "chat.h"
+#include "chat_members.h"
 #include "chat_tabs.h"
 #include "emoji.h"
 #include "hotline_proto.h"
@@ -35,7 +36,6 @@
 #include "gtkhx.h"
 #include "gtkhx_log.h"
 #include "gtkutil.h"
-#include "history.h"
 #include "xtext.h"
 #include "rcv.h"
 #include "tasks.h"
@@ -94,9 +94,7 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
  * do (name + the heap-allocated uid pointer + the struct itself).
  * The GTK widgets owned by msg->window are reclaimed by GTK's own
  * teardown when the window is destroyed by the close-request
- * handler. msg->history is intentionally not freed here — the
- * pre-existing readline-history leak is out of scope for the
- * Phase 1 mechanical migration. */
+ * handler. msg->history (a Rust InputHistory) is freed below. */
 static void
 msgwin_free (gpointer p)
 {
@@ -106,11 +104,12 @@ msgwin_free (gpointer p)
     }
     g_free (msg->name);
     g_free (msg->uid);
-    /* msg->history (readline-history state) is intentionally
-     * leaked here — pre-existing, called out in the function
-     * comment above. The draft slot is new and small; free it
-     * so the symmetric comment in session.h holds. */
-    g_free (msg->history_draft);
+    /* The PM input line history is now a Rust InputHistory (owns its draft
+     * internally); free it (no more leak). */
+    if (msg->history) {
+        hx_input_history_free (msg->history);
+        msg->history = NULL;
+    }
     g_free (msg);
 }
 
@@ -174,7 +173,6 @@ msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval, guint keycode,
         = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (ctrl));
     GtkTextView *text;
     GtkTextBuffer *buf;
-    HIST_ENTRY *hent = NULL;
     struct msgwin *msg = g_object_get_data (G_OBJECT (widget), "msg");
     (void)keycode;
     (void)user_data;
@@ -203,47 +201,41 @@ msg_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval, guint keycode,
         gtk_text_buffer_get_start_iter (buf, &start);
         gtk_text_buffer_get_end_iter (buf, &end);
         line = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
-        add_history (msg->history, line);
-        using_history (msg->history);
+        hx_input_history_record (msg->history, line);
         g_free (line);
 
         msg_input_activate (widget, msg->uid);
         return TRUE;
     } else if (keyval == GDK_KEY_Up) {
-        /* Snapshot the in-progress draft on first Up out of the
-         * bottom-of-history position so Down can restore it.
-         * See chat.c for the same pattern with more comments. */
-        if (current_history (msg->history) == NULL) {
-            GtkTextIter s, e;
-            g_free (msg->history_draft);
-            gtk_text_buffer_get_start_iter (buf, &s);
-            gtk_text_buffer_get_end_iter (buf, &e);
-            msg->history_draft =
-                gtk_text_buffer_get_text (buf, &s, &e, FALSE);
+        /* Draft snapshot + restore live in the Rust InputHistory (see chat.c);
+         * pass the current buffer in, a non-NULL result is the line to show. */
+        GtkTextIter s, e;
+        char *cur, *nt = NULL;
+
+        gtk_text_buffer_get_start_iter (buf, &s);
+        gtk_text_buffer_get_end_iter (buf, &e);
+        cur = gtk_text_buffer_get_text (buf, &s, &e, FALSE);
+        if (hx_input_history_up (msg->history, cur, &nt)) {
+            GtkTextIter end;
+            gtk_text_buffer_set_text (buf, nt, -1);
+            gtk_text_buffer_get_end_iter (buf, &end);
+            gtk_text_buffer_place_cursor (buf, &end);
+            g_free (nt);
+            g_free (cur);
+            return TRUE;
         }
-        hent = previous_history (msg->history);
+        g_free (cur);
     } else if (keyval == GDK_KEY_Down) {
-        if (current_history (msg->history) != NULL) {
-            hent = next_history (msg->history);
-            if (!hent) {
-                const char *draft = msg->history_draft
-                                  ? msg->history_draft : "";
-                GtkTextIter end;
-                gtk_text_buffer_set_text (buf, draft, strlen (draft));
-                gtk_text_buffer_get_end_iter (buf, &end);
-                gtk_text_buffer_place_cursor (buf, &end);
-                return TRUE;
-            }
+        char *nt = NULL;
+
+        if (hx_input_history_down (msg->history, &nt)) {
+            GtkTextIter end;
+            gtk_text_buffer_set_text (buf, nt, -1);
+            gtk_text_buffer_get_end_iter (buf, &end);
+            gtk_text_buffer_place_cursor (buf, &end);
+            g_free (nt);
+            return TRUE;
         }
-    }
-
-    if (hent) {
-        GtkTextIter end;
-
-        gtk_text_buffer_set_text (buf, hent->line, strlen (hent->line));
-        gtk_text_buffer_get_end_iter (buf, &end);
-        gtk_text_buffer_place_cursor (buf, &end);
-        return TRUE;
     }
 
     return FALSE;
@@ -453,7 +445,7 @@ create_msg (guint16 _uid, char *name)
     msg->name = g_strdup (name);
     msg->uid = uid;
 
-    msg->history = history_new ();
+    msg->history = hx_input_history_new ();
 
     /* msg->window is no longer a standalone
      * GtkWindow. It's the content widget of an AdwTabPage inside

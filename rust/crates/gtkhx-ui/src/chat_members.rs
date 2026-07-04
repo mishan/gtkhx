@@ -23,7 +23,7 @@ use gtk4::glib;
 use gio::prelude::*;
 use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
 
-use hxchat_model::{complete_styled, Member};
+use hxchat_model::{complete_styled, InputHistory, Member};
 use hxmember_model::{HxMember, HxMemberModel};
 
 /// `HX_NICK_COLOR_NONE` (hotline.h).
@@ -190,6 +190,104 @@ pub unsafe extern "C" fn hx_nick_complete(
             } else {
                 g_dup(&c.info.join(" "))
             };
+            glib::ffi::GTRUE
+        }
+        None => glib::ffi::GFALSE,
+    }
+}
+
+// ---- chat input line history (InputHistory) ------------------------------
+//
+// The Rust replacement for gchat->chat_history (a GNU-readline HISTORY) +
+// chat_history_draft. Owned by C as an opaque Box<InputHistory> pointer:
+// `new` boxes it, `free` drops it. Drives chat_input_key_pressed's
+// Return / Up / Down.
+
+/// `void *hx_input_history_new(void)`.
+#[no_mangle]
+pub extern "C" fn hx_input_history_new() -> *mut c_void {
+    Box::into_raw(Box::new(InputHistory::new())) as *mut c_void
+}
+
+/// `void hx_input_history_free(void *hist)`.
+///
+/// # Safety
+/// `hist` is NULL or a pointer from `hx_input_history_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_input_history_free(hist: *mut c_void) {
+    if !hist.is_null() {
+        drop(Box::from_raw(hist as *mut InputHistory));
+    }
+}
+
+/// `void hx_input_history_record(void *hist, const char *line)` — record a
+/// just-sent line and reset navigation to the bottom.
+///
+/// # Safety
+/// `hist` valid or NULL; `line` a C string or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_input_history_record(hist: *mut c_void, line: *const c_char) {
+    if hist.is_null() {
+        return;
+    }
+    let hist = &mut *(hist as *mut InputHistory);
+    let line = if line.is_null() {
+        std::borrow::Cow::Borrowed("")
+    } else {
+        CStr::from_ptr(line).to_string_lossy()
+    };
+    hist.record(&line);
+}
+
+/// `gboolean hx_input_history_up(void *hist, const char *current, char **out)`
+/// — Up arrow. `current` is the live buffer text (snapshotted as the draft on
+/// the first press). On a change returns TRUE + `*out` (a `g_malloc`'d line to
+/// show; caller `g_free`s); FALSE (out untouched) when there's nothing older.
+///
+/// # Safety
+/// `hist` valid or NULL; `current` a C string or NULL; `out` non-NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_input_history_up(
+    hist: *mut c_void,
+    current: *const c_char,
+    out: *mut *mut c_char,
+) -> glib::ffi::gboolean {
+    if hist.is_null() || out.is_null() {
+        return glib::ffi::GFALSE;
+    }
+    let hist = &mut *(hist as *mut InputHistory);
+    let current = if current.is_null() {
+        std::borrow::Cow::Borrowed("")
+    } else {
+        CStr::from_ptr(current).to_string_lossy()
+    };
+    match hist.up(&current) {
+        Some(text) => {
+            *out = g_dup(&text);
+            glib::ffi::GTRUE
+        }
+        None => glib::ffi::GFALSE,
+    }
+}
+
+/// `gboolean hx_input_history_down(void *hist, char **out)` — Down arrow. On a
+/// change returns TRUE + `*out` (the line to show, possibly the restored
+/// draft); FALSE when already at the draft.
+///
+/// # Safety
+/// `hist` valid or NULL; `out` non-NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_input_history_down(
+    hist: *mut c_void,
+    out: *mut *mut c_char,
+) -> glib::ffi::gboolean {
+    if hist.is_null() || out.is_null() {
+        return glib::ffi::GFALSE;
+    }
+    let hist = &mut *(hist as *mut InputHistory);
+    match hist.down() {
+        Some(text) => {
+            *out = g_dup(&text);
             glib::ffi::GTRUE
         }
         None => glib::ffi::GFALSE,

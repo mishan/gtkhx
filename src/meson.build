@@ -50,7 +50,9 @@ gtkhx_sources = files(
   'gtkurl.c',
   'gtkutil.c',
   'hfs.c',
-  'history.c',
+  # history.c (GNU readline command-line history) retired — the chat + PM input
+  # line history is now the Rust InputHistory (hxchat-model), reached via
+  # hx_input_history_* in chat_members.rs.
   'host_port.c',
   'hotline_url.c',
   'htxf_io.c',
