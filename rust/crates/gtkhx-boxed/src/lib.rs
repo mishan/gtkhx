@@ -42,6 +42,7 @@ use std::ffi::c_char;
 use std::sync::OnceLock;
 
 pub mod chat;
+pub mod media_table;
 pub mod msg;
 pub mod tracker;
 

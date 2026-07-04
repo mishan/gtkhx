@@ -75,13 +75,14 @@ const _: () = {
     assert!(offset_of!(HxChatEvent, media) == 64);
 };
 
-/// Deep-copy an `HxChatMedia` (private; mirrors the deleted C static
+/// Deep-copy an `HxChatMedia` (mirrors the deleted C static
 /// `hx_chat_media_copy`). `id` is raw bytes (`g_malloc` + copy), `mime`
-/// is NUL-terminated (`g_strndup`).
+/// is NUL-terminated (`g_strndup`). `pub(crate)` so [`crate::media_table`]
+/// can deep-copy into its per-chat token table.
 ///
 /// # Safety
 /// `m` is NULL or a valid `HxChatMedia*` with glib-owned `id`/`mime`.
-unsafe fn media_copy(m: *const HxChatMedia) -> *mut HxChatMedia {
+pub(crate) unsafe fn media_copy(m: *const HxChatMedia) -> *mut HxChatMedia {
     if m.is_null() {
         return ptr::null_mut();
     }
@@ -105,12 +106,13 @@ unsafe fn media_copy(m: *const HxChatMedia) -> *mut HxChatMedia {
     c
 }
 
-/// Free an `HxChatMedia` (private; mirrors the C static
-/// `hx_chat_media_free` — which the C side keeps for `attach_media`).
+/// Free an `HxChatMedia` (mirrors the C static `hx_chat_media_free` —
+/// which the C side keeps for `attach_media`). `pub(crate)` so
+/// [`crate::media_table`] can release its entries.
 ///
 /// # Safety
 /// `m` is NULL or a valid glib-owned `HxChatMedia*`.
-unsafe fn media_free(m: *mut HxChatMedia) {
+pub(crate) unsafe fn media_free(m: *mut HxChatMedia) {
     if m.is_null() {
         return;
     }

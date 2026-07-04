@@ -78,6 +78,7 @@ rust_sources = files(
   'crates/gtkhx-boxed/src/lib.rs',
   'crates/gtkhx-boxed/src/msg.rs',
   'crates/gtkhx-boxed/src/chat.rs',
+  'crates/gtkhx-boxed/src/media_table.rs',
   'crates/gtkhx-boxed/src/tracker.rs',
   # Phase R5 — gtkhx-ui: the window UIs in gtk4-rs (first gtk4-rs UI
   # crate). One module per ported window; the Tracker window is the first.

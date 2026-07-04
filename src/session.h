@@ -198,21 +198,21 @@ struct gtkhx_chat {
     GtkWidget *media_attach_btn;
 
     /* Inline-media extension (Phase 9.D dialog). Per-chat token
-	 * → HxChatMedia* lookup. When a chat carries inline media,
-	 * output_chat_from_event allocates a new token via
-	 * media_next_id++, deep-copies the HxChatMedia into the
-	 * table, and embeds the token in the placeholder row text
-	 * as `hxmedia:N`. The xtext word_click handler
-	 * (inline_media_chat_word_click) scans the clicked word for
-	 * that substring and dispatches the lookup.
+	 * -> HxChatMedia* lookup (M3: the Rust MediaTable,
+	 * gtkhx-boxed/src/media_table.rs, reached via hx_media_table_*).
+	 * When a chat carries inline media, output_chat_from_event
+	 * registers a deep copy under a fresh token
+	 * (hx_media_table_register) and embeds the token in the
+	 * placeholder row text as `hxmedia:N`. The xtext word_click
+	 * handler (inline_media_chat_word_click) scans the clicked word
+	 * for that substring and dispatches the lookup
+	 * (hx_media_table_lookup).
 	 *
-	 * Lazy-allocated; lives for the chat's lifetime. Freed in
-	 * chat_free.
-	 *
-	 * The HxChatMedia values are owned by the table (the
-	 * GHashTable destroy function frees them). */
-    GHashTable *media_handles;
-    guint       media_next_id;
+	 * Created in the chat-window constructors, lives for the chat's
+	 * lifetime, freed in chat_free -- hx_media_table_free drops the
+	 * table and every HxChatMedia copy it owns. Opaque here; token 0
+	 * is the "absent" sentinel. */
+    void *media_table;
 };
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */
