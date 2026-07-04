@@ -110,8 +110,22 @@ extern void output_chat_subject (struct htlc_conn *htlc, guint32 cid,
                                  char *buf);
 extern void output_chat_invitation (struct htlc_conn *htlc, guint32 cid,
                                     char *name);
+/* create_pchat_window is the gtkhx-ui `pchat` Rust content port: it assembles
+ * the private-chat tab layout around these C-built leaf widgets + the user
+ * sidebar, then adds the tab. Mirrors msg.c's create_msg + hx_msgwin_* seam. */
 extern struct gtkhx_chat *create_pchat_window (struct htlc_conn *htlc,
                                                struct chat *chat);
+extern struct gtkhx_chat *gtkhx_pchat_new (struct htlc_conn *htlc,
+                                           struct chat *chat);
+extern GtkWidget *gtkhx_pchat_user_sidebar (struct htlc_conn *htlc,
+                                            struct chat *chat);
+extern guint32 hx_chat_cid (struct chat *chat);
+extern GtkWidget *hx_gchat_output (struct gtkhx_chat *g);
+extern GtkWidget *hx_gchat_vscroll (struct gtkhx_chat *g);
+extern GtkWidget *hx_gchat_input (struct gtkhx_chat *g);
+extern GtkWidget *hx_gchat_subject (struct gtkhx_chat *g);
+extern GtkWidget *hx_gchat_media_btn (struct gtkhx_chat *g);
+extern void hx_gchat_set_window (struct gtkhx_chat *g, GtkWidget *w);
 extern void hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj);
 extern int word_check (GtkWidget *xtext, char *word);
 

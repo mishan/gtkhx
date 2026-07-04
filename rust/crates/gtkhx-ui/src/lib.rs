@@ -71,6 +71,10 @@ pub mod msg;
 // transfer integration stay C in files_browser.c. open_files_browser is this
 // module's #[no_mangle] export.
 pub mod files;
+// R5.15: Private Chat content — create_pchat_window builds the pchat tab's
+// content tree (subject bar, xtext output, input, user sidebar) in gtk4-rs
+// around the C gtkhx_pchat_new leaf widgets + gtkhx_pchat_user_sidebar.
+pub mod pchat;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
