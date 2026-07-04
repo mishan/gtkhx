@@ -187,9 +187,19 @@ unsafe extern "C" fn on_download_done(
         return;
     }
 
-    // Copy the borrowed canonical bytes into an owned glib::Bytes.
+    // Copy the borrowed canonical bytes into an owned glib::Bytes. GLib APIs
+    // routinely represent an empty buffer as (NULL, 0), and from_raw_parts is
+    // UB on a NULL/dangling base or a len past isize::MAX — so guard those
+    // into an empty slice rather than trust the C-side GByteArray blindly.
     let ga = &*r.bytes;
-    let slice = std::slice::from_raw_parts(ga.data, ga.len as usize);
+    let slice: &[u8] = if ga.data.is_null()
+        || ga.len == 0
+        || ga.len as u64 > isize::MAX as u64
+    {
+        &[]
+    } else {
+        std::slice::from_raw_parts(ga.data, ga.len as usize)
+    };
     let bytes = glib::Bytes::from(slice);
     md.mime = if r.canonical_mime.is_null() {
         None
@@ -320,13 +330,18 @@ fn on_open_clicked(md: &MediaDialog) {
         match file.create(gio::FileCreateFlags::PRIVATE, gio::Cancellable::NONE) {
             Ok(out) => {
                 let data: &[u8] = &bytes;
-                let write_ok = out
-                    .write_all(data, gio::Cancellable::NONE)
-                    .map(|(_written, _etag)| ())
-                    .is_ok();
+                let write_res = out.write_all(data, gio::Cancellable::NONE);
                 let _ = out.close(gio::Cancellable::NONE);
-                if write_ok {
-                    created = Some(file);
+                match write_res {
+                    Ok((_written, _etag)) => created = Some(file),
+                    Err(e) => {
+                        glib::g_debug!(
+                            "gtkhx",
+                            "inline-media open-externally tempfile write failed: {e}"
+                        );
+                        // Don't leave a partial 0600 temp file behind.
+                        let _ = file.delete(gio::Cancellable::NONE);
+                    }
                 }
                 break;
             }
