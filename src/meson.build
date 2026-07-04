@@ -126,17 +126,17 @@ gtkhx_sources = files(
 # when voice_enabled (see -Dvoice / the top-level meson.build). When off,
 # these files are dropped, the HAVE_VOICE define below is unset, and every
 # call site in the always-compiled files is guarded by #ifdef HAVE_VOICE.
-# voice.c            — wire-out helpers (hx_send_voice_*).
-# voice_bridge.c     — session/htlc field accessors for the Rust voice UI
-#                      (users_voice_col + voice_panel + voice_ptt moved to
-#                      gtkhx-ui's `voice` feature).
+# voice_bridge.c     — session/htlc field accessors for the Rust voice UI +
+#                      senders (users_voice_col + voice_panel + voice_ptt to
+#                      gtkhx-ui's `voice` feature; the hx_send_voice_* senders
+#                      to the hxvoice-send crate).
 # voice_ptt_keyspec.c— pure PTT key-spec vocabulary / canonicalisation (keeps
 #                      its standalone C unit test; voice_ptt.rs externs _parse).
 # (voice_panel.c retired — ported to rust/crates/gtkhx-ui/src/voice_panel.rs.
 #  voice_model.c retired — ported to the hxvoice-model Rust crate.
-#  voice_ptt.c retired — ported to rust/crates/gtkhx-ui/src/voice_ptt.rs.)
+#  voice_ptt.c retired — ported to rust/crates/gtkhx-ui/src/voice_ptt.rs.
+#  voice.c retired — ported to the hxvoice-send Rust crate.)
 voice_sources = files(
-  'voice.c',
   'voice_bridge.c',
   'voice_ptt_keyspec.c',
 )
@@ -234,6 +234,8 @@ if voice_enabled
   rust_deps += rust_hxvoice_runtime_dep
   # HxVoiceModel moved to the hxvoice-model Rust crate (voice_model.c retired).
   rust_deps += rust_hxvoice_model_dep
+  # hx_send_voice_* moved to the hxvoice-send Rust crate (voice.c retired).
+  rust_deps += rust_hxvoice_send_dep
 endif
 
 executable('gtkhx',

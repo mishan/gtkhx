@@ -1,332 +1,30 @@
 /*
- * tests/proto/test_voice.c — pin the C-side wire shape of the
- * fogWraith voice-chat extension (Capabilities-Voice.md).
+ * tests/proto/test_voice.c — pin the C-side FFI ABI of the fogWraith
+ * voice-chat extension's receive/parse path (Capabilities-Voice.md).
  *
- * The hotline-proto Rust crate has its own dense unit tests for the
- * voice builders + parsers (`cargo test -p hotline-proto voice`,
- * 30 cases as of Phase 8.A). What this file adds:
- *
- *   wire   — drive each hx_send_voice_* through the C-side wrapper
- *            in src/voice.c, capture the bytes hlpack_chunks
- *            produces, and verify the chunk shape matches the
- *            spec's documented opcode / field layout. This catches
- *            misuse on the C side that the Rust unit tests can't
- *            (passing the wrong scratch size, forgetting the
- *            CAP_VOICE gate, etc.).
- *
- *   gate   — verify the CAP_VOICE-not-negotiated gate is honoured.
- *            Same shape as test_chat_history's cap-gate test —
- *            sending a 600-606 to a server that didn't echo the
- *            cap earns a task-error every time, and the gate
- *            saves the user the toast.
+ * The send wrappers (hx_send_voice_*) moved to the hxvoice-send Rust
+ * crate along with src/voice.c; their cap-gate + wire-shape cases now
+ * run under `cargo test -p hxvoice-send` (the proto/voice/send cases).
+ * What stays here:
  *
  *   ffi    — call gtkhx_proto_parse_voice_reply on a hand-packed
  *            JOIN reply body and verify the typed extractor walks
- *            it correctly. The Rust side has analog tests but
- *            this one pins the FFI ABI layout (offsets, presence
- *            flags) as the C side observes it.
+ *            it correctly. The Rust side has analog tests but this
+ *            one pins the FFI ABI layout (offsets, presence flags)
+ *            as the C side observes it. Likewise the participant /
+ *            mid-label / SDP-summary / ICE-JSON extractors + builder.
  *
- *   pin    — the new field IDs and opcode constants match the
- *            spec (HTLC_CAP_VOICE, 0x01F5-0x01F9, 600-606).
+ *   pin    — the new field IDs and opcode constants match the spec.
  */
 
 #include "config.h"
 #include <string.h>
-#include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "protocol.h"
 #include "hotline.h"
-#include "hl_access.h"  /* HL_ACCESS_VOICE_CHAT */
 #include "proto_helpers.h"
 #include "hotline_proto.h"
-#include "voice.h"
-
-/* Production network.c is too heavyweight to link into a unit test
- * (it transitively pulls GIOChannel + cipher + compress + signal
- * emit). Stub hlwrite_chunks with just the buffer side — what the
- * test cares about. Same trick test_chat_history.c uses. */
-extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type,
-                            guint32 flag, const struct hx_chunk *chunks,
-                            int hc);
-void
-hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
-                const struct hx_chunk *chunks, int hc)
-{
-    hlpack_chunks (htlc, type, flag, chunks, hc);
-}
-
-/* voice.c now registers task_new() entries before each
- * hlwrite_chunks so the TASK reply path (rcv_task_voice_*) finds
- * the session bookkeeping. The unit test doesn't exercise the rcv
- * path; we stub task_new + the rcv_task_voice_* handlers as
- * no-ops so the link resolves. The wire-format assertions still
- * pin the chunk layout the test cares about. */
-struct task;
-typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
-extern struct task *task_new (struct htlc_conn *htlc, rcv_task_fn rcv,
-                              void *ptr, void *data, const char *str);
-struct task *
-task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
-          const char *str)
-{
-    (void) htlc;
-    (void) rcv;
-    (void) ptr;
-    (void) data;
-    (void) str;
-    return NULL;
-}
-
-extern void rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr);
-void
-rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
-{
-    (void) htlc;
-    (void) channel_ptr;
-}
-
-extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
-                                       void *opcode_ptr, void *cid_ptr);
-void
-rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
-                           void *cid_ptr)
-{
-    (void) htlc;
-    (void) opcode_ptr;
-    (void) cid_ptr;
-}
-
-/* ---------- htlc lifecycle helpers (copied from test_chat_history) -- */
-
-static void
-htlc_init (struct htlc_conn *htlc, guint64 caps)
-{
-    memset (htlc, 0, sizeof (*htlc));
-    htlc->trans = 1;
-    htlc->caps = caps;
-}
-
-static void
-htlc_free (struct htlc_conn *htlc)
-{
-    g_free (htlc->in.buf);
-    g_free (htlc->out.buf);
-    htlc->in.buf = NULL;
-    htlc->out.buf = NULL;
-}
-
-static void
-flip_out_to_in (struct htlc_conn *htlc)
-{
-    g_free (htlc->in.buf);
-    htlc->in.buf = htlc->out.buf;
-    htlc->in.pos = htlc->out.len;
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-}
-
-/* Pull the wire-side u32 transaction-type out of the header that
- * hlpack_chunks just wrote to htlc->out.buf. */
-static guint32
-read_out_type (const struct htlc_conn *htlc)
-{
-    g_assert_cmpuint (htlc->out.len, >=, SIZEOF_HL_HDR);
-    return ((guint32) htlc->out.buf[0] << 24)
-         | ((guint32) htlc->out.buf[1] << 16)
-         | ((guint32) htlc->out.buf[2] << 8)
-         |  (guint32) htlc->out.buf[3];
-}
-
-/* ---------- send-path gating ---------- */
-
-static void
-test_send_skipped_without_cap (void)
-{
-    /* Every voice send respects the CAP_VOICE gate. Without the cap
-     * negotiated, hx_send_voice_join returns FALSE and writes
-     * nothing — saves the user a task-error toast. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, /*caps=*/0);
-    g_assert_false (hx_send_voice_join (&htlc, 0));
-    g_assert_cmpuint (htlc.out.len, ==, 0);
-    htlc_free (&htlc);
-}
-
-static void
-test_send_join_with_cap_writes_chat_id (void)
-{
-    /* JOIN (600) carries one chunk: CHAT_ID (u32 BE). */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_VOICE);
-
-    g_assert_true (hx_send_voice_join (&htlc, /*cid=*/42));
-    flip_out_to_in (&htlc);
-
-    int saw_cid = 0, total = 0;
-    dh_start (&htlc)
-    {
-        total++;
-        switch (_type) {
-        case HTLC_DATA_CHAT_ID:
-            saw_cid++;
-            g_assert_cmpuint (_len, ==, 4);
-            /* big-endian 42 */
-            g_assert_cmpuint (dh->data[0], ==, 0);
-            g_assert_cmpuint (dh->data[1], ==, 0);
-            g_assert_cmpuint (dh->data[2], ==, 0);
-            g_assert_cmpuint (dh->data[3], ==, 42);
-            break;
-        default:
-            g_error ("unexpected chunk type 0x%04x in JOIN body", _type);
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_cid, ==, 1);
-    g_assert_cmpint (total, ==, 1);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_leave_emits_chat_id (void)
-{
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_VOICE);
-
-    g_assert_true (hx_send_voice_leave (&htlc, /*cid=*/7));
-    /* Verify the wire-side header type BEFORE flipping — read_out_type
-     * looks at out.buf, which flip_out_to_in moves under in.buf. */
-    g_assert_cmphex (read_out_type (&htlc), ==, HTLC_HDR_VOICE_LEAVE);
-
-    flip_out_to_in (&htlc);
-
-    int saw_cid = 0;
-    dh_start (&htlc)
-    {
-        switch (_type) {
-        case HTLC_DATA_CHAT_ID:
-            saw_cid++;
-            g_assert_cmpuint (_len, ==, 4);
-            g_assert_cmpuint (dh->data[3], ==, 7);
-            break;
-        default:
-            g_error ("unexpected chunk 0x%04x in LEAVE body", _type);
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_cid, ==, 1);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_sdp_answer_emits_chat_id_and_sdp (void)
-{
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_VOICE);
-
-    const guint8 sdp[] = "v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\n";
-    g_assert_true (hx_send_voice_sdp_answer (&htlc, /*cid=*/3, sdp,
-                                             sizeof (sdp) - 1));
-    flip_out_to_in (&htlc);
-
-    int saw_cid = 0, saw_sdp = 0, total = 0;
-    dh_start (&htlc)
-    {
-        total++;
-        switch (_type) {
-        case HTLC_DATA_CHAT_ID:
-            saw_cid++;
-            g_assert_cmpuint (_len, ==, 4);
-            break;
-        case HTLC_DATA_VOICE_SDP:
-            saw_sdp++;
-            g_assert_cmpuint (_len, ==, sizeof (sdp) - 1);
-            g_assert_cmpint (memcmp (dh->data, sdp, _len), ==, 0);
-            break;
-        default:
-            g_error ("unexpected chunk type 0x%04x in ANSWER body", _type);
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_cid, ==, 1);
-    g_assert_cmpint (saw_sdp, ==, 1);
-    g_assert_cmpint (total, ==, 2);
-    htlc_free (&htlc);
-}
-
-static void
-test_send_sdp_answer_rejects_empty (void)
-{
-    /* Empty SDP would tell the server we accept nothing — the
-     * builder rejects it, and the C wrapper also rejects it before
-     * reaching the builder. Either way, nothing on the wire. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_VOICE);
-    g_assert_false (
-        hx_send_voice_sdp_answer (&htlc, 0, (const guint8 *) "", 0));
-    g_assert_cmpuint (htlc.out.len, ==, 0);
-    htlc_free (&htlc);
-}
-
-static void
-test_send_ice_allows_end_of_candidates (void)
-{
-    /* End-of-candidates marker per spec: empty VOICE_ICE chunk. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_VOICE);
-
-    g_assert_true (hx_send_voice_ice (&htlc, /*cid=*/9, NULL, 0));
-    flip_out_to_in (&htlc);
-
-    int saw_cid = 0, saw_ice = 0;
-    dh_start (&htlc)
-    {
-        switch (_type) {
-        case HTLC_DATA_CHAT_ID:
-            saw_cid++;
-            break;
-        case HTLC_DATA_VOICE_ICE:
-            saw_ice++;
-            g_assert_cmpuint (_len, ==, 0);
-            break;
-        default:
-            g_error ("unexpected chunk 0x%04x in ICE body", _type);
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_cid, ==, 1);
-    g_assert_cmpint (saw_ice, ==, 1);
-    htlc_free (&htlc);
-}
-
-static void
-test_send_mute_normalises_to_zero_or_one (void)
-{
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_VOICE);
-
-    /* Pass a non-canonical TRUE — the C wrapper normalises to 1. */
-    g_assert_true (hx_send_voice_mute (&htlc, /*cid=*/4, /*muted=*/42));
-    flip_out_to_in (&htlc);
-
-    int saw_muted = 0;
-    dh_start (&htlc)
-    {
-        if (_type == HTLC_DATA_VOICE_MUTED) {
-            saw_muted++;
-            g_assert_cmpuint (_len, ==, 2);
-            g_assert_cmpuint (dh->data[0], ==, 0);
-            g_assert_cmpuint (dh->data[1], ==, 1);
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_muted, ==, 1);
-    htlc_free (&htlc);
-}
 
 /* ---------- receive-path FFI ABI ---------- */
 
@@ -659,21 +357,6 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-
-    g_test_add_func ("/proto/voice/send/skipped-without-cap",
-                     test_send_skipped_without_cap);
-    g_test_add_func ("/proto/voice/send/join-writes-chat-id",
-                     test_send_join_with_cap_writes_chat_id);
-    g_test_add_func ("/proto/voice/send/leave-emits-chat-id",
-                     test_send_leave_emits_chat_id);
-    g_test_add_func ("/proto/voice/send/sdp-answer-emits-chat-id-and-sdp",
-                     test_send_sdp_answer_emits_chat_id_and_sdp);
-    g_test_add_func ("/proto/voice/send/sdp-answer-rejects-empty",
-                     test_send_sdp_answer_rejects_empty);
-    g_test_add_func ("/proto/voice/send/ice-allows-end-of-candidates",
-                     test_send_ice_allows_end_of_candidates);
-    g_test_add_func ("/proto/voice/send/mute-normalises",
-                     test_send_mute_normalises_to_zero_or_one);
 
     g_test_add_func ("/proto/voice/parse/reply-join-shape",
                      test_parse_voice_reply_extracts_join_reply_shape);
