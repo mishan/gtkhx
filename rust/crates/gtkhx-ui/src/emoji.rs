@@ -75,6 +75,9 @@ pub unsafe extern "C" fn hx_emoji_button_new(
     target_text_view: *mut gtk::ffi::GtkWidget,
 ) -> *mut gtk::ffi::GtkWidget {
     crate::ensure_gtk_init();
+    if target_text_view.is_null() {
+        return std::ptr::null_mut();
+    }
     let widget: gtk::Widget = from_glib_none(target_text_view);
     let Some(view) = widget.downcast_ref::<gtk::TextView>() else {
         return std::ptr::null_mut();
@@ -289,6 +292,9 @@ unsafe extern "C" fn ta_free_notify(data: glib::ffi::gpointer) {
 #[no_mangle]
 pub unsafe extern "C" fn hx_emoji_typeahead_attach(target_text_view: *mut gtk::ffi::GtkWidget) {
     crate::ensure_gtk_init();
+    if target_text_view.is_null() {
+        return;
+    }
     let widget: gtk::Widget = from_glib_none(target_text_view);
     let Some(view) = widget.downcast_ref::<gtk::TextView>() else {
         return;
@@ -425,8 +431,10 @@ pub unsafe extern "C" fn hx_emoji_typeahead_detach(target_text_view: *mut gtk::f
         view.remove_controller(&kc);
     }
     if let Some(pop) = ta.popover.borrow_mut().take() {
-        // Only ref on the popover is the parent's; unparent frees it (while
-        // the view is still alive, pre-dispose).
+        // Two refs at this point: the parent's, and the strong ref we just
+        // took out of `ta.popover` into `pop`. unparent() drops the parent's
+        // (while the view is still alive, pre-dispose); `pop` dropping at the
+        // end of this block releases the last one and frees the popover.
         pop.unparent();
     }
     drop(ta); // frees the box + releases its widget refs
