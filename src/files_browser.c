@@ -11,12 +11,8 @@
 
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <libpanel.h>
 
 #include "hx.h"        /* struct htxf_conn — auto-refresh hook */
-#include "hx_panel.h"
-#include "panel_registry.h"
-#include "toolbar.h"
 #include "session.h"   /* active session — remote drag uses htlc.access */
 #include "hl_access.h" /* HL_ACCESS_DOWNLOAD_FILES */
 #include "xfers.h"     /* xfer_new for remote drag-to-Downloads */
@@ -1903,8 +1899,16 @@ on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
     }
 }
 
-void
-open_files_browser (void)
+/* Content build for the Rust Files window shell (gtkhx-ui `files`). The dock
+ * registration moved to Rust via dock_bridge; this builds the whole browser +
+ * its two-panel content and returns the content box. br->window points at that
+ * content box (a widget in the panel's tree once embedded) so the
+ * adw_dialog_present parenting, gtk_widget_get_root walks, the shortcut
+ * controller, and init_keyaccel all keep working — the Rust shell owns the
+ * dock panel. Returns NULL if the browser already exists (the shell's
+ * raise-if-open handles that case). */
+GtkWidget *
+gtkhx_files_build_content (void)
 {
     struct browser *br;
     GtkWidget *button_bar, *content_vbox;
@@ -1913,29 +1917,9 @@ open_files_browser (void)
         *rename_btn, *delete_btn;
     GtkEventController *shortcuts;
     GtkShortcut *sh;
-    HxPanel *panel;
 
-    /* Files panel lives in the
-     * toolbar's center PanelGrid (shared with Chat / News). The
-     * legacy the_browser file-static stays; we just replace the
-     * standalone window with a PanelWidget container, and
-     * br->window points at the panel widget so existing
-     * dialog-parent calls (adw_dialog_present, gtk_widget_get_root)
-     * continue to work via duck typing.
-     *
-     * init_keyaccel is still attached to br->window but only the
-     * Ctrl+Q / Ctrl+K / Ctrl+T accelerators take effect — the
-     * Ctrl+W close path inside init_keyaccel checks GTK_IS_WINDOW
-     * and bails on a PanelWidget. The panel's tab close is the X
-     * on its libpanel tab strip; we don't currently bind Ctrl+W
-     * to that. */
     if (the_browser) {
-        panel = hx_panel_registry_lookup (HX_PANEL_ID_FILES);
-        if (panel) {
-            hx_panel_ensure_attached (panel);
-            panel_widget_raise (PANEL_WIDGET (panel));
-        }
-        return;
+        return NULL;
     }
 
     br = g_new0 (struct browser, 1);
@@ -2148,18 +2132,12 @@ open_files_browser (void)
     gtk_box_append (GTK_BOX (content_vbox), GTK_WIDGET (br->toast));
     gtk_widget_set_vexpand (GTK_WIDGET (br->toast), TRUE);
 
-    /* Build the panel. br->window points at the panel widget so
-     * the rest of files_browser.c — adw_dialog_present parents,
-     * gtk_widget_get_root() walks, init_keyaccel controllers,
-     * the shortcut controller below — keeps compiling unchanged. */
-    panel = hx_panel_new (HX_PANEL_ID_FILES,
-                          HX_PANEL_KIND_CENTER,
-                          PANEL_AREA_CENTER);
-    panel_widget_set_title     (PANEL_WIDGET (panel), _ ("Files"));
-    panel_widget_set_icon_name (PANEL_WIDGET (panel),
-                                "folder-symbolic");
-    panel_widget_set_child     (PANEL_WIDGET (panel), content_vbox);
-    br->window = GTK_WIDGET (panel);
+    /* br->window points at the content box, not the dock panel (the Rust
+     * shell owns that). It only needs to be a widget in the panel's tree so
+     * adw_dialog_present parents, gtk_widget_get_root() walks, and the
+     * shortcut controller + init_keyaccel route — content_vbox is exactly that
+     * once embedded. */
+    br->window = content_vbox;
 
     /* Track which panel has focus / was clicked so the headerbar
 	 * actions know who to operate on. Wired AFTER both panels
@@ -2341,15 +2319,5 @@ open_files_browser (void)
     set_active (br, br->left);
     gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 
-    if (toolbar_center_frame != NULL) {
-        panel_frame_add (PANEL_FRAME (toolbar_center_frame),
-                         PANEL_WIDGET (panel));
-        hx_panel_set_home_frame (panel, toolbar_center_frame);
-    } else {
-        g_critical ("open_files_browser: toolbar dock not built yet");
-    }
-
-    /* Registry takes the owning ref; do NOT g_object_unref after.
-     * See users.c for the ref-count walk-through. */
-    hx_panel_registry_register (panel);
+    return content_vbox;
 }
