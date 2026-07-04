@@ -29,14 +29,16 @@ use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 
 use hotline_proto::build::HxChunk;
+use hotline_proto::messages::ClientHdr;
 use hotline_proto::voice;
 
-// Wire opcodes (mirror hotline.h HTLC_HDR_VOICE_*).
-const HTLC_HDR_VOICE_JOIN: u32 = 0x0000_0258;
-const HTLC_HDR_VOICE_LEAVE: u32 = 0x0000_0259;
-const HTLC_HDR_VOICE_SDP_ANSWER: u32 = 0x0000_025b;
-const HTLC_HDR_VOICE_ICE: u32 = 0x0000_025c;
-const HTLC_HDR_VOICE_MUTE: u32 = 0x0000_025e;
+// Wire opcodes — the single source of truth is hotline_proto::messages::
+// ClientHdr (the repr(u32) HTLC_HDR_* enum), not re-spelled magic numbers.
+const HTLC_HDR_VOICE_JOIN: u32 = ClientHdr::VoiceJoin as u32;
+const HTLC_HDR_VOICE_LEAVE: u32 = ClientHdr::VoiceLeave as u32;
+const HTLC_HDR_VOICE_SDP_ANSWER: u32 = ClientHdr::VoiceSdpAnswer as u32;
+const HTLC_HDR_VOICE_ICE: u32 = ClientHdr::VoiceIce as u32;
+const HTLC_HDR_VOICE_MUTE: u32 = ClientHdr::VoiceMute as u32;
 
 /// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores. The
 /// real `rcv_task_voice_*` symbols take fewer args, but they're invoked
