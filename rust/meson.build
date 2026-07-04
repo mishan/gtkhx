@@ -138,6 +138,8 @@ rust_sources = files(
   'crates/hxvoice-model/src/tests.rs',
   'crates/hxvoice-send/src/lib.rs',
   'crates/hxvoice-send/src/tests.rs',
+  'crates/hxtext/src/lib.rs',
+  'crates/hxtext/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -169,6 +171,7 @@ rust_sources = files(
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-send/Cargo.toml',
+  'crates/hxtext/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -461,6 +464,19 @@ rust_gtkhx_boxed_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lgtkhx_boxed',
+  ],
+)
+
+# hxtext (Phase R5) — the Rust port of src/text_util.c. Exports the four
+# gtkhx_text_* C ABI symbols (to_utf8 / for_wire / the emoji-shortcode
+# toggle) the ~16 C callers link against; implemented over hotline-proto's
+# native text/emoji primitives. Unconditional (text encoding is always
+# needed), so it's part of the default --workspace cargo build.
+rust_hxtext_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxtext',
   ],
 )
 

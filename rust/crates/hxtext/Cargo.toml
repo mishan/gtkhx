@@ -1,0 +1,23 @@
+[package]
+name = "hxtext"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5: text encoding + emoji-shortcode helpers (the Rust port of src/text_util.c)"
+publish = false
+
+[lib]
+# staticlib: the ~16 C callers link gtkhx_text_to_utf8 / gtkhx_text_for_wire /
+#            gtkhx_text_{set_,}emoji_shortcodes_enabled that src/text_util.c
+#            used to provide.
+# rlib:      lets a future fully-Rust text path call the helpers directly.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# glib for the g_malloc'd return buffers the C ABI contract owes its callers
+# (they g_free the result).
+glib = { workspace = true }
+# Native Mac Roman <-> UTF-8 (text::to_utf8 / from_utf8) + emoji shortcode
+# rewrite (emoji::emoji_to_shortcodes) — no C-ABI gtkhx_proto_* shim in the
+# path, no glib g_convert.
+hotline-proto = { path = "../hotline-proto" }

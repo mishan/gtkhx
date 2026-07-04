@@ -85,7 +85,8 @@ gtkhx_sources = files(
   'sound.c',
   'tasks.c',
   'tasks_table.c',
-  'text_util.c',
+  # text_util.c ported to Rust (hxtext crate, Phase R5); text_util.h keeps the
+  # C ABI decls the ~16 callers include. Links via rust_hxtext_dep below.
   'tls_trust.c',
   # tls_trust_dialog.c ported to Rust (gtkhx-ui tls_trust_dialog.rs);
   # tls_trust_dialog.h keeps the C ABI decl network.c calls.
@@ -228,6 +229,8 @@ rust_deps = [
   rust_gtkhx_boxed_dep,
   rust_hxnet_dep,
   rust_hx_image_decode_dep,
+  # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
+  rust_hxtext_dep,
 ]
 if voice_enabled
   rust_deps += rust_hxvoice_runtime_dep
