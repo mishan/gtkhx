@@ -863,6 +863,20 @@ extern gboolean hx_chat_media_parse_token (const char *word,
                                            guint *out_token);
 
 /*
+ * MediaTable — the per-chat token → HxChatMedia handle table (M3;
+ * gtkhx-boxed/src/media_table.rs). Replaces gchat->media_handles
+ * (GHashTable) + gchat->media_next_id: output_chat_from_event registers a
+ * deep copy of the event's media under a fresh token and embeds it in the
+ * placeholder; the word_click handler looks the token back up to pop the
+ * dialog. The table owns each copy and frees them on _free. Owned by C as an
+ * opaque pointer (typed void* so this header needn't know the Rust type);
+ * token 0 is the "absent" sentinel. */
+extern void *hx_media_table_new (void);
+extern void hx_media_table_free (void *table);
+extern guint hx_media_table_register (void *table, const HxChatMedia *src);
+extern const HxChatMedia *hx_media_table_lookup (void *table, guint token);
+
+/*
  * HxMsgEvent — a parsed private-message value object.
  *
  * Same architectural move as HxChatEvent, applied to HTLS_HDR_MSG.
