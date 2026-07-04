@@ -217,7 +217,19 @@ pub unsafe extern "C" fn hx_send_voice_ice(
     if !cap_ok(htlc) {
         return glib::ffi::GFALSE;
     }
-    let ice_slice = slice_or_empty(ice, ice_len);
+    // Empty ICE is the legitimate end-of-candidates marker, so a NULL pointer
+    // is ONLY valid with ice_len == 0. Don't coerce a caller bug — (NULL,
+    // non-zero) or an oversized length — into that marker: it would silently
+    // emit an EOC frame and corrupt negotiation. Fail those explicitly.
+    if (ice.is_null() && ice_len != 0) || ice_len > isize::MAX as usize {
+        glib::g_debug!("gtkhx", "VOICE_ICE: invalid ice ptr/len (len={ice_len})");
+        return glib::ffi::GFALSE;
+    }
+    let ice_slice: &[u8] = if ice.is_null() {
+        &[] // (NULL, 0) — end-of-candidates marker
+    } else {
+        std::slice::from_raw_parts(ice, ice_len)
+    };
     let mut chunks = [HxChunk::EMPTY; 2];
     let mut scratch = [0u8; 4];
     let hc = voice::build_voice_ice_chunks(cid, ice_slice, &mut chunks, &mut scratch);

@@ -175,6 +175,19 @@ fn send_ice_allows_end_of_candidates() {
 }
 
 #[test]
+fn send_ice_rejects_null_with_nonzero_len() {
+    reset(true);
+    // A NULL ice pointer is the end-of-candidates marker ONLY with len == 0.
+    // (NULL, non-zero) is a caller bug — reject rather than emit a spurious
+    // EOC frame that would corrupt negotiation.
+    assert_eq!(
+        unsafe { hx_send_voice_ice(htlc(), 9, std::ptr::null(), 5) },
+        glib::ffi::GFALSE
+    );
+    assert!(last().is_none());
+}
+
+#[test]
 fn send_mute_normalises_to_zero_or_one() {
     reset(true);
     // Non-canonical TRUE (42) → the wrapper normalises to wire 1.
