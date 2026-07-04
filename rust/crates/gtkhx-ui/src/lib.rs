@@ -103,6 +103,10 @@ pub mod inline_media_dialog;
 // small read-only text window; fired from the user-info GtkhxSession signal.
 // output_user_info is this module's #[no_mangle] export.
 pub mod user_info;
+// R5.24: the Create-Post composer (was news.c's post window). A modal
+// GtkTextView + Cancel/Post header; the wire sender hx_post_news stays C.
+// create_post_window is this module's #[no_mangle] export.
+pub mod create_post;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
