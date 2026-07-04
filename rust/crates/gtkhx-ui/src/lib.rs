@@ -75,6 +75,12 @@ pub mod files;
 // content tree (subject bar, xtext output, input, user sidebar) in gtk4-rs
 // around the C gtkhx_pchat_new leaf widgets + gtkhx_pchat_user_sidebar.
 pub mod pchat;
+// R5.17: the inline-media click-to-view dialog (Phase 9.D UI). Builds the
+// AdwDialog (Loading → image → error stack) + Save-As / Open-Externally
+// handlers in gtk4-rs; the download state machine (inline_media_download.c)
+// and glycin decoder (inline_media_decode.c / hx-image-decode) stay C behind
+// the FFI seam. inline_media_show_dialog is this module's #[no_mangle] export.
+pub mod inline_media_dialog;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
