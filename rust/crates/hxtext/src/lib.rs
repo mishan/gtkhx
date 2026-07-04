@@ -25,8 +25,11 @@ use std::os::raw::c_char;
 /// the tightest of the validate / overflow / isize-slice constraints.
 const TO_UTF8_MAX_LEN: usize = (isize::MAX as usize - 1) / 3;
 
-/// Legacy-mode cap for `gtkhx_text_for_wire`: `(G_MAXSSIZE - 64) / 2`, bounding
-/// the shortcode-rewrite buffer + the encode length under isize::MAX.
+/// Length cap for `gtkhx_text_for_wire`: `(G_MAXSSIZE - 64) / 2`, bounding the
+/// legacy shortcode-rewrite buffer + the encode length under isize::MAX. Gates
+/// BOTH modes (checked before any `from_raw_parts`, whose own precondition is
+/// `len <= isize::MAX`); the legacy `*2` bound is the tightest, and no real
+/// message approaches it, so UTF-8 pass-through shares it harmlessly.
 const FOR_WIRE_MAX_LEN: usize = (isize::MAX as usize - 64) / 2;
 
 thread_local! {
@@ -123,7 +126,11 @@ pub unsafe extern "C" fn gtkhx_text_for_wire(
     is_body: glib::ffi::gboolean,
     out_len: *mut usize,
 ) -> *mut c_char {
-    if utf8.is_null() {
+    // Pathological-length guard BEFORE constructing any slice: `from_raw_parts`
+    // requires `len <= isize::MAX`, so a huge `utf8_len` would be UB even in the
+    // UTF-8 pass-through branch. Gate both modes here, up front (also covers the
+    // encode-buffer overflow the legacy path would hit). See text_util.h.
+    if utf8.is_null() || utf8_len > FOR_WIRE_MAX_LEN {
         if !out_len.is_null() {
             *out_len = 0;
         }
@@ -137,14 +144,6 @@ pub unsafe extern "C" fn gtkhx_text_for_wire(
             *out_len = utf8_len;
         }
         return g_dup(input);
-    }
-
-    // Legacy mode. Pathological-length guard (see text_util.h rationale).
-    if utf8_len > FOR_WIRE_MAX_LEN {
-        if !out_len.is_null() {
-            *out_len = 0;
-        }
-        return g_dup(b"");
     }
 
     let text = String::from_utf8_lossy(input);

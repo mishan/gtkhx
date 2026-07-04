@@ -322,6 +322,45 @@ fn for_wire_null_input() {
     assert_eq!(out, b"");
 }
 
+// ---------- for_wire pathological-length guard ----------
+//
+// The guard must fire BEFORE from_raw_parts (whose precondition is
+// len <= isize::MAX). A tiny buffer + huge len exercises the contract: with
+// the guard missing, slice construction is UB and later reads/allocs walk off
+// the buffer. Both modes must be protected — the UTF-8 pass-through branch has
+// no other length check.
+
+#[test]
+fn for_wire_len_above_max_returns_empty_utf8_mode() {
+    // utf8_mode: previously the unguarded branch — this is the regression pin.
+    let input = [b'a'];
+    let huge = FOR_WIRE_MAX_LEN + 1;
+    let (out, len) = unsafe { for_wire_raw(input.as_ptr() as *const c_char, huge, GTRUE, GFALSE) };
+    assert_eq!(out, b"");
+    assert_eq!(len, 0);
+}
+
+#[test]
+fn for_wire_len_above_max_returns_empty_legacy_mode() {
+    let input = [b'a'];
+    let huge = FOR_WIRE_MAX_LEN + 1;
+    let (out, len) = unsafe { for_wire_raw(input.as_ptr() as *const c_char, huge, GFALSE, GFALSE) };
+    assert_eq!(out, b"");
+    assert_eq!(len, 0);
+}
+
+#[test]
+fn for_wire_len_usize_max_returns_empty() {
+    // The isize-wraparound extreme, both modes.
+    let input = [b'a'];
+    for mode in [GTRUE, GFALSE] {
+        let (out, len) =
+            unsafe { for_wire_raw(input.as_ptr() as *const c_char, usize::MAX, mode, GTRUE) };
+        assert_eq!(out, b"");
+        assert_eq!(len, 0);
+    }
+}
+
 // ---------- emoji-shortcode toggle (thread_local: no cross-test race) ----------
 
 #[test]
