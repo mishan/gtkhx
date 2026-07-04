@@ -231,6 +231,25 @@ fn invite_registers_task_without_handler() {
 }
 
 #[test]
+fn null_htlc_is_no_op() {
+    // A NULL htlc must short-circuit every sender before task_new/hlwrite_chunks
+    // (which dereference it on the C side).
+    reset(true, 0xABC);
+    let body = cstr("hi");
+    let subj = cstr("s");
+    unsafe {
+        hx_send_chat(std::ptr::null_mut(), body.as_ptr(), 0, 0);
+        hx_chat_user(std::ptr::null_mut(), 1);
+        hx_invite_user(std::ptr::null_mut(), 1, 1);
+        hx_chat_join(std::ptr::null_mut(), 1);
+        hx_part_chat(std::ptr::null_mut(), 1);
+        hx_change_subject(std::ptr::null_mut(), 1, subj.as_ptr());
+    }
+    assert!(last().is_none());
+    assert!(last_task().is_none());
+}
+
+#[test]
 fn join_passes_chat_ptr_to_task() {
     // Pre-registered chat: the lookup returns this ptr, JOIN carries it.
     reset(true, 0xBEEF);

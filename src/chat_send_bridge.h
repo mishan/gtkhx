@@ -1,5 +1,9 @@
 #ifndef HX_CHAT_SEND_BRIDGE_H
-#define HX_CHAT_SEND_BRIDGE_H
+#define HX_CHAT_SEND_BRIDGE_H 1
+
+#include <glib.h>
+
+G_BEGIN_DECLS
 
 /*
  * chat_send_bridge.c — the narrow C seam the Rust chat wire-senders
@@ -27,5 +31,7 @@ extern void *hx_chat_lookup (struct htlc_conn *htlc, guint32 cid);
  * yet (the CHAT_JOIN path — see the self-invite comment in the old
  * hx_chat_join). Never returns NULL for a non-NULL htlc. */
 extern void *hx_chat_lookup_or_create (struct htlc_conn *htlc, guint32 cid);
+
+G_END_DECLS
 
 #endif

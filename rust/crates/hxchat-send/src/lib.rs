@@ -130,8 +130,9 @@ unsafe fn with_wire<R>(
         &mut wire_len,
     );
     // gtkhx_text_for_wire never returns NULL (empty buffer on any guard), but
-    // treat NULL as empty defensively rather than deref it.
-    let slice: &[u8] = if wire.is_null() || wire_len == 0 {
+    // treat NULL / 0 / oversized as empty defensively — from_raw_parts requires
+    // a non-NULL base and len <= isize::MAX.
+    let slice: &[u8] = if wire.is_null() || wire_len == 0 || wire_len > isize::MAX as usize {
         &[]
     } else {
         std::slice::from_raw_parts(wire as *const u8, wire_len)
@@ -156,6 +157,11 @@ pub unsafe extern "C" fn hx_send_chat(
     cid: u32,
     style: u16,
 ) {
+    // task_new / hlwrite_chunks dereference htlc on the C side (htlc->trans,
+    // htlc->fd); a NULL would crash there. Guard here — every sender does.
+    if htlc.is_null() {
+        return;
+    }
     with_wire(htlc, str_, glib::ffi::GTRUE, |wire| {
         let mut chunks = [HxChunk::EMPTY; 3];
         let mut scratch = [0u8; 8];
@@ -178,6 +184,9 @@ pub unsafe extern "C" fn hx_send_chat(
 /// `htlc` is NULL or a valid `htlc_conn *`; main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_user(htlc: *mut c_void, uid: u16) {
+    if htlc.is_null() {
+        return;
+    }
     let mut chunks = [HxChunk::EMPTY; 1];
     let mut scratch = [0u8; 2];
     let hc = build::build_chat_create_chunks(uid, &mut chunks, &mut scratch);
@@ -202,6 +211,9 @@ pub unsafe extern "C" fn hx_chat_user(htlc: *mut c_void, uid: u16) {
 /// See `hx_chat_user`.
 #[no_mangle]
 pub unsafe extern "C" fn hx_invite_user(htlc: *mut c_void, uid: u16, cid: u32) {
+    if htlc.is_null() {
+        return;
+    }
     let mut chunks = [HxChunk::EMPTY; 2];
     let mut scratch = [0u8; 6];
     let hc = build::build_chat_invite_chunks(cid, uid, &mut chunks, &mut scratch);
@@ -224,6 +236,9 @@ pub unsafe extern "C" fn hx_invite_user(htlc: *mut c_void, uid: u16, cid: u32) {
 /// See `hx_chat_user`.
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_join(htlc: *mut c_void, cid: u32) {
+    if htlc.is_null() {
+        return;
+    }
     // Look up (or seed) the chat before sending — the JOIN reply's
     // user-list-switch task carries the chat pointer. Always send the JOIN,
     // even when the chat was pre-registered by a self-invite CHAT_CREATE
@@ -253,6 +268,9 @@ pub unsafe extern "C" fn hx_chat_join(htlc: *mut c_void, cid: u32) {
 /// See `hx_chat_user`.
 #[no_mangle]
 pub unsafe extern "C" fn hx_part_chat(htlc: *mut c_void, cid: u32) {
+    if htlc.is_null() {
+        return;
+    }
     if hx_chat_lookup(htlc, cid).is_null() {
         return;
     }
@@ -277,6 +295,9 @@ pub unsafe extern "C" fn hx_change_subject(
     cid: u32,
     subject: *const c_char,
 ) {
+    if htlc.is_null() {
+        return;
+    }
     with_wire(htlc, subject, glib::ffi::GFALSE, |wire| {
         let mut chunks = [HxChunk::EMPTY; 2];
         let mut scratch = [0u8; 4];
