@@ -2,6 +2,7 @@
 
 - Voice
   - Voice activity detection for self
+  - Volume control slider for each individual
   - Sounds for join / leave events
   - Update to follow latest version of the voice chat spec
 - Code Modernization
