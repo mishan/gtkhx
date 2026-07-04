@@ -1056,6 +1056,24 @@ tabs. What moved to Rust and what stays C splits into two shapes:
 Plus the earlier standalone work: **Settings form** (R5.6, 10 of 11 pages),
 **TLS-trust prompt** (R5.4), **RC4-replacement dialog** (folded into R5.3).
 
+**Status update — the standalone-dialog + voice leaf pool is drained.** After
+the shell milestone the small self-contained pieces went leaf-up, each its own
+PR: the **inline-media view dialog** (R5.17, `inline_media_dialog.rs`), the
+**Get-User-Info window** (R5.23, `user_info.rs`), the **Create-Post composer**
+(R5.24, `create_post.rs`), the **emoji picker + `:shortcode:` typeahead**
+(R5.25, `emoji.rs`), and the **Broadcast composer** (R5.26, `broadcast.rs` —
+`hx_send_broadcast` moved to Rust with it, over hotline-proto's native
+`build_broadcast_chunks`). Voice went Rust end-to-end behind the `voice`
+Cargo feature: **users_voice_col + voice_panel** (R5.18/R5.19,
+`users_voice_col.rs` / `voice_panel.rs`), the **voice model** (R5.20,
+`hxvoice-model` crate — a glib GObject port of `voice_model.c`), **PTT**
+(R5.21, `voice_ptt.rs`), and the **voice send path** (R5.22, `hxvoice-send`
+crate — the `hx_send_voice_*` wire senders over `hotline_proto::messages`).
+`src/voice_bridge.c` + `voice_ptt_keyspec.c` remain as the session/htlc + PTT
+key-spec C seams. Each port kept the exact C ABI and its unit/proto/Tier-3
+coverage green; the `text_util.c` → `hxtext` crate port (the text-encoding +
+emoji-shortcode helpers) is in flight on `claude/r5-text-util`.
+
 See the **[Inventory — what's still C](#inventory--whats-still-c)** subsection
 below for the honest ledger of the many small pieces that remain.
 
@@ -1146,21 +1164,22 @@ small standalone dialogs, (b) the *content* still living behind the shells, and
 (c) shared UI infrastructure. This is the honest ledger of "much more that is
 still in C" as of the shell-completion milestone.
 
-**A. Standalone dialogs / windows not yet ported** (self-contained — the best
-next-target pool, each is a small independent PR):
+**A. Standalone dialogs / windows** (self-contained — was the best next-target
+pool; the small ones are now drained, three larger items remain):
 
-- **User Info window** — `gtkhx.c::output_user_info` (the *Get User Info*
-  result display). The request side (`hx_get_user_info` in `users.c`) is a
-  wire sender and stays C.
-- **Create Post composer** — `news.c::create_post_window` / `close_post_window`
-  (the news-post editor). `hx_post_news` is the C wire sender.
-- **Broadcast composer** — the admin-broadcast compose dialog (entry in
-  `toolbar.c` / `network.c`; `hx_send_broadcast` sender in `msg.c`).
-- **Inline-media view dialog** — `inline_media_dialog.c` (~540 LOC,
-  click-to-view media popup).
-- **Emoji picker + `:shortcode:` typeahead** — `emoji.c` (~520 LOC;
-  `hx_emoji_button_new` / `hx_emoji_typeahead_attach`, consumed by the chat /
-  pchat / PM inputs, which is why those content ports call it via FFI).
+- ✅ **User Info window** — shipped (R5.23, `user_info.rs`). `output_user_info`
+  moved to Rust; the request side (`hx_get_user_info` in `users.c`) is a wire
+  sender and stays C.
+- ✅ **Create Post composer** — shipped (R5.24, `create_post.rs`). `hx_post_news`
+  is the C wire sender.
+- ✅ **Broadcast composer** — shipped (R5.26, `broadcast.rs`). The
+  `hx_send_broadcast` wire sender moved to Rust with it (native
+  `build_broadcast_chunks`); the toolbar entry point is the Rust
+  `gtkhx_broadcast_dialog_open`.
+- ✅ **Inline-media view dialog** — shipped (R5.17, `inline_media_dialog.rs`).
+- ✅ **Emoji picker + `:shortcode:` typeahead** — shipped (R5.25, `emoji.rs`).
+  `hx_emoji_button_new` / `hx_emoji_typeahead_attach` resolve against the crate;
+  the chat / pchat / PM inputs still call them via FFI.
 - **Preview window** — `preview.c` (~1540 LOC): text / image / PDF / source
   viewers + HTXF-worker marshalling. Still deferred — hinges on `sourceview5`
   + a poppler crate aligning with the pinned gtk4 0.10 (see
@@ -1179,8 +1198,9 @@ next-target pool, each is a small independent PR):
   controller/wire glue tied to the C `hx_user` / `chat` structs, not a clean
   UI leaf (revisit when the chat model ports).
 - **Custom cells / columns** — `users_cell.c` (the snapshot-rendered Name
-  cell) and `users_voice_col.c` (the voice-indicator column) stay C behind the
-  `HxUserListView` FFI.
+  cell) stays C behind the `HxUserListView` FFI. ✅ The voice-indicator column
+  (`users_voice_col.c`) moved to Rust (R5.18/R5.19, `users_voice_col.rs`,
+  behind the `voice` Cargo feature).
 - **Tasks content** — the `gtask` row build, progress / queue-badge updates,
   the up/down queue reorder, and `task_update` / `file_update` (transfer
   progress) in `tasks.c`.
@@ -1194,8 +1214,12 @@ next-target pool, each is a small independent PR):
   `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,
   `files_entry.c`, `filelist_walker.c`), transfer integration, and the
   rename / mkdir / move / get-info sub-dialogs. The largest content port left.
-- **Voice UI** — `voice_panel.c` (~900 LOC, the per-room Join/Leave/Mute
-  controls) alongside `users_voice_col.c`.
+- ✅ **Voice UI** — shipped Rust end-to-end behind the `voice` feature:
+  `voice_panel.rs` (per-room Join/Leave/Mute, R5.18/R5.19), the `hxvoice-model`
+  crate (glib GObject port of `voice_model.c`, R5.20), `voice_ptt.rs` (R5.21),
+  and the `hxvoice-send` crate (the `hx_send_voice_*` wire senders, R5.22).
+  `voice_bridge.c` (session/htlc accessors) + `voice_ptt_keyspec.c` (PTT
+  key-spec vocabulary, keeps its C unit test) remain as C seams.
 
 **C. Shared UI infrastructure still C** (ports late; some may stay):
 
@@ -1403,23 +1427,25 @@ chat-history work in `ROADMAP.md`. Same caveats as before: multiply for life.
 
 ## Suggested next concrete step
 
-R0–R4 are done, and R5 has every window's *shell* in Rust. The frontier now is
-finishing R5 — draining the [inventory above](#inventory--whats-still-c). Two
-good pools of work, both leaf-up:
+R0–R4 are done, and R5 has every window's *shell* in Rust plus the whole
+small-standalone-dialog pool (§A: User Info, Create Post, Broadcast,
+inline-media, emoji) and the voice UI (§B: voice_panel / model / PTT / send).
+The frontier now is the **content ports behind the shells** and the remaining
+larger standalone windows — draining the rest of the
+[inventory above](#inventory--whats-still-c). Two good pools of work, both
+leaf-up:
 
-1. **Small standalone dialogs** (inventory §A) — each an independent, bite-sized
-   PR that doesn't touch the dock or the model: the **User Info window**
-   (`output_user_info`), the **Create Post** composer, the **Broadcast** dialog,
-   the **inline-media view** dialog, and the **emoji picker**. These are the
-   `msg.rs` / `pchat.rs` shape (build the widget tree in gtk4-rs, keep the wire
-   sender + any model struct in C behind a tiny accessor seam) and are the
-   lowest-risk way to keep momentum.
+1. **Content ports behind the shells** (inventory §B) — the main remaining
+   pool, larger, in rough order of value: the **Files** two-panel browser
+   content (biggest), the **Tasks** `gtask` list, the **News** viewers, and the
+   **Chat** input/senders. Each mirrors the `users_view` content port: build
+   the tree in Rust, keep genuinely-C leaves (xtext, providers, transfer
+   workers) behind FFI.
 
-2. **Content ports behind the shells** (inventory §B) — larger, in rough order
-   of value: the **Files** two-panel browser content (biggest), the **Tasks**
-   `gtask` list, and the **News** viewers. Each mirrors the `users_view`
-   content port: build the tree in Rust, keep genuinely-C leaves (xtext,
-   providers, transfer workers) behind FFI.
+2. **The larger standalone windows** (inventory §A) — **`preview.c`** (waits on
+   the poppler / sourceview crate alignment), **`tray.c`**, and
+   **`files_complete.c`**. Plus the loose `text_util.c` → `hxtext` helper port
+   already in flight on `claude/r5-text-util`.
 
 Deliberately deferred: the **Users controller glue** (`view_*_btn` /
 `user_popup_show` / model↔view) waits for the chat model; **`preview.c`** waits
