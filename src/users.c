@@ -811,8 +811,11 @@ prompt_chat (session *sess, guint16 _uid)
             if (!gchat->cid) {
                 continue;
             }
-            GtkWidget *row
-                = prompt_chat_make_row (gchat->chat->cid, gchat->chat->subject);
+            struct chat *c = chat_with_cid (sess, gchat->cid);
+            if (!c) {
+                continue;
+            }
+            GtkWidget *row = prompt_chat_make_row (c->cid, c->subject);
             gtk_list_box_append (GTK_LIST_BOX (listbox), row);
         }
     }
@@ -1245,9 +1248,13 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
                 continue;
             }
             gchat = val;
-            struct hx_user *u = hx_user_with_uid (gchat->chat, user->uid);
+            struct chat *c = chat_with_cid (sess, gchat->cid);
+            if (!c) {
+                continue;
+            }
+            struct hx_user *u = hx_user_with_uid (c, user->uid);
             if (u) {
-                user_change (&sess->htlc, gchat->chat, u, nam, icon, color);
+                user_change (&sess->htlc, c, u, nam, icon, color);
             }
         }
     }
@@ -1294,10 +1301,14 @@ users_refresh_avatar (guint16 uid)
         g_hash_table_iter_init (&iter, sess->gchats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             struct gtkhx_chat *gchat = val;
-            if (!gchat || !gchat->userlist || !gchat->chat) {
+            if (!gchat || !gchat->userlist) {
                 continue;
             }
-            struct hx_user *u = hx_user_with_uid (gchat->chat, uid);
+            struct chat *c = chat_with_cid (sess, gchat->cid);
+            if (!c) {
+                continue;
+            }
+            struct hx_user *u = hx_user_with_uid (c, uid);
             if (u) {
                 hx_user_list_view_refresh_avatar (gchat->userlist, u);
             }

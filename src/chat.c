@@ -1870,7 +1870,6 @@ create_chat (session *sess)
     gchat->output = text;
     gchat->userlist = 0;
     gchat->vscroll = vscroll;
-    gchat->chat = 0;
     gchat->window = 0;
     gchat->input = 0;
     gchat->render.oldest_msgid    = 0;
@@ -2064,7 +2063,6 @@ pchat_new (session *sess, struct chat *chat)
     g_object_ref_sink (subject);
 
     gchat->cid = chat->cid;
-    gchat->chat = chat;
     gchat->output = text;
     gchat->vscroll = vscroll;
     gchat->subject = subject;
