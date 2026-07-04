@@ -8,9 +8,9 @@
 //!     GtkEmojiChooser; inserts the picked glyph at the input's cursor.
 //!   * `hx_emoji_typeahead_attach` / `_detach` — a keyboard-driven
 //!     `:prefix` popover of matching shortcodes (Up/Down select,
-//!     Tab/Enter commit, Esc dismiss). The match list comes from the Rust
-//!     `gtkhx_proto_shortcode_matches` (hotline-proto); this module owns
-//!     only the GTK wiring.
+//!     Tab/Enter commit, Esc dismiss). The match list comes from
+//!     `hotline_proto::emoji::shortcode_matches` (native Rust); this module
+//!     owns only the GTK wiring.
 //!
 //! The three C ABI entry points are preserved so chat.c / msg.c (and the
 //! sibling Rust modules msg.rs / pchat.rs, which extern them) link
@@ -30,7 +30,6 @@ use crate::tr::tr;
 // Typeahead tuning (mirror emoji.c).
 const TA_MIN_PREFIX: i32 = 2;
 const TA_MAX_MATCHES: usize = 8;
-const TA_MATCH_BUF: usize = TA_MAX_MATCHES * 128;
 const TA_MAX_PREFIX_SCAN: i32 = 128;
 
 /// qdata key on the view carrying the boxed `EmojiTypeahead` (raw C qdata so
@@ -40,15 +39,6 @@ const TA_KEY: &[u8] = b"hx-emoji-typeahead\0";
 const ROW_EMOJI_KEY: &str = "hx-emoji";
 
 extern "C" {
-    /// hotline-proto — fill `dst` with up to `max` "name\temoji\n" records
-    /// matching `prefix`; returns the record count.
-    fn gtkhx_proto_shortcode_matches(
-        prefix: *const u8,
-        len: usize,
-        dst: *mut u8,
-        cap: usize,
-        max: usize,
-    ) -> usize;
     /// options.c — the live emoji-typeahead pref (read fresh so a Settings
     /// flip takes effect on open windows).
     fn gtkhx_prefs_get_bool(name: *const c_char) -> c_int;
@@ -179,39 +169,26 @@ fn ta_clear_rows(ta: &EmojiTypeahead) {
     }
 }
 
-/// Parse the FFI's "name\temoji\n" record run into selectable rows.
-fn ta_populate(ta: &EmojiTypeahead, recs: &[u8], nrec: usize) {
+/// Build a selectable row per (shortcode name, emoji glyph) match.
+fn ta_populate(ta: &EmojiTypeahead, matches: &[(&str, &str)]) {
     ta_clear_rows(ta);
 
-    let mut p = recs;
-    for _ in 0..nrec {
-        let Some(tab) = p.iter().position(|&b| b == b'\t') else {
-            break;
-        };
-        let Some(nl_rel) = p[tab + 1..].iter().position(|&b| b == b'\n') else {
-            break;
-        };
-        let nl = tab + 1 + nl_rel;
-        let name = String::from_utf8_lossy(&p[..tab]);
-        let emoji = String::from_utf8_lossy(&p[tab + 1..nl]).into_owned();
-
+    for &(name, emoji) in matches {
         let row = gtk::ListBoxRow::new();
         let hbox = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         hbox.set_margin_start(6);
         hbox.set_margin_end(6);
         hbox.set_margin_top(2);
         hbox.set_margin_bottom(2);
-        hbox.append(&gtk::Label::new(Some(&emoji)));
+        hbox.append(&gtk::Label::new(Some(emoji)));
         let nlab = gtk::Label::new(Some(&format!(":{}:", name)));
         nlab.set_halign(gtk::Align::Start);
         hbox.append(&nlab);
         row.set_child(Some(&hbox));
 
         // The row owns the emoji glyph; commit reads it back.
-        unsafe { row.set_data(ROW_EMOJI_KEY, emoji) };
+        unsafe { row.set_data(ROW_EMOJI_KEY, emoji.to_string()) };
         ta.listbox.append(&row);
-
-        p = &p[nl + 1..];
     }
 
     if let Some(first) = ta.listbox.row_at_index(0) {
@@ -249,24 +226,14 @@ fn ta_update(ta: &EmojiTypeahead) {
         return;
     };
 
-    // Reserve the final byte as a sentinel NUL (the FFI never appends one).
-    let mut outbuf = [0u8; TA_MATCH_BUF];
-    let nrec = unsafe {
-        gtkhx_proto_shortcode_matches(
-            prefix.as_ptr(),
-            prefix.len(),
-            outbuf.as_mut_ptr(),
-            outbuf.len() - 1,
-            TA_MAX_MATCHES,
-        )
-    };
-    if nrec == 0 {
+    let matches = hotline_proto::emoji::shortcode_matches(&prefix, TA_MAX_MATCHES);
+    if matches.is_empty() {
         ta_hide(ta);
         return;
     }
 
     ta.tok_start_off.set(colon_off);
-    ta_populate(ta, &outbuf, nrec);
+    ta_populate(ta, &matches);
     ta_position(ta);
     if !ta.open.get() {
         ta.open.set(true);
