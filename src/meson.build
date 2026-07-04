@@ -115,9 +115,9 @@ gtkhx_sources = files(
   # hx_user_row_* C ABI now resolves against the crate.
   # users_view.c ported to Rust (gtkhx-ui `users_view`, Phase R5.9); its
   # hx_user_list_view_* C ABI resolves against the crate. The custom Name
-  # cell + voice column stay C:
+  # cell stays C; the voice column moved to gtkhx-ui's `voice` feature
+  # (users_voice_col.rs).
   'users_cell.c',
-  'users_voice_col.c',
   'xfers.c',
   'xtext.c',
 )
@@ -128,13 +128,16 @@ gtkhx_sources = files(
 # call site in the always-compiled files is guarded by #ifdef HAVE_VOICE.
 # voice.c            — wire-out helpers (hx_send_voice_*).
 # voice_model.c      — per-uid voice presence/state GObject (no GStreamer).
-# voice_panel.c      — per-chat-tab Join/Leave/Mute toolbar + runtime wire.
+# voice_bridge.c     — session/htlc field accessors for the Rust voice UI
+#                      (users_voice_col + voice_panel moved to gtkhx-ui's
+#                      `voice` feature).
 # voice_ptt.c        — push-to-talk key controller.
 # voice_ptt_keyspec.c— pure PTT key-spec vocabulary / canonicalisation.
+# (voice_panel.c retired — ported to rust/crates/gtkhx-ui/src/voice_panel.rs.)
 voice_sources = files(
   'voice.c',
   'voice_model.c',
-  'voice_panel.c',
+  'voice_bridge.c',
   'voice_ptt.c',
   'voice_ptt_keyspec.c',
 )

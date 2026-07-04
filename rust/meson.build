@@ -96,6 +96,8 @@ rust_sources = files(
   'crates/gtkhx-ui/src/useredit.rs',
   'crates/gtkhx-ui/src/user_row.rs',
   'crates/gtkhx-ui/src/users_view.rs',
+  'crates/gtkhx-ui/src/users_voice_col.rs',
+  'crates/gtkhx-ui/src/voice_panel.rs',
   'crates/gtkhx-ui/src/users.rs',
   'crates/gtkhx-ui/src/tasks.rs',
   'crates/gtkhx-ui/src/news.rs',
@@ -280,6 +282,13 @@ endif
 # `--workspace`.
 if voice_enabled
   cargo_voice_args = ''
+  # Turn on gtkhx-ui's `voice` feature so the user-list voice-indicator
+  # column + the per-chat voice toolbar compile their real (voice-model /
+  # runtime / wire-sender-backed) implementations instead of the NULL/no-op
+  # stubs. Package-qualified feature syntax, same shape as cargo_features
+  # above; valid at the virtual-workspace root the way the existing
+  # hxbridge/runtime + hxnet/socks entries already are.
+  cargo_features = cargo_features + ',gtkhx-ui/voice'
 else
   cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime'
 endif
