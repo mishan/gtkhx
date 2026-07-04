@@ -14,6 +14,7 @@ members = [
     "crates/hxvoice",
     "crates/hxvoice-model",
     "crates/hxvoice-send",
+    "crates/hxtext",
     "crates/hxvoice-runtime",
     "crates/hx-image-decode",
     "crates/feature-unify",
