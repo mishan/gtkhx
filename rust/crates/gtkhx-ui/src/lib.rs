@@ -49,6 +49,11 @@ pub mod users_voice_col;
 // #ifdef HAVE_VOICE, so no voice-off stub is needed. Exports voice_panel_*.
 #[cfg(feature = "voice")]
 pub mod voice_panel;
+// R5.21: the push-to-talk key controller (was voice_ptt.c). Wholly behind the
+// `voice` feature — its C caller (toolbar.c) is #ifdef HAVE_VOICE. The pure
+// key-spec vocabulary stays C (voice_ptt_keyspec.c). Exports hx_voice_ptt_attach.
+#[cfg(feature = "voice")]
+pub mod voice_ptt;
 // R5.7: the Users window shell (raise + dock registration + lifecycle).
 // The custom view widget + action-button handlers stay C behind
 // users_bridge.c / dock_bridge.c; create_users_window is now this module's
