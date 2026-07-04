@@ -2122,6 +2122,22 @@ apply_loaded_xtext_prefs (void)
 	 * animate-avatars toggle into gif_avatar.c so a persisted OFF takes
 	 * effect at startup, not only after the user touches the setting. */
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
+
+#ifdef HAVE_VOICE
+    /* Voice capture / playback device: same load-vs-changefunc concern.
+	 * prefs_read doesn't fire changed_voice_{input,output}_device, so the
+	 * loaded device names live in gtkhx_prefs but never reach the Rust
+	 * runtime's DEVICE_PREFS. Without this push a saved device is shown
+	 * correctly in Settings yet ignored on the first Join after launch —
+	 * the send/receive bins fall back to autoaudiosrc/autoaudiosink. Push
+	 * both here so a persisted pick actually takes effect at startup, not
+	 * only after the user re-touches the setting. (The setters just store
+	 * into a Mutex-guarded static; no GStreamer init required, so it's
+	 * safe this early in fe_init.) */
+    gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
+    gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
+#endif
+
     /* Stamp format is widget-aware but the module-global it stashes
 	 * into is read by xtext_get_stamp_str. Pass NULL for the widget
 	 * here — at this point no xtext widgets exist yet (chat windows
