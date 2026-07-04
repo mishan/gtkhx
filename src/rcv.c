@@ -2253,7 +2253,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
 
     /* advance the session-wide newest-msgid cursor used
 	 * for AFTER= reconnect catch-up. This is independent of the
-	 * per-chat oldest-msgid (gtkhx_chat::history_oldest_msgid) the
+	 * per-chat oldest-msgid (gtkhx_chat::render.oldest_msgid) the
 	 * Load-older flow uses — the cursor we maintain here grows
 	 * monotonically over the htlc's lifetime, while the per-chat
 	 * oldest shrinks as new older batches arrive. */

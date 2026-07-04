@@ -951,16 +951,16 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         return;
     }
 
-    /* if history_loading was TRUE on entry, this batch
+    /* if render.loading was TRUE on entry, this batch
 	 * is the response to a "Load older" click — render with the
 	 * prepend path so the older entries land ABOVE the existing
 	 * buffer content. Otherwise this is the initial post-login
 	 * batch and we use the original append path.
 	 *
-	 * Capture the latch first because gchat->history_loading gets
+	 * Capture the latch first because gchat->render.loading gets
 	 * cleared just below as part of the cursor-tracking bookkeeping
 	 * (Phase 3.1). */
-    gboolean prepend_mode = gchat->history_loading;
+    gboolean prepend_mode = gchat->render.loading;
 
     /* maintain the "oldest msgid we have rendered" anchor
 	 * and the has_more flag on the gtkhx_chat. A "Load older" click
@@ -969,20 +969,20 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * empty-batch path so a server response of "no more entries"
 	 * (entries->len == 0, has_more == FALSE) reliably clears the
 	 * loading flag. */
-    gchat->history_loading = FALSE;
+    gchat->render.loading = FALSE;
     if (entries->len > 0) {
         for (guint i = 0; i < entries->len; i++) {
             HxHistoryEntry *e = g_ptr_array_index (entries, i);
             if (!e || e->message_id == 0) {
                 continue;
             }
-            if (gchat->history_oldest_msgid == 0
-                || e->message_id < gchat->history_oldest_msgid) {
-                gchat->history_oldest_msgid = e->message_id;
+            if (gchat->render.oldest_msgid == 0
+                || e->message_id < gchat->render.oldest_msgid) {
+                gchat->render.oldest_msgid = e->message_id;
             }
         }
     }
-    gchat->history_has_more = has_more;
+    gchat->render.has_more = has_more;
 
     xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
 
@@ -992,9 +992,9 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * remove_entry's return — a stale pointer means the entry
 	 * was already gone, so dropping our reference is the right
 	 * thing either way. */
-    if (gchat->history_load_older_ent) {
-        gtk_xtext_remove_entry (xbuf, gchat->history_load_older_ent);
-        gchat->history_load_older_ent = NULL;
+    if (gchat->render.load_older_ent) {
+        gtk_xtext_remove_entry (xbuf, gchat->render.load_older_ent);
+        gchat->render.load_older_ent = NULL;
     }
 
     /* Empty batch — server confirmed CAP_CHAT_HISTORY but has no
@@ -1011,7 +1011,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * The textual shape is identical in initial vs. Load-older
 	 * mode — only the insert direction differs:
 	 *   initial:   append at tail (normal chat-output path)
-	 *   load-older: insert BEFORE gchat->history_anchor_ent
+	 *   load-older: insert BEFORE gchat->render.anchor_ent
 	 *               (the opening "── chat history (N) ──" divider
 	 *               we saved on the initial render)
 	 *
@@ -1023,9 +1023,9 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * divider. */
 #define HX_RENDER(LEFT, LEFT_LEN, RIGHT, RIGHT_LEN, STAMP)                    \
     do {                                                                      \
-        if (prepend_mode && gchat->history_anchor_ent) {                      \
+        if (prepend_mode && gchat->render.anchor_ent) {                      \
             gtk_xtext_insert_indent_before (xbuf,                             \
-                gchat->history_anchor_ent,                                    \
+                gchat->render.anchor_ent,                                    \
                 (unsigned char *) (LEFT), (LEFT_LEN),                         \
                 (unsigned char *) (RIGHT), (RIGHT_LEN),                       \
                 (STAMP));                                                     \
@@ -1059,7 +1059,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
                                  (int) strlen (divider), 0);
         g_free (divider);
         g_free (body);
-        gchat->history_anchor_ent = gtk_xtext_get_last_entry (xbuf);
+        gchat->render.anchor_ent = gtk_xtext_get_last_entry (xbuf);
     }
 
     /* insert the "Load older messages" sentinel BEFORE
@@ -1098,8 +1098,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             "\003" "37"
             "─── %s ───",
             hx_load_older_sentinel ());
-        gchat->history_load_older_ent = gtk_xtext_insert_indent_before (xbuf,
-            gchat->history_anchor_ent,
+        gchat->render.load_older_ent = gtk_xtext_insert_indent_before (xbuf,
+            gchat->render.anchor_ent,
             (unsigned char *) "", 0,
             (unsigned char *) row,
             (int) strlen (row), 0);
@@ -1257,9 +1257,9 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 
     /* Guard: don't fire a second request while the first is
 	 * still in flight. The receive path (output_chat_history_batch)
-	 * clears history_loading on every batch — including empty ones,
+	 * clears render.loading on every batch — including empty ones,
 	 * so a "no more history" reply unsticks us. */
-    if (gchat->history_loading) {
+    if (gchat->render.loading) {
         debug_log ("chat-history",
                    "Load-older click: fetch already in flight for cid=%u",
                    gchat->cid);
@@ -1279,7 +1279,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 
     debug_log ("chat-history",
                "Load-older click: cid=%u, before=%" G_GUINT64_FORMAT,
-               gchat->cid, gchat->history_oldest_msgid);
+               gchat->cid, gchat->render.oldest_msgid);
 
     /* Use the same per-batch count as the initial post-login pull
 	 * (gtkhx_prefs.chat_history_initial, default 50). If the user
@@ -1296,17 +1296,17 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
         limit = 0xffff;
     }
 
-    gchat->history_loading = TRUE;
+    gchat->render.loading = TRUE;
     task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
               GUINT_TO_POINTER (gchat->cid), 0, "chat-history-older");
     if (!hx_get_chat_history (htlc, gchat->cid,
-                              gchat->history_oldest_msgid,
+                              gchat->render.oldest_msgid,
                               /*after=*/0, (guint16) limit)) {
         /* Sender refused (e.g. cap dropped mid-session). Roll back
 		 * the loading flag — the task we just registered will sit
 		 * unmatched but a future cap-bearing reply on that trans
 		 * id is extremely unlikely; tasks expire harmlessly. */
-        gchat->history_loading = FALSE;
+        gchat->render.loading = FALSE;
         debug_log ("chat-history",
                    "Load-older click: hx_get_chat_history refused");
         return;
@@ -1321,7 +1321,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 	 *
 	 * The eviction-and-reinsert at the top of
 	 * output_chat_history_batch handles cleanup: it removes
-	 * whatever entry history_load_older_ent points at — clickable
+	 * whatever entry render.load_older_ent points at — clickable
 	 * or loading row — and then renders a fresh clickable
 	 * sentinel above the (now expanded) chat-history block if
 	 * the new batch still says has_more. So we just update the
@@ -1330,15 +1330,15 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 	 * Text uses the same mIRC palette colour 14 (grey) and the
 	 * same divider framing as the clickable row, so visually
 	 * only the body text changes between the two states. */
-    if (gchat->history_load_older_ent) {
+    if (gchat->render.load_older_ent) {
         xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
         gchar *loading_row
             = g_strdup_printf ("\003" "37" "─── %s ───",
                                hx_loading_older_sentinel ());
 
-        gtk_xtext_remove_entry (xbuf, gchat->history_load_older_ent);
-        gchat->history_load_older_ent = gtk_xtext_insert_indent_before (
-            xbuf, gchat->history_anchor_ent,
+        gtk_xtext_remove_entry (xbuf, gchat->render.load_older_ent);
+        gchat->render.load_older_ent = gtk_xtext_insert_indent_before (
+            xbuf, gchat->render.anchor_ent,
             (unsigned char *) "", 0,
             (unsigned char *) loading_row,
             (int) strlen (loading_row), 0);
@@ -1873,11 +1873,11 @@ create_chat (session *sess)
     gchat->chat = 0;
     gchat->window = 0;
     gchat->input = 0;
-    gchat->history_oldest_msgid    = 0;
-    gchat->history_has_more        = FALSE;
-    gchat->history_loading         = FALSE;
-    gchat->history_anchor_ent      = NULL;
-    gchat->history_load_older_ent  = NULL;
+    gchat->render.oldest_msgid    = 0;
+    gchat->render.has_more        = FALSE;
+    gchat->render.loading         = FALSE;
+    gchat->render.anchor_ent      = NULL;
+    gchat->render.load_older_ent  = NULL;
 
     /* Public chat (cid=0) UI gets seeded into the table on the
      * single create_chat call at session init. */
@@ -2071,11 +2071,11 @@ pchat_new (session *sess, struct chat *chat)
     gchat->userlist = NULL;
     gchat->chat_history = hx_input_history_new ();
     gchat->media_table = hx_media_table_new ();
-    gchat->history_oldest_msgid    = 0;
-    gchat->history_has_more        = FALSE;
-    gchat->history_loading         = FALSE;
-    gchat->history_anchor_ent      = NULL;
-    gchat->history_load_older_ent  = NULL;
+    gchat->render.oldest_msgid    = 0;
+    gchat->render.has_more        = FALSE;
+    gchat->render.loading         = FALSE;
+    gchat->render.anchor_ent      = NULL;
+    gchat->render.load_older_ent  = NULL;
     g_hash_table_insert (sess->gchats, GUINT_TO_POINTER (gchat->cid), gchat);
 
     return gchat;

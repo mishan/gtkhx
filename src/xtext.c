@@ -5819,7 +5819,7 @@ gtk_xtext_remove_entry (xtext_buffer *buf, textentry *ent)
 	/* Defensive membership walk before dereferencing ent->prev.
 	 *
 	 * Background: external code (chat.c's Load-Older sentinel
-	 * tracking in gchat->history_load_older_ent) holds raw
+	 * tracking in gchat->render.load_older_ent) holds raw
 	 * textentry pointers across xtext operations. xtext's
 	 * max_lines pruning silently frees the oldest entries, so a
 	 * cached pointer can outlive the entry it names. Without this
