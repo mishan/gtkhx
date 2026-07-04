@@ -190,8 +190,6 @@ impl HxVoiceModel {
                 .collect();
 
         let keep: HashSet<u16> = parts.iter().map(|p| p.user_id).collect();
-        let self_uid = self.imp().self_uid.get();
-        let seeded = self.imp().seeded.get();
 
         // First pass: update / insert for every named uid.
         for p in &parts {
@@ -208,8 +206,15 @@ impl HxVoiceModel {
             };
             self.recompute_and_maybe_emit(uid);
             // Join chime for a genuine presence transition, only after the
-            // initial roster seeded and never for our own uid.
-            if seeded && !was_in_voice && uid != self_uid {
+            // initial roster seeded and never for our own uid. Read seeded /
+            // self_uid fresh here (after the emit) rather than caching before
+            // the loop: a re-entrant "indicator-changed" handler may call
+            // clear() / set_self_uid() during this ingest, and the C original
+            // read self->seeded / self->self_uid at exactly this point.
+            if self.imp().seeded.get()
+                && !was_in_voice
+                && uid != self.imp().self_uid.get()
+            {
                 unsafe { play_sound(VOICE_JOIN) };
             }
         }
@@ -236,7 +241,10 @@ impl HxVoiceModel {
                 }
             }
             self.recompute_and_maybe_emit(uid);
-            if seeded && uid != self_uid {
+            // Read seeded / self_uid fresh at the decision point (see the
+            // first-pass note) — re-entrancy safe against a handler that flips
+            // them mid-ingest.
+            if self.imp().seeded.get() && uid != self.imp().self_uid.get() {
                 unsafe { play_sound(VOICE_LEAVE) };
             }
             // Drop the entry so a malicious server cycling random uids can't
@@ -344,7 +352,11 @@ pub unsafe extern "C" fn hx_voice_model_ingest_participants(
     if self_.is_null() {
         return;
     }
-    let slice: &[u8] = if blob.is_null() || len == 0 {
+    // Guard from_raw_parts' precondition: NULL base or len past isize::MAX is
+    // UB. A buggy / attacker-controlled caller could pass an out-of-range
+    // size_t; treat it as empty (same convention as hotline-proto's as_slice /
+    // hxvoice-runtime's room_status).
+    let slice: &[u8] = if blob.is_null() || len == 0 || len > isize::MAX as usize {
         &[]
     } else {
         std::slice::from_raw_parts(blob, len)
