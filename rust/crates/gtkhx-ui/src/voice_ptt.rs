@@ -81,21 +81,18 @@ fn current_bind() -> Option<(u32, u32)> {
     if !enabled {
         return None;
     }
-    // Owned g_malloc'd string — copy out then free.
-    let spec = unsafe {
-        let p = gtkhx_prefs_get_string(crate::cs("VOICEPTTKEY").as_ptr());
-        let s = crate::cstr(p);
-        glib::ffi::g_free(p as *mut c_void);
-        s
-    };
-    let cspec = crate::cs(&spec);
+    // This runs on every key event that reaches matches_bind(), so avoid the
+    // Rust-side String + CString round-trip: hand the g_malloc'd prefs string
+    // straight to the parser (NULL-safe — an unset key parses as FALSE), then
+    // free it.
     let mut keyval: u32 = 0;
     let mut state: u32 = 0;
-    let ok = unsafe {
-        hx_voice_ptt_keyspec_parse(cspec.as_ptr(), &mut keyval, &mut state)
-            != glib::ffi::GFALSE
-    };
-    ok.then_some((keyval, state))
+    unsafe {
+        let p = gtkhx_prefs_get_string(crate::cs("VOICEPTTKEY").as_ptr());
+        let ok = hx_voice_ptt_keyspec_parse(p, &mut keyval, &mut state) != glib::ffi::GFALSE;
+        glib::ffi::g_free(p as *mut c_void);
+        ok.then_some((keyval, state))
+    }
 }
 
 /// Exact-match an inbound event against the configured bind. Inbound modifiers
