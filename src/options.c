@@ -744,34 +744,38 @@ changed_tray (session *sess)
 }
 
 #ifdef HAVE_VOICE
-/* Settings → Voice → "Input device" combobox. Pushes the user's
- * pick through to the Rust runtime via FFI; the next VoiceRuntime
- * construction (typically the next Join Voice click) builds the
- * send leg against the resolved device. Empty / NULL means
- * "system default" — autoaudiosrc resolves whichever PulseAudio /
- * PipeWire / ALSA default the host has configured.
+/* Settings → Voice → "Input device" combobox. Two steps:
  *
- * No effect on a currently-active voice session — the runtime is
- * constructed once per session and the bins are built at Join
- * time; changing the device picker takes effect on the next call.
- * Phase 8.E follow-up could hot-swap by rebuilding the send bin
- * on prefs change, but for now Leave + Join is the prescribed
- * dance. */
+ *   1. Push the pick to the global device preference (DEVICE_PREFS in
+ *      the Rust audio module) so any FUTURE VoiceRuntime / send bin is
+ *      built against the resolved device. Empty / NULL means "system
+ *      default" — autoaudiosrc resolves the host's configured default.
+ *   2. If a voice runtime is live for the active session, hot-swap the
+ *      capture device NOW by rebuilding the send bin in place (reusing
+ *      the existing WebRTC transceiver, no renegotiation) so the change
+ *      takes effect immediately rather than only on the next Join. The
+ *      global-preference push in step 1 must happen first — the reload
+ *      reads that freshly-stored value. */
 static void
 changed_voice_input_device (session *sess)
 {
-    (void)sess;
     gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
+    if (sess && sess->voice_runtime) {
+        gtkhx_voice_runtime_reload_input_device (sess->voice_runtime);
+    }
 }
 
-/* Settings → Voice → "Output device" combobox. Same shape as
- * changed_voice_input_device but for the receive (autoaudiosink)
- * side. */
+/* Settings → Voice → "Output device" combobox. Same two-step shape as
+ * changed_voice_input_device but for the receive (autoaudiosink) side:
+ * update the global preference, then hot-swap by rebuilding every live
+ * receive bin against the new sink. */
 static void
 changed_voice_output_device (session *sess)
 {
-    (void)sess;
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
+    if (sess && sess->voice_runtime) {
+        gtkhx_voice_runtime_reload_output_device (sess->voice_runtime);
+    }
 }
 #endif /* HAVE_VOICE */
 
@@ -2122,6 +2126,22 @@ apply_loaded_xtext_prefs (void)
 	 * animate-avatars toggle into gif_avatar.c so a persisted OFF takes
 	 * effect at startup, not only after the user touches the setting. */
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
+
+#ifdef HAVE_VOICE
+    /* Voice capture / playback device: same load-vs-changefunc concern.
+	 * prefs_read doesn't fire changed_voice_{input,output}_device, so the
+	 * loaded device names live in gtkhx_prefs but never reach the Rust
+	 * runtime's DEVICE_PREFS. Without this push a saved device is shown
+	 * correctly in Settings yet ignored on the first Join after launch —
+	 * the send/receive bins fall back to autoaudiosrc/autoaudiosink. Push
+	 * both here so a persisted pick actually takes effect at startup, not
+	 * only after the user re-touches the setting. (The setters just store
+	 * into a Mutex-guarded static; no GStreamer init required, so it's
+	 * safe this early in fe_init.) */
+    gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
+    gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
+#endif
+
     /* Stamp format is widget-aware but the module-global it stashes
 	 * into is read by xtext_get_stamp_str. Pass NULL for the widget
 	 * here — at this point no xtext widgets exist yet (chat windows
@@ -3150,7 +3170,8 @@ settings_page_voice (AdwPreferencesPage *page)
         devices_grp,
         _ ("Capture and playback devices for voice chat. "
            "\"System default\" follows your desktop's audio configuration. "
-           "Changes take effect the next time you join a voice room."));
+           "Changes take effect immediately, including during an active "
+           "call."));
     adw_preferences_group_add (
         devices_grp,
         pref_combo_row (CFG_VOICE_INPUT_DEVICE, _ ("Input (microphone)"),

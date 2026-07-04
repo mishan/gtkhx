@@ -28,7 +28,7 @@ behind the `HAVE_VOICE` define. The gate plumbing is documented in
 | 8.B | GStreamer dep + bare pipeline (loopback test) | **Shipped** | `7178b7f` |
 | 8.C | State machine (`hxvoice`) + webrtcbin runtime (`hxvoice-runtime`) | **Shipped** | multiple |
 | 8.D | Voice toolbar in chat tab + runtime wire-up + signal bridge | **Shipped** | multiple |
-| 8.E | Settings → Voice device pickers | **Shipped** | merged from `claude/voice-phase-e-devices` |
+| 8.E | Settings → Voice device pickers (+ startup-apply + hot-swap) | **Shipped** | `claude/voice-phase-e-devices`; device persistence + live hot-swap on `claude/voice-device-startup-apply` |
 | 8.F | Tier 3 integration matrix vs Janus | **Shipped** | merged from `claude/voice-phase-f-tests` |
 | 8.G | Per-uid voice indicators in user list | **Shipped** (in-voice + muted) | `claude/voice-speaker-indicator` |
 | follow-ups | PTT, "Start muted" toggle, "Auto-join", wedge-deadline hardening, real-VAD speaker detection | **Mixed** — wedge, soft-Media, PTT, real-VAD shipped; Start-muted / Auto-join open | `claude/voice-wedge-deadline` (wedge), `claude/voice-speaker-indicator` (soft-Media), `claude/voice-vad-level` (real-VAD) |
@@ -332,6 +332,34 @@ Notifications. Picks persist as `VOICEINPUTDEVICE` /
 `VOICEOUTPUTDEVICE` in `gtkhxrc`. The runtime reads them via the
 `audio::DEVICE_PREFS` static and threads them through `make_send_bin`
 / `make_receive_bin`.
+
+**Device persistence + hot-swap ✅** (`claude/voice-device-startup-apply`).
+Two follow-on fixes closed the loop on the device pickers:
+
+- **Applied at startup.** `prefs_read` deliberately doesn't run cfgvar
+  changefuncs, so a saved device sat in `gtkhx_prefs` (and displayed
+  correctly in Settings) but never reached the runtime's
+  `DEVICE_PREFS` — the send/receive bins fell back to the system
+  default on the first Join after launch. `apply_loaded_xtext_prefs`
+  now pushes both loaded device names via `gtkhx_voice_set_input_device`
+  / `_set_output_device`, alongside the other load-vs-changefunc fixups.
+- **Hot-swappable during a call.** Changing the device in Settings now
+  takes effect immediately, no Leave + Join. `changed_voice_{input,
+  output}_device` updates the global `DEVICE_PREFS` (for future bins)
+  then calls `gtkhx_voice_runtime_reload_{input,output}_device` on the
+  active session's runtime. `reload_input_device` rebuilds the send bin
+  in place — unlink the ghost src from the webrtcbin sink pad, drop the
+  old bin, build a fresh one against the new device, re-link the SAME
+  sink pad, re-apply the current mute state, sync — so there's no SDP
+  renegotiation. `reload_output_device` rebuilds every live receive bin
+  via the existing `stop_receive_bin` + `start_receive_bin` pair
+  (replaying stored per-user volumes). Whole-bin granularity (the same
+  the `TearDown` rebuild uses, all on the main thread) sidesteps the
+  streaming-thread deadlocks per-element surgery on a live source
+  invites; there's a sub-second gap on the affected leg while the new
+  element prerolls. Covered by runtime unit tests (send-bin peer-pad
+  reuse + mute re-apply, the unlinked-bin bail, and the live
+  `reload_input_device` path against a real pipeline + webrtcbin).
 
 **Open Phase 8.E follow-ups** (mentioned in the original doc but not
 yet implemented):
@@ -766,6 +794,15 @@ Voice works end-to-end. The remaining roadmap:
      top with no additional code on the runtime side.
    - "Auto-join voice when joining a chat room" toggle (default OFF).
    Persist via the existing `cfgvars` table.
+   - ~~Device persistence + hot-swap~~ — **Shipped on
+     `claude/voice-device-startup-apply`.** Saved capture/playback
+     devices are now applied at startup (`apply_loaded_xtext_prefs`
+     pushes them into the runtime, since `prefs_read` doesn't run
+     changefuncs), and a device change in Settings takes effect live
+     during a call — `changed_voice_{input,output}_device` reload the
+     active runtime, which rebuilds the send bin / receive bins in
+     place reusing the existing webrtcbin pads (no renegotiation). See
+     the "Device persistence + hot-swap" note under Phase 8.E above.
 2. **Ping VesperNet** for confirmation that Janus's voice impl is
    feature-complete (server-side mute enforcement, room-full
    handling, access-bit check, ~100 ms mute debounce).

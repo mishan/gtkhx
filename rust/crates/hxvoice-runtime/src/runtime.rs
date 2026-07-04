@@ -1824,6 +1824,95 @@ impl VoiceRuntime {
             .unwrap_or(1.0)
     }
 
+    /// Hot-swap the capture device: rebuild the send bin from the
+    /// current `audio::input_device()` preference, reusing the existing
+    /// webrtcbin sink pad so the WebRTC session is NOT renegotiated.
+    ///
+    /// Called (via FFI) from the Settings input-device change handler
+    /// after it has updated the global `DEVICE_PREFS`. If there's no
+    /// live pipeline (pipeline-less test runtime) it's a no-op; the next
+    /// join builds the send bin against the new pref anyway.
+    ///
+    /// The rebuild is a whole-bin replace, not element-level surgery:
+    /// unlink the send bin's ghost src from the webrtcbin sink pad, set
+    /// the bin to `Null`, drop it, build a fresh send bin against the new
+    /// device, add it, re-link the same webrtcbin sink pad, re-apply the
+    /// current mute state, and sync. This is the same coarse granularity
+    /// `stop_receive_bin` / the `TearDown` rebuild already use, which
+    /// sidesteps the streaming-thread deadlocks that per-element pad
+    /// surgery on a live source invites. There's a sub-second audio gap
+    /// while the new capture element prerolls, acceptable for a manual
+    /// device change.
+    pub fn reload_input_device(&self) {
+        let device = crate::audio::input_device();
+        let (pipeline, muted) = {
+            let inner = self.inner.borrow();
+            (inner.pipeline.clone(), inner.machine.is_muted())
+        };
+        let Some(pipeline) = pipeline else {
+            return;
+        };
+        rebuild_send_bin(&pipeline, device.as_deref(), muted);
+    }
+
+    /// Hot-swap the playback device: rebuild every live receive bin from
+    /// the current `audio::output_device()` preference, reusing each
+    /// bin's upstream webrtcbin src pad. Same no-renegotiation, whole-bin
+    /// granularity as [`reload_input_device`].
+    ///
+    /// `start_receive_bin` reads `audio::output_device()` itself, so once
+    /// the Settings handler has updated `DEVICE_PREFS` the stop+start
+    /// pair below picks up the new sink automatically. Stored per-user
+    /// volumes are replayed onto the rebuilt bins. No-op when there's no
+    /// pipeline or no receive bins (nobody else is in the room yet).
+    pub fn reload_output_device(&self) {
+        let (pipeline, counter, entries) = {
+            let inner = self.inner.borrow();
+            let entries: Vec<(String, gstreamer::Bin)> = inner
+                .receive_bins
+                .iter()
+                .map(|(k, b)| (k.clone(), b.clone()))
+                .collect();
+            (
+                inner.pipeline.clone(),
+                Arc::clone(&inner.rtp_buffers_received),
+                entries,
+            )
+        };
+        let Some(pipeline) = pipeline else {
+            return;
+        };
+        for (pad_key, old_bin) in entries {
+            // Recover the upstream webrtcbin src pad + the mid before we
+            // tear the old bin down.
+            let src_pad = old_bin
+                .static_pad("sink")
+                .and_then(|sink| sink.peer());
+            let mid = mid_from_recv_bin_name(old_bin.name().as_str())
+                .map(str::to_string);
+            let (Some(src_pad), Some(mid)) = (src_pad, mid) else {
+                // Can't recover the source pad / mid — leave this bin
+                // alone rather than orphan its audio.
+                continue;
+            };
+            stop_receive_bin(&pipeline, &old_bin);
+            match start_receive_bin(&pipeline, &src_pad, &mid, &counter) {
+                Some(new_bin) => {
+                    self.apply_stored_volume_to_bin(&new_bin);
+                    self.inner
+                        .borrow_mut()
+                        .receive_bins
+                        .insert(pad_key, new_bin);
+                }
+                None => {
+                    // Rebuild failed — drop the stale map entry so we
+                    // don't keep a torn-down bin around.
+                    self.inner.borrow_mut().receive_bins.remove(&pad_key);
+                }
+            }
+        }
+    }
+
     /// Replay the stored per-user gain onto a freshly (re)built receive
     /// bin. Called from the receive-bin insertion sites so a mid-call
     /// rejoin — which tears the bin down and builds a new one — restores
@@ -4056,6 +4145,134 @@ fn stop_receive_bin(
     let _ = pipeline.remove(bin);
 }
 
+/// Rebuild the send bin in place against a (possibly new) capture
+/// device, reusing the existing webrtcbin sink pad so the WebRTC
+/// session is not renegotiated. Drives [`VoiceRuntime::reload_input_device`].
+///
+/// Steps, all on the main thread (never a streaming thread — that's
+/// what keeps a live source's `set_state(Null)` from deadlocking on its
+/// own task):
+///
+///   1. Find the current send bin by name and recover BOTH its ghost src
+///      pad and the webrtcbin sink pad that pad feeds. If either is
+///      missing, bail *before* touching anything — a rebuild that can't
+///      re-link would only orphan a fresh bin, so leaving the working
+///      one in place is the safer failure.
+///   2. Unlink, set the old bin to `Null`, remove it from the pipeline.
+///   3. Build a fresh send bin against `device`, add it, re-link its
+///      ghost src to the SAME webrtcbin sink pad, re-apply `muted`, and
+///      sync it up to the running pipeline.
+///
+/// Returns `true` only when the rebuilt bin is added, linked, and synced.
+/// Any failure after the old bin is torn down cleans the partially-added
+/// replacement back out of the pipeline and returns `false`; the send
+/// leg is then down until the next `TearDown`/rejoin, logged loudly so
+/// the failure isn't invisible. A pre-teardown bail (no send bin, or the
+/// old bin isn't linked) also returns `false` but leaves the pipeline
+/// untouched.
+fn rebuild_send_bin(
+    pipeline: &gstreamer::Pipeline,
+    device: Option<&str>,
+    muted: bool,
+) -> bool {
+    let Some(old_bin) = pipeline
+        .by_name(crate::audio::SEND_BIN_NAME)
+        .and_then(|e| e.downcast::<gstreamer::Bin>().ok())
+    else {
+        // No send bin in the pipeline — nothing to swap. Not an error:
+        // a pipeline without a send leg just means we're not sending.
+        return false;
+    };
+    // Recover the ghost src AND its peer (the webrtcbin sink pad) up
+    // front. We need both to re-link the replacement; if either is
+    // missing, don't tear the working bin down for a rebuild we couldn't
+    // finish.
+    let old_ghost = old_bin.static_pad("src");
+    let webrtc_sink = old_ghost.as_ref().and_then(|p| p.peer());
+    let (Some(old_ghost), Some(webrtc_sink)) = (old_ghost, webrtc_sink) else {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: reload_input_device: send bin isn't linked to \
+             webrtcbin (no src ghost pad or no peer) — leaving it in \
+             place; device change applies on the next rejoin"
+        );
+        return false;
+    };
+
+    let _ = old_ghost.unlink(&webrtc_sink);
+    let _ = old_bin.set_state(gstreamer::State::Null);
+    let _ = pipeline.remove(&old_bin);
+
+    let Some(new_bin) =
+        crate::audio::make_send_bin(crate::audio::SEND_BIN_NAME, device)
+    else {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: reload_input_device could not build a send bin for \
+             the new device — send leg is down until rejoin"
+        );
+        return false;
+    };
+    if pipeline.add(&new_bin).is_err() {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: reload_input_device failed to add the rebuilt send \
+             bin to the pipeline"
+        );
+        return false;
+    }
+    // From here on, any failure must pull the freshly-added bin back out
+    // so we don't leave a dangling, unlinked send bin in the pipeline.
+    let cleanup = |bin: &gstreamer::Bin| {
+        let _ = bin.set_state(gstreamer::State::Null);
+        let _ = pipeline.remove(bin);
+    };
+
+    // Re-apply the current mute state — a fresh send bin starts unmuted,
+    // but the state machine may be muted (start-muted default, PTT, or a
+    // manual mute). Do it before sync so no un-muted audio slips out.
+    if let Some(volume) = new_bin.by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME)
+    {
+        volume.set_property("mute", muted);
+    }
+
+    let Some(new_src) = new_bin.static_pad("src") else {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: reload_input_device: rebuilt send bin has no src \
+             ghost pad — removing it; send leg down until rejoin"
+        );
+        cleanup(&new_bin);
+        return false;
+    };
+    if let Err(e) = new_src.link(&webrtc_sink) {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: reload_input_device failed to re-link the rebuilt \
+             send bin to webrtcbin: {e:?} — removing it"
+        );
+        cleanup(&new_bin);
+        return false;
+    }
+    if new_bin.sync_state_with_parent().is_err() {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: reload_input_device: rebuilt send bin failed to sync \
+             to the running pipeline — removing it"
+        );
+        let _ = new_src.unlink(&webrtc_sink);
+        cleanup(&new_bin);
+        return false;
+    }
+    crate::debug::log!(
+        "voice-pipe",
+        "reload_input_device: send bin rebuilt (device={:?}, muted={})",
+        device,
+        muted
+    );
+    true
+}
+
 /// Helper for the `Action::ArmTimer` dispatch arm — cancels any
 /// existing timer of the same kind, then arms a fresh one-shot
 /// `glib::timeout_add_local` for `ms` milliseconds whose callback
@@ -5405,6 +5622,131 @@ mod tests {
             .expect("runtime should construct with a fresh pipeline");
         // Sanity: the pipeline element is reachable.
         assert!(runtime.inner.borrow().pipeline.is_some());
+    }
+
+    // ------------------------------------------------------------------
+    // Device hot-swap (reload_input_device / reload_output_device).
+    // ------------------------------------------------------------------
+
+    /// `rebuild_send_bin` replaces the send bin in place: the old bin is
+    /// removed from the pipeline, a fresh one takes its name, the fresh
+    /// one is re-linked to the SAME downstream peer pad (standing in for
+    /// the webrtcbin sink pad — here a fakesink so no webrtc is needed),
+    /// and the requested mute state is applied. Structural proof of the
+    /// no-renegotiation swap; live buffer flow is covered against Janus.
+    #[test]
+    fn rebuild_send_bin_reuses_peer_and_applies_mute() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let pipeline = gstreamer::Pipeline::new();
+        let old = crate::audio::make_send_bin(crate::audio::SEND_BIN_NAME, None)
+            .expect("send bin builds");
+        pipeline.add(&old).expect("add send bin");
+        let fakesink =
+            gstreamer::ElementFactory::make("fakesink").build().unwrap();
+        pipeline.add(&fakesink).expect("add fakesink");
+        let sink_pad = fakesink.static_pad("sink").unwrap();
+        old.static_pad("src")
+            .unwrap()
+            .link(&sink_pad)
+            .expect("link send bin -> fakesink");
+
+        assert!(
+            rebuild_send_bin(&pipeline, None, true),
+            "rebuild should succeed"
+        );
+
+        // Old bin was removed from the pipeline.
+        assert!(
+            old.parent().is_none(),
+            "old send bin must be unparented after rebuild"
+        );
+        // A fresh send bin carries the name and is re-linked to the SAME
+        // fakesink sink pad (transceiver-pad reuse in production).
+        let new = pipeline
+            .by_name(crate::audio::SEND_BIN_NAME)
+            .and_then(|e| e.downcast::<gstreamer::Bin>().ok())
+            .expect("rebuilt send bin present under the same name");
+        let new_peer = new.static_pad("src").unwrap().peer();
+        assert_eq!(
+            new_peer.as_ref(),
+            Some(&sink_pad),
+            "rebuilt send bin must reuse the original downstream pad"
+        );
+        // Mute state re-applied to the fresh volume element.
+        let vol = new
+            .by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME)
+            .expect("send volume element present");
+        assert!(
+            vol.property::<bool>("mute"),
+            "muted=true must be re-applied to the rebuilt send bin"
+        );
+    }
+
+    /// `rebuild_send_bin` bails without touching the pipeline when the
+    /// existing send bin isn't linked to anything (no peer to reuse) —
+    /// tearing the working bin down for a rebuild we couldn't finish
+    /// would only orphan a replacement.
+    #[test]
+    fn rebuild_send_bin_bails_when_unlinked() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let pipeline = gstreamer::Pipeline::new();
+        let send = crate::audio::make_send_bin(crate::audio::SEND_BIN_NAME, None)
+            .expect("send bin builds");
+        pipeline.add(&send).expect("add send bin");
+        // Deliberately NOT linked — its src ghost pad has no peer.
+
+        assert!(
+            !rebuild_send_bin(&pipeline, None, false),
+            "rebuild must fail when the send bin has no peer to reuse"
+        );
+        // The original bin is left in place, untouched.
+        assert!(
+            send.parent().is_some(),
+            "unlinked send bin must be left in the pipeline"
+        );
+        assert!(
+            pipeline.by_name(crate::audio::SEND_BIN_NAME).is_some(),
+            "a send bin must still be present under the name"
+        );
+    }
+
+    /// `reload_input_device` on a live runtime rebuilds the send bin and
+    /// keeps it linked to a webrtcbin sink pad (the real one the
+    /// constructor set up). Exercises the whole method against a real
+    /// pipeline + webrtcbin.
+    #[test]
+    fn reload_input_device_rebuilds_live_send_bin() {
+        assert!(crate::init(), "gst::init() must succeed");
+        let runtime = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime constructs with a pipeline");
+
+        runtime.reload_input_device();
+
+        let pipeline = runtime.inner.borrow().pipeline.clone().unwrap();
+        let send = pipeline
+            .by_name(crate::audio::SEND_BIN_NAME)
+            .expect("a send bin still exists after reload");
+        let bin = send.downcast::<gstreamer::Bin>().unwrap();
+        assert!(
+            bin.static_pad("src").and_then(|p| p.peer()).is_some(),
+            "rebuilt send bin must stay linked to the webrtcbin sink pad"
+        );
+    }
+
+    /// `reload_output_device` with no receive bins (nobody else in the
+    /// room) is a clean no-op — no panic on either the pipeline-less or
+    /// pipeline-built runtime.
+    #[test]
+    fn reload_output_device_without_receive_bins_is_noop() {
+        let (runtime, _backend) = rec();
+        runtime.reload_output_device(); // pipeline-less: returns early
+
+        assert!(crate::init(), "gst::init() must succeed");
+        let live = VoiceRuntime::new(Box::new(NoopBackend))
+            .expect("runtime constructs with a pipeline");
+        // No receive bins yet — nothing to rebuild, must not panic.
+        live.reload_output_device();
+        assert!(live.inner.borrow().receive_bins.is_empty());
     }
 
     // ------------------------------------------------------------------

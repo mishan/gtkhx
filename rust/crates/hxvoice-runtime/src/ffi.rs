@@ -624,6 +624,42 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_set_user_volume(
     rt.set_user_volume(uid, gain);
 }
 
+/// Hot-swap the capture (microphone) device on a live runtime. The C
+/// side calls this from the Settings input-device change handler AFTER
+/// updating the global device preference via
+/// [`gtkhx_voice_set_input_device`] — this reads that preference and
+/// rebuilds the send bin against it, reusing the existing webrtcbin
+/// transceiver (no SDP renegotiation). No-op on a NULL runtime or one
+/// without a live pipeline.
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. Main-thread only.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_reload_input_device(
+    rt: *mut VoiceRuntime,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.reload_input_device();
+}
+
+/// Hot-swap the playback (speaker) device on a live runtime. Same
+/// contract as [`gtkhx_voice_runtime_reload_input_device`] but rebuilds
+/// every live receive bin against the current output-device preference.
+///
+/// # Safety
+/// `rt` must be NULL or a valid runtime pointer. Main-thread only.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_voice_runtime_reload_output_device(
+    rt: *mut VoiceRuntime,
+) {
+    let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
+        return;
+    };
+    rt.reload_output_device();
+}
+
 /// Read the stored per-listener gain for a uid, or `1.0` (unity) when
 /// the user never adjusted that uid's slider. Used by the C side to
 /// initialise the slider position when it opens the popover.

@@ -2,7 +2,7 @@
 
 - Voice
   - Voice activity detection for self
-  - Volume control slider for each individual
+  - Audio devices can now be hot swapped (no having to re-join the voice chat)
   - Sounds for join / leave events
   - Update to follow latest version of the voice chat spec
 - Code Modernization
