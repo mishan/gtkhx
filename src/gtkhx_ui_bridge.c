@@ -26,6 +26,7 @@
 
 #include "session.h"  /* session, hx_htlc_close */
 #include "network.h"  /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
+#include "hotline.h"  /* HTLC_CAP_TEXT_ENCODING */
 #include "gtkhx_ui_bridge.h"
 
 void
@@ -56,6 +57,23 @@ struct htlc_conn *
 gtkhx_active_htlc (void)
 {
     return &hx_active_session ()->htlc;
+}
+
+/* TRUE if the active session has a live connection (fd set). Used by the
+ * Rust Broadcast composer to no-op when disconnected. */
+gboolean
+gtkhx_active_connected (void)
+{
+    return hx_active_session ()->htlc.fd != 0;
+}
+
+/* TRUE if the active session negotiated HTLC_CAP_TEXT_ENCODING (UTF-8 on the
+ * wire vs. legacy Mac Roman). The Rust Broadcast sender passes this to
+ * gtkhx_text_for_wire. */
+gboolean
+gtkhx_active_text_encoding (void)
+{
+    return (hx_active_session ()->htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
 }
 
 void

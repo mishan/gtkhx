@@ -155,104 +155,11 @@ on_action_user_edit (GSimpleAction *action, GVariant *param, gpointer user_data)
     useredit_open_dialog ();
 }
 
-/* AdwAlertDialog "response" handler for the Broadcast button.
- * Pulls the text out of the AdwEntryRow extra-child and sends it
- * via HTLC_HDR_MSG_BROADCAST. Cancel / close-via-X / empty text
- * is a silent no-op. */
-static void
-on_broadcast_response (AdwAlertDialog *dialog, const char *response,
-                       gpointer data)
-{
-    GtkWidget *entry = data;
-    const char *text;
-    gsize len;
-
-    (void)dialog;
-    if (g_strcmp0 (response, "send") != 0) {
-        return;
-    }
-    text = gtk_editable_get_text (GTK_EDITABLE (entry));
-    if (!text || !*text) {
-        return;
-    }
-    len = strlen (text);
-    if (len > 0xfffe) {
-        len = 0xfffe; /* HTLC_DATA_MSG length is u16; clamp. */
-    }
-    hx_send_broadcast (&hx_active_session ()->htlc, text, (guint16)len);
-}
-
-/* AdwEntryRow swallows Enter for its own entry-activated signal,
- * which bypasses the dialog's default-response binding. Bridge it
- * by running the same logic as the Send button (see the open-user
- * dialog for the same trick). */
-static void
-on_broadcast_entry_activated (AdwEntryRow *entry, gpointer data)
-{
-    AdwAlertDialog *dialog = data;
-    const char *text = gtk_editable_get_text (GTK_EDITABLE (entry));
-    gsize len;
-    if (text && *text) {
-        len = strlen (text);
-        if (len > 0xfffe) {
-            len = 0xfffe;
-        }
-        hx_send_broadcast (&hx_active_session ()->htlc, text, (guint16)len);
-    }
-    adw_dialog_close (ADW_DIALOG (dialog));
-}
-
-/* Open the Broadcast composer — an AdwAlertDialog with an
- * AdwEntryRow in an AdwPreferencesGroup, mirroring the Open User
- * dialog's shape. Send is the default + suggested-action response;
- * Cancel / Esc / window-close dismiss without sending. The button
- * is hidden when the account lacks HL_ACCESS_CAN_BROADCAST, so by
- * the time this fires we expect the server to accept; if it
- * doesn't, the task_error path handles the rejection. */
-static void
-on_broadcast_button_clicked (GtkButton *btn, gpointer user_data)
-{
-    AdwDialog *dialog;
-    GtkWidget *prefs_grp;
-    GtkWidget *entry;
-    (void)btn;
-    (void)user_data;
-
-    if (!hx_active_session ()->htlc.fd) {
-        return;
-    }
-
-    dialog = adw_alert_dialog_new (
-        _ ("Broadcast"),
-        _ ("Send a broadcast message to every user on the server."));
-
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
-                                   _ ("_Cancel"));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "send",
-                                   _ ("_Send"));
-    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "send",
-                                              ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "send");
-    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
-
-    prefs_grp = adw_preferences_group_new ();
-    entry = adw_entry_row_new ();
-    adw_preferences_row_set_title (ADW_PREFERENCES_ROW (entry),
-                                   _ ("Message"));
-    adw_preferences_group_add (ADW_PREFERENCES_GROUP (prefs_grp), entry);
-    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), prefs_grp);
-
-    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
-
-    g_signal_connect (dialog, "response", G_CALLBACK (on_broadcast_response),
-                      entry);
-    g_signal_connect (entry, "entry-activated",
-                      G_CALLBACK (on_broadcast_entry_activated), dialog);
-
-    adw_dialog_present (dialog,
-                        toolbar_window ? GTK_WIDGET (toolbar_window) : NULL);
-    gtk_widget_grab_focus (entry);
-}
+/* The Broadcast composer + wire sender (on_broadcast_response /
+ * on_broadcast_entry_activated / on_broadcast_button_clicked, and
+ * msg.c::hx_send_broadcast) moved to Rust (gtkhx-ui broadcast.rs). The
+ * Broadcast button connects to this #[no_mangle] export. */
+extern void gtkhx_broadcast_dialog_open (GtkButton *btn, gpointer user_data);
 
 /* app.open_bookmark fires from the AdwSplitButton's
  * dropdown menu. The GVariant parameter carries the bookmark
@@ -1035,7 +942,7 @@ create_toolbar_window (session *sess)
 	 * before they have permission to use it. */
     broadcast_btn = make_pixmap_button (
         "/com/nasledov/gtkhx/pixmaps/broadcast.png", _ ("Broadcast"),
-        G_CALLBACK (on_broadcast_button_clicked), sess);
+        G_CALLBACK (gtkhx_broadcast_dialog_open), sess);
     gtk_widget_set_sensitive (broadcast_btn, FALSE);
     gtk_box_append (GTK_BOX (hbox), broadcast_btn);
 

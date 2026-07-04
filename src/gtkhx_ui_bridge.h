@@ -36,6 +36,12 @@ extern void gtkhx_session_set_agreementwin (struct _session *sess,
 struct htlc_conn;
 extern struct htlc_conn *gtkhx_active_htlc (void);
 
+/* Active-session predicates for the Rust Broadcast composer (broadcast.rs):
+ * gtkhx_active_connected — htlc.fd != 0; gtkhx_active_text_encoding —
+ * HTLC_CAP_TEXT_ENCODING negotiated. */
+extern gboolean gtkhx_active_connected (void);
+extern gboolean gtkhx_active_text_encoding (void);
+
 /* Connect dialog (connect.rs). Set the session's HOPE compress / cipher
  * algorithm names (NULL or "" clears them) and fire hx_connect. Keeps
  * the sess->htlc.{compressalg,cipheralg} field pokes in C so the Rust

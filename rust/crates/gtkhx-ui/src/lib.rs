@@ -111,6 +111,11 @@ pub mod create_post;
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
 pub mod emoji;
+// R5.26: the Broadcast composer + wire sender (was toolbar.c's broadcast
+// dialog + msg.c's hx_send_broadcast). AdwAlertDialog + AdwEntryRow; the wire
+// build is native hotline-proto, the text encoder / task / write stay C.
+// gtkhx_broadcast_dialog_open is this module's #[no_mangle] export.
+pub mod broadcast;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///
