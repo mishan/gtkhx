@@ -383,6 +383,25 @@ extern void gtkhx_voice_runtime_set_user_volume (gtkhx_voice_runtime *rt,
 extern double gtkhx_voice_runtime_user_volume (gtkhx_voice_runtime *rt,
                                                uint16_t uid);
 
+/*
+ * Hot-swap the capture / playback device on an ALREADY-RUNNING
+ * runtime. The global gtkhx_voice_set_*_device setters above only
+ * affect bins built on the NEXT join; these rebuild the live send bin
+ * / receive bins in place so a device change in Settings takes effect
+ * immediately, without a Leave + Join, and without renegotiating the
+ * WebRTC session (the existing transceiver pads are reused).
+ *
+ * Call order from the Settings change handler: update the global
+ * preference first (gtkhx_voice_set_input_device), THEN reload the
+ * active runtime — the reload reads the freshly-stored preference.
+ * NULL-safe on the runtime pointer (drops the call); a no-op when the
+ * runtime has no live pipeline. Main-thread only.
+ */
+extern void gtkhx_voice_runtime_reload_input_device (
+    gtkhx_voice_runtime *rt);
+extern void gtkhx_voice_runtime_reload_output_device (
+    gtkhx_voice_runtime *rt);
+
 /* Fire Event::SdpOfferReceived { cid, sdp }. sdp is a NUL-terminated
  * C string; NULL is treated as empty (and dropped by the state
  * machine's downstream parser). */
