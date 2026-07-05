@@ -162,16 +162,25 @@ symbols are introduced ahead of use.
     (membership test); `user_list` repopulates the Users view straight from the
     model, and `user_change`'s cid=0 fan-out gates each pchat on `_contains`.
     Leaves `rcv.c` the only C code still touching `chat->users`.
-  - **M4b.4b-iii-B — rcv.c → model; delete `chat->users` (remaining).** rcv.c's
-    USER_LIST / USER_CHANGE / USER_LEAVE stop creating/reading `hx_user` in
-    `chat->users`: read old state (rename detection, colour preservation) via
-    `hx_member_model_get_info`, and emit `user_create`/`_change` with a minimal
-    transient `hx_user {uid, nick_color}` (the fan-out reads only those two).
-    `options.c`'s self nick-colour writer likewise. Then delete `chat->users` +
+  - ✅ **M4b.4b-iii prep — pure decision helper + Tier-2 tests (shipped).**
+    USER_CHANGE's branchy decisions (self / adopt-self-uid / new-vs-change /
+    skip-self-create / colour + nick-colour preserve / rename notice) are
+    display-only and unobservable from the wire-level Tier 3 harness, so they
+    were lifted into a side-effect-free helper
+    `hx_user_change_plan_resolve(uc, old state…, self…, *out)` in
+    `proto_helpers.{c,h}` and pinned by `tests/proto/test_user_change.c`.
+    `hx_rcv_user_change` now calls the helper for every decision — **old state
+    still from `chat->users`, behaviour-preserving.** This replaces the earlier
+    "Tier 3 first" plan: the integration harness can't observe client model
+    state, so a Tier-2 pure helper is the right guard for the hot path.
+  - **M4b.4b-iii-B — rcv.c → model; delete `chat->users` (remaining).** With the
+    decision logic already tested, this slice only swaps the helper's old-state
+    source from `chat->users` to `hx_member_model_get_info`, and emits
+    `user_create`/`_change` with a minimal transient `hx_user {uid, nick_color}`
+    (the fan-out reads only those two). `options.c`'s self nick-colour writer
+    likewise. Then delete `chat->users` +
     `hx_user_new`/`_delete`/`_with_uid`/`_with_name` + the `hx_user_*`
-    accessors (`struct hx_user` shrinks to the transient carrier). **The
-    highest-risk slice — rcv.c hot path, no display tests — best validated with
-    a Tier 3 join/rename/recolour/leave test against mhxd/Janus first.**
+    accessors (`struct hx_user` shrinks to the transient carrier).
 
 - **M4b.5 — `Conversation` replaces `struct chat`.** With membership,
   history, media, and render-cursors already Rust or view-local, `struct chat`
