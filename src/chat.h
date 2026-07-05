@@ -9,11 +9,6 @@ extern GdkRGBA colors[];
  * gtkhx.c calls it during init, before any other chat_* operation. */
 extern void chats_init (session *sess);
 
-/* lazy-allocate the session's gtkhx_chat (UI side)
- * GHashTable. create_chat seeds the public chat (cid=0) UI;
- * pchat_new inserts pchat windows. */
-extern void gchats_init (session *sess);
-
 extern struct chat *chat_new (session *sess, guint32 cid);
 extern void chat_delete (session *sess, struct chat *chat);
 extern struct chat *chat_with_cid (session *sess, guint32 cid);

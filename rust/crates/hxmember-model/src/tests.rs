@@ -178,3 +178,57 @@ fn member_carries_model_fields() {
     assert_eq!(got.with_name(|n| n.len()), 5); // "carol"
     assert!(got.with_name(|n| n == "carol"));
 }
+
+#[test]
+fn ignore_defaults_false_and_round_trips() {
+    let model = HxMemberModel::new();
+    model.upsert(&mem(1, "alice"));
+    // A wire-created member starts un-ignored.
+    assert!(!model.get_ignore(1));
+    assert!(model.set_ignore(1, true));
+    assert!(model.get_ignore(1));
+    assert!(model.set_ignore(1, false));
+    assert!(!model.get_ignore(1));
+}
+
+#[test]
+fn ignore_survives_a_presence_update() {
+    // The whole point of moving ignore onto the model: a USER_CHANGE
+    // (rename/recolour → upsert of the same uid) must NOT clear it.
+    let model = HxMemberModel::new();
+    model.upsert(&mem(1, "alice"));
+    model.set_ignore(1, true);
+    model.upsert(&mem(1, "alicia")); // rename — in-place update
+    assert_eq!(model.get(1).unwrap().name(), "alicia");
+    assert!(model.get_ignore(1), "ignore cleared by a presence update");
+}
+
+#[test]
+fn ignore_on_absent_uid_is_false_and_noop() {
+    let model = HxMemberModel::new();
+    assert!(!model.get_ignore(42));
+    assert!(!model.set_ignore(42, true)); // no member → returns false
+    assert!(!model.get_ignore(42));
+    // toggle on an absent uid stays false (nothing to flip).
+    assert!(!model.toggle_ignore(42));
+}
+
+#[test]
+fn toggle_ignore_flips_and_returns_new_state() {
+    let model = HxMemberModel::new();
+    model.upsert(&mem(5, "dave"));
+    assert!(model.toggle_ignore(5)); // false → true
+    assert!(model.get_ignore(5));
+    assert!(!model.toggle_ignore(5)); // true → false
+    assert!(!model.get_ignore(5));
+}
+
+#[test]
+fn ignore_dropped_when_member_removed_and_readded() {
+    let model = HxMemberModel::new();
+    model.upsert(&mem(1, "alice"));
+    model.set_ignore(1, true);
+    model.remove(1);
+    model.upsert(&mem(1, "alice")); // a fresh join is a fresh member
+    assert!(!model.get_ignore(1));
+}

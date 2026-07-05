@@ -42,33 +42,14 @@ G_BEGIN_DECLS
 #define HX_TYPE_USER_ROW (hx_user_row_get_type ())
 G_DECLARE_FINAL_TYPE (HxUserRow, hx_user_row, HX, USER_ROW, GObject)
 
-/* Construct a row over a borrowed `user`. `nam` is g_strdup'd into
- * the row; `icon` and `color` are stored verbatim. `color` is the
- * 2-bit status field (idle / admin), same shape user_color_gdk
- * reads. The foreground is computed via user_nick_color_gdk and
- * cached for the cell renderer; pass user==NULL only in the
- * unusual "placeholder row" case. */
-extern HxUserRow *hx_user_row_new (struct hx_user *user, const char *nam,
-                                   guint16 icon, guint16 color);
-
-/* In-place mutator. Triggers the "changed" signal so the view's
- * sort model re-orders + the cell re-snapshots. Stash whatever
- * the caller just received from a USER_CHANGE event — name, icon,
- * status color — without throwing away the row identity. */
-extern void hx_user_row_set_state (HxUserRow *row, const char *nam,
-                                   guint16 icon, guint16 color);
-
-/* Fire "changed" without mutating any state. Used when something the
- * cell reads outside the row's own fields changed — e.g. this user's
- * GIF avatar landed in the avatar cache — so the cell re-snapshots and
- * picks it up. The sort key is unchanged, so the row keeps its
- * position. */
-extern void hx_user_row_touch (HxUserRow *row);
+/* M4b.3b-ii-B: the row is built + mutated from Rust (HxUserListView), so
+ * hx_user_row_new / _set_state / _touch are no longer part of the C ABI;
+ * and hx_user_row_get_user is gone — the row no longer holds an hx_user*.
+ * Only the cell-facing field getters below remain C-visible. */
 
 /* Field accessors. Strings are NUL-terminated UTF-8 owned by the
  * row; callers MUST NOT free. user_color_gdk-style foreground is
  * NULL for the "regular user, theme default" slot. */
-extern struct hx_user *hx_user_row_get_user (HxUserRow *row);
 extern const char *hx_user_row_get_name (HxUserRow *row);
 extern guint16 hx_user_row_get_icon (HxUserRow *row);
 extern guint16 hx_user_row_get_color (HxUserRow *row);

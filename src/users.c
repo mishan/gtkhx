@@ -199,7 +199,8 @@ hx_user_with_name (struct chat *chat, const char *name)
 
 struct UserActionCtx {
     session *sess;
-    struct hx_user *user;
+    guint32 cid;
+    guint16 uid;
 };
 
 static void prompt_chat (session *sess, guint16 uid);
@@ -216,10 +217,10 @@ on_user_kick (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     (void)action;
     (void)param;
-    if (!ctx->user) {
+    if (!ctx || !ctx->sess) {
         return;
     }
-    hx_kick_user (&ctx->sess->htlc, ctx->user->uid, 0);
+    hx_kick_user (&ctx->sess->htlc, ctx->uid, 0);
 }
 
 static void
@@ -228,10 +229,10 @@ on_user_ban (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     (void)action;
     (void)param;
-    if (!ctx->user) {
+    if (!ctx || !ctx->sess) {
         return;
     }
-    hx_kick_user (&ctx->sess->htlc, ctx->user->uid, 1);
+    hx_kick_user (&ctx->sess->htlc, ctx->uid, 1);
 }
 
 static void
@@ -240,12 +241,15 @@ on_user_ignore (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     (void)action;
     (void)param;
-    if (!ctx->user) {
+    struct hx_member_info mi;
+    struct chat *c
+        = (ctx && ctx->sess) ? chat_with_cid (ctx->sess, ctx->cid) : NULL;
+    if (!c || !hx_member_model_get_info (c->member_model, ctx->uid, &mi)) {
         return;
     }
-    ctx->user->ignore = 1;
+    hx_member_model_set_ignore (c->member_model, ctx->uid, TRUE);
     hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
-                      _ ("ignore: %s is now ignored\n"), ctx->user->name);
+                      _ ("ignore: %s is now ignored\n"), mi.name);
 }
 
 static void
@@ -254,12 +258,15 @@ on_user_unignore (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     (void)action;
     (void)param;
-    if (!ctx->user) {
+    struct hx_member_info mi;
+    struct chat *c
+        = (ctx && ctx->sess) ? chat_with_cid (ctx->sess, ctx->cid) : NULL;
+    if (!c || !hx_member_model_get_info (c->member_model, ctx->uid, &mi)) {
         return;
     }
-    ctx->user->ignore = 0;
+    hx_member_model_set_ignore (c->member_model, ctx->uid, FALSE);
     hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
-                      _ ("ignore: %s is now unignored\n"), ctx->user->name);
+                      _ ("ignore: %s is now unignored\n"), mi.name);
 }
 
 static void
@@ -268,10 +275,10 @@ on_user_info (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     (void)action;
     (void)param;
-    if (!ctx->user) {
+    if (!ctx || !ctx->sess) {
         return;
     }
-    hx_get_user_info (&ctx->sess->htlc, ctx->user->uid);
+    hx_get_user_info (&ctx->sess->htlc, ctx->uid);
 }
 
 static void
@@ -282,17 +289,20 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
     (void)action;
     (void)param;
 
-    if (!ctx->user) {
+    struct hx_member_info mi;
+    struct chat *c
+        = (ctx && ctx->sess) ? chat_with_cid (ctx->sess, ctx->cid) : NULL;
+    if (!c || !hx_member_model_get_info (c->member_model, ctx->uid, &mi)) {
         return;
     }
 
-    if ((msg = msgwin_with_uid (ctx->user->uid))) {
+    if ((msg = msgwin_with_uid (mi.uid))) {
         /* Existing msgwin — just raise its tab inside the Chat
          * panel. The Chat panel itself gets attached / raised by
          * gtkhx_chat_tabs_raise_msg if it's hidden. */
-        gtkhx_chat_tabs_raise_msg (ctx->user->uid);
+        gtkhx_chat_tabs_raise_msg (mi.uid);
     } else {
-        create_msgwin (ctx->user->uid, ctx->user->name);
+        create_msgwin (mi.uid, mi.name);
     }
 }
 
@@ -304,16 +314,17 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
     (void)action;
     (void)param;
 
-    if (!ctx->user) {
+    if (!ctx || !ctx->sess) {
         return;
     }
 
-    if (ctx->sess->gchats) {
+    if (ctx->sess->chats) {
         GHashTableIter iter;
-        gpointer key;
-        g_hash_table_iter_init (&iter, ctx->sess->gchats);
-        while (g_hash_table_iter_next (&iter, &key, NULL)) {
-            if (GPOINTER_TO_UINT (key) != 0) {
+        gpointer key, val;
+        g_hash_table_iter_init (&iter, ctx->sess->chats);
+        while (g_hash_table_iter_next (&iter, &key, &val)) {
+            struct chat *c = val;
+            if (GPOINTER_TO_UINT (key) != 0 && c->view) {
                 with_cid = 1;
                 break;
             }
@@ -321,9 +332,9 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
     }
 
     if (!with_cid) {
-        hx_chat_user (&ctx->sess->htlc, ctx->user->uid);
+        hx_chat_user (&ctx->sess->htlc, ctx->uid);
     } else {
-        prompt_chat (ctx->sess, ctx->user->uid);
+        prompt_chat (ctx->sess, ctx->uid);
     }
 }
 
@@ -335,11 +346,10 @@ on_user_toggle_anim (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     (void)action;
     (void)param;
-    if (!ctx->user) {
+    if (!ctx) {
         return;
     }
-    gtkhx_avatar_set_paused (ctx->user->uid,
-                             !gtkhx_avatar_is_paused (ctx->user->uid));
+    gtkhx_avatar_set_paused (ctx->uid, !gtkhx_avatar_is_paused (ctx->uid));
 }
 
 /* Tthe GActionEntry table that drove the old GtkPopoverMenu
@@ -466,12 +476,12 @@ on_user_volume_changed (GtkRange *range, gpointer user_data)
     struct UserActionCtx *ctx = user_data;
     double gain;
 
-    if (!ctx || !ctx->user || !ctx->sess || !ctx->sess->voice_runtime) {
+    if (!ctx || !ctx->sess || !ctx->sess->voice_runtime) {
         return;
     }
     gain = gtk_range_get_value (range) / 100.0;
     gtkhx_voice_runtime_set_user_volume (ctx->sess->voice_runtime,
-                                         ctx->user->uid, gain);
+                                         ctx->uid, gain);
 }
 
 /* Append a "Volume" label + horizontal GtkScale (0..150 %) to the
@@ -511,7 +521,7 @@ user_popup_append_volume (GtkBox *vbox, struct UserActionCtx *ctx)
      * slider can only ever store 0..150% itself; this guards a value
      * set by some future caller / bad FFI. */
     stored = gtkhx_voice_runtime_user_volume (ctx->sess->voice_runtime,
-                                              ctx->user->uid) * 100.0;
+                                              ctx->uid) * 100.0;
     stored = CLAMP (stored, 0.0, 150.0);
     gtk_range_set_value (GTK_RANGE (scale), stored);
 
@@ -526,25 +536,36 @@ user_popup_append_volume (GtkBox *vbox, struct UserActionCtx *ctx)
  * old static `user_popup' wrapper retired with the legacy
  * user_pressed handler (Phase C). */
 void
-user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
+user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
                  double x, double y)
 {
     GtkWidget *popover, *vbox, *info_label, *sep, *parent;
     struct UserActionCtx *ctx;
+    struct hx_member_info mi;
     char *info_markup;
     GdkRectangle rect;
     graphene_point_t src_pt = { (float)x, (float)y };
     graphene_point_t dst_pt = { (float)x, (float)y };
 
-    if (!user || !sess) {
+    if (!sess) {
         return;
+    }
+    /* Resolve the member for the header + capability checks. The handlers
+     * re-resolve from (cid, uid) at click time, so a member that leaves
+     * while the menu is open just makes them no-op. */
+    {
+        struct chat *c = chat_with_cid (sess, cid);
+        if (!c || !hx_member_model_get_info (c->member_model, uid, &mi)) {
+            return;
+        }
     }
 
     user_popup_install_css ();
 
     ctx = g_new0 (struct UserActionCtx, 1);
     ctx->sess = sess;
-    ctx->user = user;
+    ctx->cid = cid;
+    ctx->uid = uid;
 
     parent = GTK_WIDGET (gtk_widget_get_root (anchor));
     if (!parent) {
@@ -575,9 +596,9 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
 
     /* Header: bold name + dim details. */
     info_markup = g_markup_printf_escaped (
-        "<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>", user->name,
-        user->uid, user->icon, user->color >= 2 ? _ ("Admin") : _ ("Guest"),
-        user->color % 2 ? _ (" (Away)") : "");
+        "<b>%s</b>\n<small>UID %d · Icon %d · %s%s</small>", mi.name,
+        mi.uid, mi.icon, mi.status >= 2 ? _ ("Admin") : _ ("Guest"),
+        mi.status % 2 ? _ (" (Away)") : "");
     info_label = gtk_label_new (NULL);
     gtk_label_set_markup (GTK_LABEL (info_label), info_markup);
     gtk_label_set_xalign (GTK_LABEL (info_label), 0.0);
@@ -623,12 +644,12 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
     /* GIF-icons (Phase 10.D): pause / resume this user's animated
 	 * avatar. Only shown when they actually have an animated one — the
 	 * discoverable counterpart to clicking the avatar directly. */
-    if (gtkhx_avatar_is_animated (user->uid)) {
+    if (gtkhx_avatar_is_animated (uid)) {
         gtk_box_append (GTK_BOX (vbox),
                         gtk_separator_new (GTK_ORIENTATION_HORIZONTAL));
         user_popup_append_button (
             GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
-            gtkhx_avatar_is_paused (user->uid) ? _ ("Resume Animation")
+            gtkhx_avatar_is_paused (uid) ? _ ("Resume Animation")
                                                : _ ("Pause Animation"),
             on_user_toggle_anim);
     }
@@ -639,7 +660,7 @@ user_popup_show (GtkWidget *anchor, struct hx_user *user, session *sess,
      * A dialog-free inline GtkScale — drag to set how loud you hear
      * this person; session-scoped, applied live. */
     if (sess->voice_model
-        && hx_voice_model_get_indicator (sess->voice_model, user->uid)
+        && hx_voice_model_get_indicator (sess->voice_model, uid)
                != HX_VOICE_INDICATOR_NONE
         && sess->voice_runtime) {
         gtk_box_append (GTK_BOX (vbox),
@@ -762,7 +783,6 @@ prompt_chat (session *sess, guint16 _uid)
 {
     AdwDialog *dialog;
     GtkWidget *listbox, *scroll;
-    struct gtkhx_chat *gchat;
     struct prompt_chat_ctx *ctx;
 
     dialog = adw_alert_dialog_new (
@@ -802,18 +822,14 @@ prompt_chat (session *sess, guint16 _uid)
     gtkhx_widget_set_child (scroll, listbox);
     gtk_widget_set_size_request (scroll, 350, 200);
 
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            gchat = val;
-            if (!gchat->cid) {
-                continue;
-            }
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            if (!c) {
-                continue;
+            struct chat *c = val;
+            if (!c->cid || !c->view) {
+                continue;   /* skip the public chat + window-less models */
             }
             GtkWidget *row = prompt_chat_make_row (c->cid, c->subject);
             gtk_list_box_append (GTK_LIST_BOX (listbox), row);
@@ -867,19 +883,20 @@ user_list (session *sess)
 
     pub = chat_with_cid (sess, 0);
     hx_user_list_view_clear (sess->users_view);
-    if (pub && pub->users) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, pub->users);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct hx_user *user = val;
-            /* Emit via the signal so any listener (incl. the
-			 * per-pchat sidebars when the cid==0 broadcast lands
-			 * on them downstream) sees a single canonical add. */
-            gtkhx_session_emit_user_create (gtkhx_session_get_default (),
-                                            &sess->htlc, pub, user, user->name,
-                                            user->icon, user->color);
+    if (!pub) {
+        return;
+    }
+    /* Repopulate the standalone Users view straight from the public chat's
+     * membership model (M4b.4b-iii) — the model is the store now, and
+     * user_create(cid=0) only ever added to this same view anyway. */
+    guint n = hx_member_model_count (pub->member_model);
+    for (guint i = 0; i < n; i++) {
+        struct hx_member_info mi;
+        if (!hx_member_model_get_at (pub->member_model, i, &mi)) {
+            continue;
         }
+        hx_user_list_view_add (sess->users_view, mi.uid, mi.name, mi.icon,
+                               mi.status, mi.nick_color);
     }
 }
 
@@ -888,16 +905,30 @@ user_list (session *sess)
  * Users window and the pchat sidebars in chat.c.
  *
  * The `data' parameter is the HxUserListView* the button is attached
- * to. view_selected_user reads the current single-selection; the
+ * to. view_selected_member reads the current single-selection; the
  * session pointer is borrowed from the view (set at construction). */
-static struct hx_user *
-view_selected_user (gpointer data)
+/* Fill *out with the acted-on member from the view's live selection,
+ * resolved fresh from (cid, uid) against the view's member model (M4b.4b-ii).
+ * Returns FALSE when nothing is selected or the member has since left. The
+ * fresh resolution also avoids the old use-after-free (a borrowed hx_user*
+ * that dangled if the user left between selection and the button click). */
+static gboolean
+view_selected_member (gpointer data, struct hx_member_info *out)
 {
     HxUserListView *v = data;
+    session *sess;
+    guint16 uid;
+    struct chat *c;
     if (!v) {
-        return NULL;
+        return FALSE;
     }
-    return hx_user_list_view_get_selected_user (v);
+    sess = hx_user_list_view_get_session (v);
+    uid = hx_user_list_view_get_selected_uid (v);
+    if (!sess || !uid) {
+        return FALSE;
+    }
+    c = chat_with_cid (sess, hx_user_list_view_get_cid (v));
+    return c && hx_member_model_get_info (c->member_model, uid, out);
 }
 
 static session *
@@ -907,101 +938,115 @@ view_session (gpointer data)
     return v ? hx_user_list_view_get_session (v) : NULL;
 }
 
+/* The chat id the view lists — pairs with a selected uid to reach the
+ * per-chat member_model (e.g. the ignore toggle). */
+static guint32
+view_cid (gpointer data)
+{
+    HxUserListView *v = data;
+    return v ? hx_user_list_view_get_cid (v) : 0;
+}
+
 void
 view_msg_btn (GtkWidget *w, gpointer data)
 {
-    struct hx_user *user = view_selected_user (data);
+    struct hx_member_info mi;
     struct msgwin *mw;
     (void)w;
-    if (!user) {
+    if (!view_selected_member (data, &mi)) {
         return;
     }
-    mw = msgwin_with_uid (user->uid);
+    mw = msgwin_with_uid (mi.uid);
     if (mw) {
-        gtkhx_chat_tabs_raise_msg (user->uid);
+        gtkhx_chat_tabs_raise_msg (mi.uid);
     } else {
-        create_msgwin (user->uid, user->name);
+        create_msgwin (mi.uid, mi.name);
     }
 }
 
 void
 view_info_btn (GtkWidget *w, gpointer data)
 {
-    struct hx_user *user = view_selected_user (data);
+    struct hx_member_info mi;
     session *sess = view_session (data);
     (void)w;
-    if (!user || !sess) {
+    if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    hx_get_user_info (&sess->htlc, user->uid);
+    hx_get_user_info (&sess->htlc, mi.uid);
 }
 
 void
 view_kick_btn (GtkWidget *w, gpointer data)
 {
-    struct hx_user *user = view_selected_user (data);
+    struct hx_member_info mi;
     session *sess = view_session (data);
     (void)w;
-    if (!user || !sess) {
+    if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    hx_kick_user (&sess->htlc, user->uid, 0);
+    hx_kick_user (&sess->htlc, mi.uid, 0);
 }
 
 void
 view_ban_btn (GtkWidget *w, gpointer data)
 {
-    struct hx_user *user = view_selected_user (data);
+    struct hx_member_info mi;
     session *sess = view_session (data);
     (void)w;
-    if (!user || !sess) {
+    if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    hx_kick_user (&sess->htlc, user->uid, 1);
+    hx_kick_user (&sess->htlc, mi.uid, 1);
 }
 
 void
 view_igno_btn (GtkWidget *w, gpointer data)
 {
-    struct hx_user *user = view_selected_user (data);
+    struct hx_member_info mi;
     session *sess = view_session (data);
     (void)w;
-    if (!user || !sess) {
+    if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    user->ignore ^= 1;
+    struct chat *c = chat_with_cid (sess, view_cid (data));
+    if (!c) {
+        return;
+    }
+    gboolean ig = hx_member_model_toggle_ignore (c->member_model, mi.uid);
     hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
-                      user->ignore ? _ ("ignore: %s is now ignored\n")
-                                   : _ ("ignore: %s is now unignored"),
-                      user->name);
+                      ig ? _ ("ignore: %s is now ignored\n")
+                         : _ ("ignore: %s is now unignored"),
+                      mi.name);
 }
 
 void
 view_chat_btn (GtkWidget *w, gpointer data)
 {
-    struct hx_user *user = view_selected_user (data);
+    struct hx_member_info mi;
     session *sess = view_session (data);
     int with_cid = 0;
     (void)w;
 
-    if (!user || !sess) {
+    if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
-        gpointer key;
-        g_hash_table_iter_init (&iter, sess->gchats);
-        while (g_hash_table_iter_next (&iter, &key, NULL)) {
-            if (GPOINTER_TO_UINT (key) != 0) {
+        gpointer key, val;
+        g_hash_table_iter_init (&iter, sess->chats);
+        while (g_hash_table_iter_next (&iter, &key, &val)) {
+            struct chat *c = val;
+            if (GPOINTER_TO_UINT (key) != 0 && c->view) {
                 with_cid = 1;
                 break;
             }
         }
     }
     if (!with_cid) {
-        hx_chat_user (&sess->htlc, user->uid);
+        hx_chat_user (&sess->htlc, mi.uid);
     } else {
-        prompt_chat (sess, user->uid);
+        prompt_chat (sess, mi.uid);
     }
 }
 
@@ -1107,13 +1152,23 @@ hx_user_name (const struct hx_user *user)
     return user ? user->name : NULL;
 }
 
-GdkRGBA *
-user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
+guint32
+hx_user_nick_color (const struct hx_user *user)
 {
-    if (user && user->nick_color != HX_NICK_COLOR_NONE && out) {
-        double r = ((user->nick_color >> 16) & 0xff) / 255.0;
-        double g = ((user->nick_color >> 8) & 0xff) / 255.0;
-        double b = (user->nick_color & 0xff) / 255.0;
+    return user ? user->nick_color : HX_NICK_COLOR_NONE;
+}
+
+/* Pointer-free core (M4b.3b): compute a foreground from a raw nick_color +
+ * status, so the view row can cache its nick_color and recompute fg without
+ * a live struct hx_user*. HX_NICK_COLOR_NONE falls through to the status
+ * palette. */
+GdkRGBA *
+user_nick_color_rgb (guint32 nick_color, guint16 status, GdkRGBA *out)
+{
+    if (nick_color != HX_NICK_COLOR_NONE && out) {
+        double r = ((nick_color >> 16) & 0xff) / 255.0;
+        double g = ((nick_color >> 8) & 0xff) / 255.0;
+        double b = (nick_color & 0xff) / 255.0;
         /* status bit 0 = idle/away, bit 1 = admin. When the user
 		 * is idle, dim their custom color so the idle indication
 		 * still reads visually — without this an away user with a
@@ -1133,6 +1188,12 @@ user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
         return out;
     }
     return user_color_gdk (status);
+}
+
+GdkRGBA *
+user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
+{
+    return user_nick_color_rgb (hx_user_nick_color (user), status, out);
 }
 
 void
@@ -1162,7 +1223,8 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         if (!gchat || !gchat->userlist) {
             return;
         }
-        hx_user_list_view_add (gchat->userlist, user, nam, icon, color);
+        hx_user_list_view_add (gchat->userlist, user->uid, nam, icon,
+                               color, user->nick_color);
         return;
     }
 
@@ -1174,7 +1236,8 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
     }
-    hx_user_list_view_add (sess->users_view, user, nam, icon, color);
+    hx_user_list_view_add (sess->users_view, user->uid, nam, icon, color,
+                           user->nick_color);
 }
 
 void
@@ -1192,7 +1255,7 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
         if (!gchat || !gchat->userlist) {
             return;
         }
-        hx_user_list_view_remove (gchat->userlist, user);
+        hx_user_list_view_remove (gchat->userlist, user->uid);
         return;
     }
 
@@ -1200,7 +1263,7 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
     }
-    hx_user_list_view_remove (sess->users_view, user);
+    hx_user_list_view_remove (sess->users_view, user->uid);
 }
 
 void
@@ -1230,7 +1293,8 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 		 * re-snapshots. The row keeps its GObject identity so the
 		 * sidebar selection stays on the same user across rename or
 		 * icon change. */
-        hx_user_list_view_update (gchat->userlist, user, nam, icon, color);
+        hx_user_list_view_update (gchat->userlist, user->uid, nam, icon,
+                                  color, user->nick_color);
         return;
     }
 
@@ -1239,22 +1303,24 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 	 * BEFORE the Users-window update so the recursion shape is the
 	 * same as the legacy code; both arms compute the foreground
 	 * from the freshly-parsed `color`. */
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             if (GPOINTER_TO_UINT (key) == 0) {
-                continue;
+                continue;   /* public chat handled via the standalone view */
             }
-            gchat = val;
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            if (!c) {
-                continue;
+            struct chat *c = val;
+            if (!c->view) {
+                continue;   /* only open private-chat windows */
             }
-            struct hx_user *u = hx_user_with_uid (c, user->uid);
-            if (u) {
-                user_change (&sess->htlc, c, u, nam, icon, color);
+            /* Only fan the change into pchats this user is actually in
+			 * (M4b.4b-iii: the membership check is the model now). The
+			 * same `user` carrier works — user_change reads only its uid +
+			 * nick_color, which are the same across chats. */
+            if (hx_member_model_contains (c->member_model, user->uid)) {
+                user_change (&sess->htlc, c, user, nam, icon, color);
             }
         }
     }
@@ -1265,7 +1331,8 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 		 * re-orders, the column-view cell re-snapshots). The row
 		 * keeps its GObject identity, so the live selection stays
 		 * on the same user across rename or icon change. */
-        hx_user_list_view_update (sess->users_view, user, nam, icon, color);
+        hx_user_list_view_update (sess->users_view, user->uid, nam, icon, color,
+                              user->nick_color);
     }
 
     /* if this user has an open PM window, refresh its info
@@ -1295,31 +1362,21 @@ users_refresh_avatar (guint16 uid)
 	 * Users window (public chat). We look the hx_user up per chat
 	 * because the row<->user mapping is keyed on the struct pointer,
 	 * which differs per chat. */
-    if (sess->gchats) {
+    if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->gchats);
+        g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
-            struct gtkhx_chat *gchat = val;
+            struct chat *c = val;
+            struct gtkhx_chat *gchat = c->view;
             if (!gchat || !gchat->userlist) {
                 continue;
             }
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            if (!c) {
-                continue;
-            }
-            struct hx_user *u = hx_user_with_uid (c, uid);
-            if (u) {
-                hx_user_list_view_refresh_avatar (gchat->userlist, u);
-            }
+            hx_user_list_view_refresh_avatar (gchat->userlist, uid);
         }
     }
 
     if (sess->users_view && gtkhx_prefs.geo.users.open) {
-        struct chat *pub = chat_with_cid (sess, 0);
-        struct hx_user *u = pub ? hx_user_with_uid (pub, uid) : NULL;
-        if (u) {
-            hx_user_list_view_refresh_avatar (sess->users_view, u);
-        }
+        hx_user_list_view_refresh_avatar (sess->users_view, uid);
     }
 }

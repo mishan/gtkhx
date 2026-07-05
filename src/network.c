@@ -357,7 +357,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
                 if (chat->users) {
                     g_hash_table_remove_all (chat->users);
                 }
-                chat->nusers = 0;
                 chat->subject[0] = '\0';
             }
         }

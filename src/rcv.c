@@ -39,6 +39,7 @@
 #include "network.h"
 #include "xfers.h"
 #include "chat.h"
+#include "chat_members.h" /* hx_member_model_get_ignore (M4b.4a) */
 #include "tasks.h"
 #include "files.h"
 #include "files_remote_provider.h"
@@ -276,8 +277,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
     }
 
     if (msg.uid) { /* do ignoring stuff */
-        struct hx_user *user = hx_user_with_uid (hx_chat, msg.uid);
-        if (user && user->ignore) {
+        if (hx_member_model_get_ignore (hx_chat->member_model, msg.uid)) {
             return;
         }
     }
@@ -366,7 +366,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
     }
 
     user = hx_user_with_uid (chat, pm.uid);
-    if (user && user->ignore) {
+    if (hx_member_model_get_ignore (chat->member_model, pm.uid)) {
         return;
     }
 
@@ -693,7 +693,6 @@ hx_rcv_user_change (struct htlc_conn *htlc)
             return;
         }
         user = hx_user_new (chat, uid);
-        chat->nusers++;
         /* Colored-Nicknames: stamp the per-user nick_color
 		 * onto the user struct BEFORE emitting user-create. The render
 		 * path reads user->nick_color directly (the signal payload
@@ -736,7 +735,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
 		 * our nick on the server) from spamming a redundant
 		 * "misha is now known as misha" notice. Also bail on
 		 * ignored users early so we neither toast nor log them. */
-        if (user->ignore) {
+        if (hx_member_model_get_ignore (chat->member_model, uid)) {
             return;
         }
         if (uid != htlc->uid && nlen > 0 && strcmp (name, user->name) != 0) {
@@ -822,7 +821,6 @@ hx_rcv_user_part (struct htlc_conn *htlc)
         }
 
         hx_user_delete (chat, user);
-        chat->nusers--;
         play_sound (USER_PART);
     }
 }
@@ -892,14 +890,12 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
     struct hx_chat_invite_msg im;
     session *sess = sess_from_htlc (htlc);
     struct chat *chat = chat_with_cid (sess, 0);
-    struct hx_user *user = 0;
 
     if (!hx_chat_invite_extract (htlc, &im)) {
         return;
     }
 
-    user = hx_user_with_uid (chat, im.uid);
-    if (user && user->ignore) {
+    if (hx_member_model_get_ignore (chat->member_model, im.uid)) {
         return;
     }
 #ifdef USE_PLUGIN
@@ -2343,7 +2339,6 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
             if (!user) {
                 new = 1;
                 user = hx_user_new (chat, uid);
-                chat->nusers++;
             }
             user->uid = rec.uid;
             user->icon = rec.icon;
