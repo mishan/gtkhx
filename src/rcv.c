@@ -1759,7 +1759,6 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     guint16 version;
     guint16 len;
     char servername[8192 + 1];
-    session *sess = sess_from_htlc (htlc);
 
     g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
 
@@ -1777,15 +1776,11 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
      * always runs the post-login completion below (pass is always
      * NULL). */
     if (!task_inerror (htlc)) {
-        /* Login task reply came back successful. Announce it as the
-         * "logged-in" signal; the sound_events subscriber plays the LOGIN
-         * chime off it. (Kept distinct from the connection-state
-         * LOGIN_READY milestone, which is agreement-gated and fires later
-         * — or not at all on a server with an unaccepted agreement.) */
-        gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
-        changetitlesconnected (sess);
-        setbtns (sess, 1);
-        set_status_bar (2);
+        /* Login task reply came back successful. The connected-state UI
+         * (window titles / toolbar buttons / status bar) and the LOGIN
+         * chime are driven off the "logged-in" signal, emitted below once
+         * the LOGIN reply has been fully walked — see the emit site after
+         * dh_end(). */
         connected = 1;
 
         /* Seed the opaque HOPE AEAD material handle (if the orchestrated
@@ -1866,7 +1861,9 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 				 * cascade. */
                 server_addr = gtkhx_text_to_utf8 (
                     servername, strlen (servername), NULL);
-                changetitlesconnected (sess);
+                /* The window titles pick this server_addr up when the
+                 * "logged-in" signal is emitted after the walk completes;
+                 * no inline changetitlesconnected re-run needed. */
                 break;
             case HTLS_DATA_CAPABILITIES:
                 /* DATA_CAPABILITIES echo from the server — the bits
@@ -1983,17 +1980,17 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             inline_media_log_advertised_limits (htlc);
         }
 
-        /* Re-run setbtns now that HTLS_DATA_VERSION has been
-		 * parsed out of this same LOGIN reply. The earlier
-		 * setbtns at the top of this branch fires before the
-		 * chunk walker, so htlc->version is still 0 there —
-		 * which leaves news15_btn (the 1.5+ threaded-News
-		 * toolbar button) stuck disabled on every 1.5+ server
-		 * since its gate is is_15plus = (version >= 150).
-		 * The other buttons setbtns touches don't depend on
-		 * version, so running it twice is just an idempotent
-		 * refresh. */
-        setbtns (sess, 1);
+        /* Login processing is complete: uid, version, server name, and
+		 * caps have all been parsed out of this LOGIN reply. Emit the
+		 * "logged-in" signal now so the view-side handler in gtkhx.c
+		 * settles the connected UI in one shot — window titles (needs
+		 * the parsed SERVERNAME → server_addr) and toolbar buttons (the
+		 * news15 button gate is version >= 150, so it needs the parsed
+		 * HTLS_DATA_VERSION) and the status bar — and sound_events plays
+		 * the LOGIN chime. Emitting after the walk rather than before it
+		 * is what lets this be a single settle instead of the old
+		 * set-then-re-run dance. */
+        gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
 
         /* PING keepalive only on confirmed 1.5+ servers.
 		 * htlc->version is populated by the HTLS_DATA_VERSION

@@ -1397,6 +1397,26 @@ on_msg_signal (GtkhxSession *emitter, gpointer event_p, gpointer user_data)
     gtkhx_notify_msg (event);
 }
 
+/* "logged-in" — the LOGIN task reply came back successful and the reply
+ * has been fully walked (so htlc->version, server_addr, and caps are all
+ * settled). Settle the connected-state UI in one shot: window titles
+ * (server_addr-dependent), toolbar buttons (news15 gate is version >=
+ * 150), and the status bar. The LOGIN chime rides the same signal in
+ * sound_events.c. This used to be an inline changetitlesconnected +
+ * setbtns + set_status_bar (twice) in rcv_task_login. */
+static void
+on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                     gpointer user_data)
+{
+    session *sess = hx_active_session ();
+    (void)emitter;
+    (void)htlc;
+    (void)user_data;
+    changetitlesconnected (sess);
+    setbtns (sess, 1);
+    set_status_bar (2);
+}
+
 static void
 on_agreement_signal (GtkhxSession *emitter, gpointer sess, gpointer agreement,
                      guint len, gpointer user_data)
@@ -1751,6 +1771,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
     g_signal_connect (emitter, "chat-history-batch",
                       G_CALLBACK (on_chat_history_batch_signal), NULL);
     g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
+    g_signal_connect (emitter, "logged-in", G_CALLBACK (on_logged_in_signal),
+                      NULL);
     g_signal_connect (emitter, "agreement", G_CALLBACK (on_agreement_signal),
                       NULL);
     g_signal_connect (emitter, "news-file", G_CALLBACK (on_news_file_signal),
