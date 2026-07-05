@@ -1417,6 +1417,20 @@ on_logged_in_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     set_status_bar (2);
 }
 
+/* "self-updated" — our own access bits / uid were (re)parsed from a
+ * SELFINFO reply. Refresh toolbar-button sensitivity, which gates on the
+ * access bitmap (kick/ban, etc.). Was an inline setbtns in
+ * hx_rcv_user_selfinfo. */
+static void
+on_self_updated_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
+                        gpointer user_data)
+{
+    (void)emitter;
+    (void)htlc;
+    (void)user_data;
+    setbtns (hx_active_session (), 1);
+}
+
 static void
 on_agreement_signal (GtkhxSession *emitter, gpointer sess, gpointer agreement,
                      guint len, gpointer user_data)
@@ -1773,6 +1787,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
     g_signal_connect (emitter, "msg", G_CALLBACK (on_msg_signal), NULL);
     g_signal_connect (emitter, "logged-in", G_CALLBACK (on_logged_in_signal),
                       NULL);
+    g_signal_connect (emitter, "self-updated",
+                      G_CALLBACK (on_self_updated_signal), NULL);
     g_signal_connect (emitter, "agreement", G_CALLBACK (on_agreement_signal),
                       NULL);
     g_signal_connect (emitter, "news-file", G_CALLBACK (on_news_file_signal),

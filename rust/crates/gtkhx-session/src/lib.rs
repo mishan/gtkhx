@@ -180,6 +180,13 @@ mod imp {
                     Signal::builder("logged-in")
                         .param_types([Type::POINTER])
                         .build(),
+                    // self-updated: (htlc*) — our own access bits / uid were
+                    // (re)parsed from a SELFINFO reply. Toolbar-button
+                    // sensitivity depends on the access bitmap, so the view
+                    // refreshes it here.
+                    Signal::builder("self-updated")
+                        .param_types([Type::POINTER])
+                        .build(),
                     // agreement: (session*, agreement*, len)
                     Signal::builder("agreement")
                         .param_types([Type::POINTER, Type::POINTER, Type::U32])
@@ -545,6 +552,17 @@ pub unsafe extern "C" fn gtkhx_session_emit_logged_in(
 ) {
     let v = [ptr_value(htlc)];
     emit(self_, "logged-in", &v);
+}
+
+/// # Safety
+/// `self_`/`htlc` valid pointers.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_self_updated(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+) {
+    let v = [ptr_value(htlc)];
+    emit(self_, "self-updated", &v);
 }
 
 /// # Safety
@@ -915,7 +933,7 @@ mod tests {
         // count is a deliberate drift-catcher: adding or removing a signal
         // without updating it (and the matching emit wrapper) trips here.
         // Bump it in lockstep when the signal set changes.
-        assert_eq!(imp::GtkhxSession::signals().len(), 29);
+        assert_eq!(imp::GtkhxSession::signals().len(), 30);
     }
 
     #[test]

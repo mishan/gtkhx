@@ -908,7 +908,10 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
     htlc->flags.logged_in = 1;
 
-    setbtns (sess_from_htlc (htlc), 1);
+    /* Access bits just landed; the view refreshes toolbar-button
+     * sensitivity (kick/ban etc. gate on the access bitmap) off the
+     * "self-updated" signal rather than an inline setbtns here. */
+    gtkhx_session_emit_self_updated (gtkhx_session_get_default (), htlc);
 
     /* Note: SELFINFO is NOT where we fire post-login fetches. In
 	 * the 1.5 flow SELFINFO (TranUserAccess) arrives BEFORE the
