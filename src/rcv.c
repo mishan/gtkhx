@@ -48,7 +48,6 @@
 #include "gtkutil.h"
 #include "msg.h"
 #include "news.h"
-#include "sound.h"
 #include "users.h"
 #include "usermod.h"
 #include "hxnet_bridge.h"
@@ -346,7 +345,8 @@ hx_rcv_chat (struct htlc_conn *htlc)
         gtkhx_session_emit_chat (gtkhx_session_get_default (), htlc, ev);
         hx_chat_event_free (ev);
     }
-    play_sound (CHAT_POST);
+    /* CHAT_POST chime is played by the sound_events subscriber off the
+     * "chat" signal — no inline play_sound here. */
 }
 
 void
@@ -425,7 +425,10 @@ hx_rcv_msg (struct htlc_conn *htlc)
         guint16 sender_color = user ? user->color : 0;
         broadcastmsg (sender_name, sender_color, pm.msg);
     }
-    play_sound (MSG);
+    /* MSG chime: the sound_events subscriber plays it off the "msg"
+     * signal (private-message branch). The broadcast branch has no "msg"
+     * signal, so broadcastmsg() plays MSG itself to preserve the chime
+     * that used to fire here for both branches. */
 
     if (!*last_msg_nick) {
         strncpy (last_msg_nick, pm.name, 31);
@@ -496,7 +499,8 @@ news_post_emit (void *user, const char *bytes, gsize len)
     struct htlc_conn *htlc = user;
     gtkhx_session_emit_news_post (gtkhx_session_get_default (), htlc,
                                   (char *)bytes, (guint16)len);
-    play_sound (NEWS_POST);
+    /* NEWS_POST chime played by the sound_events subscriber off the
+     * "news-post" signal. */
 }
 
 void
@@ -696,10 +700,13 @@ hx_rcv_user_change (struct htlc_conn *htlc)
          * payload doesn't carry it), so emitting first would paint the row
          * from a stale HX_NICK_COLOR_NONE. */
         user->nick_color = plan.eff_nick_color;
+        /* incremental=TRUE: a genuine join broadcast. The sound_events
+         * subscriber plays USER_JOIN off this signal only when the flag
+         * is set, so the bulk user-list load (which passes FALSE) stays
+         * silent. */
         gtkhx_session_emit_user_create (gtkhx_session_get_default (), htlc,
                                         chat, user, name, icon,
-                                        plan.eff_color);
-        play_sound (USER_JOIN);
+                                        plan.eff_color, TRUE);
         if (gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, cid, INFOPREFIX, _ ("join: %s\n"), name);
         }
@@ -785,8 +792,10 @@ hx_rcv_user_part (struct htlc_conn *htlc)
 
     user = hx_user_with_uid (chat, pm.uid);
     if (user) {
+        /* incremental=TRUE: a genuine part broadcast — the sound_events
+         * subscriber plays USER_PART off this signal. */
         gtkhx_session_emit_user_delete (gtkhx_session_get_default (), htlc,
-                                        chat, user);
+                                        chat, user, TRUE);
 
         if (gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, pm.cid, INFOPREFIX, _ ("parts: %s \n"),
@@ -794,7 +803,6 @@ hx_rcv_user_part (struct htlc_conn *htlc)
         }
 
         hx_user_delete (chat, user);
-        play_sound (USER_PART);
     }
 }
 
@@ -879,7 +887,8 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
 #endif
     gtkhx_session_emit_chat_invitation (gtkhx_session_get_default (), htlc,
                                         im.cid, im.name);
-    play_sound (CHAT_INVITE);
+    /* CHAT_INVITE chime played by the sound_events subscriber off the
+     * "chat-invitation" signal. */
 }
 
 void
@@ -1768,7 +1777,12 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
      * always runs the post-login completion below (pass is always
      * NULL). */
     if (!task_inerror (htlc)) {
-        play_sound (LOGIN);
+        /* Login task reply came back successful. Announce it as the
+         * "logged-in" signal; the sound_events subscriber plays the LOGIN
+         * chime off it. (Kept distinct from the connection-state
+         * LOGIN_READY milestone, which is agreement-gated and fires later
+         * — or not at all on a server with an unaccepted agreement.) */
+        gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
         changetitlesconnected (sess);
         setbtns (sess, 1);
         set_status_bar (2);
@@ -2335,9 +2349,13 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
                 htlc->color = user->color;
             }
             if (new) {
+                /* incremental=FALSE: this is the bulk user-list load, not a
+                 * live join. Passing FALSE keeps the join chime from firing
+                 * once per user already in the room at login. */
                 gtkhx_session_emit_user_create (gtkhx_session_get_default (),
                                                 htlc, chat, user, user->name,
-                                                user->icon, user->color);
+                                                user->icon, user->color,
+                                                FALSE);
             }
         }
 

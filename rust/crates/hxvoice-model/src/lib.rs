@@ -20,15 +20,15 @@
 //! The C ABI (`hx_voice_model_*`) is preserved exactly so `rcv.c`, `gtkhx.c`,
 //! `network.c`, `users.c` link unchanged, and the gtkhx-ui `voice` modules
 //! (`users_voice_col`, `voice_panel`) keep reaching it through their existing
-//! externs. Presence-transition chimes still call the C `play_sound`
-//! (sound.c) over FFI; a test build stubs it (see the `tests` module).
+//! externs. Presence-transition chimes are emitted as the
+//! `voice-presence-chime` GObject signal (uid, joined); the C sound subscriber
+//! (`sound_events.c`) plays the actual chime, keeping this model sound-agnostic.
 //!
 //! Main-thread only, same as the C side — no `Send`/`Sync` surface.
 
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::ffi::c_void;
-use std::os::raw::c_int;
 
 use glib::prelude::*;
 use glib::subclass::prelude::*;
@@ -53,20 +53,6 @@ pub const INDICATOR_MUTED: u32 = 3;
 /// plausible room and well below any DoS-relevant size. (Mirrors the C
 /// `HX_VOICE_MODEL_MAX_PARTICIPANTS`.)
 const MAX_PARTICIPANTS: usize = 1024;
-
-/// `sound.h`: `play_sound` ids for the presence chimes.
-const VOICE_JOIN: c_int = 9;
-const VOICE_LEAVE: c_int = 10;
-
-// play_sound lives in sound.c in the real build (resolved at the final C
-// link). A `cfg(test)` build has no sound.c, so the test module provides a
-// recording stub under the same symbol name.
-#[cfg(not(test))]
-extern "C" {
-    fn play_sound(sound: c_int);
-}
-#[cfg(test)]
-use tests::play_sound;
 
 #[derive(Default, Clone, Copy)]
 pub(crate) struct Entry {
@@ -122,11 +108,22 @@ mod imp {
         fn signals() -> &'static [Signal] {
             // "indicator-changed" (uid: u32, indicator: u32). Both scalar so
             // no typed-boxed-payload dance for a tiny signal.
+            //
+            // "voice-presence-chime" (uid: u32, joined: bool). Fired on a
+            // genuine presence transition (after the initial roster seeded,
+            // never for our own uid) — exactly the condition that used to
+            // call play_sound(VOICE_JOIN/LEAVE) inline. The C sound
+            // subscriber plays the chime; the model stays sound-agnostic.
             static SIGNALS: OnceLock<Vec<Signal>> = OnceLock::new();
             SIGNALS.get_or_init(|| {
-                vec![Signal::builder("indicator-changed")
-                    .param_types([u32::static_type(), u32::static_type()])
-                    .build()]
+                vec![
+                    Signal::builder("indicator-changed")
+                        .param_types([u32::static_type(), u32::static_type()])
+                        .build(),
+                    Signal::builder("voice-presence-chime")
+                        .param_types([u32::static_type(), bool::static_type()])
+                        .build(),
+                ]
             })
         }
     }
@@ -215,7 +212,10 @@ impl HxVoiceModel {
                 && !was_in_voice
                 && uid != self.imp().self_uid.get()
             {
-                unsafe { play_sound(VOICE_JOIN) };
+                self.emit_by_name::<()>(
+                    "voice-presence-chime",
+                    &[&(uid as u32), &true],
+                );
             }
         }
 
@@ -245,7 +245,10 @@ impl HxVoiceModel {
             // first-pass note) — re-entrancy safe against a handler that flips
             // them mid-ingest.
             if self.imp().seeded.get() && uid != self.imp().self_uid.get() {
-                unsafe { play_sound(VOICE_LEAVE) };
+                self.emit_by_name::<()>(
+                    "voice-presence-chime",
+                    &[&(uid as u32), &false],
+                );
             }
             // Drop the entry so a malicious server cycling random uids can't
             // grow the table unboundedly; re-join re-inserts cheaply.

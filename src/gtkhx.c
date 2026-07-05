@@ -70,6 +70,7 @@
 #endif
 #include "tray.h"
 #include "xtext.h"
+#include "sound_events.h"
 #include "options.h"
 #include "xfers.h"
 #include "commands.h"
@@ -1038,6 +1039,16 @@ fe_init (void)
 
     gtkhx_connect_signals (gtkhx_session_get_default ());
 
+    /* Sound-effect subscriber: maps model-side signals (and the voice
+     * model's presence chime) to play_sound ids. Connected after
+     * gtkhx_connect_signals and after the voice model exists. */
+#ifdef HAVE_VOICE
+    gtkhx_sound_events_init (gtkhx_session_get_default (),
+                             the_session.voice_model);
+#else
+    gtkhx_sound_events_init (gtkhx_session_get_default (), NULL);
+#endif
+
     /* create_chat / create_tasks
      * build per-session widget state (xtext + chat_hbox, gtask
      * scroll) that the toolbar window's eager-panel-construction
@@ -1471,9 +1482,11 @@ on_news_thread_signal (GtkhxSession *emitter, gpointer post, gpointer user_data)
 static void
 on_user_create_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                        struct chat *chat, struct hx_user *user, gpointer nam,
-                       guint icon, guint color, gpointer user_data)
+                       guint icon, guint color, gboolean incremental,
+                       gpointer user_data)
 {
     (void)emitter;
+    (void)incremental; /* join-chime gate; consumed by sound_events.c */
     (void)user_data;
     user_create (htlc, chat, user, (const char *)nam, (guint16)icon,
                  (guint16)color);
@@ -1482,9 +1495,10 @@ on_user_create_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 static void
 on_user_delete_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
                        struct chat *chat, struct hx_user *user,
-                       gpointer user_data)
+                       gboolean incremental, gpointer user_data)
 {
     (void)emitter;
+    (void)incremental; /* part-chime gate; consumed by sound_events.c */
     (void)user_data;
     user_delete (htlc, chat, user);
 }

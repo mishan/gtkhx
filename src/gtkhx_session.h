@@ -132,6 +132,14 @@ void gtkhx_session_emit_gif_icon_data (GtkhxSession     *self,
  * of the message. */
 void gtkhx_session_emit_msg (GtkhxSession *self, HxMsgEvent *event);
 
+/* "logged-in" (htlc *) — the login task reply came back successful
+ * (rcv_task_login, non-error branch). This is the exact point the login
+ * chime used to play inline; sound (and any future login-reaction
+ * consumer) subscribes here instead. Distinct from the connection-state
+ * LOGIN_READY milestone, which is agreement-gated and can fire much later
+ * (or, on a server with an unaccepted agreement, not at all). */
+void gtkhx_session_emit_logged_in (GtkhxSession *self, struct htlc_conn *htlc);
+
 /* Login + news notifications. agreement fires once after the
  * AGREEMENT chunks arrive post-login; the news-* variants fire
  * for the four 1.x / 1.5+ news flows. */
@@ -152,12 +160,17 @@ void gtkhx_session_emit_news_thread (GtkhxSession *self,
  * so a view that wants to highlight a rename / icon change can diff
  * them against the user's current cached state (which still holds
  * the OLD values when the signal fires). */
+/* `incremental` is TRUE for a genuine join/part broadcast and FALSE for a
+ * row synthesised during the bulk user-list load / teardown. Sound and
+ * notification consumers gate on it so the join/part chime fires only on
+ * real transitions, not once per user already in the room at login. */
 void gtkhx_session_emit_user_create (GtkhxSession *self, struct htlc_conn *htlc,
                                      struct chat *chat, struct hx_user *user,
                                      const char *nam, guint16 icon,
-                                     guint16 color);
+                                     guint16 color, gboolean incremental);
 void gtkhx_session_emit_user_delete (GtkhxSession *self, struct htlc_conn *htlc,
-                                     struct chat *chat, struct hx_user *user);
+                                     struct chat *chat, struct hx_user *user,
+                                     gboolean incremental);
 void gtkhx_session_emit_user_change (GtkhxSession *self, struct htlc_conn *htlc,
                                      struct chat *chat, struct hx_user *user,
                                      const char *nam, guint16 icon,

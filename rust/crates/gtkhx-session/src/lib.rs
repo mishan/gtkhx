@@ -174,6 +174,12 @@ mod imp {
                     Signal::builder("msg")
                         .param_types([msg_event_type()])
                         .build(),
+                    // logged-in: (htlc*) — login task reply came back
+                    // successful; the login chime and any future
+                    // login-reaction consumer subscribe here.
+                    Signal::builder("logged-in")
+                        .param_types([Type::POINTER])
+                        .build(),
                     // agreement: (session*, agreement*, len)
                     Signal::builder("agreement")
                         .param_types([Type::POINTER, Type::POINTER, Type::U32])
@@ -198,7 +204,12 @@ mod imp {
                     Signal::builder("news-thread")
                         .param_types([Type::POINTER])
                         .build(),
-                    // user-create: (htlc*, chat*, user*, nam*, icon, color)
+                    // user-create: (htlc*, chat*, user*, nam*, icon, color,
+                    // incremental). `incremental` is TRUE for a genuine
+                    // join broadcast and FALSE for a row synthesised during
+                    // the bulk user-list load — sound/notification consumers
+                    // gate on it so the join chime only fires on real joins,
+                    // not once per user already in the room at login.
                     Signal::builder("user-create")
                         .param_types([
                             Type::POINTER,
@@ -207,11 +218,19 @@ mod imp {
                             Type::POINTER,
                             Type::U32,
                             Type::U32,
+                            Type::BOOL,
                         ])
                         .build(),
-                    // user-delete: (htlc*, chat*, user*)
+                    // user-delete: (htlc*, chat*, user*, incremental).
+                    // `incremental` mirrors user-create — TRUE for a real
+                    // part broadcast, FALSE for a teardown-driven removal.
                     Signal::builder("user-delete")
-                        .param_types([Type::POINTER, Type::POINTER, Type::POINTER])
+                        .param_types([
+                            Type::POINTER,
+                            Type::POINTER,
+                            Type::POINTER,
+                            Type::BOOL,
+                        ])
                         .build(),
                     // user-change: (htlc*, chat*, user*, nam*, icon, color)
                     Signal::builder("user-change")
@@ -518,6 +537,17 @@ pub unsafe extern "C" fn gtkhx_session_emit_msg(self_: *mut c_void, event: *mut 
 }
 
 /// # Safety
+/// `self_`/`htlc` valid pointers.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_logged_in(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+) {
+    let v = [ptr_value(htlc)];
+    emit(self_, "logged-in", &v);
+}
+
+/// # Safety
 /// `self_`/`sess` valid; `agreement` a valid buffer pointer (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_agreement(
@@ -591,6 +621,7 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_create(
     nam: *const c_char,
     icon: u16,
     color: u16,
+    incremental: c_int,
 ) {
     let v = [
         ptr_value(htlc),
@@ -599,6 +630,7 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_create(
         ptr_value(nam as *const c_void),
         glib::Value::from(icon as u32),
         glib::Value::from(color as u32),
+        glib::Value::from(incremental != 0),
     ];
     emit(self_, "user-create", &v);
 }
@@ -611,8 +643,14 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_delete(
     htlc: *mut c_void,
     chat: *mut c_void,
     user: *mut c_void,
+    incremental: c_int,
 ) {
-    let v = [ptr_value(htlc), ptr_value(chat), ptr_value(user)];
+    let v = [
+        ptr_value(htlc),
+        ptr_value(chat),
+        ptr_value(user),
+        glib::Value::from(incremental != 0),
+    ];
     emit(self_, "user-delete", &v);
 }
 
@@ -877,7 +915,7 @@ mod tests {
         // count is a deliberate drift-catcher: adding or removing a signal
         // without updating it (and the matching emit wrapper) trips here.
         // Bump it in lockstep when the signal set changes.
-        assert_eq!(imp::GtkhxSession::signals().len(), 28);
+        assert_eq!(imp::GtkhxSession::signals().len(), 29);
     }
 
     #[test]
