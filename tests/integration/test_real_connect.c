@@ -230,7 +230,22 @@ observer_index_of (test_observer *obs, GtkhxConnectionState state)
     return -1;
 }
 
-static struct htlc_conn test_htlc;
+/* The harness connection MUST be embedded in a `session`. sess_from_htlc()
+ * (src/session.h) is a container_of() that walks back from an htlc to its
+ * enclosing session. A bare `struct htlc_conn` makes it return a wild
+ * `session *` — `&test_htlc - offsetof(session, htlc)` — pointing at
+ * whatever static happens to sit there in the final link. In a voice-enabled
+ * build, hx_htlc_close()'s teardown then runs `sess->voice_runtime = NULL`,
+ * zeroing a word of that unrelated static; when the victim is the tokio
+ * runtime singleton it flips the scheduler-Handle enum tag (MultiThread ->
+ * CurrentThread) and the NEXT connect's spawn dereferences a null task-list
+ * shard and SIGSEGVs. It is link-layout-sensitive (which is why it surfaced
+ * under mold and after unrelated .o size changes) and voice-gated (why
+ * build-no-voice stays green). Real connections always pass &the_session.htlc,
+ * so production is unaffected; embedding here keeps the harness faithful to
+ * that invariant. */
+static session test_session;
+#define test_htlc (test_session.htlc)
 
 static void
 test_orchestrator_login (void)
