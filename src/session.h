@@ -309,48 +309,27 @@ struct uesp_fn {
                 const hl_access_bits);
 };
 
-/* no more next/prev. Users live in
- * chat->users, a GHashTable<u16 uid, struct hx_user*>. Lookup by
- * uid via hx_user_with_uid is now O(1); name lookup (uncommon)
- * still walks. */
+/* Transient signal-payload carrier, NOT a store. Per-chat membership
+ * (uid / icon / status colour / nick colour / name / ignore) is owned by
+ * the Rust HxMemberModel (chat->member_model); readers query it via
+ * chat_members.h. The user-create/change/delete signals still carry a
+ * `struct hx_user *`, but the users.c fan-out reads only ->uid and
+ * ->nick_color off it, so rcv.c / options.c fill a short-lived stack
+ * instance per emit. Everything else rides in as explicit signal args. */
 struct hx_user {
     guint16 uid;
-    guint16 icon;
-    guint16 color;
-    /* Colored-Nicknames extension — per-user 32-bit
-	 * 0x00RRGGBB nickname color. HX_NICK_COLOR_NONE (0xFFFFFFFF) is
-	 * the sentinel for "no color set"; the renderer falls back to
-	 * the legacy `color` status bitmap (Admin/Guest/Away) in that
-	 * case. Populated from:
-	 *   - HTLS_DATA_COLOR (0x0500) chunk on USER_CHANGE /
-	 *     CHAT_USER_CHANGE broadcasts (per-user updates).
-	 *   - Same chunk on SELFINFO (server's view of our color, mirrors
-	 *     onto htlc->nick_color).
-	 *   - USER_LIST record-trailer extension: 4 BE bytes appended
-	 *     after the name in every hl_userlist_hdr, so the initial
-	 *     post-login user-list paints colors directly without
-	 *     waiting for a follow-up USER_CHANGE broadcast for each
-	 *     existing user. Servers implement this opportunistically
-	 *     (Janus confirmed in the wild); read in rcv_task_user_list
-	 *     gated on _len >= 8 + nlen + 4. */
+    /* Colored-Nicknames 0x00RRGGBB nick colour, or HX_NICK_COLOR_NONE.
+	 * Carried on the signal because it isn't a separate marshalled arg
+	 * (the status `color` is), so the render path can read it straight
+	 * off the payload. */
     guint32 nick_color;
-    /* Display name. Stored as char[] (rather than unsigned char[]) so
-	 * the rest of the codebase can pass it to strcmp/strlen/strcpy
-	 * without -Wpointer-sign casts. The Hotline wire is byte-oriented
-	 * but in practice the name field always holds an ASCII/Mac Roman
-	 * string. */
-    char name[32];
-    /* M4b.4a: the client-local ignore flag moved to the per-chat
-     * HxMemberModel (chat->member_model), the authoritative store —
-     * reached via hx_member_model_{set,get,toggle}_ignore. */
 };
 
 struct chat {
     /* no next/prev — chats live in session->chats, a
-	 * GHashTable<u32 cid, struct chat*>. Members likewise live in
-	 * chat->users, a GHashTable<u16 uid, struct hx_user*>. */
+	 * GHashTable<u32 cid, struct chat*>. Membership lives in
+	 * member_model (below), the authoritative HxMemberModel. */
     guint32 cid;
-    GHashTable *users;
     char subject[256];
     /* M2 wire-up (Option A): authoritative membership for this chat as a Rust
      * HxMemberModel (opaque GObject*, hxmember-model). Created in chat_new,

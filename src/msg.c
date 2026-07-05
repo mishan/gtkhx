@@ -402,11 +402,9 @@ msgwin_refresh_user_info (struct msgwin *msg)
     }
 
     /* The user list is per-chat; the public chat (cid=0) carries the
-	 * server-wide list we want here. chat_with_cid is the canonical
-	 * "global user list" lookup the rest of the codebase uses
-	 * (rcv.c, commands.c, users.c). hx_user_with_uid is defensive
-	 * against a NULL chat / chat->users so we don't need an extra
-	 * mid-disconnect guard. */
+     * server-wide membership we want here. chat_with_cid is the canonical
+     * "global user list" lookup; the pubchat + member_model NULL checks
+     * below cover the mid-disconnect case. */
     pubchat = chat_with_cid (hx_active_session (), 0);
 
     if (pubchat

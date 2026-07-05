@@ -5,18 +5,17 @@
 //! can sit in the `GListStore` that `HxUserListView`'s `GtkColumnView`
 //! consumes. It holds a *copy* of the display state the cell renderers read:
 //! uid, nick_color, name, icon id, status color, and a cached foreground
-//! `GdkRGBA`. Those are copied in from the borrowed `struct hx_user *` at
-//! construct / `set_state` (where it's known-valid) — the row does **not**
-//! store the pointer (M4b.3b-ii-B), so it can't dangle when `chat->users` is
-//! retired. Every state change fires `"changed"` so the view can re-sort +
-//! re-snapshot.
+//! `GdkRGBA`. Those are copied in from the plain values the view hands to
+//! `new_row` / `set_state_row` — the values it received at its
+//! `hx_user_list_view_add` / `_update` entry points. The row holds no
+//! `struct hx_user *` at all, so it can't dangle. Every state change fires
+//! `"changed"` so the view can re-sort + re-snapshot.
 //!
 //! The row is built + driven from Rust (`HxUserListView`), so the only C ABI
 //! left is `hx_user_row_get_type` (the `G_DECLARE_FINAL_TYPE` accessor) + the
 //! cell-facing field getters (`get_name` / `_icon` / `_uid` / `_foreground`).
-//! Foreground computation calls the pointer-free C `user_nick_color_rgb`, and
-//! `uid` / `nick_color` are copied in via the C `hx_user_uid` /
-//! `hx_user_nick_color` accessors — all in `users.c` next to `hx_user`.
+//! Foreground computation calls the pointer-free C `user_nick_color_rgb` (in
+//! `users.c`); `uid` / `nick_color` are just the values the view passed in.
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, c_void, CStr, CString};
@@ -29,7 +28,7 @@ use glib::translate::IntoGlib;
 const EMPTY_CSTR: &[u8] = b"\0";
 
 /// Layout-compatible mirror of `GdkRGBA` (four `f32`s). Used for both the
-/// FFI to `user_nick_color_gdk` and the cached foreground the C cell
+/// FFI to `user_nick_color_rgb` and the cached foreground the C cell
 /// renderer reads back via `hx_user_row_get_foreground`.
 #[repr(C)]
 #[derive(Clone, Copy, Default)]
@@ -188,10 +187,10 @@ impl HxUserRow {
         self.emit_by_name::<()>("changed", &[]);
     }
 
-    /// Recompute the cached foreground from the row's user + status.
-    /// Always calls `user_nick_color_gdk`, including with a NULL user: it's
-    /// NULL-safe and still returns the status-palette color (away/admin) or
-    /// NULL for the theme-default slot, so a placeholder row keeps its
+    /// Recompute the cached foreground from the row's cached nick_color +
+    /// status. Calls `user_nick_color_rgb`, which returns the status-palette
+    /// color (away/admin) or NULL for the theme-default slot, so a
+    /// placeholder row keeps its
     /// status coloring exactly as the deleted C `hx_user_row_refresh_fg`
     /// did. NULL return → no cached fg (fall through to the theme default).
     fn refresh_fg(&self) {

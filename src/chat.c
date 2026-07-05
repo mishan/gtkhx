@@ -353,25 +353,10 @@ word_check (GtkWidget *xtext, char *word)
  * just append the bare message text; the per-entry timestamp is
  * auto-set in gtk_xtext_append_entry. */
 
-/* chat lifecycle on GHashTable.
- *
- * chat_free() is the GDestroyNotify the hashtable invokes when an
- * entry is replaced, removed, or the table itself is destroyed.
- * chat->users (a sub-hashtable of struct hx_user* keyed on uid)
- * is destroyed first — its own value-destroy notify (g_free, via
- * users_table_new below) reclaims each hx_user — and then the
- * chat struct itself is freed.
- *
- * Pre-Phase-1.5 callers used to be responsible for clearing users
- * themselves before chat_delete; the migration to per-chat hashtable
- * means g_hash_table_destroy / g_hash_table_remove Do The Right
- * Thing — no caller can accidentally leak a chat's users by
- * skipping the manual walk. */
-static GHashTable *
-users_table_new (void)
-{
-    return g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
-}
+/* chat lifecycle on GHashTable. chat_free() is the GDestroyNotify the
+ * session->chats table invokes when an entry is removed or the table is
+ * destroyed. It frees the chat's authoritative membership model, its
+ * attached view (if any), and the struct itself. */
 
 /* Forward decls: chat_free (the model destroy-notify) tears down an
  * attached view via gchat_free, and chats_init installs pchat_close as
@@ -386,9 +371,6 @@ chat_free (gpointer p)
 
     if (!chat) {
         return;
-    }
-    if (chat->users) {
-        g_hash_table_destroy (chat->users);
     }
     if (chat->member_model) {
         hx_member_model_free (chat->member_model);
@@ -433,9 +415,9 @@ chat_new (session *sess, guint32 cid)
 
     chat = g_malloc0 (sizeof (struct chat));
     chat->cid = cid;
-    chat->users = users_table_new ();
-    /* M2 wire-up (Option A): this chat's authoritative membership model,
-     * fed by the users.c fan-out, read by tab_nick_comp. */
+    /* This chat's authoritative membership model, fed by the users.c
+     * fan-out and read by every membership consumer (tab_nick_comp, the
+     * user-list view, rcv.c old-state lookups). */
     chat->member_model = hx_member_model_new ();
 
     g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);

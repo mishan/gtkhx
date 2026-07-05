@@ -355,7 +355,6 @@ hx_rcv_msg (struct htlc_conn *htlc)
     struct hx_msg_msg pm;
     session *sess = sess_from_htlc (htlc);
     struct chat *chat = chat_with_cid (sess, 0);
-    struct hx_user *user = 0;
     guint32 hdr_type = 0;
     gboolean is_broadcast;
 
@@ -365,7 +364,11 @@ hx_rcv_msg (struct htlc_conn *htlc)
         return;
     }
 
-    user = hx_user_with_uid (chat, pm.uid);
+    /* Sender snapshot from the authoritative member model — used to fill
+     * a missing display name (self-PM path) and the broadcast colour. */
+    struct hx_member_info sender;
+    gboolean have_sender
+        = hx_member_model_get_info (chat->member_model, pm.uid, &sender);
     if (hx_member_model_get_ignore (chat->member_model, pm.uid)) {
         return;
     }
@@ -399,9 +402,9 @@ hx_rcv_msg (struct htlc_conn *htlc)
             if (pm.uid == htlc->uid && htlc->name[0]) {
                 disp_name = htlc->name;
                 disp_name_len = strlen (htlc->name);
-            } else if (user && user->name[0]) {
-                disp_name = user->name;
-                disp_name_len = strlen (user->name);
+            } else if (have_sender && sender.name[0]) {
+                disp_name = sender.name;
+                disp_name_len = strlen (sender.name);
             }
         }
         /* msg signal payload is a boxed HxMsgEvent
@@ -422,7 +425,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 		 * notes), broadcastmsg falls back to the legacy
 		 * "[hx] broadcast: …" chat line. */
         const char *sender_name = pm.name_len > 0 ? pm.name : NULL;
-        guint16 sender_color = user ? user->color : 0;
+        guint16 sender_color = have_sender ? sender.status : 0;
         broadcastmsg (sender_name, sender_color, pm.msg);
     }
     /* MSG chime: the sound_events subscriber plays it off the "msg"
@@ -638,7 +641,6 @@ hx_rcv_user_change (struct htlc_conn *htlc)
 {
     struct hx_user_change_msg uc;
     struct chat *chat;
-    struct hx_user *user;
     session *sess = sess_from_htlc (htlc);
 
     if (task_inerror (htlc)) {
@@ -663,19 +665,24 @@ hx_rcv_user_change (struct htlc_conn *htlc)
      * detection (incl. the SELFINFO-less uid adoption some 1.9 servers
      * force by omitting USER_LIST from SELFINFO, leaving htlc->uid 0),
      * new-vs-change, the colour / nick-colour preserve rules, and whether
-     * to print a rename notice. Old state still comes from chat->users
-     * here; M4b.4b-iii-B swaps that source to the model. */
+     * to print a rename notice. */
     chat = chat_with_cid (sess, cid);
     if (!chat) {
         chat = chat_new (sess, cid);
     }
-    user = hx_user_with_uid (chat, uid);
+
+    /* Old state is read from the authoritative member model (the per-chat
+     * user hashtable is gone). get_info fills a *value* snapshot; it's
+     * taken before the emit below updates the model, so `old` stays the
+     * pre-change state even after the fan-out upserts. */
+    struct hx_member_info old;
+    gboolean old_exists = hx_member_model_get_info (chat->member_model, uid, &old);
 
     struct hx_user_change_plan plan;
-    hx_user_change_plan_resolve (&uc, /*old_exists=*/user != NULL,
-                                 user ? user->color : 0,
-                                 user ? user->nick_color : HX_NICK_COLOR_NONE,
-                                 user ? user->name : NULL, htlc->uid,
+    hx_user_change_plan_resolve (&uc, old_exists,
+                                 old_exists ? old.status : 0,
+                                 old_exists ? old.nick_color : HX_NICK_COLOR_NONE,
+                                 old_exists ? old.name : NULL, htlc->uid,
                                  (const char *)htlc->name, &plan);
 
     if (plan.adopt_self_uid) {
@@ -686,6 +693,12 @@ hx_rcv_user_change (struct htlc_conn *htlc)
                    (unsigned)uid);
     }
 
+    /* Transient carrier for the signal payload. The users.c fan-out
+     * (user_create / user_change) reads ONLY ->uid and ->nick_color off
+     * it; nam/icon/color are passed as explicit args. No chat->users
+     * entry is created — the model, fed by the fan-out, is the store. */
+    struct hx_user carrier = { .uid = uid, .nick_color = plan.eff_nick_color };
+
     if (plan.is_new) {
         if (plan.skip_self_create) {
             /* Don't add our own row here. The USER_LIST reply (or any
@@ -694,82 +707,54 @@ hx_rcv_user_change (struct htlc_conn *htlc)
              * the user list and spam a "join: <us>" line in chat. */
             return;
         }
-        user = hx_user_new (chat, uid);
-        /* Colored-Nicknames: stamp nick_color BEFORE emitting user-create.
-         * The render path reads user->nick_color directly (the signal
-         * payload doesn't carry it), so emitting first would paint the row
-         * from a stale HX_NICK_COLOR_NONE. */
-        user->nick_color = plan.eff_nick_color;
         /* incremental=TRUE: a genuine join broadcast. The sound_events
          * subscriber plays USER_JOIN off this signal only when the flag
          * is set, so the bulk user-list load (which passes FALSE) stays
-         * silent. */
+         * silent. The carrier already carries eff_nick_color for the
+         * render path. */
         gtkhx_session_emit_user_create (gtkhx_session_get_default (), htlc,
-                                        chat, user, name, icon,
+                                        chat, &carrier, name, icon,
                                         plan.eff_color, TRUE);
         if (gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, cid, INFOPREFIX, _ ("join: %s\n"), name);
         }
     } else {
-        /* Same nick_color-before-emit ordering as the create path. */
-        user->nick_color = plan.eff_nick_color;
         gtkhx_session_emit_user_change (gtkhx_session_get_default (), htlc,
-                                        chat, user, name, icon,
+                                        chat, &carrier, name, icon,
                                         plan.eff_color);
         /* Bail on ignored users before we toast or log them. */
         if (hx_member_model_get_ignore (chat->member_model, uid)) {
             return;
         }
         if (plan.do_rename_notice) {
+            /* old.name is the pre-change snapshot taken above. */
             hx_printf_prefix (htlc, cid, INFOPREFIX,
-                              _ ("%1$s is now known as %2$s\n"), user->name,
+                              _ ("%1$s is now known as %2$s\n"), old.name,
                               name);
         }
     }
-    if (nlen) {
-        memcpy (user->name, name, nlen);
-        user->name[nlen] = 0;
-    }
-    if (icon) {
-        user->icon = icon;
-    }
-    user->color = plan.eff_color;
-    /* Colored-Nicknames: the per-user nick_color was
-	 * stamped onto the user struct above, BEFORE emitting the
-	 * user-create / user-change signal — the render path reads it
-	 * directly from user->nick_color, so the assignment has to
-	 * precede the emit. See the comments at the emit sites for
-	 * the full rationale. */
+
+    /* Self bookkeeping — mirror the just-applied wire/plan values into
+     * htlc. (skip_self_create returned early for a new-self, so here a
+     * self change is always an existing member: old_exists is true.)
+     *
+     * deliberately do NOT copy the server's name into htlc->name.
+     * Servers can legitimately override a display name — guests get
+     * pinned to things like "Read the agreement" before they have
+     * HL_ACCESS_USERNAME_CHANGE — and that override should show in the
+     * user list but must not bleed into htlc->name, which doubles as the
+     * persisted NICK= prefs value (prefs_write would then persist the
+     * override forever). */
     if ((uid) && (uid == htlc->uid)) {
-        htlc->icon = user->icon;
-        htlc->color = user->color;
+        htlc->icon = icon ? icon : (old_exists ? old.icon : htlc->icon);
+        htlc->color = plan.eff_color;
         if (got_nick_color) {
             htlc->nick_color = nick_color;
         }
-        /* deliberately do NOT copy user->name into
-		 * htlc->name. Servers can legitimately override a user's
-		 * display name — guests get pinned to things like "Read
-		 * the agreement" before they have HL_ACCESS_USERNAME_CHANGE
-		 * — and that override should appear in the user list (which
-		 * user->name already feeds) but must not bleed into our
-		 * htlc->name buffer, which doubles as the persisted NICK=
-		 * prefs value. Letting the server's override land in
-		 * htlc->name and then prefs_write persists 'Read the
-		 * agreement' as the user's nick forever.
-		 *
-		 * Display paths read user_list entries (chat output, user
-		 * window, etc.); htlc->name is reserved for the wire-side
-		 * USER_CHANGE we *send* and the gtkhxrc persistence. The
-		 * two diverging is exactly the model the protocol expects. */
-        {
-            gsize unlen = strlen (user->name);
-            debug_log ("name",
-                       "USER_CHANGE for our uid=%u: server says "
-                       "'%.*s' (%zu bytes); keeping local "
-                       "htlc->name = '%s'",
-                       (unsigned)uid, (int)unlen, user->name, (size_t)unlen,
-                       htlc->name);
-        }
+        debug_log ("name",
+                   "USER_CHANGE for our uid=%u: server says "
+                   "'%.*s' (%u bytes); keeping local htlc->name = '%s'",
+                   (unsigned)uid, (int)nlen, name, (unsigned)nlen, htlc->name);
     }
 }
 
@@ -778,7 +763,6 @@ hx_rcv_user_part (struct htlc_conn *htlc)
 {
     struct hx_user_part_msg pm;
     struct chat *chat;
-    struct hx_user *user;
     session *sess = sess_from_htlc (htlc);
 
     if (!hx_user_part_extract (htlc, &pm)) {
@@ -790,19 +774,21 @@ hx_rcv_user_part (struct htlc_conn *htlc)
         return;
     }
 
-    user = hx_user_with_uid (chat, pm.uid);
-    if (user) {
-        /* incremental=TRUE: a genuine part broadcast — the sound_events
-         * subscriber plays USER_PART off this signal. */
+    /* Membership + name come from the member model. The user_delete
+     * fan-out reads only ->uid off the carrier and removes the model
+     * entry itself. incremental=TRUE: a genuine part broadcast — the
+     * sound_events subscriber plays USER_PART off this signal. */
+    struct hx_member_info mi;
+    if (hx_member_model_get_info (chat->member_model, pm.uid, &mi)) {
+        struct hx_user carrier = { .uid = pm.uid };
         gtkhx_session_emit_user_delete (gtkhx_session_get_default (), htlc,
-                                        chat, user, TRUE);
+                                        chat, &carrier, TRUE);
 
         if (gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, pm.cid, INFOPREFIX, _ ("parts: %s \n"),
-                              user->name);
+                              mi.name);
         }
 
-        hx_user_delete (chat, user);
     }
 }
 
@@ -2282,8 +2268,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
 void
 rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 {
-    struct hx_user *user;
-    guint16 nlen, uid;
+    guint16 uid;
     int new;
 
     dh_start (htlc)
@@ -2306,56 +2291,44 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
                 continue;
             }
             uid = rec.uid;
-            user = hx_user_with_uid (chat, uid);
-            /* reset `new` per chunk. Previously declared
-			 * once at the top of the function and set to 1 inside
-			 * the "user not found" branch, then never reset — so
-			 * after the first new user in the response, every
-			 * subsequent EXISTING user (found via hx_user_with_uid)
-			 * inherited new=1 from the previous iteration and got
-			 * a spurious hx_output.user_create call, doubling the
-			 * UI row.
-			 *
-			 * Latent since the original handler; surfaced when
-			 * hx_rcv_user_selfinfo started pushing USER_CHANGE
-			 * before USER_GETLIST — that broadcast adds our own
-			 * entry first, then USER_GETLIST returns [others, us]
-			 * and the existing-us match was using the stale new=1
-			 * from the first new other-user. */
-            new = 0;
-            if (!user) {
-                new = 1;
-                user = hx_user_new (chat, uid);
-            }
-            user->uid = rec.uid;
-            user->icon = rec.icon;
-            user->color = rec.color;
-            nlen = rec.name_len;
-            memcpy (user->name, name_buf, nlen);
-            user->name[nlen] = 0;
-            /* Colored-Nicknames extension: trailer present in this
-			 * record? rec.got_nick_color is 0/1; on 0 the Rust shim
-			 * substitutes HX_NICK_COLOR_NONE (0xffffffff). */
-            if (rec.got_nick_color) {
-                user->nick_color = rec.nick_color;
-                if (uid == htlc->uid) {
-                    htlc->nick_color = rec.nick_color;
-                }
-            }
-            if (!htlc->uid && !strcmp (user->name, htlc->name) &&
+            name_buf[rec.name_len] = 0;
+            /* `new` means "not already in this chat's membership". Reset
+             * per chunk: a stale new=1 from a previous new user would
+             * otherwise spawn a spurious user_create for every subsequent
+             * EXISTING user, doubling the UI row. Existence is a model
+             * query now — the same store every reader uses. */
+            new = !hx_member_model_contains (chat->member_model, uid);
 
-                user->icon == htlc->icon) {
-                htlc->uid = user->uid;
-                htlc->color = user->color;
+            /* Colored-Nicknames: mirror the trailer colour onto htlc when
+             * this record is us (absent trailer => HX_NICK_COLOR_NONE). */
+            if (rec.got_nick_color && uid == htlc->uid) {
+                htlc->nick_color = rec.nick_color;
             }
+            /* "is this us?" adoption for servers that omit USER_LIST from
+             * SELFINFO: the first record matching our nick+icon claims our
+             * uid + status colour. */
+            if (!htlc->uid && !strcmp (name_buf, htlc->name)
+                && rec.icon == htlc->icon) {
+                htlc->uid = uid;
+                htlc->color = rec.color;
+            }
+
+            /* Transient carrier: fan-out reads only ->uid + ->nick_color. */
+            struct hx_user carrier
+                = { .uid = uid, .nick_color = rec.nick_color };
             if (new) {
                 /* incremental=FALSE: this is the bulk user-list load, not a
                  * live join. Passing FALSE keeps the join chime from firing
                  * once per user already in the room at login. */
                 gtkhx_session_emit_user_create (gtkhx_session_get_default (),
-                                                htlc, chat, user, user->name,
-                                                user->icon, user->color,
-                                                FALSE);
+                                                htlc, chat, &carrier, name_buf,
+                                                rec.icon, rec.color, FALSE);
+            } else {
+                /* Existing member: keep the model current without churning
+                 * the view — matches the old silent field update the
+                 * per-chat hashtable did for a re-sent list. */
+                hx_member_model_upsert (chat->member_model, uid, name_buf,
+                                        rec.icon, rec.color, rec.nick_color);
             }
         }
 
