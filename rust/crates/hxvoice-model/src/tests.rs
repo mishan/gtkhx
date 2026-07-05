@@ -1,36 +1,42 @@
 //! Unit tests ported from `tests/unit/test_voice_model.c`.
 //!
 //! Runs under plain `cargo test` — a `glib::subclass` GObject + its signal
-//! work without GTK or a main loop. `play_sound` is stubbed here (the real
-//! sound.c isn't linked into the test binary); the stub records each id so the
-//! join/leave gating test can assert on the sequence.
+//! work without GTK or a main loop. Presence chimes are no longer a direct
+//! `play_sound` FFI call; the model emits the `voice-presence-chime` signal
+//! instead, so the join/leave gating test records that signal and asserts on
+//! the (uid, joined) sequence.
 
 use super::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-// ObjectExt (connect_local) — the emit-recording handler in install_recorder.
+// ObjectExt (connect_local) — the emit-recording handlers below.
 use glib::prelude::ObjectExt;
 
-// ---- play_sound stub (lib.rs imports this under cfg(test)) ----------
+// ---- voice-presence-chime recorder ---------------------------------
 
-thread_local! {
-    static SOUND_CALLS: RefCell<Vec<c_int>> = const { RefCell::new(Vec::new()) };
+type Chimes = Rc<RefCell<Vec<(u32, bool)>>>;
+
+/// Subscribe to `voice-presence-chime` and record every (uid, joined) pair.
+fn install_chime_recorder(m: &HxVoiceModel) -> Chimes {
+    let chimes: Chimes = Rc::new(RefCell::new(Vec::new()));
+    let sink = chimes.clone();
+    m.connect_local("voice-presence-chime", false, move |args| {
+        let uid = args[1].get::<u32>().unwrap();
+        let joined = args[2].get::<bool>().unwrap();
+        sink.borrow_mut().push((uid, joined));
+        None
+    });
+    chimes
 }
 
-/// # Safety
-/// Trivially safe; `unsafe` only to match the real `extern "C"` signature the
-/// non-test build links, so the call sites read identically.
-pub(crate) unsafe fn play_sound(sound: c_int) {
-    SOUND_CALLS.with(|c| c.borrow_mut().push(sound));
+/// Count recorded chimes matching `joined` (true = join, false = leave).
+fn chime_count(chimes: &Chimes, joined: bool) -> usize {
+    chimes.borrow().iter().filter(|&&(_, j)| j == joined).count()
 }
 
-fn sound_reset() {
-    SOUND_CALLS.with(|c| c.borrow_mut().clear());
-}
-
-fn sound_count(sound: c_int) -> usize {
-    SOUND_CALLS.with(|c| c.borrow().iter().filter(|&&s| s == sound).count())
+fn chime_reset(chimes: &Chimes) {
+    chimes.borrow_mut().clear();
 }
 
 // ---- wire-blob helper (packed 6-byte BE records) --------------------
@@ -168,39 +174,39 @@ fn signal_emitted() {
 
 #[test]
 fn join_leave_sounds() {
-    sound_reset();
     let m = HxVoiceModel::new();
+    let chimes = install_chime_recorder(&m);
     m.set_self_uid(13); // we are uid 13
 
     // Initial roster (us + a peer): seeds silently.
     m.ingest_participants(&blob(&[(13, 0), (14, 0)]));
-    assert_eq!(sound_count(VOICE_JOIN), 0);
-    assert_eq!(sound_count(VOICE_LEAVE), 0);
+    assert_eq!(chime_count(&chimes, true), 0);
+    assert_eq!(chime_count(&chimes, false), 0);
 
-    // Peer 15 joins after the seed: one VOICE_JOIN.
+    // Peer 15 joins after the seed: one join chime.
     m.ingest_participants(&blob(&[(13, 0), (14, 0), (15, 0)]));
-    assert_eq!(sound_count(VOICE_JOIN), 1);
-    assert_eq!(sound_count(VOICE_LEAVE), 0);
+    assert_eq!(chime_count(&chimes, true), 1);
+    assert_eq!(chime_count(&chimes, false), 0);
 
-    // Peer 15 leaves: one VOICE_LEAVE.
-    sound_reset();
+    // Peer 15 leaves: one leave chime.
+    chime_reset(&chimes);
     m.ingest_participants(&blob(&[(13, 0), (14, 0)]));
-    assert_eq!(sound_count(VOICE_JOIN), 0);
-    assert_eq!(sound_count(VOICE_LEAVE), 1);
+    assert_eq!(chime_count(&chimes, true), 0);
+    assert_eq!(chime_count(&chimes, false), 1);
 
     // Our own leave is silent (self-exclusion).
-    sound_reset();
+    chime_reset(&chimes);
     m.ingest_participants(&blob(&[(14, 0)]));
-    assert_eq!(sound_count(VOICE_LEAVE), 0);
+    assert_eq!(chime_count(&chimes, false), 0);
 
     // Our own re-join is likewise silent.
-    sound_reset();
+    chime_reset(&chimes);
     m.ingest_participants(&blob(&[(13, 0), (14, 0)]));
-    assert_eq!(sound_count(VOICE_JOIN), 0);
+    assert_eq!(chime_count(&chimes, true), 0);
 
     // clear() re-arms the seed gate: next roster seeds silently.
-    sound_reset();
+    chime_reset(&chimes);
     m.clear();
     m.ingest_participants(&blob(&[(13, 0), (14, 0), (16, 0)]));
-    assert_eq!(sound_count(VOICE_JOIN), 0);
+    assert_eq!(chime_count(&chimes, true), 0);
 }

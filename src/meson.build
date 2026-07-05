@@ -89,6 +89,7 @@ gtkhx_sources = files(
   'rand.c',
   'rcv.c',
   'sound.c',
+  'sound_events.c',
   'tasks.c',
   'tasks_table.c',
   # text_util.c ported to Rust (hxtext crate, Phase R5); text_util.h keeps the

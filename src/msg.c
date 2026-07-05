@@ -41,6 +41,7 @@
 #include "tasks.h"
 #include "connect.h"
 #include "notify.h"
+#include "sound.h"
 #include "toolbar.h"
 #include "users.h"
 #include "cicn.h"
@@ -769,6 +770,13 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 	 * the broadcast renders as a transient toast or a modal
 	 * dialog. */
     gtkhx_notify_broadcast (text);
+
+    /* Broadcasts share the MSG chime with private messages. The "msg"
+	 * signal (which the sound_events subscriber keys on) fires only for
+	 * the private-message branch of hx_rcv_msg, not for broadcasts, so
+	 * play it here to preserve the chime that used to fire inline for
+	 * both branches. */
+    play_sound (MSG);
 
     /* Log the broadcast to chat output. When the wire carried a
 	 * sender name (mhxd-family servers echo broadcasts back with
