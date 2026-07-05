@@ -140,6 +140,12 @@ void gtkhx_session_emit_msg (GtkhxSession *self, HxMsgEvent *event);
  * (or, on a server with an unaccepted agreement, not at all). */
 void gtkhx_session_emit_logged_in (GtkhxSession *self, struct htlc_conn *htlc);
 
+/* "self-updated" (htlc *) — our own access bits / uid were (re)parsed
+ * from a SELFINFO reply. Toolbar-button sensitivity depends on the
+ * access bitmap, so the view refreshes it off this signal. */
+void gtkhx_session_emit_self_updated (GtkhxSession *self,
+                                      struct htlc_conn *htlc);
+
 /* Login + news notifications. agreement fires once after the
  * AGREEMENT chunks arrive post-login; the news-* variants fire
  * for the four 1.x / 1.5+ news flows. */
