@@ -19,46 +19,15 @@ extern GdkRGBA gdk_user_colors[4];
  * (hard-coding black would be invisible on dark themes). */
 extern GdkRGBA *user_color_gdk (guint16 color);
 
-/* user->uid, or 0 if NULL. A tiny accessor so the Rust HxUserRow
- * (rust/crates/gtkhx-ui/src/user_row.rs) reads the uid without pinning
- * the struct hx_user field layout on its side. */
-extern guint16 hx_user_uid (const struct hx_user *user);
-
-/* user->name (the char[32] display name), or NULL if user is NULL. Lets
- * the Rust HxUserListView (users_view.rs) pass the name to create_msgwin
- * on activate without knowing the struct layout. */
-extern const char *hx_user_name (const struct hx_user *user);
-
-/* user->nick_color (0x00RRGGBB, or HX_NICK_COLOR_NONE when unset / NULL
- * user). M4b.3b: lets HxUserRow cache the nick_color so it can recompute
- * its foreground without dereferencing a live struct hx_user*. */
-extern guint32 hx_user_nick_color (const struct hx_user *user);
-
-/* Pointer-free variant of user_nick_color_gdk: same result computed from a
- * raw nick_color + status instead of a struct hx_user*. HX_NICK_COLOR_NONE
- * falls through to the status palette. See user_nick_color_gdk below. */
+/* Colored-Nicknames foreground: prefers the RGB nick_color (0x00RRGGBB)
+ * when set, else falls back to user_color_gdk's status palette
+ * (Admin/Guest/Away). `status` is the user's 2-bit status field passed
+ * explicitly so the caller renders the freshly-parsed wire status. `out`
+ * is a caller-provided GdkRGBA. Returns out (filled, possibly idle-
+ * dimmed), a static status-slot GdkRGBA, or NULL for the regular-user
+ * slot — callers then fall through to the GTK theme default, which reads
+ * correctly under both light and dark themes. */
 extern GdkRGBA *user_nick_color_rgb (guint32 nick_color, guint16 status,
-                                     GdkRGBA *out);
-
-/* Colored-Nicknames preference. Prefers user->nick_color
- * (RGB) when set, else falls back to user_color_gdk's status palette
- * (Admin/Guest/Away). `status` is the user's 2-bit status field
- * (idle/admin) passed explicitly rather than read off user->color so
- * the caller in users.c::user_change can render the freshly-parsed
- * status — rcv.c stamps user->color AFTER emitting the signal, so
- * the field would still hold the previous value if read here.
- * `out` is a caller-provided GdkRGBA used to hold the unpacked RGB
- * result.
- *
- * Return: caller-owned pointer that's either &`out` (filled with the
- * unpacked nick_color, possibly idle-dimmed) or the static GdkRGBA
- * for the user's status slot — OR NULL when neither applies (the
- * regular-user slot in user_color_gdk returns NULL so callers fall
- * through to the GTK theme's default foreground, which is what reads
- * correctly under both light and dark themes).
- * The cell renderer treats NULL as "use theme default", so callers
- * can pass the result through unconditionally. */
-extern GdkRGBA *user_nick_color_gdk (const struct hx_user *user, guint16 status,
                                      GdkRGBA *out);
 
 extern PangoFontDescription *users_font_desc;
@@ -99,10 +68,6 @@ extern void view_igno_btn (GtkWidget *widget, gpointer data);
 extern void view_ban_btn (GtkWidget *widget, gpointer data);
 extern void view_chat_btn (GtkWidget *widget, gpointer data);
 
-extern struct hx_user *hx_user_new (struct chat *chat, guint16 uid);
-extern void hx_user_delete (struct chat *chat, struct hx_user *user);
-extern struct hx_user *hx_user_with_uid (struct chat *chat, guint16 uid);
-extern struct hx_user *hx_user_with_name (struct chat *chat, const char *name);
 extern void hx_change_name_icon (struct htlc_conn *htlc);
 extern void hx_get_user_info (struct htlc_conn *htlc, guint16 uid);
 extern void hx_kick_user (struct htlc_conn *htlc, guint16 uid, guint16 ban);

@@ -332,11 +332,12 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 *      on cid != 0 since the global user-list widget only shows
 	 *      the public chat's members).
 	 *   2. The hashtable's value-destroy notify (chat_free in chat.c)
-	 *      reclaims the chat's hx_user nodes + the struct chat itself
-	 *      on remove; we do not need to walk + free users by hand.
+	 *      reclaims the chat's member model + the struct chat itself
+	 *      on remove; we do not need to walk + free members by hand.
 	 * The public chat (cid=0) must stay alive across reconnects, so
 	 * we remove all *non-public* chats and then reset the public
-	 * chat's user-list pointers + subject in-place. */
+	 * chat's subject in-place (its membership was already dropped by
+	 * the users-clear emit above, which clears the member model). */
     if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
@@ -349,14 +350,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
             if (GPOINTER_TO_UINT (key) != 0) {
                 non_public = g_list_prepend (non_public, key);
             } else {
-                /* Public chat: clear the per-chat users
-				 * hashtable in place. The struct chat itself
-				 * stays in the session->chats table; the users
-				 * table's value-destroy notify reclaims each
-				 * hx_user. */
-                if (chat->users) {
-                    g_hash_table_remove_all (chat->users);
-                }
+                /* Public chat persists across reconnect. Its membership
+				 * was already dropped by the users-clear emit above (which
+				 * clears the member model); just reset the subject. */
                 chat->subject[0] = '\0';
             }
         }

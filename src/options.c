@@ -35,6 +35,7 @@
 #include "sound.h"
 #include "users.h"
 #include "chat.h"
+#include "chat_members.h" /* hx_member_model_get_info, struct hx_member_info */
 #include "files.h"
 #include "network.h"
 #include "news15.h"
@@ -546,15 +547,18 @@ changed_nick_color (session *sess)
     /* Locally re-render our own row in the public chat user list.
 	 * Pre-login (no uid yet, or no chat container yet) just no-ops —
 	 * apply_loaded_xtext_prefs stamps the loaded pref onto htlc, and
-	 * the SELFINFO-driven hx_user_new for self picks it up the same
+	 * the SELFINFO-driven membership add for self picks it up the same
 	 * way it picks up the loaded nick. */
     struct chat *pub = chat_with_cid (hx_active_session (), 0);
     if (pub && hx_active_session ()->htlc.uid) {
-        struct hx_user *self = hx_user_with_uid (pub, hx_active_session ()->htlc.uid);
-        if (self) {
-            self->nick_color = nc;
-            user_change (&hx_active_session ()->htlc, pub, self, self->name, self->icon,
-                         self->color);
+        struct hx_member_info mi;
+        if (hx_member_model_get_info (pub->member_model,
+                                      hx_active_session ()->htlc.uid, &mi)) {
+            /* Transient carrier — user_change reads only ->uid + the new
+             * ->nick_color; the other fields ride in as explicit args. */
+            struct hx_user self = { .uid = mi.uid, .nick_color = nc };
+            user_change (&hx_active_session ()->htlc, pub, &self, mi.name,
+                         mi.icon, mi.status);
         }
     }
 }

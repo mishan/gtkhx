@@ -134,68 +134,6 @@ hx_get_user_info (struct htlc_conn *htlc, guint16 uid)
     }
 }
 
-/* per-chat user list lives in chat->users, a
- * GHashTable<u16 uid, struct hx_user*>. hx_user_new mallocs a fresh
- * hx_user, stamps its uid, and inserts it; hx_user_delete drops it
- * from the table (the table's value-destroy notify g_frees the
- * struct); hx_user_with_uid is an O(1) lookup. */
-struct hx_user *
-hx_user_new (struct chat *chat, guint16 uid)
-{
-    struct hx_user *user = g_malloc0 (sizeof (struct hx_user));
-    user->uid = uid;
-    /* Colored-Nicknames extension. Default to "no color"
-     * — the renderer falls back to the legacy status palette
-     * (Admin/Guest/Away from user->color) unless a server-pushed
-     * DATA_COLOR chunk overrides this. g_malloc0 has already
-     * zeroed the struct so the explicit assignment is just to
-     * avoid a "what does zero mean here?" question on the read
-     * side — HX_NICK_COLOR_NONE = 0xFFFFFFFF is the canonical
-     * sentinel. */
-    user->nick_color = HX_NICK_COLOR_NONE;
-    g_hash_table_insert (chat->users, GUINT_TO_POINTER ((guint)uid), user);
-    return user;
-}
-
-void
-hx_user_delete (struct chat *chat, struct hx_user *user)
-{
-    if (!user || !chat || !chat->users) {
-        return;
-    }
-    g_hash_table_remove (chat->users, GUINT_TO_POINTER ((guint)user->uid));
-}
-
-struct hx_user *
-hx_user_with_uid (struct chat *chat, guint16 uid)
-{
-    if (!chat || !chat->users) {
-        return NULL;
-    }
-    return g_hash_table_lookup (chat->users, GUINT_TO_POINTER ((guint)uid));
-}
-
-/* Name lookup remains a linear scan — only one caller
- * (commands.c handle_command_msg) uses it, and we expect chat
- * membership lists to stay small enough for that not to matter. */
-struct hx_user *
-hx_user_with_name (struct chat *chat, const char *name)
-{
-    GHashTableIter iter;
-    gpointer val;
-
-    if (!chat || !chat->users) {
-        return NULL;
-    }
-    g_hash_table_iter_init (&iter, chat->users);
-    while (g_hash_table_iter_next (&iter, NULL, &val)) {
-        struct hx_user *u = val;
-        if (strcmp (u->name, name) == 0) {
-            return u;
-        }
-    }
-    return NULL;
-}
 
 struct UserActionCtx {
     session *sess;
@@ -1112,51 +1050,6 @@ user_color_gdk (guint16 color)
     return &gdk_user_colors[color % 4];
 }
 
-/* Colored-Nicknames extension. When the user has a
- * server-supplied RGB nick color, fill the caller's GdkRGBA from
- * the 0x00RRGGBB value and return a pointer to it; otherwise
- * fall through to user_color_gdk's status palette
- * (Admin/Guest/Away). The cell renderer copies the colour into the
- * row immediately so a stack-allocated GdkRGBA buffer at the call
- * site is fine.
- *
- * `status` is the 2-bit status field that user_color_gdk reads —
- * passed explicitly rather than read off user->color because at
- * the call sites (users.c::user_create / user_change) the new
- * status from the wire hasn't been stamped onto user->color yet.
- * Reading user->color here would have rendered the row from the
- * OLD status (stale idle-dim, stale palette slot) until a later
- * unrelated USER_CHANGE rebuilt the row.
- *
- * Lookup priority: explicit nick_color > status palette > theme
- * default. The status palette still applies to away/admin
- * decoration when the user hasn't set their own color, matching
- * what users would expect from a colored-nicknames-unaware client.
- *
- * Returns NULL when nick_color is unset AND the status palette
- * resolves to the regular-user slot — user_color_gdk explicitly
- * returns NULL there so the caller falls through to the GTK
- * theme's default foreground (hard-coding black would be
- * invisible on dark themes). The renderer treats NULL as
- * "use theme default", so call sites can pass the result
- * through unconditionally. */
-guint16
-hx_user_uid (const struct hx_user *user)
-{
-    return user ? user->uid : 0;
-}
-
-const char *
-hx_user_name (const struct hx_user *user)
-{
-    return user ? user->name : NULL;
-}
-
-guint32
-hx_user_nick_color (const struct hx_user *user)
-{
-    return user ? user->nick_color : HX_NICK_COLOR_NONE;
-}
 
 /* Pointer-free core (M4b.3b): compute a foreground from a raw nick_color +
  * status, so the view row can cache its nick_color and recompute fg without
@@ -1188,12 +1081,6 @@ user_nick_color_rgb (guint32 nick_color, guint16 status, GdkRGBA *out)
         return out;
     }
     return user_color_gdk (status);
-}
-
-GdkRGBA *
-user_nick_color_gdk (const struct hx_user *user, guint16 status, GdkRGBA *out)
-{
-    return user_nick_color_rgb (hx_user_nick_color (user), status, out);
 }
 
 void

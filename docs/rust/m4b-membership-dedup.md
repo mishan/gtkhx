@@ -173,14 +173,21 @@ symbols are introduced ahead of use.
     still from `chat->users`, behaviour-preserving.** This replaces the earlier
     "Tier 3 first" plan: the integration harness can't observe client model
     state, so a Tier-2 pure helper is the right guard for the hot path.
-  - **M4b.4b-iii-B — rcv.c → model; delete `chat->users` (remaining).** With the
-    decision logic already tested, this slice only swaps the helper's old-state
-    source from `chat->users` to `hx_member_model_get_info`, and emits
-    `user_create`/`_change` with a minimal transient `hx_user {uid, nick_color}`
-    (the fan-out reads only those two). `options.c`'s self nick-colour writer
-    likewise. Then delete `chat->users` +
-    `hx_user_new`/`_delete`/`_with_uid`/`_with_name` + the `hx_user_*`
-    accessors (`struct hx_user` shrinks to the transient carrier).
+  - ✅ **M4b.4b-iii-B — rcv.c → model; delete `chat->users` (shipped).** Two
+    reviewable halves on one branch. **B-1:** every remaining `chat->users`
+    read moved to the model — `hx_rcv_user_change` old-state via
+    `hx_member_model_get_info`, `hx_rcv_user_part` + `hx_rcv_msg` likewise,
+    `rcv_task_user_list` uses `_contains` for new-vs-existing (existing rows
+    `_upsert` the model directly, matching the old silent field update),
+    `options.c`'s self nick-colour writer via `get_info`. All emits carry a
+    stack-local transient `struct hx_user {uid, nick_color}` (the fan-out reads
+    only those two). **B-2:** deleted `chat->users`, `users_table_new`,
+    `hx_user_new`/`_delete`/`_with_uid`/`_with_name`, the `hx_user_uid`/`_name`/
+    `_nick_color` accessors, and the now-dead `user_nick_color_gdk` wrapper;
+    `struct hx_user` shrank to `{uid, nick_color}` (a signal-payload carrier,
+    not a store). `struct chat` is now `{cid, subject, member_model, view}`.
+    64 unit+proto green; full 9-subtest Tier-3 real_connect green (drives real
+    USER_LIST / USER_CHANGE / SELFINFO end to end).
 
 - **M4b.5 — `Conversation` replaces `struct chat`.** With membership,
   history, media, and render-cursors already Rust or view-local, `struct chat`
