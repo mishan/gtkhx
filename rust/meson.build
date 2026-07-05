@@ -84,6 +84,7 @@ rust_sources = files(
   # crate). One module per ported window; the Tracker window is the first.
   'crates/gtkhx-ui/src/lib.rs',
   'crates/gtkhx-ui/src/ffi.rs',
+  'crates/gtkhx-ui/src/conversation.rs',
   'crates/gtkhx-ui/src/tr.rs',
   'crates/gtkhx-ui/src/dock.rs',
   'crates/gtkhx-ui/src/about.rs',

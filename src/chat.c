@@ -235,7 +235,7 @@ gtkhx_apply_theme_palette (gboolean dark)
     }
 
     /* Push the new palette into every live xtext widget. Chat /
-	 * private-chat outputs hang off each model's view (chat->view) in sess->chats;
+	 * private-chat outputs hang off each model's view (hx_chat_view (chat)) in sess->chats;
 	 * private-message outputs hang off msgwin in sess->msg_windows.
 	 * News uses a plain GtkTextView (theme-driven CSS), not an
 	 * xtext, so it picks up the system theme without help. */
@@ -246,7 +246,7 @@ gtkhx_apply_theme_palette (gboolean dark)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct chat *c = val;
-            struct gtkhx_chat *gchat = c->view;
+            struct gtkhx_chat *gchat = hx_chat_view (c);
             if (gchat && gchat->output) {
                 gtk_xtext_set_palette (GTK_XTEXT (gchat->output), colors);
                 gtk_xtext_refresh (GTK_XTEXT (gchat->output));
@@ -268,7 +268,7 @@ gtkhx_apply_theme_palette (gboolean dark)
 }
 
 /* hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join / hx_part_chat
- * / hx_change_subject moved to the hxchat-send Rust crate (Phase R5 port of
+ * / hx_change_subject moved to the hxchat-send Rust crate (the port of
  * chat.c's send path, over hotline-proto's native chat builders). chat.h keeps
  * the C ABI decls; the per-htlc cap + chat-model lookups the senders need are
  * in chat_send_bridge.c. */
@@ -372,18 +372,17 @@ chat_free (gpointer p)
     if (!chat) {
         return;
     }
-    if (chat->member_model) {
-        hx_member_model_free (chat->member_model);
+    /* The conversation owns its view. Normally the view is detached (freed,
+     * set to NULL) by gchat_delete / pchat_close before the conversation
+     * goes; free a still-attached view so deleting a conversation can't leak
+     * its window struct. hx_conversation_free then drops the member model
+     * and the handle. */
+    struct gtkhx_chat *view = hx_chat_view (chat);
+    if (view) {
+        gchat_free (view);
+        hx_chat_set_view (chat, NULL);
     }
-    /* M4a: the model owns its view. Normally the view is detached (freed,
-     * chat->view NULLed) by gchat_delete / pchat_close before the model
-     * goes; this frees a still-attached view so deleting a model can't
-     * leak its window struct. */
-    if (chat->view) {
-        gchat_free (chat->view);
-        chat->view = NULL;
-    }
-    g_free (chat);
+    hx_conversation_free (chat);
 }
 
 void
@@ -399,27 +398,22 @@ chats_init (session *sess)
 	 * top-level chat messages are routed. Create it eagerly so
 	 * chat_with_cid(sess, 0) is always non-NULL. */
     chat_new (sess, 0);
-    /* M2 wire-up (Option A): the authoritative public-chat membership model.
+    /* The authoritative public-chat membership model.
      * Created once, fed by the users.c fan-out, read by tab_nick_comp. */
 
     /* Route user-clicks on a private-chat tab's X through pchat_close
      * (which sends hx_part_chat and tears down the view). Idempotent.
-     * (M4a: moved here from the now-removed gchats_init.) */
+     * (moved here from the now-removed gchats_init.) */
     gtkhx_chat_tabs_set_close_pchat_handler (pchat_close);
 }
 
 struct chat *
 chat_new (session *sess, guint32 cid)
 {
-    struct chat *chat;
-
-    chat = g_malloc0 (sizeof (struct chat));
-    chat->cid = cid;
-    /* This chat's authoritative membership model, fed by the users.c
-     * fan-out and read by every membership consumer (tab_nick_comp, the
-     * user-list view, rcv.c old-state lookups). */
-    chat->member_model = hx_member_model_new ();
-
+    /* The conversation is a Rust HxConversation handle — it creates its own
+     * authoritative membership model (fed by the users.c fan-out, read by
+     * tab_nick_comp / the user-list view / rcv.c old-state lookups). */
+    struct chat *chat = hx_conversation_new (cid);
     g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);
     return chat;
 }
@@ -430,7 +424,7 @@ chat_delete (session *sess, struct chat *chat)
     if (!chat || !sess->chats) {
         return;
     }
-    g_hash_table_remove (sess->chats, GUINT_TO_POINTER (chat->cid));
+    g_hash_table_remove (sess->chats, GUINT_TO_POINTER (hx_chat_cid (chat)));
 }
 
 struct chat *
@@ -468,7 +462,7 @@ gchat_free (gpointer p)
         hx_input_history_free (gchat->chat_history);
         gchat->chat_history = NULL;
     }
-    /* Phase 9.D inline-media (M3): drop the per-chat handle table.
+    /* Inline-media: drop the per-chat handle table.
 	 * hx_media_table_free frees every HxChatMedia copy it owns. */
     if (gchat->media_table) {
         hx_media_table_free (gchat->media_table);
@@ -477,7 +471,7 @@ gchat_free (gpointer p)
     g_free (gchat);
 }
 
-/* M4a: the view is reached through its model — chat_with_cid(sess,
+/* The view is reached through its model — chat_with_cid(sess,
  * cid)->view — so gchat_with_cid is a thin wrapper and there is no
  * separate gchats table (gchats_init is gone; chats_init installs the
  * tab-close handler now). */
@@ -485,7 +479,7 @@ struct gtkhx_chat *
 gchat_with_cid (session *sess, guint32 cid)
 {
     struct chat *chat = chat_with_cid (sess, cid);
-    return chat ? chat->view : NULL;
+    return hx_chat_view (chat);
 }
 
 void
@@ -498,8 +492,8 @@ gchat_delete (session *sess, struct gtkhx_chat *gchat)
      * model) and free the view struct. The model stays in sess->chats
      * until chat_delete. */
     struct chat *chat = chat_with_cid (sess, gchat->cid);
-    if (chat && chat->view == gchat) {
-        chat->view = NULL;
+    if (chat && hx_chat_view (chat) == gchat) {
+        hx_chat_set_view (chat, NULL);
     }
     gchat_free (gchat);
 }
@@ -1207,7 +1201,7 @@ find_gchat_by_output (GtkWidget *xtext)
     g_hash_table_iter_init (&it, hx_active_session ()->chats);
     while (g_hash_table_iter_next (&it, &key, &val)) {
         struct chat *c = val;
-        struct gtkhx_chat *g = c->view;
+        struct gtkhx_chat *g = hx_chat_view (c);
         if (g && g->output == xtext) {
             return g;
         }
@@ -1589,7 +1583,7 @@ chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
 
 /* Nick completion. The C tab_nick_comp / tab_nick_comp_next / nick_comp_chng /
  * public_chat_users_sorted machinery (~250 lines of raw-buffer + GSList work)
- * moved to Rust in the M2 wire-up: the tested hxchat-model::complete over the
+ * moved to Rust: the tested hxchat-model::complete over the
  * authoritative membership model for the chat the input belongs to (each
  * struct chat's member_model), reached via hx_nick_complete. The Rust version
  * also fixes two latent C bugs the old code had — Tab-cycling that computed the
@@ -1726,7 +1720,7 @@ chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
          * (public or private) — gchat->cid keys the model. */
         {
             struct chat *c = chat_with_cid (sess, gchat->cid);
-            tab_nick_comp (sess, c ? c->member_model : NULL, p, reverse, point,
+            tab_nick_comp (sess, c ? hx_chat_member_model (c) : NULL, p, reverse, point,
                            widget);
         }
         g_free (p);
@@ -1873,9 +1867,9 @@ create_chat (session *sess)
     gchat->render.anchor_ent      = NULL;
     gchat->render.load_older_ent  = NULL;
 
-    /* M4a: attach the public-chat view to its model (seeded eagerly by
+    /* Attach the public-chat view to its model (seeded eagerly by
      * chats_init, so chat_with_cid(sess, 0) is non-NULL here). */
-    chat_with_cid (sess, 0)->view = gchat;
+    hx_chat_set_view (chat_with_cid (sess, 0), gchat);
 }
 
 static void
@@ -1933,7 +1927,7 @@ gtkhx_chat_build_leaves (session *sess)
     {
         struct chat *pub = chat_with_cid (sess, 0);
         gtk_editable_set_text (GTK_EDITABLE (gchat->subject),
-                               pub ? pub->subject : "");
+                               pub ? hx_chat_subject (pub) : "");
     }
     gtkhx_apply_text_style (gchat->subject);
     g_signal_connect (gchat->subject, "activate", G_CALLBACK (change_subject),
@@ -2057,7 +2051,7 @@ pchat_new (session *sess, struct chat *chat)
     g_object_ref_sink (vscroll);
     g_object_ref_sink (subject);
 
-    gchat->cid = chat->cid;
+    gchat->cid = hx_chat_cid (chat);
     gchat->output = text;
     gchat->vscroll = vscroll;
     gchat->subject = subject;
@@ -2069,9 +2063,9 @@ pchat_new (session *sess, struct chat *chat)
     gchat->render.loading         = FALSE;
     gchat->render.anchor_ent      = NULL;
     gchat->render.load_older_ent  = NULL;
-    /* M4a: attach this view to its model (the `chat` arg, already in
+    /* Attach this view to its model (the `chat` arg, already in
      * sess->chats) instead of a separate gchats entry. */
-    chat->view = gchat;
+    hx_chat_set_view (chat, gchat);
 
     return gchat;
 }
@@ -2160,7 +2154,7 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
     if (!gchat || !gchat->subject) {
         return;
     }
-    /* buf comes from chat->subject — set by hx_rcv_chat_subject
+    /* buf comes from the conversation subject — set by hx_rcv_chat_subject
 	 * (HTLS_HDR_CHAT_SUBJECT broadcast) and by the
 	 * HTLS_DATA_CHAT_SUBJECT branch of rcv_task_user_list
 	 * (initial-subject-discovery). Both paths copy the raw wire
@@ -2241,12 +2235,6 @@ output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
  * C-coupled leaf widgets these helpers build. Mirrors msg.c's create_msg +
  * hx_msgwin_* accessor seam. */
 
-guint32
-hx_chat_cid (struct chat *chat)
-{
-    return chat ? chat->cid : 0;
-}
-
 GtkWidget *
 hx_gchat_output (struct gtkhx_chat *g)
 {
@@ -2292,9 +2280,9 @@ gtkhx_pchat_new (struct htlc_conn *htlc, struct chat *chat)
     /* Reuse the subject entry pchat_new already created + styled + ref-sank —
      * overwriting gchat->subject with a fresh gtk_entry_new would leak that
      * one. Just populate its text and wire the activate handler. */
-    gtk_editable_set_text (GTK_EDITABLE (gchat->subject), chat->subject);
+    gtk_editable_set_text (GTK_EDITABLE (gchat->subject), hx_chat_subject (chat));
     g_signal_connect (gchat->subject, "activate", G_CALLBACK (change_subject),
-                      GINT_TO_POINTER (chat->cid));
+                      GINT_TO_POINTER (hx_chat_cid (chat)));
 
     gchat->input = gtk_text_view_new ();
     gtkhx_apply_input_font (gchat->input);
@@ -2325,7 +2313,7 @@ GtkWidget *
 gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
 {
     session *sess = sess_from_htlc (htlc);
-    struct gtkhx_chat *gchat = gchat_with_cid (sess, chat->cid);
+    struct gtkhx_chat *gchat = gchat_with_cid (sess, hx_chat_cid (chat));
     GtkWidget *user_vbox, *userframe, *topframe, *scroll, *hbuttonbox;
     GtkWidget *msg_btn, *kick_btn, *ban_btn, *info_btn, *igno_btn, *chat_btn;
     GtkWidget *pix;
@@ -2456,9 +2444,9 @@ gtkhx_pchat_user_sidebar (struct htlc_conn *htlc, struct chat *chat)
 
 #ifdef HAVE_VOICE
     /* Voice Join/Leave + Mute icon controls for this private room,
-     * scoped to chat->cid. Sit at the end of the user-list action
+     * scoped to hx_chat_cid (chat). Sit at the end of the user-list action
      * bar; hidden entirely unless the server echoed HTLC_CAP_VOICE. */
-    gchat->voice_panel = voice_panel_new (sess, chat->cid);
+    gchat->voice_panel = voice_panel_new (sess, hx_chat_cid (chat));
     gtkhx_box_pack (hbuttonbox, gchat->voice_panel, 0, 0, 4);
 #endif
 

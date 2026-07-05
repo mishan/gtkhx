@@ -1016,7 +1016,7 @@ fe_init (void)
      * setup are the only places that touch the concrete `the_session`
      * storage rather than the sess_from_htlc() / hx_active_session()
      * accessors — because this is where the one session is born and
-     * dies. Multi-conn (phase M3) turns these into a session factory
+     * dies. Multi-conn turns these into a session factory
      * over a collection; every accessor-routed call site downstream
      * follows without further edits.
      *
@@ -1559,7 +1559,7 @@ on_users_clear_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
 	 * boundary. GIF avatars are per-session server-side, so drop the
 	 * whole cache (and cancel any in-flight decodes) — a reconnect
 	 * re-probes and re-fetches from scratch. */
-    if (chat && chat->cid == 0) {
+    if (chat && hx_chat_cid (chat) == 0) {
         gtkhx_avatar_clear_all ();
     }
 }

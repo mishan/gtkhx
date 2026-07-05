@@ -39,7 +39,7 @@
 #include "network.h"
 #include "xfers.h"
 #include "chat.h"
-#include "chat_members.h" /* hx_member_model_get_ignore (M4b.4a) */
+#include "chat_members.h" /* hx_member_model_get_ignore */
 #include "tasks.h"
 #include "files.h"
 #include "files_remote_provider.h"
@@ -276,7 +276,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
     }
 
     if (msg.uid) { /* do ignoring stuff */
-        if (hx_member_model_get_ignore (hx_chat->member_model, msg.uid)) {
+        if (hx_member_model_get_ignore (hx_chat_member_model (hx_chat), msg.uid)) {
             return;
         }
     }
@@ -368,8 +368,8 @@ hx_rcv_msg (struct htlc_conn *htlc)
      * a missing display name (self-PM path) and the broadcast colour. */
     struct hx_member_info sender;
     gboolean have_sender
-        = hx_member_model_get_info (chat->member_model, pm.uid, &sender);
-    if (hx_member_model_get_ignore (chat->member_model, pm.uid)) {
+        = hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &sender);
+    if (hx_member_model_get_ignore (hx_chat_member_model (chat), pm.uid)) {
         return;
     }
 
@@ -676,7 +676,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
      * taken before the emit below updates the model, so `old` stays the
      * pre-change state even after the fan-out upserts. */
     struct hx_member_info old;
-    gboolean old_exists = hx_member_model_get_info (chat->member_model, uid, &old);
+    gboolean old_exists = hx_member_model_get_info (hx_chat_member_model (chat), uid, &old);
 
     struct hx_user_change_plan plan;
     hx_user_change_plan_resolve (&uc, old_exists,
@@ -723,7 +723,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
                                         chat, &carrier, name, icon,
                                         plan.eff_color);
         /* Bail on ignored users before we toast or log them. */
-        if (hx_member_model_get_ignore (chat->member_model, uid)) {
+        if (hx_member_model_get_ignore (hx_chat_member_model (chat), uid)) {
             return;
         }
         if (plan.do_rename_notice) {
@@ -779,7 +779,7 @@ hx_rcv_user_part (struct htlc_conn *htlc)
      * entry itself. incremental=TRUE: a genuine part broadcast — the
      * sound_events subscriber plays USER_PART off this signal. */
     struct hx_member_info mi;
-    if (hx_member_model_get_info (chat->member_model, pm.uid, &mi)) {
+    if (hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &mi)) {
         struct hx_user carrier = { .uid = pm.uid };
         gtkhx_session_emit_user_delete (gtkhx_session_get_default (), htlc,
                                         chat, &carrier, TRUE);
@@ -808,14 +808,13 @@ hx_rcv_chat_subject (struct htlc_conn *htlc)
         if (!chat) {
             return;
         }
-        if (strcmp (sm.subject, chat->subject) == 0) {
+        if (strcmp (sm.subject, hx_chat_subject (chat)) == 0) {
             return;
         }
-        memcpy (chat->subject, sm.subject, sm.subject_len);
-        chat->subject[sm.subject_len] = 0;
+        hx_chat_set_subject (chat, (const char *) (sm.subject), sm.subject_len);
 
 #ifdef USE_PLUGIN
-        if (EMIT_SIGNAL (XP_RCV_SUBJ, sess, chat->subject, &sm.cid, 0, 0, 0)
+        if (EMIT_SIGNAL (XP_RCV_SUBJ, sess, hx_chat_subject (chat), &sm.cid, 0, 0, 0)
             == 1) {
             return;
         }
@@ -828,9 +827,9 @@ hx_rcv_chat_subject (struct htlc_conn *htlc)
 		 * for a subject that, from the user's point of view, was
 		 * already there before they joined. */
         gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc,
-                                         sm.cid, chat->subject);
+                                         sm.cid, hx_chat_subject (chat));
         hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
-                          _ ("Subject Changed to"), chat->subject);
+                          _ ("Subject Changed to"), hx_chat_subject (chat));
     }
 }
 
@@ -862,7 +861,7 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
         return;
     }
 
-    if (hx_member_model_get_ignore (chat->member_model, im.uid)) {
+    if (hx_member_model_get_ignore (hx_chat_member_model (chat), im.uid)) {
         return;
     }
 #ifdef USE_PLUGIN
@@ -2297,7 +2296,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
              * otherwise spawn a spurious user_create for every subsequent
              * EXISTING user, doubling the UI row. Existence is a model
              * query now — the same store every reader uses. */
-            new = !hx_member_model_contains (chat->member_model, uid);
+            new = !hx_member_model_contains (hx_chat_member_model (chat), uid);
 
             /* Colored-Nicknames: mirror the trailer colour onto htlc when
              * this record is us (absent trailer => HX_NICK_COLOR_NONE). */
@@ -2327,21 +2326,20 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
                 /* Existing member: keep the model current without churning
                  * the view — matches the old silent field update the
                  * per-chat hashtable did for a re-sent list. */
-                hx_member_model_upsert (chat->member_model, uid, name_buf,
+                hx_member_model_upsert (hx_chat_member_model (chat), uid, name_buf,
                                         rec.icon, rec.color, rec.nick_color);
             }
         }
 
         else if (_type == HTLS_DATA_CHAT_SUBJECT) {
             guint16 slen = (_len > 255) ? 255 : _len;
-            memcpy (chat->subject, dh->data, slen);
-            chat->subject[slen] = 0;
+            hx_chat_set_subject (chat, (const char *) (dh->data), slen);
             /* route through the view
 			 * vtable rather than poking the subject widget
 			 * directly. Initial-subject-discovery path — no
 			 * 'Subject Changed to X' log line. */
             gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc,
-                                             chat->cid, chat->subject);
+                                             hx_chat_cid (chat), hx_chat_subject (chat));
         }
     }
     dh_end ();

@@ -1,4 +1,4 @@
-//! `gtkhx-ui` — Phase R5 window UIs in gtk4-rs.
+//! `gtkhx-ui` — window UIs in gtk4-rs.
 //!
 //! One module per ported window (`tracker` is the first). Each module
 //! exports the C ABI entry points its deleted `src/<window>.c` used to
@@ -25,7 +25,7 @@ pub mod agreement;
 pub mod bookmarks;
 pub mod cipher_vocab;
 pub mod connect;
-// R5.6: the Settings form. 10 of 11 pages are Rust and wired live via the
+// the Settings form. 10 of 11 pages are Rust and wired live via the
 // gtkhx_options_rs_page_* exports (options.c's create_options_window +
 // settings_entries[] call them). Identity + Voice remain C.
 pub mod options;
@@ -33,88 +33,91 @@ pub mod rc4_dialog;
 pub mod tls_trust_dialog;
 pub mod tracker;
 pub mod useredit;
-// R5.8: HxUserRow — the users/chat list row model GObject (was
+// HxUserRow — the users/chat list row model GObject (was
 // users_row.c). Exports the hx_user_row_* C ABI users_view.c links against.
 pub mod user_row;
-// R5.9: HxUserListView — the GtkColumnView-backed user list. Exports the
+// HxUserListView — the GtkColumnView-backed user list. Exports the
 // hx_user_list_view_* C ABI users.c / chat.c link against; the custom Name
 // cell stays C behind FFI (users_cell.c).
 pub mod users_view;
-// R5.18: the user-list voice-indicator column (was users_voice_col.c).
+// the user-list voice-indicator column (was users_voice_col.c).
 // Behind the `voice` feature; a NULL stub otherwise. Exports
 // gtkhx_users_voice_column_new that users_view.rs appends.
 pub mod users_voice_col;
-// R5.19: the per-chat voice toolbar (was voice_panel.c). Wholly behind the
+// the per-chat voice toolbar (was voice_panel.c). Wholly behind the
 // `voice` feature — its C callers (chat.c / users_bridge.c / gtkutil.c) are
 // #ifdef HAVE_VOICE, so no voice-off stub is needed. Exports voice_panel_*.
 #[cfg(feature = "voice")]
 pub mod voice_panel;
-// R5.21: the push-to-talk key controller (was voice_ptt.c). Wholly behind the
+// the push-to-talk key controller (was voice_ptt.c). Wholly behind the
 // `voice` feature — its C caller (toolbar.c) is #ifdef HAVE_VOICE. The pure
 // key-spec vocabulary stays C (voice_ptt_keyspec.c). Exports hx_voice_ptt_attach.
 #[cfg(feature = "voice")]
 pub mod voice_ptt;
-// R5.22: the voice-chat wire-out senders (was voice.c) moved to their own
+// the voice-chat wire-out senders (was voice.c) moved to their own
 // lean crate `hxvoice-send` (cargo-testable; native hotline-proto builders).
 // The sibling voice modules reach hx_send_voice_* through their existing
 // externs, resolved at the final C link against that staticlib.
-// R5.7: the Users window shell (raise + dock registration + lifecycle).
+// the Users window shell (raise + dock registration + lifecycle).
 // The custom view widget + action-button handlers stay C behind
 // users_bridge.c / dock_bridge.c; create_users_window is now this module's
 // #[no_mangle] export.
 pub mod users;
-// R5.10: the Tasks window shell (raise + dock registration + lifecycle).
+// the Tasks window shell (raise + dock registration + lifecycle).
 // The task list content + transfer-model coupling stay C in tasks.c;
 // create_tasks_window is now this module's #[no_mangle] export.
 pub mod tasks;
-// R5.11: the News window shell (1.0/1.2 flat news). Dock registration via
+// the News window shell (1.0/1.2 flat news). Dock registration via
 // dock_bridge; the news content (viewers, search, fetch/post RPC) stays C
 // in news.c. create_news_window is now this module's #[no_mangle] export.
 pub mod news;
-// R5.12: the News browser (1.5 threaded news, CENTER) window shell. Dock
+// the News browser (1.5 threaded news, CENTER) window shell. Dock
 // registration via dock_bridge; the browser content + fetch/RPC stay C in
 // news_browser.c. create_news_browser_window is this module's export.
 pub mod news_browser;
-// R5.13: the Chat window shell (public chat, CENTER; hosts the pchat/PM tabs).
+// the Chat window shell (public chat, CENTER; hosts the pchat/PM tabs).
 // Dock registration via dock_bridge; chat content + xtext + wire senders stay
 // C in chat.c. create_chat_window is this module's #[no_mangle] export.
 pub mod chat;
-// M2 wire-up (Option A): the C ABI over the session-owned HxMemberModel +
+// The C ABI over the session-owned HxMemberModel +
 // the M1 nick completion (hx_member_model_* / hx_nick_complete).
 pub mod chat_members;
-// R5.14: Private Message content — create_msgwin builds the PM tab's content
+// HxConversation — the Rust per-chat model that replaces the C struct chat
+// (cid + subject + owned HxMemberModel + opaque view pointer).
+pub mod conversation;
+// Private Message content — create_msgwin builds the PM tab's content
 // tree (output frame, input + emoji, recipient info pane) in gtk4-rs around
 // the C create_msg model/leaf widgets. The msgwin struct + chat_tabs + wire
 // senders stay C.
 pub mod msg;
-// R5.16: the Files browser window shell (two-panel browser, CENTER). Dock
+// the Files browser window shell (two-panel browser, CENTER). Dock
 // registration via dock_bridge; the browser content + DnD + providers +
 // transfer integration stay C in files_browser.c. open_files_browser is this
 // module's #[no_mangle] export.
 pub mod files;
-// R5.15: Private Chat content — create_pchat_window builds the pchat tab's
+// Private Chat content — create_pchat_window builds the pchat tab's
 // content tree (subject bar, xtext output, input, user sidebar) in gtk4-rs
 // around the C gtkhx_pchat_new leaf widgets + gtkhx_pchat_user_sidebar.
 pub mod pchat;
-// R5.17: the inline-media click-to-view dialog (Phase 9.D UI). Builds the
+// the inline-media click-to-view dialog. Builds the
 // AdwDialog (Loading → image → error stack) + Save-As / Open-Externally
 // handlers in gtk4-rs; the download state machine (inline_media_download.c)
 // and glycin decoder (inline_media_decode.c / hx-image-decode) stay C behind
 // the FFI seam. inline_media_show_dialog is this module's #[no_mangle] export.
 pub mod inline_media_dialog;
-// R5.23: the Get-User-Info result window (was gtkhx.c::output_user_info). A
+// the Get-User-Info result window (was gtkhx.c::output_user_info). A
 // small read-only text window; fired from the user-info GtkhxSession signal.
 // output_user_info is this module's #[no_mangle] export.
 pub mod user_info;
-// R5.24: the Create-Post composer (was news.c's post window). A modal
+// the Create-Post composer (was news.c's post window). A modal
 // GtkTextView + Cancel/Post header; the wire sender hx_post_news stays C.
 // create_post_window is this module's #[no_mangle] export.
 pub mod create_post;
-// R5.25: the emoji picker button + inline `:shortcode:` typeahead (was
+// the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
 pub mod emoji;
-// R5.26: the Broadcast composer + wire sender (was toolbar.c's broadcast
+// the Broadcast composer + wire sender (was toolbar.c's broadcast
 // dialog + msg.c's hx_send_broadcast). AdwAlertDialog + AdwEntryRow; the wire
 // build is native hotline-proto, the text encoder / task / write stay C.
 // gtkhx_broadcast_dialog_open is this module's #[no_mangle] export.

@@ -12,6 +12,20 @@ extern void chats_init (session *sess);
 extern struct chat *chat_new (session *sess, guint32 cid);
 extern void chat_delete (session *sess, struct chat *chat);
 extern struct chat *chat_with_cid (session *sess, guint32 cid);
+
+/* struct chat is an opaque HxConversation handle
+ * (gtkhx-ui/src/conversation.rs): C reaches its fields only through these
+ * accessors. hx_conversation_new / _free are the storage lifecycle used by
+ * chat_new / chat_free; hx_chat_cid (declared lower down) + the rest are field
+ * access. The member model is a borrowed GObject* (do not unref); the view is
+ * the open struct gtkhx_chat* or NULL. */
+extern struct chat *hx_conversation_new (guint32 cid);
+extern void hx_conversation_free (struct chat *chat);
+extern const char *hx_chat_subject (struct chat *chat);
+extern void hx_chat_set_subject (struct chat *chat, const char *s, gsize len);
+extern void *hx_chat_member_model (struct chat *chat);
+extern struct gtkhx_chat *hx_chat_view (struct chat *chat);
+extern void hx_chat_set_view (struct chat *chat, struct gtkhx_chat *view);
 extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
 extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
 extern void xprintline (GtkWidget *text, char *chat, size_t len);

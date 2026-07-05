@@ -182,10 +182,10 @@ on_user_ignore (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct hx_member_info mi;
     struct chat *c
         = (ctx && ctx->sess) ? chat_with_cid (ctx->sess, ctx->cid) : NULL;
-    if (!c || !hx_member_model_get_info (c->member_model, ctx->uid, &mi)) {
+    if (!c || !hx_member_model_get_info (hx_chat_member_model (c), ctx->uid, &mi)) {
         return;
     }
-    hx_member_model_set_ignore (c->member_model, ctx->uid, TRUE);
+    hx_member_model_set_ignore (hx_chat_member_model (c), ctx->uid, TRUE);
     hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
                       _ ("ignore: %s is now ignored\n"), mi.name);
 }
@@ -199,10 +199,10 @@ on_user_unignore (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct hx_member_info mi;
     struct chat *c
         = (ctx && ctx->sess) ? chat_with_cid (ctx->sess, ctx->cid) : NULL;
-    if (!c || !hx_member_model_get_info (c->member_model, ctx->uid, &mi)) {
+    if (!c || !hx_member_model_get_info (hx_chat_member_model (c), ctx->uid, &mi)) {
         return;
     }
-    hx_member_model_set_ignore (c->member_model, ctx->uid, FALSE);
+    hx_member_model_set_ignore (hx_chat_member_model (c), ctx->uid, FALSE);
     hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
                       _ ("ignore: %s is now unignored\n"), mi.name);
 }
@@ -230,7 +230,7 @@ on_user_msg (GSimpleAction *action, GVariant *param, gpointer user_data)
     struct hx_member_info mi;
     struct chat *c
         = (ctx && ctx->sess) ? chat_with_cid (ctx->sess, ctx->cid) : NULL;
-    if (!c || !hx_member_model_get_info (c->member_model, ctx->uid, &mi)) {
+    if (!c || !hx_member_model_get_info (hx_chat_member_model (c), ctx->uid, &mi)) {
         return;
     }
 
@@ -262,7 +262,7 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
         g_hash_table_iter_init (&iter, ctx->sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             struct chat *c = val;
-            if (GPOINTER_TO_UINT (key) != 0 && c->view) {
+            if (GPOINTER_TO_UINT (key) != 0 && hx_chat_view (c)) {
                 with_cid = 1;
                 break;
             }
@@ -493,7 +493,7 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
      * while the menu is open just makes them no-op. */
     {
         struct chat *c = chat_with_cid (sess, cid);
-        if (!c || !hx_member_model_get_info (c->member_model, uid, &mi)) {
+        if (!c || !hx_member_model_get_info (hx_chat_member_model (c), uid, &mi)) {
             return;
         }
     }
@@ -766,10 +766,10 @@ prompt_chat (session *sess, guint16 _uid)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct chat *c = val;
-            if (!c->cid || !c->view) {
+            if (!hx_chat_cid (c) || !hx_chat_view (c)) {
                 continue;   /* skip the public chat + window-less models */
             }
-            GtkWidget *row = prompt_chat_make_row (c->cid, c->subject);
+            GtkWidget *row = prompt_chat_make_row (hx_chat_cid (c), hx_chat_subject (c));
             gtk_list_box_append (GTK_LIST_BOX (listbox), row);
         }
     }
@@ -825,12 +825,12 @@ user_list (session *sess)
         return;
     }
     /* Repopulate the standalone Users view straight from the public chat's
-     * membership model (M4b.4b-iii) — the model is the store now, and
+     * membership model — the model is the store now, and
      * user_create(cid=0) only ever added to this same view anyway. */
-    guint n = hx_member_model_count (pub->member_model);
+    guint n = hx_member_model_count (hx_chat_member_model (pub));
     for (guint i = 0; i < n; i++) {
         struct hx_member_info mi;
-        if (!hx_member_model_get_at (pub->member_model, i, &mi)) {
+        if (!hx_member_model_get_at (hx_chat_member_model (pub), i, &mi)) {
             continue;
         }
         hx_user_list_view_add (sess->users_view, mi.uid, mi.name, mi.icon,
@@ -846,7 +846,7 @@ user_list (session *sess)
  * to. view_selected_member reads the current single-selection; the
  * session pointer is borrowed from the view (set at construction). */
 /* Fill *out with the acted-on member from the view's live selection,
- * resolved fresh from (cid, uid) against the view's member model (M4b.4b-ii).
+ * resolved fresh from (cid, uid) against the view's member model.
  * Returns FALSE when nothing is selected or the member has since left. The
  * fresh resolution also avoids the old use-after-free (a borrowed hx_user*
  * that dangled if the user left between selection and the button click). */
@@ -866,7 +866,7 @@ view_selected_member (gpointer data, struct hx_member_info *out)
         return FALSE;
     }
     c = chat_with_cid (sess, hx_user_list_view_get_cid (v));
-    return c && hx_member_model_get_info (c->member_model, uid, out);
+    return c && hx_member_model_get_info (hx_chat_member_model (c), uid, out);
 }
 
 static session *
@@ -951,7 +951,7 @@ view_igno_btn (GtkWidget *w, gpointer data)
     if (!c) {
         return;
     }
-    gboolean ig = hx_member_model_toggle_ignore (c->member_model, mi.uid);
+    gboolean ig = hx_member_model_toggle_ignore (hx_chat_member_model (c), mi.uid);
     hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
                       ig ? _ ("ignore: %s is now ignored\n")
                          : _ ("ignore: %s is now unignored"),
@@ -975,7 +975,7 @@ view_chat_btn (GtkWidget *w, gpointer data)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             struct chat *c = val;
-            if (GPOINTER_TO_UINT (key) != 0 && c->view) {
+            if (GPOINTER_TO_UINT (key) != 0 && hx_chat_view (c)) {
                 with_cid = 1;
                 break;
             }
@@ -994,10 +994,13 @@ users_clear (struct htlc_conn *htlc, struct chat *chat)
     session *sess = sess_from_htlc (htlc);
     (void)htlc;
 
-    /* M2 wire-up (A): drop this chat's authoritative membership too
-     * (disconnect / reconnect resets the user list). Before the view gate. */
-    if (chat && chat->member_model) {
-        hx_member_model_clear (chat->member_model);
+    /* Drop this chat's authoritative membership and subject: a
+     * disconnect / reconnect resets the user list, and the public chat
+     * (which persists across reconnect) must not carry a stale topic.
+     * Before the view gate so it runs even when the window is closed. */
+    if (chat && hx_chat_member_model (chat)) {
+        hx_member_model_clear (hx_chat_member_model (chat));
+        hx_chat_set_subject (chat, NULL, 0);
     }
 
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
@@ -1051,7 +1054,7 @@ user_color_gdk (guint16 color)
 }
 
 
-/* Pointer-free core (M4b.3b): compute a foreground from a raw nick_color +
+/* Pointer-free core: compute a foreground from a raw nick_color +
  * status, so the view row can cache its nick_color and recompute fg without
  * a live struct hx_user*. HX_NICK_COLOR_NONE falls through to the status
  * palette. */
@@ -1090,20 +1093,20 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat;
 
-    /* M2 wire-up (A): feed this chat's authoritative membership model before
+    /* Feed this chat's authoritative membership model before
      * any view gate, so it stays populated even when the chat has no user-list
      * view open. Read by tab_nick_comp for input in this chat. */
-    if (chat->member_model) {
-        hx_member_model_upsert (chat->member_model, user->uid, nam, icon, color,
+    if (hx_chat_member_model (chat)) {
+        hx_member_model_upsert (hx_chat_member_model (chat), user->uid, nam, icon, color,
                                 user->nick_color);
     }
 
-    if (chat->cid) {
+    if (hx_chat_cid (chat)) {
         /* Per-pchat sidebar — HxUserListView, STYLE_CHAT. The
 		 * pchat window's userlist GObject is created lazily by
 		 * create_pchat_window (Phase C) the first time a user
 		 * shows up in this chat. */
-        gchat = gchat_with_cid (sess, chat->cid);
+        gchat = gchat_with_cid (sess, hx_chat_cid (chat));
         if (!gchat) {
             gchat = create_pchat_window (htlc, chat);
         }
@@ -1115,7 +1118,7 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         return;
     }
 
-    /* chat->cid == 0 — standalone Users window. The view's own
+    /* hx_chat_cid (chat) == 0 — standalone Users window. The view's own
 	 * bookkeeping (GListStore + GtkSortListModel) does the insert +
 	 * position; the row computes its own foreground via
 	 * user_nick_color_gdk from the `color` arg. */
@@ -1134,11 +1137,11 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
     session *sess = sess_from_htlc (htlc);
 
     (void)htlc;
-    if (chat->member_model) {
-        hx_member_model_remove (chat->member_model, user->uid);
+    if (hx_chat_member_model (chat)) {
+        hx_member_model_remove (hx_chat_member_model (chat), user->uid);
     }
-    if (chat->cid) {
-        gchat = gchat_with_cid (sess, chat->cid);
+    if (hx_chat_cid (chat)) {
+        gchat = gchat_with_cid (sess, hx_chat_cid (chat));
         if (!gchat || !gchat->userlist) {
             return;
         }
@@ -1146,7 +1149,7 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
         return;
     }
 
-    /* chat->cid == 0 — standalone Users window. */
+    /* hx_chat_cid (chat) == 0 — standalone Users window. */
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
     }
@@ -1162,13 +1165,13 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 
     (void)htlc;
 
-    if (chat->member_model) {
-        hx_member_model_upsert (chat->member_model, user->uid, nam, icon, color,
+    if (hx_chat_member_model (chat)) {
+        hx_member_model_upsert (hx_chat_member_model (chat), user->uid, nam, icon, color,
                                 user->nick_color);
     }
 
-    if (chat->cid) {
-        gchat = gchat_with_cid (sess, chat->cid);
+    if (hx_chat_cid (chat)) {
+        gchat = gchat_with_cid (sess, hx_chat_cid (chat));
         if (!gchat) {
             gchat = create_pchat_window (&sess->htlc, chat);
         }
@@ -1185,7 +1188,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         return;
     }
 
-    /* chat->cid == 0 — fan out the change into per-pchat sidebars
+    /* hx_chat_cid (chat) == 0 — fan out the change into per-pchat sidebars
 	 * AND into the standalone Users window. The fan-out happens
 	 * BEFORE the Users-window update so the recursion shape is the
 	 * same as the legacy code; both arms compute the foreground
@@ -1199,14 +1202,14 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
                 continue;   /* public chat handled via the standalone view */
             }
             struct chat *c = val;
-            if (!c->view) {
+            if (!hx_chat_view (c)) {
                 continue;   /* only open private-chat windows */
             }
             /* Only fan the change into pchats this user is actually in
-			 * (M4b.4b-iii: the membership check is the model now). The
+			 * (the membership check is the model now). The
 			 * same `user` carrier works — user_change reads only its uid +
 			 * nick_color, which are the same across chats. */
-            if (hx_member_model_contains (c->member_model, user->uid)) {
+            if (hx_member_model_contains (hx_chat_member_model (c), user->uid)) {
                 user_change (&sess->htlc, c, user, nam, icon, color);
             }
         }
@@ -1255,7 +1258,7 @@ users_refresh_avatar (guint16 uid)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             struct chat *c = val;
-            struct gtkhx_chat *gchat = c->view;
+            struct gtkhx_chat *gchat = hx_chat_view (c);
             if (!gchat || !gchat->userlist) {
                 continue;
             }

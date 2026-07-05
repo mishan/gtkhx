@@ -335,9 +335,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 *      reclaims the chat's member model + the struct chat itself
 	 *      on remove; we do not need to walk + free members by hand.
 	 * The public chat (cid=0) must stay alive across reconnects, so
-	 * we remove all *non-public* chats and then reset the public
-	 * chat's subject in-place (its membership was already dropped by
-	 * the users-clear emit above, which clears the member model). */
+	 * we remove all *non-public* chats; the public chat's membership
+	 * and subject were both reset by its users-clear emit above. */
     if (sess->chats) {
         GHashTableIter iter;
         gpointer key, val;
@@ -345,15 +344,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             struct chat *chat = val;
+            /* The users-clear emit drops this chat's membership and
+			 * (view-side) resets its subject — the public chat persists
+			 * across reconnect, so its subject must not carry over. */
             gtkhx_session_emit_users_clear (gtkhx_session_get_default (), htlc,
                                             chat);
             if (GPOINTER_TO_UINT (key) != 0) {
                 non_public = g_list_prepend (non_public, key);
-            } else {
-                /* Public chat persists across reconnect. Its membership
-				 * was already dropped by the users-clear emit above (which
-				 * clears the member model); just reset the subject. */
-                chat->subject[0] = '\0';
             }
         }
         for (GList *l = non_public; l; l = l->next) {
@@ -1517,7 +1514,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 	 * cipher / compress hooks below. */
     len = (htlc->out.pos + htlc->out.len) - this_off;
 
-    /* R3.3.e-4c: when the bridge is installed and neither
+    /* When the bridge is installed and neither
      * cipher nor compression is active, ship the packed
      * plaintext through hxnet's send queue and pop the bytes
      * out of htlc->out so the legacy write-source path doesn't
@@ -1525,7 +1522,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
      * cipher / compression yet (HOPE-negotiated stacks live
      * inside the C cipher state today); when those are set we
      * fall through to the legacy in-place encode path. */
-    /* R3.3.e-4d: when the bridge is installed, hxnet's transform
+    /* When the bridge is installed, hxnet's transform
      * stack handles the negotiated cipher / compression, so the
      * C side ships PLAINTEXT through hx_bridge_send_frame and
      * skips the legacy compress_encode + cipher_encode +

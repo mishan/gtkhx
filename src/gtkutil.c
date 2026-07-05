@@ -572,10 +572,10 @@ close_connected_windows (session *sess)
         while (g_hash_table_iter_next (&iter, &key, &val)) {
             guint32 cid = GPOINTER_TO_UINT (key);
             struct chat *c = val;
-            /* M4a: only non-public conversations that actually have an
+            /* Only non-public conversations that actually have an
 			 * open window need closing (models without a view have no
 			 * tab to tear down). */
-            if (cid != 0 && c->view)
+            if (cid != 0 && hx_chat_view (c))
                 g_array_append_val (cids, cid);
         }
         for (guint i = 0; i < cids->len; i++) {
