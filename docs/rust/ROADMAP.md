@@ -1160,9 +1160,18 @@ below for the honest ledger of the many small pieces that remain.
 ### Chat-model re-think (M1–M4)
 
 The per-chat model (`struct chat`) and window (`struct gtkhx_chat`) are being
-reshaped into Rust rather than field-for-field ported. Full design +
-rationale: **[gchats-model-rethink.md](gchats-model-rethink.md)**. Phasing,
-leaf-up:
+reshaped into Rust rather than field-for-field ported. The original tangle kept
+two lockstep per-session hashtables (`chats` / `gchats`) plus a
+`struct gtkhx_chat` god-object mixing a model back-pointer, seven live widget
+handles, command history, raw xtext render cursors, and an inline-media table —
+with membership stored *twice* (`chat->users` and, again, the user-list model).
+The re-think splits that into the three concerns it actually is: a pure,
+testable `Conversation` + `Member` model (membership + subject, no GTK); a
+`gio::ListModel` of members the user list binds to directly (single source of
+truth); and a per-conversation view object owning the widgets + history +
+render cursors + media table as named sub-structs. Nick completion / tab-cycle
+became methods on the pure model, unit-tested without a display. Wire compat is
+untouched — client-side state shape only. Phasing, leaf-up:
 
 - ✅ **M1 — pure model + nick completion.** `hxchat-model` crate
   (`Member` / `MemberList` / `Conversation`) with the tested `complete_styled`

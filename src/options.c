@@ -393,16 +393,15 @@ reinit_gtktexts (session *sess)
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
         if (sess->chats) {
-            GHashTableIter iter;
-            gpointer key, val;
-            g_hash_table_iter_init (&iter, sess->chats);
-            while (g_hash_table_iter_next (&iter, &key, &val)) {
-                struct chat *c = val;
+            guint n = hx_chats_count (sess->chats);
+            for (guint i = 0; i < n; i++) {
+                struct chat *c = hx_chats_get_at (sess->chats, i);
                 struct gtkhx_chat *gchat = hx_chat_view (c);
                 if (!gchat) {
                     continue;
                 }
-                if (GPOINTER_TO_UINT (key) == 0 && !gtkhx_prefs.geo.chat.open) {
+                if (hx_chats_cid_at (sess->chats, i) == 0
+                    && !gtkhx_prefs.geo.chat.open) {
                     continue;
                 }
                 gtk_xtext_set_font (GTK_XTEXT (gchat->output), fontname);
@@ -442,11 +441,9 @@ changed_xtext (session *sess)
 {
     if (sess) {
         if (sess->chats) {
-            GHashTableIter iter;
-            gpointer val;
-            g_hash_table_iter_init (&iter, sess->chats);
-            while (g_hash_table_iter_next (&iter, NULL, &val)) {
-                struct chat *c = val;
+            guint n = hx_chats_count (sess->chats);
+            for (guint i = 0; i < n; i++) {
+                struct chat *c = hx_chats_get_at (sess->chats, i);
                 struct gtkhx_chat *gchat = hx_chat_view (c);
                 if (!gchat) {
                     continue;
@@ -482,11 +479,9 @@ changed_timestamp (session *sess)
         return;
     }
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct chat *c = val;
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (!gchat) {
                 continue;
@@ -663,11 +658,9 @@ changed_stampformat (session *sess)
         return;
     }
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct chat *c = val;
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (!gchat) {
                 continue;

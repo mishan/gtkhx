@@ -8,7 +8,8 @@ G_BEGIN_DECLS
 /*
  * chat_members.h — C ABI over the Rust HxMemberModel (the authoritative
  * per-chat membership data, gtkhx-ui/src/chat_members.rs) + the M1 nick
- * completion. See the module doc + docs/rust/gchats-model-rethink.md.
+ * completion. See the module doc + the Chat-model re-think section of
+ * docs/rust/ROADMAP.md.
  *
  * Ownership: one model per chat, created in chat_new and held on
  * struct chat::member_model. It's a C-owned GObject — hx_member_model_new

@@ -462,11 +462,9 @@ inline_media_attach_refresh_all_chats (session *sess)
     }
     gboolean show = (sess->htlc.caps & HTLC_CAP_INLINE_MEDIA) != 0;
 
-    GHashTableIter iter;
-    gpointer val;
-    g_hash_table_iter_init (&iter, sess->chats);
-    while (g_hash_table_iter_next (&iter, NULL, &val)) {
-        struct chat *c = val;
+    guint n = hx_chats_count (sess->chats);
+    for (guint i = 0; i < n; i++) {
+        struct chat *c = hx_chats_get_at (sess->chats, i);
         struct gtkhx_chat *gchat = hx_chat_view (c);
         if (gchat && gchat->media_attach_btn) {
             gtk_widget_set_visible (gchat->media_attach_btn, show);

@@ -338,25 +338,31 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * we remove all *non-public* chats; the public chat's membership
 	 * and subject were both reset by its users-clear emit above. */
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer key, val;
-        GList *non_public = NULL;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, &key, &val)) {
-            struct chat *chat = val;
+        GArray *non_public = g_array_new (FALSE, FALSE, sizeof (guint32));
+        /* Snapshot pass: emit users-clear for every chat, collect the
+         * non-public cids, remove them after. The cid comes from the
+         * registry (hx_chats_cid_at) rather than the gtkhx-ui conversation
+         * accessors — this file must stay free of UI-crate symbols so the
+         * headless wire-level tests link. Collect-then-remove so we don't
+         * mutate the registry mid-walk. */
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *chat = hx_chats_get_at (sess->chats, i);
+            guint32 cid = hx_chats_cid_at (sess->chats, i);
             /* The users-clear emit drops this chat's membership and
 			 * (view-side) resets its subject — the public chat persists
 			 * across reconnect, so its subject must not carry over. */
             gtkhx_session_emit_users_clear (gtkhx_session_get_default (), htlc,
                                             chat);
-            if (GPOINTER_TO_UINT (key) != 0) {
-                non_public = g_list_prepend (non_public, key);
+            if (cid != 0) {
+                g_array_append_val (non_public, cid);
             }
         }
-        for (GList *l = non_public; l; l = l->next) {
-            g_hash_table_remove (sess->chats, l->data);
+        for (guint i = 0; i < non_public->len; i++) {
+            hx_chats_remove (sess->chats,
+                             g_array_index (non_public, guint32, i));
         }
-        g_list_free (non_public);
+        g_array_free (non_public, TRUE);
     }
 
     /* tasks live in a GHashTable<u32 trans, struct task*>.

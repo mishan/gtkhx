@@ -46,6 +46,11 @@
 //! practice the session never reaches refcount 0, but the defensive
 //! ref keeps the invariant local and matches the project convention.
 
+// The per-session cid → conversation registry (was `session->chats`, a
+// GHashTable). Type-agnostic + GTK-free so it can live in this crate — the one
+// the headless wire-level tests link — rather than gtkhx-ui.
+pub mod chat_registry;
+
 use glib::prelude::*;
 use glib::translate::{from_glib, FromGlibPtrNone, IntoGlib, ToGlibPtrMut};
 use std::ffi::{c_char, c_int, c_void, CStr};

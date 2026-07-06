@@ -71,6 +71,7 @@ rust_sources = files(
   # now resolve against gtkhx-boxed instead of proto_helpers.c /
   # tracker_event.c.
   'crates/gtkhx-session/src/lib.rs',
+  'crates/gtkhx-session/src/chat_registry.rs',
   # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent, HxChatEvent
   # + HxChatMedia, HxTrackerServer + HxTrackerV3Meta), self-contained
   # (glib only) so proto unit tests can pull their _copy/_free without

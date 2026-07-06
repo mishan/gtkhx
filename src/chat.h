@@ -3,15 +3,35 @@
 
 extern GdkRGBA colors[];
 
-/* lazy-allocate the session's chat GHashTable AND seed it
+/* lazy-allocate the session's chat registry (see below) AND seed it
  * with the always-required public chat at cid=0. Safe to call
- * multiple times — only the first call constructs the table.
+ * multiple times — only the first call constructs the registry.
  * gtkhx.c calls it during init, before any other chat_* operation. */
 extern void chats_init (session *sess);
 
 extern struct chat *chat_new (session *sess, guint32 cid);
 extern void chat_delete (session *sess, struct chat *chat);
 extern struct chat *chat_with_cid (session *sess, guint32 cid);
+
+/* The per-session cid → conversation registry (was a GHashTable), now the Rust
+ * HxChatRegistry in the gtkhx-session crate (rust/crates/gtkhx-session/src/
+ * chat_registry.rs). Opaque here; sess->chats holds one. chats_init creates it
+ * with chat_free as the destroy callback; chat_new / _delete / _with_cid wrap
+ * insert / remove / lookup. Disconnect teardown and the palette push walk it
+ * with hx_chats_count + hx_chats_get_at, plus hx_chats_cid_at where the cid is
+ * needed without reaching the (gtkhx-ui) conversation accessors. It lives in
+ * gtkhx-session — the crate the headless wire-level tests link — so network.c's
+ * teardown resolves these symbols without pulling in the UI crate. */
+typedef struct HxChatRegistry HxChatRegistry;
+typedef void (*HxChatDestroyFn) (void *chat);
+extern HxChatRegistry *hx_chats_new (HxChatDestroyFn destroy);
+extern void hx_chats_free (HxChatRegistry *reg);
+extern void hx_chats_insert (HxChatRegistry *reg, guint32 cid, void *chat);
+extern void hx_chats_remove (HxChatRegistry *reg, guint32 cid);
+extern void *hx_chats_lookup (HxChatRegistry *reg, guint32 cid);
+extern guint32 hx_chats_count (HxChatRegistry *reg);
+extern void *hx_chats_get_at (HxChatRegistry *reg, guint32 i);
+extern guint32 hx_chats_cid_at (HxChatRegistry *reg, guint32 i);
 
 /* struct chat is an opaque HxConversation handle
  * (gtkhx-ui/src/conversation.rs): C reaches its fields only through these

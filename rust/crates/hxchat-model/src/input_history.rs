@@ -1,6 +1,7 @@
 //! `InputHistory` — chat input line history with Up/Down navigation and
-//! draft recovery (Phase R5 M3; the first typed sub-struct peeled off the C
-//! `struct gtkhx_chat` — see `docs/rust/gchats-model-rethink.md`).
+//! draft recovery (the first typed sub-struct peeled off the C
+//! `struct gtkhx_chat` — see the Chat-model re-think section of
+//! `docs/rust/ROADMAP.md`).
 //!
 //! Replaces the GNU-readline `HISTORY` the chat input used (`gchat->
 //! chat_history`) plus the `chat_history_draft` Up-arrow recovery slot, folding

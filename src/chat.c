@@ -241,11 +241,9 @@ gtkhx_apply_theme_palette (gboolean dark)
 	 * xtext, so it picks up the system theme without help. */
     session *sess = hx_active_session ();
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct chat *c = val;
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (gchat && gchat->output) {
                 gtk_xtext_set_palette (GTK_XTEXT (gchat->output), colors);
@@ -353,10 +351,10 @@ word_check (GtkWidget *xtext, char *word)
  * just append the bare message text; the per-entry timestamp is
  * auto-set in gtk_xtext_append_entry. */
 
-/* chat lifecycle on GHashTable. chat_free() is the GDestroyNotify the
- * session->chats table invokes when an entry is removed or the table is
- * destroyed. It frees the chat's authoritative membership model, its
- * attached view (if any), and the struct itself. */
+/* chat lifecycle on the HxChatRegistry. chat_free() is the destroy callback the
+ * session->chats registry invokes when an entry is removed or the registry is
+ * freed. It frees the chat's authoritative membership model, its attached view
+ * (if any), and the struct itself. */
 
 /* Forward decls: chat_free (the model destroy-notify) tears down an
  * attached view via gchat_free, and chats_init installs pchat_close as
@@ -391,8 +389,7 @@ chats_init (session *sess)
     if (sess->chats) {
         return;
     }
-    sess->chats = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
-                                         chat_free);
+    sess->chats = hx_chats_new (chat_free);
     /* Public chat (cid=0) must always exist while the table does —
 	 * it's where the server-wide user list lives and where
 	 * top-level chat messages are routed. Create it eagerly so
@@ -414,7 +411,7 @@ chat_new (session *sess, guint32 cid)
      * authoritative membership model (fed by the users.c fan-out, read by
      * tab_nick_comp / the user-list view / rcv.c old-state lookups). */
     struct chat *chat = hx_conversation_new (cid);
-    g_hash_table_insert (sess->chats, GUINT_TO_POINTER (cid), chat);
+    hx_chats_insert (sess->chats, cid, chat);
     return chat;
 }
 
@@ -424,7 +421,7 @@ chat_delete (session *sess, struct chat *chat)
     if (!chat || !sess->chats) {
         return;
     }
-    g_hash_table_remove (sess->chats, GUINT_TO_POINTER (hx_chat_cid (chat)));
+    hx_chats_remove (sess->chats, hx_chat_cid (chat));
 }
 
 struct chat *
@@ -433,16 +430,17 @@ chat_with_cid (session *sess, guint32 cid)
     if (!sess->chats) {
         return NULL;
     }
-    return g_hash_table_lookup (sess->chats, GUINT_TO_POINTER (cid));
+    return hx_chats_lookup (sess->chats, cid);
 }
 
-/* gtkhx_chat (UI side) lifecycle on GHashTable.
- *
- * The table's destroy notify just g_frees the struct; the widget
- * subtree (window, output, input, subject, userlist, vscroll) is
- * owned by the parent window and reclaimed when the window is
- * destroyed. gchat_delete callers (gtkutil.c teardown, pchat_close)
- * destroy the window separately. */
+/* gtkhx_chat (UI side) lifecycle. The view isn't stored in its own table —
+ * it hangs off its conversation (hx_chat_view (chat)). gchat_free g_frees the
+ * struct (and drops the strong refs it owns below); the widget subtree
+ * (window, output, input, subject, userlist, vscroll) is owned by the parent
+ * window and reclaimed when the window is destroyed. It runs either from
+ * chat_free (the registry destroy callback, when the conversation goes) or
+ * from gchat_delete / pchat_close, which detach the view and destroy the
+ * window separately. */
 static void
 gchat_free (gpointer p)
 {
@@ -1192,15 +1190,13 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 static struct gtkhx_chat *
 find_gchat_by_output (GtkWidget *xtext)
 {
-    GHashTableIter it;
-    gpointer key, val;
-
-    if (!hx_active_session ()->chats) {
+    HxChatRegistry *chats = hx_active_session ()->chats;
+    if (!chats) {
         return NULL;
     }
-    g_hash_table_iter_init (&it, hx_active_session ()->chats);
-    while (g_hash_table_iter_next (&it, &key, &val)) {
-        struct chat *c = val;
+    guint n = hx_chats_count (chats);
+    for (guint i = 0; i < n; i++) {
+        struct chat *c = hx_chats_get_at (chats, i);
         struct gtkhx_chat *g = hx_chat_view (c);
         if (g && g->output == xtext) {
             return g;
