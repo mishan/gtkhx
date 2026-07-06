@@ -120,113 +120,13 @@ typedef struct HxChatRegistry HxChatRegistry;
 
 /* ---- Chat windows ------------------------------------------------- */
 
-/* fogWraith chat-history extension render cursors, grouped.
- * Was five loose gtkhx_chat fields; contained here so their
- * widget-coupled lifetime is one named object. The two textentry*
- * are raw pointers into xtext's internal buffer entries — they stay a
- * C view concern, which is why this render state isn't a Rust
- * sub-model like chat_history / media_table. Embedded in gtkhx_chat
- * (zero-init'd by its g_malloc0); reset to zero on (re)render. */
-struct hx_chat_history_render {
-    /* Smallest message_id we've already rendered for this chat. Used
-     * as the BEFORE= cursor on "Load older" fetches so the server
-     * returns strictly older entries. 0 means no anchor yet (no
-     * history batch arrived) and a "Load older" click is a bare-cursor
-     * request (server's default window). */
-    guint64    oldest_msgid;
-    /* Last batch's has_more flag, mirrored here so the renderer + the
-     * click handler can consult it without re-walking the xtext
-     * buffer. */
-    gboolean   has_more;
-    /* TRUE while a "Load older" fetch is in-flight; the click handler
-     * refuses a second request until the receive path clears it. */
-    gboolean   loading;
-    /* textentry of the opening "── chat history (N) ──" divider, saved
-     * on initial render. Insert-point for all subsequent Load-Older
-     * inserts: older entries + the refreshed sentinel land just BEFORE
-     * this anchor, so older content stays inside the chat-history block
-     * instead of jumping above the server-notice preamble that
-     * hx_printf wrote first. */
-    textentry *anchor_ent;
-    /* textentry of the currently-rendered "↑ Load older" sentinel row,
-     * or NULL when none is rendered. Refreshed every batch: removed via
-     * gtk_xtext_remove_entry, then re-inserted before the anchor if
-     * has_more is still true on the new batch. */
-    textentry *load_older_ent;
-};
-
-/* The per-conversation window/view. No longer stored in its own
- * table: it hangs off the matching model (struct chat::view) in
- * sess->chats, keyed by cid. cid=0 is the public chat's window (created
- * at startup by create_chat); pchat windows attach in pchat_new. Lookup
- * by cid is O(1) via gchat_with_cid (chat_with_cid(sess, cid)->view);
- * gchat_free reclaims the struct. */
-struct gtkhx_chat {
-    GtkWidget *window;
-    GtkWidget *vscroll;
-    GtkWidget *output;
-    GtkWidget *input;
-    GtkWidget *subject;
-    /* Voice Join/Mute icon controls for a private chat, hosted in
-     * that pchat's user-list action bar (create_pchat_window). NULL
-     * for the public chat — its controls live in the standalone
-     * Users window instead (create_users_window), and the voice
-     * panels are tracked in voice_panel.c's own registry rather than
-     * through this field. Hidden when HTLC_CAP_VOICE wasn't echoed
-     * (the common case on most servers). */
-    GtkWidget *voice_panel;
-    /* per-pchat
-	 * sidebar is now an HxUserListView GObject (GtkColumnView-
-	 * backed). Forward-declared as an opaque typedef so this
-	 * header doesn't have to pull in users_view.h — the field
-	 * is read/written from chat.c + users.c only. */
-    struct _HxUserListView *userlist;
-    /* The window's identity: its chat id. The matching model object is the
-     * sess->chats entry under this cid, and it owns this view via chat::view
-     * — look it up with chat_with_cid(sess, cid) rather than caching a
-     * raw struct chat* back-pointer here (the old `chat` field, now gone). */
-    guint32 cid;
-    /* Chat input line history — a Rust InputHistory (hxchat-model), created by
-     * hx_input_history_new, driven by chat_input_key_pressed's Return/Up/Down,
-     * freed in chat_free. Owns the Up-arrow draft internally (the old separate
-     * chat_history_draft field is gone). */
-    void *chat_history;
-
-    /* fogWraith chat-history extension render cursors (Phase 3+),
-     * grouped into one named sub-object — see struct
-     * hx_chat_history_render above for the per-field notes. The
-     * anchor / load-older textentry* are raw pointers into xtext and
-     * can be invalidated by entry trims, so treat them as live only
-     * during a render pass. */
-    struct hx_chat_history_render render;
-
-    /* Inline-media extension (Phase 9.C UI). Pointer to the
-	 * paperclip 'Attach Image' button in this chat's input row.
-	 * Visibility is gated on HTLC_CAP_INLINE_MEDIA — initially
-	 * hidden, flipped on by inline_media_attach_refresh_all_chats
-	 * (called from setbtns alongside the voice-panel refresh)
-	 * once the LOGIN reply populates htlc->caps. Stays NULL on
-	 * gchats whose input row hasn't been built yet (e.g. before
-	 * create_chat_window runs). */
-    GtkWidget *media_attach_btn;
-
-    /* Inline-media extension (Phase 9.D dialog). Per-chat token
-	 * -> HxChatMedia* lookup (the Rust MediaTable,
-	 * gtkhx-boxed/src/media_table.rs, reached via hx_media_table_*).
-	 * When a chat carries inline media, output_chat_from_event
-	 * registers a deep copy under a fresh token
-	 * (hx_media_table_register) and embeds the token in the
-	 * placeholder row text as `hxmedia:N`. The xtext word_click
-	 * handler (inline_media_chat_word_click) scans the clicked word
-	 * for that substring and dispatches the lookup
-	 * (hx_media_table_lookup).
-	 *
-	 * Created in the chat-window constructors, lives for the chat's
-	 * lifetime, freed in chat_free -- hx_media_table_free drops the
-	 * table and every HxChatMedia copy it owns. Opaque here; token 0
-	 * is the "absent" sentinel. */
-    void *media_table;
-};
+/* struct gtkhx_chat — the per-conversation view — is an opaque handle here.
+ * Its definition (and struct hx_chat_history_render, which it embeds) lives in
+ * chat.c: it is a C-only view aggregate (GTK widget handles, the Rust
+ * InputHistory / MediaTable / HxUserListView handles, and render cursors that
+ * are raw pointers into xtext internal entries). Code outside chat.c reaches it
+ * through the hx_gchat_* accessors in chat.h. */
+struct gtkhx_chat;
 
 /* ---- News (1.5 threaded protocol) --------------------------------- */
 

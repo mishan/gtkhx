@@ -23,7 +23,7 @@ use std::os::raw::c_int;
 use gtk4 as gtk;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_none, IntoGlibPtr};
+use glib::translate::{from_glib_borrow, IntoGlibPtr};
 
 use crate::tr::tr;
 
@@ -78,7 +78,11 @@ pub unsafe extern "C" fn hx_emoji_button_new(
     if target_text_view.is_null() {
         return std::ptr::null_mut();
     }
-    let widget: gtk::Widget = from_glib_none(target_text_view);
+    // Borrow, don't own: `from_glib_none` would sink a floating reference, so a
+    // caller passing an unparented view would have it finalized when this
+    // wrapper drops. We only inspect it here (retaining via `view.clone()` where
+    // needed), so a non-owning borrow is both correct and floating-safe.
+    let widget = from_glib_borrow::<_, gtk::Widget>(target_text_view);
     let Some(view) = widget.downcast_ref::<gtk::TextView>() else {
         return std::ptr::null_mut();
     };
@@ -295,7 +299,11 @@ pub unsafe extern "C" fn hx_emoji_typeahead_attach(target_text_view: *mut gtk::f
     if target_text_view.is_null() {
         return;
     }
-    let widget: gtk::Widget = from_glib_none(target_text_view);
+    // Borrow, don't own: `from_glib_none` would sink a floating reference, so a
+    // caller passing an unparented view would have it finalized when this
+    // wrapper drops. We only inspect it here (retaining via `view.clone()` where
+    // needed), so a non-owning borrow is both correct and floating-safe.
+    let widget = from_glib_borrow::<_, gtk::Widget>(target_text_view);
     let Some(view) = widget.downcast_ref::<gtk::TextView>() else {
         return;
     };
@@ -406,7 +414,11 @@ pub unsafe extern "C" fn hx_emoji_typeahead_detach(target_text_view: *mut gtk::f
     if target_text_view.is_null() {
         return;
     }
-    let widget: gtk::Widget = from_glib_none(target_text_view);
+    // Borrow, don't own: `from_glib_none` would sink a floating reference, so a
+    // caller passing an unparented view would have it finalized when this
+    // wrapper drops. We only inspect it here (retaining via `view.clone()` where
+    // needed), so a non-owning borrow is both correct and floating-safe.
+    let widget = from_glib_borrow::<_, gtk::Widget>(target_text_view);
     let Some(view) = widget.downcast_ref::<gtk::TextView>() else {
         return;
     };

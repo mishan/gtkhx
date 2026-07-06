@@ -17,6 +17,15 @@ use glib::translate::{from_glib_full, IntoGlibPtr};
 
 use hxmember_model::HxMemberModel;
 
+extern "C" {
+    // hxchat-model — the Rust InputHistory (input line history), C ABI.
+    fn hx_input_history_new() -> *mut c_void;
+    fn hx_input_history_free(hist: *mut c_void);
+    // gtkhx-boxed — the Rust MediaTable (inline-media token → HxChatMedia), C ABI.
+    fn hx_media_table_new() -> *mut c_void;
+    fn hx_media_table_free(table: *mut c_void);
+}
+
 /// The per-chat model. Box-allocated, so `subject`'s address is stable for the
 /// handle's lifetime (the C side reads a pointer into it).
 pub struct HxConversation {
@@ -26,6 +35,13 @@ pub struct HxConversation {
     /// Authoritative membership. Owned GObject ref (transfer-full); unref'd in
     /// `hx_conversation_free`.
     member_model: *mut c_void,
+    /// Input line history (Rust `InputHistory`, hxchat-model). Owned. Created
+    /// here so it's conversation-scoped — a pchat's typed history survives
+    /// closing + reopening its window (it's chat state, not view state).
+    chat_history: *mut c_void,
+    /// Inline-media token table (Rust `MediaTable`, gtkhx-boxed). Owned. Tokens
+    /// are monotonic, so re-rendering into a rebuilt view never collides.
+    media_table: *mut c_void,
     /// The open window/view, or NULL. Non-owning: the C side (`gchat_free`)
     /// owns the `struct gtkhx_chat` and frees it in `chat_free` before us.
     view: *mut c_void,
@@ -39,10 +55,16 @@ pub extern "C" fn hx_conversation_new(cid: u32) -> *mut HxConversation {
     let mm: *mut glib::gobject_ffi::GObject =
         HxMemberModel::new().upcast::<glib::Object>().into_glib_ptr();
     let member_model = mm as *mut c_void;
+    // SAFETY: hx_input_history_new / hx_media_table_new are the C-ABI
+    // constructors from hxchat-model / gtkhx-boxed; each returns an owned handle.
+    let (chat_history, media_table) =
+        unsafe { (hx_input_history_new(), hx_media_table_new()) };
     Box::into_raw(Box::new(HxConversation {
         cid,
         subject: [0; 256],
         member_model,
+        chat_history,
+        media_table,
         view: std::ptr::null_mut(),
     }))
 }
@@ -62,6 +84,12 @@ pub unsafe extern "C" fn hx_conversation_free(conv: *mut HxConversation) {
     if !conv.member_model.is_null() {
         let _: glib::Object =
             from_glib_full(conv.member_model as *mut glib::gobject_ffi::GObject);
+    }
+    if !conv.chat_history.is_null() {
+        hx_input_history_free(conv.chat_history);
+    }
+    if !conv.media_table.is_null() {
+        hx_media_table_free(conv.media_table);
     }
 }
 
@@ -127,6 +155,34 @@ pub unsafe extern "C" fn hx_chat_member_model(conv: *const HxConversation) -> *m
         std::ptr::null_mut()
     } else {
         (*conv).member_model
+    }
+}
+
+/// `void *hx_chat_input_history(struct chat *)` — the conversation's
+/// `InputHistory` handle (borrowed; owned by the conversation).
+///
+/// # Safety
+/// `conv` is NULL or live.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_input_history(conv: *const HxConversation) -> *mut c_void {
+    if conv.is_null() {
+        std::ptr::null_mut()
+    } else {
+        (*conv).chat_history
+    }
+}
+
+/// `void *hx_chat_media_table(struct chat *)` — the conversation's `MediaTable`
+/// handle (borrowed; owned by the conversation).
+///
+/// # Safety
+/// `conv` is NULL or live.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_media_table(conv: *const HxConversation) -> *mut c_void {
+    if conv.is_null() {
+        std::ptr::null_mut()
+    } else {
+        (*conv).media_table
     }
 }
 

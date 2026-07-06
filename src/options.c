@@ -404,13 +404,13 @@ reinit_gtktexts (session *sess)
                     && !gtkhx_prefs.geo.chat.open) {
                     continue;
                 }
-                gtk_xtext_set_font (GTK_XTEXT (gchat->output), fontname);
-                gtk_xtext_refresh (GTK_XTEXT (gchat->output));
-                if (gchat->input) {
-                    gtkhx_apply_input_font (gchat->input);
+                gtk_xtext_set_font (GTK_XTEXT (hx_gchat_output (gchat)), fontname);
+                gtk_xtext_refresh (GTK_XTEXT (hx_gchat_output (gchat)));
+                if (hx_gchat_input (gchat)) {
+                    gtkhx_apply_input_font (hx_gchat_input (gchat));
                 }
-                if (gchat->subject) {
-                    gtkhx_apply_text_style (gchat->subject);
+                if (hx_gchat_subject (gchat)) {
+                    gtkhx_apply_text_style (hx_gchat_subject (gchat));
                 }
             }
         }
@@ -448,9 +448,9 @@ changed_xtext (session *sess)
                 if (!gchat) {
                     continue;
                 }
-                GTK_XTEXT (gchat->output)->wordwrap = gtkhx_prefs.word_wrap;
-                GTK_XTEXT (gchat->output)->max_lines = gtkhx_prefs.xbuf_max;
-                gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+                GTK_XTEXT (hx_gchat_output (gchat))->wordwrap = gtkhx_prefs.word_wrap;
+                GTK_XTEXT (hx_gchat_output (gchat))->max_lines = gtkhx_prefs.xbuf_max;
+                gtk_xtext_refresh (GTK_XTEXT (hx_gchat_output (gchat)));
             }
         }
         if (sess->msg_windows) {
@@ -486,9 +486,9 @@ changed_timestamp (session *sess)
             if (!gchat) {
                 continue;
             }
-            gtk_xtext_set_time_stamp (GTK_XTEXT (gchat->output)->buffer,
+            gtk_xtext_set_time_stamp (GTK_XTEXT (hx_gchat_output (gchat))->buffer,
                                       gtkhx_prefs.timestamp);
-            gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+            gtk_xtext_refresh (GTK_XTEXT (hx_gchat_output (gchat)));
         }
     }
     if (sess->msg_windows) {
@@ -665,7 +665,7 @@ changed_stampformat (session *sess)
             if (!gchat) {
                 continue;
             }
-            gtk_xtext_set_stamp_format (GTK_XTEXT (gchat->output),
+            gtk_xtext_set_stamp_format (GTK_XTEXT (hx_gchat_output (gchat)),
                                         gtkhx_prefs.stamp_format);
         }
     }
