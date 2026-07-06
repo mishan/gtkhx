@@ -85,6 +85,9 @@ pub mod chat_tabs;
 // The chat / pchat input GtkTextView key handler (was chat_input_key_pressed).
 // Exports gtkhx_chat_input_attach; keeps tab_nick_comp in C.
 pub mod chat_input;
+// The incoming chat-invitation dialog (was output_chat_invitation +
+// chat_invite_response). Join/Decline via the hxchat-send Rust senders.
+pub mod chat_invite;
 // The C ABI over the session-owned HxMemberModel +
 // the M1 nick completion (hx_member_model_* / hx_nick_complete).
 pub mod chat_members;

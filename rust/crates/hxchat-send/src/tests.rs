@@ -297,6 +297,25 @@ fn part_sends_chat_id_when_known() {
 }
 
 #[test]
+fn reject_sends_chat_id_no_task_no_lookup() {
+    reset(true, 0); // lookup → NULL, but DECLINE never looks up
+    unsafe { hx_reject_chat(htlc(), 0x44) };
+    let s = last().unwrap();
+    assert_eq!(s.ty, HTLC_HDR_CHAT_DECLINE);
+    assert_eq!(s.chunks.len(), 1);
+    assert_eq!(s.chunks[0].0, TAG_CHAT_ID);
+    assert_eq!(s.chunks[0].1, vec![0, 0, 0, 0x44]);
+    assert!(last_task().is_none()); // DECLINE has no task
+}
+
+#[test]
+fn reject_bails_on_null_htlc() {
+    reset(true, 0);
+    unsafe { hx_reject_chat(std::ptr::null_mut(), 1) };
+    assert!(last().is_none());
+}
+
+#[test]
 fn change_subject_emits_chat_id_and_subject() {
     reset(true, 0);
     let subj = cstr("Lobby");

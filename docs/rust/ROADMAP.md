@@ -1264,7 +1264,10 @@ pool; the small ones are now drained, three larger items remain):
   bridge shim). ✅ The input key handler moved to Rust (`chat_input.rs`:
   Ctrl+K / Return-to-send / Tab completion / Up-Down history via
   `gtkhx_chat_input_attach`; the tested `tab_nick_comp` completer stays C and
-  is called from it). See the chat-model re-think above for the model side.
+  is called from it). ✅ The incoming chat-invitation dialog moved to Rust
+  (`chat_invite.rs`); both its senders are now Rust in `hxchat-send`
+  (`hx_chat_join` + `hx_reject_chat`). See the chat-model re-think above for the
+  model side.
 - **Files content** — the whole two-panel browser: the two `files_panel`
   GtkColumnViews, DnD, the providers (`files_provider.c`,
   `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,
