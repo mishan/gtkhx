@@ -27,6 +27,9 @@
 #include "session.h"  /* session, hx_htlc_close */
 #include "network.h"  /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
 #include "hotline.h"  /* HTLC_CAP_TEXT_ENCODING */
+#include "gtkhx.h"     /* gtkhx_prefs */
+#include "hl_access.h" /* hl_access_permits, HL_ACCESS_READ_NEWS */
+#include "debug.h"     /* debug_log */
 #include "gtkhx_ui_bridge.h"
 
 void
@@ -109,4 +112,64 @@ gtkhx_connect_apply (session *sess, const char *server, guint16 port,
 
     hx_connect (&sess->htlc, server ? server : "", port, login ? login : "",
                 pass ? pass : "", secure, tls);
+}
+
+/* ---- Flat News (gtkhx-ui news.rs) session seam -----------------------
+ *
+ * The flat 1.0/1.2 News content moved to Rust (news.rs). The three widget
+ * handles still live on the C `session` so the two remaining C consumers —
+ * gtkutil.c's setbtns (Post/Reload sensitivity on connect) and options.c's
+ * theme re-apply (news_text) — reach them unchanged. The Rust content build
+ * populates them via gtkhx_news_set_widgets; the rest of the flat-news view
+ * state (search context) lives Rust-side. */
+
+void
+gtkhx_news_set_widgets (session *sess, GtkWidget *text, GtkWidget *post,
+                        GtkWidget *reload)
+{
+    if (sess) {
+        sess->news_text    = text;
+        sess->postButton   = post;
+        sess->reloadButton = reload;
+    }
+}
+
+struct htlc_conn *
+gtkhx_session_htlc (session *sess)
+{
+    return sess ? &sess->htlc : NULL;
+}
+
+gboolean
+gtkhx_news_is_open (void)
+{
+    return gtkhx_prefs.geo.news.open ? TRUE : FALSE;
+}
+
+void
+gtkhx_news_mark_open (void)
+{
+    gtkhx_prefs.geo.news.open = 1;
+    gtkhx_prefs.geo.news.init = 1;
+}
+
+/* Mirror reload_news's pre-fetch access gate: the server told us at SELFINFO
+ * time whether our account holds HL_ACCESS_READ_NEWS. Sending NEWS_GETFILE
+ * without it just earns a task error on every login, so the Rust caller skips
+ * the fetch entirely. */
+gboolean
+gtkhx_news_can_read (struct htlc_conn *htlc)
+{
+    const guint8 *access;
+
+    if (!htlc) {
+        return FALSE;
+    }
+    access = (const guint8 *) &htlc->access;
+    if (!hl_access_permits (access, HL_ACCESS_READ_NEWS)) {
+        debug_log ("news", "skipping HTLC_HDR_NEWS_GETFILE — account lacks "
+                           "HL_ACCESS_READ_NEWS (bit 20)");
+        return FALSE;
+    }
+    return TRUE;
 }
