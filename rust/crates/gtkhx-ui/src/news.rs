@@ -296,14 +296,18 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     find_btn.set_tooltip_text(Some(&tr("Find in News (Ctrl+F)")));
 
     // Post → the Rust composer; Reload → reload_news (this module).
-    post_btn.connect_local("clicked", false, move |_| {
-        crate::create_post::create_post_window(ptr::null_mut(), sess);
-        None
-    });
-    reload_btn.connect_local("clicked", false, move |_| {
-        news_reload(sess);
-        None
-    });
+    // gtkhx_pixmap_button always returns a GtkButton, so downcast for a typed
+    // connect_clicked rather than a stringly-typed connect_local("clicked").
+    if let Some(btn) = post_btn.downcast_ref::<gtk::Button>() {
+        btn.connect_clicked(move |_| {
+            crate::create_post::create_post_window(ptr::null_mut(), sess);
+        });
+    }
+    if let Some(btn) = reload_btn.downcast_ref::<gtk::Button>() {
+        btn.connect_clicked(move |_| {
+            news_reload(sess);
+        });
+    }
 
     let news_text = gtk::TextView::new();
     news_text.set_editable(false);
