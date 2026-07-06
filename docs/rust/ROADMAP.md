@@ -1282,8 +1282,19 @@ pool; the small ones are now drained, three larger items remain):
 - **Tasks content** — the `gtask` row build, progress / queue-badge updates,
   the up/down queue reorder, and `task_update` / `file_update` (transfer
   progress) in `tasks.c`.
-- **News content** — the read-only viewers, in-buffer search, the threaded
-  tree model, and the fetch/post RPC in `news.c` / `news_browser.c`.
+- **News content** — ✅ the flat **1.0/1.2** viewer shipped Rust (`news.rs`,
+  R5.27): the Post/Reload/Find button bar, the read-only `GtkTextView`, the
+  in-buffer Find (`GtkSearchBar` + match highlight/nav + Ctrl+F), and the
+  `news-file`/`news-post` signal output (`output_news_*`, `reload_news`,
+  `open_news` keep their C ABI). Widget-ownership seam: the three handles stay
+  on the C `session` (a narrow `gtkhx_ui_bridge.c` accessor set) for
+  `gtkutil.c` setbtns + `options.c` theme-apply; the search state is Rust-side.
+  The wire senders `hx_get_news` / `hx_post_news` stay C (R2 already put the
+  `news_post` chunk builder in `hotline-proto`; a `hxnews-send` crate mirroring
+  `hxchat-send` is the optional follow-up). **Remaining:** the threaded **1.5
+  browser** (`news_browser.c`) — the `GtkTreeListModel` tree, `ColumnView`
+  factory, dirlist/catlist/thread fetch, and the compose / create / delete
+  dialogs.
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
