@@ -408,7 +408,7 @@ msgwin_refresh_user_info (struct msgwin *msg)
     pubchat = chat_with_cid (hx_active_session (), 0);
 
     if (pubchat
-        && hx_member_model_get_info (pubchat->member_model, *msg->uid, &mi)) {
+        && hx_member_model_get_info (hx_chat_member_model (pubchat), *msg->uid, &mi)) {
         msg_apply_user_view (msg, mi.name, mi.icon, mi.status, TRUE);
     } else {
         msg_apply_user_view (msg, NULL, 0, 0, FALSE);

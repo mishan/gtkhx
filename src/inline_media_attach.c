@@ -36,6 +36,7 @@
 #include "protocol.h"
 #include "hx.h"
 #include "session.h"
+#include "chat.h" /* hx_chat_view — struct chat is opaque */
 #include "toolbar.h"
 #include "inline_media.h"
 #include "inline_media_attach.h"
@@ -466,7 +467,7 @@ inline_media_attach_refresh_all_chats (session *sess)
     g_hash_table_iter_init (&iter, sess->chats);
     while (g_hash_table_iter_next (&iter, NULL, &val)) {
         struct chat *c = val;
-        struct gtkhx_chat *gchat = c->view;
+        struct gtkhx_chat *gchat = hx_chat_view (c);
         if (gchat && gchat->media_attach_btn) {
             gtk_widget_set_visible (gchat->media_attach_btn, show);
         }

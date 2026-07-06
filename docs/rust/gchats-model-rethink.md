@@ -278,8 +278,8 @@ two-tables-times-N.
     `inline_media_attach.c`, …) through the model's FFI or porting it. The
     coupling (rcv.c hot-path field writes, the view's render-time `hx_user*`
     deref, and `ignore` living only in `chat->users`) makes this a
-    five-step effort — see
-    **[m4b-membership-dedup.md](m4b-membership-dedup.md)**. Shipped so far:
+    five-step effort; the current status lives in the **M4b** summary of
+    **[ROADMAP.md](ROADMAP.md)**. Shipped so far:
     **M4b.1** (kickoff — deleted the write-only `chat->nusers`) and **M4b.2**
     (`HxMemberModel` gains `set_ignore`/`get_ignore`/`toggle_ignore` +
     `upsert` preserves `ignore`, unit-tested — the model can now own the

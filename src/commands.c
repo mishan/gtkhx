@@ -31,7 +31,7 @@
 #include "network.h"
 #include "rcv.h"
 #include "chat.h"
-#include "chat_members.h" /* hx_member_model_toggle_ignore (M4b.4a) */
+#include "chat_members.h" /* hx_member_model_toggle_ignore */
 #include "sound.h"
 #include "tasks.h"
 #include "options.h"
@@ -308,7 +308,7 @@ COMMAND (msg)
     }
     uid = atou32 (name);
     if (!uid) {
-        uid = hx_member_model_find_by_name (chat->member_model, name);
+        uid = hx_member_model_find_by_name (hx_chat_member_model (chat), name);
         if (!uid) {
             hx_printf_prefix (htlc, cid, INFOPREFIX,
                               "%s: no such nickname %s\n", argv[0], name);
@@ -319,7 +319,7 @@ COMMAND (msg)
     last_msg_nick[31] = 0;
 
     struct hx_member_info mi;
-    if (hx_member_model_get_info (chat->member_model, uid, &mi)) {
+    if (hx_member_model_get_info (hx_chat_member_model (chat), uid, &mi)) {
         hx_printf (htlc, 0, "[%s(%u)]-> %s", mi.name, uid, msg);
     } else {
         hx_printf (htlc, 0, "[(%u)]-> %s", uid, msg);
@@ -539,12 +539,12 @@ COMMAND (ignore)
         return;
     }
     struct hx_member_info mi;
-    if (!hx_member_model_get_info (chat->member_model, uid, &mi)) {
+    if (!hx_member_model_get_info (hx_chat_member_model (chat), uid, &mi)) {
         hx_printf_prefix (htlc, cid, INFOPREFIX,
                           "%s: no such user with uid %d\n", argv[0], uid);
         return;
     }
-    gboolean ig = hx_member_model_toggle_ignore (chat->member_model, uid);
+    gboolean ig = hx_member_model_toggle_ignore (hx_chat_member_model (chat), uid);
 
     hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: %s is now %s", argv[0],
                       mi.name, ig ? "ignored" : "unignored");

@@ -114,7 +114,7 @@ typedef struct textentry textentry;
 
 /* ---- Chat windows ------------------------------------------------- */
 
-/* fogWraith chat-history extension render cursors, grouped (M3).
+/* fogWraith chat-history extension render cursors, grouped.
  * Was five loose gtkhx_chat fields; contained here so their
  * widget-coupled lifetime is one named object. The two textentry*
  * are raw pointers into xtext's internal buffer entries — they stay a
@@ -149,7 +149,7 @@ struct hx_chat_history_render {
     textentry *load_older_ent;
 };
 
-/* The per-conversation window/view (M4a). No longer stored in its own
+/* The per-conversation window/view. No longer stored in its own
  * table: it hangs off the matching model (struct chat::view) in
  * sess->chats, keyed by cid. cid=0 is the public chat's window (created
  * at startup by create_chat); pchat windows attach in pchat_new. Lookup
@@ -177,9 +177,8 @@ struct gtkhx_chat {
     struct _HxUserListView *userlist;
     /* The window's identity: its chat id. The matching model object is the
      * sess->chats entry under this cid, and it owns this view via chat::view
-     * (M4a) — look it up with chat_with_cid(sess, cid) rather than caching a
-     * raw struct chat* back-pointer here (the old `chat` field, dropped in
-     * M3). */
+     * — look it up with chat_with_cid(sess, cid) rather than caching a
+     * raw struct chat* back-pointer here (the old `chat` field, now gone). */
     guint32 cid;
     /* Chat input line history — a Rust InputHistory (hxchat-model), created by
      * hx_input_history_new, driven by chat_input_key_pressed's Return/Up/Down,
@@ -206,7 +205,7 @@ struct gtkhx_chat {
     GtkWidget *media_attach_btn;
 
     /* Inline-media extension (Phase 9.D dialog). Per-chat token
-	 * -> HxChatMedia* lookup (M3: the Rust MediaTable,
+	 * -> HxChatMedia* lookup (the Rust MediaTable,
 	 * gtkhx-boxed/src/media_table.rs, reached via hx_media_table_*).
 	 * When a chat carries inline media, output_chat_from_event
 	 * registers a deep copy under a fresh token
@@ -311,8 +310,8 @@ struct uesp_fn {
 
 /* Transient signal-payload carrier, NOT a store. Per-chat membership
  * (uid / icon / status colour / nick colour / name / ignore) is owned by
- * the Rust HxMemberModel (chat->member_model); readers query it via
- * chat_members.h. The user-create/change/delete signals still carry a
+ * the Rust HxMemberModel (hx_chat_member_model (chat)); readers query it
+ * via chat_members.h. The user-create/change/delete signals still carry a
  * `struct hx_user *`, but the users.c fan-out reads only ->uid and
  * ->nick_color off it, so rcv.c / options.c fill a short-lived stack
  * instance per emit. Everything else rides in as explicit signal args. */
@@ -325,29 +324,14 @@ struct hx_user {
     guint32 nick_color;
 };
 
-struct chat {
-    /* no next/prev — chats live in session->chats, a
-	 * GHashTable<u32 cid, struct chat*>. Membership lives in
-	 * member_model (below), the authoritative HxMemberModel. */
-    guint32 cid;
-    char subject[256];
-    /* M2 wire-up (Option A): authoritative membership for this chat as a Rust
-     * HxMemberModel (opaque GObject*, hxmember-model). Created in chat_new,
-     * fed by the users.c fan-out (before the view gate, so it's populated even
-     * when no user-list view exists), and read by tab_nick_comp for input in
-     * this chat. Freed in chat_free. */
-    void *member_model;
-    /* M4a: the open window/view for this conversation, or NULL when the
-     * model has no window yet. The model (this struct) is the single
-     * per-conversation registry entry — sess->chats — and owns the view
-     * rather than the old parallel sess->gchats table keyed by the same
-     * cid. Public chat (cid 0): created eagerly, persists for the session.
-     * Private chats: model appears first (on USER_CHANGE), view attaches
-     * lazily in create_pchat_window and detaches (freed) in gchat_delete /
-     * pchat_close while the model lingers. gchat_with_cid returns this;
-     * chat_free frees it if still set. */
-    struct gtkhx_chat *view;
-};
+/* struct chat is an opaque handle: the Rust HxConversation
+ * (gtkhx-ui/src/conversation.rs) owns the per-chat state — the cid, subject,
+ * member model, and view. C holds `struct chat *` and reaches each through
+ * its hx_chat_* accessor in chat.h (hx_chat_cid / _subject /
+ * hx_chat_member_model / hx_chat_view). Left an incomplete type here on
+ * purpose, so a stray `chat->field` is a compile error rather than a silent
+ * layout coupling. */
+struct chat;
 
 /* ---- The session struct ------------------------------------------- */
 
@@ -479,7 +463,7 @@ sess_from_htlc (struct htlc_conn *htlc)
  * UI-side code (a button click, a menu action, a dialog) acts on
  * whichever connection the user is looking at. Today there is exactly
  * one, so this returns &the_session; when the connection tab strip
- * lands (phase M3) it becomes "the focused tab's session" and every
+ * lands it becomes "the focused tab's session" and every
  * UI call site follows without further edits.
  */
 extern session *hx_active_session (void);

@@ -398,7 +398,7 @@ reinit_gtktexts (session *sess)
             g_hash_table_iter_init (&iter, sess->chats);
             while (g_hash_table_iter_next (&iter, &key, &val)) {
                 struct chat *c = val;
-                struct gtkhx_chat *gchat = c->view;
+                struct gtkhx_chat *gchat = hx_chat_view (c);
                 if (!gchat) {
                     continue;
                 }
@@ -447,7 +447,7 @@ changed_xtext (session *sess)
             g_hash_table_iter_init (&iter, sess->chats);
             while (g_hash_table_iter_next (&iter, NULL, &val)) {
                 struct chat *c = val;
-                struct gtkhx_chat *gchat = c->view;
+                struct gtkhx_chat *gchat = hx_chat_view (c);
                 if (!gchat) {
                     continue;
                 }
@@ -487,7 +487,7 @@ changed_timestamp (session *sess)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct chat *c = val;
-            struct gtkhx_chat *gchat = c->view;
+            struct gtkhx_chat *gchat = hx_chat_view (c);
             if (!gchat) {
                 continue;
             }
@@ -552,7 +552,7 @@ changed_nick_color (session *sess)
     struct chat *pub = chat_with_cid (hx_active_session (), 0);
     if (pub && hx_active_session ()->htlc.uid) {
         struct hx_member_info mi;
-        if (hx_member_model_get_info (pub->member_model,
+        if (hx_member_model_get_info (hx_chat_member_model (pub),
                                       hx_active_session ()->htlc.uid, &mi)) {
             /* Transient carrier — user_change reads only ->uid + the new
              * ->nick_color; the other fields ride in as explicit args. */
@@ -668,7 +668,7 @@ changed_stampformat (session *sess)
         g_hash_table_iter_init (&iter, sess->chats);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct chat *c = val;
-            struct gtkhx_chat *gchat = c->view;
+            struct gtkhx_chat *gchat = hx_chat_view (c);
             if (!gchat) {
                 continue;
             }
@@ -1231,7 +1231,7 @@ pref_apply (struct cfgvar *v)
     prefs_write ();
 }
 
-/* ---- Rust settings-form bridge (Phase R5) ------------------------
+/* ---- Rust settings-form bridge ----------------------------------
  *
  * The settings *form* is moving to Rust (gtkhx-ui options.rs); the
  * cfgvar registry, the changed_* apply hooks, and the on-disk
@@ -3256,7 +3256,7 @@ struct settings_entry {
 
 /* Flat sidebar list, grouped under section headers. Order here is the
  * order rows appear; a non-NULL .section starts a new header group. */
-/* Rust page builders (gtkhx-ui options.rs, Phase R5.6) — build the ported
+/* Rust page builders (gtkhx-ui options.rs) — build the ported
  * pages' content into a C-created AdwPreferencesPage. The two custom-widget
  * pages (Identity + Voice) stay C for now and keep their C draw functions
  * below. */

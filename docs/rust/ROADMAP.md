@@ -1184,25 +1184,21 @@ leaf-up:
   (`struct chat`, always present) is the single per-conversation registry
   entry and owns an optional `struct chat::view` (the window), killing the
   two-tables-in-lockstep hazard. `gchat_with_cid` is now a thin wrapper over
-  `chat_with_cid(sess, cid)->view`. **M4b (in progress):** fold the membership
-  duplication (`chat->users` vs `member_model`) and, once a
-  `Conversation`/`ConversationView` object the view references exists, retire
-  `struct chat` / `struct gtkhx_chat` and the last loose `cid`. Decomposed
-  into five sub-increments in
-  **[m4b-membership-dedup.md](m4b-membership-dedup.md)**; M4b.1 (kickoff:
-  deleted the write-only `chat->nusers`) and M4b.2 (`HxMemberModel` can now
-  own the `ignore` flag — model layer + tests), M4b.3a (the user-list view's
-  row map is now keyed on uid, not the `hx_user*` address), and M4b.3b-i
-  (`HxUserRow` renders from a cached uid/nick_color instead of dereferencing
-  the pointer) have landed. The deep-dive found `hx_user*` is the UI/view
-  identity handle, so M4b.3 re-keys that off the pointer before the field
-  migrations; 3b-ii-A (the view learns its cid + the selection API / toolbar
-  resolve members by `(cid, uid)`) and 3b-ii-B (the right-click popup re-keyed
-  on `(cid, uid)`, and `HxUserRow`'s `hx_user*` field deleted) have landed —
-  **the view/UI now hold no `hx_user*` at all**. That unblocked M4b.4a (the
-  `ignore` flag moved onto the per-chat `HxMemberModel`, deleting
-  `hx_user::ignore`); M4b.4b (retire the remaining `chat->users` fields +
-  `struct hx_user`) is the last big slice.
+  `chat_with_cid(sess, cid)->view`. **M4b (membership dedup — done):** the
+  `chat->users` vs `member_model` duplication is gone. Walking the increments:
+  the write-only `chat->nusers` was deleted; `HxMemberModel` became the
+  authoritative per-chat membership store and took ownership of the `ignore`
+  flag; the user-list view and every UI path were re-keyed off the `hx_user*`
+  pointer onto `(cid, uid)`, so **the view/UI hold no `hx_user*` at all**;
+  then all C readers (`rcv.c`, `msg.c`, `commands.c`, `options.c`) moved to
+  the model read-FFI and `chat->users` was deleted — `struct hx_user` shrank
+  to a two-field signal-payload carrier `{uid, nick_color}`. The capstone
+  (M4b.5) model port made `struct chat` an opaque handle over a Rust
+  `HxConversation` (`{cid, subject, member_model, view}`), reached only
+  through the `hx_chat_*` accessors. **Remaining (deferred):** fold the
+  `sess->chats` registry itself into Rust (`cid → HxConversation`, which also
+  feeds the R7 multi-conn design) and retire the C `struct gtkhx_chat` view
+  object that `HxConversation.view` still points at opaquely.
 
 ### Inventory — what's still C
 
