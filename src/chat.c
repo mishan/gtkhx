@@ -1955,44 +1955,6 @@ pchat_close (guint32 cid)
     gchat_delete (sess, gchat);
 }
 
-/* Forward decl — hx_reject_chat is defined further down (in the
- * "subject change" cluster) but the AdwAlertDialog response handler
- * needs to see it. */
-void hx_reject_chat (struct htlc_conn *htlc, guint32 _cid);
-
-/* AdwAlertDialog dispatches by response id, so we carry the htlc +
- * cid pair through the response signal as a small heap-allocated
- * context. The dialog's "closed" signal frees it after the response
- * handler runs. */
-struct chat_invite_ctx {
-    struct htlc_conn *htlc;
-    guint32 cid;
-};
-
-static void
-chat_invite_response (AdwAlertDialog *dialog, const char *response,
-                      gpointer data)
-{
-    struct chat_invite_ctx *ctx = data;
-    (void)dialog;
-
-    if (g_strcmp0 (response, "join") == 0) {
-        hx_chat_join (ctx->htlc, ctx->cid);
-    } else {
-        hx_reject_chat (ctx->htlc, ctx->cid);
-    }
-
-    /* Free ctx here rather than in a separate "closed" handler.
-     * adw_alert_dialog_set_close_response below guarantees that the
-     * response signal fires exactly once per dialog (with the close
-     * response on Escape / dismiss), so this is the canonical
-     * single-owner free site. The previous two-handler design
-     * (response + closed) raced under valgrind — the closed handler
-     * could free ctx while the response handler was still about to
-     * dereference it. */
-    g_free (ctx);
-}
-
 /* pure view function — just paints the
  * new subject into the chat-window subject entry. The broadcast
  * handler in rcv.c (hx_rcv_chat_subject) is responsible for the
@@ -2034,55 +1996,10 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
     g_free (utf8);
 }
 
-void
-hx_reject_chat (struct htlc_conn *htlc, guint32 _cid)
-{
-    /* chunk layout moved to gtkhx_proto_build_chat_decline_chunks. */
-    struct hx_chunk chunks[1];
-    guint8 scratch[4];
-    int hc = (int)gtkhx_proto_build_chat_decline_chunks (
-        _cid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
-    if (hc > 0) {
-        hlwrite_chunks (htlc, HTLC_HDR_CHAT_DECLINE, 0, chunks, hc);
-    }
-}
-
-/* AdwAlertDialog with two responses (Join / Decline) replaces
- * the hand-rolled GtkDialog + label + two buttons. Decline (and ESC)
- * declines the invite via hx_reject_chat; Join calls hx_chat_join.
- * Both go through the same response handler: the response id keys
- * the action. */
-void
-output_chat_invitation (struct htlc_conn *htlc, guint32 cid, char *name)
-{
-    AdwDialog *dialog;
-    struct chat_invite_ctx *ctx;
-    char *body;
-
-    body = g_strdup_printf ("%s %s: 0x%08x", name,
-                            _ ("invites you to private chat"), cid);
-
-    dialog = adw_alert_dialog_new (_ ("Chat Invitation"), body);
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "decline",
-                                   _ ("_Decline"));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "join",
-                                   _ ("_Join"));
-    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog), "join",
-                                              ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "join");
-    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "decline");
-
-    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
-
-    ctx = g_new (struct chat_invite_ctx, 1);
-    ctx->htlc = htlc;
-    ctx->cid = cid;
-    g_signal_connect (dialog, "response", G_CALLBACK (chat_invite_response),
-                      ctx);
-
-    adw_dialog_present (dialog, GTK_WIDGET (sess_from_htlc (htlc)->chat_window));
-    g_free (body);
-}
+/* hx_reject_chat + output_chat_invitation (the incoming chat-invitation
+ * dialog) moved to Rust: gtkhx-ui/src/chat_invite.rs presents the AdwAlertDialog
+ * and routes Join/Decline to the hxchat-send senders (hx_chat_join /
+ * hx_reject_chat). */
 
 /* pchat_update_trans was a configure-event handler that
  * forced an xtext refresh on every resize so transparency would track

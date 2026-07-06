@@ -59,6 +59,16 @@ gtkhx_active_htlc (void)
     return &hx_active_session ()->htlc;
 }
 
+/* The chat window/panel widget of the session that owns `htlc` (NULL if none).
+ * The Rust chat-invitation dialog parents itself here: an invite belongs to the
+ * session that received it, so it's scoped by htlc rather than the active
+ * session — which keeps it correct if multi-conn ever lands. */
+GtkWidget *
+gtkhx_htlc_chat_window (struct htlc_conn *htlc)
+{
+    return sess_from_htlc (htlc)->chat_window;
+}
+
 /* TRUE if the active session has a live connection (fd set). Used by the
  * Rust Broadcast composer to no-op when disconnected. */
 gboolean

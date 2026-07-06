@@ -36,6 +36,11 @@ extern void gtkhx_session_set_agreementwin (struct _session *sess,
 struct htlc_conn;
 extern struct htlc_conn *gtkhx_active_htlc (void);
 
+/* The chat window/panel widget of `htlc`'s session (NULL if none) — the Rust
+ * chat-invitation dialog's transient parent, scoped to the session that
+ * received the invite (not the active session). */
+extern GtkWidget *gtkhx_htlc_chat_window (struct htlc_conn *htlc);
+
 /* Active-session predicates for the Rust Broadcast composer (broadcast.rs):
  * gtkhx_active_connected — htlc.fd != 0; gtkhx_active_text_encoding —
  * HTLC_CAP_TEXT_ENCODING negotiated. */

@@ -9,8 +9,9 @@
 //! `gtkhx_proto_build_*` shims — the whole build flow is Rust), registers a
 //! reply task where the C original did, and hands the chunks to
 //! `hlwrite_chunks`. Exports the exact `hx_send_chat` / `hx_chat_*` /
-//! `hx_invite_user` / `hx_part_chat` / `hx_change_subject` C ABI so every
-//! caller (toolbar.c, users.c, the chat input handler) links unchanged.
+//! `hx_invite_user` / `hx_part_chat` / `hx_reject_chat` / `hx_change_subject`
+//! C ABI so every caller (toolbar.c, users.c, the chat input handler, the
+//! Rust invite dialog) links unchanged.
 //!
 //! A lean dedicated crate (only `glib` + the pure `hotline-proto`, no GTK) so
 //! it's `cargo test`-able: the builders run natively and the C send-path
@@ -38,6 +39,7 @@ const HTLC_HDR_CHAT_INVITE: u32 = ClientHdr::ChatInvite as u32;
 const HTLC_HDR_CHAT_JOIN: u32 = ClientHdr::ChatJoin as u32;
 const HTLC_HDR_CHAT_PART: u32 = ClientHdr::ChatPart as u32;
 const HTLC_HDR_CHAT_SUBJECT: u32 = ClientHdr::ChatSubject as u32;
+const HTLC_HDR_CHAT_DECLINE: u32 = ClientHdr::ChatDecline as u32;
 
 /// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores. The
 /// real `hx_rcv_user_change` (1-arg) / `rcv_task_user_list_switch` (2-arg)
@@ -279,6 +281,26 @@ pub unsafe extern "C" fn hx_part_chat(htlc: *mut c_void, cid: u32) {
     let hc = build::build_chat_part_chunks(cid, &mut chunks, &mut scratch);
     if hc > 0 {
         hlwrite_chunks(htlc, HTLC_HDR_CHAT_PART, 0, chunks.as_ptr(), hc as c_int);
+    }
+}
+
+/// `void hx_reject_chat(struct htlc_conn *htlc, guint32 cid)` — decline a
+/// pending chat invitation for `cid` (CHAT_DECLINE; no task). No membership
+/// lookup: declining an invite is valid for a cid we never joined, so unlike
+/// `hx_part_chat` there's nothing to find in the chat registry.
+///
+/// # Safety
+/// See `hx_chat_user`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_reject_chat(htlc: *mut c_void, cid: u32) {
+    if htlc.is_null() {
+        return;
+    }
+    let mut chunks = [HxChunk::EMPTY; 1];
+    let mut scratch = [0u8; 4];
+    let hc = build::build_chat_decline_chunks(cid, &mut chunks, &mut scratch);
+    if hc > 0 {
+        hlwrite_chunks(htlc, HTLC_HDR_CHAT_DECLINE, 0, chunks.as_ptr(), hc as c_int);
     }
 }
 
