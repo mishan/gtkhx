@@ -140,11 +140,6 @@ struct gtkhx_chat {
      * — look it up with chat_with_cid(sess, cid) rather than caching a
      * raw struct chat* back-pointer here (the old `chat` field, now gone). */
     guint32 cid;
-    /* Chat input line history — a Rust InputHistory (hxchat-model), created by
-     * hx_input_history_new, driven by chat_input_key_pressed's Return/Up/Down,
-     * freed in chat_free. Owns the Up-arrow draft internally (the old separate
-     * chat_history_draft field is gone). */
-    void *chat_history;
 
     /* fogWraith chat-history extension render cursors (Phase 3+),
      * grouped into one named sub-object — see struct
@@ -163,24 +158,13 @@ struct gtkhx_chat {
 	 * gchats whose input row hasn't been built yet (e.g. before
 	 * create_chat_window runs). */
     GtkWidget *media_attach_btn;
-
-    /* Inline-media extension (Phase 9.D dialog). Per-chat token
-	 * -> HxChatMedia* lookup (the Rust MediaTable,
-	 * gtkhx-boxed/src/media_table.rs, reached via hx_media_table_*).
-	 * When a chat carries inline media, output_chat_from_event
-	 * registers a deep copy under a fresh token
-	 * (hx_media_table_register) and embeds the token in the
-	 * placeholder row text as `hxmedia:N`. The xtext word_click
-	 * handler (inline_media_chat_word_click) scans the clicked word
-	 * for that substring and dispatches the lookup
-	 * (hx_media_table_lookup).
-	 *
-	 * Created in the chat-window constructors, lives for the chat's
-	 * lifetime, freed in chat_free -- hx_media_table_free drops the
-	 * table and every HxChatMedia copy it owns. Opaque here; token 0
-	 * is the "absent" sentinel. */
-    void *media_table;
 };
+
+/* The input line history + the inline-media token table used to live on the
+ * view above (chat_history / media_table); they moved to the conversation model
+ * (HxConversation), reached via hx_chat_input_history / hx_chat_media_table on
+ * chat_with_cid(sess, cid) — they're chat state, not view state, and now
+ * survive a pchat window close + reopen. */
 
 
 /* Compose the load-older / loading-older sentinels by translating the
@@ -568,18 +552,9 @@ gchat_free (gpointer p)
 	 * gchat is created in create_chat with userlist=NULL so this is
 	 * a no-op there. */
     g_clear_object (&gchat->userlist);
-    /* The chat input line history is now a Rust InputHistory (owns the
-     * Up-arrow draft internally); free it. */
-    if (gchat->chat_history) {
-        hx_input_history_free (gchat->chat_history);
-        gchat->chat_history = NULL;
-    }
-    /* Inline-media: drop the per-chat handle table.
-	 * hx_media_table_free frees every HxChatMedia copy it owns. */
-    if (gchat->media_table) {
-        hx_media_table_free (gchat->media_table);
-        gchat->media_table = NULL;
-    }
+    /* chat_history + media_table are owned by the conversation model now, not
+     * the view — they're freed in hx_conversation_free (via chat_free), so a
+     * view teardown here must NOT touch them. */
     g_free (gchat);
 }
 
@@ -884,7 +859,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     if (!e) {
         return;
     }
-    gchat = gchat_with_cid (sess_from_htlc (htlc), e->cid);
+    struct chat *conv = chat_with_cid (sess_from_htlc (htlc), e->cid);
+    gchat = hx_chat_view (conv);
     if (!gchat) {
         return;
     }
@@ -974,7 +950,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 	 * (visible until the texture lands) so it reads as a
 	 * subdued caption rather than chat text. */
     if (e->media) {
-        guint token = hx_media_table_register (gchat->media_table, e->media);
+        guint token
+            = hx_media_table_register (hx_chat_media_table (conv), e->media);
         char *placeholder
             = hx_chat_media_placeholder_clickable (e->media, token);
         if (placeholder) {
@@ -1478,10 +1455,13 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     }
 
     struct gtkhx_chat *gchat = find_gchat_by_output (xtext);
-    if (!gchat || !gchat->media_table) {
+    struct chat *conv
+        = gchat ? chat_with_cid (hx_active_session (), gchat->cid) : NULL;
+    if (!conv) {
         return;
     }
-    const HxChatMedia *m = hx_media_table_lookup (gchat->media_table, token);
+    const HxChatMedia *m
+        = hx_media_table_lookup (hx_chat_media_table (conv), token);
     if (!m) {
         debug_log ("media",
                    "inline-media click: token %u not found on gchat cid=%u",
@@ -1832,8 +1812,6 @@ create_chat (session *sess)
     g_object_ref_sink (text);
     g_object_ref_sink (vscroll);
 
-    gchat->chat_history = hx_input_history_new ();
-    gchat->media_table = hx_media_table_new ();
     gchat->cid = 0;
     gchat->subject = 0;
     gchat->output = text;
@@ -1922,7 +1900,8 @@ gtkhx_chat_build_leaves (session *sess)
     gtkhx_apply_input_font (gchat->input);
     gtkhx_apply_input_style (gchat->input);
     gtkhx_chat_input_attach (gchat->input, sess, gchat->cid,
-                             gchat->chat_history);
+                             hx_chat_input_history (
+                                 chat_with_cid (sess, gchat->cid)));
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
     /* Inner margins so the text doesn't sit flush against the rounded-corner
@@ -2030,8 +2009,6 @@ pchat_new (session *sess, struct chat *chat)
     gchat->vscroll = vscroll;
     gchat->subject = subject;
     gchat->userlist = NULL;
-    gchat->chat_history = hx_input_history_new ();
-    gchat->media_table = hx_media_table_new ();
     gchat->render.oldest_msgid    = 0;
     gchat->render.has_more        = FALSE;
     gchat->render.loading         = FALSE;
@@ -2194,7 +2171,8 @@ gtkhx_pchat_new (struct htlc_conn *htlc, struct chat *chat)
     gtkhx_apply_input_font (gchat->input);
     gtkhx_apply_input_style (gchat->input);
     gtkhx_chat_input_attach (gchat->input, sess, gchat->cid,
-                             gchat->chat_history);
+                             hx_chat_input_history (
+                                 chat_with_cid (sess, gchat->cid)));
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);

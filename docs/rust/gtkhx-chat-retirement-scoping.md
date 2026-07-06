@@ -91,19 +91,32 @@ Note: `struct hx_chat_history_render` (embedded in `gtkhx_chat`) currently also
 lives in `session.h`; it moves to `chat.c` with the parent struct. Its forward
 `typedef struct textentry textentry;` stays where xtext needs it.
 
-### Phase 3 — thin the leaf *(optional, later)*
-Relocate the three Rust-owned handles from the C struct into the Rust
-`HxConversation` (which already owns the membership model and view pointer):
-- `chat_history` (`InputHistory`) and `media_table` (`MediaTable`) — the C view
-  only stores + frees them; `HxConversation` is the more natural owner, reached
-  from C via `hx_chat_*` accessors on the model.
-- `userlist` (`HxUserListView`) — similar.
-- Drop the duplicated `cid` (it's already `hx_chat_cid` on the model; the view
-  can derive it).
+### Phase 3 — move the conversation-scoped handles to the model ✅ *(shipped)*
+Relocate the two Rust *data* handles that are genuinely chat state (not view
+state) from the C `gtkhx_chat` into `HxConversation`, which now creates and
+frees them in `hx_conversation_new` / `_free`:
+- `chat_history` (`InputHistory`) — the user's typed history *is* conversation
+  state; moving it means a pchat's input history now survives closing +
+  reopening its window.
+- `media_table` (`MediaTable`) — token → media map; tokens are monotonic so
+  re-rendering into a rebuilt view never collides.
 
-After Phase 3 the C `gtkhx_chat` shrinks to **pure GTK widget handles + the
-xtext render cursors** — the irreducible C view leaf. This phase is where the
-struct genuinely thins, but it's lower value than Phases 1–2 and can wait.
+The C view reaches them through `hx_chat_input_history` / `hx_chat_media_table`
+on `chat_with_cid(sess, cid)`.
+
+**Two of the originally-scoped items were deliberately *not* done**, on closer
+inspection:
+- `userlist` stays in the view — it's a `GtkColumnView`-backed **widget**, and
+  it's already reachable via `HxConversation.view`, so moving it would be
+  redundant, not a thinning.
+- `cid` stays — it is the view's **self-identity**: the view needs its own cid to
+  find its conversation (`chat_with_cid(sess, cid)`), since it deliberately
+  holds no back-pointer to the model. It is not a redundant duplicate.
+
+The C `gtkhx_chat` is now down to GTK widget handles (`window` / `vscroll` /
+`output` / `input` / `subject` / `voice_panel` / `media_attach_btn`), the
+`userlist` widget, `cid`, and the xtext `render` cursors — the irreducible C
+view leaf.
 
 ## What stays C — permanently, by design
 
