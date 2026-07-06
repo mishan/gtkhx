@@ -1188,12 +1188,13 @@ untouched — client-side state shape only. Phasing, leaf-up:
   `struct hx_chat_history_render` (stays C — the `textentry*` point into
   xtext); and the raw `gtkhx_chat->chat` back-pointer dropped (derive via
   `chat_with_cid`).
-- **M4 — retire the two per-session tables.** *In progress.* **M4a
-  (this change): collapsed `sess->gchats` into `sess->chats`** — the model
+- ✅ **M4 — retire the two per-session tables.** *Done.* **M4a: collapsed
+  `sess->gchats` into `sess->chats`** — the model
   (`struct chat`, always present) is the single per-conversation registry
   entry and owns an optional `struct chat::view` (the window), killing the
   two-tables-in-lockstep hazard. `gchat_with_cid` is now a thin wrapper over
-  `chat_with_cid(sess, cid)->view`. **M4b (membership dedup — done):** the
+  `chat_with_cid(sess, cid)->view` (later the single `sess->chats` table itself
+  moved into the Rust `HxChatRegistry` — see M4b.5-b below). **M4b (membership dedup — done):** the
   `chat->users` vs `member_model` duplication is gone. Walking the increments:
   the write-only `chat->nusers` was deleted; `HxMemberModel` became the
   authoritative per-chat membership store and took ownership of the `ignore`
