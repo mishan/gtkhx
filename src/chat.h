@@ -44,6 +44,11 @@ extern void hx_conversation_free (struct chat *chat);
 extern const char *hx_chat_subject (struct chat *chat);
 extern void hx_chat_set_subject (struct chat *chat, const char *s, gsize len);
 extern void *hx_chat_member_model (struct chat *chat);
+/* Conversation-owned Rust handles (created in hx_conversation_new, freed in
+ * hx_conversation_free): the input line history and the inline-media token
+ * table. Borrowed — do not free. */
+extern void *hx_chat_input_history (struct chat *chat);
+extern void *hx_chat_media_table (struct chat *chat);
 extern struct gtkhx_chat *hx_chat_view (struct chat *chat);
 extern void hx_chat_set_view (struct chat *chat, struct gtkhx_chat *view);
 extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
@@ -160,6 +165,12 @@ extern GtkWidget *hx_gchat_input (struct gtkhx_chat *g);
 extern GtkWidget *hx_gchat_subject (struct gtkhx_chat *g);
 extern GtkWidget *hx_gchat_media_btn (struct gtkhx_chat *g);
 extern void hx_gchat_set_window (struct gtkhx_chat *g, GtkWidget *w);
+extern GtkWidget *hx_gchat_window (struct gtkhx_chat *g);
+extern guint32 hx_gchat_cid (struct gtkhx_chat *g);
+/* The pchat's user-list view (HxUserListView*), or NULL. Opaque here; users.c
+ * has the real type via users_view.h. */
+struct _HxUserListView;
+extern struct _HxUserListView *hx_gchat_userlist (struct gtkhx_chat *g);
 extern void hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj);
 extern int word_check (GtkWidget *xtext, char *word);
 

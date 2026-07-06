@@ -25,7 +25,7 @@ use std::ptr;
 use gtk4 as gtk;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::from_glib_none;
+use glib::translate::{from_glib_borrow, from_glib_none};
 
 extern "C" {
     fn hx_input_history_record(hist: *mut c_void, line: *const c_char);
@@ -198,8 +198,15 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
     }
     crate::ensure_gtk_init();
 
-    let w: gtk::Widget = from_glib_none(view);
-    let Ok(tv) = w.downcast::<gtk::TextView>() else {
+    // BORROW the pointer — do NOT use `from_glib_none`. At attach time the input
+    // GtkTextView is freshly `gtk_text_view_new()`d and still carries its
+    // floating reference (it isn't parented until later, in chat.rs
+    // build_content). glib-rs `from_glib_none` sinks floating references, so the
+    // owned wrapper would hold the only ref and, on drop at the end of this
+    // function, finalize the widget out from under its C caller. `from_glib_borrow`
+    // neither refs nor sinks, so the widget's lifetime stays with C.
+    let w = unsafe { from_glib_borrow::<_, gtk::Widget>(view) };
+    let Some(tv) = w.downcast_ref::<gtk::TextView>() else {
         return;
     };
     // Idempotence sentinel — a second attach (e.g. a reconnect rebuild) would

@@ -22,7 +22,7 @@ use std::rc::Rc;
 use gtk4 as gtk;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_none, IntoGlib};
+use glib::translate::{from_glib_borrow, IntoGlib};
 
 /// gtk-rs qdata key: the idempotence sentinel on the window.
 const ATTACHED_KEY: &str = "voice-ptt-attached";
@@ -199,7 +199,11 @@ pub unsafe extern "C" fn hx_voice_ptt_attach(
         return;
     }
     crate::ensure_gtk_init();
-    let window: gtk::Widget = from_glib_none(window);
+    // Borrow, don't own: the controller we add is held BY the window, and the
+    // closures capture `state` (not the window), so nothing here retains it.
+    // `from_glib_none` would sink a floating reference and finalize the window
+    // when this wrapper drops; `from_glib_borrow` leaves its lifetime with C.
+    let window = from_glib_borrow::<_, gtk::Widget>(window);
 
     // Idempotence sentinel — don't attach twice (reconnect path).
     if window.data::<bool>(ATTACHED_KEY).is_some() {

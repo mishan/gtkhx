@@ -1204,10 +1204,35 @@ untouched — client-side state shape only. Phasing, leaf-up:
   to a two-field signal-payload carrier `{uid, nick_color}`. The capstone
   (M4b.5) model port made `struct chat` an opaque handle over a Rust
   `HxConversation` (`{cid, subject, member_model, view}`), reached only
-  through the `hx_chat_*` accessors. **Remaining (deferred):** fold the
-  `sess->chats` registry itself into Rust (`cid → HxConversation`, which also
-  feeds the R7 multi-conn design) and retire the C `struct gtkhx_chat` view
-  object that `HxConversation.view` still points at opaquely.
+  through the `hx_chat_*` accessors. The `sess->chats` registry itself then
+  moved into Rust too (M4b.5-b: the `HxChatRegistry` in gtkhx-session, `cid →
+  HxConversation`, which also feeds the R7 multi-conn design). ✅ **Chat-view
+  retirement (done).** The last C aggregate in the chat area, `struct
+  gtkhx_chat` (the view `HxConversation.view` points at), can't be fully
+  *deleted* while xtext stays C — its `render` cursors are raw xtext
+  `textentry*` that can't cross into Rust — so the achievable goals were to make
+  it opaque and thin the leaf, both shipped:
+  - **Opaque (phases 1–2).** `struct gtkhx_chat` and its embedded
+    `struct hx_chat_history_render` moved out of `session.h` (now just a forward
+    declaration) into private definitions in `chat.c`; the four external
+    consumers (`options.c`, `users.c`, `inline_media_attach.c`, `notify.c`)
+    route through `hx_gchat_*` accessors, mirroring the `struct chat`
+    opaque-ification. The incomplete type caught `notify.c`'s stray field access
+    at compile time.
+  - **Handle relocation (phase 3).** The two Rust *data* handles that are
+    conversation state, not view state — `chat_history` (`InputHistory`) and
+    `media_table` (`MediaTable`) — moved into `HxConversation` (created/freed in
+    `hx_conversation_new`/`_free`, reached via `hx_chat_input_history` /
+    `hx_chat_media_table`), so a pchat's typed history now survives closing +
+    reopening its window. `userlist` and `cid` deliberately stayed in the view:
+    the former is a `GtkColumnView`-backed **widget** already reachable via
+    `HxConversation.view`, the latter is the view's self-identity for its
+    `chat_with_cid` lookup (it holds no model back-pointer), not a redundant dup.
+
+  What remains is the irreducible C **view leaf** — the GTK widget handles
+  (`window` / `vscroll` / `output` / `input` / `subject` / `voice_panel` /
+  `media_attach_btn`), the `userlist` widget, `cid`, and the xtext `render`
+  cursors — a permanent seam by design, not a TODO.
 
 ### Inventory — what's still C
 

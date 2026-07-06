@@ -1104,10 +1104,10 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         if (!gchat) {
             gchat = create_pchat_window (htlc, chat);
         }
-        if (!gchat || !gchat->userlist) {
+        if (!gchat || !hx_gchat_userlist (gchat)) {
             return;
         }
-        hx_user_list_view_add (gchat->userlist, user->uid, nam, icon,
+        hx_user_list_view_add (hx_gchat_userlist (gchat), user->uid, nam, icon,
                                color, user->nick_color);
         return;
     }
@@ -1136,10 +1136,10 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
     }
     if (hx_chat_cid (chat)) {
         gchat = gchat_with_cid (sess, hx_chat_cid (chat));
-        if (!gchat || !gchat->userlist) {
+        if (!gchat || !hx_gchat_userlist (gchat)) {
             return;
         }
-        hx_user_list_view_remove (gchat->userlist, user->uid);
+        hx_user_list_view_remove (hx_gchat_userlist (gchat), user->uid);
         return;
     }
 
@@ -1169,7 +1169,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         if (!gchat) {
             gchat = create_pchat_window (&sess->htlc, chat);
         }
-        if (!gchat || !gchat->userlist) {
+        if (!gchat || !hx_gchat_userlist (gchat)) {
             return;
         }
         /* In-place state mutation: HxUserRow::set_state fires its
@@ -1177,7 +1177,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 		 * re-snapshots. The row keeps its GObject identity so the
 		 * sidebar selection stays on the same user across rename or
 		 * icon change. */
-        hx_user_list_view_update (gchat->userlist, user->uid, nam, icon,
+        hx_user_list_view_update (hx_gchat_userlist (gchat), user->uid, nam, icon,
                                   color, user->nick_color);
         return;
     }
@@ -1249,10 +1249,10 @@ users_refresh_avatar (guint16 uid)
         for (guint i = 0; i < n; i++) {
             struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
-            if (!gchat || !gchat->userlist) {
+            if (!gchat || !hx_gchat_userlist (gchat)) {
                 continue;
             }
-            hx_user_list_view_refresh_avatar (gchat->userlist, uid);
+            hx_user_list_view_refresh_avatar (hx_gchat_userlist (gchat), uid);
         }
     }
 

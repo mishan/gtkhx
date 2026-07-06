@@ -29,7 +29,7 @@ use std::time::Duration;
 use gtk4 as gtk;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_none, IntoGlibPtr};
+use glib::translate::{from_glib_borrow, IntoGlibPtr};
 
 use crate::tr::tr;
 
@@ -688,7 +688,10 @@ pub unsafe extern "C" fn voice_panel_refresh(
     if panel.is_null() || sess.is_null() {
         return;
     }
-    let widget: gtk::Widget = from_glib_none(panel);
+    // Borrow, don't own — we only read state off the widget here. `from_glib_none`
+    // would sink a floating reference and finalize the panel when this wrapper
+    // drops; `from_glib_borrow` leaves its lifetime with the C caller.
+    let widget = from_glib_borrow::<_, gtk::Widget>(panel);
     if let Some(inner) = panel_state(&widget) {
         do_refresh(&widget, &inner, sess);
     }
@@ -724,7 +727,10 @@ pub unsafe extern "C" fn voice_panel_set_joined(
     if panel.is_null() {
         return;
     }
-    let widget: gtk::Widget = from_glib_none(panel);
+    // Borrow, don't own — we only read state off the widget here. `from_glib_none`
+    // would sink a floating reference and finalize the panel when this wrapper
+    // drops; `from_glib_borrow` leaves its lifetime with the C caller.
+    let widget = from_glib_borrow::<_, gtk::Widget>(panel);
     if let Some(inner) = panel_state(&widget) {
         inner.joined.set(joined != 0);
         update_button_labels(&inner);
@@ -743,7 +749,10 @@ pub unsafe extern "C" fn voice_panel_set_muted(
     if panel.is_null() {
         return;
     }
-    let widget: gtk::Widget = from_glib_none(panel);
+    // Borrow, don't own — we only read state off the widget here. `from_glib_none`
+    // would sink a floating reference and finalize the panel when this wrapper
+    // drops; `from_glib_borrow` leaves its lifetime with the C caller.
+    let widget = from_glib_borrow::<_, gtk::Widget>(panel);
     if let Some(inner) = panel_state(&widget) {
         inner.muted.set(muted != 0);
         update_button_labels(&inner);
