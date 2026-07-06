@@ -38,6 +38,9 @@ thread_local! {
     static NODE_PATH: RefCell<CString> = RefCell::new(CString::new("/node").unwrap());
     static CAT_MARKED: Cell<bool> = const { Cell::new(false) };
     static FOLDER_MARKED: Cell<bool> = const { Cell::new(false) };
+    // When set, the path accessors return NULL (a node cleared during refresh),
+    // exercising the senders' NULL-path guard (real path_to_hldir crashes on it).
+    static PATH_NULL: Cell<bool> = const { Cell::new(false) };
     static LAST_SEND: RefCell<Option<Sent>> = const { RefCell::new(None) };
     static LAST_TASK: RefCell<Option<Task>> = const { RefCell::new(None) };
 }
@@ -141,6 +144,9 @@ pub(crate) unsafe extern "C" fn rcv_task_newscat_list(_h: *mut c_void, _p: *mut 
 pub(crate) unsafe extern "C" fn rcv_task_newsfolder_list(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
 
 pub(crate) unsafe extern "C" fn news_item_group_path(_item: *mut c_void) -> *const c_char {
+    if PATH_NULL.with(|c| c.get()) {
+        return std::ptr::null();
+    }
     ITEM_PATH.with(|p| p.borrow().as_ptr())
 }
 pub(crate) unsafe extern "C" fn news_item_postid(_item: *mut c_void) -> u32 {
@@ -150,12 +156,18 @@ pub(crate) unsafe extern "C" fn news_item_mime0(_item: *mut c_void) -> *const c_
     ITEM_MIME.with(|p| p.borrow().as_ptr())
 }
 pub(crate) unsafe extern "C" fn gnews_catalog_path(_g: *mut c_void) -> *const c_char {
+    if PATH_NULL.with(|c| c.get()) {
+        return std::ptr::null();
+    }
     NODE_PATH.with(|p| p.borrow().as_ptr())
 }
 pub(crate) unsafe extern "C" fn gnews_catalog_mark_listing(_g: *mut c_void) {
     CAT_MARKED.with(|c| c.set(true));
 }
 pub(crate) unsafe extern "C" fn gnews_folder_path(_g: *mut c_void) -> *const c_char {
+    if PATH_NULL.with(|c| c.get()) {
+        return std::ptr::null();
+    }
     NODE_PATH.with(|p| p.borrow().as_ptr())
 }
 pub(crate) unsafe extern "C" fn gnews_folder_mark_listing(_g: *mut c_void) {
@@ -168,6 +180,7 @@ fn reset() {
     CAP.with(|c| c.set(true));
     CAT_MARKED.with(|c| c.set(false));
     FOLDER_MARKED.with(|c| c.set(false));
+    PATH_NULL.with(|c| c.set(false));
     LAST_SEND.with(|s| *s.borrow_mut() = None);
     LAST_TASK.with(|t| *t.borrow_mut() = None);
 }
@@ -388,4 +401,38 @@ fn null_struct_is_no_op_for_list_senders() {
     }
     assert!(last().is_none());
     assert!(last_task().is_none());
+}
+
+/// A NULL `path` argument must bail before `path_to_hldir` (not NULL-safe).
+#[test]
+fn null_path_arg_is_no_op() {
+    reset();
+    let name = cstr("n");
+    unsafe {
+        hx_news15_post_thread(htlc(), std::ptr::null(), name.as_ptr(), 0, name.as_ptr());
+        hx_news15_delete_thread(htlc(), std::ptr::null(), 1);
+        hx_news15_delete(htlc(), std::ptr::null());
+        hx_news15_mkcat(htlc(), std::ptr::null(), name.as_ptr());
+        hx_news15_mkdir(htlc(), std::ptr::null());
+    }
+    assert!(last().is_none());
+    assert!(last_task().is_none());
+}
+
+/// When the path accessor yields NULL (a node cleared during refresh), the
+/// list senders bail before `path_to_hldir` — and must NOT flip the listing
+/// flag, since nothing is actually sent.
+#[test]
+fn null_accessor_path_is_no_op_and_skips_listing() {
+    reset();
+    PATH_NULL.with(|c| c.set(true));
+    unsafe {
+        hx_news15_get_post(htlc(), tok());
+        hx_news15_cat_list(htlc(), tok());
+        hx_news15_fldr_list(htlc(), tok());
+    }
+    assert!(last().is_none());
+    assert!(last_task().is_none());
+    assert!(!CAT_MARKED.with(|c| c.get()));
+    assert!(!FOLDER_MARKED.with(|c| c.get()));
 }

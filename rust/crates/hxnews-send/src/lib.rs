@@ -159,15 +159,23 @@ pub unsafe extern "C" fn hx_news15_get_post(htlc: *mut c_void, item: *mut c_void
     if htlc.is_null() || item.is_null() {
         return;
     }
+    // Guard the path: path_to_hldir dereferences it immediately (no NULL check).
+    let path = news_item_group_path(item);
+    if path.is_null() {
+        return;
+    }
     let mut hldirlen: u16 = 0;
-    let hldir = path_to_hldir(news_item_group_path(item), &mut hldirlen, 0);
+    let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 3];
     let mut scratch = [0u8; 4];
+    let mime0 = news_item_mime0(item);
+    let mime_type = cstr_bytes(mime0);
+    let mime_type = if mime_type.is_empty() { b"text/plain".as_slice() } else { mime_type };
     let req = NewsGetThreadRequest {
         path: hldir_slice(hldir, hldirlen),
         threadid: news_item_postid(item),
-        mime_type: cstr_bytes(news_item_mime0(item)),
+        mime_type,
     };
     let hc = build::build_news_getthread_chunks(&req, &mut chunks, &mut scratch);
     if hc > 0 {
@@ -194,9 +202,16 @@ pub unsafe extern "C" fn hx_news15_cat_list(htlc: *mut c_void, g: *mut c_void) {
     if htlc.is_null() || g.is_null() {
         return;
     }
+    // Read + guard the path BEFORE marking listing: path_to_hldir dereferences
+    // it immediately (no NULL check), and we shouldn't flip the listing flag if
+    // the request can't be sent.
+    let path = gnews_catalog_path(g);
+    if path.is_null() {
+        return;
+    }
     gnews_catalog_mark_listing(g);
     let mut hldirlen: u16 = 0;
-    let hldir = path_to_hldir(gnews_catalog_path(g), &mut hldirlen, 0);
+    let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 1];
     let hc = build::build_news_catlist_chunks(hldir_slice(hldir, hldirlen), &mut chunks);
@@ -224,9 +239,16 @@ pub unsafe extern "C" fn hx_news15_fldr_list(htlc: *mut c_void, g: *mut c_void) 
     if htlc.is_null() || g.is_null() {
         return;
     }
+    // Read + guard the path BEFORE marking listing: path_to_hldir dereferences
+    // it immediately (no NULL check), and we shouldn't flip the listing flag if
+    // the request can't be sent.
+    let path = gnews_folder_path(g);
+    if path.is_null() {
+        return;
+    }
     gnews_folder_mark_listing(g);
     let mut hldirlen: u16 = 0;
-    let hldir = path_to_hldir(gnews_folder_path(g), &mut hldirlen, 0);
+    let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 1];
     let hc = build::build_news_dirlist_chunks(hldir_slice(hldir, hldirlen), &mut chunks);
@@ -258,7 +280,10 @@ pub unsafe extern "C" fn hx_news15_post_thread(
     threadid: u32,
     text: *const c_char,
 ) {
-    if htlc.is_null() {
+    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
+    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
+    // refresh) rather than crash.
+    if htlc.is_null() || path.is_null() {
         return;
     }
     let mut hldirlen: u16 = 0;
@@ -307,7 +332,10 @@ pub unsafe extern "C" fn hx_news15_delete_thread(
     path: *const c_char,
     threadid: u32,
 ) {
-    if htlc.is_null() {
+    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
+    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
+    // refresh) rather than crash.
+    if htlc.is_null() || path.is_null() {
         return;
     }
     let mut hldirlen: u16 = 0;
@@ -340,7 +368,10 @@ pub unsafe extern "C" fn hx_news15_delete_thread(
 /// `htlc` is NULL or valid; `path` is a NUL-terminated C string or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn hx_news15_delete(htlc: *mut c_void, path: *const c_char) {
-    if htlc.is_null() {
+    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
+    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
+    // refresh) rather than crash.
+    if htlc.is_null() || path.is_null() {
         return;
     }
     let mut hldirlen: u16 = 0;
@@ -372,7 +403,10 @@ pub unsafe extern "C" fn hx_news15_mkcat(
     path: *const c_char,
     name: *const c_char,
 ) {
-    if htlc.is_null() {
+    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
+    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
+    // refresh) rather than crash.
+    if htlc.is_null() || path.is_null() {
         return;
     }
     let mut hldirlen: u16 = 0;
@@ -407,7 +441,10 @@ pub unsafe extern "C" fn hx_news15_mkcat(
 /// `htlc` is NULL or valid; `path` is a NUL-terminated C string or NULL.
 #[no_mangle]
 pub unsafe extern "C" fn hx_news15_mkdir(htlc: *mut c_void, path: *const c_char) {
-    if htlc.is_null() {
+    // path_to_hldir dereferences `path` immediately (strchr, no NULL check —
+    // path_hldir.c), so bail on a NULL path (e.g. a node cleared during a
+    // refresh) rather than crash.
+    if htlc.is_null() || path.is_null() {
         return;
     }
     let mut hldirlen: u16 = 0;

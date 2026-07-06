@@ -10,6 +10,8 @@
  * instead of mirroring the GTK-laden struct layouts.
  */
 
+G_BEGIN_DECLS
+
 struct news_item;
 struct gnews_catalog;
 struct gnews_folder;
@@ -23,5 +25,7 @@ extern void gnews_catalog_mark_listing (struct gnews_catalog *g);
 
 extern const char *gnews_folder_path (struct gnews_folder *g);
 extern void gnews_folder_mark_listing (struct gnews_folder *g);
+
+G_END_DECLS
 
 #endif /* HX_NEWS_SEND_BRIDGE_H */
