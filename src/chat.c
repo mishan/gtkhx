@@ -110,7 +110,6 @@ hx_loading_older_sentinel (void)
     return cached;
 }
 
-static char *termed_buf = 0;
 #define WORD_URL 1
 #define WORD_NICK 2
 #define WORD_HOST 4
@@ -1589,7 +1588,7 @@ chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
  *
  * `pos` is a char offset (the GtkTextBuffer insert mark). `reverse` steps the
  * Tab-cycle backwards (Shift+Tab). */
-static int
+int
 tab_nick_comp (session *sess, void *member_model, char *text, gboolean reverse,
                int pos, GtkWidget *entry)
 {
@@ -1627,136 +1626,6 @@ tab_nick_comp (session *sess, void *member_model, char *text, gboolean reverse,
         g_free (ctext);
     }
     return 0;
-}
-
-/* GTK 4 widgets don't fire key-press-event. The chat input's
- * Tab nick completion + Return-to-send + Up/Down history is the most
- * complex key handler in the codebase per ROADMAP. It now hangs off a
- * GtkEventControllerKey installed on the chat input view; the
- * "key-pressed" signal carries (controller, keyval, keycode, state).
- *
- * Returning TRUE inhibits further propagation (so the GtkTextView's
- * default text input doesn't insert the Return / Tab / Up / Down).
- * FALSE lets the default proceed (used for Shift+Return → newline and
- * for ordinary printable characters).
- *
- * The session/gchat pointers come from g_object_set_data on the
- * widget, set at chat-window construction time; the helper retrieves
- * them via the controller's widget lookup. */
-static gboolean
-chat_input_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
-                        guint keycode, GdkModifierType state,
-                        gpointer user_data)
-{
-    GtkWidget *widget
-        = gtk_event_controller_get_widget (GTK_EVENT_CONTROLLER (ctrl));
-    GtkTextView *text;
-    GtkTextBuffer *buf;
-    GtkTextMark *insert_mark;
-    GtkTextIter insert_iter;
-    guint point;
-    struct gtkhx_chat *gchat = g_object_get_data (G_OBJECT (widget), "gchat");
-    session *sess = g_object_get_data (G_OBJECT (widget), "sess");
-    (void)keycode;
-    (void)user_data;
-
-    if (!gchat || !sess) {
-        return FALSE;
-    }
-
-    text = GTK_TEXT_VIEW (widget);
-    buf = gtk_text_view_get_buffer (text);
-
-    insert_mark = gtk_text_buffer_get_insert (buf);
-    gtk_text_buffer_get_iter_at_mark (buf, &insert_iter, insert_mark);
-    point = gtk_text_iter_get_offset (&insert_iter);
-
-    if (state & GDK_CONTROL_MASK) {
-        switch (keyval) {
-        case 'k':
-        case 'K':
-            create_connect_window (0, hx_active_session ());
-            return TRUE;
-        }
-    } else if ((state & GDK_SHIFT_MASK) && keyval == GDK_KEY_Return) {
-        /* Insert a linebreak if shift is held — let GtkTextView default. */
-        return FALSE;
-    } else if (keyval == GDK_KEY_Return) {
-        GtkTextIter start, end;
-
-        gtk_text_view_set_editable (text, FALSE);
-        g_free (termed_buf);
-
-        gtk_text_buffer_get_start_iter (buf, &start);
-        gtk_text_buffer_get_end_iter (buf, &end);
-        termed_buf = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
-
-        hx_input_history_record (gchat->chat_history, termed_buf);
-
-        hotline_client_input (&sess->htlc, termed_buf, gchat->cid,
-                              (state & GDK_CONTROL_MASK) ? 1 : 0);
-
-        gtk_text_buffer_get_start_iter (buf, &start);
-        gtk_text_buffer_get_end_iter (buf, &end);
-        gtk_text_buffer_delete (buf, &start, &end);
-        gtk_text_view_set_editable (text, TRUE);
-        return TRUE;
-    } else if (keyval == GDK_KEY_Tab || keyval == GDK_KEY_ISO_Left_Tab) {
-        GtkTextIter start, end;
-        char *p;
-        /* Shift+Tab (GDK reports it as ISO_Left_Tab) cycles backwards.
-         * Handle it here too so it completes rather than moving focus. */
-        gboolean reverse
-            = (keyval == GDK_KEY_ISO_Left_Tab) || (state & GDK_SHIFT_MASK);
-
-        gtk_text_buffer_get_start_iter (buf, &start);
-        gtk_text_buffer_get_end_iter (buf, &end);
-        p = gtk_text_buffer_get_text (buf, &start, &end, FALSE);
-        /* Complete against the members of the chat this input belongs to
-         * (public or private) — gchat->cid keys the model. */
-        {
-            struct chat *c = chat_with_cid (sess, gchat->cid);
-            tab_nick_comp (sess, c ? hx_chat_member_model (c) : NULL, p, reverse, point,
-                           widget);
-        }
-        g_free (p);
-        gtk_widget_grab_focus (GTK_WIDGET (text));
-        return TRUE;
-    } else if (keyval == GDK_KEY_Up) {
-        /* The draft snapshot (capture the in-progress line on the first Up,
-         * restore it on Down past the newest entry) is encapsulated in the
-         * Rust InputHistory. Pass the current buffer text in; a non-NULL
-         * result is the line to show. */
-        GtkTextIter s, e;
-        char *cur, *nt = NULL;
-
-        gtk_text_buffer_get_start_iter (buf, &s);
-        gtk_text_buffer_get_end_iter (buf, &e);
-        cur = gtk_text_buffer_get_text (buf, &s, &e, FALSE);
-        if (hx_input_history_up (gchat->chat_history, cur, &nt)) {
-            GtkTextIter end;
-            gtk_text_buffer_set_text (buf, nt, -1);
-            gtk_text_buffer_get_end_iter (buf, &end);
-            gtk_text_buffer_place_cursor (buf, &end);
-            g_free (nt);
-            g_free (cur);
-            return TRUE;
-        }
-        g_free (cur);
-    } else if (keyval == GDK_KEY_Down) {
-        char *nt = NULL;
-
-        if (hx_input_history_down (gchat->chat_history, &nt)) {
-            GtkTextIter end;
-            gtk_text_buffer_set_text (buf, nt, -1);
-            gtk_text_buffer_get_end_iter (buf, &end);
-            gtk_text_buffer_place_cursor (buf, &end);
-            g_free (nt);
-            return TRUE;
-        }
-    }
-
-    return FALSE;
 }
 
 /* configure-event is gone in GTK 4. Window size for the
@@ -1937,14 +1806,8 @@ gtkhx_chat_build_leaves (session *sess)
      * active GtkHx theme via the .gtkhx-input class. */
     gtkhx_apply_input_font (gchat->input);
     gtkhx_apply_input_style (gchat->input);
-    g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
-    g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
-    {
-        GtkEventController *kctrl = gtk_event_controller_key_new ();
-        g_signal_connect (kctrl, "key-pressed",
-                          G_CALLBACK (chat_input_key_pressed), NULL);
-        gtk_widget_add_controller (gchat->input, kctrl);
-    }
+    gtkhx_chat_input_attach (gchat->input, sess, gchat->cid,
+                             gchat->chat_history);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
     /* Inner margins so the text doesn't sit flush against the rounded-corner
@@ -2283,14 +2146,8 @@ gtkhx_pchat_new (struct htlc_conn *htlc, struct chat *chat)
     gchat->input = gtk_text_view_new ();
     gtkhx_apply_input_font (gchat->input);
     gtkhx_apply_input_style (gchat->input);
-    g_object_set_data (G_OBJECT (gchat->input), "sess", sess);
-    g_object_set_data (G_OBJECT (gchat->input), "gchat", gchat);
-    {
-        GtkEventController *kctrl = gtk_event_controller_key_new ();
-        g_signal_connect (kctrl, "key-pressed",
-                          G_CALLBACK (chat_input_key_pressed), NULL);
-        gtk_widget_add_controller (gchat->input, kctrl);
-    }
+    gtkhx_chat_input_attach (gchat->input, sess, gchat->cid,
+                             gchat->chat_history);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (gchat->input), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (gchat->input), GTK_WRAP_WORD);
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (gchat->input), 6);
