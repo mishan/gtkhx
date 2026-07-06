@@ -91,6 +91,19 @@ fn ffi_matches_pure_fn() {
 }
 
 #[test]
+fn ffi_oversized_n_is_noop() {
+    // A bogus/hostile huge `n` must fail closed (the isize::MAX ceiling) before
+    // any slice deref — the out buffer stays untouched.
+    let ids = [1u32];
+    let pids = [0u32];
+    let mut out = [7i32; 1];
+    unsafe {
+        hx_news_thread_parent_indices(ids.as_ptr(), pids.as_ptr(), usize::MAX, out.as_mut_ptr());
+    }
+    assert_eq!(out, [7]);
+}
+
+#[test]
 fn ffi_zero_len_is_noop() {
     // n == 0 must not touch out_parent (or deref the arrays).
     let mut out = [7i32; 1];

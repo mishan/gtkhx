@@ -431,11 +431,12 @@ rust_hxchat_send_dep = declare_dependency(
   ],
 )
 
-# hxnews-model (Phase R5 N2a) — the pure, unit-tested post-threading layout for
-# the 1.5 news browser. Exports hx_news_thread_parent_indices, which
-# news_browser.c::catlist_thread_into links against. Dependency-free (no glib),
-# so `cargo test -p hxnews-model` runs headless. Unconditional (news is always
-# built), so it's part of the default --workspace cargo build.
+# hxnews-model (Phase R5 N2a/N2b) — the unit-tested model layer for the 1.5 news
+# browser: the pure post-threading layout (hx_news_thread_parent_indices, which
+# news_browser.c::catlist_thread_into links against) plus the HxNewsNode
+# glib::subclass GObject (hx_news_node_*). glib + gio only (no gtk, no C
+# externs), so `cargo test -p hxnews-model` runs headless. Unconditional (news
+# is always built), so it's part of the default --workspace cargo build.
 rust_hxnews_model_dep = declare_dependency(
   sources : rust_build,
   link_args : [

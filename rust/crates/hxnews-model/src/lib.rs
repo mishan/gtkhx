@@ -88,6 +88,14 @@ pub unsafe extern "C" fn hx_news_thread_parent_indices(
     if n == 0 || postids.is_null() || parentids.is_null() || out_parent.is_null() {
         return;
     }
+    // Defensive slice-size ceiling: `slice::from_raw_parts` is UB if the total
+    // byte size exceeds `isize::MAX`. A corrupt/hostile `n` (e.g. a bogus
+    // `group->post_count`) must fail closed here, before the deref — matching
+    // the `len <= isize::MAX` guards on hotline-proto's FFI shims. Each of the
+    // three arrays holds `n` 4-byte elements (`u32` / `c_int`).
+    if n > isize::MAX as usize / std::mem::size_of::<u32>() {
+        return;
+    }
     let ids = unsafe { slice::from_raw_parts(postids, n) };
     let pids = unsafe { slice::from_raw_parts(parentids, n) };
     let posts: Vec<PostLink> = (0..n)
