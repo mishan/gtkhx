@@ -1260,8 +1260,10 @@ pool; the small ones are now drained, three larger items remain):
   tree model, and the fetch/post RPC in `news.c` / `news_browser.c`.
 - **Chat content** — the xtext output widget (vendored, stays C forever), the
   input key handling (the line history itself is now the Rust `InputHistory`,
-  M3), the wire senders, and `chat_tabs.c` (~380 LOC, the `AdwTabView` tab
-  management). See the chat-model re-think above for the model side.
+  M3), and the wire senders. ✅ The `AdwTabView` tab strip moved to Rust
+  (`chat_tabs.rs`; the libpanel needs-attention flag rides a
+  `gtkhx_dock_set_needs_attention` bridge shim). See the chat-model re-think
+  above for the model side.
 - **Files content** — the whole two-panel browser: the two `files_panel`
   GtkColumnViews, DnD, the providers (`files_provider.c`,
   `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,

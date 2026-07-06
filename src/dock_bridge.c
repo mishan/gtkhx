@@ -86,6 +86,20 @@ gtkhx_dock_raise_if_open (const char *id)
     return TRUE;
 }
 
+void
+gtkhx_dock_set_needs_attention (const char *id, gboolean state)
+{
+    HxPanel *panel;
+
+    g_return_if_fail (id != NULL);
+
+    panel = hx_panel_registry_lookup (id);
+    if (panel == NULL) {
+        return;
+    }
+    panel_widget_set_needs_attention (PANEL_WIDGET (panel), state);
+}
+
 /* Shared body for the static + dynamic embeds. Builds the panel, homes
  * it, registers it. Returns the panel (still owned by the registry's
  * strong ref) or NULL if the dock wasn't built. */

@@ -24,6 +24,7 @@ pub const AREA_CENTER: i32 = 3;
 
 extern "C" {
     fn gtkhx_dock_raise_if_open(id: *const c_char) -> glib::ffi::gboolean;
+    fn gtkhx_dock_set_needs_attention(id: *const c_char, state: glib::ffi::gboolean);
     fn gtkhx_dock_embed(
         id: *const c_char,
         kind: i32,
@@ -39,6 +40,15 @@ extern "C" {
 pub fn raise_if_open(id: &str) -> bool {
     let cid = crate::cs(id);
     unsafe { gtkhx_dock_raise_if_open(cid.as_ptr()) != glib::ffi::GFALSE }
+}
+
+/// Set / clear the needs-attention hint on the registered panel `id` (no-op
+/// if it isn't registered). The dock tab strip badges a flagged panel when
+/// it isn't the visible tab.
+pub fn set_needs_attention(id: &str, state: bool) {
+    let cid = crate::cs(id);
+    let g = if state { glib::ffi::GTRUE } else { glib::ffi::GFALSE };
+    unsafe { gtkhx_dock_set_needs_attention(cid.as_ptr(), g) }
 }
 
 /// Embed `content` as a static docked panel titled `title_key` (translated)

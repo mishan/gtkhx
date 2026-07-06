@@ -65,6 +65,12 @@ typedef enum {
  * lookup → ensure_attached → raise head of each old create_X_window. */
 gboolean gtkhx_dock_raise_if_open (const char *id);
 
+/* Set / clear the needs-attention hint on a registered panel (the dock
+ * tab strip badges it when the panel isn't the visible tab). No-op if no
+ * panel with this id is registered. Used by the Rust chat-tabs manager to
+ * flag the Chat panel when a background tab wants attention. */
+void gtkhx_dock_set_needs_attention (const char *id, gboolean state);
+
 /* Create-or-embed a static (CENTER / SIDEBAR) panel: builds the HxPanel
  * for `id`, titles/icons it, sets `content` as its child, adds it to the
  * home frame for `area`, records the home frame, and registers it (the

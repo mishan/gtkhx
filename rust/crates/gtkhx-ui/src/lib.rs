@@ -79,6 +79,9 @@ pub mod news_browser;
 // Dock registration via dock_bridge; chat content + xtext + wire senders stay
 // C in chat.c. create_chat_window is this module's #[no_mangle] export.
 pub mod chat;
+// The Chat panel's internal AdwTabView tab strip (was chat_tabs.c). Exports the
+// gtkhx_chat_tabs_* C ABI chat.c / msg.c / users.c / gtkutil.c + chat.rs use.
+pub mod chat_tabs;
 // The C ABI over the session-owned HxMemberModel +
 // the M1 nick completion (hx_member_model_* / hx_nick_complete).
 pub mod chat_members;

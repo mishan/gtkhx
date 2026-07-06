@@ -16,7 +16,6 @@ gtkhx_sources = files(
   # chat.c). Links via rust_hxchat_send_dep below.
   'chat_send_bridge.c',
   'chat_history.c',
-  'chat_tabs.c',
   'cicn.c',
   'gif_avatar.c',
   'gif_icons.c',
