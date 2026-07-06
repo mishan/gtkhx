@@ -1258,12 +1258,13 @@ pool; the small ones are now drained, three larger items remain):
   progress) in `tasks.c`.
 - **News content** — the read-only viewers, in-buffer search, the threaded
   tree model, and the fetch/post RPC in `news.c` / `news_browser.c`.
-- **Chat content** — the xtext output widget (vendored, stays C forever), the
-  input key handling (the line history itself is now the Rust `InputHistory`,
-  M3), and the wire senders. ✅ The `AdwTabView` tab strip moved to Rust
-  (`chat_tabs.rs`; the libpanel needs-attention flag rides a
-  `gtkhx_dock_set_needs_attention` bridge shim). See the chat-model re-think
-  above for the model side.
+- **Chat content** — the xtext output widget (vendored, stays C forever) and
+  the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
+  the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
+  bridge shim). ✅ The input key handler moved to Rust (`chat_input.rs`:
+  Ctrl+K / Return-to-send / Tab completion / Up-Down history via
+  `gtkhx_chat_input_attach`; the tested `tab_nick_comp` completer stays C and
+  is called from it). See the chat-model re-think above for the model side.
 - **Files content** — the whole two-panel browser: the two `files_panel`
   GtkColumnViews, DnD, the providers (`files_provider.c`,
   `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,
