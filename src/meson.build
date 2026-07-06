@@ -242,6 +242,8 @@ rust_deps = [
   # above; the C callers of gtkhx_text_for_wire happen to pull it first today,
   # but don't rely on that as they get ported.
   rust_hxchat_send_dep,
+  # pure post-threading layout for the 1.5 news browser (news_browser.c).
+  rust_hxnews_model_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]

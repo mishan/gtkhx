@@ -58,6 +58,14 @@
 #include "hl_date.h"
 #include "debug.h"
 
+/* Pure post-threading layout (hxnews-model crate, unit-tested). Fills
+ * out_parent[i] with post i's parent *array index*, or -1 for a top-level
+ * post — the postid→index map + the parentid==0 / self / missing rules that
+ * catlist_thread_into used to do inline with a GHashTable. */
+extern void hx_news_thread_parent_indices (const guint32 *postids,
+                                           const guint32 *parentids, gsize n,
+                                           int *out_parent);
+
 /* ---------- HxNewsNode (one GObject per tree row) ---------- */
 
 enum {
@@ -756,21 +764,25 @@ static void
 catlist_thread_into (GListStore *dest, struct news_group *group,
                      const char *category_path)
 {
-    GHashTable *by_postid;
     HxNewsNode **nodes;
-    int i;
+    guint32 *postids, *parentids;
+    int *parent_idx;
+    int count, i;
 
     if (!group || group->post_count <= 0) {
         return;
     }
+    count = group->post_count;
 
     /* Pass 1: build a postid → HxNewsNode map. Each node steals
 	 * the subject / sender / mime_type strings from the news_item
 	 * (we'll NULL them in the source so the freer skips them). */
-    by_postid = g_hash_table_new (g_direct_hash, g_direct_equal);
-    nodes = g_new0 (HxNewsNode *, group->post_count);
+    nodes = g_new0 (HxNewsNode *, count);
+    postids = g_new0 (guint32, count);
+    parentids = g_new0 (guint32, count);
+    parent_idx = g_new0 (int, count);
 
-    for (i = 0; i < group->post_count; i++) {
+    for (i = 0; i < count; i++) {
         struct news_item *it = &group->posts[i];
         HxNewsNode *n = hx_news_node_new (
             NB_KIND_POST,
@@ -784,8 +796,15 @@ catlist_thread_into (GListStore *dest, struct news_group *group,
                   ? g_strdup (it->parts[0].mime_type)
                   : g_strdup ("text/plain");
         nodes[i] = n;
-        g_hash_table_insert (by_postid, GUINT_TO_POINTER (it->postid), n);
+        postids[i] = it->postid;
+        parentids[i] = it->parentid;
     }
+
+    /* Parent resolution — the postid->index map plus the parentid==0 /
+     * self-parent / missing-parent rules — lives in the unit-tested
+     * hxnews-model crate (hx_news_thread_parent_indices). */
+    hx_news_thread_parent_indices (postids, parentids, (gsize) count,
+                                   parent_idx);
 
     /* Pass 2: attach replies to their parents' children stores.
 	 * Top-level posts are deferred to pass 3.
@@ -805,22 +824,16 @@ catlist_thread_into (GListStore *dest, struct news_group *group,
     {
         GArray *top_indices = g_array_new (FALSE, FALSE, sizeof (int));
 
-        for (i = 0; i < group->post_count; i++) {
-            struct news_item *it = &group->posts[i];
-            HxNewsNode *n = nodes[i];
-            HxNewsNode *parent = NULL;
+        for (i = 0; i < count; i++) {
+            int pi = parent_idx[i];
 
-            if (it->parentid != 0) {
-                parent = g_hash_table_lookup (by_postid,
-                                              GUINT_TO_POINTER (it->parentid));
-            }
-
-            if (parent && parent != n) {
+            if (pi >= 0 && pi < count) {
+                HxNewsNode *parent = nodes[pi];
                 if (!parent->children) {
                     parent->children = g_list_store_new (HX_TYPE_NEWS_NODE);
                 }
-                g_list_store_append (parent->children, n);
-                g_object_unref (n); /* parent->children owns it */
+                g_list_store_append (parent->children, nodes[i]);
+                g_object_unref (nodes[i]); /* parent->children owns it */
             } else {
                 g_array_append_val (top_indices, i);
             }
@@ -837,7 +850,9 @@ catlist_thread_into (GListStore *dest, struct news_group *group,
     }
 
     g_free (nodes);
-    g_hash_table_destroy (by_postid);
+    g_free (postids);
+    g_free (parentids);
+    g_free (parent_idx);
 }
 
 /* Free a news_group + its child news_items + their owned strings.

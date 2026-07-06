@@ -1835,6 +1835,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxnews-model"
+version = "0.1.0"
+
+[[package]]
 name = "hxtext"
 version = "0.1.0"
 dependencies = [

@@ -1,0 +1,19 @@
+[package]
+name = "hxnews-model"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase R5 N2a: pure post-threading layout for the 1.5 news browser (news_browser.c)"
+publish = false
+
+[lib]
+# rlib: for any future Rust consumer (the eventual news_browser.rs port).
+# staticlib: the FFI seam news_browser.c links against today
+#            (hx_news_thread_parent_indices).
+crate-type = ["staticlib", "rlib"]
+
+# Deliberately dependency-free: the threading layout is pure logic (no glib /
+# gtk), so `cargo test -p hxnews-model` runs headless and carries the
+# verification the display-less news_browser.c GTK glue can't (mirrors
+# hxchat-model). See docs/rust/ROADMAP.md R5 "News content".
+[dependencies]
