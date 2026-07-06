@@ -149,6 +149,8 @@ rust_sources = files(
   'crates/hxtext/src/tests.rs',
   'crates/hxchat-send/src/lib.rs',
   'crates/hxchat-send/src/tests.rs',
+  'crates/hxnews-send/src/lib.rs',
+  'crates/hxnews-send/src/tests.rs',
   'crates/hxchat-model/src/lib.rs',
   'crates/hxchat-model/src/tests.rs',
   'crates/hxchat-model/src/input_history.rs',
@@ -191,6 +193,7 @@ rust_sources = files(
   'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
   'crates/hxchat-send/Cargo.toml',
+  'crates/hxnews-send/Cargo.toml',
   'crates/hxchat-model/Cargo.toml',
   'crates/hxmember-model/Cargo.toml',
   'crates/hxnews-model/Cargo.toml',
@@ -428,6 +431,18 @@ rust_hxchat_send_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxchat_send',
+  ],
+)
+
+# hxnews-send (Phase R5 N2c) — the news RPC senders (Rust port of news15.c's
+# 1.5 threaded senders + news.c's flat hx_get_news / hx_post_news). Exports the
+# hx_news15_* / hx_get_news / hx_post_news C ABI its callers link against, over
+# hotline-proto's native news builders. Unconditional (news is always built).
+rust_hxnews_send_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxnews_send',
   ],
 )
 

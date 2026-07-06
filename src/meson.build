@@ -71,10 +71,12 @@ gtkhx_sources = files(
   'msg.c',
   'network.c',
   'hxnet_bridge.c',
-  'news.c',
+  # news.c + news15.c retired — the flat + 1.5 news wire senders moved to the
+  # hxnews-send Rust crate (rust_hxnews_send_dep below). news_send_bridge.c is
+  # the C struct-field accessor shim it calls (mirrors chat_send_bridge.c).
+  'news_send_bridge.c',
   'news_browser.c',
   'notify.c',
-  'news15.c',
   'options.c',
   'path_hldir.c',
   'path_util.c',
@@ -242,6 +244,10 @@ rust_deps = [
   # above; the C callers of gtkhx_text_for_wire happen to pull it first today,
   # but don't rely on that as they get ported.
   rust_hxchat_send_dep,
+  # news wire senders (flat 1.0/1.2 + 1.5 threaded) — Rust port of news.c +
+  # news15.c. Before rust_hxtext_dep on the link line (undefined ref to
+  # gtkhx_text_for_wire), same consumer-before-provider rule as hxchat-send.
+  rust_hxnews_send_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
