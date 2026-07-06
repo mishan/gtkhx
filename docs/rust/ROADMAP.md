@@ -1204,10 +1204,14 @@ untouched — client-side state shape only. Phasing, leaf-up:
   to a two-field signal-payload carrier `{uid, nick_color}`. The capstone
   (M4b.5) model port made `struct chat` an opaque handle over a Rust
   `HxConversation` (`{cid, subject, member_model, view}`), reached only
-  through the `hx_chat_*` accessors. **Remaining (deferred):** fold the
-  `sess->chats` registry itself into Rust (`cid → HxConversation`, which also
-  feeds the R7 multi-conn design) and retire the C `struct gtkhx_chat` view
-  object that `HxConversation.view` still points at opaquely.
+  through the `hx_chat_*` accessors. The `sess->chats` registry itself then
+  moved into Rust too (M4b.5-b: the `HxChatRegistry` in gtkhx-session, `cid →
+  HxConversation`, which also feeds the R7 multi-conn design). **Remaining:**
+  the C `struct gtkhx_chat` view object `HxConversation.view` points at. Scoped
+  in **[gtkhx-chat-retirement-scoping.md](gtkhx-chat-retirement-scoping.md)** —
+  the finding is that it can't be fully deleted while xtext stays C (its
+  `render` cursors are raw xtext `textentry*`), so the achievable goal is to
+  make it *opaque* behind `hx_gchat_*` accessors, mirroring `struct chat`.
 
 ### Inventory — what's still C
 
