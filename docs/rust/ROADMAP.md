@@ -1291,10 +1291,27 @@ pool; the small ones are now drained, three larger items remain):
   `gtkutil.c` setbtns + `options.c` theme-apply; the search state is Rust-side.
   The wire senders `hx_get_news` / `hx_post_news` stay C (R2 already put the
   `news_post` chunk builder in `hotline-proto`; a `hxnews-send` crate mirroring
-  `hxchat-send` is the optional follow-up). **Remaining:** the threaded **1.5
-  browser** (`news_browser.c`) — the `GtkTreeListModel` tree, `ColumnView`
-  factory, dirlist/catlist/thread fetch, and the compose / create / delete
-  dialogs.
+  `hxchat-send` is the optional follow-up).
+
+  The threaded **1.5 browser** (`news_browser.c`, ~2.3k LOC) is a monolithic
+  GObject/GTK window (tree model, factory, async reply matching, dialogs, one
+  shared struct) with no clean buildable sub-unit, so it's being carved down
+  leaf-first into the **`hxnews-model`** crate (pure/GObject bits that unit-test
+  headless — the display-less GTK glue can't) ahead of the GTK port:
+  - ✅ **N2a** — the post-**threading layout** (`thread_parent_indices`): maps a
+    category's flat post list to each post's parent array index, encoding the
+    parentid==0 / self / missing / duplicate-id rules the C walker did inline
+    with a `GHashTable`. `catlist_thread_into` calls it; 11 unit tests.
+  - ✅ **N2b** — **`HxNewsNode`**, the per-row tree node, moved to a
+    `glib::subclass` GObject (`node.rs`) exporting the `hx_news_node_*` C ABI
+    (get_type / new + field accessors + lazy children `GListStore`).
+    `news_browser.c` dropped the C struct + `G_DEFINE_FINAL_TYPE` and reaches
+    the node through the accessors; 7 headless tests.
+
+  **Remaining:** the GTK glue itself — the `GtkTreeListModel` tree + `ListView`
+  factory, dirlist/catlist/thread fetch + reply matching, post rendering, and
+  the compose / create / delete dialogs. That part needs runtime testing against
+  a live 1.5 server (Badmoon/mhxd).
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
