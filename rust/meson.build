@@ -154,6 +154,10 @@ rust_sources = files(
   'crates/hxchat-model/src/input_history.rs',
   'crates/hxmember-model/src/lib.rs',
   'crates/hxmember-model/src/tests.rs',
+  'crates/hxnews-model/src/lib.rs',
+  'crates/hxnews-model/src/tests.rs',
+  'crates/hxnews-model/src/node.rs',
+  'crates/hxnews-model/src/node_tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -189,6 +193,7 @@ rust_sources = files(
   'crates/hxchat-send/Cargo.toml',
   'crates/hxchat-model/Cargo.toml',
   'crates/hxmember-model/Cargo.toml',
+  'crates/hxnews-model/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -423,6 +428,20 @@ rust_hxchat_send_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxchat_send',
+  ],
+)
+
+# hxnews-model (Phase R5 N2a/N2b) — the unit-tested model layer for the 1.5 news
+# browser: the pure post-threading layout (hx_news_thread_parent_indices, which
+# news_browser.c::catlist_thread_into links against) plus the HxNewsNode
+# glib::subclass GObject (hx_news_node_*). glib + gio only (no gtk, no C
+# externs), so `cargo test -p hxnews-model` runs headless. Unconditional (news
+# is always built), so it's part of the default --workspace cargo build.
+rust_hxnews_model_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxnews_model',
   ],
 )
 

@@ -58,7 +58,22 @@
 #include "hl_date.h"
 #include "debug.h"
 
-/* ---------- HxNewsNode (one GObject per tree row) ---------- */
+/* Pure post-threading layout (hxnews-model crate, unit-tested). Fills
+ * out_parent[i] with post i's parent *array index*, or -1 for a top-level
+ * post — the postid→index map + the parentid==0 / self / missing rules that
+ * catlist_thread_into used to do inline with a GHashTable. */
+extern void hx_news_thread_parent_indices (const guint32 *postids,
+                                           const guint32 *parentids, gsize n,
+                                           int *out_parent);
+
+/* ---------- HxNewsNode (one GObject per tree row) ----------
+ *
+ * The node — one GObject per folder / category / post — moved to the
+ * hxnews-model Rust crate (glib::subclass GObject; unit-tested headless). It's
+ * a pure data holder, so the C browser here keeps the GtkTreeListModel /
+ * factory / fetch glue and reaches the node opaquely through the
+ * hx_news_node_* accessors below. `HX_NEWS_NODE(obj)` is now just a pointer
+ * cast; `HX_TYPE_NEWS_NODE` still backs g_list_store_new / the tree item type. */
 
 enum {
     NB_KIND_FOLDER = 1,
@@ -66,70 +81,32 @@ enum {
     NB_KIND_POST = 3,
 };
 
+typedef struct _HxNewsNode HxNewsNode;
 #define HX_TYPE_NEWS_NODE (hx_news_node_get_type ())
-G_DECLARE_FINAL_TYPE (HxNewsNode, hx_news_node, HX, NEWS_NODE, GObject)
+#define HX_NEWS_NODE(obj) ((HxNewsNode *) (obj))
 
-struct _HxNewsNode {
-    GObject parent_instance;
-    int kind;
-    char *name;
-    char *path;           /* full Hotline path (folders / categories);
-	                          * for posts: the containing category's path */
-    GListStore *children; /* created lazily on first expansion */
-    gboolean loaded;      /* TRUE once the RPC reply has populated
-	                          * children — guards against re-fetch on
-	                          * collapse + re-expand */
-
-    /* Post-specific (kind == NB_KIND_POST). Filled at the
-	 * NEWSCATLIST reply when the post tree gets built. */
-    guint32 postid;
-    char *sender;
-    char *mime_type;
-    struct date_time date;
-
-    /* Cached post body (NULL = not fetched yet; "" = empty
-	 * body the server returned). Populated by HTLC_HDR_GETTHREAD
-	 * reply via gnews_browser_handle_thread. */
-    char *body;
-    gboolean body_fetching;
-};
-
-G_DEFINE_FINAL_TYPE (HxNewsNode, hx_news_node, G_TYPE_OBJECT)
-
-static void
-hx_news_node_finalize (GObject *obj)
-{
-    HxNewsNode *n = HX_NEWS_NODE (obj);
-    g_free (n->name);
-    g_free (n->path);
-    g_free (n->sender);
-    g_free (n->mime_type);
-    g_free (n->body);
-    g_clear_object (&n->children);
-    G_OBJECT_CLASS (hx_news_node_parent_class)->finalize (obj);
-}
-
-static void
-hx_news_node_class_init (HxNewsNodeClass *klass)
-{
-    G_OBJECT_CLASS (klass)->finalize = hx_news_node_finalize;
-}
-
-static void
-hx_news_node_init (HxNewsNode *self)
-{
-    (void)self;
-}
-
-static HxNewsNode *
-hx_news_node_new (int kind, const char *name, const char *path)
-{
-    HxNewsNode *n = g_object_new (HX_TYPE_NEWS_NODE, NULL);
-    n->kind = kind;
-    n->name = g_strdup (name ? name : "");
-    n->path = path ? g_strdup (path) : NULL;
-    return n;
-}
+extern GType hx_news_node_get_type (void);
+extern HxNewsNode *hx_news_node_new (int kind, const char *name,
+                                     const char *path);
+extern int hx_news_node_kind (HxNewsNode *node);
+extern guint32 hx_news_node_postid (HxNewsNode *node);
+extern gboolean hx_news_node_loaded (HxNewsNode *node);
+extern gboolean hx_news_node_body_fetching (HxNewsNode *node);
+extern void hx_news_node_set_loaded (HxNewsNode *node, gboolean loaded);
+extern void hx_news_node_set_body_fetching (HxNewsNode *node, gboolean fetching);
+extern void hx_news_node_set_postid (HxNewsNode *node, guint32 postid);
+extern const char *hx_news_node_name (HxNewsNode *node);
+extern const char *hx_news_node_path (HxNewsNode *node);
+extern const char *hx_news_node_sender (HxNewsNode *node);
+extern const char *hx_news_node_mime_type (HxNewsNode *node);
+extern const char *hx_news_node_body (HxNewsNode *node);
+extern void hx_news_node_set_sender (HxNewsNode *node, const char *s);
+extern void hx_news_node_set_mime_type (HxNewsNode *node, const char *s);
+extern void hx_news_node_set_body (HxNewsNode *node, const char *s);
+extern void hx_news_node_get_date (HxNewsNode *node, struct date_time *out);
+extern void hx_news_node_set_date (HxNewsNode *node, const struct date_time *date);
+extern GListStore *hx_news_node_children (HxNewsNode *node);
+extern GListStore *hx_news_node_ensure_children (HxNewsNode *node);
 
 /* ---------- Browser ---------- */
 
@@ -275,20 +252,17 @@ news_node_create_child_model (gpointer item, gpointer user_data)
     HxNewsNode *node = item;
     (void)user_data;
 
-    if (node->kind == NB_KIND_POST) {
-        if (node->children
-            && g_list_model_get_n_items (G_LIST_MODEL (node->children)) > 0) {
-            return G_LIST_MODEL (g_object_ref (node->children));
+    if (hx_news_node_kind (node) == NB_KIND_POST) {
+        GListStore *ch = hx_news_node_children (node);
+        if (ch && g_list_model_get_n_items (G_LIST_MODEL (ch)) > 0) {
+            return G_LIST_MODEL (g_object_ref (ch));
         }
         return NULL;
     }
 
     /* Folders + categories: lazy-allocate an empty children store so
 	 * the expander appears. The fetch only fires on first expand. */
-    if (!node->children) {
-        node->children = g_list_store_new (HX_TYPE_NEWS_NODE);
-    }
-    return G_LIST_MODEL (g_object_ref (node->children));
+    return G_LIST_MODEL (g_object_ref (hx_news_node_ensure_children (node)));
 }
 
 /* Join a parent path and a child name to form the child's full
@@ -412,7 +386,8 @@ update_breadcrumb (gnews_browser *br, HxNewsNode **leaf_out)
 					 * leaf (we walk upward from there). */
                     *leaf_out = node;
                 }
-                g_ptr_array_insert (names, 0, g_strdup (node->name));
+                g_ptr_array_insert (names, 0,
+                                    g_strdup (hx_news_node_name (node)));
                 g_object_unref (node);
                 first = FALSE;
             }
@@ -451,7 +426,8 @@ on_selection_changed (GtkSingleSelection *sel, guint position, guint n_items,
     /* Track the currently-selected post (NULL for folder /
 	 * category / empty). The reply handler uses this to decide
 	 * whether to push a fetched body into the view. */
-    br->selected_post = (leaf && leaf->kind == NB_KIND_POST) ? leaf : NULL;
+    br->selected_post
+        = (leaf && hx_news_node_kind (leaf) == NB_KIND_POST) ? leaf : NULL;
 
     render_selected_post (br);
     sync_action_buttons (br);
@@ -475,10 +451,10 @@ on_row_expanded (GtkTreeListRow *row, GParamSpec *pspec, gpointer user_data)
         return;
     }
 
-    if (!node->loaded) {
-        if (node->kind == NB_KIND_FOLDER) {
+    if (!hx_news_node_loaded (node)) {
+        if (hx_news_node_kind (node) == NB_KIND_FOLDER) {
             fetch_dirlist (br, node);
-        } else if (node->kind == NB_KIND_CATEGORY) {
+        } else if (hx_news_node_kind (node) == NB_KIND_CATEGORY) {
             fetch_catlist (br, node);
         }
         /* Posts: children are already populated by the catlist
@@ -541,14 +517,15 @@ on_factory_bind (GtkSignalListItemFactory *factory, GtkListItem *list_item,
         return;
     }
 
-    GdkPaintable *paintable = icon_paintable_for_kind (br, node->kind);
+    GdkPaintable *paintable
+        = icon_paintable_for_kind (br, hx_news_node_kind (node));
     if (paintable) {
         gtk_image_set_from_paintable (icon, paintable);
     } else {
         gtk_image_clear (icon);
     }
 
-    gtk_label_set_text (label, node->name ? node->name : "");
+    gtk_label_set_text (label, hx_news_node_name (node));
 
     /* Lazy-fetch: connect a notify::expanded handler so the first
 	 * time the row's expander flips open we fire the NEWSDIRLIST /
@@ -636,8 +613,9 @@ fetch_dirlist (gnews_browser *br, HxNewsNode *target)
 	 * string and dereferences it unconditionally — NULL crashes.
 	 * The legacy create_gfnews_window uses "/" for the root case;
 	 * mirror that. */
-    stub->path
-        = target && target->path ? g_strdup (target->path) : g_strdup ("/");
+    stub->path = target && hx_news_node_path (target)
+                     ? g_strdup (hx_news_node_path (target))
+                     : g_strdup ("/");
 
     g_hash_table_insert (pending_dirlists, stub,
                          target ? g_object_ref (target) : NULL);
@@ -646,7 +624,7 @@ fetch_dirlist (gnews_browser *br, HxNewsNode *target)
 	 * sequence doesn't re-fire the fetch. The reply handler appends
 	 * children into the existing store. */
     if (target) {
-        target->loaded = TRUE;
+        hx_news_node_set_loaded (target, TRUE);
     }
 
     hx_news15_fldr_list (&hx_active_session ()->htlc, stub);
@@ -661,18 +639,18 @@ fetch_catlist (gnews_browser *br, HxNewsNode *target)
     struct gnews_catalog *stub;
     (void)br;
 
-    if (!target || !target->path) {
+    if (!target || !hx_news_node_path (target)) {
         return;
     }
 
     ensure_pending_tables ();
 
     stub = g_malloc0 (sizeof (struct gnews_catalog));
-    stub->path = g_strdup (target->path);
+    stub->path = g_strdup (hx_news_node_path (target));
 
     g_hash_table_insert (pending_catlists, stub, g_object_ref (target));
 
-    target->loaded = TRUE;
+    hx_news_node_set_loaded (target, TRUE);
 
     hx_news15_cat_list (&hx_active_session ()->htlc, stub);
 }
@@ -707,14 +685,14 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
     if (br) {
         if (!target) {
             dest = br->root_store;
-        } else if (target->children) {
-            dest = target->children;
+        } else {
+            dest = hx_news_node_children (target);
         }
     }
 
     if (dest && gfnews->news) {
         struct news_folder *folder = gfnews->news;
-        const char *parent_path = target ? target->path : "/";
+        const char *parent_path = target ? hx_news_node_path (target) : "/";
         for (i = 0; i < folder->num_entries; i++) {
             struct folder_item *item = folder->entry[i];
             int kind = (item->type == 1) ? NB_KIND_FOLDER : NB_KIND_CATEGORY;
@@ -756,36 +734,47 @@ static void
 catlist_thread_into (GListStore *dest, struct news_group *group,
                      const char *category_path)
 {
-    GHashTable *by_postid;
     HxNewsNode **nodes;
-    int i;
+    guint32 *postids, *parentids;
+    int *parent_idx;
+    int count, i;
 
     if (!group || group->post_count <= 0) {
         return;
     }
+    count = group->post_count;
 
     /* Pass 1: build a postid → HxNewsNode map. Each node steals
 	 * the subject / sender / mime_type strings from the news_item
 	 * (we'll NULL them in the source so the freer skips them). */
-    by_postid = g_hash_table_new (g_direct_hash, g_direct_equal);
-    nodes = g_new0 (HxNewsNode *, group->post_count);
+    nodes = g_new0 (HxNewsNode *, count);
+    postids = g_new0 (guint32, count);
+    parentids = g_new0 (guint32, count);
+    parent_idx = g_new0 (int, count);
 
-    for (i = 0; i < group->post_count; i++) {
+    for (i = 0; i < count; i++) {
         struct news_item *it = &group->posts[i];
         HxNewsNode *n = hx_news_node_new (
             NB_KIND_POST,
             it->subject && *it->subject ? it->subject : "(no subject)",
             category_path);
-        n->postid = it->postid;
-        n->sender = g_strdup (it->sender ? it->sender : "");
-        n->date = it->date;
-        n->mime_type
-            = (it->partcount > 0 && it->parts && it->parts[0].mime_type)
-                  ? g_strdup (it->parts[0].mime_type)
-                  : g_strdup ("text/plain");
+        hx_news_node_set_postid (n, it->postid);
+        hx_news_node_set_sender (n, it->sender ? it->sender : "");
+        hx_news_node_set_date (n, &it->date);
+        hx_news_node_set_mime_type (
+            n, (it->partcount > 0 && it->parts && it->parts[0].mime_type)
+                   ? it->parts[0].mime_type
+                   : "text/plain");
         nodes[i] = n;
-        g_hash_table_insert (by_postid, GUINT_TO_POINTER (it->postid), n);
+        postids[i] = it->postid;
+        parentids[i] = it->parentid;
     }
+
+    /* Parent resolution — the postid->index map plus the parentid==0 /
+     * self-parent / missing-parent rules — lives in the unit-tested
+     * hxnews-model crate (hx_news_thread_parent_indices). */
+    hx_news_thread_parent_indices (postids, parentids, (gsize) count,
+                                   parent_idx);
 
     /* Pass 2: attach replies to their parents' children stores.
 	 * Top-level posts are deferred to pass 3.
@@ -805,22 +794,13 @@ catlist_thread_into (GListStore *dest, struct news_group *group,
     {
         GArray *top_indices = g_array_new (FALSE, FALSE, sizeof (int));
 
-        for (i = 0; i < group->post_count; i++) {
-            struct news_item *it = &group->posts[i];
-            HxNewsNode *n = nodes[i];
-            HxNewsNode *parent = NULL;
+        for (i = 0; i < count; i++) {
+            int pi = parent_idx[i];
 
-            if (it->parentid != 0) {
-                parent = g_hash_table_lookup (by_postid,
-                                              GUINT_TO_POINTER (it->parentid));
-            }
-
-            if (parent && parent != n) {
-                if (!parent->children) {
-                    parent->children = g_list_store_new (HX_TYPE_NEWS_NODE);
-                }
-                g_list_store_append (parent->children, n);
-                g_object_unref (n); /* parent->children owns it */
+            if (pi >= 0 && pi < count) {
+                GListStore *pch = hx_news_node_ensure_children (nodes[pi]);
+                g_list_store_append (pch, nodes[i]);
+                g_object_unref (nodes[i]); /* parent->children owns it */
             } else {
                 g_array_append_val (top_indices, i);
             }
@@ -837,7 +817,9 @@ catlist_thread_into (GListStore *dest, struct news_group *group,
     }
 
     g_free (nodes);
-    g_hash_table_destroy (by_postid);
+    g_free (postids);
+    g_free (parentids);
+    g_free (parent_idx);
 }
 
 /* Free a news_group + its child news_items + their owned strings.
@@ -891,8 +873,9 @@ gnews_browser_handle_catlist (gpointer gcnews_p)
     }
     g_hash_table_remove (pending_catlists, gcnews);
 
-    if (br && target && target->children && gcnews->group) {
-        catlist_thread_into (target->children, gcnews->group, target->path);
+    GListStore *ch = target ? hx_news_node_children (target) : NULL;
+    if (br && ch && gcnews->group) {
+        catlist_thread_into (ch, gcnews->group, hx_news_node_path (target));
     }
 
     /* Free the parsed group + the stub. */
@@ -957,28 +940,31 @@ fetch_thread (gnews_browser *br, HxNewsNode *target)
     struct news_group *stub_group;
     (void)br;
 
-    if (!target || target->kind != NB_KIND_POST || !target->path) {
+    if (!target || hx_news_node_kind (target) != NB_KIND_POST
+        || !hx_news_node_path (target)) {
         return;
     }
-    if (target->body_fetching) {
+    if (hx_news_node_body_fetching (target)) {
         return; /* already in flight */
     }
 
     ensure_pending_tables ();
 
     stub_group = g_malloc0 (sizeof (struct news_group));
-    stub_group->path = g_strdup (target->path);
+    stub_group->path = g_strdup (hx_news_node_path (target));
 
     stub_item = g_malloc0 (sizeof (struct news_item));
-    stub_item->postid = target->postid;
+    stub_item->postid = hx_news_node_postid (target);
     stub_item->group = stub_group;
     stub_item->partcount = 1;
     stub_item->parts = g_malloc0 (sizeof (struct news_parts));
-    stub_item->parts[0].mime_type
-        = g_strdup (target->mime_type ? target->mime_type : "text/plain");
+    {
+        const char *mt = hx_news_node_mime_type (target);
+        stub_item->parts[0].mime_type = g_strdup (mt ? mt : "text/plain");
+    }
 
     g_hash_table_insert (pending_threads, stub_item, g_object_ref (target));
-    target->body_fetching = TRUE;
+    hx_news_node_set_body_fetching (target, TRUE);
 
     hx_news15_get_post (&hx_active_session ()->htlc, stub_item);
 }
@@ -992,7 +978,7 @@ render_selected_post (gnews_browser *br)
     HxNewsNode *node = br->selected_post;
     GtkTextBuffer *buf;
 
-    if (!node || node->kind != NB_KIND_POST) {
+    if (!node || hx_news_node_kind (node) != NB_KIND_POST) {
         gtk_widget_set_visible (br->header_strip, FALSE);
         buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
         gtk_text_buffer_set_text (
@@ -1002,14 +988,18 @@ render_selected_post (gnews_browser *br)
     }
 
     /* Header strip */
-    gtk_label_set_text (br->subject_label, node->name && *node->name
-                                               ? node->name
-                                               : _ ("(no subject)"));
     {
-        char *date_str = post_date_format (&node->date);
-        char *meta = g_strdup_printf (
-            _ ("%1$s — %2$s"),
-            node->sender && *node->sender ? node->sender : "?", date_str);
+        const char *nm = hx_news_node_name (node);
+        gtk_label_set_text (br->subject_label,
+                            nm && *nm ? nm : _ ("(no subject)"));
+    }
+    {
+        struct date_time dt;
+        const char *snd = hx_news_node_sender (node);
+        hx_news_node_get_date (node, &dt);
+        char *date_str = post_date_format (&dt);
+        char *meta = g_strdup_printf (_ ("%1$s — %2$s"),
+                                      snd && *snd ? snd : "?", date_str);
         gtk_label_set_text (br->meta_label, meta);
         g_free (meta);
         g_free (date_str);
@@ -1018,11 +1008,14 @@ render_selected_post (gnews_browser *br)
 
     /* Body */
     buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
-    if (node->body) {
-        gtk_text_buffer_set_text (buf, node->body, -1);
-    } else {
-        gtk_text_buffer_set_text (buf, _ ("Loading…"), -1);
-        fetch_thread (br, node);
+    {
+        const char *body = hx_news_node_body (node);
+        if (body) {
+            gtk_text_buffer_set_text (buf, body, -1);
+        } else {
+            gtk_text_buffer_set_text (buf, _ ("Loading…"), -1);
+            fetch_thread (br, node);
+        }
     }
     /* Tag URLs (http://, https://, hotline://, mailto:, etc.) so the
 	 * hover-cursor + right-click popup wired by gtkurl_textview_install
@@ -1056,9 +1049,8 @@ gnews_browser_handle_thread (gpointer post_p)
     g_hash_table_remove (pending_threads, stub_item);
 
     if (target) {
-        target->body_fetching = FALSE;
-        g_free (target->body);
-        target->body = g_strdup (post->buf ? post->buf : "");
+        hx_news_node_set_body_fetching (target, FALSE);
+        hx_news_node_set_body (target, post->buf ? post->buf : "");
 
         /* If the post is still the selected one, push the body
 		 * into the view. (User may have moved on while the fetch
@@ -1131,13 +1123,16 @@ refresh_node (gnews_browser *br, HxNewsNode *node)
         fetch_dirlist (br, NULL);
         return;
     }
-    if (node->children) {
-        g_list_store_remove_all (node->children);
+    {
+        GListStore *ch = hx_news_node_children (node);
+        if (ch) {
+            g_list_store_remove_all (ch);
+        }
     }
-    node->loaded = FALSE;
-    if (node->kind == NB_KIND_FOLDER) {
+    hx_news_node_set_loaded (node, FALSE);
+    if (hx_news_node_kind (node) == NB_KIND_FOLDER) {
         fetch_dirlist (br, node);
-    } else if (node->kind == NB_KIND_CATEGORY) {
+    } else if (hx_news_node_kind (node) == NB_KIND_CATEGORY) {
         fetch_catlist (br, node);
     }
 }
@@ -1152,15 +1147,15 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
     /* If a post is selected: refetch the body. Otherwise refresh
 	 * the selected folder / category — or the root, if nothing
 	 * (or only the root level) is selected. */
-    if (node && node->kind == NB_KIND_POST) {
-        g_free (node->body);
-        node->body = NULL;
-        node->body_fetching = FALSE;
+    if (node && hx_news_node_kind (node) == NB_KIND_POST) {
+        hx_news_node_set_body (node, NULL);
+        hx_news_node_set_body_fetching (node, FALSE);
         render_selected_post (br);
         return;
     }
     if (node
-        && (node->kind == NB_KIND_FOLDER || node->kind == NB_KIND_CATEGORY)) {
+        && (hx_news_node_kind (node) == NB_KIND_FOLDER
+            || hx_news_node_kind (node) == NB_KIND_CATEGORY)) {
         refresh_node (br, node);
     } else {
         refresh_node (br, NULL);
@@ -1195,13 +1190,14 @@ create_response (AdwAlertDialog *dialog, const char *response,
     }
 
     if (ctx->kind == NB_KIND_FOLDER) {
-        char *new_path
-            = build_child_path (ctx->parent ? ctx->parent->path : "/", text);
+        char *new_path = build_child_path (
+            ctx->parent ? hx_news_node_path (ctx->parent) : "/", text);
         hx_news15_mkdir (&hx_active_session ()->htlc, new_path);
         g_free (new_path);
     } else {
-        char *parent
-            = ctx->parent ? g_strdup (ctx->parent->path) : g_strdup ("/");
+        char *parent = ctx->parent
+                           ? g_strdup (hx_news_node_path (ctx->parent))
+                           : g_strdup ("/");
         hx_news15_mkcat (&hx_active_session ()->htlc, parent, text);
         g_free (parent);
     }
@@ -1276,7 +1272,8 @@ on_new_folder_clicked (GtkButton *btn, gpointer user_data)
     (void)btn;
     /* If a folder is selected, create inside it. Otherwise (no
 	 * selection, category, or post selected) create at the root. */
-    open_create_dialog (br, (sel && sel->kind == NB_KIND_FOLDER) ? sel : NULL,
+    open_create_dialog (
+        br, (sel && hx_news_node_kind (sel) == NB_KIND_FOLDER) ? sel : NULL,
                         NB_KIND_FOLDER);
 }
 
@@ -1286,7 +1283,8 @@ on_new_category_clicked (GtkButton *btn, gpointer user_data)
     gnews_browser *br = user_data;
     HxNewsNode *sel = selected_node (br);
     (void)btn;
-    open_create_dialog (br, (sel && sel->kind == NB_KIND_FOLDER) ? sel : NULL,
+    open_create_dialog (
+        br, (sel && hx_news_node_kind (sel) == NB_KIND_FOLDER) ? sel : NULL,
                         NB_KIND_CATEGORY);
 }
 
@@ -1357,11 +1355,11 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
     char *body_text;
     (void)btn;
 
-    if (!sel || !sel->path) {
+    if (!sel || !hx_news_node_path (sel)) {
         return;
     }
 
-    switch (sel->kind) {
+    switch (hx_news_node_kind (sel)) {
     case NB_KIND_FOLDER:
         body_fmt = _ ("Delete the folder “%s” and all its contents?");
         delete_label = _ ("_Delete Folder");
@@ -1378,7 +1376,7 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
         return;
     }
 
-    body_text = g_strdup_printf (body_fmt, sel->name ? sel->name : "");
+    body_text = g_strdup_printf (body_fmt, hx_news_node_name (sel));
     dialog = ADW_DIALOG (adw_alert_dialog_new (_ ("Delete"), body_text));
     g_free (body_text);
 
@@ -1395,9 +1393,9 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
 
     ctx = g_new0 (struct delete_ctx, 1);
     ctx->br = br;
-    ctx->kind = sel->kind;
-    ctx->path = g_strdup (sel->path);
-    ctx->postid = sel->postid;
+    ctx->kind = hx_news_node_kind (sel);
+    ctx->path = g_strdup (hx_news_node_path (sel));
+    ctx->postid = hx_news_node_postid (sel);
     g_signal_connect (dialog, "response", G_CALLBACK (delete_response), ctx);
     g_signal_connect (dialog, "closed", G_CALLBACK (delete_closed), ctx);
 
@@ -1456,15 +1454,18 @@ find_category_node (GListStore *store, const char *path)
 		 * gets its own ref from the inner call and drops the
 		 * outer-folder ref here; the no-match branch just drops
 		 * the ref before continuing. */
-        if (node->kind == NB_KIND_CATEGORY
-            && g_strcmp0 (node->path, path) == 0) {
+        if (hx_news_node_kind (node) == NB_KIND_CATEGORY
+            && g_strcmp0 (hx_news_node_path (node), path) == 0) {
             return node;
         }
-        if (node->kind == NB_KIND_FOLDER && node->children) {
-            HxNewsNode *hit = find_category_node (node->children, path);
-            if (hit) {
-                g_object_unref (node);
-                return hit;
+        if (hx_news_node_kind (node) == NB_KIND_FOLDER) {
+            GListStore *ch = hx_news_node_children (node);
+            if (ch) {
+                HxNewsNode *hit = find_category_node (ch, path);
+                if (hit) {
+                    g_object_unref (node);
+                    return hit;
+                }
             }
         }
         g_object_unref (node);
@@ -1560,11 +1561,13 @@ build_reply_context_panel (HxNewsNode *reply_to)
     gtk_widget_set_margin_end (header_row, 8);
     gtk_widget_set_margin_top (header_row, 6);
 
-    date_str = post_date_format (&reply_to->date);
+    struct date_time reply_dt;
+    hx_news_node_get_date (reply_to, &reply_dt);
+    date_str = post_date_format (&reply_dt);
+    const char *reply_sender = hx_news_node_sender (reply_to);
     meta = g_strdup_printf (
         _ ("Replying to %1$s — %2$s"),
-        reply_to->sender && *reply_to->sender ? reply_to->sender : "?",
-        date_str);
+        reply_sender && *reply_sender ? reply_sender : "?", date_str);
     meta_lbl = gtk_label_new (meta);
     gtk_label_set_xalign (GTK_LABEL (meta_lbl), 0.0f);
     gtk_label_set_ellipsize (GTK_LABEL (meta_lbl), PANGO_ELLIPSIZE_END);
@@ -1573,8 +1576,9 @@ build_reply_context_panel (HxNewsNode *reply_to)
     g_free (meta);
     g_free (date_str);
 
-    subj_lbl = gtk_label_new (reply_to->name && *reply_to->name
-                                  ? reply_to->name
+    const char *reply_name = hx_news_node_name (reply_to);
+    subj_lbl = gtk_label_new (reply_name && *reply_name
+                                  ? reply_name
                                   : _ ("(no subject)"));
     gtk_label_set_xalign (GTK_LABEL (subj_lbl), 0.0f);
     gtk_label_set_wrap (GTK_LABEL (subj_lbl), TRUE);
@@ -1610,9 +1614,10 @@ build_reply_context_panel (HxNewsNode *reply_to)
 	 * before the GETTHREAD reply landed. Rather than block, render
 	 * a placeholder — the reply can still be composed; the user has
 	 * the subject + sender + date for context. */
-    body_text = reply_to->body ? reply_to->body
-                               : _ ("(original post body not loaded — open the "
-                                    "post first to fetch it)");
+    const char *reply_body = hx_news_node_body (reply_to);
+    body_text = reply_body ? reply_body
+                           : _ ("(original post body not loaded — open the "
+                                "post first to fetch it)");
     gtk_text_buffer_set_text (buf, body_text, -1);
 
     gtkhx_widget_set_child (body_scroll, body_view);
@@ -1633,7 +1638,7 @@ open_compose_window (gnews_browser *br, const char *category_path,
     GtkWidget *window, *header, *content, *form, *body_scroll;
     GtkWidget *subject_row, *subject_lbl;
     GtkWidget *cancel_btn, *post_btn;
-    guint32 parent_postid = reply_to ? reply_to->postid : 0;
+    guint32 parent_postid = reply_to ? hx_news_node_postid (reply_to) : 0;
 
     if (!category_path) {
         return;
@@ -1677,7 +1682,7 @@ open_compose_window (gnews_browser *br, const char *category_path,
     /* Layout: optional context panel + subject row + reply body. */
     content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
 
-    if (reply_to && reply_to->kind == NB_KIND_POST) {
+    if (reply_to && hx_news_node_kind (reply_to) == NB_KIND_POST) {
         GtkWidget *ctx_panel = build_reply_context_panel (reply_to);
         gtkhx_box_pack (content, ctx_panel, FALSE, FALSE, 0);
     }
@@ -1750,8 +1755,9 @@ on_new_post_clicked (GtkButton *btn, gpointer user_data)
     if (!sel) {
         return;
     }
-    if (sel->kind == NB_KIND_CATEGORY || sel->kind == NB_KIND_POST) {
-        cat_path = sel->path;
+    int sel_kind = hx_news_node_kind (sel);
+    if (sel_kind == NB_KIND_CATEGORY || sel_kind == NB_KIND_POST) {
+        cat_path = hx_news_node_path (sel);
     }
     if (!cat_path) {
         return;
@@ -1768,17 +1774,19 @@ on_reply_clicked (GtkButton *btn, gpointer user_data)
     char *subj;
     (void)btn;
 
-    if (!sel || sel->kind != NB_KIND_POST || !sel->path) {
+    if (!sel || hx_news_node_kind (sel) != NB_KIND_POST
+        || !hx_news_node_path (sel)) {
         return;
     }
 
     /* Prefill with "Re: <original>", but only if the original
 	 * doesn't already start with "Re:" — avoid Re: Re: Re: chains
 	 * the way every mail client has for decades. */
-    if (sel->name && g_ascii_strncasecmp (sel->name, "Re:", 3) == 0) {
-        subj = g_strdup (sel->name);
+    const char *sel_name = hx_news_node_name (sel);
+    if (sel_name && g_ascii_strncasecmp (sel_name, "Re:", 3) == 0) {
+        subj = g_strdup (sel_name);
     } else {
-        subj = g_strdup_printf ("Re: %s", sel->name ? sel->name : "");
+        subj = g_strdup_printf ("Re: %s", sel_name ? sel_name : "");
     }
 
     /* Make sure the original body is loaded before opening compose —
@@ -1786,11 +1794,11 @@ on_reply_clicked (GtkButton *btn, gpointer user_data)
 	 * the context panel renders a "(not loaded)" placeholder, which
 	 * is fine but ugly. Firing the fetch here costs nothing (the
 	 * helper no-ops if already in flight or cached). */
-    if (!sel->body && !sel->body_fetching) {
+    if (!hx_news_node_body (sel) && !hx_news_node_body_fetching (sel)) {
         fetch_thread (br, sel);
     }
 
-    open_compose_window (br, sel->path, sel, subj);
+    open_compose_window (br, hx_news_node_path (sel), sel, subj);
     g_free (subj);
 }
 
@@ -1813,7 +1821,7 @@ static void
 sync_action_buttons (gnews_browser *br)
 {
     HxNewsNode *node = selected_node (br);
-    int kind = node ? node->kind : 0;
+    int kind = node ? hx_news_node_kind (node) : 0;
     const guint8 *access = (const guint8 *)&hx_active_session ()->htlc.access;
     int delete_bit;
 
