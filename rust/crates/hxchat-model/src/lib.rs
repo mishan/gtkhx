@@ -1,6 +1,6 @@
 //! `hxchat-model` — the pure, testable chat conversation model + nick
-//! completion (Phase R5 M1; the Rust re-think of `struct chat` /
-//! `struct gtkhx_chat` — see `docs/rust/gchats-model-rethink.md`).
+//! completion (the Rust re-think of `struct chat` / `struct gtkhx_chat` — see
+//! the Chat-model re-think section of `docs/rust/ROADMAP.md`).
 //!
 //! This crate is *only* the model half: a [`Conversation`] owns its `cid`,
 //! `subject`, and an ordered, uid-indexed [`MemberList`], plus the

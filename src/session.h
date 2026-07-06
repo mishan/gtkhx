@@ -112,6 +112,12 @@ struct ifn {
  * allows redundant typedefs of the same struct. */
 typedef struct textentry textentry;
 
+/* The Rust cid → conversation registry backing session->chats (defined in the
+ * gtkhx-session crate; full FFI in chat.h). Opaque here — session.h only needs
+ * the pointer type for the struct field below. gnu11 permits this redundant
+ * typedef alongside the identical one in chat.h. */
+typedef struct HxChatRegistry HxChatRegistry;
+
 /* ---- Chat windows ------------------------------------------------- */
 
 /* fogWraith chat-history extension render cursors, grouped.
@@ -418,10 +424,11 @@ typedef struct _session {
 	 * and is created at session init by chats_init() — it must
 	 * always exist while the table does. Other chats (private
 	 * pchats) are inserted by chat_new and removed by chat_delete.
-	 * Lookup is O(1) via chat_with_cid; the value-destroy notify
-	 * (chat_free in chat.c) walks chat->user_list and reclaims the
-	 * heap-allocated hx_user nodes before freeing the chat. */
-    GHashTable *chats;
+	 * Lookup via chat_with_cid; the registry's destroy callback
+	 * (chat_free in chat.c) tears down each conversation's view then the
+	 * conversation handle when it is removed. It's the Rust HxChatRegistry
+	 * (gtkhx-session crate — see chat.h), not a GHashTable. */
+    HxChatRegistry *chats;
 
     struct htlc_conn htlc;
 

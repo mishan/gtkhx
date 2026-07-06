@@ -257,12 +257,10 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
     }
 
     if (ctx->sess->chats) {
-        GHashTableIter iter;
-        gpointer key, val;
-        g_hash_table_iter_init (&iter, ctx->sess->chats);
-        while (g_hash_table_iter_next (&iter, &key, &val)) {
-            struct chat *c = val;
-            if (GPOINTER_TO_UINT (key) != 0 && hx_chat_view (c)) {
+        guint n = hx_chats_count (ctx->sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (ctx->sess->chats, i);
+            if (hx_chats_cid_at (ctx->sess->chats, i) != 0 && hx_chat_view (c)) {
                 with_cid = 1;
                 break;
             }
@@ -761,11 +759,9 @@ prompt_chat (session *sess, guint16 _uid)
     gtk_widget_set_size_request (scroll, 350, 200);
 
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, NULL, &val)) {
-            struct chat *c = val;
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             if (!hx_chat_cid (c) || !hx_chat_view (c)) {
                 continue;   /* skip the public chat + window-less models */
             }
@@ -970,12 +966,10 @@ view_chat_btn (GtkWidget *w, gpointer data)
         return;
     }
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, &key, &val)) {
-            struct chat *c = val;
-            if (GPOINTER_TO_UINT (key) != 0 && hx_chat_view (c)) {
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
+            if (hx_chats_cid_at (sess->chats, i) != 0 && hx_chat_view (c)) {
                 with_cid = 1;
                 break;
             }
@@ -1194,14 +1188,12 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 	 * same as the legacy code; both arms compute the foreground
 	 * from the freshly-parsed `color`. */
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, &key, &val)) {
-            if (GPOINTER_TO_UINT (key) == 0) {
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            if (hx_chats_cid_at (sess->chats, i) == 0) {
                 continue;   /* public chat handled via the standalone view */
             }
-            struct chat *c = val;
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             if (!hx_chat_view (c)) {
                 continue;   /* only open private-chat windows */
             }
@@ -1253,11 +1245,9 @@ users_refresh_avatar (guint16 uid)
 	 * because the row<->user mapping is keyed on the struct pointer,
 	 * which differs per chat. */
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer key, val;
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, &key, &val)) {
-            struct chat *c = val;
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (!gchat || !gchat->userlist) {
                 continue;

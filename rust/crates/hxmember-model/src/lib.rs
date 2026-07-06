@@ -1,5 +1,5 @@
-//! `HxMember` + `HxMemberModel` — the membership `gio::ListModel` (Phase R5
-//! M2; see `docs/rust/gchats-model-rethink.md`).
+//! `HxMember` + `HxMemberModel` — the membership `gio::ListModel` (see the
+//! Chat-model re-think section of `docs/rust/ROADMAP.md`).
 //!
 //! `HxMemberModel` is the single source of truth for a chat's membership,
 //! exposed as a `gio::ListModel` so the user list (`HxUserListView`) can bind

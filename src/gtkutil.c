@@ -552,10 +552,9 @@ close_connected_windows (session *sess)
 	 *
 	 * gtkhx_chat_tabs_close_pchat fires AdwTabView::close-page,
 	 * which runs the registered teardown (pchat_close in chat.c).
-	 * That teardown calls gchat_delete, which removes the entry
-	 * from sess->gchats. Iterating sess->gchats while it's being
-	 * mutated would invalidate the iterator, so collect cids in a
-	 * first pass and close in a second.
+	 * That teardown calls gchat_delete, which detaches the view.
+	 * Closing tabs mutates the chat registry as we go, so collect
+	 * cids in a first pass and close in a second.
 	 *
 	 * this was destroying gchat->window
 	 * directly, but gchat->window now points at the tab content
@@ -565,13 +564,11 @@ close_connected_windows (session *sess)
 	 * close-page dispatcher keeps the AdwTabView, the registry
 	 * index, and gchat lifecycle consistent. */
     if (sess->chats) {
-        GHashTableIter iter;
-        gpointer key, val;
         GArray *cids = g_array_new (FALSE, FALSE, sizeof (guint32));
-        g_hash_table_iter_init (&iter, sess->chats);
-        while (g_hash_table_iter_next (&iter, &key, &val)) {
-            guint32 cid = GPOINTER_TO_UINT (key);
-            struct chat *c = val;
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            guint32 cid = hx_chats_cid_at (sess->chats, i);
+            struct chat *c = hx_chats_get_at (sess->chats, i);
             /* Only non-public conversations that actually have an
 			 * open window need closing (models without a view have no
 			 * tab to tear down). */
