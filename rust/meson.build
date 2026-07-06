@@ -156,6 +156,8 @@ rust_sources = files(
   'crates/hxmember-model/src/tests.rs',
   'crates/hxnews-model/src/lib.rs',
   'crates/hxnews-model/src/tests.rs',
+  'crates/hxnews-model/src/node.rs',
+  'crates/hxnews-model/src/node_tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',

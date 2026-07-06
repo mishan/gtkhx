@@ -18,6 +18,9 @@ use std::collections::HashMap;
 use std::os::raw::c_int;
 use std::slice;
 
+pub mod node;
+pub use node::{HxNewsDate, HxNewsNode};
+
 /// A post's identity for threading: its own id and its parent's id (`0` = no
 /// parent, i.e. a top-level post).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

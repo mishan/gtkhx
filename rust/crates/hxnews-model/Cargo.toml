@@ -12,8 +12,11 @@ publish = false
 #            (hx_news_thread_parent_indices).
 crate-type = ["staticlib", "rlib"]
 
-# Deliberately dependency-free: the threading layout is pure logic (no glib /
-# gtk), so `cargo test -p hxnews-model` runs headless and carries the
-# verification the display-less news_browser.c GTK glue can't (mirrors
-# hxchat-model). See docs/rust/ROADMAP.md R5 "News content".
+# The threading layout (lib.rs) is pure logic; HxNewsNode (node.rs) is a
+# glib::subclass GObject — the news-browser tree's data node, exported to C via
+# hx_news_node_*. glib + gio only (no gtk / no C externs), so
+# `cargo test -p hxnews-model` still runs headless (mirrors hxmember-model).
+# See docs/rust/ROADMAP.md R5 "News content".
 [dependencies]
+glib = { workspace = true }
+gio = { workspace = true }
