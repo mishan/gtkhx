@@ -446,7 +446,7 @@ hx_inline_media_attach_button_new (struct gtkhx_chat *gchat,
     hx_attach_ctx *seed = g_new0 (hx_attach_ctx, 1);
     seed->gchat = gchat;
     seed->htlc = htlc;
-    seed->cid = gchat ? gchat->cid : 0;
+    seed->cid = gchat ? hx_gchat_cid (gchat) : 0;
     g_object_set_data_full (G_OBJECT (btn), "attach-seed", seed,
                             (GDestroyNotify) attach_ctx_free);
 
@@ -466,8 +466,8 @@ inline_media_attach_refresh_all_chats (session *sess)
     for (guint i = 0; i < n; i++) {
         struct chat *c = hx_chats_get_at (sess->chats, i);
         struct gtkhx_chat *gchat = hx_chat_view (c);
-        if (gchat && gchat->media_attach_btn) {
-            gtk_widget_set_visible (gchat->media_attach_btn, show);
+        if (gchat && hx_gchat_media_btn (gchat)) {
+            gtk_widget_set_visible (hx_gchat_media_btn (gchat), show);
         }
     }
 }

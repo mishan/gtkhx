@@ -51,25 +51,32 @@ this coupling (`xtext.c` ~L5822, comment). This is fundamentally C-side state.
 - **`chat.c`** — the owner. Touches every field (builders, the history renderer,
   input, media). Full field access by design; stays.
 - **External consumers** (must route through accessors before the struct can go
-  opaque) — only four files:
+  opaque) — four files with real code access:
   - `options.c` — `output` / `input` / `subject` (font + theme apply, iterating
     the chat registry).
   - `users.c` — `userlist` (the pchat sidebar view).
-  - `gtkutil.c` — `window` (disconnect teardown).
   - `inline_media_attach.c` — `cid`, `media_attach_btn`.
-- `xtext.c` — mentions `gchat->render` **in a comment only**; no code access.
+  - `notify.c` — `window` (omit-if-focused check).
+- `gtkutil.c`, `xtext.c` — mention `gchat->window` / `gchat->render` **in
+  comments only**; no code access.
 - `msg.c` — **not** a consumer (it uses its own `struct msgwin`).
 
 Existing accessors (`chat.h`): `hx_gchat_output` / `_vscroll` / `_input` /
-`_subject` / `_media_btn`, plus `hx_gchat_set_window`. Missing (needed by the
-external consumers above): `hx_gchat_window` (getter), `hx_gchat_cid`,
-`hx_gchat_media_attach_btn`, `hx_gchat_userlist`.
+`_subject` / `_media_btn`, plus `hx_gchat_set_window`. Missing (added by
+Phase 1): `hx_gchat_window` (getter), `hx_gchat_cid`, `hx_gchat_userlist`
+(`_media_btn` already covers `media_attach_btn`).
+
+> **Status: Phases 1–2 shipped** (`claude/gtkhx-chat-opaque`). `struct gtkhx_chat`
+> and `struct hx_chat_history_render` now live privately in `chat.c`; `session.h`
+> holds only a forward declaration; the four consumers route through accessors.
+> The opaque type immediately caught `notify.c` (which this doc originally
+> missed) at compile time. Phase 3 remains optional.
 
 ## Plan
 
 ### Phase 1 — accessor-clean the external consumers *(small, low-risk)*
-Add the four missing `hx_gchat_*` accessors and route `options.c`, `users.c`,
-`gtkutil.c`, `inline_media_attach.c` through them. No behaviour change; pure
+Add the missing `hx_gchat_*` accessors and route `options.c`, `users.c`,
+`inline_media_attach.c`, `notify.c` through them. No behaviour change; pure
 seam work. This is the same move that preceded making `struct chat` opaque.
 
 ### Phase 2 — make `struct gtkhx_chat` opaque *(the headline)*

@@ -160,6 +160,12 @@ extern GtkWidget *hx_gchat_input (struct gtkhx_chat *g);
 extern GtkWidget *hx_gchat_subject (struct gtkhx_chat *g);
 extern GtkWidget *hx_gchat_media_btn (struct gtkhx_chat *g);
 extern void hx_gchat_set_window (struct gtkhx_chat *g, GtkWidget *w);
+extern GtkWidget *hx_gchat_window (struct gtkhx_chat *g);
+extern guint32 hx_gchat_cid (struct gtkhx_chat *g);
+/* The pchat's user-list view (HxUserListView*), or NULL. Opaque here; users.c
+ * has the real type via users_view.h. */
+struct _HxUserListView;
+extern struct _HxUserListView *hx_gchat_userlist (struct gtkhx_chat *g);
 extern void hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj);
 extern int word_check (GtkWidget *xtext, char *word);
 

@@ -104,7 +104,7 @@ static GtkWidget *
 chat_window_for_cid (guint32 cid)
 {
     struct gtkhx_chat *gc = gchat_with_cid (hx_active_session (), cid);
-    return gc ? gc->window : NULL;
+    return hx_gchat_window (gc);
 }
 
 static GtkWidget *
