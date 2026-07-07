@@ -129,6 +129,23 @@ extern void hx_news_node_set_date (HxNewsNode *node, const struct date_time *dat
 extern GListStore *hx_news_node_children (HxNewsNode *node);
 extern GListStore *hx_news_node_ensure_children (HxNewsNode *node);
 
+/* Create (new folder / category) + delete-confirm dialogs — ported to the
+ * gtkhx-ui Rust crate (news_dialogs.rs). C keeps the selection logic (the
+ * toolbar handlers below pick the target and hand it over); Rust owns the
+ * dialog, the wire send, and the post-send refresh via the bridge just
+ * below. `parent` may be NULL (create at root); the delete opener takes a
+ * snapshot of the target's identity by value. */
+extern void gtkhx_news_create_dialog_open (GtkWidget *parent_window,
+                                           HxNewsNode *parent, int kind);
+extern void gtkhx_news_delete_dialog_open (GtkWidget *parent_window, int kind,
+                                           const char *name, const char *path,
+                                           guint32 postid);
+
+/* Re-fetch a listing after a create / delete (the server pushes no
+ * notification for these). Called from the Rust dialogs once the RPC is
+ * away; `node` NULL means refresh from the root. */
+void gtkhx_news_browser_refresh (HxNewsNode *node);
+
 /* ---------- Browser ---------- */
 
 struct _gnews_browser {
@@ -1123,106 +1140,17 @@ on_refresh_clicked (GtkButton *btn, gpointer user_data)
     }
 }
 
-/* New Folder / New Category — prompt for a name, then fire mkdir /
- * mkcat against the selected folder's path. */
+/* New Folder / New Category — the toolbar handlers pick the target and hand
+ * off to the Rust create dialog (gtkhx-ui news_dialogs.rs), which owns the
+ * name prompt, the mkdir / mkcat send, and the refresh. */
 
-struct create_ctx {
-    gnews_browser *br;
-    HxNewsNode *parent; /* reffed */
-    int kind;           /* NB_KIND_FOLDER or NB_KIND_CATEGORY */
-    GtkWidget *entry;
-};
-
-static void
-create_response (AdwAlertDialog *dialog, const char *response,
-                 gpointer user_data)
+void
+gtkhx_news_browser_refresh (HxNewsNode *node)
 {
-    struct create_ctx *ctx = user_data;
-    const char *text;
-    (void)dialog;
-
-    if (g_strcmp0 (response, "create") != 0) {
-        return;
-    }
-
-    text = gtk_editable_get_text (GTK_EDITABLE (ctx->entry));
-    if (!text || !*text) {
-        return;
-    }
-
-    if (ctx->kind == NB_KIND_FOLDER) {
-        char *new_path = build_child_path (
-            ctx->parent ? hx_news_node_path (ctx->parent) : "/", text);
-        hx_news15_mkdir (&hx_active_session ()->htlc, new_path);
-        g_free (new_path);
-    } else {
-        char *parent = ctx->parent
-                           ? g_strdup (hx_news_node_path (ctx->parent))
-                           : g_strdup ("/");
-        hx_news15_mkcat (&hx_active_session ()->htlc, parent, text);
-        g_free (parent);
-    }
-
-    /* Settle: re-fetch the parent's listing so the new item
-	 * appears. The server doesn't push notifications for these. */
+    /* Called from the Rust create / delete dialogs once the RPC is away. */
     if (the_browser) {
-        refresh_node (the_browser, ctx->parent);
+        refresh_node (the_browser, node);
     }
-}
-
-static void
-create_closed (AdwAlertDialog *dialog, gpointer user_data)
-{
-    struct create_ctx *ctx = user_data;
-    (void)dialog;
-    g_clear_object (&ctx->parent);
-    g_free (ctx);
-}
-
-static void
-open_create_dialog (gnews_browser *br, HxNewsNode *parent, int kind)
-{
-    AdwDialog *dialog;
-    GtkWidget *entry;
-    struct create_ctx *ctx;
-    const char *title, *body, *create_label;
-
-    if (kind == NB_KIND_FOLDER) {
-        title = _ ("New News Folder");
-        body = _ ("Enter a name for the new news folder.");
-        create_label = _ ("C_reate Folder");
-    } else {
-        title = _ ("New News Category");
-        body = _ ("Enter a name for the new news category.");
-        create_label = _ ("C_reate Category");
-    }
-
-    dialog = ADW_DIALOG (adw_alert_dialog_new (title, body));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
-                                   _ ("_Cancel"));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "create",
-                                   create_label);
-    adw_alert_dialog_set_response_appearance (ADW_ALERT_DIALOG (dialog),
-                                              "create", ADW_RESPONSE_SUGGESTED);
-    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "create");
-    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
-
-    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
-
-    entry = gtk_entry_new ();
-    gtk_entry_set_activates_default (GTK_ENTRY (entry), TRUE);
-    adw_alert_dialog_set_extra_child (ADW_ALERT_DIALOG (dialog), entry);
-
-    ctx = g_new0 (struct create_ctx, 1);
-    ctx->br = br;
-    ctx->parent = parent ? g_object_ref (parent) : NULL;
-    ctx->kind = kind;
-    ctx->entry = entry;
-
-    g_signal_connect (dialog, "response", G_CALLBACK (create_response), ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (create_closed), ctx);
-
-    adw_dialog_present (dialog, br->window);
 }
 
 static void
@@ -1232,10 +1160,11 @@ on_new_folder_clicked (GtkButton *btn, gpointer user_data)
     HxNewsNode *sel = selected_node (br);
     (void)btn;
     /* If a folder is selected, create inside it. Otherwise (no
-	 * selection, category, or post selected) create at the root. */
-    open_create_dialog (
-        br, (sel && hx_news_node_kind (sel) == NB_KIND_FOLDER) ? sel : NULL,
-                        NB_KIND_FOLDER);
+     * selection, category, or post selected) create at the root. */
+    gtkhx_news_create_dialog_open (
+        br->window,
+        (sel && hx_news_node_kind (sel) == NB_KIND_FOLDER) ? sel : NULL,
+        NB_KIND_FOLDER);
 }
 
 static void
@@ -1244,123 +1173,35 @@ on_new_category_clicked (GtkButton *btn, gpointer user_data)
     gnews_browser *br = user_data;
     HxNewsNode *sel = selected_node (br);
     (void)btn;
-    open_create_dialog (
-        br, (sel && hx_news_node_kind (sel) == NB_KIND_FOLDER) ? sel : NULL,
-                        NB_KIND_CATEGORY);
+    gtkhx_news_create_dialog_open (
+        br->window,
+        (sel && hx_news_node_kind (sel) == NB_KIND_FOLDER) ? sel : NULL,
+        NB_KIND_CATEGORY);
 }
 
-/* Delete — confirm dialog + RPC + refresh parent.
- *
- * Snapshot the node's identity (kind, path, postid) at click time
- * instead of holding an HxNewsNode reference across the dialog.
- * A held GObject ref keeps the node alive but doesn't protect
- * against the GListStore dropping its ref during a refresh or
- * collapse, which clears the node's path pointer in flight and
- * passes NULL to path_to_hldir (crash). The snapshot approach is
- * also simpler to reason about — once the user clicks Delete in
- * the toolbar, the intent is fixed regardless of what happens to
- * the tree before they confirm. */
-struct delete_ctx {
-    gnews_browser *br;
-    int kind;
-    char *path; /* owned */
-    guint32 postid;
-};
-
-static void
-delete_response (AdwAlertDialog *dialog, const char *response,
-                 gpointer user_data)
-{
-    struct delete_ctx *ctx = user_data;
-    (void)dialog;
-
-    if (g_strcmp0 (response, "delete") != 0) {
-        return;
-    }
-    if (!ctx->path) {
-        return;
-    }
-
-    if (ctx->kind == NB_KIND_POST) {
-        hx_news15_delete_thread (&hx_active_session ()->htlc, ctx->path, ctx->postid);
-    } else {
-        hx_news15_delete (&hx_active_session ()->htlc, ctx->path);
-    }
-
-    /* Settle with a root refresh. The model doesn't keep a
-	 * path → node lookup yet, so locating the affected parent
-	 * cheaply isn't doable; a full root refresh is correct,
-	 * just heavier. */
-    if (the_browser) {
-        refresh_node (the_browser, NULL);
-    }
-}
-
-static void
-delete_closed (AdwAlertDialog *dialog, gpointer user_data)
-{
-    struct delete_ctx *ctx = user_data;
-    (void)dialog;
-    g_free (ctx->path);
-    g_free (ctx);
-}
-
+/* Delete — snapshot the target's identity (kind, name, path, postid) at click
+ * time and hand it to the Rust confirm dialog (which copies the strings
+ * synchronously before deferring). Snapshotting rather than holding an
+ * HxNewsNode ref avoids a use-after-clear: a held ref keeps the node alive but
+ * doesn't stop the GListStore dropping its ref during a refresh or collapse,
+ * which clears the node's path pointer in flight (\u2192 NULL to path_to_hldir,
+ * crash). Once the user clicks Delete the intent is fixed regardless of what
+ * happens to the tree before they confirm. */
 static void
 on_delete_clicked (GtkButton *btn, gpointer user_data)
 {
     gnews_browser *br = user_data;
     HxNewsNode *sel = selected_node (br);
-    AdwDialog *dialog;
-    struct delete_ctx *ctx;
-    const char *body_fmt, *delete_label;
-    char *body_text;
     (void)btn;
 
     if (!sel || !hx_news_node_path (sel)) {
         return;
     }
 
-    switch (hx_news_node_kind (sel)) {
-    case NB_KIND_FOLDER:
-        body_fmt = _ ("Delete the folder “%s” and all its contents?");
-        delete_label = _ ("_Delete Folder");
-        break;
-    case NB_KIND_CATEGORY:
-        body_fmt = _ ("Delete the category “%s” and all its posts?");
-        delete_label = _ ("_Delete Category");
-        break;
-    case NB_KIND_POST:
-        body_fmt = _ ("Delete the post “%s”?");
-        delete_label = _ ("_Delete Post");
-        break;
-    default:
-        return;
-    }
-
-    body_text = g_strdup_printf (body_fmt, hx_news_node_name (sel));
-    dialog = ADW_DIALOG (adw_alert_dialog_new (_ ("Delete"), body_text));
-    g_free (body_text);
-
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "cancel",
-                                   _ ("_Cancel"));
-    adw_alert_dialog_add_response (ADW_ALERT_DIALOG (dialog), "delete",
-                                   delete_label);
-    adw_alert_dialog_set_response_appearance (
-        ADW_ALERT_DIALOG (dialog), "delete", ADW_RESPONSE_DESTRUCTIVE);
-    adw_alert_dialog_set_default_response (ADW_ALERT_DIALOG (dialog), "cancel");
-    adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dialog), "cancel");
-
-    gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
-
-    ctx = g_new0 (struct delete_ctx, 1);
-    ctx->br = br;
-    ctx->kind = hx_news_node_kind (sel);
-    ctx->path = g_strdup (hx_news_node_path (sel));
-    ctx->postid = hx_news_node_postid (sel);
-    g_signal_connect (dialog, "response", G_CALLBACK (delete_response), ctx);
-    g_signal_connect (dialog, "closed", G_CALLBACK (delete_closed), ctx);
-
-    adw_dialog_present (dialog, br->window);
+    gtkhx_news_delete_dialog_open (br->window, hx_news_node_kind (sel),
+                                   hx_news_node_name (sel),
+                                   hx_news_node_path (sel),
+                                   hx_news_node_postid (sel));
 }
 
 /* ---------- Compose window (shared by New Post and Reply) ----------
