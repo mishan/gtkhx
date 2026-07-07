@@ -1317,11 +1317,19 @@ pool; the small ones are now drained, three larger items remain):
     keeps `GtkTreeListModel` from fixing a parent as a leaf before its subtree
     exists) moved to `node.rs`. The C shim just marshals the posts into a
     `#[repr(C)]` array; ownership stays inside Rust; 3 headless tests.
+  - ✅ **N2e** — the **create + delete dialogs** (`news_dialogs.rs`): the New
+    Folder / New Category name prompt and the delete-confirmation, as
+    `AdwAlertDialog`s over the `hxnews-send` senders. C keeps the selection logic
+    (the toolbar handlers pick the target node) and a one-line
+    `gtkhx_news_browser_refresh` bridge; Rust owns the dialog, the mkdir / mkcat
+    / delete send, and the post-send refetch. Create holds the parent node for a
+    targeted refresh; delete snapshots (kind/name/path/postid) by value to dodge
+    the use-after-clear the C already guarded against.
 
   **Remaining:** the GTK glue itself — the `GtkTreeListModel` tree + `ListView`
   factory, dirlist/catlist/thread fetch + reply matching, post rendering, and
-  the compose / create / delete dialogs. That part needs runtime testing against
-  a live 1.5 server (Badmoon/mhxd).
+  the compose window. That part needs runtime testing against a live 1.5 server
+  (Badmoon/mhxd).
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`

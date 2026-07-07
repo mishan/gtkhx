@@ -122,6 +122,12 @@ pub mod user_info;
 // GtkTextView + Cancel/Post header; the wire sender hx_post_news stays C.
 // create_post_window is this module's #[no_mangle] export.
 pub mod create_post;
+// the 1.5 news-browser create (new folder / category) + delete
+// confirmation dialogs (were news_browser.c's open_create_dialog +
+// on_delete_clicked bodies). AdwAlertDialogs over the hxnews-send senders;
+// C keeps the selection logic + the refresh bridge. Exports
+// gtkhx_news_create_dialog_open / gtkhx_news_delete_dialog_open.
+pub mod news_dialogs;
 // the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
