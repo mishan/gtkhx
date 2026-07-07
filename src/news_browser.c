@@ -66,6 +66,27 @@ extern void hx_news_thread_parent_indices (const guint32 *postids,
                                            const guint32 *parentids, gsize n,
                                            int *out_parent);
 
+/* Category tree builder (hxnews-model crate; replaces catlist_thread_into's
+ * inline node-tree assembly). Given a category's posts, it creates one
+ * NB_KIND_POST HxNewsNode per post, threads replies under their parents (using
+ * the parent-index logic above), and appends the top-level posts to `dest`
+ * LAST — so each has its full reply subtree before GtkTreeListModel fixes its
+ * one-shot expandable verdict. The const char* fields may be NULL; defaults are
+ * applied (subject "(no subject)", sender "", mime "text/plain"). Layout of
+ * struct hx_news_post_data must match the crate's #[repr(C)] HxNewsPostData. */
+struct hx_news_post_data {
+    guint32 postid;
+    guint32 parentid;
+    const char *subject;
+    const char *sender;
+    const char *mime_type;
+    struct date_time date;
+};
+extern void hx_news_build_category_tree (GListStore *dest,
+                                         const char *category_path,
+                                         const struct hx_news_post_data *posts,
+                                         gsize count);
+
 /* ---------- HxNewsNode (one GObject per tree row) ----------
  *
  * The node — one GObject per folder / category / post — moved to the
@@ -734,92 +755,32 @@ static void
 catlist_thread_into (GListStore *dest, struct news_group *group,
                      const char *category_path)
 {
-    HxNewsNode **nodes;
-    guint32 *postids, *parentids;
-    int *parent_idx;
-    int count, i;
-
     if (!group || group->post_count <= 0) {
         return;
     }
-    count = group->post_count;
+    gsize count = (gsize) group->post_count;
 
-    /* Pass 1: build a postid → HxNewsNode map. Each node steals
-	 * the subject / sender / mime_type strings from the news_item
-	 * (we'll NULL them in the source so the freer skips them). */
-    nodes = g_new0 (HxNewsNode *, count);
-    postids = g_new0 (guint32, count);
-    parentids = g_new0 (guint32, count);
-    parent_idx = g_new0 (int, count);
-
-    for (i = 0; i < count; i++) {
+    /* Marshal the posts into the flat repr(C) array the Rust tree builder
+     * takes. hx_news_build_category_tree (hxnews-model) owns all of it now:
+     * node creation, reply-threading, and the two-pass append ordering that
+     * keeps GtkTreeListModel from fixing a parent as a leaf before its reply
+     * subtree exists. The const char* fields are borrowed for the call — Rust
+     * copies them into the nodes and applies the defaults. */
+    struct hx_news_post_data *data = g_new0 (struct hx_news_post_data, count);
+    for (gsize i = 0; i < count; i++) {
         struct news_item *it = &group->posts[i];
-        HxNewsNode *n = hx_news_node_new (
-            NB_KIND_POST,
-            it->subject && *it->subject ? it->subject : "(no subject)",
-            category_path);
-        hx_news_node_set_postid (n, it->postid);
-        hx_news_node_set_sender (n, it->sender ? it->sender : "");
-        hx_news_node_set_date (n, &it->date);
-        hx_news_node_set_mime_type (
-            n, (it->partcount > 0 && it->parts && it->parts[0].mime_type)
-                   ? it->parts[0].mime_type
-                   : "text/plain");
-        nodes[i] = n;
-        postids[i] = it->postid;
-        parentids[i] = it->parentid;
+        data[i].postid = it->postid;
+        data[i].parentid = it->parentid;
+        data[i].subject = it->subject;
+        data[i].sender = it->sender;
+        data[i].mime_type
+            = (it->partcount > 0 && it->parts && it->parts[0].mime_type)
+                  ? it->parts[0].mime_type
+                  : NULL;
+        data[i].date = it->date;
     }
-
-    /* Parent resolution — the postid->index map plus the parentid==0 /
-     * self-parent / missing-parent rules — lives in the unit-tested
-     * hxnews-model crate (hx_news_thread_parent_indices). */
-    hx_news_thread_parent_indices (postids, parentids, (gsize) count,
-                                   parent_idx);
-
-    /* Pass 2: attach replies to their parents' children stores.
-	 * Top-level posts are deferred to pass 3.
-	 *
-	 * Why two passes for the append: GtkTreeListModel decides
-	 * whether a row is expandable on the *first* call to
-	 * create_child_model — which fires the moment we append a
-	 * post to `dest`. If we appended top-level parents in array
-	 * order (mhxd sorts depth-first, so parents come before their
-	 * replies), the parent goes into `dest` while its
-	 * `children` store is still empty → returns NULL →
-	 * permanent leaf, no expander. Replies appended a beat later
-	 * to parent->children are then invisible. Doing all the
-	 * parent.children wiring first means by the time pass 3
-	 * pushes the top-level parent into `dest`, its full reply
-	 * subtree already exists. */
-    {
-        GArray *top_indices = g_array_new (FALSE, FALSE, sizeof (int));
-
-        for (i = 0; i < count; i++) {
-            int pi = parent_idx[i];
-
-            if (pi >= 0 && pi < count) {
-                GListStore *pch = hx_news_node_ensure_children (nodes[pi]);
-                g_list_store_append (pch, nodes[i]);
-                g_object_unref (nodes[i]); /* parent->children owns it */
-            } else {
-                g_array_append_val (top_indices, i);
-            }
-        }
-
-        /* Pass 3: emit top-level posts to dest now that each one's
-		 * reply subtree is wired up. */
-        for (guint k = 0; k < top_indices->len; k++) {
-            int idx = g_array_index (top_indices, int, k);
-            g_list_store_append (dest, nodes[idx]);
-            g_object_unref (nodes[idx]);
-        }
-        g_array_free (top_indices, TRUE);
-    }
-
-    g_free (nodes);
-    g_free (postids);
-    g_free (parentids);
-    g_free (parent_idx);
+    hx_news_build_category_tree (dest, category_path, data, count);
+    g_free (data);
 }
 
 /* Free a news_group + its child news_items + their owned strings.
