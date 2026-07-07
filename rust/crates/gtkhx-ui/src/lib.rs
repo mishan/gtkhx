@@ -128,6 +128,11 @@ pub mod create_post;
 // C keeps the selection logic + the refresh bridge. Exports
 // gtkhx_news_create_dialog_open / gtkhx_news_delete_dialog_open.
 pub mod news_dialogs;
+// the 1.5 news-browser tree view: the GtkTreeListModel child-model
+// function + the GtkListView row factory (setup/bind/unbind + lazy
+// fetch-on-expand), was news_browser.c's factory callbacks. Exports
+// gtkhx_news_build_tree_model / gtkhx_news_build_factory.
+pub mod news_tree;
 // the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
