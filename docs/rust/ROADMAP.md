@@ -1307,6 +1307,16 @@ pool; the small ones are now drained, three larger items remain):
     (get_type / new + field accessors + lazy children `GListStore`).
     `news_browser.c` dropped the C struct + `G_DEFINE_FINAL_TYPE` and reaches
     the node through the accessors; 7 headless tests.
+  - ✅ **N2c** — the news **wire senders** moved to a dedicated `hxnews-send`
+    crate (mirrors `hxchat-send`): flat NEWS_GETFILE / NEWS_POST + the 1.5
+    DIRLIST / CATLIST / GETTHREAD / POSTTHREAD / DELETETHREAD / DELNEWSDIRCAT /
+    MAKENEWSDIR / MAKECATEGORY, over the native `hotline_proto::build` builders.
+  - ✅ **N2d** — the **category tree builder** (`hx_news_build_category_tree`):
+    the reply-threaded `HxNewsNode` tree that `catlist_thread_into` assembled
+    inline (create a node per post, thread via N2a, and the two-pass append that
+    keeps `GtkTreeListModel` from fixing a parent as a leaf before its subtree
+    exists) moved to `node.rs`. The C shim just marshals the posts into a
+    `#[repr(C)]` array; ownership stays inside Rust; 3 headless tests.
 
   **Remaining:** the GTK glue itself — the `GtkTreeListModel` tree + `ListView`
   factory, dirlist/catlist/thread fetch + reply matching, post rendering, and

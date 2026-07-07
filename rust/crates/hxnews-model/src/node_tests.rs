@@ -150,3 +150,91 @@ fn ffi_null_ptr_is_safe() {
         hx_news_node_set_loaded(std::ptr::null_mut(), glib::ffi::GTRUE);
     }
 }
+
+// ---- hx_news_build_category_tree ----------------------------------------
+
+fn post(postid: u32, parentid: u32, subject: &CStr, sender: &CStr, mime: &CStr) -> HxNewsPostData {
+    HxNewsPostData {
+        postid,
+        parentid,
+        subject: subject.as_ptr(),
+        sender: sender.as_ptr(),
+        mime_type: mime.as_ptr(),
+        date: HxNewsDate::default(),
+    }
+}
+
+#[test]
+fn build_category_tree_threads_replies_under_parents() {
+    // Array (server) order: #10 top, #11 reply→#10, #12 top.
+    let (s0, s1, s2) = (cs("First"), cs("Re: First"), cs("Second"));
+    let (a, b, c) = (cs("alice"), cs("bob"), cs("carol"));
+    let mime = cs("text/plain");
+    let cat = cs("/news/general");
+    let posts = [
+        post(10, 0, &s0, &a, &mime),
+        post(11, 10, &s1, &b, &mime),
+        post(12, 0, &s2, &c, &mime),
+    ];
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    unsafe {
+        hx_news_build_category_tree(dest.as_ptr(), cat.as_ptr(), posts.as_ptr(), posts.len());
+    }
+
+    // Two top-level posts, in order.
+    assert_eq!(dest.n_items(), 2);
+    let n0 = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+    let n1 = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(n0.imp().postid.get(), 10);
+    assert_eq!(n0.imp().name.borrow().to_str().unwrap(), "First");
+    assert_eq!(n0.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(), "alice");
+    assert_eq!(n0.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/general");
+    assert_eq!(n1.imp().postid.get(), 12);
+
+    // #10 has one reply (#11) in its children store; #12 is a leaf.
+    let kids = n0.imp().children.borrow();
+    let kids = kids.as_ref().expect("parent got a children store");
+    assert_eq!(kids.n_items(), 1);
+    let reply = kids.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(reply.imp().postid.get(), 11);
+    assert_eq!(reply.imp().name.borrow().to_str().unwrap(), "Re: First");
+    // #12 never had ensure_children called → no store (renders as a leaf).
+    assert!(n1.imp().children.borrow().is_none());
+}
+
+#[test]
+fn build_category_tree_defaults_empty_fields() {
+    // NULL subject → "(no subject)"; NULL sender → ""; NULL mime → "text/plain".
+    let posts = [HxNewsPostData {
+        postid: 1,
+        parentid: 0,
+        subject: std::ptr::null(),
+        sender: std::ptr::null(),
+        mime_type: std::ptr::null(),
+        date: HxNewsDate::default(),
+    }];
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    unsafe {
+        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), posts.as_ptr(), 1);
+    }
+    assert_eq!(dest.n_items(), 1);
+    let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(n.imp().name.borrow().to_str().unwrap(), "(no subject)");
+    assert_eq!(n.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(), "");
+    assert_eq!(n.imp().mime_type.borrow().as_ref().unwrap().to_str().unwrap(), "text/plain");
+}
+
+#[test]
+fn build_category_tree_empty_or_null_is_no_op() {
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    // Bind the CStrings to locals so `post()`'s stored pointers stay valid for
+    // the call. A `&cs("x")` temporary dangles at the end of the statement —
+    // harmless only because count==0 returns before any deref, but fragile.
+    let (subj, sndr, mime) = (cs("x"), cs("y"), cs("text/plain"));
+    let posts = [post(1, 0, &subj, &sndr, &mime)];
+    unsafe {
+        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), posts.as_ptr(), 0); // count 0
+        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3); // null posts
+    }
+    assert_eq!(dest.n_items(), 0);
+}

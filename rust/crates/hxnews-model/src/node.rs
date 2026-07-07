@@ -20,6 +20,12 @@ use gio::prelude::*;
 use gio::subclass::prelude::*;
 use glib::translate::{from_glib_none, IntoGlib, IntoGlibPtr};
 
+/// `NB_KIND_POST` from the `NB_KIND_*` enum in `news_browser.c` (FOLDER=1,
+/// CATEGORY=2, POST=3). Named so the Rust and C meanings of `kind` can't
+/// silently drift; only POST is constructed here (the tree builder makes post
+/// rows), so it's the only member this crate needs.
+pub(crate) const NB_KIND_POST: i32 = 3;
+
 /// `#[repr(C)]` mirror of C's `struct date_time` (`session.h`): a post's
 /// timestamp in the parsed 3-field wire form. Copied in/out by value so the C
 /// caller keeps passing `struct date_time *`.
@@ -338,6 +344,125 @@ pub unsafe extern "C" fn hx_news_node_ensure_children(
     ptr: *mut glib::gobject_ffi::GObject,
 ) -> *mut gio::ffi::GListStore {
     with_node(ptr, |n| n.ensure_children().as_ptr()).unwrap_or(std::ptr::null_mut())
+}
+
+// -------------------------------------------------------------------------
+// Category tree builder (was news_browser.c::catlist_thread_into).
+// -------------------------------------------------------------------------
+
+/// `#[repr(C)]` post record. The C `catlist_thread_into` shim fills an array of
+/// these from a `struct news_group`'s posts and hands it to
+/// [`hx_news_build_category_tree`]. Layout mirrors the C `struct
+/// hx_news_post_data` (news_browser.c); the borrowed `const char *`s are copied
+/// into the nodes during the call.
+#[repr(C)]
+pub struct HxNewsPostData {
+    pub postid: u32,
+    pub parentid: u32,
+    pub subject: *const c_char,
+    pub sender: *const c_char,
+    pub mime_type: *const c_char,
+    pub date: HxNewsDate,
+}
+
+/// A borrowed `const char *` → owned `CString`, substituting `default` when the
+/// pointer is NULL — and also when it points at `""` if `empty_is_default`.
+unsafe fn cstr_or(p: *const c_char, default: &str, empty_is_default: bool) -> CString {
+    if p.is_null() {
+        return CString::new(default).unwrap();
+    }
+    let c = CStr::from_ptr(p);
+    if empty_is_default && c.to_bytes().is_empty() {
+        CString::new(default).unwrap()
+    } else {
+        c.to_owned()
+    }
+}
+
+/// `void hx_news_build_category_tree(GListStore *dest, const char *category_path,
+/// const struct hx_news_post_data *posts, size_t count)` — build a category's
+/// reply-threaded `HxNewsNode` tree and append its top-level posts to `dest`.
+///
+/// Replaces `news_browser.c::catlist_thread_into`: one `NB_KIND_POST` node per
+/// post (subject / sender / date / mime set from `posts`), parent resolution via
+/// the tested [`thread_parent_indices`], then replies attached to their parents'
+/// children stores and the top-level posts appended to `dest` **last** — so each
+/// has its full reply subtree before `GtkTreeListModel` makes its one-shot
+/// expandability decision on the first `create_child_model` (otherwise a parent
+/// whose children store is still empty becomes a permanent, non-expandable leaf).
+///
+/// Ownership stays inside Rust: each node is created here (one ref), appended to
+/// its owning store (which takes a ref), and the transient `Vec` ref is released
+/// when the vector drops — the tree survives, held by the stores.
+///
+/// # Safety
+/// `dest` is a valid `GListStore *`; `posts` points at `count` valid records
+/// whose `const char *` fields are NULL or NUL-terminated; main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn hx_news_build_category_tree(
+    dest: *mut gio::ffi::GListStore,
+    category_path: *const c_char,
+    posts: *const HxNewsPostData,
+    count: usize,
+) {
+    if dest.is_null() || posts.is_null() || count == 0 {
+        return;
+    }
+    // Defensive slice-size ceiling: `slice::from_raw_parts` is UB if the total
+    // byte size exceeds `isize::MAX`. A corrupt/hostile `count` (e.g. a bogus
+    // `group->post_count`) must fail closed here, before the deref — matching
+    // the guard on `hx_news_thread_parent_indices`.
+    if count > isize::MAX as usize / std::mem::size_of::<HxNewsPostData>() {
+        return;
+    }
+    let dest: gio::ListStore = from_glib_none(dest);
+    let path: Option<CString> = if category_path.is_null() {
+        None
+    } else {
+        Some(CStr::from_ptr(category_path).to_owned())
+    };
+    let data = std::slice::from_raw_parts(posts, count);
+
+    // Pass 1: a node per post + collect (postid, parentid) for threading.
+    // subject: NULL/empty → "(no subject)"; sender: NULL → ""; mime: NULL →
+    // "text/plain" (the C original's defaults).
+    let mut nodes: Vec<HxNewsNode> = Vec::with_capacity(count);
+    let mut links: Vec<crate::PostLink> = Vec::with_capacity(count);
+    for p in data {
+        let subject = cstr_or(p.subject, "(no subject)", true);
+        let node = HxNewsNode::new(NB_KIND_POST, subject, path.clone());
+        {
+            let imp = node.imp();
+            imp.postid.set(p.postid);
+            imp.sender.replace(Some(cstr_or(p.sender, "", false)));
+            imp.mime_type
+                .replace(Some(cstr_or(p.mime_type, "text/plain", false)));
+            imp.date.set(p.date);
+        }
+        links.push(crate::PostLink {
+            postid: p.postid,
+            parentid: p.parentid,
+        });
+        nodes.push(node);
+    }
+
+    // Pass 2: parent resolution (tested).
+    let parent_idx = crate::thread_parent_indices(&links);
+
+    // Pass 3: wire replies under their parents; defer top-level posts.
+    let mut top: Vec<usize> = Vec::new();
+    for (i, &pi) in parent_idx.iter().enumerate() {
+        if pi >= 0 && (pi as usize) < count {
+            let store = nodes[pi as usize].ensure_children();
+            store.append(&nodes[i]);
+        } else {
+            top.push(i);
+        }
+    }
+    // Pass 4: append top-level posts now that each subtree is fully built.
+    for i in top {
+        dest.append(&nodes[i]);
+    }
 }
 
 #[cfg(test)]
