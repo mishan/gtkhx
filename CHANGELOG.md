@@ -1,4 +1,4 @@
-## 1.2.2-dev
+## 1.2.2
 
 - Voice
   - Voice activity detection for self
