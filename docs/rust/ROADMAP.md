@@ -1325,11 +1325,22 @@ pool; the small ones are now drained, three larger items remain):
     / delete send, and the post-send refetch. Create holds the parent node for a
     targeted refresh; delete snapshots (kind/name/path/postid) by value to dodge
     the use-after-clear the C already guarded against.
+  - ✅ **N2f** — the **tree view** (`news_tree.rs`): the `GtkTreeListModel`
+    child-model function (leaf-vs-expandable decision) and the `GtkListView` row
+    factory (setup / bind / unbind + lazy DIRLIST/CATLIST fetch on first expand).
+    Built the gtk-rs-idiomatic way (closures, like `users_view.rs`): two
+    builders — `gtkhx_news_build_tree_model` / `gtkhx_news_build_factory` — hand
+    the wired objects back to the ~15-line C construction that still owns
+    `root_store` / `tree_model` / `selection` (read from a dozen other spots).
+    Two small C bridges feed the factory: `gtkhx_news_icon_for_kind` and
+    `gtkhx_news_fetch_for_expanded` (keeps `fetch_dirlist` / `fetch_catlist` +
+    the pending-request tables C). The selection→content handler stays C.
 
-  **Remaining:** the GTK glue itself — the `GtkTreeListModel` tree + `ListView`
-  factory, dirlist/catlist/thread fetch + reply matching, post rendering, and
-  the compose window. That part needs runtime testing against a live 1.5 server
-  (Badmoon/mhxd).
+  **Remaining:** the reply-handler bookkeeping (the `pending_*` GHashTables +
+  C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`), post
+  rendering (`render_selected_post` + breadcrumb), and the compose window. These
+  are C-struct-coupled with no more headless-testable logic, so they want
+  runtime testing against a live 1.5 server (Badmoon/mhxd).
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`

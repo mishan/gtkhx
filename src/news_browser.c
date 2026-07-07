@@ -268,41 +268,6 @@ ensure_pending_tables (void)
     }
 }
 
-/* ---------- create_child_model: builds the tree's child stores --------
- *
- * Called by GtkTreeListModel for each row to decide whether it's a
- * leaf or expandable. Returning NULL marks the row as a leaf.
- * Returning a GListModel (even empty) marks it as expandable; the
- * tree expander will appear next to the row.
- *
- *   FOLDER, CATEGORY → always expandable. Children get appended
- *                      when the NEWSDIRLIST / NEWSCATLIST reply
- *                      arrives (lazy fetch, see on_row_expanded).
- *   POST             → expandable only if the post has replies,
- *                      i.e. node->children is already populated by
- *                      the NEWSCATLIST threading walker. Post
- *                      replies don't need a separate fetch — they
- *                      came in the same task reply as the parent.
- */
-static GListModel *
-news_node_create_child_model (gpointer item, gpointer user_data)
-{
-    HxNewsNode *node = item;
-    (void)user_data;
-
-    if (hx_news_node_kind (node) == NB_KIND_POST) {
-        GListStore *ch = hx_news_node_children (node);
-        if (ch && g_list_model_get_n_items (G_LIST_MODEL (ch)) > 0) {
-            return G_LIST_MODEL (g_object_ref (ch));
-        }
-        return NULL;
-    }
-
-    /* Folders + categories: lazy-allocate an empty children store so
-	 * the expander appears. The fetch only fires on first expand. */
-    return G_LIST_MODEL (g_object_ref (hx_news_node_ensure_children (node)));
-}
-
 /* Join a parent path and a child name to form the child's full
  * Hotline path. The root case ("/") needs special treatment to
  * avoid producing "//child". */
@@ -376,9 +341,9 @@ icon_paintable_for_kind (gnews_browser *br, int kind)
     }
 }
 
-/* Forward decls — selection-changed + the row-expanded handler
- * fire these; the bodies live further down so the file reads
- * lifecycle-first, then RPC, then rendering. */
+/* Forward decls — the selection handler and the Rust factory's expand
+ * bridge (gtkhx_news_fetch_for_expanded) fire these; the bodies live
+ * further down so the file reads lifecycle-first, then RPC, then rendering. */
 static void fetch_dirlist (gnews_browser *br, HxNewsNode *target);
 static void fetch_catlist (gnews_browser *br, HxNewsNode *target);
 static void render_selected_post (gnews_browser *br);
@@ -471,137 +436,40 @@ on_selection_changed (GtkSingleSelection *sel, guint position, guint n_items,
     sync_action_buttons (br);
 }
 
-/* ---------- Factory: setup + bind for each row widget ---------- */
+/* ---------- Tree view: factory + child model (ported to Rust) ----------
+ *
+ * The GtkTreeListModel's create-child-model function and the GtkListView row
+ * factory (setup / bind / unbind + lazy fetch-on-expand) live in the gtkhx-ui
+ * Rust crate (news_tree.rs). gtkhx_news_build_tree_model / _build_factory hand
+ * back the wired-up objects for the construction site to stitch in. These two
+ * bridges are everything the factory needs back from the browser: the per-kind
+ * row icon, and the DIRLIST / CATLIST fetch fired the first time a folder /
+ * category row expands (fetch_dirlist / fetch_catlist + the pending-request
+ * tables stay C). */
+extern GtkTreeListModel *gtkhx_news_build_tree_model (GListModel *root_model);
+extern GtkListItemFactory *gtkhx_news_build_factory (gnews_browser *browser);
 
-static void
-on_row_expanded (GtkTreeListRow *row, GParamSpec *pspec, gpointer user_data)
+GdkPaintable *gtkhx_news_icon_for_kind (gnews_browser *br, int kind);
+void gtkhx_news_fetch_for_expanded (gnews_browser *br, HxNewsNode *node);
+
+GdkPaintable *
+gtkhx_news_icon_for_kind (gnews_browser *br, int kind)
 {
-    gnews_browser *br = user_data;
-    HxNewsNode *node;
-    (void)pspec;
+    return icon_paintable_for_kind (br, kind);
+}
 
-    if (!gtk_tree_list_row_get_expanded (row)) {
-        return; /* collapse — nothing to do */
-    }
-
-    node = gtk_tree_list_row_get_item (row);
-    if (!node) {
+void
+gtkhx_news_fetch_for_expanded (gnews_browser *br, HxNewsNode *node)
+{
+    if (!node || hx_news_node_loaded (node)) {
         return;
     }
-
-    if (!hx_news_node_loaded (node)) {
-        if (hx_news_node_kind (node) == NB_KIND_FOLDER) {
-            fetch_dirlist (br, node);
-        } else if (hx_news_node_kind (node) == NB_KIND_CATEGORY) {
-            fetch_catlist (br, node);
-        }
-        /* Posts: children are already populated by the catlist
-		 * threading walker, so no fetch needed. */
+    if (hx_news_node_kind (node) == NB_KIND_FOLDER) {
+        fetch_dirlist (br, node);
+    } else if (hx_news_node_kind (node) == NB_KIND_CATEGORY) {
+        fetch_catlist (br, node);
     }
-
-    g_object_unref (node);
-}
-
-static void
-on_factory_setup (GtkSignalListItemFactory *factory, GtkListItem *list_item,
-                  gpointer user_data)
-{
-    (void)factory;
-    (void)user_data;
-
-    GtkWidget *box = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 6);
-    GtkWidget *icon = gtk_image_new ();
-    GtkWidget *label = gtk_label_new (NULL);
-    GtkWidget *expander = gtk_tree_expander_new ();
-
-    /* GtkImage clamps paintable size to its `icon-size` (~16px by
-	 * default in Adwaita), so the upscaled-paintable bytes are
-	 * shrunk back down at draw time. Override with pixel_size to
-	 * make the row actually use the 1.5x render. */
-    gtk_image_set_pixel_size (GTK_IMAGE (icon), 24);
-
-    gtk_label_set_xalign (GTK_LABEL (label), 0.0f);
-    gtk_label_set_ellipsize (GTK_LABEL (label), PANGO_ELLIPSIZE_END);
-    gtk_box_append (GTK_BOX (box), icon);
-    gtk_box_append (GTK_BOX (box), label);
-    gtk_tree_expander_set_child (GTK_TREE_EXPANDER (expander), box);
-
-    gtk_list_item_set_child (list_item, expander);
-
-    /* Stash refs on the expander itself so bind() can find them
-	 * without juggling another struct. */
-    g_object_set_data (G_OBJECT (expander), "icon", icon);
-    g_object_set_data (G_OBJECT (expander), "label", label);
-}
-
-static void
-on_factory_bind (GtkSignalListItemFactory *factory, GtkListItem *list_item,
-                 gpointer user_data)
-{
-    gnews_browser *br = user_data;
-    (void)factory;
-
-    GtkWidget *expander = gtk_list_item_get_child (list_item);
-    GtkTreeListRow *row = gtk_list_item_get_item (list_item);
-    HxNewsNode *node = row ? gtk_tree_list_row_get_item (row) : NULL;
-    GtkImage *icon = g_object_get_data (G_OBJECT (expander), "icon");
-    GtkLabel *label = g_object_get_data (G_OBJECT (expander), "label");
-
-    gtk_tree_expander_set_list_row (GTK_TREE_EXPANDER (expander), row);
-
-    if (!node) {
-        gtk_image_clear (icon);
-        gtk_label_set_text (label, "");
-        return;
-    }
-
-    GdkPaintable *paintable
-        = icon_paintable_for_kind (br, hx_news_node_kind (node));
-    if (paintable) {
-        gtk_image_set_from_paintable (icon, paintable);
-    } else {
-        gtk_image_clear (icon);
-    }
-
-    gtk_label_set_text (label, hx_news_node_name (node));
-
-    /* Lazy-fetch: connect a notify::expanded handler so the first
-	 * time the row's expander flips open we fire the NEWSDIRLIST /
-	 * NEWSCATLIST that populates its children. The connection
-	 * lives for this row binding only — unbind disconnects. */
-    {
-        gulong id = g_signal_connect (row, "notify::expanded",
-                                      G_CALLBACK (on_row_expanded), br);
-        g_object_set_data (G_OBJECT (expander), "expanded-handler",
-                           GSIZE_TO_POINTER ((gsize)id));
-        g_object_set_data_full (G_OBJECT (expander), "bound-row",
-                                g_object_ref (row), g_object_unref);
-    }
-
-    g_object_unref (node); /* gtk_tree_list_row_get_item returned a ref */
-}
-
-static void
-on_factory_unbind (GtkSignalListItemFactory *factory, GtkListItem *list_item,
-                   gpointer user_data)
-{
-    (void)factory;
-    (void)user_data;
-
-    GtkWidget *expander = gtk_list_item_get_child (list_item);
-    gulong id;
-    GtkTreeListRow *row;
-
-    id = (gulong)GPOINTER_TO_SIZE (
-        g_object_get_data (G_OBJECT (expander), "expanded-handler"));
-    row = g_object_get_data (G_OBJECT (expander), "bound-row");
-    if (id && row && g_signal_handler_is_connected (row, id)) {
-        g_signal_handler_disconnect (row, id);
-    }
-    g_object_set_data (G_OBJECT (expander), "expanded-handler", NULL);
-    g_object_set_data (G_OBJECT (expander), "bound-row", NULL);
-
-    gtk_tree_expander_set_list_row (GTK_TREE_EXPANDER (expander), NULL);
+    /* Posts: replies arrived in the catlist reply — no fetch needed. */
 }
 
 /* ---------- RPC dispatch ---------- */
@@ -1940,21 +1808,15 @@ gtkhx_news_browser_build_content (void)
 
     /* ---- Left: GtkListView over a GtkTreeListModel ---- */
     br->root_store = g_list_store_new (HX_TYPE_NEWS_NODE);
-    br->tree_model = gtk_tree_list_model_new (
-        G_LIST_MODEL (br->root_store), /* takes ownership of one ref */
-        FALSE,                         /* passthrough — FALSE means
-		                                    * the model items are
-		                                    * GtkTreeListRow wrappers */
-        FALSE,                         /* autoexpand */
-        news_node_create_child_model, br, NULL);
+    /* gtkhx_news_build_tree_model consumes one root_store ref (as
+     * gtk_tree_list_model_new did); the create-child-model logic is Rust. */
+    br->tree_model = gtkhx_news_build_tree_model (G_LIST_MODEL (br->root_store));
     br->selection = gtk_single_selection_new (G_LIST_MODEL (br->tree_model));
     gtk_single_selection_set_autoselect (br->selection, FALSE);
     gtk_single_selection_set_can_unselect (br->selection, TRUE);
 
-    factory = gtk_signal_list_item_factory_new ();
-    g_signal_connect (factory, "setup", G_CALLBACK (on_factory_setup), br);
-    g_signal_connect (factory, "bind", G_CALLBACK (on_factory_bind), br);
-    g_signal_connect (factory, "unbind", G_CALLBACK (on_factory_unbind), br);
+    /* Row factory (setup / bind / unbind + lazy fetch-on-expand) is Rust. */
+    factory = gtkhx_news_build_factory (br);
 
     br->list_view
         = gtk_list_view_new (GTK_SELECTION_MODEL (br->selection), factory);
