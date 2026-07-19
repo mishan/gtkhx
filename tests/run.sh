@@ -22,13 +22,14 @@ set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 COMPOSE_FILE="$DIR/docker-compose.yml"
+OVERRIDE_FILE="$DIR/docker-compose.janus-host.yml"
 
-# Optional host-networking override for Janus (enables voice). Both the
-# down and up paths must see the same -f set so compose tears down and
+# Optional host-networking override for Janus (enables voice). The down,
+# up, and ps calls must all see the same -f set so compose tears down and
 # brings up the identical project definition.
-COMPOSE_ARGS="-f $COMPOSE_FILE"
+USE_OVERRIDE=0
 if [ "${JANUS_HOST_NET:-0}" = "1" ]; then
-	COMPOSE_ARGS="$COMPOSE_ARGS -f $DIR/docker-compose.janus-host.yml"
+	USE_OVERRIDE=1
 	echo ">> Janus host-networking override enabled (voice path active)"
 fi
 
@@ -43,6 +44,18 @@ else
 	exit 1
 fi
 
+# Invoke compose with the right -f set, keeping every file path quoted so
+# a repo path containing spaces survives. $COMPOSE stays unquoted on
+# purpose: it's the CLI word(s), either "docker compose" or the single
+# token "docker-compose", never a path.
+dc() {
+	if [ "$USE_OVERRIDE" -eq 1 ]; then
+		$COMPOSE -f "$COMPOSE_FILE" -f "$OVERRIDE_FILE" "$@"
+	else
+		$COMPOSE -f "$COMPOSE_FILE" "$@"
+	fi
+}
+
 echo ">> Rebuilding images"
 "$DIR/build-all.sh" "$@"
 
@@ -50,15 +63,21 @@ echo
 echo ">> Tearing down any running rig"
 # --remove-orphans cleans up containers from earlier compose revisions
 # (e.g. a service that was renamed). Safe no-op when nothing is running.
-$COMPOSE $COMPOSE_ARGS down --remove-orphans
+dc down --remove-orphans
 
 echo
 echo ">> Starting the rig"
-$COMPOSE $COMPOSE_ARGS up -d
+dc up -d
 
 echo
-$COMPOSE $COMPOSE_ARGS ps
+dc ps
 echo
 echo "Rig is up. Servers: mhxd localhost:5500, Janus localhost:5510."
 echo "Trackers: Argus localhost:5498, hxtrackd localhost:5598."
-echo "Follow logs: $COMPOSE -f tests/docker-compose.yml logs -f"
+# Print the exact logs command for the rig actually brought up, paths
+# quoted so a spaced path is copy-pasteable.
+if [ "$USE_OVERRIDE" -eq 1 ]; then
+	echo "Follow logs: $COMPOSE -f \"$COMPOSE_FILE\" -f \"$OVERRIDE_FILE\" logs -f"
+else
+	echo "Follow logs: $COMPOSE -f \"$COMPOSE_FILE\" logs -f"
+fi

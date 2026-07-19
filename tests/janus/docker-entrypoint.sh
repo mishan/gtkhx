@@ -42,9 +42,15 @@ if [ -n "${TRACKERS:-}" ]; then
 	# on-disk order is the reverse of the env order — irrelevant for
 	# registration. Two-space indentation matches the upstream style
 	# and parses cleanly (verified with a YAML loader).
-	for t in $(echo "$TRACKERS" | tr ',' ' '); do
+	#
+	# `printf '%s'` rather than `echo` to split the list: echo mangles
+	# values that look like options (a leading `-n`, `-e`) on some
+	# shells. Backslashes in an entry are escaped before the sed `a\`
+	# insertion, whose append text otherwise consumes them.
+	for t in $(printf '%s' "$TRACKERS" | tr ',' ' '); do
 		[ -n "$t" ] || continue
-		sed -i "/^Trackers:/a\\  - ${t}" "$CONF"
+		t_esc=$(printf '%s' "$t" | sed 's/\\/\\\\/g')
+		sed -i "/^Trackers:/a\\  - ${t_esc}" "$CONF"
 	done
 
 	echo "docker-entrypoint: tracker registration enabled -> $TRACKERS"
