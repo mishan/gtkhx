@@ -1335,12 +1335,20 @@ pool; the small ones are now drained, three larger items remain):
     Two small C bridges feed the factory: `gtkhx_news_icon_for_kind` and
     `gtkhx_news_fetch_for_expanded` (keeps `fetch_dirlist` / `fetch_catlist` +
     the pending-request tables C). The selection→content handler stays C.
+  - ✅ **N2g** — the **compose window** (`news_compose.rs`): the New Post / Reply
+    modal (subject entry, body editor, the "Replying to …" context card) over
+    `hx_news15_post_thread`. C keeps the toolbar handlers' selection logic
+    (category path, reply target, body prefetch, "Re:" prefill) and two bridges:
+    `gtkhx_news_refresh_category` (settle after a post) and
+    `gtkhx_news_node_date_string` (format the reply's date via the shared
+    `post_date_format`). `find_category_node` + `post_date_format` stay C.
 
   **Remaining:** the reply-handler bookkeeping (the `pending_*` GHashTables +
-  C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`), post
-  rendering (`render_selected_post` + breadcrumb), and the compose window. These
-  are C-struct-coupled with no more headless-testable logic, so they want
-  runtime testing against a live 1.5 server (Badmoon/mhxd).
+  C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`) and post
+  rendering (`render_selected_post` + breadcrumb). These are C-struct-coupled
+  with no more headless-testable logic, so they want runtime testing against a
+  live 1.5 server (Badmoon/mhxd). `news_browser.c` is now down to that RPC
+  bookkeeping + rendering + the window/dock scaffold.
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`

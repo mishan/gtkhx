@@ -133,6 +133,11 @@ pub mod news_dialogs;
 // fetch-on-expand), was news_browser.c's factory callbacks. Exports
 // gtkhx_news_build_tree_model / gtkhx_news_build_factory.
 pub mod news_tree;
+// the 1.5 news-browser compose window (New Post / Reply), was
+// news_browser.c's open_compose_window + build_reply_context_panel. Modal
+// GtkWindow over hxnews-send's post_thread sender. Exports
+// gtkhx_news_compose_open.
+pub mod news_compose;
 // the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.
