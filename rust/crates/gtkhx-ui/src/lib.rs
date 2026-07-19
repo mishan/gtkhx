@@ -138,6 +138,11 @@ pub mod news_tree;
 // GtkWindow over hxnews-send's post_thread sender. Exports
 // gtkhx_news_compose_open.
 pub mod news_compose;
+// the 1.5 news-browser right-pane post rendering + selection
+// breadcrumb (was news_browser.c's render_selected_post + update_breadcrumb).
+// The C functions stay as thin delegators. Exports gtkhx_news_render_post /
+// gtkhx_news_update_breadcrumb.
+pub mod news_render;
 // the emoji picker button + inline `:shortcode:` typeahead (was
 // emoji.c). GTK wiring only — the shortcode match list comes from
 // hotline-proto. Exports hx_emoji_button_new / _typeahead_attach / _detach.

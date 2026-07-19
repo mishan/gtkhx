@@ -349,69 +349,31 @@ static void fetch_catlist (gnews_browser *br, HxNewsNode *target);
 static void render_selected_post (gnews_browser *br);
 static void sync_action_buttons (gnews_browser *br);
 
+/* render_selected_post + update_breadcrumb bodies live in the gtkhx-ui Rust
+ * crate (news_render.rs); the two functions below stay as thin delegators that
+ * hand the Rust side the browser's live widgets. gtkhx_news_fetch_thread is the
+ * cache-miss fetch the renderer calls back into. */
+extern void gtkhx_news_render_post (gnews_browser *browser, GtkWidget *post_view,
+                                    GtkLabel *subject_label, GtkLabel *meta_label,
+                                    GtkWidget *header_strip, HxNewsNode *node);
+extern HxNewsNode *gtkhx_news_update_breadcrumb (GtkLabel *breadcrumb,
+                                                 GtkSingleSelection *selection,
+                                                 GtkTreeListModel *tree_model);
+void gtkhx_news_fetch_thread (gnews_browser *br, HxNewsNode *node);
+
 /* ---------- Selection → breadcrumb ---------- */
 
-/* Walk up the tree from the currently-selected row collecting names
- * for the breadcrumb. Also returns the leaf HxNewsNode of the
- * selection via `*leaf_out` (caller does not own a ref). */
+/* Rebuild the breadcrumb + return the selected leaf. Delegates to the Rust
+ * renderer (news_render.rs), which owns the tree walk + label update. */
 static void
 update_breadcrumb (gnews_browser *br, HxNewsNode **leaf_out)
 {
-    guint pos = gtk_single_selection_get_selected (br->selection);
-    GtkTreeListRow *row;
-    GString *crumb;
-
+    HxNewsNode *leaf = gtkhx_news_update_breadcrumb (br->breadcrumb,
+                                                     br->selection,
+                                                     br->tree_model);
     if (leaf_out) {
-        *leaf_out = NULL;
+        *leaf_out = leaf;
     }
-
-    if (pos == GTK_INVALID_LIST_POSITION) {
-        gtk_label_set_text (br->breadcrumb, "/");
-        return;
-    }
-
-    row = g_list_model_get_item (G_LIST_MODEL (br->tree_model), pos);
-    if (!row) {
-        gtk_label_set_text (br->breadcrumb, "/");
-        return;
-    }
-
-    {
-        GPtrArray *names = g_ptr_array_new_with_free_func (g_free);
-        GtkTreeListRow *cur = g_object_ref (row);
-        gboolean first = TRUE;
-
-        while (cur) {
-            HxNewsNode *node = gtk_tree_list_row_get_item (cur);
-            if (node) {
-                if (first && leaf_out) {
-                    /* The first node we visit IS the selected
-					 * leaf (we walk upward from there). */
-                    *leaf_out = node;
-                }
-                g_ptr_array_insert (names, 0,
-                                    g_strdup (hx_news_node_name (node)));
-                g_object_unref (node);
-                first = FALSE;
-            }
-            GtkTreeListRow *parent = gtk_tree_list_row_get_parent (cur);
-            g_object_unref (cur);
-            cur = parent;
-        }
-
-        crumb = g_string_new ("/");
-        for (guint i = 0; i < names->len; i++) {
-            if (i > 0) {
-                g_string_append_c (crumb, '/');
-            }
-            g_string_append (crumb, (const char *)names->pdata[i]);
-        }
-        g_ptr_array_free (names, TRUE);
-    }
-
-    gtk_label_set_text (br->breadcrumb, crumb->str);
-    g_string_free (crumb, TRUE);
-    g_object_unref (row);
 }
 
 static void
@@ -815,58 +777,23 @@ fetch_thread (gnews_browser *br, HxNewsNode *target)
     hx_news15_get_post (&hx_active_session ()->htlc, stub_item);
 }
 
-/* Render the currently-selected post into the right pane. If the
- * body hasn't been fetched yet, fires fetch_thread and shows a
- * "Loading…" placeholder until the reply lands. */
+/* Bridge for the Rust post renderer: fire the GETTHREAD fetch for a node whose
+ * body isn't cached yet. Wraps the static fetch_thread (+ pending tables). */
+void
+gtkhx_news_fetch_thread (gnews_browser *br, HxNewsNode *node)
+{
+    fetch_thread (br, node);
+}
+
+/* Render the current post into the right pane. Delegates to the Rust renderer
+ * (news_render.rs) with the browser's live widgets; a body cache-miss routes
+ * back through gtkhx_news_fetch_thread below. */
 static void
 render_selected_post (gnews_browser *br)
 {
-    HxNewsNode *node = br->selected_post;
-    GtkTextBuffer *buf;
-
-    if (!node || hx_news_node_kind (node) != NB_KIND_POST) {
-        gtk_widget_set_visible (br->header_strip, FALSE);
-        buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
-        gtk_text_buffer_set_text (
-            buf, _ ("Select a post in the tree to view it here."), -1);
-        gtkurl_textview_apply_tags (GTK_TEXT_VIEW (br->post_view));
-        return;
-    }
-
-    /* Header strip */
-    {
-        const char *nm = hx_news_node_name (node);
-        gtk_label_set_text (br->subject_label,
-                            nm && *nm ? nm : _ ("(no subject)"));
-    }
-    {
-        struct date_time dt;
-        const char *snd = hx_news_node_sender (node);
-        hx_news_node_get_date (node, &dt);
-        char *date_str = post_date_format (&dt);
-        char *meta = g_strdup_printf (_ ("%1$s — %2$s"),
-                                      snd && *snd ? snd : "?", date_str);
-        gtk_label_set_text (br->meta_label, meta);
-        g_free (meta);
-        g_free (date_str);
-    }
-    gtk_widget_set_visible (br->header_strip, TRUE);
-
-    /* Body */
-    buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (br->post_view));
-    {
-        const char *body = hx_news_node_body (node);
-        if (body) {
-            gtk_text_buffer_set_text (buf, body, -1);
-        } else {
-            gtk_text_buffer_set_text (buf, _ ("Loading…"), -1);
-            fetch_thread (br, node);
-        }
-    }
-    /* Tag URLs (http://, https://, hotline://, mailto:, etc.) so the
-	 * hover-cursor + right-click popup wired by gtkurl_textview_install
-	 * has something to anchor on. */
-    gtkurl_textview_apply_tags (GTK_TEXT_VIEW (br->post_view));
+    gtkhx_news_render_post (br, br->post_view, br->subject_label,
+                            br->meta_label, br->header_strip,
+                            br->selected_post);
 }
 
 gboolean
