@@ -11,13 +11,13 @@
 //! hxtext), builds the chunks with the **native** `hotline_proto::build`
 //! builders (the same ones the R2 `gtkhx_proto_build_news_*` C-ABI shims wrap),
 //! registers a reply task where the C original did, and hands the chunks to
-//! `hlwrite_chunks`. Exports the exact `hx_news15_*` C ABI so `news_browser.c`
-//! links unchanged.
+//! `hlwrite_chunks`. Exports the exact `hx_news15_*` C ABI its callers (the
+//! gtkhx-ui news browser) link against.
 //!
-//! Three senders (`get_post` / `cat_list` / `fldr_list`) take C structs
-//! (`news_item` / `gnews_catalog` / `gnews_folder`); their fields are read (and
-//! the `listing` flag set) through `news_send_bridge.c` rather than mirroring
-//! the GTK-laden structs here.
+//! The `cat_list` / `fldr_list` senders take an opaque reply carrier (the
+//! Rust-owned `gnews_catalog` / `gnews_folder` in hxnews-recv); they read its
+//! request path through the `gnews_*_path` accessor. `get_post` takes its path
+//! directly.
 //!
 //! A lean crate (`glib` + the pure `hotline-proto`, no GTK) so it's
 //! `cargo test`-able: the builders run natively and the C send-path primitives
@@ -88,19 +88,16 @@ extern "C" {
     fn rcv_task_newscat_list(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
     fn rcv_task_newsfolder_list(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
 
-    // news_send_bridge.c — struct field accessors.
+    // hxnews-recv `carrier` module — the request path off the reply carrier.
     fn gnews_catalog_path(g: *mut c_void) -> *const c_char;
-    fn gnews_catalog_mark_listing(g: *mut c_void);
     fn gnews_folder_path(g: *mut c_void) -> *const c_char;
-    fn gnews_folder_mark_listing(g: *mut c_void);
 }
 
 #[cfg(test)]
 use tests::{
-    gnews_catalog_mark_listing, gnews_catalog_path, gnews_folder_mark_listing, gnews_folder_path,
-    gtkhx_text_for_wire, hlwrite_chunks, hx_htlc_text_encoding_cap, path_to_hldir,
-    rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list,
-    task_new,
+    gnews_catalog_path, gnews_folder_path, gtkhx_text_for_wire, hlwrite_chunks,
+    hx_htlc_text_encoding_cap, path_to_hldir, rcv_task_news_file, rcv_task_news_post,
+    rcv_task_newscat_list, rcv_task_newsfolder_list, task_new,
 };
 
 /// A NUL-terminated C string's bytes (without the NUL), or empty for NULL.
@@ -220,14 +217,12 @@ pub unsafe extern "C" fn hx_news15_cat_list(htlc: *mut c_void, g: *mut c_void) {
     if htlc.is_null() || g.is_null() {
         return;
     }
-    // Read + guard the path BEFORE marking listing: path_to_hldir dereferences
-    // it immediately (no NULL check), and we shouldn't flip the listing flag if
-    // the request can't be sent.
+    // Guard the path before path_to_hldir, which dereferences it immediately
+    // (no NULL check) — a node cleared mid-refresh yields NULL here.
     let path = gnews_catalog_path(g);
     if path.is_null() {
         return;
     }
-    gnews_catalog_mark_listing(g);
     let mut hldirlen: u16 = 0;
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
@@ -257,14 +252,12 @@ pub unsafe extern "C" fn hx_news15_fldr_list(htlc: *mut c_void, g: *mut c_void) 
     if htlc.is_null() || g.is_null() {
         return;
     }
-    // Read + guard the path BEFORE marking listing: path_to_hldir dereferences
-    // it immediately (no NULL check), and we shouldn't flip the listing flag if
-    // the request can't be sent.
+    // Guard the path before path_to_hldir, which dereferences it immediately
+    // (no NULL check) — a node cleared mid-refresh yields NULL here.
     let path = gnews_folder_path(g);
     if path.is_null() {
         return;
     }
-    gnews_folder_mark_listing(g);
     let mut hldirlen: u16 = 0;
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
 

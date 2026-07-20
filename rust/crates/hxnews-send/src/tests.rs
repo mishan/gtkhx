@@ -33,8 +33,6 @@ struct Task {
 thread_local! {
     static CAP: Cell<bool> = const { Cell::new(true) };
     static NODE_PATH: RefCell<CString> = RefCell::new(CString::new("/node").unwrap());
-    static CAT_MARKED: Cell<bool> = const { Cell::new(false) };
-    static FOLDER_MARKED: Cell<bool> = const { Cell::new(false) };
     // When set, the path accessors return NULL (a node cleared during refresh),
     // exercising the senders' NULL-path guard (real path_to_hldir crashes on it).
     static PATH_NULL: Cell<bool> = const { Cell::new(false) };
@@ -146,25 +144,17 @@ pub(crate) unsafe extern "C" fn gnews_catalog_path(_g: *mut c_void) -> *const c_
     }
     NODE_PATH.with(|p| p.borrow().as_ptr())
 }
-pub(crate) unsafe extern "C" fn gnews_catalog_mark_listing(_g: *mut c_void) {
-    CAT_MARKED.with(|c| c.set(true));
-}
 pub(crate) unsafe extern "C" fn gnews_folder_path(_g: *mut c_void) -> *const c_char {
     if PATH_NULL.with(|c| c.get()) {
         return std::ptr::null();
     }
     NODE_PATH.with(|p| p.borrow().as_ptr())
 }
-pub(crate) unsafe extern "C" fn gnews_folder_mark_listing(_g: *mut c_void) {
-    FOLDER_MARKED.with(|c| c.set(true));
-}
 
 // ---- helpers --------------------------------------------------------
 
 fn reset() {
     CAP.with(|c| c.set(true));
-    CAT_MARKED.with(|c| c.set(false));
-    FOLDER_MARKED.with(|c| c.set(false));
     PATH_NULL.with(|c| c.set(false));
     LAST_SEND.with(|s| *s.borrow_mut() = None);
     LAST_TASK.with(|t| *t.borrow_mut() = None);
@@ -189,7 +179,7 @@ fn cstr(s: &str) -> CString {
 // ---- tests ----------------------------------------------------------
 
 #[test]
-fn fldr_list_marks_listing_and_registers_task() {
+fn fldr_list_sends_path_and_registers_task() {
     reset();
     NODE_PATH.with(|p| *p.borrow_mut() = cstr("/f"));
     unsafe { hx_news15_fldr_list(htlc(), tok()) };
@@ -199,7 +189,6 @@ fn fldr_list_marks_listing_and_registers_task() {
     assert_eq!(s.chunks.len(), 1);
     assert_eq!(s.chunks[0].0, TAG_NEWSPATH);
     assert_eq!(s.chunks[0].1, b"/f");
-    assert!(FOLDER_MARKED.with(|c| c.get()));
     let t = last_task().expect("DIRLIST registers a folder-list task");
     assert!(t.has_rcv);
     assert_eq!(t.ptr, tok() as usize);
@@ -207,7 +196,7 @@ fn fldr_list_marks_listing_and_registers_task() {
 }
 
 #[test]
-fn cat_list_marks_listing_and_registers_task() {
+fn cat_list_sends_path_and_registers_task() {
     reset();
     NODE_PATH.with(|p| *p.borrow_mut() = cstr("/c"));
     unsafe { hx_news15_cat_list(htlc(), tok()) };
@@ -216,7 +205,6 @@ fn cat_list_marks_listing_and_registers_task() {
     assert_eq!(s.ty, HTLC_HDR_NEWSCATLIST);
     assert_eq!(s.chunks.len(), 1);
     assert_eq!(s.chunks[0], (TAG_NEWSPATH, b"/c".to_vec()));
-    assert!(CAT_MARKED.with(|c| c.get()));
     let t = last_task().unwrap();
     assert!(t.has_rcv);
     assert_eq!(t.ptr, tok() as usize);
@@ -376,9 +364,6 @@ fn null_htlc_is_no_op() {
     }
     assert!(last().is_none());
     assert!(last_task().is_none());
-    // A NULL htlc must not even touch the structs' listing flags.
-    assert!(!CAT_MARKED.with(|c| c.get()));
-    assert!(!FOLDER_MARKED.with(|c| c.get()));
 }
 
 #[test]
@@ -412,10 +397,9 @@ fn null_path_arg_is_no_op() {
 }
 
 /// When the path accessor yields NULL (a node cleared during refresh), the
-/// list senders bail before `path_to_hldir` — and must NOT flip the listing
-/// flag, since nothing is actually sent.
+/// list senders bail before `path_to_hldir` — nothing is sent, no task.
 #[test]
-fn null_accessor_path_is_no_op_and_skips_listing() {
+fn null_accessor_path_is_no_op() {
     reset();
     PATH_NULL.with(|c| c.set(true));
     unsafe {
@@ -424,6 +408,4 @@ fn null_accessor_path_is_no_op_and_skips_listing() {
     }
     assert!(last().is_none());
     assert!(last_task().is_none());
-    assert!(!CAT_MARKED.with(|c| c.get()));
-    assert!(!FOLDER_MARKED.with(|c| c.get()));
 }

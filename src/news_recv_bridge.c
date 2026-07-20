@@ -8,8 +8,12 @@
  */
 
 /*
- * news_recv_bridge.c — C-struct accessors for the Rust 1.5 news receive
- * handlers (hxnews-recv). Mirrors news_send_bridge.c's role for the senders.
+ * news_recv_bridge.c — the C leaves the Rust 1.5 news receive handlers
+ * (hxnews-recv) and the news browser (gtkhx-ui) can't reach across the FFI:
+ * the received frame body (htlc->in), the live session version + access
+ * bitmap, the post-date formatter, and the row-icon loader. The news reply
+ * carriers themselves (gnews_folder / gnews_catalog / news_post) are now
+ * Rust-owned in hxnews-recv's `carrier` module.
  */
 
 #include "config.h"
@@ -19,7 +23,7 @@
 #include <time.h>
 
 #include "protocol.h" /* struct htlc_conn / struct qbuf */
-#include "session.h"  /* struct gnews_catalog / gnews_folder / date_time */
+#include "session.h"  /* struct date_time */
 #include "hx.h"       /* hx_active_session */
 #include "hl_access.h"
 #include "hl_date.h"
@@ -27,9 +31,7 @@
 #include "gtkutil.h"    /* gtkhx_texture_from_pixbuf */
 #include "news_recv_bridge.h"
 
-/* hxnews-model — clear the "fetch in flight" flag so a failed GETTHREAD can be
- * retried. HxNewsNode * crosses as a GObject *. */
-extern void hx_news_node_set_body_fetching (void *node, gboolean fetching);
+/* hxnews-model — a post node's parsed date, for the date formatter below. */
 extern void hx_news_node_get_date (void *node, struct date_time *out);
 
 /* ---- session / htlc accessors for the Rust news browser ---- */
@@ -52,61 +54,6 @@ gtkhx_news_access_permits (int bit)
 {
     return hl_access_permits (
         (const guint8 *) &hx_active_session ()->htlc.access, bit);
-}
-
-/* ---- gnews_folder / gnews_catalog carriers (fetch → send → rcv → handle) ----
- *
- * The Rust browser can't sizeof these session.h structs across the FFI, so it
- * allocates / reads ->parsed / frees them here. The send path reads ->path +
- * flips ->listing (news_send_bridge.c); the receive path stashes ->parsed
- * (gnews_*_set_parsed above). */
-
-void *
-gnews_folder_new (const char *path)
-{
-    struct gnews_folder *g = g_malloc0 (sizeof *g);
-    g->path = g_strdup (path);
-    return g;
-}
-
-void *
-gnews_folder_parsed (void *g)
-{
-    return g ? ((struct gnews_folder *) g)->parsed : NULL;
-}
-
-void
-gnews_folder_free (void *g)
-{
-    struct gnews_folder *f = g;
-    if (f) {
-        g_free (f->path);
-        g_free (f);
-    }
-}
-
-void *
-gnews_catalog_new (const char *path)
-{
-    struct gnews_catalog *g = g_malloc0 (sizeof *g);
-    g->path = g_strdup (path);
-    return g;
-}
-
-void *
-gnews_catalog_parsed (void *g)
-{
-    return g ? ((struct gnews_catalog *) g)->parsed : NULL;
-}
-
-void
-gnews_catalog_free (void *g)
-{
-    struct gnews_catalog *c = g;
-    if (c) {
-        g_free (c->path);
-        g_free (c);
-    }
 }
 
 /* ---- post-date formatting (C leaf: hl_date_decode + strftime) ----
@@ -196,69 +143,4 @@ gsize
 hx_htlc_in_pos (struct htlc_conn *htlc)
 {
     return htlc ? htlc->in.pos : 0;
-}
-
-void
-gnews_catalog_set_parsed (struct gnews_catalog *g, void *parsed)
-{
-    if (g) {
-        g->parsed = parsed;
-    }
-}
-
-void
-gnews_folder_set_parsed (struct gnews_folder *g, void *parsed)
-{
-    if (g) {
-        g->parsed = parsed;
-    }
-}
-
-void *
-news_post_new (void *target, const guint8 *body, gsize body_len)
-{
-    /* The news-thread carrier: the parsed body (owned, g_strndup'd so
-     * gnews_browser_handle_thread frees it with g_free) + the HxNewsNode being
-     * fetched (carrying its transfer-full ref). Created per-reply — the Rust
-     * receive handler can't sizeof the C struct across the FFI, so it's here. */
-    struct news_post *post = g_malloc (sizeof (struct news_post));
-    post->buf = g_strndup ((const char *) body, body_len);
-    post->target = target;
-    return post;
-}
-
-void
-news_post_fetch_failed (void *target)
-{
-    /* GETTHREAD reply that carried no usable body (TASK_ERROR / missing
-     * NEWSDATA). No news_post is emitted, so release the transfer-full target
-     * ref here and clear body_fetching so the user can retry. */
-    if (target) {
-        hx_news_node_set_body_fetching (target, FALSE);
-        g_object_unref (target);
-    }
-}
-
-/* news_post carrier read/free for the Rust GETTHREAD reply handler
- * (gnews_browser_handle_thread) — it can't sizeof the C struct across the FFI. */
-void *
-news_post_target (void *post)
-{
-    return post ? ((struct news_post *) post)->target : NULL;
-}
-
-const char *
-news_post_body (void *post)
-{
-    return post ? ((struct news_post *) post)->buf : NULL;
-}
-
-void
-news_post_free (void *post)
-{
-    struct news_post *p = post;
-    if (p) {
-        g_free (p->buf);
-        g_free (p);
-    }
 }
