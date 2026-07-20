@@ -372,3 +372,39 @@ fn build_from_catlist_null_is_no_op() {
     }
     assert_eq!(dest.n_items(), 0);
 }
+
+// ---- hx_news_build_dirlist_from_dirlist -----------------------------------
+
+use hotline_proto::parse::{DirList, NewsDirEntry, NewsDirKind};
+
+#[test]
+fn build_dirlist_from_dirlist_reads_handle() {
+    let dl = DirList {
+        entries: vec![
+            NewsDirEntry { kind: NewsDirKind::Folder, name: b"Docs".to_vec() },
+            NewsDirEntry { kind: NewsDirKind::Category, name: b"News".to_vec() },
+        ],
+    };
+    let parent = cs("/news");
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    unsafe {
+        hx_news_build_dirlist_from_dirlist(dest.as_ptr(), parent.as_ptr(), &dl);
+    }
+    assert_eq!(dest.n_items(), 2);
+    let a = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(a.imp().kind.get(), 1); // folder
+    assert_eq!(a.imp().name.borrow().to_str().unwrap(), "Docs");
+    assert_eq!(a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/Docs");
+    let b = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(b.imp().kind.get(), 2); // category
+    assert_eq!(b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/News");
+}
+
+#[test]
+fn build_dirlist_from_dirlist_null_is_no_op() {
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    unsafe {
+        hx_news_build_dirlist_from_dirlist(dest.as_ptr(), std::ptr::null(), std::ptr::null());
+    }
+    assert_eq!(dest.n_items(), 0);
+}

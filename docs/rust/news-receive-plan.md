@@ -200,7 +200,25 @@ Original step list:
    `parsed` handle. `struct news_group` loses its catalog consumer (see
    elimination below).
 
-## Phase B — dirlist (`news-folder`)
+## Phase B — dirlist (`news-folder`) ✅ shipped (B2)
+
+Done on `claude/news-recv-dirlist`, taking the fuller **B2** route. hotline-proto
+gained a whole-message `parse_dirlist` (walks the NEWSFOLDERITEM / CATEGORYITEM
+chunks via `ChunkIter` + the existing per-chunk parsers) + FFI
+`gtkhx_proto_parse_dirlist` / `_free` — mirroring the catlist owned-handle API,
+so the C `dh_start` chunk-walk is gone entirely. `rcv_task_newsfolder_list` is
+now Rust (`hxnews-recv`): parse to the owned `DirList`, stash on
+`gnews_folder->parsed` (was `->news`), emit `news-folder`.
+`gnews_browser_handle_dirlist` feeds the handle to a new
+`hx_news_build_dirlist_from_dirlist` (hxnews-model, sharing an `append_dir_node`
+core with the array builder) and frees it. Deleted: `rcv_task_newsfolder_list`
+(rcv.c) and — the payoff — `struct folder_item` + `struct news_folder`
+(session.h), gone entirely. `proto_helpers.c::hx_news_dirlist_parse_*` stay
+(now test-only, like `hx_newscat_parse`). Verified: hotline-proto +4 parse
+tests, hxnews-model +2 builder tests, full build, unit+proto 64, Tier 3
+`news15` (dirlist) against the live mhxd container.
+
+Original notes:
 
 `rcv_task_newsfolder_list` moves to `hxnews-recv` like the catalog handler. It
 currently does the DIRLIST chunk-walk in C (`dh_start` loop, calling the

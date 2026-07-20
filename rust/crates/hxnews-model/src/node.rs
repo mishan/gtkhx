@@ -19,7 +19,7 @@ use std::ffi::{c_char, c_int, CStr, CString};
 use gio::prelude::*;
 use gio::subclass::prelude::*;
 use glib::translate::{from_glib_none, IntoGlib, IntoGlibPtr};
-use hotline_proto::parse::CatList;
+use hotline_proto::parse::{CatList, DirList, NewsDirKind};
 
 /// The `NB_KIND_*` node kinds from `news_browser.c`. Named so the Rust and C
 /// meanings of `kind` can't silently drift.
@@ -628,16 +628,69 @@ pub unsafe extern "C" fn hx_news_build_dirlist_into(
     };
     let data = std::slice::from_raw_parts(items, count);
     for it in data {
-        let name = cstr_or(it.name, "", false);
+        let name = if it.name.is_null() {
+            &[][..]
+        } else {
+            CStr::from_ptr(it.name).to_bytes()
+        };
         let kind = if it.item_type == 1 {
             NB_KIND_FOLDER
         } else {
             NB_KIND_CATEGORY
         };
-        let child_path = build_child_path(parent, name.to_bytes());
-        let node = HxNewsNode::new(kind, name, Some(child_path));
-        dest.append(&node);
+        append_dir_node(&dest, parent, kind, name);
     }
+}
+
+/// `void hx_news_build_dirlist_from_dirlist(GListStore *dest,
+/// const char *parent_path, const DirList *dl)` — the same folder-tree build,
+/// read straight from the `hotline-proto` owned parse handle (the receive port,
+/// `gnews_browser_handle_dirlist`), skipping the `#[repr(C)]` array marshal. The
+/// handle is **borrowed** here — the caller frees it (`gtkhx_proto_dirlist_free`).
+///
+/// # Safety
+/// `dest` is a valid `GListStore *`; `dl` is NULL or a live handle from
+/// `gtkhx_proto_parse_dirlist`; `parent_path` is NULL or NUL-terminated; main
+/// thread only.
+#[no_mangle]
+pub unsafe extern "C" fn hx_news_build_dirlist_from_dirlist(
+    dest: *mut gio::ffi::GListStore,
+    parent_path: *const c_char,
+    dl: *const DirList,
+) {
+    if dest.is_null() || dl.is_null() {
+        return;
+    }
+    let dest: gio::ListStore = from_glib_none(dest);
+    let parent: &[u8] = if parent_path.is_null() {
+        b"/"
+    } else {
+        CStr::from_ptr(parent_path).to_bytes()
+    };
+    for e in &(*dl).entries {
+        let kind = match e.kind {
+            NewsDirKind::Folder => NB_KIND_FOLDER,
+            NewsDirKind::Category => NB_KIND_CATEGORY,
+        };
+        append_dir_node(&dest, parent, kind, &e.name);
+    }
+}
+
+/// Append one DIRLIST child node to `dest`: a `kind` node labelled `name_bytes`
+/// with path `parent`/`name`. Shared by both dirlist builders so the label +
+/// path-join (raw bytes, no UTF-8 round-trip) live in one place.
+fn append_dir_node(dest: &gio::ListStore, parent: &[u8], kind: i32, name_bytes: &[u8]) {
+    let label = bytes_to_cstring(name_bytes);
+    let child_path = build_child_path(parent, name_bytes);
+    let node = HxNewsNode::new(kind, label, Some(child_path));
+    dest.append(&node);
+}
+
+/// Raw name bytes → owned `CString` label, truncated at the first NUL (a name
+/// shouldn't contain one; `CString` rejects interior NULs). Empty stays empty.
+fn bytes_to_cstring(bytes: &[u8]) -> CString {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    CString::new(&bytes[..end]).unwrap_or_default()
 }
 
 #[cfg(test)]

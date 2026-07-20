@@ -261,6 +261,10 @@ pub mod tag {
     pub const VERSION: u16 = 0x00a0;
     /// `0x012c` — user-list record (server → client).
     pub const USER_LIST: u16 = 0x012c;
+    /// `0x0140` — 1.5 news directory-listing entry (folder or category).
+    /// One per entry in the HTLC_HDR_NEWSDIRLIST reply; body shape is
+    /// documented on [`crate::parse::parse_news_folderitem`].
+    pub const NEWSFOLDERITEM: u16 = 0x0140;
     /// `0x0141` — 1.5 threaded-news article listing (the
     /// HTLC_HDR_NEWSCATLIST reply payload). One catlist chunk per
     /// reply; body shape is documented on [`crate::parse::parse_catlist`].
@@ -268,6 +272,10 @@ pub mod tag {
     /// `0x0142` — 1.5 category name (the name field on
     /// `HTLC_HDR_MAKECATEGORY`).
     pub const CATEGORY: u16 = 0x0142;
+    /// `0x0143` — 1.5 news directory-listing entry with per-category sync
+    /// metadata (an alternate encoding of [`NEWSFOLDERITEM`] some servers
+    /// emit); body shape on [`crate::parse::parse_news_categoryitem`].
+    pub const CATEGORYITEM: u16 = 0x0143;
     /// `0x0145` — 1.5 news path (server → client and client → server).
     /// The path component encoding is the responsibility of the
     /// caller (`path_to_hldir` on the C side).

@@ -18,14 +18,18 @@ extern "C" {
     // news_recv_bridge.c — the received frame body + its length (htlc->in).
     fn hx_htlc_in_buf(htlc: *mut c_void) -> *const u8;
     fn hx_htlc_in_pos(htlc: *mut c_void) -> usize;
-    // news_recv_bridge.c — stash the parse handle on the catalog carrier.
+    // news_recv_bridge.c — stash the parse handle on the reply carrier.
     fn gnews_catalog_set_parsed(g: *mut c_void, parsed: *mut c_void);
-    // hotline-proto — parse the first CATLIST chunk to an owned handle, or NULL
-    // when absent / malformed. The view handler frees it (gtkhx_proto_catlist_free).
+    fn gnews_folder_set_parsed(g: *mut c_void, parsed: *mut c_void);
+    // hotline-proto — parse a reply to an owned handle. catlist: NULL when the
+    // chunk is absent / malformed. dirlist: always a (possibly empty) handle.
+    // The view handler frees them (gtkhx_proto_catlist_free / _dirlist_free).
     fn gtkhx_proto_parse_catlist(msg: *const u8, msglen: usize) -> *mut c_void;
-    // gtkhx-session — the singleton + the news-catalog signal emit.
+    fn gtkhx_proto_parse_dirlist(msg: *const u8, msglen: usize) -> *mut c_void;
+    // gtkhx-session — the singleton + the news signal emits.
     fn gtkhx_session_get_default() -> *mut c_void;
     fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void);
+    fn gtkhx_session_emit_news_folder(self_: *mut c_void, gfnews: *mut c_void);
 }
 
 /// `void rcv_task_newscat_list(struct htlc_conn *htlc, void *gcnews, void *data)`
@@ -55,4 +59,34 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
     };
     gnews_catalog_set_parsed(gcnews, parsed);
     gtkhx_session_emit_news_catalog(gtkhx_session_get_default(), gcnews);
+}
+
+/// `void rcv_task_newsfolder_list(struct htlc_conn *htlc, void *gfnews, void *data)`
+/// — the HTLC_HDR_NEWSDIRLIST reply handler (was `rcv.c`).
+///
+/// Parses every NEWSFOLDERITEM / CATEGORYITEM chunk out of `htlc->in` into an
+/// owned `DirList` handle, stashes it on the `gnews_folder` carrier, and emits
+/// `news-folder`. The C `dh_start` chunk-walk + `folder_item[]` accumulation are
+/// gone — `gtkhx_proto_parse_dirlist` does the walk and always returns a
+/// (possibly empty) handle.
+///
+/// # Safety
+/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `htlc` is a
+/// valid `struct htlc_conn *`; `gfnews` is the `struct gnews_folder *` task
+/// pointer.
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_newsfolder_list(
+    htlc: *mut c_void,
+    gfnews: *mut c_void,
+    _data: *mut c_void,
+) {
+    let buf = hx_htlc_in_buf(htlc);
+    let len = hx_htlc_in_pos(htlc);
+    let parsed = if buf.is_null() {
+        std::ptr::null_mut()
+    } else {
+        gtkhx_proto_parse_dirlist(buf, len)
+    };
+    gnews_folder_set_parsed(gfnews, parsed);
+    gtkhx_session_emit_news_folder(gtkhx_session_get_default(), gfnews);
 }

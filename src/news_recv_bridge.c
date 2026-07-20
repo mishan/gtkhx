@@ -17,7 +17,7 @@
 #include <glib.h>
 
 #include "protocol.h" /* struct htlc_conn / struct qbuf */
-#include "session.h"  /* struct gnews_catalog */
+#include "session.h"  /* struct gnews_catalog / gnews_folder */
 #include "news_recv_bridge.h"
 
 const guint8 *
@@ -34,6 +34,14 @@ hx_htlc_in_pos (struct htlc_conn *htlc)
 
 void
 gnews_catalog_set_parsed (struct gnews_catalog *g, void *parsed)
+{
+    if (g) {
+        g->parsed = parsed;
+    }
+}
+
+void
+gnews_folder_set_parsed (struct gnews_folder *g, void *parsed)
 {
     if (g) {
         g->parsed = parsed;

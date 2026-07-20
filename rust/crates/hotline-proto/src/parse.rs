@@ -1549,6 +1549,40 @@ pub fn parse_news_categoryitem(data: &[u8], max_name: usize) -> Option<NewsDirEn
     })
 }
 
+/// A parsed `HTLC_HDR_NEWSDIRLIST` reply — a folder's directory listing.
+#[derive(Debug, Clone, Default)]
+pub struct DirList {
+    pub entries: Vec<NewsDirEntry>,
+}
+
+/// Max name bytes: the CATEGORYITEM encoding's `namelen` is a u8, so 255 is the
+/// protocol ceiling; NEWSFOLDERITEM names are capped the same for symmetry
+/// (matches the C extractor's `char name[256]`).
+const DIRLIST_MAX_NAME: usize = 255;
+
+/// Parse a `HTLC_HDR_NEWSDIRLIST` reply into its directory entries. Walks every
+/// `NEWSFOLDERITEM` (0x0140) / `CATEGORYITEM` (0x0143) chunk — either type can
+/// carry either kind of entry; both normalise to [`NewsDirEntry::kind`] — and
+/// parses each with the per-chunk parsers above.
+///
+/// Never fails: a malformed chunk is skipped (the C `dh_start` loop `continue`d
+/// on a rejected parse) and an empty result is a valid empty listing, so this
+/// returns a `DirList` directly rather than an `Option`.
+pub fn parse_dirlist(buf: &[u8], len: usize) -> DirList {
+    let mut entries = Vec::new();
+    for chunk in ChunkIter::over_message(buf, len) {
+        let parsed = match chunk.tag {
+            tag::NEWSFOLDERITEM => parse_news_folderitem(chunk.data, DIRLIST_MAX_NAME),
+            tag::CATEGORYITEM => parse_news_categoryitem(chunk.data, DIRLIST_MAX_NAME),
+            _ => continue,
+        };
+        if let Some(e) = parsed {
+            entries.push(e);
+        }
+    }
+    DirList { entries }
+}
+
 // ---- HTLS_DATA_USER_LIST record ----------------------------------------
 //
 // Per-user record carried inside `HTLS_DATA_USER_LIST` chunks. The same
@@ -3932,6 +3966,70 @@ mod tests {
     #[test]
     fn news_folderitem_empty_body_rejected() {
         assert!(parse_news_folderitem(&[], 255).is_none());
+    }
+
+    // ---- news dirlist: whole-message parse_dirlist ----
+
+    fn folderitem_chunk(ntype: u8, name: &[u8]) -> Vec<u8> {
+        let mut b = vec![ntype];
+        b.extend_from_slice(name);
+        chunk(tag::NEWSFOLDERITEM, &b)
+    }
+
+    fn categoryitem_chunk(name: &[u8]) -> Vec<u8> {
+        // ntype=3 (category): ntype(2) count(2) guid(16) addsn(4) deletesn(4)
+        // namelen(1) name.
+        let mut b = Vec::new();
+        b.extend_from_slice(&3u16.to_be_bytes());
+        b.extend_from_slice(&0u16.to_be_bytes());
+        b.extend_from_slice(&[0u8; 16]);
+        b.extend_from_slice(&0u32.to_be_bytes());
+        b.extend_from_slice(&0u32.to_be_bytes());
+        b.push(name.len() as u8);
+        b.extend_from_slice(name);
+        chunk(tag::CATEGORYITEM, &b)
+    }
+
+    #[test]
+    fn dirlist_walks_folderitems() {
+        let mut body = folderitem_chunk(1, b"Docs"); // folder
+        body.extend(folderitem_chunk(0, b"General")); // category (ntype != 1)
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let dl = parse_dirlist(&m, m.len());
+        assert_eq!(dl.entries.len(), 2);
+        assert_eq!(dl.entries[0].kind, NewsDirKind::Folder);
+        assert_eq!(dl.entries[0].name, b"Docs");
+        assert_eq!(dl.entries[1].kind, NewsDirKind::Category);
+        assert_eq!(dl.entries[1].name, b"General");
+    }
+
+    #[test]
+    fn dirlist_walks_categoryitem_and_mixes() {
+        let mut body = folderitem_chunk(1, b"Folder");
+        body.extend(categoryitem_chunk(b"News"));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let dl = parse_dirlist(&m, m.len());
+        assert_eq!(dl.entries.len(), 2);
+        assert_eq!(dl.entries[0].name, b"Folder");
+        assert_eq!(dl.entries[1].kind, NewsDirKind::Category);
+        assert_eq!(dl.entries[1].name, b"News");
+    }
+
+    #[test]
+    fn dirlist_skips_malformed_and_unrelated() {
+        let mut body = chunk(tag::NEWSFOLDERITEM, &[]); // empty body → parse None
+        body.extend(chunk(tag::CATLIST, b"junk")); // unrelated tag
+        body.extend(folderitem_chunk(1, b"Keep"));
+        let m = msg(0x0001_0000, 1, 0, &body);
+        let dl = parse_dirlist(&m, m.len());
+        assert_eq!(dl.entries.len(), 1);
+        assert_eq!(dl.entries[0].name, b"Keep");
+    }
+
+    #[test]
+    fn dirlist_empty_message_is_empty() {
+        let m = msg(0x0001_0000, 1, 0, &[]);
+        assert!(parse_dirlist(&m, m.len()).entries.is_empty());
     }
 
     // ---- news dirlist: categoryitem ----

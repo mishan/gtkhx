@@ -14,7 +14,9 @@ use crate::build::{
     ChatSubjectRequest, HxChunk, MsgRequest, NewsDeleteThreadRequest, NewsGetThreadRequest,
     NewsMakeCategoryRequest, NewsPostThreadRequest, UserChangeRequest, UserKickRequest,
 };
-use crate::parse::{self, AgreementResult, CatList, Header, NewsDirEntry, NewsDirKind};
+use crate::parse::{
+    self, AgreementResult, CatList, DirList, Header, NewsDirEntry, NewsDirKind,
+};
 use std::slice;
 
 /// Borrow a `(ptr, len)` pair as a slice, or an empty slice if `ptr` is
@@ -755,6 +757,38 @@ pub unsafe extern "C" fn gtkhx_proto_parse_catlist(
 pub unsafe extern "C" fn gtkhx_proto_catlist_free(cl: *mut CatList) {
     if !cl.is_null() {
         drop(Box::from_raw(cl));
+    }
+}
+
+/// Parse a `HTLC_HDR_NEWSDIRLIST` reply (all its NEWSFOLDERITEM /
+/// CATEGORYITEM chunks) into an opaque owned handle. Always non-NULL (an empty
+/// reply yields an empty listing) unless `msg` is NULL. The caller owns the
+/// handle and must free it with [`gtkhx_proto_dirlist_free`].
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_dirlist(
+    msg: *const u8,
+    msglen: usize,
+) -> *mut DirList {
+    if msg.is_null() {
+        return std::ptr::null_mut();
+    }
+    let s = as_slice(msg, msglen);
+    Box::into_raw(Box::new(parse::parse_dirlist(s, s.len())))
+}
+
+/// Free a dirlist handle returned by [`gtkhx_proto_parse_dirlist`]. NULL is a
+/// no-op.
+///
+/// # Safety
+/// `dl` must be either NULL or a pointer previously returned by
+/// `gtkhx_proto_parse_dirlist`. Each handle must be freed exactly once.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_dirlist_free(dl: *mut DirList) {
+    if !dl.is_null() {
+        drop(Box::from_raw(dl));
     }
 }
 

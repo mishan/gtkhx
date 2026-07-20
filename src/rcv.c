@@ -1573,53 +1573,12 @@ rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
  * emits news-catalog, with no intermediate news_item / news_group. hxnews-send's
  * task_new still registers it; the symbol now resolves against hxnews-recv. */
 
-void
-rcv_task_newsfolder_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)
-{
-    struct news_folder *folder = g_malloc (sizeof (struct news_folder));
-    struct folder_item *item;
-    int num = 0;
-
-    folder->entry = g_malloc (sizeof (struct folder_item *));
-    folder->path = gfnews->path;
-
-    dh_start (htlc)
-    {
-        struct hx_news_dirlist_entry entry;
-        gboolean got = FALSE;
-
-        /* Either chunk type can carry either a folder-entry or a
-		 * category-entry; both parsers normalise to entry.kind. */
-        switch (_type) {
-        case HTLC_DATA_NEWSFOLDERITEM:
-            got = hx_news_dirlist_parse_folderitem (dh->data, _len, &entry);
-            break;
-        case HTLC_DATA_CATEGORYITEM:
-            /* Same listing reply but with per-category sync
-			 * metadata (GUID + add/delete SNs). Some servers
-			 * emit this instead of NEWSFOLDERITEM. */
-            got = hx_news_dirlist_parse_categoryitem (dh->data, _len, &entry);
-            break;
-        }
-        if (!got) {
-            continue;
-        }
-
-        num++;
-        folder->entry
-            = g_realloc (folder->entry, sizeof (struct folder_item *) * num);
-        item = g_malloc (sizeof (struct folder_item));
-        item->type = entry.kind;
-        item->name = g_strndup (entry.name, entry.name_len);
-        folder->entry[num - 1] = item;
-    }
-    dh_end ();
-
-    folder->num_entries = num;
-
-    gfnews->news = folder;
-    gtkhx_session_emit_news_folder (gtkhx_session_get_default (), gfnews);
-}
+/* rcv_task_newsfolder_list moved to the hxnews-recv Rust crate — it parses the
+ * NEWSDIRLIST chunks (the dh_start walk + per-chunk parsers) into an owned
+ * DirList handle via gtkhx_proto_parse_dirlist, stashes it on the gnews_folder
+ * carrier, and emits news-folder, with no intermediate folder_item / news_folder.
+ * hxnews-send's task_new still registers it; the symbol now resolves against
+ * hxnews-recv. */
 
 void
 rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)

@@ -80,17 +80,17 @@ extern void hx_news_build_category_tree_from_catlist (
     const struct gtkhx_proto_catlist *catlist);
 extern void gtkhx_proto_catlist_free (struct gtkhx_proto_catlist *catlist);
 
-/* One DIRLIST entry marshalled for the Rust folder-tree builder. Layout must
- * match the crate's #[repr(C)] HxNewsDirItem. `item_type` is the wire
- * folder_item.type (1 = folder, else category); gint32 to match Rust's i32
- * exactly rather than assuming C `int` is 32-bit. */
-struct hx_news_dir_item {
-    gint32 item_type;
-    const char *name;
-};
-extern void hx_news_build_dirlist_into (GListStore *dest, const char *parent_path,
-                                        const struct hx_news_dir_item *items,
-                                        gsize count);
+/* Folder-tree builder (hxnews-model), reading the owned DirList parse handle
+ * from gtkhx_proto_parse_dirlist directly — the receive path stashes it on
+ * gnews_folder->parsed (rcv_task_newsfolder_list, hxnews-recv), so there's no
+ * intermediate C folder_item / news_folder. Each entry becomes a folder /
+ * category child node of `dest`. The handle is borrowed — freed by the handler
+ * via gtkhx_proto_dirlist_free. NULL handle → no-op. */
+struct gtkhx_proto_dirlist;
+extern void hx_news_build_dirlist_from_dirlist (
+    GListStore *dest, const char *parent_path,
+    const struct gtkhx_proto_dirlist *dirlist);
+extern void gtkhx_proto_dirlist_free (struct gtkhx_proto_dirlist *dirlist);
 
 /* ---------- HxNewsNode (one GObject per tree row) ----------
  *
@@ -525,7 +525,6 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
     HxNewsNode *target = NULL;
     GListStore *dest = NULL;
     gnews_browser *br = the_browser;
-    guint32 i;
 
     if (!pending_dirlists) {
         return FALSE;
@@ -551,33 +550,15 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
         }
     }
 
-    if (dest && gfnews->news) {
-        struct news_folder *folder = gfnews->news;
-        const char *parent_path = target ? hx_news_node_path (target) : "/";
-        /* Marshal the entries into the flat repr(C) array the Rust builder
-         * takes. hx_news_build_dirlist_into (hxnews-model) owns node creation +
-         * the parent-path join now; the names are borrowed for the call. */
-        struct hx_news_dir_item *data
-            = g_new0 (struct hx_news_dir_item, folder->num_entries);
-        for (i = 0; i < folder->num_entries; i++) {
-            data[i].item_type = folder->entry[i]->type;
-            data[i].name = folder->entry[i]->name;
-        }
-        hx_news_build_dirlist_into (dest, parent_path, data,
-                                    folder->num_entries);
-        g_free (data);
+    if (dest) {
+        /* Build straight from the Rust DirList handle stashed by
+         * rcv_task_newsfolder_list — no intermediate C news_folder. A NULL
+         * handle builds nothing. */
+        hx_news_build_dirlist_from_dirlist (
+            dest, target ? hx_news_node_path (target) : "/", gfnews->parsed);
     }
 
-    /* Free the stub + its parsed news_folder. */
-    if (gfnews->news) {
-        guint32 j;
-        for (j = 0; j < gfnews->news->num_entries; j++) {
-            g_free (gfnews->news->entry[j]->name);
-            g_free (gfnews->news->entry[j]);
-        }
-        g_free (gfnews->news->entry);
-        g_free (gfnews->news);
-    }
+    gtkhx_proto_dirlist_free (gfnews->parsed);
     g_free (gfnews->path);
     g_free (gfnews);
 
