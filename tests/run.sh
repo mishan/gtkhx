@@ -3,7 +3,7 @@
 # bring the whole rig back up fresh.
 #
 # Steps:
-#   1. build-all.sh           — rebuild all four images
+#   1. build-all.sh           — rebuild all five images
 #   2. docker compose down    — stop + remove the currently running rig
 #   3. docker compose up -d   — start the freshly-built rig detached
 #

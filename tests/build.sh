@@ -32,9 +32,22 @@ fi
 container=$1
 shift
 
+# Always pass the short build name (the one that becomes the gtkhx-<name>
+# tag compose expects), NOT a directory name. For SOCKS that's `socks`,
+# whose context dir is socks-proxy/ — passing `socks-proxy` would produce
+# a gtkhx-socks-proxy tag that doesn't match docker-compose.yml. Reject
+# the `-proxy` directory form up front so the mismatch can't happen.
+case "$container" in
+*-proxy)
+	echo "$0: pass the short build name, not the directory (e.g. use" >&2
+	echo "  'socks', not '$container' — the socks image is gtkhx-socks)." >&2
+	exit 64
+	;;
+esac
+
 # Resolve the build-context directory. Most images live in tests/<name>;
 # the SOCKS proxy's directory is socks-proxy/ while its image stays
-# gtkhx-socks. Accept both the short name and the directory name.
+# gtkhx-socks, so map the `socks` short name to socks-proxy/.
 ctxdir="$container"
 if [ ! -d "$DIR/$ctxdir" ] && [ -d "$DIR/$ctxdir-proxy" ]; then
 	ctxdir="$container-proxy"
