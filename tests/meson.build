@@ -900,41 +900,10 @@ test_news_file = executable('test_news_file',
 test('news_file', test_news_file,
      suite : 'proto')
 
-# news_dirlist — hx_news_dirlist_parse_folderitem and
-# hx_news_dirlist_parse_categoryitem each walk one chunk body from
-# the 1.5 threaded-news directory listing reply (NEWSFOLDERITEM and
-# CATEGORYITEM respectively). Either chunk type can encode either
-# a folder-entry or a category-entry; the CATEGORYITEM encoding adds
-# per-category sync metadata (GUID + add/delete serial numbers).
-# Includes the real Badmoon hex fixtures from the bug report.
-test_news_dirlist = executable('test_news_dirlist',
-  'proto/test_news_dirlist.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-)
-test('news_dirlist', test_news_dirlist,
-     suite : 'proto')
-
-# newscat — hx_newscat_parse turns an HTLC_DATA_CATLIST chunk (the
-# reply to HTLC_HDR_NEWSCATLIST) into a structured thread list. The
-# original parser in rcv.c had no bounds checks, walked the wire as
-# a raw pointer, and used a get_pstring macro that depended on the
-# server zeroing several "opaque" header bytes. The extracted helper
-# in proto_helpers tightens the bounds checks; this test pins both
-# the happy-path layout (so the rcv.c translation keeps producing
-# the same news_item values) and the malformed-input refusal cases.
-test_newscat = executable('test_newscat',
-  'proto/test_newscat.c',
-  '../src/proto_helpers.c',
-  '../src/debug.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-  link_with           : wire_fixture_lib,
-)
-test('newscat', test_newscat,
-     suite : 'proto')
+# (test_news_dirlist / test_newscat removed — the C parse shims they exercised
+# (hx_news_dirlist_parse_* / hx_newscat_parse) were retired when the 1.5 news
+# receive path moved to owned handles; the parsers are covered by hotline-proto's
+# native cargo tests, e.g. parse::tests::dirlist_* and catlist_*.)
 
 # chat_event — hx_chat_event_new is the parsed value-object the
 # GtkhxSession::chat signal carries to chat.c and notify.c. Pins

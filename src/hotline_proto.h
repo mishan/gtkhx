@@ -586,8 +586,7 @@ struct gtkhx_proto_catlist_post_view {
     uint16_t date_pad;
     uint16_t partcount;
     uint16_t size_total;
-    /* NULL when the wire pstring was zero-length (matches the C
-     * hx_newscat's "NULL when empty" convention). */
+    /* NULL when the wire pstring was zero-length. */
     const uint8_t *subject_ptr;
     size_t subject_len;
     const uint8_t *sender_ptr;
@@ -602,9 +601,8 @@ struct gtkhx_proto_catlist_part_view {
 };
 
 /* Parse the first HTLC_DATA_CATLIST chunk. Returns NULL when no
- * CATLIST chunk is present or the body is malformed (the FALSE return
- * from hx_newscat_parse). The caller owns the returned handle and
- * must free it with gtkhx_proto_catlist_free. */
+ * CATLIST chunk is present or the body is malformed. The caller owns
+ * the returned handle and must free it with gtkhx_proto_catlist_free. */
 extern struct gtkhx_proto_catlist *
 gtkhx_proto_parse_catlist (const uint8_t *msg, size_t msglen);
 
