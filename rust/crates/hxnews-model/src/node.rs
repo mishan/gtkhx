@@ -20,10 +20,10 @@ use gio::prelude::*;
 use gio::subclass::prelude::*;
 use glib::translate::{from_glib_none, IntoGlib, IntoGlibPtr};
 
-/// `NB_KIND_POST` from the `NB_KIND_*` enum in `news_browser.c` (FOLDER=1,
-/// CATEGORY=2, POST=3). Named so the Rust and C meanings of `kind` can't
-/// silently drift; only POST is constructed here (the tree builder makes post
-/// rows), so it's the only member this crate needs.
+/// The `NB_KIND_*` node kinds from `news_browser.c`. Named so the Rust and C
+/// meanings of `kind` can't silently drift.
+pub(crate) const NB_KIND_FOLDER: i32 = 1;
+pub(crate) const NB_KIND_CATEGORY: i32 = 2;
 pub(crate) const NB_KIND_POST: i32 = 3;
 
 /// `#[repr(C)]` mirror of C's `struct date_time` (`session.h`): a post's
@@ -462,6 +462,90 @@ pub unsafe extern "C" fn hx_news_build_category_tree(
     // Pass 4: append top-level posts now that each subtree is fully built.
     for i in top {
         dest.append(&nodes[i]);
+    }
+}
+
+/// Join a parent Hotline path and a child name into the child's full path,
+/// special-casing the root ("/") so it doesn't produce "//child" (mirrors
+/// `news_browser.c::build_child_path`).
+///
+/// Works on **raw bytes**, not `&str`: DIRLIST entry names come off the wire and
+/// aren't guaranteed UTF-8, and the joined path is handed straight back to the
+/// server (NEWSDIRLIST / NEWSCATLIST), so a lossy UTF-8 round-trip could change
+/// the byte sequence and break the follow-up fetch.
+fn build_child_path(parent: &[u8], child: &[u8]) -> CString {
+    let mut joined: Vec<u8> = Vec::with_capacity(parent.len() + child.len() + 1);
+    if parent.is_empty() || parent == b"/" {
+        joined.push(b'/');
+        joined.extend_from_slice(child);
+    } else {
+        joined.extend_from_slice(parent);
+        joined.push(b'/');
+        joined.extend_from_slice(child);
+    }
+    // Truncate at the first NUL (a Hotline name shouldn't contain one; CString
+    // rejects interior NULs), falling back to the root path if that empties it.
+    let end = joined.iter().position(|&b| b == 0).unwrap_or(joined.len());
+    CString::new(&joined[..end]).unwrap_or_else(|_| CString::new("/").unwrap())
+}
+
+/// One DIRLIST entry: a folder or category child. Mirrors the fields
+/// [`hx_news_build_dirlist_into`] reads out of C's `struct folder_item`.
+#[repr(C)]
+pub struct HxNewsDirItem {
+    /// The wire `folder_item.type` — 1 means folder, anything else category.
+    pub item_type: i32,
+    pub name: *const c_char,
+}
+
+/// `void hx_news_build_dirlist_into(GListStore *dest, const char *parent_path,
+/// const struct hx_news_dir_item *items, size_t count)` — append a folder's
+/// DIRLIST entries as folder / category child nodes of `dest`.
+///
+/// Replaces the inline node loop in `news_browser.c::gnews_browser_handle_dirlist`
+/// (the pending-request table + wire-struct frees stay C). Each entry becomes a
+/// `NB_KIND_FOLDER` / `NB_KIND_CATEGORY` node whose path is `parent_path` joined
+/// with the entry name; a NULL name becomes an empty label. Ownership stays in
+/// Rust — each node is created, appended (the store refs it), and the transient
+/// `Vec` ref drops.
+///
+/// # Safety
+/// `dest` is a valid `GListStore *`; `items` points at `count` valid records
+/// whose `name` is NULL or NUL-terminated; `parent_path` is NULL or
+/// NUL-terminated; main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn hx_news_build_dirlist_into(
+    dest: *mut gio::ffi::GListStore,
+    parent_path: *const c_char,
+    items: *const HxNewsDirItem,
+    count: usize,
+) {
+    if dest.is_null() || items.is_null() || count == 0 {
+        return;
+    }
+    // Defensive slice-size ceiling before from_raw_parts (see the category
+    // builder) — fail closed on a corrupt/hostile count.
+    if count > isize::MAX as usize / std::mem::size_of::<HxNewsDirItem>() {
+        return;
+    }
+    let dest: gio::ListStore = from_glib_none(dest);
+    // Raw bytes throughout — no UTF-8 round-trip (see build_child_path).
+    let parent: &[u8] = if parent_path.is_null() {
+        b"/"
+    } else {
+        CStr::from_ptr(parent_path).to_bytes()
+    };
+    let data = std::slice::from_raw_parts(items, count);
+    for it in data {
+        let name = cstr_or(it.name, "", false);
+        let kind = if it.item_type == 1 {
+            NB_KIND_FOLDER
+        } else {
+            NB_KIND_CATEGORY
+        };
+        let child_path = build_child_path(parent, name.to_bytes());
+        let node = HxNewsNode::new(kind, name, Some(child_path));
+        dest.append(&node);
     }
 }
 

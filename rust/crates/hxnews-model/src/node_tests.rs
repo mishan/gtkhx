@@ -238,3 +238,54 @@ fn build_category_tree_empty_or_null_is_no_op() {
     }
     assert_eq!(dest.n_items(), 0);
 }
+
+// ---- hx_news_build_dirlist_into ----------------------------------------
+
+#[test]
+fn build_dirlist_appends_folder_and_category_nodes() {
+    // type==1 → folder (kind 1); anything else → category (kind 2).
+    let (n0, n1) = (cs("Docs"), cs("Announcements"));
+    let items = [
+        HxNewsDirItem { item_type: 1, name: n0.as_ptr() },
+        HxNewsDirItem { item_type: 0, name: n1.as_ptr() },
+    ];
+    let parent = cs("/news");
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    unsafe {
+        hx_news_build_dirlist_into(dest.as_ptr(), parent.as_ptr(), items.as_ptr(), items.len());
+    }
+    assert_eq!(dest.n_items(), 2);
+    let a = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(a.imp().kind.get(), 1);
+    assert_eq!(a.imp().name.borrow().to_str().unwrap(), "Docs");
+    assert_eq!(a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/Docs");
+    let b = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(b.imp().kind.get(), 2);
+    assert_eq!(b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/Announcements");
+}
+
+#[test]
+fn build_dirlist_null_parent_and_null_name() {
+    // NULL parent → root "/"; NULL name → empty label; root + "" → "/".
+    let items = [HxNewsDirItem { item_type: 0, name: std::ptr::null() }];
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    unsafe {
+        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), items.as_ptr(), 1);
+    }
+    assert_eq!(dest.n_items(), 1);
+    let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
+    assert_eq!(n.imp().name.borrow().to_str().unwrap(), "");
+    assert_eq!(n.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/");
+}
+
+#[test]
+fn build_dirlist_empty_or_null_is_no_op() {
+    let dest = gio::ListStore::with_type(HxNewsNode::static_type());
+    let name = cs("x");
+    let items = [HxNewsDirItem { item_type: 1, name: name.as_ptr() }];
+    unsafe {
+        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), items.as_ptr(), 0); // count 0
+        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3); // null items
+    }
+    assert_eq!(dest.n_items(), 0);
+}
