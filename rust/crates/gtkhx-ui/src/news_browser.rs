@@ -288,13 +288,16 @@ fn fetch_dirlist(target: *mut c_void) {
         if !threaded_news_available() {
             return;
         }
-        // path_to_hldir dereferences unconditionally — root uses "/".
+        // Pass the node's path pointer straight through — HxNewsNode paths are
+        // byte-oriented (may be non-UTF8), so a cstr()/cs() round-trip would be
+        // lossy. Only the root case synthesizes "/" (path_to_hldir derefs it
+        // unconditionally, so it can't be NULL).
         let path = if !target.is_null() && !hx_news_node_path(target).is_null() {
-            crate::cs(&crate::cstr(hx_news_node_path(target)))
+            hx_news_node_path(target)
         } else {
-            crate::cs("/")
+            c"/".as_ptr()
         };
-        let stub = gnews_folder_new(path.as_ptr());
+        let stub = gnews_folder_new(path);
         let val: Option<glib::Object> = if target.is_null() {
             None
         } else {
@@ -317,8 +320,9 @@ fn fetch_catlist(target: *mut c_void) {
         if target.is_null() || hx_news_node_path(target).is_null() {
             return;
         }
-        let path = crate::cs(&crate::cstr(hx_news_node_path(target)));
-        let stub = gnews_catalog_new(path.as_ptr());
+        // Byte-oriented path — pass the pointer straight through (no lossy
+        // cstr()/cs() round-trip).
+        let stub = gnews_catalog_new(hx_news_node_path(target));
         let val: Option<glib::Object> =
             Some(from_glib_none(target as *mut glib::gobject_ffi::GObject));
         PENDING_CATLISTS.with(|t| t.borrow_mut().insert(stub as usize, val));
@@ -377,10 +381,9 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(gfnews_p: *mut c_void) -> 
         if let Some(_br) = b.borrow().as_ref() {
             match &target {
                 None => {
-                    let path = crate::cs("/");
                     hx_news_build_dirlist_from_dirlist(
                         _br.root_store.as_ptr(),
-                        path.as_ptr(),
+                        c"/".as_ptr(),
                         parsed,
                     );
                 }
@@ -388,8 +391,9 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(gfnews_p: *mut c_void) -> 
                     let np = node.as_ptr() as *mut c_void;
                     let dest = hx_news_node_children(np);
                     if !dest.is_null() {
-                        let path = crate::cs(&crate::cstr(hx_news_node_path(np)));
-                        hx_news_build_dirlist_from_dirlist(dest, path.as_ptr(), parsed);
+                        // Raw byte-oriented path pointer (NULL is fine — the
+                        // builder falls back to the root "/").
+                        hx_news_build_dirlist_from_dirlist(dest, hx_news_node_path(np), parsed);
                     }
                 }
             }
@@ -418,8 +422,8 @@ pub unsafe extern "C" fn gnews_browser_handle_catlist(gcnews_p: *mut c_void) -> 
         let ch = hx_news_node_children(np);
         NEWS_BROWSER.with(|b| {
             if b.borrow().as_ref().is_some() && !ch.is_null() {
-                let path = crate::cs(&crate::cstr(hx_news_node_path(np)));
-                hx_news_build_category_tree_from_catlist(ch, path.as_ptr(), parsed);
+                // Raw byte-oriented path pointer (no lossy cstr()/cs() round-trip).
+                hx_news_build_category_tree_from_catlist(ch, hx_news_node_path(np), parsed);
             }
         });
     }
