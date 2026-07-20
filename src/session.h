@@ -165,7 +165,10 @@ struct news_group {
 };
 
 struct gnews_catalog {
-    struct news_group *group;
+    /* Owned `CatList *` from gtkhx_proto_parse_catlist, stashed by the Rust
+     * receive handler (rcv_task_newscat_list, hxnews-recv) and freed by
+     * gnews_browser_handle_catlist. Opaque here — only Rust dereferences it. */
+    void *parsed;
     struct gnews_catalog *next, *prev;
     char *path;
     GtkWidget *window;
@@ -186,7 +189,10 @@ struct gnews_folder {
     GtkWidget *window;
     GtkWidget *news_list;
     gint row, col;
-    struct news_folder *news;
+    /* Owned `DirList *` from gtkhx_proto_parse_dirlist, stashed by the Rust
+     * receive handler (rcv_task_newsfolder_list, hxnews-recv) and freed by
+     * gnews_browser_handle_dirlist. Opaque here — only Rust dereferences it. */
+    void *parsed;
     struct gnews_folder *next, *prev;
     char *path;
     char listing;
@@ -194,17 +200,11 @@ struct gnews_folder {
     struct path_hist *path_list;
 };
 
-struct folder_item {
-    char *name;
-    /*	guint16 icon; */
-    int type;
-};
-
-struct news_folder {
-    struct folder_item **entry;
-    char *path;
-    guint32 num_entries;
-};
+/* struct folder_item / struct news_folder retired — the NEWSDIRLIST reply is
+ * parsed to a Rust-owned DirList handle (hotline-proto) carried on
+ * gnews_folder->parsed, and the tree is built by
+ * hx_news_build_dirlist_from_dirlist (hxnews-model). No C GUI struct in the
+ * middle. */
 
 /* ---- User-list / chat membership ---------------------------------- */
 

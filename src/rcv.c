@@ -1568,166 +1568,24 @@ rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
     }
 }
 
-/* Translate one parsed hx_newscat_post into the GUI's news_item. The
- * field shapes match 1:1 except for the parts array (which we copy
- * shallowly and steal the mime_type pointers from) and the GTK-only
- * `iter` field (zeroed; news15.c populates it later). The `group`
- * back-pointer is set by the caller. */
-static void
-news_item_take_from_wire (struct news_item *ni, struct hx_newscat_post *p)
-{
-    guint16 j;
+/* rcv_task_newscat_list moved to the hxnews-recv Rust crate — it parses the
+ * CATLIST chunk to an owned handle, stashes it on the gnews_catalog carrier, and
+ * emits news-catalog, with no intermediate news_item / news_group. hxnews-send's
+ * task_new still registers it; the symbol now resolves against hxnews-recv. */
 
-    ni->postid = p->postid;
-    ni->parentid = p->parentid;
-    ni->date.base_year = p->date_base_year;
-    ni->date.pad = p->date_pad;
-    ni->date.seconds = p->date_seconds;
-    ni->partcount = p->partcount;
-    ni->size = p->size_total;
+/* rcv_task_newsfolder_list moved to the hxnews-recv Rust crate — it parses the
+ * NEWSDIRLIST chunks (the dh_start walk + per-chunk parsers) into an owned
+ * DirList handle via gtkhx_proto_parse_dirlist, stashes it on the gnews_folder
+ * carrier, and emits news-folder, with no intermediate folder_item / news_folder.
+ * hxnews-send's task_new still registers it; the symbol now resolves against
+ * hxnews-recv. */
 
-    /* Steal ownership of subject + sender strings — the wire struct
-	 * will be cleared next so it won't double-free. */
-    ni->subject = p->subject;
-    ni->sender = p->sender;
-    p->subject = p->sender = NULL;
-
-    if (p->partcount) {
-        ni->parts = g_new0 (struct news_parts, p->partcount);
-        for (j = 0; j < p->partcount; j++) {
-            ni->parts[j].size = p->parts[j].size;
-            ni->parts[j].mime_type = p->parts[j].mime_type;
-            p->parts[j].mime_type = NULL; /* stolen */
-        }
-    } else {
-        ni->parts = NULL;
-    }
-
-    memset (&ni->iter, 0, sizeof (ni->iter));
-}
-
-void
-rcv_task_newscat_list (struct htlc_conn *htlc, struct gnews_catalog *gcnews)
-{
-    struct news_group *group = g_malloc0 (sizeof (struct news_group));
-    struct hx_newscat parsed;
-    guint32 i;
-
-    if (!hx_newscat_parse (htlc, &parsed)) {
-        /* No CATLIST chunk or malformed payload. Surface an empty
-		 * group rather than a NULL — preserves the original
-		 * behaviour (the parser bailed out of the loop and still
-		 * emitted an empty signal payload). */
-        group->post_count = 0;
-        group->posts = NULL;
-        gcnews->group = group;
-        gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
-        return;
-    }
-
-    group->post_count = parsed.post_count;
-    if (parsed.post_count) {
-        group->posts = g_new0 (struct news_item, parsed.post_count);
-        for (i = 0; i < parsed.post_count; i++) {
-            news_item_take_from_wire (&group->posts[i], &parsed.posts[i]);
-            group->posts[i].group = group;
-        }
-    } else {
-        group->posts = NULL;
-    }
-    hx_newscat_clear (&parsed);
-
-    gcnews->group = group;
-    gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
-}
-
-void
-rcv_task_newsfolder_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)
-{
-    struct news_folder *folder = g_malloc (sizeof (struct news_folder));
-    struct folder_item *item;
-    int num = 0;
-
-    folder->entry = g_malloc (sizeof (struct folder_item *));
-    folder->path = gfnews->path;
-
-    dh_start (htlc)
-    {
-        struct hx_news_dirlist_entry entry;
-        gboolean got = FALSE;
-
-        /* Either chunk type can carry either a folder-entry or a
-		 * category-entry; both parsers normalise to entry.kind. */
-        switch (_type) {
-        case HTLC_DATA_NEWSFOLDERITEM:
-            got = hx_news_dirlist_parse_folderitem (dh->data, _len, &entry);
-            break;
-        case HTLC_DATA_CATEGORYITEM:
-            /* Same listing reply but with per-category sync
-			 * metadata (GUID + add/delete SNs). Some servers
-			 * emit this instead of NEWSFOLDERITEM. */
-            got = hx_news_dirlist_parse_categoryitem (dh->data, _len, &entry);
-            break;
-        }
-        if (!got) {
-            continue;
-        }
-
-        num++;
-        folder->entry
-            = g_realloc (folder->entry, sizeof (struct folder_item *) * num);
-        item = g_malloc (sizeof (struct folder_item));
-        item->type = entry.kind;
-        item->name = g_strndup (entry.name, entry.name_len);
-        folder->entry[num - 1] = item;
-    }
-    dh_end ();
-
-    folder->num_entries = num;
-
-    gfnews->news = folder;
-    gtkhx_session_emit_news_folder (gtkhx_session_get_default (), gfnews);
-}
-
-void
-rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
-{
-    /* chunk-walk + CR2LF + strip_ansi moved to Rust
-	 * parse_news_thread_reply. The TASK_ERROR short-circuit is
-	 * preserved (the Rust parser drops the body on that path and
-	 * sets has_task_error). The C side keeps the news_post
-	 * allocation + emit so the news_item back-pointer can be
-	 * stitched in without crossing the FFI.
-	 *
-	 * Buffer sized at 65536 to match what real-world NEWSDATA
-	 * bodies need (chunk lens are u16 = 65535 max, so this is the
-	 * comfortable cap — text_cap-1 inside the parser is 65535,
-	 * matching the wire ceiling). */
-    char *buf = g_malloc (65536);
-    struct gtkhx_proto_news_thread_reply r;
-    gtkhx_proto_parse_news_thread_reply (htlc->in.buf, htlc->in.pos,
-                                         (uint8_t *)buf, 65536, &r);
-
-    if (r.has_task_error) {
-        g_free (buf);
-        return;
-    }
-    if (!r.has_text) {
-        /* A well-formed reply carries NEWSDATA. If the server sent
-		 * a reply without it — protocol corruption, future
-		 * revision, or chunks in an order we don't expect — bail
-		 * rather than emitting an empty article. */
-        debug_log ("news",
-                   "rcv_task_news_post: reply missing HTLC_DATA_NEWSDATA");
-        g_free (buf);
-        return;
-    }
-
-    struct news_post *post = g_malloc (sizeof (struct news_post));
-    post->buf = buf;
-    post->item = item;
-    gtkhx_session_emit_news_thread (gtkhx_session_get_default (), post);
-}
+/* rcv_task_news_post moved to the hxnews-recv Rust crate — it parses the
+ * GETTHREAD NEWSDATA body (gtkhx_proto_parse_news_thread_reply), bails on a
+ * TASK_ERROR / body-less reply, then builds the news_post carrier via
+ * news_post_new (news_recv_bridge.c) and emits news-thread. hxnews-send's
+ * get_post sender still registers it; the symbol now resolves against
+ * hxnews-recv. With this, no news code remains in rcv.c. */
 
 void
 rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text)

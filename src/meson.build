@@ -75,6 +75,9 @@ gtkhx_sources = files(
   # hxnews-send Rust crate (rust_hxnews_send_dep below). news_send_bridge.c is
   # the C struct-field accessor shim it calls (mirrors chat_send_bridge.c).
   'news_send_bridge.c',
+  # news_recv_bridge.c — C-struct accessors for the Rust 1.5 news receive
+  # handlers (hxnews-recv): htlc->in bytes + the catalog carrier's parse handle.
+  'news_recv_bridge.c',
   'news_browser.c',
   'notify.c',
   'options.c',
@@ -248,6 +251,9 @@ rust_deps = [
   # news15.c. Before rust_hxtext_dep on the link line (undefined ref to
   # gtkhx_text_for_wire), same consumer-before-provider rule as hxchat-send.
   rust_hxnews_send_dep,
+  # 1.5 news receive handlers (rcv_task_news* moved out of rcv.c). After
+  # hxnews-send: it resolves the rcv_task_newscat_list ref hxnews-send registers.
+  rust_hxnews_recv_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).

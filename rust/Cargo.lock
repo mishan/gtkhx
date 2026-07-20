@@ -1840,7 +1840,12 @@ version = "0.1.0"
 dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
+ "hotline-proto",
 ]
+
+[[package]]
+name = "hxnews-recv"
+version = "0.1.0"
 
 [[package]]
 name = "hxnews-send"
