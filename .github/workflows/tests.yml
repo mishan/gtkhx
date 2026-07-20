@@ -50,6 +50,15 @@ jobs:
   build-and-test:
     name: build + unit + proto + integration
     runs-on: ubuntu-latest
+    # The test-server rig is orchestrated through tests/docker-compose.yml
+    # plus the Janus host-networking override (tests/docker-compose.janus-host.yml).
+    # The override keeps Janus on --network=host so the WebRTC voice matrix
+    # can negotiate ICE against 127.0.0.1 — the same reason the per-container
+    # setup ran Janus host-net — while the trackers + mhxd stay on the compose
+    # bridge and the servers register with both trackers. Both files are passed
+    # to every compose call via this shared var.
+    env:
+      COMPOSE_FILES: "-f tests/docker-compose.yml -f tests/docker-compose.janus-host.yml"
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -226,92 +235,63 @@ jobs:
           cache-from: type=gha,scope=socks
           cache-to: type=gha,mode=max,scope=socks
 
-      - name: start mhxd
+      - name: start rig (compose)
+        # One `compose up` starts all five test containers. The images were
+        # just built (build-push-action above) with the same gtkhx-<name> tags
+        # the compose file references, so compose reuses them and never
+        # rebuilds. Host ports are unchanged from the old per-container
+        # `docker run`s and still match server_matrix.c / tracker_matrix.c:
+        #   mhxd     5500/5501
+        #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice, host-net)
+        #   argus    5498 + 6498 (TLS via stunnel) + 5499/udp
+        #   hxtrackd 5598->5498 + 5599->5499/udp
+        #   socks    1080 (host-net; forwards CONNECTs to 127.0.0.1:5500)
+        # Unlike the old per-container run, the servers now register with both
+        # trackers on startup (compose sets each server's TRACKERS env); the
+        # verify step below checks that.
         run: |
-          docker run -d --name gtkhx-mhxd \
-            -p 5500:5500 -p 5501:5501 \
-            gtkhx-mhxd
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if (echo > /dev/tcp/127.0.0.1/5500) 2>/dev/null; then
-              echo "mhxd is up"; break
-            fi
-            sleep 1
-          done
+          docker compose $COMPOSE_FILES up -d
 
-      - name: start janus
-        # --network=host so WebRTC voice can negotiate ICE against 127.0.0.1
-        # (Docker's bridge strips the route libnice needs). config.yaml pins
-        # the listen ports to the matrix numbers. See tests/janus/README.md.
+      - name: wait for services
+        # Readiness gates before the integration binaries run. hxtrackd also
+        # needs its seeded fixture record present (its entrypoint sends the
+        # first UDP registration ~1s after boot); reuse the rig's own v1
+        # listing checker with --min-records 1 to wait for it rather than
+        # racing an empty listing.
         run: |
-          docker run -d --name gtkhx-janus \
-            --network=host \
-            gtkhx-janus
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if (echo > /dev/tcp/127.0.0.1/5510) 2>/dev/null; then
-              echo "janus is up"; break
-            fi
-            sleep 1
-          done
+          wait_tcp() {
+            for _ in $(seq 1 30); do
+              if (echo > /dev/tcp/127.0.0.1/"$1") 2>/dev/null; then
+                echo "port $1 is up"; return 0
+              fi
+              sleep 1
+            done
+            echo "timed out waiting for port $1" >&2; return 1
+          }
+          wait_tcp 5500   # mhxd HTLS
+          wait_tcp 5510   # janus HTLS
+          wait_tcp 5498   # argus listing
+          wait_tcp 6498   # argus TLS (stunnel)
+          wait_tcp 1080   # socks proxy (test_integration_socks)
+          python3 tests/ci/check-tracker-registration.py \
+            --host 127.0.0.1 --port 5598 --min-records 1 --timeout-secs 30
 
-      - name: start hxtrackd
-        # Exposes internal 5498/5499 on host 5598/5599 (Argus claims the
-        # conventional 5498/5499 below). Wait for the seed UDP registration
-        # to land (>= 1 record) so the Tier 3 test doesn't race an empty list.
+      - name: verify tracker registration
+        # Diagnostic, non-blocking (continue-on-error until the loopback-UDP
+        # registration path is confirmed reliable on the runner). mhxd
+        # registers with both trackers over the bridge by service name; Janus
+        # registers over host-net loopback to 127.0.0.1:5499 (argus) and
+        # 127.0.0.1:5599 (hxtrackd). Poll hxtrackd's v1 listing for >= 2
+        # records (seeded fixture + at least mhxd) as an end-to-end proof a
+        # real registration datagram landed, and dump the trackers'
+        # registration log lines for visibility.
+        continue-on-error: true
         run: |
-          docker run -d --name gtkhx-hxtrackd \
-            -p 5598:5498 -p 5599:5499/udp \
-            gtkhx-hxtrackd
-          for i in $(seq 1 30); do
-            if python3 -c "
-          import socket, struct, sys
-          s = socket.socket()
-          s.settimeout(2)
-          s.connect(('127.0.0.1', 5598))
-          s.sendall(b'HTRK\x00\x01')
-          d = s.recv(14)
-          if len(d) < 14:
-              sys.exit(1)
-          n = struct.unpack('>H', d[10:12])[0]
-          sys.exit(0 if n > 0 else 1)
-          " 2>/dev/null; then
-              echo "hxtrackd is up with seeded record"; break
-            fi
-            sleep 1
-          done
-
-      - name: start argus
-        # Conventional tracker ports 5498/tcp + 5499/udp published straight
-        # through; +6498 for the stunnel-wrapped TLS path (tracker_matrix.c's
-        # argus entry advertises tls_port=6498).
-        run: |
-          docker run -d --name gtkhx-argus \
-            -p 5498:5498 -p 6498:6498 -p 5499:5499/udp \
-            gtkhx-argus
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if (echo > /dev/tcp/127.0.0.1/5498) 2>/dev/null; then
-              echo "argus plain is up"; break
-            fi
-            sleep 1
-          done
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if (echo > /dev/tcp/127.0.0.1/6498) 2>/dev/null; then
-              echo "argus TLS (stunnel) is up"; break
-            fi
-            sleep 1
-          done
-
-      - name: start socks proxy
-        # microsocks under --network host so its CONNECT forwards reach mhxd's
-        # published 127.0.0.1:5500. test_integration_socks defaults
-        # GTKHX_TEST_SOCKS to socks5://127.0.0.1:1080.
-        run: |
-          docker run -d --name gtkhx-socks --network host gtkhx-socks
-          for i in 1 2 3 4 5 6 7 8 9 10; do
-            if (echo > /dev/tcp/127.0.0.1/1080) 2>/dev/null; then
-              echo "socks proxy is up"; break
-            fi
-            sleep 1
-          done
+          python3 tests/ci/check-tracker-registration.py \
+            --host 127.0.0.1 --port 5598 --min-records 2 --timeout-secs 30
+          echo "---- tracker / registration log lines ----"
+          docker compose $COMPOSE_FILES logs --no-color \
+            | grep -iE 'regist|track' || true
 
       # ---- 3. Integration, off the snapshot (no reinstall, no recompile) ----
       - name: integration tests
@@ -334,25 +314,10 @@ jobs:
               exit $rc
             '
 
-      - name: dump mhxd logs on failure
+      - name: dump rig logs on failure
         if: failure()
-        run: docker logs gtkhx-mhxd || true
-
-      - name: dump janus logs on failure
-        if: failure()
-        run: docker logs gtkhx-janus || true
-
-      - name: dump hxtrackd logs on failure
-        if: failure()
-        run: docker logs gtkhx-hxtrackd || true
-
-      - name: dump argus logs on failure
-        if: failure()
-        run: docker logs gtkhx-argus || true
-
-      - name: dump socks proxy logs on failure
-        if: failure()
-        run: docker logs gtkhx-socks || true
+        # All five test containers' stdout/stderr in one stream.
+        run: docker compose $COMPOSE_FILES logs --no-color || true
 
       - name: upload meson test logs
         if: always()
@@ -365,6 +330,9 @@ jobs:
 
       - name: clean up containers
         if: always()
+        # The build container isn't managed by compose; the five test
+        # containers are, so tear them down via compose (-v also drops the
+        # bridge network + anonymous volumes for a clean re-run).
         run: |
-          docker rm -f gtkhx-build gtkhx-mhxd gtkhx-janus \
-            gtkhx-hxtrackd gtkhx-argus gtkhx-socks 2>/dev/null || true
+          docker rm -f gtkhx-build 2>/dev/null || true
+          docker compose $COMPOSE_FILES down -v 2>/dev/null || true
