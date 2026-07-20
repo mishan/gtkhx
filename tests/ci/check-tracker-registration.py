@@ -17,7 +17,7 @@
 # Tier 3 test_tracker_v3 binary.)
 #
 # Usage:
-#   check-tracker-registration.py --host 127.0.0.1 --port 5598 \
+#   check-tracker-registration.py --host 127.0.0.1 --port 5498 \
 #       --min-records 2 [--timeout-secs 30]
 #
 # The hxtrackd container is seeded with one fixture record ("hxtrackd
@@ -91,7 +91,7 @@ def recv_exact(sock, n):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=5598)
+    ap.add_argument("--port", type=int, default=5498)
     ap.add_argument("--min-records", type=int, default=2)
     ap.add_argument("--timeout-secs", type=int, default=30)
     args = ap.parse_args()

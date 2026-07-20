@@ -50,15 +50,14 @@ jobs:
   build-and-test:
     name: build + unit + proto + integration
     runs-on: ubuntu-latest
-    # The test-server rig is orchestrated through tests/docker-compose.yml
-    # plus the Janus host-networking override (tests/docker-compose.janus-host.yml).
-    # The override keeps Janus on --network=host so the WebRTC voice matrix
-    # can negotiate ICE against 127.0.0.1 — the same reason the per-container
-    # setup ran Janus host-net — while the trackers + mhxd stay on the compose
-    # bridge and the servers register with both trackers. Both files are passed
-    # to every compose call via this shared var.
+    # The test-server rig is orchestrated through tests/docker-compose.yml.
+    # Every container runs on host networking (no user-defined bridge —
+    # that adds an interface the host-networked WebRTC voice test's ICE
+    # agent enumerates as a dead-end candidate and fails on). The servers
+    # register with both trackers over loopback. Passed to every compose
+    # call via this shared var.
     env:
-      COMPOSE_FILES: "-f tests/docker-compose.yml -f tests/docker-compose.janus-host.yml"
+      COMPOSE_FILES: "-f tests/docker-compose.yml"
     steps:
       - name: checkout
         uses: actions/checkout@v4
@@ -236,19 +235,18 @@ jobs:
           cache-to: type=gha,mode=max,scope=socks
 
       - name: start rig (compose)
-        # One `compose up` starts all five test containers. The images were
-        # just built (build-push-action above) with the same gtkhx-<name> tags
-        # the compose file references, so compose reuses them and never
-        # rebuilds. Host ports are unchanged from the old per-container
-        # `docker run`s and still match server_matrix.c / tracker_matrix.c:
+        # One `compose up` starts all five test containers, every one on host
+        # networking. The images were just built (build-push-action above) with
+        # the same gtkhx-<name> tags the compose file references, so compose
+        # reuses them and never rebuilds. Host ports match server_matrix.c /
+        # tracker_matrix.c:
         #   mhxd     5500/5501
-        #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice, host-net)
-        #   argus    5498 + 6498 (TLS via stunnel) + 5499/udp
-        #   hxtrackd 5598->5498 + 5599->5499/udp
-        #   socks    1080 (host-net; forwards CONNECTs to 127.0.0.1:5500)
-        # Unlike the old per-container run, the servers now register with both
-        # trackers on startup (compose sets each server's TRACKERS env); the
-        # verify step below checks that.
+        #   janus    5510/5511 + 5610/5611 (TLS) + 5514/udp (voice)
+        #   hxtrackd 5498 + 5499/udp        (its hardcoded HTRK ports)
+        #   argus    5698 + 6498 (TLS via stunnel) + 5699/udp
+        #   socks    1080 (forwards CONNECTs to 127.0.0.1:5500)
+        # The servers register with the trackers over loopback on startup
+        # (compose sets each server's TRACKERS env); the verify step checks it.
         run: |
           docker compose $COMPOSE_FILES up -d
 
@@ -270,25 +268,25 @@ jobs:
           }
           wait_tcp 5500   # mhxd HTLS
           wait_tcp 5510   # janus HTLS
-          wait_tcp 5498   # argus listing
+          wait_tcp 5498   # hxtrackd listing
+          wait_tcp 5698   # argus listing
           wait_tcp 6498   # argus TLS (stunnel)
           wait_tcp 1080   # socks proxy (test_integration_socks)
           python3 tests/ci/check-tracker-registration.py \
-            --host 127.0.0.1 --port 5598 --min-records 1 --timeout-secs 30
+            --host 127.0.0.1 --port 5498 --min-records 1 --timeout-secs 30
 
       - name: verify tracker registration
         # Diagnostic, non-blocking (continue-on-error until the loopback-UDP
-        # registration path is confirmed reliable on the runner). mhxd
-        # registers with both trackers over the bridge by service name; Janus
-        # registers over host-net loopback to 127.0.0.1:5499 (argus) and
-        # 127.0.0.1:5599 (hxtrackd). Poll hxtrackd's v1 listing for >= 2
-        # records (seeded fixture + at least mhxd) as an end-to-end proof a
-        # real registration datagram landed, and dump the trackers'
-        # registration log lines for visibility.
+        # registration path is confirmed reliable on the runner). Over host
+        # networking both servers register on loopback: mhxd hits the fixed
+        # HTRK port 5499 (hxtrackd); Janus registers with hxtrackd (5499) and
+        # Argus (5699). Poll hxtrackd's v1 listing for >= 2 records (seeded
+        # fixture + at least mhxd) as an end-to-end proof a real registration
+        # datagram landed, and dump the trackers' registration log lines.
         continue-on-error: true
         run: |
           python3 tests/ci/check-tracker-registration.py \
-            --host 127.0.0.1 --port 5598 --min-records 2 --timeout-secs 30
+            --host 127.0.0.1 --port 5498 --min-records 2 --timeout-secs 30
           echo "---- tracker / registration log lines ----"
           docker compose $COMPOSE_FILES logs --no-color \
             | grep -iE 'regist|track' || true

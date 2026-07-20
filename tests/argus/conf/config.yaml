@@ -45,8 +45,12 @@
 # client's perspective only.
 
 listen:
-  tcp_port: 5498
-  udp_port: 5499
+  # Shifted up from the conventional 5498/5499 to 5698/5699 so Argus
+  # doesn't collide with hxtrackd under host networking — hxtrackd's
+  # HTRK_TCPPORT/HTRK_UDPPORT are hardcoded at 5498/5499 and can't move
+  # without patching, whereas Argus's ports are config-driven.
+  tcp_port: 5698
+  udp_port: 5699
   bind_address: "0.0.0.0"
 
 registration:

@@ -2,7 +2,7 @@
 # Container entrypoint: launch argus (as the argus user) +
 # stunnel in parallel, capture both stdout streams, and exit
 # when either child dies. Argus is the long-running tracker
-# daemon (binds 5498 plain); stunnel terminates TLS on 6498
+# daemon (binds 5698 plain); stunnel terminates TLS on 6498
 # and forwards to argus.
 #
 # POSIX-shell only — debian:bookworm-slim's /bin/sh is dash,
@@ -26,7 +26,7 @@ cd /opt/argus
 su argus -s /bin/sh -c '/opt/argus/argus' &
 ARGUS_PID=$!
 
-# Give Argus a moment to bind 5498 before stunnel tries to
+# Give Argus a moment to bind 5698 before stunnel tries to
 # connect-back. Without this, the first TLS client to land
 # before Argus is ready gets a connect-refused that's hard to
 # tell apart from a real failure.

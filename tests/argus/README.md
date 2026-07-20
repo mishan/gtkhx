@@ -17,7 +17,7 @@ v3 trackers would be busywork; Argus is the real thing.
 
 Argus is the only public tracker we have access to that:
 
-- Speaks v1, v2, AND v3 simultaneously on the same TCP port (5498)
+- Speaks v1, v2, AND v3 simultaneously on the same TCP port (5698)
   with automatic version detection.
 - Ships a static binary that runs from a single config file with
   no external dependencies.
@@ -49,7 +49,7 @@ ARG; we deliberately don't auto-track upstream.
 
 ```sh
 docker run --rm \
-    -p 5498:5498 -p 6498:6498 -p 5499:5499/udp \
+    -p 5698:5698 -p 6498:6498 -p 5699:5699/udp \
     gtkhx-argus
 ```
 
@@ -60,13 +60,14 @@ so connecting is just opening the tracker window.
 
 | Port | Protocol  | Purpose                                                |
 |------|-----------|--------------------------------------------------------|
-| 5498 | TCP       | Client listing requests (v1/v2/v3 — auto-detected)     |
-| 6498 | TCP + TLS | Phase D TLS-wrapped listing requests. stunnel sidecar terminates TLS here and forwards to plain Argus on `127.0.0.1:5498`. Self-signed cert generated at image-build time. |
-| 5499 | UDP       | Server registration heartbeats (not driven by tests today) |
+| 5698 | TCP       | Client listing requests (v1/v2/v3 — auto-detected)     |
+| 6498 | TCP + TLS | Phase D TLS-wrapped listing requests. stunnel sidecar terminates TLS here and forwards to plain Argus on `127.0.0.1:5698`. Self-signed cert generated at image-build time. |
+| 5699 | UDP       | Server registration heartbeats (not driven by tests today) |
 
-The TLS port is `6498` rather than the natural `5598` because
-hxtrackd's container already publishes its plain endpoint on
-host:5598. `+1000` is the next clean non-colliding step.
+Argus's plain listener sits at `5698/5699` (not the conventional
+`5498/5499`) so it doesn't collide with hxtrackd under host networking —
+hxtrackd's `5498/5499` are hardcoded and can't move, whereas Argus's
+ports are config-driven. The TLS port stays `6498`.
 
 ## What's enabled
 
@@ -146,7 +147,7 @@ cover.
 
 In the running app:
 
-1. Settings → Tracker host → `localhost:5498` (or whichever port
+1. Settings → Tracker host → `localhost:5698` (or whichever port
    you mapped).
 2. Open the tracker window (Toolbar → Tracker).
 3. Click Refresh.

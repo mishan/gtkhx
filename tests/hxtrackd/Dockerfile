@@ -16,13 +16,14 @@
 #     the hxtrackd binary instead of hxd.
 #
 # Build:    docker build -t gtkhx-hxtrackd tests/hxtrackd
-# Run:      docker run --rm -p 5598:5498 -p 5599:5499/udp gtkhx-hxtrackd
-# Connect:  point GtkHx tracker fetcher at localhost:5598
+# Run:      docker run --rm -p 5498:5498 -p 5499:5499/udp gtkhx-hxtrackd
+# Connect:  point GtkHx tracker fetcher at localhost:5498
 #
-# Host port mapping: 5598/5599 (not 5498/5499) because Argus
-# already claims the conventional tracker ports in the Compose
-# matrix. The tracker_matrix.c entry for "hxtrackd" hard-codes
-# 5598 as the host-side port.
+# Ports: hxtrackd binds its hardcoded HTRK_TCPPORT/HTRK_UDPPORT
+# (5498/5499). In the Compose rig everything runs on host networking and
+# Argus (config-driven) is moved to 5698/5699, so hxtrackd keeps the
+# conventional 5498/5499. The tracker_matrix.c entry for "hxtrackd"
+# hard-codes 5498.
 
 FROM debian:bookworm-slim AS build
 
@@ -115,9 +116,9 @@ RUN chmod 755 /usr/local/bin/docker-entrypoint.sh \
               /usr/local/bin/seed-tracker.py
 
 # Tracker ports — the conventional 5498/tcp client-listing port +
-# 5499/udp server-registration port. Container-internal; host-side
-# mapping (5598/5599) is set at `docker run` time so Argus on
-# 5498/5499 doesn't collide in the multi-target rig.
+# 5499/udp server-registration port (hardcoded HTRK_TCPPORT/UDPPORT).
+# Under host networking in the rig these bind the host directly; Argus
+# is moved to 5698/5699 to stay out of the way.
 EXPOSE 5498/tcp 5499/udp
 
 USER hxtrackd

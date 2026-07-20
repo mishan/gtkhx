@@ -30,9 +30,13 @@
  *     full 6-byte HTRK_MAGIC and silently ignore the v3 version
  *     byte. Covers the probe-then-fallback path in network.c.
  *
- * Container port mapping: Argus uses the conventional 5498/5499
- * (nothing else in the rig binds those). hxtrackd is mapped to
- * host 5598/5599 to dodge the collision.
+ * Container port mapping: the rig runs every container on host
+ * networking (no user-defined bridge — that perturbs the voice
+ * ICE path). hxtrackd's listen ports are hardcoded compile-time
+ * constants (HTRK_TCPPORT/HTRK_UDPPORT = 5498/5499) that can't be
+ * moved without patching, so it keeps 5498/5499 and the
+ * config-driven Argus is shifted up to 5698/5699 (+ TLS 6498) to
+ * avoid the collision.
  */
 const hx_test_tracker hx_test_tracker_matrix[] = {
     {
@@ -58,7 +62,7 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          *
          * TLS: Phase D adds a stunnel sidecar inside the same
          * Argus container that terminates TLS on tcp/6498 and
-         * forwards to plain Argus on 127.0.0.1:5498. Argus
+         * forwards to plain Argus on 127.0.0.1:5698. Argus
          * itself has no native TLS support (we verified by
          * grepping the binary's yaml-tag strings — no tls/cert/
          * ssl keys), so the wrapper is how we exercise the v3
@@ -68,15 +72,13 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          * a pre-pin via GTKHX_KNOWN_HOSTS to dodge the TOFU
          * prompt that would otherwise block a headless run.
          *
-         * Port 6498 (not the natural +100 = 5598) because
-         * hxtrackd's container already publishes its plain
-         * endpoint on host:5598, so +1000 is the next clean
-         * non-colliding step that keeps the port relationship
-         * obvious. */
+         * Argus is shifted to 5698/5699 (TLS 6498) so it doesn't
+         * collide with hxtrackd's un-moveable 5498/5499 under host
+         * networking. */
         .name                    = "argus",
         .host                    = "127.0.0.1",
-        .port                    = 5498,
-        .udp_port                = 5499,
+        .port                    = 5698,
+        .udp_port                = 5699,
         .tls_port                = 6498,
         /* tests/argus/conf/config.yaml seeds three promoted
          * entries (Alpha / Beta / Gamma). Test asserts on this
@@ -100,9 +102,9 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          * the v3 version byte, so we need a real one in the
          * matrix to make sure that fallback can't regress.
          *
-         * Container exposes its internal 5498/5499 on host
-         * 5598/5599 (Argus already claims the conventional
-         * ports above).
+         * Keeps its native 5498/5499 (hardcoded HTRK_TCPPORT/
+         * HTRK_UDPPORT); Argus moved up to 5698/5699 above so
+         * nothing collides under host networking.
          *
          * Caps: V1 only. No V2 (mhxd's tracker doesn't speak v2),
          * no V3, no FEAT_QUERY, no pagination, no TLS.
@@ -113,8 +115,8 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          * record arrives, not a specific count. */
         .name                    = "hxtrackd",
         .host                    = "127.0.0.1",
-        .port                    = 5598,
-        .udp_port                = 5599,
+        .port                    = 5498,
+        .udp_port                = 5499,
         .tls_port                = 0,
         .expected_promoted_count = 0,
         .caps                    = HX_TEST_TRACKER_CAP_V1,
