@@ -1072,35 +1072,33 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
                                    hx_news_node_postid (sel));
 }
 
-/* ---------- Compose window (shared by New Post and Reply) ----------
+/* ---------- Compose window (New Post / Reply) ----------
  *
- * The user fires either New Post (parent_postid = 0) or Reply (parent
- * postid taken from the selected post). Both open the same compose
- * window — subject entry, body text view, Post + Cancel. On Post:
- *   1. hx_news15_post_thread on the wire
- *   2. refresh the containing category so the new post appears
- *
- * The category path comes from the selected node (for a post: its
- * containing-category path, which is what HxNewsNode->path already
- * holds; for a category: the category's own path). */
+ * The window itself — subject + body + the "Replying to ..." context card, the
+ * POST send, and the post-send refresh — lives in the gtkhx-ui Rust crate
+ * (news_compose.rs). The toolbar handlers below keep the selection logic: they
+ * pick the category path + reply target, prefetch the reply body, and hand off
+ * to gtkhx_news_compose_open. Two bridges feed the Rust window back:
+ * gtkhx_news_refresh_category (settle after a post) and
+ * gtkhx_news_node_date_string (format a post's date like the browser's post
+ * pane). */
+extern void gtkhx_news_compose_open (const char *category_path,
+                                     HxNewsNode *reply_to,
+                                     const char *prefill_subject);
 
-struct compose_ctx {
-    gnews_browser *br;
-    char *category_path; /* owned */
-    guint32 parent_postid;
-    GtkWidget *window;
-    GtkWidget *subject_entry;
-    GtkWidget *body_view;
-};
+/* Format `node`'s post date as a newly-allocated string (caller frees), the
+ * same way the post pane shows it; used by the Rust reply-context card. */
+char *gtkhx_news_node_date_string (HxNewsNode *node);
 
-static void
-compose_ctx_free (struct compose_ctx *ctx)
+char *
+gtkhx_news_node_date_string (HxNewsNode *node)
 {
-    if (!ctx) {
-        return;
+    struct date_time dt;
+    if (!node) {
+        return NULL;
     }
-    g_free (ctx->category_path);
-    g_free (ctx);
+    hx_news_node_get_date (node, &dt);
+    return post_date_format (&dt);
 }
 
 /* Find the HxNewsNode that owns the category path, walking the
@@ -1143,269 +1141,23 @@ find_category_node (GListStore *store, const char *path)
     return NULL;
 }
 
-static void
-compose_do_post (GtkButton *btn, gpointer user_data)
+/* Settle after a post: refetch just the affected category if it's still in the
+ * tree, otherwise the whole root. Called from the Rust compose window. */
+void gtkhx_news_refresh_category (const char *path);
+
+void
+gtkhx_news_refresh_category (const char *path)
 {
-    struct compose_ctx *ctx = user_data;
-    const char *subject;
-    GtkTextBuffer *buf;
-    GtkTextIter a, b;
-    char *body;
     HxNewsNode *cat;
-    (void)btn;
-
-    subject = gtk_editable_get_text (GTK_EDITABLE (ctx->subject_entry));
-    if (!subject) {
-        subject = "";
-    }
-
-    buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (ctx->body_view));
-    gtk_text_buffer_get_start_iter (buf, &a);
-    gtk_text_buffer_get_end_iter (buf, &b);
-    body = gtk_text_buffer_get_text (buf, &a, &b, FALSE);
-
-    hx_news15_post_thread (&hx_active_session ()->htlc, ctx->category_path, subject,
-                           ctx->parent_postid, body ? body : (char *)"");
-
-    g_free (body);
-
-    /* Settle: refresh just the affected category if it's still in
-	 * the tree, otherwise the whole root. */
-    if (the_browser) {
-        cat = find_category_node (the_browser->root_store, ctx->category_path);
-        if (cat) {
-            refresh_node (the_browser, cat);
-            g_object_unref (cat);
-        } else {
-            refresh_node (the_browser, NULL);
-        }
-    }
-
-    gtk_window_destroy (GTK_WINDOW (ctx->window));
-}
-
-static void
-compose_cancel (GtkButton *btn, gpointer user_data)
-{
-    struct compose_ctx *ctx = user_data;
-    (void)btn;
-    gtk_window_destroy (GTK_WINDOW (ctx->window));
-}
-
-static void
-compose_window_closed (GtkWindow *win, gpointer user_data)
-{
-    struct compose_ctx *ctx = user_data;
-    (void)win;
-    compose_ctx_free (ctx);
-}
-
-/* Build the "Replying to ..." context strip — sender + date line,
- * subject line, then a scrollable preview of the original body.
- * Returned widget is the container; caller boxes it above the
- * compose form. `reply_to` must have kind == NB_KIND_POST. */
-static GtkWidget *
-build_reply_context_panel (HxNewsNode *reply_to)
-{
-    GtkWidget *outer, *header_row, *meta_lbl, *subj_lbl;
-    GtkWidget *body_scroll, *body_view;
-    GtkTextBuffer *buf;
-    char *meta;
-    char *date_str;
-    const char *body_text;
-
-    outer = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_add_css_class (outer, "card");
-    gtk_widget_set_margin_start (outer, 12);
-    gtk_widget_set_margin_end (outer, 12);
-    gtk_widget_set_margin_top (outer, 10);
-    gtk_widget_set_margin_bottom (outer, 4);
-
-    /* Header row: pinned mini-label + sender/date.
-	 *
-	 * Compact "From <sender> on <date>" line matches the post-pane
-	 * format in the main browser, so the user reads it the same
-	 * way in both places. */
-    header_row = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-    gtk_widget_set_margin_start (header_row, 8);
-    gtk_widget_set_margin_end (header_row, 8);
-    gtk_widget_set_margin_top (header_row, 6);
-
-    struct date_time reply_dt;
-    hx_news_node_get_date (reply_to, &reply_dt);
-    date_str = post_date_format (&reply_dt);
-    const char *reply_sender = hx_news_node_sender (reply_to);
-    meta = g_strdup_printf (
-        _ ("Replying to %1$s — %2$s"),
-        reply_sender && *reply_sender ? reply_sender : "?", date_str);
-    meta_lbl = gtk_label_new (meta);
-    gtk_label_set_xalign (GTK_LABEL (meta_lbl), 0.0f);
-    gtk_label_set_ellipsize (GTK_LABEL (meta_lbl), PANGO_ELLIPSIZE_END);
-    gtk_widget_add_css_class (meta_lbl, "dim-label");
-    gtk_widget_add_css_class (meta_lbl, "caption");
-    g_free (meta);
-    g_free (date_str);
-
-    const char *reply_name = hx_news_node_name (reply_to);
-    subj_lbl = gtk_label_new (reply_name && *reply_name
-                                  ? reply_name
-                                  : _ ("(no subject)"));
-    gtk_label_set_xalign (GTK_LABEL (subj_lbl), 0.0f);
-    gtk_label_set_wrap (GTK_LABEL (subj_lbl), TRUE);
-    gtk_label_set_wrap_mode (GTK_LABEL (subj_lbl), PANGO_WRAP_WORD_CHAR);
-    gtk_widget_add_css_class (subj_lbl, "heading");
-
-    gtk_box_append (GTK_BOX (header_row), meta_lbl);
-    gtk_box_append (GTK_BOX (header_row), subj_lbl);
-    gtk_box_append (GTK_BOX (outer), header_row);
-
-    /* Body preview (scrollable, capped height so the panel doesn't
-	 * crowd out the user's reply box on a long original). */
-    body_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (body_scroll),
-                                    GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
-    gtk_scrolled_window_set_max_content_height (
-        GTK_SCROLLED_WINDOW (body_scroll), 140);
-    gtk_scrolled_window_set_propagate_natural_height (
-        GTK_SCROLLED_WINDOW (body_scroll), TRUE);
-
-    body_view = gtk_text_view_new ();
-    gtk_text_view_set_editable (GTK_TEXT_VIEW (body_view), FALSE);
-    gtk_text_view_set_cursor_visible (GTK_TEXT_VIEW (body_view), FALSE);
-    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (body_view), GTK_WRAP_WORD_CHAR);
-    gtk_widget_set_margin_start (body_view, 8);
-    gtk_widget_set_margin_end (body_view, 8);
-    gtk_widget_set_margin_top (body_view, 2);
-    gtk_widget_set_margin_bottom (body_view, 6);
-    gtk_widget_add_css_class (body_view, "dim-label");
-
-    buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (body_view));
-    /* If we don't have the body cached, the user just clicked Reply
-	 * before the GETTHREAD reply landed. Rather than block, render
-	 * a placeholder — the reply can still be composed; the user has
-	 * the subject + sender + date for context. */
-    const char *reply_body = hx_news_node_body (reply_to);
-    body_text = reply_body ? reply_body
-                           : _ ("(original post body not loaded — open the "
-                                "post first to fetch it)");
-    gtk_text_buffer_set_text (buf, body_text, -1);
-
-    gtkhx_widget_set_child (body_scroll, body_view);
-    gtk_box_append (GTK_BOX (outer), body_scroll);
-
-    return outer;
-}
-
-/* Open a compose window. `reply_to` NULL = new post; non-NULL =
- * reply (must be kind == NB_KIND_POST; the parent_postid + reply
- * context panel come from the node). `prefill_subject` is the
- * initial subject text. */
-static void
-open_compose_window (gnews_browser *br, const char *category_path,
-                     HxNewsNode *reply_to, const char *prefill_subject)
-{
-    struct compose_ctx *ctx;
-    GtkWidget *window, *header, *content, *form, *body_scroll;
-    GtkWidget *subject_row, *subject_lbl;
-    GtkWidget *cancel_btn, *post_btn;
-    guint32 parent_postid = reply_to ? hx_news_node_postid (reply_to) : 0;
-
-    if (!category_path) {
+    if (!the_browser || !path) {
         return;
     }
-
-    ctx = g_new0 (struct compose_ctx, 1);
-    ctx->br = br;
-    ctx->category_path = g_strdup (category_path);
-    ctx->parent_postid = parent_postid;
-
-    window = gtk_window_new ();
-    gtk_window_set_title (GTK_WINDOW (window),
-                          reply_to ? _ ("Reply") : _ ("New Post"));
-    gtk_widget_set_size_request (window, 560, reply_to ? 540 : 380);
-    /* br->window is a PanelWidget,
-     * not a GtkWindow. Transient-for the toolbar window which now
-     * hosts the panel — same target every other panel uses for
-     * sub-dialog parenting. */
-    gtk_window_set_transient_for (GTK_WINDOW (window),
-                                  GTK_WINDOW (toolbar_window));
-    gtk_window_set_modal (GTK_WINDOW (window), TRUE);
-    ctx->window = window;
-
-    /* Header bar with Cancel (left) + Post (right). */
-    header = adw_header_bar_new ();
-    adw_header_bar_set_show_start_title_buttons (ADW_HEADER_BAR (header),
-                                                 FALSE);
-    adw_header_bar_set_show_end_title_buttons (ADW_HEADER_BAR (header), FALSE);
-
-    cancel_btn = gtk_button_new_with_mnemonic (_ ("_Cancel"));
-    post_btn = gtk_button_new_with_mnemonic (_ ("_Post"));
-    gtk_widget_add_css_class (post_btn, "suggested-action");
-
-    g_signal_connect (cancel_btn, "clicked", G_CALLBACK (compose_cancel), ctx);
-    g_signal_connect (post_btn, "clicked", G_CALLBACK (compose_do_post), ctx);
-
-    adw_header_bar_pack_start (ADW_HEADER_BAR (header), cancel_btn);
-    adw_header_bar_pack_end (ADW_HEADER_BAR (header), post_btn);
-    gtk_window_set_titlebar (GTK_WINDOW (window), header);
-
-    /* Layout: optional context panel + subject row + reply body. */
-    content = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);
-
-    if (reply_to && hx_news_node_kind (reply_to) == NB_KIND_POST) {
-        GtkWidget *ctx_panel = build_reply_context_panel (reply_to);
-        gtkhx_box_pack (content, ctx_panel, FALSE, FALSE, 0);
-    }
-
-    form = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
-    gtk_widget_set_margin_start (form, 12);
-    gtk_widget_set_margin_end (form, 12);
-    gtk_widget_set_margin_top (form, 10);
-    gtk_widget_set_margin_bottom (form, 6);
-
-    subject_row = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 8);
-    subject_lbl = gtk_label_new (_ ("Subject:"));
-    gtk_label_set_xalign (GTK_LABEL (subject_lbl), 0.0f);
-    ctx->subject_entry = gtk_entry_new ();
-    gtk_entry_set_activates_default (GTK_ENTRY (ctx->subject_entry), FALSE);
-    gtk_widget_set_hexpand (ctx->subject_entry, TRUE);
-    gtk_editable_set_text (GTK_EDITABLE (ctx->subject_entry),
-                           prefill_subject ? prefill_subject : "");
-    gtk_box_append (GTK_BOX (subject_row), subject_lbl);
-    gtk_box_append (GTK_BOX (subject_row), ctx->subject_entry);
-
-    gtk_box_append (GTK_BOX (form), subject_row);
-    gtkhx_box_pack (content, form, FALSE, FALSE, 0);
-
-    body_scroll = gtk_scrolled_window_new ();
-    gtk_scrolled_window_set_policy (GTK_SCROLLED_WINDOW (body_scroll),
-                                    GTK_POLICY_AUTOMATIC, GTK_POLICY_AUTOMATIC);
-    ctx->body_view = gtk_text_view_new ();
-    gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (ctx->body_view),
-                                 GTK_WRAP_WORD_CHAR);
-    gtk_widget_set_margin_start (ctx->body_view, 4);
-    gtk_widget_set_margin_end (ctx->body_view, 4);
-    gtk_widget_set_margin_top (ctx->body_view, 4);
-    gtk_widget_set_margin_bottom (ctx->body_view, 4);
-    /* Compose surface — the user types the post body here. Themed
-     * via .gtkhx-input so the editor matches the chat / PM inputs. */
-    gtkhx_apply_input_style (ctx->body_view);
-    gtkhx_widget_set_child (body_scroll, ctx->body_view);
-    gtkhx_box_pack (content, body_scroll, TRUE, TRUE, 0);
-
-    gtkhx_widget_set_child (window, content);
-
-    g_signal_connect (window, "destroy", G_CALLBACK (compose_window_closed),
-                      ctx);
-
-    gtk_window_present (GTK_WINDOW (window));
-    /* Focus the subject for new posts, body for replies (the
-	 * subject is already prefilled "Re: …" — the user usually just
-	 * wants to start typing). */
-    if (reply_to) {
-        gtk_widget_grab_focus (ctx->body_view);
+    cat = find_category_node (the_browser->root_store, path);
+    if (cat) {
+        refresh_node (the_browser, cat);
+        g_object_unref (cat);
     } else {
-        gtk_widget_grab_focus (ctx->subject_entry);
+        refresh_node (the_browser, NULL);
     }
 }
 
@@ -1433,7 +1185,7 @@ on_new_post_clicked (GtkButton *btn, gpointer user_data)
         return;
     }
 
-    open_compose_window (br, cat_path, NULL, "");
+    gtkhx_news_compose_open (cat_path, NULL, "");
 }
 
 static void
@@ -1468,7 +1220,7 @@ on_reply_clicked (GtkButton *btn, gpointer user_data)
         fetch_thread (br, sel);
     }
 
-    open_compose_window (br, hx_news_node_path (sel), sel, subj);
+    gtkhx_news_compose_open (hx_news_node_path (sel), sel, subj);
     g_free (subj);
 }
 
