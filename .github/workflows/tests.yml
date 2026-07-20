@@ -112,8 +112,16 @@ jobs:
             -e CARGO_TARGET_DIR=/src/rust-cargo-target \
             -e GTKHX_GLYCIN_NO_SANDBOX=1 \
             -e CI=true \
-            ghcr.io/mishan/gtkhx-ci-base:latest bash -c '
+            ghcr.io/mishan/gtkhx-ci-base:latest mold -run bash -c '
               set -e
+
+              # `mold -run` wraps the whole build so every linker invocation
+              # — the C link of the gtkhx binary and every rustc/cargo link
+              # (workspace libs, test harnesses) — goes through mold instead
+              # of GNU ld. It intercepts ld via LD_PRELOAD, so it needs no
+              # RUSTFLAGS / meson flag changes and doesn'"'"'t perturb the cargo
+              # fingerprint (the build cache stays valid). mold is installed
+              # in the gtkhx-ci-base image.
 
               # All build/test deps (base + GStreamer) are pre-installed in
               # the gtkhx-ci-base image (published from the hotline-docker
