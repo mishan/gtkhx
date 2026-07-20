@@ -1140,8 +1140,10 @@ below for the honest ledger of the many small pieces that remain.
    of per-transfer `gtask` rows + progress + queue-reorder + the
    transfer-model coupling stay C; only the dock shell moved.
 7. ✅ **News** — shipped as two shells: **News 1.0/1.2** (`news.c`, R5.11) and
-   the **News browser 1.5** (`news_browser.c`, R5.12). Viewers, in-buffer
-   search, the threaded tree, and the fetch/post RPC stay C.
+   the **News browser 1.5** (`news_browser.c`, R5.12). The 1.5 browser has
+   since been content-ported in full — `news_browser.c` is **deleted** and the
+   whole browser lives in the gtkhx-ui `news_browser` module (see N2 below).
+   The flat 1.0/1.2 viewer + in-buffer search stay C.
 8. ✅ **Chat window** (`chat.c`) — shipped (R5.13, shell). xtext output +
    input + wire senders stay C; the `AdwTabView` that hosts the pchat/PM tabs
    is C (`chat_tabs.c`). The pchat/PM tab *content trees* were separately
@@ -1293,11 +1295,13 @@ pool; the small ones are now drained, three larger items remain):
   `news_post` chunk builder in `hotline-proto`; a `hxnews-send` crate mirroring
   `hxchat-send` is the optional follow-up).
 
-  The threaded **1.5 browser** (`news_browser.c`, ~2.3k LOC) is a monolithic
+  The threaded **1.5 browser** (`news_browser.c`, ~2.3k LOC) was a monolithic
   GObject/GTK window (tree model, factory, async reply matching, dialogs, one
-  shared struct) with no clean buildable sub-unit, so it's being carved down
+  shared struct) with no clean buildable sub-unit, so it was carved down
   leaf-first into the **`hxnews-model`** crate (pure/GObject bits that unit-test
-  headless — the display-less GTK glue can't) ahead of the GTK port:
+  headless — the display-less GTK glue can't) ahead of the GTK port, then the
+  window itself moved in one port (N2l). **`news_browser.c` is now deleted** —
+  the whole browser is Rust. The N2a–N2m leaf-first build-up:
   - ✅ **N2a** — the post-**threading layout** (`thread_parent_indices`): maps a
     category's flat post list to each post's parent array index, encoding the
     parentid==0 / self / missing / duplicate-id rules the C walker did inline
@@ -1374,9 +1378,9 @@ pool; the small ones are now drained, three larger items remain):
       (shares an `append_dir_node` core with the N2i array builder). `struct
       folder_item` / `news_folder` deleted outright.
     - **Thread** (`rcv_task_news_post`): the existing
-      `gtkhx_proto_parse_news_thread_reply` + a `news_post_new` bridge; `news_post`
-      / `news_item` survive (the thread carrier is per-reply and `news_item` is
-      still the get-post send stub + `pending_threads` key).
+      `gtkhx_proto_parse_news_thread_reply` + a `news_post_new` bridge. (The
+      `news_item` get-post stub was since retired in N2k, and the `news_post`
+      thread carrier moved to Rust in N2m.)
 
     New `news_recv_bridge.c` exposes `htlc->in` + the `*_set_parsed` /
     `news_post_new` shims. **No news code remains in `rcv.c`** — the only news
@@ -1384,12 +1388,50 @@ pool; the small ones are now drained, three larger items remain):
     reply type. hotline-proto + hxnews-model + hxnews-recv are unit-tested; the
     catalog / dirlist / thread paths pass Tier 3 against the live mhxd container.
 
+  - ✅ **N2k — get-post stub retired** (`struct news_item`). `hx_news15_get_post`
+    now takes `(path, postid, mime, target)` scalars directly; the thread fetch
+    rides the target `HxNewsNode` ref (transfer-full) straight through the reply
+    task to the thread handler, so the `pending_threads` correlation table and
+    the stub struct are both gone. `struct news_item` / `news_group` /
+    `news_parts` deleted — no C news wire struct is left on the send side.
+
+  - ✅ **N2l — the browser itself** (`news_browser.c` → gtkhx-ui `news_browser`).
+    The last big rock: the ~1.5k-LOC monolith moved to Rust in one logical port.
+    A `NewsBrowser` thread-local singleton owns construction, the two-pane
+    layout, the RPC fetch flow (DIRLIST / CATLIST / GETTHREAD), the three reply
+    handlers (`gnews_browser_handle_*`, now `#[no_mangle]` Rust), refresh, the
+    toolbar, selection→content, the disconnected-state `AdwBanner`, and the
+    panel lifecycle (`open_news_browser` + the `PanelWidget::presented` hook).
+    The in-flight fetch tables (`pending_dirlists` / `pending_catlists`) became
+    Rust thread-local `HashMap`s (carrier-ptr → reffed target node). The whole
+    N2d–N2j Rust surface (`news_tree` / `news_render` / `news_compose` /
+    `news_dialogs` + the `hxnews-model` builders) is now stitched together from
+    Rust rather than C. `news_browser.c` is **deleted**; the only news code left
+    in `rcv.c` is the generic reply dispatch. A handful of C leaves stay in
+    `news_recv_bridge.c`: `htlc->in`, the live htlc version + access bitmap, the
+    post-date formatter (`hl_date_decode` + `strftime`), and the row-icon loader
+    (pixbuf → 1.5× → texture). Not headless-testable (display-less GTK); verified
+    by build + the news Tier 3 suite + a manual GUI pass.
+
+  - ✅ **N2m — the reply carriers** (`gnews_folder` / `gnews_catalog` /
+    `news_post`) moved to a Rust-owned `carrier` module in `hxnews-recv`: a
+    shared `{ path, parsed }` box for the folder / catalog fetch carriers, a
+    `{ body, target }` box for the GETTHREAD reply. The `#[no_mangle]` accessors
+    keep the exact symbol names the browser (gtkhx-ui) and senders (hxnews-send)
+    link against, and C only ever sees an opaque `void *` (`rcv.c` / `gtkhx.c`
+    pass it straight through, never dereferencing). `news_send_bridge.c` deleted
+    wholesale; the carrier + `news_post` accessors left `news_recv_bridge.c`;
+    `struct gnews_folder` / `gnews_catalog` / `news_post` / `path_hist` removed
+    from `session.h`. The dead `listing` flag (written by the senders, read by
+    nobody since the two-window UI retired) and its `mark_listing` accessors went
+    with them.
+
   **Remaining:** the `proto_helpers.c` per-chunk parse shims
-  (`hx_newscat_parse` / `hx_news_dirlist_parse_*`) are now production-dead
-  (test-only) — a small cleanup. The `pending_*` GHashTables + `news_post`
-  frees + the window/dock scaffold stay C. The `hx_news15_get_post` stub
-  (`struct news_item`) is the last C news wire struct; retiring it is a
-  separate send-path change.
+  (`hx_newscat_parse` / `hx_news_dirlist_parse_*`) are production-dead
+  (test-only) — a small cleanup. Otherwise the 1.5 news path is fully Rust end
+  to end: the only C left is `news_recv_bridge.c`'s four leaves (`htlc->in`,
+  htlc version + access, post-date formatter, row-icon loader) and `rcv.c`'s
+  generic trans-ID dispatch.
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
