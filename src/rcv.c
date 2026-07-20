@@ -1580,45 +1580,12 @@ rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
  * hxnews-send's task_new still registers it; the symbol now resolves against
  * hxnews-recv. */
 
-void
-rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item)
-{
-    /* chunk-walk + CR2LF + strip_ansi moved to Rust
-	 * parse_news_thread_reply. The TASK_ERROR short-circuit is
-	 * preserved (the Rust parser drops the body on that path and
-	 * sets has_task_error). The C side keeps the news_post
-	 * allocation + emit so the news_item back-pointer can be
-	 * stitched in without crossing the FFI.
-	 *
-	 * Buffer sized at 65536 to match what real-world NEWSDATA
-	 * bodies need (chunk lens are u16 = 65535 max, so this is the
-	 * comfortable cap — text_cap-1 inside the parser is 65535,
-	 * matching the wire ceiling). */
-    char *buf = g_malloc (65536);
-    struct gtkhx_proto_news_thread_reply r;
-    gtkhx_proto_parse_news_thread_reply (htlc->in.buf, htlc->in.pos,
-                                         (uint8_t *)buf, 65536, &r);
-
-    if (r.has_task_error) {
-        g_free (buf);
-        return;
-    }
-    if (!r.has_text) {
-        /* A well-formed reply carries NEWSDATA. If the server sent
-		 * a reply without it — protocol corruption, future
-		 * revision, or chunks in an order we don't expect — bail
-		 * rather than emitting an empty article. */
-        debug_log ("news",
-                   "rcv_task_news_post: reply missing HTLC_DATA_NEWSDATA");
-        g_free (buf);
-        return;
-    }
-
-    struct news_post *post = g_malloc (sizeof (struct news_post));
-    post->buf = buf;
-    post->item = item;
-    gtkhx_session_emit_news_thread (gtkhx_session_get_default (), post);
-}
+/* rcv_task_news_post moved to the hxnews-recv Rust crate — it parses the
+ * GETTHREAD NEWSDATA body (gtkhx_proto_parse_news_thread_reply), bails on a
+ * TASK_ERROR / body-less reply, then builds the news_post carrier via
+ * news_post_new (news_recv_bridge.c) and emits news-thread. hxnews-send's
+ * get_post sender still registers it; the symbol now resolves against
+ * hxnews-recv. With this, no news code remains in rcv.c. */
 
 void
 rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text)

@@ -51,10 +51,10 @@ extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
 extern void rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn);
 extern void rcv_task_msg (struct htlc_conn *htlc, char *msg_buf);
 /* rcv_task_newscat_list moved to the hxnews-recv Rust crate as a 3-arg
- * rcv_task_fn (htlc, ptr, data). No C caller references it by name — the
- * hxnews-send cat_list / fldr_list senders register them via task_new — so the
- * old 2-arg prototypes are gone rather than left to drift from the real ABI. */
-extern void rcv_task_news_post (struct htlc_conn *htlc, struct news_item *item);
+ * rcv_task_fn (htlc, ptr, data). No C caller references them by name — the
+ * hxnews-send cat_list / fldr_list / get_post senders register them via
+ * task_new — so the old 2-arg prototypes are gone rather than left to drift
+ * from the real ABI. */
 extern void rcv_task_login (struct htlc_conn *htlc, char *pass);
 extern void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat,
                                  int text);

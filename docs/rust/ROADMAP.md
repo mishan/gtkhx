@@ -1357,14 +1357,39 @@ pool; the small ones are now drained, three larger items remain):
     entries into a `#[repr(C)]` array and calls it; the path-join
     (`build_child_path`) moved to Rust too. 3 headless tests.
 
-  **Remaining:** just the reply-handler *bookkeeping* — the `pending_*`
-  GHashTables + C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`
-  that route DIRLIST/CATLIST/GETTHREAD replies back into the tree. No node
-  construction is left in C; what remains is the pending-request table lookup +
-  the `news_folder`/`news_group`/`news_post` wire-struct frees — model plumbing
-  tied to the C protocol structs (not headless-testable) — plus the window/dock
-  scaffold. All the user-facing view work is now Rust; the rest wants runtime
-  testing against a live 1.5 server (Badmoon/mhxd).
+  - ✅ **N2j — the 1.5 news *receive path*.** The three reply handlers moved
+    out of `rcv.c` into the new **`hxnews-recv`** crate (they were already
+    registered from Rust via `hxnews-send`'s `task_new`, so only the bodies
+    moved; the symbols resolve against `hxnews-recv` at the final link). Each
+    parses `htlc->in` to a Rust-owned handle and emits its `GtkhxSession` signal,
+    and the view handler feeds that handle straight to the `hxnews-model` builder
+    — the old round-trip through C GUI structs (`news_item` / `news_group` /
+    `news_folder` / `folder_item`) is gone, and those structs were deleted.
+    - **Catalog** (`rcv_task_newscat_list`): `gtkhx_proto_parse_catlist` →
+      `gnews_catalog->parsed` → `hx_news_build_category_tree_from_catlist` (shares
+      the threading core with the N2d array builder).
+    - **Dirlist** (`rcv_task_newsfolder_list`): a new whole-message
+      `parse_dirlist` in `hotline-proto` (walks the NEWSFOLDERITEM / CATEGORYITEM
+      chunks) → `gnews_folder->parsed` → `hx_news_build_dirlist_from_dirlist`
+      (shares an `append_dir_node` core with the N2i array builder). `struct
+      folder_item` / `news_folder` deleted outright.
+    - **Thread** (`rcv_task_news_post`): the existing
+      `gtkhx_proto_parse_news_thread_reply` + a `news_post_new` bridge; `news_post`
+      / `news_item` survive (the thread carrier is per-reply and `news_item` is
+      still the get-post send stub + `pending_threads` key).
+
+    New `news_recv_bridge.c` exposes `htlc->in` + the `*_set_parsed` /
+    `news_post_new` shims. **No news code remains in `rcv.c`** — the only news
+    path through it is the generic `hx_rcv_task` trans-ID dispatch shared by every
+    reply type. hotline-proto + hxnews-model + hxnews-recv are unit-tested; the
+    catalog / dirlist / thread paths pass Tier 3 against the live mhxd container.
+
+  **Remaining:** the `proto_helpers.c` per-chunk parse shims
+  (`hx_newscat_parse` / `hx_news_dirlist_parse_*`) are now production-dead
+  (test-only) — a small cleanup. The `pending_*` GHashTables + `news_post`
+  frees + the window/dock scaffold stay C. The `hx_news15_get_post` stub
+  (`struct news_item`) is the last C news wire struct; retiring it is a
+  separate send-path change.
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`

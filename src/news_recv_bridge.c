@@ -47,3 +47,16 @@ gnews_folder_set_parsed (struct gnews_folder *g, void *parsed)
         g->parsed = parsed;
     }
 }
+
+void *
+news_post_new (struct news_item *item, const guint8 *body, gsize body_len)
+{
+    /* The news-thread carrier: the parsed body (owned, g_strndup'd so
+     * gnews_browser_handle_thread frees it with g_free) + the stub news_item
+     * that keys pending_threads. Created per-reply — the Rust receive handler
+     * can't sizeof the C struct across the FFI, so it's built here. */
+    struct news_post *post = g_malloc (sizeof (struct news_post));
+    post->buf = g_strndup ((const char *) body, body_len);
+    post->item = item;
+    return post;
+}
