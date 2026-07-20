@@ -11,7 +11,12 @@
  * and emits the HTLC frame.
  */
 
-extern void hx_news15_get_post (struct htlc_conn *htlc, struct news_item *item);
+/* GETTHREAD: fetch a post's body. `target` is the HxNewsNode * being fetched,
+ * transfer-full — the ref rides the reply task to gnews_browser_handle_thread
+ * (which unrefs it), or is released here if nothing is sent. */
+extern void hx_news15_get_post (struct htlc_conn *htlc, const char *path,
+                                guint32 postid, const char *mime_type,
+                                void *target);
 extern void hx_news15_cat_list (struct htlc_conn *htlc,
                                 struct gnews_catalog *gcnews);
 extern void hx_news15_fldr_list (struct htlc_conn *htlc,

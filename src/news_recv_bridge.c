@@ -20,6 +20,10 @@
 #include "session.h"  /* struct gnews_catalog / gnews_folder */
 #include "news_recv_bridge.h"
 
+/* hxnews-model — clear the "fetch in flight" flag so a failed GETTHREAD can be
+ * retried. HxNewsNode * crosses as a GObject *. */
+extern void hx_news_node_set_body_fetching (void *node, gboolean fetching);
+
 const guint8 *
 hx_htlc_in_buf (struct htlc_conn *htlc)
 {
@@ -49,14 +53,26 @@ gnews_folder_set_parsed (struct gnews_folder *g, void *parsed)
 }
 
 void *
-news_post_new (struct news_item *item, const guint8 *body, gsize body_len)
+news_post_new (void *target, const guint8 *body, gsize body_len)
 {
     /* The news-thread carrier: the parsed body (owned, g_strndup'd so
-     * gnews_browser_handle_thread frees it with g_free) + the stub news_item
-     * that keys pending_threads. Created per-reply — the Rust receive handler
-     * can't sizeof the C struct across the FFI, so it's built here. */
+     * gnews_browser_handle_thread frees it with g_free) + the HxNewsNode being
+     * fetched (carrying its transfer-full ref). Created per-reply — the Rust
+     * receive handler can't sizeof the C struct across the FFI, so it's here. */
     struct news_post *post = g_malloc (sizeof (struct news_post));
     post->buf = g_strndup ((const char *) body, body_len);
-    post->item = item;
+    post->target = target;
     return post;
+}
+
+void
+news_post_fetch_failed (void *target)
+{
+    /* GETTHREAD reply that carried no usable body (TASK_ERROR / missing
+     * NEWSDATA). No news_post is emitted, so release the transfer-full target
+     * ref here and clear body_fetching so the user can retry. */
+    if (target) {
+        hx_news_node_set_body_fetching (target, FALSE);
+        g_object_unref (target);
+    }
 }

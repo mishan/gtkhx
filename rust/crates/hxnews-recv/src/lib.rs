@@ -37,8 +37,10 @@ extern "C" {
         out: *mut NewsThreadReply,
     ) -> bool;
     // news_recv_bridge.c — build the news_post carrier ({ g_strndup'd body, the
-    // stub news_item that keys pending_threads }) for gnews_browser_handle_thread.
-    fn news_post_new(item: *mut c_void, body: *const u8, body_len: usize) -> *mut c_void;
+    // target HxNewsNode }) for gnews_browser_handle_thread; and the failure
+    // counterpart that releases the target ref + clears body_fetching.
+    fn news_post_new(target: *mut c_void, body: *const u8, body_len: usize) -> *mut c_void;
+    fn news_post_fetch_failed(target: *mut c_void);
     // gtkhx-session — the singleton + the news signal emits.
     fn gtkhx_session_get_default() -> *mut c_void;
     fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void);
@@ -119,29 +121,32 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
     gtkhx_session_emit_news_folder(gtkhx_session_get_default(), gfnews);
 }
 
-/// `void rcv_task_news_post(struct htlc_conn *htlc, void *item, void *data)` —
+/// `void rcv_task_news_post(struct htlc_conn *htlc, void *target, void *data)` —
 /// the HTLC_HDR_GETTHREAD reply handler (a post's body; was `rcv.c`).
 ///
-/// Parses the NEWSDATA body out of `htlc->in`, bails on a TASK_ERROR or a reply
-/// with no body (no signal, matching the old C), then hands the body + the stub
-/// `news_item` (the `pending_threads` key) to `news_post_new` and emits
-/// `news-thread`. Unlike the catalog / folder carriers this one is created
-/// per-reply rather than pre-allocated, so the body rides as a plain
-/// `g_strndup`'d string on `news_post` (the existing shape) rather than an owned
-/// parse handle.
+/// `target` is the `HxNewsNode *` being fetched, carrying a transfer-full ref
+/// (set up by `hx_news15_get_post` → `fetch_thread`). Parses the NEWSDATA body
+/// out of `htlc->in`; on a TASK_ERROR / body-less reply it releases the ref via
+/// `news_post_fetch_failed` (no signal, so nothing else would). Otherwise it
+/// hands the body + `target` to `news_post_new` and emits `news-thread`, and the
+/// ref rides on to `gnews_browser_handle_thread`, which unrefs it.
+///
+/// Unlike the catalog / folder carriers this one is created per-reply rather
+/// than pre-allocated, so the body rides as a plain `g_strndup`'d string on
+/// `news_post` (the existing shape) rather than an owned parse handle.
 ///
 /// # Safety
 /// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `htlc` is a
-/// valid `struct htlc_conn *`; `item` is the stub `struct news_item *` task
-/// pointer.
+/// valid `struct htlc_conn *`; `target` is the `HxNewsNode *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_news_post(
     htlc: *mut c_void,
-    item: *mut c_void,
+    target: *mut c_void,
     _data: *mut c_void,
 ) {
     let buf = hx_htlc_in_buf(htlc);
     if buf.is_null() {
+        news_post_fetch_failed(target);
         return;
     }
     let len = hx_htlc_in_pos(htlc);
@@ -151,8 +156,9 @@ pub unsafe extern "C" fn rcv_task_news_post(
     let mut reply = NewsThreadReply::default();
     gtkhx_proto_parse_news_thread_reply(buf, len, text.as_mut_ptr(), text.len(), &mut reply);
     if reply.has_task_error != 0 || reply.has_text == 0 {
+        news_post_fetch_failed(target);
         return;
     }
-    let post = news_post_new(item, text.as_ptr(), reply.text_len as usize);
+    let post = news_post_new(target, text.as_ptr(), reply.text_len as usize);
     gtkhx_session_emit_news_thread(gtkhx_session_get_default(), post);
 }

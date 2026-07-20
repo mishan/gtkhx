@@ -20,29 +20,8 @@
 
 #include <glib.h>
 
-#include "session.h" /* struct news_item / news_group / gnews_catalog / gnews_folder */
+#include "session.h" /* struct gnews_catalog / gnews_folder */
 #include "news_send_bridge.h"
-
-const char *
-news_item_group_path (struct news_item *item)
-{
-    return (item && item->group) ? item->group->path : NULL;
-}
-
-guint32
-news_item_postid (struct news_item *item)
-{
-    return item ? item->postid : 0;
-}
-
-const char *
-news_item_mime0 (struct news_item *item)
-{
-    if (item && item->partcount > 0 && item->parts) {
-        return item->parts[0].mime_type;
-    }
-    return NULL;
-}
 
 const char *
 gnews_catalog_path (struct gnews_catalog *g)

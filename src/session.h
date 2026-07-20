@@ -136,33 +136,19 @@ struct date_time {
     guint32 seconds;
 };
 
+/* The news-thread (GETTHREAD reply) carrier: the parsed body + the HxNewsNode
+ * being fetched (an opaque `void *target`, carrying a transfer-full ref).
+ * Built by news_post_new (news_recv_bridge.c) for the Rust receive handler;
+ * consumed + freed by gnews_browser_handle_thread. */
 struct news_post {
     char *buf;
-    struct news_item *item;
+    void *target;
 };
 
-struct news_parts {
-    int size;
-    char *mime_type;
-};
-
-struct news_item {
-    guint32 postid, parentid;
-    char *sender;
-    char *subject;
-    struct date_time date;
-    guint16 partcount;
-    guint16 size;
-    struct news_parts *parts;
-    GtkTreeIter iter;
-    struct news_group *group;
-};
-
-struct news_group {
-    int post_count;
-    struct news_item *posts;
-    char *path;
-};
+/* struct news_item / news_group / news_parts retired — they were the get-post
+ * request stub + the pending-threads correlation key. The thread fetch now
+ * rides the target HxNewsNode ref straight through the reply task, so no C
+ * news wire struct is left. */
 
 struct gnews_catalog {
     /* Owned `CatList *` from gtkhx_proto_parse_catlist, stashed by the Rust
