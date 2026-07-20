@@ -165,7 +165,10 @@ struct news_group {
 };
 
 struct gnews_catalog {
-    struct news_group *group;
+    /* Owned `CatList *` from gtkhx_proto_parse_catlist, stashed by the Rust
+     * receive handler (rcv_task_newscat_list, hxnews-recv) and freed by
+     * gnews_browser_handle_catlist. Opaque here — only Rust dereferences it. */
+    void *parsed;
     struct gnews_catalog *next, *prev;
     char *path;
     GtkWidget *window;

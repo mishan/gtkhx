@@ -1568,78 +1568,10 @@ rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
     }
 }
 
-/* Translate one parsed hx_newscat_post into the GUI's news_item. The
- * field shapes match 1:1 except for the parts array (which we copy
- * shallowly and steal the mime_type pointers from) and the GTK-only
- * `iter` field (zeroed; news15.c populates it later). The `group`
- * back-pointer is set by the caller. */
-static void
-news_item_take_from_wire (struct news_item *ni, struct hx_newscat_post *p)
-{
-    guint16 j;
-
-    ni->postid = p->postid;
-    ni->parentid = p->parentid;
-    ni->date.base_year = p->date_base_year;
-    ni->date.pad = p->date_pad;
-    ni->date.seconds = p->date_seconds;
-    ni->partcount = p->partcount;
-    ni->size = p->size_total;
-
-    /* Steal ownership of subject + sender strings — the wire struct
-	 * will be cleared next so it won't double-free. */
-    ni->subject = p->subject;
-    ni->sender = p->sender;
-    p->subject = p->sender = NULL;
-
-    if (p->partcount) {
-        ni->parts = g_new0 (struct news_parts, p->partcount);
-        for (j = 0; j < p->partcount; j++) {
-            ni->parts[j].size = p->parts[j].size;
-            ni->parts[j].mime_type = p->parts[j].mime_type;
-            p->parts[j].mime_type = NULL; /* stolen */
-        }
-    } else {
-        ni->parts = NULL;
-    }
-
-    memset (&ni->iter, 0, sizeof (ni->iter));
-}
-
-void
-rcv_task_newscat_list (struct htlc_conn *htlc, struct gnews_catalog *gcnews)
-{
-    struct news_group *group = g_malloc0 (sizeof (struct news_group));
-    struct hx_newscat parsed;
-    guint32 i;
-
-    if (!hx_newscat_parse (htlc, &parsed)) {
-        /* No CATLIST chunk or malformed payload. Surface an empty
-		 * group rather than a NULL — preserves the original
-		 * behaviour (the parser bailed out of the loop and still
-		 * emitted an empty signal payload). */
-        group->post_count = 0;
-        group->posts = NULL;
-        gcnews->group = group;
-        gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
-        return;
-    }
-
-    group->post_count = parsed.post_count;
-    if (parsed.post_count) {
-        group->posts = g_new0 (struct news_item, parsed.post_count);
-        for (i = 0; i < parsed.post_count; i++) {
-            news_item_take_from_wire (&group->posts[i], &parsed.posts[i]);
-            group->posts[i].group = group;
-        }
-    } else {
-        group->posts = NULL;
-    }
-    hx_newscat_clear (&parsed);
-
-    gcnews->group = group;
-    gtkhx_session_emit_news_catalog (gtkhx_session_get_default (), gcnews);
-}
+/* rcv_task_newscat_list moved to the hxnews-recv Rust crate — it parses the
+ * CATLIST chunk to an owned handle, stashes it on the gnews_catalog carrier, and
+ * emits news-catalog, with no intermediate news_item / news_group. hxnews-send's
+ * task_new still registers it; the symbol now resolves against hxnews-recv. */
 
 void
 rcv_task_newsfolder_list (struct htlc_conn *htlc, struct gnews_folder *gfnews)

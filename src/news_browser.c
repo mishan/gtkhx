@@ -66,26 +66,19 @@ extern void hx_news_thread_parent_indices (const guint32 *postids,
                                            const guint32 *parentids, gsize n,
                                            int *out_parent);
 
-/* Category tree builder (hxnews-model crate; replaces catlist_thread_into's
- * inline node-tree assembly). Given a category's posts, it creates one
- * NB_KIND_POST HxNewsNode per post, threads replies under their parents (using
- * the parent-index logic above), and appends the top-level posts to `dest`
- * LAST — so each has its full reply subtree before GtkTreeListModel fixes its
- * one-shot expandable verdict. The const char* fields may be NULL; defaults are
- * applied (subject "(no subject)", sender "", mime "text/plain"). Layout of
- * struct hx_news_post_data must match the crate's #[repr(C)] HxNewsPostData. */
-struct hx_news_post_data {
-    guint32 postid;
-    guint32 parentid;
-    const char *subject;
-    const char *sender;
-    const char *mime_type;
-    struct date_time date;
-};
-extern void hx_news_build_category_tree (GListStore *dest,
-                                         const char *category_path,
-                                         const struct hx_news_post_data *posts,
-                                         gsize count);
+/* Category tree builder (hxnews-model crate), reading the owned CatList parse
+ * handle from gtkhx_proto_parse_catlist directly — the receive path stashes it
+ * on gnews_catalog->parsed (rcv_task_newscat_list, hxnews-recv), so there's no
+ * intermediate C news_group. Creates one NB_KIND_POST HxNewsNode per post,
+ * threads replies under their parents, and appends top-level posts to `dest`
+ * LAST (full reply subtree before GtkTreeListModel's one-shot expandable
+ * verdict). The handle is borrowed — freed by the handler via
+ * gtkhx_proto_catlist_free. NULL handle (absent / malformed CATLIST) → no-op. */
+struct gtkhx_proto_catlist;
+extern void hx_news_build_category_tree_from_catlist (
+    GListStore *dest, const char *category_path,
+    const struct gtkhx_proto_catlist *catlist);
+extern void gtkhx_proto_catlist_free (struct gtkhx_proto_catlist *catlist);
 
 /* One DIRLIST entry marshalled for the Rust folder-tree builder. Layout must
  * match the crate's #[repr(C)] HxNewsDirItem. `item_type` is the wire
@@ -592,78 +585,6 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
     return TRUE;
 }
 
-/* Build the thread tree for one news_group. Walks the flat
- * posts[] array, links posts by parentid, and appends top-level
- * posts into `dest` (with replies as their children, recursively
- * via HxNewsNode->children).
- *
- * Posts are visited in array order (server-given chronological).
- * Parents typically appear before their replies, but we don't
- * rely on that — a two-pass build (build map, then attach) makes
- * the order irrelevant. */
-static void
-catlist_thread_into (GListStore *dest, struct news_group *group,
-                     const char *category_path)
-{
-    if (!group || group->post_count <= 0) {
-        return;
-    }
-    gsize count = (gsize) group->post_count;
-
-    /* Marshal the posts into the flat repr(C) array the Rust tree builder
-     * takes. hx_news_build_category_tree (hxnews-model) owns all of it now:
-     * node creation, reply-threading, and the two-pass append ordering that
-     * keeps GtkTreeListModel from fixing a parent as a leaf before its reply
-     * subtree exists. The const char* fields are borrowed for the call — Rust
-     * copies them into the nodes and applies the defaults. */
-    struct hx_news_post_data *data = g_new0 (struct hx_news_post_data, count);
-    for (gsize i = 0; i < count; i++) {
-        struct news_item *it = &group->posts[i];
-        data[i].postid = it->postid;
-        data[i].parentid = it->parentid;
-        data[i].subject = it->subject;
-        data[i].sender = it->sender;
-        data[i].mime_type
-            = (it->partcount > 0 && it->parts && it->parts[0].mime_type)
-                  ? it->parts[0].mime_type
-                  : NULL;
-        data[i].date = it->date;
-    }
-    hx_news_build_category_tree (dest, category_path, data, count);
-    g_free (data);
-}
-
-/* Free a news_group + its child news_items + their owned strings.
- * Mirrors the partial-cleanup the existing rcv-task path leaves us
- * with (the rcv path g_strdup-s subject, sender, mime_type into the
- * news_item and we never free them anywhere — the legacy
- * output_news_catalog just holds onto the group for the window's
- * lifetime). */
-static void
-news_group_free (struct news_group *group)
-{
-    int i;
-    if (!group) {
-        return;
-    }
-    if (group->posts) {
-        for (i = 0; i < group->post_count; i++) {
-            struct news_item *it = &group->posts[i];
-            g_free (it->subject);
-            g_free (it->sender);
-            if (it->parts) {
-                int j;
-                for (j = 0; j < it->partcount; j++) {
-                    g_free (it->parts[j].mime_type);
-                }
-                g_free (it->parts);
-            }
-        }
-        g_free (group->posts);
-    }
-    g_free (group);
-}
-
 gboolean
 gnews_browser_handle_catlist (gpointer gcnews_p)
 {
@@ -685,12 +606,16 @@ gnews_browser_handle_catlist (gpointer gcnews_p)
     g_hash_table_remove (pending_catlists, gcnews);
 
     GListStore *ch = target ? hx_news_node_children (target) : NULL;
-    if (br && ch && gcnews->group) {
-        catlist_thread_into (ch, gcnews->group, hx_news_node_path (target));
+    if (br && ch) {
+        /* Build straight from the Rust CatList handle stashed by
+         * rcv_task_newscat_list — no intermediate C news_group. A NULL handle
+         * (absent / malformed CATLIST) builds nothing, matching the old
+         * empty-group behaviour. */
+        hx_news_build_category_tree_from_catlist (
+            ch, hx_news_node_path (target), gcnews->parsed);
     }
 
-    /* Free the parsed group + the stub. */
-    news_group_free (gcnews->group);
+    gtkhx_proto_catlist_free (gcnews->parsed);
     g_free (gcnews->path);
     g_free (gcnews);
 

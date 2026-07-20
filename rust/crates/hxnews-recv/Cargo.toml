@@ -1,0 +1,19 @@
+[package]
+name = "hxnews-recv"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "1.5 threaded-news receive handlers (Rust; the rcv_task_news* bodies moved out of rcv.c)"
+publish = false
+
+[lib]
+# staticlib: the FFI seam — hxnews-send's task_new calls resolve
+#            rcv_task_newscat_list against this at the final C link.
+# rlib: for any future Rust consumer.
+crate-type = ["staticlib", "rlib"]
+
+# Pure FFI glue: it parses via hotline-proto's C ABI (gtkhx_proto_parse_catlist),
+# reads htlc->in + stashes the handle via the news_recv_bridge.c shims, and emits
+# through gtkhx-session's C ABI. All resolved at the final C link, so no Rust
+# deps here.
+[dependencies]

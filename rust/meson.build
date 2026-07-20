@@ -155,6 +155,7 @@ rust_sources = files(
   'crates/hxchat-send/src/tests.rs',
   'crates/hxnews-send/src/lib.rs',
   'crates/hxnews-send/src/tests.rs',
+  'crates/hxnews-recv/src/lib.rs',
   'crates/hxchat-model/src/lib.rs',
   'crates/hxchat-model/src/tests.rs',
   'crates/hxchat-model/src/input_history.rs',
@@ -198,6 +199,7 @@ rust_sources = files(
   'crates/hxtext/Cargo.toml',
   'crates/hxchat-send/Cargo.toml',
   'crates/hxnews-send/Cargo.toml',
+  'crates/hxnews-recv/Cargo.toml',
   'crates/hxchat-model/Cargo.toml',
   'crates/hxmember-model/Cargo.toml',
   'crates/hxnews-model/Cargo.toml',
@@ -447,6 +449,19 @@ rust_hxnews_send_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxnews_send',
+  ],
+)
+
+# hxnews-recv — the 1.5 news receive handlers (rcv_task_news* bodies moved out
+# of rcv.c). hxnews-send's task_new calls resolve rcv_task_newscat_list against
+# this, so it must follow rust_hxnews_send_dep on the link line (consumer before
+# provider). Parses via hotline-proto's C ABI + emits via gtkhx-session; all
+# resolved at the final C link.
+rust_hxnews_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxnews_recv',
   ],
 )
 

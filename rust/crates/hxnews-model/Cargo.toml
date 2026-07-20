@@ -20,3 +20,7 @@ crate-type = ["staticlib", "rlib"]
 [dependencies]
 glib = { workspace = true }
 gio = { workspace = true }
+# The native CatList parse tree, read directly by
+# hx_news_build_category_tree_from_catlist (the receive-path builder) instead of
+# re-marshalling through a #[repr(C)] array.
+hotline-proto = { path = "../hotline-proto" }

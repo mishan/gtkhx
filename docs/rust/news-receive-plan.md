@@ -164,7 +164,25 @@ carrier struct nor the signal marshalling ever dereferences it.
   the existing `hx_news_build_category_tree` (keep both, or make the array
   variant a thin adapter — the threading logic + tests stay one place).
 
-## Phase A — catalog (`news-catalog`)
+## Phase A — catalog (`news-catalog`) ✅ shipped
+
+Done on `claude/news-recv-catalog`. `rcv_task_newscat_list` is now Rust
+(`hxnews-recv`): it parses `htlc->in` to the owned `CatList` handle (the
+pre-existing `gtkhx_proto_parse_catlist`), stashes it on `gnews_catalog->parsed`
+(a new `void *`, was `->group`) via `news_recv_bridge.c`, and emits
+`news-catalog`. `gnews_browser_handle_catlist` feeds the handle straight to the
+new `hx_news_build_category_tree_from_catlist` (hxnews-model, sharing one
+threading core with the array builder) and frees it. Deleted from C:
+`rcv_task_newscat_list` + `news_item_take_from_wire` (rcv.c),
+`catlist_thread_into` + `news_group_free` (news_browser.c). `struct news_group`
+/ `struct news_item` survive for the thread stub + get-post send.
+`proto_helpers.c::hx_newscat_parse` is now production-unused but kept — its
+proto test (`test_newscat.c`) still exercises it; removing both is a small
+follow-up. Verified: hxnews-model cargo tests (+2 from-catlist), full build,
+unit+proto 64, and the Tier 3 `news_catlist` fetch against the live mhxd
+container.
+
+Original step list:
 
 1. `hotline-proto`: add an owned-handle catlist parse + free (or box the
    existing `hx_newscat`). Cargo tests for the handle lifecycle.

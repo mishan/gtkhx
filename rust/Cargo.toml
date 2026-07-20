@@ -12,6 +12,7 @@ members = [
     "crates/gtkhx-ui",
     "crates/hxchat-send",
     "crates/hxnews-send",
+    "crates/hxnews-recv",
     "crates/hxchat-model",
     "crates/hxmember-model",
     "crates/hxnews-model",
