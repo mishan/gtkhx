@@ -1,4 +1,5 @@
-GtkHx is a GTK+ Hotline Client originally based on Hx.
+GtkHx is a GTK+ Hotline Client originally based on Hx. Originally written in C, and currently
+being rewritten in Rust.
 
 ## Features
 
