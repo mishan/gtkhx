@@ -75,10 +75,12 @@ gtkhx_sources = files(
   # hxnews-send Rust crate (rust_hxnews_send_dep below). news_send_bridge.c is
   # the C struct-field accessor shim it calls (mirrors chat_send_bridge.c).
   'news_send_bridge.c',
-  # news_recv_bridge.c — C-struct accessors for the Rust 1.5 news receive
-  # handlers (hxnews-recv): htlc->in bytes + the catalog carrier's parse handle.
+  # news_recv_bridge.c — C-struct accessors + leaves for the Rust 1.5 news
+  # receive + browser (gtkhx-ui news_browser): htlc->in bytes, the catalog /
+  # folder carrier parse handles, htlc version+access, the post-date formatter,
+  # and the row-icon loader. The whole news browser (news_browser.c) is gone —
+  # it lives in the gtkhx-ui `news_browser` Rust module now.
   'news_recv_bridge.c',
-  'news_browser.c',
   'notify.c',
   'options.c',
   'path_hldir.c',

@@ -45,6 +45,35 @@ void *news_post_new (void *target, const guint8 *body, gsize body_len);
  * reply carries no body (so no news_post is emitted to carry it onward). */
 void news_post_fetch_failed (void *target);
 
+/* news_post carrier read/free for the Rust GETTHREAD reply handler. */
+void *news_post_target (void *post);
+const char *news_post_body (void *post);
+void news_post_free (void *post);
+
+/* ---- session / htlc accessors for the Rust news browser ----
+ * The browser gates its RPC + toolbar sensitivity on the live session version
+ * and access bitmap, which live on the C htlc_conn. */
+int gtkhx_news_htlc_version (void);
+int gtkhx_news_access_has (int bit);
+int gtkhx_news_access_permits (int bit);
+
+/* ---- gnews_folder / gnews_catalog carriers ----
+ * The Rust browser can't sizeof the session.h structs, so it allocates the
+ * dirlist / catlist request carriers (path-only stubs), reads their parsed
+ * handle after the reply lands, and frees them here. */
+void *gnews_folder_new (const char *path);
+void *gnews_folder_parsed (void *g);
+void gnews_folder_free (void *g);
+void *gnews_catalog_new (const char *path);
+void *gnews_catalog_parsed (void *g);
+void gnews_catalog_free (void *g);
+
+/* Format a post node's date (hl_date_decode + strftime) as a newly-allocated
+ * string (caller g_free's), and load a row-icon resource as a 1.5x-upscaled
+ * GdkPaintable (NULL on miss). Both are C leaves the Rust news browser calls. */
+char *gtkhx_news_node_date_string (void *node);
+void *gtkhx_news_load_icon_paintable (const char *resource);
+
 G_END_DECLS
 
 #endif /* GTKHX_NEWS_RECV_BRIDGE_H */
