@@ -50,6 +50,9 @@ jobs:
   build-and-test:
     name: build + unit + proto + integration
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read        # pull the pre-built base images from GHCR
     # The test-server rig is orchestrated through tests/docker-compose.yml.
     # Every container runs on host networking (no user-defined bridge —
     # that adds an interface the host-networked WebRTC voice test's ICE
@@ -61,6 +64,17 @@ jobs:
     steps:
       - name: checkout
         uses: actions/checkout@v4
+
+      - name: log in to GHCR
+        # Pull the pre-built base images published from the hotline-docker
+        # repo: gtkhx-ci-base (the build toolchain) and the five server/proxy
+        # images the test overlays build FROM. Login is a no-op for public
+        # packages; required if they're private and this repo has read access.
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: cache rust build
         # The build runs inside a nested Fedora container writing into the
@@ -98,24 +112,13 @@ jobs:
             -e CARGO_TARGET_DIR=/src/rust-cargo-target \
             -e GTKHX_GLYCIN_NO_SANDBOX=1 \
             -e CI=true \
-            fedora:43 bash -c '
+            ghcr.io/mishan/gtkhx-ci-base:latest bash -c '
               set -e
 
-              # Base deps (no GStreamer) for the voice-disabled build.
-              # desktop-file-utils + appstream back the validate-desktop /
-              # validate-metainfo meson tests; glycin-loaders back the
-              # hx-image-decode decode tests.
-              dnf -y install \
-                meson ninja-build pkgconf-pkg-config gcc \
-                gtk4-devel libadwaita-devel \
-                glib2-devel gobject-introspection-devel \
-                gsound-devel \
-                gettext-devel \
-                desktop-file-utils appstream \
-                libpanel-devel \
-                libseccomp-devel lcms2-devel fontconfig-devel \
-                glycin-loaders \
-                git rust cargo
+              # All build/test deps (base + GStreamer) are pre-installed in
+              # the gtkhx-ci-base image (published from the hotline-docker
+              # repo) — no per-run dnf install. Keep that image in sync with
+              # this build if a new dep is added.
 
               # Fedora rust ignores rust-toolchain.toml; assert the MSRV floor
               # up front so a Fedora rust regression fails loudly here.
@@ -138,17 +141,10 @@ jobs:
                   --exclude hxvoice --exclude hxvoice-runtime \
                   --ignore-rust-version )
 
-              # Install GStreamer, then Build 2: voice ENABLED. Shares the
-              # Cargo target dir with Build 1; the feature-unify crate keeps
-              # the shared deps identical so only voice crates recompile.
-              dnf -y install \
-                libnice-gstreamer1 \
-                libsoup3-devel \
-                gstreamer1-devel \
-                gstreamer1-plugins-base-devel \
-                gstreamer1-plugins-bad-free-devel \
-                gstreamer1-plugins-bad-free-extras \
-                gstreamer1-plugins-good
+              # Build 2: voice ENABLED (GStreamer already present in the base
+              # image). Shares the Cargo target dir with Build 1; the
+              # feature-unify crate keeps the shared deps identical so only
+              # voice crates recompile.
               meson setup build \
                 -Dcargo_target_dir=/src/rust-cargo-target
               meson compile -C build
