@@ -1446,7 +1446,7 @@ test('tracker_v3_listing', test_integration_tracker_v3,
 # HX_TEST_TRACKER_CAP_TLS via its tls_port. Argus has no native
 # TLS support so tests/argus/ adds a stunnel sidecar that
 # terminates TLS on port 6498 and forwards to plain Argus on
-# 5498. The cert is self-signed at image-build time; the test
+# 5698. The cert is self-signed at image-build time; the test
 # accepts any cert inline (we have no GMainLoop / GtkApplication
 # to drive the production TOFU prompt against).
 #

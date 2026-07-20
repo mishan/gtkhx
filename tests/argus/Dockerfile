@@ -24,8 +24,8 @@
 # therefore assert at the parser layer. See README.md.
 #
 # Build:    docker build -t gtkhx-argus tests/argus
-# Run:      docker run --rm -p 5498:5498 -p 5499:5499/udp gtkhx-argus
-# Connect:  point GtkHx tracker fetcher at localhost:5498 (the
+# Run:      docker run --rm -p 5698:5698 -p 5699:5699/udp gtkhx-argus
+# Connect:  point GtkHx tracker fetcher at localhost:5698 (the
 #           default tracker port), or set in Settings → Tracker.
 #
 # The binary is not redistributed — the Dockerfile pulls it fresh at
@@ -104,12 +104,10 @@ FROM debian:bookworm-slim AS runtime
 # we wrap Argus with stunnel:
 #
 #   stunnel terminates TLS on 0.0.0.0:6498, forwards to argus on
-#   127.0.0.1:5498 (the same plain port the existing Tier 3 test
-#   already uses). One container, two ports — plain on 5498, TLS
+#   127.0.0.1:5698 (the same plain port the existing Tier 3 test
+#   already uses). One container, two ports — plain on 5698, TLS
 #   on 6498 — so the existing test stays unchanged and the new
-#   Phase D test points at 6498. (Port 6498 not 5598 because
-#   hxtrackd's container already publishes its plain endpoint on
-#   host:5598; +1000 sidesteps the collision.)
+#   Phase D test points at 6498.
 #
 # Cert: generated at image-build time, self-signed, SHA-256
 # fingerprint is captured into /opt/argus/tls.fingerprint so the
@@ -155,17 +153,16 @@ COPY entrypoint.sh /opt/argus/entrypoint.sh
 RUN chmod +x /opt/argus/entrypoint.sh
 
 # Tracker ports:
-#   5498/tcp — client listing requests over plain TCP (HTRK over
+#   5698/tcp — client listing requests over plain TCP (HTRK over
 #              TCP — what GtkHx speaks against; v1/v2/v3 all
 #              multiplex here)
 #   6498/tcp — TLS-wrapped client listing requests (stunnel
-#              terminates TLS here and forwards to 127.0.0.1:5498).
-#              Skips a thousand instead of the natural +100 to
-#              avoid colliding with hxtrackd's host-port mapping
-#              (its container's 5498 is published on host:5598).
-#   5499/udp — server registration heartbeats (not driven by tests
+#              terminates TLS here and forwards to 127.0.0.1:5698).
+#   Note: the plain listener is 5698 (not the conventional 5498) so it
+#   doesn't collide with hxtrackd's hardcoded 5498 under host networking.
+#   5699/udp — server registration heartbeats (not driven by tests
 #              today)
-EXPOSE 5498/tcp 6498/tcp 5499/udp
+EXPOSE 5698/tcp 6498/tcp 5699/udp
 
 WORKDIR /opt/argus
 

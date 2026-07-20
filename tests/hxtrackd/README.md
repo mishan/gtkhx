@@ -42,14 +42,16 @@ to `/opt/hxtrackd`, and overlays `tests/hxtrackd/conf/hxtrackd.conf`.
 ## Run
 
 ```sh
-docker run --rm -p 5598:5498 -p 5599:5499/udp gtkhx-hxtrackd
+docker run --rm -p 5498:5498 -p 5499:5499/udp gtkhx-hxtrackd
 ```
 
-Host port mapping: `5598/5599` instead of the conventional
-`5498/5499` because Argus already claims those in the multi-
-target Compose rig. The `hxtrackd` row in
-`tests/integration/tracker_matrix.c` hard-codes `5598` as the
-host-side listing port.
+hxtrackd uses its conventional `5498/5499` directly — these are
+compile-time constants (`HTRK_TCPPORT`/`HTRK_UDPPORT`) that can't be
+configured. In the multi-target Compose rig everything runs on host
+networking, so Argus (whose ports *are* config-driven) is shifted up to
+`5698/5699` to avoid the collision, leaving `5498/5499` free for
+hxtrackd. The `hxtrackd` row in `tests/integration/tracker_matrix.c`
+hard-codes `5498` as the listing port.
 
 ## Ports
 
