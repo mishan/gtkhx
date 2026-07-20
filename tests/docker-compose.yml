@@ -2,15 +2,17 @@
 #
 # Brings up the two Hotline servers (mhxd, Janus) and the two trackers
 # (Argus, hxtrackd) on one user-defined bridge network so the servers
-# can register with both trackers by service name. Once up:
+# can register with both trackers by service name, plus a SOCKS5 proxy
+# (microsocks) on host networking for the SOCKS Tier 3 test. Once up:
 #
 #   * Servers   : mhxd @ localhost:5500, Janus @ localhost:5510 (+TLS 5610)
 #   * Trackers  : Argus @ localhost:5498 (+TLS 6498), hxtrackd @ localhost:5598
 #   * Both servers UDP-register with BOTH trackers (argus:5499 + hxtrackd:5499)
+#   * SOCKS5    : localhost:1080 (host-net; forwards to mhxd at 127.0.0.1:5500)
 #
 # Bring it up with the helper scripts:
 #
-#   ./build-all.sh     # build all four images
+#   ./build-all.sh     # build all five images
 #   ./run.sh           # rebuild + tear down + restart the whole rig
 #
 # or directly:
@@ -98,3 +100,20 @@ services:
       - "5610:5610"        # HTLS over TLS
       - "5611:5611"        # HTXF over TLS
       - "5514:5514/udp"    # WebRTC voice (see networking note above)
+
+  # ── SOCKS proxy ───────────────────────────────────────────────────
+  # microsocks, used by tests/integration/test_integration_socks.c. It
+  # runs on host networking — NOT the bridge — because the test asks the
+  # proxy to CONNECT to GTKHX_TEST_HOST:PORT (127.0.0.1:5500), and that
+  # 127.0.0.1 must resolve to the host loopback where mhxd publishes
+  # 5500, not to the proxy container's own loopback. Same reason the
+  # standalone container documents `docker run --network host`. As a
+  # host-net service it can't join the `hotline` bridge or use `ports:`;
+  # it binds the host's 1080 directly. Linux-host only (see COMPOSE.md).
+  socks:
+    build:
+      context: ./socks-proxy
+    image: gtkhx-socks
+    container_name: gtkhx-socks
+    network_mode: host
+    depends_on: [mhxd]

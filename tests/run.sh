@@ -16,8 +16,9 @@
 # docker-compose.janus-host.yml):
 #   JANUS_HOST_NET=1 ./run.sh
 #
-# Afterwards, tail logs with:
-#   docker compose -f tests/docker-compose.yml logs -f
+# Requires Docker Compose v2 (the compose files use v2-only features;
+# JANUS_HOST_NET=1 additionally needs v2.24+ for the !reset tag). The
+# script prints the exact `logs -f` command for the rig it brought up.
 set -eu
 
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -33,14 +34,42 @@ if [ "${JANUS_HOST_NET:-0}" = "1" ]; then
 	echo ">> Janus host-networking override enabled (voice path active)"
 fi
 
-# Pick the available Compose CLI: prefer the `docker compose` plugin,
-# fall back to the legacy standalone `docker-compose` binary.
+# These compose files require Docker Compose v2: the base file uses the
+# top-level `name:` key, and the Janus host override uses the `!reset`
+# tag (added in v2.24). Compose v1 (`docker-compose` 1.x) chokes on both
+# with confusing schema errors, so we detect v2 explicitly and refuse to
+# limp along on v1.
+#
+# Prefer the `docker compose` plugin; accept the standalone
+# `docker-compose` binary only if it self-reports v2+.
 if docker compose version >/dev/null 2>&1; then
 	COMPOSE="docker compose"
-elif command -v docker-compose >/dev/null 2>&1; then
+elif docker-compose version >/dev/null 2>&1; then
 	COMPOSE="docker-compose"
 else
-	echo "run.sh: neither 'docker compose' nor 'docker-compose' is available" >&2
+	echo "run.sh: Docker Compose v2 is required but was not found." >&2
+	echo "  Install the 'docker compose' plugin (v2.24+ recommended)." >&2
+	exit 1
+fi
+
+# Parse MAJOR.MINOR from the selected CLI and enforce the version floor.
+ver=$($COMPOSE version --short 2>/dev/null | sed 's/^[vV]//')
+major=${ver%%.*}
+minrest=${ver#*.}
+minor=${minrest%%.*}
+case "$major" in '' | *[!0-9]*) major=0 ;; esac
+case "$minor" in '' | *[!0-9]*) minor=0 ;; esac
+
+if [ "$major" -lt 2 ]; then
+	echo "run.sh: Docker Compose v2+ required, but '$COMPOSE' reports $ver." >&2
+	echo "  These compose files use v2-only features (top-level name:)." >&2
+	exit 1
+fi
+
+# The Janus host override uses the !reset tag, added in Compose v2.24.
+if [ "$USE_OVERRIDE" -eq 1 ] && [ "$major" -eq 2 ] && [ "$minor" -lt 24 ]; then
+	echo "run.sh: JANUS_HOST_NET=1 needs Docker Compose >= 2.24 for the" >&2
+	echo "  !reset tag in docker-compose.janus-host.yml ('$COMPOSE' is $ver)." >&2
 	exit 1
 fi
 

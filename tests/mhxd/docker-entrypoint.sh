@@ -59,8 +59,14 @@ CONF=/opt/mhxd/run/hxd.conf
 # through verbatim). `tracker_register yes` is already set in conf, so
 # patching the host list is all that's needed.
 TRACKERS="${TRACKERS:-127.0.0.1}"
+# Escape characters special to sed's replacement side before splicing the
+# value in: backslash, the '|' we use as the s/// delimiter, and '&'
+# (which sed expands to the whole match). Without this, an id:password
+# value containing any of those — which the conf's `trackers` syntax
+# permits — could corrupt the replacement or break the s/// expression.
+TRACKERS_ESC=$(printf '%s' "$TRACKERS" | sed -e 's/[\\&|]/\\&/g')
 sed -i \
-	-e "s|^\\([[:space:]]*\\)trackers .*;|\\1trackers $TRACKERS;|" \
+	-e "s|^\\([[:space:]]*\\)trackers .*;|\\1trackers ${TRACKERS_ESC};|" \
 	"$CONF"
 echo "docker-entrypoint: trackers=\"$TRACKERS\""
 
