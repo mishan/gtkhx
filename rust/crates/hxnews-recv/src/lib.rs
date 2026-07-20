@@ -14,13 +14,15 @@
 
 use std::ffi::c_void;
 
+mod carrier;
+use carrier::{
+    gnews_catalog_set_parsed, gnews_folder_set_parsed, news_post_fetch_failed, news_post_new,
+};
+
 extern "C" {
     // news_recv_bridge.c — the received frame body + its length (htlc->in).
     fn hx_htlc_in_buf(htlc: *mut c_void) -> *const u8;
     fn hx_htlc_in_pos(htlc: *mut c_void) -> usize;
-    // news_recv_bridge.c — stash the parse handle on the reply carrier.
-    fn gnews_catalog_set_parsed(g: *mut c_void, parsed: *mut c_void);
-    fn gnews_folder_set_parsed(g: *mut c_void, parsed: *mut c_void);
     // hotline-proto — parse a reply to an owned handle. catlist: NULL when the
     // chunk is absent / malformed. dirlist: always a (possibly empty) handle.
     // The view handler frees them (gtkhx_proto_catlist_free / _dirlist_free).
@@ -36,11 +38,6 @@ extern "C" {
         text_cap: usize,
         out: *mut NewsThreadReply,
     ) -> bool;
-    // news_recv_bridge.c — build the news_post carrier ({ g_strndup'd body, the
-    // target HxNewsNode }) for gnews_browser_handle_thread; and the failure
-    // counterpart that releases the target ref + clears body_fetching.
-    fn news_post_new(target: *mut c_void, body: *const u8, body_len: usize) -> *mut c_void;
-    fn news_post_fetch_failed(target: *mut c_void);
     // gtkhx-session — the singleton + the news signal emits.
     fn gtkhx_session_get_default() -> *mut c_void;
     fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void);

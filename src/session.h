@@ -136,60 +136,14 @@ struct date_time {
     guint32 seconds;
 };
 
-/* The news-thread (GETTHREAD reply) carrier: the parsed body + the HxNewsNode
- * being fetched (an opaque `void *target`, carrying a transfer-full ref).
- * Built by news_post_new (news_recv_bridge.c) for the Rust receive handler;
- * consumed + freed by gnews_browser_handle_thread. */
-struct news_post {
-    char *buf;
-    void *target;
-};
-
-/* struct news_item / news_group / news_parts retired — they were the get-post
- * request stub + the pending-threads correlation key. The thread fetch now
- * rides the target HxNewsNode ref straight through the reply task, so no C
- * news wire struct is left. */
-
-struct gnews_catalog {
-    /* Owned `CatList *` from gtkhx_proto_parse_catlist, stashed by the Rust
-     * receive handler (rcv_task_newscat_list, hxnews-recv) and freed by
-     * gnews_browser_handle_catlist. Opaque here — only Rust dereferences it. */
-    void *parsed;
-    struct gnews_catalog *next, *prev;
-    char *path;
-    GtkWidget *window;
-    GtkWidget *news_tree;
-    GtkTreeStore *news_store;
-    GtkWidget *news_text;
-    GtkWidget *authorlbl, *subjectlbl, *datelbl;
-    /* selection is queried from news_tree at use time; no cached row */
-    char listing;
-};
-
-struct path_hist {
-    char path[4096];
-    struct path_hist *prev;
-};
-
-struct gnews_folder {
-    GtkWidget *window;
-    GtkWidget *news_list;
-    gint row, col;
-    /* Owned `DirList *` from gtkhx_proto_parse_dirlist, stashed by the Rust
-     * receive handler (rcv_task_newsfolder_list, hxnews-recv) and freed by
-     * gnews_browser_handle_dirlist. Opaque here — only Rust dereferences it. */
-    void *parsed;
-    struct gnews_folder *next, *prev;
-    char *path;
-    char listing;
-    GtkWidget *up_btn;
-    struct path_hist *path_list;
-};
-
-/* struct folder_item / struct news_folder retired — the NEWSDIRLIST reply is
- * parsed to a Rust-owned DirList handle (hotline-proto) carried on
- * gnews_folder->parsed, and the tree is built by
- * hx_news_build_dirlist_from_dirlist (hxnews-model). No C GUI struct in the
+/* The 1.5 news reply carriers (news_post + gnews_folder / gnews_catalog) and
+ * their retired predecessors (news_item / news_group / news_parts /
+ * folder_item / news_folder) are all gone from C. The fetch carriers are
+ * Rust-owned in hxnews-recv's `carrier` module: the browser gets an opaque
+ * handle, the sender reads its path, the receive handler stashes a Rust-owned
+ * hotline-proto parse handle (DirList / CatList), and the tree is built by
+ * hx_news_build_dirlist_from_dirlist / hx_news_build_category_tree_from_catlist
+ * (hxnews-model). No C GUI struct in the
  * middle. */
 
 /* ---- User-list / chat membership ---------------------------------- */

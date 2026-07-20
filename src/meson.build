@@ -71,14 +71,12 @@ gtkhx_sources = files(
   'msg.c',
   'network.c',
   'hxnet_bridge.c',
-  # news.c + news15.c retired — the flat + 1.5 news wire senders moved to the
-  # hxnews-send Rust crate (rust_hxnews_send_dep below). news_send_bridge.c is
-  # the C struct-field accessor shim it calls (mirrors chat_send_bridge.c).
-  'news_send_bridge.c',
-  # news_recv_bridge.c — C-struct accessors for the Rust 1.5 news receive
-  # handlers (hxnews-recv): htlc->in bytes + the catalog carrier's parse handle.
+  # news.c + news15.c + news_browser.c + news_send_bridge.c all retired — the
+  # 1.5 news wire senders live in the hxnews-send Rust crate, the reply
+  # handlers + carriers in hxnews-recv, and the browser UI in the gtkhx-ui
+  # `news_browser` module. news_recv_bridge.c is the last C leaf: htlc->in
+  # bytes, htlc version+access, the post-date formatter, and the row-icon loader.
   'news_recv_bridge.c',
-  'news_browser.c',
   'notify.c',
   'options.c',
   'path_hldir.c',
