@@ -1342,13 +1342,21 @@ pool; the small ones are now drained, three larger items remain):
     `gtkhx_news_refresh_category` (settle after a post) and
     `gtkhx_news_node_date_string` (format the reply's date via the shared
     `post_date_format`). `find_category_node` + `post_date_format` stay C.
+  - ✅ **N2h** — the **post rendering + breadcrumb** (`news_render.rs`): the
+    right-pane render (subject / meta / body, empty-state + "Loading…" +
+    URL-tagging) and the selection breadcrumb tree-walk. `render_selected_post`
+    and `update_breadcrumb` stay in C as thin one-line delegators that pass the
+    browser's live widgets down; the logic is Rust. Cache-miss body fetch routes
+    back through the `gtkhx_news_fetch_thread` bridge (over the static
+    `fetch_thread` + pending tables); the date reuses `gtkhx_news_node_date_string`.
 
-  **Remaining:** the reply-handler bookkeeping (the `pending_*` GHashTables +
-  C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`) and post
-  rendering (`render_selected_post` + breadcrumb). These are C-struct-coupled
-  with no more headless-testable logic, so they want runtime testing against a
-  live 1.5 server (Badmoon/mhxd). `news_browser.c` is now down to that RPC
-  bookkeeping + rendering + the window/dock scaffold.
+  **Remaining:** just the reply-handler bookkeeping — the `pending_*` GHashTables
+  + C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`, which route
+  the DIRLIST/CATLIST/GETTHREAD replies back into the tree. That's model plumbing
+  tied to the C `news_folder`/`news_group`/`news_post` structs (not
+  headless-testable), plus the window/dock scaffold. All the user-facing view
+  work (tree, factory, dialogs, compose, rendering) is now Rust; what's left
+  wants runtime testing against a live 1.5 server (Badmoon/mhxd).
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
