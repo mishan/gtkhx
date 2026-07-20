@@ -87,6 +87,18 @@ extern void hx_news_build_category_tree (GListStore *dest,
                                          const struct hx_news_post_data *posts,
                                          gsize count);
 
+/* One DIRLIST entry marshalled for the Rust folder-tree builder. Layout must
+ * match the crate's #[repr(C)] HxNewsDirItem. `item_type` is the wire
+ * folder_item.type (1 = folder, else category); gint32 to match Rust's i32
+ * exactly rather than assuming C `int` is 32-bit. */
+struct hx_news_dir_item {
+    gint32 item_type;
+    const char *name;
+};
+extern void hx_news_build_dirlist_into (GListStore *dest, const char *parent_path,
+                                        const struct hx_news_dir_item *items,
+                                        gsize count);
+
 /* ---------- HxNewsNode (one GObject per tree row) ----------
  *
  * The node — one GObject per folder / category / post — moved to the
@@ -266,18 +278,6 @@ ensure_pending_tables (void)
         pending_threads = g_hash_table_new_full (g_direct_hash, g_direct_equal,
                                                  NULL, g_object_unref);
     }
-}
-
-/* Join a parent path and a child name to form the child's full
- * Hotline path. The root case ("/") needs special treatment to
- * avoid producing "//child". */
-static char *
-build_child_path (const char *parent_path, const char *child_name)
-{
-    if (!parent_path || g_strcmp0 (parent_path, "/") == 0) {
-        return g_strdup_printf ("/%s", child_name ? child_name : "");
-    }
-    return g_strdup_printf ("%s/%s", parent_path, child_name ? child_name : "");
 }
 
 /* ---------- Icon helpers ---------- */
@@ -561,15 +561,18 @@ gnews_browser_handle_dirlist (gpointer gfnews_p)
     if (dest && gfnews->news) {
         struct news_folder *folder = gfnews->news;
         const char *parent_path = target ? hx_news_node_path (target) : "/";
+        /* Marshal the entries into the flat repr(C) array the Rust builder
+         * takes. hx_news_build_dirlist_into (hxnews-model) owns node creation +
+         * the parent-path join now; the names are borrowed for the call. */
+        struct hx_news_dir_item *data
+            = g_new0 (struct hx_news_dir_item, folder->num_entries);
         for (i = 0; i < folder->num_entries; i++) {
-            struct folder_item *item = folder->entry[i];
-            int kind = (item->type == 1) ? NB_KIND_FOLDER : NB_KIND_CATEGORY;
-            char *child_path = build_child_path (parent_path, item->name);
-            HxNewsNode *node = hx_news_node_new (kind, item->name, child_path);
-            g_list_store_append (dest, node);
-            g_object_unref (node);
-            g_free (child_path);
+            data[i].item_type = folder->entry[i]->type;
+            data[i].name = folder->entry[i]->name;
         }
+        hx_news_build_dirlist_into (dest, parent_path, data,
+                                    folder->num_entries);
+        g_free (data);
     }
 
     /* Free the stub + its parsed news_folder. */

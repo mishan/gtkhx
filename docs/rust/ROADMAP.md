@@ -1349,14 +1349,22 @@ pool; the small ones are now drained, three larger items remain):
     browser's live widgets down; the logic is Rust. Cache-miss body fetch routes
     back through the `gtkhx_news_fetch_thread` bridge (over the static
     `fetch_thread` + pending tables); the date reuses `gtkhx_news_node_date_string`.
+  - ✅ **N2i** — the **DIRLIST node builder** (`hx_news_build_dirlist_into`): the
+    last inline node-creation loop in a reply handler
+    (`gnews_browser_handle_dirlist`) moved to `hxnews-model` next to the category
+    builder, so the crate is now the single tested owner of all wire→node
+    construction (folder / category / post). The C handler marshals `folder_item`
+    entries into a `#[repr(C)]` array and calls it; the path-join
+    (`build_child_path`) moved to Rust too. 3 headless tests.
 
-  **Remaining:** just the reply-handler bookkeeping — the `pending_*` GHashTables
-  + C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`, which route
-  the DIRLIST/CATLIST/GETTHREAD replies back into the tree. That's model plumbing
-  tied to the C `news_folder`/`news_group`/`news_post` structs (not
-  headless-testable), plus the window/dock scaffold. All the user-facing view
-  work (tree, factory, dialogs, compose, rendering) is now Rust; what's left
-  wants runtime testing against a live 1.5 server (Badmoon/mhxd).
+  **Remaining:** just the reply-handler *bookkeeping* — the `pending_*`
+  GHashTables + C-struct frees in `gnews_browser_handle_dirlist/catlist/thread`
+  that route DIRLIST/CATLIST/GETTHREAD replies back into the tree. No node
+  construction is left in C; what remains is the pending-request table lookup +
+  the `news_folder`/`news_group`/`news_post` wire-struct frees — model plumbing
+  tied to the C protocol structs (not headless-testable) — plus the window/dock
+  scaffold. All the user-facing view work is now Rust; the rest wants runtime
+  testing against a live 1.5 server (Badmoon/mhxd).
 - **Chat content** — the xtext output widget (vendored, stays C forever) and
   the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
   the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
