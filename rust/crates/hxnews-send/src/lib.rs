@@ -89,9 +89,6 @@ extern "C" {
     fn rcv_task_newsfolder_list(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
 
     // news_send_bridge.c — struct field accessors.
-    fn news_item_group_path(item: *mut c_void) -> *const c_char;
-    fn news_item_postid(item: *mut c_void) -> u32;
-    fn news_item_mime0(item: *mut c_void) -> *const c_char;
     fn gnews_catalog_path(g: *mut c_void) -> *const c_char;
     fn gnews_catalog_mark_listing(g: *mut c_void);
     fn gnews_folder_path(g: *mut c_void) -> *const c_char;
@@ -101,9 +98,9 @@ extern "C" {
 #[cfg(test)]
 use tests::{
     gnews_catalog_mark_listing, gnews_catalog_path, gnews_folder_mark_listing, gnews_folder_path,
-    gtkhx_text_for_wire, hlwrite_chunks, hx_htlc_text_encoding_cap, news_item_group_path,
-    news_item_mime0, news_item_postid, path_to_hldir, rcv_task_news_file, rcv_task_news_post,
-    rcv_task_newscat_list, rcv_task_newsfolder_list, task_new,
+    gtkhx_text_for_wire, hlwrite_chunks, hx_htlc_text_encoding_cap, path_to_hldir,
+    rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list,
+    task_new,
 };
 
 /// A NUL-terminated C string's bytes (without the NUL), or empty for NULL.
@@ -148,20 +145,32 @@ unsafe fn with_wire<R>(
     r
 }
 
-/// `void hx_news15_get_post(struct htlc_conn *htlc, struct news_item *item)` —
-/// GETTHREAD: fetch a post's body. Reply drives `rcv_task_news_post` with the
-/// `item` pointer.
+/// `void hx_news15_get_post(struct htlc_conn *htlc, const char *path,
+/// guint32 postid, const char *mime_type, void *target)` — GETTHREAD: fetch a
+/// post's body. The reply drives `rcv_task_news_post` with `target` (the
+/// `HxNewsNode *` whose body is being fetched), which carries it to
+/// `gnews_browser_handle_thread`.
+///
+/// `target` is **transfer-full**: this takes ownership of one GObject ref. On
+/// success it rides the task through to the reply handler, which unrefs it;
+/// on any early-out (bad args, nothing to send) it's released here, so the
+/// caller (`fetch_thread`) can hand over a ref and forget.
 ///
 /// # Safety
-/// `htlc` / `item` are NULL or valid; main thread only.
+/// `htlc` is NULL or valid; `path` / `mime_type` are NULL or NUL-terminated;
+/// `target` is NULL or a valid `HxNewsNode *` whose ref is transferred here;
+/// main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn hx_news15_get_post(htlc: *mut c_void, item: *mut c_void) {
-    if htlc.is_null() || item.is_null() {
-        return;
-    }
-    // Guard the path: path_to_hldir dereferences it immediately (no NULL check).
-    let path = news_item_group_path(item);
-    if path.is_null() {
+pub unsafe extern "C" fn hx_news15_get_post(
+    htlc: *mut c_void,
+    path: *const c_char,
+    postid: u32,
+    mime_type: *const c_char,
+    target: *mut c_void,
+) {
+    // path_to_hldir dereferences `path` immediately (no NULL check).
+    if htlc.is_null() || path.is_null() {
+        release(target);
         return;
     }
     let mut hldirlen: u16 = 0;
@@ -169,26 +178,35 @@ pub unsafe extern "C" fn hx_news15_get_post(htlc: *mut c_void, item: *mut c_void
 
     let mut chunks = [HxChunk::EMPTY; 3];
     let mut scratch = [0u8; 4];
-    let mime0 = news_item_mime0(item);
-    let mime_type = cstr_bytes(mime0);
-    let mime_type = if mime_type.is_empty() { b"text/plain".as_slice() } else { mime_type };
+    let mime = cstr_bytes(mime_type);
+    let mime = if mime.is_empty() { b"text/plain".as_slice() } else { mime };
     let req = NewsGetThreadRequest {
         path: hldir_slice(hldir, hldirlen),
-        threadid: news_item_postid(item),
-        mime_type,
+        threadid: postid,
+        mime_type: mime,
     };
     let hc = build::build_news_getthread_chunks(&req, &mut chunks, &mut scratch);
     if hc > 0 {
+        // The target ref transfers into the task (freed by the reply handler).
         task_new(
             htlc,
             Some(rcv_task_news_post),
-            item,
+            target,
             std::ptr::null_mut(),
             c"news_post".as_ptr(),
         );
         hlwrite_chunks(htlc, HTLC_HDR_GETTHREAD, 0, chunks.as_ptr(), hc as c_int);
+    } else {
+        release(target);
     }
     glib::ffi::g_free(hldir as *mut c_void);
+}
+
+/// Drop a transfer-full GObject ref (no-op on NULL).
+unsafe fn release(obj: *mut c_void) {
+    if !obj.is_null() {
+        glib::gobject_ffi::g_object_unref(obj as *mut glib::gobject_ffi::GObject);
+    }
 }
 
 /// `void hx_news15_cat_list(struct htlc_conn *htlc, struct gnews_catalog *g)` —

@@ -251,10 +251,9 @@ static gnews_browser *the_browser = NULL;
 static GHashTable *pending_dirlists = NULL; /* stub → HxNewsNode* or NULL */
 static GHashTable *pending_catlists = NULL; /* stub → HxNewsNode* or NULL */
 
-/* Pending HTLC_HDR_GETTHREAD fetches. Keys are throwaway news_item
- * stubs we hand to hx_news15_get_post; values are reffed HxNewsNodes
- * whose `body` cache should be populated when the reply arrives. */
-static GHashTable *pending_threads = NULL; /* stub news_item* → HxNewsNode* */
+/* (GETTHREAD fetches no longer use a pending table — fetch_thread rides a
+ * transfer-full HxNewsNode ref on the reply task straight to
+ * gnews_browser_handle_thread; see fetch_thread.) */
 
 static void
 ensure_pending_tables (void)
@@ -266,10 +265,6 @@ ensure_pending_tables (void)
     if (!pending_catlists) {
         pending_catlists = g_hash_table_new_full (g_direct_hash, g_direct_equal,
                                                   NULL, g_object_unref);
-    }
-    if (!pending_threads) {
-        pending_threads = g_hash_table_new_full (g_direct_hash, g_direct_equal,
-                                                 NULL, g_object_unref);
     }
 }
 
@@ -646,15 +641,14 @@ post_date_format (const struct date_time *dt)
     return g_strdup (out);
 }
 
-/* Issue HTLC_HDR_GETTHREAD for `target`. The legacy hx_news15_get_post
- * helper takes a struct news_item — build a stub one with just the
- * fields it dereferences (postid, group->path, parts[0].mime_type)
- * and register it in pending_threads so the reply routes back to us. */
+/* Issue HTLC_HDR_GETTHREAD for `target`. The node itself is the correlation
+ * token: a ref rides the reply task (transfer-full into hx_news15_get_post)
+ * through to gnews_browser_handle_thread, which sets the body + unrefs — no
+ * stub struct, no pending table. */
 static void
 fetch_thread (gnews_browser *br, HxNewsNode *target)
 {
-    struct news_item *stub_item;
-    struct news_group *stub_group;
+    const char *mt;
     (void)br;
 
     if (!target || hx_news_node_kind (target) != NB_KIND_POST
@@ -665,25 +659,12 @@ fetch_thread (gnews_browser *br, HxNewsNode *target)
         return; /* already in flight */
     }
 
-    ensure_pending_tables ();
-
-    stub_group = g_malloc0 (sizeof (struct news_group));
-    stub_group->path = g_strdup (hx_news_node_path (target));
-
-    stub_item = g_malloc0 (sizeof (struct news_item));
-    stub_item->postid = hx_news_node_postid (target);
-    stub_item->group = stub_group;
-    stub_item->partcount = 1;
-    stub_item->parts = g_malloc0 (sizeof (struct news_parts));
-    {
-        const char *mt = hx_news_node_mime_type (target);
-        stub_item->parts[0].mime_type = g_strdup (mt ? mt : "text/plain");
-    }
-
-    g_hash_table_insert (pending_threads, stub_item, g_object_ref (target));
     hx_news_node_set_body_fetching (target, TRUE);
 
-    hx_news15_get_post (&hx_active_session ()->htlc, stub_item);
+    mt = hx_news_node_mime_type (target);
+    hx_news15_get_post (&hx_active_session ()->htlc, hx_news_node_path (target),
+                        hx_news_node_postid (target), mt ? mt : "text/plain",
+                        g_object_ref (target));
 }
 
 /* Bridge for the Rust post renderer: fire the GETTHREAD fetch for a node whose
@@ -709,60 +690,31 @@ gboolean
 gnews_browser_handle_thread (gpointer post_p)
 {
     struct news_post *post = post_p;
-    struct news_item *stub_item;
-    HxNewsNode *target = NULL;
+    HxNewsNode *target;
     gnews_browser *br = the_browser;
 
-    if (!post || !pending_threads) {
-        return FALSE;
-    }
-    stub_item = post->item;
-    if (!stub_item) {
-        return FALSE;
-    }
-    if (!g_hash_table_contains (pending_threads, stub_item)) {
+    if (!post) {
         return FALSE;
     }
 
-    target = g_hash_table_lookup (pending_threads, stub_item);
-    if (target) {
-        g_object_ref (target);
-    }
-    g_hash_table_remove (pending_threads, stub_item);
-
+    /* post->target is the fetched node, carrying the transfer-full ref
+     * fetch_thread took; we own it here and release it below. */
+    target = post->target;
     if (target) {
         hx_news_node_set_body_fetching (target, FALSE);
         hx_news_node_set_body (target, post->buf ? post->buf : "");
 
-        /* If the post is still the selected one, push the body
-		 * into the view. (User may have moved on while the fetch
-		 * was in flight — in that case we just keep the cached
-		 * body for when they come back.) */
+        /* If the post is still the selected one, push the body into the view.
+		 * (User may have moved on while the fetch was in flight — keep the
+		 * cached body for when they come back.) */
         if (br && br->selected_post == target) {
             render_selected_post (br);
         }
+        g_object_unref (target);
     }
-
-    /* Free the stub news_item + stub group + the news_post. */
-    if (stub_item->parts) {
-        int j;
-        for (j = 0; j < stub_item->partcount; j++) {
-            g_free (stub_item->parts[j].mime_type);
-        }
-        g_free (stub_item->parts);
-    }
-    g_free (stub_item->subject);
-    g_free (stub_item->sender);
-    if (stub_item->group) {
-        g_free (stub_item->group->path);
-        g_free (stub_item->group);
-    }
-    g_free (stub_item);
 
     g_free (post->buf);
     g_free (post);
-
-    g_clear_object (&target);
     return TRUE;
 }
 

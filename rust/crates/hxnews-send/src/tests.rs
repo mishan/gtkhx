@@ -32,9 +32,6 @@ struct Task {
 
 thread_local! {
     static CAP: Cell<bool> = const { Cell::new(true) };
-    static ITEM_PATH: RefCell<CString> = RefCell::new(CString::new("/cat").unwrap());
-    static ITEM_POSTID: Cell<u32> = const { Cell::new(0) };
-    static ITEM_MIME: RefCell<CString> = RefCell::new(CString::new("text/plain").unwrap());
     static NODE_PATH: RefCell<CString> = RefCell::new(CString::new("/node").unwrap());
     static CAT_MARKED: Cell<bool> = const { Cell::new(false) };
     static FOLDER_MARKED: Cell<bool> = const { Cell::new(false) };
@@ -143,18 +140,6 @@ pub(crate) unsafe extern "C" fn rcv_task_news_post(_h: *mut c_void, _p: *mut c_v
 pub(crate) unsafe extern "C" fn rcv_task_newscat_list(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
 pub(crate) unsafe extern "C" fn rcv_task_newsfolder_list(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
 
-pub(crate) unsafe extern "C" fn news_item_group_path(_item: *mut c_void) -> *const c_char {
-    if PATH_NULL.with(|c| c.get()) {
-        return std::ptr::null();
-    }
-    ITEM_PATH.with(|p| p.borrow().as_ptr())
-}
-pub(crate) unsafe extern "C" fn news_item_postid(_item: *mut c_void) -> u32 {
-    ITEM_POSTID.with(|c| c.get())
-}
-pub(crate) unsafe extern "C" fn news_item_mime0(_item: *mut c_void) -> *const c_char {
-    ITEM_MIME.with(|p| p.borrow().as_ptr())
-}
 pub(crate) unsafe extern "C" fn gnews_catalog_path(_g: *mut c_void) -> *const c_char {
     if PATH_NULL.with(|c| c.get()) {
         return std::ptr::null();
@@ -241,16 +226,19 @@ fn cat_list_marks_listing_and_registers_task() {
 #[test]
 fn get_post_emits_path_threadid_type() {
     reset();
-    ITEM_PATH.with(|p| *p.borrow_mut() = cstr("/cat"));
-    ITEM_POSTID.with(|c| c.set(0x0102_0304));
-    ITEM_MIME.with(|p| *p.borrow_mut() = cstr("text/plain"));
-    unsafe { hx_news15_get_post(htlc(), tok()) };
+    const POSTID: u32 = 0x0102_0304; // distinct non-palindrome so byte order shows
+    let path = cstr("/cat");
+    let mime = cstr("text/plain");
+    // target rides into the task ptr (transfer-full); a fake token is fine here
+    // since the happy path hands it to task_new rather than unref-ing it.
+    unsafe { hx_news15_get_post(htlc(), path.as_ptr(), POSTID, mime.as_ptr(), tok()) };
 
     let s = last().unwrap();
     assert_eq!(s.ty, HTLC_HDR_GETTHREAD);
     assert_eq!(s.chunks.len(), 3);
     assert_eq!(s.chunks[0], (TAG_NEWSPATH, b"/cat".to_vec()));
-    assert_eq!(s.chunks[1], (TAG_THREADID, vec![0x01, 0x02, 0x03, 0x04]));
+    // THREADID is the postid as big-endian bytes.
+    assert_eq!(s.chunks[1], (TAG_THREADID, POSTID.to_be_bytes().to_vec()));
     assert_eq!(s.chunks[2], (TAG_NEWSTYPE, b"text/plain".to_vec()));
     let t = last_task().expect("GETTHREAD registers a news_post task");
     assert!(t.has_rcv);
@@ -375,7 +363,9 @@ fn null_htlc_is_no_op() {
     unsafe {
         hx_get_news(std::ptr::null_mut());
         hx_post_news(std::ptr::null_mut(), name.as_ptr(), 1);
-        hx_news15_get_post(std::ptr::null_mut(), tok());
+        // NULL target so the transfer-full release is a no-op (not an unref).
+        hx_news15_get_post(std::ptr::null_mut(), path.as_ptr(), 0, name.as_ptr(),
+                           std::ptr::null_mut());
         hx_news15_cat_list(std::ptr::null_mut(), tok());
         hx_news15_fldr_list(std::ptr::null_mut(), tok());
         hx_news15_post_thread(std::ptr::null_mut(), path.as_ptr(), name.as_ptr(), 0, name.as_ptr());
@@ -395,7 +385,6 @@ fn null_htlc_is_no_op() {
 fn null_struct_is_no_op_for_list_senders() {
     reset();
     unsafe {
-        hx_news15_get_post(htlc(), std::ptr::null_mut());
         hx_news15_cat_list(htlc(), std::ptr::null_mut());
         hx_news15_fldr_list(htlc(), std::ptr::null_mut());
     }
@@ -409,6 +398,9 @@ fn null_path_arg_is_no_op() {
     reset();
     let name = cstr("n");
     unsafe {
+        // get_post takes its path directly now; NULL path must bail before
+        // path_to_hldir (and release the transfer-full target — NULL here).
+        hx_news15_get_post(htlc(), std::ptr::null(), 0, name.as_ptr(), std::ptr::null_mut());
         hx_news15_post_thread(htlc(), std::ptr::null(), name.as_ptr(), 0, name.as_ptr());
         hx_news15_delete_thread(htlc(), std::ptr::null(), 1);
         hx_news15_delete(htlc(), std::ptr::null());
@@ -427,7 +419,6 @@ fn null_accessor_path_is_no_op_and_skips_listing() {
     reset();
     PATH_NULL.with(|c| c.set(true));
     unsafe {
-        hx_news15_get_post(htlc(), tok());
         hx_news15_cat_list(htlc(), tok());
         hx_news15_fldr_list(htlc(), tok());
     }

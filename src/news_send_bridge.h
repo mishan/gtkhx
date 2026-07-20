@@ -12,13 +12,8 @@
 
 G_BEGIN_DECLS
 
-struct news_item;
 struct gnews_catalog;
 struct gnews_folder;
-
-extern const char *news_item_group_path (struct news_item *item);
-extern guint32 news_item_postid (struct news_item *item);
-extern const char *news_item_mime0 (struct news_item *item);
 
 extern const char *gnews_catalog_path (struct gnews_catalog *g);
 extern void gnews_catalog_mark_listing (struct gnews_catalog *g);
