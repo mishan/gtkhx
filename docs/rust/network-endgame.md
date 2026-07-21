@@ -160,6 +160,13 @@ and the bridge staging simultaneously. Those two callers are also the ones Phase
 E2/E3 delete — so it may be cleaner to leave the buffers C-side until the
 handlers and bridge move, then delete them outright rather than port them.
 
+The buffer removal is scoped in detail in
+[network-endgame-buffers.md](network-endgame-buffers.md): `read_in` was dead
+and is culled; `out` is self-contained (2 files) and removable ahead of E2 by
+packing into a transient buffer; `in` disappears family-by-family through E2 and
+is deleted with the bridge stager in E3. That is the delete-don't-port path for
+the last three direct-field-access holdouts before the E1c flip.
+
 ### Phase E2 — Receive handlers to Rust (delete `rcv.c`)
 
 With `htlc_conn` Rust-owned and the collaborators already Rust, move each handler
