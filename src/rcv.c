@@ -1436,85 +1436,70 @@ hx_rcv_hdr (struct htlc_conn *htlc)
 
     proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
 
-    /* Some servers (Heidrun's Inn-family) echo the original request
-	 * opcode in the low u16 of a TASK reply: 0x0001_006b = TASK |
-	 * HTLC_HDR_LOGIN, 0x0001_012c = TASK | HTLC_HDR_USER_GETLIST,
-	 * etc. Standard servers (mhxd, hlserver.com, Janus, …) send
-	 * plain 0x0001_0000 for every TASK reply and rely on the trans
-	 * id for correlation. We use task_with_trans(trans) inside
-	 * hx_rcv_task either way, so the low-u16 opcode is purely
-	 * diagnostic — strip it before dispatch so both server styles
-	 * land in the HTLS_HDR_TASK arm. Without this mask the Heidrun
-	 * variant falls through to "unknown header type 0x0001006b"
-	 * and the login (and subsequent USER_GETLIST) never completes. */
-    if ((type & 0xffff0000) == HTLS_HDR_TASK) {
-        type = HTLS_HDR_TASK;
-    }
-
-    /* htlc->trans = ntohl(h->trans); */
+    /* Opcode → handler category. The routing table (including the composite-
+     * TASK mask some servers use — see hx_recv_route's doc) lives in the Rust
+     * hotline-proto crate (dispatch.rs), exhaustively unit-tested; this switch
+     * only maps the category to the body handler + keeps the per-kind C-side
+     * side effects (the POLITEQUIT notice, the unknown-opcode log). */
     htlc->rcv = 0;
-    switch (type) {
-    case HTLS_HDR_CHAT:
+    switch (hx_recv_route (type)) {
+    case HX_RECV_CHAT:
         htlc->rcv = hx_rcv_chat;
         break;
-    case HTLS_HDR_MSG:
+    case HX_RECV_MSG:
         htlc->rcv = hx_rcv_msg;
         break;
-    case HTLS_HDR_USER_CHANGE:
-    case HTLS_HDR_CHAT_USER_CHANGE:
+    case HX_RECV_USER_CHANGE:
         htlc->rcv = hx_rcv_user_change;
         break;
-    case HTLS_HDR_USER_PART:
-    case HTLS_HDR_CHAT_USER_PART:
+    case HX_RECV_USER_PART:
         htlc->rcv = hx_rcv_user_part;
         break;
-    case HTLS_HDR_NEWS_POST:
+    case HX_RECV_NEWS_POST:
         htlc->rcv = hx_rcv_news_post;
         break;
-    case HTLS_HDR_TASK:
+    case HX_RECV_TASK:
         htlc->rcv = hx_rcv_task;
         break;
-    case HTLS_HDR_CHAT_SUBJECT:
+    case HX_RECV_CHAT_SUBJECT:
         htlc->rcv = hx_rcv_chat_subject;
         break;
-    case HTLS_HDR_CHAT_INVITE:
+    case HX_RECV_CHAT_INVITE:
         htlc->rcv = hx_rcv_chat_invite;
         break;
-    case HTLS_HDR_MSG_BROADCAST:
-        htlc->rcv = hx_rcv_msg;
-        break;
-    case HTLS_HDR_USER_SELFINFO:
+    case HX_RECV_USER_SELFINFO:
         htlc->rcv = hx_rcv_user_selfinfo;
         break;
-    case HTLS_HDR_AGREEMENT:
+    case HX_RECV_AGREEMENT:
         htlc->rcv = hx_rcv_agreement_file;
         break;
-    case HTLS_HDR_BANNER:
+    case HX_RECV_BANNER:
         htlc->rcv = hx_rcv_banner;
         break;
-    case HTLS_HDR_POLITEQUIT:
+    case HX_RECV_POLITEQUIT:
         hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("polite quit\n"));
         htlc->rcv = hx_rcv_msg;
         break;
-    case HTLS_HDR_QUEUE:
+    case HX_RECV_XFER_QUEUE:
         htlc->rcv = hx_rcv_xfer_queue;
         break;
 #ifdef HAVE_VOICE
-    case HTLS_HDR_VOICE_SDP_OFFER:
+    case HX_RECV_VOICE_SDP_OFFER:
         htlc->rcv = hx_rcv_voice_sdp_offer;
         break;
-    case HTLS_HDR_VOICE_ICE:
+    case HX_RECV_VOICE_ICE:
         htlc->rcv = hx_rcv_voice_ice;
         break;
-    case HTLS_HDR_VOICE_ROOM_STATUS:
+    case HX_RECV_VOICE_ROOM_STATUS:
         htlc->rcv = hx_rcv_voice_room_status;
         break;
 #endif /* HAVE_VOICE */
-    case HTLS_HDR_ICON_CHANGE:
+    case HX_RECV_ICON_CHANGE:
         htlc->rcv = hx_rcv_icon_change;
         break;
     default:
-        g_print ("0x%08x\n", type);
+        /* HX_RECV_UNKNOWN, plus the voice kinds in a -Dvoice=disabled build. */
+        debug_log ("proto", "unknown header type 0x%08x", type);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
                           _ ("unknown header type 0x%08x\n"), type);
         htlc->rcv = hx_rcv_dump;

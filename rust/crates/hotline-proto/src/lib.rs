@@ -40,6 +40,7 @@
 #![allow(unsafe_op_in_unsafe_fn)]
 
 pub mod build;
+pub mod dispatch;
 pub mod emoji;
 mod emoji_table;
 pub mod gif_icons;
