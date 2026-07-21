@@ -1,0 +1,22 @@
+[package]
+name = "hxhfs"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "HFS metadata sidecar (.rsrc / .fndrinfo) reader/writer — CAP / AppleDouble / Netatalk layouts, ported from src/hfs.c for the future hxfiles-xfer crate"
+publish = false
+
+[lib]
+# rlib: the native API the future hxfiles-xfer crate consumes.
+# staticlib: the `ffi` module preserves the exact hfs.h C ABI so a later
+#            leaf-up replacement can drop hfs.c and link this instead.
+# NOTE: this crate is standalone for now — it is NOT linked into src/gtkhx yet
+#       (hfs.c is untouched), so the #[no_mangle] ffi symbols don't collide.
+crate-type = ["staticlib", "rlib"]
+
+# The native API is pure std (filesystem I/O + big-endian byte twiddling, no
+# glib / gtk / C externs, so `cargo test -p hxhfs` runs headless). `libc` is
+# used only by the ffi shim, for platform-correct open(2) flag constants when
+# translating the C `mode` arg.
+[dependencies]
+libc = "0.2"
