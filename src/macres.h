@@ -2,53 +2,26 @@
 #define GTKHX_MACRES_H
 
 #include <unistd.h>
+#include <glib.h>
 #if defined(HAVE_CONFIG_H)
 #include "config.h"
 #endif
 
-struct macres_res;
+/*
+ * Macintosh resource-fork reader. The parser lives in the Rust `hxmacres`
+ * crate (port of the old macres.c); this header is its C ABI. GtkHx uses it to
+ * pull `cicn` colour-icon resources out of the bundled icons.rsrc files.
+ */
 
-struct macres_res_ref_list {
-	gint16 resid;
-	guint16 res_map_name_list_name_off;
-	guint8 res_attrs;
-	guint32 res_data_off;
-	struct macres_res *mr;
-};
-
-typedef struct macres_res_ref_list macres_res_ref_list;
-
-struct macres_res_type_list {
-	guint32 res_type;
-	guint32 num_res_of_type;
-	guint16 res_ref_list_off;
-	macres_res_ref_list *cached_ref_list;
-};
-
-typedef struct macres_res_type_list macres_res_type_list;
-
-struct macres_res_map {
-	guint16 res_type_list_off;
-	guint16 res_name_list_off;
-	guint32 num_res_types;
-	macres_res_type_list *res_type_list;
-};
-
-typedef struct macres_res_map macres_res_map;
-
-struct macres_file {
-	int fd;
-	unsigned char *base;
-	size_t len;
-	guint32 first_res_off;
-	guint32 res_data_len;
-	guint32 res_map_off;
-	guint32 res_map_len;
-	macres_res_map res_map;
-};
-
+/* Opaque parsed-resource-file handle (a Rust ResourceFork). */
 typedef struct macres_file macres_file;
 
+/*
+ * A single resource. `data` (`datalen` bytes) is what consumers read; the
+ * buffer is owned by the macres_file and stays valid until macres_file_delete.
+ * The wrapper itself is g_malloc'd, so callers g_free it (as options.c does).
+ * name / namelen are always NULL / 0.
+ */
 struct macres_res {
 	guint32 datalen;
 	guint16 resid;
@@ -59,14 +32,16 @@ struct macres_res {
 
 typedef struct macres_res macres_res;
 
-extern macres_file *macres_file_new (void);
+/* Read + parse the resource fork at `fd` (fd stays owned by the caller, which
+ * may close it as soon as this returns). NULL on a read / parse failure. */
 extern macres_file *macres_file_open (int fd);
-extern macres_res *macres_res_read (unsigned char *);
-extern guint32 macres_file_num_res_of_type (macres_file *mrf, guint32 type);
-extern macres_res *macres_file_get_nth_res_of_type (macres_file *mrf, guint32 type, guint32 n);
-extern macres_res *macres_file_get_resid_of_type (macres_file *mrf, guint32 type, gint16 resid);
-extern void macres_file_print (macres_file *mrf);
 extern void macres_file_delete (macres_file *mrf);
-extern int macres_add_resource (macres_file *mrf, guint32 type, gint16 resid, const guint8 *name, guint8 namelen, const guint8 *data, guint32 datalen);
+
+extern guint32 macres_file_num_res_of_type (macres_file *mrf, guint32 type);
+/* Both lookups return a g_malloc'd macres_res (caller g_free's) or NULL. */
+extern macres_res *macres_file_get_nth_res_of_type (macres_file *mrf,
+                                                    guint32 type, guint32 n);
+extern macres_res *macres_file_get_resid_of_type (macres_file *mrf,
+                                                  guint32 type, gint16 resid);
 
 #endif /* GTKHX_MACRES_H */

@@ -69,7 +69,6 @@ gtkhx_sources = files(
   'log.c',
   'login_packet.c',
   'agreement_packet.c',
-  'macres.c',
   'msg.c',
   'network.c',
   'hxnet_bridge.c',
@@ -270,6 +269,9 @@ rust_deps = [
   # HFS metadata sidecar (Rust port of hfs.c): hfsinfo_read/write,
   # resource_open/len, type_creator, comment_*, finderinfo_path/resource_path.
   rust_hxhfs_dep,
+  # Mac resource-fork parser (macres.c retired) — the macres_file_* icon
+  # readers used by gtkhx.c / options.c / cicn.c.
+  rust_hxmacres_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]
