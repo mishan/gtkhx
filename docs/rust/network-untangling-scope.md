@@ -147,11 +147,23 @@ mirror + `_Static_assert`. The crate externs the few C symbols it needs
 crate `#[test]`s comes for free. **This is the prerequisite that unblocks both
 the send-framing move and the receive-dispatch move**, which is why it leads.
 
-**N2 — Send framing into Rust (Knot D).** Move `hlpack` / `hlwrite` /
-`hlwrite_chunks` packing behind a Rust seam (the chunk builders are already in
-`hotline-proto`; what remains is the header stamp + `trans` bump + task
-registration + hand-off to the actor). Senders keep their current C signatures;
-only the framing underneath changes. Leaves the ~17 sender sites untouched.
+**N2 — Send framing into Rust (Knot D). _Mostly already done; the residual
+step landed._** On investigation the send *serialization* was already Rust: the
+byte-level wire encoder is `hotline-proto`'s `build::pack_message` /
+`pack_message_size` (exported as `gtkhx_proto_pack_message*`), and the
+chunk-array entry point `hlpack_chunks` (proto_helpers.c) was already a thin
+wrapper around it. The one hold-out was the **variadic `hlpack`**, which still
+hand-rolled the header + per-chunk `htonl`/`memcpy` loop in C. N2 unified it:
+`hlpack` now marshals its varargs into an `hx_chunk` array and delegates to
+`hlpack_chunks`, so *both* send entry points serialize through the single Rust
+packer. The `proto - gtkhx:hlwrite` byte-level test confirms the output is
+identical. What remains in C after N2 is not serialization but **htlc-lifecycle
+glue** — the `htlc->out` qbuf growth, the `htlc->trans` bump, the send-side
+`proto_trace` re-walk, and the `hx_bridge_send_frame` hand-off to the actor.
+Those are tied to the C-owned connection state + the bridge, so moving them is
+properly part of **N3** (which takes ownership of the connection I/O), not a
+standalone send-framing step. N2 is therefore complete as the `hlpack`
+unification; the rest folds into N3.
 
 **N3 — Receive dispatch skeleton into Rust (Knots B + A-consumer).** Move
 `hx_rcv_hdr`'s header parse + the router table + `hx_rcv_task`'s `trans`→task
