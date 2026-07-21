@@ -10,8 +10,10 @@
 
 use std::os::raw::{c_char, c_int};
 
-/// 0x00RRGGBB nick-colour sentinel — "no colour, use the theme default".
-/// Mirrors `HX_NICK_COLOR_NONE` (src/hotline.h).
+/// "No nick colour" sentinel — 0xFFFFFFFF (equivalently, the DATA_COLOR chunk
+/// being absent): use the theme default. A real Colored-Nicknames colour is
+/// 0x00RRGGBB, so the all-ones sentinel can't collide with one. Mirrors
+/// `HX_NICK_COLOR_NONE` (src/hotline.h).
 const HX_NICK_COLOR_NONE: u32 = 0xffff_ffff;
 
 /// `#[repr(C)]` mirror of the C `struct hx_user_change_msg` (proto_helpers.h).

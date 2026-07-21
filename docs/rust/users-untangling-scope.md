@@ -126,7 +126,17 @@ branch, squashed before PR.
   plus two thin FFI smoke tests (rename + self-adoption) that drive the real
   C ABI end to end.
 
-- **U3 — unify the change + bulk-load core in `hxuser-recv` (K3).** With U1+U2
+- **U3 — unify the change + bulk-load core in `hxuser-recv` (K3). SHIPPED.**
+  `hx_user_apply_recv` is now the single roster-apply routine both paths call:
+  new → emit `user-create` (the `incremental` flag gates the join chime),
+  existing + live → emit `user-change`, existing + bulk → silent
+  `hx_member_model_upsert`. `hx_rcv_user_change` (incremental) and
+  `rcv_task_user_list` (bulk) both call it — the latter's `if(new) emit else
+  upsert` fork is gone. Crate `#[test]`s cover all four outcomes; unit/proto +
+  Tier-3 `real_connect` (login user-list load) green. The remainder below is the
+  original plan.
+  <!-- superseded plan follows -->
+  With U1+U2
   done, fold `rcv_task_user_list`'s per-record tail and `hx_rcv_user_change`'s
   emit tail into one shared Rust routine that takes the member-model handle and
   does the `contains` / `upsert` / emit routing, driven by an `incremental`
