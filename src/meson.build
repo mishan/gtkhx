@@ -74,6 +74,7 @@ gtkhx_sources = files(
   'msg.c',
   'network.c',
   'hxnet_bridge.c',
+  'hxconn.c',
   # news.c + news15.c + news_browser.c + news_send_bridge.c all retired — the
   # 1.5 news wire senders live in the hxnews-send Rust crate, the reply
   # handlers + carriers in hxnews-recv, and the browser UI in the gtkhx-ui

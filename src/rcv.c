@@ -53,6 +53,7 @@
 #include "hxnet_bridge.h"
 #include "htxf_io.h"             /* hxnet_hope_aead_free (HOPE AEAD handle) */
 #include "rcv.h"
+#include "hxconn.h"
 #include "news15.h"
 #include "hfs.h"
 #include "proto_trace.h"
@@ -167,17 +168,17 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 	 * Clamp negative limit values defensively (cfgvars INT
 	 * parser doesn't enforce a floor). */
     if (htlc->caps & HTLC_CAP_CHAT_HISTORY) {
-        if (htlc->chat_history_last_msgid > 0) {
+        if (hx_conn_chat_history_last_msgid (htlc) > 0) {
             /* Reconnect catch-up — AFTER=last_msgid, no limit. */
             debug_log ("chat-history",
                        "reconnect catch-up: AFTER=%" G_GUINT64_FORMAT,
-                       htlc->chat_history_last_msgid);
+                       hx_conn_chat_history_last_msgid (htlc));
             task_new (htlc, RCV_TASK_FN (rcv_task_chat_history),
                       GUINT_TO_POINTER (HX_HISTORY_CHANNEL_PUBLIC), 0,
                       "chat-history-catchup");
             hx_get_chat_history (htlc, HX_HISTORY_CHANNEL_PUBLIC,
                                  /*before=*/0,
-                                 /*after=*/htlc->chat_history_last_msgid,
+                                 /*after=*/hx_conn_chat_history_last_msgid (htlc),
                                  /*limit=*/0);
         } else {
             /* Initial connect — limit-based fetch. */
@@ -1757,10 +1758,10 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * unlimited; these are hints only, the authoritative end-of-history
 		 * signal is DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
         if (login_seen & HX_LOGIN_SEEN_HISTORY_MAX_MSGS) {
-            htlc->history_max_msgs = li.history_max_msgs;
+            hx_conn_set_history_max_msgs (htlc, li.history_max_msgs);
         }
         if (login_seen & HX_LOGIN_SEEN_HISTORY_MAX_DAYS) {
-            htlc->history_max_days = li.history_max_days;
+            hx_conn_set_history_max_days (htlc, li.history_max_days);
         }
 
         /* Phase 9.A: log the server's advertised inline-media
@@ -2041,8 +2042,8 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
 	 * oldest shrinks as new older batches arrive. */
     for (guint i = 0; i < entries->len; i++) {
         HxHistoryEntry *e = g_ptr_array_index (entries, i);
-        if (e && e->message_id > htlc->chat_history_last_msgid) {
-            htlc->chat_history_last_msgid = e->message_id;
+        if (e && e->message_id > hx_conn_chat_history_last_msgid (htlc)) {
+            hx_conn_set_chat_history_last_msgid (htlc, e->message_id);
         }
     }
 
@@ -2050,7 +2051,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
                "received batch: cid=%u entries=%u has_more=%d last_msgid=%"
                G_GUINT64_FORMAT,
                cid, entries->len, (int) has_more,
-               htlc->chat_history_last_msgid);
+               hx_conn_chat_history_last_msgid (htlc));
 
     /* chat-history-batch emit — Rust hxchat-recv crate. */
     hx_chat_history_recv (htlc, cid, entries, has_more);
