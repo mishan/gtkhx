@@ -1,30 +1,77 @@
 //! TLS TOFU trust prompt (ported from `src/tls_trust_dialog.c`).
 //!
-//! The `GSocketClient::accept-certificate` handler (marshaled to the main
-//! thread in network.c) must return TRUE/FALSE before the handshake can
-//! proceed, but `AdwAlertDialog`'s response API is async — so we spin a
-//! nested `GMainLoop` until the user answers, the same synchronous-from-async
-//! pattern as `rc4_dialog.rs` and the C original.
-//!
-//! The C caller is network.c, so this keeps the `hx_tls_trust_dialog_run_sync`
-//! C ABI export. The trust-store / fingerprint logic stays in `tls_trust.c`.
+//! The trust brain (classify / seams / path / decide / pin) lives in the
+//! `hxtls-trust` crate; this module is only the Adwaita prompt + the worker→main
+//! marshalling. `hxtls-trust`'s `decide` runs on the hxnet (tokio) verify
+//! thread and, when it needs to ask the user, calls the callback we install via
+//! [`gtkhx_tls_prompt_install`]. That callback ([`prompt_trampoline`]) hops to
+//! the GTK main thread and spins a nested `GMainLoop` until the user answers
+//! (the same synchronous-from-async pattern as `rc4_dialog.rs`), since the
+//! verify path must return trust/reject synchronously.
 
 use crate::cstr;
-use crate::ffi as cffi;
 use crate::tr::{tr, tr1, tr_argv};
 use gtk4 as gtk;
 use libadwaita as adw;
 
 use adw::prelude::*;
 use gtk::glib;
-use std::os::raw::{c_char, c_int, c_void};
 use std::cell::Cell;
+use std::os::raw::{c_char, c_int};
 use std::rc::Rc;
 
+/// The MISMATCH status the dialog's tone branches on. Matches the
+/// `hxtls-trust` `TrustStatus` discriminant (Trusted=0 / Unknown=1 /
+/// Mismatch=2), passed through as an `int` by the registered prompt callback.
+const STATUS_MISMATCH: c_int = 2;
+
 extern "C" {
-    /// tls_trust.c — the resolved known_hosts path (g_malloc'd; free with
-    /// g_free). May be NULL.
-    fn hx_tls_trust_known_hosts_path() -> *mut c_char;
+    /// hxtls-trust — install (Some) or clear (None) the TOFU prompt callback.
+    fn hx_tls_trust_set_prompt(cb: Option<PromptFn>);
+}
+
+/// The callback signature `hxtls-trust` calls. See its `PromptFn`.
+type PromptFn = extern "C" fn(
+    host: *const c_char,
+    port: u16,
+    fingerprint: *const c_char,
+    status: c_int,
+    known_hosts: *const c_char,
+) -> c_int;
+
+/// `void gtkhx_tls_prompt_install (void)` — register the Adwaita TOFU prompt
+/// with `hxtls-trust`. Called once from C at UI init (before any connect).
+#[no_mangle]
+pub extern "C" fn gtkhx_tls_prompt_install() {
+    unsafe { hx_tls_trust_set_prompt(Some(prompt_trampoline)) };
+}
+
+/// Called by `hxtls-trust::decide` on the verify (worker) thread. Marshal the
+/// dialog to the GTK main thread and block until answered. `MainContext::invoke`
+/// runs the closure directly when we're already on the main thread and queues it
+/// otherwise; the unbounded channel + `recv` covers both without deadlock.
+extern "C" fn prompt_trampoline(
+    host: *const c_char,
+    port: u16,
+    fingerprint: *const c_char,
+    status: c_int,
+    known_hosts: *const c_char,
+) -> c_int {
+    let host = unsafe { cstr(host) };
+    let fingerprint = unsafe { cstr(fingerprint) };
+    let known_hosts = if known_hosts.is_null() {
+        None
+    } else {
+        Some(unsafe { cstr(known_hosts) })
+    };
+    let mismatch = status == STATUS_MISMATCH;
+
+    let (tx, rx) = std::sync::mpsc::channel::<bool>();
+    glib::MainContext::default().invoke(move || {
+        let accepted = run_dialog(&host, port, &fingerprint, mismatch, known_hosts.as_deref());
+        let _ = tx.send(accepted);
+    });
+    c_int::from(rx.recv().unwrap_or(false))
 }
 
 /// Substitute a host (arg 1) + port (arg 2) into a translated msgid. Routes
@@ -34,30 +81,17 @@ fn host_port(msgid: &str, host: &str, port: u16) -> String {
     tr_argv(msgid, &[host, &port.to_string()])
 }
 
-/// `gboolean hx_tls_trust_dialog_run_sync(GtkWindow *parent, const char *host,
-/// guint16 port, const char *fingerprint, hx_tls_trust_status status)` —
-/// present the TOFU prompt, block until the user answers, return TRUE iff they
-/// chose to trust.
-///
-/// # Safety
-/// `host` / `fingerprint` are valid C strings; `parent` is NULL or a valid
-/// `GtkWindow`. Must be called on the GTK main thread.
-#[no_mangle]
-pub unsafe extern "C" fn hx_tls_trust_dialog_run_sync(
-    parent: *mut cffi::GtkWindow,
-    host: *const c_char,
+/// Present the TOFU prompt, block until the user answers, return `true` iff they
+/// chose to trust. Runs on the GTK main thread; parents to the app's active
+/// window when there is one.
+fn run_dialog(
+    host: &str,
     port: u16,
-    fingerprint: *const c_char,
-    status: c_int,
-) -> glib::ffi::gboolean {
-    if host.is_null() || fingerprint.is_null() {
-        return glib::ffi::GFALSE;
-    }
+    fingerprint: &str,
+    mismatch: bool,
+    known_hosts: Option<&str>,
+) -> bool {
     crate::ensure_gtk_init();
-
-    let host = cstr(host);
-    let fingerprint = cstr(fingerprint);
-    let mismatch = status == cffi::HX_TLS_TRUST_MISMATCH;
 
     let (title, trust_label) = if mismatch {
         (tr("Certificate changed"), tr("_Trust New Certificate"))
@@ -71,7 +105,7 @@ pub unsafe extern "C" fn hx_tls_trust_dialog_run_sync(
              trusted. This usually means the server rotated its certificate, but it \
              can also indicate a man-in-the-middle attack. Verify the fingerprint \
              out-of-band with the server operator before accepting.",
-            &host,
+            host,
             port,
         )
     } else {
@@ -79,7 +113,7 @@ pub unsafe extern "C" fn hx_tls_trust_dialog_run_sync(
             "You haven't connected to %s:%u over TLS before. GtkHx will pin this \
              certificate so future connections are silent — but only if you trust it \
              now.",
-            &host,
+            host,
             port,
         );
         s.push_str("\n\n");
@@ -87,19 +121,16 @@ pub unsafe extern "C" fn hx_tls_trust_dialog_run_sync(
             "If %s later presents the same certificate on a different port (for \
              example the file transfer subchannel), it will be accepted silently \
              without another prompt.",
-            &host,
+            host,
         ));
         s
     };
     body.push_str("\n\n");
-    body.push_str(&tr1("Fingerprint:\n%s", &fingerprint));
+    body.push_str(&tr1("Fingerprint:\n%s", fingerprint));
 
-    let kh = hx_tls_trust_known_hosts_path();
-    if !kh.is_null() {
-        let kh_s = cstr(kh);
-        glib::ffi::g_free(kh as *mut c_void);
+    if let Some(kh) = known_hosts {
         body.push_str("\n\n");
-        body.push_str(&tr1("Pinned certificates live in %s.", &kh_s));
+        body.push_str(&tr1("Pinned certificates live in %s.", kh));
     }
 
     let dialog = adw::AlertDialog::new(Some(&title), Some(&body));
@@ -130,18 +161,12 @@ pub unsafe extern "C" fn hx_tls_trust_dialog_run_sync(
         });
     }
 
-    let parent_win: Option<gtk::Window> = if parent.is_null() {
-        None
-    } else {
-        Some(glib::translate::from_glib_none(parent))
-    };
+    let parent_win: Option<gtk::Window> = gtk::gio::Application::default()
+        .and_downcast::<gtk::Application>()
+        .and_then(|app| app.active_window());
     dialog.present(parent_win.as_ref().map(|w| w.upcast_ref::<gtk::Widget>()));
 
     main_loop.run();
 
-    if accepted.get() {
-        glib::ffi::GTRUE
-    } else {
-        glib::ffi::GFALSE
-    }
+    accepted.get()
 }

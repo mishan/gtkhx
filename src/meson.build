@@ -100,9 +100,9 @@ gtkhx_sources = files(
   'tasks_bridge.c',
   # text_util.c ported to Rust (hxtext crate, Phase R5); text_util.h keeps the
   # C ABI decls the ~16 callers include. Links via rust_hxtext_dep below.
-  'tls_trust.c',
-  # tls_trust_dialog.c ported to Rust (gtkhx-ui tls_trust_dialog.rs);
-  # tls_trust_dialog.h keeps the C ABI decl network.c calls.
+  # tls_trust.c + tls_trust_dialog.c ported to Rust: the trust brain is the
+  # hxtls-trust crate (rust_hxtls_trust_dep below) and the Adwaita prompt is
+  # gtkhx-ui's tls_trust_dialog.rs; tls_trust.h keeps the surviving C ABI.
   'toolbar.c',
   # tracker.c + tracker_row.c ported to Rust (gtkhx-ui crate, Phase R5).
   # tracker_bridge.c is the thin session/prefs shim the Rust window calls.
@@ -281,6 +281,9 @@ rust_deps = [
   # Transaction-task table (tasks_table.c + the struct task model retired) — the
   # tasks_table_new / tasks_init / task_new / task_with_trans / task_delete ABI.
   rust_hxtask_dep,
+  # TLS TOFU trust store + connect-side decide (tls_trust.c retired) — the
+  # hx_tls_verify_cert / hx_tls_trust_pin / hx_tls_test_* C ABI.
+  rust_hxtls_trust_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]

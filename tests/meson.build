@@ -537,21 +537,10 @@ test_hl_code = executable('test_hl_code',
 test('hl_code', test_hl_code,
      suite : 'unit')
 
-# tls_trust — TLS Phase 3 TOFU trust DB. Pure GLib/GIO (SHA-256
-# fingerprint cache in SSH known_hosts shape). Tier 1 drives the
-# pin/lookup/MISMATCH semantics against a tmpdir via the
-# GTKHX_KNOWN_HOSTS env override; the dialog UX layer
-# (tls_trust_dialog) is Adwaita-only and exercised via Tier 3 with
-# GTKHX_TLS_AUTO_ACCEPT=1 instead of GUI scripting.
-test_tls_trust = executable('test_tls_trust',
-  'unit/test_tls_trust.c',
-  '../src/tls_trust.c',
-  '../src/host_port.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('tls_trust', test_tls_trust,
-     suite : 'unit')
+# tls_trust — the TOFU trust DB + decide logic moved to the Rust hxtls-trust
+# crate; `cargo test -p hxtls-trust` covers the pin/lookup/MISMATCH semantics
+# (and the decide seams) headless against a tmpdir. The old Tier-1 C test
+# (unit/test_tls_trust.c) was retired with the C module.
 
 # host_port — the shared "host:port" parse/join helper (IPv6-aware),
 # replacing the hand-rolled strrchr(':') splits that mis-handled IPv6
@@ -1125,7 +1114,7 @@ integration_harness_lib = static_library(
   # (hxnet_connection_open_plaintext_polling / try_recv_frame /
   # send_frame), so the suite pulls in the hxnet staticlib and its
   # compression dependency.
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1157,7 +1146,6 @@ test_integration_real_connect = executable(
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/tls_trust.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/inline_media.c',
@@ -1177,7 +1165,7 @@ test_integration_real_connect = executable(
   '../src/hl_code.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1204,7 +1192,6 @@ test_integration_tracker_signals = executable(
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/tls_trust.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/inline_media.c',
@@ -1222,7 +1209,7 @@ test_integration_tracker_signals = executable(
   '../src/hl_code.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('tracker_signals', test_integration_tracker_signals,
@@ -1238,7 +1225,7 @@ test('tracker_signals', test_integration_tracker_signals,
 test_integration_orchestrator_harness = executable(
   'test_integration_orchestrator_harness',
   'integration/test_orchestrator_harness.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('orchestrator_harness', test_integration_orchestrator_harness,
@@ -1253,7 +1240,7 @@ test('orchestrator_harness', test_integration_orchestrator_harness,
 test_integration_socks = executable(
   'test_integration_socks',
   'integration/test_integration_socks.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('socks', test_integration_socks,
@@ -1278,7 +1265,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/tls_trust.c',
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',
@@ -1299,7 +1285,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/hl_code.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('real_htxf_connect', test_integration_real_htxf_connect,

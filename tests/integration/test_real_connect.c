@@ -567,11 +567,11 @@ test_orchestrator_tls_login (void)
     }
 
     /* TOFU: isolate the known-hosts store to a tmp dir and auto-accept
-     * the prompt (the dialog is stubbed in this headless binary, so
-     * the prompt path would assert). With a fresh store the cert is
+     * the prompt (no GUI prompt is registered in this headless binary,
+     * so the prompt path would reject). With a fresh store the cert is
      * UNKNOWN → auto-accept pins it; we then assert the pin landed,
      * which proves the orchestrator's verify_cert bridge ran the real
-     * tls_trust.c TOFU path end-to-end. */
+     * TOFU path (the hxtls-trust crate) end-to-end. */
     g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-tofu-XXXXXX", NULL);
     g_assert_nonnull (tmpdir);
     g_autofree char *known_hosts = g_build_filename (tmpdir, "known_hosts", NULL);
@@ -601,9 +601,10 @@ test_orchestrator_tls_login (void)
     g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
-    /* Flush the deferred pin (schedule_trust_pin → g_idle_add) and
-     * assert the cert was pinned to the known-hosts store — the TOFU
-     * bridge proof. */
+    /* The pin now runs synchronously inside the verify callback (the
+     * hxtls-trust decide), so it has already landed by LOGIN_READY; the
+     * drain below just clears any residual idles. Assert the cert was
+     * pinned to the known-hosts store — the TOFU bridge proof. */
     while (g_main_context_iteration (NULL, FALSE)) {
         /* drain pending idles */
     }
@@ -619,11 +620,12 @@ test_orchestrator_tls_login (void)
     g_assert_false (hx_bridge_is_installed ());
 
     /* Second connect with AUTO_ACCEPT OFF: the cert is now pinned, so
-     * tls_trust_decide must resolve TRUSTED and accept silently — no
-     * prompt. (The dialog is stubbed with g_assert_not_reached in this
-     * headless binary, so if the TRUSTED lookup failed and the prompt
-     * fired, the test would crash.) This is the end-to-end proof that
-     * the orchestrator honours a pinned cert. */
+     * the decide must resolve TRUSTED and accept silently — no prompt.
+     * (No GUI prompt is registered in this headless binary, so if the
+     * TRUSTED lookup failed the prompt path would reject and the
+     * connection would never reach LOGIN_READY — the wait_arrived assert
+     * below catches it.) End-to-end proof the orchestrator honours a
+     * pinned cert. */
     hx_tls_test_set_auto_accept (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
