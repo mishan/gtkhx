@@ -1835,14 +1835,18 @@ test('news15', test_integration_news15,
      suite   : 'integration',
      timeout : 30)
 
-# file_put — request/reply phase only. Sends HTLC_HDR_FILE_PUT
-# targeted at the seeded Uploads/ directory; verifies the TASK
-# reply correlates by trans and either carries an HTXF_REF or a
-# task-error (server-permission-dependent). Full upload (FILP-
-# wrapped data over the subchannel) is a future extension.
+# file_put — full upload round-trip driving the PRODUCTION send state
+# machine. Sends HTLC_HDR_FILE_PUT to the seeded Uploads/ dir, streams an
+# FFO-wrapped file via xfers_send.c::file_send_one, then downloads it
+# back through xfers_recv.c::file_recv_one and asserts byte-exact. Links
+# both machines + hfs.c + the FFO codec on top of integration_harness_lib.
+# Requires the guest account to have UPLOAD_FILES + UPLOAD_ANYWHERE.
 test_integration_file_put = executable('test_integration_file_put',
   'integration/test_file_put.c',
-  dependencies        : proto_test_deps,
+  '../src/xfers_send.c',
+  '../src/xfers_recv.c',
+  '../src/hfs.c',
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
