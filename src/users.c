@@ -158,7 +158,7 @@ on_user_kick (GSimpleAction *action, GVariant *param, gpointer user_data)
     if (!ctx || !ctx->sess) {
         return;
     }
-    hx_kick_user (&ctx->sess->htlc, ctx->uid, 0);
+    hx_kick_user (ctx->sess->htlc, ctx->uid, 0);
 }
 
 static void
@@ -170,7 +170,7 @@ on_user_ban (GSimpleAction *action, GVariant *param, gpointer user_data)
     if (!ctx || !ctx->sess) {
         return;
     }
-    hx_kick_user (&ctx->sess->htlc, ctx->uid, 1);
+    hx_kick_user (ctx->sess->htlc, ctx->uid, 1);
 }
 
 static void
@@ -186,7 +186,7 @@ on_user_ignore (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
     hx_member_model_set_ignore (hx_chat_member_model (c), ctx->uid, TRUE);
-    hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
+    hx_printf_prefix (ctx->sess->htlc, 0, INFOPREFIX,
                       _ ("ignore: %s is now ignored\n"), mi.name);
 }
 
@@ -203,7 +203,7 @@ on_user_unignore (GSimpleAction *action, GVariant *param, gpointer user_data)
         return;
     }
     hx_member_model_set_ignore (hx_chat_member_model (c), ctx->uid, FALSE);
-    hx_printf_prefix (&ctx->sess->htlc, 0, INFOPREFIX,
+    hx_printf_prefix (ctx->sess->htlc, 0, INFOPREFIX,
                       _ ("ignore: %s is now unignored\n"), mi.name);
 }
 
@@ -216,7 +216,7 @@ on_user_info (GSimpleAction *action, GVariant *param, gpointer user_data)
     if (!ctx || !ctx->sess) {
         return;
     }
-    hx_get_user_info (&ctx->sess->htlc, ctx->uid);
+    hx_get_user_info (ctx->sess->htlc, ctx->uid);
 }
 
 static void
@@ -268,7 +268,7 @@ on_user_pchat (GSimpleAction *action, GVariant *param, gpointer user_data)
     }
 
     if (!with_cid) {
-        hx_chat_user (&ctx->sess->htlc, ctx->uid);
+        hx_chat_user (ctx->sess->htlc, ctx->uid);
     } else {
         prompt_chat (ctx->sess, ctx->uid);
     }
@@ -551,7 +551,7 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
     /* Kick / Ban — only when the account has DISCONNECT_USERS.
      * Same rule as before: hidden, not disabled, since the server
      * would reject the wire op anyway. */
-    if (hl_access_has ((const guint8 *)&sess->htlc.access,
+    if (hl_access_has ((const guint8 *)&sess->htlc->access,
                        HL_ACCESS_DISCONNECT_USERS)) {
         user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
                                   _ ("Kick"), on_user_kick);
@@ -644,7 +644,7 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
  * returned. Earlier versions wired ctx to a "closed" handler that
  * g_free'd it directly, which raced ahead of "response" under
  * re-entrant dialog conditions and crashed in hx_chat_user via
- * &ctx->sess->htlc reading freed memory. */
+ * ctx->sess->htlc reading freed memory. */
 struct prompt_chat_ctx {
     session *sess;
     guint16 uid;
@@ -672,9 +672,9 @@ prompt_chat_response (AdwAlertDialog *dialog, const char *response,
         }
         guint32 chat_cid
             = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (row), "pchat-cid"));
-        hx_invite_user (&ctx->sess->htlc, ctx->uid, chat_cid);
+        hx_invite_user (ctx->sess->htlc, ctx->uid, chat_cid);
     } else if (g_strcmp0 (response, "new") == 0) {
-        hx_chat_user (&ctx->sess->htlc, ctx->uid);
+        hx_chat_user (ctx->sess->htlc, ctx->uid);
     }
 }
 
@@ -907,7 +907,7 @@ view_info_btn (GtkWidget *w, gpointer data)
     if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    hx_get_user_info (&sess->htlc, mi.uid);
+    hx_get_user_info (sess->htlc, mi.uid);
 }
 
 void
@@ -919,7 +919,7 @@ view_kick_btn (GtkWidget *w, gpointer data)
     if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    hx_kick_user (&sess->htlc, mi.uid, 0);
+    hx_kick_user (sess->htlc, mi.uid, 0);
 }
 
 void
@@ -931,7 +931,7 @@ view_ban_btn (GtkWidget *w, gpointer data)
     if (!sess || !view_selected_member (data, &mi)) {
         return;
     }
-    hx_kick_user (&sess->htlc, mi.uid, 1);
+    hx_kick_user (sess->htlc, mi.uid, 1);
 }
 
 void
@@ -948,7 +948,7 @@ view_igno_btn (GtkWidget *w, gpointer data)
         return;
     }
     gboolean ig = hx_member_model_toggle_ignore (hx_chat_member_model (c), mi.uid);
-    hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
+    hx_printf_prefix (sess->htlc, 0, INFOPREFIX,
                       ig ? _ ("ignore: %s is now ignored\n")
                          : _ ("ignore: %s is now unignored"),
                       mi.name);
@@ -976,7 +976,7 @@ view_chat_btn (GtkWidget *w, gpointer data)
         }
     }
     if (!with_cid) {
-        hx_chat_user (&sess->htlc, mi.uid);
+        hx_chat_user (sess->htlc, mi.uid);
     } else {
         prompt_chat (sess, mi.uid);
     }
@@ -1167,7 +1167,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
     if (hx_chat_cid (chat)) {
         gchat = gchat_with_cid (sess, hx_chat_cid (chat));
         if (!gchat) {
-            gchat = create_pchat_window (&sess->htlc, chat);
+            gchat = create_pchat_window (sess->htlc, chat);
         }
         if (!gchat || !hx_gchat_userlist (gchat)) {
             return;
@@ -1201,7 +1201,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
 			 * (the membership check is the model now). uid +
 			 * nick_color are the same across chats. */
             if (hx_member_model_contains (hx_chat_member_model (c), uid)) {
-                user_change (&sess->htlc, c, uid, nick_color, nam, icon, color);
+                user_change (sess->htlc, c, uid, nick_color, nam, icon, color);
             }
         }
     }

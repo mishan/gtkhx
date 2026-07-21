@@ -35,16 +35,16 @@
 void
 gtkhx_agreement_agree (session *sess)
 {
-    if (sess && sess->htlc.fd) {
-        hx_send_agreement_agree (&sess->htlc);
+    if (sess && sess->htlc->fd) {
+        hx_send_agreement_agree (sess->htlc);
     }
 }
 
 void
 gtkhx_agreement_disagree (session *sess)
 {
-    if (sess && sess->htlc.fd) {
-        hx_htlc_close (&sess->htlc, 1);
+    if (sess && sess->htlc->fd) {
+        hx_htlc_close (sess->htlc, 1);
     }
 }
 
@@ -59,7 +59,7 @@ gtkhx_session_set_agreementwin (session *sess, GtkWidget *win)
 struct htlc_conn *
 gtkhx_active_htlc (void)
 {
-    return &hx_active_session ()->htlc;
+    return hx_active_session ()->htlc;
 }
 
 /* The chat window/panel widget of the session that owns `htlc` (NULL if none).
@@ -77,7 +77,7 @@ gtkhx_htlc_chat_window (struct htlc_conn *htlc)
 gboolean
 gtkhx_active_connected (void)
 {
-    return hx_active_session ()->htlc.fd != 0;
+    return hx_active_session ()->htlc->fd != 0;
 }
 
 /* TRUE if the active session negotiated HTLC_CAP_TEXT_ENCODING (UTF-8 on the
@@ -86,7 +86,7 @@ gtkhx_active_connected (void)
 gboolean
 gtkhx_active_text_encoding (void)
 {
-    return (hx_active_session ()->htlc.caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    return (hx_active_session ()->htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
 }
 
 void
@@ -99,18 +99,18 @@ gtkhx_connect_apply (session *sess, const char *server, guint16 port,
         return;
     }
 
-    memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
+    memset (sess->htlc->compressalg, 0, sizeof (sess->htlc->compressalg));
     if (compress_name && *compress_name) {
-        g_strlcpy (sess->htlc.compressalg, compress_name,
-                   sizeof (sess->htlc.compressalg));
+        g_strlcpy (sess->htlc->compressalg, compress_name,
+                   sizeof (sess->htlc->compressalg));
     }
-    memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
+    memset (sess->htlc->cipheralg, 0, sizeof (sess->htlc->cipheralg));
     if (cipher_name && *cipher_name) {
-        g_strlcpy (sess->htlc.cipheralg, cipher_name,
-                   sizeof (sess->htlc.cipheralg));
+        g_strlcpy (sess->htlc->cipheralg, cipher_name,
+                   sizeof (sess->htlc->cipheralg));
     }
 
-    hx_connect (&sess->htlc, server ? server : "", port, login ? login : "",
+    hx_connect (sess->htlc, server ? server : "", port, login ? login : "",
                 pass ? pass : "", secure, tls);
 }
 
@@ -137,7 +137,7 @@ gtkhx_news_set_widgets (session *sess, GtkWidget *text, GtkWidget *post,
 struct htlc_conn *
 gtkhx_session_htlc (session *sess)
 {
-    return sess ? &sess->htlc : NULL;
+    return sess ? sess->htlc : NULL;
 }
 
 gboolean

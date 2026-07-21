@@ -357,7 +357,7 @@ on_get_info_clicked (GtkButton *btn, gpointer user_data)
         show_toast (br, _ ("Get Info is only available for remote files."));
         return;
     }
-    if (!hx_active_session ()->htlc.fd) {
+    if (!hx_active_session ()->htlc->fd) {
         show_toast (br, _ ("Not connected."));
         return;
     }
@@ -369,7 +369,7 @@ on_get_info_clicked (GtkButton *btn, gpointer user_data)
 
     dir = hx_files_provider_get_current_path (prov);
     name = hx_file_entry_get_name (e);
-    hx_file_info (&hx_active_session ()->htlc, dir ? dir : "/", name,
+    hx_file_info (hx_active_session ()->htlc, dir ? dir : "/", name,
                   name ? strlen (name) : 0);
 }
 
@@ -645,18 +645,18 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
             g_object_unref (sf);
             g_object_unref (df);
         } else if (HX_IS_REMOTE_FILES_PROVIDER (prov)) {
-            if (!hx_active_session ()->htlc.fd) {
+            if (!hx_active_session ()->htlc->fd) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("Not connected to a server."));
-            } else if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc.access,
+            } else if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc->access,
                                        HL_ACCESS_MOVE_FILES)) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("You don't have permission to move files "
                                       "on the server."));
             } else {
-                hx_file_move (&hx_active_session ()->htlc, src_abs, new_path);
+                hx_file_move (hx_active_session ()->htlc, src_abs, new_path);
                 ok = TRUE; /* fire-and-forget — server task
 				              * error would surface via the
 				              * existing task-error toast */
@@ -1098,11 +1098,11 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         return;
     }
 
-    if (!hx_active_session ()->htlc.fd) {
+    if (!hx_active_session ()->htlc->fd) {
         show_toast (br, _ ("Not connected to a server."));
         return;
     }
-    if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc.access,
+    if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc->access,
                         HL_ACCESS_MOVE_FILES)) {
         show_toast (br, _ ("You don't have permission to move files on the "
                            "server."));
@@ -1119,7 +1119,7 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         const char *name = hx_file_entry_get_name (e);
         char *src_abs = g_build_filename (src_dir ? src_dir : "/", name, NULL);
         char *dst_abs = g_build_filename (dst_dir ? dst_dir : "/", name, NULL);
-        hx_file_move (&hx_active_session ()->htlc, src_abs, dst_abs);
+        hx_file_move (hx_active_session ()->htlc, src_abs, dst_abs);
         g_free (src_abs);
         g_free (dst_abs);
     }

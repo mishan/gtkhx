@@ -123,7 +123,24 @@ C holds an opaque `struct htlc_conn *` and reaches every field through
 Rust's alone from the start, no duplicated struct to keep in sync); the cost is
 more shim boilerplate during the migration, which is mechanical.
 
-Sequencing within E1 (the struct is too wide to move atomically):
+**E1a — break the embedding (landed).** `struct htlc_conn` was an embedded
+*value* on `session` (`struct htlc_conn htlc;`), and `sess_from_htlc` recovered
+the session by `container_of` pointer math — which only works while htlc is
+embedded. An opaque Rust-owned struct can't be embedded by value (C would need
+its size), so the first concrete step made `session.htlc` a heap pointer
+(`struct htlc_conn *htlc`, `g_new0`'d once at startup, owned for the session's
+life). `sess_from_htlc` now reads a `session *sess` back-pointer set at
+allocation instead of doing container_of (also multi-conn-ready). Two wrinkles
+surfaced and were handled: (1) the `cfgvars[]` table bound ICON/NICK to
+`&the_session.htlc.icon` at compile time — no longer a constant behind a heap
+pointer — so those slots are now NULL in the static table and wired at runtime
+by `hx_options_bind_identity()` right after allocation; (2) the Tier-3 connect
+harness deliberately embedded its htlc in a `session` to keep container_of
+honest, so it now owns explicit storage and re-arms the back-pointer after each
+per-test memset. Verified against the full unit/proto suites and the
+session-routing Tier-3 tests (real_connect, real_htxf_connect, voice_rejoin_media).
+
+Sequencing within the rest of E1 (the struct is too wide to move atomically):
 
 1. **Opaque handle + allocation ownership.** Rust allocates/frees the struct;
    C holds a `struct htlc_conn *` it no longer dereferences directly. A

@@ -39,13 +39,13 @@ extern void hx_news_node_get_date (void *node, struct date_time *out);
 int
 gtkhx_news_htlc_version (void)
 {
-    return (int) hx_active_session ()->htlc.version;
+    return (int) hx_active_session ()->htlc->version;
 }
 
 int
 gtkhx_news_access_has (int bit)
 {
-    return hl_access_has ((const guint8 *) &hx_active_session ()->htlc.access,
+    return hl_access_has ((const guint8 *) &hx_active_session ()->htlc->access,
                           bit);
 }
 
@@ -53,7 +53,7 @@ int
 gtkhx_news_access_permits (int bit)
 {
     return hl_access_permits (
-        (const guint8 *) &hx_active_session ()->htlc.access, bit);
+        (const guint8 *) &hx_active_session ()->htlc->access, bit);
 }
 
 /* ---- post-date formatting (C leaf: hl_date_decode + strftime) ----

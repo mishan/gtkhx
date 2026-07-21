@@ -502,7 +502,7 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     xfers[nxfers] = htxf;
     nxfers++;
 
-    htxf->htlc = &hx_active_session ()->htlc;
+    htxf->htlc = hx_active_session ()->htlc;
     htxf->total_pos = 0;
     htxf->total_size = 1;
     gtkhx_session_emit_file_update (gtkhx_session_get_default (), sess_from_htlc (htxf->htlc),

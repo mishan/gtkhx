@@ -55,7 +55,7 @@ static GtkApplication *notify_app;
 static gboolean
 body_mentions_us (const char *body)
 {
-    const char *self_nick = hx_active_session ()->htlc.name;
+    const char *self_nick = hx_active_session ()->htlc->name;
     gboolean matched = FALSE;
     GPtrArray *words;
     gchar **extras = NULL;

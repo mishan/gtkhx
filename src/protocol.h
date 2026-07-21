@@ -52,6 +52,12 @@ extern void qbuf_add (struct qbuf *q, void *buf, guint32 len);
 
 struct htlc_conn;
 
+/* Forward declaration so htlc_conn can carry a back-pointer to its owning
+ * session without pulling in the GUI-heavy session.h. The full definition
+ * lives there (`typedef struct _session { ... } session;`); gnu11 permits this
+ * redundant typedef of the same tag. */
+typedef struct _session session;
+
 struct htxf_conn {
     /* All size / position fields are guint64 to support the
 	 * Large-File extension (CAP_LARGE_FILES). The protocol still
@@ -193,6 +199,12 @@ struct htxf_conn {
 };
 
 struct htlc_conn {
+    /* The session that owns this connection. Set once at allocation; read by
+	 * sess_from_htlc() to route a received event back to its session (replaces
+	 * the old container_of, which required htlc to be embedded in session).
+	 * The single-session world sets this to &the_session; the multi-conn seam
+	 * later sets it per connection. */
+    session *sess;
     void (*rcv) (struct htlc_conn *);
     struct qbuf in, out;
     struct qbuf read_in;

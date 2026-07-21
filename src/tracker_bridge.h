@@ -35,7 +35,7 @@ extern void gtkhx_tracker_connect_apply (const char *address, guint16 port,
                                          char secure, char tls,
                                          const char *cipher_name);
 
-/* hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s", msg) — an
+/* hx_printf_prefix(the_session.htlc, 0, INFOPREFIX, "%s", msg) — an
  * INFO-prefixed status line in the chat output. */
 extern void gtkhx_tracker_log_info (const char *msg);
 

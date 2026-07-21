@@ -245,7 +245,19 @@ observer_index_of (test_observer *obs, GtkhxConnectionState state)
  * so production is unaffected; embedding here keeps the harness faithful to
  * that invariant. */
 static session test_session;
-#define test_htlc (test_session.htlc)
+/* htlc_conn is now a heap pointer on `session` (network-endgame.md E1), so the
+ * harness owns the storage explicitly and `test_session.htlc` points at it.
+ * test_htlc stays the embedded VALUE so the existing `.field` / `&test_htlc`
+ * uses are unchanged; the per-test memset re-zeroes it, so the sess back-pointer
+ * (read by sess_from_htlc) is re-armed after each reset via test_htlc_rearm(). */
+static struct htlc_conn test_htlc_storage;
+#define test_htlc test_htlc_storage
+static inline void
+test_htlc_rearm (void)
+{
+    test_session.htlc = &test_htlc_storage;
+    test_htlc_storage.sess = &test_session;
+}
 
 static void
 test_orchestrator_login (void)
@@ -266,6 +278,7 @@ test_orchestrator_login (void)
      * so neither interferes with the gate. */    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     /* wait_for is set to LOGIN_READY (never emitted in this headless
@@ -360,6 +373,7 @@ test_orchestrator_capabilities_negotiated (void)
     hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx,
@@ -423,6 +437,7 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
     hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
     g_strlcpy (test_htlc.cipheralg, cipheralg, sizeof (test_htlc.cipheralg));
     g_strlcpy (test_htlc.name, "PhaseGHope", sizeof (test_htlc.name));
 
@@ -500,6 +515,7 @@ test_orchestrator_hope_no_cipher (void)
     hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
     /* cipheralg intentionally left empty — secure auth, no cipher. */
     g_strlcpy (test_htlc.name, "PhaseGHopeNoCipher", sizeof (test_htlc.name));
 
@@ -580,6 +596,7 @@ test_orchestrator_tls_login (void)
     hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx,
@@ -629,6 +646,7 @@ test_orchestrator_tls_login (void)
     hx_tls_test_set_auto_accept (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
     test_observer *obs2 = observer_new (gtkhx,
                                         GTKHX_CONNECTION_LOGIN_READY);
     hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
@@ -703,6 +721,7 @@ test_orchestrator_tls_mismatch_rejected (void)
     hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
@@ -741,6 +760,7 @@ test_orchestrator_connect_refused (void)
 {    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
     test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_DISCONNECTED);
@@ -770,6 +790,7 @@ static void
 test_hope_tls_rejected (void)
 {    hx_tls_test_set_force_tls (0);
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
     g_assert_false (hx_bridge_is_installed ());
 
@@ -783,6 +804,7 @@ test_hope_tls_rejected (void)
     /* Same via the GTKHX_TLS env override (bookmarks/power-user path). */
     hx_tls_test_set_force_tls (1);
     memset (&test_htlc, 0, sizeof (test_htlc));
+    test_htlc_rearm ();
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
     hx_connect (&test_htlc, "127.0.0.1", 5500, "guest", "",
                 /*secure=*/1, /*tls=*/0);

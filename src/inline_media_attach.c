@@ -460,7 +460,7 @@ inline_media_attach_refresh_all_chats (session *sess)
     if (!sess || !sess->chats) {
         return;
     }
-    gboolean show = (sess->htlc.caps & HTLC_CAP_INLINE_MEDIA) != 0;
+    gboolean show = (sess->htlc->caps & HTLC_CAP_INLINE_MEDIA) != 0;
 
     guint n = hx_chats_count (sess->chats);
     for (guint i = 0; i < n; i++) {

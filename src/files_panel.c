@@ -1034,11 +1034,11 @@ update_status (files_panel *p)
     if (p->provider && HX_IS_REMOTE_FILES_PROVIDER (p->provider)
         && hx_remote_files_provider_has_listing_error (
             HX_REMOTE_FILES_PROVIDER (p->provider))) {
-        const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc.access;
+        const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc->access;
         gboolean can_upload = hl_access_has (bits, HL_ACCESS_UPLOAD_FILES);
         gboolean can_view_dropbox
             = hl_access_has (bits, HL_ACCESS_VIEW_DROP_BOXES);
-        if (hx_active_session ()->htlc.fd && can_upload && !can_view_dropbox) {
+        if (hx_active_session ()->htlc->fd && can_upload && !can_view_dropbox) {
             text = g_strdup (
                 _ ("Folder is upload-only — drop files here to upload"));
         } else {

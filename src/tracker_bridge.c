@@ -49,19 +49,19 @@ gtkhx_tracker_connect_apply (const char *address, guint16 port, char secure,
 {
     session *sess = hx_active_session ();
 
-    memset (sess->htlc.compressalg, 0, sizeof (sess->htlc.compressalg));
-    memset (sess->htlc.cipheralg, 0, sizeof (sess->htlc.cipheralg));
+    memset (sess->htlc->compressalg, 0, sizeof (sess->htlc->compressalg));
+    memset (sess->htlc->cipheralg, 0, sizeof (sess->htlc->cipheralg));
     if (cipher_name && *cipher_name) {
-        g_strlcpy (sess->htlc.cipheralg, cipher_name,
-                   sizeof (sess->htlc.cipheralg));
+        g_strlcpy (sess->htlc->cipheralg, cipher_name,
+                   sizeof (sess->htlc->cipheralg));
     }
-    hx_connect (&sess->htlc, address ? address : "", port, "", "", secure,
+    hx_connect (sess->htlc, address ? address : "", port, "", "", secure,
                 tls);
 }
 
 void
 gtkhx_tracker_log_info (const char *msg)
 {
-    hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX, "%s",
+    hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX, "%s",
                       msg ? msg : "");
 }
