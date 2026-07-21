@@ -279,13 +279,6 @@ hx_rcv_chat (struct htlc_conn *htlc)
         return;
     }
 
-#ifdef USE_PLUGIN
-    if (EMIT_SIGNAL (XP_RCV_CHAT, sess, msg.text, &msg.cid, &msg.uid, 0, 0)
-        == 1) {
-        return;
-    }
-#endif
-
     /* Phase 9.D — inline-media companion fields. The relayed
 	 * chat may carry CHAT_MEDIA_ID + CHAT_MEDIA_TYPE plus the
 	 * server-supplied advisory width/height/bytes. The Phase A
@@ -374,12 +367,6 @@ hx_rcv_msg (struct htlc_conn *htlc)
     if (hx_member_model_get_ignore (hx_chat_member_model (chat), pm.uid)) {
         return;
     }
-
-#ifdef USE_PLUGIN
-    if (EMIT_SIGNAL (XP_RCV_MSG, sess, pm.msg, pm.name, &pm.uid, 0, 0) == 1) {
-        return;
-    }
-#endif
 
     /* Dispatch on the wire opcode, not on pm.uid. mhxd echoes
 	 * broadcasts back with the sender's UID populated (so the
@@ -481,13 +468,6 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
         return;
     }
 
-#ifdef USE_PLUGIN
-    guint16 plugin_len = (guint16)body_len;
-    if (EMIT_SIGNAL (XP_RCV_AGREE, sess_from_htlc (htlc), buf, &plugin_len, 0, 0, 0)
-        == 1) {
-        return;
-    }
-#endif
     gtkhx_session_emit_agreement (gtkhx_session_get_default (), sess_from_htlc (htlc),
                                   buf, (guint16)body_len);
 }
@@ -866,15 +846,6 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
         return;
     }
 
-#ifdef USE_PLUGIN
-    if (hx_member_model_get_ignore (hx_chat_member_model (chat), im.uid)) {
-        return;
-    }
-    if (EMIT_SIGNAL (XP_RCV_INVITE, sess, im.name, &im.uid, &im.cid, 0, 0)
-        == 1) {
-        return;
-    }
-#endif
     /* Drops the invite if the inviter is ignored, else emits chat-invitation
      * (the sound subscriber chimes off it). */
     hx_chat_invite_recv (htlc, hx_chat_member_model (chat), im.cid, im.uid,

@@ -2026,12 +2026,6 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
                       guint16 style)
 {
     if (*str) {
-#ifdef USE_PLUGIN
-        if (EMIT_SIGNAL (XP_SND_CHAT, sess_from_htlc (htlc), str, &cid, 0, 0, 0) == 1) {
-            return;
-        }
-#endif
-
         if (*str == '/' && *++str && *str != '/') {
             if (is_hxdcmd (str)) {
                 str--;

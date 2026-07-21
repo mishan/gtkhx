@@ -80,10 +80,6 @@ GtkWidget *toolbar_end_frame      = NULL;
 GtkWidget *toolbar_bottom_frame   = NULL;
 GtkWidget *toolbar_center_frame   = NULL;
 
-#ifdef USE_PLUGIN
-GtkWidget *plugin_btn;
-#endif
-
 /* status_bar is now a GtkLabel. The previous GtkStatusbar
  * was deprecated in GTK 4.10 and we never used its stack-of-messages
  * model — we always replaced the message wholesale. set_status_bar()
@@ -945,14 +941,6 @@ create_toolbar_window (session *sess)
         G_CALLBACK (gtkhx_broadcast_dialog_open), sess);
     gtk_widget_set_sensitive (broadcast_btn, FALSE);
     gtk_box_append (GTK_BOX (hbox), broadcast_btn);
-
-#ifdef USE_PLUGIN
-    plugin_btn = gtk_button_new_with_label ("[ P ]");
-    gtk_widget_set_tooltip_text (plugin_btn, _ ("Plugin Manager"));
-    g_signal_connect (plugin_btn, "clicked", G_CALLBACK (create_plugin_manager),
-                      0);
-    gtk_box_append (GTK_BOX (hbox), plugin_btn);
-#endif
 
     /* ------------- bottom bar (status label) ------------- */
     status_bar = gtk_label_new (_ ("Not Connected"));
