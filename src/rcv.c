@@ -637,16 +637,19 @@ hx_rcv_task (struct htlc_conn *htlc)
     }
 }
 
-/* User-roster emit routing lives in the Rust hxuser-recv crate
- * (rust/crates/hxuser-recv). */
+/* User-roster apply routing lives in the Rust hxuser-recv crate
+ * (rust/crates/hxuser-recv). hx_user_apply_recv is shared by the live
+ * USER_CHANGE broadcast and the bulk USER_LIST load — `incremental` tells the
+ * two apart. */
 #define HX_USER_CHANGE_SKIPPED 0
 #define HX_USER_CHANGE_CREATED 1
 #define HX_USER_CHANGE_CHANGED 2
-extern int hx_user_change_recv (struct htlc_conn *htlc, void *chat,
-                                guint16 uid, guint32 nick_color,
-                                const char *name, guint16 icon, guint16 color,
-                                int is_new, int skip_self_create,
-                                int incremental);
+#define HX_USER_CHANGE_UPDATED 3
+extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
+                               void *member_model, guint16 uid,
+                               guint32 nick_color, const char *name,
+                               guint16 icon, guint16 color, int is_new,
+                               int skip_self_create, int incremental);
 extern int hx_user_part_recv (struct htlc_conn *htlc, void *chat,
                               void *member_model, guint16 uid);
 
@@ -707,13 +710,13 @@ hx_rcv_user_change (struct htlc_conn *htlc)
                    (unsigned)uid);
     }
 
-    /* Route to the right roster signal in the Rust hxuser-recv crate; it
-     * returns what it emitted so we do the matching join / rename logging.
-     * uid + nick_color ride in as scalars — the view's model upsert + row
-     * insert read only those two off the old carrier struct. */
-    int emitted = hx_user_change_recv (htlc, chat, uid, plan.eff_nick_color,
-                                       name, icon, plan.eff_color, plan.is_new,
-                                       plan.skip_self_create, TRUE);
+    /* Route through the shared roster-apply in the Rust hxuser-recv crate
+     * (incremental=TRUE — this is a live broadcast, not the bulk load); it
+     * returns what it emitted so we do the matching join / rename logging. */
+    int emitted = hx_user_apply_recv (htlc, chat, hx_chat_member_model (chat),
+                                      uid, plan.eff_nick_color, name, icon,
+                                      plan.eff_color, plan.is_new,
+                                      plan.skip_self_create, TRUE);
     if (emitted == HX_USER_CHANGE_SKIPPED) {
         /* Our own row — the USER_LIST reply creates it in the right spot. */
         return;
@@ -2114,11 +2117,11 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
             }
             uid = rec.uid;
             name_buf[rec.name_len] = 0;
-            /* `new` means "not already in this chat's membership". Reset
-             * per chunk: a stale new=1 from a previous new user would
+            /* `new` means "not already in this chat's membership". Computed
+             * per record: a stale new=1 from a previous new user would
              * otherwise spawn a spurious user_create for every subsequent
-             * EXISTING user, doubling the UI row. Existence is a model
-             * query now — the same store every reader uses. */
+             * EXISTING user, doubling the UI row. Existence is a model query —
+             * the same store every reader uses. */
             new = !hx_member_model_contains (hx_chat_member_model (chat), uid);
 
             /* Colored-Nicknames: mirror the trailer colour onto htlc when
@@ -2135,22 +2138,14 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
                 htlc->color = rec.color;
             }
 
-            /* uid + nick_color ride in as scalar signal args now. */
-            if (new) {
-                /* incremental=FALSE: this is the bulk user-list load, not a
-                 * live join. Passing FALSE keeps the join chime from firing
-                 * once per user already in the room at login. */
-                gtkhx_session_emit_user_create (gtkhx_session_get_default (),
-                                                htlc, chat, uid, rec.nick_color,
-                                                name_buf, rec.icon, rec.color,
-                                                FALSE);
-            } else {
-                /* Existing member: keep the model current without churning
-                 * the view — matches the old silent field update the
-                 * per-chat hashtable did for a re-sent list. */
-                hx_member_model_upsert (hx_chat_member_model (chat), uid, name_buf,
-                                        rec.icon, rec.color, rec.nick_color);
-            }
+            /* Same shared roster-apply as the live USER_CHANGE path, but
+             * incremental=FALSE: a new record emits user-create with the join
+             * chime suppressed (we're loading users already in the room at
+             * login), and an existing record folds into the model silently. */
+            hx_user_apply_recv (htlc, chat, hx_chat_member_model (chat), uid,
+                                rec.nick_color, name_buf, rec.icon, rec.color,
+                                new, /*skip_self_create=*/FALSE,
+                                /*incremental=*/FALSE);
         }
 
         else if (_type == HTLS_DATA_CHAT_SUBJECT) {

@@ -5,11 +5,29 @@ use super::test_env::Emit;
 use super::*;
 use std::ffi::CString;
 
+/// A live `USER_CHANGE` apply (incremental=1).
 #[allow(clippy::too_many_arguments)]
 fn change(uid: u16, nick_color: u32, name: &str, icon: u16, color: u16, is_new: bool, skip_self: bool) -> c_int {
+    apply(uid, nick_color, name, icon, color, is_new, skip_self, /*incremental=*/ true)
+}
+
+/// The unified roster-apply — mirrors both callers (USER_CHANGE = incremental,
+/// USER_LIST = not).
+#[allow(clippy::too_many_arguments)]
+fn apply(
+    uid: u16,
+    nick_color: u32,
+    name: &str,
+    icon: u16,
+    color: u16,
+    is_new: bool,
+    skip_self: bool,
+    incremental: bool,
+) -> c_int {
     let cname = CString::new(name).unwrap();
     unsafe {
-        hx_user_change_recv(
+        hx_user_apply_recv(
+            std::ptr::null_mut(),
             std::ptr::null_mut(),
             std::ptr::null_mut(),
             uid,
@@ -19,7 +37,7 @@ fn change(uid: u16, nick_color: u32, name: &str, icon: u16, color: u16, is_new: 
             color,
             c_int::from(is_new),
             c_int::from(skip_self),
-            /*incremental=*/ 1,
+            c_int::from(incremental),
         )
     }
 }
@@ -65,6 +83,45 @@ fn self_join_is_skipped_without_emit() {
     let r = change(1, 0, "Me", 128, 0, /*is_new=*/ true, /*skip_self=*/ true);
     assert_eq!(r, HX_USER_CHANGE_SKIPPED);
     assert_eq!(test_env::take(), None);
+}
+
+#[test]
+fn bulk_load_new_user_creates_without_chime() {
+    // USER_LIST login load: a new member emits user-create, but incremental=0
+    // so the join chime stays silent.
+    test_env::reset();
+    let r = apply(7, 3, "Alice", 128, 4, /*is_new=*/ true, /*skip_self=*/ false, /*incremental=*/ false);
+    assert_eq!(r, HX_USER_CHANGE_CREATED);
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Create {
+            uid: 7,
+            nick_color: 3,
+            name: b"Alice".to_vec(),
+            icon: 128,
+            color: 4,
+            incremental: false,
+        })
+    );
+}
+
+#[test]
+fn bulk_load_existing_user_upserts_silently() {
+    // USER_LIST re-load of a member already in the room: fold the fields into
+    // the model directly, no view signal.
+    test_env::reset();
+    let r = apply(9, 5, "Alice2", 129, 2, /*is_new=*/ false, /*skip_self=*/ false, /*incremental=*/ false);
+    assert_eq!(r, HX_USER_CHANGE_UPDATED);
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Upsert {
+            uid: 9,
+            nick_color: 5,
+            name: b"Alice2".to_vec(),
+            icon: 129,
+            color: 2,
+        })
+    );
 }
 
 fn part(uid: u16) -> c_int {

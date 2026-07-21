@@ -1,12 +1,14 @@
 //! User-roster receive handlers (ported from `rcv.c`).
 //!
-//! The `USER_CHANGE` / `USER_PART` broadcasts are the most entangled of the
-//! receive handlers — they read the per-chat member model, mutate `htlc` self
-//! state, and log. The pure change-*decision* (`hx_user_change_plan_resolve`)
-//! already lives in `proto_helpers.c` with its own Tier-2 tests. This crate
-//! takes the next cleanly-extractable slice: the emit *routing* — which
-//! `GtkhxSession` signal fires for which outcome — leaving the parse, the plan,
-//! the model reads, the ignore/rename logging, and the self-bookkeeping in C.
+//! The live `USER_CHANGE` broadcast and the bulk `USER_LIST` login load both end
+//! in the same roster-apply decision: a new member becomes a `user-create`, an
+//! existing one is either a live `user-change` or a silent model refresh. That
+//! shared tail is [`hx_user_apply_recv`], called by both paths (`incremental`
+//! tells them apart) so the create/change/upsert routing lives in one place.
+//! [`hx_user_part_recv`] handles the `USER_PART` removal. The change-*decision*
+//! itself (`hx_user_change_plan_resolve`) lives in `hotline-proto`; the C side
+//! keeps the parse, the plan resolution, the self-uid bookkeeping, and the
+//! ignore/rename logging keyed on these functions' return values.
 
 use std::os::raw::{c_char, c_int, c_void};
 
@@ -47,30 +49,56 @@ extern "C" {
     );
     /// Whether `uid` is a member of the per-chat model (hxmember-model).
     fn hx_member_model_contains(model: *mut c_void, uid: u16) -> c_int;
+    /// Insert-or-update a member's fields in the per-chat model (hxmember-model),
+    /// without emitting a view signal.
+    fn hx_member_model_upsert(
+        model: *mut c_void,
+        uid: u16,
+        name: *const c_char,
+        icon: u16,
+        color: u16,
+        nick_color: u32,
+    );
 }
 
-/// Result of [`hx_user_change_recv`] — tells the C side what (if anything) it
-/// emitted, so it can do the matching join/rename logging.
+/// Result of [`hx_user_apply_recv`] — tells the C side what (if anything) it
+/// did, so it can do the matching join/rename logging.
 pub const HX_USER_CHANGE_SKIPPED: c_int = 0;
 pub const HX_USER_CHANGE_CREATED: c_int = 1;
 pub const HX_USER_CHANGE_CHANGED: c_int = 2;
+/// The member already existed and this was a non-incremental (bulk user-list)
+/// pass, so its fields were folded into the model silently — no view signal.
+pub const HX_USER_CHANGE_UPDATED: c_int = 3;
 
-/// `int hx_user_change_recv (htlc, chat, uid, nick_color, name, icon, color,
-/// is_new, skip_self_create, incremental)` — route a resolved `USER_CHANGE` to
-/// the right roster signal. Returns [`HX_USER_CHANGE_SKIPPED`] (nothing emitted —
-/// our own join, deferred to the USER_LIST reply), [`HX_USER_CHANGE_CREATED`]
-/// (user-create), or [`HX_USER_CHANGE_CHANGED`] (user-change). The C side owns
-/// the plan resolution, the model reads, and the join/rename logging keyed on
-/// this return.
+/// `int hx_user_apply_recv (htlc, chat, member_model, uid, nick_color, name,
+/// icon, color, is_new, skip_self_create, incremental)` — the one roster-apply
+/// routine shared by the live `USER_CHANGE` broadcast and the bulk `USER_LIST`
+/// load. It routes a member's resolved state to the right outcome and returns
+/// which, so the C side does the matching logging:
+///
+/// - **new + `skip_self_create`** → [`HX_USER_CHANGE_SKIPPED`]: our own live
+///   join; the USER_LIST reply creates the row in the right spot.
+/// - **new** → [`HX_USER_CHANGE_CREATED`]: emit `user-create` (the view inserts
+///   the row and seeds the model). `incremental` gates the join chime.
+/// - **existing + `incremental`** (live change) → [`HX_USER_CHANGE_CHANGED`]:
+///   emit `user-change` (the view updates the row in place).
+/// - **existing + not `incremental`** (bulk re-load) → [`HX_USER_CHANGE_UPDATED`]:
+///   fold the fields into the model silently, no view churn — matches the old
+///   quiet field update for a re-sent list.
+///
+/// The C side owns the plan resolution + `is_new` determination, the self-uid
+/// bookkeeping, and the join/rename logging keyed on the return.
 ///
 /// # Safety
-/// `chat` is the opaque `struct chat *` the signal forwards; `name` is a valid C
-/// string; `htlc` is opaque.
+/// `chat` is the opaque `struct chat *` the signal forwards; `member_model` is a
+/// valid `HxMemberModel *` (only read on the silent-upsert path); `name` is a
+/// valid C string; `htlc` is opaque.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
-pub unsafe extern "C" fn hx_user_change_recv(
+pub unsafe extern "C" fn hx_user_apply_recv(
     htlc: *mut c_void,
     chat: *mut c_void,
+    member_model: *mut c_void,
     uid: u16,
     nick_color: u32,
     name: *const c_char,
@@ -98,17 +126,23 @@ pub unsafe extern "C" fn hx_user_change_recv(
         );
         return HX_USER_CHANGE_CREATED;
     }
-    gtkhx_session_emit_user_change(
-        gtkhx_session_get_default(),
-        htlc,
-        chat,
-        uid,
-        nick_color,
-        name,
-        icon,
-        color,
-    );
-    HX_USER_CHANGE_CHANGED
+    if incremental != 0 {
+        gtkhx_session_emit_user_change(
+            gtkhx_session_get_default(),
+            htlc,
+            chat,
+            uid,
+            nick_color,
+            name,
+            icon,
+            color,
+        );
+        return HX_USER_CHANGE_CHANGED;
+    }
+    // Existing member seen during the bulk user-list load: keep the model
+    // current without churning the view.
+    hx_member_model_upsert(member_model, uid, name, icon, color, nick_color);
+    HX_USER_CHANGE_UPDATED
 }
 
 /// `int hx_user_part_recv (htlc, chat, member_model, uid)` — emit `user-delete`
@@ -160,6 +194,15 @@ pub(crate) mod test_env {
         Delete {
             uid: u16,
             incremental: bool,
+        },
+        /// The silent-upsert path (existing member during a bulk load): no
+        /// view signal fired, the model was updated directly.
+        Upsert {
+            uid: u16,
+            nick_color: u32,
+            name: Vec<u8>,
+            icon: u16,
+            color: u16,
         },
     }
 
@@ -256,6 +299,24 @@ unsafe fn gtkhx_session_emit_user_delete(
 #[cfg(test)]
 unsafe fn hx_member_model_contains(_model: *mut c_void, _uid: u16) -> c_int {
     c_int::from(test_env::CONTAINS.with(|c| c.get()))
+}
+
+#[cfg(test)]
+unsafe fn hx_member_model_upsert(
+    _model: *mut c_void,
+    uid: u16,
+    name: *const c_char,
+    icon: u16,
+    color: u16,
+    nick_color: u32,
+) {
+    test_env::record(test_env::Emit::Upsert {
+        uid,
+        nick_color,
+        name: cbytes(name),
+        icon,
+        color,
+    });
 }
 
 #[cfg(test)]
