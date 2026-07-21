@@ -537,7 +537,7 @@ changed_nick_color (session *sess)
 {
     (void)sess;
     guint32 nc = (guint32)gtkhx_prefs.nick_color;
-    hx_active_session ()->htlc->nick_color = nc;
+    hx_conn_set_nick_color (hx_active_session ()->htlc, nc);
     hx_change_name_icon (hx_active_session ()->htlc);
 
     /* Locally re-render our own row in the public chat user list.
@@ -2138,7 +2138,8 @@ apply_loaded_xtext_prefs (void)
 	 * doesn't fire on prefs_read, so without an explicit copy here
 	 * htlc->nick_color stays at network.c's HX_NICK_COLOR_NONE
 	 * default and we'd silently never advertise. */
-    hx_active_session ()->htlc->nick_color = (guint32)gtkhx_prefs.nick_color;
+    hx_conn_set_nick_color (hx_active_session ()->htlc,
+                            (guint32)gtkhx_prefs.nick_color);
 
     gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
     gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);

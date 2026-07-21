@@ -275,8 +275,6 @@ struct htlc_conn {
     char name[32];
     char login[32];
 
-    guint16 color;
-
     /* Colored-Nicknames extension — our own 32-bit
 	 * 0x00RRGGBB nickname color. HX_NICK_COLOR_NONE means "no
 	 * color set"; in that case hx_change_name_icon omits the

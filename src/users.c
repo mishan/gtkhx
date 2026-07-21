@@ -86,12 +86,12 @@ hx_change_name_icon (struct htlc_conn *htlc)
      * in. Servers that don't know the extension ignore the trailing
      * chunk; supporting servers mark us color-aware and start
      * decorating other users' USER_CHANGE pushes for us. */
-    bool has_color = htlc->nick_color != HX_NICK_COLOR_NONE;
+    bool has_color = hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE;
     struct hx_chunk chunks[3];
     guint8 scratch[6];
     int hc = (int)gtkhx_proto_build_user_change_chunks (
         hx_conn_icon (htlc), (const uint8_t *)name_wire, name_len, has_color ? 1 : 0,
-        htlc->nick_color, chunks, G_N_ELEMENTS (chunks), scratch,
+        hx_conn_nick_color (htlc), chunks, G_N_ELEMENTS (chunks), scratch,
         sizeof (scratch));
     if (hc > 0) {
         hlwrite_chunks (htlc, HTLC_HDR_USER_CHANGE, 0, chunks, hc);

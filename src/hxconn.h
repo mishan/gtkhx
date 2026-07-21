@@ -72,9 +72,10 @@ extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
 /* ---- Our own user identity -----------------------------------------------
  *
  * uid: our session user-id (assigned by the server). icon: our chat-list icon
- * id. color: our status colour index. nick_color: the Colored-Nicknames RGB
- * (0x00RRGGBB, or HX_NICK_COLOR_NONE). Seeded from prefs at connect and updated
- * from SELFINFO / USER_CHANGE echoes.
+ * id. nick_color: the Colored-Nicknames RGB (0x00RRGGBB, or
+ * HX_NICK_COLOR_NONE). Seeded from prefs at connect and updated from SELFINFO /
+ * USER_CHANGE echoes. (The old status-colour field `color` was write-only and
+ * has been removed.)
  *
  * hx_conn_icon_ptr returns the raw address of the icon field: the ICON cfgvar
  * (options.c) binds the prefs read/write path to a stable guint16* and can't go
@@ -86,8 +87,6 @@ extern void    hx_conn_set_uid (struct htlc_conn *h, guint16 v);
 extern guint16 hx_conn_icon (const struct htlc_conn *h);
 extern void    hx_conn_set_icon (struct htlc_conn *h, guint16 v);
 extern guint16 *hx_conn_icon_ptr (struct htlc_conn *h);
-extern guint16 hx_conn_color (const struct htlc_conn *h);
-extern void    hx_conn_set_color (struct htlc_conn *h, guint16 v);
 extern guint32 hx_conn_nick_color (const struct htlc_conn *h);
 extern void    hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
 
