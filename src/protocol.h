@@ -193,9 +193,7 @@ struct htxf_conn {
 };
 
 struct htlc_conn {
-    struct htlc_conn *next, *prev;
     void (*rcv) (struct htlc_conn *);
-    void (*real_rcv) (struct htlc_conn *);
     struct qbuf in, out;
     struct qbuf read_in;
     /* Server endpoint identification, populated at hx_connect time.
@@ -279,56 +277,24 @@ struct htlc_conn {
 	 * apply; sent on USER_CHANGE via hx_change_name_icon. */
     guint32 nick_color;
 
-    char macalg[32];
-    u_int8_t sessionkey[64];
-    u_int16_t sklen;
-
+    /* HOPE cipher / compression names handed to the orchestrated connect
+	 * (hxnet owns the actual handshake, ciphers, and compression). Empty
+	 * strings select the orchestrator's defaults; set from the Connect dialog
+	 * and read at hx_connect time. */
     char cipheralg[32];
-    union cipher_state cipher_encode_state;
-    union cipher_state cipher_decode_state;
-    u_int8_t cipher_encode_key[32];
-    u_int8_t cipher_decode_key[32];
-    /* keylen in bytes */
-    u_int8_t cipher_encode_keylen, cipher_decode_keylen;
-    u_int8_t cipher_encode_type, cipher_decode_type;
-    /* HOPE cipher mode (CIPHER_MODE_STREAM | CIPHER_MODE_AEAD).
-	 * Defaults to STREAM. The server's HTLS_DATA_CIPHER_MODE chunk
-	 * in the HOPE Step-2 reply sets this — "AEAD" → AEAD, anything
-	 * else (or chunk absent) → STREAM. cipher_encode/decode dispatch
-	 * on this to pick between the byte-stream XOR path (Blowfish)
-	 * and the framed Seal/Open path (ChaCha20-Poly1305). */
-    u_int8_t cipher_mode;
-    /* Opaque HOPE control-channel AEAD material handle (Rust
-	 * HxnetHopeAead*), or NULL. Set after login when the orchestrated
-	 * HOPE handshake negotiated ChaCha20-Poly1305 (or, on the legacy
-	 * Tier 3 harness transport, built from the harness's own C cipher
-	 * state). Lets an HTXF subchannel derive its per-transfer keys
-	 * in-process via hxnet_htxf_connect, without the session key crossing
-	 * back to C. Freed with hxnet_hope_aead_free on connection
-	 * teardown. */
-    void *hope_aead;
-    /* AEAD decoded-plaintext accumulator. network.c::decode() in
-	 * AEAD mode opens complete length-prefixed frames out of
-	 * read_in and stores their plaintext here. The same decode()
-	 * call then memcpy's bytes from here into htlc->in as the
-	 * existing rcv loop (which works in header → body chunks)
-	 * consumes them.
-	 *
-	 * Two-stage buffering (read_in → aead_plain → in) is needed
-	 * because AEAD requires a complete frame before Open can
-	 * verify the Poly1305 tag, while the rcv loop streams in
-	 * header-then-body pieces. The intermediate plain buffer
-	 * bridges the granularity mismatch. Only used in AEAD mode;
-	 * stream-cipher mode leaves it untouched. */
-    struct qbuf aead_plain;
-    u_int8_t zc_hdrlen;
-    u_int8_t zc_ran;
     char compressalg[32];
-    union compress_state compress_encode_state;
-    union compress_state compress_decode_state;
-    u_int16_t compress_encode_type, compress_decode_type;
-    unsigned long gzip_inflate_total_in, gzip_inflate_total_out;
-    unsigned long gzip_deflate_total_in, gzip_deflate_total_out;
+    /* Opaque HOPE control-channel AEAD material handle (Rust HxnetHopeAead*),
+	 * or NULL. Set after login when the orchestrated HOPE handshake negotiated
+	 * ChaCha20-Poly1305; lets an HTXF subchannel derive its per-transfer keys
+	 * in-process via hxnet_htxf_connect without the session key crossing back
+	 * to C. Freed with hxnet_hope_aead_free on connection teardown. */
+    void *hope_aead;
+    /* The legacy per-direction C cipher and compression state (session key,
+	 * the cipher and compress union members, their keys, type and keylen
+	 * fields, cipher_mode, the AEAD plaintext accumulator, and the gzip
+	 * counters) is gone: hxnet plus the hxcrypto and hxcompress crates own all
+	 * control-channel crypto and compression now, so none of it was ever
+	 * populated on htlc. */
     /* DATA_CAPABILITIES bitmask negotiated for this session, as
 	 * confirmed by the server in the LOGIN reply. Zero on legacy
 	 * servers (or on connections where neither side speaks the

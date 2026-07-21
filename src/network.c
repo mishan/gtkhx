@@ -385,42 +385,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * need explicit teardown. The legacy freeaddrinfo() call (and
 	 * the conn_addr shim that briefly replaced it) belonged here. */
 
-    memset (htlc->cipher_encode_key, 0, sizeof (htlc->cipher_encode_key));
-    memset (htlc->cipher_decode_key, 0, sizeof (htlc->cipher_decode_key));
-    /* No per-direction stream-cipher state to free: the orchestrator
-     * (hxnet) owns all control-channel crypto now, so the legacy C
-     * Blowfish union member is never allocated on htlc. The memsets
-     * below clear the (always-zero) cipher state defensively. */
-    memset (&htlc->cipher_encode_state, 0, sizeof (htlc->cipher_encode_state));
-    memset (&htlc->cipher_decode_state, 0, sizeof (htlc->cipher_decode_state));
-    htlc->cipher_encode_type = 0;
-    htlc->cipher_decode_type = 0;
-    htlc->cipher_encode_keylen = 0;
-    htlc->cipher_decode_keylen = 0;
-    htlc->cipher_mode = CIPHER_MODE_STREAM;
-    /* Free the AEAD plaintext accumulator buffer if it grew. The
-	 * struct itself stays zeroed for the next connection. */
-    if (htlc->aead_plain.buf) {
-        g_free (htlc->aead_plain.buf);
-        memset (&htlc->aead_plain, 0, sizeof (htlc->aead_plain));
-    }
-    /* No per-direction compression state to tear down: the orchestrator
-     * (hxnet, via the Rust hxcompress crate) owns the control-channel
-     * compression now, so the legacy C compress_*_state / gzip counters
-     * are never populated on htlc. The zeroing below clears the
-     * (always-zero) fields defensively. */
-    memset (&htlc->compress_encode_state, 0,
-            sizeof (htlc->compress_encode_state));
-    memset (&htlc->compress_decode_state, 0,
-            sizeof (htlc->compress_decode_state));
-    htlc->compress_encode_type = 0;
-    htlc->compress_decode_type = 0;
-    htlc->gzip_deflate_total_in = 0;
-    htlc->gzip_deflate_total_out = 0;
-    htlc->gzip_inflate_total_in = 0;
-    htlc->gzip_inflate_total_out = 0;
-    memset (htlc->sessionkey, 0, sizeof (htlc->sessionkey));
-    htlc->sklen = 0;
+    /* No per-direction cipher / compression state to tear down: the
+     * orchestrator (hxnet + the Rust hxcrypto-* / hxcompress crates) owns all
+     * control-channel crypto and compression now. The legacy C session key,
+     * cipher/compress union state, and gzip counters were removed from
+     * struct htlc_conn — nothing populated them. */
     /* Release the opaque HOPE AEAD material handle seeded at login. */
     if (htlc->hope_aead) {
         hxnet_hope_aead_free (htlc->hope_aead);
@@ -1281,36 +1250,12 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
      * cipher / compression yet (HOPE-negotiated stacks live
      * inside the C cipher state today); when those are set we
      * fall through to the legacy in-place encode path. */
-    /* When the bridge is installed, hxnet's transform
-     * stack handles the negotiated cipher / compression, so the
-     * C side ships PLAINTEXT through hx_bridge_send_frame and
-     * skips the legacy compress_encode + cipher_encode +
-     * GIOStream-write-queue path. The install path in
-     * hx_install_hxnet_post_hope clears htlc->cipher_*_type /
-     * compress_*_type to NONE so the gate below only needs to
-     * check `hx_bridge_is_installed` — but the asserts inside
-     * the branch keep us honest if a future refactor lets a
-     * non-NONE state leak through. */
+    /* When the bridge is installed, hxnet's transform stack handles the
+     * negotiated cipher / compression, so the C side ships PLAINTEXT through
+     * hx_bridge_send_frame. There is no longer any legacy C
+     * compress_encode / cipher_encode path to skip — that state was removed
+     * from struct htlc_conn once hxnet took over control-channel crypto. */
     if (hx_bridge_is_installed ()) {
-        /* hx_install_hxnet_post_hope clears cipher_*_type and
-         * compress_*_type to NONE before the bridge starts
-         * carrying traffic. A non-NONE state here means a
-         * future refactor put a cipher / compression activation
-         * after the install — that would silently
-         * double-encode on the wire. Log the invariant
-         * violation and close rather than ship garbage. (Not
-         * `g_assert`, which compiles out under
-         * G_DISABLE_ASSERT.) */
-        if (htlc->cipher_encode_type != CIPHER_NONE
-            || htlc->compress_encode_type != COMPRESS_NONE) {
-            g_critical (
-                "hxnet bridge active but cipher_encode_type=%d "
-                "compress_encode_type=%d — would double-encode; "
-                "closing.",
-                htlc->cipher_encode_type, htlc->compress_encode_type);
-            hx_htlc_close (htlc, /*expected=*/0);
-            return;
-        }
         int rc = hx_bridge_send_frame (&htlc->out.buf[this_off], len);
         if (rc == 0) {
             htlc->out.len -= len;
@@ -1422,25 +1367,6 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     /* hxnet routing — same shape as hlwrite above; see that
      * comment block for the gate's full rationale. */
     if (hx_bridge_is_installed ()) {
-        /* hx_install_hxnet_post_hope clears cipher_*_type and
-         * compress_*_type to NONE before the bridge starts
-         * carrying traffic. A non-NONE state here means a
-         * future refactor put a cipher / compression activation
-         * after the install — that would silently
-         * double-encode on the wire. Log the invariant
-         * violation and close rather than ship garbage. (Not
-         * `g_assert`, which compiles out under
-         * G_DISABLE_ASSERT.) */
-        if (htlc->cipher_encode_type != CIPHER_NONE
-            || htlc->compress_encode_type != COMPRESS_NONE) {
-            g_critical (
-                "hxnet bridge active but cipher_encode_type=%d "
-                "compress_encode_type=%d — would double-encode; "
-                "closing.",
-                htlc->cipher_encode_type, htlc->compress_encode_type);
-            hx_htlc_close (htlc, /*expected=*/0);
-            return;
-        }
         int rc = hx_bridge_send_frame (&htlc->out.buf[this_off], len);
         if (rc == 0) {
             htlc->out.len -= len;
