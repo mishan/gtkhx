@@ -14,7 +14,7 @@
  * worker shell. The only coupling back to that shell is a progress
  * callback (xfer_progress_fn) the caller supplies; xfers.c passes its
  * post_file_update, a test passes a no-op. See
- * docs/files-rust-migration-scope.md.
+ * docs/rust/files-migration-scope.md.
  */
 
 #ifndef GTKHX_XFERS_RECV_H
@@ -77,5 +77,14 @@ extern void gtkhx_ffo_parse_filp_info (const guint8 *info, size_t info_len,
  * errno-like positive code on failure. */
 extern int file_recv_one (struct htxf_conn *htxf, guint64 file_budget,
                           guint8 *buf, xfer_progress_fn progress);
+
+/* Receive a folder tree from an already-open HTXF subchannel into the
+ * local directory `base_path` (which it creates). Drives the Hotline 1.5
+ * FILE_NEXT/FILE_SEND state machine, calling file_recv_one per file.
+ * `buf` is caller scratch (>= 1024 bytes). Rewrites htxf->path per file;
+ * the caller restores it. Returns 0 on success (including the clean
+ * end-of-stream when the server closes), an errno-like code on failure. */
+extern int folder_recv_all (struct htxf_conn *htxf, const char *base_path,
+                            guint8 *buf, xfer_progress_fn progress);
 
 #endif /* GTKHX_XFERS_RECV_H */

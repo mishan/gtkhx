@@ -1,7 +1,53 @@
 # Files subsystem — C→Rust migration scope
 
-> Scoping document. No code changes here — this maps the components, what's
-> already in Rust, what's worth moving, and a phased plan with risk/effort.
+> Scoping document. Maps the components, what's already in Rust, what's
+> worth moving, and a phased plan with risk/effort. **F1 and F2 are done**
+> — see the Status section below.
+
+## Status
+
+- **F1 — pure helpers: DONE.** The file-type → icon-id map and the
+  FourCC → human-label table live in the `hxfiles-model` crate
+  (`icon_id_for`, `kind_label_for`), called from `files.c` via the
+  `gtkhx_files_*` FFI.
+- **F2 — the transfer workers: DONE**, though it landed differently from
+  the original "full tokio port" sketch below (see the F2 section for the
+  as-built architecture). The FFO/FILP frame codec + HFS fork byte math
+  moved to the dependency-free `hxfiles-xfer` crate (`ffo` module,
+  unit-tested headless). The four worker state machines were **extracted
+  from `xfers.c` into linkable C units** — `file_recv_one` /
+  `folder_recv_all` in `src/xfers_recv.c`, `file_send_one` /
+  `folder_send_all` in `src/xfers_send.c` — each driven by a
+  one-function-pointer progress seam so they can be tested without the
+  GTK worker shell. `xfers.c` keeps only the worker shell (the `xfers[]`
+  list, refcount lifecycle, dispatch, and the thin connect/sound
+  wrappers). New worker-level round-trip tests drive the real code
+  against mhxd: `test_file_get`, `test_file_put`, `test_folder_roundtrip`.
+  - **Bug found + fixed along the way:** `folder_send_all` (the folder
+    upload path) declared a per-file size that excluded the 16-byte MACR
+    marker `file_send_one` always writes, so multi-file folder uploads
+    desynced the server and failed. Never caught because the solo-file
+    path has no following file to corrupt and folder upload had never
+    been driven end-to-end. Fixed in the F2 folder commit.
+- **F3 (remote provider model) and F4 (provider trait): not started.**
+
+### F2 follow-ups (deferred)
+
+- **Nested-subdir folder round-trip.** `test_folder_roundtrip` covers two
+  top-level files. A nested subdir (folder markers + `pathcount > 1`) has
+  its own untested quirk in the mhxd round-trip — the folder-marker path
+  in `folder_send_all` / `folder_recv_all` — and is left as a follow-up.
+- **`hxhfs` wiring.** The HFS sidecar (`type_creator`, `hfsinfo_read/
+  write`, `resource_open`, `comment_len`) now has a standalone Rust port
+  in the `hxhfs` crate, but `xfers_send.c` / `xfers_recv.c` still call the
+  C `hfs.c`. Switching them to `hxhfs` (and retiring `hfs.c`) is a natural
+  next step, coordinated with the `hxhfs` work.
+- **`htxf_io.c` / `htxf_subchannel.c`** remain thin C shims rather than
+  being folded into a Rust worker — the as-built F2 keeps the I/O loops
+  in C (see the F2 section).
+
+> Scoping notes below predate the F1/F2 work; kept for the component
+> inventory + F3/F4 planning.
 
 ## TL;DR
 
@@ -101,31 +147,55 @@ GObject/GIO/rcv-routing shells, `files_panel.c`, `files_browser.c`,
 Each phase is independently shippable, behind the existing test net, on
 its own `claude/*` branch.
 
-### Phase F1 — pure helpers (warm-up, low risk)
-- Move to Rust: `hx_htxf_subchannel_pack_preamble` (byte packing), the
-  FILE_LIST walk loop in `filelist_walker.c`, `icon_of_ftype_and_name`,
-  `kind_of_ftype`, and the size/modified formatters.
-- Keeps the C signatures; swaps bodies for FFI calls.
-- **Test:** existing `test_htxf_hdr`, `test_filelist_walker` cover most;
-  add Tier-1 unit tests for the formatters.
-- **Value:** establishes `hxfiles-model` + the FFI shape; removes ~200
-  LOC of fiddly C.
+### Phase F1 — pure helpers (warm-up, low risk) — **DONE**
+- Moved to the `hxfiles-model` crate: `icon_of_ftype_and_name` →
+  `icon_id_for`, `kind_of_ftype` → `kind_label_for`. `files.c` keeps the
+  C signatures and calls the `gtkhx_files_*` FFI; the `_()` translation +
+  "Unknown"/unknown-FourCC fallbacks stay in C.
+- (The `hx_htxf_subchannel_pack_preamble` / `filelist_walker` / size
+  formatters listed in the original sketch were left in C — low value,
+  and the preamble packer is already a thin leaf over Rust.)
+- **Test:** `cargo test -p hxfiles-model` (icon + label tables).
 
-### Phase F2 — the transfer workers (the big one)
-- Port `put_thread`, `get_thread`, `folder_put_thread`,
-  `folder_get_thread` into `hxfiles-xfer` (tokio), owning the FFO frame
-  codec, HFS fork extraction (`hfs_m_to_htime`, fork headers), the
-  folder DFS walk, and local file read/write.
-- `htxf_io.c` / `htxf_subchannel.c` fold into the Rust worker; the C
-  `xfers.c` shrinks to the GObject/xfers-list/refcount + `file_update`
-  signal shell (or that moves too).
-- **Test:** strong existing net — `test_file_get/put`, `test_folder_get/
-  put`, `test_folder_xfer`, `test_large_file`, `test_htxf_cancel`,
-  `test_xfer_queue`, `test_real_htxf_connect`. Run against mhxd/Janus.
-- **Risk:** High — this is the core. But it's pure logic + IO (no GTK),
-  already on the tokio pool, and covered by integration tests. Do it in
-  slices: single-file get, then put, then folder get, then folder put.
-- **Value:** the bulk of the win; removes ~1800 LOC of frame/fork C.
+### Phase F2 — the transfer workers — **DONE (as-built differs)**
+
+The original sketch was a "full tokio port" that also folded in
+`htxf_io.c` / `htxf_subchannel.c`. As built, F2 drew the boundary
+differently, and the reasoning is worth recording:
+
+- **What moved to Rust:** only the genuinely protocol-shaped, error-prone
+  *byte math* — the FFO fork-header decode/encode (legacy + large-file
+  high32/low32 split), the FILP info-block parse, the mac↔header (1904↔
+  2000) wire epoch conversion, and the info-block length. All in the
+  dependency-free `hxfiles-xfer` crate's `ffo` module, unit-tested
+  headless (no socket, no server), pinned against the same wire-shape
+  oracle `tests/proto/test_large_file.c` uses. Exposed to C via the
+  `gtkhx_ffo_*` FFI.
+- **What stayed in C but was extracted for testability:** the four worker
+  state machines. `file_recv_one` + `folder_recv_all` → `src/xfers_recv.c`;
+  `file_send_one` + `folder_send_all` (+ the DFS tree walk) →
+  `src/xfers_send.c`. The one coupling back to the GTK worker shell —
+  `post_file_update` — became a `xfer_progress_fn` function-pointer
+  parameter, so each machine links + runs without GTK. `xfers.c` keeps
+  the shell: the `xfers[]` list, refcount lifecycle, worker/completion
+  dispatch, and the thin `htxf_connect` / `play_sound` / completion
+  wrappers.
+- **Why not a full tokio port:** the I/O loops are thin plumbing over
+  `hxnet` (already Rust) and the HFS sidecar / preview window are
+  C/GTK-shaped. Re-expressing them as a Rust worker would mean a large
+  FFI callback vtable or a fragile `htxf_conn` struct mirror, for little
+  gain over "protocol math in Rust, I/O + platform glue in C" — which
+  matches the project's MVC boundary. `htxf_io.c` / `htxf_subchannel.c`
+  stay as the thin shims they already are.
+- **Tests (worker-level, against the live mhxd rig):**
+  `test_file_get` and `test_file_put` drive the real `file_recv_one` /
+  `file_send_one` and assert byte-exact on disk; `test_folder_roundtrip`
+  uploads a tree via `folder_send_all` and downloads it back through
+  `folder_recv_all`. Each was verified to *fail* under a deliberate
+  fault injection. Plus the pre-existing net (`test_large_file`,
+  `test_folder_xfer`, `test_xfer_queue`, `test_htxf_cancel`,
+  `test_htxf_hdr`, `test_real_htxf_connect`).
+- **Bug fixed:** the `folder_send_all` MACR-size desync (see Status).
 
 ### Phase F3 — remote provider model
 - Extract the listing model + reply handling from
@@ -150,9 +220,16 @@ Already present (this is what makes F2 tractable):
   `test_file_info`, `test_file_list`, `test_file_list_subdir`,
   `test_folder_get`, `test_folder_put`, `test_real_htxf_connect`
 
-Gaps to add: Tier-1 unit tests for the icon/type/size formatters (F1);
-a Rust-side unit test for the FFO frame codec + HFS fork math (F2) so
-regressions surface without a live server.
+Added by F1/F2:
+
+- **unit (Rust):** `cargo test -p hxfiles-model` (icon + label tables),
+  `cargo test -p hxfiles-xfer` (the FFO frame codec + HFS fork math,
+  headless).
+- **integration (worker-level, mhxd):** `test_file_get` and
+  `test_file_put` now drive the real `file_recv_one` / `file_send_one`
+  and assert byte-exact on disk (rewritten from harness-only smoke
+  tests); `test_folder_roundtrip` drives `folder_send_all` +
+  `folder_recv_all` end to end.
 
 ## Risks & open questions
 
@@ -174,10 +251,12 @@ regressions surface without a live server.
 
 ## Rough effort
 
-- **F1:** ~1–2 days (mechanical; establishes the crate).
-- **F2:** ~1–2 weeks (the real work; slice by transfer direction).
-- **F3:** ~3–5 days.
+- **F1:** DONE.
+- **F2:** DONE.
+- **F3:** ~3–5 days (not started).
 - **F4:** optional, defer.
 
-Recommended start: **F1** to stand up `hxfiles-model` + the FFI pattern,
-then **F2 sliced** (single-file get first) as the high-value core.
+Next up: **F3** — extract the remote listing model + reply handling from
+`files_remote_provider.c` into `hxfiles-model`, keeping the rcv.c signal
+routing + timeout watchdog in C. Smaller F2 follow-ups (nested-subdir
+folder round-trip, `hxhfs` wiring) are listed in the Status section.
