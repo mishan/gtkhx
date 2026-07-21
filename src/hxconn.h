@@ -37,4 +37,22 @@ extern guint64 hx_conn_chat_history_last_msgid (const struct htlc_conn *h);
 extern void    hx_conn_set_chat_history_last_msgid (struct htlc_conn *h,
                                                     guint64 v);
 
+/* ---- Server endpoint identity --------------------------------------------
+ *
+ * Populated at hx_connect time and read by the HTXF-subchannel setup, the TLS
+ * TOFU verify, and the connection-event log lines. serverhost / ip_addr are
+ * NUL-terminated strings; the getters return the internal buffer (valid for
+ * the connection's lifetime) and the setters copy into it (truncating to the
+ * field's capacity). `tls` is the per-connection separate-port TLS flag (0/1).
+ * ip_addr is the resolved printable peer address; hx_conn_set_ip_addr with ""
+ * clears it. */
+extern const char *hx_conn_serverhost (const struct htlc_conn *h);
+extern void        hx_conn_set_serverhost (struct htlc_conn *h, const char *v);
+extern guint16     hx_conn_serverport (const struct htlc_conn *h);
+extern void        hx_conn_set_serverport (struct htlc_conn *h, guint16 v);
+extern const char *hx_conn_ip_addr (const struct htlc_conn *h);
+extern void        hx_conn_set_ip_addr (struct htlc_conn *h, const char *v);
+extern char        hx_conn_tls (const struct htlc_conn *h);
+extern void        hx_conn_set_tls (struct htlc_conn *h, char v);
+
 #endif /* GTKHX_HXCONN_H */

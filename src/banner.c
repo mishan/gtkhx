@@ -33,6 +33,7 @@
 #include "debug.h"
 #include "hotline.h"
 #include "protocol.h"
+#include "hxconn.h"
 #include "proto_helpers.h"
 #include "network.h"
 #include "hxnet_bridge.h"      /* hx_bridge_lookup_socks_proxy */
@@ -600,14 +601,15 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
     /* Snapshot the subchannel endpoint — same host as the main
 	 * connection, port + 1. Stored as plain strings; the worker
 	 * hands them straight to GSocketClient. */
-    g_strlcpy (f->serverhost, htlc->serverhost, sizeof (f->serverhost));
-    f->serverport = htlc->serverport + 1;
+    g_strlcpy (f->serverhost, hx_conn_serverhost (htlc),
+               sizeof (f->serverhost));
+    f->serverport = hx_conn_serverport (htlc) + 1;
     /* mirror the control-channel TLS mode so the HTXF
      * subchannel wraps in TLS too when the control did. Janus
      * binds TLS-HTXF on TLSPort+1 (5601), which falls out of the
      * existing port+1 arithmetic — the htlc->serverport already
      * stores the TLS HTLS port (5600) in TLS mode. */
-    f->tls = htlc->tls;
+    f->tls = hx_conn_tls (htlc);
 
     /* Clone the control connection's opaque HOPE AEAD material handle
      * (seeded on htlc at login when ChaCha20-Poly1305 was negotiated).
