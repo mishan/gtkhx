@@ -1739,6 +1739,14 @@ name = "hxagreement-recv"
 version = "0.1.0"
 
 [[package]]
+name = "hxbookmarks"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "hxbridge"
 version = "0.1.0"
 dependencies = [

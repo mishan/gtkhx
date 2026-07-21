@@ -1,0 +1,20 @@
+[package]
+name = "hxbookmarks"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GtkHx bookmark model, TOML persistence, and legacy HTsc import/export."
+publish = false
+
+[lib]
+# rlib: consumed directly by gtkhx-ui (the Connect + Bookmarks dialogs call
+#       this crate's Rust API — no C ABI needed, since no C code touches
+#       bookmarks anymore). staticlib: reserved in case a C caller ever needs
+#       a thin FFI shim.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# Pure serde + toml, no glib/gtk, so `cargo test -p hxbookmarks` runs headless
+# against temp dirs. Both are already in the workspace lockfile.
+serde = { version = "1", features = ["derive"] }
+toml = "1"
