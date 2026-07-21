@@ -929,6 +929,13 @@ hx_rcv_dump (struct htlc_conn *htlc)
     close (fd);
 }
 
+/* Shared file-transfer reply tail — Rust hxxfer-recv crate. Emits the transfer's
+ * queue position to the tasks view, then (when queue == 0) starts the byte
+ * stream via xfer_ready_write. Called by all five xfer reply handlers once
+ * they've stamped ref/size/queue onto htxf. */
+extern void hx_xfer_announce (struct htlc_conn *htlc, struct htxf_conn *htxf,
+                              guint32 queue);
+
 void
 hx_rcv_xfer_queue (struct htlc_conn *htlc)
 {
@@ -948,12 +955,7 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
         return;
     }
     htxf->queue = xq.queueid;
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
-                                   htxf);
-
-    if (!htxf->queue) {
-        xfer_ready_write (htxf);
-    }
+    hx_xfer_announce (htlc, htxf, htxf->queue);
 }
 
 #ifdef HAVE_VOICE
@@ -2471,17 +2473,15 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
-                                   htxf); /* we most certainly want
-														 to output its position
-														 in the queue */
-
     /* For previews, build the GtkWindow + GtkTextView on the main
 	 * thread (we are on the main thread here — this is the
 	 * GIOChannel callback path). The download worker subsequently
 	 * feeds bytes via htxf->preview without ever touching GTK,
 	 * sidestepping a class of lockups we hit when constructing
-	 * widgets and calling gtk_window_present from a worker. */
+	 * widgets and calling gtk_window_present from a worker. Built
+	 * before hx_xfer_announce below because that call starts the
+	 * download when unqueued, and the worker streams into
+	 * htxf->preview. */
     if (htxf->opt.preview && !htxf->preview) {
         char *name = dirchar_basename (htxf->path);
         htxf->preview = hx_preview_new (name ? name : htxf->path);
@@ -2498,9 +2498,7 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
                                   htxf);
     }
 
-    if (!htxf->queue) {
-        xfer_ready_write (htxf);
-    }
+    hx_xfer_announce (htlc, htxf, htxf->queue);
 }
 
 /* HTLS reply to HTLC_HDR_FILE_GETFOLDER. Mirror of
@@ -2571,12 +2569,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
-                                   htxf);
-
-    if (!htxf->queue) {
-        xfer_ready_write (htxf);
-    }
+    hx_xfer_announce (htlc, htxf, htxf->queue);
 }
 
 void
@@ -2625,12 +2618,7 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
-                                   htxf);
-
-    if (!htxf->queue) {
-        xfer_ready_write (htxf);
-    }
+    hx_xfer_announce (htlc, htxf, htxf->queue);
 }
 
 /* HTLS reply to HTLC_HDR_FILE_PUTFOLDER. The server has created
@@ -2669,12 +2657,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
     htxf->serverport = htlc->serverport + 1;
 
-    gtkhx_session_emit_xfer_queue (gtkhx_session_get_default (), sess_from_htlc (htlc),
-                                   htxf);
-
-    if (!htxf->queue) {
-        xfer_ready_write (htxf);
-    }
+    hx_xfer_announce (htlc, htxf, htxf->queue);
 }
 
 /* Reply to our HTLC_HDR_DOWNLOAD_BANNER. The server gives us a
