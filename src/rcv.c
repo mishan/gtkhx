@@ -1585,9 +1585,6 @@ void
 rcv_task_login (struct htlc_conn *htlc, char *pass)
 {
     char buf[HOSTLEN];
-    guint16 uid;
-    guint16 version;
-    guint16 len;
     char servername[8192 + 1];
 
     g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
@@ -1662,145 +1659,98 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * walker; these can't piggyback on that. */
         inline_media_reset_advisory_limits (htlc);
 
-        dh_start (htlc)
-        {
-            switch (_type) {
-            case HTLS_DATA_UID:
-                dh_getint (uid);
-                htlc->uid = uid;
-                break;
-            case HTLS_DATA_VERSION: /* Hotline 1.5+ servers only */
-                dh_getint (version);
-                htlc->version = version;
-                break;
-            case HTLS_DATA_SERVERNAME: /* Hotline 1.5+ servers only */
-                len = (_len > sizeof (servername) - 1)
-                          ? sizeof (servername) - 1
-                          : _len;
-                memcpy (servername, dh->data, len);
-                CR2LF (servername, len);
-                strip_ansi (servername, len);
-                servername[len] = 0;
-                if (server_addr) {
-                    g_free (server_addr);
-                }
-                /* server names from old Hotline servers are
-				 * 8-bit Mac Roman text, not UTF-8 — and gtk_window_set_title
-				 * et al. assert UTF-8. gtkhx_text_to_utf8 handles the
-				 * already-UTF-8 / Mac-Roman / fall-back-to-substitute
-				 * cascade. */
-                server_addr = gtkhx_text_to_utf8 (
-                    servername, strlen (servername), NULL);
-                /* The window titles pick this server_addr up when the
-                 * "logged-in" signal is emitted after the walk completes;
-                 * no inline changetitlesconnected re-run needed. */
-                break;
-            case HTLS_DATA_CAPABILITIES:
-                /* DATA_CAPABILITIES echo from the server — the bits
-				 * the server agreed to enable for this session.
-				 * Per spec the field is a variable-width big-endian
-				 * unsigned integer (typically 2 bytes, extensible
-				 * to 8). hl_capabilities_decode (proto_helpers)
-				 * normalises whatever width arrived into our 64-
-				 * bit field. Bits we don't recognise are silently
-				 * preserved per the spec's "ignore unknown bits"
-				 * requirement — they don't affect behaviour but
-				 * leave the door open if a server advertises a cap
-				 * we'll start using later. */
-                {
-                    guint64 caps
-                        = hl_capabilities_decode (dh->data, _len);
-                    htlc->caps = caps;
-                    if (caps & HTLC_CAP_LARGE_FILES) {
-                        hx_printf_prefix (
-                            htlc, 0, INFOPREFIX,
-                            _ ("server confirmed large-file (64-bit) "
-                               "mode for this session\n"));
-                    }
-                    if (caps & HTLC_CAP_TEXT_ENCODING) {
-                        hx_printf_prefix (
-                            htlc, 0, INFOPREFIX,
-                            _ ("server confirmed UTF-8 text encoding "
-                               "for this session\n"));
-                    }
-                    if (caps & HTLC_CAP_CHAT_HISTORY) {
-                        hx_printf_prefix (
-                            htlc, 0, INFOPREFIX,
-                            _ ("server confirmed chat-history extension "
-                               "for this session\n"));
-                    }
-                    if (caps & HTLC_CAP_INLINE_MEDIA) {
-                        hx_printf_prefix (
-                            htlc, 0, INFOPREFIX,
-                            _ ("server confirmed inline-media extension "
-                               "for this session\n"));
-                    }
-                }
-                break;
-            case HTLS_DATA_CHAT_MEDIA_MAX_BYTES:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->media_max_bytes = v;
-                }
-                break;
-            case HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->media_max_dimension = v;
-                }
-                break;
-            case HTLS_DATA_CHAT_MEDIA_MAX_PIXELS:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->media_max_pixels = v;
-                }
-                break;
-            case HTLS_DATA_CHAT_MEDIA_CHUNK_SIZE:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->media_chunk_size = v;
-                }
-                break;
-            case HTLS_DATA_CHAT_MEDIA_MAX_FRAMES:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->media_max_frames = v;
-                }
-                break;
-            case HTLS_DATA_CHAT_MEDIA_MAX_DURATION_MS:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->media_max_duration_ms = v;
-                }
-                break;
-            case HTLS_DATA_HISTORY_MAX_MSGS:
-                /* Chat-history retention hint — server's max
-				 * message count. uint32 big-endian; 0 means
-				 * unlimited. Spec note: hints only, the
-				 * authoritative end-of-history signal is
-				 * DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->history_max_msgs = v;
-                }
-                break;
-            case HTLS_DATA_HISTORY_MAX_DAYS:
-                if (_len >= 4) {
-                    guint32 v;
-                    HN32 (&v, dh->data);
-                    htlc->history_max_days = v;
-                }
-                break;
+        /* The LOGIN reply chunk-walk moved to the Rust hotline-proto crate
+		 * (gtkhx_proto_parse_login). It enforces the same per-field width
+		 * gates the C code did (UID/VERSION as u16; each media / history
+		 * limit requires the spec's 4 bytes or it's skipped), sanitises
+		 * the server name (CR2LF + strip_ansi), and reports which fields
+		 * were present via the returned HX_LOGIN_SEEN_* bitmask. Every
+		 * field is independently optional on the wire — a 1.0/1.2 server
+		 * sends almost none of them — so each htlc assignment below is
+		 * gated on its seen bit. The advisory media limits were already
+		 * reset above; caps is overwritten only when the server echoed a
+		 * DATA_CAPABILITIES chunk. */
+        struct gtkhx_proto_login li;
+        unsigned login_seen = gtkhx_proto_parse_login (
+            htlc->in.buf, htlc->in.pos, (uint8_t *) servername,
+            sizeof (servername), &li);
+
+        if (login_seen & HX_LOGIN_SEEN_UID) {
+            htlc->uid = li.uid;
+        }
+        if (login_seen & HX_LOGIN_SEEN_VERSION) { /* Hotline 1.5+ only */
+            htlc->version = li.version;
+        }
+        if (login_seen & HX_LOGIN_SEEN_SERVERNAME) { /* Hotline 1.5+ only */
+            if (server_addr) {
+                g_free (server_addr);
+            }
+            /* server names from old Hotline servers are 8-bit Mac Roman
+			 * text, not UTF-8 — and gtk_window_set_title et al. assert
+			 * UTF-8. gtkhx_text_to_utf8 handles the already-UTF-8 /
+			 * Mac-Roman / fall-back-to-substitute cascade. The window
+			 * titles pick server_addr up when the "logged-in" signal is
+			 * emitted after this walk completes. */
+            server_addr = gtkhx_text_to_utf8 (
+                servername, strlen (servername), NULL);
+        }
+        if (login_seen & HX_LOGIN_SEEN_CAPS) {
+            /* DATA_CAPABILITIES echo — the bits the server agreed to
+			 * enable for this session. Bits we don't recognise are
+			 * preserved per the spec's "ignore unknown bits" rule. */
+            htlc->caps = li.caps;
+            if (li.caps & HTLC_CAP_LARGE_FILES) {
+                hx_printf_prefix (
+                    htlc, 0, INFOPREFIX,
+                    _ ("server confirmed large-file (64-bit) "
+                       "mode for this session\n"));
+            }
+            if (li.caps & HTLC_CAP_TEXT_ENCODING) {
+                hx_printf_prefix (
+                    htlc, 0, INFOPREFIX,
+                    _ ("server confirmed UTF-8 text encoding "
+                       "for this session\n"));
+            }
+            if (li.caps & HTLC_CAP_CHAT_HISTORY) {
+                hx_printf_prefix (
+                    htlc, 0, INFOPREFIX,
+                    _ ("server confirmed chat-history extension "
+                       "for this session\n"));
+            }
+            if (li.caps & HTLC_CAP_INLINE_MEDIA) {
+                hx_printf_prefix (
+                    htlc, 0, INFOPREFIX,
+                    _ ("server confirmed inline-media extension "
+                       "for this session\n"));
             }
         }
-        dh_end ();
+        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_BYTES) {
+            htlc->media_max_bytes = li.media_max_bytes;
+        }
+        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_DIMENSION) {
+            htlc->media_max_dimension = li.media_max_dimension;
+        }
+        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_PIXELS) {
+            htlc->media_max_pixels = li.media_max_pixels;
+        }
+        if (login_seen & HX_LOGIN_SEEN_MEDIA_CHUNK_SIZE) {
+            htlc->media_chunk_size = li.media_chunk_size;
+        }
+        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_FRAMES) {
+            htlc->media_max_frames = li.media_max_frames;
+        }
+        if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_DURATION_MS) {
+            htlc->media_max_duration_ms = li.media_max_duration_ms;
+        }
+        /* Chat-history retention hints — max message count / age. 0 means
+		 * unlimited; these are hints only, the authoritative end-of-history
+		 * signal is DATA_HISTORY_HAS_MORE = 0 in TRAN 700 replies. */
+        if (login_seen & HX_LOGIN_SEEN_HISTORY_MAX_MSGS) {
+            htlc->history_max_msgs = li.history_max_msgs;
+        }
+        if (login_seen & HX_LOGIN_SEEN_HISTORY_MAX_DAYS) {
+            htlc->history_max_days = li.history_max_days;
+        }
 
         /* Phase 9.A: log the server's advertised inline-media
 		 * limits at debug-category "media". Routed through a

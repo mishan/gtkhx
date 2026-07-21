@@ -202,6 +202,144 @@ pub fn parse_selfinfo(buf: &[u8], len: usize) -> SelfInfo<'_> {
     out
 }
 
+// ---- rcv_task_login (the LOGIN task reply) ------------------------------
+
+/// Bit flags reporting which LOGIN-reply fields were present. Mirror the
+/// `HX_LOGIN_SEEN_*` enum in `src/hotline_proto.h`.
+pub const LOGIN_SEEN_UID: u32 = 1 << 0;
+pub const LOGIN_SEEN_VERSION: u32 = 1 << 1;
+pub const LOGIN_SEEN_SERVERNAME: u32 = 1 << 2;
+pub const LOGIN_SEEN_CAPS: u32 = 1 << 3;
+pub const LOGIN_SEEN_MEDIA_MAX_BYTES: u32 = 1 << 4;
+pub const LOGIN_SEEN_MEDIA_MAX_DIMENSION: u32 = 1 << 5;
+pub const LOGIN_SEEN_MEDIA_MAX_PIXELS: u32 = 1 << 6;
+pub const LOGIN_SEEN_MEDIA_CHUNK_SIZE: u32 = 1 << 7;
+pub const LOGIN_SEEN_MEDIA_MAX_FRAMES: u32 = 1 << 8;
+pub const LOGIN_SEEN_MEDIA_MAX_DURATION_MS: u32 = 1 << 9;
+pub const LOGIN_SEEN_HISTORY_MAX_MSGS: u32 = 1 << 10;
+pub const LOGIN_SEEN_HISTORY_MAX_DAYS: u32 = 1 << 11;
+
+/// Parsed `HTLS_HDR_TASK` LOGIN reply. Every field is independently optional on
+/// the wire (a 1.0/1.2 server sends almost none of them); `seen` says which were
+/// present, and the value fields are only meaningful for the bits that are set.
+/// The server name is returned separately (sanitised into a caller buffer) to
+/// avoid an owned allocation crossing the FFI.
+#[derive(Debug, Clone, Default)]
+pub struct LoginInfo {
+    pub seen: u32,
+    pub uid: u16,
+    pub version: u16,
+    /// Negotiated session capabilities (decoded via [`capabilities_decode`]).
+    pub caps: u64,
+    pub media_max_bytes: u32,
+    pub media_max_dimension: u32,
+    pub media_max_pixels: u32,
+    pub media_chunk_size: u32,
+    pub media_max_frames: u32,
+    pub media_max_duration_ms: u32,
+    pub history_max_msgs: u32,
+    pub history_max_days: u32,
+}
+
+/// Parse a LOGIN task reply. The server name (if present) is CR2LF'd +
+/// `strip_ansi`'d and written into `servername` (up to its length); the number
+/// of bytes written is returned. The caller reads the scalar fields off the
+/// returned [`LoginInfo`] gated on its `seen` bits. Each media / history limit
+/// requires the spec's 4-byte width; a short chunk is ignored (not seen), same
+/// as the C original's `_len >= 4` guard.
+pub fn parse_login(buf: &[u8], len: usize, servername: &mut [u8]) -> (LoginInfo, usize) {
+    let mut out = LoginInfo::default();
+    let mut servername_len = 0usize;
+
+    // Read a big-endian u32 from a chunk that must be >= 4 bytes; None otherwise.
+    fn be32(data: &[u8]) -> Option<u32> {
+        (data.len() >= 4).then(|| u32::from_be_bytes([data[0], data[1], data[2], data[3]]))
+    }
+
+    for chunk in ChunkIter::over_message(buf, len) {
+        match chunk.tag {
+            tag::UID if chunk.data.len() >= 2 => {
+                out.uid = u16::from_be_bytes([chunk.data[0], chunk.data[1]]);
+                out.seen |= LOGIN_SEEN_UID;
+            }
+            tag::VERSION if chunk.data.len() >= 2 => {
+                out.version = u16::from_be_bytes([chunk.data[0], chunk.data[1]]);
+                out.seen |= LOGIN_SEEN_VERSION;
+            }
+            // Only claim the name when there's a caller buffer to deliver it
+            // into. A zero-length `servername` (the FFI passes one when the C
+            // caller gives NULL / zero capacity, or cap==1 leaving no room past
+            // the reserved NUL) means "name skipped" per the C-ABI contract, so
+            // the SERVERNAME chunk falls through to the ignore arm and
+            // LOGIN_SEEN_SERVERNAME stays unset — a caller must not read a
+            // servername we never wrote.
+            tag::SERVERNAME if !servername.is_empty() => {
+                let n = chunk.data.len().min(servername.len());
+                servername[..n].copy_from_slice(&chunk.data[..n]);
+                cr2lf(&mut servername[..n]);
+                strip_ansi(&mut servername[..n]);
+                servername_len = n;
+                out.seen |= LOGIN_SEEN_SERVERNAME;
+            }
+            tag::CAPABILITIES => {
+                out.caps = capabilities_decode(chunk.data);
+                out.seen |= LOGIN_SEEN_CAPS;
+            }
+            tag::CHAT_MEDIA_MAX_BYTES => {
+                if let Some(v) = be32(chunk.data) {
+                    out.media_max_bytes = v;
+                    out.seen |= LOGIN_SEEN_MEDIA_MAX_BYTES;
+                }
+            }
+            tag::CHAT_MEDIA_MAX_DIMENSION => {
+                if let Some(v) = be32(chunk.data) {
+                    out.media_max_dimension = v;
+                    out.seen |= LOGIN_SEEN_MEDIA_MAX_DIMENSION;
+                }
+            }
+            tag::CHAT_MEDIA_MAX_PIXELS => {
+                if let Some(v) = be32(chunk.data) {
+                    out.media_max_pixels = v;
+                    out.seen |= LOGIN_SEEN_MEDIA_MAX_PIXELS;
+                }
+            }
+            tag::CHAT_MEDIA_CHUNK_SIZE => {
+                if let Some(v) = be32(chunk.data) {
+                    out.media_chunk_size = v;
+                    out.seen |= LOGIN_SEEN_MEDIA_CHUNK_SIZE;
+                }
+            }
+            tag::CHAT_MEDIA_MAX_FRAMES => {
+                if let Some(v) = be32(chunk.data) {
+                    out.media_max_frames = v;
+                    out.seen |= LOGIN_SEEN_MEDIA_MAX_FRAMES;
+                }
+            }
+            tag::CHAT_MEDIA_MAX_DURATION_MS => {
+                if let Some(v) = be32(chunk.data) {
+                    out.media_max_duration_ms = v;
+                    out.seen |= LOGIN_SEEN_MEDIA_MAX_DURATION_MS;
+                }
+            }
+            tag::HISTORY_MAX_MSGS => {
+                if let Some(v) = be32(chunk.data) {
+                    out.history_max_msgs = v;
+                    out.seen |= LOGIN_SEEN_HISTORY_MAX_MSGS;
+                }
+            }
+            tag::HISTORY_MAX_DAYS => {
+                if let Some(v) = be32(chunk.data) {
+                    out.history_max_days = v;
+                    out.seen |= LOGIN_SEEN_HISTORY_MAX_DAYS;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    (out, servername_len)
+}
+
 // ---- HTLS_HDR_CHAT ------------------------------------------------------
 
 /// Parsed + sanitised public-chat line.
@@ -2442,6 +2580,135 @@ mod tests {
         let m = msg(0x0000_0162, 1, 0, &[]);
         let si = parse_selfinfo(&m, m.len());
         assert_eq!(si.seen, 0);
+    }
+
+    // ---- login ----
+
+    #[test]
+    fn login_full_reply() {
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &0x1234u16.to_be_bytes()));
+        body.extend(chunk(tag::VERSION, &190u16.to_be_bytes()));
+        body.extend(chunk(tag::SERVERNAME, b"My Server"));
+        // caps: 2 wire bytes -> big-endian accumulate = 0x0102
+        body.extend(chunk(tag::CAPABILITIES, &[0x01, 0x02]));
+        body.extend(chunk(tag::CHAT_MEDIA_MAX_BYTES, &1_000_000u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_MEDIA_MAX_DIMENSION, &4096u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_MEDIA_MAX_PIXELS, &8_000_000u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_MEDIA_CHUNK_SIZE, &16384u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_MEDIA_MAX_FRAMES, &60u32.to_be_bytes()));
+        body.extend(chunk(tag::CHAT_MEDIA_MAX_DURATION_MS, &30_000u32.to_be_bytes()));
+        body.extend(chunk(tag::HISTORY_MAX_MSGS, &50u32.to_be_bytes()));
+        body.extend(chunk(tag::HISTORY_MAX_DAYS, &7u32.to_be_bytes()));
+
+        let m = msg(0x0000_0000, 1, 0, &body);
+        let mut sn = [0u8; 64];
+        let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
+
+        let all = LOGIN_SEEN_UID
+            | LOGIN_SEEN_VERSION
+            | LOGIN_SEEN_SERVERNAME
+            | LOGIN_SEEN_CAPS
+            | LOGIN_SEEN_MEDIA_MAX_BYTES
+            | LOGIN_SEEN_MEDIA_MAX_DIMENSION
+            | LOGIN_SEEN_MEDIA_MAX_PIXELS
+            | LOGIN_SEEN_MEDIA_CHUNK_SIZE
+            | LOGIN_SEEN_MEDIA_MAX_FRAMES
+            | LOGIN_SEEN_MEDIA_MAX_DURATION_MS
+            | LOGIN_SEEN_HISTORY_MAX_MSGS
+            | LOGIN_SEEN_HISTORY_MAX_DAYS;
+        assert_eq!(li.seen, all);
+        assert_eq!(li.uid, 0x1234);
+        assert_eq!(li.version, 190);
+        assert_eq!(li.caps, 0x0102);
+        assert_eq!(li.media_max_bytes, 1_000_000);
+        assert_eq!(li.media_max_dimension, 4096);
+        assert_eq!(li.media_max_pixels, 8_000_000);
+        assert_eq!(li.media_chunk_size, 16384);
+        assert_eq!(li.media_max_frames, 60);
+        assert_eq!(li.media_max_duration_ms, 30_000);
+        assert_eq!(li.history_max_msgs, 50);
+        assert_eq!(li.history_max_days, 7);
+        assert_eq!(&sn[..sn_len], b"My Server");
+    }
+
+    #[test]
+    fn login_old_server_only_uid_version() {
+        // A 1.0/1.2 server sends almost nothing but UID + VERSION.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &7u16.to_be_bytes()));
+        body.extend(chunk(tag::VERSION, &150u16.to_be_bytes()));
+        let m = msg(0x0000_0000, 1, 0, &body);
+        let mut sn = [0u8; 64];
+        let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(li.seen, LOGIN_SEEN_UID | LOGIN_SEEN_VERSION);
+        assert_eq!(li.uid, 7);
+        assert_eq!(li.version, 150);
+        assert_eq!(sn_len, 0);
+    }
+
+    #[test]
+    fn login_servername_is_sanitized() {
+        // CR folds to LF (cr2lf); a control byte in the strip band (14) folds
+        // to its printable image 'N' (14|64) via strip_ansi.
+        let raw = b"a\rb\x0ec";
+        let m = msg(0x0000_0000, 1, 0, &chunk(tag::SERVERNAME, raw));
+        let mut sn = [0u8; 64];
+        let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(li.seen & LOGIN_SEEN_SERVERNAME, LOGIN_SEEN_SERVERNAME);
+        assert_eq!(&sn[..sn_len], b"a\nbNc");
+    }
+
+    #[test]
+    fn login_servername_clamps_to_buffer() {
+        let raw = vec![b'x'; 200];
+        let m = msg(0x0000_0000, 1, 0, &chunk(tag::SERVERNAME, &raw));
+        let mut sn = [0u8; 16];
+        let (_li, sn_len) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(sn_len, 16);
+        assert_eq!(&sn[..], &[b'x'; 16]);
+    }
+
+    #[test]
+    fn login_servername_empty_buffer_skips_name() {
+        // A zero-capacity servername buffer (what the FFI passes for a
+        // NULL / zero-cap C caller) must NOT set LOGIN_SEEN_SERVERNAME — the
+        // caller has no delivered name to read. Other fields still parse.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &9u16.to_be_bytes()));
+        body.extend(chunk(tag::SERVERNAME, b"My Server"));
+        let m = msg(0x0000_0000, 1, 0, &body);
+        let mut sn: [u8; 0] = [];
+        let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(li.seen & LOGIN_SEEN_SERVERNAME, 0, "name skipped, bit unset");
+        assert_eq!(sn_len, 0);
+        // The UID chunk before it still lands, so the walk isn't derailed.
+        assert_eq!(li.seen & LOGIN_SEEN_UID, LOGIN_SEEN_UID);
+        assert_eq!(li.uid, 9);
+    }
+
+    #[test]
+    fn login_short_media_limit_ignored() {
+        // A media limit chunk narrower than 4 bytes must not be reported.
+        let m = msg(
+            0x0000_0000,
+            1,
+            0,
+            &chunk(tag::CHAT_MEDIA_MAX_BYTES, &[0x00, 0x01, 0x02]),
+        );
+        let mut sn = [0u8; 64];
+        let (li, _) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(li.seen, 0);
+        assert_eq!(li.media_max_bytes, 0);
+    }
+
+    #[test]
+    fn login_empty_body() {
+        let m = msg(0x0000_0000, 1, 0, &[]);
+        let mut sn = [0u8; 64];
+        let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(li.seen, 0);
+        assert_eq!(sn_len, 0);
     }
 
     // ---- chat ----

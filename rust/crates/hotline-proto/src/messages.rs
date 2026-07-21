@@ -262,6 +262,14 @@ pub mod tag {
     pub const NOAGREEMENT: u16 = 0x009a;
     /// `0x00a0` — server version (server) / client version (client).
     pub const VERSION: u16 = 0x00a0;
+    /// `0x00a2` — server name (server → client, in the LOGIN reply).
+    pub const SERVERNAME: u16 = 0x00a2;
+    /// `0x01f0` — negotiated session capabilities echo (LOGIN reply).
+    pub const CAPABILITIES: u16 = 0x01f0;
+    /// `0x0f07` — chat-history retention hint: max message count (LOGIN reply).
+    pub const HISTORY_MAX_MSGS: u16 = 0x0f07;
+    /// `0x0f08` — chat-history retention hint: max age in days (LOGIN reply).
+    pub const HISTORY_MAX_DAYS: u16 = 0x0f08;
     /// `0x012c` — user-list record (server → client).
     pub const USER_LIST: u16 = 0x012c;
     /// `0x0140` — 1.5 news directory-listing entry (folder or category).
