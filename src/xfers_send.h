@@ -39,4 +39,14 @@ struct htxf_conn;
 extern int file_send_one (struct htxf_conn *htxf, guint8 *buf,
                           xfer_progress_fn progress);
 
+/* Send a folder tree rooted at `base_path` out over an already-open HTXF
+ * subchannel. Walks the local tree (DFS pre-order) and answers each
+ * server FILE_NEXT with one entry: a next_file_info header + path
+ * components, then (for files) the per-file size + FILP body via
+ * file_send_one. `buf` is caller scratch (>= 2048 bytes). Rewrites
+ * htxf->path per file; the caller restores it. Returns 0 on success, an
+ * errno-like code on failure. */
+extern int folder_send_all (struct htxf_conn *htxf, const char *base_path,
+                            guint8 *buf, xfer_progress_fn progress);
+
 #endif /* GTKHX_XFERS_SEND_H */
