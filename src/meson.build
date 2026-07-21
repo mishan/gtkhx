@@ -129,6 +129,7 @@ gtkhx_sources = files(
   'users_cell.c',
   'xfers.c',
   'xfers_recv.c',
+  'xfers_send.c',
   'xtext.c',
 )
 
