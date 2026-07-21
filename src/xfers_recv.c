@@ -458,6 +458,26 @@ folder_recv_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
             continue;
         }
 
+        /* Ensure the file's parent directory exists before writing it.
+		 * The server normally sends a folder marker for each subdir
+		 * first, but don't rely on that — a file at pathcount > 1 whose
+		 * parent marker was missing (or a server that doesn't send
+		 * markers) would otherwise fail the open. mkdir -p the parent. */
+        if (nfi.pathcount > 1) {
+            char *slash = strrchr (htxf->path, '/');
+            if (slash && slash != htxf->path) {
+                *slash = 0;
+                int mrv = (g_mkdir_with_parents (htxf->path, 0755) < 0
+                           && errno != EEXIST)
+                              ? errno
+                              : 0;
+                *slash = '/';
+                if (mrv) {
+                    return mrv;
+                }
+            }
+        }
+
         /* File entry — request fresh. FILE_SEND with data_pos/rsrc_pos
 		 * zeroed tells the server to send the whole file. */
         cmd_n = htons (1); /* FILE_SEND */

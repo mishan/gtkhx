@@ -33,10 +33,19 @@
 
 ### F2 follow-ups (deferred)
 
-- **Nested-subdir folder round-trip.** `test_folder_roundtrip` covers two
-  top-level files. A nested subdir (folder markers + `pathcount > 1`) has
-  its own untested quirk in the mhxd round-trip — the folder-marker path
-  in `folder_send_all` / `folder_recv_all` — and is left as a follow-up.
+- **Nested-subdir folder transfer — RESOLVED (a mhxd limitation, not a
+  client bug).** A full nested round-trip via GETFOLDER can't retrieve
+  subdir files from mhxd: its `folder_send` (server download) is
+  non-recursive — `folder_getpaths` reads a single directory level and
+  `folder_send` hard-codes `pathcount = 1`, so it emits a marker for a
+  subdir but never descends. `folder_send_all` (upload) *does* correctly
+  send the recursive tree, and mhxd's `folder_recv` stores it;
+  `test_folder_roundtrip`'s `nested_upload` case proves this by uploading
+  `alpha.txt` + `nested/beta.txt` and fetching each back with a direct
+  FILE_GET (including the subdir file). `folder_recv_all` also now
+  `mkdir -p`s each file's parent before writing, so it reconstructs a
+  nested tree correctly from any recursion-capable server (independent of
+  mhxd's download limit).
 - **`hxhfs` wiring.** The HFS sidecar (`type_creator`, `hfsinfo_read/
   write`, `resource_open`, `comment_len`) now has a standalone Rust port
   in the `hxhfs` crate, but `xfers_send.c` / `xfers_recv.c` still call the
