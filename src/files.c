@@ -71,80 +71,21 @@ guint8 dir_char = '/';
  * GTK + Adwaita pile. The "fileutils-4.0/lib/human.c" attribution
  * applies to the body of the algorithm; see human_readable.c. */
 
-/* needle must be uppercase :) */
-static int
-strcasestr_len (char *haystack, char *needle, size_t len)
-{
-    char *p, *np = 0, *end = haystack + len;
+/* Pick a cicn icon ID for a Hotline file based on its 4-byte type code
+ * (plus filename, for the drop-box heuristic on folders). Public so the
+ * files browser's remote provider can drive it off the parsed wire chunks.
+ *
+ * The mapping logic moved to the hxfiles-model Rust crate in Phase F1
+ * (see docs/files-rust-migration-scope.md); this is a thin wrapper over
+ * its FFI export. */
+extern guint16 gtkhx_files_icon_of_ftype_and_name (const char *ftype,
+                                                   const char *name,
+                                                   gsize name_len);
 
-    for (p = haystack; p < end; p++) {
-        if (np) {
-            if (toupper (*p) == *np) {
-                if (!*++np) {
-                    return 1;
-                }
-            } else {
-                np = 0;
-            }
-        } else if (toupper (*p) == *needle) {
-            np = needle + 1;
-        }
-    }
-    return 0;
-}
-
-/* Pick a cicn icon ID for a Hotline file based on its 4-byte
- * type code (plus filename, for the drop-box heuristic on
- * folders). Public so the new files browser's remote provider
- * can drive it directly off the parsed wire chunks. */
 guint16
 icon_of_ftype_and_name (const char *ftype, const char *name, gsize name_len)
 {
-    if (!ftype) {
-        return ICON_FILE;
-    }
-
-    if (!memcmp (ftype, "fldr", 4)) {
-        if (name
-            && (strcasestr_len ((char *)name, "DROP BOX", name_len)
-                || strcasestr_len ((char *)name, "UPLOAD", name_len))) {
-            return ICON_FOLDER_IN;
-        }
-        return ICON_FOLDER;
-    }
-    if (!memcmp (ftype, "JPEG", 4) || !memcmp (ftype, "PNGf", 4)
-        || !memcmp (ftype, "GIFf", 4) || !memcmp (ftype, "PICT", 4)) {
-        return ICON_FILE_IMAGE;
-    }
-    if (!memcmp (ftype, "MPEG", 4) || !memcmp (ftype, "MPG ", 4)
-        || !memcmp (ftype, "AVI ", 4) || !memcmp (ftype, "MooV", 4)) {
-        return ICON_FILE_MOOV;
-    }
-    if (!memcmp (ftype, "MP3 ", 4)) {
-        return ICON_FILE_NOTE;
-    }
-    if (!memcmp (ftype, "ZIP ", 4)) {
-        return ICON_FILE_ZIP;
-    }
-    if (!memcmp (ftype, "SIT", 3)) {
-        return ICON_FILE_SIT;
-    }
-    if (!memcmp (ftype, "APPL", 4)) {
-        return ICON_FILE_APPL;
-    }
-    if (!memcmp (ftype, "rohd", 4)) {
-        return ICON_FILE_DISK;
-    }
-    if (!memcmp (ftype, "HTft", 4)) {
-        return ICON_FILE_HTft;
-    }
-    if (!memcmp (ftype, "alis", 4)) {
-        return ICON_FILE_alis;
-    }
-    if (!memcmp (ftype, "TEXT", 4)) {
-        return ICON_FILE_TEXT;
-    }
-    return ICON_FILE;
+    return gtkhx_files_icon_of_ftype_and_name (ftype, name, name_len);
 }
 
 guint16
@@ -157,44 +98,20 @@ icon_of_fh (struct hl_filelist_hdr *fh)
                                    (const char *)fh->fname, (gsize)fh->fnlen);
 }
 
-/* FourCC → human label. Table is intentionally small — only the
- * codes we see often in the wild on Hotline servers. Anything
- * unknown falls through to "<XXXX> file" with the raw FourCC,
- * which is still better than the raw 4-byte glyph the old code
- * showed. Strings here are plain literals; _() runs at lookup
- * time so any later translation catalog picks them up without
- * needing N_() / gettext-noop machinery in this TU. */
+/* FourCC → human label.
+ *
+ * The type→label table moved to the hxfiles-model Rust crate in Phase F1
+ * (gtkhx_files_kind_label_for; see docs/files-rust-migration-scope.md).
+ * This C wrapper keeps the parts that need glib/gettext: the runtime
+ * `_()` translation of the (static, English) label, the null-type
+ * "Unknown" case, and the unknown-FourCC "<XXXX> file" fallback (whose
+ * result the caller frees). Behaviour is byte-for-byte the same as the
+ * old table. */
+extern const char *gtkhx_files_kind_label_for (const char *ftype);
+
 const char *
 kind_of_ftype (const char *ftype, gboolean *is_static_out)
 {
-    static const struct {
-        const char *code;
-        const char *label;
-    } table[] = {
-        { "fldr", "Folder" },          { "TEXT", "Text Document" },
-        { "PDF ", "PDF Document" },    { "JPEG", "JPEG Image" },
-        { "GIFf", "GIF Image" },       { "GIF ", "GIF Image" },
-        { "PNGf", "PNG Image" },       { "PNG ", "PNG Image" },
-        { "PICT", "PICT Image" },      { "TIFF", "TIFF Image" },
-        { "BMP ", "BMP Image" },       { "MP3 ", "MP3 Audio" },
-        { "MPG3", "MP3 Audio" },       { "AIFF", "AIFF Audio" },
-        { "AIFC", "AIFF Audio" },      { "WAVE", "WAV Audio" },
-        { "Mp3 ", "MP3 Audio" },       { "MooV", "QuickTime Movie" },
-        { "MPEG", "MPEG Video" },      { "MPG ", "MPEG Video" },
-        { "M4V ", "MPEG-4 Video" },    { "AVI ", "AVI Video" },
-        { "MKV ", "Matroska Video" },  { "ZIP ", "ZIP Archive" },
-        { "SIT!", "StuffIt Archive" }, { "SITD", "StuffIt Archive" },
-        { "SIT5", "StuffIt Archive" }, { "BINA", "MacBinary Archive" },
-        { "TARF", "TAR Archive" },     { "Tar ", "TAR Archive" },
-        { "GZIP", "Gzip Archive" },    { "GZip", "Gzip Archive" },
-        { "BZIP", "Bzip2 Archive" },   { "APPL", "Application" },
-        { "rohd", "Disk Image" },      { "IMG ", "Disk Image" },
-        { "ISO ", "ISO Disk Image" },  { "DMG ", "Disk Image" },
-        { "HTft", "HTML Document" },   { "HTML", "HTML Document" },
-        { "alis", "Alias" },           { "SLNK", "Symbolic Link" },
-    };
-    gsize i;
-
     if (!ftype) {
         if (is_static_out) {
             *is_static_out = TRUE;
@@ -202,13 +119,12 @@ kind_of_ftype (const char *ftype, gboolean *is_static_out)
         return _ ("Unknown");
     }
 
-    for (i = 0; i < G_N_ELEMENTS (table); i++) {
-        if (memcmp (ftype, table[i].code, 4) == 0) {
-            if (is_static_out) {
-                *is_static_out = TRUE;
-            }
-            return _ (table[i].label);
+    const char *label = gtkhx_files_kind_label_for (ftype);
+    if (label) {
+        if (is_static_out) {
+            *is_static_out = TRUE;
         }
+        return _ (label);
     }
 
     /* Fall-through: format a one-off string with the raw FourCC.
