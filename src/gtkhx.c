@@ -76,7 +76,6 @@
 #include "options.h"
 #include "xfers.h"
 #include "commands.h"
-#include "log.h"
 #include "gtkhx.h"
 
 char last_msg_nick[32];

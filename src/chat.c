@@ -65,7 +65,6 @@
 #include "tasks.h"
 #include "rcv.h"
 #include "connect.h"
-#include "log.h"
 #include "debug.h"
 #include "compat.h" /* _() i18n macro */
 

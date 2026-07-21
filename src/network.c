@@ -51,7 +51,6 @@
 #include "tasks.h"
 #include "users.h"
 #include "inet.h"
-#include "log.h"
 #include "proto_trace.h"
 #include "tls_trust.h"
 #include "inline_media.h"

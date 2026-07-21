@@ -68,7 +68,6 @@ gtkhx_sources = files(
   'hl_code.c',
   'hl_date.c',
   'human_readable.c',
-  'log.c',
   'login_packet.c',
   'agreement_packet.c',
   'msg.c',

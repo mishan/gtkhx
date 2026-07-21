@@ -40,7 +40,6 @@
 #include "files.h"
 #include "network.h"
 #include "news15.h"
-#include "log.h"
 #include "tray.h"
 #include "gtkutil.h"
 #include "cfgkeys.h"
