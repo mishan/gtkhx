@@ -374,21 +374,12 @@ test_compress_bufsize = executable('test_compress_bufsize',
 test('compress_bufsize', test_compress_bufsize,
      suite : 'unit')
 
-# task_hash — the Phase 1.1 GLib-collections migration replaced the
-# per-session task linked list (the intrusive __task_list / task_list
-# / task_tail trio) with GHashTable<u32 trans, struct task*>. The
-# table factory lives in tasks_table.c specifically so this test can
-# build it without dragging in GTK; pins down the lifecycle contract
-# (insert / lookup / replace / remove / iterate / destroy → value
-# destroy notify reclaims the struct task + its `str` label).
-test_task_hash = executable('test_task_hash',
-  'unit/test_task_hash.c',
-  '../src/tasks_table.c',
-  dependencies        : proto_test_deps,
-  include_directories : test_inc,
-)
-test('task_hash', test_task_hash,
-     suite : 'unit')
+# task_hash — the transaction-table lifecycle contract (insert / lookup /
+# replace / remove / destroy → value destroy notify reclaims struct task + its
+# `str` + the optional `ptr`) now lives in the Rust hxtask crate's #[test]s
+# (`cargo test -p hxtask`), which additionally cover task_new / task_delete
+# end-to-end via in-crate C-environment doubles. The old C test
+# (unit/test_task_hash.c) + tasks_table.c were retired with the port.
 
 # dock_layout_parse — recursive-descent parser for the saved-layout
 # tree expression. Pure GLib so the test links just the parser .c
@@ -1193,7 +1184,6 @@ test_integration_real_connect = executable(
   '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
@@ -1239,7 +1229,6 @@ test_integration_tracker_signals = executable(
   '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],
@@ -1317,7 +1306,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  '../src/tasks_table.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep],

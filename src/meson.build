@@ -94,7 +94,9 @@ gtkhx_sources = files(
   'sound.c',
   'sound_events.c',
   'tasks.c',
-  'tasks_table.c',
+  # tasks_table.c + the struct task model in tasks.c ported to the Rust hxtask
+  # crate (rust_hxtask_dep below); tasks_bridge.c is its C field-accessor shim.
+  'tasks_bridge.c',
   # text_util.c ported to Rust (hxtext crate, Phase R5); text_util.h keeps the
   # C ABI decls the ~16 callers include. Links via rust_hxtext_dep below.
   'tls_trust.c',
@@ -272,6 +274,9 @@ rust_deps = [
   # Mac resource-fork parser (macres.c retired) — the macres_file_* icon
   # readers used by gtkhx.c / options.c / cicn.c.
   rust_hxmacres_dep,
+  # Transaction-task table (tasks_table.c + the struct task model retired) — the
+  # tasks_table_new / tasks_init / task_new / task_with_trans / task_delete ABI.
+  rust_hxtask_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]

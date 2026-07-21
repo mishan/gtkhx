@@ -38,7 +38,6 @@
 #include "sound.h"
 #include "toolbar.h" /* disconnect_clicked, toolbar_show_toast */
 #include "tasks.h"
-#include "tasks_table.h"
 
 /* Phase 5 task-row polish: each row is now an Adwaita-shaped
  * action-row layout — icon column on the left, then a vbox with
@@ -1079,58 +1078,13 @@ file_update (session *sess, struct htxf_conn *htxf)
     }
 }
 
-/* The GHashTable factory + value-destroy notify (task_free) live in
- * tasks_table.c so the unit tests can build the same table the
- * runtime uses without pulling in GTK. task_delete() below is the
- * public removal entry point and additionally notifies the UI side
- * (gtask_delete_tsk peels off the Tasks window's progress row);
- * g_hash_table_remove then invokes task_free() for the heap
- * cleanup. */
-
-void
-tasks_init (session *sess)
-{
-    if (!sess->tasks) {
-        sess->tasks = tasks_table_new ();
-    }
-}
-
-struct task *
-task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
-          const char *str)
-{
-    struct task *tsk;
-    session *sess = sess_from_htlc (htlc);
-
-    tsk = g_malloc0 (sizeof (struct task));
-    tsk->trans = htlc->trans;
-    tsk->data = data;
-    tsk->str = str ? g_strdup (str) : NULL;
-    tsk->ptr = ptr;
-    tsk->rcv = rcv;
-    tsk->pos = 0;
-    tsk->len = 1;
-
-    g_hash_table_insert (sess->tasks, GUINT_TO_POINTER (tsk->trans), tsk);
-    gtkhx_session_emit_task_update (gtkhx_session_get_default (), sess, tsk);
-    return tsk;
-}
-
-void
-task_delete (session *sess, struct task *tsk)
-{
-    if (!tsk) {
-        return;
-    }
-    gtask_delete_tsk (sess, tsk->trans);
-    g_hash_table_remove (sess->tasks, GUINT_TO_POINTER (tsk->trans));
-}
-
-struct task *
-task_with_trans (session *sess, guint32 trans)
-{
-    return g_hash_table_lookup (sess->tasks, GUINT_TO_POINTER (trans));
-}
+/* The transaction table model — tasks_table_new / task_free / tasks_init /
+ * task_new / task_with_trans / task_delete — is the Rust `hxtask` crate
+ * (rust/crates/hxtask). It keeps sess->tasks a real GHashTable and preserves the
+ * exact C ABI these callers link against; gtask_delete_tsk (above) is the view
+ * hook task_delete calls before removing the model entry. The field accessors
+ * the crate needs (hx_session_tasks / hx_session_set_tasks / hx_htlc_trans) live
+ * in tasks_bridge.c. */
 
 /* task_error_extract lives in proto_helpers.c so the Tier 2 unit
  * tests can drive it without a GTK build. The prototype is in
