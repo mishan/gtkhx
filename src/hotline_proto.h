@@ -62,6 +62,54 @@ struct gtkhx_proto_selfinfo {
 extern uint32_t gtkhx_proto_parse_selfinfo (const uint8_t *buf, size_t len,
                                             struct gtkhx_proto_selfinfo *out);
 
+/* ---- LOGIN task-reply parser ----
+ *
+ * Every field of the LOGIN reply is independently optional on the wire (a
+ * 1.0/1.2 server sends almost none of them). gtkhx_proto_parse_login walks
+ * the chunks, fills *out with whatever scalars were present, writes the
+ * sanitised server name into a caller buffer, and returns a bitmask of the
+ * fields it saw. Read each *out field only when its HX_LOGIN_SEEN_* bit is
+ * set. */
+
+enum {
+    HX_LOGIN_SEEN_UID = 1u << 0,
+    HX_LOGIN_SEEN_VERSION = 1u << 1,
+    HX_LOGIN_SEEN_SERVERNAME = 1u << 2,
+    HX_LOGIN_SEEN_CAPS = 1u << 3,
+    HX_LOGIN_SEEN_MEDIA_MAX_BYTES = 1u << 4,
+    HX_LOGIN_SEEN_MEDIA_MAX_DIMENSION = 1u << 5,
+    HX_LOGIN_SEEN_MEDIA_MAX_PIXELS = 1u << 6,
+    HX_LOGIN_SEEN_MEDIA_CHUNK_SIZE = 1u << 7,
+    HX_LOGIN_SEEN_MEDIA_MAX_FRAMES = 1u << 8,
+    HX_LOGIN_SEEN_MEDIA_MAX_DURATION_MS = 1u << 9,
+    HX_LOGIN_SEEN_HISTORY_MAX_MSGS = 1u << 10,
+    HX_LOGIN_SEEN_HISTORY_MAX_DAYS = 1u << 11,
+};
+
+struct gtkhx_proto_login {
+    uint64_t caps; /* decoded capabilities bitmap */
+    uint32_t media_max_bytes;
+    uint32_t media_max_dimension;
+    uint32_t media_max_pixels;
+    uint32_t media_chunk_size;
+    uint32_t media_max_frames;
+    uint32_t media_max_duration_ms;
+    uint32_t history_max_msgs;
+    uint32_t history_max_days;
+    uint16_t uid;
+    uint16_t version;
+};
+
+/* Parse the LOGIN task reply. Fills *out and writes the CR2LF'd +
+ * strip_ansi'd server name into servername (capacity servername_cap,
+ * NUL-terminated, capped at servername_cap-1). Returns the HX_LOGIN_SEEN_*
+ * bitmask; each *out field is valid only when its bit is set. Returns 0 on
+ * NULL out. A NULL / zero-capacity servername is tolerated (name skipped). */
+extern uint32_t gtkhx_proto_parse_login (const uint8_t *msg, size_t msglen,
+                                         uint8_t *servername,
+                                         size_t servername_cap,
+                                         struct gtkhx_proto_login *out);
+
 /* ---- Chat-family parsers (HTLS_HDR_CHAT / _SUBJECT / _INVITE) ----
  *
  * Each takes the message buffer (msg/msglen = htlc->in.buf/in.pos) plus a

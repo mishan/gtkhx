@@ -202,6 +202,68 @@ pub unsafe extern "C" fn gtkhx_proto_parse_selfinfo(
     si.seen
 }
 
+/// C-ABI result of [`parse::parse_login`]. The server name is written
+/// separately into a caller buffer (NUL-terminated); every scalar here is
+/// only meaningful when its `HX_LOGIN_SEEN_*` bit is set in the return value.
+#[repr(C)]
+pub struct LoginOut {
+    pub caps: u64,
+    pub media_max_bytes: u32,
+    pub media_max_dimension: u32,
+    pub media_max_pixels: u32,
+    pub media_chunk_size: u32,
+    pub media_max_frames: u32,
+    pub media_max_duration_ms: u32,
+    pub history_max_msgs: u32,
+    pub history_max_days: u32,
+    pub uid: u16,
+    pub version: u16,
+}
+
+/// Parse the LOGIN task reply. Fills `*out` and writes the sanitised server
+/// name into `servername` (capacity `servername_cap`, NUL-terminated, capped
+/// at `servername_cap - 1`). Returns the `seen` bitmask (`HX_LOGIN_SEEN_*`);
+/// each `*out` field is valid only when its bit is set. Returns 0 on NULL
+/// `out`. A NULL / zero-capacity `servername` is tolerated (name skipped).
+///
+/// # Safety
+/// `msg` valid for `msglen` bytes (or NULL); `servername` valid for
+/// `servername_cap` bytes (or NULL); `out` a valid writable `LoginOut`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_parse_login(
+    msg: *const u8,
+    msglen: usize,
+    servername: *mut u8,
+    servername_cap: usize,
+    out: *mut LoginOut,
+) -> u32 {
+    if out.is_null() {
+        return 0;
+    }
+    let s = as_slice(msg, msglen);
+    let li = if servername.is_null() || servername_cap == 0 {
+        parse::parse_login(s, s.len(), &mut []).0
+    } else {
+        // Reserve the last byte for the NUL terminator.
+        let sn = std::slice::from_raw_parts_mut(servername, servername_cap - 1);
+        let (li, n) = parse::parse_login(s, s.len(), sn);
+        *servername.add(n) = 0;
+        li
+    };
+    (*out).caps = li.caps;
+    (*out).media_max_bytes = li.media_max_bytes;
+    (*out).media_max_dimension = li.media_max_dimension;
+    (*out).media_max_pixels = li.media_max_pixels;
+    (*out).media_chunk_size = li.media_chunk_size;
+    (*out).media_max_frames = li.media_max_frames;
+    (*out).media_max_duration_ms = li.media_max_duration_ms;
+    (*out).history_max_msgs = li.history_max_msgs;
+    (*out).history_max_days = li.history_max_days;
+    (*out).uid = li.uid;
+    (*out).version = li.version;
+    li.seen
+}
+
 /// Copy `src` into the C buffer `dst` (capacity `cap`), truncating to
 /// `cap - 1` and NUL-terminating. Returns the number of bytes written
 /// (excluding the NUL). No-op returning 0 on NULL / zero-capacity dst.
