@@ -792,6 +792,13 @@ hx_rcv_user_part (struct htlc_conn *htlc)
     }
 }
 
+/* The changed-gate + chat-subject emit live in the Rust hxchat-recv crate
+ * (rust/crates/hxchat-recv). C keeps the wire parse, the chat lookup, the model
+ * set, and the "Subject Changed to" announce. */
+extern int hx_chat_subject_recv (struct htlc_conn *htlc, guint32 cid,
+                                 const char *subject, gsize subject_len,
+                                 const char *current_subject);
+
 void
 hx_rcv_chat_subject (struct htlc_conn *htlc)
 {
@@ -802,32 +809,21 @@ hx_rcv_chat_subject (struct htlc_conn *htlc)
     if (!hx_chat_subject_extract (htlc, &sm)) {
         return;
     }
+    if (!sm.subject_len) {
+        return;
+    }
+    chat = chat_with_cid (sess, sm.cid);
+    if (!chat) {
+        return;
+    }
 
-    if (sm.subject_len) {
-        chat = chat_with_cid (sess, sm.cid);
-        if (!chat) {
-            return;
-        }
-        if (strcmp (sm.subject, hx_chat_subject (chat)) == 0) {
-            return;
-        }
+    /* On a real change the crate emits chat-subject and returns non-zero; the
+     * initial-subject-discovery path (rcv_task_user_list) still updates the
+     * widget directly without this announce. Set the model + log only when a
+     * change actually fired. */
+    if (hx_chat_subject_recv (htlc, sm.cid, sm.subject, sm.subject_len,
+                              hx_chat_subject (chat))) {
         hx_chat_set_subject (chat, (const char *) (sm.subject), sm.subject_len);
-
-#ifdef USE_PLUGIN
-        if (EMIT_SIGNAL (XP_RCV_SUBJ, sess, hx_chat_subject (chat), &sm.cid, 0, 0, 0)
-            == 1) {
-            return;
-        }
-#endif
-        /* Update the subject widget (pure view), then log the
-		 * change as a chat line. Splitting the two means the
-		 * initial-subject-discovery path (rcv_task_user_list's
-		 * HTLS_DATA_CHAT_SUBJECT chunk) can call only the widget
-		 * update without spamming a "Subject Changed to X" line
-		 * for a subject that, from the user's point of view, was
-		 * already there before they joined. */
-        gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc,
-                                         sm.cid, hx_chat_subject (chat));
         hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
                           _ ("Subject Changed to"), hx_chat_subject (chat));
     }
