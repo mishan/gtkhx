@@ -1,7 +1,7 @@
 //! Pure files-subsystem model helpers.
 //!
 //! Phase F1 of the files C→Rust migration (see
-//! docs/files-rust-migration-scope.md). This first increment is the
+//! docs/rust/files-migration-scope.md). This first increment is the
 //! file-type → icon-id mapping, ported from
 //! `src/files.c::icon_of_ftype_and_name`. Pure logic, no glib/gtk, so it
 //! is fully unit-tested here and the C side calls in through the

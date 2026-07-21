@@ -14,7 +14,7 @@
  * worker shell. The only coupling back to that shell is a progress
  * callback (xfer_progress_fn) the caller supplies; xfers.c passes its
  * post_file_update, a test passes a no-op. See
- * docs/files-rust-migration-scope.md.
+ * docs/rust/files-migration-scope.md.
  */
 
 #ifndef GTKHX_XFERS_RECV_H

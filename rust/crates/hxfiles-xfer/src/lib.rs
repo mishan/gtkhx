@@ -1,6 +1,6 @@
 //! File-transfer worker port — codec layer.
 //!
-//! See `docs/files-rust-migration-scope.md`. The goal is to move the
+//! See `docs/rust/files-migration-scope.md`. The goal is to move the
 //! four HTXF worker state machines (`get_thread`, `put_thread`,
 //! `folder_get_thread`, `folder_put_thread`) out of `src/xfers.c` into
 //! Rust. This crate starts with the fiddliest, highest-risk part: the

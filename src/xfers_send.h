@@ -14,7 +14,7 @@
  * sidecar reads, and a caller-supplied progress callback — no GTK worker
  * shell. That keeps it directly linkable + testable
  * (tests/integration/test_file_put.c). See
- * docs/files-rust-migration-scope.md.
+ * docs/rust/files-migration-scope.md.
  */
 
 #ifndef GTKHX_XFERS_SEND_H
