@@ -157,18 +157,6 @@ hx_conn_icon_ptr (struct htlc_conn *h)
     return &h->icon;
 }
 
-guint16
-hx_conn_color (const struct htlc_conn *h)
-{
-    return h->color;
-}
-
-void
-hx_conn_set_color (struct htlc_conn *h, guint16 v)
-{
-    h->color = v;
-}
-
 guint32
 hx_conn_nick_color (const struct htlc_conn *h)
 {

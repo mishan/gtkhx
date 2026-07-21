@@ -309,7 +309,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * clear. */
     htlc->fd = 0;
     hx_conn_set_uid (htlc, 0);
-    htlc->color = 0;
     /* Colored-Nicknames: nick_color is a per-session pref
 	 * echo, not per-connection state. On connection teardown we
 	 * deliberately re-seed (not reset) from gtkhx_prefs.nick_color so
@@ -323,7 +322,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * server-side admin override into the next one (we overwrite with
 	 * the local pref, which is independent of the prior server state)
 	 * and (b) fixes the reconnect-loses-color bug. */
-    htlc->nick_color = (guint32)gtkhx_prefs.nick_color;
+    hx_conn_set_nick_color (htlc, (guint32)gtkhx_prefs.nick_color);
     hx_conn_set_version (htlc, 0);
     memset (htlc->login, 0, sizeof (htlc->login));
 
@@ -474,7 +473,7 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
 	 * branch) so this only matters for the 1.5+/AGREEMENTAGREE path.
 	 * Gate on nick_color != NONE so a no-color client doesn't ride
 	 * the auto-opt-in train it doesn't want. */
-    if (htlc->nick_color != HX_NICK_COLOR_NONE) {
+    if (hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE) {
         hx_change_name_icon (htlc);
     }
 

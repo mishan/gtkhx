@@ -771,9 +771,8 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         hx_conn_set_icon (htlc,
                           icon ? icon
                                : (old_exists ? old.icon : hx_conn_icon (htlc)));
-        htlc->color = plan.eff_color;
         if (got_nick_color) {
-            htlc->nick_color = nick_color;
+            hx_conn_set_nick_color (htlc, nick_color);
         }
         debug_log ("name",
                    "USER_CHANGE for our uid=%u: server says "
@@ -2102,15 +2101,15 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
             /* Colored-Nicknames: mirror the trailer colour onto htlc when
              * this record is us (absent trailer => HX_NICK_COLOR_NONE). */
             if (rec.got_nick_color && uid == hx_conn_uid (htlc)) {
-                htlc->nick_color = rec.nick_color;
+                hx_conn_set_nick_color (htlc, rec.nick_color);
             }
             /* "is this us?" adoption for servers that omit USER_LIST from
              * SELFINFO: the first record matching our nick+icon claims our
-             * uid + status colour. */
+             * uid. (The server's status colour used to be mirrored onto
+             * htlc->color here, but that field was write-only and is gone.) */
             if (!hx_conn_uid (htlc) && !strcmp (name_buf, htlc->name)
                 && rec.icon == hx_conn_icon (htlc)) {
                 hx_conn_set_uid (htlc, uid);
-                htlc->color = rec.color;
             }
 
             /* Same shared roster-apply as the live USER_CHANGE path, but
