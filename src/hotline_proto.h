@@ -1715,9 +1715,10 @@ extern size_t gtkhx_proto_parse_icon_list (
  * a server frame's opcode to a handler category, then switches on the result to
  * pick the body handler. This enum mirrors hotline-proto's dispatch::HandlerKind
  * (rust/crates/hotline-proto/src/dispatch.rs) — the values must stay in lockstep
- * with the Rust discriminants. The composite-TASK mask (Heidrun-style
- * TASK|opcode replies) is applied inside hx_recv_route, so the C side no longer
- * special-cases it.
+ * with the Rust discriminants. The composite-TASK mask (folding a now-fixed
+ * Heidrun quirk where the TASK reply echoed the request opcode in the low u16,
+ * kept defensively for older deployments) is applied inside hx_recv_route, so
+ * the C side no longer special-cases it.
  */
 typedef enum {
     HX_RECV_CHAT = 0,

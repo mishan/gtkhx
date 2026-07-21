@@ -71,11 +71,14 @@ const HTLS_HDR_TASK: u32 = 0x0001_0000;
 
 /// Route a wire `type` opcode to its [`HandlerKind`].
 ///
-/// The composite-`TASK` mask is applied first: some servers (Heidrun's
-/// Inn-family) echo the request opcode in the low u16 of a TASK reply
-/// (`0x0001_006b` = `TASK | LOGIN`), while standard servers send plain
-/// `0x0001_0000`. Correlation is by `trans` inside `hx_rcv_task` either way, so
-/// any `type` with the TASK bits in the high u16 routes to [`HandlerKind::Task`].
+/// The composite-`TASK` mask is applied first: a TASK reply normally arrives as
+/// plain `0x0001_0000`, but it can carry the request opcode echoed in the low
+/// u16 (`0x0001_006b` = `TASK | LOGIN`). That was a Heidrun (Inn-family) server
+/// bug, since fixed upstream — but older deployments still send it, and the mask
+/// is a no-op for compliant servers (which send `0x0001_0000`), so it stays as
+/// defensive handling. Correlation is by `trans` inside `hx_rcv_task` either way,
+/// so any `type` with the TASK bits in the high u16 routes to
+/// [`HandlerKind::Task`].
 pub fn route(opcode: u32) -> HandlerKind {
     use HandlerKind::*;
 
@@ -155,9 +158,11 @@ mod tests {
 
     #[test]
     fn composite_task_replies_fold_to_task() {
-        // The non-trivial bit: standard servers send plain 0x0001_0000, but
-        // Heidrun echoes the request opcode in the low u16 — every variant with
-        // the TASK bits set must still route to the task handler.
+        // The non-trivial bit: a TASK reply is normally plain 0x0001_0000, but a
+        // now-fixed Heidrun (Inn-family) bug echoed the request opcode in the low
+        // u16. Every variant with the TASK bits set must still route to the task
+        // handler — kept defensively for older Heidrun deployments, a no-op for
+        // compliant servers.
         assert_eq!(route(0x0001_0000), Task);
         assert_eq!(route(0x0001_006b), Task); // TASK | LOGIN
         assert_eq!(route(0x0001_012c), Task); // TASK | USER_GETLIST
