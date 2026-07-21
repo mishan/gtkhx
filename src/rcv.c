@@ -106,7 +106,7 @@ static char *hx_timeformat = "%c";
  * with no response opcode. For those we rely on the 2-second
  * fallback timer armed in rcv_task_login.
  *
- * `htlc->flags.post_login_fetched` is the single-fire guard:
+ * `hx_conn_post_login_fetched (htlc)` is the single-fire guard:
  * whichever path runs first sets it, the other path becomes a
  * no-op. Reset in hx_htlc_close so the next connect starts
  * fresh. Stored on the htlc rather than as a file-local static
@@ -120,10 +120,10 @@ static guint post_login_timer_id = 0;
 void
 hx_post_login_fetches (struct htlc_conn *htlc)
 {
-    if (htlc->flags.post_login_fetched) {
+    if (hx_conn_post_login_fetched (htlc)) {
         return;
     }
-    htlc->flags.post_login_fetched = 1;
+    hx_conn_set_post_login_fetched (htlc, 1);
 
     if (post_login_timer_id) {
         g_source_remove (post_login_timer_id);
@@ -216,7 +216,7 @@ post_login_fallback (gpointer data)
     struct htlc_conn *htlc = data;
 
     post_login_timer_id = 0;
-    if (htlc && htlc->fd && !htlc->flags.post_login_fetched) {
+    if (htlc && htlc->fd && !hx_conn_post_login_fetched (htlc)) {
         debug_log (
             "login",
             "AGREEMENTAGREE didn't fire after 2s, firing fetches anyway");
@@ -904,7 +904,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * Track it on htlc->flags so the agreement Agree button can
 	 * tell whether to send AGREEMENTAGREE. See the comment on the
 	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
-    htlc->flags.logged_in = 1;
+    hx_conn_set_logged_in (htlc, 1);
 
     /* Access bits just landed; the view refreshes toolbar-button
      * sensitivity (kick/ban etc. gate on the access bitmap) off the
@@ -1646,12 +1646,12 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * from hx_send_agreement_agree). The check is harmless
 		 * to keep — it's a no-op when the flag is FALSE, which is
 		 * the new common case. The fetched-bit itself lives on
-		 * htlc->flags.post_login_fetched now (so the files browser
+		 * hx_conn_post_login_fetched (htlc) now (so the files browser
 		 * can read it); the running timer id is still our local
 		 * static. */
-        gboolean already_fetched = htlc->flags.post_login_fetched;
+        gboolean already_fetched = hx_conn_post_login_fetched (htlc);
         if (!already_fetched) {
-            htlc->flags.post_login_fetched = 0;
+            hx_conn_set_post_login_fetched (htlc, 0);
             if (post_login_timer_id) {
                 g_source_remove (post_login_timer_id);
                 post_login_timer_id = 0;
@@ -1890,7 +1890,7 @@ rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr)
     /* A get reply implies the server speaks the extension. gif_len == 0
 	 * is a valid "avatar cleared" result — we still emit it so the view
 	 * drops any stale cached avatar. */
-    htlc->gif_icons_state = GIF_ICONS_SUPPORTED;
+    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_SUPPORTED);
     debug_log ("icon", "ICON_GET reply: uid=%u gif_len=%zu", (unsigned) e.uid,
                e.gif_len);
     hx_icon_data_recv (htlc, e.uid, e.gif_ptr, (guint32) e.gif_len);
@@ -1912,10 +1912,10 @@ rcv_task_icon_getlist (struct htlc_conn *htlc)
      * path so we record the verdict). A speculative probe's rejection is
      * expected and non-actionable. */
     if (task_inerror (htlc)) {
-        htlc->gif_icons_state = GIF_ICONS_UNSUPPORTED;
-        if (htlc->gif_icons_probe_timer) {
-            g_source_remove (htlc->gif_icons_probe_timer);
-            htlc->gif_icons_probe_timer = 0;
+        hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
+        if (hx_conn_gif_icons_probe_timer (htlc)) {
+            g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
+            hx_conn_set_gif_icons_probe_timer (htlc, 0);
         }
         debug_log ("icon",
                    "ICON_GETLIST rejected (task error) — server lacks the "
@@ -1923,10 +1923,10 @@ rcv_task_icon_getlist (struct htlc_conn *htlc)
         return;
     }
 
-    htlc->gif_icons_state = GIF_ICONS_SUPPORTED;
-    if (htlc->gif_icons_probe_timer) {
-        g_source_remove (htlc->gif_icons_probe_timer);
-        htlc->gif_icons_probe_timer = 0;
+    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_SUPPORTED);
+    if (hx_conn_gif_icons_probe_timer (htlc)) {
+        g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
+        hx_conn_set_gif_icons_probe_timer (htlc, 0);
     }
 
     /* The server is confirmed capable — push our saved avatar (if the

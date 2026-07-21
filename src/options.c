@@ -2571,7 +2571,7 @@ on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
         return;
     }
     avatar_preview_from_gif (preview, (const guchar *) contents, len);
-    if (hx_active_session ()->htlc->gif_icons_state == GIF_ICONS_SUPPORTED) {
+    if (hx_conn_gif_icons_state (hx_active_session ()->htlc) == GIF_ICONS_SUPPORTED) {
         hx_icon_set (hx_active_session ()->htlc, (const guint8 *) contents, len);
         toolbar_show_toast (_ ("Avatar updated."));
     } else {
@@ -2616,7 +2616,7 @@ on_avatar_clear_clicked (GtkButton *btn, gpointer user_data)
     gboolean removed = hx_icon_forget ();
     gtk_picture_set_paintable (GTK_PICTURE (preview), NULL);
     /* Tell the server to drop it too, if we're on a capable one. */
-    if (hx_active_session ()->htlc->gif_icons_state == GIF_ICONS_SUPPORTED) {
+    if (hx_conn_gif_icons_state (hx_active_session ()->htlc) == GIF_ICONS_SUPPORTED) {
         hx_icon_clear (hx_active_session ()->htlc);
     }
     /* Don't claim it's cleared if the persisted file survived deletion —
