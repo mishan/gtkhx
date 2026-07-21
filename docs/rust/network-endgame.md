@@ -117,6 +117,12 @@ struct's storage moves to a Rust crate (`hxconn`, or a module inside `hxnet`),
 and C reaches fields through a generated getter/setter FFI
 (`hx_conn_uid(htlc)`, `hx_conn_set_uid(htlc, v)`, …).
 
+**Decided (Misha): opaque handle + accessor FFI**, not a `#[repr(C)]` mirror.
+C holds an opaque `struct htlc_conn *` and reaches every field through
+`hx_conn_get/set_*` shims. This gives the cleanest end state (the layout is
+Rust's alone from the start, no duplicated struct to keep in sync); the cost is
+more shim boilerplate during the migration, which is mechanical.
+
 Sequencing within E1 (the struct is too wide to move atomically):
 
 1. **Opaque handle + allocation ownership.** Rust allocates/frees the struct;
