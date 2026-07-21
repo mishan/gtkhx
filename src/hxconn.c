@@ -332,6 +332,7 @@ void
 hx_conn_set_hope_aead (struct htlc_conn *h, void *p)
 {
     h->hope_aead = p;
+}
 
 guint32
 hx_conn_trans (const struct htlc_conn *h)
