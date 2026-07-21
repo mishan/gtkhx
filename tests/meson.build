@@ -1764,16 +1764,20 @@ test('nick_colors', test_integration_nick_colors,
      is_parallel : false,
      timeout     : 30)
 
-# file_get — full HTXF subchannel exchange. Sends FILE_GET on the
-# main port (5500), receives the TASK reply with HTXF_REF +
-# HTXF_SIZE, opens a fresh TCP connection to the subchannel
-# port (5501 by default; override via GTKHX_TEST_XFER_PORT),
-# sends the 16-byte HTXF magic header, reads the streamed
-# payload, and substring-searches for our seeded 'hello world'
-# content. The Dockerfile seeds files/test.txt for this purpose.
+# file_get — full HTXF subchannel exchange driving the PRODUCTION
+# receive state machine. Sends FILE_GET on the main port (5500),
+# receives the TASK reply with HTXF_REF + HTXF_SIZE, opens the subchannel
+# (5501 by default; override via GTKHX_TEST_XFER_PORT), then calls the
+# real xfers_recv.c::file_recv_one and asserts the decoded on-disk file
+# is byte-for-byte the seeded 'hello world\n'. Links xfers_recv.c + hfs.c
+# (receive machine + HFS sidecar) and the hxfiles-xfer FFO codec on top
+# of integration_harness_lib (which bundles htxf_io.c + the hxnet
+# channel). The Dockerfile seeds files/test.txt for this purpose.
 test_integration_file_get = executable('test_integration_file_get',
   'integration/test_file_get.c',
-  dependencies        : proto_test_deps,
+  '../src/xfers_recv.c',
+  '../src/hfs.c',
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )

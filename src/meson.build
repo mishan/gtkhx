@@ -128,6 +128,7 @@ gtkhx_sources = files(
   # (users_voice_col.rs).
   'users_cell.c',
   'xfers.c',
+  'xfers_recv.c',
   'xtext.c',
 )
 
