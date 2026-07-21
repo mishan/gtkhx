@@ -170,6 +170,11 @@ rust_sources = files(
   'crates/hxfiles-xfer/src/lib.rs',
   'crates/hxfiles-xfer/src/ffo.rs',
   'crates/hxfiles-xfer/src/ffi.rs',
+  'crates/hxhfs/src/lib.rs',
+  'crates/hxhfs/src/hfs.rs',
+  'crates/hxhfs/src/hfs/tests.rs',
+  'crates/hxhfs/src/suffix.rs',
+  'crates/hxhfs/src/ffi.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -210,6 +215,7 @@ rust_sources = files(
   'crates/hxnews-model/Cargo.toml',
   'crates/hxfiles-model/Cargo.toml',
   'crates/hxfiles-xfer/Cargo.toml',
+  'crates/hxhfs/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -517,6 +523,18 @@ rust_hxcicn_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxcicn',
+  ],
+)
+
+# HFS metadata sidecar (Rust port of hfs.c). Exposes the exact hfs.h C ABI
+# (hfsinfo_read/write, resource_open/len, type_creator, comment_*,
+# finderinfo_path/resource_path, hfs_set_config) so the C callers (xfers_recv.c
+# / xfers_send.c / rcv.c) link it unchanged in place of hfs.c.
+rust_hxhfs_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxhfs',
   ],
 )
 

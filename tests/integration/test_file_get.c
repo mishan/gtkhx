@@ -31,11 +31,12 @@
  *
  * The Dockerfile seeds files/test.txt with exactly "hello world\n".
  *
- * Links xfers_recv.c + hfs.c (the receive machine + HFS sidecar) on top
- * of integration_harness_lib (which already bundles htxf_io.c and the
- * hxnet channel). file_recv_one's GTK-shell couplings are stubbed below:
- * the preview branch is never taken (opt.preview = 0) and progress is a
- * no-op, so hx_preview_* / dir_char just need to resolve at link time.
+ * Links xfers_recv.c + the hxhfs crate (the receive machine + HFS
+ * sidecar) on top of integration_harness_lib (which already bundles
+ * htxf_io.c and the hxnet channel). file_recv_one's GTK-shell couplings
+ * are stubbed below: the preview branch is never taken (opt.preview = 0)
+ * and progress is a no-op, so hx_preview_* just needs to resolve at link
+ * time.
  */
 
 #include "config.h"
@@ -54,10 +55,8 @@
 #include "integration_harness.h"
 
 /* --- link stubs for file_recv_one's GTK-shell couplings --- *
- * hfs.c reads dir_char (normally defined in files.c); the preview branch
- * of file_recv_one references these three but never runs here. */
-guint8 dir_char = '/';
-
+ * The preview branch of file_recv_one references these three but never
+ * runs here (opt.preview = 0). */
 void
 hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
 {

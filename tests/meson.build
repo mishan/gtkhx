@@ -1769,15 +1769,14 @@ test('nick_colors', test_integration_nick_colors,
 # receives the TASK reply with HTXF_REF + HTXF_SIZE, opens the subchannel
 # (5501 by default; override via GTKHX_TEST_XFER_PORT), then calls the
 # real xfers_recv.c::file_recv_one and asserts the decoded on-disk file
-# is byte-for-byte the seeded 'hello world\n'. Links xfers_recv.c + hfs.c
+# is byte-for-byte the seeded 'hello world\n'. Links xfers_recv.c + the hxhfs crate
 # (receive machine + HFS sidecar) and the hxfiles-xfer FFO codec on top
 # of integration_harness_lib (which bundles htxf_io.c + the hxnet
 # channel). The Dockerfile seeds files/test.txt for this purpose.
 test_integration_file_get = executable('test_integration_file_get',
   'integration/test_file_get.c',
   '../src/xfers_recv.c',
-  '../src/hfs.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
@@ -1839,14 +1838,13 @@ test('news15', test_integration_news15,
 # machine. Sends HTLC_HDR_FILE_PUT to the seeded Uploads/ dir, streams an
 # FFO-wrapped file via xfers_send.c::file_send_one, then downloads it
 # back through xfers_recv.c::file_recv_one and asserts byte-exact. Links
-# both machines + hfs.c + the FFO codec on top of integration_harness_lib.
+# both machines + the hxhfs crate + the FFO codec on top of integration_harness_lib.
 # Requires the guest account to have UPLOAD_FILES + UPLOAD_ANYWHERE.
 test_integration_file_put = executable('test_integration_file_put',
   'integration/test_file_put.c',
   '../src/xfers_send.c',
   '../src/xfers_recv.c',
-  '../src/hfs.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
@@ -2270,14 +2268,13 @@ test('folder_put', test_integration_folder_put,
 # PRODUCTION folder machines. Uploads a local tree via
 # xfers_send.c::folder_send_all, downloads it back through
 # xfers_recv.c::folder_recv_all, and asserts every file is byte-exact.
-# Links both machines + hfs.c + htxf_subchannel.c + the FFO codec on top
+# Links both machines + the hxhfs crate + htxf_subchannel.c + the FFO codec on top
 # of integration_harness_lib. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
 test_integration_folder_roundtrip = executable('test_integration_folder_roundtrip',
   'integration/test_folder_roundtrip.c',
   '../src/xfers_send.c',
   '../src/xfers_recv.c',
-  '../src/hfs.c',
-  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
   include_directories : integration_test_inc,
   link_with           : integration_harness_lib,
 )
