@@ -273,6 +273,10 @@ rust_deps = [
   # rule: undefined refs to gtkhx_session_get_default / _emit_msg and
   # hx_member_model_get_ignore.
   rust_hxmsg_recv_dep,
+  # agreement receive path (auto-agree vs show-and-emit decision, moved out
+  # of rcv.c). Same receive-handler group + consumer-before-provider rule:
+  # undefined refs to gtkhx_session_get_default / _emit_agreement.
+  rust_hxagreement_recv_dep,
   # user-roster receive handlers (user-change routing + user-part gate/emit,
   # moved out of rcv.c). Same receive-handler group + consumer-before-provider
   # rule as hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*

@@ -448,6 +448,15 @@ hx_rcv_msg (struct htlc_conn *htlc)
     }
 }
 
+/* Agreement show-vs-auto-agree decision + emit — Rust hxagreement-recv crate.
+ * Returns HX_AGREEMENT_ACT_AUTO_AGREE (C sends AGREEMENTAGREE) or
+ * HX_AGREEMENT_ACT_SHOWN (the agreement signal fired; the view pops the
+ * Agree window). */
+#define HX_AGREEMENT_ACT_AUTO_AGREE 0
+#define HX_AGREEMENT_ACT_SHOWN 1
+extern int hx_agreement_recv (void *sess, int has_agreement, const char *buf,
+                              guint16 len);
+
 void
 hx_rcv_agreement_file (struct htlc_conn *htlc)
 {
@@ -480,16 +489,16 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
 	 * in). That gate was almost certainly chasing a misdiagnosed
 	 * symptom — see gtkhx.c::concurrence for the long comment —
 	 * and was suppressing banner delivery on every 1.9 server. */
-    if (r == HX_AGREEMENT_NONE || r == HX_AGREEMENT_NOT_FOUND) {
+    /* HX_AGREEMENT_OK → show it (crate emits the agreement signal). Otherwise
+     * (HX_AGREEMENT_NONE = agreement disabled, HX_AGREEMENT_NOT_FOUND =
+     * malformed) there's nothing to click, so the crate returns AUTO_AGREE and
+     * we send AGREEMENTAGREE ourselves — that completes login on no-agreement
+     * servers and triggers the banner on banner-configured ones. */
+    if (hx_agreement_recv (sess_from_htlc (htlc), r == HX_AGREEMENT_OK, buf,
+                           (guint16) body_len)
+        == HX_AGREEMENT_ACT_AUTO_AGREE) {
         hx_send_agreement_agree (htlc);
-        return;
     }
-    if (r != HX_AGREEMENT_OK) {
-        return;
-    }
-
-    gtkhx_session_emit_agreement (gtkhx_session_get_default (), sess_from_htlc (htlc),
-                                  buf, (guint16)body_len);
 }
 
 /* rewritten to use hx_news_post_walk in proto_helpers.c.
