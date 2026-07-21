@@ -35,15 +35,15 @@ extern void msg_output_from_event (struct _HxMsgEvent *event);
  * falls back to the legacy "[hx] broadcast: ..." form. */
 extern void broadcastmsg (const char *sender_name, guint16 sender_color,
                           char *text);
-/* Re-render the recipient info pane from the cached hx_user. Used
- * at create_msgwin time when the cached struct already reflects
- * current state. */
+/* Re-render the recipient info pane from the recipient's current entry in the
+ * public chat's HxMemberModel. Used at create_msgwin time when that entry
+ * already reflects current state. */
 extern void msgwin_refresh_user_info (struct msgwin *msg);
 
 /* Re-render the recipient info pane from explicit just-changed
  * values. Called from users.c's user_change handler, which receives
- * the NEW name/icon/color as direct args before rcv.c has patched
- * them onto the cached hx_user struct. */
+ * the NEW name/icon/color as direct args before rcv.c has applied
+ * them to the chat's member model. */
 extern void msgwin_apply_user_change (struct msgwin *msg, const char *nam,
                                       guint16 icon, guint16 color);
 

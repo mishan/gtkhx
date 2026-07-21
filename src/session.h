@@ -154,21 +154,10 @@ struct uesp_fn {
                 const hl_access_bits);
 };
 
-/* Transient signal-payload carrier, NOT a store. Per-chat membership
- * (uid / icon / status colour / nick colour / name / ignore) is owned by
- * the Rust HxMemberModel (hx_chat_member_model (chat)); readers query it
- * via chat_members.h. The user-create/change/delete signals still carry a
- * `struct hx_user *`, but the users.c fan-out reads only ->uid and
- * ->nick_color off it, so rcv.c / options.c fill a short-lived stack
- * instance per emit. Everything else rides in as explicit signal args. */
-struct hx_user {
-    guint16 uid;
-    /* Colored-Nicknames 0x00RRGGBB nick colour, or HX_NICK_COLOR_NONE.
-	 * Carried on the signal because it isn't a separate marshalled arg
-	 * (the status `color` is), so the render path can read it straight
-	 * off the payload. */
-    guint32 nick_color;
-};
+/* (struct hx_user retired — the user-create/change/delete signals now carry
+ * uid + nick_color as scalar args, so no transient carrier is needed. Per-chat
+ * membership is owned by the Rust HxMemberModel (hx_chat_member_model (chat));
+ * readers query it via chat_members.h.) */
 
 /* struct chat is an opaque handle: the Rust HxConversation
  * (gtkhx-ui/src/conversation.rs) owns the per-chat state — the cid, subject,

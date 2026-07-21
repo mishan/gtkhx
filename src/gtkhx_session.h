@@ -43,7 +43,6 @@ struct gnews_catalog;
 struct news_post;
 struct htxf_conn;
 struct chat;
-struct hx_user;
 struct cached_filelist;
 struct hl_filelist_hdr;
 
@@ -171,16 +170,17 @@ void gtkhx_session_emit_news_thread (GtkhxSession *self,
  * notification consumers gate on it so the join/part chime fires only on
  * real transitions, not once per user already in the room at login. */
 void gtkhx_session_emit_user_create (GtkhxSession *self, struct htlc_conn *htlc,
-                                     struct chat *chat, struct hx_user *user,
-                                     const char *nam, guint16 icon,
-                                     guint16 color, gboolean incremental);
+                                     struct chat *chat, guint16 uid,
+                                     guint32 nick_color, const char *nam,
+                                     guint16 icon, guint16 color,
+                                     gboolean incremental);
 void gtkhx_session_emit_user_delete (GtkhxSession *self, struct htlc_conn *htlc,
-                                     struct chat *chat, struct hx_user *user,
+                                     struct chat *chat, guint16 uid,
                                      gboolean incremental);
 void gtkhx_session_emit_user_change (GtkhxSession *self, struct htlc_conn *htlc,
-                                     struct chat *chat, struct hx_user *user,
-                                     const char *nam, guint16 icon,
-                                     guint16 color);
+                                     struct chat *chat, guint16 uid,
+                                     guint32 nick_color, const char *nam,
+                                     guint16 icon, guint16 color);
 void gtkhx_session_emit_users_clear (GtkhxSession *self, struct htlc_conn *htlc,
                                      struct chat *chat);
 void gtkhx_session_emit_user_info (GtkhxSession *self, guint16 uid,

@@ -11,15 +11,11 @@
  * users_row.h — one row in the chat / pchat / standalone users list.
  *
  * A GObject so it can sit inside a GListStore that GtkColumnView
- * consumes. Wraps a borrowed `struct hx_user *` plus the display
- * state the cell renderers read (name string, icon id, status
- * color, computed foreground GdkRGBA). Lifetime split mirrors
- * tracker_row:
+ * consumes. Caches the values the cell renderers read (uid, nick
+ * colour, name string, icon id, status color, computed foreground
+ * GdkRGBA) — the authoritative per-chat membership lives in the Rust
+ * HxMemberModel; the row is a self-contained view snapshot.
  *
- *   - The underlying `struct hx_user` is still owned by the
- *     per-chat `chat->users` GHashTable. The row holds a
- *     borrowed pointer; the row's GObject finalize never
- *     touches it.
  *   - The row owns its `name` g_strdup, its foreground GdkRGBA,
  *     and its GObject self. That's all.
  *
@@ -35,7 +31,7 @@
 #include <glib-object.h>
 #include <gdk/gdk.h>
 
-#include "hx.h" /* struct hx_user — borrowed pointer */
+#include "hx.h" /* session + shared typedefs */
 
 G_BEGIN_DECLS
 

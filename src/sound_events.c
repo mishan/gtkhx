@@ -78,13 +78,15 @@ sound_on_chat_invitation (GtkhxSession *emitter, struct htlc_conn *htlc,
 
 static void
 sound_on_user_create (GtkhxSession *emitter, struct htlc_conn *htlc,
-                      gpointer chat, gpointer user, gpointer nam, guint icon,
-                      guint color, gboolean incremental, gpointer user_data)
+                      gpointer chat, guint uid, guint nick_color, gpointer nam,
+                      guint icon, guint color, gboolean incremental,
+                      gpointer user_data)
 {
     (void)emitter;
     (void)htlc;
     (void)chat;
-    (void)user;
+    (void)uid;
+    (void)nick_color;
     (void)nam;
     (void)icon;
     (void)color;
@@ -98,13 +100,13 @@ sound_on_user_create (GtkhxSession *emitter, struct htlc_conn *htlc,
 
 static void
 sound_on_user_delete (GtkhxSession *emitter, struct htlc_conn *htlc,
-                      gpointer chat, gpointer user, gboolean incremental,
+                      gpointer chat, guint uid, gboolean incremental,
                       gpointer user_data)
 {
     (void)emitter;
     (void)htlc;
     (void)chat;
-    (void)user;
+    (void)uid;
     (void)user_data;
     if (incremental) {
         play_sound (USER_PART);

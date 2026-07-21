@@ -643,12 +643,12 @@ hx_rcv_task (struct htlc_conn *htlc)
 #define HX_USER_CHANGE_CREATED 1
 #define HX_USER_CHANGE_CHANGED 2
 extern int hx_user_change_recv (struct htlc_conn *htlc, void *chat,
-                                void *carrier, const char *name,
-                                guint16 icon, guint16 color, int is_new,
-                                int skip_self_create, int incremental);
+                                guint16 uid, guint32 nick_color,
+                                const char *name, guint16 icon, guint16 color,
+                                int is_new, int skip_self_create,
+                                int incremental);
 extern int hx_user_part_recv (struct htlc_conn *htlc, void *chat,
-                              void *member_model, void *carrier,
-                              guint16 uid);
+                              void *member_model, guint16 uid);
 
 void
 hx_rcv_user_change (struct htlc_conn *htlc)
@@ -707,16 +707,12 @@ hx_rcv_user_change (struct htlc_conn *htlc)
                    (unsigned)uid);
     }
 
-    /* Transient carrier for the signal payload. The users.c fan-out
-     * (user_create / user_change) reads ONLY ->uid and ->nick_color off
-     * it; nam/icon/color are passed as explicit args. No chat->users
-     * entry is created — the model, fed by the fan-out, is the store. */
-    struct hx_user carrier = { .uid = uid, .nick_color = plan.eff_nick_color };
-
     /* Route to the right roster signal in the Rust hxuser-recv crate; it
-     * returns what it emitted so we do the matching join / rename logging. */
-    int emitted = hx_user_change_recv (htlc, chat, &carrier, name, icon,
-                                       plan.eff_color, plan.is_new,
+     * returns what it emitted so we do the matching join / rename logging.
+     * uid + nick_color ride in as scalars — the view's model upsert + row
+     * insert read only those two off the old carrier struct. */
+    int emitted = hx_user_change_recv (htlc, chat, uid, plan.eff_nick_color,
+                                       name, icon, plan.eff_color, plan.is_new,
                                        plan.skip_self_create, TRUE);
     if (emitted == HX_USER_CHANGE_SKIPPED) {
         /* Our own row — the USER_LIST reply creates it in the right spot. */
@@ -787,9 +783,7 @@ hx_rcv_user_part (struct htlc_conn *htlc)
     struct hx_member_info mi;
     gboolean have
         = hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &mi);
-    struct hx_user carrier = { .uid = pm.uid };
-    if (hx_user_part_recv (htlc, chat, hx_chat_member_model (chat), &carrier,
-                           pm.uid)) {
+    if (hx_user_part_recv (htlc, chat, hx_chat_member_model (chat), pm.uid)) {
         if (have && gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, pm.cid, INFOPREFIX, _ ("parts: %s \n"),
                               mi.name);
@@ -2107,10 +2101,10 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			 * the 8-byte fixed header, two-stage nlen clamp
 			 * (avail-first, then cap-31), strip_ansi, and the
 			 * Colored-Nicknames trailer at `8 + clamped_nlen`. The C
-			 * side keeps the hx_user creation, the "is this us?"
-			 * adoption gate that sets htlc->uid / ->color, and the
-			 * GtkhxSession signal emit — all of which need
-			 * session/chat objects the Rust layer doesn't see. */
+			 * side keeps the "is this us?" adoption gate that sets
+			 * htlc->uid / ->color, and the GtkhxSession signal emit —
+			 * all of which need session/chat objects the Rust layer
+			 * doesn't see. */
             struct gtkhx_proto_user_list_record rec;
             char name_buf[32];
             if (!gtkhx_proto_parse_user_list_record (
@@ -2141,16 +2135,15 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
                 htlc->color = rec.color;
             }
 
-            /* Transient carrier: fan-out reads only ->uid + ->nick_color. */
-            struct hx_user carrier
-                = { .uid = uid, .nick_color = rec.nick_color };
+            /* uid + nick_color ride in as scalar signal args now. */
             if (new) {
                 /* incremental=FALSE: this is the bulk user-list load, not a
                  * live join. Passing FALSE keeps the join chime from firing
                  * once per user already in the room at login. */
                 gtkhx_session_emit_user_create (gtkhx_session_get_default (),
-                                                htlc, chat, &carrier, name_buf,
-                                                rec.icon, rec.color, FALSE);
+                                                htlc, chat, uid, rec.nick_color,
+                                                name_buf, rec.icon, rec.color,
+                                                FALSE);
             } else {
                 /* Existing member: keep the model current without churning
                  * the view — matches the old silent field update the

@@ -35,13 +35,13 @@ extern PangoFontDescription *users_font_desc;
 extern void create_users_window (GtkWidget *toolbar_window, gpointer data);
 extern void user_list (session *sess);
 extern void user_create (struct htlc_conn *htlc, struct chat *chat,
-                         struct hx_user *user, const char *nam, guint16 icon,
-                         guint16 color);
+                         guint16 uid, guint32 nick_color, const char *nam,
+                         guint16 icon, guint16 color);
 extern void user_delete (struct htlc_conn *htlc, struct chat *chat,
-                         struct hx_user *user);
+                         guint16 uid);
 extern void user_change (struct htlc_conn *htlc, struct chat *chat,
-                         struct hx_user *user, const char *nam, guint16 icon,
-                         guint16 color);
+                         guint16 uid, guint32 nick_color, const char *nam,
+                         guint16 icon, guint16 color);
 /* Refresh every user-list view that shows `uid` so its cell re-reads
  * the GIF avatar cache (Phase 10.B). Called from the gif-icon-data
  * handler after the avatar cache is updated. */

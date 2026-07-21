@@ -1522,37 +1522,38 @@ on_news_thread_signal (GtkhxSession *emitter, gpointer post, gpointer user_data)
 
 static void
 on_user_create_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
-                       struct chat *chat, struct hx_user *user, gpointer nam,
-                       guint icon, guint color, gboolean incremental,
-                       gpointer user_data)
+                       struct chat *chat, guint uid, guint nick_color,
+                       gpointer nam, guint icon, guint color,
+                       gboolean incremental, gpointer user_data)
 {
     (void)emitter;
     (void)incremental; /* join-chime gate; consumed by sound_events.c */
     (void)user_data;
-    user_create (htlc, chat, user, (const char *)nam, (guint16)icon,
-                 (guint16)color);
+    user_create (htlc, chat, (guint16)uid, nick_color, (const char *)nam,
+                 (guint16)icon, (guint16)color);
 }
 
 static void
 on_user_delete_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
-                       struct chat *chat, struct hx_user *user,
-                       gboolean incremental, gpointer user_data)
+                       struct chat *chat, guint uid, gboolean incremental,
+                       gpointer user_data)
 {
     (void)emitter;
     (void)incremental; /* part-chime gate; consumed by sound_events.c */
     (void)user_data;
-    user_delete (htlc, chat, user);
+    user_delete (htlc, chat, (guint16)uid);
 }
 
 static void
 on_user_change_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
-                       struct chat *chat, struct hx_user *user, gpointer nam,
-                       guint icon, guint color, gpointer user_data)
+                       struct chat *chat, guint uid, guint nick_color,
+                       gpointer nam, guint icon, guint color,
+                       gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
-    user_change (htlc, chat, user, (const char *)nam, (guint16)icon,
-                 (guint16)color);
+    user_change (htlc, chat, (guint16)uid, nick_color, (const char *)nam,
+                 (guint16)icon, (guint16)color);
 }
 
 static void

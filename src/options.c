@@ -528,7 +528,7 @@ changed_nickoricon (session *sess)
  * repainting our own row: servers vary on whether they echo a user's
  * own broadcast to that user, and even when they do, the round-trip
  * is enough of a lag that the user perceives the picker as broken.
- * Update self's hx_user.nick_color directly and re-render. The
+ * Update self's nick_color in the member model directly and re-render. The
  * inbound echo (if any) lands on top with the same value — no
  * flicker, just an idempotent rewrite. */
 static void
@@ -549,11 +549,8 @@ changed_nick_color (session *sess)
         struct hx_member_info mi;
         if (hx_member_model_get_info (hx_chat_member_model (pub),
                                       hx_active_session ()->htlc.uid, &mi)) {
-            /* Transient carrier — user_change reads only ->uid + the new
-             * ->nick_color; the other fields ride in as explicit args. */
-            struct hx_user self = { .uid = mi.uid, .nick_color = nc };
-            user_change (&hx_active_session ()->htlc, pub, &self, mi.name,
-                         mi.icon, mi.status);
+            user_change (&hx_active_session ()->htlc, pub, mi.uid, nc,
+                         mi.name, mi.icon, mi.status);
         }
     }
 }
