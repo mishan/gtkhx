@@ -48,7 +48,7 @@
 
 #include <gtk/gtk.h>
 
-#include "hx.h" /* struct hx_user, session */
+#include "hx.h" /* session + shared typedefs */
 
 G_BEGIN_DECLS
 
@@ -80,9 +80,9 @@ extern HxUserListView *hx_user_list_view_new (session *sess, guint32 cid,
  * border, etc.). */
 extern GtkWidget *hx_user_list_view_get_widget (HxUserListView *v);
 
-/* Row management by member value (M4b.4b-i: uid + display fields, no
- * borrowed hx_user*). The row copies what it needs and holds no pointer
- * into any C store. */
+/* Row management by member value (uid + display fields, no borrowed
+ * pointer). The row copies what it needs and holds no pointer into any
+ * C store. */
 extern void hx_user_list_view_add (HxUserListView *v, guint16 uid,
                                    const char *nam, guint16 icon,
                                    guint16 color, guint32 nick_color);
@@ -100,9 +100,8 @@ extern void hx_user_list_view_clear (HxUserListView *v);
 /* Return the uid under the live single-selection, or 0 if no row is
  * selected. This is what the headerbar toolbar buttons (Msg / Kick /
  * Info / Ban / Chat / Ignore) consult to know which user to act on;
- * they resolve the struct hx_user (when still needed) via
- * hx_user_with_uid(chat_with_cid(sess, cid), uid). M4b.3b-ii: the
- * selection identity is the uid, not a borrowed hx_user*. */
+ * the selection identity is the uid, and per-user state is read from
+ * the chat's HxMemberModel keyed on it. */
 extern guint16 hx_user_list_view_get_selected_uid (HxUserListView *v);
 
 /* The chat id this view lists (0 = public). Pairs with the selected

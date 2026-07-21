@@ -105,12 +105,15 @@ Ordered leaf-up so each step is independently shippable with headless tests and
 a green Tier-3 `real_connect`. Each is its own `claude/network-untangling-uN-*`
 branch, squashed before PR.
 
-- **U1 — collapse the `hx_user` carrier (K1).** Change the
-  `user-create/change/delete` signals to carry scalar `(uid, nick_color)`
-  instead of `struct hx_user*`. Update the three emit wrappers, the `on_*_signal`
-  bridges in `gtkhx.c`, `hxuser-recv`, and the two call sites in `rcv.c` +
-  `rcv_task_user_list`. Deletes the transient struct at four sites. Mechanical,
-  high-value, unblocks U2/U3. No behaviour change — Tier-3 join/part regression.
+- **U1 — collapse the `hx_user` carrier (K1). SHIPPED.** The
+  `user-create/change/delete` signals now carry scalar `(uid, nick_color)`
+  instead of `struct hx_user*`: the three `param_types`, the three emit wrappers
+  (gtkhx-session), the `on_*_signal` bridges + the two `sound_events.c`
+  subscribers, the three `users.c` view fns, `hxuser-recv`, and the emit sites in
+  `rcv.c` (`hx_rcv_user_change` / `hx_rcv_user_part` / `rcv_task_user_list`) +
+  `options.c`. With every construction site gone, `struct hx_user` itself was
+  retired. No behaviour change; unit/proto + Tier-3 join/part green. Unblocks
+  U2/U3.
 
 - **U2 — move `hx_user_change_plan_resolve` into `hotline-proto` (K2).** Port
   the pure decision (self detection, new-vs-change, colour/nick-colour preserve,

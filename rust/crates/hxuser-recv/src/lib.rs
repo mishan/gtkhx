@@ -14,33 +14,35 @@ use std::os::raw::{c_char, c_int, c_void};
 extern "C" {
     /// The singleton `GtkhxSession` GObject (gtkhx-session).
     fn gtkhx_session_get_default() -> *mut c_void;
-    /// `GtkhxSession::user-create (htlc, chat, user, nam, icon, color, incremental)`.
+    /// `GtkhxSession::user-create (htlc, chat, uid, nick_color, nam, icon, color, incremental)`.
     fn gtkhx_session_emit_user_create(
         self_: *mut c_void,
         htlc: *mut c_void,
         chat: *mut c_void,
-        user: *mut c_void,
+        uid: u16,
+        nick_color: u32,
         nam: *const c_char,
         icon: u16,
         color: u16,
         incremental: c_int,
     );
-    /// `GtkhxSession::user-change (htlc, chat, user, nam, icon, color)`.
+    /// `GtkhxSession::user-change (htlc, chat, uid, nick_color, nam, icon, color)`.
     fn gtkhx_session_emit_user_change(
         self_: *mut c_void,
         htlc: *mut c_void,
         chat: *mut c_void,
-        user: *mut c_void,
+        uid: u16,
+        nick_color: u32,
         nam: *const c_char,
         icon: u16,
         color: u16,
     );
-    /// `GtkhxSession::user-delete (htlc, chat, user, incremental)`.
+    /// `GtkhxSession::user-delete (htlc, chat, uid, incremental)`.
     fn gtkhx_session_emit_user_delete(
         self_: *mut c_void,
         htlc: *mut c_void,
         chat: *mut c_void,
-        user: *mut c_void,
+        uid: u16,
         incremental: c_int,
     );
     /// Whether `uid` is a member of the per-chat model (hxmember-model).
@@ -53,23 +55,24 @@ pub const HX_USER_CHANGE_SKIPPED: c_int = 0;
 pub const HX_USER_CHANGE_CREATED: c_int = 1;
 pub const HX_USER_CHANGE_CHANGED: c_int = 2;
 
-/// `int hx_user_change_recv (htlc, chat, carrier, name, icon, color, is_new,
-/// skip_self_create, incremental)` — route a resolved `USER_CHANGE` to the right
-/// roster signal. Returns [`HX_USER_CHANGE_SKIPPED`] (nothing emitted — our own
-/// join, deferred to the USER_LIST reply), [`HX_USER_CHANGE_CREATED`]
+/// `int hx_user_change_recv (htlc, chat, uid, nick_color, name, icon, color,
+/// is_new, skip_self_create, incremental)` — route a resolved `USER_CHANGE` to
+/// the right roster signal. Returns [`HX_USER_CHANGE_SKIPPED`] (nothing emitted —
+/// our own join, deferred to the USER_LIST reply), [`HX_USER_CHANGE_CREATED`]
 /// (user-create), or [`HX_USER_CHANGE_CHANGED`] (user-change). The C side owns
 /// the plan resolution, the model reads, and the join/rename logging keyed on
 /// this return.
 ///
 /// # Safety
-/// `chat` / `carrier` are the opaque `struct chat *` / `struct hx_user *` the
-/// signal forwards; `name` is a valid C string; `htlc` is opaque.
+/// `chat` is the opaque `struct chat *` the signal forwards; `name` is a valid C
+/// string; `htlc` is opaque.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn hx_user_change_recv(
     htlc: *mut c_void,
     chat: *mut c_void,
-    carrier: *mut c_void,
+    uid: u16,
+    nick_color: u32,
     name: *const c_char,
     icon: u16,
     color: u16,
@@ -86,7 +89,8 @@ pub unsafe extern "C" fn hx_user_change_recv(
             gtkhx_session_get_default(),
             htlc,
             chat,
-            carrier,
+            uid,
+            nick_color,
             name,
             icon,
             color,
@@ -98,7 +102,8 @@ pub unsafe extern "C" fn hx_user_change_recv(
         gtkhx_session_get_default(),
         htlc,
         chat,
-        carrier,
+        uid,
+        nick_color,
         name,
         icon,
         color,
@@ -106,28 +111,26 @@ pub unsafe extern "C" fn hx_user_change_recv(
     HX_USER_CHANGE_CHANGED
 }
 
-/// `int hx_user_part_recv (htlc, chat, member_model, carrier, uid)` — emit
-/// `user-delete` iff `uid` is a member of the chat (the fan-out removes the
-/// model entry itself). Returns 1 when it emitted, 0 otherwise. The C side
-/// captures the member's name *before* calling (the emit removes the entry) and
-/// logs the "parts" line only when this returns 1.
+/// `int hx_user_part_recv (htlc, chat, member_model, uid)` — emit `user-delete`
+/// iff `uid` is a member of the chat (the fan-out removes the model entry
+/// itself). Returns 1 when it emitted, 0 otherwise. The C side captures the
+/// member's name *before* calling (the emit removes the entry) and logs the
+/// "parts" line only when this returns 1.
 ///
 /// # Safety
-/// `member_model` is a valid `HxMemberModel *`; `chat` / `carrier` are the
-/// opaque `struct chat *` / `struct hx_user *` the signal forwards; `htlc` is
-/// opaque.
+/// `member_model` is a valid `HxMemberModel *`; `chat` is the opaque
+/// `struct chat *` the signal forwards; `htlc` is opaque.
 #[no_mangle]
 pub unsafe extern "C" fn hx_user_part_recv(
     htlc: *mut c_void,
     chat: *mut c_void,
     member_model: *mut c_void,
-    carrier: *mut c_void,
     uid: u16,
 ) -> c_int {
     if hx_member_model_contains(member_model, uid) == 0 {
         return 0;
     }
-    gtkhx_session_emit_user_delete(gtkhx_session_get_default(), htlc, chat, carrier, 1);
+    gtkhx_session_emit_user_delete(gtkhx_session_get_default(), htlc, chat, uid, 1);
     1
 }
 
@@ -140,17 +143,22 @@ pub(crate) mod test_env {
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Emit {
         Create {
+            uid: u16,
+            nick_color: u32,
             name: Vec<u8>,
             icon: u16,
             color: u16,
             incremental: bool,
         },
         Change {
+            uid: u16,
+            nick_color: u32,
             name: Vec<u8>,
             icon: u16,
             color: u16,
         },
         Delete {
+            uid: u16,
             incremental: bool,
         },
     }
@@ -194,13 +202,16 @@ unsafe fn gtkhx_session_emit_user_create(
     _self_: *mut c_void,
     _htlc: *mut c_void,
     _chat: *mut c_void,
-    _user: *mut c_void,
+    uid: u16,
+    nick_color: u32,
     nam: *const c_char,
     icon: u16,
     color: u16,
     incremental: c_int,
 ) {
     test_env::record(test_env::Emit::Create {
+        uid,
+        nick_color,
         name: cbytes(nam),
         icon,
         color,
@@ -213,12 +224,15 @@ unsafe fn gtkhx_session_emit_user_change(
     _self_: *mut c_void,
     _htlc: *mut c_void,
     _chat: *mut c_void,
-    _user: *mut c_void,
+    uid: u16,
+    nick_color: u32,
     nam: *const c_char,
     icon: u16,
     color: u16,
 ) {
     test_env::record(test_env::Emit::Change {
+        uid,
+        nick_color,
         name: cbytes(nam),
         icon,
         color,
@@ -230,10 +244,11 @@ unsafe fn gtkhx_session_emit_user_delete(
     _self_: *mut c_void,
     _htlc: *mut c_void,
     _chat: *mut c_void,
-    _user: *mut c_void,
+    uid: u16,
     incremental: c_int,
 ) {
     test_env::record(test_env::Emit::Delete {
+        uid,
         incremental: incremental != 0,
     });
 }

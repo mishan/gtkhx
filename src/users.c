@@ -1050,7 +1050,7 @@ user_color_gdk (guint16 color)
 
 /* Pointer-free core: compute a foreground from a raw nick_color +
  * status, so the view row can cache its nick_color and recompute fg without
- * a live struct hx_user*. HX_NICK_COLOR_NONE falls through to the status
+ * a borrowed per-user pointer. HX_NICK_COLOR_NONE falls through to the status
  * palette. */
 GdkRGBA *
 user_nick_color_rgb (guint32 nick_color, guint16 status, GdkRGBA *out)
@@ -1081,8 +1081,8 @@ user_nick_color_rgb (guint32 nick_color, guint16 status, GdkRGBA *out)
 }
 
 void
-user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
-             const char *nam, guint16 icon, guint16 color)
+user_create (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
+             guint32 nick_color, const char *nam, guint16 icon, guint16 color)
 {
     session *sess = sess_from_htlc (htlc);
     struct gtkhx_chat *gchat;
@@ -1091,8 +1091,8 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
      * any view gate, so it stays populated even when the chat has no user-list
      * view open. Read by tab_nick_comp for input in this chat. */
     if (hx_chat_member_model (chat)) {
-        hx_member_model_upsert (hx_chat_member_model (chat), user->uid, nam, icon, color,
-                                user->nick_color);
+        hx_member_model_upsert (hx_chat_member_model (chat), uid, nam, icon, color,
+                                nick_color);
     }
 
     if (hx_chat_cid (chat)) {
@@ -1107,8 +1107,8 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
         if (!gchat || !hx_gchat_userlist (gchat)) {
             return;
         }
-        hx_user_list_view_add (hx_gchat_userlist (gchat), user->uid, nam, icon,
-                               color, user->nick_color);
+        hx_user_list_view_add (hx_gchat_userlist (gchat), uid, nam, icon,
+                               color, nick_color);
         return;
     }
 
@@ -1120,26 +1120,26 @@ user_create (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
     }
-    hx_user_list_view_add (sess->users_view, user->uid, nam, icon, color,
-                           user->nick_color);
+    hx_user_list_view_add (sess->users_view, uid, nam, icon, color,
+                           nick_color);
 }
 
 void
-user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
+user_delete (struct htlc_conn *htlc, struct chat *chat, guint16 uid)
 {
     struct gtkhx_chat *gchat;
     session *sess = sess_from_htlc (htlc);
 
     (void)htlc;
     if (hx_chat_member_model (chat)) {
-        hx_member_model_remove (hx_chat_member_model (chat), user->uid);
+        hx_member_model_remove (hx_chat_member_model (chat), uid);
     }
     if (hx_chat_cid (chat)) {
         gchat = gchat_with_cid (sess, hx_chat_cid (chat));
         if (!gchat || !hx_gchat_userlist (gchat)) {
             return;
         }
-        hx_user_list_view_remove (hx_gchat_userlist (gchat), user->uid);
+        hx_user_list_view_remove (hx_gchat_userlist (gchat), uid);
         return;
     }
 
@@ -1147,12 +1147,12 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user)
     if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
         return;
     }
-    hx_user_list_view_remove (sess->users_view, user->uid);
+    hx_user_list_view_remove (sess->users_view, uid);
 }
 
 void
-user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
-             const char *nam, guint16 icon, guint16 color)
+user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
+             guint32 nick_color, const char *nam, guint16 icon, guint16 color)
 {
     struct gtkhx_chat *gchat;
     session *sess = sess_from_htlc (htlc);
@@ -1160,8 +1160,8 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
     (void)htlc;
 
     if (hx_chat_member_model (chat)) {
-        hx_member_model_upsert (hx_chat_member_model (chat), user->uid, nam, icon, color,
-                                user->nick_color);
+        hx_member_model_upsert (hx_chat_member_model (chat), uid, nam, icon, color,
+                                nick_color);
     }
 
     if (hx_chat_cid (chat)) {
@@ -1177,8 +1177,8 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 		 * re-snapshots. The row keeps its GObject identity so the
 		 * sidebar selection stays on the same user across rename or
 		 * icon change. */
-        hx_user_list_view_update (hx_gchat_userlist (gchat), user->uid, nam, icon,
-                                  color, user->nick_color);
+        hx_user_list_view_update (hx_gchat_userlist (gchat), uid, nam, icon,
+                                  color, nick_color);
         return;
     }
 
@@ -1198,11 +1198,10 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
                 continue;   /* only open private-chat windows */
             }
             /* Only fan the change into pchats this user is actually in
-			 * (the membership check is the model now). The
-			 * same `user` carrier works — user_change reads only its uid +
-			 * nick_color, which are the same across chats. */
-            if (hx_member_model_contains (hx_chat_member_model (c), user->uid)) {
-                user_change (&sess->htlc, c, user, nam, icon, color);
+			 * (the membership check is the model now). uid +
+			 * nick_color are the same across chats. */
+            if (hx_member_model_contains (hx_chat_member_model (c), uid)) {
+                user_change (&sess->htlc, c, uid, nick_color, nam, icon, color);
             }
         }
     }
@@ -1213,20 +1212,20 @@ user_change (struct htlc_conn *htlc, struct chat *chat, struct hx_user *user,
 		 * re-orders, the column-view cell re-snapshots). The row
 		 * keeps its GObject identity, so the live selection stays
 		 * on the same user across rename or icon change. */
-        hx_user_list_view_update (sess->users_view, user->uid, nam, icon, color,
-                              user->nick_color);
+        hx_user_list_view_update (sess->users_view, uid, nam, icon, color,
+                              nick_color);
     }
 
     /* if this user has an open PM window, refresh its info
 	 * pane (icon / name / status) so it tracks the user changing
 	 * their nick or going idle. We pass the new nam/icon/color
-	 * through directly rather than re-reading user->* — rcv.c
-	 * hasn't patched the new values onto the cached struct yet at
+	 * through directly rather than re-reading cached state — rcv.c
+	 * hasn't patched the new values onto the model yet at
 	 * this point in the dispatch (its rename-detection compares
-	 * user->name vs nam after we return), so a cache-lookup
+	 * the old name vs nam after we return), so a cache-lookup
 	 * refresh would paint the OLD identity. */
     {
-        struct msgwin *mw = msgwin_with_uid (user->uid);
+        struct msgwin *mw = msgwin_with_uid (uid);
         if (mw) {
             msgwin_apply_user_change (mw, nam, icon, color);
         }
@@ -1241,9 +1240,8 @@ users_refresh_avatar (guint16 uid)
     /* GIF avatar for `uid` changed in the gif_avatar cache — nudge
 	 * every list that shows this user so the cell re-reads it. Mirrors
 	 * user_change's fan-out: each pchat sidebar, then the standalone
-	 * Users window (public chat). We look the hx_user up per chat
-	 * because the row<->user mapping is keyed on the struct pointer,
-	 * which differs per chat. */
+	 * Users window (public chat). Each view's row map is keyed on the
+	 * uid, so we refresh per chat the user appears in. */
     if (sess->chats) {
         guint n = hx_chats_count (sess->chats);
         for (guint i = 0; i < n; i++) {

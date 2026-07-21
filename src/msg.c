@@ -287,7 +287,7 @@ msg_input_activate (GtkWidget *widget, gpointer data)
 
 /* header pane above the PM chat that mirrors the bits of
  * the recipient's identity that the global user list shows — icon,
- * name, idle/admin status. Built from the cached hx_user the chat
+ * name, idle/admin status. Built from the member model entry the chat
  * keeps for that uid; falls back to the name we were created with
  * (and uid only) when the user has already left the public chat by
  * the time the PM window opens.
@@ -417,8 +417,8 @@ msgwin_refresh_user_info (struct msgwin *msg)
 
 /* Bypass the cache lookup. Called from users.c::user_change with the
  * NEW name/icon/color values straight off the wire — at that point
- * rcv.c hasn't yet patched them onto the cached hx_user struct (the
- * rename-detection comparison at rcv.c:338-339 needs the old values
+ * rcv.c hasn't yet applied them to the chat's member model (the
+ * rename-detection comparison needs the old values
  * to still be there when user_change returns), so a cache-based
  * refresh would render stale data. Take the new values directly. */
 void

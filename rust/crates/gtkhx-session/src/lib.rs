@@ -216,8 +216,8 @@ mod imp {
                     Signal::builder("news-thread")
                         .param_types([Type::POINTER])
                         .build(),
-                    // user-create: (htlc*, chat*, user*, nam*, icon, color,
-                    // incremental). `incremental` is TRUE for a genuine
+                    // user-create: (htlc*, chat*, uid, nick_color, nam*, icon,
+                    // color, incremental). `incremental` is TRUE for a genuine
                     // join broadcast and FALSE for a row synthesised during
                     // the bulk user-list load — sound/notification consumers
                     // gate on it so the join chime only fires on real joins,
@@ -226,30 +226,32 @@ mod imp {
                         .param_types([
                             Type::POINTER,
                             Type::POINTER,
-                            Type::POINTER,
+                            Type::U32,
+                            Type::U32,
                             Type::POINTER,
                             Type::U32,
                             Type::U32,
                             Type::BOOL,
                         ])
                         .build(),
-                    // user-delete: (htlc*, chat*, user*, incremental).
+                    // user-delete: (htlc*, chat*, uid, incremental).
                     // `incremental` mirrors user-create — TRUE for a real
                     // part broadcast, FALSE for a teardown-driven removal.
                     Signal::builder("user-delete")
                         .param_types([
                             Type::POINTER,
                             Type::POINTER,
-                            Type::POINTER,
+                            Type::U32,
                             Type::BOOL,
                         ])
                         .build(),
-                    // user-change: (htlc*, chat*, user*, nam*, icon, color)
+                    // user-change: (htlc*, chat*, uid, nick_color, nam*, icon, color)
                     Signal::builder("user-change")
                         .param_types([
                             Type::POINTER,
                             Type::POINTER,
-                            Type::POINTER,
+                            Type::U32,
+                            Type::U32,
                             Type::POINTER,
                             Type::U32,
                             Type::U32,
@@ -634,13 +636,14 @@ pub unsafe extern "C" fn gtkhx_session_emit_news_thread(self_: *mut c_void, post
 }
 
 /// # Safety
-/// `self_`/`htlc`/`chat`/`user` valid; `nam` a valid C string (or NULL).
+/// `self_`/`htlc`/`chat` valid; `nam` a valid C string (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_user_create(
     self_: *mut c_void,
     htlc: *mut c_void,
     chat: *mut c_void,
-    user: *mut c_void,
+    uid: u16,
+    nick_color: u32,
     nam: *const c_char,
     icon: u16,
     color: u16,
@@ -649,7 +652,8 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_create(
     let v = [
         ptr_value(htlc),
         ptr_value(chat),
-        ptr_value(user),
+        glib::Value::from(uid as u32),
+        glib::Value::from(nick_color),
         ptr_value(nam as *const c_void),
         glib::Value::from(icon as u32),
         glib::Value::from(color as u32),
@@ -659,32 +663,33 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_create(
 }
 
 /// # Safety
-/// `self_`/`htlc`/`chat`/`user` valid pointers.
+/// `self_`/`htlc`/`chat` valid pointers.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_user_delete(
     self_: *mut c_void,
     htlc: *mut c_void,
     chat: *mut c_void,
-    user: *mut c_void,
+    uid: u16,
     incremental: c_int,
 ) {
     let v = [
         ptr_value(htlc),
         ptr_value(chat),
-        ptr_value(user),
+        glib::Value::from(uid as u32),
         glib::Value::from(incremental != 0),
     ];
     emit(self_, "user-delete", &v);
 }
 
 /// # Safety
-/// `self_`/`htlc`/`chat`/`user` valid; `nam` a valid C string (or NULL).
+/// `self_`/`htlc`/`chat` valid; `nam` a valid C string (or NULL).
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_session_emit_user_change(
     self_: *mut c_void,
     htlc: *mut c_void,
     chat: *mut c_void,
-    user: *mut c_void,
+    uid: u16,
+    nick_color: u32,
     nam: *const c_char,
     icon: u16,
     color: u16,
@@ -692,7 +697,8 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_change(
     let v = [
         ptr_value(htlc),
         ptr_value(chat),
-        ptr_value(user),
+        glib::Value::from(uid as u32),
+        glib::Value::from(nick_color),
         ptr_value(nam as *const c_void),
         glib::Value::from(icon as u32),
         glib::Value::from(color as u32),
