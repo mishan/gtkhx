@@ -636,6 +636,19 @@ hx_rcv_task (struct htlc_conn *htlc)
     }
 }
 
+/* User-roster emit routing lives in the Rust hxuser-recv crate
+ * (rust/crates/hxuser-recv). */
+#define HX_USER_CHANGE_SKIPPED 0
+#define HX_USER_CHANGE_CREATED 1
+#define HX_USER_CHANGE_CHANGED 2
+extern int hx_user_change_recv (struct htlc_conn *htlc, void *chat,
+                                void *carrier, const char *name,
+                                guint16 icon, guint16 color, int is_new,
+                                int skip_self_create, int incremental);
+extern int hx_user_part_recv (struct htlc_conn *htlc, void *chat,
+                              void *member_model, void *carrier,
+                              guint16 uid);
+
 void
 hx_rcv_user_change (struct htlc_conn *htlc)
 {
@@ -699,29 +712,20 @@ hx_rcv_user_change (struct htlc_conn *htlc)
      * entry is created — the model, fed by the fan-out, is the store. */
     struct hx_user carrier = { .uid = uid, .nick_color = plan.eff_nick_color };
 
-    if (plan.is_new) {
-        if (plan.skip_self_create) {
-            /* Don't add our own row here. The USER_LIST reply (or any
-             * subsequent broadcast that mentions us) creates it in the
-             * proper position; adding it now would put us at the top of
-             * the user list and spam a "join: <us>" line in chat. */
-            return;
-        }
-        /* incremental=TRUE: a genuine join broadcast. The sound_events
-         * subscriber plays USER_JOIN off this signal only when the flag
-         * is set, so the bulk user-list load (which passes FALSE) stays
-         * silent. The carrier already carries eff_nick_color for the
-         * render path. */
-        gtkhx_session_emit_user_create (gtkhx_session_get_default (), htlc,
-                                        chat, &carrier, name, icon,
-                                        plan.eff_color, TRUE);
+    /* Route to the right roster signal in the Rust hxuser-recv crate; it
+     * returns what it emitted so we do the matching join / rename logging. */
+    int emitted = hx_user_change_recv (htlc, chat, &carrier, name, icon,
+                                       plan.eff_color, plan.is_new,
+                                       plan.skip_self_create, TRUE);
+    if (emitted == HX_USER_CHANGE_SKIPPED) {
+        /* Our own row — the USER_LIST reply creates it in the right spot. */
+        return;
+    }
+    if (emitted == HX_USER_CHANGE_CREATED) {
         if (gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, cid, INFOPREFIX, _ ("join: %s\n"), name);
         }
-    } else {
-        gtkhx_session_emit_user_change (gtkhx_session_get_default (), htlc,
-                                        chat, &carrier, name, icon,
-                                        plan.eff_color);
+    } else { /* HX_USER_CHANGE_CHANGED */
         /* Bail on ignored users before we toast or log them. */
         if (hx_member_model_get_ignore (hx_chat_member_model (chat), uid)) {
             return;
@@ -774,21 +778,21 @@ hx_rcv_user_part (struct htlc_conn *htlc)
         return;
     }
 
-    /* Membership + name come from the member model. The user_delete
-     * fan-out reads only ->uid off the carrier and removes the model
-     * entry itself. incremental=TRUE: a genuine part broadcast — the
-     * sound_events subscriber plays USER_PART off this signal. */
+    /* Capture the member's name before the emit — the user_delete fan-out
+     * removes the model entry. hx_user_part_recv (Rust hxuser-recv) re-checks
+     * membership and emits user_delete only if present (incremental=TRUE: a
+     * genuine part broadcast the sound subscriber chimes off), returning
+     * whether it did so we log the "parts" line to match. */
     struct hx_member_info mi;
-    if (hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &mi)) {
-        struct hx_user carrier = { .uid = pm.uid };
-        gtkhx_session_emit_user_delete (gtkhx_session_get_default (), htlc,
-                                        chat, &carrier, TRUE);
-
-        if (gtkhx_prefs.showjoin) {
+    gboolean have
+        = hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &mi);
+    struct hx_user carrier = { .uid = pm.uid };
+    if (hx_user_part_recv (htlc, chat, hx_chat_member_model (chat), &carrier,
+                           pm.uid)) {
+        if (have && gtkhx_prefs.showjoin) {
             hx_printf_prefix (htlc, pm.cid, INFOPREFIX, _ ("parts: %s \n"),
                               mi.name);
         }
-
     }
 }
 

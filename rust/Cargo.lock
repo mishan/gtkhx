@@ -1923,6 +1923,10 @@ name = "hxtls-trust"
 version = "0.1.0"
 
 [[package]]
+name = "hxuser-recv"
+version = "0.1.0"
+
+[[package]]
 name = "hxvoice"
 version = "0.1.0"
 dependencies = [

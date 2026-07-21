@@ -1,0 +1,21 @@
+[package]
+name = "hxuser-recv"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "User-roster receive handlers: user-change emit routing + user-part gate/emit, ported from rcv.c"
+publish = false
+
+[lib]
+# staticlib: the hx_user_change_recv / hx_user_part_recv C ABI rcv.c calls.
+# rlib: cargo test (the emit routing + the contains-gate are unit-tested through
+#       recording doubles for the member-model / signal-emit C ABIs).
+crate-type = ["staticlib", "rlib"]
+
+# std-only. The wire parse + the change-plan decision (hx_user_change_plan_resolve,
+# already Tier-2-tested) + the model reads / htlc bookkeeping stay in rcv.c; this
+# crate owns the "which user signal fires" routing. The member-model + emit
+# providers are separately-linked staticlibs, so they're externed rather than
+# taken as rlib deps (matching hxnews-recv / hxchat-recv / hxicon-recv). cargo
+# test drives them with in-crate #[cfg(test)] recording doubles, headless.
+[dependencies]

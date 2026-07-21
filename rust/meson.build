@@ -190,6 +190,8 @@ rust_sources = files(
   'crates/hxchat-recv/src/tests.rs',
   'crates/hxicon-recv/src/lib.rs',
   'crates/hxicon-recv/src/tests.rs',
+  'crates/hxuser-recv/src/lib.rs',
+  'crates/hxuser-recv/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -237,6 +239,7 @@ rust_sources = files(
   'crates/hxtls-trust/Cargo.toml',
   'crates/hxchat-recv/Cargo.toml',
   'crates/hxicon-recv/Cargo.toml',
+  'crates/hxuser-recv/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -619,6 +622,17 @@ rust_hxicon_recv_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxicon_recv',
+  ],
+)
+
+# User-roster receive handlers (user-change emit routing + user-part gate/emit,
+# ported from rcv.c). std-only C ABI (hx_user_change_recv / hx_user_part_recv);
+# `cargo test -p hxuser-recv` runs headless. See docs/rust/network-untangling-scope.md.
+rust_hxuser_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxuser_recv',
   ],
 )
 
