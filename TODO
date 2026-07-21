@@ -7,7 +7,6 @@ Testing:
 
 Bookmarks:
 - Ship some bookmarks for more servers
-- Built-in bookmarks should be written once as real bookmark files on config dir creation, instead of being hardcoded in the Connect dialog
 
 Docs:
 - Rewrite README.md to explain this project better

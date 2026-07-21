@@ -176,23 +176,6 @@ on_action_open_bookmark (GSimpleAction *action, GVariant *param,
     connect_open_bookmark_by_name (name);
 }
 
-/* app.connect_builtin fires from the SplitButton's
- * dropdown for one of the hardcoded "well-known" Hotline servers.
- * Index 1..4 — same numbering the connect dialog's built-in combo
- * has used since forever. */
-static void
-on_action_connect_builtin (GSimpleAction *action, GVariant *param,
-                           gpointer user_data)
-{
-    (void)action;
-    (void)user_data;
-
-    if (!param || !g_variant_is_of_type (param, G_VARIANT_TYPE_INT32)) {
-        return;
-    }
-    connect_open_builtin_bookmark (g_variant_get_int32 (param));
-}
-
 /* GTK 4 close-request signature is (GtkWindow *, gpointer)
  * returning gboolean. Returning TRUE inhibits the default destroy.
  *
@@ -427,9 +410,6 @@ static const GActionEntry app_actions[] = {
     { .name = "open_bookmark",
       .activate = on_action_open_bookmark,
       .parameter_type = "s" },
-    { .name = "connect_builtin",
-      .activate = on_action_connect_builtin,
-      .parameter_type = "i" },
     { .name = "quit", .activate = on_action_quit },
     { .name = "reset_layout", .activate = on_action_reset_layout },
 };

@@ -4,9 +4,11 @@
 
 use super::row::HxTrackerRow;
 use super::{cs, cstr, section_row_at, WIN};
+use crate::bookmark_store;
 use crate::ffi as cffi;
 use crate::tr::tr;
 use gtk4 as gtk;
+use hxbookmarks::{cipher, Bookmark};
 use libadwaita as adw;
 
 use adw::prelude::*;
@@ -27,28 +29,28 @@ fn pick_security(row: &HxTrackerRow) -> (u16, bool, bool, u8) {
     let mut port = row.port();
     let mut tls = false;
     let mut secure = false;
-    let mut cipher = cffi::BOOKMARK_CIPHER_BYTE_NONE;
+    let mut cipher_byte = cipher::NONE;
 
     let m = row.meta();
     if m.is_null() {
-        return (port, tls, secure, cipher);
+        return (port, tls, secure, cipher_byte);
     }
     let m = unsafe { &*m };
 
     if m.supports_tls != 0 && m.tls_port != 0 {
-        return (m.tls_port, true, false, cffi::BOOKMARK_CIPHER_BYTE_NONE);
+        return (m.tls_port, true, false, cipher::NONE);
     }
     if m.supports_hope != 0 {
         secure = true;
         let list = unsafe { cstr(m.hope_ciphers) };
         if hope_offers(&list, "CHACHA20-POLY1305") {
-            cipher = cffi::BOOKMARK_CIPHER_BYTE_CHACHA20_POLY1305;
+            cipher_byte = cipher::CHACHA20_POLY1305;
         } else if hope_offers(&list, "BLOWFISH") {
-            cipher = cffi::BOOKMARK_CIPHER_BYTE_BLOWFISH;
+            cipher_byte = cipher::BLOWFISH;
         }
     }
     let _ = (&mut port, &mut tls);
-    (port, tls, secure, cipher)
+    (port, tls, secure, cipher_byte)
 }
 
 /// Whole-token, case-insensitive membership in a comma/space/semicolon
@@ -86,8 +88,11 @@ pub(super) fn on_section_activate(url: &str, pos: u32) {
         section_row_at(sec, pos)
     });
     let Some(row) = row else { return };
-    let (port, tls, secure, cipher) = pick_security(&row);
-    let cipher_name = unsafe { cffi::bookmark_cipher_name(cipher) };
+    let (port, tls, secure, cipher_byte) = pick_security(&row);
+    // Stable cipher byte → cipher-name C string (NULL = no cipher). Keep the
+    // CString alive across the call.
+    let cname = cipher::name(cipher_byte).map(cs);
+    let cipher_name = cname.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
     let addr = cs(&row.address());
     unsafe {
         cffi::gtkhx_tracker_connect_apply(
@@ -115,7 +120,7 @@ pub(super) fn tracker_connect() {
     // (create_connect_window(0, hx_active_session())).
     unsafe { cffi::create_connect_window(std::ptr::null_mut(), cffi::hx_active_session()) };
 
-    let (port, tls, secure, cipher) = pick_security(&row);
+    let (port, tls, secure, cipher_byte) = pick_security(&row);
     let addr = cs(&row.address());
     let portc = cs(&port.to_string());
     let empty = cs("");
@@ -127,7 +132,7 @@ pub(super) fn tracker_connect() {
             portc.as_ptr() as *mut c_char,
             secure as c_char,
             0,
-            cipher as c_char,
+            cipher_byte as c_char,
             tls as c_char,
         )
     };
@@ -188,88 +193,46 @@ fn safe_bookmark_filename(raw: &str, fallback: &str) -> String {
     out
 }
 
-/// Copy `s` into a fixed C char buffer, truncating to fit + NUL
-/// (mirrors g_strlcpy semantics on a byte buffer).
-fn fill_cbuf(buf: &mut [c_char], s: &str) {
-    let bytes = s.as_bytes();
-    let n = bytes.len().min(buf.len().saturating_sub(1));
-    for (i, &b) in bytes.iter().take(n).enumerate() {
-        buf[i] = b as c_char;
-    }
-    buf[n] = 0;
-}
-
 pub(super) fn tracker_save_bookmark() {
     let Some(row) = selected_row() else { return };
     save_bookmark_for_row(&row);
 }
 
 fn save_bookmark_for_row(row: &HxTrackerRow) {
-    let safe = safe_bookmark_filename(&row.name(), &row.address());
-    let display = unsafe {
-        let p = cffi::hx_bookmark_safe_filename(cs(&safe).as_ptr());
-        if p.is_null() {
-            None
-        } else {
-            let s = cstr(p);
-            glib::ffi::g_free(p as *mut c_void);
-            Some(s)
-        }
-    };
-    let Some(display) = display else {
-        toast(&tr("Couldn't pick a bookmark filename for this server."));
+    // Bookmark names are stored verbatim now (TOML keys, not filenames).
+    let name = safe_bookmark_filename(&row.name(), &row.address());
+    if name.is_empty() {
+        toast(&tr("Couldn't pick a bookmark name for this server."));
         return;
-    };
-
-    // Refuse to clobber an existing bookmark.
-    unsafe {
-        let existing = cffi::hx_bookmark_load(cs(&display).as_ptr());
-        if !existing.is_null() {
-            cffi::hx_bookmark_free(existing);
-            toast(&format!(
-                "{} \"{}\"",
-                tr("Bookmark already exists; manage it from the Bookmarks dialog:"),
-                display
-            ));
-            return;
-        }
     }
 
-    let (port, tls, secure, cipher) = pick_security(row);
+    // Refuse to clobber an existing bookmark.
+    if bookmark_store::exists(&name) {
+        toast(&format!(
+            "{} \"{}\"",
+            tr("Bookmark already exists; manage it from the Bookmarks dialog:"),
+            name
+        ));
+        return;
+    }
 
-    unsafe {
-        let bm = cffi::hx_bookmark_new();
-        if bm.is_null() {
-            return;
-        }
-        // name takes ownership of a heap string (freed by hx_bookmark_free).
-        (*bm).name = glib::ffi::g_strdup(cs(&display).as_ptr());
-        fill_cbuf(&mut (*bm).server, &row.address());
-        fill_cbuf(&mut (*bm).port, &port.to_string());
-        (*bm).login[0] = 0;
-        (*bm).pass[0] = 0;
-        (*bm).secure = secure as c_char;
-        (*bm).compress = 0;
-        (*bm).cipher = cipher as c_char;
-        (*bm).tls = tls as c_char;
+    let (port, tls, secure, cipher_byte) = pick_security(row);
+    let bm = Bookmark {
+        name: name.clone(),
+        server: row.address(),
+        port: port.to_string(),
+        hope: secure,
+        cipher: cipher_byte,
+        tls,
+        ..Default::default()
+    };
 
-        let mut err: *mut cffi::GError = std::ptr::null_mut();
-        let ok = cffi::hx_bookmark_save(bm, &mut err);
-        if ok == 0 {
-            let msg = if err.is_null() {
-                "unknown error".to_owned()
-            } else {
-                // Take ownership of the GError (freed on drop) via the safe
-                // wrapper and read its message through Display — no raw
-                // field deref, no manual g_error_free.
-                let e: glib::Error = glib::translate::from_glib_full(err);
-                e.to_string()
-            };
-            toast(&format!("{}: {}", tr("Couldn't save bookmark"), msg));
-        } else {
-            toast(&format!("{} \"{}\"", tr("Saved bookmark"), display));
+    match bookmark_store::upsert(bm) {
+        Ok(()) => {
+            unsafe { cffi::toolbar_refresh_bookmarks() };
+            toast(&format!("{} \"{}\"", tr("Saved bookmark"), name));
         }
-        cffi::hx_bookmark_free(bm);
+        Err(e) => toast(&format!("{}: {}", tr("Couldn't save bookmark"), e)),
     }
 }
 

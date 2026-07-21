@@ -28,8 +28,8 @@
  * connect path needs.
  */
 
-/* Field sizes mirror HxBookmark in bookmarks.h: host gets the
- * 128-byte buffer; login / pass are 33 bytes (STRING32 = 32 + NUL).
+/* Field sizes follow the Hotline wire limits: host gets a 128-byte
+ * buffer; login / pass are 33 bytes (STRING32 = 32 + NUL).
  * Truncation on overlong input is silent — matches what would
  * happen if the user typed the value into the Connect dialog. */
 typedef struct {

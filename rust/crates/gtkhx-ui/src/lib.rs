@@ -22,6 +22,7 @@ mod dock;
 
 pub mod about;
 pub mod agreement;
+pub mod bookmark_store;
 pub mod bookmarks;
 pub mod cipher_vocab;
 pub mod connect;

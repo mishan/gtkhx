@@ -3,11 +3,12 @@ gtkhx_sources = files(
   'algo_list.c',
   'banner.c',
   'banner_dispatch.c',
-  'bookmark_cipher.c',
+  # bookmark_cipher.c + bookmarks_io.c retired — bookmark storage (TOML model,
+  # legacy HTsc import/export, cipher vocab) is the hxbookmarks Rust crate,
+  # reached directly from the Rust Connect + Bookmarks dialogs. bookmarks.h
+  # keeps only the create_bookmarks_window decl the toolbar calls.
   # bookmark_rc4_dialog.c ported to Rust (gtkhx-ui rc4_dialog.rs).
-  # bookmarks.c (management dialog) ported to Rust (gtkhx-ui bookmarks.rs);
-  # bookmarks.h keeps the C ABI decls. CRUD stays in bookmarks_io.c.
-  'bookmarks_io.c',
+  # bookmarks.c (management dialog) ported to Rust (gtkhx-ui bookmarks.rs).
   # cipher_vocab.c folded into the Rust gtkhx-ui crate (cipher_vocab.rs) when
   # the Bookmarks dialog joined the Connect dialog in Rust (R5.3).
   'chat.c',

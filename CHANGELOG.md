@@ -1,3 +1,10 @@
+## 1.2.3-dev
+
+- Bookmarks
+  - Bookmarks are now kept in a single TOML file
+  - Legacy bookmark files are imported if the TOML file does not exist
+  - Bookmarks dialog supports exporting bookmarks to legacy Hotline bookmark files
+
 ## 1.2.2
 
 - Voice

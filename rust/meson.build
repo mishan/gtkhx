@@ -92,6 +92,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/dock.rs',
   'crates/gtkhx-ui/src/about.rs',
   'crates/gtkhx-ui/src/agreement.rs',
+  'crates/gtkhx-ui/src/bookmark_store.rs',
   'crates/gtkhx-ui/src/bookmarks.rs',
   'crates/gtkhx-ui/src/cipher_vocab.rs',
   'crates/gtkhx-ui/src/connect.rs',

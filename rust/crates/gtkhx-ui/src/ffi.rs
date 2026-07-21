@@ -1,7 +1,6 @@
 //! Shared FFI surface for the UI crate: extern declarations for the C
-//! helpers the ported windows call, plus the `HxBookmark` `#[repr(C)]`
-//! mirror. These resolve at final link against the C binary (the
-//! gtkhx_* util helpers, the bookmark API, the connect dialog, the
+//! helpers the ported windows call. These resolve at final link against
+//! the C binary (the gtkhx_* util helpers, the connect dialog, the
 //! `tracker_bridge.c` / `gtkhx_ui_bridge.c` session shims) — the same
 //! leaf-up "C resolves Rust's externs" shape the R4 crates use. Window-
 //! specific externs (e.g. the tracker boxed payload + its network entry
@@ -15,7 +14,6 @@ use std::os::raw::{c_int, c_void};
 pub type GtkWidget = gtk4::ffi::GtkWidget;
 pub type GtkWindow = gtk4::ffi::GtkWindow;
 pub type GApplication = gio::ffi::GApplication;
-pub type GError = glib::ffi::GError;
 
 /// GtkHx version, embedded from meson's `project(version:)` at build time
 /// (rust/meson.build sets `GTKHX_VERSION` in the cargo env). Falls back to
@@ -29,33 +27,6 @@ pub const VERSION: &str = match option_env!("GTKHX_VERSION") {
 /// enum (`gtkhx_theme.h`); the themable area action buttons use.
 pub const GTKHX_SCALE_WINDOW_BUTTONS: c_int = 1;
 
-// ---------------------------------------------------------------------
-// HxBookmark — the fixed on-disk bookmark record (bookmarks.h).
-// ---------------------------------------------------------------------
-
-/// `#[repr(C)]` mirror of `HxBookmark` (`bookmarks.h`). `name` is a heap
-/// `char*` owned by the record; the rest are inline fixed buffers.
-#[repr(C)]
-pub struct HxBookmark {
-    pub name: *mut c_char,
-    pub server: [c_char; 128],
-    pub port: [c_char; 8],
-    pub login: [c_char; 33],
-    pub pass: [c_char; 33],
-    pub secure: c_char,
-    pub compress: c_char,
-    pub cipher: c_char,
-    pub tls: c_char,
-}
-
-const _: () = {
-    use std::mem::{offset_of, size_of};
-    assert!(size_of::<HxBookmark>() == 216);
-    assert!(offset_of!(HxBookmark, server) == 8);
-    assert!(offset_of!(HxBookmark, port) == 136);
-    assert!(offset_of!(HxBookmark, secure) == 210);
-    assert!(offset_of!(HxBookmark, tls) == 213);
-};
 
 extern "C" {
     // ---- gtkhx util helpers (gtkutil.c / gtkhx.c / host_port.c) ------
@@ -113,23 +84,8 @@ extern "C" {
     /// change hook (keeps the Settings switch in lockstep).
     pub fn gtkhx_prefs_set_bool(name: *const c_char, value: c_int);
 
-    // ---- bookmark API (bookmarks_io.c / bookmark_cipher.c) -----------
-    pub fn hx_bookmark_new() -> *mut HxBookmark;
-    pub fn hx_bookmark_free(bm: *mut HxBookmark);
-    pub fn hx_bookmark_load(name: *const c_char) -> *mut HxBookmark;
-    pub fn hx_bookmark_save(bm: *const HxBookmark, err: *mut *mut GError) -> glib::ffi::gboolean;
-    pub fn hx_bookmark_safe_filename(name: *const c_char) -> *mut c_char;
-    /// GList of newly-allocated UTF-8 bookmark filenames, collation-sorted.
-    /// Free with `g_list_free_full(list, g_free)`.
-    pub fn hx_bookmark_list() -> *mut glib::ffi::GList;
-    pub fn hx_bookmark_delete(name: *const c_char, err: *mut *mut GError) -> glib::ffi::gboolean;
-    pub fn hx_bookmark_rename(
-        old_name: *const c_char,
-        new_name: *const c_char,
-        err: *mut *mut GError,
-    ) -> glib::ffi::gboolean;
-    pub fn bookmark_cipher_name(byte: u8) -> *const c_char;
-    pub fn bookmark_cipher_byte_from_name(name: *const c_char) -> u8;
+    // (Bookmark storage moved to the hxbookmarks crate — reached through
+    // crate::bookmark_store, no C bookmark API remains.)
 
     // ---- toolbar (toolbar.c) -----------------------------------------
     /// Rebuild the toolbar Connect-button dropdown after a bookmark
@@ -155,10 +111,3 @@ extern "C" {
     /// `hx_printf_prefix(&the_session.htlc, 0, INFOPREFIX, "%s", msg)`.
     pub fn gtkhx_tracker_log_info(msg: *const c_char);
 }
-
-/// Stable bookmark cipher-byte vocabulary (`bookmark_cipher.h`).
-pub const BOOKMARK_CIPHER_BYTE_NONE: u8 = 0;
-/// Legacy RC4 slot — never offered, prompts the replacement dialog on load.
-pub const BOOKMARK_CIPHER_BYTE_RC4: u8 = 1;
-pub const BOOKMARK_CIPHER_BYTE_BLOWFISH: u8 = 2;
-pub const BOOKMARK_CIPHER_BYTE_CHACHA20_POLY1305: u8 = 3;

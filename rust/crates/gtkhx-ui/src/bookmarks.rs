@@ -6,12 +6,12 @@
 //! deleted `src/bookmarks.c` used to provide, so the toolbar links
 //! unchanged.
 //!
-//! On-disk CRUD delegates to the byte-identical `hx_bookmark_*` API
-//! (`bookmarks_io.c`, still C, Tier-1 tested) — one source of truth for
-//! the wire-compatible HTsc format. The cipher / compression picker
-//! vocabulary comes from the sibling [`crate::cipher_vocab`] module (shared
-//! with [`crate::connect`]); the stable on-disk cipher byte from
-//! `bookmark_cipher.c`.
+//! CRUD goes through [`crate::bookmark_store`] (the single TOML file owned by
+//! [`hxbookmarks`]); this dialog also offers an "Export legacy format" action
+//! that writes each bookmark as an old-style HTsc file. The cipher /
+//! compression picker vocabulary comes from the sibling [`crate::cipher_vocab`]
+//! module (shared with [`crate::connect`]); the stable cipher byte from
+//! `hxbookmarks::cipher`.
 //!
 //! Live widgets + selection state live in `thread_local!`s mirroring the
 //! old file-static `BookmarksWindow`. Handlers are plain functions that
@@ -19,19 +19,18 @@
 //! same discipline the Connect dialog uses, so a signal-emitting setter
 //! can't re-enter a held borrow.
 
+use crate::bookmark_store;
 use crate::cipher_vocab;
-use crate::ffi::{self as cffi, BOOKMARK_CIPHER_BYTE_RC4};
+use crate::ffi as cffi;
 use crate::tr::{tr, tr1, tr_fmt};
-use crate::{cs, cstr};
 use gtk4 as gtk;
 use libadwaita as adw;
 
 use adw::prelude::*;
 use gtk::gdk;
 use gtk::glib;
+use hxbookmarks::{cipher, Bookmark};
 use std::cell::{Cell, RefCell};
-use std::ffi::c_char;
-use std::os::raw::c_void;
 
 /// The dialog's live widgets (mirrors bookmarks.c's `BookmarksWindow`
 /// pointer fields). Cheap to clone — every field is a refcounted GObject
@@ -100,141 +99,43 @@ fn active_window() -> Option<gtk::Window> {
 }
 
 // ======================================================================
-// On-disk plumbing (delegates to bookmarks_io.c)
+// On-disk plumbing (delegates to the hxbookmarks TOML store)
 // ======================================================================
 
-/// A loaded bookmark's fields, copied out of the C `HxBookmark`. `compress`
-/// is a dropdown index; `cipher` is a stable bookmark byte.
-struct BmData {
-    name: String,
-    server: String,
-    port: String,
-    login: String,
-    pass: String,
-    secure: u8,
-    compress: u8,
-    cipher: u8,
-    tls: u8,
+/// Load `name` from the store (None if it isn't present).
+fn load_bm(name: &str) -> Option<Bookmark> {
+    bookmark_store::find(name)
 }
 
-/// Load `name` via hx_bookmark_load (None on missing / corrupt / legacy).
-fn load_bm(name: &str) -> Option<BmData> {
-    unsafe {
-        let p = cffi::hx_bookmark_load(cs(name).as_ptr());
-        if p.is_null() {
-            return None;
-        }
-        let d = BmData {
-            name: cstr((*p).name as *const c_char),
-            server: cstr((*p).server.as_ptr()),
-            port: cstr((*p).port.as_ptr()),
-            login: cstr((*p).login.as_ptr()),
-            pass: cstr((*p).pass.as_ptr()),
-            secure: (*p).secure as u8,
-            compress: (*p).compress as u8,
-            cipher: (*p).cipher as u8,
-            tls: (*p).tls as u8,
-        };
-        cffi::hx_bookmark_free(p);
-        Some(d)
-    }
-}
-
-/// Collation-sorted bookmark filenames (primary + legacy dir), via
-/// hx_bookmark_list.
+/// Bookmark names in display order.
 fn list_bookmark_names() -> Vec<String> {
-    let mut out = Vec::new();
-    unsafe {
-        let head = cffi::hx_bookmark_list();
-        let mut l = head;
-        while !l.is_null() {
-            let data = (*l).data as *mut c_void;
-            if !data.is_null() {
-                out.push(cstr(data as *const c_char));
-                glib::ffi::g_free(data);
-            }
-            l = (*l).next;
-        }
-        if !head.is_null() {
-            glib::ffi::g_list_free(head);
-        }
-    }
-    out
-}
-
-/// Take ownership of a `GError` out-param message, freeing it. Returns a
-/// placeholder when NULL (matches the C "(unknown)" fallback).
-unsafe fn take_gerror(err: *mut cffi::GError) -> String {
-    if err.is_null() {
-        "(unknown)".to_string()
-    } else {
-        let s = cstr((*err).message);
-        glib::ffi::g_error_free(err);
-        s
-    }
+    bookmark_store::names()
 }
 
 fn bm_rename(old: &str, new: &str) -> Result<(), String> {
-    unsafe {
-        let mut err: *mut cffi::GError = std::ptr::null_mut();
-        if cffi::hx_bookmark_rename(cs(old).as_ptr(), cs(new).as_ptr(), &mut err)
-            != glib::ffi::GFALSE
-        {
-            Ok(())
-        } else {
-            Err(take_gerror(err))
-        }
-    }
+    bookmark_store::rename(old, new)
 }
 
 fn bm_delete(name: &str) -> Result<(), String> {
-    unsafe {
-        let mut err: *mut cffi::GError = std::ptr::null_mut();
-        if cffi::hx_bookmark_delete(cs(name).as_ptr(), &mut err) != glib::ffi::GFALSE {
-            Ok(())
-        } else {
-            Err(take_gerror(err))
-        }
-    }
+    bookmark_store::delete(name)
 }
 
-/// Copy `s` (truncated) + NUL into a fixed C char buffer, zeroing the rest.
-fn set_cfield(field: &mut [c_char], s: &str) {
-    let bytes = s.as_bytes();
-    let n = bytes.len().min(field.len().saturating_sub(1));
-    for (i, slot) in field.iter_mut().enumerate() {
-        *slot = if i < n { bytes[i] as c_char } else { 0 };
-    }
-}
-
-/// Build a C `HxBookmark` from the current form and persist it under
-/// `name` via hx_bookmark_save. Returns the save error message on failure.
+/// Build a [`Bookmark`] from the current form and persist it under `name`.
+/// Returns the save error message on failure.
 fn save_form_as(w: &BmWidgets, name: &str) -> Result<(), String> {
-    unsafe {
-        let bm = cffi::hx_bookmark_new();
-        if bm.is_null() {
-            return Err(tr("Out of memory"));
-        }
-        (*bm).name = glib::ffi::g_strdup(cs(name).as_ptr());
-        set_cfield(&mut (*bm).server, w.server_row.text().as_str());
-        set_cfield(&mut (*bm).port, w.port_row.text().as_str());
-        set_cfield(&mut (*bm).login, w.login_row.text().as_str());
-        set_cfield(&mut (*bm).pass, w.pass_row.text().as_str());
-        (*bm).secure = w.hope_row.is_active() as c_char;
+    let bm = Bookmark {
+        name: name.to_string(),
+        server: w.server_row.text().to_string(),
+        port: w.port_row.text().to_string(),
+        login: w.login_row.text().to_string(),
+        password: w.pass_row.text().to_string(),
+        hope: w.hope_row.is_active(),
         // Cipher: dropdown index → stable bookmark byte.
-        (*bm).cipher = cipher_vocab::dropdown_to_cipher_byte(w.cipher_row.selected()) as c_char;
-        (*bm).compress = w.compress_row.selected() as c_char;
-        (*bm).tls = w.tls_row.is_active() as c_char;
-
-        let mut err: *mut cffi::GError = std::ptr::null_mut();
-        let ok = cffi::hx_bookmark_save(bm, &mut err);
-        cffi::hx_bookmark_free(bm);
-        if ok != glib::ffi::GFALSE {
-            Ok(())
-        } else {
-            Err(take_gerror(err))
-        }
-    }
+        cipher: cipher_vocab::dropdown_to_cipher_byte(w.cipher_row.selected()),
+        compress: w.compress_row.selected() as u8,
+        tls: w.tls_row.is_active(),
+    };
+    bookmark_store::upsert(bm)
 }
 
 // ======================================================================
@@ -255,14 +156,14 @@ fn clamp_combo(combo: &adw::ComboRow, idx: u32) -> u32 {
     }
 }
 
-fn form_from_bookmark(w: &BmWidgets, d: &BmData) {
+fn form_from_bookmark(w: &BmWidgets, d: &Bookmark) {
     w.name_row.set_text(&d.name);
     w.server_row.set_text(&d.server);
     w.port_row.set_text(&d.port);
     w.login_row.set_text(&d.login);
-    w.pass_row.set_text(&d.pass);
-    w.hope_row.set_active(d.secure != 0);
-    w.tls_row.set_active(d.tls != 0);
+    w.pass_row.set_text(&d.password);
+    w.hope_row.set_active(d.hope);
+    w.tls_row.set_active(d.tls);
     // Cipher uses the stable bookmark vocabulary; translate to the live
     // dropdown index. An unknown byte (e.g. RC4) maps to 0 ("Off").
     // clamp_combo still wraps a corrupt / forward-format byte past the
@@ -370,16 +271,10 @@ fn load_selection() {
     let mut data = match load_bm(&name) {
         Some(d) => d,
         None => {
-            // Legacy-format or corrupt file. Surface the error and leave
-            // the form empty, but record the name so Delete still works
-            // (otherwise the user can't clear a broken entry). Save stays
-            // disabled — there's no loaded bookmark to write back.
-            let msg = tr1(
-                "Could not load bookmark \"%s\". The file may be in the legacy format \
-                 — pick it from the toolbar's Connect-button dropdown to convert it \
-                 first.",
-                &name,
-            );
+            // The selected name vanished from the store (e.g. edited away in
+            // another process). Surface it and leave the form empty, but keep
+            // the name so Delete can clear a stale row.
+            let msg = tr1("Could not load bookmark \"%s\".", &name);
             toast_error(&w, &msg);
             set_original_name(Some(name));
             show_empty_state(&w);
@@ -391,8 +286,8 @@ fn load_selection() {
     // RC4 migration: prompt for a replacement before showing the form, so
     // the user can't accidentally Save back with cipher=0 ("no cipher"),
     // silently turning a previously-encrypted bookmark into plaintext. The
-    // dialog rewrites the file in place; reload to pick up the new byte.
-    if data.secure != 0 && data.cipher == BOOKMARK_CIPHER_BYTE_RC4 {
+    // dialog rewrites the store entry in place; reload to pick up the new byte.
+    if data.hope && data.cipher == cipher::RC4 {
         let parent = w.window.as_ptr() as *mut cffi::GtkWindow;
         let new_byte = crate::rc4_dialog::run_sync(parent, &name);
         if new_byte < 0 {
@@ -487,33 +382,14 @@ fn on_save() {
         return;
     }
 
-    // Canonicalize: hx_bookmark_save defangs '/' to '\\' on disk, so keep
-    // the in-memory name and the on-disk filename in lockstep (otherwise a
-    // later rebuild+select misses).
-    let safe_name = unsafe {
-        let p = cffi::hx_bookmark_safe_filename(cs(&raw_name).as_ptr());
-        if p.is_null() {
-            None
-        } else {
-            let s = cstr(p);
-            glib::ffi::g_free(p as *mut c_void);
-            Some(s)
-        }
-    };
-    let Some(safe_name) = safe_name.filter(|s| !s.is_empty()) else {
-        toast_error(&w, &tr("Bookmark name cannot be empty."));
-        return;
-    };
-    if raw_name != safe_name {
-        w.name_row.set_text(&safe_name);
-    }
+    // Bookmark names are stored verbatim now (they're TOML keys, not
+    // filenames), so there's no '/'→'\\' canonicalization to reconcile.
+    let safe_name = raw_name;
 
     // Rename first, if the name changed. Two failure modes to defend:
-    //   1. Rename fails — bail before touching anything else.
-    //   2. Rename succeeds, then save fails — the file now sits at the new
-    //      name with OLD contents (rename(2) just moved the inode). Roll
-    //      the rename back so the list row keeps pointing at the same file
-    //      with the same contents it had before Save.
+    //   1. Rename fails (e.g. the new name is already taken) — bail.
+    //   2. Rename succeeds, then the content save fails — roll the rename
+    //      back so the selected entry keeps its original name + contents.
     let orig = original_name();
     let mut renamed_from: Option<String> = None;
     match &orig {
@@ -587,16 +463,9 @@ fn on_new() {
     w.list_box.unselect_all();
     unblock_row_selected(&w.list_box);
 
-    let defaults = BmData {
-        name: String::new(),
-        server: String::new(),
-        port: String::new(),
-        login: String::new(),
-        pass: String::new(),
-        secure: 1,
-        compress: 0,
-        cipher: 0,
-        tls: 0,
+    let defaults = Bookmark {
+        hope: true,
+        ..Default::default()
     };
     form_from_bookmark(&w, &defaults);
     show_detail_state(&w);
@@ -641,6 +510,40 @@ fn toast_error(w: &BmWidgets, msg: &str) {
     dialog.set_default_response(Some("ok"));
     dialog.set_close_response("ok");
     dialog.present(Some(w.window.upcast_ref::<gtk::Widget>()));
+}
+
+fn info_dialog(w: &BmWidgets, title: &str, msg: &str) {
+    let dialog = adw::AlertDialog::new(Some(title), Some(msg));
+    dialog.add_response("ok", &tr("_OK"));
+    dialog.set_default_response(Some("ok"));
+    dialog.set_close_response("ok");
+    dialog.present(Some(w.window.upcast_ref::<gtk::Widget>()));
+}
+
+/// "Export legacy format…": pick a folder, then write every bookmark as a
+/// classic HTsc file into it.
+fn on_export_legacy() {
+    let Some(w) = widgets() else { return };
+    let dialog = gtk::FileDialog::new();
+    dialog.set_title(&tr("Export Bookmarks (legacy format)"));
+    dialog.select_folder(
+        Some(&w.window),
+        gtk::gio::Cancellable::NONE,
+        move |res| {
+            // Cancelled / dismissed → nothing to do.
+            let Ok(folder) = res else { return };
+            let Some(path) = folder.path() else { return };
+            let Some(w) = widgets() else { return };
+            match bookmark_store::export_legacy(&path) {
+                Ok(n) => info_dialog(
+                    &w,
+                    &tr("Bookmarks exported"),
+                    &tr1("Wrote %s bookmark file(s) in the legacy format.", &n.to_string()),
+                ),
+                Err(e) => toast_error(&w, &tr1("Export failed: %s", &e.to_string())),
+            }
+        },
+    );
 }
 
 // ======================================================================
@@ -702,6 +605,13 @@ fn build_window() {
 
     let header = adw::HeaderBar::new();
     window.set_titlebar(Some(&header));
+
+    // "Export legacy format…" — write every bookmark as an old-style HTsc
+    // file into a chosen folder, for interop with classic Hotline clients.
+    let export_btn = gtk::Button::from_icon_name("document-export-symbolic");
+    export_btn.set_tooltip_text(Some(&tr("Export bookmarks in the legacy Hotline format…")));
+    export_btn.connect_clicked(|_| on_export_legacy());
+    header.pack_end(&export_btn);
 
     // Esc + Ctrl-W close (same pattern as the User Editor).
     let shortcuts = gtk::ShortcutController::new();
