@@ -268,6 +268,11 @@ rust_deps = [
   # of rcv.c). Same receive-handler group + consumer-before-provider rule as
   # hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*.
   rust_hxicon_recv_dep,
+  # private-message receive path (MSG / MSG_BROADCAST ignore-gate + msg emit,
+  # moved out of rcv.c). Same receive-handler group + consumer-before-provider
+  # rule: undefined refs to gtkhx_session_get_default / _emit_msg and
+  # hx_member_model_get_ignore.
+  rust_hxmsg_recv_dep,
   # user-roster receive handlers (user-change routing + user-part gate/emit,
   # moved out of rcv.c). Same receive-handler group + consumer-before-provider
   # rule as hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*
