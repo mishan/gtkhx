@@ -391,13 +391,14 @@ extern gboolean hx_user_change_extract (struct htlc_conn *htlc,
                                         struct hx_user_change_msg *out);
 
 /*
- * Pure decision layer for hx_rcv_user_change (M4b.4b): given a parsed
- * USER_CHANGE and the *existing* member state (from the membership store —
- * chat->users today, the HxMemberModel after M4b.4b-iii-B), decide what the
- * handler should do, with no side effects. The handler applies the plan
+ * Pure decision layer for hx_rcv_user_change: given a parsed USER_CHANGE and
+ * the *existing* member state (from the per-chat HxMemberModel), decide what
+ * the handler should do, with no side effects. The handler applies the plan
  * (emit create/change, adopt self uid, print the rename notice, mirror onto
- * htlc). Extracting it means the fiddly rename / colour-preserve / self-detect
- * logic is Tier-2 testable without the GUI signal machinery.
+ * htlc). The implementation lives in Rust (hotline-proto's user_change module);
+ * this decl + the two structs below are the C ABI it exports, and the
+ * _Static_asserts in proto_helpers.c pin the struct layout its #[repr(C)]
+ * mirrors depend on.
  *
  * Inputs:
  *   uc              — the parsed USER_CHANGE.

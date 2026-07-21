@@ -115,12 +115,16 @@ branch, squashed before PR.
   retired. No behaviour change; unit/proto + Tier-3 join/part green. Unblocks
   U2/U3.
 
-- **U2 — move `hx_user_change_plan_resolve` into `hotline-proto` (K2).** Port
-  the pure decision (self detection, new-vs-change, colour/nick-colour preserve,
-  rename-notice flag) to Rust; re-express `test_user_change.c` as crate
-  `#[test]`s; delete the C copy. The C handler then calls one Rust decision + one
-  Rust emit-route. `test_user_change.c` stays as a thin FFI smoke test or is
-  retired in favour of the crate tests.
+- **U2 — move `hx_user_change_plan_resolve` into `hotline-proto` (K2). SHIPPED.**
+  The pure decision (self detection, new-vs-change, colour/nick-colour preserve,
+  rename-notice flag) now lives in `hotline-proto/src/user_change.rs` as a native
+  `resolve()` core plus a `#[no_mangle]` FFI over `#[repr(C)]` mirrors of
+  `hx_user_change_msg` / `hx_user_change_plan` (layout pinned by
+  `_Static_assert`s in `proto_helpers.c`). The C copy in `proto_helpers.c` is
+  deleted; `hx_rcv_user_change` calls the Rust symbol unchanged. The 11 logic
+  cases moved to crate `#[test]`s; `test_user_change.c` keeps its parser tests
+  plus two thin FFI smoke tests (rename + self-adoption) that drive the real
+  C ABI end to end.
 
 - **U3 — unify the change + bulk-load core in `hxuser-recv` (K3).** With U1+U2
   done, fold `rcv_task_user_list`'s per-record tail and `hx_rcv_user_change`'s
