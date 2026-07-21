@@ -3936,6 +3936,35 @@ pub unsafe extern "C" fn gtkhx_proto_pack_message(
     crate::build::pack_message(buf, type_, trans, flag, safe_chunks).unwrap_or(0)
 }
 
+/// Pack a 22-byte Hotline transaction header into `dst`. This is the
+/// receive-side counterpart to `pack_message`: the hxnet actor already parsed
+/// the header of an incoming frame, and the C bridge calls this to reconstruct
+/// the byte-exact header into `htlc->in` so the body handlers can decode it back
+/// out (`hl_hdr_decode`, `task_inerror`, the trans lookup). `body_len` is the
+/// application body byte count (after the header, excluding hc); the wire `len`
+/// / `len2` fields encode `body_len + sizeof(hc)`.
+///
+/// No-op on NULL `dst`. The caller must provide at least `HL_HDR_LEN` (22)
+/// writable bytes.
+///
+/// # Safety
+/// `dst` is either NULL or valid (writable) for at least `HL_HDR_LEN` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_pack_header(
+    dst: *mut u8,
+    type_: u32,
+    trans: u32,
+    flag: u32,
+    hc: u16,
+    body_len: u32,
+) {
+    if dst.is_null() {
+        return;
+    }
+    let out = slice::from_raw_parts_mut(dst, crate::HL_HDR_LEN);
+    crate::build::pack_header(out, type_, trans, flag, hc, body_len);
+}
+
 // ---- Text encoding: Mac Roman / UTF-8 ---------------------------------
 
 /// Decode wire bytes from `src` into UTF-8 in `dst`, mirroring

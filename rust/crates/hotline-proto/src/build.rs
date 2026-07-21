@@ -1805,6 +1805,33 @@ pub fn pack_message_size(chunks: &[PackChunk<'_>]) -> usize {
     n
 }
 
+/// Pack a 22-byte Hotline transaction header into `out` (big-endian).
+///
+/// `body_len` is the application-level body byte count (everything after the
+/// header, *excluding* hc); the wire `len` / `len2` fields encode `body_len +
+/// sizeof(hc)` because the protocol counts hc — which physically sits at the
+/// tail of the 22-byte header — as the first two bytes of the data section.
+/// `len2` is written identical to `len`, matching what [`pack_message`] and the
+/// C `hlpack` path produce, so a header packed here is byte-for-byte identical.
+///
+/// `out` must be at least [`HL_HDR_LEN`](crate::HL_HDR_LEN) bytes; the slice's
+/// length is otherwise ignored (only the first 22 bytes are written).
+///
+/// This is the single wire-header encoder: [`pack_message`] calls it for the
+/// header portion, and the receive-side bridge calls it (via
+/// `gtkhx_proto_pack_header`) to reconstruct the header of a frame the Rust
+/// actor already parsed, so the C handlers can decode it back out of
+/// `htlc->in`.
+pub fn pack_header(out: &mut [u8], type_: u32, trans: u32, flag: u32, hc: u16, body_len: u32) {
+    let wire_len = body_len + core::mem::size_of::<u16>() as u32;
+    out[0..4].copy_from_slice(&type_.to_be_bytes());
+    out[4..8].copy_from_slice(&trans.to_be_bytes());
+    out[8..12].copy_from_slice(&flag.to_be_bytes());
+    out[12..16].copy_from_slice(&wire_len.to_be_bytes());
+    out[16..20].copy_from_slice(&wire_len.to_be_bytes()); // len2 == len
+    out[20..22].copy_from_slice(&hc.to_be_bytes());
+}
+
 /// Pack a full Hotline transaction (header + chunks) into `out`.
 ///
 /// Wire layout (big-endian throughout):
@@ -1852,18 +1879,17 @@ pub fn pack_message(
     if out.len() < needed {
         return None;
     }
-    // Wire `len` field encodes "body bytes after the header, plus the 2
-    // bytes hc occupies at the tail of the header". hc is at the tail of
-    // the 22-byte header but counts as the start of the data section per
-    // the protocol spec. Mirror the C `packed_len - (SIZEOF_HL_HDR -
-    // sizeof(h.hc))` math: `needed - HL_HDR_LEN + 2` = `needed - 20`.
-    let wire_len = (needed - (crate::HL_HDR_LEN - 2)) as u32;
-    out[0..4].copy_from_slice(&type_.to_be_bytes());
-    out[4..8].copy_from_slice(&trans.to_be_bytes());
-    out[8..12].copy_from_slice(&flag.to_be_bytes());
-    out[12..16].copy_from_slice(&wire_len.to_be_bytes());
-    out[16..20].copy_from_slice(&wire_len.to_be_bytes()); // len2
-    out[20..22].copy_from_slice(&(chunks.len() as u16).to_be_bytes());
+    // The header body_len is everything after the 22-byte header. pack_header
+    // adds back the sizeof(hc) the wire `len` field folds in.
+    let body_len = (needed - crate::HL_HDR_LEN) as u32;
+    pack_header(
+        &mut out[..crate::HL_HDR_LEN],
+        type_,
+        trans,
+        flag,
+        chunks.len() as u16,
+        body_len,
+    );
     let mut pos = crate::HL_HDR_LEN;
     for c in chunks {
         let plen = c.data.len() as u16;
@@ -1887,6 +1913,49 @@ mod tests {
     /// tests because we know the buffers are still alive).
     unsafe fn chunk_bytes(c: &HxChunk) -> &[u8] {
         std::slice::from_raw_parts(c.data, c.len as usize)
+    }
+
+    #[test]
+    fn pack_header_byte_layout() {
+        // Mirror the explicit vector in tests/unit/test_hxnet_bridge.c so the
+        // Rust encoder and the C round-trip test can never silently diverge.
+        let mut hdr = [0u8; crate::HL_HDR_LEN];
+        pack_header(&mut hdr, 0x0102_0304, 0x0506_0708, 0x090a_0b0c, 0x0d0e, 10);
+        let expected: [u8; crate::HL_HDR_LEN] = [
+            0x01, 0x02, 0x03, 0x04, // type
+            0x05, 0x06, 0x07, 0x08, // trans
+            0x09, 0x0a, 0x0b, 0x0c, // flag
+            0x00, 0x00, 0x00, 0x0c, // len = body(10) + hc(2) = 12
+            0x00, 0x00, 0x00, 0x0c, // len2 == len
+            0x0d, 0x0e, // hc
+        ];
+        assert_eq!(hdr, expected);
+    }
+
+    #[test]
+    fn pack_header_zero_body_encodes_hc_only_len() {
+        // Body-less frame: wire len == sizeof(hc) == 2.
+        let mut hdr = [0u8; crate::HL_HDR_LEN];
+        pack_header(&mut hdr, 0x0001_0000, 0, 0, 0, 0);
+        assert_eq!(&hdr[12..16], &[0, 0, 0, 2]); // len
+        assert_eq!(&hdr[16..20], &[0, 0, 0, 2]); // len2
+        assert_eq!(&hdr[20..22], &[0, 0]); // hc
+    }
+
+    #[test]
+    fn pack_message_header_matches_pack_header() {
+        // pack_message must emit the same header pack_header does for the same
+        // (type, trans, flag, hc=chunk-count, body_len).
+        let chunks = [PackChunk {
+            tag: 0x0069,
+            data: b"hello",
+        }];
+        let mut msg = [0u8; 64];
+        let n = pack_message(&mut msg, 0x0000_006a, 0x1234_5678, 0, &chunks).unwrap();
+        let body_len = (n - crate::HL_HDR_LEN) as u32;
+        let mut hdr = [0u8; crate::HL_HDR_LEN];
+        pack_header(&mut hdr, 0x0000_006a, 0x1234_5678, 0, 1, body_len);
+        assert_eq!(&msg[..crate::HL_HDR_LEN], &hdr);
     }
 
     #[test]

@@ -22,6 +22,7 @@
 #include "hxnet_bridge.h"
 #include "protocol.h"
 #include "proto_helpers.h"
+#include "hotline_proto.h"      /* gtkhx_proto_pack_header (wire header encode) */
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
 #include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
 #include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
@@ -59,53 +60,6 @@ extern int connected;
 #define HXNET_SHUTDOWN_HANDLE_DROPPED  3
 
 void
-hx_bridge_pack_header (guint8 *dst, guint32 type, guint32 trans, guint32 flag,
-                       guint16 hc, guint32 body_len)
-{
-    /* Layout matches struct hl_hdr in src/hotline.h:
-     *   type(4) + trans(4) + flag(4) + len(4) + len2(4) + hc(2)
-     * = 22 bytes. All multi-byte fields are wire big-endian.
-     *
-     * wire `len` encodes "body bytes + sizeof(hc)" — the
-     * Hotline protocol's quirk where hc counts as data section
-     * even though it lives at the tail of the 22-byte header.
-     * hl_hdr_decode (proto_helpers.c) reverses this by
-     * subtracting sizeof(hc) to derive its body_len_out, so we
-     * have to add it here. */
-    const guint32 wire_len = body_len + (guint32) sizeof (guint16);
-
-    /* Encode big-endian without depending on ntohl/htonl — same
-     * byte-ordering discipline hlpack uses internally. */
-    dst[0]  = (guint8) ((type  >> 24) & 0xff);
-    dst[1]  = (guint8) ((type  >> 16) & 0xff);
-    dst[2]  = (guint8) ((type  >>  8) & 0xff);
-    dst[3]  = (guint8) ( type         & 0xff);
-    dst[4]  = (guint8) ((trans >> 24) & 0xff);
-    dst[5]  = (guint8) ((trans >> 16) & 0xff);
-    dst[6]  = (guint8) ((trans >>  8) & 0xff);
-    dst[7]  = (guint8) ( trans        & 0xff);
-    dst[8]  = (guint8) ((flag  >> 24) & 0xff);
-    dst[9]  = (guint8) ((flag  >> 16) & 0xff);
-    dst[10] = (guint8) ((flag  >>  8) & 0xff);
-    dst[11] = (guint8) ( flag         & 0xff);
-    dst[12] = (guint8) ((wire_len >> 24) & 0xff);
-    dst[13] = (guint8) ((wire_len >> 16) & 0xff);
-    dst[14] = (guint8) ((wire_len >>  8) & 0xff);
-    dst[15] = (guint8) ( wire_len        & 0xff);
-    /* len2: a second copy of the wire length. hlpack/hlwrite set
-     * len2 == len (proto_helpers.c: h.len = h.len2 = ...); match that
-     * so a bridge-packed header is byte-identical to an hlpack one and
-     * can't drift if a decoder ever starts validating len2. */
-    dst[16] = (guint8) ((wire_len >> 24) & 0xff);
-    dst[17] = (guint8) ((wire_len >> 16) & 0xff);
-    dst[18] = (guint8) ((wire_len >>  8) & 0xff);
-    dst[19] = (guint8) ( wire_len        & 0xff);
-    /* hc (host chunk count) is u16 BE at offset 20-21. */
-    dst[20] = (guint8) ((hc >> 8) & 0xff);
-    dst[21] = (guint8) ( hc       & 0xff);
-}
-
-void
 hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
                           guint32 flag, guint16 hc, const guint8 *body,
                           guint32 body_len)
@@ -122,8 +76,8 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
      * the actor exited) calls `hx_htlc_close` immediately —
      * which clears `htlc->fd`, frees `htlc->in.buf`, and
      * uninstalls the bridge. Any already-queued idle source
-     * then fires AFTER close, calls us here, and we'd crash in
-     * `hx_bridge_pack_header` writing through the freed buffer.
+     * then fires AFTER close, calls us here, and we'd crash
+     * writing the packed header through the freed buffer.
      * Skip the dispatch when either signal of close is set;
      * the in-flight frame is information the C side no longer
      * cares about. */
@@ -163,7 +117,7 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
      * htlc->rcv two-phase state machine — hx_dispatch_frame routes the parsed
      * opcode straight to the body handler. */
     qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR + body_len);
-    hx_bridge_pack_header (htlc->in.buf, type, trans, flag, hc, body_len);
+    gtkhx_proto_pack_header (htlc->in.buf, type, trans, flag, hc, body_len);
     if (body_len > 0) {
         memcpy (&htlc->in.buf[SIZEOF_HL_HDR], body, body_len);
     }

@@ -211,9 +211,19 @@ handler emits its `GtkhxSession` signal from the relevant model/recv crate —
 exactly the shape `hxnews-recv` already established for the news receive path.
 These are independent and parallelizable once N3 lands.
 
-**N5 — Shrink the bridge.** Once dispatch + framing are Rust, `hxnet_bridge.c`
-collapses to connection-lifecycle/state plumbing; the frame staging + header
-pack/dispatch code is deleted.
+**N5 — Shrink the bridge. _First brick landed._** Once dispatch + framing are
+Rust, `hxnet_bridge.c` collapses to connection-lifecycle/state plumbing; the
+frame staging + header pack/dispatch code is deleted. First increment shipped:
+the bridge's hand-rolled 22-byte header encoder (`hx_bridge_pack_header`) moved
+into `hotline-proto` as `pack_header` / `gtkhx_proto_pack_header` (byte-for-byte,
+reused by `pack_message`, unit-tested), and the C encoder was deleted — the
+bridge now calls the Rust packer to reconstruct the header the actor already
+parsed. The rest of "shrink/delete the bridge" is part of the larger endgame.
+
+> **The full endgame — retiring `rcv.c`, the bridge, and C-owned `htlc_conn`
+> — is scoped in [`network-endgame.md`](network-endgame.md).** N5's remaining
+> work is subsumed by that plan's Phase E3 (delete the bridge), which depends on
+> E1 (`htlc_conn` to Rust) and E2 (handlers to Rust, `rcv.c` deleted) first.
 
 ## Constraints & risks (carry-overs, don't re-decide)
 
