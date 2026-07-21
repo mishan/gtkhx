@@ -1710,4 +1710,36 @@ extern size_t gtkhx_proto_parse_icon_list (
     const uint8_t *buf, size_t len,
     struct gtkhx_proto_icon_entry *out, size_t cap);
 
+/*
+ * Receive-dispatch routing (network-untangling N3). hx_rcv_hdr calls
+ * hx_recv_route(type) to map a server frame's opcode to a handler category,
+ * then switches on the result to pick the body handler. This enum mirrors
+ * hotline-proto's dispatch::HandlerKind (rust/crates/hotline-proto/src/
+ * dispatch.rs) — the values must stay in lockstep with the Rust discriminants.
+ * The composite-TASK mask (Heidrun-style TASK|opcode replies) is applied inside
+ * hx_recv_route, so the C side no longer special-cases it.
+ */
+typedef enum {
+    HX_RECV_CHAT = 0,
+    HX_RECV_MSG = 1,
+    HX_RECV_USER_CHANGE = 2,
+    HX_RECV_USER_PART = 3,
+    HX_RECV_NEWS_POST = 4,
+    HX_RECV_TASK = 5,
+    HX_RECV_CHAT_SUBJECT = 6,
+    HX_RECV_CHAT_INVITE = 7,
+    HX_RECV_USER_SELFINFO = 8,
+    HX_RECV_AGREEMENT = 9,
+    HX_RECV_BANNER = 10,
+    HX_RECV_POLITEQUIT = 11,
+    HX_RECV_XFER_QUEUE = 12,
+    HX_RECV_VOICE_SDP_OFFER = 13,
+    HX_RECV_VOICE_ICE = 14,
+    HX_RECV_VOICE_ROOM_STATUS = 15,
+    HX_RECV_ICON_CHANGE = 16,
+    HX_RECV_UNKNOWN = 17,
+} hx_recv_handler_kind;
+
+extern int hx_recv_route (guint32 opcode);
+
 #endif /* GTKHX_HOTLINE_PROTO_H */

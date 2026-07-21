@@ -92,8 +92,11 @@ pub enum ClientHdr {
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServerHdr {
-    Chat = 0x0000_0068,
-    Msg = 0x0000_006a,
+    // NB: these match hotline.h — MSG is 0x68, CHAT is 0x6a. (They were
+    // previously swapped here; the values were unused so nothing routed on
+    // them, but see the round-trip test below that now pins them.)
+    Msg = 0x0000_0068,
+    Chat = 0x0000_006a,
     Queue = 0x0000_00d3,
     UserChange = 0x0000_012d,
     UserPart = 0x0000_012e,
@@ -123,8 +126,8 @@ impl ServerHdr {
     pub fn from_u32(v: u32) -> Option<ServerHdr> {
         use ServerHdr::*;
         Some(match v {
-            0x0000_0068 => Chat,
-            0x0000_006a => Msg,
+            0x0000_0068 => Msg,
+            0x0000_006a => Chat,
             0x0000_00d3 => Queue,
             0x0000_012d => UserChange,
             0x0000_012e => UserPart,
@@ -436,6 +439,7 @@ mod tests {
         assert_eq!(ServerHdr::Task.as_u32(), 0x0001_0000);
         assert_eq!(ServerHdr::from_u32(0xdead_beef), None);
     }
+
 
     #[test]
     fn client_opcode_values_match_header() {
