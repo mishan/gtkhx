@@ -48,7 +48,9 @@ gtkhx_sources = files(
   'panel_registry.c',
   'gtkurl.c',
   'gtkutil.c',
-  'hfs.c',
+  # hfs.c retired — the HFS metadata sidecar (CAP / AppleDouble / Netatalk) is
+  # now the Rust hxhfs crate (rust_hxhfs_dep below); hfs.h keeps the struct /
+  # macro / C-ABI decls its callers include.
   # history.c (GNU readline command-line history) retired — the chat + PM input
   # line history is now the Rust InputHistory (hxchat-model), reached via
   # hx_input_history_* in chat_members.rs.
@@ -265,6 +267,9 @@ rust_deps = [
   # cicn colour-icon decoder (cicn.c's decode path retired) — hxcicn_decode,
   # wrapped into a GdkPixbuf by the thin cicn.c.
   rust_hxcicn_dep,
+  # HFS metadata sidecar (Rust port of hfs.c): hfsinfo_read/write,
+  # resource_open/len, type_creator, comment_*, finderinfo_path/resource_path.
+  rust_hxhfs_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]

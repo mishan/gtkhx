@@ -22,7 +22,7 @@
  * (+ UPLOAD_FILES / UPLOAD_ANYWHERE), granted in the mhxd overlay's
  * guest UserData.
  *
- * Links xfers_send.c + xfers_recv.c + hfs.c + htxf_subchannel.c + the FFO
+ * Links xfers_send.c + xfers_recv.c + the hxhfs crate + htxf_subchannel.c + the FFO
  * codec on top of integration_harness_lib. GTK-shell couplings are
  * stubbed (preview branch never runs; progress is a no-op).
  */
@@ -45,7 +45,6 @@
 #include "integration_harness.h"
 
 /* --- link stubs for the send/recv machines' GTK-shell couplings --- */
-guint8 dir_char = '/';
 
 void
 hx_preview_set_info (hx_preview *p, const char *type, const char *creator)

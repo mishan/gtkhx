@@ -23,9 +23,10 @@
  * (granted in tests/mhxd/conf/accounts/guest/UserData) so mhxd accepts
  * the upload to the seeded Uploads/ directory.
  *
- * Links xfers_send.c + xfers_recv.c + hfs.c + the FFO codec on top of
- * integration_harness_lib. file_{send,recv}_one's GTK-shell couplings
- * are stubbed below (preview branch never runs; progress is a no-op).
+ * Links xfers_send.c + xfers_recv.c + the hxhfs crate + the FFO codec on
+ * top of integration_harness_lib. file_{send,recv}_one's GTK-shell
+ * couplings are stubbed below (preview branch never runs; progress is a
+ * no-op).
  */
 
 #include "config.h"
@@ -45,7 +46,6 @@
 #include "integration_harness.h"
 
 /* --- link stubs for the send/recv machines' GTK-shell couplings --- */
-guint8 dir_char = '/';
 
 void
 hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
