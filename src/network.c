@@ -59,6 +59,7 @@
 #include "toolbar.h"
 #include "tracker.h"
 #include "network.h"
+#include "hxconn.h"
 #include "banner.h"
 #include "debug.h"
 #include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
@@ -207,8 +208,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     /* Chat-history retention hints from the LOGIN reply — wiped
 	 * on disconnect so a reconnect to a server with different
 	 * retention doesn't carry stale numbers into the UI. */
-    htlc->history_max_msgs = 0;
-    htlc->history_max_days = 0;
+    hx_conn_set_history_max_msgs (htlc, 0);
+    hx_conn_set_history_max_days (htlc, 0);
     /* Inline-media advisory limits from the LOGIN reply — same
 	 * reasoning. The accessors in src/inline_media.h gate on
 	 * CAP_INLINE_MEDIA being lit so callers see spec defaults
@@ -583,7 +584,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     server_addr = g_strdup_printf ("%s:%u", serverstr, port);
     server_port = port;
 
-    htlc->chat_history_last_msgid = 0;
+    hx_conn_set_chat_history_last_msgid (htlc, 0);
     g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
     htlc->serverport = port;
     /* Stamp the TLS flag so the HTXF subchannel workers (xfers.c /
