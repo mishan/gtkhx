@@ -21,6 +21,8 @@
 //! The entry is immutable once constructed, so the fields need only
 //! construction-time writes; there is no signal surface.
 
+mod populate;
+
 use std::cell::{Cell, RefCell};
 use std::ffi::{c_char, CStr, CString};
 use std::os::raw::c_void;
@@ -95,7 +97,7 @@ impl HxFileEntry {
     /// Construct a row. `icon_id == 0` means "caller didn't classify" and
     /// defaults to the generic file/folder icon per `is_dir` — the same
     /// fallback both providers relied on the C constructor for.
-    fn build(
+    pub(crate) fn build(
         name: &str,
         is_dir: bool,
         size: u64,

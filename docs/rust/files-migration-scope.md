@@ -122,7 +122,7 @@ the existing MVC boundary: view = C/GTK, model/protocol/IO = Rust).
 | `files_local_provider.c` | 506 | GIO directory ops | Keep in C | — |
 | `files_panel.c` | 1674 | single-panel widget (GtkColumnView, inline rename, icon cache) | Keep in C | — |
 | `files_browser.c` | 2323 | two-panel window; action orchestration; DnD | Keep in C | — |
-| `filelist_walker.c` | 65 | walk packed FILE_LIST bytes, callback per entry (already calls Rust decoder) | **Yes → Rust** | Low |
+| `filelist_walker.c` | 65 | walk packed FILE_LIST bytes, callback per entry | **DONE → Rust** (folded into `hxfiles-entry` populate; file retired) | Low |
 | `htxf_io.c` | 173 | thin shim over hxnet Rust HTXF (errno mapping, abort) | Mostly Rust already; fold into workers | Low |
 | `htxf_subchannel.c` | 68 | HTXF preamble packing (16/24 byte) | **Yes → Rust** (pure byte packing) | Low |
 
@@ -250,15 +250,46 @@ differently, and the reasoning is worth recording:
   handling (a poor Rust target, and a divergence risk), while the GObject
   *data* is the clean move. The formatters stay in C and read the entry
   only through the public accessors.
-- **Still in C (a fair next increment):** the per-entry reply→model
-  binding (`populate_from_chunks_cb`) constructs the entries via
-  `hx_file_entry_new` from C. Building them Rust-side — or replacing the
-  hand-populated `GListStore` with a Rust `gio::ListModel` of
-  `HxFileEntry` (the `hxmember-model` shape) — is the natural F4 step.
+- **Reply→model binding moved to Rust (F4).** The whole remote populate
+  path — walk the FILE_LIST chunks, decode each entry's display name (Mac
+  Roman → UTF-8), dir flag, icon id, and kind label, build the
+  `HxFileEntry`, and append it — is now `gtkhx_files_populate_from_reply`
+  in the `hxfiles-entry` crate, operating on the provider's
+  `gio::ListStore`. `files_remote_provider.c::populate_from_chunks` +
+  `populate_from_chunks_cb` collapsed to one FFI call, and
+  `filelist_walker.c` / `.h` / `test_filelist_walker` retired (the wire
+  parse is `hotline-proto`'s `parse_file_list_entry`, unit-tested there;
+  the full decode is unit-tested headless in `hxfiles-entry` against
+  hand-built wire buffers). The kind label keeps its `gtkhx`-domain
+  translation via `dgettext`, matching the old C `_()`.
+  - **`GListStore`, not a custom model — a deliberate call.** The
+    original F4 sketch was "a Rust `gio::ListModel` of `HxFileEntry` (the
+    `hxmember-model` shape)". `GListStore` already *is* a `gio::ListModel`,
+    and a files listing is clear-and-rebuild on every navigation — there's
+    no keyed upsert or in-place update the way chat membership has, which
+    is the only reason `HxMemberModel` is a custom model. A bespoke files
+    list model would duplicate `GListStore` for no functional gain, so the
+    value (the populate/decode logic) went to Rust while the store stays
+    `GListStore`.
 
-### Phase F4 (optional) — provider trait in Rust
-- Only if F1–F3 prove out. Consider a `glib::subclass` implementation of
-  `HxFilesProvider`. Lower priority; the GObject interface is a fine
+### Phase F4 — reply→model binding in Rust — **DONE**
+- The remote provider's populate path (`populate_from_chunks` +
+  `populate_from_chunks_cb`) moved into `gtkhx_files_populate_from_reply`
+  in the `hxfiles-entry` crate: parse (via `hotline-proto`) + Mac Roman
+  name decode (`hotline_proto::text`) + icon/kind (`hxfiles-model`, kind
+  translated via `dgettext`) + `HxFileEntry` construction + append to the
+  `gio::ListStore`. `filelist_walker.c` / `.h` / `test_filelist_walker`
+  retired.
+- Kept `GListStore` rather than a bespoke `gio::ListModel` (see the Status
+  note — files listings are clear-and-rebuild, so a custom model would be
+  redundant with `GListStore`).
+- **Test:** `cargo test -p hxfiles-entry` (headless populate over a real
+  `gio::ListStore` from hand-built wire buffers); the `file_list` /
+  `file_list_subdir` / `file_info` integration tests stay green.
+
+### Phase F5 (optional) — provider trait in Rust
+- Only if the above prove out. Consider a `glib::subclass` implementation
+  of `HxFilesProvider`. Lower priority; the GObject interface is a fine
   boundary as-is.
 
 ## Test safety net

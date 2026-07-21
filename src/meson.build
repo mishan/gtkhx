@@ -24,7 +24,8 @@ gtkhx_sources = files(
   # decls. The shared cipher/compress vocab is in the Rust crate too
   # (cipher_vocab.rs), as is the Bookmarks dialog (bookmarks.rs).
   'debug.c',
-  'filelist_walker.c',
+  # filelist_walker.c retired — the FILE_LIST walk + per-entry decode moved
+  # into the hxfiles-entry Rust crate (gtkhx_files_populate_from_reply).
   'files.c',
   'files_browser.c',
   'files_complete.c',

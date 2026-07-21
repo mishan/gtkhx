@@ -2351,10 +2351,11 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
 					 * in memory so the display side (gtkhx.c folder-
 					 * xfer label) is consistent and xfer_go can
 					 * re-encode to the negotiated wire format. The
-					 * file_list walker converts file entry names to
-					 * UTF-8 in populate_from_chunks_cb; do the same
-					 * here for the recursive-get path so both routes
-					 * agree on the in-memory contract. */
+					 * file_list populate path converts file entry
+					 * names to UTF-8 (gtkhx_files_populate_from_reply
+					 * in the hxfiles-entry crate); do the same here
+					 * for the recursive-get path so both routes agree
+					 * on the in-memory contract. */
                     char *nm_utf8;
                     gsize nm_utf8_len = 0;
                     HN32 (&fsize, &fh->fsize);

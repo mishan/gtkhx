@@ -169,6 +169,7 @@ rust_sources = files(
   'crates/hxfiles-model/src/ffi.rs',
   'crates/hxfiles-model/src/remote_listing.rs',
   'crates/hxfiles-entry/src/lib.rs',
+  'crates/hxfiles-entry/src/populate.rs',
   'crates/hxfiles-xfer/src/lib.rs',
   'crates/hxfiles-xfer/src/ffo.rs',
   'crates/hxfiles-xfer/src/ffi.rs',

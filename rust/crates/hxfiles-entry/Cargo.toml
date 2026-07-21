@@ -14,8 +14,13 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# glib gives the GObject surface; no gtk / no C externs, so
-# `cargo test -p hxfiles-entry` runs headless. Builds against the
-# libglib-2.0 / libgobject-2.0 the C binary already links, so the
-# system-library surface doesn't grow.
+# glib + gio give the GObject + gio::ListStore surface; the only C extern is
+# glibc's dgettext (always linked), so `cargo test -p hxfiles-entry` runs
+# headless. Builds against the libglib-2.0 / libgobject-2.0 / libgio-2.0 the
+# C binary already links, so the system-library surface doesn't grow.
 glib = { workspace = true }
+gio = { workspace = true }
+# The wire FILE_LIST parser + Mac Roman decoder (populate-from-reply), and the
+# file-type -> icon-id / kind-label tables. All pure, no cycle.
+hotline-proto = { path = "../hotline-proto" }
+hxfiles-model = { path = "../hxfiles-model" }

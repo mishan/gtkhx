@@ -33,7 +33,6 @@
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_remote_provider.h"
-#include "filelist_walker.h"
 
 #include <stdbool.h>
 
@@ -59,6 +58,14 @@ extern char *gtkhx_files_listing_child (const HxFilesListing *l,
 extern bool gtkhx_files_listing_has_error (const HxFilesListing *l);
 extern void gtkhx_files_listing_set_error (HxFilesListing *l, bool v);
 extern void gtkhx_files_string_free (char *s);
+
+/* Clear `store` and repopulate it from a FILE_LIST reply (`fh` = the
+ * accumulated chunk bytes, `fhlen` long) — the whole walk + per-entry
+ * decode + HxFileEntry construction, in the hxfiles-entry Rust crate.
+ * `fh` is gconstpointer so the caller's struct hl_filelist_hdr* passes
+ * without a cast; the Rust side reads it as raw bytes. NULL/empty clears. */
+extern void gtkhx_files_populate_from_reply (GListStore *store,
+                                             gconstpointer fh, gsize fhlen);
 
 struct _HxRemoteFilesProvider {
     GObject parent_instance;
@@ -289,73 +296,18 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     g_free (hldir);
 }
 
-/* ---- Reply: parse hl_filelist_hdr chunks into HxFileEntry ----
+/* ---- Reply: parse the FILE_LIST chunks into HxFileEntry rows ----
  *
- * The wire walk (each chunk's len-prefixed step + ntohl of the
- * fixed fields) lives in src/filelist_walker.c so the Tier 2 test
- * can exercise it without dragging in this TU's GTK pile. The
- * callback below is the model-binding half: takes the decoded
- * (ftype, fsize, name) and appends an HxFileEntry to the
- * provider's GListStore. */
-static void
-populate_from_chunks_cb (guint32 ftype, guint32 fsize, const guint8 *name,
-                         gsize name_len, void *user_data)
-{
-    HxRemoteFilesProvider *self = (HxRemoteFilesProvider *)user_data;
-    char namebuf[256];
-    char *utf8;
-    gboolean is_dir;
-    HxFileEntry *entry;
-    guint32 ftype_be;
-
-    if (name_len > sizeof (namebuf) - 1) {
-        name_len = sizeof (namebuf) - 1;
-    }
-    memcpy (namebuf, name, name_len);
-    namebuf[name_len] = '\0';
-
-    /* Hotline filename bytes can be Mac Roman on older servers —
-	 * sanitise to UTF-8 for display. */
-    utf8 = gtkhx_text_to_utf8 (namebuf, name_len, NULL);
-
-    is_dir = (ftype == 0x666c6472); /* 'fldr' */
-
-    /* Friendly kind label and icon both want the raw big-endian
-	 * FourCC bytes (not the host-order ftype int) — they
-	 * memcmp() against "JPEG" / "fldr" / etc. literals. Stash a
-	 * htonl back into a local for that. */
-    ftype_be = htonl (ftype);
-    gboolean kind_static = FALSE;
-    const char *kind = kind_of_ftype ((const char *)&ftype_be, &kind_static);
-
-    /* For folders, Hotline puts the child count in the size field
-	 * rather than a byte count — we keep it (rather than zeroing
-	 * it out) so the Size column renders "(N items)" instead of
-	 * just "—". hx_file_entry_format_size branches on is_dir to
-	 * pick the right wording. */
-    entry = hx_file_entry_new (
-        utf8 ? utf8 : namebuf, is_dir, (guint64)fsize,
-        0, /* no mtime on the wire */
-        kind,
-        icon_of_ftype_and_name ((const char *)&ftype_be, namebuf, name_len));
-    g_list_store_append (self->listing, entry);
-    g_object_unref (entry);
-    g_free (utf8);
-    if (!kind_static) {
-        g_free ((char *)kind);
-    }
-}
-
+ * The whole wire→model binding — walk each chunk, decode the name
+ * (Mac Roman → UTF-8), dir flag, icon id, and kind label, build an
+ * HxFileEntry, and append it — lives in the hxfiles-entry Rust crate
+ * (gtkhx_files_populate_from_reply). It clears the store first, so
+ * one call fully refreshes the listing. NULL/empty fh just clears. */
 static void
 populate_from_chunks (HxRemoteFilesProvider *self, struct cached_filelist *cfl)
 {
-    g_list_store_remove_all (self->listing);
-
-    if (!cfl || !cfl->fh || !cfl->fhlen) {
-        return;
-    }
-
-    hl_filelist_walk (cfl->fh, cfl->fhlen, populate_from_chunks_cb, self);
+    gtkhx_files_populate_from_reply (self->listing, cfl ? cfl->fh : NULL,
+                                     cfl ? cfl->fhlen : 0);
 }
 
 gboolean
