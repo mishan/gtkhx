@@ -191,6 +191,8 @@ rust_sources = files(
   'crates/hxchat-recv/src/tests.rs',
   'crates/hxicon-recv/src/lib.rs',
   'crates/hxicon-recv/src/tests.rs',
+  'crates/hxmsg-recv/src/lib.rs',
+  'crates/hxmsg-recv/src/tests.rs',
   'crates/hxuser-recv/src/lib.rs',
   'crates/hxuser-recv/src/tests.rs',
   'crates/hxxfer-recv/src/lib.rs',
@@ -242,6 +244,7 @@ rust_sources = files(
   'crates/hxtls-trust/Cargo.toml',
   'crates/hxchat-recv/Cargo.toml',
   'crates/hxicon-recv/Cargo.toml',
+  'crates/hxmsg-recv/Cargo.toml',
   'crates/hxuser-recv/Cargo.toml',
   'crates/hxxfer-recv/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
@@ -626,6 +629,17 @@ rust_hxicon_recv_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxicon_recv',
+  ],
+)
+
+# Private-message receive path (MSG / MSG_BROADCAST): ignore-gate + the boxed
+# `msg` signal emit, ported from rcv.c. std-only C ABI (hx_msg_recv); `cargo
+# test -p hxmsg-recv` runs headless. See docs/rust/network-untangling-scope.md.
+rust_hxmsg_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxmsg_recv',
   ],
 )
 

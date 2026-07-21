@@ -1859,6 +1859,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxmsg-recv"
+version = "0.1.0"
+
+[[package]]
 name = "hxnet"
 version = "0.1.0"
 dependencies = [

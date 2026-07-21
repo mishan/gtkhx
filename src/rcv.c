@@ -344,6 +344,15 @@ hx_rcv_chat (struct htlc_conn *htlc)
      * "chat" signal — no inline play_sound here. */
 }
 
+/* Private-message ignore-gate + msg emit — Rust hxmsg-recv crate. hx_msg_recv
+ * returns HX_MSG_DROPPED (ignored), HX_MSG_EMITTED (private message, boxed msg
+ * signal fired), or HX_MSG_BROADCAST (C renders it via broadcastmsg). */
+#define HX_MSG_DROPPED 0
+#define HX_MSG_EMITTED 1
+#define HX_MSG_BROADCAST 2
+extern int hx_msg_recv (void *member_model, guint16 uid, int is_pm,
+                        void *event);
+
 void
 hx_rcv_msg (struct htlc_conn *htlc)
 {
@@ -364,9 +373,6 @@ hx_rcv_msg (struct htlc_conn *htlc)
     struct hx_member_info sender;
     gboolean have_sender
         = hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &sender);
-    if (hx_member_model_get_ignore (hx_chat_member_model (chat), pm.uid)) {
-        return;
-    }
 
     /* Dispatch on the wire opcode, not on pm.uid. mhxd echoes
 	 * broadcasts back with the sender's UID populated (so the
@@ -376,8 +382,15 @@ hx_rcv_msg (struct htlc_conn *htlc)
 	 * The header type is the authoritative signal. */
     hl_hdr_decode (htlc->in.buf, &hdr_type, NULL, NULL, NULL, NULL, NULL);
     is_broadcast = (hdr_type == HTLS_HDR_MSG_BROADCAST);
+    gboolean is_pm = !is_broadcast && pm.uid > 0;
 
-    if (!is_broadcast && pm.uid > 0) {
+    /* For a private message, build the boxed HxMsgEvent here — it needs the
+     * self-PM display-name resolution + htlc->name. The broadcast branch has no
+     * boxed event. The Rust hxmsg-recv crate owns the shared ignore-gate + the
+     * PM emit; it returns which branch so we run broadcastmsg + preserve the
+     * ignored-message early-out (no last_msg_nick update). */
+    HxMsgEvent *ev = NULL;
+    if (is_pm) {
         /* Some servers (mhxd on a self-directed PM) deliver the message
 		 * with the sender UID but an empty NAME chunk, which rendered as
 		 * "<> body" and — because HxMsgEvent's is_self test is name-based —
@@ -399,12 +412,19 @@ hx_rcv_msg (struct htlc_conn *htlc)
         /* msg signal payload is a boxed HxMsgEvent
 		 * (parsed once; every subscriber sees the same
 		 * UTF-8-sanitised, self-classified view). */
-        HxMsgEvent *ev = hx_msg_event_new (
+        ev = hx_msg_event_new (
             pm.uid, disp_name, disp_name_len, pm.msg, pm.msg_len,
             htlc->name[0] ? htlc->name : NULL);
-        gtkhx_session_emit_msg (gtkhx_session_get_default (), ev);
+    }
+
+    int r = hx_msg_recv (hx_chat_member_model (chat), pm.uid, is_pm, ev);
+    if (ev) {
         hx_msg_event_free (ev);
-    } else {
+    }
+    if (r == HX_MSG_DROPPED) {
+        return;
+    }
+    if (r == HX_MSG_BROADCAST) {
         /* Broadcasts on mhxd-family servers carry the sender's UID
 		 * + NAME so the client can render "[name] body" with the
 		 * sender's color. Pull the color from the cached user
