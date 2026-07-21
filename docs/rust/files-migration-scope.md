@@ -29,7 +29,22 @@
     desynced the server and failed. Never caught because the solo-file
     path has no following file to corrupt and folder upload had never
     been driven end-to-end. Fixed in the F2 folder commit.
-- **F3 (remote provider model) and F4 (provider trait): not started.**
+- **F3 — remote provider model: DONE (first increment).** The remote
+  provider's path-navigation state — the current path, the sticky
+  listing-error flag, and the parent/child path math — moved out of
+  `src/files_remote_provider.c` into the `RemoteListing` model in the
+  `hxfiles-model` crate (`remote_listing.rs`), reached through a
+  `gtkhx_files_listing_*` opaque-handle FFI. The C provider now holds one
+  handle and delegates all path computation + the error flag to it,
+  keeping only the GListStore, the FILE_LIST RPC send, the no-reply
+  watchdog, and the rcv-dispatch plumbing (event-loop-specific, stays in
+  C per the plan). The fiddly path-walk edge cases (root no-op, one-level
+  vs deep parent, empty→"/" normalization, names containing '/') are now
+  unit-tested headless in Rust; the reply *parse* was already Rust
+  (`parse_file_list_entry`, driven by `filelist_walker.c`). The
+  `test_file_list` / `test_file_list_subdir` / `test_file_info`
+  integration tests stay green against mhxd.
+- **F4 (provider trait): not started.**
 
 ### F2 follow-ups (deferred)
 
@@ -206,12 +221,25 @@ differently, and the reasoning is worth recording:
   `test_htxf_hdr`, `test_real_htxf_connect`).
 - **Bug fixed:** the `folder_send_all` MACR-size desync (see Status).
 
-### Phase F3 — remote provider model
-- Extract the listing model + reply handling from
-  `files_remote_provider.c` into `hxfiles-model` (like `hxchat-model`).
-- Keep the rcv.c signal routing + timeout watchdog in C (event-loop
-  specific), calling into the Rust model.
-- **Test:** `test_file_list`, `test_file_list_subdir`, `test_file_info`.
+### Phase F3 — remote provider model — **DONE (first increment)**
+- Extracted the listing model's path-navigation state from
+  `files_remote_provider.c` into the `RemoteListing` type in
+  `hxfiles-model` (`remote_listing.rs`) — current path, listing-error
+  flag, and the `parent` / `child` / `reset_to_root` path math — behind a
+  `gtkhx_files_listing_*` opaque-handle FFI (same shape as
+  `hotline-proto`'s `parse_dirlist`). The provider holds one handle and
+  delegates; its `current_path` / `listing_error` C fields are gone.
+- The rcv.c signal routing, the FILE_LIST RPC send, and the timeout
+  watchdog stay in C (event-loop specific), calling into the model. The
+  reply *parse* was already Rust (`parse_file_list_entry`).
+- **Tests:** `cargo test -p hxfiles-model` gained the `RemoteListing`
+  navigation-math cases + an FFI-handle round-trip; the existing
+  `test_file_list` / `test_file_list_subdir` / `test_file_info`
+  integration tests stay green against mhxd.
+- **Not yet moved (a fair next increment):** the per-entry reply→model
+  binding (`populate_from_chunks_cb`) still builds `HxFileEntry` GObjects
+  in C — that's the GObject boundary and would follow the `gtkhx-boxed`
+  pattern if pushed down.
 
 ### Phase F4 (optional) — provider trait in Rust
 - Only if F1–F3 prove out. Consider a `glib::subclass` implementation of
@@ -262,10 +290,10 @@ Added by F1/F2:
 
 - **F1:** DONE.
 - **F2:** DONE.
-- **F3:** ~3–5 days (not started).
+- **F3:** DONE (first increment — path-navigation model).
 - **F4:** optional, defer.
 
-Next up: **F3** — extract the remote listing model + reply handling from
-`files_remote_provider.c` into `hxfiles-model`, keeping the rcv.c signal
-routing + timeout watchdog in C. Smaller F2 follow-ups (nested-subdir
-folder round-trip, `hxhfs` wiring) are listed in the Status section.
+Next up: an optional F3 follow-on could push `HxFileEntry` + the
+`populate_from_chunks_cb` reply→model binding into Rust via the
+`gtkhx-boxed` pattern, or **F4** (a `glib::subclass` `HxFilesProvider`).
+Both are lower-priority; the GObject boundary is a fine stopping point.

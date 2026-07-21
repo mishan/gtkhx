@@ -35,18 +35,42 @@
 #include "files_remote_provider.h"
 #include "filelist_walker.h"
 
+#include <stdbool.h>
+
+/* Path-navigation model — the current path + sticky listing-error flag,
+ * plus the parent/child path math. Implemented in the hxfiles-model Rust
+ * crate (rust/crates/hxfiles-model/src/remote_listing.rs); this provider
+ * holds one opaque handle and keeps only the GListStore, the FILE_LIST
+ * RPC send, the no-reply watchdog, and the rcv-dispatch plumbing.
+ *
+ * `bool` (not `gboolean`) mirrors the Rust `extern "C"` 1-byte bool ABI.
+ * `parent` / `child` return freshly-allocated strings the caller releases
+ * with gtkhx_files_string_free (a Rust allocation — do NOT g_free it). */
+typedef struct HxFilesListing HxFilesListing;
+extern HxFilesListing *gtkhx_files_listing_new (void);
+extern void gtkhx_files_listing_free (HxFilesListing *l);
+extern const char *gtkhx_files_listing_current_path (const HxFilesListing *l);
+extern void gtkhx_files_listing_set_path (HxFilesListing *l, const char *path);
+extern void gtkhx_files_listing_reset (HxFilesListing *l);
+extern bool gtkhx_files_listing_is_root (const HxFilesListing *l);
+extern char *gtkhx_files_listing_parent (const HxFilesListing *l);
+extern char *gtkhx_files_listing_child (const HxFilesListing *l,
+                                        const char *name);
+extern bool gtkhx_files_listing_has_error (const HxFilesListing *l);
+extern void gtkhx_files_listing_set_error (HxFilesListing *l, bool v);
+extern void gtkhx_files_string_free (char *s);
+
 struct _HxRemoteFilesProvider {
     GObject parent_instance;
     GListStore *listing;
-    char *current_path; /* Hotline-style; "/" at root */
-    /* TRUE if the most recent FILE_LIST RPC came back as a task
-	 * error (server denied the listing). Cleared on the next
-	 * successful listing. Drives the panel's empty-state hint
-	 * ("Folder is upload-only" if the access bits also indicate
-	 * a drop-box, "Can't list this folder" otherwise) — without
-	 * this the user just sees an empty panel and has no idea why
-	 * the navigation didn't produce rows. */
-    gboolean listing_error;
+    /* Path-navigation state (current path + sticky listing-error flag).
+	 * The current path is Hotline-style ("/" at root); the error flag
+	 * drives the panel's empty-state hint ("Folder is upload-only" if
+	 * the access bits also indicate a drop-box, "Can't list this
+	 * folder" otherwise) — without it the user just sees an empty
+	 * panel and has no idea why the navigation didn't produce rows.
+	 * Both live in the Rust model behind `model`. */
+    HxFilesListing *model;
     /* Watchdog for an in-flight FILE_LIST. Some servers silently drop
 	 * the request (no reply, no task error) when the account lacks a
 	 * server-side "list files" permission — mhxd gates HTLC_HDR_FILE_LIST
@@ -106,7 +130,8 @@ hx_remote_files_provider_finalize (GObject *obj)
         self->list_timeout_id = 0;
     }
     g_clear_object (&self->listing);
-    g_free (self->current_path);
+    gtkhx_files_listing_free (self->model);
+    self->model = NULL;
     /* If we're in pending_listings, the table holds the ref that's
 	 * being dropped now — this finalize was called BECAUSE the
 	 * table released us. So no remove call here. */
@@ -123,7 +148,7 @@ static void
 hx_remote_files_provider_init (HxRemoteFilesProvider *self)
 {
     self->listing = g_list_store_new (HX_TYPE_FILE_ENTRY);
-    self->current_path = g_strdup ("/");
+    self->model = gtkhx_files_listing_new ();
 }
 
 HxRemoteFilesProvider *
@@ -200,8 +225,9 @@ remote_list_timeout (gpointer data)
 
     remote_list_drop_task (keep);
     g_list_store_remove_all (keep->listing);
-    keep->listing_error = TRUE;
-    g_signal_emit_by_name (keep, "navigated", keep->current_path);
+    gtkhx_files_listing_set_error (keep->model, true);
+    g_signal_emit_by_name (keep, "navigated",
+                           gtkhx_files_listing_current_path (keep->model));
 
     g_object_unref (keep);
     return G_SOURCE_REMOVE;
@@ -382,18 +408,18 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
 
     /* A successful response clears any sticky listing-error state
 	 * from a previous failed navigation. */
-    self->listing_error = FALSE;
+    gtkhx_files_listing_set_error (self->model, false);
 
     /* Adopt the new path as the current one (the RPC was fired
 	 * with this path in cfl_path — if a second fetch superseded
 	 * the first, the more-recent one wins via pending_listings's
 	 * single-entry-per-provider invariant). */
     if (cfl && cfl->path) {
-        g_free (self->current_path);
-        self->current_path = g_strdup (cfl->path);
+        gtkhx_files_listing_set_path (self->model, cfl->path);
     }
 
-    g_signal_emit_by_name (self, "navigated", self->current_path);
+    g_signal_emit_by_name (self, "navigated",
+                           gtkhx_files_listing_current_path (self->model));
 
     /* The cached_filelist was allocated by us in remote_send_file_list
 	 * and isn't tracked by the legacy cfl_lookup table — free it.
@@ -444,18 +470,18 @@ hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
     self->list_task_trans = 0;
 
     g_list_store_remove_all (self->listing);
-    self->listing_error = TRUE;
+    gtkhx_files_listing_set_error (self->model, true);
 
     /* The cfl we allocated in remote_send_file_list carries the
 	 * path the user navigated to. Adopt it as the current path
 	 * even though the listing failed — otherwise the next
 	 * navigate_up has nothing to walk back from. */
     if (cfl && cfl->path) {
-        g_free (self->current_path);
-        self->current_path = g_strdup (cfl->path);
+        gtkhx_files_listing_set_path (self->model, cfl->path);
     }
 
-    g_signal_emit_by_name (self, "navigated", self->current_path);
+    g_signal_emit_by_name (self, "navigated",
+                           gtkhx_files_listing_current_path (self->model));
 
     /* cfl is owned by rcv.c's caller; we don't free it here.
 	 * The success path's twin (handle_file_list above) does
@@ -472,7 +498,7 @@ hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
 gboolean
 hx_remote_files_provider_has_listing_error (HxRemoteFilesProvider *self)
 {
-    return self ? self->listing_error : FALSE;
+    return self ? gtkhx_files_listing_has_error (self->model) : FALSE;
 }
 
 void
@@ -482,18 +508,17 @@ hx_remote_files_provider_reset_to_root (HxRemoteFilesProvider *self)
         return;
     }
     g_list_store_remove_all (self->listing);
-    self->listing_error = FALSE;
-    /* Return to the server root. The provider is created once and
-     * reused across connections, so a stale deep path from the server
-     * we just left would otherwise carry into the next session — where
-     * it doesn't exist, leaving "Up" unable to walk back to a valid
-     * parent. Resetting here means the next connection always starts
-     * listing from "/". */
-    g_free (self->current_path);
-    self->current_path = g_strdup ("/");
+    /* Return to the server root and clear the error flag. The provider is
+     * created once and reused across connections, so a stale deep path
+     * from the server we just left would otherwise carry into the next
+     * session — where it doesn't exist, leaving "Up" unable to walk back
+     * to a valid parent. Resetting here means the next connection always
+     * starts listing from "/". */
+    gtkhx_files_listing_reset (self->model);
     /* Re-emit "navigated" so the panel's path bar + status footer
      * reflect the reset root and the now-empty listing. */
-    g_signal_emit_by_name (self, "navigated", self->current_path);
+    g_signal_emit_by_name (self, "navigated",
+                           gtkhx_files_listing_current_path (self->model));
 }
 
 /* ---- Interface implementations ---- */
@@ -508,7 +533,8 @@ static const char *
 remote_get_current_path (HxFilesProvider *self)
 {
     HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
-    return r->current_path ? r->current_path : "/";
+    const char *p = gtkhx_files_listing_current_path (r->model);
+    return p ? p : "/";
 }
 
 static const char *
@@ -532,46 +558,34 @@ static void
 remote_reload (HxFilesProvider *self)
 {
     HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
-    remote_send_file_list (r, r->current_path);
+    remote_send_file_list (r, gtkhx_files_listing_current_path (r->model));
 }
 
-/* Walk one component off the end of current_path. Hotline paths
- * use '/' as the separator (server-side it's stored as a
- * length-prefixed array of component pstrings, but the canonical
- * string form uses '/'). Root is "/". */
+/* Walk one component off the end of the current path. The parent
+ * math lives in the Rust model (parent() returns NULL at the root or
+ * when there's no separator to walk back over — the no-op case). */
 static void
 remote_navigate_up (HxFilesProvider *self)
 {
     HxRemoteFilesProvider *r = HX_REMOTE_FILES_PROVIDER (self);
-    char *parent, *slash;
+    char *parent = gtkhx_files_listing_parent (r->model);
 
-    if (!r->current_path || g_strcmp0 (r->current_path, "/") == 0) {
-        return;
+    if (parent) {
+        remote_send_file_list (r, parent);
+        gtkhx_files_string_free (parent);
     }
-
-    parent = g_strdup (r->current_path);
-    slash = strrchr (parent, '/');
-    if (!slash) {
-        g_free (parent);
-        return;
-    }
-    if (slash == parent) {
-        slash[1] = '\0'; /* "/foo" → "/" */
-    } else {
-        *slash = '\0'; /* "/foo/bar" → "/foo" */
-    }
-    remote_send_file_list (r, parent);
-    g_free (parent);
 }
 
-/* Build a server-side child path from current_path + name. */
+/* Build a server-side child path from the current path + name. The
+ * model owns the join; copy the Rust-allocated result into a
+ * g_free-able string so callers keep their g_free convention. */
 static char *
 remote_child_path (HxRemoteFilesProvider *r, const char *name)
 {
-    if (!r->current_path || g_strcmp0 (r->current_path, "/") == 0) {
-        return g_strdup_printf ("/%s", name ? name : "");
-    }
-    return g_strdup_printf ("%s/%s", r->current_path, name ? name : "");
+    char *rs = gtkhx_files_listing_child (r->model, name);
+    char *out = g_strdup (rs ? rs : "");
+    gtkhx_files_string_free (rs);
+    return out;
 }
 
 static gboolean
@@ -595,7 +609,7 @@ remote_mkdir (HxFilesProvider *self, const char *name, GError **err)
 	 * response carries success-or-failure as a task error; if it
 	 * failed, the user sees an empty refresh + the existing
 	 * server-error toast machinery already surfaces a message. */
-    remote_send_file_list (r, r->current_path);
+    remote_send_file_list (r, gtkhx_files_listing_current_path (r->model));
     return TRUE;
 }
 
@@ -615,7 +629,7 @@ remote_delete_entry (HxFilesProvider *self, const char *name, GError **err)
     path = remote_child_path (r, name);
     hx_file_delete (&hx_active_session ()->htlc, path);
     g_free (path);
-    remote_send_file_list (r, r->current_path);
+    remote_send_file_list (r, gtkhx_files_listing_current_path (r->model));
     return TRUE;
 }
 
@@ -638,7 +652,7 @@ remote_rename (HxFilesProvider *self, const char *old_name,
     hx_file_move (&hx_active_session ()->htlc, src, dst);
     g_free (src);
     g_free (dst);
-    remote_send_file_list (r, r->current_path);
+    remote_send_file_list (r, gtkhx_files_listing_current_path (r->model));
     return TRUE;
 }
 
