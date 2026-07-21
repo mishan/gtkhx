@@ -186,6 +186,8 @@ rust_sources = files(
   'crates/hxtls-trust/src/lib.rs',
   'crates/hxtls-trust/src/ffi.rs',
   'crates/hxtls-trust/src/tests.rs',
+  'crates/hxchat-recv/src/lib.rs',
+  'crates/hxchat-recv/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -231,6 +233,7 @@ rust_sources = files(
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
+  'crates/hxchat-recv/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -591,6 +594,17 @@ rust_hxtls_trust_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtls_trust',
+  ],
+)
+
+# Chat-domain receive handlers (chat-invite ignore-gate + GtkhxSession emit,
+# ported from rcv.c). std-only C ABI (hx_chat_*_recv); `cargo test -p hxchat-recv`
+# runs headless against recording doubles. See docs/rust/network-untangling-scope.md.
+rust_hxchat_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxchat_recv',
   ],
 )
 

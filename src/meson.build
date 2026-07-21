@@ -258,6 +258,12 @@ rust_deps = [
   # 1.5 news receive handlers (rcv_task_news* moved out of rcv.c). After
   # hxnews-send: it resolves the rcv_task_newscat_list ref hxnews-send registers.
   rust_hxnews_recv_dep,
+  # chat-domain receive handlers (chat-invite ignore-gate + emit, moved out of
+  # rcv.c). Grouped with hxnews-recv, the other receive-handler crate: both have
+  # undefined refs to gtkhx_session_get_default / gtkhx_session_emit_* and
+  # hx_member_model_*, so they sit ahead of the providers on the link line
+  # (consumer before provider, same static-archive rule as gtkhx-ui → gtkhx-boxed).
+  rust_hxchat_recv_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
   # files-subsystem model: file-type -> icon-id map behind
