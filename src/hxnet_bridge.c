@@ -21,6 +21,7 @@
 #include "compat.h"             /* MAX_HOTLINE_PACKET_LEN */
 #include "hxnet_bridge.h"
 #include "protocol.h"
+#include "hxconn.h"
 #include "proto_helpers.h"
 #include "hotline_proto.h"      /* gtkhx_proto_pack_header (wire header encode) */
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
@@ -81,7 +82,7 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
      * Skip the dispatch when either signal of close is set;
      * the in-flight frame is information the C side no longer
      * cares about. */
-    if (htlc->fd == 0 || !hx_bridge_is_installed ()) {
+    if (hx_conn_fd (htlc) == 0 || !hx_bridge_is_installed ()) {
         return;
     }
 
@@ -171,11 +172,11 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
         g_warning ("hxnet_bridge: actor exited mid-session with reason=%d "
                    "%s (htlc->fd=%d) — see stderr for the Rust-side "
                    "ShutdownReason (io::Error string for StreamError).",
-                   reason, reason_str, htlc->fd);
+                   reason, reason_str, hx_conn_fd (htlc));
     } else {
         g_message ("hxnet_bridge: actor exited with reason=%d %s "
                    "(htlc->fd=%d connected=%d)",
-                   reason, reason_str, htlc->fd, connected);
+                   reason, reason_str, hx_conn_fd (htlc), connected);
     }
 
     /* Drop in-flight shutdowns that the GLib idle queue dispatched
@@ -196,7 +197,7 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
      * cleared first, so this early-returned and hx_htlc_close never
      * ran. fd is -1 on the orchestrator path (no C-visible fd) and the
      * real fd on the legacy path — both non-zero, so both proceed. */
-    if (htlc->fd == 0) {
+    if (hx_conn_fd (htlc) == 0) {
         return;
     }
 

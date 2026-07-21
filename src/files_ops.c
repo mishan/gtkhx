@@ -110,7 +110,7 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     const char *src_dir, *dst_dir;
     char *lpath, *rpath;
 
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return HX_OPS_ERR_NOT_CONNECTED;
     }
     if (!has_access (HL_ACCESS_UPLOAD_FILES)) {
@@ -163,7 +163,7 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     struct htxf_conn *htxf;
     guint64 size;
 
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return HX_OPS_ERR_NOT_CONNECTED;
     }
     if (!has_access (HL_ACCESS_DOWNLOAD_FILES)) {

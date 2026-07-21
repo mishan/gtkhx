@@ -306,6 +306,7 @@ test_hxnet_bridge = executable('test_hxnet_bridge',
   '../src/hxnet_bridge.c',
   '../src/host_port.c',
   '../src/proto_helpers.c',
+  '../src/hxconn.c',
   dependencies        : test_deps + [rust_hotline_proto_dep],
   include_directories : test_inc,
 )

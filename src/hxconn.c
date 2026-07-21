@@ -265,3 +265,15 @@ hx_conn_access_permits (const struct htlc_conn *h, int bit)
 {
     return hl_access_permits ((const guint8 *) &h->access, bit);
 }
+
+int
+hx_conn_fd (const struct htlc_conn *h)
+{
+    return h->fd;
+}
+
+void
+hx_conn_set_fd (struct htlc_conn *h, int v)
+{
+    h->fd = v;
+}

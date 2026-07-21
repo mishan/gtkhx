@@ -651,7 +651,7 @@ hx_quit (void)
     xfers_delete_all ();
     tracker_kill_threads ();
 
-    if (the_session.htlc->fd) {
+    if (hx_conn_fd (the_session.htlc)) {
         hx_htlc_close (the_session.htlc, 1);
     }
 

@@ -36,7 +36,7 @@
 void
 gtkhx_agreement_agree (session *sess)
 {
-    if (sess && sess->htlc->fd) {
+    if (sess && hx_conn_fd (sess->htlc)) {
         hx_send_agreement_agree (sess->htlc);
     }
 }
@@ -44,7 +44,7 @@ gtkhx_agreement_agree (session *sess)
 void
 gtkhx_agreement_disagree (session *sess)
 {
-    if (sess && sess->htlc->fd) {
+    if (sess && hx_conn_fd (sess->htlc)) {
         hx_htlc_close (sess->htlc, 1);
     }
 }
@@ -78,7 +78,7 @@ gtkhx_htlc_chat_window (struct htlc_conn *htlc)
 gboolean
 gtkhx_active_connected (void)
 {
-    return hx_active_session ()->htlc->fd != 0;
+    return hx_conn_fd (hx_active_session ()->htlc) != 0;
 }
 
 /* TRUE if the active session negotiated HTLC_CAP_TEXT_ENCODING (UTF-8 on the
