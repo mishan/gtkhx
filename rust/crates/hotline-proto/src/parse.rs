@@ -266,7 +266,14 @@ pub fn parse_login(buf: &[u8], len: usize, servername: &mut [u8]) -> (LoginInfo,
                 out.version = u16::from_be_bytes([chunk.data[0], chunk.data[1]]);
                 out.seen |= LOGIN_SEEN_VERSION;
             }
-            tag::SERVERNAME => {
+            // Only claim the name when there's a caller buffer to deliver it
+            // into. A zero-length `servername` (the FFI passes one when the C
+            // caller gives NULL / zero capacity, or cap==1 leaving no room past
+            // the reserved NUL) means "name skipped" per the C-ABI contract, so
+            // the SERVERNAME chunk falls through to the ignore arm and
+            // LOGIN_SEEN_SERVERNAME stays unset — a caller must not read a
+            // servername we never wrote.
+            tag::SERVERNAME if !servername.is_empty() => {
                 let n = chunk.data.len().min(servername.len());
                 servername[..n].copy_from_slice(&chunk.data[..n]);
                 cr2lf(&mut servername[..n]);
@@ -2660,6 +2667,24 @@ mod tests {
         let (_li, sn_len) = parse_login(&m, m.len(), &mut sn);
         assert_eq!(sn_len, 16);
         assert_eq!(&sn[..], &[b'x'; 16]);
+    }
+
+    #[test]
+    fn login_servername_empty_buffer_skips_name() {
+        // A zero-capacity servername buffer (what the FFI passes for a
+        // NULL / zero-cap C caller) must NOT set LOGIN_SEEN_SERVERNAME — the
+        // caller has no delivered name to read. Other fields still parse.
+        let mut body = Vec::new();
+        body.extend(chunk(tag::UID, &9u16.to_be_bytes()));
+        body.extend(chunk(tag::SERVERNAME, b"My Server"));
+        let m = msg(0x0000_0000, 1, 0, &body);
+        let mut sn: [u8; 0] = [];
+        let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
+        assert_eq!(li.seen & LOGIN_SEEN_SERVERNAME, 0, "name skipped, bit unset");
+        assert_eq!(sn_len, 0);
+        // The UID chunk before it still lands, so the walk isn't derailed.
+        assert_eq!(li.seen & LOGIN_SEEN_UID, LOGIN_SEEN_UID);
+        assert_eq!(li.uid, 9);
     }
 
     #[test]
