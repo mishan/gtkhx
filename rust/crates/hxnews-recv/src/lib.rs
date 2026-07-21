@@ -43,6 +43,35 @@ extern "C" {
     fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void);
     fn gtkhx_session_emit_news_folder(self_: *mut c_void, gfnews: *mut c_void);
     fn gtkhx_session_emit_news_thread(self_: *mut c_void, post: *mut c_void);
+    fn gtkhx_session_emit_news_post(self_: *mut c_void, htlc: *mut c_void, news: *const u8, len: u16);
+    fn gtkhx_session_emit_news_file(self_: *mut c_void, htlc: *mut c_void, news: *const u8, len: u16);
+}
+
+/// `void hx_news_post_recv (htlc, bytes, len)` — emit the flat-news `news-post`
+/// signal for one appended NEWSDATA chunk. The C handler (`hx_rcv_news_post`)
+/// keeps the `gtkhx_proto_walk_news_post` chunk walk and calls this once per
+/// sanitised chunk; the signal emit is the only thing that moved here, so
+/// `rcv.c` no longer touches `GtkhxSession` for flat news.
+///
+/// # Safety
+/// `bytes` valid for `len` bytes (the sanitised chunk body); `htlc` is only
+/// forwarded to the signal.
+#[no_mangle]
+pub unsafe extern "C" fn hx_news_post_recv(htlc: *mut c_void, bytes: *const u8, len: usize) {
+    gtkhx_session_emit_news_post(gtkhx_session_get_default(), htlc, bytes, len as u16);
+}
+
+/// `void hx_news_file_recv (htlc, bytes, len)` — emit the `news-file` signal
+/// carrying the whole flat-news document (a `NEWS_FILE` task reply). The C
+/// handler (`rcv_task_news_file`) keeps the `hx_news_file_extract` parse into
+/// its scratch buffer and calls this to publish it.
+///
+/// # Safety
+/// `bytes` valid for `len` bytes (the sanitised document); `htlc` is only
+/// forwarded to the signal.
+#[no_mangle]
+pub unsafe extern "C" fn hx_news_file_recv(htlc: *mut c_void, bytes: *const u8, len: usize) {
+    gtkhx_session_emit_news_file(gtkhx_session_get_default(), htlc, bytes, len as u16);
 }
 
 /// `#[repr(C)]` mirror of C's `struct gtkhx_proto_news_thread_reply`

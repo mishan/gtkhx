@@ -117,3 +117,26 @@ fn system_line_uid_zero_always_emits() {
     assert_eq!(chat(0), 1);
     assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(fake_event()));
 }
+
+#[test]
+fn subject_discovery_emits_unconditionally() {
+    // The room-load discovery path has no change-gate: always publish.
+    test_env::reset();
+    let subj = CString::new("Welcome").unwrap();
+    unsafe { hx_chat_subject_emit(std::ptr::null_mut(), 5, subj.as_ptr()) };
+    assert_eq!(
+        test_env::SUBJECT_EMITTED.with(|c| c.take()),
+        Some((5, b"Welcome".to_vec()))
+    );
+}
+
+#[test]
+fn chat_history_batch_forwards_array_and_flag() {
+    test_env::reset();
+    let entries = 0xE117_usize as *mut std::os::raw::c_void;
+    unsafe { hx_chat_history_recv(std::ptr::null_mut(), 0, entries, 1) };
+    assert_eq!(
+        test_env::HISTORY_EMITTED.with(|c| c.take()),
+        Some((0, entries, true))
+    );
+}

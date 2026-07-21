@@ -59,6 +59,17 @@ extern "C" {
         color: u16,
         nick_color: u32,
     );
+    /// `GtkhxSession::user-info (uid, nam, info, len)` — a USER_INFO reply.
+    fn gtkhx_session_emit_user_info(
+        self_: *mut c_void,
+        uid: u16,
+        nam: *const c_char,
+        info: *const c_char,
+        len: u16,
+    );
+    /// `GtkhxSession::self-updated (htlc)` — our own access bits / uid were
+    /// (re)parsed from a SELFINFO reply.
+    fn gtkhx_session_emit_self_updated(self_: *mut c_void, htlc: *mut c_void);
 }
 
 /// Result of [`hx_user_apply_recv`] — tells the C side what (if anything) it
@@ -168,6 +179,34 @@ pub unsafe extern "C" fn hx_user_part_recv(
     1
 }
 
+/// `void hx_user_info_recv (uid, name, info, len)` — emit the `user-info`
+/// signal for a USER_INFO reply. The C handler keeps the parse (already Rust,
+/// via `gtkhx_proto_parse_user_info`) and the `name_len && info_len` gate that
+/// filters unanswered server frames; this publishes the parsed pair.
+///
+/// # Safety
+/// `name` / `info` are valid C strings (`info` valid for at least `len` bytes).
+#[no_mangle]
+pub unsafe extern "C" fn hx_user_info_recv(
+    uid: u16,
+    name: *const c_char,
+    info: *const c_char,
+    len: u16,
+) {
+    gtkhx_session_emit_user_info(gtkhx_session_get_default(), uid, name, info, len);
+}
+
+/// `void hx_selfinfo_recv (htlc)` — emit the `self-updated` signal after a
+/// SELFINFO reply re-parsed our own access bits / uid. The C handler keeps the
+/// chunk parse and the `logged_in` flag; this is the view-notify hop.
+///
+/// # Safety
+/// `htlc` is only forwarded to the signal (never dereferenced here).
+#[no_mangle]
+pub unsafe extern "C" fn hx_selfinfo_recv(htlc: *mut c_void) {
+    gtkhx_session_emit_self_updated(gtkhx_session_get_default(), htlc);
+}
+
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
@@ -204,6 +243,15 @@ pub(crate) mod test_env {
             icon: u16,
             color: u16,
         },
+        /// A USER_INFO reply was published.
+        Info {
+            uid: u16,
+            name: Vec<u8>,
+            info: Vec<u8>,
+            len: u16,
+        },
+        /// A SELFINFO reply refreshed our own access/uid.
+        SelfUpdated,
     }
 
     thread_local! {
@@ -294,6 +342,27 @@ unsafe fn gtkhx_session_emit_user_delete(
         uid,
         incremental: incremental != 0,
     });
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_session_emit_user_info(
+    _self_: *mut c_void,
+    uid: u16,
+    nam: *const c_char,
+    info: *const c_char,
+    len: u16,
+) {
+    test_env::record(test_env::Emit::Info {
+        uid,
+        name: cbytes(nam),
+        info: cbytes(info),
+        len,
+    });
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_session_emit_self_updated(_self_: *mut c_void, _htlc: *mut c_void) {
+    test_env::record(test_env::Emit::SelfUpdated);
 }
 
 #[cfg(test)]

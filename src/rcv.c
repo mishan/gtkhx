@@ -507,14 +507,16 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
  * hx_output.news_post was called with just the new chunk's `_len`
  * bytes regardless of how much had been accumulated. See the
  * walker comment in proto_helpers.h for the full breakdown. */
+/* flat-news chunk emit — Rust hxnews-recv crate. The chunk walk stays C
+ * (gtkhx_proto_walk_news_post); hx_news_post_recv publishes the news-post
+ * signal (the NEWS_POST chime plays off it via the sound_events subscriber). */
+extern void hx_news_post_recv (struct htlc_conn *htlc, const char *bytes,
+                               gsize len);
+
 static void
 news_post_emit (void *user, const char *bytes, gsize len)
 {
-    struct htlc_conn *htlc = user;
-    gtkhx_session_emit_news_post (gtkhx_session_get_default (), htlc,
-                                  (char *)bytes, (guint16)len);
-    /* NEWS_POST chime played by the sound_events subscriber off the
-     * "news-post" signal. */
+    hx_news_post_recv ((struct htlc_conn *) user, bytes, len);
 }
 
 void
@@ -663,6 +665,10 @@ extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
                                int skip_self_create, int incremental);
 extern int hx_user_part_recv (struct htlc_conn *htlc, void *chat,
                               void *member_model, guint16 uid);
+/* USER_INFO reply + SELFINFO self-updated emits — Rust hxuser-recv crate. */
+extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
+                               guint16 len);
+extern void hx_selfinfo_recv (struct htlc_conn *htlc);
 
 void
 hx_rcv_user_change (struct htlc_conn *htlc)
@@ -900,8 +906,8 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 
     /* Access bits just landed; the view refreshes toolbar-button
      * sensitivity (kick/ban etc. gate on the access bitmap) off the
-     * "self-updated" signal rather than an inline setbtns here. */
-    gtkhx_session_emit_self_updated (gtkhx_session_get_default (), htlc);
+     * "self-updated" signal. The emit lives in the Rust hxuser-recv crate. */
+    hx_selfinfo_recv (htlc);
 
     /* Note: SELFINFO is NOT where we fire post-login fetches. In
 	 * the 1.5 flow SELFINFO (TranUserAccess) arrives BEFORE the
@@ -964,6 +970,11 @@ hx_rcv_dump (struct htlc_conn *htlc)
  * they've stamped ref/size/queue onto htxf. */
 extern void hx_xfer_announce (struct htlc_conn *htlc, struct htxf_conn *htxf,
                               guint32 queue);
+/* file-info reply emit — Rust hxxfer-recv crate. */
+extern void hx_file_info_recv (const char *path, const char *name,
+                               const char *creator, const char *type,
+                               const char *comments, const char *modified,
+                               const char *created, guint64 size);
 
 void
 hx_rcv_xfer_queue (struct htlc_conn *htlc)
@@ -1826,6 +1837,10 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     }
 }
 
+/* news-file emit — Rust hxnews-recv crate. */
+extern void hx_news_file_recv (struct htlc_conn *htlc, const char *bytes,
+                               gsize len);
+
 void
 rcv_task_news_file (struct htlc_conn *htlc)
 {
@@ -1842,8 +1857,8 @@ rcv_task_news_file (struct htlc_conn *htlc)
         news_len = 0;
         news_buf[0] = 0;
     }
-    gtkhx_session_emit_news_file (gtkhx_session_get_default (), htlc,
-                                  (char *)news_buf, news_len);
+    /* news-file emit — Rust hxnews-recv crate. */
+    hx_news_file_recv (htlc, (char *)news_buf, news_len);
 }
 
 /* GIF-icons extension (fogWraith GIF-Icons.md). Parsing lives in the
@@ -1851,31 +1866,12 @@ rcv_task_news_file (struct htlc_conn *htlc)
  * shims); these handlers pass htlc->in.buf/pos straight in and only
  * emit GtkhxSession signals — no chunk walking on the C side. */
 
-/* Emit gif-icon-data, upholding the signal's "raw GIF bytes or empty"
- * contract. A non-empty payload that fails the GIF87a/89a signature
- * check is network-supplied garbage (buggy / hostile server) — we drop
- * it to a clear (len 0) so no subscriber tries to decode it and any
- * stale avatar is removed. (The avatar decoder re-validates as
- * defence-in-depth, but the signal itself must not carry non-GIF
- * bytes.) */
-static void
-emit_gif_avatar_validated (GtkhxSession *sess, struct htlc_conn *htlc,
-                           guint16 uid, const guint8 *gif, guint len)
-{
-    if (len == 0) {
-        /* Cleared — never forward a (possibly dangling) non-NULL ptr for
-		 * an empty payload; subscribers see (NULL, 0). */
-        gif = NULL;
-    } else if (!gtkhx_proto_gif_icon_is_gif (gif, len)) {
-        debug_log ("icon",
-                   "avatar payload for uid=%u is not a GIF (%u bytes); "
-                   "treating as cleared",
-                   (unsigned) uid, len);
-        gif = NULL;
-        len = 0;
-    }
-    gtkhx_session_emit_gif_icon_data (sess, htlc, uid, gif, len);
-}
+/* gif-icon-data validation + emit lives in the Rust hxicon-recv crate: it
+ * upholds the signal's "raw GIF bytes or empty" contract — a zero-length or
+ * non-GIF-signed payload is coerced to a cleared (NULL, 0) so no subscriber
+ * decodes network garbage or a dangling pointer. */
+extern void hx_icon_data_recv (struct htlc_conn *htlc, guint16 uid,
+                               const guint8 *gif, guint32 len);
 
 /* ICON_GET (1863) task reply: UID + ICON_GIF. */
 void
@@ -1893,8 +1889,7 @@ rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr)
     htlc->gif_icons_state = GIF_ICONS_SUPPORTED;
     debug_log ("icon", "ICON_GET reply: uid=%u gif_len=%zu", (unsigned) e.uid,
                e.gif_len);
-    emit_gif_avatar_validated (gtkhx_session_get_default (), htlc, e.uid,
-                               e.gif_ptr, (guint) e.gif_len);
+    hx_icon_data_recv (htlc, e.uid, e.gif_ptr, (guint32) e.gif_len);
 }
 
 /* ICON_GETLIST (1861) task reply: 0..N packed ICON_LIST entries. Also
@@ -1961,11 +1956,9 @@ rcv_task_icon_getlist (struct htlc_conn *htlc)
     if (got > n) {
         got = n; /* defensive: never iterate past the allocation */
     }
-    GtkhxSession *sess = gtkhx_session_get_default ();
     for (size_t i = 0; i < got; i++) {
-        emit_gif_avatar_validated (sess, htlc, entries[i].uid,
-                                   entries[i].gif_ptr,
-                                   (guint) entries[i].gif_len);
+        hx_icon_data_recv (htlc, entries[i].uid, entries[i].gif_ptr,
+                           (guint32) entries[i].gif_len);
     }
     g_free (entries);
 }
@@ -1993,6 +1986,14 @@ hx_rcv_icon_change (struct htlc_conn *htlc)
  * array (plus has_more) is handed to the chat-history-batch signal
  * subscribers. After every subscriber returns, the array is
  * unref'd and entries free along with it. */
+
+/* chat-history-batch + initial-subject-discovery emits — Rust hxchat-recv
+ * crate (rust/crates/hxchat-recv). */
+extern void hx_chat_history_recv (struct htlc_conn *htlc, guint32 cid,
+                                  GPtrArray *entries, int has_more);
+extern void hx_chat_subject_emit (struct htlc_conn *htlc, guint32 cid,
+                                  const char *subject);
+
 void
 rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
 {
@@ -2051,8 +2052,8 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
                cid, entries->len, (int) has_more,
                htlc->chat_history_last_msgid);
 
-    gtkhx_session_emit_chat_history_batch (gtkhx_session_get_default (), htlc,
-                                           cid, entries, has_more);
+    /* chat-history-batch emit — Rust hxchat-recv crate. */
+    hx_chat_history_recv (htlc, cid, entries, has_more);
 
     /* Free the array (and via free_func, every entry inside) now
 	 * that subscribers have had their pass. */
@@ -2120,12 +2121,11 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
         else if (_type == HTLS_DATA_CHAT_SUBJECT) {
             guint16 slen = (_len > 255) ? 255 : _len;
             hx_chat_set_subject (chat, (const char *) (dh->data), slen);
-            /* route through the view
-			 * vtable rather than poking the subject widget
-			 * directly. Initial-subject-discovery path — no
-			 * 'Subject Changed to X' log line. */
-            gtkhx_session_emit_chat_subject (gtkhx_session_get_default (), htlc,
-                                             hx_chat_cid (chat), hx_chat_subject (chat));
+            /* Initial-subject-discovery path — the Rust hxchat-recv crate
+			 * publishes chat-subject unconditionally (no 'Subject Changed
+			 * to X' log line). */
+            hx_chat_subject_emit (htlc, hx_chat_cid (chat),
+                                  hx_chat_subject (chat));
         }
     }
     dh_end ();
@@ -2171,8 +2171,8 @@ rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
                                            sizeof (name), (uint8_t *)info,
                                            sizeof (info), &ui);
     if (ok && ui.name_len && ui.info_len) {
-        gtkhx_session_emit_user_info (gtkhx_session_get_default (), uid, name,
-                                      info, ui.info_len);
+        /* user-info emit — Rust hxuser-recv crate. */
+        hx_user_info_recv (uid, name, info, ui.info_len);
     }
 }
 
@@ -2390,9 +2390,9 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
     hx_format_hotline_date (f.date_create, created, sizeof created);
     hx_format_hotline_date (f.date_modify, modified, sizeof modified);
 
-    gtkhx_session_emit_file_info (gtkhx_session_get_default (), path, name,
-                                  crea, type, comment, modified, created,
-                                  f.size64_seen ? f.size64 : (guint64)f.size);
+    /* file-info emit — Rust hxxfer-recv crate. */
+    hx_file_info_recv (path, name, crea, type, comment, modified, created,
+                       f.size64_seen ? f.size64 : (guint64)f.size);
 }
 
 /* Adapter matching hx_preview_cancel_fn (void (*)(void *)).

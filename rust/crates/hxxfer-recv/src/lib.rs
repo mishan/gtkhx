@@ -11,7 +11,7 @@
 //! stamping, the per-reply wire parse, the error/retry handling); they call in
 //! only once their `htxf` is ready to go.
 
-use std::os::raw::c_void;
+use std::os::raw::{c_char, c_void};
 
 #[cfg(not(test))]
 extern "C" {
@@ -25,6 +25,52 @@ extern "C" {
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
     /// Start writing the transfer over its HTXF subchannel (xfers.c).
     fn xfer_ready_write(htxf: *mut c_void);
+    /// Fire `GtkhxSession::file-info (path, name, creator, type, comments,
+    /// modified, created, size)` (gtkhx-session).
+    #[allow(clippy::too_many_arguments)]
+    fn gtkhx_session_emit_file_info(
+        self_: *mut c_void,
+        path: *const c_char,
+        name: *const c_char,
+        creator: *const c_char,
+        type_: *const c_char,
+        comments: *const c_char,
+        modified: *const c_char,
+        created: *const c_char,
+        size: u64,
+    );
+}
+
+/// `void hx_file_info_recv (path, name, creator, type, comments, modified,
+/// created, size)` — publish a `file-info` reply (`rcv_task_file_getinfo`). The
+/// C handler keeps the parse (already Rust, `gtkhx_proto_parse_file_getinfo`)
+/// and the Hotline-date formatting; this is the view-notify hop.
+///
+/// # Safety
+/// All string args are NUL-terminated C strings.
+#[no_mangle]
+#[allow(clippy::too_many_arguments)]
+pub unsafe extern "C" fn hx_file_info_recv(
+    path: *const c_char,
+    name: *const c_char,
+    creator: *const c_char,
+    type_: *const c_char,
+    comments: *const c_char,
+    modified: *const c_char,
+    created: *const c_char,
+    size: u64,
+) {
+    gtkhx_session_emit_file_info(
+        gtkhx_session_get_default(),
+        path,
+        name,
+        creator,
+        type_,
+        comments,
+        modified,
+        created,
+        size,
+    );
 }
 
 /// `void hx_xfer_announce (htlc, htxf, queue)` — the shared file-transfer reply
@@ -53,18 +99,21 @@ pub unsafe extern "C" fn hx_xfer_announce(htlc: *mut c_void, htxf: *mut c_void, 
 
 #[cfg(test)]
 pub(crate) mod test_env {
-    use std::cell::Cell;
+    use std::cell::{Cell, RefCell};
 
     thread_local! {
         /// The `htxf` pointer of the last emitted xfer-queue signal, or None.
         pub static EMITTED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
         /// The `htxf` pointer passed to the last xfer_ready_write, or None.
         pub static STARTED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
+        /// The last emitted file-info as (name-bytes, size), or None.
+        pub static FILE_INFO: RefCell<Option<(Vec<u8>, u64)>> = const { RefCell::new(None) };
     }
 
     pub fn reset() {
         EMITTED.with(|c| c.set(None));
         STARTED.with(|c| c.set(None));
+        FILE_INFO.with(|c| *c.borrow_mut() = None);
     }
 }
 
@@ -86,6 +135,27 @@ unsafe fn gtkhx_session_emit_xfer_queue(_self_: *mut c_void, _sess: *mut c_void,
 #[cfg(test)]
 unsafe fn xfer_ready_write(htxf: *mut c_void) {
     test_env::STARTED.with(|c| c.set(Some(htxf)));
+}
+
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn gtkhx_session_emit_file_info(
+    _self_: *mut c_void,
+    _path: *const c_char,
+    name: *const c_char,
+    _creator: *const c_char,
+    _type_: *const c_char,
+    _comments: *const c_char,
+    _modified: *const c_char,
+    _created: *const c_char,
+    size: u64,
+) {
+    let name = if name.is_null() {
+        Vec::new()
+    } else {
+        std::ffi::CStr::from_ptr(name).to_bytes().to_vec()
+    };
+    test_env::FILE_INFO.with(|c| *c.borrow_mut() = Some((name, size)));
 }
 
 #[cfg(test)]

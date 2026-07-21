@@ -29,6 +29,15 @@ extern "C" {
     );
     /// Fire `GtkhxSession::chat (htlc, HxChatEvent* boxed)` (gtkhx-session).
     fn gtkhx_session_emit_chat(self_: *mut c_void, htlc: *mut c_void, event: *mut c_void);
+    /// Fire `GtkhxSession::chat-history-batch (htlc, cid, GPtrArray*, has_more)`
+    /// (gtkhx-session).
+    fn gtkhx_session_emit_chat_history_batch(
+        self_: *mut c_void,
+        htlc: *mut c_void,
+        cid: u32,
+        entries: *mut c_void,
+        has_more: c_int,
+    );
     /// Whether `uid` is on the per-chat ignore list (hxmember-model).
     fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
 }
@@ -97,6 +106,42 @@ pub unsafe extern "C" fn hx_chat_subject_recv(
     1
 }
 
+/// `void hx_chat_subject_emit (htlc, cid, subject)` — the initial-subject-
+/// discovery emit (the `rcv_task_user_list` room-load path). Unlike
+/// [`hx_chat_subject_recv`], this has no change-gate: the room just came into
+/// view and the caller has already set the model, so the subject is always
+/// published to refresh the widget (with no "Subject Changed to" log line).
+///
+/// # Safety
+/// `subject` is a NUL-terminated C string; `htlc` is opaque and only forwarded.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_subject_emit(
+    htlc: *mut c_void,
+    cid: u32,
+    subject: *const c_char,
+) {
+    gtkhx_session_emit_chat_subject(gtkhx_session_get_default(), htlc, cid, subject);
+}
+
+/// `void hx_chat_history_recv (htlc, cid, entries, has_more)` — publish a
+/// `chat-history-batch` reply. The C handler keeps the chunk walk that builds
+/// the `GPtrArray<HxHistoryEntry*>` and advances the newest-msgid cursor; this
+/// is the view-notify hop. The array is borrowed for the emit only — the C side
+/// still owns and frees it after.
+///
+/// # Safety
+/// `entries` is a valid `GPtrArray *` live for the duration of the call; `htlc`
+/// is opaque and only forwarded to the signal.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_history_recv(
+    htlc: *mut c_void,
+    cid: u32,
+    entries: *mut c_void,
+    has_more: c_int,
+) {
+    gtkhx_session_emit_chat_history_batch(gtkhx_session_get_default(), htlc, cid, entries, has_more);
+}
+
 /// `int hx_chat_recv (htlc, member_model, uid, event)` — the public-chat line
 /// receive path: drop the line when its sender (`uid`) is on the ignore list,
 /// otherwise emit the `chat` signal carrying the boxed `HxChatEvent`. Returns 1
@@ -139,6 +184,10 @@ pub(crate) mod test_env {
         pub static SUBJECT_EMITTED: Cell<Option<(u32, Vec<u8>)>> = const { Cell::new(None) };
         /// Records the boxed-event pointer of the last emitted `chat`, or None.
         pub static CHAT_EMITTED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
+        /// Records the last emitted chat-history-batch as (cid, entries-ptr,
+        /// has_more), or None.
+        pub static HISTORY_EMITTED: Cell<Option<(u32, *mut std::os::raw::c_void, bool)>> =
+            const { Cell::new(None) };
     }
 
     pub fn reset() {
@@ -146,6 +195,7 @@ pub(crate) mod test_env {
         EMITTED.with(|c| c.set(None));
         SUBJECT_EMITTED.with(|c| c.set(None));
         CHAT_EMITTED.with(|c| c.set(None));
+        HISTORY_EMITTED.with(|c| c.set(None));
     }
 }
 
@@ -187,6 +237,17 @@ unsafe fn gtkhx_session_emit_chat_subject(
 #[cfg(test)]
 unsafe fn gtkhx_session_emit_chat(_self_: *mut c_void, _htlc: *mut c_void, event: *mut c_void) {
     test_env::CHAT_EMITTED.with(|c| c.set(Some(event)));
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_session_emit_chat_history_batch(
+    _self_: *mut c_void,
+    _htlc: *mut c_void,
+    cid: u32,
+    entries: *mut c_void,
+    has_more: c_int,
+) {
+    test_env::HISTORY_EMITTED.with(|c| c.set(Some((cid, entries, has_more != 0))));
 }
 
 #[cfg(test)]
