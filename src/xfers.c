@@ -62,6 +62,9 @@ static void xfer_remove_from_list (struct htxf_conn *htxf);
 extern size_t gtkhx_ffo_info_block_len (guint8 b38, guint8 b39);
 extern guint64 gtkhx_ffo_fork_len (const guint8 *marker, size_t marker_len,
                                    int large);
+extern void gtkhx_ffo_pack_fork_header (const guint8 *tag, size_t tag_len,
+                                        guint64 length, int large,
+                                        guint8 *out, size_t out_len);
 
 /* Fields the Rust FILP parser fills for file_recv_one. Layout mirrors
  * hxfiles-xfer's #[repr(C)] GtkhxFilpInfo; the offsets are pinned on
@@ -1291,20 +1294,13 @@ TYPECREA\
     buf[115] = 0;
     buf[116] = fi.comlen;
     memcpy (&buf[117], fi.comment, fi.comlen);
-    /* DATA fork header. Legacy mode: 16 bytes of "DATA" + zeros +
-	 * 32-bit length. Large-file mode (folder per-file in large-
-	 * file mode): split encoding — high 32 bits in the Compression
-	 * slot at offset 4-7, low 32 bits in DataSize at offset 12-15. */
-    memcpy (&buf[117 + fi.comlen], "DATA\0\0\0\0\0\0\0\0", 12);
-    {
-        guint64 fork_len = htxf->data_size - htxf->data_pos;
-        guint32 lo = (guint32)(fork_len & 0xFFFFFFFFu);
-        HN32 (&buf[129 + fi.comlen], &lo);
-        if (htxf->opt.large) {
-            guint32 hi = (guint32)(fork_len >> 32);
-            HN32 (&buf[121 + fi.comlen], &hi);
-        }
-    }
+    /* DATA fork header — 16 bytes at buf[117+comlen], packed by the
+	 * hxfiles-xfer encoder (the twin of the receive-side fork_len
+	 * decode): "DATA" + the legacy 32-bit length, or the large-file
+	 * high32/low32 split when opt.large. */
+    gtkhx_ffo_pack_fork_header ((const guint8 *)"DATA", 4,
+                                htxf->data_size - htxf->data_pos,
+                                htxf->opt.large, &buf[117 + fi.comlen], 16);
     if (htxf_io_write (htxf, buf, 133 + fi.comlen) != 133 + (ssize_t)fi.comlen) {
         return errno ? errno : EIO;
     }
@@ -1326,17 +1322,9 @@ TYPECREA\
     close (f);
 
 put_rsrc:
-    /* MACR fork header — same legacy / split-encoding choice as
-	 * the DATA fork above. */
-    memcpy (buf, "MACR\0\0\0\0\0\0\0\0", 12);
-    {
-        guint32 lo = (guint32)(htxf->rsrc_size & 0xFFFFFFFFu);
-        HN32 (&buf[12], &lo);
-        if (htxf->opt.large) {
-            guint32 hi = (guint32)(htxf->rsrc_size >> 32);
-            HN32 (&buf[4], &hi);
-        }
-    }
+    /* MACR fork header — 16 bytes, same encoder as the DATA fork. */
+    gtkhx_ffo_pack_fork_header ((const guint8 *)"MACR", 4, htxf->rsrc_size,
+                                htxf->opt.large, buf, 16);
     if (htxf_io_write (htxf, buf, 16) != 16) {
         /* Same behaviour as the inlined version: a short write at
 		 * the MACR-marker boundary is treated as a clean stop (the

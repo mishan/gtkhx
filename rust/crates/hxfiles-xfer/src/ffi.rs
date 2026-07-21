@@ -72,6 +72,40 @@ pub unsafe extern "C" fn gtkhx_ffo_fork_len(
     ffo::fork_len(&m, large != 0)
 }
 
+/// Pack a 16-byte fork header into `out` — the encode shim behind the
+/// DATA / MACR marker writes in `src/xfers.c::file_send_one`. `tag`
+/// supplies the 4-byte marker ("DATA" / "MACR"); `large != 0` writes the
+/// high 32 bits into the Compression slot at offset 4 (else only the low
+/// 32 bits at offset 12). The byte-for-byte twin of the receive-side
+/// [`gtkhx_ffo_fork_len`] decode.
+///
+/// # Safety
+/// `tag` must point to at least 4 readable bytes and `out` to at least
+/// 16 writable bytes; short buffers (a caller bug) are a no-op.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_ffo_pack_fork_header(
+    tag: *const u8,
+    tag_len: usize,
+    length: u64,
+    large: c_int,
+    out: *mut u8,
+    out_len: usize,
+) {
+    if tag.is_null() || tag_len < 4 || out.is_null() || out_len < ffo::FORK_HEADER_LEN {
+        return;
+    }
+    let mut t = [0u8; 4];
+    // SAFETY: non-null with >= 4 readable bytes per the caller contract.
+    unsafe {
+        core::ptr::copy_nonoverlapping(tag, t.as_mut_ptr(), 4);
+    }
+    let hdr = ffo::pack_fork_header(&t, length, large != 0);
+    // SAFETY: non-null with >= FORK_HEADER_LEN writable bytes.
+    unsafe {
+        core::ptr::copy_nonoverlapping(hdr.as_ptr(), out, ffo::FORK_HEADER_LEN);
+    }
+}
+
 /// Parse a FILP info block into the C-ABI struct — the shim behind the
 /// field extraction in `file_recv_one` (type/creator, timestamps munged
 /// mac→header, comment, and the trailing DATA fork length). `large != 0`
@@ -150,6 +184,30 @@ mod tests {
             assert_eq!(gtkhx_ffo_fork_len(marker.as_ptr(), 8, 1), 0);
             assert_eq!(gtkhx_ffo_fork_len(core::ptr::null(), 16, 1), 0);
         }
+    }
+
+    #[test]
+    fn pack_fork_header_ffi_roundtrips_with_decode() {
+        let mut out = [0u8; 16];
+        unsafe {
+            gtkhx_ffo_pack_fork_header(
+                b"MACR".as_ptr(),
+                4,
+                0x1_4000_0000,
+                1,
+                out.as_mut_ptr(),
+                out.len(),
+            );
+            assert_eq!(&out[0..4], b"MACR");
+            // decode via the receive-side shim must recover the length
+            assert_eq!(gtkhx_ffo_fork_len(out.as_ptr(), out.len(), 1), 0x1_4000_0000);
+        }
+        // short out buffer is a no-op (leaves it zeroed)
+        let mut small = [0u8; 8];
+        unsafe {
+            gtkhx_ffo_pack_fork_header(b"DATA".as_ptr(), 4, 1, 0, small.as_mut_ptr(), small.len());
+        }
+        assert_eq!(small, [0u8; 8]);
     }
 
     #[test]
