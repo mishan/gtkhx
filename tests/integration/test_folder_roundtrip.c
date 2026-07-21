@@ -151,6 +151,146 @@ assert_file_is (const char *root, const char *rel, const char *body)
     g_assert_cmpmem (got, glen, body, strlen (body));
 }
 
+/* Encode a multi-component HTLC_DATA_DIR blob for comps[0..n): a u16 BE
+ * count, then per component a reserved byte + u16 BE name length + name.
+ * (integration_encode_hldir_one only does a single component.) */
+static gsize
+build_hldir (guint8 *out, const char *const *comps, int n)
+{
+    guint16 count_be = htons ((guint16)n);
+    memcpy (out, &count_be, 2);
+    gsize pos = 2;
+    for (int i = 0; i < n; i++) {
+        gsize nl = strlen (comps[i]);
+        guint16 nl_be = htons ((guint16)nl);
+        out[pos++] = 0;
+        memcpy (out + pos, &nl_be, 2);
+        pos += 2;
+        memcpy (out + pos, comps[i], nl);
+        pos += nl;
+    }
+    return pos;
+}
+
+/* FILE_GET a single file at DIR=comps[0..ncomp)/<fname> via the real
+ * file_recv_one; return its contents (caller frees) or NULL. */
+static char *
+get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
+                 int ncomp, const char *fname, gsize *out_len)
+{
+    guint8 hldir[512];
+    gsize hldir_len = build_hldir (hldir, comps, ncomp);
+    guint32 our_trans = htlc->trans;
+    if (!integration_send_message (
+            ctrl, htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/2,
+            (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname,
+            (int)HTLC_DATA_DIR, (int)hldir_len, hldir)) {
+        return NULL;
+    }
+    if (!integration_drain_until_task_trans (ctrl, htlc, our_trans, 64)
+        || (hdr_flag (htlc) & 1)) {
+        return NULL;
+    }
+    struct hx_htxf_reply reply = { 0 };
+    hx_htxf_reply_extract (htlc, &reply);
+    if (!reply.ref || !reply.size) {
+        return NULL;
+    }
+
+    int xfd = integration_connect_xfer ();
+    if (xfd < 0) {
+        return NULL;
+    }
+    if (!integration_send_xfer_hdr (xfd, reply.ref, (guint32)reply.size)) {
+        integration_close (xfd);
+        return NULL;
+    }
+    HtxfConn *ch = hxnet_htxf_open (xfd, 0, (const guint8 *)xfer_host (),
+                                    strlen (xfer_host ()), NULL, 0, NULL,
+                                    reply.ref, NULL, NULL);
+    if (!ch) {
+        integration_close (xfd);
+        return NULL;
+    }
+    g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx_frt_get_XXXXXX", NULL);
+    if (!tmpdir) {
+        hxnet_htxf_close (ch);
+        return NULL;
+    }
+    struct htxf_conn htxf;
+    memset (&htxf, 0, sizeof (htxf));
+    htxf_io_init (&htxf);
+    htxf.hx = ch;
+    htxf.total_size = reply.size;
+    g_snprintf (htxf.path, sizeof (htxf.path), "%s/got", tmpdir);
+
+    guint8 buf[1024];
+    char *content = NULL;
+    if (file_recv_one (&htxf, reply.size, buf, noop_progress) == 0) {
+        if (!g_file_get_contents (htxf.path, &content, out_len, NULL)) {
+            content = NULL;
+        }
+    }
+    htxf_io_release (&htxf);
+    unlink (htxf.path);
+    g_rmdir (tmpdir);
+    return content;
+}
+
+/* PUTFOLDER + drive folder_send_all to upload the local tree at `srcroot`
+ * to Uploads/<folder>. Returns TRUE on a clean upload. */
+static gboolean
+upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
+                    const char *folder)
+{
+    guint32 nfiles = 0;
+    guint64 total = 0;
+    tree_totals (srcroot, &nfiles, &total);
+
+    guint8 hldir[64];
+    gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
+    guint32 size_be = htonl ((guint32)total);
+    guint32 nfiles_be = htonl (nfiles);
+    guint32 our_trans = htlc->trans;
+    if (!integration_send_message (
+            fd, htlc, HTLC_HDR_FILE_PUTFOLDER, /*flag=*/0, /*hc=*/4,
+            (int)HTLC_DATA_FILE_NAME, (int)strlen (folder), (guint8 *)folder,
+            (int)HTLC_DATA_DIR, (int)hldir_len, hldir,
+            (int)HTLC_DATA_HTXF_SIZE, (int)sizeof (size_be), &size_be,
+            (int)HTLC_DATA_FILE_NFILES, (int)sizeof (nfiles_be), &nfiles_be)) {
+        return FALSE;
+    }
+    if (!integration_drain_until_task_trans (fd, htlc, our_trans, 64)
+        || (hdr_flag (htlc) & 1)) {
+        return FALSE;
+    }
+    guint32 xfer_ref = 0;
+    dh_start (htlc)
+    {
+        if (_type == HTLS_DATA_HTXF_REF) {
+            dh_getint (xfer_ref);
+        }
+    }
+    dh_end ();
+    if (!xfer_ref) {
+        return FALSE;
+    }
+    HtxfConn *ch = open_folder_channel (xfer_ref, total);
+    if (!ch) {
+        return FALSE;
+    }
+    struct htxf_conn htxf;
+    memset (&htxf, 0, sizeof (htxf));
+    htxf_io_init (&htxf);
+    htxf.hx = ch;
+    htxf.opt.folder = 1;
+    htxf.total_size = total;
+    guint8 buf[2048];
+    int rv = folder_send_all (&htxf, srcroot, buf, noop_progress);
+    htxf_io_release (&htxf);
+    return rv == 0;
+}
+
 /* Download folder `name` from Uploads/ into `dstroot` via folder_recv_all.
  * Returns TRUE on a clean transfer. */
 static gboolean
@@ -205,9 +345,10 @@ test_folder_round_trip (void)
         return;
     }
 
-    /* Build a local source tree: two files at the top level. (A nested
-     * subdir — folder markers + pathcount>1 — is a separate follow-up;
-     * mhxd's subdir round-trip has its own untested quirks.) */
+    /* Build a local source tree: two files at the top level. (Nested
+     * subdirs are covered by test_folder_nested_upload — mhxd's folder
+     * *download* is non-recursive, so a full nested round-trip via
+     * GETFOLDER can't retrieve subdir files; see that test.) */
     g_autofree char *srcroot = g_dir_make_tmp ("gtkhx_frt_src_XXXXXX", NULL);
     g_assert_nonnull (srcroot);
     const char *alpha_body = "alpha folder file\n";
@@ -217,71 +358,26 @@ test_folder_round_trip (void)
     g_assert_true (g_file_set_contents (alpha, alpha_body, -1, NULL));
     g_assert_true (g_file_set_contents (beta, beta_body, -1, NULL));
 
-    guint32 nfiles = 0;
-    guint64 total = 0;
-    tree_totals (srcroot, &nfiles, &total);
-    g_assert_cmpuint (nfiles, ==, 2);
-
     g_autofree char *folder =
         g_strdup_printf ("tier3_frt_%08x", g_random_int ());
+    /* Declared before any `goto out` so the g_autofree cleanups never run
+     * over an uninitialised pointer. */
+    g_autofree char *dstroot = NULL;
+    g_autofree char *got_root = NULL;
 
-    /* FILE_PUTFOLDER: NAME + DIR(Uploads) + HTXF_SIZE + NFILES. */
-    guint8 hldir[64];
-    gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
-    guint32 size_be = htonl ((guint32)total);
-    guint32 nfiles_be = htonl (nfiles);
-    guint32 our_trans = htlc.trans;
-    g_assert_true (integration_send_message (
-        fd, &htlc, HTLC_HDR_FILE_PUTFOLDER, /*flag=*/0, /*hc=*/4,
-        (int)HTLC_DATA_FILE_NAME, (int)strlen (folder), (guint8 *)folder,
-        (int)HTLC_DATA_DIR, (int)hldir_len, hldir,
-        (int)HTLC_DATA_HTXF_SIZE, (int)sizeof (size_be), &size_be,
-        (int)HTLC_DATA_FILE_NFILES, (int)sizeof (nfiles_be), &nfiles_be));
-
-    g_assert_true (
-        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
-    if (hdr_flag (&htlc) & 1) {
-        char err[256];
-        gsize el = 0;
-        task_error_extract (&htlc, err, sizeof (err), &el);
-        g_test_fail_printf ("putfolder refused: \"%s\" (guest UPLOAD_FOLDERS?)",
-                            err);
+    /* Upload the tree via the production folder_send_all. */
+    if (!upload_folder_tree (fd, &htlc, srcroot, folder)) {
+        g_test_fail_printf ("folder upload failed (guest UPLOAD_FOLDERS?)");
         goto out;
     }
-
-    guint32 xfer_ref = 0;
-    dh_start (&htlc)
-    {
-        if (_type == HTLS_DATA_HTXF_REF) {
-            dh_getint (xfer_ref);
-        }
-    }
-    dh_end ();
-    g_assert_cmphex (xfer_ref, !=, 0);
-
-    HtxfConn *ch = open_folder_channel (xfer_ref, total);
-    g_assert_nonnull (ch);
-
-    struct htxf_conn htxf;
-    memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
-    htxf.hx = ch;
-    htxf.opt.folder = 1;
-    htxf.total_size = total;
-    g_strlcpy (htxf.path, srcroot, sizeof (htxf.path));
-
-    guint8 buf[2048];
-    int rv = folder_send_all (&htxf, srcroot, buf, noop_progress);
-    g_assert_cmpint (rv, ==, 0);
-    htxf_io_release (&htxf);
 
     /* Download the tree back (retry: mhxd commits asynchronously). mhxd
      * sends path components relative to the requested folder, so — as in
      * production hx_get_folder — the receive base already includes the
      * folder name. */
-    g_autofree char *dstroot = g_dir_make_tmp ("gtkhx_frt_dst_XXXXXX", NULL);
+    dstroot = g_dir_make_tmp ("gtkhx_frt_dst_XXXXXX", NULL);
     g_assert_nonnull (dstroot);
-    g_autofree char *got_root = g_build_filename (dstroot, folder, NULL);
+    got_root = g_build_filename (dstroot, folder, NULL);
 
     gboolean ok = FALSE;
     for (int attempt = 0; attempt < 30 && !ok; attempt++) {
@@ -303,11 +399,86 @@ out:
     integration_close (fd);
 }
 
+/* Nested subdir: upload <root>/alpha.txt + <root>/nested/beta.txt via the
+ * production folder_send_all, then verify BOTH landed on the server by
+ * fetching each file directly (FILE_GET) — including the subdir file.
+ *
+ * We can't verify the subdir file via a folder DOWNLOAD: mhxd's
+ * folder_send (server side) is non-recursive — folder_getpaths reads a
+ * single directory level and folder_send hard-codes pathcount=1, so it
+ * emits a marker for a subdir but never descends into it. That's a mhxd
+ * limitation, not a client bug: folder_send_all correctly uploads the
+ * recursive tree (mhxd's folder_recv is recursion-capable and stores it),
+ * and a direct FILE_GET of the nested path retrieves it. */
+static void
+test_folder_nested_upload (void)
+{
+    struct htlc_conn htlc;
+    int fd = integration_open_login_or_skip (&htlc, "FolderNest Tier-3", 412);
+    if (fd < 0) {
+        return;
+    }
+
+    g_autofree char *srcroot = g_dir_make_tmp ("gtkhx_frn_src_XXXXXX", NULL);
+    g_assert_nonnull (srcroot);
+    const char *alpha_body = "alpha top-level file\n";
+    const char *beta_body = "beta nested file body\n";
+    g_autofree char *alpha = g_build_filename (srcroot, "alpha.txt", NULL);
+    g_autofree char *nested = g_build_filename (srcroot, "nested", NULL);
+    g_assert_cmpint (g_mkdir (nested, 0755), ==, 0);
+    g_autofree char *beta = g_build_filename (nested, "beta.txt", NULL);
+    g_assert_true (g_file_set_contents (alpha, alpha_body, -1, NULL));
+    g_assert_true (g_file_set_contents (beta, beta_body, -1, NULL));
+
+    g_autofree char *folder =
+        g_strdup_printf ("tier3_frn_%08x", g_random_int ());
+    /* Declared before any `goto out` so the g_autofree cleanups are safe. */
+    g_autofree char *got_alpha = NULL;
+    g_autofree char *got_beta = NULL;
+
+    if (!upload_folder_tree (fd, &htlc, srcroot, folder)) {
+        g_test_fail_printf ("nested folder upload failed");
+        goto out;
+    }
+
+    /* Verify both files by direct FILE_GET (retry for async commit):
+     *   Uploads/<folder>/alpha.txt         (top level)
+     *   Uploads/<folder>/nested/beta.txt   (subdir — the recursive case) */
+    const char *top_dir[] = { "Uploads", folder };
+    const char *nested_dir[] = { "Uploads", folder, "nested" };
+
+    gsize alen = 0, blen = 0;
+    for (int attempt = 0; attempt < 30 && !(got_alpha && got_beta); attempt++) {
+        if (attempt) {
+            g_usleep (100 * 1000);
+        }
+        if (!got_alpha) {
+            got_alpha = get_file_direct (fd, &htlc, top_dir, 2, "alpha.txt",
+                                         &alen);
+        }
+        if (!got_beta) {
+            got_beta = get_file_direct (fd, &htlc, nested_dir, 3, "beta.txt",
+                                        &blen);
+        }
+    }
+
+    g_assert_nonnull (got_alpha);
+    g_assert_cmpmem (got_alpha, alen, alpha_body, strlen (alpha_body));
+    g_assert_nonnull (got_beta);
+    g_assert_cmpmem (got_beta, blen, beta_body, strlen (beta_body));
+
+out:
+    integration_release_htlc (&htlc);
+    integration_close (fd);
+}
+
 int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
     g_test_add_func ("/integration/folder_roundtrip/tree",
                      test_folder_round_trip);
+    g_test_add_func ("/integration/folder_roundtrip/nested_upload",
+                     test_folder_nested_upload);
     return g_test_run ();
 }
