@@ -188,6 +188,8 @@ rust_sources = files(
   'crates/hxtls-trust/src/tests.rs',
   'crates/hxchat-recv/src/lib.rs',
   'crates/hxchat-recv/src/tests.rs',
+  'crates/hxicon-recv/src/lib.rs',
+  'crates/hxicon-recv/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -234,6 +236,7 @@ rust_sources = files(
   'crates/hxtask/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
   'crates/hxchat-recv/Cargo.toml',
+  'crates/hxicon-recv/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -605,6 +608,17 @@ rust_hxchat_recv_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxchat_recv',
+  ],
+)
+
+# GIF-icon receive path (ICON_CHANGE parse + gif-icon-changed emit, ported from
+# rcv.c). std-only C ABI (hx_icon_change_recv); `cargo test -p hxicon-recv` runs
+# headless against recording doubles. See docs/rust/network-untangling-scope.md.
+rust_hxicon_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxicon_recv',
   ],
 )
 

@@ -264,6 +264,10 @@ rust_deps = [
   # hx_member_model_*, so they sit ahead of the providers on the link line
   # (consumer before provider, same static-archive rule as gtkhx-ui → gtkhx-boxed).
   rust_hxchat_recv_dep,
+  # GIF-icon receive path (ICON_CHANGE parse + gif-icon-changed emit, moved out
+  # of rcv.c). Same receive-handler group + consumer-before-provider rule as
+  # hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*.
+  rust_hxicon_recv_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
   # files-subsystem model: file-type -> icon-id map behind
