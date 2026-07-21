@@ -76,7 +76,7 @@ hx_icon_probe (struct htlc_conn *htlc)
     /* hx_icon_getlist's task_new snapshots htlc->trans (the increment
 	 * happens later inside hlwrite_chunks), so the trans the probe task
 	 * is keyed on is htlc->trans right now. Stash it for the watchdog. */
-    hx_conn_set_gif_icons_probe_trans (htlc, htlc->trans);
+    hx_conn_set_gif_icons_probe_trans (htlc, hx_conn_trans (htlc));
     hx_icon_getlist (htlc);
     hx_conn_set_gif_icons_probe_timer (
         htlc, g_timeout_add_seconds (GIF_ICONS_PROBE_TIMEOUT_S,

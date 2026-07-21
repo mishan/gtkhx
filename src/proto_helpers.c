@@ -28,6 +28,7 @@
 #include <glib.h>
 #include <glib-object.h>
 #include "protocol.h"
+#include "hxconn.h"
 #include "hotline.h"
 #include "proto_helpers.h"
 #include "hotline_proto.h"
@@ -160,11 +161,11 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
         = gtkhx_proto_parse_selfinfo (htlc->in.buf, htlc->in.pos, &si);
 
     if (seen & HX_SELFINFO_ACCESS) {
-        memcpy (&htlc->access, si.access, 8);
+        hx_conn_set_access (htlc, si.access);
     }
     if (seen & HX_SELFINFO_USER_LIST) {
-        htlc->uid = si.uid;
-        htlc->icon = si.icon;
+        hx_conn_set_uid (htlc, si.uid);
+        hx_conn_set_icon (htlc, si.icon);
         if (si.cached_name_len) {
             GString *hex = g_string_new (NULL);
             for (gsize i = 0; i < si.cached_name_len; i++) {
@@ -183,7 +184,7 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
         }
     }
     if (seen & HX_SELFINFO_NICK_COLOR) {
-        htlc->nick_color = si.nick_color;
+        hx_conn_set_nick_color (htlc, si.nick_color);
     }
 
     return seen;
@@ -549,8 +550,8 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     /* the inner serialize loop (header byte layout, per-chunk
      * data hdr + payload writes, len/len2 wire-length math) moved to the
      * Rust hotline-proto crate (build::pack_message). The C side keeps
-     * the qbuf growth and the htlc->trans++ side effect because those
-     * tie to the connection lifecycle that's R3 territory.
+     * the qbuf growth and the trans post-increment side effect because
+     * those tie to the connection lifecycle that's R3 territory.
      *
      * Public-API guardrails: this function is the entry point for
      * every shared chunk-array builder (login_packet, chat_history,
@@ -584,8 +585,7 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     q->len += needed;
     q->buf = g_realloc (q->buf, q->pos + q->len);
 
-    guint32 my_trans = htlc->trans;
-    htlc->trans++;
+    guint32 my_trans = hx_conn_trans_post_inc (htlc);
 
     size_t written = gtkhx_proto_pack_message (q->buf + this_off, needed,
                                                type, my_trans, flag,

@@ -545,10 +545,10 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
     if (task_with_trans (sess_from_htlc (htlc), orchestrator_login_reply_trans)) {
         return;
     }
-    guint32 saved = htlc->trans;
-    htlc->trans = orchestrator_login_reply_trans;
+    guint32 saved = hx_conn_trans (htlc);
+    hx_conn_set_trans (htlc, orchestrator_login_reply_trans);
     task_new (htlc, RCV_TASK_FN (rcv_task_login), 0, 0, "login");
-    htlc->trans = saved;
+    hx_conn_set_trans (htlc, saved);
 }
 
 /* Phase G (hxnet-owns-the-whole-lifecycle). The sole control-channel
@@ -634,7 +634,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
     orchestrator_login_reply_trans = secure ? (HX_LOGIN_TRANS + 1)
                                             : HX_LOGIN_TRANS;
-    htlc->trans = orchestrator_login_reply_trans + 1;
+    hx_conn_set_trans (htlc, orchestrator_login_reply_trans + 1);
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
      * has no real fd. Use -1 (not 0) — hx_bridge_dispatch_frame
@@ -1217,7 +1217,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 	 *
 	 * Trans ID for the trace: it's whatever htlc->trans was BEFORE
 	 * hlpack increments it. */
-    guint32 my_trans = htlc->trans;
+    guint32 my_trans = hx_conn_trans (htlc);
     proto_trace_send_begin (type, my_trans, hc);
 
     va_start (ap, hc);
@@ -1352,7 +1352,7 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 	 * inside hlpack_chunks (per-chunk NULL data with len > 0)
 	 * doesn't leave an open trace block. Capture trans BEFORE the
 	 * pack call since hlpack_chunks bumps htlc->trans. */
-    guint32 my_trans = htlc->trans;
+    guint32 my_trans = hx_conn_trans (htlc);
     hlpack_chunks (htlc, type, flag, chunks, hc);
 
     proto_trace_send_begin (type, my_trans, hc);
