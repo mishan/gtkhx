@@ -1802,6 +1802,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxfiles-model"
+version = "0.1.0"
+
+[[package]]
 name = "hxmember-model"
 version = "0.1.0"
 dependencies = [

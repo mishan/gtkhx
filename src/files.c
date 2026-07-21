@@ -71,80 +71,21 @@ guint8 dir_char = '/';
  * GTK + Adwaita pile. The "fileutils-4.0/lib/human.c" attribution
  * applies to the body of the algorithm; see human_readable.c. */
 
-/* needle must be uppercase :) */
-static int
-strcasestr_len (char *haystack, char *needle, size_t len)
-{
-    char *p, *np = 0, *end = haystack + len;
+/* Pick a cicn icon ID for a Hotline file based on its 4-byte type code
+ * (plus filename, for the drop-box heuristic on folders). Public so the
+ * files browser's remote provider can drive it off the parsed wire chunks.
+ *
+ * The mapping logic moved to the hxfiles-model Rust crate in Phase F1
+ * (see docs/files-rust-migration-scope.md); this is a thin wrapper over
+ * its FFI export. */
+extern guint16 gtkhx_files_icon_of_ftype_and_name (const char *ftype,
+                                                   const char *name,
+                                                   gsize name_len);
 
-    for (p = haystack; p < end; p++) {
-        if (np) {
-            if (toupper (*p) == *np) {
-                if (!*++np) {
-                    return 1;
-                }
-            } else {
-                np = 0;
-            }
-        } else if (toupper (*p) == *needle) {
-            np = needle + 1;
-        }
-    }
-    return 0;
-}
-
-/* Pick a cicn icon ID for a Hotline file based on its 4-byte
- * type code (plus filename, for the drop-box heuristic on
- * folders). Public so the new files browser's remote provider
- * can drive it directly off the parsed wire chunks. */
 guint16
 icon_of_ftype_and_name (const char *ftype, const char *name, gsize name_len)
 {
-    if (!ftype) {
-        return ICON_FILE;
-    }
-
-    if (!memcmp (ftype, "fldr", 4)) {
-        if (name
-            && (strcasestr_len ((char *)name, "DROP BOX", name_len)
-                || strcasestr_len ((char *)name, "UPLOAD", name_len))) {
-            return ICON_FOLDER_IN;
-        }
-        return ICON_FOLDER;
-    }
-    if (!memcmp (ftype, "JPEG", 4) || !memcmp (ftype, "PNGf", 4)
-        || !memcmp (ftype, "GIFf", 4) || !memcmp (ftype, "PICT", 4)) {
-        return ICON_FILE_IMAGE;
-    }
-    if (!memcmp (ftype, "MPEG", 4) || !memcmp (ftype, "MPG ", 4)
-        || !memcmp (ftype, "AVI ", 4) || !memcmp (ftype, "MooV", 4)) {
-        return ICON_FILE_MOOV;
-    }
-    if (!memcmp (ftype, "MP3 ", 4)) {
-        return ICON_FILE_NOTE;
-    }
-    if (!memcmp (ftype, "ZIP ", 4)) {
-        return ICON_FILE_ZIP;
-    }
-    if (!memcmp (ftype, "SIT", 3)) {
-        return ICON_FILE_SIT;
-    }
-    if (!memcmp (ftype, "APPL", 4)) {
-        return ICON_FILE_APPL;
-    }
-    if (!memcmp (ftype, "rohd", 4)) {
-        return ICON_FILE_DISK;
-    }
-    if (!memcmp (ftype, "HTft", 4)) {
-        return ICON_FILE_HTft;
-    }
-    if (!memcmp (ftype, "alis", 4)) {
-        return ICON_FILE_alis;
-    }
-    if (!memcmp (ftype, "TEXT", 4)) {
-        return ICON_FILE_TEXT;
-    }
-    return ICON_FILE;
+    return gtkhx_files_icon_of_ftype_and_name (ftype, name, name_len);
 }
 
 guint16

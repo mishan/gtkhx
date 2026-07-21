@@ -165,6 +165,8 @@ rust_sources = files(
   'crates/hxnews-model/src/tests.rs',
   'crates/hxnews-model/src/node.rs',
   'crates/hxnews-model/src/node_tests.rs',
+  'crates/hxfiles-model/src/lib.rs',
+  'crates/hxfiles-model/src/ffi.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -203,6 +205,7 @@ rust_sources = files(
   'crates/hxchat-model/Cargo.toml',
   'crates/hxmember-model/Cargo.toml',
   'crates/hxnews-model/Cargo.toml',
+  'crates/hxfiles-model/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -476,6 +479,18 @@ rust_hxnews_model_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxnews_model',
+  ],
+)
+
+# Files-subsystem model (Phase F1; see docs/files-rust-migration-scope.md).
+# Pure logic, no glib/gtk — `cargo test -p hxfiles-model` runs headless.
+# Exposes the `gtkhx_files_*` FFI surface (currently just the file-type →
+# icon-id map behind src/files.c::icon_of_ftype_and_name). Unconditional.
+rust_hxfiles_model_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxfiles_model',
   ],
 )
 

@@ -1,0 +1,17 @@
+[package]
+name = "hxfiles-model"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase F1: pure files-subsystem model helpers (the Rust re-think of the C files.c presentation logic). First increment: file-type → icon-id mapping."
+publish = false
+
+[lib]
+# staticlib: the C side (files.c) links the #[no_mangle] FFI surface.
+# rlib:      future Rust consumers (the F2 transfer worker / provider model).
+crate-type = ["staticlib", "rlib"]
+
+# Deliberately dependency-free: this is pure logic (no glib / gtk), so
+# `cargo test -p hxfiles-model` runs in any CI container and carries the
+# verification weight the display-less CI can't. Matches hxchat-model.
+[dependencies]

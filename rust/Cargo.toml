@@ -16,6 +16,7 @@ members = [
     "crates/hxchat-model",
     "crates/hxmember-model",
     "crates/hxnews-model",
+    "crates/hxfiles-model",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",
