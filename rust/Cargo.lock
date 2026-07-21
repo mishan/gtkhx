@@ -1764,6 +1764,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxcicn"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+]
+
+[[package]]
 name = "hxcompress"
 version = "0.1.0"
 dependencies = [
