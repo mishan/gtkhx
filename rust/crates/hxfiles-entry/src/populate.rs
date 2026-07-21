@@ -137,8 +137,9 @@ pub unsafe extern "C" fn gtkhx_files_populate_from_reply(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // gio::prelude re-exports the glib prelude (StaticType / Cast), so it
+    // covers the downcast + static_type used below.
     use gio::prelude::*;
-    use glib::prelude::*;
     use glib::subclass::prelude::*;
 
     /// Build one FILE_LIST chunk: 2-byte type (0xc8), 2-byte rest-len,

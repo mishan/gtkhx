@@ -30,7 +30,7 @@ use std::os::raw::c_void;
 use glib::ffi::{gboolean, GFALSE, GTRUE};
 use glib::prelude::*;
 use glib::subclass::prelude::*;
-use glib::translate::{from_glib_none, IntoGlib, IntoGlibPtr};
+use glib::translate::{from_glib_borrow, Borrowed, IntoGlib, IntoGlibPtr};
 
 /// Default icon ids for the "caller didn't classify" case. These MUST
 /// stay in lockstep with the `ICON_*` #defines in `src/files.h` (the same
@@ -125,22 +125,30 @@ impl HxFileEntry {
 
 // ---- FFI: the hx_file_entry_* C ABI (matches src/files_entry.h) --------
 
-/// Borrow a C-passed `HxFileEntry*` as a typed object without taking
-/// ownership of the caller's ref. Returns None on NULL.
+/// Borrow a C-passed `HxFileEntry*` as a typed object **without touching
+/// its refcount**. Returns None on NULL.
 ///
-/// `from_glib_none` bumps the refcount and drops it when the returned
-/// object falls out of scope, leaving the caller's ref intact — so any
-/// `*const c_char` returned into the object's interior stays valid for as
-/// long as the caller holds its reference (the C borrowed-return contract).
+/// The getters below are a hot path — `GtkColumnView` re-snapshots them on
+/// every cell bind — so this uses `from_glib_borrow` rather than
+/// `from_glib_none`: `Borrowed<HxFileEntry>` is a zero-cost wrapper over
+/// the raw pointer (no atomic ref/unref, no runtime GType check) that
+/// derefs to `&HxFileEntry`, and cannot be cloned (which would add a ref).
+/// The caller owns the reference for the whole call, so any `*const c_char`
+/// returned into the object's interior stays valid (the C borrowed-return
+/// contract). Same shape as `hxbridge::session_from_ptr` /
+/// `HxUserRow`'s `borrow`.
 ///
 /// # Safety
-/// `e`, when non-null, must point to a live `HxFileEntry` GObject.
-unsafe fn borrow(e: *mut c_void) -> Option<HxFileEntry> {
+/// `e`, when non-null, must point to a live `HxFileEntry` GObject (as the
+/// C ABI guarantees — the store is typed `HX_TYPE_FILE_ENTRY`).
+unsafe fn borrow(e: *mut c_void) -> Option<Borrowed<HxFileEntry>> {
     if e.is_null() {
-        return None;
+        None
+    } else {
+        Some(from_glib_borrow::<_, HxFileEntry>(
+            e as *mut <HxFileEntry as glib::object::ObjectType>::GlibType,
+        ))
     }
-    let obj: glib::Object = from_glib_none(e as *mut glib::gobject_ffi::GObject);
-    obj.downcast::<HxFileEntry>().ok()
 }
 
 fn bool_to_gboolean(b: bool) -> gboolean {
