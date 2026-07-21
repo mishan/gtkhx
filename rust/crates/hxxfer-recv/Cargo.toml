@@ -1,0 +1,22 @@
+[package]
+name = "hxxfer-recv"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "File-transfer reply tail (announce queue position + start when ready), ported from rcv.c"
+publish = false
+
+[lib]
+# staticlib: the hx_xfer_announce C ABI the xfer reply handlers call.
+# rlib: cargo test (the queued-vs-ready decision is unit-tested through
+#       recording doubles for the emit / xfer C ABIs).
+crate-type = ["staticlib", "rlib"]
+
+# std-only. The xfer-queue signal emit (gtkhx-session), the session lookup
+# (hx_sess_from_htlc, tasks_bridge.c) and the transfer kickoff (xfer_ready_write,
+# xfers.c) are externed C ABIs resolved at the final link; cargo test provides
+# in-crate #[cfg(test)] doubles that record the emit + kickoff, so the suite runs
+# headless. (The providers are separately-linked staticlibs / C objects in the
+# binary, so they can't be taken as rlib deps here without double-defining their
+# symbols — hence the extern-C surface, matching hxchat-recv / hxuser-recv.)
+[dependencies]
