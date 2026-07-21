@@ -63,6 +63,32 @@ extern size_t gtkhx_ffo_info_block_len (guint8 b38, guint8 b39);
 extern guint64 gtkhx_ffo_fork_len (const guint8 *marker, size_t marker_len,
                                    int large);
 
+/* Fields the Rust FILP parser fills for file_recv_one. Layout mirrors
+ * hxfiles-xfer's #[repr(C)] GtkhxFilpInfo; the offsets are pinned on
+ * both sides so a field reorder can't silently desync the ABI. */
+struct gtkhx_filp_info {
+    guint8 type_creator[8];
+    guint8 create_time[4];
+    guint8 modify_time[4];
+    guint64 data_fork_len;
+    guint8 comment[256];
+    guint32 comment_len;
+    int ok;
+};
+_Static_assert (sizeof (struct gtkhx_filp_info) == 288,
+                "gtkhx_filp_info wire size");
+_Static_assert (offsetof (struct gtkhx_filp_info, data_fork_len) == 16,
+                "gtkhx_filp_info.data_fork_len offset");
+_Static_assert (offsetof (struct gtkhx_filp_info, comment) == 24,
+                "gtkhx_filp_info.comment offset");
+_Static_assert (offsetof (struct gtkhx_filp_info, comment_len) == 280,
+                "gtkhx_filp_info.comment_len offset");
+_Static_assert (offsetof (struct gtkhx_filp_info, ok) == 284,
+                "gtkhx_filp_info.ok offset");
+
+extern void gtkhx_ffo_parse_filp_info (const guint8 *info, size_t info_len,
+                                       int large, struct gtkhx_filp_info *out);
+
 /* Phase R3 X2: worker→main marshalling goes through hxbridge
  * (rust/crates/hxbridge/src/blocking.rs::gtkhx_bridge_post_to_main),
  * with the same g_main_context_invoke(NULL, ...) semantics the old
@@ -752,32 +778,32 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
         htxf->total_pos += r;
         post_file_update (htxf);
     }
-    memcpy (typecrea, &buf[4], 8);
+    /* Interpret the FILP info block in one shot: type/creator, the
+	 * comment (via the buf[73+buf[71]] offset), the mac→header
+	 * timestamp munge, and the trailing 16-byte DATA fork marker
+	 * (with the large-file high32/low32 split). Ported to hxfiles-xfer
+	 * in Phase F2; on a truncated block the parser reports !ok and we
+	 * fail the transfer rather than reading past the info block the way
+	 * the old blind indexing did. */
+    struct gtkhx_filp_info pi;
+    gtkhx_ffo_parse_filp_info (buf, len, htxf->opt.large, &pi);
+    if (!pi.ok) {
+        return EIO;
+    }
+    memcpy (typecrea, pi.type_creator, 8);
     memset (&fi, 0, sizeof (fi));
-    fi.comlen = buf[73 + buf[71]];
+    /* Clamp the comment to the sidecar buffer — real comments are
+	 * <200 bytes, so this only bites a hostile length. */
+    fi.comlen = MIN (pi.comment_len, (guint32)sizeof (fi.comment));
     memcpy (fi.type, "HTftHTLC", 8);
-    memcpy (fi.comment, &buf[74 + buf[71]], fi.comlen);
-    *((guint32 *)(&buf[56])) = hfs_m_to_htime (*((guint32 *)(&buf[56])));
-    *((guint32 *)(&buf[64])) = hfs_m_to_htime (*((guint32 *)(&buf[64])));
-    memcpy (&fi.create_time, &buf[56], 4);
-    memcpy (&fi.modify_time, &buf[64], 4);
+    memcpy (fi.comment, pi.comment, fi.comlen);
+    memcpy (&fi.create_time, pi.create_time, 4);
+    memcpy (&fi.modify_time, pi.modify_time, 4);
     if (!htxf->opt.preview) {
         hfsinfo_write (htxf->path, &fi);
     }
 
-    /* DATA fork length. The 16-byte fork header lives at buf[pos-16
-	 * .. pos]: "DATA" + Compression(4) + Reserved(4) + DataSize(4).
-	 *
-	 * Legacy mode: DataSize at pos-4 is the 32-bit fork length;
-	 * Compression must be zero.
-	 *
-	 * Large-file mode (htxf->opt.large): the same 16-byte header is
-	 * reinterpreted — Compression (at pos-12) holds the HIGH 32
-	 * bits, DataSize (at pos-4) holds the LOW 32 bits. Combine into
-	 * the full 64-bit length. Source:
-	 * fogWraith/Hotline Docs/Protocol/Capabilities-Large-File.md
-	 * section "Flattened File Object Fork Headers". */
-    fork_len = gtkhx_ffo_fork_len (&buf[pos - 16], 16, htxf->opt.large);
+    fork_len = pi.data_fork_len;
     tot_len += fork_len;
     if (!fork_len) {
         goto get_rsrc;
