@@ -102,9 +102,18 @@ fn active_window() -> Option<gtk::Window> {
 // On-disk plumbing (delegates to the hxbookmarks TOML store)
 // ======================================================================
 
-/// Load `name` from the store (None if it isn't present).
+/// Load `name` from the store (None if it isn't present). An unreadable
+/// store logs a warning and reads as None — but the sidebar list is built
+/// from the same store, so an unreadable file shows no rows to select in the
+/// first place.
 fn load_bm(name: &str) -> Option<Bookmark> {
-    bookmark_store::find(name)
+    match bookmark_store::find(name) {
+        Ok(bm) => bm,
+        Err(e) => {
+            glib::g_warning!("gtkhx", "bookmarks: {e}");
+            None
+        }
+    }
 }
 
 /// Bookmark names in display order.
@@ -540,7 +549,7 @@ fn on_export_legacy() {
                     &tr("Bookmarks exported"),
                     &tr1("Wrote %s bookmark file(s) in the legacy format.", &n.to_string()),
                 ),
-                Err(e) => toast_error(&w, &tr1("Export failed: %s", &e.to_string())),
+                Err(e) => toast_error(&w, &tr1("Export failed: %s", &e)),
             }
         },
     );

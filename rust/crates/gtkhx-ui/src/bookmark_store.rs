@@ -41,12 +41,27 @@ fn legacy_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Load the store for a **read** path (menu, list, lookup). If the file
-/// exists but can't be parsed, this degrades to an empty store rather than
-/// erroring — a read never risks the user's data. Use [`load_writable`] for
-/// anything that will save back.
+/// Load the store, mapping an unreadable file to a human-readable message.
+/// The single source of truth both the read and mutation paths build on.
+fn load_result() -> Result<Store, String> {
+    hxbookmarks::load_or_bootstrap(&config_dir(), &legacy_dirs()).map_err(|e| {
+        format!(
+            "Bookmarks file couldn't be read ({e}). Fix or remove it before saving, \
+             so your existing bookmarks aren't overwritten."
+        )
+    })
+}
+
+/// Load the store for a **read/display** path (toolbar menu, list). If the
+/// file is unreadable this logs a warning and degrades to an empty store —
+/// a read never risks the user's data, but the failure is no longer silent.
+/// Paths that need to distinguish "unreadable" from "empty" (lookup, export,
+/// mutation) use [`find`] / [`export_legacy`] / [`load_writable`] instead.
 pub fn load() -> Store {
-    hxbookmarks::load_or_bootstrap(&config_dir(), &legacy_dirs()).unwrap_or_default()
+    load_result().unwrap_or_else(|e| {
+        glib::g_warning!("gtkhx", "bookmark_store::load: {e}");
+        Store::default()
+    })
 }
 
 /// Load the store for a **mutation** path. Propagates an error string if the
@@ -54,12 +69,7 @@ pub fn load() -> Store {
 /// the message) instead of overwriting the user's real bookmarks with an
 /// empty store + one change.
 fn load_writable() -> Result<Store, String> {
-    hxbookmarks::load_or_bootstrap(&config_dir(), &legacy_dirs()).map_err(|e| {
-        format!(
-            "Bookmarks file couldn't be read ({e}). Fix or remove it before saving, \
-             so your existing bookmarks aren't overwritten."
-        )
-    })
+    load_result()
 }
 
 /// Persist the store.
@@ -72,14 +82,18 @@ pub fn names() -> Vec<String> {
     load().names()
 }
 
-/// The bookmark named `name`, if present.
-pub fn find(name: &str) -> Option<Bookmark> {
-    load().find(name).cloned()
+/// The bookmark named `name`. `Ok(None)` = no such bookmark; `Err` = the
+/// store file is unreadable (distinct so callers can show the right message
+/// rather than a misleading "no such bookmark").
+pub fn find(name: &str) -> Result<Option<Bookmark>, String> {
+    Ok(load_result()?.find(name).cloned())
 }
 
-/// Whether a bookmark named `name` exists.
+/// Whether a bookmark named `name` exists. An unreadable store reports
+/// `false` — the caller's subsequent save refuses through [`load_writable`]
+/// anyway, so this can't cause an overwrite.
 pub fn exists(name: &str) -> bool {
-    find(name).is_some()
+    matches!(find(name), Ok(Some(_)))
 }
 
 /// Insert or replace `bm` (keyed on name) and save. Returns a human-readable
@@ -109,7 +123,9 @@ pub fn rename(old: &str, new: &str) -> Result<(), String> {
 }
 
 /// Write every bookmark as a legacy HTsc file into `dir` (the "Export legacy
-/// format" action). Returns the number of files written.
-pub fn export_legacy(dir: &Path) -> io::Result<usize> {
-    legacy::export_dir(&load().bookmarks, dir)
+/// format" action). Returns the number of files written. Fails (rather than
+/// exporting nothing and reporting success) when the store is unreadable.
+pub fn export_legacy(dir: &Path) -> Result<usize, String> {
+    let store = load_result()?;
+    legacy::export_dir(&store.bookmarks, dir).map_err(|e| e.to_string())
 }

@@ -243,7 +243,13 @@ pub fn save(config_dir: &Path, store: &Store) -> io::Result<()> {
     let final_path = store_path(config_dir);
     let tmp_path = config_dir.join("bookmarks.toml.tmp");
     fs::write(&tmp_path, text.as_bytes())?;
-    fs::rename(&tmp_path, &final_path)
+    // On a rename failure (permissions, cross-device, …) don't leave the
+    // half-written temp file lying around to confuse the user or a later save.
+    if let Err(e) = fs::rename(&tmp_path, &final_path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(e);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

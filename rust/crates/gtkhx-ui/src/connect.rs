@@ -710,9 +710,16 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
     if name.is_empty() {
         return;
     }
-    let Some(bm) = bookmark_store::find(&name) else {
-        glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
-        return;
+    let bm = match bookmark_store::find(&name) {
+        Ok(Some(bm)) => bm,
+        Ok(None) => {
+            glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
+            return;
+        }
+        Err(e) => {
+            unsafe { error_dialog(cs(&tr("Error")).as_ptr(), cs(&e).as_ptr()) };
+            return;
+        }
     };
     let port: u16 = if bm.port.is_empty() {
         5500
@@ -732,9 +739,16 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
 /// Fill the connect-dialog form from a saved bookmark (the preload path used
 /// by connect_bookmark_name; the SplitButton uses direct-connect instead).
 fn open_bookmark_preload(name: &str) {
-    let Some(bm) = bookmark_store::find(name) else {
-        glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
-        return;
+    let bm = match bookmark_store::find(name) {
+        Ok(Some(bm)) => bm,
+        Ok(None) => {
+            glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
+            return;
+        }
+        Err(e) => {
+            unsafe { error_dialog(cs(&tr("Error")).as_ptr(), cs(&e).as_ptr()) };
+            return;
+        }
     };
     let Some(cipher_byte) = rc4_migrate(name, bm.hope, bm.cipher) else {
         return;
