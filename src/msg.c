@@ -272,7 +272,7 @@ msg_input_activate (GtkWidget *widget, gpointer data)
     }
 
     len = strlen (termed_buf);
-    msg_output (hx_active_session ()->htlc->name, *uid, termed_buf);
+    msg_output (hx_conn_name (hx_active_session ()->htlc), *uid, termed_buf);
     LF2CR (termed_buf, len);
     hx_send_msg (hx_active_session ()->htlc, *uid, termed_buf, len, 0);
     g_free (termed_buf);
@@ -653,8 +653,8 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 void
 msg_output (char *name, guint16 uid, char *buf)
 {
-    gboolean is_self = name && hx_active_session ()->htlc->name[0]
-                       && strcmp (name, hx_active_session ()->htlc->name) == 0;
+    gboolean is_self = name && hx_conn_name (hx_active_session ()->htlc)[0]
+                       && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;
     msg_output_render (name, uid, buf, is_self);
 }
 

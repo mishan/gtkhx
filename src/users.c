@@ -74,7 +74,7 @@ hx_change_name_icon (struct htlc_conn *htlc)
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
     char *name_wire
-        = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
+        = gtkhx_text_for_wire ((const char *)hx_conn_name (htlc), strlen (hx_conn_name (htlc)),
                                utf8, /*is_body=*/FALSE, &name_len);
 
     /* chunk layout moved to gtkhx_proto_build_user_change

@@ -101,8 +101,8 @@ debug_log (const char *cat, const char *fmt, ...)
     }
 }
 
-/* tracing helper for the htlc->name corruption hunt. Each
- * write site to htlc->name calls this with a label naming the call
+/* tracing helper for the hx_conn_name (htlc) corruption hunt. Each
+ * write site to hx_conn_name (htlc) calls this with a label naming the call
  * site, the bytes about to be copied, and their length. With
  * GTKHX_DEBUG=name set, a per-write line dumps the source label, the
  * length, the hex bytes, and the printable rendering — which lets us

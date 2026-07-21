@@ -35,6 +35,7 @@
 #include <string.h>
 #include <gtk/gtk.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "session.h"
 #include "chat.h"
 #include "msg.h"
@@ -55,7 +56,7 @@ static GtkApplication *notify_app;
 static gboolean
 body_mentions_us (const char *body)
 {
-    const char *self_nick = hx_active_session ()->htlc->name;
+    const char *self_nick = hx_conn_name (hx_active_session ()->htlc);
     gboolean matched = FALSE;
     GPtrArray *words;
     gchar **extras = NULL;

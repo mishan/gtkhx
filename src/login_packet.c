@@ -134,7 +134,7 @@ hx_login_build_chunks (const hx_login_request *req,
                 req->compress_alg_reply
             };
         }
-        /* NAME — always emit. Production passes htlc->name (may be
+        /* NAME — always emit. Production passes hx_conn_name (htlc) (may be
          * empty when unset). Empty-string chunk has length 0; an
          * empty NAME chunk is the same shape the server expects. */
         chunks[hc++] = (struct hx_chunk) {

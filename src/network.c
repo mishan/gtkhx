@@ -324,7 +324,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * and (b) fixes the reconnect-loses-color bug. */
     hx_conn_set_nick_color (htlc, (guint32)gtkhx_prefs.nick_color);
     hx_conn_set_version (htlc, 0);
-    memset (htlc->login, 0, sizeof (htlc->login));
+    hx_conn_set_login (htlc, "");
 
     /* chats live in a GHashTable<u32 cid, struct chat*>.
 	 * For each chat:
@@ -425,7 +425,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  *      sends HTLS_HDR_BANNER from inside that handler.
  *
  * ICON comes from hx_conn_icon (htlc) (preserved across the connect), NAME
- * from htlc->name (set from prefs.nick at connect time). */
+ * from hx_conn_name (htlc) (set from prefs.nick at connect time). */
 void
 hx_send_agreement_agree (struct htlc_conn *htlc)
 {
@@ -437,7 +437,7 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
     char *name_wire
-        = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
+        = gtkhx_text_for_wire ((const char *)hx_conn_name (htlc), strlen (hx_conn_name (htlc)),
                                utf8, /*is_body=*/FALSE, &name_len);
 
     /* Build the AGREEMENTAGREE chunk array through the shared
@@ -593,7 +593,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * runs inside hxnet (rustls); HTXF keeps using the legacy
      * GTlsConnection path, which reads htlc->tls. */
     hx_conn_set_tls (htlc, tls ? 1 : 0);
-    g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
+    hx_conn_set_login (htlc, login ? login : "");
 
     /* Seed htlc->ip_addr from the server string so the post-login
 	 * "<addr>: login successful" line in rcv_task_login isn't "?".
@@ -680,7 +680,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
             /*version=*/185, caps, HX_LOGIN_TRANS);
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
-            htlc, serverstr, port, login, pass, htlc->name, hx_conn_icon (htlc),
+            htlc, serverstr, port, login, pass, hx_conn_name (htlc), hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS, htlc->cipheralg);
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (

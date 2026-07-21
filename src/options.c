@@ -1160,7 +1160,7 @@ hx_options_bind_identity (void)
     }
     v = cfgvar_for_name (CFG_NICK);
     if (v) {
-        v->variable.var = the_session.htlc->name;
+        v->variable.var = hx_conn_name_buf (the_session.htlc);
     }
 }
 
@@ -1922,7 +1922,7 @@ prefs_allocate (char *tag, char *rest)
     }
     case STRING32: {
         gsize rest_len = strlen (rest);
-        /* trace every STRING32 load so the htlc->name
+        /* trace every STRING32 load so the hx_conn_name (htlc)
 			 * corruption hunt has a full audit trail of what came
 			 * out of gtkhxrc before any sanitisation. The label
 			 * encodes the key name so we can disambiguate NICK
@@ -1934,7 +1934,7 @@ prefs_allocate (char *tag, char *rest)
         }
         /* Defend against corrupt non-UTF-8 bytes in the prefs
 			 * file. NICK lives in a STRING32 buffer that doubles
-			 * as htlc->name on the wire AND as the source for a
+			 * as hx_conn_name (htlc) on the wire AND as the source for a
 			 * GtkEntry in Settings. GTK's input method context
 			 * asserts the surrounding text is valid UTF-8
 			 * (gtk_im_context_set_surrounding_with_selection),
@@ -2269,7 +2269,7 @@ prefs_write (void)
             break;
         case STRING32: {
             /* trace the value about to be persisted. If
-			 * the htlc->name corruption has happened between the
+			 * the hx_conn_name (htlc) corruption has happened between the
 			 * explicit write site and this save, the hex here
 			 * shows what's actually going to disk. The gtkhxrc
 			 * file is the only stable record of the corrupt

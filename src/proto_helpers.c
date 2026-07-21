@@ -145,7 +145,7 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
      *     fix for the old self-aliasing HN16(&htlc->uid, &htlc->uid)
      *     bug; the crate reads the wire uid out of the record
      *     explicitly (see gtkhx_selfinfo_uid_bug.md in memory).
-     *   - htlc->name is deliberately NOT overwritten with the server's
+     *   - hx_conn_name (htlc) is deliberately NOT overwritten with the server's
      *     cached nick. Local prefs win, to avoid the corrupt-nick
      *     feedback loop documented in hx_rcv_user_selfinfo (server
      *     caches our nick by IP and echoes back whatever a previous
