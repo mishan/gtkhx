@@ -23,7 +23,7 @@ extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
                                guint32 trans, guint32 flag, guint32 body_len);
 
 /* Voice-chat extension (fogWraith Capabilities-Voice.md), Phase 8.A.
- * Server-initiated notifications dispatched from the hx_rcv_hdr switch.
+ * Server-initiated notifications dispatched from the hx_dispatch_frame switch.
  *   _sdp_offer   — 602 VOICE_SDP_OFFER, initial offer or renegotiation.
  *   _ice         — 604 VOICE_ICE, trickle-ICE candidate (server side).
  *   _room_status — 605 VOICE_ROOM_STATUS, updated participant list.

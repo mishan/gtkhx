@@ -268,6 +268,11 @@ rust_deps = [
   # of rcv.c). Same receive-handler group + consumer-before-provider rule as
   # hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*.
   rust_hxicon_recv_dep,
+  # user-roster receive handlers (user-change routing + user-part gate/emit,
+  # moved out of rcv.c). Same receive-handler group + consumer-before-provider
+  # rule as hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*
+  # and hx_member_model_contains.
+  rust_hxuser_recv_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
   # files-subsystem model: file-type -> icon-id map behind
