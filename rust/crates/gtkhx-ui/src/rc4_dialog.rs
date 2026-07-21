@@ -11,16 +11,15 @@
 //!
 //! Both callers are Rust, so this is a plain `pub` fn — no C ABI export.
 
-use crate::cs;
 use crate::ffi as cffi;
 use crate::tr::{tr, tr1};
 use gtk4 as gtk;
+use hxbookmarks::cipher;
 use libadwaita as adw;
 
 use adw::prelude::*;
 use gtk::glib;
 use std::cell::Cell;
-use std::ffi::c_char;
 use std::rc::Rc;
 
 /// Present the RC4-replacement picker over `parent` (may be NULL), block
@@ -79,9 +78,9 @@ pub fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
         let ml = main_loop.clone();
         dialog.connect_response(None, move |_, resp| {
             result.set(match resp {
-                "none" => cffi::BOOKMARK_CIPHER_BYTE_NONE as i32,
-                "blowfish" => cffi::BOOKMARK_CIPHER_BYTE_BLOWFISH as i32,
-                "chacha20" => cffi::BOOKMARK_CIPHER_BYTE_CHACHA20_POLY1305 as i32,
+                "none" => cipher::NONE as i32,
+                "blowfish" => cipher::BLOWFISH as i32,
+                "chacha20" => cipher::CHACHA20_POLY1305 as i32,
                 // "cancel", Esc, X-close, WM-close — anything that isn't a
                 // positive selection — folds to cancel.
                 _ => -1,
@@ -105,23 +104,17 @@ pub fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
     chosen
 }
 
-/// Best-effort: write the chosen cipher byte back to the bookmark file so a
-/// subsequent open doesn't re-prompt. Silent no-op on empty name / cancel /
-/// load / save failure — there's nothing actionable mid-connection.
+/// Best-effort: write the chosen cipher byte back to the bookmark in the
+/// store so a subsequent open doesn't re-prompt. Silent no-op on empty name /
+/// cancel / a name that isn't in the store — there's nothing actionable
+/// mid-connection.
 fn persist_choice(name: &str, chosen: i32) {
     if name.is_empty() || chosen < 0 {
         return;
     }
-    unsafe {
-        let bm = cffi::hx_bookmark_load(cs(name).as_ptr());
-        if bm.is_null() {
-            return;
-        }
-        (*bm).cipher = chosen as c_char;
-        let mut err: *mut glib::ffi::GError = std::ptr::null_mut();
-        if cffi::hx_bookmark_save(bm, &mut err) == glib::ffi::GFALSE && !err.is_null() {
-            glib::ffi::g_error_free(err);
-        }
-        cffi::hx_bookmark_free(bm);
+    let mut store = crate::bookmark_store::load();
+    if let Some(bm) = store.bookmarks.iter_mut().find(|b| b.name == name) {
+        bm.cipher = chosen as u8;
+        let _ = crate::bookmark_store::save(&store);
     }
 }

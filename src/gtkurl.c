@@ -538,7 +538,7 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
         /* hotline:// — Hotline-native menu. Connect routes through
 		 * connect_open_hotline_url (parses + plain-Hotline connect_with_args);
 		 * Save Bookmark routes through connect_save_hotline_url_as_
-		 * bookmark (parses + persists via hx_bookmark_save). The
+		 * bookmark (parses + persists to the bookmarks TOML store). The
 		 * browser-launch entries below are skipped — xdg-open on a
 		 * hotline:// URL has nowhere good to go. */
         GtkWidget *connect_item, *bookmark_item;

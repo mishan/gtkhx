@@ -13,7 +13,7 @@ extern void create_connect_window (GtkWidget *btn, gpointer data);
  * crate now (cipher_vocab.rs), shared between the Connect dialog and the
  * Bookmarks dialog (both ported to Rust in R5.3). No C consumer of it
  * remains, so connect.h no longer re-exports it. The stable on-disk
- * cipher byte ↔ name mapping is still C (bookmark_cipher.{c,h}). */
+ * cipher byte ↔ name mapping now lives in the hxbookmarks Rust crate. */
 /* list_n moved to src/algo_list.{c,h} — re-include so historic
  * connect.h consumers keep finding the declaration without an
  * extra include. */
@@ -41,12 +41,6 @@ extern void connect_open_bookmark_by_name (const char *name);
  * banner button. */
 extern void connect_reconnect_last (void);
 
-/* load one of the hardcoded "well-known" Hotline server
- * bookmarks (Hotline Communications / CafeLinux / GtkHx / SiN
- * Grafix). idx is 1..4 — same numbering the connect dialog's
- * builtin combo uses. */
-extern void connect_open_builtin_bookmark (int idx);
-
 /* Parse a hotline:// URL and connect to the server it names.
  *
  * Accepted shape (de facto standard from the original Mac client):
@@ -62,15 +56,14 @@ extern void connect_open_builtin_bookmark (int idx);
  * connect, FALSE on a malformed URL. */
 extern gboolean connect_open_hotline_url (const char *url);
 
-/* Parse a hotline:// URL and persist it as a bookmark. The bookmark
- * filename is derived from the host (sanitised by hx_bookmark_safe_
- * filename); if a bookmark with that name already exists this returns
- * FALSE with err set to a translated "already exists" message — the
- * caller surfaces it via toast so the user can rename / delete the
- * existing entry from the Bookmarks dialog.
+/* Parse a hotline:// URL and persist it as a bookmark in the TOML store.
+ * The bookmark name is the URL host; if a bookmark with that name already
+ * exists this returns FALSE with err set to a translated "already exists"
+ * message — the caller surfaces it via toast so the user can rename /
+ * delete the existing entry from the Bookmarks dialog.
  *
- * `out_name` (optional) receives the chosen bookmark filename on
- * success; caller frees with g_free. NULL on failure. */
+ * `out_name` (optional) receives the chosen bookmark name on success;
+ * caller frees with g_free. NULL on failure. */
 extern gboolean connect_save_hotline_url_as_bookmark (const char *url,
                                                      char **out_name,
                                                      GError **err);

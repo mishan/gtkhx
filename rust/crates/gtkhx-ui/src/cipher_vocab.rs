@@ -7,19 +7,17 @@
 //! combos prepend a synthetic "none" row at index 0.
 //!
 //! The on-disk cipher byte uses a SEPARATE stable vocabulary
-//! (`bookmark_cipher.c`, still C — driven by Tier 1 tests), so reordering
-//! or shortening these arrays never shifts the meaning of a saved bookmark
-//! byte. The two translators here ([`dropdown_to_cipher_byte`] /
-//! [`cipher_byte_to_dropdown`]) bridge the UI index and the stable byte by
-//! calling into that C module.
+//! (`hxbookmarks::cipher`), so reordering or shortening these arrays never
+//! shifts the meaning of a saved bookmark byte. The two translators here
+//! ([`dropdown_to_cipher_byte`] / [`cipher_byte_to_dropdown`]) bridge the UI
+//! index and the stable byte via that module.
 
-use crate::ffi::{bookmark_cipher_byte_from_name, bookmark_cipher_name, BOOKMARK_CIPHER_BYTE_NONE};
-use crate::{cs, cstr};
+use hxbookmarks::cipher;
 
 /// HOPE stream / AEAD ciphers this build offers, strongest-preference
 /// first. RC4 was retired in `claude/remove-rc4` (known-broken stream
 /// cipher shipped under a "Secure" label); its stable byte stays reserved
-/// in `bookmark_cipher.h` but it is never offered here. CHACHA20-POLY1305
+/// in `hxbookmarks::cipher` but it is never offered here. CHACHA20-POLY1305
 /// is the modern AEAD choice; BLOWFISH is the minimum acceptable bar.
 pub const VALID_CIPHERS: &[&str] = &["BLOWFISH", "CHACHA20-POLY1305"];
 
@@ -50,24 +48,18 @@ pub fn compress_name(i: usize) -> Option<&'static str> {
 /// this so the byte's meaning stays stable across dropdown reorderings.
 pub fn dropdown_to_cipher_byte(dropdown_idx: u32) -> u8 {
     if dropdown_idx == 0 || dropdown_idx as usize > VALID_CIPHERS.len() {
-        return BOOKMARK_CIPHER_BYTE_NONE;
+        return cipher::NONE;
     }
-    let name = VALID_CIPHERS[(dropdown_idx - 1) as usize];
-    unsafe { bookmark_cipher_byte_from_name(cs(name).as_ptr()) }
+    cipher::byte_from_name(VALID_CIPHERS[(dropdown_idx - 1) as usize])
 }
 
 /// Inverse of [`dropdown_to_cipher_byte`]: a stable bookmark cipher byte
 /// back to the matching dropdown index, or 0 ("no cipher") if the byte
 /// names a cipher the dropdown no longer offers (e.g. RC4).
 pub fn cipher_byte_to_dropdown(byte: u8) -> u32 {
-    if byte == BOOKMARK_CIPHER_BYTE_NONE {
+    let Some(name) = cipher::name(byte) else {
         return 0;
-    }
-    let name_ptr = unsafe { bookmark_cipher_name(byte) };
-    if name_ptr.is_null() {
-        return 0;
-    }
-    let name = unsafe { cstr(name_ptr) };
+    };
     VALID_CIPHERS
         .iter()
         .position(|c| *c == name)

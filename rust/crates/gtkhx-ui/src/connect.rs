@@ -9,12 +9,11 @@
 //!
 //! The cipher / compression picker vocabulary lives in the sibling
 //! [`crate::cipher_vocab`] module (shared with [`crate::bookmarks`]); the
-//! stable on-disk cipher byte still comes from `bookmark_cipher.c`.
+//! stable on-disk cipher byte comes from `hxbookmarks::cipher`.
 //!
-//! One deliberate boundary kept in C:
-//!   * On-disk bookmark I/O delegates to the byte-identical `hx_bookmark_*`
-//!     API (`bookmarks_io.c`) rather than re-implementing the HTsc layout,
-//!     so there is one source of truth for the wire-compatible format.
+//! Bookmark storage is the single TOML file owned by [`hxbookmarks`], reached
+//! through [`crate::bookmark_store`]. Built-in bookmarks are ordinary entries
+//! seeded on first run, so there's no separate "builtins" concept here.
 //!
 //! Widget state lives in a thread-local `ConnectUi` (mirrors the file-static
 //! `GtkWidget*`s the C had). Handlers snapshot the widgets they need out of
@@ -35,9 +34,7 @@ use gtk::glib;
 use glib::translate::IntoGlibPtr;
 use std::cell::RefCell;
 use std::ffi::c_char;
-use std::io::Read;
 use std::os::raw::{c_int, c_void};
-use std::path::PathBuf;
 
 /// `#[repr(C)]` mirror of `HotlineUrlParts` (hotline_url.h).
 #[repr(C)]
@@ -63,21 +60,13 @@ extern "C" {
     );
     // hotline_url.c — hotline:// URL parser.
     fn hotline_url_parse(url: *const c_char, out: *mut HotlineUrlParts) -> glib::ffi::gboolean;
-    // host_port.c — IPv6-aware "host:port" splitter (legacy conversion).
-    fn gtkhx_parse_host_port(
-        s: *const c_char,
-        default_port: u16,
-        host_out: *mut *mut c_char,
-        port_out: *mut u16,
-        had_out: *mut glib::ffi::gboolean,
-    ) -> glib::ffi::gboolean;
     // gtkhx.c / gtkutil.c / toolbar.c helpers.
-    fn gtkhx_config_dir() -> *const c_char;
     fn error_dialog(title: *const c_char, msg: *const c_char);
     fn toolbar_refresh_bookmarks();
 }
 
-use cffi::BOOKMARK_CIPHER_BYTE_RC4;
+use crate::bookmark_store;
+use hxbookmarks::{cipher, Bookmark};
 
 /// The connect dialog's live widgets (mirrors connect.c's file statics).
 /// Cheap to clone — every field is a refcounted GObject handle.
@@ -158,10 +147,9 @@ fn connect_with_args(
     }
 
     // Resolve the dropdown index / stable byte to HOPE algorithm names.
-    // The compressor name is a Rust `&str`, so hold its CString for the
-    // duration of the FFI call; the cipher name comes back as a static C
-    // string from bookmark_cipher.c, so its pointer can be passed as-is.
-    // Both are gated on HOPE being on.
+    // Both the compressor and cipher names are Rust `&str`s (from the
+    // vocabulary / hxbookmarks::cipher), so hold their CStrings for the
+    // duration of the FFI call. Both are gated on HOPE being on.
     let compress_cs: Option<std::ffi::CString> = if secure != 0 && compress > 0 {
         cipher_vocab::compress_name((compress - 1) as usize)
             .filter(|n| cipher_vocab::valid_compress(n))
@@ -171,15 +159,15 @@ fn connect_with_args(
     };
     let compress_name: *const c_char =
         compress_cs.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
-    let mut cipher_name: *const c_char = std::ptr::null();
-    if secure != 0 && cipher != 0 {
-        unsafe {
-            let n = cffi::bookmark_cipher_name(cipher);
-            if !n.is_null() && cipher_vocab::valid_cipher(&cstr(n)) {
-                cipher_name = n;
-            }
-        }
-    }
+    let cipher_cs: Option<std::ffi::CString> = if secure != 0 && cipher != 0 {
+        cipher::name(cipher)
+            .filter(|n| cipher_vocab::valid_cipher(n))
+            .map(cs)
+    } else {
+        None
+    };
+    let cipher_name: *const c_char =
+        cipher_cs.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
 
     LAST_CONN.with_borrow_mut(|lc| {
         *lc = Some(LastConn {
@@ -229,20 +217,6 @@ pub extern "C" fn connect_reconnect_last() {
             create_connect_window(std::ptr::null_mut(), cffi::hx_active_session());
         },
     }
-}
-
-/// Connect to a built-in "well-known" Hotline server (1 = hlserver.com).
-#[no_mangle]
-pub extern "C" fn connect_open_builtin_bookmark(idx: c_int) {
-    let server = match idx {
-        1 => "hlserver.com",
-        _ => {
-            glib::g_warning!("gtkhx", "connect_open_builtin_bookmark: unknown idx {idx}");
-            return;
-        }
-    };
-    let sess = unsafe { cffi::hx_active_session() };
-    connect_with_args(sess, server, 5500, "", "", 0, 0, 0, 0);
 }
 
 // ======================================================================
@@ -342,10 +316,10 @@ fn set_the_entries_impl(
         h.set_active(secure != 0);
     }
     if let Some(c) = &w.compress {
-        // Bookmark files can hold arbitrary bytes (hx_bookmark_load doesn't
-        // validate the compress index), and the model is NONE + N items — a
-        // byte past N would select an out-of-range index (GTK warning /
-        // undefined selection). Clamp anything outside 0..=N back to 0 (NONE).
+        // A hand-edited bookmark can hold an arbitrary compress byte, and the
+        // model is NONE + N items — a byte past N would select an out-of-range
+        // index (GTK warning / undefined selection). Clamp anything outside
+        // 0..=N back to 0 (NONE).
         let n = cipher_vocab::VALID_COMPRESSORS.len() as u32;
         let sel = if (compress as u32) <= n { compress as u32 } else { 0 };
         c.set_selected(sel);
@@ -631,57 +605,28 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
 // Save Bookmark dialog
 // ======================================================================
 
-/// Read the current form into a fresh HxBookmark and persist it via
-/// hx_bookmark_save (the byte-identical C writer). `name` is the raw,
-/// user-entered bookmark name (hx_bookmark_save canonicalizes it).
+/// Read the current form into a [`Bookmark`] and persist it to the TOML store.
 fn save_bookmark_from_form(name: &str) {
     let w = widgets();
-    let server = w.address.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
-    let login = w.login.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
-    let pass = w.password.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
-    let portstr = w.port.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
-    let secure = w.hope.as_ref().map(|h| h.is_active()).unwrap_or(false) as i8;
-    let compress = w.compress.as_ref().map(|c| c.selected()).unwrap_or(0) as i8;
-    let cipher = cipher_vocab::dropdown_to_cipher_byte(
-        w.cipher.as_ref().map(|c| c.selected()).unwrap_or(0),
-    ) as i8;
-    let tls = w.tls.as_ref().map(|t| t.is_active()).unwrap_or(false) as i8;
+    let bm = Bookmark {
+        name: name.to_string(),
+        server: w.address.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
+        port: w.port.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
+        login: w.login.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
+        password: w.password.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
+        hope: w.hope.as_ref().map(|h| h.is_active()).unwrap_or(false),
+        compress: w.compress.as_ref().map(|c| c.selected()).unwrap_or(0) as u8,
+        cipher: cipher_vocab::dropdown_to_cipher_byte(
+            w.cipher.as_ref().map(|c| c.selected()).unwrap_or(0),
+        ),
+        tls: w.tls.as_ref().map(|t| t.is_active()).unwrap_or(false),
+    };
 
-    unsafe {
-        let bm = cffi::hx_bookmark_new();
-        if bm.is_null() {
-            error_dialog(
-                cs(&tr("Error")).as_ptr(),
-                cs(&tr("Could not save bookmark.")).as_ptr(),
-            );
-            return;
-        }
-        (*bm).name = glib::ffi::g_strdup(cs(name).as_ptr());
-        set_cfield(&mut (*bm).server, &server);
-        set_cfield(&mut (*bm).port, &portstr);
-        set_cfield(&mut (*bm).login, &login);
-        set_cfield(&mut (*bm).pass, &pass);
-        (*bm).secure = secure;
-        (*bm).compress = compress;
-        (*bm).cipher = cipher;
-        (*bm).tls = tls;
-
-        let mut err: *mut glib::ffi::GError = std::ptr::null_mut();
-        let ok = cffi::hx_bookmark_save(bm, &mut err);
-        if ok != glib::ffi::GFALSE {
-            toolbar_refresh_bookmarks();
-        } else {
-            let msg = if err.is_null() {
-                tr("Could not save bookmark.")
-            } else {
-                cstr((*err).message)
-            };
+    match bookmark_store::upsert(bm) {
+        Ok(()) => unsafe { toolbar_refresh_bookmarks() },
+        Err(msg) => unsafe {
             error_dialog(cs(&tr("Error")).as_ptr(), cs(&msg).as_ptr());
-            if !err.is_null() {
-                glib::ffi::g_error_free(err);
-            }
-        }
-        cffi::hx_bookmark_free(bm);
+        },
     }
 }
 
@@ -736,107 +681,11 @@ fn save_dialog() {
 // Bookmark load + open
 // ======================================================================
 
-/// Parsed bookmark, mirroring connect.c's `struct bookmark_parsed`. `server`
-/// is host-only (port split out); `compress` is a dropdown index; `cipher`
-/// is a stable byte.
-struct Bookmark {
-    server: String,
-    login: String,
-    pass: String,
-    port: String,
-    secure: u8,
-    compress: u8,
-    cipher: u8,
-    tls: u8,
-}
-
-enum BmLoad {
-    Ok(Bookmark),
-    Missing,
-    Legacy(PathBuf),
-    Corrupt,
-}
-
-fn config_bookmarks_dir() -> PathBuf {
-    let base = unsafe { cstr(gtkhx_config_dir()) };
-    PathBuf::from(base).join("bookmarks")
-}
-
-fn legacy_bookmarks_dir() -> Option<PathBuf> {
-    let home = std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| Some(glib::home_dir()));
-    home.map(|h| h.join(".hx").join("bookmarks"))
-}
-
-/// Locate a bookmark file: primary dir first, then the read-only legacy dir.
-fn find_bookmark_file(name: &str) -> Option<PathBuf> {
-    let primary = config_bookmarks_dir().join(name);
-    if primary.exists() {
-        return Some(primary);
-    }
-    if let Some(legacy) = legacy_bookmarks_dir() {
-        let p = legacy.join(name);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
-}
-
-/// Load a bookmark, distinguishing the (rare) legacy pre-HTsc text format so
-/// the caller can offer conversion. The HTsc read delegates to
-/// hx_bookmark_load (host:port split + legacy-dir fallback included).
-fn load_bookmark(name: &str) -> BmLoad {
-    let Some(path) = find_bookmark_file(name) else {
-        return BmLoad::Missing;
-    };
-    // Header check: legacy files aren't "HTsc". Read just the first 4 bytes
-    // (a large / garbled local file shouldn't be slurped whole here — the
-    // real parse below re-reads via hx_bookmark_load anyway).
-    let mut hdr: Vec<u8> = Vec::new();
-    match std::fs::File::open(&path) {
-        Ok(f) => {
-            let mut take = f.take(4);
-            if take.read_to_end(&mut hdr).is_err() {
-                return BmLoad::Corrupt;
-            }
-        }
-        Err(_) => return BmLoad::Corrupt,
-    }
-    // A file too short to even hold the 4-byte magic is truncated/corrupt,
-    // not a legacy-format bookmark — don't offer conversion for it.
-    if hdr.len() < 4 {
-        return BmLoad::Corrupt;
-    }
-    if hdr.as_slice() != b"HTsc" {
-        return BmLoad::Legacy(path);
-    }
-    unsafe {
-        let p = cffi::hx_bookmark_load(cs(name).as_ptr());
-        if p.is_null() {
-            return BmLoad::Corrupt;
-        }
-        let bm = Bookmark {
-            server: cstr((*p).server.as_ptr()),
-            login: cstr((*p).login.as_ptr()),
-            pass: cstr((*p).pass.as_ptr()),
-            port: cstr((*p).port.as_ptr()),
-            secure: (*p).secure as u8,
-            compress: (*p).compress as u8,
-            cipher: (*p).cipher as u8,
-            tls: (*p).tls as u8,
-        };
-        cffi::hx_bookmark_free(p);
-        BmLoad::Ok(bm)
-    }
-}
-
 /// Run the RC4-replacement picker if the bookmark carries the legacy RC4
 /// byte. Returns the (possibly-updated) cipher byte, or None if the user
 /// cancelled (caller should abandon).
-fn rc4_migrate(name: &str, secure: u8, cipher: u8) -> Option<u8> {
-    if secure != 0 && cipher == BOOKMARK_CIPHER_BYTE_RC4 {
+fn rc4_migrate(name: &str, hope: bool, cipher_byte: u8) -> Option<u8> {
+    if hope && cipher_byte == cipher::RC4 {
         let parent = unsafe { cffi::gtkhx_active_window() };
         let nb = crate::rc4_dialog::run_sync(parent, name);
         if nb < 0 {
@@ -844,7 +693,7 @@ fn rc4_migrate(name: &str, secure: u8, cipher: u8) -> Option<u8> {
         }
         return Some(nb as u8);
     }
-    Some(cipher)
+    Some(cipher_byte)
 }
 
 /// `void connect_open_bookmark_by_name(const char *name)` — connect to a
@@ -861,48 +710,53 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
     if name.is_empty() {
         return;
     }
-    match load_bookmark(&name) {
-        BmLoad::Missing => glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name),
-        BmLoad::Legacy(path) => prompt_conversion(&path),
-        BmLoad::Corrupt => {
-            glib::g_warning!("gtkhx", "{} \"{}\"", tr("Could not read bookmark"), name)
+    let bm = match bookmark_store::find(&name) {
+        Ok(Some(bm)) => bm,
+        Ok(None) => {
+            glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
+            return;
         }
-        BmLoad::Ok(bm) => {
-            let port: u16 = if bm.port.is_empty() {
-                5500
-            } else {
-                atoi_port(&bm.port)
-            };
-            let Some(cipher) = rc4_migrate(&name, bm.secure, bm.cipher) else {
-                return;
-            };
-            let sess = cffi::hx_active_session();
-            connect_with_args(
-                sess, &bm.server, port, &bm.login, &bm.pass, bm.secure, bm.compress, cipher,
-                bm.tls,
-            );
+        Err(e) => {
+            unsafe { error_dialog(cs(&tr("Error")).as_ptr(), cs(&e).as_ptr()) };
+            return;
         }
-    }
+    };
+    let port: u16 = if bm.port.is_empty() {
+        5500
+    } else {
+        atoi_port(&bm.port)
+    };
+    let Some(cipher_byte) = rc4_migrate(&name, bm.hope, bm.cipher) else {
+        return;
+    };
+    let sess = cffi::hx_active_session();
+    connect_with_args(
+        sess, &bm.server, port, &bm.login, &bm.password, bm.hope as u8, bm.compress, cipher_byte,
+        bm.tls as u8,
+    );
 }
 
 /// Fill the connect-dialog form from a saved bookmark (the preload path used
 /// by connect_bookmark_name; the SplitButton uses direct-connect instead).
 fn open_bookmark_preload(name: &str) {
-    match load_bookmark(name) {
-        BmLoad::Missing => glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name),
-        BmLoad::Legacy(path) => prompt_conversion(&path),
-        BmLoad::Corrupt => {
-            glib::g_warning!("gtkhx", "{} \"{}\"", tr("Could not read bookmark"), name)
+    let bm = match bookmark_store::find(name) {
+        Ok(Some(bm)) => bm,
+        Ok(None) => {
+            glib::g_warning!("gtkhx", "{} \"{}\"", tr("No such bookmark"), name);
+            return;
         }
-        BmLoad::Ok(bm) => {
-            let Some(cipher) = rc4_migrate(name, bm.secure, bm.cipher) else {
-                return;
-            };
-            set_the_entries_impl(
-                &bm.server, &bm.login, &bm.pass, &bm.port, bm.secure, bm.compress, cipher, bm.tls,
-            );
+        Err(e) => {
+            unsafe { error_dialog(cs(&tr("Error")).as_ptr(), cs(&e).as_ptr()) };
+            return;
         }
-    }
+    };
+    let Some(cipher_byte) = rc4_migrate(name, bm.hope, bm.cipher) else {
+        return;
+    };
+    set_the_entries_impl(
+        &bm.server, &bm.login, &bm.password, &bm.port, bm.hope as u8, bm.compress, cipher_byte,
+        bm.tls as u8,
+    );
 }
 
 /// `void connect_bookmark_name(char *name)` — open the dialog, then preload
@@ -926,182 +780,23 @@ pub unsafe extern "C" fn connect_bookmark_name(name: *mut c_char) {
 }
 
 // ======================================================================
-// Legacy-format conversion
-// ======================================================================
-
-/// Convert a legacy pre-HTsc bookmark (3-line text: server / login / pass)
-/// to the modern format. Fills the form and re-saves via hx_bookmark_save
-/// (which writes to the primary bookmarks dir). When the legacy source is a
-/// *different* file from the one we just wrote — i.e. it lived in the
-/// read-only `~/.hx` dir rather than being overwritten in place — the stale
-/// legacy file is renamed to a dotfile so conversion is one-way: deleting the
-/// converted bookmark can't resurrect the legacy file and re-trigger this
-/// prompt.
-fn convert_bookmark(path: &PathBuf) {
-    // Lossy decode (not read_to_string): the legacy format is raw bytes; the
-    // original C read them as bytes and still converted. A non-UTF-8 byte
-    // shouldn't abort conversion.
-    let Ok(bytes) = std::fs::read(path) else {
-        glib::g_warning!("gtkhx", "Could not read legacy bookmark for conversion");
-        return;
-    };
-    let text = String::from_utf8_lossy(&bytes);
-    let mut lines = text.lines();
-    let (Some(server_line), Some(login), Some(pass)) =
-        (lines.next(), lines.next(), lines.next())
-    else {
-        glib::g_warning!("gtkhx", "Legacy bookmark truncated; aborting conversion");
-        return;
-    };
-
-    // Split host / port via the shared IPv6-aware helper.
-    let (mut server, mut port) = (server_line.to_string(), String::new());
-    unsafe {
-        let mut host_out: *mut c_char = std::ptr::null_mut();
-        let mut port_out: u16 = 0;
-        let mut had: glib::ffi::gboolean = glib::ffi::GFALSE;
-        if gtkhx_parse_host_port(cs(server_line).as_ptr(), 0, &mut host_out, &mut port_out, &mut had)
-            != glib::ffi::GFALSE
-        {
-            server = cstr(host_out);
-            glib::ffi::g_free(host_out as *mut c_void);
-            if had != glib::ffi::GFALSE {
-                port = format!("{port_out}");
-            }
-        }
-    }
-
-    set_the_entries_impl(&server, login, pass, &port, 0, 0, 0, 0);
-
-    // Re-save in the modern format under the same file name.
-    let name = path
-        .file_name()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    if name.is_empty() {
-        return;
-    }
-    unsafe {
-        let bm = cffi::hx_bookmark_new();
-        if bm.is_null() {
-            return;
-        }
-        (*bm).name = glib::ffi::g_strdup(cs(&name).as_ptr());
-        set_cfield(&mut (*bm).server, &server);
-        set_cfield(&mut (*bm).port, &port);
-        set_cfield(&mut (*bm).login, login);
-        set_cfield(&mut (*bm).pass, pass);
-        (*bm).secure = 0;
-        (*bm).compress = 0;
-        (*bm).cipher = 0;
-        (*bm).tls = 0;
-        let mut err: *mut glib::ffi::GError = std::ptr::null_mut();
-        let ok = cffi::hx_bookmark_save(bm, &mut err) != glib::ffi::GFALSE;
-        if !err.is_null() {
-            glib::ffi::g_error_free(err);
-        }
-        cffi::hx_bookmark_free(bm);
-
-        // Where the save actually landed: the primary dir + canonicalized
-        // name. If that's a different file from the legacy source, hide the
-        // source so it doesn't shadow-resurrect after the converted copy is
-        // deleted. (When the legacy file was itself in the primary dir,
-        // hx_bookmark_save overwrote it in place — paths match, nothing to do,
-        // and we must NOT rename the freshly-written file.)
-        if ok {
-            let safe = cffi::hx_bookmark_safe_filename(cs(&name).as_ptr());
-            let saved_path = if safe.is_null() {
-                config_bookmarks_dir().join(&name)
-            } else {
-                let s = cstr(safe);
-                glib::ffi::g_free(safe as *mut c_void);
-                config_bookmarks_dir().join(s)
-            };
-            if path.as_path() != saved_path.as_path() {
-                if let Some(fname) = path.file_name().and_then(|s| s.to_str()) {
-                    let backup = path.with_file_name(format!(".{fname}.converted"));
-                    let _ = std::fs::rename(path, backup);
-                }
-            }
-        }
-    }
-}
-
-/// Prompt to convert a legacy-format bookmark.
-fn prompt_conversion(path: &PathBuf) {
-    let dialog = adw::AlertDialog::new(
-        Some(&tr("Convert Bookmark")),
-        Some(&tr(
-            "This bookmark is written in an old GtkHx format. Would you like to \
-             convert it to the new format?",
-        )),
-    );
-    dialog.add_response("no", &tr("_No"));
-    dialog.add_response("convert", &tr("_Convert"));
-    dialog.set_response_appearance("convert", adw::ResponseAppearance::Suggested);
-    dialog.set_default_response(Some("convert"));
-    dialog.set_close_response("no");
-    unsafe { cffi::gtkhx_dialog_add_close_shortcuts(dialog.as_ptr() as *mut cffi::GtkWidget) };
-
-    let path = path.clone();
-    dialog.connect_response(None, move |_, resp| {
-        if resp == "convert" {
-            convert_bookmark(&path);
-        }
-    });
-    dialog.present(active_window().as_ref().map(|w| w.upcast_ref::<gtk::Widget>()));
-}
-
-// ======================================================================
 // Bookmark menu (toolbar SplitButton dropdown)
 // ======================================================================
 
-/// Append each bookmark file in `dir` (skipping dotfiles + de-duping against
-/// `seen`) as an app.open_bookmark menu item.
-fn append_dir_bookmarks(saved: &gio::Menu, dir: &PathBuf, seen: &mut Vec<String>) {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for ent in entries.flatten() {
-        let fname = ent.file_name().to_string_lossy().into_owned();
-        if fname.starts_with('.') || seen.contains(&fname) {
-            continue;
-        }
-        seen.push(fname.clone());
-        let item = gio::MenuItem::new(Some(&fname), None);
-        item.set_action_and_target_value(
-            Some("app.open_bookmark"),
-            Some(&glib::Variant::from(fname.as_str())),
-        );
-        saved.append_item(&item);
-    }
-}
-
-/// `GMenu *connect_build_bookmark_menu(void)` — builtins section + saved
-/// bookmarks section. Returns a new GMenu; caller owns the ref.
+/// `GMenu *connect_build_bookmark_menu(void)` — one item per saved bookmark
+/// (built-ins are ordinary entries now). Returns a new GMenu; caller owns the
+/// ref.
 #[no_mangle]
 pub extern "C" fn connect_build_bookmark_menu() -> *mut gio::ffi::GMenu {
     let menu = gio::Menu::new();
-
-    let builtins = gio::Menu::new();
-    let item = gio::MenuItem::new(Some("Hotline Communications"), None);
-    item.set_action_and_target_value(
-        Some("app.connect_builtin"),
-        Some(&glib::Variant::from(1i32)),
-    );
-    builtins.append_item(&item);
-    menu.append_section(None, &builtins);
-
-    let saved = gio::Menu::new();
-    let mut seen: Vec<String> = Vec::new();
-    append_dir_bookmarks(&saved, &config_bookmarks_dir(), &mut seen);
-    if let Some(legacy) = legacy_bookmarks_dir() {
-        append_dir_bookmarks(&saved, &legacy, &mut seen);
+    for name in bookmark_store::names() {
+        let item = gio::MenuItem::new(Some(&name), None);
+        item.set_action_and_target_value(
+            Some("app.open_bookmark"),
+            Some(&glib::Variant::from(name.as_str())),
+        );
+        menu.append_item(&item);
     }
-    if saved.n_items() > 0 {
-        menu.append_section(None, &saved);
-    }
-
     menu.into_glib_ptr()
 }
 
@@ -1165,8 +860,10 @@ pub unsafe extern "C" fn connect_save_hotline_url_as_bookmark(
     }
 
     let host = cstr(parts.host.as_ptr());
-    let safe = cffi::hx_bookmark_safe_filename(cs(&host).as_ptr());
-    if safe.is_null() {
+    // The bookmark name is just the host (the store keys on name; no
+    // filename escaping needed now).
+    let name = host.clone();
+    if name.is_empty() {
         set_file_error(
             err,
             glib::ffi::G_FILE_ERROR_INVAL,
@@ -1174,13 +871,9 @@ pub unsafe extern "C" fn connect_save_hotline_url_as_bookmark(
         );
         return glib::ffi::GFALSE;
     }
-    let name = cstr(safe);
-    glib::ffi::g_free(safe as *mut c_void);
 
     // Refuse to clobber an existing bookmark of the same name.
-    let existing = cffi::hx_bookmark_load(cs(&name).as_ptr());
-    if !existing.is_null() {
-        cffi::hx_bookmark_free(existing);
+    if bookmark_store::exists(&name) {
         set_file_error(
             err,
             glib::ffi::G_FILE_ERROR_EXIST,
@@ -1192,38 +885,33 @@ pub unsafe extern "C" fn connect_save_hotline_url_as_bookmark(
         return glib::ffi::GFALSE;
     }
 
-    let login = cstr(parts.login.as_ptr());
-    let pass = cstr(parts.pass.as_ptr());
     let port = if parts.port != 0 {
         format!("{}", parts.port)
     } else {
         String::new()
     };
+    let bm = Bookmark {
+        name: name.clone(),
+        server: host,
+        port,
+        login: cstr(parts.login.as_ptr()),
+        password: cstr(parts.pass.as_ptr()),
+        ..Default::default()
+    };
 
-    let bm = cffi::hx_bookmark_new();
-    if bm.is_null() {
-        set_file_error(err, glib::ffi::G_FILE_ERROR_NOMEM, &tr("Out of memory"));
-        return glib::ffi::GFALSE;
-    }
-    (*bm).name = glib::ffi::g_strdup(cs(&name).as_ptr());
-    set_cfield(&mut (*bm).server, &host);
-    set_cfield(&mut (*bm).port, &port);
-    set_cfield(&mut (*bm).login, &login);
-    set_cfield(&mut (*bm).pass, &pass);
-    (*bm).secure = 0;
-    (*bm).compress = 0;
-    (*bm).cipher = 0;
-    (*bm).tls = 0;
-
-    let ok = cffi::hx_bookmark_save(bm, err);
-    if ok != glib::ffi::GFALSE {
-        if !out_name.is_null() {
-            *out_name = glib::ffi::g_strdup(cs(&name).as_ptr());
+    match bookmark_store::upsert(bm) {
+        Ok(()) => {
+            if !out_name.is_null() {
+                *out_name = glib::ffi::g_strdup(cs(&name).as_ptr());
+            }
+            toolbar_refresh_bookmarks();
+            glib::ffi::GTRUE
         }
-        toolbar_refresh_bookmarks();
+        Err(msg) => {
+            set_file_error(err, glib::ffi::G_FILE_ERROR_FAILED, &msg);
+            glib::ffi::GFALSE
+        }
     }
-    cffi::hx_bookmark_free(bm);
-    ok
 }
 
 // ======================================================================
@@ -1247,16 +935,6 @@ fn atoi_port(s: &str) -> u16 {
     let v = digits.parse::<i64>().unwrap_or(0);
     let v = if neg { v.wrapping_neg() } else { v };
     (v & 0xffff) as u16
-}
-
-/// Copy `s` (truncated) + NUL into a fixed C char buffer, zeroing the rest.
-fn set_cfield(field: &mut [c_char], s: &str) {
-    let bytes = s.as_bytes();
-    let cap = field.len();
-    let n = bytes.len().min(cap.saturating_sub(1));
-    for (i, slot) in field.iter_mut().enumerate() {
-        *slot = if i < n { bytes[i] as c_char } else { 0 };
-    }
 }
 
 /// g_set_error on a G_FILE_ERROR-domain out-param (no-op if `err` is NULL,

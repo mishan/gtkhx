@@ -312,38 +312,12 @@ test_hxnet_bridge = executable('test_hxnet_bridge',
 test('hxnet_bridge', test_hxnet_bridge,
      suite : 'unit')
 
-# bookmarks — HTsc on-disk format + CRUD module. The CRUD lives in
-# bookmarks_io.c (carved out of bookmarks.c, which still holds the
-# GTK / libadwaita dialog) so this test can drive it without the
-# whole UI tree. The test provides its own gtkhx_config_dir() stub
-# so each test sees a fresh tmpdir for primary + legacy bookmark
-# directories.
-test_bookmarks = executable('test_bookmarks',
-  'unit/test_bookmarks.c',
-  '../src/bookmarks_io.c',
-  '../src/host_port.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('bookmarks', test_bookmarks,
-     suite : 'unit')
-
-# bookmark_cipher — stable byte ↔ cipher-name vocabulary used by
-# the HTsc bookmark file format. Independent of the UI dropdown
-# (valid_ciphers[]) so reordering the dropdown doesn't shift the
-# meaning of a saved byte. Pins the byte assignments numerically
-# so a renumber breaks here before it breaks every bookmark on
-# disk. RC4 keeps its slot named even though the cipher itself
-# was retired in claude/remove-rc4 — the migration dialog needs
-# string equality on this slot to detect a legacy RC4 bookmark.
-test_bookmark_cipher = executable('test_bookmark_cipher',
-  'unit/test_bookmark_cipher.c',
-  '../src/bookmark_cipher.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('bookmark_cipher', test_bookmark_cipher,
-     suite : 'unit')
+# (bookmarks + bookmark_cipher C tests retired — bookmark storage, the
+# legacy HTsc format, and the stable cipher-byte vocabulary moved to the
+# hxbookmarks Rust crate, unit-tested there via `cargo test -p hxbookmarks`:
+# TOML round-trip, first-run legacy import + built-in seeding, HTsc byte
+# round-trip incl. the pre-TLS short-file case, host:port edge cases, and the
+# cipher byte↔name table.)
 
 # hotline_url — parser for the hotline:// URL scheme. Drives the
 # Connect / Save Bookmark entries on the gtkurl right-click popup,

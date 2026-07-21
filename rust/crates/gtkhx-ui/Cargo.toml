@@ -63,6 +63,9 @@ hotline-proto = { path = "../hotline-proto" }
 # Rust (glib/gio only, no extra C surface) — rides in gtkhx-ui's archive.
 hxchat-model = { path = "../hxchat-model" }
 hxmember-model = { path = "../hxmember-model" }
+# Bookmark model + TOML persistence + legacy HTsc import/export. The Connect
+# and Bookmarks dialogs call it directly (no C bookmark code remains).
+hxbookmarks = { path = "../hxbookmarks" }
 
 [features]
 # `voice` gates the user-list voice-indicator column (users_voice_col) and
