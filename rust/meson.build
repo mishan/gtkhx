@@ -193,6 +193,8 @@ rust_sources = files(
   'crates/hxicon-recv/src/tests.rs',
   'crates/hxmsg-recv/src/lib.rs',
   'crates/hxmsg-recv/src/tests.rs',
+  'crates/hxagreement-recv/src/lib.rs',
+  'crates/hxagreement-recv/src/tests.rs',
   'crates/hxuser-recv/src/lib.rs',
   'crates/hxuser-recv/src/tests.rs',
   'crates/hxxfer-recv/src/lib.rs',
@@ -245,6 +247,7 @@ rust_sources = files(
   'crates/hxchat-recv/Cargo.toml',
   'crates/hxicon-recv/Cargo.toml',
   'crates/hxmsg-recv/Cargo.toml',
+  'crates/hxagreement-recv/Cargo.toml',
   'crates/hxuser-recv/Cargo.toml',
   'crates/hxxfer-recv/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
@@ -640,6 +643,17 @@ rust_hxmsg_recv_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxmsg_recv',
+  ],
+)
+
+# Agreement receive path (auto-agree vs show-and-emit), ported from rcv.c.
+# std-only C ABI (hx_agreement_recv); `cargo test -p hxagreement-recv` runs
+# headless. See docs/rust/network-untangling-scope.md.
+rust_hxagreement_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxagreement_recv',
   ],
 )
 

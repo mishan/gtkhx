@@ -27,6 +27,7 @@ members = [
     "crates/hxchat-recv",
     "crates/hxicon-recv",
     "crates/hxmsg-recv",
+    "crates/hxagreement-recv",
     "crates/hxuser-recv",
     "crates/hxxfer-recv",
     "crates/hxnet",

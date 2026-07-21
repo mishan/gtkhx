@@ -1735,6 +1735,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxagreement-recv"
+version = "0.1.0"
+
+[[package]]
 name = "hxbridge"
 version = "0.1.0"
 dependencies = [
