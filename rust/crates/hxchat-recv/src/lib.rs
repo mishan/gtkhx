@@ -20,6 +20,13 @@ extern "C" {
         cid: u32,
         name: *const c_char,
     );
+    /// Fire `GtkhxSession::chat-subject (htlc, cid, subj)` (gtkhx-session).
+    fn gtkhx_session_emit_chat_subject(
+        self_: *mut c_void,
+        htlc: *mut c_void,
+        cid: u32,
+        subj: *const c_char,
+    );
     /// Whether `uid` is on the per-chat ignore list (hxmember-model).
     fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
 }
@@ -51,6 +58,43 @@ pub unsafe extern "C" fn hx_chat_invite_recv(
     gtkhx_session_emit_chat_invitation(gtkhx_session_get_default(), htlc, cid, name);
 }
 
+/// `int hx_chat_subject_recv (htlc, cid, subject, subject_len, current_subject)`
+/// — the chat-subject-change receive path. Returns 1 and emits `chat-subject`
+/// when the subject is non-empty AND differs from the current one; the C side
+/// then updates the model + logs the "Subject Changed to" line. Returns 0 (no
+/// emit) for an empty or unchanged subject.
+///
+/// The emit forwards `subject` verbatim, which is byte-identical to the value
+/// the old C read back from the model after setting it; the one subscriber
+/// (`output_chat_subject`) uses the signal argument, not the model, so emitting
+/// before the C-side set is safe.
+///
+/// # Safety
+/// `subject` / `current_subject` are NUL-terminated C strings (the wire parse
+/// and the model getter); `htlc` is opaque and only forwarded to the signal.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_subject_recv(
+    htlc: *mut c_void,
+    cid: u32,
+    subject: *const c_char,
+    subject_len: usize,
+    current_subject: *const c_char,
+) -> c_int {
+    if subject_len == 0 {
+        return 0;
+    }
+    // Unchanged subject → no announcement. (An empty subject was already
+    // rejected above; current_subject is the model's "" when unset.)
+    if !subject.is_null()
+        && !current_subject.is_null()
+        && std::ffi::CStr::from_ptr(subject) == std::ffi::CStr::from_ptr(current_subject)
+    {
+        return 0;
+    }
+    gtkhx_session_emit_chat_subject(gtkhx_session_get_default(), htlc, cid, subject);
+    1
+}
+
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
@@ -62,11 +106,14 @@ pub(crate) mod test_env {
         pub static IGNORE: Cell<bool> = const { Cell::new(false) };
         /// Records the last emitted invitation as (cid, name-bytes), or None.
         pub static EMITTED: Cell<Option<(u32, Vec<u8>)>> = const { Cell::new(None) };
+        /// Records the last emitted chat-subject as (cid, subj-bytes), or None.
+        pub static SUBJECT_EMITTED: Cell<Option<(u32, Vec<u8>)>> = const { Cell::new(None) };
     }
 
     pub fn reset() {
         IGNORE.with(|c| c.set(false));
         EMITTED.with(|c| c.set(None));
+        SUBJECT_EMITTED.with(|c| c.set(None));
     }
 }
 
@@ -88,6 +135,21 @@ unsafe fn gtkhx_session_emit_chat_invitation(
         std::ffi::CStr::from_ptr(name).to_bytes().to_vec()
     };
     test_env::EMITTED.with(|c| c.set(Some((cid, bytes))));
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_session_emit_chat_subject(
+    _self_: *mut c_void,
+    _htlc: *mut c_void,
+    cid: u32,
+    subj: *const c_char,
+) {
+    let bytes = if subj.is_null() {
+        Vec::new()
+    } else {
+        std::ffi::CStr::from_ptr(subj).to_bytes().to_vec()
+    };
+    test_env::SUBJECT_EMITTED.with(|c| c.set(Some((cid, bytes))));
 }
 
 #[cfg(test)]

@@ -39,3 +39,47 @@ fn drops_invitation_from_ignored_user() {
     // Ignored inviter → no chat-invitation signal.
     assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
 }
+
+/// Returns the applied flag; records the emit (if any) in SUBJECT_EMITTED.
+fn subject(cid: u32, new: &str, current: &str) -> bool {
+    let cnew = CString::new(new).unwrap();
+    let ccur = CString::new(current).unwrap();
+    let applied = unsafe {
+        hx_chat_subject_recv(
+            std::ptr::null_mut(),
+            cid,
+            cnew.as_ptr(),
+            new.len(),
+            ccur.as_ptr(),
+        )
+    };
+    applied != 0
+}
+
+#[test]
+fn emits_chat_subject_when_changed() {
+    test_env::reset();
+    assert!(subject(3, "New Topic", "Old Topic"));
+    assert_eq!(
+        test_env::SUBJECT_EMITTED.with(|c| c.take()),
+        Some((3, b"New Topic".to_vec()))
+    );
+}
+
+#[test]
+fn suppresses_unchanged_subject() {
+    test_env::reset();
+    assert!(!subject(3, "Same", "Same"));
+    assert_eq!(test_env::SUBJECT_EMITTED.with(|c| c.take()), None);
+}
+
+#[test]
+fn suppresses_empty_subject() {
+    test_env::reset();
+    // subject_len 0 → no announcement, even against a non-empty current.
+    let ccur = CString::new("Existing").unwrap();
+    let applied =
+        unsafe { hx_chat_subject_recv(std::ptr::null_mut(), 3, c"".as_ptr(), 0, ccur.as_ptr()) };
+    assert_eq!(applied, 0);
+    assert_eq!(test_env::SUBJECT_EMITTED.with(|c| c.take()), None);
+}
