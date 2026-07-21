@@ -788,8 +788,10 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
 	 * in Phase F2; on a truncated block the parser reports !ok and we
 	 * fail the transfer rather than reading past the info block the way
 	 * the old blind indexing did. */
+    /* pos holds the info-block length (the read loop above accumulated
+	 * it while draining len to 0); pass pos, not the now-zero len. */
     struct gtkhx_filp_info pi;
-    gtkhx_ffo_parse_filp_info (buf, len, htxf->opt.large, &pi);
+    gtkhx_ffo_parse_filp_info (buf, pos, htxf->opt.large, &pi);
     if (!pi.ok) {
         return EIO;
     }

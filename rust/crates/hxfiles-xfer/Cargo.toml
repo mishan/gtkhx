@@ -2,6 +2,9 @@
 name = "hxfiles-xfer"
 version = "0.1.0"
 edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Phase F2: file-transfer codec — the FFO/FILP frame + HFS fork byte math ported from src/xfers.c."
+publish = false
 
 # Dependency-free "codec" layer of the file-transfer worker port
 # (Phase F2, slice 1). The FFO/FILP frame + HFS fork math lives here as
