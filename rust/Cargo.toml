@@ -17,6 +17,7 @@ members = [
     "crates/hxmember-model",
     "crates/hxnews-model",
     "crates/hxfiles-model",
+    "crates/hxfiles-entry",
     "crates/hxfiles-xfer",
     "crates/hxhfs",
     "crates/hxcicn",

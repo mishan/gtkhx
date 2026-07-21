@@ -1809,6 +1809,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxfiles-entry"
+version = "0.1.0"
+dependencies = [
+ "gio 0.21.5",
+ "glib 0.21.5",
+ "hotline-proto",
+ "hxfiles-model",
+]
+
+[[package]]
 name = "hxfiles-model"
 version = "0.1.0"
 

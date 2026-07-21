@@ -7,102 +7,26 @@
  * option) any later version.
  */
 
+/*
+ * files_entry.c — the two presentation formatters for a files-browser
+ * row.
+ *
+ * The HxFileEntry GObject itself (its state, construction, get_type, and
+ * the six field getters) now lives in the Rust hxfiles-entry crate
+ * (rust/crates/hxfiles-entry/src/lib.rs), which exports the same
+ * hx_file_entry_* C ABI declared in files_entry.h. These two formatters
+ * stay in C: they are thin g_format_size_full / g_dngettext / GDateTime
+ * i18n wrappers whose whole value is GLib's locale handling, and they
+ * read the entry only through the public accessors — no struct access.
+ */
+
 #include "config.h"
 
 #include <glib.h>
 #include <glib/gi18n.h>
-#include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
-#include "files.h" /* ICON_* defaults */
 #include "files_entry.h"
-
-struct _HxFileEntry {
-    GObject parent_instance;
-    char *name;
-    gboolean is_dir;
-    guint64 size;
-    gint64 modified;
-    char *kind;
-    guint16 icon_id;
-};
-
-G_DEFINE_FINAL_TYPE (HxFileEntry, hx_file_entry, G_TYPE_OBJECT)
-
-static void
-hx_file_entry_finalize (GObject *obj)
-{
-    HxFileEntry *e = HX_FILE_ENTRY (obj);
-    g_free (e->name);
-    g_free (e->kind);
-    G_OBJECT_CLASS (hx_file_entry_parent_class)->finalize (obj);
-}
-
-static void
-hx_file_entry_class_init (HxFileEntryClass *klass)
-{
-    G_OBJECT_CLASS (klass)->finalize = hx_file_entry_finalize;
-}
-
-static void
-hx_file_entry_init (HxFileEntry *self)
-{
-    (void)self;
-}
-
-HxFileEntry *
-hx_file_entry_new (const char *name, gboolean is_dir, guint64 size,
-                   gint64 modified, const char *kind, guint16 icon_id)
-{
-    HxFileEntry *e = g_object_new (HX_TYPE_FILE_ENTRY, NULL);
-    e->name = g_strdup (name ? name : "");
-    e->is_dir = is_dir;
-    e->size = size;
-    e->modified = modified;
-    e->kind = g_strdup (kind ? kind : "");
-    /* 0 = "caller didn't classify" — default to the generic icon
-	 * appropriate for the kind. Saves both providers from spelling
-	 * out the same fallback. */
-    e->icon_id = icon_id ? icon_id : (is_dir ? ICON_FOLDER : ICON_FILE);
-    return e;
-}
-
-guint16
-hx_file_entry_get_icon_id (HxFileEntry *e)
-{
-    return e ? e->icon_id : 0;
-}
-
-const char *
-hx_file_entry_get_name (HxFileEntry *e)
-{
-    return e ? e->name : "";
-}
-
-gboolean
-hx_file_entry_is_dir (HxFileEntry *e)
-{
-    return e ? e->is_dir : FALSE;
-}
-
-guint64
-hx_file_entry_get_size (HxFileEntry *e)
-{
-    return e ? e->size : 0;
-}
-
-gint64
-hx_file_entry_get_modified (HxFileEntry *e)
-{
-    return e ? e->modified : 0;
-}
-
-const char *
-hx_file_entry_get_kind (HxFileEntry *e)
-{
-    return e ? e->kind : "";
-}
 
 /* Size column.
  *
@@ -124,17 +48,19 @@ hx_file_entry_format_size (HxFileEntry *e)
     if (!e) {
         return g_strdup ("—");
     }
-    if (e->is_dir) {
-        if (e->size > 0) {
+    if (hx_file_entry_is_dir (e)) {
+        guint64 size = hx_file_entry_get_size (e);
+        if (size > 0) {
             return g_strdup_printf (
                 g_dngettext (NULL, "(%" G_GUINT64_FORMAT " item)",
-                             "(%" G_GUINT64_FORMAT " items)", (gulong)e->size),
-                e->size);
+                             "(%" G_GUINT64_FORMAT " items)", (gulong)size),
+                size);
         }
         return g_strdup ("—");
     }
-    return g_format_size_full (e->size, G_FORMAT_SIZE_IEC_UNITS
-                                            | G_FORMAT_SIZE_LONG_FORMAT);
+    return g_format_size_full (hx_file_entry_get_size (e),
+                               G_FORMAT_SIZE_IEC_UNITS
+                                   | G_FORMAT_SIZE_LONG_FORMAT);
 }
 
 /* Modified-time column.
@@ -151,14 +77,15 @@ hx_file_entry_format_modified (HxFileEntry *e)
 {
     GDateTime *dt, *now;
     GTimeSpan delta;
+    gint64 modified;
     int year_dt, year_now;
     char *out;
 
-    if (!e || e->modified <= 0) {
+    if (!e || (modified = hx_file_entry_get_modified (e)) <= 0) {
         return g_strdup ("");
     }
 
-    dt = g_date_time_new_from_unix_local (e->modified);
+    dt = g_date_time_new_from_unix_local (modified);
     if (!dt) {
         return g_strdup ("");
     }

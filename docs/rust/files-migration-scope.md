@@ -29,7 +29,22 @@
     desynced the server and failed. Never caught because the solo-file
     path has no following file to corrupt and folder upload had never
     been driven end-to-end. Fixed in the F2 folder commit.
-- **F3 (remote provider model) and F4 (provider trait): not started.**
+- **F3 — remote provider model: DONE (first increment).** The remote
+  provider's path-navigation state — the current path, the sticky
+  listing-error flag, and the parent/child path math — moved out of
+  `src/files_remote_provider.c` into the `RemoteListing` model in the
+  `hxfiles-model` crate (`remote_listing.rs`), reached through a
+  `gtkhx_files_listing_*` opaque-handle FFI. The C provider now holds one
+  handle and delegates all path computation + the error flag to it,
+  keeping only the GListStore, the FILE_LIST RPC send, the no-reply
+  watchdog, and the rcv-dispatch plumbing (event-loop-specific, stays in
+  C per the plan). The fiddly path-walk edge cases (root no-op, one-level
+  vs deep parent, empty→"/" normalization, names containing '/') are now
+  unit-tested headless in Rust; the reply *parse* was already Rust
+  (`parse_file_list_entry`, driven by `filelist_walker.c`). The
+  `test_file_list` / `test_file_list_subdir` / `test_file_info`
+  integration tests stay green against mhxd.
+- **F4 (provider trait): not started.**
 
 ### F2 follow-ups (deferred)
 
@@ -102,12 +117,12 @@ the existing MVC boundary: view = C/GTK, model/protocol/IO = Rust).
 | `files_remote_provider.c` | 746 | remote listing provider; FILE_LIST RPC; reply routing from rcv.c; timeout watchdog | **Split**: model→Rust; rcv routing + watchdog→C | Med |
 | `files_ops.c` | 389 | cross-panel copy/move dispatch; access-bit checks; local↔local GIO recursive copy | Keep in C (thin glue) | Low |
 | `files_provider.c` | 185 | `HxFilesProvider` GInterface + signals | Keep in C (GObject interface) | Low |
-| `files_entry.c` | 181 | file-row GObject; size/modified formatters | **Split**: formatters→Rust; GObject→C | Low |
+| `files_entry.c` | 181 | file-row GObject; size/modified formatters | **DONE (split, inverted)**: GObject→Rust (`hxfiles-entry`); formatters stay in C | Low |
 | `files_complete.c` | 694 | local path-completion popover | Keep in C (pure GTK) | — |
 | `files_local_provider.c` | 506 | GIO directory ops | Keep in C | — |
 | `files_panel.c` | 1674 | single-panel widget (GtkColumnView, inline rename, icon cache) | Keep in C | — |
 | `files_browser.c` | 2323 | two-panel window; action orchestration; DnD | Keep in C | — |
-| `filelist_walker.c` | 65 | walk packed FILE_LIST bytes, callback per entry (already calls Rust decoder) | **Yes → Rust** | Low |
+| `filelist_walker.c` | 65 | walk packed FILE_LIST bytes, callback per entry | **DONE → Rust** (folded into `hxfiles-entry` populate; file retired) | Low |
 | `htxf_io.c` | 173 | thin shim over hxnet Rust HTXF (errno mapping, abort) | Mostly Rust already; fold into workers | Low |
 | `htxf_subchannel.c` | 68 | HTXF preamble packing (16/24 byte) | **Yes → Rust** (pure byte packing) | Low |
 
@@ -206,16 +221,75 @@ differently, and the reasoning is worth recording:
   `test_htxf_hdr`, `test_real_htxf_connect`).
 - **Bug fixed:** the `folder_send_all` MACR-size desync (see Status).
 
-### Phase F3 — remote provider model
-- Extract the listing model + reply handling from
-  `files_remote_provider.c` into `hxfiles-model` (like `hxchat-model`).
-- Keep the rcv.c signal routing + timeout watchdog in C (event-loop
-  specific), calling into the Rust model.
-- **Test:** `test_file_list`, `test_file_list_subdir`, `test_file_info`.
+### Phase F3 — remote provider model — **DONE (first increment)**
+- Extracted the listing model's path-navigation state from
+  `files_remote_provider.c` into the `RemoteListing` type in
+  `hxfiles-model` (`remote_listing.rs`) — current path, listing-error
+  flag, and the `parent` / `child` / `reset_to_root` path math — behind a
+  `gtkhx_files_listing_*` opaque-handle FFI (same shape as
+  `hotline-proto`'s `parse_dirlist`). The provider holds one handle and
+  delegates; its `current_path` / `listing_error` C fields are gone.
+- The rcv.c signal routing, the FILE_LIST RPC send, and the timeout
+  watchdog stay in C (event-loop specific), calling into the model. The
+  reply *parse* was already Rust (`parse_file_list_entry`).
+- **Tests:** `cargo test -p hxfiles-model` gained the `RemoteListing`
+  navigation-math cases + an FFI-handle round-trip; the existing
+  `test_file_list` / `test_file_list_subdir` / `test_file_info`
+  integration tests stay green against mhxd.
+- **`HxFileEntry` GObject moved to Rust (second increment).** The
+  files-browser row object — its state, construction, `get_type`, and the
+  six field getters — is now a `glib::subclass` type in the new
+  `hxfiles-entry` crate, exporting the same `hx_file_entry_*` C ABI the
+  old `G_DEFINE_FINAL_TYPE` in `files_entry.c` provided (mirrors
+  `hxmember-model`'s `HxMember`). Every C consumer (both providers, the
+  panel, the browser) compiles unchanged; only `files_entry.c` shrank to
+  the two presentation formatters. **Note:** this is the *inverse* of the
+  original component-table sketch ("formatters→Rust; GObject→C"). A closer
+  read flipped it: the formatters are thin `g_format_size_full` /
+  `g_dngettext` / `GDateTime` i18n wrappers whose value is GLib's locale
+  handling (a poor Rust target, and a divergence risk), while the GObject
+  *data* is the clean move. The formatters stay in C and read the entry
+  only through the public accessors.
+- **Reply→model binding moved to Rust (F4).** The whole remote populate
+  path — walk the FILE_LIST chunks, decode each entry's display name (Mac
+  Roman → UTF-8), dir flag, icon id, and kind label, build the
+  `HxFileEntry`, and append it — is now `gtkhx_files_populate_from_reply`
+  in the `hxfiles-entry` crate, operating on the provider's
+  `gio::ListStore`. `files_remote_provider.c::populate_from_chunks` +
+  `populate_from_chunks_cb` collapsed to one FFI call, and
+  `filelist_walker.c` / `.h` / `test_filelist_walker` retired (the wire
+  parse is `hotline-proto`'s `parse_file_list_entry`, unit-tested there;
+  the full decode is unit-tested headless in `hxfiles-entry` against
+  hand-built wire buffers). The kind label keeps its `gtkhx`-domain
+  translation via `dgettext`, matching the old C `_()`.
+  - **`GListStore`, not a custom model — a deliberate call.** The
+    original F4 sketch was "a Rust `gio::ListModel` of `HxFileEntry` (the
+    `hxmember-model` shape)". `GListStore` already *is* a `gio::ListModel`,
+    and a files listing is clear-and-rebuild on every navigation — there's
+    no keyed upsert or in-place update the way chat membership has, which
+    is the only reason `HxMemberModel` is a custom model. A bespoke files
+    list model would duplicate `GListStore` for no functional gain, so the
+    value (the populate/decode logic) went to Rust while the store stays
+    `GListStore`.
 
-### Phase F4 (optional) — provider trait in Rust
-- Only if F1–F3 prove out. Consider a `glib::subclass` implementation of
-  `HxFilesProvider`. Lower priority; the GObject interface is a fine
+### Phase F4 — reply→model binding in Rust — **DONE**
+- The remote provider's populate path (`populate_from_chunks` +
+  `populate_from_chunks_cb`) moved into `gtkhx_files_populate_from_reply`
+  in the `hxfiles-entry` crate: parse (via `hotline-proto`) + Mac Roman
+  name decode (`hotline_proto::text`) + icon/kind (`hxfiles-model`, kind
+  translated via `dgettext`) + `HxFileEntry` construction + append to the
+  `gio::ListStore`. `filelist_walker.c` / `.h` / `test_filelist_walker`
+  retired.
+- Kept `GListStore` rather than a bespoke `gio::ListModel` (see the Status
+  note — files listings are clear-and-rebuild, so a custom model would be
+  redundant with `GListStore`).
+- **Test:** `cargo test -p hxfiles-entry` (headless populate over a real
+  `gio::ListStore` from hand-built wire buffers); the `file_list` /
+  `file_list_subdir` / `file_info` integration tests stay green.
+
+### Phase F5 (optional) — provider trait in Rust
+- Only if the above prove out. Consider a `glib::subclass` implementation
+  of `HxFilesProvider`. Lower priority; the GObject interface is a fine
   boundary as-is.
 
 ## Test safety net
@@ -262,10 +336,10 @@ Added by F1/F2:
 
 - **F1:** DONE.
 - **F2:** DONE.
-- **F3:** ~3–5 days (not started).
+- **F3:** DONE (first increment — path-navigation model).
 - **F4:** optional, defer.
 
-Next up: **F3** — extract the remote listing model + reply handling from
-`files_remote_provider.c` into `hxfiles-model`, keeping the rcv.c signal
-routing + timeout watchdog in C. Smaller F2 follow-ups (nested-subdir
-folder round-trip, `hxhfs` wiring) are listed in the Status section.
+Next up: an optional F3 follow-on could push `HxFileEntry` + the
+`populate_from_chunks_cb` reply→model binding into Rust via the
+`gtkhx-boxed` pattern, or **F4** (a `glib::subclass` `HxFilesProvider`).
+Both are lower-priority; the GObject boundary is a fine stopping point.

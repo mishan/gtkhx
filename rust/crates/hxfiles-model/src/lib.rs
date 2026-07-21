@@ -1,13 +1,22 @@
-//! Pure files-subsystem model helpers.
+//! Pure files-subsystem model helpers (the Rust re-think of the C
+//! files-browser presentation/navigation logic; see
+//! docs/rust/files-migration-scope.md).
 //!
-//! Phase F1 of the files C→Rust migration (see
-//! docs/rust/files-migration-scope.md). This first increment is the
-//! file-type → icon-id mapping, ported from
-//! `src/files.c::icon_of_ftype_and_name`. Pure logic, no glib/gtk, so it
-//! is fully unit-tested here and the C side calls in through the
-//! `#[no_mangle]` surface in `ffi.rs`.
+//! Two pieces live here, both pure (no glib/gtk) so they carry real
+//! headless unit tests the display-less CI can run:
+//!
+//!  * the file-type → icon-id map and the FourCC → human-label table,
+//!    ported from `src/files.c` (`icon_id_for`, `kind_label_for`);
+//!  * [`RemoteListing`], the remote provider's path-navigation model
+//!    (current path + listing-error flag + parent/child path math),
+//!    ported from `src/files_remote_provider.c`.
+//!
+//! The C side calls in through the `#[no_mangle]` surface in `ffi.rs`.
 
 mod ffi;
+mod remote_listing;
+
+pub use remote_listing::RemoteListing;
 
 /// cicn resource ids for the bundled file-type icons. These MUST stay in
 /// lockstep with the `ICON_*` #defines in `src/files.h`.

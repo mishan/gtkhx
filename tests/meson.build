@@ -913,19 +913,10 @@ test_chat_event = executable('test_chat_event',
 test('chat_event', test_chat_event,
      suite : 'proto')
 
-# filelist_walker — hl_filelist_walk extracted from
-# files_remote_provider.c::populate_from_chunks. Callback-based
-# iterator over a packed run of hl_filelist_hdr chunks. Pins per-
-# entry stride + ntohl decode of ftype/fsize/fnlen + the
-# truncated-buffer defense the new helper added.
-test_filelist_walker = executable('test_filelist_walker',
-  'proto/test_filelist_walker.c',
-  '../src/filelist_walker.c',
-  dependencies        : proto_test_deps,
-  include_directories : proto_test_inc,
-)
-test('filelist_walker', test_filelist_walker,
-     suite : 'proto')
+# (filelist_walker retired — the FILE_LIST walk + per-entry decode moved
+# into the hxfiles-entry Rust crate's gtkhx_files_populate_from_reply,
+# tested headless there; the underlying wire parse is covered by
+# hotline-proto's parse_file_list_entry unit tests.)
 
 # folder_xfer — wire-format lockdown for the 1.5 folder-transfer
 # opcodes (HTLC_HDR_FILE_GETFOLDER 0xd2, HTLC_HDR_FILE_PUTFOLDER 0xd5)
