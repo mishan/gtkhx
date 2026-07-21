@@ -261,6 +261,9 @@ rust_deps = [
   # files-subsystem transfer codec: FFO fork-header + info-block byte
   # math behind xfers.c::file_recv_one.
   rust_hxfiles_xfer_dep,
+  # cicn colour-icon decoder (cicn.c's decode path retired) — hxcicn_decode,
+  # wrapped into a GdkPixbuf by the thin cicn.c.
+  rust_hxcicn_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]

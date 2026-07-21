@@ -1,0 +1,20 @@
+[package]
+name = "hxcicn"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Macintosh 'cicn' colour-icon decoder (ported from src/cicn.c) — decodes a cicn resource to a raw RGBA buffer"
+publish = false
+
+[lib]
+# rlib: the pure native decoder (headless-testable on RGBA output).
+# staticlib: the `ffi` module hands a g_malloc'd RGBA buffer to the thin C
+#            GdkPixbuf wrapper (cicn.c), so the decode logic can leave C.
+crate-type = ["staticlib", "rlib"]
+
+# Pure decode is std-only (byte walking + palette + RGBA), so
+# `cargo test -p hxcicn` runs headless. `glib` is used only by the ffi shim, to
+# g_malloc the returned RGBA buffer (the C side wraps it with
+# gdk_pixbuf_new_from_data + a g_free destroy-notify).
+[dependencies]
+glib = { workspace = true }

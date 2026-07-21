@@ -510,6 +510,16 @@ rust_hxfiles_xfer_dep = declare_dependency(
   ],
 )
 
+# cicn colour-icon decoder (Rust port of cicn.c's decode path). Produces RGBA;
+# the thin cicn.c wrapper calls hxcicn_decode and wraps it in a GdkPixbuf.
+rust_hxcicn_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxcicn',
+  ],
+)
+
 # Rust ↔ GLib bridge (Phase R3.0 + R3.1 + R3.2). hxbridge wraps a
 # C-owned GtkhxSession GObject, exposes signal-emit shims for the C
 # side (R3.0), and — with the `runtime` cargo feature this meson
