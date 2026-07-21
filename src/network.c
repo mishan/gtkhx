@@ -391,9 +391,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * cipher/compress union state, and gzip counters were removed from
      * struct htlc_conn — nothing populated them. */
     /* Release the opaque HOPE AEAD material handle seeded at login. */
-    if (htlc->hope_aead) {
-        hxnet_hope_aead_free (htlc->hope_aead);
-        htlc->hope_aead = NULL;
+    if (hx_conn_hope_aead (htlc)) {
+        hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
+        hx_conn_set_hope_aead (htlc, NULL);
     }
 
 #if 0 /* XXX */
@@ -680,7 +680,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
             htlc, serverstr, port, login, pass, hx_conn_name (htlc), hx_conn_icon (htlc),
-            /*version=*/185, caps, HX_LOGIN_TRANS, htlc->cipheralg);
+            /*version=*/185, caps, HX_LOGIN_TRANS, hx_conn_cipheralg (htlc));
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (
             htlc, serverstr, port, login, pass, /*name=*/"", hx_conn_icon (htlc),
@@ -865,7 +865,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * selects plaintext passthrough. The handle is seeded at login from
 	 * the orchestrator's retained HOPE material. */
     const HxnetHopeAead *hope_aead =
-        (htxf->htlc != NULL) ? (const HxnetHopeAead *) htxf->htlc->hope_aead
+        (htxf->htlc != NULL) ? (const HxnetHopeAead *) hx_conn_hope_aead (htxf->htlc)
                              : NULL;
     if (hope_aead) {
         debug_log ("xfer-aead", "ref=%u: AEAD active (HOPE material present)",

@@ -627,7 +627,7 @@ banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref, guint32 size)
      * clone happens here on the main thread, where htlc->hope_aead is
      * still alive (spawn and hx_htlc_close are both main-thread). */
     f->hope_aead = hxnet_hope_aead_clone (
-        (const HxnetHopeAead *) htlc->hope_aead);
+        (const HxnetHopeAead *) hx_conn_hope_aead (htlc));
 
     /* Hand the fetch off to tokio's blocking pool via hxbridge.
      * The shim runs `banner_htxf_worker_run` on a dedicated

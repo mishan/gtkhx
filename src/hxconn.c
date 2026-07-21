@@ -10,6 +10,8 @@
 
 #include "config.h"
 
+#include <string.h> /* memset (cipheralg / compressalg clear) */
+
 #include "hxconn.h"
 #include "protocol.h" /* the full struct htlc_conn definition (still C for now) */
 #include "hl_access.h" /* hl_access_has / hl_access_permits over the bitmap */
@@ -276,4 +278,52 @@ void
 hx_conn_set_fd (struct htlc_conn *h, int v)
 {
     h->fd = v;
+}
+
+void
+hx_conn_set_sess (struct htlc_conn *h, session *s)
+{
+    h->sess = s;
+}
+
+const char *
+hx_conn_cipheralg (const struct htlc_conn *h)
+{
+    return h->cipheralg;
+}
+
+void
+hx_conn_set_cipheralg (struct htlc_conn *h, const char *v)
+{
+    memset (h->cipheralg, 0, sizeof (h->cipheralg));
+    if (v && *v) {
+        g_strlcpy (h->cipheralg, v, sizeof (h->cipheralg));
+    }
+}
+
+const char *
+hx_conn_compressalg (const struct htlc_conn *h)
+{
+    return h->compressalg;
+}
+
+void
+hx_conn_set_compressalg (struct htlc_conn *h, const char *v)
+{
+    memset (h->compressalg, 0, sizeof (h->compressalg));
+    if (v && *v) {
+        g_strlcpy (h->compressalg, v, sizeof (h->compressalg));
+    }
+}
+
+void *
+hx_conn_hope_aead (const struct htlc_conn *h)
+{
+    return h->hope_aead;
+}
+
+void
+hx_conn_set_hope_aead (struct htlc_conn *h, void *p)
+{
+    h->hope_aead = p;
 }

@@ -115,7 +115,7 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
      * pos/len; we then write the header, copy the body, and leave pos past the
      * body + len == 0 (the state the handlers ran in before). The Rust actor
      * already parsed the header, so there's no C-side re-decode + no
-     * htlc->rcv two-phase state machine — hx_dispatch_frame routes the parsed
+     * two-phase receive state machine — hx_dispatch_frame routes the parsed
      * opcode straight to the body handler. */
     qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR + body_len);
     gtkhx_proto_pack_header (htlc->in.buf, type, trans, flag, hc, body_len);

@@ -545,8 +545,8 @@ proto_trace_recv_chunks (struct htlc_conn *htlc)
 	 * weave a trace call into every consumer of those macros. */
     pos = SIZEOF_HL_HDR;
     max = htlc->in.pos;
-    debug_log (CAT, "  recv-chunks entry: in.pos=%u in.len=%u rcv=%p",
-               htlc->in.pos, htlc->in.len, (void *) htlc->rcv);
+    debug_log (CAT, "  recv-chunks entry: in.pos=%u in.len=%u",
+               htlc->in.pos, htlc->in.len);
     while (pos + SIZEOF_HL_DATA_HDR < max) {
         struct hl_data_hdr *dh = (struct hl_data_hdr *)(&htlc->in.buf[pos]);
         guint16 dlen, dtype;

@@ -205,7 +205,6 @@ struct htlc_conn {
 	 * The single-session world sets this to &the_session; the multi-conn seam
 	 * later sets it per connection. */
     session *sess;
-    void (*rcv) (struct htlc_conn *);
     struct qbuf in, out;
     struct qbuf read_in;
     /* Server endpoint identification, populated at hx_connect time.
@@ -226,7 +225,6 @@ struct htlc_conn {
     char ip_addr[HOSTLEN];
     int fd;
     guint32 trans;
-    guint32 chattrans;
     guint16 icon;
     guint16 uid;
     guint16 version;

@@ -100,16 +100,8 @@ gtkhx_connect_apply (session *sess, const char *server, guint16 port,
         return;
     }
 
-    memset (sess->htlc->compressalg, 0, sizeof (sess->htlc->compressalg));
-    if (compress_name && *compress_name) {
-        g_strlcpy (sess->htlc->compressalg, compress_name,
-                   sizeof (sess->htlc->compressalg));
-    }
-    memset (sess->htlc->cipheralg, 0, sizeof (sess->htlc->cipheralg));
-    if (cipher_name && *cipher_name) {
-        g_strlcpy (sess->htlc->cipheralg, cipher_name,
-                   sizeof (sess->htlc->cipheralg));
-    }
+    hx_conn_set_compressalg (sess->htlc, compress_name);
+    hx_conn_set_cipheralg (sess->htlc, cipher_name);
 
     hx_connect (sess->htlc, server ? server : "", port, login ? login : "",
                 pass ? pass : "", secure, tls);
