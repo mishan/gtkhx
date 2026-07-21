@@ -20,8 +20,9 @@ use std::cell::Cell;
 use std::os::raw::{c_char, c_int};
 use std::rc::Rc;
 
-/// `hx_tls_trust_status::HX_TLS_TRUST_MISMATCH` — the one status value the
-/// dialog's tone branches on. Mirrors the numeric enum in `hxtls-trust`.
+/// The MISMATCH status the dialog's tone branches on. Matches the
+/// `hxtls-trust` `TrustStatus` discriminant (Trusted=0 / Unknown=1 /
+/// Mismatch=2), passed through as an `int` by the registered prompt callback.
 const STATUS_MISMATCH: c_int = 2;
 
 extern "C" {

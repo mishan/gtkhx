@@ -7,13 +7,18 @@ description = "TLS trust-on-first-use (TOFU) known_hosts store — SHA-256 cert-
 publish = false
 
 [lib]
-# rlib: consumed natively by gtkhx-ui's tls_trust decide/marshal/dialog glue.
-# staticlib: kept for the house pattern; the crate exports no C ABI itself
-#            (the FFI surface lives in gtkhx-ui).
+# staticlib: the crate's own C ABI (src/ffi.rs — hx_tls_verify_cert /
+#            hx_tls_trust_pin / hx_tls_test_* / hx_tls_trust_set_prompt),
+#            linked into the main binary + the minimal Tier-3 connect tests
+#            via rust_hxtls_trust_dep. This archive owns those symbols;
+#            gtkhx-ui does NOT depend on this crate (it only externs
+#            hx_tls_trust_set_prompt), so the symbols aren't double-defined.
+# rlib:      cargo test.
 crate-type = ["staticlib", "rlib"]
 
-# Pure std — known_hosts file parse + atomic rewrite, no glib / gtk. Every DB op
+# Pure std — known_hosts DB (parse + atomic rewrite), the test seams, path
+# resolution, and the classify/decide orchestration; no glib / gtk. Every DB op
 # takes an explicit known_hosts path, so `cargo test -p hxtls-trust` runs
-# headless against a tmpdir. Path resolution + the test seams + the dialog
-# marshalling live in gtkhx-ui (they need the config dir / GTK / main thread).
+# headless against a tmpdir. Only the Adwaita prompt lives in gtkhx-ui, reached
+# through the callback registered via hx_tls_trust_set_prompt.
 [dependencies]

@@ -190,7 +190,7 @@ pub fn pin(
 /// `hx_tls_trust_pin`'s "surgical file primitives" — the config directory is
 /// assumed to exist (created at app startup), so no `mkdir` here.
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
-    use std::io::Write;
+    use std::io::{ErrorKind, Write};
     use std::os::unix::fs::OpenOptionsExt;
 
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
@@ -198,18 +198,50 @@ fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_else(|| "known_hosts".into());
-    // A per-process-unique temp name in the same dir (rename must be same-fs).
-    let tmp = dir.join(format!(
-        ".{file_name}.tmp.{}.{}",
-        std::process::id(),
-        next_seq()
-    ));
 
-    let mut f = std::fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
-        .open(&tmp)?;
+    // Open a fresh temp file in the same dir (rename must be same-fs) with
+    // O_EXCL so we never clobber a concurrent writer's temp. The name mixes
+    // pid + a nanosecond stamp + a monotonic counter for entropy, but a stale
+    // temp left by a crashed run whose pid gets reused could still collide, so
+    // retry a few times on AlreadyExists (each attempt draws a new stamp/seq)
+    // rather than failing the pin outright.
+    let mut f = None;
+    let mut tmp = std::path::PathBuf::new();
+    let mut last_err = None;
+    for _ in 0..16 {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        tmp = dir.join(format!(
+            ".{file_name}.tmp.{}.{}.{}",
+            std::process::id(),
+            nanos,
+            next_seq()
+        ));
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&tmp)
+        {
+            Ok(handle) => {
+                f = Some(handle);
+                break;
+            }
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+                last_err = Some(e);
+                continue;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    let Some(mut f) = f else {
+        return Err(last_err.unwrap_or_else(|| {
+            std::io::Error::new(ErrorKind::AlreadyExists, "known_hosts temp file collision")
+        }));
+    };
+
     if let Err(e) = f.write_all(data).and_then(|_| f.sync_all()) {
         let _ = std::fs::remove_file(&tmp);
         return Err(e);

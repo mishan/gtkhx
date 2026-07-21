@@ -129,7 +129,11 @@ fn known_hosts_path() -> Option<PathBuf> {
         .unwrap_or_else(|e| e.into_inner())
         .clone()
     {
-        return Some(PathBuf::from(ov));
+        // An empty override is treated as "unset" — never PathBuf::from("")
+        // (which is the cwd) — so we fall through to env / $CONFIG cleanly.
+        if !ov.is_empty() {
+            return Some(PathBuf::from(ov));
+        }
     }
     if let Some(env) = std::env::var_os("GTKHX_KNOWN_HOSTS") {
         if !env.is_empty() {
@@ -439,6 +443,18 @@ mod tests {
         // Same cert on a new port → silent accept + pin, no prompt needed.
         assert!(decide("host", 5601, FP_A));
         assert_eq!(crate::lookup(&tmp.kh(), "host", 5601, FP_A), TrustStatus::Trusted);
+        reset_seams();
+    }
+
+    #[test]
+    fn empty_known_hosts_override_falls_through() {
+        let _g = seam_lock();
+        reset_seams();
+        // An empty override must NOT resolve to PathBuf::from("") (the cwd). With
+        // no env override and the test's null config dir, it falls through to None.
+        *known_hosts_ov().lock().unwrap() = Some(String::new());
+        std::env::remove_var("GTKHX_KNOWN_HOSTS");
+        assert_eq!(known_hosts_path(), None);
         reset_seams();
     }
 
