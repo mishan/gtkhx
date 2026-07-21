@@ -21,7 +21,7 @@
  *         → DNS + TCP + magic + LOGIN + LOGIN-reply against real mhxd
  *         → replay LOGIN reply as a synthetic Event::Frame
  *           → bridge_on_event_cb → hx_bridge_dispatch_frame
- *             → htlc->rcv (recorded by the connect_test_stubs.c
+ *             → body-handler dispatch (recorded by the connect_test_stubs.c
  *                          recording hx_rcv_hdr)
  *         → Event::State(HandshakeDone)
  *

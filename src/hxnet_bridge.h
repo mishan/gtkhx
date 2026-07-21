@@ -7,14 +7,14 @@
  * delivered to a C callback on the GLib main thread. The
  * existing rcv path in src/rcv.c reads from htlc->in (a 22-byte
  * header buffer; resized for the body after hx_rcv_hdr decodes
- * the type) and runs body handlers via htlc->rcv. These helpers
+ * the type) and runs body handlers via the rcv dispatch. These helpers
  * marshal an HxnetFrame into the rcv state machine without
  * involving hx_decode (the cipher / compression layers are
  * already handled by hxnet's transform stack — the bytes
  * arriving here are plaintext).
  *
  * The bridge is intentionally side-effect-free outside of htlc:
- * it touches htlc->in, htlc->rcv, and the body handlers; it
+ * it touches htlc->in and the body handlers; it
  * does NOT touch any GIOStream / GPollable state directly.
  *
  * R3.3.e-4a (shipped): the dispatch translation (pack_header /
@@ -43,7 +43,7 @@ G_BEGIN_DECLS
  *
  * Stages the packed 22-byte header + body bytes into
  * `htlc->in`, calls `hx_rcv_hdr` (which decodes the header and
- * sets `htlc->rcv` to the appropriate body handler), then
+ * selects the appropriate body handler), then
  * dispatches the body handler if one was selected and a body is
  * present. Leaves `htlc->in` in the "expecting next header"
  * state when the dispatch returns (matches what

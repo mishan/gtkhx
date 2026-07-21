@@ -180,8 +180,9 @@ rcv_login_reset (void)
 
 /* hx_rcv_hdr is the production receive callback. In the Phase G
  * orchestrator path, hx_bridge_dispatch_frame stages the replayed
- * LOGIN-reply header into htlc->in.buf and calls htlc->rcv (== this
- * stub) — so we record the dispatched frame's header fields here. The
+ * LOGIN-reply header into htlc->in.buf and calls the body-handler
+ * dispatch (== this stub) — so we record the dispatched frame's header
+ * fields here. The
  * real
  * production hx_rcv_hdr lives in rcv.c and drags the whole UI
  * stack; the orchestrator test only needs to prove the reply was
@@ -293,7 +294,7 @@ hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
 
     /* hx_bridge_dispatch_frame has already staged the full frame (22-byte
      * header + body) into htlc->in.buf, so — unlike the old two-phase
-     * hx_rcv_hdr handoff — there's no qbuf/htlc->rcv dance to mirror here.
+     * hx_rcv_hdr handoff — there's no qbuf/two-phase dance to mirror here.
      * Inspect the first frame (the replayed LOGIN reply) directly for the
      * capabilities echo. */
     if (is_first && htlc && htlc->in.buf) {

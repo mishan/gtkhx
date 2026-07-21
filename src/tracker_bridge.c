@@ -26,6 +26,7 @@
 #include <glib.h>
 
 #include "session.h"     /* hx_active_session, hx_connect */
+#include "hxconn.h"      /* hx_conn_set_cipheralg / _compressalg */
 #include "prefs.h"       /* gtkhx_prefs */
 #include "gtkhx_log.h"   /* hx_printf_prefix, INFOPREFIX */
 #include "tracker_bridge.h"
@@ -49,12 +50,8 @@ gtkhx_tracker_connect_apply (const char *address, guint16 port, char secure,
 {
     session *sess = hx_active_session ();
 
-    memset (sess->htlc->compressalg, 0, sizeof (sess->htlc->compressalg));
-    memset (sess->htlc->cipheralg, 0, sizeof (sess->htlc->cipheralg));
-    if (cipher_name && *cipher_name) {
-        g_strlcpy (sess->htlc->cipheralg, cipher_name,
-                   sizeof (sess->htlc->cipheralg));
-    }
+    hx_conn_set_compressalg (sess->htlc, NULL);
+    hx_conn_set_cipheralg (sess->htlc, cipher_name);
     hx_connect (sess->htlc, address ? address : "", port, "", "", secure,
                 tls);
 }

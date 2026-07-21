@@ -1438,7 +1438,7 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
 /* Dispatch a fully-staged received frame. The Rust
  * hxnet actor already parsed the header and the bridge staged the whole frame
  * (22-byte header + body) into htlc->in.buf, so this no longer re-decodes the
- * header or runs the old two-phase htlc->rcv state machine — it traces, routes
+ * header or runs the old two-phase receive state machine — it traces, routes
  * the opcode to a body handler (via the Rust dispatch::route table behind
  * hx_recv_route), and calls it. */
 void
@@ -1631,10 +1631,10 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
          * HTXF subchannels (banner.c / xfers.c) read htlc->hope_aead to
          * derive their per-transfer keys in-process. NULL for plaintext
          * / Blowfish / no-cipher. Freed on connection teardown. */
-        if (htlc->hope_aead) {
-            hxnet_hope_aead_free (htlc->hope_aead);
+        if (hx_conn_hope_aead (htlc)) {
+            hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
         }
-        htlc->hope_aead = hx_bridge_orchestrated_hope_aead ();
+        hx_conn_set_hope_aead (htlc, hx_bridge_orchestrated_hope_aead ());
 
         /* Reset post-login fetch state before scheduling so
 		 * a reconnection during this process state starts clean.

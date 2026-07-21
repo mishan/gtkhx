@@ -22,6 +22,7 @@
 #include <glib.h>
 
 struct htlc_conn;
+typedef struct _session session;
 
 /* ---- Chat-history extension session state ---------------------------------
  *
@@ -157,5 +158,35 @@ extern gboolean hx_conn_access_permits (const struct htlc_conn *h, int bit);
  * live in network.c's connect/close paths. */
 extern int  hx_conn_fd (const struct htlc_conn *h);
 extern void hx_conn_set_fd (struct htlc_conn *h, int v);
+
+/* ---- Owning-session back-pointer -----------------------------------------
+ *
+ * The session that owns this connection, set once at allocation. The read side
+ * already has a chokepoint accessor — sess_from_htlc() in session.h — so only
+ * the write needs a seam here; the single-session world sets it to
+ * &the_session, the multi-conn seam later sets it per connection. */
+extern void hx_conn_set_sess (struct htlc_conn *h, session *s);
+
+/* ---- Connect-time HOPE algorithm selections ------------------------------
+ *
+ * The cipher / compression names handed to the orchestrated connect (hxnet
+ * owns the actual handshake). Empty selects the orchestrator's default. Set
+ * from the Connect dialog, read at hx_connect time. hx_conn_set_cipheralg /
+ * _compressalg copy into the fixed buffer (truncating), and clear it when
+ * passed NULL or "". */
+extern const char *hx_conn_cipheralg (const struct htlc_conn *h);
+extern void        hx_conn_set_cipheralg (struct htlc_conn *h, const char *v);
+extern const char *hx_conn_compressalg (const struct htlc_conn *h);
+extern void        hx_conn_set_compressalg (struct htlc_conn *h, const char *v);
+
+/* ---- HOPE control-channel AEAD material handle ---------------------------
+ *
+ * Opaque Rust HxnetHopeAead* (or NULL). Seeded after login when the
+ * orchestrated HOPE handshake negotiated ChaCha20-Poly1305, so an HTXF
+ * subchannel can derive its per-transfer keys in-process without the session
+ * key crossing back to C. The caller owns the lifecycle (clone / free via the
+ * hxnet_hope_aead_* API); this seam only stores and returns the pointer. */
+extern void *hx_conn_hope_aead (const struct htlc_conn *h);
+extern void  hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
 
 #endif /* GTKHX_HXCONN_H */
