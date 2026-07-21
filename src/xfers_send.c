@@ -437,17 +437,28 @@ folder_send_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
             htxf->rsrc_size = (guint32)resource_len (e->full_local_path);
         }
 
-        /* Per-file payload size, matching file_send_one's writes:
-		 * 133 + comment_len + ((rsrc_size - rsrc_pos) ? 16 : 0)
-		 * + (data_size - data_pos) + (rsrc_size - rsrc_pos). */
+        /* Per-file payload size — MUST equal exactly what file_send_one
+		 * writes below, or the trailing bytes desync the server's parse
+		 * of the NEXT file's nfi and the whole folder stream fails.
+		 * file_send_one always writes the FILP header (133 + comment_len)
+		 * + the data fork + a 16-byte MACR marker + the rsrc fork:
+		 *
+		 *   133 + comment_len + (data_size - data_pos)
+		 *       + 16 + (rsrc_size - rsrc_pos)
+		 *
+		 * The 16-byte MACR marker is unconditional (file_send_one emits
+		 * it even with no resource fork), so it must always be counted.
+		 * The old accounting only added the 16 when a resource fork was
+		 * present, under-declaring by 16 for the common no-rsrc file and
+		 * desyncing every multi-file folder upload — a bug that stayed
+		 * hidden because the solo-file path has no following file for the
+		 * leaked bytes to corrupt. */
         {
             guint32 file_size;
             guint32 size_n;
             guint32 com = (guint32)comment_len (e->full_local_path);
-            file_size = 133 + com + (htxf->data_size - htxf->data_pos);
-            if (htxf->rsrc_size - htxf->rsrc_pos) {
-                file_size += 16 + (htxf->rsrc_size - htxf->rsrc_pos);
-            }
+            file_size = 133 + com + (htxf->data_size - htxf->data_pos) + 16
+                        + (htxf->rsrc_size - htxf->rsrc_pos);
             size_n = htonl (file_size);
             if (htxf_io_write (htxf, &size_n, 4) != 4) {
                 retval = errno ? errno : EIO;

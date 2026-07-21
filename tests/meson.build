@@ -2266,6 +2266,25 @@ test('folder_put', test_integration_folder_put,
      suite   : 'integration',
      timeout : 30)
 
+# folder_roundtrip — full folder tree upload+download driving the
+# PRODUCTION folder machines. Uploads a local tree via
+# xfers_send.c::folder_send_all, downloads it back through
+# xfers_recv.c::folder_recv_all, and asserts every file is byte-exact.
+# Links both machines + hfs.c + htxf_subchannel.c + the FFO codec on top
+# of integration_harness_lib. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
+test_integration_folder_roundtrip = executable('test_integration_folder_roundtrip',
+  'integration/test_folder_roundtrip.c',
+  '../src/xfers_send.c',
+  '../src/xfers_recv.c',
+  '../src/hfs.c',
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep],
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('folder_roundtrip', test_integration_folder_roundtrip,
+     suite   : 'integration',
+     timeout : 30)
+
 # voice_* — Phase 8.F coverage for the fogWraith voice-chat
 # extension (HTLC_CAP_VOICE + 600-606 transactions + 0x01F5-0x01F9
 # fields). Filters the matrix for HX_TEST_CAP_VOICE; today only
