@@ -93,8 +93,8 @@ pub enum ClientHdr {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServerHdr {
     // NB: these match hotline.h — MSG is 0x68, CHAT is 0x6a. (They were
-    // previously swapped here; the values were unused so nothing routed on
-    // them, but see the round-trip test below that now pins them.)
+    // previously swapped here; the values are unused so nothing routed on them.
+    // Routing lives in dispatch::route, keyed off its own hotline.h constants.)
     Msg = 0x0000_0068,
     Chat = 0x0000_006a,
     Queue = 0x0000_00d3,
@@ -431,15 +431,6 @@ pub const NICK_COLOR_NONE: u32 = 0xffff_ffff;
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn server_opcode_roundtrip() {
-        assert_eq!(ServerHdr::from_u32(0x0001_0000), Some(ServerHdr::Task));
-        assert_eq!(ServerHdr::from_u32(0x0000_0162), Some(ServerHdr::UserSelfInfo));
-        assert_eq!(ServerHdr::Task.as_u32(), 0x0001_0000);
-        assert_eq!(ServerHdr::from_u32(0xdead_beef), None);
-    }
-
 
     #[test]
     fn client_opcode_values_match_header() {

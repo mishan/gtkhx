@@ -12,9 +12,11 @@
 //! Opcode values mirror `src/hotline.h` (the wire authority). The unit tests
 //! pin every one.
 
-/// The handler category for a server→client opcode. `#[repr(i32)]`; the C
-/// mirror `hx_recv_handler_kind` (`hotline_proto.h`) must match these
-/// discriminants (pinned by [`tests::kind_discriminants_are_stable`]).
+/// The handler category for a server→client opcode. `#[repr(i32)]` with
+/// explicit discriminants; the C mirror `hx_recv_handler_kind`
+/// (`hotline_proto.h`) restates the same integers and must be kept in step by
+/// hand. What's tested is the routing *behaviour* — see
+/// [`tests::every_wire_opcode_routes_to_its_handler`].
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HandlerKind {
@@ -102,8 +104,9 @@ pub fn route(opcode: u32) -> HandlerKind {
     }
 }
 
-/// `int hx_recv_route (guint32 opcode)` — route an opcode to its
-/// `hx_recv_handler_kind` (hotline_proto.h). C `hx_rcv_hdr` calls this instead
+/// `hx_recv_handler_kind hx_recv_route (guint32 opcode)` — route an opcode to
+/// its [`HandlerKind`] discriminant, the integer the C `hx_recv_handler_kind`
+/// enum (hotline_proto.h) mirrors. C `hx_dispatch_frame` switches on it instead
 /// of the in-line opcode `switch`.
 #[no_mangle]
 pub extern "C" fn hx_recv_route(opcode: u32) -> i32 {
@@ -116,23 +119,38 @@ mod tests {
     use super::*;
 
     #[test]
-    fn chat_and_msg_route_to_their_own_handlers() {
-        // Guards the swap that once lived in ServerHdr: msg-opcode 0x68 must
-        // reach the msg handler, chat-opcode 0x6a the chat handler.
-        assert_eq!(route(0x0000_0068), Msg);
-        assert_eq!(route(0x0000_006a), Chat);
-    }
-
-    #[test]
-    fn aliased_opcodes_fold_to_one_handler() {
-        // Behaviours worth pinning: broadcast rides the msg handler, and the
-        // chat-room USER_CHANGE / USER_PART variants fold into the same roster
-        // handlers as their global counterparts.
-        assert_eq!(route(0x0000_0163), Msg); // MSG_BROADCAST → msg
-        assert_eq!(route(0x0000_012d), route(0x0000_0075)); // USER_CHANGE ≡ CHAT_USER_CHANGE
-        assert_eq!(route(0x0000_012d), UserChange);
-        assert_eq!(route(0x0000_012e), route(0x0000_0076)); // USER_PART ≡ CHAT_USER_PART
-        assert_eq!(route(0x0000_012e), UserPart);
+    fn every_wire_opcode_routes_to_its_handler() {
+        // Each server→client opcode (from hotline.h, the wire authority) paired
+        // with the handler category it must reach. This is the behaviour of the
+        // extracted router: a mis-mapped opcode would misroute silently against a
+        // live server. Aliases fold here too — MSG_BROADCAST rides the msg
+        // handler, and the chat-room USER_CHANGE / USER_PART variants share the
+        // roster handlers with their globals.
+        let table: &[(u32, HandlerKind)] = &[
+            (0x0000_006a, Chat),        // CHAT — 0x6a; guards the old 0x68/0x6a swap
+            (0x0000_0068, Msg),         // MSG
+            (0x0000_0163, Msg),         // MSG_BROADCAST folds onto msg
+            (0x0000_012d, UserChange),  // USER_CHANGE
+            (0x0000_0075, UserChange),  // CHAT_USER_CHANGE (room variant)
+            (0x0000_012e, UserPart),    // USER_PART
+            (0x0000_0076, UserPart),    // CHAT_USER_PART (room variant)
+            (0x0000_0066, NewsPost),
+            (0x0001_0000, Task),
+            (0x0000_0077, ChatSubject),
+            (0x0000_0071, ChatInvite),
+            (0x0000_0162, UserSelfInfo),
+            (0x0000_006d, Agreement),
+            (0x0000_007a, Banner),
+            (0x0000_006f, PoliteQuit),
+            (0x0000_00d3, XferQueue),
+            (0x0000_025a, VoiceSdpOffer),
+            (0x0000_025c, VoiceIce),
+            (0x0000_025d, VoiceRoomStatus),
+            (0x0000_0748, IconChange),
+        ];
+        for &(opcode, kind) in table {
+            assert_eq!(route(opcode), kind, "route(0x{opcode:08x})");
+        }
     }
 
     #[test]

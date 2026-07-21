@@ -1499,7 +1499,7 @@ hx_rcv_hdr (struct htlc_conn *htlc)
         break;
     default:
         /* HX_RECV_UNKNOWN, plus the voice kinds in a -Dvoice=disabled build. */
-        g_print ("0x%08x\n", type);
+        debug_log ("proto", "unknown header type 0x%08x", type);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
                           _ ("unknown header type 0x%08x\n"), type);
         htlc->rcv = hx_rcv_dump;

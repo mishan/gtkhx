@@ -1711,13 +1711,13 @@ extern size_t gtkhx_proto_parse_icon_list (
     struct gtkhx_proto_icon_entry *out, size_t cap);
 
 /*
- * Receive-dispatch routing (network-untangling N3). hx_rcv_hdr calls
- * hx_recv_route(type) to map a server frame's opcode to a handler category,
- * then switches on the result to pick the body handler. This enum mirrors
- * hotline-proto's dispatch::HandlerKind (rust/crates/hotline-proto/src/
- * dispatch.rs) — the values must stay in lockstep with the Rust discriminants.
- * The composite-TASK mask (Heidrun-style TASK|opcode replies) is applied inside
- * hx_recv_route, so the C side no longer special-cases it.
+ * Receive-dispatch routing. hx_rcv_hdr calls hx_recv_route(type) to map a
+ * server frame's opcode to a handler category, then switches on the result to
+ * pick the body handler. This enum mirrors hotline-proto's dispatch::HandlerKind
+ * (rust/crates/hotline-proto/src/dispatch.rs) — the values must stay in lockstep
+ * with the Rust discriminants. The composite-TASK mask (Heidrun-style
+ * TASK|opcode replies) is applied inside hx_recv_route, so the C side no longer
+ * special-cases it.
  */
 typedef enum {
     HX_RECV_CHAT = 0,
@@ -1740,6 +1740,6 @@ typedef enum {
     HX_RECV_UNKNOWN = 17,
 } hx_recv_handler_kind;
 
-extern int hx_recv_route (guint32 opcode);
+extern hx_recv_handler_kind hx_recv_route (guint32 opcode);
 
 #endif /* GTKHX_HOTLINE_PROTO_H */
