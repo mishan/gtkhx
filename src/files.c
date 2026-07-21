@@ -98,44 +98,20 @@ icon_of_fh (struct hl_filelist_hdr *fh)
                                    (const char *)fh->fname, (gsize)fh->fnlen);
 }
 
-/* FourCC → human label. Table is intentionally small — only the
- * codes we see often in the wild on Hotline servers. Anything
- * unknown falls through to "<XXXX> file" with the raw FourCC,
- * which is still better than the raw 4-byte glyph the old code
- * showed. Strings here are plain literals; _() runs at lookup
- * time so any later translation catalog picks them up without
- * needing N_() / gettext-noop machinery in this TU. */
+/* FourCC → human label.
+ *
+ * The type→label table moved to the hxfiles-model Rust crate in Phase F1
+ * (gtkhx_files_kind_label_for; see docs/files-rust-migration-scope.md).
+ * This C wrapper keeps the parts that need glib/gettext: the runtime
+ * `_()` translation of the (static, English) label, the null-type
+ * "Unknown" case, and the unknown-FourCC "<XXXX> file" fallback (whose
+ * result the caller frees). Behaviour is byte-for-byte the same as the
+ * old table. */
+extern const char *gtkhx_files_kind_label_for (const char *ftype);
+
 const char *
 kind_of_ftype (const char *ftype, gboolean *is_static_out)
 {
-    static const struct {
-        const char *code;
-        const char *label;
-    } table[] = {
-        { "fldr", "Folder" },          { "TEXT", "Text Document" },
-        { "PDF ", "PDF Document" },    { "JPEG", "JPEG Image" },
-        { "GIFf", "GIF Image" },       { "GIF ", "GIF Image" },
-        { "PNGf", "PNG Image" },       { "PNG ", "PNG Image" },
-        { "PICT", "PICT Image" },      { "TIFF", "TIFF Image" },
-        { "BMP ", "BMP Image" },       { "MP3 ", "MP3 Audio" },
-        { "MPG3", "MP3 Audio" },       { "AIFF", "AIFF Audio" },
-        { "AIFC", "AIFF Audio" },      { "WAVE", "WAV Audio" },
-        { "Mp3 ", "MP3 Audio" },       { "MooV", "QuickTime Movie" },
-        { "MPEG", "MPEG Video" },      { "MPG ", "MPEG Video" },
-        { "M4V ", "MPEG-4 Video" },    { "AVI ", "AVI Video" },
-        { "MKV ", "Matroska Video" },  { "ZIP ", "ZIP Archive" },
-        { "SIT!", "StuffIt Archive" }, { "SITD", "StuffIt Archive" },
-        { "SIT5", "StuffIt Archive" }, { "BINA", "MacBinary Archive" },
-        { "TARF", "TAR Archive" },     { "Tar ", "TAR Archive" },
-        { "GZIP", "Gzip Archive" },    { "GZip", "Gzip Archive" },
-        { "BZIP", "Bzip2 Archive" },   { "APPL", "Application" },
-        { "rohd", "Disk Image" },      { "IMG ", "Disk Image" },
-        { "ISO ", "ISO Disk Image" },  { "DMG ", "Disk Image" },
-        { "HTft", "HTML Document" },   { "HTML", "HTML Document" },
-        { "alis", "Alias" },           { "SLNK", "Symbolic Link" },
-    };
-    gsize i;
-
     if (!ftype) {
         if (is_static_out) {
             *is_static_out = TRUE;
@@ -143,13 +119,12 @@ kind_of_ftype (const char *ftype, gboolean *is_static_out)
         return _ ("Unknown");
     }
 
-    for (i = 0; i < G_N_ELEMENTS (table); i++) {
-        if (memcmp (ftype, table[i].code, 4) == 0) {
-            if (is_static_out) {
-                *is_static_out = TRUE;
-            }
-            return _ (table[i].label);
+    const char *label = gtkhx_files_kind_label_for (ftype);
+    if (label) {
+        if (is_static_out) {
+            *is_static_out = TRUE;
         }
+        return _ (label);
     }
 
     /* Fall-through: format a one-off string with the raw FourCC.

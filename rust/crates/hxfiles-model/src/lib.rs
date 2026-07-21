@@ -100,6 +100,54 @@ fn contains_ascii_ci(haystack: &[u8], needle: &[u8]) -> bool {
         .any(|w| w.eq_ignore_ascii_case(needle))
 }
 
+/// Human label for a 4-byte Hotline file type (FourCC), ported from the
+/// table in `src/files.c::kind_of_ftype`.
+///
+/// Returns a static, NUL-terminated English label for a known type, or
+/// `None` for an unknown/short/missing type. The C side wraps the result
+/// in `_()` for runtime translation and handles the unknown-FourCC
+/// fallback ("<XXXX> file") + the "Unknown" (null type) case itself, so
+/// this stays pure logic. The English strings match the old C table
+/// byte-for-byte so any existing translation catalog keys still resolve.
+pub fn kind_label_for(ftype: Option<&[u8]>) -> Option<&'static core::ffi::CStr> {
+    let f = match ftype {
+        Some(f) if f.len() >= 4 => &f[..4],
+        _ => return None,
+    };
+    Some(match f {
+        b"fldr" => c"Folder",
+        b"TEXT" => c"Text Document",
+        b"PDF " => c"PDF Document",
+        b"JPEG" => c"JPEG Image",
+        b"GIFf" | b"GIF " => c"GIF Image",
+        b"PNGf" | b"PNG " => c"PNG Image",
+        b"PICT" => c"PICT Image",
+        b"TIFF" => c"TIFF Image",
+        b"BMP " => c"BMP Image",
+        b"MP3 " | b"MPG3" | b"Mp3 " => c"MP3 Audio",
+        b"AIFF" | b"AIFC" => c"AIFF Audio",
+        b"WAVE" => c"WAV Audio",
+        b"MooV" => c"QuickTime Movie",
+        b"MPEG" | b"MPG " => c"MPEG Video",
+        b"M4V " => c"MPEG-4 Video",
+        b"AVI " => c"AVI Video",
+        b"MKV " => c"Matroska Video",
+        b"ZIP " => c"ZIP Archive",
+        b"SIT!" | b"SITD" | b"SIT5" => c"StuffIt Archive",
+        b"BINA" => c"MacBinary Archive",
+        b"TARF" | b"Tar " => c"TAR Archive",
+        b"GZIP" | b"GZip" => c"Gzip Archive",
+        b"BZIP" => c"Bzip2 Archive",
+        b"APPL" => c"Application",
+        b"rohd" | b"IMG " | b"DMG " => c"Disk Image",
+        b"ISO " => c"ISO Disk Image",
+        b"HTft" | b"HTML" => c"HTML Document",
+        b"alis" => c"Alias",
+        b"SLNK" => c"Symbolic Link",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -176,5 +224,43 @@ mod tests {
     fn ftype_longer_than_four_bytes_uses_first_four() {
         // Callers pass exactly 4, but be robust: only the first 4 count.
         assert_eq!(icon_id_for(Some(b"JPEGextra"), Some(b"")), icon::IMAGE);
+    }
+
+    fn kind(ftype: &[u8]) -> Option<&'static str> {
+        kind_label_for(Some(ftype)).map(|c| c.to_str().unwrap())
+    }
+
+    #[test]
+    fn kind_known_types() {
+        assert_eq!(kind(b"fldr"), Some("Folder"));
+        assert_eq!(kind(b"TEXT"), Some("Text Document"));
+        assert_eq!(kind(b"JPEG"), Some("JPEG Image"));
+        assert_eq!(kind(b"MP3 "), Some("MP3 Audio"));
+        assert_eq!(kind(b"MooV"), Some("QuickTime Movie"));
+        assert_eq!(kind(b"APPL"), Some("Application"));
+        assert_eq!(kind(b"alis"), Some("Alias"));
+    }
+
+    #[test]
+    fn kind_aliased_codes_share_a_label() {
+        for t in [b"MP3 ", b"MPG3", b"Mp3 "] {
+            assert_eq!(kind(t), Some("MP3 Audio"), "{t:?}");
+        }
+        for t in [b"SIT!", b"SITD", b"SIT5"] {
+            assert_eq!(kind(t), Some("StuffIt Archive"), "{t:?}");
+        }
+        for t in [b"rohd", b"IMG ", b"DMG "] {
+            assert_eq!(kind(t), Some("Disk Image"), "{t:?}");
+        }
+        for t in [b"HTft", b"HTML"] {
+            assert_eq!(kind(t), Some("HTML Document"), "{t:?}");
+        }
+    }
+
+    #[test]
+    fn kind_unknown_and_short_are_none() {
+        assert_eq!(kind(b"XXXX"), None);
+        assert_eq!(kind_label_for(None), None);
+        assert_eq!(kind_label_for(Some(b"MP")), None); // < 4 bytes
     }
 }
