@@ -18,7 +18,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 #[cfg(not(test))]
@@ -163,25 +163,28 @@ pub type PromptFn = extern "C" fn(
     known_hosts: *const c_char,
 ) -> c_int;
 
-/// The installed prompt as a raw `usize` (a NULL == none). `AtomicUsize` because
-/// function pointers aren't `AtomicPtr`-friendly and we only ever store/load.
-static PROMPT: AtomicUsize = AtomicUsize::new(0);
+/// The installed prompt (a plain fn pointer — `Send`, `Copy`), or `None` before
+/// UI init. A `Mutex<Option<PromptFn>>` rather than an integer cast so there's
+/// no pointer→usize→pointer round-trip / `transmute` to get wrong; the slot is
+/// written once at init and read once per fallback prompt.
+fn prompt_slot() -> &'static Mutex<Option<PromptFn>> {
+    static P: OnceLock<Mutex<Option<PromptFn>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(None))
+}
 
 /// `void hx_tls_trust_set_prompt (PromptFn cb)` — install (or, with NULL, clear)
 /// the GUI prompt. Called once from the UI init.
 #[no_mangle]
 pub extern "C" fn hx_tls_trust_set_prompt(cb: Option<PromptFn>) {
-    PROMPT.store(cb.map(|f| f as usize).unwrap_or(0), Ordering::SeqCst);
+    *prompt_slot().lock().unwrap_or_else(|e| e.into_inner()) = cb;
 }
 
 fn call_prompt(host: &str, port: u16, fp: &str, status: TrustStatus, kh: Option<&Path>) -> bool {
-    let v = PROMPT.load(Ordering::SeqCst);
-    if v == 0 {
+    let Some(cb) = *prompt_slot().lock().unwrap_or_else(|e| e.into_inner()) else {
         // No GUI registered (headless integration tests) → reject. Production
         // always installs one at UI init, and tests always set a seam first.
         return false;
-    }
-    let cb: PromptFn = unsafe { std::mem::transmute::<usize, PromptFn>(v) };
+    };
     let host_c = CString::new(host).unwrap_or_default();
     let fp_c = CString::new(fp).unwrap_or_default();
     let kh_c = kh.and_then(|p| CString::new(p.as_os_str().as_bytes()).ok());
@@ -347,7 +350,7 @@ mod tests {
         FORCE_TLS_OV.store(-1, Ordering::SeqCst);
         PROMPT_OV.store(0, Ordering::SeqCst);
         *known_hosts_ov().lock().unwrap() = None;
-        PROMPT.store(0, Ordering::SeqCst);
+        *prompt_slot().lock().unwrap() = None;
     }
 
     struct Tmp(PathBuf);

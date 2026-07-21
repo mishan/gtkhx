@@ -18,18 +18,21 @@
 //! next pin. A hostname-only entry (no `:port`) matches every port for that host
 //! (legacy SSH convention; we always *write* `host:port`).
 //!
-//! This crate is the pure DB: every operation takes an explicit `known_hosts`
-//! path, so `cargo test` runs headless against a tmpdir. Path resolution (the
-//! `$CONFIG` dir + the `GTKHX_KNOWN_HOSTS` override), the thread-safe test
-//! seams, and the prompt/marshalling all live in `gtkhx-ui` (they need the
-//! config dir / GTK / the main thread).
+//! `lib.rs` (this file) is the pure DB: every operation takes an explicit
+//! `known_hosts` path, so `cargo test` runs headless against a tmpdir. The rest
+//! of the trust brain — `known_hosts` path resolution (`$CONFIG` dir +
+//! `GTKHX_KNOWN_HOSTS` override), the thread-safe test seams, and the
+//! classify/decide orchestration plus the C ABI (`hx_tls_verify_cert` etc.) —
+//! lives in this crate's `ffi.rs`. Only the Adwaita prompt + its worker→main
+//! hop live in `gtkhx-ui`, reached through a callback registered via
+//! `hx_tls_trust_set_prompt`.
 
 use std::path::Path;
 
 /// The verdict of looking a `(host, port, fingerprint)` up in `known_hosts`.
 ///
-/// Numeric values are pinned to match the C `hx_tls_trust_status` enum (mirrored
-/// as `HX_TLS_TRUST_*` on the FFI side).
+/// Numeric values are part of the C ABI: they’re passed as an `int` through the
+/// registered prompt callback and must remain stable (Trusted=0, Unknown=1, Mismatch=2).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(i32)]
 pub enum TrustStatus {
@@ -101,7 +104,12 @@ fn parse_line(line: &str) -> Option<Entry> {
     let mut fields = trimmed.split_whitespace();
     let host_field = fields.next()?;
     let (host, port) = parse_host_field(host_field)?;
-    let fp = fields.next()?;
+    // The fingerprint token ends at whitespace OR a `#` — the old C reader let a
+    // comment abut the fingerprint (`sha256:...#added`) with no intervening
+    // space, so cut at the first `#` to keep matching those hand-edited lines.
+    // (A sha256 hex fingerprint never contains `#`.)
+    let fp_token = fields.next()?;
+    let fp = fp_token.split('#').next().unwrap_or(fp_token);
     if !fp.starts_with("sha256:") {
         return None;
     }
@@ -121,9 +129,13 @@ fn host_port_match(entry_host: &str, entry_port: u16, host: &str, port: u16) -> 
 /// missing / unreadable file is treated as empty (every cert is `Unknown`),
 /// giving a sane first-run experience.
 pub fn lookup(known_hosts: &Path, host: &str, port: u16, fingerprint: &str) -> TrustStatus {
-    let Ok(contents) = std::fs::read_to_string(known_hosts) else {
+    // Read raw bytes + a lossy UTF-8 view (never read_to_string): a stray
+    // non-UTF-8 byte in a comment must not make the whole store look empty and
+    // re-prompt for an otherwise-valid pinned entry.
+    let Ok(bytes) = std::fs::read(known_hosts) else {
         return TrustStatus::Unknown;
     };
+    let contents = String::from_utf8_lossy(&bytes);
     let mut result = TrustStatus::Unknown;
     for line in contents.lines() {
         let Some(e) = parse_line(line) else { continue };
@@ -145,9 +157,10 @@ pub fn lookup(known_hosts: &Path, host: &str, port: u16, fingerprint: &str) -> T
 /// same host on another port (control channel :5600 → HTXF subchannel :5601).
 /// Only safe to consult on a strict-`Unknown`; never overrides a `Mismatch`.
 pub fn host_has_fingerprint(known_hosts: &Path, host: &str, fingerprint: &str) -> bool {
-    let Ok(contents) = std::fs::read_to_string(known_hosts) else {
+    let Ok(bytes) = std::fs::read(known_hosts) else {
         return false;
     };
+    let contents = String::from_utf8_lossy(&bytes);
     contents.lines().filter_map(parse_line).any(|e| {
         e.host.eq_ignore_ascii_case(host) && e.fingerprint == fingerprint
     })
@@ -166,7 +179,12 @@ pub fn pin(
     fingerprint: &str,
     now_date: &str,
 ) -> std::io::Result<()> {
-    let existing = std::fs::read_to_string(known_hosts).unwrap_or_default();
+    // Lossy UTF-8 view of the raw bytes — never read_to_string, whose decode
+    // error on a stray non-UTF-8 byte would default to "" and clobber every
+    // existing pin + comment on the rewrite below. A missing file → "".
+    let existing = std::fs::read(known_hosts)
+        .map(|b| String::from_utf8_lossy(&b).into_owned())
+        .unwrap_or_default();
 
     let mut out = String::new();
     for line in existing.lines() {

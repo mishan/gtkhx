@@ -227,6 +227,32 @@ fn malformed_port_never_widens_trust() {
 }
 
 #[test]
+fn fingerprint_abutting_comment_still_matches() {
+    let tmp = TmpDir::new();
+    // Hand-edited line with the comment jammed against the fingerprint (no
+    // space) — the old C reader accepted `#` as a delimiter, so we must too.
+    std::fs::write(tmp.kh(), format!("host:5600 {FP_A}#pinned by hand\n")).unwrap();
+    assert_eq!(lookup(&tmp.kh(), "host", 5600, FP_A), TrustStatus::Trusted);
+}
+
+#[test]
+fn non_utf8_bytes_dont_hide_valid_entries() {
+    let tmp = TmpDir::new();
+    // A comment with a stray non-UTF-8 byte (0xFF) must not make the whole
+    // store look empty — the valid pin below still resolves.
+    let mut bytes = b"# note: \xff\xfe raw bytes\n".to_vec();
+    bytes.extend_from_slice(format!("host:5600 {FP_A}\n").as_bytes());
+    std::fs::write(tmp.kh(), &bytes).unwrap();
+    assert_eq!(lookup(&tmp.kh(), "host", 5600, FP_A), TrustStatus::Trusted);
+
+    // And pinning another entry preserves the existing one rather than
+    // clobbering the file on a decode error.
+    pin(&tmp.kh(), "host2", 5600, FP_B, "2026-06-01").unwrap();
+    assert_eq!(lookup(&tmp.kh(), "host", 5600, FP_A), TrustStatus::Trusted);
+    assert_eq!(lookup(&tmp.kh(), "host2", 5600, FP_B), TrustStatus::Trusted);
+}
+
+#[test]
 fn leading_whitespace_entry_parses() {
     let tmp = TmpDir::new();
     // Spaces + a tab before the host token must still match (the trim keeps
