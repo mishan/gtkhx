@@ -270,14 +270,6 @@ msg_input_activate (GtkWidget *widget, gpointer data)
         return;
     }
 
-    /* send the plugins information that we're sending a private message
-	   with content termed_buf to uid */
-#ifdef USE_PLUGIN
-    if (EMIT_SIGNAL (XP_SND_MSG, hx_active_session (), termed_buf, &uid, 0, 0, 0)
-        == 1) {
-        return;
-    }
-#endif
     len = strlen (termed_buf);
     msg_output (hx_active_session ()->htlc.name, *uid, termed_buf);
     LF2CR (termed_buf, len);
@@ -578,8 +570,8 @@ hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w)
  * "<name>" coloured nick prefix prepended.
  *
  * this is the shared body for both msg_output (legacy
- * raw-strings call site — kept for plugin / outgoing-msg / xfer-
- * status code paths that hand-roll a name + body string pair) and
+ * raw-strings call site — kept for outgoing-msg / xfer-status
+ * code paths that hand-roll a name + body string pair) and
  * msg_output_from_event (the msg-signal path that has the
  * pre-parsed HxMsgEvent). */
 static void
