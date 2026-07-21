@@ -552,7 +552,7 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
     /* Kick / Ban — only when the account has DISCONNECT_USERS.
      * Same rule as before: hidden, not disabled, since the server
      * would reject the wire op anyway. */
-    if (hl_access_has ((const guint8 *)&sess->htlc->access,
+    if (hx_conn_access_has (sess->htlc,
                        HL_ACCESS_DISCONNECT_USERS)) {
         user_popup_append_button (GTK_BOX (vbox), GTK_POPOVER (popover), ctx,
                                   _ ("Kick"), on_user_kick);

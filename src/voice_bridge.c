@@ -59,7 +59,7 @@ gboolean
 hx_htlc_voice_access (struct htlc_conn *htlc)
 {
     return htlc
-           && hl_access_has ((const guint8 *) &htlc->access,
+           && hx_conn_access_has (htlc,
                              HL_ACCESS_VOICE_CHAT);
 }
 

@@ -15,6 +15,7 @@
 #include "hx.h"        /* struct htxf_conn — auto-refresh hook */
 #include "session.h"   /* active session — remote drag uses htlc.access */
 #include "hl_access.h" /* HL_ACCESS_DOWNLOAD_FILES */
+#include "hxconn.h"
 #include "xfers.h"     /* xfer_new for remote drag-to-Downloads */
 #include "prefs.h"     /* gtkhx_prefs.download_path */
 #include "files.h"     /* hx_file_move for cross-dir Move */
@@ -649,7 +650,7 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("Not connected to a server."));
-            } else if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc->access,
+            } else if (!hx_conn_access_has (hx_active_session ()->htlc,
                                        HL_ACCESS_MOVE_FILES)) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
@@ -1102,7 +1103,7 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         show_toast (br, _ ("Not connected to a server."));
         return;
     }
-    if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc->access,
+    if (!hx_conn_access_has (hx_active_session ()->htlc,
                         HL_ACCESS_MOVE_FILES)) {
         show_toast (br, _ ("You don't have permission to move files on the "
                            "server."));

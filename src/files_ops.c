@@ -15,6 +15,7 @@
 #include "hx.h"
 #include "session.h"
 #include "hl_access.h"
+#include "hxconn.h"
 #include "files.h"
 #include "xfers.h"
 #include "files_entry.h"
@@ -90,13 +91,10 @@ join_path (const char *dir, const char *name)
     return g_strdup_printf ("%s/%s", dir, name);
 }
 
-/* htlc->access is a 64-bit big-endian bitmap; the helper in
- * hl_access.h reads it as a byte array. */
 static gboolean
 has_access (int bit)
 {
-    const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc->access;
-    return hl_access_has (bits, bit);
+    return hx_conn_access_has (hx_active_session ()->htlc, bit);
 }
 
 /* ---- Per-direction handlers ---- */

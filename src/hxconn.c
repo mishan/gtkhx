@@ -12,6 +12,7 @@
 
 #include "hxconn.h"
 #include "protocol.h" /* the full struct htlc_conn definition (still C for now) */
+#include "hl_access.h" /* hl_access_has / hl_access_permits over the bitmap */
 
 guint32
 hx_conn_history_max_msgs (const struct htlc_conn *h)
@@ -251,4 +252,16 @@ void
 hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h, guint32 v)
 {
     h->gif_icons_probe_trans = v;
+}
+
+gboolean
+hx_conn_access_has (const struct htlc_conn *h, int bit)
+{
+    return hl_access_has ((const guint8 *) &h->access, bit);
+}
+
+gboolean
+hx_conn_access_permits (const struct htlc_conn *h, int bit)
+{
+    return hl_access_permits ((const guint8 *) &h->access, bit);
 }
