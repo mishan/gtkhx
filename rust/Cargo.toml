@@ -20,6 +20,7 @@ members = [
     "crates/hxfiles-xfer",
     "crates/hxhfs",
     "crates/hxcicn",
+    "crates/hxmacres",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",

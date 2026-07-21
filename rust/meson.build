@@ -175,6 +175,9 @@ rust_sources = files(
   'crates/hxhfs/src/hfs/tests.rs',
   'crates/hxhfs/src/suffix.rs',
   'crates/hxhfs/src/ffi.rs',
+  'crates/hxmacres/src/lib.rs',
+  'crates/hxmacres/src/ffi.rs',
+  'crates/hxmacres/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -216,6 +219,7 @@ rust_sources = files(
   'crates/hxfiles-model/Cargo.toml',
   'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxhfs/Cargo.toml',
+  'crates/hxmacres/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -523,6 +527,16 @@ rust_hxcicn_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxcicn',
+  ],
+)
+             
+# Mac resource-fork parser (Rust port of macres.c). Provides the macres_file_*
+# C ABI the icon loaders (gtkhx.c / options.c / cicn.c) link against.
+rust_hxmacres_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxmacres',
   ],
 )
 

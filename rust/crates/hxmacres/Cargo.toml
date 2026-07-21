@@ -1,0 +1,22 @@
+[package]
+name = "hxmacres"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Macintosh resource-fork parser (ported from src/macres.c) — reads cicn / other resources out of a Mac resource file"
+publish = false
+
+[lib]
+# rlib: the native API (Rust consumers, e.g. hxcicn's future higher-level use).
+# staticlib: the `ffi` module preserves the exact macres.h C ABI so macres.c can
+#            be deleted and the C consumers (gtkhx.c / options.c / cicn.c) link
+#            this instead.
+crate-type = ["staticlib", "rlib"]
+
+# The native parser is pure std (bounds-checked big-endian byte walking, no
+# glib / gtk), so `cargo test -p hxmacres` runs headless. `glib` is used only by
+# the ffi shim, to g_malloc the returned macres_res wrappers (C callers g_free
+# them) and to read the fd contents.
+[dependencies]
+glib = { workspace = true }
+libc = "0.2"
