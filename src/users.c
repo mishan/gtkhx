@@ -90,7 +90,7 @@ hx_change_name_icon (struct htlc_conn *htlc)
     struct hx_chunk chunks[3];
     guint8 scratch[6];
     int hc = (int)gtkhx_proto_build_user_change_chunks (
-        htlc->icon, (const uint8_t *)name_wire, name_len, has_color ? 1 : 0,
+        hx_conn_icon (htlc), (const uint8_t *)name_wire, name_len, has_color ? 1 : 0,
         htlc->nick_color, chunks, G_N_ELEMENTS (chunks), scratch,
         sizeof (scratch));
     if (hc > 0) {

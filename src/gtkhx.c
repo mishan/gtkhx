@@ -2198,7 +2198,7 @@ hotline_client_init (int argc, char **argv)
     }
     /* Back-pointer for sess_from_htlc (survives the memset above). */
     the_session.htlc->sess = &the_session;
-    the_session.htlc->icon = 500;
+    hx_conn_set_icon (the_session.htlc, 500);
     if (user) {
         strncpy (the_session.htlc->name, user, 31);
         the_session.htlc->name[31] = '\0';

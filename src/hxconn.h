@@ -69,4 +69,26 @@ extern guint64  hx_conn_caps (const struct htlc_conn *h);
 extern void     hx_conn_set_caps (struct htlc_conn *h, guint64 v);
 extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
 
+/* ---- Our own user identity -----------------------------------------------
+ *
+ * uid: our session user-id (assigned by the server). icon: our chat-list icon
+ * id. color: our status colour index. nick_color: the Colored-Nicknames RGB
+ * (0x00RRGGBB, or HX_NICK_COLOR_NONE). Seeded from prefs at connect and updated
+ * from SELFINFO / USER_CHANGE echoes.
+ *
+ * hx_conn_icon_ptr returns the raw address of the icon field: the ICON cfgvar
+ * (options.c) binds the prefs read/write path to a stable guint16* and can't go
+ * through a value accessor. It's the deliberate escape hatch for that one
+ * pointer-based consumer; at the E1c flip the Rust hxconn owner returns a raw
+ * pointer into its struct here. Everything else uses the value get/set. */
+extern guint16 hx_conn_uid (const struct htlc_conn *h);
+extern void    hx_conn_set_uid (struct htlc_conn *h, guint16 v);
+extern guint16 hx_conn_icon (const struct htlc_conn *h);
+extern void    hx_conn_set_icon (struct htlc_conn *h, guint16 v);
+extern guint16 *hx_conn_icon_ptr (struct htlc_conn *h);
+extern guint16 hx_conn_color (const struct htlc_conn *h);
+extern void    hx_conn_set_color (struct htlc_conn *h, guint16 v);
+extern guint32 hx_conn_nick_color (const struct htlc_conn *h);
+extern void    hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
+
 #endif /* GTKHX_HXCONN_H */

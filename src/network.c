@@ -308,7 +308,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * hxd_fd_set GIOChannel watch on it to register; no slot to
      * clear. */
     htlc->fd = 0;
-    htlc->uid = 0;
+    hx_conn_set_uid (htlc, 0);
     htlc->color = 0;
     /* Colored-Nicknames: nick_color is a per-session pref
 	 * echo, not per-connection state. On connection teardown we
@@ -425,7 +425,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
  *   2. If the server config has banner.type set, mhxd unconditionally
  *      sends HTLS_HDR_BANNER from inside that handler.
  *
- * ICON comes from htlc->icon (preserved across the connect), NAME
+ * ICON comes from hx_conn_icon (htlc) (preserved across the connect), NAME
  * from htlc->name (set from prefs.nick at connect time). */
 void
 hx_send_agreement_agree (struct htlc_conn *htlc)
@@ -447,7 +447,7 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
 	 * OPTIONS-bitmap-is-mandatory rule (Mobius panics without it,
 	 * see commit history) is enforced by the builder, not here. */
     const hx_agreement_agree_request req = {
-        .icon             = htlc->icon,
+        .icon             = hx_conn_icon (htlc),
         .display_name     = name_wire,
         .display_name_len = (guint16) name_len,
         .options          = 0,
@@ -677,15 +677,15 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     if (tls) {
         /* plaintext LOGIN over TLS (secure+tls is gated out upstream). */
         ok = hx_bridge_install_orchestrated_plaintext_tls (
-            htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
+            htlc, serverstr, port, login, pass, /*name=*/"", hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS);
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
-            htlc, serverstr, port, login, pass, htlc->name, htlc->icon,
+            htlc, serverstr, port, login, pass, htlc->name, hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS, htlc->cipheralg);
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (
-            htlc, serverstr, port, login, pass, /*name=*/"", htlc->icon,
+            htlc, serverstr, port, login, pass, /*name=*/"", hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS);
     }
     if (!ok) {

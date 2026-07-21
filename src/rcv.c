@@ -402,7 +402,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
         const char *disp_name = pm.name;
         gsize disp_name_len = pm.name_len;
         if (disp_name_len == 0) {
-            if (pm.uid == htlc->uid && htlc->name[0]) {
+            if (pm.uid == hx_conn_uid (htlc) && htlc->name[0]) {
                 disp_name = htlc->name;
                 disp_name_len = strlen (htlc->name);
             } else if (have_sender && sender.name[0]) {
@@ -698,7 +698,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     /* Resolve every change decision in one pure, Tier-2-tested helper
      * (hx_user_change_plan_resolve; tests/proto/test_user_change.c): self
      * detection (incl. the SELFINFO-less uid adoption some 1.9 servers
-     * force by omitting USER_LIST from SELFINFO, leaving htlc->uid 0),
+     * force by omitting USER_LIST from SELFINFO, leaving hx_conn_uid (htlc) 0),
      * new-vs-change, the colour / nick-colour preserve rules, and whether
      * to print a rename notice. */
     chat = chat_with_cid (sess, cid);
@@ -717,11 +717,11 @@ hx_rcv_user_change (struct htlc_conn *htlc)
     hx_user_change_plan_resolve (&uc, old_exists,
                                  old_exists ? old.status : 0,
                                  old_exists ? old.nick_color : HX_NICK_COLOR_NONE,
-                                 old_exists ? old.name : NULL, htlc->uid,
+                                 old_exists ? old.name : NULL, hx_conn_uid (htlc),
                                  (const char *)htlc->name, &plan);
 
     if (plan.adopt_self_uid) {
-        htlc->uid = uid;
+        hx_conn_set_uid (htlc, uid);
         debug_log ("login",
                    "adopted self uid=%u from USER_CHANGE "
                    "broadcast (SELFINFO didn't carry it)",
@@ -767,8 +767,10 @@ hx_rcv_user_change (struct htlc_conn *htlc)
      * user list but must not bleed into htlc->name, which doubles as the
      * persisted NICK= prefs value (prefs_write would then persist the
      * override forever). */
-    if ((uid) && (uid == htlc->uid)) {
-        htlc->icon = icon ? icon : (old_exists ? old.icon : htlc->icon);
+    if ((uid) && (uid == hx_conn_uid (htlc))) {
+        hx_conn_set_icon (htlc,
+                          icon ? icon
+                               : (old_exists ? old.icon : hx_conn_icon (htlc)));
         htlc->color = plan.eff_color;
         if (got_nick_color) {
             htlc->nick_color = nick_color;
@@ -1690,7 +1692,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             sizeof (servername), &li);
 
         if (login_seen & HX_LOGIN_SEEN_UID) {
-            htlc->uid = li.uid;
+            hx_conn_set_uid (htlc, li.uid);
         }
         if (login_seen & HX_LOGIN_SEEN_VERSION) { /* Hotline 1.5+ only */
             hx_conn_set_version (htlc, li.version);
@@ -2078,7 +2080,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 			 * (avail-first, then cap-31), strip_ansi, and the
 			 * Colored-Nicknames trailer at `8 + clamped_nlen`. The C
 			 * side keeps the "is this us?" adoption gate that sets
-			 * htlc->uid / ->color, and the GtkhxSession signal emit —
+			 * hx_conn_uid (htlc) / ->color, and the GtkhxSession signal emit —
 			 * all of which need session/chat objects the Rust layer
 			 * doesn't see. */
             struct gtkhx_proto_user_list_record rec;
@@ -2099,15 +2101,15 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 
             /* Colored-Nicknames: mirror the trailer colour onto htlc when
              * this record is us (absent trailer => HX_NICK_COLOR_NONE). */
-            if (rec.got_nick_color && uid == htlc->uid) {
+            if (rec.got_nick_color && uid == hx_conn_uid (htlc)) {
                 htlc->nick_color = rec.nick_color;
             }
             /* "is this us?" adoption for servers that omit USER_LIST from
              * SELFINFO: the first record matching our nick+icon claims our
              * uid + status colour. */
-            if (!htlc->uid && !strcmp (name_buf, htlc->name)
-                && rec.icon == htlc->icon) {
-                htlc->uid = uid;
+            if (!hx_conn_uid (htlc) && !strcmp (name_buf, htlc->name)
+                && rec.icon == hx_conn_icon (htlc)) {
+                hx_conn_set_uid (htlc, uid);
                 htlc->color = rec.color;
             }
 
