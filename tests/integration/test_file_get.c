@@ -138,7 +138,10 @@ test_file_get_round_trip (void)
         integration_close (fd);
         return;
     }
-    g_assert_true (integration_send_xfer_hdr (xfd, xfer_ref, xfer_size));
+    /* The legacy 16-byte HTXF preamble carries a 32-bit size; xfer_size
+     * is capped < 1 MiB above, so the narrowing cast is safe. */
+    g_assert_true (
+        integration_send_xfer_hdr (xfd, xfer_ref, (guint32)xfer_size));
 
     /* Wrap the connected fd as an hxnet HTXF channel (plaintext, no
      * preamble — we already sent it above). hxnet adopts xfd; the

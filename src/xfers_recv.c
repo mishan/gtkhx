@@ -132,6 +132,12 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf,
     struct hfsinfo fi;
     hx_preview *p = NULL;
 
+    /* progress is called unconditionally below; a NULL hook is a caller
+	 * bug, not a runtime condition — fail cleanly rather than segfault. */
+    if (!progress) {
+        return EINVAL;
+    }
+
     len = 40;
     pos = 0;
     while (len) {

@@ -71,9 +71,10 @@ extern void gtkhx_ffo_parse_filp_info (const guint8 *info, size_t info_len,
  * htxf->path. file_budget is htxf->total_size for a solo download, or
  * this file's size off the FILE_SEND header inside a folder stream.
  * `buf` is caller-provided scratch (>= 1024 bytes). `progress` fires as
- * bytes arrive. Does NOT play the completion sound, post a final
- * update, or close the channel — those stay with the caller. Returns 0
- * on success, an errno-like positive code on failure. */
+ * bytes arrive and must be non-NULL (a NULL hook returns EINVAL). Does
+ * NOT play the completion sound, post a final update, or close the
+ * channel — those stay with the caller. Returns 0 on success, an
+ * errno-like positive code on failure. */
 extern int file_recv_one (struct htxf_conn *htxf, guint64 file_budget,
                           guint8 *buf, xfer_progress_fn progress);
 
