@@ -2003,18 +2003,15 @@ rcv_task_icon_getlist (struct htlc_conn *htlc)
     g_free (entries);
 }
 
-/* ICON_CHANGE (1864) server broadcast: UID only. */
+/* ICON_CHANGE (1864) server broadcast: UID only. Parse + gif-icon-changed emit
+ * live in the Rust hxicon-recv crate (rust/crates/hxicon-recv). */
+extern void hx_icon_change_recv (struct htlc_conn *htlc, const guint8 *buf,
+                                 gsize len);
+
 void
 hx_rcv_icon_change (struct htlc_conn *htlc)
 {
-    guint16 uid = 0;
-    if (!gtkhx_proto_parse_icon_change (htlc->in.buf, htlc->in.pos, &uid)) {
-        debug_log ("icon", "ICON_CHANGE broadcast missing UID");
-        return;
-    }
-    debug_log ("icon", "ICON_CHANGE: uid=%u", (unsigned) uid);
-    gtkhx_session_emit_gif_icon_changed (gtkhx_session_get_default (), htlc,
-                                         uid);
+    hx_icon_change_recv (htlc, htlc->in.buf, htlc->in.pos);
 }
 
 /* TRAN_GET_CHAT_HISTORY (700) reply walker. The reply carries:

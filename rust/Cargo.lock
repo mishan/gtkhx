@@ -1838,6 +1838,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxicon-recv"
+version = "0.1.0"
+
+[[package]]
 name = "hxmacres"
 version = "0.1.0"
 dependencies = [

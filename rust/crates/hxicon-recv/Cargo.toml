@@ -1,0 +1,22 @@
+[package]
+name = "hxicon-recv"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GIF-icon receive path (ICON_CHANGE broadcast): parse + GtkhxSession emit, ported from rcv.c"
+publish = false
+
+[lib]
+# staticlib: the hx_icon_change_recv C ABI rcv.c's handler calls.
+# rlib: cargo test (the parse-gate + emit are unit-tested through recording
+#       doubles for the parse / emit C ABIs).
+crate-type = ["staticlib", "rlib"]
+
+# std-only. The wire parse (gtkhx_proto_parse_icon_change, hotline-proto) and
+# the gif-icon-changed signal emit (gtkhx-session) are externed C ABIs resolved
+# at the final link; cargo test provides in-crate #[cfg(test)] doubles that
+# drive the parse result + record the emit, so the suite runs headless. (Both
+# providers are separately-linked staticlibs in the binary, so they can't be
+# taken as rlib deps here without double-defining their #[no_mangle] symbols —
+# hence the extern-C surface, matching hxnews-recv / hxchat-recv.)
+[dependencies]
