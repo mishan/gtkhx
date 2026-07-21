@@ -141,11 +141,11 @@ extern void    hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h,
  * form the callers used before is exactly what these hide. hx_conn_access_has
  * is the strict bit test; hx_conn_access_permits additionally treats an
  * all-zero bitmap as "permitted", the rule the legacy-server news gate needs.
- * The lone writer (the SELFINFO parse in proto_helpers.c) still fills the
- * field directly and moves onto the seam with the rest of that file's
- * writes. */
+ * hx_conn_set_access copies the 8 raw bitmap bytes in (the SELFINFO parse's
+ * sole writer). */
 extern gboolean hx_conn_access_has (const struct htlc_conn *h, int bit);
 extern gboolean hx_conn_access_permits (const struct htlc_conn *h, int bit);
+extern void     hx_conn_set_access (struct htlc_conn *h, const guint8 *bytes);
 
 /* ---- Control-channel socket descriptor -----------------------------------
  *
@@ -188,5 +188,17 @@ extern void        hx_conn_set_compressalg (struct htlc_conn *h, const char *v);
  * hxnet_hope_aead_* API); this seam only stores and returns the pointer. */
 extern void *hx_conn_hope_aead (const struct htlc_conn *h);
 extern void  hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
+
+/* ---- Outgoing transaction counter ----------------------------------------
+ *
+ * The monotonically-increasing trans id stamped on each outgoing request. A
+ * task is keyed on the value current at send time (task_new snapshots it
+ * before hlpack_chunks bumps it), so the packer reads-then-increments via
+ * hx_conn_trans_post_inc (returns the pre-increment value). hx_conn_trans /
+ * hx_conn_set_trans cover the login-replay save/restore in network.c and the
+ * trace/task snapshots that just read it. */
+extern guint32 hx_conn_trans (const struct htlc_conn *h);
+extern void    hx_conn_set_trans (struct htlc_conn *h, guint32 v);
+extern guint32 hx_conn_trans_post_inc (struct htlc_conn *h);
 
 #endif /* GTKHX_HXCONN_H */

@@ -10,7 +10,7 @@
 
 #include "config.h"
 
-#include <string.h> /* memset (cipheralg / compressalg clear) */
+#include <string.h> /* memset (cipheralg / compressalg clear + access bitmap copy) */
 
 #include "hxconn.h"
 #include "protocol.h" /* the full struct htlc_conn definition (still C for now) */
@@ -268,6 +268,12 @@ hx_conn_access_permits (const struct htlc_conn *h, int bit)
     return hl_access_permits ((const guint8 *) &h->access, bit);
 }
 
+void
+hx_conn_set_access (struct htlc_conn *h, const guint8 *bytes)
+{
+    memcpy (&h->access, bytes, 8);
+}
+
 int
 hx_conn_fd (const struct htlc_conn *h)
 {
@@ -326,4 +332,21 @@ void
 hx_conn_set_hope_aead (struct htlc_conn *h, void *p)
 {
     h->hope_aead = p;
+
+guint32
+hx_conn_trans (const struct htlc_conn *h)
+{
+    return h->trans;
+}
+
+void
+hx_conn_set_trans (struct htlc_conn *h, guint32 v)
+{
+    h->trans = v;
+}
+
+guint32
+hx_conn_trans_post_inc (struct htlc_conn *h)
+{
+    return h->trans++;
 }
