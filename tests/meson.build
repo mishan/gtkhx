@@ -927,6 +927,7 @@ test('capabilities', test_capabilities,
 test_chat_history = executable('test_chat_history',
   'proto/test_chat_history.c',
   '../src/chat_history.c',
+  '../src/hxconn.c',
   '../src/proto_helpers.c',
   '../src/debug.c',
   dependencies        : proto_test_deps,
@@ -968,6 +969,7 @@ test_inline_media = executable('test_inline_media',
   'proto/test_inline_media.c',
   '../src/inline_media.c',
   '../src/inline_media_upload.c',
+  '../src/hxconn.c',
   '../src/proto_helpers.c',
   '../src/debug.c',
   dependencies        : proto_test_deps,
@@ -1072,6 +1074,7 @@ integration_harness_lib = static_library(
   '../src/login_packet.c',
   '../src/agreement_packet.c',
   '../src/chat_history.c',
+  '../src/hxconn.c',
   # The Tier 3 HOPE login + HTXF transfers run through the production
   # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
   # (cipher.c stream, cipher_aead.c AEAD) are gone. htxf_io.c +

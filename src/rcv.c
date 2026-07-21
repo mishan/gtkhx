@@ -167,7 +167,7 @@ hx_post_login_fetches (struct htlc_conn *htlc)
 	 *
 	 * Clamp negative limit values defensively (cfgvars INT
 	 * parser doesn't enforce a floor). */
-    if (htlc->caps & HTLC_CAP_CHAT_HISTORY) {
+    if (hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY)) {
         if (hx_conn_chat_history_last_msgid (htlc) > 0) {
             /* Reconnect catch-up — AFTER=last_msgid, no limit. */
             debug_log ("chat-history",
@@ -292,7 +292,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
 	 * ignore. */
     struct gtkhx_proto_chat_media_meta media_meta;
     int media_status = GTKHX_PROTO_MEDIA_META_NONE;
-    if (htlc->caps & HTLC_CAP_INLINE_MEDIA) {
+    if (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) {
         memset (&media_meta, 0, sizeof (media_meta));
         media_status = gtkhx_proto_extract_chat_media_meta (
             htlc->in.buf, htlc->in.pos, &media_meta);
@@ -1693,7 +1693,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             htlc->uid = li.uid;
         }
         if (login_seen & HX_LOGIN_SEEN_VERSION) { /* Hotline 1.5+ only */
-            htlc->version = li.version;
+            hx_conn_set_version (htlc, li.version);
         }
         if (login_seen & HX_LOGIN_SEEN_SERVERNAME) { /* Hotline 1.5+ only */
             if (server_addr) {
@@ -1712,7 +1712,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
             /* DATA_CAPABILITIES echo — the bits the server agreed to
 			 * enable for this session. Bits we don't recognise are
 			 * preserved per the spec's "ignore unknown bits" rule. */
-            htlc->caps = li.caps;
+            hx_conn_set_caps (htlc, li.caps);
             if (li.caps & HTLC_CAP_LARGE_FILES) {
                 hx_printf_prefix (
                     htlc, 0, INFOPREFIX,
@@ -1770,7 +1770,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * limits at debug-category "media". Routed through a
 		 * stable helper so future logging adjustments don't
 		 * spider out across rcv.c. */
-        if (htlc->caps & HTLC_CAP_INLINE_MEDIA) {
+        if (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) {
             inline_media_log_advertised_limits (htlc);
         }
 
@@ -1787,7 +1787,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
         gtkhx_session_emit_logged_in (gtkhx_session_get_default (), htlc);
 
         /* PING keepalive only on confirmed 1.5+ servers.
-		 * htlc->version is populated by the HTLS_DATA_VERSION
+		 * hx_conn_version (htlc) is populated by the HTLS_DATA_VERSION
 		 * chunk just parsed above; servers that don't advertise
 		 * a version (1.0/1.2 originals like hlserver.com) leave
 		 * it at 0, and sending HTLC_HDR_PING to them earns a
@@ -1795,7 +1795,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * ERROR sound. >= 150 is the bar — that covers every
 		 * server we've seen (Badmoon at 190, mhxd at 150+) that
 		 * implements PING, and excludes the ones that don't. */
-        if (htlc->version >= 150) {
+        if (hx_conn_version (htlc) >= 150) {
             ping_start (htlc);
         }
 
@@ -1819,7 +1819,7 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * call hx_post_login_fetches after the wire send. The
 		 * 2s fallback timer below arms as a last resort if the
 		 * agreement opcode doesn't arrive at all. */
-        switch (hx_post_login_route (htlc->version, already_fetched)) {
+        switch (hx_post_login_route (hx_conn_version (htlc), already_fetched)) {
         case HX_POST_LOGIN_FETCH_NOW:
             /* 1.0/1.2 server: no agreement flow — deliver NAME + ICON and fire
              * the fetches now (no AGREEMENTAGREE boundary is coming). */

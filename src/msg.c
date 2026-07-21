@@ -26,6 +26,7 @@
 #include <gdk/gdkkeysyms.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "chat.h"
 #include "chat_members.h"
 #include "chat_tabs.h"
@@ -55,7 +56,7 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
     /* Phase E2/E3: body field — UTF-8 / Mac Roman conversion plus
 	 * LF→CR for legacy servers. See [[gtkhx_text_for_wire]] in
 	 * src/text_util.c. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize wire_len = 0;
     char *wire
         = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);

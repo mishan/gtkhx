@@ -96,3 +96,33 @@ hx_conn_set_tls (struct htlc_conn *h, char v)
 {
     h->tls = v;
 }
+
+guint16
+hx_conn_version (const struct htlc_conn *h)
+{
+    return h->version;
+}
+
+void
+hx_conn_set_version (struct htlc_conn *h, guint16 v)
+{
+    h->version = v;
+}
+
+guint64
+hx_conn_caps (const struct htlc_conn *h)
+{
+    return h->caps;
+}
+
+void
+hx_conn_set_caps (struct htlc_conn *h, guint64 v)
+{
+    h->caps = v;
+}
+
+gboolean
+hx_conn_has_cap (const struct htlc_conn *h, guint64 cap)
+{
+    return (h->caps & cap) != 0;
+}

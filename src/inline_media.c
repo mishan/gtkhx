@@ -30,6 +30,7 @@
 #include "compat.h"        /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
+#include "hxconn.h"
 #include "inline_media.h"
 #include "hx.h"
 #include "debug.h"
@@ -40,11 +41,11 @@ inline_media_cap_ok (struct htlc_conn *htlc)
     if (!htlc) {
         return FALSE;
     }
-    if (!(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!(hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA))) {
         debug_log ("media",
                    "skip inline-media send: server didn't echo "
                    "CAP_INLINE_MEDIA (caps=0x%" G_GINT64_MODIFIER "x)",
-                   (guint64) htlc->caps);
+                   (guint64) hx_conn_caps (htlc));
         return FALSE;
     }
     return TRUE;

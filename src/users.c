@@ -27,6 +27,7 @@
 #include <netinet/in.h>
 #include <ctype.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "gtkhx_session.h"
 #include "gtkhx_theme.h"
 #include "hl_access.h"
@@ -70,7 +71,7 @@ hx_change_name_icon (struct htlc_conn *htlc)
      * is_body = FALSE — nicks don't have line endings; we want the
      * Mac-Roman transcoding (or UTF-8 passthrough) without the
      * LF→CR substitution. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
     char *name_wire
         = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),

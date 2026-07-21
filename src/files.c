@@ -30,6 +30,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "gtkhx_session.h"
 #include "hotline_proto.h"
 #include "network.h"
@@ -194,7 +195,7 @@ set_name_comment (GtkWidget *btn, gpointer data)
 	 * fields are single-line; comment is multi-line but the spec
 	 * lists DATA_FILE_COMMENT as is_body too. */
     struct htlc_conn *htlc = hx_active_session ()->htlc;
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize file_len = 0, name_len = 0, comments_len = 0;
     char *file_wire = gtkhx_text_for_wire (file, strlen (file), utf8, FALSE,
                                            &file_len);
@@ -473,7 +474,7 @@ hx_file_delete (struct htlc_conn *htlc, char *path)
 
     /* Phase E (follow-up): encode the filename. is_body = FALSE
 	 * (filenames are single-line). */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize file_len = 0;
     char *file_wire
         = gtkhx_text_for_wire (file, strlen (file), utf8, FALSE, &file_len);
@@ -520,7 +521,7 @@ hx_file_info (struct htlc_conn *htlc, const char *dir_path,
 	 * which copies the bytes verbatim — same encoding shape as
 	 * other DIR-chunk sends (deferred for now; ASCII paths are
 	 * the overwhelming common case). */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
     char *name_wire = gtkhx_text_for_wire (file_name, file_name_len, utf8,
                                            FALSE, &name_len);
@@ -631,7 +632,7 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
     htxf->opt.retry = 0;
 
     /* Phase E (follow-up): encode the folder name for the wire. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_wire_len = 0;
     char *name_wire
         = gtkhx_text_for_wire (name, name_len, utf8, FALSE, &name_wire_len);
@@ -735,7 +736,7 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
     }
 
     /* Phase E (follow-up): encode the folder name. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_wire_len = 0;
     char *name_wire
         = gtkhx_text_for_wire (name, name_len, utf8, FALSE, &name_wire_len);
@@ -788,7 +789,7 @@ hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
     rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
 
     /* Phase E (follow-up): encode src + dst basenames. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize src_len = 0, dst_len = 0;
     char *src_wire = gtkhx_text_for_wire (src_file, strlen (src_file), utf8,
                                           FALSE, &src_len);
@@ -827,7 +828,7 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
     len = strlen (dst_path) - (strlen (dst_path) - (dst_file - dst_path));
 
     /* Phase E (follow-up): encode src + dst basenames. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize src_len = 0, dst_len = 0;
     char *src_wire = gtkhx_text_for_wire (src_file, strlen (src_file), utf8,
                                           FALSE, &src_len);
