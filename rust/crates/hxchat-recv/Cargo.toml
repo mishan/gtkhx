@@ -1,0 +1,19 @@
+[package]
+name = "hxchat-recv"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Chat-domain receive handlers: the ignore-gate + GtkhxSession emit for server chat notifications, ported from rcv.c"
+publish = false
+
+[lib]
+# staticlib: the hx_chat_*_recv C ABI rcv.c's chat handlers call.
+# rlib: cargo test (the gate + emit are unit-tested through recording doubles
+#       for the member-model / signal-emit C ABIs).
+crate-type = ["staticlib", "rlib"]
+
+# std-only. The wire parse stays in C (proto_helpers reads htlc->in), the member
+# model + the GtkhxSession signal emit are externed C ABIs resolved at the final
+# link; cargo test provides in-crate #[cfg(test)] doubles that record what would
+# be emitted (and drive the ignore flag), so the suite runs headless.
+[dependencies]

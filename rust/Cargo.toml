@@ -24,6 +24,7 @@ members = [
     "crates/hxmacres",
     "crates/hxtask",
     "crates/hxtls-trust",
+    "crates/hxchat-recv",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",

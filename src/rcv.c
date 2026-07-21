@@ -850,6 +850,11 @@ hx_rcv_banner (struct htlc_conn *htlc)
                            bm.has_url ? bm.url : NULL);
 }
 
+/* The ignore-gate + chat-invitation emit live in the Rust hxchat-recv crate
+ * (rust/crates/hxchat-recv). C keeps the wire parse + the member-model lookup. */
+extern void hx_chat_invite_recv (struct htlc_conn *htlc, void *member_model,
+                                 guint32 cid, guint16 uid, const char *name);
+
 void
 hx_rcv_chat_invite (struct htlc_conn *htlc)
 {
@@ -861,19 +866,19 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
         return;
     }
 
+#ifdef USE_PLUGIN
     if (hx_member_model_get_ignore (hx_chat_member_model (chat), im.uid)) {
         return;
     }
-#ifdef USE_PLUGIN
     if (EMIT_SIGNAL (XP_RCV_INVITE, sess, im.name, &im.uid, &im.cid, 0, 0)
         == 1) {
         return;
     }
 #endif
-    gtkhx_session_emit_chat_invitation (gtkhx_session_get_default (), htlc,
-                                        im.cid, im.name);
-    /* CHAT_INVITE chime played by the sound_events subscriber off the
-     * "chat-invitation" signal. */
+    /* Drops the invite if the inviter is ignored, else emits chat-invitation
+     * (the sound subscriber chimes off it). */
+    hx_chat_invite_recv (htlc, hx_chat_member_model (chat), im.cid, im.uid,
+                         im.name);
 }
 
 void
