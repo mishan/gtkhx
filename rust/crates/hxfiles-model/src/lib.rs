@@ -20,6 +20,8 @@ pub mod icon {
     pub const TEXT: u16 = 404;
     pub const IMAGE: u16 = 406;
     pub const APPL: u16 = 407;
+    pub const HTLC: u16 = 408;
+    pub const SITP: u16 = 409;
     pub const ALIS: u16 = 422;
     pub const DISK: u16 = 423;
     pub const NOTE: u16 = 424; // audio
