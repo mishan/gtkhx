@@ -204,7 +204,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * bit could otherwise survive a reconnect to a Mac Roman
 	 * server and cause us to skip text transcoding once Phase E2
 	 * lands. */
-    htlc->caps = 0;
+    hx_conn_set_caps (htlc, 0);
     /* Chat-history retention hints from the LOGIN reply — wiped
 	 * on disconnect so a reconnect to a server with different
 	 * retention doesn't carry stale numbers into the UI. */
@@ -324,7 +324,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * the local pref, which is independent of the prior server state)
 	 * and (b) fixes the reconnect-loses-color bug. */
     htlc->nick_color = (guint32)gtkhx_prefs.nick_color;
-    htlc->version = 0;
+    hx_conn_set_version (htlc, 0);
     memset (htlc->login, 0, sizeof (htlc->login));
 
     /* chats live in a GHashTable<u32 cid, struct chat*>.
@@ -435,7 +435,7 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
 	 * single-line). Encoding happens here (not inside the shared
 	 * builder) so agreement_packet.c stays free of the iconv
 	 * dependency that text_util.c brings in. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
     char *name_wire
         = gtkhx_text_for_wire ((const char *)htlc->name, strlen (htlc->name),
@@ -826,7 +826,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * peers KNOW they can speak large-file, they just don't have
 	 * to use the wire shape for this particular transfer. */
     gboolean size64 = htxf->htlc
-                      && (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0
+                      && (hx_conn_has_cap (htxf->htlc, HTLC_CAP_LARGE_FILES)) != 0
                       && htxf->total_size > 0xFFFFFFFFULL;
     htxf->opt.large = size64 ? 1 : 0;
 

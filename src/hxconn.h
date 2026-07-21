@@ -55,4 +55,18 @@ extern void        hx_conn_set_ip_addr (struct htlc_conn *h, const char *v);
 extern char        hx_conn_tls (const struct htlc_conn *h);
 extern void        hx_conn_set_tls (struct htlc_conn *h, char v);
 
+/* ---- Negotiated protocol identity ----------------------------------------
+ *
+ * version: the server's HTLS_DATA_VERSION from the LOGIN reply (0 on 1.0/1.2
+ * servers that don't advertise one — the gate for PING, the 1.5 news button,
+ * etc.). caps: the DATA_CAPABILITIES bitmask the server confirmed for this
+ * session (0 on legacy servers). Both are wiped on disconnect. hx_conn_has_cap
+ * is the predicate every `htlc->caps & HTLC_CAP_*` bit-test now goes through;
+ * hx_conn_caps exposes the raw bitmask for the rare whole-value consumer. */
+extern guint16  hx_conn_version (const struct htlc_conn *h);
+extern void     hx_conn_set_version (struct htlc_conn *h, guint16 v);
+extern guint64  hx_conn_caps (const struct htlc_conn *h);
+extern void     hx_conn_set_caps (struct htlc_conn *h, guint64 v);
+extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
+
 #endif /* GTKHX_HXCONN_H */

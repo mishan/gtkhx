@@ -46,6 +46,7 @@
 #include "compat.h"        /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
+#include "hxconn.h"
 #include "proto_helpers.h" /* hx_chunk */
 #include "hotline_proto.h" /* gtkhx_proto_build_upload_media_* */
 #include "hx.h"
@@ -718,7 +719,7 @@ hx_send_chat_with_media (struct htlc_conn *htlc, const char *str,
         return;
     }
 
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize wire_len = 0;
     char *wire = gtkhx_text_for_wire (str, strlen (str), utf8,
                                       /*is_body=*/TRUE, &wire_len);
@@ -744,7 +745,7 @@ hx_send_chat_with_media (struct htlc_conn *htlc, const char *str,
     gboolean have_media = (media_id && media_id_len > 0
                            && media_id_len <= G_MAXUINT16 && mime
                            && mime_len > 0 && mime_len <= G_MAXUINT16);
-    if (have_media && !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (have_media && !(hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA))) {
         debug_log ("media",
                    "chat-with-media: dropping companions, CAP_INLINE_MEDIA "
                    "not negotiated");

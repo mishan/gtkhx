@@ -41,6 +41,7 @@
 #include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "tls_trust.h"
 #include "macres.h"
 #include "cicn.h"
@@ -1405,7 +1406,7 @@ on_msg_signal (GtkhxSession *emitter, gpointer event_p, gpointer user_data)
 }
 
 /* "logged-in" — the LOGIN task reply came back successful and the reply
- * has been fully walked (so htlc->version, server_addr, and caps are all
+ * has been fully walked (so hx_conn_version (htlc), server_addr, and caps are all
  * settled). Settle the connected-state UI in one shot: window titles
  * (server_addr-dependent), toolbar buttons (news15 gate is version >=
  * 150), and the status bar. The LOGIN chime rides the same signal in

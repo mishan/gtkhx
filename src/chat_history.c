@@ -14,6 +14,7 @@
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
+#include "hxconn.h"
 #include "proto_helpers.h" /* struct hx_chunk */
 #include "hotline_proto.h" /* gtkhx_proto_parse_history_entry */
 #include "network.h"       /* hlwrite_chunks */
@@ -141,11 +142,11 @@ hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
     /* Spec: clients MUST NOT send TRAN 700 if CAP_CHAT_HISTORY
      * wasn't echoed by the server in the login reply. Sending it
      * anyway earns a task-error every time. */
-    if (!(htlc->caps & HTLC_CAP_CHAT_HISTORY)) {
+    if (!(hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY))) {
         debug_log ("chat-history",
                    "skip GET_CHAT_HISTORY: server didn't echo "
                    "CAP_CHAT_HISTORY (caps=0x%" G_GINT64_MODIFIER "x)",
-                   htlc->caps);
+                   hx_conn_caps (htlc));
         return FALSE;
     }
 

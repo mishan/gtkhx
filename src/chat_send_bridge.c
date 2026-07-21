@@ -16,6 +16,7 @@
 #include "config.h"
 
 #include "hx.h"
+#include "hxconn.h"
 #include "protocol.h"
 #include "session.h"
 #include "hotline.h"
@@ -25,7 +26,7 @@
 gboolean
 hx_htlc_text_encoding_cap (struct htlc_conn *htlc)
 {
-    return htlc && (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    return htlc && (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
 }
 
 void *

@@ -33,6 +33,7 @@
 #include <arpa/inet.h>
 #include <time.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "gtkhx_session.h"
 #include "gtkhx_theme.h"
 #include "hx_panel.h"
@@ -1345,11 +1346,11 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     /* CAP_CHAT_HISTORY is a hard prerequisite. hx_get_chat_history
 	 * already gates on this and returns FALSE, but check up front
 	 * so we don't even try to register the task. */
-    if (!(htlc->caps & HTLC_CAP_CHAT_HISTORY)) {
+    if (!(hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY))) {
         debug_log ("chat-history",
                    "Load-older click: server didn't negotiate "
                    "CAP_CHAT_HISTORY (caps=0x%" G_GINT64_MODIFIER "x)",
-                   htlc->caps);
+                   hx_conn_caps (htlc));
         return;
     }
 

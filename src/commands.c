@@ -27,6 +27,7 @@
 #include <getopt.h>
 #include <gtk/gtk.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "hotline_proto.h"
 #include "network.h"
 #include "rcv.h"
@@ -339,7 +340,7 @@ COMMAND (me)
     }
 
     /* Phase E2/E3: chat body — same encoder as hx_send_chat. */
-    gboolean utf8 = (htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize wire_len = 0;
     char *wire = gtkhx_text_for_wire (p, strlen (p), utf8,
                                       /*is_body=*/TRUE, &wire_len);

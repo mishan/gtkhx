@@ -34,6 +34,7 @@
 #include "compat.h"
 #include "hotline.h"
 #include "protocol.h"
+#include "hxconn.h"
 #include "hx.h"
 #include "session.h"
 #include "chat.h" /* hx_chat_view — struct chat is opaque */
@@ -437,7 +438,7 @@ hx_inline_media_attach_button_new (struct gtkhx_chat *gchat,
 	 * disconnect / reconnect case. Most Hotline servers don't
 	 * support the extension; leaving the button visible (and
 	 * inert on a click) would be misleading. */
-    gboolean show_now = htlc && (htlc->caps & HTLC_CAP_INLINE_MEDIA) != 0;
+    gboolean show_now = htlc && (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) != 0;
     gtk_widget_set_visible (btn, show_now);
 
     /* Persistent click-seed holds the shape we need on every
@@ -460,7 +461,7 @@ inline_media_attach_refresh_all_chats (session *sess)
     if (!sess || !sess->chats) {
         return;
     }
-    gboolean show = (sess->htlc->caps & HTLC_CAP_INLINE_MEDIA) != 0;
+    gboolean show = (hx_conn_has_cap (sess->htlc, HTLC_CAP_INLINE_MEDIA)) != 0;
 
     guint n = hx_chats_count (sess->chats);
     for (guint i = 0; i < n; i++) {

@@ -16,6 +16,7 @@
 #include "config.h"
 
 #include "hx.h"
+#include "hxconn.h"
 #include "protocol.h"
 #include "session.h"
 #include "hotline.h"
@@ -51,7 +52,7 @@ hx_session_htlc (session *sess)
 gboolean
 hx_htlc_voice_cap (struct htlc_conn *htlc)
 {
-    return htlc && (htlc->caps & HTLC_CAP_VOICE) != 0;
+    return htlc && (hx_conn_has_cap (htlc, HTLC_CAP_VOICE)) != 0;
 }
 
 gboolean

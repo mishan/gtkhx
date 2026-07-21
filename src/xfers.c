@@ -34,6 +34,7 @@
 #include <gtk/gtk.h>
 #include <time.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "hotline_proto.h"
 #include "gtkhx_session.h"
 #include "hfs.h"
@@ -322,7 +323,7 @@ xfer_go (struct htxf_conn *htxf)
 		 * pass UTF-8); convert back to Mac Roman in legacy mode.
 		 * is_body = FALSE — filenames are single-line. */
         {
-            gboolean utf8 = (htxf->htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+            gboolean utf8 = (hx_conn_has_cap (htxf->htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
             gsize nm_wire_len = 0;
             char *nm_wire = gtkhx_text_for_wire (
                 htxf->remotename, htxf->remotename_len, utf8, FALSE,
@@ -361,7 +362,7 @@ xfer_go (struct htxf_conn *htxf)
 		 * companion (sent only when CAP_LARGE_FILES was negotiated). */
         guint32 size_host = (guint32)MIN (htxf->total_size,
                                           (guint64)0xFFFFFFFFUL);
-        gboolean large = (htxf->htlc->caps & HTLC_CAP_LARGE_FILES) != 0;
+        gboolean large = (hx_conn_has_cap (htxf->htlc, HTLC_CAP_LARGE_FILES)) != 0;
 
         /* Initialise before the ternary — when the no-dir branch
 		 * takes the NULL path, path_to_hldir never runs and
@@ -379,7 +380,7 @@ xfer_go (struct htxf_conn *htxf)
         bool has_preview = exists_remote (htxf->remotepath);
 
         /* Phase E (follow-up): encode remotename. */
-        gboolean utf8 = (htxf->htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+        gboolean utf8 = (hx_conn_has_cap (htxf->htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
         gsize nm_wire_len = 0;
         char *nm_wire
             = gtkhx_text_for_wire (htxf->remotename, htxf->remotename_len,

@@ -25,6 +25,7 @@
 #include <gtk/gtk.h>
 
 #include "session.h"  /* session, hx_htlc_close */
+#include "hxconn.h"
 #include "network.h"  /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
 #include "hotline.h"  /* HTLC_CAP_TEXT_ENCODING */
 #include "gtkhx.h"     /* gtkhx_prefs */
@@ -86,7 +87,7 @@ gtkhx_active_connected (void)
 gboolean
 gtkhx_active_text_encoding (void)
 {
-    return (hx_active_session ()->htlc->caps & HTLC_CAP_TEXT_ENCODING) != 0;
+    return hx_conn_has_cap (hx_active_session ()->htlc, HTLC_CAP_TEXT_ENCODING);
 }
 
 void

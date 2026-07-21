@@ -23,6 +23,7 @@
 #include <time.h>
 
 #include "protocol.h" /* struct htlc_conn / struct qbuf */
+#include "hxconn.h"
 #include "session.h"  /* struct date_time */
 #include "hx.h"       /* hx_active_session */
 #include "hl_access.h"
@@ -39,7 +40,7 @@ extern void hx_news_node_get_date (void *node, struct date_time *out);
 int
 gtkhx_news_htlc_version (void)
 {
-    return (int) hx_active_session ()->htlc->version;
+    return (int) hx_conn_version (hx_active_session ()->htlc);
 }
 
 int
