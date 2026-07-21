@@ -254,11 +254,11 @@ rust_deps = [
   rust_hxnews_recv_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
-  # files-subsystem model (Phase F1): file-type -> icon-id map behind
+  # files-subsystem model: file-type -> icon-id map behind
   # files.c::icon_of_ftype_and_name.
   rust_hxfiles_model_dep,
-  # files-subsystem transfer codec (Phase F2): FFO fork-header +
-  # info-block byte math behind xfers.c::file_recv_one.
+  # files-subsystem transfer codec: FFO fork-header + info-block byte
+  # math behind xfers.c::file_recv_one.
   rust_hxfiles_xfer_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,

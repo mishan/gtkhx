@@ -3,15 +3,14 @@ name = "hxfiles-xfer"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-2.0-or-later"
-description = "Phase F2: file-transfer codec — the FFO/FILP frame + HFS fork byte math ported from src/xfers.c."
+description = "File-transfer codec — the FFO/FILP frame + HFS fork byte math ported from src/xfers.c."
 publish = false
 
-# Dependency-free "codec" layer of the file-transfer worker port
-# (Phase F2, slice 1). The FFO/FILP frame + HFS fork math lives here as
-# pure logic so it is fully unit-testable headless. The worker state
-# machines (tokio) and the C-ABI surface land in later increments and
-# will pull hxnet / hotline-proto; this first slice deliberately has no
-# dependencies.
+# Dependency-free "codec" layer of the file-transfer worker port. The
+# FFO/FILP frame + HFS fork math lives here as pure logic so it is fully
+# unit-testable headless. The worker state machines (tokio) and the
+# C-ABI surface land in later increments and will pull hxnet /
+# hotline-proto; this codec layer deliberately has no dependencies.
 [lib]
 crate-type = ["staticlib", "rlib"]
 

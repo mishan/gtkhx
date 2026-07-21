@@ -486,7 +486,7 @@ rust_hxnews_model_dep = declare_dependency(
   ],
 )
 
-# Files-subsystem model (Phase F1; see docs/files-rust-migration-scope.md).
+# Files-subsystem model (see docs/files-rust-migration-scope.md).
 # Pure logic, no glib/gtk — `cargo test -p hxfiles-model` runs headless.
 # Exposes the `gtkhx_files_*` FFI surface (currently just the file-type →
 # icon-id map behind src/files.c::icon_of_ftype_and_name). Unconditional.
@@ -498,11 +498,10 @@ rust_hxfiles_model_dep = declare_dependency(
   ],
 )
 
-# Files-subsystem transfer codec (Phase F2; see
-# docs/files-rust-migration-scope.md). Pure logic, no glib/gtk —
-# `cargo test -p hxfiles-xfer` runs headless. Exposes the `gtkhx_ffo_*`
-# FFI surface (the FFO fork-header + info-block byte math behind
-# src/xfers.c::file_recv_one). Unconditional.
+# Files-subsystem transfer codec (see docs/files-rust-migration-scope.md).
+# Pure logic, no glib/gtk — `cargo test -p hxfiles-xfer` runs headless.
+# Exposes the `gtkhx_ffo_*` FFI surface (the FFO fork-header + info-block
+# byte math behind src/xfers.c::file_recv_one). Unconditional.
 rust_hxfiles_xfer_dep = declare_dependency(
   sources : rust_build,
   link_args : [

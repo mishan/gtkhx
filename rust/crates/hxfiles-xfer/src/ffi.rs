@@ -2,13 +2,13 @@
 //! `gtkhx_ffo_*` to match the existing `gtkhx_files_*` / `gtkhx_proto_*`
 //! naming.
 //!
-//! Phase F2, slice 1: these are the two fiddly, error-prone pieces of
-//! the receive-path byte math (`src/xfers.c::file_recv_one`) — the
-//! variable info-block length and the 16-byte fork-header length decode
-//! with its large-file high32/low32 split. The C worker keeps its loop
-//! structure and local I/O for now and calls in here for the math; the
-//! full tokio-worker relocation (which will also use `parse_filp_info`
-//! and the HFS epoch helpers) is a later increment.
+//! These are the fiddly, error-prone pieces of the transfer byte math
+//! (`src/xfers.c::file_recv_one` / `file_send_one`) — the variable
+//! info-block length, the 16-byte fork-header length decode/encode with
+//! its large-file high32/low32 split, and the FILP info-block parse. The
+//! C worker keeps its loop structure and local I/O for now and calls in
+//! here for the math; the full tokio-worker relocation (which will also
+//! use the HFS epoch helpers) is a later increment.
 
 use crate::ffo;
 use core::ffi::c_int;

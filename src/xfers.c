@@ -54,8 +54,8 @@ struct htxf_conn **xfers = 0;
 static void xfer_remove_from_list (struct htxf_conn *htxf);
 
 /* FFO fork-header / info-block byte math — ported to the hxfiles-xfer
- * Rust crate in Phase F2 (see docs/files-rust-migration-scope.md). The
- * receive worker below keeps its loop + local I/O and calls in here for
+ * Rust crate (see docs/files-rust-migration-scope.md). The receive
+ * worker below keeps its loop + local I/O and calls in here for
  * the fiddly, error-prone parsing (the large-file high32/low32 fork-
  * length split and the variable info-block length). Pure logic, unit-
  * tested headless in the crate. */
@@ -784,10 +784,10 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
     /* Interpret the FILP info block in one shot: type/creator, the
 	 * comment (via the buf[73+buf[71]] offset), the mac→header
 	 * timestamp munge, and the trailing 16-byte DATA fork marker
-	 * (with the large-file high32/low32 split). Ported to hxfiles-xfer
-	 * in Phase F2; on a truncated block the parser reports !ok and we
-	 * fail the transfer rather than reading past the info block the way
-	 * the old blind indexing did. */
+	 * (with the large-file high32/low32 split). Ported to hxfiles-xfer;
+	 * on a truncated block the parser reports !ok and we fail the
+	 * transfer rather than reading past the info block the way the old
+	 * blind indexing did. */
     /* pos holds the info-block length (the read loop above accumulated
 	 * it while draining len to 0); pass pos, not the now-zero len. */
     struct gtkhx_filp_info pi;
