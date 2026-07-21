@@ -567,8 +567,7 @@ rust_hxmacres_dep = declare_dependency(
 # task_with_trans / task_delete C ABI the ~14 caller files + rcv.c's dispatcher
 # link against; keeps sess->tasks a real GHashTable and reaches C session/htlc
 # fields via tasks_bridge.c. glib-only, so `cargo test -p hxtask` runs headless
-# against in-crate doubles. First step of the network-untangling plan (N1) —
-# see docs/rust/network-untangling-scope.md.
+# against in-crate doubles. See docs/rust/network-untangling-scope.md.
 rust_hxtask_dep = declare_dependency(
   sources : rust_build,
   link_args : [

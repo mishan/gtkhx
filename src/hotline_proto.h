@@ -1711,8 +1711,8 @@ extern size_t gtkhx_proto_parse_icon_list (
     struct gtkhx_proto_icon_entry *out, size_t cap);
 
 /*
- * Receive-dispatch routing. hx_rcv_hdr calls hx_recv_route(type) to map a
- * server frame's opcode to a handler category, then switches on the result to
+ * Receive-dispatch routing. hx_dispatch_frame calls hx_recv_route(type) to map
+ * a server frame's opcode to a handler category, then switches on the result to
  * pick the body handler. This enum mirrors hotline-proto's dispatch::HandlerKind
  * (rust/crates/hotline-proto/src/dispatch.rs) — the values must stay in lockstep
  * with the Rust discriminants. The composite-TASK mask (Heidrun-style

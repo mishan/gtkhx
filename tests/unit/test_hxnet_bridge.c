@@ -61,24 +61,29 @@ gtkhx_text_emoji_shortcodes_enabled (void)
     return FALSE;
 }
 
-/* hxnet_bridge.c references the production rcv state machine
- * (hx_rcv_hdr) and qbuf_set / hx_htlc_close to drive a real
- * htlc_conn. Those are exercised by R3.3.e-4b's wider
- * integration tests once the bridge is wired into the
- * connection lifecycle. Tier 1 here only links the bridge's
- * header-pack path, so the linker just needs unresolved symbols
- * resolved. proto_helpers.c needs debug_log for its trace
- * helpers; same treatment. */
-void hx_rcv_hdr (struct htlc_conn *htlc);
+/* hxnet_bridge.c references the production receive dispatch
+ * (hx_dispatch_frame) and qbuf_set / hx_htlc_close to drive a real
+ * htlc_conn. Those are exercised by the wider integration tests once
+ * the bridge is wired into the connection lifecycle. Tier 1 here only
+ * links the bridge's header-pack path, so the linker just needs
+ * unresolved symbols resolved. proto_helpers.c needs debug_log for its
+ * trace helpers; same treatment. */
+void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+                        guint32 flag, guint32 body_len);
 void hx_htlc_close (struct htlc_conn *htlc, int expected);
 void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
 void debug_log (const char *cat, const char *fmt, ...);
 void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
 void
-hx_rcv_hdr (struct htlc_conn *htlc)
+hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+                   guint32 flag, guint32 body_len)
 {
     (void) htlc;
+    (void) type;
+    (void) trans;
+    (void) flag;
+    (void) body_len;
     g_assert_not_reached ();
 }
 

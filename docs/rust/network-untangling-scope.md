@@ -165,32 +165,44 @@ properly part of **N3** (which takes ownership of the connection I/O), not a
 standalone send-framing step. N2 is therefore complete as the `hlpack`
 unification; the rest folds into N3.
 
-**N3 — Receive dispatch routing into Rust (Knot B). _First increment landed._**
-The opcode→handler-kind routing — the decision core of `hx_rcv_hdr`, including
-the composite-`TASK` mask some servers use — moved into
-`hotline-proto::dispatch::route` (exported as `hx_recv_route`), exhaustively
-unit-tested. `hx_rcv_hdr` now calls it and `switch`es on the `HandlerKind` to
-pick the body handler, keeping only the per-kind C side effects (the `POLITEQUIT`
-notice, the unknown-opcode log). Doing this **surfaced a latent bug**:
-`hotline-proto`'s `ServerHdr` had `Chat`/`Msg` swapped (`Chat = 0x68` but
-hotline.h's `HTLS_HDR_MSG = 0x68`); the values were unused so nothing routed on
-them, but building the router on top of them would have inverted chat/msg with no
-test to catch it — a concrete vindication of doing the testable routing core
-first. Fixed with the router's behavioural tests as the guard.
+**N3 — Receive dispatch into Rust (Knot B). _Landed (two steps)._**
 
-Remaining N3 (the *deeper* move — feeding frames to a Rust dispatcher directly
-instead of staging into `htlc->in`, and moving `hx_rcv_task`'s `trans`→task match
-into Rust) is deferred: it entangles with the `htlc->in` staging + the handlers
-reading it, which is exactly what the per-domain N4 extractions unbraid one
-family at a time. Once a few domains are crate-resident, the staging can be
-retired.
+_Step 1 — routing._ The opcode→handler-kind decision — the core of the old
+`hx_rcv_hdr` `switch`, including the composite-`TASK` mask some servers use —
+moved into `hotline-proto::dispatch::route` (exported as `hx_recv_route`),
+exhaustively unit-tested. Doing this **surfaced a latent bug**: `hotline-proto`'s
+`ServerHdr` had `Chat`/`Msg` swapped (`Chat = 0x68` but hotline.h's
+`HTLS_HDR_MSG = 0x68`); the values were unused so nothing routed on them, but
+building the router on top of them would have inverted chat/msg with no test to
+catch it — a concrete vindication of doing the testable routing core first.
+Fixed, with the router's behavioural tests as the guard.
+
+_Step 2 — retire the round-trip + the state machine._ The hxnet actor already
+parses the header, yet the bridge re-packed it into `htlc->in` so `hx_rcv_hdr`
+could re-decode it and run a two-phase `htlc->rcv` state machine (header handler
+→ body handler). That's consolidated: the bridge now stages the whole frame
+(header + body) into `htlc->in.buf` in one shot and calls a single
+`hx_dispatch_frame(htlc, type, trans, flag, body_len)` in rcv.c, which traces,
+routes via `hx_recv_route`, and calls the body handler directly. No re-decode,
+no `htlc->rcv` state machine; `hx_rcv_hdr` is deleted. The handler-facing
+`htlc->in` layout (22-byte header + body, `pos` past the body, `len == 0`) is
+preserved byte-for-byte, so the handlers are unchanged.
+
+_Still open in N3:_ moving `hx_rcv_task`'s `trans`→task match into Rust (the
+table is already the `hxtask` crate, so the lookup can move; the `rcv` callback
+stays a C fn pointer the Rust side invokes), and eventually dropping the
+`htlc->in` staging entirely so handlers take `(body_ptr, body_len)` — but that
+last step waits on the per-domain N4 extractions, which unbraid the handlers'
+`htlc->in` reads one family at a time.
 
 **Note on coverage:** the receive-dispatch→`GtkhxSession`-signal path has no
 headless integration coverage (the Tier-3 tests do wire round-trips via
-`integration_recv_message`; `real_connect` stubs `hx_rcv_hdr`). So per-handler
-*signal* coverage comes from extracting each N4 domain into a crate (the
-`hxnews-recv` pattern), where the handler's parse→signal logic is unit-testable
-in isolation. The N3 routing core is covered by its own `dispatch.rs` tests.
+`integration_recv_message`; `real_connect` stubs the dispatch entry to record
+the replayed frame — it validates the bridge→dispatch handoff + the LOGIN-reply
+capability echo, but not the handlers' signal emission). So per-handler *signal*
+coverage comes from extracting each N4 domain into a crate (the `hxnews-recv`
+pattern), where the handler's parse→signal logic is unit-testable in isolation.
+The N3 routing core is covered by its own `dispatch.rs` tests.
 
 **N4 — Per-domain handler migration (Knot C), one domain per branch.** With the
 skeleton in Rust and bodies parsed by `hotline-proto`, move each handler family

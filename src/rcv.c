@@ -1415,105 +1415,88 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
 }
 #endif /* HAVE_VOICE */
 
+/* Dispatch a fully-staged received frame. The Rust
+ * hxnet actor already parsed the header and the bridge staged the whole frame
+ * (22-byte header + body) into htlc->in.buf, so this no longer re-decodes the
+ * header or runs the old two-phase htlc->rcv state machine — it traces, routes
+ * the opcode to a body handler (via the Rust dispatch::route table behind
+ * hx_recv_route), and calls it. */
 void
-hx_rcv_hdr (struct htlc_conn *htlc)
+hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+                   guint32 flag, guint32 body_len)
 {
-    /* Shared header decoder in proto_helpers — same math the
-	 * integration harness's integration_recv_message uses. Returns
-	 * the raw wire_len (for the proto trace) plus the clamped body
-	 * payload size (what the receive state machine needs to read
-	 * next). */
-    guint32 wire_len, len, type, trace_trans, trace_flag;
-    hl_hdr_decode (htlc->in.buf, &type, &trace_trans, &trace_flag, NULL,
-                   &wire_len, &len);
+    /* Wire len field encodes body_len + the 2-byte hc; the proto trace wants
+     * that raw value. */
+    proto_trace_recv_hdr (type, trans, flag,
+                          body_len + (guint32) sizeof (guint16));
 
-    /* The legacy HOPE stream-cipher rekey marker (a count stamped into
-	 * the type field's high byte on Blowfish-OFB-64 connections) is
-	 * handled entirely in the hxnet orchestrator now: hope_blowfish.rs
-	 * rotates the decode key and strips the marker before forwarding the
-	 * decrypted frame, so by the time the header reaches this C dispatch
-	 * `type` already carries the real opcode. No C-side check needed. */
-
-    proto_trace_recv_hdr (type, trace_trans, trace_flag, wire_len);
-
-    /* Opcode → handler category. The routing table (including the composite-
-     * TASK mask some servers use — see hx_recv_route's doc) lives in the Rust
-     * hotline-proto crate (dispatch.rs), exhaustively unit-tested; this switch
-     * only maps the category to the body handler + keeps the per-kind C-side
-     * side effects (the POLITEQUIT notice, the unknown-opcode log). */
-    htlc->rcv = 0;
+    void (*handler) (struct htlc_conn *) = NULL;
     switch (hx_recv_route (type)) {
     case HX_RECV_CHAT:
-        htlc->rcv = hx_rcv_chat;
+        handler = hx_rcv_chat;
         break;
     case HX_RECV_MSG:
-        htlc->rcv = hx_rcv_msg;
+        handler = hx_rcv_msg;
         break;
     case HX_RECV_USER_CHANGE:
-        htlc->rcv = hx_rcv_user_change;
+        handler = hx_rcv_user_change;
         break;
     case HX_RECV_USER_PART:
-        htlc->rcv = hx_rcv_user_part;
+        handler = hx_rcv_user_part;
         break;
     case HX_RECV_NEWS_POST:
-        htlc->rcv = hx_rcv_news_post;
+        handler = hx_rcv_news_post;
         break;
     case HX_RECV_TASK:
-        htlc->rcv = hx_rcv_task;
+        handler = hx_rcv_task;
         break;
     case HX_RECV_CHAT_SUBJECT:
-        htlc->rcv = hx_rcv_chat_subject;
+        handler = hx_rcv_chat_subject;
         break;
     case HX_RECV_CHAT_INVITE:
-        htlc->rcv = hx_rcv_chat_invite;
+        handler = hx_rcv_chat_invite;
         break;
     case HX_RECV_USER_SELFINFO:
-        htlc->rcv = hx_rcv_user_selfinfo;
+        handler = hx_rcv_user_selfinfo;
         break;
     case HX_RECV_AGREEMENT:
-        htlc->rcv = hx_rcv_agreement_file;
+        handler = hx_rcv_agreement_file;
         break;
     case HX_RECV_BANNER:
-        htlc->rcv = hx_rcv_banner;
+        handler = hx_rcv_banner;
         break;
     case HX_RECV_POLITEQUIT:
         hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("polite quit\n"));
-        htlc->rcv = hx_rcv_msg;
+        handler = hx_rcv_msg;
         break;
     case HX_RECV_XFER_QUEUE:
-        htlc->rcv = hx_rcv_xfer_queue;
+        handler = hx_rcv_xfer_queue;
         break;
 #ifdef HAVE_VOICE
     case HX_RECV_VOICE_SDP_OFFER:
-        htlc->rcv = hx_rcv_voice_sdp_offer;
+        handler = hx_rcv_voice_sdp_offer;
         break;
     case HX_RECV_VOICE_ICE:
-        htlc->rcv = hx_rcv_voice_ice;
+        handler = hx_rcv_voice_ice;
         break;
     case HX_RECV_VOICE_ROOM_STATUS:
-        htlc->rcv = hx_rcv_voice_room_status;
+        handler = hx_rcv_voice_room_status;
         break;
 #endif /* HAVE_VOICE */
     case HX_RECV_ICON_CHANGE:
-        htlc->rcv = hx_rcv_icon_change;
+        handler = hx_rcv_icon_change;
         break;
     default:
         /* HX_RECV_UNKNOWN, plus the voice kinds in a -Dvoice=disabled build. */
         debug_log ("proto", "unknown header type 0x%08x", type);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
                           _ ("unknown header type 0x%08x\n"), type);
-        htlc->rcv = hx_rcv_dump;
+        handler = hx_rcv_dump;
         break;
     }
 
-    if (len) {
-        qbuf_set (&htlc->in, htlc->in.pos, len);
-    } else {
-        if (htlc->rcv) {
-            htlc->rcv (htlc);
-        }
-        htlc->rcv = hx_rcv_hdr;
-        qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR);
+    if (handler && htlc->fd != 0) {
+        handler (htlc);
     }
 }
 
