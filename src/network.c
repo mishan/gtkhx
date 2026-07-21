@@ -258,7 +258,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         g_cancellable_cancel (current_cancel);
         g_clear_object (&current_cancel);
     }
-    g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
+    g_strlcpy (buf,
+               hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
+               sizeof (buf));
     hx_printf_prefix (htlc, 0, INFOPREFIX, "%s: %s\n", buf,
 
                       _ ("connection closed"));
@@ -278,7 +280,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * to call whether or not the bridge was active. */
     hx_bridge_uninstall ();
 
-    htlc->ip_addr[0] = '\0';
+    hx_conn_set_ip_addr (htlc, "");
 
     if (htlc->in.buf) {
         g_free (htlc->in.buf);
@@ -503,7 +505,8 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
     if (!htlc || !fingerprint) {
         return FALSE;
     }
-    return hx_tls_verify_cert (htlc->serverhost, htlc->serverport, fingerprint);
+    return hx_tls_verify_cert (hx_conn_serverhost (htlc),
+                               hx_conn_serverport (htlc), fingerprint);
 }
 
 /* Phase G: pinned LOGIN transaction id. LOGIN is always the first
@@ -585,13 +588,13 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     server_port = port;
 
     hx_conn_set_chat_history_last_msgid (htlc, 0);
-    g_strlcpy (htlc->serverhost, serverstr, sizeof (htlc->serverhost));
-    htlc->serverport = port;
+    hx_conn_set_serverhost (htlc, serverstr);
+    hx_conn_set_serverport (htlc, port);
     /* Stamp the TLS flag so the HTXF subchannel workers (xfers.c /
      * banner.c) wrap their data ports too. The control channel's TLS
      * runs inside hxnet (rustls); HTXF keeps using the legacy
      * GTlsConnection path, which reads htlc->tls. */
-    htlc->tls = tls ? 1 : 0;
+    hx_conn_set_tls (htlc, tls ? 1 : 0);
     htlc->gdk_input = 0;
     g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
 
@@ -603,7 +606,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
 	 * the best display string we have. TODO: plumb the resolved
 	 * SocketAddr out of the hxnet lifecycle to match the legacy
 	 * numeric-IP display exactly. */
-    g_strlcpy (htlc->ip_addr, serverstr, sizeof (htlc->ip_addr));
+    hx_conn_set_ip_addr (htlc, serverstr);
 
     hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
                       server_addr);
@@ -879,7 +882,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * the rustls handshake, and the WebPKI→TOFU trust gate internally;
 	 * htxf_verify_cert_cb bridges a WebPKI failure back to the C
 	 * known-hosts decision. */
-    int xfer_tls = (htxf->htlc != NULL) ? htxf->htlc->tls : 0;
+    int xfer_tls = (htxf->htlc != NULL) ? hx_conn_tls (htxf->htlc) : 0;
     htxf->hx = hxnet_htxf_connect (
         (const guint8 *) htxf->serverhost, strlen (htxf->serverhost),
         htxf->serverport,

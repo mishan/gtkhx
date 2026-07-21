@@ -48,3 +48,51 @@ hx_conn_set_chat_history_last_msgid (struct htlc_conn *h, guint64 v)
 {
     h->chat_history_last_msgid = v;
 }
+
+const char *
+hx_conn_serverhost (const struct htlc_conn *h)
+{
+    return h->serverhost;
+}
+
+void
+hx_conn_set_serverhost (struct htlc_conn *h, const char *v)
+{
+    g_strlcpy (h->serverhost, v, sizeof (h->serverhost));
+}
+
+guint16
+hx_conn_serverport (const struct htlc_conn *h)
+{
+    return h->serverport;
+}
+
+void
+hx_conn_set_serverport (struct htlc_conn *h, guint16 v)
+{
+    h->serverport = v;
+}
+
+const char *
+hx_conn_ip_addr (const struct htlc_conn *h)
+{
+    return h->ip_addr;
+}
+
+void
+hx_conn_set_ip_addr (struct htlc_conn *h, const char *v)
+{
+    g_strlcpy (h->ip_addr, v, sizeof (h->ip_addr));
+}
+
+char
+hx_conn_tls (const struct htlc_conn *h)
+{
+    return h->tls;
+}
+
+void
+hx_conn_set_tls (struct htlc_conn *h, char v)
+{
+    h->tls = v;
+}

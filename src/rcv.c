@@ -1599,11 +1599,13 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
     char buf[HOSTLEN];
     char servername[8192 + 1];
 
-    g_strlcpy (buf, htlc->ip_addr[0] ? htlc->ip_addr : "?", sizeof (buf));
+    g_strlcpy (buf,
+               hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
+               sizeof (buf));
 
     if (!pass) {
         hx_printf_prefix (htlc, 0, INFOPREFIX, "%s:%u: %s %s\n", buf,
-                          htlc->serverport, _ ("login"),
+                          hx_conn_serverport (htlc), _ ("login"),
 
                           task_inerror (htlc) ? _ ("failed?")
                                               : _ ("successful"));
@@ -2465,8 +2467,9 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
     /* Stamp the HTXF subchannel target onto htxf so the worker can
 	 * hand it straight to GSocketClient without re-resolving — the
 	 * subchannel is always (main server hostname, main port + 1). */
-    g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
-    htxf->serverport = htlc->serverport + 1;
+    g_strlcpy (htxf->serverhost, hx_conn_serverhost (htlc),
+               sizeof (htxf->serverhost));
+    htxf->serverport = hx_conn_serverport (htlc) + 1;
 
     /* For previews, build the GtkWindow + GtkTextView on the main
 	 * thread (we are on the main thread here — this is the
@@ -2561,8 +2564,9 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 
     gettimeofday (&htxf->start, 0);
 
-    g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
-    htxf->serverport = htlc->serverport + 1;
+    g_strlcpy (htxf->serverhost, hx_conn_serverhost (htlc),
+               sizeof (htxf->serverhost));
+    htxf->serverport = hx_conn_serverport (htlc) + 1;
 
     hx_xfer_announce (htlc, htxf, htxf->queue);
 }
@@ -2610,8 +2614,9 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
 
     /* Stamp the HTXF subchannel target onto htxf. See the file_get
 	 * sibling above for the same idiom. */
-    g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
-    htxf->serverport = htlc->serverport + 1;
+    g_strlcpy (htxf->serverhost, hx_conn_serverhost (htlc),
+               sizeof (htxf->serverhost));
+    htxf->serverport = hx_conn_serverport (htlc) + 1;
 
     hx_xfer_announce (htlc, htxf, htxf->queue);
 }
@@ -2649,8 +2654,9 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
     htxf->queue = queue;
     gettimeofday (&htxf->start, 0);
 
-    g_strlcpy (htxf->serverhost, htlc->serverhost, sizeof (htxf->serverhost));
-    htxf->serverport = htlc->serverport + 1;
+    g_strlcpy (htxf->serverhost, hx_conn_serverhost (htlc),
+               sizeof (htxf->serverhost));
+    htxf->serverport = hx_conn_serverport (htlc) + 1;
 
     hx_xfer_announce (htlc, htxf, htxf->queue);
 }
