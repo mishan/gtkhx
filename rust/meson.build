@@ -56,6 +56,7 @@ rust_sources = files(
   'crates/hotline-proto/src/wire.rs',
   'crates/hotline-proto/src/messages.rs',
   'crates/hotline-proto/src/text.rs',
+  'crates/hotline-proto/src/user_change.rs',
   'crates/hotline-proto/src/parse.rs',
   'crates/hotline-proto/src/ffi.rs',
   'crates/hxbridge/src/lib.rs',

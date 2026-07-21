@@ -286,60 +286,21 @@ hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
     return TRUE;
 }
 
-void
-hx_user_change_plan_resolve (const struct hx_user_change_msg *uc,
-                             gboolean old_exists, guint16 old_status,
-                             guint32 old_nick_color, const char *old_name,
-                             guint16 self_uid, const char *self_name,
-                             struct hx_user_change_plan *out)
-{
-    if (!out) {
-        return;
-    }
-    /* Always leave *out in a defined state when out is non-NULL: a zeroed
-     * plan is a safe no-op (no create, no change, no rename), so a caller
-     * that ignores a NULL-uc early-return still reads well-defined fields. */
-    memset (out, 0, sizeof *out);
-    if (!uc) {
-        return;
-    }
-
-    /* SELFINFO-less self-detection: some 1.9-style servers (The Mobius
-     * Strip) omit USER_LIST from SELFINFO, so self_uid stays 0 after login.
-     * The first USER_CHANGE we get is the server echoing our own post-
-     * SELFINFO USER_CHANGE back — its name matches our nick and carries our
-     * freshly-assigned uid. Adopt it. */
-    guint16 eff_self = self_uid;
-    if (self_uid == 0 && uc->uid != 0 && uc->name_len > 0 && self_name
-        && strlen (self_name) == (size_t)uc->name_len
-        && memcmp (self_name, uc->name, uc->name_len) == 0) {
-        out->adopt_self_uid = TRUE;
-        eff_self = uc->uid;
-    }
-
-    out->is_self = (uc->uid != 0 && uc->uid == eff_self);
-    out->is_new = !old_exists;
-    /* Don't add our own row on a create — the USER_LIST reply (or a later
-     * broadcast) creates it in the right position; adding it here would put
-     * us at the top and spam a "join: <us>" line. */
-    out->skip_self_create = out->is_new && out->is_self;
-
-    /* Colour: the wire value wins when present; otherwise keep the member's
-     * current status (a rename-only USER_CHANGE mustn't reset it). A new
-     * member has no old status, so it takes the wire value (possibly 0). */
-    out->eff_color = uc->got_color ? uc->color
-                                   : (old_exists ? old_status : uc->color);
-    /* RGB nick colour: same preserve rule; a new member with no wire colour
-     * defaults to "none". */
-    out->eff_nick_color = uc->got_nick_color
-                              ? uc->nick_color
-                              : (old_exists ? old_nick_color : HX_NICK_COLOR_NONE);
-
-    /* "X is now known as Y" only on a real rename of someone other than us. */
-    out->do_rename_notice = old_exists && (uc->uid != eff_self)
-                            && uc->name_len > 0 && old_name
-                            && strcmp (uc->name, old_name) != 0;
-}
+/* hx_user_change_plan_resolve moved to Rust (hotline-proto's user_change
+ * module). These pins guard the #[repr(C)] mirrors it reads/writes against
+ * silent drift of the C structs here + in proto_helpers.h. */
+_Static_assert (sizeof (struct hx_user_change_msg) == 60,
+                "hx_user_change_msg layout drifted from the Rust mirror");
+_Static_assert (offsetof (struct hx_user_change_msg, got_color) == 8, "");
+_Static_assert (offsetof (struct hx_user_change_msg, nick_color) == 12, "");
+_Static_assert (offsetof (struct hx_user_change_msg, got_nick_color) == 16, "");
+_Static_assert (offsetof (struct hx_user_change_msg, cid) == 20, "");
+_Static_assert (offsetof (struct hx_user_change_msg, name) == 24, "");
+_Static_assert (offsetof (struct hx_user_change_msg, name_len) == 56, "");
+_Static_assert (sizeof (struct hx_user_change_plan) == 28,
+                "hx_user_change_plan layout drifted from the Rust mirror");
+_Static_assert (offsetof (struct hx_user_change_plan, eff_color) == 20, "");
+_Static_assert (offsetof (struct hx_user_change_plan, eff_nick_color) == 24, "");
 
 gboolean
 hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
