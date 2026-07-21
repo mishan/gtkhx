@@ -262,6 +262,10 @@ task_inerror (struct htlc_conn *htlc)
     return gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos) ? 1 : 0;
 }
 
+/* Public-chat line ignore-gate + emit — Rust hxchat-recv crate. */
+extern int hx_chat_recv (struct htlc_conn *htlc, void *member_model,
+                         guint16 uid, void *event);
+
 void
 hx_rcv_chat (struct htlc_conn *htlc)
 {
@@ -273,12 +277,6 @@ hx_rcv_chat (struct htlc_conn *htlc)
 	 * proto_helpers.c so the Tier 2 unit tests can drive it. */
     if (!hx_chat_extract (htlc, &msg)) {
         return;
-    }
-
-    if (msg.uid) { /* do ignoring stuff */
-        if (hx_member_model_get_ignore (hx_chat_member_model (hx_chat), msg.uid)) {
-            return;
-        }
     }
 
 #ifdef USE_PLUGIN
@@ -342,7 +340,11 @@ hx_rcv_chat (struct htlc_conn *htlc)
                        (unsigned) media_meta.height,
                        (unsigned) media_meta.bytes);
         }
-        gtkhx_session_emit_chat (gtkhx_session_get_default (), htlc, ev);
+        /* Ignore-gate + emit live in the Rust hxchat-recv crate: it drops the
+         * line when the sender is ignored (uid 0 = server line, never ignored)
+         * and otherwise fires the "chat" signal. We keep ownership of ev and
+         * free it either way. */
+        hx_chat_recv (htlc, hx_chat_member_model (hx_chat), msg.uid, ev);
         hx_chat_event_free (ev);
     }
     /* CHAT_POST chime is played by the sound_events subscriber off the
