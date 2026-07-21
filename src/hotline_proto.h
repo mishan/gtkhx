@@ -1281,6 +1281,16 @@ extern size_t gtkhx_proto_pack_message (uint8_t *out, size_t out_cap,
                                         const struct hx_chunk *chunks,
                                         size_t chunks_len);
 
+/* Pack a 22-byte Hotline transaction header into `dst` (the receive-side
+ * counterpart to gtkhx_proto_pack_message). The hxnet actor already parsed the
+ * header; the bridge calls this to reconstruct the byte-exact header into
+ * htlc->in so the body handlers can decode it back out. `body_len` is the body
+ * byte count after the header (excluding hc); the wire len/len2 fields encode
+ * body_len + sizeof(hc). No-op on NULL dst; `dst` must hold >= 22 bytes. */
+extern void gtkhx_proto_pack_header (uint8_t *dst, uint32_t type,
+                                     uint32_t trans, uint32_t flag, uint16_t hc,
+                                     uint32_t body_len);
+
 /* ---- Text encoding: Mac Roman -> UTF-8 ---- */
 
 /* Decode `src[0..len)` wire bytes into UTF-8 in `dst`, writing into the

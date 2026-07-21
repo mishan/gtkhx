@@ -4,10 +4,12 @@
  *
  * The module ships two ingest paths:
  *
- *   * `hx_bridge_pack_header` — turns a (type, trans, flag, hc,
- *     body_len) tuple into a 22-byte Hotline header. Tested here
- *     against the production `hl_hdr_decode` to lock down the
- *     wire-format round-trip without standing up an htlc_conn.
+ *   * `gtkhx_proto_pack_header` (hotline-proto) — turns a (type,
+ *     trans, flag, hc, body_len) tuple into a 22-byte Hotline
+ *     header. The bridge calls it to reconstruct the header of a
+ *     frame the hxnet actor already parsed; tested here against the
+ *     production `hl_hdr_decode` to lock down the wire-format
+ *     round-trip without standing up an htlc_conn.
  *
  *   * `hx_bridge_dispatch_frame` / `hx_bridge_dispatch_shutdown`
  *     — exercise the rcv state machine. Those need a populated
@@ -32,6 +34,7 @@
 
 #include "config.h"
 #include "hxnet_bridge.h"
+#include "hotline_proto.h"      /* gtkhx_proto_pack_header (wire header encode) */
 #include "proto_helpers.h"
 #include "protocol.h"
 
@@ -380,7 +383,7 @@ assert_round_trip (guint32 type, guint32 trans, guint32 flag, guint16 hc,
                    guint32 body_len)
 {
     guint8 hdr[SIZEOF_HL_HDR];
-    hx_bridge_pack_header (hdr, type, trans, flag, hc, body_len);
+    gtkhx_proto_pack_header (hdr, type, trans, flag, hc, body_len);
 
     guint32 got_type, got_trans, got_flag;
     guint16 got_hc;
@@ -454,8 +457,8 @@ test_pack_header_byte_layout (void)
         /* len2 == len (matches hlpack) */ 0x00, 0x00, 0x00, 0x0c,
         /* hc 0x0d0e BE */ 0x0d, 0x0e,
     };
-    hx_bridge_pack_header (hdr, 0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e,
-                           10);
+    gtkhx_proto_pack_header (hdr, 0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e,
+                             10);
     g_assert_cmpmem (hdr, sizeof (hdr), expected, sizeof (expected));
 }
 

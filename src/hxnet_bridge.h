@@ -39,30 +39,6 @@
 G_BEGIN_DECLS
 
 /*
- * Pack a Hotline 22-byte message header into `dst`.
- *
- *   dst        : caller-supplied buffer of at least SIZEOF_HL_HDR
- *                bytes. Must be writable.
- *   type/trans/flag/hc : host-order fields from a decoded
- *                HxnetFrame.
- *   body_len   : body byte count (no hc adjustment — this is the
- *                hxnet "body" length, matching
- *                hotline_proto::parse::HeaderDecoded.body_len).
- *
- * The wire `len` field is encoded as `body_len + sizeof(hc)` so
- * production's hl_hdr_decode reports the same body_len back via
- * its `body_len_out` parameter. `len2` is set equal to `len`, the
- * same as hlpack/hlwrite, so a bridge-packed header is byte-identical
- * to an hlpack one.
- *
- * Visibility: declared here for testability — tests/unit/
- * test_hxnet_bridge.c exercises the round-trip against
- * hl_hdr_decode without standing up a struct htlc_conn.
- */
-extern void hx_bridge_pack_header (guint8 *dst, guint32 type, guint32 trans,
-                                   guint32 flag, guint16 hc, guint32 body_len);
-
-/*
  * Run a plaintext Hotline frame through the rcv state machine.
  *
  * Stages the packed 22-byte header + body bytes into
