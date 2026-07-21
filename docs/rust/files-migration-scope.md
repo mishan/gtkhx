@@ -117,7 +117,7 @@ the existing MVC boundary: view = C/GTK, model/protocol/IO = Rust).
 | `files_remote_provider.c` | 746 | remote listing provider; FILE_LIST RPC; reply routing from rcv.c; timeout watchdog | **Split**: model→Rust; rcv routing + watchdog→C | Med |
 | `files_ops.c` | 389 | cross-panel copy/move dispatch; access-bit checks; local↔local GIO recursive copy | Keep in C (thin glue) | Low |
 | `files_provider.c` | 185 | `HxFilesProvider` GInterface + signals | Keep in C (GObject interface) | Low |
-| `files_entry.c` | 181 | file-row GObject; size/modified formatters | **Split**: formatters→Rust; GObject→C | Low |
+| `files_entry.c` | 181 | file-row GObject; size/modified formatters | **DONE (split, inverted)**: GObject→Rust (`hxfiles-entry`); formatters stay in C | Low |
 | `files_complete.c` | 694 | local path-completion popover | Keep in C (pure GTK) | — |
 | `files_local_provider.c` | 506 | GIO directory ops | Keep in C | — |
 | `files_panel.c` | 1674 | single-panel widget (GtkColumnView, inline rename, icon cache) | Keep in C | — |
@@ -236,10 +236,25 @@ differently, and the reasoning is worth recording:
   navigation-math cases + an FFI-handle round-trip; the existing
   `test_file_list` / `test_file_list_subdir` / `test_file_info`
   integration tests stay green against mhxd.
-- **Not yet moved (a fair next increment):** the per-entry reply→model
-  binding (`populate_from_chunks_cb`) still builds `HxFileEntry` GObjects
-  in C — that's the GObject boundary and would follow the `gtkhx-boxed`
-  pattern if pushed down.
+- **`HxFileEntry` GObject moved to Rust (second increment).** The
+  files-browser row object — its state, construction, `get_type`, and the
+  six field getters — is now a `glib::subclass` type in the new
+  `hxfiles-entry` crate, exporting the same `hx_file_entry_*` C ABI the
+  old `G_DEFINE_FINAL_TYPE` in `files_entry.c` provided (mirrors
+  `hxmember-model`'s `HxMember`). Every C consumer (both providers, the
+  panel, the browser) compiles unchanged; only `files_entry.c` shrank to
+  the two presentation formatters. **Note:** this is the *inverse* of the
+  original component-table sketch ("formatters→Rust; GObject→C"). A closer
+  read flipped it: the formatters are thin `g_format_size_full` /
+  `g_dngettext` / `GDateTime` i18n wrappers whose value is GLib's locale
+  handling (a poor Rust target, and a divergence risk), while the GObject
+  *data* is the clean move. The formatters stay in C and read the entry
+  only through the public accessors.
+- **Still in C (a fair next increment):** the per-entry reply→model
+  binding (`populate_from_chunks_cb`) constructs the entries via
+  `hx_file_entry_new` from C. Building them Rust-side — or replacing the
+  hand-populated `GListStore` with a Rust `gio::ListModel` of
+  `HxFileEntry` (the `hxmember-model` shape) — is the natural F4 step.
 
 ### Phase F4 (optional) — provider trait in Rust
 - Only if F1–F3 prove out. Consider a `glib::subclass` implementation of

@@ -262,6 +262,9 @@ rust_deps = [
   # files-subsystem model: file-type -> icon-id map behind
   # files.c::icon_of_ftype_and_name.
   rust_hxfiles_model_dep,
+  # HxFileEntry files-browser row GObject (files_entry.c's model half):
+  # hx_file_entry_get_type / _new / the six field getters.
+  rust_hxfiles_entry_dep,
   # files-subsystem transfer codec: FFO fork-header + info-block byte
   # math behind xfers.c::file_recv_one.
   rust_hxfiles_xfer_dep,

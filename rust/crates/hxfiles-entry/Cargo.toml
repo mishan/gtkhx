@@ -1,0 +1,21 @@
+[package]
+name = "hxfiles-entry"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "HxFileEntry — one files-browser row as a Rust glib::subclass GObject (the model half of the C files_entry.c), exporting the hx_file_entry_* C ABI."
+publish = false
+
+[lib]
+# staticlib: the C side (files_entry.c formatters + both providers + the panel
+#            / browser) links the hx_file_entry_* symbols this crate exports.
+# rlib:      future Rust consumers (a files gio::ListModel, like hxmember-model)
+#            hold a typed HxFileEntry.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# glib gives the GObject surface; no gtk / no C externs, so
+# `cargo test -p hxfiles-entry` runs headless. Builds against the
+# libglib-2.0 / libgobject-2.0 the C binary already links, so the
+# system-library surface doesn't grow.
+glib = { workspace = true }

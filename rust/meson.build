@@ -168,6 +168,7 @@ rust_sources = files(
   'crates/hxfiles-model/src/lib.rs',
   'crates/hxfiles-model/src/ffi.rs',
   'crates/hxfiles-model/src/remote_listing.rs',
+  'crates/hxfiles-entry/src/lib.rs',
   'crates/hxfiles-xfer/src/lib.rs',
   'crates/hxfiles-xfer/src/ffo.rs',
   'crates/hxfiles-xfer/src/ffi.rs',
@@ -220,6 +221,7 @@ rust_sources = files(
   'crates/hxmember-model/Cargo.toml',
   'crates/hxnews-model/Cargo.toml',
   'crates/hxfiles-model/Cargo.toml',
+  'crates/hxfiles-entry/Cargo.toml',
   'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
@@ -509,6 +511,21 @@ rust_hxfiles_model_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxfiles_model',
+  ],
+)
+
+# HxFileEntry GObject (see docs/rust/files-migration-scope.md). The
+# files-browser row model, now a Rust glib::subclass type exporting the C
+# ABI the deleted files_entry.c GObject provided: hx_file_entry_get_type,
+# hx_file_entry_new, and the six field getters. The two presentation
+# formatters (hx_file_entry_format_size / _modified) stay in C. Pulls in
+# glib/gobject (already C-side deps), no new system-library surface;
+# `cargo test -p hxfiles-entry` runs headless. Unconditional.
+rust_hxfiles_entry_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxfiles_entry',
   ],
 )
 
