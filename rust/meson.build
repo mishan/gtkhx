@@ -167,6 +167,9 @@ rust_sources = files(
   'crates/hxnews-model/src/node_tests.rs',
   'crates/hxfiles-model/src/lib.rs',
   'crates/hxfiles-model/src/ffi.rs',
+  'crates/hxfiles-xfer/src/lib.rs',
+  'crates/hxfiles-xfer/src/ffo.rs',
+  'crates/hxfiles-xfer/src/ffi.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -206,6 +209,7 @@ rust_sources = files(
   'crates/hxmember-model/Cargo.toml',
   'crates/hxnews-model/Cargo.toml',
   'crates/hxfiles-model/Cargo.toml',
+  'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -491,6 +495,19 @@ rust_hxfiles_model_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxfiles_model',
+  ],
+)
+
+# Files-subsystem transfer codec (Phase F2; see
+# docs/files-rust-migration-scope.md). Pure logic, no glib/gtk —
+# `cargo test -p hxfiles-xfer` runs headless. Exposes the `gtkhx_ffo_*`
+# FFI surface (the FFO fork-header + info-block byte math behind
+# src/xfers.c::file_recv_one). Unconditional.
+rust_hxfiles_xfer_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxfiles_xfer',
   ],
 )
 

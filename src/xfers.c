@@ -53,6 +53,16 @@ int nxfers = 0;
 struct htxf_conn **xfers = 0;
 static void xfer_remove_from_list (struct htxf_conn *htxf);
 
+/* FFO fork-header / info-block byte math — ported to the hxfiles-xfer
+ * Rust crate in Phase F2 (see docs/files-rust-migration-scope.md). The
+ * receive worker below keeps its loop + local I/O and calls in here for
+ * the fiddly, error-prone parsing (the large-file high32/low32 fork-
+ * length split and the variable info-block length). Pure logic, unit-
+ * tested headless in the crate. */
+extern size_t gtkhx_ffo_info_block_len (guint8 b38, guint8 b39);
+extern guint64 gtkhx_ffo_fork_len (const guint8 *marker, size_t marker_len,
+                                   int large);
+
 /* Phase R3 X2: worker→main marshalling goes through hxbridge
  * (rust/crates/hxbridge/src/blocking.rs::gtkhx_bridge_post_to_main),
  * with the same g_main_context_invoke(NULL, ...) semantics the old
@@ -731,8 +741,7 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
         post_file_update (htxf);
     }
     pos = 0;
-    len = (buf[38] ? 0x100 : 0) + buf[39];
-    len += 16;
+    len = (guint32)gtkhx_ffo_info_block_len (buf[38], buf[39]);
     tot_len = 40 + len;
     while (len) {
         if ((r = htxf_io_read (htxf, &(buf[pos]), len)) < 1) {
@@ -768,14 +777,7 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf)
 	 * the full 64-bit length. Source:
 	 * fogWraith/Hotline Docs/Protocol/Capabilities-Large-File.md
 	 * section "Flattened File Object Fork Headers". */
-    {
-        guint32 lo, hi = 0;
-        HN32 (&lo, &buf[pos - 4]);
-        if (htxf->opt.large) {
-            HN32 (&hi, &buf[pos - 12]);
-        }
-        fork_len = ((guint64)hi << 32) | (guint64)lo;
-    }
+    fork_len = gtkhx_ffo_fork_len (&buf[pos - 16], 16, htxf->opt.large);
     tot_len += fork_len;
     if (!fork_len) {
         goto get_rsrc;
@@ -916,14 +918,7 @@ get_rsrc:
     /* MACR fork header — same split encoding as DATA: in large-
 	 * file mode the Compression field at offset 4-7 holds the
 	 * high 32 bits, DataSize at 12-15 holds the low 32 bits. */
-    {
-        guint32 lo, hi = 0;
-        HN32 (&lo, &buf[12]);
-        if (htxf->opt.large) {
-            HN32 (&hi, &buf[4]);
-        }
-        fork_len = ((guint64)hi << 32) | (guint64)lo;
-    }
+    fork_len = gtkhx_ffo_fork_len (&buf[0], 16, htxf->opt.large);
     if (!fork_len) {
         goto done;
     }

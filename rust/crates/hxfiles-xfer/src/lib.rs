@@ -14,4 +14,5 @@
 //! state machines (on the hxbridge tokio pool) and the `gtkhx_xfer_*`
 //! C-ABI surface arrive in later slice-1 increments.
 
+pub mod ffi;
 pub mod ffo;

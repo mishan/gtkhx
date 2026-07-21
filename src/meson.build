@@ -257,6 +257,9 @@ rust_deps = [
   # files-subsystem model (Phase F1): file-type -> icon-id map behind
   # files.c::icon_of_ftype_and_name.
   rust_hxfiles_model_dep,
+  # files-subsystem transfer codec (Phase F2): FFO fork-header +
+  # info-block byte math behind xfers.c::file_recv_one.
+  rust_hxfiles_xfer_dep,
   # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
   rust_hxtext_dep,
 ]
