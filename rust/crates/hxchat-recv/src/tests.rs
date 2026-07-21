@@ -83,3 +83,37 @@ fn suppresses_empty_subject() {
     assert_eq!(applied, 0);
     assert_eq!(test_env::SUBJECT_EMITTED.with(|c| c.take()), None);
 }
+
+/// A sentinel boxed-event pointer (never dereferenced by the crate).
+fn fake_event() -> *mut std::os::raw::c_void {
+    0xC0FE_usize as *mut std::os::raw::c_void
+}
+
+fn chat(uid: u16) -> c_int {
+    unsafe { hx_chat_recv(std::ptr::null_mut(), std::ptr::null_mut(), uid, fake_event()) }
+}
+
+#[test]
+fn emits_chat_when_not_ignored() {
+    test_env::reset();
+    test_env::IGNORE.with(|c| c.set(false));
+    assert_eq!(chat(42), 1);
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(fake_event()));
+}
+
+#[test]
+fn drops_chat_from_ignored_user() {
+    test_env::reset();
+    test_env::IGNORE.with(|c| c.set(true));
+    assert_eq!(chat(42), 0);
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), None);
+}
+
+#[test]
+fn system_line_uid_zero_always_emits() {
+    // uid 0 is a server/system line — the ignore list is never consulted.
+    test_env::reset();
+    test_env::IGNORE.with(|c| c.set(true));
+    assert_eq!(chat(0), 1);
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(fake_event()));
+}

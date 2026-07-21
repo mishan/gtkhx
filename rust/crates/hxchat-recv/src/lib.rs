@@ -27,6 +27,8 @@ extern "C" {
         cid: u32,
         subj: *const c_char,
     );
+    /// Fire `GtkhxSession::chat (htlc, HxChatEvent* boxed)` (gtkhx-session).
+    fn gtkhx_session_emit_chat(self_: *mut c_void, htlc: *mut c_void, event: *mut c_void);
     /// Whether `uid` is on the per-chat ignore list (hxmember-model).
     fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
 }
@@ -95,6 +97,33 @@ pub unsafe extern "C" fn hx_chat_subject_recv(
     1
 }
 
+/// `int hx_chat_recv (htlc, member_model, uid, event)` — the public-chat line
+/// receive path: drop the line when its sender (`uid`) is on the ignore list,
+/// otherwise emit the `chat` signal carrying the boxed `HxChatEvent`. Returns 1
+/// when it emitted, 0 when it dropped. A `uid` of 0 is a server/system line
+/// (no sender to ignore), so it always emits.
+///
+/// The C handler owns `event`: it builds the `HxChatEvent` (including any inline
+/// -media companion) before calling and frees it after, whether or not this
+/// emitted. The emit only borrows it for the duration of the signal.
+///
+/// # Safety
+/// `member_model` is a valid `HxMemberModel *`; `event` is a valid boxed
+/// `HxChatEvent *`; `htlc` is opaque and only forwarded to the signal.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_recv(
+    htlc: *mut c_void,
+    member_model: *mut c_void,
+    uid: u16,
+    event: *mut c_void,
+) -> c_int {
+    if uid != 0 && hx_member_model_get_ignore(member_model, uid) != 0 {
+        return 0;
+    }
+    gtkhx_session_emit_chat(gtkhx_session_get_default(), htlc, event);
+    1
+}
+
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
@@ -108,12 +137,15 @@ pub(crate) mod test_env {
         pub static EMITTED: Cell<Option<(u32, Vec<u8>)>> = const { Cell::new(None) };
         /// Records the last emitted chat-subject as (cid, subj-bytes), or None.
         pub static SUBJECT_EMITTED: Cell<Option<(u32, Vec<u8>)>> = const { Cell::new(None) };
+        /// Records the boxed-event pointer of the last emitted `chat`, or None.
+        pub static CHAT_EMITTED: Cell<Option<*mut std::os::raw::c_void>> = const { Cell::new(None) };
     }
 
     pub fn reset() {
         IGNORE.with(|c| c.set(false));
         EMITTED.with(|c| c.set(None));
         SUBJECT_EMITTED.with(|c| c.set(None));
+        CHAT_EMITTED.with(|c| c.set(None));
     }
 }
 
@@ -150,6 +182,11 @@ unsafe fn gtkhx_session_emit_chat_subject(
         std::ffi::CStr::from_ptr(subj).to_bytes().to_vec()
     };
     test_env::SUBJECT_EMITTED.with(|c| c.set(Some((cid, bytes))));
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_session_emit_chat(_self_: *mut c_void, _htlc: *mut c_void, event: *mut c_void) {
+    test_env::CHAT_EMITTED.with(|c| c.set(Some(event)));
 }
 
 #[cfg(test)]
