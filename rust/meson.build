@@ -178,6 +178,8 @@ rust_sources = files(
   'crates/hxmacres/src/lib.rs',
   'crates/hxmacres/src/ffi.rs',
   'crates/hxmacres/src/tests.rs',
+  'crates/hxtask/src/lib.rs',
+  'crates/hxtask/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -220,6 +222,7 @@ rust_sources = files(
   'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
+  'crates/hxtask/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -537,6 +540,21 @@ rust_hxmacres_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxmacres',
+  ],
+)
+
+# Per-session transaction-task table (Rust port of tasks_table.c + the struct
+# task model in tasks.c). Exposes the tasks_table_new / tasks_init / task_new /
+# task_with_trans / task_delete C ABI the ~14 caller files + rcv.c's dispatcher
+# link against; keeps sess->tasks a real GHashTable and reaches C session/htlc
+# fields via tasks_bridge.c. glib-only, so `cargo test -p hxtask` runs headless
+# against in-crate doubles. First step of the network-untangling plan (N1) —
+# see docs/rust/network-untangling-scope.md.
+rust_hxtask_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxtask',
   ],
 )
 

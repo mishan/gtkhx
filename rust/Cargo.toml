@@ -21,6 +21,7 @@ members = [
     "crates/hxhfs",
     "crates/hxcicn",
     "crates/hxmacres",
+    "crates/hxtask",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",
