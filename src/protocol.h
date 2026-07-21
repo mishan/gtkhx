@@ -275,8 +275,6 @@ struct htlc_conn {
     char name[32];
     char login[32];
 
-    unsigned int gdk_input : 1;
-
     guint16 color;
 
     /* Colored-Nicknames extension — our own 32-bit

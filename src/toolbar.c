@@ -289,9 +289,7 @@ disconnect_clicked (void)
          * legacy hxd_fd_clr + close(fd) cleanup here would either
          * be a no-op or worse — close(fd) would target a fd
          * already owned (and possibly closed) by the released
-         * GSocketConnection. Just clear the gdk_input bookkeeping
-         * flag and emit the user-visible notice. */
-        hx_active_session ()->htlc->gdk_input = 0;
+         * GSocketConnection. Just emit the user-visible notice. */
         hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX, "%s: %s\n",
                           server_addr, _ ("connection closed"));
     }

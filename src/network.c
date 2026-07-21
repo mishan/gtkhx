@@ -324,7 +324,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * the local pref, which is independent of the prior server state)
 	 * and (b) fixes the reconnect-loses-color bug. */
     htlc->nick_color = (guint32)gtkhx_prefs.nick_color;
-    htlc->gdk_input = 0;
     htlc->version = 0;
     memset (htlc->login, 0, sizeof (htlc->login));
 
@@ -595,7 +594,6 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * runs inside hxnet (rustls); HTXF keeps using the legacy
      * GTlsConnection path, which reads htlc->tls. */
     hx_conn_set_tls (htlc, tls ? 1 : 0);
-    htlc->gdk_input = 0;
     g_strlcpy (htlc->login, login ? login : "", sizeof (htlc->login));
 
     /* Seed htlc->ip_addr from the server string so the post-login
