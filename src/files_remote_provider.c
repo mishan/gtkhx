@@ -176,7 +176,7 @@ static const char *
 remote_get_unavailable_reason (HxFilesProvider *self)
 {
     (void)self;
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return _ ("Not connected to a server.");
     }
     /* htlc->fd is set as soon as the TCP socket comes up — well
@@ -255,7 +255,7 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     guint16 hldirlen;
     guint8 *hldir;
 
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return;
     }
 
@@ -551,7 +551,7 @@ remote_mkdir (HxFilesProvider *self, const char *name, GError **err)
     if (!name || !*name) {
         return FALSE;
     }
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return FALSE;
     }
     path = remote_child_path (r, name);
@@ -576,7 +576,7 @@ remote_delete_entry (HxFilesProvider *self, const char *name, GError **err)
     if (!name || !*name) {
         return FALSE;
     }
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return FALSE;
     }
     path = remote_child_path (r, name);
@@ -597,7 +597,7 @@ remote_rename (HxFilesProvider *self, const char *old_name,
     if (!old_name || !new_name) {
         return FALSE;
     }
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return FALSE;
     }
     src = remote_child_path (r, old_name);
@@ -624,7 +624,7 @@ remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
     if (!e || hx_file_entry_is_dir (e)) {
         return;
     }
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         return;
     }
     if (!hx_conn_access_has (hx_active_session ()->htlc,

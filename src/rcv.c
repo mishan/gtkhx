@@ -216,7 +216,7 @@ post_login_fallback (gpointer data)
     struct htlc_conn *htlc = data;
 
     post_login_timer_id = 0;
-    if (htlc && htlc->fd && !hx_conn_post_login_fetched (htlc)) {
+    if (htlc && hx_conn_fd (htlc) && !hx_conn_post_login_fetched (htlc)) {
         debug_log (
             "login",
             "AGREEMENTAGREE didn't fire after 2s, firing fetches anyway");
@@ -643,7 +643,7 @@ hx_rcv_task (struct htlc_conn *htlc)
 		 * (which echoed the request opcode in the TASK reply type —
 		 * a since-fixed server bug — and reaches hx_rcv_task once the
 		 * dispatch mask folds it). */
-        if (htlc->fd) {
+        if (hx_conn_fd (htlc)) {
             task_delete (sess_from_htlc (htlc), tsk);
         }
     } else {
@@ -1515,7 +1515,7 @@ hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
         break;
     }
 
-    if (handler && htlc->fd != 0) {
+    if (handler && hx_conn_fd (htlc) != 0) {
         handler (htlc);
     }
 }

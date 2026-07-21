@@ -1039,7 +1039,7 @@ update_status (files_panel *p)
                                                   HL_ACCESS_UPLOAD_FILES);
         gboolean can_view_dropbox = hx_conn_access_has (
             hx_active_session ()->htlc, HL_ACCESS_VIEW_DROP_BOXES);
-        if (hx_active_session ()->htlc->fd && can_upload && !can_view_dropbox) {
+        if (hx_conn_fd (hx_active_session ()->htlc) && can_upload && !can_view_dropbox) {
             text = g_strdup (
                 _ ("Folder is upload-only — drop files here to upload"));
         } else {

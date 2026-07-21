@@ -358,7 +358,7 @@ on_get_info_clicked (GtkButton *btn, gpointer user_data)
         show_toast (br, _ ("Get Info is only available for remote files."));
         return;
     }
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         show_toast (br, _ ("Not connected."));
         return;
     }
@@ -646,7 +646,7 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
             g_object_unref (sf);
             g_object_unref (df);
         } else if (HX_IS_REMOTE_FILES_PROVIDER (prov)) {
-            if (!hx_active_session ()->htlc->fd) {
+            if (!hx_conn_fd (hx_active_session ()->htlc)) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("Not connected to a server."));
@@ -1099,7 +1099,7 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         return;
     }
 
-    if (!hx_active_session ()->htlc->fd) {
+    if (!hx_conn_fd (hx_active_session ()->htlc)) {
         show_toast (br, _ ("Not connected to a server."));
         return;
     }

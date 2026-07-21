@@ -26,6 +26,7 @@
 #include <libpanel.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "network.h"
 #include "news.h"
 #include "news15.h"
@@ -294,7 +295,7 @@ disconnect_clicked (void)
                           server_addr, _ ("connection closed"));
     }
 
-    else if (hx_active_session ()->htlc->fd) {
+    else if (hx_conn_fd (hx_active_session ()->htlc)) {
         hx_htlc_close (hx_active_session ()->htlc, 1);
     }
 }

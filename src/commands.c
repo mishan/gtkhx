@@ -376,7 +376,7 @@ COMMAND (post)
 
 COMMAND (close)
 {
-    if (htlc->fd) {
+    if (hx_conn_fd (htlc)) {
         hx_htlc_close (htlc, 1);
     }
 }

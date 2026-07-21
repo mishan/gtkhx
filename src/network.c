@@ -147,7 +147,7 @@ ping_tick (gpointer data)
 {
     struct htlc_conn *htlc = data;
 
-    if (!htlc || !htlc->fd) {
+    if (!htlc || !hx_conn_fd (htlc)) {
         ping_timer_id = 0;
         return G_SOURCE_REMOVE;
     }
@@ -161,7 +161,7 @@ ping_tick (gpointer data)
 void
 ping_start (struct htlc_conn *htlc)
 {
-    if (ping_timer_id || !htlc || !htlc->fd) {
+    if (ping_timer_id || !htlc || !hx_conn_fd (htlc)) {
         return;
     }
     ping_timer_id = g_timeout_add_seconds (PING_INTERVAL_SEC, ping_tick, htlc);
@@ -307,7 +307,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * hxnet orchestrator owns the control socket, so there is no
      * hxd_fd_set GIOChannel watch on it to register; no slot to
      * clear. */
-    htlc->fd = 0;
+    hx_conn_set_fd (htlc, 0);
     hx_conn_set_uid (htlc, 0);
     /* Colored-Nicknames: nick_color is a per-session pref
 	 * echo, not per-connection state. On connection teardown we
@@ -576,7 +576,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
         g_cancellable_cancel (current_cancel);
         g_clear_object (&current_cancel);
     }
-    if (htlc->fd) {
+    if (hx_conn_fd (htlc)) {
         hx_htlc_close (htlc, 1);
     }
     hx_clear_chat (htlc, 0, 1);
@@ -645,7 +645,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * hx_htlc_close tears the connection down via the hxnet handle /
      * current_conn, not close(htlc->fd), so the sentinel value is
      * never passed to close(2); hxnet's TcpStream owns the socket. */
-    htlc->fd = -1;
+    hx_conn_set_fd (htlc, -1);
 
     /* 4-6. Hand off to the bridge, which calls
      * hxnet_connection_open_plaintext with the bridge's event /
@@ -693,7 +693,7 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
          * forever. No login task to roll back — it isn't registered
          * until the LOGIN_SENDING state, which a refused spawn never
          * reaches. */
-        htlc->fd = 0;
+        hx_conn_set_fd (htlc, 0);
         gtkhx_session_emit_connection_state (gtkhx_session_get_default (),
                                              GTKHX_CONNECTION_DISCONNECTED);
         hx_printf_prefix (htlc, 0, INFOPREFIX,
@@ -1202,7 +1202,7 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     va_list ap, ap_trace;
     guint32 this_off, len;
 
-    if (!htlc->fd) {
+    if (!hx_conn_fd (htlc)) {
         return;
     }
 
@@ -1343,7 +1343,7 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 
     guint32 this_off, len;
 
-    if (!htlc->fd) {
+    if (!hx_conn_fd (htlc)) {
         return;
     }
 

@@ -146,4 +146,16 @@ extern void    hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h,
 extern gboolean hx_conn_access_has (const struct htlc_conn *h, int bit);
 extern gboolean hx_conn_access_permits (const struct htlc_conn *h, int bit);
 
+/* ---- Control-channel socket descriptor -----------------------------------
+ *
+ * The main control-channel fd, doubling as the connection-liveness flag: 0
+ * means "no socket" (disconnected), and every `if (hx_conn_fd (h))` gate reads
+ * it that way. A non-zero value is either a live descriptor or the -1 sentinel
+ * network.c parks it at during teardown so the close-time guards still fire —
+ * so the truthiness (!= 0), not fd > 0, is the connected test. The raw value
+ * is also formatted into the disconnect-diagnostics log lines. The writers all
+ * live in network.c's connect/close paths. */
+extern int  hx_conn_fd (const struct htlc_conn *h);
+extern void hx_conn_set_fd (struct htlc_conn *h, int v);
+
 #endif /* GTKHX_HXCONN_H */
