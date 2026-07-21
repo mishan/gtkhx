@@ -626,8 +626,9 @@ hx_rcv_task (struct htlc_conn *htlc)
 		 * rows accumulated forever. The bug was latent against
 		 * servers like mhxd that mostly skip TASK replies for
 		 * login-time setup; it surfaced against Heidrun's Inn
-		 * (which echoes the request opcode in the TASK reply type
-		 * and now reaches hx_rcv_task after the dispatch mask fix). */
+		 * (which echoed the request opcode in the TASK reply type —
+		 * a since-fixed server bug — and reaches hx_rcv_task once the
+		 * dispatch mask folds it). */
         if (htlc->fd) {
             task_delete (sess_from_htlc (htlc), tsk);
         }
