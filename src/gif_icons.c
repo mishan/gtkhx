@@ -14,6 +14,7 @@
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h" /* struct htlc_conn, RCV_TASK_FN */
+#include "hxconn.h"
 #include "proto_helpers.h" /* struct hx_chunk */
 #include "hotline_proto.h"
 #include "network.h"  /* hlwrite_chunks */
@@ -45,9 +46,9 @@ gif_icons_probe_timeout (gpointer data)
 {
     struct htlc_conn *htlc = data;
 
-    htlc->gif_icons_probe_timer = 0;
-    if (htlc->gif_icons_state == GIF_ICONS_UNKNOWN) {
-        htlc->gif_icons_state = GIF_ICONS_UNSUPPORTED;
+    hx_conn_set_gif_icons_probe_timer (htlc, 0);
+    if (hx_conn_gif_icons_state (htlc) == GIF_ICONS_UNKNOWN) {
+        hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
         debug_log ("icon",
                    "GIF-icons probe timed out; server appears not to "
                    "support the extension");
@@ -57,7 +58,7 @@ gif_icons_probe_timeout (gpointer data)
 		 * gtask row (not the model task), so a late reply — slow
 		 * server, not an unsupporting one — still dispatches through
 		 * hx_rcv_task -> rcv_task_icon_getlist and loads avatars. */
-        gtask_delete_tsk (sess_from_htlc (htlc), htlc->gif_icons_probe_trans);
+        gtask_delete_tsk (sess_from_htlc (htlc), hx_conn_gif_icons_probe_trans (htlc));
     }
     return G_SOURCE_REMOVE;
 }
@@ -68,17 +69,18 @@ hx_icon_probe (struct htlc_conn *htlc)
     if (!htlc) {
         return;
     }
-    htlc->gif_icons_state = GIF_ICONS_UNKNOWN;
-    if (htlc->gif_icons_probe_timer) {
-        g_source_remove (htlc->gif_icons_probe_timer);
+    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNKNOWN);
+    if (hx_conn_gif_icons_probe_timer (htlc)) {
+        g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
     }
     /* hx_icon_getlist's task_new snapshots htlc->trans (the increment
 	 * happens later inside hlwrite_chunks), so the trans the probe task
 	 * is keyed on is htlc->trans right now. Stash it for the watchdog. */
-    htlc->gif_icons_probe_trans = htlc->trans;
+    hx_conn_set_gif_icons_probe_trans (htlc, htlc->trans);
     hx_icon_getlist (htlc);
-    htlc->gif_icons_probe_timer = g_timeout_add_seconds (
-        GIF_ICONS_PROBE_TIMEOUT_S, gif_icons_probe_timeout, htlc);
+    hx_conn_set_gif_icons_probe_timer (
+        htlc, g_timeout_add_seconds (GIF_ICONS_PROBE_TIMEOUT_S,
+                                     gif_icons_probe_timeout, htlc));
     debug_log ("icon", "GIF-icons probe sent (ICON_GETLIST), watchdog armed");
 }
 
@@ -262,7 +264,7 @@ hx_icon_load_saved (void)
 void
 hx_icon_send_saved (struct htlc_conn *htlc)
 {
-    if (!htlc || htlc->gif_icons_state != GIF_ICONS_SUPPORTED) {
+    if (!htlc || hx_conn_gif_icons_state (htlc) != GIF_ICONS_SUPPORTED) {
         return;
     }
     avatar_cache_ensure_loaded (); /* in-memory after first call */

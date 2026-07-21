@@ -192,3 +192,63 @@ hx_conn_set_login (struct htlc_conn *h, const char *v)
 {
     g_strlcpy (h->login, v, sizeof (h->login));
 }
+
+gboolean
+hx_conn_logged_in (const struct htlc_conn *h)
+{
+    return h->flags.logged_in;
+}
+
+void
+hx_conn_set_logged_in (struct htlc_conn *h, gboolean v)
+{
+    h->flags.logged_in = v ? 1 : 0;
+}
+
+gboolean
+hx_conn_post_login_fetched (const struct htlc_conn *h)
+{
+    return h->flags.post_login_fetched;
+}
+
+void
+hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v)
+{
+    h->flags.post_login_fetched = v ? 1 : 0;
+}
+
+int
+hx_conn_gif_icons_state (const struct htlc_conn *h)
+{
+    return h->gif_icons_state;
+}
+
+void
+hx_conn_set_gif_icons_state (struct htlc_conn *h, int v)
+{
+    h->gif_icons_state = v;
+}
+
+guint
+hx_conn_gif_icons_probe_timer (const struct htlc_conn *h)
+{
+    return h->gif_icons_probe_timer;
+}
+
+void
+hx_conn_set_gif_icons_probe_timer (struct htlc_conn *h, guint v)
+{
+    h->gif_icons_probe_timer = v;
+}
+
+guint32
+hx_conn_gif_icons_probe_trans (const struct htlc_conn *h)
+{
+    return h->gif_icons_probe_trans;
+}
+
+void
+hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h, guint32 v)
+{
+    h->gif_icons_probe_trans = v;
+}

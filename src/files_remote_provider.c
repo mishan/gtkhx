@@ -14,6 +14,7 @@
 #include <arpa/inet.h>
 
 #include "hx.h"
+#include "hxconn.h"
 /* hx.h pulls compat.h which defines _(s) as a passthrough; undef
  * before gi18n.h gives us the proper gettext() expansion without
  * the redefine warning. */
@@ -187,7 +188,7 @@ remote_get_unavailable_reason (HxFilesProvider *self)
      * joined" disconnect on stricter 1.5+ servers. The flag is
      * raised in rcv.c::hx_post_login_fetches and reset in
      * hx_htlc_close. */
-    if (!hx_active_session ()->htlc->flags.post_login_fetched) {
+    if (!hx_conn_post_login_fetched (hx_active_session ()->htlc)) {
         return _ ("Logging in…");
     }
     return NULL;

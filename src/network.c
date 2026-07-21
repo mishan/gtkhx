@@ -191,13 +191,13 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * fresh. concurrence() reads this to decide whether to send
 	 * AGREEMENTAGREE; a stale 1 from a previous session would skip
 	 * the legacy flow on the next connect. */
-    htlc->flags.logged_in = 0;
+    hx_conn_set_logged_in (htlc, 0);
     /* Same reset for the "we've reached the spec-correct fully-
 	 * joined boundary" flag — see hx_post_login_fetches in rcv.c
 	 * and the comment on the flag in protocol.h. The files browser's
 	 * remote provider reads this to know when FILE_LIST is safe to
 	 * send. */
-    htlc->flags.post_login_fetched = 0;
+    hx_conn_set_post_login_fetched (htlc, 0);
 
     /* Same idea for the DATA_CAPABILITIES bitmask — the next
 	 * connect renegotiates from zero. A stale CAP_TEXT_ENCODING
@@ -224,11 +224,11 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 	 * (rather than calling into gif_icons.c) to avoid pulling the
 	 * task_new / rcv_task_icon_* dependency chain into every test
 	 * harness that links network.c. */
-    if (htlc->gif_icons_probe_timer) {
-        g_source_remove (htlc->gif_icons_probe_timer);
-        htlc->gif_icons_probe_timer = 0;
+    if (hx_conn_gif_icons_probe_timer (htlc)) {
+        g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
+        hx_conn_set_gif_icons_probe_timer (htlc, 0);
     }
-    htlc->gif_icons_state = GIF_ICONS_UNKNOWN;
+    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNKNOWN);
 
 #ifdef HAVE_VOICE
     /* Phase 8.D runtime wiring: tear down the voice runtime.

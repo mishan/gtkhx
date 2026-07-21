@@ -102,4 +102,35 @@ extern void        hx_conn_set_name (struct htlc_conn *h, const char *v);
 extern char       *hx_conn_name_buf (struct htlc_conn *h);
 extern void        hx_conn_set_login (struct htlc_conn *h, const char *v);
 
+/* ---- Login lifecycle flags -----------------------------------------------
+ *
+ * logged_in: set on the first SELFINFO; the agreement Agree button reads it to
+ * decide whether AGREEMENTAGREE is appropriate. post_login_fetched: the
+ * spec-correct "we're a fully-joined user" boundary (USER_GETLIST / news / file
+ * listing are safe only after it). Both are 1-bit flags, cleared on disconnect. */
+extern gboolean hx_conn_logged_in (const struct htlc_conn *h);
+extern void     hx_conn_set_logged_in (struct htlc_conn *h, gboolean v);
+extern gboolean hx_conn_post_login_fetched (const struct htlc_conn *h);
+extern void     hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v);
+
+/* ---- GIF-icons capability probe ------------------------------------------
+ *
+ * gif_icons_state is the GIF_ICONS_* tri-state (UNKNOWN / SUPPORTED /
+ * UNSUPPORTED) tracking whether the server accepts the animated-icon opcodes
+ * rather than task-erroring. gif_icons_probe_timer is the watchdog source id
+ * that resolves the probe if no reply arrives (0 = disarmed). Both reset on
+ * connect. The state getter/setter keep the int wire vocabulary of the
+ * GIF_ICONS_* enum; the timer setter takes 0 to record "disarmed" after the
+ * caller has removed the source. */
+extern int  hx_conn_gif_icons_state (const struct htlc_conn *h);
+extern void hx_conn_set_gif_icons_state (struct htlc_conn *h, int v);
+extern guint hx_conn_gif_icons_probe_timer (const struct htlc_conn *h);
+extern void  hx_conn_set_gif_icons_probe_timer (struct htlc_conn *h, guint v);
+/* gif_icons_probe_trans: the trans of the probe's task, stashed so the
+ * watchdog can dismiss the orphaned Tasks-window row when a legacy server
+ * silently drops ICON_GETLIST. */
+extern guint32 hx_conn_gif_icons_probe_trans (const struct htlc_conn *h);
+extern void    hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h,
+                                                  guint32 v);
+
 #endif /* GTKHX_HXCONN_H */
