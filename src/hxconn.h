@@ -90,4 +90,16 @@ extern guint16 *hx_conn_icon_ptr (struct htlc_conn *h);
 extern guint32 hx_conn_nick_color (const struct htlc_conn *h);
 extern void    hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
 
+/* name: our display nick (NUL-terminated, <= 31 chars). login: our account
+ * login (set at connect, not read back in production — kept as a field only so
+ * the SELFINFO no-overflow test can sentinel the buffer adjacent to name).
+ * hx_conn_name_buf returns the writable name buffer for the NICK cfgvar, whose
+ * prefs read/write path stores a stable char* (the string counterpart of
+ * hx_conn_icon_ptr); everything else reads via hx_conn_name / writes via
+ * hx_conn_set_name (which truncates to the field capacity). */
+extern const char *hx_conn_name (const struct htlc_conn *h);
+extern void        hx_conn_set_name (struct htlc_conn *h, const char *v);
+extern char       *hx_conn_name_buf (struct htlc_conn *h);
+extern void        hx_conn_set_login (struct htlc_conn *h, const char *v);
+
 #endif /* GTKHX_HXCONN_H */

@@ -128,8 +128,7 @@ COMMAND (nick)
                           argv[0]);
         return;
     }
-    strncpy (htlc->name, argv[1], 31);
-    htlc->name[31] = '\0';
+    hx_conn_set_name (htlc, argv[1]);
     hx_change_name_icon (htlc);
 }
 

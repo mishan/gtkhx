@@ -168,3 +168,27 @@ hx_conn_set_nick_color (struct htlc_conn *h, guint32 v)
 {
     h->nick_color = v;
 }
+
+const char *
+hx_conn_name (const struct htlc_conn *h)
+{
+    return h->name;
+}
+
+void
+hx_conn_set_name (struct htlc_conn *h, const char *v)
+{
+    g_strlcpy (h->name, v, sizeof (h->name));
+}
+
+char *
+hx_conn_name_buf (struct htlc_conn *h)
+{
+    return h->name;
+}
+
+void
+hx_conn_set_login (struct htlc_conn *h, const char *v)
+{
+    g_strlcpy (h->login, v, sizeof (h->login));
+}

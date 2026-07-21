@@ -316,7 +316,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
     {
         HxChatEvent *ev = hx_chat_event_new (
             msg.text, msg.text_len, msg.cid,
-            htlc->name[0] ? htlc->name : NULL);
+            hx_conn_name (htlc)[0] ? hx_conn_name (htlc) : NULL);
         if (media_status == GTKHX_PROTO_MEDIA_META_PRESENT) {
             hx_chat_event_attach_media (
                 ev, media_meta.id_ptr, media_meta.id_len,
@@ -386,7 +386,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
     gboolean is_pm = !is_broadcast && pm.uid > 0;
 
     /* For a private message, build the boxed HxMsgEvent here — it needs the
-     * self-PM display-name resolution + htlc->name. The broadcast branch has no
+     * self-PM display-name resolution + hx_conn_name (htlc). The broadcast branch has no
      * boxed event. The Rust hxmsg-recv crate owns the shared ignore-gate + the
      * PM emit; it returns which branch so we run broadcastmsg + preserve the
      * ignored-message early-out (no last_msg_nick update). */
@@ -402,9 +402,9 @@ hx_rcv_msg (struct htlc_conn *htlc)
         const char *disp_name = pm.name;
         gsize disp_name_len = pm.name_len;
         if (disp_name_len == 0) {
-            if (pm.uid == hx_conn_uid (htlc) && htlc->name[0]) {
-                disp_name = htlc->name;
-                disp_name_len = strlen (htlc->name);
+            if (pm.uid == hx_conn_uid (htlc) && hx_conn_name (htlc)[0]) {
+                disp_name = hx_conn_name (htlc);
+                disp_name_len = strlen (hx_conn_name (htlc));
             } else if (have_sender && sender.name[0]) {
                 disp_name = sender.name;
                 disp_name_len = strlen (sender.name);
@@ -415,7 +415,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 		 * UTF-8-sanitised, self-classified view). */
         ev = hx_msg_event_new (
             pm.uid, disp_name, disp_name_len, pm.msg, pm.msg_len,
-            htlc->name[0] ? htlc->name : NULL);
+            hx_conn_name (htlc)[0] ? hx_conn_name (htlc) : NULL);
     }
 
     int r = hx_msg_recv (hx_chat_member_model (chat), pm.uid, is_pm, ev);
@@ -718,7 +718,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
                                  old_exists ? old.status : 0,
                                  old_exists ? old.nick_color : HX_NICK_COLOR_NONE,
                                  old_exists ? old.name : NULL, hx_conn_uid (htlc),
-                                 (const char *)htlc->name, &plan);
+                                 (const char *)hx_conn_name (htlc), &plan);
 
     if (plan.adopt_self_uid) {
         hx_conn_set_uid (htlc, uid);
@@ -760,11 +760,11 @@ hx_rcv_user_change (struct htlc_conn *htlc)
      * htlc. (skip_self_create returned early for a new-self, so here a
      * self change is always an existing member: old_exists is true.)
      *
-     * deliberately do NOT copy the server's name into htlc->name.
+     * deliberately do NOT copy the server's name into hx_conn_name (htlc).
      * Servers can legitimately override a display name — guests get
      * pinned to things like "Read the agreement" before they have
      * HL_ACCESS_USERNAME_CHANGE — and that override should show in the
-     * user list but must not bleed into htlc->name, which doubles as the
+     * user list but must not bleed into hx_conn_name (htlc), which doubles as the
      * persisted NICK= prefs value (prefs_write would then persist the
      * override forever). */
     if ((uid) && (uid == hx_conn_uid (htlc))) {
@@ -777,7 +777,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         debug_log ("name",
                    "USER_CHANGE for our uid=%u: server says "
                    "'%.*s' (%u bytes); keeping local htlc->name = '%s'",
-                   (unsigned)uid, (int)nlen, name, (unsigned)nlen, htlc->name);
+                   (unsigned)uid, (int)nlen, name, (unsigned)nlen, hx_conn_name (htlc));
     }
 }
 
@@ -2107,7 +2107,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
              * SELFINFO: the first record matching our nick+icon claims our
              * uid. (The server's status colour used to be mirrored onto
              * htlc->color here, but that field was write-only and is gone.) */
-            if (!hx_conn_uid (htlc) && !strcmp (name_buf, htlc->name)
+            if (!hx_conn_uid (htlc) && !strcmp (name_buf, hx_conn_name (htlc))
                 && rec.icon == hx_conn_icon (htlc)) {
                 hx_conn_set_uid (htlc, uid);
             }
