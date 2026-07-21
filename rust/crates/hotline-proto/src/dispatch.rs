@@ -1,6 +1,6 @@
 //! Receive-dispatch routing: map an incoming server frame's `type` opcode to
 //! the handler category `rcv.c`'s `hx_rcv_hdr` selects. This is the pure,
-//! exhaustively-tested core of the receive dispatch (network-untangling N3) —
+//! exhaustively-tested core of the receive dispatch —
 //! the opcode→handler decision, including the composite-`TASK` mask some servers
 //! use — lifted out of the C `switch` so a mis-mapped opcode is caught by a unit
 //! test rather than only in production against a live server.

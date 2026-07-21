@@ -15,7 +15,12 @@ extern void hx_rcv_dump (struct htlc_conn *htlc);
 extern void hx_rcv_xfer_queue (struct htlc_conn *htlc);
 extern void hx_rcv_banner (struct htlc_conn *htlc);
 extern void hx_rcv_magic (struct htlc_conn *htlc);
-extern void hx_rcv_hdr (struct htlc_conn *htlc);
+/* Dispatch a fully-staged received frame: route the (already-parsed) opcode to
+ * a body handler and call it. The hxnet bridge stages the 22-byte header + body
+ * into htlc->in.buf, then calls this with the parsed header fields. Replaces the
+ * old hx_rcv_hdr two-phase state machine. */
+extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
+                               guint32 trans, guint32 flag, guint32 body_len);
 
 /* Voice-chat extension (fogWraith Capabilities-Voice.md), Phase 8.A.
  * Server-initiated notifications dispatched from the hx_rcv_hdr switch.

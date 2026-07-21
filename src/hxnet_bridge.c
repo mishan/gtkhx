@@ -27,10 +27,11 @@
 #include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
 #include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
 
-/* Forward declaration of the production header decoder
- * (proto_helpers.c). hx_rcv_hdr decodes the buffered header by
- * calling this; we don't need to call it directly here. */
-extern void hx_rcv_hdr (struct htlc_conn *htlc);
+/* The production receive dispatch (rcv.c). We stage the parsed frame into
+ * htlc->in.buf and hand the header fields to it; it routes the opcode to a
+ * body handler and calls it. */
+extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
+                               guint32 trans, guint32 flag, guint32 body_len);
 
 /* Forward declaration of the production teardown. Defined in
  * network.c; we trampoline to it from the shutdown bridge.
@@ -152,66 +153,24 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
         return;
     }
 
-    /* Stage the header into htlc->in. qbuf_set both grows the
-     * underlying buffer if needed and sets pos+len in one call.
-     * After the memcpy, advance pos to the header end and clear
-     * len so hx_rcv_hdr sees a fully-received header (the
-     * "bytes-remaining" semantic htlc->in carries). */
-    qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR);
+    /* Stage the whole frame (22-byte header + body) into htlc->in.buf in one
+     * shot — the body handlers read the header via hl_hdr_decode(htlc->in.buf)
+     * and the body from buf[SIZEOF_HL_HDR..], so the buffer layout must match
+     * what the legacy read loop produced. qbuf_set grows the buffer and sets
+     * pos/len; we then write the header, copy the body, and leave pos past the
+     * body + len == 0 (the state the handlers ran in before). The Rust actor
+     * already parsed the header, so there's no C-side re-decode + no
+     * htlc->rcv two-phase state machine — hx_dispatch_frame routes the parsed
+     * opcode straight to the body handler. */
+    qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR + body_len);
     hx_bridge_pack_header (htlc->in.buf, type, trans, flag, hc, body_len);
-    htlc->in.pos = SIZEOF_HL_HDR;
-    htlc->in.len = 0;
-
-    /* Initial state precondition for hx_rcv_hdr: htlc->rcv must
-     * be hx_rcv_hdr itself (the read loop in network.c
-     * maintains that invariant; we don't have that loop running
-     * when we're driving the bridge directly). */
-    htlc->rcv = hx_rcv_hdr;
-    hx_rcv_hdr (htlc);
-
-    /* hx_rcv_hdr's two possible exit states:
-     *
-     *   (a) Body present (body_len > 0). htlc->rcv is now the
-     *       body handler; htlc->in has been resized via
-     *       qbuf_set(&htlc->in, htlc->in.pos, body_len) — where
-     *       htlc->in.pos == SIZEOF_HL_HDR — and htlc->in.len
-     *       holds the count of body bytes still wanted. We fill
-     *       those bytes and call the body handler.
-     *
-     *   (b) No body (body_len == 0). hx_rcv_hdr called the body
-     *       handler with empty body and reset state — htlc->rcv
-     *       is hx_rcv_hdr and htlc->in is sized for the next
-     *       header. Nothing else for us to do.
-     *
-     * hx_htlc_close on the inner code path (e.g. a fatal task
-     * error) would set htlc->fd to 0 — we check that as the
-     * liveness gate so we don't keep dispatching on a torn-down
-     * connection. */
-    if (htlc->fd == 0 || htlc->rcv == NULL || htlc->rcv == hx_rcv_hdr) {
-        return;
-    }
-
-    /* Body bytes go directly after the header in htlc->in.buf.
-     * hx_rcv_hdr called qbuf_set(&htlc->in, htlc->in.pos, len)
-     * which left htlc->in.pos at SIZEOF_HL_HDR (where the
-     * caller had advanced it to after writing the header) and
-     * set htlc->in.len to the body byte count we still owe.
-     * The body handler reads from htlc->in.buf[SIZEOF_HL_HDR..]
-     * once we stage the bytes there. */
     if (body_len > 0) {
         memcpy (&htlc->in.buf[SIZEOF_HL_HDR], body, body_len);
     }
     htlc->in.pos = SIZEOF_HL_HDR + body_len;
     htlc->in.len = 0;
 
-    htlc->rcv (htlc);
-
-    /* Reset for the next frame. Mirrors the goto-reset leg in
-     * control_on_readable. */
-    if (htlc->fd != 0) {
-        htlc->rcv = hx_rcv_hdr;
-        qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR);
-    }
+    hx_dispatch_frame (htlc, type, trans, flag, body_len);
 }
 
 void

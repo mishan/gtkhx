@@ -292,15 +292,10 @@ connect_test_rcv_body (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_hdr (struct htlc_conn *htlc)
+hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+                   guint32 flag, guint32 body_len)
 {
-    if (!htlc || !htlc->in.buf) {
-        return;
-    }
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
-    guint32 type = GUINT32_FROM_BE (h->type);
-    guint32 trans = GUINT32_FROM_BE (h->trans);
-    guint32 flag = GUINT32_FROM_BE (h->flag);
+    (void) body_len;
     gboolean is_first = (connect_test_rcv_count == 0);
     if (is_first) {
         connect_test_first_rcv_type = type;
@@ -312,20 +307,13 @@ hx_rcv_hdr (struct htlc_conn *htlc)
     connect_test_last_rcv_flag = flag;
     connect_test_rcv_count++;
 
-    /* For the first frame only, mirror the real hx_rcv_hdr two-phase
-     * handoff so hx_bridge_dispatch_frame stages the body and calls
-     * our body handler — letting us inspect the LOGIN reply's chunks
-     * for the capabilities echo. qbuf_set grows htlc->in to hold the
-     * body (g_realloc preserves the header already in buf[0..22]).
-     * Without this the dispatch returns after the header phase
-     * (htlc->rcv still == hx_rcv_hdr) and the body is never staged. */
-    if (is_first) {
-        guint32 wire_len = GUINT32_FROM_BE (h->len);
-        if (wire_len > 2) {
-            guint32 body_len = wire_len - 2; /* strip the 2-byte hc */
-            qbuf_set (&htlc->in, htlc->in.pos, body_len);
-            htlc->rcv = connect_test_rcv_body;
-        }
+    /* hx_bridge_dispatch_frame has already staged the full frame (22-byte
+     * header + body) into htlc->in.buf, so — unlike the old two-phase
+     * hx_rcv_hdr handoff — there's no qbuf/htlc->rcv dance to mirror here.
+     * Inspect the first frame (the replayed LOGIN reply) directly for the
+     * capabilities echo. */
+    if (is_first && htlc && htlc->in.buf) {
+        connect_test_rcv_body (htlc);
     }
 }
 
