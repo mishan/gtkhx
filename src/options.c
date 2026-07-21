@@ -28,6 +28,7 @@
 #include <time.h>
 #include <netinet/in.h>
 #include "hx.h"
+#include "hxconn.h"
 #include "gtkhx.h"
 #include "news.h"
 #include "xtext.h"
@@ -545,10 +546,11 @@ changed_nick_color (session *sess)
 	 * the SELFINFO-driven membership add for self picks it up the same
 	 * way it picks up the loaded nick. */
     struct chat *pub = chat_with_cid (hx_active_session (), 0);
-    if (pub && hx_active_session ()->htlc->uid) {
+    if (pub && hx_conn_uid (hx_active_session ()->htlc)) {
         struct hx_member_info mi;
         if (hx_member_model_get_info (hx_chat_member_model (pub),
-                                      hx_active_session ()->htlc->uid, &mi)) {
+                                      hx_conn_uid (hx_active_session ()->htlc),
+                                      &mi)) {
             user_change (hx_active_session ()->htlc, pub, mi.uid, nc,
                          mi.name, mi.icon, mi.status);
         }
@@ -1154,7 +1156,7 @@ hx_options_bind_identity (void)
 {
     struct cfgvar *v = cfgvar_for_name (CFG_ICON);
     if (v) {
-        v->variable.var = &the_session.htlc->icon;
+        v->variable.var = hx_conn_icon_ptr (the_session.htlc);
     }
     v = cfgvar_for_name (CFG_NICK);
     if (v) {

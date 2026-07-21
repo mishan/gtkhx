@@ -126,3 +126,57 @@ hx_conn_has_cap (const struct htlc_conn *h, guint64 cap)
 {
     return (h->caps & cap) != 0;
 }
+
+guint16
+hx_conn_uid (const struct htlc_conn *h)
+{
+    return h->uid;
+}
+
+void
+hx_conn_set_uid (struct htlc_conn *h, guint16 v)
+{
+    h->uid = v;
+}
+
+guint16
+hx_conn_icon (const struct htlc_conn *h)
+{
+    return h->icon;
+}
+
+void
+hx_conn_set_icon (struct htlc_conn *h, guint16 v)
+{
+    h->icon = v;
+}
+
+guint16 *
+hx_conn_icon_ptr (struct htlc_conn *h)
+{
+    return &h->icon;
+}
+
+guint16
+hx_conn_color (const struct htlc_conn *h)
+{
+    return h->color;
+}
+
+void
+hx_conn_set_color (struct htlc_conn *h, guint16 v)
+{
+    h->color = v;
+}
+
+guint32
+hx_conn_nick_color (const struct htlc_conn *h)
+{
+    return h->nick_color;
+}
+
+void
+hx_conn_set_nick_color (struct htlc_conn *h, guint32 v)
+{
+    h->nick_color = v;
+}

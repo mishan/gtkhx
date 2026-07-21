@@ -66,5 +66,5 @@ hx_htlc_voice_access (struct htlc_conn *htlc)
 guint16
 hx_htlc_uid (struct htlc_conn *htlc)
 {
-    return htlc ? htlc->uid : 0;
+    return htlc ? hx_conn_uid (htlc) : 0;
 }

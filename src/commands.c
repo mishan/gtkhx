@@ -139,7 +139,7 @@ COMMAND (icon)
         hx_printf_prefix (htlc, cid, INFOPREFIX, "usage: %s <icon>\n", argv[0]);
         return;
     }
-    htlc->icon = atou16 (argv[1]);
+    hx_conn_set_icon (htlc, atou16 (argv[1]));
     hx_change_name_icon (htlc);
 }
 
