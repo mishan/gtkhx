@@ -41,9 +41,25 @@ fn legacy_dirs() -> Vec<PathBuf> {
     dirs
 }
 
-/// Load the store (bootstrapping + importing legacy bookmarks on first run).
+/// Load the store for a **read** path (menu, list, lookup). If the file
+/// exists but can't be parsed, this degrades to an empty store rather than
+/// erroring — a read never risks the user's data. Use [`load_writable`] for
+/// anything that will save back.
 pub fn load() -> Store {
-    hxbookmarks::load_or_bootstrap(&config_dir(), &legacy_dirs())
+    hxbookmarks::load_or_bootstrap(&config_dir(), &legacy_dirs()).unwrap_or_default()
+}
+
+/// Load the store for a **mutation** path. Propagates an error string if the
+/// existing file is unreadable, so the caller refuses to save (and surfaces
+/// the message) instead of overwriting the user's real bookmarks with an
+/// empty store + one change.
+fn load_writable() -> Result<Store, String> {
+    hxbookmarks::load_or_bootstrap(&config_dir(), &legacy_dirs()).map_err(|e| {
+        format!(
+            "Bookmarks file couldn't be read ({e}). Fix or remove it before saving, \
+             so your existing bookmarks aren't overwritten."
+        )
+    })
 }
 
 /// Persist the store.
@@ -69,7 +85,7 @@ pub fn exists(name: &str) -> bool {
 /// Insert or replace `bm` (keyed on name) and save. Returns a human-readable
 /// error message on failure.
 pub fn upsert(bm: Bookmark) -> Result<(), String> {
-    let mut store = load();
+    let mut store = load_writable()?;
     if !store.upsert(bm) {
         return Err("bookmark name required".to_string());
     }
@@ -78,7 +94,7 @@ pub fn upsert(bm: Bookmark) -> Result<(), String> {
 
 /// Remove the bookmark named `name` and save.
 pub fn delete(name: &str) -> Result<(), String> {
-    let mut store = load();
+    let mut store = load_writable()?;
     if !store.remove(name) {
         return Err(format!("No such bookmark: {name}"));
     }
@@ -87,7 +103,7 @@ pub fn delete(name: &str) -> Result<(), String> {
 
 /// Rename `old` → `new` and save.
 pub fn rename(old: &str, new: &str) -> Result<(), String> {
-    let mut store = load();
+    let mut store = load_writable()?;
     store.rename(old, new).map_err(|e| e.to_string())?;
     save(&store).map_err(|e| e.to_string())
 }

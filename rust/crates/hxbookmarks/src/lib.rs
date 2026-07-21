@@ -58,9 +58,16 @@ pub struct Bookmark {
     pub tls: bool,
 }
 
+fn default_version() -> u32 {
+    STORE_VERSION
+}
+
 /// The whole bookmarks file: a version tag plus an ordered list.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Store {
+    /// Schema version. Defaults to the current [`STORE_VERSION`] when the key
+    /// is absent, so a hand-edit that drops the `version` line still loads.
+    #[serde(default = "default_version")]
     pub version: u32,
     #[serde(default)]
     pub bookmarks: Vec<Bookmark>,
@@ -164,20 +171,45 @@ pub fn builtins() -> Vec<Bookmark> {
     }]
 }
 
+/// The existing `bookmarks.toml` couldn't be read or parsed. Carries the
+/// path and a human-readable reason. Callers must **not** overwrite the file
+/// on this error — surface it and let the user fix the file by hand, so a
+/// single typo (or a transient read error) can't destroy real bookmarks.
+#[derive(Debug, Clone)]
+pub struct Unreadable {
+    pub path: PathBuf,
+    pub reason: String,
+}
+
+impl std::fmt::Display for Unreadable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.path.display(), self.reason)
+    }
+}
+
+impl std::error::Error for Unreadable {}
+
 /// Load the store, or bootstrap it on first run.
 ///
-/// If `bookmarks.toml` exists it's parsed and returned (a parse error yields
-/// an empty store *without* overwriting the file, so a hand-edit typo never
-/// destroys the user's data). Otherwise this imports every legacy HTsc
-/// bookmark found in `legacy_dirs` (in order), appends any [`builtins`] whose
-/// names aren't already taken, writes the new TOML, and returns it.
-pub fn load_or_bootstrap(config_dir: &Path, legacy_dirs: &[PathBuf]) -> Store {
+/// - `bookmarks.toml` present + readable → parse and return it.
+/// - `bookmarks.toml` present but unreadable / unparseable → [`Unreadable`]
+///   (the caller must not overwrite it — this is what keeps a hand-edit typo
+///   from being turned into an empty store on the next save).
+/// - `bookmarks.toml` absent → import every legacy HTsc bookmark found in
+///   `legacy_dirs` (in order), append any [`builtins`] whose names aren't
+///   already taken, write the new TOML, and return it.
+pub fn load_or_bootstrap(config_dir: &Path, legacy_dirs: &[PathBuf]) -> Result<Store, Unreadable> {
     let path = store_path(config_dir);
     if path.exists() {
-        return match fs::read_to_string(&path) {
-            Ok(text) => toml::from_str(&text).unwrap_or_default(),
-            Err(_) => Store::default(),
-        };
+        let text = fs::read_to_string(&path).map_err(|e| Unreadable {
+            path: path.clone(),
+            reason: e.to_string(),
+        })?;
+        let store: Store = toml::from_str(&text).map_err(|e| Unreadable {
+            path: path.clone(),
+            reason: e.to_string(),
+        })?;
+        return Ok(store);
     }
 
     let mut store = Store::default();
@@ -195,8 +227,10 @@ pub fn load_or_bootstrap(config_dir: &Path, legacy_dirs: &[PathBuf]) -> Store {
         }
     }
 
+    // Best-effort write of the freshly-bootstrapped file. A failure here isn't
+    // data loss (no file existed), so we still return the in-memory store.
     let _ = save(config_dir, &store);
-    store
+    Ok(store)
 }
 
 /// Write the store to `bookmarks.toml` atomically (temp file + rename), so a
@@ -290,13 +324,13 @@ mod tests {
     #[test]
     fn bootstrap_seeds_builtins_and_writes_file() {
         let dir = tmpdir();
-        let store = load_or_bootstrap(&dir, &[]);
+        let store = load_or_bootstrap(&dir, &[]).unwrap();
         // built-in present
         assert!(store.find("Hotline Communications").is_some());
         // file now exists
         assert!(store_path(&dir).exists());
         // second load reads the file (doesn't re-bootstrap)
-        let again = load_or_bootstrap(&dir, &[]);
+        let again = load_or_bootstrap(&dir, &[]).unwrap();
         assert_eq!(again, store);
     }
 
@@ -313,7 +347,7 @@ mod tests {
         };
         fs::write(legacy.join("My Old Server"), legacy::write(&old)).unwrap();
 
-        let store = load_or_bootstrap(&cfg, &[legacy.clone()]);
+        let store = load_or_bootstrap(&cfg, &[legacy.clone()]).unwrap();
         // imported (name from filename) + built-in both present, import first
         assert_eq!(store.bookmarks[0].name, "My Old Server");
         assert_eq!(store.bookmarks[0].server, "legacy.example");
@@ -321,14 +355,30 @@ mod tests {
     }
 
     #[test]
-    fn corrupt_toml_does_not_clobber() {
+    fn corrupt_toml_errors_and_does_not_clobber() {
         let dir = tmpdir();
         fs::write(store_path(&dir), b"this is not valid toml {{{").unwrap();
-        let store = load_or_bootstrap(&dir, &[]);
-        assert!(store.bookmarks.is_empty());
-        // file untouched (still the bad bytes) — user can fix it
+        // An unreadable existing file must be an error, NOT an empty store —
+        // otherwise a load→mutate→save would wipe the user's real data.
+        let err = load_or_bootstrap(&dir, &[]).unwrap_err();
+        assert_eq!(err.path, store_path(&dir));
+        // file untouched (still the bad bytes) — user can fix it by hand
         let raw = fs::read_to_string(store_path(&dir)).unwrap();
         assert!(raw.starts_with("this is not valid toml"));
+    }
+
+    #[test]
+    fn missing_version_key_defaults() {
+        // A human-edited file that dropped the `version` line still parses.
+        let dir = tmpdir();
+        fs::write(
+            store_path(&dir),
+            b"[[bookmarks]]\nname = \"Hand Made\"\nserver = \"h.example\"\n",
+        )
+        .unwrap();
+        let store = load_or_bootstrap(&dir, &[]).unwrap();
+        assert_eq!(store.version, STORE_VERSION);
+        assert_eq!(store.find("Hand Made").unwrap().server, "h.example");
     }
 
     #[test]
@@ -338,7 +388,7 @@ mod tests {
         store.upsert(bm("X", "x.example"));
         save(&dir, &store).unwrap();
         assert!(!dir.join("bookmarks.toml.tmp").exists());
-        let back = load_or_bootstrap(&dir, &[]);
+        let back = load_or_bootstrap(&dir, &[]).unwrap();
         assert_eq!(back.find("X").unwrap().server, "x.example");
     }
 }

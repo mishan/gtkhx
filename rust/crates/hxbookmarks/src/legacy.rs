@@ -32,6 +32,10 @@ use crate::{hostport, Bookmark};
 /// the caller sets it from the filename). Returns `None` for a non-HTsc /
 /// truncated / corrupt buffer. Lenient on the trailing TLS byte (absent →
 /// off), matching the C reader.
+///
+/// Only the HTsc binary format is recognized. The ancient pre-HTsc GtkHx
+/// 3-line text bookmark format is deliberately not imported — HTsc predates
+/// it in the wild and no such files are left (per project decision).
 pub fn parse(bytes: &[u8]) -> Option<Bookmark> {
     if bytes.len() < 4 || &bytes[0..4] != b"HTsc" {
         return None;
@@ -145,7 +149,8 @@ fn cstr_field(field: &[u8]) -> String {
     String::from_utf8_lossy(&field[..end]).into_owned()
 }
 
-/// Write a 1-byte length + up-to-32-byte value + NUL padding to 33 bytes.
+/// Write a login/pass field: a 1-byte length, then the value clamped to 32
+/// bytes and NUL-padded to a 33-byte field — 34 bytes total.
 fn write_field(out: &mut Vec<u8>, s: &str) {
     let b = s.as_bytes();
     let len = b.len().min(32);
