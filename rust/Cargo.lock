@@ -1810,6 +1810,13 @@ name = "hxfiles-xfer"
 version = "0.1.0"
 
 [[package]]
+name = "hxhfs"
+version = "0.1.0"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "hxmember-model"
 version = "0.1.0"
 dependencies = [

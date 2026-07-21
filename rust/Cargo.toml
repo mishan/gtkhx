@@ -18,6 +18,7 @@ members = [
     "crates/hxnews-model",
     "crates/hxfiles-model",
     "crates/hxfiles-xfer",
+    "crates/hxhfs",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",
