@@ -471,52 +471,25 @@ hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb, void *user)
 void
 hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
 {
-    struct hl_hdr h;
-    struct hl_data_hdr dhs;
-    struct qbuf *q = &htlc->out;
-    guint32 this_off, pos;
-    guint32 my_trans;
+    /* Marshal the varargs (type, len, data triples) into an hx_chunk array
+     * and delegate to hlpack_chunks, so BOTH send entry points serialize
+     * through the one Rust packer (gtkhx_proto_pack_message) rather than a
+     * hand-rolled C loop. Every variadic caller passes a handful of chunks;
+     * the 64 cap matches hotline-proto's MAX_PACK_CHUNKS (above which
+     * pack_message_size rejects anyway) and guards the stack array. The data
+     * arg is consumed even for a zero-length chunk, matching the old walk. */
+    struct hx_chunk chunks[64];
 
-    this_off = q->pos + q->len;
-    pos = this_off + SIZEOF_HL_HDR;
-    q->len += SIZEOF_HL_HDR;
-    q->buf = g_realloc (q->buf, q->pos + q->len);
+    g_return_if_fail (htlc != NULL);
+    g_return_if_fail (hc >= 0 && hc <= (int) G_N_ELEMENTS (chunks));
 
-    h.type = htonl (type);
-    my_trans = htlc->trans;
-    h.trans = htonl (my_trans);
-    htlc->trans++;
-    h.flag = htonl (flag);
-    h.hc = htons ((guint16)hc);
-
-    while (hc) {
-        guint16 t = (guint16)va_arg (ap, int);
-        guint16 l = (guint16)va_arg (ap, int);
-        guint8 *data;
-
-        dhs.type = htons (t);
-        dhs.len = htons (l);
-
-        q->len += SIZEOF_HL_DATA_HDR + l;
-        q->buf = g_realloc (q->buf, q->pos + q->len);
-        memcpy (&q->buf[pos], (guint8 *)&dhs, SIZEOF_HL_DATA_HDR);
-        pos += SIZEOF_HL_DATA_HDR;
-
-        data = va_arg (ap, guint8 *);
-        if (l) {
-            memcpy (&q->buf[pos], data, l);
-            pos += l;
-        }
-        hc--;
+    for (int i = 0; i < hc; i++) {
+        chunks[i].type = (guint16) va_arg (ap, int);
+        chunks[i].len = (guint16) va_arg (ap, int);
+        chunks[i].data = va_arg (ap, const void *);
     }
 
-    /* Header's len/len2 fields encode the byte count from the start
-	 * of the data section (i.e. total - SIZEOF_HL_HDR + sizeof(hc),
-	 * since hc is part of the data section in the wire format).
-	 * Match hlwrite's encoding exactly. */
-    guint32 packed_len = pos - this_off;
-    h.len = h.len2 = htonl (packed_len - (SIZEOF_HL_HDR - sizeof (h.hc)));
-    memcpy (q->buf + this_off, &h, SIZEOF_HL_HDR);
+    hlpack_chunks (htlc, type, flag, chunks, hc);
 }
 
 void
