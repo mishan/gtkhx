@@ -1,0 +1,19 @@
+[package]
+name = "hxtls-trust"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "TLS trust-on-first-use (TOFU) known_hosts store — SHA-256 cert-fingerprint pinning (ported from src/tls_trust.c)"
+publish = false
+
+[lib]
+# rlib: consumed natively by gtkhx-ui's tls_trust decide/marshal/dialog glue.
+# staticlib: kept for the house pattern; the crate exports no C ABI itself
+#            (the FFI surface lives in gtkhx-ui).
+crate-type = ["staticlib", "rlib"]
+
+# Pure std — known_hosts file parse + atomic rewrite, no glib / gtk. Every DB op
+# takes an explicit known_hosts path, so `cargo test -p hxtls-trust` runs
+# headless against a tmpdir. Path resolution + the test seams + the dialog
+# marshalling live in gtkhx-ui (they need the config dir / GTK / main thread).
+[dependencies]

@@ -115,53 +115,37 @@ int hxd_open_max_placeholder; /* never read; just defined to make sure */
 
 const char *INFOPREFIX = "[hx] ";
 
-/* ---- TLS Phase 3 stubs --------------------------------------- */
+/* ---- TLS TOFU stubs ------------------------------------------ */
 /*
- * Production network.c::tls_accept_certificate calls into
- * src/tls_trust.c (pure GLib, gets linked in) and
- * src/tls_trust_dialog.c (Adwaita + nested GMainLoop — too heavy
- * for the test binary). The Tier 3 TLS tests set
- * GTKHX_TLS_AUTO_ACCEPT=1 so the dialog path is never taken;
- * the dialog symbol still has to resolve for the linker. Stub
- * with g_assert_not_reached so a future test that loses the env
- * var fails loudly instead of dead-locking on an invisible
- * dialog. Same trick for toolbar_window — never read on the
- * auto-accept path (the env-var check happens first). */
+ * The TLS trust brain (classify / decide / pin / seams) is the Rust
+ * hxtls-trust crate, linked into these test binaries via
+ * rust_hxtls_trust_dep. The Adwaita prompt lives in gtkhx-ui, which
+ * we deliberately DON'T link (too heavy, and it drags a huge C-symbol
+ * surface). The trust brain only reaches the prompt through a
+ * callback registered at UI init (gtkhx_tls_prompt_install), which
+ * these headless tests never call — so with no prompt registered the
+ * decide path rejects. The Tier 3 TLS tests set a seam
+ * (GTKHX_TLS_AUTO_ACCEPT / a prompt verdict) up front, so the prompt
+ * is never needed anyway. toolbar_window is stubbed because other
+ * production sources linked here reference it. */
 GtkWidget *toolbar_window = NULL;
 
-/* src/tls_trust.c calls gtkhx_config_dir() to find
- * $CONFIG/known_hosts when the GTKHX_KNOWN_HOSTS env override
- * isn't set. The Tier 3 TLS test mains set the env override
- * unconditionally, so this stub is never consulted on the
- * happy path. Return NULL so a buggy test that loses the
- * env var fails the lookup loudly rather than touching the
+/* hxtls-trust's known_hosts path resolver calls gtkhx_config_dir() to
+ * find $CONFIG/known_hosts when the GTKHX_KNOWN_HOSTS env override /
+ * hx_tls_test_set_known_hosts seam isn't set. The Tier 3 TLS test
+ * mains set the override unconditionally, so this stub is never
+ * consulted on the happy path. Return NULL so a buggy test that loses
+ * the override fails the lookup loudly rather than touching the
  * developer's real $CONFIG.
  *
- * Forward-declared inline (rather than via #include "gtkhx.h",
- * which would drag in the GTK / Adwaita header pile) so
- * -Wmissing-prototypes stays happy. Same trick tls_trust.c
- * uses for the same symbol. */
+ * Forward-declared inline (rather than via #include "gtkhx.h", which
+ * would drag in the GTK / Adwaita header pile) so -Wmissing-prototypes
+ * stays happy. */
 extern const char *gtkhx_config_dir (void);
 const char *
 gtkhx_config_dir (void)
 {
     return NULL;
-}
-
-/* tls_trust_dialog.h declares hx_tls_trust_dialog_run_sync (and
- * pulls in tls_trust.h for the hx_tls_trust_status enum). The
- * include here puts the prototype in scope before the stub
- * definition below, silencing -Wmissing-prototypes. */
-#include "tls_trust_dialog.h"
-gboolean
-hx_tls_trust_dialog_run_sync (GtkWindow *parent G_GNUC_UNUSED,
-                              const char *host G_GNUC_UNUSED,
-                              guint16 port G_GNUC_UNUSED,
-                              const char *fingerprint G_GNUC_UNUSED,
-                              hx_tls_trust_status status G_GNUC_UNUSED)
-{
-    g_assert_not_reached ();
-    return FALSE;
 }
 
 /* ---- Stubs that network.c calls during hx_connect / close --- */

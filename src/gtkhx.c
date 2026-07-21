@@ -41,6 +41,7 @@
 #include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
+#include "tls_trust.h"
 #include "macres.h"
 #include "cicn.h"
 #include "news.h"
@@ -994,6 +995,12 @@ fe_init (void)
     generate_colors (widg);
     gtkhx_widget_destroy (widg);
     init_variables ();
+
+    /* Register the Adwaita TLS TOFU prompt (gtkhx-ui) with the trust
+     * brain (hxtls-trust) before any connect can happen, so a cert
+     * that fails WebPKI validation can raise the prompt on the main
+     * thread. */
+    gtkhx_tls_prompt_install ();
 
     memset (&icon_files, 0, sizeof (icon_files));
     prefs_read ();

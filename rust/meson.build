@@ -183,6 +183,9 @@ rust_sources = files(
   'crates/hxmacres/src/tests.rs',
   'crates/hxtask/src/lib.rs',
   'crates/hxtask/src/tests.rs',
+  'crates/hxtls-trust/src/lib.rs',
+  'crates/hxtls-trust/src/ffi.rs',
+  'crates/hxtls-trust/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -227,6 +230,7 @@ rust_sources = files(
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
+  'crates/hxtls-trust/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -573,6 +577,20 @@ rust_hxtask_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtask',
+  ],
+)
+
+# TLS TOFU trust store + connect-side decide (Rust port of tls_trust.c +
+# network.c's tls_trust_decide). Exposes the hx_tls_verify_cert / hx_tls_trust_pin
+# / hx_tls_test_* C ABI the verify callbacks + integration tests link against.
+# std-only (no glib/gtk), so `cargo test -p hxtls-trust` runs headless and the
+# minimal Tier-3 connect tests link it without dragging in libadwaita. The
+# Adwaita prompt lives in gtkhx-ui and registers via hx_tls_trust_set_prompt.
+rust_hxtls_trust_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxtls_trust',
   ],
 )
 

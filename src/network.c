@@ -54,7 +54,6 @@
 #include "log.h"
 #include "proto_trace.h"
 #include "tls_trust.h"
-#include "tls_trust_dialog.h"
 #include "inline_media.h"
 #include "gif_icons.h"
 #include "toolbar.h"
@@ -520,252 +519,6 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
     hx_post_login_fetches (htlc);
 }
 
-/* Phase 3 TLS: deferred pin payload. Stamping a new known-hosts
- * entry from inside the accept-certificate signal handler turned
- * out to hang the TLS handshake — the handler runs on glib-
- * networking's TLS worker thread, and the GLib file I/O (mkstemp
- * + rename) inside hx_tls_trust_pin interacts badly with the
- * thread state the handshake needs after we return TRUE. Janus
- * waits forever for the client's next handshake message; we
- * eventually time out and Janus logs "perform handshake: read
- * handshake: EOF".
- *
- * The fix: return TRUE immediately from the accept handler and
- * let the handshake resume; queue the file write on the default
- * main context where the rest of GtkHx already runs file I/O.
- * The trust DECISION (accept this cert) is what the signal
- * contract needs; the pin is persistence and can happen any
- * time before the next connect. */
-typedef struct {
-    char *host;
-    guint16 port;
-    char *fingerprint;
-} trust_pin_payload;
-
-static void
-trust_pin_payload_free (gpointer data)
-{
-    trust_pin_payload *p = data;
-    if (!p) {
-        return;
-    }
-    g_free (p->host);
-    g_free (p->fingerprint);
-    g_free (p);
-}
-
-static gboolean
-trust_pin_idle (gpointer data)
-{
-    trust_pin_payload *p = data;
-    if (p) {
-        if (!hx_tls_trust_pin (p->host, p->port, p->fingerprint)) {
-            /* Pin failed — likely permissions on $CONFIG, a
-             * missing config dir, or a rename(2) error. The
-             * connection is already up (we returned TRUE from
-             * accept-certificate before queueing this idle),
-             * so we don't disturb it; but the trust state
-             * won't persist and the user will see the TOFU
-             * prompt again on next connect with no obvious
-             * explanation. g_warning routes through GLib's
-             * log machinery so it shows up on stderr for
-             * console-launched runs and in journalctl for
-             * Flatpak. Should be rare enough that the noise
-             * cost is acceptable; if it stops being rare we
-             * can promote to a user-visible toast. */
-            g_warning ("TLS trust pin failed for %s:%u — connection "
-                       "allowed but the trust state will not "
-                       "persist; expect another trust prompt on "
-                       "the next connect to this server. Check "
-                       "permissions on the known_hosts path.",
-                       p->host, (unsigned) p->port);
-        }
-    }
-    return G_SOURCE_REMOVE;
-}
-
-static void
-schedule_trust_pin (const char *host, guint16 port, const char *fingerprint)
-{
-    trust_pin_payload *p = g_new0 (trust_pin_payload, 1);
-    p->host = g_strdup (host);
-    p->port = port;
-    p->fingerprint = g_strdup (fingerprint);
-    g_idle_add_full (G_PRIORITY_DEFAULT_IDLE, trust_pin_idle, p,
-                     trust_pin_payload_free);
-}
-
-/* Marshal hx_tls_trust_dialog_run_sync to the main thread.
- *
- * The TOFU decision can run on a worker thread: the HTXF subchannel
- * workers (xfers.c + banner.c) connect via hxnet_htxf_connect on tokio's
- * blocking pool, and hxnet's rustls verifier calls back into
- * tls_trust_decide (through htxf_verify_cert_cb) on that worker thread.
- * Dialog APIs (libadwaita, the nested GMainLoop in hx_tls_trust_dialog_
- * run_sync) require the main thread — calling them from a worker
- * crashes or deadlocks.
- *
- * The pattern: pack the dialog args + a result slot + a
- * GMutex/GCond into a stack-local struct, g_main_context_invoke
- * to dispatch the body, wait on the condvar. On the main thread
- * the invoke runs synchronously (the callback fills in result
- * before invoke returns), so the wait loop sees done==TRUE
- * immediately and exits without contention. On a worker the
- * invoke queues an idle on the main context, the worker blocks
- * on the condvar, and the main thread eventually wakes it with
- * the user's decision. The dialog's own nested GMainLoop keeps
- * pumping events while the user clicks, including any GSource
- * activity the worker is waiting on. */
-typedef struct {
-    GtkWindow *parent;
-    const char *host;
-    guint16 port;
-    const char *fingerprint;
-    hx_tls_trust_status status;
-    /* Mutex + cond + done form the worker-thread wait protocol;
-     * accepted is the result. */
-    GMutex mutex;
-    GCond cond;
-    gboolean done;
-    gboolean accepted;
-} trust_dialog_marshal;
-
-static gboolean
-trust_dialog_invoke (gpointer data)
-{
-    trust_dialog_marshal *m = data;
-    gboolean accepted = hx_tls_trust_dialog_run_sync (
-        m->parent, m->host, m->port, m->fingerprint, m->status);
-    g_mutex_lock (&m->mutex);
-    m->accepted = accepted;
-    m->done = TRUE;
-    g_cond_signal (&m->cond);
-    g_mutex_unlock (&m->mutex);
-    return G_SOURCE_REMOVE;
-}
-
-static gboolean
-trust_dialog_run_thread_safe (GtkWindow *parent, const char *host,
-                              guint16 port, const char *fingerprint,
-                              hx_tls_trust_status status)
-{
-    trust_dialog_marshal m = {
-        .parent = parent,
-        .host = host,
-        .port = port,
-        .fingerprint = fingerprint,
-        .status = status,
-        .done = FALSE,
-        .accepted = FALSE,
-    };
-    g_mutex_init (&m.mutex);
-    g_cond_init (&m.cond);
-
-    /* g_main_context_invoke runs synchronously when called from
-     * the context's owner (main thread) and asynchronously
-     * otherwise; either way the callback eventually signals
-     * m.cond, and the wait loop below covers both cases. */
-    g_main_context_invoke (NULL, trust_dialog_invoke, &m);
-
-    g_mutex_lock (&m.mutex);
-    while (!m.done) {
-        g_cond_wait (&m.cond, &m.mutex);
-    }
-    g_mutex_unlock (&m.mutex);
-
-    g_mutex_clear (&m.mutex);
-    g_cond_clear (&m.cond);
-    return m.accepted;
-}
-
-/* Shared TOFU decision over a (host, port, fingerprint) tuple: look
- * the fingerprint up in the known-hosts store and accept silently
- * (TRUSTED, or the same cert already pinned for this host on another
- * port), auto-accept (GTKHX_TLS_AUTO_ACCEPT, for headless tests),
- * or prompt the user (UNKNOWN / MISMATCH), pinning on accept. A
- * GTKHX_TLS_TEST_PROMPT=accept|reject seam (test-only) substitutes the
- * prompt verdict so headless tests can drive the reject path too.
- * Returns TRUE to accept the cert, FALSE to reject.
- *
- * Used by the orchestrator's post-handshake verify
- * (hx_tls_orchestrator_verify_cert for the control channel,
- * htxf_verify_cert_cb for the HTXF subchannel) — both run hxnet's
- * rustls handshake and call here with the fingerprint computed in Rust.
- * Safe off the main thread — the prompt marshals via
- * trust_dialog_run_thread_safe. */
-static gboolean
-tls_trust_decide (const char *host, guint16 port, const char *fingerprint)
-{
-    hx_tls_trust_status status =
-        hx_tls_trust_lookup (host, port, fingerprint);
-    debug_log ("tls", "trust-decide: %s:%u fp=%s status=%d", host,
-               (unsigned) port, fingerprint, (int) status);
-
-    if (status == HX_TLS_TRUST_TRUSTED) {
-        return TRUE;
-    }
-
-    /* Same cert pinned for this host on another port (e.g. control
-     * channel pinned at :5600, HTXF subchannel now at :5601) — accept
-     * + pin the new port silently. Only on a strict-UNKNOWN; never
-     * overrides a MISMATCH. */
-    if (status == HX_TLS_TRUST_UNKNOWN
-        && hx_tls_trust_host_has_fingerprint (host, fingerprint)) {
-        schedule_trust_pin (host, port, fingerprint);
-        return TRUE;
-    }
-
-    /* Headless / scripted escape hatch. Tier 3 sets this; production
-     * never does. MISMATCH is logged loudly so a silent override
-     * can't hide a real fingerprint change. */
-    if (hx_tls_test_auto_accept ()) {
-        if (status == HX_TLS_TRUST_MISMATCH) {
-            g_warning ("GTKHX_TLS_AUTO_ACCEPT overriding TLS MISMATCH for "
-                       "%s:%u (fp=%s) — the pinned fingerprint differs from "
-                       "this one. Set this env var only for trusted test "
-                       "harnesses; production should never see this line.",
-                       host, (unsigned) port, fingerprint);
-        }
-        schedule_trust_pin (host, port, fingerprint);
-        return TRUE;
-    }
-
-    /* Test-only prompt-verdict seam. GTKHX_TLS_TEST_PROMPT=accept|reject
-     * substitutes the human's dialog click without a GUI, so headless
-     * Tier 3 can drive BOTH outcomes — including the reject path, which
-     * GTKHX_TLS_AUTO_ACCEPT can never exercise (it always accepts). The
-     * real classify (the lookup above) and the real pin-on-accept still
-     * run; only the click is stubbed. Production never sets this.
-     *
-     * Only the exact tokens "accept" / "reject" are honoured. Any other
-     * value (a typo, a stale or misconfigured export) is ignored and we
-     * fall through to the real prompt — never an implicit reject that
-     * silently bypasses the dialog. */
-    gboolean accepted;
-    /* Test prompt seam (thread-safe override, else the GTKHX_TLS_TEST_PROMPT
-     * env token) substitutes the human's dialog click so headless Tier 3
-     * can drive BOTH outcomes — including reject, which auto-accept can't.
-     * 0 = no seam -> show the real prompt; 1 = accept; 2 = reject. */
-    int verdict = hx_tls_test_prompt_verdict ();
-    if (verdict != 0) {
-        accepted = (verdict == 1);
-        debug_log ("tls", "trust-decide: test prompt seam -> %s",
-                   accepted ? "accept" : "reject");
-    } else {
-        /* Real user-facing TOFU prompt, marshalled to the main thread. */
-        GtkWindow *parent = NULL;
-        if (toolbar_window && GTK_IS_WINDOW (toolbar_window)) {
-            parent = GTK_WINDOW (toolbar_window);
-        }
-        accepted = trust_dialog_run_thread_safe (parent, host, port,
-                                                 fingerprint, status);
-    }
-    if (accepted) {
-        schedule_trust_pin (host, port, fingerprint);
-    }
-    return accepted;
-}
-
 /* Orchestrator (hxnet) TOFU verify. The Rust TLS lifecycle computes
  * the peer leaf cert's SHA-256 fingerprint — matching
  * hx_tls_trust_fingerprint's "sha256:<hex>" format — and calls this
@@ -780,7 +533,7 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
     if (!htlc || !fingerprint) {
         return FALSE;
     }
-    return tls_trust_decide (htlc->serverhost, htlc->serverport, fingerprint);
+    return hx_tls_verify_cert (htlc->serverhost, htlc->serverport, fingerprint);
 }
 
 /* Phase G: pinned LOGIN transaction id. LOGIN is always the first
@@ -1058,19 +811,19 @@ htxf_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
         return 0; /* reject: no context / no fingerprint */
     }
     g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
-    return tls_trust_decide (htxf->serverhost, htxf->serverport, fp_str) ? 1
+    return hx_tls_verify_cert (htxf->serverhost, htxf->serverport, fp_str) ? 1
                                                                          : 0;
 }
 
 /* Public host:port-keyed subchannel cert verify for callers outside
  * network.c (banner.c's HTXF worker). Same decision as the static
- * htxf_verify_cert_cb above; exposed because tls_trust_decide is
- * file-static. */
+ * htxf_verify_cert_cb above; a thin wrapper over hx_tls_verify_cert
+ * for callers outside network.c. */
 gboolean
 hx_tls_verify_subchannel_cert (const char *host, guint16 port,
                                const char *fingerprint)
 {
-    return tls_trust_decide (host, port, fingerprint);
+    return hx_tls_verify_cert (host, port, fingerprint);
 }
 
 gboolean
@@ -1259,7 +1012,7 @@ hx_tracker_v3_probe_ms (void)
 }
 
 /* TOFU verify keyed on the tracker's (host, port). Runs on the hxnet
- * worker thread; tls_trust_decide marshals any user prompt to the main
+ * worker thread; hx_tls_verify_cert marshals any user prompt to the main
  * thread, exactly as htxf_verify_cert_cb does. A WebPKI-valid cert is
  * trusted in Rust and never reaches here. */
 static int
@@ -1274,7 +1027,7 @@ tracker_verify_cert_cb (const guint8 *host, gsize host_len, guint16 port,
     }
     g_autofree char *host_str = g_strndup ((const char *) host, host_len);
     g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
-    return tls_trust_decide (host_str, port, fp_str) ? 1 : 0;
+    return hx_tls_verify_cert (host_str, port, fp_str) ? 1 : 0;
 }
 
 /* Owned copy of a (ptr, len) wire string. The hxnet FFI exports an empty
