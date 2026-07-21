@@ -145,7 +145,13 @@ jobs:
               meson compile -C build-novoice
               meson test -C build-novoice --suite unit --suite proto \
                 --print-errorlogs
-              ( cd rust && cargo test --workspace \
+              # --release: the meson build above compiled the workspace in
+              # release into the shared CARGO_TARGET_DIR. Running the Rust
+              # tests in release lets them reuse those already-built release
+              # dependencies instead of recompiling the whole tree in debug —
+              # only the workspace crates rebuild (for cfg(test)). Trade-off:
+              # tests run without debug_assertions / overflow checks.
+              ( cd rust && cargo test --release --workspace \
                   --exclude hxvoice --exclude hxvoice-runtime \
                   --ignore-rust-version )
 
@@ -159,10 +165,10 @@ jobs:
               meson test -C build --suite unit --suite proto \
                 --print-errorlogs
               ( cd rust \
-                && cargo test --workspace --ignore-rust-version \
-                && cargo test -p hxnet --features socks --ignore-rust-version )
+                && cargo test --release --workspace --ignore-rust-version \
+                && cargo test --release -p hxnet --features socks --ignore-rust-version )
               # glycin-v2 (1+ loaders) backend — compile-only lib tests.
-              ( cd rust && cargo test -p hx-image-decode --lib \
+              ( cd rust && cargo test --release -p hx-image-decode --lib \
                   --no-default-features --features glycin-v2 --ignore-rust-version )
 
               # Hand the cached dirs back to the runner user so the post-job
