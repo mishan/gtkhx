@@ -46,15 +46,13 @@ gtkhx_news_htlc_version (void)
 int
 gtkhx_news_access_has (int bit)
 {
-    return hl_access_has ((const guint8 *) &hx_active_session ()->htlc->access,
-                          bit);
+    return hx_conn_access_has (hx_active_session ()->htlc, bit);
 }
 
 int
 gtkhx_news_access_permits (int bit)
 {
-    return hl_access_permits (
-        (const guint8 *) &hx_active_session ()->htlc->access, bit);
+    return hx_conn_access_permits (hx_active_session ()->htlc, bit);
 }
 
 /* ---- post-date formatting (C leaf: hl_date_decode + strftime) ----

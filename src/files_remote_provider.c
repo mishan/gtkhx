@@ -627,7 +627,7 @@ remote_start_get (HxFilesProvider *self, HxFileEntry *e, int preview)
     if (!hx_active_session ()->htlc->fd) {
         return;
     }
-    if (!hl_access_has ((const guint8 *)&hx_active_session ()->htlc->access,
+    if (!hx_conn_access_has (hx_active_session ()->htlc,
                         HL_ACCESS_DOWNLOAD_FILES)) {
         return;
     }

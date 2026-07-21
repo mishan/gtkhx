@@ -161,13 +161,10 @@ gtkhx_news_mark_open (void)
 gboolean
 gtkhx_news_can_read (struct htlc_conn *htlc)
 {
-    const guint8 *access;
-
     if (!htlc) {
         return FALSE;
     }
-    access = (const guint8 *) &htlc->access;
-    if (!hl_access_permits (access, HL_ACCESS_READ_NEWS)) {
+    if (!hx_conn_access_permits (htlc, HL_ACCESS_READ_NEWS)) {
         debug_log ("news", "skipping HTLC_HDR_NEWS_GETFILE — account lacks "
                            "HL_ACCESS_READ_NEWS (bit 20)");
         return FALSE;

@@ -133,4 +133,17 @@ extern guint32 hx_conn_gif_icons_probe_trans (const struct htlc_conn *h);
 extern void    hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h,
                                                   guint32 v);
 
+/* ---- Account access bitmap -----------------------------------------------
+ *
+ * The 8-byte access bitmap the server sends in SELFINFO. Every UI gate reads
+ * it through one of these two predicates — the byte-pointer-into-the-struct
+ * form the callers used before is exactly what these hide. hx_conn_access_has
+ * is the strict bit test; hx_conn_access_permits additionally treats an
+ * all-zero bitmap as "permitted", the rule the legacy-server news gate needs.
+ * The lone writer (the SELFINFO parse in proto_helpers.c) still fills the
+ * field directly and moves onto the seam with the rest of that file's
+ * writes. */
+extern gboolean hx_conn_access_has (const struct htlc_conn *h, int bit);
+extern gboolean hx_conn_access_permits (const struct htlc_conn *h, int bit);
+
 #endif /* GTKHX_HXCONN_H */

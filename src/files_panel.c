@@ -15,7 +15,8 @@
 #include "gtkhx.h"     /* gtkhx_apply_listview_style */
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "debug.h"     /* debug_log — GTKHX_DEBUG=files for inline-rename trace */
-#include "hl_access.h" /* HL_ACCESS_* + hl_access_has */
+#include "hl_access.h" /* HL_ACCESS_* constants */
+#include "hxconn.h"
 #include "files.h"     /* ICON_* */
 #include "files_complete.h"
 #include "files_entry.h"
@@ -1034,10 +1035,10 @@ update_status (files_panel *p)
     if (p->provider && HX_IS_REMOTE_FILES_PROVIDER (p->provider)
         && hx_remote_files_provider_has_listing_error (
             HX_REMOTE_FILES_PROVIDER (p->provider))) {
-        const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc->access;
-        gboolean can_upload = hl_access_has (bits, HL_ACCESS_UPLOAD_FILES);
-        gboolean can_view_dropbox
-            = hl_access_has (bits, HL_ACCESS_VIEW_DROP_BOXES);
+        gboolean can_upload = hx_conn_access_has (hx_active_session ()->htlc,
+                                                  HL_ACCESS_UPLOAD_FILES);
+        gboolean can_view_dropbox = hx_conn_access_has (
+            hx_active_session ()->htlc, HL_ACCESS_VIEW_DROP_BOXES);
         if (hx_active_session ()->htlc->fd && can_upload && !can_view_dropbox) {
             text = g_strdup (
                 _ ("Folder is upload-only — drop files here to upload"));
