@@ -1286,7 +1286,10 @@ extern size_t gtkhx_proto_pack_message (uint8_t *out, size_t out_cap,
  * header; the bridge calls this to reconstruct the byte-exact header into
  * htlc->in so the body handlers can decode it back out. `body_len` is the body
  * byte count after the header (excluding hc); the wire len/len2 fields encode
- * body_len + sizeof(hc). No-op on NULL dst; `dst` must hold >= 22 bytes. */
+ * body_len + sizeof(hc). `dst` must be non-NULL and hold >= 22 writable bytes.
+ * Passing NULL is a caller bug — the header simply won't be produced (the Rust
+ * side returns early rather than crash), which surfaces downstream as a
+ * malformed frame; do not rely on NULL as a "skip" path. */
 extern void gtkhx_proto_pack_header (uint8_t *dst, uint32_t type,
                                      uint32_t trans, uint32_t flag, uint16_t hc,
                                      uint32_t body_len);

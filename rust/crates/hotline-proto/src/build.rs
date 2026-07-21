@@ -1814,16 +1814,28 @@ pub fn pack_message_size(chunks: &[PackChunk<'_>]) -> usize {
 /// `len2` is written identical to `len`, matching what [`pack_message`] and the
 /// C `hlpack` path produce, so a header packed here is byte-for-byte identical.
 ///
-/// `out` must be at least [`HL_HDR_LEN`](crate::HL_HDR_LEN) bytes; the slice's
-/// length is otherwise ignored (only the first 22 bytes are written).
-///
 /// This is the single wire-header encoder: [`pack_message`] calls it for the
 /// header portion, and the receive-side bridge calls it (via
 /// `gtkhx_proto_pack_header`) to reconstruct the header of a frame the Rust
 /// actor already parsed, so the C handlers can decode it back out of
 /// `htlc->in`.
+///
+/// # Panics
+/// Panics if `out` is shorter than [`HL_HDR_LEN`](crate::HL_HDR_LEN) (22), or if
+/// `body_len + sizeof(hc)` overflows `u32`. Both are caller bugs (a real
+/// Hotline body is bounded well under `u32::MAX`); asserting turns them into a
+/// deterministic, diagnosable failure instead of a bare slice-range panic or a
+/// silent release-mode wrap.
 pub fn pack_header(out: &mut [u8], type_: u32, trans: u32, flag: u32, hc: u16, body_len: u32) {
-    let wire_len = body_len + core::mem::size_of::<u16>() as u32;
+    assert!(
+        out.len() >= crate::HL_HDR_LEN,
+        "pack_header: output buffer too short: {} < {} bytes",
+        out.len(),
+        crate::HL_HDR_LEN
+    );
+    let wire_len = body_len
+        .checked_add(core::mem::size_of::<u16>() as u32)
+        .expect("pack_header: body_len + sizeof(hc) overflows u32");
     out[0..4].copy_from_slice(&type_.to_be_bytes());
     out[4..8].copy_from_slice(&trans.to_be_bytes());
     out[8..12].copy_from_slice(&flag.to_be_bytes());
