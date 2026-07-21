@@ -1572,6 +1572,15 @@ rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text)
     reload_news (0, sess_from_htlc (htlc));
 }
 
+/* Post-login fetch sequencing decision — Rust hotline-proto (login module).
+ * Returns HX_POST_LOGIN_FETCH_NOW (1.0/1.2: fire fetches now),
+ * HX_POST_LOGIN_ARM_FALLBACK (1.5+: wait for AGREEMENTAGREE, arm the 2s timer),
+ * or HX_POST_LOGIN_NOTHING (already fetched). */
+#define HX_POST_LOGIN_NOTHING 0
+#define HX_POST_LOGIN_FETCH_NOW 1
+#define HX_POST_LOGIN_ARM_FALLBACK 2
+extern int hx_post_login_route (guint16 version, int already_fetched);
+
 void
 rcv_task_login (struct htlc_conn *htlc, char *pass)
 {
@@ -1846,17 +1855,23 @@ rcv_task_login (struct htlc_conn *htlc, char *pass)
 		 * call hx_post_login_fetches after the wire send. The
 		 * 2s fallback timer below arms as a last resort if the
 		 * agreement opcode doesn't arrive at all. */
-        if (htlc->version == 0 && !already_fetched) {
+        switch (hx_post_login_route (htlc->version, already_fetched)) {
+        case HX_POST_LOGIN_FETCH_NOW:
+            /* 1.0/1.2 server: no agreement flow — deliver NAME + ICON and fire
+             * the fetches now (no AGREEMENTAGREE boundary is coming). */
             hx_change_name_icon (htlc);
             hx_post_login_fetches (htlc);
-        } else if (!already_fetched) {
-            /* do NOT fire HTLC_HDR_USER_GETLIST yet —
-			 * wait for AGREEMENTAGREE to go out (or its no-
-			 * agreement auto-send). The fallback timer covers
-			 * 1.5+ servers that misbehave and don't send any
-			 * agreement opcode. */
+            break;
+        case HX_POST_LOGIN_ARM_FALLBACK:
+            /* 1.5+ server: hx_send_agreement_agree / the Agree click fire the
+             * fetches after the AGREEMENTAGREE round-trip. Do NOT fire
+             * HTLC_HDR_USER_GETLIST yet; arm a 2s fallback in case a misbehaving
+             * server sends no agreement opcode at all. */
             post_login_timer_id
                 = g_timeout_add_seconds (2, post_login_fallback, htlc);
+            break;
+        default: /* HX_POST_LOGIN_NOTHING — fetches already fired */
+            break;
         }
     }
 }
