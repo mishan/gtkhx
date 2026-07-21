@@ -650,8 +650,8 @@ hx_quit (void)
     xfers_delete_all ();
     tracker_kill_threads ();
 
-    if (the_session.htlc.fd) {
-        hx_htlc_close (&the_session.htlc, 1);
+    if (the_session.htlc->fd) {
+        hx_htlc_close (the_session.htlc, 1);
     }
 
 #if 0 /* XXX */
@@ -735,7 +735,7 @@ hxd_fd_set (int fd, int rw)
     GIOChannel *channel;
 
     if (fd >= 1024) {
-        hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX,
+        hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,
                           "gtkhx: fd %d >= 1024", fd);
         hx_quit ();
     }
@@ -769,7 +769,7 @@ hxd_fd_clr (int fd, int rw)
     int tag;
 
     if (fd >= 1024) {
-        hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX,
+        hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,
                           "gtkhx: fd %d >= 1024", fd);
         hx_quit ();
     }
@@ -2170,7 +2170,7 @@ hotline_client_init (int argc, char **argv)
     if (!home || !user) {
         pwe = getpwuid (getuid ());
         if (!pwe) {
-            hx_printf_prefix (&the_session.htlc, 0, INFOPREFIX, "getpwuid: %s",
+            hx_printf_prefix (the_session.htlc, 0, INFOPREFIX, "getpwuid: %s",
                               strerror (errno));
         } else {
             if (!home) {
@@ -2182,13 +2182,27 @@ hotline_client_init (int argc, char **argv)
         }
     }
 
-    memset (&the_session.htlc, 0, sizeof (struct htlc_conn));
-    the_session.htlc.icon = 500;
-    if (user) {
-        strncpy (the_session.htlc.name, user, 31);
-        the_session.htlc.name[31] = '\0';
+    /* The session's connection is now a heap-allocated struct the session
+	 * owns for its lifetime (network-endgame.md E1). Allocate once and zero;
+	 * on a re-entry (should not happen in the single-session world) reuse the
+	 * existing allocation. */
+    if (!the_session.htlc) {
+        the_session.htlc = g_new0 (struct htlc_conn, 1);
+        /* Bind the ICON / NICK cfgvars to this connection's storage now that
+	     * it exists (their static table slots are NULL — see options.c). Must
+	     * precede any prefs read/write. */
+        hx_options_bind_identity ();
     } else {
-        strcpy (the_session.htlc.name, "Evaluation 0wn3r");
+        memset (the_session.htlc, 0, sizeof (struct htlc_conn));
+    }
+    /* Back-pointer for sess_from_htlc (survives the memset above). */
+    the_session.htlc->sess = &the_session;
+    the_session.htlc->icon = 500;
+    if (user) {
+        strncpy (the_session.htlc->name, user, 31);
+        the_session.htlc->name[31] = '\0';
+    } else {
+        strcpy (the_session.htlc->name, "Evaluation 0wn3r");
     }
 
     gen_command_hash ();
@@ -2204,7 +2218,7 @@ hotline_client_init (int argc, char **argv)
         }
         /* CLI --server bootstrap: tls=0 default. GTKHX_TLS=1 env-var
 		 * override applies (Phase 4 adds a --tls CLI flag). */
-        hx_connect (&the_session.htlc, server, port, login ? login : "guest",
+        hx_connect (the_session.htlc, server, port, login ? login : "guest",
                     pass ? pass : "", 0, /*tls=*/0);
         g_free (server);
         g_free (login);

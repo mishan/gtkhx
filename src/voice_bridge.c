@@ -45,7 +45,7 @@ hx_session_set_voice_runtime (session *sess, struct gtkhx_voice_runtime *rt)
 struct htlc_conn *
 hx_session_htlc (session *sess)
 {
-    return sess ? &sess->htlc : NULL;
+    return sess ? sess->htlc : NULL;
 }
 
 gboolean

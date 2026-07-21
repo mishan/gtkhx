@@ -1067,7 +1067,7 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
         g_autofree char *url = tracker_dup_str (ev->url_ptr, ev->url_len);
         g_autofree char *msg
             = tracker_dup_str (ev->message_ptr, ev->message_len);
-        hx_printf_prefix (&sess->htlc, 0, INFOPREFIX,
+        hx_printf_prefix (sess->htlc, 0, INFOPREFIX,
                           _ ("tracker: %1$s: %2$s\n"), url, msg);
         break;
     }

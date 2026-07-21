@@ -2,6 +2,10 @@
 #define HX_OPTIONS_H
 
 extern void create_options_window (GtkWidget *widget, gpointer data);
+/* Bind the identity cfgvars (ICON / NICK) to the connection's heap-allocated
+ * storage. Call once after the_session.htlc is allocated and before any prefs
+ * read/write. See the definition in options.c (network-endgame.md E1). */
+extern void hx_options_bind_identity (void);
 extern void init_variables (void);
 extern void prefs_read (void);
 extern void prefs_write (void);

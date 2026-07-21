@@ -43,7 +43,7 @@ struct gtkhx_voice_runtime *hx_session_voice_runtime (session *sess);
 void hx_session_set_voice_runtime (session *sess,
                                    struct gtkhx_voice_runtime *rt);
 
-/* &sess->htlc — the connection the wire senders + runtime constructor take.
+/* sess->htlc — the connection the wire senders + runtime constructor take.
  * The pointer is stable for the session's lifetime. */
 struct htlc_conn *hx_session_htlc (session *sess);
 

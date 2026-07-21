@@ -608,8 +608,8 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     const char *display_body = NULL;
     gsize display_body_len = 0;
     session *sess = hx_active_session ();
-    const char *self_nick = (sess->htlc.name[0] != '\0')
-                                ? (const char *)sess->htlc.name
+    const char *self_nick = (sess->htlc->name[0] != '\0')
+                                ? (const char *)sess->htlc->name
                                 : NULL;
 
     if (is_info && name_len > 0) {
@@ -1329,7 +1329,7 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
                    "Load-older click: no gchat matches the xtext widget");
         return;
     }
-    htlc = &hx_active_session ()->htlc;
+    htlc = hx_active_session ()->htlc;
 
     /* Guard: don't fire a second request while the first is
 	 * still in flight. The receive path (output_chat_history_batch)
@@ -1472,7 +1472,7 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     debug_log ("media",
                "inline-media click: dispatch token=%u mime=%s id_len=%zu",
                token, m->mime ? m->mime : "?", m->id_len);
-    inline_media_show_dialog (xtext, &hx_active_session ()->htlc, m->id, m->id_len,
+    inline_media_show_dialog (xtext, hx_active_session ()->htlc, m->id, m->id_len,
                               m->mime, m->width_present ? m->width : 0,
                               m->height_present ? m->height : 0,
                               m->bytes_present ? m->bytes : 0);
@@ -1536,8 +1536,8 @@ xprintline (GtkWidget *text, char *chat, size_t len)
     gboolean is_info = FALSE;
     gboolean said_by_self = FALSE;
     session *sess = hx_active_session ();
-    const char *self_nick = (sess->htlc.name[0] != '\0')
-                                ? (const char *)sess->htlc.name
+    const char *self_nick = (sess->htlc->name[0] != '\0')
+                                ? (const char *)sess->htlc->name
                                 : NULL;
 
     /* Recognise any line that opens with the INFOPREFIX-style
@@ -1703,7 +1703,7 @@ tab_nick_comp (session *sess, void *member_model, char *text, gboolean reverse,
      * completer returns it space-joined, case-insensitively sorted, with no
      * trailing space). */
     if (cinfo) {
-        hx_printf (&sess->htlc, 0, "%s", cinfo);
+        hx_printf (sess->htlc, 0, "%s", cinfo);
         g_free (cinfo);
     }
     if (ctext) {
@@ -1836,7 +1836,7 @@ change_subject (GtkWidget *widget, gpointer data)
     const char *subject;
 
     subject = gtk_editable_get_text (GTK_EDITABLE (widget));
-    hx_change_subject (&hx_active_session ()->htlc, GPOINTER_TO_INT (data),
+    hx_change_subject (hx_active_session ()->htlc, GPOINTER_TO_INT (data),
                        (char *)subject);
 }
 
@@ -1916,7 +1916,7 @@ gtkhx_chat_build_leaves (session *sess)
      * the LOGIN reply confirms CAP_INLINE_MEDIA. Most servers don't ship the
      * extension, so it stays hidden there — same shape as the voice gating. */
     gchat->media_attach_btn
-        = hx_inline_media_attach_button_new (gchat, &sess->htlc);
+        = hx_inline_media_attach_button_new (gchat, sess->htlc);
 
     return gchat;
 }
@@ -2043,7 +2043,7 @@ pchat_close (guint32 cid)
         hx_emoji_typeahead_detach (gchat->input);
     }
 
-    hx_part_chat (&sess->htlc, cid);
+    hx_part_chat (sess->htlc, cid);
     gchat_delete (sess, gchat);
 }
 
@@ -2181,7 +2181,7 @@ gtkhx_pchat_new (struct htlc_conn *htlc, struct chat *chat)
     gtk_text_view_set_bottom_margin (GTK_TEXT_VIEW (gchat->input), 4);
 
     gchat->media_attach_btn
-        = hx_inline_media_attach_button_new (gchat, &sess->htlc);
+        = hx_inline_media_attach_button_new (gchat, sess->htlc);
     return gchat;
 }
 

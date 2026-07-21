@@ -413,7 +413,7 @@ exec_ready_read (int fd)
             }
             hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
         } else {
-            hx_printf (&hx_active_session ()->htlc, hxd_files[fd].cid, "%s", buf);
+            hx_printf (hx_active_session ()->htlc, hxd_files[fd].cid, "%s", buf);
         }
     }
 }
@@ -670,7 +670,7 @@ hx_command (char *str, guint32 cid)
             }
             argv[argc] = 0;
 
-            cmd->fun (argc, argv, str, &hx_active_session ()->htlc, cid);
+            cmd->fun (argc, argv, str, hx_active_session ()->htlc, cid);
             g_free (s);
             if (argv != auto_argv) {
                 g_free (argv);
@@ -681,6 +681,6 @@ hx_command (char *str, guint32 cid)
     } while (cmd <= last_command && cmd->name[0] == *str);
 
 notfound:
-    hx_printf_prefix (&hx_active_session ()->htlc, cid, INFOPREFIX,
+    hx_printf_prefix (hx_active_session ()->htlc, cid, INFOPREFIX,
                       "%.*s: command not found\n", (int)(p - str), str);
 }

@@ -259,7 +259,12 @@ typedef struct _session {
 	 * (gtkhx-session crate — see chat.h), not a GHashTable. */
     HxChatRegistry *chats;
 
-    struct htlc_conn htlc;
+    /* The connection this session owns. Heap-allocated (g_new0) once at
+	 * startup and owned by the session for its lifetime — a pointer, not an
+	 * embedded value, so the struct's storage can move behind an opaque Rust
+	 * owner (network-endgame.md phase E1) without every `sess->htlc->` call
+	 * site changing again. Never NULL after fe_init. */
+    struct htlc_conn *htlc;
 
     unsigned int connected : 1;
 } session;
@@ -279,18 +284,17 @@ extern session the_session;
  *
  * Model-side code (rcv.c, network.c, …) already holds the htlc for a
  * received event and must route by it: an event belongs to a specific
- * connection, not the focused one. `struct htlc_conn` is embedded in
- * `session` (the `htlc` field), and that embedded instance is the only
- * htlc_conn in the tree, so container_of is exact — and stays correct
- * when sessions become heap-allocated (each session carries its own
- * embedded htlc). NULL in, NULL out.
+ * connection, not the focused one. htlc_conn carries a back-pointer to its
+ * owning session (`sess`, set at allocation), so this is a field read — no
+ * longer a container_of, which required htlc to be embedded in session. NULL
+ * in, NULL out.
  */
 static inline session *
 sess_from_htlc (struct htlc_conn *htlc)
 {
     if (htlc == NULL)
         return NULL;
-    return (session *) ((char *) htlc - G_STRUCT_OFFSET (session, htlc));
+    return htlc->sess;
 }
 
 /*

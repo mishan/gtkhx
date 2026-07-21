@@ -287,7 +287,7 @@ setbtns (session *sess, int stat)
 		 * section, so the toolbar and the popup agree on what's
 		 * available. */
         if (stat
-            && hl_access_has ((const guint8 *)&sess->htlc.access,
+            && hl_access_has ((const guint8 *)&sess->htlc->access,
                               HL_ACCESS_DISCONNECT_USERS)) {
             gtk_widget_set_visible (kickbtn, TRUE);
             gtk_widget_set_sensitive (kickbtn, TRUE);
@@ -320,7 +320,7 @@ setbtns (session *sess, int stat)
     if (broadcast_btn) {
         gboolean can_broadcast
             = stat
-              && hl_access_has ((const guint8 *)&sess->htlc.access,
+              && hl_access_has ((const guint8 *)&sess->htlc->access,
                                 HL_ACCESS_CAN_BROADCAST);
         gtk_widget_set_sensitive (broadcast_btn, can_broadcast);
     }
@@ -341,7 +341,7 @@ setbtns (session *sess, int stat)
 	 * On disconnect (`stat == 0`) both are always disabled —
 	 * there's no session to talk to. */
     if (stat) {
-        const guint8 *bits = (const guint8 *)&sess->htlc.access;
+        const guint8 *bits = (const guint8 *)&sess->htlc->access;
         set_app_action_enabled (
             "user_new", hl_access_has (bits, HL_ACCESS_CREATE_USERS));
         set_app_action_enabled (
@@ -406,7 +406,7 @@ setbtns (session *sess, int stat)
          * ones) still serves legacy news, and news.c fires NEWS_GETFILE in
          * that case. Gate the button by the same rule so it isn't greyed
          * out on a server where News actually works. */
-        const guint8 *access = (const guint8 *)&sess->htlc.access;
+        const guint8 *access = (const guint8 *)&sess->htlc->access;
         gtk_widget_set_sensitive (news_btn,
                                   hl_access_permits (access,
                                                      HL_ACCESS_READ_NEWS));

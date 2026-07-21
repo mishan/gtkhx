@@ -291,13 +291,13 @@ disconnect_clicked (void)
          * already owned (and possibly closed) by the released
          * GSocketConnection. Just clear the gdk_input bookkeeping
          * flag and emit the user-visible notice. */
-        hx_active_session ()->htlc.gdk_input = 0;
-        hx_printf_prefix (&hx_active_session ()->htlc, 0, INFOPREFIX, "%s: %s\n",
+        hx_active_session ()->htlc->gdk_input = 0;
+        hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX, "%s: %s\n",
                           server_addr, _ ("connection closed"));
     }
 
-    else if (hx_active_session ()->htlc.fd) {
-        hx_htlc_close (&hx_active_session ()->htlc, 1);
+    else if (hx_active_session ()->htlc->fd) {
+        hx_htlc_close (hx_active_session ()->htlc, 1);
     }
 }
 

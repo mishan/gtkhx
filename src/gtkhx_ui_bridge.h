@@ -49,7 +49,7 @@ extern gboolean gtkhx_active_text_encoding (void);
 
 /* Connect dialog (connect.rs). Set the session's HOPE compress / cipher
  * algorithm names (NULL or "" clears them) and fire hx_connect. Keeps
- * the sess->htlc.{compressalg,cipheralg} field pokes in C so the Rust
+ * the sess->htlc->{compressalg,cipheralg} field pokes in C so the Rust
  * Connect dialog doesn't mirror the htlc_conn struct. `compress_name` /
  * `cipher_name` are already-resolved HOPE algorithm names (the Rust
  * side does the dropdown-index / stable-byte → name translation). */

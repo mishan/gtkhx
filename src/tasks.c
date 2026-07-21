@@ -958,7 +958,7 @@ gtkhx_tasks_after_embed (session *sess)
     gtkhx_prefs.geo.tasks.init = 1;
 
     task_tasks_update (sess);
-    xfer_tasks_update (&sess->htlc);
+    xfer_tasks_update (sess->htlc);
 }
 
 /* LONGEST_HUMAN_READABLE + human_size come in via human_readable.h

@@ -95,7 +95,7 @@ join_path (const char *dir, const char *name)
 static gboolean
 has_access (int bit)
 {
-    const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc.access;
+    const guint8 *bits = (const guint8 *)&hx_active_session ()->htlc->access;
     return hl_access_has (bits, bit);
 }
 
@@ -112,7 +112,7 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     const char *src_dir, *dst_dir;
     char *lpath, *rpath;
 
-    if (!hx_active_session ()->htlc.fd) {
+    if (!hx_active_session ()->htlc->fd) {
         return HX_OPS_ERR_NOT_CONNECTED;
     }
     if (!has_access (HL_ACCESS_UPLOAD_FILES)) {
@@ -134,7 +134,7 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
             return HX_OPS_ERR_NO_PERMISSION;
         }
         src_full = join_path (src_dir, nm);
-        hx_put_folder (&hx_active_session ()->htlc, src_full, dst_dir ? dst_dir : "", nm,
+        hx_put_folder (hx_active_session ()->htlc, src_full, dst_dir ? dst_dir : "", nm,
                        nm_len);
         g_free (src_full);
         return HX_OPS_OK;
@@ -143,7 +143,7 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
     lpath = join_path (src_dir, hx_file_entry_get_name (e));
     rpath = join_path (dst_dir, hx_file_entry_get_name (e));
 
-    hx_put_file (&hx_active_session ()->htlc, lpath, rpath);
+    hx_put_file (hx_active_session ()->htlc, lpath, rpath);
 
     g_free (lpath);
     g_free (rpath);
@@ -165,7 +165,7 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     struct htxf_conn *htxf;
     guint64 size;
 
-    if (!hx_active_session ()->htlc.fd) {
+    if (!hx_active_session ()->htlc->fd) {
         return HX_OPS_ERR_NOT_CONNECTED;
     }
     if (!has_access (HL_ACCESS_DOWNLOAD_FILES)) {
@@ -184,7 +184,7 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
         if (!has_access (HL_ACCESS_DOWNLOAD_FOLDERS)) {
             return HX_OPS_ERR_NO_PERMISSION;
         }
-        hx_get_folder (&hx_active_session ()->htlc, dst_dir ? dst_dir : "",
+        hx_get_folder (hx_active_session ()->htlc, dst_dir ? dst_dir : "",
                        src_dir ? src_dir : "", nm, nm_len);
         return HX_OPS_OK;
     }
