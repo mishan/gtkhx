@@ -3944,11 +3944,16 @@ pub unsafe extern "C" fn gtkhx_proto_pack_message(
 /// application body byte count (after the header, excluding hc); the wire `len`
 /// / `len2` fields encode `body_len + sizeof(hc)`.
 ///
-/// No-op on NULL `dst`. The caller must provide at least `HL_HDR_LEN` (22)
-/// writable bytes.
+/// `dst` must be non-NULL and point to at least `HL_HDR_LEN` (22) writable
+/// bytes. A NULL `dst` is a caller bug — this function exists to *populate* a
+/// header buffer, so there is no meaningful "skip" behaviour. The Rust side
+/// defensively returns without writing rather than dereferencing NULL, but
+/// callers must not rely on that as a valid path: a NULL here means the header
+/// was silently not produced, which surfaces downstream as a malformed frame.
 ///
 /// # Safety
-/// `dst` is either NULL or valid (writable) for at least `HL_HDR_LEN` bytes.
+/// `dst` must be valid (writable) for at least `HL_HDR_LEN` bytes. (NULL is
+/// tolerated as a defensive early-return, but see above — it's a caller error.)
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_proto_pack_header(
     dst: *mut u8,
@@ -3958,6 +3963,9 @@ pub unsafe extern "C" fn gtkhx_proto_pack_header(
     hc: u16,
     body_len: u32,
 ) {
+    // NULL is a caller bug (see the doc comment); flag it loudly in dev builds,
+    // but still return early rather than dereference it in release.
+    debug_assert!(!dst.is_null(), "gtkhx_proto_pack_header: NULL dst");
     if dst.is_null() {
         return;
     }
