@@ -29,3 +29,28 @@ fn queued_transfer_announces_only() {
     assert_eq!(test_env::EMITTED.with(|c| c.take()), Some(fake_htxf()));
     assert_eq!(test_env::STARTED.with(|c| c.take()), None);
 }
+
+#[test]
+fn file_info_forwards_name_and_size() {
+    use std::ffi::CString;
+    test_env::reset();
+    let path = CString::new("/Files/report.txt").unwrap();
+    let name = CString::new("report.txt").unwrap();
+    let empty = CString::new("").unwrap();
+    unsafe {
+        hx_file_info_recv(
+            path.as_ptr(),
+            name.as_ptr(),
+            empty.as_ptr(),
+            empty.as_ptr(),
+            empty.as_ptr(),
+            empty.as_ptr(),
+            empty.as_ptr(),
+            4096,
+        );
+    }
+    assert_eq!(
+        test_env::FILE_INFO.with(|c| c.borrow_mut().take()),
+        Some((b"report.txt".to_vec(), 4096))
+    );
+}
