@@ -623,7 +623,7 @@ hx_rcv_task (struct htlc_conn *htlc)
                       || !strcmp (tsk->str, "upload-media")
                       || !strcmp (tsk->str, "download-media")));
         if (tsk->rcv && (!error || dispatch_on_error)) {
-            tsk->rcv (htlc, tsk->ptr, tsk->data);
+            tsk->rcv (htlc, htlc->in.buf, htlc->in.pos, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore
 		 * down the connection (rcv_task_login does this on a
@@ -1286,7 +1286,7 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc)
  */
 
 void
-rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
+rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *channel_ptr)
 {
     guint32 expected_cid = GPOINTER_TO_UINT (channel_ptr);
 
@@ -1420,7 +1420,7 @@ rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr)
 }
 
 void
-rcv_task_voice_simple_ack (struct htlc_conn *htlc, void *opcode_ptr,
+rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *opcode_ptr,
                            void *cid_ptr)
 {
     /* opcode is stashed in ptr via GUINT_TO_POINTER for the trace
@@ -1521,7 +1521,7 @@ hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
 }
 
 void
-rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn)
+rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct uesp_fn *uespfn)
 {
     char name[32], login[32], pass[32];
     hl_access_bits access;
@@ -1548,7 +1548,7 @@ rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn)
 }
 
 void
-rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
+rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *msg_buf)
 {
     if (msg_buf) {
         hx_printf (htlc, 0, "%s\n", msg_buf);
@@ -1576,11 +1576,11 @@ rcv_task_msg (struct htlc_conn *htlc, char *msg_buf)
  * hxnews-recv. With this, no news code remains in rcv.c. */
 
 void
-rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text)
+rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat, int text)
 {
     /* output user list and then grab news */
     /* this is only used for login events  */
-    rcv_task_user_list (htlc, chat, text);
+    rcv_task_user_list (htlc, frame, frame_len, chat, text);
 
     reload_news (0, sess_from_htlc (htlc));
 }
@@ -1595,7 +1595,7 @@ rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat, int text)
 extern int hx_post_login_route (guint16 version, int already_fetched);
 
 void
-rcv_task_login (struct htlc_conn *htlc, char *pass)
+rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *pass)
 {
     char buf[HOSTLEN];
     char servername[8192 + 1];
@@ -1846,7 +1846,7 @@ extern void hx_news_file_recv (struct htlc_conn *htlc, const char *bytes,
                                gsize len);
 
 void
-rcv_task_news_file (struct htlc_conn *htlc)
+rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* parse + sanitise in hx_news_file_extract. We still
 	 * use the file-scope news_buf scratch as the destination so
@@ -1879,7 +1879,7 @@ extern void hx_icon_data_recv (struct htlc_conn *htlc, guint16 uid,
 
 /* ICON_GET (1863) task reply: UID + ICON_GIF. */
 void
-rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr)
+rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr)
 {
     (void) uid_ptr; /* uid is echoed in the reply; we read it from there */
     struct gtkhx_proto_icon_entry e;
@@ -1899,7 +1899,7 @@ rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr)
 /* ICON_GETLIST (1861) task reply: 0..N packed ICON_LIST entries. Also
  * the resolution point for the post-login probe. */
 void
-rcv_task_icon_getlist (struct htlc_conn *htlc)
+rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* The reply arriving at all means the server supports the
 	 * extension — flip the probe state and disarm the watchdog. */
@@ -1999,7 +1999,7 @@ extern void hx_chat_subject_emit (struct htlc_conn *htlc, guint32 cid,
                                   const char *subject);
 
 void
-rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
+rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *channel_ptr)
 {
     guint32 cid = GPOINTER_TO_UINT (channel_ptr);
     GPtrArray *entries
@@ -2065,7 +2065,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
 }
 
 void
-rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
+rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat, int text)
 {
     guint16 uid;
     int new;
@@ -2136,7 +2136,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
 }
 
 void
-rcv_task_user_list_switch (struct htlc_conn *htlc, struct chat *chat)
+rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat)
 {
     session *sess = sess_from_htlc (htlc);
 
@@ -2145,11 +2145,11 @@ rcv_task_user_list_switch (struct htlc_conn *htlc, struct chat *chat)
         return;
     }
 
-    rcv_task_user_list (htlc, chat, 0);
+    rcv_task_user_list (htlc, frame, frame_len, chat, 0);
 }
 
 void
-rcv_task_kick (struct htlc_conn *htlc)
+rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     if (task_inerror (htlc)) {
         return;
@@ -2159,7 +2159,7 @@ rcv_task_kick (struct htlc_conn *htlc)
 }
 
 void
-rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
+rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, guint16 *_uid, int text)
 {
     char info[4096 + 1], name[32];
     guint16 uid = *_uid;
@@ -2181,7 +2181,7 @@ rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid, int text)
 }
 
 void
-rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
+rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct cached_filelist *cfl,
                     void *data)
 {
     struct hl_filelist_hdr *fh = 0;
@@ -2368,7 +2368,7 @@ hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
 }
 
 void
-rcv_task_file_getinfo (struct htlc_conn *htlc, char *path)
+rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *path)
 {
     char type[32], crea[32];
     char name[256], comment[256];
@@ -2413,7 +2413,7 @@ preview_cancel_xfer_cb (void *user_data)
 }
 
 void
-rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
+rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf)
 {
     guint32 ref = 0, size = 0, queue = 0;
     /* Large-file (CAP_LARGE_FILES) companion: when present, the
@@ -2506,7 +2506,7 @@ rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
  * can display a non-trivial percentage even though the per-file
  * sizes come in as the stream unfolds). */
 void
-rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
+rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf)
 {
     guint32 ref = 0, size = 0, queue = 0, nfiles = 0;
     /* Large-file (CAP_LARGE_FILES) companion field — see
@@ -2573,7 +2573,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, struct htxf_conn *htxf)
 }
 
 void
-rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
+rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf)
 {
     guint32 ref = 0, data_pos = 0, rsrc_pos = 0, queue = 0;
     struct stat sb;
@@ -2629,7 +2629,7 @@ rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
  * resume happens inside folder_put_thread, not at the task
  * boundary). */
 void
-rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
+rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf)
 {
     guint32 ref = 0, queue = 0;
 
@@ -2667,7 +2667,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, struct htxf_conn *htxf)
  * HTXF worker thread to actually fetch the bytes off
  * server_port + 1. */
 void
-rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data)
+rcv_task_banner_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ptr, void *data)
 {
     guint32 ref = 0, size = 0;
     (void)ptr;

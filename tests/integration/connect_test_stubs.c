@@ -370,9 +370,10 @@ hx_change_name_icon (struct htlc_conn *htlc)
  * function pointer but doesn't call it (the test's task_new is a
  * no-op anyway). Provide a definition so the symbol resolves. */
 void
-rcv_task_login (struct htlc_conn *htlc, char *pass)
+rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                char *pass)
 {
-    (void) htlc; (void) pass;
+    (void) htlc; (void) frame; (void) frame_len; (void) pass;
 }
 
 /* Phase 8.D runtime-wire stub. network.c::hx_htlc_close calls

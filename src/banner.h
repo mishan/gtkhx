@@ -69,6 +69,6 @@ extern void banner_handle_htxf_reply (struct htlc_conn *htlc, guint32 ref,
  * here so banner.c can pass it to RCV_TASK_FN() when registering
  * the task, and so rcv.c itself sees a prior prototype for the
  * function body (avoids -Wmissing-prototypes). */
-extern void rcv_task_banner_get (struct htlc_conn *htlc, void *ptr, void *data);
+extern void rcv_task_banner_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ptr, void *data);
 
 #endif /* HX_BANNER_H */

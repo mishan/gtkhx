@@ -422,7 +422,8 @@ extern int fd_lock_write (int fd);
  * `void (*)()` so -Wstrict-prototypes doesn't trip on every consumer
  * of this header. */
 struct htlc_conn;
-typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
+typedef void (*rcv_task_fn) (struct htlc_conn *htlc, const guint8 *frame,
+                            gsize frame_len, void *ptr, void *data);
 
 /* Cast a heterogeneous rcv_task_* implementation to the canonical
  * 3-arg rcv_task_fn shape. The intermediate (void(*)(void)) cast is

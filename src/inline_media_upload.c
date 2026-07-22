@@ -591,7 +591,7 @@ deliver_synthetic_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx,
 }
 
 void
-rcv_task_upload_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
+rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ctx_ptr, void *unused)
 {
     (void) unused;
     hx_upload_ctx *ctx = ctx_ptr;

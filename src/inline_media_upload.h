@@ -247,7 +247,7 @@ extern void hx_send_chat_with_media (
 /* TASK-reply handler for HTLC_HDR_UPLOAD_MEDIA. Hooked into
  * rcv.c's task table via task_new(...) inside
  * hx_send_upload_media_single. Not called directly. */
-extern void rcv_task_upload_media (struct htlc_conn *htlc, void *ctx_ptr,
+extern void rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ctx_ptr,
                                    void *unused);
 
 #endif /* HX_INLINE_MEDIA_UPLOAD_H */

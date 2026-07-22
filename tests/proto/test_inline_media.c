@@ -684,7 +684,8 @@ test_rcv_task_upload_media_rejects_oversized_token (void)
 	 * length does. */
 
     /* Drive the production rcv handler. */
-    rcv_task_upload_media (&htlc, captured_upload_ctx, NULL);
+    rcv_task_upload_media (&htlc, htlc.in.buf, htlc.in.pos, captured_upload_ctx,
+                           NULL);
 
     /* Callback must have fired with a synthetic failure. */
     g_assert_true (cap.fired);

@@ -212,7 +212,7 @@ deliver_success (struct htlc_conn *htlc, hx_inline_media_download *ctx)
 }
 
 void
-rcv_task_download_media (struct htlc_conn *htlc, void *ctx_ptr, void *unused)
+rcv_task_download_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ctx_ptr, void *unused)
 {
     (void) unused;
     hx_inline_media_download *ctx = ctx_ptr;

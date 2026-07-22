@@ -49,21 +49,21 @@ extern void hx_rcv_voice_room_status (struct htlc_conn *htlc);
  *                   the originating opcode (label only),
  *                   `cid_ptr` is the originating cid (diagnostic
  *                   only). */
-extern void rcv_task_voice_join (struct htlc_conn *htlc, void *channel_ptr);
-extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
+extern void rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *channel_ptr);
+extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                        void *opcode_ptr, void *cid_ptr);
 
-extern void rcv_task_user_open (struct htlc_conn *htlc, struct uesp_fn *uespfn);
-extern void rcv_task_msg (struct htlc_conn *htlc, char *msg_buf);
+extern void rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct uesp_fn *uespfn);
+extern void rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *msg_buf);
 /* rcv_task_newscat_list moved to the hxnews-recv Rust crate as a 3-arg
  * rcv_task_fn (htlc, ptr, data). No C caller references them by name — the
  * hxnews-send cat_list / fldr_list / get_post senders register them via
  * task_new — so the old 2-arg prototypes are gone rather than left to drift
  * from the real ABI. */
-extern void rcv_task_login (struct htlc_conn *htlc, char *pass);
-extern void rcv_task_news_users (struct htlc_conn *htlc, struct chat *chat,
+extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *pass);
+extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
                                  int text);
-extern void rcv_task_news_file (struct htlc_conn *htlc);
+extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 
 /* TRAN_GET_CHAT_HISTORY (700) reply walker. Parses 0..N
  * HTLS_DATA_HISTORY_ENTRY packed-binary chunks and the
@@ -71,7 +71,7 @@ extern void rcv_task_news_file (struct htlc_conn *htlc);
  * GtkhxSession::chat-history-batch. The channel id is carried via
  * the task ptr (GUINT_TO_POINTER) since the reply itself doesn't
  * repeat it. */
-extern void rcv_task_chat_history (struct htlc_conn *htlc,
+extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                    void             *channel_ptr);
 /* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The
  * send wrappers in gif_icons.c register these via task_new before the
@@ -81,31 +81,31 @@ extern void rcv_task_chat_history (struct htlc_conn *htlc,
  *               GUINT_TO_POINTER(uid) from the send wrapper.
  *   _getlist  — ICON_GETLIST (1861) reply: 0..N packed ICON_LIST
  *               entries; also resolves the probe to SUPPORTED. */
-extern void rcv_task_icon_get (struct htlc_conn *htlc, void *uid_ptr);
-extern void rcv_task_icon_getlist (struct htlc_conn *htlc);
+extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr);
+extern void rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 /* ICON_CHANGE (1864) broadcast: UID only. Emits gif-icon-changed so a
  * view can re-fetch the avatar via hx_icon_get. */
 extern void hx_rcv_icon_change (struct htlc_conn *htlc);
 
-extern void rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat,
+extern void rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
                                 int text);
-extern void rcv_task_user_list_switch (struct htlc_conn *htlc,
+extern void rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                        struct chat *chat);
-extern void rcv_task_kick (struct htlc_conn *htlc);
-extern void rcv_task_user_info (struct htlc_conn *htlc, guint16 *_uid,
+extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, guint16 *_uid,
                                 int text);
-extern void rcv_task_file_list (struct htlc_conn *htlc,
+extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                 struct cached_filelist *cfl, void *data);
-extern void rcv_task_file_getinfo (struct htlc_conn *htlc, char *path);
-extern void rcv_task_file_get (struct htlc_conn *htlc, struct htxf_conn *htxf);
-extern void rcv_task_file_put (struct htlc_conn *htlc, struct htxf_conn *htxf);
+extern void rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *path);
+extern void rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf);
+extern void rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf);
 /* Folder transfer task replies. Mirror rcv_task_file_get /
  * rcv_task_file_put but also parse HTLS_DATA_FILE_NFILES so the
  * tasks-window can show the leaf count. The actual stream is
  * handled by folder_get_thread / folder_put_thread in xfers.c. */
-extern void rcv_task_folder_get (struct htlc_conn *htlc,
+extern void rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                  struct htxf_conn *htxf);
-extern void rcv_task_folder_put (struct htlc_conn *htlc,
+extern void rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                  struct htxf_conn *htxf);
 
 /* drop any pending post-login fallback timer. Called from
