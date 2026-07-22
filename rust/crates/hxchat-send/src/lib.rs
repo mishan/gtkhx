@@ -41,11 +41,13 @@ const HTLC_HDR_CHAT_PART: u32 = ClientHdr::ChatPart as u32;
 const HTLC_HDR_CHAT_SUBJECT: u32 = ClientHdr::ChatSubject as u32;
 const HTLC_HDR_CHAT_DECLINE: u32 = ClientHdr::ChatDecline as u32;
 
-/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores. The
-/// real `hx_rcv_user_change` (1-arg) / `rcv_task_user_list_switch` (2-arg)
-/// symbols are invoked through this 3-arg type — exactly what the C
-/// `RCV_TASK_FN` cast does.
-type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores —
+/// `(htlc, frame, frame_len, ptr, data)`. `hx_rcv_task` hands the registered
+/// callback the received frame as a `(frame, frame_len)` slice ahead of the
+/// task `ptr` / `data`. `hx_rcv_user_change` is a primary handler
+/// `(htlc, frame, frame_len)` reused here as a reply handler — it reads the
+/// first three args in both calling conventions and ignores `ptr` / `data`.
+type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void);
 
 // Real build: these resolve at the final C link. Test build: the `use
 // tests::{…}` below shadows them with recording stubs, so the extern
@@ -89,8 +91,8 @@ extern "C" {
 
     // rcv.c — reply-task handlers. Declared with the 3-arg RcvTaskFn shape (see
     // the typedef note); the linker resolves the real symbols.
-    fn hx_rcv_user_change(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_user_list_switch(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
+    fn hx_rcv_user_change(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_user_list_switch(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
 }
 
 // The C send-path primitives are stubbed under cfg(test) (see tests.rs), so the

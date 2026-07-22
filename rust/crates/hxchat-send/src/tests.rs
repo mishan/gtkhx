@@ -128,6 +128,8 @@ pub(crate) unsafe extern "C" fn task_new(
 
 pub(crate) unsafe extern "C" fn hx_rcv_user_change(
     _h: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     _p: *mut c_void,
     _d: *mut c_void,
 ) {
@@ -135,6 +137,8 @@ pub(crate) unsafe extern "C" fn hx_rcv_user_change(
 
 pub(crate) unsafe extern "C" fn rcv_task_user_list_switch(
     _h: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     _p: *mut c_void,
     _d: *mut c_void,
 ) {

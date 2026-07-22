@@ -40,10 +40,11 @@ const HTLC_HDR_VOICE_SDP_ANSWER: u32 = ClientHdr::VoiceSdpAnswer as u32;
 const HTLC_HDR_VOICE_ICE: u32 = ClientHdr::VoiceIce as u32;
 const HTLC_HDR_VOICE_MUTE: u32 = ClientHdr::VoiceMute as u32;
 
-/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores. The
-/// real `rcv_task_voice_*` symbols take fewer args, but they're invoked
-/// through this 3-arg type — exactly what the C `RCV_TASK_FN` cast does.
-type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores —
+/// `(htlc, frame, frame_len, ptr, data)`. `hx_rcv_task` hands the registered
+/// callback the received frame as a `(frame, frame_len)` slice ahead of the
+/// task `ptr` / `data`.
+type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void);
 
 // Real build: these resolve at the final C link. Test build: the `use
 // tests::{…}` below shadows them with recording stubs (see the cfg(test)
@@ -72,8 +73,8 @@ extern "C" {
 
     // rcv.c — reply-task handlers. Declared with the 3-arg RcvTaskFn shape
     // (see the typedef note); the linker resolves the real symbols.
-    fn rcv_task_voice_join(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_voice_simple_ack(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_voice_join(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_voice_simple_ack(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
 }
 
 // The C send-path primitives are stubbed under `cfg(test)` (see tests.rs), so

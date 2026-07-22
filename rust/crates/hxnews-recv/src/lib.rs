@@ -103,6 +103,8 @@ struct NewsThreadReply {
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_newscat_list(
     htlc: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     gcnews: *mut c_void,
     _data: *mut c_void,
 ) {
@@ -133,6 +135,8 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_newsfolder_list(
     htlc: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     gfnews: *mut c_void,
     _data: *mut c_void,
 ) {
@@ -167,6 +171,8 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_news_post(
     htlc: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     target: *mut c_void,
     _data: *mut c_void,
 ) {
