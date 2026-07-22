@@ -2182,20 +2182,20 @@ hotline_client_init (int argc, char **argv)
         }
     }
 
-    /* The session's connection is now a heap-allocated struct the session
-	 * owns for its lifetime (network-endgame.md E1). Allocate once and zero;
-	 * on a re-entry (should not happen in the single-session world) reuse the
-	 * existing allocation. */
+    /* The session's connection is a Rust-owned allocation (hxconn crate, the
+	 * network-endgame.md E1c flip) the session holds for its lifetime.
+	 * Allocate once; on a re-entry (should not happen in the single-session
+	 * world) reset the existing one to its fresh state. */
     if (!the_session.htlc) {
-        the_session.htlc = g_new0 (struct htlc_conn, 1);
+        the_session.htlc = hx_conn_new ();
         /* Bind the ICON / NICK cfgvars to this connection's storage now that
 	     * it exists (their static table slots are NULL — see options.c). Must
 	     * precede any prefs read/write. */
         hx_options_bind_identity ();
     } else {
-        memset (the_session.htlc, 0, sizeof (struct htlc_conn));
+        hx_conn_reset (the_session.htlc);
     }
-    /* Back-pointer for sess_from_htlc (survives the memset above). */
+    /* Back-pointer for sess_from_htlc (survives the reset above). */
     hx_conn_set_sess (the_session.htlc, &the_session);
     hx_conn_set_icon (the_session.htlc, 500);
     hx_conn_set_name (the_session.htlc, user ? user : "Evaluation 0wn3r");
