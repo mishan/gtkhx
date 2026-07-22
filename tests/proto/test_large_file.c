@@ -38,24 +38,20 @@
 
 /* ---------- send side: DATA_XFERSIZE64 on file_put ---------- */
 
+/* Pack straight into htlc->in so dh_start can walk it — hlpack now
+ * returns a fresh buffer (there's no htlc->out send buffer anymore). */
 static void
 hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
-}
 
-static void
-flip_out_to_in (struct htlc_conn *htlc)
-{
     g_free (htlc->in.buf);
-    htlc->in.buf = htlc->out.buf;
-    htlc->in.pos = htlc->out.len;
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
 }
 
 /* Drive hlpack with the same chunk list a large-file-mode file_put
@@ -78,8 +74,6 @@ test_send_xfersize64_alongside_legacy (void)
               (int)HTLC_DATA_FILE_NAME, (guint16)strlen (name), name,
               (int)HTLC_DATA_HTXF_SIZE, 4, &legacy,
               (int)HTLC_DATA_XFERSIZE64, 8, &size64);
-
-    flip_out_to_in (&htlc);
 
     int saw_legacy = 0;
     int saw_64 = 0;

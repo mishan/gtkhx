@@ -41,7 +41,7 @@
  *              ENOENT. The test reads captured_upload_ctx after
  *              the call to drive rcv_task_upload_media directly.
  *   hlwrite_chunks — delegate to hlpack_chunks so the first chunk's
- *              wire shape lands in htlc->out.buf, where the test
+ *              wire shape lands in htlc->in.buf, where the test
  *              can choose to inspect or discard.
  *   the_session — zeroed; the only test path that would touch
  *              it (chunked-continuation task_with_trans lookup)
@@ -72,7 +72,13 @@ void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
 {
-    hlpack_chunks (htlc, type, flag, chunks, hc);
+    /* Stash the packed frame into htlc->in — hlpack_chunks now returns a
+     * fresh buffer (there's no htlc->out). */
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
+    g_free (htlc->in.buf);
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
 }
 
 /* the_session is a session*, dereferenced by inline_media_upload.c
@@ -698,7 +704,6 @@ test_rcv_task_upload_media_rejects_oversized_token (void)
         fake_task.ptr_free (captured_upload_ctx);
     }
     g_free (htlc.in.buf);
-    g_free (htlc.out.buf);
 }
 
 /* ---------- FFI parser: download reply + error code ---------- */

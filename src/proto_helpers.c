@@ -430,8 +430,9 @@ hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb, void *user)
                                             hx_news_post_emit, &tr);
 }
 
-void
-hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
+guint8 *
+hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap,
+        gsize *out_len)
 {
     /* Marshal the varargs (type, len, data triples) into an hx_chunk array
      * and delegate to hlpack_chunks, so BOTH send entry points serialize
@@ -442,8 +443,8 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
      * arg is consumed even for a zero-length chunk, matching the old walk. */
     struct hx_chunk chunks[64];
 
-    g_return_if_fail (htlc != NULL);
-    g_return_if_fail (hc >= 0 && hc <= (int) G_N_ELEMENTS (chunks));
+    g_return_val_if_fail (htlc != NULL, NULL);
+    g_return_val_if_fail (hc >= 0 && hc <= (int) G_N_ELEMENTS (chunks), NULL);
 
     for (int i = 0; i < hc; i++) {
         chunks[i].type = (guint16) va_arg (ap, int);
@@ -451,7 +452,7 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap)
         chunks[i].data = va_arg (ap, const void *);
     }
 
-    hlpack_chunks (htlc, type, flag, chunks, hc);
+    return hlpack_chunks (htlc, type, flag, chunks, hc, out_len);
 }
 
 void
@@ -543,15 +544,16 @@ hl_hdr_decode (const void *hdr_bytes, guint32 *type_out, guint32 *trans_out,
     return TRUE;
 }
 
-void
+guint8 *
 hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
-               const struct hx_chunk *chunks, int hc)
+               const struct hx_chunk *chunks, int hc, gsize *out_len)
 {
     /* the inner serialize loop (header byte layout, per-chunk
      * data hdr + payload writes, len/len2 wire-length math) moved to the
-     * Rust hotline-proto crate (build::pack_message). The C side keeps
-     * the qbuf growth and the trans post-increment side effect because
-     * those tie to the connection lifecycle that's R3 territory.
+     * Rust hotline-proto crate (build::pack_message). The C side packs the
+     * one message into a fresh block and hands ownership back — there is no
+     * per-connection send buffer; the only lingering connection-lifecycle
+     * side effect is the trans post-increment.
      *
      * Public-API guardrails: this function is the entry point for
      * every shared chunk-array builder (login_packet, chat_history,
@@ -562,12 +564,10 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
      * (build::pack_message rejects the malformed chunk and returns 0);
      * the size+pack mismatch g_error below fires on that path too, so
      * the failure mode still surfaces loudly. */
-    g_return_if_fail (htlc != NULL);
-    g_return_if_fail (hc >= 0);
-    g_return_if_fail (hc == 0 || chunks != NULL);
+    g_return_val_if_fail (htlc != NULL, NULL);
+    g_return_val_if_fail (hc >= 0, NULL);
+    g_return_val_if_fail (hc == 0 || chunks != NULL, NULL);
 
-    struct qbuf *q = &htlc->out;
-    gsize this_off = q->pos + q->len;
     gsize needed = gtkhx_proto_pack_message_size (chunks, (size_t) hc);
     if (needed == 0) {
         /* pack_message_size returns 0 on hc > MAX_PACK_CHUNKS (currently
@@ -582,14 +582,12 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                  hc);
     }
 
-    q->len += needed;
-    q->buf = g_realloc (q->buf, q->pos + q->len);
+    guint8 *buf = g_malloc (needed);
 
     guint32 my_trans = hx_conn_trans_post_inc (htlc);
 
-    size_t written = gtkhx_proto_pack_message (q->buf + this_off, needed,
-                                               type, my_trans, flag,
-                                               chunks, (size_t) hc);
+    size_t written = gtkhx_proto_pack_message (buf, needed, type, my_trans,
+                                               flag, chunks, (size_t) hc);
     if (written != needed) {
         /* pack_message returns 0 on: hc > MAX_PACK_CHUNKS, NULL chunks
          * with hc > 0, any chunk with len > 0 && data == NULL, or
@@ -601,6 +599,11 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                  "len in some chunk)",
                  written, (size_t) needed);
     }
+
+    if (out_len) {
+        *out_len = needed;
+    }
+    return buf;
 }
 
 /* See doc-comment in proto_helpers.h. */

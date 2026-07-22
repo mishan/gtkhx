@@ -55,8 +55,14 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
+    /* Stash the packed frame into htlc->in so the tests can walk it
+     * (hlpack now returns a fresh buffer — there's no htlc->out). */
+    g_free (htlc->in.buf);
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
 }
 
 /* Production declaration lives in network.h, which we deliberately
@@ -70,7 +76,11 @@ void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
 {
-    hlpack_chunks (htlc, type, flag, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
+    g_free (htlc->in.buf);
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
 }
 
 /* ---------- entry-buffer construction helper ---------- */
@@ -277,20 +287,7 @@ static void
 htlc_free (struct htlc_conn *htlc)
 {
     g_free (htlc->in.buf);
-    g_free (htlc->out.buf);
     htlc->in.buf = NULL;
-    htlc->out.buf = NULL;
-}
-
-static void
-flip_out_to_in (struct htlc_conn *htlc)
-{
-    g_free (htlc->in.buf);
-    htlc->in.buf = htlc->out.buf;
-    htlc->in.pos = htlc->out.len;
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
 }
 
 static void
@@ -302,7 +299,7 @@ test_send_skipped_without_cap (void)
 
     g_assert_false (hx_get_chat_history (&htlc, 0, 0, 0, 0));
     /* Nothing got written. */
-    g_assert_cmpuint (htlc.out.len, ==, 0);
+    g_assert_cmpuint (htlc.in.pos, ==, 0);
 
     htlc_free (&htlc);
 }
@@ -319,7 +316,6 @@ test_send_bare_request (void)
                                         /*before=*/0, /*after=*/0,
                                         /*limit=*/0));
 
-    flip_out_to_in (&htlc);
 
     int saw_channel = 0;
     int total = 0;
@@ -358,7 +354,6 @@ test_send_with_before_cursor (void)
                                         /*before=*/1000,
                                         /*after=*/0, /*limit=*/50));
 
-    flip_out_to_in (&htlc);
 
     int saw_channel = 0, saw_before = 0, saw_limit = 0, saw_after = 0;
     dh_start (&htlc)
@@ -406,7 +401,6 @@ test_send_with_after_cursor (void)
     g_assert_true (hx_get_chat_history (&htlc, 0, /*before=*/0,
                                         /*after=*/5000, /*limit=*/0));
 
-    flip_out_to_in (&htlc);
 
     int saw_after = 0;
     dh_start (&htlc)
@@ -435,7 +429,6 @@ test_send_with_range_query (void)
     g_assert_true (hx_get_chat_history (&htlc, 0, /*before=*/600,
                                         /*after=*/200, /*limit=*/50));
 
-    flip_out_to_in (&htlc);
 
     int saw_before = 0, saw_after = 0, saw_limit = 0;
     dh_start (&htlc)
@@ -463,11 +456,11 @@ test_send_request_type_and_trans (void)
 
     /* hl_hdr starts with guint32 type at offset 0 (big-endian on
      * the wire — see struct hl_hdr in hotline.h). */
-    g_assert_cmpuint (htlc.out.len, >=, 4);
-    guint32 hdr_type = ((guint32) htlc.out.buf[0] << 24)
-                     | ((guint32) htlc.out.buf[1] << 16)
-                     | ((guint32) htlc.out.buf[2] << 8)
-                     |  (guint32) htlc.out.buf[3];
+    g_assert_cmpuint (htlc.in.pos, >=, 4);
+    guint32 hdr_type = ((guint32) htlc.in.buf[0] << 24)
+                     | ((guint32) htlc.in.buf[1] << 16)
+                     | ((guint32) htlc.in.buf[2] << 8)
+                     |  (guint32) htlc.in.buf[3];
     g_assert_cmphex (hdr_type, ==, HTLC_HDR_GET_CHAT_HISTORY);
 
     htlc_free (&htlc);

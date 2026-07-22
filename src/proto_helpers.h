@@ -183,39 +183,38 @@ extern gboolean hx_banner_extract (struct htlc_conn *htlc,
  *
  * one per chunk. `data` is allowed to be NULL when `len == 0`.
  *
- * Side effects:
- *   - htlc->out.buf is g_realloc'd to fit the new message and
- *     populated with the wire bytes (header + chunks).
- *   - htlc->out.len is bumped.
- *   - htlc->trans is incremented (the transaction ID assigned to
- *     this message is the value htlc->trans had on entry).
+ * Returns a newly g_malloc'd buffer holding the wire bytes (header +
+ * chunks); the caller owns it and frees with g_free. `*out_len` (when
+ * non-NULL) receives the byte length. htlc->trans is incremented — the
+ * transaction ID assigned to this message is the value htlc->trans had
+ * on entry.
  *
- * No fd write, no cipher / compression, no proto_trace logging —
- * those layers stay in hlwrite(). Caller must initialise
- * htlc->out (qbuf_set or zeroed via memset) before the first
- * hlpack call.
+ * No fd write, no cipher / compression, no proto_trace logging — those
+ * layers stay in hlwrite(). There is no per-connection send buffer: the
+ * message is packed straight into the returned block, handed to the
+ * transport, and freed.
  */
-extern void hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
-                    va_list ap);
+extern guint8 *hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                       int hc, va_list ap, gsize *out_len);
 
 /*
  * Chunk-array variant of hlpack.
  *
- * Same wire format and same effect on htlc->out as hlpack, but the
- * chunks come from a caller-built array rather than a va_list. This
- * lets shared message builders (e.g. login_packet.c::hx_login_pack)
- * assemble their chunks programmatically and hand them to a single
- * packer — no need for each builder to wrap its own variadic
- * dispatch.
+ * Same wire format and same return contract as hlpack (a fresh
+ * caller-freed buffer + length), but the chunks come from a
+ * caller-built array rather than a va_list. This lets shared message
+ * builders (e.g. login_packet.c::hx_login_pack) assemble their chunks
+ * programmatically and hand them to a single packer — no need for each
+ * builder to wrap its own variadic dispatch.
  *
  * The struct hx_chunk type is a thin (type, len, data) triple; the
  * caller owns the backing storage for the data pointers (they must
- * outlive the hlpack_chunks call, which copies bytes into
- * htlc->out). hc is the number of chunks in the array.
+ * outlive the hlpack_chunks call, which copies their bytes into the
+ * returned buffer). hc is the number of chunks in the array.
  *
- * No fd write, no cipher / compression, no proto_trace logging —
- * those layers stay in hlwrite() and the harness's
- * integration_send_chunks() wrapper.
+ * No fd write, no cipher / compression, no proto_trace logging — those
+ * layers stay in hlwrite() and the harness's integration_send_chunks()
+ * wrapper.
  */
 struct hx_chunk {
     guint16 type;
@@ -223,8 +222,9 @@ struct hx_chunk {
     const void *data;
 };
 
-extern void hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
-                           const struct hx_chunk *chunks, int hc);
+extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type,
+                              guint32 flag, const struct hx_chunk *chunks,
+                              int hc, gsize *out_len);
 
 /*
  * Decode the 22-byte Hotline message header into host-order fields.

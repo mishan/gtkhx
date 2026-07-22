@@ -3,7 +3,7 @@
  *
  *   1. Build a Hotline message via hlpack (the pure-packing half of
  *      hlwrite — no fd / cipher / compress / proto_trace).
- *   2. Inspect the bytes hlpack laid down in htlc->out.buf.
+ *   2. Inspect the bytes hlpack packed (staged into htlc->in.buf).
  *   3. Move them over to htlc->in.buf and parse them back via the
  *      dh_start chunk walker.
  *   4. Assert structure round-trips verbatim.
@@ -29,18 +29,39 @@
 #include "proto_helpers.h"
 #include "login_packet.h"
 
-/* Variadic test wrapper: builds a va_list and forwards to hlpack.
- * Mirrors the public hlwrite() API minus the side effects. */
+/* Variadic test wrapper: pack via hlpack and return the fresh buffer
+ * (caller frees) plus its length. hlpack no longer has a per-connection
+ * out buffer — it hands back the packed block directly. */
+static guint8 *
+hlpack_buf_v (struct htlc_conn *htlc, gsize *len, guint32 type, guint32 flag,
+              int hc, ...)
+{
+    va_list ap;
+    va_start (ap, hc);
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, len);
+    va_end (ap);
+    return buf;
+}
+
+/* The common case: pack and stash the message into htlc->in so the
+ * dh_start walker + read_packed_hdr can see it. Mirrors the public
+ * hlwrite() API minus the send + trace side effects. */
 static void
 hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
+
+    g_free (htlc->in.buf);
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
+    htlc->in.len = len;
 }
 
-/* Fresh htlc with empty out and trans counter. */
+/* Fresh htlc with empty buffers and trans counter. */
 static void
 htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
 {
@@ -48,39 +69,21 @@ htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
     htlc->trans = starting_trans;
 }
 
-/* After hlpack runs, copy htlc->out into htlc->in so the dh_start
- * walker can see the just-packed message. Frees the caller of any
- * "where does the message live" bookkeeping. */
-static void
-flip_out_to_in (struct htlc_conn *htlc)
-{
-    g_free (htlc->in.buf);
-    htlc->in.buf = htlc->out.buf;
-    htlc->in.pos = htlc->out.len;
-    htlc->in.len = htlc->out.len;
-
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-}
-
 static void
 htlc_free (struct htlc_conn *htlc)
 {
     g_free (htlc->in.buf);
-    g_free (htlc->out.buf);
     htlc->in.buf = NULL;
-    htlc->out.buf = NULL;
 }
 
-/* Read back the header that hlpack wrote at out.buf[0]. Returns the
- * decoded fields in host order. */
+/* Read back the header that hlpack wrote at the front of htlc->in.
+ * Returns the decoded fields in host order. */
 static void
 read_packed_hdr (const struct htlc_conn *htlc, guint32 *type, guint32 *trans,
                  guint32 *flag, guint16 *hc)
 {
-    g_assert_cmpuint (htlc->out.len, >=, SIZEOF_HL_HDR);
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc->out.buf;
+    g_assert_cmpuint (htlc->in.pos, >=, SIZEOF_HL_HDR);
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc->in.buf;
     if (type) {
         *type = ntohl (h->type);
     }
@@ -152,7 +155,6 @@ test_hlwrite_single_chunk_round_trip (void)
     read_packed_hdr (&htlc, NULL, NULL, NULL, &hc);
     g_assert_cmpuint (hc, ==, 1);
 
-    flip_out_to_in (&htlc);
 
     int found_chunks = 0;
     dh_start (&htlc)
@@ -199,7 +201,6 @@ test_hlwrite_login_message_round_trip (void)
     g_assert_cmphex (trans, ==, 42);
     g_assert_cmpuint (hc, ==, 4);
 
-    flip_out_to_in (&htlc);
 
     gboolean saw_name = FALSE, saw_login = FALSE, saw_pass = FALSE,
              saw_icon = FALSE;
@@ -256,7 +257,6 @@ test_hlwrite_zero_length_chunk_round_trip (void)
     hlpack_v (&htlc, HTLC_HDR_USER_GETLIST, 0, 1, (int)HTLS_DATA_UID, /*len=*/0,
               (guint8 *)NULL);
 
-    flip_out_to_in (&htlc);
 
     int found = 0;
     dh_start (&htlc)
@@ -281,28 +281,36 @@ test_hlwrite_two_messages_concatenate (void)
 
     const char *a = "first";
     const char *b = "second";
-    hlpack_v (&htlc, HTLC_HDR_CHAT, 0, 1, (int)HTLS_DATA_CHAT, (int)strlen (a),
-              (guint8 *)a);
-    hlpack_v (&htlc, HTLC_HDR_CHAT, 0, 1, (int)HTLS_DATA_CHAT, (int)strlen (b),
-              (guint8 *)b);
+    /* Two sequential packs: each hands back its own frame and the trans
+	 * counter advances once per message. (There is no send buffer that
+	 * accumulates them — the transport framing is one message per send.) */
+    gsize len0 = 0, len1 = 0;
+    guint8 *m0 = hlpack_buf_v (&htlc, &len0, HTLC_HDR_CHAT, 0, 1,
+                              (int)HTLS_DATA_CHAT, (int)strlen (a),
+                              (guint8 *)a);
+    guint8 *m1 = hlpack_buf_v (&htlc, &len1, HTLC_HDR_CHAT, 0, 1,
+                              (int)HTLS_DATA_CHAT, (int)strlen (b),
+                              (guint8 *)b);
 
     /* Trans bumped by 2. */
     g_assert_cmphex (htlc.trans, ==, 102);
 
-    /* The two messages are laid down back-to-back. The first
-	 * header sits at out.buf[0]. */
-    const struct hl_hdr *h0 = (const struct hl_hdr *)htlc.out.buf;
+    /* First message: trans 100. */
+    g_assert_cmpuint (len0, >=, SIZEOF_HL_HDR);
+    const struct hl_hdr *h0 = (const struct hl_hdr *)m0;
     g_assert_cmphex (ntohl (h0->trans), ==, 100);
     g_assert_cmphex (ntohl (h0->type), ==, HTLC_HDR_CHAT);
+    /* First message's on-wire length is header + chunk hdr + payload. */
+    g_assert_cmpuint (len0, ==, SIZEOF_HL_HDR + SIZEOF_HL_DATA_HDR + strlen (a));
 
-    /* Second header sits right after the first message's
-	 * (header + chunk + payload). */
-    gsize first_len = SIZEOF_HL_HDR + SIZEOF_HL_DATA_HDR + strlen (a);
-    g_assert_cmpuint (htlc.out.len, >=, first_len + SIZEOF_HL_HDR);
-    const struct hl_hdr *h1 = (const struct hl_hdr *)(htlc.out.buf + first_len);
+    /* Second message: trans 101, its own buffer. */
+    g_assert_cmpuint (len1, >=, SIZEOF_HL_HDR);
+    const struct hl_hdr *h1 = (const struct hl_hdr *)m1;
     g_assert_cmphex (ntohl (h1->trans), ==, 101);
     g_assert_cmphex (ntohl (h1->type), ==, HTLC_HDR_CHAT);
 
+    g_free (m0);
+    g_free (m1);
     htlc_free (&htlc);
 }
 
@@ -328,7 +336,7 @@ test_hlwrite_header_len_field_matches_wire_format (void)
 	 *   29 - (22 - 2)  =  29 - 20  =  9
 	 * (the 22-2 carve-out is "header without the hc field", since
 	 * hc is part of the data section in the wire format). */
-    const struct hl_hdr *h = (const struct hl_hdr *)htlc.out.buf;
+    const struct hl_hdr *h = (const struct hl_hdr *)htlc.in.buf;
     g_assert_cmpuint (ntohl (h->len), ==, 9);
     g_assert_cmpuint (ntohl (h->len2), ==, 9);
 
@@ -359,7 +367,6 @@ test_hlwrite_round_trip_stress (void)
               (int)HTLC_DATA_PASSWORD, 256, huge, (int)HTLC_DATA_ICON, 2,
               (guint8 *)&small_int, (int)HTLC_DATA_NAME, 1024, huge);
 
-    flip_out_to_in (&htlc);
 
     int chunks = 0;
     dh_start (&htlc)
@@ -420,7 +427,7 @@ test_hlpack_chunks_matches_hlpack (void)
 {
     /* Pack the same login-shaped message two ways: once via the
 	 * va_list-style hlpack, once via the array-style hlpack_chunks.
-	 * The htlc->out bytes should be identical. */
+	 * The packed bytes should be identical. */
     const char *login = "guest";
     guint16 icon_be = htons (412);
     guint16 cv_be = htons (185);
@@ -439,13 +446,15 @@ test_hlpack_chunks_matches_hlpack (void)
         { HTLC_DATA_LOGIN,          (guint16) strlen (login), login },
         { HTLC_DATA_CLIENTVERSION,  2, &cv_be }
     };
-    hlpack_chunks (&h2, HTLC_HDR_LOGIN, 0, chunks, 3);
+    gsize l2 = 0;
+    guint8 *b2 = hlpack_chunks (&h2, HTLC_HDR_LOGIN, 0, chunks, 3, &l2);
 
-    g_assert_cmpuint (h1.out.len, ==, h2.out.len);
-    g_assert_cmpmem (h1.out.buf, h1.out.len, h2.out.buf, h2.out.len);
+    g_assert_cmpuint (h1.in.pos, ==, l2);
+    g_assert_cmpmem (h1.in.buf, h1.in.pos, b2, l2);
     /* And the trans counter advanced by the same amount in both. */
     g_assert_cmphex (h1.trans, ==, h2.trans);
 
+    g_free (b2);
     htlc_free (&h1);
     htlc_free (&h2);
 }
@@ -459,11 +468,13 @@ test_hlpack_chunks_empty (void)
     htlc_init (&h2, 1);
 
     hlpack_v (&h1, HTLC_HDR_PING, 0, 0);
-    hlpack_chunks (&h2, HTLC_HDR_PING, 0, NULL, 0);
+    gsize l2 = 0;
+    guint8 *b2 = hlpack_chunks (&h2, HTLC_HDR_PING, 0, NULL, 0, &l2);
 
-    g_assert_cmpuint (h1.out.len, ==, h2.out.len);
-    g_assert_cmpmem (h1.out.buf, h1.out.len, h2.out.buf, h2.out.len);
+    g_assert_cmpuint (h1.in.pos, ==, l2);
+    g_assert_cmpmem (h1.in.buf, h1.in.pos, b2, l2);
 
+    g_free (b2);
     htlc_free (&h1);
     htlc_free (&h2);
 }
@@ -483,11 +494,13 @@ test_hlpack_chunks_zero_length_chunk (void)
     struct hx_chunk chunks[1] = {
         { HTLC_DATA_SESSIONKEY, 0, NULL }
     };
-    hlpack_chunks (&h2, HTLC_HDR_LOGIN, 0, chunks, 1);
+    gsize l2 = 0;
+    guint8 *b2 = hlpack_chunks (&h2, HTLC_HDR_LOGIN, 0, chunks, 1, &l2);
 
-    g_assert_cmpuint (h1.out.len, ==, h2.out.len);
-    g_assert_cmpmem (h1.out.buf, h1.out.len, h2.out.buf, h2.out.len);
+    g_assert_cmpuint (h1.in.pos, ==, l2);
+    g_assert_cmpmem (h1.in.buf, h1.in.pos, b2, l2);
 
+    g_free (b2);
     htlc_free (&h1);
     htlc_free (&h2);
 }
@@ -512,7 +525,7 @@ test_hl_hdr_decode_basic (void)
 
     guint32 type, trans, flag, wire_len, body_len;
     guint16 hc;
-    g_assert_true (hl_hdr_decode (htlc.out.buf, &type, &trans, &flag, &hc,
+    g_assert_true (hl_hdr_decode (htlc.in.buf, &type, &trans, &flag, &hc,
                                   &wire_len, &body_len));
     g_assert_cmphex (type, ==, HTLC_HDR_CHAT);
     g_assert_cmphex (trans, ==, 77);

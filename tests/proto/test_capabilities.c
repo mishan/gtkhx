@@ -37,13 +37,20 @@
 
 /* ---------- send side: hlpack + dh_start round trip ---------- */
 
+/* Pack straight into htlc->in so dh_start can walk it — hlpack now
+ * returns a fresh buffer (there's no htlc->out send buffer anymore). */
 static void
 hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
+
+    g_free (htlc->in.buf);
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
 }
 
 static void
@@ -54,23 +61,10 @@ htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
 }
 
 static void
-flip_out_to_in (struct htlc_conn *htlc)
-{
-    g_free (htlc->in.buf);
-    htlc->in.buf = htlc->out.buf;
-    htlc->in.pos = htlc->out.len;
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-}
-
-static void
 htlc_free (struct htlc_conn *htlc)
 {
     g_free (htlc->in.buf);
-    g_free (htlc->out.buf);
     htlc->in.buf = NULL;
-    htlc->out.buf = NULL;
 }
 
 /* The minimum cap chunk we'd send on a legacy LOGIN: u16 big-endian
@@ -85,7 +79,6 @@ test_send_capabilities_chunk_layout (void)
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/1, (int)HTLC_DATA_CAPABILITIES,
               2, &caps16);
 
-    flip_out_to_in (&htlc);
 
     int found = 0;
     dh_start (&htlc)
@@ -117,7 +110,6 @@ test_send_multiple_caps_bits (void)
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/1, (int)HTLC_DATA_CAPABILITIES,
               2, &caps16);
 
-    flip_out_to_in (&htlc);
 
     dh_start (&htlc)
     {
