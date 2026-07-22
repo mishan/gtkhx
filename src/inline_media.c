@@ -57,12 +57,7 @@ inline_media_reset_advisory_limits (struct htlc_conn *htlc)
     if (!htlc) {
         return;
     }
-    htlc->media_max_bytes = 0;
-    htlc->media_max_dimension = 0;
-    htlc->media_max_pixels = 0;
-    htlc->media_chunk_size = 0;
-    htlc->media_max_frames = 0;
-    htlc->media_max_duration_ms = 0;
+    hx_conn_reset_media_limits (htlc);
 }
 
 void
@@ -75,10 +70,10 @@ inline_media_log_advertised_limits (struct htlc_conn *htlc)
                "server inline-media limits: max_bytes=%u max_dim=%u "
                "max_pixels=%u chunk_size=%u max_frames=%u "
                "max_duration_ms=%u (0 = use default)",
-               (unsigned) htlc->media_max_bytes,
-               (unsigned) htlc->media_max_dimension,
-               (unsigned) htlc->media_max_pixels,
-               (unsigned) htlc->media_chunk_size,
-               (unsigned) htlc->media_max_frames,
-               (unsigned) htlc->media_max_duration_ms);
+               (unsigned) hx_conn_media_max_bytes (htlc),
+               (unsigned) hx_conn_media_max_dimension (htlc),
+               (unsigned) hx_conn_media_max_pixels (htlc),
+               (unsigned) hx_conn_media_chunk_size (htlc),
+               (unsigned) hx_conn_media_max_frames (htlc),
+               (unsigned) hx_conn_media_max_duration_ms (htlc));
 }
