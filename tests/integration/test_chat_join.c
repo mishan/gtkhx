@@ -63,7 +63,7 @@ test_chat_join_member_visible (void)
     /* Step 3: Bob drains for the CHAT_INVITE. */
     g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    g_assert_true (hx_chat_invite_extract (htlc_b.in.buf, htlc_b.in.pos, &im));
+    g_assert_true (hx_chat_invite_extract (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos, &im));
     g_assert_cmphex (im.cid, ==, chat_id);
 
     /* Steps 4 + 5: Bob CHAT_JOIN; harness drains to the TASK reply
@@ -73,7 +73,7 @@ test_chat_join_member_visible (void)
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
 
     int n_user_list = 0;
-    dh_start (htlc_b.in.buf, htlc_b.in.pos)
+    dh_start (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             n_user_list++;

@@ -1322,8 +1322,8 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
      * is an internal inconsistency. Surface it instead of logging
      * a misleading zero-mids/empty-blob summary.
      *
-     * SDP summary for the trace; the full SDP body lands in
-     * htlc->in.buf at the offset the per-field accessor returns. */
+     * SDP summary for the trace; the full SDP body lands in the
+     * received frame at the offset the per-field accessor returns. */
     const guint8 *sdp_ptr = NULL;
     gsize sdp_len = 0;
     if (!gtkhx_proto_voice_reply_field (frame, frame_len, 0,
@@ -1435,12 +1435,12 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame, gsize fr
 }
 #endif /* HAVE_VOICE */
 
-/* Dispatch a fully-staged received frame. The Rust
- * hxnet actor already parsed the header and the bridge staged the whole frame
- * (22-byte header + body) into htlc->in.buf, so this no longer re-decodes the
- * header or runs the old two-phase receive state machine — it traces, routes
- * the opcode to a body handler (via the Rust dispatch::route table behind
- * hx_recv_route), and calls it. */
+/* Dispatch a received frame. The Rust hxnet actor already parsed the header
+ * and the bridge hands us the whole frame (22-byte header + body) as a
+ * (frame, frame_len) slice, so this no longer re-decodes the header or runs
+ * the old two-phase receive state machine — it traces, routes the opcode to a
+ * body handler (via the Rust dispatch::route table behind hx_recv_route), and
+ * calls it. */
 void
 hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                    guint32 type, guint32 trans,
@@ -1868,7 +1868,7 @@ rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
 
 /* GIF-icons extension (fogWraith GIF-Icons.md). Parsing lives in the
  * Rust hotline-proto crate (crate::gif_icons via the gtkhx_proto_*
- * shims); these handlers pass htlc->in.buf/pos straight in and only
+ * shims); these handlers pass the received frame slice straight in and only
  * emit GtkhxSession signals — no chunk walking on the C side. */
 
 /* gif-icon-data validation + emit lives in the Rust hxicon-recv crate: it

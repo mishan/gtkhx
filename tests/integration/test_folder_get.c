@@ -137,7 +137,7 @@ test_folder_get_round_trip (void)
 		 * rather than failing the whole test. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
             gchar *msg = g_strdup_printf (
                 "GETFOLDER refused: \"%s\". The test_folder/ fixture "
                 "is added by tests/mhxd/Dockerfile but only takes "
@@ -158,7 +158,7 @@ test_folder_get_round_trip (void)
     /* Success path — pull HTXF_REF + HTXF_SIZE. NFILES is
 	 * mhxd-version-dependent. */
     guint32 xfer_ref = 0, xfer_size = 0, nfiles = 0;
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_REF:

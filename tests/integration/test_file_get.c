@@ -106,7 +106,7 @@ test_file_get_round_trip (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("file_get refused by server: \"%s\". "
                                 "Is files/test.txt seeded in the container?",
                                 err);
@@ -119,7 +119,7 @@ test_file_get_round_trip (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
+    hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024); /* sanity cap */

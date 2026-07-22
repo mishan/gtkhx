@@ -29,9 +29,9 @@
 #include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
 #include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
 
-/* The production receive dispatch (rcv.c). We stage the parsed frame into
- * htlc->in.buf and hand the header fields to it; it routes the opcode to a
- * body handler and calls it. */
+/* The production receive dispatch (rcv.c). We hand it the assembled frame
+ * as an explicit (frame, frame_len) slice plus the parsed header fields; it
+ * routes the opcode to a body handler and calls it. */
 extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
                               gsize frame_len, guint32 type,
                                guint32 trans, guint32 flag, guint32 body_len);

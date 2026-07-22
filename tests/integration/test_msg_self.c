@@ -65,7 +65,7 @@ test_msg_self_doesnt_break_stream (void)
         drained++;
         if (hdr_type (&htlc) == HTLS_HDR_MSG) {
             struct hx_msg_msg pm;
-            if (hx_msg_extract (htlc.in.buf, htlc.in.pos, &pm) && pm.uid == htlc.uid) {
+            if (hx_msg_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &pm) && pm.uid == htlc.uid) {
                 saw_self_msg = TRUE;
             }
         } else if (hdr_type (&htlc) == HTLS_HDR_TASK

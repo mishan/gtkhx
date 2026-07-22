@@ -640,9 +640,7 @@ task_update (session *sess, struct task *tsk)
     struct gtask *gtsk;
     /* tsk->pos / tsk->len are byte counts on the inbound TASK
 	 * reply: pos is bytes received so far, len is bytes still
-	 * to read, so pos + len is the announced total. (See
-	 * network.c::update_task which copies them out of
-	 * htlc->in.pos / htlc->in.len.) */
+	 * to read, so pos + len is the announced total. */
     guint32 pos = tsk->pos;
     guint32 len = tsk->len;
     guint32 tot = pos + len;

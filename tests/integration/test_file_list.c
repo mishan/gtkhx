@@ -56,7 +56,7 @@ test_file_list_round_trip (void)
 		 * actual message text is server-implementation-detail. */
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
         g_test_message ("server returned task-error for FILE_LIST: "
                         "\"%s\" (this is fine if files/ is empty)",
                         err);
@@ -66,7 +66,7 @@ test_file_list_round_trip (void)
 		 * contents of mhxd's files/ are container-deployment-
 		 * specific. */
         int n = 0;
-        dh_start (htlc.in.buf, htlc.in.pos)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_FILE_LIST) {
                 n++;

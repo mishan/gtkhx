@@ -179,10 +179,10 @@ rcv_login_reset (void)
 }
 
 /* hx_rcv_hdr is the production receive callback. In the Phase G
- * orchestrator path, hx_bridge_dispatch_frame stages the replayed
- * LOGIN-reply header into htlc->in.buf and calls the body-handler
- * dispatch (== this stub) — so we record the dispatched frame's header
- * fields here. The
+ * orchestrator path, hx_bridge_dispatch_frame hands the replayed
+ * LOGIN reply to the body-handler dispatch (== this stub) as an
+ * explicit (frame, frame_len) slice — so we record the dispatched
+ * frame's header fields here. The
  * real
  * production hx_rcv_hdr lives in rcv.c and drags the whole UI
  * stack; the orchestrator test only needs to prove the reply was
@@ -230,27 +230,32 @@ connect_test_reset_rcv_record (void)
  * 0x01f0 — same tag is reused server→client for the echo). */
 #define CONNECT_TEST_TAG_CAPABILITIES 0x01f0
 
-/* Body handler the recording hx_rcv_hdr installs for the FIRST
- * dispatched frame. By the time hx_bridge_dispatch_frame calls this,
- * the full frame (22-byte header + body) is staged in htlc->in.buf;
- * walk the chunk list for the capabilities echo. */
+/* Body handler for the FIRST dispatched frame. hx_bridge_dispatch_frame
+ * hands us the whole frame (22-byte header + body) as an explicit
+ * (frame, frame_len) slice; walk the chunk list for the capabilities echo. */
 static void
-connect_test_rcv_body (struct htlc_conn *htlc)
+connect_test_rcv_body (const guint8 *frame, gsize frame_len)
 {
+    if (frame_len < SIZEOF_HL_HDR) {
+        return;
+    }
     guint16 hc_be;
     guint32 len_be;
-    memcpy (&hc_be, htlc->in.buf + 20, 2);    /* hl_hdr.hc  @ offset 20 */
-    memcpy (&len_be, htlc->in.buf + 12, 4);   /* hl_hdr.len @ offset 12 */
+    memcpy (&hc_be, frame + 20, 2);    /* hl_hdr.hc  @ offset 20 */
+    memcpy (&len_be, frame + 12, 4);   /* hl_hdr.len @ offset 12 */
     guint16 hc = GUINT16_FROM_BE (hc_be);
     guint32 wire_len = GUINT32_FROM_BE (len_be);
     gsize body_len = wire_len >= 2 ? (gsize) (wire_len - 2) : 0;
     gsize off = SIZEOF_HL_HDR;
     gsize end = SIZEOF_HL_HDR + body_len;
+    if (end > frame_len) {
+        end = frame_len;
+    }
 
     for (guint16 i = 0; i < hc && off + 4 <= end; i++) {
         guint16 tag_be, dlen_be;
-        memcpy (&tag_be, htlc->in.buf + off, 2);
-        memcpy (&dlen_be, htlc->in.buf + off + 2, 2);
+        memcpy (&tag_be, frame + off, 2);
+        memcpy (&dlen_be, frame + off + 2, 2);
         guint16 tag = GUINT16_FROM_BE (tag_be);
         guint16 dlen = GUINT16_FROM_BE (dlen_be);
         off += 4;
@@ -268,7 +273,7 @@ connect_test_rcv_body (struct htlc_conn *htlc)
              * and made the negotiation assertion spuriously fail. */
             guint64 caps = 0;
             for (guint16 b = 0; b < dlen; b++) {
-                caps = (caps << 8) | htlc->in.buf[off + b];
+                caps = (caps << 8) | frame[off + b];
             }
             connect_test_first_rcv_caps_value = (guint16) caps;
         }
@@ -280,8 +285,7 @@ void
 hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                    guint32 type, guint32 trans, guint32 flag, guint32 body_len)
 {
-    (void) frame;
-    (void) frame_len;
+    (void) htlc;
     (void) body_len;
     gboolean is_first = (connect_test_rcv_count == 0);
     if (is_first) {
@@ -294,13 +298,10 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     connect_test_last_rcv_flag = flag;
     connect_test_rcv_count++;
 
-    /* hx_bridge_dispatch_frame has already staged the full frame (22-byte
-     * header + body) into htlc->in.buf, so — unlike the old two-phase
-     * hx_rcv_hdr handoff — there's no qbuf/two-phase dance to mirror here.
-     * Inspect the first frame (the replayed LOGIN reply) directly for the
-     * capabilities echo. */
-    if (is_first && htlc && htlc->in.buf) {
-        connect_test_rcv_body (htlc);
+    /* Inspect the first frame (the replayed LOGIN reply) directly for
+     * the capabilities echo. */
+    if (is_first && frame) {
+        connect_test_rcv_body (frame, frame_len);
     }
 }
 

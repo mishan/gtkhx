@@ -120,7 +120,7 @@ test_login_round_trip (void)
      * with a task-error (which the drain reports as a failure).
      * Pin the contract by sanity-checking htlc->in has a parsed
      * header buffer of at least the wire-header size. */
-    g_assert_cmpuint (htlc.in.len, >=, SIZEOF_HL_HDR);
+    g_assert_cmpuint (hx_test_in(&htlc)->len, >=, SIZEOF_HL_HDR);
 
     integration_release_htlc (&htlc);
     integration_close (fd);
@@ -170,7 +170,7 @@ test_chat_round_trip (void)
         if (hdr_type (&htlc) != HTLS_HDR_CHAT) {
             continue;
         }
-        if (!hx_chat_extract (htlc.in.buf, htlc.in.pos, &cm)) {
+        if (!hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &cm)) {
             continue;
         }
         if (g_strstr_len (cm.text, cm.text_len, marker) != NULL) {

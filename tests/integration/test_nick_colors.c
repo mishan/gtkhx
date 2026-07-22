@@ -186,7 +186,7 @@ test_nick_color_user_list_trailer (void)
     gboolean found_us_at_all = FALSE;
     guint32 read_color = 0;
     int n_records = 0;
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type != HTLS_DATA_USER_LIST) {
             continue;

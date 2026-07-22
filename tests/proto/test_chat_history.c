@@ -33,6 +33,7 @@
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
+#include "htlc_recv_buf.h"
 #include "proto_helpers.h"
 #include "chat_history.h"
 
@@ -60,9 +61,9 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     va_end (ap);
     /* Stash the packed frame into htlc->in so the tests can walk it
      * (hlpack now returns a fresh buffer — there's no htlc->out). */
-    g_free (htlc->in.buf);
-    htlc->in.buf = buf;
-    htlc->in.pos = len;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = buf;
+    hx_test_in(htlc)->pos = len;
 }
 
 /* Production declaration lives in network.h, which we deliberately
@@ -78,9 +79,9 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 {
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
-    g_free (htlc->in.buf);
-    htlc->in.buf = buf;
-    htlc->in.pos = len;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = buf;
+    hx_test_in(htlc)->pos = len;
 }
 
 /* ---------- entry-buffer construction helper ---------- */
@@ -286,8 +287,8 @@ htlc_init (struct htlc_conn *htlc, guint64 caps)
 static void
 htlc_free (struct htlc_conn *htlc)
 {
-    g_free (htlc->in.buf);
-    htlc->in.buf = NULL;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = NULL;
 }
 
 static void
@@ -299,7 +300,7 @@ test_send_skipped_without_cap (void)
 
     g_assert_false (hx_get_chat_history (&htlc, 0, 0, 0, 0));
     /* Nothing got written. */
-    g_assert_cmpuint (htlc.in.pos, ==, 0);
+    g_assert_cmpuint (hx_test_in(&htlc)->pos, ==, 0);
 
     htlc_free (&htlc);
 }
@@ -319,7 +320,7 @@ test_send_bare_request (void)
 
     int saw_channel = 0;
     int total = 0;
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         total++;
         switch (_type) {
@@ -356,7 +357,7 @@ test_send_with_before_cursor (void)
 
 
     int saw_channel = 0, saw_before = 0, saw_limit = 0, saw_after = 0;
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         switch (_type) {
         case HTLC_DATA_CHANNEL_ID:
@@ -403,7 +404,7 @@ test_send_with_after_cursor (void)
 
 
     int saw_after = 0;
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type == HTLC_DATA_HISTORY_AFTER) {
             saw_after++;
@@ -431,7 +432,7 @@ test_send_with_range_query (void)
 
 
     int saw_before = 0, saw_after = 0, saw_limit = 0;
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type == HTLC_DATA_HISTORY_BEFORE) saw_before++;
         if (_type == HTLC_DATA_HISTORY_AFTER)  saw_after++;
@@ -456,11 +457,11 @@ test_send_request_type_and_trans (void)
 
     /* hl_hdr starts with guint32 type at offset 0 (big-endian on
      * the wire — see struct hl_hdr in hotline.h). */
-    g_assert_cmpuint (htlc.in.pos, >=, 4);
-    guint32 hdr_type = ((guint32) htlc.in.buf[0] << 24)
-                     | ((guint32) htlc.in.buf[1] << 16)
-                     | ((guint32) htlc.in.buf[2] << 8)
-                     |  (guint32) htlc.in.buf[3];
+    g_assert_cmpuint (hx_test_in(&htlc)->pos, >=, 4);
+    guint32 hdr_type = ((guint32) hx_test_in(&htlc)->buf[0] << 24)
+                     | ((guint32) hx_test_in(&htlc)->buf[1] << 16)
+                     | ((guint32) hx_test_in(&htlc)->buf[2] << 8)
+                     |  (guint32) hx_test_in(&htlc)->buf[3];
     g_assert_cmphex (hdr_type, ==, HTLC_HDR_GET_CHAT_HISTORY);
 
     htlc_free (&htlc);

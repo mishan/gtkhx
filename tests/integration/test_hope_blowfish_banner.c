@@ -118,7 +118,7 @@ test_hope_blowfish_banner_htxf (void)
         if (hdr_type (&htlc) != HTLS_HDR_BANNER) {
             continue;
         }
-        dh_start (htlc.in.buf, htlc.in.pos)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_BANNER_TYPE) {
                 banner_type = g_strndup ((const char *) dh->data, _len);
@@ -155,7 +155,7 @@ test_hope_blowfish_banner_htxf (void)
             continue;
         }
         got_reply = TRUE;
-        hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
+        hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (reply.ref, >, 0);

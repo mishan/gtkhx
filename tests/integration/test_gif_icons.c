@@ -144,7 +144,7 @@ test_gif_icons_set_get_roundtrip (void)
 
     struct gtkhx_proto_icon_entry entry;
     g_assert_true (
-        gtkhx_proto_parse_icon_get_reply (htlc.in.buf, htlc.in.pos, &entry));
+        gtkhx_proto_parse_icon_get_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &entry));
     g_assert_cmpuint (entry.uid, ==, htlc.uid);
     g_assert_cmpuint (entry.gif_len, ==, sizeof (TINY_GIF));
     g_assert_cmpmem (entry.gif_ptr, entry.gif_len, TINY_GIF, sizeof (TINY_GIF));
@@ -179,12 +179,12 @@ test_gif_icons_getlist_self (void)
 
     /* Count, then fill exactly — the same two-pass shape the C rcv
 	 * handler (rcv_task_icon_getlist) uses. */
-    size_t n = gtkhx_proto_parse_icon_list (htlc.in.buf, htlc.in.pos, NULL, 0);
+    size_t n = gtkhx_proto_parse_icon_list (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL, 0);
     g_assert_cmpuint (n, >, 0);
     struct gtkhx_proto_icon_entry *entries
         = g_new0 (struct gtkhx_proto_icon_entry, n);
     size_t got
-        = gtkhx_proto_parse_icon_list (htlc.in.buf, htlc.in.pos, entries, n);
+        = gtkhx_proto_parse_icon_list (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, entries, n);
     g_assert_cmpuint (got, ==, n);
 
     gboolean found = FALSE;
@@ -239,7 +239,7 @@ test_gif_icons_change_broadcast (void)
             continue;
         }
         guint16 changed = 0;
-        if (gtkhx_proto_parse_icon_change (htlc_b.in.buf, htlc_b.in.pos,
+        if (gtkhx_proto_parse_icon_change (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos,
                                            &changed)
             && changed == htlc_a.uid) {
             saw = TRUE;
@@ -294,7 +294,7 @@ test_gif_icons_clear (void)
 	 * — we require success and an empty avatar. */
     struct gtkhx_proto_icon_entry entry;
     g_assert_true (
-        gtkhx_proto_parse_icon_get_reply (htlc.in.buf, htlc.in.pos, &entry));
+        gtkhx_proto_parse_icon_get_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &entry));
     g_assert_cmpuint (entry.uid, ==, htlc.uid);
     g_assert_cmpuint (entry.gif_len, ==, 0);
 

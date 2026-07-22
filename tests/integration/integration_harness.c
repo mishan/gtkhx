@@ -248,7 +248,7 @@ orch_unregister (int fd)
  * src/hxnet_bridge.c::hx_bridge_pack_header does — reconstructing the
  * wire frame the actor already parsed so the downstream chunk walkers
  * (dh_start / hdr_type) see exactly what a legacy raw read would have
- * left in htlc->in.buf. Reimplemented locally rather than linking
+ * left in hx_test_in(htlc)->buf. Reimplemented locally rather than linking
  * hxnet_bridge.c, which would drag in the GTK-side session/bridge
  * state the harness deliberately excludes. The wire `len` encodes
  * body_len + sizeof(hc) (Hotline's hc-counts-as-data quirk that
@@ -670,10 +670,10 @@ gboolean
 integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
 {
     /* Reset in buffer. */
-    g_free (htlc->in.buf);
-    htlc->in.buf = NULL;
-    htlc->in.pos = 0;
-    htlc->in.len = 0;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = NULL;
+    hx_test_in(htlc)->pos = 0;
+    hx_test_in(htlc)->len = 0;
 
     /* Orchestrated control connection: the actor delivers whole,
      * already-parsed frames. Poll the event queue, then rebuild the
@@ -691,7 +691,7 @@ integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
             if (rc == HXNET_RECV_FRAME) {
                 /* Build the frame into a fresh local buffer, then hand
                  * it to htlc->in only once it's fully populated. (Don't
-                 * assign htlc->in.buf the raw g_malloc up front — the
+                 * assign hx_test_in(htlc)->buf the raw g_malloc up front — the
                  * free-at-top + realloc pattern reads as a potential
                  * use-after-free to static analysis even though the
                  * malloc reassigns it.) */
@@ -702,9 +702,9 @@ integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
                 if (f.body_len > 0 && f.body_ptr) {
                     memcpy (buf + SIZEOF_HL_HDR, f.body_ptr, f.body_len);
                 }
-                htlc->in.buf = buf;
-                htlc->in.pos = total;
-                htlc->in.len = total;
+                hx_test_in(htlc)->buf = buf;
+                hx_test_in(htlc)->pos = total;
+                hx_test_in(htlc)->len = total;
                 hxnet_frame_free (&f);
                 return TRUE;
             }
@@ -763,25 +763,24 @@ integration_recv_message (int fd, struct htlc_conn *htlc, int timeout_ms)
     /* Allocate the full message buffer, copy the header in, read
 	 * the rest. */
     gsize total = SIZEOF_HL_HDR + body_len;
-    htlc->in.buf = g_malloc (total);
-    memcpy (htlc->in.buf, hdr_bytes, SIZEOF_HL_HDR);
+    hx_test_in(htlc)->buf = g_malloc (total);
+    memcpy (hx_test_in(htlc)->buf, hdr_bytes, SIZEOF_HL_HDR);
     if (body_len > 0) {
-        if (!integration_recv (fd, htlc->in.buf + SIZEOF_HL_HDR, body_len)) {
-            g_free (htlc->in.buf);
-            htlc->in.buf = NULL;
+        if (!integration_recv (fd, hx_test_in(htlc)->buf + SIZEOF_HL_HDR, body_len)) {
+            g_free (hx_test_in(htlc)->buf);
+            hx_test_in(htlc)->buf = NULL;
             return FALSE;
         }
     }
-    htlc->in.pos = total;
-    htlc->in.len = total;
+    hx_test_in(htlc)->pos = total;
+    hx_test_in(htlc)->len = total;
     return TRUE;
 }
 
 void
 integration_release_htlc (struct htlc_conn *htlc)
 {
-    g_free (htlc->in.buf);
-    htlc->in.buf = NULL;
+    hx_test_in_free (htlc);
     /* htlc->hope_aead is an owned HxnetHopeAead* (a copy of the control
      * channel's HOPE material, independent of the connection's lifetime —
      * see hxnet_connection_hope_aead_material), seeded by the orchestrated
@@ -919,7 +918,7 @@ integration_drain_until_chat (int fd, struct htlc_conn *htlc,
         if (hdr_type (htlc) != HTLS_HDR_CHAT) {
             continue; /* unrelated broadcast — doesn't count */
         }
-        if (!hx_chat_extract (htlc->in.buf, htlc->in.pos, out)) {
+        if (!hx_chat_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, out)) {
             continue;
         }
         if (out->uid == wanted_uid) {
@@ -950,7 +949,7 @@ integration_drain_until_chat_marker (int fd, struct htlc_conn *htlc,
         if (hdr_type (htlc) != HTLS_HDR_CHAT) {
             continue; /* unrelated broadcast — doesn't count */
         }
-        if (!hx_chat_extract (htlc->in.buf, htlc->in.pos, out)) {
+        if (!hx_chat_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, out)) {
             continue;
         }
         if (out->text && marker && strstr (out->text, marker)) {
@@ -1056,7 +1055,7 @@ integration_drain_until_chat_user_event (int fd, struct htlc_conn *htlc,
         guint32 got_cid = 0;
         guint16 got_uid = 0;
         gboolean got_uid_chunk = FALSE;
-        dh_start (htlc->in.buf, htlc->in.pos)
+        dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
         {
             switch (_type) {
             case HTLS_DATA_CHAT_ID:
@@ -1105,7 +1104,7 @@ integration_create_chat_with_uid (int fd, struct htlc_conn *htlc,
         return FALSE;
     }
     /* Server's TASK reply carries HTLS_DATA_CHAT_ID. Walk it out. */
-    dh_start (htlc->in.buf, htlc->in.pos)
+    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
     {
         if (_type == HTLS_DATA_CHAT_ID) {
             dh_getint (*chat_id_out);
@@ -1304,7 +1303,7 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
 		 * stash mirrors src/rcv.c::rcv_task_login's variable-width
 		 * big-endian decode (1..8 bytes) into htlc->caps. */
         {
-            dh_start (htlc->in.buf, htlc->in.pos)
+            dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
             {
                 if (_type == HTLS_DATA_NAME && _len > 0
                     && htlc->name[0] == 0) {
@@ -1395,7 +1394,7 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("server rejected guest login: \"%s\". "
                                 "Check the test server's accounts/ for a "
                                 "`guest` account with no password.",
@@ -1422,7 +1421,7 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 	 * login reply and was stashed during the drain above); preserve
 	 * that stashed value when hx_selfinfo_parse can't supply one. */
     guint16 stashed_uid = htlc->uid;
-    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
+    hx_selfinfo_parse (htlc, hx_test_in(htlc)->buf, hx_test_in(htlc)->pos);
     if (htlc->uid == 0) {
         htlc->uid = stashed_uid;
     }
@@ -1442,7 +1441,7 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 	 * (Janus / 1.9-style flow — name lives in the TASK login
 	 * reply, not in SELFINFO). */
     if (htlc->name[0] == 0) {
-        dh_start (htlc->in.buf, htlc->in.pos)
+        dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
         {
             if (_type == HTLS_DATA_USER_LIST
                 && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
@@ -1499,7 +1498,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("%s rejected guest login: \"%s\"", srv->name,
                                 err);
         } else {
@@ -1525,7 +1524,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
 	 * helper. Without this the uid is lost here and any uid-filtered
 	 * drain (e.g. inline_media's chat_with_media) never matches. */
     guint16 stashed_uid = htlc->uid;
-    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
+    hx_selfinfo_parse (htlc, hx_test_in(htlc)->buf, hx_test_in(htlc)->pos);
     if (htlc->uid == 0) {
         htlc->uid = stashed_uid;
     }
@@ -1535,7 +1534,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
 	 * USER_LIST chunk; else fall back to the display_name we sent.
 	 * Janus skips both server-side paths so the fallback fires. */
     if (htlc->name[0] == 0) {
-        dh_start (htlc->in.buf, htlc->in.pos)
+        dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
         {
             if (_type == HTLS_DATA_USER_LIST
                 && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
@@ -1594,7 +1593,7 @@ integration_open_login_tls_or_skip (const hx_test_server *srv,
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("server rejected guest login over TLS: \"%s\"",
                                 err);
         } else {
@@ -1612,7 +1611,7 @@ integration_open_login_tls_or_skip (const hx_test_server *srv,
         integration_close (fd);
         return -1;
     }
-    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
+    hx_selfinfo_parse (htlc, hx_test_in(htlc)->buf, hx_test_in(htlc)->pos);
     if (htlc->name[0] == 0 && display_name && *display_name) {
         g_strlcpy ((char *) htlc->name, display_name, sizeof (htlc->name));
     }
@@ -1684,7 +1683,7 @@ integration_open_login_hope_or_skip (
         if (type == HTLS_HDR_TASK && (flag & 1)) {
             char err[256];
             gsize err_len = 0;
-            if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
+            if (task_error_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, err, sizeof (err), &err_len)) {
                 g_test_fail_printf ("HOPE Step 2 rejected: \"%s\"", err);
             } else {
                 g_test_fail_printf ("HOPE Step 2 rejected (no error chunk)");
@@ -1697,7 +1696,7 @@ integration_open_login_hope_or_skip (
         /* Opportunistic NAME / CAPABILITIES stash, same as the legacy
          * drain (and same caveat: htlc->in gets overwritten between
          * recv calls, so we capture what we want as we walk). */
-        dh_start (htlc->in.buf, htlc->in.pos)
+        dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
         {
             if (_type == HTLS_DATA_NAME && _len > 0 && htlc->name[0] == 0) {
                 gsize nlen = _len > sizeof (htlc->name) - 1
@@ -1738,7 +1737,7 @@ integration_open_login_hope_or_skip (
         dh_end ();
 
         if (type == HTLS_HDR_USER_SELFINFO) {
-            hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
+            hx_selfinfo_parse (htlc, hx_test_in(htlc)->buf, hx_test_in(htlc)->pos);
             if (htlc->name[0] == 0 && display_name && *display_name) {
                 g_strlcpy ((char *) htlc->name, display_name,
                            sizeof (htlc->name));

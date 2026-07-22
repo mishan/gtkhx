@@ -5,21 +5,23 @@
  * Helpers for building canned Hotline wire-format buffers that the
  * Tier 2 protocol-parser tests feed into rcv.c handlers.
  *
- * The handlers in rcv.c read from htlc->in.buf and walk the chunk
- * list with the dh_start / dh_end macros from protocol.h. The macro
- * assumes:
+ * The proto_helpers extractors take an explicit (buf, len) frame
+ * slice and walk the chunk list with the dh_start / dh_end macros
+ * from protocol.h. The fixture builds that slice:
  *
- *   - htlc->in.buf points at a buffer that begins with a 22-byte
- *     hl_hdr (type, trans, flag, len, len2, hc).
- *   - htlc->in.pos is the total number of bytes the buffer holds.
+ *   - the buffer begins with a 22-byte hl_hdr (type, trans, flag,
+ *     len, len2, hc).
+ *   - the buffer length is the total number of bytes it holds.
  *   - Each chunk after the header is hl_data_hdr (type, len) +
  *     payload; types and lengths are big-endian on the wire.
  *
- * wire_fixture_init() zeroes a struct htlc_conn, builds the header,
- * and points htlc->in.buf at an internally-managed buffer. Each
- * wire_fixture_add_chunk() call appends one data chunk and updates
- * the header's hc / len fields. wire_fixture_free() releases the
- * buffer.
+ * The buffer lives in the test-only per-htlc receive qbuf
+ * (hx_test_in(), see htlc_recv_buf.h) — production struct htlc_conn
+ * no longer carries a receive buffer. wire_fixture_init() zeroes the
+ * struct htlc_conn and builds the header; each wire_fixture_add_chunk()
+ * appends one data chunk and updates the header's hc / len fields;
+ * tests read the built slice via hx_test_in(htlc)->buf / ->pos.
+ * wire_fixture_free() releases the buffer.
  *
  * Single-shot — one fixture per test. The internal buffer is freed
  * by wire_fixture_free().
@@ -27,6 +29,7 @@
 
 #include <glib.h>
 #include "protocol.h"
+#include "htlc_recv_buf.h" /* hx_test_in — where the built frame lives */
 
 /*
  * Initialise htlc->in with a fresh hl_hdr. Pass `flag = 1` to mark

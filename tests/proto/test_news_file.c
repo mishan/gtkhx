@@ -34,7 +34,7 @@ test_news_file_extracts_body (void)
 
     char out[256];
     gsize out_len = 0;
-    g_assert_true (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), &out_len));
+    g_assert_true (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len));
     g_assert_cmpstr (out, ==, "Welcome to the news.\n\nRule 1: be nice.");
     g_assert_cmpuint (out_len, ==, strlen (body));
 
@@ -50,7 +50,7 @@ test_news_file_strips_ansi (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, sizeof (body) - 1, body);
 
     char out[128];
-    g_assert_true (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), NULL));
+    g_assert_true (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "[[31mALERT[[0m\nmessage");
 
     wire_fixture_free (&htlc);
@@ -67,7 +67,7 @@ test_news_file_truncates_to_buffer (void)
 
     char out[128];
     gsize out_len = 0;
-    g_assert_true (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), &out_len));
+    g_assert_true (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len));
     g_assert_cmpuint (out_len, ==, sizeof (out) - 1);
     g_assert_cmpuint (strlen (out), ==, sizeof (out) - 1);
     g_assert_cmphex (out[sizeof (out) - 1], ==, '\0');
@@ -84,7 +84,7 @@ test_news_file_no_news_chunk_returns_false (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
 
     char out[64] = "untouched";
-    g_assert_false (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), NULL));
+    g_assert_false (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "untouched");
 
     wire_fixture_free (&htlc);
@@ -97,7 +97,7 @@ test_news_file_empty_message_returns_false (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 0);
 
     char out[64];
-    g_assert_false (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), NULL));
+    g_assert_false (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
 
     wire_fixture_free (&htlc);
 }
@@ -115,7 +115,7 @@ test_news_file_first_news_chunk_wins (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, strlen (second), second);
 
     char out[64];
-    g_assert_true (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), NULL));
+    g_assert_true (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "first body");
 
     wire_fixture_free (&htlc);
@@ -138,7 +138,7 @@ test_news_file_skips_unrelated_chunks_before_news (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, strlen (body), body);
 
     char out[64];
-    g_assert_true (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, sizeof (out), NULL));
+    g_assert_true (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "the news");
 
     wire_fixture_free (&htlc);
@@ -154,7 +154,7 @@ test_news_file_null_out_returns_false (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, strlen (body), body);
 
-    g_assert_false (hx_news_file_extract (htlc.in.buf, htlc.in.pos, NULL, 64, NULL));
+    g_assert_false (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL, 64, NULL));
 
     wire_fixture_free (&htlc);
 }
@@ -168,7 +168,7 @@ test_news_file_zero_buffer_returns_false (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, strlen (body), body);
 
     char out[64];
-    g_assert_false (hx_news_file_extract (htlc.in.buf, htlc.in.pos, out, 0, NULL));
+    g_assert_false (hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, 0, NULL));
 
     wire_fixture_free (&htlc);
 }

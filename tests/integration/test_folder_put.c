@@ -96,7 +96,7 @@ test_folder_put_request_reply (void)
 		 * setup-phase test needs to prove. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_message ("PUTFOLDER refused: \"%s\" (request/reply "
                             "round-trip itself worked)",
                             err);
@@ -106,7 +106,7 @@ test_folder_put_request_reply (void)
     } else {
         /* Success path. Pull HTXF_REF — should be non-zero. */
         guint32 xfer_ref = 0;
-        dh_start (htlc.in.buf, htlc.in.pos)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_HTXF_REF) {
                 dh_getint (xfer_ref);

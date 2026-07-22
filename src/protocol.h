@@ -205,7 +205,6 @@ struct htlc_conn {
 	 * The single-session world sets this to &the_session; the multi-conn seam
 	 * later sets it per connection. */
     session *sess;
-    struct qbuf in;
     /* Server endpoint identification, populated at hx_connect time.
 	 * serverhost+serverport drive HTXF subchannel connects (rcv.c
 	 * stamps them onto each htxf_conn). ip_addr is the resolved

@@ -68,7 +68,7 @@ test_news_post_then_fetch (void)
     char body[8192 + 1];
     gsize body_len = 0;
     g_assert_true (
-        hx_news_file_extract (htlc.in.buf, htlc.in.pos, body, sizeof (body), &body_len));
+        hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, body, sizeof (body), &body_len));
 
     /* Our marker should be somewhere in the body. mhxd prepends
 	 * a "From <name>" header line per post, so the body grew. */
@@ -114,7 +114,7 @@ test_news_post_broadcasts_to_other_clients (void)
 
     /* Walk the chunks via dh_start to find the NEWS body. */
     gboolean found_marker = FALSE;
-    dh_start (htlc_b.in.buf, htlc_b.in.pos)
+    dh_start (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos)
     {
         if (_type != HTLS_DATA_NEWS) {
             continue;

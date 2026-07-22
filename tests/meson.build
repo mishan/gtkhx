@@ -610,11 +610,12 @@ test('inline_media_decode', test_inline_media_decode,
 # Shared wire-fixture builder used by every Tier 2 test. Compile it
 # in via a static library so individual test binaries don't each
 # carry their own copy of the object code.
-proto_test_inc = include_directories('proto', '../src')
+proto_test_inc = include_directories('.', 'proto', '../src')
 
 wire_fixture_lib = static_library(
   'wire_fixture',
   'proto/wire_fixture.c',
+  'htlc_recv_buf.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
 )
@@ -767,6 +768,7 @@ test('tracker_v3_meta', test_tracker_v3_meta,
 # format end-to-end.
 test_hlwrite = executable('test_hlwrite',
   'proto/test_hlwrite.c',
+  'htlc_recv_buf.c',
   '../src/proto_helpers.c',
   '../src/hxconn.c',
   '../src/debug.c',
@@ -1070,7 +1072,7 @@ test('msg_event', test_msg_event,
 # See tests/mhxd/README.md for details.
 # -----------------------------------------------------------------------------
 
-integration_test_inc = include_directories('integration', '../src')
+integration_test_inc = include_directories('.', 'integration', '../src')
 
 # Shared harness lib — opens the socket, runs the magic handshake,
 # provides blocking send / recv primitives, and (via proto_helpers
@@ -1086,6 +1088,7 @@ integration_test_inc = include_directories('integration', '../src')
 integration_harness_lib = static_library(
   'integration_harness',
   'integration/integration_harness.c',
+  'htlc_recv_buf.c',
   'integration/server_matrix.c',
   'integration/tracker_matrix.c',
   '../src/proto_helpers.c',
@@ -1259,6 +1262,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   'integration/test_real_htxf_connect.c',
   'integration/connect_test_stubs.c',
   'integration/integration_harness.c',
+  'htlc_recv_buf.c',
   'integration/tracker_matrix.c',
   'integration/server_matrix.c',
   '../src/network.c',

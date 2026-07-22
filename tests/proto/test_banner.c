@@ -51,7 +51,7 @@ test_banner_url_mode (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_cmpstr (b.type, ==, "URL ");
     g_assert_true (b.has_url);
     g_assert_cmpstr (b.url, ==, url);
@@ -71,7 +71,7 @@ test_banner_jpeg_mode (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "JPEG");
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_cmpstr (b.type, ==, "JPEG");
     g_assert_false (b.has_url);
     g_assert_cmpstr (b.url, ==, "");
@@ -90,7 +90,7 @@ test_banner_gif_mode (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "GIFf");
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_cmpstr (b.type, ==, "GIFf");
     g_assert_false (b.has_url);
 
@@ -109,7 +109,7 @@ test_banner_pict_mode (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "PICT");
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_cmpstr (b.type, ==, "PICT");
 
     wire_fixture_free (&htlc);
@@ -130,7 +130,7 @@ test_banner_chunk_order_url_first (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_cmpstr (b.type, ==, "URL ");
     g_assert_true (b.has_url);
     g_assert_cmpstr (b.url, ==, url);
@@ -153,7 +153,7 @@ test_banner_short_type_rejected (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 3, "URL");
 
     struct hx_banner_msg b;
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
 
     wire_fixture_free (&htlc);
 }
@@ -166,7 +166,7 @@ test_banner_long_type_rejected (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 5, "JPEG ");
 
     struct hx_banner_msg b;
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
 
     wire_fixture_free (&htlc);
 }
@@ -179,7 +179,7 @@ test_banner_empty_type_rejected (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 0, NULL);
 
     struct hx_banner_msg b;
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
 
     wire_fixture_free (&htlc);
 }
@@ -197,7 +197,7 @@ test_banner_bad_type_with_valid_url_still_refused (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
 
     struct hx_banner_msg b;
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
 
     wire_fixture_free (&htlc);
 }
@@ -215,7 +215,7 @@ test_banner_missing_type_rejected (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, strlen (url), url);
 
     struct hx_banner_msg b;
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
 
     wire_fixture_free (&htlc);
 }
@@ -228,7 +228,7 @@ test_banner_no_chunks_rejected (void)
     wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
 
     struct hx_banner_msg b;
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
 
     wire_fixture_free (&htlc);
 }
@@ -253,7 +253,7 @@ test_banner_url_truncated_at_buffer_cap (void)
                             long_url);
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_true (b.has_url);
     g_assert_cmpuint (b.url_len, ==, 1024);
     g_assert_cmpuint (strlen (b.url), ==, 1024);
@@ -274,7 +274,7 @@ test_banner_url_at_exact_buffer_cap (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, sizeof (url), url);
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_cmpuint (b.url_len, ==, 1024);
     for (gsize i = 0; i < 1024; i++) {
         g_assert_cmpint (b.url[i], ==, 'b');
@@ -297,7 +297,7 @@ test_banner_empty_url_still_flags_has_url (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_URL, 0, NULL);
 
     struct hx_banner_msg b;
-    g_assert_true (hx_banner_extract (htlc.in.buf, htlc.in.pos, &b));
+    g_assert_true (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &b));
     g_assert_true (b.has_url);
     g_assert_cmpstr (b.url, ==, "");
     g_assert_cmpuint (b.url_len, ==, 0);
@@ -314,7 +314,7 @@ test_banner_null_out_returns_false (void)
     wire_fixture_init (&htlc, HTLS_HDR_BANNER, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_BANNER_TYPE, 4, "URL ");
 
-    g_assert_false (hx_banner_extract (htlc.in.buf, htlc.in.pos, NULL));
+    g_assert_false (hx_banner_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL));
 
     wire_fixture_free (&htlc);
 }

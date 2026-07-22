@@ -33,8 +33,8 @@
  *     └─ free ctx
  *
  * The callback runs on the main thread (rcv.c → task dispatch is
- * already on main). pointers inside the result struct live in
- * htlc->in.buf and are only valid for the duration of the
+ * already on main). pointers inside the result struct point into the
+ * received frame slice and are only valid for the duration of the
  * callback — callers that retain the handle MUST copy.
  */
 

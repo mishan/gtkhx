@@ -99,13 +99,13 @@ participant_count (struct htlc_conn *htlc)
 {
     struct gtkhx_proto_voice_reply r;
     memset (&r, 0, sizeof (r));
-    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &r);
     if (!r.participants_present) {
         return -1;
     }
     const guint8 *blob = NULL;
     gsize blob_len = 0;
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 3, &blob,
+    if (!gtkhx_proto_voice_reply_field (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, 3, &blob,
                                         &blob_len)) {
         return -1;
     }

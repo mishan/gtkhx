@@ -53,7 +53,7 @@ test_file_info_seeded (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
         g_test_message ("server returned task-error for "
                         "FILE_GETINFO test.txt: \"%s\" "
                         "(check Dockerfile seeds the file)",
@@ -68,7 +68,7 @@ test_file_info_seeded (void)
     guint32 got_size = 0;
     gboolean got_size_chunk = FALSE;
 
-    dh_start (htlc.in.buf, htlc.in.pos)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_FILE_NAME:

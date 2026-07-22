@@ -36,7 +36,7 @@ test_xfer_queue_extracts_ref_and_queueid (void)
                             &queue_wire);
 
     struct hx_xfer_queue_msg xq;
-    g_assert_true (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, &xq));
+    g_assert_true (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &xq));
     g_assert_cmphex (xq.ref, ==, 0xdeadbeefu);
     g_assert_cmphex (xq.queueid, ==, 5);
 
@@ -62,7 +62,7 @@ test_xfer_queue_queueid_zero_is_valid (void)
                             &queue_wire);
 
     struct hx_xfer_queue_msg xq;
-    g_assert_true (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, &xq));
+    g_assert_true (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &xq));
     g_assert_cmphex (xq.ref, ==, 1);
     g_assert_cmphex (xq.queueid, ==, 0);
 
@@ -83,7 +83,7 @@ test_xfer_queue_missing_ref_defaults_to_zero (void)
                             &queue_wire);
 
     struct hx_xfer_queue_msg xq;
-    g_assert_true (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, &xq));
+    g_assert_true (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &xq));
     g_assert_cmphex (xq.ref, ==, 0);
     g_assert_cmphex (xq.queueid, ==, 3);
 
@@ -97,7 +97,7 @@ test_xfer_queue_empty_payload_zero_defaults (void)
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
 
     struct hx_xfer_queue_msg xq;
-    g_assert_true (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, &xq));
+    g_assert_true (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &xq));
     g_assert_cmphex (xq.ref, ==, 0);
     g_assert_cmphex (xq.queueid, ==, 0);
 
@@ -120,7 +120,7 @@ test_xfer_queue_unrelated_chunks_skipped (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NAME, 4, "spam");
 
     struct hx_xfer_queue_msg xq;
-    g_assert_true (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, &xq));
+    g_assert_true (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &xq));
     g_assert_cmphex (xq.ref, ==, 7);
     g_assert_cmphex (xq.queueid, ==, 0);
 
@@ -145,7 +145,7 @@ test_xfer_queue_max_uint32_round_trips (void)
                             &queue_wire);
 
     struct hx_xfer_queue_msg xq;
-    g_assert_true (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, &xq));
+    g_assert_true (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &xq));
     g_assert_cmphex (xq.ref, ==, 0xffffffffu);
     g_assert_cmphex (xq.queueid, ==, 0x80000000u);
 
@@ -158,7 +158,7 @@ test_xfer_queue_null_out_returns_false (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
 
-    g_assert_false (hx_xfer_queue_extract (htlc.in.buf, htlc.in.pos, NULL));
+    g_assert_false (hx_xfer_queue_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL));
 
     wire_fixture_free (&htlc);
 }
