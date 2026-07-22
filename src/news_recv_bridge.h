@@ -25,12 +25,6 @@ G_BEGIN_DECLS
 
 struct htlc_conn;
 
-/* The received message buffer + its length (htlc->in.buf / htlc->in.pos — the
- * frame body the reply dispatch left staged). Generic htlc accessors, not
- * news-specific; the news parsers scan this for their chunk. */
-const guint8 *hx_htlc_in_buf (struct htlc_conn *htlc);
-gsize hx_htlc_in_pos (struct htlc_conn *htlc);
-
 /* ---- session / htlc accessors for the Rust news browser ----
  * The browser gates its RPC + toolbar sensitivity on the live session version
  * and access bitmap, which live on the C htlc_conn. */

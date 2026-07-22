@@ -281,22 +281,9 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 
     hx_conn_set_ip_addr (htlc, "");
 
-    if (htlc->in.buf) {
-        g_free (htlc->in.buf);
-        htlc->in.buf = NULL;
-    }
-    /* Reset pos/len alongside the buf free. qbuf_set's grow
-     * heuristic compares `pos + len < new_pos + new_len`; with
-     * pos/len left over from the previous frame the heuristic
-     * can decide "no realloc needed" and leave buf NULL, which
-     * is what the bridge's `hx_bridge_dispatch_frame` write-
-     * through-NULL crash was. The dispatch path now also
-     * early-returns when fd==0, but resetting here keeps the
-     * qbuf invariant tight regardless of who's reading it
-     * next. */
-    htlc->in.pos = 0;
-    htlc->in.len = 0;
-    /* No send buffer to free — hlwrite / hlwrite_chunks pack into a
+    /* No receive buffer to free — the bridge assembles each frame into
+     * a transient block it frees after hx_dispatch_frame returns, and
+     * no send buffer either: hlwrite / hlwrite_chunks pack into a
      * transient block they free after handing it to the transport. */
     /* hxd_files[fd] no longer used for the control channel — the
      * hxnet orchestrator owns the control socket, so there is no

@@ -131,15 +131,3 @@ gtkhx_news_load_icon_paintable (const char *resource)
     g_object_unref (scaled);
     return tex ? GDK_PAINTABLE (tex) : NULL;
 }
-
-const guint8 *
-hx_htlc_in_buf (struct htlc_conn *htlc)
-{
-    return htlc ? htlc->in.buf : NULL;
-}
-
-gsize
-hx_htlc_in_pos (struct htlc_conn *htlc)
-{
-    return htlc ? htlc->in.pos : 0;
-}
