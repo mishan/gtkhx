@@ -52,6 +52,89 @@ hx_conn_set_chat_history_last_msgid (struct htlc_conn *h, guint64 v)
     h->chat_history_last_msgid = v;
 }
 
+guint32
+hx_conn_media_max_bytes (const struct htlc_conn *h)
+{
+    return h->media_max_bytes;
+}
+
+void
+hx_conn_set_media_max_bytes (struct htlc_conn *h, guint32 v)
+{
+    h->media_max_bytes = v;
+}
+
+guint32
+hx_conn_media_max_dimension (const struct htlc_conn *h)
+{
+    return h->media_max_dimension;
+}
+
+void
+hx_conn_set_media_max_dimension (struct htlc_conn *h, guint32 v)
+{
+    h->media_max_dimension = v;
+}
+
+guint32
+hx_conn_media_max_pixels (const struct htlc_conn *h)
+{
+    return h->media_max_pixels;
+}
+
+void
+hx_conn_set_media_max_pixels (struct htlc_conn *h, guint32 v)
+{
+    h->media_max_pixels = v;
+}
+
+guint32
+hx_conn_media_chunk_size (const struct htlc_conn *h)
+{
+    return h->media_chunk_size;
+}
+
+void
+hx_conn_set_media_chunk_size (struct htlc_conn *h, guint32 v)
+{
+    h->media_chunk_size = v;
+}
+
+guint32
+hx_conn_media_max_frames (const struct htlc_conn *h)
+{
+    return h->media_max_frames;
+}
+
+void
+hx_conn_set_media_max_frames (struct htlc_conn *h, guint32 v)
+{
+    h->media_max_frames = v;
+}
+
+guint32
+hx_conn_media_max_duration_ms (const struct htlc_conn *h)
+{
+    return h->media_max_duration_ms;
+}
+
+void
+hx_conn_set_media_max_duration_ms (struct htlc_conn *h, guint32 v)
+{
+    h->media_max_duration_ms = v;
+}
+
+void
+hx_conn_reset_media_limits (struct htlc_conn *h)
+{
+    h->media_max_bytes = 0;
+    h->media_max_dimension = 0;
+    h->media_max_pixels = 0;
+    h->media_chunk_size = 0;
+    h->media_max_frames = 0;
+    h->media_max_duration_ms = 0;
+}
+
 const char *
 hx_conn_serverhost (const struct htlc_conn *h)
 {

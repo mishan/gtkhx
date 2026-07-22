@@ -39,6 +39,7 @@
 #include <stdint.h>
 
 #include "protocol.h"
+#include "hxconn.h"
 
 /* Defensive: every inline-media-send op is gated on the server
  * having echoed HTLC_CAP_INLINE_MEDIA. Sending an upload to a
@@ -56,9 +57,9 @@ extern gboolean inline_media_cap_ok (struct htlc_conn *htlc);
  *
  * Gates on two things:
  *
- *   1. HTLC_CAP_INLINE_MEDIA being lit in htlc->caps for the
+ *   1. HTLC_CAP_INLINE_MEDIA being lit in hx_conn_caps (htlc) for the
  *      current session. struct htlc_conn is reused across
- *      reconnects: htlc->caps gets overwritten by every LOGIN
+ *      reconnects: hx_conn_caps (htlc) gets overwritten by every LOGIN
  *      reply, but htlc->media_max_* aren't cleared at connect
  *      time. Without this gate a prior session's advertisement
  *      could leak into a new session against a server that
@@ -83,40 +84,40 @@ extern gboolean inline_media_cap_ok (struct htlc_conn *htlc);
 static inline guint32
 inline_media_max_bytes (const struct htlc_conn *htlc)
 {
-    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_BYTES;
     }
-    return htlc->media_max_bytes ? htlc->media_max_bytes
-                                 : HX_MEDIA_DEFAULT_MAX_BYTES;
+    guint32 v = hx_conn_media_max_bytes (htlc);
+    return v ? v : HX_MEDIA_DEFAULT_MAX_BYTES;
 }
 
 static inline guint32
 inline_media_max_dimension (const struct htlc_conn *htlc)
 {
-    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_DIMENSION;
     }
-    return htlc->media_max_dimension ? htlc->media_max_dimension
-                                     : HX_MEDIA_DEFAULT_MAX_DIMENSION;
+    guint32 v = hx_conn_media_max_dimension (htlc);
+    return v ? v : HX_MEDIA_DEFAULT_MAX_DIMENSION;
 }
 
 static inline guint32
 inline_media_max_pixels (const struct htlc_conn *htlc)
 {
-    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_PIXELS;
     }
-    return htlc->media_max_pixels ? htlc->media_max_pixels
-                                  : HX_MEDIA_DEFAULT_MAX_PIXELS;
+    guint32 v = hx_conn_media_max_pixels (htlc);
+    return v ? v : HX_MEDIA_DEFAULT_MAX_PIXELS;
 }
 
 static inline guint32
 inline_media_chunk_size (const struct htlc_conn *htlc)
 {
-    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_CHUNK_SIZE;
     }
-    guint32 v = htlc->media_chunk_size;
+    guint32 v = hx_conn_media_chunk_size (htlc);
     if (v == 0) {
         return HX_MEDIA_DEFAULT_CHUNK_SIZE;
     }
@@ -138,21 +139,21 @@ inline_media_chunk_size (const struct htlc_conn *htlc)
 static inline guint32
 inline_media_max_frames (const struct htlc_conn *htlc)
 {
-    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_FRAMES;
     }
-    return htlc->media_max_frames ? htlc->media_max_frames
-                                  : HX_MEDIA_DEFAULT_MAX_FRAMES;
+    guint32 v = hx_conn_media_max_frames (htlc);
+    return v ? v : HX_MEDIA_DEFAULT_MAX_FRAMES;
 }
 
 static inline guint32
 inline_media_max_duration_ms (const struct htlc_conn *htlc)
 {
-    if (!htlc || !(htlc->caps & HTLC_CAP_INLINE_MEDIA)) {
+    if (!htlc || !(hx_conn_caps (htlc) & HTLC_CAP_INLINE_MEDIA)) {
         return HX_MEDIA_DEFAULT_MAX_DURATION_MS;
     }
-    return htlc->media_max_duration_ms ? htlc->media_max_duration_ms
-                                       : HX_MEDIA_DEFAULT_MAX_DURATION_MS;
+    guint32 v = hx_conn_media_max_duration_ms (htlc);
+    return v ? v : HX_MEDIA_DEFAULT_MAX_DURATION_MS;
 }
 
 /* Log the server's advertised inline-media limits at LOGIN time.
@@ -169,7 +170,7 @@ extern void inline_media_log_advertised_limits (struct htlc_conn *htlc);
  *   network.c::hx_htlc_close — wipe at disconnect so a reconnect
  *     to a server that doesn't advertise the cap can't inherit
  *     a prior session's caps. Lined up with the existing
- *     htlc->caps + history_max_* resets there.
+ *     hx_conn_caps (htlc) + history_max_* resets there.
  *
  *   rcv.c::rcv_task_login — wipe BEFORE walking the LOGIN-reply
  *     chunk run. Each MAX_* field is independently optional on

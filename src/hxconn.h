@@ -38,6 +38,27 @@ extern guint64 hx_conn_chat_history_last_msgid (const struct htlc_conn *h);
 extern void    hx_conn_set_chat_history_last_msgid (struct htlc_conn *h,
                                                     guint64 v);
 
+/* Inline-media advisory limits — server hints from the LOGIN reply
+ * (0 = "use the client default"). Set as a group by rcv_task_login,
+ * reset as a group at connect, and read individually by the
+ * inline_media.h ceiling helpers. Survive reconnect intentionally
+ * (see the inline_media.h caps/limits note) until explicitly reset. */
+extern guint32 hx_conn_media_max_bytes (const struct htlc_conn *h);
+extern void    hx_conn_set_media_max_bytes (struct htlc_conn *h, guint32 v);
+extern guint32 hx_conn_media_max_dimension (const struct htlc_conn *h);
+extern void    hx_conn_set_media_max_dimension (struct htlc_conn *h, guint32 v);
+extern guint32 hx_conn_media_max_pixels (const struct htlc_conn *h);
+extern void    hx_conn_set_media_max_pixels (struct htlc_conn *h, guint32 v);
+extern guint32 hx_conn_media_chunk_size (const struct htlc_conn *h);
+extern void    hx_conn_set_media_chunk_size (struct htlc_conn *h, guint32 v);
+extern guint32 hx_conn_media_max_frames (const struct htlc_conn *h);
+extern void    hx_conn_set_media_max_frames (struct htlc_conn *h, guint32 v);
+extern guint32 hx_conn_media_max_duration_ms (const struct htlc_conn *h);
+extern void    hx_conn_set_media_max_duration_ms (struct htlc_conn *h,
+                                                  guint32 v);
+/* Reset all six advisory limits to 0 ("use client defaults"). */
+extern void    hx_conn_reset_media_limits (struct htlc_conn *h);
+
 /* ---- Server endpoint identity --------------------------------------------
  *
  * Populated at hx_connect time and read by the HTXF-subchannel setup, the TLS

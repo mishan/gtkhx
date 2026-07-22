@@ -1741,22 +1741,22 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
             }
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_BYTES) {
-            htlc->media_max_bytes = li.media_max_bytes;
+            hx_conn_set_media_max_bytes (htlc, li.media_max_bytes);
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_DIMENSION) {
-            htlc->media_max_dimension = li.media_max_dimension;
+            hx_conn_set_media_max_dimension (htlc, li.media_max_dimension);
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_PIXELS) {
-            htlc->media_max_pixels = li.media_max_pixels;
+            hx_conn_set_media_max_pixels (htlc, li.media_max_pixels);
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_CHUNK_SIZE) {
-            htlc->media_chunk_size = li.media_chunk_size;
+            hx_conn_set_media_chunk_size (htlc, li.media_chunk_size);
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_FRAMES) {
-            htlc->media_max_frames = li.media_max_frames;
+            hx_conn_set_media_max_frames (htlc, li.media_max_frames);
         }
         if (login_seen & HX_LOGIN_SEEN_MEDIA_MAX_DURATION_MS) {
-            htlc->media_max_duration_ms = li.media_max_duration_ms;
+            hx_conn_set_media_max_duration_ms (htlc, li.media_max_duration_ms);
         }
         /* Chat-history retention hints — max message count / age. 0 means
 		 * unlimited; these are hints only, the authoritative end-of-history
