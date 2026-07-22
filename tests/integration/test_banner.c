@@ -170,7 +170,7 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
         integration_close (fd);
         return -1;
     }
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         switch (_type) {
         case HTLS_DATA_BANNER_TYPE:

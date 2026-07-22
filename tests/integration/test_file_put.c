@@ -213,7 +213,7 @@ test_file_put_round_trip (void)
     }
 
     guint32 xfer_ref = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLS_DATA_HTXF_REF) {
             dh_getint (xfer_ref);

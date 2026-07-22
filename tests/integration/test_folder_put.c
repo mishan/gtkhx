@@ -106,7 +106,7 @@ test_folder_put_request_reply (void)
     } else {
         /* Success path. Pull HTXF_REF — should be non-zero. */
         guint32 xfer_ref = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_HTXF_REF) {
                 dh_getint (xfer_ref);

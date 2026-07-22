@@ -81,7 +81,7 @@ test_send_capabilities_chunk_layout (void)
 
 
     int found = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         found++;
         g_assert_cmphex (_type, ==, HTLC_DATA_CAPABILITIES);
@@ -111,7 +111,7 @@ test_send_multiple_caps_bits (void)
               2, &caps16);
 
 
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         guint16 wire = (guint16)dh->data[0] << 8 | (guint16)dh->data[1];
         g_assert_cmphex (wire & HTLC_CAP_LARGE_FILES, ==,
@@ -139,7 +139,7 @@ static guint64
 decode_caps_from_reply (struct htlc_conn *htlc)
 {
     guint64 caps = 0;
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         if (_type != HTLS_DATA_CAPABILITIES) {
             continue;

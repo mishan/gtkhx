@@ -65,7 +65,7 @@ user_list_contains (int fd, struct htlc_conn *htlc, const char *wanted_name)
 
     gsize wlen = strlen (wanted_name);
     gboolean found = FALSE;
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         if (_type != HTLS_DATA_USER_LIST) {
             continue;

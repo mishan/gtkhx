@@ -158,7 +158,7 @@ test_folder_get_round_trip (void)
     /* Success path — pull HTXF_REF + HTXF_SIZE. NFILES is
 	 * mhxd-version-dependent. */
     guint32 xfer_ref = 0, xfer_size = 0, nfiles = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_REF:

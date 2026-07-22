@@ -80,7 +80,7 @@ test_news15_root_dirlist (void)
 	 * HTLS_DATA_NEWS_DIRLIST_EXTENDED. The shipped run/hxd/newsdir
 	 * has cat_irasshaimase pre-seeded as a category. */
     int dirlist_chunks = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLS_DATA_NEWS_DIRLIST_EXTENDED) {
             dirlist_chunks++;

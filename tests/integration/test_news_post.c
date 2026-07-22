@@ -114,7 +114,7 @@ test_news_post_broadcasts_to_other_clients (void)
 
     /* Walk the chunks via dh_start to find the NEWS body. */
     gboolean found_marker = FALSE;
-    dh_start (&htlc_b)
+    dh_start (htlc_b.in.buf, htlc_b.in.pos)
     {
         if (_type != HTLS_DATA_NEWS) {
             continue;

@@ -157,7 +157,7 @@ test_hlwrite_single_chunk_round_trip (void)
 
 
     int found_chunks = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         found_chunks++;
         g_assert_cmphex (_type, ==, HTLC_DATA_LOGIN);
@@ -204,7 +204,7 @@ test_hlwrite_login_message_round_trip (void)
 
     gboolean saw_name = FALSE, saw_login = FALSE, saw_pass = FALSE,
              saw_icon = FALSE;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLC_DATA_NAME:
@@ -259,7 +259,7 @@ test_hlwrite_zero_length_chunk_round_trip (void)
 
 
     int found = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         g_assert_cmphex (_type, ==, HTLS_DATA_UID);
         g_assert_cmpuint (_len, ==, 0);
@@ -369,7 +369,7 @@ test_hlwrite_round_trip_stress (void)
 
 
     int chunks = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (chunks) {
         case 0:

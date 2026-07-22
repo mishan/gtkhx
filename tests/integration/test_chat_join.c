@@ -73,7 +73,7 @@ test_chat_join_member_visible (void)
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
 
     int n_user_list = 0;
-    dh_start (&htlc_b)
+    dh_start (htlc_b.in.buf, htlc_b.in.pos)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             n_user_list++;

@@ -319,7 +319,7 @@ test_send_bare_request (void)
 
     int saw_channel = 0;
     int total = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         total++;
         switch (_type) {
@@ -356,7 +356,7 @@ test_send_with_before_cursor (void)
 
 
     int saw_channel = 0, saw_before = 0, saw_limit = 0, saw_after = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLC_DATA_CHANNEL_ID:
@@ -403,7 +403,7 @@ test_send_with_after_cursor (void)
 
 
     int saw_after = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLC_DATA_HISTORY_AFTER) {
             saw_after++;
@@ -431,7 +431,7 @@ test_send_with_range_query (void)
 
 
     int saw_before = 0, saw_after = 0, saw_limit = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLC_DATA_HISTORY_BEFORE) saw_before++;
         if (_type == HTLC_DATA_HISTORY_AFTER)  saw_after++;

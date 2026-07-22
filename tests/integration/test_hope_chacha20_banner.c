@@ -161,7 +161,7 @@ test_hope_chacha20_banner_htxf (void)
         if (hdr_type (&htlc) != HTLS_HDR_BANNER) {
             continue;
         }
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_BANNER_TYPE) {
                 banner_type = g_strndup ((const char *) dh->data, _len);

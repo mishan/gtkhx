@@ -95,7 +95,7 @@ test_file_list_subdir_uploads (void)
                         err);
     } else {
         int n = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_FILE_LIST) {
                 n++;

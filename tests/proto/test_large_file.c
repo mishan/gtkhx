@@ -80,7 +80,7 @@ test_send_xfersize64_alongside_legacy (void)
     guint32 decoded_legacy = 0;
     guint64 decoded_64 = 0;
 
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLC_DATA_HTXF_SIZE) {
             g_assert_cmpuint (_len, ==, 4);
@@ -125,7 +125,7 @@ test_recv_xfersize64_chunk_decode (void)
 
     int found = 0;
     guint64 size64 = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLS_DATA_XFERSIZE64 && _len >= 8) {
             for (guint16 i = 0; i < 8; i++) {

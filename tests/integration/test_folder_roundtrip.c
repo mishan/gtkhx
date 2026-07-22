@@ -265,7 +265,7 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
         return FALSE;
     }
     guint32 xfer_ref = 0;
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         if (_type == HTLS_DATA_HTXF_REF) {
             dh_getint (xfer_ref);

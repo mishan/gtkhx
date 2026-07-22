@@ -118,7 +118,7 @@ test_news_catlist_seeded_irasshaimase (void)
     }
 
     int catlist_chunks = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         if (_type == HTLS_DATA_NEWS_CATLIST) {
             catlist_chunks++;

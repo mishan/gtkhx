@@ -68,7 +68,7 @@ test_file_info_seeded (void)
     guint32 got_size = 0;
     gboolean got_size_chunk = FALSE;
 
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLS_DATA_FILE_NAME:

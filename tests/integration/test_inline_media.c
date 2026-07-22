@@ -797,7 +797,7 @@ test_inline_media_chunked_upload_too_large (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;
@@ -1173,7 +1173,7 @@ test_inline_media_oversized_rejected (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;
@@ -1247,7 +1247,7 @@ test_inline_media_unsupported_format_upload (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;
@@ -1316,7 +1316,7 @@ test_inline_media_unauthorized_download (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;

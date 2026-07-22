@@ -332,7 +332,7 @@ hx_htxf_reply_extract (struct htlc_conn *htlc, struct hx_htxf_reply *out)
     out->ref = 0;
     out->size = 0;
 
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_REF:

@@ -2006,7 +2006,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, void *channel_ptr)
         = g_ptr_array_new_with_free_func ((GDestroyNotify) hx_history_entry_free);
     gboolean has_more = FALSE;
 
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         switch (_type) {
         case HTLS_DATA_HISTORY_ENTRY: {
@@ -2070,7 +2070,7 @@ rcv_task_user_list (struct htlc_conn *htlc, struct chat *chat, int text)
     guint16 uid;
     int new;
 
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             /* chunk-record parsing moved to Rust
@@ -2203,7 +2203,7 @@ rcv_task_file_list (struct htlc_conn *htlc, struct cached_filelist *cfl,
         g_free (cfl);
         return;
     }
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         if (_type != HTLS_DATA_FILE_LIST) {
             continue;

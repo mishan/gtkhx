@@ -570,12 +570,12 @@ memory_copy (void *__dst, void *__src, unsigned int len)
  * effect and ANDs the bounds checks. Reads dh->len, then bounds-
  * checks; reads dh->type only after we've confirmed the chunk fits.
  */
-#define dh_start(_htlc)                                                        \
+#define dh_start(_buf, _buflen)                                                \
     {                                                                          \
         struct hl_data_hdr *dh                                                 \
-            = (struct hl_data_hdr *)(&((_htlc)->in.buf[SIZEOF_HL_HDR]));       \
+            = (struct hl_data_hdr *)(&((_buf)[SIZEOF_HL_HDR]));                \
         guint32 _pos = SIZEOF_HL_HDR;                                          \
-        guint32 _max = (_htlc)->in.pos;                                        \
+        guint32 _max = (_buflen);                                              \
         guint16 _len = 0, _type = 0;                                           \
         for (; _pos + SIZEOF_HL_DATA_HDR <= _max;                              \
              _pos += SIZEOF_HL_DATA_HDR + _len,                                \

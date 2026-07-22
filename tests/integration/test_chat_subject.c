@@ -76,7 +76,7 @@ test_chat_subject_broadcasts (void)
             continue;
         }
 
-        dh_start (&htlc_a)
+        dh_start (htlc_a.in.buf, htlc_a.in.pos)
         {
             switch (_type) {
             case HTLS_DATA_CHAT_ID:

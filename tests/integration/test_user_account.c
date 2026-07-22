@@ -223,7 +223,7 @@ read_account_reply (struct htlc_conn *htlc, char *name_out, gsize name_cap,
                     char *login_out, gsize login_cap, guint8 *access_out)
 {
     unsigned seen = 0;
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         switch (_type) {
         case HTLS_DATA_NAME:

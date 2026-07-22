@@ -66,7 +66,7 @@ test_file_list_round_trip (void)
 		 * contents of mhxd's files/ are container-deployment-
 		 * specific. */
         int n = 0;
-        dh_start (&htlc)
+        dh_start (htlc.in.buf, htlc.in.pos)
         {
             if (_type == HTLS_DATA_FILE_LIST) {
                 n++;

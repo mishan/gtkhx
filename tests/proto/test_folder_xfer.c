@@ -99,7 +99,7 @@ test_getfolder_request_name_only (void)
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_GETFOLDER);
 
     int found = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         found++;
         g_assert_cmphex (_type, ==, HTLC_DATA_FILE_NAME);
@@ -136,7 +136,7 @@ test_getfolder_request_with_dir (void)
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_GETFOLDER);
 
     int saw_name = 0, saw_dir = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLC_DATA_FILE_NAME:
@@ -185,7 +185,7 @@ test_putfolder_request_name_size_nfiles (void)
 
     int saw_name = 0, saw_size = 0, saw_nfiles = 0;
     guint32 got_size = 0, got_nfiles = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLC_DATA_FILE_NAME:
@@ -243,7 +243,7 @@ test_putfolder_request_with_dir (void)
 
     int chunks = 0;
     int saw_dir = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         chunks++;
         if (_type == HTLC_DATA_DIR) {
@@ -283,7 +283,7 @@ test_folder_get_reply_parse (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
 
     guint32 ref = 0, size = 0, queue = 0, nfiles = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_SIZE:
@@ -330,7 +330,7 @@ test_folder_get_reply_with_queue (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_QUEUE, 4, &queue_n);
 
     guint32 ref = 0, size = 0, queue = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_REF:
@@ -371,7 +371,7 @@ test_folder_put_reply_parse (void)
 
     guint32 ref = 0, queue = 0;
     int chunks = 0;
-    dh_start (&htlc)
+    dh_start (htlc.in.buf, htlc.in.pos)
     {
         chunks++;
         switch (_type) {

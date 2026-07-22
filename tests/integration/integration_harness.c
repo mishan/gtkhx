@@ -1056,7 +1056,7 @@ integration_drain_until_chat_user_event (int fd, struct htlc_conn *htlc,
         guint32 got_cid = 0;
         guint16 got_uid = 0;
         gboolean got_uid_chunk = FALSE;
-        dh_start (htlc)
+        dh_start (htlc->in.buf, htlc->in.pos)
         {
             switch (_type) {
             case HTLS_DATA_CHAT_ID:
@@ -1105,7 +1105,7 @@ integration_create_chat_with_uid (int fd, struct htlc_conn *htlc,
         return FALSE;
     }
     /* Server's TASK reply carries HTLS_DATA_CHAT_ID. Walk it out. */
-    dh_start (htlc)
+    dh_start (htlc->in.buf, htlc->in.pos)
     {
         if (_type == HTLS_DATA_CHAT_ID) {
             dh_getint (*chat_id_out);
@@ -1304,7 +1304,7 @@ integration_drain_until_selfinfo_or_error (int fd, struct htlc_conn *htlc,
 		 * stash mirrors src/rcv.c::rcv_task_login's variable-width
 		 * big-endian decode (1..8 bytes) into htlc->caps. */
         {
-            dh_start (htlc)
+            dh_start (htlc->in.buf, htlc->in.pos)
             {
                 if (_type == HTLS_DATA_NAME && _len > 0
                     && htlc->name[0] == 0) {
@@ -1442,7 +1442,7 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 	 * (Janus / 1.9-style flow — name lives in the TASK login
 	 * reply, not in SELFINFO). */
     if (htlc->name[0] == 0) {
-        dh_start (htlc)
+        dh_start (htlc->in.buf, htlc->in.pos)
         {
             if (_type == HTLS_DATA_USER_LIST
                 && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
@@ -1535,7 +1535,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
 	 * USER_LIST chunk; else fall back to the display_name we sent.
 	 * Janus skips both server-side paths so the fallback fires. */
     if (htlc->name[0] == 0) {
-        dh_start (htlc)
+        dh_start (htlc->in.buf, htlc->in.pos)
         {
             if (_type == HTLS_DATA_USER_LIST
                 && _len >= (SIZEOF_HL_USERLIST_HDR - SIZEOF_HL_DATA_HDR)) {
@@ -1697,7 +1697,7 @@ integration_open_login_hope_or_skip (
         /* Opportunistic NAME / CAPABILITIES stash, same as the legacy
          * drain (and same caveat: htlc->in gets overwritten between
          * recv calls, so we capture what we want as we walk). */
-        dh_start (htlc)
+        dh_start (htlc->in.buf, htlc->in.pos)
         {
             if (_type == HTLS_DATA_NAME && _len > 0 && htlc->name[0] == 0) {
                 gsize nlen = _len > sizeof (htlc->name) - 1
