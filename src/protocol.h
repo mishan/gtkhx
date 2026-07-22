@@ -364,6 +364,17 @@ struct htlc_conn {
     guint32 gif_icons_probe_trans;
 };
 
+/* Layout pin for the E1c flip: struct htlc_conn's storage + accessors live in
+ * the Rust `hxconn` crate (rust/crates/hxconn), whose #[repr(C)] HtlcConn
+ * mirrors this struct field-for-field. Production allocates via hx_conn_new
+ * (a Box of the Rust struct); the Tier-2/Tier-3 tests stack-allocate this
+ * definition. Both are read/written through the Rust accessors by pointer, so
+ * the two layouts must stay identical — this assert (paired with the Rust
+ * `assert!(size_of::<HtlcConn>() == HXCONN_SIZEOF)`) fails loudly on drift. */
+_Static_assert (sizeof (struct htlc_conn) == 760,
+                "struct htlc_conn layout drifted from Rust HtlcConn "
+                "(rust/crates/hxconn/src/lib.rs)");
+
 /* LOCK_HTXF / UNLOCK_HTXF / INITLOCK_HTXF used to serialize
  * cross-thread access to the global xfers[] array between worker
  * threads (get_thread, put_thread, the connect worker) and main.

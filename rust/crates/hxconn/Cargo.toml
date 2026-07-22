@@ -1,0 +1,20 @@
+[package]
+name = "hxconn"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Owner of struct htlc_conn — the per-connection state formerly defined in protocol.h and accessed via hxconn.c. Exports the hx_conn_* C ABI and the new/reset/free lifecycle."
+publish = false
+
+[lib]
+# staticlib: the hx_conn_* accessor + hx_conn_new/reset/free C ABI that the
+#            whole C tree links against (every former hxconn.c caller).
+# rlib: cargo test (layout pin + accessor round-trips).
+crate-type = ["staticlib", "rlib"]
+
+# glib only, for the gboolean ABI type (gint) used by the predicate accessors.
+# No gtk. `struct htlc_conn`'s storage is a plain #[repr(C)] Rust struct owned
+# by this crate; production allocates it via hx_conn_new (Box), tests stack-
+# allocate the pinned C mirror. `cargo test -p hxconn` runs headless.
+[dependencies]
+glib = { workspace = true }

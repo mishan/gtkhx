@@ -1,19 +1,20 @@
 /*
  * hxconn.h — field accessors for struct htlc_conn.
  *
- * The connection struct is on the path to becoming an opaque, Rust-owned
- * allocation (docs/rust/network-endgame.md, phase E1). The migration can't be
- * atomic — the struct's fields are read and written from ~30 C files — so this
- * header introduces a stable getter/setter seam that call sites move onto
- * group-by-group. Today the bodies (hxconn.c) are thin C over the still-C
- * struct; at the E1c flip the struct definition and these bodies move into the
- * Rust `hxconn` crate with the same C ABI, and the call sites — already using
- * the accessors — don't change.
+ * The connection struct is Rust-owned (docs/rust/network-endgame.md, the E1c
+ * flip). Its storage and every accessor body live in the Rust `hxconn` crate
+ * (rust/crates/hxconn); this header is the C ABI those accessors export. C
+ * reaches every field through the getters/setters below — the migration onto
+ * this seam ran group-by-group before the flip, so the call sites didn't change
+ * when the bodies moved to Rust.
  *
- * `struct htlc_conn` is deliberately only forward-declared here: a consumer
- * that includes hxconn.h (and not protocol.h) sees the accessors but NOT the
- * fields, which is the end-state contract. This file grows one field group per
- * E1 increment.
+ * `struct htlc_conn` is deliberately only forward-declared here: a consumer that
+ * includes hxconn.h (and not protocol.h) sees the accessors but NOT the fields,
+ * which is the end-state contract. Production allocates a connection with
+ * hx_conn_new (a Rust Box, never freed — it lives for the process); the Tier-2/
+ * Tier-3 tests stack-allocate the pinned C mirror still in protocol.h. The
+ * #[repr(C)] HtlcConn and the _Static_assert in protocol.h keep the two in
+ * lockstep.
  */
 
 #ifndef GTKHX_HXCONN_H
@@ -23,6 +24,16 @@
 
 struct htlc_conn;
 typedef struct _session session;
+
+/* ---- Lifecycle -----------------------------------------------------------
+ *
+ * hx_conn_new allocates a fresh, zeroed connection (the Rust owner Box-boxes
+ * it); hx_conn_reset returns an existing one to the just-allocated state (the
+ * reconnect path); hx_conn_free releases a hx_conn_new allocation. Production
+ * keeps exactly one connection for the process lifetime and never frees it. */
+extern struct htlc_conn *hx_conn_new (void);
+extern void              hx_conn_reset (struct htlc_conn *h);
+extern void              hx_conn_free (struct htlc_conn *h);
 
 /* ---- Chat-history extension session state ---------------------------------
  *
@@ -186,6 +197,7 @@ extern void hx_conn_set_fd (struct htlc_conn *h, int v);
  * already has a chokepoint accessor — sess_from_htlc() in session.h — so only
  * the write needs a seam here; the single-session world sets it to
  * &the_session, the multi-conn seam later sets it per connection. */
+extern session *hx_conn_sess (const struct htlc_conn *h);
 extern void hx_conn_set_sess (struct htlc_conn *h, session *s);
 
 /* ---- Connect-time HOPE algorithm selections ------------------------------
