@@ -15,10 +15,11 @@ extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize fram
 extern void hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 extern void hx_rcv_magic (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-/* Dispatch a fully-staged received frame: route the (already-parsed) opcode to
- * a body handler and call it. The hxnet bridge stages the 22-byte header + body
- * into htlc->in.buf, then calls this with the parsed header fields. Replaces the
- * old hx_rcv_hdr two-phase state machine. */
+/* Dispatch a received frame: route the (already-parsed) opcode to a body
+ * handler and call it. The hxnet bridge assembles the 22-byte header + body
+ * into a transient buffer and passes it here as an explicit (frame, frame_len)
+ * slice alongside the parsed header fields. Replaces the old hx_rcv_hdr
+ * two-phase state machine. */
 extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
                               gsize frame_len, guint32 type,
                                guint32 trans, guint32 flag, guint32 body_len);
