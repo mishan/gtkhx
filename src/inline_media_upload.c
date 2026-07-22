@@ -463,17 +463,17 @@ hx_send_upload_media (struct htlc_conn *htlc, const guint8 *payload,
 
 /* Parse error reply: DATA_ERROR text + optional
  * DATA_CHAT_MEDIA_ERROR_CODE. The error text we surface comes
- * directly from htlc->in.buf — borrowed for the duration of the
+ * directly from the received frame — borrowed for the duration of the
  * callback. The Rust extractor for the error code is fully
  * tolerant of absent / unknown values (returns 0 = Generic). */
 static void
-deliver_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx)
+deliver_failure (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                 hx_upload_ctx *ctx)
 {
     HxInlineMediaUploadResult r;
     memset (&r, 0, sizeof (r));
 
-    r.error_code = gtkhx_proto_extract_media_error_code (
-        htlc->in.buf, htlc->in.pos);
+    r.error_code = gtkhx_proto_extract_media_error_code (frame, frame_len);
 
     /* Best-effort error text from DATA_TASK_ERROR. Same pattern
 	 * task_error in tasks.c uses. Pull it through task_error_extract
@@ -481,7 +481,7 @@ deliver_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx)
 	 * without traversing the chunk walker itself. */
     char err_buf[1024];
     gsize err_len = 0;
-    if (task_error_extract (htlc->in.buf, htlc->in.pos, err_buf, sizeof (err_buf), &err_len)) {
+    if (task_error_extract (frame, frame_len, err_buf, sizeof (err_buf), &err_len)) {
         r.error_message = err_buf;
         r.error_message_len = err_len;
     }
@@ -507,10 +507,11 @@ deliver_failure (struct htlc_conn *htlc, hx_upload_ctx *ctx)
 }
 
 static void
-deliver_success (struct htlc_conn *htlc, hx_upload_ctx *ctx)
+deliver_success (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                 hx_upload_ctx *ctx)
 {
     struct gtkhx_proto_upload_final_reply parsed;
-    if (!gtkhx_proto_parse_upload_final_reply (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_upload_final_reply (frame, frame_len,
                                                &parsed)) {
         /* Reply was structurally malformed — handle is missing.
 		 * Surface as a generic failure with a synthetic error
@@ -600,14 +601,14 @@ rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
     }
 
     if (task_inerror (htlc, frame, frame_len)) {
-        deliver_failure (htlc, ctx);
+        deliver_failure (htlc, frame, frame_len, ctx);
         return;
     }
 
     /* Single-shot path: payload not stored on the ctx, so this is
 	 * the only reply we'll see — must be the final reply. */
     if (!ctx->payload) {
-        deliver_success (htlc, ctx);
+        deliver_success (htlc, frame, frame_len, ctx);
         return;
     }
 
@@ -617,7 +618,7 @@ rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
 	 * intermediate and (on the first reply at least) carries the
 	 * UPLOAD_TOKEN we need to echo on every follow-up. */
     if ((guint32) ctx->next_part_index >= (guint32) ctx->part_count) {
-        deliver_success (htlc, ctx);
+        deliver_success (htlc, frame, frame_len, ctx);
         return;
     }
 
@@ -634,7 +635,7 @@ rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
 	 * re-echo it on. */
     const guint8 *tok_ptr = NULL;
     size_t tok_len = 0;
-    if (gtkhx_proto_parse_upload_token_reply (htlc->in.buf, htlc->in.pos,
+    if (gtkhx_proto_parse_upload_token_reply (frame, frame_len,
                                               &tok_ptr, &tok_len)
         && tok_len > 0) {
         if (tok_len > HX_MEDIA_MAX_UPLOAD_TOKEN) {
@@ -679,7 +680,7 @@ rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
 	 * fire. Fail closed instead. */
     guint32 cur_trans = 0;
     struct task *cur = NULL;
-    if (gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &cur_trans)) {
+    if (gtkhx_proto_header_trans (frame, frame_len, &cur_trans)) {
         cur = task_with_trans (sess_from_htlc (htlc), cur_trans);
     }
     if (!cur) {

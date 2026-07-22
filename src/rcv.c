@@ -551,7 +551,7 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 
     if (task_inerror (htlc, frame, frame_len)) {
         if (!silent_probe) {
-            task_error (htlc);
+            task_error (htlc, frame, frame_len);
         }
         error = 1;
     }

@@ -1091,12 +1091,13 @@ file_update (session *sess, struct htxf_conn *htxf)
  * tasks.h via #include "proto_helpers.h". */
 
 void
-task_error (struct htlc_conn *htlc)
+task_error (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     char errormsg[8192 + 1];
     gsize len = 0;
 
-    if (!task_error_extract (htlc->in.buf, htlc->in.pos, errormsg, sizeof (errormsg), &len)) {
+    (void) htlc;
+    if (!task_error_extract (frame, frame_len, errormsg, sizeof (errormsg), &len)) {
         return;
     }
 

@@ -71,7 +71,8 @@ gtkhx_text_emoji_shortcodes_enabled (void)
  * links the bridge's header-pack path, so the linker just needs
  * unresolved symbols resolved. proto_helpers.c needs debug_log for its
  * trace helpers; same treatment. */
-void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
+                        gsize frame_len, guint32 type, guint32 trans,
                         guint32 flag, guint32 body_len);
 void hx_htlc_close (struct htlc_conn *htlc, int expected);
 void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
@@ -79,10 +80,13 @@ void debug_log (const char *cat, const char *fmt, ...);
 void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
 void
-hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
+                   gsize frame_len, guint32 type, guint32 trans,
                    guint32 flag, guint32 body_len)
 {
     (void) htlc;
+    (void) frame;
+    (void) frame_len;
     (void) type;
     (void) trans;
     (void) flag;

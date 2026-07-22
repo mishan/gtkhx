@@ -574,15 +574,17 @@ memory_copy (void *__dst, void *__src, unsigned int len)
  */
 #define dh_start(_buf, _buflen)                                                \
     {                                                                          \
-        struct hl_data_hdr *dh                                                 \
-            = (struct hl_data_hdr *)(&((_buf)[SIZEOF_HL_HDR]));                \
+        const guint8 *_dhbuf = (_buf);                                         \
+        struct hl_data_hdr *dh = NULL;                                         \
         guint32 _pos = SIZEOF_HL_HDR;                                          \
         guint32 _max = (_buflen);                                              \
         guint16 _len = 0, _type = 0;                                           \
+        /* Form the chunk pointer only after the loop guard proves _pos is     \
+         * in bounds — computing _dhbuf + _pos up front would be UB when       \
+         * _buflen < SIZEOF_HL_HDR. */                                         \
         for (; _pos + SIZEOF_HL_DATA_HDR <= _max;                              \
-             _pos += SIZEOF_HL_DATA_HDR + _len,                                \
-             dh = (struct hl_data_hdr *)(((guint8 *)dh) + SIZEOF_HL_DATA_HDR   \
-                                         + _len)) {                            \
+             _pos += SIZEOF_HL_DATA_HDR + _len) {                              \
+            dh = (struct hl_data_hdr *)(_dhbuf + _pos);                        \
             HN16 (&_len, &dh->len);                                            \
             if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR)                     \
                 break;                                                         \

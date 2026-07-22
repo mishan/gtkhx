@@ -167,16 +167,16 @@ inline_media_download_cancel (hx_inline_media_download *dl)
 }
 
 static void
-deliver_failure (struct htlc_conn *htlc, hx_inline_media_download *ctx)
+deliver_failure (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                 hx_inline_media_download *ctx)
 {
     HxInlineMediaDownloadResult r;
     memset (&r, 0, sizeof (r));
-    r.error_code = gtkhx_proto_extract_media_error_code (
-        htlc->in.buf, htlc->in.pos);
+    r.error_code = gtkhx_proto_extract_media_error_code (frame, frame_len);
 
     char err_buf[1024];
     gsize err_len = 0;
-    if (task_error_extract (htlc->in.buf, htlc->in.pos, err_buf, sizeof (err_buf), &err_len)) {
+    if (task_error_extract (frame, frame_len, err_buf, sizeof (err_buf), &err_len)) {
         r.error_message = err_buf;
         r.error_message_len = err_len;
     }
@@ -226,12 +226,12 @@ rcv_task_download_media (struct htlc_conn *htlc, const guint8 *frame, gsize fram
     }
 
     if (task_inerror (htlc, frame, frame_len)) {
-        deliver_failure (htlc, ctx);
+        deliver_failure (htlc, frame, frame_len, ctx);
         return;
     }
 
     struct gtkhx_proto_download_reply parsed;
-    if (!gtkhx_proto_parse_download_reply (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_download_reply (frame, frame_len,
                                            &parsed)) {
         debug_log ("media",
                    "DOWNLOAD_MEDIA reply missing required fields; "
@@ -307,7 +307,7 @@ rcv_task_download_media (struct htlc_conn *htlc, const guint8 *frame, gsize fram
 	 * creates a new task with ctx + ptr_free = ctx_free, and the
 	 * chunk-by-chunk handoff continues. */
     guint32 cur_trans = 0;
-    gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &cur_trans);
+    gtkhx_proto_header_trans (frame, frame_len, &cur_trans);
     struct task *cur = task_with_trans (sess_from_htlc (htlc), cur_trans);
     if (cur) {
         cur->ptr = NULL;
