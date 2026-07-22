@@ -599,7 +599,7 @@ rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
         return;
     }
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         deliver_failure (htlc, ctx);
         return;
     }

@@ -32,7 +32,8 @@
 /* The production receive dispatch (rcv.c). We stage the parsed frame into
  * htlc->in.buf and hand the header fields to it; it routes the opcode to a
  * body handler and calls it. */
-extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
+extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
+                              gsize frame_len, guint32 type,
                                guint32 trans, guint32 flag, guint32 body_len);
 
 /* Forward declaration of the production teardown. Defined in
@@ -125,7 +126,8 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
     htlc->in.pos = SIZEOF_HL_HDR + body_len;
     htlc->in.len = 0;
 
-    hx_dispatch_frame (htlc, type, trans, flag, body_len);
+    hx_dispatch_frame (htlc, htlc->in.buf, htlc->in.pos, type, trans, flag,
+                       body_len);
 }
 
 void

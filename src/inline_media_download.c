@@ -225,7 +225,7 @@ rcv_task_download_media (struct htlc_conn *htlc, const guint8 *frame, gsize fram
         return;
     }
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         deliver_failure (htlc, ctx);
         return;
     }

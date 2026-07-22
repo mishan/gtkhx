@@ -94,9 +94,9 @@ void *the_session = NULL;
  * task_inerror==FALSE check). Return 0 unconditionally — the
  * oversized-token test won't go anywhere near an actual error
  * reply. */
-extern int task_inerror (struct htlc_conn *htlc);
+extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 int
-task_inerror (struct htlc_conn *htlc)
+task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     (void) htlc;
     return 0;

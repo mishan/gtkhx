@@ -277,9 +277,11 @@ connect_test_rcv_body (struct htlc_conn *htlc)
 }
 
 void
-hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
-                   guint32 flag, guint32 body_len)
+hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                   guint32 type, guint32 trans, guint32 flag, guint32 body_len)
 {
+    (void) frame;
+    (void) frame_len;
     (void) body_len;
     gboolean is_first = (connect_test_rcv_count == 0);
     if (is_first) {

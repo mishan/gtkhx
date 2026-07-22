@@ -455,7 +455,8 @@ struct task {
     rcv_task_fn rcv;
 };
 
-extern int task_inerror (struct htlc_conn *htlc);
+extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
+                          gsize frame_len);
 
 #define XFER_GET 0
 #define XFER_PUT 1

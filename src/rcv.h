@@ -1,25 +1,26 @@
 #ifndef HX_RCV_H
 #define HX_RCV_H
 
-extern void hx_rcv_chat (struct htlc_conn *htlc);
-extern void hx_rcv_msg (struct htlc_conn *htlc);
-extern void hx_rcv_agreement_file (struct htlc_conn *htlc);
-extern void hx_rcv_news_post (struct htlc_conn *htlc);
-extern void hx_rcv_task (struct htlc_conn *htlc);
-extern void hx_rcv_user_change (struct htlc_conn *htlc);
-extern void hx_rcv_user_part (struct htlc_conn *htlc);
-extern void hx_rcv_chat_subject (struct htlc_conn *htlc);
-extern void hx_rcv_chat_invite (struct htlc_conn *htlc);
-extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc);
-extern void hx_rcv_dump (struct htlc_conn *htlc);
-extern void hx_rcv_xfer_queue (struct htlc_conn *htlc);
-extern void hx_rcv_banner (struct htlc_conn *htlc);
-extern void hx_rcv_magic (struct htlc_conn *htlc);
+extern void hx_rcv_chat (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_magic (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 /* Dispatch a fully-staged received frame: route the (already-parsed) opcode to
  * a body handler and call it. The hxnet bridge stages the 22-byte header + body
  * into htlc->in.buf, then calls this with the parsed header fields. Replaces the
  * old hx_rcv_hdr two-phase state machine. */
-extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
+extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
+                              gsize frame_len, guint32 type,
                                guint32 trans, guint32 flag, guint32 body_len);
 
 /* Voice-chat extension (fogWraith Capabilities-Voice.md), Phase 8.A.
@@ -30,9 +31,9 @@ extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
  * Phase 8.A logs the parsed payload via debug_log("voice", ...) and
  * proto_trace; the runtime state machine + GtkhxSession signals land
  * in Phase 8.C with hxvoice-runtime. */
-extern void hx_rcv_voice_sdp_offer (struct htlc_conn *htlc);
-extern void hx_rcv_voice_ice (struct htlc_conn *htlc);
-extern void hx_rcv_voice_room_status (struct htlc_conn *htlc);
+extern void hx_rcv_voice_sdp_offer (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_voice_ice (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 
 /* TASK-reply handlers for the client-initiated 600/601/603/606
  * transactions. The voice send wrappers in src/voice.c register
@@ -85,7 +86,7 @@ extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsiz
 extern void rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 /* ICON_CHANGE (1864) broadcast: UID only. Emits gif-icon-changed so a
  * view can re-fetch the avatar via hx_icon_get. */
-extern void hx_rcv_icon_change (struct htlc_conn *htlc);
+extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 
 extern void rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
                                 int text);

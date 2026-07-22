@@ -254,13 +254,13 @@ void print_binary(char *buf, int len)
 */
 
 int
-task_inerror (struct htlc_conn *htlc)
+task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* the header error-bit test moved to the Rust
 	 * hotline-proto crate (gtkhx_proto_header_in_error). Same
 	 * computation as the old ntohl(h->flag) & 1, with bounds
 	 * checking on a short buffer. */
-    return gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos) ? 1 : 0;
+    return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
 }
 
 /* Public-chat line ignore-gate + emit — Rust hxchat-recv crate. */
@@ -268,7 +268,7 @@ extern int hx_chat_recv (struct htlc_conn *htlc, void *member_model,
                          guint16 uid, void *event);
 
 void
-hx_rcv_chat (struct htlc_conn *htlc)
+hx_rcv_chat (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_chat_msg msg;
     session *sess = sess_from_htlc (htlc);
@@ -276,7 +276,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
 
     /* Chunk parse + CR2LF/strip_ansi + leading-LF strip lives in
 	 * proto_helpers.c so the Tier 2 unit tests can drive it. */
-    if (!hx_chat_extract (htlc->in.buf, htlc->in.pos, &msg)) {
+    if (!hx_chat_extract (frame, frame_len, &msg)) {
         return;
     }
 
@@ -295,7 +295,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
     if (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) {
         memset (&media_meta, 0, sizeof (media_meta));
         media_status = gtkhx_proto_extract_chat_media_meta (
-            htlc->in.buf, htlc->in.pos, &media_meta);
+            frame, frame_len, &media_meta);
         if (media_status == GTKHX_PROTO_MEDIA_META_ORPHAN) {
             /* Spec: receivers MUST reject a transaction with
 			 * exactly one companion field present. Drop the chat
@@ -355,7 +355,7 @@ extern int hx_msg_recv (void *member_model, guint16 uid, int is_pm,
                         void *event);
 
 void
-hx_rcv_msg (struct htlc_conn *htlc)
+hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_msg_msg pm;
     session *sess = sess_from_htlc (htlc);
@@ -365,7 +365,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 
     /* Chunk parse + name/body sanitisation lives in proto_helpers.c
 	 * so the Tier 2 unit tests can drive it. */
-    if (!hx_msg_extract (htlc->in.buf, htlc->in.pos, &pm)) {
+    if (!hx_msg_extract (frame, frame_len, &pm)) {
         return;
     }
 
@@ -381,7 +381,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 	 * which means a UID-only check would mis-route every broadcast
 	 * on mhxd-family servers into the private-message handler.
 	 * The header type is the authoritative signal. */
-    hl_hdr_decode (htlc->in.buf, &hdr_type, NULL, NULL, NULL, NULL, NULL);
+    hl_hdr_decode (frame, &hdr_type, NULL, NULL, NULL, NULL, NULL);
     is_broadcast = (hdr_type == HTLS_HDR_MSG_BROADCAST);
     gboolean is_pm = !is_broadcast && pm.uid > 0;
 
@@ -459,7 +459,7 @@ extern int hx_agreement_recv (void *sess, int has_agreement, const char *buf,
                               guint16 len);
 
 void
-hx_rcv_agreement_file (struct htlc_conn *htlc)
+hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* chunk-walking + sanitisation lives in
 	 * hx_agreement_extract. The 16 KiB cap is generous; mhxd
@@ -468,7 +468,7 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
     char buf[16384];
     gsize body_len = 0;
     hx_agreement_result r
-        = hx_agreement_extract (htlc->in.buf, htlc->in.pos, buf, sizeof (buf), &body_len);
+        = hx_agreement_extract (frame, frame_len, buf, sizeof (buf), &body_len);
 
     /* no-agreement auto-path — the user has nothing to
 	 * click Agree on, so we send AGREEMENTAGREE ourselves to:
@@ -521,13 +521,13 @@ news_post_emit (void *user, const char *bytes, gsize len)
 }
 
 void
-hx_rcv_news_post (struct htlc_conn *htlc)
+hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
-    hx_news_post_walk (htlc->in.buf, htlc->in.pos, news_post_emit, htlc);
+    hx_news_post_walk (frame, frame_len, news_post_emit, htlc);
 }
 
 void
-hx_rcv_task (struct htlc_conn *htlc)
+hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     guint32 trans = 0;
     struct task *tsk;
@@ -537,7 +537,7 @@ hx_rcv_task (struct htlc_conn *htlc)
 	 * hotline-proto crate (replaces HN32(&trans, &h->trans)). A
 	 * short buffer leaves trans at 0, which task_with_trans treats
 	 * as "no such task" — the same safe fallthrough as before. */
-    gtkhx_proto_header_trans (htlc->in.buf, htlc->in.pos, &trans);
+    gtkhx_proto_header_trans (frame, frame_len, &trans);
     tsk = task_with_trans (sess_from_htlc (htlc), trans);
 
     /* Speculative bootstrap probes whose rejection is expected and
@@ -549,7 +549,7 @@ hx_rcv_task (struct htlc_conn *htlc)
 	 * user about a request they never made. */
     gboolean silent_probe = tsk && tsk->str && !strcmp (tsk->str, "icon-list");
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         if (!silent_probe) {
             task_error (htlc);
         }
@@ -581,7 +581,7 @@ hx_rcv_task (struct htlc_conn *htlc)
             char err_text[256];
             gsize err_len = 0;
             const char *text =
-                (task_error_extract (htlc->in.buf, htlc->in.pos, err_text, sizeof (err_text),
+                (task_error_extract (frame, frame_len, err_text, sizeof (err_text),
                                      &err_len) && err_len > 0)
                     ? err_text
                     : NULL;
@@ -623,7 +623,7 @@ hx_rcv_task (struct htlc_conn *htlc)
                       || !strcmp (tsk->str, "upload-media")
                       || !strcmp (tsk->str, "download-media")));
         if (tsk->rcv && (!error || dispatch_on_error)) {
-            tsk->rcv (htlc, htlc->in.buf, htlc->in.pos, tsk->ptr, tsk->data);
+            tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data);
         }
         /* Liveness gate: skip task_delete if the rcv handler tore
 		 * down the connection (rcv_task_login does this on a
@@ -672,17 +672,17 @@ extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
 extern void hx_selfinfo_recv (struct htlc_conn *htlc);
 
 void
-hx_rcv_user_change (struct htlc_conn *htlc)
+hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_user_change_msg uc;
     struct chat *chat;
     session *sess = sess_from_htlc (htlc);
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         return;
     }
 
-    if (!hx_user_change_extract (htlc->in.buf, htlc->in.pos, &uc)) {
+    if (!hx_user_change_extract (frame, frame_len, &uc)) {
         return;
     }
 
@@ -782,13 +782,13 @@ hx_rcv_user_change (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_user_part (struct htlc_conn *htlc)
+hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_user_part_msg pm;
     struct chat *chat;
     session *sess = sess_from_htlc (htlc);
 
-    if (!hx_user_part_extract (htlc->in.buf, htlc->in.pos, &pm)) {
+    if (!hx_user_part_extract (frame, frame_len, &pm)) {
         return;
     }
 
@@ -821,13 +821,13 @@ extern int hx_chat_subject_recv (struct htlc_conn *htlc, guint32 cid,
                                  const char *current_subject);
 
 void
-hx_rcv_chat_subject (struct htlc_conn *htlc)
+hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_chat_subject_msg sm;
     struct chat *chat;
     session *sess = sess_from_htlc (htlc);
 
-    if (!hx_chat_subject_extract (htlc->in.buf, htlc->in.pos, &sm)) {
+    if (!hx_chat_subject_extract (frame, frame_len, &sm)) {
         return;
     }
     if (!sm.subject_len) {
@@ -851,7 +851,7 @@ hx_rcv_chat_subject (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_banner (struct htlc_conn *htlc)
+hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_banner_msg bm;
 
@@ -859,7 +859,7 @@ hx_rcv_banner (struct htlc_conn *htlc)
 	 * after the AGREEMENTAGREE round-trip. Parse the type +
 	 * optional URL and hand off to banner.c, which owns the
 	 * toolbar widget and the URL/HTXF fetch state machines. */
-    if (!hx_banner_extract (htlc->in.buf, htlc->in.pos, &bm)) {
+    if (!hx_banner_extract (frame, frame_len, &bm)) {
         return;
     }
 
@@ -873,13 +873,13 @@ extern void hx_chat_invite_recv (struct htlc_conn *htlc, void *member_model,
                                  guint32 cid, guint16 uid, const char *name);
 
 void
-hx_rcv_chat_invite (struct htlc_conn *htlc)
+hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_chat_invite_msg im;
     session *sess = sess_from_htlc (htlc);
     struct chat *chat = chat_with_cid (sess, 0);
 
-    if (!hx_chat_invite_extract (htlc->in.buf, htlc->in.pos, &im)) {
+    if (!hx_chat_invite_extract (frame, frame_len, &im)) {
         return;
     }
 
@@ -890,7 +890,7 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_user_selfinfo (struct htlc_conn *htlc)
+hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* The chunk walker (parses HTLS_DATA_ACCESS + HTLS_DATA_USER_LIST
 	 * into htlc->access / uid / icon) is in proto_helpers.c so the
@@ -898,7 +898,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * deliberately ignores the server-supplied name bytes (see the
 	 * comment there) — we treat our local prefs nick as authoritative
 	 * and push it back to the server immediately below. */
-    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
+    hx_selfinfo_parse (htlc, frame, frame_len);
 
     /* SELFINFO is the canonical 'login complete' signal.
 	 * Track it on htlc->flags so the agreement Agree button can
@@ -946,7 +946,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_dump (struct htlc_conn *htlc)
+hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     int fd;
     ssize_t n;
@@ -958,8 +958,8 @@ hx_rcv_dump (struct htlc_conn *htlc)
     /* Best-effort diagnostic dump — if the write fails or comes up
 	 * short there's no recovery path, but we shouldn't silently
 	 * pretend it succeeded either. */
-    n = write (fd, htlc->in.buf, htlc->in.pos);
-    if (n != (ssize_t)htlc->in.pos) {
+    n = write (fd, frame, frame_len);
+    if (n != (ssize_t)frame_len) {
         g_warning ("hx_rcv_dump: short write to hx.dump");
     }
     fsync (fd);
@@ -979,12 +979,12 @@ extern void hx_file_info_recv (const char *path, const char *name,
                                const char *created, guint64 size);
 
 void
-hx_rcv_xfer_queue (struct htlc_conn *htlc)
+hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     struct hx_xfer_queue_msg xq;
     struct htxf_conn *htxf;
 
-    if (!hx_xfer_queue_extract (htlc->in.buf, htlc->in.pos, &xq)) {
+    if (!hx_xfer_queue_extract (frame, frame_len, &xq)) {
         return;
     }
 
@@ -1020,13 +1020,13 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
  */
 
 void
-hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
+hx_rcv_voice_sdp_offer (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* gtkhx_proto_parse_voice_reply only fails on NULL out; with a
      * stack-allocated `r` it always succeeds. The presence flags
      * below are the real malformed-frame signal. */
     struct gtkhx_proto_voice_reply r;
-    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_voice_reply (frame, frame_len, &r);
 
     /* SDP is the mandatory payload on 602; absence is a malformed
      * frame from the server. Surface the case but don't crash — Phase
@@ -1045,7 +1045,7 @@ hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
      * upstream, or an exotic frame the wire layer accepted in one
      * pass and refused in another). Leaving sum uninitialised below
      * would log garbage; surfacing the inconsistency is better. */
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 0,
+    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 0,
                                         (const uint8_t **) &sdp_ptr,
                                         &sdp_len)) {
         debug_log ("voice",
@@ -1093,14 +1093,14 @@ hx_rcv_voice_sdp_offer (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_voice_ice (struct htlc_conn *htlc)
+hx_rcv_voice_ice (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* See hx_rcv_voice_sdp_offer for the parse_voice_reply contract:
      * it only fails on NULL out, which a stack-allocated r can't
      * trigger. The presence flags below are the malformed-frame
      * signal. */
     struct gtkhx_proto_voice_reply r;
-    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_voice_reply (frame, frame_len, &r);
 
     /* Distinguish the spec's end-of-candidates shorthand from a
      * malformed 604:
@@ -1141,7 +1141,7 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
 
     const guint8 *ice_ptr = NULL;
     gsize ice_len = 0;
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 1,
+    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 1,
                                         (const uint8_t **) &ice_ptr,
                                         &ice_len)) {
         debug_log ("voice",
@@ -1189,12 +1189,12 @@ hx_rcv_voice_ice (struct htlc_conn *htlc)
 }
 
 void
-hx_rcv_voice_room_status (struct htlc_conn *htlc)
+hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* parse_voice_reply only fails on NULL out — see
      * hx_rcv_voice_sdp_offer's comment. */
     struct gtkhx_proto_voice_reply r;
-    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_voice_reply (frame, frame_len, &r);
 
     if (!r.participants_present) {
         debug_log (
@@ -1210,7 +1210,7 @@ hx_rcv_voice_room_status (struct htlc_conn *htlc)
      * handlers above: the presence flag was true, so the field
      * walker should hand back a non-NULL slice. Surface any
      * inconsistency instead of walking an uninitialised blob_len. */
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 3,
+    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 3,
                                         (const uint8_t **) &blob,
                                         &blob_len)) {
         debug_log ("voice",
@@ -1296,7 +1296,7 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
      * gtkhx_proto_parse_voice_reply only returns false on NULL out,
      * so we don't need the dead-code conditional here either. */
     struct gtkhx_proto_voice_reply r;
-    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_voice_reply (frame, frame_len, &r);
 
     if (r.cid != expected_cid) {
         debug_log (
@@ -1326,7 +1326,7 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
      * htlc->in.buf at the offset the per-field accessor returns. */
     const guint8 *sdp_ptr = NULL;
     gsize sdp_len = 0;
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 0,
+    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 0,
                                         (const uint8_t **) &sdp_ptr,
                                         &sdp_len)) {
         debug_log ("voice",
@@ -1341,7 +1341,7 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
     /* Codec name (short ASCII, typically "PCMU"). */
     const guint8 *codec_ptr = NULL;
     gsize codec_len = 0;
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 2,
+    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 2,
                                         (const uint8_t **) &codec_ptr,
                                         &codec_len)) {
         debug_log ("voice",
@@ -1359,7 +1359,7 @@ rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
     /* Participants — same walk as hx_rcv_voice_room_status. */
     const guint8 *blob = NULL;
     gsize blob_len = 0;
-    if (!gtkhx_proto_voice_reply_field (htlc->in.buf, htlc->in.pos, 3,
+    if (!gtkhx_proto_voice_reply_field (frame, frame_len, 3,
                                         (const uint8_t **) &blob,
                                         &blob_len)) {
         debug_log ("voice",
@@ -1442,7 +1442,8 @@ rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame, gsize fr
  * the opcode to a body handler (via the Rust dispatch::route table behind
  * hx_recv_route), and calls it. */
 void
-hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
+hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                   guint32 type, guint32 trans,
                    guint32 flag, guint32 body_len)
 {
     /* Wire len field encodes body_len + the 2-byte hc; the proto trace wants
@@ -1450,7 +1451,7 @@ hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
     proto_trace_recv_hdr (type, trans, flag,
                           body_len + (guint32) sizeof (guint16));
 
-    void (*handler) (struct htlc_conn *) = NULL;
+    void (*handler) (struct htlc_conn *, const guint8 *, gsize) = NULL;
     switch (hx_recv_route (type)) {
     case HX_RECV_CHAT:
         handler = hx_rcv_chat;
@@ -1516,7 +1517,7 @@ hx_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
     }
 
     if (handler && hx_conn_fd (htlc) != 0) {
-        handler (htlc);
+        handler (htlc, frame, frame_len);
     }
 }
 
@@ -1534,7 +1535,7 @@ rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
 	 * NUL-terminated at offset 0. */
     struct gtkhx_proto_account_read ar;
     bool ok = gtkhx_proto_parse_account_read (
-        htlc->in.buf, htlc->in.pos, (uint8_t *)name, sizeof (name),
+        frame, frame_len, (uint8_t *)name, sizeof (name),
         (uint8_t *)login, sizeof (login), (uint8_t *)pass, sizeof (pass), &ar);
     if (ok && ar.got_access) {
         /* ACCESS lands in ar.access as raw 8 wire bytes; copy into
@@ -1608,7 +1609,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
         hx_printf_prefix (htlc, 0, INFOPREFIX, "%s:%u: %s %s\n", buf,
                           hx_conn_serverport (htlc), _ ("login"),
 
-                          task_inerror (htlc) ? _ ("failed?")
+                          task_inerror (htlc, frame, frame_len) ? _ ("failed?")
                                               : _ ("successful"));
     }
 
@@ -1617,7 +1618,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
      * handshake in Rust and replays only the final reply, so this task
      * always runs the post-login completion below (pass is always
      * NULL). */
-    if (!task_inerror (htlc)) {
+    if (!task_inerror (htlc, frame, frame_len)) {
         /* Login task reply came back successful. The connected-state UI
          * (window titles / toolbar buttons / status bar) and the LOGIN
          * chime are driven off the "logged-in" signal, emitted below once
@@ -1687,7 +1688,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
 		 * DATA_CAPABILITIES chunk. */
         struct gtkhx_proto_login li;
         unsigned login_seen = gtkhx_proto_parse_login (
-            htlc->in.buf, htlc->in.pos, (uint8_t *) servername,
+            frame, frame_len, (uint8_t *) servername,
             sizeof (servername), &li);
 
         if (login_seen & HX_LOGIN_SEEN_UID) {
@@ -1855,7 +1856,7 @@ rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
 	 * NEWS_FILE arrives"). */
     gsize copied = 0;
     news_buf = g_realloc (news_buf, 65536);
-    if (hx_news_file_extract (htlc->in.buf, htlc->in.pos, (char *)news_buf, 65536, &copied)) {
+    if (hx_news_file_extract (frame, frame_len, (char *)news_buf, 65536, &copied)) {
         news_len = copied;
     } else {
         news_len = 0;
@@ -1883,7 +1884,7 @@ rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 {
     (void) uid_ptr; /* uid is echoed in the reply; we read it from there */
     struct gtkhx_proto_icon_entry e;
-    if (!gtkhx_proto_parse_icon_get_reply (htlc->in.buf, htlc->in.pos, &e)) {
+    if (!gtkhx_proto_parse_icon_get_reply (frame, frame_len, &e)) {
         debug_log ("icon", "ICON_GET reply missing UID");
         return;
     }
@@ -1911,7 +1912,7 @@ rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
      * task_error for the "icon-list" task and dispatches us on the error
      * path so we record the verdict). A speculative probe's rejection is
      * expected and non-actionable. */
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
         if (hx_conn_gif_icons_probe_timer (htlc)) {
             g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
@@ -1939,7 +1940,7 @@ rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
 	 * server-controlled, so clamp it: a uid is a u16, so a well-formed
 	 * list has at most 65536 entries; a hostile/buggy reply with massive
 	 * duplication shouldn't drive a huge allocation + emit storm. */
-    size_t n = gtkhx_proto_parse_icon_list (htlc->in.buf, htlc->in.pos, NULL, 0);
+    size_t n = gtkhx_proto_parse_icon_list (frame, frame_len, NULL, 0);
     /* A uid is u16, so the space is 65536 distinct values (0..65535) —
 	 * clamp to that, not G_MAXUINT16, so a full list isn't off-by-one. */
     const size_t max_entries = (size_t) G_MAXUINT16 + 1;
@@ -1956,7 +1957,7 @@ rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
     struct gtkhx_proto_icon_entry *entries
         = g_new0 (struct gtkhx_proto_icon_entry, n);
     size_t got
-        = gtkhx_proto_parse_icon_list (htlc->in.buf, htlc->in.pos, entries, n);
+        = gtkhx_proto_parse_icon_list (frame, frame_len, entries, n);
     if (got > n) {
         got = n; /* defensive: never iterate past the allocation */
     }
@@ -1973,9 +1974,9 @@ extern void hx_icon_change_recv (struct htlc_conn *htlc, const guint8 *buf,
                                  gsize len);
 
 void
-hx_rcv_icon_change (struct htlc_conn *htlc)
+hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
-    hx_icon_change_recv (htlc, htlc->in.buf, htlc->in.pos);
+    hx_icon_change_recv (htlc, frame, frame_len);
 }
 
 /* TRAN_GET_CHAT_HISTORY (700) reply walker. The reply carries:
@@ -2006,7 +2007,7 @@ rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
         = g_ptr_array_new_with_free_func ((GDestroyNotify) hx_history_entry_free);
     gboolean has_more = FALSE;
 
-    dh_start (htlc->in.buf, htlc->in.pos)
+    dh_start (frame, frame_len)
     {
         switch (_type) {
         case HTLS_DATA_HISTORY_ENTRY: {
@@ -2070,7 +2071,7 @@ rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
     guint16 uid;
     int new;
 
-    dh_start (htlc->in.buf, htlc->in.pos)
+    dh_start (frame, frame_len)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             /* chunk-record parsing moved to Rust
@@ -2140,7 +2141,7 @@ rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize fr
 {
     session *sess = sess_from_htlc (htlc);
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         chat_delete (sess, chat);
         return;
     }
@@ -2151,7 +2152,7 @@ rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize fr
 void
 rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         return;
     }
 
@@ -2171,7 +2172,7 @@ rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
 	 * the `nlen && ilen` dispatch gate that filters out unanswered
 	 * server frames. */
     struct gtkhx_proto_user_info ui;
-    bool ok = gtkhx_proto_parse_user_info (htlc->in.buf, htlc->in.pos, (uint8_t *)name,
+    bool ok = gtkhx_proto_parse_user_info (frame, frame_len, (uint8_t *)name,
                                            sizeof (name), (uint8_t *)info,
                                            sizeof (info), &ui);
     if (ok && ui.name_len && ui.info_len) {
@@ -2188,7 +2189,7 @@ rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
     guint32 fh_len;
     guint16 fhlen;
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         /* give the new-browser remote provider a chance
 		 * to react before we drop the cfl. The helper marks the
 		 * provider's listing_error flag and emits "navigated" so
@@ -2203,7 +2204,7 @@ rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
         g_free (cfl);
         return;
     }
-    dh_start (htlc->in.buf, htlc->in.pos)
+    dh_start (frame, frame_len)
     {
         if (_type != HTLS_DATA_FILE_LIST) {
             continue;
@@ -2374,7 +2375,7 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
     char name[256], comment[256];
     char created[32], modified[32];
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         return;
     }
 
@@ -2384,7 +2385,7 @@ rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
 	 * date stamp format) and the per-call session emit. */
     struct gtkhx_proto_file_getinfo f;
     bool ok = gtkhx_proto_parse_file_getinfo (
-        htlc->in.buf, htlc->in.pos, (uint8_t *)name, sizeof (name),
+        frame, frame_len, (uint8_t *)name, sizeof (name),
         (uint8_t *)type, sizeof (type), (uint8_t *)crea, sizeof (crea),
         (uint8_t *)comment, sizeof (comment), &f);
     if (!ok) {
@@ -2433,7 +2434,7 @@ rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     if (i == nxfers) {
         return;
     }
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         if (htxf->opt.retry) {
             htxf->gone = 0;
             timer_add_secs (1, xfer_go_timer, htxf);
@@ -2448,7 +2449,7 @@ rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 	 * `(!size && !size64_seen) || !ref` dispatch gate stays here —
 	 * malformed replies short-circuit the rest of the xfer kickoff. */
     struct gtkhx_proto_file_get_reply r;
-    gtkhx_proto_parse_file_get_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_file_get_reply (frame, frame_len, &r);
     ref = r.ref_;
     size = r.size;
     size64 = r.size64;
@@ -2524,7 +2525,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
     if (i == nxfers) {
         return;
     }
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         if (htxf->opt.retry) {
             htxf->gone = 0;
             timer_add_secs (1, xfer_go_timer, htxf);
@@ -2541,7 +2542,7 @@ rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
 	 * legal at total_size 0 (the `total_size = ... : 1` clamp
 	 * below normalises that for the progress UI). */
     struct gtkhx_proto_folder_get_reply r;
-    gtkhx_proto_parse_folder_get_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_folder_get_reply (frame, frame_len, &r);
     ref = r.ref_;
     size = r.size;
     size64 = r.size64;
@@ -2578,7 +2579,7 @@ rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     guint32 ref = 0, data_pos = 0, rsrc_pos = 0, queue = 0;
     struct stat sb;
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         gtask_delete_htxf (sess_from_htlc (htlc), htxf);
         xfer_delete (htxf);
         return;
@@ -2588,7 +2589,7 @@ rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 	 * resume offsets (data_pos at +46, rsrc_pos at +62) gate on
 	 * len >= 66 in the Rust parser, matching the C extractor. */
     struct gtkhx_proto_file_put_reply r;
-    gtkhx_proto_parse_file_put_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_file_put_reply (frame, frame_len, &r);
     ref = r.ref_;
     queue = r.queue;
     data_pos = r.data_pos;
@@ -2633,7 +2634,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
 {
     guint32 ref = 0, queue = 0;
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         gtask_delete_htxf (sess_from_htlc (htlc), htxf);
         xfer_delete (htxf);
         return;
@@ -2643,7 +2644,7 @@ rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
 	 * Strict subset of file_put — no RFLT (per-file resume happens
 	 * inside folder_put_thread, not at the task boundary). */
     struct gtkhx_proto_folder_put_reply r;
-    gtkhx_proto_parse_folder_put_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_folder_put_reply (frame, frame_len, &r);
     ref = r.ref_;
     queue = r.queue;
 
@@ -2673,7 +2674,7 @@ rcv_task_banner_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
     (void)ptr;
     (void)data;
 
-    if (task_inerror (htlc)) {
+    if (task_inerror (htlc, frame, frame_len)) {
         debug_log ("banner", "DOWNLOAD_BANNER task error from server");
         return;
     }
@@ -2682,7 +2683,7 @@ rcv_task_banner_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_le
 	 * Just REF + SIZE — banner.c spins up an HTXF subchannel
 	 * worker on the back of these two scalars. */
     struct gtkhx_proto_banner_get_reply r;
-    gtkhx_proto_parse_banner_get_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_banner_get_reply (frame, frame_len, &r);
     ref = r.ref_;
     size = r.size;
 
