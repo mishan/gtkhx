@@ -36,11 +36,12 @@
 #include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h" /* struct htlc_conn — referenced by the inline hdr_* below */
+#include "htlc_recv_buf.h" /* hx_test_in — the test-side receive buffer */
 #include "server_matrix.h"
 
 /*
  * Convenience accessors over the wire header that integration_recv_message
- * just dropped into htlc->in.buf. Every Tier 3 test wants type / flag /
+ * just dropped into hx_test_in(htlc)->buf. Every Tier 3 test wants type / flag /
  * trans to filter incoming messages — pre-refactor each test had its own
  * static guint32 hdr_type / hdr_flag / hdr_trans copies (34 binaries,
  * dozens of duplicate 4-line wrappers). Inline static here keeps the
@@ -49,21 +50,21 @@
 static inline guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
     return ntohl (h->type);
 }
 
 static inline guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
     return ntohl (h->flag);
 }
 
 static inline guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-    const struct hl_hdr *h = (const struct hl_hdr *) htlc->in.buf;
+    const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
     return ntohl (h->trans);
 }
 

@@ -50,7 +50,7 @@ test_user_info_self (void)
     gsize info_len = 0;
     gchar *name_text = NULL;
     gsize name_len = 0;
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_USER_INFO:

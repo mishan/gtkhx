@@ -136,7 +136,7 @@ open_admin_login_or_fail (struct htlc_conn *htlc, const char *display_name)
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf (
                 "server rejected admin login: \"%s\". Check the test server's "
                 "accounts/ for an `admin` account with no password.",
@@ -155,7 +155,7 @@ open_admin_login_or_fail (struct htlc_conn *htlc, const char *display_name)
         return -1;
     }
 
-    hx_selfinfo_parse (htlc);
+    hx_selfinfo_parse (htlc, hx_test_in(htlc)->buf, hx_test_in(htlc)->pos);
 
     /* Sanity: admin needs at least the user-management bits, otherwise
      * mhxd silently drops the ACCOUNT_* dispatches and our trans-
@@ -223,7 +223,7 @@ read_account_reply (struct htlc_conn *htlc, char *name_out, gsize name_cap,
                     char *login_out, gsize login_cap, guint8 *access_out)
 {
     unsigned seen = 0;
-    dh_start (htlc)
+    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_NAME:

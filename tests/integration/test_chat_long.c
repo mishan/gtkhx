@@ -89,7 +89,7 @@ test_chat_long_message_roundtrips (void)
         }
 
         struct hx_chat_msg cm = { 0 };
-        if (!hx_chat_extract (&htlc_b, &cm)) {
+        if (!hx_chat_extract (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos, &cm)) {
             continue;
         }
 

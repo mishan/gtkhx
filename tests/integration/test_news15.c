@@ -15,7 +15,7 @@
  * For the dirlist test:
  *   1. Login.
  *   2. Send HTLC_HDR_NEWSDIRLIST with no chunks (mhxd's
- *      rcv_news_listdir interprets `htlc->in.pos == SIZEOF_HL_HDR`
+ *      rcv_news_listdir interprets `hx_test_in(htlc)->pos == SIZEOF_HL_HDR`
  *      as 'list the configured newsdir root').
  *   3. Drain to the TASK reply matching our trans.
  *   4. Verify at least one HTLS_DATA_NEWS_DIRLIST_EXTENDED chunk
@@ -64,7 +64,7 @@ test_news15_root_dirlist (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_message ("news15 dirlist refused: \"%s\" "
                             "(server may have tnews disabled)",
                             err);
@@ -80,7 +80,7 @@ test_news15_root_dirlist (void)
 	 * HTLS_DATA_NEWS_DIRLIST_EXTENDED. The shipped run/hxd/newsdir
 	 * has cat_irasshaimase pre-seeded as a category. */
     int dirlist_chunks = 0;
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type == HTLS_DATA_NEWS_DIRLIST_EXTENDED) {
             dirlist_chunks++;

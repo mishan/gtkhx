@@ -51,10 +51,4 @@ extern void proto_trace_send_end (void);
 extern void proto_trace_recv_hdr (guint32 type, guint32 trans, guint32 flag,
                                   guint32 len);
 
-/* Incoming — walks the data chunks already buffered in htlc->in
- * (between SIZEOF_HL_HDR and htlc->in.pos) and logs each one.
- * Independent of dh_start / dh_end so we don't have to thread a
- * trace call into every consumer of those macros. */
-extern void proto_trace_recv_chunks (struct htlc_conn *htlc);
-
 #endif /* HX_PROTO_TRACE_H */

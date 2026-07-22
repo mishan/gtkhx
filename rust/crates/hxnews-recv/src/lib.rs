@@ -7,7 +7,7 @@
 //! (`hx_rcv_task`, shared by every reply type) just calls these Rust callbacks.
 //!
 //! Each handler composes pieces that are already Rust: the `hotline-proto`
-//! parser (owned handle), the carrier stash + `htlc->in` accessor
+//! parser (owned handle) fed the received frame slice, the carrier stash
 //! (`news_recv_bridge.c`), and the `gtkhx-session` signal emit. The main-thread
 //! `gnews_browser_handle_*` view handler then feeds the handle to the
 //! `hxnews-model` builder and frees it. See `docs/rust/news-receive-plan.md`.
@@ -20,9 +20,6 @@ use carrier::{
 };
 
 extern "C" {
-    // news_recv_bridge.c — the received frame body + its length (htlc->in).
-    fn hx_htlc_in_buf(htlc: *mut c_void) -> *const u8;
-    fn hx_htlc_in_pos(htlc: *mut c_void) -> usize;
     // hotline-proto — parse a reply to an owned handle. catlist: NULL when the
     // chunk is absent / malformed. dirlist: always a (possibly empty) handle.
     // The view handler frees them (gtkhx_proto_catlist_free / _dirlist_free).
@@ -91,27 +88,29 @@ struct NewsThreadReply {
 /// `void rcv_task_newscat_list(struct htlc_conn *htlc, void *gcnews, void *data)`
 /// — the HTLC_HDR_NEWSCATLIST reply handler (was `rcv.c`).
 ///
-/// Parses the CATLIST chunk out of `htlc->in` to an owned `CatList` handle,
-/// stashes it on the `gnews_catalog` carrier, and emits `news-catalog`. A NULL
-/// handle (absent / malformed chunk) is stashed as-is and treated as an empty
-/// listing downstream — matching the old C, which emitted an empty `news_group`.
+/// Parses the CATLIST chunk out of the received `frame` to an owned `CatList`
+/// handle, stashes it on the `gnews_catalog` carrier, and emits `news-catalog`.
+/// A NULL handle (absent / malformed chunk) is stashed as-is and treated as an
+/// empty listing downstream — matching the old C, which emitted an empty
+/// `news_group`.
 ///
 /// # Safety
 /// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `htlc` is a
-/// valid `struct htlc_conn *`; `gcnews` is the `struct gnews_catalog *` task
-/// pointer.
+/// valid `struct htlc_conn *` (unused here); `frame` is valid for `frame_len`
+/// bytes; `gcnews` is the `struct gnews_catalog *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_newscat_list(
-    htlc: *mut c_void,
+    _htlc: *mut c_void,
+    frame: *const c_void,
+    frame_len: usize,
     gcnews: *mut c_void,
     _data: *mut c_void,
 ) {
-    let buf = hx_htlc_in_buf(htlc);
-    let len = hx_htlc_in_pos(htlc);
+    let buf = frame as *const u8;
     let parsed = if buf.is_null() {
         std::ptr::null_mut()
     } else {
-        gtkhx_proto_parse_catlist(buf, len)
+        gtkhx_proto_parse_catlist(buf, frame_len)
     };
     gnews_catalog_set_parsed(gcnews, parsed);
     gtkhx_session_emit_news_catalog(gtkhx_session_get_default(), gcnews);
@@ -120,28 +119,29 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
 /// `void rcv_task_newsfolder_list(struct htlc_conn *htlc, void *gfnews, void *data)`
 /// — the HTLC_HDR_NEWSDIRLIST reply handler (was `rcv.c`).
 ///
-/// Parses every NEWSFOLDERITEM / CATEGORYITEM chunk out of `htlc->in` into an
-/// owned `DirList` handle, stashes it on the `gnews_folder` carrier, and emits
-/// `news-folder`. The C `dh_start` chunk-walk + `folder_item[]` accumulation are
-/// gone — `gtkhx_proto_parse_dirlist` does the walk and always returns a
-/// (possibly empty) handle.
+/// Parses every NEWSFOLDERITEM / CATEGORYITEM chunk out of the received `frame`
+/// into an owned `DirList` handle, stashes it on the `gnews_folder` carrier, and
+/// emits `news-folder`. The C `dh_start` chunk-walk + `folder_item[]`
+/// accumulation are gone — `gtkhx_proto_parse_dirlist` does the walk and always
+/// returns a (possibly empty) handle.
 ///
 /// # Safety
 /// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `htlc` is a
-/// valid `struct htlc_conn *`; `gfnews` is the `struct gnews_folder *` task
-/// pointer.
+/// valid `struct htlc_conn *` (unused here); `frame` is valid for `frame_len`
+/// bytes; `gfnews` is the `struct gnews_folder *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_newsfolder_list(
-    htlc: *mut c_void,
+    _htlc: *mut c_void,
+    frame: *const c_void,
+    frame_len: usize,
     gfnews: *mut c_void,
     _data: *mut c_void,
 ) {
-    let buf = hx_htlc_in_buf(htlc);
-    let len = hx_htlc_in_pos(htlc);
+    let buf = frame as *const u8;
     let parsed = if buf.is_null() {
         std::ptr::null_mut()
     } else {
-        gtkhx_proto_parse_dirlist(buf, len)
+        gtkhx_proto_parse_dirlist(buf, frame_len)
     };
     gnews_folder_set_parsed(gfnews, parsed);
     gtkhx_session_emit_news_folder(gtkhx_session_get_default(), gfnews);
@@ -152,10 +152,11 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
 ///
 /// `target` is the `HxNewsNode *` being fetched, carrying a transfer-full ref
 /// (set up by `hx_news15_get_post` → `fetch_thread`). Parses the NEWSDATA body
-/// out of `htlc->in`; on a TASK_ERROR / body-less reply it releases the ref via
-/// `news_post_fetch_failed` (no signal, so nothing else would). Otherwise it
-/// hands the body + `target` to `news_post_new` and emits `news-thread`, and the
-/// ref rides on to `gnews_browser_handle_thread`, which unrefs it.
+/// out of the received `frame`; on a TASK_ERROR / body-less reply it releases
+/// the ref via `news_post_fetch_failed` (no signal, so nothing else would).
+/// Otherwise it hands the body + `target` to `news_post_new` and emits
+/// `news-thread`, and the ref rides on to `gnews_browser_handle_thread`, which
+/// unrefs it.
 ///
 /// Unlike the catalog / folder carriers this one is created per-reply rather
 /// than pre-allocated, so the body rides as a plain `g_strndup`'d string on
@@ -163,24 +164,26 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
 ///
 /// # Safety
 /// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `htlc` is a
-/// valid `struct htlc_conn *`; `target` is the `HxNewsNode *` task pointer.
+/// valid `struct htlc_conn *` (unused here); `frame` is valid for `frame_len`
+/// bytes; `target` is the `HxNewsNode *` task pointer.
 #[no_mangle]
 pub unsafe extern "C" fn rcv_task_news_post(
-    htlc: *mut c_void,
+    _htlc: *mut c_void,
+    frame: *const c_void,
+    frame_len: usize,
     target: *mut c_void,
     _data: *mut c_void,
 ) {
-    let buf = hx_htlc_in_buf(htlc);
+    let buf = frame as *const u8;
     if buf.is_null() {
         news_post_fetch_failed(target);
         return;
     }
-    let len = hx_htlc_in_pos(htlc);
     // 65536: chunk lens are u16, so this comfortably holds any NEWSDATA body
     // (the parser caps at text_cap-1 = 65535, the wire ceiling).
     let mut text = vec![0u8; 65536];
     let mut reply = NewsThreadReply::default();
-    gtkhx_proto_parse_news_thread_reply(buf, len, text.as_mut_ptr(), text.len(), &mut reply);
+    gtkhx_proto_parse_news_thread_reply(buf, frame_len, text.as_mut_ptr(), text.len(), &mut reply);
     if reply.has_task_error != 0 || reply.has_text == 0 {
         news_post_fetch_failed(target);
         return;

@@ -259,7 +259,7 @@ reply_cid (const struct htlc_conn *htlc)
 {
     struct gtkhx_proto_voice_reply r;
     memset (&r, 0, sizeof (r));
-    gtkhx_proto_parse_voice_reply (htlc->in.buf, htlc->in.pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &r);
     return r.cid;
 }
 
@@ -299,7 +299,7 @@ feed_room_status (voice_client *c)
 {
     const guint8 *blob = NULL;
     size_t blob_len = 0;
-    if (gtkhx_proto_voice_reply_field (c->htlc.in.buf, c->htlc.in.pos,
+    if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
                                        /*field=participants*/ 3, &blob,
                                        &blob_len)) {
         gtkhx_voice_runtime_room_status (c->rt, reply_cid (&c->htlc), blob,
@@ -312,7 +312,7 @@ feed_sdp_offer (voice_client *c)
 {
     const guint8 *sdp = NULL;
     size_t sdp_len = 0;
-    if (gtkhx_proto_voice_reply_field (c->htlc.in.buf, c->htlc.in.pos,
+    if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
                                        /*field=SDP*/ 0, &sdp, &sdp_len)
         && sdp_len > 0) {
         char *s = g_strndup ((const char *) sdp, sdp_len);
@@ -347,7 +347,7 @@ dispatch_frame (voice_client *c)
     if (type == HTLS_HDR_VOICE_ICE) {
         const guint8 *ice = NULL;
         size_t ice_len = 0;
-        if (gtkhx_proto_voice_reply_field (c->htlc.in.buf, c->htlc.in.pos,
+        if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
                                            /*field=ICE*/ 1, &ice, &ice_len)) {
             /* Mirror production (rcv.c): forward the parsed cid, and
              * pass NULL for the zero-length end-of-candidates marker
@@ -365,7 +365,7 @@ dispatch_frame (voice_client *c)
     if (type == HTLS_HDR_VOICE_ROOM_STATUS) {
         const guint8 *blob = NULL;
         size_t blob_len = 0;
-        if (gtkhx_proto_voice_reply_field (c->htlc.in.buf, c->htlc.in.pos,
+        if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
                                            /*field=participants*/ 3, &blob,
                                            &blob_len)) {
             gtkhx_voice_runtime_room_status (c->rt, reply_cid (&c->htlc), blob,

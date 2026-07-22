@@ -171,7 +171,7 @@ walk_history_reply (struct htlc_conn *htlc, GPtrArray *out,
 {
     guint added = 0;
     gboolean has_more = FALSE;
-    dh_start (htlc)
+    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
     {
         if (_type == HTLS_DATA_HISTORY_ENTRY) {
             HxHistoryEntry *e = hx_history_entry_parse (dh->data, _len);

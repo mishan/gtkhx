@@ -29,10 +29,11 @@
 #include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
 #include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
 
-/* The production receive dispatch (rcv.c). We stage the parsed frame into
- * htlc->in.buf and hand the header fields to it; it routes the opcode to a
- * body handler and calls it. */
-extern void hx_dispatch_frame (struct htlc_conn *htlc, guint32 type,
+/* The production receive dispatch (rcv.c). We hand it the assembled frame
+ * as an explicit (frame, frame_len) slice plus the parsed header fields; it
+ * routes the opcode to a body handler and calls it. */
+extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
+                              gsize frame_len, guint32 type,
                                guint32 trans, guint32 flag, guint32 body_len);
 
 /* Forward declaration of the production teardown. Defined in
@@ -75,29 +76,27 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
      * but a synchronous failure on the C-side send path (e.g.
      * `hx_bridge_send_frame` returning HXNET_SEND_CLOSED after
      * the actor exited) calls `hx_htlc_close` immediately —
-     * which clears `htlc->fd`, frees `htlc->in.buf`, and
-     * uninstalls the bridge. Any already-queued idle source
-     * then fires AFTER close, calls us here, and we'd crash
-     * writing the packed header through the freed buffer.
-     * Skip the dispatch when either signal of close is set;
+     * which clears `htlc->fd` and uninstalls the bridge. Any
+     * already-queued idle source then fires AFTER close and
+     * calls us here; dispatching a frame for a torn-down
+     * connection is at best wasted work and at worst reaches
+     * freed session state. Skip the dispatch when either signal
+     * of close is set;
      * the in-flight frame is information the C side no longer
      * cares about. */
     if (hx_conn_fd (htlc) == 0 || !hx_bridge_is_installed ()) {
         return;
     }
 
-    /* `hx_rcv_hdr` calls `hl_hdr_decode` which clamps the wire
-     * `len` field (= body_len + sizeof(hc)) to
-     * `MAX_HOTLINE_PACKET_LEN`. The body qbuf inside hx_rcv_hdr
-     * therefore allocates at most `MAX_HOTLINE_PACKET_LEN - 2`
-     * bytes of body space. If we accepted a larger body_len
-     * here, the memcpy below would write past the end of
-     * htlc->in.buf. hxnet's actor enforces its own
-     * MAX_BODY_LEN (1 MiB = MAX_HOTLINE_PACKET_LEN) so any real
-     * server traffic that reaches us is in range — but the
-     * bridge shouldn't depend on that coincidence. Refuse
-     * oversize frames and tear the connection down loudly
-     * rather than silently truncating or overflowing. */
+    /* The body handlers decode the header via hl_hdr_decode(frame)
+     * and read the body from frame[SIZEOF_HL_HDR..]. hxnet's actor
+     * enforces its own MAX_BODY_LEN (1 MiB = MAX_HOTLINE_PACKET_LEN)
+     * so any real server traffic that reaches us is in range — but
+     * the bridge shouldn't depend on that coincidence. Refuse
+     * oversize frames and tear the connection down loudly rather
+     * than silently truncating or overflowing. The clamp mirrors
+     * hl_hdr_decode, which caps the wire `len` (= body_len +
+     * sizeof(hc)) to MAX_HOTLINE_PACKET_LEN. */
     if (body_len > MAX_HOTLINE_PACKET_LEN - 2) {
         g_critical (
             "hxnet_bridge: dispatch_frame body_len %u exceeds "
@@ -108,24 +107,26 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
         return;
     }
 
-    /* Stage the whole frame (22-byte header + body) into htlc->in.buf in one
-     * shot — the body handlers read the header via hl_hdr_decode(htlc->in.buf)
-     * and the body from buf[SIZEOF_HL_HDR..], so the buffer layout must match
-     * what the legacy read loop produced. qbuf_set grows the buffer and sets
-     * pos/len; we then write the header, copy the body, and leave pos past the
-     * body + len == 0 (the state the handlers ran in before). The Rust actor
-     * already parsed the header, so there's no C-side re-decode + no
-     * two-phase receive state machine — hx_dispatch_frame routes the parsed
-     * opcode straight to the body handler. */
-    qbuf_set (&htlc->in, 0, SIZEOF_HL_HDR + body_len);
-    gtkhx_proto_pack_header (htlc->in.buf, type, trans, flag, hc, body_len);
+    /* Assemble the whole frame (22-byte header + body) into a
+     * transient buffer and hand it to hx_dispatch_frame as an
+     * explicit (frame, frame_len) slice. hx_dispatch_frame is
+     * synchronous — it walks the chunks and fires any task
+     * callback before returning, and callbacks that need the bytes
+     * past their own return (chunked upload/download) copy them out
+     * first — so the buffer only has to outlive this call. The Rust
+     * actor already parsed the header, so there's no C-side re-decode
+     * and no two-phase receive state machine: dispatch routes the
+     * parsed opcode straight to the body handler. */
+    gsize frame_len = SIZEOF_HL_HDR + body_len;
+    guint8 *frame = g_malloc (frame_len);
+    gtkhx_proto_pack_header (frame, type, trans, flag, hc, body_len);
     if (body_len > 0) {
-        memcpy (&htlc->in.buf[SIZEOF_HL_HDR], body, body_len);
+        memcpy (&frame[SIZEOF_HL_HDR], body, body_len);
     }
-    htlc->in.pos = SIZEOF_HL_HDR + body_len;
-    htlc->in.len = 0;
 
-    hx_dispatch_frame (htlc, type, trans, flag, body_len);
+    hx_dispatch_frame (htlc, frame, frame_len, type, trans, flag, body_len);
+
+    g_free (frame);
 }
 
 void

@@ -49,7 +49,7 @@ test_user_change_extracts_all_five_chunks (void)
                             &cid_wire);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_cmphex (uc.uid, ==, 42);
     g_assert_cmphex (uc.icon, ==, 412);
     g_assert_cmphex (uc.color, ==, 3);
@@ -78,7 +78,7 @@ test_user_change_color_chunk_present_sets_got_color (void)
                             &color_wire);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_true (uc.got_color);
     g_assert_cmphex (uc.color, ==, 0);
 
@@ -95,7 +95,7 @@ test_user_change_color_chunk_absent_clears_got_color (void)
     /* no COLOUR chunk */
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_false (uc.got_color);
     /* color stays at the default zero. */
     g_assert_cmphex (uc.color, ==, 0);
@@ -114,7 +114,7 @@ test_user_change_strips_ansi_in_name (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NAME, sizeof (name) - 1, name);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_cmpstr (uc.name, ==, "[[31mMisha[[0m");
 
     wire_fixture_free (&htlc);
@@ -131,7 +131,7 @@ test_user_change_truncates_long_name (void)
                             long_name);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_cmpuint (uc.name_len, ==, 31);
     g_assert_cmpuint (strlen (uc.name), ==, 31);
     g_assert_cmphex (uc.name[31], ==, '\0');
@@ -148,7 +148,7 @@ test_user_change_empty_payload_returns_zero_defaults (void)
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_cmphex (uc.uid, ==, 0);
     g_assert_cmphex (uc.icon, ==, 0);
     g_assert_cmphex (uc.color, ==, 0);
@@ -179,7 +179,7 @@ test_user_change_self_change_uid_matches (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_cmphex (uc.uid, ==, 5);
     /* The downstream "this is me" check at rcv.c:370 is
 	 * `uid == htlc->uid`. Pre-SELFINFO-fix, htlc->uid was
@@ -205,7 +205,7 @@ test_user_change_chunk_order_does_not_matter (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_cmphex (uc.uid, ==, 456);
     g_assert_cmphex (uc.icon, ==, 123);
     g_assert_cmpstr (uc.name, ==, "Z");
@@ -236,7 +236,7 @@ test_user_change_decodes_nick_color (void)
                             &color_wire);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_true (uc.got_nick_color);
     g_assert_cmphex (uc.nick_color, ==, 0x11223344u);
 
@@ -253,7 +253,7 @@ test_user_change_nick_color_none_round_trips (void)
                             &color_wire);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_true (uc.got_nick_color);
     g_assert_cmphex (uc.nick_color, ==, HX_NICK_COLOR_NONE);
 
@@ -270,7 +270,7 @@ test_user_change_nick_color_absent_clears_got_flag (void)
     /* No COLOR chunk. */
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_false (uc.got_nick_color);
     /* Parser defaults to HX_NICK_COLOR_NONE rather than 0 — "absent"
 	 * means "no color set", not "pure black". Callers gate on
@@ -295,7 +295,7 @@ test_user_change_nick_color_too_short_is_skipped (void)
                             too_short);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_false (uc.got_nick_color);
     /* Malformed length must not partial-read into nick_color — it
 	 * must stay at the parser's default (HX_NICK_COLOR_NONE). */
@@ -314,7 +314,7 @@ test_user_change_nick_color_too_long_is_skipped (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_long), too_long);
 
     struct hx_user_change_msg uc;
-    g_assert_true (hx_user_change_extract (&htlc, &uc));
+    g_assert_true (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &uc));
     g_assert_false (uc.got_nick_color);
     g_assert_cmphex (uc.nick_color, ==, HX_NICK_COLOR_NONE);
 
@@ -327,7 +327,7 @@ test_user_change_null_out_returns_false (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
 
-    g_assert_false (hx_user_change_extract (&htlc, NULL));
+    g_assert_false (hx_user_change_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL));
 
     wire_fixture_free (&htlc);
 }

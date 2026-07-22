@@ -293,7 +293,7 @@ send_upload_media (int fd, struct htlc_conn *htlc,
  *
  * Returns the trans id of the FINAL chunk (the one whose reply
  * carries the canonical handle). Returns 0 on any send/recv
- * failure. On success the final reply is left in htlc->in.buf
+ * failure. On success the final reply is left in hx_test_in(htlc)->buf
  * for the caller to parse via gtkhx_proto_parse_upload_final_reply. */
 static guint32
 send_upload_media_chunked (int fd, struct htlc_conn *htlc,
@@ -330,17 +330,17 @@ send_upload_media_chunked (int fd, struct htlc_conn *htlc,
     if (!integration_drain_until_task_trans (fd, htlc, chunk0_trans, 16)) {
         return 0;
     }
-    if (gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos)) {
+    if (gtkhx_proto_header_in_error (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)) {
         return 0;
     }
     const guint8 *tok_ptr = NULL;
     size_t tok_len = 0;
-    if (!gtkhx_proto_parse_upload_token_reply (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_upload_token_reply (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos,
                                                &tok_ptr, &tok_len)
         || tok_len == 0) {
         return 0;
     }
-    /* Token bytes borrow into htlc->in.buf; copy them so subsequent
+    /* Token bytes borrow into hx_test_in(htlc)->buf; copy them so subsequent
 	 * recvs into the same buffer don't pull the rug out. */
     guint8 *token = g_memdup2 (tok_ptr, tok_len);
     gsize token_len = tok_len;
@@ -373,7 +373,7 @@ send_upload_media_chunked (int fd, struct htlc_conn *htlc,
             g_free (token);
             return 0;
         }
-        if (gtkhx_proto_header_in_error (htlc->in.buf, htlc->in.pos)) {
+        if (gtkhx_proto_header_in_error (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)) {
             g_free (token);
             return 0;
         }
@@ -625,11 +625,11 @@ test_inline_media_upload_round_trip (void)
 
     /* TASK header flag bit 0 (task-error) must be clear on
 	 * success. */
-    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_false (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     struct gtkhx_proto_upload_final_reply reply;
     g_assert_true (gtkhx_proto_parse_upload_final_reply (
-        htlc.in.buf, htlc.in.pos, &reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply));
 
     g_assert_cmpuint (reply.id_len, >, 0);
     g_assert_cmpuint (reply.type_len, >, 0);
@@ -714,7 +714,7 @@ test_inline_media_chunked_upload_round_trip (void)
 	 * final reply is non-error and left it parsed in htlc.in. */
     struct gtkhx_proto_upload_final_reply reply;
     g_assert_true (gtkhx_proto_parse_upload_final_reply (
-        htlc.in.buf, htlc.in.pos, &reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply));
     g_assert_cmpuint (reply.id_len, >, 0);
     g_assert_cmpuint (reply.type_len, >, 0);
     char mime_buf[64] = {0};
@@ -736,7 +736,7 @@ test_inline_media_chunked_upload_round_trip (void)
  * via PART_COUNT * chunk_size, or accumulate and reject the
  * canonicalise step at the final chunk). The send helper
  * returns 0 the moment a task-error reply arrives, leaving
- * the error reply in htlc.in.buf for us to inspect.
+ * the error reply in hx_test_in(&htlc)->buf for us to inspect.
  */
 static void
 test_inline_media_chunked_upload_too_large (void)
@@ -775,16 +775,16 @@ test_inline_media_chunked_upload_too_large (void)
     g_assert_cmpuint (png_len, >, max_bytes);
 
     /* Send. Either the helper returns 0 (rejection at some chunk
-	 * reply, error left in htlc.in.buf) or we have a server bug. */
+	 * reply, error left in hx_test_in(&htlc)->buf) or we have a server bug. */
     guint32 final_trans = send_upload_media_chunked (
         fd, &htlc, png_data, png_len, chunk_size, "image/png");
     g_bytes_unref (png);
     g_assert_cmpuint (final_trans, ==, 0);
 
     /* The error reply that aborted the chunked loop is sitting in
-	 * htlc.in.buf — assert it's actually a task-error, not a
+	 * hx_test_in(&htlc)->buf — assert it's actually a task-error, not a
 	 * transport hiccup. */
-    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_true (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     /* If the spec error-code field is present, it MUST sit inside
 	 * 0..=5; the PayloadTooLarge (1) branch is what the server
@@ -797,7 +797,7 @@ test_inline_media_chunked_upload_too_large (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;
@@ -849,13 +849,13 @@ test_inline_media_chat_with_media_round_trip (void)
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, up_trans, 16));
     g_bytes_unref (png);
-    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_false (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     /* Copy the handle + mime out of htlc->in before drain_until
 	 * overwrites the buffer with the next received message. */
     struct gtkhx_proto_upload_final_reply reply;
     g_assert_true (gtkhx_proto_parse_upload_final_reply (
-        htlc.in.buf, htlc.in.pos, &reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply));
     guint8 *handle = g_memdup2 (reply.id_ptr, reply.id_len);
     gsize handle_len = reply.id_len;
     char *mime = g_strndup ((const char *) reply.type_ptr, reply.type_len);
@@ -879,15 +879,15 @@ test_inline_media_chat_with_media_round_trip (void)
 	 * marker — Janus stamps HTLS_HDR_CHAT broadcasts with uid 0, so a
 	 * uid filter can't identify ours, and the marker also skips other
 	 * concurrent test binaries' chat noise. The walker consumes the
-	 * body fields, but htlc->in.buf is left intact for the media-meta
+	 * body fields, but hx_test_in(htlc)->buf is left intact for the media-meta
 	 * walk below. */
     struct hx_chat_msg msg;
     g_assert_true (
         integration_drain_until_chat_marker (fd, &htlc, marker, &msg, 16));
 
     struct gtkhx_proto_chat_media_meta meta;
-    int status = gtkhx_proto_extract_chat_media_meta (htlc.in.buf,
-                                                      htlc.in.pos, &meta);
+    int status = gtkhx_proto_extract_chat_media_meta (hx_test_in(&htlc)->buf,
+                                                      hx_test_in(&htlc)->pos, &meta);
     g_assert_cmpint (status, ==, GTKHX_PROTO_MEDIA_META_PRESENT);
     g_assert_cmpuint (meta.id_len, ==, handle_len);
     g_assert (memcmp (meta.id_ptr, handle, handle_len) == 0);
@@ -929,11 +929,11 @@ test_inline_media_download_round_trip (void)
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, up_trans, 16));
     g_bytes_unref (png);
-    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_false (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     struct gtkhx_proto_upload_final_reply up_reply;
     g_assert_true (gtkhx_proto_parse_upload_final_reply (
-        htlc.in.buf, htlc.in.pos, &up_reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &up_reply));
     guint8 *handle = g_memdup2 (up_reply.id_ptr, up_reply.id_len);
     gsize handle_len = up_reply.id_len;
 
@@ -959,11 +959,11 @@ test_inline_media_download_round_trip (void)
     g_assert_cmpuint (dl_trans, !=, 0);
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, dl_trans, 16));
-    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_false (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     struct gtkhx_proto_download_reply dl_reply;
     g_assert_true (gtkhx_proto_parse_download_reply (
-        htlc.in.buf, htlc.in.pos, &dl_reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &dl_reply));
     g_assert_cmpuint (dl_reply.payload_len, >=, 8);
     /* The canonical bytes must start with an allowlisted image
 	 * magic prefix. Janus passes PNG through today so PNG is
@@ -1040,7 +1040,7 @@ test_inline_media_chunked_download_round_trip (void)
 
     struct gtkhx_proto_upload_final_reply up_reply;
     g_assert_true (gtkhx_proto_parse_upload_final_reply (
-        htlc.in.buf, htlc.in.pos, &up_reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &up_reply));
     guint8 *handle = g_memdup2 (up_reply.id_ptr, up_reply.id_len);
     gsize handle_len = up_reply.id_len;
 
@@ -1062,11 +1062,11 @@ test_inline_media_chunked_download_round_trip (void)
     g_assert_cmpuint (dl_trans, !=, 0);
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, dl_trans, 16));
-    g_assert_false (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_false (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     struct gtkhx_proto_download_reply dl_reply;
     g_assert_true (gtkhx_proto_parse_download_reply (
-        htlc.in.buf, htlc.in.pos, &dl_reply));
+        hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &dl_reply));
     /* The whole point of this test is exercising the
 	 * multi-chunk path. If the server's canonical form fits in
 	 * one chunk after all (the upload's noise PNG re-encoded
@@ -1089,9 +1089,9 @@ test_inline_media_chunked_download_round_trip (void)
         g_assert_cmpuint (t, !=, 0);
         g_assert_true (integration_drain_until_task_trans (fd, &htlc, t, 16));
         g_assert_false (
-            gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+            gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
         g_assert_true (gtkhx_proto_parse_download_reply (
-            htlc.in.buf, htlc.in.pos, &dl_reply));
+            hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &dl_reply));
         g_byte_array_append (accumulator, dl_reply.payload_ptr,
                              dl_reply.payload_len);
         saw_final = dl_reply.final_chunk;
@@ -1162,7 +1162,7 @@ test_inline_media_oversized_rejected (void)
     g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
 
     /* Header MUST carry the task-error flag. */
-    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_true (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     /* gtkhx_proto_extract_media_error_code() collapses unknown +
 	 * absent to 0, so asserting <= 5 would always pass and the
@@ -1173,7 +1173,7 @@ test_inline_media_oversized_rejected (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;
@@ -1239,7 +1239,7 @@ test_inline_media_unsupported_format_upload (void)
     g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
 
     /* Header MUST carry the task-error flag. */
-    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_true (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     /* If CHAT_MEDIA_ERROR_CODE is present, it MUST sit inside 0..=5
 	 * — UnsupportedFormat (2) is the spec-preferred branch, but a
@@ -1247,7 +1247,7 @@ test_inline_media_unsupported_format_upload (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;
@@ -1303,7 +1303,7 @@ test_inline_media_unauthorized_download (void)
     g_assert_true (integration_drain_until_task_trans (fd, &htlc, trans, 16));
 
     /* Header MUST carry the task-error flag. */
-    g_assert_true (gtkhx_proto_header_in_error (htlc.in.buf, htlc.in.pos));
+    g_assert_true (gtkhx_proto_header_in_error (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos));
 
     /* gtkhx_proto_extract_media_error_code() collapses unknown +
 	 * absent to 0 so it can't distinguish 'server omitted the
@@ -1316,7 +1316,7 @@ test_inline_media_unauthorized_download (void)
     {
         gboolean saw_code = FALSE;
         guint16 raw = 0;
-        dh_start (&htlc)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_CHAT_MEDIA_ERROR_CODE && _len >= 2) {
                 guint8 *p = dh->data;

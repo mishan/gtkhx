@@ -45,11 +45,11 @@ const HTLC_HDR_GETTHREAD: u32 = 0x0000_0190;
 const HTLC_HDR_POSTTHREAD: u32 = 0x0000_019a;
 const HTLC_HDR_DELETETHREAD: u32 = 0x0000_019b;
 
-/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores. The
-/// real `rcv_task_news_post` (2-arg) / `rcv_task_newscat_list` /
-/// `rcv_task_newsfolder_list` symbols are invoked through this 3-arg type —
-/// exactly what the C `RCV_TASK_FN` cast does.
-type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
+/// `rcv_task_fn` (protocol.h): the reply-handler shape `task_new` stores —
+/// `(htlc, frame, frame_len, ptr, data)`. `hx_rcv_task` invokes the registered
+/// callback through this type, handing it the received frame as an explicit
+/// `(frame, frame_len)` slice ahead of the task's `ptr` / `data`.
+type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void);
 
 // Real build: these resolve at the final C link. Test build: `use tests::{…}`
 // below shadows them with recording stubs, so the extern block is gated off.
@@ -82,11 +82,12 @@ extern "C" {
     ) -> *mut c_void;
     fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
 
-    // rcv.c — reply-task handlers (declared 3-arg per the RcvTaskFn note).
-    fn rcv_task_news_file(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_news_post(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_newscat_list(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_newsfolder_list(htlc: *mut c_void, ptr: *mut c_void, data: *mut c_void);
+    // reply-task handlers (5-arg per the RcvTaskFn note); news ones resolve
+    // against hxnews-recv, rcv_task_news_file against rcv.c.
+    fn rcv_task_news_file(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_news_post(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_newscat_list(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_newsfolder_list(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
 
     // hxnews-recv `carrier` module — the request path off the reply carrier.
     fn gnews_catalog_path(g: *mut c_void) -> *const c_char;

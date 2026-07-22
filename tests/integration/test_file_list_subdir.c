@@ -88,14 +88,14 @@ test_file_list_subdir_uploads (void)
     if (flag & 1) {
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (&htlc, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
         g_test_message ("server returned task-error for "
                         "FILE_LIST Uploads/: \"%s\" "
                         "(check Dockerfile creates the dir)",
                         err);
     } else {
         int n = 0;
-        dh_start (&htlc)
+        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
         {
             if (_type == HTLS_DATA_FILE_LIST) {
                 n++;

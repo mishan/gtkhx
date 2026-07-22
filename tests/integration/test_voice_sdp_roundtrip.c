@@ -146,7 +146,7 @@ test_voice_sdp_roundtrip (void)
      * the answer below is synthetic. */
     struct gtkhx_proto_voice_reply r;
     memset (&r, 0, sizeof (r));
-    gtkhx_proto_parse_voice_reply (htlc.in.buf, htlc.in.pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &r);
     g_assert_true (r.sdp_present);
     g_assert_cmpuint (r.sdp_len, >, 0);
 
@@ -191,7 +191,7 @@ test_voice_sdp_roundtrip (void)
          * future answer-shape tests. */
         char err[256] = { 0 };
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
             g_test_message ("VOICE_SDP_ANSWER rejected (expected, synthetic "
                             "answer lacks real DTLS+ICE): \"%s\"", err);
         }

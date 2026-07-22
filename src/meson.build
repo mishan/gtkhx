@@ -77,8 +77,8 @@ gtkhx_sources = files(
   # news.c + news15.c + news_browser.c + news_send_bridge.c all retired — the
   # 1.5 news wire senders live in the hxnews-send Rust crate, the reply
   # handlers + carriers in hxnews-recv, and the browser UI in the gtkhx-ui
-  # `news_browser` module. news_recv_bridge.c is the last C leaf: htlc->in
-  # bytes, htlc version+access, the post-date formatter, and the row-icon loader.
+  # `news_browser` module. news_recv_bridge.c is the last C leaf: htlc
+  # version+access, the post-date formatter, and the row-icon loader.
   'news_recv_bridge.c',
   'notify.c',
   'options.c',

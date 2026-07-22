@@ -7,13 +7,18 @@ those buffers, explains why they are the last thing standing between here and
 the **E1c flip** (moving the struct's storage into a Rust `hxconn` crate), and
 lays out the removal order.
 
+**Status:** all three buffers are removed. `read_in` (dead) and `out` (send
+staging) went first; `in` (receive staging) followed via the frame-slice
+threading described below. No qbuf remains on `struct htlc_conn`, so the E1c
+flip is unblocked.
+
 ## Why the buffers block the flip
 
 Misha's decided end state for `htlc_conn` is an **opaque, Rust-owned handle**:
 C holds a `struct htlc_conn *` it never dereferences, reaching every field
-through `hx_conn_*` shims. Every other field now works that way. The three
-qbufs do not — they are touched directly at ~155 sites as `htlc->in.buf`,
-`htlc->in.pos`, `htlc->out.pos`, etc.
+through `hx_conn_*` shims. Every other field now works that way. The qbufs did
+not — they were touched directly at field granularity (`htlc->in.buf`,
+`htlc->in.pos`, `htlc->out.pos`, …).
 
 Two ways to make them opaque:
 
@@ -38,74 +43,105 @@ length-prefixed frame reader; `hxnet` owns receive accumulation now. Only a
 struct declaration in `protocol.h` and one stale comment in `cipher.h`
 mentioned it. **Removed** — a free precondition, no behaviour change.
 
-### `out` — send staging, **2 files, self-contained**
+### `out` — send staging — **DONE (removed)**
 
-| File | Touches | Role |
-|------|--------:|------|
-| `network.c` | 24 | `hlwrite` / `hx_send_login_reply_flush` stage packed frames into `htlc->out`, then drain via `hx_bridge_send_frame(&htlc->out.buf[off], len)`; `htlc_close` frees the buffer. |
-| `proto_helpers.c` | 1 | `hlpack_chunks` grows `htlc->out` and writes the packed frame into it (`q = &htlc->out`). |
+`hlpack` / `hlpack_chunks` now return a freshly-`g_malloc`'d buffer + length;
+`hlwrite` / `hlwrite_chunks` pack into that transient block, hand it to
+`hx_bridge_send_frame`, and free it. `htlc_close` lost its out-teardown, and the
+`out` field is gone from `struct htlc_conn`. The accumulator was vestigial: each
+send drained exactly what it packed, so it never held more than one message
+(the orchestrator send is whole-frame — no partial-write retry to buffer
+against). Tests that used `htlc->out` as a capture buffer moved to the returned
+buffer / `htlc->in`.
 
-The whole `out` lifecycle is: `hlpack_chunks` appends a packed frame → `hlwrite`
-hands the new bytes to `hx_bridge_send_frame` → on success the consumed span is
-dropped. There is no longer any partial-write retry against a socket (the
-orchestrator's `hx_bridge_send_frame` takes the whole frame); the qbuf is just a
-scratch region between pack and hand-off.
+### `in` — receive staging — **DONE (removed)**
 
-**`out` is removable independently of E2/E3.** It only involves the send path in
-two files. The shape: have `hlpack_chunks` pack into a **transient buffer** (a
-`GByteArray` or a stack/`g_malloc` buffer sized by `compress_encode_bufsize`-style
-math) that `hlwrite` hands straight to `hx_bridge_send_frame`, then frees. No
-`htlc->out` field, no `pos`/`len` bookkeeping, no free-on-close. This is a
-tractable, self-contained increment that removes one of the three buffers well
-ahead of the receive-handler migration.
+Removed via the frame-slice threading below. `hxnet_bridge.c::hx_bridge_dispatch_frame`
+no longer stages into `htlc->in` via `qbuf_set`; it assembles the frame into a
+transient `g_malloc` buffer and passes it to `hx_dispatch_frame` as an explicit
+`(frame, frame_len)` slice, freeing it once dispatch returns. Every consumer
+that used to read `htlc->in.{buf,pos}` — the `rcv.c` task/body handlers + the
+`hx_rcv_task` correlator + the `tsk->rcv` reply callbacks, the `proto_helpers.c`
+`hx_*_parse` wrappers, `inline_media_{upload,download}.c`, `tasks.c::task_error`,
+and `proto_trace.c` — now reads its threaded slice argument. The three Rust
+`hxnews-recv` task callbacks read the same threaded slice; the
+`news_recv_bridge.c` `hx_htlc_in_buf` / `hx_htlc_in_pos` accessors that
+previewed the seam are deleted. `network.c`'s teardown lost its `htlc->in`
+free, and the dead `proto_trace_recv_chunks` walker is gone. The `in` field is
+deleted from `struct htlc_conn`; the receive path no longer touches a
+per-connection buffer.
 
-### `in` — receive staging, **9 files, gated on E2**
+The historical inventory (what touched `in` before removal — `rcv.c`,
+`proto_helpers.c`, `hxnet_bridge.c`, `inline_media_{upload,download}.c`,
+`network.c`, `proto_trace.c`, `news_recv_bridge.c`, `tasks.c`) is preserved in
+the git history of this doc if needed.
 
-| File | Touches | Role |
-|------|--------:|------|
-| `rcv.c` | 32 | every task/body handler reads `htlc->in.buf, htlc->in.pos` and passes it to a Rust `gtkhx_proto_parse_*` / `hl_hdr_decode`; `hx_rcv_dump` writes it to `hx.dump` (debug). |
-| `proto_helpers.c` | 13 | the `hx_*_parse` wrappers read `htlc->in.{buf,pos}` and delegate to the crate parsers. |
-| `hxnet_bridge.c` | 10 | `hx_bridge_dispatch_frame` **stages** the replayed header+body into `htlc->in` via `qbuf_set` before invoking the dispatch. |
-| `inline_media_upload.c` | 6 | reply handlers read `htlc->in.{buf,pos}` into the crate parsers. |
-| `network.c` | 5 | login-reply replay staging + trace. |
-| `proto_trace.c` | 4 | wire trace reads `htlc->in.{buf,pos,len}`. |
-| `news_recv_bridge.c` | 3 | already exposes `hx_htlc_in_buf(htlc)` / `hx_htlc_in_pos(htlc)` accessors for the Rust news receive path — a **partial seam** that previews the end state. |
-| `inline_media_download.c` | 3 | reply handlers, as upload. |
-| `tasks.c` | 1 | comment only. |
+The buffer removal was deliberately kept **separate from** the E2 handler-body
+migration (moving each receive handler into a Rust `hxNNN-recv` crate, the
+family-by-family work that eventually deletes `rcv.c`). Removing the field did
+not require moving handler bodies to Rust — the same delete-don't-accessorize
+move the `out` removal proved, applied to the receive path.
 
-The uniform pattern is **read `(buf, pos)`, feed a Rust parser**. `htlc->in` is
-the hand-off region where `hxnet_bridge.c` deposits a received frame's bytes and
-the C handlers pick them up. When E2 moves a handler family into Rust, that
-family's handler takes the body as a `&[u8]` slice straight from the actor —
-no `htlc->in` staging, no re-pack. So `in` disappears **family by family** as E2
-proceeds, and the field is deleted when the last C reader (and the
-`hxnet_bridge.c` stager) is gone in E3.
+## The `in`-removal shape (frame-slice threading)
 
-`hx_rcv_dump` (the `hx.dump` debug writer) and `proto_trace.c` are the only
-non-parser readers; both are diagnostics that either move with their handler or
-switch to the slice the Rust dispatch already has.
+Mirror the `out` removal — pass the frame explicitly instead of via a struct
+field:
+
+- **`hx_dispatch_frame`** already receives `(type, trans, flag, body_len)`. Add
+  the frame pointer: `hx_dispatch_frame(htlc, frame, frame_len, type, trans,
+  flag)`, where `frame`/`frame_len` are the whole staged frame the bridge holds.
+- **Every body handler** changes from `void hx_rcv_X(struct htlc_conn *htlc)`
+  reading `htlc->in.{buf,pos}` to `void hx_rcv_X(struct htlc_conn *htlc, const
+  guint8 *frame, gsize frame_len)` reading its arguments. Same for the
+  `hx_rcv_task` correlator (it reads `trans` from the frame) and the `tsk->rcv`
+  task-reply callbacks (they receive the same slice — thread it through
+  `hx_rcv_task` into `tsk->rcv (htlc, frame, frame_len, tsk->ptr, tsk->data)`, or
+  stash the current-frame slice on the correlator for the callback to read).
+- **`hxnet_bridge.c`** stops the `qbuf_set` staging into `htlc->in` and passes
+  its frame buffer straight through.
+- **`network.c`'s login-reply replay** likewise hands its bytes to the dispatch
+  as a slice.
+- **`proto_helpers.c` / `inline_media_*` / `news_recv_bridge.c`** parser wrappers
+  take `(frame, frame_len)` params (several already do via the `hx_htlc_in_*`
+  accessors — those callers pass the accessor result, which becomes the slice).
+- Delete the `in` field from `struct htlc_conn`; the receive path no longer
+  touches a per-connection buffer.
+
+Cost: ~20 handler signatures + the bridge + the correlator + the Tier-2 tests
+that currently stage into `htlc->in` (the same tests the `out` removal touched —
+they'd pass their packed buffer to the handler directly instead of stashing it).
+Mechanical, but broad — size it like the `out` removal, not smaller.
 
 ## Removal order
 
-1. **`read_in` cull** — done in this branch. Precondition, zero risk.
-2. **`out` removal** — next, self-contained (`network.c` + `proto_helpers.c`):
-   pack into a transient buffer handed to `hx_bridge_send_frame`; delete the
-   `out` field, its `pos`/`len` bookkeeping, and the free-on-close. Gated on the
-   full unit/proto suite (the Tier-2 `hlpack` tests drive this path directly)
-   plus a Tier-3 send-path check (any RPC round-trip: login, news_fetch).
-3. **`in` removal** — folded into **E2** (receive handlers → Rust). Each handler
-   family that moves stops reading `htlc->in`; the `hxnet_bridge.c` stager and
-   the field itself are deleted in **E3** when the last C reader is gone. The
-   `news_recv_bridge.c` `hx_htlc_in_*` accessors are the template for any
-   interim reader that must stay C-side across a family boundary.
-4. **E1c flip** — once all three buffers are gone, no direct `htlc_conn` field
-   access remains; the struct's storage moves into the Rust `hxconn` crate with
-   the same C ABI (`hxconn.c`'s bodies deleted), and the layout is Rust's alone.
+1. **`read_in` cull** — done. Precondition, zero risk.
+2. **`out` removal** — done. Send path packs into a transient buffer.
+3. **`in` removal** — done, via frame-slice threading (above). Was the last E1c
+   blocker; independent of the E2 handler-body migration. Gated on unit/proto
+   (the Tier-2 receive tests drive it) + Tier-3 receive round-trips (login,
+   news_fetch, user_list, chat).
+4. **E1c flip** — now unblocked: no qbuf remains on `htlc_conn`, and the field
+   accessor seam (`hxconn.c`) covers the rest. The struct's storage moves into
+   the Rust `hxconn` crate with the same C ABI (`hxconn.c`'s bodies deleted), and
+   the layout is Rust's alone.
+5. **E2 proper** — the receive handlers move into Rust family-by-family (see the
+   grouping in [network-recv-handler-inventory.md](network-recv-handler-inventory.md)),
+   shrinking `rcv.c` to nothing. Independent of the flip; pure cleanup once the
+   struct is Rust-owned.
 
-## First increment
+## Next increment
 
-**Remove `out`.** It is the only buffer removable without the E2 receive-handler
-migration, touches just two files, and its send-path semantics are already a
-thin pack→hand-off with no socket-level retry to preserve. Doing it now shrinks
-the struct by one qbuf and proves the delete-don't-port approach before the
-larger `in`/E2 work.
+**The E1c flip** — with all three buffers gone and the field accessor seam
+complete, `struct htlc_conn` can become an opaque, Rust-owned handle. The C tree
+already reaches every field through `hx_conn_*`, so moving the struct's storage
+into the Rust `hxconn` crate (same C ABI, `hxconn.c`'s bodies reimplemented in
+Rust) is the delete-the-header-visible-definition step this whole effort was
+building toward.
+
+> Note on the earlier plan: an earlier revision of this doc said `in` was
+> "gated on E2" and would dissolve family-by-family as handlers moved to Rust.
+> That conflated the *buffer* removal with the *handler* migration. The buffer
+> went first — and had to, since it (not the handler ports) blocked the flip. The
+> inventory doc's `htlc->rcv` two-phase-state-machine description is also stale:
+> that field was culled and `hx_dispatch_frame` now routes via a
+> `switch (hx_recv_route(type))` straight to the body handler.

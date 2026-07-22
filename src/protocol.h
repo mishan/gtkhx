@@ -205,7 +205,6 @@ struct htlc_conn {
 	 * The single-session world sets this to &the_session; the multi-conn seam
 	 * later sets it per connection. */
     session *sess;
-    struct qbuf in;
     /* Server endpoint identification, populated at hx_connect time.
 	 * serverhost+serverport drive HTXF subchannel connects (rcv.c
 	 * stamps them onto each htxf_conn). ip_addr is the resolved
@@ -422,7 +421,8 @@ extern int fd_lock_write (int fd);
  * `void (*)()` so -Wstrict-prototypes doesn't trip on every consumer
  * of this header. */
 struct htlc_conn;
-typedef void (*rcv_task_fn) (struct htlc_conn *htlc, void *ptr, void *data);
+typedef void (*rcv_task_fn) (struct htlc_conn *htlc, const guint8 *frame,
+                            gsize frame_len, void *ptr, void *data);
 
 /* Cast a heterogeneous rcv_task_* implementation to the canonical
  * 3-arg rcv_task_fn shape. The intermediate (void(*)(void)) cast is
@@ -454,7 +454,8 @@ struct task {
     rcv_task_fn rcv;
 };
 
-extern int task_inerror (struct htlc_conn *htlc);
+extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
+                          gsize frame_len);
 
 #define XFER_GET 0
 #define XFER_PUT 1
@@ -570,17 +571,19 @@ memory_copy (void *__dst, void *__src, unsigned int len)
  * effect and ANDs the bounds checks. Reads dh->len, then bounds-
  * checks; reads dh->type only after we've confirmed the chunk fits.
  */
-#define dh_start(_htlc)                                                        \
+#define dh_start(_buf, _buflen)                                                \
     {                                                                          \
-        struct hl_data_hdr *dh                                                 \
-            = (struct hl_data_hdr *)(&((_htlc)->in.buf[SIZEOF_HL_HDR]));       \
+        const guint8 *_dhbuf = (_buf);                                         \
+        struct hl_data_hdr *dh = NULL;                                         \
         guint32 _pos = SIZEOF_HL_HDR;                                          \
-        guint32 _max = (_htlc)->in.pos;                                        \
+        guint32 _max = (_buflen);                                              \
         guint16 _len = 0, _type = 0;                                           \
+        /* Form the chunk pointer only after the loop guard proves _pos is     \
+         * in bounds — computing _dhbuf + _pos up front would be UB when       \
+         * _buflen < SIZEOF_HL_HDR. */                                         \
         for (; _pos + SIZEOF_HL_DATA_HDR <= _max;                              \
-             _pos += SIZEOF_HL_DATA_HDR + _len,                                \
-             dh = (struct hl_data_hdr *)(((guint8 *)dh) + SIZEOF_HL_DATA_HDR   \
-                                         + _len)) {                            \
+             _pos += SIZEOF_HL_DATA_HDR + _len) {                              \
+            dh = (struct hl_data_hdr *)(_dhbuf + _pos);                        \
             HN16 (&_len, &dh->len);                                            \
             if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR)                     \
                 break;                                                         \

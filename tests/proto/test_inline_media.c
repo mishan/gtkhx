@@ -23,6 +23,7 @@
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "protocol.h"
 #include "hotline.h"
+#include "htlc_recv_buf.h"
 #include "proto_helpers.h"
 #include "hotline_proto.h"
 #include "inline_media.h"
@@ -41,7 +42,7 @@
  *              ENOENT. The test reads captured_upload_ctx after
  *              the call to drive rcv_task_upload_media directly.
  *   hlwrite_chunks — delegate to hlpack_chunks so the first chunk's
- *              wire shape lands in htlc->in.buf, where the test
+ *              wire shape lands in hx_test_in(htlc)->buf, where the test
  *              can choose to inspect or discard.
  *   the_session — zeroed; the only test path that would touch
  *              it (chunked-continuation task_with_trans lookup)
@@ -76,9 +77,9 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
      * fresh buffer (there's no htlc->out). */
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
-    g_free (htlc->in.buf);
-    htlc->in.buf = buf;
-    htlc->in.pos = len;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = buf;
+    hx_test_in(htlc)->pos = len;
 }
 
 /* the_session is a session*, dereferenced by inline_media_upload.c
@@ -94,9 +95,9 @@ void *the_session = NULL;
  * task_inerror==FALSE check). Return 0 unconditionally — the
  * oversized-token test won't go anywhere near an actual error
  * reply. */
-extern int task_inerror (struct htlc_conn *htlc);
+extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 int
-task_inerror (struct htlc_conn *htlc)
+task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     (void) htlc;
     return 0;
@@ -669,22 +670,23 @@ test_rcv_task_upload_media_rejects_oversized_token (void)
 	 * bytes payload}, on top of the SIZEOF_HL_HDR transaction
 	 * header. */
     gsize chunk_overhead = SIZEOF_HL_HDR + 4;
-    g_free (htlc.in.buf);
-    htlc.in.buf = g_malloc0 (chunk_overhead + oversized_len);
-    htlc.in.pos = chunk_overhead + oversized_len;
-    htlc.in.len = htlc.in.pos;
+    g_free (hx_test_in(&htlc)->buf);
+    hx_test_in(&htlc)->buf = g_malloc0 (chunk_overhead + oversized_len);
+    hx_test_in(&htlc)->pos = chunk_overhead + oversized_len;
+    hx_test_in(&htlc)->len = hx_test_in(&htlc)->pos;
     /* Tag = HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN, big-endian. */
-    htlc.in.buf[SIZEOF_HL_HDR + 0]
+    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 0]
         = (HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN >> 8) & 0xff;
-    htlc.in.buf[SIZEOF_HL_HDR + 1]
+    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 1]
         = HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN & 0xff;
-    htlc.in.buf[SIZEOF_HL_HDR + 2] = (oversized_len >> 8) & 0xff;
-    htlc.in.buf[SIZEOF_HL_HDR + 3] = oversized_len & 0xff;
+    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 2] = (oversized_len >> 8) & 0xff;
+    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 3] = oversized_len & 0xff;
     /* Payload bytes left at zero — content doesn't matter, only
 	 * length does. */
 
     /* Drive the production rcv handler. */
-    rcv_task_upload_media (&htlc, captured_upload_ctx, NULL);
+    rcv_task_upload_media (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, captured_upload_ctx,
+                           NULL);
 
     /* Callback must have fired with a synthetic failure. */
     g_assert_true (cap.fired);
@@ -703,7 +705,7 @@ test_rcv_task_upload_media_rejects_oversized_token (void)
     if (fake_task.ptr_free && captured_upload_ctx) {
         fake_task.ptr_free (captured_upload_ctx);
     }
-    g_free (htlc.in.buf);
+    g_free (hx_test_in(&htlc)->buf);
 }
 
 /* ---------- FFI parser: download reply + error code ---------- */

@@ -133,10 +133,10 @@ pub(crate) unsafe extern "C" fn task_new(
     std::ptr::null_mut()
 }
 
-pub(crate) unsafe extern "C" fn rcv_task_news_file(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
-pub(crate) unsafe extern "C" fn rcv_task_news_post(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
-pub(crate) unsafe extern "C" fn rcv_task_newscat_list(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
-pub(crate) unsafe extern "C" fn rcv_task_newsfolder_list(_h: *mut c_void, _p: *mut c_void, _d: *mut c_void) {}
+pub(crate) unsafe extern "C" fn rcv_task_news_file(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
+pub(crate) unsafe extern "C" fn rcv_task_news_post(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
+pub(crate) unsafe extern "C" fn rcv_task_newscat_list(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
+pub(crate) unsafe extern "C" fn rcv_task_newsfolder_list(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
 
 pub(crate) unsafe extern "C" fn gnews_catalog_path(_g: *mut c_void) -> *const c_char {
     if PATH_NULL.with(|c| c.get()) {

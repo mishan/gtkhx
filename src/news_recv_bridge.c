@@ -10,8 +10,9 @@
 /*
  * news_recv_bridge.c — the C leaves the Rust 1.5 news receive handlers
  * (hxnews-recv) and the news browser (gtkhx-ui) can't reach across the FFI:
- * the received frame body (htlc->in), the live session version + access
- * bitmap, the post-date formatter, and the row-icon loader. The news reply
+ * the live session version + access bitmap, the post-date formatter, and the
+ * row-icon loader. (The received frame reaches the handlers as an explicit
+ * (frame, frame_len) slice threaded through the dispatch.) The news reply
  * carriers themselves (gnews_folder / gnews_catalog / news_post) are now
  * Rust-owned in hxnews-recv's `carrier` module.
  */
@@ -130,16 +131,4 @@ gtkhx_news_load_icon_paintable (const char *resource)
     GdkTexture *tex = gtkhx_texture_from_pixbuf (scaled);
     g_object_unref (scaled);
     return tex ? GDK_PAINTABLE (tex) : NULL;
-}
-
-const guint8 *
-hx_htlc_in_buf (struct htlc_conn *htlc)
-{
-    return htlc ? htlc->in.buf : NULL;
-}
-
-gsize
-hx_htlc_in_pos (struct htlc_conn *htlc)
-{
-    return htlc ? htlc->in.pos : 0;
 }

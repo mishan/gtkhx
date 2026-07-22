@@ -71,6 +71,8 @@ pub(crate) unsafe extern "C" fn task_new(
 
 pub(crate) unsafe extern "C" fn rcv_task_voice_join(
     _h: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     _p: *mut c_void,
     _d: *mut c_void,
 ) {
@@ -78,6 +80,8 @@ pub(crate) unsafe extern "C" fn rcv_task_voice_join(
 
 pub(crate) unsafe extern "C" fn rcv_task_voice_simple_ack(
     _h: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
     _p: *mut c_void,
     _d: *mut c_void,
 ) {

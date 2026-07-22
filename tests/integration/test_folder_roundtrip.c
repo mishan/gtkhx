@@ -192,7 +192,7 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
         return NULL;
     }
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (htlc, &reply);
+    hx_htxf_reply_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &reply);
     if (!reply.ref || !reply.size) {
         return NULL;
     }
@@ -265,7 +265,7 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
         return FALSE;
     }
     guint32 xfer_ref = 0;
-    dh_start (htlc)
+    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
     {
         if (_type == HTLS_DATA_HTXF_REF) {
             dh_getint (xfer_ref);
@@ -313,7 +313,7 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (htlc, &reply);
+    hx_htxf_reply_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &reply);
     if (!reply.ref) {
         return FALSE;
     }

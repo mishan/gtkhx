@@ -49,9 +49,9 @@ hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    g_free (htlc->in.buf);
-    htlc->in.buf = buf;
-    htlc->in.pos = len;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = buf;
+    hx_test_in(htlc)->pos = len;
 }
 
 /* Drive hlpack with the same chunk list a large-file-mode file_put
@@ -80,7 +80,7 @@ test_send_xfersize64_alongside_legacy (void)
     guint32 decoded_legacy = 0;
     guint64 decoded_64 = 0;
 
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type == HTLC_DATA_HTXF_SIZE) {
             g_assert_cmpuint (_len, ==, 4);
@@ -103,7 +103,7 @@ test_send_xfersize64_alongside_legacy (void)
     g_assert_cmphex (decoded_legacy, ==, 0xFFFFFFFFu);
     g_assert_cmpuint (decoded_64, ==, true_size);
 
-    g_free (htlc.in.buf);
+    g_free (hx_test_in(&htlc)->buf);
 }
 
 /* ---------- recv side: DATA_XFERSIZE64 in file_get reply ---------- */
@@ -125,7 +125,7 @@ test_recv_xfersize64_chunk_decode (void)
 
     int found = 0;
     guint64 size64 = 0;
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type == HTLS_DATA_XFERSIZE64 && _len >= 8) {
             for (guint16 i = 0; i < 8; i++) {

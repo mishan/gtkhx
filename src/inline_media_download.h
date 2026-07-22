@@ -113,7 +113,7 @@ extern void inline_media_download_cancel (hx_inline_media_download *dl);
 
 /* TASK-reply handler hooked through task_new from
  * inline_media_download_start. Not called directly. */
-extern void rcv_task_download_media (struct htlc_conn *htlc, void *ctx_ptr,
+extern void rcv_task_download_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ctx_ptr,
                                      void *unused);
 
 #endif /* HX_INLINE_MEDIA_DOWNLOAD_H */

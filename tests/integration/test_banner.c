@@ -170,7 +170,7 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
         integration_close (fd);
         return -1;
     }
-    dh_start (htlc)
+    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_BANNER_TYPE:
@@ -359,7 +359,7 @@ test_banner_htxf_mode (void)
             continue;
         }
         got_reply = TRUE;
-        hx_htxf_reply_extract (&htlc, &reply);
+        hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (reply.ref, >, 0);

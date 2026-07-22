@@ -69,7 +69,7 @@ test_user_list_contains_self (void)
 	 * inspects every entry; this peek just confirms the reply
 	 * isn't empty before we start parsing. */
     gboolean got_user_list = FALSE;
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             got_user_list = TRUE;
@@ -83,7 +83,7 @@ test_user_list_contains_self (void)
     struct hl_userlist_hdr *uh;
     guint16 chunk_uid, chunk_icon, chunk_nlen;
     gboolean found_self = FALSE;
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         if (_type != HTLS_DATA_USER_LIST) {
             continue;

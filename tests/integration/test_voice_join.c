@@ -198,7 +198,7 @@ test_voice_join_leave_round_trip (void)
     /* gtkhx_proto_parse_voice_reply only returns false on NULL out
      * (see ffi.rs::gtkhx_proto_parse_voice_reply). The presence
      * flags below are the real malformed-frame signal. */
-    gtkhx_proto_parse_voice_reply (htlc.in.buf, htlc.in.pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &r);
     g_assert_cmpuint (r.cid, ==, 0);
     g_assert_true (r.sdp_present);
     g_assert_true (r.codec_present);
@@ -212,7 +212,7 @@ test_voice_join_leave_round_trip (void)
      * downstream WebRTC code got a chance to mis-handle it. */
     const guint8 *sdp_ptr = NULL;
     gsize sdp_len = 0;
-    g_assert_true (gtkhx_proto_voice_reply_field (htlc.in.buf, htlc.in.pos, 0,
+    g_assert_true (gtkhx_proto_voice_reply_field (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, 0,
                                                   &sdp_ptr, &sdp_len));
     g_assert_nonnull (sdp_ptr);
     g_assert_cmpuint (sdp_len, >, 0);
@@ -229,7 +229,7 @@ test_voice_join_leave_round_trip (void)
      * bytes, no terminator). */
     const guint8 *codec_ptr = NULL;
     gsize codec_len = 0;
-    g_assert_true (gtkhx_proto_voice_reply_field (htlc.in.buf, htlc.in.pos, 2,
+    g_assert_true (gtkhx_proto_voice_reply_field (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, 2,
                                                   &codec_ptr, &codec_len));
     char codec_buf[16] = { 0 };
     gsize ccap = (codec_len < sizeof (codec_buf) - 1)

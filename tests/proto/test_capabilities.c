@@ -48,9 +48,9 @@ hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    g_free (htlc->in.buf);
-    htlc->in.buf = buf;
-    htlc->in.pos = len;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = buf;
+    hx_test_in(htlc)->pos = len;
 }
 
 static void
@@ -63,8 +63,8 @@ htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
 static void
 htlc_free (struct htlc_conn *htlc)
 {
-    g_free (htlc->in.buf);
-    htlc->in.buf = NULL;
+    g_free (hx_test_in(htlc)->buf);
+    hx_test_in(htlc)->buf = NULL;
 }
 
 /* The minimum cap chunk we'd send on a legacy LOGIN: u16 big-endian
@@ -81,7 +81,7 @@ test_send_capabilities_chunk_layout (void)
 
 
     int found = 0;
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         found++;
         g_assert_cmphex (_type, ==, HTLC_DATA_CAPABILITIES);
@@ -111,7 +111,7 @@ test_send_multiple_caps_bits (void)
               2, &caps16);
 
 
-    dh_start (&htlc)
+    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
     {
         guint16 wire = (guint16)dh->data[0] << 8 | (guint16)dh->data[1];
         g_assert_cmphex (wire & HTLC_CAP_LARGE_FILES, ==,
@@ -139,7 +139,7 @@ static guint64
 decode_caps_from_reply (struct htlc_conn *htlc)
 {
     guint64 caps = 0;
-    dh_start (htlc)
+    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
     {
         if (_type != HTLS_DATA_CAPABILITIES) {
             continue;

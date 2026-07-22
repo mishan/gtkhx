@@ -43,7 +43,7 @@ test_chat_extracts_simple_body (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "hello, world");
     g_assert_cmpuint (msg.text_len, ==, strlen (body));
     g_assert_cmpuint (msg.cid, ==, 0);
@@ -64,7 +64,7 @@ test_chat_strips_leading_newline (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     /* Note the leading '\n' is gone. */
     g_assert_cmpstr (msg.text, ==, "Misha: hello!");
     g_assert_cmpuint (msg.text_len, ==, strlen (body) - 1);
@@ -85,7 +85,7 @@ test_chat_does_not_strip_internal_newline (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "alpha\nbeta\ngamma");
     g_assert_true (msg.text == msg.buf); /* no leading-LF strip */
 
@@ -104,7 +104,7 @@ test_chat_converts_cr_to_lf (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "User: hi\nline two");
 
     wire_fixture_free (&htlc);
@@ -120,7 +120,7 @@ test_chat_strips_ansi (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, sizeof (body) - 1, body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, expected);
 
     wire_fixture_free (&htlc);
@@ -140,7 +140,7 @@ test_chat_extracts_chat_id (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmphex (msg.cid, ==, 0x12345678u);
     g_assert_cmpstr (msg.text, ==, "hi");
 
@@ -161,7 +161,7 @@ test_chat_extracts_uid (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmphex (msg.uid, ==, 0xabcdu);
 
     wire_fixture_free (&htlc);
@@ -183,7 +183,7 @@ test_chat_truncates_oversized_body (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, sizeof (big), big);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpuint (strlen (msg.text), ==, 8192);
     for (gsize i = 0; i < 8192; i++) {
         g_assert_cmphex (msg.text[i], ==, 'A');
@@ -209,7 +209,7 @@ test_chat_empty_body_is_valid (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, 0, NULL);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "");
     g_assert_cmpuint (msg.text_len, ==, 0);
 
@@ -228,7 +228,7 @@ test_chat_missing_body_is_valid (void)
                             &cid_wire);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "");
     g_assert_cmphex (msg.cid, ==, 5);
 
@@ -245,7 +245,7 @@ test_chat_null_out_returns_false (void)
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
-    g_assert_false (hx_chat_extract (&htlc, NULL));
+    g_assert_false (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL));
 
     wire_fixture_free (&htlc);
 }
@@ -266,7 +266,7 @@ test_chat_all_three_chunks_combined (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (&htlc, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
     g_assert_cmphex (msg.cid, ==, 7);
     g_assert_cmphex (msg.uid, ==, 42);
     g_assert_cmpstr (msg.text, ==, "Misha: hello team");

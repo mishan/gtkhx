@@ -36,7 +36,8 @@
 #include "debug.h"
 
 gboolean
-task_error_extract (struct htlc_conn *htlc, char *out, gsize out_size,
+task_error_extract (const guint8 *frame, gsize frame_len, char *out,
+                    gsize out_size,
                     gsize *out_len)
 {
     if (!out || out_size == 0) {
@@ -46,7 +47,7 @@ task_error_extract (struct htlc_conn *htlc, char *out, gsize out_size,
     /* chunk walk + CR2LF + strip_ansi moved to
      * gtkhx_proto_parse_task_error. The crate sentinel SIZE_MAX
      * distinguishes "no TASK_ERROR chunk" from "empty error string". */
-    size_t n = gtkhx_proto_parse_task_error (htlc->in.buf, htlc->in.pos,
+    size_t n = gtkhx_proto_parse_task_error (frame, frame_len,
                                              (uint8_t *) out, out_size);
     if (n == (size_t)-1) {
         return FALSE;
@@ -58,7 +59,7 @@ task_error_extract (struct htlc_conn *htlc, char *out, gsize out_size,
 }
 
 gboolean
-hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
+hx_chat_extract (const guint8 *frame, gsize frame_len, struct hx_chat_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -69,7 +70,7 @@ hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
      * writes the full sanitised line into out->buf (NUL-terminated, capped
      * at sizeof(out->buf)-1) and reports where the display text starts. */
     struct gtkhx_proto_chat c;
-    if (!gtkhx_proto_parse_chat (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_chat (frame, frame_len,
                                  (uint8_t *) out->buf, sizeof (out->buf),
                                  &c)) {
         return FALSE;
@@ -84,7 +85,7 @@ hx_chat_extract (struct htlc_conn *htlc, struct hx_chat_msg *out)
 }
 
 gboolean
-hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
+hx_msg_extract (const guint8 *frame, gsize frame_len, struct hx_msg_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -92,7 +93,7 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
 
     /* chunk walk moved to gtkhx_proto_parse_msg. */
     struct gtkhx_proto_msg m;
-    if (!gtkhx_proto_parse_msg (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_msg (frame, frame_len,
                                 (uint8_t *) out->name, sizeof (out->name),
                                 (uint8_t *) out->msg, sizeof (out->msg),
                                 &m)) {
@@ -107,7 +108,7 @@ hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out)
 }
 
 gboolean
-hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
+hx_banner_extract (const guint8 *frame, gsize frame_len, struct hx_banner_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -120,7 +121,7 @@ hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
      * those 4 bytes into out->type and NUL-terminate to match the
      * existing C contract. */
     struct gtkhx_proto_banner b;
-    bool got_type = gtkhx_proto_parse_banner (htlc->in.buf, htlc->in.pos,
+    bool got_type = gtkhx_proto_parse_banner (frame, frame_len,
                                               (uint8_t *) out->url,
                                               sizeof (out->url), &b);
 
@@ -133,7 +134,7 @@ hx_banner_extract (struct htlc_conn *htlc, struct hx_banner_msg *out)
 }
 
 unsigned
-hx_selfinfo_parse (struct htlc_conn *htlc)
+hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* the chunk walk moved to the Rust hotline-proto crate
      * (gtkhx_proto_parse_selfinfo). The crate enforces the same
@@ -158,7 +159,7 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
      *     HX_NICK_COLOR_NONE passes through verbatim. */
     struct gtkhx_proto_selfinfo si;
     unsigned seen
-        = gtkhx_proto_parse_selfinfo (htlc->in.buf, htlc->in.pos, &si);
+        = gtkhx_proto_parse_selfinfo (frame, frame_len, &si);
 
     if (seen & HX_SELFINFO_ACCESS) {
         hx_conn_set_access (htlc, si.access);
@@ -191,7 +192,7 @@ hx_selfinfo_parse (struct htlc_conn *htlc)
 }
 
 gboolean
-hx_user_part_extract (struct htlc_conn *htlc, struct hx_user_part_msg *out)
+hx_user_part_extract (const guint8 *frame, gsize frame_len, struct hx_user_part_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -199,7 +200,7 @@ hx_user_part_extract (struct htlc_conn *htlc, struct hx_user_part_msg *out)
 
     /* chunk walk moved to gtkhx_proto_parse_user_part. */
     struct gtkhx_proto_user_part p;
-    if (!gtkhx_proto_parse_user_part (htlc->in.buf, htlc->in.pos, &p)) {
+    if (!gtkhx_proto_parse_user_part (frame, frame_len, &p)) {
         return FALSE;
     }
 
@@ -210,7 +211,7 @@ hx_user_part_extract (struct htlc_conn *htlc, struct hx_user_part_msg *out)
 }
 
 gboolean
-hx_chat_subject_extract (struct htlc_conn *htlc,
+hx_chat_subject_extract (const guint8 *frame, gsize frame_len,
                          struct hx_chat_subject_msg *out)
 {
     if (!out) {
@@ -221,7 +222,7 @@ hx_chat_subject_extract (struct htlc_conn *htlc,
      * Subjects are NOT CR2LF'd / strip_ansi'd (they carry no line
      * endings); the crate preserves that. */
     struct gtkhx_proto_chat_subject sub;
-    if (!gtkhx_proto_parse_chat_subject (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_chat_subject (frame, frame_len,
                                          (uint8_t *) out->subject,
                                          sizeof (out->subject), &sub)) {
         return FALSE;
@@ -234,7 +235,7 @@ hx_chat_subject_extract (struct htlc_conn *htlc,
 }
 
 gboolean
-hx_chat_invite_extract (struct htlc_conn *htlc, struct hx_chat_invite_msg *out)
+hx_chat_invite_extract (const guint8 *frame, gsize frame_len, struct hx_chat_invite_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -244,7 +245,7 @@ hx_chat_invite_extract (struct htlc_conn *htlc, struct hx_chat_invite_msg *out)
      * strip_ansi's the inviter name (no CR2LF) and caps it at
      * sizeof(out->name)-1. */
     struct gtkhx_proto_chat_invite inv;
-    if (!gtkhx_proto_parse_chat_invite (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_chat_invite (frame, frame_len,
                                         (uint8_t *) out->name,
                                         sizeof (out->name), &inv)) {
         return FALSE;
@@ -258,7 +259,7 @@ hx_chat_invite_extract (struct htlc_conn *htlc, struct hx_chat_invite_msg *out)
 }
 
 gboolean
-hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
+hx_user_change_extract (const guint8 *frame, gsize frame_len, struct hx_user_change_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -269,7 +270,7 @@ hx_user_change_extract (struct htlc_conn *htlc, struct hx_user_change_msg *out)
      * endings) and gates the Colored-Nicknames COLOR chunk at exactly
      * 4 bytes; nick_color defaults to HX_NICK_COLOR_NONE when absent. */
     struct gtkhx_proto_user_change uc;
-    if (!gtkhx_proto_parse_user_change (htlc->in.buf, htlc->in.pos,
+    if (!gtkhx_proto_parse_user_change (frame, frame_len,
                                         (uint8_t *) out->name,
                                         sizeof (out->name), &uc)) {
         return FALSE;
@@ -304,7 +305,7 @@ _Static_assert (offsetof (struct hx_user_change_plan, eff_color) == 20, "");
 _Static_assert (offsetof (struct hx_user_change_plan, eff_nick_color) == 24, "");
 
 gboolean
-hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
+hx_xfer_queue_extract (const guint8 *frame, gsize frame_len, struct hx_xfer_queue_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -312,7 +313,7 @@ hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
 
     /* chunk walk moved to gtkhx_proto_parse_xfer_queue. */
     struct gtkhx_proto_xfer_queue q;
-    if (!gtkhx_proto_parse_xfer_queue (htlc->in.buf, htlc->in.pos, &q)) {
+    if (!gtkhx_proto_parse_xfer_queue (frame, frame_len, &q)) {
         return FALSE;
     }
 
@@ -323,7 +324,7 @@ hx_xfer_queue_extract (struct htlc_conn *htlc, struct hx_xfer_queue_msg *out)
 }
 
 gboolean
-hx_htxf_reply_extract (struct htlc_conn *htlc, struct hx_htxf_reply *out)
+hx_htxf_reply_extract (const guint8 *frame, gsize frame_len, struct hx_htxf_reply *out)
 {
     if (!out) {
         return FALSE;
@@ -332,7 +333,7 @@ hx_htxf_reply_extract (struct htlc_conn *htlc, struct hx_htxf_reply *out)
     out->ref = 0;
     out->size = 0;
 
-    dh_start (htlc)
+    dh_start (frame, frame_len)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_REF:
@@ -349,14 +350,14 @@ hx_htxf_reply_extract (struct htlc_conn *htlc, struct hx_htxf_reply *out)
 }
 
 hx_agreement_result
-hx_agreement_extract (struct htlc_conn *htlc, char *out, gsize out_size,
+hx_agreement_extract (const guint8 *frame, gsize frame_len, char *out, gsize out_size,
                       gsize *out_len)
 {
     /* chunk walk moved to gtkhx_proto_parse_agreement. The
      * Rust crate leaves *out untouched on NONE / MISSING (matching the
      * "untouched" sentinel assertions in tests/proto/test_agreement.c),
      * and only writes *out_len when both out and out_len are non-NULL. */
-    uint32_t r = gtkhx_proto_parse_agreement (htlc->in.buf, htlc->in.pos,
+    uint32_t r = gtkhx_proto_parse_agreement (frame, frame_len,
                                               (uint8_t *) out, out_size,
                                               out_len);
     switch (r) {
@@ -370,7 +371,7 @@ hx_agreement_extract (struct htlc_conn *htlc, char *out, gsize out_size,
 }
 
 gboolean
-hx_news_file_extract (struct htlc_conn *htlc, char *out, gsize out_size,
+hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out, gsize out_size,
                       gsize *out_len)
 {
     if (!out || out_size == 0) {
@@ -381,7 +382,7 @@ hx_news_file_extract (struct htlc_conn *htlc, char *out, gsize out_size,
      * gtkhx_proto_parse_news_file. The SIZE_MAX sentinel return
      * preserves the "leave *out untouched when no NEWS chunk is
      * present" contract tests/proto/test_news_file.c pins. */
-    size_t n = gtkhx_proto_parse_news_file (htlc->in.buf, htlc->in.pos,
+    size_t n = gtkhx_proto_parse_news_file (frame, frame_len,
                                             (uint8_t *) out, out_size);
     if (n == (size_t)-1) {
         return FALSE;
@@ -419,14 +420,14 @@ hx_news_post_emit (void *t, const uint8_t *bytes, size_t len)
 }
 
 int
-hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb, void *user)
+hx_news_post_walk (const guint8 *frame, gsize frame_len, hx_news_post_cb cb, void *user)
 {
     /* chunk walk + sanitise moved to
      * gtkhx_proto_walk_news_post. Per-chunk buffer ownership is
      * Rust's; the trampoline above adapts the FFI callback signature
      * to the public hx_news_post_cb's (char *, gsize) shape. */
     struct hx_news_post_trampoline tr = { cb, user };
-    return (int)gtkhx_proto_walk_news_post (htlc->in.buf, htlc->in.pos,
+    return (int)gtkhx_proto_walk_news_post (frame, frame_len,
                                             hx_news_post_emit, &tr);
 }
 

@@ -12,13 +12,14 @@
 #include <netinet/in.h>
 #include <glib.h>
 #include "wire_fixture.h"
+#include "htlc_recv_buf.h"
 #include "hotline.h"
 
-/* Memoryview of the hl_hdr currently sitting at htlc->in.buf[0]. */
+/* Memoryview of the hl_hdr currently sitting at the fixture buffer[0]. */
 static struct hl_hdr *
 hdr (struct htlc_conn *htlc)
 {
-    return (struct hl_hdr *)htlc->in.buf;
+    return (struct hl_hdr *)hx_test_in (htlc)->buf;
 }
 
 void
@@ -26,10 +27,14 @@ wire_fixture_init (struct htlc_conn *htlc, guint32 type, guint32 trans,
                    guint32 flag)
 {
     memset (htlc, 0, sizeof (*htlc));
+    /* Drop any stale receive buffer left keyed to this htlc address by
+     * a previous test before allocating a fresh one. */
+    hx_test_in_free (htlc);
 
-    htlc->in.buf = g_malloc0 (SIZEOF_HL_HDR);
-    htlc->in.len = SIZEOF_HL_HDR;
-    htlc->in.pos = SIZEOF_HL_HDR;
+    struct qbuf *q = hx_test_in (htlc);
+    q->buf = g_malloc0 (SIZEOF_HL_HDR);
+    q->len = SIZEOF_HL_HDR;
+    q->pos = SIZEOF_HL_HDR;
 
     struct hl_hdr *h = hdr (htlc);
     h->type = htonl (type);
@@ -44,18 +49,19 @@ void
 wire_fixture_add_chunk (struct htlc_conn *htlc, guint16 type, guint16 len,
                         const void *data)
 {
+    struct qbuf *q = hx_test_in (htlc);
     const guint32 needed = SIZEOF_HL_DATA_HDR + len;
-    const guint32 old_pos = htlc->in.pos;
+    const guint32 old_pos = q->pos;
 
-    htlc->in.buf = g_realloc (htlc->in.buf, old_pos + needed);
-    htlc->in.len = old_pos + needed;
-    htlc->in.pos = old_pos + needed;
+    q->buf = g_realloc (q->buf, old_pos + needed);
+    q->len = old_pos + needed;
+    q->pos = old_pos + needed;
 
-    struct hl_data_hdr *dh = (struct hl_data_hdr *)(htlc->in.buf + old_pos);
+    struct hl_data_hdr *dh = (struct hl_data_hdr *)(q->buf + old_pos);
     dh->type = htons (type);
     dh->len = htons (len);
     if (len && data) {
-        memcpy (htlc->in.buf + old_pos + SIZEOF_HL_DATA_HDR, data, len);
+        memcpy (q->buf + old_pos + SIZEOF_HL_DATA_HDR, data, len);
     }
 
     struct hl_hdr *h = hdr (htlc);
@@ -66,9 +72,9 @@ wire_fixture_add_chunk (struct htlc_conn *htlc, guint16 type, guint16 len,
 	 * the data section to the end (i.e. total - SIZEOF_HL_HDR + 2,
 	 * since the hc field is part of the data section in the wire
 	 * format — see hlwrite). The dh_start macro doesn't actually
-	 * read these fields though, it walks until htlc->in.pos. We
+	 * read these fields though, it walks until the buffer length. We
 	 * fill them in for correctness in case a handler ever looks. */
-    guint32 data_len = htlc->in.pos - SIZEOF_HL_HDR + sizeof (h->hc);
+    guint32 data_len = q->pos - SIZEOF_HL_HDR + sizeof (h->hc);
     h->len = htonl (data_len);
     h->len2 = htonl (data_len);
 }
@@ -76,10 +82,5 @@ wire_fixture_add_chunk (struct htlc_conn *htlc, guint16 type, guint16 len,
 void
 wire_fixture_free (struct htlc_conn *htlc)
 {
-    if (htlc->in.buf) {
-        g_free (htlc->in.buf);
-        htlc->in.buf = NULL;
-    }
-    htlc->in.len = 0;
-    htlc->in.pos = 0;
+    hx_test_in_free (htlc);
 }

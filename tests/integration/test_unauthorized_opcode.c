@@ -82,7 +82,7 @@ test_unauthorized_mkdir_silently_dropped (void)
             got_reject = TRUE;
             char err[256];
             gsize err_len = 0;
-            if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+            if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
                 g_test_message ("server rejected mkdir: \"%s\"", err);
             }
         } else {

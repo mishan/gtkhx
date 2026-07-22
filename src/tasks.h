@@ -19,7 +19,8 @@ extern GtkWidget *gtkhx_tasks_build_content (session *sess);
 extern void gtkhx_tasks_after_embed (session *sess);
 extern void file_update (session *sess, struct htxf_conn *htxf);
 extern void task_delete (session *sess, struct task *tsk);
-extern void task_error (struct htlc_conn *htlc);
+extern void task_error (struct htlc_conn *htlc, const guint8 *frame,
+                        gsize frame_len);
 /* Pure-protocol-parsing half of task_error, broken out into
  * proto_helpers.c for the Tier 2 unit tests. */
 #include "proto_helpers.h"

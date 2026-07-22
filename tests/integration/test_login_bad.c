@@ -106,7 +106,7 @@ test_login_bad_account_rejected (void)
 
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (&htlc, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
         g_assert_cmpuint (err_len, >, 0);
         g_test_message ("server rejected bad login (task-error): \"%s\"", err);
     }
