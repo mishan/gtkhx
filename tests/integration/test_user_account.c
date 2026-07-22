@@ -108,6 +108,9 @@ admin_login (int fd, struct htlc_conn *htlc, const char *display_name,
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc, &len);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
     g_free (buf);
     return ok;
@@ -273,12 +276,14 @@ static gboolean
 send_chunks (int fd, struct htlc_conn *htlc, guint32 type,
              const struct hx_chunk *chunks, int hc)
 {
-
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, type, /*flag=*/0, chunks, hc, &len);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
-
+    g_free (buf);
     return ok;
 }
 

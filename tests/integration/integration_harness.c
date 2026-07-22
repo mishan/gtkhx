@@ -637,18 +637,17 @@ gboolean
 integration_send_message (int fd, struct htlc_conn *htlc, guint32 type,
                           guint32 flag, int hc, ...)
 {
-    /* Reset the out buffer so successive sends each pack into a
-	 * fresh buffer (otherwise hlpack appends, which would confuse
-	 * our 'now write that out' step below). */
-
     va_list ap;
     va_start (ap, hc);
     gsize len = 0;
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
-
+    g_free (buf);
     return ok;
 }
 
@@ -659,8 +658,11 @@ integration_send_chunks (int fd, struct htlc_conn *htlc, guint32 type,
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
-
+    g_free (buf);
     return ok;
 }
 
@@ -799,10 +801,6 @@ integration_release_htlc (struct htlc_conn *htlc)
 static gboolean
 send_login_packet (int fd, struct htlc_conn *htlc, const hx_login_request *req)
 {
-    /* Reset the out buffer so successive calls each pack into a
-	 * fresh buffer (otherwise hlpack_chunks would append to whatever
-	 * the previous integration_send_message left behind). */
-
     struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
     guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
     int hc = hx_login_build_chunks (req, chunks, HX_LOGIN_MAX_CHUNKS,
@@ -813,8 +811,11 @@ send_login_packet (int fd, struct htlc_conn *htlc, const hx_login_request *req)
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc, &len);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
-
+    g_free (buf);
     return ok;
 }
 
@@ -1152,9 +1153,11 @@ integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc, &len);
 
+    if (!buf) {
+        return 0;
+    }
     gboolean ok = integration_send (fd, buf, len);
-
-
+    g_free (buf);
     return ok ? trans : 0;
 }
 
@@ -1186,6 +1189,9 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc, &len);
 
+    if (!buf) {
+        return 0;
+    }
     gboolean ok = integration_send (fd, buf, len);
     g_free (buf);
     return ok ? trans : 0;
@@ -1769,6 +1775,9 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
     g_free (buf);
     return ok;
@@ -1816,6 +1825,9 @@ integration_send_agreementagree_hope (int                       fd,
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc, &len);
 
+    if (!buf) {
+        return FALSE;
+    }
     gboolean ok = integration_send (fd, buf, len);
     g_free (buf);
     return ok;

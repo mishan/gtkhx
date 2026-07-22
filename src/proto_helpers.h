@@ -189,10 +189,12 @@ extern gboolean hx_banner_extract (struct htlc_conn *htlc,
  * transaction ID assigned to this message is the value htlc->trans had
  * on entry.
  *
- * No fd write, no cipher / compression, no proto_trace logging — those
- * layers stay in hlwrite(). There is no per-connection send buffer: the
- * message is packed straight into the returned block, handed to the
- * transport, and freed.
+ * Pure packing: no transport, no proto_trace logging (that stays in
+ * hlwrite()). Cipher / compression are not applied here or in hlwrite —
+ * the hxnet orchestrator owns the control-channel transform stack, so
+ * hlwrite ships plaintext through hx_bridge_send_frame. There is no
+ * per-connection send buffer: the message is packed straight into the
+ * returned block, handed to the transport, and freed.
  */
 extern guint8 *hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
                        int hc, va_list ap, gsize *out_len);
