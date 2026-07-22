@@ -93,8 +93,8 @@ typedef struct BlowfishOfb64State BlowfishOfb64State;
  *            uses 0x01 from the client side, decode state 0x00.
  *
  * Receive-side accumulation (collecting bytes until a full length-
- * prefixed frame is available) lives in htlc->in / htlc->read_in;
- * the AEAD state doesn't need its own buffer. */
+ * prefixed frame is available) lives in htlc->in; the AEAD state
+ * doesn't need its own buffer. */
 struct chacha_aead_state {
     uint8_t key[32];
     uint64_t counter;

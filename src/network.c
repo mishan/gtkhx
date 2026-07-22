@@ -296,12 +296,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * next. */
     htlc->in.pos = 0;
     htlc->in.len = 0;
-    if (htlc->out.buf) {
-        g_free (htlc->out.buf);
-        htlc->out.buf = NULL;
-    }
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    /* No send buffer to free — hlwrite / hlwrite_chunks pack into a
+     * transient block they free after handing it to the transport. */
     /* hxd_files[fd] no longer used for the control channel — the
      * hxnet orchestrator owns the control socket, so there is no
      * hxd_fd_set GIOChannel watch on it to register; no slot to
@@ -1199,21 +1195,18 @@ void
 hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
     va_list ap, ap_trace;
-    guint32 this_off, len;
 
     if (!hx_conn_fd (htlc)) {
         return;
     }
 
-    this_off = htlc->out.pos + htlc->out.len;
-
     /* the buffer-packing logic lives in hlpack
 	 * (proto_helpers.c) so the Tier 2 unit tests can drive the
-	 * SEND path without the fd / proto_trace / compress / cipher
-	 * side effects. proto_trace stays here in hlwrite — it needs
-	 * the per-chunk hook *during* the walk, which is awkward to
-	 * expose through the va_list interface. We re-walk the args
-	 * for the trace; the pack itself only happens once.
+	 * SEND path without the fd / proto_trace / cipher side effects.
+	 * proto_trace stays here in hlwrite — it needs the per-chunk hook
+	 * *during* the walk, which is awkward to expose through the va_list
+	 * interface. We re-walk the args for the trace; the pack itself only
+	 * happens once, into a fresh buffer we own and free below.
 	 *
 	 * Trans ID for the trace: it's whatever htlc->trans was BEFORE
 	 * hlpack increments it. */
@@ -1222,7 +1215,8 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 
     va_start (ap, hc);
     va_copy (ap_trace, ap);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
     {
@@ -1238,34 +1232,18 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     va_end (ap_trace);
     proto_trace_send_end ();
 
-    /* Length of the packed message (header + chunks), used by the
-	 * cipher / compress hooks below. */
-    len = (htlc->out.pos + htlc->out.len) - this_off;
+    if (!buf) {
+        return; /* hlpack guard trip (programmer error) — nothing packed */
+    }
 
-    /* When the bridge is installed and neither
-     * cipher nor compression is active, ship the packed
-     * plaintext through hxnet's send queue and pop the bytes
-     * out of htlc->out so the legacy write-source path doesn't
-     * also try to send them. The hxnet path doesn't support
-     * cipher / compression yet (HOPE-negotiated stacks live
-     * inside the C cipher state today); when those are set we
-     * fall through to the legacy in-place encode path. */
     /* When the bridge is installed, hxnet's transform stack handles the
      * negotiated cipher / compression, so the C side ships PLAINTEXT through
-     * hx_bridge_send_frame. There is no longer any legacy C
-     * compress_encode / cipher_encode path to skip — that state was removed
-     * from struct htlc_conn once hxnet took over control-channel crypto. */
+     * hx_bridge_send_frame. There is no legacy C compress_encode /
+     * cipher_encode path to skip — that state was removed from struct
+     * htlc_conn once hxnet took over control-channel crypto. */
     if (hx_bridge_is_installed ()) {
-        int rc = hx_bridge_send_frame (&htlc->out.buf[this_off], len);
-        if (rc == 0) {
-            htlc->out.len -= len;
-            if (!htlc->out.len) {
-                /* Queue drained — reset pos to 0 so the qbuf reuses its
-                 * buffer from the start (avoids accumulating unused
-                 * prefix space over a long hxnet session). */
-                htlc->out.pos = 0;
-            }
-        } else {
+        int rc = hx_bridge_send_frame (buf, len);
+        if (rc != 0) {
             /* hxnet refused the send. The return codes are:
              *
              *   HXNET_SEND_FULL          (-1) — actor's command
@@ -1296,23 +1274,18 @@ hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
                               rc);
             hx_htlc_close (htlc, /*expected=*/0);
         }
-        return;
+    } else {
+        /* No bridge installed → no connection. The orchestrator installs
+         * the bridge synchronously at connect time and hlwrite only runs on
+         * a live session, so reaching here means a stray send racing
+         * teardown. Drop the just-packed bytes rather than queue them on a
+         * socket that no longer exists. */
+        debug_log ("net",
+                   "hlwrite: no bridge installed; dropping %zu packed bytes",
+                   len);
     }
 
-    /* No bridge installed → no connection. The orchestrator installs
-     * the bridge synchronously at connect time and hlwrite only runs on
-     * a live session, so reaching here means a stray send racing
-     * teardown. Drop the just-packed bytes (same out bookkeeping as the
-     * bridge success path) rather than queue them on a socket that no
-     * longer exists. The legacy GIOStream write-source + in-place
-     * cipher/compress encode path is gone — hxnet's transform stack
-     * owns encoding now. */
-    debug_log ("net", "hlwrite: no bridge installed; dropping %u packed bytes",
-               len);
-    htlc->out.len -= len;
-    if (!htlc->out.len) {
-        htlc->out.pos = 0;
-    }
+    g_free (buf);
 }
 
 /* Chunk-array variant of hlwrite. Same trace + write + cipher +
@@ -1340,20 +1313,17 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     g_return_if_fail (hc >= 0);
     g_return_if_fail (hc == 0 || chunks != NULL);
 
-    guint32 this_off, len;
-
     if (!hx_conn_fd (htlc)) {
         return;
     }
 
-    this_off = htlc->out.pos + htlc->out.len;
-
-    /* Pack first, trace after — that way a g_return_if_fail trip
+    /* Pack first, trace after — that way a g_return_val_if_fail trip
 	 * inside hlpack_chunks (per-chunk NULL data with len > 0)
 	 * doesn't leave an open trace block. Capture trans BEFORE the
 	 * pack call since hlpack_chunks bumps htlc->trans. */
     guint32 my_trans = hx_conn_trans (htlc);
-    hlpack_chunks (htlc, type, flag, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
 
     proto_trace_send_begin (type, my_trans, hc);
     for (int i = 0; i < hc; i++) {
@@ -1362,21 +1332,15 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     }
     proto_trace_send_end ();
 
-    len = (htlc->out.pos + htlc->out.len) - this_off;
+    if (!buf) {
+        return; /* hlpack_chunks guard trip (programmer error) */
+    }
 
     /* hxnet routing — same shape as hlwrite above; see that
      * comment block for the gate's full rationale. */
     if (hx_bridge_is_installed ()) {
-        int rc = hx_bridge_send_frame (&htlc->out.buf[this_off], len);
-        if (rc == 0) {
-            htlc->out.len -= len;
-            if (!htlc->out.len) {
-                /* Queue drained — reset pos to 0 so the qbuf reuses its
-                 * buffer from the start (avoids accumulating unused
-                 * prefix space over a long hxnet session). */
-                htlc->out.pos = 0;
-            }
-        } else {
+        int rc = hx_bridge_send_frame (buf, len);
+        if (rc != 0) {
             /* Same rc-handling rationale as hlwrite above —
              * see the comment block there. With
              * DEFAULT_COMMAND_CAPACITY = 256, FULL means the
@@ -1386,19 +1350,16 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                               rc);
             hx_htlc_close (htlc, /*expected=*/0);
         }
-        return;
+    } else {
+        /* No bridge installed → no connection; drop the just-packed bytes.
+         * See the matching comment in hlwrite. */
+        debug_log (
+            "net",
+            "hlwrite_chunks: no bridge installed; dropping %zu packed bytes",
+            len);
     }
 
-    /* No bridge installed → no connection; drop the just-packed bytes.
-     * See the matching comment in hlwrite — the legacy GIOStream
-     * write-source + in-place encode path is gone. */
-    debug_log ("net",
-               "hlwrite_chunks: no bridge installed; dropping %u packed bytes",
-               len);
-    htlc->out.len -= len;
-    if (!htlc->out.len) {
-        htlc->out.pos = 0;
-    }
+    g_free (buf);
 }
 
 /* hl_code lives in src/hl_code.c so the Tier 1 unit test can link

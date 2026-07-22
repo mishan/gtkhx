@@ -637,25 +637,17 @@ gboolean
 integration_send_message (int fd, struct htlc_conn *htlc, guint32 type,
                           guint32 flag, int hc, ...)
 {
-    /* Reset the out buffer so successive sends each pack into a
-	 * fresh buffer (otherwise hlpack appends, which would confuse
-	 * our 'now write that out' step below). */
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 
@@ -663,21 +655,14 @@ gboolean
 integration_send_chunks (int fd, struct htlc_conn *htlc, guint32 type,
                          guint32 flag, const struct hx_chunk *chunks, int hc)
 {
-    /* Same buffer-reset shape as integration_send_message — keeps
-	 * back-to-back sends from interleaving in htlc->out. */
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
 
-    hlpack_chunks (htlc, type, flag, chunks, hc);
-
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 
@@ -796,9 +781,7 @@ void
 integration_release_htlc (struct htlc_conn *htlc)
 {
     g_free (htlc->in.buf);
-    g_free (htlc->out.buf);
     htlc->in.buf = NULL;
-    htlc->out.buf = NULL;
     /* htlc->hope_aead is an owned HxnetHopeAead* (a copy of the control
      * channel's HOPE material, independent of the connection's lifetime —
      * see hxnet_connection_hope_aead_material), seeded by the orchestrated
@@ -818,14 +801,6 @@ integration_release_htlc (struct htlc_conn *htlc)
 static gboolean
 send_login_packet (int fd, struct htlc_conn *htlc, const hx_login_request *req)
 {
-    /* Reset the out buffer so successive calls each pack into a
-	 * fresh buffer (otherwise hlpack_chunks would append to whatever
-	 * the previous integration_send_message left behind). */
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-
     struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
     guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
     int hc = hx_login_build_chunks (req, chunks, HX_LOGIN_MAX_CHUNKS,
@@ -833,14 +808,14 @@ send_login_packet (int fd, struct htlc_conn *htlc, const hx_login_request *req)
     if (hc <= 0) {
         return FALSE;
     }
-    hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc, &len);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 
@@ -1164,17 +1139,9 @@ integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
 	 * cap-gate (so tests can deliberately exercise a server's task-
 	 * error response when the extension isn't negotiated) and uses
 	 * hlpack_chunks + integration_send instead of hlwrite_chunks
-	 * — the former is fire-and-forget against htlc->out, the latter
-	 * is production's queue-via-FDW path. */
+	 * — the former packs + sends inline, the latter is production's
+	 * queue-via-FDW path. */
     guint32 trans = htlc->trans;
-
-    /* Reset htlc->out so the pack starts at offset 0; otherwise
-	 * hlpack_chunks would append to whatever an earlier
-	 * integration_send_message left behind. */
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
 
     struct hx_chunk chunks[4];
     struct hx_get_chat_history_scratch scratch;
@@ -1183,15 +1150,14 @@ integration_send_get_chat_history (int fd, struct htlc_conn *htlc,
     if (hc <= 0) {
         return 0;
     }
-    hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc, &len);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-
+    if (!buf) {
+        return 0;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok ? trans : 0;
 }
 
@@ -1207,15 +1173,9 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
      * harness just writes the framed bytes through the synthetic fd. */
     guint32 trans = htlc->trans;
 
-    /* Build the chunks first so we can hand them to hlpack_chunks
-     * inside integration_send_message_hope. The hope variant
-     * doesn't take pre-packed buffers — it does its own hlpack via
-     * the va_list integration_send_message uses. So we have to
-     * carry the chunks through that interface. Simplest path: pack
-     * via hlpack_chunks, then re-frame from htlc->out via cipher_
-     * encode/seal, matching what integration_send_message_hope's
-     * stream/aead branches do internally. We mirror that here so
-     * the trans-id accounting stays identical to production. */
+    /* Pack via hlpack_chunks then plain-send. Snapshot trans before
+     * the pack (hlpack_chunks bumps it after writing the header) so the
+     * trans-id accounting stays identical to production. */
     struct hx_chunk chunks[4];
     struct hx_get_chat_history_scratch scratch;
     int hc = hx_get_chat_history_build_chunks (channel_id, before, after,
@@ -1226,17 +1186,14 @@ integration_send_get_chat_history_hope (int fd, struct htlc_conn *htlc,
 
     /* hlpack_chunks bumps htlc->trans after writing the header, so
      * snapshot before. */
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-    hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc, &len);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return 0;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok ? trans : 0;
 }
 
@@ -1811,22 +1768,18 @@ integration_send_message_hope (int fd, struct htlc_conn *htlc,
                                integration_hope_session *hope, guint32 type,
                                guint32 flag, int hc, ...)
 {
-    /* Pack into htlc->out via hlpack first, same as integration_send_message. */
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-
+    /* Pack via hlpack, same as integration_send_message. */
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 
@@ -1869,17 +1822,14 @@ integration_send_agreementagree_hope (int                       fd,
         return FALSE;
     }
 
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-    hlpack_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc, &len);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 

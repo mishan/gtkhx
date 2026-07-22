@@ -87,10 +87,6 @@ static gboolean
 admin_login (int fd, struct htlc_conn *htlc, const char *display_name,
              guint16 icon)
 {
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
 
     const hx_login_request req = {
         .mode = HX_LOGIN_MODE_LEGACY,
@@ -109,13 +105,14 @@ admin_login (int fd, struct htlc_conn *htlc, const char *display_name,
     if (hc <= 0) {
         return FALSE;
     }
-    hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc);
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc, &len);
 
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 
@@ -279,19 +276,14 @@ static gboolean
 send_chunks (int fd, struct htlc_conn *htlc, guint32 type,
              const struct hx_chunk *chunks, int hc)
 {
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, type, /*flag=*/0, chunks, hc, &len);
 
-    hlpack_chunks (htlc, type, /*flag=*/0, chunks, hc);
-
-    gboolean ok = integration_send (fd, htlc->out.buf, htlc->out.len);
-
-    g_free (htlc->out.buf);
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
+    if (!buf) {
+        return FALSE;
+    }
+    gboolean ok = integration_send (fd, buf, len);
+    g_free (buf);
     return ok;
 }
 

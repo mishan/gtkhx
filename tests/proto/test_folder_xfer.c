@@ -41,13 +41,21 @@
 
 /* ---------- send-side: pack via hlpack ---------- */
 
+/* Pack straight into htlc->in so the dh_start walker can read it —
+ * hlpack now returns a fresh buffer (there's no htlc->out send buffer). */
 static void
 hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
 {
     va_list ap;
     va_start (ap, hc);
-    hlpack (htlc, type, flag, hc, ap);
+    gsize len = 0;
+    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
+
+    g_free (htlc->in.buf);
+    htlc->in.buf = buf;
+    htlc->in.pos = len;
+    htlc->in.len = len;
 }
 
 static void
@@ -58,25 +66,10 @@ htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
 }
 
 static void
-flip_out_to_in (struct htlc_conn *htlc)
-{
-    g_free (htlc->in.buf);
-    htlc->in.buf = htlc->out.buf;
-    htlc->in.pos = htlc->out.len;
-    htlc->in.len = htlc->out.len;
-
-    htlc->out.buf = NULL;
-    htlc->out.pos = 0;
-    htlc->out.len = 0;
-}
-
-static void
 htlc_free (struct htlc_conn *htlc)
 {
     g_free (htlc->in.buf);
-    g_free (htlc->out.buf);
     htlc->in.buf = NULL;
-    htlc->out.buf = NULL;
 }
 
 /* Walk the packed message in htlc->in.buf and assert it has the
@@ -103,7 +96,6 @@ test_getfolder_request_name_only (void)
     hlpack_v (&htlc, HTLC_HDR_FILE_GETFOLDER, 0, /*hc=*/1,
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name);
 
-    flip_out_to_in (&htlc);
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_GETFOLDER);
 
     int found = 0;
@@ -141,7 +133,6 @@ test_getfolder_request_with_dir (void)
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name,
               (int)HTLC_DATA_DIR, (int)sizeof (dir_chunk), dir_chunk);
 
-    flip_out_to_in (&htlc);
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_GETFOLDER);
 
     int saw_name = 0, saw_dir = 0;
@@ -190,7 +181,6 @@ test_putfolder_request_name_size_nfiles (void)
               (int)HTLC_DATA_HTXF_SIZE, 4, &size_n,
               (int)HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
 
-    flip_out_to_in (&htlc);
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_PUTFOLDER);
 
     int saw_name = 0, saw_size = 0, saw_nfiles = 0;
@@ -249,7 +239,6 @@ test_putfolder_request_with_dir (void)
               (int)HTLC_DATA_HTXF_SIZE, 4, &size_n,
               (int)HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
 
-    flip_out_to_in (&htlc);
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_PUTFOLDER);
 
     int chunks = 0;
