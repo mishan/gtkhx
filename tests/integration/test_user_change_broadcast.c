@@ -44,7 +44,7 @@ drain_for_user_change (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
             continue;
         }
         struct hx_user_change_msg uc;
-        if (!hx_user_change_extract (htlc, &uc)) {
+        if (!hx_user_change_extract (htlc->in.buf, htlc->in.pos, &uc)) {
             continue;
         }
         if (uc.uid == wanted_uid) {
@@ -66,7 +66,7 @@ drain_for_user_part (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
             continue;
         }
         struct hx_user_part_msg pm;
-        if (!hx_user_part_extract (htlc, &pm)) {
+        if (!hx_user_part_extract (htlc->in.buf, htlc->in.pos, &pm)) {
             continue;
         }
         if (pm.uid == wanted_uid) {

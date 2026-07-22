@@ -37,7 +37,7 @@ test_user_part_extracts_uid_and_cid (void)
                             &cid_wire);
 
     struct hx_user_part_msg pm;
-    g_assert_true (hx_user_part_extract (&htlc, &pm));
+    g_assert_true (hx_user_part_extract (htlc.in.buf, htlc.in.pos, &pm));
     g_assert_cmphex (pm.uid, ==, 42);
     g_assert_cmphex (pm.cid, ==, 3);
 
@@ -58,7 +58,7 @@ test_user_part_missing_uid_defaults_to_zero (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
 
     struct hx_user_part_msg pm;
-    g_assert_true (hx_user_part_extract (&htlc, &pm));
+    g_assert_true (hx_user_part_extract (htlc.in.buf, htlc.in.pos, &pm));
     g_assert_cmphex (pm.uid, ==, 5);
     g_assert_cmphex (pm.cid, ==, 0);
 
@@ -71,7 +71,7 @@ test_user_part_null_out_returns_false (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_PART, 1, 0);
 
-    g_assert_false (hx_user_part_extract (&htlc, NULL));
+    g_assert_false (hx_user_part_extract (htlc.in.buf, htlc.in.pos, NULL));
 
     wire_fixture_free (&htlc);
 }
@@ -92,7 +92,7 @@ test_chat_subject_extracts_cid_and_subject (void)
                             subject);
 
     struct hx_chat_subject_msg sm;
-    g_assert_true (hx_chat_subject_extract (&htlc, &sm));
+    g_assert_true (hx_chat_subject_extract (htlc.in.buf, htlc.in.pos, &sm));
     g_assert_cmphex (sm.cid, ==, 7);
     g_assert_cmpstr (sm.subject, ==, "weekly stand-up");
     g_assert_cmpuint (sm.subject_len, ==, strlen (subject));
@@ -111,7 +111,7 @@ test_chat_subject_truncates_at_255 (void)
                             sizeof (long_subject), long_subject);
 
     struct hx_chat_subject_msg sm;
-    g_assert_true (hx_chat_subject_extract (&htlc, &sm));
+    g_assert_true (hx_chat_subject_extract (htlc.in.buf, htlc.in.pos, &sm));
     g_assert_cmpuint (sm.subject_len, ==, 255);
     g_assert_cmpuint (strlen (sm.subject), ==, 255);
     for (gsize i = 0; i < 255; i++) {
@@ -137,7 +137,7 @@ test_chat_subject_no_sanitisation (void)
                             subject);
 
     struct hx_chat_subject_msg sm;
-    g_assert_true (hx_chat_subject_extract (&htlc, &sm));
+    g_assert_true (hx_chat_subject_extract (htlc.in.buf, htlc.in.pos, &sm));
     /* Bytes are passed through verbatim. */
     g_assert_cmpmem (sm.subject, sm.subject_len, subject, strlen (subject));
 
@@ -151,7 +151,7 @@ test_chat_subject_empty_message_returns_zero_length (void)
     wire_fixture_init (&htlc, HTLS_HDR_CHAT_SUBJECT, 1, 0);
 
     struct hx_chat_subject_msg sm;
-    g_assert_true (hx_chat_subject_extract (&htlc, &sm));
+    g_assert_true (hx_chat_subject_extract (htlc.in.buf, htlc.in.pos, &sm));
     g_assert_cmphex (sm.cid, ==, 0);
     g_assert_cmpstr (sm.subject, ==, "");
     g_assert_cmpuint (sm.subject_len, ==, 0);
@@ -176,7 +176,7 @@ test_chat_invite_extracts_all_three_fields (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NAME, strlen (name), name);
 
     struct hx_chat_invite_msg im;
-    g_assert_true (hx_chat_invite_extract (&htlc, &im));
+    g_assert_true (hx_chat_invite_extract (htlc.in.buf, htlc.in.pos, &im));
     g_assert_cmphex (im.uid, ==, 99);
     g_assert_cmphex (im.cid, ==, 12);
     g_assert_cmpstr (im.name, ==, "Misha");
@@ -195,7 +195,7 @@ test_chat_invite_strips_ansi_in_name (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NAME, sizeof (name) - 1, name);
 
     struct hx_chat_invite_msg im;
-    g_assert_true (hx_chat_invite_extract (&htlc, &im));
+    g_assert_true (hx_chat_invite_extract (htlc.in.buf, htlc.in.pos, &im));
     g_assert_cmpstr (im.name, ==, "[[1mMisha[[0m");
 
     wire_fixture_free (&htlc);
@@ -213,7 +213,7 @@ test_chat_invite_truncates_name_at_31 (void)
                             long_name);
 
     struct hx_chat_invite_msg im;
-    g_assert_true (hx_chat_invite_extract (&htlc, &im));
+    g_assert_true (hx_chat_invite_extract (htlc.in.buf, htlc.in.pos, &im));
     g_assert_cmpuint (im.name_len, ==, 31);
     g_assert_cmpuint (strlen (im.name), ==, 31);
     g_assert_cmphex (im.name[31], ==, '\0');
@@ -228,7 +228,7 @@ test_chat_invite_missing_chunks_return_zero_defaults (void)
     wire_fixture_init (&htlc, HTLS_HDR_CHAT_INVITE, 1, 0);
 
     struct hx_chat_invite_msg im;
-    g_assert_true (hx_chat_invite_extract (&htlc, &im));
+    g_assert_true (hx_chat_invite_extract (htlc.in.buf, htlc.in.pos, &im));
     g_assert_cmphex (im.uid, ==, 0);
     g_assert_cmphex (im.cid, ==, 0);
     g_assert_cmpstr (im.name, ==, "");

@@ -107,7 +107,7 @@ test_news_catlist_seeded_irasshaimase (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_message ("news catlist refused: \"%s\" "
                             "(server may have tnews disabled)",
                             err);

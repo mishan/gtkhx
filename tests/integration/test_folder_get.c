@@ -137,7 +137,7 @@ test_folder_get_round_trip (void)
 		 * rather than failing the whole test. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             gchar *msg = g_strdup_printf (
                 "GETFOLDER refused: \"%s\". The test_folder/ fixture "
                 "is added by tests/mhxd/Dockerfile but only takes "

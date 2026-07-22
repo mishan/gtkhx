@@ -40,7 +40,7 @@ drain_for_rename (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
         if (hdr_type (htlc) != HTLS_HDR_USER_CHANGE) {
             continue;
         }
-        if (!hx_user_change_extract (htlc, out)) {
+        if (!hx_user_change_extract (htlc->in.buf, htlc->in.pos, out)) {
             continue;
         }
         if (out->uid != wanted_uid) {

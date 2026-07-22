@@ -68,7 +68,7 @@ test_news_post_then_fetch (void)
     char body[8192 + 1];
     gsize body_len = 0;
     g_assert_true (
-        hx_news_file_extract (&htlc, body, sizeof (body), &body_len));
+        hx_news_file_extract (htlc.in.buf, htlc.in.pos, body, sizeof (body), &body_len));
 
     /* Our marker should be somewhere in the body. mhxd prepends
 	 * a "From <name>" header line per post, so the body grew. */

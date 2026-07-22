@@ -1096,7 +1096,7 @@ task_error (struct htlc_conn *htlc)
     char errormsg[8192 + 1];
     gsize len = 0;
 
-    if (!task_error_extract (htlc, errormsg, sizeof (errormsg), &len)) {
+    if (!task_error_extract (htlc->in.buf, htlc->in.pos, errormsg, sizeof (errormsg), &len)) {
         return;
     }
 

@@ -176,7 +176,7 @@ deliver_failure (struct htlc_conn *htlc, hx_inline_media_download *ctx)
 
     char err_buf[1024];
     gsize err_len = 0;
-    if (task_error_extract (htlc, err_buf, sizeof (err_buf), &err_len)) {
+    if (task_error_extract (htlc->in.buf, htlc->in.pos, err_buf, sizeof (err_buf), &err_len)) {
         r.error_message = err_buf;
         r.error_message_len = err_len;
     }

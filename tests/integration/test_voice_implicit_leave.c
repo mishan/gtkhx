@@ -131,7 +131,7 @@ test_voice_implicit_leave (void)
          * the error message in the test log. */
         char err[256] = { 0 };
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_message ("duplicate VOICE_JOIN(0) rejected: \"%s\"", err);
         }
     } else {

@@ -192,7 +192,7 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
         return NULL;
     }
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (htlc, &reply);
+    hx_htxf_reply_extract (htlc->in.buf, htlc->in.pos, &reply);
     if (!reply.ref || !reply.size) {
         return NULL;
     }
@@ -313,7 +313,7 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (htlc, &reply);
+    hx_htxf_reply_extract (htlc->in.buf, htlc->in.pos, &reply);
     if (!reply.ref) {
         return FALSE;
     }

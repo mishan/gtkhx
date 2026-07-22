@@ -35,7 +35,7 @@ drain_until_msg_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
         if (hdr_type (htlc) != HTLS_HDR_MSG) {
             continue;
         }
-        if (!hx_msg_extract (htlc, out)) {
+        if (!hx_msg_extract (htlc->in.buf, htlc->in.pos, out)) {
             continue;
         }
         if (out->uid == wanted_uid) {

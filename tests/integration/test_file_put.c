@@ -103,7 +103,7 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (htlc, &reply);
+    hx_htxf_reply_extract (htlc->in.buf, htlc->in.pos, &reply);
     if (!reply.ref || !reply.size) {
         return NULL;
     }
@@ -201,7 +201,7 @@ test_file_put_round_trip (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("file_put refused by server: \"%s\". Does the "
                                 "guest account have UPLOAD_FILES + "
                                 "UPLOAD_ANYWHERE?",

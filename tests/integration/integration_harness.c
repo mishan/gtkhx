@@ -919,7 +919,7 @@ integration_drain_until_chat (int fd, struct htlc_conn *htlc,
         if (hdr_type (htlc) != HTLS_HDR_CHAT) {
             continue; /* unrelated broadcast — doesn't count */
         }
-        if (!hx_chat_extract (htlc, out)) {
+        if (!hx_chat_extract (htlc->in.buf, htlc->in.pos, out)) {
             continue;
         }
         if (out->uid == wanted_uid) {
@@ -950,7 +950,7 @@ integration_drain_until_chat_marker (int fd, struct htlc_conn *htlc,
         if (hdr_type (htlc) != HTLS_HDR_CHAT) {
             continue; /* unrelated broadcast — doesn't count */
         }
-        if (!hx_chat_extract (htlc, out)) {
+        if (!hx_chat_extract (htlc->in.buf, htlc->in.pos, out)) {
             continue;
         }
         if (out->text && marker && strstr (out->text, marker)) {
@@ -1395,7 +1395,7 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("server rejected guest login: \"%s\". "
                                 "Check the test server's accounts/ for a "
                                 "`guest` account with no password.",
@@ -1422,7 +1422,7 @@ integration_open_login_or_skip (struct htlc_conn *htlc,
 	 * login reply and was stashed during the drain above); preserve
 	 * that stashed value when hx_selfinfo_parse can't supply one. */
     guint16 stashed_uid = htlc->uid;
-    hx_selfinfo_parse (htlc);
+    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
     if (htlc->uid == 0) {
         htlc->uid = stashed_uid;
     }
@@ -1499,7 +1499,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("%s rejected guest login: \"%s\"", srv->name,
                                 err);
         } else {
@@ -1525,7 +1525,7 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
 	 * helper. Without this the uid is lost here and any uid-filtered
 	 * drain (e.g. inline_media's chat_with_media) never matches. */
     guint16 stashed_uid = htlc->uid;
-    hx_selfinfo_parse (htlc);
+    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
     if (htlc->uid == 0) {
         htlc->uid = stashed_uid;
     }
@@ -1594,7 +1594,7 @@ integration_open_login_tls_or_skip (const hx_test_server *srv,
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("server rejected guest login over TLS: \"%s\"",
                                 err);
         } else {
@@ -1612,7 +1612,7 @@ integration_open_login_tls_or_skip (const hx_test_server *srv,
         integration_close (fd);
         return -1;
     }
-    hx_selfinfo_parse (htlc);
+    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
     if (htlc->name[0] == 0 && display_name && *display_name) {
         g_strlcpy ((char *) htlc->name, display_name, sizeof (htlc->name));
     }
@@ -1684,7 +1684,7 @@ integration_open_login_hope_or_skip (
         if (type == HTLS_HDR_TASK && (flag & 1)) {
             char err[256];
             gsize err_len = 0;
-            if (task_error_extract (htlc, err, sizeof (err), &err_len)) {
+            if (task_error_extract (htlc->in.buf, htlc->in.pos, err, sizeof (err), &err_len)) {
                 g_test_fail_printf ("HOPE Step 2 rejected: \"%s\"", err);
             } else {
                 g_test_fail_printf ("HOPE Step 2 rejected (no error chunk)");
@@ -1738,7 +1738,7 @@ integration_open_login_hope_or_skip (
         dh_end ();
 
         if (type == HTLS_HDR_USER_SELFINFO) {
-            hx_selfinfo_parse (htlc);
+            hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
             if (htlc->name[0] == 0 && display_name && *display_name) {
                 g_strlcpy ((char *) htlc->name, display_name,
                            sizeof (htlc->name));

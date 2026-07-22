@@ -204,7 +204,7 @@ test_hope_chacha20_banner_htxf (void)
             continue;
         }
         got_reply = TRUE;
-        hx_htxf_reply_extract (&htlc, &reply);
+        hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (reply.ref, >, 0);

@@ -276,7 +276,7 @@ hx_rcv_chat (struct htlc_conn *htlc)
 
     /* Chunk parse + CR2LF/strip_ansi + leading-LF strip lives in
 	 * proto_helpers.c so the Tier 2 unit tests can drive it. */
-    if (!hx_chat_extract (htlc, &msg)) {
+    if (!hx_chat_extract (htlc->in.buf, htlc->in.pos, &msg)) {
         return;
     }
 
@@ -365,7 +365,7 @@ hx_rcv_msg (struct htlc_conn *htlc)
 
     /* Chunk parse + name/body sanitisation lives in proto_helpers.c
 	 * so the Tier 2 unit tests can drive it. */
-    if (!hx_msg_extract (htlc, &pm)) {
+    if (!hx_msg_extract (htlc->in.buf, htlc->in.pos, &pm)) {
         return;
     }
 
@@ -468,7 +468,7 @@ hx_rcv_agreement_file (struct htlc_conn *htlc)
     char buf[16384];
     gsize body_len = 0;
     hx_agreement_result r
-        = hx_agreement_extract (htlc, buf, sizeof (buf), &body_len);
+        = hx_agreement_extract (htlc->in.buf, htlc->in.pos, buf, sizeof (buf), &body_len);
 
     /* no-agreement auto-path — the user has nothing to
 	 * click Agree on, so we send AGREEMENTAGREE ourselves to:
@@ -523,7 +523,7 @@ news_post_emit (void *user, const char *bytes, gsize len)
 void
 hx_rcv_news_post (struct htlc_conn *htlc)
 {
-    hx_news_post_walk (htlc, news_post_emit, htlc);
+    hx_news_post_walk (htlc->in.buf, htlc->in.pos, news_post_emit, htlc);
 }
 
 void
@@ -581,7 +581,7 @@ hx_rcv_task (struct htlc_conn *htlc)
             char err_text[256];
             gsize err_len = 0;
             const char *text =
-                (task_error_extract (htlc, err_text, sizeof (err_text),
+                (task_error_extract (htlc->in.buf, htlc->in.pos, err_text, sizeof (err_text),
                                      &err_len) && err_len > 0)
                     ? err_text
                     : NULL;
@@ -682,7 +682,7 @@ hx_rcv_user_change (struct htlc_conn *htlc)
         return;
     }
 
-    if (!hx_user_change_extract (htlc, &uc)) {
+    if (!hx_user_change_extract (htlc->in.buf, htlc->in.pos, &uc)) {
         return;
     }
 
@@ -788,7 +788,7 @@ hx_rcv_user_part (struct htlc_conn *htlc)
     struct chat *chat;
     session *sess = sess_from_htlc (htlc);
 
-    if (!hx_user_part_extract (htlc, &pm)) {
+    if (!hx_user_part_extract (htlc->in.buf, htlc->in.pos, &pm)) {
         return;
     }
 
@@ -827,7 +827,7 @@ hx_rcv_chat_subject (struct htlc_conn *htlc)
     struct chat *chat;
     session *sess = sess_from_htlc (htlc);
 
-    if (!hx_chat_subject_extract (htlc, &sm)) {
+    if (!hx_chat_subject_extract (htlc->in.buf, htlc->in.pos, &sm)) {
         return;
     }
     if (!sm.subject_len) {
@@ -859,7 +859,7 @@ hx_rcv_banner (struct htlc_conn *htlc)
 	 * after the AGREEMENTAGREE round-trip. Parse the type +
 	 * optional URL and hand off to banner.c, which owns the
 	 * toolbar widget and the URL/HTXF fetch state machines. */
-    if (!hx_banner_extract (htlc, &bm)) {
+    if (!hx_banner_extract (htlc->in.buf, htlc->in.pos, &bm)) {
         return;
     }
 
@@ -879,7 +879,7 @@ hx_rcv_chat_invite (struct htlc_conn *htlc)
     session *sess = sess_from_htlc (htlc);
     struct chat *chat = chat_with_cid (sess, 0);
 
-    if (!hx_chat_invite_extract (htlc, &im)) {
+    if (!hx_chat_invite_extract (htlc->in.buf, htlc->in.pos, &im)) {
         return;
     }
 
@@ -898,7 +898,7 @@ hx_rcv_user_selfinfo (struct htlc_conn *htlc)
 	 * deliberately ignores the server-supplied name bytes (see the
 	 * comment there) — we treat our local prefs nick as authoritative
 	 * and push it back to the server immediately below. */
-    hx_selfinfo_parse (htlc);
+    hx_selfinfo_parse (htlc, htlc->in.buf, htlc->in.pos);
 
     /* SELFINFO is the canonical 'login complete' signal.
 	 * Track it on htlc->flags so the agreement Agree button can
@@ -984,7 +984,7 @@ hx_rcv_xfer_queue (struct htlc_conn *htlc)
     struct hx_xfer_queue_msg xq;
     struct htxf_conn *htxf;
 
-    if (!hx_xfer_queue_extract (htlc, &xq)) {
+    if (!hx_xfer_queue_extract (htlc->in.buf, htlc->in.pos, &xq)) {
         return;
     }
 
@@ -1855,7 +1855,7 @@ rcv_task_news_file (struct htlc_conn *htlc)
 	 * NEWS_FILE arrives"). */
     gsize copied = 0;
     news_buf = g_realloc (news_buf, 65536);
-    if (hx_news_file_extract (htlc, (char *)news_buf, 65536, &copied)) {
+    if (hx_news_file_extract (htlc->in.buf, htlc->in.pos, (char *)news_buf, 65536, &copied)) {
         news_len = copied;
     } else {
         news_len = 0;

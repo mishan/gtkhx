@@ -48,7 +48,7 @@ test_news_fetch_round_trip (void)
 		 * client/protocol bug. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_message ("news fetch refused by server: \"%s\"", err);
         } else {
             g_test_message ("news fetch refused by server (no error chunk)");
@@ -64,7 +64,7 @@ test_news_fetch_round_trip (void)
     char body[8192 + 1];
     gsize body_len = 0;
     g_assert_true (
-        hx_news_file_extract (&htlc, body, sizeof (body), &body_len));
+        hx_news_file_extract (htlc.in.buf, htlc.in.pos, body, sizeof (body), &body_len));
     g_assert_cmpuint (body_len, >, 0);
 
     /* mhxd's shipped news file starts with the divider line and

@@ -96,7 +96,7 @@ test_folder_put_request_reply (void)
 		 * setup-phase test needs to prove. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_message ("PUTFOLDER refused: \"%s\" (request/reply "
                             "round-trip itself worked)",
                             err);

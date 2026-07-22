@@ -91,7 +91,7 @@ test_chat_in_pchat_routes_to_member (void)
         }
 
         struct hx_chat_msg cm = { 0 };
-        if (!hx_chat_extract (&htlc_b, &cm)) {
+        if (!hx_chat_extract (htlc_b.in.buf, htlc_b.in.pos, &cm)) {
             continue;
         }
         if (cm.cid != chat_id) {

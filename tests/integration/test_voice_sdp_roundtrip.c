@@ -191,7 +191,7 @@ test_voice_sdp_roundtrip (void)
          * future answer-shape tests. */
         char err[256] = { 0 };
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_message ("VOICE_SDP_ANSWER rejected (expected, synthetic "
                             "answer lacks real DTLS+ICE): \"%s\"", err);
         }

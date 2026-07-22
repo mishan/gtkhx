@@ -103,7 +103,7 @@ test_htxf_connect_file_get_plaintext (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("file_get refused by server: \"%s\". Is "
                                 "files/test.txt seeded in the container?",
                                 err);
@@ -116,7 +116,7 @@ test_htxf_connect_file_get_plaintext (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (&htlc, &reply);
+    hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024);
@@ -238,7 +238,7 @@ test_htxf_connect_file_get_aead (void)
         if (hdr_flag (&htlc) & 1) {
             char err[256];
             gsize err_len = 0;
-            if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+            if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
                 g_test_fail_printf ("file_get refused: \"%s\"", err);
             } else {
                 g_test_fail_printf ("file_get refused (no error chunk)");
@@ -247,7 +247,7 @@ test_htxf_connect_file_get_aead (void)
             integration_close (fd);
             return;
         }
-        hx_htxf_reply_extract (&htlc, &reply);
+        hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmphex (reply.ref, !=, 0);
@@ -355,7 +355,7 @@ test_htxf_connect_file_get_tls (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (&htlc, err, sizeof (err), &err_len)) {
+        if (task_error_extract (htlc.in.buf, htlc.in.pos, err, sizeof (err), &err_len)) {
             g_test_fail_printf ("file_get refused: \"%s\"", err);
         } else {
             g_test_fail_printf ("file_get refused (no error chunk)");
@@ -366,7 +366,7 @@ test_htxf_connect_file_get_tls (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (&htlc, &reply);
+    hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024);

@@ -63,7 +63,7 @@ test_chat_join_member_visible (void)
     /* Step 3: Bob drains for the CHAT_INVITE. */
     g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    g_assert_true (hx_chat_invite_extract (&htlc_b, &im));
+    g_assert_true (hx_chat_invite_extract (htlc_b.in.buf, htlc_b.in.pos, &im));
     g_assert_cmphex (im.cid, ==, chat_id);
 
     /* Steps 4 + 5: Bob CHAT_JOIN; harness drains to the TASK reply

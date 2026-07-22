@@ -156,7 +156,7 @@ test_banner_htxf_mode_tls (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (&htlc, &reply);
+    hx_htxf_reply_extract (htlc.in.buf, htlc.in.pos, &reply);
     g_assert_cmpuint (reply.ref, >, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1u << 20); /* sanity cap: < 1 MB */

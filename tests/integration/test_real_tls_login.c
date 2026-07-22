@@ -170,7 +170,7 @@ test_chat_round_trip (void)
         if (hdr_type (&htlc) != HTLS_HDR_CHAT) {
             continue;
         }
-        if (!hx_chat_extract (&htlc, &cm)) {
+        if (!hx_chat_extract (htlc.in.buf, htlc.in.pos, &cm)) {
             continue;
         }
         if (g_strstr_len (cm.text, cm.text_len, marker) != NULL) {

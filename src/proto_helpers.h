@@ -37,8 +37,8 @@ struct htlc_conn;
  * Truncates to (out_size - 1) bytes if the message is too big.
  * out_size must be at least 1.
  */
-extern gboolean task_error_extract (struct htlc_conn *htlc, char *out,
-                                    gsize out_size, gsize *out_len);
+extern gboolean task_error_extract (const guint8 *frame, gsize frame_len,
+                                    char *out, gsize out_size, gsize *out_len);
 
 /*
  * Parse a HTLS_HDR_USER_SELFINFO message from htlc->in into the
@@ -67,7 +67,7 @@ enum {
     HX_SELFINFO_NICK_COLOR = 1u << 2,
 };
 
-extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc);
+extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 
 /*
  * Result of parsing a HTLS_HDR_CHAT message. Output of hx_chat_extract.
@@ -108,7 +108,7 @@ struct hx_chat_msg {
  *
  * NULL out is treated as a programmer error and returns FALSE.
  */
-extern gboolean hx_chat_extract (struct htlc_conn *htlc,
+extern gboolean hx_chat_extract (const guint8 *frame, gsize frame_len,
                                  struct hx_chat_msg *out);
 
 /*
@@ -132,7 +132,7 @@ struct hx_msg_msg {
     guint16 msg_len;
 };
 
-extern gboolean hx_msg_extract (struct htlc_conn *htlc, struct hx_msg_msg *out);
+extern gboolean hx_msg_extract (const guint8 *frame, gsize frame_len, struct hx_msg_msg *out);
 
 /*
  * HTLS_HDR_BANNER — extract the banner type (4 bytes) and optional
@@ -165,7 +165,7 @@ struct hx_banner_msg {
     guint16 url_len;
 };
 
-extern gboolean hx_banner_extract (struct htlc_conn *htlc,
+extern gboolean hx_banner_extract (const guint8 *frame, gsize frame_len,
                                    struct hx_banner_msg *out);
 
 /*
@@ -335,7 +335,7 @@ struct hx_user_part_msg {
     guint16 uid;
     guint32 cid;
 };
-extern gboolean hx_user_part_extract (struct htlc_conn *htlc,
+extern gboolean hx_user_part_extract (const guint8 *frame, gsize frame_len,
                                       struct hx_user_part_msg *out);
 
 struct hx_chat_subject_msg {
@@ -343,7 +343,7 @@ struct hx_chat_subject_msg {
     char subject[256]; /* NUL-terminated, max 255 chars */
     guint16 subject_len;
 };
-extern gboolean hx_chat_subject_extract (struct htlc_conn *htlc,
+extern gboolean hx_chat_subject_extract (const guint8 *frame, gsize frame_len,
                                          struct hx_chat_subject_msg *out);
 
 struct hx_chat_invite_msg {
@@ -352,7 +352,7 @@ struct hx_chat_invite_msg {
     char name[32]; /* NUL-terminated, max 31 chars */
     guint16 name_len;
 };
-extern gboolean hx_chat_invite_extract (struct htlc_conn *htlc,
+extern gboolean hx_chat_invite_extract (const guint8 *frame, gsize frame_len,
                                         struct hx_chat_invite_msg *out);
 
 /*
@@ -389,7 +389,7 @@ struct hx_user_change_msg {
     char name[32]; /* NUL-terminated */
     guint16 name_len;
 };
-extern gboolean hx_user_change_extract (struct htlc_conn *htlc,
+extern gboolean hx_user_change_extract (const guint8 *frame, gsize frame_len,
                                         struct hx_user_change_msg *out);
 
 /*
@@ -448,7 +448,7 @@ struct hx_xfer_queue_msg {
     guint32 ref;
     guint32 queueid;
 };
-extern gboolean hx_xfer_queue_extract (struct htlc_conn *htlc,
+extern gboolean hx_xfer_queue_extract (const guint8 *frame, gsize frame_len,
                                        struct hx_xfer_queue_msg *out);
 
 /*
@@ -478,7 +478,7 @@ struct hx_htxf_reply {
     guint32 ref;
     guint32 size;
 };
-extern gboolean hx_htxf_reply_extract (struct htlc_conn *htlc,
+extern gboolean hx_htxf_reply_extract (const guint8 *frame, gsize frame_len,
                                        struct hx_htxf_reply *out);
 
 /*
@@ -491,7 +491,7 @@ extern gboolean hx_htxf_reply_extract (struct htlc_conn *htlc,
  * Returns the number of NEWS chunks seen.
  */
 typedef void (*hx_news_post_cb) (void *user, const char *bytes, gsize len);
-extern int hx_news_post_walk (struct htlc_conn *htlc, hx_news_post_cb cb,
+extern int hx_news_post_walk (const guint8 *frame, gsize frame_len, hx_news_post_cb cb,
                               void *user);
 
 /* The 1.5 news dirlist / catlist C parse shims (hx_news_dirlist_parse_* +
@@ -530,7 +530,7 @@ typedef enum {
     HX_AGREEMENT_NOT_FOUND,
 } hx_agreement_result;
 
-extern hx_agreement_result hx_agreement_extract (struct htlc_conn *htlc,
+extern hx_agreement_result hx_agreement_extract (const guint8 *frame, gsize frame_len,
                                                  char *out, gsize out_size,
                                                  gsize *out_len);
 
@@ -549,7 +549,7 @@ extern hx_agreement_result hx_agreement_extract (struct htlc_conn *htlc,
  * (which other code paths still reach for) — this extractor exists
  * to make the parsing testable without sharing global state.
  */
-extern gboolean hx_news_file_extract (struct htlc_conn *htlc, char *out,
+extern gboolean hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out,
                                       gsize out_size, gsize *out_len);
 
 /*
