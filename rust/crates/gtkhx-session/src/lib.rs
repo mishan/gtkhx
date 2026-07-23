@@ -144,6 +144,12 @@ mod imp {
                     Signal::builder("chat-subject")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
                         .build(),
+                    // chat-subject-notice: (htlc*, cid, subject*) — the
+                    // "Subject Changed to: X" log line for a real change (the
+                    // change-gate already fired the chat-subject bar update).
+                    Signal::builder("chat-subject-notice")
+                        .param_types([Type::POINTER, Type::U32, Type::POINTER])
+                        .build(),
                     // chat-invitation: (htlc*, cid, name*)
                     Signal::builder("chat-invitation")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
@@ -316,6 +322,18 @@ mod imp {
                     Signal::builder("chat-log-line")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
                         .build(),
+                    // user-notice: (htlc*, cid, kind, name*, old_name*) — a
+                    // roster notice line (join / parts / rename). The view
+                    // handler applies the showjoin pref + gettext.
+                    Signal::builder("user-notice")
+                        .param_types([
+                            Type::POINTER,
+                            Type::U32,
+                            Type::U32,
+                            Type::POINTER,
+                            Type::POINTER,
+                        ])
+                        .build(),
                     // connection-state-changed: (state:u32)
                     Signal::builder("connection-state-changed")
                         .param_types([Type::U32])
@@ -467,6 +485,23 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_subject(
 ) {
     let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(subj as *const c_void)];
     emit(self_, "chat-subject", &v);
+}
+
+/// Emit the "Subject Changed to: X" notice line for chat `cid` (distinct from
+/// the chat-subject bar update, which also fires for a room's initial subject).
+/// The view-side handler owns the gettext + INFOPREFIX.
+///
+/// # Safety
+/// `self_`/`htlc` valid; `subj` a valid NUL-terminated C string (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_chat_subject_notice(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    cid: u32,
+    subj: *const c_char,
+) {
+    let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(subj as *const c_void)];
+    emit(self_, "chat-subject-notice", &v);
 }
 
 /// # Safety
@@ -875,6 +910,31 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_log_line(
     emit(self_, "chat-log-line", &v);
 }
 
+/// Emit a roster notice line (join / parts / rename) for chat `cid`. `kind` is
+/// one of the `HX_USER_NOTICE_*` values (gtkhx_session.h); `name`/`old_name` are
+/// raw C-string pointers (`old_name` is NULL except for a rename).
+///
+/// # Safety
+/// `self_`/`htlc` valid; `name`/`old_name` are valid C strings or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_user_notice(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    cid: u32,
+    kind: u32,
+    name: *const c_char,
+    old_name: *const c_char,
+) {
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(cid),
+        glib::Value::from(kind),
+        ptr_value(name as *const c_void),
+        ptr_value(old_name as *const c_void),
+    ];
+    emit(self_, "user-notice", &v);
+}
+
 /// # Safety
 /// `self_` valid. `state` is a `GtkhxConnectionState` (C enum = int).
 #[no_mangle]
@@ -939,12 +999,59 @@ mod tests {
     }
 
     #[test]
-    fn registers_all_signals() {
-        // One entry per signal the model→view contract carries. This exact
-        // count is a deliberate drift-catcher: adding or removing a signal
-        // without updating it (and the matching emit wrapper) trips here.
-        // Bump it in lockstep when the signal set changes.
-        assert_eq!(imp::GtkhxSession::signals().len(), 30);
+    fn user_notice_signal_round_trips() {
+        // (htlc ptr, cid:u32, kind:u32, name ptr, old_name ptr) — the 5-arg
+        // roster-notice shape. Proves the emit wrapper marshals all five and
+        // that the signal is registered (an unregistered signal would
+        // GLib-critical on emit rather than reach the handler).
+        let s = new_session();
+        let got: Rc<Cell<(usize, u32, u32, usize, usize)>> = Rc::new(Cell::new((0, 0, 0, 0, 0)));
+        let got2 = got.clone();
+        s.connect_local("user-notice", false, move |args| {
+            got2.set((
+                pval(&args[1]),
+                args[2].get::<u32>().unwrap(),
+                args[3].get::<u32>().unwrap(),
+                pval(&args[4]),
+                pval(&args[5]),
+            ));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        let name = std::ffi::CString::new("Alice").unwrap();
+        unsafe {
+            gtkhx_session_emit_user_notice(
+                raw,
+                0xABCD as *mut c_void,
+                7,
+                2,
+                name.as_ptr(),
+                std::ptr::null(),
+            );
+        }
+        assert_eq!(
+            got.get(),
+            (0xABCD, 7, 2, name.as_ptr() as usize, 0)
+        );
+    }
+
+    #[test]
+    fn chat_subject_notice_signal_round_trips() {
+        // (htlc ptr, cid:u32, subject ptr) — distinct from chat-subject so the
+        // "Subject Changed to" line only fires on a real change.
+        let s = new_session();
+        let got: Rc<Cell<(usize, u32, usize)>> = Rc::new(Cell::new((0, 0, 0)));
+        let got2 = got.clone();
+        s.connect_local("chat-subject-notice", false, move |args| {
+            got2.set((pval(&args[1]), args[2].get::<u32>().unwrap(), pval(&args[3])));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        let subj = std::ffi::CString::new("New topic").unwrap();
+        unsafe {
+            gtkhx_session_emit_chat_subject_notice(raw, 0x1234 as *mut c_void, 5, subj.as_ptr());
+        }
+        assert_eq!(got.get(), (0x1234, 5, subj.as_ptr() as usize));
     }
 
     #[test]

@@ -1952,6 +1952,9 @@ version = "0.1.0"
 [[package]]
 name = "hxuser-recv"
 version = "0.1.0"
+dependencies = [
+ "hotline-proto",
+]
 
 [[package]]
 name = "hxvoice"

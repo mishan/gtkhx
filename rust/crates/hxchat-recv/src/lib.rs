@@ -53,8 +53,14 @@ extern "C" {
     fn hx_chat_subject(chat: *mut c_void) -> *const c_char;
     /// Set the chat's subject from `s` (`len` bytes; gtkhx-ui).
     fn hx_chat_set_subject(chat: *mut c_void, s: *const c_char, len: usize);
-    /// Log the "Subject Changed to: <subject>" chat line (chat.c view/log shim).
-    fn hx_chat_log_subject_changed(htlc: *mut c_void, cid: u32, subject: *const c_char);
+    /// Emit the "Subject Changed to: <subject>" notice signal (gtkhx-session);
+    /// the view-side handler owns the gettext + INFOPREFIX.
+    fn gtkhx_session_emit_chat_subject_notice(
+        self_: *mut c_void,
+        htlc: *mut c_void,
+        cid: u32,
+        subject: *const c_char,
+    );
     /// Whether the server negotiated `cap` for this session (hxconn crate).
     fn hx_conn_has_cap(htlc: *const c_void, cap: u64) -> c_int;
     /// Our own display nick (NUL-terminated internal buffer; hxconn crate).
@@ -189,9 +195,9 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
 /// primary handler (was `rcv.c`, Phase E2). Parses the frame via
 /// `hotline_proto::parse` (native), and — for a non-empty subject on a known
 /// chat — delegates the change-gate + emit to [`hx_chat_subject_recv`]. On a real
-/// change it sets the chat model subject and logs the "Subject Changed to" line
-/// (both C collaborators). An empty subject or unknown chat is a no-op, exactly
-/// as the old C did.
+/// change it sets the chat model subject (C collaborator) and emits the
+/// "Subject Changed to" notice signal (the view-side handler owns the gettext).
+/// An empty subject or unknown chat is a no-op, exactly as the old C did.
 ///
 /// # Safety
 /// C-ABI handler invoked from the receive dispatch on the main thread. `htlc` is
@@ -220,7 +226,12 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(htlc: *mut c_void, frame: *const u8
     let subj_ptr = s.as_ptr() as *const c_char;
     if hx_chat_subject_recv(htlc, sub.cid, subj_ptr, n, hx_chat_subject(chat)) != 0 {
         hx_chat_set_subject(chat, subj_ptr, n);
-        hx_chat_log_subject_changed(htlc, sub.cid, hx_chat_subject(chat));
+        gtkhx_session_emit_chat_subject_notice(
+            gtkhx_session_get_default(),
+            htlc,
+            sub.cid,
+            hx_chat_subject(chat),
+        );
     }
 }
 
@@ -536,7 +547,13 @@ unsafe fn hx_chat_subject(_chat: *mut c_void) -> *const c_char {
 #[cfg(test)]
 unsafe fn hx_chat_set_subject(_chat: *mut c_void, _s: *const c_char, _len: usize) {}
 #[cfg(test)]
-unsafe fn hx_chat_log_subject_changed(_htlc: *mut c_void, _cid: u32, _subject: *const c_char) {}
+unsafe fn gtkhx_session_emit_chat_subject_notice(
+    _self_: *mut c_void,
+    _htlc: *mut c_void,
+    _cid: u32,
+    _subject: *const c_char,
+) {
+}
 
 /// A fixed non-null sentinel the chat-event doubles hand back / expect.
 #[cfg(test)]

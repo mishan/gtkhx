@@ -70,6 +70,124 @@ extern "C" {
     /// `GtkhxSession::self-updated (htlc)` — our own access bits / uid were
     /// (re)parsed from a SELFINFO reply.
     fn gtkhx_session_emit_self_updated(self_: *mut c_void, htlc: *mut c_void);
+    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
+    /// Deliberately ignores the server-supplied name — our local prefs nick is
+    /// authoritative. C helper in proto_helpers.c.
+    fn hx_selfinfo_parse(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> u32;
+    /// Set our own "logged in" flag on the connection (hxconn). SELFINFO is the
+    /// canonical login-complete signal; the agreement Agree button reads this.
+    fn hx_conn_set_logged_in(htlc: *mut c_void, v: c_int);
+    /// `session *hx_conn_sess (htlc)` — the session owning this connection.
+    fn hx_conn_sess(htlc: *mut c_void) -> *mut c_void;
+    /// `struct chat *chat_with_cid (sess, cid)` — the chat with this id, or NULL.
+    fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
+    /// `void *hx_chat_member_model (chat)` — the chat's authoritative
+    /// `HxMemberModel` (hxmember-model).
+    fn hx_chat_member_model(chat: *mut c_void) -> *mut c_void;
+    /// Read a member's display fields by uid into `out` (chat_members.h). Returns
+    /// gboolean; leaves `out` untouched when the uid is absent.
+    fn hx_member_model_get_info(model: *mut c_void, uid: u16, out: *mut HxMemberInfo)
+        -> c_int;
+    /// Emit the `user-notice` signal (gtkhx-session): a roster join / parts /
+    /// rename line for chat `cid`. `kind` is one of `HX_USER_NOTICE_*`; the
+    /// view-side handler owns the gettext + showjoin gate. `old_name` is NULL
+    /// except for a rename.
+    fn gtkhx_session_emit_user_notice(
+        self_: *mut c_void,
+        htlc: *mut c_void,
+        cid: u32,
+        kind: u32,
+        name: *const c_char,
+        old_name: *const c_char,
+    );
+    /// `int task_inerror (htlc, frame, frame_len)` — TRUE if the frame is a
+    /// task-error reply we should bail on (protocol.h).
+    fn task_inerror(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> c_int;
+    /// `struct chat *chat_new (sess, cid)` — create (and register) a chat.
+    fn chat_new(sess: *mut c_void, cid: u32) -> *mut c_void;
+    /// Client-local ignore flag for `uid` on the model (chat_members.h).
+    fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
+    /// hxconn accessors for our own identity bookkeeping.
+    fn hx_conn_uid(htlc: *mut c_void) -> u16;
+    fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
+    fn hx_conn_icon(htlc: *mut c_void) -> u16;
+    fn hx_conn_set_icon(htlc: *mut c_void, v: u16);
+    fn hx_conn_set_nick_color(htlc: *mut c_void, v: u32);
+    fn hx_conn_name(htlc: *mut c_void) -> *const c_char;
+    /// Log a pre-formatted line under a debug category (debug.c) — the
+    /// non-variadic sibling of debug_log.
+    fn debug_log_str(cat: *const c_char, msg: *const c_char);
+}
+
+/// RGB nick colour sentinel — "no colour, use theme default"
+/// (`HX_NICK_COLOR_NONE`, hotline.h).
+const HX_NICK_COLOR_NONE: u32 = 0xffff_ffff;
+
+/// `user-notice` signal kinds (must match `HX_USER_NOTICE_*` in gtkhx_session.h).
+const HX_USER_NOTICE_JOIN: u32 = 0;
+const HX_USER_NOTICE_PART: u32 = 1;
+const HX_USER_NOTICE_RENAME: u32 = 2;
+
+/// glib TRUE (`gboolean`).
+const TRUE: c_int = 1;
+
+/// `gboolean` from a Rust bool.
+#[inline]
+fn gbool(b: bool) -> c_int {
+    b as c_int
+}
+
+/// A `CString` from wire bytes, truncated at the first interior NUL — mirroring
+/// how the old C `char*` extractor buffer terminated. Infallible (the truncated
+/// slice has no interior NUL).
+unsafe fn cstring_first_nul(bytes: &[u8]) -> std::ffi::CString {
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    std::ffi::CString::new(&bytes[..end]).unwrap_or_default()
+}
+
+/// Bytes of a NUL-terminated C string, or `None` for a NULL pointer.
+unsafe fn optr_bytes(p: *const c_char) -> Option<Vec<u8>> {
+    if p.is_null() {
+        None
+    } else {
+        Some(std::ffi::CStr::from_ptr(p).to_bytes().to_vec())
+    }
+}
+
+/// Emit a pre-formatted line under `cat` via debug_log_str, stripping any NULs
+/// so wire-derived interpolations can't panic CString::new. A debug trace must
+/// never be able to crash the client.
+///
+/// # Safety
+/// `debug_log_str` is an FFI call into debug.c.
+unsafe fn debug_trace(cat: &std::ffi::CStr, line: String) {
+    if let Ok(c) = std::ffi::CString::new(line.replace('\0', "")) {
+        debug_log_str(cat.as_ptr(), c.as_ptr());
+    }
+}
+
+/// `#[repr(C)]` mirror of `struct hx_member_info` (chat_members.h): the display
+/// snapshot `hx_member_model_get_info` fills. `name` is NUL-terminated.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct HxMemberInfo {
+    uid: u16,
+    icon: u16,
+    status: u16,
+    nick_color: u32,
+    name: [c_char; 32],
+}
+
+impl HxMemberInfo {
+    fn zeroed() -> Self {
+        HxMemberInfo {
+            uid: 0,
+            icon: 0,
+            status: 0,
+            nick_color: 0,
+            name: [0; 32],
+        }
+    }
 }
 
 /// Result of [`hx_user_apply_recv`] — tells the C side what (if anything) it
@@ -156,6 +274,151 @@ pub unsafe extern "C" fn hx_user_apply_recv(
     HX_USER_CHANGE_UPDATED
 }
 
+/// `void hx_rcv_user_change (htlc, frame, frame_len)` — the live USER_CHANGE
+/// (`HTLS_HDR_USER_CHANGE`) broadcast handler.
+///
+/// Parses the frame natively (`parse_user_change`), resolves the chat (creating
+/// it if this is the first we've heard of the cid), snapshots the member's
+/// pre-change state from the model, and runs the pure change-plan decision
+/// natively (`user_change::resolve` — the same code the retired C
+/// `hx_user_change_plan_resolve` wrapped: self-detection incl. the SELFINFO-less
+/// uid adoption some 1.9 servers force, new-vs-change, the colour / nick-colour
+/// preserve rules, and the rename-notice test). It then routes the apply through
+/// the shared [`hx_user_apply_recv`] and does the matching join / rename logging
+/// (both gated behind the showjoin pref inside the C shims), plus the self
+/// icon / nick-colour bookkeeping.
+///
+/// It deliberately does NOT copy the server's name into `htlc` — servers can
+/// pin guests to override names (e.g. "Read the agreement") that must show in
+/// the user list but must not bleed into the persisted NICK pref.
+///
+/// # Safety
+/// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_user_change(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+) {
+    if frame.is_null() || task_inerror(htlc, frame, frame_len) != 0 {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    let uc = hotline_proto::parse::parse_user_change(buf, frame_len, 31);
+
+    let sess = hx_conn_sess(htlc);
+    let mut chat = chat_with_cid(sess, uc.cid);
+    if chat.is_null() {
+        chat = chat_new(sess, uc.cid);
+    }
+    let model = hx_chat_member_model(chat);
+
+    // Pre-change snapshot from the authoritative model, taken before the apply
+    // updates it — so the preserve rules + rename notice see the old state.
+    let mut old = HxMemberInfo::zeroed();
+    let old_exists = hx_member_model_get_info(model, uc.uid, &mut old) != 0;
+    let old_name_bytes = optr_bytes(old.name.as_ptr());
+
+    let self_name_bytes = optr_bytes(hx_conn_name(htlc));
+
+    let plan = hotline_proto::user_change::resolve(&hotline_proto::user_change::ChangeInput {
+        uid: uc.uid,
+        name: &uc.name,
+        got_color: uc.got_color,
+        color: uc.color,
+        got_nick_color: uc.got_nick_color,
+        nick_color: uc.nick_color,
+        old_exists,
+        old_status: old.status,
+        old_nick_color: if old_exists { old.nick_color } else { HX_NICK_COLOR_NONE },
+        old_name: if old_exists { old_name_bytes.as_deref() } else { None },
+        self_uid: hx_conn_uid(htlc),
+        self_name: self_name_bytes.as_deref(),
+    });
+
+    if plan.adopt_self_uid {
+        hx_conn_set_uid(htlc, uc.uid);
+        debug_trace(
+            c"login",
+            format!(
+                "adopted self uid={} from USER_CHANGE broadcast (SELFINFO didn't carry it)",
+                uc.uid
+            ),
+        );
+    }
+
+    // uc.name as a C string (first-NUL truncated, matching the old extractor).
+    let name_c = cstring_first_nul(&uc.name);
+
+    let emitted = hx_user_apply_recv(
+        htlc,
+        chat,
+        model,
+        uc.uid,
+        plan.eff_nick_color,
+        name_c.as_ptr(),
+        uc.icon,
+        plan.eff_color,
+        gbool(plan.is_new),
+        gbool(plan.skip_self_create),
+        TRUE, // live broadcast, not the bulk USER_LIST load
+    );
+
+    if emitted == HX_USER_CHANGE_SKIPPED {
+        // Our own row — the USER_LIST reply creates it in the right spot.
+        return;
+    } else if emitted == HX_USER_CHANGE_CREATED {
+        gtkhx_session_emit_user_notice(
+            gtkhx_session_get_default(),
+            htlc,
+            uc.cid,
+            HX_USER_NOTICE_JOIN,
+            name_c.as_ptr(),
+            std::ptr::null(),
+        );
+    } else {
+        // HX_USER_CHANGE_CHANGED. Bail on ignored users before the notice.
+        if hx_member_model_get_ignore(model, uc.uid) != 0 {
+            return;
+        }
+        if plan.do_rename_notice {
+            // old.name is the pre-change snapshot taken above.
+            gtkhx_session_emit_user_notice(
+                gtkhx_session_get_default(),
+                htlc,
+                uc.cid,
+                HX_USER_NOTICE_RENAME,
+                name_c.as_ptr(),
+                old.name.as_ptr(),
+            );
+        }
+    }
+
+    // Self bookkeeping — mirror the just-applied wire/plan values into htlc.
+    // (A new-self returned early via SKIPPED, so a self change here is always an
+    // existing member.) The name is deliberately not copied back (see above).
+    if uc.uid != 0 && uc.uid == hx_conn_uid(htlc) {
+        let icon = if uc.icon != 0 {
+            uc.icon
+        } else if old_exists {
+            old.icon
+        } else {
+            hx_conn_icon(htlc)
+        };
+        hx_conn_set_icon(htlc, icon);
+        if uc.got_nick_color {
+            hx_conn_set_nick_color(htlc, uc.nick_color);
+        }
+        debug_trace(
+            c"name",
+            format!(
+                "USER_CHANGE for our uid={}: keeping local htlc->name",
+                uc.uid
+            ),
+        );
+    }
+}
+
 /// `int hx_user_part_recv (htlc, chat, member_model, uid)` — emit `user-delete`
 /// iff `uid` is a member of the chat (the fan-out removes the model entry
 /// itself). Returns 1 when it emitted, 0 otherwise. The C side captures the
@@ -177,6 +440,53 @@ pub unsafe extern "C" fn hx_user_part_recv(
     }
     gtkhx_session_emit_user_delete(gtkhx_session_get_default(), htlc, chat, uid, 1);
     1
+}
+
+/// `void hx_rcv_user_part (htlc, frame, frame_len)` — the USER_PART
+/// (`HTLS_HDR_USER_PART`) receive handler.
+///
+/// Parses the frame natively (`parse_user_part` → uid + cid), resolves the chat,
+/// captures the leaving member's name *before* the emit (the `user-delete`
+/// fan-out removes the model entry), and delegates the membership-gated emit to
+/// [`hx_user_part_recv`]. When that emitted, it logs the "parts: <name>" line —
+/// which the C shim suppresses unless the showjoin pref is on.
+///
+/// # Safety
+/// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_user_part(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+) {
+    if frame.is_null() {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    let pm = hotline_proto::parse::parse_user_part(buf, frame_len);
+
+    let sess = hx_conn_sess(htlc);
+    let chat = chat_with_cid(sess, pm.cid);
+    if chat.is_null() {
+        return;
+    }
+    let model = hx_chat_member_model(chat);
+
+    // Snapshot the member before the emit removes it, so we have the name for
+    // the "parts" line.
+    let mut info = HxMemberInfo::zeroed();
+    let have = hx_member_model_get_info(model, pm.uid, &mut info) != 0;
+
+    if hx_user_part_recv(htlc, chat, model, pm.uid) != 0 && have {
+        gtkhx_session_emit_user_notice(
+            gtkhx_session_get_default(),
+            htlc,
+            pm.cid,
+            HX_USER_NOTICE_PART,
+            info.name.as_ptr(),
+            std::ptr::null(),
+        );
+    }
 }
 
 /// `void hx_user_info_recv (uid, name, info, len)` — emit the `user-info`
@@ -207,11 +517,44 @@ pub unsafe extern "C" fn hx_selfinfo_recv(htlc: *mut c_void) {
     gtkhx_session_emit_self_updated(gtkhx_session_get_default(), htlc);
 }
 
+/// `void hx_rcv_user_selfinfo (htlc, frame, frame_len)` — the SELFINFO
+/// (`HTLS_HDR_USER_SELFINFO`) receive handler.
+///
+/// SELFINFO carries our own access bitmap + uid + icon. The chunk parse stays in
+/// `hx_selfinfo_parse` (proto_helpers.c) so the Tier-2 unit tests can drive it
+/// headless; it folds the fields into `htlc` and deliberately ignores the
+/// server-supplied name (our local prefs nick is authoritative and we push it
+/// back at agreement time). SELFINFO is the canonical "login complete" signal,
+/// so we set the `logged_in` flag — the agreement Agree button reads it to
+/// decide whether to send AGREEMENTAGREE. The view then refreshes toolbar
+/// sensitivity (kick/ban gate on the access bits) off the `self-updated` emit.
+///
+/// This is NOT where post-login fetches fire: in the 1.5 flow SELFINFO arrives
+/// before the agreement, so USER_GETLIST / news are sent from
+/// `hx_send_agreement_agree`, after AGREEMENTAGREE is on the wire.
+///
+/// # Safety
+/// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_user_selfinfo(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+) {
+    if frame.is_null() {
+        return;
+    }
+    hx_selfinfo_parse(htlc, frame, frame_len);
+    hx_conn_set_logged_in(htlc, 1);
+    hx_selfinfo_recv(htlc);
+}
+
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
 pub(crate) mod test_env {
     use std::cell::{Cell, RefCell};
+    use std::os::raw::c_int;
 
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Emit {
@@ -259,11 +602,67 @@ pub(crate) mod test_env {
         pub static CONTAINS: Cell<bool> = const { Cell::new(true) };
         /// Records the last emitted roster signal, or None.
         pub static EMIT: RefCell<Option<Emit>> = const { RefCell::new(None) };
+        /// SELFINFO handler: did it call the chunk parse?
+        pub static SELFINFO_PARSED: Cell<bool> = const { Cell::new(false) };
+        /// SELFINFO handler: value passed to hx_conn_set_logged_in (or -1).
+        pub static LOGGED_IN: Cell<c_int> = const { Cell::new(-1) };
+        /// get_info: the member snapshot to return (name + fields), or None
+        /// (absent → get_info returns FALSE).
+        pub static MEMBER: RefCell<Option<MemberSnap>> = const { RefCell::new(None) };
+        /// The last emitted user-notice, as (cid, kind, name, old_name).
+        pub static NOTICE: RefCell<Option<Notice>> = const { RefCell::new(None) };
+        /// task_inerror return.
+        pub static TASK_ERROR: Cell<bool> = const { Cell::new(false) };
+        /// Our own uid (hx_conn_uid / set_uid).
+        pub static SELF_UID: Cell<u16> = const { Cell::new(0) };
+        /// Our own icon (hx_conn_icon / set_icon).
+        pub static SELF_ICON: Cell<u16> = const { Cell::new(0) };
+        /// Our own nick colour (hx_conn_set_nick_color).
+        pub static SELF_NICK_COLOR: Cell<u32> = const { Cell::new(0) };
+        /// get_ignore return.
+        pub static IGNORE: Cell<bool> = const { Cell::new(false) };
+        /// Our own display name (hx_conn_name returns a pointer into this).
+        pub static SELF_NAME: RefCell<std::ffi::CString> =
+            RefCell::new(std::ffi::CString::new("").unwrap());
+    }
+
+    /// A member snapshot the get_info double hands back.
+    #[derive(Clone)]
+    pub struct MemberSnap {
+        pub icon: u16,
+        pub status: u16,
+        pub nick_color: u32,
+        pub name: Vec<u8>,
+    }
+
+    /// A recorded user-notice emit.
+    #[derive(Debug, PartialEq, Eq, Clone)]
+    pub struct Notice {
+        pub cid: u32,
+        pub kind: u32,
+        pub name: Vec<u8>,
+        /// Empty when the emit passed NULL (everything but a rename).
+        pub old_name: Vec<u8>,
     }
 
     pub fn reset() {
         CONTAINS.with(|c| c.set(true));
         EMIT.with(|c| *c.borrow_mut() = None);
+        SELFINFO_PARSED.with(|c| c.set(false));
+        LOGGED_IN.with(|c| c.set(-1));
+        MEMBER.with(|c| *c.borrow_mut() = None);
+        NOTICE.with(|c| *c.borrow_mut() = None);
+        TASK_ERROR.with(|c| c.set(false));
+        SELF_UID.with(|c| c.set(0));
+        SELF_ICON.with(|c| c.set(0));
+        SELF_NICK_COLOR.with(|c| c.set(0));
+        IGNORE.with(|c| c.set(false));
+        SELF_NAME.with(|c| *c.borrow_mut() = std::ffi::CString::new("").unwrap());
+    }
+
+    /// Set the self display name the hx_conn_name double returns.
+    pub fn set_self_name(name: &str) {
+        SELF_NAME.with(|c| *c.borrow_mut() = std::ffi::CString::new(name).unwrap());
     }
     pub fn take() -> Option<Emit> {
         EMIT.with(|c| c.borrow_mut().take())
@@ -364,6 +763,138 @@ unsafe fn gtkhx_session_emit_user_info(
 unsafe fn gtkhx_session_emit_self_updated(_self_: *mut c_void, _htlc: *mut c_void) {
     test_env::record(test_env::Emit::SelfUpdated);
 }
+
+#[cfg(test)]
+unsafe fn hx_selfinfo_parse(_htlc: *mut c_void, _frame: *const u8, _frame_len: usize) -> u32 {
+    test_env::SELFINFO_PARSED.with(|c| c.set(true));
+    0
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_set_logged_in(_htlc: *mut c_void, v: c_int) {
+    test_env::LOGGED_IN.with(|c| c.set(v));
+}
+
+// Non-null sentinels so the handlers' null-guards pass in tests.
+#[cfg(test)]
+const FAKE_CHAT: *mut c_void = 0xC0FE_usize as *mut c_void;
+#[cfg(test)]
+const FAKE_MODEL: *mut c_void = 0xB0B0_usize as *mut c_void;
+
+#[cfg(test)]
+unsafe fn hx_conn_sess(_htlc: *mut c_void) -> *mut c_void {
+    std::ptr::null_mut()
+}
+
+#[cfg(test)]
+unsafe fn chat_with_cid(_sess: *mut c_void, _cid: u32) -> *mut c_void {
+    FAKE_CHAT
+}
+
+#[cfg(test)]
+unsafe fn hx_chat_member_model(_chat: *mut c_void) -> *mut c_void {
+    FAKE_MODEL
+}
+
+#[cfg(test)]
+unsafe fn hx_member_model_get_info(
+    _model: *mut c_void,
+    _uid: u16,
+    out: *mut HxMemberInfo,
+) -> c_int {
+    test_env::MEMBER.with(|c| match &*c.borrow() {
+        Some(snap) => {
+            let o = &mut *out;
+            o.uid = _uid;
+            o.icon = snap.icon;
+            o.status = snap.status;
+            o.nick_color = snap.nick_color;
+            o.name = [0; 32];
+            let n = snap.name.len().min(31);
+            for i in 0..n {
+                o.name[i] = snap.name[i] as c_char;
+            }
+            1
+        }
+        None => 0,
+    })
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_session_emit_user_notice(
+    _self_: *mut c_void,
+    _htlc: *mut c_void,
+    cid: u32,
+    kind: u32,
+    name: *const c_char,
+    old_name: *const c_char,
+) {
+    test_env::NOTICE.with(|c| {
+        *c.borrow_mut() = Some(test_env::Notice {
+            cid,
+            kind,
+            name: cstr_bytes(name),
+            old_name: cstr_bytes(old_name),
+        })
+    });
+}
+
+#[cfg(test)]
+unsafe fn cstr_bytes(p: *const c_char) -> Vec<u8> {
+    if p.is_null() {
+        Vec::new()
+    } else {
+        std::ffi::CStr::from_ptr(p).to_bytes().to_vec()
+    }
+}
+
+#[cfg(test)]
+unsafe fn task_inerror(_htlc: *mut c_void, _frame: *const u8, _frame_len: usize) -> c_int {
+    c_int::from(test_env::TASK_ERROR.with(|c| c.get()))
+}
+
+#[cfg(test)]
+unsafe fn chat_new(_sess: *mut c_void, _cid: u32) -> *mut c_void {
+    FAKE_CHAT
+}
+
+#[cfg(test)]
+unsafe fn hx_member_model_get_ignore(_model: *mut c_void, _uid: u16) -> c_int {
+    c_int::from(test_env::IGNORE.with(|c| c.get()))
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_uid(_htlc: *mut c_void) -> u16 {
+    test_env::SELF_UID.with(|c| c.get())
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_set_uid(_htlc: *mut c_void, v: u16) {
+    test_env::SELF_UID.with(|c| c.set(v));
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_icon(_htlc: *mut c_void) -> u16 {
+    test_env::SELF_ICON.with(|c| c.get())
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_set_icon(_htlc: *mut c_void, v: u16) {
+    test_env::SELF_ICON.with(|c| c.set(v));
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_set_nick_color(_htlc: *mut c_void, v: u32) {
+    test_env::SELF_NICK_COLOR.with(|c| c.set(v));
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_name(_htlc: *mut c_void) -> *const c_char {
+    test_env::SELF_NAME.with(|c| c.borrow().as_ptr())
+}
+
+#[cfg(test)]
+unsafe fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
 
 #[cfg(test)]
 unsafe fn hx_member_model_contains(_model: *mut c_void, _uid: u16) -> c_int {

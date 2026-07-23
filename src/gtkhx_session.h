@@ -81,6 +81,15 @@ void gtkhx_session_emit_chat_subject (GtkhxSession *self,
                                       struct htlc_conn *htlc, guint32 cid,
                                       const char *subj);
 
+/* chat-subject-notice — the "Subject Changed to: X" chat-output line for a real
+ * subject change (the chat-subject signal above already updated the subject
+ * bar). Emitted by the Rust chat-subject receive handler (hxchat-recv); the
+ * view-side handler (chat.c chat_subject_notice_handler) owns the gettext +
+ * INFOPREFIX. */
+void gtkhx_session_emit_chat_subject_notice (GtkhxSession *self,
+                                             struct htlc_conn *htlc, guint32 cid,
+                                             const char *subj);
+
 void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
                                          struct htlc_conn *htlc, guint32 cid,
                                          const char *name);
@@ -241,6 +250,20 @@ void gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
 void gtkhx_session_emit_chat_log_line (GtkhxSession *self,
                                        struct htlc_conn *htlc, guint32 cid,
                                        const char *body);
+
+/* user-notice — a roster notice line for chat `cid`: someone joined, parted, or
+ * renamed. The Rust user-roster receive handlers (hxuser-recv) emit this; the
+ * view-side handler (chat.c user_notice_handler) applies the showjoin pref +
+ * gettext + INFOPREFIX. `name` / `old_name` are raw C-string pointers;
+ * `old_name` is NULL except for HX_USER_NOTICE_RENAME. */
+enum {
+    HX_USER_NOTICE_JOIN = 0,
+    HX_USER_NOTICE_PART = 1,
+    HX_USER_NOTICE_RENAME = 2,
+};
+void gtkhx_session_emit_user_notice (GtkhxSession *self, struct htlc_conn *htlc,
+                                     guint32 cid, guint32 kind, const char *name,
+                                     const char *old_name);
 
 /* High-level connection state. The signal's view-side handler
  * translates each state into the per-aspect UI updates (toolbar

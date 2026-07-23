@@ -577,173 +577,41 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 }
 
 /* User-roster apply routing lives in the Rust hxuser-recv crate
- * (rust/crates/hxuser-recv). hx_user_apply_recv is shared by the live
- * USER_CHANGE broadcast and the bulk USER_LIST load — `incremental` tells the
- * two apart. */
-#define HX_USER_CHANGE_SKIPPED 0
-#define HX_USER_CHANGE_CREATED 1
-#define HX_USER_CHANGE_CHANGED 2
-#define HX_USER_CHANGE_UPDATED 3
+ * (rust/crates/hxuser-recv). hx_user_apply_recv is shared by the Rust live
+ * USER_CHANGE broadcast handler and the bulk USER_LIST load below —
+ * `incremental` tells the two apart. */
 extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
                                void *member_model, guint16 uid,
                                guint32 nick_color, const char *name,
                                guint16 icon, guint16 color, int is_new,
                                int skip_self_create, int incremental);
-extern int hx_user_part_recv (struct htlc_conn *htlc, void *chat,
-                              void *member_model, guint16 uid);
-/* USER_INFO reply + SELFINFO self-updated emits — Rust hxuser-recv crate. */
+/* USER_INFO reply emit — Rust hxuser-recv crate. (The SELFINFO self-updated
+ * emit is now internal to hxuser-recv's hx_rcv_user_selfinfo.) */
 extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
                                guint16 len);
-extern void hx_selfinfo_recv (struct htlc_conn *htlc);
 
-void
-hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_user_change_msg uc;
-    struct chat *chat;
-    session *sess = sess_from_htlc (htlc);
+/* hx_rcv_user_change (HTLS_HDR_USER_CHANGE) is a #[no_mangle] fn in the
+ * hxuser-recv crate (rust/crates/hxuser-recv): it parses the frame natively,
+ * resolves the chat, runs the native user_change::resolve plan (self-detection,
+ * new-vs-change, colour/nick-colour preserve, rename-notice), routes the apply
+ * through the shared hx_user_apply_recv, and does the join / rename logging
+ * (showjoin-gated in the C shims) plus the self icon / nick-colour bookkeeping.
+ * The dispatch switch below calls it by name (declared in rcv.h); no C body
+ * remains here. */
 
-    if (task_inerror (htlc, frame, frame_len)) {
-        return;
-    }
-
-    if (!hx_user_change_extract (frame, frame_len, &uc)) {
-        return;
-    }
-
-    /* Local aliases — keep the rest of the handler readable. */
-    guint16 uid = uc.uid;
-    guint16 icon = uc.icon;
-    guint32 nick_color = uc.nick_color;
-    gboolean got_nick_color = uc.got_nick_color;
-    guint32 cid = uc.cid;
-    char *name = uc.name;
-    guint16 nlen = uc.name_len;
-
-    /* Resolve every change decision in one pure, Tier-2-tested helper
-     * (hx_user_change_plan_resolve; tests/proto/test_user_change.c): self
-     * detection (incl. the SELFINFO-less uid adoption some 1.9 servers
-     * force by omitting USER_LIST from SELFINFO, leaving hx_conn_uid (htlc) 0),
-     * new-vs-change, the colour / nick-colour preserve rules, and whether
-     * to print a rename notice. */
-    chat = chat_with_cid (sess, cid);
-    if (!chat) {
-        chat = chat_new (sess, cid);
-    }
-
-    /* Old state is read from the authoritative member model (the per-chat
-     * user hashtable is gone). get_info fills a *value* snapshot; it's
-     * taken before the emit below updates the model, so `old` stays the
-     * pre-change state even after the fan-out upserts. */
-    struct hx_member_info old;
-    gboolean old_exists = hx_member_model_get_info (hx_chat_member_model (chat), uid, &old);
-
-    struct hx_user_change_plan plan;
-    hx_user_change_plan_resolve (&uc, old_exists,
-                                 old_exists ? old.status : 0,
-                                 old_exists ? old.nick_color : HX_NICK_COLOR_NONE,
-                                 old_exists ? old.name : NULL, hx_conn_uid (htlc),
-                                 (const char *)hx_conn_name (htlc), &plan);
-
-    if (plan.adopt_self_uid) {
-        hx_conn_set_uid (htlc, uid);
-        debug_log ("login",
-                   "adopted self uid=%u from USER_CHANGE "
-                   "broadcast (SELFINFO didn't carry it)",
-                   (unsigned)uid);
-    }
-
-    /* Route through the shared roster-apply in the Rust hxuser-recv crate
-     * (incremental=TRUE — this is a live broadcast, not the bulk load); it
-     * returns what it emitted so we do the matching join / rename logging. */
-    int emitted = hx_user_apply_recv (htlc, chat, hx_chat_member_model (chat),
-                                      uid, plan.eff_nick_color, name, icon,
-                                      plan.eff_color, plan.is_new,
-                                      plan.skip_self_create, TRUE);
-    if (emitted == HX_USER_CHANGE_SKIPPED) {
-        /* Our own row — the USER_LIST reply creates it in the right spot. */
-        return;
-    }
-    if (emitted == HX_USER_CHANGE_CREATED) {
-        if (gtkhx_prefs.showjoin) {
-            hx_printf_prefix (htlc, cid, INFOPREFIX, _ ("join: %s\n"), name);
-        }
-    } else { /* HX_USER_CHANGE_CHANGED */
-        /* Bail on ignored users before we toast or log them. */
-        if (hx_member_model_get_ignore (hx_chat_member_model (chat), uid)) {
-            return;
-        }
-        if (plan.do_rename_notice) {
-            /* old.name is the pre-change snapshot taken above. */
-            hx_printf_prefix (htlc, cid, INFOPREFIX,
-                              _ ("%1$s is now known as %2$s\n"), old.name,
-                              name);
-        }
-    }
-
-    /* Self bookkeeping — mirror the just-applied wire/plan values into
-     * htlc. (skip_self_create returned early for a new-self, so here a
-     * self change is always an existing member: old_exists is true.)
-     *
-     * deliberately do NOT copy the server's name into hx_conn_name (htlc).
-     * Servers can legitimately override a display name — guests get
-     * pinned to things like "Read the agreement" before they have
-     * HL_ACCESS_USERNAME_CHANGE — and that override should show in the
-     * user list but must not bleed into hx_conn_name (htlc), which doubles as the
-     * persisted NICK= prefs value (prefs_write would then persist the
-     * override forever). */
-    if ((uid) && (uid == hx_conn_uid (htlc))) {
-        hx_conn_set_icon (htlc,
-                          icon ? icon
-                               : (old_exists ? old.icon : hx_conn_icon (htlc)));
-        if (got_nick_color) {
-            hx_conn_set_nick_color (htlc, nick_color);
-        }
-        debug_log ("name",
-                   "USER_CHANGE for our uid=%u: server says "
-                   "'%.*s' (%u bytes); keeping local htlc->name = '%s'",
-                   (unsigned)uid, (int)nlen, name, (unsigned)nlen, hx_conn_name (htlc));
-    }
-}
-
-void
-hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_user_part_msg pm;
-    struct chat *chat;
-    session *sess = sess_from_htlc (htlc);
-
-    if (!hx_user_part_extract (frame, frame_len, &pm)) {
-        return;
-    }
-
-    chat = chat_with_cid (sess, pm.cid);
-    if (!chat) {
-        return;
-    }
-
-    /* Capture the member's name before the emit — the user_delete fan-out
-     * removes the model entry. hx_user_part_recv (Rust hxuser-recv) re-checks
-     * membership and emits user_delete only if present (incremental=TRUE: a
-     * genuine part broadcast the sound subscriber chimes off), returning
-     * whether it did so we log the "parts" line to match. */
-    struct hx_member_info mi;
-    gboolean have
-        = hx_member_model_get_info (hx_chat_member_model (chat), pm.uid, &mi);
-    if (hx_user_part_recv (htlc, chat, hx_chat_member_model (chat), pm.uid)) {
-        if (have && gtkhx_prefs.showjoin) {
-            hx_printf_prefix (htlc, pm.cid, INFOPREFIX, _ ("parts: %s \n"),
-                              mi.name);
-        }
-    }
-}
+/* hx_rcv_user_part (HTLS_HDR_USER_PART) is a #[no_mangle] fn in the hxuser-recv
+ * crate: it parses the frame natively, resolves the chat, snapshots the leaving
+ * member's name, and delegates the membership-gated user-delete emit to
+ * hx_user_part_recv, then logs the showjoin-gated "parts" line. The dispatch
+ * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
 /* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
  * hxchat-recv crate (rust/crates/hxchat-recv, Phase E2): it parses the frame,
  * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
- * and on a real change sets the model subject + logs the "Subject Changed to"
- * line via hx_chat_log_subject_changed (chat.c). The dispatch switch below calls
- * it by name (declared in rcv.h); no C body remains here. */
+ * and on a real change sets the model subject + emits the "chat-subject-notice"
+ * signal for the "Subject Changed to" line (view-side handler in chat.c). The
+ * dispatch switch below calls it by name (declared in rcv.h); no C body remains
+ * here. */
 
 void
 hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -769,61 +637,15 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
  * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
  * by name (declared in rcv.h); no C body remains here. (network-endgame.md E2.) */
 
-void
-hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* The chunk walker (parses HTLS_DATA_ACCESS + HTLS_DATA_USER_LIST
-	 * into htlc->access / uid / icon) is in proto_helpers.c so the
-	 * Tier 2 unit tests can drive it without GTK. NB: the parser
-	 * deliberately ignores the server-supplied name bytes (see the
-	 * comment there) — we treat our local prefs nick as authoritative
-	 * and push it back to the server immediately below. */
-    hx_selfinfo_parse (htlc, frame, frame_len);
-
-    /* SELFINFO is the canonical 'login complete' signal.
-	 * Track it on htlc->flags so the agreement Agree button can
-	 * tell whether to send AGREEMENTAGREE. See the comment on the
-	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
-    hx_conn_set_logged_in (htlc, 1);
-
-    /* Access bits just landed; the view refreshes toolbar-button
-     * sensitivity (kick/ban etc. gate on the access bitmap) off the
-     * "self-updated" signal. The emit lives in the Rust hxuser-recv crate. */
-    hx_selfinfo_recv (htlc);
-
-    /* Note: SELFINFO is NOT where we fire post-login fetches. In
-	 * the 1.5 flow SELFINFO (TranUserAccess) arrives BEFORE the
-	 * server sends the agreement — firing USER_GETLIST / news here
-	 * would land them at the server before our AGREEMENTAGREE, so
-	 * the server logs the action against the not-yet-joined session.
-	 * fogWraith caught this on Mobius (Classic Macs / MacSecret /
-	 * vespernet) where the server-side log shows "Get user list"
-	 * arriving before "Accept agreement". The fetches now fire from
-	 * hx_send_agreement_agree, after AGREEMENTAGREE is on the wire.
-	 *
-	 * the SELFINFO USE_ANY_NAME auto-push that used to
-	 * live here is gone. It existed to deliver NAME + ICON to the
-	 * server on flows where AGREEMENTAGREE couldn't be relied on:
-	 *
-	 *   - 1.9-style servers where SELFINFO arrived first and the
-	 *     concurrence() click path was sending USER_CHANGE instead
-	 *     of AGREEMENTAGREE (to dodge a misdiagnosed Mobius
-	 *     disconnect bug). See gtkhx_mobius_options_field memory.
-	 *   - no-agreement servers where the user has nothing to
-	 *     click Agree on.
-	 *
-	 * Both cases are now handled by AGREEMENTAGREE itself:
-	 *   - concurrence() always sends AGREEMENTAGREE on Agree click
-	 *     (with NAME + ICON + OPTIONS chunks).
-	 *   - hx_rcv_agreement_file's HX_AGREEMENT_NONE / NOT_FOUND
-	 *     branch auto-sends AGREEMENTAGREE when there's no
-	 *     agreement to display.
-	 *
-	 * Keeping the auto-push here would have it fire alongside the
-	 * Agree click on 1.9 servers, producing two redundant NAME +
-	 * ICON deliveries plus a USER_CHANGE broadcast race that nudged
-	 * us to the top of the local user_list. Cleaner without it. */
-}
+/* hx_rcv_user_selfinfo (HTLS_HDR_USER_SELFINFO) is a #[no_mangle] fn in the
+ * hxuser-recv crate (rust/crates/hxuser-recv): it calls hx_selfinfo_parse
+ * (proto_helpers.c chunk walker → htlc access/uid/icon), flips the logged-in
+ * flag (SELFINFO is the canonical login-complete signal the agreement Agree
+ * button reads), and emits self-updated via hx_selfinfo_recv so the view
+ * refreshes toolbar sensitivity. Post-login fetches are deliberately NOT fired
+ * here — in the 1.5 flow SELFINFO precedes the agreement, so USER_GETLIST / news
+ * go out from hx_send_agreement_agree after AGREEMENTAGREE. The dispatch switch
+ * below calls it by name (declared in rcv.h); no C body remains here. */
 
 void
 hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
