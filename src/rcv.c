@@ -70,8 +70,6 @@
 #include "voice_model.h"
 #endif
 
-static size_t news_len = 0;
-static guint8 *news_buf = 0;
 static char *hx_timeformat = "%c";
 
 /* xfer_go_timer (xfers.h), rcv_task_user_list and rcv_task_news_users
@@ -427,29 +425,11 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
     }
 }
 
-/* rewritten to use hx_news_post_walk in proto_helpers.c.
- * The previous version maintained an unbounded-growth news_buf
- * accumulator that the emit code never actually consumed —
- * hx_output.news_post was called with just the new chunk's `_len`
- * bytes regardless of how much had been accumulated. See the
- * walker comment in proto_helpers.h for the full breakdown. */
-/* flat-news chunk emit — Rust hxnews-recv crate. The chunk walk stays C
- * (gtkhx_proto_walk_news_post); hx_news_post_recv publishes the news-post
- * signal (the NEWS_POST chime plays off it via the sound_events subscriber). */
-extern void hx_news_post_recv (struct htlc_conn *htlc, const char *bytes,
-                               gsize len);
-
-static void
-news_post_emit (void *user, const char *bytes, gsize len)
-{
-    hx_news_post_recv ((struct htlc_conn *) user, bytes, len);
-}
-
-void
-hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    hx_news_post_walk (frame, frame_len, news_post_emit, htlc);
-}
+/* hx_rcv_news_post (HTLS_HDR_NEWS_POST, the flat 1.0/1.2 news push) is a
+ * #[no_mangle] fn in the hxnews-recv crate (rust/crates/hxnews-recv): it walks
+ * the HTLS_DATA_NEWS chunks natively (hotline_proto::parse::news_post_chunks)
+ * and emits one news-post line per chunk via hx_news_post_recv. The dispatch
+ * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
 void
 hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -1544,29 +1524,12 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
     }
 }
 
-/* news-file emit — Rust hxnews-recv crate. */
-extern void hx_news_file_recv (struct htlc_conn *htlc, const char *bytes,
-                               gsize len);
-
-void
-rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* parse + sanitise in hx_news_file_extract. We still
-	 * use the file-scope news_buf scratch as the destination so
-	 * downstream-allocated callers reading news_len/news_buf get
-	 * the same shape as before (the lifetime is "until the next
-	 * NEWS_FILE arrives"). */
-    gsize copied = 0;
-    news_buf = g_realloc (news_buf, 65536);
-    if (hx_news_file_extract (frame, frame_len, (char *)news_buf, 65536, &copied)) {
-        news_len = copied;
-    } else {
-        news_len = 0;
-        news_buf[0] = 0;
-    }
-    /* news-file emit — Rust hxnews-recv crate. */
-    hx_news_file_recv (htlc, (char *)news_buf, news_len);
-}
+/* rcv_task_news_file (the flat NEWS_FILE task reply — the whole 1.0/1.2 news
+ * document) is a #[no_mangle] fn in the hxnews-recv crate: it parses the first
+ * HTLS_DATA_NEWS chunk natively (hotline_proto::parse::parse_news_file) and
+ * publishes it via hx_news_file_recv, emitting an empty document on a chunk-less
+ * reply. hxnews-send registers it as the reply callback (declared in rcv.h); no
+ * C body — and no news_buf/news_len scratch — remains here. */
 
 /* GIF-icons extension (fogWraith GIF-Icons.md). Parsing lives in the
  * Rust hotline-proto crate (crate::gif_icons via the gtkhx_proto_*

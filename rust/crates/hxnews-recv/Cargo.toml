@@ -12,8 +12,11 @@ publish = false
 # rlib: for any future Rust consumer.
 crate-type = ["staticlib", "rlib"]
 
-# Pure FFI glue: it parses via hotline-proto's C ABI (gtkhx_proto_parse_catlist),
-# reads htlc->in + stashes the handle via the news_recv_bridge.c shims, and emits
-# through gtkhx-session's C ABI. All resolved at the final C link, so no Rust
-# deps here.
+# All reply parsing is native via the hotline-proto rlib dep (parse::parse_catlist
+# / parse_dirlist / parse_news_thread_reply / news_post_chunks / parse_news_file).
+# The catalog / folder handlers box the owned parse handle for the C view side to
+# consume + free (gtkhx_proto_catlist_free / _dirlist_free reclaim the same Box).
+# Signal emits + carrier stashes still go through the C ABI, resolved at the final
+# C link.
 [dependencies]
+hotline-proto = { path = "../hotline-proto" }

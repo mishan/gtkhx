@@ -20,21 +20,10 @@ use carrier::{
 };
 
 extern "C" {
-    // hotline-proto — parse a reply to an owned handle. catlist: NULL when the
-    // chunk is absent / malformed. dirlist: always a (possibly empty) handle.
-    // The view handler frees them (gtkhx_proto_catlist_free / _dirlist_free).
-    fn gtkhx_proto_parse_catlist(msg: *const u8, msglen: usize) -> *mut c_void;
-    fn gtkhx_proto_parse_dirlist(msg: *const u8, msglen: usize) -> *mut c_void;
-    // hotline-proto — parse the post-GETTHREAD TASK reply: writes the CR2LF +
-    // strip_ansi'd NEWSDATA body into `text_buf` (NUL-terminated) and fills the
-    // flags. Body-less / TASK_ERROR replies are filtered via the flags.
-    fn gtkhx_proto_parse_news_thread_reply(
-        msg: *const u8,
-        msglen: usize,
-        text_buf: *mut u8,
-        text_cap: usize,
-        out: *mut NewsThreadReply,
-    ) -> bool;
+    // The catlist / dirlist / thread-reply parses are now native
+    // (hotline_proto::parse::*); the owned catlist / dirlist handles are boxed
+    // here and freed C-side (gtkhx_proto_catlist_free / _dirlist_free reclaim the
+    // same Box<CatList> / Box<DirList>).
     // gtkhx-session — the singleton + the news signal emits.
     fn gtkhx_session_get_default() -> *mut c_void;
     fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void);
@@ -45,10 +34,8 @@ extern "C" {
 }
 
 /// `void hx_news_post_recv (htlc, bytes, len)` — emit the flat-news `news-post`
-/// signal for one appended NEWSDATA chunk. The C handler (`hx_rcv_news_post`)
-/// keeps the `gtkhx_proto_walk_news_post` chunk walk and calls this once per
-/// sanitised chunk; the signal emit is the only thing that moved here, so
-/// `rcv.c` no longer touches `GtkhxSession` for flat news.
+/// signal for one appended NEWSDATA chunk. [`hx_rcv_news_post`] calls this once
+/// per sanitised NEWS chunk.
 ///
 /// # Safety
 /// `bytes` valid for `len` bytes (the sanitised chunk body); `htlc` is only
@@ -58,10 +45,32 @@ pub unsafe extern "C" fn hx_news_post_recv(htlc: *mut c_void, bytes: *const u8, 
     gtkhx_session_emit_news_post(gtkhx_session_get_default(), htlc, bytes, len as u16);
 }
 
+/// `void hx_rcv_news_post (htlc, frame, frame_len)` — the HTLS_HDR_NEWS_POST
+/// primary handler (the flat 1.0/1.2 news push; was `rcv.c`).
+///
+/// Walks the message's `HTLS_DATA_NEWS` chunks natively
+/// (`hotline_proto::parse::news_post_chunks`, the same per-chunk CR2LF +
+/// strip_ansi contract as the old C `hx_news_post_walk`) and emits one
+/// `news-post` line per chunk via [`hx_news_post_recv`]. Non-NEWS chunks are
+/// skipped; an empty / chunk-less frame emits nothing.
+///
+/// # Safety
+/// C-ABI primary handler invoked from the receive dispatch on the main thread.
+/// `frame` is valid for `frame_len` bytes; `htlc` is only forwarded to the emit.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_news_post(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
+    if frame.is_null() {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    for body in hotline_proto::parse::news_post_chunks(buf, frame_len, u16::MAX as usize) {
+        hx_news_post_recv(htlc, body.as_ptr(), body.len());
+    }
+}
+
 /// `void hx_news_file_recv (htlc, bytes, len)` — emit the `news-file` signal
-/// carrying the whole flat-news document (a `NEWS_FILE` task reply). The C
-/// handler (`rcv_task_news_file`) keeps the `hx_news_file_extract` parse into
-/// its scratch buffer and calls this to publish it.
+/// carrying the whole flat-news document (a `NEWS_FILE` task reply).
+/// [`rcv_task_news_file`] calls this with the parsed document (or empty).
 ///
 /// # Safety
 /// `bytes` valid for `len` bytes (the sanitised document); `htlc` is only
@@ -71,18 +80,40 @@ pub unsafe extern "C" fn hx_news_file_recv(htlc: *mut c_void, bytes: *const u8, 
     gtkhx_session_emit_news_file(gtkhx_session_get_default(), htlc, bytes, len as u16);
 }
 
-/// `#[repr(C)]` mirror of C's `struct gtkhx_proto_news_thread_reply`
-/// (`hotline_proto.h`): the flags the thread-reply parser fills.
-#[repr(C)]
-#[derive(Default)]
-struct NewsThreadReply {
-    thread_id: u32,
-    /// Body bytes written to the buffer, excluding the trailing NUL.
-    text_len: u16,
-    /// 1 iff a NEWSDATA chunk was present and no TASK_ERROR short-circuited.
-    has_text: u8,
-    /// 1 iff a TASK_ERROR chunk was seen mid-walk.
-    has_task_error: u8,
+/// `void rcv_task_news_file (htlc, frame, frame_len, ptr, data)` — the flat
+/// `NEWS_FILE` task reply (the whole 1.0/1.2 news document; was `rcv.c`).
+///
+/// Parses the first `HTLS_DATA_NEWS` chunk natively
+/// (`hotline_proto::parse::parse_news_file`, CR2LF + strip_ansi, capped at the
+/// old 64 KiB scratch size less the NUL) and publishes it via
+/// [`hx_news_file_recv`]. A chunk-less / short reply publishes an empty document,
+/// exactly as the old C path did after its extractor returned FALSE. The `rcv.c`
+/// `news_buf` / `news_len` scratch globals are gone with it.
+///
+/// # Safety
+/// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `frame` is
+/// valid for `frame_len` bytes; `htlc` is only forwarded to the emit.
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_news_file(
+    htlc: *mut c_void,
+    frame: *const c_void,
+    frame_len: usize,
+    _ptr: *mut c_void,
+    _data: *mut c_void,
+) {
+    let buf = frame as *const u8;
+    let body = if buf.is_null() {
+        None
+    } else {
+        let s = std::slice::from_raw_parts(buf, frame_len);
+        // 65535 = the old 64 KiB C scratch buffer minus the NUL the extractor
+        // reserved (gtkhx_proto_parse_news_file used cap - 1).
+        hotline_proto::parse::parse_news_file(s, frame_len, 65535)
+    };
+    match body {
+        Some(b) => hx_news_file_recv(htlc, b.as_ptr(), b.len()),
+        None => hx_news_file_recv(htlc, b"".as_ptr(), 0),
+    }
 }
 
 /// `void rcv_task_newscat_list(struct htlc_conn *htlc, void *gcnews, void *data)`
@@ -106,11 +137,17 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
     gcnews: *mut c_void,
     _data: *mut c_void,
 ) {
-    let buf = frame as *const u8;
-    let parsed = if buf.is_null() {
+    // Parse natively to an owned handle the C view side consumes + frees
+    // (gtkhx_proto_catlist_free reclaims the same Box<CatList>). NULL when the
+    // catalog chunk is absent / malformed, matching the old FFI.
+    let parsed = if frame.is_null() {
         std::ptr::null_mut()
     } else {
-        gtkhx_proto_parse_catlist(buf, frame_len)
+        let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
+        match hotline_proto::parse::parse_catlist(s, frame_len) {
+            Some(cl) => Box::into_raw(Box::new(cl)) as *mut c_void,
+            None => std::ptr::null_mut(),
+        }
     };
     gnews_catalog_set_parsed(gcnews, parsed);
     gtkhx_session_emit_news_catalog(gtkhx_session_get_default(), gcnews);
@@ -122,8 +159,8 @@ pub unsafe extern "C" fn rcv_task_newscat_list(
 /// Parses every NEWSFOLDERITEM / CATEGORYITEM chunk out of the received `frame`
 /// into an owned `DirList` handle, stashes it on the `gnews_folder` carrier, and
 /// emits `news-folder`. The C `dh_start` chunk-walk + `folder_item[]`
-/// accumulation are gone — `gtkhx_proto_parse_dirlist` does the walk and always
-/// returns a (possibly empty) handle.
+/// accumulation are gone — native `hotline_proto::parse::parse_dirlist` does the
+/// walk and always returns a (possibly empty) list.
 ///
 /// # Safety
 /// C-ABI reply callback invoked by `hx_rcv_task` on the main thread. `htlc` is a
@@ -137,11 +174,14 @@ pub unsafe extern "C" fn rcv_task_newsfolder_list(
     gfnews: *mut c_void,
     _data: *mut c_void,
 ) {
-    let buf = frame as *const u8;
-    let parsed = if buf.is_null() {
+    // Parse natively to an owned handle the C view side consumes + frees
+    // (gtkhx_proto_dirlist_free reclaims the same Box<DirList>). parse_dirlist
+    // always yields a (possibly empty) list; NULL only on a NULL frame.
+    let parsed = if frame.is_null() {
         std::ptr::null_mut()
     } else {
-        gtkhx_proto_parse_dirlist(buf, frame_len)
+        let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
+        Box::into_raw(Box::new(hotline_proto::parse::parse_dirlist(s, frame_len))) as *mut c_void
     };
     gnews_folder_set_parsed(gfnews, parsed);
     gtkhx_session_emit_news_folder(gtkhx_session_get_default(), gfnews);
@@ -174,20 +214,21 @@ pub unsafe extern "C" fn rcv_task_news_post(
     target: *mut c_void,
     _data: *mut c_void,
 ) {
-    let buf = frame as *const u8;
-    if buf.is_null() {
+    if frame.is_null() {
         news_post_fetch_failed(target);
         return;
     }
-    // 65536: chunk lens are u16, so this comfortably holds any NEWSDATA body
-    // (the parser caps at text_cap-1 = 65535, the wire ceiling).
-    let mut text = vec![0u8; 65536];
-    let mut reply = NewsThreadReply::default();
-    gtkhx_proto_parse_news_thread_reply(buf, frame_len, text.as_mut_ptr(), text.len(), &mut reply);
-    if reply.has_task_error != 0 || reply.has_text == 0 {
-        news_post_fetch_failed(target);
-        return;
-    }
-    let post = news_post_new(target, text.as_ptr(), reply.text_len as usize);
+    let s = std::slice::from_raw_parts(frame as *const u8, frame_len);
+    // 65535 = the wire ceiling (chunk lens are u16; the old FFI capped at
+    // text_cap-1). A TASK_ERROR or body-less reply releases the fetch ref.
+    let reply = hotline_proto::parse::parse_news_thread_reply(s, frame_len, 65535);
+    let body = match reply.text {
+        Some(ref b) if !reply.has_task_error => b,
+        _ => {
+            news_post_fetch_failed(target);
+            return;
+        }
+    };
+    let post = news_post_new(target, body.as_ptr(), body.len());
     gtkhx_session_emit_news_thread(gtkhx_session_get_default(), post);
 }
