@@ -2,9 +2,6 @@ General:
 - Help feature within GtkHx. It should at least explain available keyboard shortcuts.
 - Publish to Flathub
 
-Testing:
-- Use docker-compose for the Docker container mess
-
 Bookmarks:
 - Ship some bookmarks for more servers
 
