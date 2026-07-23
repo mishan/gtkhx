@@ -1788,6 +1788,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
     g_signal_connect (emitter, "chat", G_CALLBACK (on_chat_signal), NULL);
     g_signal_connect (emitter, "chat-subject",
                       G_CALLBACK (on_chat_subject_signal), NULL);
+    g_signal_connect (emitter, "chat-subject-notice",
+                      G_CALLBACK (chat_subject_notice_handler), NULL);
     g_signal_connect (emitter, "chat-invitation",
                       G_CALLBACK (on_chat_invitation_signal), NULL);
     g_signal_connect (emitter, "chat-history-batch",

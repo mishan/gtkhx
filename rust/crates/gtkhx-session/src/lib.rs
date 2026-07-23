@@ -144,6 +144,12 @@ mod imp {
                     Signal::builder("chat-subject")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
                         .build(),
+                    // chat-subject-notice: (htlc*, cid, subject*) — the
+                    // "Subject Changed to: X" log line for a real change (the
+                    // change-gate already fired the chat-subject bar update).
+                    Signal::builder("chat-subject-notice")
+                        .param_types([Type::POINTER, Type::U32, Type::POINTER])
+                        .build(),
                     // chat-invitation: (htlc*, cid, name*)
                     Signal::builder("chat-invitation")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
@@ -479,6 +485,23 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_subject(
 ) {
     let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(subj as *const c_void)];
     emit(self_, "chat-subject", &v);
+}
+
+/// Emit the "Subject Changed to: X" notice line for chat `cid` (distinct from
+/// the chat-subject bar update, which also fires for a room's initial subject).
+/// The view-side handler owns the gettext + INFOPREFIX.
+///
+/// # Safety
+/// `self_`/`htlc` valid; `subj` a valid NUL-terminated C string (or NULL).
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_chat_subject_notice(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    cid: u32,
+    subj: *const c_char,
+) {
+    let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(subj as *const c_void)];
+    emit(self_, "chat-subject-notice", &v);
 }
 
 /// # Safety

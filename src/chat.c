@@ -2088,16 +2088,18 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
     g_free (utf8);
 }
 
-/* Non-variadic view/log shim for the Rust chat-subject receive handler
- * (hxchat-recv, hx_rcv_chat_subject): logs the "Subject Changed to: <subject>"
- * chat line. Keeps the gettext + INFOPREFIX + variadic hx_printf_prefix on the
- * C side rather than reproducing them across the FFI. */
+/* View-side handler for the "chat-subject-notice" signal — the "Subject Changed
+ * to: <subject>" chat-output line for a real subject change (the chat-subject
+ * signal already updated the subject bar). The Rust chat-subject receive handler
+ * (hxchat-recv, hx_rcv_chat_subject) emits it; the gettext + INFOPREFIX live
+ * here on the view side, same as every other model→view notification. Connected
+ * in gtkhx_connect_signals at startup. */
 void
-hx_chat_log_subject_changed (struct htlc_conn *htlc, guint32 cid,
-                             const char *subject)
+chat_subject_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
+                             guint cid, gpointer subject, gpointer user_data)
 {
     hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: %s",
-                      _ ("Subject Changed to"), subject);
+                      _ ("Subject Changed to"), (const char *)subject);
 }
 
 /* View-side handler for the "user-notice" signal — the roster notice lines
