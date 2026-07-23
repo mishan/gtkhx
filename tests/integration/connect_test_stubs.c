@@ -61,6 +61,7 @@
 #include "compat.h"
 #include "hotline.h"            /* struct hl_hdr — Phase G replay recorder */
 #include "protocol.h"
+#include "hxconn_layout.h"
 #include "session.h"
 #include "prefs.h"
 #include "tasks.h"
