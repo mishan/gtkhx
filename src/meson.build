@@ -137,6 +137,13 @@ gtkhx_sources = files(
   'xtext.c',
 )
 
+# /exec (chat command) + its Unix process / fd-watch / signal machinery.
+# fork/pipe/dup2/execve + POSIX signals + a GIOChannel over a raw fd —
+# Unix-only, so it's compiled out on Windows (where /exec is absent).
+if host_machine.system() != 'windows'
+  gtkhx_sources += files('cmd_exec.c')
+endif
+
 # Voice chat (fogWraith WebRTC extension) C sources. Compiled in only
 # when voice_enabled (see -Dvoice / the top-level meson.build). When off,
 # these files are dropped, the HAVE_VOICE define below is unset, and every

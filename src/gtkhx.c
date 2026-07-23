@@ -28,9 +28,7 @@
 #include <gdk/gdkkeysyms.h>
 #include <sys/time.h>
 #include <time.h>
-#include <sys/wait.h>
 #include <errno.h>
-#include <signal.h>
 #include <termios.h>
 #include <ctype.h>
 #include <locale.h>
@@ -40,6 +38,7 @@
 #include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
+#include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
 #include "hxconn.h"
 #include "tls_trust.h"
 #include "macres.h"
@@ -508,8 +507,6 @@ gtkhx_apply_userlist_style (GtkWidget *w)
 }
 static struct timer *timer_list;
 
-static int rinput_tags[1024];
-static int winput_tags[1024];
 
 const char *INFOPREFIX = " \00310[\00303hx\00310]\003 ";
 
@@ -705,86 +702,6 @@ timer_delete_ptr (void *ptr)
         }
 
         timer = prev;
-    }
-}
-
-static gboolean
-hxd_gtk_read (GIOChannel *source, GIOCondition cond, struct hxd_file *file)
-{
-    if (file->ready_read) {
-        file->ready_read (file->fd);
-    }
-    return TRUE;
-}
-
-static gboolean
-hxd_gtk_write (GIOChannel *source, GIOCondition cond, struct hxd_file *file)
-{
-    if (file->ready_write) {
-        file->ready_write (file->fd);
-    }
-    return TRUE;
-}
-
-void
-hxd_fd_set (int fd, int rw)
-{
-    int tag, type = 0;
-    GIOChannel *channel;
-
-    if (fd >= 1024) {
-        hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,
-                          "gtkhx: fd %d >= 1024", fd);
-        hx_quit ();
-    }
-
-    channel = g_io_channel_unix_new (fd);
-    if (rw & FDR) {
-        /*		printf("adding fd %d for reading\n", fd); */
-        if (rinput_tags[fd] != -1) {
-            return;
-        }
-        type |= G_IO_IN | G_IO_HUP | G_IO_ERR;
-        tag = g_io_add_watch (channel, type, (GIOFunc)hxd_gtk_read,
-                              &hxd_files[fd]);
-        rinput_tags[fd] = tag;
-    }
-    if (rw & FDW) {
-        /*		printf("adding fd %d for writing\n", fd); */
-        if (winput_tags[fd] != -1) {
-            return;
-        }
-        type |= G_IO_OUT | G_IO_ERR;
-        tag = g_io_add_watch (channel, type, (GIOFunc)hxd_gtk_write,
-                              &hxd_files[fd]);
-        winput_tags[fd] = tag;
-    }
-}
-
-void
-hxd_fd_clr (int fd, int rw)
-{
-    int tag;
-
-    if (fd >= 1024) {
-        hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,
-                          "gtkhx: fd %d >= 1024", fd);
-        hx_quit ();
-    }
-    /* The arrays are pre-zeroed to -1 (see init()), so a clear request
-	 * for a fd that was never set up — e.g. cleanup at exit on a
-	 * connection that only ever had a read watch — would otherwise call
-	 * g_source_remove((guint)-1) and trip GLib's "Source ID 4294967295
-	 * was not found" critical. */
-    if ((rw & FDR) && rinput_tags[fd] != -1) {
-        tag = rinput_tags[fd];
-        g_source_remove (tag);
-        rinput_tags[fd] = -1;
-    }
-    if ((rw & FDW) && winput_tags[fd] != -1) {
-        tag = winput_tags[fd];
-        g_source_remove (tag);
-        winput_tags[fd] = -1;
     }
 }
 
@@ -1261,7 +1178,6 @@ loop (void)
 static void
 init (int argc, char **argv)
 {
-    int i;
 
     /* parse the GTKHX_DEBUG env var into the categorised
      * debug logger before anything else, so init paths can already
@@ -1270,11 +1186,6 @@ init (int argc, char **argv)
      * hook — a lookup against a (possibly empty) hash table, cheap
      * enough to leave unconditionally. */
     debug_init ();
-
-    for (i = 0; i < 1024; i++) {
-        rinput_tags[i] = -1;
-        winput_tags[i] = -1;
-    }
     /* gtk_set_locale() was removed in GTK 3 — gtk_init() now handles
 	 * setlocale() itself. */
     setlocale (LC_ALL, "");
@@ -1849,68 +1760,15 @@ gtkhx_connect_signals (GtkhxSession *emitter)
  * The two lifecycle hooks (init, loop) only ever had one
  * implementation, so they're called by name from fe_init. */
 
-char **hxd_environ = 0;
-
-int hxd_open_max = 0;
-struct hxd_file *hxd_files = 0;
 
 /* qbuf_set / qbuf_add moved to src/qbuf.c so both the GUI binary and
  * the Tier 3 integration harness link the same implementation. */
 
-static RETSIGTYPE
-sig_chld (int sig)
-{
-    int status, serrno = errno;
-    pid_t pid;
-
-#ifndef WAIT_ANY
-#define WAIT_ANY -1
-#endif
-
-    for (;;) {
-        pid = waitpid (WAIT_ANY, &status, WNOHANG);
-        if (pid < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            goto ret;
-        }
-        if (!pid) {
-            goto ret;
-        }
-
-        hlclient_reap_pid (pid, status);
-    }
-
-ret:
-    errno = serrno;
-}
-
-static RETSIGTYPE
-sig_bus (int sig)
-{
-    /* do something!! */
-    abort ();
-}
-
 void hotline_client_init (int argc, char **argv);
-
-#if !defined(_SC_OPEN_MAX) && defined(HAVE_GETRLIMIT)
-#include <sys/resource.h>
-#endif
-
-static RETSIGTYPE
-sig_fpe (int sig)
-{
-    g_error ("SIGFPE (%d)", sig);
-    abort ();
-}
 
 int
 main (int argc, char **argv, char **envp)
 {
-    struct sigaction act;
-
     memset (&the_session, 0, sizeof (session));
 
     /* Defensively clear the test-only TLS-trust escape hatches at the
@@ -1943,43 +1801,11 @@ main (int argc, char **argv, char **envp)
     g_set_prgname ("com.nasledov.gtkhx");
     g_set_application_name ("GtkHx");
 
-#if defined(_SC_OPEN_MAX)
-    hxd_open_max = sysconf (_SC_OPEN_MAX);
-#elif defined(RLIMIT_NOFILE)
-    {
-        struct rlimit rlimit;
-
-        if (getrlimit (RLIMIT_NOFILE, &rlimit)) {
-            exit (1);
-        }
-        hxd_open_max = rlimit.rlim_max;
-    }
-#elif defined(HAVE_GETDTABLESIZE)
-    hxd_open_max = getdtablesize ();
-#elif defined(OPEN_MAX)
-    hxd_open_max = OPEN_MAX;
-#else
-    hxd_open_max = 16;
+#ifdef G_OS_UNIX
+    /* Set up /exec's Unix process + fd-watch + signal machinery
+     * (cmd_exec.c, compiled only on Unix). */
+    hxd_exec_init (envp);
 #endif
-    if (hxd_open_max > FD_SETSIZE) {
-        hxd_open_max = FD_SETSIZE;
-    }
-    hxd_files = g_malloc0 (hxd_open_max * sizeof (struct hxd_file));
-
-    hxd_environ = envp;
-
-    act.sa_handler = SIG_IGN;
-    act.sa_flags = 0;
-    sigemptyset (&act.sa_mask);
-    sigaction (SIGPIPE, &act, 0);
-    sigaction (SIGHUP, &act, 0);
-    act.sa_handler = sig_fpe;
-    sigaction (SIGFPE, &act, 0);
-    act.sa_handler = sig_bus;
-    sigaction (SIGBUS, &act, 0);
-    act.sa_handler = sig_chld;
-    act.sa_flags |= SA_NOCLDSTOP;
-    sigaction (SIGCHLD, &act, 0);
 
     hotline_client_init (argc, argv);
 
