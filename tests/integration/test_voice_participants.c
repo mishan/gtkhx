@@ -39,7 +39,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
@@ -67,7 +66,7 @@ pick_voice_server (void)
 static guint32
 send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = htonl (cid);
+    guint32 cid_be = g_htonl(cid);
     guint32 trans = htlc->trans;
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0, /*hc=*/1,
@@ -80,7 +79,7 @@ send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 static guint32
 send_voice_leave (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = htonl (cid);
+    guint32 cid_be = g_htonl(cid);
     guint32 trans = htlc->trans;
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0, /*hc=*/1,

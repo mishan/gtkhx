@@ -19,7 +19,7 @@
 #include <string.h>
 #include <glib.h>
 #include <glib-object.h>
-#include <arpa/inet.h>
+#include <gio/gio.h>
 #include "compat.h"
 #include "hotline.h"
 #include "tracker_event.h"
@@ -49,6 +49,19 @@ macroman_to_utf8_dup (const char *src, gsize len)
     return u8;
 }
 
+/* Render network-byte-order address bytes into a printable string via
+ * GInetAddress — portable (no POSIX inet_ntop). `family` selects the
+ * length: G_SOCKET_FAMILY_IPV4 reads 4 bytes, IPV6 reads 16. Caller owns
+ * the returned string. */
+static char *
+format_ip (const guint8 *bytes, GSocketFamily family)
+{
+    GInetAddress *a = g_inet_address_new_from_bytes (bytes, family);
+    char *s = g_inet_address_to_string (a);
+    g_object_unref (a);
+    return s;
+}
+
 /* Stamp the printable .address field from raw address bytes,
  * gating on the addr_type discriminator. Returns the freshly
  * allocated string, or NULL if addr_type is unknown (caller fails
@@ -56,35 +69,19 @@ macroman_to_utf8_dup (const char *src, gsize len)
 static char *
 format_address (guint8 addr_type, const guint8 *address, gsize address_len)
 {
-    char buf[INET6_ADDRSTRLEN] = { 0 };
-
     switch (addr_type) {
     case HTRK_V3_ADDR_IPV4: {
         if (!address || address_len != 4) {
             return NULL;
         }
-        struct in_addr ia;
-        memcpy (&ia.s_addr, address, 4);
-        if (!inet_ntop (AF_INET, &ia, buf, sizeof (buf))) {
-            /* Should never fail for AF_INET + sufficient buffer,
-             * but fall back to a stringified u32 so we don't crash
-             * the UI. */
-            g_snprintf (buf, sizeof (buf), "%u.%u.%u.%u",
-                        address[0], address[1], address[2], address[3]);
-        }
-        return g_strdup (buf);
+        return format_ip (address, G_SOCKET_FAMILY_IPV4);
     }
 
     case HTRK_V3_ADDR_IPV6: {
         if (!address || address_len != 16) {
             return NULL;
         }
-        struct in6_addr ia6;
-        memcpy (&ia6, address, 16);
-        if (!inet_ntop (AF_INET6, &ia6, buf, sizeof (buf))) {
-            return g_strdup ("::");
-        }
-        return g_strdup (buf);
+        return format_ip (address, G_SOCKET_FAMILY_IPV6);
     }
 
     case HTRK_V3_ADDR_HOSTNAME: {
@@ -112,7 +109,7 @@ format_address (guint8 addr_type, const guint8 *address, gsize address_len)
 }
 
 HxTrackerServer *
-hx_tracker_server_new_v1 (struct in_addr addr, guint16 port, guint16 nusers,
+hx_tracker_server_new_v1 (guint32 addr, guint16 port, guint16 nusers,
                           const char *name_bytes, gsize name_len,
                           const char *desc_bytes, gsize desc_len, int total)
 {
@@ -120,14 +117,10 @@ hx_tracker_server_new_v1 (struct in_addr addr, guint16 port, guint16 nusers,
 
     e->addr_type = HTRK_V3_ADDR_IPV4;
 
-    /* Render the IPv4 into a printable form. inet_ntoa returns a
-     * pointer to a static buffer, which is racy in a multi-threaded
-     * codebase; inet_ntop is the thread-safe equivalent. */
-    char buf[INET_ADDRSTRLEN] = { 0 };
-    if (!inet_ntop (AF_INET, &addr, buf, sizeof (buf))) {
-        g_snprintf (buf, sizeof (buf), "0.0.0.0");
-    }
-    e->address = g_strdup (buf);
+    /* Render the IPv4 into a printable form. `addr`'s bytes are already
+     * in network order — exactly what g_inet_address_new_from_bytes
+     * expects — so hand them straight over. */
+    e->address = format_ip ((const guint8 *) &addr, G_SOCKET_FAMILY_IPV4);
 
     e->port   = port;
     e->nusers = nusers;

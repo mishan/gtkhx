@@ -25,10 +25,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
-#include <netdb.h>
 #include <gtk/gtk.h>
 #include <sys/time.h>
 #include <time.h>
@@ -254,7 +250,7 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
     /* the header error-bit test moved to the Rust
 	 * hotline-proto crate (gtkhx_proto_header_in_error). Same
-	 * computation as the old ntohl(h->flag) & 1, with bounds
+	 * computation as the old g_ntohl(h->flag) & 1, with bounds
 	 * checking on a short buffer. */
     return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
 }
@@ -1974,7 +1970,7 @@ rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
         cfl->fh = g_realloc (cfl->fh, cfl->fhlen + fh_len);
         memcpy ((char *)cfl->fh + cfl->fhlen, fh, SIZEOF_HL_DATA_HDR + fhlen);
         *((guint16 *)((char *)cfl->fh + cfl->fhlen + 2))
-            = htons (fh_len - SIZEOF_HL_DATA_HDR);
+            = g_htons(fh_len - SIZEOF_HL_DATA_HDR);
         cfl->fhlen += fh_len;
     }
     dh_end ();

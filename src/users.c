@@ -24,7 +24,6 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <libpanel.h>
-#include <netinet/in.h>
 #include <ctype.h>
 #include "hx.h"
 #include "hxconn.h"

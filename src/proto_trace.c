@@ -12,7 +12,6 @@
 #include <string.h>
 #include <ctype.h>
 #include <glib.h>
-#include <netinet/in.h>
 /* Deliberately do NOT include hx.h. proto_trace.c only needs the
  * wire-protocol opcode constants and the htlc_conn struct, both of
  * which protocol.h provides (it transitively pulls in hotline.h

@@ -51,7 +51,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
@@ -97,8 +96,8 @@ send_user_change_with_color (int fd, struct htlc_conn *htlc,
                              const char *display_name, guint16 icon,
                              guint32 nick_color)
 {
-    guint16 icon_be = htons (icon);
-    guint32 color_be = htonl (nick_color);
+    guint16 icon_be = g_htons(icon);
+    guint32 color_be = g_htonl(nick_color);
     return integration_send_message (
         fd, htlc, HTLC_HDR_USER_CHANGE, /*flag=*/0, /*hc=*/3,
         (int) HTLC_DATA_ICON, (int) sizeof (icon_be), &icon_be,

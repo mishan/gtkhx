@@ -28,7 +28,6 @@
 #include "config.h"
 #include <string.h>
 #include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -75,7 +74,7 @@ test_send_capabilities_chunk_layout (void)
     struct htlc_conn htlc;
     htlc_init (&htlc, 1);
 
-    guint16 caps16 = htons (HTLC_CAP_TEXT_ENCODING);
+    guint16 caps16 = g_htons(HTLC_CAP_TEXT_ENCODING);
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/1, (int)HTLC_DATA_CAPABILITIES,
               2, &caps16);
 
@@ -106,7 +105,7 @@ test_send_multiple_caps_bits (void)
     htlc_init (&htlc, 1);
 
     guint16 caps16
-        = htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
+        = g_htons(HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/1, (int)HTLC_DATA_CAPABILITIES,
               2, &caps16);
 
@@ -158,7 +157,7 @@ test_recv_caps_2byte_text_encoding (void)
     memset (&htlc, 0, sizeof htlc);
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
-    guint16 caps_be = htons (HTLC_CAP_TEXT_ENCODING);
+    guint16 caps_be = g_htons(HTLC_CAP_TEXT_ENCODING);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 2, &caps_be);
 
     guint64 caps = decode_caps_from_reply (&htlc);
@@ -179,7 +178,7 @@ test_recv_caps_multiple_bits (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
     guint16 caps_be
-        = htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
+        = g_htons(HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 2, &caps_be);
 
     guint64 caps = decode_caps_from_reply (&htlc);
@@ -223,7 +222,7 @@ test_recv_caps_absent_field_means_zero (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
     /* Some other unrelated chunk, no CAPABILITIES. */
-    guint16 version_be = htons (190);
+    guint16 version_be = g_htons(190);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_VERSION, 2, &version_be);
 
     guint64 caps = decode_caps_from_reply (&htlc);

@@ -32,7 +32,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -49,7 +48,7 @@ build_hldir_one (const char *name, guint16 *outlen)
     guint8 nlen = (guint8)strlen (name);
     guint16 total = 2 + 3 + nlen;
     guint8 *buf = g_malloc (total);
-    guint16 count = htons (1);
+    guint16 count = g_htons(1);
 
     memcpy (buf, &count, 2);
     /* enc = 0 */

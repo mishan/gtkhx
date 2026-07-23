@@ -42,7 +42,7 @@
 
 #include <string.h>
 #include <glib.h>
-#include <arpa/inet.h>
+#include <gio/gio.h>
 #include "compat.h"  /* PACKED — used by structs in hotline.h */
 #include "hotline.h"
 #include "tracker_v3.h"
@@ -275,14 +275,27 @@ test_response_header_wrong_type (void)
 
 /* Build a synthetic IPv4 record with three TLVs: SERVER_SOFTWARE
  * (string), PROTOCOL_VERSION (u16), SUPPORTS_HOPE (bool/u8). */
+/* "203.0.113.42" -> the 4-byte IPv4 as a network-byte-order guint32,
+ * via GInetAddress (portable — no POSIX inet_aton). */
+static guint32
+ipv4_be (const char *dotted)
+{
+    GInetAddress *ia = g_inet_address_new_from_string (dotted);
+    g_assert_nonnull (ia);
+    guint32 out = 0;
+    memcpy (&out, g_inet_address_to_bytes (ia), 4);
+    g_object_unref (ia);
+    return out;
+}
+
 static GByteArray *
-build_ipv4_record (struct in_addr addr, guint16 port, guint16 nusers,
+build_ipv4_record (guint32 addr, guint16 port, guint16 nusers,
                    const char *name, const char *desc)
 {
     GByteArray *r = g_byte_array_new ();
     guint8 type = HTRK_V3_ADDR_IPV4;
     g_byte_array_append (r, &type, 1);
-    g_byte_array_append (r, (const guint8 *)&addr.s_addr, 4);
+    g_byte_array_append (r, (const guint8 *)&addr, 4);
     buf_append_u16_be (r, port);
     buf_append_u16_be (r, nusers);
     gsize nl = strlen (name);
@@ -312,8 +325,7 @@ build_ipv4_record (struct in_addr addr, guint16 port, guint16 nusers,
 static void
 test_record_ipv4_basic (void)
 {
-    struct in_addr a;
-    inet_aton ("203.0.113.42", &a);
+    guint32 a = ipv4_be ("203.0.113.42");
     GByteArray *r = build_ipv4_record (a, 5500, 17, "Retro Hub",
                                        "Vintage Mac hangout");
 
@@ -327,12 +339,12 @@ test_record_ipv4_basic (void)
     g_assert_cmpuint (rec.addr_type, ==, HTRK_V3_ADDR_IPV4);
     g_assert_cmpuint (rec.address_len, ==, 4);
     /* Address bytes preserved in network byte order; reassemble
-     * back into in_addr to verify the round-trip without endian
+     * back into a guint32 to verify the round-trip without endian
      * pitfalls. */
     {
-        struct in_addr roundtrip;
-        memcpy (&roundtrip.s_addr, rec.address, 4);
-        g_assert_cmpuint (roundtrip.s_addr, ==, a.s_addr);
+        guint32 roundtrip = 0;
+        memcpy (&roundtrip, rec.address, 4);
+        g_assert_cmpuint (roundtrip, ==, a);
     }
     g_assert_cmpuint (rec.port, ==, 5500);
     g_assert_cmpuint (rec.nusers, ==, 17);
@@ -509,9 +521,8 @@ test_record_two_back_to_back (void)
      * advancing by `consumed` each iteration. Pin that contract
      * by stuffing two records into one buffer and verifying both
      * decode + consumed accumulates correctly. */
-    struct in_addr a, b;
-    inet_aton ("192.0.2.10", &a);
-    inet_aton ("198.51.100.20", &b);
+    guint32 a = ipv4_be ("192.0.2.10");
+    guint32 b = ipv4_be ("198.51.100.20");
     GByteArray *r1 = build_ipv4_record (a, 5500, 3, "alpha", "first");
     GByteArray *r2 = build_ipv4_record (b, 5500, 7, "beta", "second");
     GByteArray *cat = g_byte_array_new ();

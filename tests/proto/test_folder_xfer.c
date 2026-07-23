@@ -32,7 +32,6 @@
 #include "config.h"
 #include <string.h>
 #include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -79,7 +78,7 @@ assert_packed_opcode (struct htlc_conn *htlc, guint32 expected)
 {
     g_assert_cmpuint (hx_test_in(htlc)->pos, >=, SIZEOF_HL_HDR);
     const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in(htlc)->buf;
-    g_assert_cmphex (ntohl (h->type), ==, expected);
+    g_assert_cmphex (g_ntohl(h->type), ==, expected);
 }
 
 /* ---------- GETFOLDER request ---------- */
@@ -173,8 +172,8 @@ test_putfolder_request_name_size_nfiles (void)
     const char *name = "uploads";
     /* hx_put_folder htonl's the numbers before passing — replicate
 	 * that here so the packed bytes match the production caller. */
-    guint32 size_n = htonl (12345);
-    guint32 nfiles_n = htonl (3);
+    guint32 size_n = g_htonl(12345);
+    guint32 nfiles_n = g_htonl(3);
 
     hlpack_v (&htlc, HTLC_HDR_FILE_PUTFOLDER, 0, /*hc=*/3,
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name,
@@ -230,8 +229,8 @@ test_putfolder_request_with_dir (void)
                                  0x00, 0x00,   /* enc */
                                  0x05,         /* namelen */
                                  'p', 'u', 'b', 'l', 'i' };
-    guint32 size_n = htonl (1);
-    guint32 nfiles_n = htonl (1);
+    guint32 size_n = g_htonl(1);
+    guint32 nfiles_n = g_htonl(1);
 
     hlpack_v (&htlc, HTLC_HDR_FILE_PUTFOLDER, 0, /*hc=*/4,
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name,
@@ -275,9 +274,9 @@ test_folder_get_reply_parse (void)
 
     /* The server's order is implementation-defined; rcv handles
 	 * arbitrary order. Mix it up to prove that. */
-    guint32 size_n = htonl (8192);
-    guint32 ref_n = htonl (0xdeadbeef);
-    guint32 nfiles_n = htonl (5);
+    guint32 size_n = g_htonl(8192);
+    guint32 ref_n = g_htonl(0xdeadbeef);
+    guint32 nfiles_n = g_htonl(5);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_SIZE, 4, &size_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_FILE_NFILES, 4, &nfiles_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
@@ -322,9 +321,9 @@ test_folder_get_reply_with_queue (void)
 
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/200, /*flag=*/0);
 
-    guint32 ref_n = htonl (1);
-    guint32 size_n = htonl (1024);
-    guint32 queue_n = htonl (3); /* third in line */
+    guint32 ref_n = g_htonl(1);
+    guint32 size_n = g_htonl(1024);
+    guint32 queue_n = g_htonl(3); /* third in line */
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_SIZE, 4, &size_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_QUEUE, 4, &queue_n);
@@ -366,7 +365,7 @@ test_folder_put_reply_parse (void)
 
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/77, /*flag=*/0);
 
-    guint32 ref_n = htonl (0xabad1dea);
+    guint32 ref_n = g_htonl(0xabad1dea);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
 
     guint32 ref = 0, queue = 0;

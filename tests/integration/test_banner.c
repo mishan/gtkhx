@@ -39,7 +39,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -80,8 +79,8 @@ send_skinny_login (int fd, struct htlc_conn *htlc, guint16 icon)
     gsize llen = strlen (login);
     guint8 enclogin[16];
     hl_code_inline (enclogin, login, llen);
-    guint16 icon_be = htons (icon);
-    guint16 cv_be = htons (185);
+    guint16 icon_be = g_htons(icon);
+    guint16 cv_be = g_htons(185);
 
     return integration_send_message (
         fd, htlc, HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/3, (int)HTLC_DATA_ICON,
@@ -145,14 +144,14 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
     }
 
     const char *name = "Banner Tier-3";
-    guint16 icon_be = htons (412);
+    guint16 icon_be = g_htons(412);
     /* OPTIONS bitmap (0x0071, same code as HTLC_DATA_BAN in mhxd's
 	 * naming). Mhxd ignores the body; Mobius reads it as a big-
 	 * endian u16 and panics if the chunk is missing. Send 0x0000.
 	 * Matches the production hx_send_agreement_agree shape so an
 	 * eventual Mobius Tier-3 target exercises the same wire bytes
 	 * the real client sends. See [[gtkhx_mobius_options_field]]. */
-    guint16 options_be = htons (0);
+    guint16 options_be = g_htons(0);
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/3,
             (int)HTLC_DATA_NAME, (int)strlen (name), (guint8 *)name,

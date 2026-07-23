@@ -25,10 +25,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netdb.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>
 #include <gtk/gtk.h>
 #include <gdk/gdk.h>
 #include <gio/gio.h>
@@ -1018,10 +1014,9 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
         if (tracker_batch_version == 1) {
             /* v1 record: MacRoman name/desc (the v1 constructor
              * transcodes), IPv4 address in network byte order. */
-            struct in_addr addr;
-            memset (&addr, 0, sizeof addr);
+            guint32 addr = 0; /* IPv4, network byte order */
             if (ev->address_len >= 4) {
-                memcpy (&addr.s_addr, ev->address_ptr, 4);
+                memcpy (&addr, ev->address_ptr, 4);
             }
             e = hx_tracker_server_new_v1 (
                 addr, ev->port, ev->nusers, (const char *) ev->name_ptr,

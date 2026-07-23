@@ -15,7 +15,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -33,7 +32,7 @@ test_user_info_self (void)
         return;
     }
 
-    guint16 self_uid_be = htons (htlc.uid);
+    guint16 self_uid_be = g_htons(htlc.uid);
     guint32 our_trans = htlc.trans;
 
     g_assert_true (integration_send_message (

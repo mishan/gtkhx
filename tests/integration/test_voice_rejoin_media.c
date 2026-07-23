@@ -77,7 +77,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
@@ -193,7 +192,7 @@ on_send_wire_frame (void *user_data, uint32_t opcode, const uint8_t *body,
     }
     guint32 cid = ((guint32) body[0] << 24) | ((guint32) body[1] << 16)
                   | ((guint32) body[2] << 8) | (guint32) body[3];
-    guint32 cid_be = htonl (cid);
+    guint32 cid_be = g_htonl(cid);
     const guint8 *payload = body + 4;
     gsize plen = body_len - 4;
     guint32 trans = c->htlc.trans;
@@ -381,8 +380,8 @@ dispatch_frame (voice_client *c)
 static void
 wire_unmute (voice_client *c)
 {
-    guint32 cid_be = htonl (0);
-    guint16 muted_be = htons (0);
+    guint32 cid_be = g_htonl(0);
+    guint16 muted_be = g_htons(0);
     integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_MUTE, 0, 2,
                               (int) HTLC_DATA_CHAT_ID, 4, &cid_be,
                               (int) HTLC_DATA_VOICE_MUTED, 2, &muted_be);

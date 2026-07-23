@@ -18,7 +18,6 @@
 #include "config.h"
 #include <string.h>
 #include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "protocol.h"

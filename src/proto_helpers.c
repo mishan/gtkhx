@@ -24,7 +24,6 @@
 #include "config.h"
 #include <string.h>
 #include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include <glib-object.h>
 #include "protocol.h"

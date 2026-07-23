@@ -24,7 +24,6 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
-#include <netinet/in.h>
 #include "hx.h"
 #include "hxconn.h"
 #include "chat.h"

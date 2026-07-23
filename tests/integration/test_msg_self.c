@@ -25,7 +25,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -44,7 +43,7 @@ test_msg_self_doesnt_break_stream (void)
     }
 
     /* Send a PM addressed to our own uid. */
-    guint16 self_uid_be = htons (htlc.uid);
+    guint16 self_uid_be = g_htons(htlc.uid);
     const char *body = "tier-3 self-msg edge case";
     g_assert_true (integration_send_message (
         fd, &htlc, HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_UID,

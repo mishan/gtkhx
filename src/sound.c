@@ -22,7 +22,6 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <gtk/gtk.h>
-#include <netinet/in.h>
 #ifdef HAVE_GSOUND
 #include <gsound.h>
 #endif

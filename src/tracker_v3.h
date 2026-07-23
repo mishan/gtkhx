@@ -121,8 +121,8 @@ hx_tracker_v3_parse_response_header (const guint8 *buf, gsize len,
  * in the source.
  *
  * For IPv4 (addr_type == 0x04): address is the raw 4-byte network-
- * order in_addr.s_addr bytes; address_len == 4.
- * For IPv6 (0x06): 16 bytes of in6_addr.s6_addr.
+ * order IPv4 address bytes; address_len == 4.
+ * For IPv6 (0x06): 16 bytes of IPv6 address.
  * For hostname (0x48): UTF-8 hostname bytes (no length prefix).
  */
 typedef struct {

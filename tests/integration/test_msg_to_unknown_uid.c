@@ -18,7 +18,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -38,7 +37,7 @@ test_msg_to_unknown_uid_doesnt_break_stream (void)
 
     /* uid 0xFFFE — high enough that no real connection will ever
 	 * be assigned it within the test's lifetime. */
-    guint16 dead_uid_be = htons (0xFFFE);
+    guint16 dead_uid_be = g_htons(0xFFFE);
     const char *body = "tier-3 unknown-uid msg";
     g_assert_true (integration_send_message (
         fd, &htlc, HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_UID,

@@ -23,7 +23,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -49,13 +48,13 @@ build_userlist_payload (guint8 *out, gsize out_size, guint16 uid, guint16 icon,
     g_assert_cmpuint (need, <=, out_size);
 
     guint16 v;
-    v = htons (uid);
+    v = g_htons(uid);
     memcpy (out + 0, &v, 2);
-    v = htons (icon);
+    v = g_htons(icon);
     memcpy (out + 2, &v, 2);
-    v = htons (color);
+    v = g_htons(color);
     memcpy (out + 4, &v, 2);
-    v = htons ((guint16)name_len);
+    v = g_htons((guint16)name_len);
     memcpy (out + 6, &v, 2);
     memcpy (out + 8, name, name_len);
     return need;
@@ -320,7 +319,7 @@ test_selfinfo_decodes_nick_color (void)
 	 * parse overwrote it (not just left a zero in place). */
     htlc.nick_color = 0xdeadbeefu;
 
-    const guint32 color_wire = htonl (0x00abcdefu);
+    const guint32 color_wire = g_htonl(0x00abcdefu);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
                             &color_wire);
 
@@ -337,7 +336,7 @@ test_selfinfo_nick_color_none_round_trips (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
-    const guint32 color_wire = htonl (HX_NICK_COLOR_NONE);
+    const guint32 color_wire = g_htonl(HX_NICK_COLOR_NONE);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
                             &color_wire);
 
@@ -358,7 +357,7 @@ test_selfinfo_nick_color_absent_leaves_seen_clear (void)
     htlc.nick_color = 0x11223344u;
 
     /* Unrelated chunk so the message isn't empty. */
-    const guint16 some_uid = htons (1);
+    const guint16 some_uid = g_htons(1);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
 
     unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);

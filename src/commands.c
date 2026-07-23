@@ -22,7 +22,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
-#include <netinet/in.h>
 #include <ctype.h>
 #include <getopt.h>
 #include <gtk/gtk.h>

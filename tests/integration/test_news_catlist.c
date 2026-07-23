@@ -44,7 +44,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -71,7 +70,7 @@ build_news_dir_one (const char *name, guint16 *outlen)
     /* 2 (count) + 2 (reserved) + 1 (nlen) + name */
     guint16 total = 5 + nlen;
     guint8 *buf = g_malloc (total);
-    guint16 count = htons (1);
+    guint16 count = g_htons(1);
 
     memcpy (buf, &count, 2);
     buf[2] = 0;

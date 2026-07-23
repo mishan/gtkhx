@@ -47,7 +47,7 @@ build_macalg_list (guint8 *list, size_t cap)
     if (cap < 2) {
         return 0;
     }
-    guint16 count = htons (3);
+    guint16 count = g_htons(3);
     memcpy (list, &count, 2);
     size_t off = 2;
     off = alg_list_append (list, off, cap, "HMAC-SHA256");
@@ -72,7 +72,7 @@ build_single_alg_list (guint8 *list, size_t cap, const char *name)
     if (cap < 2) {
         return 0;
     }
-    guint16 count = htons (1);
+    guint16 count = g_htons(1);
     memcpy (list, &count, 2);
     return alg_list_append (list, 2, cap, name);
 }
@@ -145,7 +145,7 @@ hx_login_build_chunks (const hx_login_request *req,
 
         /* ICON — always emit. */
         size_t icon_off = soff;
-        guint16 icon_be = htons (req->icon);
+        guint16 icon_be = g_htons(req->icon);
         g_return_val_if_fail (soff + 2 <= scratch_cap, 0);
         memcpy (scratch + soff, &icon_be, 2);
         soff += 2;
@@ -162,7 +162,7 @@ hx_login_build_chunks (const hx_login_request *req,
          * post-login PING timer fires task-errors every 60 s. */
         if (req->client_version) {
             size_t cv_off = soff;
-            guint16 cv_be = htons (req->client_version);
+            guint16 cv_be = g_htons(req->client_version);
             g_return_val_if_fail (soff + 2 <= scratch_cap, 0);
             memcpy (scratch + soff, &cv_be, 2);
             soff += 2;
@@ -176,7 +176,7 @@ hx_login_build_chunks (const hx_login_request *req,
          * AEAD activation. caps=0 stays meaningful ("I support the
          * spec but no optional bits"). */
         size_t caps_off = soff;
-        guint16 caps_be = htons (req->caps);
+        guint16 caps_be = g_htons(req->caps);
         g_return_val_if_fail (soff + 2 <= scratch_cap, 0);
         memcpy (scratch + soff, &caps_be, 2);
         soff += 2;
@@ -270,7 +270,7 @@ hx_login_build_chunks (const hx_login_request *req,
 
         /* ICON — always emit, even if 0. */
         size_t icon_off = soff;
-        guint16 icon_be = htons (req->icon);
+        guint16 icon_be = g_htons(req->icon);
         memcpy (scratch + soff, &icon_be, 2);
         soff += 2;
         chunks[hc++] = (struct hx_chunk) {
@@ -327,7 +327,7 @@ hx_login_build_chunks (const hx_login_request *req,
         /* CLIENTVERSION — emit only if explicitly set. */
         if (req->client_version) {
             size_t cv_off = soff;
-            guint16 cv_be = htons (req->client_version);
+            guint16 cv_be = g_htons(req->client_version);
             memcpy (scratch + soff, &cv_be, 2);
             soff += 2;
             chunks[hc++] = (struct hx_chunk) {
@@ -342,7 +342,7 @@ hx_login_build_chunks (const hx_login_request *req,
          * spec's "typical" width. */
         if (req->send_caps) {
             size_t caps_off = soff;
-            guint16 caps_be = htons (req->caps);
+            guint16 caps_be = g_htons(req->caps);
             memcpy (scratch + soff, &caps_be, 2);
             soff += 2;
             chunks[hc++] = (struct hx_chunk) {

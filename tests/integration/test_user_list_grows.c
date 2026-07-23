@@ -28,7 +28,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -75,7 +74,7 @@ user_list_contains (int fd, struct htlc_conn *htlc, const char *wanted_name)
         }
         guint16 nlen;
         memcpy (&nlen, dh->data + 6, 2);
-        nlen = ntohs (nlen);
+        nlen = g_ntohs(nlen);
         if (8 + (gsize)nlen > _len) {
             continue;
         }

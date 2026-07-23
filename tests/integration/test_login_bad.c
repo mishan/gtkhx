@@ -23,7 +23,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -63,7 +62,7 @@ test_login_bad_account_rejected (void)
     hl_encode_local (encbogus, bogus, blen);
 
     const char *display = "BadLoginTier-3";
-    guint16 icon_be = htons (412);
+    guint16 icon_be = g_htons(412);
 
     guint32 our_trans = htlc.trans;
     g_assert_true (integration_send_message (

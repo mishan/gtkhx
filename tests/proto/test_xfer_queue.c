@@ -15,7 +15,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -26,8 +25,8 @@ static void
 test_xfer_queue_extracts_ref_and_queueid (void)
 {
     struct htlc_conn htlc;
-    const guint32 ref_wire = htonl (0xdeadbeefu);
-    const guint32 queue_wire = htonl (5);
+    const guint32 ref_wire = g_htonl(0xdeadbeefu);
+    const guint32 queue_wire = g_htonl(5);
 
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, sizeof (ref_wire),
@@ -52,8 +51,8 @@ static void
 test_xfer_queue_queueid_zero_is_valid (void)
 {
     struct htlc_conn htlc;
-    const guint32 ref_wire = htonl (1);
-    const guint32 queue_wire = htonl (0);
+    const guint32 ref_wire = g_htonl(1);
+    const guint32 queue_wire = g_htonl(0);
 
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, sizeof (ref_wire),
@@ -76,7 +75,7 @@ test_xfer_queue_missing_ref_defaults_to_zero (void)
 	 * extractor still parses; the rcv.c handler then fails the
 	 * htxf_with_ref(0) lookup and warns. */
     struct htlc_conn htlc;
-    const guint32 queue_wire = htonl (3);
+    const guint32 queue_wire = g_htonl(3);
 
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_QUEUE, sizeof (queue_wire),
@@ -108,8 +107,8 @@ static void
 test_xfer_queue_unrelated_chunks_skipped (void)
 {
     struct htlc_conn htlc;
-    const guint32 ref_wire = htonl (7);
-    const guint16 some_uid = htons (99);
+    const guint32 ref_wire = g_htonl(7);
+    const guint16 some_uid = g_htons(99);
 
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
     /* DATA_UID and DATA_NAME chunks aren't in the XFER_QUEUE
@@ -135,8 +134,8 @@ test_xfer_queue_max_uint32_round_trips (void)
 	 * sign-extended in early Hotline implementations. dh_getint
 	 * uses HN32 which is unsigned. */
     struct htlc_conn htlc;
-    const guint32 ref_wire = htonl (0xffffffffu);
-    const guint32 queue_wire = htonl (0x80000000u);
+    const guint32 ref_wire = g_htonl(0xffffffffu);
+    const guint32 queue_wire = g_htonl(0x80000000u);
 
     wire_fixture_init (&htlc, HTLS_HDR_QUEUE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, sizeof (ref_wire),

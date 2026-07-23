@@ -26,7 +26,6 @@
 #include <adwaita.h>
 #include <sys/time.h>
 #include <time.h>
-#include <netinet/in.h>
 #include "hx.h"
 #include "hxconn.h"
 #include "gtkhx.h"

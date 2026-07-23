@@ -22,7 +22,6 @@
 #include "config.h"
 #include <string.h>
 #include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -86,16 +85,16 @@ read_packed_hdr (const struct htlc_conn *htlc, guint32 *type, guint32 *trans,
     g_assert_cmpuint (hx_test_in(htlc)->pos, >=, SIZEOF_HL_HDR);
     const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in(htlc)->buf;
     if (type) {
-        *type = ntohl (h->type);
+        *type = g_ntohl(h->type);
     }
     if (trans) {
-        *trans = ntohl (h->trans);
+        *trans = g_ntohl(h->trans);
     }
     if (flag) {
-        *flag = ntohl (h->flag);
+        *flag = g_ntohl(h->flag);
     }
     if (hc) {
-        *hc = ntohs (h->hc);
+        *hc = g_ntohs(h->hc);
     }
 }
 
@@ -187,7 +186,7 @@ test_hlwrite_login_message_round_trip (void)
     const char *name = "Misha";
     const char *user = "guest";
     const char *pass = "*****";
-    const guint16 icon = htons (412);
+    const guint16 icon = g_htons(412);
 
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/4, (int)HTLC_DATA_NAME,
               (int)strlen (name), (guint8 *)name, (int)HTLC_DATA_LOGIN,
@@ -299,16 +298,16 @@ test_hlwrite_two_messages_concatenate (void)
     /* First message: trans 100. */
     g_assert_cmpuint (len0, >=, SIZEOF_HL_HDR);
     const struct hl_hdr *h0 = (const struct hl_hdr *)m0;
-    g_assert_cmphex (ntohl (h0->trans), ==, 100);
-    g_assert_cmphex (ntohl (h0->type), ==, HTLC_HDR_CHAT);
+    g_assert_cmphex (g_ntohl(h0->trans), ==, 100);
+    g_assert_cmphex (g_ntohl(h0->type), ==, HTLC_HDR_CHAT);
     /* First message's on-wire length is header + chunk hdr + payload. */
     g_assert_cmpuint (len0, ==, SIZEOF_HL_HDR + SIZEOF_HL_DATA_HDR + strlen (a));
 
     /* Second message: trans 101, its own buffer. */
     g_assert_cmpuint (len1, >=, SIZEOF_HL_HDR);
     const struct hl_hdr *h1 = (const struct hl_hdr *)m1;
-    g_assert_cmphex (ntohl (h1->trans), ==, 101);
-    g_assert_cmphex (ntohl (h1->type), ==, HTLC_HDR_CHAT);
+    g_assert_cmphex (g_ntohl(h1->trans), ==, 101);
+    g_assert_cmphex (g_ntohl(h1->type), ==, HTLC_HDR_CHAT);
 
     g_free (m0);
     g_free (m1);
@@ -338,8 +337,8 @@ test_hlwrite_header_len_field_matches_wire_format (void)
 	 * (the 22-2 carve-out is "header without the hc field", since
 	 * hc is part of the data section in the wire format). */
     const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in(&htlc)->buf;
-    g_assert_cmpuint (ntohl (h->len), ==, 9);
-    g_assert_cmpuint (ntohl (h->len2), ==, 9);
+    g_assert_cmpuint (g_ntohl(h->len), ==, 9);
+    g_assert_cmpuint (g_ntohl(h->len2), ==, 9);
 
     htlc_free (&htlc);
 }
@@ -362,7 +361,7 @@ test_hlwrite_round_trip_stress (void)
         huge[i] = (guint8)(i & 0xff);
     }
 
-    const guint16 small_int = htons (0x1234);
+    const guint16 small_int = g_htons(0x1234);
     hlpack_v (&htlc, HTLC_HDR_FILE_GET, 0, /*hc=*/5, (int)HTLC_DATA_NAME, 0,
               (guint8 *)NULL, (int)HTLC_DATA_LOGIN, 1, (guint8 *)"x",
               (int)HTLC_DATA_PASSWORD, 256, huge, (int)HTLC_DATA_ICON, 2,
@@ -430,8 +429,8 @@ test_hlpack_chunks_matches_hlpack (void)
 	 * va_list-style hlpack, once via the array-style hlpack_chunks.
 	 * The packed bytes should be identical. */
     const char *login = "guest";
-    guint16 icon_be = htons (412);
-    guint16 cv_be = htons (185);
+    guint16 icon_be = g_htons(412);
+    guint16 cv_be = g_htons(185);
 
     struct htlc_conn h1, h2;
     htlc_init (&h1, /*starting_trans=*/42);
@@ -549,10 +548,10 @@ test_hl_hdr_decode_oversize_clamps_body_len (void)
 	 * so production's trace shows the server's claim) and clamp
 	 * body_len at MAX_HOTLINE_PACKET_LEN - 2. */
     struct hl_hdr h;
-    h.type = htonl (HTLS_HDR_TASK);
-    h.trans = htonl (1);
+    h.type = g_htonl(HTLS_HDR_TASK);
+    h.trans = g_htonl(1);
     h.flag = 0;
-    h.len = h.len2 = htonl (MAX_HOTLINE_PACKET_LEN * 2);
+    h.len = h.len2 = g_htonl(MAX_HOTLINE_PACKET_LEN * 2);
     h.hc = 0;
 
     guint32 wire_len, body_len;
@@ -567,8 +566,8 @@ test_hl_hdr_decode_zero_len (void)
 {
     /* wire_len < sizeof(hc) → body_len = 0, no underflow. */
     struct hl_hdr h = { 0 };
-    h.type = htonl (HTLS_HDR_TASK);
-    h.len = h.len2 = htonl (1);
+    h.type = g_htonl(HTLS_HDR_TASK);
+    h.len = h.len2 = g_htonl(1);
 
     guint32 body_len = 0xdead;
     g_assert_true (hl_hdr_decode (&h, NULL, NULL, NULL, NULL, NULL, &body_len));

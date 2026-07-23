@@ -23,7 +23,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -57,7 +56,7 @@ test_chat_subject_broadcasts (void)
 
     /* Alice sets the subject. */
     const char *subject = "Tier-3 chat subject smoke test";
-    guint32 cid_be = htonl (chat_id);
+    guint32 cid_be = g_htonl(chat_id);
     g_assert_true (integration_send_message (
         fd_a, &htlc_a, HTLC_HDR_CHAT_SUBJECT, /*flag=*/0, /*hc=*/2,
         (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be,

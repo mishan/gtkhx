@@ -11,7 +11,6 @@
 
 #include <glib.h>
 #include <string.h>
-#include <arpa/inet.h>
 
 #include "hx.h"
 #include "hxconn.h"

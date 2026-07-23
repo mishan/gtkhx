@@ -32,7 +32,7 @@
  * Construction shapes:
  *
  *   v1 path — hx_tracker_server_new_v1: takes the legacy fixed-
- *   record fields (in_addr, port, nusers, MacRoman name + desc).
+ *   record fields (guint32 IPv4 addr, port, nusers, MacRoman name + desc).
  *   The MacRoman → UTF-8 transcode that used to live in tracker.c
  *   's tracker_server_create runs here so the view side always
  *   sees UTF-8.
@@ -54,7 +54,6 @@
 
 #include <glib.h>
 #include <glib-object.h>
-#include <netinet/in.h>     /* struct in_addr */
 #include "tracker_v3_meta.h"
 
 G_BEGIN_DECLS
@@ -125,7 +124,7 @@ extern GType hx_tracker_server_get_type (void) G_GNUC_CONST;
  * empty strings (not NULL). Returns a freshly-allocated event the
  * caller owns. */
 extern HxTrackerServer *
-hx_tracker_server_new_v1 (struct in_addr addr, guint16 port, guint16 nusers,
+hx_tracker_server_new_v1 (guint32 addr, guint16 port, guint16 nusers,
                           const char *name_bytes, gsize name_len,
                           const char *desc_bytes, gsize desc_len, int total);
 

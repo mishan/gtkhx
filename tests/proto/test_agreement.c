@@ -17,7 +17,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -158,7 +157,7 @@ static void
 test_agreement_no_relevant_chunks_returns_not_found (void)
 {
     struct htlc_conn htlc;
-    const guint16 some_uid = htons (5);
+    const guint16 some_uid = g_htons(5);
     wire_fixture_init (&htlc, HTLS_HDR_AGREEMENT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (some_uid),
@@ -196,8 +195,8 @@ static void
 test_agreement_skips_unrelated_chunks_before_agreement (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (1);
-    const guint32 cid_wire = htonl (2);
+    const guint16 uid_wire = g_htons(1);
+    const guint32 cid_wire = g_htonl(2);
     const char *body = "real agreement";
     wire_fixture_init (&htlc, HTLS_HDR_AGREEMENT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);

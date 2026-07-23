@@ -45,12 +45,11 @@
 
 #include <stdint.h>
 #include <glib.h>
-#include <netinet/in.h>
 
 /* Parsed fixed portion of a single server record. The variable
  * name + description come on separate reads. */
 typedef struct {
-    struct in_addr addr;    /* IPv4 address, network byte order */
+    guint32        addr;    /* IPv4 address, network byte order */
     guint16        port;    /* TCP port, host byte order */
     guint16        nusers;  /* user count, host byte order */
     guint8         name_len;

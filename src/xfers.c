@@ -24,11 +24,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <sys/socket.h>
 #include <sys/select.h>
-#include <netinet/in.h>
-#include <netdb.h>
-#include <arpa/inet.h>
 #include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <gtk/gtk.h>

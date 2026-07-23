@@ -379,10 +379,10 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 #define S32HTON(_word, _addr)                                                  \
     do {                                                                       \
         uint32_t _x;                                                          \
-        _x = htonl (_word);                                                    \
+        _x = g_htonl (_word);                                                    \
         memory_copy ((_addr), &_x, 4);                                         \
     } while (0)
-/* _word is passed straight to htonl(), which already takes a value
+/* _word is passed straight to g_htonl(), which already takes a value
  * (not an expression to evaluate), so it doesn't need parenthesising.
  * _addr is wrapped in parens at the memory_copy call site. */
 
@@ -434,7 +434,7 @@ memory_copy (void *__dst, void *__src, unsigned int len)
     do {                                                                       \
         if (_len == 4)                                                         \
             HN32 (&(_word), dh->data);                                         \
-        else /* if (ntohs(dh->len) == 2) */                                    \
+        else /* if (g_ntohs(dh->len) == 2) */                                    \
             HN16 (&(_word), dh->data);                                         \
     } while (0)
 
