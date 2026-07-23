@@ -47,21 +47,48 @@ crate-type = ["staticlib", "rlib"]
 # compatible. glycin `default-features = false` + `async-io` keeps us off
 # the tokio interop helpers; `gdk4` gives `Frame::texture() -> gdk::Texture`.
 
-# --- glycin 3.x / 2+ loaders (default; GNOME 48+, Flatpak) ---
-glycin3 = { package = "glycin", version = "~3.0", default-features = false, features = ["async-io", "gdk4"], optional = true }
+# The gtk-rs families (glib/gio/gdk) stay cross-platform — gtk-rs builds fine
+# on Windows/macOS and the texture FFI (ffi_result.rs) needs gdk everywhere.
+# glycin itself is Linux-only (see the [target.*.dependencies] tables below).
+# --- gtk-rs 0.21 family (glycin-v3 / 2+ loaders; default; GNOME 48+, Flatpak) ---
 glib3   = { package = "glib",  version = "0.21", optional = true }
 gio3    = { package = "gio",   version = "0.21", optional = true }
 gdk3    = { package = "gdk4",  version = "0.10", optional = true }
 
-# --- glycin 2.x / 1+ loaders (Debian stable + older runtimes) ---
-# 2.1.x is the last 2.x line; it has no `Loader::new_bytes`, so the v2
-# backend streams the payload through a short-lived temp file (see
-# decode.rs `TempImageFile`). gtk-rs 0.20 here coexists with the
-# workspace's 0.21 only inside this crate.
-glycin2 = { package = "glycin", version = "~2.1", default-features = false, features = ["async-io", "gdk4"], optional = true }
+# --- gtk-rs 0.20 family (glycin-v2 / 1+ loaders; Debian stable + older) ---
 glib2   = { package = "glib",  version = "0.20", optional = true }
 gio2    = { package = "gio",   version = "0.20", optional = true }
 gdk2    = { package = "gdk4",  version = "0.9",  optional = true }
+
+# glycin is Linux-only: glycin-common uses the Linux `memfd_create` syscall for
+# the shared memory it hands decoded frames back through, plus a seccomp
+# sandbox — neither exists on macOS/Windows. So the actual glycin crates only
+# build on Linux; the `glycin-v{2,3}` features still select the gtk-rs family
+# above cross-platform, and `dep:glycin{2,3}` is simply inert off-Linux.
+# 2.1.x is the last 2.x line; it has no `Loader::new_bytes`, so the v2 backend
+# streams the payload through a short-lived temp file (see decode.rs
+# `TempImageFile`). gtk-rs 0.20 here coexists with the workspace's 0.21 only
+# inside this crate.
+[target.'cfg(target_os = "linux")'.dependencies]
+glycin3 = { package = "glycin", version = "~3.0", default-features = false, features = ["async-io", "gdk4"], optional = true }
+glycin2 = { package = "glycin", version = "~2.1", default-features = false, features = ["async-io", "gdk4"], optional = true }
+
+# Non-Linux decode backend: pure-Rust codecs (no system libs, no subprocess
+# sandbox). Always compiled off-Linux; decode.rs's run_decode() is cfg-split so
+# this crate builds a glib/gdk texture from `image`-decoded RGBA there instead
+# of driving glycin's sandboxed loader. JPEG/PNG/GIF only — the same
+# inline-media allowlist the sniff gate enforces.
+[target.'cfg(not(target_os = "linux"))'.dependencies]
+# Codec set: the inline-media allowlist (jpeg/png/gif) plus the extra formats
+# the WIDE-policy preview path opens (bmp/ico/tiff/webp). All pure-Rust — no
+# system libs. AVIF/HEIC need C libraries and degrade to a decode error, same
+# as a glycin host missing those loaders.
+# Pinned below 0.25.10: that release started using `slice_as_chunks` /
+# `is_multiple_of` (stabilized in rustc 1.88 / 1.87) without bumping its declared
+# rust-version, so the MSRV-aware resolver doesn't avoid it and it fails to
+# compile on our 1.85 floor. 0.25.9 is the last release that builds on 1.85.
+# Revisit this ceiling when the toolchain floor rises (see rust-toolchain.toml).
+image = { version = ">=0.25.5, <0.25.10", default-features = false, features = ["jpeg", "png", "gif", "bmp", "ico", "tiff", "webp"] }
 
 [features]
 # Default to the 3.x / 2+ backend so a bare `cargo build` / `cargo test`

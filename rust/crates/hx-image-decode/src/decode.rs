@@ -46,7 +46,10 @@ use std::time::{Duration, Instant};
 
 // gtk-rs family + glycin major are version-selected — see crate::compat.
 use crate::compat::glib::{Bytes, MainContext};
-use crate::compat::{gdk, glycin};
+use crate::compat::gdk;
+// glycin is Linux-only; the non-Linux backend below uses the `image` crate.
+#[cfg(target_os = "linux")]
+use crate::compat::glycin;
 
 use crate::caps::HxInlineMediaCaps;
 use crate::ffi_result::{
@@ -206,7 +209,7 @@ pub(crate) fn decode_async(
 
         let result = decoded_alloc();
 
-        match run_glycin_decode(
+        match run_decode(
             gbytes,
             max_dim,
             max_pix,
@@ -247,7 +250,7 @@ pub(crate) fn decode_async(
                     bytes_len,
                 );
             }
-            Err(GlycinErr {
+            Err(DecodeErr {
                 code,
                 message,
                 detail,
@@ -292,7 +295,7 @@ enum DecodeOk {
 /// Error path internal to the async block. `message` is a
 /// 'static literal — keeps the FFI struct's error_message
 /// borrowed-pointer contract.
-struct GlycinErr {
+struct DecodeErr {
     code: u16,
     message: &'static str,
     /// Glycin's own error text (its `ErrorCtx` Display), when the
@@ -305,14 +308,15 @@ struct GlycinErr {
     detail: Option<String>,
 }
 
-async fn run_glycin_decode(
+#[cfg(target_os = "linux")]
+async fn run_decode(
     gbytes: Bytes,
     max_dimension: u32,
     max_pixels: u32,
     max_frames: u32,
     max_duration_ms: u32,
     _sniffed: Format,
-) -> Result<DecodeOk, GlycinErr> {
+) -> Result<DecodeOk, DecodeErr> {
     // Backend construction differs. glycin 3.x has `Loader::new_bytes`,
     // a GLib-Bytes-in entry point — glycin keeps a ref + passes the
     // buffer to the subprocess via memfd. glycin 2.x has no bytes
@@ -325,9 +329,9 @@ async fn run_glycin_decode(
     // a Flatpak runtime.
     #[cfg(feature = "glycin-v3")]
     let (mut loader, _tmp_guard) = (glycin::Loader::new_bytes(gbytes), ());
-    #[cfg(feature = "glycin-v2")]
+    #[cfg(all(target_os = "linux", feature = "glycin-v2"))]
     let (mut loader, _tmp_guard) = {
-        let guard = TempImageFile::create(&gbytes).map_err(|e| GlycinErr {
+        let guard = TempImageFile::create(&gbytes).map_err(|e| DecodeErr {
             code: MEDIA_ERR_UNSUPPORTED,
             message: "glycin decode failed",
             detail: Some(format!("temp-file decode staging failed: {e}")),
@@ -348,7 +352,7 @@ async fn run_glycin_decode(
     let image = loader
         .load()
         .await
-        .map_err(|ctx| GlycinErr {
+        .map_err(|ctx| DecodeErr {
             code: MEDIA_ERR_UNSUPPORTED,
             // The category is what matters at the wire level; glycin's
             // full ErrorCtx (descriptive, but not 'static) rides the
@@ -369,27 +373,27 @@ async fn run_glycin_decode(
         let details = image.details();
         (details.width(), details.height())
     };
-    #[cfg(feature = "glycin-v2")]
+    #[cfg(all(target_os = "linux", feature = "glycin-v2"))]
     let (w, h) = {
         let info = image.info();
         (info.width, info.height)
     };
     if w == 0 || h == 0 {
-        return Err(GlycinErr {
+        return Err(DecodeErr {
             code: MEDIA_ERR_UNSUPPORTED,
             message: "decoder reported zero-dimension image",
             detail: None,
         });
     }
     if w > max_dimension || h > max_dimension {
-        return Err(GlycinErr {
+        return Err(DecodeErr {
             code: MEDIA_ERR_TOO_LARGE,
             message: "image dimension exceeds cap",
             detail: None,
         });
     }
     if (w as u64) * (h as u64) > max_pixels as u64 {
-        return Err(GlycinErr {
+        return Err(DecodeErr {
             code: MEDIA_ERR_TOO_LARGE,
             message: "image pixel count exceeds cap",
             detail: None,
@@ -401,7 +405,7 @@ async fn run_glycin_decode(
     // documents next_frame as looping back to frame 0 once the
     // animation completes — we stop ourselves via max_frames /
     // max_duration_ms rather than relying on a sentinel.
-    let first = image.next_frame().await.map_err(|ctx| GlycinErr {
+    let first = image.next_frame().await.map_err(|ctx| DecodeErr {
         code: MEDIA_ERR_UNSUPPORTED,
         message: glycin_err_category(&ctx),
         detail: Some(format!("{ctx}")),
@@ -453,10 +457,188 @@ async fn run_glycin_decode(
     Ok(DecodeOk::Animation(frames))
 }
 
-/// Map glycin's per-frame `Duration` to the wire's milli-second
-/// integer. Spec doesn't define a "0 ms = fastest" sentinel —
-/// we clamp to a sane floor (10 ms) so a malformed loader
-/// returning 0 doesn't busy-spin the tick timer.
+// ---- Non-Linux backend: pure-Rust `image`-crate decode -------------------
+//
+// glycin (sandboxed subprocess loaders + memfd IPC) is Linux-only, so off-Linux
+// we decode in-process with the `image` crate and build the same gdk::Texture /
+// frame vector the FFI expects. CPU-bound but bounded by the caller's byte cap
+// (256 KiB default for inline media), so the inline decode on the main-context
+// task is a sub-millisecond hit. Format coverage is the pure-Rust codec set
+// (JPEG/PNG/GIF + the WIDE-policy preview formats BMP/ICO/TIFF/WebP); animated
+// GIF and APNG collect frames, everything else yields one static texture.
+
+#[cfg(not(target_os = "linux"))]
+async fn run_decode(
+    gbytes: Bytes,
+    max_dimension: u32,
+    max_pixels: u32,
+    max_frames: u32,
+    max_duration_ms: u32,
+    sniffed: Format,
+) -> Result<DecodeOk, DecodeErr> {
+    let bytes: &[u8] = &gbytes;
+
+    // Cheap dimension probe for the cap gate before decoding pixel data.
+    let (w, h) = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| img_err(&e))?
+        .into_dimensions()
+        .map_err(|e| img_err(&e))?;
+    check_dims(w, h, max_dimension, max_pixels)?;
+
+    // Animated GIF / APNG collect frames; everything else is a single texture.
+    match sniffed {
+        Format::Gif => decode_gif_frames(bytes, max_frames, max_duration_ms),
+        Format::Png => decode_png_maybe_apng(bytes, max_frames, max_duration_ms),
+        _ => decode_static(bytes),
+    }
+}
+
+/// Build a gdk::Texture from straight (non-premultiplied) RGBA8 pixels.
+#[cfg(not(target_os = "linux"))]
+fn texture_from_rgba(w: u32, h: u32, rgba: &[u8]) -> gdk::Texture {
+    use crate::compat::glib::prelude::Cast;
+    let gbytes = Bytes::from(rgba);
+    let stride = (w as usize) * 4;
+    gdk::MemoryTexture::new(
+        w as i32,
+        h as i32,
+        gdk::MemoryFormat::R8g8b8a8,
+        &gbytes,
+        stride,
+    )
+    .upcast()
+}
+
+/// Cap gate shared by the static + frame paths (mirrors the glycin backend's
+/// post-`load()` dimension / pixel checks).
+#[cfg(not(target_os = "linux"))]
+fn check_dims(w: u32, h: u32, max_dimension: u32, max_pixels: u32) -> Result<(), DecodeErr> {
+    if w == 0 || h == 0 {
+        return Err(DecodeErr {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: "decoder reported zero-dimension image",
+            detail: None,
+        });
+    }
+    if w > max_dimension || h > max_dimension {
+        return Err(DecodeErr {
+            code: MEDIA_ERR_TOO_LARGE,
+            message: "image dimension exceeds cap",
+            detail: None,
+        });
+    }
+    if (w as u64) * (h as u64) > max_pixels as u64 {
+        return Err(DecodeErr {
+            code: MEDIA_ERR_TOO_LARGE,
+            message: "image pixel count exceeds cap",
+            detail: None,
+        });
+    }
+    Ok(())
+}
+
+/// Map any `image` / IO error onto the wire's UnsupportedFormat category; the
+/// `Display` text rides `detail` to the telemetry log, like glycin's ErrorCtx.
+#[cfg(not(target_os = "linux"))]
+fn img_err(e: &dyn std::fmt::Display) -> DecodeErr {
+    DecodeErr {
+        code: MEDIA_ERR_UNSUPPORTED,
+        message: "image decode failed",
+        detail: Some(e.to_string()),
+    }
+}
+
+/// Decode a single image → one static texture.
+#[cfg(not(target_os = "linux"))]
+fn decode_static(bytes: &[u8]) -> Result<DecodeOk, DecodeErr> {
+    let img = image::load_from_memory(bytes).map_err(|e| img_err(&e))?;
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    if w == 0 || h == 0 {
+        return Err(DecodeErr {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: "decoder reported zero-dimension image",
+            detail: None,
+        });
+    }
+    Ok(DecodeOk::Static(texture_from_rgba(w, h, rgba.as_raw())))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn decode_gif_frames(
+    bytes: &[u8],
+    max_frames: u32,
+    max_duration_ms: u32,
+) -> Result<DecodeOk, DecodeErr> {
+    use image::AnimationDecoder;
+    let dec = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes))
+        .map_err(|e| img_err(&e))?;
+    collect_frames(dec.into_frames(), max_frames, max_duration_ms)
+}
+
+#[cfg(not(target_os = "linux"))]
+fn decode_png_maybe_apng(
+    bytes: &[u8],
+    max_frames: u32,
+    max_duration_ms: u32,
+) -> Result<DecodeOk, DecodeErr> {
+    use image::AnimationDecoder;
+    let dec = image::codecs::png::PngDecoder::new(std::io::Cursor::new(bytes))
+        .map_err(|e| img_err(&e))?;
+    if dec.is_apng().map_err(|e| img_err(&e))? {
+        return collect_frames(
+            dec.apng().map_err(|e| img_err(&e))?.into_frames(),
+            max_frames,
+            max_duration_ms,
+        );
+    }
+    // A non-animated PNG → decode the whole image as one texture.
+    decode_static(bytes)
+}
+
+/// Collect `image` animation frames into our `CollectedFrame` vec, honoring the
+/// frame-count + total-duration caps. A single collected frame collapses to a
+/// static texture (matching glycin's "first frame has no delay → static").
+#[cfg(not(target_os = "linux"))]
+fn collect_frames(
+    frames: image::Frames<'_>,
+    max_frames: u32,
+    max_duration_ms: u32,
+) -> Result<DecodeOk, DecodeErr> {
+    let mut out: Vec<CollectedFrame> = Vec::new();
+    let mut total_ms: u64 = 0;
+    for frame in frames {
+        let frame = frame.map_err(|e| img_err(&e))?;
+        let (numer, denom) = frame.delay().numer_denom_ms();
+        let ms = if denom == 0 { 0 } else { numer / denom };
+        let delay_ms = clamp_delay_ms(Duration::from_millis(ms as u64));
+        let buf = frame.into_buffer();
+        let (w, h) = buf.dimensions();
+        out.push(CollectedFrame {
+            texture: texture_from_rgba(w, h, buf.as_raw()),
+            delay_ms,
+        });
+        total_ms = total_ms.saturating_add(delay_ms as u64);
+        if out.len() >= max_frames as usize || total_ms >= max_duration_ms as u64 {
+            break;
+        }
+    }
+    match out.len() {
+        0 => Err(DecodeErr {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: "image decode failed",
+            detail: None,
+        }),
+        // One frame → static, so single-frame GIFs render like plain images.
+        1 => Ok(DecodeOk::Static(out.pop().unwrap().texture)),
+        _ => Ok(DecodeOk::Animation(out)),
+    }
+}
+
+/// Map a per-frame `Duration` to the wire's millisecond integer. The spec
+/// defines no "0 ms = fastest" sentinel, so clamp to a sane floor (10 ms) so a
+/// malformed loader returning 0 doesn't busy-spin the tick timer.
 fn clamp_delay_ms(d: Duration) -> u32 {
     let ms = d.as_millis().min(u32::MAX as u128) as u32;
     if ms < 10 {
@@ -471,6 +653,7 @@ fn clamp_delay_ms(d: Duration) -> u32 {
 /// caller would receive a borrowed pointer with an undefined
 /// lifetime); the detail goes to debug_log on the telemetry
 /// path where the format string can hold the ctx by value.
+#[cfg(target_os = "linux")]
 fn glycin_err_category(_ctx: &glycin::ErrorCtx) -> &'static str {
     // The glycin::Error variants are non_exhaustive — we
     // collapse to a single category here. Future refinement
@@ -487,12 +670,12 @@ fn glycin_err_category(_ctx: &glycin::ErrorCtx) -> &'static str {
 /// `ExposeBaseDir` mounts the directory, and SVG is rejected at the
 /// sniff gate long before this). The guard's Drop unlinks the file once
 /// the decode future has finished reading it.
-#[cfg(feature = "glycin-v2")]
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
 struct TempImageFile {
     path: std::path::PathBuf,
 }
 
-#[cfg(feature = "glycin-v2")]
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
 impl TempImageFile {
     fn create(bytes: &[u8]) -> std::io::Result<Self> {
         use std::io::Write;
@@ -550,7 +733,7 @@ impl TempImageFile {
     }
 }
 
-#[cfg(feature = "glycin-v2")]
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
 impl Drop for TempImageFile {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.path);
@@ -570,7 +753,7 @@ mod tests {
     // filesystem plumbing — exercise it directly so the glycin-v2
     // backend (which the default-feature build never compiles) has
     // unit coverage in the CI v2 leg.
-    #[cfg(feature = "glycin-v2")]
+    #[cfg(all(target_os = "linux", feature = "glycin-v2"))]
     #[test]
     fn temp_image_file_round_trips_and_cleans_up() {
         use super::TempImageFile;
@@ -600,7 +783,7 @@ mod tests {
         assert!(!path.exists(), "Drop should remove the staged file");
     }
 
-    #[cfg(feature = "glycin-v2")]
+    #[cfg(all(target_os = "linux", feature = "glycin-v2"))]
     #[test]
     fn temp_image_file_names_are_unique() {
         use super::TempImageFile;

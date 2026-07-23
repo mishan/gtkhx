@@ -287,6 +287,7 @@ fn static_cstr(s: &'static str) -> *const std::ffi::c_char {
     literal!("format rejected by inline-media allowlist");
     literal!("unrecognised image magic bytes");
     literal!("glycin decode failed");
+    literal!("image decode failed");
     literal!("decoder reported zero-dimension image");
     literal!("image dimension exceeds cap");
     literal!("image pixel count exceeds cap");

@@ -35,8 +35,20 @@ compile_error!(
      loaders). Meson selects this via -Dglycin_compat."
 );
 
+// gtk-rs family aliases (glib/gio/gdk) — cross-platform. The texture FFI
+// (`ffi_result.rs`) needs gdk/glib on every target, and gtk-rs builds on
+// Windows/macOS, so these are selected purely by the backend feature.
 #[cfg(feature = "glycin-v3")]
-pub use {gdk3 as gdk, gio3 as gio, glib3 as glib, glycin3 as glycin};
+pub use {gdk3 as gdk, gio3 as gio, glib3 as glib};
 
 #[cfg(feature = "glycin-v2")]
-pub use {gdk2 as gdk, gio2 as gio, glib2 as glib, glycin2 as glycin};
+pub use {gdk2 as gdk, gio2 as gio, glib2 as glib};
+
+// glycin alias — Linux only. glycin is a Linux-only dependency (see Cargo.toml);
+// the non-Linux build decodes via the `image` crate in `decode.rs` and never
+// names `compat::glycin`, so the alias simply doesn't exist there.
+#[cfg(all(target_os = "linux", feature = "glycin-v3"))]
+pub use glycin3 as glycin;
+
+#[cfg(all(target_os = "linux", feature = "glycin-v2"))]
+pub use glycin2 as glycin;
