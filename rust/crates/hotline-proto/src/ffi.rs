@@ -5467,6 +5467,64 @@ pub unsafe extern "C" fn gtkhx_proto_parse_icon_list(
     total
 }
 
+/// `#[repr(C)]` decoded Hotline timestamp — the C-ABI form of
+/// [`crate::hl_date::HlDate`] (mirror: `struct gtkhx_proto_hl_date` in
+/// `hotline_proto.h`).
+#[repr(C)]
+pub struct GtkhxProtoHlDate {
+    /// 0 = Mac 1904 epoch, 1 = modern.
+    pub kind: u8,
+    /// Modern-format year (0 for the Mac 1904 kind).
+    pub year: u16,
+    /// Seconds field: since 1904-01-01 UTC (Mac) or since Jan 1 `year` local
+    /// (modern).
+    pub secs: u32,
+}
+
+/// `bool gtkhx_proto_hl_date_decode(const uint8_t *bytes, size_t len,
+/// struct gtkhx_proto_hl_date *out)` — decode an 8-byte wire timestamp into
+/// `out`. Returns false (out untouched) for the no-timestamp sentinel, an
+/// out-of-range year, or a short buffer. Resolving the result to an absolute
+/// instant + formatting it for display is the caller's job (local-tz calendar
+/// math, e.g. GDateTime) — the decode is protocol, the format is view.
+///
+/// # Safety
+/// `bytes` is NULL or valid for `len`; `out` is NULL or a writable
+/// `GtkhxProtoHlDate`.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_proto_hl_date_decode(
+    bytes: *const u8,
+    len: usize,
+    out: *mut GtkhxProtoHlDate,
+) -> bool {
+    let Some(out) = out.as_mut() else {
+        return false;
+    };
+    if bytes.is_null() {
+        return false;
+    }
+    let s = slice::from_raw_parts(bytes, len);
+    match crate::hl_date::parse_hl_date(s) {
+        Some(crate::hl_date::HlDate::Mac1904 { secs }) => {
+            *out = GtkhxProtoHlDate {
+                kind: 0,
+                year: 0,
+                secs,
+            };
+            true
+        }
+        Some(crate::hl_date::HlDate::Modern { year, secs }) => {
+            *out = GtkhxProtoHlDate {
+                kind: 1,
+                year,
+                secs,
+            };
+            true
+        }
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

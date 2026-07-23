@@ -28,7 +28,6 @@ extern "C" {
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     // news_browser.c bridges.
-    fn gtkhx_news_node_date_string(node: *mut c_void) -> *mut c_char;
     fn gtkhx_news_fetch_thread(browser: *mut c_void, node: *mut c_void);
     // gtkurl.c — (re)tag URLs in a text view after a buffer mutation.
     fn gtkurl_textview_apply_tags(tv: *mut gtk::ffi::GtkTextView);
@@ -82,11 +81,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
 
     let sender = crate::cstr(hx_news_node_sender(node));
     let sender = if sender.is_empty() { "?".to_string() } else { sender };
-    let date_ptr = gtkhx_news_node_date_string(node);
-    let date = crate::cstr(date_ptr);
-    if !date_ptr.is_null() {
-        glib::ffi::g_free(date_ptr as *mut c_void);
-    }
+    let date = crate::hl_date::news_node_date_string(node).unwrap_or_default();
     // Single translatable msgid with positional args (was the C
     // _("%1$s — %2$s")) so a translation can reorder sender / date.
     meta_label.set_text(&tr_fmt("%1$s — %2$s", &[&sender, &date]));

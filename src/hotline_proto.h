@@ -1804,4 +1804,25 @@ typedef enum {
 
 extern hx_recv_handler_kind hx_recv_route (guint32 opcode);
 
+/* Decoded 8-byte Hotline wire timestamp (mirror of #[repr(C)] GtkhxProtoHlDate
+ * in hotline-proto's ffi.rs). `kind` is 0 = Mac 1904 epoch, 1 = modern. The
+ * caller resolves this to an absolute instant + display string (local-tz
+ * calendar math, e.g. GDateTime) — the decode is protocol, the format is view. */
+struct gtkhx_proto_hl_date {
+    uint8_t kind;
+    uint16_t year;
+    uint32_t secs;
+};
+
+/* Seconds between the Mac 1904 epoch and the Unix epoch — for a `kind==0`
+ * result, the absolute Unix time is `secs - GTKHX_PROTO_MAC_TO_UNIX_EPOCH_OFFSET`.
+ * (Mirrors hl_date::MAC_TO_UNIX_EPOCH_OFFSET.) */
+#define GTKHX_PROTO_MAC_TO_UNIX_EPOCH_OFFSET 2082844800u
+
+/* Decode an 8-byte wire timestamp into *out. FALSE (out untouched) for the
+ * no-timestamp sentinel (secs==0), an out-of-range modern year, or a short
+ * buffer. */
+extern bool gtkhx_proto_hl_date_decode (const uint8_t *bytes, size_t len,
+                                        struct gtkhx_proto_hl_date *out);
+
 #endif /* GTKHX_HOTLINE_PROTO_H */

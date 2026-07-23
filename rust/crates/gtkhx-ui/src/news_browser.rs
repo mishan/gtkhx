@@ -114,7 +114,9 @@ extern "C" {
     fn news_post_target(post: *mut c_void) -> *mut c_void;
     fn news_post_body(post: *mut c_void) -> *const c_char;
     fn news_post_free(post: *mut c_void);
-    fn gtkhx_news_load_icon_paintable(resource: *const c_char) -> *mut gdk::ffi::GdkPaintable;
+    /// Load a chrome icon resource through the theme resolver (gtkhx_icon.c),
+    /// transfer-full GdkPixbuf.
+    fn gtkhx_icon_load(resource: *const c_char) -> *mut gtk::gdk_pixbuf::ffi::GdkPixbuf;
 
     // ---- C UI leaves (gtkhx_pixmap_button / apply-style / init_keyaccel come
     // from crate::ffi) ----
@@ -177,13 +179,20 @@ fn with_browser<R>(f: impl FnOnce(&NewsBrowser) -> R) -> Option<R> {
 
 fn load_icon(resource: &str) -> Option<gdk::Paintable> {
     let res = crate::cs(resource);
-    let p = unsafe { gtkhx_news_load_icon_paintable(res.as_ptr()) };
-    if p.is_null() {
-        None
-    } else {
-        // Transfer-full: the leaf returns a texture with one ref we own here.
-        Some(unsafe { from_glib_full(p) })
+    let pb_ptr = unsafe { gtkhx_icon_load(res.as_ptr()) };
+    if pb_ptr.is_null() {
+        return None;
     }
+    // Transfer-full: gtkhx_icon_load returns a pixbuf with one ref we own.
+    let pb: gtk::gdk_pixbuf::Pixbuf = unsafe { from_glib_full(pb_ptr) };
+    // Upscale 1.5x with nearest-neighbour to keep the pixel-art crisp, then wrap
+    // as a GdkTexture (paintable) — matches gtkhx_pixmap_button's pixbuf→texture
+    // path, which renders where gtk_image_set_from_resource goes blank for our
+    // XPM/PNG pixmaps.
+    let w = pb.width() * 3 / 2;
+    let h = pb.height() * 3 / 2;
+    let scaled = pb.scale_simple(w, h, gtk::gdk_pixbuf::InterpType::Nearest)?;
+    Some(gdk::Texture::for_pixbuf(&scaled).upcast())
 }
 
 // ---------- Selection → breadcrumb / render / buttons ----------
