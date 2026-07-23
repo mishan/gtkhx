@@ -380,6 +380,10 @@ COMMAND (close)
     }
 }
 
+/* /exec spawns a POSIX subprocess (fork + pipe + /bin/sh) and watches the
+ * output pipe via the fd table. That machinery is Unix-only; on other
+ * platforms /exec is stubbed out below. */
+#ifdef G_OS_UNIX
 static void
 exec_close (int fd)
 {
@@ -416,9 +420,11 @@ exec_ready_read (int fd)
         }
     }
 }
+#endif /* G_OS_UNIX */
 
 COMMAND (exec)
 {
+#ifdef G_OS_UNIX
     int pfds[2];
     char *p, *av[4];
     guint32 output_to = 0;
@@ -514,6 +520,12 @@ find_cmd_arg:
         hxd_fd_set (pfds[0], FDR);
         break;
     }
+#else
+    (void) argc;
+    (void) str;
+    hx_printf_prefix (htlc, cid, INFOPREFIX,
+                      "%s: not supported on this platform\n", argv[0]);
+#endif /* G_OS_UNIX */
 }
 
 COMMAND (ignore)

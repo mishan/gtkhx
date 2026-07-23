@@ -39,6 +39,10 @@ crate-type = ["staticlib", "rlib"]
 # doesn't grow (meson floor: gtk4 >= 4.10, libadwaita-1 >= 1.6).
 glib = { workspace = true }
 gio = { workspace = true }
+# CSPRNG bytes for the user-editor password generator (useredit.rs),
+# replacing the Linux-only getrandom(2) C shim in src/rand.c. Same 0.3
+# line hxnet already pins; portable across Linux/macOS/Windows.
+getrandom = "0.3"
 # v4_10 enables the GtkColorDialog / GtkColorDialogButton bindings the
 # settings nick-colour row uses. The runtime GTK is already >= 4.10 (meson
 # floor) and the C options.c used GtkColorDialogButton, so this just turns

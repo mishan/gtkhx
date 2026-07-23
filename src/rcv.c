@@ -22,6 +22,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <glib/gstdio.h> /* g_mkdir (portable) */
 #include <fcntl.h>
 #include <errno.h>
 #include <signal.h>
@@ -1916,7 +1917,7 @@ rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
                 p = lpath + 1;
                 while ((p = strchr (p, dir_char))) {
                     *p = 0;
-                    if (mkdir (lpath + 1, S_IRUSR | S_IWUSR | S_IXUSR)) {
+                    if (g_mkdir (lpath + 1, S_IRUSR | S_IWUSR | S_IXUSR)) {
                         if (errno != EEXIST) {
                             hx_printf_prefix (htlc, 0, INFOPREFIX,
                                               "mkdir(%s): %s\n", lpath + 1,
@@ -1928,10 +1929,14 @@ rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
                         *p++ = '/';
                     }
                 }
-                p = basename (lpath + 1);
-                if (p) {
-                    dirchar_fix (p);
-                }
+                /* Basename in place: pointer to the last '/'-delimited
+                 * component within lpath (portable — POSIX basename needs
+                 * libgen.h and g_basename is deprecated). dirchar_fix
+                 * rewrites that component's bytes, which lpath+1 (passed to
+                 * xfer_new below) then carries. */
+                p = strrchr (lpath + 1, '/');
+                p = p ? p + 1 : lpath + 1;
+                dirchar_fix (p);
                 {
                     guint32 fsize;
                     /* pathbuf is the joined parent + name in `cfl->path`
