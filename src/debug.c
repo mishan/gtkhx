@@ -104,7 +104,7 @@ debug_log (const char *cat, const char *fmt, ...)
 void
 debug_log_str (const char *cat, const char *msg)
 {
-    debug_log (cat, "%s", msg);
+    debug_log (cat, "%s", msg ? msg : "(null)");
 }
 
 /* tracing helper for the hx_conn_name (htlc) corruption hunt. Each

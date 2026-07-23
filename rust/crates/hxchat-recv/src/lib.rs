@@ -99,6 +99,23 @@ fn gbool(b: bool) -> c_int {
     b as c_int
 }
 
+/// Emit a pre-formatted line under `cat` via debug_log_str.
+///
+/// The line often interpolates wire-derived bytes (e.g. a media MIME type),
+/// which may contain interior NULs. CString::new rejects those, so strip any
+/// NULs first rather than unwrap-panicking on hostile / damaged input — a
+/// debug trace must never be able to crash the client.
+///
+/// # Safety
+/// `debug_log_str` is an FFI call into debug.c.
+unsafe fn debug_trace(cat: &std::ffi::CStr, line: String) {
+    let sanitized: String = line.replace('\0', "");
+    // Now infallible: sanitized has no interior NULs.
+    if let Ok(c) = std::ffi::CString::new(sanitized) {
+        debug_log_str(cat.as_ptr(), c.as_ptr());
+    }
+}
+
 /// `void hx_chat_invite_recv (htlc, member_model, cid, uid, name)` — the
 /// private-chat-invitation receive path: drop the invite if the inviter is on
 /// the ignore list, otherwise emit the `chat-invitation` signal (the sound
@@ -246,12 +263,13 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
             Err(_) => {
                 // Spec: exactly one companion field present → reject the whole
                 // chat (orphan implies server bug / wire damage).
-                let line = std::ffi::CString::new(format!(
-                    "drop chat with orphaned media companion (cid={}, uid={})",
-                    cm.cid, cm.uid
-                ))
-                .unwrap();
-                debug_log_str(c"media".as_ptr(), line.as_ptr());
+                debug_trace(
+                    c"media",
+                    format!(
+                        "drop chat with orphaned media companion (cid={}, uid={})",
+                        cm.cid, cm.uid
+                    ),
+                );
                 return;
             }
         }
@@ -281,17 +299,18 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
             m.bytes.unwrap_or(0),
             gbool(m.bytes.is_some()),
         );
-        let line = std::ffi::CString::new(format!(
-            "chat with media: cid={} uid={} mime={} dims={}x{} bytes={}",
-            cm.cid,
-            cm.uid,
-            String::from_utf8_lossy(m.type_),
-            m.width.unwrap_or(0),
-            m.height.unwrap_or(0),
-            m.bytes.unwrap_or(0)
-        ))
-        .unwrap();
-        debug_log_str(c"media".as_ptr(), line.as_ptr());
+        debug_trace(
+            c"media",
+            format!(
+                "chat with media: cid={} uid={} mime={} dims={}x{} bytes={}",
+                cm.cid,
+                cm.uid,
+                String::from_utf8_lossy(m.type_),
+                m.width.unwrap_or(0),
+                m.height.unwrap_or(0),
+                m.bytes.unwrap_or(0)
+            ),
+        );
     }
     // Ignore-gate + emit; C owns `ev` and frees it either way.
     hx_chat_recv(htlc, hx_chat_member_model(chat), cm.uid, ev);
