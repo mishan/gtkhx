@@ -1,5 +1,5 @@
 [workspace]
-resolver = "2"
+resolver = "3"
 members = [
     "crates/hxcrypto-hash",
     "crates/hxcrypto-stream",
@@ -72,6 +72,15 @@ members = [
 # into the C binary today) doesn't pay the compile cost until a
 # subsequent R3.x phase activates it (R3.2 — banner.c port — is the
 # first planned consumer).
+[workspace.package]
+# Debian trixie (stable) ships rustc 1.85 — see rust-toolchain.toml for the
+# full rationale. Declaring it here (inherited by every member via
+# `rust-version.workspace = true`) turns on cargo's MSRV-aware resolver
+# (enabled by resolver = "3"), which prefers dependency versions whose own
+# MSRV is <= 1.85. That keeps transitive deps (icu, zbus/zvariant via glycin,
+# …) from silently jumping to a version that needs a newer rustc.
+rust-version = "1.85"
+
 [workspace.dependencies]
 glib = "0.21"
 gio = "0.21"

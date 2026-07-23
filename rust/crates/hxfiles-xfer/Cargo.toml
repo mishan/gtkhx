@@ -1,4 +1,5 @@
 [package]
+rust-version.workspace = true
 name = "hxfiles-xfer"
 version = "0.1.0"
 edition = "2021"
