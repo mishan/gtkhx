@@ -21,6 +21,17 @@
 # (xtext, dfa, cipher, …) we don't intend to fix in one go — they exist as a
 # "what's new vs. baseline" signal with uploaded artifacts for the triage
 # queue. Flip a category to blocking once it's clean.
+#
+# Speed: both jobs run in the pre-built ghcr.io/mishan/gtkhx-ci-base:latest
+# image (published from the hotline-docker repo) — the whole build/analysis
+# toolchain, incl. libasan / libubsan / clang-tools-extra, is baked in, so
+# there is no per-run `dnf install`. The sanitize-and-analyze compiles link
+# through `mold` (mold -run wraps meson compile, intercepting ld via
+# LD_PRELOAD — no meson/RUSTFLAGS changes, cargo fingerprint unperturbed), and
+# the shared Rust target dir is cached across runs. Kept as its own workflow so
+# it runs in parallel with tests.yml on a separate runner (fast wall-clock);
+# only its per-run cost drops. Keep the base image in sync with these jobs if a
+# new dep is added.
 
 name: analyze
 
@@ -33,6 +44,7 @@ on:
 
 permissions:
   contents: read
+  packages: read        # pull the pre-built base image from GHCR
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -42,36 +54,19 @@ jobs:
   sanitize-and-analyze:
     name: ASan + UBSan (unit + proto) + GCC -fanalyzer
     runs-on: ubuntu-latest
+    # Pre-built toolchain image (published from hotline-docker). Everything the
+    # old `dnf install` pulled — meson/gcc, gtk4/libadwaita, the GStreamer
+    # stack, libasan/libubsan, git/rust/cargo — is baked in, so there's no
+    # per-run install. credentials let GITHUB_TOKEN pull it if the package is
+    # private (no-op when public).
     container:
-      image: fedora:43
+      image: ghcr.io/mishan/gtkhx-ci-base:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: checkout
         uses: actions/checkout@v4
-
-      - name: install build deps
-        # Union of the ASan + analyzer dep sets. libasan / libubsan back the
-        # sanitized build; the GStreamer stack + desktop-file-utils / appstream
-        # are needed for meson to configure (it probes gstreamer-1.0 etc. and
-        # references update-desktop-database at setup time).
-        run: |
-          dnf -y install \
-            meson ninja-build pkgconf-pkg-config gcc \
-            libasan libubsan \
-            gtk4-devel libadwaita-devel \
-            glib2-devel gobject-introspection-devel \
-            nettle-devel zlib-devel \
-            gsound-devel \
-            gstreamer1-devel \
-            gstreamer1-plugins-base-devel \
-            gstreamer1-plugins-bad-free-devel \
-            gstreamer1-plugins-bad-free-extras \
-            gstreamer1-plugins-good \
-            libsoup3-devel \
-            gettext-devel \
-            desktop-file-utils appstream \
-            libpanel-devel \
-            libseccomp-devel lcms2-devel \
-            git rust cargo
 
       - name: cache rust build
         # ONE shared cargo target dir (rust-cargo-target) for both the ASan and
@@ -101,7 +96,10 @@ jobs:
         # Builds the Rust workspace into the shared target dir + the ASan/UBSan
         # C objects. (The Rust staticlibs aren't sanitizer-instrumented — meson
         # doesn't pass -fsanitize to cargo — same as before; ASan covers the C.)
-        run: meson compile -C build-asan
+        # `mold -run` routes every link (the gtkhx C link + all rustc/cargo
+        # links) through mold via LD_PRELOAD — no meson/RUSTFLAGS change, so the
+        # cargo fingerprint (and thus the cache) stays valid.
+        run: mold -run meson compile -C build-asan
 
       - name: meson test (unit + proto under ASan/UBSan)
         # detect_leaks=0: GtkHx doesn't tear down every alloc on shutdown.
@@ -139,7 +137,7 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          meson compile -C build-analyzer 2>&1 \
+          mold -run meson compile -C build-analyzer 2>&1 \
             | tee build-analyzer/analyzer.log
 
           echo "=== -fanalyzer warning summary ===" \
@@ -165,35 +163,19 @@ jobs:
     # build — so it shares nothing with the build above.
     name: clang-tidy
     runs-on: ubuntu-latest
+    # Same pre-built image as sanitize-and-analyze — it ships clang-tools-extra
+    # (clang-tidy + run-clang-tidy) alongside the meson/gcc toolchain, so no
+    # per-run install. We still configure with gcc; clang-tidy only needs the
+    # compile-commands database, so there's no compile/link here (hence no mold).
     container:
-      image: fedora:43
+      image: ghcr.io/mishan/gtkhx-ci-base:latest
+      credentials:
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
     continue-on-error: true
     steps:
       - name: checkout
         uses: actions/checkout@v4
-
-      - name: install build deps + clang-tools-extra
-        # clang-tools-extra ships clang-tidy + run-clang-tidy. We still build
-        # with gcc — clang-tidy only needs the compile-commands database.
-        run: |
-          dnf -y install \
-            meson ninja-build pkgconf-pkg-config gcc \
-            clang-tools-extra \
-            gtk4-devel libadwaita-devel \
-            glib2-devel gobject-introspection-devel \
-            nettle-devel zlib-devel \
-            gsound-devel \
-            gstreamer1-devel \
-            gstreamer1-plugins-base-devel \
-            gstreamer1-plugins-bad-free-devel \
-            gstreamer1-plugins-bad-free-extras \
-            gstreamer1-plugins-good \
-            libsoup3-devel \
-            gettext-devel \
-            desktop-file-utils appstream \
-            libpanel-devel \
-            libseccomp-devel lcms2-devel \
-            git rust cargo
 
       - name: meson setup (export compile_commands.json)
         run: meson setup build-tidy
