@@ -49,8 +49,6 @@ extern "C" {
     );
     // gtkhx_ui_bridge.c — &hx_active_session()->htlc.
     fn gtkhx_active_htlc() -> *mut c_void;
-    // rand.c — CSPRNG bytes (getrandom + /dev/urandom fallback).
-    fn random_bytes(buf: *mut u8, len: usize) -> usize;
 }
 
 struct UserEdit {
@@ -134,7 +132,9 @@ fn gen_password(len: usize) -> Option<String> {
     let mut bi = buf.len();
     while out.len() < len {
         if bi >= buf.len() {
-            if unsafe { random_bytes(buf.as_mut_ptr(), buf.len()) } != buf.len() {
+            // CSPRNG entropy via the getrandom crate (portable: Linux
+            // getrandom(2), macOS getentropy, Windows BCryptGenRandom).
+            if getrandom::fill(&mut buf).is_err() {
                 return None;
             }
             bi = 0;

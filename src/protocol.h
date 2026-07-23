@@ -334,7 +334,6 @@ hmac_xxx (uint8_t *md, const void *key, uint32_t keylen,
  * src/rand.c: getrandom(2) on the happy path, /dev/urandom fallback
  * for kernels/libcs without getrandom support. Returns nbytes on
  * success or 0 on failure. */
-extern unsigned int random_bytes (uint8_t *buf, unsigned int nbytes);
 
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 

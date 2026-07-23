@@ -6,7 +6,7 @@
  *   compat.h    — portability shims, gettext _(), MAXPATHLEN, byte-shift
  *                 macros: pure preprocessor, no struct definitions.
  *   protocol.h  — wire/network/connection types, htlc_conn, qbuf, task,
- *                 hmac_xxx, random_bytes (Rust), byte-order helpers.
+ *                 hmac_xxx, byte-order helpers.
  *                 Pulls in <glib.h> but NOT <gtk/gtk.h>.
  *   prefs.h     — gtkhx_prefs and Window_Geo. Pure data.
  *   session.h   — GtkWidget*-bearing types, the `session` struct, the

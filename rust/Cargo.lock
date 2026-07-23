@@ -1650,6 +1650,7 @@ dependencies = [
 name = "gtkhx-ui"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "gio 0.21.5",
  "glib 0.21.5",
  "gtk4",
