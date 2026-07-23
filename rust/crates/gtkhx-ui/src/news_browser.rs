@@ -97,10 +97,12 @@ extern "C" {
         target: *mut c_void,
     );
 
+    // ---- hxconn: read the active connection's version / access bits directly
+    // (over gtkhx_active_htlc), rather than through news-specific C wrappers ----
+    fn hx_conn_version(htlc: *mut c_void) -> u16;
+    fn hx_conn_access_has(htlc: *mut c_void, bit: i32) -> i32;
+    fn hx_conn_access_permits(htlc: *mut c_void, bit: i32) -> i32;
     // ---- news_recv_bridge.c: session / carrier / leaf helpers ----
-    fn gtkhx_news_htlc_version() -> i32;
-    fn gtkhx_news_access_has(bit: i32) -> i32;
-    fn gtkhx_news_access_permits(bit: i32) -> i32;
     fn gtkhx_active_connected() -> glib::ffi::gboolean;
     fn gtkhx_active_htlc() -> *mut c_void;
     fn gnews_folder_new(path: *const c_char) -> *mut c_void;
@@ -253,14 +255,15 @@ fn sync_action_buttons(br: &NewsBrowser) {
             kind == NB_KIND_FOLDER || kind == NB_KIND_CATEGORY || kind == NB_KIND_POST,
         );
 
+        let htlc = gtkhx_active_htlc();
         br.btn_new_folder
-            .set_sensitive(gtkhx_news_access_has(HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
+            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
         br.btn_new_category
-            .set_sensitive(gtkhx_news_access_has(HL_ACCESS_CREATE_CATEGORIES) != 0);
+            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_CREATE_CATEGORIES) != 0);
         br.btn_new_post
-            .set_sensitive(gtkhx_news_access_has(HL_ACCESS_POST_NEWS) != 0);
+            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_POST_NEWS) != 0);
         br.btn_reply
-            .set_sensitive(gtkhx_news_access_has(HL_ACCESS_POST_NEWS) != 0);
+            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_POST_NEWS) != 0);
 
         let delete_bit = match kind {
             NB_KIND_FOLDER => HL_ACCESS_DELETE_NEWS_BUNDLES,
@@ -269,7 +272,7 @@ fn sync_action_buttons(br: &NewsBrowser) {
             _ => -1,
         };
         br.btn_delete
-            .set_sensitive(delete_bit >= 0 && gtkhx_news_access_has(delete_bit) != 0);
+            .set_sensitive(delete_bit >= 0 && hx_conn_access_has(htlc, delete_bit) != 0);
     }
 }
 
@@ -279,7 +282,8 @@ fn sync_action_buttons(br: &NewsBrowser) {
 /// >= 150 AND read-news permission (an empty legacy access map is permitted; the
 /// version gate is what excludes 1.0/1.2 servers that reject NEWSDIRLIST).
 unsafe fn threaded_news_available() -> bool {
-    gtkhx_news_htlc_version() >= 150 && gtkhx_news_access_permits(HL_ACCESS_READ_NEWS) != 0
+    let htlc = gtkhx_active_htlc();
+    hx_conn_version(htlc) >= 150 && hx_conn_access_permits(htlc, HL_ACCESS_READ_NEWS) != 0
 }
 
 /// Fire NEWSDIRLIST. `target` NULL = root fetch (populate `root_store`).

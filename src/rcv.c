@@ -54,7 +54,6 @@
 #include "htxf_io.h"             /* hxnet_hope_aead_free (HOPE AEAD handle) */
 #include "rcv.h"
 #include "hxconn.h"
-#include "news15.h"
 #include "hfs.h"
 #include "proto_trace.h"
 #include "hotline_proto.h"

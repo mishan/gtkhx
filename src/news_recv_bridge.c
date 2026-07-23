@@ -36,25 +36,9 @@
 /* hxnews-model — a post node's parsed date, for the date formatter below. */
 extern void hx_news_node_get_date (void *node, struct date_time *out);
 
-/* ---- session / htlc accessors for the Rust news browser ---- */
-
-int
-gtkhx_news_htlc_version (void)
-{
-    return (int) hx_conn_version (hx_active_session ()->htlc);
-}
-
-int
-gtkhx_news_access_has (int bit)
-{
-    return hx_conn_access_has (hx_active_session ()->htlc, bit);
-}
-
-int
-gtkhx_news_access_permits (int bit)
-{
-    return hx_conn_access_permits (hx_active_session ()->htlc, bit);
-}
+/* The version / access-bit reads the Rust news browser used to reach through
+ * here now call hxconn (hx_conn_version / _access_has / _access_permits) over
+ * gtkhx_active_htlc() directly — no news-specific wrappers. */
 
 /* ---- post-date formatting (C leaf: hl_date_decode + strftime) ----
  *

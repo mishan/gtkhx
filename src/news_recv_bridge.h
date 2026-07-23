@@ -23,15 +23,6 @@
 
 G_BEGIN_DECLS
 
-struct htlc_conn;
-
-/* ---- session / htlc accessors for the Rust news browser ----
- * The browser gates its RPC + toolbar sensitivity on the live session version
- * and access bitmap, which live on the C htlc_conn. */
-int gtkhx_news_htlc_version (void);
-int gtkhx_news_access_has (int bit);
-int gtkhx_news_access_permits (int bit);
-
 /* Format a post node's date (hl_date_decode + strftime) as a newly-allocated
  * string (caller g_free's), and load a row-icon resource as a 1.5x-upscaled
  * GdkPaintable (NULL on miss). Both are C leaves the Rust news browser calls. */
