@@ -1841,6 +1841,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_task_update_signal), NULL);
     g_signal_connect (emitter, "chat-log-line",
                       G_CALLBACK (chat_log_line_handler), NULL);
+    g_signal_connect (emitter, "user-notice",
+                      G_CALLBACK (user_notice_handler), NULL);
     g_signal_connect (emitter, "connection-state-changed",
                       G_CALLBACK (on_connection_state_changed_signal), NULL);
 }

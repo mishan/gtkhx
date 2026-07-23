@@ -316,6 +316,18 @@ mod imp {
                     Signal::builder("chat-log-line")
                         .param_types([Type::POINTER, Type::U32, Type::POINTER])
                         .build(),
+                    // user-notice: (htlc*, cid, kind, name*, old_name*) — a
+                    // roster notice line (join / parts / rename). The view
+                    // handler applies the showjoin pref + gettext.
+                    Signal::builder("user-notice")
+                        .param_types([
+                            Type::POINTER,
+                            Type::U32,
+                            Type::U32,
+                            Type::POINTER,
+                            Type::POINTER,
+                        ])
+                        .build(),
                     // connection-state-changed: (state:u32)
                     Signal::builder("connection-state-changed")
                         .param_types([Type::U32])
@@ -873,6 +885,31 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_log_line(
 ) {
     let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(body as *const c_void)];
     emit(self_, "chat-log-line", &v);
+}
+
+/// Emit a roster notice line (join / parts / rename) for chat `cid`. `kind` is
+/// one of the `HX_USER_NOTICE_*` values (gtkhx_session.h); `name`/`old_name` are
+/// raw C-string pointers (`old_name` is NULL except for a rename).
+///
+/// # Safety
+/// `self_`/`htlc` valid; `name`/`old_name` are valid C strings or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_session_emit_user_notice(
+    self_: *mut c_void,
+    htlc: *mut c_void,
+    cid: u32,
+    kind: u32,
+    name: *const c_char,
+    old_name: *const c_char,
+) {
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(cid),
+        glib::Value::from(kind),
+        ptr_value(name as *const c_void),
+        ptr_value(old_name as *const c_void),
+    ];
+    emit(self_, "user-notice", &v);
 }
 
 /// # Safety

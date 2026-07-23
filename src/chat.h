@@ -212,4 +212,11 @@ extern void gtkhx_apply_theme_palette (gboolean dark);
 extern void hx_chat_log_subject_changed (struct htlc_conn *htlc, guint32 cid,
                                          const char *subject);
 
+/* View-side handler for the "user-notice" signal (roster join / parts / rename
+ * lines emitted by the Rust hxuser-recv handlers). Applies the showjoin pref +
+ * gettext + INFOPREFIX. Connected in gtkhx_connect_signals. */
+extern void user_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
+                                 guint cid, guint kind, gpointer name,
+                                 gpointer old_name, gpointer user_data);
+
 #endif
