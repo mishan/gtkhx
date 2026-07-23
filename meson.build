@@ -53,6 +53,22 @@ extra_warnings = [
 ]
 add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c')
 
+# arm64 macOS: keep the ARM-NEON target feature on for the C compile.
+# GTK pulls in graphene, whose generated graphene-config.h selects its
+# ARM-NEON SIMD path from `__aarch64__` alone and unconditionally
+# `#include <arm_neon.h>`. Those intrinsics only type-check when the
+# translation unit has the `neon` target feature enabled — otherwise the
+# NEON vector types silently degrade to their scalar base (e.g.
+# `int8x16_t` becomes `signed char`) and every GTK-including source fails
+# to compile (seen on the ports.yml macos-14 runner: the compile reaches
+# arm_neon.h without the feature). NEON is baseline on Apple Silicon, so
+# naming the CPU re-asserts the feature; a trailing `-mcpu` overrides
+# whatever upstream flag or default dropped it. No-op elsewhere (the
+# Intel runner takes graphene's SSE path; Linux is unaffected).
+if host_machine.system() == 'darwin' and host_machine.cpu_family() == 'aarch64'
+  add_project_arguments(cc.get_supported_arguments('-mcpu=apple-m1'), language : 'c')
+endif
+
 # -----------------------------------------------------------------------------
 # Dependencies
 # -----------------------------------------------------------------------------
