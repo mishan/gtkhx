@@ -42,7 +42,6 @@ extern "C" {
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     // news_browser.c bridges.
     fn gtkhx_news_refresh_category(path: *const c_char);
-    fn gtkhx_news_node_date_string(node: *mut c_void) -> *mut c_char;
     // gtkhx_ui_bridge.c — the focused session's &htlc (single-session).
     fn gtkhx_active_htlc() -> *mut c_void;
     // gtkhx.c — themed .gtkhx-input CSS class + font for the compose body.
@@ -206,11 +205,7 @@ unsafe fn build_reply_context_panel(reply_to: *mut c_void) -> gtk::Box {
 
     let sender = crate::cstr(hx_news_node_sender(reply_to));
     let sender = if sender.is_empty() { "?".to_string() } else { sender };
-    let date_ptr = gtkhx_news_node_date_string(reply_to);
-    let date = crate::cstr(date_ptr);
-    if !date_ptr.is_null() {
-        glib::ffi::g_free(date_ptr as *mut c_void);
-    }
+    let date = crate::hl_date::news_node_date_string(reply_to).unwrap_or_default();
     // Single translatable msgid with positional args (was the C
     // _("Replying to %1$s — %2$s")) so translators keep one string + can
     // reorder for their word order.

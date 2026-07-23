@@ -59,6 +59,7 @@ rust_sources = files(
   'crates/hotline-proto/src/user_change.rs',
   'crates/hotline-proto/src/login.rs',
   'crates/hotline-proto/src/parse.rs',
+  'crates/hotline-proto/src/hl_date.rs',
   'crates/hotline-proto/src/ffi.rs',
   'crates/hxbridge/src/lib.rs',
   # Phase R3.1+ submodules, gated behind the `runtime` Cargo feature
@@ -87,6 +88,7 @@ rust_sources = files(
   # crate). One module per ported window; the Tracker window is the first.
   'crates/gtkhx-ui/src/lib.rs',
   'crates/gtkhx-ui/src/ffi.rs',
+  'crates/gtkhx-ui/src/hl_date.rs',
   'crates/gtkhx-ui/src/conversation.rs',
   'crates/gtkhx-ui/src/tr.rs',
   'crates/gtkhx-ui/src/dock.rs',

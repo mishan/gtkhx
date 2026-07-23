@@ -15,6 +15,7 @@
 //! fire).
 
 mod ffi;
+mod hl_date;
 mod tr;
 // Shared wrapper over the C dock-embed bridge, used by every docked-window
 // shell (Users, Tasks, …). See dock_bridge.c.

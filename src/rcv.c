@@ -44,7 +44,6 @@
 #include "files.h"
 #include "files_remote_provider.h"
 #include "preview.h"
-#include "hl_date.h"
 #include "gtkutil.h"
 #include "msg.h"
 #include "news.h"
@@ -2015,21 +2014,40 @@ rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
 static void
 hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
 {
-    time_t t;
-    struct tm tm;
+    struct gtkhx_proto_hl_date d;
+    GDateTime *dt = NULL;
 
     if (cap == 0) {
         return;
     }
     out[0] = '\0';
 
-    if (!hl_date_decode (bytes, &t)) {
+    /* Decode is protocol (hotline-proto); resolving to an absolute instant +
+     * formatting for display is view-side calendar math via GDateTime. */
+    if (!gtkhx_proto_hl_date_decode (bytes, 8, &d)) {
         return;
     }
-    if (!localtime_r (&t, &tm)) {
+    if (d.kind == 0) {
+        /* Mac 1904 epoch → an absolute UTC instant. */
+        dt = g_date_time_new_from_unix_local (
+            (gint64)d.secs - (gint64)GTKHX_PROTO_MAC_TO_UNIX_EPOCH_OFFSET);
+    } else {
+        /* Modern → seconds since Jan 1 `year` in local time. */
+        GDateTime *base = g_date_time_new_local (d.year, 1, 1, 0, 0, 0);
+        if (base) {
+            dt = g_date_time_add_seconds (base, (double)d.secs);
+            g_date_time_unref (base);
+        }
+    }
+    if (!dt) {
         return;
     }
-    strftime (out, cap, hx_timeformat, &tm);
+    char *s = g_date_time_format (dt, hx_timeformat);
+    g_date_time_unref (dt);
+    if (s) {
+        g_strlcpy (out, s, cap);
+        g_free (s);
+    }
 }
 
 void

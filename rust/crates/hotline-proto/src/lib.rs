@@ -44,6 +44,7 @@ pub mod dispatch;
 pub mod emoji;
 mod emoji_table;
 pub mod gif_icons;
+pub mod hl_date;
 pub mod inline_media;
 pub mod login;
 pub mod messages;

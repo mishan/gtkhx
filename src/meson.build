@@ -66,7 +66,6 @@ gtkhx_sources = files(
   'inline_media_download.c',
   'inline_media_upload.c',
   'hl_code.c',
-  'hl_date.c',
   'human_readable.c',
   'login_packet.c',
   'agreement_packet.c',
@@ -77,11 +76,10 @@ gtkhx_sources = files(
   # hxconn crate now (rust_hxconn_dep below); the layout is pinned by the
   # _Static_assert in protocol.h against Rust's HtlcConn.
   # news.c + news15.c + news_browser.c + news_send_bridge.c all retired — the
-  # 1.5 news wire senders live in the hxnews-send Rust crate, the reply
-  # handlers + carriers in hxnews-recv, and the browser UI in the gtkhx-ui
-  # `news_browser` module. news_recv_bridge.c is the last C leaf: htlc
-  # version+access, the post-date formatter, and the row-icon loader.
-  'news_recv_bridge.c',
+  # The 1.5 news domain is fully Rust: wire senders in hxnews-send, reply
+  # handlers + carriers in hxnews-recv, the browser UI + post-date formatting +
+  # row-icon loading in the gtkhx-ui `news_browser` / `news_render` / `hl_date`
+  # modules. (news_recv_bridge.c, the last C leaf, is gone.)
   'notify.c',
   'options.c',
   'path_hldir.c',
