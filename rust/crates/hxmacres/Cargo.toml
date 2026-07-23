@@ -15,9 +15,11 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 # The native parser is pure std (bounds-checked big-endian byte walking, no
-# glib / gtk), so `cargo test -p hxmacres` runs headless. `glib` is used only by
-# the ffi shim, to g_malloc the returned macres_res wrappers (C callers g_free
-# them) and to read the fd contents.
+# glib / gtk), so `cargo test -p hxmacres` runs headless and cross-platform.
+# `glib` is used only by the ffi shim, to g_malloc the returned macres_res
+# wrappers (C callers g_free them). The shim is portable — macres_file_open
+# takes a path and reads it with std::fs, so no raw-fd / POSIX code — but it
+# still links glib, so the crate needs a GTK stack wherever the ffi is built
+# (it's exercised via the full-app builds, not the bare no-GTK port tripwire).
 [dependencies]
 glib = { workspace = true }
-libc = "0.2"

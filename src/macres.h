@@ -32,9 +32,10 @@ struct macres_res {
 
 typedef struct macres_res macres_res;
 
-/* Read + parse the resource fork at `fd` (fd stays owned by the caller, which
- * may close it as soon as this returns). NULL on a read / parse failure. */
-extern macres_file *macres_file_open (int fd);
+/* Read + parse the resource fork at `path`. NULL if the file can't be read or
+ * isn't a valid resource fork. (Takes a path rather than an fd so the
+ * implementation stays portable — no raw-fd handling.) */
+extern macres_file *macres_file_open (const char *path);
 extern void macres_file_delete (macres_file *mrf);
 
 extern guint32 macres_file_num_res_of_type (macres_file *mrf, guint32 type);
