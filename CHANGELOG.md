@@ -5,6 +5,10 @@
   - Legacy bookmark files are imported if the TOML file does not exist
   - Bookmarks dialog supports exporting bookmarks to legacy Hotline bookmark files
   - Built-in bookmarks can now be deleted
+- Build
+  - GtkHx can now be built for OS X and Windows
+- Code Modernization
+  - GtkHx almost has more Rust code than C code
 
 ## 1.2.2
 
