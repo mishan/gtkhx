@@ -36,7 +36,6 @@ extern void xfer_tasks_update (struct htlc_conn *htlc);
 extern void xfers_delete_all (void);
 extern void xfer_delete (struct htxf_conn *htxf);
 extern struct htxf_conn *htxf_with_ref (guint32 ref);
-extern void hlclient_reap_pid (pid_t pid, int status);
 //extern inline int comment_len (const char *path);
 
 #endif

@@ -959,7 +959,3 @@ htxf_with_ref (guint32 ref)
     return 0;
 }
 
-void
-hlclient_reap_pid (pid_t pid, int status)
-{
-}

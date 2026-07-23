@@ -93,7 +93,6 @@
                                 * g_getenv on `environ` is a SIGSEGV. */
 
 /* From connect_test_stubs.c. */
-extern void connect_test_init_fd_table (void);
 extern void connect_test_reset_rcv_record (void);
 extern guint32 connect_test_first_rcv_type;
 extern guint32 connect_test_first_rcv_trans;
@@ -818,7 +817,6 @@ int
 main (int argc, char *argv[])
 {
     g_test_init (&argc, &argv, NULL);
-    connect_test_init_fd_table ();
 
     g_test_add_func ("/real_connect/orchestrator_login", test_orchestrator_login);
     g_test_add_func ("/real_connect/capabilities_negotiated",

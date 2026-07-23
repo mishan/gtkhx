@@ -22,14 +22,6 @@
  *
  * The stubs are deliberately dumb:
  *
- *   - hxd_files[] is a static byte-allocated array sized for
- *     getdtablesize(), backing struct hxd_file pointers
- *     network.c::send_login writes into. The test doesn't read
- *     these back — it's purely write-only side state.
- *   - hxd_fd_set / hxd_fd_clr are no-ops. Production installs a
- *     GIOChannel watch; the test doesn't need byte routing past
- *     send_login because the assertions check the GtkhxSession
- *     connection-state signals, not the inbound rcv path.
  *   - the_session is a single zero-initialised session struct.
  *     network.c only touches a couple of fields (htlc, tasks)
  *     during the connect path; the rest stays untouched.
@@ -71,46 +63,12 @@
 #include "gtkutil.h"
 #include "users.h"
 
-/* ---- hxd_files file table ----------------------------------- */
-
-static struct hxd_file *the_hxd_files;
-struct hxd_file *hxd_files = NULL;
-int hxd_open_max = 0;
-
-/* Called from the test's main() before hx_connect runs. Sizing
- * mirrors production gtkhx.c::main: query _SC_OPEN_MAX, then cap at
- * FD_SETSIZE. The cap matters here too — on Linux with a high
- * RLIMIT_NOFILE (containers, modern systemd) sysconf can return
- * 1 048 576, which would have us g_malloc0 ~80 MB of struct hxd_file
- * for a test binary that never opens more than a handful of fds. */
-void connect_test_init_fd_table (void);
-void
-connect_test_init_fd_table (void)
-{
-    if (hxd_files) {
-        return;
-    }
-    hxd_open_max = (int) sysconf (_SC_OPEN_MAX);
-    if (hxd_open_max <= 0) {
-        hxd_open_max = 1024;
-    }
-    if (hxd_open_max > FD_SETSIZE) {
-        hxd_open_max = FD_SETSIZE;
-    }
-    the_hxd_files = g_new0 (struct hxd_file, hxd_open_max);
-    hxd_files = the_hxd_files;
-}
-
-void hxd_fd_set (int fd, int rw) { (void) fd; (void) rw; }
-void hxd_fd_clr (int fd, int rw) { (void) fd; (void) rw; }
-
 /* ---- the_session + gtkhx_prefs globals ---------------------- */
 
 session the_session;
 struct gtkhx_prefs gtkhx_prefs;
 char last_msg_nick[32];
 char *g_user_colors[4];
-int hxd_open_max_placeholder; /* never read; just defined to make sure */
 
 /* ---- INFOPREFIX ---------------------------------------------- */
 

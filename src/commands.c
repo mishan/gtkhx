@@ -41,6 +41,7 @@
 #include "users.h"
 #include "msg.h"
 #include "commands.h"
+#include "cmd_exec.h" /* cmd_exec — /exec handler (Unix-only module) */
 
 void
 chrexpand (char *str, int len)
@@ -380,154 +381,6 @@ COMMAND (close)
     }
 }
 
-/* /exec spawns a POSIX subprocess (fork + pipe + /bin/sh) and watches the
- * output pipe via the fd table. That machinery is Unix-only; on other
- * platforms /exec is stubbed out below. */
-#ifdef G_OS_UNIX
-static void
-exec_close (int fd)
-{
-    close (fd);
-    memset (&hxd_files[fd], 0, sizeof (struct hxd_file));
-    hxd_fd_clr (fd, FDR);
-}
-
-static void
-exec_ready_read (int fd)
-{
-    ssize_t r;
-    char buf[0x4000];
-
-    r = read (fd, buf, sizeof (buf) - 1);
-    if (r == 0 || (r < 0 && errno != EINTR)) {
-        exec_close (fd);
-    } else {
-        buf[r] = 0;
-        /* conn.htlc holds the connection that started the command in
-         * `/exec -o` mode (see the setter in COMMAND(exec)), or NULL for
-         * a plain `/exec` whose output prints locally. Route -o output
-         * back to that originating connection — not hx_active_session(),
-         * which can differ from it once multiple connections exist. */
-        struct htlc_conn *out_htlc = hxd_files[fd].conn.htlc;
-        if (out_htlc) {
-            LF2CR (buf, r);
-            if (buf[r - 1] == '\r') {
-                buf[r - 1] = 0;
-            }
-            hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
-        } else {
-            hx_printf (hx_active_session ()->htlc, hxd_files[fd].cid, "%s", buf);
-        }
-    }
-}
-#endif /* G_OS_UNIX */
-
-COMMAND (exec)
-{
-#ifdef G_OS_UNIX
-    int pfds[2];
-    char *p, *av[4];
-    guint32 output_to = 0;
-
-    if (argc < 2) {
-        hx_printf_prefix (htlc, cid, INFOPREFIX, "usage: %s [-o] <command>\n",
-                          argv[0]);
-        return;
-    }
-    p = str;
-find_cmd_arg:
-    for (; *p && *p != ' '; p++)
-        ;
-    if (!*p || !(*++p)) {
-        return;
-    }
-    if (*p == '-' && *(p + 1) == 'o') {
-        output_to = 1;
-        goto find_cmd_arg;
-    }
-    if (pipe (pfds)) {
-        hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: pipe: %s\n", argv[0],
-                          strerror (errno));
-        return;
-    }
-    if (pfds[0] >= hxd_open_max) {
-        hx_printf_prefix (htlc, cid, INFOPREFIX,
-                          "%s:%d: %d >= hxd_open_max (%d)\n", __FILE__,
-                          __LINE__, pfds[0], hxd_open_max);
-        close (pfds[0]);
-        close (pfds[1]);
-        return;
-    }
-    switch (fork ()) {
-    case -1:
-        hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: fork: %s\n", argv[0],
-                          strerror (errno));
-        close (pfds[0]);
-        close (pfds[1]);
-        return;
-    case 0:
-        /* In the shell-pipe child: discard stdin (no terminal
-		 * input plumbed through), close our read end of the pipe,
-		 * then dup the write end into stdout + stderr.
-		 *
-		 * close(1)/close(2) before dup2 is redundant — POSIX dup2
-		 * implicitly closes the target slot if it was open, and
-		 * does so atomically with the assignment. The redundant
-		 * pair also tripped GCC -fanalyzer's
-		 * -Wanalyzer-fd-use-without-check (it tracks the close
-		 * and then sees the literal `1`/`2` arg to dup2 as a
-		 * use-after-close). */
-        close (0);
-        close (pfds[0]);
-        av[0] = "/bin/sh";
-        av[1] = "-c";
-        av[2] = p;
-        av[3] = 0;
-        /* GCC -fanalyzer's -Wanalyzer-fd-leak flags every dup2 + execve
-		 * idiom: it models dup2 as "opens a new fd, you must close
-		 * it" and doesn't see execve as a process-replacement that
-		 * inherits descriptors. The duped fds (now 1 and 2) ARE
-		 * supposed to outlive this stack frame — they become the
-		 * child's stdout + stderr. Suppress locally; the pattern is
-		 * standard POSIX and the analyzer just lacks the model. */
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wanalyzer-fd-leak"
-        if (dup2 (pfds[1], 1) == -1 || dup2 (pfds[1], 2) == -1) {
-            hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: dup2: %s\n", argv[0],
-                              strerror (errno));
-            _exit (1);
-        }
-        /* The duped fds (now 1 and 2) keep the pipe open; the
-		 * original pfds[1] is redundant. Close it so the child
-		 * doesn't carry an extra reference to the write end across
-		 * execve. */
-        close (pfds[1]);
-        execve ("/bin/sh", av, hxd_environ);
-#pragma GCC diagnostic pop
-        hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: execve: %s\n", argv[0],
-                          strerror (errno));
-        _exit (127);
-    default:
-        close (pfds[1]);
-        if (output_to) {
-            hxd_files[pfds[0]].conn.htlc = htlc;
-        } else {
-            hxd_files[pfds[0]].conn.htlc = 0;
-        }
-        hxd_files[pfds[0]].fd = pfds[0];
-        hxd_files[pfds[0]].cid = cid;
-        hxd_files[pfds[0]].ready_read = exec_ready_read;
-        hxd_fd_set (pfds[0], FDR);
-        break;
-    }
-#else
-    (void) argc;
-    (void) str;
-    hx_printf_prefix (htlc, cid, INFOPREFIX,
-                      "%s: not supported on this platform\n", argv[0]);
-#endif /* G_OS_UNIX */
-}
-
 COMMAND (ignore)
 {
     guint32 uid;
@@ -575,7 +428,10 @@ struct hx_command {
 static struct hx_command *commands, *last_command;
 
 static struct hx_command commands_tbl[] = {
-    { "clear", cmd_clear }, { "close", cmd_close },    { "exec", cmd_exec },
+    { "clear", cmd_clear }, { "close", cmd_close },
+#ifdef G_OS_UNIX
+    { "exec", cmd_exec }, /* /exec — Unix-only (cmd_exec.c) */
+#endif
     { "help", cmd_help },   { "icon", cmd_icon },      { "ignore", cmd_ignore },
     { "me", cmd_me },       { "msg", cmd_msg },        { "nick", cmd_nick },
     { "post", cmd_post },   { "quit", cmd_quit },      { "server", cmd_server },

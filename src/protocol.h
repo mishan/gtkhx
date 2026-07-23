@@ -222,35 +222,6 @@ extern void hl_code (void *__dst, const void *__src, size_t len);
 #define hl_decode(d, s, l) hl_code (d, s, l)
 #define hl_encode(d, s, l) hl_code (d, s, l)
 
-/* ---- File-descriptor / event-loop plumbing ------------------------- */
-
-struct hxd_file {
-    union {
-        void *ptr;
-        struct htlc_conn *htlc;
-        struct htrk_conn *htrk;
-        struct htxf_conn *htxf;
-    } conn;
-    guint32 cid;
-    int fd;
-    void (*ready_read) (int fd);
-    void (*ready_write) (int fd);
-};
-
-extern struct hxd_file *hxd_files;
-extern int hxd_open_max;
-
-extern void hxd_fd_set (int fd, int rw);
-extern void hxd_fd_clr (int fd, int rw);
-
-#define FDR 1
-#define FDW 2
-
-extern char **hxd_environ;
-
-extern int fd_closeonexec (int fd, int on);
-extern int fd_lock_write (int fd);
-
 /* ---- Tasks (in-flight protocol transactions) ----------------------- */
 
 /* Type-erased per-task callback. The dispatcher in rcv.c calls it as
