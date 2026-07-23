@@ -1,0 +1,205 @@
+# GtkHx port CI — Windows + macOS build probes.
+#
+# Manual-only for now: workflow_dispatch is the sole trigger, so this
+# never runs on push/PR. Fire it from the Actions tab ("Run workflow")
+# or `gh workflow run ports.yml`. When the jobs go green, add
+# `pull_request:` here and require them in branch protection.
+#
+# Three job families:
+#
+#   rust-portability — cargo test of the glib-free crates on
+#       windows-latest / macos-latest. Needs no GTK stack; this is the
+#       cheap tripwire that keeps hxnet & friends honest cross-platform.
+#       hxnet runs as its own step so its (currently expected) Windows
+#       failure — the unix RawFd seams in ffi.rs / htxf.rs — doesn't
+#       mask regressions in the crates that already are portable.
+#
+#   windows-app — full meson build under MSYS2 UCRT64.
+#   macos-app   — full meson build against Homebrew, both arches.
+#
+#   Both app jobs run a dependency PROBE step first (never fails) so a
+#   red run still tells you exactly which pkg-config modules the
+#   platform is missing. Known blockers going in:
+#     * libseccomp — required unconditionally (meson.build:158),
+#       Linux-only. Needs a host_machine.system() guard.
+#     * gsound — no MSYS2 package; Homebrew availability unverified.
+#     * hxnet on Windows — RawFd FFI seams.
+#   The probe output + uploaded meson-logs are the point of early runs.
+
+name: ports
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Crates with no glib dep today. Extend as more of the workspace
+  # proves portable; anything glib-flavored needs the GTK stack and
+  # belongs in the app jobs instead.
+  PORTABLE_CRATES: >-
+    -p hotline-proto
+    -p hxcompress
+    -p hxcrypto-aead
+    -p hxcrypto-hash
+    -p hxcrypto-stream
+    -p hxhfs
+    -p hxtls-trust
+
+jobs:
+  # ---------------------------------------------------------------
+  # Tier 1: Rust workspace, no GTK. rustup honors rust-toolchain.toml
+  # (channel 1.85) — unlike the Fedora-dnf path in tests.yml, the pin
+  # DOES apply here, which is exactly what we want for MSRV honesty.
+  # ---------------------------------------------------------------
+  rust-portability:
+    name: cargo test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: portable crates
+        run: cargo test --locked ${{ env.PORTABLE_CRATES }}
+
+      - name: hxnet
+        # Expected RED on windows-latest until the FromRawFd/IntoRawFd
+        # seams are replaced with path-based file handoff. Green here
+        # is the "hxnet is portable" milestone.
+        run: cargo test --locked -p hxnet --features hxnet/socks
+
+  # ---------------------------------------------------------------
+  # Tier 2: full app build, Windows / MSYS2 UCRT64.
+  # ---------------------------------------------------------------
+  windows-app:
+    name: meson build (MSYS2 UCRT64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          # pacboy resolves the mingw-w64-ucrt-x86_64- prefix (:p).
+          # Deliberately no gstreamer — we configure -Dvoice=disabled
+          # to keep variables down. No gsound: MSYS2 doesn't ship it;
+          # the probe below documents that on every run.
+          pacboy: >-
+            cc:p
+            meson:p
+            ninja:p
+            pkgconf:p
+            rust:p
+            gtk4:p
+            libadwaita:p
+            libpanel:p
+            gettext:p
+
+      - name: dependency probe
+        # Never fails — prints present/MISSING for every required
+        # pkg-config module so the run is informative even when
+        # configure can't succeed yet.
+        run: |
+          for m in gtk4 libadwaita-1 libpanel-1 glib-2.0 gthread-2.0 \
+                   gsound fontconfig libseccomp lcms2; do
+            v=$(pkg-config --modversion "$m" 2>/dev/null) \
+              && echo "  $m  $v" \
+              || echo "  $m  MISSING"
+          done
+
+      - name: meson setup
+        run: >-
+          meson setup build
+          -Dvoice=disabled
+          -Dtests=false
+          -Dcargo_target_dir="$(pwd)/rust-target"
+
+      - name: ninja
+        run: ninja -C build
+
+      - name: upload meson logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-windows
+          path: build/meson-logs/
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------
+  # Tier 2: full app build, macOS. macos-13 = Intel, macos-14 = arm64,
+  # so the matrix covers both ship targets with stock runners.
+  # ---------------------------------------------------------------
+  macos-app:
+    name: meson build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-13, macos-14]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: brew deps
+        # Formula existence for libpanel / gsound is unverified —
+        # attempt them individually and report rather than fail, then
+        # let the probe + configure steps tell the real story.
+        run: |
+          brew update --quiet
+          brew install meson ninja pkgconf gtk4 libadwaita gettext
+          for f in libpanel gsound; do
+            brew install "$f" || echo "::warning::no Homebrew formula for $f"
+          done
+
+      - name: rust toolchain
+        # Runner images ship rustup; this makes it honor the repo's
+        # rust-toolchain.toml pin (1.85) instead of a stale default.
+        run: rustup show
+
+      - name: dependency probe
+        run: |
+          for m in gtk4 libadwaita-1 libpanel-1 glib-2.0 gthread-2.0 \
+                   gsound fontconfig libseccomp lcms2; do
+            v=$(pkg-config --modversion "$m" 2>/dev/null) \
+              && echo "  $m  $v" \
+              || echo "  $m  MISSING"
+          done
+
+      - name: meson setup
+        run: >-
+          meson setup build
+          -Dvoice=disabled
+          -Dtests=false
+          -Dcargo_target_dir="$(pwd)/rust-target"
+
+      - name: ninja
+        run: ninja -C build
+
+      - name: upload meson logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-${{ matrix.os }}
+          path: build/meson-logs/
+          if-no-files-found: ignore
+
+
+          
