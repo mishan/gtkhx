@@ -1921,6 +1921,9 @@ dependencies = [
 [[package]]
 name = "hxnews-recv"
 version = "0.1.0"
+dependencies = [
+ "hotline-proto",
+]
 
 [[package]]
 name = "hxnews-send"
