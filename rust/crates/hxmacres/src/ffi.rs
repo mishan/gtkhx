@@ -8,11 +8,8 @@
 //! `g_free` it (as `options.c` does), with its `data` pointer borrowing into the
 //! handle's buffer (valid until `macres_file_delete`).
 
-use std::ffi::c_void;
-use std::io::Read;
-use std::mem::ManuallyDrop;
-use std::os::raw::c_int;
-use std::os::unix::io::FromRawFd;
+use std::ffi::{c_void, CStr};
+use std::os::raw::c_char;
 
 use crate::{Resource, ResourceFork};
 
@@ -42,13 +39,23 @@ const _: () = {
     assert!(offset_of!(MacresRes, data) == 8 + ptr);
 };
 
-/// Read all of `fd`'s bytes into an owned `Vec` **without** closing it — the
-/// caller (`gtkhx.c`) closes the fd right after `macres_file_open` returns.
-unsafe fn read_fd(fd: c_int) -> Option<Vec<u8>> {
-    let mut f = ManuallyDrop::new(std::fs::File::from_raw_fd(fd));
-    let mut buf = Vec::new();
-    f.read_to_end(&mut buf).ok()?;
-    Some(buf)
+/// Read all of the file at `cpath` into an owned `Vec`. Portable: no raw-fd /
+/// POSIX handling, so it builds on every target. `None` on any read error.
+fn read_path(cpath: &CStr) -> Option<Vec<u8>> {
+    // GtkHx builds these paths with GLib (`g_build_filename`). On Unix, filenames
+    // are opaque bytes (so we decode the raw bytes to preserve the exact path
+    // semantics of open(2)); on non-Unix (Windows), GLib uses UTF-8, which std
+    // maps to UTF-16 at the filesystem boundary.
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        std::fs::read(OsStr::from_bytes(cpath.to_bytes())).ok()
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::read(cpath.to_str().ok()?).ok()
+    }
 }
 
 /// `g_malloc` a `macres_res` wrapper around a borrowed [`Resource`]. The `data`
@@ -63,14 +70,18 @@ unsafe fn alloc_res(res: Resource<'_>) -> *mut MacresRes {
     p
 }
 
-/// `macres_file *macres_file_open (int fd)` — parse the resource fork at `fd`.
-/// Returns an opaque handle or NULL on a read / parse failure.
+/// `macres_file *macres_file_open (const char *path)` — read and parse the
+/// resource fork at `path`. Returns an opaque handle, or NULL if the file
+/// can't be read or isn't a valid resource fork.
 ///
 /// # Safety
-/// `fd` is a valid, readable file descriptor owned by the caller.
+/// `path` is NULL or a valid NUL-terminated C string naming a readable file.
 #[no_mangle]
-pub unsafe extern "C" fn macres_file_open(fd: c_int) -> *mut c_void {
-    let Some(data) = read_fd(fd) else {
+pub unsafe extern "C" fn macres_file_open(path: *const c_char) -> *mut c_void {
+    if path.is_null() {
+        return std::ptr::null_mut();
+    }
+    let Some(data) = read_path(CStr::from_ptr(path)) else {
         return std::ptr::null_mut();
     };
     match ResourceFork::parse(data) {

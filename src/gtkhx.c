@@ -892,7 +892,7 @@ collect_rsrc_files (GPtrArray *out, const char *dir)
 void
 init_icons (void)
 {
-    int fd, i;
+    int i;
     struct ifn *ifn = &icon_files;
     GPtrArray *paths;
     char *user_dir;
@@ -971,14 +971,11 @@ init_icons (void)
 
     for (i = 0; i < (int)paths->len; i++) {
         ifn->files[i] = (char *)g_ptr_array_index (paths, i);
-        fd = open (ifn->files[i], O_RDONLY);
-        if (fd < 0) {
-            g_warning ("%s: %s\n", ifn->files[i], strerror (errno));
-            ifn->cicns[i] = 0;
-            continue;
+        /* macres_file_open reads the file itself (portable — no fd handoff). */
+        ifn->cicns[i] = macres_file_open (ifn->files[i]);
+        if (!ifn->cicns[i]) {
+            g_warning ("%s: not readable or not a valid Mac resource file\n", ifn->files[i]);
         }
-        ifn->cicns[i] = macres_file_open (fd);
-        close (fd);
     }
     ifn->n = paths->len;
     /* free the GPtrArray shell only — element strings transferred
