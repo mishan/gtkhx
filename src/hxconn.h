@@ -12,8 +12,8 @@
  * includes hxconn.h (and not protocol.h) sees the accessors but NOT the fields,
  * which is the end-state contract. Production allocates a connection with
  * hx_conn_new (a Rust Box, never freed — it lives for the process); the Tier-2/
- * Tier-3 tests stack-allocate the pinned C mirror still in protocol.h. The
- * #[repr(C)] HtlcConn and the _Static_assert in protocol.h keep the two in
+ * Tier-3 tests stack-allocate the pinned C mirror in hxconn_layout.h. The
+ * #[repr(C)] HtlcConn and the _Static_assert in hxconn_layout.h keep the two in
  * lockstep.
  */
 

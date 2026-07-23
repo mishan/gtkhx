@@ -23,6 +23,12 @@
 #include "compat.h"  /* HOSTLEN */
 #include "hotline.h" /* hl_access_bits */
 
+/* Forward-declared so this header is self-contained (doesn't depend on
+ * protocol.h / session.h having been included first for the `session` typedef).
+ * The full type is `typedef struct _session session;` in session.h; gnu11
+ * permits this redundant typedef of the same tag. */
+typedef struct _session session;
+
 struct htlc_conn {
     /* The session that owns this connection. Set once at allocation; read by
 	 * sess_from_htlc() to route a received event back to its session (replaces
