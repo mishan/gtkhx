@@ -204,12 +204,22 @@ pub fn pin(
     write_atomic(known_hosts, out.as_bytes())
 }
 
-/// Atomic write: temp file in the same directory (mode 0600) + rename. Mirrors
-/// `hx_tls_trust_pin`'s "surgical file primitives" — the config directory is
-/// assumed to exist (created at app startup), so no `mkdir` here.
+/// Apply a Unix file mode to `opts` on platforms that model one; a no-op on
+/// Windows, whose `OpenOptions` has no mode concept (the temp file inherits the
+/// config directory's ACL there instead of an explicit 0600).
+#[cfg(unix)]
+fn with_mode(opts: &mut std::fs::OpenOptions, mode: u32) {
+    use std::os::unix::fs::OpenOptionsExt;
+    opts.mode(mode);
+}
+#[cfg(not(unix))]
+fn with_mode(_opts: &mut std::fs::OpenOptions, _mode: u32) {}
+
+/// Atomic write: temp file in the same directory (mode 0600 on Unix) + rename.
+/// Mirrors `hx_tls_trust_pin`'s "surgical file primitives" — the config
+/// directory is assumed to exist (created at app startup), so no `mkdir` here.
 fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
     use std::io::{ErrorKind, Write};
-    use std::os::unix::fs::OpenOptionsExt;
 
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
@@ -237,12 +247,10 @@ fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
             nanos,
             next_seq()
         ));
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(&tmp)
-        {
+        let mut opts = std::fs::OpenOptions::new();
+        opts.write(true).create_new(true);
+        with_mode(&mut opts, 0o600);
+        match opts.open(&tmp) {
             Ok(handle) => {
                 f = Some(handle);
                 break;

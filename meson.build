@@ -385,12 +385,22 @@ endif
 
 # Refresh the gtk-update-icon-cache and update-desktop-database state
 # after `meson install` so the freshly-installed icon and .desktop
-# entry are visible to the desktop session without a logout. No-ops if
-# the tools are missing.
+# entry are visible to the desktop session without a logout.
+#
+# Each action is gated on its tool actually being present: meson's
+# gnome.post_install() resolves the helper program at configure time and
+# hard-errors when it's missing (it does NOT silently no-op). desktop-file-utils
+# (update-desktop-database) and gtk-update-icon-cache aren't packaged on macOS /
+# MSYS2, so probe with required:false and only ask post_install to run what
+# exists. On Linux both are present and behavior is unchanged.
 gnome = import('gnome')
+update_desktop_db_prog = find_program('update-desktop-database', required : false)
+update_icon_cache_prog = find_program(
+  'gtk4-update-icon-cache', 'gtk-update-icon-cache', required : false,
+)
 gnome.post_install(
-  gtk_update_icon_cache    : true,
-  update_desktop_database  : true,
+  gtk_update_icon_cache    : update_icon_cache_prog.found(),
+  update_desktop_database  : update_desktop_db_prog.found(),
 )
 
 # -----------------------------------------------------------------------------

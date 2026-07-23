@@ -103,6 +103,10 @@ jobs:
           # Deliberately no gstreamer — we configure -Dvoice=disabled
           # to keep variables down. No gsound: MSYS2 doesn't ship it;
           # the probe below documents that on every run.
+          # lcms2: glycin (via hx-image-decode) links Little-CMS for ICC
+          # colour management on every platform, so meson's `dependency('lcms2')`
+          # needs it here. (fontconfig comes transitively with gtk4/pango;
+          # libseccomp is Linux-only and gated out in meson.build.)
           pacboy: >-
             cc:p
             meson:p
@@ -113,6 +117,7 @@ jobs:
             libadwaita:p
             libpanel:p
             gettext:p
+            lcms2:p
 
       - name: dependency probe
         # Never fails — prints present/MISSING for every required
@@ -145,8 +150,11 @@ jobs:
           if-no-files-found: ignore
 
   # ---------------------------------------------------------------
-  # Tier 2: full app build, macOS. macos-13 = Intel, macos-14 = arm64,
-  # so the matrix covers both ship targets with stock runners.
+  # Tier 2: full app build, macOS. macos-15-intel = Intel (x86_64),
+  # macos-14 = arm64 (Apple Silicon), so the matrix covers both ship
+  # targets with stock runners. (The old macos-13 Intel image was
+  # retired by GitHub; the -intel-suffixed images are the current way
+  # to get an x86_64 macOS runner.)
   # ---------------------------------------------------------------
   macos-app:
     name: meson build (${{ matrix.os }})
@@ -154,7 +162,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-13, macos-14]
+        os: [macos-15-intel, macos-14]
     steps:
       - uses: actions/checkout@v4
 
@@ -164,7 +172,11 @@ jobs:
         # let the probe + configure steps tell the real story.
         run: |
           brew update --quiet
-          brew install meson ninja pkgconf gtk4 libadwaita gettext
+          # little-cms2 provides lcms2.pc — glycin (via hx-image-decode) links
+          # Little-CMS for ICC colour management on every platform, so meson's
+          # dependency('lcms2') needs it. (fontconfig arrives with gtk4;
+          # libseccomp is Linux-only and gated out in meson.build.)
+          brew install meson ninja pkgconf gtk4 libadwaita gettext little-cms2
           for f in libpanel gsound; do
             brew install "$f" || echo "::warning::no Homebrew formula for $f"
           done

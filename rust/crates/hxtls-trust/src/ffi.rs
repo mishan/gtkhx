@@ -16,10 +16,39 @@
 use crate::TrustStatus;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_int};
-use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Mutex, OnceLock};
+
+// ---- portable C-string ↔ path seams ----
+//
+// The config dir comes from C (gtkhx.c → GLib) and the known_hosts path goes
+// back to C for the prompt dialog to display. On Unix these are raw bytes (as
+// the old OsStrExt did); GLib hands back UTF-8 on Windows, so other targets
+// round-trip through UTF-8. Keeping the Unix path byte-exact preserves the
+// original tls_trust.c behavior for non-UTF-8 config paths.
+
+/// C-string bytes → a `PathBuf`.
+#[cfg(unix)]
+fn path_from_c_bytes(bytes: &[u8]) -> PathBuf {
+    use std::os::unix::ffi::OsStrExt;
+    PathBuf::from(std::ffi::OsStr::from_bytes(bytes))
+}
+#[cfg(not(unix))]
+fn path_from_c_bytes(bytes: &[u8]) -> PathBuf {
+    PathBuf::from(String::from_utf8_lossy(bytes).into_owned())
+}
+
+/// A `Path`'s bytes for handing back to C (display-only known_hosts path).
+#[cfg(unix)]
+fn path_to_c_bytes(p: &Path) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    p.as_os_str().as_bytes().to_vec()
+}
+#[cfg(not(unix))]
+fn path_to_c_bytes(p: &Path) -> Vec<u8> {
+    p.to_string_lossy().into_owned().into_bytes()
+}
 
 #[cfg(not(test))]
 extern "C" {
@@ -145,7 +174,7 @@ fn known_hosts_path() -> Option<PathBuf> {
         return None;
     }
     let cfg = unsafe { CStr::from_ptr(cfg) };
-    Some(PathBuf::from(std::ffi::OsStr::from_bytes(cfg.to_bytes())).join("known_hosts"))
+    Some(path_from_c_bytes(cfg.to_bytes()).join("known_hosts"))
 }
 
 // ---- prompt registration (the GUI dialog lives in gtkhx-ui) ----
@@ -187,7 +216,7 @@ fn call_prompt(host: &str, port: u16, fp: &str, status: TrustStatus, kh: Option<
     };
     let host_c = CString::new(host).unwrap_or_default();
     let fp_c = CString::new(fp).unwrap_or_default();
-    let kh_c = kh.and_then(|p| CString::new(p.as_os_str().as_bytes()).ok());
+    let kh_c = kh.and_then(|p| CString::new(path_to_c_bytes(p)).ok());
     let kh_ptr = kh_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
     cb(host_c.as_ptr(), port, fp_c.as_ptr(), status as c_int, kh_ptr) != 0
 }
