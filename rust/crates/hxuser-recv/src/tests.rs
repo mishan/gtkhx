@@ -180,3 +180,14 @@ fn selfinfo_emits_self_updated() {
     unsafe { hx_selfinfo_recv(std::ptr::null_mut()) };
     assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
 }
+
+#[test]
+fn rcv_selfinfo_parses_marks_logged_in_then_emits() {
+    // The full SELFINFO handler: parse the frame, flip logged-in, emit.
+    test_env::reset();
+    let frame = [0u8; 8];
+    unsafe { hx_rcv_user_selfinfo(std::ptr::null_mut(), frame.as_ptr(), frame.len()) };
+    assert!(test_env::SELFINFO_PARSED.with(|c| c.get()));
+    assert_eq!(test_env::LOGGED_IN.with(|c| c.get()), 1);
+    assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
+}

@@ -70,6 +70,13 @@ extern "C" {
     /// `GtkhxSession::self-updated (htlc)` — our own access bits / uid were
     /// (re)parsed from a SELFINFO reply.
     fn gtkhx_session_emit_self_updated(self_: *mut c_void, htlc: *mut c_void);
+    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
+    /// Deliberately ignores the server-supplied name — our local prefs nick is
+    /// authoritative. C helper in proto_helpers.c.
+    fn hx_selfinfo_parse(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> u32;
+    /// Set our own "logged in" flag on the connection (hxconn). SELFINFO is the
+    /// canonical login-complete signal; the agreement Agree button reads this.
+    fn hx_conn_set_logged_in(htlc: *mut c_void, v: c_int);
 }
 
 /// Result of [`hx_user_apply_recv`] — tells the C side what (if anything) it
@@ -207,11 +214,41 @@ pub unsafe extern "C" fn hx_selfinfo_recv(htlc: *mut c_void) {
     gtkhx_session_emit_self_updated(gtkhx_session_get_default(), htlc);
 }
 
+/// `void hx_rcv_user_selfinfo (htlc, frame, frame_len)` — the SELFINFO
+/// (`HTLS_HDR_USER_SELFINFO`) receive handler.
+///
+/// SELFINFO carries our own access bitmap + uid + icon. The chunk parse stays in
+/// `hx_selfinfo_parse` (proto_helpers.c) so the Tier-2 unit tests can drive it
+/// headless; it folds the fields into `htlc` and deliberately ignores the
+/// server-supplied name (our local prefs nick is authoritative and we push it
+/// back at agreement time). SELFINFO is the canonical "login complete" signal,
+/// so we set the `logged_in` flag — the agreement Agree button reads it to
+/// decide whether to send AGREEMENTAGREE. The view then refreshes toolbar
+/// sensitivity (kick/ban gate on the access bits) off the `self-updated` emit.
+///
+/// This is NOT where post-login fetches fire: in the 1.5 flow SELFINFO arrives
+/// before the agreement, so USER_GETLIST / news are sent from
+/// `hx_send_agreement_agree`, after AGREEMENTAGREE is on the wire.
+///
+/// # Safety
+/// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_user_selfinfo(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+) {
+    hx_selfinfo_parse(htlc, frame, frame_len);
+    hx_conn_set_logged_in(htlc, 1);
+    hx_selfinfo_recv(htlc);
+}
+
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
 pub(crate) mod test_env {
     use std::cell::{Cell, RefCell};
+    use std::os::raw::c_int;
 
     #[derive(Debug, PartialEq, Eq, Clone)]
     pub enum Emit {
@@ -259,11 +296,17 @@ pub(crate) mod test_env {
         pub static CONTAINS: Cell<bool> = const { Cell::new(true) };
         /// Records the last emitted roster signal, or None.
         pub static EMIT: RefCell<Option<Emit>> = const { RefCell::new(None) };
+        /// SELFINFO handler: did it call the chunk parse?
+        pub static SELFINFO_PARSED: Cell<bool> = const { Cell::new(false) };
+        /// SELFINFO handler: value passed to hx_conn_set_logged_in (or -1).
+        pub static LOGGED_IN: Cell<c_int> = const { Cell::new(-1) };
     }
 
     pub fn reset() {
         CONTAINS.with(|c| c.set(true));
         EMIT.with(|c| *c.borrow_mut() = None);
+        SELFINFO_PARSED.with(|c| c.set(false));
+        LOGGED_IN.with(|c| c.set(-1));
     }
     pub fn take() -> Option<Emit> {
         EMIT.with(|c| c.borrow_mut().take())
@@ -363,6 +406,17 @@ unsafe fn gtkhx_session_emit_user_info(
 #[cfg(test)]
 unsafe fn gtkhx_session_emit_self_updated(_self_: *mut c_void, _htlc: *mut c_void) {
     test_env::record(test_env::Emit::SelfUpdated);
+}
+
+#[cfg(test)]
+unsafe fn hx_selfinfo_parse(_htlc: *mut c_void, _frame: *const u8, _frame_len: usize) -> u32 {
+    test_env::SELFINFO_PARSED.with(|c| c.set(true));
+    0
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_set_logged_in(_htlc: *mut c_void, v: c_int) {
+    test_env::LOGGED_IN.with(|c| c.set(v));
 }
 
 #[cfg(test)]

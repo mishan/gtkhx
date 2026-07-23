@@ -591,10 +591,10 @@ extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
                                int skip_self_create, int incremental);
 extern int hx_user_part_recv (struct htlc_conn *htlc, void *chat,
                               void *member_model, guint16 uid);
-/* USER_INFO reply + SELFINFO self-updated emits — Rust hxuser-recv crate. */
+/* USER_INFO reply emit — Rust hxuser-recv crate. (The SELFINFO self-updated
+ * emit is now internal to hxuser-recv's hx_rcv_user_selfinfo.) */
 extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
                                guint16 len);
-extern void hx_selfinfo_recv (struct htlc_conn *htlc);
 
 void
 hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -769,61 +769,15 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
  * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
  * by name (declared in rcv.h); no C body remains here. (network-endgame.md E2.) */
 
-void
-hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* The chunk walker (parses HTLS_DATA_ACCESS + HTLS_DATA_USER_LIST
-	 * into htlc->access / uid / icon) is in proto_helpers.c so the
-	 * Tier 2 unit tests can drive it without GTK. NB: the parser
-	 * deliberately ignores the server-supplied name bytes (see the
-	 * comment there) — we treat our local prefs nick as authoritative
-	 * and push it back to the server immediately below. */
-    hx_selfinfo_parse (htlc, frame, frame_len);
-
-    /* SELFINFO is the canonical 'login complete' signal.
-	 * Track it on htlc->flags so the agreement Agree button can
-	 * tell whether to send AGREEMENTAGREE. See the comment on the
-	 * flag in protocol.h for the legacy-vs-1.9 reasoning. */
-    hx_conn_set_logged_in (htlc, 1);
-
-    /* Access bits just landed; the view refreshes toolbar-button
-     * sensitivity (kick/ban etc. gate on the access bitmap) off the
-     * "self-updated" signal. The emit lives in the Rust hxuser-recv crate. */
-    hx_selfinfo_recv (htlc);
-
-    /* Note: SELFINFO is NOT where we fire post-login fetches. In
-	 * the 1.5 flow SELFINFO (TranUserAccess) arrives BEFORE the
-	 * server sends the agreement — firing USER_GETLIST / news here
-	 * would land them at the server before our AGREEMENTAGREE, so
-	 * the server logs the action against the not-yet-joined session.
-	 * fogWraith caught this on Mobius (Classic Macs / MacSecret /
-	 * vespernet) where the server-side log shows "Get user list"
-	 * arriving before "Accept agreement". The fetches now fire from
-	 * hx_send_agreement_agree, after AGREEMENTAGREE is on the wire.
-	 *
-	 * the SELFINFO USE_ANY_NAME auto-push that used to
-	 * live here is gone. It existed to deliver NAME + ICON to the
-	 * server on flows where AGREEMENTAGREE couldn't be relied on:
-	 *
-	 *   - 1.9-style servers where SELFINFO arrived first and the
-	 *     concurrence() click path was sending USER_CHANGE instead
-	 *     of AGREEMENTAGREE (to dodge a misdiagnosed Mobius
-	 *     disconnect bug). See gtkhx_mobius_options_field memory.
-	 *   - no-agreement servers where the user has nothing to
-	 *     click Agree on.
-	 *
-	 * Both cases are now handled by AGREEMENTAGREE itself:
-	 *   - concurrence() always sends AGREEMENTAGREE on Agree click
-	 *     (with NAME + ICON + OPTIONS chunks).
-	 *   - hx_rcv_agreement_file's HX_AGREEMENT_NONE / NOT_FOUND
-	 *     branch auto-sends AGREEMENTAGREE when there's no
-	 *     agreement to display.
-	 *
-	 * Keeping the auto-push here would have it fire alongside the
-	 * Agree click on 1.9 servers, producing two redundant NAME +
-	 * ICON deliveries plus a USER_CHANGE broadcast race that nudged
-	 * us to the top of the local user_list. Cleaner without it. */
-}
+/* hx_rcv_user_selfinfo (HTLS_HDR_USER_SELFINFO) is a #[no_mangle] fn in the
+ * hxuser-recv crate (rust/crates/hxuser-recv): it calls hx_selfinfo_parse
+ * (proto_helpers.c chunk walker → htlc access/uid/icon), flips the logged-in
+ * flag (SELFINFO is the canonical login-complete signal the agreement Agree
+ * button reads), and emits self-updated via hx_selfinfo_recv so the view
+ * refreshes toolbar sensitivity. Post-login fetches are deliberately NOT fired
+ * here — in the 1.5 flow SELFINFO precedes the agreement, so USER_GETLIST / news
+ * go out from hx_send_agreement_agree after AGREEMENTAGREE. The dispatch switch
+ * below calls it by name (declared in rcv.h); no C body remains here. */
 
 void
 hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
