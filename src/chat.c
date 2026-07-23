@@ -2098,7 +2098,7 @@ void
 chat_subject_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
                              guint cid, gpointer subject, gpointer user_data)
 {
-    hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: %s",
+    hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: %s\n",
                       _ ("Subject Changed to"), (const char *)subject);
 }
 

@@ -541,6 +541,9 @@ pub unsafe extern "C" fn hx_rcv_user_selfinfo(
     frame: *const u8,
     frame_len: usize,
 ) {
+    if frame.is_null() {
+        return;
+    }
     hx_selfinfo_parse(htlc, frame, frame_len);
     hx_conn_set_logged_in(htlc, 1);
     hx_selfinfo_recv(htlc);

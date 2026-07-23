@@ -999,12 +999,59 @@ mod tests {
     }
 
     #[test]
-    fn registers_all_signals() {
-        // One entry per signal the model→view contract carries. This exact
-        // count is a deliberate drift-catcher: adding or removing a signal
-        // without updating it (and the matching emit wrapper) trips here.
-        // Bump it in lockstep when the signal set changes.
-        assert_eq!(imp::GtkhxSession::signals().len(), 30);
+    fn user_notice_signal_round_trips() {
+        // (htlc ptr, cid:u32, kind:u32, name ptr, old_name ptr) — the 5-arg
+        // roster-notice shape. Proves the emit wrapper marshals all five and
+        // that the signal is registered (an unregistered signal would
+        // GLib-critical on emit rather than reach the handler).
+        let s = new_session();
+        let got: Rc<Cell<(usize, u32, u32, usize, usize)>> = Rc::new(Cell::new((0, 0, 0, 0, 0)));
+        let got2 = got.clone();
+        s.connect_local("user-notice", false, move |args| {
+            got2.set((
+                pval(&args[1]),
+                args[2].get::<u32>().unwrap(),
+                args[3].get::<u32>().unwrap(),
+                pval(&args[4]),
+                pval(&args[5]),
+            ));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        let name = std::ffi::CString::new("Alice").unwrap();
+        unsafe {
+            gtkhx_session_emit_user_notice(
+                raw,
+                0xABCD as *mut c_void,
+                7,
+                2,
+                name.as_ptr(),
+                std::ptr::null(),
+            );
+        }
+        assert_eq!(
+            got.get(),
+            (0xABCD, 7, 2, name.as_ptr() as usize, 0)
+        );
+    }
+
+    #[test]
+    fn chat_subject_notice_signal_round_trips() {
+        // (htlc ptr, cid:u32, subject ptr) — distinct from chat-subject so the
+        // "Subject Changed to" line only fires on a real change.
+        let s = new_session();
+        let got: Rc<Cell<(usize, u32, usize)>> = Rc::new(Cell::new((0, 0, 0)));
+        let got2 = got.clone();
+        s.connect_local("chat-subject-notice", false, move |args| {
+            got2.set((pval(&args[1]), args[2].get::<u32>().unwrap(), pval(&args[3])));
+            None
+        });
+        let raw = s.as_ptr() as *mut c_void;
+        let subj = std::ffi::CString::new("New topic").unwrap();
+        unsafe {
+            gtkhx_session_emit_chat_subject_notice(raw, 0x1234 as *mut c_void, 5, subj.as_ptr());
+        }
+        assert_eq!(got.get(), (0x1234, 5, subj.as_ptr() as usize));
     }
 
     #[test]

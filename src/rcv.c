@@ -608,9 +608,10 @@ extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
 /* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
  * hxchat-recv crate (rust/crates/hxchat-recv, Phase E2): it parses the frame,
  * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
- * and on a real change sets the model subject + logs the "Subject Changed to"
- * line via hx_chat_log_subject_changed (chat.c). The dispatch switch below calls
- * it by name (declared in rcv.h); no C body remains here. */
+ * and on a real change sets the model subject + emits the "chat-subject-notice"
+ * signal for the "Subject Changed to" line (view-side handler in chat.c). The
+ * dispatch switch below calls it by name (declared in rcv.h); no C body remains
+ * here. */
 
 void
 hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
