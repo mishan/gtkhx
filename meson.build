@@ -161,8 +161,19 @@ voice_enabled = gstreamer_dep.found() and gstreamer_app_dep.found() \
 # include them explicitly. Versions follow the Debian/Ubuntu LTS
 # floor + the GNOME 48+ Flatpak runtime.
 fontconfig_dep = dependency('fontconfig', version : '>= 2.13')
-libseccomp_dep = dependency('libseccomp', version : '>= 2.5')
 lcms2_dep      = dependency('lcms2',      version : '>= 2.14')
+
+# libseccomp backs glycin's image-loader sandbox and is Linux-only: glycin-utils
+# gates its libseccomp crate dependency behind cfg(target_os = "linux"), so it
+# emits a -lseccomp link directive only on Linux. macOS / Windows have no
+# libseccomp (glycin uses a different / no sandbox there), so require it on Linux
+# alone; elsewhere it's a not-found placeholder that the deps list below skips
+# (same as the optional viewers). Guards the ports.yml macOS/Windows build.
+if host_machine.system() == 'linux'
+  libseccomp_dep = dependency('libseccomp', version : '>= 2.5')
+else
+  libseccomp_dep = dependency('libseccomp', required : false)
+endif
 
 # R3 item 5 (June 2026): the URL-mode banner fetcher moved off
 # libsoup-3 to a Rust hxnet banner fetch (a blocking ureq GET on the
