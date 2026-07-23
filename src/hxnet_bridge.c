@@ -271,83 +271,6 @@ typedef int (*hxnet_verify_cert_cb_t) (const guint8 *fp, gsize fp_len,
 #define HXNET_BRIDGE_STATE_LOGIN_SENDING   5
 #define HXNET_BRIDGE_STATE_HANDSHAKE_DONE 10
 
-#define HXNET_BRIDGE_CIPHER_NONE              0
-#define HXNET_BRIDGE_CIPHER_BLOWFISH          1
-#define HXNET_BRIDGE_CIPHER_CHACHA20_POLY1305 2
-/* R3.3.e-4g: Hotline-frame-aware Blowfish (HopeBlowfishStream).
- * Use this kind for any HOPE-Blowfish handshake; the bare
- * HXNET_BRIDGE_CIPHER_BLOWFISH kind doesn't carry the per-
- * message rekey-marker logic and breaks against servers that
- * trip the marker (e.g. VesperNet/Janus). */
-#define HXNET_BRIDGE_CIPHER_HOPE_BLOWFISH     3
-
-/* HMAC algorithm tags for HOPE Blowfish — match
- * HXNET_MACALG_* in rust/crates/hxnet/src/ffi.rs. */
-#define HXNET_BRIDGE_MACALG_SHA256 0
-#define HXNET_BRIDGE_MACALG_SHA1   1
-#define HXNET_BRIDGE_MACALG_MD5    2
-
-#define HXNET_BRIDGE_COMPRESSION_NONE 0
-#define HXNET_BRIDGE_COMPRESSION_GZIP 1
-#define HXNET_BRIDGE_COMPRESSION_LZ4  2
-#define HXNET_BRIDGE_COMPRESSION_ZSTD 3
-
-typedef struct {
-    guint32 cipher_kind;
-    guint32 compression_kind;
-    /* Per-direction Blowfish keys. HOPE derives distinct read /
-     * write keys from the session keystream — using a single key
-     * for both directions desynchronises the read keystream from
-     * anything the server sends. Caught against VesperNet/Janus,
-     * where the keys clearly differ. */
-    guint32 blowfish_read_key_len;
-    guint32 blowfish_write_key_len;
-    guint8  blowfish_read_key[56];
-    guint8  blowfish_write_key[56];
-    guint8  blowfish_read_ivec[8];
-    guint8  blowfish_write_ivec[8];
-    /* OFB byte-offset into the current keystream block (0..7).
-     * Threaded through so the bridge install can fire mid-block
-     * without desynchronising the Rust BlowfishStream from the
-     * server's keystream. */
-    guint8  blowfish_read_num;
-    guint8  blowfish_write_num;
-    /* HOPE-Blowfish per-message rekey inputs (only consulted
-     * when cipher_kind == HXNET_BRIDGE_CIPHER_HOPE_BLOWFISH).
-     * `hope_macalg` is one of HXNET_BRIDGE_MACALG_*; the
-     * session key is the HOPE-Step-1 SESSIONKEY chunk. */
-    guint8  hope_macalg;
-    guint8  _pad_macalg;
-    guint32 hope_session_key_len;
-    guint8  hope_session_key[64];
-    guint8  aead_read_key[32];
-    guint8  aead_write_key[32];
-    guint64 aead_read_counter;
-    guint64 aead_write_counter;
-    guint8  aead_read_dir;
-    guint8  aead_write_dir;
-    guint8  _pad[6];
-} hxnet_transform_config_t;
-
-/* ABI pin — Rust's HxnetTransformConfig has matching size +
- * alignment const-asserts in rust/crates/hxnet/src/ffi.rs.
- * tests/unit/test_hxnet_ffi.c carries the full per-field
- * offset checks; here we just guard size + alignment so a
- * layout regression fails at production build time even when
- * the test suite isn't built. */
-_Static_assert (sizeof (hxnet_transform_config_t) == 304,
-                "hxnet_transform_config_t size drift — sync Rust "
-                "rust/crates/hxnet/src/ffi.rs const-asserts");
-_Static_assert (_Alignof (hxnet_transform_config_t) == 8,
-                "hxnet_transform_config_t alignment drift — sync "
-                "Rust rust/crates/hxnet/src/ffi.rs const-asserts");
-
-extern hxnet_connection_opaque *
-hxnet_connection_spawn_fd_with_transforms_and_callback (
-    int fd, const hxnet_transform_config_t *config,
-    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
-    void *user_data);
-
 extern int hxnet_connection_send_frame (hxnet_connection_opaque *handle,
                                         const guint8 *data, guint32 len);
 extern void hxnet_connection_destroy (hxnet_connection_opaque *handle);
@@ -827,21 +750,6 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
     bridge_htlc   = htlc;
     return TRUE;
 }
-
-/* R3.3.e-4d HOPE-state install. Builds an
- * hxnet_transform_config_t from the negotiated cipher state
- * already living on htlc, then spawns the actor with that
- * stack. */
-#include "cipher.h" /* CIPHER_*, chacha_aead_state */
-#include "compress.h" /* COMPRESS_* */
-#include "protocol.h" /* struct htlc_conn cipher_*_key fields */
-
-/* Same Rust-side function as hxcrypto-stream's
- * gtkhx_blowfish_ofb64_save_state. Lets us read the live OFB
- * ivec without copying the whole BlowfishOfb64State. */
-extern void
-gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
-                                 guint32 *out_num);
 
 gboolean
 hx_bridge_is_installed (void)

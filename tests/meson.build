@@ -263,16 +263,15 @@ test_icon_pack = executable('test_icon_pack',
 test('icon_pack', test_icon_pack,
      suite : 'unit')
 
-# hxnet_ffi — smoke test for the hxnet C-callable FFI surface
-# (Phase R3.3.b). Builds a connected TCP loopback pair
-# (bind/listen/accept + connect on 127.0.0.1) → spawn_fd → round-
-# trip a Hotline frame + bytes both directions → assert EOF
-# surfaces as HXNET_SHUTDOWN_EOF. The TCP loopback (rather than
-# AF_UNIX socketpair) matches what production passes: the FFI
-# wraps the fd as tokio::net::TcpStream and a peer_addr probe
-# rejects non-TCP sockets up front. Links the Rust hxnet
-# staticlib directly via rust_hxnet_dep; transitively pulls in
-# hxbridge for the shared tokio runtime. No C-side production
+# hxnet_ffi — smoke test for the hxnet C-callable FFI surface.
+# Binds a loopback listener on 127.0.0.1, has hxnet connect to it
+# via the fd-free hxnet_connection_open_tcp entry (no OS socket fd
+# crosses the FFI), then accepts the server side and round-trips a
+# Hotline frame + bytes both directions, asserting EOF surfaces as
+# HXNET_SHUTDOWN_EOF via the shutdown callback. Also pins the
+# HxnetFrame struct ABI and the NULL-arg guards. Links the Rust
+# hxnet staticlib directly via rust_hxnet_dep; transitively pulls
+# in hxbridge for the shared tokio runtime. No C-side production
 # source is linked — the test exercises the FFI in isolation.
 test_hxnet_ffi = executable('test_hxnet_ffi',
   'unit/test_hxnet_ffi.c',
@@ -1294,7 +1293,7 @@ test('real_tls_login', test_integration_real_tls_login,
 # real_tls_banner — Phase 2 coverage: HTXF banner subchannel over TLS.
 # The control channel logs in through production rustls (the
 # orchestrator), and the banner-image body rides a second TLS
-# subchannel opened via the SAME hxnet_htxf_open(tls=1) path banner.c's
+# subchannel opened via the SAME hxnet_htxf_connect(tls=1) path banner.c's
 # production worker uses, drained through htxf_io_read. The TLS HTXF
 # socket uses Janus's tls_xfer_port (5611 host-mapped).
 #

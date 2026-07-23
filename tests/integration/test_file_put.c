@@ -73,13 +73,6 @@ noop_progress (struct htxf_conn *htxf)
     (void)htxf;
 }
 
-static const char *
-xfer_host (void)
-{
-    const char *host = g_getenv ("GTKHX_TEST_HOST");
-    return (host && *host) ? host : "127.0.0.1";
-}
-
 /* Download Uploads/<fname> via the production file_recv_one into a fresh
  * temp file and return its contents (caller frees). NULL on any failure
  * along the way. */
@@ -108,19 +101,9 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
         return NULL;
     }
 
-    int xfd = integration_connect_xfer ();
-    if (xfd < 0) {
-        return NULL;
-    }
-    if (!integration_send_xfer_hdr (xfd, reply.ref, (guint32)reply.size)) {
-        integration_close (xfd);
-        return NULL;
-    }
-    HtxfConn *ch = hxnet_htxf_open (xfd, 0, (const guint8 *)xfer_host (),
-                                    strlen (xfer_host ()), NULL, 0, NULL,
-                                    reply.ref, NULL, NULL);
+    HtxfConn *ch = integration_htxf_open_xfer_file (
+        reply.ref, (guint32)reply.size, NULL, reply.ref);
     if (!ch) {
-        integration_close (xfd);
         return NULL;
     }
 
@@ -223,16 +206,12 @@ test_file_put_round_trip (void)
     g_assert_cmphex (xfer_ref, !=, 0);
 
     /* Open the subchannel, send the upload preamble, wrap the fd. */
-    int xfd = integration_connect_xfer ();
-    if (xfd < 0) {
+    HtxfConn *ch =
+        integration_htxf_open_xfer_file (xfer_ref, up_total, NULL, xfer_ref);
+    if (!ch) {
         g_test_fail_printf ("HTXF subchannel port (5501) unreachable.");
         goto out_src;
     }
-    g_assert_true (integration_send_xfer_hdr (xfd, xfer_ref, up_total));
-    HtxfConn *ch = hxnet_htxf_open (xfd, 0, (const guint8 *)xfer_host (),
-                                    strlen (xfer_host ()), NULL, 0, NULL,
-                                    xfer_ref, NULL, NULL);
-    g_assert_nonnull (ch);
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));

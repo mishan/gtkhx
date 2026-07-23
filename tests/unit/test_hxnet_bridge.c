@@ -130,57 +130,34 @@ debug_log (const char *cat, const char *fmt, ...)
      * that the test paths don't trigger. */
 }
 
-/* R3.3.e-4b adds install / send / uninstall helpers to the
- * bridge that wrap hxnet's callback FFI. Tier 1 only exercises
- * the header-pack path, so we stub the hxnet symbols (rather
- * than dragging the staticlib + tokio runtime into a smoke
- * test). The lifecycle helpers themselves are covered by the
- * production network.c hookups + Tier 3 integration when
- * R3.3.e-4c lands.
+/* R3.3.e-4b's bridge install / send / uninstall helpers wrap hxnet's
+ * callback FFI. Tier 1 only exercises the header-pack path, so we stub
+ * the hxnet symbols the bridge references (rather than dragging the
+ * staticlib + tokio runtime into a smoke test). The lifecycle helpers
+ * themselves are covered by the production network.c hookups + Tier 3.
  *
- * The function-pointer types here must match the production
- * declarations in hxnet_bridge.c (and through it
- * rust/crates/hxnet/src/ffi.rs). Declaring the callback
- * parameters as `void *` would be undefined behavior under
- * C's function-type compatibility rules if anything ever
- * exercised this stub (the production caller passes real
- * function pointers, not data pointers, and "incompatible
- * function type" is the same ABI hazard the rest of the
- * hxnet FFI guards via hand-declared externs). */
+ * The stubs are g_assert_not_reached: Tier 1 never installs a
+ * connection, so none of them run — they exist only to satisfy the
+ * link. */
 struct hxnet_connection_opaque;
 struct hxnet_frame_t;
-struct hxnet_transform_config_t;
 
+/* Callback function-pointer types shared by the connect-entry stubs
+ * below (open_plaintext / open_hope / open_plaintext_tls). Match the
+ * production declarations in hxnet_bridge.c (and through it
+ * rust/crates/hxnet/src/ffi.rs) — declaring the callback parameters as
+ * `void *` would be undefined behavior under C's function-type
+ * compatibility rules. */
 typedef void (*test_stub_event_cb) (struct hxnet_connection_opaque *conn,
                                     struct hxnet_frame_t *frame,
                                     void *user_data);
 typedef void (*test_stub_shutdown_cb) (struct hxnet_connection_opaque *conn,
                                        int reason, void *user_data);
 
-struct hxnet_connection_opaque *
-hxnet_connection_spawn_fd_with_transforms_and_callback (
-    int fd, const struct hxnet_transform_config_t *config,
-    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
-    void *user_data);
 int hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
                                  const guint8 *data, guint32 len);
 void hxnet_connection_destroy (struct hxnet_connection_opaque *handle);
 void hxnet_frame_free (struct hxnet_frame_t *f);
-
-struct hxnet_connection_opaque *
-hxnet_connection_spawn_fd_with_transforms_and_callback (
-    int fd, const struct hxnet_transform_config_t *config,
-    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
-    void *user_data)
-{
-    (void) fd;
-    (void) config;
-    (void) on_event;
-    (void) on_shutdown;
-    (void) user_data;
-    g_assert_not_reached ();
-    return NULL;
-}
 
 int
 hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,

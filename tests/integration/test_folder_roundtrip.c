@@ -72,36 +72,18 @@ noop_progress (struct htxf_conn *htxf)
     (void)htxf;
 }
 
-static const char *
-xfer_host (void)
-{
-    const char *h = g_getenv ("GTKHX_TEST_HOST");
-    return (h && *h) ? h : "127.0.0.1";
-}
-
 /* Open the HTXF subchannel and wrap it as a FOLDER-typed hxnet channel
  * (the preamble carries HTXF_TYPE_FOLDER). Returns NULL on failure. */
 static HtxfConn *
 open_folder_channel (guint32 ref, guint64 total_size)
 {
-    int xfd = integration_connect_xfer ();
-    if (xfd < 0) {
-        return NULL;
-    }
     guint8 pre[24];
     size_t plen = hx_htxf_subchannel_pack_preamble (
         pre, sizeof (pre), ref, total_size, HTXF_TYPE_FOLDER, 0, FALSE);
     if (!plen) {
-        integration_close (xfd);
         return NULL;
     }
-    HtxfConn *ch = hxnet_htxf_open (xfd, 0, (const guint8 *)xfer_host (),
-                                    strlen (xfer_host ()), pre, plen, NULL,
-                                    ref, NULL, NULL);
-    if (!ch) {
-        integration_close (xfd);
-    }
-    return ch;
+    return integration_htxf_open_xfer (pre, plen, NULL, ref);
 }
 
 /* Fixed FILP-wrapper overhead per file for the HTXF_SIZE aggregate: the
@@ -197,19 +179,9 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
         return NULL;
     }
 
-    int xfd = integration_connect_xfer ();
-    if (xfd < 0) {
-        return NULL;
-    }
-    if (!integration_send_xfer_hdr (xfd, reply.ref, (guint32)reply.size)) {
-        integration_close (xfd);
-        return NULL;
-    }
-    HtxfConn *ch = hxnet_htxf_open (xfd, 0, (const guint8 *)xfer_host (),
-                                    strlen (xfer_host ()), NULL, 0, NULL,
-                                    reply.ref, NULL, NULL);
+    HtxfConn *ch = integration_htxf_open_xfer_file (
+        reply.ref, (guint32)reply.size, NULL, reply.ref);
     if (!ch) {
-        integration_close (xfd);
         return NULL;
     }
     g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx_frt_get_XXXXXX", NULL);

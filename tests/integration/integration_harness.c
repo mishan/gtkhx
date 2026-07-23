@@ -27,6 +27,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
+#include "htxf_io.h"
 #include "hl_code.h"
 #include "login_packet.h"
 #include "agreement_packet.h"
@@ -192,13 +193,12 @@ extern int hxnet_connection_send_frame (hxnet_connection *handle,
                                         const guint8 *data, guint len);
 extern void hxnet_connection_destroy (hxnet_connection *handle);
 extern void hxnet_frame_free (hxnet_frame_t *frame);
-/* Opaque HOPE AEAD material handle (Rust HxnetHopeAead). The orchestrated
- * login seeds htlc->hope_aead from it; passed to hxnet_htxf_open so the
- * subchannel derives its per-transfer keys in-process. */
-typedef struct HxnetHopeAead HxnetHopeAead;
+/* HOPE AEAD material handle: the orchestrated login seeds htlc->hope_aead
+ * from it; passed to hxnet_htxf_connect so the subchannel derives its
+ * per-transfer keys in-process. The HxnetHopeAead type + hxnet_hope_aead_free
+ * come from htxf_io.h; this getter is hxnet-internal (not in that header). */
 extern HxnetHopeAead *hxnet_connection_hope_aead_material (
     hxnet_connection *handle);
-extern void hxnet_hope_aead_free (HxnetHopeAead *h);
 
 /* Synthetic-fd space for orchestrated control connections. Picked far
  * above any real socket fd so orch_lookup can branch on the value
@@ -1224,6 +1224,42 @@ integration_send_xfer_hdr (int fd, guint32 ref, guint32 total_size)
     guint8 hdr_buf[SIZEOF_HTXF_HDR];
     hl_htxf_hdr_pack (hdr_buf, ref, total_size, HTXF_TYPE_FILE, 0);
     return integration_send (fd, hdr_buf, sizeof (hdr_buf));
+}
+
+/* fd-free HTXF subchannel open against the default test server's
+ * plaintext xfer target (same host / port selection as
+ * integration_connect_xfer, honoring GTKHX_TEST_HOST /
+ * GTKHX_TEST_XFER_PORT), via hxnet_htxf_connect. `preamble`
+ * (length preamble_len) is written raw right after connect; a non-NULL
+ * `hope` + `xfer_ref` arm per-transfer AEAD (NULL hope = plaintext). This
+ * is the fd-free replacement for the old
+ * integration_connect_xfer() + integration_send_xfer_hdr() +
+ * hxnet_htxf_open(fd, ...) sequence. Returns NULL if the matrix filter
+ * excluded every server, or on a connect / TLS failure. */
+HtxfConn *
+integration_htxf_open_xfer (const guint8 *preamble, gsize preamble_len,
+                            const HxnetHopeAead *hope, guint32 xfer_ref)
+{
+    const hx_test_server *srv = hx_test_server_default ();
+    if (!srv) {
+        return NULL;
+    }
+    return hxnet_htxf_connect ((const guint8 *) srv->host, strlen (srv->host),
+                               srv->xfer_port, NULL, 0, /*tls=*/0,
+                               preamble, preamble_len, hope, xfer_ref,
+                               /*verify_cert=*/NULL, /*user_data=*/NULL);
+}
+
+/* Convenience wrapper over integration_htxf_open_xfer for the common
+ * single-file case: packs the 16-byte legacy HTXF FILE header
+ * (ref, total_size, type=FILE, flag=0) as the preamble, then connects. */
+HtxfConn *
+integration_htxf_open_xfer_file (guint32 ref, guint32 total_size,
+                                 const HxnetHopeAead *hope, guint32 xfer_ref)
+{
+    guint8 hdr[SIZEOF_HTXF_HDR];
+    hl_htxf_hdr_pack (hdr, ref, total_size, HTXF_TYPE_FILE, 0);
+    return integration_htxf_open_xfer (hdr, sizeof (hdr), hope, xfer_ref);
 }
 
 int

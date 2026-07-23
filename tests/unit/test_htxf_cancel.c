@@ -42,12 +42,18 @@
 #include "protocol.h"
 #include "htxf_io.h"
 
-/* Connected TCP loopback pair on 127.0.0.1: sv[0] = server side we
- * control by hand, sv[1] = client side handed to hxnet_htxf_open (which
- * adopts + closes it). Aborts via g_error on any setup failure. Mirrors
- * the helper in test_hxnet_ffi.c. */
+/* Stand up a loopback listener, have hxnet connect to it in-process
+ * (fd-free, via hxnet_htxf_connect — plaintext, no preamble / no AEAD),
+ * stash the channel on `xfer`, and hand back the accepted server side in
+ * *server_fd (the end the test controls by hand). hxnet owns the client
+ * socket; the channel is torn down via htxf_io_release. Aborts via
+ * g_error on any setup failure.
+ *
+ * hxnet_htxf_connect blocks until the TCP connect completes, so the
+ * connection is already sitting in the listener backlog when we accept()
+ * afterwards — no ordering race. */
 static void
-tcp_loopback_pair (int sv[2])
+open_passthrough_loopback (struct htxf_conn *xfer, int *server_fd)
 {
     int listener = socket (AF_INET, SOCK_STREAM, 0);
     if (listener < 0) {
@@ -68,36 +74,23 @@ tcp_loopback_pair (int sv[2])
     if (getsockname (listener, (struct sockaddr *) &addr, &alen) < 0) {
         g_error ("getsockname: %s", g_strerror (errno));
     }
-    int client = socket (AF_INET, SOCK_STREAM, 0);
-    if (client < 0) {
-        g_error ("socket(client): %s", g_strerror (errno));
-    }
-    if (connect (client, (struct sockaddr *) &addr, sizeof (addr)) < 0) {
-        g_error ("connect: %s", g_strerror (errno));
-    }
+    guint16 port = ntohs (addr.sin_port);
+
+    memset (xfer, 0, sizeof (*xfer));
+    htxf_io_init (xfer);
+    xfer->hx = hxnet_htxf_connect ((const guint8 *) "127.0.0.1",
+                                   strlen ("127.0.0.1"), port, NULL, 0,
+                                   /*tls=*/0, /*preamble=*/NULL, 0,
+                                   /*hope_aead=*/NULL, /*xfer_ref=*/0,
+                                   /*verify_cert=*/NULL, /*user_data=*/NULL);
+    g_assert_nonnull (xfer->hx);
+
     int server = accept (listener, NULL, NULL);
     if (server < 0) {
         g_error ("accept: %s", g_strerror (errno));
     }
     close (listener);
-    sv[0] = server;
-    sv[1] = client;
-}
-
-/* Open a plaintext (no-TLS, no-AEAD, empty-preamble) HTXF channel over
- * `client_fd` and stash it on `xfer`, matching how xfers.c drives the
- * shim. The fd is adopted by hxnet — the caller must NOT close it (the
- * channel is torn down via htxf_io_release). */
-static void
-open_passthrough (struct htxf_conn *xfer, int client_fd)
-{
-    memset (xfer, 0, sizeof (*xfer));
-    htxf_io_init (xfer);
-    xfer->hx = hxnet_htxf_open (client_fd, /*tls=*/0, /*host=*/NULL, 0,
-                                /*preamble=*/NULL, 0, /*hope_aead=*/NULL,
-                                /*xfer_ref=*/0, /*verify_cert=*/NULL,
-                                /*user_data=*/NULL);
-    g_assert_nonnull (xfer->hx);
+    *server_fd = server;
 }
 
 /* ------------------------------------------------------------------ *
@@ -107,11 +100,9 @@ open_passthrough (struct htxf_conn *xfer, int client_fd)
 static void
 test_canceled_flag_short_circuits_read (void)
 {
-    int sv[2];
-    tcp_loopback_pair (sv);
-
     struct htxf_conn xfer;
-    open_passthrough (&xfer, sv[1]);
+    int server_fd;
+    open_passthrough_loopback (&xfer, &server_fd);
 
     g_atomic_int_set (&xfer.canceled, TRUE);
 
@@ -129,7 +120,7 @@ test_canceled_flag_short_circuits_read (void)
 
     htxf_io_release (&xfer);
     htxf_io_abort_free (&xfer);
-    close (sv[0]);
+    close (server_fd);
 }
 
 /* Shared state for the parked-reader thread. */
@@ -172,11 +163,9 @@ parked_reader (gpointer data)
 static void
 test_abort_wakes_parked_read (void)
 {
-    int sv[2];
-    tcp_loopback_pair (sv);
-
     struct htxf_conn xfer;
-    open_passthrough (&xfer, sv[1]);
+    int server_fd;
+    open_passthrough_loopback (&xfer, &server_fd);
     htxf_io_abort_init (&xfer); /* main-thread token alloc */
     htxf_io_abort_arm (&xfer);  /* arm with the channel's socket */
 
@@ -217,7 +206,7 @@ test_abort_wakes_parked_read (void)
 
     htxf_io_release (&xfer);
     htxf_io_abort_free (&xfer);
-    close (sv[0]);
+    close (server_fd);
 }
 
 /* ------------------------------------------------------------------ *
@@ -236,11 +225,9 @@ test_abort_wakes_parked_read (void)
 static void
 test_abort_before_arm (void)
 {
-    int sv[2];
-    tcp_loopback_pair (sv);
-
     struct htxf_conn xfer;
-    open_passthrough (&xfer, sv[1]);
+    int server_fd;
+    open_passthrough_loopback (&xfer, &server_fd);
     htxf_io_abort_init (&xfer);
 
     /* Abort BEFORE arm (no socket on the token yet), then arm late. */
@@ -252,14 +239,14 @@ test_abort_before_arm (void)
 	 * broken latch from hanging the test. */
     struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
     g_assert_cmpint (
-        setsockopt (sv[0], SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof (tv)), ==, 0);
+        setsockopt (server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof (tv)), ==, 0);
     guint8 b = 0;
-    ssize_t n = read (sv[0], &b, 1);
+    ssize_t n = read (server_fd, &b, 1);
     g_assert_cmpint (n, ==, 0); /* clean EOF — the socket was shut down */
 
     htxf_io_release (&xfer);
     htxf_io_abort_free (&xfer);
-    close (sv[0]);
+    close (server_fd);
 }
 
 /* ------------------------------------------------------------------ *
@@ -301,10 +288,7 @@ test_many_channels_abort_clean (void)
     struct htxf_conn xfers[N];
 
     for (int i = 0; i < N; i++) {
-        int sv[2];
-        tcp_loopback_pair (sv);
-        srv[i] = sv[0];
-        open_passthrough (&xfers[i], sv[1]);
+        open_passthrough_loopback (&xfers[i], &srv[i]);
         htxf_io_abort_init (&xfers[i]);
         htxf_io_abort_arm (&xfers[i]);
     }

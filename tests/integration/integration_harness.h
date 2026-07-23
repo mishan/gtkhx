@@ -701,6 +701,23 @@ extern gboolean integration_send_agreementagree_hope (
  */
 extern int integration_connect_xfer (void);
 
+/* fd-free HTXF subchannel open against the default test server's
+ * plaintext xfer target (via hxnet_htxf_connect — no fd crosses the
+ * FFI). `preamble` is written raw after connect; a non-NULL `hope` +
+ * `xfer_ref` arm per-transfer AEAD. `..._file` packs the 16-byte legacy
+ * FILE header as the preamble for you. Both return NULL if the matrix
+ * filter excluded every server or on a connect failure. (Opaque types
+ * come from htxf_io.h, which the caller also includes.) */
+struct HtxfConn;
+struct HxnetHopeAead;
+extern struct HtxfConn *
+integration_htxf_open_xfer (const guint8 *preamble, gsize preamble_len,
+                            const struct HxnetHopeAead *hope, guint32 xfer_ref);
+extern struct HtxfConn *
+integration_htxf_open_xfer_file (guint32 ref, guint32 total_size,
+                                 const struct HxnetHopeAead *hope,
+                                 guint32 xfer_ref);
+
 /*
  * Send the 16-byte HTXF transfer header that initiates a file
  * transfer subchannel exchange:

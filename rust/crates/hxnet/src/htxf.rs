@@ -342,7 +342,6 @@ use crate::ffi::HxnetVerifyCertCallback;
 use hxbridge::runtime::Runtime;
 use std::ffi::c_void;
 use std::os::raw::c_int;
-use std::os::unix::io::FromRawFd;
 use std::slice;
 
 /// Inner transport behind an open HTXF channel: plaintext TCP or
@@ -522,10 +521,10 @@ unsafe fn htxf_derive_aead(
 
 /// Finish opening an HTXF subchannel over a connected, blocking `tcp`:
 /// optionally TLS-wrap + TOFU-gate, write the plaintext preamble, then
-/// arm AEAD (or plaintext passthrough) and box the channel. Shared by the
-/// fd-adopting [`hxnet_htxf_open`] and the connect-in-Rust
-/// [`hxnet_htxf_connect`]. `tcp` is closed on every failure path (it's
-/// dropped). `host` is only consulted for `tls`.
+/// arm AEAD (or plaintext passthrough) and box the channel. The
+/// finishing half of [`hxnet_htxf_connect`], split out so any future
+/// connected-socket entry can reuse it. `tcp` is closed on every failure
+/// path (it's dropped). `host` is only consulted for `tls`.
 ///
 /// # Safety
 /// `verify_cert` / `user_data` follow the [`HxnetVerifyCertCallback`]
@@ -649,112 +648,11 @@ unsafe fn htxf_blocking_connect(
         .map_err(|_| io::Error::other("htxf connect task dropped before delivering a result"))?
 }
 
-/// Open an HTXF subchannel over an already-connected, blocking `fd`
-/// (which this call adopts — the C side must NOT close it afterward).
-///
-/// This is the low-level fd-adopting entry, used by tests that inject a
-/// socketpair / their own connected fd. Production connects in-process via
-/// [`hxnet_htxf_connect`] instead (no fd crosses the FFI).
-///
-/// - `tls != 0`: TLS-handshake the fd with rustls, reusing the control
-///   channel's WebPKI→TOFU verifier. On WebPKI failure the `verify_cert`
-///   callback runs (the C TOFU known-hosts decision); a zero return
-///   rejects the connection. `host` is the SNI / TOFU hostname.
-/// - `preamble` (length `preamble_len`) is written raw over the
-///   (TLS-wrapped) stream before AEAD is armed — the HTXF header.
-/// - `hope_aead` non-NULL arms AEAD framing: the per-transfer keys are
-///   derived in-process from the control connection's retained HOPE
-///   material (obtained via `hxnet_connection_hope_aead_material`) and
-///   `xfer_ref`, so the session key never crosses the FFI. NULL selects
-///   plaintext passthrough (no HOPE, or HOPE with a stream cipher).
-///
-/// Returns an owned handle, or NULL on bad arguments, a TLS/TOFU
-/// rejection, or an IO error (the adopted fd is closed in every failure
-/// path by dropping the stream).
-///
-/// # Safety
-/// `fd` must be a valid, connected, blocking socket fd this call may
-/// adopt. `host` / `preamble` must be valid for their lengths (or NULL
-/// where documented); `hope_aead` must be NULL or a live handle from
-/// `hxnet_connection_hope_aead_material`. The handle must be used
-/// single-threaded.
-#[no_mangle]
-pub unsafe extern "C" fn hxnet_htxf_open(
-    fd: c_int,
-    tls: c_int,
-    host: *const u8,
-    host_len: usize,
-    preamble: *const u8,
-    preamble_len: usize,
-    hope_aead: *const crate::ffi::HxnetHopeAead,
-    xfer_ref: u32,
-    verify_cert: HxnetVerifyCertCallback,
-    user_data: *mut c_void,
-) -> *mut HtxfConn {
-    if fd < 0 {
-        glib::g_critical!("hxnet", "hxnet_htxf_open: negative fd");
-        return std::ptr::null_mut();
-    }
-
-    // Adopt the fd up front, before any other validation, so EVERY
-    // early return below drops `tcp` and closes it — honouring the
-    // documented "the adopted fd is closed in every failure path"
-    // contract. The C side hands ownership at the call boundary; if we
-    // bailed on a bad length/NULL arg *before* adopting, that fd would
-    // leak (the C worker assumes the transfer took it).
-    let tcp = std::net::TcpStream::from_raw_fd(fd);
-
-    // slice::from_raw_parts is UB for len * size_of > isize::MAX.
-    if (host_len as u64) > (isize::MAX as u64) || (preamble_len as u64) > (isize::MAX as u64) {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_htxf_open: length argument exceeds isize::MAX"
-        );
-        return std::ptr::null_mut();
-    }
-    if preamble_len != 0 && preamble.is_null() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_htxf_open: NULL preamble with non-zero len"
-        );
-        return std::ptr::null_mut();
-    }
-
-    let preamble_slice: &[u8] = if preamble_len == 0 {
-        &[]
-    } else {
-        slice::from_raw_parts(preamble, preamble_len)
-    };
-    let aead = htxf_derive_aead(hope_aead, xfer_ref);
-    // Host is only consulted for TLS; a plaintext transfer ignores it
-    // (preserving the original "host unused when !tls" behaviour).
-    let host_opt: Option<&str> = if tls != 0 && !host.is_null() && host_len != 0 {
-        match std::str::from_utf8(slice::from_raw_parts(host, host_len)) {
-            Ok(s) => Some(s),
-            Err(_) => {
-                glib::g_critical!("hxnet", "hxnet_htxf_open: host is not valid UTF-8");
-                return std::ptr::null_mut();
-            }
-        }
-    } else {
-        None
-    };
-
-    htxf_finish(
-        tcp,
-        tls != 0,
-        host_opt,
-        preamble_slice,
-        aead,
-        verify_cert,
-        user_data,
-    )
-}
-
 /// Connect an HTXF subchannel to `host:port` (optionally through a SOCKS
 /// proxy) entirely in Rust, then open it — the production entry that
-/// replaces the C-side GSocketClient connect + fd hand-off. Same TLS /
-/// preamble / AEAD semantics as [`hxnet_htxf_open`], minus the adopted fd.
+/// replaces the C-side GSocketClient connect + fd hand-off: it does the
+/// TCP connect, optional TLS + TOFU gate, raw preamble write, then AEAD
+/// (or plaintext) framing — all in Rust, with no fd crossing the FFI.
 ///
 /// - `proxy_uri` (length `proxy_uri_len`) is an optional `socks5://…`
 ///   URI to tunnel through; NULL / 0 connects direct. A malformed or
@@ -851,7 +749,7 @@ pub unsafe extern "C" fn hxnet_htxf_connect(
 /// `< 1` stop condition the C worker loops already use.
 ///
 /// # Safety
-/// `handle` must be a live handle from [`hxnet_htxf_open`]; `buf` valid
+/// `handle` must be a live handle from [`hxnet_htxf_connect`]; `buf` valid
 /// for `len` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_htxf_read(handle: *mut HtxfConn, buf: *mut u8, len: usize) -> isize {
@@ -887,7 +785,7 @@ pub unsafe extern "C" fn hxnet_htxf_read(handle: *mut HtxfConn, buf: *mut u8, le
 /// active). Returns `len` on success, `-1` on error.
 ///
 /// # Safety
-/// `handle` must be a live handle from [`hxnet_htxf_open`]; `buf` valid
+/// `handle` must be a live handle from [`hxnet_htxf_connect`]; `buf` valid
 /// for `len` bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_htxf_write(
@@ -928,7 +826,7 @@ pub unsafe extern "C" fn hxnet_htxf_write(
 /// Returns `0` on success, `-1` on a NULL handle or a setsockopt error.
 ///
 /// # Safety
-/// `handle` must be a live handle from [`hxnet_htxf_open`].
+/// `handle` must be a live handle from [`hxnet_htxf_connect`].
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_htxf_set_read_timeout(
     handle: *mut HtxfConn,
@@ -963,7 +861,7 @@ pub extern "C" fn hxnet_htxf_abort_new() -> *const HtxfAbort {
 
 /// Arm `token` with `handle`'s socket and clone a token ref into
 /// `handle` so its read/write can observe the aborted flag. Called once
-/// by the worker right after [`hxnet_htxf_open`] succeeds. No-op if
+/// by the worker right after [`hxnet_htxf_connect`] succeeds. No-op if
 /// either argument is NULL, or if `handle`'s socket can't be duplicated
 /// — in that case the handle is left unarmed (its read/write won't
 /// observe the flag), and cancellation falls back to the C-side
@@ -971,7 +869,7 @@ pub extern "C" fn hxnet_htxf_abort_new() -> *const HtxfAbort {
 /// read/write regardless. Does not consume the caller's `token` ref.
 ///
 /// # Safety
-/// `handle` must be a live handle from [`hxnet_htxf_open`]; `token` must
+/// `handle` must be a live handle from [`hxnet_htxf_connect`]; `token` must
 /// be a live pointer from [`hxnet_htxf_abort_new`].
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_htxf_abort_arm(handle: *mut HtxfConn, token: *const HtxfAbort) {
@@ -1038,7 +936,7 @@ pub unsafe extern "C" fn hxnet_htxf_abort_free(token: *const HtxfAbort) {
 /// the fd / tearing down TLS). Safe to call with NULL.
 ///
 /// # Safety
-/// `handle` must be a handle from [`hxnet_htxf_open`] not yet closed.
+/// `handle` must be a handle from [`hxnet_htxf_connect`] not yet closed.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_htxf_close(handle: *mut HtxfConn) {
     if !handle.is_null() {
@@ -1176,19 +1074,19 @@ mod tests {
     }
 
     // Exercise the FFI end-to-end over a real loopback socket on the
-    // plaintext+AEAD path: open adopts the client fd, writes the raw
-    // preamble, arms AEAD; a server thread reads the preamble raw then
-    // speaks the matching AEAD framing. (TLS path is Tier-3-covered.)
+    // plaintext+AEAD path: hxnet_htxf_connect does the TCP connect in
+    // Rust, writes the raw preamble, arms AEAD; a server thread accepts,
+    // reads the preamble raw then speaks the matching AEAD framing.
+    // (TLS path is Tier-3-covered.)
     #[test]
-    fn ffi_open_write_read_close_over_socket() {
-        use std::net::{TcpListener, TcpStream};
-        use std::os::unix::io::IntoRawFd;
+    fn ffi_connect_write_read_close_over_socket() {
+        use std::net::TcpListener;
         use std::thread;
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let k = key();
-        // The transfer keys are now derived INSIDE hxnet_htxf_open from
+        // The transfer keys are derived INSIDE hxnet_htxf_connect from
         // the control connection's retained HOPE material + the transfer
         // ref. Build that material here and derive the matching
         // per-transfer states for the server thread so both ends agree.
@@ -1242,9 +1140,7 @@ mod tests {
             assert_eq!(sch.write(b"pong").unwrap(), 4);
         });
 
-        let client = TcpStream::connect(addr).unwrap();
-        let fd = client.into_raw_fd();
-        // Client passes the opaque HOPE material handle; hxnet_htxf_open
+        // Client passes the opaque HOPE material handle; hxnet_htxf_connect
         // derives the same xe/xd internally from material + xref.
         let hope = crate::ffi::HxnetHopeAead {
             material: crate::lifecycle::HopeAeadMaterial {
@@ -1254,11 +1150,14 @@ mod tests {
             },
         };
 
+        let host = "127.0.0.1";
         let h = unsafe {
-            hxnet_htxf_open(
-                fd,
-                0,
+            hxnet_htxf_connect(
+                host.as_ptr(),
+                host.len(),
+                addr.port(),
                 std::ptr::null(),
+                0,
                 0,
                 b"PRE".as_ptr(),
                 3,
@@ -1289,8 +1188,7 @@ mod tests {
     #[test]
     fn ffi_abort_unblocks_parked_read() {
         use std::io::Read;
-        use std::net::{TcpListener, TcpStream};
-        use std::os::unix::io::IntoRawFd;
+        use std::net::TcpListener;
         use std::thread;
         use std::time::{Duration, Instant};
 
@@ -1306,13 +1204,14 @@ mod tests {
             let _ = sock.read(&mut buf);
         });
 
-        let client = TcpStream::connect(addr).unwrap();
-        let fd = client.into_raw_fd();
+        let host = "127.0.0.1";
         let h = unsafe {
-            hxnet_htxf_open(
-                fd,
-                0,
+            hxnet_htxf_connect(
+                host.as_ptr(),
+                host.len(),
+                addr.port(),
                 std::ptr::null(),
+                0,
                 0,
                 std::ptr::null(),
                 0, // no preamble

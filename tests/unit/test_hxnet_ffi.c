@@ -1,29 +1,26 @@
 /*
  * test_hxnet_ffi.c — smoke test for the hxnet C-callable FFI.
  *
- * Phase R3.3.b: hxnet ships a polling FFI surface (spawn_fd,
- * try_recv_frame, send_frame, destroy, frame_free). This test
- * uses a TCP loopback pair (bind/listen/accept + connect) so the
- * fd we hand to hxnet_connection_spawn_fd is a real connected
- * TCP socket — matching what production will pass and the
- * AF_INET assumptions the FFI's peer_addr probe + the underlying
- * tokio::net::TcpStream depend on. The earlier draft used an
- * AF_UNIX socketpair(2), which is a stream socket but NOT a TCP
- * one, so it violated TcpStream's invariants.
+ * hxnet creates connections through its connect entry points, which
+ * resolve + connect the socket INSIDE Rust — no OS socket fd ever
+ * crosses the FFI. This test drives the fd-free `hxnet_connection_open_tcp`
+ * entry against an in-process loopback listener: it binds a TCP listener
+ * on 127.0.0.1, hands hxnet the host:port (hxnet connects), then accepts
+ * the incoming connection to get the server side it drives by hand.
  *
  * Covers:
- *   - spawn_fd adopts the fd and starts the actor
- *   - try_recv_frame returns HXNET_RECV_FRAME with correct fields
- *   - send_frame round-trips bytes to the peer
- *   - try_recv_frame on EOF returns HXNET_RECV_SHUTDOWN with
- *     HXNET_SHUTDOWN_EOF
- *   - destroy + frame_free clean up without leaks (no asan
- *     screams)
+ *   - open_tcp connects and starts the actor; the event callback fires
+ *     per frame with the correct fields (routed through the hxbridge
+ *     ferry to the GLib main loop);
+ *   - the shutdown callback fires with HXNET_SHUTDOWN_EOF on peer close;
+ *   - send_frame round-trips bytes to the peer;
+ *   - NULL-arg handling on try_recv_frame / send_frame / destroy /
+ *     frame_free (g_critical + failure code, never a crash);
+ *   - the HxnetFrame struct ABI (offsets / size / alignment).
  *
- * The C side mirrors the FFI's constants by hand — the
- * established discipline for hxbridge / hotline-proto FFI
- * (drift surfaces as a link-time undefined symbol or a test
- * failure).
+ * The C side mirrors the FFI's constants by hand — the established
+ * discipline for hxbridge / hotline-proto FFI (drift surfaces as a
+ * link-time undefined symbol or a test failure).
  */
 
 #include <arpa/inet.h>
@@ -96,7 +93,6 @@ _Static_assert (sizeof (hxnet_frame)
 #define HXNET_SEND_CLOSED -2
 #define HXNET_SEND_INVALID -3
 
-extern hxnet_connection *hxnet_connection_spawn_fd (int fd);
 extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
                                             hxnet_frame *out_frame,
                                             int *out_reason);
@@ -105,111 +101,26 @@ extern int hxnet_connection_send_frame (hxnet_connection *handle,
 extern void hxnet_connection_destroy (hxnet_connection *handle);
 extern void hxnet_frame_free (hxnet_frame *f);
 
-/* R3.3.e callback FFI. The on_event callback fires on the GLib
- * main thread per Event::Frame; on_shutdown fires once when the
- * actor exits. user_data is opaque.
+/* Callback FFI. on_event fires on the GLib main thread per Event::Frame;
+ * on_shutdown fires once when the actor exits; on_state (optional, may be
+ * NULL) fires per connection-state transition. user_data is opaque.
  *
- * `frame` is passed as `hxnet_frame *` (not const): the C side
- * is expected to call `hxnet_frame_free(frame)` to release the
- * body, and that function writes through the struct to zero
- * body_ptr / body_len. Marking it const would force a const-
- * cast at every correct call site. */
+ * `frame` is passed as `hxnet_frame *` (not const): the C side is
+ * expected to call `hxnet_frame_free(frame)` to release the body, and
+ * that function writes through the struct to zero body_ptr / body_len. */
 typedef void (*hxnet_event_cb) (hxnet_connection *conn, hxnet_frame *frame,
                                 void *user_data);
 typedef void (*hxnet_shutdown_cb) (hxnet_connection *conn, int reason,
                                    void *user_data);
-extern hxnet_connection *hxnet_connection_spawn_fd_with_callback (
-    int fd, hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
-    void *user_data);
+typedef void (*hxnet_state_cb) (hxnet_connection *conn, unsigned int state,
+                                void *user_data);
 
-/* R3.3.e-2 transform-config FFI. Lets the C side hand hxnet a
- * cipher + compression stack to compose around the adopted TCP
- * socket before the Connection actor sees it. The Rust side
- * pins this struct's offsets + size via const-asserts in
- * rust/crates/hxnet/src/ffi.rs; the _Static_asserts below
- * mirror those so drift on either side breaks both compiles. */
-#define HXNET_CIPHER_NONE              0
-#define HXNET_CIPHER_BLOWFISH          1
-#define HXNET_CIPHER_CHACHA20_POLY1305 2
-
-#define HXNET_COMPRESSION_NONE 0
-#define HXNET_COMPRESSION_GZIP 1
-#define HXNET_COMPRESSION_LZ4  2
-#define HXNET_COMPRESSION_ZSTD 3
-
-typedef struct {
-    /* `c_uint` on the Rust side is guaranteed 32-bit, but
-     * `unsigned int` on the C side is not (only required to be
-     * >= 16-bit). Use `uint32_t` for the u32-shaped fields so the
-     * offset asserts below don't bake in an implementation-
-     * defined size assumption. */
-    uint32_t cipher_kind;
-    uint32_t compression_kind;
-    uint32_t blowfish_read_key_len;
-    uint32_t blowfish_write_key_len;
-    uint8_t      blowfish_read_key[56];
-    uint8_t      blowfish_write_key[56];
-    uint8_t      blowfish_read_ivec[8];
-    uint8_t      blowfish_write_ivec[8];
-    uint8_t      blowfish_read_num;
-    uint8_t      blowfish_write_num;
-    uint8_t      hope_macalg;
-    uint8_t      _pad_macalg;
-    uint32_t     hope_session_key_len;
-    uint8_t      hope_session_key[64];
-    uint8_t      aead_read_key[32];
-    uint8_t      aead_write_key[32];
-    uint64_t     aead_read_counter;
-    uint64_t     aead_write_counter;
-    uint8_t      aead_read_dir;
-    uint8_t      aead_write_dir;
-    uint8_t      _pad[6];
-} hxnet_transform_config;
-
-_Static_assert (offsetof (hxnet_transform_config, cipher_kind) == 0,
-                "hxnet_transform_config.cipher_kind offset drift");
-_Static_assert (offsetof (hxnet_transform_config, compression_kind) == 4,
-                "hxnet_transform_config.compression_kind offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_read_key_len) == 8,
-                "hxnet_transform_config.blowfish_read_key_len offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_write_key_len) == 12,
-                "hxnet_transform_config.blowfish_write_key_len offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_read_key) == 16,
-                "hxnet_transform_config.blowfish_read_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_write_key) == 72,
-                "hxnet_transform_config.blowfish_write_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_read_ivec) == 128,
-                "hxnet_transform_config.blowfish_read_ivec offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_write_ivec) == 136,
-                "hxnet_transform_config.blowfish_write_ivec offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_read_num) == 144,
-                "hxnet_transform_config.blowfish_read_num offset drift");
-_Static_assert (offsetof (hxnet_transform_config, blowfish_write_num) == 145,
-                "hxnet_transform_config.blowfish_write_num offset drift");
-_Static_assert (offsetof (hxnet_transform_config, hope_macalg) == 146,
-                "hxnet_transform_config.hope_macalg offset drift");
-_Static_assert (offsetof (hxnet_transform_config, hope_session_key_len) == 148,
-                "hxnet_transform_config.hope_session_key_len offset drift");
-_Static_assert (offsetof (hxnet_transform_config, hope_session_key) == 152,
-                "hxnet_transform_config.hope_session_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_key) == 216,
-                "hxnet_transform_config.aead_read_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_key) == 248,
-                "hxnet_transform_config.aead_write_key offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_counter) == 280,
-                "hxnet_transform_config.aead_read_counter offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_counter) == 288,
-                "hxnet_transform_config.aead_write_counter offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_read_dir) == 296,
-                "hxnet_transform_config.aead_read_dir offset drift");
-_Static_assert (offsetof (hxnet_transform_config, aead_write_dir) == 297,
-                "hxnet_transform_config.aead_write_dir offset drift");
-_Static_assert (sizeof (hxnet_transform_config) == 304,
-                "hxnet_transform_config size drift");
-
-extern hxnet_connection *hxnet_connection_spawn_fd_with_transforms_and_callback (
-    int fd, const hxnet_transform_config *config,
-    hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown, void *user_data);
+/* fd-free connect entry: hxnet resolves + connects host:port on the
+ * shared tokio runtime and routes events through the callbacks. */
+extern hxnet_connection *hxnet_connection_open_tcp (
+    const uint8_t *host, size_t host_len, uint16_t port,
+    hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
+    hxnet_state_cb on_state, void *user_data);
 
 /* Write `len` bytes of `buf` to `fd`, retrying on short writes
  * and on EINTR. A real I/O error (broken pipe, etc.) or a 0-byte
@@ -279,15 +190,18 @@ build_header (uint8_t hdr[22], uint32_t type_, uint32_t trans, uint32_t flag,
     memcpy (&hdr[20], &hc_be, 2);
 }
 
-/* Build a connected TCP loopback pair: bind a listening socket
- * on 127.0.0.1:0 (kernel-chosen port), connect a second socket
- * to it, accept on the listener. Returns the two ends as
- * sv[0] (server, accepted side) and sv[1] (client, the side we
- * hand to hxnet). The listener is closed before return — only
- * the connected pair survives. Aborts the test via g_error on
- * any setup failure. */
+/* Bind a loopback listener on 127.0.0.1:0, have hxnet connect to it via
+ * the fd-free open_tcp entry, and return the handle in *out_conn plus the
+ * accepted server side in *out_server (the end the test drives by hand).
+ * hxnet owns the client socket; the caller destroys the handle. Aborts
+ * via g_error on any setup failure.
+ *
+ * open_tcp connects asynchronously on the tokio runtime, so accept()
+ * below blocks until the connection lands — no ordering race. */
 static void
-tcp_loopback_pair (int sv[2])
+open_tcp_to_listener (hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
+                      void *user_data, hxnet_connection **out_conn,
+                      int *out_server)
 {
     int listener = socket (AF_INET, SOCK_STREAM, 0);
     if (listener < 0) {
@@ -306,18 +220,18 @@ tcp_loopback_pair (int sv[2])
         g_error ("listen: %s", g_strerror (errno));
     }
 
-    /* Read back the kernel-assigned port. */
     socklen_t alen = sizeof (addr);
     if (getsockname (listener, (struct sockaddr *) &addr, &alen) < 0) {
         g_error ("getsockname: %s", g_strerror (errno));
     }
+    uint16_t port = ntohs (addr.sin_port);
 
-    int client = socket (AF_INET, SOCK_STREAM, 0);
-    if (client < 0) {
-        g_error ("socket(client): %s", g_strerror (errno));
-    }
-    if (connect (client, (struct sockaddr *) &addr, sizeof (addr)) < 0) {
-        g_error ("connect: %s", g_strerror (errno));
+    const char *host = "127.0.0.1";
+    hxnet_connection *conn = hxnet_connection_open_tcp (
+        (const uint8_t *) host, strlen (host), port, on_event, on_shutdown,
+        /*on_state=*/NULL, user_data);
+    if (!conn) {
+        g_error ("hxnet_connection_open_tcp returned NULL");
     }
 
     int server = accept (listener, NULL, NULL);
@@ -326,149 +240,11 @@ tcp_loopback_pair (int sv[2])
     }
     close (listener);
 
-    sv[0] = server;
-    sv[1] = client;
+    *out_conn = conn;
+    *out_server = server;
 }
 
-/* Poll try_recv_frame until it returns FRAME or SHUTDOWN, capped
- * at ~5 seconds total wall clock (5000 attempts × 1 ms). Returns
- * the code; if FRAME, fills `out_frame`; if SHUTDOWN, fills
- * `out_reason`. */
-static int
-poll_for_event (hxnet_connection *handle, hxnet_frame *out_frame,
-                int *out_reason)
-{
-    for (int i = 0; i < 5000; i++) {
-        int r = hxnet_connection_try_recv_frame (handle, out_frame, out_reason);
-        if (r != HXNET_RECV_EMPTY) {
-            return r;
-        }
-        g_usleep (1000);
-    }
-    return HXNET_RECV_EMPTY;
-}
-
-/* ------------------------------------------------------------------- *
- * Test: round-trip a single frame through hxnet.
- *
- * Server side writes header + body; client side (hxnet) reads
- * and emits an Event::Frame. */
-static void
-test_round_trip_single_frame (void)
-{
-    int sv[2];
-    tcp_loopback_pair (sv);
-
-    /* sv[0] is the "server" side we control by hand. sv[1] goes
-     * to hxnet. After the handoff hxnet owns sv[1] — we must not
-     * close it. */
-    hxnet_connection *conn = hxnet_connection_spawn_fd (sv[1]);
-    g_assert_nonnull (conn);
-
-    uint8_t hdr[22];
-    build_header (hdr, 0x69, 1, 0, 8, 0);
-    write_all_or_die (sv[0], hdr, sizeof (hdr));
-    write_all_or_die (sv[0], (const uint8_t *) "hello!\0\0", 8);
-
-    hxnet_frame frame;
-    memset (&frame, 0, sizeof (frame));
-    int reason = -1;
-    int r = poll_for_event (conn, &frame, &reason);
-    g_assert_cmpint (r, ==, HXNET_RECV_FRAME);
-
-    g_assert_cmpuint (frame.type_, ==, 0x69);
-    g_assert_cmpuint (frame.trans, ==, 1);
-    g_assert_cmpuint (frame.flag, ==, 0);
-    g_assert_cmpuint (frame.body_len, ==, 8);
-    g_assert_nonnull (frame.body_ptr);
-    g_assert_cmpmem (frame.body_ptr, frame.body_len, "hello!\0\0", 8);
-
-    hxnet_frame_free (&frame);
-
-    /* Close the server side and confirm we see the Shutdown(Eof) */
-    g_assert_cmpint (close (sv[0]), ==, 0);
-
-    memset (&frame, 0, sizeof (frame));
-    reason = -1;
-    r = poll_for_event (conn, &frame, &reason);
-    g_assert_cmpint (r, ==, HXNET_RECV_SHUTDOWN);
-    g_assert_cmpint (reason, ==, HXNET_SHUTDOWN_EOF);
-
-    hxnet_connection_destroy (conn);
-}
-
-/* ------------------------------------------------------------------- *
- * Test: send_frame writes bytes to the peer. */
-static void
-test_send_frame_round_trip (void)
-{
-    int sv[2];
-    tcp_loopback_pair (sv);
-
-    hxnet_connection *conn = hxnet_connection_spawn_fd (sv[1]);
-    g_assert_nonnull (conn);
-
-    /* Build a full frame as bytes and ship via send_frame. */
-    uint8_t buf[22 + 5];
-    build_header (buf, 0x6b, 99, 0, 5, 0);
-    memcpy (&buf[22], "login", 5);
-
-    int r = hxnet_connection_send_frame (conn, buf, sizeof (buf));
-    g_assert_cmpint (r, ==, HXNET_SEND_OK);
-
-    /* Server side reads the bytes back. */
-    uint8_t got[27] = { 0 };
-    read_all_or_die (sv[0], got, sizeof (got));
-    g_assert_cmpmem (got, sizeof (got), buf, sizeof (buf));
-
-    g_assert_cmpint (close (sv[0]), ==, 0);
-    hxnet_connection_destroy (conn);
-}
-
-/* ------------------------------------------------------------------- *
- * Test: NULL handle / NULL data fall through cleanly.
- *
- * The FFI's policy on invalid args is "g_critical + return a
- * failure code, never crash." GTest's default fatal-mask
- * promotes criticals to abort; we use g_test_expect_message to
- * acknowledge each expected critical so the test doesn't bail.
- * (Same pattern hxbridge::tests::malformed_utf8_signal_name uses
- * for its critical-emitting path.) */
-static void
-test_invalid_args_return_invalid_not_crash (void)
-{
-    int reason = 0;
-    hxnet_frame f;
-    memset (&f, 0, sizeof (f));
-
-    /* NULL handle to try_recv_frame returns EMPTY (we picked
-     * EMPTY rather than SHUTDOWN because the caller passed a
-     * NULL handle — there's no actor to attribute a shutdown
-     * reason to). Just confirm no crash. */
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL arg*");
-    int r = hxnet_connection_try_recv_frame (NULL, &f, &reason);
-    g_test_assert_expected_messages ();
-    g_assert_cmpint (r, ==, HXNET_RECV_EMPTY);
-
-    /* NULL handle → INVALID. The FFI checks the handle first,
-     * before the data/len pair, so this is the one critical that
-     * actually fires when both arguments are NULL. */
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL handle*");
-    r = hxnet_connection_send_frame (NULL, NULL, 4);
-    g_test_assert_expected_messages ();
-    g_assert_cmpint (r, ==, HXNET_SEND_INVALID);
-
-    /* destroy + frame_free are NULL-safe no-ops. */
-    hxnet_connection_destroy (NULL);
-    hxnet_frame_free (NULL);
-}
-
-/* ------------------------------------------------------------------- *
- * Callback-FFI smoke test (Phase R3.3.e). spawn_fd_with_callback
- * routes events through the hxbridge ferry to the GLib main loop
- * and invokes the C callback per frame. We use GMainContext
- * iteration to drive the dispatch in the test (the production
- * path uses the GtkApplication's main loop). */
+/* Callback state + main-loop pump shared by the connect tests. */
 
 struct callback_state {
     int frames_seen;
@@ -478,9 +254,8 @@ struct callback_state {
     uint32_t last_trans;
     uint32_t last_body_len;
     uint8_t last_body[32];
-    /* Capture the handle pointer the callback received so we
-     * can verify it matches what spawn_fd_with_callback
-     * returned. */
+    /* Capture the handle pointer the callback received so we can verify
+     * it matches what open_tcp returned. */
     void *got_handle;
 };
 
@@ -491,17 +266,15 @@ test_on_event (hxnet_connection *conn, hxnet_frame *frame, void *user_data)
     s->got_handle = conn;
     s->last_type = frame->type_;
     s->last_trans = frame->trans;
-    /* Clamp the recorded length to what we actually copied —
-     * otherwise a future test sending a body > sizeof(last_body)
-     * would leave last_body_len exceeding the bytes-in-buffer
-     * and the assert_cmpmem path could read past the array. */
+    /* Clamp the recorded length to what we actually copied — otherwise a
+     * future test sending a body > sizeof(last_body) would leave
+     * last_body_len exceeding the bytes-in-buffer and the assert_cmpmem
+     * path could read past the array. */
     uint32_t cap = (uint32_t) sizeof (s->last_body);
     s->last_body_len = frame->body_len > cap ? cap : frame->body_len;
     memcpy (s->last_body, frame->body_ptr, s->last_body_len);
     s->frames_seen++;
-    /* C side owns the body until it calls hxnet_frame_free.
-     * The callback's frame pointer is mutable per the FFI
-     * contract — no const-cast required. */
+    /* C side owns the body until it calls hxnet_frame_free. */
     hxnet_frame_free (frame);
 }
 
@@ -514,18 +287,12 @@ test_on_shutdown (hxnet_connection *conn, int reason, void *user_data)
     s->shutdown_seen++;
 }
 
-/* Iterate the thread-default GMainContext until either
- * `pred(state)` is true or `deadline` elapses. Returns true if
- * pred satisfied.
+/* Iterate the thread-default GMainContext until either `pred(state)` is
+ * true or `deadline` elapses. Returns true if pred satisfied.
  *
- * Uses ref_thread_default(), not g_main_context_default(): the
- * Rust callback forwarder attaches its idle source to the
- * thread-default context (MainContext::ref_thread_default on
- * the Rust side). On the main thread with no push_thread_default
- * frame these are the same context, but if a future test pushes
- * a private thread-default frame, pumping the wrong one would
- * leave the callbacks queued and the predicate would never
- * trip. */
+ * Uses ref_thread_default(), not g_main_context_default(): the Rust
+ * callback forwarder attaches its idle source to the thread-default
+ * context (MainContext::ref_thread_default on the Rust side). */
 static gboolean
 pump_main_until (gboolean (*pred) (struct callback_state *),
                  struct callback_state *state, gint64 deadline_us)
@@ -557,24 +324,26 @@ saw_shutdown (struct callback_state *s)
     return s->shutdown_seen >= 1;
 }
 
+/* ------------------------------------------------------------------- *
+ * Test: a frame written by the server side arrives via the event
+ * callback with correct fields; peer close fires the shutdown callback
+ * with HXNET_SHUTDOWN_EOF. */
 static void
-test_callback_frame_then_shutdown (void)
+test_open_tcp_frame_then_shutdown (void)
 {
-    int sv[2];
-    tcp_loopback_pair (sv);
-
     struct callback_state state;
     memset (&state, 0, sizeof (state));
 
-    hxnet_connection *conn = hxnet_connection_spawn_fd_with_callback (
-        sv[1], test_on_event, test_on_shutdown, &state);
-    g_assert_nonnull (conn);
+    hxnet_connection *conn = NULL;
+    int server = -1;
+    open_tcp_to_listener (test_on_event, test_on_shutdown, &state, &conn,
+                          &server);
 
     /* Write a frame from the server side. */
     uint8_t hdr[22];
     build_header (hdr, 0x69, 7, 0, 4, 0);
-    write_all_or_die (sv[0], hdr, sizeof (hdr));
-    write_all_or_die (sv[0], (const uint8_t *) "abcd", 4);
+    write_all_or_die (server, hdr, sizeof (hdr));
+    write_all_or_die (server, (const uint8_t *) "abcd", 4);
 
     /* Pump main context until the callback fires. */
     g_assert_true (pump_main_until (saw_one_frame, &state, 5 * 1000000));
@@ -585,9 +354,8 @@ test_callback_frame_then_shutdown (void)
     g_assert_cmpmem (state.last_body, state.last_body_len, "abcd", 4);
     g_assert_true (state.got_handle == conn);
 
-    /* Close the server side; shutdown callback should fire with
-     * HXNET_SHUTDOWN_EOF. */
-    g_assert_cmpint (close (sv[0]), ==, 0);
+    /* Close the server side; shutdown callback should fire with EOF. */
+    g_assert_cmpint (close (server), ==, 0);
     g_assert_true (pump_main_until (saw_shutdown, &state, 5 * 1000000));
     g_assert_cmpint (state.shutdown_seen, ==, 1);
     g_assert_cmpint (state.shutdown_reason, ==, HXNET_SHUTDOWN_EOF);
@@ -595,124 +363,115 @@ test_callback_frame_then_shutdown (void)
     hxnet_connection_destroy (conn);
 }
 
+/* No-op callbacks for the send-frame test (it inspects the peer socket,
+ * not the callbacks). open_tcp requires both slots non-NULL. */
 static void
-test_callback_null_arg_rejects (void)
+noop_event (hxnet_connection *conn, hxnet_frame *frame, void *user_data)
 {
-    /* NULL on_event must be rejected with g_critical + NULL. */
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL callback*");
-    hxnet_connection *r = hxnet_connection_spawn_fd_with_callback (
-        0, NULL, test_on_shutdown, NULL);
-    g_test_assert_expected_messages ();
-    g_assert_null (r);
-
-    /* NULL on_shutdown likewise. */
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL callback*");
-    r = hxnet_connection_spawn_fd_with_callback (0, test_on_event, NULL, NULL);
-    g_test_assert_expected_messages ();
-    g_assert_null (r);
+    (void) conn;
+    (void) user_data;
+    hxnet_frame_free (frame);
 }
 
 static void
-test_transforms_null_config_rejected (void)
+noop_shutdown (hxnet_connection *conn, int reason, void *user_data)
 {
-    /* NULL config must be rejected with g_critical + NULL — no
-     * fd is adopted, so nothing leaks. */
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL config*");
-    hxnet_connection *r =
-        hxnet_connection_spawn_fd_with_transforms_and_callback (
-            0, NULL, test_on_event, test_on_shutdown, NULL);
-    g_test_assert_expected_messages ();
-    g_assert_null (r);
+    (void) conn;
+    (void) reason;
+    (void) user_data;
 }
 
+/* ------------------------------------------------------------------- *
+ * Test: send_frame writes bytes to the peer. */
 static void
-test_transforms_unknown_kind_rejected (void)
+test_send_frame_round_trip (void)
 {
-    hxnet_transform_config cfg;
-    memset (&cfg, 0, sizeof (cfg));
-    cfg.cipher_kind = 42; /* not a defined HXNET_CIPHER_* */
-    cfg.compression_kind = HXNET_COMPRESSION_NONE;
+    hxnet_connection *conn = NULL;
+    int server = -1;
+    open_tcp_to_listener (noop_event, noop_shutdown, NULL, &conn, &server);
 
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*unknown cipher_kind*");
-    hxnet_connection *r =
-        hxnet_connection_spawn_fd_with_transforms_and_callback (
-            0, &cfg, test_on_event, test_on_shutdown, NULL);
-    g_test_assert_expected_messages ();
-    g_assert_null (r);
-}
+    /* Build a full frame as bytes and ship via send_frame. */
+    uint8_t buf[22 + 5];
+    build_header (buf, 0x6b, 99, 0, 5, 0);
+    memcpy (&buf[22], "login", 5);
 
-static void
-test_transforms_passthrough_round_trip (void)
-{
-    /* Smoke test: passthrough config (cipher=NONE,
-     * compression=NONE) should behave identically to the
-     * non-transform spawn entry. We send a Hotline-framed
-     * message in, expect the callback to fire with the matching
-     * frame, then close + verify shutdown.
-     *
-     * The point is exercising the C ABI surface end to end —
-     * the C side builds an hxnet_transform_config, the Rust
-     * side decodes it, composes a no-op stack, and the
-     * Connection actor still drives the same Event::Frame path
-     * the non-transform variant uses. The cipher / compression
-     * variants are covered by the Rust-side transform.rs
-     * integration tests; the C smoke here just verifies that
-     * the new spawn entry is wired up. */
-    int sv[2];
-    tcp_loopback_pair (sv);
+    int r = hxnet_connection_send_frame (conn, buf, sizeof (buf));
+    g_assert_cmpint (r, ==, HXNET_SEND_OK);
 
-    struct callback_state state;
-    memset (&state, 0, sizeof (state));
+    /* Server side reads the bytes back. */
+    uint8_t got[27] = { 0 };
+    read_all_or_die (server, got, sizeof (got));
+    g_assert_cmpmem (got, sizeof (got), buf, sizeof (buf));
 
-    hxnet_transform_config cfg;
-    memset (&cfg, 0, sizeof (cfg));
-    cfg.cipher_kind = HXNET_CIPHER_NONE;
-    cfg.compression_kind = HXNET_COMPRESSION_NONE;
-
-    hxnet_connection *conn =
-        hxnet_connection_spawn_fd_with_transforms_and_callback (
-            sv[1], &cfg, test_on_event, test_on_shutdown, &state);
-    g_assert_nonnull (conn);
-
-    /* Send a frame using the same builder the callback test
-     * uses — type 0x69, trans 7, flag 0, body "abcd". */
-    uint8_t hdr[22];
-    build_header (hdr, 0x69, 7, 0, 4, 0);
-    write_all_or_die (sv[0], hdr, sizeof (hdr));
-    write_all_or_die (sv[0], (const uint8_t *) "abcd", 4);
-
-    g_assert_true (pump_main_until (saw_one_frame, &state, 5 * 1000000));
-    g_assert_cmpint (state.frames_seen, ==, 1);
-    g_assert_cmpuint (state.last_type, ==, 0x69);
-    g_assert_cmpuint (state.last_trans, ==, 7);
-    g_assert_cmpuint (state.last_body_len, ==, 4);
-    g_assert_cmpmem (state.last_body, state.last_body_len, "abcd", 4);
-
-    g_assert_cmpint (close (sv[0]), ==, 0);
-    g_assert_true (pump_main_until (saw_shutdown, &state, 5 * 1000000));
-    g_assert_cmpint (state.shutdown_reason, ==, HXNET_SHUTDOWN_EOF);
-
+    g_assert_cmpint (close (server), ==, 0);
     hxnet_connection_destroy (conn);
+}
+
+/* ------------------------------------------------------------------- *
+ * Test: NULL handle / NULL data fall through cleanly.
+ *
+ * The FFI's policy on invalid args is "g_critical + return a failure
+ * code, never crash." GTest's default fatal-mask promotes criticals to
+ * abort; we use g_test_expect_message to acknowledge each expected
+ * critical so the test doesn't bail. */
+static void
+test_invalid_args_return_invalid_not_crash (void)
+{
+    int reason = 0;
+    hxnet_frame f;
+    memset (&f, 0, sizeof (f));
+
+    /* NULL handle to try_recv_frame returns EMPTY (there's no actor to
+     * attribute a shutdown reason to). Just confirm no crash. */
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL arg*");
+    int r = hxnet_connection_try_recv_frame (NULL, &f, &reason);
+    g_test_assert_expected_messages ();
+    g_assert_cmpint (r, ==, HXNET_RECV_EMPTY);
+
+    /* NULL handle → INVALID. The FFI checks the handle first, before the
+     * data/len pair, so this is the one critical that fires. */
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL handle*");
+    r = hxnet_connection_send_frame (NULL, NULL, 4);
+    g_test_assert_expected_messages ();
+    g_assert_cmpint (r, ==, HXNET_SEND_INVALID);
+
+    /* destroy + frame_free are NULL-safe no-ops. */
+    hxnet_connection_destroy (NULL);
+    hxnet_frame_free (NULL);
+}
+
+/* ------------------------------------------------------------------- *
+ * Test: open_tcp rejects NULL host / NULL callbacks with g_critical +
+ * NULL, no connection attempted. */
+static void
+test_open_tcp_null_args_rejected (void)
+{
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL or empty host*");
+    hxnet_connection *r = hxnet_connection_open_tcp (
+        NULL, 0, 5500, noop_event, noop_shutdown, NULL, NULL);
+    g_test_assert_expected_messages ();
+    g_assert_null (r);
+
+    const char *host = "127.0.0.1";
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL,
+                           "*NULL on_event*");
+    r = hxnet_connection_open_tcp ((const uint8_t *) host, strlen (host), 5500,
+                                   NULL, noop_shutdown, NULL, NULL);
+    g_test_assert_expected_messages ();
+    g_assert_null (r);
 }
 
 int
 main (int argc, char *argv[])
 {
     g_test_init (&argc, &argv, NULL);
-    g_test_add_func ("/hxnet/ffi/round-trip-frame",
-                     test_round_trip_single_frame);
+    g_test_add_func ("/hxnet/ffi/open-tcp-frame-then-shutdown",
+                     test_open_tcp_frame_then_shutdown);
     g_test_add_func ("/hxnet/ffi/send-frame-round-trip",
                      test_send_frame_round_trip);
-    g_test_add_func ("/hxnet/ffi/invalid-args", test_invalid_args_return_invalid_not_crash);
-    g_test_add_func ("/hxnet/ffi/callback-frame-then-shutdown",
-                     test_callback_frame_then_shutdown);
-    g_test_add_func ("/hxnet/ffi/callback-null-arg-rejects",
-                     test_callback_null_arg_rejects);
-    g_test_add_func ("/hxnet/ffi/transforms-null-config-rejected",
-                     test_transforms_null_config_rejected);
-    g_test_add_func ("/hxnet/ffi/transforms-unknown-kind-rejected",
-                     test_transforms_unknown_kind_rejected);
-    g_test_add_func ("/hxnet/ffi/transforms-passthrough-round-trip",
-                     test_transforms_passthrough_round_trip);
+    g_test_add_func ("/hxnet/ffi/invalid-args",
+                     test_invalid_args_return_invalid_not_crash);
+    g_test_add_func ("/hxnet/ffi/open-tcp-null-args-rejected",
+                     test_open_tcp_null_args_rejected);
     return g_test_run ();
 }

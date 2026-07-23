@@ -80,33 +80,20 @@ extern void hxnet_hope_aead_free (HxnetHopeAead *h);
 typedef int (*hxnet_htxf_verify_cb_t) (const guint8 *fp, gsize fp_len,
                                        void *user_data);
 
-/* Open an HTXF subchannel over an already-connected, blocking `fd`
- * (which this call adopts — the C side must not close it). `tls != 0`
- * TLS-handshakes the fd with rustls (host = SNI / TOFU name);
- * `preamble` is written raw before AEAD arms. A non-NULL `hope_aead`
- * arms per-transfer AEAD framing: the keys are derived in-process from
- * that control-channel material + `xfer_ref`, so the session key never
- * crosses the FFI. NULL = plaintext passthrough. Returns an owned
- * handle, or NULL on bad arguments / TLS rejection / IO error (the
- * adopted fd is closed on every failure path). */
-extern HtxfConn *hxnet_htxf_open (int fd, int tls, const guint8 *host,
-                                  size_t host_len, const guint8 *preamble,
-                                  size_t preamble_len,
-                                  const HxnetHopeAead *hope_aead,
-                                  guint32 xfer_ref,
-                                  hxnet_htxf_verify_cb_t verify_cert,
-                                  void *user_data);
-
 /* Connect an HTXF subchannel to host:port (optionally through a SOCKS
- * proxy) entirely in Rust, then open it — the production entry that
- * replaces the C-side GSocketClient connect + fd hand-off. `proxy_uri`
- * (length proxy_uri_len) is an optional "socks5://..." URI; NULL/0
- * connects direct, a malformed/unsupported URI fails the open. `host` is
- * required (connect target + TLS SNI / TOFU name). All other args match
- * hxnet_htxf_open. The connect runs on the tokio runtime (bounded by the
- * shared handshake timeout) and blocks the calling worker for the result.
- * Returns an owned handle, or NULL on a bad argument / connect / TLS /
- * TOFU failure. Defined in rust/crates/hxnet/src/htxf.rs. */
+ * proxy) entirely in Rust, then open it — no OS socket fd crosses the
+ * FFI. `proxy_uri` (length proxy_uri_len) is an optional "socks5://..."
+ * URI; NULL/0 connects direct, a malformed/unsupported URI fails the
+ * open. `host` is required (connect target + TLS SNI / TOFU name).
+ * `tls != 0` TLS-handshakes with rustls; `preamble` is written raw
+ * before AEAD arms; a non-NULL `hope_aead` arms per-transfer AEAD
+ * framing, with the keys derived in-process from that control-channel
+ * material + `xfer_ref` (the session key never crosses the FFI), while
+ * NULL selects plaintext passthrough. The connect runs on the tokio
+ * runtime (bounded by the shared handshake timeout) and blocks the
+ * calling worker for the result. Returns an owned handle, or NULL on a
+ * bad argument / connect / TLS / TOFU failure. Defined in
+ * rust/crates/hxnet/src/htxf.rs. */
 extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
                                      guint16 port, const guint8 *proxy_uri,
                                      size_t proxy_uri_len, int tls,

@@ -30,7 +30,7 @@
  * Both legs run through PRODUCTION rustls: the control channel via
  * the orchestrator (integration_open_login_tls_or_skip drives the
  * production login lifecycle, AGREEMENTAGREE included), and the HTXF
- * subchannel via the same hxnet_htxf_open(tls=1) path banner.c's
+ * subchannel via the same hxnet_htxf_connect(tls=1) path banner.c's
  * worker uses — no parallel GnuTLS harness transport.
  */
 
@@ -164,24 +164,15 @@ test_banner_htxf_mode_tls (void)
     g_test_message ("HTXF ref=%u size=%u", ref, size);
 
     /* Open the TLS HTXF subchannel the SAME way banner.c's worker
-     * does: a plaintext TCP connect to the xfer port (the TLS wrap is
-     * hxnet's job), then hxnet_htxf_open with tls=1. No parallel
+     * does: hxnet_htxf_connect connects to the xfer port and TLS-wraps
+     * it (tls=1), all in Rust — no fd crosses the FFI. No parallel
      * GnuTLS harness transport — the body bytes ride the production
-     * rustls subchannel. The harness owns the connect (returns a raw
-     * fd we hand to hxnet, which takes ownership on success). */
-    int dupfd = hx_integration_connect_to (srv->host, srv->tls_xfer_port,
-                                            /*timeout_ms=*/10000);
-    if (dupfd < 0) {
-        g_test_fail_printf (
-            "TLS HTXF subchannel port (%u) not reachable",
-            (unsigned) srv->tls_xfer_port);
-        goto cleanup;
-    }
+     * rustls subchannel. */
 
     /* Pack the HTXF preamble with HTXF_TYPE_BANNER — Janus refuses
      * a banner ref on a FILE-typed connection. Production banner
      * worker uses the same packer (see banner.c). The preamble carries
-     * no HTXF/HOPE AEAD framing — hxnet_htxf_open writes it before any
+     * no HTXF/HOPE AEAD framing — hxnet_htxf_connect writes it before any
      * such per-transfer cipher state is armed, so the server can match
      * the subchannel to the queued transfer by ref. (It's still inside
      * the TLS record layer here: on this TLS-from-byte-zero subchannel
@@ -197,13 +188,14 @@ test_banner_htxf_mode_tls (void)
     xfer.ref = ref;
     htxf_io_init (&xfer);
     /* hope_aead = NULL: plaintext-TLS banner, no HOPE AEAD framing. */
-    xfer.hx = hxnet_htxf_open (
-        dupfd, /*tls=*/1, (const guint8 *) srv->host, strlen (srv->host),
-        hdr_buf, hdr_len, /*hope_aead=*/NULL, ref,
+    xfer.hx = hxnet_htxf_connect (
+        (const guint8 *) srv->host, strlen (srv->host), srv->tls_xfer_port,
+        NULL, 0, /*tls=*/1, hdr_buf, hdr_len, /*hope_aead=*/NULL, ref,
         tls_banner_xfer_verify_cb, NULL);
     if (!xfer.hx) {
-        g_test_fail_printf ("hxnet_htxf_open (TLS banner) failed");
-        close (dupfd);
+        g_test_fail_printf (
+            "TLS HTXF subchannel (port %u) connect/open failed",
+            (unsigned) srv->tls_xfer_port);
         goto cleanup;
     }
 
