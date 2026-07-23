@@ -8,11 +8,14 @@
 # Three job families:
 #
 #   rust-portability — cargo test of the glib-free crates on
-#       windows-latest / macos-latest. Needs no GTK stack; this is the
-#       cheap tripwire that keeps hxnet & friends honest cross-platform.
-#       hxnet runs as its own step so its (currently expected) Windows
-#       failure — the unix RawFd seams in ffi.rs / htxf.rs — doesn't
-#       mask regressions in the crates that already are portable.
+#       windows-latest / macos-latest. Needs no GTK stack (no pkg-config,
+#       no glib); this is the cheap tripwire that keeps the portable
+#       crates honest cross-platform. hxnet is deliberately NOT here: it
+#       depends on glib (hxbridge's shared runtime + the FFI g_critical!
+#       layer), and glib-sys needs pkg-config + glib on the runner — which
+#       this bare job intentionally lacks — so hxnet is exercised by the
+#       full-app jobs below instead. (Decoupling hxnet's core from glib so
+#       it could rejoin this tripwire is a separate follow-up.)
 #
 #   windows-app — full meson build under MSYS2 UCRT64.
 #   macos-app   — full meson build against Homebrew, both arches.
@@ -23,7 +26,9 @@
 #     * libseccomp — required unconditionally (meson.build:158),
 #       Linux-only. Needs a host_machine.system() guard.
 #     * gsound — no MSYS2 package; Homebrew availability unverified.
-#     * hxnet on Windows — RawFd FFI seams.
+#     * hxnet — needs glib/pkg-config, so it builds only in these app
+#       jobs (not the bare tripwire); its unix RawFd FFI seams may still
+#       block the Windows build.
 #   The probe output + uploaded meson-logs are the point of early runs.
 
 name: ports
@@ -76,12 +81,6 @@ jobs:
 
       - name: portable crates
         run: cargo test --locked ${{ env.PORTABLE_CRATES }}
-
-      - name: hxnet
-        # Expected RED on windows-latest until the FromRawFd/IntoRawFd
-        # seams are replaced with path-based file handoff. Green here
-        # is the "hxnet is portable" milestone.
-        run: cargo test --locked -p hxnet --features hxnet/socks
 
   # ---------------------------------------------------------------
   # Tier 2: full app build, Windows / MSYS2 UCRT64.
