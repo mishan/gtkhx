@@ -56,10 +56,22 @@ macroman_to_utf8_dup (const char *src, gsize len)
 static char *
 format_ip (const guint8 *bytes, GSocketFamily family)
 {
+    /* A family-appropriate placeholder for the failure paths below, so a
+     * malformed tracker record yields a harmless string rather than a
+     * crash while building the event. */
+    const char *placeholder =
+        (family == G_SOCKET_FAMILY_IPV6) ? "::" : "0.0.0.0";
+
     GInetAddress *a = g_inet_address_new_from_bytes (bytes, family);
+    if (!a) {
+        /* g_inet_address_new_from_bytes can return NULL on an unexpected
+         * family / bad input — don't deref it. */
+        return g_strdup (placeholder);
+    }
     char *s = g_inet_address_to_string (a);
     g_object_unref (a);
-    return s;
+    /* to_string is non-NULL for a valid address, but stay defensive. */
+    return s ? s : g_strdup (placeholder);
 }
 
 /* Stamp the printable .address field from raw address bytes,
