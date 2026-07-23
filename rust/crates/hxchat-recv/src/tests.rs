@@ -120,6 +120,104 @@ fn rcv_subject_handler_empty_noops() {
     assert_eq!(test_env::SUBJECT_EMITTED.with(|c| c.take()), None);
 }
 
+/// Build a real HTLS_HDR_CHAT frame: 22-byte header + BODY/CHAT_ID/UID (+ any
+/// extra chunks, e.g. media companions). The header type is ignored by
+/// parse_chat — it walks chunks.
+fn chat_frame(cid: u32, uid: u16, body: &[u8], extra: &[(u16, Vec<u8>)]) -> Vec<u8> {
+    use hotline_proto::messages::tag;
+    let mut v = Vec::new();
+    v.extend_from_slice(&0x0000_0069u32.to_be_bytes()); // type (ignored)
+    v.extend_from_slice(&[0u8; 18]);
+    push_chunk(&mut v, tag::BODY, body); // HTLS_DATA_CHAT shares the BODY tag
+    push_chunk(&mut v, tag::CHAT_ID, &cid.to_be_bytes());
+    push_chunk(&mut v, tag::UID, &uid.to_be_bytes());
+    for (t, d) in extra {
+        push_chunk(&mut v, *t, d);
+    }
+    v
+}
+
+fn rcv_chat(frame: &[u8]) {
+    unsafe { hx_rcv_chat(std::ptr::null_mut(), frame.as_ptr(), frame.len()) };
+}
+
+#[test]
+fn rcv_chat_handler_parses_and_emits() {
+    test_env::reset();
+    let f = chat_frame(0, 42, b"hello world", &[]);
+
+    rcv_chat(&f);
+
+    // native parse → event build → gate → chat emit (the sentinel event ptr).
+    assert_eq!(
+        test_env::EVENT_NEW.with(|c| c.borrow().clone()),
+        Some((0, b"hello world".to_vec()))
+    );
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(FAKE_CHAT_EVENT));
+    assert!(!test_env::MEDIA_ATTACHED.with(|c| c.get()));
+}
+
+#[test]
+fn rcv_chat_handler_honours_ignore() {
+    test_env::reset();
+    test_env::IGNORE.with(|c| c.set(true));
+    let f = chat_frame(0, 42, b"blocked", &[]);
+
+    rcv_chat(&f);
+
+    // ignored sender → hx_chat_recv drops it (the event was still built + freed).
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), None);
+}
+
+#[test]
+fn rcv_chat_handler_attaches_media_when_cap_set() {
+    use hotline_proto::messages::tag;
+    test_env::reset();
+    test_env::HAS_CAP.with(|c| c.set(true));
+    let extra = vec![
+        (tag::CHAT_MEDIA_ID, b"handle123".to_vec()),
+        (tag::CHAT_MEDIA_TYPE, b"image/png".to_vec()),
+    ];
+    let f = chat_frame(0, 42, b"look", &extra);
+
+    rcv_chat(&f);
+
+    assert!(test_env::MEDIA_ATTACHED.with(|c| c.get()));
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(FAKE_CHAT_EVENT));
+}
+
+#[test]
+fn rcv_chat_handler_drops_orphaned_media() {
+    use hotline_proto::messages::tag;
+    test_env::reset();
+    test_env::HAS_CAP.with(|c| c.set(true));
+    // Only the ID present (no TYPE) → orphan → drop the whole chat.
+    let extra = vec![(tag::CHAT_MEDIA_ID, b"handle123".to_vec())];
+    let f = chat_frame(0, 42, b"look", &extra);
+
+    rcv_chat(&f);
+
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), None);
+    assert!(!test_env::MEDIA_ATTACHED.with(|c| c.get()));
+}
+
+#[test]
+fn rcv_chat_handler_ignores_media_without_cap() {
+    use hotline_proto::messages::tag;
+    // Media chunks present but cap NOT negotiated → media ignored, line still emits.
+    test_env::reset();
+    let extra = vec![
+        (tag::CHAT_MEDIA_ID, b"handle123".to_vec()),
+        (tag::CHAT_MEDIA_TYPE, b"image/png".to_vec()),
+    ];
+    let f = chat_frame(0, 42, b"look", &extra);
+
+    rcv_chat(&f);
+
+    assert!(!test_env::MEDIA_ATTACHED.with(|c| c.get()));
+    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(FAKE_CHAT_EVENT));
+}
+
 #[test]
 fn emits_chat_invitation_when_not_ignored() {
     test_env::reset();

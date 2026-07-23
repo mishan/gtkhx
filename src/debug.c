@@ -101,6 +101,12 @@ debug_log (const char *cat, const char *fmt, ...)
     }
 }
 
+void
+debug_log_str (const char *cat, const char *msg)
+{
+    debug_log (cat, "%s", msg);
+}
+
 /* tracing helper for the hx_conn_name (htlc) corruption hunt. Each
  * write site to hx_conn_name (htlc) calls this with a label naming the call
  * site, the bytes about to be copied, and their length. With

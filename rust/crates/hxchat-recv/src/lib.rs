@@ -55,6 +55,48 @@ extern "C" {
     fn hx_chat_set_subject(chat: *mut c_void, s: *const c_char, len: usize);
     /// Log the "Subject Changed to: <subject>" chat line (chat.c view/log shim).
     fn hx_chat_log_subject_changed(htlc: *mut c_void, cid: u32, subject: *const c_char);
+    /// Whether the server negotiated `cap` for this session (hxconn crate).
+    fn hx_conn_has_cap(htlc: *const c_void, cap: u64) -> c_int;
+    /// Our own display nick (NUL-terminated internal buffer; hxconn crate).
+    fn hx_conn_name(htlc: *const c_void) -> *const c_char;
+    /// Build a boxed `HxChatEvent` from the raw (CR2LF + strip_ansi'd) chat body
+    /// — copies the bytes, runs the UTF-8 validation + is-self classification
+    /// (proto_helpers.c producer). Freed with [`hx_chat_event_free`].
+    fn hx_chat_event_new(
+        raw: *const c_char,
+        raw_len: usize,
+        cid: u32,
+        self_nick: *const c_char,
+    ) -> *mut c_void;
+    /// Attach inline-media metadata to a chat event (copies id + mime;
+    /// proto_helpers.c producer).
+    #[allow(clippy::too_many_arguments)]
+    fn hx_chat_event_attach_media(
+        ev: *mut c_void,
+        id: *const u8,
+        id_len: usize,
+        mime: *const c_char,
+        mime_len: usize,
+        width: u32,
+        width_present: c_int,
+        height: u32,
+        height_present: c_int,
+        bytes: u32,
+        bytes_present: c_int,
+    );
+    /// Free a boxed `HxChatEvent` (gtkhx-boxed).
+    fn hx_chat_event_free(ev: *mut c_void);
+    /// Log a pre-formatted line under a debug category (debug.c).
+    fn debug_log_str(cat: *const c_char, msg: *const c_char);
+}
+
+/// The inline-media capability bit (HTLC_CAP_INLINE_MEDIA, hotline.h).
+const HTLC_CAP_INLINE_MEDIA: u64 = 0x0008;
+
+/// gboolean from a Rust bool (glib `gint`, i.e. `c_int`, TRUE=1 / FALSE=0).
+#[inline]
+fn gbool(b: bool) -> c_int {
+    b as c_int
 }
 
 /// `void hx_chat_invite_recv (htlc, member_model, cid, uid, name)` — the
@@ -163,6 +205,97 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(htlc: *mut c_void, frame: *const u8
         hx_chat_set_subject(chat, subj_ptr, n);
         hx_chat_log_subject_changed(htlc, sub.cid, hx_chat_subject(chat));
     }
+}
+
+/// `void hx_rcv_chat (htlc, frame, frame_len)` — the HTLS_HDR_CHAT public-chat
+/// line handler (was `rcv.c`, Phase E2). Parses the body via native
+/// `hotline_proto::parse::parse_chat`; when the inline-media cap is negotiated,
+/// pulls the media companion via native `inline_media::extract_chat_media_meta`
+/// (dropping the whole line on an orphaned companion, per spec). Builds the boxed
+/// `HxChatEvent` (C producer, which copies + UTF-8-validates + self-classifies),
+/// attaches any media, then delegates the ignore-gate + emit to the in-crate
+/// [`hx_chat_recv`], and frees the event either way.
+///
+/// # Safety
+/// C-ABI handler invoked from the receive dispatch on the main thread. `htlc` is
+/// a valid connection handle; `frame` is valid for `frame_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
+    if frame.is_null() {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    // 8192: the C body cap. parse_chat CR2LF's + strip_ansi's the body and drops
+    // a single leading LF; `text()` is the display slice.
+    let cm = hotline_proto::parse::parse_chat(buf, frame_len, 8192);
+
+    let sess = hx_conn_sess(htlc);
+    let chat = chat_with_cid(sess, 0);
+    if chat.is_null() {
+        return;
+    }
+
+    // Inline-media companion — only when the server confirmed the cap. `media`
+    // borrows `buf` (the raw frame), valid for the whole handler.
+    let mut media: Option<hotline_proto::inline_media::ChatMediaMeta> = None;
+    if hx_conn_has_cap(htlc, HTLC_CAP_INLINE_MEDIA) != 0 {
+        let walker = hotline_proto::wire::ChunkIter::over_message(buf, frame_len);
+        match hotline_proto::inline_media::extract_chat_media_meta(walker) {
+            Ok(None) => {}
+            Ok(Some(m)) => media = Some(m),
+            Err(_) => {
+                // Spec: exactly one companion field present → reject the whole
+                // chat (orphan implies server bug / wire damage).
+                let line = std::ffi::CString::new(format!(
+                    "drop chat with orphaned media companion (cid={}, uid={})",
+                    cm.cid, cm.uid
+                ))
+                .unwrap();
+                debug_log_str(c"media".as_ptr(), line.as_ptr());
+                return;
+            }
+        }
+    }
+
+    // Boxed HxChatEvent (the C producer copies the bytes). self_nick = our own
+    // display name, or NULL when unset.
+    let own = hx_conn_name(htlc);
+    let self_nick = if !own.is_null() && *own != 0 {
+        own
+    } else {
+        std::ptr::null()
+    };
+    let text = cm.text();
+    let ev = hx_chat_event_new(text.as_ptr() as *const c_char, text.len(), cm.cid, self_nick);
+    if let Some(m) = media {
+        hx_chat_event_attach_media(
+            ev,
+            m.id.as_ptr(),
+            m.id.len(),
+            m.type_.as_ptr() as *const c_char,
+            m.type_.len(),
+            m.width.unwrap_or(0),
+            gbool(m.width.is_some()),
+            m.height.unwrap_or(0),
+            gbool(m.height.is_some()),
+            m.bytes.unwrap_or(0),
+            gbool(m.bytes.is_some()),
+        );
+        let line = std::ffi::CString::new(format!(
+            "chat with media: cid={} uid={} mime={} dims={}x{} bytes={}",
+            cm.cid,
+            cm.uid,
+            String::from_utf8_lossy(m.type_),
+            m.width.unwrap_or(0),
+            m.height.unwrap_or(0),
+            m.bytes.unwrap_or(0)
+        ))
+        .unwrap();
+        debug_log_str(c"media".as_ptr(), line.as_ptr());
+    }
+    // Ignore-gate + emit; C owns `ev` and frees it either way.
+    hx_chat_recv(htlc, hx_chat_member_model(chat), cm.uid, ev);
+    hx_chat_event_free(ev);
 }
 
 /// `int hx_chat_subject_recv (htlc, cid, subject, subject_len, current_subject)`
@@ -284,6 +417,13 @@ pub(crate) mod test_env {
         /// has_more), or None.
         pub static HISTORY_EMITTED: Cell<Option<(u32, *mut std::os::raw::c_void, bool)>> =
             const { Cell::new(None) };
+        /// Configurable return for the stubbed inline-media cap check.
+        pub static HAS_CAP: Cell<bool> = const { Cell::new(false) };
+        /// Records the (cid, body-bytes) the stubbed hx_chat_event_new saw.
+        pub static EVENT_NEW: std::cell::RefCell<Option<(u32, Vec<u8>)>> =
+            const { std::cell::RefCell::new(None) };
+        /// Whether the stubbed hx_chat_event_attach_media was called.
+        pub static MEDIA_ATTACHED: Cell<bool> = const { Cell::new(false) };
     }
 
     pub fn reset() {
@@ -292,6 +432,9 @@ pub(crate) mod test_env {
         SUBJECT_EMITTED.with(|c| c.set(None));
         CHAT_EMITTED.with(|c| c.set(None));
         HISTORY_EMITTED.with(|c| c.set(None));
+        HAS_CAP.with(|c| c.set(false));
+        EVENT_NEW.with(|c| *c.borrow_mut() = None);
+        MEDIA_ATTACHED.with(|c| c.set(false));
     }
 }
 
@@ -375,6 +518,51 @@ unsafe fn hx_chat_subject(_chat: *mut c_void) -> *const c_char {
 unsafe fn hx_chat_set_subject(_chat: *mut c_void, _s: *const c_char, _len: usize) {}
 #[cfg(test)]
 unsafe fn hx_chat_log_subject_changed(_htlc: *mut c_void, _cid: u32, _subject: *const c_char) {}
+
+/// A fixed non-null sentinel the chat-event doubles hand back / expect.
+#[cfg(test)]
+pub(crate) const FAKE_CHAT_EVENT: *mut c_void = 0xC0FE_usize as *mut c_void;
+
+#[cfg(test)]
+unsafe fn hx_conn_has_cap(_htlc: *const c_void, _cap: u64) -> c_int {
+    c_int::from(test_env::HAS_CAP.with(|c| c.get()))
+}
+#[cfg(test)]
+unsafe fn hx_conn_name(_htlc: *const c_void) -> *const c_char {
+    c"".as_ptr()
+}
+#[cfg(test)]
+unsafe fn hx_chat_event_new(
+    raw: *const c_char,
+    raw_len: usize,
+    cid: u32,
+    _self_nick: *const c_char,
+) -> *mut c_void {
+    let body = std::slice::from_raw_parts(raw as *const u8, raw_len).to_vec();
+    test_env::EVENT_NEW.with(|c| *c.borrow_mut() = Some((cid, body)));
+    FAKE_CHAT_EVENT
+}
+#[cfg(test)]
+#[allow(clippy::too_many_arguments)]
+unsafe fn hx_chat_event_attach_media(
+    _ev: *mut c_void,
+    _id: *const u8,
+    _id_len: usize,
+    _mime: *const c_char,
+    _mime_len: usize,
+    _width: u32,
+    _width_present: c_int,
+    _height: u32,
+    _height_present: c_int,
+    _bytes: u32,
+    _bytes_present: c_int,
+) {
+    test_env::MEDIA_ATTACHED.with(|c| c.set(true));
+}
+#[cfg(test)]
+unsafe fn hx_chat_event_free(_ev: *mut c_void) {}
+#[cfg(test)]
+unsafe fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
 
 #[cfg(test)]
 mod tests;
