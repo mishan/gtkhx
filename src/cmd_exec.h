@@ -35,6 +35,9 @@
 
 #include "protocol.h" /* struct htlc_conn */
 
+#define FDR 1
+#define FDW 2
+
 /* The /exec command handler (COMMAND-macro signature). Non-static so
  * commands.c's dispatch table can reference it. */
 extern void cmd_exec (int argc, char **argv, char *str,

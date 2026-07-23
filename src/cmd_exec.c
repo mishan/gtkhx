@@ -41,6 +41,14 @@
 #include "chat.h"      /* hx_send_chat */
 #include "cmd_exec.h"
 
+struct hxd_file {
+    struct htlc_conn *htlc;
+    guint32 cid;
+    int fd;
+    void (*ready_read) (int fd);
+    void (*ready_write) (int fd);
+};
+
 /* ---- fd-watch table (GIOChannel over the /exec output pipe) --------- */
 
 /* Environment for execve; the fd table + its size. Declared extern in
@@ -53,6 +61,9 @@ struct hxd_file *hxd_files = 0;
  * Sized to the same 1024-fd ceiling hxd_fd_set enforces. */
 static int rinput_tags[1024];
 static int winput_tags[1024];
+
+void hxd_fd_clr (int fd, int rw);
+void hxd_fd_set (int fd, int rw);
 
 static gboolean
 hxd_gtk_read (GIOChannel *source, GIOCondition cond, struct hxd_file *file)
@@ -205,7 +216,7 @@ exec_ready_read (int fd)
          * plain `/exec` whose output prints locally. Route -o output back
          * to that originating connection — not hx_active_session(), which
          * can differ from it once multiple connections exist. */
-        struct htlc_conn *out_htlc = hxd_files[fd].conn.htlc;
+        struct htlc_conn *out_htlc = hxd_files[fd].htlc;
         if (out_htlc) {
             LF2CR (buf, r);
             if (buf[r - 1] == '\r') {
@@ -301,9 +312,9 @@ find_cmd_arg:
     default:
         close (pfds[1]);
         if (output_to) {
-            hxd_files[pfds[0]].conn.htlc = htlc;
+            hxd_files[pfds[0]].htlc = htlc;
         } else {
-            hxd_files[pfds[0]].conn.htlc = 0;
+            hxd_files[pfds[0]].htlc = 0;
         }
         hxd_files[pfds[0]].fd = pfds[0];
         hxd_files[pfds[0]].cid = cid;
