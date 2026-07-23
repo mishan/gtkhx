@@ -27,6 +27,7 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <glib/gstdio.h> /* g_lstat / GStatBuf (portable) */
 #include <time.h>
 #include "hx.h"
 #include "hxconn.h"
@@ -676,9 +677,11 @@ hx_folder_aggregate (const char *root, guint64 *total_bytes_out,
         return;
     }
     while ((name = g_dir_read_name (d))) {
-        struct stat sb;
+        GStatBuf sb;
         char *full = g_build_filename (root, name, NULL);
-        if (lstat (full, &sb) == 0) {
+        /* g_lstat: portable lstat (no symlink follow) — POSIX lstat isn't
+         * available in the Windows CRT. */
+        if (g_lstat (full, &sb) == 0) {
             if (S_ISDIR (sb.st_mode)) {
                 hx_folder_aggregate (full, total_bytes_out, nfiles_out);
             } else if (S_ISREG (sb.st_mode)) {

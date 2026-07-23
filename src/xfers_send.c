@@ -27,6 +27,7 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
+#include <glib/gstdio.h> /* g_lstat / GStatBuf (portable) */
 #include <glib.h>
 #include "hx.h"
 #include "protocol.h" /* HN32 for the folder-resume RFLT parse */
@@ -257,11 +258,12 @@ hx_collect_put_entries (GPtrArray *entries, const char *dir_path,
     for (GList *l = names; l; l = l->next) {
         const char *n = l->data;
         char *full;
-        struct stat sb;
+        GStatBuf sb;
         struct hx_put_entry *e;
 
         full = g_build_filename (dir_path, n, NULL);
-        if (lstat (full, &sb) < 0) {
+        /* g_lstat: portable lstat (no symlink follow). */
+        if (g_lstat (full, &sb) < 0) {
             g_free (full);
             continue;
         }
