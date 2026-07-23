@@ -29,7 +29,6 @@
 #include <sys/time.h>
 #include <time.h>
 #include <errno.h>
-#include <termios.h>
 #include <ctype.h>
 #include <locale.h>
 #ifdef HAVE_LIBINTL_H
@@ -1864,6 +1863,9 @@ hotline_client_input (struct htlc_conn *htlc, char *str, guint32 cid,
     }
 }
 
+#ifdef G_OS_UNIX
+#include <termios.h>
+
 static void
 get_password (char *buf)
 {
@@ -1898,6 +1900,7 @@ get_password (char *buf)
         }
     }
 }
+#endif
 
 static void
 print_help (char *name)
@@ -1915,7 +1918,9 @@ print_help (char *name)
                "(default: 5500)\n"));
     printf (_ ("\t--login, -l <login>\tUse <login> for <host>. "
                "(default: guest)\n"));
+#ifdef G_OS_UNIX
     printf (_ ("\t--pass, -p\t\tPrompt for pass of <login>.\n"));
+#endif
     printf (_ ("\t--bookmark, -b <name>\tConnect using bookmark <name>.\n"));
 }
 
@@ -2032,10 +2037,12 @@ hotline_client_init (int argc, char **argv)
     init (argc, argv);
 
     if (server) {
+#ifdef G_OS_UNIX
         if (prompt_pass) {
             pass = g_malloc (128);
             get_password (pass);
         }
+#endif
         /* CLI --server bootstrap: tls=0 default. GTKHX_TLS=1 env-var
 		 * override applies (Phase 4 adds a --tls CLI flag). */
         hx_connect (the_session.htlc, server, port, login ? login : "guest",
