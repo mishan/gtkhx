@@ -1,10 +1,17 @@
-//! End-to-end decode tests driving glycin against real image
-//! bytes. These run in `cargo test -p hx-image-decode` if the
-//! host has glycin loaders installed (detected via their config
-//! under `$XDG_DATA_DIRS/glycin-loaders/*/conf.d/` — see
-//! `glycin_loaders_available`). When the loaders are absent the
-//! tests skip on a dev box but fail loudly under CI (the `CI`
-//! env var) so a missing-loader CI image can't mask a regression.
+//! End-to-end decode tests driving the crate's FFI against real image
+//! bytes. The backend is platform-split (see `src/decode.rs`):
+//!
+//!   - **Linux** decodes through glycin, so these run only if the host
+//!     has glycin loaders installed (detected via their config under
+//!     `$XDG_DATA_DIRS/glycin-loaders/*/conf.d/` — see
+//!     `glycin_loaders_available`). When the loaders are absent the
+//!     tests skip on a dev box but fail loudly under CI (the `CI` env
+//!     var) so a missing-loader CI image can't mask a regression.
+//!   - **Off Linux** decodes through the pure-Rust `image` backend,
+//!     which needs no loaders, so the same fixtures always run and
+//!     exercise that backend directly. (The JPEG fixture routes through
+//!     `decode_static`, PNG through `decode_png_maybe_apng`, and GIF
+//!     through `decode_gif_frames`, so all three backend arms are hit.)
 //!
 //! The fixtures (PNG, JPEG, GIF) come from `tests/common/`
 //! which the Tier 3 banner suite already uses. They're small
@@ -41,8 +48,8 @@ pub extern "C" fn hx_image_decode_log(msg: *const std::ffi::c_char) {
 }
 
 use hx_image_decode::ffi::{
-    inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free,
-    HxInlineMediaDecoded,
+    hx_image_decode_async_with_policy, inline_media_decode_async, inline_media_decode_cancel,
+    inline_media_decoded_free, HxInlineMediaDecoded,
 };
 // Borrow the crate's version-selected gtk-rs family so the test's raw
 // GArray / GdkTexture FFI calls match whichever glycin backend is built
@@ -60,6 +67,7 @@ use hx_image_decode::compat::{gdk, glib};
 /// release, whereas the config always lives under the data dirs glycin
 /// itself searches. Keying off the config keeps the gate honest across
 /// CI (Fedora) and dev boxes (Debian/Ubuntu) without guessing paths.
+#[cfg(target_os = "linux")]
 fn glycin_loaders_available() -> bool {
     let data_dirs = std::env::var("XDG_DATA_DIRS")
         .unwrap_or_else(|_| "/usr/local/share:/usr/share".to_string());
@@ -72,6 +80,7 @@ fn glycin_loaders_available() -> bool {
 
 /// True if `root` (a `…/glycin-loaders` directory) holds at least one
 /// `<api>+/conf.d/*.conf` loader config, for any API-version subdir.
+#[cfg(target_os = "linux")]
 fn glycin_conf_present_under(root: &Path) -> bool {
     let Ok(versions) = std::fs::read_dir(root) else {
         return false;
@@ -86,20 +95,29 @@ fn glycin_conf_present_under(root: &Path) -> bool {
     })
 }
 
-/// Glycin-loader gate for the decode tests. Returns `true` when the
-/// loaders are present and the test should run.
+/// Backend-availability gate for the e2e fixture tests. Returns `true`
+/// when the decode backend is usable and the test should run.
 ///
-/// When they're absent the behaviour depends on the environment:
+/// Off Linux the backend is the pure-Rust `image` crate — always
+/// present, no loaders — so this is unconditionally `true` and the
+/// fixtures always exercise that backend.
+#[cfg(not(target_os = "linux"))]
+fn require_decoder() -> bool {
+    true
+}
+
+/// On Linux the backend is glycin, so the gate keys off the loaders:
 ///
-///   - **Under CI** (`CI` env var, which GitHub Actions always sets) a
-///     missing loader is a HARD failure. A silent skip there would let a
-///     real decode regression sail through a green run — the exact
-///     footgun the project's no-silent-skips rule guards against. If this
-///     fires in CI, the fix is to install the loaders (the `glycin-loaders`
-///     package) in the job, not to skip.
-///   - **Locally** (a slim dev box with no gnome-platform pieces) it
-///     skips with a notice, so `cargo test` stays usable off-desktop.
-fn require_glycin() -> bool {
+///   - present → run.
+///   - absent **under CI** (`CI` env var, which GitHub Actions always
+///     sets) → HARD failure. A silent skip there would let a real decode
+///     regression sail through a green run — the exact footgun the
+///     project's no-silent-skips rule guards against. The fix is to
+///     install the loaders (the `glycin-loaders` package) in the job.
+///   - absent **locally** (a slim dev box with no gnome-platform pieces)
+///     → skip with a notice, so `cargo test` stays usable off-desktop.
+#[cfg(target_os = "linux")]
+fn require_decoder() -> bool {
     if glycin_loaders_available() {
         return true;
     }
@@ -231,7 +249,10 @@ fn decode_fixture(path: &str) -> DecodeResult {
     // and map to UnsupportedFormat. The fixtures are trusted in-tree
     // images. Set process-wide (decode tests are serialised by
     // MAIN_CTX_LOCK, and the value never varies) so the test passes
-    // regardless of how the runner configures its environment.
+    // regardless of how the runner configures its environment. This is a
+    // glycin (Linux backend) knob; the pure-Rust `image` backend has no
+    // sandbox, so it's inert — and unset — off Linux.
+    #[cfg(target_os = "linux")]
     std::env::set_var("GTKHX_GLYCIN_NO_SANDBOX", "1");
     let bytes = std::fs::read(fixture_path(path))
         .unwrap_or_else(|e| panic!("read fixture {}: {}", path, e));
@@ -251,6 +272,31 @@ fn decode_fixture(path: &str) -> DecodeResult {
     result
 }
 
+/// Decode a fixture through the WIDE-policy entry (the file-preview
+/// path). Same backend as `decode_fixture`, but via
+/// `hx_image_decode_async_with_policy` with the sniff allowlist skipped
+/// — exercising that FFI entry + the policy plumbing cross-platform.
+fn decode_fixture_wide(path: &str) -> DecodeResult {
+    // Same glycin sandbox knob as decode_fixture; inert / unset off Linux.
+    #[cfg(target_os = "linux")]
+    std::env::set_var("GTKHX_GLYCIN_NO_SANDBOX", "1");
+    let bytes = std::fs::read(fixture_path(path))
+        .unwrap_or_else(|e| panic!("read fixture {}: {}", path, e));
+    let token = unsafe {
+        hx_image_decode_async_with_policy(
+            bytes.as_ptr(),
+            bytes.len(),
+            std::ptr::null(),
+            1, // POLICY_WIDE
+            collect_cb,
+            std::ptr::null_mut(),
+        )
+    };
+    let result = drive_until_done(Duration::from_secs(10));
+    unsafe { inline_media_decode_cancel(token) };
+    result
+}
+
 fn run_in_main_thread<F: FnOnce()>(f: F) {
     // Serialise against other tests racing for the default
     // MainContext. We hold `MAIN_CTX_LOCK` for the duration
@@ -266,7 +312,7 @@ fn run_in_main_thread<F: FnOnce()>(f: F) {
 
 #[test]
 fn png_fixture_decodes() {
-    if !require_glycin() {
+    if !require_decoder() {
         return;
     }
     run_in_main_thread(|| {
@@ -289,7 +335,7 @@ fn png_fixture_decodes() {
 
 #[test]
 fn jpeg_fixture_decodes() {
-    if !require_glycin() {
+    if !require_decoder() {
         return;
     }
     run_in_main_thread(|| {
@@ -312,7 +358,7 @@ fn jpeg_fixture_decodes() {
 
 #[test]
 fn gif_fixture_decodes() {
-    if !require_glycin() {
+    if !require_decoder() {
         return;
     }
     // The shipped GIF fixture is a single-frame static — it
@@ -335,6 +381,30 @@ fn gif_fixture_decodes() {
         assert!(r.has_texture);
         assert!(r.width > 0 && r.height > 0);
         assert_eq!(r.mime.as_deref(), Some("image/gif"));
+    });
+}
+
+/// The WIDE-policy preview entry decodes an allowed format too (it only
+/// widens the sniff gate, it doesn't change the backend). Covers the
+/// `hx_image_decode_async_with_policy` FFI + policy plumbing on both
+/// backends; the PNG fixture keeps this fixture-free while still driving
+/// a real decode.
+#[test]
+fn wide_policy_decodes_png() {
+    if !require_decoder() {
+        return;
+    }
+    run_in_main_thread(|| {
+        let r = decode_fixture_wide("banner_http.png");
+        assert_eq!(
+            r.error_code, 0,
+            "wide-policy decode failed: error_code={} message={:?} \
+             (has_texture={}, mime={:?})",
+            r.error_code, r.error_message, r.has_texture, r.mime
+        );
+        assert!(r.has_texture);
+        assert!(r.width > 0 && r.height > 0);
+        assert_eq!(r.mime.as_deref(), Some("image/png"));
     });
 }
 

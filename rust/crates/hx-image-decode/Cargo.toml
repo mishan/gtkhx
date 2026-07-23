@@ -76,8 +76,10 @@ glycin2 = { package = "glycin", version = "~2.1", default-features = false, feat
 # Non-Linux decode backend: pure-Rust codecs (no system libs, no subprocess
 # sandbox). Always compiled off-Linux; decode.rs's run_decode() is cfg-split so
 # this crate builds a glib/gdk texture from `image`-decoded RGBA there instead
-# of driving glycin's sandboxed loader. JPEG/PNG/GIF only — the same
-# inline-media allowlist the sniff gate enforces.
+# of driving glycin's sandboxed loader. Codec set is the inline-media allowlist
+# (JPEG/PNG/GIF, reached via the Strict sniff gate) plus the extra formats the
+# WIDE-policy preview path opens and decode.rs's decode_static handles
+# (BMP/ICO/TIFF/WebP) — see the dependency feature list below.
 [target.'cfg(not(target_os = "linux"))'.dependencies]
 # Codec set: the inline-media allowlist (jpeg/png/gif) plus the extra formats
 # the WIDE-policy preview path opens (bmp/ico/tiff/webp). All pure-Rust — no
