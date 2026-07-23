@@ -39,7 +39,6 @@
 #include "chat_members.h" /* hx_member_model_get_info, struct hx_member_info */
 #include "files.h"
 #include "network.h"
-#include "news15.h"
 #include "tray.h"
 #include "gtkutil.h"
 #include "cfgkeys.h"
