@@ -18,6 +18,41 @@ fn invite(cid: u32, uid: u16, name: &str) {
     }
 }
 
+/// Drive the whole moved handler (parse → chat lookup → recv) via the doubles.
+fn rcv_invite() {
+    unsafe { hx_rcv_chat_invite(std::ptr::null_mut(), std::ptr::null(), 0) };
+}
+
+#[test]
+fn rcv_handler_parses_and_emits() {
+    test_env::reset();
+    test_env::PARSE_INVITE.with(|c| *c.borrow_mut() = Some((9, 5, b"Alice".to_vec())));
+
+    rcv_invite();
+
+    // parse → lookups → hx_chat_invite_recv → chat-invitation emit.
+    assert_eq!(test_env::EMITTED.with(|c| c.take()), Some((9, b"Alice".to_vec())));
+}
+
+#[test]
+fn rcv_handler_drops_on_parse_failure() {
+    test_env::reset();
+    // PARSE_INVITE left None → the parse double returns false → early return.
+    rcv_invite();
+    assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
+}
+
+#[test]
+fn rcv_handler_honours_ignore() {
+    test_env::reset();
+    test_env::PARSE_INVITE.with(|c| *c.borrow_mut() = Some((1, 2, b"Blocked".to_vec())));
+    test_env::IGNORE.with(|c| c.set(true));
+
+    rcv_invite();
+
+    assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
+}
+
 #[test]
 fn emits_chat_invitation_when_not_ignored() {
     test_env::reset();

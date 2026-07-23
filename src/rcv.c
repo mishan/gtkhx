@@ -867,27 +867,12 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
                            bm.has_url ? bm.url : NULL);
 }
 
-/* The ignore-gate + chat-invitation emit live in the Rust hxchat-recv crate
- * (rust/crates/hxchat-recv). C keeps the wire parse + the member-model lookup. */
-extern void hx_chat_invite_recv (struct htlc_conn *htlc, void *member_model,
-                                 guint32 cid, guint16 uid, const char *name);
-
-void
-hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_chat_invite_msg im;
-    session *sess = sess_from_htlc (htlc);
-    struct chat *chat = chat_with_cid (sess, 0);
-
-    if (!hx_chat_invite_extract (frame, frame_len, &im)) {
-        return;
-    }
-
-    /* Drops the invite if the inviter is ignored, else emits chat-invitation
-     * (the sound subscriber chimes off it). */
-    hx_chat_invite_recv (htlc, hx_chat_member_model (chat), im.cid, im.uid,
-                         im.name);
-}
+/* hx_rcv_chat_invite (HTLS_HDR_CHAT_INVITE) is the first receive handler whose
+ * whole body lives in Rust: it's now a #[no_mangle] fn in the hxchat-recv crate
+ * (rust/crates/hxchat-recv) that parses the frame, resolves the public chat's
+ * member model via chat_with_cid/hx_chat_member_model, and delegates the
+ * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
+ * by name (declared in rcv.h); no C body remains here. (network-endgame.md E2.) */
 
 void
 hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)

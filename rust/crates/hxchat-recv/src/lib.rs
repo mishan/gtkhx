@@ -40,6 +40,35 @@ extern "C" {
     );
     /// Whether `uid` is on the per-chat ignore list (hxmember-model).
     fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
+
+    // ---- Receive-handler collaborators (E2: the handler body moves here) ----
+    /// The connection's owning session back-pointer (hxconn crate).
+    fn hx_conn_sess(htlc: *const c_void) -> *mut c_void;
+    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0
+    /// is the always-present public chat (chat.c).
+    fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
+    /// The chat's authoritative `HxMemberModel *` (chat.c).
+    fn hx_chat_member_model(chat: *mut c_void) -> *mut c_void;
+    /// Parse a HTLS_HDR_CHAT_INVITE frame: fills `out` (cid/uid/name_len) and
+    /// writes the strip_ansi'd, length-capped inviter name into `name_buf`
+    /// (NUL-terminated). Returns false on a malformed frame (hotline-proto).
+    fn gtkhx_proto_parse_chat_invite(
+        msg: *const u8,
+        msglen: usize,
+        name_buf: *mut u8,
+        name_cap: usize,
+        out: *mut ProtoChatInvite,
+    ) -> bool;
+}
+
+/// `#[repr(C)]` mirror of C's `struct gtkhx_proto_chat_invite` (hotline_proto.h):
+/// the scalar fields the invite parser fills (the name lands in a caller buffer).
+#[repr(C)]
+#[derive(Default)]
+struct ProtoChatInvite {
+    cid: u32,
+    uid: u16,
+    name_len: u16,
 }
 
 /// `void hx_chat_invite_recv (htlc, member_model, cid, uid, name)` — the
@@ -67,6 +96,42 @@ pub unsafe extern "C" fn hx_chat_invite_recv(
         return;
     }
     gtkhx_session_emit_chat_invitation(gtkhx_session_get_default(), htlc, cid, name);
+}
+
+/// `void hx_rcv_chat_invite (htlc, frame, frame_len)` — the HTLS_HDR_CHAT_INVITE
+/// primary handler (was `rcv.c`). The first receive handler whose whole body
+/// lives in Rust (network-endgame.md Phase E2): the C dispatch switch in
+/// `hx_dispatch_frame` calls this by name; the body parses the frame via
+/// hotline-proto, resolves the public chat's member model through the chat.c
+/// lookups, and delegates the ignore-gate + emit to [`hx_chat_invite_recv`].
+///
+/// The ignore check uses the **public** chat's member model (cid 0), where every
+/// user lives — matching the old C, even though the invite targets `inv.cid`.
+///
+/// # Safety
+/// C-ABI handler invoked from the receive dispatch on the main thread. `htlc` is
+/// a valid connection handle; `frame` is valid for `frame_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
+    // name[32]: matches the C hx_chat_invite_msg.name buffer; the parser caps at
+    // cap-1 and NUL-terminates.
+    let mut name = [0u8; 32];
+    let mut inv = ProtoChatInvite::default();
+    if !gtkhx_proto_parse_chat_invite(frame, frame_len, name.as_mut_ptr(), name.len(), &mut inv) {
+        return;
+    }
+    let sess = hx_conn_sess(htlc);
+    let chat = chat_with_cid(sess, 0);
+    if chat.is_null() {
+        return;
+    }
+    hx_chat_invite_recv(
+        htlc,
+        hx_chat_member_model(chat),
+        inv.cid,
+        inv.uid,
+        name.as_ptr() as *const c_char,
+    );
 }
 
 /// `int hx_chat_subject_recv (htlc, cid, subject, subject_len, current_subject)`
@@ -188,6 +253,10 @@ pub(crate) mod test_env {
         /// has_more), or None.
         pub static HISTORY_EMITTED: Cell<Option<(u32, *mut std::os::raw::c_void, bool)>> =
             const { Cell::new(None) };
+        /// Canned chat-invite parse result (cid, uid, name-bytes). `Some` makes
+        /// the parse double succeed with these values; `None` makes it fail.
+        pub static PARSE_INVITE: std::cell::RefCell<Option<(u32, u16, Vec<u8>)>> =
+            const { std::cell::RefCell::new(None) };
     }
 
     pub fn reset() {
@@ -196,6 +265,7 @@ pub(crate) mod test_env {
         SUBJECT_EMITTED.with(|c| c.set(None));
         CHAT_EMITTED.with(|c| c.set(None));
         HISTORY_EMITTED.with(|c| c.set(None));
+        PARSE_INVITE.with(|c| *c.borrow_mut() = None);
     }
 }
 
@@ -253,6 +323,43 @@ unsafe fn gtkhx_session_emit_chat_history_batch(
 #[cfg(test)]
 unsafe fn hx_member_model_get_ignore(_model: *mut c_void, _uid: u16) -> c_int {
     c_int::from(test_env::IGNORE.with(|c| c.get()))
+}
+
+// Non-null sentinels so the handler proceeds past the lookups to the recv logic;
+// the doubles above ignore the actual pointer values.
+#[cfg(test)]
+unsafe fn hx_conn_sess(_htlc: *const c_void) -> *mut c_void {
+    1 as *mut c_void
+}
+#[cfg(test)]
+unsafe fn chat_with_cid(_sess: *mut c_void, _cid: u32) -> *mut c_void {
+    2 as *mut c_void
+}
+#[cfg(test)]
+unsafe fn hx_chat_member_model(_chat: *mut c_void) -> *mut c_void {
+    3 as *mut c_void
+}
+
+#[cfg(test)]
+unsafe fn gtkhx_proto_parse_chat_invite(
+    _msg: *const u8,
+    _msglen: usize,
+    name_buf: *mut u8,
+    name_cap: usize,
+    out: *mut ProtoChatInvite,
+) -> bool {
+    test_env::PARSE_INVITE.with(|c| match &*c.borrow() {
+        Some((cid, uid, name)) => {
+            (*out).cid = *cid;
+            (*out).uid = *uid;
+            (*out).name_len = name.len() as u16;
+            let n = name.len().min(name_cap.saturating_sub(1));
+            std::ptr::copy_nonoverlapping(name.as_ptr(), name_buf, n);
+            *name_buf.add(n) = 0;
+            true
+        }
+        None => false,
+    })
 }
 
 #[cfg(test)]
