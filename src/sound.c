@@ -23,12 +23,19 @@
 #include <stdlib.h>
 #include <gtk/gtk.h>
 #include <netinet/in.h>
+#ifdef HAVE_GSOUND
 #include <gsound.h>
+#endif
 #include "hx.h"
 #include "gtkhx.h"
 #include "sound.h"
 
+/* The alert-sound on/off preferences. Always present — options.c binds these
+ * settings regardless of whether a playback backend was compiled in; when
+ * HAVE_GSOUND is unset the toggles simply have no audible effect. */
 struct hx_sounds hxsnd = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
+
+#ifdef HAVE_GSOUND
 
 /* resolve a sound file by name across the layered sound
  * search path:
@@ -231,3 +238,16 @@ play_sound (int sound)
      * other GTK/GLib call in this process already runs. */
     g_idle_add (play_sound_idle_cb, GINT_TO_POINTER (sound));
 }
+
+#else /* !HAVE_GSOUND */
+
+/* No playback backend on this platform (GSound/libcanberra has no Homebrew
+ * or MSYS2 package). Keep the public entry point so every caller in rcv.c /
+ * tasks.c / xfers.c links unchanged; it just does nothing. */
+void
+play_sound (int sound)
+{
+    (void) sound;
+}
+
+#endif /* HAVE_GSOUND */

@@ -81,9 +81,15 @@ threads_dep = dependency('threads')
 
 # Phase 5: GSound replaces the legacy fork+execlp("play") path in sound.c.
 # It's a thin GLib-style wrapper over libcanberra that plays an arbitrary
-# audio file fire-and-forget, in-process. Required — Misha confirmed
-# GSound is the canonical path; the fallback fork+exec code was retired.
-gsound_dep = dependency('gsound')
+# audio file fire-and-forget, in-process. It's the canonical playback path on
+# Linux; the fallback fork+exec code was retired.
+#
+# Optional (like the preview viewers below): libcanberra/GSound has no
+# Homebrew formula and no MSYS2 package, so it's absent on macOS / Windows.
+# When missing, HAVE_GSOUND (src/meson.build) is unset and src/sound.c compiles
+# play_sound() as a no-op — the app builds and runs, just without alert sounds
+# on that platform.
+gsound_dep = dependency('gsound', required : false)
 
 # Phase 8.B: GStreamer system libraries. The Rust hxvoice-runtime
 # crate wraps these via gstreamer-sys (from the gstreamer-rs 0.24
@@ -383,7 +389,7 @@ summary(
   {
     'GTK'           : gtk_dep.version(),
     'GLib'          : glib_dep.version(),
-    'GSound'        : gsound_dep.version(),
+    'GSound'        : gsound_dep.found() ? gsound_dep.version() : 'no',
     'libadwaita'    : adw_dep.version(),
     'libpanel'      : panel_dep.version(),
     'Voice (GStreamer)' : voice_enabled ? gstreamer_dep.version() : 'no',
