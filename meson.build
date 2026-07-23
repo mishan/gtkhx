@@ -251,6 +251,17 @@ deps = [
   lcms2_dep,
 ]
 
+# macOS: hxnet's TLS stack loads the system trust store via
+# rustls-native-certs, whose security-framework / core-foundation crates
+# bind Apple's Security and CoreFoundation frameworks. The crates emit
+# cargo:rustc-link-lib framework=... directives, but — same
+# non-propagation as the glycin libs above — those never reach the C-side
+# executable link line, so the frameworks have to be listed here. Security
+# also provides the Authorization* symbols security-framework references.
+if host_machine.system() == 'darwin'
+  deps += dependency('appleframeworks', modules : ['Security', 'CoreFoundation'])
+endif
+
 # Voice GStreamer system libs link into the executable only when voice
 # is compiled in. The Rust hxvoice-runtime staticlib references their
 # symbols; with voice off the crate isn't built (rust/meson.build) so
