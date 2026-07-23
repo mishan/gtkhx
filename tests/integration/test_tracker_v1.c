@@ -198,7 +198,7 @@ test_v1_fallback_listing (void)
         memcpy (packed, hdr8, 8);
         memcpy (packed + 8, rest3, 3);
 
-        hx_tracker_record_fixed rec = { { 0 }, 0, 0, 0 };
+        hx_tracker_record_fixed rec = { 0 };
         g_assert_true (
             hx_tracker_record_parse_fixed (packed, sizeof (packed), &rec));
 

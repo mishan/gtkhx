@@ -29,7 +29,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -69,7 +68,7 @@ test_chat_decline_silent (void)
         fd_b, &htlc_b, 64));
 
     /* Bob declines. Server should accept silently. */
-    guint32 cid_be = htonl (chat_id);
+    guint32 cid_be = g_htonl(chat_id);
     g_assert_true (integration_send_message (
         fd_b, &htlc_b, HTLC_HDR_CHAT_DECLINE, /*flag=*/0, /*hc=*/1,
         (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));

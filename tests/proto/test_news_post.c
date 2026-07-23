@@ -17,7 +17,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -164,7 +163,7 @@ static void
 test_news_post_skips_non_news_chunks (void)
 {
     struct htlc_conn htlc;
-    const guint16 some_uid = htons (5);
+    const guint16 some_uid = g_htons(5);
     const char *body = "real post";
 
     wire_fixture_init (&htlc, HTLS_HDR_NEWS_POST, 1, 0);

@@ -53,7 +53,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
@@ -129,7 +128,7 @@ make_marker (char *out, gsize cap)
 static gboolean
 send_chat_line (int fd, struct htlc_conn *htlc, const char *text)
 {
-    guint16 style = htons (1);
+    guint16 style = g_htons(1);
     return integration_send_message (
         fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2,
         (int) HTLC_DATA_STYLE, (int) sizeof (style), &style,

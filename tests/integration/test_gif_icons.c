@@ -45,7 +45,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "compat.h"
 #include "hotline.h"
@@ -83,7 +82,7 @@ send_icon_set (int fd, struct htlc_conn *htlc, const guint8 *gif, gsize len)
 static guint32
 send_icon_get (int fd, struct htlc_conn *htlc, guint16 uid)
 {
-    guint16 uid_be = htons (uid);
+    guint16 uid_be = g_htons(uid);
     guint32 trans = htlc->trans;
     if (!integration_send_message (fd, htlc, HTLC_HDR_ICON_GET, /*flag=*/0,
                                    /*hc=*/1, (int) HTLC_DATA_UID,

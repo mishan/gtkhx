@@ -46,7 +46,6 @@ struct chat;
 struct cached_filelist;
 struct hl_filelist_hdr;
 
-#include <netinet/in.h> /* struct in_addr for tracker signal */
 #include "tracker_event.h" /* HxTrackerServer (boxed payload) */
 /* struct task already defined in protocol.h (included above). */
 

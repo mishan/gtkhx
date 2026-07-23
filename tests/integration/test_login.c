@@ -22,7 +22,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -70,7 +69,7 @@ test_login_malformed_does_not_succeed (void)
     struct htlc_conn htlc;
     memset (&htlc, 0, sizeof (htlc));
 
-    guint16 icon_be = htons (0);
+    guint16 icon_be = g_htons(0);
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_LOGIN, 0,
                                              /*hc=*/1, (int)HTLC_DATA_ICON,
                                              (int)sizeof (icon_be), &icon_be));

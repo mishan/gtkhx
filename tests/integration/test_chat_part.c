@@ -24,7 +24,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -62,7 +61,7 @@ test_chat_part_broadcasts (void)
 
     /* Bob joins. We need Bob in the chat before he can part it. */
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
-    guint32 cid_be = htonl (chat_id);
+    guint32 cid_be = g_htonl(chat_id);
 
     /* Drain Alice's CHAT_USER_CHANGE for Bob (the join broadcast)
 	 * so the remaining test only sees the part broadcast. */

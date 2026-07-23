@@ -27,7 +27,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include <netinet/in.h> /* htons/ntohs for the folder FILE_NEXT framing */
 #include <glib.h>
 #include "hx.h"
 #include "hfs.h"
@@ -389,7 +388,7 @@ folder_recv_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
         guint32 file_size;
         ssize_t n;
 
-        cmd_n = htons (3); /* FILE_NEXT */
+        cmd_n = g_htons(3); /* FILE_NEXT */
         if (htxf_io_write (htxf, &cmd_n, 2) != 2) {
             return errno ? errno : EIO;
         }
@@ -403,9 +402,9 @@ folder_recv_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
             }
             return errno ? errno : EIO;
         }
-        nfi.len = ntohs (nfi.len);
-        nfi.type = ntohs (nfi.type);
-        nfi.pathcount = ntohs (nfi.pathcount);
+        nfi.len = g_ntohs(nfi.len);
+        nfi.type = g_ntohs(nfi.type);
+        nfi.pathcount = g_ntohs(nfi.pathcount);
 
         /* Read pathcount name components and join with '/' into the
 		 * per-entry relative path. */
@@ -480,7 +479,7 @@ folder_recv_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
 
         /* File entry — request fresh. FILE_SEND with data_pos/rsrc_pos
 		 * zeroed tells the server to send the whole file. */
-        cmd_n = htons (1); /* FILE_SEND */
+        cmd_n = g_htons(1); /* FILE_SEND */
         if (htxf_io_write (htxf, &cmd_n, 2) != 2) {
             return errno ? errno : EIO;
         }
@@ -488,7 +487,7 @@ folder_recv_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
         if (htxf_io_read (htxf, &file_size, 4) != 4) {
             return errno ? errno : EIO;
         }
-        file_size = ntohl (file_size);
+        file_size = g_ntohl(file_size);
 
         htxf->data_pos = 0;
         htxf->rsrc_pos = 0;

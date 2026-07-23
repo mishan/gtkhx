@@ -17,7 +17,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -79,7 +78,7 @@ static void
 test_news_file_no_news_chunk_returns_false (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (5);
+    const guint16 uid_wire = g_htons(5);
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
 
@@ -128,8 +127,8 @@ static void
 test_news_file_skips_unrelated_chunks_before_news (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (5);
-    const guint32 cid_wire = htonl (3);
+    const guint16 uid_wire = g_htons(5);
+    const guint32 cid_wire = g_htonl(3);
     const char *body = "the news";
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);

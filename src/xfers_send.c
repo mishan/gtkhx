@@ -27,7 +27,6 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <sys/stat.h>
-#include <netinet/in.h> /* hfs_h_to_mtime uses htonl/ntohl */
 #include <glib.h>
 #include "hx.h"
 #include "protocol.h" /* HN32 for the folder-resume RFLT parse */
@@ -336,7 +335,7 @@ folder_send_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
             retval = errno ? errno : EIO;
             goto cleanup;
         }
-        if (ntohs (cmd_n) != 3 /* FILE_NEXT */) {
+        if (g_ntohs(cmd_n) != 3 /* FILE_NEXT */) {
             retval = EPROTO;
             goto cleanup;
         }
@@ -349,11 +348,11 @@ folder_send_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
         }
         {
             guint16 t;
-            t = htons (wire_len);
+            t = g_htons(wire_len);
             memcpy (&buf[0], &t, 2);
-            t = htons ((guint16)e->type);
+            t = g_htons((guint16)e->type);
             memcpy (&buf[2], &t, 2);
-            t = htons ((guint16)e->components->len);
+            t = g_htons((guint16)e->components->len);
             memcpy (&buf[4], &t, 2);
         }
         if (htxf_io_write (htxf, buf, 6) != 6) {
@@ -394,7 +393,7 @@ folder_send_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
             retval = errno ? errno : EIO;
             goto cleanup;
         }
-        cmd_n = ntohs (cmd_n);
+        cmd_n = g_ntohs(cmd_n);
         htxf->data_pos = 0;
         htxf->rsrc_pos = 0;
         if (cmd_n == 2 /* FILE_RESUME */) {
@@ -404,7 +403,7 @@ folder_send_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
                 retval = errno ? errno : EIO;
                 goto cleanup;
             }
-            rlen = ntohs (rlen);
+            rlen = g_ntohs(rlen);
             if (rlen > sizeof (rflt)) {
                 retval = EPROTO;
                 goto cleanup;
@@ -459,7 +458,7 @@ folder_send_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
             guint32 com = (guint32)comment_len (e->full_local_path);
             file_size = 133 + com + (htxf->data_size - htxf->data_pos) + 16
                         + (htxf->rsrc_size - htxf->rsrc_pos);
-            size_n = htonl (file_size);
+            size_n = g_htonl(file_size);
             if (htxf_io_write (htxf, &size_n, 4) != 4) {
                 retval = errno ? errno : EIO;
                 goto cleanup;

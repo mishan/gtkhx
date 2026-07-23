@@ -22,7 +22,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -79,7 +78,7 @@ test_file_info_seeded (void)
             if (_len == sizeof (guint32)) {
                 guint32 v;
                 memcpy (&v, dh->data, sizeof v);
-                got_size = ntohl (v);
+                got_size = g_ntohl(v);
                 got_size_chunk = TRUE;
             }
             break;

@@ -40,7 +40,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -71,8 +70,8 @@ test_folder_put_request_reply (void)
 
     gchar *fname
         = g_strdup_printf ("tier3_putfolder_%u", (guint)g_random_int ());
-    guint32 size_be = htonl (256); /* aggregate size hint */
-    guint32 nfiles_be = htonl (2); /* aggregate count hint */
+    guint32 size_be = g_htonl(256); /* aggregate size hint */
+    guint32 nfiles_be = g_htonl(2); /* aggregate count hint */
     guint32 our_trans = htlc.trans;
 
     g_assert_true (integration_send_message (

@@ -16,7 +16,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -82,7 +81,7 @@ test_user_rename_broadcasts (void)
 	 * either differs it sets `diff` and broadcasts via
 	 * snd_user_change. */
     const char *new_name = "RenameAlice 2.0";
-    guint16 new_icon_be = htons (999); /* differs from 412 */
+    guint16 new_icon_be = g_htons(999); /* differs from 412 */
     g_assert_true (integration_send_message (
         fd_a, &htlc_a, HTLC_HDR_USER_CHANGE, /*flag=*/0, /*hc=*/2,
         (int)HTLC_DATA_ICON, (int)sizeof (new_icon_be), &new_icon_be,

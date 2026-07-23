@@ -23,7 +23,6 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <netinet/in.h>
 #include <sys/time.h>
 #include <time.h>
 #include "hx.h"

@@ -20,12 +20,12 @@
  *	header:	  SIGNED big-endian since 00:00 GMT, Jan. 1, 2000
  *
  */
-#define hfs_h_to_mtime(ARG)	htonl((uint32_t)ntohl((ARG))+3029529600U)
-#define hfs_u_to_mtime(ARG)	htonl((ARG)+2082844800U)
-#define hfs_h_to_utime(ARG)	((uint32_t)(ntohl((ARG))+946684800U))
-#define hfs_m_to_utime(ARG)	((ntohl((ARG))-2082844800U))
-#define hfs_u_to_htime(ARG)	((int32_t)htonl((ARG)-946684800U))
-#define hfs_m_to_htime(ARG)	((int32_t)htonl(ntohl((ARG))-3029529600U))
+#define hfs_h_to_mtime(ARG)	g_htonl((uint32_t)g_ntohl((ARG))+3029529600U)
+#define hfs_u_to_mtime(ARG)	g_htonl((ARG)+2082844800U)
+#define hfs_h_to_utime(ARG)	((uint32_t)(g_ntohl((ARG))+946684800U))
+#define hfs_m_to_utime(ARG)	((g_ntohl((ARG))-2082844800U))
+#define hfs_u_to_htime(ARG)	((int32_t)g_htonl((ARG)-946684800U))
+#define hfs_m_to_htime(ARG)	((int32_t)g_htonl(g_ntohl((ARG))-3029529600U))
 
 /* IDs for elements of an AppleDouble or AppleSingle header */
 #define HFS_HDR_DATA	1   /* data fork */

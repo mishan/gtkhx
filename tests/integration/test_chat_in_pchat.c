@@ -25,7 +25,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <unistd.h>
 #include <glib.h>
 #include "compat.h"
@@ -64,7 +63,7 @@ test_chat_in_pchat_routes_to_member (void)
 
     /* Bob joins. */
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
-    guint32 cid_be = htonl (chat_id);
+    guint32 cid_be = g_htonl(chat_id);
 
     /* Drain Alice's CHAT_USER_CHANGE so the next-event-on-Alice
 	 * search isn't fooled by the stale join broadcast. We don't

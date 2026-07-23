@@ -38,7 +38,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <sys/select.h>
 #include <unistd.h>
 #include <glib.h>
@@ -214,7 +213,7 @@ test_folder_get_round_trip (void)
         iterations++;
 
         /* Send FILE_NEXT (u16 BE = 3). */
-        cmd_n = htons (3);
+        cmd_n = g_htons(3);
         g_assert_true (integration_send (xfd, &cmd_n, 2));
 
         /* Read the 6-byte next_file_info. Short read = clean
@@ -279,12 +278,12 @@ test_folder_get_round_trip (void)
 		 * fork. Don't even look for MACR — the over-claimed
 		 * size means the server is fine advancing on our next
 		 * FILE_NEXT without sending the phantom rsrc bytes. */
-        cmd_n = htons (1); /* FILE_SEND */
+        cmd_n = g_htons(1); /* FILE_SEND */
         g_assert_true (integration_send (xfd, &cmd_n, 2));
 
         guint32 file_size_n;
         g_assert_true (integration_recv (xfd, &file_size_n, 4));
-        guint32 file_size = ntohl (file_size_n);
+        guint32 file_size = g_ntohl(file_size_n);
         g_assert_cmpuint (file_size, >, 0);
         g_assert_cmpuint (file_size, <, 1024 * 1024);
 

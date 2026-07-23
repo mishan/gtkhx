@@ -27,10 +27,7 @@
 #include <gdk/gdkkeysyms.h>
 #include <sys/types.h>
 #include <ctype.h>
-#include <netinet/in.h>
 #include <sys/time.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
 #include <time.h>
 #include "hx.h"
 #include "hxconn.h"
@@ -408,7 +405,7 @@ word_check (GtkWidget *xtext, char *word)
         }
     }
     if (dots == 3) {
-        if (inet_addr (word) != INADDR_NONE) {
+        if (g_hostname_is_ip_address (word)) {
             return WORD_HOST;
         }
     }

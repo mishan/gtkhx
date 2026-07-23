@@ -31,7 +31,6 @@
 #include "config.h"
 #include <string.h>
 #include <glib.h>
-#include <arpa/inet.h>          /* htonl */
 #include "compat.h"             /* PACKED — used inside hotline.h */
 #include "hotline.h"
 #include "proto_helpers.h"      /* hl_htxf_hdr_pack — the shared packer */

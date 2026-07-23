@@ -19,7 +19,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -32,10 +31,10 @@ static void
 test_user_change_extracts_all_five_chunks (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (42);
-    const guint16 icon_wire = htons (412);
-    const guint16 color_wire = htons (3);
-    const guint32 cid_wire = htonl (0);
+    const guint16 uid_wire = g_htons(42);
+    const guint16 icon_wire = g_htons(412);
+    const guint16 color_wire = g_htons(3);
+    const guint32 cid_wire = g_htonl(0);
     const char *name = "Misha";
 
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
@@ -72,7 +71,7 @@ static void
 test_user_change_color_chunk_present_sets_got_color (void)
 {
     struct htlc_conn htlc;
-    const guint16 color_wire = htons (0); /* explicit zero */
+    const guint16 color_wire = g_htons(0); /* explicit zero */
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOUR, sizeof (color_wire),
                             &color_wire);
@@ -89,7 +88,7 @@ static void
 test_user_change_color_chunk_absent_clears_got_color (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (5);
+    const guint16 uid_wire = g_htons(5);
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
     /* no COLOUR chunk */
@@ -174,7 +173,7 @@ static void
 test_user_change_self_change_uid_matches (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (5);
+    const guint16 uid_wire = g_htons(5);
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
 
@@ -194,8 +193,8 @@ static void
 test_user_change_chunk_order_does_not_matter (void)
 {
     struct htlc_conn htlc;
-    const guint16 icon_wire = htons (123);
-    const guint16 uid_wire = htons (456);
+    const guint16 icon_wire = g_htons(123);
+    const guint16 uid_wire = g_htons(456);
     const char *name = "Z";
 
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
@@ -230,7 +229,7 @@ test_user_change_decodes_nick_color (void)
 {
     struct htlc_conn htlc;
     /* 0x11223344 wire-side. Big-endian on the wire → htonl. */
-    const guint32 color_wire = htonl (0x11223344u);
+    const guint32 color_wire = g_htonl(0x11223344u);
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
                             &color_wire);
@@ -247,7 +246,7 @@ static void
 test_user_change_nick_color_none_round_trips (void)
 {
     struct htlc_conn htlc;
-    const guint32 color_wire = htonl (HX_NICK_COLOR_NONE);
+    const guint32 color_wire = g_htonl(HX_NICK_COLOR_NONE);
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
                             &color_wire);
@@ -264,7 +263,7 @@ static void
 test_user_change_nick_color_absent_clears_got_flag (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (7);
+    const guint16 uid_wire = g_htons(7);
     wire_fixture_init (&htlc, HTLS_HDR_USER_CHANGE, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
     /* No COLOR chunk. */

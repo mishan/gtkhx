@@ -34,7 +34,7 @@
 #include <stdint.h>
 
 /* True if the transaction header's task-error bit is set
- * (ntohl(flag) & 1). Buffer is htlc->in.buf / htlc->in.pos. */
+ * (g_ntohl(flag) & 1). Buffer is htlc->in.buf / htlc->in.pos. */
 extern bool gtkhx_proto_header_in_error (const uint8_t *buf, size_t len);
 
 /* Extract the transaction id into *out_trans. Returns true on success,
@@ -1038,7 +1038,7 @@ extern bool gtkhx_proto_tracker_record_is_padding (const uint8_t *buf,
 
 struct gtkhx_proto_tracker_record_fixed {
     /* 4 IPv4 address bytes verbatim from the wire. memcpy straight
-     * into struct in_addr's s_addr (same network-byte-order storage
+     * into a network-byte-order guint32 (same network-byte-order storage
      * convention). */
     uint32_t addr_be;
     uint16_t port;       /* host byte order */

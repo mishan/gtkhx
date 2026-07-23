@@ -32,7 +32,6 @@
  */
 
 #include <glib.h>
-#include <netinet/in.h>
 #include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h" /* struct htlc_conn — referenced by the inline hdr_* below */
@@ -52,21 +51,21 @@ static inline guint32
 hdr_type (const struct htlc_conn *htlc)
 {
     const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
-    return ntohl (h->type);
+    return g_ntohl(h->type);
 }
 
 static inline guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
     const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
-    return ntohl (h->flag);
+    return g_ntohl(h->flag);
 }
 
 static inline guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
     const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
-    return ntohl (h->trans);
+    return g_ntohl(h->trans);
 }
 
 /*

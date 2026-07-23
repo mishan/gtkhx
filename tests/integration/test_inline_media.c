@@ -391,7 +391,7 @@ send_chat_with_media (int fd, struct htlc_conn *htlc, const char *text,
                       const guint8 *handle, gsize handle_len,
                       const char *mime)
 {
-    guint16 style = htons (1);
+    guint16 style = g_htons(1);
     if (handle && handle_len > 0 && mime) {
         return integration_send_message (
             fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/4,

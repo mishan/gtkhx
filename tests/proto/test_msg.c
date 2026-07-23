@@ -18,7 +18,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -33,7 +32,7 @@ test_msg_extracts_simple (void)
     struct htlc_conn htlc;
     const char *name = "Misha";
     const char *body = "are you around?";
-    const guint16 uid_wire = htons (42);
+    const guint16 uid_wire = g_htons(42);
 
     wire_fixture_init (&htlc, HTLS_HDR_MSG, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
@@ -223,7 +222,7 @@ test_msg_chunks_in_reverse_order (void)
     struct htlc_conn htlc;
     const char *name = "Misha";
     const char *body = "hello";
-    const guint16 uid_wire = htons (7);
+    const guint16 uid_wire = g_htons(7);
 
     wire_fixture_init (&htlc, HTLS_HDR_MSG, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_MSG, strlen (body), body);
@@ -246,7 +245,7 @@ test_msg_unrelated_chunks_skipped (void)
 {
     struct htlc_conn htlc;
     const char *name = "x";
-    const guint32 cid_wire = htonl (99);
+    const guint32 cid_wire = g_htonl(99);
     wire_fixture_init (&htlc, HTLS_HDR_MSG, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),
                             &cid_wire);

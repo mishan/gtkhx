@@ -47,12 +47,6 @@
 #define MAXPATHLEN 4095
 #endif
 
-#if !defined(HAVE_INET_NTOA_R)
-#include <sys/types.h>
-#include <netinet/in.h> /* struct in_addr */
-extern int inet_ntoa_r (struct in_addr in, char *buf, size_t buflen);
-#endif
-
 /* libintl provides dgettext on every platform we care about. Older
  * autotools layouts checked HAVE_DCGETTEXT (set by AM_GNU_GETTEXT)
  * before pulling libintl in, but meson detects libintl directly via

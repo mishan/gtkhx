@@ -30,7 +30,6 @@
 #include "config.h"
 #include <string.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include "compat.h"
@@ -139,12 +138,12 @@ assert_file_is (const char *root, const char *rel, const char *body)
 static gsize
 build_hldir (guint8 *out, const char *const *comps, int n)
 {
-    guint16 count_be = htons ((guint16)n);
+    guint16 count_be = g_htons((guint16)n);
     memcpy (out, &count_be, 2);
     gsize pos = 2;
     for (int i = 0; i < n; i++) {
         gsize nl = strlen (comps[i]);
-        guint16 nl_be = htons ((guint16)nl);
+        guint16 nl_be = g_htons((guint16)nl);
         out[pos++] = 0;
         memcpy (out + pos, &nl_be, 2);
         pos += 2;
@@ -221,8 +220,8 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
 
     guint8 hldir[64];
     gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
-    guint32 size_be = htonl ((guint32)total);
-    guint32 nfiles_be = htonl (nfiles);
+    guint32 size_be = g_htonl((guint32)total);
+    guint32 nfiles_be = g_htonl(nfiles);
     guint32 our_trans = htlc->trans;
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_FILE_PUTFOLDER, /*flag=*/0, /*hc=*/4,

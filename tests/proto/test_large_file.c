@@ -27,7 +27,6 @@
 #include "config.h"
 #include <string.h>
 #include <stdarg.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -67,7 +66,7 @@ test_send_xfersize64_alongside_legacy (void)
     const char *name = "huge.bin";
     /* True size: 5 GiB = 0x140000000. Legacy clamped, 64-bit full. */
     guint64 true_size = 0x140000000ULL;
-    guint32 legacy = htonl (0xFFFFFFFFu);
+    guint32 legacy = g_htonl(0xFFFFFFFFu);
     guint64 size64 = GUINT64_TO_BE (true_size);
 
     hlpack_v (&htlc, HTLC_HDR_FILE_PUT, 0, 3,
@@ -151,11 +150,11 @@ static void
 test_htxf_handshake_legacy_16byte (void)
 {
     struct htxf_hdr h;
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (0xABCDu);
-    h.len = htonl (1234567u);
+    h.magic = g_htonl(HTXF_MAGIC_INT);
+    h.ref = g_htonl(0xABCDu);
+    h.len = g_htonl(1234567u);
     /* Legacy: high u16 = type (0 = file), low u16 = zero. */
-    h.unknown = htonl ((guint32)HTXF_TYPE_FILE << 16);
+    h.unknown = g_htonl((guint32)HTXF_TYPE_FILE << 16);
 
     const guint8 *bytes = (const guint8 *)&h;
     g_assert_cmphex (bytes[0], ==, 'H');
@@ -186,10 +185,10 @@ static void
 test_htxf_handshake_large_file_under_4gib (void)
 {
     struct htxf_hdr h;
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (0xABCDu);
-    h.len = htonl (2000u);
-    h.unknown = htonl (((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE);
+    h.magic = g_htonl(HTXF_MAGIC_INT);
+    h.ref = g_htonl(0xABCDu);
+    h.len = g_htonl(2000u);
+    h.unknown = g_htonl(((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE);
 
     const guint8 *bytes = (const guint8 *)&h;
     /* Legacy length intact. */
@@ -215,10 +214,10 @@ test_htxf_handshake_large_file_over_4gib (void)
     /* 5 GiB FFO. */
     guint64 size64 = 0x140000066ULL;
     struct htxf_hdr h;
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (0xABCDu);
+    h.magic = g_htonl(HTXF_MAGIC_INT);
+    h.ref = g_htonl(0xABCDu);
     h.len = 0; /* zeroed when SIZE64 is set */
-    h.unknown = htonl (((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE
+    h.unknown = g_htonl(((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE
                        | HTXF_FLAG_SIZE64);
     guint64 size64_be = GUINT64_TO_BE (size64);
 
@@ -413,11 +412,11 @@ static void
 test_htxf_handshake_folder_with_large_file (void)
 {
     struct htxf_hdr h;
-    h.magic = htonl (HTXF_MAGIC_INT);
-    h.ref = htonl (0xABCDu);
-    h.len = htonl (1000u);
+    h.magic = g_htonl(HTXF_MAGIC_INT);
+    h.ref = g_htonl(0xABCDu);
+    h.len = g_htonl(1000u);
     h.unknown
-        = htonl (((guint32)HTXF_TYPE_FOLDER << 16) | HTXF_FLAG_LARGE_FILE);
+        = g_htonl(((guint32)HTXF_TYPE_FOLDER << 16) | HTXF_FLAG_LARGE_FILE);
 
     const guint8 *bytes = (const guint8 *)&h;
     /* type=1 in bytes 12-13. */

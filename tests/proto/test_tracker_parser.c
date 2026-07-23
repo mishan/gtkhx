@@ -48,8 +48,6 @@
 
 #include <string.h>
 #include <glib.h>
-#include <netinet/in.h>
-#include <arpa/inet.h>           /* inet_aton */
 #include "tracker_parser.h"
 
 /* ---- reply header --------------------------------------------- */
@@ -170,15 +168,13 @@ test_record_parse_basic (void)
         0xab, 0xcd,             /* reserved (skipped) */
         23                       /* name_len */
     };
-    hx_tracker_record_fixed rec = { { 0 }, 0, 0, 0 };
+    hx_tracker_record_fixed rec = { 0 };
     g_assert_true (hx_tracker_record_parse_fixed (buf, sizeof (buf), &rec));
 
-    /* addr stays in network byte order — inet_ntoa-compatible. */
-    {
-        struct in_addr expected;
-        inet_aton ("192.168.1.42", &expected);
-        g_assert_cmpuint (rec.addr.s_addr, ==, expected.s_addr);
-    }
+    /* addr stays in network byte order. 192.168.1.42 is 0xC0A8012A in
+     * host order; g_htonl gives the network-order value the parser stores. */
+    g_assert_cmpuint (rec.addr, ==,
+                      g_htonl ((192u << 24) | (168u << 16) | (1u << 8) | 42u));
     g_assert_cmpuint (rec.port,     ==, 5500);
     g_assert_cmpuint (rec.nusers,   ==, 17);
     g_assert_cmpuint (rec.name_len, ==, 23);
@@ -198,9 +194,9 @@ test_record_parse_max_values (void)
         0xaa, 0xbb,
         0xff
     };
-    hx_tracker_record_fixed rec = { { 0 }, 0, 0, 0 };
+    hx_tracker_record_fixed rec = { 0 };
     g_assert_true (hx_tracker_record_parse_fixed (buf, 11, &rec));
-    g_assert_cmpuint (rec.addr.s_addr, ==, 0xffffffffu);
+    g_assert_cmpuint (rec.addr, ==, 0xffffffffu);
     g_assert_cmpuint (rec.port,        ==, 0xffff);
     g_assert_cmpuint (rec.nusers,      ==, 0xffff);
     g_assert_cmpuint (rec.name_len,    ==, 0xff);
@@ -221,11 +217,11 @@ test_record_parse_reserved_bytes_ignored (void)
     guint8 buf_b[11] = {
         10, 0, 0, 1, 0x13, 0x88, 0, 5, 0xde, 0xad, 4
     };
-    hx_tracker_record_fixed a = { { 0 }, 0, 0, 0 };
-    hx_tracker_record_fixed b = { { 0 }, 0, 0, 0 };
+    hx_tracker_record_fixed a = { 0 };
+    hx_tracker_record_fixed b = { 0 };
     g_assert_true (hx_tracker_record_parse_fixed (buf_a, 11, &a));
     g_assert_true (hx_tracker_record_parse_fixed (buf_b, 11, &b));
-    g_assert_cmpuint (a.addr.s_addr, ==, b.addr.s_addr);
+    g_assert_cmpuint (a.addr, ==, b.addr);
     g_assert_cmpuint (a.port,        ==, b.port);
     g_assert_cmpuint (a.nusers,      ==, b.nusers);
     g_assert_cmpuint (a.name_len,    ==, b.name_len);
@@ -235,7 +231,7 @@ static void
 test_record_parse_short_input (void)
 {
     guint8 buf[10] = { 0 };
-    hx_tracker_record_fixed rec = { { 0xdeadbeef }, 9, 9, 9 };
+    hx_tracker_record_fixed rec = { 0xdeadbeef, 9, 9, 9 };
     g_assert_false (hx_tracker_record_parse_fixed (buf, 10, &rec));
     /* On failure the out struct is left as-is. */
     g_assert_cmpuint (rec.port,     ==, 9);
@@ -246,7 +242,7 @@ test_record_parse_short_input (void)
 static void
 test_record_parse_null_inputs (void)
 {
-    hx_tracker_record_fixed rec = { { 0 }, 0, 0, 0 };
+    hx_tracker_record_fixed rec = { 0 };
     g_assert_false (hx_tracker_record_parse_fixed (NULL, 11, &rec));
     {
         guint8 buf[11] = { 0 };

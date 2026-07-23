@@ -15,7 +15,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -28,8 +27,8 @@ static void
 test_user_part_extracts_uid_and_cid (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (42);
-    const guint32 cid_wire = htonl (3);
+    const guint16 uid_wire = g_htons(42);
+    const guint32 cid_wire = g_htonl(3);
 
     wire_fixture_init (&htlc, HTLS_HDR_USER_PART, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
@@ -52,7 +51,7 @@ test_user_part_missing_uid_defaults_to_zero (void)
 	 * (no UID, only CID) is malformed but the extractor should
 	 * still parse cleanly. */
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (5);
+    const guint16 uid_wire = g_htons(5);
 
     wire_fixture_init (&htlc, HTLS_HDR_USER_PART, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
@@ -82,7 +81,7 @@ static void
 test_chat_subject_extracts_cid_and_subject (void)
 {
     struct htlc_conn htlc;
-    const guint32 cid_wire = htonl (7);
+    const guint32 cid_wire = g_htonl(7);
     const char *subject = "weekly stand-up";
 
     wire_fixture_init (&htlc, HTLS_HDR_CHAT_SUBJECT, 1, 0);
@@ -165,8 +164,8 @@ static void
 test_chat_invite_extracts_all_three_fields (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = htons (99);
-    const guint32 cid_wire = htonl (12);
+    const guint16 uid_wire = g_htons(99);
+    const guint32 cid_wire = g_htonl(12);
     const char *name = "Misha";
 
     wire_fixture_init (&htlc, HTLS_HDR_CHAT_INVITE, 1, 0);

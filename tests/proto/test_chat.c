@@ -25,7 +25,6 @@
 
 #include "config.h"
 #include <string.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
@@ -133,7 +132,7 @@ test_chat_extracts_chat_id (void)
 {
     struct htlc_conn htlc;
     const char *body = "hi";
-    const guint32 cid_wire = htonl (0x12345678);
+    const guint32 cid_wire = g_htonl(0x12345678);
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),
                             &cid_wire);
@@ -155,7 +154,7 @@ test_chat_extracts_uid (void)
 {
     struct htlc_conn htlc;
     const char *body = "msg";
-    const guint16 uid_wire = htons (0xabcd);
+    const guint16 uid_wire = g_htons(0xabcd);
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
@@ -222,7 +221,7 @@ test_chat_missing_body_is_valid (void)
     /* No DATA_CHAT chunk at all (bizarre but defensively handled).
 	 * text == "", cid / uid pulled from whatever IDs were sent. */
     struct htlc_conn htlc;
-    const guint32 cid_wire = htonl (5);
+    const guint32 cid_wire = g_htonl(5);
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),
                             &cid_wire);
@@ -256,8 +255,8 @@ static void
 test_chat_all_three_chunks_combined (void)
 {
     struct htlc_conn htlc;
-    const guint32 cid_wire = htonl (7);
-    const guint16 uid_wire = htons (42);
+    const guint32 cid_wire = g_htonl(7);
+    const guint16 uid_wire = g_htons(42);
     const char *body = "\nMisha: hello team";
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),

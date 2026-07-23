@@ -32,7 +32,6 @@
 #include "config.h"
 #include <string.h>
 #include <unistd.h>
-#include <netinet/in.h>
 #include <glib.h>
 #include <glib/gstdio.h>
 #include "compat.h"
@@ -169,7 +168,7 @@ test_file_put_round_trip (void)
 
     guint8 hldir[64];
     gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
-    guint32 size_be = htonl (up_total);
+    guint32 size_be = g_htonl(up_total);
     guint32 our_trans = htlc.trans;
 
     g_assert_true (integration_send_message (

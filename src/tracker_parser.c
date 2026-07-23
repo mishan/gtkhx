@@ -51,9 +51,9 @@ hx_tracker_record_parse_fixed (const guint8 *buf, gsize len,
         return FALSE;
     }
     /* addr_be stores the wire bytes verbatim — same network-byte-
-     * order convention struct in_addr's s_addr uses, so this is a
+     * order convention the parser stores addresses in, so this is a
      * direct field assignment, not a byte-swap. */
-    out->addr.s_addr = parsed.addr_be;
+    out->addr = parsed.addr_be;
     out->port = parsed.port;
     out->nusers = parsed.nusers;
     out->name_len = parsed.name_len;
