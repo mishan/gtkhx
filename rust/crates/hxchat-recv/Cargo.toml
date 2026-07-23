@@ -7,13 +7,22 @@ description = "Chat-domain receive handlers: the ignore-gate + GtkhxSession emit
 publish = false
 
 [lib]
-# staticlib: the hx_chat_*_recv C ABI rcv.c's chat handlers call.
-# rlib: cargo test (the gate + emit are unit-tested through recording doubles
-#       for the member-model / signal-emit C ABIs).
+# staticlib: the hx_chat_*_recv + hx_rcv_chat_invite C ABI rcv.c's dispatch calls.
+# rlib: cargo test (gate + emit + the moved handler are unit-tested through
+#       recording doubles for the parse / member-model / signal-emit C ABIs).
 crate-type = ["staticlib", "rlib"]
 
-# std-only. The wire parse stays in C (proto_helpers reads htlc->in), the member
-# model + the GtkhxSession signal emit are externed C ABIs resolved at the final
-# link; cargo test provides in-crate #[cfg(test)] doubles that record what would
-# be emitted (and drive the ignore flag), so the suite runs headless.
+# std-only. The decision logic (ignore-gate + emit) is here; collaborators — the
+# hotline-proto wire parsers, the chat/member-model lookups, the GtkhxSession
+# emits — are externed C ABIs resolved at the final link. Phase E2 moves whole
+# handler bodies here (hx_rcv_chat_invite is the first): the crate calls the
+# hotline-proto parser + chat.c lookups directly. cargo test provides in-crate
+# #[cfg(test)] doubles that record what would be emitted (and drive the ignore
+# input), so the suite runs headless.
 [dependencies]
+# The wire parsers are native Rust — a moved handler calls
+# hotline_proto::parse::* directly rather than round-tripping through the C-ABI
+# gtkhx_proto_* shims. Its unused #[no_mangle] exports dead-strip out of this
+# crate's archive, so no duplicate-symbol clash with the separately-linked
+# hotline-proto staticlib (same as hxnet / gtkhx-ui, which already depend on it).
+hotline-proto = { path = "../hotline-proto" }

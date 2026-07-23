@@ -263,87 +263,12 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
 }
 
-/* Public-chat line ignore-gate + emit — Rust hxchat-recv crate. */
-extern int hx_chat_recv (struct htlc_conn *htlc, void *member_model,
-                         guint16 uid, void *event);
-
-void
-hx_rcv_chat (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_chat_msg msg;
-    session *sess = sess_from_htlc (htlc);
-    struct chat *hx_chat = chat_with_cid (sess, 0);
-
-    /* Chunk parse + CR2LF/strip_ansi + leading-LF strip lives in
-	 * proto_helpers.c so the Tier 2 unit tests can drive it. */
-    if (!hx_chat_extract (frame, frame_len, &msg)) {
-        return;
-    }
-
-    /* Phase 9.D — inline-media companion fields. The relayed
-	 * chat may carry CHAT_MEDIA_ID + CHAT_MEDIA_TYPE plus the
-	 * server-supplied advisory width/height/bytes. The Phase A
-	 * Rust extractor enforces the spec's "both or neither" rule
-	 * and reports orphan pairs separately so the receiver can
-	 * drop them per spec rather than render a half-blank
-	 * placeholder. Only fires when the server confirmed the
-	 * inline-media cap — receiving media chunks despite the cap
-	 * not being negotiated implies a server bug, safer to
-	 * ignore. */
-    struct gtkhx_proto_chat_media_meta media_meta;
-    int media_status = GTKHX_PROTO_MEDIA_META_NONE;
-    if (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) {
-        memset (&media_meta, 0, sizeof (media_meta));
-        media_status = gtkhx_proto_extract_chat_media_meta (
-            frame, frame_len, &media_meta);
-        if (media_status == GTKHX_PROTO_MEDIA_META_ORPHAN) {
-            /* Spec: receivers MUST reject a transaction with
-			 * exactly one companion field present. Drop the chat
-			 * entirely — orphans imply server bug / wire damage. */
-            debug_log ("media",
-                       "drop chat with orphaned media companion (cid=%u, "
-                       "uid=%u)",
-                       (unsigned) msg.cid, (unsigned) msg.uid);
-            return;
-        }
-    }
-
-    /* hx_output.chat → "chat" signal on the session
-	 * emitter. Phase 5+: payload is a boxed HxChatEvent that
-	 * bundles the UTF-8-validated line, sender/body slices, and
-	 * info/self flags — every subscriber (chat.c renderer,
-	 * notify.c) reads the same parsed view. */
-    {
-        HxChatEvent *ev = hx_chat_event_new (
-            msg.text, msg.text_len, msg.cid,
-            hx_conn_name (htlc)[0] ? hx_conn_name (htlc) : NULL);
-        if (media_status == GTKHX_PROTO_MEDIA_META_PRESENT) {
-            hx_chat_event_attach_media (
-                ev, media_meta.id_ptr, media_meta.id_len,
-                (const char *) media_meta.type_ptr, media_meta.type_len,
-                media_meta.width, media_meta.width_present,
-                media_meta.height, media_meta.height_present,
-                media_meta.bytes, media_meta.bytes_present);
-            debug_log ("media",
-                       "chat with media: cid=%u uid=%u mime=%.*s "
-                       "dims=%ux%u bytes=%u",
-                       (unsigned) msg.cid, (unsigned) msg.uid,
-                       (int) media_meta.type_len,
-                       (const char *) media_meta.type_ptr,
-                       (unsigned) media_meta.width,
-                       (unsigned) media_meta.height,
-                       (unsigned) media_meta.bytes);
-        }
-        /* Ignore-gate + emit live in the Rust hxchat-recv crate: it drops the
-         * line when the sender is ignored (uid 0 = server line, never ignored)
-         * and otherwise fires the "chat" signal. We keep ownership of ev and
-         * free it either way. */
-        hx_chat_recv (htlc, hx_chat_member_model (hx_chat), msg.uid, ev);
-        hx_chat_event_free (ev);
-    }
-    /* CHAT_POST chime is played by the sound_events subscriber off the
-     * "chat" signal — no inline play_sound here. */
-}
+/* hx_rcv_chat (HTLS_HDR_CHAT) is a #[no_mangle] fn in the hxchat-recv crate
+ * (Phase E2): it parses the body via native hotline_proto::parse::parse_chat,
+ * pulls the inline-media companion via native inline_media::extract_chat_media_meta
+ * (dropping the line on an orphan), builds + attaches the boxed HxChatEvent via
+ * the C producers, delegates the ignore-gate + emit to hx_chat_recv, and frees
+ * the event. The dispatch switch below calls it by name (declared in rcv.h). */
 
 /* Private-message ignore-gate + msg emit — Rust hxmsg-recv crate. hx_msg_recv
  * returns HX_MSG_DROPPED (ignored), HX_MSG_EMITTED (private message, boxed msg
@@ -813,42 +738,12 @@ hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 }
 
-/* The changed-gate + chat-subject emit live in the Rust hxchat-recv crate
- * (rust/crates/hxchat-recv). C keeps the wire parse, the chat lookup, the model
- * set, and the "Subject Changed to" announce. */
-extern int hx_chat_subject_recv (struct htlc_conn *htlc, guint32 cid,
-                                 const char *subject, gsize subject_len,
-                                 const char *current_subject);
-
-void
-hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_chat_subject_msg sm;
-    struct chat *chat;
-    session *sess = sess_from_htlc (htlc);
-
-    if (!hx_chat_subject_extract (frame, frame_len, &sm)) {
-        return;
-    }
-    if (!sm.subject_len) {
-        return;
-    }
-    chat = chat_with_cid (sess, sm.cid);
-    if (!chat) {
-        return;
-    }
-
-    /* On a real change the crate emits chat-subject and returns non-zero; the
-     * initial-subject-discovery path (rcv_task_user_list) still updates the
-     * widget directly without this announce. Set the model + log only when a
-     * change actually fired. */
-    if (hx_chat_subject_recv (htlc, sm.cid, sm.subject, sm.subject_len,
-                              hx_chat_subject (chat))) {
-        hx_chat_set_subject (chat, (const char *) (sm.subject), sm.subject_len);
-        hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
-                          _ ("Subject Changed to"), hx_chat_subject (chat));
-    }
-}
+/* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
+ * hxchat-recv crate (rust/crates/hxchat-recv, Phase E2): it parses the frame,
+ * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
+ * and on a real change sets the model subject + logs the "Subject Changed to"
+ * line via hx_chat_log_subject_changed (chat.c). The dispatch switch below calls
+ * it by name (declared in rcv.h); no C body remains here. */
 
 void
 hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -867,27 +762,12 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
                            bm.has_url ? bm.url : NULL);
 }
 
-/* The ignore-gate + chat-invitation emit live in the Rust hxchat-recv crate
- * (rust/crates/hxchat-recv). C keeps the wire parse + the member-model lookup. */
-extern void hx_chat_invite_recv (struct htlc_conn *htlc, void *member_model,
-                                 guint32 cid, guint16 uid, const char *name);
-
-void
-hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_chat_invite_msg im;
-    session *sess = sess_from_htlc (htlc);
-    struct chat *chat = chat_with_cid (sess, 0);
-
-    if (!hx_chat_invite_extract (frame, frame_len, &im)) {
-        return;
-    }
-
-    /* Drops the invite if the inviter is ignored, else emits chat-invitation
-     * (the sound subscriber chimes off it). */
-    hx_chat_invite_recv (htlc, hx_chat_member_model (chat), im.cid, im.uid,
-                         im.name);
-}
+/* hx_rcv_chat_invite (HTLS_HDR_CHAT_INVITE) is the first receive handler whose
+ * whole body lives in Rust: it's now a #[no_mangle] fn in the hxchat-recv crate
+ * (rust/crates/hxchat-recv) that parses the frame, resolves the public chat's
+ * member model via chat_with_cid/hx_chat_member_model, and delegates the
+ * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
+ * by name (declared in rcv.h); no C body remains here. (network-endgame.md E2.) */
 
 void
 hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)

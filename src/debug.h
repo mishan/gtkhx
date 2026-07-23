@@ -32,6 +32,13 @@ extern gboolean debug_category_enabled (const char *cat);
 extern void debug_log (const char *cat, const char *fmt, ...)
     G_GNUC_PRINTF (2, 3);
 
+/* Non-variadic sibling of debug_log for callers that pre-format their line
+ * (notably Rust recv handlers, which can't cleanly call a C-variadic fn):
+ * emits `msg` as debug_log's single argument, so the output carries the same
+ * "[cat] " prefix and trailing-newline handling as debug_log (cat, "%s", msg).
+ * A NULL msg is rendered as "(null)" rather than being dereferenced. */
+extern void debug_log_str (const char *cat, const char *msg);
+
 /* tracing helper for htlc->name corruption hunt. Logs every
  * htlc->name write under category 'name' with the call-site label,
  * byte count, and hex dump of the source bytes. Cheap when the
