@@ -13,7 +13,7 @@
  * Wire format for the request, from mhxd/src/hxd/tnews.c
  * (cat_to_path) — HTLC_DATA_NEWS_DIR is a packed path blob:
  *
- *   bytes 0-1   : component count       (big-endian u_int16_t)
+ *   bytes 0-1   : component count       (big-endian uint16_t)
  *   bytes 2-3   : reserved / unknown    (zeroes)
  *   per non-last component:
  *     1 byte    : name length

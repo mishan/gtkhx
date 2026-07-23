@@ -8,7 +8,7 @@
  *
  * The original rand.c reached straight into OpenSSL's RAND_bytes; the
  * Phase 1.3 modernization drops that dependency along with libssl. The
- * function signature (u_int8_t buffer, returns nbytes on success or 0
+ * function signature (uint8_t buffer, returns nbytes on success or 0
  * on failure) is preserved so call sites in cipher.c and elsewhere are
  * untouched.
  */
@@ -25,7 +25,7 @@
 #include "protocol.h"
 
 static unsigned int
-random_bytes_urandom(u_int8_t *buf, unsigned int nbytes)
+random_bytes_urandom(uint8_t *buf, unsigned int nbytes)
 {
 	int fd;
 	unsigned int got = 0;
@@ -52,7 +52,7 @@ random_bytes_urandom(u_int8_t *buf, unsigned int nbytes)
 }
 
 unsigned int
-random_bytes(u_int8_t *buf, unsigned int nbytes)
+random_bytes(uint8_t *buf, unsigned int nbytes)
 {
 	unsigned int got = 0;
 

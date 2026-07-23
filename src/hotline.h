@@ -1,6 +1,8 @@
 #ifndef GTKHX_HOTLINE_H
 #define GTKHX_HOTLINE_H
 
+#include <stdint.h>
+
 #if defined(__GNUC__) && !defined(__STRICT_ANSI__)
 #define ZERO_SIZE_ARRAY_SIZE 0
 #else
@@ -726,12 +728,12 @@ struct hl_user_data {
 #define HTLC_DATA_MAC_ALG ((guint16)0x0e04)
 
 /* cipher */
-#define HTLS_DATA_CIPHER_ALG ((u_int16_t)0x0ec1)
-#define HTLC_DATA_CIPHER_ALG ((u_int16_t)0x0ec2)
-#define HTLS_DATA_CIPHER_MODE ((u_int16_t)0x0ec3)
-#define HTLC_DATA_CIPHER_MODE ((u_int16_t)0x0ec4)
-#define HTLS_DATA_CIPHER_IVEC ((u_int16_t)0x0ec5)
-#define HTLC_DATA_CIPHER_IVEC ((u_int16_t)0x0ec6)
+#define HTLS_DATA_CIPHER_ALG ((uint16_t)0x0ec1)
+#define HTLC_DATA_CIPHER_ALG ((uint16_t)0x0ec2)
+#define HTLS_DATA_CIPHER_MODE ((uint16_t)0x0ec3)
+#define HTLC_DATA_CIPHER_MODE ((uint16_t)0x0ec4)
+#define HTLS_DATA_CIPHER_IVEC ((uint16_t)0x0ec5)
+#define HTLC_DATA_CIPHER_IVEC ((uint16_t)0x0ec6)
 
 /* compress */
 #define HTLS_DATA_CHECKSUM_ALG ((guint16)0x0ec7)

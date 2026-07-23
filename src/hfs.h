@@ -1,6 +1,8 @@
 #ifndef GTKHX_HFS_H
 #define GTKHX_HFS_H
 
+#include <stdint.h>
+
 #include "hx.h"
 #include <sys/stat.h>
 
@@ -18,9 +20,9 @@
  *	header:	  SIGNED big-endian since 00:00 GMT, Jan. 1, 2000
  *
  */
-#define hfs_h_to_mtime(ARG)	htonl((u_int32_t)ntohl((ARG))+3029529600U)
+#define hfs_h_to_mtime(ARG)	htonl((uint32_t)ntohl((ARG))+3029529600U)
 #define hfs_u_to_mtime(ARG)	htonl((ARG)+2082844800U)
-#define hfs_h_to_utime(ARG)	((u_int32_t)(ntohl((ARG))+946684800U))
+#define hfs_h_to_utime(ARG)	((uint32_t)(ntohl((ARG))+946684800U))
 #define hfs_m_to_utime(ARG)	((ntohl((ARG))-2082844800U))
 #define hfs_u_to_htime(ARG)	((int32_t)htonl((ARG)-946684800U))
 #define hfs_m_to_htime(ARG)	((int32_t)htonl(ntohl((ARG))-3029529600U))
@@ -55,9 +57,9 @@
  * An array of these make up a table of contents for the file.
  */
 struct hfs_hdr_descr {
-	u_int32_t	id PACKED;	/* The Apple assigned ID for the entry type */
-	u_int32_t	offset PACKED;	/* The offset to reach the entry */
-	u_int32_t	length PACKED;	/* The length of the entry */
+	uint32_t	id PACKED;	/* The Apple assigned ID for the entry type */
+	uint32_t	offset PACKED;	/* The offset to reach the entry */
+	uint32_t	length PACKED;	/* The length of the entry */
 };
 
 /* Cast to size_t so the 18 sites that compute
@@ -72,19 +74,19 @@ struct hfs_hdr_descr {
  * Default header layout for Netatalk and AppleDouble
  */
 struct hfs_dbl_hdr {
-	u_int32_t	magic;
-	u_int32_t	version;
-	u_int8_t	filler[16];
-	u_int16_t	entries;
-	u_int8_t	descrs[SIZEOF_HFS_HDR_DESCR * HFS_HDR_MAX];
+	uint32_t	magic;
+	uint32_t	version;
+	uint8_t	filler[16];
+	uint16_t	entries;
+	uint8_t	descrs[SIZEOF_HFS_HDR_DESCR * HFS_HDR_MAX];
 };
 
 #define SIZEOF_HFS_DBL_HDR	26
 
 /* finder metadata for CAP */
 struct hfs_cap_info {
-	u_int8_t	fi_fndr[32];	/* Finder's info */
-	u_int16_t	fi_attr;	/* AFP attributes (f=file/d=dir) */
+	uint8_t	fi_fndr[32];	/* Finder's info */
+	uint16_t	fi_attr;	/* AFP attributes (f=file/d=dir) */
 #define HFS_AFP_INV		0x001   /* Invisible bit (f/d) */
 #define HFS_AFP_EXPFOLDER	0x002   /* exported folder (d) */
 #define HFS_AFP_MULTI		0x002   /* Multiuser bit (f) */
@@ -99,48 +101,48 @@ struct hfs_cap_info {
 #define HFS_AFP_DEI		0x100	/* Delete inhibit bit (f/d) */
 #define HFS_AFP_NOCOPY		0x400   /* Copy protect bit (f) */
 #define HFS_AFP_RDONLY		(HFS_AFP_WRI|HFS_AFP_RNI|HFS_AFP_DEI)
-	u_int8_t	fi_magic1;	/* Magic number: */
+	uint8_t	fi_magic1;	/* Magic number: */
 #define HFS_CAP_MAGIC1		0xFF
-	u_int8_t	fi_version;	/* Version of this structure: */
+	uint8_t	fi_version;	/* Version of this structure: */
 #define HFS_CAP_VERSION		0x10
-	u_int8_t	fi_magic;	/* Another magic number: */
+	uint8_t	fi_magic;	/* Another magic number: */
 #define HFS_CAP_MAGIC		0xDA
-	u_int8_t	fi_bitmap;	/* Bitmap of which names are valid: */
+	uint8_t	fi_bitmap;	/* Bitmap of which names are valid: */
 #define HFS_CAP_SHORTNAME	0x01
 #define HFS_CAP_LONGNAME	0x02
-	u_int8_t	fi_shortfilename[12+1];	/* "short name" (unused) */
-	u_int8_t	fi_macfilename[32+1];	/* Original (Macintosh) name */
-	u_int8_t	fi_comln;	/* Length of comment (always 0) */
-	u_int8_t	fi_comnt[200];	/* Finder comment (unused) */
+	uint8_t	fi_shortfilename[12+1];	/* "short name" (unused) */
+	uint8_t	fi_macfilename[32+1];	/* Original (Macintosh) name */
+	uint8_t	fi_comln;	/* Length of comment (always 0) */
+	uint8_t	fi_comnt[200];	/* Finder comment (unused) */
 	/* optional: 	used by aufs only if compiled with USE_MAC_DATES */
-	u_int8_t	fi_datemagic;	/* Magic number for dates extension: */
+	uint8_t	fi_datemagic;	/* Magic number for dates extension: */
 #define HFS_CAP_DMAGIC		0xDA
-	u_int8_t	fi_datevalid;	/* Bitmap of which dates are valid: */
+	uint8_t	fi_datevalid;	/* Bitmap of which dates are valid: */
 #define HFS_CAP_MDATE		0x01
 #define HFS_CAP_CDATE		0x02
-	u_int8_t	fi_ctime[4];	/* Creation date (in AFP format) */
-	u_int8_t	fi_mtime[4];	/* Modify date (in AFP format) */
-	u_int8_t	fi_utime[4];	/* Un*x time of last mtime change */
-	u_int8_t	pad;
+	uint8_t	fi_ctime[4];	/* Creation date (in AFP format) */
+	uint8_t	fi_mtime[4];	/* Modify date (in AFP format) */
+	uint8_t	fi_utime[4];	/* Un*x time of last mtime change */
+	uint8_t	pad;
 };
 
 #define SIZEOF_HFS_CAP_INFO	300
 
 struct hfsinfo {
-	u_int8_t type[4];
-	u_int8_t creator[4];
-	u_int32_t create_time;
-	u_int32_t modify_time;
-	u_int32_t rsrclen;
-	u_int32_t comlen;
-	u_int8_t comment[200];
+	uint8_t type[4];
+	uint8_t creator[4];
+	uint32_t create_time;
+	uint32_t modify_time;
+	uint32_t rsrclen;
+	uint32_t comlen;
+	uint8_t comment[200];
 };
 
 extern int finderinfo_path (char *infopath, const char *path, struct stat *statbuf);
 extern int resource_path (char *rsrcpath, const char *path, struct stat *statbuf);
 extern int resource_open (const char *path, int mode, int perm);
 extern size_t resource_len (const char *path);
-extern void type_creator (u_int8_t *buf, const char *path);
+extern void type_creator (uint8_t *buf, const char *path);
 extern void hfsinfo_read (const char *path, struct hfsinfo *fi);
 extern void hfsinfo_write (const char *path, struct hfsinfo *fi);
 extern size_t comment_len (const char *path);

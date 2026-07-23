@@ -14,7 +14,7 @@
 #define GTKHX_PROTOCOL_H 1
 
 #include <glib.h>
-#include <sys/types.h> /* u_int8_t / u_int16_t / u_int32_t */
+#include <stdint.h> /* uint8_t / uint16_t / uint32_t */
 #include <sys/time.h>
 #include <time.h>
 
@@ -314,18 +314,18 @@ extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
  * sits in protocol.h (rather than a new hmac.h) so every TU that
  * already includes protocol.h for the wire types picks it up
  * automatically. */
-extern u_int16_t gtkhx_hmac_xxx (u_int8_t *md,
-                                 const u_int8_t *key, u_int32_t keylen,
-                                 const u_int8_t *text, u_int32_t textlen,
+extern uint16_t gtkhx_hmac_xxx (uint8_t *md,
+                                 const uint8_t *key, uint32_t keylen,
+                                 const uint8_t *text, uint32_t textlen,
                                  const char *macalg);
 
-static inline u_int16_t
-hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
-          const void *text, u_int32_t textlen, const char *macalg)
+static inline uint16_t
+hmac_xxx (uint8_t *md, const void *key, uint32_t keylen,
+          const void *text, uint32_t textlen, const char *macalg)
 {
     return gtkhx_hmac_xxx (md,
-                           (const u_int8_t *) key, keylen,
-                           (const u_int8_t *) text, textlen,
+                           (const uint8_t *) key, keylen,
+                           (const uint8_t *) text, textlen,
                            macalg);
 }
 
@@ -334,7 +334,7 @@ hmac_xxx (u_int8_t *md, const void *key, u_int32_t keylen,
  * src/rand.c: getrandom(2) on the happy path, /dev/urandom fallback
  * for kernels/libcs without getrandom support. Returns nbytes on
  * success or 0 on failure. */
-extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
+extern unsigned int random_bytes (uint8_t *buf, unsigned int nbytes);
 
 /* ---- Byte-order helpers used by the protocol parser ---------------- */
 
@@ -369,7 +369,7 @@ extern unsigned int random_bytes (u_int8_t *buf, unsigned int nbytes);
 static inline void
 memory_copy (void *__dst, void *__src, unsigned int len)
 {
-    u_int8_t *dst = __dst, *src = __src;
+    uint8_t *dst = __dst, *src = __src;
 
     for (; len; len--) {
         *dst++ = *src++;
@@ -378,7 +378,7 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 
 #define S32HTON(_word, _addr)                                                  \
     do {                                                                       \
-        u_int32_t _x;                                                          \
+        uint32_t _x;                                                          \
         _x = htonl (_word);                                                    \
         memory_copy ((_addr), &_x, 4);                                         \
     } while (0)

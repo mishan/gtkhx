@@ -17,7 +17,7 @@
  *      Catching it at this seam is much faster.
  *
  * The macros take generic void-cast pointers in either direction;
- * we cover both "read from a wire byte buffer into a u_int32_t" and
+ * we cover both "read from a wire byte buffer into a uint32_t" and
  * "round-trip back out to a fresh byte buffer" so we don't just
  * exercise one direction.
  */

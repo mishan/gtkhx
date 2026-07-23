@@ -152,7 +152,7 @@ static struct option server_opts[]
 
 COMMAND (server)
 {
-    u_int16_t port = 0;
+    uint16_t port = 0;
     char *serverstr = 0, *portstr = 0, *login = 0, *pass = 0;
     int o, longind;
 
@@ -205,13 +205,13 @@ COMMAND (server)
     hx_connect (htlc, serverstr, port, login, pass, 0, /*tls=*/0);
 }
 
-static u_int32_t
+static uint32_t
 cmd_arg (int argn, char *str)
 {
     char *p, *cur;
     char c, quote = 0;
     int argc = 0;
-    u_int32_t offset = 0, length = 0;
+    uint32_t offset = 0, length = 0;
 
     p = str;
     while (isspace (*p)) {
@@ -286,7 +286,7 @@ cmd_arg (int argn, char *str)
 
 COMMAND (msg)
 {
-    u_int32_t uid;
+    uint32_t uid;
     char *name, *msg;
 
     name = argv[1];
