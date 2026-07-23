@@ -160,18 +160,20 @@ voice_enabled = gstreamer_dep.found() and gstreamer_app_dep.found() \
 # executable link line — so the C-side `dependencies` list has to
 # include them explicitly. Versions follow the Debian/Ubuntu LTS
 # floor + the GNOME 48+ Flatpak runtime.
-fontconfig_dep = dependency('fontconfig', version : '>= 2.13')
-lcms2_dep      = dependency('lcms2',      version : '>= 2.14')
-
-# libseccomp backs glycin's image-loader sandbox and is Linux-only: glycin-utils
-# gates its libseccomp crate dependency behind cfg(target_os = "linux"), so it
-# emits a -lseccomp link directive only on Linux. macOS / Windows have no
-# libseccomp (glycin uses a different / no sandbox there), so require it on Linux
-# alone; elsewhere it's a not-found placeholder that the deps list below skips
-# (same as the optional viewers). Guards the ports.yml macOS/Windows build.
+#
+# All three are Linux-only: hx-image-decode links glycin ONLY on Linux (glycin
+# is Linux-only — glycin-common uses the memfd syscall + a seccomp sandbox), and
+# off-Linux it decodes with the pure-Rust `image` crate, which needs none of
+# these C libraries. So require them on Linux and skip them elsewhere (a
+# not-found placeholder the deps list below ignores, same as the optional
+# viewers). This is what lets the ports.yml macOS/Windows app build configure.
 if host_machine.system() == 'linux'
+  fontconfig_dep = dependency('fontconfig', version : '>= 2.13')
+  lcms2_dep      = dependency('lcms2',      version : '>= 2.14')
   libseccomp_dep = dependency('libseccomp', version : '>= 2.5')
 else
+  fontconfig_dep = dependency('fontconfig', required : false)
+  lcms2_dep      = dependency('lcms2',      required : false)
   libseccomp_dep = dependency('libseccomp', required : false)
 endif
 

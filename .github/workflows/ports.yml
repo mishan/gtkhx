@@ -102,10 +102,10 @@ jobs:
           # Deliberately no gstreamer — we configure -Dvoice=disabled
           # to keep variables down. No gsound: MSYS2 doesn't ship it;
           # the probe below documents that on every run.
-          # lcms2: glycin (via hx-image-decode) links Little-CMS for ICC
-          # colour management on every platform, so meson's `dependency('lcms2')`
-          # needs it here. (fontconfig comes transitively with gtk4/pango;
-          # libseccomp is Linux-only and gated out in meson.build.)
+          # No lcms2 / fontconfig / libseccomp: those are glycin's transitive C
+          # libs, and glycin is Linux-only — off-Linux hx-image-decode decodes
+          # with the pure-Rust `image` crate, so meson gates all three out
+          # (see meson.build). Deliberately no gstreamer — -Dvoice=disabled.
           pacboy: >-
             cc:p
             meson:p
@@ -116,7 +116,6 @@ jobs:
             libadwaita:p
             libpanel:p
             gettext:p
-            lcms2:p
 
       - name: dependency probe
         # Never fails — prints present/MISSING for every required
@@ -171,11 +170,11 @@ jobs:
         # let the probe + configure steps tell the real story.
         run: |
           brew update --quiet
-          # little-cms2 provides lcms2.pc — glycin (via hx-image-decode) links
-          # Little-CMS for ICC colour management on every platform, so meson's
-          # dependency('lcms2') needs it. (fontconfig arrives with gtk4;
-          # libseccomp is Linux-only and gated out in meson.build.)
-          brew install meson ninja pkgconf gtk4 libadwaita gettext little-cms2
+          # No little-cms2 / fontconfig / libseccomp: those are glycin's
+          # transitive C libs, and glycin is Linux-only — off-Linux
+          # hx-image-decode decodes with the pure-Rust `image` crate, so meson
+          # gates all three out (see meson.build).
+          brew install meson ninja pkgconf gtk4 libadwaita gettext
           for f in libpanel gsound; do
             brew install "$f" || echo "::warning::no Homebrew formula for $f"
           done
