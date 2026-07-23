@@ -34,12 +34,14 @@ cd build && meson compile && meson install
 
 ## Testing:
 
-A local mhxd instance should be running for the integration tests to run. An
-mhxd Docker container is provided. To run it:
+A `tests/docker-compose-yml` file provides mhxd, hxtrackd, Janus, and Argus
+containers to test against. `tests/run.sh` will build and run everything.
+Note: The base Dockerfiles live in [mishan/hotline-docker](https://github.com/mishan/hotline-docker),
+and [mishan/gtkhx-docker](https://github.com/mishan/gtkhx-docker) for the
+CI base image and SOCKS proxy.
 
 ```
-docker build -t gtkhx-mhxd tests/mhxd
-docker run -d -p 5500:5500 -p 5501:5501 gtkhx-mhxd
+./tests/run.sh
 cd build & meson test
 ```
 
