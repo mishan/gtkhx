@@ -205,4 +205,11 @@ extern void hx_send_chat (struct htlc_conn *htlc, char *str, guint32 cid,
  * agnostic and stay put. */
 extern void gtkhx_apply_theme_palette (gboolean dark);
 
+/* Log the "Subject Changed to: <subject>" chat line. A non-variadic view/log
+ * shim so the Rust chat-subject receive handler (hxchat-recv, hx_rcv_chat_subject)
+ * can trigger the gettext + INFOPREFIX + hx_printf_prefix line without a variadic
+ * call or gettext across the FFI. */
+extern void hx_chat_log_subject_changed (struct htlc_conn *htlc, guint32 cid,
+                                         const char *subject);
+
 #endif

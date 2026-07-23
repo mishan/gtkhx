@@ -2088,6 +2088,18 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
     g_free (utf8);
 }
 
+/* Non-variadic view/log shim for the Rust chat-subject receive handler
+ * (hxchat-recv, hx_rcv_chat_subject): logs the "Subject Changed to: <subject>"
+ * chat line. Keeps the gettext + INFOPREFIX + variadic hx_printf_prefix on the
+ * C side rather than reproducing them across the FFI. */
+void
+hx_chat_log_subject_changed (struct htlc_conn *htlc, guint32 cid,
+                             const char *subject)
+{
+    hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: %s",
+                      _ ("Subject Changed to"), subject);
+}
+
 /* hx_reject_chat + output_chat_invitation (the incoming chat-invitation
  * dialog) moved to Rust: gtkhx-ui/src/chat_invite.rs presents the AdwAlertDialog
  * and routes Join/Decline to the hxchat-send senders (hx_chat_join /

@@ -79,6 +79,47 @@ fn rcv_handler_header_only_emits_zeroed() {
     assert_eq!(test_env::EMITTED.with(|c| c.take()), Some((0, Vec::new())));
 }
 
+/// Build a real HTLS_HDR_CHAT_SUBJECT frame: 22-byte header + CHAT_ID/CHAT_SUBJECT.
+fn subject_frame(cid: u32, subject: &[u8]) -> Vec<u8> {
+    use hotline_proto::messages::tag;
+    let mut v = Vec::new();
+    v.extend_from_slice(&0x0000_0077u32.to_be_bytes()); // type = CHAT_SUBJECT
+    v.extend_from_slice(&[0u8; 18]);
+    push_chunk(&mut v, tag::CHAT_ID, &cid.to_be_bytes());
+    push_chunk(&mut v, tag::CHAT_SUBJECT, subject);
+    v
+}
+
+fn rcv_subject(frame: &[u8]) {
+    unsafe { hx_rcv_chat_subject(std::ptr::null_mut(), frame.as_ptr(), frame.len()) };
+}
+
+#[test]
+fn rcv_subject_handler_parses_and_emits() {
+    // Native parse → lookup → change-gate (current subject is "" in the double,
+    // so any non-empty subject is a change) → chat-subject emit.
+    test_env::reset();
+    let f = subject_frame(4, b"New Topic");
+
+    rcv_subject(&f);
+
+    assert_eq!(
+        test_env::SUBJECT_EMITTED.with(|c| c.take()),
+        Some((4, b"New Topic".to_vec()))
+    );
+}
+
+#[test]
+fn rcv_subject_handler_empty_noops() {
+    // An empty subject is dropped before any lookup/emit (matches the old C).
+    test_env::reset();
+    let f = subject_frame(4, b"");
+
+    rcv_subject(&f);
+
+    assert_eq!(test_env::SUBJECT_EMITTED.with(|c| c.take()), None);
+}
+
 #[test]
 fn emits_chat_invitation_when_not_ignored() {
     test_env::reset();

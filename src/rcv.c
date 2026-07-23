@@ -813,42 +813,12 @@ hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 }
 
-/* The changed-gate + chat-subject emit live in the Rust hxchat-recv crate
- * (rust/crates/hxchat-recv). C keeps the wire parse, the chat lookup, the model
- * set, and the "Subject Changed to" announce. */
-extern int hx_chat_subject_recv (struct htlc_conn *htlc, guint32 cid,
-                                 const char *subject, gsize subject_len,
-                                 const char *current_subject);
-
-void
-hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    struct hx_chat_subject_msg sm;
-    struct chat *chat;
-    session *sess = sess_from_htlc (htlc);
-
-    if (!hx_chat_subject_extract (frame, frame_len, &sm)) {
-        return;
-    }
-    if (!sm.subject_len) {
-        return;
-    }
-    chat = chat_with_cid (sess, sm.cid);
-    if (!chat) {
-        return;
-    }
-
-    /* On a real change the crate emits chat-subject and returns non-zero; the
-     * initial-subject-discovery path (rcv_task_user_list) still updates the
-     * widget directly without this announce. Set the model + log only when a
-     * change actually fired. */
-    if (hx_chat_subject_recv (htlc, sm.cid, sm.subject, sm.subject_len,
-                              hx_chat_subject (chat))) {
-        hx_chat_set_subject (chat, (const char *) (sm.subject), sm.subject_len);
-        hx_printf_prefix (htlc, sm.cid, INFOPREFIX, "%s: %s",
-                          _ ("Subject Changed to"), hx_chat_subject (chat));
-    }
-}
+/* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
+ * hxchat-recv crate (rust/crates/hxchat-recv, Phase E2): it parses the frame,
+ * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
+ * and on a real change sets the model subject + logs the "Subject Changed to"
+ * line via hx_chat_log_subject_changed (chat.c). The dispatch switch below calls
+ * it by name (declared in rcv.h); no C body remains here. */
 
 void
 hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)

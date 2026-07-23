@@ -49,6 +49,12 @@ extern "C" {
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
     /// The chat's authoritative `HxMemberModel *` (chat.c).
     fn hx_chat_member_model(chat: *mut c_void) -> *mut c_void;
+    /// The chat's current subject (NUL-terminated internal buffer; gtkhx-ui).
+    fn hx_chat_subject(chat: *mut c_void) -> *const c_char;
+    /// Set the chat's subject from `s` (`len` bytes; gtkhx-ui).
+    fn hx_chat_set_subject(chat: *mut c_void, s: *const c_char, len: usize);
+    /// Log the "Subject Changed to: <subject>" chat line (chat.c view/log shim).
+    fn hx_chat_log_subject_changed(htlc: *mut c_void, cid: u32, subject: *const c_char);
 }
 
 /// `void hx_chat_invite_recv (htlc, member_model, cid, uid, name)` — the
@@ -118,6 +124,45 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
         inv.uid,
         name.as_ptr() as *const c_char,
     );
+}
+
+/// `void hx_rcv_chat_subject (htlc, frame, frame_len)` — the HTLS_HDR_CHAT_SUBJECT
+/// primary handler (was `rcv.c`, Phase E2). Parses the frame via
+/// `hotline_proto::parse` (native), and — for a non-empty subject on a known
+/// chat — delegates the change-gate + emit to [`hx_chat_subject_recv`]. On a real
+/// change it sets the chat model subject and logs the "Subject Changed to" line
+/// (both C collaborators). An empty subject or unknown chat is a no-op, exactly
+/// as the old C did.
+///
+/// # Safety
+/// C-ABI handler invoked from the receive dispatch on the main thread. `htlc` is
+/// a valid connection handle; `frame` is valid for `frame_len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hx_rcv_chat_subject(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
+    if frame.is_null() {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    // 255: the C subject cap. Subjects carry no line endings, so no CR2LF /
+    // strip_ansi — raw wire bytes (may be Mac Roman; UTF-8 fix-up is view-side).
+    let sub = hotline_proto::parse::parse_chat_subject(buf, frame_len, 255);
+    if sub.subject.is_empty() {
+        return;
+    }
+    let sess = hx_conn_sess(htlc);
+    let chat = chat_with_cid(sess, sub.cid);
+    if chat.is_null() {
+        return;
+    }
+    // NUL-terminate the (≤ 255-byte) subject for the C string calls.
+    let mut s = [0u8; 256];
+    let n = sub.subject.len().min(255);
+    s[..n].copy_from_slice(&sub.subject[..n]);
+    let subj_ptr = s.as_ptr() as *const c_char;
+    if hx_chat_subject_recv(htlc, sub.cid, subj_ptr, n, hx_chat_subject(chat)) != 0 {
+        hx_chat_set_subject(chat, subj_ptr, n);
+        hx_chat_log_subject_changed(htlc, sub.cid, hx_chat_subject(chat));
+    }
 }
 
 /// `int hx_chat_subject_recv (htlc, cid, subject, subject_len, current_subject)`
@@ -320,6 +365,16 @@ unsafe fn chat_with_cid(_sess: *mut c_void, _cid: u32) -> *mut c_void {
 unsafe fn hx_chat_member_model(_chat: *mut c_void) -> *mut c_void {
     3 as *mut c_void
 }
+// Empty current subject → any non-empty new subject is a change (the change-gate
+// itself is exercised directly against hx_chat_subject_recv elsewhere).
+#[cfg(test)]
+unsafe fn hx_chat_subject(_chat: *mut c_void) -> *const c_char {
+    c"".as_ptr()
+}
+#[cfg(test)]
+unsafe fn hx_chat_set_subject(_chat: *mut c_void, _s: *const c_char, _len: usize) {}
+#[cfg(test)]
+unsafe fn hx_chat_log_subject_changed(_htlc: *mut c_void, _cid: u32, _subject: *const c_char) {}
 
 #[cfg(test)]
 mod tests;
