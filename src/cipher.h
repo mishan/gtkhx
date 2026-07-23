@@ -27,8 +27,7 @@
 #include "config.h"
 
 
-#include <stdint.h>
-#include <sys/types.h> /* u_int8_t / u_int32_t */
+#include <stdint.h> /* uint8_t / uint32_t */
 
 /* Note: cipher.h is pulled into protocol.h via the htlc_conn cipher_state
  * fields, so this header MUST NOT include hx.h or session.h — that would

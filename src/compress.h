@@ -4,7 +4,7 @@
 
 #include "config.h"
 
-#include <sys/types.h> /* u_int32_t */
+#include <stdint.h> /* uint32_t */
 
 /* HOPE-Secure-Login transport compression algorithms.
  *
@@ -60,9 +60,8 @@ struct qbuf;
  * u32 result would overflow (any len > ~2 GiB). Defined `static inline`
  * here so the Tier 1 test in tests/unit/test_compress_bufsize.c can drive
  * the overflow guard without linking any compression backend. */
-#include <stdint.h>
-static inline u_int32_t
-compress_encode_bufsize (u_int32_t len)
+static inline uint32_t
+compress_encode_bufsize (uint32_t len)
 {
     /* 64-bit accumulator so the u32 result's overflow case is
      * detectable rather than wrap-around-silently. */
@@ -70,7 +69,7 @@ compress_encode_bufsize (u_int32_t len)
     if (bound > (uint64_t) 0xffffffffu) {
         return 0;
     }
-    return (u_int32_t) bound;
+    return (uint32_t) bound;
 }
 
 
