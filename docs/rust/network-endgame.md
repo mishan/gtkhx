@@ -152,8 +152,29 @@ Sequencing within the rest of E1 (the struct is too wide to move atomically):
    start with the extension limits and identity scalars (self-contained), then
    the `flags` bitfield, then the I/O buffers (these are the entangled ones —
    `network.c` send path + the bridge both touch `in`/`out`).
-3. **Retire the `#[repr(C)]` mirror** once every C site goes through accessors;
-   the struct becomes fully opaque and its layout is Rust's alone.
+3. **Make production opaque** once every production C site goes through
+   accessors: `protocol.h` forward-declares `struct htlc_conn` only, and the
+   `#[repr(C)]` definition moves to `src/hxconn_layout.h`. Production sees the
+   opaque handle + accessors + `hx_conn_new`; it never sees the fields.
+
+**E1c — landed (`claude/hxconn-flip`).** The accessor bodies + lifecycle
+(`hx_conn_new` / `_reset` / `_free`) moved into the Rust `hxconn` crate;
+`hxconn.c` is deleted. Production allocates the connection via `hx_conn_new` (a
+`Box`, never freed — process-lifetime) and reaches every field through the
+`hx_conn_*` ABI; `sess_from_htlc` reads through `hx_conn_sess`. `struct
+htlc_conn` is opaque in `protocol.h`.
+
+The `#[repr(C)]` mirror is **retired from production** but deliberately kept for
+the Tier-2/Tier-3 tests, which stack-allocate a connection (and, in a few
+places like `test_hlwrite`, memset it, copy it by value, and read fields
+directly) to drive the accessors + parsers. That mirror lives in
+`src/hxconn_layout.h`, is included only by test code, and is pinned
+`#[repr(C)]`-identical to Rust's `HtlcConn` by a `_Static_assert` (paired with
+the crate's `assert!(size_of == HXCONN_SIZEOF)`) — the same
+keep-a-pinned-mirror pattern gtkhx-boxed uses. Fully retiring even the test
+mirror (heap-allocating tests via `hx_conn_new` + rewriting their direct field
+pokes to accessors) is a possible follow-up, deferred as high-churn / low-value
+since tests legitimately need to construct and inspect a connection.
 
 Risk: `in`/`out`/`read_in` qbufs are touched by the send framing (`network.c`)
 and the bridge staging simultaneously. Those two callers are also the ones Phases

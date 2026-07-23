@@ -73,7 +73,9 @@ gtkhx_sources = files(
   'msg.c',
   'network.c',
   'hxnet_bridge.c',
-  'hxconn.c',
+  # hxconn.c retired — struct htlc_conn's accessors + lifecycle are the Rust
+  # hxconn crate now (rust_hxconn_dep below); the layout is pinned by the
+  # _Static_assert in protocol.h against Rust's HtlcConn.
   # news.c + news15.c + news_browser.c + news_send_bridge.c all retired — the
   # 1.5 news wire senders live in the hxnews-send Rust crate, the reply
   # handlers + carriers in hxnews-recv, and the browser UI in the gtkhx-ui
@@ -311,6 +313,9 @@ rust_deps = [
   # Transaction-task table (tasks_table.c + the struct task model retired) — the
   # tasks_table_new / tasks_init / task_new / task_with_trans / task_delete ABI.
   rust_hxtask_dep,
+  # struct htlc_conn owner (hxconn.c retired) — the hx_conn_* accessor ABI +
+  # the hx_conn_new / _reset / _free lifecycle.
+  rust_hxconn_dep,
   # TLS TOFU trust store + connect-side decide (tls_trust.c retired) — the
   # hx_tls_verify_cert / hx_tls_trust_pin / hx_tls_test_* C ABI.
   rust_hxtls_trust_dep,

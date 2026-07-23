@@ -190,6 +190,8 @@ rust_sources = files(
   'crates/hxmacres/src/tests.rs',
   'crates/hxtask/src/lib.rs',
   'crates/hxtask/src/tests.rs',
+  'crates/hxconn/src/lib.rs',
+  'crates/hxconn/src/tests.rs',
   'crates/hxtls-trust/src/lib.rs',
   'crates/hxtls-trust/src/ffi.rs',
   'crates/hxtls-trust/src/tests.rs',
@@ -249,6 +251,7 @@ rust_sources = files(
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
+  'crates/hxconn/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
   'crates/hxchat-recv/Cargo.toml',
   'crates/hxicon-recv/Cargo.toml',
@@ -602,6 +605,18 @@ rust_hxtask_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtask',
+  ],
+)
+
+# hxconn — owner of struct htlc_conn (the E1c flip of network-endgame.md).
+# Exports the hx_conn_* accessor C ABI (was hxconn.c) + the hx_conn_new /
+# _reset / _free lifecycle. The whole C tree links it: every former hxconn.c
+# caller. glib-only (gboolean ABI), so `cargo test -p hxconn` runs headless.
+rust_hxconn_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxconn',
   ],
 )
 

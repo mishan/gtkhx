@@ -129,14 +129,15 @@ Mechanical, but broad — size it like the `out` removal, not smaller.
    shrinking `rcv.c` to nothing. Independent of the flip; pure cleanup once the
    struct is Rust-owned.
 
-## Next increment
+## Next increment — done
 
-**The E1c flip** — with all three buffers gone and the field accessor seam
-complete, `struct htlc_conn` can become an opaque, Rust-owned handle. The C tree
-already reaches every field through `hx_conn_*`, so moving the struct's storage
-into the Rust `hxconn` crate (same C ABI, `hxconn.c`'s bodies reimplemented in
-Rust) is the delete-the-header-visible-definition step this whole effort was
-building toward.
+**The E1c flip landed** (`claude/hxconn-flip`, see network-endgame.md). With all
+three buffers gone and the field accessor seam complete, `struct htlc_conn`
+became an opaque, Rust-owned handle: the accessor bodies + `hx_conn_new` /
+`_reset` / `_free` lifecycle live in the Rust `hxconn` crate, `hxconn.c` is
+deleted, production allocates via `hx_conn_new` and never sees the fields
+(`protocol.h` forward-declares only). A pinned `#[repr(C)]` mirror
+(`src/hxconn_layout.h`) is kept for the tests that stack-allocate a connection.
 
 > Note on the earlier plan: an earlier revision of this doc said `in` was
 > "gated on E2" and would dissolve family-by-family as handlers moved to Rust.

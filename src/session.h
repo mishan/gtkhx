@@ -16,6 +16,7 @@
 
 #include "compat.h"
 #include "protocol.h"
+#include "hxconn.h" /* hx_conn_sess — sess_from_htlc reads the opaque conn */
 #include "prefs.h"
 #include "macres.h"
 
@@ -285,16 +286,17 @@ extern session the_session;
  * Model-side code (rcv.c, network.c, …) already holds the htlc for a
  * received event and must route by it: an event belongs to a specific
  * connection, not the focused one. htlc_conn carries a back-pointer to its
- * owning session (`sess`, set at allocation), so this is a field read — no
- * longer a container_of, which required htlc to be embedded in session. NULL
- * in, NULL out.
+ * owning session (`sess`, set at allocation), read here through the hxconn
+ * accessor — no longer a container_of, which required htlc to be embedded in
+ * session, nor (since the E1c flip) a direct field read of the now-opaque
+ * struct. NULL in, NULL out.
  */
 static inline session *
 sess_from_htlc (struct htlc_conn *htlc)
 {
     if (htlc == NULL)
         return NULL;
-    return htlc->sess;
+    return hx_conn_sess (htlc);
 }
 
 /*

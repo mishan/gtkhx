@@ -1797,6 +1797,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxconn"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+]
+
+[[package]]
 name = "hxcrypto-aead"
 version = "0.1.0"
 dependencies = [

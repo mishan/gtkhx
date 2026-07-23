@@ -79,6 +79,7 @@
 #include "compat.h"
 #include "hotline.h"            /* HTLS_HDR_TASK */
 #include "protocol.h"
+#include "hxconn_layout.h"     /* struct htlc_conn mirror — stack-allocated below */
 #include "network.h"           /* hx_connect, hx_htlc_close */
 #include "gtkhx_session.h"     /* GtkhxConnectionState */
 #include "hxnet_bridge.h"      /* hx_bridge_is_installed */

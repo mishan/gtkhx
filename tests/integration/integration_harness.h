@@ -36,6 +36,7 @@
 #include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h" /* struct htlc_conn — referenced by the inline hdr_* below */
+#include "hxconn_layout.h" /* struct htlc_conn mirror — tests stack-allocate it */
 #include "htlc_recv_buf.h" /* hx_test_in — the test-side receive buffer */
 #include "server_matrix.h"
 

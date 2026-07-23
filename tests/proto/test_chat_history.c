@@ -33,6 +33,7 @@
 #include <glib.h>
 #include "protocol.h"
 #include "hotline.h"
+#include "hxconn_layout.h"
 #include "htlc_recv_buf.h"
 #include "proto_helpers.h"
 #include "chat_history.h"

@@ -29,6 +29,7 @@
 
 #include <glib.h>
 #include "protocol.h"
+#include "hxconn_layout.h" /* struct htlc_conn mirror — tests stack-allocate it */
 #include "htlc_recv_buf.h" /* hx_test_in — where the built frame lives */
 
 /*
