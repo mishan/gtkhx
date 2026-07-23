@@ -169,7 +169,7 @@ test_htxf_connect_file_get_plaintext (void)
  * AEAD sibling: same production htxf_connect, but the control channel
  * negotiated HOPE-ChaCha20-Poly1305. htxf_connect hands the control
  * connection's retained HOPE material handle (htlc->hope_aead) to
- * hxnet_htxf_open, which derives the per-transfer ChaCha20-Poly1305
+ * hxnet_htxf_connect, which derives the per-transfer ChaCha20-Poly1305
  * keys in-process (mixing in ref) and frames the body AEAD — the
  * session key never crosses back into C. Under orchestration the login
  * helper seeds htlc->hope_aead; on the legacy transport we build the
@@ -255,7 +255,7 @@ test_htxf_connect_file_get_aead (void)
     g_assert_cmpuint (reply.size, <, 1024 * 1024);
 
     /* htxf_connect derives the per-transfer ChaCha20-Poly1305 keys
-     * INSIDE hxnet_htxf_open from the control connection's retained HOPE
+     * INSIDE hxnet_htxf_connect from the control connection's retained HOPE
      * material (htlc->hope_aead, an opaque handle) plus this transfer's
      * ref — the session key never crosses back into C. The orchestrated
      * login already seeded htlc.hope_aead from the production actor

@@ -126,10 +126,15 @@ test_file_get_round_trip (void)
     guint32 xfer_ref = reply.ref;
     guint64 xfer_size = reply.size;
 
-    /* Open the subchannel and send the 16-byte preamble the way a real
-     * download does. */
-    int xfd = integration_connect_xfer ();
-    if (xfd < 0) {
+    /* Open the HTXF subchannel the way a real download does: hxnet
+     * connects in-process to the default server's xfer port and writes
+     * the legacy 16-byte FILE header (ref, size, type=FILE) as the
+     * preamble. The channel is closed by htxf_io_release. The legacy
+     * preamble carries a 32-bit size; xfer_size is capped < 1 MiB above,
+     * so the narrowing cast is safe. */
+    HtxfConn *ch = integration_htxf_open_xfer_file (
+        xfer_ref, (guint32)xfer_size, NULL, xfer_ref);
+    if (!ch) {
         g_test_fail_printf ("HTXF subchannel port (5501 by default) isn't "
                             "reachable. Publish -p 5501:5501 or set "
                             "GTKHX_TEST_XFER_PORT.");
@@ -137,23 +142,6 @@ test_file_get_round_trip (void)
         integration_close (fd);
         return;
     }
-    /* The legacy 16-byte HTXF preamble carries a 32-bit size; xfer_size
-     * is capped < 1 MiB above, so the narrowing cast is safe. */
-    g_assert_true (
-        integration_send_xfer_hdr (xfd, xfer_ref, (guint32)xfer_size));
-
-    /* Wrap the connected fd as an hxnet HTXF channel (plaintext, no
-     * preamble — we already sent it above). hxnet adopts xfd; the
-     * channel is closed by htxf_io_release, so we must not close xfd. */
-    const char *host = g_getenv ("GTKHX_TEST_HOST");
-    if (!host || !*host) {
-        host = "127.0.0.1";
-    }
-    HtxfConn *ch = hxnet_htxf_open (xfd, /*tls=*/0, (const guint8 *)host,
-                                    strlen (host), /*preamble=*/NULL,
-                                    /*preamble_len=*/0, /*hope_aead=*/NULL,
-                                    xfer_ref, /*verify=*/NULL, /*ud=*/NULL);
-    g_assert_nonnull (ch);
 
     /* A temp directory to receive into, so the decoded file (and any HFS
      * sidecar) is isolated and cleaned up. */
@@ -183,7 +171,7 @@ test_file_get_round_trip (void)
     g_assert_cmpuint (clen, ==, 12);
     g_assert_cmpmem (content, clen, "hello world\n", 12);
 
-    /* htxf_io_release closes the channel (and adopts-and-drops xfd). */
+    /* htxf_io_release closes the channel (hxnet owns the socket internally). */
     htxf_io_release (&htxf);
 
     /* Best-effort cleanup of the temp tree (data fork + any sidecar). */

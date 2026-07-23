@@ -1633,9 +1633,26 @@ Keeping the "if it ever happens" pile separate from the actual plan.
 - **Plugin system reincarnation.** The dlopen ABI stays dead. If we
   reintroduce scripting hooks (Lua / Wasmtime), that's a fresh design
   conversation, not a port goal.
-- **Windows / macOS / iOS targets.** The current binary is Linux-Wayland.
-  The Rust rewrite incidentally improves cross-platform feasibility, but
-  none of the phases above plan it. Open question for later.
+- **Windows / macOS / iOS targets.** The current binary is Linux-Wayland,
+  and full cross-platform support is not a committed phase. Some groundwork
+  has landed opportunistically as the Rust rewrite makes it cheap:
+  `.github/workflows/ports.yml` probes Windows (MSYS2 UCRT64) and macOS
+  builds, and the leaf crates are being kept compilable off-Linux —
+  `hx-image-decode` gained a pure-Rust `image` backend for the glycin-less
+  platforms, and `hxnet`'s raw-fd FFI surface was removed. On the latter: the
+  production connect paths (`open_plaintext` / `open_hope` /
+  `open_plaintext_tls` / `htxf_connect`) already resolve + connect **inside
+  Rust**, so no OS socket fd ever crossed the FFI in the running client; all
+  that remained was test-support — four fd-adopting entries and two
+  unconditional `std::os::unix::io` imports that broke the Windows compile —
+  and those are gone (the tests now inject via loopback / `open_tcp` /
+  `htxf_connect`). **Remaining `hxnet` follow-up:** it still depends on `glib`
+  (via `hxbridge`'s shared tokio runtime and the `g_critical!` FFI logging),
+  so it's validated through `ports.yml`'s full-app build rather than the bare
+  no-GTK `rust-portability` tripwire; decoupling that logging + runtime seam
+  behind injected callbacks would let it join the tripwire. The whole-app port
+  (the C `gtkhx.c` GIOChannel plumbing, the Linux-only `libseccomp` dep,
+  `gsound`) remains an open question for later.
 
 ---
 

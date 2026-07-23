@@ -1,14 +1,13 @@
 //! TCP connect for hxnet (Phase A of the
 //! `hxnet-owns-the-whole-lifecycle` work).
 //!
-//! Production today calls `hxnet_connection_spawn_fd_with_callback`
-//! after the C side has already done DNS + TCP via
-//! `GSocketClient::connect_to_host_async`. Phase A inverts that:
-//! the C side passes host + port, hxnet does the resolution and
-//! the connect itself, emitting `Event::State(Resolving)` and
-//! `Event::State(Connecting)` along the way. The actor then
-//! takes over the connected `TcpStream` exactly as it does on
-//! the post-handshake `spawn_fd_*` paths today.
+//! The C side passes host + port; hxnet does the resolution and the
+//! connect itself, emitting `Event::State(Resolving)` and
+//! `Event::State(Connecting)` along the way, then hands the connected
+//! `TcpStream` to the actor. No OS socket fd ever crosses the FFI —
+//! this is the connect primitive every entry point
+//! (`hxnet_connection_open_tcp` / `_open_plaintext` / `_open_hope` /
+//! `_open_plaintext_tls`, and `hxnet_htxf_connect`) builds on.
 //!
 //! Subsequent phases (B-F) layer TLS + magic + LOGIN + HOPE on
 //! top of this connect step. Phase G replaces the C-side

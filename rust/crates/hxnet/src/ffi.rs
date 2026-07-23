@@ -1,10 +1,11 @@
-//! C-callable surface for hxnet (Phase R3.3.b).
+//! C-callable surface for hxnet.
 //!
-//! Five symbols, all in this module:
+//! Connections are created by the connect entry points further down
+//! (`hxnet_connection_open_tcp`, `hxnet_connection_open_plaintext`,
+//! `_open_hope`, `_open_plaintext_tls`), which resolve + connect the
+//! socket **inside Rust** — no OS socket fd ever crosses this FFI.
+//! Once a handle exists it is driven through:
 //!
-//! - [`hxnet_connection_spawn_fd`] — adopt an already-connected OS
-//!   socket fd. Returns an opaque handle; the actor begins reading
-//!   frames on the shared tokio runtime immediately.
 //! - [`hxnet_connection_try_recv_frame`] — non-blocking poll for
 //!   the next event. The C side drives this from a GLib idle / a
 //!   poll loop in tests.
@@ -14,13 +15,9 @@
 //!   gets HandleDropped and exits.
 //! - [`hxnet_frame_free`] — release a frame returned by try_recv.
 //!
-//! R3.3.b ships the non-blocking, polling-style API only. The
-//! callback-driven variant that routes events through the hxbridge
-//! ferry to the GLib main loop arrives in a later phase
-//! (R3.3.e) alongside the production switch in network.c. The
-//! polling form is easier to reason about for the smoke-test
-//! goal, and the FFI surface stays additive when the callback
-//! path lands.
+//! The production paths use the callback-driven connect entries,
+//! which route events through the hxbridge ferry to the GLib main
+//! loop rather than the polling form above.
 //!
 //! # Lifetime
 //!
@@ -68,10 +65,8 @@
 
 use std::ffi::c_void;
 use std::os::raw::{c_int, c_uint};
-use std::os::unix::io::FromRawFd;
 
 use hxbridge::runtime::Runtime;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -222,153 +217,6 @@ pub const HXNET_SEND_FULL: c_int = -1;
 pub const HXNET_SEND_CLOSED: c_int = -2;
 pub const HXNET_SEND_INVALID: c_int = -3;
 
-/// Spawn a Connection actor on the shared tokio runtime, reading
-/// from the supplied **connected TCP socket fd**. The fd is
-/// wrapped as a `tokio::net::TcpStream`; passing a non-TCP socket
-/// (e.g. an `AF_UNIX` `socketpair(2)` fd) is rejected up front
-/// with a NULL return and a `g_critical` log — see the `peer_addr`
-/// probe in the body for the runtime gate.
-///
-/// # fd ownership
-///
-/// Rust **always** takes ownership of `fd` when `fd >= 0`. On
-/// success it lives inside the spawned `tokio::net::TcpStream`
-/// and is closed when the actor exits. On the NULL-return failure
-/// paths (set_nonblocking errored, peer_addr rejected the fd,
-/// TcpStream::from_std rejected the fd, or Connection::spawn
-/// couldn't find a runtime), the `std::net::TcpStream` we built
-/// from `from_raw_fd` falls out of scope and Rust closes the fd
-/// via the standard Drop. Either way, the C side **must not**
-/// `close(2)` the fd after handing it to this function — that
-/// would double-close and likely tear down an unrelated reused
-/// fd value. The only fd the C side keeps responsibility for is
-/// one passed with `fd < 0` (NULL return, no ownership transfer
-/// attempted).
-///
-/// # Errors
-///
-/// Returns NULL (after a `g_critical` log) for the recoverable
-/// failure modes: negative `fd`, `set_nonblocking` errored,
-/// `peer_addr` failed (fd is not a connected TCP socket),
-/// `TcpStream::from_std` rejected the fd, or
-/// `Connection::spawn` couldn't find a tokio runtime context.
-/// Caller-side recovery is to retry the connect — the failed fd
-/// is already closed by Rust, so the caller starts fresh with a
-/// new socket.
-///
-/// # Aborts
-///
-/// If `Runtime::global()` panics during lazy initialisation —
-/// typically because the OS refuses to spawn the runtime's
-/// worker thread — this function calls `std::process::abort()`
-/// rather than unwinding across the C ABI boundary, which would
-/// be undefined behaviour. The panic is logged via `g_critical`
-/// before the abort. This is a process-fatal failure mode; the
-/// C side never observes it as a return.
-///
-/// # Safety
-///
-/// `fd` must be a valid, **already-connected TCP socket fd**.
-/// Passing a closed fd, a listening socket, a connected UDP
-/// socket, or a non-AF_INET/AF_INET6 socket (such as an
-/// `AF_UNIX` socketpair fd) is undefined behaviour — Rust
-/// adopts the fd via `TcpStream::from_raw_fd` which assumes the
-/// underlying file is a connected TCP socket. The `peer_addr`
-/// probe in the body catches the most common misuse (non-TCP /
-/// not-yet-connected) but is not a substitute for the caller
-/// passing the right kind of fd to begin with.
-#[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_spawn_fd(fd: c_int) -> *mut HxnetConnection {
-    if fd < 0 {
-        glib::g_critical!("hxnet", "hxnet_connection_spawn_fd: negative fd");
-        return std::ptr::null_mut();
-    }
-
-    // Resolve the runtime singleton behind catch_unwind — same
-    // pattern as hxbridge::blocking::spawn_blocking_with_idle so
-    // a runtime init panic can't unwind across the C ABI.
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
-        Ok(rt) => rt,
-        Err(_) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd: Runtime::global panicked; \
-                 aborting to avoid unwinding across the FFI boundary"
-            );
-            std::process::abort();
-        }
-    };
-
-    // tokio::net::TcpStream::from_std requires the fd to be
-    // already in non-blocking mode AND for the calling code to
-    // have a runtime context (enter the handle below). We adopt
-    // the fd via std::net::TcpStream::from_raw_fd, switch to
-    // non-blocking, then hand it over.
-    let std_stream = std::net::TcpStream::from_raw_fd(fd);
-    if let Err(e) = std_stream.set_nonblocking(true) {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd: set_nonblocking failed: {}",
-            e
-        );
-        // std_stream's Drop closes the fd here — Rust owns it now.
-        return std::ptr::null_mut();
-    }
-    // Probe peer_addr() to reject non-TCP / not-yet-connected
-    // fds. peer_addr returns ENOTCONN for unconnected sockets
-    // and EOPNOTSUPP / EINVAL for non-stream / non-TCP types.
-    // We don't need the address itself — just the success of the
-    // syscall. A successful probe confirms (a) the fd is a
-    // socket, (b) it supports the SOCK_STREAM getpeername
-    // semantics, and (c) it's connected. This catches the
-    // common smoke-test misuse (AF_UNIX socketpair, listening
-    // socket) before the downstream tokio code wraps the fd as
-    // TcpStream and produces confusing errors later.
-    if let Err(e) = std_stream.peer_addr() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd: peer_addr failed ({}); fd is not a \
-             connected TCP socket",
-            e
-        );
-        return std::ptr::null_mut();
-    }
-
-    let _guard = rt.handle().enter();
-    let tcp = match TcpStream::from_std(std_stream) {
-        Ok(s) => s,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd: TcpStream::from_std failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    let (cmd, events, join) = match Connection::spawn(tcp) {
-        Ok(triple) => triple,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd: Connection::spawn failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    let handle = Box::new(HxnetConnection {
-        cmd,
-        events: Some(events),
-        _callback_state: None,
-        _join: join,
-        hope_aead: None,
-    });
-    Box::into_raw(handle)
-}
-
 /// Non-blocking poll for the next event. Writes a frame (if one
 /// arrived) into `*out_frame` and returns `HXNET_RECV_FRAME`.
 ///
@@ -382,8 +230,8 @@ pub unsafe extern "C" fn hxnet_connection_spawn_fd(fd: c_int) -> *mut HxnetConne
 ///
 /// # Safety
 ///
-/// `handle` must be a non-NULL pointer previously returned by
-/// [`hxnet_connection_spawn_fd`] and not yet passed to
+/// `handle` must be a non-NULL pointer previously returned by one
+/// of the connect entry points and not yet passed to
 /// [`hxnet_connection_destroy`]. `out_frame` and `out_reason`
 /// must be valid writable locations.
 #[no_mangle]
@@ -427,13 +275,12 @@ pub unsafe extern "C" fn hxnet_connection_try_recv_frame(
             }
             Ok(Event::State(_)) => {
                 // Polling API has no surface to expose
-                // connection-state events on. The polling
-                // spawn (`spawn_fd`) is only used by R3.3.b's
-                // smoke test which adopts a pre-connected fd
-                // and never sees connect-time state events. If
-                // a future caller wires the polling API
-                // through the Phase A connect path, we'll grow
-                // a separate `try_recv_state` entry; for now
+                // connection-state events on. No connect entry
+                // currently produces a pollable handle (the connect
+                // paths are all callback-driven), so State events
+                // don't reach here in practice. If a future caller
+                // wires the polling API through a connect path,
+                // we'll grow a separate `try_recv_state` entry; for now
                 // silently drop state events and continue the
                 // try_recv loop so the caller still gets to
                 // see Frame / Shutdown.
@@ -606,8 +453,8 @@ pub unsafe extern "C" fn hxnet_connection_send_frame(
 ///
 /// # Safety
 ///
-/// `handle` must be a non-NULL pointer previously returned by
-/// [`hxnet_connection_spawn_fd`] and not yet destroyed.
+/// `handle` must be a non-NULL pointer previously returned by one
+/// of the connect entry points and not yet destroyed.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_destroy(handle: *mut HxnetConnection) {
     if handle.is_null() {
@@ -743,740 +590,6 @@ struct SendCallbacks {
 /// can drain it predictably under load.
 const CALLBACK_FERRY_CAPACITY: usize = 64;
 
-/// Spawn a Connection actor like
-/// [`hxnet_connection_spawn_fd`], but route events through a
-/// pair of C callbacks invoked on the GLib main thread instead
-/// of buffering them for polling retrieval. The fd contract
-/// (TCP, connected, Rust takes ownership) and the abort-on-
-/// runtime-panic semantics are identical.
-///
-/// `on_event` fires once per `Event::Frame` with a non-NULL
-/// `frame` pointer; the C side owns the frame until calling
-/// `hxnet_frame_free`. `on_shutdown` fires once with the
-/// shutdown reason code (`HXNET_SHUTDOWN_*`); after it returns,
-/// no further callbacks fire.
-///
-/// Both callback slots are required (NULL is rejected with
-/// `g_critical` + NULL return). `user_data` is opaque and
-/// passed through to both callbacks unchanged.
-///
-/// # Threading
-///
-/// The callbacks fire on the GLib main thread (whatever
-/// `MainContext::ref_thread_default()` resolved to at spawn
-/// time). C-side state touched from the callback should be
-/// safe to access on that thread; the per-handle thread-pinned
-/// contract documented in the module-level safety section
-/// continues to apply.
-///
-/// # Safety
-///
-/// `fd` requirements identical to
-/// [`hxnet_connection_spawn_fd`]. `on_event` and `on_shutdown`
-/// must be valid C function pointers when non-NULL. `user_data`
-/// must remain valid for the entire connection lifetime.
-#[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_callback(
-    fd: c_int,
-    on_event: HxnetEventCallback,
-    on_shutdown: HxnetShutdownCallback,
-    user_data: *mut c_void,
-) -> *mut HxnetConnection {
-    if on_event.is_none() || on_shutdown.is_none() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_callback: NULL callback"
-        );
-        return std::ptr::null_mut();
-    }
-    if fd < 0 {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_callback: negative fd"
-        );
-        return std::ptr::null_mut();
-    }
-
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
-        Ok(rt) => rt,
-        Err(_) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_callback: Runtime::global \
-                 panicked; aborting to avoid unwinding across the FFI \
-                 boundary"
-            );
-            std::process::abort();
-        }
-    };
-
-    // Same fd-prep as the polling variant — adopt as
-    // std::net::TcpStream, switch to non-blocking, peer_addr
-    // probe, then hand to tokio.
-    let std_stream = std::net::TcpStream::from_raw_fd(fd);
-    if let Err(e) = std_stream.set_nonblocking(true) {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_callback: set_nonblocking \
-             failed: {}",
-            e
-        );
-        return std::ptr::null_mut();
-    }
-    if let Err(e) = std_stream.peer_addr() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_callback: peer_addr failed \
-             ({}); fd is not a connected TCP socket",
-            e
-        );
-        return std::ptr::null_mut();
-    }
-
-    let _guard = rt.handle().enter();
-    let tcp = match TcpStream::from_std(std_stream) {
-        Ok(s) => s,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_callback: TcpStream::\
-                 from_std failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-    let (cmd, events, join) = match Connection::spawn(tcp) {
-        Ok(triple) => triple,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_callback: \
-                 Connection::spawn failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    // Hand the post-spawn wiring (MainContext acquire,
-    // Box::into_raw, pump spawn, forwarder attach,
-    // callback_state stash) to the shared helper so this entry
-    // and the transform-config variant below stay aligned. See
-    // [`wire_callback_state`] for the rationale on ordering and
-    // the cleanup-on-failure contract.
-    wire_callback_state(rt, cmd, events, join, on_event, on_shutdown, user_data)
-}
-
-// ============================================================
-// Transform-config FFI (R3.3.e-2)
-// ============================================================
-//
-// Lets the C side pass a HOPE-negotiated cipher + compression
-// stack and have hxnet hand the resulting layered transport to
-// the Connection actor. The shape is a flat `#[repr(C)]` struct
-// — all per-direction key material is held inline, the cipher /
-// compression kind tags pick which subset of fields are
-// load-bearing on any given call.
-//
-// Behaviourally identical to `spawn_fd_with_callback` once the
-// transports are built — the same SendCallbacks + pump +
-// forward_to_main wiring runs underneath.
-
-/// Cipher selection tag, matches [`crate::transform::CipherKind`].
-pub const HXNET_CIPHER_NONE: c_uint = 0;
-pub const HXNET_CIPHER_BLOWFISH: c_uint = 1;
-pub const HXNET_CIPHER_CHACHA20_POLY1305: c_uint = 2;
-/// R3.3.e-4g: Hotline-frame-aware Blowfish that mirrors the
-/// legacy HOPE per-message rekey protocol
-/// ([`crate::hope_blowfish::HopeBlowfishStream`]). Use this
-/// for HOPE-Blowfish handshakes; the bare
-/// [`HXNET_CIPHER_BLOWFISH`] kind is wire-incompatible with any
-/// HOPE server that ever trips the rekey marker.
-pub const HXNET_CIPHER_HOPE_BLOWFISH: c_uint = 3;
-
-/// HMAC algorithm tag. Matches
-/// [`crate::hope_blowfish::HopeMacAlg`].
-pub const HXNET_MACALG_SHA256: u8 = 0;
-pub const HXNET_MACALG_SHA1: u8 = 1;
-pub const HXNET_MACALG_MD5: u8 = 2;
-
-/// Maximum HOPE session-key length the FFI accepts. The wire
-/// protocol caps the SESSIONKEY chunk at 64 bytes, which the C
-/// `htlc->sessionkey` field also pins; we mirror exactly.
-pub const HXNET_HOPE_SESSION_KEY_MAX: c_uint = 64;
-
-/// Compression selection tag, matches
-/// [`crate::transform::CompressionKind`].
-pub const HXNET_COMPRESSION_NONE: c_uint = 0;
-pub const HXNET_COMPRESSION_GZIP: c_uint = 1;
-pub const HXNET_COMPRESSION_LZ4: c_uint = 2;
-pub const HXNET_COMPRESSION_ZSTD: c_uint = 3;
-
-/// Maximum Blowfish key length the cipher accepts (matches
-/// `Blowfish::new_from_slice`'s 1..=56 range).
-pub const HXNET_BLOWFISH_MAX_KEY_LEN: c_uint = 56;
-
-/// C-facing config for the layered transport. Flat POD struct so
-/// the C side mirrors it with an explicit `_Static_assert` on
-/// size + the relevant field offsets — same ABI-pinning
-/// discipline as [`HxnetFrame`].
-///
-/// Field usage depends on the kind tags:
-///
-/// - `cipher_kind == HXNET_CIPHER_BLOWFISH` reads
-///   `blowfish_key[..blowfish_key_len]`, `blowfish_read_ivec`,
-///   `blowfish_write_ivec`.
-/// - `cipher_kind == HXNET_CIPHER_CHACHA20_POLY1305` reads
-///   `aead_read_*` / `aead_write_*`.
-/// - Either compression tag uses no extra fields — the codec
-///   is fully described by the tag.
-///
-/// All fields not used by the active variant are ignored; the C
-/// side may leave them zeroed.
-#[repr(C)]
-pub struct HxnetTransformConfig {
-    pub cipher_kind: c_uint,
-    pub compression_kind: c_uint,
-
-    /// Per-direction Blowfish key lengths in bytes
-    /// (1..=`HXNET_BLOWFISH_MAX_KEY_LEN`). The HOPE chain derives
-    /// distinct keys for the two directions (client→server and
-    /// server→client); a single-key shortcut would desynchronise
-    /// the read keystream from anything the server sends — caught
-    /// against VesperNet/Janus, where the keys clearly differ.
-    pub blowfish_read_key_len: c_uint,
-    pub blowfish_write_key_len: c_uint,
-    /// Per-direction Blowfish key buffers; only the first
-    /// `blowfish_*_key_len` bytes of each are used.
-    pub blowfish_read_key: [u8; 56],
-    pub blowfish_write_key: [u8; 56],
-    /// Per-direction OFB ivecs. The legacy HOPE handshake
-    /// derives these from the session keystream.
-    pub blowfish_read_ivec: [u8; 8],
-    pub blowfish_write_ivec: [u8; 8],
-    /// Per-direction OFB byte-offset (0..7) into the current
-    /// keystream block. The bridge install can fire mid-block
-    /// — the C side may have decoded post-LOGIN-reply bytes (or
-    /// encoded step-2 LOGIN bytes) before `install_check_idle`'s
-    /// htlc->out drain wait completes, advancing `num` past 0.
-    /// Restoring with `num=0` would re-encrypt the ivec block on
-    /// the next crypt() and desynchronise the keystream. Caught
-    /// by VesperNet/Janus + Blowfish: Janus ships an empty
-    /// HTLS_DATA_CIPHER_IVEC and the post-LOGIN SELFINFO is
-    /// decoded by the legacy path before install fires.
-    pub blowfish_read_num: u8,
-    pub blowfish_write_num: u8,
-
-    /// R3.3.e-4g: HOPE-Blowfish per-message rekey inputs.
-    /// `hope_macalg` is one of `HXNET_MACALG_*`; the session
-    /// key (HOPE-Step-1 reply SESSIONKEY chunk, up to 64 bytes)
-    /// is hashed against the current direction key for each
-    /// HMAC iteration the marker triggers. Only consulted when
-    /// `cipher_kind == HXNET_CIPHER_HOPE_BLOWFISH`.
-    pub hope_macalg: u8,
-    /// 1 byte of padding so `hope_session_key_len` lands on a
-    /// 4-byte boundary.
-    pub _pad_macalg: u8,
-    pub hope_session_key_len: c_uint,
-    pub hope_session_key: [u8; 64],
-
-    /// ChaCha20-Poly1305 keys per direction.
-    pub aead_read_key: [u8; 32],
-    pub aead_write_key: [u8; 32],
-    /// Frame counters per direction.
-    pub aead_read_counter: u64,
-    pub aead_write_counter: u64,
-    /// Direction tags — `AEAD_DIR_SERVER_TO_CLIENT` /
-    /// `AEAD_DIR_CLIENT_TO_SERVER` from hxcrypto-aead.
-    pub aead_read_dir: u8,
-    pub aead_write_dir: u8,
-
-    /// Explicit trailing padding so the struct's total size is
-    /// stable and the C side's `_Static_assert sizeof(...)`
-    /// catches drift.
-    pub _pad: [u8; 6],
-}
-
-// Pin the cross-language ABI layout from the Rust side; the C
-// side mirrors with the same offsets. Drift on either side
-// trips a compile error before any byte hits the wire.
-const _: () = {
-    assert!(std::mem::offset_of!(HxnetTransformConfig, cipher_kind) == 0);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, compression_kind) == 4);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_key_len) == 8);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_key_len) == 12);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_key) == 16);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_key) == 72);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_ivec) == 128);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_ivec) == 136);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_read_num) == 144);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, blowfish_write_num) == 145);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, hope_macalg) == 146);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad_macalg) == 147);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, hope_session_key_len) == 148);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, hope_session_key) == 152);
-    // hope_session_key is 64 bytes → ends at 216. aead_read_key
-    // ([u8; 32]) has 1-byte alignment so it falls right at 216
-    // with no padding.
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_key) == 216);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_key) == 248);
-    // aead_read_counter is u64 — needs 8-byte alignment. The
-    // aead_write_key array ends at 248+32=280, which is
-    // already 8-aligned, so no padding is inserted before
-    // the counter.
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_counter) == 280);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_counter) == 288);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_read_dir) == 296);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, aead_write_dir) == 297);
-    assert!(std::mem::offset_of!(HxnetTransformConfig, _pad) == 298);
-    // Total: 298 + 6 = 304, aligned to the struct's natural
-    // 8-byte alignment.
-    assert!(std::mem::size_of::<HxnetTransformConfig>() == 304);
-    assert!(std::mem::align_of::<HxnetTransformConfig>() == 8);
-};
-
-/// Translate the C-side config into a [`crate::transform::CipherLayer`].
-/// Returns the layer plus a descriptive label for `g_critical`
-/// messages on the failure path. This helper is the validation
-/// boundary: it accepts a raw [`HxnetTransformConfig`], rejects
-/// unknown `cipher_kind` tags, out-of-range `blowfish_key_len`,
-/// failed Blowfish state init, and AEAD direction tags outside
-/// the two canonical SERVER_TO_CLIENT / CLIENT_TO_SERVER values.
-/// Each failure carries a static label that the caller in
-/// [`hxnet_connection_spawn_fd_with_transforms_and_callback`]
-/// routes into a `g_critical` and a NULL return.
-fn cipher_layer_from_config(
-    cfg: &HxnetTransformConfig,
-) -> Result<crate::transform::CipherLayer, &'static str> {
-    match cfg.cipher_kind {
-        HXNET_CIPHER_NONE => Ok(crate::transform::CipherLayer::None),
-        HXNET_CIPHER_BLOWFISH | HXNET_CIPHER_HOPE_BLOWFISH => {
-            let read_key_len = cfg.blowfish_read_key_len as usize;
-            let write_key_len = cfg.blowfish_write_key_len as usize;
-            if read_key_len == 0 || read_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
-                return Err("blowfish_read_key_len out of range (1..=56)");
-            }
-            if write_key_len == 0 || write_key_len > HXNET_BLOWFISH_MAX_KEY_LEN as usize {
-                return Err("blowfish_write_key_len out of range (1..=56)");
-            }
-            let read_key = &cfg.blowfish_read_key[..read_key_len];
-            let write_key = &cfg.blowfish_write_key[..write_key_len];
-            // Use the per-direction num verbatim. restore_ofb_state
-            // already masks to 0..7 internally so an over-range
-            // value can't index ivec out of bounds — same defense
-            // the rollback path relies on. Threading num through
-            // is the fix for the Janus + Blowfish disconnect: the
-            // C-side may have advanced num past 0 by the time
-            // install_check_idle fires; restoring num=0 here would
-            // re-encrypt ivec on the next crypt() and desync the
-            // keystream against the server. The per-direction key
-            // split is the other half of the same fix — HOPE
-            // derives distinct read/write Blowfish keys from the
-            // session keystream, so loading the same key into both
-            // states gives the read side a wrong keystream against
-            // any server that doesn't happen to derive identical
-            // keys (the Janus case).
-            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(read_key) {
-                Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_read_ivec, cfg.blowfish_read_num as u32);
-                    s
-                }
-                None => return Err("blowfish read state init failed"),
-            };
-            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(write_key) {
-                Some(mut s) => {
-                    s.restore_ofb_state(&cfg.blowfish_write_ivec, cfg.blowfish_write_num as u32);
-                    s
-                }
-                None => return Err("blowfish write state init failed"),
-            };
-            // Branch on the kind to pick the right wrapper. The
-            // plain Blowfish path stays for non-HOPE use cases
-            // (e.g. a future HTXF subchannel where there's no
-            // rekey marker to worry about); the HOPE path
-            // additionally captures the session key + HMAC alg
-            // the per-message rekey rotation needs.
-            if cfg.cipher_kind == HXNET_CIPHER_HOPE_BLOWFISH {
-                let sk_len = cfg.hope_session_key_len as usize;
-                if sk_len == 0 || sk_len > HXNET_HOPE_SESSION_KEY_MAX as usize {
-                    return Err("hope_session_key_len out of range (1..=64)");
-                }
-                let macalg = match cfg.hope_macalg {
-                    HXNET_MACALG_SHA256 => crate::hope_blowfish::HopeMacAlg::Sha256,
-                    HXNET_MACALG_SHA1 => crate::hope_blowfish::HopeMacAlg::Sha1,
-                    HXNET_MACALG_MD5 => crate::hope_blowfish::HopeMacAlg::Md5,
-                    _ => {
-                        return Err("hope_macalg is not a known tag");
-                    }
-                };
-                let session_key = cfg.hope_session_key[..sk_len].to_vec();
-                Ok(crate::transform::CipherLayer::HopeBlowfish {
-                    read_state,
-                    read_key: read_key.to_vec(),
-                    write_state,
-                    write_key: write_key.to_vec(),
-                    session_key,
-                    macalg,
-                })
-            } else {
-                Ok(crate::transform::CipherLayer::Blowfish {
-                    read_state,
-                    write_state,
-                })
-            }
-        }
-        HXNET_CIPHER_CHACHA20_POLY1305 => {
-            // The dir tag is one byte of the ChaCha20-Poly1305
-            // nonce derivation; a value outside the defined set
-            // would derive a non-interoperable (and potentially
-            // unsafe) nonce. Reject anything other than the
-            // two canonical SERVER_TO_CLIENT / CLIENT_TO_SERVER
-            // tags before handing them to AeadState.
-            if cfg.aead_read_dir != hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT
-                && cfg.aead_read_dir != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
-            {
-                return Err("aead_read_dir is not a defined direction tag");
-            }
-            if cfg.aead_write_dir != hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT
-                && cfg.aead_write_dir != hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER
-            {
-                return Err("aead_write_dir is not a defined direction tag");
-            }
-            // For a working bidirectional channel the read and
-            // write directions must disagree — same direction
-            // tag on both ends produces matching nonces, which
-            // breaks the AEAD's per-direction counter
-            // invariant. Refuse the obviously-broken config
-            // up front.
-            if cfg.aead_read_dir == cfg.aead_write_dir {
-                return Err("aead_read_dir and aead_write_dir must disagree");
-            }
-            Ok(crate::transform::CipherLayer::ChaCha20Poly1305 {
-                read: hxcrypto_aead::AeadState {
-                    key: cfg.aead_read_key,
-                    counter: cfg.aead_read_counter,
-                    dir: cfg.aead_read_dir,
-                },
-                write: hxcrypto_aead::AeadState {
-                    key: cfg.aead_write_key,
-                    counter: cfg.aead_write_counter,
-                    dir: cfg.aead_write_dir,
-                },
-            })
-        }
-        _ => Err("unknown cipher_kind"),
-    }
-}
-
-fn compression_kind_from_config(
-    cfg: &HxnetTransformConfig,
-) -> Result<crate::transform::CompressionKind, &'static str> {
-    match cfg.compression_kind {
-        HXNET_COMPRESSION_NONE => Ok(crate::transform::CompressionKind::None),
-        HXNET_COMPRESSION_GZIP => Ok(crate::transform::CompressionKind::Gzip),
-        HXNET_COMPRESSION_LZ4 => Ok(crate::transform::CompressionKind::Lz4),
-        HXNET_COMPRESSION_ZSTD => Ok(crate::transform::CompressionKind::Zstd),
-        _ => Err("unknown compression_kind"),
-    }
-}
-
-/// Like [`hxnet_connection_spawn_fd_with_callback`], but wraps
-/// the adopted TCP socket in a cipher + compression stack
-/// described by `config` before handing it to the actor.
-///
-/// `config` is dereferenced read-only; the C side may free /
-/// reuse its storage as soon as this function returns. NULL
-/// `config` is rejected with `g_critical` + NULL.
-///
-/// All fd / callback / runtime semantics are identical to the
-/// non-transform variant. The layered transport is built via
-/// [`crate::transform::compose`]; the new failure modes this
-/// surfaces beyond the base spawn path are:
-///
-/// - unknown `cipher_kind` or `compression_kind` tag,
-/// - `blowfish_key_len` outside the 1..=56 range,
-/// - Blowfish read / write state initialisation failure,
-/// - `aead_read_dir` / `aead_write_dir` outside the canonical
-///   `SERVER_TO_CLIENT` / `CLIENT_TO_SERVER` direction tags,
-/// - Zstd decoder init failure.
-///
-/// All log via `g_critical` and return NULL.
-///
-/// # Safety
-///
-/// `config` must point at a valid, fully-initialised
-/// `HxnetTransformConfig`. All other parameters carry the same
-/// safety preconditions as
-/// [`hxnet_connection_spawn_fd_with_callback`].
-#[no_mangle]
-pub unsafe extern "C" fn hxnet_connection_spawn_fd_with_transforms_and_callback(
-    fd: c_int,
-    config: *const HxnetTransformConfig,
-    on_event: HxnetEventCallback,
-    on_shutdown: HxnetShutdownCallback,
-    user_data: *mut c_void,
-) -> *mut HxnetConnection {
-    if config.is_null() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_transforms_and_callback: NULL config"
-        );
-        return std::ptr::null_mut();
-    }
-    if on_event.is_none() || on_shutdown.is_none() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_transforms_and_callback: NULL \
-             callback"
-        );
-        return std::ptr::null_mut();
-    }
-    if fd < 0 {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_transforms_and_callback: negative fd"
-        );
-        return std::ptr::null_mut();
-    }
-
-    let cfg = &*config;
-    let cipher_layer = match cipher_layer_from_config(cfg) {
-        Ok(l) => l,
-        Err(msg) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_transforms_and_callback: {}",
-                msg
-            );
-            return std::ptr::null_mut();
-        }
-    };
-    let compression_kind = match compression_kind_from_config(cfg) {
-        Ok(k) => k,
-        Err(msg) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_transforms_and_callback: {}",
-                msg
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
-        Ok(rt) => rt,
-        Err(_) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
-                 Runtime::global panicked; aborting to avoid unwinding \
-                 across the FFI boundary"
-            );
-            std::process::abort();
-        }
-    };
-
-    // Same fd-prep + TCP wrap as the non-transform variant.
-    let std_stream = std::net::TcpStream::from_raw_fd(fd);
-    if let Err(e) = std_stream.set_nonblocking(true) {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_transforms_and_callback: \
-             set_nonblocking failed: {}",
-            e
-        );
-        return std::ptr::null_mut();
-    }
-    if let Err(e) = std_stream.peer_addr() {
-        glib::g_critical!(
-            "hxnet",
-            "hxnet_connection_spawn_fd_with_transforms_and_callback: \
-             peer_addr failed ({}); fd is not a connected TCP socket",
-            e
-        );
-        return std::ptr::null_mut();
-    }
-
-    let _guard = rt.handle().enter();
-    let tcp = match TcpStream::from_std(std_stream) {
-        Ok(s) => s,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
-                 TcpStream::from_std failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    // Layer the cipher + compression on top of the raw TCP.
-    let boxed = match crate::transform::compose(tcp, cipher_layer, compression_kind) {
-        Ok(b) => b,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
-                 transform compose failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    let (cmd, events, join) = match Connection::spawn_boxed(boxed) {
-        Ok(triple) => triple,
-        Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_spawn_fd_with_transforms_and_callback: \
-                 Connection::spawn_boxed failed: {}",
-                e
-            );
-            return std::ptr::null_mut();
-        }
-    };
-
-    wire_callback_state(rt, cmd, events, join, on_event, on_shutdown, user_data)
-}
-
-/// Common post-Connection-spawn callback wiring. Builds the
-/// HxnetConnection box, spawns the pump task, acquires the
-/// MainContext, attaches the forwarder. Returns the C-side
-/// handle pointer or NULL on the MainContext-acquisition
-/// failure path (with `g_critical` already logged). Same
-/// shape used by both
-/// [`hxnet_connection_spawn_fd_with_callback`] and the
-/// transform-config variant above so the wiring stays in one
-/// place.
-fn wire_callback_state(
-    rt: &Runtime,
-    cmd: ConnectionHandle,
-    mut events: mpsc::Receiver<Event>,
-    join: JoinHandle<()>,
-    on_event: HxnetEventCallback,
-    on_shutdown: HxnetShutdownCallback,
-    user_data: *mut c_void,
-) -> *mut HxnetConnection {
-    // Acquire MainContext before Box::into_raw so a failure
-    // doesn't leak the handle — see the matching comment in
-    // hxnet_connection_spawn_fd_with_callback for the rationale.
-    let main_ctx = glib::MainContext::ref_thread_default();
-    let _acquire_guard = if main_ctx.is_owner() {
-        None
-    } else {
-        match main_ctx.acquire() {
-            Ok(g) => Some(g),
-            Err(_) => {
-                glib::g_critical!(
-                    "hxnet",
-                    "wire_callback_state: thread-default MainContext is owned \
-                     by another thread; cannot acquire for spawn_local. The \
-                     Connection was spawned on the tokio runtime but is being \
-                     dropped because the GLib wiring cannot attach."
-                );
-                return std::ptr::null_mut();
-            }
-        }
-    };
-
-    let handle_box = Box::new(HxnetConnection {
-        cmd,
-        events: None,
-        _callback_state: None,
-        _join: join,
-        hope_aead: None,
-    });
-    let handle_ptr = Box::into_raw(handle_box);
-
-    let (ferry_tx, ferry_rx) = async_channel::bounded::<Event>(CALLBACK_FERRY_CAPACITY);
-    let pump = rt.handle().spawn(async move {
-        while let Some(evt) = events.recv().await {
-            if ferry_tx.send(evt).await.is_err() {
-                break;
-            }
-        }
-    });
-
-    let cb = SendCallbacks {
-        on_event,
-        on_shutdown,
-        user_data,
-        handle_ptr,
-    };
-
-    let forwarder = hxbridge::channel::forward_to_main(&main_ctx, ferry_rx, move |evt| {
-        match evt {
-            Event::Frame(frame) => {
-                let mut out = std::mem::MaybeUninit::<HxnetFrame>::uninit();
-                unsafe { write_frame_to_out(frame, out.as_mut_ptr()) };
-                // Hand the raw *mut pointer to the callback —
-                // hxnet_frame_free writes through the struct
-                // to zero body_ptr / body_len, so a *mut
-                // here matches the callback's documented
-                // contract and saves the C side a const-cast.
-                let frame_ptr = out.as_mut_ptr();
-                if let Some(on_event) = cb.on_event {
-                    unsafe {
-                        on_event(cb.handle_ptr, frame_ptr, cb.user_data);
-                    }
-                }
-            }
-            Event::Shutdown(reason) => {
-                // Log the *full* reason — including the
-                // StreamError's inner io::Error string —
-                // before we collapse it to an integer code
-                // for the FFI callback. The integer alone
-                // tells the C side which BUCKET the actor
-                // died in (StreamError vs FrameTooLarge vs
-                // EOF) but not which specific failure
-                // produced it. Without this stderr line
-                // the actual cause of a mid-burst death is
-                // unrecoverable from user logs — the C
-                // side's bridge_on_shutdown_cb may also
-                // get pre-empted by a synchronous send
-                // failure path that uninstalls the bridge
-                // and swallows the deferred event entirely.
-                eprintln!("hxnet: actor shutting down: {reason:?}");
-                let code = shutdown_code(reason);
-                if let Some(on_shutdown) = cb.on_shutdown {
-                    unsafe {
-                        on_shutdown(cb.handle_ptr, code, cb.user_data);
-                    }
-                }
-            }
-            Event::State(state) => {
-                // The post-HOPE callback FFI from R3.3.e-1
-                // only carries Frame + Shutdown; the spawn
-                // path adopts an already-connected fd so no
-                // connect-time state events ever fire here.
-                // When Phase A's connect-in-Rust spawn
-                // function lands, it'll carry its own
-                // on_state callback and route state events
-                // through that. For now log + drop so any
-                // future regression that wires a state-
-                // event-emitting transform under the
-                // existing spawn surfaces in dev logs
-                // rather than silently disappearing.
-                eprintln!(
-                    "hxnet: unexpected State({state:?}) on post-HOPE \
-                         callback path; ignoring (no consumer)"
-                );
-            }
-        }
-    });
-
-    let handle_ref = unsafe { &mut *handle_ptr };
-    handle_ref._callback_state = Some(CallbackState {
-        _pump: pump,
-        _forwarder: forwarder,
-    });
-
-    handle_ptr
-}
-
 // ============================================================ *
 // Phase A — hxnet does the TCP connect itself                  *
 // ============================================================ *
@@ -1567,9 +680,9 @@ const _: () = {
 ///
 /// `host` is a non-NUL-terminated UTF-8 slice of length
 /// `host_len`. It can be a DNS name or an IP literal (v4 or v6).
-/// `port` is the TCP port. The three callbacks are wired exactly
-/// the same way as in `hxnet_connection_spawn_fd_with_callback`;
-/// `on_state` is new and fires once per `ConnectionState`
+/// `port` is the TCP port. The three callbacks are wired through
+/// the shared `wire_callback_state_with_on_state` helper;
+/// `on_state` fires once per `ConnectionState`
 /// transition.
 ///
 /// The returned handle is fully functional from the moment of
@@ -1765,9 +878,8 @@ pub(crate) unsafe fn parse_proxy_arg(
 /// pick a non-zero value (production uses a counter).
 ///
 /// **Plaintext only**: this FFI does NOT speak TLS or HOPE.
-/// Callers who need either route through the legacy
-/// `spawn_fd_*` path until Phase F (HOPE) and Phase B (TLS)
-/// are folded into the orchestrator.
+/// Callers who need either use the dedicated connect entries
+/// (`hxnet_connection_open_hope`, `_open_plaintext_tls`).
 ///
 /// # Safety
 ///
@@ -2816,7 +1928,7 @@ pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
 
 /// Opaque handle to a HOPE control-channel's retained AEAD material.
 /// Obtained from [`hxnet_connection_hope_aead_material`] and passed to
-/// [`hxnet_htxf_open`] so an HTXF subchannel can derive its per-transfer
+/// [`hxnet_htxf_connect`] so an HTXF subchannel can derive its per-transfer
 /// keys in-process. The session key never crosses the FFI as bytes —
 /// only this opaque token does. Free with [`hxnet_hope_aead_free`].
 pub struct HxnetHopeAead {
@@ -2891,9 +2003,11 @@ pub unsafe extern "C" fn hxnet_hope_aead_free(h: *mut HxnetHopeAead) {
     }
 }
 
-/// Variant of `wire_callback_state` that routes
-/// `Event::State(...)` through an additional `on_state`
-/// callback instead of dropping it. Reuses the same
+/// Common post-Connection-spawn callback wiring, with an
+/// `on_state` callback that routes `Event::State(...)` through
+/// instead of dropping it. Builds the HxnetConnection box, spawns
+/// the pump task, acquires the MainContext, and attaches the
+/// forwarder. Reuses the same
 /// pump→forward_to_main shape as the older wiring helper —
 /// only the per-event dispatch differs.
 fn wire_callback_state_with_on_state(

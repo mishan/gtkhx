@@ -223,13 +223,9 @@ test_hope_chacha20_banner_htxf (void)
      * the chacha20 banner test routes to janus for login but the
      * default xfer port can still be mhxd's, opening the subchannel
      * against the wrong server. */
-    int xfer_fd = hx_integration_connect_to (srv->host, srv->xfer_port,
-                                              /*timeout_ms=*/2000);
-    g_assert_cmpint (xfer_fd, >=, 0);
-
     /* Shared preamble packer mirrors production banner.c +
      * network.c::htxf_connect. Banners are never >4 GiB so size64
-     * stays FALSE; the 16-byte legacy variant comes out. hxnet_htxf_open
+     * stays FALSE; the 16-byte legacy variant comes out. hxnet_htxf_connect
      * writes it raw before arming AEAD, so we don't send it ourselves. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     size_t hdr_len = hx_htxf_subchannel_pack_preamble (
@@ -238,7 +234,7 @@ test_hope_chacha20_banner_htxf (void)
         /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
 
-    /* hxnet_htxf_open derives the per-transfer AEAD keys in-process from
+    /* hxnet_htxf_connect derives the per-transfer AEAD keys in-process from
      * an opaque HOPE material handle + ref, then adopts the fd, writes
      * the plaintext preamble, and frames the body AEAD. The orchestrated
      * login already seeded htlc.hope_aead from the production actor.
@@ -249,10 +245,11 @@ test_hope_chacha20_banner_htxf (void)
     xfer.ref = ref;
     htxf_io_init (&xfer);
     g_assert_nonnull (htlc.hope_aead);
-    xfer.hx = hxnet_htxf_open (xfer_fd, /*tls=*/0, /*host=*/NULL, 0,
-                              hdr_buf, hdr_len,
-                              (const HxnetHopeAead *) htlc.hope_aead, ref,
-                              /*verify_cert=*/NULL, /*user_data=*/NULL);
+    xfer.hx = hxnet_htxf_connect (
+        (const guint8 *) srv->host, strlen (srv->host), srv->xfer_port,
+        NULL, 0, /*tls=*/0, hdr_buf, hdr_len,
+        (const HxnetHopeAead *) htlc.hope_aead, ref,
+        /*verify_cert=*/NULL, /*user_data=*/NULL);
     g_assert_nonnull (xfer.hx);
 
     /* Read `size` body bytes through htxf_io_read — the hxnet channel
