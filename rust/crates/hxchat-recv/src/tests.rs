@@ -18,39 +18,65 @@ fn invite(cid: u32, uid: u16, name: &str) {
     }
 }
 
-/// Drive the whole moved handler (parse → chat lookup → recv) via the doubles.
-fn rcv_invite() {
-    unsafe { hx_rcv_chat_invite(std::ptr::null_mut(), std::ptr::null(), 0) };
+fn push_chunk(v: &mut Vec<u8>, tag: u16, data: &[u8]) {
+    v.extend_from_slice(&tag.to_be_bytes());
+    v.extend_from_slice(&(data.len() as u16).to_be_bytes());
+    v.extend_from_slice(data);
+}
+
+/// Build a real HTLS_HDR_CHAT_INVITE frame: 22-byte header + UID/CHAT_ID/NAME
+/// chunks. The handler runs the production `hotline_proto::parse::parse_chat_invite`
+/// over these bytes — no parse double.
+fn invite_frame(uid: u16, cid: u32, name: &[u8]) -> Vec<u8> {
+    use hotline_proto::messages::tag;
+    let mut v = Vec::new();
+    v.extend_from_slice(&0x0000_0071u32.to_be_bytes()); // type = CHAT_INVITE
+    v.extend_from_slice(&[0u8; 18]); // trans(4) flag(4) len(4) len2(4) hc(2)
+    push_chunk(&mut v, tag::UID, &uid.to_be_bytes());
+    push_chunk(&mut v, tag::CHAT_ID, &cid.to_be_bytes());
+    push_chunk(&mut v, tag::NAME, name);
+    v
+}
+
+/// Drive the whole moved handler (native parse → chat lookup → recv) over `frame`.
+fn rcv_invite(frame: &[u8]) {
+    unsafe { hx_rcv_chat_invite(std::ptr::null_mut(), frame.as_ptr(), frame.len()) };
 }
 
 #[test]
 fn rcv_handler_parses_and_emits() {
     test_env::reset();
-    test_env::PARSE_INVITE.with(|c| *c.borrow_mut() = Some((9, 5, b"Alice".to_vec())));
+    let f = invite_frame(5, 9, b"Alice");
 
-    rcv_invite();
+    rcv_invite(&f);
 
-    // parse → lookups → hx_chat_invite_recv → chat-invitation emit.
+    // native parse → lookups → hx_chat_invite_recv → chat-invitation emit.
     assert_eq!(test_env::EMITTED.with(|c| c.take()), Some((9, b"Alice".to_vec())));
-}
-
-#[test]
-fn rcv_handler_drops_on_parse_failure() {
-    test_env::reset();
-    // PARSE_INVITE left None → the parse double returns false → early return.
-    rcv_invite();
-    assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
 }
 
 #[test]
 fn rcv_handler_honours_ignore() {
     test_env::reset();
-    test_env::PARSE_INVITE.with(|c| *c.borrow_mut() = Some((1, 2, b"Blocked".to_vec())));
     test_env::IGNORE.with(|c| c.set(true));
+    let f = invite_frame(2, 1, b"Blocked");
 
-    rcv_invite();
+    rcv_invite(&f);
 
     assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
+}
+
+#[test]
+fn rcv_handler_header_only_emits_zeroed() {
+    // A chunk-less frame parses to cid 0 + empty name and still emits — matching
+    // the old C, whose extractor never failed on malformed data.
+    test_env::reset();
+    let mut f = Vec::new();
+    f.extend_from_slice(&0x0000_0071u32.to_be_bytes());
+    f.extend_from_slice(&[0u8; 18]);
+
+    rcv_invite(&f);
+
+    assert_eq!(test_env::EMITTED.with(|c| c.take()), Some((0, Vec::new())));
 }
 
 #[test]
