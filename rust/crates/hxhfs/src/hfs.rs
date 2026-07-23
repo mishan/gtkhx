@@ -3,14 +3,61 @@
 //! Explicit [`Config`], `&Path` inputs, `io::Result` / owned [`HfsInfo`]
 //! outputs. Byte-faithful to `hfs.c`'s CAP / AppleDouble / Netatalk layouts.
 
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
-use std::os::unix::ffi::{OsStrExt, OsStringExt};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use crate::suffix::suffix_type_creator;
+
+// ---------- portable OS-string / path seams ----------
+//
+// hfs.c is Unix C. This crate keeps its byte-exact behavior on Unix while also
+// compiling and running on Windows; the helpers below are the only places that
+// touch platform-specific surface, so the rest of the module reads the same on
+// every target.
+
+/// Borrow an `OsStr`'s platform-encoded bytes. On Unix these are the raw path
+/// bytes (identical to the old `OsStrExt::as_bytes`); on Windows they're WTF-8.
+/// The sidecar logic only splits on and appends ASCII, which every supported
+/// encoding preserves, so a round-trip through [`os_from_bytes`] is faithful.
+fn os_bytes(s: &OsStr) -> &[u8] {
+    s.as_encoded_bytes()
+}
+
+/// Rebuild an `OsString` from bytes produced by [`os_bytes`] with only
+/// ASCII-boundary edits — exactly the `dir` + `/` + `name` + `suffix` splice in
+/// [`sidecar`].
+fn os_from_bytes(bytes: Vec<u8>) -> OsString {
+    // SAFETY: `bytes` come from `os_bytes` (valid platform encoding) with ASCII
+    // bytes inserted only at ASCII boundaries, which preserves validity — the
+    // documented precondition of `from_encoded_bytes_unchecked`.
+    unsafe { OsString::from_encoded_bytes_unchecked(bytes) }
+}
+
+/// Whether `b` splits the directory from the name for sidecar computation. Unix
+/// honors *only* the caller's `dir_char`, byte-exact with hfs.c's
+/// `for (i…) if (path[i] == dir_char)` loop. Other platforms additionally treat
+/// their native separators (`/` and `\`) as splits, so a real Windows path still
+/// locates its sibling sidecar.
+#[cfg(unix)]
+fn is_sep(b: u8, dir_char: u8) -> bool {
+    b == dir_char
+}
+#[cfg(not(unix))]
+fn is_sep(b: u8, dir_char: u8) -> bool {
+    b == dir_char || b == b'/' || b == b'\\'
+}
+
+/// Apply a Unix file mode to `opts` on platforms that model one; a no-op on
+/// Windows, whose `OpenOptions` has no mode concept.
+#[cfg(unix)]
+pub(crate) fn with_mode(opts: &mut OpenOptions, mode: u32) {
+    use std::os::unix::fs::OpenOptionsExt;
+    opts.mode(mode);
+}
+#[cfg(not(unix))]
+pub(crate) fn with_mode(_opts: &mut OpenOptions, _mode: u32) {}
 
 /// Maximum Finder comment length the on-disk formats hold.
 pub const MAX_COMMENT: usize = 200;
@@ -116,7 +163,7 @@ pub struct HfsInfo {
 // ---------- Sidecar path computation ----------
 
 fn sidecar(path: &Path, dir_char: u8, suffix: &[u8]) -> io::Result<PathBuf> {
-    let p = path.as_os_str().as_bytes();
+    let p = os_bytes(path.as_os_str());
     // hfs.c: `if (len + 16 >= MAXPATHLEN) return ENAMETOOLONG;`
     if p.len() + 16 >= MAXPATHLEN {
         return Err(io::Error::new(
@@ -124,9 +171,12 @@ fn sidecar(path: &Path, dir_char: u8, suffix: &[u8]) -> io::Result<PathBuf> {
             "path too long for HFS sidecar",
         ));
     }
-    // Split at the last `dir_char` in indices [1, len) — matches the C loop
-    // `for (i = len-1; i > 0; i--)`, which never inspects index 0.
-    let split = (1..p.len()).rev().find(|&i| p[i] == dir_char);
+    // Split at the last separator in indices [1, len) — the scan range mirrors
+    // the C loop `for (i = len-1; i > 0; i--)`, which never inspects index 0.
+    // On Unix `is_sep` matches only `dir_char`, so the split is byte-exact with
+    // hfs.c; on other targets it additionally accepts `/` and `\` (see is_sep),
+    // which is a deliberate divergence so native Windows paths still split.
+    let split = (1..p.len()).rev().find(|&i| is_sep(p[i], dir_char));
     let (dir, name): (&[u8], &[u8]) = match split {
         Some(i) => (&p[..i], &p[i + 1..]),
         None => (b".", p),
@@ -137,7 +187,7 @@ fn sidecar(path: &Path, dir_char: u8, suffix: &[u8]) -> io::Result<PathBuf> {
     out.push(b'/');
     out.extend_from_slice(name);
     out.extend_from_slice(suffix);
-    Ok(PathBuf::from(OsString::from_vec(out)))
+    Ok(PathBuf::from(os_from_bytes(out)))
 }
 
 /// The `.fndrinfo` sidecar path for `path`.
@@ -226,7 +276,7 @@ pub fn type_creator(cfg: &Config, path: &Path) -> [u8; 8] {
             }
         }
     }
-    suffix_type_creator(path.as_os_str().as_bytes())
+    suffix_type_creator(os_bytes(path.as_os_str()))
 }
 
 fn read_type_creator(fork: Fork, f: &mut File) -> Option<[u8; 8]> {
@@ -270,7 +320,7 @@ pub fn hfsinfo_read(cfg: &Config, path: &Path) -> HfsInfo {
 
     // Fallbacks.
     if fi.type_creator[0..4] == [0; 4] || fi.type_creator[4..8] == [0; 4] {
-        fi.type_creator = suffix_type_creator(path.as_os_str().as_bytes());
+        fi.type_creator = suffix_type_creator(os_bytes(path.as_os_str()));
     }
     if fi.create_time == [0; 4] || fi.modify_time == [0; 4] {
         if let Ok(meta) = std::fs::metadata(path) {
@@ -294,8 +344,16 @@ pub fn hfsinfo_read(cfg: &Config, path: &Path) -> HfsInfo {
 }
 
 fn meta_mtime_secs(meta: &std::fs::Metadata) -> u32 {
-    use std::os::unix::fs::MetadataExt;
-    meta.mtime() as u32
+    // Portable mtime: `Metadata::modified()` + seconds since the Unix epoch,
+    // replacing the Unix-only `MetadataExt::mtime()`. Identical for any
+    // post-1970 mtime (which sidecar dates always are); a pre-epoch time or a
+    // platform that can't report mtime yields 0, matching the "missing date"
+    // fallback the caller already handles.
+    meta.modified()
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| d.as_secs() as u32)
+        .unwrap_or(0)
 }
 
 fn read_cap_info(f: &mut File, fi: &mut HfsInfo) {
@@ -519,7 +577,7 @@ pub fn comment_write(cfg: &Config, path: &Path, comment: &[u8]) -> io::Result<()
         buf[CAP_OFF_VERSION] = CAP_VERSION;
         buf[CAP_OFF_MAGIC] = CAP_MAGIC;
         buf[CAP_OFF_DATEMAGIC] = CAP_DMAGIC;
-        let tc = suffix_type_creator(path.as_os_str().as_bytes());
+        let tc = suffix_type_creator(os_bytes(path.as_os_str()));
         buf[CAP_OFF_FNDR..CAP_OFF_FNDR + 8].copy_from_slice(&tc);
     }
     buf[CAP_OFF_COMLN] = comlen as u8;
@@ -617,12 +675,10 @@ fn open_or_none(opts: &OpenOptions, path: &Path) -> io::Result<Option<File>> {
 // ---------- open helpers ----------
 
 fn open_rw_create(path: &Path, perm: u32) -> io::Result<File> {
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .mode(perm)
-        .open(path)
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true).create(true);
+    with_mode(&mut opts, perm);
+    opts.open(path)
 }
 
 #[cfg(test)]

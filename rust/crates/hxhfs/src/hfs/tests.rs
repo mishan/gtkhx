@@ -6,7 +6,6 @@ use super::*;
 // hfs.rs's private `use`s (which works, but is fragile).
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -184,7 +183,8 @@ fn cap_resource_fork() {
 
     // Write a resource fork, then read it back through resource_open + len.
     let mut write_opts = OpenOptions::new();
-    write_opts.write(true).create(true).truncate(true).mode(0o600);
+    write_opts.write(true).create(true).truncate(true);
+    super::with_mode(&mut write_opts, 0o600);
     let mut w = resource_open(&cfg, &data, &write_opts).unwrap().unwrap();
     w.write_all(b"RESOURCEDATA").unwrap();
     w.sync_all().unwrap();
@@ -239,7 +239,8 @@ fn resource_open_missing_parent_dir_is_error() {
     let tmp = TmpDir::new();
     let data = tmp.path("nonexistent-subdir/file.bin");
     let mut opts = OpenOptions::new();
-    opts.write(true).create(true).truncate(true).mode(0o600);
+    opts.write(true).create(true).truncate(true);
+    super::with_mode(&mut opts, 0o600);
     assert!(resource_open(&cfg, &data, &opts).is_err());
 }
 

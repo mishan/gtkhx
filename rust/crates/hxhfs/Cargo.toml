@@ -18,6 +18,7 @@ crate-type = ["staticlib", "rlib"]
 # The native API is pure std (filesystem I/O + big-endian byte twiddling, no
 # glib / gtk / C externs, so `cargo test -p hxhfs` runs headless). `libc` is
 # used only by the ffi shim, for platform-correct open(2) flag constants when
-# translating the C `mode` arg.
-[dependencies]
+# translating the C `mode` arg. The shim (and thus libc) is Unix-only — see
+# lib.rs — so the dependency is gated to keep Windows builds libc-free.
+[target.'cfg(unix)'.dependencies]
 libc = "0.2"
