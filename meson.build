@@ -53,31 +53,6 @@ extra_warnings = [
 ]
 add_project_arguments(cc.get_supported_arguments(extra_warnings), language : 'c')
 
-# arm64 macOS: force the ARM-NEON target feature on for the C compile.
-# GTK pulls in graphene, whose generated graphene-config.h selects its
-# ARM-NEON SIMD path from `__aarch64__` alone and unconditionally
-# `#include <arm_neon.h>`. Those intrinsics only type-check when the
-# translation unit has the `neon` target feature enabled — otherwise the
-# NEON vector types silently degrade to their scalar base (e.g.
-# `int8x16_t` becomes `signed char`) and every GTK-including source fails
-# to compile (seen on the ports.yml macos-14 runner: the compile reaches
-# arm_neon.h without the feature).
-#
-# `-mcpu=<applecpu>` does NOT reliably restore it (a CPU name doesn't
-# override an upstream feature-string that dropped simd — verified against
-# clang), so add the `neon` cc1 target feature directly: it force-enables
-# the feature regardless of what turned it off and without changing the
-# arch baseline. `has_multi_arguments` checks the whole `-Xclang …`
-# sequence together (get_supported_arguments would test each token in
-# isolation) and drops it if the compiler rejects it. No-op elsewhere —
-# the Intel runner takes graphene's SSE path and Linux is unaffected.
-if host_machine.system() == 'darwin' and host_machine.cpu_family() == 'aarch64'
-  neon_force = ['-Xclang', '-target-feature', '-Xclang', '+neon']
-  if cc.has_multi_arguments(neon_force)
-    add_project_arguments(neon_force, language : 'c')
-  endif
-endif
-
 # -----------------------------------------------------------------------------
 # Dependencies
 # -----------------------------------------------------------------------------

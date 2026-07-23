@@ -18,9 +18,15 @@
 #define PACKED
 #endif
 
-#if !defined(__GNUC__) || defined(__STRICT_ANSI__) || defined(__APPLE_CC__)
-#define __attribute__(x)
-#endif
+/*
+ * Never define away `__attribute__` for "compatibility": every compiler
+ * we build with (GCC, Clang, Apple Clang) supports it, the identifier is
+ * reserved so redefining it is undefined behavior, and because this
+ * header is included before system headers the empty definition silently
+ * corrupts THEIR attributes too. On macOS it stripped
+ * neon_vector_type(N) from arm_neon.h (breaking every GTK-including
+ * compile via graphene) and __packed__ from our own wire structs.
+ */
 
 #if !defined(__va_copy)
 #define __va_copy(_dst, _src) ((_dst) = (_src))
