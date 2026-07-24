@@ -27,12 +27,11 @@
 //! on-disk bytes must match `hfs.c` exactly. The round-trip + golden-byte tests
 //! pin that.
 
-// The `ffi` shim preserves hfs.c's POSIX C ABI — it hands back raw file
-// descriptors (`into_raw_fd`) and calls `libc::stat`, neither of which exists on
-// Windows (which uses HANDLEs and a different ABI). It's Unix-only by nature;
-// the eventual leaf-up replacement of hfs.c is a Unix target. The native `hfs`
-// module below stays portable so the cross-platform port CI can exercise it.
-#[cfg(unix)]
+// The `ffi` shim preserves hfs.c's C ABI. On Windows it bridges the resource-fork
+// `File` to a CRT file descriptor via `_open_osfhandle` (the C callers read /
+// write / lseek / close it), which works because MSYS2 UCRT64 links the same
+// UCRT into Rust and the C app, so the descriptor table is shared. The native
+// `hfs` module below is portable on its own.
 pub mod ffi;
 pub mod hfs;
 mod suffix;
