@@ -1,0 +1,225 @@
+# GtkHx release / snapshot artifacts.
+#
+# Builds distributable packages for all three ship targets and, on a version
+# tag, attaches them to a GitHub Release:
+#
+#   * Windows   — portable ZIP (MSYS2 UCRT64, voice-enabled)
+#   * macOS     — .app bundle zipped, per arch (arm64 + x86_64, voice-enabled)
+#   * Linux     — Flatpak bundle (.flatpak) via the existing manifest
+#
+# Triggers:
+#   * push a tag matching v*        → build + create/attach a GitHub Release
+#   * workflow_dispatch (manual)    → build a snapshot; artifacts are attached
+#     to the workflow run (downloadable from the Actions tab), no Release.
+#
+# The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml
+# (same deps + caching); this workflow adds the packaging step + artifact upload.
+# The bundle collectors (packaging/{windows,macos}/bundle.sh) are best-effort and
+# will need a CI round or two to settle the GStreamer plugin + dylib closures.
+
+name: release
+
+permissions:
+  contents: write        # create releases + upload assets on tag
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ------------------------------------------------------------------
+  # Windows portable ZIP
+  # ------------------------------------------------------------------
+  windows-package:
+    name: package (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      CARGO_HOME: ${{ github.workspace }}\.cargo-home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          cache: true
+          pacboy: >-
+            cc:p meson:p ninja:p pkgconf:p rust:p
+            gtk4:p libadwaita:p libpanel:p gettext:p
+            gstreamer:p gst-plugins-base:p gst-plugins-good:p gst-plugins-bad:p
+            libnice:p zip:p
+
+      - name: cache rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-target
+            .cargo-home
+          key: windows-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: windows-rust-
+
+      - name: build (voice enabled)
+        run: |
+          meson setup build -Dvoice=enabled -Dtests=false \
+            -Dcargo_target_dir="$(pwd)/rust-target"
+          ninja -C build
+
+      - name: bundle
+        run: packaging/windows/bundle.sh build dist
+
+      - name: name the artifact
+        # Tag name on a tag push, else a snapshot label.
+        run: |
+          ref="${GITHUB_REF_NAME}"
+          case "$GITHUB_REF" in
+            refs/tags/*) ver="$ref" ;;
+            *)           ver="snapshot-${GITHUB_SHA::7}" ;;
+          esac
+          mv dist/GtkHx-win64.zip "dist/GtkHx-${ver}-win64.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtkhx-windows
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # macOS .app bundle (both arches)
+  # ------------------------------------------------------------------
+  macos-package:
+    name: package (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15-intel]
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: cache homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/release.yml') }}
+          restore-keys: ${{ matrix.os }}-brew-
+
+      - name: brew deps
+        run: |
+          brew install meson ninja pkgconf gtk4 libadwaita libpanel gettext \
+                       gstreamer libnice dylibbundler
+
+      - name: rust toolchain
+        run: rustup show
+
+      - name: cache rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-target
+            .cargo-home
+          key: ${{ matrix.os }}-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-rust-
+
+      - name: build (voice enabled)
+        run: |
+          meson setup build -Dvoice=enabled -Dtests=false \
+            -Dcargo_target_dir="$(pwd)/rust-target"
+          ninja -C build
+
+      - name: bundle
+        run: packaging/macos/bundle.sh build dist
+
+      - name: name the artifact
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) ver="$GITHUB_REF_NAME" ;;
+            *)           ver="snapshot-${GITHUB_SHA:0:7}" ;;
+          esac
+          for z in dist/GtkHx-macos-*.zip; do
+            mv "$z" "${z/GtkHx-macos-/GtkHx-${ver}-macos-}"
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtkhx-macos-${{ matrix.os }}
+          path: dist/*.zip
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Linux Flatpak bundle
+  # ------------------------------------------------------------------
+  linux-flatpak:
+    name: package (Linux Flatpak)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: install flatpak toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+
+      - name: cache flatpak-builder
+        uses: actions/cache@v4
+        with:
+          path: |
+            .flatpak-builder
+            ~/.local/share/flatpak
+          key: flatpak-${{ hashFiles('com.nasledov.gtkhx.yml') }}
+          restore-keys: flatpak-
+
+      - name: build flatpak bundle
+        # The GNOME 49 runtime + sdk are pulled by flatpak-builder from the
+        # manifest's declared runtime; --user keeps it in the cached dir above.
+        run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak
+
+      - name: name the artifact
+        run: |
+          case "$GITHUB_REF" in
+            refs/tags/*) ver="$GITHUB_REF_NAME" ;;
+            *)           ver="snapshot-${GITHUB_SHA:0:7}" ;;
+          esac
+          mv gtkhx.flatpak "GtkHx-${ver}.flatpak"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gtkhx-flatpak
+          path: '*.flatpak'
+          if-no-files-found: error
+
+  # ------------------------------------------------------------------
+  # Attach everything to a GitHub Release (tag pushes only)
+  # ------------------------------------------------------------------
+  release:
+    name: create release
+    needs: [windows-package, macos-package, linux-flatpak]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          draft: true          # review the assets before publishing
+          generate_release_notes: true
