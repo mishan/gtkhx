@@ -9,10 +9,11 @@
 #
 # Triggers:
 #   * push a tag matching v*        → build + a draft GitHub Release for the tag
-#   * workflow_dispatch (manual)    → build; artifacts are always attached to the
-#     workflow run (downloadable from the Actions tab). Tick the create_release
-#     input to also publish a "snapshot" pre-release at the current commit;
-#     leave it unticked for artifacts only (no Release).
+#   * workflow_dispatch (manual)    → build the targets whose checkboxes are
+#     ticked (all on by default); artifacts are always attached to the workflow
+#     run (downloadable from the Actions tab). Tick create_release to also
+#     publish a "snapshot" pre-release at the current commit; leave it unticked
+#     for artifacts only (no Release). A tag push always builds all targets.
 #
 # The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml
 # (same deps + caching); this workflow adds the packaging step + artifact upload.
@@ -30,6 +31,18 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
+      build_windows:
+        description: 'Build the Windows package'
+        type: boolean
+        default: true
+      build_macos:
+        description: 'Build the macOS packages'
+        type: boolean
+        default: true
+      build_flatpak:
+        description: 'Build the Linux Flatpak'
+        type: boolean
+        default: true
       create_release:
         description: 'Publish a snapshot pre-release from this run (otherwise just uploads workflow artifacts)'
         type: boolean
@@ -45,6 +58,8 @@ jobs:
   # ------------------------------------------------------------------
   windows-package:
     name: package (Windows)
+    # On a tag push, build everything; on a manual run, honor the checkbox.
+    if: github.event_name != 'workflow_dispatch' || inputs.build_windows
     runs-on: windows-latest
     defaults:
       run:
@@ -107,6 +122,7 @@ jobs:
   # ------------------------------------------------------------------
   macos-package:
     name: package (${{ matrix.os }})
+    if: github.event_name != 'workflow_dispatch' || inputs.build_macos
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -173,6 +189,7 @@ jobs:
   # ------------------------------------------------------------------
   linux-flatpak:
     name: package (Linux Flatpak)
+    if: github.event_name != 'workflow_dispatch' || inputs.build_flatpak
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -239,9 +256,13 @@ jobs:
   release:
     name: publish release
     needs: [windows-package, macos-package, linux-flatpak]
+    # !failure() && !cancelled() lets this run even when some package jobs were
+    # skipped (a deselected target) — but not if a selected one actually failed,
+    # so a release never ships a partial/broken build.
     if: >-
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && inputs.create_release)
+      !failure() && !cancelled() &&
+      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+       (github.event_name == 'workflow_dispatch' && inputs.create_release))
     runs-on: ubuntu-latest
     steps:
       - name: download artifacts
