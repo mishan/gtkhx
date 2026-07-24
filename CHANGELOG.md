@@ -9,6 +9,8 @@
   - GtkHx can now be built for OS X and Windows
 - Code Modernization
   - GtkHx almost has more Rust code than C code
+- Sound
+  - Replaced libcanberra with rodio for notification sound playback
 
 ## 1.2.2
 
