@@ -187,16 +187,21 @@ jobs:
           key: flatpak-${{ hashFiles('com.nasledov.gtkhx.yml') }}
           restore-keys: flatpak-
 
-      - name: flathub remote + GNOME 49 runtime
+      - name: flathub remote + build deps
         # User-scoped: a *system* remote/install needs root/polkit, which the CI
-        # user isn't granted ("ConfigureRemote not allowed for user"). The
-        # build script requires org.gnome.Platform//49 + org.gnome.Sdk//49 to be
-        # present before it runs. install is a no-op when the cache restored them.
+        # user isn't granted ("ConfigureRemote not allowed for user").
+        #
+        # Let flatpak-builder resolve and install the deps itself rather than
+        # naming them by hand: the manifest needs org.gnome.Platform/Sdk//49 AND
+        # the org.freedesktop.Sdk.Extension.rust-stable extension, whose branch
+        # is the *freedesktop* base version (e.g. 25.08 for GNOME 49), not "49".
+        # --install-deps-only reads the correct branch from the SDK metadata, so
+        # we don't hardcode it. No-op refs are skipped when the cache is warm.
         run: |
           flatpak remote-add --user --if-not-exists flathub \
             https://flathub.org/repo/flathub.flatpakrepo
-          flatpak install --user -y --noninteractive flathub \
-            org.gnome.Platform//49 org.gnome.Sdk//49
+          flatpak-builder --user --install-deps-from=flathub --install-deps-only \
+            --force-clean build-flatpak com.nasledov.gtkhx.yml
 
       - name: build flatpak bundle
         run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak
