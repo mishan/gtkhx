@@ -169,9 +169,17 @@ in-crate native.
   I/O — all native. Progress/preview marshal to main through a thin bridge
   emit. The per-chunk `htxf_io_read` bounce is gone for solo downloads.
   Smallest, most-testable slice (Tier-3 `file_get`). Start here.
-- **W2 — single-file upload loop → Rust.** `put_thread` + `file_send_one` the
-  same way (`hxnet::htxf` write, `hxfiles-xfer` pack, `hxhfs` resource read).
-  Gated on `file_put` (needs a permissive server).
+- **W2 — single-file upload loop → Rust.** *(Shipped.)* `file_send_one` moved to
+  `hxnet::xfer::hxnet_xfer_file_send_one`, driven by the same `HxnetXferParams`
+  struct + callback pointers as W1 (no upward FFI). It packs the FILP header from
+  a fixed 115-byte template + native `hxfiles-xfer` fork headers, reads the data /
+  resource forks via `hxhfs`, and writes through `hxnet::htxf`. The C drivers
+  (`put_thread`, `folder_send_all`) build the params and call it; the old C
+  `file_send_one` + `rd_wr_send` in `xfers_send.c` are deleted. A byte-capture
+  unit test (`xfer::send_capture_tests`, over a loopback socket via a `#[cfg(test)]`
+  `HtxfConn::new_plain_for_test`) pins the exact wire framing against mhxd's
+  `file_recv` parse: 133-byte header, `buf[39] == 77`, DATA fork length at offset
+  129, raw data, trailing MACR. Tier-3 coverage is `file_put` / `folder_roundtrip`.
 - **W3 — folder mini-protocol → Rust.** `folder_{recv,send}_all` (the
   FILE_NEXT / FILE_SEND / FILE_RESUME framing + local tree walk + per-file
   resume). Highest behaviour-risk (resume, partial transfers, name encoding),

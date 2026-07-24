@@ -478,6 +478,17 @@ impl HtxfConn {
     fn is_aborted(&self) -> bool {
         self.abort.as_ref().is_some_and(|a| a.is_aborted())
     }
+
+    /// Test-only: wrap a connected plaintext `TcpStream` as an `HtxfConn`
+    /// so in-crate tests can drive the FFI send/recv helpers over a
+    /// loopback socket without the full connect handshake.
+    #[cfg(test)]
+    pub(crate) fn new_plain_for_test(stream: TcpStream) -> HtxfConn {
+        HtxfConn {
+            inner: HtxfInner::Plain(HtxfChannel::new_plain(stream)),
+            abort: None,
+        }
+    }
 }
 
 /// Derive the per-transfer AEAD key pair from the control connection's

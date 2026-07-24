@@ -607,6 +607,7 @@ static void
 xfer_recv_params (struct htxf_conn *htxf, guint64 file_budget,
                   struct HxnetXferParams *p)
 {
+    memset (p, 0, sizeof *p);
     p->hx = htxf->hx;
     p->path = htxf->path;
     p->file_budget = file_budget;
@@ -622,6 +623,26 @@ xfer_recv_params (struct htxf_conn *htxf, guint64 file_budget,
     p->preview_set_info
         = (void (*) (void *, const char *, const char *)) hx_preview_set_info;
     p->preview_done = (void (*) (void *)) hx_preview_done;
+}
+
+/* Fill an HxnetXferParams for an upload (send) of htxf. No preview; the send
+ * worker uses data_size/rsrc_size + the resume offsets. Solo-upload only
+ * (put_thread); folder_send_all builds its own params inline so xfers_send.c
+ * stays free of xfers.c references. */
+static void
+xfer_send_params (struct htxf_conn *htxf, struct HxnetXferParams *p)
+{
+    memset (p, 0, sizeof *p);
+    p->hx = htxf->hx;
+    p->path = htxf->path;
+    p->data_pos = htxf->data_pos;
+    p->rsrc_pos = htxf->rsrc_pos;
+    p->data_size = htxf->data_size;
+    p->rsrc_size = htxf->rsrc_size;
+    p->opt_folder = htxf->opt.folder;
+    p->opt_large = htxf->opt.large;
+    p->user_data = htxf;
+    p->progress = xfer_progress_bump;
 }
 
 static void *
@@ -745,14 +766,15 @@ put_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int retval;
-    guint8 buf[512];
+    struct HxnetXferParams params;
 
     if (!htxf_connect (htxf)) {
         retval = -1;
         goto ret;
     }
 
-    retval = file_send_one (htxf, buf, post_file_update);
+    xfer_send_params (htxf, &params);
+    retval = hxnet_xfer_file_send_one (&params);
     if (retval) {
         goto ret;
     }
@@ -819,7 +841,7 @@ folder_put_thread (void *arg)
         goto ret;
     }
 
-    retval = folder_send_all (htxf, base_path, buf, post_file_update);
+    retval = folder_send_all (htxf, base_path, buf, xfer_progress_bump);
     if (retval) {
         goto ret;
     }

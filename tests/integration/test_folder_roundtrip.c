@@ -44,13 +44,8 @@
 #include "integration_harness.h"
 
 
-static void
-noop_progress (struct htxf_conn *htxf)
-{
-    (void)htxf;
-}
-
-/* HxnetXferParams progress shape for the Rust hxnet_xfer_file_recv_one path. */
+/* HxnetXferParams progress shape for the Rust hxnet_xfer_file_{recv,send}_one
+ * paths (folder_recv_all / folder_send_all forward it per file). */
 static void
 noop_progress_bump (void *user_data, guint64 delta)
 {
@@ -254,7 +249,7 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
     htxf.opt.folder = 1;
     htxf.total_size = total;
     guint8 buf[2048];
-    int rv = folder_send_all (&htxf, srcroot, buf, noop_progress);
+    int rv = folder_send_all (&htxf, srcroot, buf, noop_progress_bump);
     htxf_io_release (&htxf);
     return rv == 0;
 }
