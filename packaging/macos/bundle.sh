@@ -74,12 +74,25 @@ if [ -d "$GST_SRC" ]; then
   [ -f "$scanner" ] && { mkdir -p "$FW/gstreamer-1.0-libexec"; cp "$scanner" "$FW/gstreamer-1.0-libexec/"; }
   # Fix each plugin's deps into Frameworks (best-effort; DYLD fallback backstops).
   for dylib in "$GST_DST"/*.dylib; do
+    [ -f "$dylib" ] || continue   # skip an unmatched glob (would abort set -e)
     dylibbundler --overwrite-files --bundle-deps \
       --fix-file "$dylib" --dest-dir "$FW" \
       --install-path "@executable_path/../Frameworks/" \
       --search-path "$FW" 2>/dev/null || \
       echo "::warning:: dylibbundler pass failed for $(basename "$dylib")"
   done
+  # Rewrite the scanner's own load commands too. As shipped it references its
+  # deps via absolute Homebrew-prefix paths, which don't exist on an end user's
+  # machine — copy them into Frameworks and repoint the scanner at them (it runs
+  # from Frameworks/gstreamer-1.0-libexec/, so its siblings sit one level up).
+  scanner_dst="$FW/gstreamer-1.0-libexec/gst-plugin-scanner"
+  if [ -f "$scanner_dst" ]; then
+    dylibbundler --overwrite-files --bundle-deps \
+      --fix-file "$scanner_dst" --dest-dir "$FW" \
+      --install-path "@executable_path/../" \
+      --search-path "$FW" 2>/dev/null || \
+      echo "::warning:: dylibbundler pass failed for gst-plugin-scanner"
+  fi
 else
   echo "::warning:: $GST_SRC missing — voice plugins not bundled"
 fi
@@ -92,6 +105,7 @@ if [ -d "$PIXBUF_SRC/loaders" ]; then
   mkdir -p "$PIXBUF_DST/loaders"
   cp "$PIXBUF_SRC"/loaders/*.so "$PIXBUF_DST/loaders/"
   for so in "$PIXBUF_DST"/loaders/*.so; do
+    [ -f "$so" ] || continue   # skip an unmatched glob (would abort set -e)
     dylibbundler --overwrite-files --bundle-deps --fix-file "$so" \
       --dest-dir "$FW" --install-path "@executable_path/../Frameworks/" 2>/dev/null || true
   done

@@ -49,6 +49,10 @@ copy_deps() {
     changed=0
     local next=()
     for f in "${scan[@]}"; do
+      # Skip anything that isn't a real file — notably an unmatched glob, which
+      # bash leaves as the literal pattern (feeding it to ldd would abort the
+      # script under `set -e`).
+      [ -f "$f" ] || continue
       while read -r dll; do
         # ldd line: "name.dll => /ucrt64/bin/name.dll (0x...)"
         case "$dll" in
@@ -93,10 +97,12 @@ if [ -d "$GST_SRC" ]; then
     dll="$GST_SRC/libgst${p}.dll"
     [ -f "$dll" ] && cp "$dll" "$GST_DST/"
   done
-  # gst-plugin-scanner is spawned by the registry; ship it beside the plugins.
+  # gst-plugin-scanner is spawned by the registry to introspect plugins on first
+  # launch; ship it beside the plugins AND fold it into the dependency closure so
+  # any DLL only it references is bundled (otherwise the scan fails at runtime).
   scanner="$MINGW_PREFIX/lib/gstreamer-1.0/gst-plugin-scanner.exe"
   [ -f "$scanner" ] && cp "$scanner" "$GST_DST/"
-  copy_deps "$GST_DST"/*.dll
+  copy_deps "$GST_DST"/*.dll "$GST_DST"/*.exe
 else
   echo "::warning:: $GST_SRC missing — voice plugins not bundled"
 fi
