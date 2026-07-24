@@ -9,9 +9,6 @@ extern struct log *server_log;
 
 extern int connected;
 
-extern int fd_closeonexec (int fd, int on);
-extern int fd_lock_write (int fd);
-
 extern void hx_htlc_close (struct htlc_conn *htlc, int expected);
 
 /* Orchestrator (hxnet) TOFU certificate verify. Called from the

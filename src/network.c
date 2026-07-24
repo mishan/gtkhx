@@ -74,47 +74,12 @@
 char *server_addr;
 guint16 server_port;
 
-#if 0 /* XXX */
-struct log *server_log = NULL;
-#endif
-
 /* The connect + magic-exchange flow runs on the main loop via
  * GSocketClient's async API; cancellation goes through current_cancel. */
 static GCancellable *current_cancel;
 
 
 int connected;
-
-int
-fd_closeonexec (int fd, int on)
-{
-    int x;
-
-    if ((x = fcntl (fd, F_GETFD, 0)) == -1) {
-        return -1;
-    }
-    if (on) {
-        x &= ~FD_CLOEXEC;
-    } else {
-        x |= FD_CLOEXEC;
-    }
-
-    return fcntl (fd, F_SETFD, x);
-}
-
-int
-fd_lock_write (int fd)
-{
-    struct flock lk;
-
-    lk.l_type = F_WRLCK;
-    lk.l_start = 0;
-    lk.l_whence = SEEK_SET;
-    lk.l_len = 0;
-    lk.l_pid = getpid ();
-
-    return fcntl (fd, F_SETLK, &lk);
-}
 
 /* PING keepalive. Some servers (hlserver.com is the known
  * case) drop idle connections after a few minutes of silence. mhxd
@@ -372,11 +337,6 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
         hxnet_hope_aead_free (hx_conn_hope_aead (htlc));
         hx_conn_set_hope_aead (htlc, NULL);
     }
-
-#if 0 /* XXX */
-	close_log(server_log);
-	server_log = NULL;
-#endif
 
     g_free (server_addr);
     server_addr = NULL;
