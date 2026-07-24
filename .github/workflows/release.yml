@@ -226,7 +226,10 @@ jobs:
   release:
     name: create release
     needs: [windows-package, macos-package, linux-flatpak]
-    if: startsWith(github.ref, 'refs/tags/')
+    # Only ever on a tag *push* — never on a manual workflow_dispatch (even one
+    # dispatched against a tag ref). Manual runs just leave downloadable
+    # workflow artifacts; tagging is the deliberate act that cuts a release.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: download artifacts
