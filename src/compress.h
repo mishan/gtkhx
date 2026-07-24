@@ -1,59 +1,12 @@
 #ifndef GTKHX_COMPRESS_H
 #define GTKHX_COMPRESS_H
 
-
 #include "config.h"
 
 #include <stdint.h> /* uint32_t */
 
-/* HOPE-Secure-Login transport compression algorithms.
- *
- * Phase R1 moved the codec implementations to Rust
- * (rust/crates/hxcompress). This header keeps the numeric IDs
- * aligned with the wire-protocol negotiation and exposes a single
- * opaque pointer so htlc_conn can carry the per-direction codec
- * state without naming the Rust types.
- *
- *   GZIP — zlib (RFC 1950). Despite the name, NOT gzip (RFC 1952).
- *          Uses deflateInit/inflateInit with Z_SYNC_FLUSH per chunk.
- *          The original HOPE algorithm, supported by every hx-family
- *          server.
- *   LZ4  — LZ4 frame format (spec v1.6). Janus/Klein extension; fast
- *          compression with low CPU overhead. Persistent streaming
- *          codec per chunk.
- *   ZSTD — Zstandard (RFC 8878). Janus/Klein extension; best
- *          compression ratio. Preferred for modern AEAD clients.
- *          Persistent streaming codec per chunk.
- *
- * IDs match the order they were added to the protocol family — the
- * value isn't observable on the wire (the name string is what we
- * negotiate), so renumber-safe. The Rust crate has matching
- * constants; the FFI takes the algorithm ID by value rather than
- * reaching into a shared enum. */
-#define COMPRESS_NONE 0
-#define COMPRESS_GZIP 1
-#define COMPRESS_LZ4 2
-#define COMPRESS_ZSTD 3
 
-/* Per-direction codec state. The pointer is opaque on the C side
- * — gtkhx_compress_{encoder,decoder}_new returns it, the
- * encode/decode FFI takes it, and gtkhx_compress_{encoder,decoder}
- * _free destroys it. compress.c knows the actual Rust type
- * (CompressEncoder / CompressDecoder) via the cast inside the
- * dispatch. */
-union compress_state {
-    void *ctx;
-};
-
-struct htlc_conn;
-struct qbuf;
-
-/* The C compression dispatch (compress.c — compress_encode / decode /
- * _init / _end / id_from_name) was retired once the hxnet orchestrator
- * took over the control-channel transport: zlib/gzip compression now
- * runs inside the Rust `hxcompress` crate. Only the shared types above
- * (COMPRESS_* ids + the compress_state union the htlc_conn fields use)
- * and the compress_encode_bufsize helper below survive here. */
+// NOTE: This is currently only used in tests.
 
 /* Worst-case output buffer size for a gzip-deflate of an input of `len`
  * bytes. Computes `2 * len + 1024` in u64 internally; returns 0 if the
@@ -72,5 +25,4 @@ compress_encode_bufsize (uint32_t len)
     return (uint32_t) bound;
 }
 
-
-#endif
+#endif /* GTKHX_COMPRESS_H */

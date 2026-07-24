@@ -21,10 +21,6 @@
 #include "compat.h"
 #include "hotline.h"
 
-#include "compress.h"
-
-#include "cipher.h"
-
 /* htxf_io.h declares the thin C shim over hxnet's Rust HTXF
  * subchannel transport (hxnet_htxf_*). struct htxf_conn below carries
  * the opaque Rust handle (`void *hx`); the byte pump + AEAD framing
@@ -161,24 +157,6 @@ struct htxf_conn {
 	 * for non-preview transfers. */
     void *preview;
 
-    /* HOPE ChaCha20-Poly1305 HTXF subchannel state (Phase E).
-	 *
-	 * aead_active records whether htxf_connect armed AEAD on this
-	 * transfer (control channel negotiated CIPHER_MODE_AEAD). It's
-	 * informational now — the framing itself lives in the Rust
-	 * hxnet HTXF channel behind `hx`. htxf_connect derives the
-	 * per-transfer keys into xfer_encode / xfer_decode (counters
-	 * start at 0, never reused across transfers — derivation mixes
-	 * the HTXF ref number into the per-transfer key) and hands them
-	 * to hxnet_htxf_connect, which owns the seal/open state thereafter.
-	 *
-	 * hx is the opaque hxnet HTXF channel handle (Rust HtxfConn *).
-	 * It owns the socket fd (and any TLS session), the AEAD framing
-	 * state, and the receive accumulators. Opened by htxf_connect,
-	 * driven by htxf_io_read / htxf_io_write, closed by
-	 * htxf_io_release at xfer worker teardown. */
-    chacha_aead_state xfer_encode;
-    chacha_aead_state xfer_decode;
     gboolean aead_active;
     void *hx;
 

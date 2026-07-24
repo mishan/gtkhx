@@ -543,13 +543,10 @@ extern gboolean integration_drain_until_task_trans (int fd,
  * in the full cipher_state union.
  */
 
-#include "cipher.h" /* chacha_aead_state */
 typedef struct {
     /* AEAD framing state. Active only after a successful
      * HOPE-ChaCha20 negotiation. */
     int aead_active;
-    chacha_aead_state encode_state;  /* client → server */
-    chacha_aead_state decode_state;  /* server → client */
 
     /* Decode-side accumulator for the next inbound frame: AEAD frames
      * are length-prefixed and arrive in chunks of arbitrary boundary

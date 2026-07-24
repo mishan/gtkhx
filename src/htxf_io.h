@@ -39,8 +39,6 @@
 #include <glib.h>
 #include <sys/types.h> /* ssize_t */
 
-#include "cipher.h"
-
 struct htxf_conn;
 
 /* Opaque hxnet HTXF channel handle (Rust `HtxfConn`). The C side never

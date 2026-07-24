@@ -406,8 +406,7 @@ struct gtkhx_proto_history_entry {
  * match exactly). Layout: u64 (8) + i64 (8) + 6×u16 (flags +
  * icon_id + nick_off + nick_len + msg_off + msg_len = 12) =
  * 28 bytes of data + 4 bytes of trailing alignment-to-8 padding
- * = 32 bytes. Same discipline as chacha_aead_state in
- * src/cipher.h. */
+ * = 32 bytes. */
 _Static_assert (sizeof (struct gtkhx_proto_history_entry) == 32,
                 "gtkhx_proto_history_entry size drifted from Rust ABI mirror");
 

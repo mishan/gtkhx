@@ -44,7 +44,6 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "cipher.h"              /* CIPHER_MODE_AEAD */
 #include "htxf_io.h"
 #include "network.h"             /* htxf_connect */
 #include "integration_harness.h"

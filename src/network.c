@@ -34,7 +34,6 @@
 #include <signal.h>
 #include <stdarg.h>
 
-#include "compress.h"
 #include "hx.h"
 #include "gtkhx_session.h"
 #include "hxnet_bridge.h"
@@ -56,7 +55,6 @@
 #include "banner.h"
 #include "debug.h"
 #include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
-#include "cipher.h"
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_model.h"
