@@ -43,27 +43,6 @@
 #include "xfers_send.h"
 #include "integration_harness.h"
 
-/* --- link stubs for the send/recv machines' GTK-shell couplings --- */
-
-void
-hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
-{
-    (void)p;
-    (void)type;
-    (void)creator;
-}
-void
-hx_preview_chunk (hx_preview *p, const char *buf, gsize len)
-{
-    (void)p;
-    (void)buf;
-    (void)len;
-}
-void
-hx_preview_done (hx_preview *p)
-{
-    (void)p;
-}
 
 static void
 noop_progress (struct htxf_conn *htxf)
@@ -162,7 +141,7 @@ build_hldir (guint8 *out, const char *const *comps, int n)
 }
 
 /* FILE_GET a single file at DIR=comps[0..ncomp)/<fname> via the real
- * file_recv_one; return its contents (caller frees) or NULL. */
+ * hxnet_xfer_file_recv_one; return its contents (caller frees) or NULL. */
 static char *
 get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
                  int ncomp, const char *fname, gsize *out_len)

@@ -10,8 +10,8 @@
 /*
  * tests/integration/test_file_get.c — download a file from mhxd over
  * the HTXF subchannel, driving the PRODUCTION receive state machine
- * (xfers_recv.c::file_recv_one), and assert the decoded on-disk file is
- * byte-for-byte correct.
+ * (hxnet::xfer::hxnet_xfer_file_recv_one), and assert the decoded on-disk
+ * file is byte-for-byte correct.
  *
  * Unlike a raw substring-search over the streamed bytes, this exercises
  * the real FILP-frame decode: the info-block length, the FILP info
@@ -25,18 +25,18 @@
  *   2. Open the subchannel (5501), send the 16-byte preamble, and wrap
  *      the fd as an hxnet HTXF channel (plaintext passthrough — mhxd
  *      guest is unencrypted).
- *   3. Point a minimal htxf_conn at a temp path and call the real
- *      file_recv_one with a no-op progress hook.
+ *   3. Point a minimal htxf_conn at a temp path, build an HxnetXferParams
+ *      pointing at it with a no-op progress hook, and call
+ *      hxnet_xfer_file_recv_one.
  *   4. Assert the temp file equals the seeded "hello world\n".
  *
  * The Dockerfile seeds files/test.txt with exactly "hello world\n".
  *
- * Links xfers_recv.c + the hxhfs crate (the receive machine + HFS
- * sidecar) on top of integration_harness_lib (which already bundles
- * htxf_io.c and the hxnet channel). file_recv_one's GTK-shell couplings
- * are stubbed below: the preview branch is never taken (opt.preview = 0)
- * and progress is a no-op, so hx_preview_* just needs to resolve at link
- * time.
+ * Links the hxnet + hxhfs crates (the receive copy loop + HFS sidecar) on
+ * top of integration_harness_lib (which already bundles htxf_io.c and the
+ * hxnet channel). The worker takes the preview feed as params callbacks
+ * (NULL here — opt.preview = 0), so it references no hx_preview_* symbols
+ * and no link stubs are needed.
  */
 
 #include "config.h"
@@ -52,29 +52,6 @@
 #include "preview.h"
 #include "xfers_recv.h"
 #include "integration_harness.h"
-
-/* --- link stubs for file_recv_one's GTK-shell couplings --- *
- * The preview branch of file_recv_one references these three but never
- * runs here (opt.preview = 0). */
-void
-hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
-{
-    (void)p;
-    (void)type;
-    (void)creator;
-}
-void
-hx_preview_chunk (hx_preview *p, const char *buf, gsize len)
-{
-    (void)p;
-    (void)buf;
-    (void)len;
-}
-void
-hx_preview_done (hx_preview *p)
-{
-    (void)p;
-}
 
 static void
 noop_progress (void *user_data, guint64 delta)

@@ -39,8 +39,9 @@
  * machine. We drive the loop by writing FILE_NEXT; the server answers
  * with a next_file_info (nfi) header + path components, then either a
  * folder marker (mkdir, no payload) or a file (FILE_SEND + u32 size +
- * FILP body via file_recv_one). The server closes the socket when the
- * tree is exhausted; our next FILE_NEXT short-reads and we exit clean. */
+ * FILP body, received per file via hxnet_xfer_file_recv_one — the Rust
+ * hxnet::xfer copy loop). The server closes the socket when the tree is
+ * exhausted; our next FILE_NEXT short-reads and we exit clean. */
 int
 folder_recv_all (struct htxf_conn *htxf, const char *base_path, guint8 *buf,
                  hxnet_xfer_progress_fn progress)

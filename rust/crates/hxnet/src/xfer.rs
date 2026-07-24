@@ -258,7 +258,12 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
                     creator_s.as_ptr() as *const c_char,
                 );
             }
-            if let Err(e) = preview_get(hx, fork_len, p) {
+            // Clamp the streamed preview to 32 bits (the C `preview_get` took a
+            // guint32 length via MIN(fork_len, 0xFFFFFFFF)). Previews are small
+            // by definition; the clamp guards against a hostile/pathological
+            // multi-GiB "preview" length flooding the UI pipeline.
+            let preview_len = fork_len.min(u32::MAX as u64);
+            if let Err(e) = preview_get(hx, preview_len, p) {
                 return e;
             }
         }
