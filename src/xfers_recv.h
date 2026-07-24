@@ -98,12 +98,22 @@ struct HxnetXferParams {
     void (*preview_chunk) (void *preview, const char *buf, gsize len);
     void (*preview_set_info) (void *preview, const char *type, const char *creator);
     void (*preview_done) (void *preview);
+    guint64 data_size;      /* send-only: htxf->data_size (local data fork) */
+    guint64 rsrc_size;      /* send-only: htxf->rsrc_size (local rsrc fork) */
 };
 
 /* Returns 0 on success, an errno-like positive code on failure. Does NOT play
  * the completion sound, post a final update, or close the channel — the C
  * driver (get_thread / folder_recv_all) owns those. */
 extern int hxnet_xfer_file_recv_one (const struct HxnetXferParams *params);
+
+/* Send one file out an already-open HTXF subchannel from params->path — the
+ * upload twin of hxnet_xfer_file_recv_one (was xfers_send.c::file_send_one),
+ * ported to hxnet::xfer. Uses data_size/rsrc_size (+ data_pos/rsrc_pos resume
+ * offsets); the preview + file_budget fields are unused. Returns 0 on success,
+ * errno-like on failure; the C driver (put_thread / folder_send_all) closes the
+ * channel + plays the sound. */
+extern int hxnet_xfer_file_send_one (const struct HxnetXferParams *params);
 
 /* Receive a folder tree from an already-open HTXF subchannel into the
  * local directory `base_path` (which it creates). Drives the Hotline 1.5

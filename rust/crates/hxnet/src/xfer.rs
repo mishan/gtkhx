@@ -23,7 +23,7 @@
 //! file) build the params and call `hxnet_xfer_file_recv_one`.
 
 use std::ffi::{c_void, CStr};
-use std::io::{Seek, SeekFrom, Write};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::os::raw::{c_char, c_int};
 use std::path::{Path, PathBuf};
 
@@ -60,10 +60,15 @@ pub struct HxnetXferParams {
     pub user_data: *mut c_void,
     /// Report `delta` bytes transferred; the C shim bumps `total_pos` + emits.
     pub progress: Option<unsafe extern "C" fn(user_data: *mut c_void, delta: u64)>,
-    /// Preview feed (the `hx_preview_*` C functions), or `None`.
+    /// Preview feed (the `hx_preview_*` C functions), or `None`. Receive-only;
+    /// the send worker ignores them.
     pub preview_chunk: Option<unsafe extern "C" fn(*mut c_void, *const c_char, usize)>,
     pub preview_set_info: Option<unsafe extern "C" fn(*mut c_void, *const c_char, *const c_char)>,
     pub preview_done: Option<unsafe extern "C" fn(*mut c_void)>,
+    /// Local fork sizes for a *send* (`htxf->data_size` / `htxf->rsrc_size`).
+    /// Send-only; the receive worker ignores them (it uses `file_budget`).
+    pub data_size: u64,
+    pub rsrc_size: u64,
 }
 
 impl HxnetXferParams {
@@ -323,4 +328,259 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         return e;
     }
     finish(&cfg, &path, typecrea, &pi)
+}
+
+// ============================ send (upload) ================================
+// W2: the Rust port of C's xfers_send.c::file_send_one (+ rd_wr_send). Mirror
+// of the receive worker above, sending end.
+
+/// The fixed 115-byte FILP header template C `file_send_one` `memcpy`s before
+/// patching in the per-file fields. Extracted byte-for-byte from the C string
+/// literal (octal escapes + the literal `^A` = 0x5e 0x41) so the wire framing is
+/// identical.
+#[rustfmt::skip]
+const FILP_TEMPLATE: [u8; 115] = [
+    0x46,0x49,0x4c,0x50,0x00,0x01,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x02,
+    0x49,0x4e,0x46,0x4f,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x5e,0x41,0x4d,0x41,0x43,0x54,0x59,0x50,0x45,
+    0x43,0x52,0x45,0x41,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x07,0x70,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x07,0x70,0x00,0x00,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x03,0x68,0x78,0x64,
+];
+
+/// One blocking write of the whole buffer to the subchannel (mirrors C
+/// `htxf_io_write`, which returns the full logical length on success — the hxnet
+/// channel writes it all, one AEAD frame when armed). `!= len` is failure.
+unsafe fn xfer_write(hx: *mut HtxfConn, buf: &[u8]) -> Result<(), c_int> {
+    if crate::htxf::hxnet_htxf_write(hx, buf.as_ptr(), buf.len()) != buf.len() as isize {
+        return Err(EIO);
+    }
+    Ok(())
+}
+
+/// Copy `data_len` bytes from a local fork file to the subchannel (C
+/// `rd_wr_send`). A local read of 0 (EOF before the promised length) is EIO,
+/// matching the C `read(...) < 1` gate.
+unsafe fn rd_wr_send(
+    hx: *mut HtxfConn,
+    src: &mut std::fs::File,
+    mut data_len: u64,
+    p: &HxnetXferParams,
+) -> Result<(), c_int> {
+    let mut buf = vec![0u8; 0xf000];
+    while data_len > 0 {
+        let want = std::cmp::min(buf.len() as u64, data_len) as usize;
+        let n = match src.read(&mut buf[..want]) {
+            Ok(0) => return Err(EIO),
+            Ok(n) => n,
+            Err(e) => return Err(io_errno(&e)),
+        };
+        xfer_write(hx, &buf[..n])?;
+        p.report(n as u64);
+        data_len -= n as u64;
+    }
+    Ok(())
+}
+
+/// `int hxnet_xfer_file_send_one (const HxnetXferParams *p)` — send one file out
+/// the HTXF subchannel from `p->path` (was C `file_send_one`). The FILP header +
+/// fork markers are built natively (`hxfiles_xfer::ffo` + `hxhfs`), the fork
+/// bytes streamed via `hxnet::htxf` write. `p->data_size` / `rsrc_size` are the
+/// local fork sizes; `data_pos` / `rsrc_pos` the resume offsets. Returns 0 on
+/// success, an errno-like positive code on failure. Caller closes the channel +
+/// plays the completion sound.
+///
+/// # Safety
+/// C-ABI worker helper on a blocking-pool thread; `p` valid, `p->hx` open.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> c_int {
+    let p = match p.as_ref() {
+        Some(p) => p,
+        None => return EINVAL,
+    };
+    let hx = p.hx;
+    if hx.is_null() {
+        return EINVAL;
+    }
+    let large = p.opt_large != 0;
+    let is_folder = p.opt_folder != 0;
+    let path = match path_from(p.path) {
+        Some(pb) => pb,
+        None => return EINVAL,
+    };
+    let cfg = hxhfs::ffi::current_config();
+
+    // Large-file solo upload: raw file data only, no FFO wrapper (the server
+    // reconstructs metadata from the filesystem). Folder uploads keep FFO.
+    if large && !is_folder {
+        let mut f = match std::fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) => return io_errno(&e),
+        };
+        return match rd_wr_send(hx, &mut f, p.data_size, p) {
+            Ok(()) => 0,
+            Err(e) => e,
+        };
+    }
+
+    // FILP header: template + patched fields (rsrc flag, comment length,
+    // type/creator, munged times, comment bytes, DATA fork marker).
+    let fi = hfs::hfsinfo_read(&cfg, &path);
+    let comlen = fi.comment.len();
+    let mut hdr = vec![0u8; 133 + comlen];
+    hdr[..115].copy_from_slice(&FILP_TEMPLATE);
+    if p.rsrc_size.wrapping_sub(p.rsrc_pos) != 0 {
+        hdr[23] = 3;
+    }
+    let comfield = 65 + comlen + 12; // = 77 + comlen; the u16-ish comment field
+    if comfield > 0xff {
+        hdr[38] = 1;
+    }
+    hdr[39] = comfield as u8;
+    hdr[44..52].copy_from_slice(&hfs::type_creator(&cfg, &path));
+    hdr[96..100].copy_from_slice(&ffo::hfs_h_to_mtime(fi.create_time));
+    hdr[104..108].copy_from_slice(&ffo::hfs_h_to_mtime(fi.modify_time));
+    hdr[115] = 0;
+    hdr[116] = comlen as u8;
+    hdr[117..117 + comlen].copy_from_slice(&fi.comment);
+    let data_hdr = ffo::pack_fork_header(b"DATA", p.data_size.wrapping_sub(p.data_pos), large);
+    hdr[117 + comlen..133 + comlen].copy_from_slice(&data_hdr);
+    if xfer_write(hx, &hdr).is_err() {
+        return EIO;
+    }
+    p.report((133 + comlen) as u64);
+
+    // Data fork.
+    if p.data_size.wrapping_sub(p.data_pos) != 0 {
+        let mut f = match std::fs::File::open(&path) {
+            Ok(f) => f,
+            Err(e) => return io_errno(&e),
+        };
+        if p.data_pos != 0 && f.seek(SeekFrom::Start(p.data_pos)).is_err() {
+            return EIO;
+        }
+        // Resume: stream only the bytes past data_pos — matches the DATA fork
+        // length declared in the header and the folder payload size in
+        // folder_send_all (both data_size - data_pos).
+        if let Err(e) = rd_wr_send(hx, &mut f, p.data_size.wrapping_sub(p.data_pos), p) {
+            return e;
+        }
+    }
+
+    // MACR fork header. A short write at the marker boundary is a clean stop
+    // (the server may not want the resource fork), not an error. The length is
+    // the remaining resource fork (rsrc_size - rsrc_pos) so a resumed upload's
+    // marker matches what we actually stream below.
+    let macr_hdr = ffo::pack_fork_header(b"MACR", p.rsrc_size.wrapping_sub(p.rsrc_pos), large);
+    if xfer_write(hx, &macr_hdr).is_err() {
+        return 0;
+    }
+    p.report(16);
+    if p.rsrc_size.wrapping_sub(p.rsrc_pos) == 0 {
+        return 0;
+    }
+    let mut ropts = std::fs::OpenOptions::new();
+    ropts.read(true);
+    let mut rf = match hfs::resource_open(&cfg, &path, &ropts) {
+        Ok(Some(f)) => f,
+        Ok(None) => return EIO,
+        Err(e) => return io_errno(&e),
+    };
+    if p.rsrc_pos != 0 && rf.seek(SeekFrom::Start(p.rsrc_pos)).is_err() {
+        return EIO;
+    }
+    match rd_wr_send(hx, &mut rf, p.rsrc_size.wrapping_sub(p.rsrc_pos), p) {
+        Ok(()) => 0,
+        Err(e) => e,
+    }
+}
+
+#[cfg(test)]
+mod send_capture_tests {
+    use super::*;
+    use crate::htxf::HtxfConn;
+    use std::net::{TcpListener, TcpStream};
+
+    // Capture the exact bytes hxnet_xfer_file_send_one writes for a plain
+    // no-comment / no-rsrc file, and assert the mhxd file_recv framing
+    // invariants: 133-byte FILP header (buf[39] = 77), DATA fork length at
+    // offset 129, then the raw data, so tot_pos == 133 + body_len exactly.
+    #[test]
+    fn plain_file_header_is_133_and_frames_correctly() {
+        let body = b"hello upload from file_send_one\n";
+        let dir = std::env::temp_dir().join(format!("hxnet_send_cap_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("src.txt");
+        std::fs::write(&path, body).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let reader = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            s.read_to_end(&mut got).unwrap();
+            got
+        });
+
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+
+        extern "C" fn noop_progress(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: path_c.as_ptr(),
+            file_budget: 0,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop_progress),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: body.len() as u64,
+            rsrc_size: 0,
+        };
+        let rv = unsafe { hxnet_xfer_file_send_one(&params) };
+        assert_eq!(rv, 0, "send returned error");
+        // Drop the connection so the socket closes and read_to_end returns.
+        drop(conn);
+
+        let got = reader.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        let hex: String = got[..133.min(got.len())]
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect();
+        eprintln!("[capture] total={} header133={}", got.len(), hex);
+
+        // Header is 133 bytes (comlen == 0) + body + a trailing 16-byte MACR
+        // (written unconditionally, mirroring C; the server discards it once
+        // tot_pos == tot_len).
+        assert_eq!(
+            got.len(),
+            133 + body.len() + 16,
+            "wire = 133 header + body + 16 MACR; got {}",
+            got.len()
+        );
+        assert_eq!(&got[0..4], b"FILP", "FILP magic");
+        assert_eq!(got[38], 0, "buf[38] high byte must be 0 for short comment");
+        assert_eq!(got[39], 77, "buf[39] must be 65+comlen+12 = 77");
+        // DATA fork marker + length: mhxd reads L32 at stream offset 129.
+        assert_eq!(&got[117..121], b"DATA", "DATA fork marker at 117");
+        let data_len = u32::from_be_bytes([got[129], got[130], got[131], got[132]]);
+        assert_eq!(data_len as usize, body.len(), "DATA length at offset 129");
+        assert_eq!(&got[133..133 + body.len()], body, "raw data fork follows header");
+        // Trailing 16 bytes are the MACR marker (rsrc_size == 0).
+        assert_eq!(&got[133 + body.len()..133 + body.len() + 4], b"MACR", "MACR marker");
+    }
 }

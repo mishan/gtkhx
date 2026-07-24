@@ -28,25 +28,20 @@
 
 struct htxf_conn;
 
-/* Send a single file out over an already-open HTXF subchannel from
- * htxf->path. htxf->data_size / data_pos / rsrc_size / rsrc_pos must be
- * set to the local file's values before calling. `buf` is caller scratch
- * (>= 512 bytes, or larger for folder framing). `progress` fires as
- * bytes go out and must be non-NULL (a NULL hook returns EINVAL). Does
- * NOT play the completion sound, post a final update, or close the
- * channel. Returns 0 on success, an errno-like positive code on
- * failure. */
-extern int file_send_one (struct htxf_conn *htxf, guint8 *buf,
-                          xfer_progress_fn progress);
+/* The single-file send body moved to Rust (hxnet::xfer, W2 of the xfer-worker
+ * migration): hxnet_xfer_file_send_one (declared in xfers_recv.h alongside the
+ * shared HxnetXferParams). The C drivers (put_thread, folder_send_all) build the
+ * params and call it. */
 
 /* Send a folder tree rooted at `base_path` out over an already-open HTXF
  * subchannel. Walks the local tree (DFS pre-order) and answers each
  * server FILE_NEXT with one entry: a next_file_info header + path
- * components, then (for files) the per-file size + FILP body via
- * file_send_one. `buf` is caller scratch (>= 2048 bytes). Rewrites
+ * components, then (for files) the per-file size + FILP body, built per file
+ * into HxnetXferParams and sent via hxnet_xfer_file_send_one. `buf` is caller
+ * scratch (>= 2048 bytes). `progress` is the HxnetXferParams shape. Rewrites
  * htxf->path per file; the caller restores it. Returns 0 on success, an
  * errno-like code on failure. */
 extern int folder_send_all (struct htxf_conn *htxf, const char *base_path,
-                            guint8 *buf, xfer_progress_fn progress);
+                            guint8 *buf, hxnet_xfer_progress_fn progress);
 
 #endif /* GTKHX_XFERS_SEND_H */

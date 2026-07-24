@@ -45,14 +45,8 @@
 #include "integration_harness.h"
 
 
-static void
-noop_progress (struct htxf_conn *htxf)
-{
-    (void)htxf;
-}
-
 /* HxnetXferParams progress shape (user_data + byte delta) for the Rust
- * hxnet_xfer_file_recv_one download path. */
+ * hxnet_xfer_file_{recv,send}_one paths. */
 static void
 noop_progress_bump (void *user_data, guint64 delta)
 {
@@ -219,9 +213,21 @@ test_file_put_round_trip (void)
     htxf.rsrc_size = 0;
     htxf.total_size = up_total;
 
-    /* THE code under test: the production single-file send machine. */
-    guint8 buf[512];
-    int rv = file_send_one (&htxf, buf, noop_progress);
+    /* THE code under test: the production single-file send machine
+     * (hxnet::xfer, driven through HxnetXferParams). */
+    struct HxnetXferParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.path = htxf.path;
+    params.data_size = htxf.data_size;
+    params.rsrc_size = htxf.rsrc_size;
+    params.data_pos = htxf.data_pos;
+    params.rsrc_pos = htxf.rsrc_pos;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.user_data = &htxf;
+    params.progress = noop_progress_bump;
+    int rv = hxnet_xfer_file_send_one (&params);
     g_assert_cmpint (rv, ==, 0);
     htxf_io_release (&htxf);
 
