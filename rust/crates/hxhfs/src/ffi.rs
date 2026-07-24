@@ -1,20 +1,23 @@
 //! Thin `#[no_mangle]` C-ABI shim preserving the exact `hfs.h` surface.
 //!
-//! This is the drop-in seam for a later leaf-up replacement of `hfs.c`: the
-//! symbol names, the `struct hfsinfo` layout, and the process-global config
-//! (`hfs_set_config`) all match, so C callers (`xfers.c`, `rcv.c`) can link this
-//! unchanged. It is **not linked into `src/gtkhx` yet** — the crate is
-//! standalone while `hxfiles-xfer` is unmerged, so nothing calls these symbols.
+//! This preserves `hfs.c`'s symbol names, the `struct hfsinfo` layout, and the
+//! process-global config (`hfs_set_config`), so C callers (`xfers.c`, `rcv.c`)
+//! link it unchanged.
 //!
 //! The shim only marshals: it converts C pointers ↔ the native
 //! [`crate::hfs`] API and holds the global [`Config`]. All real work is in the
 //! native module.
+//!
+//! Portability: the shim compiles on every target. The only platform-specific
+//! surface is path decoding, the Unix file-mode / raw open(2) flags (no-ops on
+//! Windows), and `resource_open`'s file-descriptor hand-off — on Unix an
+//! `into_raw_fd`, on Windows a CRT descriptor from `_open_osfhandle` (see
+//! [`file_into_fd`]). The `struct stat` existence probe used by the path helpers
+//! stays Unix-exact; on other targets those (currently uncalled) helpers report
+//! existence without filling the caller's `struct stat`.
 
-use std::ffi::{c_char, c_int, c_long, c_void, CStr, OsStr};
-use std::fs::OpenOptions;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::OpenOptionsExt;
-use std::os::unix::io::IntoRawFd;
+use std::ffi::{c_char, c_int, c_long, c_void, CStr};
+use std::fs::{File, OpenOptions};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
@@ -23,10 +26,24 @@ use crate::hfs::{self, Config, HfsInfo};
 /// `errno` for the path-too-long return — the platform `ENAMETOOLONG`.
 const ENAMETOOLONG: c_int = libc::ENAMETOOLONG;
 
+/// `open(2)` access-mode mask. `libc::O_ACCMODE` on Unix; the CRT uses the same
+/// low two bits (O_RDONLY=0, O_WRONLY=1, O_RDWR=2) on Windows but doesn't always
+/// export the mask constant, so spell it out there.
+#[cfg(unix)]
+const O_ACCMODE: c_int = libc::O_ACCMODE;
+#[cfg(not(unix))]
+const O_ACCMODE: c_int = 0x3;
+
 /// The C `MAXPATHLEN` — `PATH_MAX` clamped to 4095 (`compat.h`). This is a C
 /// caller's `char buf[MAXPATHLEN]` size, so `write_path_buf` must not exceed it.
+#[cfg(unix)]
 fn c_maxpathlen() -> usize {
     (libc::PATH_MAX as usize).min(4095)
+}
+#[cfg(not(unix))]
+fn c_maxpathlen() -> usize {
+    // compat.h clamps MAXPATHLEN to 4095 on platforms without a smaller PATH_MAX.
+    4095
 }
 
 /// `#[repr(C)]` mirror of C's `struct hfsinfo` (`hfs.h`). Layout pinned below.
@@ -66,9 +83,18 @@ unsafe fn path_from(ptr: *const c_char) -> Option<PathBuf> {
     if ptr.is_null() {
         return None;
     }
-    Some(PathBuf::from(
-        OsStr::from_bytes(CStr::from_ptr(ptr).to_bytes()).to_owned(),
-    ))
+    let bytes = CStr::from_ptr(ptr).to_bytes();
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        Some(PathBuf::from(std::ffi::OsStr::from_bytes(bytes).to_owned()))
+    }
+    #[cfg(not(unix))]
+    {
+        // GtkHx passes UTF-8 filenames on Windows (the glib convention), which
+        // map to the OS's wide encoding at the filesystem boundary.
+        std::str::from_utf8(bytes).ok().map(PathBuf::from)
+    }
 }
 
 /// Translate C `open(2)` `mode` flags + `perm` into an [`OpenOptions`], so the
@@ -76,7 +102,7 @@ unsafe fn path_from(ptr: *const c_char) -> Option<PathBuf> {
 /// passes through exactly as `hfs.c`'s `open(path, mode, perm)` did.
 fn open_options_from(mode: c_int, perm: c_int) -> OpenOptions {
     let mut opts = OpenOptions::new();
-    match mode & libc::O_ACCMODE {
+    match mode & O_ACCMODE {
         libc::O_WRONLY => {
             opts.write(true);
         }
@@ -88,7 +114,9 @@ fn open_options_from(mode: c_int, perm: c_int) -> OpenOptions {
         }
     }
     if mode & libc::O_CREAT != 0 {
-        opts.create(true).mode(perm as u32);
+        opts.create(true);
+        // Applies the Unix file mode; a no-op on Windows (no mode concept).
+        hfs::with_mode(&mut opts, perm as u32);
     }
     if mode & libc::O_TRUNC != 0 {
         opts.truncate(true);
@@ -96,12 +124,15 @@ fn open_options_from(mode: c_int, perm: c_int) -> OpenOptions {
     if mode & libc::O_APPEND != 0 {
         opts.append(true);
     }
-    // Pass through any remaining flags OpenOptions doesn't model (O_CLOEXEC,
-    // O_EXCL, O_NOFOLLOW, O_SYNC, …). The access-mode + create/truncate/append
-    // bits are applied above, so mask them out here (O_ACCMODE is masked by
-    // custom_flags anyway).
-    let managed = libc::O_ACCMODE | libc::O_CREAT | libc::O_TRUNC | libc::O_APPEND;
-    opts.custom_flags(mode & !managed);
+    // Pass through any remaining raw open(2) flags OpenOptions doesn't model
+    // (O_CLOEXEC, O_EXCL, O_NOFOLLOW, O_SYNC, …). Unix-only: Windows OpenOptions
+    // has no custom-flags escape hatch, and the C callers pass none of these.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let managed = O_ACCMODE | libc::O_CREAT | libc::O_TRUNC | libc::O_APPEND;
+        opts.custom_flags(mode & !managed);
+    }
     opts
 }
 
@@ -123,6 +154,7 @@ unsafe fn write_path_buf(dst: *mut c_char, bytes: &[u8]) -> c_int {
 /// `stat(path, statbuf)` when `statbuf` is non-NULL, returning `0` on success or
 /// the failure `errno` — the existence-check half of the C `*_path` helpers.
 /// `path` must be a NUL-terminated buffer (as `write_path_buf` leaves it).
+#[cfg(unix)]
 unsafe fn stat_if_requested(path: *const c_char, statbuf: *mut c_void) -> c_int {
     if statbuf.is_null() {
         return 0;
@@ -133,6 +165,21 @@ unsafe fn stat_if_requested(path: *const c_char, statbuf: *mut c_void) -> c_int 
         std::io::Error::last_os_error()
             .raw_os_error()
             .unwrap_or(ENAMETOOLONG)
+    }
+}
+
+/// Non-Unix variant: C's `struct stat` layout isn't portable to fill here, and
+/// the only callers (`finderinfo_path` / `resource_path`) are currently unused
+/// by the C app. So report existence via the path and leave `statbuf` untouched.
+#[cfg(not(unix))]
+unsafe fn stat_if_requested(path: *const c_char, statbuf: *mut c_void) -> c_int {
+    if statbuf.is_null() {
+        return 0;
+    }
+    match path_from(path) {
+        Some(p) if p.exists() => 0,
+        Some(_) => libc::ENOENT,
+        None => libc::EINVAL,
     }
 }
 
@@ -190,7 +237,7 @@ pub unsafe extern "C" fn finderinfo_path(
     let Ok(pb) = hfs::finderinfo_path(&p, current_config().dir_char) else {
         return ENAMETOOLONG;
     };
-    let rc = write_path_buf(infopath, pb.as_os_str().as_bytes());
+    let rc = write_path_buf(infopath, pb.as_os_str().as_encoded_bytes());
     if rc != 0 {
         return rc;
     }
@@ -214,7 +261,7 @@ pub unsafe extern "C" fn resource_path(
     let Ok(pb) = hfs::resource_path(&p, current_config().dir_char) else {
         return ENAMETOOLONG;
     };
-    let rc = write_path_buf(rsrcpath, pb.as_os_str().as_bytes());
+    let rc = write_path_buf(rsrcpath, pb.as_os_str().as_encoded_bytes());
     if rc != 0 {
         return rc;
     }
@@ -242,9 +289,45 @@ pub unsafe extern "C" fn resource_open(path: *const c_char, mode: c_int, perm: c
     };
     let opts = open_options_from(mode, perm);
     match hfs::resource_open(&current_config(), &p, &opts) {
-        Ok(Some(f)) => f.into_raw_fd(),
+        Ok(Some(f)) => file_into_fd(f, mode),
         _ => -1,
     }
+}
+
+/// Hand an open resource-fork [`File`] to C as an owned descriptor the caller
+/// closes. On Unix that's the underlying fd. On Windows there is no fd, so wrap
+/// the OS `HANDLE` in a CRT descriptor via `_open_osfhandle` — usable with the
+/// C runtime's `_read` / `_write` / `_lseek` / `_close` (which MinGW aliases to
+/// the POSIX names the C callers use). This relies on Rust and the C app sharing
+/// one CRT, which holds under MSYS2 UCRT64 (both link ucrtbase). Returns -1 if
+/// the descriptor can't be created.
+#[cfg(unix)]
+fn file_into_fd(f: File, _mode: c_int) -> c_int {
+    use std::os::unix::io::IntoRawFd;
+    f.into_raw_fd()
+}
+#[cfg(windows)]
+fn file_into_fd(f: File, mode: c_int) -> c_int {
+    use std::os::windows::io::{FromRawHandle, IntoRawHandle};
+
+    extern "C" {
+        // <io.h>: allocate a CRT file descriptor for an existing OS HANDLE.
+        fn _open_osfhandle(osfhandle: isize, flags: c_int) -> c_int;
+    }
+    // _open_osfhandle records the descriptor's CRT access mode from `flags`, and
+    // _O_RDONLY is 0x0000 — so passing 0 yields a read-only descriptor whose
+    // _write() fails even though the HANDLE is writable. Carry the caller's
+    // access-mode + append bits through; on Windows these share libc's O_* values
+    // (O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_APPEND=8), exactly the _O_* set
+    // _open_osfhandle accepts. Binary is the default (no _O_TEXT).
+    let flags = mode & (O_ACCMODE | libc::O_APPEND);
+    let handle = f.into_raw_handle();
+    let fd = unsafe { _open_osfhandle(handle as isize, flags) };
+    if fd == -1 {
+        // Ownership didn't transfer to the CRT — reclaim and close the HANDLE.
+        drop(unsafe { File::from_raw_handle(handle) });
+    }
+    fd
 }
 
 /// `size_t resource_len (const char *path)`
@@ -372,6 +455,40 @@ fn ffi_to_native(ffi: &HfsInfoFfi) -> HfsInfo {
 mod tests {
     use super::*;
 
+    // Exercises the full FFI resource_open path including the platform
+    // descriptor hand-off (into_raw_fd on Unix, _open_osfhandle on Windows), and
+    // proves the returned descriptor works with the C runtime's read / write /
+    // close — exactly how xfers.c drives it. Portable: libc wraps the CRT on
+    // Windows, and both descriptors here live in the test binary's own CRT.
+    #[test]
+    fn resource_open_descriptor_roundtrips() {
+        use std::ffi::CString;
+
+        let dir = std::env::temp_dir().join(format!("hxhfs-rsrc-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cpath = CString::new(dir.join("song").to_str().unwrap()).unwrap();
+        let data = b"RSRCDATA";
+
+        // Default config = CAP fork → resource_open manages "<path>.rsrc".
+        let fd = unsafe { resource_open(cpath.as_ptr(), libc::O_CREAT | libc::O_WRONLY, 0o600) };
+        assert!(fd >= 0, "resource_open create returned {fd}");
+        let n = unsafe { libc::write(fd, data.as_ptr() as *const c_void, data.len() as _) };
+        assert_eq!(n as usize, data.len());
+        assert_eq!(unsafe { libc::close(fd) }, 0);
+
+        assert_eq!(unsafe { resource_len(cpath.as_ptr()) }, data.len());
+
+        let fd = unsafe { resource_open(cpath.as_ptr(), libc::O_RDONLY, 0) };
+        assert!(fd >= 0, "resource_open read returned {fd}");
+        let mut buf = [0u8; 16];
+        let n = unsafe { libc::read(fd, buf.as_mut_ptr() as *mut c_void, buf.len() as _) };
+        assert!(n >= 0, "read returned {n}");
+        assert_eq!(&buf[..n as usize], data);
+        unsafe { libc::close(fd) };
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn open_options_translation_honors_flags() {
         use std::io::Write as _;
@@ -398,6 +515,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // Exercises the `struct stat` existence probe, which is Unix-exact (the
+    // non-Unix `stat_if_requested` doesn't fill the caller's struct).
+    #[cfg(unix)]
     #[test]
     fn finderinfo_path_stats_when_requested() {
         use std::ffi::CString;

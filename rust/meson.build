@@ -920,11 +920,16 @@ elif host_machine.system() == 'darwin'
   _hxsound_sys_deps += dependency('appleframeworks',
                                   modules : ['AudioToolbox', 'AudioUnit', 'CoreAudio'])
 elif host_machine.system() == 'windows'
-  # cpal's WASAPI backend uses COM; the windows crate's link directives don't
-  # reach the meson link line, so pull ole32 explicitly. Required so a missing
-  # ole32 fails at configure with a clear message rather than as an opaque link
-  # error later.
-  _hxsound_sys_deps += cc.find_library('ole32')
+  # cpal's WASAPI backend and the windows-core crate reach into COM
+  # (ole32/oleaut32), the PropVariant/Variant helper APIs (propsys), WinRT
+  # activation (runtimeobject), plus a couple of Win32 calls Rust std itself
+  # pulls in (userenv: GetUserProfileDirectoryW, ntdll: NtCreateNamedPipeFile).
+  # The windows crate's #[link] directives don't reach meson's link line through
+  # the staticlib, so name each import library here. Required, so a missing one
+  # is a clear configure error rather than an opaque link failure later.
+  foreach _win_lib : ['ole32', 'oleaut32', 'propsys', 'runtimeobject', 'userenv', 'ntdll']
+    _hxsound_sys_deps += cc.find_library(_win_lib)
+  endforeach
 endif
 rust_hxsound_dep = declare_dependency(
   sources : rust_build,
