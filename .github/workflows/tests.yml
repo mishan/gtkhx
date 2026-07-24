@@ -338,3 +338,171 @@ jobs:
         run: |
           docker rm -f gtkhx-build 2>/dev/null || true
           docker compose $COMPOSE_FILES down -v 2>/dev/null || true
+
+  # =====================================================================
+  # Windows — full voice-enabled meson build under MSYS2 UCRT64.
+  #
+  # This is the cross-platform breakage tripwire: it runs on every push /
+  # PR so a change that only breaks the Windows build is caught here rather
+  # than at release time. It builds the same voice-enabled configuration the
+  # release packages ship, so a GStreamer / cpal / hxhfs regression shows up.
+  # (Tier 1/2/3 meson tests aren't run here — they assume a POSIX harness and
+  # the Docker server rig; this job proves the app compiles + links.)
+  #
+  # Caching mirrors the Linux job: actions/cache over the relocated Cargo
+  # target dir + a workspace-local CARGO_HOME, keyed on Cargo.lock. (setup-msys2
+  # caches the MSYS2 package install itself.)
+  # =====================================================================
+  build-windows:
+    name: build (Windows / MSYS2 UCRT64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    env:
+      # Workspace-local so actions/cache can restore it. A native (mingw) cargo
+      # accepts the Windows-style path here.
+      CARGO_HOME: ${{ github.workspace }}\.cargo-home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          # setup-msys2 caches the installed packages between runs by default
+          # (cache: true) — this is the MSYS2 equivalent of the Linux base
+          # image, so repeat runs skip re-downloading/installing the toolkit.
+          cache: true
+          # pacboy ':p' resolves the mingw-w64-ucrt-x86_64- prefix. gsound is
+          # gone (alert sounds are the hxsound crate now — cpal/WASAPI needs no
+          # dev package; the ole32/propsys/… import libs ship with the toolchain).
+          # The GStreamer stack is for -Dvoice=enabled: base (app/audio/sdp),
+          # bad (webrtc), good + bad plugins + libnice for the runtime elements.
+          # glycin's C libs (lcms2/fontconfig/libseccomp) stay out — glycin is
+          # Linux-only, so meson gates them off here.
+          pacboy: >-
+            cc:p
+            meson:p
+            ninja:p
+            pkgconf:p
+            rust:p
+            gtk4:p
+            libadwaita:p
+            libpanel:p
+            gettext:p
+            gstreamer:p
+            gst-plugins-base:p
+            gst-plugins-good:p
+            gst-plugins-bad:p
+            libnice:p
+
+      - name: cache rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-target
+            .cargo-home
+          key: windows-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            windows-rust-
+
+      - name: meson setup (voice enabled)
+        run: >-
+          meson setup build
+          -Dvoice=enabled
+          -Dtests=false
+          -Dcargo_target_dir="$(pwd)/rust-target"
+
+      - name: ninja
+        run: ninja -C build
+
+      - name: sanity — binary built
+        run: test -f build/src/gtkhx.exe && echo "gtkhx.exe OK"
+
+      - name: upload meson logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-windows
+          path: build/meson-logs/
+          if-no-files-found: ignore
+
+  # =====================================================================
+  # macOS — full voice-enabled meson build against Homebrew, both arches
+  # (macos-14 = arm64 Apple Silicon, macos-15-intel = x86_64). Same
+  # breakage-tripwire role as build-windows.
+  # =====================================================================
+  build-macos:
+    name: build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-14, macos-15-intel]
+    env:
+      CARGO_HOME: ${{ github.workspace }}/.cargo-home
+      # Skip the multi-minute `brew update` (the runner's formulae are recent
+      # enough) and its post-install cleanup so cached bottles survive.
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      HOMEBREW_NO_INSTALL_CLEANUP: 1
+    steps:
+      - uses: actions/checkout@v4
+
+      # Cache Homebrew's downloaded bottles so repeat runs skip the (slow)
+      # re-download of the gtk4 / gstreamer dependency closure. This is the
+      # macOS analogue of the Linux base image / MSYS2's built-in package cache
+      # — GitHub-hosted macOS runners can't run in a custom prebuilt image, so a
+      # download cache is the available speedup.
+      - name: cache homebrew downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew/downloads
+          key: ${{ matrix.os }}-brew-${{ hashFiles('.github/workflows/tests.yml') }}
+          restore-keys: |
+            ${{ matrix.os }}-brew-
+
+      - name: brew deps
+        # gtk4 + libadwaita pull glib/pango/cairo/etc. gstreamer is Homebrew's
+        # umbrella formula (base/good/bad/ugly/libav); libnice adds the ICE
+        # element for voice. No gsound (replaced by the hxsound crate; cpal uses
+        # the CoreAudio frameworks, no formula needed). No lcms2/fontconfig —
+        # those are glycin's Linux-only transitive libs, gated off here.
+        run: |
+          brew install meson ninja pkgconf gtk4 libadwaita libpanel gettext \
+                       gstreamer libnice
+
+      - name: rust toolchain
+        # Honor the repo's rust-toolchain.toml pin (1.85) over the image default.
+        run: rustup show
+
+      - name: cache rust build
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-target
+            .cargo-home
+          key: ${{ matrix.os }}-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            ${{ matrix.os }}-rust-
+
+      - name: meson setup (voice enabled)
+        run: >-
+          meson setup build
+          -Dvoice=enabled
+          -Dtests=false
+          -Dcargo_target_dir="$(pwd)/rust-target"
+
+      - name: ninja
+        run: ninja -C build
+
+      - name: sanity — binary built
+        run: test -f build/src/gtkhx && echo "gtkhx OK"
+
+      - name: upload meson logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meson-logs-${{ matrix.os }}
+          path: build/meson-logs/
+          if-no-files-found: ignore
