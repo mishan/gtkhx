@@ -1,0 +1,41 @@
+/* Windows resource script for gtkhx.exe. Configured by meson (see
+ * src/meson.build) — @VAR@ placeholders are substituted from the project
+ * version. Compiled with windres and linked into the executable, giving it a
+ * file icon, an embedded application manifest, and version metadata (shown on
+ * the Explorer "Details" tab / file properties). */
+#include <windows.h>
+
+/* Explorer / taskbar icon. Multi-resolution .ico (16–256 px). */
+100 ICON "gtkhx.ico"
+
+/* Application manifest. CREATEPROCESS_MANIFEST_RESOURCE_ID (1), RT_MANIFEST (24). */
+1 24 "gtkhx.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+  FILEVERSION     @VER_MAJOR@,@VER_MINOR@,@VER_PATCH@,0
+  PRODUCTVERSION  @VER_MAJOR@,@VER_MINOR@,@VER_PATCH@,0
+  FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
+  FILEFLAGS       0x0L
+  FILEOS          VOS__WINDOWS32
+  FILETYPE        VFT_APP
+  FILESUBTYPE     0x0L
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"   /* U.S. English, Unicode */
+    BEGIN
+      VALUE "CompanyName",      "Misha Nasledov"
+      VALUE "FileDescription",  "GtkHx \342\200\224 a GTK Hotline client"
+      VALUE "FileVersion",      "@VERSION_STR@"
+      VALUE "InternalName",     "gtkhx"
+      VALUE "LegalCopyright",   "GPL-2.0-or-later"
+      VALUE "OriginalFilename", "gtkhx.exe"
+      VALUE "ProductName",      "GtkHx"
+      VALUE "ProductVersion",   "@VERSION_STR@"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200   /* langID 0x0409, codepage 1200 (Unicode) */
+  END
+END
