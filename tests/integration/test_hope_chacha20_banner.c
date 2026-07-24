@@ -58,7 +58,6 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
-#include "cipher.h"
 #include "htxf_io.h"
 #include "htxf_subchannel.h"
 #include "debug.h"

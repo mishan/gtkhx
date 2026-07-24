@@ -37,7 +37,6 @@
 #include "proto_helpers.h"
 #include "network.h"
 #include "hxnet_bridge.h"      /* hx_bridge_lookup_socks_proxy */
-#include "cipher.h"
 #include "htxf_io.h"
 #include "htxf_subchannel.h"
 #include "banner.h"

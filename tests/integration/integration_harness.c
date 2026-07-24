@@ -32,7 +32,6 @@
 #include "login_packet.h"
 #include "agreement_packet.h"
 #include "chat_history.h"
-#include "cipher.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
 
