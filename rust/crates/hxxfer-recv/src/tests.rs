@@ -261,4 +261,27 @@ fn file_getinfo_emits_name_and_size() {
         test_env::FILE_INFO.with(|c| c.borrow_mut().take()),
         Some((b"report.txt".to_vec(), 4096))
     );
+    // Success: the label transfers to the file-info window — the handler must
+    // NOT free it (that would double-free with close_file_info).
+    assert_eq!(test_env::FREED.with(|c| c.get()), None);
+}
+
+#[test]
+fn file_getinfo_task_error_frees_label() {
+    test_env::reset();
+    // A sentinel standing in for the g_strdup'd path label held as the task ptr.
+    let label = 0x1_abe1_usize as *mut std::os::raw::c_void;
+    let f = reply(true, &[]);
+    unsafe {
+        rcv_task_file_getinfo(
+            std::ptr::null_mut(),
+            f.as_ptr() as *const std::os::raw::c_void,
+            f.len(),
+            label,
+            std::ptr::null_mut(),
+        )
+    };
+    // No dialog opens on a task error, so the handler frees the label itself.
+    assert_eq!(test_env::FREED.with(|c| c.get()), Some(label));
+    assert!(test_env::FILE_INFO.with(|c| c.borrow().is_none()));
 }

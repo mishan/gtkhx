@@ -101,6 +101,9 @@ extern "C" {
     fn hx_conn_serverport(htlc: *const c_void) -> u16;
     /// The DOWNLOAD_BANNER reply spins up an HTXF subchannel worker (`banner.c`).
     fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, size: u32);
+    /// GLib `g_free` — release the FILE_GETINFO path task label on the error path
+    /// (it's `g_strdup`'d, with no task `ptr_free`).
+    fn g_free(ptr: *mut c_void);
 }
 
 /// Adapter matching `hx_preview_cancel_fn (void (*)(void *))`: closing the
@@ -415,6 +418,11 @@ pub unsafe extern "C" fn rcv_task_file_getinfo(
     _data: *mut c_void,
 ) {
     if task_in_error(frame, frame_len) {
+        // `ptr` is the request's path label (`g_strdup`'d in hx_file_info, stored
+        // as the task ptr with no ptr_free). On success it transfers to the
+        // file-info window (freed in close_file_info); on a task error no window
+        // opens, so release it here rather than leak it per FILE_GETINFO failure.
+        g_free(ptr);
         return;
     }
     let s = frame_slice(frame, frame_len);
