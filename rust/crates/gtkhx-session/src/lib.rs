@@ -277,7 +277,10 @@ mod imp {
                         ])
                         .build(),
                     // file-info: (path*, name*, creator*, type*, comments*,
-                    //             modified*, created*, size:u64)
+                    //             date_modify* (8 raw wire bytes), date_create*
+                    //             (8 raw wire bytes), size:u64). The date stamps
+                    //             ride raw so the view formats them for display
+                    //             (model doesn't do locale date formatting).
                     Signal::builder("file-info")
                         .param_types([
                             Type::POINTER,
@@ -773,7 +776,9 @@ pub unsafe extern "C" fn gtkhx_session_emit_user_info(
 }
 
 /// # Safety
-/// `self_` valid; the seven string args valid C strings (or NULL).
+/// `self_` valid; the five string args valid C strings (or NULL); `date_modify`
+/// / `date_create` each point to 8 raw wire bytes (the Hotline date stamp) and
+/// stay valid for the synchronous emit. The view side decodes + formats them.
 #[no_mangle]
 #[allow(clippy::too_many_arguments)]
 pub unsafe extern "C" fn gtkhx_session_emit_file_info(
@@ -783,8 +788,8 @@ pub unsafe extern "C" fn gtkhx_session_emit_file_info(
     creator: *const c_char,
     type_: *const c_char,
     comments: *const c_char,
-    modified: *const c_char,
-    created: *const c_char,
+    date_modify: *const u8,
+    date_create: *const u8,
     size: u64,
 ) {
     let v = [
@@ -793,8 +798,8 @@ pub unsafe extern "C" fn gtkhx_session_emit_file_info(
         ptr_value(creator as *const c_void),
         ptr_value(type_ as *const c_void),
         ptr_value(comments as *const c_void),
-        ptr_value(modified as *const c_void),
-        ptr_value(created as *const c_void),
+        ptr_value(date_modify as *const c_void),
+        ptr_value(date_create as *const c_void),
         glib::Value::from(size),
     ];
     emit(self_, "file-info", &v);

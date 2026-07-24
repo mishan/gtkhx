@@ -43,9 +43,12 @@ struct hl_filelist_hdr;
  * a HTLS_HDR_FILE_GETINFO reply arrives. The new files browser's
  * Get Info button fires the wire request via hx_file_info; this
  * is the receiving end that builds the dialog. */
+/* date_modify / date_create are the raw 8-byte Hotline date stamps from the
+ * FILE_GETINFO reply; output_file_info decodes + locale-formats them for
+ * display (the model side emits them raw). */
 extern void output_file_info (char *path, char *name, char *creator, char *type,
-                              char *comments, char *modified, char *created,
-                              guint64 size);
+                              char *comments, const guint8 *date_modify,
+                              const guint8 *date_create, guint64 size);
 
 /* Emit the file-list GtkhxSession signal so the file_list-signal
  * handler in gtkhx.c (and through it the remote-provider in the

@@ -2191,6 +2191,9 @@ dependencies = [
 [[package]]
 name = "hxxfer-recv"
 version = "0.1.0"
+dependencies = [
+ "hotline-proto",
+]
 
 [[package]]
 name = "hybrid-array"

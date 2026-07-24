@@ -133,6 +133,11 @@ gtkhx_sources = files(
   'users_cell.c',
   'xfers.c',
   'xfers_recv.c',
+  # Rust-facing accessor seam over the still-C-owned htxf_conn: the field
+  # getters/setters + fs-size helper the Rust file-transfer receive handlers
+  # (hxxfer-recv) reach transfer state through, so the transfer logic lives in
+  # Rust while the refcounted, cross-thread struct stays in xfers.c.
+  'htxf_accessors.c',
   'xfers_send.c',
   'xtext.c',
 )
