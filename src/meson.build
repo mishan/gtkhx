@@ -133,11 +133,11 @@ gtkhx_sources = files(
   'users_cell.c',
   'xfers.c',
   'xfers_recv.c',
-  # C-side collaborators for the Rust file-transfer receive handlers (hxxfer-recv:
-  # rcv_task_file_get / _folder_get / _file_put / _folder_put / _banner_get /
-  # _file_getinfo moved out of rcv.c). The refcounted, cross-thread htxf stays
-  # C-owned, so these shims do the field stamping / preview / fs probes.
-  'xfers_recv_bridge.c',
+  # Rust-facing accessor seam over the still-C-owned htxf_conn: the field
+  # getters/setters + fs-size helper the Rust file-transfer receive handlers
+  # (hxxfer-recv) reach transfer state through, so the transfer logic lives in
+  # Rust while the refcounted, cross-thread struct stays in xfers.c.
+  'htxf_accessors.c',
   'xfers_send.c',
   'xtext.c',
 )

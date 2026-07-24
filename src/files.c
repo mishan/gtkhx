@@ -251,9 +251,53 @@ hx_file_info_row (const char *title, const char *value)
     return row;
 }
 
+/* Format a Hotline 8-byte date stamp into a locale-formatted string in `out`
+ * (capped at `cap`) for the File Info dialog. Wire decode (Mac-1904 vs modern
+ * epoch, auto-detected via the year field) is hotline-proto; resolving to an
+ * absolute instant + locale formatting is view-side GDateTime math. Servers
+ * commonly send ts=0 to mean "no timestamp set"; hl_date_decode rejects that and
+ * we leave `out` empty, which hx_file_info_row renders as an em-dash rather than
+ * a date in the year 1838. */
+static void
+hx_format_hotline_date (const guint8 *bytes, char *out, size_t cap)
+{
+    struct gtkhx_proto_hl_date d;
+    GDateTime *dt = NULL;
+
+    if (cap == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (!bytes || !gtkhx_proto_hl_date_decode (bytes, 8, &d)) {
+        return;
+    }
+    if (d.kind == 0) {
+        /* Mac 1904 epoch -> an absolute UTC instant. */
+        dt = g_date_time_new_from_unix_local (
+            (gint64)d.secs - (gint64)GTKHX_PROTO_MAC_TO_UNIX_EPOCH_OFFSET);
+    } else {
+        /* Modern -> seconds since Jan 1 `year` in local time. */
+        GDateTime *base = g_date_time_new_local (d.year, 1, 1, 0, 0, 0);
+        if (base) {
+            dt = g_date_time_add_seconds (base, (double)d.secs);
+            g_date_time_unref (base);
+        }
+    }
+    if (!dt) {
+        return;
+    }
+    char *s = g_date_time_format (dt, "%c");
+    g_date_time_unref (dt);
+    if (s) {
+        g_strlcpy (out, s, cap);
+        g_free (s);
+    }
+}
+
 void
 output_file_info (char *path, char *name, char *creator, char *type,
-                  char *comments, char *modified, char *created, guint64 size)
+                  char *comments, const guint8 *date_modify,
+                  const guint8 *date_create, guint64 size)
 {
     GtkWidget *window, *header, *savebtn;
     GtkWidget *vbox;
@@ -263,6 +307,12 @@ output_file_info (char *path, char *name, char *creator, char *type,
     GtkTextBuffer *cbuf;
     char humanbuf[LONGEST_HUMAN_READABLE + 1];
     char sizestr[64];
+    char created[64], modified[64];
+
+    /* Decode + locale-format the raw Hotline date stamps for display. Formatting
+     * is a view concern, so it happens here rather than in the receive handler. */
+    hx_format_hotline_date (date_create, created, sizeof created);
+    hx_format_hotline_date (date_modify, modified, sizeof modified);
 
     window = gtk_window_new ();
     gtk_window_set_title (GTK_WINDOW (window), _ ("File Info"));

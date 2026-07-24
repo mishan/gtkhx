@@ -15,15 +15,17 @@ crate-type = ["staticlib", "rlib"]
 
 # Reply parsing is native via the hotline-proto rlib dep (parse::parse_file_get_reply
 # / _folder_get_reply / _file_put_reply / _folder_put_reply / _banner_get_reply /
-# _file_getinfo, and the Header task-error bit). The htxf state-stamping, the
-# xfer-queue signal emit (gtkhx-session), the session lookup (hx_sess_from_htlc,
-# tasks_bridge.c) and the transfer kickoff (xfer_ready_write, xfers.c) are externed
-# C ABIs resolved at the final link — the refcounted, cross-thread htxf is C-owned,
-# so the handlers do the native parse + decision here and delegate the C-state
-# mutation to focused shims in xfers_recv_bridge.c. cargo test provides in-crate
-# #[cfg(test)] doubles that record the emit + kickoff so the suite runs headless.
-# (The providers are separately-linked staticlibs / C objects in the binary, so
-# they can't be taken as rlib deps here without double-defining their symbols —
-# hence the extern-C surface, matching hxchat-recv / hxuser-recv.)
+# _file_getinfo, and the Header task-error bit). The transfer logic (gates,
+# stamping sequence, error policy, upload-size math) lives in Rust; the still-C-owned
+# htxf_conn is reached through the hx_htxf_* accessor seam (htxf_accessors.c), and
+# the genuine collaborators (xfer_delete, gtask_delete_htxf, timers, hx_preview_*,
+# resource_len / comment_len / hx_file_size, the gtkhx-session emits) are externed
+# C ABIs resolved at the final link. The file-info reply emits the two raw Hotline
+# date stamps straight through the file-info signal — the view (output_file_info)
+# does the locale formatting, so no date/glib code lives here. cargo test provides
+# in-crate #[cfg(test)] doubles (a fake htxf recorded in a thread-local) so the
+# suite runs headless. (The providers are separately-linked staticlibs / C objects
+# in the binary, so they can't be taken as rlib deps here without double-defining
+# their symbols — hence the extern-C surface, matching hxchat-recv / hxuser-recv.)
 [dependencies]
 hotline-proto = { path = "../hotline-proto" }

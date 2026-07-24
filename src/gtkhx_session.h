@@ -196,11 +196,13 @@ void gtkhx_session_emit_user_info (GtkhxSession *self, guint16 uid,
                                    guint16 len);
 
 /* Files / transfers / tracker / tasks. */
+/* date_modify / date_create carry the raw 8-byte Hotline date stamps; the view
+ * (output_file_info) decodes + formats them for display. */
 void gtkhx_session_emit_file_info (GtkhxSession *self, const char *path,
                                    const char *name, const char *creator,
                                    const char *type, const char *comments,
-                                   const char *modified, const char *created,
-                                   guint64 size);
+                                   const guint8 *date_modify,
+                                   const guint8 *date_create, guint64 size);
 void gtkhx_session_emit_file_list (GtkhxSession *self,
                                    struct cached_filelist *cfl,
                                    struct hl_filelist_hdr *fh, void *data);

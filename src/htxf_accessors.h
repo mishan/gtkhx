@@ -1,0 +1,53 @@
+#ifndef GTKHX_HTXF_ACCESSORS_H
+#define GTKHX_HTXF_ACCESSORS_H
+
+#include <glib.h>
+
+/* Rust-facing accessor seam for struct htxf_conn.
+ *
+ * struct htxf_conn is still C-owned (g_malloc0'd in xfers.c, refcounted, held in
+ * the C xfers[] array, mutated by both the main thread and the tokio transfer
+ * worker). These getters/setters are the generic field seam the Rust receive
+ * handlers (hxxfer-recv) reach it through — so the transfer *logic* (parse,
+ * gates, stamping sequence, error policy, upload-size math) lives in Rust while
+ * the struct stays in C. This is the same getter/setter-seam step the hxconn
+ * (htlc_conn) migration started with; if htxf ever moves to a Rust hxhtxf crate,
+ * these signatures are what it re-exports. */
+
+struct htxf_conn;
+
+/* Registry: is htxf still a live entry in the xfers[] array? (Downloads gate
+ * their reply on this — a since-cancelled transfer's reply is dropped.) */
+extern int hx_htxf_in_list (struct htxf_conn *htxf);
+
+/* Getters. */
+extern int          hx_htxf_opt_retry (const struct htxf_conn *htxf);
+extern int          hx_htxf_opt_preview (const struct htxf_conn *htxf);
+extern void        *hx_htxf_preview (const struct htxf_conn *htxf);
+extern const char  *hx_htxf_path (const struct htxf_conn *htxf);
+extern guint64      hx_htxf_data_size (const struct htxf_conn *htxf);
+
+/* Setters. */
+extern void hx_htxf_set_ref (struct htxf_conn *htxf, guint32 ref);
+extern void hx_htxf_set_total_size (struct htxf_conn *htxf, guint64 total_size);
+extern void hx_htxf_set_queue (struct htxf_conn *htxf, guint32 queue);
+extern void hx_htxf_set_data_pos (struct htxf_conn *htxf, guint64 data_pos);
+extern void hx_htxf_set_rsrc_pos (struct htxf_conn *htxf, guint64 rsrc_pos);
+extern void hx_htxf_set_data_size (struct htxf_conn *htxf, guint64 data_size);
+extern void hx_htxf_set_rsrc_size (struct htxf_conn *htxf, guint64 rsrc_size);
+extern void hx_htxf_set_gone (struct htxf_conn *htxf, guint8 gone);
+extern void hx_htxf_set_preview (struct htxf_conn *htxf, void *preview);
+extern void hx_htxf_set_serverhost (struct htxf_conn *htxf, const char *host);
+extern void hx_htxf_set_serverport (struct htxf_conn *htxf, guint16 port);
+
+/* Stamp htxf->start with the current time (gettimeofday) — keeps the
+ * struct timeval layout on the C side. */
+extern void hx_htxf_stamp_start (struct htxf_conn *htxf);
+
+/* stat(2) the given path; returns the data-fork byte size, or -1 on error. Lets
+ * the Rust file_put handler compute the upload byte total without marshaling the
+ * path into Rust — the C string pointer (hx_htxf_path) is handed straight to the
+ * fs primitives (this, resource_len, comment_len). */
+extern gint64 hx_file_size (const char *path);
+
+#endif /* GTKHX_HTXF_ACCESSORS_H */

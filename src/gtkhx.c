@@ -1524,14 +1524,16 @@ on_user_info_signal (GtkhxSession *emitter, guint uid, gpointer nam,
 static void
 on_file_info_signal (GtkhxSession *emitter, gpointer path, gpointer name,
                      gpointer creator, gpointer type, gpointer comments,
-                     gpointer modified, gpointer created, guint64 size,
+                     gpointer date_modify, gpointer date_create, guint64 size,
                      gpointer user_data)
 {
     (void)emitter;
     (void)user_data;
+    /* date_modify / date_create are raw 8-byte Hotline date stamps; the view
+     * (output_file_info) decodes + formats them. */
     output_file_info ((char *)path, (char *)name, (char *)creator, (char *)type,
-                      (char *)comments, (char *)modified, (char *)created,
-                      size);
+                      (char *)comments, (const guint8 *)date_modify,
+                      (const guint8 *)date_create, size);
 }
 
 static void
