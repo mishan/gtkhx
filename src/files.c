@@ -457,6 +457,10 @@ hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
             task_new (htlc, RCV_TASK_FN (rcv_task_file_list), ncfl, 0,
                       "ls_complete");
             hlwrite_chunks (htlc, HTLC_HDR_FILE_LIST, 0, chunks, hc);
+        } else {
+            /* Chunk build failed (documented to return 0): nobody took
+             * ownership of ncfl via task_new, so free it here. */
+            hx_cfl_free (ncfl);
         }
         g_free (hldir);
     } else if (completing == COMPLETE_GET_R) {

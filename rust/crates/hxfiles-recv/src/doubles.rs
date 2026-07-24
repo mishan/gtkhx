@@ -41,8 +41,9 @@ pub(crate) unsafe fn gtkhx_session_emit_file_list(
 pub(crate) unsafe fn hx_remote_files_provider_handle_file_list_error(
     _cfl: *mut c_void,
     _data: *mut c_void,
-) {
+) -> std::os::raw::c_int {
     test_env::PROVIDER_ERROR.with(|c| c.set(true));
+    1 // gboolean TRUE
 }
 
 pub(crate) unsafe fn hx_cfl_complete_entry(

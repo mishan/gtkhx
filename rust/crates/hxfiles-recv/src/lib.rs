@@ -171,8 +171,13 @@ extern "C" {
         data: *mut c_void,
     );
     /// Give the remote provider a chance to show an empty-state hint before we
-    /// drop the cfl on a task-error listing (files_remote_provider.c).
-    fn hx_remote_files_provider_handle_file_list_error(cfl: *mut c_void, data: *mut c_void);
+    /// drop the cfl on a task-error listing (files_remote_provider.c). Returns a
+    /// `gboolean` (whether the reply had a recognised provider carrier); we don't
+    /// act on it, but the declaration must match the C ABI.
+    fn hx_remote_files_provider_handle_file_list_error(
+        cfl: *mut c_void,
+        data: *mut c_void,
+    ) -> c_int;
     /// The recursive folder-relist / GET_R engine (files.c): re-issue FILE_LIST
     /// for a subfolder (`is_folder`), or `mkdir` + `xfer_new` a leaf for a
     /// recursive download. The folder-vs-file decision is made here in Rust (via
