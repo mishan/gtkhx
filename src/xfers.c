@@ -587,19 +587,57 @@ xfer_num (struct htxf_conn *htxf)
     return -1;
 }
 
+/* Progress callback the Rust hxnet::xfer worker calls per chunk: bump the byte
+ * counter and post a tasks-window update. user_data is the htxf. Passed by value
+ * into HxnetXferParams so the leaf hxnet crate never references a C symbol. */
+static void
+xfer_progress_bump (void *user_data, guint64 delta)
+{
+    struct htxf_conn *htxf = user_data;
+    htxf->total_pos += delta;
+    post_file_update (htxf);
+}
+
+/* Fill an HxnetXferParams for a receive of `file_budget` bytes off htxf. The
+ * preview hooks are the hx_preview_* view functions (cast to the void*-first
+ * callback shape — they take a pointer we only ever hand back the htxf->preview
+ * we read here). Solo-download only (get_thread); folder_recv_all builds its own
+ * preview-less params inline so xfers_recv.c stays free of xfers.c references. */
+static void
+xfer_recv_params (struct htxf_conn *htxf, guint64 file_budget,
+                  struct HxnetXferParams *p)
+{
+    p->hx = htxf->hx;
+    p->path = htxf->path;
+    p->file_budget = file_budget;
+    p->data_pos = htxf->data_pos;
+    p->rsrc_pos = htxf->rsrc_pos;
+    p->opt_preview = htxf->opt.preview;
+    p->opt_folder = htxf->opt.folder;
+    p->opt_large = htxf->opt.large;
+    p->preview = htxf->preview;
+    p->user_data = htxf;
+    p->progress = xfer_progress_bump;
+    p->preview_chunk = (void (*) (void *, const char *, gsize)) hx_preview_chunk;
+    p->preview_set_info
+        = (void (*) (void *, const char *, const char *)) hx_preview_set_info;
+    p->preview_done = (void (*) (void *)) hx_preview_done;
+}
+
 static void *
 get_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int retval;
-    guint8 buf[1024];
+    struct HxnetXferParams params;
 
     if (!htxf_connect (htxf)) {
         retval = -1;
         goto ret;
     }
 
-    retval = file_recv_one (htxf, htxf->total_size, buf, post_file_update);
+    xfer_recv_params (htxf, htxf->total_size, &params);
+    retval = hxnet_xfer_file_recv_one (&params);
     if (retval) {
         goto ret;
     }
@@ -681,7 +719,7 @@ folder_get_thread (void *arg)
         goto ret;
     }
 
-    retval = folder_recv_all (htxf, base_path, buf, post_file_update);
+    retval = folder_recv_all (htxf, base_path, buf, xfer_progress_bump);
     if (retval) {
         goto ret;
     }

@@ -27,8 +27,14 @@
 struct htxf_conn;
 
 /* Progress hook fired as bytes arrive (htxf->total_pos is already
- * bumped). Must be non-NULL. */
+ * bumped). Must be non-NULL. Used by the C send path (file_send_one /
+ * folder_send_all). */
 typedef void (*xfer_progress_fn) (struct htxf_conn *htxf);
+
+/* The receive-side progress hook — the HxnetXferParams shape (user_data +
+ * byte delta), so the C driver owns the total_pos bump + the tasks-window
+ * post. folder_recv_all forwards it straight into the per-file params. */
+typedef void (*hxnet_xfer_progress_fn) (void *user_data, guint64 delta);
 
 /* ---- hxfiles-xfer FFO/FILP codec FFI (rust/crates/hxfiles-xfer) ----
  * Shared by the receive state machine here and the send packing in
@@ -67,24 +73,47 @@ _Static_assert (offsetof (struct gtkhx_filp_info, ok) == 284,
 extern void gtkhx_ffo_parse_filp_info (const guint8 *info, size_t info_len,
                                        int large, struct gtkhx_filp_info *out);
 
-/* Receive a single file from an already-open HTXF subchannel into
- * htxf->path. file_budget is htxf->total_size for a solo download, or
- * this file's size off the FILE_SEND header inside a folder stream.
- * `buf` is caller-provided scratch (>= 1024 bytes). `progress` fires as
- * bytes arrive and must be non-NULL (a NULL hook returns EINVAL). Does
- * NOT play the completion sound, post a final update, or close the
- * channel — those stay with the caller. Returns 0 on success, an
- * errno-like positive code on failure. */
-extern int file_recv_one (struct htxf_conn *htxf, guint64 file_budget,
-                          guint8 *buf, xfer_progress_fn progress);
+/* Receive a single file from an already-open HTXF subchannel — the body moved
+ * to Rust (hxnet::xfer, W1 of the xfer-worker migration): it reads the
+ * subchannel via hxnet::htxf in-crate and does the FILP/FFO codec + HFS fork I/O
+ * natively (hxfiles-xfer / hxhfs). hxnet is a leaf crate that must not reference
+ * C symbols, so the C driver hands everything in by value through this struct
+ * (the scalars it reads off htxf directly) plus callback function pointers the
+ * worker calls through — no upward link reference. Cancellation rides the
+ * HtxfConn's HtxfAbort, so there's no canceled flag here.
+ *
+ * MUST match hxnet::xfer::HxnetXferParams (a #[repr(C)] struct) field-for-field. */
+struct HxnetXferParams {
+    void *hx;               /* htxf->hx (the Rust HtxfConn *) */
+    const char *path;       /* htxf->path */
+    guint64 file_budget;    /* solo: htxf->total_size; folder: FILE_SEND size */
+    guint64 data_pos;       /* htxf->data_pos (resume offset) */
+    guint64 rsrc_pos;       /* htxf->rsrc_pos */
+    int opt_preview;
+    int opt_folder;
+    int opt_large;
+    void *preview;          /* htxf->preview (hx_preview *) or NULL */
+    void *user_data;        /* passed back to progress (the C side uses it as htxf) */
+    void (*progress) (void *user_data, guint64 delta);
+    void (*preview_chunk) (void *preview, const char *buf, gsize len);
+    void (*preview_set_info) (void *preview, const char *type, const char *creator);
+    void (*preview_done) (void *preview);
+};
+
+/* Returns 0 on success, an errno-like positive code on failure. Does NOT play
+ * the completion sound, post a final update, or close the channel — the C
+ * driver (get_thread / folder_recv_all) owns those. */
+extern int hxnet_xfer_file_recv_one (const struct HxnetXferParams *params);
 
 /* Receive a folder tree from an already-open HTXF subchannel into the
  * local directory `base_path` (which it creates). Drives the Hotline 1.5
- * FILE_NEXT/FILE_SEND state machine, calling file_recv_one per file.
- * `buf` is caller scratch (>= 1024 bytes). Rewrites htxf->path per file;
- * the caller restores it. Returns 0 on success (including the clean
- * end-of-stream when the server closes), an errno-like code on failure. */
+ * FILE_NEXT/FILE_SEND state machine, building per-file HxnetXferParams and
+ * calling hxnet_xfer_file_recv_one. `buf` is caller scratch (>= 1024 bytes).
+ * `progress` is the HxnetXferParams shape, forwarded per file. Rewrites
+ * htxf->path per file; the caller restores it. Returns 0 on success (including
+ * the clean end-of-stream when the server closes), an errno-like code on
+ * failure. */
 extern int folder_recv_all (struct htxf_conn *htxf, const char *base_path,
-                            guint8 *buf, xfer_progress_fn progress);
+                            guint8 *buf, hxnet_xfer_progress_fn progress);
 
 #endif /* GTKHX_XFERS_RECV_H */

@@ -77,9 +77,10 @@ hx_preview_done (hx_preview *p)
 }
 
 static void
-noop_progress (struct htxf_conn *htxf)
+noop_progress (void *user_data, guint64 delta)
 {
-    (void)htxf;
+    (void)user_data;
+    (void)delta;
 }
 
 static void
@@ -156,9 +157,22 @@ test_file_get_round_trip (void)
     htxf.total_size = xfer_size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/out.txt", tmpdir);
 
-    /* THE code under test: the production single-file receive machine. */
-    guint8 buf[1024];
-    int rv = file_recv_one (&htxf, xfer_size, buf, noop_progress);
+    /* THE code under test: the production single-file receive machine
+     * (hxnet::xfer, driven through HxnetXferParams). */
+    struct HxnetXferParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.path = htxf.path;
+    params.file_budget = xfer_size;
+    params.data_pos = htxf.data_pos;
+    params.rsrc_pos = htxf.rsrc_pos;
+    params.opt_preview = htxf.opt.preview;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.preview = htxf.preview;
+    params.user_data = &htxf;
+    params.progress = noop_progress;
+    int rv = hxnet_xfer_file_recv_one (&params);
     g_assert_cmpint (rv, ==, 0);
 
     /* The decoded data fork must be byte-for-byte the seeded content. */

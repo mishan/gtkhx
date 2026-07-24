@@ -223,23 +223,31 @@ real work). `file_recv_one`'s structure:
   per-chunk progress emit stay FFI/bridge calls (they already marshal to
   main); the worker stays GTK-free.
 
-**Accessors W1 needs** (extend `htxf_accessors.c`; getters unless noted):
-`hx` (the `HtxfConn*`), `total_pos` (get + set — bumped per chunk; keep a Rust
-local and push at progress points), `total_size`, `data_pos`, `rsrc_pos`,
-`opt.large`, `opt.folder`, `canceled`. (`path`, `opt.preview`, `preview`,
-`data_size` already exist.) These are per-file, not per-chunk, except the
-`total_pos` push + `canceled` check, which sit alongside the progress emit that
-already crosses per chunk.
+**Shipped — no accessor seam, no upward FFI.** The plan first assumed the worker
+would reach `htxf` through `hx_htxf_*` accessor externs. That doesn't link:
+`hxnet` is a *leaf* crate (the C binary + higher crates depend on it), so the
+linker places it as a provider, after the C objects — a C symbol it referenced
+(`hx_htxf_*`, `hx_preview_*`, before the `--start-group`) would not resolve,
+whereas group-archive symbols (e.g. `gtkhx_aead_*`) do. So the worker references
+**no** C symbols. Instead the C driver hands everything in by value through a
+`#[repr(C)] HxnetXferParams` (the scalars it reads off `htxf` directly — `hx`,
+`path`, `file_budget`, `data_pos`, `rsrc_pos`, the `opt` flags, `preview`) plus
+callback **function pointers** (a `progress(user_data, delta)` shim that bumps
+`total_pos` + posts, and the `hx_preview_*` feed). The worker calls those
+through the pointers — a runtime value, no link reference. Cancellation rides
+the `HtxfConn`'s own `HtxfAbort` (armed by `xfer_delete`), so there's no
+`canceled` accessor either. This keeps `hxnet` a clean leaf and is the shape
+S0/W2/W3 should follow.
 
-**The one real decision — `hxhfs` config threading (risk #3).** The native
-`hxhfs` fns (`hfsinfo_write`, `resource_open`) take a `Config` (dir_char +
-sidecar mode); today the C wrappers supply a process global. The Rust worker
-needs that config — simplest is a `hxhfs` process-global set once at startup
-(mirroring the C global), read by the worker. Decide this first in W1.
+**`hxhfs` config threading (was risk #3, resolved).** The native `hxhfs` fns
+(`hfsinfo_write`, `resource_open`) take a `Config`; the worker reads the same
+process-global the C side set via `hfs_set_config`, through a new
+`pub hxhfs::ffi::current_config()`. No config crosses the FFI.
 
-**Gate:** Tier-3 `file_get` (solo download, plain + TLS) is the W1 regression
-guard; it already drives `xfer_ready_write` → the worker → progress →
-completion end-to-end.
+**Gate — passing.** Tier-3 `file_get` (solo download) drives `xfer_ready_write` →
+the Rust worker → progress → completion end-to-end and asserts byte-exact
+content; `folder_get` exercises the same worker per file inside the still-C
+folder driver. Both green against mhxd.
 
 ## Risks / open questions
 

@@ -2090,6 +2090,8 @@ dependencies = [
  "hxcrypto-aead",
  "hxcrypto-hash",
  "hxcrypto-stream",
+ "hxfiles-xfer",
+ "hxhfs",
  "lz4_flex",
  "rustls-native-certs",
  "sha2",

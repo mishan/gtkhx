@@ -72,6 +72,15 @@ noop_progress (struct htxf_conn *htxf)
     (void)htxf;
 }
 
+/* HxnetXferParams progress shape (user_data + byte delta) for the Rust
+ * hxnet_xfer_file_recv_one download path. */
+static void
+noop_progress_bump (void *user_data, guint64 delta)
+{
+    (void)user_data;
+    (void)delta;
+}
+
 /* Download Uploads/<fname> via the production file_recv_one into a fresh
  * temp file and return its contents (caller frees). NULL on any failure
  * along the way. */
@@ -119,9 +128,19 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
     htxf.total_size = reply.size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/back.txt", tmpdir);
 
-    guint8 buf[1024];
     char *content = NULL;
-    if (file_recv_one (&htxf, reply.size, buf, noop_progress) == 0) {
+    struct HxnetXferParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.path = htxf.path;
+    params.file_budget = reply.size;
+    params.opt_preview = htxf.opt.preview;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.preview = htxf.preview;
+    params.user_data = &htxf;
+    params.progress = noop_progress_bump;
+    if (hxnet_xfer_file_recv_one (&params) == 0) {
         if (!g_file_get_contents (htxf.path, &content, out_len, NULL)) {
             content = NULL;
         }

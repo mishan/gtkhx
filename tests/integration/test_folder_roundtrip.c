@@ -71,6 +71,14 @@ noop_progress (struct htxf_conn *htxf)
     (void)htxf;
 }
 
+/* HxnetXferParams progress shape for the Rust hxnet_xfer_file_recv_one path. */
+static void
+noop_progress_bump (void *user_data, guint64 delta)
+{
+    (void)user_data;
+    (void)delta;
+}
+
 /* Open the HTXF subchannel and wrap it as a FOLDER-typed hxnet channel
  * (the preamble carries HTXF_TYPE_FOLDER). Returns NULL on failure. */
 static HtxfConn *
@@ -195,9 +203,19 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
     htxf.total_size = reply.size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/got", tmpdir);
 
-    guint8 buf[1024];
     char *content = NULL;
-    if (file_recv_one (&htxf, reply.size, buf, noop_progress) == 0) {
+    struct HxnetXferParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.path = htxf.path;
+    params.file_budget = reply.size;
+    params.opt_preview = htxf.opt.preview;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.preview = htxf.preview;
+    params.user_data = &htxf;
+    params.progress = noop_progress_bump;
+    if (hxnet_xfer_file_recv_one (&params) == 0) {
         if (!g_file_get_contents (htxf.path, &content, out_len, NULL)) {
             content = NULL;
         }
@@ -302,7 +320,7 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     htxf.total_size = reply.size;
 
     guint8 buf[1024];
-    int rv = folder_recv_all (&htxf, dstroot, buf, noop_progress);
+    int rv = folder_recv_all (&htxf, dstroot, buf, noop_progress_bump);
     htxf_io_release (&htxf);
     return rv == 0;
 }
