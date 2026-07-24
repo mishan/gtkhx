@@ -73,17 +73,17 @@ human_readable (guint64 n, char *buf, int from_block_size,
                 int output_block_size)
 {
     guint64 amt;
-    uint base;
+    guint base;
     int to_block_size;
-    uint tenths;
-    uint power = 0;
+    guint tenths;
+    guint power = 0;
     char *p;
 
     /* 0 means adjusted N == AMT.TENTHS;
      1 means AMT.TENTHS < adjusted N < AMT.TENTHS + 0.05;
      2 means adjusted N == AMT.TENTHS + 0.05;
      3 means AMT.TENTHS + 0.05 < adjusted N < AMT.TENTHS + 0.1.  */
-    uint rounding;
+    guint rounding;
 
     if (output_block_size < 0) {
         base = -output_block_size;
@@ -137,9 +137,9 @@ human_readable (guint64 n, char *buf, int from_block_size,
             return buf;
         }
     } else {
-        uint divisor = to_block_size / from_block_size;
-        uint r10 = (n % divisor) * 10;
-        uint r2 = (r10 % divisor) * 2;
+        guint divisor = to_block_size / from_block_size;
+        guint r10 = (n % divisor) * 10;
+        guint r2 = (r10 % divisor) * 2;
         amt = n / divisor;
         tenths = r10 / divisor;
         rounding = r2 < divisor ? 0 < r2 : 2 + (divisor < r2);
@@ -151,8 +151,8 @@ human_readable (guint64 n, char *buf, int from_block_size,
         power = 0;
 
         do {
-            uint r10 = (amt % base) * 10 + tenths;
-            uint r2 = (r10 % base) * 2 + (rounding >> 1);
+            guint r10 = (amt % base) * 10 + tenths;
+            guint r2 = (r10 % base) * 2 + (rounding >> 1);
             amt /= base;
             tenths = r10 / base;
             rounding
