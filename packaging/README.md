@@ -53,8 +53,9 @@ follow-ups:
   + a Windows code-signing cert).
 - **GStreamer plugin lists are curated** (`GST_PLUGINS` in each script) for the
   voice pipeline. If a voice element is missing at runtime, add it there.
-- **Relocatable sound path.** `src/sound.c` looks in `$PREFIX/share/gtkhx/sounds`
-  with a configure-time `$PREFIX` that won't match an unzipped bundle, so alert
-  sounds don't resolve on Windows/macOS packages yet. The files are staged at the
-  mirrored path; making the lookup derive its prefix from the module directory is
-  the fix.
+- **Relocatable sound path.** `src/sound.c::sound_resolve` searches, in order,
+  `$CONFIG/sounds`, every `g_get_system_data_dirs()` entry's `gtkhx/sounds`, the
+  Windows module-relative `share/gtkhx/sounds`, then the compiled-in
+  `$PREFIX/share/gtkhx/sounds`. So the staged sounds resolve in a relocated
+  bundle: the macOS launcher points `XDG_DATA_DIRS` at `Contents/Resources/share`,
+  and on Windows GLib derives the data dirs from the exe location.

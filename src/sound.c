@@ -37,10 +37,17 @@ extern void hx_sound_play (const char *path);
 struct hx_sounds hxsnd = { 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1 };
 
 /* Resolve a sound file by name across the layered sound search path:
- *   1. $CONFIG/sounds/<name>        — per-user drop-ins
- *   2. $PREFIX/share/gtkhx/sounds/  — distro / system default
+ *   1. $CONFIG/sounds/<name>              — per-user drop-ins
+ *   2. <system-data-dir>/gtkhx/sounds/    — every g_get_system_data_dirs() entry
+ *   3. <module-dir>/share/gtkhx/sounds/   — Windows: relative to the running exe
+ *   4. $PREFIX/share/gtkhx/sounds/        — compiled-in install prefix (Unix)
  *
- * Returns the first existing path, or NULL if none was found. Caller g_frees. */
+ * Step 2 is what makes relocatable bundles work without a hardcoded prefix: the
+ * macOS .app launcher points XDG_DATA_DIRS at its Resources, and GLib derives
+ * the data dirs from the install location on Windows. Step 3 is a Windows
+ * belt-and-braces path from the exe itself; step 4 keeps a normal `meson
+ * install` on Unix working. Returns the first existing path, or NULL. Caller
+ * g_frees. */
 static char *
 sound_resolve (const char *name)
 {
@@ -52,7 +59,31 @@ sound_resolve (const char *name)
     }
     g_free (candidate);
 
-    candidate = g_build_filename (PREFIX "/share/gtkhx/sounds", name, NULL);
+    for (const gchar * const *d = g_get_system_data_dirs (); d && *d; d++) {
+        candidate = g_build_filename (*d, "gtkhx", "sounds", name, NULL);
+        if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
+            return candidate;
+        }
+        g_free (candidate);
+    }
+
+#ifdef G_OS_WIN32
+    {
+        /* …\bin\gtkhx.exe -> install root; find <root>\share\gtkhx\sounds. */
+        char *root = g_win32_get_package_installation_directory_of_module (NULL);
+        if (root) {
+            candidate = g_build_filename (root, "share", "gtkhx", "sounds",
+                                          name, NULL);
+            g_free (root);
+            if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
+                return candidate;
+            }
+            g_free (candidate);
+        }
+    }
+#endif
+
+    candidate = g_build_filename (PREFIX, "share", "gtkhx", "sounds", name, NULL);
     if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
         return candidate;
     }
@@ -67,8 +98,7 @@ play (const char *name)
     char *path = sound_resolve (name);
 
     if (!path) {
-        g_message ("sound: '%s' not found in $CONFIG/sounds or " PREFIX
-                   "/share/gtkhx/sounds; skipping",
+        g_message ("sound: '%s' not found on the sound search path; skipping",
                    name);
         return;
     }
