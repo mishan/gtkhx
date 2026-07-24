@@ -1,0 +1,31 @@
+[package]
+rust-version.workspace = true
+name = "hxsound"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Cross-platform WAV notification-sound playback for GtkHx (replaces the Linux-only GSound/libcanberra path in src/sound.c)."
+publish = false
+
+[lib]
+# staticlib: the C side (src/sound.c) links the hx_sound_play FFI symbol.
+# rlib: keeps `cargo test -p hxsound` and any future Rust consumer working.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+# rodio gives cross-platform audio output (cpal backend: ALSA on Linux,
+# CoreAudio on macOS, WASAPI on Windows) plus a WAV decoder — exactly what the
+# notification sounds need. default-features off drops the flac/vorbis/mp3
+# decoders we don't use; "wav" keeps the (built-in, C-free) WAV decoder, and
+# cpal playback is always present regardless of the decoder features.
+rodio = { version = "0.20", default-features = false, features = ["wav"] }
+
+# High-quality (windowed-sinc) sample-rate conversion. The notification WAVs are
+# 8/11/22 kHz; rodio's built-in converter is plain linear interpolation, which
+# leaves audible aliasing when upsampling those to a 44.1/48 kHz output device.
+# We pre-resample each clip to the device's own rate with rubato so rodio's
+# converter is a pass-through, matching the quality of gsound/PipeWire's path.
+# default-features off drops rubato's FFT resamplers (and the rustfft/realfft
+# stack behind them); we only use the windowed-sinc one, which needs just
+# num-traits + num-integer.
+rubato = { version = "0.16", default-features = false }

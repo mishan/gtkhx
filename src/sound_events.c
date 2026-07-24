@@ -17,7 +17,8 @@
  *
  * Each handler is a one-liner: map the signal to a play_sound() id.
  * play_sound (sound.c) does the pref gate (hxsnd.*) and the actual
- * GSound playback, so there's no policy here beyond "which event plays
+ * playback (via the hxsound Rust crate), so there's no policy here
+ * beyond "which event plays
  * which sound". Handlers run on the main thread (every signal is
  * emitted there), and play_sound is safe from any thread regardless.
  */

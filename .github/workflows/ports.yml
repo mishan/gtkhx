@@ -54,6 +54,7 @@ env:
     -p hxcrypto-hash
     -p hxcrypto-stream
     -p hxhfs
+    -p hxsound
     -p hxtls-trust
 
 jobs:

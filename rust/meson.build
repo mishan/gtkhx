@@ -225,6 +225,7 @@ rust_sources = files(
   # features so the voice-off/voice-on builds share their dependency
   # compiles. Empty lib; see its Cargo.toml.
   'crates/feature-unify/src/lib.rs',
+  'crates/hxsound/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
   'crates/hxcrypto-hash/Cargo.toml',
@@ -264,6 +265,7 @@ rust_sources = files(
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
+  'crates/hxsound/Cargo.toml',
 )
 # cargo-sources.json is regenerated from Cargo.lock for the Flatpak
 # offline build; it is not consumed by `cargo build` directly. Cargo.lock
@@ -903,5 +905,32 @@ rust_hx_image_decode_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhx_image_decode',
+  ],
+)
+
+# Notification-sound playback (rodio → cpal), the cross-platform Rust
+# replacement for the Linux-only GSound/libcanberra path in src/sound.c.
+# Exports hx_sound_play(const char *path). cpal links the platform audio
+# libraries; like the other crates' system deps, cargo can't propagate those
+# to the meson link line, so name them here per host.
+_hxsound_sys_deps = []
+if host_machine.system() == 'linux'
+  _hxsound_sys_deps += dependency('alsa') # cpal ALSA backend
+elif host_machine.system() == 'darwin'
+  _hxsound_sys_deps += dependency('appleframeworks',
+                                  modules : ['AudioToolbox', 'AudioUnit', 'CoreAudio'])
+elif host_machine.system() == 'windows'
+  # cpal's WASAPI backend uses COM; the windows crate's link directives don't
+  # reach the meson link line, so pull ole32 explicitly. Required so a missing
+  # ole32 fails at configure with a clear message rather than as an opaque link
+  # error later.
+  _hxsound_sys_deps += cc.find_library('ole32')
+endif
+rust_hxsound_dep = declare_dependency(
+  sources : rust_build,
+  dependencies : _hxsound_sys_deps,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxsound',
   ],
 )
