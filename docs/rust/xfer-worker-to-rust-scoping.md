@@ -109,26 +109,31 @@ them; they don't depend on it.) The two Rust types get distinct names — keep
 `HtxfConn` for the transport; the transfer struct is e.g. `hxnet::xfer::Xfer`,
 backing the C `struct htxf_conn` ABI.
 
-## Dependency order: the transfer struct moves first
+## Order: the worker moves first, the struct flip follows
 
-The struct is the pivot. The worker body can't move to Rust while it mutates a
-C-owned `htxf_conn` (the same reason `htlc_conn` blocked the receive handlers
-in `network-endgame.md`). And it is the *right* first step on its own merits,
-because its concurrency story improves:
+The obvious order is "struct to Rust, then the worker" (the `htlc_conn`
+precedent — a C-owned struct blocked the receive handlers). But here the
+worker files hold ~180 of the ~230 `htxf->` accesses *and* the gnarly
+internal fields (`in` qbuf, `xfer_encode`/`decode` AEAD state, `hx`), and P1
+rewrites those files in Rust anyway. Making the struct fully opaque first
+would mean accessorizing worker internals that P1 then deletes — throwaway.
 
-- Today the lifecycle is a hand-rolled `g_atomic_int` refcount (xfers[] ref +
-  worker ref + one ref per queued progress idle) plus a cross-thread
-  `canceled` flag, all in C. Getting an `htxf` field from Rust means the
-  accessor seam (`htxf_accessors.c`, added for the receive handlers).
-- Rust-owned, this becomes an `Arc<HtxfConn>` whose clones *are* the refs, an
-  `AtomicBool`/`AtomicU64` for `canceled`/`total_pos`, and the field access is
-  native for the (Rust) worker and recv handlers — C keeps a `hx_htxf_*`
-  accessor facade only for the view code that still reads a transfer scalar.
+So the order is **inverted: move the worker to Rust first, then flip the
+struct.** The Rust worker doesn't need the struct to be Rust-owned yet — it
+reaches `htxf` scalar state (path, sizes, positions, `canceled`) through the
+existing `hx_htxf_*` accessor seam, a handful of calls *per file* rather than
+the *per-chunk* `htxf_io` bounce. The byte path — `hxnet::htxf` read/write,
+the `hxfiles-xfer` codec, `hxhfs` fork I/O — goes native immediately. That
+kills the weave (the whole point) without the struct move as a precondition.
 
-This is the `hxconn` playbook again, with the extra wrinkle (already flagged
-in the `htxf_accessors.c` work) that `htxf_conn` is genuinely multi-threaded,
-so the mirror needs `Atomic*` fields, not plain ones. That wrinkle is *easier*
-to get right in Rust's ownership model than to keep auditing by hand in C.
+The struct flip then comes *after* the worker is Rust, when it's cheap: the
+worker already uses accessors, and the remaining C consumers are the smaller
+view set (tasks.c, banner.c, network.c, files.c). At that point the flip is
+the `hxconn` E1c shape — storage + an `Arc`-based lifecycle (clones *are* the
+refs) + atomic `canceled`/`total_pos` in Rust, behind the same `hx_htxf_*`
+facade. The multi-threaded wrinkle (atomics, not plain fields) is *easier* to
+get right in Rust's ownership model than to keep auditing `g_atomic` by hand
+in C — but it lands last, not first.
 
 ## What genuinely stays C (or at the seam)
 
@@ -151,55 +156,62 @@ tiny helpers.
 
 ## Phased plan
 
-Ordered so the pivot lands first and each phase is independently shippable and
-Tier-3-gated.
+The worker moves first (weave removal), the struct flip lands last. Each phase
+is independently shippable and Tier-3-gated. The Rust worker code lands in a
+new `hxnet::xfer` module (beside the `htxf` transport) so its byte path is
+in-crate native.
 
-- **P0 — the transfer struct → Rust (`hxnet::xfer`).** Move `struct htxf_conn`
-  into a new `xfer` module in the hxnet crate (beside the `htxf` transport),
-  behind the existing `hx_htxf_*` C ABI (the `hxconn` E1c flip): storage +
-  `Arc`-based lifecycle in Rust, `canceled`/`total_pos` as atomics,
-  `hx_htxf_new/_free` replacing `g_malloc0`/`htxf_unref`. C (xfers.c worker, banner.c, tasks.c,
-  the view) reaches fields through the accessor facade unchanged. The
+- **W1 — single-file download loop → Rust.** Port `get_thread` + `file_recv_one`
+  into `hxnet::xfer`: a Rust worker (spawned via the same
+  `gtkhx_bridge_spawn_blocking_with_idle` shim) reads `htxf` scalars through
+  the `hx_htxf_*` accessor seam, then runs the copy loop calling `hxnet::htxf`
+  read *directly* (in-crate), the `hxfiles-xfer` FFO codec, and `hxhfs` fork
+  I/O — all native. Progress/preview marshal to main through a thin bridge
+  emit. The per-chunk `htxf_io_read` bounce is gone for solo downloads.
+  Smallest, most-testable slice (Tier-3 `file_get`). Start here.
+- **W2 — single-file upload loop → Rust.** `put_thread` + `file_send_one` the
+  same way (`hxnet::htxf` write, `hxfiles-xfer` pack, `hxhfs` resource read).
+  Gated on `file_put` (needs a permissive server).
+- **W3 — folder mini-protocol → Rust.** `folder_{recv,send}_all` (the
+  FILE_NEXT / FILE_SEND / FILE_RESUME framing + local tree walk + per-file
+  resume). Highest behaviour-risk (resume, partial transfers, name encoding),
+  so last; leans hardest on the Tier-3 folder round-trip. `xfers_recv.c` /
+  `xfers_send.c` / the `htxf_io.c` read/write shim delete here.
+- **S0 — flip `struct htxf_conn` → `hxnet::xfer` (Arc + atomics).** Now that
+  the worker is Rust, move the struct storage + lifecycle behind the
+  `hx_htxf_*` C ABI: `Arc`-based refcount (clones *are* the refs), atomic
+  `canceled`/`total_pos`, `hx_htxf_new/_ref/_unref` replacing
+  `g_malloc0`/`g_atomic`/`g_free`. The remaining C consumers (view: tasks.c,
+  banner.c, network.c, files.c) reach fields through the facade. The
   hand-rolled refcount + `htxf_io_abort_*` bookkeeping collapse into the
-  Rust handle. **Keystone; independently valuable (leaner, safer lifecycle).**
-- **P1 — single-file copy loop → Rust.** Port `file_recv_one` / `file_send_one`
-  into `hxnet::xfer` (the same module as the struct + worker): the Rust worker
-  calls `hxnet::htxf` read/write directly, the `hxfiles-xfer` codec, and the
-  `hxhfs` fork I/O *natively*. `xfer_ready_write`'s worker entry points at the
-  Rust loop. The per-chunk FFI weave is gone for solo files. `htxf_io.c` loses
-  its read/write shim (the loop calls `hxnet::htxf` in-crate); the `canceled`
-  check moves into the Rust read/write wrapper.
-- **P2 — folder mini-protocol → Rust.** Port `folder_recv_all` /
-  `folder_send_all` (the FILE_NEXT / FILE_SEND / FILE_RESUME framing + the
-  local tree walk + per-file resume). Highest behaviour-risk piece (resume,
-  partial transfers, name encoding), so it goes last and leans hardest on the
-  Tier-3 folder round-trip. `xfers_recv.c` / `xfers_send.c` delete here.
-- **P3 — consolidate banner + delete the shims.** Point `banner.c`'s
-  transient-htxf worker at the same Rust path (it already shares
-  `htxf_io_*` / `hxnet`), then delete `htxf_io.c`, `htxf_subchannel.c`
-  (preamble pack moves into `hxnet::htxf::connect`), and shrink
-  `htxf_accessors.c` to whatever the view still needs.
+  handle. `htxf_accessors.c` shrinks to the view surface.
+- **S1 — consolidate banner + delete the shims.** Point `banner.c`'s
+  transient-htxf worker at the same Rust path, then delete `htxf_io.c` and
+  `htxf_subchannel.c` (preamble pack moves into `hxnet::htxf::connect`).
 
-P0 is a precondition for P1–P2. P1 and P2 are the throughput-sensitive
-rewrites; P3 is cleanup.
+W1 is the first increment. W1–W3 are the throughput-sensitive rewrites; S0 is
+the lifecycle keystone (now cheap); S1 is cleanup.
 
 ## Risks / open questions
 
 1. **Throughput.** The whole point is removing per-chunk FFI, so this should
    *help*, but the copy loop is the bulk-data path — benchmark a large solo
-   file and a deep folder before/after each of P1/P2. The AEAD frames are
+   file and a deep folder before/after each of W1–W3. The AEAD frames are
    already bulk-sized in `hxnet`.
-2. **Folder-protocol fidelity (P2).** FILE_NEXT/SEND/RESUME framing, per-file
+2. **Folder-protocol fidelity (W3).** FILE_NEXT/SEND/RESUME framing, per-file
    resume (RFLT), and Mac-Roman name encoding must be byte-identical. Wire
    compat with 1.2/1.5 is frozen — gate on the Tier-3 folder round-trip
    against mhxd (and the upload matrix once a permissive server is in CI).
 3. **`hxhfs` config threading.** The native `hxhfs` fns take a `Config`
    (dir_char, sidecar mode); today the C wrappers supply a global. The Rust
    worker needs that config handed in (or a process-global in `hxhfs`) — a
-   small decision to make in P1.
-4. **`htxf_conn` atomics (P0).** The `#[repr(C)]`/opaque mirror must place the
-   atomic fields correctly and the C accessors must not race the worker;
-   `_Static_assert` layout pins + the existing `test_htxf_cancel` cover it.
+   small decision to make in W1.
+4. **Worker reaches a C-owned struct (W1–W3).** Until S0 the worker (Rust)
+   reads/writes `htxf` through the `hx_htxf_*` accessor seam — a few calls per
+   file, not per chunk, so no hot-path FFI. It does mean the accessor surface
+   must cover every field the worker touches (built out incrementally per
+   slice), and the `canceled`/`total_pos` accessors must stay `g_atomic` on
+   the C side until S0 makes them Rust atomics.
 5. **Cancel semantics preserved.** Cooperative cancel (`HtxfAbort` + the
    `canceled` re-check) already works; the Rust loop must keep checking at the
    same boundaries. This is a straight carry-over, not a redesign.
@@ -209,13 +221,14 @@ rewrites; P3 is cleanup.
 
 ## Recommendation
 
-Do **P0 first, on its own branch.** It's the keystone (P1–P2 can't move
-without it), it's independently valuable (an `Arc`-based lifecycle is leaner
-and safer than the hand-rolled `g_atomic` refcount + `htxf_io_abort_*`
-bookkeeping), and it's the direct sibling of the `hxconn` / `cfl` moves
-already done — the same opaque-handle + accessor-facade shape, plus atomics.
-Then reassess P1 (solo copy loop) as the first weave-removal, with P2 (folder)
-and P3 (banner + shim deletion) following. Land nothing without the Tier-3
-transfer matrix (`file/folder get/put`, TLS variants, cancel/shutdown under
-ASan) staying green — wire compat with 1.2/1.5/1.9 is frozen; only the
-implementation moves.
+Do **W1 (single-file download loop) first, on its own branch.** It's the
+smallest slice that removes the per-chunk weave end-to-end and it's directly
+gated by the Tier-3 `file_get` test. The Rust worker reaches the still-C-owned
+`htxf` through the accessor seam (per-file, not per-chunk) and calls
+`hxnet::htxf` / `hxfiles-xfer` / `hxhfs` natively on the byte path — proving
+the shape before W2 (upload) and W3 (folder). The `struct htxf_conn` flip (S0
+— `Arc` + atomics behind the `hx_htxf_*` facade, the direct sibling of the
+`hxconn` / `cfl` moves) lands *after* the worker is Rust, when it's cheap.
+Land nothing without the Tier-3 transfer matrix (`file/folder get/put`, TLS
+variants, cancel/shutdown under ASan) staying green — wire compat with
+1.2/1.5/1.9 is frozen; only the implementation moves.
