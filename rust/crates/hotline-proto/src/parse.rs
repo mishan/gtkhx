@@ -851,6 +851,11 @@ pub fn parse_history_entry(data: &[u8]) -> Option<HistoryEntry<'_>> {
 // any field, which removes the read-past-end risk on a 23-byte
 // suffix.
 
+/// The Hotline file-type FourCC that marks a directory in a `FILE_LIST` entry —
+/// `'f','l','d','r'` as a big-endian `u32`. Callers compare `FileListEntry::ftype`
+/// against this to tell a folder row from a file row.
+pub const FTYPE_FLDR: u32 = u32::from_be_bytes(*b"fldr");
+
 /// One parsed `HTLS_DATA_FILE_LIST` entry. `name` borrows into the
 /// caller's input buffer — copy it out before the input goes away.
 #[derive(Debug, Clone)]
@@ -3566,7 +3571,7 @@ mod tests {
         // Three back-to-back chunks: a folder, a text file, an
         // image. Walker iterates them in order.
         let mut body = Vec::new();
-        body.extend(file_list_chunk(0x666c_6472, 0, 7, 0, b"Public")); // "fldr"
+        body.extend(file_list_chunk(FTYPE_FLDR, 0, 7, 0, b"Public")); // "fldr"
         body.extend(file_list_chunk(0x5445_5854, 0x7474_7874, 100, 0, b"a.txt"));
         body.extend(file_list_chunk(0x4a50_4547, 0, 200, 0, b"pic.jpg")); // "JPEG"
 
@@ -3578,7 +3583,7 @@ mod tests {
         }
         assert_eq!(off, body.len());
         assert_eq!(entries.len(), 3);
-        assert_eq!(entries[0], (0x666c_6472, 7, b"Public".to_vec()));
+        assert_eq!(entries[0], (FTYPE_FLDR, 7, b"Public".to_vec()));
         assert_eq!(entries[1], (0x5445_5854, 100, b"a.txt".to_vec()));
         assert_eq!(entries[2], (0x4a50_4547, 200, b"pic.jpg".to_vec()));
     }
@@ -3587,7 +3592,7 @@ mod tests {
     fn file_list_zero_length_name_legal() {
         // Empty filename: chunk_len = 20 (no fname bytes). The
         // 24-byte fixed prefix is the entire chunk.
-        let body = file_list_chunk(0x666c_6472, 0, 0, 0, b"");
+        let body = file_list_chunk(FTYPE_FLDR, 0, 0, 0, b"");
         assert_eq!(body.len(), 24);
         let (e, next) = parse_file_list_entry(&body, 0).expect("ok");
         assert!(e.name.is_empty());
@@ -3599,7 +3604,7 @@ mod tests {
         // After the last valid entry, fewer than 24 bytes remain.
         // Walker returns None — silently stops, matching the C
         // walker's "while p + sizeof - 1 <= end" loop exit.
-        let body = file_list_chunk(0x666c_6472, 0, 1, 0, b"f");
+        let body = file_list_chunk(FTYPE_FLDR, 0, 1, 0, b"f");
         let first_end = body.len();
         let mut padded = body.clone();
         padded.extend_from_slice(&[0u8; 10]); // 10 bytes of garbage, < 24
@@ -3617,7 +3622,7 @@ mod tests {
     #[test]
     fn file_list_off_past_end() {
         // off beyond buffer is None, not panic.
-        let body = file_list_chunk(0x666c_6472, 0, 1, 0, b"f");
+        let body = file_list_chunk(FTYPE_FLDR, 0, 1, 0, b"f");
         assert!(parse_file_list_entry(&body, body.len() + 100).is_none());
     }
 

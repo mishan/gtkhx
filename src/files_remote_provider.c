@@ -244,9 +244,8 @@ remote_list_timeout (gpointer data)
  *
  * Fires HTLC_HDR_FILE_LIST without going through the legacy
  * hx_list_dir, which is tightly coupled to the gfile_list bookkeeping.
- * We allocate our own cached_filelist (matches the legacy task
- * signature: rcv_task_file_list dereferences cfl->path) and pass
- * the HxRemoteFilesProvider* as the signal data carrier. */
+ * We allocate our own cached_filelist (via hx_cfl_new) and pass the
+ * HxRemoteFilesProvider* as the signal data carrier. */
 static void
 remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
 {
@@ -268,14 +267,14 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
     }
     remote_list_drop_task (self);
 
-    cfl = g_malloc0 (sizeof (struct cached_filelist));
-    cfl->path = g_strdup (path && *path ? path : "/");
+    cfl = hx_cfl_new ();
+    hx_cfl_set_path (cfl, path && *path ? path : "/");
 
     /* Reffed entry — keeps the provider alive while the RPC is
 	 * in flight even if the browser closes. Drops on remove. */
     g_hash_table_insert (pending_listings, self, g_object_ref (self));
 
-    hldir = path_to_hldir (cfl->path, &hldirlen, 0);
+    hldir = path_to_hldir (hx_cfl_path (cfl), &hldirlen, 0);
 
     /* chunk layout moved to gtkhx_proto_build_file_list_chunks.
 	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
@@ -306,8 +305,8 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
 static void
 populate_from_chunks (HxRemoteFilesProvider *self, struct cached_filelist *cfl)
 {
-    gtkhx_files_populate_from_reply (self->listing, cfl ? cfl->fh : NULL,
-                                     cfl ? cfl->fhlen : 0);
+    gtkhx_files_populate_from_reply (self->listing, cfl ? hx_cfl_fh (cfl) : NULL,
+                                     cfl ? hx_cfl_fhlen (cfl) : 0);
 }
 
 gboolean
@@ -366,20 +365,17 @@ hx_remote_files_provider_handle_file_list (gpointer cfl_p, gpointer fh,
 	 * with this path in cfl_path — if a second fetch superseded
 	 * the first, the more-recent one wins via pending_listings's
 	 * single-entry-per-provider invariant). */
-    if (cfl && cfl->path) {
-        gtkhx_files_listing_set_path (self->model, cfl->path);
+    if (cfl && hx_cfl_path (cfl)) {
+        gtkhx_files_listing_set_path (self->model, hx_cfl_path (cfl));
     }
 
     g_signal_emit_by_name (self, "navigated",
                            gtkhx_files_listing_current_path (self->model));
 
-    /* The cached_filelist was allocated by us in remote_send_file_list
-	 * and isn't tracked by the legacy cfl_lookup table — free it.
-	 * The fh data inside it points into the receive buffer and is
-	 * owned by the rcv path; we don't free fh. */
+    /* The cached_filelist was allocated by us in remote_send_file_list and the
+	 * success arm owns it now — free it (the fh buffer drops with it). */
     if (cfl) {
-        g_free (cfl->path);
-        g_free (cfl);
+        hx_cfl_free (cfl);
     }
 
     g_object_unref (self);
@@ -428,18 +424,15 @@ hx_remote_files_provider_handle_file_list_error (gpointer cfl_p, gpointer data)
 	 * path the user navigated to. Adopt it as the current path
 	 * even though the listing failed — otherwise the next
 	 * navigate_up has nothing to walk back from. */
-    if (cfl && cfl->path) {
-        gtkhx_files_listing_set_path (self->model, cfl->path);
+    if (cfl && hx_cfl_path (cfl)) {
+        gtkhx_files_listing_set_path (self->model, hx_cfl_path (cfl));
     }
 
     g_signal_emit_by_name (self, "navigated",
                            gtkhx_files_listing_current_path (self->model));
 
-    /* cfl is owned by rcv.c's caller; we don't free it here.
-	 * The success path's twin (handle_file_list above) does
-	 * free cfl because rcv_task_file_list's success arm
-	 * surrenders ownership to cfl_print → us. The error arm
-	 * keeps ownership upstream. */
+    /* cfl is owned by the caller (rcv_task_file_list's error arm frees it via
+	 * hx_cfl_free right after this returns); we don't free it here. */
 
     g_object_unref (self);
     return TRUE;

@@ -42,6 +42,7 @@
 #include "cicn.h"
 #include "tasks.h"
 #include "rcv.h"
+#include "gtkhx_log.h" /* hx_printf_prefix, INFOPREFIX (recursive GET_R mkdir log) */
 #include "files.h"
 
 #define ICON_FILE 400
@@ -408,29 +409,99 @@ output_file_info (char *path, char *name, char *creator, char *type,
     init_keyaccel (window);
 }
 
-struct cached_filelist *
-cfl_lookup (const char *path)
-{
-    /* the legacy implementation walked the global
-	 * gfile_list to share a cached_filelist with an open browser
-	 * window for that path. With the legacy browser retired the
-	 * sharing has nothing to share with — every caller now gets a
-	 * fresh zeroed cfl and fills in `path` itself. The single
-	 * remaining caller (rcv.c::rcv_task_file_list, recursive
-	 * folder download path) does exactly that. */
-    (void)path;
-    return g_malloc0 (sizeof (struct cached_filelist));
-}
-
+/* Recursive folder-listing / GET_R engine for one FILE_LIST entry, invoked by
+ * the Rust rcv_task_file_list (hxfiles-recv) when cfl is in a recursive mode
+ * (completing > 1). Lifted from the old C rcv_task_file_list; it reads the
+ * now-Rust-owned cfl through the hx_cfl_* accessors. The folder-vs-file decision
+ * is made in the Rust handler (via hotline_proto's FTYPE_FLDR) and passed as
+ * `is_folder`, so no FourCC lives here. A folder entry re-issues FILE_LIST for
+ * the subfolder (a fresh cfl carrying the same completing mode); a leaf in
+ * COMPLETE_GET_R mode mkdir's the local directory tree and xfer_new's the
+ * download. This is genuine files-subsystem C (path_to_hldir, mkdir, xfer_new),
+ * so it stays here rather than moving into the crate. */
 void
-cfl_print (struct cached_filelist *cfl, void *data)
+hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
+                       int is_folder, const guint8 *fname, gsize fnlen,
+                       guint32 fsize)
 {
-    struct hl_filelist_hdr *fh = cfl->fh;
+    const char *cfl_path = hx_cfl_path (cfl);
+    guint completing = hx_cfl_completing (cfl);
+    char *pathbuf;
+    int len;
 
-    if (data) {
-        gtkhx_session_emit_file_list (gtkhx_session_get_default (), cfl, fh,
-                                      data);
+    if (!cfl_path) {
+        return;
     }
+    len = strlen (cfl_path) + 1 + (int)fnlen + 1;
+    pathbuf = g_malloc (len + 1);
+    snprintf (pathbuf, len, "%s%c%.*s", cfl_path[1] ? cfl_path : "", dir_char,
+              (int)fnlen, (const char *)fname);
+
+    if (is_folder) {
+        struct cached_filelist *ncfl;
+        guint16 hldirlen;
+        guint8 *hldir;
+
+        ncfl = hx_cfl_new ();
+        hx_cfl_set_completing (ncfl, completing);
+        hx_cfl_set_filter_argv (ncfl, hx_cfl_filter_argv (cfl));
+        hx_cfl_set_path (ncfl, pathbuf);
+        hldir = path_to_hldir (pathbuf, &hldirlen, 0);
+
+        /* chunk layout via gtkhx_proto_build_file_list_chunks; build BEFORE
+		 * task_new — see hx_send_msg for the rationale. */
+        struct hx_chunk chunks[1];
+        int hc = (int)gtkhx_proto_build_file_list_chunks (
+            hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+        if (hc > 0) {
+            task_new (htlc, RCV_TASK_FN (rcv_task_file_list), ncfl, 0,
+                      "ls_complete");
+            hlwrite_chunks (htlc, HTLC_HDR_FILE_LIST, 0, chunks, hc);
+        }
+        g_free (hldir);
+    } else if (completing == COMPLETE_GET_R) {
+        struct htxf_conn *htxf;
+        char *lpath, *p;
+
+        lpath = g_malloc (len + 1);
+        dirmask (lpath, pathbuf, "/");
+        p = lpath + 1;
+        while ((p = strchr (p, dir_char))) {
+            *p = 0;
+            if (g_mkdir (lpath + 1, S_IRUSR | S_IWUSR | S_IXUSR)) {
+                if (errno != EEXIST) {
+                    hx_printf_prefix (htlc, 0, INFOPREFIX, "mkdir(%s): %s\n",
+                                      lpath + 1, strerror (errno));
+                }
+            }
+            *p++ = '/';
+            while ((guint8)*p == dir_char) {
+                *p++ = '/';
+            }
+        }
+        /* Basename in place: pointer to the last '/'-delimited component within
+		 * lpath; dirchar_fix rewrites those bytes, which lpath+1 (passed to
+		 * xfer_new) then carries. */
+        p = strrchr (lpath + 1, '/');
+        p = p ? p + 1 : lpath + 1;
+        dirchar_fix (p);
+        {
+            char *nm_utf8;
+            gsize nm_utf8_len = 0;
+            /* Store remotename as UTF-8 in memory so the folder-xfer label and
+			 * the file_list populate path agree; xfer_go re-encodes to the wire
+			 * format. */
+            nm_utf8 = gtkhx_text_to_utf8 ((const char *)fname, fnlen,
+                                          &nm_utf8_len);
+            htxf = xfer_new (lpath + 1, cfl_path,
+                             nm_utf8 ? nm_utf8 : (const char *)fname,
+                             nm_utf8 ? nm_utf8_len : fnlen, XFER_GET, 0, fsize);
+            g_free (nm_utf8);
+        }
+        htxf->filter_argv = (char **)hx_cfl_filter_argv (cfl);
+        g_free (lpath);
+    }
+    g_free (pathbuf);
 }
 
 /* path_to_hldir lives in src/path_hldir.c so the Tier 1 unit test

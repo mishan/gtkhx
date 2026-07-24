@@ -1,0 +1,29 @@
+[package]
+rust-version.workspace = true
+name = "hxfiles-recv"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "File-listing receive handler (rcv_task_file_list, ported from rcv.c)"
+publish = false
+
+[lib]
+# staticlib: the rcv_task_file_list C ABI the FILE_LIST senders register via
+#            task_new resolve against this at the final link.
+# rlib: cargo test (the chunk walk + append/recurse dispatch is unit-tested
+#       through recording doubles for the C cfl seam).
+crate-type = ["staticlib", "rlib"]
+
+# This crate OWNS struct cached_filelist (the opaque handle + hx_cfl_* accessor
+# facade, the hxconn playbook): the path, the accumulated fh buffer (a Vec<u8>),
+# completing, and filter_argv all live in Rust, so the FILE_LIST reply's chunk
+# accumulation is native — the walk is hotline-proto's wire::ChunkIter (no
+# gtkhx_proto_* FFI), and the fh buffer is grown here with the exact 4-byte-align
+# + patched-length layout the view's hxfiles-entry populate walks. The C consumers
+# (files_remote_provider.c create/read/free, the file-list emit) go through the
+# accessors. The recursive folder-relist / GET_R engine (hx_cfl_complete_entry,
+# files.c) is the one genuine files-subsystem collaborator the handler still calls
+# out to — mkdir trees, xfer_new, path_to_hldir — reading the Rust cfl via the
+# accessors. cargo test provides in-crate #[cfg(test)] doubles so it runs headless.
+[dependencies]
+hotline-proto = { path = "../hotline-proto" }

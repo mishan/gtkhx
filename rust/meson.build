@@ -704,6 +704,17 @@ rust_hxxfer_recv_dep = declare_dependency(
   ],
 )
 
+# FILE_LIST receive handler (rcv_task_file_list) + the Rust-owned struct
+# cached_filelist (hx_cfl_* accessor facade). std-only C ABI; `cargo test -p
+# hxfiles-recv` runs headless. See docs/rust/network-endgame.md.
+rust_hxfiles_recv_dep = declare_dependency(
+  sources : rust_build,
+  link_args : [
+    '-L' + rust_target_dir / 'release',
+    '-lhxfiles_recv',
+  ],
+)
+
 # HFS metadata sidecar (Rust port of hfs.c). Exposes the exact hfs.h C ABI
 # (hfsinfo_read/write, resource_open/len, type_creator, comment_*,
 # finderinfo_path/resource_path, hfs_set_config) so the C callers (xfers_recv.c

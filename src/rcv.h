@@ -96,14 +96,18 @@ extern void rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *fra
 extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, guint16 *_uid,
                                 int text);
+/* rcv_task_file_list moved to the hxfiles-recv Rust crate, which also owns struct
+ * cached_filelist (the hx_cfl_* accessor facade in files.h). It walks the
+ * FILE_LIST chunks natively and accumulates them into the Rust-owned cfl. */
 extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                 struct cached_filelist *cfl, void *data);
 /* rcv_task_file_getinfo / _file_get / _file_put / _folder_get / _folder_put (and
  * rcv_task_banner_get in banner.h) moved to the hxxfer-recv Rust crate: each
- * parses its reply natively (hotline_proto::parse::*) and delegates the C-owned
- * htxf state change to xfers_recv_bridge.c. The prototypes stay because the C
- * senders (xfers.c, files.c, banner.c) register the handlers via
- * RCV_TASK_FN(); the symbols now resolve against the Rust crate at link. */
+ * parses its reply natively (hotline_proto::parse::*) and reaches the C-owned
+ * htxf state through the hx_htxf_* accessor seam (htxf_accessors.c). The
+ * prototypes stay because the C senders (xfers.c, files.c, banner.c) register the
+ * handlers via RCV_TASK_FN(); the symbols now resolve against the Rust crate at
+ * link. */
 extern void rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *path);
 extern void rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf);
 extern void rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf);
