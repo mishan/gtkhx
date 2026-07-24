@@ -921,8 +921,10 @@ elif host_machine.system() == 'darwin'
                                   modules : ['AudioToolbox', 'AudioUnit', 'CoreAudio'])
 elif host_machine.system() == 'windows'
   # cpal's WASAPI backend uses COM; the windows crate's link directives don't
-  # reach the meson link line, so pull ole32 explicitly.
-  _hxsound_sys_deps += cc.find_library('ole32', required : false)
+  # reach the meson link line, so pull ole32 explicitly. Required so a missing
+  # ole32 fails at configure with a clear message rather than as an opaque link
+  # error later.
+  _hxsound_sys_deps += cc.find_library('ole32')
 endif
 rust_hxsound_dep = declare_dependency(
   sources : rust_build,

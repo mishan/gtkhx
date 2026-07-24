@@ -115,16 +115,24 @@ fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
         return;
     }
 
-    let samples = if src_rate == device_rate {
-        interleaved
+    // Resample to the device rate so rodio's own converter is a pass-through.
+    // If the resampler can't be built we fall back to the original samples at
+    // their *source* rate and let rodio's (lower-quality) converter handle it —
+    // tagging the buffer with device_rate there would make rodio treat
+    // unresampled audio as already-correct and play it at the wrong speed/pitch.
+    let (samples, rate) = if src_rate == device_rate {
+        (interleaved, device_rate)
     } else {
-        resample_to(interleaved, channels, src_rate, device_rate)
+        match resample_to(&interleaved, channels, src_rate, device_rate) {
+            Some(resampled) => (resampled, device_rate),
+            None => (interleaved, src_rate),
+        }
     };
 
-    // Buffer is already at the device rate, so rodio's own sample-rate
-    // converter is a pass-through; it still up/down-mixes channels to match the
-    // output (e.g. mono → stereo), which is cheap and artefact-free.
-    let buffer = SamplesBuffer::new(channels, device_rate, samples);
+    // When rate == device_rate rodio's sample-rate converter is a pass-through;
+    // either way it up/down-mixes channels to match the output (e.g. mono →
+    // stereo), which is cheap and artefact-free.
+    let buffer = SamplesBuffer::new(channels, rate, samples);
     match Sink::try_new(handle) {
         Ok(sink) => {
             sink.append(buffer);
@@ -138,13 +146,14 @@ fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
 }
 
 /// High-quality (windowed-sinc) resample of interleaved f32 audio from `from`
-/// to `to` Hz. On any resampler-setup failure the input is returned unchanged
-/// (rodio then resamples it with its linear converter — degraded but audible).
-fn resample_to(interleaved: Vec<f32>, channels: u16, from: u32, to: u32) -> Vec<f32> {
+/// to `to` Hz, returning the resampled interleaved samples. Returns `None` if
+/// the resampler can't be constructed, so the caller can fall back to the
+/// original samples (at their original rate) and let rodio resample instead.
+fn resample_to(interleaved: &[f32], channels: u16, from: u32, to: u32) -> Option<Vec<f32>> {
     let ch = channels as usize;
     let in_frames = interleaved.len() / ch;
     if in_frames == 0 {
-        return interleaved;
+        return Some(Vec::new());
     }
 
     // Deinterleave into rubato's planar (per-channel) layout.
@@ -166,7 +175,7 @@ fn resample_to(interleaved: Vec<f32>, channels: u16, from: u32, to: u32) -> Vec<
         Ok(r) => r,
         Err(e) => {
             eprintln!("hxsound: resampler init {from}->{to}: {e}");
-            return interleaved;
+            return None;
         }
     };
 
@@ -205,7 +214,7 @@ fn resample_to(interleaved: Vec<f32>, channels: u16, from: u32, to: u32) -> Vec<
             out.push(out_planar[c][start + f]);
         }
     }
-    out
+    Some(out)
 }
 
 /// Decode a C path string into a `PathBuf`. On Unix the raw bytes are the
@@ -237,7 +246,7 @@ mod tests {
         let input: Vec<f32> = (0..in_frames)
             .map(|i| (i as f32 * 0.05).sin() * 0.5)
             .collect();
-        let out = resample_to(input, 1, 8000, 48000);
+        let out = resample_to(&input, 1, 8000, 48000).expect("resampler builds");
         let expected = in_frames * 6;
         // Within a few percent of the ideal 6× ratio.
         assert!(
@@ -258,16 +267,17 @@ mod tests {
             input.push((i as f32 * 0.03).sin()); // L
             input.push((i as f32 * 0.07).cos()); // R
         }
-        let out = resample_to(input, 2, 22050, 44100);
+        let out = resample_to(&input, 2, 22050, 44100).expect("resampler builds");
         assert_eq!(out.len() % 2, 0, "stereo output must stay frame-aligned");
         assert!(out.len() >= frames * 2, "44.1k from 22.05k should ~2× frames");
         assert!(out.iter().all(|s| s.is_finite()));
     }
 
-    /// Empty input is returned as-is rather than panicking.
+    /// Empty input yields an empty result rather than panicking.
     #[test]
     fn empty_input_is_noop() {
-        assert!(resample_to(Vec::new(), 1, 8000, 48000).is_empty());
+        let empty: [f32; 0] = [];
+        assert!(resample_to(&empty, 1, 8000, 48000).unwrap().is_empty());
     }
 }
 
