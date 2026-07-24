@@ -8,9 +8,11 @@
 #   * Linux     — Flatpak bundle (.flatpak) via the existing manifest
 #
 # Triggers:
-#   * push a tag matching v*        → build + create/attach a GitHub Release
-#   * workflow_dispatch (manual)    → build a snapshot; artifacts are attached
-#     to the workflow run (downloadable from the Actions tab), no Release.
+#   * push a tag matching v*        → build + a draft GitHub Release for the tag
+#   * workflow_dispatch (manual)    → build; artifacts are always attached to the
+#     workflow run (downloadable from the Actions tab). Tick the create_release
+#     input to also publish a "snapshot" pre-release at the current commit;
+#     leave it unticked for artifacts only (no Release).
 #
 # The per-platform build recipes mirror the breakage-tripwire jobs in tests.yml
 # (same deps + caching); this workflow adds the packaging step + artifact upload.
@@ -27,6 +29,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish a snapshot pre-release from this run (otherwise just uploads workflow artifacts)'
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -221,15 +228,20 @@ jobs:
           if-no-files-found: error
 
   # ------------------------------------------------------------------
-  # Attach everything to a GitHub Release (tag pushes only)
+  # Publish a GitHub Release.
+  #   * tag push (v*)              → a draft release for that version (review
+  #                                  the assets, then publish).
+  #   * manual run + create_release → a published "snapshot" pre-release at the
+  #                                  current commit. A plain manual run without
+  #                                  the box ticked lands here NOT AT ALL — it
+  #                                  only leaves downloadable workflow artifacts.
   # ------------------------------------------------------------------
   release:
-    name: create release
+    name: publish release
     needs: [windows-package, macos-package, linux-flatpak]
-    # Only ever on a tag *push* — never on a manual workflow_dispatch (even one
-    # dispatched against a tag ref). Manual runs just leave downloadable
-    # workflow artifacts; tagging is the deliberate act that cuts a release.
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: >-
+      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.create_release)
     runs-on: ubuntu-latest
     steps:
       - name: download artifacts
@@ -238,9 +250,29 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      - name: create release
+      # Tag push: a draft release named for the tag, for review before publish.
+      - name: tagged release
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          draft: true          # review the assets before publishing
+          draft: true
+          generate_release_notes: true
+
+      # Manual snapshot: a published pre-release at the current commit. The tag
+      # (snapshot-<short-sha>) matches the artifact filenames and is created at
+      # this SHA; re-running on the same commit updates the same release.
+      - name: snapshot version
+        if: github.event_name == 'workflow_dispatch'
+        id: snap
+        run: echo "sha=${GITHUB_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+      - name: snapshot pre-release
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          tag_name: snapshot-${{ steps.snap.outputs.sha }}
+          name: Snapshot ${{ steps.snap.outputs.sha }}
+          prerelease: true
           generate_release_notes: true
