@@ -58,6 +58,10 @@ command: gtkhx
 
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
+  # Modules built into /app (libpanel, poppler, imagemagick) land their .pc in
+  # /app/lib64/pkgconfig on this SDK, which isn't on the default PKG_CONFIG_PATH
+  # — so a later module's `dependency('libpanel-1')` fails to find them. Add it.
+  append-pkg-config-path: /app/lib64/pkgconfig
 
 # Sandbox permissions. Each line is justified — Flathub reviewers
 # expect a finish-args list that's the minimum for the app to work.

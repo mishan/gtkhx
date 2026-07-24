@@ -6,7 +6,7 @@
   - Bookmarks dialog supports exporting bookmarks to legacy Hotline bookmark files
   - Built-in bookmarks can now be deleted
 - Build
-  - GtkHx can now be built for OS X and Windows
+  - GtkHx is now available for macOS and Windows
 - Code Modernization
   - GtkHx almost has more Rust code than C code
 - Sound
