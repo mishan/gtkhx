@@ -67,10 +67,13 @@ fn config() -> &'static Mutex<Config> {
     CFG.get_or_init(|| Mutex::new(Config::default()))
 }
 
-/// Snapshot the global config. Recovers from a poisoned mutex (`into_inner`)
-/// rather than `unwrap`-panicking — an unwind across the `extern "C"` boundary
-/// would be UB, and the config is plain data with no invariant to protect.
-fn current_config() -> Config {
+/// Snapshot the global config (set by `hfs_set_config`). Recovers from a
+/// poisoned mutex (`into_inner`) rather than `unwrap`-panicking — an unwind
+/// across the `extern "C"` boundary would be UB, and the config is plain data
+/// with no invariant to protect. `pub` so in-process Rust workers (the
+/// `hxnet::xfer` transfer loop) can read the same global the C callers set,
+/// rather than threading a `Config` through the FFI.
+pub fn current_config() -> Config {
     config()
         .lock()
         .unwrap_or_else(|e| e.into_inner())

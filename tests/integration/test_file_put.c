@@ -11,8 +11,8 @@
  * tests/integration/test_file_put.c — upload a file to mhxd over the
  * HTXF subchannel driving the PRODUCTION send state machine
  * (xfers_send.c::file_send_one), then download it back through the
- * PRODUCTION receive machine (xfers_recv.c::file_recv_one) and assert
- * the round-tripped bytes are byte-for-byte what we uploaded.
+ * PRODUCTION receive machine (hxnet::xfer::hxnet_xfer_file_recv_one) and
+ * assert the round-tripped bytes are byte-for-byte what we uploaded.
  *
  * This exercises the real FILP encode: the header template, the
  * type/creator + timestamp fill, the DATA fork-length pack, and the fork
@@ -44,27 +44,6 @@
 #include "xfers_send.h"
 #include "integration_harness.h"
 
-/* --- link stubs for the send/recv machines' GTK-shell couplings --- */
-
-void
-hx_preview_set_info (hx_preview *p, const char *type, const char *creator)
-{
-    (void)p;
-    (void)type;
-    (void)creator;
-}
-void
-hx_preview_chunk (hx_preview *p, const char *buf, gsize len)
-{
-    (void)p;
-    (void)buf;
-    (void)len;
-}
-void
-hx_preview_done (hx_preview *p)
-{
-    (void)p;
-}
 
 static void
 noop_progress (struct htxf_conn *htxf)
@@ -72,9 +51,18 @@ noop_progress (struct htxf_conn *htxf)
     (void)htxf;
 }
 
-/* Download Uploads/<fname> via the production file_recv_one into a fresh
- * temp file and return its contents (caller frees). NULL on any failure
- * along the way. */
+/* HxnetXferParams progress shape (user_data + byte delta) for the Rust
+ * hxnet_xfer_file_recv_one download path. */
+static void
+noop_progress_bump (void *user_data, guint64 delta)
+{
+    (void)user_data;
+    (void)delta;
+}
+
+/* Download Uploads/<fname> via the production hxnet_xfer_file_recv_one into
+ * a fresh temp file and return its contents (caller frees). NULL on any
+ * failure along the way. */
 static char *
 download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
                    gsize *out_len)
@@ -119,9 +107,19 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
     htxf.total_size = reply.size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/back.txt", tmpdir);
 
-    guint8 buf[1024];
     char *content = NULL;
-    if (file_recv_one (&htxf, reply.size, buf, noop_progress) == 0) {
+    struct HxnetXferParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.path = htxf.path;
+    params.file_budget = reply.size;
+    params.opt_preview = htxf.opt.preview;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.preview = htxf.preview;
+    params.user_data = &htxf;
+    params.progress = noop_progress_bump;
+    if (hxnet_xfer_file_recv_one (&params) == 0) {
         if (!g_file_get_contents (htxf.path, &content, out_len, NULL)) {
             content = NULL;
         }
