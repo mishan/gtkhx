@@ -216,21 +216,23 @@ static char *xtext_stamp_format = NULL;
 static int
 xtext_get_stamp_str (time_t tim, char **ret)
 {
-	char buf[64];
-	struct tm tmv;
-	int len;
+	g_autoptr(GDateTime) dt = g_date_time_new_from_unix_local ((gint64) tim);
 	const char *fmt = xtext_stamp_format && *xtext_stamp_format
 	                ? xtext_stamp_format
 	                : XTEXT_STAMP_FORMAT_DEFAULT;
 
-	localtime_r (&tim, &tmv);
-	len = strftime (buf, sizeof buf, fmt, &tmv);
-	if (len <= 0) {
+	if (!dt) {
 		*ret = g_strdup ("");
 		return 0;
 	}
-	*ret = g_strdup (buf);
-	return len;
+
+	*ret = g_date_time_format (dt, fmt);
+	if (!*ret) {
+		*ret = g_strdup ("");
+		return 0;
+	}
+
+	return (int) strlen (*ret);
 }
 
 /* is delimiter */

@@ -166,31 +166,11 @@ if voice_enabled
   gtkhx_sources += voice_sources
 endif
 
-# -----------------------------------------------------------------------------
-# Generated config.h — replaces autotools' AC_DEFINE machinery.
-#
-# The HAVE_* probes from the old configure.in are gone: snprintf, vsnprintf,
-# localtime_r, basename, strcasestr, getopt_long, getaddrinfo are all POSIX
-# now and present on every target we care about. dlopen is in libc on modern
-# glibc; we still link -ldl conditionally for older systems.
-# -----------------------------------------------------------------------------
 conf = configuration_data()
 conf.set_quoted('PACKAGE',            meson.project_name())
 conf.set_quoted('VERSION',            meson.project_version())
 conf.set_quoted('GETTEXT_PACKAGE',    meson.project_name())
 conf.set_quoted('PACKAGE_LOCALE_DIR', get_option('prefix') / get_option('localedir'))
-
-# Headers/feature defines historically probed via autoconf. All universally
-# present on the targets we care about (any modern glibc/musl/BSD); we set
-# them unconditionally. Previously these were also load-bearing for the
-# vendored dfa.c's `#ifdef HAVE_FOO` gates — that file has been replaced
-# by GLib's GRegex (PCRE2) so the constraint is gone, but the defines are
-# still useful for the few HAVE_LIBINTL_H consumers etc.
-conf.set('STDC_HEADERS',    1)
-conf.set('HAVE_STRING_H',   1)
-conf.set('HAVE_STDLIB_H',   1)
-conf.set('HAVE_LIMITS_H',   1)
-conf.set('HAVE_LIBINTL_H',  1)
 
 # Phase 5+: optional preview viewers. Each define gates a single
 # struct hx_viewer in src/preview.c; without it the corresponding

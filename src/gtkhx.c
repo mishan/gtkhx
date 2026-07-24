@@ -30,9 +30,7 @@
 #include <errno.h>
 #include <ctype.h>
 #include <locale.h>
-#ifdef HAVE_LIBINTL_H
 #include <libintl.h> /* bindtextdomain, bind_textdomain_codeset, textdomain */
-#endif
 #include <getopt.h>
 #include "hx.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
@@ -1195,11 +1193,9 @@ init (int argc, char **argv)
      * defined in config.h via meson; the codeset bind tells libintl to
      * hand us UTF-8 regardless of the user's LC_CTYPE so GTK doesn't
      * trip over Latin-1 in fr_FR / es_ES locale aliases. */
-#ifdef HAVE_LIBINTL_H
     bindtextdomain (PACKAGE, PACKAGE_LOCALE_DIR);
     bind_textdomain_codeset (PACKAGE, "UTF-8");
     textdomain (PACKAGE);
-#endif
     gtk_init ();
     /* panel_init() registers libpanel's boxed
      * types and CSS provider. It has to run before the first
