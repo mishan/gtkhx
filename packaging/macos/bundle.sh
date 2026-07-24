@@ -145,6 +145,12 @@ if [ -d sounds ]; then
   mkdir -p "$RES/share/gtkhx/sounds"
   cp sounds/*.wav "$RES/share/gtkhx/sounds/" 2>/dev/null || true
 fi
+# icons.rsrc — the classic Hotline colour-icon (cicn) set for the user list.
+# init_icons() finds it via the launcher's XDG_DATA_DIRS (Resources/share).
+if [ -f icons.rsrc ]; then
+  mkdir -p "$RES/share/gtkhx/icons"
+  cp icons.rsrc "$RES/share/gtkhx/icons/"
+fi
 
 # ---- app icon (.icns from src/pixmaps) -------------------------------------
 echo ">> building app icon"
