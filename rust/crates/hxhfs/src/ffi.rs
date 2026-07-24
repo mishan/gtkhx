@@ -314,9 +314,13 @@ fn file_into_fd(f: File, mode: c_int) -> c_int {
         // <io.h>: allocate a CRT file descriptor for an existing OS HANDLE.
         fn _open_osfhandle(osfhandle: isize, flags: c_int) -> c_int;
     }
-    // Descriptors are binary by default (no _O_TEXT); carry O_APPEND through as
-    // the CRT's _O_APPEND (0x0008). Access is governed by the HANDLE itself.
-    let flags = if mode & libc::O_APPEND != 0 { 0x0008 } else { 0 };
+    // _open_osfhandle records the descriptor's CRT access mode from `flags`, and
+    // _O_RDONLY is 0x0000 — so passing 0 yields a read-only descriptor whose
+    // _write() fails even though the HANDLE is writable. Carry the caller's
+    // access-mode + append bits through; on Windows these share libc's O_* values
+    // (O_RDONLY=0, O_WRONLY=1, O_RDWR=2, O_APPEND=8), exactly the _O_* set
+    // _open_osfhandle accepts. Binary is the default (no _O_TEXT).
+    let flags = mode & (O_ACCMODE | libc::O_APPEND);
     let handle = f.into_raw_handle();
     let fd = unsafe { _open_osfhandle(handle as isize, flags) };
     if fd == -1 {
