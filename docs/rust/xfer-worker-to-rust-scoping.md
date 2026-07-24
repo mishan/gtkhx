@@ -192,6 +192,55 @@ in-crate native.
 W1 is the first increment. W1–W3 are the throughput-sensitive rewrites; S0 is
 the lifecycle keystone (now cheap); S1 is cleanup.
 
+## W1 — concrete shape (the first increment)
+
+The single-file download is `get_thread` (`xfers.c`, a ~30-line driver:
+`htxf_connect` → `file_recv_one(total_size)` → play sound + final progress →
+`htxf_io_release`) around `file_recv_one` (`xfers_recv.c`, ~230 lines — the
+real work). `file_recv_one`'s structure:
+
+1. read the 40-byte FILP fixed header;
+2. `gtkhx_ffo_info_block_len(buf[38], buf[39])` → read the info block;
+3. `gtkhx_ffo_parse_filp_info(...)` → type/creator, comment, times, data-fork
+   length; `hfsinfo_write(path, fi)` (skipped for previews);
+4. data fork: `open(path)` + optional `lseek(data_pos)` + copy loop
+   (`rd_wr_recv`), *or* stream through the preview;
+5. resource fork (`get_rsrc`): skip for previews; a timed drain for folder
+   streams; else read the 16-byte MACR marker, `gtkhx_ffo_fork_len`,
+   `resource_open` + optional `lseek(rsrc_pos)` + copy loop;
+6. `hfsinfo_write` again.
+
+**Ported to `hxnet::xfer`, each dependency goes native or to a narrow seam:**
+
+- **Transport (hot path).** `htxf_io_read` → call `hxnet::htxf`'s read
+  *in-crate* on the `HtxfConn` the worker gets from `hx_htxf_hx(htxf)`. The
+  `canceled` re-check + errno mapping that `htxf_io.c` did move into a small
+  Rust read wrapper.
+- **Codec.** `gtkhx_ffo_*` → `hxfiles-xfer` native calls.
+- **Local forks.** `hfsinfo_write` / `resource_open` → `hxhfs` native;
+  `open`/`write`/`lseek`/`fsync`/`close` → `std::fs`.
+- **Preview + progress (view seam).** `hx_preview_chunk/set_info/done` and the
+  per-chunk progress emit stay FFI/bridge calls (they already marshal to
+  main); the worker stays GTK-free.
+
+**Accessors W1 needs** (extend `htxf_accessors.c`; getters unless noted):
+`hx` (the `HtxfConn*`), `total_pos` (get + set — bumped per chunk; keep a Rust
+local and push at progress points), `total_size`, `data_pos`, `rsrc_pos`,
+`opt.large`, `opt.folder`, `canceled`. (`path`, `opt.preview`, `preview`,
+`data_size` already exist.) These are per-file, not per-chunk, except the
+`total_pos` push + `canceled` check, which sit alongside the progress emit that
+already crosses per chunk.
+
+**The one real decision — `hxhfs` config threading (risk #3).** The native
+`hxhfs` fns (`hfsinfo_write`, `resource_open`) take a `Config` (dir_char +
+sidecar mode); today the C wrappers supply a process global. The Rust worker
+needs that config — simplest is a `hxhfs` process-global set once at startup
+(mirroring the C global), read by the worker. Decide this first in W1.
+
+**Gate:** Tier-3 `file_get` (solo download, plain + TLS) is the W1 regression
+guard; it already drives `xfer_ready_write` → the worker → progress →
+completion end-to-end.
+
 ## Risks / open questions
 
 1. **Throughput.** The whole point is removing per-chunk FFI, so this should
