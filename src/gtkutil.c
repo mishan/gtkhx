@@ -25,7 +25,6 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <gdk/gdkkeysyms.h>
-#include <sys/time.h>
 #include <time.h>
 #include "hx.h"
 #include "gtkhx_icon.h"

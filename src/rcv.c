@@ -639,7 +639,7 @@ hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     if (n != (ssize_t)frame_len) {
         g_warning ("hx_rcv_dump: short write to hx.dump");
     }
-    fsync (fd);
+    hx_fsync (fd);
     close (fd);
 }
 

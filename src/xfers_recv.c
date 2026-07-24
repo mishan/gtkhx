@@ -204,7 +204,7 @@ file_recv_one (struct htxf_conn *htxf, guint64 file_budget, guint8 *buf,
             lseek (f, htxf->data_pos, SEEK_SET);
         }
         retval = rd_wr_recv (f, fork_len, htxf, progress);
-        fsync (f);
+        hx_fsync (f);
         close (f);
     } else {
         /* The preview window is constructed on the main thread by

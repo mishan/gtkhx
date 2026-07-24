@@ -26,7 +26,6 @@
 #include <adwaita.h>
 #include <libpanel.h>
 #include <gdk/gdkkeysyms.h>
-#include <sys/time.h>
 #include <time.h>
 #include <errno.h>
 #include <ctype.h>

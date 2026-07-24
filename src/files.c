@@ -24,7 +24,6 @@
 #include <gtk/gtk.h>
 #include <adwaita.h>
 #include <ctype.h>
-#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <glib/gstdio.h> /* g_lstat / GStatBuf (portable) */

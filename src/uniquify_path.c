@@ -41,7 +41,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
-#include <sys/param.h>          /* MAXPATHLEN */
+#include "compat.h"             /* MAXPATHLEN */
 #include "uniquify_path.h"
 
 void

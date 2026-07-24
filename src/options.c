@@ -24,7 +24,6 @@
 #include <unistd.h>
 #include <gtk/gtk.h>
 #include <adwaita.h>
-#include <sys/time.h>
 #include <time.h>
 #include "hx.h"
 #include "hxconn.h"

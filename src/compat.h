@@ -36,6 +36,17 @@
 #define RETSIGTYPE void
 #endif
 
+/* fsync(2): flush a file's data to disk. The Windows CRT spells it
+ * _commit(); everywhere else it's POSIX fsync. Takes an OS file
+ * descriptor on both. */
+#ifdef _WIN32
+#include <io.h>
+static inline int hx_fsync (int fd) { return _commit (fd); }
+#else
+#include <unistd.h>
+static inline int hx_fsync (int fd) { return fsync (fd); }
+#endif
+
 #define HOSTLEN 256
 #define MAX_HOTLINE_PACKET_LEN 0x100000
 #define UNKNOWN_TYPECREA "TEXTR*ch"
