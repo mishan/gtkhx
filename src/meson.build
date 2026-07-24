@@ -315,9 +315,34 @@ if voice_enabled
   rust_deps += rust_hxvoice_send_dep
 endif
 
+# Windows resource: file icon + embedded application manifest (asInvoker, no UAC)
+# + version metadata. windres compiles gtkhx.rc into an object linked below.
+# Guarded to Windows so nothing here touches the Linux/macOS build.
+gtkhx_win_res = []
+if host_machine.system() == 'windows'
+  _ver = meson.project_version().split('-')[0].split('.')
+  _rc_conf = configuration_data()
+  _rc_conf.set('VER_MAJOR',   _ver.get(0, '0'))
+  _rc_conf.set('VER_MINOR',   _ver.get(1, '0'))
+  _rc_conf.set('VER_PATCH',   _ver.get(2, '0'))
+  _rc_conf.set('VERSION_STR', meson.project_version())
+  _gtkhx_rc = configure_file(
+    input         : 'gtkhx.rc.in',
+    output        : 'gtkhx.rc',
+    configuration : _rc_conf,
+  )
+  gtkhx_win_res = import('windows').compile_resources(
+    _gtkhx_rc,
+    # windres reads the .ico / .manifest the .rc references from here.
+    include_directories : include_directories('.'),
+    depend_files        : files('gtkhx.ico', 'gtkhx.manifest'),
+  )
+endif
+
 executable('gtkhx',
   gtkhx_sources,
   gtkhx_resources,
+  gtkhx_win_res,
   dependencies        : deps + rust_deps,
   include_directories : include_directories('.'),
   install             : true,
