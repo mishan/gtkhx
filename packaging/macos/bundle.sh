@@ -17,9 +17,8 @@
 # launcher backstops any of their deps that didn't get rewritten.
 #
 # Best-effort collector — treat the first CI runs as the real test. Most likely
-# to need iteration: the curated GStreamer plugin list, and the PREFIX-relative
-# sound lookup in src/sound.c (a relocated .app can't find $PREFIX/share/gtkhx/
-# sounds — staged here but the lookup itself needs a relocatable follow-up).
+# to need iteration: the curated GStreamer plugin list. (Alert sounds resolve via
+# the launcher's XDG_DATA_DIRS — see sound_resolve in src/sound.c.)
 set -euo pipefail
 
 BUILD_DIR="${1:-build}"
@@ -36,6 +35,21 @@ MACOS="$APP/Contents/MacOS"
 RES="$APP/Contents/Resources"
 FW="$APP/Contents/Frameworks"
 
+# Search paths passed to EVERY dylibbundler call. GStreamer plugins/libs
+# reference their deps via @rpath / relative names dylibbundler can't resolve on
+# its own; without a search path it drops to an interactive "specify the
+# directory where this library is located" prompt that hangs a CI run forever
+# (no TTY). Cover Homebrew's main lib dir plus every keg-only formula's lib.
+DB_SEARCH=(--search-path "$BREW/lib")
+for _d in "$BREW"/opt/*/lib; do [ -d "$_d" ] && DB_SEARCH+=(--search-path "$_d"); done
+
+# Hang-proof wrapper: even with the search paths above, an unexpected unresolved
+# library would drop dylibbundler into its stdin prompt and spin forever in CI.
+# Feeding it an endless "quit" makes such a case abort the pass (non-zero) rather
+# than block. The process-substitution keeps dylibbundler's own exit status (a
+# plain `yes | ` pipe would mask it / trip pipefail on SIGPIPE).
+run_dylibbundler() { dylibbundler "$@" < <(yes quit); }
+
 echo ">> staging $APP"
 rm -rf "$APP"
 mkdir -p "$MACOS" "$RES" "$FW"
@@ -45,10 +59,11 @@ cp "$BIN" "$MACOS/gtkhx-bin"
 # dylibbundler follows the binary's load commands, copies every non-system dylib
 # into Frameworks, and rewrites install names to @executable_path/../Frameworks.
 echo ">> bundling linked dylibs"
-dylibbundler --create-dir --overwrite-files --bundle-deps \
+run_dylibbundler --create-dir --overwrite-files --bundle-deps \
   --fix-file "$MACOS/gtkhx-bin" \
   --dest-dir "$FW" \
-  --install-path "@executable_path/../Frameworks/"
+  --install-path "@executable_path/../Frameworks/" \
+  "${DB_SEARCH[@]}"
 
 # ---- GStreamer plugins (voice: -Dvoice=enabled) ----------------------------
 # dlopen'd, so dylibbundler didn't see them. Copy the voice pipeline's elements
@@ -75,10 +90,10 @@ if [ -d "$GST_SRC" ]; then
   # Fix each plugin's deps into Frameworks (best-effort; DYLD fallback backstops).
   for dylib in "$GST_DST"/*.dylib; do
     [ -f "$dylib" ] || continue   # skip an unmatched glob (would abort set -e)
-    dylibbundler --overwrite-files --bundle-deps \
+    run_dylibbundler --overwrite-files --bundle-deps \
       --fix-file "$dylib" --dest-dir "$FW" \
       --install-path "@executable_path/../Frameworks/" \
-      --search-path "$FW" 2>/dev/null || \
+      "${DB_SEARCH[@]}" --search-path "$FW" 2>/dev/null || \
       echo "::warning:: dylibbundler pass failed for $(basename "$dylib")"
   done
   # Rewrite the scanner's own load commands too. As shipped it references its
@@ -87,10 +102,10 @@ if [ -d "$GST_SRC" ]; then
   # from Frameworks/gstreamer-1.0-libexec/, so its siblings sit one level up).
   scanner_dst="$FW/gstreamer-1.0-libexec/gst-plugin-scanner"
   if [ -f "$scanner_dst" ]; then
-    dylibbundler --overwrite-files --bundle-deps \
+    run_dylibbundler --overwrite-files --bundle-deps \
       --fix-file "$scanner_dst" --dest-dir "$FW" \
       --install-path "@executable_path/../" \
-      --search-path "$FW" 2>/dev/null || \
+      "${DB_SEARCH[@]}" --search-path "$FW" 2>/dev/null || \
       echo "::warning:: dylibbundler pass failed for gst-plugin-scanner"
   fi
 else
@@ -106,8 +121,9 @@ if [ -d "$PIXBUF_SRC/loaders" ]; then
   cp "$PIXBUF_SRC"/loaders/*.so "$PIXBUF_DST/loaders/"
   for so in "$PIXBUF_DST"/loaders/*.so; do
     [ -f "$so" ] || continue   # skip an unmatched glob (would abort set -e)
-    dylibbundler --overwrite-files --bundle-deps --fix-file "$so" \
-      --dest-dir "$FW" --install-path "@executable_path/../Frameworks/" 2>/dev/null || true
+    run_dylibbundler --overwrite-files --bundle-deps --fix-file "$so" \
+      --dest-dir "$FW" --install-path "@executable_path/../Frameworks/" \
+      "${DB_SEARCH[@]}" 2>/dev/null || true
   done
   ( cd "$PIXBUF_DST" && GDK_PIXBUF_MODULEDIR=loaders \
       gdk-pixbuf-query-loaders loaders/*.so > loaders.cache )

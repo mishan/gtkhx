@@ -56,7 +56,10 @@ jobs:
             cc:p meson:p ninja:p pkgconf:p rust:p
             gtk4:p libadwaita:p libpanel:p gettext:p
             gstreamer:p gst-plugins-base:p gst-plugins-good:p gst-plugins-bad:p
-            libnice:p zip:p
+            libnice:p
+          # zip is a plain MSYS package (no mingw-w64-ucrt-x86_64- variant), so
+          # it goes through `install`, not pacboy's ':p' prefix resolver.
+          install: zip
 
       - name: cache rust build
         uses: actions/cache@v4
@@ -167,14 +170,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: install flatpak toolchain
+      - name: install flatpak-builder
         run: |
           sudo apt-get update
           sudo apt-get install -y flatpak flatpak-builder
-          flatpak remote-add --if-not-exists flathub \
-            https://flathub.org/repo/flathub.flatpakrepo
 
-      - name: cache flatpak-builder
+      # Restore the user flatpak install (runtime + SDK) and flatpak-builder's
+      # download/ccache cache BEFORE installing, so a warm cache skips the
+      # ~1 GB GNOME runtime pull.
+      - name: cache flatpak
         uses: actions/cache@v4
         with:
           path: |
@@ -183,9 +187,18 @@ jobs:
           key: flatpak-${{ hashFiles('com.nasledov.gtkhx.yml') }}
           restore-keys: flatpak-
 
+      - name: flathub remote + GNOME 49 runtime
+        # User-scoped: a *system* remote/install needs root/polkit, which the CI
+        # user isn't granted ("ConfigureRemote not allowed for user"). The
+        # build script requires org.gnome.Platform//49 + org.gnome.Sdk//49 to be
+        # present before it runs. install is a no-op when the cache restored them.
+        run: |
+          flatpak remote-add --user --if-not-exists flathub \
+            https://flathub.org/repo/flathub.flatpakrepo
+          flatpak install --user -y --noninteractive flathub \
+            org.gnome.Platform//49 org.gnome.Sdk//49
+
       - name: build flatpak bundle
-        # The GNOME 49 runtime + sdk are pulled by flatpak-builder from the
-        # manifest's declared runtime; --user keeps it in the cached dir above.
         run: tools/build-flatpak-bundle.sh -o gtkhx.flatpak
 
       - name: name the artifact
