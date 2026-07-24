@@ -9,6 +9,8 @@
   - GtkHx is now available for macOS and Windows
 - Code Modernization
   - GtkHx almost has more Rust code than C code
+- User Interface
+  - Button icons now default to their original size, rather than upscaled
 - Sound
   - Replaced libcanberra with rodio for notification sound playback
 
