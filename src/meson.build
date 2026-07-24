@@ -321,4 +321,7 @@ executable('gtkhx',
   dependencies        : deps + rust_deps,
   include_directories : include_directories('.'),
   install             : true,
+  # GUI subsystem on Windows so double-clicking the exe doesn't pop a console
+  # window (mingw still enters through main()). Ignored on non-PE targets.
+  win_subsystem       : 'windows',
 )
