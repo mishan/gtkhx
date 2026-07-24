@@ -1,0 +1,290 @@
+//! `hxsound` — cross-platform WAV notification-sound playback for GtkHx.
+//!
+//! Replaces the Linux-only GSound / libcanberra path in `src/sound.c`. The C
+//! side still owns the event → filename mapping and the on-disk sound-file
+//! search path; this crate is just the playback backend: given a path to a WAV
+//! file, play it fire-and-forget.
+//!
+//! Design: a single lazily-spawned audio thread owns the (`!Send`) rodio
+//! `OutputStream` and pulls play requests off an mpsc channel. It opens the
+//! default output device at its own default config so we know the exact rate
+//! the hardware runs at. Each request decodes the WAV, high-quality-resamples
+//! it to that device rate (see below), and appends it to a **detached** `Sink`,
+//! so the sound plays to completion on cpal's audio callback without blocking
+//! the thread and overlapping notification sounds mix on the shared stream.
+//!
+//! Resampling: the notification WAVs are 8/11/22 kHz. rodio's built-in
+//! sample-rate converter is plain linear interpolation, which leaves audible
+//! aliasing when upsampling those to a 44.1/48 kHz output device. We instead
+//! pre-resample each clip to the device's own rate with rubato's windowed-sinc
+//! resampler, then hand rodio a buffer already at the device rate so rodio's
+//! converter is a no-op. This matches the quality of the gsound/PipeWire path.
+//!
+//! [`hx_sound_play`] is the C entry point — thread-safe (it just sends on the
+//! channel), and a graceful no-op when the path is bad or no audio device is
+//! available (headless CI, no server), matching the old "sounds simply don't
+//! play" behaviour on platforms without a backend.
+
+use std::ffi::{c_char, CStr};
+use std::fs::File;
+use std::io::BufReader;
+use std::path::PathBuf;
+use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::OnceLock;
+use std::thread;
+
+use rodio::buffer::SamplesBuffer;
+use rodio::cpal::traits::{DeviceTrait, HostTrait};
+use rodio::{Decoder, OutputStream, OutputStreamHandle, Sink, Source};
+use rubato::{
+    Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
+};
+
+/// Lazily-spawned audio thread's request channel. `get_or_init` runs exactly
+/// once; every caller thereafter clones the same `Sender`.
+static PLAYER: OnceLock<Sender<PathBuf>> = OnceLock::new();
+
+fn player() -> &'static Sender<PathBuf> {
+    PLAYER.get_or_init(|| {
+        let (tx, rx) = channel::<PathBuf>();
+        // If the thread can't be spawned (effectively never), the returned
+        // sender is simply never drained and every send is a dropped no-op.
+        let _ = thread::Builder::new()
+            .name("hxsound".into())
+            .spawn(move || audio_loop(rx));
+        tx
+    })
+}
+
+fn audio_loop(rx: Receiver<PathBuf>) {
+    // Open the default output device at its own default config so we know the
+    // exact sample rate the stream runs at and can resample clips to match.
+    // With no audio device (headless CI, no sound server) there's nothing to
+    // play — return, dropping the receiver; subsequent sends fail silently, so
+    // sounds are a no-op rather than a crash. Logged once so the "why is there
+    // no sound" case is diagnosable.
+    let host = rodio::cpal::default_host();
+    let device = match host.default_output_device() {
+        Some(d) => d,
+        None => {
+            eprintln!("hxsound: no default output device; sounds disabled");
+            return;
+        }
+    };
+    let config = match device.default_output_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("hxsound: no default output config ({e}); sounds disabled");
+            return;
+        }
+    };
+    let device_rate = config.sample_rate().0;
+    let (_stream, handle) = match OutputStream::try_from_device_config(&device, config) {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("hxsound: cannot open output stream ({e}); sounds disabled");
+            return;
+        }
+    };
+    for path in rx {
+        play_one(&handle, device_rate, &path);
+    }
+}
+
+fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
+    let file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            eprintln!("hxsound: open {}: {e}", path.display());
+            return;
+        }
+    };
+    let decoder = match Decoder::new(BufReader::new(file)) {
+        Ok(d) => d,
+        Err(e) => {
+            eprintln!("hxsound: decode {}: {e}", path.display());
+            return;
+        }
+    };
+
+    let channels = decoder.channels();
+    let src_rate = decoder.sample_rate();
+    // rodio decoders yield i16 samples; normalise to f32 in [-1, 1].
+    let interleaved: Vec<f32> = decoder.map(|s| s as f32 / 32768.0).collect();
+    if interleaved.is_empty() || channels == 0 {
+        return;
+    }
+
+    let samples = if src_rate == device_rate {
+        interleaved
+    } else {
+        resample_to(interleaved, channels, src_rate, device_rate)
+    };
+
+    // Buffer is already at the device rate, so rodio's own sample-rate
+    // converter is a pass-through; it still up/down-mixes channels to match the
+    // output (e.g. mono → stereo), which is cheap and artefact-free.
+    let buffer = SamplesBuffer::new(channels, device_rate, samples);
+    match Sink::try_new(handle) {
+        Ok(sink) => {
+            sink.append(buffer);
+            // Detach so playback runs to completion on cpal's callback thread
+            // without us holding the Sink; the loop is free to serve the next
+            // request and concurrent sounds mix on the shared stream.
+            sink.detach();
+        }
+        Err(e) => eprintln!("hxsound: sink: {e}"),
+    }
+}
+
+/// High-quality (windowed-sinc) resample of interleaved f32 audio from `from`
+/// to `to` Hz. On any resampler-setup failure the input is returned unchanged
+/// (rodio then resamples it with its linear converter — degraded but audible).
+fn resample_to(interleaved: Vec<f32>, channels: u16, from: u32, to: u32) -> Vec<f32> {
+    let ch = channels as usize;
+    let in_frames = interleaved.len() / ch;
+    if in_frames == 0 {
+        return interleaved;
+    }
+
+    // Deinterleave into rubato's planar (per-channel) layout.
+    let mut planar: Vec<Vec<f32>> = vec![Vec::with_capacity(in_frames); ch];
+    for (i, s) in interleaved.iter().enumerate() {
+        planar[i % ch].push(*s);
+    }
+
+    let ratio = to as f64 / from as f64;
+    let params = SincInterpolationParameters {
+        sinc_len: 256,
+        f_cutoff: 0.95,
+        interpolation: SincInterpolationType::Linear,
+        oversampling_factor: 256,
+        window: WindowFunction::BlackmanHarris2,
+    };
+    const CHUNK: usize = 1024;
+    let mut resampler = match SincFixedIn::<f32>::new(ratio, 2.0, params, CHUNK, ch) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("hxsound: resampler init {from}->{to}: {e}");
+            return interleaved;
+        }
+    };
+
+    // SincFixedIn consumes exactly CHUNK input frames per call; feed full chunks
+    // and zero-pad the final short one.
+    let mut out_planar: Vec<Vec<f32>> = vec![Vec::new(); ch];
+    let mut inbuf: Vec<Vec<f32>> = vec![vec![0.0f32; CHUNK]; ch];
+    let mut pos = 0usize;
+    while pos < in_frames {
+        let n = (in_frames - pos).min(CHUNK);
+        for c in 0..ch {
+            for i in 0..CHUNK {
+                inbuf[c][i] = if i < n { planar[c][pos + i] } else { 0.0 };
+            }
+        }
+        if let Ok(out) = resampler.process(&inbuf, None) {
+            for c in 0..ch {
+                out_planar[c].extend_from_slice(&out[c]);
+            }
+        }
+        pos += CHUNK;
+    }
+
+    // Drop the resampler's leading algorithmic delay so the clip starts on time,
+    // then keep only as many frames as the ratio implies (the rest is the
+    // tail from zero-padding the last chunk).
+    let delay = resampler.output_delay();
+    let produced = out_planar.first().map_or(0, |c| c.len());
+    let start = delay.min(produced);
+    let expected = (in_frames as f64 * ratio).round() as usize;
+    let out_frames = (produced - start).min(expected);
+
+    let mut out = Vec::with_capacity(out_frames * ch);
+    for f in 0..out_frames {
+        for c in 0..ch {
+            out.push(out_planar[c][start + f]);
+        }
+    }
+    out
+}
+
+/// Decode a C path string into a `PathBuf`. On Unix the raw bytes are the
+/// path; elsewhere (Windows) GLib hands us UTF-8, which std maps to the OS's
+/// wide encoding at the filesystem boundary.
+fn cpath_to_pathbuf(cstr: &CStr) -> Option<PathBuf> {
+    #[cfg(unix)]
+    {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        Some(PathBuf::from(OsStr::from_bytes(cstr.to_bytes())))
+    }
+    #[cfg(not(unix))]
+    {
+        cstr.to_str().ok().map(PathBuf::from)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resample_to;
+
+    /// A 6× upsample (8 k → 48 k) yields roughly 6× the frames, in range, and
+    /// finite — the core of the quality fix. Approximate because the resampler
+    /// trims its own leading delay.
+    #[test]
+    fn upsample_mono_length_and_finiteness() {
+        let in_frames = 4000;
+        let input: Vec<f32> = (0..in_frames)
+            .map(|i| (i as f32 * 0.05).sin() * 0.5)
+            .collect();
+        let out = resample_to(input, 1, 8000, 48000);
+        let expected = in_frames * 6;
+        // Within a few percent of the ideal 6× ratio.
+        assert!(
+            out.len() as f64 > expected as f64 * 0.95
+                && out.len() as f64 <= expected as f64 * 1.02,
+            "got {} frames, expected ~{expected}",
+            out.len()
+        );
+        assert!(out.iter().all(|s| s.is_finite() && s.abs() <= 1.5));
+    }
+
+    /// Stereo stays interleaved: output length is a whole number of frames.
+    #[test]
+    fn upsample_stereo_stays_interleaved() {
+        let frames = 2000;
+        let mut input = Vec::with_capacity(frames * 2);
+        for i in 0..frames {
+            input.push((i as f32 * 0.03).sin()); // L
+            input.push((i as f32 * 0.07).cos()); // R
+        }
+        let out = resample_to(input, 2, 22050, 44100);
+        assert_eq!(out.len() % 2, 0, "stereo output must stay frame-aligned");
+        assert!(out.len() >= frames * 2, "44.1k from 22.05k should ~2× frames");
+        assert!(out.iter().all(|s| s.is_finite()));
+    }
+
+    /// Empty input is returned as-is rather than panicking.
+    #[test]
+    fn empty_input_is_noop() {
+        assert!(resample_to(Vec::new(), 1, 8000, 48000).is_empty());
+    }
+}
+
+/// `void hx_sound_play (const char *path)` — play the WAV at `path`,
+/// fire-and-forget. Thread-safe (callable from any thread); a no-op on a NULL
+/// path, an unreadable / non-WAV file, or when no audio device is available.
+///
+/// # Safety
+/// `path` must be NULL or a valid NUL-terminated C string, valid for the
+/// duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn hx_sound_play(path: *const c_char) {
+    if path.is_null() {
+        return;
+    }
+    if let Some(pb) = cpath_to_pathbuf(CStr::from_ptr(path)) {
+        // Best-effort: a full/closed channel just means the sound is skipped.
+        let _ = player().send(pb);
+    }
+}

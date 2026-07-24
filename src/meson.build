@@ -185,13 +185,6 @@ if imagemagick_dep.found()
   conf.set('HAVE_IMAGEMAGICK', 1)
 endif
 
-# Alert-sound playback (src/sound.c). GSound/libcanberra is Linux-only in
-# practice (no Homebrew / MSYS2 package), so it's optional: without it every
-# play_sound() call compiles to a no-op and the app runs silently.
-if gsound_dep.found()
-  conf.set('HAVE_GSOUND', 1)
-endif
-
 # Voice chat. Gates the voice_*.c sources (above) and every voice call
 # site in the always-compiled files (gtkhx.c, chat.c, toolbar.c,
 # options.c, users_view.c, network.c, rcv.c). Driven by -Dvoice +
@@ -225,6 +218,7 @@ gtkhx_resources = gnome.compile_resources(
 # -lhxvoice_runtime here would fail at link time.
 rust_deps = [
   rust_hxcrypto_hash_dep,
+  rust_hxsound_dep,
   rust_hxcrypto_aead_dep,
   rust_hxcrypto_stream_dep,
   rust_hxcompress_dep,
