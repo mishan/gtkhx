@@ -24,9 +24,6 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <errno.h>
-#include <sys/select.h>
-#include <sys/wait.h>
-#include <sys/ioctl.h>
 #include <gtk/gtk.h>
 #include <time.h>
 #include "hx.h"

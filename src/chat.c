@@ -27,7 +27,6 @@
 #include <gdk/gdkkeysyms.h>
 #include <sys/types.h>
 #include <ctype.h>
-#include <sys/time.h>
 #include <time.h>
 #include "hx.h"
 #include "hxconn.h"

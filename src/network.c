@@ -29,8 +29,6 @@
 #include <gdk/gdk.h>
 #include <gio/gio.h>
 #include <errno.h>
-#include <sys/time.h>
-#include <sys/select.h>
 #include <time.h>
 
 #include <signal.h>
