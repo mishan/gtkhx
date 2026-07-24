@@ -65,6 +65,27 @@ jobs:
       - name: checkout
         uses: actions/checkout@v4
 
+      - name: free disk space
+        # ubuntu-latest ships ~25 GB of preinstalled toolchains (Android SDK,
+        # .NET, GHC/Haskell, CodeQL) this build never touches. The Cargo target
+        # dir alone is large — two meson builds plus `cargo test --workspace`
+        # produce ~40 statically-linked test binaries, each bundling the full
+        # tokio / rustls / gstreamer / gtk4-rs closure — and it shares the ~14 GB
+        # runner disk with the restored cache and the mhxd/Janus/Argus test
+        # containers. Reclaiming the unused toolchains gives the link step room;
+        # without it, mold fails mid-link with "disk full". Best-effort (`|| true`)
+        # so a future runner-image layout change can't break the build here.
+        run: |
+          echo "disk before cleanup:"; df -h /
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/share/boost \
+            2>/dev/null || true
+          echo "disk after cleanup:"; df -h /
+
       - name: log in to GHCR
         # Pull the pre-built base images published from the hotline-docker
         # repo: gtkhx-ci-base (the build toolchain) and the five server/proxy
