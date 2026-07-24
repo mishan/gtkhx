@@ -6,16 +6,15 @@
 #
 #     packaging/windows/bundle.sh [BUILD_DIR] [OUT_DIR]
 #
-# Produces OUT_DIR/GtkHx-win64/ (a self-contained prefix — bin/ + share/ + lib/)
-# and OUT_DIR/GtkHx-win64.zip. Double-clicking bin\gtkhx.exe runs the app with
-# no MSYS2 install: GTK resolves ../share and ../lib relative to the exe's bin/
-# directory (g_win32_get_package_installation_directory_of_module strips the
-# trailing \bin), so mirroring the MSYS2 prefix layout is what makes it portable.
+# Produces OUT_DIR/GtkHx-win64/ (gtkhx.exe + DLLs at the root, with share/ and
+# lib/ alongside) and OUT_DIR/GtkHx-win64.zip. Double-clicking gtkhx.exe runs the
+# app with no MSYS2 install: GLib derives the install prefix from the module
+# directory (g_win32_get_package_installation_directory_of_module), so it finds
+# share/ + lib/ next to the exe — and the app's own relocatable data lookups
+# (sounds, icons.rsrc) resolve via that same prefix.
 #
 # This is a best-effort collector; treat the first CI runs as the real test.
-# The gaps most likely to need iteration: the curated GStreamer plugin list
-# (voice), and the PREFIX-relative sound-file lookup in src/sound.c (a relocated
-# install can't find $PREFIX/share/gtkhx/sounds — see the note near the end).
+# The gap most likely to need iteration: the curated GStreamer plugin list.
 set -euo pipefail
 
 BUILD_DIR="${1:-build}"
@@ -24,7 +23,11 @@ MINGW_PREFIX="${MINGW_PREFIX:-/ucrt64}"
 
 APP="GtkHx-win64"
 STAGE="$OUT_DIR/$APP"
-BIN="$STAGE/bin"
+# gtkhx.exe + its DLLs live at the archive root so the user double-clicks
+# gtkhx.exe directly (no bin/ to descend into). GTK still resolves data because
+# GLib derives the install prefix from the module directory, and share/ + lib/
+# sit alongside the exe — the same prefix layout, just without the bin/ level.
+BIN="$STAGE"
 LIB="$STAGE/lib"
 SHARE="$STAGE/share"
 
@@ -138,15 +141,18 @@ for theme in Adwaita hicolor; do
 done
 gtk4-update-icon-cache -q -t -f "$SHARE/icons/Adwaita" 2>/dev/null || true
 
-# ---- app data (alert sounds live outside GResource) ------------------------
-# NOTE: src/sound.c looks in $PREFIX/share/gtkhx/sounds, where $PREFIX is baked
-# in at configure time and won't match the unzip location — so on a relocated
-# install the sounds aren't found today. We stage them at the mirrored path so
-# they're present; making the lookup relocatable (derive the prefix from the
-# module dir on Windows) is a follow-up in src/sound.c.
+# ---- app data (alert sounds + Hotline user icons live outside GResource) ---
+# Both resolve at runtime relative to the module-derived prefix (sound_resolve /
+# init_icons search g_get_system_data_dirs() + the Windows module path), so
+# staging them at <prefix>/share/gtkhx/... is what makes them load.
 if [ -d sounds ]; then
   mkdir -p "$SHARE/gtkhx/sounds"
   cp sounds/*.wav "$SHARE/gtkhx/sounds/" 2>/dev/null || true
+fi
+# icons.rsrc — the classic Hotline colour-icon (cicn) set for the user list.
+if [ -f icons.rsrc ]; then
+  mkdir -p "$SHARE/gtkhx/icons"
+  cp icons.rsrc "$SHARE/gtkhx/icons/"
 fi
 
 # ---- zip -------------------------------------------------------------------

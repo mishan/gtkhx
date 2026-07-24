@@ -688,16 +688,24 @@ changed_downloadpath (session *sess)
 	 * two stay in sync. */
     if (!gtkhx_prefs.download_path || !*gtkhx_prefs.download_path) {
         const char *xdg = g_get_user_special_dir (G_USER_DIRECTORY_DOWNLOAD);
+        const char *home = g_get_home_dir ();
+        char *win_mac_dl
+            = home ? g_build_filename (home, "Downloads", NULL) : NULL;
         if (xdg && g_file_test (xdg, G_FILE_TEST_IS_DIR)) {
             gtkhx_prefs.download_path = g_strdup (xdg);
+        } else if (win_mac_dl && g_file_test (win_mac_dl, G_FILE_TEST_IS_DIR)) {
+            /* g_get_user_special_dir(DOWNLOAD) is NULL on Windows (KNOWNFOLDERID,
+             * not CSIDL); <home>/Downloads is the real location there and on
+             * macOS. Keep this in sync with default_root() in
+             * files_local_provider.c so the download dest and the local panel
+             * agree. */
+            gtkhx_prefs.download_path = g_strdup (win_mac_dl);
+        } else if (home && g_file_test (home, G_FILE_TEST_IS_DIR)) {
+            gtkhx_prefs.download_path = g_strdup (home);
         } else {
-            const char *home = g_get_home_dir ();
-            if (home && g_file_test (home, G_FILE_TEST_IS_DIR)) {
-                gtkhx_prefs.download_path = g_strdup (home);
-            } else {
-                gtkhx_prefs.download_path = g_strdup (".");
-            }
+            gtkhx_prefs.download_path = g_strdup (".");
         }
+        g_free (win_mac_dl);
     }
 }
 

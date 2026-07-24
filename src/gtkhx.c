@@ -871,6 +871,21 @@ init_icons (void)
         }
     }
 
+#ifdef G_OS_WIN32
+    {
+        /* Relocatable Windows build: derive the prefix from the running module
+         * (…\gtkhx.exe → prefix) so a moved/unzipped install finds its
+         * icons.rsrc even though g_get_system_data_dirs() may not cover it. */
+        char *root = g_win32_get_package_installation_directory_of_module (NULL);
+        if (root) {
+            char *p = g_build_filename (root, "share", "gtkhx", "icons", NULL);
+            collect_rsrc_files (paths, p);
+            g_free (p);
+            g_free (root);
+        }
+    }
+#endif
+
     collect_rsrc_files (paths, PREFIX "/share/gtkhx/icons");
 
     if (paths->len == 0) {

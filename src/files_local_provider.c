@@ -90,7 +90,18 @@ default_root (void)
     if (dir && g_file_test (dir, G_FILE_TEST_IS_DIR)) {
         return g_strdup (dir);
     }
+    /* g_get_user_special_dir(DOWNLOAD) is NULL on Windows (Downloads is a
+     * KNOWNFOLDERID, not a legacy CSIDL) and on bare Unix setups. Try
+     * <home>/Downloads, the real location on Windows and macOS, before falling
+     * back to the home directory itself. */
     dir = g_get_home_dir ();
+    if (dir) {
+        char *dl = g_build_filename (dir, "Downloads", NULL);
+        if (g_file_test (dl, G_FILE_TEST_IS_DIR)) {
+            return dl;
+        }
+        g_free (dl);
+    }
     if (dir && g_file_test (dir, G_FILE_TEST_IS_DIR)) {
         return g_strdup (dir);
     }
