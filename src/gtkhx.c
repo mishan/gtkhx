@@ -34,7 +34,6 @@
 #ifdef HAVE_LIBINTL_H
 #include <libintl.h> /* bindtextdomain, bind_textdomain_codeset, textdomain */
 #endif
-#include <pwd.h>
 #include <getopt.h>
 #include "hx.h"
 #include "cmd_exec.h" /* hxd_exec_init — /exec machinery (Unix-only module) */
@@ -1935,8 +1934,7 @@ extern void connect_bookmark_name (char *name);
 void
 hotline_client_init (int argc, char **argv)
 {
-    char *home, *user;
-    struct passwd *pwe;
+    const char *user = g_getenv("USER");
     char opt_char;
     int index = 0;
     char *server = 0;
@@ -1995,40 +1993,25 @@ hotline_client_init (int argc, char **argv)
             }
         }
     }
-    home = getenv ("HOME");
-    user = getenv ("USER");
-    if (!home || !user) {
-        pwe = getpwuid (getuid ());
-        if (!pwe) {
-            hx_printf_prefix (the_session.htlc, 0, INFOPREFIX, "getpwuid: %s",
-                              strerror (errno));
-        } else {
-            if (!home) {
-                home = pwe->pw_dir;
-            }
-            if (!user) {
-                user = pwe->pw_name;
-            }
-        }
-    }
 
     /* The session's connection is a Rust-owned allocation (hxconn crate, the
-	 * network-endgame.md E1c flip) the session holds for its lifetime.
-	 * Allocate once; on a re-entry (should not happen in the single-session
-	 * world) reset the existing one to its fresh state. */
+     * network-endgame.md E1c flip) the session holds for its lifetime.
+     * Allocate once; on a re-entry (should not happen in the single-session
+     * world) reset the existing one to its fresh state. */
     if (!the_session.htlc) {
         the_session.htlc = hx_conn_new ();
         /* Bind the ICON / NICK cfgvars to this connection's storage now that
-	     * it exists (their static table slots are NULL — see options.c). Must
-	     * precede any prefs read/write. */
+         * it exists (their static table slots are NULL — see options.c). Must
+         * precede any prefs read/write. */
         hx_options_bind_identity ();
     } else {
         hx_conn_reset (the_session.htlc);
     }
+
     /* Back-pointer for sess_from_htlc (survives the reset above). */
     hx_conn_set_sess (the_session.htlc, &the_session);
     hx_conn_set_icon (the_session.htlc, 500);
-    hx_conn_set_name (the_session.htlc, user ? user : "Evaluation 0wn3r");
+    hx_conn_set_name (the_session.htlc, user ? user : "GtkHx User");
 
     gen_command_hash ();
 
