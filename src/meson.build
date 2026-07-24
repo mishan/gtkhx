@@ -280,6 +280,12 @@ rust_deps = [
   # + consumer-before-provider rule: undefined refs to
   # gtkhx_session_get_default / _emit_xfer_queue.
   rust_hxxfer_recv_dep,
+  # FILE_LIST receive handler + the Rust-owned struct cached_filelist
+  # (rcv_task_file_list + the hx_cfl_* accessor facade, moved out of rcv.c).
+  # Same receive-handler group + consumer-before-provider rule: undefined refs
+  # to gtkhx_session_get_default / _emit_file_list, the provider error hook, and
+  # hx_cfl_complete_entry (files.c).
+  rust_hxfiles_recv_dep,
   # pure post-threading layout for the 1.5 news browser (news_browser.c).
   rust_hxnews_model_dep,
   # files-subsystem model: file-type -> icon-id map behind

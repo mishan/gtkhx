@@ -329,18 +329,13 @@ extern void hx_quit (void);
 
 /* ---- File browser cache ------------------------------------------- */
 
-/* cached_filelist had next/prev fields
- * left over from a long-defunct linked-list design that nothing
- * ever wired up. Dropped. Each cfl is owned by a gfile_list entry
- * (gfl->cfl) — the canonical "find a cfl for path P" lookup goes
- * through gfile_list, not through a cfl-side data structure. */
-struct cached_filelist {
-    char *path;
-    struct hl_filelist_hdr *fh;
-    guint32 fhlen;
-    unsigned int completing : 2;
-    char **filter_argv;
-};
+/* struct cached_filelist is now owned by the Rust hxfiles-recv crate (the
+ * hx_cfl_* accessor facade in files.h). C holds it opaquely — allocate via
+ * hx_cfl_new, reach the path / fh buffer / completing / filter_argv through the
+ * accessors, free via hx_cfl_free. The fh buffer accumulation for a FILE_LIST
+ * reply happens natively in Rust; the view (hxfiles-entry populate) still walks
+ * the same byte layout via hx_cfl_fh / hx_cfl_fhlen. */
+struct cached_filelist;
 
 /* The hx_output vtable is gone (Phase 3.6). Every notification it
  * carried became a GObject signal on GtkhxSession; the lifecycle

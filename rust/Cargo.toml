@@ -32,6 +32,7 @@ members = [
     "crates/hxagreement-recv",
     "crates/hxuser-recv",
     "crates/hxxfer-recv",
+    "crates/hxfiles-recv",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",

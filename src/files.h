@@ -50,12 +50,32 @@ extern void output_file_info (char *path, char *name, char *creator, char *type,
                               char *comments, const guint8 *date_modify,
                               const guint8 *date_create, guint64 size);
 
-/* Emit the file-list GtkhxSession signal so the file_list-signal
- * handler in gtkhx.c (and through it the remote-provider in the
- * new files browser) can pick up a parsed cfl. Called from
- * rcv.c::rcv_task_file_list. */
-extern void cfl_print (struct cached_filelist *cfl, void *data);
-extern struct cached_filelist *cfl_lookup (const char *path);
+/* Rust-owned struct cached_filelist (hxfiles-recv crate) — the opaque handle +
+ * accessor facade. Allocate with hx_cfl_new, reach the fields through these, free
+ * with hx_cfl_free. The FILE_LIST reply's fh accumulation + the file-list emit
+ * live in the Rust rcv_task_file_list; C touches cfl only to start a listing
+ * (files_remote_provider.c) and to drive the recursive engine below. */
+extern struct cached_filelist *hx_cfl_new (void);
+extern void         hx_cfl_free (struct cached_filelist *cfl);
+extern const char  *hx_cfl_path (const struct cached_filelist *cfl);
+extern void         hx_cfl_set_path (struct cached_filelist *cfl, const char *path);
+extern const void  *hx_cfl_fh (const struct cached_filelist *cfl);
+extern guint32      hx_cfl_fhlen (const struct cached_filelist *cfl);
+extern guint        hx_cfl_completing (const struct cached_filelist *cfl);
+extern void         hx_cfl_set_completing (struct cached_filelist *cfl, guint completing);
+extern void        *hx_cfl_filter_argv (const struct cached_filelist *cfl);
+extern void         hx_cfl_set_filter_argv (struct cached_filelist *cfl, void *argv);
+
+/* Recursive folder-listing / GET_R engine for one FILE_LIST entry, invoked by
+ * the Rust rcv_task_file_list when cfl is in a recursive mode (completing > 1).
+ * The Rust handler decides folder-vs-file (via hotline_proto's FTYPE_FLDR) and
+ * passes `is_folder`. A folder re-issues FILE_LIST for the subfolder; a leaf in
+ * COMPLETE_GET_R mode mkdir's the local tree and xfer_new's the download. Reads
+ * the Rust-owned cfl through the accessors above. */
+extern void hx_cfl_complete_entry (struct htlc_conn *htlc,
+                                   struct cached_filelist *cfl, int is_folder,
+                                   const guint8 *fname, gsize fnlen,
+                                   guint32 fsize);
 
 /* Pick the cicn icon id for a Hotline file-list entry. `ftype` is
  * the raw 4-byte FourCC from the wire (NOT byte-swapped); `name`

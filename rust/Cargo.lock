@@ -2035,6 +2035,13 @@ name = "hxfiles-model"
 version = "0.1.0"
 
 [[package]]
+name = "hxfiles-recv"
+version = "0.1.0"
+dependencies = [
+ "hotline-proto",
+]
+
+[[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
 

@@ -19,9 +19,7 @@ use std::slice;
 use glib::translate::from_glib_none;
 
 use crate::HxFileEntry;
-
-/// `'fldr'` — the Hotline FourCC for a folder row.
-const FTYPE_FLDR: u32 = 0x666c_6472;
+use hotline_proto::parse::FTYPE_FLDR;
 
 // ---- gettext shim (mirrors gtkhx-ui::tr, the `gtkhx` text domain) ---------
 //
