@@ -44,6 +44,18 @@ use rubato::{
 /// once; every caller thereafter clones the same `Sender`.
 static PLAYER: OnceLock<Sender<PathBuf>> = OnceLock::new();
 
+/// Honour the project-wide `GTKHX_DEBUG` category switch (see `src/debug.c`):
+/// `GTKHX_DEBUG=sound` (or `all`) traces the output device rate and each clip's
+/// resample decision, so the "is rodio's own converter really a no-op?"
+/// assumption can be confirmed against real hardware.
+fn sound_debug() -> bool {
+    // Trim whitespace around each category to match the C side's debug_init()
+    // (g_strstrip), so GTKHX_DEBUG="sound, login" behaves the same in both.
+    std::env::var("GTKHX_DEBUG")
+        .map(|v| v.split(',').any(|c| matches!(c.trim(), "sound" | "all")))
+        .unwrap_or(false)
+}
+
 fn player() -> &'static Sender<PathBuf> {
     PLAYER.get_or_init(|| {
         let (tx, rx) = channel::<PathBuf>();
@@ -86,6 +98,13 @@ fn audio_loop(rx: Receiver<PathBuf>) {
             return;
         }
     };
+    if sound_debug() {
+        eprintln!(
+            "hxsound: output device default rate = {device_rate} Hz; \
+             clips are pre-resampled to this where possible so rodio's own \
+             converter stays a no-op (per-clip trace below shows the actual path)"
+        );
+    }
     for path in rx {
         play_one(&handle, device_rate, &path);
     }
@@ -128,6 +147,24 @@ fn play_one(handle: &OutputStreamHandle, device_rate: u32, path: &PathBuf) {
             None => (interleaved, src_rate),
         }
     };
+
+    if sound_debug() {
+        let mode = if src_rate == device_rate {
+            "passthrough (already at device rate)"
+        } else if rate == device_rate {
+            "pre-resampled to device rate"
+        } else {
+            "resample FAILED -> rodio's linear converter runs (lower quality)"
+        };
+        eprintln!(
+            "hxsound: {} -- {} ch, {} Hz -> {} Hz [{}]",
+            path.display(),
+            channels,
+            src_rate,
+            rate,
+            mode
+        );
+    }
 
     // When rate == device_rate rodio's sample-rate converter is a pass-through;
     // either way it up/down-mixes channels to match the output (e.g. mono →
@@ -199,19 +236,27 @@ fn resample_to(interleaved: &[f32], channels: u16, from: u32, to: u32) -> Option
         pos += CHUNK;
     }
 
-    // Drop the resampler's leading algorithmic delay so the clip starts on time,
-    // then keep only as many frames as the ratio implies (the rest is the
-    // tail from zero-padding the last chunk).
-    let delay = resampler.output_delay();
-    let produced = out_planar.first().map_or(0, |c| c.len());
-    let start = delay.min(produced);
+    // Keep the whole resampled clip from frame 0 — we deliberately do NOT discard
+    // `output_delay()` leading frames the way a latency-compensating stream would.
+    // For these very short notification clips rubato's reported delay (hundreds of
+    // output frames for a 256-tap sinc) massively overstates the true group delay,
+    // so chopping it discards the clip's onset outright. That was a real bug: a
+    // clip whose whole sound is a tick in the first few milliseconds came out
+    // ~15 dB quieter with no attack, because the trim ate the onset. The true
+    // leading latency here is sub-millisecond and inaudible for fire-and-forget
+    // playback, so starting at frame 0 is both onset-safe and correct-sounding.
+    // Capping the length at the ideal frame count also trims the silent tail left
+    // by zero-padding the last input chunk.
+    // Take the shortest channel so the interleave loop can never index past a
+    // shorter slice, even if per-channel output lengths ever diverge.
+    let produced = out_planar.iter().map(|c| c.len()).min().unwrap_or(0);
     let expected = (in_frames as f64 * ratio).round() as usize;
-    let out_frames = (produced - start).min(expected);
+    let out_frames = expected.min(produced);
 
     let mut out = Vec::with_capacity(out_frames * ch);
     for f in 0..out_frames {
-        for c in 0..ch {
-            out.push(out_planar[c][start + f]);
+        for plane in &out_planar {
+            out.push(plane[f]);
         }
     }
     Some(out)
@@ -271,6 +316,34 @@ mod tests {
         assert_eq!(out.len() % 2, 0, "stereo output must stay frame-aligned");
         assert!(out.len() >= frames * 2, "44.1k from 22.05k should ~2× frames");
         assert!(out.iter().all(|s| s.is_finite()));
+    }
+
+    /// A short clip whose energy is a transient right at the start — the failure
+    /// class where the whole sound lives in the first few milliseconds. Regression
+    /// guard: the resampler must keep the onset, not discard it as "algorithmic
+    /// delay". The pre-fix behaviour trimmed `output_delay()` leading frames, which
+    /// for a clip like this ate the entire attack and left it ~15 dB quieter.
+    #[test]
+    fn short_clip_onset_survives() {
+        let ch = 2u16;
+        let frames = 1000; // ~45 ms at 22.05 kHz, like the stereo notification clip
+        let mut input = vec![0.0f32; frames * ch as usize];
+        // A short decaying tick in the first ~40 frames, on both channels.
+        for i in 0..40 {
+            let v = 0.5 * (1.0 - i as f32 / 40.0);
+            input[i * 2] = v;
+            input[i * 2 + 1] = v;
+        }
+        let in_peak = input.iter().cloned().fold(0.0f32, |m, x| m.max(x.abs()));
+        let out = resample_to(&input, ch, 22050, 48000).expect("resampler builds");
+        let out_peak = out.iter().cloned().fold(0.0f32, |m, x| m.max(x.abs()));
+        // Onset must survive: allow modest sinc overshoot, but the pre-fix collapse
+        // (peak dropping to ~0.18x input) must never recur.
+        assert!(
+            out_peak > in_peak * 0.8,
+            "onset lost: in_peak {in_peak}, out_peak {out_peak}"
+        );
+        assert!(out_peak < in_peak * 1.4, "unexpected overshoot: {out_peak}");
     }
 
     /// Empty input yields an empty result rather than panicking.
