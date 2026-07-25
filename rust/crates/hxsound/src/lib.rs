@@ -49,8 +49,10 @@ static PLAYER: OnceLock<Sender<PathBuf>> = OnceLock::new();
 /// resample decision, so the "is rodio's own converter really a no-op?"
 /// assumption can be confirmed against real hardware.
 fn sound_debug() -> bool {
+    // Trim whitespace around each category to match the C side's debug_init()
+    // (g_strstrip), so GTKHX_DEBUG="sound, login" behaves the same in both.
     std::env::var("GTKHX_DEBUG")
-        .map(|v| v.split(',').any(|c| c == "sound" || c == "all"))
+        .map(|v| v.split(',').any(|c| matches!(c.trim(), "sound" | "all")))
         .unwrap_or(false)
 }
 
@@ -99,7 +101,8 @@ fn audio_loop(rx: Receiver<PathBuf>) {
     if sound_debug() {
         eprintln!(
             "hxsound: output device default rate = {device_rate} Hz; \
-             clips are pre-resampled to this so rodio's own converter stays a no-op"
+             clips are pre-resampled to this where possible so rodio's own \
+             converter stays a no-op (per-clip trace below shows the actual path)"
         );
     }
     for path in rx {
@@ -244,7 +247,9 @@ fn resample_to(interleaved: &[f32], channels: u16, from: u32, to: u32) -> Option
     // playback, so starting at frame 0 is both onset-safe and correct-sounding.
     // Capping the length at the ideal frame count also trims the silent tail left
     // by zero-padding the last input chunk.
-    let produced = out_planar.first().map_or(0, |c| c.len());
+    // Take the shortest channel so the interleave loop can never index past a
+    // shorter slice, even if per-channel output lengths ever diverge.
+    let produced = out_planar.iter().map(|c| c.len()).min().unwrap_or(0);
     let expected = (in_frames as f64 * ratio).round() as usize;
     let out_frames = expected.min(produced);
 
