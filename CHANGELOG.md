@@ -1,4 +1,4 @@
-## 1.2.3-dev
+## 1.3.0-dev
 
 - Bookmarks
   - Bookmarks are now kept in a single TOML file
