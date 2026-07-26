@@ -68,6 +68,53 @@ fn player() -> &'static Sender<PathBuf> {
     })
 }
 
+/// Pick the output stream config to open the device with.
+///
+/// We build clips at whatever rate this returns so that rodio's own converter
+/// (and, more importantly, the audio server's) does no extra resampling. The
+/// obvious choice is `default_output_config()`, but cpal's ALSA backend
+/// hardcodes a 44.1 kHz preference there: whenever the device advertises 44100
+/// it reports 44100 as the default, *regardless of the rate the audio server's
+/// graph is actually running at*. On modern Linux that graph is almost always
+/// PipeWire (or PulseAudio) at 48 kHz, so taking cpal's 44100 at face value
+/// makes us hand the server a 44.1 kHz stream, which it then resamples up to
+/// 48 kHz — a second conversion stacked on ours, audibly duller than the single
+/// high-quality resample `aplay` does when it feeds the server directly.
+///
+/// So on Linux, if the device can do 48 kHz with the same channels and sample
+/// format as the default, prefer that: it matches the common graph rate, so the
+/// server passes our audio through untouched and there is exactly one resample.
+/// Other hosts (CoreAudio, WASAPI) report their device's true current rate as
+/// the default and don't have this quirk, so we trust the default there and
+/// leave this override Linux-only to avoid forcing a needless conversion on a
+/// device whose real rate is 44.1 kHz.
+fn choose_output_config(
+    device: &rodio::cpal::Device,
+) -> Result<rodio::cpal::SupportedStreamConfig, rodio::cpal::DefaultStreamConfigError> {
+    let default = device.default_output_config()?;
+
+    #[cfg(target_os = "linux")]
+    {
+        use rodio::cpal::SampleRate;
+        const PREFERRED: SampleRate = SampleRate(48_000);
+        if default.sample_rate() != PREFERRED {
+            if let Ok(ranges) = device.supported_output_configs() {
+                for r in ranges {
+                    if r.channels() == default.channels()
+                        && r.sample_format() == default.sample_format()
+                        && r.min_sample_rate() <= PREFERRED
+                        && PREFERRED <= r.max_sample_rate()
+                    {
+                        return Ok(r.with_sample_rate(PREFERRED));
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(default)
+}
+
 fn audio_loop(rx: Receiver<PathBuf>) {
     // Open the default output device at its own default config so we know the
     // exact sample rate the stream runs at and can resample clips to match.
@@ -83,7 +130,7 @@ fn audio_loop(rx: Receiver<PathBuf>) {
             return;
         }
     };
-    let config = match device.default_output_config() {
+    let config = match choose_output_config(&device) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("hxsound: no default output config ({e}); sounds disabled");
@@ -100,9 +147,9 @@ fn audio_loop(rx: Receiver<PathBuf>) {
     };
     if sound_debug() {
         eprintln!(
-            "hxsound: output device default rate = {device_rate} Hz; \
-             clips are pre-resampled to this where possible so rodio's own \
-             converter stays a no-op (per-clip trace below shows the actual path)"
+            "hxsound: opened output stream at {device_rate} Hz; \
+             clips are pre-resampled to this where possible so neither rodio nor \
+             the audio server resamples again (per-clip trace below shows the path)"
         );
     }
     for path in rx {
