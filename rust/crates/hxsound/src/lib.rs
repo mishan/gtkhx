@@ -138,6 +138,17 @@ fn audio_loop(rx: Receiver<PathBuf>) {
         }
     };
     let device_rate = config.sample_rate().0;
+    if sound_debug() {
+        let name = device.name().unwrap_or_else(|_| "<unknown>".into());
+        eprintln!(
+            "hxsound: cpal output device {name:?}; negotiated config: \
+             {} ch, {:?}, {} Hz, buffer {:?}",
+            config.channels(),
+            config.sample_format(),
+            device_rate,
+            config.buffer_size(),
+        );
+    }
     let (_stream, handle) = match OutputStream::try_from_device_config(&device, config) {
         Ok(pair) => pair,
         Err(e) => {
