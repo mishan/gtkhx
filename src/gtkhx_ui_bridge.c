@@ -90,6 +90,15 @@ gtkhx_active_text_encoding (void)
     return hx_conn_has_cap (hx_active_session ()->htlc, HTLC_CAP_TEXT_ENCODING);
 }
 
+/* The queue-downloads pref (gtkhx_prefs.queuedl). The Rust xfers shell's
+ * xfer_new reads it to decide whether to start a new transfer inline or queue
+ * it — an accessor rather than reprojecting the prefs struct layout into Rust. */
+int
+hx_prefs_queuedl (void)
+{
+    return gtkhx_prefs.queuedl ? 1 : 0;
+}
+
 void
 gtkhx_connect_apply (session *sess, const char *server, guint16 port,
                      const char *login, const char *pass, char secure,

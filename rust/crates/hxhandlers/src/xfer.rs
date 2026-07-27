@@ -14,10 +14,13 @@
 //! needs) rather than the `hx_htxf_*` C-ABI accessor bounce.
 
 use std::cell::RefCell;
-use std::os::raw::{c_int, c_void};
+use std::os::raw::{c_char, c_int, c_void};
 
 use hxnet::htxf::{hxnet_htxf_abort, HtxfAbort};
-use hxnet::xfer_handle::{hx_htxf_cancel, hx_htxf_unref, HtxfHandle};
+use hxnet::xfer_handle::{
+    hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref, hx_htxf_set_destructor,
+    hx_htxf_unref, HtxfHandle,
+};
 
 // C environment resolved at the final link; #[cfg(test)] doubles below let
 // `cargo test -p hxhandlers` run headless (same shape recv/files.rs uses).
@@ -33,6 +36,20 @@ extern "C" {
     /// Kick a queued transfer's wire request (xfers.c — still C until Y4). Called
     /// on the head of the list after a removal so the next queued transfer runs.
     fn xfer_go(htxf: *mut HtxfHandle);
+    /// gtkhx_ui_bridge.c — the active connection's htlc (xfer_init stamps it).
+    fn gtkhx_active_htlc() -> *mut c_void;
+    /// gtkhx_ui_bridge.c — the queue-downloads pref (xfer_new's inline-vs-queue).
+    fn hx_prefs_queuedl() -> c_int;
+    /// xfers.c — the last-ref GTK/preview + channel teardown (stays C until Y5);
+    /// registered once via hx_htxf_set_destructor from xfer_init.
+    fn htxf_destructor(htxf: *mut HtxfHandle);
+    /// htxf_accessors.c — the opt bitfield setters (C owns the bit layout).
+    fn hx_htxf_set_opt_preview(htxf: *mut HtxfHandle, v: c_int);
+    fn hx_htxf_set_opt_folder(htxf: *mut HtxfHandle, v: c_int);
+    /// hxbridge — queue a GSourceFunc onto the global default main context
+    /// (`g_main_context_invoke`); thread-safe, used to marshal a worker-thread
+    /// progress update back to the main loop.
+    fn gtkhx_bridge_post_to_main(func: glib::ffi::GSourceFunc, user_data: *mut c_void);
 }
 
 thread_local! {
@@ -217,6 +234,213 @@ pub unsafe extern "C" fn xfer_tasks_update(htlc: *mut c_void) {
     }
 }
 
+// ---- Y2: construction + progress/completion marshaling ---------------------
+
+/// Copy `src` bytes into a fixed C `char` array + NUL-terminate, truncating to
+/// fit (mirrors g_strlcpy / the memcpy+NUL the C `xfer_init` did).
+unsafe fn set_carr(dst: &mut [c_char], src: &[u8]) {
+    let n = src.len().min(dst.len().saturating_sub(1));
+    for (i, &b) in src[..n].iter().enumerate() {
+        dst[i] = b as c_char;
+    }
+    dst[n] = 0;
+}
+
+/// Read a NUL-terminated fixed C `char` array back into a byte `Vec`.
+unsafe fn carr_read(src: &[c_char]) -> Vec<u8> {
+    let end = src.iter().position(|&c| c == 0).unwrap_or(src.len());
+    src[..end].iter().map(|&c| c as u8).collect()
+}
+
+/// C string → borrowed bytes (empty for NULL); NUL-terminated.
+unsafe fn cstr_bytes<'a>(p: *const c_char) -> &'a [u8] {
+    if p.is_null() {
+        &[]
+    } else {
+        std::ffi::CStr::from_ptr(p).to_bytes()
+    }
+}
+
+/// (ptr, len) → borrowed bytes (empty for NULL). Names carry any byte incl.
+/// `dir_char`, so they arrive as an explicit length, never NUL-terminated.
+unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
+    if p.is_null() || len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(p as *const u8, len)
+    }
+}
+
+/// Shared constructor for [`xfer_new`] / [`xfer_new_folder`] (was `xfer_init`):
+/// allocate the handle, stash the structured fields, seed the list's ref, enqueue
+/// to the registry, and emit the initial `file-update`. Does NOT drive the wire
+/// request — the caller decides (xfer_new → xfer_go, xfer_new_folder → its own
+/// GETFOLDER/PUTFOLDER later).
+unsafe fn xfer_init(path: &[u8], remotedir: &[u8], remotename: &[u8], type_: u16) -> *mut HtxfHandle {
+    // Register the last-ref destructor once — every handle comes through here, so
+    // this runs before any can be dropped (was the g_once_init in xfer_init).
+    static DTOR: std::sync::Once = std::sync::Once::new();
+    DTOR.call_once(|| hx_htxf_set_destructor(Some(htxf_destructor)));
+
+    // Zeroed handle with its cancellation token pre-created (hxnet::xfer_handle).
+    let htxf = hx_htxf_new();
+    let h = &mut *htxf;
+
+    // remotename: the wire NAME chunk, clamped to the field; never split.
+    let rn_len = remotename.len().min(h.remotename.len() - 1);
+    h.remotename_len = rn_len as u16;
+    set_carr(&mut h.remotename, &remotename[..rn_len]);
+
+    if !remotedir.is_empty() {
+        set_carr(&mut h.remotedir, remotedir);
+    }
+
+    // remotepath = stored-remotedir [+ '/'] + name (display/log only; truncates).
+    let dir = carr_read(&h.remotedir);
+    let mut rp = dir.clone();
+    if !dir.is_empty() && *dir.last().unwrap() != b'/' {
+        rp.push(b'/');
+    }
+    rp.extend_from_slice(&remotename[..rn_len]);
+    set_carr(&mut h.remotepath, &rp);
+
+    set_carr(&mut h.path, path);
+    h.type_ = type_ as u8;
+    h.queue = u32::MAX; // -1
+
+    // Seed the list's ref (0 → 1), then enqueue.
+    hx_htxf_ref(htxf);
+    xfer_registry_add(htxf);
+
+    h.htlc = gtkhx_active_htlc();
+    h.total_size = 1;
+    gtkhx_session_emit_file_update(
+        gtkhx_session_get_default(),
+        hx_sess_from_htlc(h.htlc),
+        htxf as *mut c_void,
+    );
+    htxf
+}
+
+/// `struct htxf_conn *xfer_new(const char *path, const char *remotedir, const
+/// char *remotename, gsize remotename_len, guint16 type, int preview, guint32
+/// srv_data_size)` — create a download/upload transfer. Sets preview +
+/// srv_data_size (which xfer_go gates its resume/rename on) BEFORE possibly
+/// driving the wire request inline (only transfer, or queueing off).
+///
+/// # Safety
+/// `path` / `remotedir` are NUL-terminated C strings (or NULL); `remotename` is
+/// `remotename_len` bytes. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_new(
+    path: *const c_char,
+    remotedir: *const c_char,
+    remotename: *const c_char,
+    remotename_len: usize,
+    type_: u16,
+    preview: c_int,
+    srv_data_size: u32,
+) -> *mut HtxfHandle {
+    let htxf = xfer_init(
+        cstr_bytes(path),
+        cstr_bytes(remotedir),
+        slice_bytes(remotename, remotename_len),
+        type_,
+    );
+    hx_htxf_set_opt_preview(htxf, if preview != 0 { 1 } else { 0 });
+    (*htxf).srv_data_size = srv_data_size as u64;
+
+    if xfer_count() == 1 || hx_prefs_queuedl() == 0 {
+        xfer_go(htxf);
+    }
+    htxf
+}
+
+/// `struct htxf_conn *xfer_new_folder(const char *path, const char *remotedir,
+/// const char *remotename, gsize remotename_len, guint16 type)` — create a folder
+/// transfer. Flags `opt.folder` (so the worker dispatcher picks the folder
+/// thread) and leaves the wire request to the caller (hx_get_folder /
+/// hx_put_folder send GETFOLDER/PUTFOLDER themselves).
+///
+/// # Safety
+/// Same contract as [`xfer_new`]. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_new_folder(
+    path: *const c_char,
+    remotedir: *const c_char,
+    remotename: *const c_char,
+    remotename_len: usize,
+    type_: u16,
+) -> *mut HtxfHandle {
+    let htxf = xfer_init(
+        cstr_bytes(path),
+        cstr_bytes(remotedir),
+        slice_bytes(remotename, remotename_len),
+        type_,
+    );
+    hx_htxf_set_opt_folder(htxf, 1);
+    htxf
+}
+
+/// `void post_file_update(struct htxf_conn *htxf)` — queue a tasks-window
+/// progress update onto the main loop. Called from the transfer **worker thread**
+/// (still C until Y3), so it only touches thread-safe state: takes a ref (atomic)
+/// and posts through hxbridge (`g_main_context_invoke`) — never the main-thread
+/// registry.
+///
+/// # Safety
+/// `htxf` is a live handle; callable from any thread.
+#[no_mangle]
+pub unsafe extern "C" fn post_file_update(htxf: *mut HtxfHandle) {
+    hx_htxf_ref(htxf); // held until fu_dispatch drops it
+    gtkhx_bridge_post_to_main(Some(fu_dispatch), htxf as *mut c_void);
+}
+
+/// The queued progress dispatcher (main thread). Emits `file-update` unless the
+/// transfer was since cancelled, then drops the ref `post_file_update` took.
+///
+/// # Safety
+/// GLib idle on the main thread; `data` is the live htxf `post_file_update` ref'd.
+unsafe extern "C" fn fu_dispatch(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
+    let htxf = data as *mut HtxfHandle;
+    if hx_htxf_is_canceled(htxf) == 0 {
+        gtkhx_session_emit_file_update(
+            gtkhx_session_get_default(),
+            hx_sess_from_htlc((*htxf).htlc),
+            htxf as *mut c_void,
+        );
+    }
+    hx_htxf_unref(htxf);
+    glib::ffi::G_SOURCE_REMOVE
+}
+
+/// The transfer teardown (main-thread idle): unlink from the registry + drop the
+/// worker's ref. Deferred by [`xfer_completion_entry`] so it runs after every
+/// pending progress idle.
+///
+/// # Safety
+/// GLib idle on the main thread; `data` is the completing htxf.
+unsafe extern "C" fn xfer_cleanup_dispatch(data: glib::ffi::gpointer) -> glib::ffi::gboolean {
+    let htxf = data as *mut HtxfHandle;
+    xfer_remove_from_list(htxf);
+    hx_htxf_unref(htxf); // drop the worker's ref
+    glib::ffi::G_SOURCE_REMOVE
+}
+
+/// `void xfer_completion_entry(void *arg)` — worker→main completion (run by the
+/// hxbridge spawn once the worker returns). Defers the teardown via `g_idle_add`
+/// (always async, at `G_PRIORITY_DEFAULT_IDLE` — strictly below the file-update
+/// idles' `G_PRIORITY_DEFAULT`), so cleanup runs AFTER every progress update the
+/// worker already queued. Re-posting via the bridge would run synchronously on
+/// this (main) thread and tear down too early — the ordering is load-bearing.
+///
+/// # Safety
+/// Runs on the main thread; `arg` is the completing htxf (worker ref held).
+#[no_mangle]
+pub unsafe extern "C" fn xfer_completion_entry(arg: *mut c_void) {
+    glib::ffi::g_idle_add(Some(xfer_cleanup_dispatch), arg);
+}
+
 // ---- test doubles for the C / GObject-emit environment ----------------------
 
 #[cfg(test)]
@@ -233,6 +457,22 @@ unsafe fn hx_sess_from_htlc(_htlc: *mut c_void) -> *mut c_void {
 }
 #[cfg(test)]
 unsafe fn xfer_go(_htxf: *mut HtxfHandle) {}
+#[cfg(test)]
+unsafe fn gtkhx_active_htlc() -> *mut c_void {
+    std::ptr::null_mut()
+}
+#[cfg(test)]
+unsafe fn hx_prefs_queuedl() -> c_int {
+    0
+}
+#[cfg(test)]
+unsafe extern "C" fn htxf_destructor(_htxf: *mut HtxfHandle) {}
+#[cfg(test)]
+unsafe fn hx_htxf_set_opt_preview(_htxf: *mut HtxfHandle, _v: c_int) {}
+#[cfg(test)]
+unsafe fn hx_htxf_set_opt_folder(_htxf: *mut HtxfHandle, _v: c_int) {}
+#[cfg(test)]
+unsafe fn gtkhx_bridge_post_to_main(_func: glib::ffi::GSourceFunc, _user_data: *mut c_void) {}
 
 #[cfg(test)]
 mod tests {
