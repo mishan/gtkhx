@@ -29,6 +29,10 @@ socks = ["dep:tokio-socks"]
 [dependencies]
 hxcrypto = { path = "../hxcrypto" }
 hotline-proto = { path = "../hotline-proto" }
+# S0 (xfer_handle module): the struct htxf_conn storage mirror uses libc for the
+# platform-correct `timeval` layout + `PATH_MAX`, so the #[repr(C)] mirror
+# matches the C compiler on every target. Already a workspace dep (hxhfs).
+libc = "0.2"
 # xfer module (W1): the file-transfer copy loop moved off C's file_recv_one.
 # hxfiles-xfer is the FFO/FILP fork-header codec (native ffo::*); hxhfs is the
 # HFS sidecar / resource-fork I/O (native hfsinfo_write / resource_open, reading

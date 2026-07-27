@@ -49,11 +49,18 @@ purely Rust-side (no C field access), when `Arc`'s ergonomics actually pay off.
 all 82 sites in one commit is a large, error-prone churn with no behavioural
 payoff.
 
-**Decision:** move the struct into a self-contained Rust crate (`hxhtxf`) as a
-`#[repr(C)]` mirror, layout pinned by `_Static_assert`s on the C side (the
-`gtkhx-boxed` pattern). `hx_htxf_new` allocates it Rust-side and returns
-`*mut HtxfConn`; C keeps direct field access through the unchanged
-`struct htxf_conn` declaration. The lifecycle fields (`refcount`, `canceled`,
+**Decision:** put the storage in the existing `hxnet` crate (new
+`xfer_handle` module), not a new crate — `hxnet` already owns the HTXF domain
+(the handle's `hx` field *is* an `hxnet::htxf::HtxfConn` transport channel, and
+the transfer loops in `hxnet::xfer` drive the handle), it's already linked into
+the binary, and C→`hxnet` symbol references resolve fine (that's how the
+`hxnet_xfer_*` calls already work). The struct is a `#[repr(C)]` mirror
+(`HtxfHandle`, named apart from the channel `HtxfConn`), layout pinned at
+runtime by `tests/unit/test_htxf_layout.c` against `sizeof`/`offsetof` on the
+real struct — chosen over compile-time `_Static_assert`s because `MAXPATHLEN`
+et al. would make a hard-coded size fragile. `hx_htxf_new` allocates it
+Rust-side and returns `*mut struct htxf_conn`; C keeps direct field access
+through the unchanged `struct htxf_conn` declaration. The lifecycle fields (`refcount`, `canceled`,
 `total_pos`) become the crate's atomics, mutated through
 `hx_htxf_{ref,unref,cancel,is_canceled,add_total_pos}` so no C site does a raw
 `g_atomic_int_*` on them anymore. The remaining scalar/string fields stay
@@ -67,12 +74,14 @@ the crate. Consumer field reads/writes are untouched.
 
 ## Increments
 
-- **S0.1 — crate + layout pin.** New `rust/crates/hxhtxf`: `#[repr(C)]
-  HtxfConn` mirroring `struct htxf_conn` field-for-field, `hx_htxf_new` /
-  `hx_htxf_free` (raw, no refcount yet), and `_Static_assert`s in a C TU (or
-  `proto_helpers.c`) pinning `sizeof` + every offset. `xfers.c` allocates via
-  `hx_htxf_new` instead of `g_new0`. No behaviour change; a Tier-1 layout test
-  guards the ABI.
+- **S0.1 — storage module + layout pin. _(Shipped.)_** New
+  `hxnet::xfer_handle`: `#[repr(C)] HtxfHandle` mirroring `struct htxf_conn`
+  field-for-field, `hx_htxf_new` / `hx_htxf_free` (raw, no refcount move yet),
+  plus `hx_htxf_sizeof` / `_alignof` / `_offsetof_*` introspection. `xfers.c`
+  allocates via `hx_htxf_new` instead of `g_malloc0` and frees via
+  `hx_htxf_free`. `tests/unit/test_htxf_layout.c` pins the ABI at runtime — it
+  immediately caught that `compat.h` clamps `MAXPATHLEN` to a fixed 4095 (not
+  the host `PATH_MAX`). No behaviour change.
 - **S0.2 — atomic lifecycle.** Move `refcount` / `canceled` / `total_pos` to
   crate atomics behind `hx_htxf_ref` (→ new count) / `hx_htxf_unref` (→ bool
   was-last) / `hx_htxf_cancel` / `hx_htxf_is_canceled` / `hx_htxf_add_total_pos`

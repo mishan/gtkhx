@@ -16,6 +16,23 @@
 
 struct htxf_conn;
 
+/* ---- Storage (S0): allocation owned by hxnet's xfer_handle module ----------
+ * struct htxf_conn is still declared + field-accessed in C, but the storage is
+ * allocated + freed Rust-side (a #[repr(C)] mirror in rust/crates/hxnet), the
+ * first step of moving its cross-thread lifecycle behind this ABI. The mirror
+ * layout is pinned at runtime by tests/unit/test_htxf_layout.c against the
+ * introspection helpers below. */
+extern struct htxf_conn *hx_htxf_new (void);   /* zeroed; replaces g_malloc0 */
+extern void hx_htxf_free (struct htxf_conn *htxf); /* NULL-safe; replaces g_free */
+
+/* Layout introspection — a C test asserts these against sizeof / offsetof on the
+ * real struct htxf_conn, so a field drift on either side fails the build/test. */
+extern size_t hx_htxf_sizeof (void);
+extern size_t hx_htxf_alignof (void);
+extern size_t hx_htxf_offsetof_refcount (void);
+extern size_t hx_htxf_offsetof_canceled (void);
+extern size_t hx_htxf_offsetof_total_pos (void);
+
 /* Registry: is htxf still a live entry in the xfers[] array? (Downloads gate
  * their reply on this — a since-cancelled transfer's reply is dropped.) */
 extern int hx_htxf_in_list (struct htxf_conn *htxf);

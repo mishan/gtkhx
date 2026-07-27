@@ -2044,6 +2044,7 @@ dependencies = [
  "hxcrypto",
  "hxfiles-xfer",
  "hxhfs",
+ "libc",
  "lz4_flex",
  "rustls-native-certs",
  "sha2",

@@ -83,6 +83,7 @@ pub mod tracker;
 pub mod tracker_fetch;
 pub mod transform;
 pub mod xfer;
+pub mod xfer_handle;
 
 /// Per-step timeout for the pre-frame handshake (DNS + TCP connect,
 /// TLS handshake, magic exchange, each LOGIN reply read). Matches the

@@ -40,6 +40,7 @@
 #include "sound.h"
 #include "files.h"
 #include "htxf_io.h"
+#include "htxf_accessors.h"
 #include "preview.h"
 #include "xfers.h"
 #include "xfers_recv.h"
@@ -128,7 +129,7 @@ htxf_unref (struct htxf_conn *htxf)
 	 * (closed by htxf_io_release just above) already dropped its ref, so
 	 * this frees the token. NULL-safe on a transfer that never opened. */
     htxf_io_abort_free (htxf);
-    g_free (htxf);
+    hx_htxf_free (htxf);
 }
 
 struct fu_job {
@@ -427,7 +428,10 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     gsize sep_len;
     gsize stash_len;
 
-    htxf = g_malloc0 (sizeof (struct htxf_conn));
+    /* Storage owned by hxnet's xfer_handle module (S0): a zeroed struct
+	 * htxf_conn, same semantics as the old g_malloc0. Freed by hx_htxf_free in
+	 * htxf_unref's last-ref tail. */
+    htxf = hx_htxf_new ();
 
     /* Stash the structured fields verbatim. remotename is the wire
 	 * NAME chunk; remotedir is the wire DIR chunk source. Names can

@@ -281,6 +281,18 @@ test_hxnet_ffi = executable('test_hxnet_ffi',
 test('hxnet_ffi', test_hxnet_ffi,
      suite : 'unit')
 
+# htxf_layout (S0) — pin the struct htxf_conn ABI: assert hxnet's #[repr(C)]
+# mirror (hx_htxf_sizeof / _alignof / _offsetof_*) against the real C struct, and
+# that hx_htxf_new returns a zeroed handle. Links the hxnet staticlib for the
+# hx_htxf_* symbols; no GUI tree.
+test_htxf_layout = executable('test_htxf_layout',
+  'unit/test_htxf_layout.c',
+  dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
+  include_directories : test_inc,
+)
+test('htxf_layout', test_htxf_layout,
+     suite : 'unit')
+
 # htxf_cancel — the HTXF cooperative-cancel C shim (Phase R3 X1). Drives
 # the real htxf_io.c shim + the hxnet abort token over a TCP loopback
 # pair: the canceled-flag boundary check, abort waking a parked transport
