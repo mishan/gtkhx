@@ -684,20 +684,9 @@ test_banner = executable('test_banner',
 test('banner', test_banner,
      suite : 'proto')
 
-# banner_dispatch — pure URL-vs-file mode classifier + HTXF reply
-# sanity checker carved out of banner.c so this test can drive the
-# dispatch decisions without dragging in GTK / libsoup / pthread.
-# Two helpers, ~30 lines each, both load-bearing in the wire-mode
-# routing path that the live Tier 3 banner tests exercise
-# downstream.
-test_banner_dispatch = executable('test_banner_dispatch',
-  'proto/test_banner_dispatch.c',
-  '../src/banner_dispatch.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('banner_dispatch', test_banner_dispatch,
-     suite : 'proto')
+# banner_dispatch — the URL-vs-file classifier + HTXF-reply sanity checker moved
+# to Rust (gtkhx-ui::banner, folded in with banner.c); its coverage lives in
+# that module's #[cfg(test)] unit tests now.
 
 # tracker_parser — pure HTRK reply parsers carved out of
 # network.c's async tracker fetch state machine. Four small

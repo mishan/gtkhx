@@ -51,3 +51,8 @@ pub mod sniff;
 pub(crate) mod telemetry;
 
 pub use sniff::{format_is_allowed, format_to_mime, sniff, Format};
+
+// Closure-based, all-Rust decode entry for in-tree gtk4-rs callers (the banner),
+// so they get a `gdk::Texture` directly instead of driving the C-callback +
+// `HxInlineMediaDecoded` FFI shape.
+pub use decode::{decode_first_frame_async, ImageDecodeHandle, ImageDecodeOutcome};

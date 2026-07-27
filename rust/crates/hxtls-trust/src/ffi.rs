@@ -315,6 +315,15 @@ fn decide(host: &str, port: u16, fingerprint: &str) -> bool {
     accepted
 }
 
+/// Native TOFU verify for in-tree Rust callers — the same decision the C-ABI
+/// [`hx_tls_verify_cert`] makes, minus the C-string marshalling. In-tree gtk4-rs
+/// code (the banner's HTXF subchannel verify) calls this directly instead of
+/// bouncing through the C symbol. `fingerprint` is the `"sha256:<hex>"` leaf
+/// fingerprint; returns `true` to accept the connection.
+pub fn verify_cert(host: &str, port: u16, fingerprint: &str) -> bool {
+    decide(host, port, fingerprint)
+}
+
 /// `gboolean hx_tls_verify_cert (const char *host, guint16 port,
 /// const char *fingerprint)` — the single TOFU verify entry the C verify
 /// callbacks (control / HTXF / tracker / banner) call.

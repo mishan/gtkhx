@@ -152,6 +152,10 @@ pub mod emoji;
 // build is native hotline-proto, the text encoder / task / write stay C.
 // gtkhx_broadcast_dialog_open is this module's #[no_mangle] export.
 pub mod broadcast;
+// the server banner surface + URL / HTXF fetch state machines (was banner.c +
+// banner_dispatch.c). Decode / connection-state / TLS-verify are native Rust;
+// the hxnet fetch + tokio worker spawn + send/task stay on the C ABI.
+pub mod banner;
 
 /// Tell gtk4-rs that GTK is already initialized.
 ///

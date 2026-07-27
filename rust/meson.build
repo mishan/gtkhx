@@ -132,6 +132,7 @@ rust_sources = files(
   'crates/gtkhx-ui/src/news_render.rs',
   'crates/gtkhx-ui/src/emoji.rs',
   'crates/gtkhx-ui/src/broadcast.rs',
+  'crates/gtkhx-ui/src/banner.rs',
   'crates/gtkhx-ui/src/tracker/mod.rs',
   'crates/gtkhx-ui/src/tracker/ffi.rs',
   'crates/gtkhx-ui/src/tracker/meta.rs',
