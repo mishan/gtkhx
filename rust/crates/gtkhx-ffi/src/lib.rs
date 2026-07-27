@@ -61,19 +61,8 @@ use hxcrypto_aead as _;
 use hxcrypto_hash as _;
 use hxcrypto_stream as _;
 
-// --- receive-side handlers ---
-use hxagreement_recv as _;
-use hxchat_recv as _;
-use hxfiles_recv as _;
-use hxicon_recv as _;
-use hxmsg_recv as _;
-use hxnews_recv as _;
-use hxuser_recv as _;
-use hxxfer_recv as _;
-
-// --- send-side handlers ---
-use hxchat_send as _;
-use hxnews_send as _;
+// --- protocol handler layer (recv + send) ---
+use hxhandlers as _;
 
 // --- models ---
 use hxmodel as _;

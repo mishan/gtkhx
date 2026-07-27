@@ -54,9 +54,9 @@ type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_
 // Real build: these resolve at the final C link. Test build: `use tests::{…}`
 // below shadows them with recording stubs, so the extern block is gated off.
 #[cfg(not(test))]
-use hxnews_recv::{rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list};
+use crate::recv::news::{rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list};
 #[cfg(not(test))]
-use hxnews_recv::carrier::{gnews_catalog_path, gnews_folder_path};
+use crate::recv::news::carrier::{gnews_catalog_path, gnews_folder_path};
 #[cfg(not(test))]
 use hxtext::gtkhx_text_for_wire;
 

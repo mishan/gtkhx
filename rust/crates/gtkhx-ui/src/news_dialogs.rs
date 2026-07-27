@@ -31,7 +31,7 @@ const NB_KIND_FOLDER: c_int = 1;
 const NB_KIND_CATEGORY: c_int = 2;
 const NB_KIND_POST: c_int = 3;
 
-use hxnews_send::{hx_news15_delete, hx_news15_delete_thread, hx_news15_mkcat, hx_news15_mkdir};
+use hxhandlers::send::news::{hx_news15_delete, hx_news15_delete_thread, hx_news15_mkcat, hx_news15_mkdir};
 
 extern "C" {
     // hxnews-model C ABI — the node's Hotline path (NULL for a pathless node).

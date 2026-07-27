@@ -13,13 +13,11 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
-hxchat-send = { path = "../hxchat-send" }
+hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
 gtkhx-boxed = { path = "../gtkhx-boxed" }
 gtkhx-session = { path = "../gtkhx-session" }
 hxconn = { path = "../hxconn" }
-hxnews-recv = { path = "../hxnews-recv" }
-hxnews-send = { path = "../hxnews-send" }
 hxtext = { path = "../hxtext" }
 hx-image-decode = { path = "../hx-image-decode" }
 hxvoice-model = { path = "../hxvoice-model", optional = true }

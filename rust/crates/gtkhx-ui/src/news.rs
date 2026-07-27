@@ -37,7 +37,7 @@ type Session = c_void;
 /// Stable panel id — matches `HX_PANEL_ID_NEWS` (`panel_registry.h`).
 const HX_ID_NEWS: &str = "news";
 
-use hxnews_send::hx_get_news;
+use hxhandlers::send::news::hx_get_news;
 use hxtext::gtkhx_text_to_utf8;
 
 extern "C" {

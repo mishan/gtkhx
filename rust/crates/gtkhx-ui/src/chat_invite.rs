@@ -18,7 +18,7 @@ use glib::translate::from_glib_none;
 
 use crate::tr::tr;
 
-use hxchat_send::{hx_chat_join, hx_reject_chat};
+use hxhandlers::send::chat::{hx_chat_join, hx_reject_chat};
 
 extern "C" {    // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
     fn gtkhx_dialog_add_close_shortcuts(dialog: *mut gtk::ffi::GtkWidget);

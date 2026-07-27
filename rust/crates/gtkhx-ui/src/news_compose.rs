@@ -26,7 +26,7 @@ use crate::tr::{tr, tr_fmt};
 const NB_KIND_POST: i32 = 3;
 
 use hxmodel::news::node::hx_news_node_name;
-use hxnews_send::hx_news15_post_thread;
+use hxhandlers::send::news::hx_news15_post_thread;
 
 extern "C" {    // hxnews-model node accessors (for the reply-context card).
     fn hx_news_node_kind(node: *mut c_void) -> i32;

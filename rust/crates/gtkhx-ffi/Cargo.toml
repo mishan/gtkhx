@@ -14,6 +14,7 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
 # --- GObject / UI layer ---
 gtkhx-boxed = { path = "../gtkhx-boxed" }
@@ -32,18 +33,8 @@ hxcrypto-aead = { path = "../hxcrypto-aead" }
 hxcompress = { path = "../hxcompress" }
 
 # --- receive-side handlers ---
-hxagreement-recv = { path = "../hxagreement-recv" }
-hxchat-recv = { path = "../hxchat-recv" }
-hxfiles-recv = { path = "../hxfiles-recv" }
-hxicon-recv = { path = "../hxicon-recv" }
-hxmsg-recv = { path = "../hxmsg-recv" }
-hxnews-recv = { path = "../hxnews-recv" }
-hxuser-recv = { path = "../hxuser-recv" }
-hxxfer-recv = { path = "../hxxfer-recv" }
 
 # --- send-side handlers ---
-hxchat-send = { path = "../hxchat-send" }
-hxnews-send = { path = "../hxnews-send" }
 
 # --- models ---
 

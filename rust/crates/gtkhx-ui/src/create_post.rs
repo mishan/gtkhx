@@ -31,7 +31,7 @@ thread_local! {
     static POST: RefCell<Option<(gtk::Window, gtk::TextView)>> = const { RefCell::new(None) };
 }
 
-use hxnews_send::hx_post_news;
+use hxhandlers::send::news::hx_post_news;
 
 extern "C" {    /// gtkhx_ui_bridge.c — the focused session's `&htlc` (single-session).
     fn gtkhx_active_htlc() -> *mut c_void;
