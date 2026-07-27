@@ -18,5 +18,7 @@ crate-type = ["rlib"]
 # under cfg(test), so `cargo test -p hxnews-send` runs headless. Mirrors
 # hxchat-send.
 [dependencies]
+hxnews-recv = { path = "../hxnews-recv" }
+hxtext = { path = "../hxtext" }
 glib = { workspace = true }
 hotline-proto = { path = "../hotline-proto" }

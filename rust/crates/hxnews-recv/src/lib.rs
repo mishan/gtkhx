@@ -14,7 +14,7 @@
 
 use std::ffi::c_void;
 
-mod carrier;
+pub mod carrier;
 use carrier::{
     gnews_catalog_set_parsed, gnews_folder_set_parsed, news_post_fetch_failed, news_post_new,
 };

@@ -10,61 +10,20 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 #[cfg(not(test))]
-extern "C" {
-    /// The singleton `GtkhxSession` GObject (gtkhx-session).
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::chat-invitation (htlc, cid, name)` (gtkhx-session).
-    fn gtkhx_session_emit_chat_invitation(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        cid: u32,
-        name: *const c_char,
-    );
-    /// Fire `GtkhxSession::chat-subject (htlc, cid, subj)` (gtkhx-session).
-    fn gtkhx_session_emit_chat_subject(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        cid: u32,
-        subj: *const c_char,
-    );
-    /// Fire `GtkhxSession::chat (htlc, HxChatEvent* boxed)` (gtkhx-session).
-    fn gtkhx_session_emit_chat(self_: *mut c_void, htlc: *mut c_void, event: *mut c_void);
-    /// Fire `GtkhxSession::chat-history-batch (htlc, cid, GPtrArray*, has_more)`
-    /// (gtkhx-session).
-    fn gtkhx_session_emit_chat_history_batch(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        cid: u32,
-        entries: *mut c_void,
-        has_more: c_int,
-    );
-    /// Whether `uid` is on the per-chat ignore list (hxmember-model).
-    fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
+use gtkhx_boxed::chat::hx_chat_event_free;
+#[cfg(not(test))]
+use gtkhx_session::{gtkhx_session_emit_chat, gtkhx_session_emit_chat_history_batch, gtkhx_session_emit_chat_invitation, gtkhx_session_emit_chat_subject, gtkhx_session_emit_chat_subject_notice, gtkhx_session_get_default};
+#[cfg(not(test))]
+use gtkhx_ui::chat_members::hx_member_model_get_ignore;
+#[cfg(not(test))]
+use gtkhx_ui::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
+#[cfg(not(test))]
+use hxconn::{hx_conn_has_cap, hx_conn_name, hx_conn_sess};
 
-    // ---- Receive-handler collaborators (E2: the handler body moves here) ----
-    /// The connection's owning session back-pointer (hxconn crate).
-    fn hx_conn_sess(htlc: *const c_void) -> *mut c_void;
-    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0
+#[cfg(not(test))]
+extern "C" {    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0
     /// is the always-present public chat (chat.c).
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
-    /// The chat's authoritative `HxMemberModel *` (chat.c).
-    fn hx_chat_member_model(chat: *mut c_void) -> *mut c_void;
-    /// The chat's current subject (NUL-terminated internal buffer; gtkhx-ui).
-    fn hx_chat_subject(chat: *mut c_void) -> *const c_char;
-    /// Set the chat's subject from `s` (`len` bytes; gtkhx-ui).
-    fn hx_chat_set_subject(chat: *mut c_void, s: *const c_char, len: usize);
-    /// Emit the "Subject Changed to: <subject>" notice signal (gtkhx-session);
-    /// the view-side handler owns the gettext + INFOPREFIX.
-    fn gtkhx_session_emit_chat_subject_notice(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        cid: u32,
-        subject: *const c_char,
-    );
-    /// Whether the server negotiated `cap` for this session (hxconn crate).
-    fn hx_conn_has_cap(htlc: *const c_void, cap: u64) -> c_int;
-    /// Our own display nick (NUL-terminated internal buffer; hxconn crate).
-    fn hx_conn_name(htlc: *const c_void) -> *const c_char;
     /// Build a boxed `HxChatEvent` from the raw (CR2LF + strip_ansi'd) chat body
     /// — copies the bytes, runs the UTF-8 validation + is-self classification
     /// (proto_helpers.c producer). Freed with [`hx_chat_event_free`].
@@ -90,8 +49,6 @@ extern "C" {
         bytes: u32,
         bytes_present: c_int,
     );
-    /// Free a boxed `HxChatEvent` (gtkhx-boxed).
-    fn hx_chat_event_free(ev: *mut c_void);
     /// Log a pre-formatted line under a debug category (debug.c).
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
 }
@@ -173,7 +130,7 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
     // parse as uid/cid 0 + empty name — the same "always emit" behaviour the old
     // C had (its extractor never failed on malformed data).
     let inv = hotline_proto::parse::parse_chat_invite(buf, frame_len, 31);
-    let sess = hx_conn_sess(htlc);
+    let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, 0);
     if chat.is_null() {
         return;
@@ -184,7 +141,7 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
     name[..n].copy_from_slice(&inv.name[..n]);
     hx_chat_invite_recv(
         htlc,
-        hx_chat_member_model(chat),
+        hx_chat_member_model(chat.cast()),
         inv.cid,
         inv.uid,
         name.as_ptr() as *const c_char,
@@ -214,7 +171,7 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(htlc: *mut c_void, frame: *const u8
     if sub.subject.is_empty() {
         return;
     }
-    let sess = hx_conn_sess(htlc);
+    let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, sub.cid);
     if chat.is_null() {
         return;
@@ -224,13 +181,13 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(htlc: *mut c_void, frame: *const u8
     let n = sub.subject.len().min(255);
     s[..n].copy_from_slice(&sub.subject[..n]);
     let subj_ptr = s.as_ptr() as *const c_char;
-    if hx_chat_subject_recv(htlc, sub.cid, subj_ptr, n, hx_chat_subject(chat)) != 0 {
-        hx_chat_set_subject(chat, subj_ptr, n);
+    if hx_chat_subject_recv(htlc, sub.cid, subj_ptr, n, hx_chat_subject(chat.cast())) != 0 {
+        hx_chat_set_subject(chat.cast(), subj_ptr, n);
         gtkhx_session_emit_chat_subject_notice(
             gtkhx_session_get_default(),
             htlc,
             sub.cid,
-            hx_chat_subject(chat),
+            hx_chat_subject(chat.cast()),
         );
     }
 }
@@ -257,7 +214,7 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
     // a single leading LF; `text()` is the display slice.
     let cm = hotline_proto::parse::parse_chat(buf, frame_len, 8192);
 
-    let sess = hx_conn_sess(htlc);
+    let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, 0);
     if chat.is_null() {
         return;
@@ -266,7 +223,7 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
     // Inline-media companion — only when the server confirmed the cap. `media`
     // borrows `buf` (the raw frame), valid for the whole handler.
     let mut media: Option<hotline_proto::inline_media::ChatMediaMeta> = None;
-    if hx_conn_has_cap(htlc, HTLC_CAP_INLINE_MEDIA) != 0 {
+    if hx_conn_has_cap(htlc.cast(), HTLC_CAP_INLINE_MEDIA) != 0 {
         let walker = hotline_proto::wire::ChunkIter::over_message(buf, frame_len);
         match hotline_proto::inline_media::extract_chat_media_meta(walker) {
             Ok(None) => {}
@@ -288,7 +245,7 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
 
     // Boxed HxChatEvent (the C producer copies the bytes). self_nick = our own
     // display name, or NULL when unset.
-    let own = hx_conn_name(htlc);
+    let own = hx_conn_name(htlc.cast());
     let self_nick = if !own.is_null() && *own != 0 {
         own
     } else {
@@ -324,8 +281,8 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
         );
     }
     // Ignore-gate + emit; C owns `ev` and frees it either way.
-    hx_chat_recv(htlc, hx_chat_member_model(chat), cm.uid, ev);
-    hx_chat_event_free(ev);
+    hx_chat_recv(htlc, hx_chat_member_model(chat.cast()), cm.uid, ev);
+    hx_chat_event_free(ev.cast());
 }
 
 /// `int hx_chat_subject_recv (htlc, cid, subject, subject_len, current_subject)`

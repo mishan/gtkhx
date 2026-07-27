@@ -13,41 +13,12 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 #[cfg(not(test))]
-extern "C" {
-    /// The singleton `GtkhxSession` GObject (gtkhx-session).
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// `GtkhxSession::user-create (htlc, chat, uid, nick_color, nam, icon, color, incremental)`.
-    fn gtkhx_session_emit_user_create(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        chat: *mut c_void,
-        uid: u16,
-        nick_color: u32,
-        nam: *const c_char,
-        icon: u16,
-        color: u16,
-        incremental: c_int,
-    );
-    /// `GtkhxSession::user-change (htlc, chat, uid, nick_color, nam, icon, color)`.
-    fn gtkhx_session_emit_user_change(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        chat: *mut c_void,
-        uid: u16,
-        nick_color: u32,
-        nam: *const c_char,
-        icon: u16,
-        color: u16,
-    );
-    /// `GtkhxSession::user-delete (htlc, chat, uid, incremental)`.
-    fn gtkhx_session_emit_user_delete(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        chat: *mut c_void,
-        uid: u16,
-        incremental: c_int,
-    );
-    /// Whether `uid` is a member of the per-chat model (hxmember-model).
+use gtkhx_session::{gtkhx_session_emit_self_updated, gtkhx_session_emit_user_change, gtkhx_session_emit_user_create, gtkhx_session_emit_user_delete, gtkhx_session_emit_user_info, gtkhx_session_emit_user_notice, gtkhx_session_get_default};
+#[cfg(not(test))]
+use hxconn::{hx_conn_name, hx_conn_sess};
+
+#[cfg(not(test))]
+extern "C" {    /// Whether `uid` is a member of the per-chat model (hxmember-model).
     fn hx_member_model_contains(model: *mut c_void, uid: u16) -> c_int;
     /// Insert-or-update a member's fields in the per-chat model (hxmember-model),
     /// without emitting a view signal.
@@ -59,17 +30,6 @@ extern "C" {
         color: u16,
         nick_color: u32,
     );
-    /// `GtkhxSession::user-info (uid, nam, info, len)` — a USER_INFO reply.
-    fn gtkhx_session_emit_user_info(
-        self_: *mut c_void,
-        uid: u16,
-        nam: *const c_char,
-        info: *const c_char,
-        len: u16,
-    );
-    /// `GtkhxSession::self-updated (htlc)` — our own access bits / uid were
-    /// (re)parsed from a SELFINFO reply.
-    fn gtkhx_session_emit_self_updated(self_: *mut c_void, htlc: *mut c_void);
     /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
     /// Deliberately ignores the server-supplied name — our local prefs nick is
     /// authoritative. C helper in proto_helpers.c.
@@ -77,8 +37,6 @@ extern "C" {
     /// Set our own "logged in" flag on the connection (hxconn). SELFINFO is the
     /// canonical login-complete signal; the agreement Agree button reads this.
     fn hx_conn_set_logged_in(htlc: *mut c_void, v: c_int);
-    /// `session *hx_conn_sess (htlc)` — the session owning this connection.
-    fn hx_conn_sess(htlc: *mut c_void) -> *mut c_void;
     /// `struct chat *chat_with_cid (sess, cid)` — the chat with this id, or NULL.
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
     /// `void *hx_chat_member_model (chat)` — the chat's authoritative
@@ -88,18 +46,6 @@ extern "C" {
     /// gboolean; leaves `out` untouched when the uid is absent.
     fn hx_member_model_get_info(model: *mut c_void, uid: u16, out: *mut HxMemberInfo)
         -> c_int;
-    /// Emit the `user-notice` signal (gtkhx-session): a roster join / parts /
-    /// rename line for chat `cid`. `kind` is one of `HX_USER_NOTICE_*`; the
-    /// view-side handler owns the gettext + showjoin gate. `old_name` is NULL
-    /// except for a rename.
-    fn gtkhx_session_emit_user_notice(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        cid: u32,
-        kind: u32,
-        name: *const c_char,
-        old_name: *const c_char,
-    );
     /// `int task_inerror (htlc, frame, frame_len)` — TRUE if the frame is a
     /// task-error reply we should bail on (protocol.h).
     fn task_inerror(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> c_int;
@@ -113,7 +59,6 @@ extern "C" {
     fn hx_conn_icon(htlc: *mut c_void) -> u16;
     fn hx_conn_set_icon(htlc: *mut c_void, v: u16);
     fn hx_conn_set_nick_color(htlc: *mut c_void, v: u32);
-    fn hx_conn_name(htlc: *mut c_void) -> *const c_char;
     /// Log a pre-formatted line under a debug category (debug.c) — the
     /// non-variadic sibling of debug_log.
     fn debug_log_str(cat: *const c_char, msg: *const c_char);
@@ -306,12 +251,12 @@ pub unsafe extern "C" fn hx_rcv_user_change(
     let buf = std::slice::from_raw_parts(frame, frame_len);
     let uc = hotline_proto::parse::parse_user_change(buf, frame_len, 31);
 
-    let sess = hx_conn_sess(htlc);
+    let sess = hx_conn_sess(htlc.cast());
     let mut chat = chat_with_cid(sess, uc.cid);
     if chat.is_null() {
         chat = chat_new(sess, uc.cid);
     }
-    let model = hx_chat_member_model(chat);
+    let model = hx_chat_member_model(chat.cast());
 
     // Pre-change snapshot from the authoritative model, taken before the apply
     // updates it — so the preserve rules + rename notice see the old state.
@@ -319,7 +264,7 @@ pub unsafe extern "C" fn hx_rcv_user_change(
     let old_exists = hx_member_model_get_info(model, uc.uid, &mut old) != 0;
     let old_name_bytes = optr_bytes(old.name.as_ptr());
 
-    let self_name_bytes = optr_bytes(hx_conn_name(htlc));
+    let self_name_bytes = optr_bytes(hx_conn_name(htlc.cast()));
 
     let plan = hotline_proto::user_change::resolve(&hotline_proto::user_change::ChangeInput {
         uid: uc.uid,
@@ -332,7 +277,7 @@ pub unsafe extern "C" fn hx_rcv_user_change(
         old_status: old.status,
         old_nick_color: if old_exists { old.nick_color } else { HX_NICK_COLOR_NONE },
         old_name: if old_exists { old_name_bytes.as_deref() } else { None },
-        self_uid: hx_conn_uid(htlc),
+        self_uid: hx_conn_uid(htlc.cast()),
         self_name: self_name_bytes.as_deref(),
     });
 
@@ -397,13 +342,13 @@ pub unsafe extern "C" fn hx_rcv_user_change(
     // Self bookkeeping — mirror the just-applied wire/plan values into htlc.
     // (A new-self returned early via SKIPPED, so a self change here is always an
     // existing member.) The name is deliberately not copied back (see above).
-    if uc.uid != 0 && uc.uid == hx_conn_uid(htlc) {
+    if uc.uid != 0 && uc.uid == hx_conn_uid(htlc.cast()) {
         let icon = if uc.icon != 0 {
             uc.icon
         } else if old_exists {
             old.icon
         } else {
-            hx_conn_icon(htlc)
+            hx_conn_icon(htlc.cast())
         };
         hx_conn_set_icon(htlc, icon);
         if uc.got_nick_color {
@@ -465,12 +410,12 @@ pub unsafe extern "C" fn hx_rcv_user_part(
     let buf = std::slice::from_raw_parts(frame, frame_len);
     let pm = hotline_proto::parse::parse_user_part(buf, frame_len);
 
-    let sess = hx_conn_sess(htlc);
+    let sess = hx_conn_sess(htlc.cast());
     let chat = chat_with_cid(sess, pm.cid);
     if chat.is_null() {
         return;
     }
-    let model = hx_chat_member_model(chat);
+    let model = hx_chat_member_model(chat.cast());
 
     // Snapshot the member before the emit removes it, so we have the name for
     // the "parts" line.

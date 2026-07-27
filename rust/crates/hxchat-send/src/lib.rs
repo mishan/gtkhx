@@ -53,17 +53,10 @@ type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_
 // tests::{…}` below shadows them with recording stubs, so the extern
 // declarations are gated off to avoid a name clash.
 #[cfg(not(test))]
-extern "C" {
-    // hxtext — encode UTF-8 → wire (UTF-8 verbatim or Mac Roman + LF→CR).
-    // Returns a g_malloc'd, NUL-terminated buffer; caller g_free's.
-    fn gtkhx_text_for_wire(
-        utf8: *const c_char,
-        utf8_len: usize,
-        utf8_mode: glib::ffi::gboolean,
-        is_body: glib::ffi::gboolean,
-        out_len: *mut usize,
-    ) -> *mut c_char;
+use hxtext::gtkhx_text_for_wire;
 
+#[cfg(not(test))]
+extern "C" {
     // chat_send_bridge.c — per-htlc cap + chat-model lookups.
     fn hx_htlc_text_encoding_cap(htlc: *mut c_void) -> glib::ffi::gboolean;
     fn hx_chat_lookup(htlc: *mut c_void, cid: u32) -> *mut c_void;

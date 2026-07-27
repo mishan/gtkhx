@@ -13,6 +13,7 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+hxtext = { path = "../hxtext" }
 # glib for the g_free'd text buffer + the gboolean cap flag.
 glib = { workspace = true }
 # Native chat chunk builders (build::build_chat_*_chunks) + the HTLC_HDR_*

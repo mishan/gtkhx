@@ -20,6 +20,10 @@ crate-type = ["rlib"]
 # #[cfg(test)] doubles that record what would be emitted (and drive the ignore
 # input), so the suite runs headless.
 [dependencies]
+gtkhx-boxed = { path = "../gtkhx-boxed" }
+gtkhx-session = { path = "../gtkhx-session" }
+gtkhx-ui = { path = "../gtkhx-ui" }
+hxconn = { path = "../hxconn" }
 # The wire parsers are native Rust — a moved handler calls
 # hotline_proto::parse::* directly rather than round-tripping through the C-ABI
 # gtkhx_proto_* shims. Its unused #[no_mangle] exports dead-strip out of this

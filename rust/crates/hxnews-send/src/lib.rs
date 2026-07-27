@@ -54,19 +54,17 @@ type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_
 // Real build: these resolve at the final C link. Test build: `use tests::{…}`
 // below shadows them with recording stubs, so the extern block is gated off.
 #[cfg(not(test))]
+use hxnews_recv::{rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list};
+#[cfg(not(test))]
+use hxnews_recv::carrier::{gnews_catalog_path, gnews_folder_path};
+#[cfg(not(test))]
+use hxtext::gtkhx_text_for_wire;
+
+#[cfg(not(test))]
 extern "C" {
     // path_hldir.c — encode a "/a/b" path to the wire NEWSPATH bytes. Returns a
     // g_malloc'd buffer + out length; caller g_free's. is_file = 0 for news.
     fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: c_int) -> *mut u8;
-
-    // hxtext — encode UTF-8 → wire (verbatim or Mac Roman + LF→CR).
-    fn gtkhx_text_for_wire(
-        utf8: *const c_char,
-        utf8_len: usize,
-        utf8_mode: glib::ffi::gboolean,
-        is_body: glib::ffi::gboolean,
-        out_len: *mut usize,
-    ) -> *mut c_char;
 
     // chat_send_bridge.c — per-htlc CAP_TEXT_ENCODING probe (shared with the
     // chat senders).
@@ -81,17 +79,6 @@ extern "C" {
         str_: *const c_char,
     ) -> *mut c_void;
     fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
-
-    // reply-task handlers (5-arg per the RcvTaskFn note); news ones resolve
-    // against hxnews-recv, rcv_task_news_file against rcv.c.
-    fn rcv_task_news_file(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_news_post(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_newscat_list(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_newsfolder_list(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
-
-    // hxnews-recv `carrier` module — the request path off the reply carrier.
-    fn gnews_catalog_path(g: *mut c_void) -> *const c_char;
-    fn gnews_folder_path(g: *mut c_void) -> *const c_char;
 }
 
 #[cfg(test)]

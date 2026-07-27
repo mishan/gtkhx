@@ -2009,7 +2009,11 @@ version = "0.1.0"
 name = "hxchat-recv"
 version = "0.1.0"
 dependencies = [
+ "gtkhx-boxed",
+ "gtkhx-session",
+ "gtkhx-ui",
  "hotline-proto",
+ "hxconn",
 ]
 
 [[package]]
@@ -2018,6 +2022,7 @@ version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
  "hotline-proto",
+ "hxtext",
 ]
 
 [[package]]
@@ -2187,6 +2192,8 @@ version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
  "hotline-proto",
+ "hxnews-recv",
+ "hxtext",
 ]
 
 [[package]]
@@ -2221,7 +2228,9 @@ version = "0.1.0"
 name = "hxuser-recv"
 version = "0.1.0"
 dependencies = [
+ "gtkhx-session",
  "hotline-proto",
+ "hxconn",
 ]
 
 [[package]]
