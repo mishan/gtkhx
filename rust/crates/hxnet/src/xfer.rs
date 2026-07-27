@@ -35,6 +35,7 @@ use crate::htxf::HtxfConn;
 // errno-ish return codes (the C returned raw errno; callers only test != 0).
 const EIO: c_int = 5;
 const EINVAL: c_int = 22;
+const EFBIG: c_int = 27;
 const ENAMETOOLONG: c_int = 36;
 const EPROTO: c_int = 71;
 
@@ -123,13 +124,28 @@ fn io_errno(e: &std::io::Error) -> c_int {
     e.raw_os_error().unwrap_or(EIO)
 }
 
-/// A single subchannel read (mirrors C `htxf_io_read`: one `hxnet_htxf_read`, no
-/// fill-loop). Returns the byte count (0 = clean EOF, the folder recv's
-/// end-of-stream signal) or a negative on error. The folder control reads are
-/// small and each maps to one sender write / AEAD frame, so a single read
-/// returns them whole — same assumption the C loop made.
-unsafe fn htxf_read_once(hx: *mut HtxfConn, buf: &mut [u8]) -> isize {
-    crate::htxf::hxnet_htxf_read(hx, buf.as_mut_ptr(), buf.len())
+/// Fill `buf` completely off the subchannel, looping over short reads (the
+/// plaintext transport can return fewer bytes than requested, unlike the C
+/// callers' one-write-per-frame assumption). Returns `buf.len()` when full,
+/// `0` only when EOF lands on a read boundary before any bytes are consumed
+/// (the folder recv's clean end-of-stream signal), or a negative on error —
+/// including a truncated read (EOF partway through), which is a genuine desync
+/// rather than a clean end.
+unsafe fn htxf_read_full(hx: *mut HtxfConn, buf: &mut [u8]) -> isize {
+    let want = buf.len();
+    let mut got = 0usize;
+    while got < want {
+        let n = crate::htxf::hxnet_htxf_read(hx, buf[got..].as_mut_ptr(), want - got);
+        if n < 0 {
+            return -1;
+        }
+        if n == 0 {
+            // Clean EOF only at a buffer boundary; a partial fill is truncation.
+            return if got == 0 { 0 } else { -1 };
+        }
+        got += n as usize;
+    }
+    got as isize
 }
 
 /// A raw Hotline path component (Mac Roman bytes) → an owned `OsString`, without
@@ -648,7 +664,7 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
         }
         // nfi header: a 0-byte read is the clean end-of-stream (server closed).
         let mut nfi = [0u8; NFI_HEADER_LEN];
-        let n = htxf_read_once(fp.hx, &mut nfi);
+        let n = htxf_read_full(fp.hx, &mut nfi);
         if n == 0 {
             return 0;
         }
@@ -662,12 +678,12 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
         let mut rel = std::path::PathBuf::new();
         for _ in 0..pathcount {
             let mut ph = [0u8; 3];
-            if htxf_read_once(fp.hx, &mut ph) != 3 {
+            if htxf_read_full(fp.hx, &mut ph) != 3 {
                 return EIO;
             }
             let nlen = ph[2] as usize;
             let mut name = vec![0u8; nlen];
-            if nlen > 0 && htxf_read_once(fp.hx, &mut name) != nlen as isize {
+            if nlen > 0 && htxf_read_full(fp.hx, &mut name) != nlen as isize {
                 return EIO;
             }
             // Defence in depth — refuse `..` and embedded '/' that would escape.
@@ -703,7 +719,7 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
             return EIO;
         }
         let mut sz = [0u8; 4];
-        if htxf_read_once(fp.hx, &mut sz) != 4 {
+        if htxf_read_full(fp.hx, &mut sz) != 4 {
             return EIO;
         }
         let file_size = u32::from_be_bytes(sz) as u64;
@@ -809,20 +825,25 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
     for e in &entries {
         // Wait for FILE_NEXT.
         let mut cmd = [0u8; 2];
-        if htxf_read_once(fp.hx, &mut cmd) != 2 {
+        if htxf_read_full(fp.hx, &mut cmd) != 2 {
             return EIO;
         }
         if u16::from_be_bytes(cmd) != FILE_NEXT_CMD {
             return EPROTO;
         }
 
-        // nfi header: len = 4 + sum(3 + nlen_i), type, pathcount.
-        let mut wire_len: u16 = NFI_LEN_FIXED;
+        // nfi header: len = 4 + sum(3 + nlen_i), type, pathcount. Compute the
+        // length wide and refuse an nfi that won't fit the u16 wire fields
+        // rather than wrapping and desyncing the server's folder-stream parser.
+        let mut wire_len: usize = NFI_LEN_FIXED as usize;
         for c in &e.components {
-            wire_len = wire_len.wrapping_add(3 + c.len() as u16);
+            wire_len += 3 + c.len();
+        }
+        if wire_len > u16::MAX as usize || e.components.len() > u16::MAX as usize {
+            return ENAMETOOLONG;
         }
         let mut nfi = [0u8; NFI_HEADER_LEN];
-        nfi[0..2].copy_from_slice(&wire_len.to_be_bytes());
+        nfi[0..2].copy_from_slice(&(wire_len as u16).to_be_bytes());
         nfi[2..4].copy_from_slice(&(e.is_folder as u16).to_be_bytes());
         nfi[4..6].copy_from_slice(&(e.components.len() as u16).to_be_bytes());
         if xfer_write(fp.hx, &nfi).is_err() {
@@ -848,7 +869,7 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
 
         // File leaf — server replies FILE_SEND (fresh) or FILE_RESUME.
         let mut cmd = [0u8; 2];
-        if htxf_read_once(fp.hx, &mut cmd) != 2 {
+        if htxf_read_full(fp.hx, &mut cmd) != 2 {
             return EIO;
         }
         let cmd = u16::from_be_bytes(cmd);
@@ -856,7 +877,7 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
         let mut rsrc_pos = 0u64;
         if cmd == FILE_RESUME_CMD {
             let mut rl = [0u8; 2];
-            if htxf_read_once(fp.hx, &mut rl) != 2 {
+            if htxf_read_full(fp.hx, &mut rl) != 2 {
                 return EIO;
             }
             let rlen = u16::from_be_bytes(rl) as usize;
@@ -864,7 +885,7 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
                 return EPROTO;
             }
             let mut rflt = vec![0u8; rlen];
-            if rlen > 0 && htxf_read_once(fp.hx, &mut rflt) != rlen as isize {
+            if rlen > 0 && htxf_read_full(fp.hx, &mut rflt) != rlen as isize {
                 return EIO;
             }
             if rlen >= RFLT_MIN_FOR_DATA {
@@ -903,7 +924,15 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
             + data_size.wrapping_sub(data_pos)
             + ffo::FORK_HEADER_LEN as u64
             + rsrc_size.wrapping_sub(rsrc_pos);
-        if xfer_write(fp.hx, &(file_size as u32).to_be_bytes()).is_err() {
+        // The folder-stream size header is a u32 on the wire; a file whose FFO
+        // payload exceeds 4 GiB can't be represented, so refuse it explicitly
+        // rather than truncating and desyncing the stream. (The C path silently
+        // truncated here.)
+        let file_size = match u32::try_from(file_size) {
+            Ok(v) => v,
+            Err(_) => return EFBIG,
+        };
+        if xfer_write(fp.hx, &file_size.to_be_bytes()).is_err() {
             return EIO;
         }
 
@@ -1013,7 +1042,6 @@ mod folder_loopback_tests {
     //! of the Hotline 1.5 folder protocol over a loopback socket.
     use super::*;
     use crate::htxf::HtxfConn;
-    use std::io::{Read as _, Write as _};
     use std::net::{TcpListener, TcpStream};
 
     // The full FILP body hxnet_xfer_file_send_one emits for `body` (133-byte
@@ -1204,5 +1232,62 @@ mod folder_loopback_tests {
         let _ = std::fs::remove_dir_all(&dest);
         assert_eq!(a, b"alpha body", "downloaded a.txt");
         assert_eq!(b, b"beta!", "downloaded b.txt");
+    }
+
+    // The plaintext transport can hand a control read fewer bytes than asked
+    // for; htxf_read_full must reassemble. A mock that emits the nfi header +
+    // component + size one byte at a time (flush between) drives that
+    // reassembly — the download must still land byte-exact.
+    #[test]
+    fn folder_recv_tolerates_dribbled_control_reads() {
+        let name: &[u8] = b"drib.txt";
+        let body: &[u8] = b"dribbled control reads must reassemble\n";
+        let filp = gen_filp(body);
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            // Byte-at-a-time writer with a flush + tiny sleep, to make the peer's
+            // read return partial buffers.
+            fn dribble(s: &mut TcpStream, bytes: &[u8]) {
+                for b in bytes {
+                    s.write_all(std::slice::from_ref(b)).unwrap();
+                    s.flush().unwrap();
+                    std::thread::sleep(std::time::Duration::from_millis(1));
+                }
+            }
+            let (mut s, _) = listener.accept().unwrap();
+            let mut cmd = [0u8; 2];
+            s.read_exact(&mut cmd).unwrap();
+            let wire_len = NFI_LEN_FIXED + 3 + name.len() as u16;
+            let mut nfi = [0u8; NFI_HEADER_LEN];
+            nfi[0..2].copy_from_slice(&wire_len.to_be_bytes());
+            nfi[2..4].copy_from_slice(&0u16.to_be_bytes());
+            nfi[4..6].copy_from_slice(&1u16.to_be_bytes());
+            dribble(&mut s, &nfi);
+            dribble(&mut s, &[0, 0, name.len() as u8]);
+            dribble(&mut s, name);
+            s.read_exact(&mut cmd).unwrap();
+            dribble(&mut s, &(filp.len() as u32).to_be_bytes());
+            s.write_all(&filp).unwrap();
+            // Trailing FILE_NEXT → close for a clean end-of-stream.
+            let _ = s.read_exact(&mut cmd);
+        });
+
+        let dest =
+            std::env::temp_dir().join(format!("hxnet_frecv_drib_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
+        let fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        let rv = unsafe { hxnet_xfer_folder_recv_all(&fp) };
+        drop(conn);
+        server.join().unwrap();
+
+        assert_eq!(rv, 0, "folder_recv_all returned error under dribbled reads");
+        let got = std::fs::read(dest.join("drib.txt")).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dest);
+        assert_eq!(got, body, "download must reassemble the dribbled control reads");
     }
 }
