@@ -41,12 +41,19 @@ extern size_t hx_htxf_offsetof_total_pos (void);
  * port of the old g_atomic_int_* calls) the C side now goes through instead of
  * accessing htxf->{refcount,canceled,total_pos} directly. */
 extern gint hx_htxf_ref (struct htxf_conn *htxf);   /* inc; returns new count */
-extern gint hx_htxf_unref (struct htxf_conn *htxf); /* dec; nonzero == was last ref */
+/* dec; on the last ref (count → 0) runs the registered destructor (the C
+ * GTK/preview + channel teardown) then frees the handle. NULL-safe. */
+extern void hx_htxf_unref (struct htxf_conn *htxf);
 extern void hx_htxf_cancel (struct htxf_conn *htxf);
 extern gint hx_htxf_is_canceled (const struct htxf_conn *htxf);
 extern void hx_htxf_add_total_pos (struct htxf_conn *htxf, guint64 delta);
 extern void hx_htxf_set_total_pos (struct htxf_conn *htxf, guint64 val);
 extern guint64 hx_htxf_total_pos (const struct htxf_conn *htxf);
+
+/* Register the destructor run on a handle's last unref, before free (S0.3) —
+ * the GTK/preview + channel teardown that must stay in C. Called once at
+ * startup. */
+extern void hx_htxf_set_destructor (void (*cb) (struct htxf_conn *htxf));
 
 /* Registry: is htxf still a live entry in the xfers[] array? (Downloads gate
  * their reply on this — a since-cancelled transfer's reply is dropped.) */

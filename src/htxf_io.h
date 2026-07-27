@@ -149,9 +149,9 @@ extern void hxnet_htxf_abort_free (const HtxfAbort *token);
 
 /* ---- C-side shim --------------------------------------------------- */
 
-/* Allocate the cancellation token onto htxf->abort. Main-thread call
- * at transfer creation. No-op if a token is already present. */
-extern void htxf_io_abort_init (struct htxf_conn *htxf);
+/* The cancellation token (htxf->abort) is created + freed by hxnet's
+ * xfer_handle module (hx_htxf_new / hx_htxf_free, S0.3). This shim only arms
+ * and triggers it. */
 
 /* Arm htxf->abort with htxf->hx's socket. Worker-thread call, once,
  * after the channel is open. No-op if either is NULL. */
@@ -160,9 +160,6 @@ extern void htxf_io_abort_arm (struct htxf_conn *htxf);
 /* Trigger cancellation: unblock a parked htxf_io_read / _write by
  * shutting the subchannel socket down. Main-thread call. NULL-safe. */
 extern void htxf_io_abort (struct htxf_conn *htxf);
-
-/* Free htxf->abort and clear the slot. Called at htxf teardown. */
-extern void htxf_io_abort_free (struct htxf_conn *htxf);
 
 /* Zero the handle slot. struct htxf_conn is memset by every caller
  * before use, so this is mostly explicit-intent; safe to call before

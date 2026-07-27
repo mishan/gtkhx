@@ -21,7 +21,7 @@
 //! hard-coded constant.
 
 use std::os::raw::{c_char, c_int, c_void};
-use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
 
 /// `HOSTLEN` from `compat.h`.
 const HOSTLEN: usize = 256;
@@ -90,29 +90,59 @@ pub struct HtxfHandle {
     abort: *mut c_void,
 }
 
-/// Allocate a zeroed transfer handle (replaces C `g_new0 (struct htxf_conn, 1)`).
-/// The returned pointer is owned by the caller and must be released with
-/// [`hx_htxf_free`]. Never NULL (allocation failure aborts, as `g_new0` did).
+/// A C-side destructor invoked by [`hx_htxf_unref`] on the last ref, before the
+/// handle is freed — it runs the GTK/preview + channel teardown that must stay
+/// in C. Registered once at startup via [`hx_htxf_set_destructor`].
+type Destructor = unsafe extern "C" fn(*mut HtxfHandle);
+
+/// The registered destructor as a raw `usize` (a fn pointer round-trips through
+/// `usize`); 0 = none. Set once at startup, read on any thread at teardown.
+static DESTRUCTOR: AtomicUsize = AtomicUsize::new(0);
+
+/// Register the C destructor callback run on a handle's last unref (before free).
+/// `None` clears it. Idempotent; call once from startup.
+#[no_mangle]
+pub extern "C" fn hx_htxf_set_destructor(cb: Option<Destructor>) {
+    DESTRUCTOR.store(cb.map_or(0, |f| f as usize), Ordering::SeqCst);
+}
+
+/// Allocate a zeroed transfer handle (replaces C `g_malloc0 (sizeof (struct
+/// htxf_conn))`), with its `HtxfAbort` cancellation token created up front (S0.3,
+/// was `xfers.c`'s `htxf_io_abort_init`). The returned pointer is owned by the
+/// caller and released with [`hx_htxf_free`] or the last [`hx_htxf_unref`]. Never
+/// NULL (allocation failure aborts, as `g_malloc0` did).
 #[no_mangle]
 pub extern "C" fn hx_htxf_new() -> *mut HtxfHandle {
     // SAFETY: HtxfHandle is POD (integers, byte arrays, and null-valid raw
     // pointers), so all-zero is a valid inhabitant — the exact semantics of the
-    // old g_new0 / memset(0).
-    let boxed: Box<HtxfHandle> = Box::new(unsafe { std::mem::zeroed() });
+    // old g_malloc0 / memset(0).
+    let mut boxed: Box<HtxfHandle> = Box::new(unsafe { std::mem::zeroed() });
+    // Create the cancellation token now (main thread), live for the handle's
+    // whole life: armed later with the socket by htxf_io_abort_arm (worker),
+    // triggered by xfer_delete (main), freed in hx_htxf_free.
+    boxed.abort = crate::htxf::hxnet_htxf_abort_new() as *mut c_void;
     Box::into_raw(boxed)
 }
 
-/// Free a handle from [`hx_htxf_new`] (replaces the `g_free (htxf)` tail in
-/// `xfers.c::htxf_unref`). NULL-safe.
+/// Free a handle from [`hx_htxf_new`] — frees its `HtxfAbort` token (the C-side
+/// creation ref; the channel's ref was already dropped by the destructor's
+/// `htxf_io_release`) then the struct. NULL-safe. Not usually called directly;
+/// the last [`hx_htxf_unref`] calls it after running the destructor.
 ///
 /// # Safety
 /// `htxf` must be NULL or a pointer previously returned by `hx_htxf_new` and not
 /// yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn hx_htxf_free(htxf: *mut HtxfHandle) {
-    if !htxf.is_null() {
-        drop(Box::from_raw(htxf));
+    if htxf.is_null() {
+        return;
     }
+    let abort = (*htxf).abort;
+    if !abort.is_null() {
+        crate::htxf::hxnet_htxf_abort_free(abort as *const crate::htxf::HtxfAbort);
+        (*htxf).abort = std::ptr::null_mut();
+    }
+    drop(Box::from_raw(htxf));
 }
 
 // ---- Cross-thread lifecycle (S0.2) -----------------------------------------
@@ -131,15 +161,30 @@ pub unsafe extern "C" fn hx_htxf_ref(p: *mut HtxfHandle) -> c_int {
     (*p).refcount.fetch_add(1, Ordering::SeqCst) + 1
 }
 
-/// Drop a reference (`g_atomic_int_dec_and_test`). Returns nonzero iff this was
-/// the last ref (the count reached 0), so the caller runs the teardown + frees.
+/// Drop a reference (`g_atomic_int_dec_and_test`). On the last ref (count → 0)
+/// it runs the registered destructor (the C GTK/preview + channel teardown) and
+/// frees the handle (S0.3 — the teardown + free tail that lived in
+/// `xfers.c::htxf_unref`). NULL-safe.
 ///
 /// # Safety
-/// `p` is a live handle from `hx_htxf_new`.
+/// `p` is NULL or a live handle from `hx_htxf_new`; after the last unref the
+/// caller must not touch `p` again.
 #[no_mangle]
-pub unsafe extern "C" fn hx_htxf_unref(p: *mut HtxfHandle) -> c_int {
+pub unsafe extern "C" fn hx_htxf_unref(p: *mut HtxfHandle) {
+    if p.is_null() {
+        return;
+    }
     // fetch_sub returns the previous value; previous == 1 means we hit 0.
-    ((*p).refcount.fetch_sub(1, Ordering::SeqCst) == 1) as c_int
+    if (*p).refcount.fetch_sub(1, Ordering::SeqCst) != 1 {
+        return;
+    }
+    let d = DESTRUCTOR.load(Ordering::SeqCst);
+    if d != 0 {
+        // SAFETY: only ever set from a fn pointer of this exact type.
+        let cb: Destructor = std::mem::transmute::<usize, Destructor>(d);
+        cb(p);
+    }
+    hx_htxf_free(p);
 }
 
 /// Mark the transfer cancelled (`g_atomic_int_set(&canceled, TRUE)`).
@@ -244,13 +289,18 @@ mod tests {
 
     #[test]
     fn ref_unref_cancel_total_pos_transitions() {
+        use std::sync::atomic::AtomicU32;
+        static DTOR_CALLS: AtomicU32 = AtomicU32::new(0);
+        extern "C" fn test_dtor(_p: *mut HtxfHandle) {
+            DTOR_CALLS.fetch_add(1, Ordering::SeqCst);
+        }
         unsafe {
+            DTOR_CALLS.store(0, Ordering::SeqCst);
+            hx_htxf_set_destructor(Some(test_dtor));
             let p = hx_htxf_new();
-            // Refcount: inc returns the new count; unref reports was-last only at 0.
+            // Refcount: inc returns the new count.
             assert_eq!(hx_htxf_ref(p), 1); // 0 → 1 (initial ref)
             assert_eq!(hx_htxf_ref(p), 2); // 1 → 2
-            assert_eq!(hx_htxf_unref(p), 0); // 2 → 1, not last
-            assert_eq!(hx_htxf_unref(p), 1); // 1 → 0, last ref
 
             // Cancel flag: starts clear, sticks once set.
             assert_eq!(hx_htxf_is_canceled(p), 0);
@@ -265,7 +315,14 @@ mod tests {
             hx_htxf_set_total_pos(p, 4096);
             assert_eq!(hx_htxf_total_pos(p), 4096);
 
-            hx_htxf_free(p);
+            // Unref: the non-last drop runs no destructor; the last drop runs the
+            // registered destructor exactly once and frees (don't touch p after).
+            hx_htxf_unref(p); // 2 → 1
+            assert_eq!(DTOR_CALLS.load(Ordering::SeqCst), 0);
+            hx_htxf_unref(p); // 1 → 0 → destructor + free
+            assert_eq!(DTOR_CALLS.load(Ordering::SeqCst), 1);
+
+            hx_htxf_set_destructor(None);
         }
     }
 

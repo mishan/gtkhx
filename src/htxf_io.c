@@ -135,15 +135,8 @@ htxf_io_set_read_timeout (struct htxf_conn *htxf, guint32 timeout_ms)
 }
 
 /* ---- Cancellation token (Phase R3 X1) ------------------------------ */
-
-void
-htxf_io_abort_init (struct htxf_conn *htxf)
-{
-    if (!htxf || htxf->abort) {
-        return;
-    }
-    htxf->abort = (void *) hxnet_htxf_abort_new ();
-}
+/* The token is created + freed by hxnet's xfer_handle module (hx_htxf_new /
+ * hx_htxf_free, S0.3); this file only arms (worker) and triggers (main) it. */
 
 void
 htxf_io_abort_arm (struct htxf_conn *htxf)
@@ -161,14 +154,4 @@ htxf_io_abort (struct htxf_conn *htxf)
         return;
     }
     hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
-}
-
-void
-htxf_io_abort_free (struct htxf_conn *htxf)
-{
-    if (!htxf || !htxf->abort) {
-        return;
-    }
-    hxnet_htxf_abort_free ((const HtxfAbort *) htxf->abort);
-    htxf->abort = NULL;
 }

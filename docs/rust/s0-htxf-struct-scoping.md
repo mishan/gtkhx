@@ -95,12 +95,18 @@ the crate. Consumer field reads/writes are untouched.
   `files_browser.c`. No C site touches the three fields directly anymore (grep
   gate). Covered by a `ref_unref_cancel_total_pos_transitions` crate unit test
   plus the existing `htxf_cancel` shim test + the Tier-3 transfer paths.
-- **S0.3 — fold in the abort token + free tail.** `hx_htxf_new` creates the
-  `HtxfAbort` (today `htxf_io_abort_init`); `hx_htxf_unref`'s last-ref tail runs
-  the `hx_preview_unref` + `htxf_io_release` + `htxf_io_abort_free` +
-  free that `xfers.c::htxf_unref` does today (via a C-side destructor callback
-  the crate invokes, so the GTK/preview couplings stay in C). `htxf_accessors.c`
-  shrinks to the pure field getters/setters.
+- **S0.3 — fold in the abort token + free tail. _(Shipped.)_** `hx_htxf_new`
+  now creates the `HtxfAbort` token (was `xfers.c`'s `htxf_io_abort_init`) and
+  `hx_htxf_free` frees it. `hx_htxf_unref` became void and, on the last ref,
+  runs a C-registered destructor callback (`hx_htxf_set_destructor`, wired to
+  `xfers.c::htxf_destructor` = `hx_preview_unref` + `htxf_io_release` — the
+  GTK/preview + channel teardown that stays in C) then `hx_htxf_free`. So
+  `xfers.c::htxf_unref` collapsed away — its callers call `hx_htxf_unref`
+  directly — and the retired `htxf_io_abort_init` / `htxf_io_abort_free` shims
+  are deleted (the `test_htxf_cancel` unit test drives the token via the same
+  `hxnet_htxf_abort_new`/`_free` primitives; `htxf_io_abort_arm` / `htxf_io_abort`
+  stay). The teardown ordering is preserved: the destructor closes the channel
+  (dropping the channel's token ref) before `hx_htxf_free` drops the creation ref.
 
 Each increment is independently testable and revertible; S0.1 is pure
 scaffolding, S0.2 is the behavioural core (guard it hardest — the Tier-3

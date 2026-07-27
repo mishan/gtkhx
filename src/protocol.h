@@ -163,18 +163,18 @@ struct htxf_conn {
     void *hx;
 
     /* Thread-safe cancellation token for the HTXF subchannel (Rust
-	 * HtxfAbort *, opaque here). Created on the main thread at
-	 * xfer_new, armed with the channel's socket by htxf_connect once
-	 * `hx` is open (worker thread), and triggered by xfer_delete /
-	 * xfers_delete_all (main thread) to shut the socket down and
-	 * unblock a worker parked in a blocking htxf_io_read / _write.
+	 * HtxfAbort *, opaque here). Created by hx_htxf_new (S0.3, was
+	 * xfer_init's htxf_io_abort_init), armed with the channel's socket by
+	 * htxf_connect once `hx` is open (worker thread), and triggered by
+	 * xfer_delete / xfers_delete_all (main thread) to shut the socket down
+	 * and unblock a worker parked in a blocking htxf_io_read / _write.
 	 * Distinct from `hx` precisely because main and worker touch it
 	 * concurrently — `hx` is worker-owned and racy to read from the
 	 * main thread, whereas the token is reference-counted and safe to
 	 * abort from either side. Always non-NULL on an xfers.c transfer
-	 * (xfer_init allocates it before the worker can start); NULL only
+	 * (hx_htxf_new creates it before the worker can start); NULL only
 	 * on the banner.c transient-htxf path, which drives hxnet_htxf_*
-	 * directly without a token. Freed in htxf_unref. */
+	 * directly without a token. Freed by hx_htxf_free. */
     void *abort;
 };
 

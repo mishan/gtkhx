@@ -40,13 +40,14 @@ test_new_is_zeroed_and_free_is_safe (void)
     struct htxf_conn *htxf = hx_htxf_new ();
     g_assert_nonnull (htxf);
 
-    /* Fresh handle: the old g_malloc0 semantics. */
+    /* Fresh handle: the old g_malloc0 semantics, plus (S0.3) a pre-created
+	 * cancellation token — hx_htxf_new now owns what htxf_io_abort_init did. */
     g_assert_cmpint (htxf->refcount, ==, 0);
     g_assert_cmpint (htxf->canceled, ==, 0);
     g_assert_cmpuint (htxf->total_pos, ==, 0);
     g_assert_cmpuint (htxf->total_size, ==, 0);
     g_assert_null (htxf->hx);
-    g_assert_null (htxf->abort);
+    g_assert_nonnull (htxf->abort); /* token created by hx_htxf_new (S0.3) */
     g_assert_cmpint (htxf->path[0], ==, 0);
 
     hx_htxf_free (htxf);
