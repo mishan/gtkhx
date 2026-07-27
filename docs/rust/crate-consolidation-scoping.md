@@ -192,6 +192,48 @@ Unchanged: `hotline-proto`, `hxnet`, `gtkhx-ui`, `hxbridge`, `hxhfs`,
 
 ---
 
+### The second constraint: test-linked crates must stay self-contained
+
+The `gtkhx-core` merge (§2d) was written, built green under `cargo`, and then
+failed at the meson link. The failure is worth recording, because it exposes a
+constraint on crate layout that §1 missed entirely.
+
+`gtkhx-boxed` had **two** independent reasons to be a separate crate, and
+ROADMAP §R4.2 states both. §1 of this doc only noticed the first:
+
+1. **Duplicate symbols at the binary link.** Two staticlibs each bundling the
+   boxed types' `_copy`/`_free` collided. ✅ *Solved by the `gtkhx-ffi`
+   façade* — one archive, each symbol defined once.
+2. **Self-containedness for the Tier 2 test archives.** `gtkhx-boxed` is
+   deliberately "glib only, zero undefined externs", so a proto unit test that
+   pulls `hx_msg_event_copy` links that archive *alone*. ❌ **Not solved by the
+   façade**, because those tests link the standalone staticlib, not the façade.
+
+Merging `gtkhx-boxed` with `hxtask` — which has 10 undefined C externs
+(`hx_session_tasks`, `hx_sess_from_htlc`, `gtask_delete_tsk`, …) — meant
+`test_selfinfo` and `test_msg_proto`, which want only a boxed `_copy`, now
+dragged in `task_new`'s unresolved references and failed to link.
+
+**The rule.** A crate in the test-linked set can only be merged with another
+crate whose undefined-extern set the linking tests already satisfy. In
+practice: *merge extern-free crates with extern-free crates.* The façade
+removed the duplicate-symbol constraint on crate layout; it did not remove
+this one.
+
+Check before proposing any further merge:
+
+```sh
+# undefined C externs a crate would contribute
+grep -A99 'extern "C" {' crates/<c>/src/*.rs | grep -cP '^\s*(pub )?fn '
+# is it linked directly by the Tier 1/2 tests?
+grep -c "rust_<c>_dep" tests/meson.build
+```
+
+This is also why §2b (`hxcrypto`) worked: all four members are leaf primitives
+with no C externs, so the merged archive is still self-contained.
+
+---
+
 ## 3. Making crates reusable by other projects
 
 This reverses a locked-in decision. `docs/rust/ROADMAP.md` lines 38–42
@@ -372,9 +414,16 @@ Each step is independently shippable and green.
    - ✅ **`hxcrypto`** (§2b). Four crates → one. First merge to touch the
      test link surface — 25 `-lhxcrypto_*` / `-lhxcompress` references in
      `tests/meson.build` collapsed to `-lhxcrypto`.
-   - ⏳ **`gtkhx-core`** (§2d), **`hxvoice`** (§2e). Both verified
-     cycle-free; both contain test-linked crates, so both need the same
-     `tests/meson.build` treatment `hxcrypto` just had.
+   - ⛔ **`gtkhx-core`** (§2d) — **attempted and reverted.** Not viable as
+     specified; see "the second constraint" below.
+   - ⛔ **`hxvoice`** (§2e) — **not attempted after §2d failed.** Same trap
+     (`hxvoice-runtime` is test-linked and extern-free; `hxvoice-send` has 5
+     C externs), plus `hxvoice`'s zero-non-Rust-deps property is load-bearing
+     for `cargo test -p hxvoice` in GStreamer-free containers. A three-way
+     merge of `hxvoice` + `hxvoice-runtime` + `hxvoice-model` (all
+     extern-free) behind a `runtime` feature is probably viable, but it also
+     touches the meson `--exclude` gate, CI's `build-no-voice` command, and
+     `gtkhx-ui`'s optional dep — worth doing deliberately, not quickly.
 
    Crate count so far: **41 → 25**.
 
