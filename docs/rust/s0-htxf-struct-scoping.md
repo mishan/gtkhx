@@ -34,10 +34,12 @@ manual `g_atomic_int_inc/dec` we have now, minus the type safety, plus the
 footgun of a raw-pointer `Arc` whose strong count you can't inspect.
 
 **Decision:** keep the intrusive `refcount: AtomicI32` inside the handle and
-expose `hx_htxf_ref` / `hx_htxf_unref` (returns "was-last" so C can run the
-destructor tail). This is a faithful 1:1 port of the current
-`g_atomic_int_inc` / `g_atomic_int_dec_and_test`, with the allocation and the
-free moving into Rust. Revisit `Arc` only if a later phase makes the handle
+expose `hx_htxf_ref` / `hx_htxf_unref`. This is a faithful 1:1 port of the
+current `g_atomic_int_inc` / `g_atomic_int_dec_and_test`, with the allocation +
+free moving into Rust. As shipped (S0.3), `hx_htxf_unref` is void and does not
+hand the "was-last" verdict back to C — on the last ref it runs the C-registered
+destructor (`hx_htxf_set_destructor`) itself, then frees, so the whole teardown
+tail lives behind the ABI. Revisit `Arc` only if a later phase makes the handle
 purely Rust-side (no C field access), when `Arc`'s ergonomics actually pay off.
 
 ### 2. Field access: `#[repr(C)]` mirror, not full opaque

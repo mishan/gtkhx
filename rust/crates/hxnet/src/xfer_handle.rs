@@ -1,24 +1,35 @@
-//! S0.1 of the xfer-worker migration: Rust-owned storage for the HTXF transfer
-//! handle (`struct htxf_conn`).
+//! S0 of the xfer-worker migration: Rust-owned storage + cross-thread lifecycle
+//! for the HTXF transfer handle (`struct htxf_conn`).
 //!
 //! Lives in `hxnet` because this crate already owns the HTXF domain — the
 //! handle's `hx` field *is* an [`crate::htxf::HtxfConn`] transport channel, and
 //! the transfer loops ([`crate::xfer`]) that drive the handle are here too.
 //!
-//! The struct stays C-visible: the 9 C consumers keep direct `htxf->field`
-//! access through the unchanged `struct htxf_conn` declaration in `protocol.h`.
-//! What moves here is *allocation* — `hx_htxf_new` boxes a zeroed [`HtxfHandle`]
-//! (this module's `#[repr(C)]` mirror) and returns the raw pointer;
-//! `hx_htxf_free` drops it. S0.2 will move the `refcount` / `canceled` /
-//! `total_pos` lifecycle onto atomics behind more of this ABI; S0.1 is pure
-//! scaffolding with no behaviour change.
+//! The struct stays C-visible: the C consumers keep direct `htxf->field` access
+//! through the unchanged `struct htxf_conn` declaration in `protocol.h`. What
+//! this module owns:
+//!
+//! - **Storage (S0.1).** `hx_htxf_new` boxes a zeroed [`HtxfHandle`] (this
+//!   module's `#[repr(C)]` mirror) and returns the raw pointer; `hx_htxf_free`
+//!   drops it.
+//! - **Cross-thread lifecycle (S0.2).** `refcount` / `canceled` / `total_pos`
+//!   are atomics (`AtomicI32` / `AtomicI32` / `AtomicU64`) driven behind
+//!   `hx_htxf_{ref,unref,cancel,is_canceled,add_total_pos,set_total_pos,
+//!   total_pos}` — a 1:1 port of the old C `g_atomic_int_*` (SeqCst). No C site
+//!   touches the three fields directly anymore.
+//! - **Token + destructor (S0.3).** `hx_htxf_new` also creates the `HtxfAbort`
+//!   cancellation token and `hx_htxf_free` frees it. `hx_htxf_unref` is void:
+//!   on the last ref it runs the C-registered destructor
+//!   ([`hx_htxf_set_destructor`] — the GTK/preview + channel teardown that must
+//!   stay in C) then `hx_htxf_free`.
 //!
 //! Layout is pinned two ways: `#[repr(C)]` + `libc::timeval` (for the
 //! platform-correct time struct) make the mirror match the C compiler by
 //! construction, and the `hx_htxf_sizeof` / `hx_htxf_offsetof_*` introspection
-//! below lets a C test assert `sizeof` + the S0.2 field offsets against the real
-//! `struct htxf_conn` at runtime — robust even where `PATH_MAX` differs from a
-//! hard-coded constant.
+//! below lets a C test assert `sizeof` + the lifecycle field offsets against the
+//! real `struct htxf_conn` at runtime — robust even where `PATH_MAX` differs
+//! from a hard-coded constant. (`AtomicI32`/`AtomicU64` are layout-identical to
+//! the C `gint`/`guint64` they mirror, so the offsets are unchanged.)
 
 use std::os::raw::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicI32, AtomicU64, AtomicUsize, Ordering};
