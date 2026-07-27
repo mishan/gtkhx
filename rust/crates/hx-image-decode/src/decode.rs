@@ -400,9 +400,13 @@ pub fn decode_first_frame_async(
             }) => {
                 let reason = detail.as_deref().unwrap_or(message);
                 log_decode_failed(sniffed, reason, started.elapsed());
+                // Hand back glycin's detailed reason when it has one (e.g. its
+                // "no loader for this format" text), falling back to the static
+                // category — so native callers can surface / re-log something
+                // useful, matching this fn's "human-readable reason" contract.
                 ImageDecodeOutcome::Err {
                     code,
-                    message: message.to_string(),
+                    message: detail.unwrap_or_else(|| message.to_string()),
                 }
             }
         };

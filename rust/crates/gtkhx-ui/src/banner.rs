@@ -790,6 +790,23 @@ mod tests {
     }
 
     #[test]
+    fn type_is_url_defensive_edges() {
+        // Leading space → the first (empty) segment isn't "URL" (the C helper
+        // stopped copying at the first space too, so " URL" is not URL mode).
+        assert!(!banner_type_is_url(" URL"));
+        assert!(!banner_type_is_url("  URL "));
+        // A long unterminated string that merely starts with "URL" must not
+        // match (no space / NUL to trim on — the whole thing is compared).
+        assert!(!banner_type_is_url("URLAAAAAAAAAAAAAAAAAAAAAAAAAAAA"));
+        // And an arbitrarily long non-URL string is safely rejected, not
+        // truncated into a match.
+        assert!(!banner_type_is_url(&"X".repeat(1024)));
+        // NUL-terminated "URL" (a server that NUL-pads the 4-byte code) still
+        // classifies as URL mode.
+        assert!(banner_type_is_url("URL\0GIFf"));
+    }
+
+    #[test]
     fn validate_htxf_reply_matrix() {
         assert_eq!(validate_htxf_reply(0, 100), HtxfValidation::ZeroRef);
         assert_eq!(validate_htxf_reply(5, 0), HtxfValidation::ZeroSize);
