@@ -18,6 +18,14 @@ CYCLIC = {('gtkhx-ui', 'hxchat-send'),
           ('hxchat-send', 'hxuser-recv'),
           ('hxuser-recv', 'gtkhx-ui')}
 
+# Symbols that deliberately erase types across the FFI boundary and should keep
+# their hand-written declaration. `task_new` stores a `rcv_task_*` callback
+# whose real arg lists are heterogeneous and are cast to the canonical 3-arg
+# RcvTaskFn shape at the call site (see the typedef note in hxtask). Importing
+# it would force a std::mem::transmute of the fn pointer at every caller, which
+# is strictly worse than the extern block it replaces.
+SKIP_SYMS = {'task_new'}
+
 # One level of paren nesting, so `#[cfg(not(test))]` is captured whole.
 BLOCK = re.compile(r'((?:#\[cfg\((?:[^()]|\([^()]*\))*\)\]\n)?)extern\s+"C"\s*\{([\s\S]*?)\n\}')
 NOMANGLE = re.compile(r'#\[(?:unsafe\()?no_mangle\)?\][\s\S]{0,200}?\bfn\s+([A-Za-z0-9_]+)')
@@ -62,7 +70,7 @@ def convert(path, defs, needpub):
         cfg, body = blk.group(1), blk.group(2)
         use, keep = collections.defaultdict(list), []
         for name, text in split_items(body):
-            tgt = defs.get(name) if name else None
+            tgt = defs.get(name) if name and name not in SKIP_SYMS else None
             if tgt and tgt[0] != crate and (crate, tgt[0]) not in CYCLIC:
                 use[tgt].append(name)
             else:

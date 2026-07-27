@@ -26,28 +26,14 @@ use std::os::raw::{c_char, c_void};
 use std::os::raw::{c_int, c_long};
 
 #[cfg(not(test))]
-extern "C" {
-    // ---- gtkhx-session: the singleton + the file-transfer signal emits ----
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::xfer-queue (session*, htxf*)` — the view reads the
-    /// queue position off `htxf`.
-    fn gtkhx_session_emit_xfer_queue(self_: *mut c_void, sess: *mut c_void, htxf: *mut c_void);
-    /// Fire `GtkhxSession::file-info (path, name, creator, type, comments,
-    /// date_modify, date_create, size)`. The two date args are the raw 8-byte
-    /// Hotline stamps; the view formats them.
-    #[allow(clippy::too_many_arguments)]
-    fn gtkhx_session_emit_file_info(
-        self_: *mut c_void,
-        path: *const c_char,
-        name: *const c_char,
-        creator: *const c_char,
-        type_: *const c_char,
-        comments: *const c_char,
-        date_modify: *const u8,
-        date_create: *const u8,
-        size: u64,
-    );
+use gtkhx_session::{gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default};
+#[cfg(not(test))]
+use hxconn::hx_conn_serverhost;
+#[cfg(not(test))]
+use hxhfs::ffi::{comment_len, resource_len};
 
+#[cfg(not(test))]
+extern "C" {
     // ---- session lookup + transfer kickoff ----
     /// Resolve the `session *` for a connection (`sess_from_htlc` is
     /// static-inline; this is the linkable form).
@@ -93,11 +79,6 @@ extern "C" {
     );
     /// Basename within `path` (a pointer *into* `path`; not freed).
     fn dirchar_basename(path: *mut c_char) -> *mut c_char;
-    /// Resource-fork / comment byte lengths for the local file (`hfs.h`).
-    fn resource_len(path: *const c_char) -> usize;
-    fn comment_len(path: *const c_char) -> usize;
-    /// Connection's server host / port (`hxconn` accessors).
-    fn hx_conn_serverhost(htlc: *const c_void) -> *const c_char;
     fn hx_conn_serverport(htlc: *const c_void) -> u16;
     /// The DOWNLOAD_BANNER reply spins up an HTXF subchannel worker (`banner.c`).
     fn banner_handle_htxf_reply(htlc: *mut c_void, ref_: u32, size: u32);
@@ -160,7 +141,7 @@ unsafe fn frame_slice<'a>(frame: *const c_void, frame_len: usize) -> &'a [u8] {
 /// time for the progress/ETA readout.
 unsafe fn stamp_subchannel(htlc: *mut c_void, htxf: *mut c_void) {
     hx_htxf_stamp_start(htxf);
-    hx_htxf_set_serverhost(htxf, hx_conn_serverhost(htlc));
+    hx_htxf_set_serverhost(htxf, hx_conn_serverhost(htlc.cast()));
     hx_htxf_set_serverport(htxf, hx_conn_serverport(htlc).wrapping_add(1));
 }
 

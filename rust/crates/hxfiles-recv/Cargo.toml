@@ -24,4 +24,5 @@ crate-type = ["rlib"]
 # out to — mkdir trees, xfer_new, path_to_hldir — reading the Rust cfl via the
 # accessors. cargo test provides in-crate #[cfg(test)] doubles so it runs headless.
 [dependencies]
+gtkhx-session = { path = "../gtkhx-session" }
 hotline-proto = { path = "../hotline-proto" }

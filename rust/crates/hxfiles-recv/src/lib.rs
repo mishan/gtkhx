@@ -160,17 +160,10 @@ pub unsafe extern "C" fn hx_cfl_set_filter_argv(cfl: *mut CachedFileList, argv: 
 // ---- the receive handler ----------------------------------------------------
 
 #[cfg(not(test))]
-extern "C" {
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::file-list (cfl*, fh*, data*)`. The `fh` arg is vestigial
-    /// (the provider reads `hx_cfl_fh(cfl)`); we pass NULL.
-    fn gtkhx_session_emit_file_list(
-        self_: *mut c_void,
-        cfl: *mut c_void,
-        fh: *mut c_void,
-        data: *mut c_void,
-    );
-    /// Give the remote provider a chance to show an empty-state hint before we
+use gtkhx_session::{gtkhx_session_emit_file_list, gtkhx_session_get_default};
+
+#[cfg(not(test))]
+extern "C" {    /// Give the remote provider a chance to show an empty-state hint before we
     /// drop the cfl on a task-error listing (files_remote_provider.c). Returns a
     /// `gboolean` (whether the reply had a recognised provider carrier); we don't
     /// act on it, but the declaration must match the C ABI.

@@ -2090,6 +2090,7 @@ version = "0.1.0"
 name = "hxfiles-recv"
 version = "0.1.0"
 dependencies = [
+ "gtkhx-session",
  "hotline-proto",
 ]
 
@@ -2177,6 +2178,7 @@ version = "0.1.0"
 dependencies = [
  "gtkhx-session",
  "hotline-proto",
+ "hxnews-model",
 ]
 
 [[package]]
@@ -2200,6 +2202,7 @@ name = "hxtask"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
+ "gtkhx-session",
 ]
 
 [[package]]
@@ -2262,7 +2265,10 @@ dependencies = [
 name = "hxxfer-recv"
 version = "0.1.0"
 dependencies = [
+ "gtkhx-session",
  "hotline-proto",
+ "hxconn",
+ "hxhfs",
 ]
 
 [[package]]

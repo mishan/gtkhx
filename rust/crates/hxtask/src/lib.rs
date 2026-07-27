@@ -80,6 +80,9 @@ fn trans_key(trans: u32) -> gpointer {
 // (the doubles take its place, same signatures) — same shape hxtls-trust uses.
 
 #[cfg(not(test))]
+use gtkhx_session::{gtkhx_session_emit_task_update, gtkhx_session_get_default};
+
+#[cfg(not(test))]
 extern "C" {
     /// The session owning this htlc — a linkable wrapper over the static-inline
     /// `sess_from_htlc` (tasks_bridge.c).
@@ -93,11 +96,6 @@ extern "C" {
     /// Drop the matching UI task row (view side, tasks.c) — called before the
     /// model entry is removed so the row can read the task if it needs to.
     fn gtask_delete_tsk(sess: *mut Session, trans: u32);
-    /// The singleton `GtkhxSession` GObject (gtkhx-session).
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::task-update (sess, tsk)` so the Tasks window learns a
-    /// new/changed task (gtkhx-session).
-    fn gtkhx_session_emit_task_update(self_: *mut c_void, sess: *mut c_void, tsk: *mut c_void);
 }
 
 /// `GDestroyNotify` for the table: reclaim the optional `ptr` context (via its

@@ -20,11 +20,9 @@
 
 use std::ffi::{c_char, c_void, CStr, CString};
 
-extern "C" {
-    // hxnews-model — clear the "fetch in flight" flag so a failed GETTHREAD can
-    // be retried. HxNewsNode * crosses as a GObject *.
-    fn hx_news_node_set_body_fetching(node: *mut c_void, fetching: i32);
-    // glib — release the transfer-full target ref a body-less reply won't carry
+use hxnews_model::node::hx_news_node_set_body_fetching;
+
+extern "C" {    // glib — release the transfer-full target ref a body-less reply won't carry
     // onward.
     fn g_object_unref(obj: *mut c_void);
 }
@@ -213,7 +211,7 @@ pub unsafe extern "C" fn news_post_free(post: *mut c_void) {
 #[no_mangle]
 pub unsafe extern "C" fn news_post_fetch_failed(target: *mut c_void) {
     if !target.is_null() {
-        hx_news_node_set_body_fetching(target, 0);
+        hx_news_node_set_body_fetching(target.cast(), 0);
         g_object_unref(target);
     }
 }

@@ -27,4 +27,7 @@ crate-type = ["rlib"]
 # in the binary, so they can't be taken as rlib deps here without double-defining
 # their symbols — hence the extern-C surface, matching hxchat-recv / hxuser-recv.)
 [dependencies]
+gtkhx-session = { path = "../gtkhx-session" }
+hxconn = { path = "../hxconn" }
+hxhfs = { path = "../hxhfs" }
 hotline-proto = { path = "../hotline-proto" }
