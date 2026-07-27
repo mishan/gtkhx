@@ -118,6 +118,11 @@ pub mod inline_media_dialog;
 // small read-only text window; fired from the user-info GtkhxSession signal.
 // output_user_info is this module's #[no_mangle] export.
 pub mod user_info;
+// the File "Get Info" dialog (was files.c's output_file_info + Save/date
+// helpers); fired from the file-info GtkhxSession signal. Dates format natively
+// (hl_date), the Save button sends FILE_SETINFO natively (hotline_proto).
+// output_file_info is this module's #[no_mangle] export.
+pub mod file_info;
 // the Create-Post composer (was news.c's post window). A modal
 // GtkTextView + Cancel/Post header; the wire sender hx_post_news stays C.
 // create_post_window is this module's #[no_mangle] export.

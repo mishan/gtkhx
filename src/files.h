@@ -42,10 +42,11 @@ struct hl_filelist_hdr;
 /* File-info dialog. Called from gtkhx.c::on_file_info_signal when
  * a HTLS_HDR_FILE_GETINFO reply arrives. The new files browser's
  * Get Info button fires the wire request via hx_file_info; this
- * is the receiving end that builds the dialog. */
-/* date_modify / date_create are the raw 8-byte Hotline date stamps from the
- * FILE_GETINFO reply; output_file_info decodes + locale-formats them for
- * display (the model side emits them raw). */
+ * is the receiving end that builds the dialog. Implemented in Rust now
+ * (gtkhx-ui/src/file_info.rs); this decl keeps the C ABI the on_file_info_signal
+ * adapter links against. date_modify / date_create are the raw 8-byte Hotline
+ * date stamps from the FILE_GETINFO reply (the model emits them raw); the dialog
+ * decodes + locale-formats them for display. */
 extern void output_file_info (char *path, char *name, char *creator, char *type,
                               char *comments, const guint8 *date_modify,
                               const guint8 *date_create, guint64 size);
