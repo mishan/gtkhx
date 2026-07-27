@@ -21,7 +21,7 @@ use hxmodel::news::node::hx_news_node_get_date;
 /// Format an 8-byte Hotline wire timestamp with `fmt` (glib strftime codes) in
 /// the host's local timezone. `None` for the no-timestamp sentinel / out-of-
 /// range year, or if glib can't build the date.
-fn format_wire(bytes: &[u8], fmt: &str) -> Option<String> {
+pub(crate) fn format_wire(bytes: &[u8], fmt: &str) -> Option<String> {
     let dt = match parse_hl_date(bytes)? {
         HlDate::Mac1904 { secs } => {
             // Absolute UTC instant, rendered local.
