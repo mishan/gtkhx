@@ -1,8 +1,8 @@
 gtkhx_sources = files(
   # about.c ported to Rust (gtkhx-ui about.rs); about.h keeps the C ABI decl.
   'algo_list.c',
-  'banner.c',
-  'banner_dispatch.c',
+  # banner.c + banner_dispatch.c ported to Rust (gtkhx-ui banner.rs);
+  # banner.h keeps the C ABI decls the toolbar / rcv / network call sites use.
   # bookmark_cipher.c + bookmarks_io.c retired — bookmark storage (TOML model,
   # legacy HTsc import/export, cipher vocab) is the hxbookmarks Rust crate,
   # reached directly from the Rust Connect + Bookmarks dialogs. bookmarks.h

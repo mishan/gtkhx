@@ -4,36 +4,27 @@
 #include <gtk/gtk.h>
 
 /*
- * Server banner support — Phase 5.
+ * Server banner support — C ABI declarations.
  *
- * Hotline servers can advertise a per-server banner image via the
- * HTLS_HDR_BANNER message. Two on-the-wire modes:
+ * The implementation is Rust now (rust/crates/gtkhx-ui/src/banner.rs, folded in
+ * with the old banner_dispatch.c classifier). This header only carries the C
+ * ABI the C call sites link against; the module itself owns the banner widget,
+ * the URL-mode fetch (hxnet ureq), the HTXF file-mode fetch, and the glycin
+ * decode.
  *
- *   "URL " — server provides an http(s) URL; client fetches the
- *            image bytes itself. Implemented via libsoup-3.
- *   "JPEG" / "GIFf" / "PICT" / etc. — server holds the bytes; client
- *            sends HTLC_HDR_BANNER_GET, server replies via the HTXF
- *            subchannel with a flat-file payload.
- *
- * The display surface is a banner widget docked at the bottom of
- * the toolbar window. It collapses (gtk_widget_set_visible(FALSE))
- * while no banner is active or the connection is down. While the
- * fetch is in-flight a small spinner shows in place of the image.
- *
- * This module owns:
- *   - The banner widget (image surface, click handling, visibility).
- *   - The fetch state machine for URL mode (libsoup async fetch ->
- *     GdkPixbuf decode -> GtkPicture display).
- *   - The fetch state machine for HTXF mode (BANNER_GET task ->
- *     HTXF subchannel -> file-mode bytes -> display).
+ * Hotline servers advertise a per-server banner via HTLS_HDR_BANNER in two
+ * modes: "URL " (server hands a URL, client fetches) and "JPEG"/"GIFf"/"PICT"/…
+ * (server holds the bytes, client fetches over the HTXF subchannel).
  *
  * Lifecycle:
- *   - banner_widget_new() — called from toolbar.c during window
- *     construction; returns the widget to embed.
- *   - banner_handle_message() — called from rcv.c::hx_rcv_banner
- *     after parsing. Routes to URL or HTXF path based on TYPE.
- *   - banner_clear() — called on disconnect; cancels any in-flight
- *     fetch and hides the widget.
+ *   - banner_widget_new() — called from toolbar.c during window construction;
+ *     returns the widget to embed.
+ *   - banner_handle_message() — called from rcv.c::hx_rcv_banner after parsing;
+ *     routes to URL or HTXF path based on TYPE.
+ *   - banner_clear() — called on disconnect; cancels any in-flight fetch and
+ *     hides the widget.
+ *   - banner_handle_htxf_reply() — called from rcv_task_banner_get (hxhandlers)
+ *     with the file-mode reply's ref + size.
  */
 
 /* Build the banner widget. Returned widget is the root of the

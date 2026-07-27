@@ -278,6 +278,148 @@ pub(crate) fn decode_async(
     Some(token)
 }
 
+/// Outcome handed to [`decode_first_frame_async`]'s closure. Success carries the
+/// decoded first (or only) frame's texture; failure carries the spec
+/// MediaErrorCode (`1` too-large, `2` unsupported, `0` generic) plus a
+/// human-readable reason.
+pub enum ImageDecodeOutcome {
+    Ok(gdk::Texture),
+    Err { code: u16, message: String },
+}
+
+/// Cancel handle for an in-flight [`decode_first_frame_async`]. Call
+/// [`cancel`](Self::cancel) to suppress the pending closure (e.g. the banner was
+/// cleared before the decode landed); the decode future still runs to
+/// completion, but drops its outcome + the closure instead of invoking it.
+/// Dropping the handle does *not* cancel — hold it for as long as cancellation
+/// matters.
+pub struct ImageDecodeHandle {
+    token: Rc<DecodeToken>,
+}
+
+impl ImageDecodeHandle {
+    /// Suppress the pending completion closure.
+    pub fn cancel(&self) {
+        self.token.cancelled.set(true);
+    }
+}
+
+/// Closure-based, all-Rust sibling of the C-ABI [`inline_media_decode_async`]:
+/// decode `bytes` under the inline-media Strict allowlist (JPEG/PNG/GIF) and
+/// hand the first frame's [`gdk::Texture`] — or a typed failure — to `on_done`
+/// on the GTK main thread. Returns `None` on a synchronous reject (empty /
+/// over-cap / disallowed format), in which case `on_done` has already fired once
+/// with the failure. No C callback trampoline and no raw result struct: the
+/// caller captures its state in the closure and reads a `gdk::Texture` directly.
+///
+/// The heavy lifting (the glycin sandbox decode + cap enforcement) is shared
+/// with [`inline_media_decode_async`] via [`run_decode`]; only the delivery
+/// differs (a Rust closure vs. a C callback + `HxInlineMediaDecoded`).
+///
+/// [`inline_media_decode_async`]: crate::ffi::inline_media_decode_async
+pub fn decode_first_frame_async(
+    bytes: &[u8],
+    caps: HxInlineMediaCaps,
+    on_done: impl FnOnce(ImageDecodeOutcome) + 'static,
+) -> Option<ImageDecodeHandle> {
+    let started = Instant::now();
+    // Any zero field falls back to the spec default, same as the C caps path.
+    let caps = caps.with_defaults();
+
+    // Sync gates mirror decode_async's Strict path — reject before glycin spawns.
+    if bytes.is_empty() {
+        on_done(ImageDecodeOutcome::Err {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: "empty payload".to_string(),
+        });
+        return None;
+    }
+    if bytes.len() as u64 > caps.max_bytes as u64 {
+        on_done(ImageDecodeOutcome::Err {
+            code: MEDIA_ERR_TOO_LARGE,
+            message: "encoded payload exceeds size cap".to_string(),
+        });
+        return None;
+    }
+    let sniffed = sniff(bytes);
+    if !format_is_allowed(sniffed) {
+        let msg = if format_to_mime(sniffed).is_some() {
+            "format rejected by inline-media allowlist"
+        } else {
+            "unrecognised image magic bytes"
+        };
+        on_done(ImageDecodeOutcome::Err {
+            code: MEDIA_ERR_UNSUPPORTED,
+            message: msg.to_string(),
+        });
+        return None;
+    }
+
+    log_decode_start(sniffed, bytes.len());
+
+    let token = Rc::new(DecodeToken::new());
+    let token_for_future = Rc::clone(&token);
+
+    let gbytes = Bytes::from(bytes);
+    let bytes_len = bytes.len();
+    let max_dim = caps.max_dimension;
+    let max_pix = caps.max_pixels;
+    let max_frames = caps.max_frames;
+    let max_duration_ms = caps.max_duration_ms;
+
+    MainContext::default().spawn_local(async move {
+        let outcome = match run_decode(
+            gbytes,
+            max_dim,
+            max_pix,
+            max_frames,
+            max_duration_ms,
+            sniffed,
+        )
+        .await
+        {
+            Ok(DecodeOk::Static(tex)) => {
+                let w = gdk::prelude::TextureExt::width(&tex);
+                let h = gdk::prelude::TextureExt::height(&tex);
+                log_decode_done(sniffed, w, h, started.elapsed(), bytes_len);
+                ImageDecodeOutcome::Ok(tex)
+            }
+            Ok(DecodeOk::Animation(mut frames)) => {
+                // Every current native caller (the banner) renders a single
+                // frame — take the first, drop the rest.
+                let first = frames.remove(0);
+                let w = gdk::prelude::TextureExt::width(&first.texture);
+                let h = gdk::prelude::TextureExt::height(&first.texture);
+                log_decode_done(sniffed, w, h, started.elapsed(), bytes_len);
+                ImageDecodeOutcome::Ok(first.texture)
+            }
+            Err(DecodeErr {
+                code,
+                message,
+                detail,
+            }) => {
+                let reason = detail.as_deref().unwrap_or(message);
+                log_decode_failed(sniffed, reason, started.elapsed());
+                // Hand back glycin's detailed reason when it has one (e.g. its
+                // "no loader for this format" text), falling back to the static
+                // category — so native callers can surface / re-log something
+                // useful, matching this fn's "human-readable reason" contract.
+                ImageDecodeOutcome::Err {
+                    code,
+                    message: detail.unwrap_or_else(|| message.to_string()),
+                }
+            }
+        };
+
+        if token_for_future.cancelled.get() {
+            return; // caller cancelled — drop the outcome + closure on the floor
+        }
+        on_done(outcome);
+    });
+
+    Some(ImageDecodeHandle { token })
+}
+
 /// One frame collected from glycin.
 pub(crate) struct CollectedFrame {
     pub texture: gdk::Texture,
