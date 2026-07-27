@@ -365,14 +365,31 @@ Each step is independently shippable and green.
      renaming to `macresource` — the provenance audit made it internal, and
      §3's own naming rule says internal crates keep the `hx*` prefix.
    - ✅ **`hxmodel`** (§2c). Five crates → one; 106 tests carried over.
-   - ⛔ **`hxhandlers`** (§2a) — blocked on moving `conversation.rs` +
-     `chat_members.rs` from `gtkhx-ui` into `hxmodel` (see step 2 above).
-   - ⏳ **`hxcrypto`** (§2b), **`gtkhx-core`** (§2d), **`hxvoice`** (§2e).
-     All three verified cycle-free. Each contains crates from the
-     test-linked 16, so each also needs its `-l<name>` archive references in
-     `tests/meson.build` updated — the only reason they weren't done first.
+     Later also absorbed `conversation` + `chat_members` from `gtkhx-ui`.
+   - ✅ **`hxhandlers`** (§2a). Ten crates → one, after the chat-model
+     relocation cleared the cycle. Two former cross-crate edges became
+     intra-crate module calls; 99 tests carried over.
+   - ✅ **`hxcrypto`** (§2b). Four crates → one. First merge to touch the
+     test link surface — 25 `-lhxcrypto_*` / `-lhxcompress` references in
+     `tests/meson.build` collapsed to `-lhxcrypto`.
+   - ⏳ **`gtkhx-core`** (§2d), **`hxvoice`** (§2e). Both verified
+     cycle-free; both contain test-linked crates, so both need the same
+     `tests/meson.build` treatment `hxcrypto` just had.
 
-   Crate count so far: **41 → 35**.
+   Crate count so far: **41 → 25**.
+
+   **Correction to §2b.** That section says `hxnet` reaches past `hxcompress`
+   to `flate2`/`lz4_flex`/`zstd`, so "the compression code exists twice in the
+   dependency graph", and that `hxcompress` is "compiled and linked for
+   nobody". The duplication is real but is not what that describes:
+   `hxcrypto::compress` is a 7-function **C ABI dispatcher**
+   (`gtkhx_compress_*`), while `hxnet::compress` is a separate ~1000-line
+   **native streaming implementation**. Two implementations of the same
+   algorithms, not one crate linked twice — so `hxnet` keeps its direct
+   dependencies. What *is* true: `gtkhx_compress_*` has no C caller left
+   (`compress.c` is deleted), so that module is now exercised only by its
+   Tier 1 tests. Those tests still pin wire behaviour, so it isn't obviously
+   dead code; worth a deliberate decision rather than a silent deletion.
 4. **Relicense** `hx-image-decode` and `hxtls-trust` to `MIT OR Apache-2.0`
    after a file-by-file read-through (§3). `hotline-proto`, `hxhfs`, and
    `macresource` stay GPL-2.0-or-later — hxd-derived. Blocks 5.
