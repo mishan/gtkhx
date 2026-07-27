@@ -48,7 +48,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "preview.h"
 #include "xfers_recv.h"
 #include "integration_harness.h"
@@ -129,7 +129,6 @@ test_file_get_round_trip (void)
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.hx = ch;
     htxf.total_size = xfer_size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/out.txt", tmpdir);
@@ -162,7 +161,7 @@ test_file_get_round_trip (void)
     g_assert_cmpmem (content, clen, "hello world\n", 12);
 
     /* htxf_io_release closes the channel (hxnet owns the socket internally). */
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
 
     /* Best-effort cleanup of the temp tree (data fork + any sidecar). */
     unlink (htxf.path);

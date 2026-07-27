@@ -8,32 +8,22 @@
  */
 
 /*
- * htxf_io.{c,h} — thin C shim over hxnet's Rust HTXF (file-transfer)
- * subchannel transport (rust/crates/hxnet/src/htxf.rs).
+ * hxnet_htxf.h — C declarations for hxnet's Rust HTXF (file-transfer)
+ * subchannel FFI (rust/crates/hxnet/src/htxf.rs).
  *
- * Since the HTXF→Rust H2 re-wire the byte pump, the AEAD framing
- * (ChaCha20-Poly1305 length-prefixed frames), the optional rustls TLS
- * wrap, and the socket fd all live in the hxnet crate. struct htxf_conn
- * carries the opaque channel handle in `htxf->hx`; this shim:
- *
- *   - htxf_connect (network.c) opens the channel via hxnet_htxf_connect,
- *     which does the connect itself (optional SOCKS) — no fd hand-off —
- *     then takes the packed preamble and
- *     (when the control channel negotiated CIPHER_MODE_AEAD) the
- *     per-transfer ChaCha20 keys derived into htxf->xfer_encode /
- *     xfer_decode.
- *   - the xfers.c / banner.c workers stream bytes through
- *     htxf_io_read / htxf_io_write, which forward to hxnet_htxf_read /
- *     hxnet_htxf_write and translate the Rust `-1` error into the
- *     errno-set `< 1` idiom the worker loops already use.
- *   - htxf_io_release closes the channel at worker teardown.
- *
- * The shim exists (rather than calling hxnet_htxf_* directly from the
- * workers) to keep errno semantics and the handle cast in one place.
+ * The whole HTXF transport — the byte pump, the AEAD framing
+ * (ChaCha20-Poly1305 length-prefixed frames), the optional rustls TLS wrap,
+ * the socket fd, the cancellation token, and the handshake preamble packer —
+ * lives in the hxnet crate. struct htxf_conn carries the opaque channel handle
+ * in `htxf->hx` and the cancellation token in `htxf->abort`; the C drivers
+ * (network.c::htxf_connect, the xfers.c workers, banner.c) call the
+ * hxnet_htxf_* functions below directly. (The old htxf_io.c C shim was retired
+ * in S1.2: its read/write/close/abort wrappers collapsed into these calls +
+ * hxnet_htxf_read_full, and the preamble packer moved to hxnet in S1.1.)
  */
 
-#ifndef GTKHX_HTXF_IO_H
-#define GTKHX_HTXF_IO_H
+#ifndef GTKHX_HXNET_HTXF_H
+#define GTKHX_HXNET_HTXF_H
 
 #include "config.h"
 #include <glib.h>
@@ -68,9 +58,7 @@ extern HxnetHopeAead *hxnet_hope_aead_clone (const HxnetHopeAead *h);
 extern void hxnet_hope_aead_free (HxnetHopeAead *h);
 
 /* ---- hxnet HTXF subchannel FFI ------------------------------------
- * Defined in rust/crates/hxnet/src/htxf.rs. Declared here so both this
- * shim (read/write/timeout/close) and network.c::htxf_connect (open)
- * see one prototype. */
+ * All defined in rust/crates/hxnet/src/htxf.rs. */
 
 /* TOFU verify-cert callback for a TLS subchannel whose peer cert did
  * not chain to a public root: receives the "sha256:<hex>" leaf
@@ -90,8 +78,7 @@ typedef int (*hxnet_htxf_verify_cb_t) (const guint8 *fp, gsize fp_len,
  * NULL selects plaintext passthrough. The connect runs on the tokio
  * runtime (bounded by the shared handshake timeout) and blocks the
  * calling worker for the result. Returns an owned handle, or NULL on a
- * bad argument / connect / TLS / TOFU failure. Defined in
- * rust/crates/hxnet/src/htxf.rs. */
+ * bad argument / connect / TLS / TOFU failure. */
 extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
                                      guint16 port, const guint8 *proxy_uri,
                                      size_t proxy_uri_len, int tls,
@@ -102,8 +89,21 @@ extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
                                      hxnet_htxf_verify_cb_t verify_cert,
                                      void *user_data);
 
+/* Pack the HTXF subchannel handshake preamble into buf[..cap] (S1.1, was
+ * hx_htxf_subchannel_pack_preamble in the retired htxf_subchannel.c). Returns
+ * the bytes written (16, or 24 for the size64 large-file variant), or 0 on a
+ * NULL/too-small buffer or a >4 GiB size in the legacy 16-byte form. */
+extern size_t hxnet_htxf_pack_preamble (guint8 *buf, size_t cap, guint32 ref,
+                                        guint64 total_size, guint16 type,
+                                        guint16 flags, int size64);
+
 /* Blocking read of up to `len` bytes (`0` = clean EOF, `-1` on error). */
 extern ssize_t hxnet_htxf_read (HtxfConn *handle, guint8 *buf, size_t len);
+
+/* Read exactly `len` bytes into `buf`, looping over hxnet_htxf_read (a short
+ * read / clean EOF before `len` is an error). Returns `len` on success, `-1`
+ * on error / truncation. `len == 0` is a no-op success. */
+extern ssize_t hxnet_htxf_read_full (HtxfConn *handle, guint8 *buf, size_t len);
 
 /* Blocking write of `len` bytes — one AEAD frame when armed (returns
  * `len` on success, `-1` on error). */
@@ -119,12 +119,12 @@ extern int hxnet_htxf_set_read_timeout (HtxfConn *handle, guint32 timeout_ms);
 extern void hxnet_htxf_close (HtxfConn *handle);
 
 /* ---- hxnet HTXF cancellation token --------------------------------
- * Cooperative-cancel foundation (Phase R3 X1). A token is created on
- * the main thread before the transfer worker starts, armed with the
- * channel's socket once it opens (worker), and aborted from the main
- * thread to shut that socket down and unblock a parked blocking
- * read/write. Reference-counted: hxnet_htxf_abort_new yields the C
- * side's ref (freed with hxnet_htxf_abort_free); hxnet_htxf_abort_arm
+ * Cooperative-cancel foundation (Phase R3 X1). A token is created by
+ * hx_htxf_new (S0.3), armed with the channel's socket once it opens
+ * (worker, hxnet_htxf_abort_arm), and aborted from the main thread
+ * (hxnet_htxf_abort) to shut that socket down and unblock a parked
+ * blocking read/write. Reference-counted: hxnet_htxf_abort_new yields the
+ * C side's ref (freed with hxnet_htxf_abort_free); hxnet_htxf_abort_arm
  * clones a ref into the channel handle (released when the channel
  * closes). Defined in rust/crates/hxnet/src/htxf.rs. */
 
@@ -147,50 +147,4 @@ extern void hxnet_htxf_abort (const HtxfAbort *token);
 /* Drop the C side's ref to `token`. NULL-safe. */
 extern void hxnet_htxf_abort_free (const HtxfAbort *token);
 
-/* ---- C-side shim --------------------------------------------------- */
-
-/* The cancellation token (htxf->abort) is created + freed by hxnet's
- * xfer_handle module (hx_htxf_new / hx_htxf_free, S0.3). This shim only arms
- * and triggers it. */
-
-/* Arm htxf->abort with htxf->hx's socket. Worker-thread call, once,
- * after the channel is open. No-op if either is NULL. */
-extern void htxf_io_abort_arm (struct htxf_conn *htxf);
-
-/* Trigger cancellation: unblock a parked htxf_io_read / _write by
- * shutting the subchannel socket down. Main-thread call. NULL-safe. */
-extern void htxf_io_abort (struct htxf_conn *htxf);
-
-/* Zero the handle slot. struct htxf_conn is memset by every caller
- * before use, so this is mostly explicit-intent; safe to call before
- * htxf_connect opens the channel. */
-extern void htxf_io_init (struct htxf_conn *htxf);
-
-/* Close the hxnet channel and clear htxf->hx. Idempotent — safe to
- * call on a never-opened htxf and to call more than once. */
-extern void htxf_io_release (struct htxf_conn *htxf);
-
-/* Read up to `len` bytes into `buf`. Returns bytes read (>0), 0 on
- * clean EOF, -1 on error. On error errno is EINVAL when the channel
- * isn't open (htxf / htxf->hx NULL — a caller bug) and EIO for a
- * transport / framing error from hxnet. Close enough to read(2)
- * semantics that the historical `if (r < 1)` idioms keep working
- * without per-site logic changes. */
-extern ssize_t htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len);
-
-/* Write exactly `len` bytes from `buf` (one AEAD frame when armed).
- * Returns `len` on success (matches `if (htxf_io_write (...) != n)`
- * checks), -1 on error. On error errno is EINVAL when the channel
- * isn't open (htxf / htxf->hx NULL) and EIO for a transport / seal
- * error from hxnet. */
-extern ssize_t htxf_io_write (struct htxf_conn *htxf, const void *buf,
-                              size_t len);
-
-/* Arm/clear a per-read timeout (ms; 0 = block indefinitely). Used by
- * the folder-drain path to slurp whatever the server has in flight and
- * then give up. Returns 0 on success, -1 on error (errno EINVAL when
- * the channel isn't open, EIO on a hxnet setsockopt failure). */
-extern int htxf_io_set_read_timeout (struct htxf_conn *htxf,
-                                     guint32 timeout_ms);
-
-#endif /* GTKHX_HTXF_IO_H */
+#endif /* GTKHX_HXNET_HTXF_H */

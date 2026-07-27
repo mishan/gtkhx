@@ -37,8 +37,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_io.h"
-#include "htxf_subchannel.h"
+#include "hxnet_htxf.h"
 #include "preview.h"
 #include "xfers_recv.h"
 #include "integration_harness.h"
@@ -59,7 +58,7 @@ static HtxfConn *
 open_folder_channel (guint32 ref, guint64 total_size)
 {
     guint8 pre[24];
-    size_t plen = hx_htxf_subchannel_pack_preamble (
+    size_t plen = hxnet_htxf_pack_preamble (
         pre, sizeof (pre), ref, total_size, HTXF_TYPE_FOLDER, 0, FALSE);
     if (!plen) {
         return NULL;
@@ -172,7 +171,6 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
     }
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.hx = ch;
     htxf.total_size = reply.size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/got", tmpdir);
@@ -194,7 +192,7 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
             content = NULL;
         }
     }
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
     unlink (htxf.path);
     g_rmdir (tmpdir);
     return content;
@@ -244,7 +242,6 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
     }
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.hx = ch;
     htxf.opt.folder = 1;
     htxf.total_size = total;
@@ -258,7 +255,7 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
     params.user_data = &htxf;
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_folder_send_all (&params);
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
     return rv == 0;
 }
 
@@ -296,7 +293,6 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.hx = ch;
     htxf.opt.folder = 1;
     htxf.total_size = reply.size;
@@ -310,7 +306,7 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     params.user_data = &htxf;
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_folder_recv_all (&params);
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
     return rv == 0;
 }
 

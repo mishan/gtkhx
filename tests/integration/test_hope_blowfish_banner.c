@@ -28,9 +28,9 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
+#include "hxnet_htxf.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
-#include "htxf_subchannel.h"
 
 static const hx_test_server *
 pick_banner_blowfish_server (void)
@@ -178,7 +178,7 @@ test_hope_blowfish_banner_htxf (void)
     g_assert_cmpint (xfer_fd, >=, 0);
 
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
         /*flags=*/0, /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);

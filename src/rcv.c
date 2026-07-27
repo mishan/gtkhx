@@ -46,7 +46,7 @@
 #include "users.h"
 #include "usermod.h"
 #include "hxnet_bridge.h"
-#include "htxf_io.h"             /* hxnet_hope_aead_free (HOPE AEAD handle) */
+#include "hxnet_htxf.h"             /* hxnet_hope_aead_free (HOPE AEAD handle) */
 #include "rcv.h"
 #include "hxconn.h"
 #include "hfs.h"

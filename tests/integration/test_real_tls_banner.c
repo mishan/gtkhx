@@ -45,8 +45,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_subchannel.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "server_matrix.h"
 #include "integration_harness.h"
 
@@ -178,7 +177,7 @@ test_banner_htxf_mode_tls (void)
      * the TLS record layer here: on this TLS-from-byte-zero subchannel
      * every application byte, preamble included, is encrypted by TLS.) */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
         /*flags=*/0, /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
@@ -186,7 +185,6 @@ test_banner_htxf_mode_tls (void)
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
-    htxf_io_init (&xfer);
     /* hope_aead = NULL: plaintext-TLS banner, no HOPE AEAD framing. */
     xfer.hx = hxnet_htxf_connect (
         (const guint8 *) srv->host, strlen (srv->host), srv->tls_xfer_port,
@@ -199,14 +197,14 @@ test_banner_htxf_mode_tls (void)
         goto cleanup;
     }
 
-    /* Drain the full image body through production htxf_io_read
+    /* Drain the full image body through production hxnet_htxf_read
      * (passthrough leg — no AEAD). */
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = htxf_io_read (&xfer, bytes + got, size - got);
+        ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
         if (r <= 0) {
-            g_test_message ("htxf_io_read returned %zd at got=%zu", r, got);
+            g_test_message ("hxnet_htxf_read returned %zd at got=%zu", r, got);
             break;
         }
         got += (gsize) r;
@@ -218,7 +216,7 @@ test_banner_htxf_mode_tls (void)
     g_assert_true (banner_bytes_look_like_image (bytes, size));
 
     g_free (bytes);
-    htxf_io_release (&xfer);
+    hxnet_htxf_close ((HtxfConn *) xfer.hx);
 
 cleanup:
     integration_release_htlc (&htlc);

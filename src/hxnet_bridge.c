@@ -26,7 +26,7 @@
 #include "hotline_proto.h"      /* gtkhx_proto_pack_header (wire header encode) */
 #include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
 #include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
-#include "htxf_io.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
+#include "hxnet_htxf.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
 #include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
 
 /* The production receive dispatch (rcv.c). We hand it the assembled frame

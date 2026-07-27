@@ -58,8 +58,7 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
-#include "htxf_io.h"
-#include "htxf_subchannel.h"
+#include "hxnet_htxf.h"
 #include "debug.h"
 
 static const hx_test_server *
@@ -226,7 +225,7 @@ test_hope_chacha20_banner_htxf (void)
      * stays FALSE; the 16-byte legacy variant comes out. hxnet_htxf_connect
      * writes it raw before arming AEAD, so we don't send it ourselves. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf),
         ref, size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);
@@ -241,7 +240,6 @@ test_hope_chacha20_banner_htxf (void)
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
-    htxf_io_init (&xfer);
     g_assert_nonnull (htlc.hope_aead);
     xfer.hx = hxnet_htxf_connect (
         (const guint8 *) srv->host, strlen (srv->host), srv->xfer_port,
@@ -250,14 +248,14 @@ test_hope_chacha20_banner_htxf (void)
         /*verify_cert=*/NULL, /*user_data=*/NULL);
     g_assert_nonnull (xfer.hx);
 
-    /* Read `size` body bytes through htxf_io_read — the hxnet channel
+    /* Read `size` body bytes through hxnet_htxf_read — the hxnet channel
      * consumes AEAD frames off the socket and reassembles plaintext. */
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = htxf_io_read (&xfer, bytes + got, size - got);
+        ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
         if (r <= 0) {
-            g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d "
+            g_test_message ("hxnet_htxf_read returned %zd at got=%zu errno=%d "
                             "(%s)",
                             r, got, errno, g_strerror (errno));
             break;
@@ -265,7 +263,7 @@ test_hope_chacha20_banner_htxf (void)
         got += (gsize) r;
     }
     g_assert_cmpuint ((guint) got, ==, size);
-    htxf_io_release (&xfer);
+    hxnet_htxf_close ((HtxfConn *) xfer.hx);
 
     g_test_message ("first 4 bytes: %02x %02x %02x %02x",
                     bytes[0], bytes[1], bytes[2], bytes[3]);

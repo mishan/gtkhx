@@ -29,7 +29,8 @@ The big rocks, by line count:
 | `src/connect.c`         |  ~900| Connect dialog (AdwDialog) + bookmark management.             |
 | `src/gtkhx.c`           |  ~900| `main()`, GIOChannel-based fd plumbing, GtkApplication init.  |
 | `src/commands.c`        |  ~~~ | Hotline protocol send path (paired with `rcv.c`).             |
-| `src/htxf_io.c` `src/htxf_subchannel.c` | ~~~ | C shim + preamble packer over hxnet's Rust HTXF subchannel. |
+| `src/xfers.c`           |  ~~~ | GTK file-transfer **worker shell** only: the `xfers[]` list, worker/completion dispatch, and the `hx_htxf_*` refcount/cancel lifecycle. The transfer *logic* + the `struct htxf_conn` storage are all Rust now (`hxnet::xfer` / `hxnet::xfer_handle`); see below. |
+| `src/hxnet_htxf.h`      |  ~~~ | C decls for the hxnet HTXF subchannel FFI (`hxnet_htxf_*`). |
 | `src/plugin.c`          |  ~~~ | dlopen plugin loader. **Compiled out** (`USE_PLUGIN` undef).  |
 | `src/gtkthreads.c`      |  ~~~ | GRecMutex + custom poll wrapper for worker↔main serialization.|
 | `src/debug.c/.h`        |  ~~~ | Categorised runtime logger (`GTKHX_DEBUG=cat1,cat2`).         |
@@ -53,8 +54,24 @@ Other top-level dirs:
   `1+` loaders via crate 2.x for Debian stable, selected by Meson
   `-Dglycin_compat` which **auto-detects** the host's loader generation by
   default (or force `2`/`1`), see `docs/glycin-migration-plan.md`), `hxnet`,
-  `hxcompress`, `hxcrypto-{hash,stream,aead}`. See
+  `hxcompress`, `hxcrypto-{hash,stream,aead}`, `hxhfs` (HFS sidecar /
+  resource-fork I/O), `hxfiles-xfer` (FFO/FILP fork-header codec). See
   `docs/RUST-ROADMAP.md` for the migration plan.
+
+  **The HTXF file-transfer path is now Rust end-to-end** (the "xfer-worker →
+  Rust" migration, W1–W3 + S0 + S1; see the xfer-worker migration section of
+  `docs/rust/ROADMAP.md`). `hxnet::htxf` owns the subchannel transport
+  (socket / TLS / AEAD framing / cancellation token / handshake preamble pack);
+  `hxnet::xfer` owns the single-file + folder copy loops (the
+  FILE_NEXT/FILE_SEND state machine, FILP/FFO codec, HFS fork I/O);
+  `hxnet::xfer_handle` owns the `struct htxf_conn` storage + cross-thread
+  lifecycle (a `#[repr(C)]` mirror behind the `hx_htxf_*` ABI: atomic
+  refcount/cancel/total_pos, the `HtxfAbort` token, and the last-unref
+  destructor). The C driver (`xfers.c`) is a thin GTK worker shell that hands
+  everything in by value through `HxnetXferParams` / `HxnetFolderParams` +
+  callbacks — `hxnet` is a leaf crate and references no C symbols. The old C
+  `xfers_recv.c` / `xfers_send.c` / `htxf_io.c` / `htxf_subchannel.c` are all
+  deleted.
 - `plugins/sample/` — example plugin. Build-disabled (`USE_PLUGIN` undef).
 - `plugins/eliza/` — toy ELIZA chatbot plugin. Build-disabled.
 - `po/` — translations. French only.

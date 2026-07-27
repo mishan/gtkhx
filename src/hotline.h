@@ -746,6 +746,9 @@ struct hl_user_data {
 #define SIZEOF_HL_FILELIST_HDR (24)
 #define SIZEOF_HL_USERLIST_HDR (12)
 #define SIZEOF_HTXF_HDR (16)
+/* Max HTXF handshake preamble: the 16-byte header + an 8-byte size for the
+ * large-file (size64) variant. A buffer of this size always fits either form. */
+#define HX_HTXF_PREAMBLE_MAX_BYTES (SIZEOF_HTXF_HDR + 8)
 #define SIZEOF_HTRK_HDR (12)
 
 #endif /* ndef GTKHX_HOTLINE_H */
