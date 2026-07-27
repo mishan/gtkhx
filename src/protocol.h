@@ -90,13 +90,15 @@ struct htxf_conn {
 	 * canceled flag set and skip their work, and the last unref
 	 * frees. No use-after-free; no race window.
 	 *
-	 * Mutate refcount only via g_atomic_int_*. `canceled` is now
-	 * cross-thread too — the main thread stores it (xfer_delete /
-	 * xfers_delete_all) and the worker reads it at every transfer
-	 * read/write boundary (htxf_io_read/_write) — so every access,
-	 * read and write, goes through g_atomic_int_*. It's a plain gint
-	 * (0/1 for FALSE/TRUE) to match those APIs' types — same pattern
-	 * as preview.c's stream_finished. */
+	 * Since S0.2, refcount + canceled + total_pos are held as atomics in
+	 * hxnet's xfer_handle #[repr(C)] mirror and the C side touches them ONLY
+	 * through the hx_htxf_* ABI (hx_htxf_ref/_unref, hx_htxf_cancel/
+	 * _is_canceled, hx_htxf_add_total_pos/_set_total_pos/_total_pos) — a 1:1
+	 * port of the old g_atomic_int_* calls. `canceled` is cross-thread: the
+	 * main thread sets it (xfer_delete / xfers_delete_all) and the worker
+	 * reads it at every transfer read/write boundary (htxf_io_read/_write).
+	 * Declared as plain gint/guint64 here; the mirror's atomic types are
+	 * layout-identical, so C's struct size + field offsets are unchanged. */
     gint refcount;
     gint canceled;
     guint32 ref; /* xfer id */

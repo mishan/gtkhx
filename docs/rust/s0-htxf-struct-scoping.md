@@ -82,14 +82,19 @@ the crate. Consumer field reads/writes are untouched.
   `hx_htxf_free`. `tests/unit/test_htxf_layout.c` pins the ABI at runtime — it
   immediately caught that `compat.h` clamps `MAXPATHLEN` to a fixed 4095 (not
   the host `PATH_MAX`). No behaviour change.
-- **S0.2 — atomic lifecycle.** Move `refcount` / `canceled` / `total_pos` to
-  crate atomics behind `hx_htxf_ref` (→ new count) / `hx_htxf_unref` (→ bool
-  was-last) / `hx_htxf_cancel` / `hx_htxf_is_canceled` / `hx_htxf_add_total_pos`
-  / `hx_htxf_total_pos`. Rewrite `xfers.c`'s `htxf_ref`/`htxf_unref` +
-  `htxf_io.c`'s `g_atomic_int_get(&htxf->canceled)` cancel-boundary checks +
-  the worker's `total_pos` bumps onto them. The struct's `gint refcount,
-  canceled` become `_Atomic`-shaped in the mirror (C never touches them
-  directly again — grep gate).
+- **S0.2 — atomic lifecycle. _(Shipped.)_** `refcount` / `canceled` /
+  `total_pos` are now `AtomicI32` / `AtomicI32` / `AtomicU64` in the mirror
+  (layout-identical to the C `gint`/`guint64`, so offsets are unchanged),
+  driven behind `hx_htxf_ref` (→ new count) / `hx_htxf_unref` (→ was-last) /
+  `hx_htxf_cancel` / `hx_htxf_is_canceled` / `hx_htxf_add_total_pos` /
+  `hx_htxf_set_total_pos` / `hx_htxf_total_pos` — a 1:1 port of the old
+  `g_atomic_int_*` (SeqCst). `xfers.c`'s `htxf_ref`/`htxf_unref`, the init
+  seed, the cancel setters + `fu_dispatch` check, and the `total_pos` bump /
+  completion clamp all route through them, as do `htxf_io.c`'s four
+  cancel-boundary checks and the `total_pos` reads in `tasks.c` / `gtkhx.c` /
+  `files_browser.c`. No C site touches the three fields directly anymore (grep
+  gate). Covered by a `ref_unref_cancel_total_pos_transitions` crate unit test
+  plus the existing `htxf_cancel` shim test + the Tier-3 transfer paths.
 - **S0.3 — fold in the abort token + free tail.** `hx_htxf_new` creates the
   `HtxfAbort` (today `htxf_io_abort_init`); `hx_htxf_unref`'s last-ref tail runs
   the `hx_preview_unref` + `htxf_io_release` + `htxf_io_abort_free` +

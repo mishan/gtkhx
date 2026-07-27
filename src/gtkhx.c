@@ -46,6 +46,7 @@
 #include "gif_avatar.h" /* gtkhx_avatar_update / _clear_all */
 #include "files.h"
 #include "tasks.h"
+#include "htxf_accessors.h"
 #include "network.h"
 #include "gtkutil.h"
 #include "gtkhx_theme.h" /* gtkhx_theme_get_color, GTKHX_PAL_* */
@@ -1578,7 +1579,7 @@ on_file_update_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
 	 * htxf->path to the folder root before the final
 	 * post_file_update, but the in-flight one beats it. Using
 	 * remotename sidesteps the timing entirely. */
-    if (x && x->total_size > 0 && x->total_pos >= x->total_size) {
+    if (x && x->total_size > 0 && hx_htxf_total_pos (x) >= x->total_size) {
         const char *display = NULL;
         if (x->opt.folder && x->remotename_len > 0) {
             display = (const char *)x->remotename;

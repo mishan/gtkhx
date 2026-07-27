@@ -2,17 +2,19 @@
 #define GTKHX_HTXF_ACCESSORS_H
 
 #include <glib.h>
+#include <stddef.h> /* size_t, for the layout-introspection helpers below */
 
 /* Rust-facing accessor seam for struct htxf_conn.
  *
- * struct htxf_conn is still C-owned (g_malloc0'd in xfers.c, refcounted, held in
- * the C xfers[] array, mutated by both the main thread and the tokio transfer
- * worker). These getters/setters are the generic field seam the Rust receive
- * handlers (hxxfer-recv) reach it through — so the transfer *logic* (parse,
- * gates, stamping sequence, error policy, upload-size math) lives in Rust while
- * the struct stays in C. This is the same getter/setter-seam step the hxconn
- * (htlc_conn) migration started with; if htxf ever moves to a Rust hxhtxf crate,
- * these signatures are what it re-exports. */
+ * struct htxf_conn is still declared + field-accessed in C, but since S0 its
+ * storage is allocated + freed Rust-side (hx_htxf_new / hx_htxf_free, in hxnet's
+ * xfer_handle module). It's refcounted, held in the C xfers[] array, and mutated
+ * by both the main thread and the tokio transfer worker. These getters/setters
+ * are the generic field seam the Rust receive handlers (hxxfer-recv) reach it
+ * through — so the transfer *logic* (parse, gates, stamping sequence, error
+ * policy, upload-size math) lives in Rust while the struct stays in C. This is
+ * the same getter/setter-seam step the hxconn (htlc_conn) migration started
+ * with. */
 
 struct htxf_conn;
 
@@ -32,6 +34,19 @@ extern size_t hx_htxf_alignof (void);
 extern size_t hx_htxf_offsetof_refcount (void);
 extern size_t hx_htxf_offsetof_canceled (void);
 extern size_t hx_htxf_offsetof_total_pos (void);
+
+/* ---- Cross-thread lifecycle (S0.2) -----------------------------------------
+ * The refcount, cancel flag, and total_pos byte counter are touched by both the
+ * main thread and the tokio transfer worker; these are the atomic ABI (a 1:1
+ * port of the old g_atomic_int_* calls) the C side now goes through instead of
+ * accessing htxf->{refcount,canceled,total_pos} directly. */
+extern gint hx_htxf_ref (struct htxf_conn *htxf);   /* inc; returns new count */
+extern gint hx_htxf_unref (struct htxf_conn *htxf); /* dec; nonzero == was last ref */
+extern void hx_htxf_cancel (struct htxf_conn *htxf);
+extern gint hx_htxf_is_canceled (const struct htxf_conn *htxf);
+extern void hx_htxf_add_total_pos (struct htxf_conn *htxf, guint64 delta);
+extern void hx_htxf_set_total_pos (struct htxf_conn *htxf, guint64 val);
+extern guint64 hx_htxf_total_pos (const struct htxf_conn *htxf);
 
 /* Registry: is htxf still a live entry in the xfers[] array? (Downloads gate
  * their reply on this — a since-cancelled transfer's reply is dropped.) */

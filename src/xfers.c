@@ -98,7 +98,7 @@ static struct htxf_conn *
 htxf_ref (struct htxf_conn *htxf)
 {
     if (htxf) {
-        g_atomic_int_inc (&htxf->refcount);
+        hx_htxf_ref (htxf);
     }
     return htxf;
 }
@@ -109,7 +109,7 @@ htxf_unref (struct htxf_conn *htxf)
     if (!htxf) {
         return;
     }
-    if (!g_atomic_int_dec_and_test (&htxf->refcount)) {
+    if (!hx_htxf_unref (htxf)) {
         return;
     }
     /* Drop the per-htxf ref on the preview window if this transfer
@@ -142,7 +142,7 @@ fu_dispatch (gpointer data)
     /* canceled is a cross-thread flag (worker reads it in htxf_io_read/
 	 * _write); access it atomically everywhere for a single coherent
 	 * memory model, even though this dispatcher runs on the main thread. */
-    if (!g_atomic_int_get (&j->htxf->canceled)) {
+    if (!hx_htxf_is_canceled (j->htxf)) {
         gtkhx_session_emit_file_update (gtkhx_session_get_default (),
                                         sess_from_htlc (j->htxf->htlc), j->htxf);
     }
@@ -484,11 +484,9 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     /* refcount = 1 represents the xfers[] array's ownership. The
 	 * worker takes its own ref in xfer_ready_write before the
 	 * transfer is handed to the blocking pool. */
-    htxf->refcount = 1;
-    /* canceled is read on the worker thread (htxf_io_read/_write); use
-	 * atomics for every access. This initial store is before any worker
-	 * exists, but stay consistent with the cross-thread stores below. */
-    g_atomic_int_set (&htxf->canceled, FALSE);
+    /* Seed the initial xfers[] ref (0 → 1). canceled + total_pos are already
+	 * zero from hx_htxf_new, so no explicit reset is needed. */
+    hx_htxf_ref (htxf);
 
     /* Allocate the cancellation token now, on the main thread, so it's
 	 * live for the htxf's whole lifetime — armed later by htxf_connect
@@ -500,7 +498,6 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     nxfers++;
 
     htxf->htlc = hx_active_session ()->htlc;
-    htxf->total_pos = 0;
     htxf->total_size = 1;
     gtkhx_session_emit_file_update (gtkhx_session_get_default (), sess_from_htlc (htxf->htlc),
                                     htxf);
@@ -597,7 +594,7 @@ static void
 xfer_progress_bump (void *user_data, guint64 delta)
 {
     struct htxf_conn *htxf = user_data;
-    htxf->total_pos += delta;
+    hx_htxf_add_total_pos (htxf, delta);
     post_file_update (htxf);
 }
 
@@ -683,7 +680,7 @@ get_thread (void *arg)
     }
 
     play_sound (FILE_DONE);
-    htxf->total_pos = htxf->total_size;
+    hx_htxf_set_total_pos (htxf, htxf->total_size);
     post_file_update (htxf);
 
 ret:
@@ -764,7 +761,7 @@ folder_get_thread (void *arg)
     }
 
     play_sound (FILE_DONE);
-    htxf->total_pos = htxf->total_size;
+    hx_htxf_set_total_pos (htxf, htxf->total_size);
     post_file_update (htxf);
 
 ret:
@@ -859,7 +856,7 @@ folder_put_thread (void *arg)
     }
 
     play_sound (FILE_DONE);
-    htxf->total_pos = htxf->total_size;
+    hx_htxf_set_total_pos (htxf, htxf->total_size);
     post_file_update (htxf);
 
 ret:
@@ -938,7 +935,7 @@ xfers_delete_all (void)
     for (i = 0; i < nxfers; i++) {
         struct htxf_conn *htxf = xfers[i];
         /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
-        g_atomic_int_set (&htxf->canceled, TRUE);
+        hx_htxf_cancel (htxf);
         /* Shut the subchannel socket down to wake a worker parked in a
 		 * blocking read/write; the htxf_io_read/_write canceled-check
 		 * then unwinds it cleanly. The worker runs on tokio's blocking
@@ -1001,7 +998,7 @@ xfer_delete (struct htxf_conn *htxf)
     }
 
     /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
-    g_atomic_int_set (&htxf->canceled, TRUE);
+    hx_htxf_cancel (htxf);
     /* Wake a worker parked in a blocking subchannel read/write by
 	 * shutting its socket down; the htxf_io_read/_write canceled-check
 	 * then turns the resulting error into a clean exit. The worker runs

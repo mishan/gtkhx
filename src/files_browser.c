@@ -17,6 +17,7 @@
 #include "hl_access.h" /* HL_ACCESS_DOWNLOAD_FILES */
 #include "hxconn.h"
 #include "xfers.h"     /* xfer_new for remote drag-to-Downloads */
+#include "htxf_accessors.h" /* hx_htxf_total_pos */
 #include "prefs.h"     /* gtkhx_prefs.download_path */
 #include "files.h"     /* hx_file_move for cross-dir Move */
 #include "files_entry.h"
@@ -1888,7 +1889,7 @@ on_file_update (GtkhxSession *sess, gpointer sess_p, gpointer htxf_p,
     if (!x) {
         return;
     }
-    if (x->total_size == 0 || x->total_pos < x->total_size) {
+    if (x->total_size == 0 || hx_htxf_total_pos (x) < x->total_size) {
         return;
     }
 

@@ -21,6 +21,7 @@
 //! hard-coded constant.
 
 use std::os::raw::{c_char, c_int, c_void};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 
 /// `HOSTLEN` from `compat.h`.
 const HOSTLEN: usize = 256;
@@ -47,6 +48,12 @@ struct Qbuf {
 /// the *order, types, and sizes* are what must match, pinned by the runtime
 /// layout check the C side drives. All fields are POD — a zeroed value is a
 /// valid "fresh" handle, matching the old `g_new0`.
+///
+/// The three cross-thread lifecycle fields (`refcount`, `canceled`, `total_pos`)
+/// are held as atomics (S0.2). `AtomicI32` / `AtomicU64` are layout-identical to
+/// the C `gint` / `guint64` they mirror, so offsets are unchanged; the C side no
+/// longer touches them directly — all access goes through the `hx_htxf_*`
+/// ref/cancel/total_pos ABI below (a faithful port of the old `g_atomic_int_*`).
 #[repr(C)]
 pub struct HtxfHandle {
     data_size: u64,
@@ -54,10 +61,10 @@ pub struct HtxfHandle {
     rsrc_size: u64,
     rsrc_pos: u64,
     total_size: u64,
-    total_pos: u64,
+    total_pos: AtomicU64,
     srv_data_size: u64,
-    refcount: c_int,
-    canceled: c_int,
+    refcount: AtomicI32,
+    canceled: AtomicI32,
     ref_: u32,
     gone: u8,
     type_: u8,
@@ -108,6 +115,81 @@ pub unsafe extern "C" fn hx_htxf_free(htxf: *mut HtxfHandle) {
     }
 }
 
+// ---- Cross-thread lifecycle (S0.2) -----------------------------------------
+// The refcount / cancel flag / total_pos byte counter are touched by both the
+// main thread and the tokio transfer worker. These are a 1:1 port of the old
+// C `g_atomic_int_*` calls (SeqCst = the full-barrier semantics g_atomic gave);
+// the C side no longer accesses the fields directly. All take a live handle.
+
+/// Take a reference (`g_atomic_int_inc`). Returns the new count. Also used to
+/// seed the initial ref at `xfer_init` (0 → 1).
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_ref(p: *mut HtxfHandle) -> c_int {
+    (*p).refcount.fetch_add(1, Ordering::SeqCst) + 1
+}
+
+/// Drop a reference (`g_atomic_int_dec_and_test`). Returns nonzero iff this was
+/// the last ref (the count reached 0), so the caller runs the teardown + frees.
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_unref(p: *mut HtxfHandle) -> c_int {
+    // fetch_sub returns the previous value; previous == 1 means we hit 0.
+    ((*p).refcount.fetch_sub(1, Ordering::SeqCst) == 1) as c_int
+}
+
+/// Mark the transfer cancelled (`g_atomic_int_set(&canceled, TRUE)`).
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_cancel(p: *mut HtxfHandle) {
+    (*p).canceled.store(1, Ordering::SeqCst);
+}
+
+/// Read the cancel flag (`g_atomic_int_get(&canceled)`) — the worker's
+/// cooperative-cancel boundary and the dispatchers' skip check.
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_is_canceled(p: *const HtxfHandle) -> c_int {
+    (*p).canceled.load(Ordering::SeqCst)
+}
+
+/// Bump the transferred-bytes counter by `delta` (the worker progress hook's
+/// `htxf->total_pos += delta`).
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_add_total_pos(p: *mut HtxfHandle, delta: u64) {
+    (*p).total_pos.fetch_add(delta, Ordering::SeqCst);
+}
+
+/// Set the transferred-bytes counter (init to 0 / clamp to total_size at
+/// completion).
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_set_total_pos(p: *mut HtxfHandle, val: u64) {
+    (*p).total_pos.store(val, Ordering::SeqCst);
+}
+
+/// Read the transferred-bytes counter (the tasks / files-browser progress view).
+///
+/// # Safety
+/// `p` is a live handle from `hx_htxf_new`.
+#[no_mangle]
+pub unsafe extern "C" fn hx_htxf_total_pos(p: *const HtxfHandle) -> u64 {
+    (*p).total_pos.load(Ordering::SeqCst)
+}
+
 // ---- Layout introspection: lets a C test pin the ABI at runtime ------------
 
 /// `sizeof(struct htxf_conn)` as this module lays it out.
@@ -150,14 +232,41 @@ mod tests {
         assert!(!p.is_null());
         // Zeroed: spot-check a few fields through the mirror.
         unsafe {
-            assert_eq!((*p).refcount, 0);
-            assert_eq!((*p).canceled, 0);
-            assert_eq!((*p).total_pos, 0);
+            assert_eq!((*p).refcount.load(Ordering::SeqCst), 0);
+            assert_eq!((*p).canceled.load(Ordering::SeqCst), 0);
+            assert_eq!((*p).total_pos.load(Ordering::SeqCst), 0);
             assert_eq!((*p).total_size, 0);
             hx_htxf_free(p);
         }
         // NULL-safe.
         unsafe { hx_htxf_free(std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn ref_unref_cancel_total_pos_transitions() {
+        unsafe {
+            let p = hx_htxf_new();
+            // Refcount: inc returns the new count; unref reports was-last only at 0.
+            assert_eq!(hx_htxf_ref(p), 1); // 0 → 1 (initial ref)
+            assert_eq!(hx_htxf_ref(p), 2); // 1 → 2
+            assert_eq!(hx_htxf_unref(p), 0); // 2 → 1, not last
+            assert_eq!(hx_htxf_unref(p), 1); // 1 → 0, last ref
+
+            // Cancel flag: starts clear, sticks once set.
+            assert_eq!(hx_htxf_is_canceled(p), 0);
+            hx_htxf_cancel(p);
+            assert_ne!(hx_htxf_is_canceled(p), 0);
+
+            // total_pos: additive bump + absolute set.
+            assert_eq!(hx_htxf_total_pos(p), 0);
+            hx_htxf_add_total_pos(p, 100);
+            hx_htxf_add_total_pos(p, 40);
+            assert_eq!(hx_htxf_total_pos(p), 140);
+            hx_htxf_set_total_pos(p, 4096);
+            assert_eq!(hx_htxf_total_pos(p), 4096);
+
+            hx_htxf_free(p);
+        }
     }
 
     #[test]
