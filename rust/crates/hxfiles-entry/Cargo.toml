@@ -8,11 +8,9 @@ description = "HxFileEntry — one files-browser row as a Rust glib::subclass GO
 publish = false
 
 [lib]
-# staticlib: the C side (files_entry.c formatters + both providers + the panel
-#            / browser) links the hx_file_entry_* symbols this crate exports.
-# rlib:      future Rust consumers (a files gio::ListModel, like hxmember-model)
-#            hold a typed HxFileEntry.
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 [dependencies]
 # glib + gio give the GObject + gio::ListStore surface; the only C extern is

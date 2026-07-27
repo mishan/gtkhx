@@ -8,10 +8,9 @@ description = "User-roster receive handlers: user-change emit routing + user-par
 publish = false
 
 [lib]
-# staticlib: the hx_user_change_recv / hx_user_part_recv C ABI rcv.c calls.
-# rlib: cargo test (the emit routing + the contains-gate are unit-tested through
-#       recording doubles for the member-model / signal-emit C ABIs).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # The whole USER_CHANGE / USER_PART / SELFINFO receive handlers live here now.
 # The wire parse is native (hotline-proto's parse_user_change / parse_user_part)

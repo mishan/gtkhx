@@ -8,11 +8,11 @@ description = "HMAC/hash primitives for GtkHx — replaces src/hmac.c"
 publish = false
 
 [lib]
-# rlib added so in-workspace Rust consumers (R3.3.e-4g's
-# HopeBlowfishStream calls hmac_xxx for the per-message rekey
-# rotation) can link this crate directly. The staticlib keeps
-# the C FFI link surface unchanged — gtkhx_hmac_xxx remains
-# the public C entry point.
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]

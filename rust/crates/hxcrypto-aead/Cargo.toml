@@ -8,9 +8,11 @@ description = "ChaCha20-Poly1305 AEAD primitives for GtkHx — replaces cipher_a
 publish = false
 
 [lib]
-# staticlib for the C-side linker, rlib so cross-crate Rust
-# consumers (the hxnet R3.3.c cipher adapter) can call into the
-# crate's safe Rust API without going through the FFI surface.
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]

@@ -8,10 +8,9 @@ description = "Private-message receive path (MSG / MSG_BROADCAST): ignore-gate +
 publish = false
 
 [lib]
-# staticlib: the hx_msg_recv C ABI rcv.c's handler calls.
-# rlib: cargo test (the ignore-gate + emit routing are unit-tested through
-#       recording doubles for the member-model / emit C ABIs).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # std-only. The boxed HxMsgEvent build + the "msg" signal emit (gtkhx-session)
 # and the per-chat ignore lookup (hxmember-model) are externed C ABIs resolved

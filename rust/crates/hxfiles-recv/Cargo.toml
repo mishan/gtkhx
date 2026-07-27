@@ -8,11 +8,9 @@ description = "File-listing receive handler (rcv_task_file_list, ported from rcv
 publish = false
 
 [lib]
-# staticlib: the rcv_task_file_list C ABI the FILE_LIST senders register via
-#            task_new resolve against this at the final link.
-# rlib: cargo test (the chunk walk + append/recurse dispatch is unit-tested
-#       through recording doubles for the C cfl seam).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # This crate OWNS struct cached_filelist (the opaque handle + hx_cfl_* accessor
 # facade, the hxconn playbook): the path, the accumulated fh buffer (a Vec<u8>),

@@ -8,11 +8,9 @@ description = "Phase R5 M1: pure chat conversation model + nick completion (the 
 publish = false
 
 [lib]
-# rlib: consumed by the Rust chat UI + the (future) FFI shim crate.
-# staticlib: reserved for the M1 wiring step, when the C nick-completion path
-#            delegates here through a #[no_mangle] surface. No FFI exports yet
-#            — this first increment is the pure, unit-tested model core.
-crate-type = ["staticlib", "rlib"]
+# rlib only. Pure Rust — no C ABI surface of its own; consumed by other
+# workspace crates, which reach the C link via the gtkhx-ffi staticlib.
+crate-type = ["rlib"]
 
 # Deliberately dependency-free: the conversation model + completion algorithm
 # are pure logic (no glib / gtk), so `cargo test -p hxchat-model` runs in any

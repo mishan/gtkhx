@@ -8,10 +8,9 @@ description = "File-transfer reply tail (announce queue position + start when re
 publish = false
 
 [lib]
-# staticlib: the hx_xfer_announce C ABI the xfer reply handlers call.
-# rlib: cargo test (the queued-vs-ready decision is unit-tested through
-#       recording doubles for the emit / xfer C ABIs).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # Reply parsing is native via the hotline-proto rlib dep (parse::parse_file_get_reply
 # / _folder_get_reply / _file_put_reply / _folder_put_reply / _banner_get_reply /

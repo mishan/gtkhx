@@ -8,9 +8,11 @@ description = "Rust ↔ GLib bridge for GtkHx: C-owned GObject wrapping + signal
 publish = false
 
 [lib]
-# staticlib: the C side (gtkhx_session.c shims) links the FFI symbols.
-# rlib:      future Rust consumers (hxvoice-runtime in Phase 8.B+, hxnet
-#            in R3 proper) depend on the wrapping helpers.
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]

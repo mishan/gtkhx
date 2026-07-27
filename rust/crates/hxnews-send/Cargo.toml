@@ -8,9 +8,9 @@ description = "Phase R5 N2c: 1.5 threaded-news RPC senders (Rust port of news15.
 publish = false
 
 [lib]
-# staticlib: the hx_news15_* C ABI news_browser.c links against.
-# rlib: for any future Rust consumer (the eventual news_browser.rs port).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # glib (for g_free / gboolean) + the pure hotline-proto builders. No GTK: the
 # C send-path primitives (path_to_hldir, gtkhx_text_for_wire, task_new,

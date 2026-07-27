@@ -8,10 +8,9 @@ description = "GIF-icon receive path (ICON_CHANGE broadcast): parse + GtkhxSessi
 publish = false
 
 [lib]
-# staticlib: the hx_icon_change_recv C ABI rcv.c's handler calls.
-# rlib: cargo test (the parse-gate + emit are unit-tested through recording
-#       doubles for the parse / emit C ABIs).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # std-only. The wire parse (gtkhx_proto_parse_icon_change, hotline-proto) and
 # the gif-icon-changed signal emit (gtkhx-session) are externed C ABIs resolved

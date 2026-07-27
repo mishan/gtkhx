@@ -8,9 +8,9 @@ description = "Phase R5 M2: chat membership as a gio::ListModel (HxMember / HxMe
 publish = false
 
 [lib]
-# rlib: consumed by gtkhx-ui when HxUserListView binds to the model (next M2
-# increment). staticlib: reserved for the FFI seam rcv.c will mutate through.
-crate-type = ["staticlib", "rlib"]
+# rlib only. Pure Rust — no C ABI surface of its own; consumed by other
+# workspace crates, which reach the C link via the gtkhx-ffi staticlib.
+crate-type = ["rlib"]
 
 [dependencies]
 # glib + gio give the GObject + gio::ListModel surface; no gtk / no C externs,

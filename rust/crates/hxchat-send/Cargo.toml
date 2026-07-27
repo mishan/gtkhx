@@ -8,11 +8,9 @@ description = "Phase R5: chat wire-out senders (the Rust port of chat.c's send p
 publish = false
 
 [lib]
-# staticlib: chat.h's callers (toolbar.c, users.c, chat.c input handler, …)
-#            link hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join /
-#            hx_part_chat / hx_change_subject that chat.c used to provide.
-# rlib:      lets a future fully-Rust chat window call the senders directly.
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 [dependencies]
 # glib for the g_free'd text buffer + the gboolean cap flag.

@@ -8,11 +8,11 @@ description = "Phase R4: GtkhxSession model→view signal hub as a Rust glib::su
 publish = false
 
 [lib]
-# staticlib: the C side links the FFI symbols (gtkhx_session_get_type,
-#            gtkhx_session_get_default, every gtkhx_session_emit_*) that
-#            the deleted src/gtkhx_session.c used to provide.
-# rlib:      future Rust consumers (Phase R5 UI windows) hold a typed
-#            GtkhxSession handle from the glib::subclass derivation.
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]

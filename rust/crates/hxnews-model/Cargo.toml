@@ -8,10 +8,9 @@ description = "Phase R5 N2a: pure post-threading layout for the 1.5 news browser
 publish = false
 
 [lib]
-# rlib: for any future Rust consumer (the eventual news_browser.rs port).
-# staticlib: the FFI seam news_browser.c links against today
-#            (hx_news_thread_parent_indices).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # The threading layout (lib.rs) is pure logic; HxNewsNode (node.rs) is a
 # glib::subclass GObject — the news-browser tree's data node, exported to C via

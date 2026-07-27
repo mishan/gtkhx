@@ -8,11 +8,9 @@ description = "Macintosh resource-fork parser (ported from src/macres.c) — rea
 publish = false
 
 [lib]
-# rlib: the native API (Rust consumers, e.g. hxcicn's future higher-level use).
-# staticlib: the `ffi` module preserves the exact macres.h C ABI so macres.c can
-#            be deleted and the C consumers (gtkhx.c / options.c / cicn.c) link
-#            this instead.
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # The native parser is pure std (bounds-checked big-endian byte walking, no
 # glib / gtk), so `cargo test -p hxmacres` runs headless and cross-platform.

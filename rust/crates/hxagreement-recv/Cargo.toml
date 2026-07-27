@@ -8,10 +8,9 @@ description = "Agreement receive path (auto-agree vs show-and-emit decision), po
 publish = false
 
 [lib]
-# staticlib: the hx_agreement_recv C ABI hx_rcv_agreement_file calls.
-# rlib: cargo test (the show-vs-auto-agree decision is unit-tested through a
-#       recording double for the agreement-emit C ABI).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # std-only. The agreement signal emit (gtkhx-session) is an externed C ABI
 # resolved at the final link; cargo test provides an in-crate #[cfg(test)] double

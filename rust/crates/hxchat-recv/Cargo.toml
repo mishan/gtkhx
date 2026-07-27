@@ -8,10 +8,9 @@ description = "Chat-domain receive handlers: the ignore-gate + GtkhxSession emit
 publish = false
 
 [lib]
-# staticlib: the hx_chat_*_recv + hx_rcv_chat_invite C ABI rcv.c's dispatch calls.
-# rlib: cargo test (gate + emit + the moved handler are unit-tested through
-#       recording doubles for the parse / member-model / signal-emit C ABIs).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # std-only. The decision logic (ignore-gate + emit) is here; collaborators — the
 # hotline-proto wire parsers, the chat/member-model lookups, the GtkhxSession

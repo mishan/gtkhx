@@ -8,6 +8,8 @@ description = "CI Cargo-feature unification shim — not linked into the binary 
 publish = false
 
 [lib]
+# rlib only. Pure Rust — no C ABI surface of its own; consumed by other
+# workspace crates, which reach the C link via the gtkhx-ffi staticlib.
 crate-type = ["rlib"]
 
 # --- Feature unification for the two-build CI job ----------------------------

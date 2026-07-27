@@ -8,11 +8,11 @@ description = "HFS metadata sidecar (.rsrc / .fndrinfo) reader/writer — CAP / 
 publish = false
 
 [lib]
-# rlib: the native API the future hxfiles-xfer crate consumes.
-# staticlib: the `ffi` module preserves the exact hfs.h C ABI so a later
-#            leaf-up replacement can drop hfs.c and link this instead.
-# NOTE: this crate is standalone for now — it is NOT linked into src/gtkhx yet
-#       (hfs.c is untouched), so the #[no_mangle] ffi symbols don't collide.
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 # The native API is pure std (filesystem I/O + big-endian byte twiddling, no

@@ -8,9 +8,9 @@ description = "Pure files-subsystem model helpers (the Rust re-think of the C fi
 publish = false
 
 [lib]
-# staticlib: the C side (files.c) links the #[no_mangle] FFI surface.
-# rlib:      future Rust consumers (the F2 transfer worker / provider model).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # Deliberately dependency-free: this is pure logic (no glib / gtk), so
 # `cargo test -p hxfiles-model` runs in any CI container and carries the
