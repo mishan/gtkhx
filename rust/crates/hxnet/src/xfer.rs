@@ -403,19 +403,37 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     if crate::htxf::hxnet_htxf_set_read_timeout(hx, MACR_DRAIN_TIMEOUT_MS) != 0 {
         return EIO;
     }
-    let marker = read_exact_progress(hx, ffo::FORK_HEADER_LEN, p);
+    // Drive the marker read directly so we can tell "nothing arrived" (a phantom
+    // the server over-declared → clean no-resource-fork completion) apart from a
+    // partial read that then failed (a real marker we've lost sync on → error).
+    // read_exact_progress collapses both into one Err, which would silently
+    // truncate a real resource fork and desync the stream, so it can't be used
+    // here.
+    let mut m = [0u8; ffo::FORK_HEADER_LEN];
+    let mut got = 0usize;
+    let marker_complete = loop {
+        let n = crate::htxf::hxnet_htxf_read(hx, m[got..].as_mut_ptr(), m.len() - got);
+        if n < 1 {
+            // No bytes yet → server sent no marker (clean finish). Some bytes
+            // already consumed → partial marker, the stream is desynced.
+            break if got == 0 { Ok(false) } else { Err(EIO) };
+        }
+        p.report(n as u64);
+        got += n as usize;
+        if got == m.len() {
+            break Ok(true);
+        }
+    };
     // Disarm before reading the resource fork itself — fork data can take longer
     // than the drain timeout to arrive.
     if crate::htxf::hxnet_htxf_set_read_timeout(hx, 0) != 0 {
         return EIO;
     }
-    let marker = match marker {
-        Ok(m) => m,
-        // No marker (timeout/EOF) — treat as a no-resource-fork completion.
-        Err(_) => return finish(&cfg, &path, typecrea, &pi),
-    };
-    let mut m = [0u8; ffo::FORK_HEADER_LEN];
-    m.copy_from_slice(&marker);
+    match marker_complete {
+        Ok(true) => {}                                          // full 16-byte marker
+        Ok(false) => return finish(&cfg, &path, typecrea, &pi), // no marker at all
+        Err(e) => return e,                                     // partial → desync
+    }
     let rfork_len = ffo::fork_len(&m, large);
     if rfork_len == 0 {
         return finish(&cfg, &path, typecrea, &pi);
@@ -1414,7 +1432,12 @@ mod recv_timeout_tests {
     // Generate a valid FILP header + data fork (no trailing MACR) by running the
     // send path into a loopback capture and slicing off its 16-byte MACR tail.
     fn filp_header_and_data(body: &[u8]) -> Vec<u8> {
-        let dir = std::env::temp_dir().join(format!("hxnet_recv_gen_{}", std::process::id()));
+        // Unique per call: tests run in parallel and each call makes + removes
+        // this dir, so a shared name would race.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir()
+            .join(format!("hxnet_recv_gen_{}_{}", std::process::id(), seq));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("gen.txt");
         std::fs::write(&path, body).unwrap();
@@ -1522,5 +1545,64 @@ mod recv_timeout_tests {
             "recv should finish within the drain timeout, not block until close; took {:?}",
             elapsed
         );
+    }
+
+    // A *partial* MACR marker (some bytes then a stall) is a genuine desync, not
+    // a phantom: the drain timeout must not swallow it as a clean completion, or
+    // a real resource fork would be silently truncated. The worker must error.
+    #[test]
+    fn partial_macr_is_an_error_not_a_clean_finish() {
+        let body = b"file with a resource fork coming\n";
+        let mut wire = filp_header_and_data(body);
+        // Append a truncated MACR marker (8 of 16 bytes) so the drain read
+        // consumes some bytes and then stalls waiting for the rest.
+        wire.extend_from_slice(b"MACR\0\0\0\0");
+        // Declare a full marker + a resource fork beyond the header+data.
+        let file_budget = (filp_header_and_data(body).len()
+            + ffo::FORK_HEADER_LEN
+            + 32) as u64;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.write_all(&wire).unwrap();
+            s.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+        });
+
+        let out_dir =
+            std::env::temp_dir().join(format!("hxnet_recv_partial_{}", std::process::id()));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let out_path = out_dir.join("dl.txt");
+        let out_c = std::ffi::CString::new(out_path.to_str().unwrap()).unwrap();
+
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: out_c.as_ptr(),
+            file_budget,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: 0,
+            rsrc_size: 0,
+        };
+        let rv = unsafe { hxnet_xfer_file_recv_one(&params) };
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&out_dir);
+        let _ = server.join();
+
+        assert_ne!(rv, 0, "a partial MACR marker must surface as an error, not a clean finish");
     }
 }
