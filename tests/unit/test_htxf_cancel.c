@@ -1,25 +1,24 @@
 /*
- * test_htxf_cancel.c — the HTXF cooperative-cancel C shim (Phase R3 X1).
+ * test_htxf_cancel.c — the hxnet HTXF cooperative-cancel token (Phase R3 X1).
  *
- * Exercises the cancellation path xfers.c relies on, through the real
- * htxf_io.c shim + the hxnet abort token, over a TCP loopback pair (so
- * the socket is a genuine connected TCP stream, matching production and
- * the tokio/std TcpStream invariants the hxnet side assumes).
+ * Exercises the cancellation path xfers.c relies on — the hxnet HtxfAbort
+ * token driven directly (hxnet_htxf_abort_arm / _abort) against a real
+ * hxnet_htxf_read over a TCP loopback pair (a genuine connected TCP stream,
+ * matching production and the tokio/std TcpStream invariants). Since S1.2 the
+ * old htxf_io.c C shim is gone; the token IS the cancellation mechanism.
  *
  * The full client transfer worker (xfers.c::xfer_ready_write + the
  * blocking-pool worker + xfer_delete) needs the whole GTK / GtkhxSession
  * app context to drive, which the test harness doesn't stand up. But the
- * load-bearing new logic is the shim layer this test covers directly:
+ * load-bearing mechanism this test covers directly:
  *
- *   - htxf_io_read short-circuits to ECANCELED when htxf->canceled is set
- *     (the centralized boundary check every worker read goes through);
- *   - htxf_io_abort shuts the subchannel socket down so a read PARKED in
- *     the hxnet transport wakes promptly (the mechanism that makes a
- *     blocking-pool worker cancellable at all);
- *   - an abort-driven wakeup reclassifies as ECANCELED, not a spurious
- *     EIO "channel error";
- *   - the token lifecycle (init → arm → abort → release → free) is
- *     leak-clean (the analyze workflow runs this under ASan).
+ *   - hxnet_htxf_abort shuts the subchannel socket down so a read PARKED in
+ *     the hxnet transport wakes promptly (what makes a blocking-pool worker
+ *     cancellable at all), and the woken read returns -1;
+ *   - abort-before-arm still tears the socket down (the connect-races-cancel
+ *     window);
+ *   - the token lifecycle (create → arm → abort → close → free) is leak-clean
+ *     (the analyze workflow runs this under ASan), including under fan-out.
  *
  * What xfers.c adds on top — the worker-ref handoff and the
  * completion-marshal — is main-loop / refcount glue the Tier 3 transfer
@@ -40,7 +39,7 @@
 #include "compat.h"
 #include "hotline.h"
 #include "protocol.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 
 /* The token create/free shims (htxf_io_abort_init / _free) were retired in S0.3:
  * production creates the token in hx_htxf_new and frees it in hx_htxf_free (the
@@ -97,7 +96,6 @@ open_passthrough_loopback (struct htxf_conn *xfer, int *server_fd)
     guint16 port = ntohs (addr.sin_port);
 
     memset (xfer, 0, sizeof (*xfer));
-    htxf_io_init (xfer);
     xfer->hx = hxnet_htxf_connect ((const guint8 *) "127.0.0.1",
                                    strlen ("127.0.0.1"), port, NULL, 0,
                                    /*tls=*/0, /*preamble=*/NULL, 0,
@@ -111,36 +109,6 @@ open_passthrough_loopback (struct htxf_conn *xfer, int *server_fd)
     }
     close (listener);
     *server_fd = server;
-}
-
-/* ------------------------------------------------------------------ *
- * Test: the canceled flag short-circuits a read to ECANCELED before it
- * ever touches the transport. This is the centralized boundary check
- * every worker read in xfers.c goes through. */
-static void
-test_canceled_flag_short_circuits_read (void)
-{
-    struct htxf_conn xfer;
-    int server_fd;
-    open_passthrough_loopback (&xfer, &server_fd);
-
-    g_atomic_int_set (&xfer.canceled, TRUE);
-
-    guint8 buf[16];
-    errno = 0;
-    ssize_t r = htxf_io_read (&xfer, buf, sizeof (buf));
-    g_assert_cmpint (r, ==, -1);
-    g_assert_cmpint (errno, ==, ECANCELED);
-
-    /* A write is gated the same way. */
-    errno = 0;
-    ssize_t w = htxf_io_write (&xfer, buf, sizeof (buf));
-    g_assert_cmpint (w, ==, -1);
-    g_assert_cmpint (errno, ==, ECANCELED);
-
-    htxf_io_release (&xfer);
-    test_token_free (&xfer);
-    close (server_fd);
 }
 
 /* Shared state for the parked-reader thread. */
@@ -168,7 +136,7 @@ parked_reader (gpointer data)
 	 * even started (which would pass via the canceled-flag short-circuit
 	 * and prove nothing about waking a blocked read). */
     g_atomic_int_set (&ctx->entered, 1);
-    ctx->result = htxf_io_read (ctx->xfer, buf, sizeof (buf));
+    ctx->result = hxnet_htxf_read ((HtxfConn *) ctx->xfer->hx, buf, sizeof (buf));
     ctx->saved_errno = errno;
     ctx->elapsed_us = g_get_monotonic_time () - start;
     return NULL;
@@ -187,7 +155,7 @@ test_abort_wakes_parked_read (void)
     int server_fd;
     open_passthrough_loopback (&xfer, &server_fd);
     test_token_init (&xfer); /* main-thread token alloc */
-    htxf_io_abort_arm (&xfer);  /* arm with the channel's socket */
+    hxnet_htxf_abort_arm ((HtxfConn *) xfer.hx, (const HtxfAbort *) xfer.abort);  /* arm with the channel's socket */
 
     /* Fail-fast backstop: if abort ever stops waking the read, the read
 	 * timeout returns on its own instead of wedging the whole test run.
@@ -195,7 +163,7 @@ test_abort_wakes_parked_read (void)
 	 * return (≈ READ_TIMEOUT_MS) fails while an abort-driven wake
 	 * (tens of ms) passes — robust to CI scheduling variance. */
     const guint READ_TIMEOUT_MS = 3000;
-    g_assert_cmpint (htxf_io_set_read_timeout (&xfer, READ_TIMEOUT_MS), ==, 0);
+    g_assert_cmpint (hxnet_htxf_set_read_timeout ((HtxfConn *) xfer.hx, READ_TIMEOUT_MS), ==, 0);
 
     struct reader_ctx ctx = { .xfer = &xfer, .result = 0, .saved_errno = 0,
                               .elapsed_us = 0, .entered = 0 };
@@ -210,21 +178,22 @@ test_abort_wakes_parked_read (void)
     g_assert_cmpint (g_atomic_int_get (&ctx.entered), ==, 1);
     g_usleep (50 * 1000); /* let the recv() actually block */
 
-    /* Cancel exactly as xfer_delete does: latch the flag, then abort. */
-    g_atomic_int_set (&xfer.canceled, TRUE);
-    htxf_io_abort (&xfer);
+    /* Cancel as xfer_delete does: abort the token, which shuts the subchannel
+	 * socket down so the parked hxnet_htxf_read wakes and returns -1. (Since
+	 * S1.2 there's no separate canceled-flag pre-check — the token is the
+	 * cancellation mechanism.) */
+    hxnet_htxf_abort ((const HtxfAbort *) xfer.abort);
 
     g_thread_join (t);
 
+    /* The parked read woke with an error (the aborted socket). */
     g_assert_cmpint (ctx.result, ==, -1);
-    /* Reclassified as cancel, not a transport fault. */
-    g_assert_cmpint (ctx.saved_errno, ==, ECANCELED);
     /* Woke via the abort, not the timeout backstop: well under the
 	 * configured read timeout (half of it leaves ample CI margin). */
     g_assert_cmpint (ctx.elapsed_us, <,
                      (gint64) READ_TIMEOUT_MS * 1000 / 2);
 
-    htxf_io_release (&xfer);
+    hxnet_htxf_close ((HtxfConn *) xfer.hx);
     test_token_free (&xfer);
     close (server_fd);
 }
@@ -251,8 +220,8 @@ test_abort_before_arm (void)
     test_token_init (&xfer);
 
     /* Abort BEFORE arm (no socket on the token yet), then arm late. */
-    htxf_io_abort (&xfer);
-    htxf_io_abort_arm (&xfer);
+    hxnet_htxf_abort ((const HtxfAbort *) xfer.abort);
+    hxnet_htxf_abort_arm ((HtxfConn *) xfer.hx, (const HtxfAbort *) xfer.abort);
 
     /* The late arm must have shut the client socket (shutdown both
 	 * directions), so the server side sees EOF. A recv timeout keeps a
@@ -264,7 +233,7 @@ test_abort_before_arm (void)
     ssize_t n = read (server_fd, &b, 1);
     g_assert_cmpint (n, ==, 0); /* clean EOF — the socket was shut down */
 
-    htxf_io_release (&xfer);
+    hxnet_htxf_close ((HtxfConn *) xfer.hx);
     test_token_free (&xfer);
     close (server_fd);
 }
@@ -277,8 +246,8 @@ static void
 test_abort_shims_null_safe (void)
 {
     /* The surviving shims + the token free on a NULL htxf. */
-    htxf_io_abort_arm (NULL);
-    htxf_io_abort (NULL);
+    hxnet_htxf_abort_arm (NULL, NULL);
+    hxnet_htxf_abort (NULL);
     test_token_free (NULL);
     hxnet_htxf_abort_free (NULL); /* the primitive itself is NULL-safe */
 
@@ -286,8 +255,8 @@ test_abort_shims_null_safe (void)
 	 * shape): abort + free are no-ops, arm is a no-op (no hx). */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
-    htxf_io_abort_arm (&xfer);  /* no hx, no token → no-op */
-    htxf_io_abort (&xfer);      /* no token → no-op */
+    hxnet_htxf_abort_arm ((HtxfConn *) xfer.hx, (const HtxfAbort *) xfer.abort);  /* no hx, no token → no-op */
+    hxnet_htxf_abort ((const HtxfAbort *) xfer.abort);      /* no token → no-op */
     test_token_free (&xfer); /* no token → no-op */
 
     /* init then free with no channel ever opened: leak-clean (ASan). */
@@ -310,15 +279,14 @@ test_many_channels_abort_clean (void)
     for (int i = 0; i < N; i++) {
         open_passthrough_loopback (&xfers[i], &srv[i]);
         test_token_init (&xfers[i]);
-        htxf_io_abort_arm (&xfers[i]);
+        hxnet_htxf_abort_arm ((HtxfConn *) xfers[i].hx, (const HtxfAbort *) xfers[i].abort);
     }
-    /* Cancel all, as xfers_delete_all does. */
+    /* Cancel all, as xfers_delete_all does (abort each token). */
     for (int i = 0; i < N; i++) {
-        g_atomic_int_set (&xfers[i].canceled, TRUE);
-        htxf_io_abort (&xfers[i]);
+        hxnet_htxf_abort ((const HtxfAbort *) xfers[i].abort);
     }
     for (int i = 0; i < N; i++) {
-        htxf_io_release (&xfers[i]);
+        hxnet_htxf_close ((HtxfConn *) xfers[i].hx);
         test_token_free (&xfers[i]);
         close (srv[i]);
     }
@@ -329,8 +297,6 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
 
-    g_test_add_func ("/htxf/cancel/canceled-flag-short-circuits",
-                     test_canceled_flag_short_circuits_read);
     g_test_add_func ("/htxf/cancel/abort-wakes-parked-read",
                      test_abort_wakes_parked_read);
     g_test_add_func ("/htxf/cancel/abort-before-arm", test_abort_before_arm);

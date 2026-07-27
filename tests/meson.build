@@ -293,16 +293,15 @@ test_htxf_layout = executable('test_htxf_layout',
 test('htxf_layout', test_htxf_layout,
      suite : 'unit')
 
-# htxf_cancel — the HTXF cooperative-cancel C shim (Phase R3 X1). Drives
-# the real htxf_io.c shim + the hxnet abort token over a TCP loopback
-# pair: the canceled-flag boundary check, abort waking a parked transport
-# read, ECANCELED reclassification, NULL-safety, and the token lifecycle
-# under ASan. Links htxf_io.c + debug.c (for debug_log) + the hxnet
-# staticlib; no GUI tree. The full xfers.c worker path is covered by the
-# Tier 3 transfer matrix on the happy path.
+# htxf_cancel — the hxnet HTXF cooperative-cancel token (Phase R3 X1). Drives
+# the hxnet abort token directly (hxnet_htxf_abort_arm / _abort) against a real
+# hxnet_htxf_read over a TCP loopback pair: abort waking a parked transport read,
+# abort-before-arm, NULL-safety, and the token lifecycle under ASan. Links the
+# hxnet staticlib + debug.c (for debug_log); no GUI tree. (Since S1.2 there's no
+# htxf_io.c shim — the token is the cancellation mechanism.) The full xfers.c
+# worker path is covered by the Tier 3 transfer matrix on the happy path.
 test_htxf_cancel = executable('test_htxf_cancel',
   'unit/test_htxf_cancel.c',
-  '../src/htxf_io.c',
   '../src/debug.c',
   dependencies        : test_deps + [rust_hxnet_dep, rust_hxbridge_dep],
   include_directories : test_inc,
@@ -1029,9 +1028,9 @@ test('msg_event', test_msg_event,
 # cases are covered by unit tests (passthrough_roundtrip,
 # aead_single_frame_roundtrip, aead_multi_frame_and_partial_reads,
 # aead_tampered_frame_errors, aead_truncated_frame_errors) plus an
-# FFI-over-a-real-socket integration test. htxf_io.c is now a thin
-# errno-translating shim with nothing framing-specific left to unit-test
-# in C.
+# FFI-over-a-real-socket integration test. The htxf_io.c C shim is gone
+# entirely now (S1.2 — the drivers call hxnet_htxf_* directly), with nothing
+# framing-specific left to unit-test in C.
 
 # -----------------------------------------------------------------------------
 # Tier 3 — integration/
@@ -1084,10 +1083,9 @@ integration_harness_lib = static_library(
   '../src/chat_history.c',
   # The Tier 3 HOPE login + HTXF transfers run through the production
   # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
-  # (cipher.c stream, cipher_aead.c AEAD) are gone. htxf_io.c remains as the
-  # thin C shim over the Rust HTXF channel (the preamble packer moved to
-  # hxnet's hxnet_htxf_pack_preamble in S1.1).
-  '../src/htxf_io.c',
+  # (cipher.c stream, cipher_aead.c AEAD) are gone, and so is the htxf_io.c
+  # shim — the drivers call hxnet_htxf_* directly (S1.2), the preamble packer
+  # is hxnet's hxnet_htxf_pack_preamble (S1.1).
   '../src/qbuf.c',
   '../src/algo_list.c',
   '../src/debug.c',
@@ -1144,7 +1142,6 @@ test_integration_real_connect = executable(
   '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  '../src/htxf_io.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
@@ -1186,7 +1183,6 @@ test_integration_tracker_signals = executable(
   '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  '../src/htxf_io.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
@@ -1231,7 +1227,7 @@ test('socks', test_integration_socks,
 # alongside the harness control helpers; the harness's hlwrite_chunks /
 # hx_htlc_close stubs are __attribute__((weak)) so network.c's strong
 # definitions win. Links the full production connect source pile
-# (network.c + cipher / hope / proto / htxf_io) plus the harness
+# (network.c + hope / proto, with crypto + the HTXF channel in hxnet) plus the harness
 # control files (integration_harness/tls/tracker_matrix +
 # chat_history that the harness references).
 test_integration_real_htxf_connect = executable('test_integration_real_htxf_connect',
@@ -1261,7 +1257,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/tracker_v3_meta.c',
   '../src/tracker_event.c',
   '../src/hl_code.c',
-  '../src/htxf_io.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
@@ -1298,7 +1293,7 @@ test('real_tls_login', test_integration_real_tls_login,
 # The control channel logs in through production rustls (the
 # orchestrator), and the banner-image body rides a second TLS
 # subchannel opened via the SAME hxnet_htxf_connect(tls=1) path banner.c's
-# production worker uses, drained through htxf_io_read. The TLS HTXF
+# production worker uses, drained through hxnet_htxf_read. The TLS HTXF
 # socket uses Janus's tls_xfer_port (5611 host-mapped).
 #
 # (TLS file-mode HTXF body round-trip is covered by real_htxf_connect's
@@ -1713,7 +1708,7 @@ test('nick_colors', test_integration_nick_colors,
 # production hxnet::xfer::hxnet_xfer_file_recv_one and asserts the decoded
 # on-disk file is byte-for-byte the seeded 'hello world\n'. The receive machine
 # lives in the hxnet crate (linked via integration_harness_lib, which also
-# bundles htxf_io.c + the hxnet channel); this target adds the hxhfs crate (HFS
+# bundles the hxnet channel); this target adds the hxhfs crate (HFS
 # sidecar) and the hxfiles-xfer FFO codec. The Dockerfile seeds files/test.txt.
 test_integration_file_get = executable('test_integration_file_get',
   'integration/test_file_get.c',
@@ -1728,7 +1723,7 @@ test('file_get', test_integration_file_get,
 # NOTE: the former file_get_htxf_io target is gone. It drove the
 # plaintext passthrough leg of the C byte pump through a hand-rolled
 # subchannel. The H2 re-wire moved that pump into the hxnet crate, and
-# the full production path (htxf_connect -> htxf_io_read) is now covered
+# the full production path (htxf_connect -> hxnet_htxf_read) is now covered
 # across plaintext / AEAD / TLS by test_real_htxf_connect's three
 # siblings, so this hand-rolled variant is redundant.
 
@@ -2103,7 +2098,7 @@ test('hope_chacha20_chat_history', test_integration_hope_chacha20_chat_history,
 
 # hope_chacha20_banner — Tier 3 for the file-mode banner HTXF
 # subchannel under HOPE+ChaCha20-Poly1305. Drives the production
-# htxf_io.c AEAD wrappers (htxf_io_read / htxf_io_write) plus the
+# hxnet_htxf_read/_write over the AEAD channel plus the
 # per-transfer cipher_aead_derive_transfer_keys derivation, so the
 # test exercises exactly the path production xfers.c follows for
 # regular file downloads. Requires a server in BANNER_MODE=binary
@@ -2208,7 +2203,7 @@ test('folder_put', test_integration_folder_put,
 # hxnet::xfer::hxnet_xfer_folder_send_all, downloads it back through
 # hxnet_xfer_folder_recv_all, and asserts every file is byte-exact. Both folder
 # machines live in the hxnet crate (linked via integration_harness_lib, which
-# bundles htxf_io.c + the hxnet channel); this target adds the hxhfs crate + the
+# bundles the hxnet channel); this target adds the hxhfs crate + the
 # FFO codec. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
 test_integration_folder_roundtrip = executable('test_integration_folder_roundtrip',
   'integration/test_folder_roundtrip.c',

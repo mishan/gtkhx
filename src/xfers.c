@@ -39,7 +39,7 @@
 #include "uniquify_path.h"
 #include "sound.h"
 #include "files.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "htxf_accessors.h"
 #include "preview.h"
 #include "xfers.h"
@@ -103,6 +103,17 @@ htxf_ref (struct htxf_conn *htxf)
     return htxf;
 }
 
+/* Close the hxnet HTXF channel and clear the slot. Idempotent — the worker
+ * closes on completion, then the destructor closes again on the last unref; the
+ * NULL after the first close makes the second a no-op (hxnet_htxf_close is
+ * NULL-safe), which is what prevents a double-free of the channel handle. */
+static void
+xfer_close_channel (struct htxf_conn *htxf)
+{
+    hxnet_htxf_close ((HtxfConn *) htxf->hx);
+    htxf->hx = NULL;
+}
+
 /* The C teardown hx_htxf_unref runs on a handle's last ref, registered via
  * hx_htxf_set_destructor (S0.3). It does the GTK/preview + channel teardown that
  * must stay in C; the cancellation token + the struct itself are freed by
@@ -123,7 +134,7 @@ htxf_destructor (struct htxf_conn *htxf)
 	 * token frees when hx_htxf_free drops the C-side creation ref). Also
 	 * releases any AEAD read-side accumulator buffers. No-op on a transfer
 	 * that ran in plaintext mode / was already closed by the worker. */
-    htxf_io_release (htxf);
+    xfer_close_channel (htxf);
 }
 
 struct fu_job {
@@ -133,9 +144,9 @@ static gboolean
 fu_dispatch (gpointer data)
 {
     struct fu_job *j = data;
-    /* canceled is a cross-thread flag (worker reads it in htxf_io_read/
-	 * _write); access it atomically everywhere for a single coherent
-	 * memory model, even though this dispatcher runs on the main thread. */
+    /* canceled is a cross-thread flag (the main thread latches it in
+	 * xfer_delete / xfers_delete_all); read it atomically here so a
+	 * since-cancelled transfer's stale update is skipped. */
     if (!hx_htxf_is_canceled (j->htxf)) {
         gtkhx_session_emit_file_update (gtkhx_session_get_default (),
                                         sess_from_htlc (j->htxf->htlc), j->htxf);
@@ -686,9 +697,9 @@ get_thread (void *arg)
 
 ret:
     (void)retval;
-    /* htxf_io_release closes the hxnet HTXF channel, dropping the
-     * socket fd (and any rustls session) it owns. */
-    htxf_io_release (htxf);
+    /* Close the hxnet HTXF channel, dropping the socket fd (and any rustls
+     * session) it owns. */
+    xfer_close_channel (htxf);
 
     /* Cleanup runs in xfer_completion_entry on the main thread once
 	 * this worker returns — after every file_update idle queued above
@@ -767,7 +778,7 @@ folder_get_thread (void *arg)
 
 ret:
     (void)retval;
-    htxf_io_release (htxf);
+    xfer_close_channel (htxf);
     return NULL;
 }
 
@@ -794,7 +805,7 @@ put_thread (void *arg)
 
 ret:
     (void)retval;
-    htxf_io_release (htxf);
+    xfer_close_channel (htxf);
 
     /* Cleanup runs in xfer_completion_entry — see get_thread. */
     return NULL;
@@ -862,7 +873,7 @@ folder_put_thread (void *arg)
 
 ret:
     (void)retval;
-    htxf_io_release (htxf);
+    xfer_close_channel (htxf);
     return NULL;
 }
 
@@ -935,14 +946,15 @@ xfers_delete_all (void)
 
     for (i = 0; i < nxfers; i++) {
         struct htxf_conn *htxf = xfers[i];
-        /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
+        /* Latch the cancel flag so the completion dispatchers (fu_dispatch) skip
+         * stale updates for this since-cancelled transfer. */
         hx_htxf_cancel (htxf);
         /* Shut the subchannel socket down to wake a worker parked in a
-		 * blocking read/write; the htxf_io_read/_write canceled-check
+		 * blocking hxnet_htxf_read/_write — that -1 return
 		 * then unwinds it cleanly. The worker runs on tokio's blocking
 		 * pool, which can't be force-cancelled — cooperative abort is
 		 * the whole mechanism. */
-        htxf_io_abort (htxf);
+        hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
         hx_htxf_unref (htxf); /* drop xfers[] ref */
     }
     nxfers = 0;
@@ -998,14 +1010,15 @@ xfer_delete (struct htxf_conn *htxf)
         return;
     }
 
-    /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
+    /* Latch the cancel flag so the completion dispatchers (fu_dispatch) skip
+         * stale updates for this since-cancelled transfer. */
     hx_htxf_cancel (htxf);
     /* Wake a worker parked in a blocking subchannel read/write by
-	 * shutting its socket down; the htxf_io_read/_write canceled-check
-	 * then turns the resulting error into a clean exit. The worker runs
+	 * shutting its socket down; the resulting -1 unwinds the Rust transfer
+	 * loop cleanly. The worker runs
 	 * on tokio's blocking pool, which can't be force-cancelled —
 	 * cooperative abort is the whole mechanism. */
-    htxf_io_abort (htxf);
+    hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
     xfer_remove_from_list (htxf);
 }
 

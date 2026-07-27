@@ -27,7 +27,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "hl_code.h"
 #include "login_packet.h"
 #include "agreement_packet.h"

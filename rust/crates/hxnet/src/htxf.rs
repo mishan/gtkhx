@@ -792,6 +792,31 @@ pub unsafe extern "C" fn hxnet_htxf_read(handle: *mut HtxfConn, buf: *mut u8, le
     }
 }
 
+/// Read exactly `len` bytes into `buf`, looping over [`hxnet_htxf_read`] until
+/// full (a short read or clean EOF before `len` is an error). Returns `len` on
+/// success, `-1` on any error / truncation — the fill-loop the C banner + test
+/// body-read loops open-coded. `len == 0` is a no-op success.
+///
+/// # Safety
+/// `handle` must be a live handle from [`hxnet_htxf_connect`]; `buf` valid for
+/// `len` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_read_full(
+    handle: *mut HtxfConn,
+    buf: *mut u8,
+    len: usize,
+) -> isize {
+    let mut got = 0usize;
+    while got < len {
+        let n = hxnet_htxf_read(handle, buf.add(got), len - got);
+        if n <= 0 {
+            return -1;
+        }
+        got += n as usize;
+    }
+    len as isize
+}
+
 /// Blocking write of `len` bytes from `buf` (one AEAD frame when AEAD is
 /// active). Returns `len` on success, `-1` on error.
 ///

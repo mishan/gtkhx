@@ -27,7 +27,7 @@
  * live in the hxnet crate (rust/crates/hxnet/src/htxf.rs) since the
  * HTXF→Rust H2 re-wire. The header pulls in glib + sys/types only, so
  * the include is safe here. */
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 
 /* the connection and transfer structs used
  * to carry addrinfo / sockaddr_in for the network stack. The new

@@ -44,7 +44,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "network.h"             /* htxf_connect */
 #include "integration_harness.h"
 #include "server_matrix.h"
@@ -59,7 +59,7 @@ drain_and_check (struct htxf_conn *htxf, guint64 xfer_size)
     guint8 *payload = g_malloc (xfer_size);
     gsize got = 0;
     while (got < xfer_size) {
-        ssize_t r = htxf_io_read (htxf, payload + got, xfer_size - got);
+        ssize_t r = hxnet_htxf_read ((HtxfConn *) htxf->hx, payload + got, xfer_size - got);
         if (r <= 0) {
             g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d (%s)",
                             r, got, errno, g_strerror (errno));
@@ -137,7 +137,6 @@ test_htxf_connect_file_get_plaintext (void)
      * in passthrough mode (aead_active = FALSE). */
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.htlc = &htlc;
     g_strlcpy (htxf.serverhost, host, sizeof (htxf.serverhost));
     htxf.serverport = xfer_port;
@@ -159,7 +158,7 @@ test_htxf_connect_file_get_plaintext (void)
     /* Drain the body through production htxf_io_read (passthrough leg). */
     drain_and_check (&htxf, xfer_size);
 
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
     integration_release_htlc (&htlc);
     integration_close (fd);
 }
@@ -264,7 +263,6 @@ test_htxf_connect_file_get_aead (void)
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.htlc = &htlc;
     g_strlcpy (htxf.serverhost, srv->host, sizeof (htxf.serverhost));
     htxf.serverport = srv->xfer_port;
@@ -287,7 +285,7 @@ test_htxf_connect_file_get_aead (void)
      * bytes on the wire wouldn't decode to "hello world". */
     drain_and_check (&htxf, reply.size);
 
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
     integration_release_htlc (&htlc);
     integration_close (fd);
 }
@@ -376,7 +374,6 @@ test_htxf_connect_file_get_tls (void)
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.htlc = &htlc;
     g_strlcpy (htxf.serverhost, srv->host, sizeof (htxf.serverhost));
     htxf.serverport = srv->tls_xfer_port;
@@ -395,7 +392,7 @@ test_htxf_connect_file_get_tls (void)
 
     drain_and_check (&htxf, reply.size);
 
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
     integration_release_htlc (&htlc);
     integration_close (ctrl);
 }

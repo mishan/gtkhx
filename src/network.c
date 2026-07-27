@@ -54,7 +54,7 @@
 #include "hxconn.h"
 #include "banner.h"
 #include "debug.h"
-#include "htxf_io.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
+#include "hxnet_htxf.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_model.h"
@@ -832,7 +832,7 @@ htxf_connect (struct htxf_conn *htxf)
 	 * subchannel down and unblock this worker's blocking reads/writes.
 	 * Cheap and idempotent; NULL-safe on the banner transient path,
 	 * which doesn't route through htxf_connect. */
-    htxf_io_abort_arm (htxf);
+    hxnet_htxf_abort_arm ((HtxfConn *) htxf->hx, (const HtxfAbort *) htxf->abort);
     return TRUE;
 }
 

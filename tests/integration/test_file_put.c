@@ -39,7 +39,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "preview.h"
 #include "xfers_recv.h"
 #include "integration_harness.h"
@@ -96,7 +96,6 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.hx = ch;
     htxf.total_size = reply.size;
     g_snprintf (htxf.path, sizeof (htxf.path), "%s/back.txt", tmpdir);
@@ -118,7 +117,7 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
             content = NULL;
         }
     }
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
 
     unlink (htxf.path);
     g_rmdir (tmpdir);
@@ -206,7 +205,6 @@ test_file_put_round_trip (void)
 
     struct htxf_conn htxf;
     memset (&htxf, 0, sizeof (htxf));
-    htxf_io_init (&htxf);
     htxf.hx = ch;
     g_strlcpy (htxf.path, srcpath, sizeof (htxf.path));
     htxf.data_size = body_len;
@@ -229,7 +227,7 @@ test_file_put_round_trip (void)
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_file_send_one (&params);
     g_assert_cmpint (rv, ==, 0);
-    htxf_io_release (&htxf);
+    hxnet_htxf_close ((HtxfConn *) htxf.hx);
 
     /* Round-trip: download it back and assert byte-exact. mhxd commits
      * the uploaded file to disk asynchronously once the subchannel

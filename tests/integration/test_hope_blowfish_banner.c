@@ -28,7 +28,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
 

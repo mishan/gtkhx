@@ -58,7 +58,7 @@
 #include "proto_helpers.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "debug.h"
 
 static const hx_test_server *
@@ -240,7 +240,6 @@ test_hope_chacha20_banner_htxf (void)
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
-    htxf_io_init (&xfer);
     g_assert_nonnull (htlc.hope_aead);
     xfer.hx = hxnet_htxf_connect (
         (const guint8 *) srv->host, strlen (srv->host), srv->xfer_port,
@@ -254,7 +253,7 @@ test_hope_chacha20_banner_htxf (void)
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = htxf_io_read (&xfer, bytes + got, size - got);
+        ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
         if (r <= 0) {
             g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d "
                             "(%s)",
@@ -264,7 +263,7 @@ test_hope_chacha20_banner_htxf (void)
         got += (gsize) r;
     }
     g_assert_cmpuint ((guint) got, ==, size);
-    htxf_io_release (&xfer);
+    hxnet_htxf_close ((HtxfConn *) xfer.hx);
 
     g_test_message ("first 4 bytes: %02x %02x %02x %02x",
                     bytes[0], bytes[1], bytes[2], bytes[3]);

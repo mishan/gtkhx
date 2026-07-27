@@ -37,7 +37,7 @@
 #include "proto_helpers.h"
 #include "network.h"
 #include "hxnet_bridge.h"      /* hx_bridge_lookup_socks_proxy */
-#include "htxf_io.h"
+#include "hxnet_htxf.h"
 #include "banner.h"
 #include "banner_dispatch.h"
 #include "banner_http_ffi.h"
@@ -680,7 +680,6 @@ banner_htxf_worker_run (void *arg)
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = f->ref;
-    htxf_io_init (&xfer);
 
     /* type=HTXF_TYPE_BANNER so Mac-native servers route this subchannel
      * through their banner-send path. The preamble ALWAYS travels
@@ -720,22 +719,12 @@ banner_htxf_worker_run (void *arg)
         goto out;
     }
 
-    /* Drain the body through the hxnet channel — passthrough for
-     * plaintext, AEAD-deframing when armed. Same loop either way. */
-    {
-        guint8 *p = f->bytes;
-        gsize remain = f->size;
-        while (remain) {
-            ssize_t r = htxf_io_read (&xfer, p, remain);
-            if (r <= 0) {
-                debug_log ("banner",
-                           "htxf body read failed at < %zu bytes: %s",
-                           (size_t) remain, g_strerror (errno));
-                goto out;
-            }
-            p += r;
-            remain -= (gsize) r;
-        }
+    /* Drain the whole body through the hxnet channel in one call —
+     * passthrough for plaintext, AEAD-deframing when armed. */
+    if (hxnet_htxf_read_full ((HtxfConn *) xfer.hx, f->bytes, f->size)
+        != (ssize_t) f->size) {
+        debug_log ("banner", "htxf body read failed (< %u bytes)", f->size);
+        goto out;
     }
 
     f->bytes_len = f->size;
@@ -744,9 +733,10 @@ banner_htxf_worker_run (void *arg)
                f->generation);
 
 out:
-    /* htxf_io_release closes the hxnet channel (drops the fd / TLS
-     * session). NULL-safe — no-op if open never succeeded. */
-    htxf_io_release (&xfer);
+    /* Close the hxnet channel (drops the fd / TLS session). NULL-safe —
+     * no-op if the connect never succeeded (xfer.hx still NULL). */
+    hxnet_htxf_close ((HtxfConn *) xfer.hx);
+    xfer.hx = NULL;
 
     /* The hxbridge shim posts banner_htxf_completion_run onto the
      * captured main context automatically as soon as this worker
