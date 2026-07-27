@@ -9,8 +9,8 @@
 
 use std::io;
 
-use hxcrypto_aead::{AeadState, AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
-use hxcrypto_stream::BlowfishOfb64State;
+use hxcrypto::aead::{AeadState, AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
+use hxcrypto::stream::BlowfishOfb64State;
 use hxnet::transform::{
     compose, BoxedDuplex, CipherKind, CipherLayer, CompressionKind, TransformStack,
 };

@@ -17,8 +17,8 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use hxcrypto_aead::{AeadState, AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
-use hxcrypto_stream::BlowfishOfb64State;
+use hxcrypto::aead::{AeadState, AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
+use hxcrypto::stream::BlowfishOfb64State;
 use hxnet::cipher::{AeadStream, BlowfishStream};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 
@@ -282,7 +282,7 @@ async fn aead_oversized_length_prefix_rejected() {
     // Write a 4-byte big-endian length that's clearly over the
     // cap (max + 1). The adapter sees this on its read path
     // and should reject.
-    let bad_len = hxcrypto_aead::AEAD_MAX_FRAME_SIZE + 1;
+    let bad_len = hxcrypto::aead::AEAD_MAX_FRAME_SIZE + 1;
     server_side.write_all(&bad_len.to_be_bytes()).await.unwrap();
 
     let mut sink = [0u8; 16];
@@ -703,7 +703,7 @@ async fn aead_oversized_plaintext_rejected_with_invalid_input() {
     // greater than AEAD_MAX_FRAME_SIZE itself comfortably
     // exceeds the plaintext cap; using +1 keeps the allocation
     // tractable for the test.
-    let huge = vec![0u8; (hxcrypto_aead::AEAD_MAX_FRAME_SIZE as usize) + 1];
+    let huge = vec![0u8; (hxcrypto::aead::AEAD_MAX_FRAME_SIZE as usize) + 1];
     let err = adapter.write_all(&huge).await.unwrap_err();
     assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
 }
