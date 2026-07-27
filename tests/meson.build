@@ -20,7 +20,7 @@ test_deps = [
   # (the E1c flip). Every test target that touches an hx_conn_* symbol resolves
   # it here; the linker drops the archive for targets that don't. Base bundle so
   # both the test_deps and proto_test_deps (= test_deps + [...]) targets get it.
-  rust_hxconn_dep,
+  rust_gtkhx_core_dep,
 ]
 
 # All crypto primitives (hash, stream cipher, AEAD, compression) live in
@@ -49,7 +49,7 @@ proto_test_deps = test_deps + [
   # against proto_helpers.c / tracker_event.c, which those targets
   # also link. Archive members aren't pulled for tests that don't
   # touch a gtkhx_session symbol.
-  rust_gtkhx_session_dep,
+  rust_gtkhx_core_dep,
   # Phase R4.2: the boxed payload value-types (HxMsgEvent, HxChatEvent +
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
   # proto_helpers.c / tracker_event.c / tracker_v3_meta.c into the
@@ -59,7 +59,7 @@ proto_test_deps = test_deps + [
   # meta_free call sites) resolve them against this archive. It's
   # self-contained, so pulling those symbols never drags gtkhx-session's
   # C externs in.
-  rust_gtkhx_boxed_dep,
+  rust_gtkhx_core_dep,
   # Phase R5: src/text_util.c was ported to the hxtext Rust crate, so the
   # gtkhx_text_to_utf8 / _for_wire sanitisers proto_helpers.c calls now
   # resolve against this staticlib instead of a compiled-in text_util.c.
@@ -141,7 +141,7 @@ test('text_sanitisers', test_text_sanitisers,
 # because the shim preserves the signature.
 test_hmac = executable('test_hmac',
   'unit/test_hmac.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep],
   include_directories : test_inc,
 )
 test('hmac', test_hmac,
@@ -1085,7 +1085,7 @@ integration_harness_lib = static_library(
   # (hxnet_connection_open_plaintext_polling / try_recv_frame /
   # send_frame), so the suite pulls in the hxnet staticlib and its
   # compression dependency.
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 
@@ -1123,7 +1123,7 @@ test_integration_real_connect = executable(
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
   # gtkhx_session.c → Rust crate (Phase R4); linked via
-  # rust_gtkhx_session_dep in this target's dependencies.
+  # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
   '../src/qbuf.c',
@@ -1135,7 +1135,7 @@ test_integration_real_connect = executable(
   '../src/hl_code.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('real_connect', test_integration_real_connect,
@@ -1178,7 +1178,7 @@ test_integration_tracker_signals = executable(
   '../src/hl_code.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('tracker_signals', test_integration_tracker_signals,
@@ -1194,7 +1194,7 @@ test('tracker_signals', test_integration_tracker_signals,
 test_integration_orchestrator_harness = executable(
   'test_integration_orchestrator_harness',
   'integration/test_orchestrator_harness.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('orchestrator_harness', test_integration_orchestrator_harness,
@@ -1209,7 +1209,7 @@ test('orchestrator_harness', test_integration_orchestrator_harness,
 test_integration_socks = executable(
   'test_integration_socks',
   'integration/test_integration_socks.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('socks', test_integration_socks,
@@ -1242,7 +1242,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
   # gtkhx_session.c → Rust crate (Phase R4); linked via
-  # rust_gtkhx_session_dep in this target's dependencies.
+  # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
   '../src/qbuf.c',
@@ -1254,7 +1254,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/hl_code.c',
   '../src/htxf_io.c',
   '../src/htxf_subchannel.c',
-  dependencies        : proto_test_deps + [rust_hxcrypto_hash_dep, rust_hxcrypto_aead_dep, rust_hxcrypto_stream_dep, rust_hxcompress_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
+  dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
 test('real_htxf_connect', test_integration_real_htxf_connect,

@@ -21,10 +21,11 @@ use crate::tr::{tr, tr_fmt};
 
 const NB_KIND_POST: i32 = 3;
 
+use hxmodel::news::node::hx_news_node_name;
+
 extern "C" {
     // hxnews-model node accessors.
     fn hx_news_node_kind(node: *mut c_void) -> i32;
-    fn hx_news_node_name(node: *mut c_void) -> *const c_char;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     // news_browser.c bridges.
@@ -63,7 +64,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     let header_strip: gtk::Widget = from_glib_none(header_strip);
     let buffer = post_view.buffer();
 
-    if node.is_null() || hx_news_node_kind(node) != NB_KIND_POST {
+    if node.is_null() || hx_news_node_kind(node.cast()) != NB_KIND_POST {
         header_strip.set_visible(false);
         buffer.set_text(&tr("Select a post in the tree to view it here."));
         gtkurl_textview_apply_tags(post_view.as_ptr());
@@ -71,7 +72,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     }
 
     // Header strip: subject + "<sender> — <date>".
-    let name = crate::cstr(hx_news_node_name(node));
+    let name = crate::cstr(hx_news_node_name(node.cast()));
     let subject_display = if name.is_empty() {
         tr("(no subject)")
     } else {
@@ -79,7 +80,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     };
     subject_label.set_text(&subject_display);
 
-    let sender = crate::cstr(hx_news_node_sender(node));
+    let sender = crate::cstr(hx_news_node_sender(node.cast()));
     let sender = if sender.is_empty() { "?".to_string() } else { sender };
     let date = crate::hl_date::news_node_date_string(node).unwrap_or_default();
     // Single translatable msgid with positional args (was the C
@@ -88,7 +89,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     header_strip.set_visible(true);
 
     // Body — cached, or "Loading…" while the GETTHREAD fetch is in flight.
-    let body_ptr = hx_news_node_body(node);
+    let body_ptr = hx_news_node_body(node.cast());
     if body_ptr.is_null() {
         buffer.set_text(&tr("Loading…"));
         gtkhx_news_fetch_thread(browser, node);
@@ -138,7 +139,7 @@ pub unsafe extern "C" fn gtkhx_news_update_breadcrumb(
                 // The first node visited is the selected leaf.
                 leaf = node.as_ptr() as *mut c_void;
             }
-            names.insert(0, crate::cstr(hx_news_node_name(node.as_ptr() as *mut c_void)));
+            names.insert(0, crate::cstr(hx_news_node_name(node.as_ptr().cast())));
         }
         cur = c.parent();
     }

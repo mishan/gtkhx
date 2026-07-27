@@ -18,11 +18,9 @@ use glib::translate::from_glib_none;
 
 use crate::tr::tr;
 
-extern "C" {
-    // hxchat-send crate — the Rust chat wire senders (C ABI, final-link resolved).
-    fn hx_chat_join(htlc: *mut c_void, cid: u32);
-    fn hx_reject_chat(htlc: *mut c_void, cid: u32);
-    // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
+use hxhandlers::send::chat::{hx_chat_join, hx_reject_chat};
+
+extern "C" {    // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
     fn gtkhx_dialog_add_close_shortcuts(dialog: *mut gtk::ffi::GtkWidget);
     // gtkhx_ui_bridge.c — the chat window of `htlc`'s session (parent), may be
     // NULL. Scoped to the invited session, not the active one.

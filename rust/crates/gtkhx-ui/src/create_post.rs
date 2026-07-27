@@ -31,10 +31,9 @@ thread_local! {
     static POST: RefCell<Option<(gtk::Window, gtk::TextView)>> = const { RefCell::new(None) };
 }
 
-extern "C" {
-    /// news.c — put the post on the wire (cap-gated chunk build + task + write).
-    fn hx_post_news(htlc: *mut c_void, news: *const c_char, len: u16);
-    /// gtkhx_ui_bridge.c — the focused session's `&htlc` (single-session).
+use hxhandlers::send::news::hx_post_news;
+
+extern "C" {    /// gtkhx_ui_bridge.c — the focused session's `&htlc` (single-session).
     fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx.c — apply the themed `.gtkhx-text` CSS class + font.
     fn gtkhx_apply_text_style(w: *mut gtk::ffi::GtkWidget);

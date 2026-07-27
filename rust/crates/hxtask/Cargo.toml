@@ -8,12 +8,9 @@ description = "Per-session Hotline transaction-task table (ported from tasks_tab
 publish = false
 
 [lib]
-# staticlib: the C ABI (tasks_table_new / tasks_init / task_new /
-#            task_with_trans / task_delete) the ~14 caller files + rcv.c's
-#            dispatcher link against.
-# rlib: cargo test + any future Rust consumer (the N3 receive dispatcher, which
-#       will want to do the trans→task match in Rust).
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 # glib only, for the GHashTable FFI (sess->tasks stays a real GHashTable that
 # network.c's teardown iterates directly) + g_malloc0 / g_strdup / g_free. No
@@ -22,4 +19,5 @@ crate-type = ["staticlib", "rlib"]
 # is externed and resolved at the final C link; cargo test provides in-crate
 # #[cfg(test)] doubles so the suite runs headless.
 [dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }

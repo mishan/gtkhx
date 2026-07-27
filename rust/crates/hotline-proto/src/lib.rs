@@ -55,7 +55,7 @@ pub mod user_change;
 pub mod voice;
 pub mod wire;
 
-mod ffi;
+pub mod ffi;
 
 /// Size of the fixed Hotline transaction header (`struct hl_hdr`):
 /// `type`(4) + `trans`(4) + `flag`(4) + `len`(4) + `len2`(4) + `hc`(2).

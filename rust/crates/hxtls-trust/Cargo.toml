@@ -8,13 +8,11 @@ description = "TLS trust-on-first-use (TOFU) known_hosts store — SHA-256 cert-
 publish = false
 
 [lib]
-# staticlib: the crate's own C ABI (src/ffi.rs — hx_tls_verify_cert /
-#            hx_tls_trust_pin / hx_tls_test_* / hx_tls_trust_set_prompt),
-#            linked into the main binary + the minimal Tier-3 connect tests
-#            via rust_hxtls_trust_dep. This archive owns those symbols;
-#            gtkhx-ui does NOT depend on this crate (it only externs
-#            hx_tls_trust_set_prompt), so the symbols aren't double-defined.
-# rlib:      cargo test.
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 # Pure std — known_hosts DB (parse + atomic rewrite), the test seams, path

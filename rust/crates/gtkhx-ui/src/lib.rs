@@ -92,10 +92,8 @@ pub mod chat_input;
 pub mod chat_invite;
 // The C ABI over the session-owned HxMemberModel +
 // the M1 nick completion (hx_member_model_* / hx_nick_complete).
-pub mod chat_members;
 // HxConversation — the Rust per-chat model that replaces the C struct chat
 // (cid + subject + owned HxMemberModel + opaque view pointer).
-pub mod conversation;
 // Private Message content — create_msgwin builds the PM tab's content
 // tree (output frame, input + emoji, recipient info pane) in gtk4-rs around
 // the C create_msg model/leaf widgets. The msgwin struct + chat_tabs + wire

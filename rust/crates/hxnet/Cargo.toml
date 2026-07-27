@@ -11,6 +11,11 @@ publish = false
 # the C binary. The rlib stays for cross-crate Rust consumers (the
 # integration tests, and R3.3.c+ that builds on the safe Rust API).
 [lib]
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib exists
+# only for tests/meson.build, whose Tier 1/2 targets link this crate
+# directly to stay GTK-free — they cannot link the full gtkhx-ffi archive
+# without dragging in GTK/GStreamer and the C symbols only the binary has.
 crate-type = ["staticlib", "rlib"]
 
 [features]
@@ -22,6 +27,7 @@ crate-type = ["staticlib", "rlib"]
 socks = ["dep:tokio-socks"]
 
 [dependencies]
+hxcrypto = { path = "../hxcrypto" }
 hotline-proto = { path = "../hotline-proto" }
 # xfer module (W1): the file-transfer copy loop moved off C's file_recv_one.
 # hxfiles-xfer is the FFO/FILP fork-header codec (native ffo::*); hxhfs is the
@@ -34,13 +40,10 @@ hxhfs = { path = "../hxhfs" }
 # Both crates already live in the workspace and are linked into
 # the C binary via their own staticlibs — bringing them in as
 # rlib deps here doesn't change the link surface.
-hxcrypto-stream = { path = "../hxcrypto-stream" }
-hxcrypto-aead = { path = "../hxcrypto-aead" }
 # R3.3.e-4g: HopeBlowfishStream needs HMAC iteration to mirror
 # the legacy cipher_change_decode_key / cipher_change_encode_key
 # rekey rotation. We call the safe inner helper directly rather
 # than the C-shaped gtkhx_hmac_xxx wrapper.
-hxcrypto-hash = { path = "../hxcrypto-hash" }
 # Phase F-2 (post-HOPE cipher transition): the AEAD key
 # derivation uses HKDF-SHA256 directly. hxcrypto-aead has the
 # same HKDF helper internally but doesn't expose it; pulling

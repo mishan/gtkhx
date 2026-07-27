@@ -8,10 +8,9 @@ description = "Phase R5: voice-chat wire-out senders (hx_send_voice_*), the Rust
 publish = false
 
 [lib]
-# staticlib: the C side (rcv.c) + the sibling gtkhx-ui voice modules link the
-#            hx_send_voice_* symbols this crate exports.
-# rlib:      lets a fully-Rust voice stack call the senders directly later.
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 [dependencies]
 # glib for the gboolean ABI + g_debug logging. Same workspace pin.

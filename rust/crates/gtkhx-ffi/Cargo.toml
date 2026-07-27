@@ -1,0 +1,71 @@
+[package]
+rust-version.workspace = true
+name = "gtkhx-ffi"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Single-archive staticlib façade — bundles every FFI-exporting GtkHx crate into one .a for the C link."
+publish = false
+
+# The workspace's ONLY staticlib. Every other member is an rlib; this crate
+# pulls them all in and rustc bundles their objects (including their
+# `#[no_mangle]` C ABI symbols) into one archive. See src/lib.rs for why.
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
+hxcrypto = { path = "../hxcrypto" }
+hxhandlers = { path = "../hxhandlers" }
+hxmodel = { path = "../hxmodel" }
+# --- GObject / UI layer ---
+gtkhx-ui = { path = "../gtkhx-ui" }
+
+# --- protocol core ---
+hotline-proto = { path = "../hotline-proto" }
+hxnet = { path = "../hxnet" }
+hxbridge = { path = "../hxbridge", features = ["runtime"] }
+
+# --- crypto / compression ---
+
+# --- receive-side handlers ---
+
+# --- send-side handlers ---
+
+# --- models ---
+
+# --- per-session state owners ---
+hxtask = { path = "../hxtask" }
+
+# --- leaf utilities ---
+hxbookmarks = { path = "../hxbookmarks" }
+hxfiles-xfer = { path = "../hxfiles-xfer" }
+hxhfs = { path = "../hxhfs" }
+hx-image-decode = { path = "../hx-image-decode" }
+hxmacres = { path = "../hxmacres" }
+hxsound = { path = "../hxsound" }
+hxtext = { path = "../hxtext" }
+hxtls-trust = { path = "../hxtls-trust" }
+
+# --- voice (gated by -Dvoice, see rust/meson.build) ---
+hxvoice = { path = "../hxvoice", optional = true }
+hxvoice-model = { path = "../hxvoice-model", optional = true }
+hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
+hxvoice-send = { path = "../hxvoice-send", optional = true }
+
+[features]
+# No defaults on purpose. The glycin-v1 build path passes cargo's
+# workspace-wide `--no-default-features`; keeping this crate's default set
+# empty means that flag can never silently drop something load-bearing here.
+default = []
+
+# Mirrors the meson `-Dvoice` gate. Pulls in the four voice crates and turns
+# on gtkhx-ui's own voice modules, so meson passes a single
+# `--features gtkhx-ffi/voice` instead of gating each crate separately.
+voice = [
+    "dep:hxvoice",
+    "dep:hxvoice-model",
+    "dep:hxvoice-runtime",
+    "dep:hxvoice-send",
+    "gtkhx-ui/voice",
+]

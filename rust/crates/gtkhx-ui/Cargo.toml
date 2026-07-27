@@ -8,29 +8,20 @@ description = "Phase R5: GtkHx window UIs in gtk4-rs (one module per window)"
 publish = false
 
 [lib]
-# staticlib: the C side links the FFI symbols this crate exports — each
-#            ported window's public entry points that its deleted
-#            src/<window>.c used to provide. The Tracker window (first
-#            module) exports create_tracker_window, tracker_batch_begin,
-#            tracker_server_create, tracker_clear, tracker_search_refresh.
-#            Same leaf-up "C resolves Rust's externs at final link" shape
-#            the R4 crates use: this staticlib has undefined references to
-#            the not-yet-ported C helpers it calls (the gtkhx_* util
-#            helpers, the bookmark API, the connect dialog, the
-#            tracker_bridge.c session/prefs shim, hx_tracker_list_async,
-#            and hx_tracker_v3_meta_copy/_free from gtkhx-boxed) which the
-#            linking C target resolves.
-# rlib:      lets later work share helpers if useful; nothing consumes it
-#            as an rlib today.
-#
-# ONE crate for all Phase R5 windows (not one crate per window): the
-# windows are tightly interrelated (they open each other's dialogs) and
-# share infrastructure — the session/prefs C bridge, the `tr` gettext
-# helper, the GtkColumnView list-model idiom, the gtkhx-boxed payloads.
-# One gtk4-rs link unit; each window is a module under src/.
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 [dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
+hxhandlers = { path = "../hxhandlers" }
+hxmodel = { path = "../hxmodel" }
+hxtext = { path = "../hxtext" }
+hx-image-decode = { path = "../hx-image-decode" }
+hxvoice-model = { path = "../hxvoice-model", optional = true }
+hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
+hxvoice-send = { path = "../hxvoice-send", optional = true }
+hxtls-trust = { path = "../hxtls-trust" }
 # First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
 # pinned in the workspace (rust/Cargo.toml, gtk-rs-core 0.21 family) and
 # compiled behind hxbridge's `voice` feature; this crate is the first to
@@ -66,8 +57,6 @@ hotline-proto = { path = "../hotline-proto" }
 # M2 wire-up (Option A): the user list owns an authoritative HxMemberModel
 # (membership as a gio::ListModel) built from hxchat_model::Member data. Pure
 # Rust (glib/gio only, no extra C surface) — rides in gtkhx-ui's archive.
-hxchat-model = { path = "../hxchat-model" }
-hxmember-model = { path = "../hxmember-model" }
 # Bookmark model + TOML persistence + legacy HTsc import/export. The Connect
 # and Bookmarks dialogs call it directly (no C bookmark code remains).
 hxbookmarks = { path = "../hxbookmarks" }
@@ -88,4 +77,4 @@ hxbookmarks = { path = "../hxbookmarks" }
 #     off the voice_panel_* symbols are simply absent. That's fine — every C
 #     call site (chat.c / users_bridge.c / gtkutil.c) is itself #ifdef
 #     HAVE_VOICE, so nothing references them in a voice-off build.
-voice = []
+voice = ["dep:hxvoice-model", "dep:hxvoice-runtime", "dep:hxvoice-send"]

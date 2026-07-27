@@ -6,12 +6,16 @@
 # archives that src/meson.build links into the gtkhx executable.
 #
 # Current crates:
-#   hxcrypto-hash   — HMAC/MD5/SHA1/SHA256 (replaces src/hmac.c)
-#   hxcrypto-stream — Blowfish OFB-64 (replaces src/cipher.c primitives)
-#   hxcrypto-aead   — ChaCha20-Poly1305 + HKDF-SHA256 (replaces
-#                     src/cipher_aead.c primitives)
-#   hxcompress      — GZIP / LZ4 / ZSTD streaming (replaces src/compress.c)
+#   hxcrypto        — HOPE crypto + transport compression (hash / stream /
+#                     aead / compress; four crates before step 3).
 #   hotline-proto   — Phase R2 wire protocol parsers + builders.
+#   gtkhx-core      — the extern-free GObject layer (GtkhxSession + its boxed
+#                     payloads + htlc_conn). Must stay extern-free: the Tier 2
+#                     proto tests link its archive alone. See its lib.rs.
+#   hxhandlers      — the receive/send protocol handler layer (ten crates
+#                     before step 3).
+#   hxmodel         — the client-side model layer (chat, membership, news,
+#                     files, conversation).
 #   hxbridge        — Phase R3.0 Rust ↔ GLib bridge (C-owned GObject
 #                     wrapping + signal emit). Lifetime model documented
 #                     in docs/rust/glib-interop.md.
@@ -26,17 +30,23 @@
 #                     no_std-friendly (hashbrown is the only dep);
 #                     deliberately has no GLib / GStreamer / GTK
 #                     surface so `cargo test -p hxvoice` runs in
-#                     any CI container. Consumed by hxvoice-runtime,
-#                     not linked into the C binary directly — hence
-#                     no rust_hxvoice_dep declared below.
+#                     any CI container. Consumed by hxvoice-runtime.
+#   gtkhx-ffi       — the single-archive façade: no code of its own,
+#                     just a dependency edge on every FFI-exporting
+#                     crate so rustc bundles them into one .a for the
+#                     C link. See its src/lib.rs.
 #
-# Each FFI-exposed crate is a staticlib that the C side wraps with a
-# thin dispatcher. (hxvoice above is the exception — pure Rust,
-# rlib-only, consumed by hxvoice-runtime as a workspace dep with no
-# C-side surface at all.) FFI signatures are hand-declared `extern`
-# blocks in the relevant C TU rather than cbindgen-generated headers
-# — drift surfaces at link time as undefined symbols, which is
-# enough for opaque-pointer APIs and keeps the build simpler.
+# Crate-type policy: every member is an `rlib`, and `gtkhx-ffi` — the
+# one crate the binary links — bundles the whole rlib graph into a
+# single libgtkhx_ffi.a. Sixteen crates additionally keep a standalone
+# staticlib because tests/meson.build links them directly to stay
+# GTK-free; see the rust_gtkhx_ffi_dep block at the bottom of this file
+# for why both copies can coexist safely.
+#
+# FFI signatures are hand-declared `extern` blocks in the relevant C TU
+# rather than cbindgen-generated headers — drift surfaces at link time
+# as undefined symbols, which is enough for opaque-pointer APIs and
+# keeps the build simpler.
 #
 # Two crates retired at the R2 closeout: hxrand (whose only purpose was
 # wrapping getrandom(2) — the C code calls getrandom() directly via the
@@ -47,11 +57,15 @@ cargo = find_program('cargo')
 
 # Collect all .rs sources so Meson knows to re-run when they change.
 rust_sources = files(
-  'crates/hxcrypto-hash/src/lib.rs',
-  'crates/hxcrypto-stream/src/lib.rs',
-  'crates/hxcrypto-stream/src/blowfish_ofb.rs',
-  'crates/hxcrypto-aead/src/lib.rs',
-  'crates/hxcompress/src/lib.rs',
+  # The single-archive façade (see the rust_gtkhx_ffi_dep block below).
+  'crates/gtkhx-ffi/src/lib.rs',
+  'crates/hxcrypto/src/lib.rs',
+  'crates/hxcrypto/src/hash.rs',
+  'crates/hxcrypto/src/stream.rs',
+  'crates/hxcrypto/src/stream/blowfish_ofb.rs',
+  'crates/hxcrypto/src/aead.rs',
+  'crates/hxcrypto/src/compress.rs',
+  'crates/hxcrypto/Cargo.toml',
   'crates/hotline-proto/src/lib.rs',
   'crates/hotline-proto/src/wire.rs',
   'crates/hotline-proto/src/messages.rs',
@@ -67,29 +81,20 @@ rust_sources = files(
   'crates/hxbridge/src/blocking.rs',
   'crates/hxbridge/src/channel.rs',
   'crates/hxbridge/src/runtime.rs',
-  # Phase R4 — GtkhxSession as a Rust glib::subclass GObject (replaces
-  # src/gtkhx_session.c). References the C boxed GTypes via FFI; R4.2
-  # re-hosted all three boxed payload types (HxMsgEvent, HxChatEvent,
-  # HxTrackerServer) into the gtkhx-boxed crate, so this crate's externs
-  # now resolve against gtkhx-boxed instead of proto_helpers.c /
-  # tracker_event.c.
-  'crates/gtkhx-session/src/lib.rs',
-  'crates/gtkhx-session/src/chat_registry.rs',
-  # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent, HxChatEvent
-  # + HxChatMedia, HxTrackerServer + HxTrackerV3Meta), self-contained
-  # (glib only) so proto unit tests can pull their _copy/_free without
-  # dragging gtkhx-session's C externs.
-  'crates/gtkhx-boxed/src/lib.rs',
-  'crates/gtkhx-boxed/src/msg.rs',
-  'crates/gtkhx-boxed/src/chat.rs',
-  'crates/gtkhx-boxed/src/media_table.rs',
-  'crates/gtkhx-boxed/src/tracker.rs',
-  # Phase R5 — gtkhx-ui: the window UIs in gtk4-rs (first gtk4-rs UI
-  # crate). One module per ported window; the Tracker window is the first.
+  # Phase-3 consolidation: the extern-free GObject layer (see its lib.rs).
+  'crates/gtkhx-core/src/lib.rs',
+  'crates/gtkhx-core/src/session.rs',
+  'crates/gtkhx-core/src/session/chat_registry.rs',
+  'crates/gtkhx-core/src/boxed.rs',
+  'crates/gtkhx-core/src/boxed/msg.rs',
+  'crates/gtkhx-core/src/boxed/chat.rs',
+  'crates/gtkhx-core/src/boxed/media_table.rs',
+  'crates/gtkhx-core/src/boxed/tracker.rs',
+  'crates/gtkhx-core/src/conn.rs',
+  'crates/gtkhx-core/Cargo.toml',
   'crates/gtkhx-ui/src/lib.rs',
   'crates/gtkhx-ui/src/ffi.rs',
   'crates/gtkhx-ui/src/hl_date.rs',
-  'crates/gtkhx-ui/src/conversation.rs',
   'crates/gtkhx-ui/src/tr.rs',
   'crates/gtkhx-ui/src/dock.rs',
   'crates/gtkhx-ui/src/about.rs',
@@ -115,7 +120,6 @@ rust_sources = files(
   'crates/gtkhx-ui/src/chat_tabs.rs',
   'crates/gtkhx-ui/src/chat_input.rs',
   'crates/gtkhx-ui/src/chat_invite.rs',
-  'crates/gtkhx-ui/src/chat_members.rs',
   'crates/gtkhx-ui/src/msg.rs',
   'crates/gtkhx-ui/src/files.rs',
   'crates/gtkhx-ui/src/pchat.rs',
@@ -156,25 +160,6 @@ rust_sources = files(
   'crates/hxvoice-send/src/tests.rs',
   'crates/hxtext/src/lib.rs',
   'crates/hxtext/src/tests.rs',
-  'crates/hxchat-send/src/lib.rs',
-  'crates/hxchat-send/src/tests.rs',
-  'crates/hxnews-send/src/lib.rs',
-  'crates/hxnews-send/src/tests.rs',
-  'crates/hxnews-recv/src/lib.rs',
-  'crates/hxchat-model/src/lib.rs',
-  'crates/hxchat-model/src/tests.rs',
-  'crates/hxchat-model/src/input_history.rs',
-  'crates/hxmember-model/src/lib.rs',
-  'crates/hxmember-model/src/tests.rs',
-  'crates/hxnews-model/src/lib.rs',
-  'crates/hxnews-model/src/tests.rs',
-  'crates/hxnews-model/src/node.rs',
-  'crates/hxnews-model/src/node_tests.rs',
-  'crates/hxfiles-model/src/lib.rs',
-  'crates/hxfiles-model/src/ffi.rs',
-  'crates/hxfiles-model/src/remote_listing.rs',
-  'crates/hxfiles-entry/src/lib.rs',
-  'crates/hxfiles-entry/src/populate.rs',
   'crates/hxbookmarks/src/lib.rs',
   'crates/hxbookmarks/src/cipher.rs',
   'crates/hxbookmarks/src/legacy.rs',
@@ -187,28 +172,47 @@ rust_sources = files(
   'crates/hxhfs/src/hfs/tests.rs',
   'crates/hxhfs/src/suffix.rs',
   'crates/hxhfs/src/ffi.rs',
+  # Phase-3 consolidation: the five former model crates, one module each.
+  # Phase-3 consolidation: the ten former send/recv crates, one module each.
+  'crates/hxhandlers/src/lib.rs',
+  'crates/hxhandlers/src/recv.rs',
+  'crates/hxhandlers/src/send.rs',
+  'crates/hxhandlers/src/recv/agreement.rs',
+  'crates/hxhandlers/src/recv/chat.rs',
+  'crates/hxhandlers/src/recv/files.rs',
+  'crates/hxhandlers/src/recv/icon.rs',
+  'crates/hxhandlers/src/recv/msg.rs',
+  'crates/hxhandlers/src/recv/news.rs',
+  'crates/hxhandlers/src/recv/user.rs',
+  'crates/hxhandlers/src/recv/xfer.rs',
+  'crates/hxhandlers/src/send/chat.rs',
+  'crates/hxhandlers/src/send/news.rs',
+  'crates/hxhandlers/src/recv/news/carrier.rs',
+  'crates/hxhandlers/Cargo.toml',
+  'crates/hxmodel/src/lib.rs',
+  'crates/hxmodel/src/chat.rs',
+  'crates/hxmodel/src/chat_members.rs',
+  'crates/hxmodel/src/conversation.rs',
+  'crates/hxmodel/src/chat/input_history.rs',
+  'crates/hxmodel/src/member.rs',
+  'crates/hxmodel/src/news.rs',
+  'crates/hxmodel/src/news/node.rs',
+  'crates/hxmodel/src/files.rs',
+  'crates/hxmodel/src/files/ffi.rs',
+  'crates/hxmodel/src/files/remote_listing.rs',
+  'crates/hxmodel/src/files_entry.rs',
+  'crates/hxmodel/src/files_entry/populate.rs',
   'crates/hxmacres/src/lib.rs',
+  'crates/hxmacres/src/cicn.rs',
+  'crates/hxmacres/src/cicn/ffi.rs',
+  'crates/hxmacres/src/cicn/palette.rs',
   'crates/hxmacres/src/ffi.rs',
   'crates/hxmacres/src/tests.rs',
   'crates/hxtask/src/lib.rs',
   'crates/hxtask/src/tests.rs',
-  'crates/hxconn/src/lib.rs',
-  'crates/hxconn/src/tests.rs',
   'crates/hxtls-trust/src/lib.rs',
   'crates/hxtls-trust/src/ffi.rs',
   'crates/hxtls-trust/src/tests.rs',
-  'crates/hxchat-recv/src/lib.rs',
-  'crates/hxchat-recv/src/tests.rs',
-  'crates/hxicon-recv/src/lib.rs',
-  'crates/hxicon-recv/src/tests.rs',
-  'crates/hxmsg-recv/src/lib.rs',
-  'crates/hxmsg-recv/src/tests.rs',
-  'crates/hxagreement-recv/src/lib.rs',
-  'crates/hxagreement-recv/src/tests.rs',
-  'crates/hxuser-recv/src/lib.rs',
-  'crates/hxuser-recv/src/tests.rs',
-  'crates/hxxfer-recv/src/lib.rs',
-  'crates/hxxfer-recv/src/tests.rs',
   'crates/hxvoice-runtime/src/lib.rs',
   'crates/hxvoice-runtime/src/audio.rs',
   'crates/hxvoice-runtime/src/runtime.rs',
@@ -228,40 +232,20 @@ rust_sources = files(
   'crates/hxsound/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
-  'crates/hxcrypto-hash/Cargo.toml',
-  'crates/hxcrypto-stream/Cargo.toml',
-  'crates/hxcrypto-aead/Cargo.toml',
-  'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
-  'crates/gtkhx-session/Cargo.toml',
-  'crates/gtkhx-boxed/Cargo.toml',
   'crates/gtkhx-ui/Cargo.toml',
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
   'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
-  'crates/hxchat-send/Cargo.toml',
-  'crates/hxnews-send/Cargo.toml',
-  'crates/hxnews-recv/Cargo.toml',
-  'crates/hxchat-model/Cargo.toml',
-  'crates/hxmember-model/Cargo.toml',
-  'crates/hxnews-model/Cargo.toml',
-  'crates/hxfiles-model/Cargo.toml',
-  'crates/hxfiles-entry/Cargo.toml',
+  'crates/hxmodel/Cargo.toml',
   'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
-  'crates/hxconn/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
-  'crates/hxchat-recv/Cargo.toml',
-  'crates/hxicon-recv/Cargo.toml',
-  'crates/hxmsg-recv/Cargo.toml',
-  'crates/hxagreement-recv/Cargo.toml',
-  'crates/hxuser-recv/Cargo.toml',
-  'crates/hxxfer-recv/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
   'crates/feature-unify/Cargo.toml',
@@ -387,13 +371,16 @@ endif
 # `--workspace`.
 if voice_enabled
   cargo_voice_args = ''
-  # Turn on gtkhx-ui's `voice` feature so the user-list voice-indicator
-  # column + the per-chat voice toolbar compile their real (voice-model /
-  # runtime / wire-sender-backed) implementations instead of the NULL/no-op
-  # stubs. Package-qualified feature syntax, same shape as cargo_features
-  # above; valid at the virtual-workspace root the way the existing
-  # hxbridge/runtime + hxnet/socks entries already are.
-  cargo_features = cargo_features + ',gtkhx-ui/voice'
+  # Turn on gtkhx-ffi's `voice` feature. That pulls the four voice crates
+  # into the façade archive AND enables gtkhx-ui's own `voice` feature
+  # transitively, so the user-list voice-indicator column + the per-chat
+  # voice toolbar compile their real (voice-model / runtime /
+  # wire-sender-backed) implementations instead of the NULL/no-op stubs.
+  # One flag now drives the whole subsystem; before the façade this had to
+  # name gtkhx-ui directly and rely on the voice crates being separate
+  # archives on the link line. Package-qualified feature syntax, same shape
+  # as the existing hxbridge/runtime + hxnet/socks entries.
+  cargo_features = cargo_features + ',gtkhx-ffi/voice'
 else
   cargo_voice_args = '--workspace --exclude hxvoice --exclude hxvoice-runtime --exclude hxvoice-model --exclude hxvoice-send'
 endif
@@ -436,40 +423,16 @@ rust_build = custom_target('rust-workspace',
   console : true,
 )
 
-# Crypto hash (Phase R1; will replace src/hmac.c when wired through).
-rust_hxcrypto_hash_dep = declare_dependency(
+# HOPE crypto + transport compression (hash / stream / aead / compress).
+# One crate since the step 3 consolidation; the four former archives
+# (-lhxcrypto_hash, -lhxcrypto_stream, -lhxcrypto_aead, -lhxcompress) are
+# now -lhxcrypto. Kept as a standalone staticlib because the Tier 1/2
+# crypto + HOPE tests link it directly, GTK-free.
+rust_hxcrypto_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxcrypto_hash',
-  ],
-)
-
-# Stream cipher (Phase R1; will replace src/cipher.c Blowfish path
-# when wired through).
-rust_hxcrypto_stream_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcrypto_stream',
-  ],
-)
-
-# AEAD (Phase R1; will replace src/cipher_aead.c when wired through).
-rust_hxcrypto_aead_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcrypto_aead',
-  ],
-)
-
-# Compression (Phase R1; will replace src/compress.c when wired through).
-rust_hxcompress_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcompress',
+    '-lhxcrypto',
   ],
 )
 
@@ -487,85 +450,6 @@ rust_hotline_proto_dep = declare_dependency(
   ],
 )
 
-# hxchat-send (Phase R5) — the Rust port of chat.c's send path. Exports the
-# hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join / hx_part_chat /
-# hx_change_subject C ABI the chat.h callers link against; implemented over
-# hotline-proto's native chat builders. Unconditional (chat is always built),
-# so it's part of the default --workspace cargo build.
-rust_hxchat_send_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxchat_send',
-  ],
-)
-
-# hxnews-send (Phase R5 N2c) — the news RPC senders (Rust port of news15.c's
-# 1.5 threaded senders + news.c's flat hx_get_news / hx_post_news). Exports the
-# hx_news15_* / hx_get_news / hx_post_news C ABI its callers link against, over
-# hotline-proto's native news builders. Unconditional (news is always built).
-rust_hxnews_send_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxnews_send',
-  ],
-)
-
-# hxnews-recv — the 1.5 news receive handlers (rcv_task_news* bodies moved out
-# of rcv.c). hxnews-send's task_new calls resolve rcv_task_newscat_list against
-# this, so it must follow rust_hxnews_send_dep on the link line (consumer before
-# provider). Parses via hotline-proto's C ABI + emits via gtkhx-session; all
-# resolved at the final C link.
-rust_hxnews_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxnews_recv',
-  ],
-)
-
-# hxnews-model (Phase R5 N2a/N2b) — the unit-tested model layer for the 1.5 news
-# browser: the pure post-threading layout (hx_news_thread_parent_indices, which
-# news_browser.c::catlist_thread_into links against) plus the HxNewsNode
-# glib::subclass GObject (hx_news_node_*). glib + gio only (no gtk, no C
-# externs), so `cargo test -p hxnews-model` runs headless. Unconditional (news
-# is always built), so it's part of the default --workspace cargo build.
-rust_hxnews_model_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxnews_model',
-  ],
-)
-
-# Files-subsystem model (see docs/rust/files-migration-scope.md).
-# Pure logic, no glib/gtk — `cargo test -p hxfiles-model` runs headless.
-# Exposes the `gtkhx_files_*` FFI surface (currently just the file-type →
-# icon-id map behind src/files.c::icon_of_ftype_and_name). Unconditional.
-rust_hxfiles_model_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxfiles_model',
-  ],
-)
-
-# HxFileEntry GObject (see docs/rust/files-migration-scope.md). The
-# files-browser row model, now a Rust glib::subclass type exporting the C
-# ABI the deleted files_entry.c GObject provided: hx_file_entry_get_type,
-# hx_file_entry_new, and the six field getters. The two presentation
-# formatters (hx_file_entry_format_size / _modified) stay in C. Pulls in
-# glib/gobject (already C-side deps), no new system-library surface;
-# `cargo test -p hxfiles-entry` runs headless. Unconditional.
-rust_hxfiles_entry_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxfiles_entry',
-  ],
-)
-
 # Files-subsystem transfer codec (see docs/rust/files-migration-scope.md).
 # Pure logic, no glib/gtk — `cargo test -p hxfiles-xfer` runs headless.
 # Exposes the `gtkhx_ffo_*` FFI surface (the FFO fork-header + info-block
@@ -578,49 +462,19 @@ rust_hxfiles_xfer_dep = declare_dependency(
   ],
 )
 
-# cicn colour-icon decoder (Rust port of cicn.c's decode path). Produces RGBA;
-# the thin cicn.c wrapper calls hxcicn_decode and wraps it in a GdkPixbuf.
-rust_hxcicn_dep = declare_dependency(
+# The GObject layer: the GtkhxSession signal hub, its boxed payload types,
+# and the per-connection state. One crate since the step 3 consolidation —
+# -lgtkhx_session / -lgtkhx_boxed / -lhxconn are now -lgtkhx_core.
+#
+# Every module in it is free of undefined C externs, which is load-bearing:
+# the Tier 2 proto tests link THIS archive on its own (not the gtkhx-ffi
+# façade), so anything extern-ful merged in would break them. hxtask is the
+# same layer but has ten C externs, which is exactly why it stays separate.
+rust_gtkhx_core_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxcicn',
-  ],
-)
-             
-# Mac resource-fork parser (Rust port of macres.c). Provides the macres_file_*
-# C ABI the icon loaders (gtkhx.c / options.c / cicn.c) link against.
-rust_hxmacres_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxmacres',
-  ],
-)
-
-# Per-session transaction-task table (Rust port of tasks_table.c + the struct
-# task model in tasks.c). Exposes the tasks_table_new / tasks_init / task_new /
-# task_with_trans / task_delete C ABI the ~14 caller files + rcv.c's dispatcher
-# link against; keeps sess->tasks a real GHashTable and reaches C session/htlc
-# fields via tasks_bridge.c. glib-only, so `cargo test -p hxtask` runs headless
-# against in-crate doubles. See docs/rust/network-untangling-scope.md.
-rust_hxtask_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxtask',
-  ],
-)
-
-# hxconn — owner of struct htlc_conn (the E1c flip of network-endgame.md).
-# Exports the hx_conn_* accessor C ABI (was hxconn.c) + the hx_conn_new /
-# _reset / _free lifecycle. The whole C tree links it: every former hxconn.c
-# caller. glib-only (gboolean ABI), so `cargo test -p hxconn` runs headless.
-rust_hxconn_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxconn',
+    '-lgtkhx_core',
   ],
 )
 
@@ -635,83 +489,6 @@ rust_hxtls_trust_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtls_trust',
-  ],
-)
-
-# Chat-domain receive handlers (chat-invite ignore-gate + GtkhxSession emit,
-# ported from rcv.c). std-only C ABI (hx_chat_*_recv); `cargo test -p hxchat-recv`
-# runs headless against recording doubles. See docs/rust/network-untangling-scope.md.
-rust_hxchat_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxchat_recv',
-  ],
-)
-
-# GIF-icon receive path (ICON_CHANGE parse + gif-icon-changed emit, ported from
-# rcv.c). std-only C ABI (hx_icon_change_recv); `cargo test -p hxicon-recv` runs
-# headless against recording doubles. See docs/rust/network-untangling-scope.md.
-rust_hxicon_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxicon_recv',
-  ],
-)
-
-# Private-message receive path (MSG / MSG_BROADCAST): ignore-gate + the boxed
-# `msg` signal emit, ported from rcv.c. std-only C ABI (hx_msg_recv); `cargo
-# test -p hxmsg-recv` runs headless. See docs/rust/network-untangling-scope.md.
-rust_hxmsg_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxmsg_recv',
-  ],
-)
-
-# Agreement receive path (auto-agree vs show-and-emit), ported from rcv.c.
-# std-only C ABI (hx_agreement_recv); `cargo test -p hxagreement-recv` runs
-# headless. See docs/rust/network-untangling-scope.md.
-rust_hxagreement_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxagreement_recv',
-  ],
-)
-
-# User-roster receive handlers (user-change emit routing + user-part gate/emit,
-# ported from rcv.c). std-only C ABI (hx_user_change_recv / hx_user_part_recv);
-# `cargo test -p hxuser-recv` runs headless. See docs/rust/network-untangling-scope.md.
-rust_hxuser_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxuser_recv',
-  ],
-)
-
-# File-transfer reply tail (announce queue position + start when ready), ported
-# from rcv.c. std-only C ABI (hx_xfer_announce); `cargo test -p hxxfer-recv` runs
-# headless. See docs/rust/network-untangling-scope.md.
-rust_hxxfer_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxxfer_recv',
-  ],
-)
-
-# FILE_LIST receive handler (rcv_task_file_list) + the Rust-owned struct
-# cached_filelist (hx_cfl_* accessor facade). std-only C ABI; `cargo test -p
-# hxfiles-recv` runs headless. See docs/rust/network-endgame.md.
-rust_hxfiles_recv_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxfiles_recv',
   ],
 )
 
@@ -761,43 +538,6 @@ rust_hxbridge_dep = declare_dependency(
   ],
 )
 
-# GtkhxSession GObject (Phase R4). The model→view signal hub, now a
-# Rust glib::subclass type. Exports the C ABI the deleted
-# src/gtkhx_session.c used to: gtkhx_session_get_type,
-# gtkhx_session_get_default, and one gtkhx_session_emit_* wrapper per signal.
-# The staticlib has undefined references to the C boxed-type accessors
-# (hx_chat_event_get_type / hx_msg_event_get_type /
-# hx_tracker_server_get_type) which the linking C target resolves from
-# proto_helpers.c / tracker_event.c — same leaf-up "C resolves Rust's
-# externs at final link" shape the other crates use. Pulls in glib/
-# gobject (already C-side deps), no new system-library surface.
-rust_gtkhx_session_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lgtkhx_session',
-  ],
-)
-
-# Boxed signal-payload value-types (Phase R4.2). gtkhx-boxed holds the
-# GObject boxed types carried by GtkhxSession signals — all three:
-# HxMsgEvent (msg.rs), HxChatEvent + HxChatMedia (chat.rs), and
-# HxTrackerServer + HxTrackerV3Meta (tracker.rs). It exports the C ABI
-# the deleted G_DEFINE_BOXED_TYPE registrations in proto_helpers.c /
-# tracker_event.c / tracker_v3_meta.c used to (hx_*_get_type / _copy /
-# _free). Self-contained (glib only): a C target that pulls a _copy /
-# _free symbol links this archive alone without dragging gtkhx-session's
-# still-C boxed externs in via codegen-unit merging. Both the gtkhx
-# binary and the proto unit tests that link the matching producer
-# (proto_helpers.c) carry this dep.
-rust_gtkhx_boxed_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lgtkhx_boxed',
-  ],
-)
-
 # hxtext (Phase R5) — the Rust port of src/text_util.c. Exports the four
 # gtkhx_text_* C ABI symbols (to_utf8 / for_wire / the emoji-shortcode
 # toggle) the ~16 C callers link against; implemented over hotline-proto's
@@ -808,26 +548,6 @@ rust_hxtext_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxtext',
-  ],
-)
-
-# gtkhx-ui GtkHx window UIs (Phase R5). The first gtk4-rs UI crate: each
-# ported window exports the C ABI its deleted src/<window>.c provided.
-# The Tracker window (first module) exports create_tracker_window /
-# tracker_batch_begin / tracker_server_create / tracker_clear /
-# tracker_search_refresh, which the C callers (toolbar.c, gtkhx.c signal
-# adapters, options.c) resolve against here. The staticlib has undefined
-# refs to the gtkhx_* util helpers, the bookmark API, the connect dialog,
-# the tracker_bridge.c session/prefs shim, and hx_tracker_v3_meta_copy/
-# _free (gtkhx-boxed) — all resolved at final link by the C objects /
-# the gtkhx-boxed archive (listed AFTER this one in src/meson.build).
-# Pulls in libgtk-4 / libadwaita-1 / libgio-2.0, already C-side deps, so
-# the system-library surface doesn't grow.
-rust_gtkhx_ui_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lgtkhx_ui',
   ],
 )
 
@@ -875,33 +595,6 @@ rust_hxvoice_runtime_dep = declare_dependency(
   ],
 )
 
-# Per-uid voice presence model (HxVoiceModel), the Rust port of
-# src/voice_model.c. Same lazy-dependency treatment as hxvoice_runtime:
-# declared unconditionally but only linked when voice_enabled (src/meson.build),
-# which is the same condition under which cargo built the staticlib (the crate
-# is in the --exclude list for the voice-off build above). The gtkhx-ui `voice`
-# modules + rcv.c / gtkhx.c / network.c / users.c resolve hx_voice_model_*
-# against this archive.
-rust_hxvoice_model_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxvoice_model',
-  ],
-)
-
-# Voice wire-out senders (hx_send_voice_*), the Rust port of src/voice.c.
-# Same lazy voice-gated treatment: excluded from the voice-off cargo build,
-# linked into src/gtkhx only when voice_enabled. rcv.c + the gtkhx-ui voice
-# modules resolve hx_send_voice_* against this archive.
-rust_hxvoice_send_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxvoice_send',
-  ],
-)
-
 # Image decoder (glycin migration G.1+). G.1 ships the sniff layer +
 # FFI scaffold. G.2 lands the glycin loader (the actual decode) plus
 # the async ripple in the C consumers (inline_media_dialog.c,
@@ -942,11 +635,38 @@ elif host_machine.system() == 'windows'
     _hxsound_sys_deps += cc.find_library(_win_lib)
   endforeach
 endif
-rust_hxsound_dep = declare_dependency(
+
+# ---------------------------------------------------------------------------
+# The single archive the gtkhx binary links.
+# ---------------------------------------------------------------------------
+#
+# `gtkhx-ffi` names every FFI-exporting crate as a dependency, so rustc bundles
+# the whole rlib graph — and every `#[no_mangle]` C ABI symbol — into one
+# libgtkhx_ffi.a. See rust/crates/gtkhx-ffi/src/lib.rs for the full rationale.
+#
+# This replaces the 20 per-crate declare_dependency blocks that used to live
+# here and the 37-entry hand-ordered rust_deps list in src/meson.build. Static
+# archives resolve left-to-right, so that list had to place every crate ahead
+# of the crates providing its externs, and each entry carried a comment
+# justifying its position. With one archive there is no order to get wrong,
+# each symbol is defined exactly once, and adding a crate is a Cargo.toml edit
+# with nothing to touch here.
+#
+# The 16 declare_dependency blocks above are NOT dead. tests/meson.build links
+# those crates individually so its Tier 1/2 targets stay GTK-free; they cannot
+# link this archive without pulling in GTK/GStreamer and the C symbols that
+# only the binary defines. Those crates therefore keep a standalone staticlib
+# alongside the rlib gtkhx-ffi bundles. No single link line ever sees both
+# copies, so the duplicate definitions never meet.
+#
+# _hxsound_sys_deps (above) rides along here: hxsound is bundled into this
+# archive, so the binary still needs cpal's ALSA / CoreAudio / WASAPI system
+# libraries on its link line.
+rust_gtkhx_ffi_dep = declare_dependency(
   sources : rust_build,
   dependencies : _hxsound_sys_deps,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxsound',
+    '-lgtkhx_ffi',
   ],
 )

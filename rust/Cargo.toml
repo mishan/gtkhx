@@ -1,38 +1,19 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/hxcrypto-hash",
-    "crates/hxcrypto-stream",
-    "crates/hxcrypto-aead",
-    "crates/hxcompress",
+    "crates/hxcrypto",
     "crates/hotline-proto",
     "crates/hxbridge",
-    "crates/gtkhx-session",
-    "crates/gtkhx-boxed",
+    "crates/gtkhx-core",
     "crates/gtkhx-ui",
-    "crates/hxchat-send",
-    "crates/hxnews-send",
-    "crates/hxnews-recv",
-    "crates/hxchat-model",
-    "crates/hxmember-model",
-    "crates/hxnews-model",
-    "crates/hxfiles-model",
-    "crates/hxfiles-entry",
     "crates/hxfiles-xfer",
     "crates/hxbookmarks",
     "crates/hxhfs",
-    "crates/hxcicn",
     "crates/hxmacres",
+    "crates/hxmodel",
+    "crates/hxhandlers",
     "crates/hxtask",
-    "crates/hxconn",
     "crates/hxtls-trust",
-    "crates/hxchat-recv",
-    "crates/hxicon-recv",
-    "crates/hxmsg-recv",
-    "crates/hxagreement-recv",
-    "crates/hxuser-recv",
-    "crates/hxxfer-recv",
-    "crates/hxfiles-recv",
     "crates/hxnet",
     "crates/hxtext",
     "crates/hxvoice",
@@ -42,6 +23,10 @@ members = [
     "crates/hx-image-decode",
     "crates/feature-unify",
     "crates/hxsound",
+    # The workspace's single staticlib — every other member is an rlib and gets
+    # bundled into libgtkhx_ffi.a through this crate. See its src/lib.rs for the
+    # link-order / duplicate-symbol rationale.
+    "crates/gtkhx-ffi",
 ]
 
 # Shared version pins for the gtk-rs + gstreamer-rs families. Phase R3.0

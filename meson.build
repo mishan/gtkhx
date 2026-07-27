@@ -82,7 +82,7 @@ threads_dep = dependency('threads')
 # Alert-sound playback (src/sound.c) is now the Rust `hxsound` crate
 # (rust/crates/hxsound), which plays WAV files via rodio/cpal on Linux,
 # macOS, and Windows — replacing the Linux-only GSound/libcanberra path. Its
-# per-platform audio system libs are wired to rust_hxsound_dep in
+# per-platform audio system libs are wired to rust_gtkhx_ffi_dep in
 # rust/meson.build.
 
 # Phase 8.B: GStreamer system libraries. The Rust hxvoice-runtime

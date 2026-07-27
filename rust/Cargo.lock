@@ -1764,17 +1764,37 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtkhx-boxed"
+name = "gtkhx-core"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
 ]
 
 [[package]]
-name = "gtkhx-session"
+name = "gtkhx-ffi"
 version = "0.1.0"
 dependencies = [
- "glib 0.21.5",
+ "gtkhx-core",
+ "gtkhx-ui",
+ "hotline-proto",
+ "hx-image-decode",
+ "hxbookmarks",
+ "hxbridge",
+ "hxcrypto",
+ "hxfiles-xfer",
+ "hxhandlers",
+ "hxhfs",
+ "hxmacres",
+ "hxmodel",
+ "hxnet",
+ "hxsound",
+ "hxtask",
+ "hxtext",
+ "hxtls-trust",
+ "hxvoice",
+ "hxvoice-model",
+ "hxvoice-runtime",
+ "hxvoice-send",
 ]
 
 [[package]]
@@ -1785,10 +1805,17 @@ dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
  "gtk4",
+ "gtkhx-core",
  "hotline-proto",
+ "hx-image-decode",
  "hxbookmarks",
- "hxchat-model",
- "hxmember-model",
+ "hxhandlers",
+ "hxmodel",
+ "hxtext",
+ "hxtls-trust",
+ "hxvoice-model",
+ "hxvoice-runtime",
+ "hxvoice-send",
  "libadwaita",
 ]
 
@@ -1921,10 +1948,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxagreement-recv"
-version = "0.1.0"
-
-[[package]]
 name = "hxbookmarks"
 version = "0.1.0"
 dependencies = [
@@ -1950,100 +1973,38 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxchat-model"
-version = "0.1.0"
-
-[[package]]
-name = "hxchat-recv"
-version = "0.1.0"
-dependencies = [
- "hotline-proto",
-]
-
-[[package]]
-name = "hxchat-send"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
- "hotline-proto",
-]
-
-[[package]]
-name = "hxcicn"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
-]
-
-[[package]]
-name = "hxcompress"
-version = "0.1.0"
-dependencies = [
- "flate2",
- "lz4_flex",
- "zstd",
-]
-
-[[package]]
-name = "hxconn"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
-]
-
-[[package]]
-name = "hxcrypto-aead"
-version = "0.1.0"
-dependencies = [
- "chacha20poly1305",
- "hkdf",
- "hmac",
- "sha2",
-]
-
-[[package]]
-name = "hxcrypto-hash"
-version = "0.1.0"
-dependencies = [
- "digest",
- "hmac",
- "md-5",
- "sha1",
- "sha2",
-]
-
-[[package]]
-name = "hxcrypto-stream"
+name = "hxcrypto"
 version = "0.1.0"
 dependencies = [
  "blowfish",
+ "chacha20poly1305",
  "cipher 0.5.2",
-]
-
-[[package]]
-name = "hxfiles-entry"
-version = "0.1.0"
-dependencies = [
- "gio 0.21.5",
- "glib 0.21.5",
- "hotline-proto",
- "hxfiles-model",
-]
-
-[[package]]
-name = "hxfiles-model"
-version = "0.1.0"
-
-[[package]]
-name = "hxfiles-recv"
-version = "0.1.0"
-dependencies = [
- "hotline-proto",
+ "digest",
+ "flate2",
+ "hkdf",
+ "hmac",
+ "lz4_flex",
+ "md-5",
+ "sha1",
+ "sha2",
+ "zstd",
 ]
 
 [[package]]
 name = "hxfiles-xfer"
 version = "0.1.0"
+
+[[package]]
+name = "hxhandlers"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+ "gtkhx-core",
+ "hotline-proto",
+ "hxhfs",
+ "hxmodel",
+ "hxtext",
+]
 
 [[package]]
 name = "hxhfs"
@@ -2053,10 +2014,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxicon-recv"
-version = "0.1.0"
-
-[[package]]
 name = "hxmacres"
 version = "0.1.0"
 dependencies = [
@@ -2064,17 +2021,14 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxmember-model"
+name = "hxmodel"
 version = "0.1.0"
 dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
- "hxchat-model",
+ "gtkhx-core",
+ "hotline-proto",
 ]
-
-[[package]]
-name = "hxmsg-recv"
-version = "0.1.0"
 
 [[package]]
 name = "hxnet"
@@ -2087,9 +2041,7 @@ dependencies = [
  "hkdf",
  "hotline-proto",
  "hxbridge",
- "hxcrypto-aead",
- "hxcrypto-hash",
- "hxcrypto-stream",
+ "hxcrypto",
  "hxfiles-xfer",
  "hxhfs",
  "lz4_flex",
@@ -2100,30 +2052,6 @@ dependencies = [
  "tokio-socks",
  "ureq",
  "zstd",
-]
-
-[[package]]
-name = "hxnews-model"
-version = "0.1.0"
-dependencies = [
- "gio 0.21.5",
- "glib 0.21.5",
- "hotline-proto",
-]
-
-[[package]]
-name = "hxnews-recv"
-version = "0.1.0"
-dependencies = [
- "hotline-proto",
-]
-
-[[package]]
-name = "hxnews-send"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
- "hotline-proto",
 ]
 
 [[package]]
@@ -2139,6 +2067,7 @@ name = "hxtask"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
+ "gtkhx-core",
 ]
 
 [[package]]
@@ -2152,13 +2081,6 @@ dependencies = [
 [[package]]
 name = "hxtls-trust"
 version = "0.1.0"
-
-[[package]]
-name = "hxuser-recv"
-version = "0.1.0"
-dependencies = [
- "hotline-proto",
-]
 
 [[package]]
 name = "hxvoice"
@@ -2194,13 +2116,6 @@ name = "hxvoice-send"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "hotline-proto",
-]
-
-[[package]]
-name = "hxxfer-recv"
-version = "0.1.0"
-dependencies = [
  "hotline-proto",
 ]
 

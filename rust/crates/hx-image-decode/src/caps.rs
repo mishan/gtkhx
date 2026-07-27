@@ -12,6 +12,7 @@
 /// FFI shim passes a `*const HxInlineMediaCaps` directly.
 #[repr(C)]
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct HxInlineMediaCaps {
     pub max_bytes: u32,
     pub max_dimension: u32,

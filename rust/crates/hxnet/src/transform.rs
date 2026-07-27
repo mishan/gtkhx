@@ -262,11 +262,11 @@ pub enum CipherLayer {
     /// No cipher.
     None,
     /// Blowfish-OFB-64. Each direction owns its own
-    /// [`hxcrypto_stream::BlowfishOfb64State`]; the HOPE handshake
+    /// [`hxcrypto::stream::BlowfishOfb64State`]; the HOPE handshake
     /// supplies the key-and-ivec pair that derives these states.
     Blowfish {
-        read_state: hxcrypto_stream::BlowfishOfb64State,
-        write_state: hxcrypto_stream::BlowfishOfb64State,
+        read_state: hxcrypto::stream::BlowfishOfb64State,
+        write_state: hxcrypto::stream::BlowfishOfb64State,
     },
     /// HOPE-aware Blowfish-OFB-64. Same OFB primitive as
     /// [`Self::Blowfish`] but the resulting transport carries the
@@ -276,9 +276,9 @@ pub enum CipherLayer {
     /// adapter can run the same HMAC iteration loop the legacy C
     /// `cipher_change_decode_key` runs.
     HopeBlowfish {
-        read_state: hxcrypto_stream::BlowfishOfb64State,
+        read_state: hxcrypto::stream::BlowfishOfb64State,
         read_key: Vec<u8>,
-        write_state: hxcrypto_stream::BlowfishOfb64State,
+        write_state: hxcrypto::stream::BlowfishOfb64State,
         write_key: Vec<u8>,
         session_key: Vec<u8>,
         macalg: crate::hope_blowfish::HopeMacAlg,
@@ -288,9 +288,9 @@ pub enum CipherLayer {
     /// tag).
     ChaCha20Poly1305 {
         /// State used to decrypt incoming frames.
-        read: hxcrypto_aead::AeadState,
+        read: hxcrypto::aead::AeadState,
         /// State used to encrypt outgoing frames.
-        write: hxcrypto_aead::AeadState,
+        write: hxcrypto::aead::AeadState,
     },
 }
 

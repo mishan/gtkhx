@@ -26,11 +26,12 @@ use crate::tr::tr;
 /// Opaque C `struct gtkhx_chat *` / `struct chat *` / `struct htlc_conn *`.
 type Gchat = c_void;
 
+use hxmodel::conversation::hx_chat_cid;
+
 extern "C" {
     fn gtkhx_pchat_new(htlc: *mut c_void, chat: *mut c_void) -> *mut Gchat;
     fn gtkhx_pchat_user_sidebar(htlc: *mut c_void, chat: *mut c_void)
         -> *mut gtk::ffi::GtkWidget;
-    fn hx_chat_cid(chat: *mut c_void) -> u32;
     fn hx_gchat_output(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_vscroll(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_input(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
@@ -67,7 +68,7 @@ pub unsafe extern "C" fn create_pchat_window(htlc: *mut c_void, chat: *mut c_voi
     if gchat.is_null() {
         return std::ptr::null_mut();
     }
-    let cid = hx_chat_cid(chat);
+    let cid = hx_chat_cid(chat.cast());
 
     // Leaf widgets from the C helper (still floating; append/set_child sink).
     let output: gtk::Widget = from_glib_none(hx_gchat_output(gchat));

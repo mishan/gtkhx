@@ -14,7 +14,7 @@ gtkhx_sources = files(
   'chat.c',
   # chat_send_bridge.c — model/caps shims for the Rust chat wire-senders
   # (hxchat-send crate; the hx_send_chat / hx_chat_* senders moved out of
-  # chat.c). Links via rust_hxchat_send_dep below.
+  # chat.c). Links via the gtkhx-ffi façade archive.
   'chat_send_bridge.c',
   'chat_history.c',
   'cicn.c',
@@ -96,7 +96,7 @@ gtkhx_sources = files(
   'sound_events.c',
   'tasks.c',
   # tasks_table.c + the struct task model in tasks.c ported to the Rust hxtask
-  # crate (rust_hxtask_dep below); tasks_bridge.c is its C field-accessor shim.
+  # crate (via the gtkhx-ffi façade); tasks_bridge.c is its C field-accessor shim.
   'tasks_bridge.c',
   # text_util.c ported to Rust (hxtext crate, Phase R5); text_util.h keeps the
   # C ABI decls the ~16 callers include. Links via rust_hxtext_dep below.
@@ -218,113 +218,20 @@ gtkhx_resources = gnome.compile_resources(
   c_name     : 'gtkhx',
 )
 
-# The hxvoice-runtime staticlib is linked only when voice is compiled in;
-# with voice off the crate isn't built (rust/meson.build), so referencing
-# -lhxvoice_runtime here would fail at link time.
-rust_deps = [
-  rust_hxcrypto_hash_dep,
-  rust_hxsound_dep,
-  rust_hxcrypto_aead_dep,
-  rust_hxcrypto_stream_dep,
-  rust_hxcompress_dep,
-  rust_hotline_proto_dep,
-  rust_hxbridge_dep,
-  rust_gtkhx_session_dep,
-  # gtkhx-ui (Phase R5 windows) must precede gtkhx-boxed on the link line:
-  # it has undefined refs to hx_tracker_v3_meta_copy/_free which the later
-  # gtkhx-boxed archive resolves.
-  rust_gtkhx_ui_dep,
-  rust_gtkhx_boxed_dep,
-  rust_hxnet_dep,
-  rust_hx_image_decode_dep,
-  # chat wire-out senders (Rust port of chat.c's send path). Must precede
-  # rust_hxtext_dep on the link line: hxchat-send has an undefined ref to
-  # gtkhx_text_for_wire that the later hxtext archive resolves. Same
-  # static-archive rule (consumer before provider) as gtkhx-ui → gtkhx-boxed
-  # above; the C callers of gtkhx_text_for_wire happen to pull it first today,
-  # but don't rely on that as they get ported.
-  rust_hxchat_send_dep,
-  # news wire senders (flat 1.0/1.2 + 1.5 threaded) — Rust port of news.c +
-  # news15.c. Before rust_hxtext_dep on the link line (undefined ref to
-  # gtkhx_text_for_wire), same consumer-before-provider rule as hxchat-send.
-  rust_hxnews_send_dep,
-  # 1.5 news receive handlers (rcv_task_news* moved out of rcv.c). After
-  # hxnews-send: it resolves the rcv_task_newscat_list ref hxnews-send registers.
-  rust_hxnews_recv_dep,
-  # chat-domain receive handlers (chat-invite ignore-gate + emit, moved out of
-  # rcv.c). Grouped with hxnews-recv, the other receive-handler crate: both have
-  # undefined refs to gtkhx_session_get_default / gtkhx_session_emit_* and
-  # hx_member_model_*, so they sit ahead of the providers on the link line
-  # (consumer before provider, same static-archive rule as gtkhx-ui → gtkhx-boxed).
-  rust_hxchat_recv_dep,
-  # GIF-icon receive path (ICON_CHANGE parse + gif-icon-changed emit, moved out
-  # of rcv.c). Same receive-handler group + consumer-before-provider rule as
-  # hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*.
-  rust_hxicon_recv_dep,
-  # private-message receive path (MSG / MSG_BROADCAST ignore-gate + msg emit,
-  # moved out of rcv.c). Same receive-handler group + consumer-before-provider
-  # rule: undefined refs to gtkhx_session_get_default / _emit_msg and
-  # hx_member_model_get_ignore.
-  rust_hxmsg_recv_dep,
-  # agreement receive path (auto-agree vs show-and-emit decision, moved out
-  # of rcv.c). Same receive-handler group + consumer-before-provider rule:
-  # undefined refs to gtkhx_session_get_default / _emit_agreement.
-  rust_hxagreement_recv_dep,
-  # user-roster receive handlers (user-change routing + user-part gate/emit,
-  # moved out of rcv.c). Same receive-handler group + consumer-before-provider
-  # rule as hxchat-recv: undefined refs to gtkhx_session_get_default / _emit_*
-  # and hx_member_model_contains.
-  rust_hxuser_recv_dep,
-  # file-transfer reply tail (announce queue position + start when ready,
-  # moved out of rcv.c's 5 xfer reply handlers). Same receive-handler group
-  # + consumer-before-provider rule: undefined refs to
-  # gtkhx_session_get_default / _emit_xfer_queue.
-  rust_hxxfer_recv_dep,
-  # FILE_LIST receive handler + the Rust-owned struct cached_filelist
-  # (rcv_task_file_list + the hx_cfl_* accessor facade, moved out of rcv.c).
-  # Same receive-handler group + consumer-before-provider rule: undefined refs
-  # to gtkhx_session_get_default / _emit_file_list, the provider error hook, and
-  # hx_cfl_complete_entry (files.c).
-  rust_hxfiles_recv_dep,
-  # pure post-threading layout for the 1.5 news browser (news_browser.c).
-  rust_hxnews_model_dep,
-  # files-subsystem model: file-type -> icon-id map behind
-  # files.c::icon_of_ftype_and_name.
-  rust_hxfiles_model_dep,
-  # HxFileEntry files-browser row GObject (files_entry.c's model half):
-  # hx_file_entry_get_type / _new / the six field getters.
-  rust_hxfiles_entry_dep,
-  # files-subsystem transfer codec: FFO fork-header + info-block byte
-  # math behind xfers.c::file_recv_one.
-  rust_hxfiles_xfer_dep,
-  # cicn colour-icon decoder (cicn.c's decode path retired) — hxcicn_decode,
-  # wrapped into a GdkPixbuf by the thin cicn.c.
-  rust_hxcicn_dep,
-  # HFS metadata sidecar (Rust port of hfs.c): hfsinfo_read/write,
-  # resource_open/len, type_creator, comment_*, finderinfo_path/resource_path.
-  rust_hxhfs_dep,
-  # Mac resource-fork parser (macres.c retired) — the macres_file_* icon
-  # readers used by gtkhx.c / options.c / cicn.c.
-  rust_hxmacres_dep,
-  # Transaction-task table (tasks_table.c + the struct task model retired) — the
-  # tasks_table_new / tasks_init / task_new / task_with_trans / task_delete ABI.
-  rust_hxtask_dep,
-  # struct htlc_conn owner (hxconn.c retired) — the hx_conn_* accessor ABI +
-  # the hx_conn_new / _reset / _free lifecycle.
-  rust_hxconn_dep,
-  # TLS TOFU trust store + connect-side decide (tls_trust.c retired) — the
-  # hx_tls_verify_cert / hx_tls_trust_pin / hx_tls_test_* C ABI.
-  rust_hxtls_trust_dep,
-  # text encoding + emoji-shortcode helpers (Rust port of text_util.c).
-  rust_hxtext_dep,
-]
-if voice_enabled
-  rust_deps += rust_hxvoice_runtime_dep
-  # HxVoiceModel moved to the hxvoice-model Rust crate (voice_model.c retired).
-  rust_deps += rust_hxvoice_model_dep
-  # hx_send_voice_* moved to the hxvoice-send Rust crate (voice.c retired).
-  rust_deps += rust_hxvoice_send_dep
-endif
+# Every Rust crate reaches the binary through one archive: the gtkhx-ffi
+# façade (rust/crates/gtkhx-ffi). It bundles the whole rlib graph, so each
+# #[no_mangle] symbol is defined exactly once and link order is irrelevant.
+#
+# This replaces a 37-entry hand-ordered list. Static archives resolve
+# left-to-right, so every crate had to sit ahead of the crates providing its
+# externs, and each entry carried a comment justifying its position
+# ("must precede gtkhx-boxed", "consumer before provider", ...). Adding a
+# crate now means adding a dependency in gtkhx-ffi/Cargo.toml — nothing here.
+#
+# Voice needs no special case either: the voice crates enter the archive via
+# gtkhx-ffi's `voice` Cargo feature, which rust/meson.build turns on with
+# -Dvoice. There is no -lhxvoice_runtime to conditionally omit any more.
+rust_deps = [rust_gtkhx_ffi_dep]
 
 # Windows resource: file icon + embedded application manifest (asInvoker, no UAC)
 # + version metadata. windres compiles gtkhx.rc into an object linked below.

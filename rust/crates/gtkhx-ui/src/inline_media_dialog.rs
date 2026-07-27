@@ -23,7 +23,7 @@
 //! `glib::Bytes` ref, so a dismissed dialog can't free the payload out from
 //! under a pending file chooser.
 
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_void};
 use std::ptr;
 
 use gtk4 as gtk;
@@ -62,34 +62,19 @@ struct DownloadResult {
 }
 
 /// `#[repr(C)]` mirror of `HxInlineMediaDecoded` (`inline_media_decode.h`).
-/// Layout pinned by the C `_Static_assert` in `inline_media_decode.c`; we
-/// only read `texture` + `error_message`.
-#[repr(C)]
-struct Decoded {
-    texture: *mut gtk::gdk::ffi::GdkTexture,
-    canonical_mime: *const c_char,
-    sniffed_format: c_int,
-    error_code: u16,
-    _pad0: u16,
-    error_message: *const c_char,
-    frames: *mut c_void,
-}
+// The decode result type comes from hx-image-decode directly. This module
+// used to keep a hand-synced `#[repr(C)] struct Decoded` mirroring it, which
+// the old `extern "C"` declaration could not check — and which had already
+// drifted (it typed `sniffed_format` as c_int where the real field is u32).
 
-/// `#[repr(C)]` mirror of `HxInlineMediaCaps`. All-zero = "fall back to
-/// `HX_MEDIA_DEFAULT_*` per field", the same value the C dialog passed.
-#[repr(C)]
-#[derive(Default)]
-struct HxInlineMediaCaps {
-    max_bytes: u32,
-    max_dimension: u32,
-    max_pixels: u32,
-    max_frames: u32,
-    max_duration_ms: u32,
-}
+// HxInlineMediaCaps also comes from hx-image-decode now (all-zero still means
+// "fall back to HX_MEDIA_DEFAULT_* per field", as the C dialog passed).
 
 type DownloadCb =
     unsafe extern "C" fn(*mut c_void, *const DownloadResult, *mut c_void);
-type DecodeCb = unsafe extern "C" fn(*mut Decoded, *mut c_void);
+
+use hx_image_decode::ffi::{HxInlineMediaCaps, HxInlineMediaDecoded};
+use hx_image_decode::ffi::{inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free};
 
 extern "C" {
     fn inline_media_download_start(
@@ -100,16 +85,6 @@ extern "C" {
         user_data: *mut c_void,
     ) -> *mut c_void;
     fn inline_media_download_cancel(dl: *mut c_void);
-
-    fn inline_media_decode_async(
-        bytes: *const u8,
-        len: usize,
-        caps: *const HxInlineMediaCaps,
-        cb: DecodeCb,
-        user_data: *mut c_void,
-    ) -> *mut c_void;
-    fn inline_media_decode_cancel(token: *mut c_void);
-    fn inline_media_decoded_free(decoded: *mut Decoded);
 }
 
 // ---------------------------------------------------------------------
@@ -227,7 +202,7 @@ unsafe extern "C" fn on_download_done(
 // Glycin decode callback (main thread).
 // ---------------------------------------------------------------------
 
-unsafe extern "C" fn on_decode_done(decoded: *mut Decoded, user_data: *mut c_void) {
+unsafe extern "C" fn on_decode_done(decoded: *mut HxInlineMediaDecoded, user_data: *mut c_void) {
     let md = &mut *(user_data as *mut MediaDialog);
 
     // Consume the cancel-token regardless of outcome — the Rust side handed us

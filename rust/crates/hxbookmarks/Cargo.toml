@@ -8,11 +8,9 @@ description = "GtkHx bookmark model, TOML persistence, and legacy HTsc import/ex
 publish = false
 
 [lib]
-# rlib: consumed directly by gtkhx-ui (the Connect + Bookmarks dialogs call
-#       this crate's Rust API — no C ABI needed, since no C code touches
-#       bookmarks anymore). staticlib: reserved in case a C caller ever needs
-#       a thin FFI shim.
-crate-type = ["staticlib", "rlib"]
+# rlib only. Pure Rust — no C ABI surface of its own; consumed by other
+# workspace crates, which reach the C link via the gtkhx-ffi staticlib.
+crate-type = ["rlib"]
 
 [dependencies]
 # Pure serde + toml, no glib/gtk, so `cargo test -p hxbookmarks` runs headless

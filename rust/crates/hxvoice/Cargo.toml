@@ -8,11 +8,8 @@ description = "Pure-Rust voice-chat state machine for GtkHx (Phase 8.C+)"
 publish = false
 
 [lib]
-# rlib only — hxvoice has no FFI surface. The C side never talks to
-# the state machine directly; hxvoice-runtime sits between them and
-# turns typed events from gstreamer-rs signals into SessionMachine
-# inputs, then dispatches the returned actions onto the
-# webrtcbin / GtkhxSession / wire-out surfaces.
+# rlib only. Pure Rust — no C ABI surface of its own; consumed by other
+# workspace crates, which reach the C link via the gtkhx-ffi staticlib.
 crate-type = ["rlib"]
 
 [dependencies]

@@ -1,0 +1,24 @@
+[package]
+rust-version.workspace = true
+name = "hxhandlers"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Hotline protocol handler layer: the receive-side rcv.c bodies and the Rust wire-out senders."
+publish = false
+
+[lib]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
+
+# The union of what the ten merged crates needed. No gtk and no gtkhx-ui — the
+# handler layer reaches the chat model through hxmodel, which is what let this
+# merge happen at all (see src/lib.rs).
+[dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
+glib = { workspace = true }
+hotline-proto = { path = "../hotline-proto" }
+hxhfs = { path = "../hxhfs" }
+hxmodel = { path = "../hxmodel" }
+hxtext = { path = "../hxtext" }

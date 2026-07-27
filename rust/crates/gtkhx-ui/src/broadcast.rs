@@ -31,17 +31,9 @@ use crate::tr::tr;
 /// `rcv_task_fn`; broadcast registers a no-reply task (fn NULL in the C).
 type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *mut c_void, *mut c_void);
 
-extern "C" {
-    // text_util.c — encode UTF-8 → wire bytes (UTF-8 or legacy Mac Roman).
-    // Returns a g_malloc'd buffer (free with g_free) + writes the length.
-    fn gtkhx_text_for_wire(
-        utf8: *const c_char,
-        utf8_len: usize,
-        utf8_mode: glib::ffi::gboolean,
-        is_body: glib::ffi::gboolean,
-        out_len: *mut usize,
-    ) -> *mut c_char;
+use hxtext::gtkhx_text_for_wire;
 
+extern "C" {
     // tasks.c / network.c — the send primitives (rcv fn NULL = no reply task).
     fn task_new(
         htlc: *mut c_void,

@@ -8,9 +8,9 @@ description = "Cross-platform WAV notification-sound playback for GtkHx (replace
 publish = false
 
 [lib]
-# staticlib: the C side (src/sound.c) links the hx_sound_play FFI symbol.
-# rlib: keeps `cargo test -p hxsound` and any future Rust consumer working.
-crate-type = ["staticlib", "rlib"]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
 
 [dependencies]
 # rodio gives cross-platform audio output (cpal backend: ALSA on Linux,

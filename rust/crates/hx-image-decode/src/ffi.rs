@@ -12,7 +12,7 @@ use std::ffi::{c_char, c_void, CStr};
 use std::rc::Rc;
 use std::slice;
 
-use crate::caps::HxInlineMediaCaps;
+pub use crate::caps::{HxInlineMediaCaps};
 use crate::decode::{decode_async, DecodeCallback, DecodePolicy, DecodeToken};
 use crate::ffi_result::decoded_drop;
 /// Re-export so integration tests and other Rust consumers can

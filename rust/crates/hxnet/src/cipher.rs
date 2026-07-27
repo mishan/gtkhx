@@ -48,8 +48,8 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use hxcrypto_aead::AeadState;
-use hxcrypto_stream::{BlowfishOfb64State, BLOWFISH_OFB64_BLOCK_SIZE};
+use hxcrypto::aead::AeadState;
+use hxcrypto::stream::{BlowfishOfb64State, BLOWFISH_OFB64_BLOCK_SIZE};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 // ============================================================
@@ -244,7 +244,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for BlowfishStream<S> {
 ///    copy more of it into the caller's buf.
 /// 2. Otherwise, accumulate bytes from the inner stream until a
 ///    complete AEAD frame is buffered (length prefix + framed
-///    body), then [`hxcrypto_aead::gtkhx_aead_open`] it and
+///    body), then [`hxcrypto::aead::gtkhx_aead_open`] it and
 ///    start delivering the plaintext.
 /// 3. If the inner stream returns `Pending` mid-frame, hold the
 ///    partial bytes for the next poll.
@@ -330,8 +330,8 @@ impl<S> AeadStream<S> {
 /// side. Frames larger than this signal either a protocol error
 /// or a malicious server; we surface them as an `InvalidData`
 /// io::Error rather than allocate-and-fail. Matches
-/// `hxcrypto_aead::AEAD_MAX_FRAME_SIZE` (16 MiB).
-const AEAD_FRAME_LIMIT: u32 = hxcrypto_aead::AEAD_MAX_FRAME_SIZE;
+/// `hxcrypto::aead::AEAD_MAX_FRAME_SIZE` (16 MiB).
+const AEAD_FRAME_LIMIT: u32 = hxcrypto::aead::AEAD_MAX_FRAME_SIZE;
 
 impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
     fn poll_read(
@@ -373,8 +373,8 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
             // poll_read into the tail slice, then on
             // Pending/Err/Ok truncate back to `len_before + got`
             // so we never leave junk zeros in the buffer.
-            if this.read_buf.len() < hxcrypto_aead::AEAD_LENGTH_PREFIX {
-                let needed = hxcrypto_aead::AEAD_LENGTH_PREFIX - this.read_buf.len();
+            if this.read_buf.len() < hxcrypto::aead::AEAD_LENGTH_PREFIX {
+                let needed = hxcrypto::aead::AEAD_LENGTH_PREFIX - this.read_buf.len();
                 let len_before = this.read_buf.len();
                 this.read_buf.resize(len_before + needed, 0);
                 let mut tmp = ReadBuf::new(&mut this.read_buf[len_before..]);
@@ -426,17 +426,17 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
             // produce a generic "open failed" — the cause of the
             // failure is structurally obvious here and worth
             // surfacing distinctly.
-            if (length as usize) < hxcrypto_aead::AEAD_TAG_SIZE {
+            if (length as usize) < hxcrypto::aead::AEAD_TAG_SIZE {
                 return Poll::Ready(Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!(
                         "AEAD frame length {} is smaller than tag size {}",
                         length,
-                        hxcrypto_aead::AEAD_TAG_SIZE
+                        hxcrypto::aead::AEAD_TAG_SIZE
                     ),
                 )));
             }
-            let total = hxcrypto_aead::AEAD_LENGTH_PREFIX + length as usize;
+            let total = hxcrypto::aead::AEAD_LENGTH_PREFIX + length as usize;
 
             // Read more body bytes until we have the whole
             // frame. Same spare-capacity trick as the prefix
@@ -472,10 +472,10 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
             // size is ciphertext - tag bytes (length prefix is
             // not part of the ciphertext). We size pt_out
             // accordingly and pass the framed input verbatim.
-            let pt_capacity = (length as usize).saturating_sub(hxcrypto_aead::AEAD_TAG_SIZE);
+            let pt_capacity = (length as usize).saturating_sub(hxcrypto::aead::AEAD_TAG_SIZE);
             let mut pt_out = vec![0u8; pt_capacity];
             let opened_len = unsafe {
-                hxcrypto_aead::gtkhx_aead_open(
+                hxcrypto::aead::gtkhx_aead_open(
                     &mut this.read_state,
                     this.read_buf.as_ptr(),
                     total,
@@ -506,7 +506,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
 }
 
 /// Maximum plaintext bytes per AEAD frame.
-/// `hxcrypto_aead::AEAD_MAX_FRAME_SIZE` caps the body
+/// `hxcrypto::aead::AEAD_MAX_FRAME_SIZE` caps the body
 /// (ciphertext + tag) — NOT the wire frame including the length
 /// prefix. So plaintext_max = AEAD_MAX_FRAME_SIZE - AEAD_TAG_SIZE,
 /// without also subtracting the prefix (an earlier version did
@@ -516,7 +516,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for AeadStream<S> {
 /// can't force a multi-MiB allocation that the seal would refuse
 /// anyway.
 const AEAD_MAX_PLAINTEXT_PER_FRAME: usize =
-    (hxcrypto_aead::AEAD_MAX_FRAME_SIZE as usize) - hxcrypto_aead::AEAD_TAG_SIZE;
+    (hxcrypto::aead::AEAD_MAX_FRAME_SIZE as usize) - hxcrypto::aead::AEAD_TAG_SIZE;
 
 impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
     fn poll_write(
@@ -594,7 +594,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
             }
 
             let frame_cap =
-                hxcrypto_aead::AEAD_LENGTH_PREFIX + buf.len() + hxcrypto_aead::AEAD_TAG_SIZE;
+                hxcrypto::aead::AEAD_LENGTH_PREFIX + buf.len() + hxcrypto::aead::AEAD_TAG_SIZE;
             let mut framed = vec![0u8; frame_cap];
             // SAFETY: pointers come from owned Vecs of the
             // right length; gtkhx_aead_seal honours the
@@ -604,7 +604,7 @@ impl<S: AsyncWrite + Unpin> AsyncWrite for AeadStream<S> {
             // frame, regardless of how many polls the drain
             // takes.
             let written = unsafe {
-                hxcrypto_aead::gtkhx_aead_seal(
+                hxcrypto::aead::gtkhx_aead_seal(
                     &mut this.write_state,
                     buf.as_ptr(),
                     buf.len(),
