@@ -14,6 +14,7 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+hxcrypto = { path = "../hxcrypto" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
 # --- GObject / UI layer ---
@@ -27,10 +28,6 @@ hxnet = { path = "../hxnet" }
 hxbridge = { path = "../hxbridge", features = ["runtime"] }
 
 # --- crypto / compression ---
-hxcrypto-hash = { path = "../hxcrypto-hash" }
-hxcrypto-stream = { path = "../hxcrypto-stream" }
-hxcrypto-aead = { path = "../hxcrypto-aead" }
-hxcompress = { path = "../hxcompress" }
 
 # --- receive-side handlers ---
 

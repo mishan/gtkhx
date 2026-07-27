@@ -55,11 +55,13 @@ cargo = find_program('cargo')
 rust_sources = files(
   # The single-archive façade (see the rust_gtkhx_ffi_dep block below).
   'crates/gtkhx-ffi/src/lib.rs',
-  'crates/hxcrypto-hash/src/lib.rs',
-  'crates/hxcrypto-stream/src/lib.rs',
-  'crates/hxcrypto-stream/src/blowfish_ofb.rs',
-  'crates/hxcrypto-aead/src/lib.rs',
-  'crates/hxcompress/src/lib.rs',
+  'crates/hxcrypto/src/lib.rs',
+  'crates/hxcrypto/src/hash.rs',
+  'crates/hxcrypto/src/stream.rs',
+  'crates/hxcrypto/src/stream/blowfish_ofb.rs',
+  'crates/hxcrypto/src/aead.rs',
+  'crates/hxcrypto/src/compress.rs',
+  'crates/hxcrypto/Cargo.toml',
   'crates/hotline-proto/src/lib.rs',
   'crates/hotline-proto/src/wire.rs',
   'crates/hotline-proto/src/messages.rs',
@@ -236,10 +238,6 @@ rust_sources = files(
   'crates/hxsound/src/lib.rs',
   'Cargo.toml',
   'Cargo.lock',
-  'crates/hxcrypto-hash/Cargo.toml',
-  'crates/hxcrypto-stream/Cargo.toml',
-  'crates/hxcrypto-aead/Cargo.toml',
-  'crates/hxcompress/Cargo.toml',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
   'crates/gtkhx-session/Cargo.toml',
@@ -434,40 +432,16 @@ rust_build = custom_target('rust-workspace',
   console : true,
 )
 
-# Crypto hash (Phase R1; will replace src/hmac.c when wired through).
-rust_hxcrypto_hash_dep = declare_dependency(
+# HOPE crypto + transport compression (hash / stream / aead / compress).
+# One crate since the step 3 consolidation; the four former archives
+# (-lhxcrypto_hash, -lhxcrypto_stream, -lhxcrypto_aead, -lhxcompress) are
+# now -lhxcrypto. Kept as a standalone staticlib because the Tier 1/2
+# crypto + HOPE tests link it directly, GTK-free.
+rust_hxcrypto_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxcrypto_hash',
-  ],
-)
-
-# Stream cipher (Phase R1; will replace src/cipher.c Blowfish path
-# when wired through).
-rust_hxcrypto_stream_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcrypto_stream',
-  ],
-)
-
-# AEAD (Phase R1; will replace src/cipher_aead.c when wired through).
-rust_hxcrypto_aead_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcrypto_aead',
-  ],
-)
-
-# Compression (Phase R1; will replace src/compress.c when wired through).
-rust_hxcompress_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lhxcompress',
+    '-lhxcrypto',
   ],
 )
 

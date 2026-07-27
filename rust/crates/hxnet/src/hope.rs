@@ -336,7 +336,7 @@ pub fn hmac_password(
     // hxcrypto-hash's hmac_xxx writes into a fixed 32-byte
     // buffer and returns the digest length.
     let mut md = [0u8; 32];
-    let len = hxcrypto_hash::hmac_xxx(&mut md, password, sessionkey, alg_str);
+    let len = hxcrypto::hash::hmac_xxx(&mut md, password, sessionkey, alg_str);
     if len == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,

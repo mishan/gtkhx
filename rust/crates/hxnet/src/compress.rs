@@ -37,7 +37,7 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use flate2::{Compress, Compression, Decompress, FlushCompress, FlushDecompress, Status};
-use hxcrypto_aead::AEAD_MAX_FRAME_SIZE;
+use hxcrypto::aead::AEAD_MAX_FRAME_SIZE;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// Buffer size for pulling raw bytes from the inner stream on
@@ -197,7 +197,7 @@ fn oversized_write_error(algo: &str, len: usize) -> io::Error {
 /// but the bytes are RFC 1950 zlib (the 2-byte zlib header and
 /// 4-byte Adler-32 trailer), not RFC 1952 gzip. `flate2::Compress`
 /// / `Decompress` with `zlib_header=true` produce the right
-/// shape. This matches `hxcompress::CompressEncoder::Gzip` and
+/// shape. This matches `hxcrypto::compress::CompressEncoder::Gzip` and
 /// every mhxd-family server's deflateInit/inflateInit.
 pub struct GzipStream<S> {
     inner: S,

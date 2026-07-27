@@ -36,7 +36,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use hxcrypto_aead::{AeadState, AEAD_LENGTH_PREFIX, AEAD_TAG_SIZE};
+use hxcrypto::aead::{AeadState, AEAD_LENGTH_PREFIX, AEAD_TAG_SIZE};
 use tokio_rustls::rustls::pki_types::ServerName;
 use tokio_rustls::rustls::{ClientConnection, StreamOwned};
 
@@ -518,7 +518,7 @@ unsafe fn htxf_derive_aead(
         counter: 0,
         dir: 0,
     };
-    hxcrypto_aead::gtkhx_aead_derive_transfer_keys(
+    hxcrypto::aead::gtkhx_aead_derive_transfer_keys(
         &mut xfer_encode,
         &mut xfer_decode,
         m.session_key.as_ptr(),
@@ -958,7 +958,7 @@ pub unsafe extern "C" fn hxnet_htxf_close(handle: *mut HtxfConn) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hxcrypto_aead::{AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
+    use hxcrypto::aead::{AEAD_DIR_CLIENT_TO_SERVER, AEAD_DIR_SERVER_TO_CLIENT};
     use std::io::Cursor;
 
     fn key() -> [u8; 32] {
@@ -1124,7 +1124,7 @@ mod tests {
             dir: 0,
         };
         unsafe {
-            hxcrypto_aead::gtkhx_aead_derive_transfer_keys(
+            hxcrypto::aead::gtkhx_aead_derive_transfer_keys(
                 &mut xe,
                 &mut xd,
                 session_key.as_ptr(),

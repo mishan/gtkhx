@@ -56,10 +56,7 @@ use hxbridge as _;
 use hxnet as _;
 
 // --- crypto / compression ---
-use hxcompress as _;
-use hxcrypto_aead as _;
-use hxcrypto_hash as _;
-use hxcrypto_stream as _;
+use hxcrypto as _;
 
 // --- protocol handler layer (recv + send) ---
 use hxhandlers as _;

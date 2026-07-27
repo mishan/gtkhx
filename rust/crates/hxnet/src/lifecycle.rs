@@ -395,9 +395,9 @@ fn mac_label_to_hopemacalg(label: &[u8]) -> Option<HopeMacAlg> {
 pub struct HopeAeadMaterial {
     pub session_key: Vec<u8>,
     /// client -> server control-channel AEAD state.
-    pub ctrl_encode: hxcrypto_aead::AeadState,
+    pub ctrl_encode: hxcrypto::aead::AeadState,
     /// server -> client control-channel AEAD state.
-    pub ctrl_decode: hxcrypto_aead::AeadState,
+    pub ctrl_decode: hxcrypto::aead::AeadState,
 }
 
 /// Shared slot the HOPE lifecycle writes once (before the cipher layer
@@ -555,11 +555,11 @@ pub async fn run_hope_lifecycle(
     let mut hope_material: Option<HopeAeadMaterial> = None;
     let cipher_layer = match HopeCipherKind::from_label(&choice.cipher_alg) {
         Some(HopeCipherKind::Blowfish) => {
-            let read_state = match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.decode_key) {
+            let read_state = match hxcrypto::stream::BlowfishOfb64State::new(&bfkeys.decode_key) {
                 Some(s) => s,
                 None => bail!("blowfish read state init failed"),
             };
-            let write_state = match hxcrypto_stream::BlowfishOfb64State::new(&bfkeys.encode_key) {
+            let write_state = match hxcrypto::stream::BlowfishOfb64State::new(&bfkeys.encode_key) {
                 Some(s) => s,
                 None => bail!("blowfish write state init failed"),
             };
@@ -588,16 +588,16 @@ pub async fn run_hope_lifecycle(
             // passes to cipher_aead_derive_session_keys.
             let aead = derive_aead_keys(&choice.sessionkey, &bfkeys.decode_key, &bfkeys.encode_key);
             // server -> client
-            let read = hxcrypto_aead::AeadState {
+            let read = hxcrypto::aead::AeadState {
                 key: aead.decode_key,
                 counter: 0,
-                dir: hxcrypto_aead::AEAD_DIR_SERVER_TO_CLIENT,
+                dir: hxcrypto::aead::AEAD_DIR_SERVER_TO_CLIENT,
             };
             // client -> server
-            let write = hxcrypto_aead::AeadState {
+            let write = hxcrypto::aead::AeadState {
                 key: aead.encode_key,
                 counter: 0,
-                dir: hxcrypto_aead::AEAD_DIR_CLIENT_TO_SERVER,
+                dir: hxcrypto::aead::AEAD_DIR_CLIENT_TO_SERVER,
             };
             // Retain the control-channel AEAD material so an HTXF
             // subchannel can derive its per-transfer keys in-process,

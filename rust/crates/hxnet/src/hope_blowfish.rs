@@ -40,7 +40,7 @@ use std::io;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use hxcrypto_stream::BlowfishOfb64State;
+use hxcrypto::stream::BlowfishOfb64State;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 /// Size of one Hotline wire header. `type` (u32) + `trans` (u32)
@@ -62,7 +62,7 @@ const MAX_BODY_LEN: usize = 1024 * 1024;
 
 /// HMAC algorithms HOPE may negotiate. The string form
 /// matches the protocol-level chunk and is what
-/// [`hxcrypto_hash::hmac_xxx`] takes.
+/// [`hxcrypto::hash::hmac_xxx`] takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HopeMacAlg {
     Sha256,
@@ -108,7 +108,7 @@ fn rotate_key_in_place(
     let mut md = [0u8; 32];
     let mut len: u16 = 0;
     for _ in 0..iterations {
-        len = hxcrypto_hash::hmac_xxx(&mut md, key, session_key, alg);
+        len = hxcrypto::hash::hmac_xxx(&mut md, key, session_key, alg);
         // Caller's `md` is already `[u8; 32]`; `hmac_xxx` enforces
         // that array-length at compile time.
         if len == 0 {
@@ -1312,7 +1312,7 @@ mod tests {
         let mut expected = b"initial-key-32-bytes--padding---".to_vec();
         for _ in 0..3 {
             let mut md = [0u8; 32];
-            let len = hxcrypto_hash::hmac_xxx(&mut md, &expected, &session_key, "HMAC-SHA256");
+            let len = hxcrypto::hash::hmac_xxx(&mut md, &expected, &session_key, "HMAC-SHA256");
             assert_eq!(len, 32);
             expected.clear();
             expected.extend_from_slice(&md[..len as usize]);
