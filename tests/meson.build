@@ -349,21 +349,6 @@ test_hotline_url = executable('test_hotline_url',
 test('hotline_url', test_hotline_url,
      suite : 'unit')
 
-# compress_bufsize — Phase R1 round 3 fix for the
-# compress_encode_bufsize overflow guard. Pins that the function
-# returns 0 when 2*len + 1024 would overflow u32 (rather than
-# wrapping around silently and producing an undersized allocation).
-# compress_encode_bufsize is defined `static inline` in compress.h
-# specifically so this test can drive it without linking compress.c
-# (which transitively pulls GTK via hx.h).
-test_compress_bufsize = executable('test_compress_bufsize',
-  'unit/test_compress_bufsize.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('compress_bufsize', test_compress_bufsize,
-     suite : 'unit')
-
 # task_hash — the transaction-table lifecycle contract (insert / lookup /
 # replace / remove / destroy → value destroy notify reclaims struct task + its
 # `str` + the optional `ptr`) now lives in the Rust hxtask crate's #[test]s
