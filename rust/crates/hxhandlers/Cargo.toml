@@ -22,3 +22,7 @@ hotline-proto = { path = "../hotline-proto" }
 hxhfs = { path = "../hxhfs" }
 hxmodel = { path = "../hxmodel" }
 hxtext = { path = "../hxtext" }
+# The xfers shell (src/xfer.rs) owns the transfer registry over hxnet's
+# HtxfHandle + hx_htxf_* lifecycle; native access instead of the hx_htxf_*
+# C-ABI accessor bounce. hxnet does not depend on hxhandlers (acyclic).
+hxnet = { path = "../hxnet" }

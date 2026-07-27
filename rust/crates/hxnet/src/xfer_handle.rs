@@ -76,14 +76,18 @@ pub struct HtxfHandle {
     srv_data_size: u64,
     refcount: AtomicI32,
     canceled: AtomicI32,
-    ref_: u32,
+    // `pub` fields are the plain (non-atomic, non-lifecycle) ones the xfers
+    // shell (hxhandlers::xfer) reads/writes directly now that it's Rust — the
+    // atomics (total_pos / refcount / canceled) stay private, reached only
+    // through the `hx_htxf_*` methods below.
+    pub ref_: u32,
     gone: u8,
     type_: u8,
     queue: u32,
     fd: c_int,
     serverhost: [c_char; HOSTLEN],
     serverport: u16,
-    htlc: *mut c_void,
+    pub htlc: *mut c_void,
     path: [c_char; MAXPATHLEN],
     remotepath: [c_char; MAXPATHLEN],
     remotedir: [c_char; MAXPATHLEN],
@@ -98,7 +102,7 @@ pub struct HtxfHandle {
     preview: *mut c_void,
     aead_active: c_int,
     hx: *mut c_void,
-    abort: *mut c_void,
+    pub abort: *mut c_void,
 }
 
 /// A C-side destructor invoked by [`hx_htxf_unref`] on the last ref, before the

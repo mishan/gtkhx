@@ -28,6 +28,12 @@ extern struct htxf_conn *xfer_new_folder (const char *path,
                                           const char *remotedir,
                                           const char *remotename,
                                           gsize remotename_len, guint16 type);
+/* The xfers[] list + reorder/lookup/removal moved to Rust (hxhandlers::xfer,
+ * Y1 of the xfers.c -> Rust migration). These decls keep the C ABI the xfers.c
+ * shell + tasks.c / rcv.c / gtkhx.c call. */
+extern void xfer_registry_add (struct htxf_conn *htxf);
+extern int xfer_count (void);
+extern void xfer_remove_from_list (struct htxf_conn *htxf);
 extern void xfer_up (int num);
 extern int xfer_down (int num);
 extern int xfer_num (struct htxf_conn *htxf);

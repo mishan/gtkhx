@@ -45,9 +45,6 @@
 #include "xfers.h"
 #include "xfers_recv.h"
 
-int nxfers = 0;
-struct htxf_conn **xfers = 0;
-static void xfer_remove_from_list (struct htxf_conn *htxf);
 
 /* The single-file receive / send state machines (file_recv_one,
  * file_send_one) + the FFO codec FFI (gtkhx_ffo_*) live in
@@ -505,9 +502,7 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
 	 * worker, triggered by xfer_delete on main, freed by hx_htxf_free). */
     hx_htxf_ref (htxf);
 
-    xfers = g_realloc (xfers, (nxfers + 1) * sizeof (struct htxf_conn *));
-    xfers[nxfers] = htxf;
-    nxfers++;
+    xfer_registry_add (htxf);
 
     htxf->htlc = hx_active_session ()->htlc;
     htxf->total_size = 1;
@@ -535,7 +530,7 @@ xfer_new (const char *path, const char *remotedir, const char *remotename,
     htxf->opt.preview = preview ? 1 : 0;
     htxf->srv_data_size = srv_data_size;
 
-    if (nxfers == 1 || !gtkhx_prefs.queuedl) {
+    if (xfer_count () == 1 || !gtkhx_prefs.queuedl) {
         xfer_go (htxf);
     }
 
@@ -557,46 +552,6 @@ xfer_new_folder (const char *path, const char *remotedir,
     htxf->opt.folder = 1;
 
     return htxf;
-}
-
-void
-xfer_up (int num)
-{
-    struct htxf_conn *tmp;
-
-    tmp = xfers[num - 1];
-    xfers[num - 1] = xfers[num];
-    xfers[num] = tmp;
-}
-
-int
-xfer_down (int num)
-{
-    struct htxf_conn *tmp;
-
-    if (nxfers - 1 == num) {
-        return 1;
-    }
-
-    tmp = xfers[num + 1];
-    xfers[num + 1] = xfers[num];
-    xfers[num] = tmp;
-
-    return 0;
-}
-
-int
-xfer_num (struct htxf_conn *htxf)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        if (xfers[i] == htxf) {
-            return i;
-        }
-    }
-
-    return -1;
 }
 
 /* Progress callback the Rust hxnet::xfer worker calls per chunk: bump the byte
@@ -920,119 +875,3 @@ xfer_ready_write (struct htxf_conn *htxf)
     gtkhx_bridge_spawn_blocking_with_idle (xfer_worker_entry,
                                            xfer_completion_entry, htxf);
 }
-
-void
-xfer_tasks_update (struct htlc_conn *htlc)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        if (xfers[i]->htlc == htlc) {
-            gtkhx_session_emit_file_update (gtkhx_session_get_default (),
-                                            sess_from_htlc (htlc), xfers[i]);
-        }
-    }
-}
-
-/* Best-effort cancellation of all in-flight transfers at app shutdown.
- * Each htxf has its xfers[] ref dropped here; the worker's ref (and
- * any pending dispatcher refs) keep the htxf alive until the workers
- * actually exit. The process is going down anyway, so leaks of the
- * worker-still-running case don't matter. */
-void
-xfers_delete_all (void)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        struct htxf_conn *htxf = xfers[i];
-        /* Latch the cancel flag so the completion dispatchers (fu_dispatch) skip
-         * stale updates for this since-cancelled transfer. */
-        hx_htxf_cancel (htxf);
-        /* Shut the subchannel socket down to wake a worker parked in a
-		 * blocking hxnet_htxf_read/_write — that -1 return
-		 * then unwinds it cleanly. The worker runs on tokio's blocking
-		 * pool, which can't be force-cancelled — cooperative abort is
-		 * the whole mechanism. */
-        hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
-        hx_htxf_unref (htxf); /* drop xfers[] ref */
-    }
-    nxfers = 0;
-}
-
-/* Internal: remove htxf from the xfers[] array and drop the
- * array's reference. Idempotent — if the htxf isn't in the array,
- * does nothing. The actual free happens via the unref only when the
- * last owner (worker, queued dispatchers) drops their refs.
- *
- * Emits "xfer-destroyed" on the GtkhxSession singleton AFTER
- * removal from xfers[] but BEFORE the unref. Subscribers must
- * NULL any cached pointers to this htxf at that point — the next
- * unref (worker exit, dispatcher cleanup) can be the last and free
- * the slab. The signal is synchronous; handlers run with the htxf
- * still alive (the unref we're about to do drops only the xfers[]
- * ref). */
-static void
-xfer_remove_from_list (struct htxf_conn *htxf)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        if (xfers[i] != htxf) {
-            continue;
-        }
-
-        if (nxfers > (i + 1)) {
-            memcpy (&xfers[i], &xfers[i + 1],
-                    (nxfers - (i + 1)) * sizeof (struct htxf_conn *));
-        }
-        nxfers--;
-        gtkhx_session_emit_xfer_destroyed (gtkhx_session_get_default (),
-                                           sess_from_htlc (htxf->htlc), htxf);
-        hx_htxf_unref (htxf); /* drop the xfers[] ref */
-        if (nxfers) {
-            xfer_go (xfers[0]);
-        }
-        return;
-    }
-}
-
-/* Public: cancel an in-flight transfer.
- *
- * Called from rcv.c when the server sends a cancel / error. Sets
- * htxf->canceled so any pending or future dispatchers skip their work,
- * shuts the subchannel socket down to wake a parked worker, and unlinks
- * from xfers[] (which drops the array's ref). */
-void
-xfer_delete (struct htxf_conn *htxf)
-{
-    if (!htxf) {
-        return;
-    }
-
-    /* Latch the cancel flag so the completion dispatchers (fu_dispatch) skip
-         * stale updates for this since-cancelled transfer. */
-    hx_htxf_cancel (htxf);
-    /* Wake a worker parked in a blocking subchannel read/write by
-	 * shutting its socket down; the resulting -1 unwinds the Rust transfer
-	 * loop cleanly. The worker runs
-	 * on tokio's blocking pool, which can't be force-cancelled —
-	 * cooperative abort is the whole mechanism. */
-    hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
-    xfer_remove_from_list (htxf);
-}
-
-struct htxf_conn *
-htxf_with_ref (guint32 ref)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        if (xfers[i]->ref == ref) {
-            return xfers[i];
-        }
-    }
-
-    return 0;
-}
-

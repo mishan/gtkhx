@@ -10,20 +10,9 @@
 
 #include "hx.h"
 #include "htxf_accessors.h"
-#include "xfers.h" /* xfers[], nxfers */
 
-int
-hx_htxf_in_list (struct htxf_conn *htxf)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        if (xfers[i] == htxf) {
-            return 1;
-        }
-    }
-    return 0;
-}
+/* hx_htxf_in_list moved to the Rust transfer registry (hxhandlers::xfer) with
+ * the xfers[] list in Y1. */
 
 int
 hx_htxf_opt_retry (const struct htxf_conn *htxf)

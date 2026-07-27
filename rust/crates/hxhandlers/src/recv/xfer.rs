@@ -42,6 +42,8 @@ extern "C" {
     fn xfer_ready_write(htxf: *mut c_void);
 
     // ---- htxf_accessors.c: the Rust-facing field seam over C-owned htxf ----
+    // hx_htxf_in_list moved to the Rust registry (crate::xfer) in Y1; still
+    // reached over the C ABI here so this module's test doubles are unchanged.
     fn hx_htxf_in_list(htxf: *mut c_void) -> c_int;
     fn hx_htxf_opt_retry(htxf: *const c_void) -> c_int;
     fn hx_htxf_opt_preview(htxf: *const c_void) -> c_int;
