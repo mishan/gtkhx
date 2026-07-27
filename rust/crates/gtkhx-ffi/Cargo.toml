@@ -14,12 +14,11 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
 hxcrypto = { path = "../hxcrypto" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
 # --- GObject / UI layer ---
-gtkhx-boxed = { path = "../gtkhx-boxed" }
-gtkhx-session = { path = "../gtkhx-session" }
 gtkhx-ui = { path = "../gtkhx-ui" }
 
 # --- protocol core ---
@@ -36,7 +35,6 @@ hxbridge = { path = "../hxbridge", features = ["runtime"] }
 # --- models ---
 
 # --- per-session state owners ---
-hxconn = { path = "../hxconn" }
 hxtask = { path = "../hxtask" }
 
 # --- leaf utilities ---

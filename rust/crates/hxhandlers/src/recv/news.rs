@@ -19,7 +19,7 @@ use carrier::{
     gnews_catalog_set_parsed, gnews_folder_set_parsed, news_post_fetch_failed, news_post_new,
 };
 
-use gtkhx_session::{gtkhx_session_emit_news_catalog, gtkhx_session_emit_news_file, gtkhx_session_emit_news_folder, gtkhx_session_emit_news_post, gtkhx_session_emit_news_thread, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_news_catalog, gtkhx_session_emit_news_file, gtkhx_session_emit_news_folder, gtkhx_session_emit_news_post, gtkhx_session_emit_news_thread, gtkhx_session_get_default};
 
 /// `void hx_news_post_recv (htlc, bytes, len)` — emit the flat-news `news-post`
 /// signal for one appended NEWSDATA chunk. [`hx_rcv_news_post`] calls this once

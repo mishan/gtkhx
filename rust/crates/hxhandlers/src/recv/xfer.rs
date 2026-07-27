@@ -26,9 +26,9 @@ use std::os::raw::{c_char, c_void};
 use std::os::raw::{c_int, c_long};
 
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default};
 #[cfg(not(test))]
-use hxconn::hx_conn_serverhost;
+use gtkhx_core::conn::hx_conn_serverhost;
 #[cfg(not(test))]
 use hxhfs::ffi::{comment_len, resource_len};
 

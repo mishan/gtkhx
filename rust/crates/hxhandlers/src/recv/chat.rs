@@ -10,15 +10,15 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 #[cfg(not(test))]
-use gtkhx_boxed::chat::hx_chat_event_free;
+use gtkhx_core::boxed::chat::hx_chat_event_free;
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_chat, gtkhx_session_emit_chat_history_batch, gtkhx_session_emit_chat_invitation, gtkhx_session_emit_chat_subject, gtkhx_session_emit_chat_subject_notice, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_chat, gtkhx_session_emit_chat_history_batch, gtkhx_session_emit_chat_invitation, gtkhx_session_emit_chat_subject, gtkhx_session_emit_chat_subject_notice, gtkhx_session_get_default};
 #[cfg(not(test))]
 use hxmodel::chat_members::hx_member_model_get_ignore;
 #[cfg(not(test))]
 use hxmodel::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
 #[cfg(not(test))]
-use hxconn::{hx_conn_has_cap, hx_conn_name, hx_conn_sess};
+use gtkhx_core::conn::{hx_conn_has_cap, hx_conn_name, hx_conn_sess};
 
 #[cfg(not(test))]
 extern "C" {    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0

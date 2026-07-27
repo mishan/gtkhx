@@ -11,7 +11,7 @@
 use std::os::raw::c_void;
 
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_gif_icon_changed, gtkhx_session_emit_gif_icon_data, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_gif_icon_changed, gtkhx_session_emit_gif_icon_data, gtkhx_session_get_default};
 #[cfg(not(test))]
 use hotline_proto::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
 

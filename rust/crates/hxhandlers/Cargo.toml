@@ -16,11 +16,9 @@ crate-type = ["rlib"]
 # handler layer reaches the chat model through hxmodel, which is what let this
 # merge happen at all (see src/lib.rs).
 [dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }
-gtkhx-boxed = { path = "../gtkhx-boxed" }
-gtkhx-session = { path = "../gtkhx-session" }
 hotline-proto = { path = "../hotline-proto" }
-hxconn = { path = "../hxconn" }
 hxhfs = { path = "../hxhfs" }
 hxmodel = { path = "../hxmodel" }
 hxtext = { path = "../hxtext" }

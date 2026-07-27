@@ -1764,7 +1764,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtkhx-boxed"
+name = "gtkhx-core"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
@@ -1774,14 +1774,12 @@ dependencies = [
 name = "gtkhx-ffi"
 version = "0.1.0"
 dependencies = [
- "gtkhx-boxed",
- "gtkhx-session",
+ "gtkhx-core",
  "gtkhx-ui",
  "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
  "hxbridge",
- "hxconn",
  "hxcrypto",
  "hxfiles-xfer",
  "hxhandlers",
@@ -1800,14 +1798,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gtkhx-session"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
- "gtkhx-boxed",
-]
-
-[[package]]
 name = "gtkhx-ui"
 version = "0.1.0"
 dependencies = [
@@ -1815,12 +1805,10 @@ dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
  "gtk4",
- "gtkhx-boxed",
- "gtkhx-session",
+ "gtkhx-core",
  "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
- "hxconn",
  "hxhandlers",
  "hxmodel",
  "hxtext",
@@ -1985,13 +1973,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxconn"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
-]
-
-[[package]]
 name = "hxcrypto"
 version = "0.1.0"
 dependencies = [
@@ -2018,10 +1999,8 @@ name = "hxhandlers"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "gtkhx-boxed",
- "gtkhx-session",
+ "gtkhx-core",
  "hotline-proto",
- "hxconn",
  "hxhfs",
  "hxmodel",
  "hxtext",
@@ -2047,7 +2026,7 @@ version = "0.1.0"
 dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
- "gtkhx-boxed",
+ "gtkhx-core",
  "hotline-proto",
 ]
 
@@ -2088,7 +2067,7 @@ name = "hxtask"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
- "gtkhx-session",
+ "gtkhx-core",
 ]
 
 [[package]]

@@ -8,7 +8,7 @@
 //! `static`); C keeps its own `hx_chat_media_free` because
 //! `hx_chat_event_attach_media` still calls it.
 
-use crate::register_once;
+use crate::boxed::register_once;
 use glib::ffi::{g_free, g_malloc, g_malloc0, g_strndup, GType};
 use std::ffi::c_char;
 use std::mem::{offset_of, size_of};
@@ -77,7 +77,7 @@ const _: () = {
 
 /// Deep-copy an `HxChatMedia` (mirrors the deleted C static
 /// `hx_chat_media_copy`). `id` is raw bytes (`g_malloc` + copy), `mime`
-/// is NUL-terminated (`g_strndup`). `pub(crate)` so [`crate::media_table`]
+/// is NUL-terminated (`g_strndup`). `pub(crate)` so [`crate::boxed::media_table`]
 /// can deep-copy into its per-chat token table.
 ///
 /// # Safety
@@ -108,7 +108,7 @@ pub(crate) unsafe fn media_copy(m: *const HxChatMedia) -> *mut HxChatMedia {
 
 /// Free an `HxChatMedia` (mirrors the C static `hx_chat_media_free` —
 /// which the C side keeps for `attach_media`). `pub(crate)` so
-/// [`crate::media_table`] can release its entries.
+/// [`crate::boxed::media_table`] can release its entries.
 ///
 /// # Safety
 /// `m` is NULL or a valid glib-owned `HxChatMedia*`.

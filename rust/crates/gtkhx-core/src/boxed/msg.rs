@@ -1,7 +1,7 @@
 //! `HxMsgEvent` — private-message value object (`src/proto_helpers.h`).
 //! R4.2a. See the crate docs for the cross-language layout-pin contract.
 
-use crate::register_once;
+use crate::boxed::register_once;
 use glib::ffi::{g_free, g_malloc0, g_strndup, GType};
 use std::ffi::c_char;
 use std::mem::{offset_of, size_of};

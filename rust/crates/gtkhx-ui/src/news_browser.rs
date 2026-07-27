@@ -56,9 +56,9 @@ const HL_ACCESS_DELETE_CATEGORIES: i32 = 35;
 const HL_ACCESS_CREATE_NEWS_BUNDLES: i32 = 36;
 const HL_ACCESS_DELETE_NEWS_BUNDLES: i32 = 37;
 
-use gtkhx_session::gtkhx_session_get_default;
+use gtkhx_core::session::gtkhx_session_get_default;
 use hotline_proto::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
-use hxconn::{hx_conn_access_has, hx_conn_access_permits};
+use gtkhx_core::conn::{hx_conn_access_has, hx_conn_access_permits};
 use hxmodel::news::node::{hx_news_build_category_tree_from_catlist, hx_news_build_dirlist_from_dirlist, hx_news_node_body_fetching, hx_news_node_children, hx_news_node_get_type, hx_news_node_loaded, hx_news_node_name, hx_news_node_set_body_fetching, hx_news_node_set_loaded};
 use hxhandlers::recv::news::carrier::{gnews_catalog_free, gnews_catalog_new, gnews_catalog_parsed, gnews_folder_free, gnews_folder_new, gnews_folder_parsed, news_post_body, news_post_free, news_post_target};
 use hxhandlers::send::news::{hx_news15_cat_list, hx_news15_fldr_list, hx_news15_get_post};

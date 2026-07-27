@@ -17,7 +17,7 @@ use glib::translate::{from_glib_full, IntoGlibPtr};
 
 use crate::member::HxMemberModel;
 
-use gtkhx_boxed::media_table::{hx_media_table_free, hx_media_table_new};
+use gtkhx_core::boxed::media_table::{hx_media_table_free, hx_media_table_new};
 
 extern "C" {
     // hxchat-model — the Rust InputHistory (input line history), C ABI.

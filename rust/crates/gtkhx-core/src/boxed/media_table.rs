@@ -16,7 +16,7 @@
 //! `free` drops it (running `Drop`, which releases every entry). `register`
 //! and `lookup` borrow it. Token 0 is reserved for "absent".
 
-use crate::chat::{media_copy, media_free, HxChatMedia};
+use crate::boxed::chat::{media_copy, media_free, HxChatMedia};
 use std::collections::HashMap;
 use std::os::raw::c_void;
 use std::ptr;

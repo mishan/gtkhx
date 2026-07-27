@@ -13,9 +13,9 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_self_updated, gtkhx_session_emit_user_change, gtkhx_session_emit_user_create, gtkhx_session_emit_user_delete, gtkhx_session_emit_user_info, gtkhx_session_emit_user_notice, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_self_updated, gtkhx_session_emit_user_change, gtkhx_session_emit_user_create, gtkhx_session_emit_user_delete, gtkhx_session_emit_user_info, gtkhx_session_emit_user_notice, gtkhx_session_get_default};
 #[cfg(not(test))]
-use hxconn::{hx_conn_name, hx_conn_sess};
+use gtkhx_core::conn::{hx_conn_name, hx_conn_sess};
 
 // HxMemberInfo is a type, not one of the shadowed functions, so it is imported
 // unconditionally — the #[cfg(test)] doubles below replace the fns only.

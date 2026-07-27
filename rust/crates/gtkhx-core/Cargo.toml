@@ -1,0 +1,18 @@
+[package]
+rust-version.workspace = true
+name = "gtkhx-core"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GtkHx GObject layer: the GtkhxSession signal hub, its boxed payload types, and the per-connection state."
+publish = false
+
+[lib]
+# staticlib + rlib. The rlib is how gtkhx-ffi bundles this crate into the
+# single archive the gtkhx binary links. The standalone staticlib is what the
+# Tier 1/2 tests link directly — which is why every module here must stay
+# free of undefined C externs. See src/lib.rs.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+glib = { workspace = true }

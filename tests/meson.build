@@ -20,7 +20,7 @@ test_deps = [
   # (the E1c flip). Every test target that touches an hx_conn_* symbol resolves
   # it here; the linker drops the archive for targets that don't. Base bundle so
   # both the test_deps and proto_test_deps (= test_deps + [...]) targets get it.
-  rust_hxconn_dep,
+  rust_gtkhx_core_dep,
 ]
 
 # All crypto primitives (hash, stream cipher, AEAD, compression) live in
@@ -49,7 +49,7 @@ proto_test_deps = test_deps + [
   # against proto_helpers.c / tracker_event.c, which those targets
   # also link. Archive members aren't pulled for tests that don't
   # touch a gtkhx_session symbol.
-  rust_gtkhx_session_dep,
+  rust_gtkhx_core_dep,
   # Phase R4.2: the boxed payload value-types (HxMsgEvent, HxChatEvent +
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
   # proto_helpers.c / tracker_event.c / tracker_v3_meta.c into the
@@ -59,7 +59,7 @@ proto_test_deps = test_deps + [
   # meta_free call sites) resolve them against this archive. It's
   # self-contained, so pulling those symbols never drags gtkhx-session's
   # C externs in.
-  rust_gtkhx_boxed_dep,
+  rust_gtkhx_core_dep,
   # Phase R5: src/text_util.c was ported to the hxtext Rust crate, so the
   # gtkhx_text_to_utf8 / _for_wire sanitisers proto_helpers.c calls now
   # resolve against this staticlib instead of a compiled-in text_util.c.
@@ -1123,7 +1123,7 @@ test_integration_real_connect = executable(
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
   # gtkhx_session.c → Rust crate (Phase R4); linked via
-  # rust_gtkhx_session_dep in this target's dependencies.
+  # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
   '../src/qbuf.c',
@@ -1242,7 +1242,7 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
   # gtkhx_session.c → Rust crate (Phase R4); linked via
-  # rust_gtkhx_session_dep in this target's dependencies.
+  # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
   '../src/qbuf.c',

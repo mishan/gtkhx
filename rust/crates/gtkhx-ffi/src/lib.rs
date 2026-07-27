@@ -46,8 +46,7 @@
 //! to reason about and nothing to touch in `src/meson.build`.
 
 // --- GObject / UI layer ---
-use gtkhx_boxed as _;
-use gtkhx_session as _;
+use gtkhx_core as _;
 use gtkhx_ui as _;
 
 // --- protocol core ---
@@ -64,8 +63,7 @@ use hxhandlers as _;
 // --- models ---
 use hxmodel as _;
 
-// --- per-session state owners ---
-use hxconn as _;
+// --- per-session state owner (extern-ful: cannot live in gtkhx-core) ---
 use hxtask as _;
 
 // --- leaf utilities ---

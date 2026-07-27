@@ -6,12 +6,16 @@
 # archives that src/meson.build links into the gtkhx executable.
 #
 # Current crates:
-#   hxcrypto-hash   — HMAC/MD5/SHA1/SHA256 (replaces src/hmac.c)
-#   hxcrypto-stream — Blowfish OFB-64 (replaces src/cipher.c primitives)
-#   hxcrypto-aead   — ChaCha20-Poly1305 + HKDF-SHA256 (replaces
-#                     src/cipher_aead.c primitives)
-#   hxcompress      — GZIP / LZ4 / ZSTD streaming (replaces src/compress.c)
+#   hxcrypto        — HOPE crypto + transport compression (hash / stream /
+#                     aead / compress; four crates before step 3).
 #   hotline-proto   — Phase R2 wire protocol parsers + builders.
+#   gtkhx-core      — the extern-free GObject layer (GtkhxSession + its boxed
+#                     payloads + htlc_conn). Must stay extern-free: the Tier 2
+#                     proto tests link its archive alone. See its lib.rs.
+#   hxhandlers      — the receive/send protocol handler layer (ten crates
+#                     before step 3).
+#   hxmodel         — the client-side model layer (chat, membership, news,
+#                     files, conversation).
 #   hxbridge        — Phase R3.0 Rust ↔ GLib bridge (C-owned GObject
 #                     wrapping + signal emit). Lifetime model documented
 #                     in docs/rust/glib-interop.md.
@@ -77,25 +81,17 @@ rust_sources = files(
   'crates/hxbridge/src/blocking.rs',
   'crates/hxbridge/src/channel.rs',
   'crates/hxbridge/src/runtime.rs',
-  # Phase R4 — GtkhxSession as a Rust glib::subclass GObject (replaces
-  # src/gtkhx_session.c). References the C boxed GTypes via FFI; R4.2
-  # re-hosted all three boxed payload types (HxMsgEvent, HxChatEvent,
-  # HxTrackerServer) into the gtkhx-boxed crate, so this crate's externs
-  # now resolve against gtkhx-boxed instead of proto_helpers.c /
-  # tracker_event.c.
-  'crates/gtkhx-session/src/lib.rs',
-  'crates/gtkhx-session/src/chat_registry.rs',
-  # Phase R4.2 — boxed signal-payload value-types (HxMsgEvent, HxChatEvent
-  # + HxChatMedia, HxTrackerServer + HxTrackerV3Meta), self-contained
-  # (glib only) so proto unit tests can pull their _copy/_free without
-  # dragging gtkhx-session's C externs.
-  'crates/gtkhx-boxed/src/lib.rs',
-  'crates/gtkhx-boxed/src/msg.rs',
-  'crates/gtkhx-boxed/src/chat.rs',
-  'crates/gtkhx-boxed/src/media_table.rs',
-  'crates/gtkhx-boxed/src/tracker.rs',
-  # Phase R5 — gtkhx-ui: the window UIs in gtk4-rs (first gtk4-rs UI
-  # crate). One module per ported window; the Tracker window is the first.
+  # Phase-3 consolidation: the extern-free GObject layer (see its lib.rs).
+  'crates/gtkhx-core/src/lib.rs',
+  'crates/gtkhx-core/src/session.rs',
+  'crates/gtkhx-core/src/session/chat_registry.rs',
+  'crates/gtkhx-core/src/boxed.rs',
+  'crates/gtkhx-core/src/boxed/msg.rs',
+  'crates/gtkhx-core/src/boxed/chat.rs',
+  'crates/gtkhx-core/src/boxed/media_table.rs',
+  'crates/gtkhx-core/src/boxed/tracker.rs',
+  'crates/gtkhx-core/src/conn.rs',
+  'crates/gtkhx-core/Cargo.toml',
   'crates/gtkhx-ui/src/lib.rs',
   'crates/gtkhx-ui/src/ffi.rs',
   'crates/gtkhx-ui/src/hl_date.rs',
@@ -214,8 +210,6 @@ rust_sources = files(
   'crates/hxmacres/src/tests.rs',
   'crates/hxtask/src/lib.rs',
   'crates/hxtask/src/tests.rs',
-  'crates/hxconn/src/lib.rs',
-  'crates/hxconn/src/tests.rs',
   'crates/hxtls-trust/src/lib.rs',
   'crates/hxtls-trust/src/ffi.rs',
   'crates/hxtls-trust/src/tests.rs',
@@ -240,8 +234,6 @@ rust_sources = files(
   'Cargo.lock',
   'crates/hotline-proto/Cargo.toml',
   'crates/hxbridge/Cargo.toml',
-  'crates/gtkhx-session/Cargo.toml',
-  'crates/gtkhx-boxed/Cargo.toml',
   'crates/gtkhx-ui/Cargo.toml',
   'crates/hxnet/Cargo.toml',
   'crates/hxvoice/Cargo.toml',
@@ -253,7 +245,6 @@ rust_sources = files(
   'crates/hxhfs/Cargo.toml',
   'crates/hxmacres/Cargo.toml',
   'crates/hxtask/Cargo.toml',
-  'crates/hxconn/Cargo.toml',
   'crates/hxtls-trust/Cargo.toml',
   'crates/hxvoice-runtime/Cargo.toml',
   'crates/hx-image-decode/Cargo.toml',
@@ -471,15 +462,19 @@ rust_hxfiles_xfer_dep = declare_dependency(
   ],
 )
 
-# hxconn — owner of struct htlc_conn (the E1c flip of network-endgame.md).
-# Exports the hx_conn_* accessor C ABI (was hxconn.c) + the hx_conn_new /
-# _reset / _free lifecycle. The whole C tree links it: every former hxconn.c
-# caller. glib-only (gboolean ABI), so `cargo test -p hxconn` runs headless.
-rust_hxconn_dep = declare_dependency(
+# The GObject layer: the GtkhxSession signal hub, its boxed payload types,
+# and the per-connection state. One crate since the step 3 consolidation —
+# -lgtkhx_session / -lgtkhx_boxed / -lhxconn are now -lgtkhx_core.
+#
+# Every module in it is free of undefined C externs, which is load-bearing:
+# the Tier 2 proto tests link THIS archive on its own (not the gtkhx-ffi
+# façade), so anything extern-ful merged in would break them. hxtask is the
+# same layer but has ten C externs, which is exactly why it stays separate.
+rust_gtkhx_core_dep = declare_dependency(
   sources : rust_build,
   link_args : [
     '-L' + rust_target_dir / 'release',
-    '-lhxconn',
+    '-lgtkhx_core',
   ],
 )
 
@@ -540,43 +535,6 @@ rust_hxbridge_dep = declare_dependency(
   link_args : [
     '-L' + rust_target_dir / 'release',
     '-lhxbridge',
-  ],
-)
-
-# GtkhxSession GObject (Phase R4). The model→view signal hub, now a
-# Rust glib::subclass type. Exports the C ABI the deleted
-# src/gtkhx_session.c used to: gtkhx_session_get_type,
-# gtkhx_session_get_default, and one gtkhx_session_emit_* wrapper per signal.
-# The staticlib has undefined references to the C boxed-type accessors
-# (hx_chat_event_get_type / hx_msg_event_get_type /
-# hx_tracker_server_get_type) which the linking C target resolves from
-# proto_helpers.c / tracker_event.c — same leaf-up "C resolves Rust's
-# externs at final link" shape the other crates use. Pulls in glib/
-# gobject (already C-side deps), no new system-library surface.
-rust_gtkhx_session_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lgtkhx_session',
-  ],
-)
-
-# Boxed signal-payload value-types (Phase R4.2). gtkhx-boxed holds the
-# GObject boxed types carried by GtkhxSession signals — all three:
-# HxMsgEvent (msg.rs), HxChatEvent + HxChatMedia (chat.rs), and
-# HxTrackerServer + HxTrackerV3Meta (tracker.rs). It exports the C ABI
-# the deleted G_DEFINE_BOXED_TYPE registrations in proto_helpers.c /
-# tracker_event.c / tracker_v3_meta.c used to (hx_*_get_type / _copy /
-# _free). Self-contained (glib only): a C target that pulls a _copy /
-# _free symbol links this archive alone without dragging gtkhx-session's
-# still-C boxed externs in via codegen-unit merging. Both the gtkhx
-# binary and the proto unit tests that link the matching producer
-# (proto_helpers.c) carry this dep.
-rust_gtkhx_boxed_dep = declare_dependency(
-  sources : rust_build,
-  link_args : [
-    '-L' + rust_target_dir / 'release',
-    '-lgtkhx_boxed',
   ],
 )
 

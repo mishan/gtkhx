@@ -160,7 +160,7 @@ pub unsafe extern "C" fn hx_cfl_set_filter_argv(cfl: *mut CachedFileList, argv: 
 // ---- the receive handler ----------------------------------------------------
 
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_file_list, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_file_list, gtkhx_session_get_default};
 
 #[cfg(not(test))]
 extern "C" {    /// Give the remote provider a chance to show an empty-state hint before we

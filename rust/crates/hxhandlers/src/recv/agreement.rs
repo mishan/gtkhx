@@ -16,7 +16,7 @@ use std::os::raw::{c_char, c_int, c_void};
 // only linked — a signature drift surfaced as a corrupt call at runtime, or
 // not at all. The `#[cfg(test)]` stubs below still shadow these in test builds.
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_agreement, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_agreement, gtkhx_session_get_default};
 
 /// The server sent no agreement (or a malformed one): the C side should send
 /// `AGREEMENTAGREE` itself to finish login.

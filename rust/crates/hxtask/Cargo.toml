@@ -19,5 +19,5 @@ crate-type = ["rlib"]
 # is externed and resolved at the final C link; cargo test provides in-crate
 # #[cfg(test)] doubles so the suite runs headless.
 [dependencies]
-gtkhx-session = { path = "../gtkhx-session" }
+gtkhx-core = { path = "../gtkhx-core" }
 glib = { workspace = true }

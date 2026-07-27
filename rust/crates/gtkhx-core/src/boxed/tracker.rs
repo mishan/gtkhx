@@ -16,7 +16,7 @@
 //! every scalar field. Size + the ten offsets are pinned by
 //! `_Static_assert`s in `tracker_v3_meta.c`.
 
-use crate::register_once;
+use crate::boxed::register_once;
 use glib::ffi::{g_bytes_ref, g_bytes_unref, g_free, g_malloc0, g_strdup, GBytes, GType};
 use std::ffi::c_char;
 use std::mem::{align_of, offset_of, size_of};

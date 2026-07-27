@@ -80,7 +80,7 @@ fn trans_key(trans: u32) -> gpointer {
 // (the doubles take its place, same signatures) — same shape hxtls-trust uses.
 
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_task_update, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_task_update, gtkhx_session_get_default};
 
 #[cfg(not(test))]
 extern "C" {

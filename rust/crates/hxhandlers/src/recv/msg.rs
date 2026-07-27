@@ -16,7 +16,7 @@
 use std::os::raw::{c_int, c_void};
 
 #[cfg(not(test))]
-use gtkhx_session::{gtkhx_session_emit_msg, gtkhx_session_get_default};
+use gtkhx_core::session::{gtkhx_session_emit_msg, gtkhx_session_get_default};
 #[cfg(not(test))]
 use hxmodel::chat_members::hx_member_model_get_ignore;
 

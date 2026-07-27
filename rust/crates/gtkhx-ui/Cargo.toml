@@ -13,11 +13,9 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+gtkhx-core = { path = "../gtkhx-core" }
 hxhandlers = { path = "../hxhandlers" }
 hxmodel = { path = "../hxmodel" }
-gtkhx-boxed = { path = "../gtkhx-boxed" }
-gtkhx-session = { path = "../gtkhx-session" }
-hxconn = { path = "../hxconn" }
 hxtext = { path = "../hxtext" }
 hx-image-decode = { path = "../hx-image-decode" }
 hxvoice-model = { path = "../hxvoice-model", optional = true }
