@@ -40,8 +40,9 @@ use gtkhx_core::conn::hx_conn_has_cap;
 use hxtext::gtkhx_text_for_wire;
 
 extern "C" {
-    // gtkhx_ui_bridge.c — the active connection.
+    // gtkhx_ui_bridge.c — the active connection + whether it's live.
     fn gtkhx_active_htlc() -> *mut c_void;
+    fn gtkhx_active_connected() -> glib::ffi::gboolean;
     // path helpers (path_util.c / path_hldir.c): current basename (a pointer
     // into `path`) + the wire "hldir" encoding of the parent directory.
     fn dirchar_basename(path: *mut c_char) -> *mut c_char;
@@ -123,6 +124,13 @@ unsafe fn with_wire<R>(text: &str, utf8: bool, is_body: bool, f: impl FnOnce(&[u
 /// `path` is the file's full path (used for the current basename + parent dir);
 /// `new_name` and `comments` are the dialog's editable fields.
 unsafe fn save_file_info(path: &str, new_name: &str, comments: &str) {
+    // The dialog can outlive the connection (left open across a disconnect).
+    // Bail before task_new — otherwise hlwrite_chunks no-ops on the dead fd but
+    // task_new still registers a phantom task. Matches the connected gate the
+    // other gtkhx-ui send paths (broadcast.rs) use.
+    if gtkhx_active_connected() == glib::ffi::GFALSE {
+        return;
+    }
     let htlc = gtkhx_active_htlc();
     if htlc.is_null() {
         return;
