@@ -31,24 +31,27 @@ which `hxnet_htxf_read` already observes.
 
 ## Increments
 
-- **S1.1 — preamble pack → `hxnet_htxf_connect`; delete `htxf_subchannel.c`.**
-  `hotline-proto` already has `build_htxf_hdr` (the 16-byte header) +
-  `HTXF_MAGIC` / `HTXF_HDR_SIZE`. Move the `size64` framing (flag OR-ing,
-  zeroing the legacy 32-bit length, the trailing 8-byte BE size) into
-  `hxnet_htxf_connect`, changing its FFI from `(preamble, preamble_len,
-  xfer_ref, …)` to `(xfer_ref, total_size, type, flags, size64, …)` and packing
-  the handshake internally. Update the ~7 callers; delete
-  `htxf_subchannel.{c,h}`. Self-contained (touches only the preamble).
-- **S1.2 — read/write shims → direct `hxnet_htxf_*`; delete `htxf_io.c`.**
-  Decide where the cancel-boundary check lives: fold the
-  canceled-flag-before-read + ECANCELED reclassification into `hxnet_htxf_read/
-  write` (they already observe the token; add the pre-check reading the handle's
-  `canceled` atomic), or accept token-only cancellation and drop the C
-  reclassification. Replace every `htxf_io_{init,release,read,write,
-  set_read_timeout,abort_arm,abort}` call site (banner.c, xfers.c, network.c,
-  and the tests) with the `hxnet_htxf_*` equivalent, then delete
-  `htxf_io.{c,h}`. Bigger, and touches the cancel path — guard with
-  `test_htxf_cancel` (migrated) + the Tier-3 transfer matrix.
+- **S1.1 — preamble pack → hxnet; delete `htxf_subchannel.c`. _(Shipped.)_**
+  `hotline-proto` gained `build_htxf_preamble` (the `size64` framing — flag
+  OR-ing, zeroed legacy length, trailing 8-byte BE size — over the existing
+  `build_htxf_hdr`), exposed via `hxnet_htxf_pack_preamble` on the same C ABI
+  the old packer had. The ~7 callers switched; `htxf_subchannel.{c,h}` deleted.
+  `hxnet_htxf_connect`'s signature was left unchanged (callers still pre-pack)
+  so the no-preamble passthrough path keeps working — simpler than folding the
+  pack into `connect`.
+- **S1.2 — read/write shims → direct `hxnet_htxf_*`; delete `htxf_io.c`.
+  _(Shipped.)_** Chose **token-only cancellation**: the shim's canceled-flag
+  pre-check + ECANCELED reclassification was dead in production (only banner
+  reads and it never cancels; no production writers; the Rust xfer loops read
+  `hxnet_htxf_read` directly and cancel via the `HtxfAbort` token — the aborted
+  socket makes a parked read return `-1`). Every `htxf_io_*` call site (banner.c,
+  xfers.c, network.c, the tests) now calls `hxnet_htxf_*` directly; banner's
+  read loop became `hxnet_htxf_read_full`; xfers.c closes via a local
+  `xfer_close_channel` (close + NULL, so worker+destructor closes don't
+  double-free). `htxf_io.h` renamed to `hxnet_htxf.h` (pure FFI decls);
+  `htxf_io.c` deleted. `test_htxf_cancel` retargeted at the token directly
+  (obsolete canceled-flag subtest dropped; abort-wakes / abort-before-arm /
+  null-safety / fan-out kept under ASan).
 
 ## Out of scope
 
