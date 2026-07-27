@@ -18,7 +18,7 @@ use std::slice;
 
 use glib::translate::from_glib_none;
 
-use crate::HxFileEntry;
+use crate::files_entry::HxFileEntry;
 use hotline_proto::parse::FTYPE_FLDR;
 
 // ---- gettext shim (mirrors gtkhx-ui::tr, the `gtkhx` text domain) ---------
@@ -52,7 +52,7 @@ fn tr(s: &str) -> String {
 /// `files.c::kind_of_ftype`: a known type's English label run through the
 /// catalog; otherwise `"XXXX file"` with non-printable bytes shown as `?`.
 fn kind_for(ftype_be: [u8; 4]) -> String {
-    match hxfiles_model::kind_label_for(Some(&ftype_be)) {
+    match crate::files::kind_label_for(Some(&ftype_be)) {
         // Static ASCII English label (e.g. "MP3 Audio") → translate.
         Some(label) => tr(label.to_str().unwrap_or("")),
         None => {
@@ -92,7 +92,7 @@ fn fill(store: &gio::ListStore, data: &[u8]) {
         let name = hotline_proto::text::to_utf8(entry.name);
         // Icon + kind both key off the raw big-endian FourCC; the icon also
         // consults the raw (pre-UTF-8) name bytes for "DROP BOX" / "UPLOAD".
-        let icon = hxfiles_model::icon_id_for(Some(&ftype_be), Some(entry.name));
+        let icon = crate::files::icon_id_for(Some(&ftype_be), Some(entry.name));
         let kind = kind_for(ftype_be);
         // Folders carry a child count in fsize (rendered "(N items)"); files
         // carry a byte count. No mtime on the wire (0).

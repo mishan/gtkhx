@@ -1,0 +1,21 @@
+[package]
+rust-version.workspace = true
+name = "hxmodel"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GtkHx client-side model layer: chat conversations + membership, threaded news, files-browser rows and navigation."
+publish = false
+
+[lib]
+# rlib only. The C ABI symbols this crate exports reach the C link
+# through the workspace's single staticlib, gtkhx-ffi.
+crate-type = ["rlib"]
+
+# The union of what the five merged crates needed. glib/gio are for the
+# GObject + ListModel modules (member, news::node, files_entry); the chat and
+# files modules stay pure. No gtk, so `cargo test -p hxmodel` runs headless.
+[dependencies]
+glib = { workspace = true }
+gio = { workspace = true }
+hotline-proto = { path = "../hotline-proto" }

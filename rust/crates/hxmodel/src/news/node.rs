@@ -423,7 +423,7 @@ fn build_category_tree_core(
 ) {
     let count = posts.len();
     let mut nodes: Vec<HxNewsNode> = Vec::with_capacity(count);
-    let mut links: Vec<crate::PostLink> = Vec::with_capacity(count);
+    let mut links: Vec<crate::news::PostLink> = Vec::with_capacity(count);
     for p in posts {
         let node = HxNewsNode::new(NB_KIND_POST, p.subject, path.cloned());
         {
@@ -433,14 +433,14 @@ fn build_category_tree_core(
             imp.mime_type.replace(Some(p.mime_type));
             imp.date.set(p.date);
         }
-        links.push(crate::PostLink {
+        links.push(crate::news::PostLink {
             postid: p.postid,
             parentid: p.parentid,
         });
         nodes.push(node);
     }
 
-    let parent_idx = crate::thread_parent_indices(&links);
+    let parent_idx = crate::news::thread_parent_indices(&links);
 
     let mut top: Vec<usize> = Vec::new();
     for (i, &pi) in parent_idx.iter().enumerate() {

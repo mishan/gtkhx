@@ -13,6 +13,7 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+hxmodel = { path = "../hxmodel" }
 gtkhx-boxed = { path = "../gtkhx-boxed" }
 gtkhx-session = { path = "../gtkhx-session" }
 hxconn = { path = "../hxconn" }
@@ -23,7 +24,6 @@ hx-image-decode = { path = "../hx-image-decode" }
 hxvoice-model = { path = "../hxvoice-model", optional = true }
 hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
 hxvoice-send = { path = "../hxvoice-send", optional = true }
-hxnews-model = { path = "../hxnews-model" }
 hxtls-trust = { path = "../hxtls-trust" }
 # First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
 # pinned in the workspace (rust/Cargo.toml, gtk-rs-core 0.21 family) and
@@ -60,8 +60,6 @@ hotline-proto = { path = "../hotline-proto" }
 # M2 wire-up (Option A): the user list owns an authoritative HxMemberModel
 # (membership as a gio::ListModel) built from hxchat_model::Member data. Pure
 # Rust (glib/gio only, no extra C surface) — rides in gtkhx-ui's archive.
-hxchat-model = { path = "../hxchat-model" }
-hxmember-model = { path = "../hxmember-model" }
 # Bookmark model + TOML persistence + legacy HTsc import/export. The Connect
 # and Bookmarks dialogs call it directly (no C bookmark code remains).
 hxbookmarks = { path = "../hxbookmarks" }

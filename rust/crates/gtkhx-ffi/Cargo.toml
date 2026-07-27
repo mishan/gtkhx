@@ -14,6 +14,7 @@ publish = false
 crate-type = ["staticlib"]
 
 [dependencies]
+hxmodel = { path = "../hxmodel" }
 # --- GObject / UI layer ---
 gtkhx-boxed = { path = "../gtkhx-boxed" }
 gtkhx-session = { path = "../gtkhx-session" }
@@ -45,11 +46,6 @@ hxchat-send = { path = "../hxchat-send" }
 hxnews-send = { path = "../hxnews-send" }
 
 # --- models ---
-hxchat-model = { path = "../hxchat-model" }
-hxmember-model = { path = "../hxmember-model" }
-hxnews-model = { path = "../hxnews-model" }
-hxfiles-model = { path = "../hxfiles-model" }
-hxfiles-entry = { path = "../hxfiles-entry" }
 
 # --- per-session state owners ---
 hxconn = { path = "../hxconn" }

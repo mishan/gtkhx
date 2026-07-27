@@ -14,9 +14,9 @@ use std::os::raw::c_void;
 // used to carry its own `#[repr(C)]` struct mirroring `HxNewsDate` — a second
 // definition kept in sync by hand, which the old `extern "C"` declaration of
 // `hx_news_node_get_date` could not check. One definition, checked by rustc.
-use hxnews_model::HxNewsDate;
+use hxmodel::news::HxNewsDate;
 
-use hxnews_model::node::hx_news_node_get_date;
+use hxmodel::news::node::hx_news_node_get_date;
 
 /// Format an 8-byte Hotline wire timestamp with `fmt` (glib strftime codes) in
 /// the host's local timezone. `None` for the no-timestamp sentinel / out-of-

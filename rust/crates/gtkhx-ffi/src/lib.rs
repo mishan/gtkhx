@@ -76,11 +76,7 @@ use hxchat_send as _;
 use hxnews_send as _;
 
 // --- models ---
-use hxchat_model as _;
-use hxfiles_entry as _;
-use hxfiles_model as _;
-use hxmember_model as _;
-use hxnews_model as _;
+use hxmodel as _;
 
 // --- per-session state owners ---
 use hxconn as _;

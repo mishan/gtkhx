@@ -35,7 +35,7 @@ pub unsafe extern "C" fn gtkhx_files_icon_of_ftype_and_name(
         // per the caller contract.
         Some(unsafe { core::slice::from_raw_parts(name as *const u8, name_len) })
     };
-    crate::icon_id_for(ftype_slice, name_slice)
+    crate::files::icon_id_for(ftype_slice, name_slice)
 }
 
 /// Human label for a Hotline file type — the FFI shim behind the type
@@ -56,7 +56,7 @@ pub unsafe extern "C" fn gtkhx_files_kind_label_for(ftype: *const c_char) -> *co
         // SAFETY: caller guarantees >= 4 readable bytes when non-null.
         Some(unsafe { core::slice::from_raw_parts(ftype as *const u8, 4) })
     };
-    match crate::kind_label_for(ftype_slice) {
+    match crate::files::kind_label_for(ftype_slice) {
         Some(label) => label.as_ptr(),
         None => core::ptr::null(),
     }
@@ -70,7 +70,7 @@ pub unsafe extern "C" fn gtkhx_files_kind_label_for(ftype: *const c_char) -> *co
 // GListStore, the FILE_LIST RPC send, the no-reply watchdog, and the
 // rcv-dispatch plumbing on the C side.
 
-use crate::RemoteListing;
+use crate::files::RemoteListing;
 
 /// Create a fresh listing model rooted at `/`. The caller owns the handle
 /// and must free it with [`gtkhx_files_listing_free`].
@@ -234,7 +234,7 @@ fn string_into_raw(s: String) -> *mut c_char {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::icon;
+    use crate::files::icon;
 
     #[test]
     fn ffi_matches_the_pure_fn() {

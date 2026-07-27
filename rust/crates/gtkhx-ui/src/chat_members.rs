@@ -1,5 +1,5 @@
 //! `chat_members.rs` — the C ABI over the M2 `HxMemberModel` (membership data)
-//! + the M1 nick-completion (`hxchat_model::complete`).
+//! + the M1 nick-completion (`hxmodel::chat::complete`).
 //!
 //! M2 wire-up (Option A). Every chat (public + private) owns an authoritative
 //! `HxMemberModel` (created in `chat_new`, held on `struct chat::member_model`),
@@ -23,8 +23,8 @@ use gtk4::glib;
 use gio::prelude::*;
 use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
 
-use hxchat_model::{complete_styled, InputHistory, Member};
-use hxmember_model::{HxMember, HxMemberModel};
+use hxmodel::chat::{complete_styled, InputHistory, Member};
+use hxmodel::member::{HxMember, HxMemberModel};
 
 /// `HX_NICK_COLOR_NONE` (hotline.h).
 const HX_NICK_COLOR_NONE: u32 = 0xFFFF_FFFF;

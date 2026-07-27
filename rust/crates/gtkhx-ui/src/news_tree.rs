@@ -28,7 +28,7 @@ use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
 // the C bridge (gtkhx_news_fetch_for_expanded).
 const NB_KIND_POST: i32 = 3;
 
-use hxnews_model::node::{hx_news_node_children, hx_news_node_ensure_children, hx_news_node_name};
+use hxmodel::news::node::{hx_news_node_children, hx_news_node_ensure_children, hx_news_node_name};
 
 extern "C" {
     // hxnews-model C ABI — node accessors (the browser externs these too).

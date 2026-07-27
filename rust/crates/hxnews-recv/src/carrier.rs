@@ -20,7 +20,7 @@
 
 use std::ffi::{c_char, c_void, CStr, CString};
 
-use hxnews_model::node::hx_news_node_set_body_fetching;
+use hxmodel::news::node::hx_news_node_set_body_fetching;
 
 extern "C" {    // glib — release the transfer-full target ref a body-less reply won't carry
     // onward.

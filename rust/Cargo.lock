@@ -1782,7 +1782,6 @@ dependencies = [
  "hxagreement-recv",
  "hxbookmarks",
  "hxbridge",
- "hxchat-model",
  "hxchat-recv",
  "hxchat-send",
  "hxcompress",
@@ -1790,17 +1789,14 @@ dependencies = [
  "hxcrypto-aead",
  "hxcrypto-hash",
  "hxcrypto-stream",
- "hxfiles-entry",
- "hxfiles-model",
  "hxfiles-recv",
  "hxfiles-xfer",
  "hxhfs",
  "hxicon-recv",
  "hxmacres",
- "hxmember-model",
+ "hxmodel",
  "hxmsg-recv",
  "hxnet",
- "hxnews-model",
  "hxnews-recv",
  "hxnews-send",
  "hxsound",
@@ -1836,10 +1832,8 @@ dependencies = [
  "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
- "hxchat-model",
  "hxconn",
- "hxmember-model",
- "hxnews-model",
+ "hxmodel",
  "hxnews-recv",
  "hxnews-send",
  "hxtext",
@@ -2011,10 +2005,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxchat-model"
-version = "0.1.0"
-
-[[package]]
 name = "hxchat-recv"
 version = "0.1.0"
 dependencies = [
@@ -2080,20 +2070,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxfiles-entry"
-version = "0.1.0"
-dependencies = [
- "gio 0.21.5",
- "glib 0.21.5",
- "hotline-proto",
- "hxfiles-model",
-]
-
-[[package]]
-name = "hxfiles-model"
-version = "0.1.0"
-
-[[package]]
 name = "hxfiles-recv"
 version = "0.1.0"
 dependencies = [
@@ -2128,12 +2104,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxmember-model"
+name = "hxmodel"
 version = "0.1.0"
 dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
- "hxchat-model",
+ "hotline-proto",
 ]
 
 [[package]]
@@ -2171,21 +2147,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "hxnews-model"
-version = "0.1.0"
-dependencies = [
- "gio 0.21.5",
- "glib 0.21.5",
- "hotline-proto",
-]
-
-[[package]]
 name = "hxnews-recv"
 version = "0.1.0"
 dependencies = [
  "gtkhx-session",
  "hotline-proto",
- "hxnews-model",
+ "hxmodel",
 ]
 
 [[package]]

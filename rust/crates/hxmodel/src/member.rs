@@ -5,8 +5,8 @@
 //! exposed as a `gio::ListModel` so the user list (`HxUserListView`) can bind
 //! to it directly instead of being hand-populated by C `hx_user_list_view_add`
 //! / `_remove` / `_update` calls. Each item is an `HxMember` GObject wrapping
-//! the pure [`hxchat_model::Member`] data. Mutations (`upsert` / `remove` /
-//! `clear`) mirror [`hxchat_model::MemberList`]'s uid-keyed, insertion-ordered
+//! the pure [`crate::chat::Member`] data. Mutations (`upsert` / `remove` /
+//! `clear`) mirror [`crate::chat::MemberList`]'s uid-keyed, insertion-ordered
 //! semantics and emit the correct `items-changed`, so a bound view diffs the
 //! rows for free.
 //!
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use gio::prelude::*;
 use gio::subclass::prelude::*;
 
-use hxchat_model::{Member, NickColor};
+use crate::chat::{Member, NickColor};
 
 // ---- HxMember: one member, as a GObject list item ------------------------
 
@@ -61,7 +61,7 @@ mod member_imp {
 }
 
 glib::wrapper! {
-    /// A chat member as a `gio::ListModel` item. Wraps [`hxchat_model::Member`]
+    /// A chat member as a `gio::ListModel` item. Wraps [`crate::chat::Member`]
     /// data; the display-row (`HxUserRow`) binds to it.
     pub struct HxMember(ObjectSubclass<member_imp::HxMember>);
 }

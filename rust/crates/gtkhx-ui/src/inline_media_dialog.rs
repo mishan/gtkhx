@@ -72,7 +72,6 @@ struct DownloadResult {
 
 type DownloadCb =
     unsafe extern "C" fn(*mut c_void, *const DownloadResult, *mut c_void);
-type DecodeCb = unsafe extern "C" fn(*mut HxInlineMediaDecoded, *mut c_void);
 
 use hx_image_decode::ffi::{HxInlineMediaCaps, HxInlineMediaDecoded};
 use hx_image_decode::ffi::{inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free};

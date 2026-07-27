@@ -19,6 +19,6 @@ crate-type = ["rlib"]
 # Signal emits + carrier stashes still go through the C ABI, resolved at the final
 # C link.
 [dependencies]
-hxnews-model = { path = "../hxnews-model" }
+hxmodel = { path = "../hxmodel" }
 gtkhx-session = { path = "../gtkhx-session" }
 hotline-proto = { path = "../hotline-proto" }
