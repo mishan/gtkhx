@@ -336,13 +336,43 @@ Each step is independently shippable and green.
    | 4 | `task_new` (`hxtask`) | Deliberate type erasure: `rcv_task_*` handlers have heterogeneous arg lists cast to a canonical 3-arg shape. Importing it would force a `transmute` at every caller. |
    | 2 | `hx_tracker_v3_meta_{copy,free}` | `gtkhx-boxed` models the type as an opaque 216-byte buffer; `gtkhx-ui` keeps a typed mirror (R5.1). Two intentional views of the same memory. |
 
-   **The cycle is the finding that matters for step 3.** It is not an argument
-   for keeping the C indirection — it is an argument for *merging*. Folding the
-   send/recv crates into `hxhandlers` (§2a) turns `hxchat-send → hxuser-recv`
-   into an intra-crate module call and dissolves the cycle outright. So step 3
-   should be read as the fix for the leftovers of step 2, not just as
-   tidying.
-3. **Merge the internal families** — §2a–2g, one PR each, mechanical.
+   **The cycle matters for step 3 — but not the way this doc first claimed.**
+   The original note said folding the send/recv crates into `hxhandlers` (§2a)
+   would dissolve it. **That is wrong**, and checking the graph before moving
+   any code is what caught it: `hxchat-recv` and `hxmsg-recv` depend on
+   `gtkhx-ui`, while `gtkhx-ui` depends on `hxnews-recv` and `hxnews-send`.
+   Merging all ten therefore replaces a 3-node cycle with a 2-node one,
+   `gtkhx-ui ↔ hxhandlers`, which Cargo rejects just as firmly.
+
+   The real blocker is that **model code is living in the UI crate**. What the
+   recv crates actually want from `gtkhx-ui` is
+   `gtkhx-ui::{conversation, chat_members}` — `HxConversation`, the member
+   model, `hx_chat_set_subject`. That is model, not view; it ended up in
+   `gtkhx-ui` because the chat-model re-think (ROADMAP M4b.5) landed there.
+
+   So `hxhandlers` has a prerequisite: **move `conversation.rs` and
+   `chat_members.rs` out of `gtkhx-ui` into `hxmodel`** (which now exists and
+   is exactly where they belong — next to `chat` and `member`, which they
+   already use). After that both the 3-node cycle and the merge conflict
+   disappear, because nothing in the handler layer needs the UI crate any
+   more. That relocation is worth doing on its own merits regardless of the
+   merge.
+3. **Merge the internal families** — §2a–2g, one PR each. Verify each merge is
+   cycle-free *before* moving code; the check is cheap and it is what caught
+   the `hxhandlers` problem above. Status:
+
+   - ✅ **`hxcicn` → `hxmacres`** (§2f). Kept the `hxmacres` name rather than
+     renaming to `macresource` — the provenance audit made it internal, and
+     §3's own naming rule says internal crates keep the `hx*` prefix.
+   - ✅ **`hxmodel`** (§2c). Five crates → one; 106 tests carried over.
+   - ⛔ **`hxhandlers`** (§2a) — blocked on moving `conversation.rs` +
+     `chat_members.rs` from `gtkhx-ui` into `hxmodel` (see step 2 above).
+   - ⏳ **`hxcrypto`** (§2b), **`gtkhx-core`** (§2d), **`hxvoice`** (§2e).
+     All three verified cycle-free. Each contains crates from the
+     test-linked 16, so each also needs its `-l<name>` archive references in
+     `tests/meson.build` updated — the only reason they weren't done first.
+
+   Crate count so far: **41 → 35**.
 4. **Relicense** `hx-image-decode` and `hxtls-trust` to `MIT OR Apache-2.0`
    after a file-by-file read-through (§3). `hotline-proto`, `hxhfs`, and
    `macresource` stay GPL-2.0-or-later — hxd-derived. Blocks 5.
