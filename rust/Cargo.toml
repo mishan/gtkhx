@@ -42,6 +42,10 @@ members = [
     "crates/hx-image-decode",
     "crates/feature-unify",
     "crates/hxsound",
+    # The workspace's single staticlib — every other member is an rlib and gets
+    # bundled into libgtkhx_ffi.a through this crate. See its src/lib.rs for the
+    # link-order / duplicate-symbol rationale.
+    "crates/gtkhx-ffi",
 ]
 
 # Shared version pins for the gtk-rs + gstreamer-rs families. Phase R3.0
