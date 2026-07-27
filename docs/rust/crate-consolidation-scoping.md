@@ -314,8 +314,34 @@ Each step is independently shippable and green.
 1. **`gtkhx-ffi` façade.** Every crate → `rlib`; one staticlib; delete the
    link-order commentary. No logic changes. *Prerequisite for 2–5.*
 2. **Convert `extern "C"` sibling edges to Cargo dependencies** where both
-   sides are Rust. This is where the type-safety win lands, and it shrinks the
-   crates before merging them.
+   sides are Rust. ✅ **Mostly done** — 133 → 29 declarations (261 genuine C
+   declarations correctly untouched), 101 path-dep edges in the workspace.
+
+   It paid for itself immediately. rustc caught **five signature drifts** the
+   linker could not, all of them ABI-identical on x86-64 and therefore
+   invisible until now — `*const u8` vs `*const c_char`, and four cases of a
+   bare `*mut c_void` standing in for `*const HtlcConn` / `*mut GObject` /
+   `*mut HxConversation` / `*mut HxChatEvent`. It also eliminated **three
+   hand-synced `#[repr(C)]` struct mirrors**, two of which had already drifted
+   (`DateTime` vs `HxNewsDate`; `Decoded`'s `sniffed_format` typed `c_int`
+   where the real field is `u32`).
+
+   **The 29 that remain, and why** — this is the interesting part, because
+   each category is a real constraint rather than leftover work:
+
+   | count | what | why it stays |
+   |---|---|---|
+   | 15 | `gtkhx-ui` → `hxvoice-{model,runtime,send}` | Only compile under `--features voice`, so the default workspace build doesn't typecheck them. Their callbacks need `Option<fn>` wrapping — a careful pass, not a mechanical one. Genuine remaining work. |
+   | 8 | `gtkhx-ui` ↔ `hxchat-send` ↔ `hxuser-recv` | **A dependency cycle.** Cargo forbids it; `extern "C"` is precisely what lets these three be mutually recursive today. |
+   | 4 | `task_new` (`hxtask`) | Deliberate type erasure: `rcv_task_*` handlers have heterogeneous arg lists cast to a canonical 3-arg shape. Importing it would force a `transmute` at every caller. |
+   | 2 | `hx_tracker_v3_meta_{copy,free}` | `gtkhx-boxed` models the type as an opaque 216-byte buffer; `gtkhx-ui` keeps a typed mirror (R5.1). Two intentional views of the same memory. |
+
+   **The cycle is the finding that matters for step 3.** It is not an argument
+   for keeping the C indirection — it is an argument for *merging*. Folding the
+   send/recv crates into `hxhandlers` (§2a) turns `hxchat-send → hxuser-recv`
+   into an intra-crate module call and dissolves the cycle outright. So step 3
+   should be read as the fix for the leftovers of step 2, not just as
+   tidying.
 3. **Merge the internal families** — §2a–2g, one PR each, mechanical.
 4. **Relicense** `hx-image-decode` and `hxtls-trust` to `MIT OR Apache-2.0`
    after a file-by-file read-through (§3). `hotline-proto`, `hxhfs`, and
