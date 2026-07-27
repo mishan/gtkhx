@@ -19,4 +19,5 @@ crate-type = ["rlib"]
 # Signal emits + carrier stashes still go through the C ABI, resolved at the final
 # C link.
 [dependencies]
+gtkhx-session = { path = "../gtkhx-session" }
 hotline-proto = { path = "../hotline-proto" }

@@ -1821,6 +1821,7 @@ name = "gtkhx-session"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
+ "gtkhx-boxed",
 ]
 
 [[package]]
@@ -1835,6 +1836,8 @@ dependencies = [
  "hxbookmarks",
  "hxchat-model",
  "hxmember-model",
+ "hxnews-model",
+ "hxtls-trust",
  "libadwaita",
 ]
 
@@ -1969,6 +1972,9 @@ dependencies = [
 [[package]]
 name = "hxagreement-recv"
 version = "0.1.0"
+dependencies = [
+ "gtkhx-session",
+]
 
 [[package]]
 name = "hxbookmarks"
@@ -2101,6 +2107,10 @@ dependencies = [
 [[package]]
 name = "hxicon-recv"
 version = "0.1.0"
+dependencies = [
+ "gtkhx-session",
+ "hotline-proto",
+]
 
 [[package]]
 name = "hxmacres"
@@ -2121,6 +2131,10 @@ dependencies = [
 [[package]]
 name = "hxmsg-recv"
 version = "0.1.0"
+dependencies = [
+ "gtkhx-session",
+ "gtkhx-ui",
+]
 
 [[package]]
 name = "hxnet"
@@ -2161,6 +2175,7 @@ dependencies = [
 name = "hxnews-recv"
 version = "0.1.0"
 dependencies = [
+ "gtkhx-session",
  "hotline-proto",
 ]
 

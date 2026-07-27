@@ -12,10 +12,14 @@ publish = false
 # through the workspace's single staticlib, gtkhx-ffi.
 crate-type = ["rlib"]
 
-# std-only. The agreement signal emit (gtkhx-session) is an externed C ABI
-# resolved at the final link; cargo test provides an in-crate #[cfg(test)] double
-# that records the emit, so the suite runs headless. (gtkhx-session is a
-# separately-linked staticlib in the binary, so it can't be taken as an rlib dep
-# here without double-defining its #[no_mangle] symbols — hence the extern-C
-# surface, matching hxchat-recv / hxmsg-recv.)
+# The agreement signal emit is a normal Cargo dependency on gtkhx-session, so
+# rustc type-checks the call. It used to be a hand-written `extern "C"` block
+# resolved only at the final link: gtkhx-session was its own staticlib, and
+# taking it as an rlib dep would have double-defined its #[no_mangle] symbols
+# across two archives. The gtkhx-ffi façade removed that constraint — there is
+# one archive now, so each symbol is defined exactly once.
+#
+# cargo test still shadows the imports with in-crate #[cfg(test)] doubles that
+# record the emit, so the suite stays headless (no GObject, no display).
 [dependencies]
+gtkhx-session = { path = "../gtkhx-session" }

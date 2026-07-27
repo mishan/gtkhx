@@ -10,20 +10,13 @@
 use hotline_proto::hl_date::{parse_hl_date, HlDate, MAC_TO_UNIX_EPOCH_OFFSET};
 use std::os::raw::c_void;
 
-/// `#[repr(C)]` mirror of C's `struct date_time` (hxnews-model's `HxNewsDate`):
-/// a post's timestamp in the parsed 3-field wire form.
-#[repr(C)]
-#[derive(Clone, Copy, Default)]
-struct DateTime {
-    base_year: u16,
-    pad: u16,
-    seconds: u32,
-}
+// The post timestamp type comes from hxnews-model directly now. This module
+// used to carry its own `#[repr(C)]` struct mirroring `HxNewsDate` — a second
+// definition kept in sync by hand, which the old `extern "C"` declaration of
+// `hx_news_node_get_date` could not check. One definition, checked by rustc.
+use hxnews_model::HxNewsDate;
 
-extern "C" {
-    /// Copy a news node's post date into `*out` (hxnews-model).
-    fn hx_news_node_get_date(node: *mut c_void, out: *mut DateTime);
-}
+use hxnews_model::node::hx_news_node_get_date;
 
 /// Format an 8-byte Hotline wire timestamp with `fmt` (glib strftime codes) in
 /// the host's local timezone. `None` for the no-timestamp sentinel / out-of-
@@ -52,8 +45,8 @@ pub(crate) unsafe fn news_node_date_string(node: *mut c_void) -> Option<String> 
     if node.is_null() {
         return None;
     }
-    let mut d = DateTime::default();
-    hx_news_node_get_date(node, &mut d);
+    let mut d = HxNewsDate::default();
+    hx_news_node_get_date(node as *mut glib::gobject_ffi::GObject, &mut d);
     let mut bytes = [0u8; 8];
     bytes[0..2].copy_from_slice(&d.base_year.to_be_bytes());
     bytes[2..4].copy_from_slice(&d.pad.to_be_bytes());

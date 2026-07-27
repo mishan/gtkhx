@@ -10,18 +10,13 @@
 
 use std::os::raw::{c_char, c_int, c_void};
 
+// The singleton `GtkhxSession` GObject and the `agreement` signal emit come
+// from the gtkhx-session crate as a normal Cargo dependency, so rustc checks
+// these signatures. They used to be a hand-written `extern "C"` block, which
+// only linked — a signature drift surfaced as a corrupt call at runtime, or
+// not at all. The `#[cfg(test)]` stubs below still shadow these in test builds.
 #[cfg(not(test))]
-extern "C" {
-    /// The singleton `GtkhxSession` GObject (gtkhx-session).
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::agreement (session*, agreement*, len)` (gtkhx-session).
-    fn gtkhx_session_emit_agreement(
-        self_: *mut c_void,
-        sess: *mut c_void,
-        agreement: *const c_char,
-        len: u16,
-    );
-}
+use gtkhx_session::{gtkhx_session_emit_agreement, gtkhx_session_get_default};
 
 /// The server sent no agreement (or a malformed one): the C side should send
 /// `AGREEMENTAGREE` itself to finish login.

@@ -16,6 +16,7 @@ publish = false
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
+gtkhx-boxed = { path = "../gtkhx-boxed" }
 # Same glib pin as the rest of the workspace (gtk-rs-core 0.21 family).
 # Builds against the libglib-2.0 / libgobject-2.0 the C binary already
 # links, so the system-library surface doesn't grow.

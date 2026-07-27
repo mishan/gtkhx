@@ -286,7 +286,7 @@ fn next_seq() -> u64 {
     SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
-mod ffi;
+pub mod ffi;
 
 #[cfg(test)]
 mod tests;

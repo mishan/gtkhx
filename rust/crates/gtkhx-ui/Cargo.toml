@@ -13,6 +13,8 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+hxnews-model = { path = "../hxnews-model" }
+hxtls-trust = { path = "../hxtls-trust" }
 # First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
 # pinned in the workspace (rust/Cargo.toml, gtk-rs-core 0.21 family) and
 # compiled behind hxbridge's `voice` feature; this crate is the first to

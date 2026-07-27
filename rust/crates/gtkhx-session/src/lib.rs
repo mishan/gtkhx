@@ -68,11 +68,11 @@ use std::sync::OnceLock;
 // ----------------------------------------------------------------------
 
 #[cfg(not(test))]
-extern "C" {
-    fn hx_chat_event_get_type() -> glib::ffi::GType;
-    fn hx_msg_event_get_type() -> glib::ffi::GType;
-    fn hx_tracker_server_get_type() -> glib::ffi::GType;
-}
+use gtkhx_boxed::chat::hx_chat_event_get_type;
+#[cfg(not(test))]
+use gtkhx_boxed::msg::hx_msg_event_get_type;
+#[cfg(not(test))]
+use gtkhx_boxed::tracker::hx_tracker_server_get_type;
 
 // Under `cargo test` there is no other archive to link against, so stub
 // the three accessors with real Rust-registered boxed types. This lets

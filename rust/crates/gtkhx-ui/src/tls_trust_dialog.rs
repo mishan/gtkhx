@@ -25,10 +25,7 @@ use std::rc::Rc;
 /// Mismatch=2), passed through as an `int` by the registered prompt callback.
 const STATUS_MISMATCH: c_int = 2;
 
-extern "C" {
-    /// hxtls-trust — install (Some) or clear (None) the TOFU prompt callback.
-    fn hx_tls_trust_set_prompt(cb: Option<PromptFn>);
-}
+use hxtls_trust::ffi::hx_tls_trust_set_prompt;
 
 /// The callback signature `hxtls-trust` calls. See its `PromptFn`.
 type PromptFn = extern "C" fn(

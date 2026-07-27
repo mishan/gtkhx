@@ -20,3 +20,5 @@ crate-type = ["rlib"]
 # taken as rlib deps here without double-defining their #[no_mangle] symbols —
 # hence the extern-C surface, matching hxnews-recv / hxchat-recv.)
 [dependencies]
+gtkhx-session = { path = "../gtkhx-session" }
+hotline-proto = { path = "../hotline-proto" }

@@ -19,19 +19,7 @@ use carrier::{
     gnews_catalog_set_parsed, gnews_folder_set_parsed, news_post_fetch_failed, news_post_new,
 };
 
-extern "C" {
-    // The catlist / dirlist / thread-reply parses are now native
-    // (hotline_proto::parse::*); the owned catlist / dirlist handles are boxed
-    // here and freed C-side (gtkhx_proto_catlist_free / _dirlist_free reclaim the
-    // same Box<CatList> / Box<DirList>).
-    // gtkhx-session — the singleton + the news signal emits.
-    fn gtkhx_session_get_default() -> *mut c_void;
-    fn gtkhx_session_emit_news_catalog(self_: *mut c_void, gcnews: *mut c_void);
-    fn gtkhx_session_emit_news_folder(self_: *mut c_void, gfnews: *mut c_void);
-    fn gtkhx_session_emit_news_thread(self_: *mut c_void, post: *mut c_void);
-    fn gtkhx_session_emit_news_post(self_: *mut c_void, htlc: *mut c_void, news: *const u8, len: u16);
-    fn gtkhx_session_emit_news_file(self_: *mut c_void, htlc: *mut c_void, news: *const u8, len: u16);
-}
+use gtkhx_session::{gtkhx_session_emit_news_catalog, gtkhx_session_emit_news_file, gtkhx_session_emit_news_folder, gtkhx_session_emit_news_post, gtkhx_session_emit_news_thread, gtkhx_session_get_default};
 
 /// `void hx_news_post_recv (htlc, bytes, len)` — emit the flat-news `news-post`
 /// signal for one appended NEWSDATA chunk. [`hx_rcv_news_post`] calls this once
@@ -42,7 +30,7 @@ extern "C" {
 /// forwarded to the signal.
 #[no_mangle]
 pub unsafe extern "C" fn hx_news_post_recv(htlc: *mut c_void, bytes: *const u8, len: usize) {
-    gtkhx_session_emit_news_post(gtkhx_session_get_default(), htlc, bytes, len as u16);
+    gtkhx_session_emit_news_post(gtkhx_session_get_default(), htlc, bytes.cast(), len as u16);
 }
 
 /// `void hx_rcv_news_post (htlc, frame, frame_len)` — the HTLS_HDR_NEWS_POST
@@ -77,7 +65,7 @@ pub unsafe extern "C" fn hx_rcv_news_post(htlc: *mut c_void, frame: *const u8, f
 /// forwarded to the signal.
 #[no_mangle]
 pub unsafe extern "C" fn hx_news_file_recv(htlc: *mut c_void, bytes: *const u8, len: usize) {
-    gtkhx_session_emit_news_file(gtkhx_session_get_default(), htlc, bytes, len as u16);
+    gtkhx_session_emit_news_file(gtkhx_session_get_default(), htlc, bytes.cast(), len as u16);
 }
 
 /// `void rcv_task_news_file (htlc, frame, frame_len, ptr, data)` — the flat

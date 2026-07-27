@@ -16,14 +16,9 @@
 use std::os::raw::{c_int, c_void};
 
 #[cfg(not(test))]
-extern "C" {
-    /// The singleton `GtkhxSession` GObject (gtkhx-session).
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::msg (HxMsgEvent* boxed)` (gtkhx-session).
-    fn gtkhx_session_emit_msg(self_: *mut c_void, event: *mut c_void);
-    /// Whether `uid` is on the per-chat ignore list (hxmember-model).
-    fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
-}
+use gtkhx_session::{gtkhx_session_emit_msg, gtkhx_session_get_default};
+#[cfg(not(test))]
+use gtkhx_ui::chat_members::hx_member_model_get_ignore;
 
 /// Outcome of [`hx_msg_recv`], telling the C handler what happened / what to do.
 /// The sender was on the ignore list — nothing emitted, nothing broadcast, and

@@ -11,25 +11,9 @@
 use std::os::raw::c_void;
 
 #[cfg(not(test))]
-extern "C" {
-    /// Parse an `ICON_CHANGE` broadcast body: writes `*out_uid` and returns
-    /// true when a uid is present (hotline-proto).
-    fn gtkhx_proto_parse_icon_change(buf: *const u8, len: usize, out_uid: *mut u16) -> bool;
-    /// The singleton `GtkhxSession` GObject (gtkhx-session).
-    fn gtkhx_session_get_default() -> *mut c_void;
-    /// Fire `GtkhxSession::gif-icon-changed (htlc, uid)` (gtkhx-session).
-    fn gtkhx_session_emit_gif_icon_changed(self_: *mut c_void, htlc: *mut c_void, uid: u16);
-    /// True iff `gif[..len]` starts with a GIF87a/89a signature (hotline-proto).
-    fn gtkhx_proto_gif_icon_is_gif(gif: *const u8, len: usize) -> bool;
-    /// Fire `GtkhxSession::gif-icon-data (htlc, uid, gif, len)` (gtkhx-session).
-    fn gtkhx_session_emit_gif_icon_data(
-        self_: *mut c_void,
-        htlc: *mut c_void,
-        uid: u16,
-        gif: *const c_void,
-        len: u32,
-    );
-}
+use gtkhx_session::{gtkhx_session_emit_gif_icon_changed, gtkhx_session_emit_gif_icon_data, gtkhx_session_get_default};
+#[cfg(not(test))]
+use hotline_proto::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
 
 /// `void hx_icon_data_recv (htlc, uid, gif, len)` — publish a user's GIF avatar
 /// bytes (from an `ICON_GET` reply or an `ICON_GETLIST` entry), upholding the
