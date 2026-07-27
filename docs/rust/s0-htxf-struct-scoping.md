@@ -1,7 +1,7 @@
 # S0 — flip `struct htxf_conn` to Rust (Arc + atomics)
 
 > The lifecycle keystone of the xfer-worker migration
-> (`docs/rust/xfer-worker-to-rust-scoping.md`). W1–W3 moved the *transfer logic*
+> (`docs/rust/ROADMAP.md`, the xfer-worker migration section). W1–W3 moved the *transfer logic*
 > (solo + folder, both directions) into `hxnet::xfer`; the worker already
 > references no C symbols and drives everything through `HxnetXferParams` /
 > `HxnetFolderParams`. What stays in C is the **refcounted, cross-thread

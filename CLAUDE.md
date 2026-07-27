@@ -59,7 +59,7 @@ Other top-level dirs:
   `docs/RUST-ROADMAP.md` for the migration plan.
 
   **The HTXF file-transfer path is now Rust end-to-end** (the "xfer-worker →
-  Rust" migration, W1–W3 + S0 + S1; see `docs/rust/xfer-worker-to-rust-scoping.md`
+  Rust" migration, W1–W3 + S0 + S1; see `docs/rust/ROADMAP.md` (xfer-worker migration section)
   and the `s0-`/`s1-` scoping docs). `hxnet::htxf` owns the subchannel transport
   (socket / TLS / AEAD framing / cancellation token / handshake preamble pack);
   `hxnet::xfer` owns the single-file + folder copy loops (the

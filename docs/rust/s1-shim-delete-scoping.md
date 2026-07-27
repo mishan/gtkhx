@@ -1,7 +1,7 @@
 # S1 — consolidate banner + delete the HTXF C shims
 
 > Cleanup tail of the xfer-worker migration
-> (`docs/rust/xfer-worker-to-rust-scoping.md`). After W1–W3 moved the transfer
+> (`docs/rust/ROADMAP.md`, the xfer-worker migration section). After W1–W3 moved the transfer
 > logic to `hxnet::xfer` and S0 moved the `struct htxf_conn` lifecycle behind
 > `hx_htxf_*`, two thin C shims over `hxnet`'s HTXF channel remain:
 >
