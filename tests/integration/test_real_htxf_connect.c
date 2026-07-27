@@ -61,7 +61,7 @@ drain_and_check (struct htxf_conn *htxf, guint64 xfer_size)
     while (got < xfer_size) {
         ssize_t r = hxnet_htxf_read ((HtxfConn *) htxf->hx, payload + got, xfer_size - got);
         if (r <= 0) {
-            g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d (%s)",
+            g_test_message ("hxnet_htxf_read returned %zd at got=%zu errno=%d (%s)",
                             r, got, errno, g_strerror (errno));
             break;
         }

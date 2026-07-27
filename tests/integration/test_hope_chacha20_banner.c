@@ -248,14 +248,14 @@ test_hope_chacha20_banner_htxf (void)
         /*verify_cert=*/NULL, /*user_data=*/NULL);
     g_assert_nonnull (xfer.hx);
 
-    /* Read `size` body bytes through htxf_io_read — the hxnet channel
+    /* Read `size` body bytes through hxnet_htxf_read — the hxnet channel
      * consumes AEAD frames off the socket and reassembles plaintext. */
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
         ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
         if (r <= 0) {
-            g_test_message ("htxf_io_read returned %zd at got=%zu errno=%d "
+            g_test_message ("hxnet_htxf_read returned %zd at got=%zu errno=%d "
                             "(%s)",
                             r, got, errno, g_strerror (errno));
             break;

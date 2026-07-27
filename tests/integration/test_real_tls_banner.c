@@ -197,14 +197,14 @@ test_banner_htxf_mode_tls (void)
         goto cleanup;
     }
 
-    /* Drain the full image body through production htxf_io_read
+    /* Drain the full image body through production hxnet_htxf_read
      * (passthrough leg — no AEAD). */
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
         ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
         if (r <= 0) {
-            g_test_message ("htxf_io_read returned %zd at got=%zu", r, got);
+            g_test_message ("hxnet_htxf_read returned %zd at got=%zu", r, got);
             break;
         }
         got += (gsize) r;

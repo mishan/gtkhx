@@ -923,14 +923,19 @@ pub extern "C" fn hxnet_htxf_abort_new() -> *const HtxfAbort {
     Arc::into_raw(Arc::new(HtxfAbort::new()))
 }
 
-/// Arm `token` with `handle`'s socket and clone a token ref into
-/// `handle` so its read/write can observe the aborted flag. Called once
-/// by the worker right after [`hxnet_htxf_connect`] succeeds. No-op if
-/// either argument is NULL, or if `handle`'s socket can't be duplicated
-/// — in that case the handle is left unarmed (its read/write won't
-/// observe the flag), and cancellation falls back to the C-side
-/// `htxf->canceled` boundary check, which is checked on every transfer
-/// read/write regardless. Does not consume the caller's `token` ref.
+/// Publish `token` into `handle` and (if possible) arm it with `handle`'s
+/// socket so a *parked* read/write can be woken. Called once by the worker
+/// right after [`hxnet_htxf_connect`] succeeds. No-op only if either
+/// argument is NULL. Does not consume the caller's `token` ref.
+///
+/// The token is now the sole cancellation mechanism (S1 removed the C-side
+/// `htxf->canceled` boundary check), so publishing is unconditional: even
+/// when `handle`'s socket can't be duplicated — so an already-parked read
+/// can't be interrupted — the handle still holds the token, and
+/// [`hxnet_htxf_read`]'s `is_aborted()` pre-check observes a cancel that
+/// arrives between reads. Leaving `h.abort` None would instead make the
+/// transfer silently uncancellable, so the socket-arm is best-effort but
+/// the publish is not.
 ///
 /// # Safety
 /// `handle` must be a live handle from [`hxnet_htxf_connect`]; `token` must
@@ -941,29 +946,26 @@ pub unsafe extern "C" fn hxnet_htxf_abort_arm(handle: *mut HtxfConn, token: *con
         return;
     }
     let h = &mut *handle;
-    // Only arm if we can duplicate the socket: the clone is what lets the
-    // token wake a *parked* read/write. If the dup fails we leave
-    // `h.abort` None and let the C-side canceled check carry cancellation.
-    // (Note this is "h.abort is Some ⇒ a wake-socket was handed to the
-    // token", not a guarantee the wake always fires: HtxfAbort::arm drops
-    // the socket if an abort already raced ahead of arm — see its doc — so
-    // in that rare case the latched flag is still observed but an
-    // already-parked read can't be woken.)
-    let Some(sock) = h.inner.try_clone_socket() else {
-        return;
-    };
     // Borrow the C-owned Arc without dropping its ref (ManuallyDrop so
     // the implicit drop at scope end doesn't decrement).
     let arc = ManuallyDrop::new(Arc::from_raw(token));
-    // Publish the token to the handle BEFORE arming the wake-socket, so
-    // read/write observe the aborted flag the instant the socket becomes
-    // shut-down-able. If we armed first, a concurrent abort in the gap
-    // could shut the socket down (waking a parked read) while `h.abort`
-    // was still None — the post-shutdown Ok(0) would then read back as a
-    // clean EOF instead of a cancel. Clone a ref for the HtxfConn (+1);
-    // dropped when the channel closes.
+    // Publish the token to the handle unconditionally, BEFORE arming the
+    // wake-socket. Ordering matters: if we armed first, a concurrent abort
+    // in the gap could shut the socket down (waking a parked read) while
+    // `h.abort` was still None — the post-shutdown Ok(0) would then read
+    // back as a clean EOF instead of a cancel. Clone a ref for the
+    // HtxfConn (+1); dropped when the channel closes.
     h.abort = Some(Arc::clone(&arc));
-    arc.arm(sock);
+    // Arm the wake-socket if the socket can be duplicated: the clone is
+    // what lets an abort wake an *already-parked* read/write. If the dup
+    // fails the token is still published above, so a cancel between reads
+    // is observed via the `is_aborted()` pre-check — best-effort, but the
+    // transfer stays cancellable either way. (HtxfAbort::arm also drops the
+    // socket if an abort already raced ahead of arm — see its doc — same
+    // "flag still observed, parked read not woken" outcome.)
+    if let Some(sock) = h.inner.try_clone_socket() {
+        arc.arm(sock);
+    }
 }
 
 /// Flip `token` to aborted and shut its wake-socket down so a parked

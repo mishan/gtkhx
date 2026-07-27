@@ -849,10 +849,41 @@ references no C symbols.
 
 Cancellation rides the `HtxfAbort` token (`hxnet_htxf_abort_*`): `xfer_delete` /
 `xfers_delete_all` abort it, shutting the subchannel socket so a parked
-`hxnet_htxf_read` returns `-1`. Covered by `test_htxf_cancel` (ASan),
-`test_htxf_layout`, the `hxnet` crate's loopback round-trip tests, and the Tier-3
-`file_get` / `file_put` / `folder_roundtrip` / `banner` matrix. Increment detail:
-`docs/rust/s0-htxf-struct-scoping.md`, `docs/rust/s1-shim-delete-scoping.md`.
+`hxnet_htxf_read` returns `-1`. `hxnet_htxf_abort_arm` publishes the token into
+the handle unconditionally (best-effort socket-arm on top), so a cancel is still
+observed via `hxnet_htxf_read`'s `is_aborted()` pre-check even when the socket
+can't be duplicated — the token being the *sole* cancellation mechanism, never
+leaving the handle unarmed is what keeps a transfer cancellable. Covered by
+`test_htxf_cancel` (ASan), `test_htxf_layout`, the `hxnet` crate's loopback
+round-trip tests, and the Tier-3 `file_get` / `file_put` / `folder_roundtrip` /
+`banner` matrix.
+
+Design decisions worth keeping (these folded in the former `s0-`/`s1-` scoping
+docs):
+
+- **S0 refcount stays intrusive-atomic, not `Arc` across FFI.** The "N pending
+  idles each hold a ref" pattern maps badly onto `Arc<T>` over the C boundary
+  (every `post_*` site would hand-roll `into_raw`/`from_raw`), so the handle
+  keeps an intrusive `refcount: AtomicI32` behind `hx_htxf_ref`/`_unref` — a 1:1
+  port of the old `g_atomic_int_inc`/`_dec_and_test`, allocation + free moved to
+  Rust. Revisit `Arc` only once C no longer touches the struct's fields.
+- **S0 is a `#[repr(C)]` mirror, not a full opaque type.** ~9 C files read
+  `htxf->…` scalars directly; opaque-ifying all of them buys no lifecycle safety
+  for large churn, so only the three lifecycle fields (`refcount` / `canceled` /
+  `total_pos`) moved behind accessors. The layout is pinned at runtime by
+  `test_htxf_layout` (chosen over `_Static_assert` because `MAXPATHLEN` makes a
+  hard-coded size fragile) — it immediately caught that `compat.h` clamps
+  `MAXPATHLEN` to a fixed 4095, not the host `PATH_MAX`.
+- **S1 is token-only cancellation.** The deleted `htxf_io.c` shim's canceled-flag
+  pre-check + ECANCELED-vs-EIO reclassification was dead in production (only
+  `banner.c` read through it and it never cancels; no production writers; the
+  Rust xfer loops read `hxnet_htxf_read` directly and cancel via the token), so
+  it was dropped rather than ported.
+- **S1 left `hxnet_htxf_connect`'s signature unchanged.** The preamble packer
+  became a *separate* `hxnet_htxf_pack_preamble` (over
+  `hotline-proto::build_htxf_preamble`) rather than folding the pack into
+  `connect`, so `connect`'s no-preamble passthrough path (used by
+  `test_htxf_cancel`) keeps working.
 
 ---
 
