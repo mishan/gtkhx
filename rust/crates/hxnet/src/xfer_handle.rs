@@ -67,10 +67,10 @@ struct Qbuf {
 /// ref/cancel/total_pos ABI below (a faithful port of the old `g_atomic_int_*`).
 #[repr(C)]
 pub struct HtxfHandle {
-    data_size: u64,
-    data_pos: u64,
-    rsrc_size: u64,
-    rsrc_pos: u64,
+    pub data_size: u64,
+    pub data_pos: u64,
+    pub rsrc_size: u64,
+    pub rsrc_pos: u64,
     pub total_size: u64,
     total_pos: AtomicU64,
     pub srv_data_size: u64,
@@ -99,9 +99,9 @@ pub struct HtxfHandle {
     /// The C anonymous `struct { guint32 retry:1, ... } opt` — 4 bytes of
     /// bitfields; held as a plain `u32`, the C side owns the bit semantics.
     opt: u32,
-    preview: *mut c_void,
+    pub preview: *mut c_void,
     aead_active: c_int,
-    hx: *mut c_void,
+    pub hx: *mut c_void,
     pub abort: *mut c_void,
 }
 

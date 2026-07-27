@@ -126,9 +126,17 @@ become native intra-crate calls once the shell is in hxhandlers.
   (`htxf_destructor` un-static'd so xfer_init can register it). Two principled
   C-ABI exceptions: the `opt` bitfield setters (C owns the bit layout) and the
   `gtkhx_prefs.queuedl` read (`hx_prefs_queuedl` accessor).
-- **Y3 — worker dispatch + params.** `xfer_ready_write`/`xfer_worker_entry` + the
-  four `*_thread`s + `xfer_recv_params`/`_send_params`/`_folder_params` +
-  `xfer_progress_bump`. Runs the blocking-pool transfer.
+- **Y3 — worker dispatch + params. ✅ SHIPPED.** `xfer_ready_write` (takes the
+  worker ref + spawns) / `xfer_worker_entry` (dispatch on `opt.folder`×`type`) +
+  the four `*_thread`s (`get`/`folder_get`/`put`/`folder_put`) +
+  `xfer_recv_params`/`_send_params`/`_folder_params` (native fill of
+  `HxnetXferParams`/`HxnetFolderParams`) + `xfer_progress_bump`. Pulled
+  `xfer_close_channel` forward from Y5 (the workers call it 4× — keeping it C
+  would have been a Rust→C→Rust bounce over `hxnet_htxf_close`); the still-C
+  `htxf_destructor` now externs it. `htxf_ref` deleted (`xfer_ready_write` uses
+  native `hx_htxf_ref`). New opt-bit getters `hx_htxf_opt_folder`/`_large`
+  (htxf_accessors.c; the `opt` bitfield stays C-owned). Remaining C in xfers.c:
+  `xfer_go`/`xfer_go_timer` + local-path helpers (Y4) + `htxf_destructor` (Y5).
 - **Y4 — wire build + path.** `xfer_go`/`xfer_go_timer` +
   `uniquify_local_path`/`local_path_exists`. The FILE_GET/PUT chunk build +
   resume-offset logic + task registration. Most protocol-entangled.

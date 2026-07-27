@@ -30,16 +30,17 @@ extern struct htxf_conn *xfer_new_folder (const char *path,
                                           const char *remotedir,
                                           const char *remotename,
                                           gsize remotename_len, guint16 type);
-/* The xfers[] list + reorder/lookup/removal (Y1) + construction / progress /
- * completion marshaling (Y2) moved to Rust (hxhandlers::xfer). These decls keep
- * the C ABI the xfers.c worker shell + tasks.c / rcv.c / gtkhx.c call.
- * post_file_update is called from the transfer worker threads (still C);
- * xfer_completion_entry is handed to the hxbridge spawn as the completion cb. */
+/* The xfers[] list + reorder/lookup/removal (Y1), construction / progress /
+ * completion marshaling (Y2), and the worker dispatch + params (Y3) moved to
+ * Rust (hxhandlers::xfer). These decls keep the C ABI that tasks.c / rcv.c /
+ * gtkhx.c still call in through. */
 extern void post_file_update (struct htxf_conn *htxf);
 extern void xfer_completion_entry (void *arg);
 /* The last-ref GTK/preview + channel teardown (still C until Y5); the Rust
- * xfer_init registers it once via hx_htxf_set_destructor. */
+ * xfer_init registers it once via hx_htxf_set_destructor. htxf_destructor closes
+ * the subchannel through the Rust xfer_close_channel (hxhandlers::xfer, Y3). */
 extern void htxf_destructor (struct htxf_conn *htxf);
+extern void xfer_close_channel (struct htxf_conn *htxf);
 extern void xfer_registry_add (struct htxf_conn *htxf);
 extern int xfer_count (void);
 extern void xfer_remove_from_list (struct htxf_conn *htxf);

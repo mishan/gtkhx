@@ -20,8 +20,20 @@ hx_htxf_opt_retry (const struct htxf_conn *htxf)
     return htxf->opt.retry ? 1 : 0;
 }
 
+int
+hx_htxf_opt_folder (const struct htxf_conn *htxf)
+{
+    return htxf->opt.folder ? 1 : 0;
+}
+
+int
+hx_htxf_opt_large (const struct htxf_conn *htxf)
+{
+    return htxf->opt.large ? 1 : 0;
+}
+
 /* opt is a C bitfield, so its layout is the C compiler's — the Rust xfers shell
- * sets these two bits through here rather than poking the u32 mirror. */
+ * reads/sets these bits through here rather than poking the u32 mirror. */
 void
 hx_htxf_set_opt_preview (struct htxf_conn *htxf, int v)
 {

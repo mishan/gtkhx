@@ -65,6 +65,8 @@ extern int hx_htxf_in_list (struct htxf_conn *htxf);
 /* Getters. */
 extern int          hx_htxf_opt_retry (const struct htxf_conn *htxf);
 extern int          hx_htxf_opt_preview (const struct htxf_conn *htxf);
+extern int          hx_htxf_opt_folder (const struct htxf_conn *htxf);
+extern int          hx_htxf_opt_large (const struct htxf_conn *htxf);
 /* opt-bitfield setters (C owns the bit layout) — used by the Rust xfers shell's
  * xfer_new / xfer_new_folder. */
 extern void         hx_htxf_set_opt_preview (struct htxf_conn *htxf, int v);

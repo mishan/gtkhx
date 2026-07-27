@@ -16,11 +16,20 @@
 use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
-use hxnet::htxf::{hxnet_htxf_abort, HtxfAbort};
-use hxnet::xfer_handle::{
-    hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref, hx_htxf_set_destructor,
-    hx_htxf_unref, HtxfHandle,
+use hxnet::htxf::{hxnet_htxf_abort, hxnet_htxf_close, HtxfAbort, HtxfConn};
+use hxnet::xfer::{
+    hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
+    hxnet_xfer_folder_send_all, HxnetFolderParams, HxnetXferParams,
 };
+use hxnet::xfer_handle::{
+    hx_htxf_add_total_pos, hx_htxf_cancel, hx_htxf_is_canceled, hx_htxf_new, hx_htxf_ref,
+    hx_htxf_set_destructor, hx_htxf_set_total_pos, hx_htxf_unref, HtxfHandle,
+};
+
+/// `FILE_DONE` (src/sound.h) — the transfer-complete chime.
+const FILE_DONE: c_int = 3;
+/// `XFER_GET` (src/protocol.h).
+const XFER_GET: u8 = 0;
 
 // C environment resolved at the final link; #[cfg(test)] doubles below let
 // `cargo test -p hxhandlers` run headless (same shape recv/files.rs uses).
@@ -50,6 +59,29 @@ extern "C" {
     /// (`g_main_context_invoke`); thread-safe, used to marshal a worker-thread
     /// progress update back to the main loop.
     fn gtkhx_bridge_post_to_main(func: glib::ffi::GSourceFunc, user_data: *mut c_void);
+    /// hxbridge — run `worker` on the tokio blocking pool, then `completion` on
+    /// the GLib main loop once it returns (same shim banner.c uses).
+    fn gtkhx_bridge_spawn_blocking_with_idle(
+        worker: unsafe extern "C" fn(*mut c_void),
+        completion: unsafe extern "C" fn(*mut c_void),
+        user_data: *mut c_void,
+    );
+    /// network.c — open the HTXF subchannel for this transfer (thin wrapper over
+    /// hxnet_htxf_connect + abort-arm). Returns FALSE on failure. Worker thread.
+    fn htxf_connect(htxf: *mut HtxfHandle) -> glib::ffi::gboolean;
+    /// sound.c — play a chime by id (FILE_DONE here). Worker thread.
+    fn play_sound(sound: c_int);
+    /// preview.c — the GTK preview-window feed. Reached only through the receive
+    /// param callbacks; cast to the void*-first shape hxnet::xfer expects (they
+    /// really take `hx_preview *`, ABI-identical to a leading pointer arg).
+    fn hx_preview_chunk(preview: *mut c_void, buf: *const c_char, len: usize);
+    fn hx_preview_set_info(preview: *mut c_void, type_: *const c_char, creator: *const c_char);
+    fn hx_preview_done(preview: *mut c_void);
+    /// htxf_accessors.c — read the opt bitfield bits (C owns the layout).
+    /// `*const c_void` htxf to match recv/xfer.rs's existing declaration.
+    fn hx_htxf_opt_preview(htxf: *const c_void) -> c_int;
+    fn hx_htxf_opt_folder(htxf: *const c_void) -> c_int;
+    fn hx_htxf_opt_large(htxf: *const c_void) -> c_int;
 }
 
 thread_local! {
@@ -441,6 +473,197 @@ pub unsafe extern "C" fn xfer_completion_entry(arg: *mut c_void) {
     glib::ffi::g_idle_add(Some(xfer_cleanup_dispatch), arg);
 }
 
+// ---- Y3: worker dispatch + params ------------------------------------------
+
+/// `void xfer_close_channel(struct htxf_conn *htxf)` — close the hxnet HTXF
+/// channel and clear the slot. Idempotent: the worker closes on completion, then
+/// htxf_destructor closes again on the last unref; the NULL after the first close
+/// makes the second a no-op (`hxnet_htxf_close` is NULL-safe), preventing a
+/// double-free. Still called by the C `htxf_destructor` (stays C until Y5).
+///
+/// # Safety
+/// `htxf` is a live handle.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_close_channel(htxf: *mut HtxfHandle) {
+    hxnet_htxf_close((*htxf).hx as *mut HtxfConn);
+    (*htxf).hx = std::ptr::null_mut();
+}
+
+/// The per-chunk progress callback the hxnet::xfer worker calls (passed by value
+/// in the params so the leaf hxnet crate never references a C symbol): bump the
+/// byte counter (atomic) and post a tasks-window update. Runs on the worker
+/// thread; `user_data` is the htxf.
+///
+/// # Safety
+/// `user_data` is a live htxf; callable from the worker thread.
+unsafe extern "C" fn xfer_progress_bump(user_data: *mut c_void, delta: u64) {
+    let htxf = user_data as *mut HtxfHandle;
+    hx_htxf_add_total_pos(htxf, delta);
+    post_file_update(htxf);
+}
+
+/// Fill an [`HxnetXferParams`] for a receive of `file_budget` bytes off `htxf`.
+/// The preview hooks are the `hx_preview_*` view functions (they only ever get
+/// handed back the `htxf->preview` read here). Solo-download only; the folder loop
+/// builds its own preview-less per-file params.
+unsafe fn xfer_recv_params(htxf: *mut HtxfHandle, file_budget: u64) -> HxnetXferParams {
+    let h = &*htxf;
+    HxnetXferParams {
+        hx: h.hx as *mut HtxfConn,
+        path: h.path.as_ptr(),
+        file_budget,
+        data_pos: h.data_pos,
+        rsrc_pos: h.rsrc_pos,
+        opt_preview: hx_htxf_opt_preview(htxf as *const c_void),
+        opt_folder: hx_htxf_opt_folder(htxf as *const c_void),
+        opt_large: hx_htxf_opt_large(htxf as *const c_void),
+        preview: h.preview,
+        user_data: htxf as *mut c_void,
+        progress: Some(xfer_progress_bump),
+        preview_chunk: Some(hx_preview_chunk),
+        preview_set_info: Some(hx_preview_set_info),
+        preview_done: Some(hx_preview_done),
+        data_size: 0,
+        rsrc_size: 0,
+    }
+}
+
+/// Fill an [`HxnetXferParams`] for an upload (send) of `htxf`. No preview; the
+/// send worker uses `data_size`/`rsrc_size` + the resume offsets. Solo-upload
+/// only; the folder loop builds its own per-file params.
+unsafe fn xfer_send_params(htxf: *mut HtxfHandle) -> HxnetXferParams {
+    let h = &*htxf;
+    HxnetXferParams {
+        hx: h.hx as *mut HtxfConn,
+        path: h.path.as_ptr(),
+        file_budget: 0,
+        data_pos: h.data_pos,
+        rsrc_pos: h.rsrc_pos,
+        opt_preview: 0,
+        opt_folder: hx_htxf_opt_folder(htxf as *const c_void),
+        opt_large: hx_htxf_opt_large(htxf as *const c_void),
+        preview: std::ptr::null_mut(),
+        user_data: htxf as *mut c_void,
+        progress: Some(xfer_progress_bump),
+        preview_chunk: None,
+        preview_set_info: None,
+        preview_done: None,
+        data_size: h.data_size,
+        rsrc_size: h.rsrc_size,
+    }
+}
+
+/// Fill an [`HxnetFolderParams`] for a folder receive or send. The Rust folder
+/// loop builds each per-file path from `base_path` itself, so `htxf->path` (the
+/// tree root) is passed straight through and never mutated.
+unsafe fn xfer_folder_params(htxf: *mut HtxfHandle) -> HxnetFolderParams {
+    let h = &*htxf;
+    HxnetFolderParams {
+        hx: h.hx as *mut HtxfConn,
+        base_path: h.path.as_ptr(),
+        opt_preview: hx_htxf_opt_preview(htxf as *const c_void),
+        opt_folder: hx_htxf_opt_folder(htxf as *const c_void),
+        opt_large: hx_htxf_opt_large(htxf as *const c_void),
+        user_data: htxf as *mut c_void,
+        progress: Some(xfer_progress_bump),
+    }
+}
+
+/// Solo download worker: connect the subchannel, run the single-file receive
+/// loop, chime + stamp the final byte count on success. Always closes the channel
+/// on the way out (the old `goto ret`). Cleanup (unlink + worker-ref drop) is
+/// deferred to `xfer_completion_entry` on the main thread, after every queued
+/// progress idle.
+unsafe fn get_thread(htxf: *mut HtxfHandle) {
+    if htxf_connect(htxf) != glib::ffi::GFALSE {
+        let params = xfer_recv_params(htxf, (*htxf).total_size);
+        if hxnet_xfer_file_recv_one(&params) == 0 {
+            play_sound(FILE_DONE);
+            hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+            post_file_update(htxf);
+        }
+    }
+    xfer_close_channel(htxf);
+}
+
+/// Folder download worker: connect, drive the FILE_NEXT/FILE_SEND folder-receive
+/// state machine (`hxnet_xfer_folder_recv_all` — builds each per-file path from
+/// the root internally, never mutating it), chime + stamp on success.
+unsafe fn folder_get_thread(htxf: *mut HtxfHandle) {
+    if htxf_connect(htxf) != glib::ffi::GFALSE {
+        let params = xfer_folder_params(htxf);
+        if hxnet_xfer_folder_recv_all(&params) == 0 {
+            play_sound(FILE_DONE);
+            hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+            post_file_update(htxf);
+        }
+    }
+    xfer_close_channel(htxf);
+}
+
+/// Solo upload worker: connect, run the single-file send loop, chime on success.
+unsafe fn put_thread(htxf: *mut HtxfHandle) {
+    if htxf_connect(htxf) != glib::ffi::GFALSE {
+        let params = xfer_send_params(htxf);
+        if hxnet_xfer_file_send_one(&params) == 0 {
+            play_sound(FILE_DONE);
+            post_file_update(htxf);
+        }
+    }
+    xfer_close_channel(htxf);
+}
+
+/// Folder upload worker: connect, walk the local tree responding to the server's
+/// FILE_NEXT loop (`hxnet_xfer_folder_send_all`), chime + stamp on success.
+unsafe fn folder_put_thread(htxf: *mut HtxfHandle) {
+    if htxf_connect(htxf) != glib::ffi::GFALSE {
+        let params = xfer_folder_params(htxf);
+        if hxnet_xfer_folder_send_all(&params) == 0 {
+            play_sound(FILE_DONE);
+            hx_htxf_set_total_pos(htxf, (*htxf).total_size);
+            post_file_update(htxf);
+        }
+    }
+    xfer_close_channel(htxf);
+}
+
+/// Worker entry on hxbridge's tokio blocking pool. Dispatches to the right
+/// transfer body on `opt.folder` × `type` and returns; cleanup happens separately
+/// in `xfer_completion_entry` once this returns. Runs OFF the main thread, so it
+/// never touches GTK directly — only marshals via `post_file_update`.
+///
+/// # Safety
+/// `arg` is a live htxf; runs on the blocking pool.
+unsafe extern "C" fn xfer_worker_entry(arg: *mut c_void) {
+    let htxf = arg as *mut HtxfHandle;
+    let folder = hx_htxf_opt_folder(htxf as *const c_void) != 0;
+    let is_get = (*htxf).type_ == XFER_GET;
+    match (folder, is_get) {
+        (true, true) => folder_get_thread(htxf),
+        (true, false) => folder_put_thread(htxf),
+        (false, true) => get_thread(htxf),
+        (false, false) => put_thread(htxf),
+    }
+}
+
+/// `void xfer_ready_write(struct htxf_conn *htxf)` — hand a transfer to the
+/// blocking pool. Takes the worker's refcount ref BEFORE the spawn (so the htxf
+/// can't be freed mid-spawn if another path drops the list ref);
+/// `xfer_completion_entry` drops it once the worker returns. Called from the Rust
+/// receive handlers (recv/xfer.rs) once the server signals ready.
+///
+/// # Safety
+/// `htxf` is a live handle. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_ready_write(htxf: *mut HtxfHandle) {
+    hx_htxf_ref(htxf); // the worker's ref
+    gtkhx_bridge_spawn_blocking_with_idle(
+        xfer_worker_entry,
+        xfer_completion_entry,
+        htxf as *mut c_void,
+    );
+}
+
 // ---- test doubles for the C / GObject-emit environment ----------------------
 
 #[cfg(test)]
@@ -473,6 +696,42 @@ unsafe fn hx_htxf_set_opt_preview(_htxf: *mut HtxfHandle, _v: c_int) {}
 unsafe fn hx_htxf_set_opt_folder(_htxf: *mut HtxfHandle, _v: c_int) {}
 #[cfg(test)]
 unsafe fn gtkhx_bridge_post_to_main(_func: glib::ffi::GSourceFunc, _user_data: *mut c_void) {}
+#[cfg(test)]
+unsafe fn gtkhx_bridge_spawn_blocking_with_idle(
+    _worker: unsafe extern "C" fn(*mut c_void),
+    _completion: unsafe extern "C" fn(*mut c_void),
+    _user_data: *mut c_void,
+) {
+}
+#[cfg(test)]
+unsafe fn htxf_connect(_htxf: *mut HtxfHandle) -> glib::ffi::gboolean {
+    glib::ffi::GFALSE
+}
+#[cfg(test)]
+unsafe fn play_sound(_sound: c_int) {}
+#[cfg(test)]
+unsafe extern "C" fn hx_preview_chunk(_preview: *mut c_void, _buf: *const c_char, _len: usize) {}
+#[cfg(test)]
+unsafe extern "C" fn hx_preview_set_info(
+    _preview: *mut c_void,
+    _type_: *const c_char,
+    _creator: *const c_char,
+) {
+}
+#[cfg(test)]
+unsafe extern "C" fn hx_preview_done(_preview: *mut c_void) {}
+#[cfg(test)]
+unsafe fn hx_htxf_opt_preview(_htxf: *const c_void) -> c_int {
+    0
+}
+#[cfg(test)]
+unsafe fn hx_htxf_opt_folder(_htxf: *const c_void) -> c_int {
+    0
+}
+#[cfg(test)]
+unsafe fn hx_htxf_opt_large(_htxf: *const c_void) -> c_int {
+    0
+}
 
 #[cfg(test)]
 mod tests {
