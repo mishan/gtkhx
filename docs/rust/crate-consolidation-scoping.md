@@ -414,18 +414,42 @@ Each step is independently shippable and green.
    - ✅ **`hxcrypto`** (§2b). Four crates → one. First merge to touch the
      test link surface — 25 `-lhxcrypto_*` / `-lhxcompress` references in
      `tests/meson.build` collapsed to `-lhxcrypto`.
-   - ⛔ **`gtkhx-core`** (§2d) — **attempted and reverted.** Not viable as
-     specified; see "the second constraint" below.
-   - ⛔ **`hxvoice`** (§2e) — **not attempted after §2d failed.** Same trap
-     (`hxvoice-runtime` is test-linked and extern-free; `hxvoice-send` has 5
-     C externs), plus `hxvoice`'s zero-non-Rust-deps property is load-bearing
-     for `cargo test -p hxvoice` in GStreamer-free containers. A three-way
-     merge of `hxvoice` + `hxvoice-runtime` + `hxvoice-model` (all
-     extern-free) behind a `runtime` feature is probably viable, but it also
-     touches the meson `--exclude` gate, CI's `build-no-voice` command, and
-     `gtkhx-ui`'s optional dep — worth doing deliberately, not quickly.
+   - ✅ **`gtkhx-core`** (§2d), **at three of four.** The first attempt
+     (all four) failed to link; see "the second constraint" below.
+     `gtkhx-session` + `gtkhx-boxed` + `hxconn` are all extern-free and
+     merged cleanly; **`hxtask` stays out** — its ten C externs are exactly
+     what broke the four-way version.
+   - ⛔ **`hxvoice`** (§2e) — **attempted and abandoned deliberately.** The
+     merge is mechanically possible and cycle-free, but it destroys a
+     documented, load-bearing property. `hxvoice` is `#![no_std]` with
+     *zero non-Rust dependencies*: its own docs list three reasons, the first
+     being that `cargo test -p hxvoice` runs in any container regardless of
+     GStreamer or audio-device state. Folding in `hxvoice-runtime` adds
+     GStreamer and `hxvoice-model` adds glib — **both unconditionally**, both
+     C libraries. Feature-gating each back out is possible but leaves a
+     `#![cfg_attr(...)] no_std` crate whose default build is a strict subset
+     of itself, which is worse than the crate boundary it replaces.
+     (`hxvoice-send` was never a candidate anyway: 5 C externs.) **This
+     boundary is carrying real meaning — leave it.**
 
-   Crate count so far: **41 → 25**.
+   Crate count: **41 → 23**. That is where step 3 ends. The remaining 23 are
+   not further mergeable without breaking something specific: the
+   extern-freeness the Tier 2 tests depend on, the no-C-deps guarantee
+   `hxvoice` documents, or a Cargo cycle.
+
+   **What the exercise actually showed.** Of the six merges §2 proposed, four
+   landed as written, one landed at three-quarters, and one should not
+   happen. The crate count was a real problem — 41 was too many, and 16 of
+   those crates disappeared without a single behaviour change. But the
+   surviving boundaries are not arbitrary. Three distinct constraints keep
+   them, and none was visible from the crate list alone:
+
+   1. **Cargo cycles** — fixed by moving misplaced code (`conversation` /
+      `chat_members`), not by merging.
+   2. **Extern-freeness of test-linked archives** — merging an extern-ful
+      crate into one the Tier 2 tests link breaks them.
+   3. **Deliberate dependency floors** — `hxvoice` guarantees no C
+      dependencies; that is a property, not an accident of packaging.
 
    **Correction to §2b.** That section says `hxnet` reaches past `hxcompress`
    to `flate2`/`lz4_flex`/`zstd`, so "the compression code exists twice in the
