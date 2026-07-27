@@ -24,6 +24,7 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "htxf_io.h"
+#include "htxf_accessors.h"
 #include "debug.h"
 
 void
@@ -62,10 +63,10 @@ htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len)
      * parked in recv(); this catches a cancel that lands between reads.
      * Banner's transient htxf has canceled == 0, so this is a no-op there.
      *
-     * htxf->canceled is written by the main thread (xfer_delete /
-     * xfers_delete_all) and read here on the worker thread, so every
-     * access goes through g_atomic_int_* to avoid a data race. */
-    if (g_atomic_int_get (&htxf->canceled)) {
+     * The cancel flag is written by the main thread (xfer_delete /
+     * xfers_delete_all) and read here on the worker thread, so every access
+     * goes through the atomic hx_htxf_* ABI (S0.2) to avoid a data race. */
+    if (hx_htxf_is_canceled (htxf)) {
         errno = ECANCELED;
         return -1;
     }
@@ -75,7 +76,7 @@ htxf_io_read (struct htxf_conn *htxf, void *buf, size_t len)
          * read (the abort token shut the socket down to wake us). Re-check
          * so an abort-driven wakeup reads back as ECANCELED rather than a
          * spurious EIO "channel error" the worker would log as a fault. */
-        if (g_atomic_int_get (&htxf->canceled)) {
+        if (hx_htxf_is_canceled (htxf)) {
             errno = ECANCELED;
             return -1;
         }
@@ -95,7 +96,7 @@ htxf_io_write (struct htxf_conn *htxf, const void *buf, size_t len)
     }
     /* Cooperative-cancel boundary — see htxf_io_read (atomic access to
      * the cross-thread canceled flag, same rationale). */
-    if (g_atomic_int_get (&htxf->canceled)) {
+    if (hx_htxf_is_canceled (htxf)) {
         errno = ECANCELED;
         return -1;
     }
@@ -104,7 +105,7 @@ htxf_io_write (struct htxf_conn *htxf, const void *buf, size_t len)
     if (w < 0) {
         /* An abort-driven wakeup mid-write classifies as cancel, not a
          * channel fault — see htxf_io_read. */
-        if (g_atomic_int_get (&htxf->canceled)) {
+        if (hx_htxf_is_canceled (htxf)) {
             errno = ECANCELED;
             return -1;
         }
@@ -134,15 +135,8 @@ htxf_io_set_read_timeout (struct htxf_conn *htxf, guint32 timeout_ms)
 }
 
 /* ---- Cancellation token (Phase R3 X1) ------------------------------ */
-
-void
-htxf_io_abort_init (struct htxf_conn *htxf)
-{
-    if (!htxf || htxf->abort) {
-        return;
-    }
-    htxf->abort = (void *) hxnet_htxf_abort_new ();
-}
+/* The token is created + freed by hxnet's xfer_handle module (hx_htxf_new /
+ * hx_htxf_free, S0.3); this file only arms (worker) and triggers (main) it. */
 
 void
 htxf_io_abort_arm (struct htxf_conn *htxf)
@@ -160,14 +154,4 @@ htxf_io_abort (struct htxf_conn *htxf)
         return;
     }
     hxnet_htxf_abort ((const HtxfAbort *) htxf->abort);
-}
-
-void
-htxf_io_abort_free (struct htxf_conn *htxf)
-{
-    if (!htxf || !htxf->abort) {
-        return;
-    }
-    hxnet_htxf_abort_free ((const HtxfAbort *) htxf->abort);
-    htxf->abort = NULL;
 }

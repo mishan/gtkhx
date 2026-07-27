@@ -42,6 +42,26 @@
 #include "protocol.h"
 #include "htxf_io.h"
 
+/* The token create/free shims (htxf_io_abort_init / _free) were retired in S0.3:
+ * production creates the token in hx_htxf_new and frees it in hx_htxf_free (the
+ * hxnet xfer_handle module), calling the same hxnet_htxf_abort_new / _free
+ * primitives. This test drives stack htxf_conns, so it manages the token with
+ * those primitives directly — exercising the identical create → arm → trigger →
+ * free lifecycle the handle now owns. */
+static void
+test_token_init (struct htxf_conn *xfer)
+{
+    xfer->abort = (void *) hxnet_htxf_abort_new ();
+}
+static void
+test_token_free (struct htxf_conn *xfer)
+{
+    if (xfer && xfer->abort) {
+        hxnet_htxf_abort_free ((const HtxfAbort *) xfer->abort);
+        xfer->abort = NULL;
+    }
+}
+
 /* Stand up a loopback listener, have hxnet connect to it in-process
  * (fd-free, via hxnet_htxf_connect — plaintext, no preamble / no AEAD),
  * stash the channel on `xfer`, and hand back the accepted server side in
@@ -119,7 +139,7 @@ test_canceled_flag_short_circuits_read (void)
     g_assert_cmpint (errno, ==, ECANCELED);
 
     htxf_io_release (&xfer);
-    htxf_io_abort_free (&xfer);
+    test_token_free (&xfer);
     close (server_fd);
 }
 
@@ -166,7 +186,7 @@ test_abort_wakes_parked_read (void)
     struct htxf_conn xfer;
     int server_fd;
     open_passthrough_loopback (&xfer, &server_fd);
-    htxf_io_abort_init (&xfer); /* main-thread token alloc */
+    test_token_init (&xfer); /* main-thread token alloc */
     htxf_io_abort_arm (&xfer);  /* arm with the channel's socket */
 
     /* Fail-fast backstop: if abort ever stops waking the read, the read
@@ -205,7 +225,7 @@ test_abort_wakes_parked_read (void)
                      (gint64) READ_TIMEOUT_MS * 1000 / 2);
 
     htxf_io_release (&xfer);
-    htxf_io_abort_free (&xfer);
+    test_token_free (&xfer);
     close (server_fd);
 }
 
@@ -228,7 +248,7 @@ test_abort_before_arm (void)
     struct htxf_conn xfer;
     int server_fd;
     open_passthrough_loopback (&xfer, &server_fd);
-    htxf_io_abort_init (&xfer);
+    test_token_init (&xfer);
 
     /* Abort BEFORE arm (no socket on the token yet), then arm late. */
     htxf_io_abort (&xfer);
@@ -245,7 +265,7 @@ test_abort_before_arm (void)
     g_assert_cmpint (n, ==, 0); /* clean EOF — the socket was shut down */
 
     htxf_io_release (&xfer);
-    htxf_io_abort_free (&xfer);
+    test_token_free (&xfer);
     close (server_fd);
 }
 
@@ -256,11 +276,11 @@ test_abort_before_arm (void)
 static void
 test_abort_shims_null_safe (void)
 {
-    /* All four on a NULL htxf. */
-    htxf_io_abort_init (NULL);
+    /* The surviving shims + the token free on a NULL htxf. */
     htxf_io_abort_arm (NULL);
     htxf_io_abort (NULL);
-    htxf_io_abort_free (NULL);
+    test_token_free (NULL);
+    hxnet_htxf_abort_free (NULL); /* the primitive itself is NULL-safe */
 
     /* A zeroed htxf with no token / no channel (banner's transient
 	 * shape): abort + free are no-ops, arm is a no-op (no hx). */
@@ -268,11 +288,11 @@ test_abort_shims_null_safe (void)
     memset (&xfer, 0, sizeof (xfer));
     htxf_io_abort_arm (&xfer);  /* no hx, no token → no-op */
     htxf_io_abort (&xfer);      /* no token → no-op */
-    htxf_io_abort_free (&xfer); /* no token → no-op */
+    test_token_free (&xfer); /* no token → no-op */
 
     /* init then free with no channel ever opened: leak-clean (ASan). */
-    htxf_io_abort_init (&xfer);
-    htxf_io_abort_free (&xfer);
+    test_token_init (&xfer);
+    test_token_free (&xfer);
 }
 
 /* ------------------------------------------------------------------ *
@@ -289,7 +309,7 @@ test_many_channels_abort_clean (void)
 
     for (int i = 0; i < N; i++) {
         open_passthrough_loopback (&xfers[i], &srv[i]);
-        htxf_io_abort_init (&xfers[i]);
+        test_token_init (&xfers[i]);
         htxf_io_abort_arm (&xfers[i]);
     }
     /* Cancel all, as xfers_delete_all does. */
@@ -299,7 +319,7 @@ test_many_channels_abort_clean (void)
     }
     for (int i = 0; i < N; i++) {
         htxf_io_release (&xfers[i]);
-        htxf_io_abort_free (&xfers[i]);
+        test_token_free (&xfers[i]);
         close (srv[i]);
     }
 }

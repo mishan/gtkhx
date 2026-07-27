@@ -34,6 +34,7 @@
 #include "gtkhx.h"
 #include "gtkhx_icon.h"
 #include "xfers.h"
+#include "htxf_accessors.h"
 #include "sound.h"
 #include "toolbar.h" /* disconnect_clicked, toolbar_show_toast */
 #include "tasks.h"
@@ -985,7 +986,7 @@ file_update (session *sess, struct htxf_conn *htxf)
         gtsk = gtask_new (sess, 0, htxf);
     }
 
-    pos = htxf->total_pos;
+    pos = hx_htxf_total_pos (htxf);
     size = htxf->total_size;
 
     gettimeofday (&now, 0);

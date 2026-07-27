@@ -40,6 +40,7 @@
 #include "sound.h"
 #include "files.h"
 #include "htxf_io.h"
+#include "htxf_accessors.h"
 #include "preview.h"
 #include "xfers.h"
 #include "xfers_recv.h"
@@ -97,20 +98,18 @@ static struct htxf_conn *
 htxf_ref (struct htxf_conn *htxf)
 {
     if (htxf) {
-        g_atomic_int_inc (&htxf->refcount);
+        hx_htxf_ref (htxf);
     }
     return htxf;
 }
 
+/* The C teardown hx_htxf_unref runs on a handle's last ref, registered via
+ * hx_htxf_set_destructor (S0.3). It does the GTK/preview + channel teardown that
+ * must stay in C; the cancellation token + the struct itself are freed by
+ * hx_htxf_free (Rust), which hx_htxf_unref calls right after this returns. */
 static void
-htxf_unref (struct htxf_conn *htxf)
+htxf_destructor (struct htxf_conn *htxf)
 {
-    if (!htxf) {
-        return;
-    }
-    if (!g_atomic_int_dec_and_test (&htxf->refcount)) {
-        return;
-    }
     /* Drop the per-htxf ref on the preview window if this transfer
 	 * was a preview. The window holds its own ref independently;
 	 * if the user has already closed the preview, this is the ref
@@ -120,15 +119,11 @@ htxf_unref (struct htxf_conn *htxf)
 	 * which hx_preview_unref handles with an early return. */
     hx_preview_unref ((hx_preview *)htxf->preview);
     htxf->preview = NULL;
-    /* Release any AEAD read-side accumulator buffers the HTXF
-	 * subchannel Phase E wrappers might have allocated. No-op
-	 * on a transfer that ran in plaintext mode. */
+    /* Close the hxnet channel (drops its ref to the cancellation token, so the
+	 * token frees when hx_htxf_free drops the C-side creation ref). Also
+	 * releases any AEAD read-side accumulator buffers. No-op on a transfer
+	 * that ran in plaintext mode / was already closed by the worker. */
     htxf_io_release (htxf);
-    /* Drop the C side's ref to the cancellation token. The hxnet channel
-	 * (closed by htxf_io_release just above) already dropped its ref, so
-	 * this frees the token. NULL-safe on a transfer that never opened. */
-    htxf_io_abort_free (htxf);
-    g_free (htxf);
 }
 
 struct fu_job {
@@ -141,11 +136,11 @@ fu_dispatch (gpointer data)
     /* canceled is a cross-thread flag (worker reads it in htxf_io_read/
 	 * _write); access it atomically everywhere for a single coherent
 	 * memory model, even though this dispatcher runs on the main thread. */
-    if (!g_atomic_int_get (&j->htxf->canceled)) {
+    if (!hx_htxf_is_canceled (j->htxf)) {
         gtkhx_session_emit_file_update (gtkhx_session_get_default (),
                                         sess_from_htlc (j->htxf->htlc), j->htxf);
     }
-    htxf_unref (j->htxf);
+    hx_htxf_unref (j->htxf);
     g_free (j);
     return G_SOURCE_REMOVE;
 }
@@ -166,7 +161,7 @@ xfer_cleanup_dispatch (gpointer data)
 {
     struct htxf_conn *htxf = data;
     xfer_remove_from_list (htxf);
-    htxf_unref (htxf);
+    hx_htxf_unref (htxf);
     return G_SOURCE_REMOVE;
 }
 
@@ -427,7 +422,20 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     gsize sep_len;
     gsize stash_len;
 
-    htxf = g_malloc0 (sizeof (struct htxf_conn));
+    /* Register the last-ref destructor once (S0.3). hx_htxf_unref invokes it on
+	 * the last unref of any hx_htxf_new'd handle; all such handles come through
+	 * xfer_init, so registering here runs before any of them can be dropped. */
+    static gsize dtor_once = 0;
+    if (g_once_init_enter (&dtor_once)) {
+        hx_htxf_set_destructor (htxf_destructor);
+        g_once_init_leave (&dtor_once, 1);
+    }
+
+    /* Storage owned by hxnet's xfer_handle module (S0): a zeroed struct
+	 * htxf_conn (with its cancellation token pre-created), same semantics as the
+	 * old g_malloc0 + htxf_io_abort_init. Freed via hx_htxf_unref's last-ref
+	 * tail (destructor + hx_htxf_free). */
+    htxf = hx_htxf_new ();
 
     /* Stash the structured fields verbatim. remotename is the wire
 	 * NAME chunk; remotedir is the wire DIR chunk source. Names can
@@ -480,23 +488,17 @@ xfer_init (const char *path, const char *remotedir, const char *remotename,
     /* refcount = 1 represents the xfers[] array's ownership. The
 	 * worker takes its own ref in xfer_ready_write before the
 	 * transfer is handed to the blocking pool. */
-    htxf->refcount = 1;
-    /* canceled is read on the worker thread (htxf_io_read/_write); use
-	 * atomics for every access. This initial store is before any worker
-	 * exists, but stay consistent with the cross-thread stores below. */
-    g_atomic_int_set (&htxf->canceled, FALSE);
-
-    /* Allocate the cancellation token now, on the main thread, so it's
-	 * live for the htxf's whole lifetime — armed later by htxf_connect
-	 * (worker), triggered by xfer_delete (main), freed in htxf_unref. */
-    htxf_io_abort_init (htxf);
+    /* Seed the initial xfers[] ref (0 → 1). canceled + total_pos are already
+	 * zero from hx_htxf_new, so no explicit reset is needed. The cancellation
+	 * token was created by hx_htxf_new (armed later by htxf_connect on the
+	 * worker, triggered by xfer_delete on main, freed by hx_htxf_free). */
+    hx_htxf_ref (htxf);
 
     xfers = g_realloc (xfers, (nxfers + 1) * sizeof (struct htxf_conn *));
     xfers[nxfers] = htxf;
     nxfers++;
 
     htxf->htlc = hx_active_session ()->htlc;
-    htxf->total_pos = 0;
     htxf->total_size = 1;
     gtkhx_session_emit_file_update (gtkhx_session_get_default (), sess_from_htlc (htxf->htlc),
                                     htxf);
@@ -593,7 +595,7 @@ static void
 xfer_progress_bump (void *user_data, guint64 delta)
 {
     struct htxf_conn *htxf = user_data;
-    htxf->total_pos += delta;
+    hx_htxf_add_total_pos (htxf, delta);
     post_file_update (htxf);
 }
 
@@ -679,7 +681,7 @@ get_thread (void *arg)
     }
 
     play_sound (FILE_DONE);
-    htxf->total_pos = htxf->total_size;
+    hx_htxf_set_total_pos (htxf, htxf->total_size);
     post_file_update (htxf);
 
 ret:
@@ -760,7 +762,7 @@ folder_get_thread (void *arg)
     }
 
     play_sound (FILE_DONE);
-    htxf->total_pos = htxf->total_size;
+    hx_htxf_set_total_pos (htxf, htxf->total_size);
     post_file_update (htxf);
 
 ret:
@@ -855,7 +857,7 @@ folder_put_thread (void *arg)
     }
 
     play_sound (FILE_DONE);
-    htxf->total_pos = htxf->total_size;
+    hx_htxf_set_total_pos (htxf, htxf->total_size);
     post_file_update (htxf);
 
 ret:
@@ -934,14 +936,14 @@ xfers_delete_all (void)
     for (i = 0; i < nxfers; i++) {
         struct htxf_conn *htxf = xfers[i];
         /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
-        g_atomic_int_set (&htxf->canceled, TRUE);
+        hx_htxf_cancel (htxf);
         /* Shut the subchannel socket down to wake a worker parked in a
 		 * blocking read/write; the htxf_io_read/_write canceled-check
 		 * then unwinds it cleanly. The worker runs on tokio's blocking
 		 * pool, which can't be force-cancelled — cooperative abort is
 		 * the whole mechanism. */
         htxf_io_abort (htxf);
-        htxf_unref (htxf); /* drop xfers[] ref */
+        hx_htxf_unref (htxf); /* drop xfers[] ref */
     }
     nxfers = 0;
 }
@@ -975,7 +977,7 @@ xfer_remove_from_list (struct htxf_conn *htxf)
         nxfers--;
         gtkhx_session_emit_xfer_destroyed (gtkhx_session_get_default (),
                                            sess_from_htlc (htxf->htlc), htxf);
-        htxf_unref (htxf); /* drop the xfers[] ref */
+        hx_htxf_unref (htxf); /* drop the xfers[] ref */
         if (nxfers) {
             xfer_go (xfers[0]);
         }
@@ -997,7 +999,7 @@ xfer_delete (struct htxf_conn *htxf)
     }
 
     /* Atomic store — the worker reads canceled in htxf_io_read/_write. */
-    g_atomic_int_set (&htxf->canceled, TRUE);
+    hx_htxf_cancel (htxf);
     /* Wake a worker parked in a blocking subchannel read/write by
 	 * shutting its socket down; the htxf_io_read/_write canceled-check
 	 * then turns the resulting error into a clean exit. The worker runs
