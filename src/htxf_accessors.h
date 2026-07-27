@@ -55,9 +55,12 @@ extern guint64 hx_htxf_total_pos (const struct htxf_conn *htxf);
  * startup. */
 extern void hx_htxf_set_destructor (void (*cb) (struct htxf_conn *htxf));
 
-/* hx_htxf_in_list moved to the Rust transfer registry (hxhandlers::xfer) with
- * the xfers[] list; it keeps the same C ABI, called only from the Rust receive
- * handlers. */
+/* Registry: is htxf still a live entry in the transfer list? (Downloads gate
+ * their reply on this — a since-cancelled transfer's reply is dropped.) The body
+ * moved to the Rust registry (hxhandlers::xfer) with the xfers[] list; the
+ * prototype stays here to document the C ABI surface + guard against an
+ * implicit-declaration call from any future C site. Only Rust calls it today. */
+extern int hx_htxf_in_list (struct htxf_conn *htxf);
 
 /* Getters. */
 extern int          hx_htxf_opt_retry (const struct htxf_conn *htxf);

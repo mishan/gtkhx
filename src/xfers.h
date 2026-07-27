@@ -1,8 +1,10 @@
 #ifndef HX_XFERS_H
 #define HX_XFERS_H
 
-extern int nxfers;
-extern struct htxf_conn **xfers;
+/* The xfers[] list + nxfers count moved to the Rust transfer registry
+ * (hxhandlers::xfer, Y1). Reach the list through xfer_count / xfer_num /
+ * htxf_with_ref / … below — the C globals are gone, so no `extern int nxfers`
+ * here (a new user would fail at link, not silently bypass the Rust APIs). */
 
 //extern size_t resource_len (const char *path);
 extern void xfer_go (struct htxf_conn *htxf);

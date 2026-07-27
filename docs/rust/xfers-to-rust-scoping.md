@@ -109,18 +109,23 @@ become native intra-crate calls once the shell is in hxhandlers.
 
 ## Phases (dependency-ordered; one branch each; each gated on Tier-3)
 
-- **Y1 — registry.** The `thread_local` `Vec<*mut HtxfHandle>` + `xfer_up`/
-  `_down`/`_num`/`htxf_with_ref`/`xfer_remove_from_list`/`xfers_delete_all`/
-  `xfer_tasks_update`, behind the same C ABI. `xfer_init` (still C) calls a new
-  `xfer_registry_add`; `remove_from_list` emits xfer-destroyed + kicks the next
-  queued `xfer_go` (still C, extern). Self-contained list logic; lowest risk.
-  Resolves the field-access decision (A vs B) since it's the first to read
-  `->ref`/`->htlc`.
-- **Y2 — construction + lifecycle marshal.** `xfer_init`/`xfer_new`/
-  `xfer_new_folder` + `htxf_ref` + `post_file_update`/`fu_dispatch` +
-  `xfer_completion_entry`/`xfer_cleanup_dispatch`. **This is the increment that
-  unblocks `hx_cfl_complete_entry`** (its `xfer_new` call becomes native).
-  `xfer_new` still calls C `xfer_go` until Y4.
+- **Y1 — registry. ✅ SHIPPED.** The `thread_local` `Vec<*mut HtxfHandle>` +
+  `xfer_up`/`_down`/`_num`/`htxf_with_ref`/`xfer_remove_from_list`/
+  `xfers_delete_all`/`xfer_tasks_update` (+ new `xfer_registry_add`/`xfer_count`
+  replacing the `nxfers`/`xfers[]` globals, and `hx_htxf_in_list` folded in from
+  htxf_accessors.c), behind the same C ABI. `remove_from_list` emits
+  xfer-destroyed + kicks the next queued `xfer_go` (still C, extern). Resolved
+  the field-access decision: **option A** — hxhandlers now deps hxnet (acyclic),
+  the plain `HtxfHandle` fields the shell reads are `pub`, atomics stay behind
+  `hx_htxf_*`.
+- **Y2 — construction + lifecycle marshal. ✅ SHIPPED.** `xfer_init`/`xfer_new`/
+  `xfer_new_folder` + `post_file_update`/`fu_dispatch` +
+  `xfer_completion_entry`/`xfer_cleanup_dispatch`. **`xfer_new` is native now →
+  unblocks `hx_cfl_complete_entry`.** `xfer_new` still calls C `xfer_go` until
+  Y4; `htxf_ref` + `xfer_close_channel` + `htxf_destructor` stay C until Y5
+  (`htxf_destructor` un-static'd so xfer_init can register it). Two principled
+  C-ABI exceptions: the `opt` bitfield setters (C owns the bit layout) and the
+  `gtkhx_prefs.queuedl` read (`hx_prefs_queuedl` accessor).
 - **Y3 — worker dispatch + params.** `xfer_ready_write`/`xfer_worker_entry` + the
   four `*_thread`s + `xfer_recv_params`/`_send_params`/`_folder_params` +
   `xfer_progress_bump`. Runs the blocking-pool transfer.
