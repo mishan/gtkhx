@@ -93,15 +93,17 @@ struct HxnetXferParams {
 };
 
 /* Returns 0 on success, an errno-like positive code on failure. Does NOT play
- * the completion sound, post a final update, or close the channel — the C
- * driver (get_thread / folder_recv_all) owns those. */
+ * the completion sound, post a final update, or close the channel — the caller
+ * owns those (the get_thread driver for a solo download, or the Rust
+ * hxnet_xfer_folder_recv_all loop for a folder file). */
 extern int hxnet_xfer_file_recv_one (const struct HxnetXferParams *params);
 
 /* Send one file out an already-open HTXF subchannel from params->path — the
  * upload twin of hxnet_xfer_file_recv_one (was xfers_send.c::file_send_one),
  * ported to hxnet::xfer. Uses data_size/rsrc_size (+ data_pos/rsrc_pos resume
  * offsets); the preview + file_budget fields are unused. Returns 0 on success,
- * errno-like on failure; the C driver (put_thread / folder_send_all) closes the
+ * errno-like on failure; the caller (the put_thread driver for a solo upload,
+ * or the Rust hxnet_xfer_folder_send_all loop for a folder file) closes the
  * channel + plays the sound. */
 extern int hxnet_xfer_file_send_one (const struct HxnetXferParams *params);
 

@@ -48,6 +48,9 @@ const FILE_NEXT_CMD: u16 = 3;
 const NFI_HEADER_LEN: usize = 6;
 /// The fixed part the nfi `len` field counts before the per-component bytes.
 const NFI_LEN_FIXED: u16 = 4;
+/// Cap on a received folder entry's joined relative path (matches `compat.h`'s
+/// clamped `MAXPATHLEN`); a hostile server can't drive an unbounded path.
+const MAXPATHLEN: usize = 4095;
 /// Bytes the sender's per-file FILP body always emits ahead of the fork data:
 /// the fixed FILP header (no comment) — used by the folder upload's declared
 /// per-file size, which must match `hxnet_xfer_file_send_one`'s output exactly.
@@ -674,28 +677,47 @@ pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams
         let ftype = u16::from_be_bytes([nfi[2], nfi[3]]);
         let pathcount = u16::from_be_bytes([nfi[4], nfi[5]]);
 
-        // Read the path components and join them under base.
-        let mut rel = std::path::PathBuf::new();
+        // Read the path components into a single '/'-joined relative path,
+        // bounded to MAXPATHLEN like the C loop — a hostile server must not be
+        // able to drive an unbounded PathBuf (huge pathcount / long names) into
+        // a memory/CPU DoS.
+        let mut rel: Vec<u8> = Vec::new();
         for _ in 0..pathcount {
             let mut ph = [0u8; 3];
             if htxf_read_full(fp.hx, &mut ph) != 3 {
                 return EIO;
             }
             let nlen = ph[2] as usize;
-            let mut name = vec![0u8; nlen];
-            if nlen > 0 && htxf_read_full(fp.hx, &mut name) != nlen as isize {
-                return EIO;
-            }
-            // Defence in depth — refuse `..` and embedded '/' that would escape.
-            if name == b".." || name.contains(&b'/') {
+            // Empty components are meaningless and would let a bare separator
+            // slip in; refuse them.
+            if nlen == 0 {
                 return EINVAL;
             }
-            rel.push(os_from_bytes(&name));
+            let mut name = vec![0u8; nlen];
+            if htxf_read_full(fp.hx, &mut name) != nlen as isize {
+                return EIO;
+            }
+            // Defence in depth — refuse `..` and any path separator that could
+            // escape base_path. Reject '\\' too: it's a separator on Windows, so
+            // PathBuf::join would treat it as one there.
+            if name == b".." || name.contains(&b'/') || name.contains(&b'\\') {
+                return EINVAL;
+            }
+            // Grow the joined path (a '/' before every component after the
+            // first), capping the total at MAXPATHLEN.
+            let addition = if rel.is_empty() { nlen } else { 1 + nlen };
+            if rel.len() + addition > MAXPATHLEN {
+                return ENAMETOOLONG;
+            }
+            if !rel.is_empty() {
+                rel.push(b'/');
+            }
+            rel.extend_from_slice(&name);
         }
-        if rel.as_os_str().is_empty() {
+        if rel.is_empty() {
             return EINVAL;
         }
-        let full = base.join(&rel);
+        let full = base.join(os_from_bytes(&rel));
 
         if ftype == 1 {
             // Folder marker — mkdir, no payload.
@@ -1289,5 +1311,69 @@ mod folder_loopback_tests {
         let got = std::fs::read(dest.join("drib.txt")).unwrap_or_default();
         let _ = std::fs::remove_dir_all(&dest);
         assert_eq!(got, body, "download must reassemble the dribbled control reads");
+    }
+
+    // Drive hxnet_xfer_folder_recv_all's first nfi entry with attacker-shaped
+    // path components and assert it rejects them instead of building an
+    // unbounded / escaping path. Returns the recv result + whether the download
+    // dir was even created.
+    fn recv_first_entry(ftype: u16, components: &[&[u8]]) -> c_int {
+        let comps: Vec<Vec<u8>> = components.iter().map(|c| c.to_vec()).collect();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut cmd = [0u8; 2];
+            if s.read_exact(&mut cmd).is_err() {
+                return;
+            }
+            let mut wire_len = NFI_LEN_FIXED as usize;
+            for c in &comps {
+                wire_len += 3 + c.len();
+            }
+            let mut nfi = [0u8; NFI_HEADER_LEN];
+            nfi[0..2].copy_from_slice(&(wire_len as u16).to_be_bytes());
+            nfi[2..4].copy_from_slice(&ftype.to_be_bytes());
+            nfi[4..6].copy_from_slice(&(comps.len() as u16).to_be_bytes());
+            let _ = s.write_all(&nfi);
+            for c in &comps {
+                let _ = s.write_all(&[0, 0, c.len() as u8]);
+                let _ = s.write_all(c);
+            }
+            // Drain whatever the client sends next, then close.
+            let _ = s.read_exact(&mut cmd);
+        });
+
+        let dest = std::env::temp_dir().join(format!(
+            "hxnet_frecv_evil_{}_{}",
+            std::process::id(),
+            ftype as usize + components.len()
+        ));
+        let _ = std::fs::remove_dir_all(&dest);
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
+        let fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        let rv = unsafe { hxnet_xfer_folder_recv_all(&fp) };
+        drop(conn);
+        let _ = server.join();
+        let _ = std::fs::remove_dir_all(&dest);
+        rv
+    }
+
+    #[test]
+    fn folder_recv_rejects_hostile_path_components() {
+        // Parent-directory traversal.
+        assert_eq!(recv_first_entry(1, &[b".."]), EINVAL);
+        // Embedded POSIX + Windows separators.
+        assert_eq!(recv_first_entry(1, &[b"a/b"]), EINVAL);
+        assert_eq!(recv_first_entry(1, &[b"a\\b"]), EINVAL);
+        // Empty component.
+        assert_eq!(recv_first_entry(1, &[b""]), EINVAL);
+        // A joined path past MAXPATHLEN (20 × 250-byte components) must be
+        // refused with ENAMETOOLONG rather than building an unbounded path.
+        let long: Vec<u8> = vec![b'x'; 250];
+        let many: Vec<&[u8]> = std::iter::repeat(long.as_slice()).take(20).collect();
+        assert_eq!(recv_first_entry(1, &many), ENAMETOOLONG);
     }
 }

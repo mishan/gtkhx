@@ -10,7 +10,7 @@
 /*
  * tests/integration/test_file_put.c — upload a file to mhxd over the
  * HTXF subchannel driving the PRODUCTION send state machine
- * (xfers_send.c::file_send_one), then download it back through the
+ * (hxnet::xfer::hxnet_xfer_file_send_one), then download it back through the
  * PRODUCTION receive machine (hxnet::xfer::hxnet_xfer_file_recv_one) and
  * assert the round-tripped bytes are byte-for-byte what we uploaded.
  *
