@@ -1771,6 +1771,52 @@ dependencies = [
 ]
 
 [[package]]
+name = "gtkhx-ffi"
+version = "0.1.0"
+dependencies = [
+ "gtkhx-boxed",
+ "gtkhx-session",
+ "gtkhx-ui",
+ "hotline-proto",
+ "hx-image-decode",
+ "hxagreement-recv",
+ "hxbookmarks",
+ "hxbridge",
+ "hxchat-model",
+ "hxchat-recv",
+ "hxchat-send",
+ "hxcicn",
+ "hxcompress",
+ "hxconn",
+ "hxcrypto-aead",
+ "hxcrypto-hash",
+ "hxcrypto-stream",
+ "hxfiles-entry",
+ "hxfiles-model",
+ "hxfiles-recv",
+ "hxfiles-xfer",
+ "hxhfs",
+ "hxicon-recv",
+ "hxmacres",
+ "hxmember-model",
+ "hxmsg-recv",
+ "hxnet",
+ "hxnews-model",
+ "hxnews-recv",
+ "hxnews-send",
+ "hxsound",
+ "hxtask",
+ "hxtext",
+ "hxtls-trust",
+ "hxuser-recv",
+ "hxvoice",
+ "hxvoice-model",
+ "hxvoice-runtime",
+ "hxvoice-send",
+ "hxxfer-recv",
+]
+
+[[package]]
 name = "gtkhx-session"
 version = "0.1.0"
 dependencies = [
