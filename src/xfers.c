@@ -43,7 +43,6 @@
 #include "preview.h"
 #include "xfers.h"
 #include "xfers_recv.h"
-#include "xfers_send.h"
 
 int nxfers = 0;
 struct htxf_conn **xfers = 0;
@@ -601,8 +600,8 @@ xfer_progress_bump (void *user_data, guint64 delta)
 /* Fill an HxnetXferParams for a receive of `file_budget` bytes off htxf. The
  * preview hooks are the hx_preview_* view functions (cast to the void*-first
  * callback shape — they take a pointer we only ever hand back the htxf->preview
- * we read here). Solo-download only (get_thread); folder_recv_all builds its own
- * preview-less params inline so xfers_recv.c stays free of xfers.c references. */
+ * we read here). Solo-download only (get_thread); the folder loop
+ * (hxnet_xfer_folder_recv_all) builds its own preview-less per-file params. */
 static void
 xfer_recv_params (struct htxf_conn *htxf, guint64 file_budget,
                   struct HxnetXferParams *p)
@@ -627,8 +626,8 @@ xfer_recv_params (struct htxf_conn *htxf, guint64 file_budget,
 
 /* Fill an HxnetXferParams for an upload (send) of htxf. No preview; the send
  * worker uses data_size/rsrc_size + the resume offsets. Solo-upload only
- * (put_thread); folder_send_all builds its own params inline so xfers_send.c
- * stays free of xfers.c references. */
+ * (put_thread); the folder loop (hxnet_xfer_folder_send_all) builds its own
+ * per-file params. */
 static void
 xfer_send_params (struct htxf_conn *htxf, struct HxnetXferParams *p)
 {
@@ -639,6 +638,22 @@ xfer_send_params (struct htxf_conn *htxf, struct HxnetXferParams *p)
     p->rsrc_pos = htxf->rsrc_pos;
     p->data_size = htxf->data_size;
     p->rsrc_size = htxf->rsrc_size;
+    p->opt_folder = htxf->opt.folder;
+    p->opt_large = htxf->opt.large;
+    p->user_data = htxf;
+    p->progress = xfer_progress_bump;
+}
+
+/* Fill an HxnetFolderParams for a folder receive or send. The Rust folder loop
+ * builds each per-file path from base_path itself, so htxf->path (the tree root)
+ * is passed straight through and never mutated. */
+static void
+xfer_folder_params (struct htxf_conn *htxf, struct HxnetFolderParams *p)
+{
+    memset (p, 0, sizeof *p);
+    p->hx = htxf->hx;
+    p->base_path = htxf->path;
+    p->opt_preview = htxf->opt.preview;
     p->opt_folder = htxf->opt.folder;
     p->opt_large = htxf->opt.large;
     p->user_data = htxf;
@@ -728,27 +743,22 @@ folder_get_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int retval = 0;
-    guint8 buf[1024];
-    char base_path[MAXPATHLEN];
-
-    /* Snapshot the destination root before connecting: folder_recv_all
-	 * rewrites htxf->path per file, and we restore the root on exit. */
-    g_strlcpy (base_path, htxf->path, sizeof (base_path));
+    struct HxnetFolderParams params;
 
     if (!htxf_connect (htxf)) {
         retval = -1;
         goto ret;
     }
 
-    retval = folder_recv_all (htxf, base_path, buf, xfer_progress_bump);
+    /* The Rust folder loop builds per-file paths from base_path (htxf->path)
+	 * internally and never mutates it, so no snapshot/restore is needed — the
+	 * task-window label stays on the folder root throughout. */
+    xfer_folder_params (htxf, &params);
+    retval = hxnet_xfer_folder_recv_all (&params);
     if (retval) {
         goto ret;
     }
 
-    /* Restore the root path BEFORE the completion post_file_update so the
-	 * final task-window label reads as the folder, not the last per-file
-	 * path folder_recv_all left in htxf->path. */
-    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
     play_sound (FILE_DONE);
     htxf->total_pos = htxf->total_size;
     post_file_update (htxf);
@@ -756,8 +766,6 @@ folder_get_thread (void *arg)
 ret:
     (void)retval;
     htxf_io_release (htxf);
-    /* Restore the root path on the error paths too. */
-    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
     return NULL;
 }
 
@@ -816,9 +824,9 @@ ret:
  * loop exits cleanly. Same convention mhxd uses on its own
  * folder_recv exit path.
  *
- * htxf->path holds the local source root on entry; we snapshot
- * it and rewrite per-file for file_send_one. Restored to the
- * root before cleanup so the tasks-window display reads sanely.
+ * htxf->path holds the local source root; the Rust folder loop
+ * (hxnet_xfer_folder_send_all) walks it and builds each per-file
+ * path internally, so htxf->path is never mutated.
  *
  * Components are sent with pathcount equal to the depth of the
  * entry under the root, so files nested at root/sub/sub2/leaf
@@ -831,17 +839,17 @@ folder_put_thread (void *arg)
 {
     struct htxf_conn *htxf = (struct htxf_conn *)arg;
     int retval = 0;
-    guint8 buf[2048];
-    char base_path[MAXPATHLEN];
-
-    g_strlcpy (base_path, htxf->path, sizeof (base_path));
+    struct HxnetFolderParams params;
 
     if (!htxf_connect (htxf)) {
         retval = -1;
         goto ret;
     }
 
-    retval = folder_send_all (htxf, base_path, buf, xfer_progress_bump);
+    /* base_path (htxf->path) is the local source root; the Rust folder loop
+	 * walks it and never mutates it. */
+    xfer_folder_params (htxf, &params);
+    retval = hxnet_xfer_folder_send_all (&params);
     if (retval) {
         goto ret;
     }
@@ -853,9 +861,6 @@ folder_put_thread (void *arg)
 ret:
     (void)retval;
     htxf_io_release (htxf);
-    /* Restore the root path so the tasks-window label stays sensible
-	 * post-completion. */
-    g_strlcpy (htxf->path, base_path, sizeof (htxf->path));
     return NULL;
 }
 

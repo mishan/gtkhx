@@ -9,21 +9,22 @@
 
 /*
  * tests/integration/test_folder_roundtrip.c — upload a local folder tree
- * to mhxd via the PRODUCTION send machine (xfers_send.c::folder_send_all)
- * and download it back through the PRODUCTION receive machine
- * (xfers_recv.c::folder_recv_all), asserting every file round-trips
- * byte-for-byte.
+ * to mhxd via the PRODUCTION send machine
+ * (hxnet::xfer::hxnet_xfer_folder_send_all) and download it back through the
+ * PRODUCTION receive machine (hxnet_xfer_folder_recv_all), asserting every
+ * file round-trips byte-for-byte.
  *
  * This drives the real Hotline 1.5 FILE_NEXT/FILE_SEND folder protocol on
  * both sides — the nfi header + path-component framing, folder markers,
- * per-file size headers, and the FILP body via file_{send,recv}_one.
+ * per-file size headers, and the FILP body via
+ * hxnet_xfer_file_{send,recv}_one.
  *
  * Requires the guest account to hold UPLOAD_FOLDERS + DOWNLOAD_FOLDERS
  * (+ UPLOAD_FILES / UPLOAD_ANYWHERE), granted in the mhxd overlay's
  * guest UserData.
  *
- * Links xfers_send.c + xfers_recv.c + the hxhfs crate + htxf_subchannel.c + the FFO
- * codec on top of integration_harness_lib. GTK-shell couplings are
+ * The folder + per-file transfer machines live in the hxnet crate (linked via
+ * integration_harness_lib); this TU only drives them. GTK-shell couplings are
  * stubbed (preview branch never runs; progress is a no-op).
  */
 
@@ -40,12 +41,11 @@
 #include "htxf_subchannel.h"
 #include "preview.h"
 #include "xfers_recv.h"
-#include "xfers_send.h"
 #include "integration_harness.h"
 
 
-/* HxnetXferParams progress shape for the Rust hxnet_xfer_file_{recv,send}_one
- * paths (folder_recv_all / folder_send_all forward it per file). */
+/* HxnetFolderParams progress shape for the Rust folder transfer paths
+ * (hxnet_xfer_folder_{recv,send}_all forward it per file). */
 static void
 noop_progress_bump (void *user_data, guint64 delta)
 {
@@ -200,7 +200,7 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
     return content;
 }
 
-/* PUTFOLDER + drive folder_send_all to upload the local tree at `srcroot`
+/* PUTFOLDER + drive hxnet_xfer_folder_send_all to upload the local tree at `srcroot`
  * to Uploads/<folder>. Returns TRUE on a clean upload. */
 static gboolean
 upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
@@ -248,14 +248,22 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
     htxf.hx = ch;
     htxf.opt.folder = 1;
     htxf.total_size = total;
-    guint8 buf[2048];
-    int rv = folder_send_all (&htxf, srcroot, buf, noop_progress_bump);
+
+    struct HxnetFolderParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.base_path = srcroot;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.user_data = &htxf;
+    params.progress = noop_progress_bump;
+    int rv = hxnet_xfer_folder_send_all (&params);
     htxf_io_release (&htxf);
     return rv == 0;
 }
 
-/* Download folder `name` from Uploads/ into `dstroot` via folder_recv_all.
- * Returns TRUE on a clean transfer. */
+/* Download folder `name` from Uploads/ into `dstroot` via the production
+ * hxnet_xfer_folder_recv_all. Returns TRUE on a clean transfer. */
 static gboolean
 download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
                  const char *dstroot)
@@ -293,8 +301,15 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     htxf.opt.folder = 1;
     htxf.total_size = reply.size;
 
-    guint8 buf[1024];
-    int rv = folder_recv_all (&htxf, dstroot, buf, noop_progress_bump);
+    struct HxnetFolderParams params;
+    memset (&params, 0, sizeof params);
+    params.hx = htxf.hx;
+    params.base_path = dstroot;
+    params.opt_folder = htxf.opt.folder;
+    params.opt_large = htxf.opt.large;
+    params.user_data = &htxf;
+    params.progress = noop_progress_bump;
+    int rv = hxnet_xfer_folder_recv_all (&params);
     htxf_io_release (&htxf);
     return rv == 0;
 }
@@ -328,7 +343,7 @@ test_folder_round_trip (void)
     g_autofree char *dstroot = NULL;
     g_autofree char *got_root = NULL;
 
-    /* Upload the tree via the production folder_send_all. */
+    /* Upload the tree via the production hxnet_xfer_folder_send_all. */
     if (!upload_folder_tree (fd, &htlc, srcroot, folder)) {
         g_test_fail_printf ("folder upload failed (guest UPLOAD_FOLDERS?)");
         goto out;
@@ -363,14 +378,14 @@ out:
 }
 
 /* Nested subdir: upload <root>/alpha.txt + <root>/nested/beta.txt via the
- * production folder_send_all, then verify BOTH landed on the server by
+ * production hxnet_xfer_folder_send_all, then verify BOTH landed on the server by
  * fetching each file directly (FILE_GET) — including the subdir file.
  *
  * We can't verify the subdir file via a folder DOWNLOAD: mhxd's
  * folder_send (server side) is non-recursive — folder_getpaths reads a
  * single directory level and folder_send hard-codes pathcount=1, so it
  * emits a marker for a subdir but never descends into it. That's a mhxd
- * limitation, not a client bug: folder_send_all correctly uploads the
+ * limitation, not a client bug: hxnet_xfer_folder_send_all correctly uploads the
  * recursive tree (mhxd's folder_recv is recursion-capable and stores it),
  * and a direct FILE_GET of the nested path retrieves it. */
 static void

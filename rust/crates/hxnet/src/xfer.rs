@@ -35,6 +35,30 @@ use crate::htxf::HtxfConn;
 // errno-ish return codes (the C returned raw errno; callers only test != 0).
 const EIO: c_int = 5;
 const EINVAL: c_int = 22;
+const ENAMETOOLONG: c_int = 36;
+const EPROTO: c_int = 71;
+
+// Folder mini-protocol opcodes (Hotline 1.5 FILE_NEXT/SEND/RESUME state
+// machine), sent/received as u16 big-endian over the HTXF subchannel.
+const FILE_SEND_CMD: u16 = 1;
+const FILE_RESUME_CMD: u16 = 2;
+const FILE_NEXT_CMD: u16 = 3;
+/// next_file_info header: u16 len, u16 type, u16 pathcount.
+const NFI_HEADER_LEN: usize = 6;
+/// The fixed part the nfi `len` field counts before the per-component bytes.
+const NFI_LEN_FIXED: u16 = 4;
+/// Bytes the sender's per-file FILP body always emits ahead of the fork data:
+/// the fixed FILP header (no comment) — used by the folder upload's declared
+/// per-file size, which must match `hxnet_xfer_file_send_one`'s output exactly.
+const FILP_HEADER_LEN: usize = 133;
+/// A resume fork-list (RFLT) carries the data-fork resume offset at byte 46 and
+/// the resource-fork offset at byte 62, each a big-endian u32; the offsets are
+/// only present when the list is at least this long.
+const RFLT_MAX: usize = 128;
+const RFLT_DATA_POS_OFF: usize = 46;
+const RFLT_RSRC_POS_OFF: usize = 62;
+const RFLT_MIN_FOR_DATA: usize = 50;
+const RFLT_MIN_FOR_RSRC: usize = 66;
 
 /// Everything the download loop needs, supplied by the C driver by value — so
 /// the worker references no C symbols. `#[repr(C)]`; the C side declares the
@@ -97,6 +121,44 @@ unsafe fn path_from(ptr: *const c_char) -> Option<PathBuf> {
 
 fn io_errno(e: &std::io::Error) -> c_int {
     e.raw_os_error().unwrap_or(EIO)
+}
+
+/// A single subchannel read (mirrors C `htxf_io_read`: one `hxnet_htxf_read`, no
+/// fill-loop). Returns the byte count (0 = clean EOF, the folder recv's
+/// end-of-stream signal) or a negative on error. The folder control reads are
+/// small and each maps to one sender write / AEAD frame, so a single read
+/// returns them whole — same assumption the C loop made.
+unsafe fn htxf_read_once(hx: *mut HtxfConn, buf: &mut [u8]) -> isize {
+    crate::htxf::hxnet_htxf_read(hx, buf.as_mut_ptr(), buf.len())
+}
+
+/// A raw Hotline path component (Mac Roman bytes) → an owned `OsString`, without
+/// a UTF-8 round-trip that would mangle high-bit names.
+fn os_from_bytes(b: &[u8]) -> std::ffi::OsString {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::ffi::OsStr::from_bytes(b).to_owned()
+    }
+    #[cfg(not(unix))]
+    {
+        std::ffi::OsString::from(String::from_utf8_lossy(b).into_owned())
+    }
+}
+
+/// A local path → a `CString` for the per-file `HxnetXferParams.path` (which
+/// `hxnet_xfer_file_{recv,send}_one` re-parses with `path_from`). `None` if the
+/// path contains an interior NUL.
+fn cstring_from_path(p: &Path) -> Option<std::ffi::CString> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        std::ffi::CString::new(p.as_os_str().as_bytes()).ok()
+    }
+    #[cfg(not(unix))]
+    {
+        std::ffi::CString::new(p.to_str()?).ok()
+    }
 }
 
 /// One blocking read off the subchannel, mirroring C `htxf_io_read`. Cancellation
@@ -431,7 +493,7 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
     // type/creator, munged times, comment bytes, DATA fork marker).
     let fi = hfs::hfsinfo_read(&cfg, &path);
     let comlen = fi.comment.len();
-    let mut hdr = vec![0u8; 133 + comlen];
+    let mut hdr = vec![0u8; FILP_HEADER_LEN + comlen];
     hdr[..115].copy_from_slice(&FILP_TEMPLATE);
     if p.rsrc_size.wrapping_sub(p.rsrc_pos) != 0 {
         hdr[23] = 3;
@@ -448,11 +510,11 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
     hdr[116] = comlen as u8;
     hdr[117..117 + comlen].copy_from_slice(&fi.comment);
     let data_hdr = ffo::pack_fork_header(b"DATA", p.data_size.wrapping_sub(p.data_pos), large);
-    hdr[117 + comlen..133 + comlen].copy_from_slice(&data_hdr);
+    hdr[117 + comlen..FILP_HEADER_LEN + comlen].copy_from_slice(&data_hdr);
     if xfer_write(hx, &hdr).is_err() {
         return EIO;
     }
-    p.report((133 + comlen) as u64);
+    p.report((FILP_HEADER_LEN + comlen) as u64);
 
     // Data fork.
     if p.data_size.wrapping_sub(p.data_pos) != 0 {
@@ -497,6 +559,365 @@ pub unsafe extern "C" fn hxnet_xfer_file_send_one(p: *const HxnetXferParams) -> 
         Ok(()) => 0,
         Err(e) => e,
     }
+}
+
+// ============================ folder mini-protocol =========================
+// W3: the Rust port of C's xfers_recv.c::folder_recv_all and
+// xfers_send.c::folder_send_all — the Hotline 1.5 FILE_NEXT / FILE_SEND /
+// FILE_RESUME state machine plus the local tree walk. Per-file byte copying
+// delegates to the in-crate hxnet_xfer_file_{recv,send}_one above.
+
+/// Everything the folder loops need, supplied by the C driver by value (same
+/// no-upward-FFI discipline as [`HxnetXferParams`]). The per-file path is built
+/// internally from `base_path`, so the worker never touches the C
+/// `htxf->path`. `#[repr(C)]`; the C side declares the match in `xfers_recv.h`.
+#[repr(C)]
+pub struct HxnetFolderParams {
+    /// Open transport handle (`htxf->hx`).
+    pub hx: *mut HtxfConn,
+    /// Local tree root — created + written into (recv) or walked (send).
+    pub base_path: *const c_char,
+    pub opt_preview: c_int,
+    pub opt_folder: c_int,
+    pub opt_large: c_int,
+    /// Passed back to `progress` (the C side uses it as `htxf`).
+    pub user_data: *mut c_void,
+    pub progress: Option<unsafe extern "C" fn(user_data: *mut c_void, delta: u64)>,
+}
+
+/// Build the per-file receive/send params from folder params + a resolved path.
+fn per_file_params(
+    fp: &HxnetFolderParams,
+    path: *const c_char,
+    file_budget: u64,
+    data_pos: u64,
+    rsrc_pos: u64,
+    data_size: u64,
+    rsrc_size: u64,
+) -> HxnetXferParams {
+    HxnetXferParams {
+        hx: fp.hx,
+        path,
+        file_budget,
+        data_pos,
+        rsrc_pos,
+        opt_preview: fp.opt_preview,
+        opt_folder: fp.opt_folder,
+        opt_large: fp.opt_large,
+        preview: std::ptr::null_mut(),
+        user_data: fp.user_data,
+        progress: fp.progress,
+        preview_chunk: None,
+        preview_set_info: None,
+        preview_done: None,
+        data_size,
+        rsrc_size,
+    }
+}
+
+/// `int hxnet_xfer_folder_recv_all (const HxnetFolderParams *fp)` — receive a
+/// folder tree into `fp->base_path` (was C `folder_recv_all`). Drives the
+/// FILE_NEXT/FILE_SEND loop: request the next entry, read its nfi header + path
+/// components, mkdir folders or receive files via `hxnet_xfer_file_recv_one`.
+/// Returns 0 on success (including the clean end-of-stream when the server
+/// closes the socket), an errno-like positive code on failure.
+///
+/// # Safety
+/// C-ABI worker helper on a blocking-pool thread; `fp` valid, `fp->hx` open.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_xfer_folder_recv_all(fp: *const HxnetFolderParams) -> c_int {
+    let fp = match fp.as_ref() {
+        Some(f) => f,
+        None => return EINVAL,
+    };
+    if fp.hx.is_null() || fp.progress.is_none() {
+        return EINVAL;
+    }
+    let base = match path_from(fp.base_path) {
+        Some(p) => p,
+        None => return EINVAL,
+    };
+    if let Err(e) = std::fs::create_dir_all(&base) {
+        return io_errno(&e);
+    }
+
+    loop {
+        // Request the next entry.
+        if xfer_write(fp.hx, &FILE_NEXT_CMD.to_be_bytes()).is_err() {
+            return EIO;
+        }
+        // nfi header: a 0-byte read is the clean end-of-stream (server closed).
+        let mut nfi = [0u8; NFI_HEADER_LEN];
+        let n = htxf_read_once(fp.hx, &mut nfi);
+        if n == 0 {
+            return 0;
+        }
+        if n != NFI_HEADER_LEN as isize {
+            return EIO;
+        }
+        let ftype = u16::from_be_bytes([nfi[2], nfi[3]]);
+        let pathcount = u16::from_be_bytes([nfi[4], nfi[5]]);
+
+        // Read the path components and join them under base.
+        let mut rel = std::path::PathBuf::new();
+        for _ in 0..pathcount {
+            let mut ph = [0u8; 3];
+            if htxf_read_once(fp.hx, &mut ph) != 3 {
+                return EIO;
+            }
+            let nlen = ph[2] as usize;
+            let mut name = vec![0u8; nlen];
+            if nlen > 0 && htxf_read_once(fp.hx, &mut name) != nlen as isize {
+                return EIO;
+            }
+            // Defence in depth — refuse `..` and embedded '/' that would escape.
+            if name == b".." || name.contains(&b'/') {
+                return EINVAL;
+            }
+            rel.push(os_from_bytes(&name));
+        }
+        if rel.as_os_str().is_empty() {
+            return EINVAL;
+        }
+        let full = base.join(&rel);
+
+        if ftype == 1 {
+            // Folder marker — mkdir, no payload.
+            if let Err(e) = std::fs::create_dir_all(&full) {
+                return io_errno(&e);
+            }
+            continue;
+        }
+
+        // A file at depth > 1 may arrive before its parent marker; mkdir -p.
+        if pathcount > 1 {
+            if let Some(parent) = full.parent() {
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    return io_errno(&e);
+                }
+            }
+        }
+
+        // Request the file fresh (data_pos/rsrc_pos zeroed → whole file).
+        if xfer_write(fp.hx, &FILE_SEND_CMD.to_be_bytes()).is_err() {
+            return EIO;
+        }
+        let mut sz = [0u8; 4];
+        if htxf_read_once(fp.hx, &mut sz) != 4 {
+            return EIO;
+        }
+        let file_size = u32::from_be_bytes(sz) as u64;
+
+        let path_c = match cstring_from_path(&full) {
+            Some(c) => c,
+            None => return EINVAL,
+        };
+        let per = per_file_params(fp, path_c.as_ptr(), file_size, 0, 0, 0, 0);
+        let rv = hxnet_xfer_file_recv_one(&per);
+        if rv != 0 {
+            return rv;
+        }
+    }
+}
+
+/// One planned folder-upload entry (DFS pre-order): a folder marker or a file
+/// leaf, with its path components from the upload root (raw Mac Roman bytes).
+struct PutEntry {
+    is_folder: bool,
+    full: PathBuf,
+    components: Vec<Vec<u8>>,
+}
+
+/// DFS pre-order walk of the local tree (C `hx_collect_put_entries`): folders
+/// before their contents, names sorted bytewise for a deterministic stream.
+/// Symlinks and special files are skipped (metadata is read without following).
+fn collect_put_entries(dir: &Path, prefix: &[Vec<u8>], out: &mut Vec<PutEntry>) {
+    let rd = match std::fs::read_dir(dir) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let mut names: Vec<(Vec<u8>, PathBuf)> = Vec::new();
+    for ent in rd.flatten() {
+        names.push((os_bytes(&ent.file_name()), ent.path()));
+    }
+    names.sort_by(|a, b| a.0.cmp(&b.0));
+
+    for (name, full) in names {
+        let md = match std::fs::symlink_metadata(&full) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+        let mut comps = prefix.to_vec();
+        comps.push(name);
+        if md.is_dir() {
+            out.push(PutEntry {
+                is_folder: true,
+                full: full.clone(),
+                components: comps.clone(),
+            });
+            collect_put_entries(&full, &comps, out);
+        } else if md.is_file() {
+            out.push(PutEntry {
+                is_folder: false,
+                full,
+                components: comps,
+            });
+        }
+    }
+}
+
+/// Raw bytes of an `OsStr` (Mac Roman filenames), no UTF-8 round-trip.
+fn os_bytes(s: &std::ffi::OsStr) -> Vec<u8> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        s.as_bytes().to_vec()
+    }
+    #[cfg(not(unix))]
+    {
+        s.to_string_lossy().into_owned().into_bytes()
+    }
+}
+
+/// `int hxnet_xfer_folder_send_all (const HxnetFolderParams *fp)` — send the
+/// local folder tree at `fp->base_path` (was C `folder_send_all`). For each
+/// server FILE_NEXT, replies with one entry's nfi header + path components, then
+/// for files the per-file size + FILP body via `hxnet_xfer_file_send_one`. The
+/// server closes when done; our next FILE_NEXT read short-reads and we stop.
+/// Returns 0 on success, an errno-like positive code on failure.
+///
+/// # Safety
+/// C-ABI worker helper on a blocking-pool thread; `fp` valid, `fp->hx` open.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams) -> c_int {
+    let fp = match fp.as_ref() {
+        Some(f) => f,
+        None => return EINVAL,
+    };
+    if fp.hx.is_null() || fp.progress.is_none() {
+        return EINVAL;
+    }
+    let base = match path_from(fp.base_path) {
+        Some(p) => p,
+        None => return EINVAL,
+    };
+    let cfg = hxhfs::ffi::current_config();
+
+    let mut entries: Vec<PutEntry> = Vec::new();
+    collect_put_entries(&base, &[], &mut entries);
+
+    for e in &entries {
+        // Wait for FILE_NEXT.
+        let mut cmd = [0u8; 2];
+        if htxf_read_once(fp.hx, &mut cmd) != 2 {
+            return EIO;
+        }
+        if u16::from_be_bytes(cmd) != FILE_NEXT_CMD {
+            return EPROTO;
+        }
+
+        // nfi header: len = 4 + sum(3 + nlen_i), type, pathcount.
+        let mut wire_len: u16 = NFI_LEN_FIXED;
+        for c in &e.components {
+            wire_len = wire_len.wrapping_add(3 + c.len() as u16);
+        }
+        let mut nfi = [0u8; NFI_HEADER_LEN];
+        nfi[0..2].copy_from_slice(&wire_len.to_be_bytes());
+        nfi[2..4].copy_from_slice(&(e.is_folder as u16).to_be_bytes());
+        nfi[4..6].copy_from_slice(&(e.components.len() as u16).to_be_bytes());
+        if xfer_write(fp.hx, &nfi).is_err() {
+            return EIO;
+        }
+
+        for c in &e.components {
+            if c.len() > 255 {
+                return ENAMETOOLONG;
+            }
+            let ch = [0u8, 0u8, c.len() as u8];
+            if xfer_write(fp.hx, &ch).is_err() {
+                return EIO;
+            }
+            if !c.is_empty() && xfer_write(fp.hx, c).is_err() {
+                return EIO;
+            }
+        }
+
+        if e.is_folder {
+            continue; // folder marker — no payload
+        }
+
+        // File leaf — server replies FILE_SEND (fresh) or FILE_RESUME.
+        let mut cmd = [0u8; 2];
+        if htxf_read_once(fp.hx, &mut cmd) != 2 {
+            return EIO;
+        }
+        let cmd = u16::from_be_bytes(cmd);
+        let mut data_pos = 0u64;
+        let mut rsrc_pos = 0u64;
+        if cmd == FILE_RESUME_CMD {
+            let mut rl = [0u8; 2];
+            if htxf_read_once(fp.hx, &mut rl) != 2 {
+                return EIO;
+            }
+            let rlen = u16::from_be_bytes(rl) as usize;
+            if rlen > RFLT_MAX {
+                return EPROTO;
+            }
+            let mut rflt = vec![0u8; rlen];
+            if rlen > 0 && htxf_read_once(fp.hx, &mut rflt) != rlen as isize {
+                return EIO;
+            }
+            if rlen >= RFLT_MIN_FOR_DATA {
+                data_pos = u32::from_be_bytes(
+                    rflt[RFLT_DATA_POS_OFF..RFLT_DATA_POS_OFF + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as u64;
+            }
+            if rlen >= RFLT_MIN_FOR_RSRC {
+                rsrc_pos = u32::from_be_bytes(
+                    rflt[RFLT_RSRC_POS_OFF..RFLT_RSRC_POS_OFF + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as u64;
+            }
+        } else if cmd != FILE_SEND_CMD {
+            return EPROTO;
+        }
+
+        // Local fork sizes.
+        let md = match std::fs::metadata(&e.full) {
+            Ok(m) => m,
+            Err(err) => return io_errno(&err),
+        };
+        let data_size = md.len();
+        let rsrc_size = hfs::resource_len(&cfg, &e.full);
+        let com = hfs::comment_len(&cfg, &e.full) as u64;
+
+        // Per-file payload size — MUST equal exactly what hxnet_xfer_file_send_one
+        // writes (FILP header + comment + data fork + the unconditional 16-byte
+        // MACR marker + rsrc fork), or the trailing bytes desync the server's
+        // parse of the next file's nfi and the whole folder stream fails.
+        let file_size = FILP_HEADER_LEN as u64
+            + com
+            + data_size.wrapping_sub(data_pos)
+            + ffo::FORK_HEADER_LEN as u64
+            + rsrc_size.wrapping_sub(rsrc_pos);
+        if xfer_write(fp.hx, &(file_size as u32).to_be_bytes()).is_err() {
+            return EIO;
+        }
+
+        let path_c = match cstring_from_path(&e.full) {
+            Some(c) => c,
+            None => return EINVAL,
+        };
+        let per = per_file_params(fp, path_c.as_ptr(), 0, data_pos, rsrc_pos, data_size, rsrc_size);
+        let rv = hxnet_xfer_file_send_one(&per);
+        if rv != 0 {
+            return rv;
+        }
+    }
+    0
 }
 
 #[cfg(test)]
@@ -582,5 +1003,206 @@ mod send_capture_tests {
         assert_eq!(&got[133..133 + body.len()], body, "raw data fork follows header");
         // Trailing 16 bytes are the MACR marker (rsrc_size == 0).
         assert_eq!(&got[133 + body.len()..133 + body.len() + 4], b"MACR", "MACR marker");
+    }
+}
+
+#[cfg(test)]
+mod folder_loopback_tests {
+    //! Server-independent round-trip coverage for the W3 folder state machines,
+    //! driving each client function against a minimal mock of the *other* side
+    //! of the Hotline 1.5 folder protocol over a loopback socket.
+    use super::*;
+    use crate::htxf::HtxfConn;
+    use std::io::{Read as _, Write as _};
+    use std::net::{TcpListener, TcpStream};
+
+    // The full FILP body hxnet_xfer_file_send_one emits for `body` (133-byte
+    // header + data fork + 16-byte MACR), generated by running the send path
+    // into a loopback capture.
+    fn gen_filp(body: &[u8]) -> Vec<u8> {
+        let dir = std::env::temp_dir().join(format!(
+            "hxnet_folder_gen_{}_{}",
+            std::process::id(),
+            body.len()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("gen.bin");
+        std::fs::write(&path, body).unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let reader = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            s.read_to_end(&mut got).unwrap();
+            got
+        });
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: path_c.as_ptr(),
+            file_budget: 0,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 1,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: body.len() as u64,
+            rsrc_size: 0,
+        };
+        assert_eq!(unsafe { hxnet_xfer_file_send_one(&params) }, 0);
+        drop(conn);
+        let got = reader.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        got
+    }
+
+    extern "C" fn noop_progress(_u: *mut c_void, _d: u64) {}
+
+    fn folder_params(hx: *mut HtxfConn, base: *const c_char) -> HxnetFolderParams {
+        HxnetFolderParams {
+            hx,
+            base_path: base,
+            opt_preview: 0,
+            opt_folder: 1,
+            opt_large: 0,
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop_progress),
+        }
+    }
+
+    // Client upload: hxnet_xfer_folder_send_all against a mock server that plays
+    // mhxd's folder_recv role — drive FILE_NEXT, read the nfi + components, and
+    // for files read the declared size + that many body bytes.
+    #[test]
+    fn folder_send_uploads_tree() {
+        let dir = std::env::temp_dir().join(format!("hxnet_fsend_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.txt"), b"aaa").unwrap();
+        std::fs::write(dir.join("b.txt"), b"bbbb").unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut got: Vec<(Vec<u8>, u32, Vec<u8>)> = Vec::new();
+            loop {
+                if s.write_all(&FILE_NEXT_CMD.to_be_bytes()).is_err() {
+                    break;
+                }
+                let mut nfi = [0u8; NFI_HEADER_LEN];
+                if s.read_exact(&mut nfi).is_err() {
+                    break; // client closed — tree exhausted
+                }
+                let ftype = u16::from_be_bytes([nfi[2], nfi[3]]);
+                let pathcount = u16::from_be_bytes([nfi[4], nfi[5]]);
+                let mut name = Vec::new();
+                for _ in 0..pathcount {
+                    let mut ph = [0u8; 3];
+                    s.read_exact(&mut ph).unwrap();
+                    let mut nm = vec![0u8; ph[2] as usize];
+                    s.read_exact(&mut nm).unwrap();
+                    name = nm;
+                }
+                if ftype == 1 {
+                    continue; // folder marker
+                }
+                s.write_all(&FILE_SEND_CMD.to_be_bytes()).unwrap();
+                let mut sz = [0u8; 4];
+                s.read_exact(&mut sz).unwrap();
+                let size = u32::from_be_bytes(sz);
+                let mut blob = vec![0u8; size as usize];
+                s.read_exact(&mut blob).unwrap();
+                got.push((name, size, blob));
+            }
+            got
+        });
+
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(dir.to_str().unwrap()).unwrap();
+        let fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        let rv = unsafe { hxnet_xfer_folder_send_all(&fp) };
+        drop(conn);
+        let got = server.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(rv, 0, "folder_send_all returned error");
+        assert_eq!(got.len(), 2, "server should receive two files");
+        for (name, size, blob) in &got {
+            let body: &[u8] = if name == b"a.txt" { b"aaa" } else { b"bbbb" };
+            // Declared size == actual bytes == 133 header + body + 16 MACR.
+            assert_eq!(*size as usize, blob.len(), "declared size matches bytes");
+            assert_eq!(*size as usize, 133 + body.len() + 16, "folder file size accounting");
+            assert_eq!(&blob[133..133 + body.len()], body, "data fork bytes");
+        }
+    }
+
+    // Client download: hxnet_xfer_folder_recv_all against a mock server that
+    // plays mhxd's folder_send role — answer each FILE_NEXT with an nfi +
+    // component, then on FILE_SEND emit the declared size + FILP body. After the
+    // last file, close on the trailing FILE_NEXT so the client sees a clean end.
+    #[test]
+    fn folder_recv_downloads_tree() {
+        let files: Vec<(&[u8], &[u8])> = vec![(b"a.txt", b"alpha body"), (b"b.txt", b"beta!")];
+        let bodies: Vec<(Vec<u8>, Vec<u8>)> = files
+            .iter()
+            .map(|(n, b)| (n.to_vec(), gen_filp(b)))
+            .collect();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            for (name, filp) in &bodies {
+                let mut cmd = [0u8; 2];
+                s.read_exact(&mut cmd).unwrap();
+                assert_eq!(u16::from_be_bytes(cmd), FILE_NEXT_CMD);
+                // nfi: len = 4 + 3 + nlen, type = 0 (file), pathcount = 1.
+                let wire_len = NFI_LEN_FIXED + 3 + name.len() as u16;
+                let mut nfi = [0u8; NFI_HEADER_LEN];
+                nfi[0..2].copy_from_slice(&wire_len.to_be_bytes());
+                nfi[2..4].copy_from_slice(&0u16.to_be_bytes());
+                nfi[4..6].copy_from_slice(&1u16.to_be_bytes());
+                s.write_all(&nfi).unwrap();
+                s.write_all(&[0, 0, name.len() as u8]).unwrap();
+                s.write_all(name).unwrap();
+                // FILE_SEND, then the declared size + FILP body.
+                let mut cmd = [0u8; 2];
+                s.read_exact(&mut cmd).unwrap();
+                assert_eq!(u16::from_be_bytes(cmd), FILE_SEND_CMD);
+                s.write_all(&(filp.len() as u32).to_be_bytes()).unwrap();
+                s.write_all(filp).unwrap();
+            }
+            // Trailing FILE_NEXT → close (clean end-of-stream for the client).
+            let mut cmd = [0u8; 2];
+            let _ = s.read_exact(&mut cmd);
+        });
+
+        let dest = std::env::temp_dir().join(format!("hxnet_frecv_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dest);
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let base_c = std::ffi::CString::new(dest.to_str().unwrap()).unwrap();
+        let fp = folder_params(&mut conn as *mut HtxfConn, base_c.as_ptr());
+        let rv = unsafe { hxnet_xfer_folder_recv_all(&fp) };
+        drop(conn);
+        server.join().unwrap();
+
+        assert_eq!(rv, 0, "folder_recv_all returned error");
+        let a = std::fs::read(dest.join("a.txt")).unwrap_or_default();
+        let b = std::fs::read(dest.join("b.txt")).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&dest);
+        assert_eq!(a, b"alpha body", "downloaded a.txt");
+        assert_eq!(b, b"beta!", "downloaded b.txt");
     }
 }

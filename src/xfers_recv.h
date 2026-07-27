@@ -8,13 +8,13 @@
  */
 
 /*
- * xfers_recv.{c,h} — the single-file HTXF receive state machine, split
- * out of xfers.c so it can be linked and driven directly by a test
- * (tests/integration/test_file_get.c) without dragging in the GTK
- * worker shell. The only coupling back to that shell is a progress
- * callback (xfer_progress_fn) the caller supplies; xfers.c passes its
- * post_file_update, a test passes a no-op. See
- * docs/rust/files-migration-scope.md.
+ * xfers_recv.h — the FFI seam for the HTXF file-transfer workers, which
+ * now live in Rust (hxnet::xfer): the per-file HxnetXferParams + the
+ * folder HxnetFolderParams the C drivers (xfers.c) fill and hand across,
+ * plus the hxfiles-xfer FFO codec decls a couple of C sites still use.
+ * The single-file + folder state machines themselves are all Rust; the
+ * C side keeps only the refcounted htxf_conn struct + the GTK worker
+ * shell. See docs/rust/xfer-worker-to-rust-scoping.md.
  */
 
 #ifndef GTKHX_XFERS_RECV_H
@@ -25,16 +25,6 @@
 #include <stddef.h>
 
 struct htxf_conn;
-
-/* Progress hook fired as bytes arrive (htxf->total_pos is already
- * bumped). Must be non-NULL. Used by the C send path (file_send_one /
- * folder_send_all). */
-typedef void (*xfer_progress_fn) (struct htxf_conn *htxf);
-
-/* The receive-side progress hook — the HxnetXferParams shape (user_data +
- * byte delta), so the C driver owns the total_pos bump + the tasks-window
- * post. folder_recv_all forwards it straight into the per-file params. */
-typedef void (*hxnet_xfer_progress_fn) (void *user_data, guint64 delta);
 
 /* ---- hxfiles-xfer FFO/FILP codec FFI (rust/crates/hxfiles-xfer) ----
  * Shared by the receive state machine here and the send packing in
@@ -115,15 +105,32 @@ extern int hxnet_xfer_file_recv_one (const struct HxnetXferParams *params);
  * channel + plays the sound. */
 extern int hxnet_xfer_file_send_one (const struct HxnetXferParams *params);
 
-/* Receive a folder tree from an already-open HTXF subchannel into the
- * local directory `base_path` (which it creates). Drives the Hotline 1.5
- * FILE_NEXT/FILE_SEND state machine, building per-file HxnetXferParams and
- * calling hxnet_xfer_file_recv_one. `buf` is caller scratch (>= 1024 bytes).
- * `progress` is the HxnetXferParams shape, forwarded per file. Rewrites
- * htxf->path per file; the caller restores it. Returns 0 on success (including
- * the clean end-of-stream when the server closes), an errno-like code on
- * failure. */
-extern int folder_recv_all (struct htxf_conn *htxf, const char *base_path,
-                            guint8 *buf, hxnet_xfer_progress_fn progress);
+/* Everything the folder transfer loops need, supplied by the C driver by value
+ * (same no-upward-FFI discipline as HxnetXferParams). The worker builds each
+ * per-file path from base_path internally, so it never touches htxf->path.
+ *
+ * MUST match hxnet::xfer::HxnetFolderParams (a #[repr(C)] struct) field-for-
+ * field. */
+struct HxnetFolderParams {
+    void *hx;               /* htxf->hx (the Rust HtxfConn *) */
+    const char *base_path;  /* local tree root: created + written (recv) or
+                             * walked (send) */
+    int opt_preview;
+    int opt_folder;
+    int opt_large;
+    void *user_data;        /* passed back to progress (the C side uses it as htxf) */
+    void (*progress) (void *user_data, guint64 delta);
+};
+
+/* Receive / send a whole folder tree over an already-open HTXF subchannel — the
+ * Hotline 1.5 FILE_NEXT/FILE_SEND/FILE_RESUME state machine, ported to Rust
+ * (hxnet::xfer, W3). recv creates base_path and mkdir/receives each entry; send
+ * walks base_path (DFS pre-order) and answers each FILE_NEXT. Per-file byte
+ * copying delegates to hxnet_xfer_file_{recv,send}_one. Returns 0 on success
+ * (recv includes the clean end-of-stream when the server closes), an errno-like
+ * positive code on failure. The C driver (folder_get_thread / folder_put_thread)
+ * closes the channel + plays the completion sound. */
+extern int hxnet_xfer_folder_recv_all (const struct HxnetFolderParams *params);
+extern int hxnet_xfer_folder_send_all (const struct HxnetFolderParams *params);
 
 #endif /* GTKHX_XFERS_RECV_H */

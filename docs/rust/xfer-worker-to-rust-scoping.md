@@ -180,11 +180,21 @@ in-crate native.
   `HtxfConn::new_plain_for_test`) pins the exact wire framing against mhxd's
   `file_recv` parse: 133-byte header, `buf[39] == 77`, DATA fork length at offset
   129, raw data, trailing MACR. Tier-3 coverage is `file_put` / `folder_roundtrip`.
-- **W3 — folder mini-protocol → Rust.** `folder_{recv,send}_all` (the
-  FILE_NEXT / FILE_SEND / FILE_RESUME framing + local tree walk + per-file
-  resume). Highest behaviour-risk (resume, partial transfers, name encoding),
-  so last; leans hardest on the Tier-3 folder round-trip. `xfers_recv.c` /
-  `xfers_send.c` / the `htxf_io.c` read/write shim delete here.
+- **W3 — folder mini-protocol → Rust.** *(Shipped.)* `folder_recv_all` /
+  `folder_send_all` moved to `hxnet::xfer::hxnet_xfer_folder_{recv,send}_all`,
+  driven by a new `HxnetFolderParams` (hx + base_path + opts + progress; same
+  no-upward-FFI discipline as W1/W2). The FILE_NEXT/FILE_SEND/FILE_RESUME framing,
+  the DFS tree walk (`std::fs`), the RFLT resume-offset parse, and the per-file
+  size accounting are all native; per-file byte copying delegates to the in-crate
+  `hxnet_xfer_file_{recv,send}_one`. Because the worker builds each per-file path
+  from `base_path` internally, it never touches the C `htxf->path`, so the driver's
+  snapshot/restore dance is gone. `xfers_recv.c` and `xfers_send.c` (+ `xfers_send.h`)
+  are deleted; the C drivers (`folder_get_thread` / `folder_put_thread`) now just
+  fill `HxnetFolderParams` and call the Rust fn. Validated by server-independent
+  loopback round-trip tests (`folder_loopback_tests`, mock server for each
+  direction) plus the Tier-3 `folder_roundtrip` against mhxd. (`htxf_io.c` /
+  `htxf_subchannel.c` deletion moves to S1, since banner + the C accessor seam
+  still use them.)
 - **S0 — flip `struct htxf_conn` → `hxnet::xfer` (Arc + atomics).** Now that
   the worker is Rust, move the struct storage + lifecycle behind the
   `hx_htxf_*` C ABI: `Arc`-based refcount (clones *are* the refs), atomic
