@@ -20,9 +20,10 @@
 //! is the wire trace, the hxnet send bridge, and the status-log / close on a
 //! send failure.
 //!
-//! `hlwrite` (the variadic sibling) stays a thin C adapter in `network.c`: C
-//! varargs can't cross the FFI as a Rust `extern "C"` definition, so it marshals
-//! its `va_list` into a `struct hx_chunk[]` and delegates here.
+//! The old variadic `hlwrite` front door is gone (it had no production callers):
+//! a C variadic can't be an `extern "C"` Rust definition, and there was nothing
+//! left to keep it for. Callers build a `struct hx_chunk[]` and call
+//! `hlwrite_chunks` directly.
 
 use std::os::raw::{c_char, c_int};
 
@@ -112,24 +113,28 @@ pub unsafe extern "C" fn hlwrite_chunks(
     // pack-guard trip left `htlc->trans` untouched.
     let my_trans = hx_conn_trans(htlc);
 
+    // Pack the frame. `pack_message_size` predicts the exact byte count, so a
+    // zero size (too many chunks / overflow) or a write that isn't exactly
+    // `needed` is a caller bug, not a runtime condition — treated as fatal
+    // below. We never truncate a short pack onto the wire.
     let needed = gtkhx_proto_pack_message_size(chunks, hc as usize);
-    let frame: Option<Vec<u8>> = if needed == 0 {
-        None // pack-guard trip (programmer error) — nothing to send
+    let packed: Result<Vec<u8>, ()> = if needed == 0 {
+        Err(())
     } else {
         let trans = hx_conn_trans_post_inc(htlc); // == my_trans; advances the counter
         let mut buf = vec![0u8; needed];
         let written =
             gtkhx_proto_pack_message(buf.as_mut_ptr(), needed, ty, trans, flag, chunks, hc as usize);
-        if written == 0 {
-            None
+        if written == needed {
+            Ok(buf)
         } else {
-            buf.truncate(written);
-            Some(buf)
+            Err(())
         }
     };
 
-    // Trace after the pack decision (so a pack-guard trip can't leave an open
-    // trace block), walking the caller's original chunk array.
+    // Trace after the pack (so a pack-guard trip can't leave an open trace
+    // block), walking the caller's original chunk array — the attempt is visible
+    // in a proto trace even when the pack was rejected below.
     proto_trace_send_begin(ty, my_trans, hc as u16);
     for i in 0..hc as isize {
         let c = &*chunks.offset(i);
@@ -137,8 +142,22 @@ pub unsafe extern "C" fn hlwrite_chunks(
     }
     proto_trace_send_end();
 
-    let Some(frame) = frame else {
-        return;
+    let frame = match packed {
+        Ok(f) => f,
+        Err(()) => {
+            // A rejected or short pack means the caller handed us a bad chunk
+            // array. Don't silently drop a control-channel request — that
+            // desyncs protocol state and is near-impossible to diagnose. Report
+            // it and tear the connection down (never a truncated frame on the
+            // wire). Message pre-formatted so the log call takes no varargs.
+            let msg = std::ffi::CString::new(format!(
+                "hlwrite_chunks: frame pack failed (type={ty:#x}, {hc} chunks); closing.\n"
+            ))
+            .unwrap_or_default();
+            hx_printf_prefix(htlc, 0, infoprefix(), msg.as_ptr());
+            hx_htlc_close(htlc, /*expected=*/ 0);
+            return;
+        }
     };
 
     // When the bridge is installed, hxnet's transform stack handles the
@@ -151,13 +170,9 @@ pub unsafe extern "C" fn hlwrite_chunks(
             // effectively dead — close rather than drop the bytes and let
             // protocol state desync. hx_bridge_send_frame already logged the
             // specific FFI code via g_critical.
-            hx_printf_prefix(
-                htlc,
-                0,
-                infoprefix(),
-                b"hxnet send failed (rc=%d); closing.\n\0".as_ptr() as *const c_char,
-                rc,
-            );
+            let msg = std::ffi::CString::new(format!("hxnet send failed (rc={rc}); closing.\n"))
+                .unwrap_or_default();
+            hx_printf_prefix(htlc, 0, infoprefix(), msg.as_ptr());
             hx_htlc_close(htlc, /*expected=*/ 0);
         }
     } else {
@@ -251,14 +266,14 @@ mod doubles {
             env.send_rc
         })
     }
-    // Fixed-arity stand-in for the variadic real symbol: hlwrite_chunks only
-    // ever calls it with exactly these five args.
+    // Fixed-arity stand-in for the variadic real symbol: hlwrite_chunks
+    // pre-formats its message, so it only ever calls this with the four fixed
+    // args (no varargs).
     pub unsafe fn hx_printf_prefix(
         _htlc: *mut HtlcConn,
         _cid: u32,
         _prefix: *const c_char,
         _fmt: *const c_char,
-        _rc: c_int,
     ) {
     }
     pub unsafe fn hx_htlc_close(_htlc: *mut HtlcConn, _expected: c_int) {
@@ -407,6 +422,25 @@ mod tests {
             assert_eq!(env.close_calls, 0);
             // still stamped one frame's trans
             assert_eq!(env.trans, 43);
+        });
+    }
+
+    #[test]
+    fn pack_rejection_is_fatal_and_never_sends() {
+        // hc past MAX_PACK_CHUNKS (64) makes pack_message_size reject with a
+        // zero size — a caller bug. It must close the connection, not silently
+        // drop the request, and never put a (truncated) frame on the wire.
+        doubles::reset(/*fd=*/ 1, 42, /*installed=*/ true, /*rc=*/ 0);
+        let chunks = [HxChunk::EMPTY; 65];
+        unsafe {
+            hlwrite_chunks(fake_htlc(), 200, 0, chunks.as_ptr(), 65);
+        }
+        ENV.with(|e| {
+            let env = e.borrow();
+            assert_eq!(env.send_calls, 0);
+            assert_eq!(env.close_calls, 1);
+            // trans not advanced — the pack was rejected before the stamp.
+            assert_eq!(env.trans, 42);
         });
     }
 }

@@ -333,7 +333,11 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
         return;
     }
     if (hx_bridge_is_installed ()) {
-        hx_bridge_send_frame (buf, len);
+        /* Fail loudly if the bridge refuses the send (FULL/CLOSED/…) rather than
+         * continue with a half-initialised connection that fails obscurely
+         * later. `len` casts to the guint32 the FFI takes. */
+        int rc = hx_bridge_send_frame (buf, (guint32) len);
+        g_assert_cmpint (rc, ==, 0);
     }
     g_free (buf);
 }
