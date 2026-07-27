@@ -22,6 +22,10 @@ use std::os::raw::{c_char, c_void};
 
 use glib::ffi::{gpointer, GHashTable};
 
+// The control-channel send primitive `hlwrite_chunks` — the send half of the
+// outbound-request idiom whose register half (`task_new`) lives below.
+pub mod send;
+
 /// Opaque C types we only ever hold as pointers and hand back to C.
 #[repr(C)]
 pub struct Session {

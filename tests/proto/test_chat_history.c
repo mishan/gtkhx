@@ -37,36 +37,14 @@
 #include "proto_helpers.h"
 #include "chat_history.h"
 
-/* The production `hlwrite` lives in network.c, which pulls in
- * GIOChannel + proto_trace + cipher + compress + connection-state
- * signal emission. None of that is needed (or wanted) here; the
- * test only cares about the buffer hlwrite produces. Provide a
- * minimal in-test stub that does exactly what the production
- * function does for the buffer side — call hlpack — and skip
- * everything else. Linker picks this stub because we don't link
- * network.c.
+/* The production `hlwrite_chunks` lives in Rust (hxtask::send); linking it would
+ * drag in the hxnet send bridge + proto_trace + connection-state signal
+ * emission. None of that is needed (or wanted) here; the test only cares about
+ * the buffer the send produces. Provide a minimal in-test stub that does the
+ * buffer side — call hlpack_chunks — and skip everything else. The linker picks
+ * this stub because we don't link the Rust send primitive.
  *
- * Same trick for hlwrite_chunks (the array-style variant chat_history
- * now uses after the LOGIN-fork removal — see commit message
- * "tests: end the LOGIN-packet fork between production and the
- * harness"). hlpack_chunks does the buffer side; everything else is
- * stubbed out. */
-void
-hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
-{
-    va_list ap;
-    va_start (ap, hc);
-    gsize len = 0;
-    guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
-    va_end (ap);
-    /* Stash the packed frame into htlc->in so the tests can walk it
-     * (hlpack now returns a fresh buffer — there's no htlc->out). */
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = buf;
-    hx_test_in(htlc)->pos = len;
-}
-
-/* Production declaration lives in network.h, which we deliberately
+ * Production declaration lives in network.h, which we deliberately
  * don't include (it would drag in GIOChannel + proto_trace + cipher
  * + compress). Forward-declare here so -Wmissing-prototypes is
  * happy — same pattern integration_harness.c uses. */

@@ -304,6 +304,44 @@ gtask_delete_tsk (session *sess, guint32 trans)
     (void) sess; (void) trans;
 }
 
+/* hlwrite_chunks — the production send primitive is now Rust (hxtask::send),
+ * which we can't link here: its task_new / task_with_trans / task_delete /
+ * gtask_delete_tsk are exactly the no-op stubs above, so linking hxtask would
+ * double-define them. Provide a minimal in-test equivalent that does what
+ * send_login needs — pack the frame via hlpack_chunks (still C, proto_helpers.c)
+ * and hand the bytes to the hxnet send bridge — so real_connect can push the
+ * LOGIN packet to the server. No proto_trace / close-on-fail: the connect-state
+ * and tracker-signal tests don't need them (tracker_signals never calls this;
+ * it only has to link). Forward-declared inline to avoid the proto_helpers.h /
+ * hxnet_bridge.h header piles, same pattern as the stubs above. */
+struct hx_chunk;
+extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                              const struct hx_chunk *chunks, int hc,
+                              gsize *out_len);
+extern gboolean hx_bridge_is_installed (void);
+extern int hx_bridge_send_frame (const guint8 *data, guint32 len);
+
+extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                            const struct hx_chunk *chunks, int hc);
+void
+hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                const struct hx_chunk *chunks, int hc)
+{
+    gsize len = 0;
+    guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
+    if (!buf) {
+        return;
+    }
+    if (hx_bridge_is_installed ()) {
+        /* Fail loudly if the bridge refuses the send (FULL/CLOSED/…) rather than
+         * continue with a half-initialised connection that fails obscurely
+         * later. `len` casts to the guint32 the FFI takes. */
+        int rc = hx_bridge_send_frame (buf, (guint32) len);
+        g_assert_cmpint (rc, ==, 0);
+    }
+    g_free (buf);
+}
+
 /* tracker.c progress hooks — referenced by tracker fetch state
  * machine in network.c. The connect path doesn't fire the tracker
  * fetch, but the symbols need to link. */

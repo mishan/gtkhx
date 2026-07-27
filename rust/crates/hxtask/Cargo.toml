@@ -4,7 +4,7 @@ name = "hxtask"
 version = "0.1.0"
 edition = "2021"
 license = "GPL-2.0-or-later"
-description = "Per-session Hotline transaction-task table (ported from tasks_table.c + the struct task model in tasks.c)"
+description = "Per-session Hotline outbound-request machinery: the transaction-task table (from tasks_table.c + the struct task model in tasks.c) and the hlwrite_chunks send primitive (from network.c)"
 publish = false
 
 [lib]
@@ -12,12 +12,17 @@ publish = false
 # through the workspace's single staticlib, gtkhx-ffi.
 crate-type = ["rlib"]
 
-# glib only, for the GHashTable FFI (sess->tasks stays a real GHashTable that
-# network.c's teardown iterates directly) + g_malloc0 / g_strdup / g_free. No
-# gtk. The C environment — the session/htlc field accessors (tasks_bridge.c),
-# the task-update signal emit (gtkhx-session), and gtask_delete_tsk (tasks.c) —
-# is externed and resolved at the final C link; cargo test provides in-crate
-# #[cfg(test)] doubles so the suite runs headless.
+# glib for the GHashTable FFI (sess->tasks stays a real GHashTable that
+# network.c's teardown iterates directly) + g_malloc0 / g_strdup / g_free +
+# g_malloc/g_free on the send path; hotline-proto for the HxChunk (type, len,
+# data) triple the send primitive takes. No gtk. The rest of the C environment —
+# the session/htlc field accessors (tasks_bridge.c), the task-update signal emit
+# (gtkhx-session), gtask_delete_tsk (tasks.c), and the send side's frame packer /
+# wire trace / hxnet bridge / status-log / close (proto_helpers.c, proto_trace.c,
+# hxnet_bridge.c, gtkhx_log.c, network.c) — is externed and resolved at the final
+# C link; cargo test provides in-crate #[cfg(test)] doubles so the suite runs
+# headless.
 [dependencies]
 gtkhx-core = { path = "../gtkhx-core" }
+hotline-proto = { path = "../hotline-proto" }
 glib = { workspace = true }

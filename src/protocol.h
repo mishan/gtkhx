@@ -195,8 +195,6 @@ struct htxf_conn {
  * without also adding back the field. */
 
 extern void htlc_close (struct htlc_conn *htlc);
-extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
-                     ...);
 extern void hl_code (void *__dst, const void *__src, size_t len);
 
 #define hl_decode(d, s, l) hl_code (d, s, l)

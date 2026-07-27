@@ -65,22 +65,9 @@
 /* chat_history.c is bundled into the integration_harness lib (which
  * gives this test the new hx_get_chat_history_build_chunks builder
  * for free, used by integration_send_get_chat_history). The harness
- * also provides a stubbed hlwrite_chunks (production's send path
- * needs network.c which we deliberately don't link). No per-test
- * stubs needed here anymore.
- *
- * hlwrite stays stubbed here in case any non-chat-history code path
- * pulls it transitively — it's the production async-write entry that
- * never makes sense in a Tier 3 binary. */
-void
-hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
-{
-    (void) htlc;
-    (void) type;
-    (void) flag;
-    (void) hc;
-    g_assert_not_reached ();
-}
+ * also provides a stubbed hlwrite_chunks (the production send path is
+ * Rust — hxtask::send — which we deliberately don't link). No per-test
+ * stubs needed here anymore. */
 
 /* ------------------------------------------------------------------ */
 /* Small helpers                                                       */
