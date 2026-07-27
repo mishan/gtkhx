@@ -1084,11 +1084,10 @@ integration_harness_lib = static_library(
   '../src/chat_history.c',
   # The Tier 3 HOPE login + HTXF transfers run through the production
   # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
-  # (cipher.c stream, cipher_aead.c AEAD) are gone. htxf_io.c +
-  # htxf_subchannel.c remain as the thin C shim / preamble packer over
-  # the Rust HTXF channel.
+  # (cipher.c stream, cipher_aead.c AEAD) are gone. htxf_io.c remains as the
+  # thin C shim over the Rust HTXF channel (the preamble packer moved to
+  # hxnet's hxnet_htxf_pack_preamble in S1.1).
   '../src/htxf_io.c',
-  '../src/htxf_subchannel.c',
   '../src/qbuf.c',
   '../src/algo_list.c',
   '../src/debug.c',
@@ -1146,7 +1145,6 @@ test_integration_real_connect = executable(
   '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/htxf_io.c',
-  '../src/htxf_subchannel.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
@@ -1189,7 +1187,6 @@ test_integration_tracker_signals = executable(
   '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/htxf_io.c',
-  '../src/htxf_subchannel.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
@@ -1265,7 +1262,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/tracker_event.c',
   '../src/hl_code.c',
   '../src/htxf_io.c',
-  '../src/htxf_subchannel.c',
   dependencies        : proto_test_deps + [rust_hxcrypto_dep, rust_hxnet_dep, rust_hxtls_trust_dep],
   include_directories : integration_test_inc,
 )
@@ -2212,8 +2208,8 @@ test('folder_put', test_integration_folder_put,
 # hxnet::xfer::hxnet_xfer_folder_send_all, downloads it back through
 # hxnet_xfer_folder_recv_all, and asserts every file is byte-exact. Both folder
 # machines live in the hxnet crate (linked via integration_harness_lib, which
-# bundles htxf_io.c / htxf_subchannel.c + the hxnet channel); this target adds
-# the hxhfs crate + the FFO codec. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
+# bundles htxf_io.c + the hxnet channel); this target adds the hxhfs crate + the
+# FFO codec. Needs guest UPLOAD_FOLDERS + DOWNLOAD_FOLDERS.
 test_integration_folder_roundtrip = executable('test_integration_folder_roundtrip',
   'integration/test_folder_roundtrip.c',
   dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],

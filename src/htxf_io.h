@@ -102,6 +102,15 @@ extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
                                      hxnet_htxf_verify_cb_t verify_cert,
                                      void *user_data);
 
+/* Pack the HTXF subchannel handshake preamble into buf[..cap] (S1.1, was
+ * hx_htxf_subchannel_pack_preamble in the retired htxf_subchannel.c). Returns
+ * the bytes written (16, or 24 for the size64 large-file variant), or 0 on a
+ * NULL/too-small buffer or a >4 GiB size in the legacy 16-byte form. Defined in
+ * rust/crates/hxnet/src/htxf.rs. */
+extern size_t hxnet_htxf_pack_preamble (guint8 *buf, size_t cap, guint32 ref,
+                                        guint64 total_size, guint16 type,
+                                        guint16 flags, int size64);
+
 /* Blocking read of up to `len` bytes (`0` = clean EOF, `-1` on error). */
 extern ssize_t hxnet_htxf_read (HtxfConn *handle, guint8 *buf, size_t len);
 

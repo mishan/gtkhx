@@ -45,7 +45,6 @@
 #include "hotline.h"
 #include "protocol.h"
 #include "proto_helpers.h"
-#include "htxf_subchannel.h"
 #include "htxf_io.h"
 #include "server_matrix.h"
 #include "integration_harness.h"
@@ -178,7 +177,7 @@ test_banner_htxf_mode_tls (void)
      * the TLS record layer here: on this TLS-from-byte-zero subchannel
      * every application byte, preamble included, is encrypted by TLS.) */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
         /*flags=*/0, /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);

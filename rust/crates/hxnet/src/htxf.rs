@@ -861,6 +861,34 @@ pub unsafe extern "C" fn hxnet_htxf_set_read_timeout(
     }
 }
 
+/// Pack the HTXF subchannel handshake preamble into `buf[..cap]` (S1.1 — the
+/// Rust home of the retired C `hx_htxf_subchannel_pack_preamble`). Delegates to
+/// [`hotline_proto::build::build_htxf_preamble`], the single source of truth for
+/// the header layout + the `size64` large-file variant. Returns the number of
+/// bytes written (16 or 24), or 0 on a NULL/too-small buffer or a >4 GiB size in
+/// the legacy 16-byte form.
+///
+/// # Safety
+/// `buf` is NULL or valid for `cap` bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_htxf_pack_preamble(
+    buf: *mut u8,
+    cap: usize,
+    ref_id: u32,
+    total_size: u64,
+    type_code: u16,
+    flags: u16,
+    size64: c_int,
+) -> usize {
+    if buf.is_null() {
+        return 0;
+    }
+    let out = slice::from_raw_parts_mut(buf, cap);
+    hotline_proto::build::build_htxf_preamble(
+        out, ref_id, total_size, type_code, flags, size64 != 0,
+    )
+}
+
 /// Create a new, unarmed cancellation token. Called on the main thread
 /// before the transfer worker starts. Returns an owned `Arc` ref as a
 /// raw pointer; the caller must hand it back to [`hxnet_htxf_abort_free`]

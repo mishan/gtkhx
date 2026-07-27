@@ -59,7 +59,6 @@
 #include "integration_harness.h"
 #include "server_matrix.h"
 #include "htxf_io.h"
-#include "htxf_subchannel.h"
 #include "debug.h"
 
 static const hx_test_server *
@@ -226,7 +225,7 @@ test_hope_chacha20_banner_htxf (void)
      * stays FALSE; the 16-byte legacy variant comes out. hxnet_htxf_connect
      * writes it raw before arming AEAD, so we don't send it ourselves. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf),
         ref, size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);

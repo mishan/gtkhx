@@ -64,7 +64,6 @@
 #include "agreement_packet.h"
 #include "hl_code.h"
 #include "proto_helpers.h"
-#include "htxf_subchannel.h"
 #include "tracker_parser.h"
 #include "tracker_v3.h"
 #include "tracker_event.h"
@@ -764,7 +763,7 @@ htxf_connect (struct htxf_conn *htxf)
     htxf->opt.large = size64 ? 1 : 0;
 
     /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
-	 * is set). hx_htxf_subchannel_pack_preamble handles the
+	 * is set). hxnet_htxf_pack_preamble handles the
 	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
 	 * zeroing for the 24-byte variant. hxnet_htxf_connect writes it
 	 * raw (before any AEAD arms) — the server matches the subchannel
@@ -772,7 +771,7 @@ htxf_connect (struct htxf_conn *htxf)
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     guint16 type
         = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf),
         htxf->ref, htxf->total_size,
         type, /*flags=*/0, size64);

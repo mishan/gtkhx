@@ -38,7 +38,6 @@
 #include "network.h"
 #include "hxnet_bridge.h"      /* hx_bridge_lookup_socks_proxy */
 #include "htxf_io.h"
-#include "htxf_subchannel.h"
 #include "banner.h"
 #include "banner_dispatch.h"
 #include "banner_http_ffi.h"
@@ -689,7 +688,7 @@ banner_htxf_worker_run (void *arg)
      * transfer by ref before any cipher state exists) — hxnet_htxf_connect
      * writes it raw before arming AEAD. Banner transfers never need the
      * 24-byte SIZE64 variant. */
-    size_t hdr_len = hx_htxf_subchannel_pack_preamble (
+    size_t hdr_len = hxnet_htxf_pack_preamble (
         hdr_buf, sizeof (hdr_buf),
         f->ref, f->size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);

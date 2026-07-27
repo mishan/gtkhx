@@ -38,7 +38,6 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "htxf_io.h"
-#include "htxf_subchannel.h"
 #include "preview.h"
 #include "xfers_recv.h"
 #include "integration_harness.h"
@@ -59,7 +58,7 @@ static HtxfConn *
 open_folder_channel (guint32 ref, guint64 total_size)
 {
     guint8 pre[24];
-    size_t plen = hx_htxf_subchannel_pack_preamble (
+    size_t plen = hxnet_htxf_pack_preamble (
         pre, sizeof (pre), ref, total_size, HTXF_TYPE_FOLDER, 0, FALSE);
     if (!plen) {
         return NULL;

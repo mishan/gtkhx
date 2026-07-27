@@ -1762,6 +1762,47 @@ pub fn build_htxf_hdr(
     true
 }
 
+/// HTXF handshake flag bits (mirror `HTXF_FLAG_*` in `src/hotline.h`).
+pub const HTXF_FLAG_LARGE_FILE: u16 = 0x0001;
+pub const HTXF_FLAG_SIZE64: u16 = 0x0002;
+
+/// Pack the full HTXF subchannel handshake preamble: the 16-byte header, plus —
+/// when `size64` — an 8-byte big-endian `total_size` after it (the large-file
+/// variant). Mirrors C `hx_htxf_subchannel_pack_preamble` byte-for-byte.
+///
+/// The `size64` form sets `HTXF_FLAG_LARGE_FILE | HTXF_FLAG_SIZE64`, zeroes the
+/// legacy 32-bit length field (so a non-large-file peer can't mistake a partial
+/// read for completion), and writes the true size in the trailing 8 bytes. The
+/// legacy 16-byte form fails closed (returns 0) if `total_size` exceeds
+/// `u32::MAX` rather than silently truncating.
+///
+/// Returns the number of bytes written (16 or 24), or 0 on a too-small `out`
+/// (or the >4 GiB legacy case).
+pub fn build_htxf_preamble(
+    out: &mut [u8],
+    ref_id: u32,
+    total_size: u64,
+    type_code: u16,
+    flags: u16,
+    size64: bool,
+) -> usize {
+    if size64 {
+        if out.len() < HTXF_HDR_SIZE + 8 {
+            return 0;
+        }
+        let wire_flags = flags | HTXF_FLAG_LARGE_FILE | HTXF_FLAG_SIZE64;
+        build_htxf_hdr(out, ref_id, 0, type_code, wire_flags);
+        out[HTXF_HDR_SIZE..HTXF_HDR_SIZE + 8].copy_from_slice(&total_size.to_be_bytes());
+        HTXF_HDR_SIZE + 8
+    } else {
+        if out.len() < HTXF_HDR_SIZE || total_size > u32::MAX as u64 {
+            return 0;
+        }
+        build_htxf_hdr(out, ref_id, total_size as u32, type_code, flags);
+        HTXF_HDR_SIZE
+    }
+}
+
 // ---- Full message packer (Hotline transaction wire format) ----------
 
 /// A chunk with a safely-borrowed payload, used by the pure-Rust
@@ -3802,6 +3843,35 @@ mod tests {
         assert_eq!(&out[8..12], &0x12345678_u32.to_be_bytes());
         // (type << 16) | flags BE — high u16 is type, low u16 is flags
         assert_eq!(&out[12..16], &0xcafe0001_u32.to_be_bytes());
+    }
+
+    #[test]
+    fn htxf_preamble_legacy_16_and_size64_24() {
+        // Legacy 16-byte variant: header only, real length in the 32-bit field.
+        let mut out = [0u8; 24];
+        let n = build_htxf_preamble(&mut out, 0xdeadbeef, 0x1234, 0xcafe, 0x0000, false);
+        assert_eq!(n, 16);
+        assert_eq!(&out[0..4], b"HTXF");
+        assert_eq!(&out[8..12], &0x1234_u32.to_be_bytes());
+        assert_eq!(&out[12..16], &0xcafe0000_u32.to_be_bytes());
+
+        // size64 variant: 24 bytes, legacy length zeroed, LARGE_FILE|SIZE64 set,
+        // true 64-bit size in the trailing 8 bytes.
+        let mut out = [0u8; 24];
+        let big: u64 = 0x1_0000_0002;
+        let n = build_htxf_preamble(&mut out, 7, big, 0x0001, 0x0000, true);
+        assert_eq!(n, 24);
+        assert_eq!(&out[8..12], &[0u8; 4], "legacy length zeroed under size64");
+        let flags = u16::from_be_bytes([out[14], out[15]]);
+        assert_eq!(flags, HTXF_FLAG_LARGE_FILE | HTXF_FLAG_SIZE64);
+        assert_eq!(&out[16..24], &big.to_be_bytes());
+
+        // Legacy variant fails closed for a >4 GiB size (no silent truncation).
+        let mut out = [0u8; 24];
+        assert_eq!(build_htxf_preamble(&mut out, 1, 0x1_0000_0000, 1, 0, false), 0);
+        // Too-small buffers return 0.
+        assert_eq!(build_htxf_preamble(&mut [0u8; 15], 1, 1, 1, 0, false), 0);
+        assert_eq!(build_htxf_preamble(&mut [0u8; 23], 1, 1, 1, 0, true), 0);
     }
 
     #[test]
