@@ -28,12 +28,11 @@ use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
 // the C bridge (gtkhx_news_fetch_for_expanded).
 const NB_KIND_POST: i32 = 3;
 
+use hxnews_model::node::{hx_news_node_children, hx_news_node_ensure_children, hx_news_node_name};
+
 extern "C" {
     // hxnews-model C ABI — node accessors (the browser externs these too).
     fn hx_news_node_kind(node: *mut c_void) -> i32;
-    fn hx_news_node_name(node: *mut c_void) -> *const std::ffi::c_char;
-    fn hx_news_node_children(node: *mut c_void) -> *mut gio::ffi::GListStore;
-    fn hx_news_node_ensure_children(node: *mut c_void) -> *mut gio::ffi::GListStore;
     // news_browser.c bridges — the browser's per-kind icon + the
     // lazy-fetch-on-expand dispatch (keeps fetch_dirlist / fetch_catlist +
     // the pending-request tables C).
@@ -54,8 +53,8 @@ extern "C" {
 fn create_child_model(item: &glib::Object) -> Option<gio::ListModel> {
     let node = item.as_ptr() as *mut c_void;
     unsafe {
-        if hx_news_node_kind(node) == NB_KIND_POST {
-            let ch = hx_news_node_children(node);
+        if hx_news_node_kind(node.cast()) == NB_KIND_POST {
+            let ch = hx_news_node_children(node.cast());
             if ch.is_null() {
                 return None;
             }
@@ -66,7 +65,7 @@ fn create_child_model(item: &glib::Object) -> Option<gio::ListModel> {
                 None
             };
         }
-        let store: gio::ListStore = from_glib_none(hx_news_node_ensure_children(node));
+        let store: gio::ListStore = from_glib_none(hx_news_node_ensure_children(node.cast()));
         Some(store.upcast())
     }
 }
@@ -155,7 +154,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
         let paintable = unsafe {
             let p = gtkhx_news_icon_for_kind(
                 browser,
-                hx_news_node_kind(node.as_ptr() as *mut c_void),
+                hx_news_node_kind(node.as_ptr().cast()),
             );
             if p.is_null() {
                 None
@@ -167,7 +166,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
             Some(p) => icon.set_paintable(Some(&p)),
             None => icon.clear(),
         }
-        label.set_text(&unsafe { crate::cstr(hx_news_node_name(node.as_ptr() as *mut c_void)) });
+        label.set_text(&unsafe { crate::cstr(hx_news_node_name(node.as_ptr().cast())) });
 
         // Lazy fetch: fire DIRLIST / CATLIST the first time this row's expander
         // opens. Connection lives for this binding only — unbind disconnects.

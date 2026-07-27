@@ -56,64 +56,26 @@ const HL_ACCESS_DELETE_CATEGORIES: i32 = 35;
 const HL_ACCESS_CREATE_NEWS_BUNDLES: i32 = 36;
 const HL_ACCESS_DELETE_NEWS_BUNDLES: i32 = 37;
 
-extern "C" {
-    // ---- hxnews-model node accessors (HxNewsNode * as void *) ----
-    fn hx_news_node_get_type() -> glib::ffi::GType;
-    fn hx_news_node_kind(node: *mut c_void) -> i32;
+use gtkhx_session::gtkhx_session_get_default;
+use hotline_proto::ffi::{gtkhx_proto_catlist_free, gtkhx_proto_dirlist_free};
+use hxconn::{hx_conn_access_has, hx_conn_access_permits};
+use hxnews_model::node::{hx_news_build_category_tree_from_catlist, hx_news_build_dirlist_from_dirlist, hx_news_node_body_fetching, hx_news_node_children, hx_news_node_get_type, hx_news_node_loaded, hx_news_node_name, hx_news_node_set_body_fetching, hx_news_node_set_loaded};
+use hxnews_recv::carrier::{gnews_catalog_free, gnews_catalog_new, gnews_catalog_parsed, gnews_folder_free, gnews_folder_new, gnews_folder_parsed, news_post_body, news_post_free, news_post_target};
+use hxnews_send::{hx_news15_cat_list, hx_news15_fldr_list, hx_news15_get_post};
+
+extern "C" {    fn hx_news_node_kind(node: *mut c_void) -> i32;
     fn hx_news_node_postid(node: *mut c_void) -> u32;
-    fn hx_news_node_loaded(node: *mut c_void) -> glib::ffi::gboolean;
-    fn hx_news_node_body_fetching(node: *mut c_void) -> glib::ffi::gboolean;
-    fn hx_news_node_set_loaded(node: *mut c_void, loaded: glib::ffi::gboolean);
-    fn hx_news_node_set_body_fetching(node: *mut c_void, fetching: glib::ffi::gboolean);
-    fn hx_news_node_name(node: *mut c_void) -> *const c_char;
     fn hx_news_node_path(node: *mut c_void) -> *const c_char;
     fn hx_news_node_mime_type(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     fn hx_news_node_set_body(node: *mut c_void, s: *const c_char);
-    fn hx_news_node_children(node: *mut c_void) -> *mut gio::ffi::GListStore;
-
-    // ---- hxnews-model tree builders (read the owned parse handle) ----
-    fn hx_news_build_dirlist_from_dirlist(
-        dest: *mut gio::ffi::GListStore,
-        parent_path: *const c_char,
-        dirlist: *const c_void,
-    );
-    fn hx_news_build_category_tree_from_catlist(
-        dest: *mut gio::ffi::GListStore,
-        category_path: *const c_char,
-        catlist: *const c_void,
-    );
-    fn gtkhx_proto_dirlist_free(dirlist: *mut c_void);
-    fn gtkhx_proto_catlist_free(catlist: *mut c_void);
-
-    // ---- hxnews-send wire RPC senders ----
-    fn hx_news15_fldr_list(htlc: *mut c_void, gfnews: *mut c_void);
-    fn hx_news15_cat_list(htlc: *mut c_void, gcnews: *mut c_void);
-    fn hx_news15_get_post(
-        htlc: *mut c_void,
-        path: *const c_char,
-        postid: u32,
-        mime_type: *const c_char,
-        target: *mut c_void,
-    );
 
     // ---- hxconn: read the active connection's version / access bits directly
     // (over gtkhx_active_htlc), rather than through news-specific C wrappers ----
     fn hx_conn_version(htlc: *mut c_void) -> u16;
-    fn hx_conn_access_has(htlc: *mut c_void, bit: i32) -> i32;
-    fn hx_conn_access_permits(htlc: *mut c_void, bit: i32) -> i32;
     // ---- news_recv_bridge.c: session / carrier / leaf helpers ----
     fn gtkhx_active_connected() -> glib::ffi::gboolean;
     fn gtkhx_active_htlc() -> *mut c_void;
-    fn gnews_folder_new(path: *const c_char) -> *mut c_void;
-    fn gnews_folder_parsed(g: *mut c_void) -> *mut c_void;
-    fn gnews_folder_free(g: *mut c_void);
-    fn gnews_catalog_new(path: *const c_char) -> *mut c_void;
-    fn gnews_catalog_parsed(g: *mut c_void) -> *mut c_void;
-    fn gnews_catalog_free(g: *mut c_void);
-    fn news_post_target(post: *mut c_void) -> *mut c_void;
-    fn news_post_body(post: *mut c_void) -> *const c_char;
-    fn news_post_free(post: *mut c_void);
     /// Load a chrome icon resource through the theme resolver (gtkhx_icon.c),
     /// transfer-full GdkPixbuf.
     fn gtkhx_icon_load(resource: *const c_char) -> *mut gtk::gdk_pixbuf::ffi::GdkPixbuf;
@@ -125,7 +87,6 @@ extern "C" {
 
     // ---- panel registry + session singleton ----
     fn hx_panel_registry_lookup(id: *const c_char) -> *mut c_void;
-    fn gtkhx_session_get_default() -> *mut c_void;
 }
 
 // The one live browser (`None` while no News panel exists) + the in-flight
@@ -251,7 +212,7 @@ fn on_selection_changed() {
 fn sync_action_buttons(br: &NewsBrowser) {
     unsafe {
         let node = selected_node(br);
-        let kind = if node.is_null() { 0 } else { hx_news_node_kind(node) };
+        let kind = if node.is_null() { 0 } else { hx_news_node_kind(node.cast()) };
 
         br.btn_new_folder
             .set_visible(kind == 0 || kind == NB_KIND_FOLDER);
@@ -266,13 +227,13 @@ fn sync_action_buttons(br: &NewsBrowser) {
 
         let htlc = gtkhx_active_htlc();
         br.btn_new_folder
-            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
+            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_CREATE_NEWS_BUNDLES) != 0);
         br.btn_new_category
-            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_CREATE_CATEGORIES) != 0);
+            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_CREATE_CATEGORIES) != 0);
         br.btn_new_post
-            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_POST_NEWS) != 0);
+            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_POST_NEWS) != 0);
         br.btn_reply
-            .set_sensitive(hx_conn_access_has(htlc, HL_ACCESS_POST_NEWS) != 0);
+            .set_sensitive(hx_conn_access_has(htlc.cast(), HL_ACCESS_POST_NEWS) != 0);
 
         let delete_bit = match kind {
             NB_KIND_FOLDER => HL_ACCESS_DELETE_NEWS_BUNDLES,
@@ -281,7 +242,7 @@ fn sync_action_buttons(br: &NewsBrowser) {
             _ => -1,
         };
         br.btn_delete
-            .set_sensitive(delete_bit >= 0 && hx_conn_access_has(htlc, delete_bit) != 0);
+            .set_sensitive(delete_bit >= 0 && hx_conn_access_has(htlc.cast(), delete_bit) != 0);
     }
 }
 
@@ -292,7 +253,7 @@ fn sync_action_buttons(br: &NewsBrowser) {
 /// version gate is what excludes 1.0/1.2 servers that reject NEWSDIRLIST).
 unsafe fn threaded_news_available() -> bool {
     let htlc = gtkhx_active_htlc();
-    hx_conn_version(htlc) >= 150 && hx_conn_access_permits(htlc, HL_ACCESS_READ_NEWS) != 0
+    hx_conn_version(htlc.cast()) >= 150 && hx_conn_access_permits(htlc.cast(), HL_ACCESS_READ_NEWS) != 0
 }
 
 /// Fire NEWSDIRLIST. `target` NULL = root fetch (populate `root_store`).
@@ -305,8 +266,8 @@ fn fetch_dirlist(target: *mut c_void) {
         // byte-oriented (may be non-UTF8), so a cstr()/cs() round-trip would be
         // lossy. Only the root case synthesizes "/" (path_to_hldir derefs it
         // unconditionally, so it can't be NULL).
-        let path = if !target.is_null() && !hx_news_node_path(target).is_null() {
-            hx_news_node_path(target)
+        let path = if !target.is_null() && !hx_news_node_path(target.cast()).is_null() {
+            hx_news_node_path(target.cast())
         } else {
             c"/".as_ptr()
         };
@@ -321,7 +282,7 @@ fn fetch_dirlist(target: *mut c_void) {
         // Mark loaded before the wire call so a quick collapse+reexpand doesn't
         // re-fire; the reply appends into the existing store.
         if !target.is_null() {
-            hx_news_node_set_loaded(target, glib::ffi::GTRUE);
+            hx_news_node_set_loaded(target.cast(), glib::ffi::GTRUE);
         }
         hx_news15_fldr_list(gtkhx_active_htlc(), stub);
     }
@@ -330,16 +291,16 @@ fn fetch_dirlist(target: *mut c_void) {
 /// Fire NEWSCATLIST for a category node whose children store receives the posts.
 fn fetch_catlist(target: *mut c_void) {
     unsafe {
-        if target.is_null() || hx_news_node_path(target).is_null() {
+        if target.is_null() || hx_news_node_path(target.cast()).is_null() {
             return;
         }
         // Byte-oriented path — pass the pointer straight through (no lossy
         // cstr()/cs() round-trip).
-        let stub = gnews_catalog_new(hx_news_node_path(target));
+        let stub = gnews_catalog_new(hx_news_node_path(target.cast()));
         let val: Option<glib::Object> =
             Some(from_glib_none(target as *mut glib::gobject_ffi::GObject));
         PENDING_CATLISTS.with(|t| t.borrow_mut().insert(stub as usize, val));
-        hx_news_node_set_loaded(target, glib::ffi::GTRUE);
+        hx_news_node_set_loaded(target.cast(), glib::ffi::GTRUE);
         hx_news15_cat_list(gtkhx_active_htlc(), stub);
     }
 }
@@ -349,25 +310,25 @@ fn fetch_catlist(target: *mut c_void) {
 fn fetch_thread(target: *mut c_void) {
     unsafe {
         if target.is_null()
-            || hx_news_node_kind(target) != NB_KIND_POST
-            || hx_news_node_path(target).is_null()
+            || hx_news_node_kind(target.cast()) != NB_KIND_POST
+            || hx_news_node_path(target.cast()).is_null()
         {
             return;
         }
-        if hx_news_node_body_fetching(target) != 0 {
+        if hx_news_node_body_fetching(target.cast()) != 0 {
             return; // already in flight
         }
-        hx_news_node_set_body_fetching(target, glib::ffi::GTRUE);
+        hx_news_node_set_body_fetching(target.cast(), glib::ffi::GTRUE);
 
-        let mt_ptr = hx_news_node_mime_type(target);
+        let mt_ptr = hx_news_node_mime_type(target.cast());
         let fallback = crate::cs("text/plain");
         let mt_arg = if mt_ptr.is_null() { fallback.as_ptr() } else { mt_ptr };
 
         glib::gobject_ffi::g_object_ref(target as *mut glib::gobject_ffi::GObject);
         hx_news15_get_post(
             gtkhx_active_htlc(),
-            hx_news_node_path(target),
-            hx_news_node_postid(target),
+            hx_news_node_path(target.cast()),
+            hx_news_node_postid(target.cast()),
             mt_arg,
             target,
         );
@@ -399,19 +360,19 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(gfnews_p: *mut c_void) -> 
                         hx_news_build_dirlist_from_dirlist(
                             br.root_store.as_ptr(),
                             c"/".as_ptr(),
-                            parsed,
+                            parsed.cast(),
                         );
                     }
                     Some(node) => {
                         let np = node.as_ptr() as *mut c_void;
-                        let dest = hx_news_node_children(np);
+                        let dest = hx_news_node_children(np.cast());
                         if !dest.is_null() {
                             // Raw byte-oriented path pointer (NULL is fine — the
                             // builder falls back to the root "/").
                             hx_news_build_dirlist_from_dirlist(
                                 dest,
-                                hx_news_node_path(np),
-                                parsed,
+                                hx_news_node_path(np.cast()),
+                                parsed.cast(),
                             );
                         }
                     }
@@ -420,7 +381,7 @@ pub unsafe extern "C" fn gnews_browser_handle_dirlist(gfnews_p: *mut c_void) -> 
         });
     }
 
-    gtkhx_proto_dirlist_free(parsed);
+    gtkhx_proto_dirlist_free(parsed.cast());
     gnews_folder_free(gfnews_p);
     glib::ffi::GTRUE
 }
@@ -440,16 +401,16 @@ pub unsafe extern "C" fn gnews_browser_handle_catlist(gcnews_p: *mut c_void) -> 
     // below regardless.
     if let Some(Some(node)) = entry {
         let np = node.as_ptr() as *mut c_void;
-        let ch = hx_news_node_children(np);
+        let ch = hx_news_node_children(np.cast());
         NEWS_BROWSER.with(|b| {
             if b.borrow().as_ref().is_some() && !ch.is_null() {
                 // Raw byte-oriented path pointer (no lossy cstr()/cs() round-trip).
-                hx_news_build_category_tree_from_catlist(ch, hx_news_node_path(np), parsed);
+                hx_news_build_category_tree_from_catlist(ch, hx_news_node_path(np.cast()), parsed.cast());
             }
         });
     }
 
-    gtkhx_proto_catlist_free(parsed);
+    gtkhx_proto_catlist_free(parsed.cast());
     gnews_catalog_free(gcnews_p);
     glib::ffi::GTRUE
 }
@@ -468,13 +429,13 @@ pub unsafe extern "C" fn gnews_browser_handle_thread(post_p: *mut c_void) -> gli
     // post->target carries the transfer-full ref fetch_thread took; released here.
     let target = news_post_target(post_p);
     if !target.is_null() {
-        hx_news_node_set_body_fetching(target, glib::ffi::GFALSE);
+        hx_news_node_set_body_fetching(target.cast(), glib::ffi::GFALSE);
         // news_post_body() is already a valid NUL-terminated C string that
         // hx_news_node_set_body copies — pass it straight through (empty for
         // NULL) to preserve the original bytes, no lossy cstr()/cs() round-trip.
         let body_ptr = news_post_body(post_p);
         let body_ptr = if body_ptr.is_null() { c"".as_ptr() } else { body_ptr };
-        hx_news_node_set_body(target, body_ptr);
+        hx_news_node_set_body(target.cast(), body_ptr);
 
         with_browser(|br| {
             if br.selected_post.get() == target {
@@ -499,13 +460,13 @@ fn refresh_node(br: &NewsBrowser, node: *mut c_void) {
             fetch_dirlist(std::ptr::null_mut());
             return;
         }
-        let ch = hx_news_node_children(node);
+        let ch = hx_news_node_children(node.cast());
         if !ch.is_null() {
             let store: gio::ListStore = from_glib_none(ch);
             store.remove_all();
         }
-        hx_news_node_set_loaded(node, glib::ffi::GFALSE);
-        match hx_news_node_kind(node) {
+        hx_news_node_set_loaded(node.cast(), glib::ffi::GFALSE);
+        match hx_news_node_kind(node.cast()) {
             NB_KIND_FOLDER => fetch_dirlist(node),
             NB_KIND_CATEGORY => fetch_catlist(node),
             _ => {}
@@ -521,13 +482,13 @@ fn find_category_node(store: &gio::ListStore, path: &str) -> Option<glib::Object
         let node = store.item(i)?;
         let np = node.as_ptr() as *mut c_void;
         unsafe {
-            if hx_news_node_kind(np) == NB_KIND_CATEGORY
-                && crate::cstr(hx_news_node_path(np)) == path
+            if hx_news_node_kind(np.cast()) == NB_KIND_CATEGORY
+                && crate::cstr(hx_news_node_path(np.cast())) == path
             {
                 return Some(node);
             }
-            if hx_news_node_kind(np) == NB_KIND_FOLDER {
-                let ch = hx_news_node_children(np);
+            if hx_news_node_kind(np.cast()) == NB_KIND_FOLDER {
+                let ch = hx_news_node_children(np.cast());
                 if !ch.is_null() {
                     let ch_store: gio::ListStore = from_glib_none(ch);
                     if let Some(hit) = find_category_node(&ch_store, path) {
@@ -588,15 +549,15 @@ unsafe extern "C" fn on_refresh_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut
         let node = selected_node(br);
         // Post selected → refetch its body. Otherwise refresh the folder /
         // category, or the root when nothing suitable is selected.
-        if !node.is_null() && hx_news_node_kind(node) == NB_KIND_POST {
-            hx_news_node_set_body(node, std::ptr::null());
-            hx_news_node_set_body_fetching(node, glib::ffi::GFALSE);
+        if !node.is_null() && hx_news_node_kind(node.cast()) == NB_KIND_POST {
+            hx_news_node_set_body(node.cast(), std::ptr::null());
+            hx_news_node_set_body_fetching(node.cast(), glib::ffi::GFALSE);
             render_selected_post(br);
             return;
         }
         if !node.is_null()
-            && (hx_news_node_kind(node) == NB_KIND_FOLDER
-                || hx_news_node_kind(node) == NB_KIND_CATEGORY)
+            && (hx_news_node_kind(node.cast()) == NB_KIND_FOLDER
+                || hx_news_node_kind(node.cast()) == NB_KIND_CATEGORY)
         {
             refresh_node(br, node);
         } else {
@@ -608,7 +569,7 @@ unsafe extern "C" fn on_refresh_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut
 unsafe extern "C" fn on_new_folder_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
     with_browser(|br| {
         let sel = selected_node(br);
-        let parent = if !sel.is_null() && hx_news_node_kind(sel) == NB_KIND_FOLDER {
+        let parent = if !sel.is_null() && hx_news_node_kind(sel.cast()) == NB_KIND_FOLDER {
             sel
         } else {
             std::ptr::null_mut()
@@ -624,7 +585,7 @@ unsafe extern "C" fn on_new_folder_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *
 unsafe extern "C" fn on_new_category_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
     with_browser(|br| {
         let sel = selected_node(br);
-        let parent = if !sel.is_null() && hx_news_node_kind(sel) == NB_KIND_FOLDER {
+        let parent = if !sel.is_null() && hx_news_node_kind(sel.cast()) == NB_KIND_FOLDER {
             sel
         } else {
             std::ptr::null_mut()
@@ -643,11 +604,11 @@ unsafe extern "C" fn on_new_post_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mu
         if sel.is_null() {
             return;
         }
-        let kind = hx_news_node_kind(sel);
+        let kind = hx_news_node_kind(sel.cast());
         if kind != NB_KIND_CATEGORY && kind != NB_KIND_POST {
             return;
         }
-        let cat_path = hx_news_node_path(sel);
+        let cat_path = hx_news_node_path(sel.cast());
         if cat_path.is_null() {
             return;
         }
@@ -660,14 +621,14 @@ unsafe extern "C" fn on_reply_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c
     with_browser(|br| {
         let sel = selected_node(br);
         if sel.is_null()
-            || hx_news_node_kind(sel) != NB_KIND_POST
-            || hx_news_node_path(sel).is_null()
+            || hx_news_node_kind(sel.cast()) != NB_KIND_POST
+            || hx_news_node_path(sel.cast()).is_null()
         {
             return;
         }
 
         // Prefill "Re: <original>" without stacking Re: Re: chains.
-        let sel_name = crate::cstr(hx_news_node_name(sel));
+        let sel_name = crate::cstr(hx_news_node_name(sel.cast()));
         let subj = if sel_name.to_ascii_lowercase().starts_with("re:") {
             sel_name.clone()
         } else {
@@ -675,27 +636,27 @@ unsafe extern "C" fn on_reply_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c
         };
 
         // Make sure the original body is loading before the context card renders.
-        if hx_news_node_body(sel).is_null() && hx_news_node_body_fetching(sel) == 0 {
+        if hx_news_node_body(sel.cast()).is_null() && hx_news_node_body_fetching(sel.cast()) == 0 {
             fetch_thread(sel);
         }
 
         let subj_c = crate::cs(&subj);
-        crate::news_compose::gtkhx_news_compose_open(hx_news_node_path(sel), sel, subj_c.as_ptr());
+        crate::news_compose::gtkhx_news_compose_open(hx_news_node_path(sel.cast()), sel, subj_c.as_ptr());
     });
 }
 
 unsafe extern "C" fn on_delete_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut c_void) {
     with_browser(|br| {
         let sel = selected_node(br);
-        if sel.is_null() || hx_news_node_path(sel).is_null() {
+        if sel.is_null() || hx_news_node_path(sel.cast()).is_null() {
             return;
         }
         crate::news_dialogs::gtkhx_news_delete_dialog_open(
             br.window.as_ptr() as *mut gtk::ffi::GtkWidget,
-            hx_news_node_kind(sel) as c_int,
-            hx_news_node_name(sel),
-            hx_news_node_path(sel),
-            hx_news_node_postid(sel),
+            hx_news_node_kind(sel.cast()) as c_int,
+            hx_news_node_name(sel.cast()),
+            hx_news_node_path(sel.cast()),
+            hx_news_node_postid(sel.cast()),
         );
     });
 }
@@ -731,10 +692,10 @@ pub unsafe extern "C" fn gtkhx_news_icon_for_kind(
 /// C-ABI entry on the GTK main thread; `node` is an `HxNewsNode *`.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_news_fetch_for_expanded(_browser: *mut c_void, node: *mut c_void) {
-    if node.is_null() || hx_news_node_loaded(node) != 0 {
+    if node.is_null() || hx_news_node_loaded(node.cast()) != 0 {
         return;
     }
-    match hx_news_node_kind(node) {
+    match hx_news_node_kind(node.cast()) {
         NB_KIND_FOLDER => fetch_dirlist(node),
         NB_KIND_CATEGORY => fetch_catlist(node),
         _ => {}

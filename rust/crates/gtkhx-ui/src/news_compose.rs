@@ -25,19 +25,12 @@ use crate::tr::{tr, tr_fmt};
 
 const NB_KIND_POST: i32 = 3;
 
-extern "C" {
-    // hxnews-send — POST a thread (new post or reply). No reply handler.
-    fn hx_news15_post_thread(
-        htlc: *mut c_void,
-        path: *const c_char,
-        subject: *const c_char,
-        threadid: u32,
-        text: *const c_char,
-    );
-    // hxnews-model node accessors (for the reply-context card).
+use hxnews_model::node::hx_news_node_name;
+use hxnews_send::hx_news15_post_thread;
+
+extern "C" {    // hxnews-model node accessors (for the reply-context card).
     fn hx_news_node_kind(node: *mut c_void) -> i32;
     fn hx_news_node_postid(node: *mut c_void) -> u32;
-    fn hx_news_node_name(node: *mut c_void) -> *const c_char;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     // news_browser.c bridges.
@@ -73,11 +66,11 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
     }
     let category_path = crate::cstr(category_path);
     let prefill = crate::cstr(prefill_subject);
-    let is_reply = !reply_to.is_null() && hx_news_node_kind(reply_to) == NB_KIND_POST;
+    let is_reply = !reply_to.is_null() && hx_news_node_kind(reply_to.cast()) == NB_KIND_POST;
     let parent_postid = if reply_to.is_null() {
         0
     } else {
-        hx_news_node_postid(reply_to)
+        hx_news_node_postid(reply_to.cast())
     };
 
     let window = gtk::Window::new();
@@ -203,7 +196,7 @@ unsafe fn build_reply_context_panel(reply_to: *mut c_void) -> gtk::Box {
     header_row.set_margin_end(8);
     header_row.set_margin_top(6);
 
-    let sender = crate::cstr(hx_news_node_sender(reply_to));
+    let sender = crate::cstr(hx_news_node_sender(reply_to.cast()));
     let sender = if sender.is_empty() { "?".to_string() } else { sender };
     let date = crate::hl_date::news_node_date_string(reply_to).unwrap_or_default();
     // Single translatable msgid with positional args (was the C
@@ -216,7 +209,7 @@ unsafe fn build_reply_context_panel(reply_to: *mut c_void) -> gtk::Box {
     meta_lbl.add_css_class("dim-label");
     meta_lbl.add_css_class("caption");
 
-    let name = crate::cstr(hx_news_node_name(reply_to));
+    let name = crate::cstr(hx_news_node_name(reply_to.cast()));
     let subject_display = if name.is_empty() {
         tr("(no subject)")
     } else {
@@ -248,7 +241,7 @@ unsafe fn build_reply_context_panel(reply_to: *mut c_void) -> gtk::Box {
     body_view.set_margin_bottom(6);
     body_view.add_css_class("dim-label");
 
-    let body_ptr = hx_news_node_body(reply_to);
+    let body_ptr = hx_news_node_body(reply_to.cast());
     // Not cached → the user clicked Reply before the GETTHREAD reply landed;
     // show a placeholder rather than block.
     let body_text = if body_ptr.is_null() {

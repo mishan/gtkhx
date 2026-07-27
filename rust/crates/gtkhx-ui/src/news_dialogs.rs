@@ -31,14 +31,11 @@ const NB_KIND_FOLDER: c_int = 1;
 const NB_KIND_CATEGORY: c_int = 2;
 const NB_KIND_POST: c_int = 3;
 
+use hxnews_send::{hx_news15_delete, hx_news15_delete_thread, hx_news15_mkcat, hx_news15_mkdir};
+
 extern "C" {
     // hxnews-model C ABI — the node's Hotline path (NULL for a pathless node).
     fn hx_news_node_path(node: *mut c_void) -> *const c_char;
-    // hxnews-send crate — the Rust 1.5 news wire senders (final-link resolved).
-    fn hx_news15_mkdir(htlc: *mut c_void, path: *const c_char);
-    fn hx_news15_mkcat(htlc: *mut c_void, path: *const c_char, name: *const c_char);
-    fn hx_news15_delete(htlc: *mut c_void, path: *const c_char);
-    fn hx_news15_delete_thread(htlc: *mut c_void, path: *const c_char, threadid: u32);
     // gtkhx_ui_bridge.c — the active session's htlc (single-conn today).
     fn gtkhx_active_htlc() -> *mut c_void;
     // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.

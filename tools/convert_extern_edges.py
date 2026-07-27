@@ -24,7 +24,13 @@ CYCLIC = {('gtkhx-ui', 'hxchat-send'),
 # RcvTaskFn shape at the call site (see the typedef note in hxtask). Importing
 # it would force a std::mem::transmute of the fn pointer at every caller, which
 # is strictly worse than the extern block it replaces.
-SKIP_SYMS = {'task_new'}
+#
+# hx_tracker_v3_meta_{copy,free} are the other deliberate case: gtkhx-boxed
+# models HxTrackerV3Meta as an opaque 216-byte buffer while gtkhx-ui keeps a
+# typed #[repr(C)] mirror (ROADMAP R5.1), so the two crates describe the same
+# memory with different Rust types on purpose. The C boundary is what lets both
+# views coexist; importing would just move the cast to every call site.
+SKIP_SYMS = {'task_new', 'hx_tracker_v3_meta_copy', 'hx_tracker_v3_meta_free'}
 
 # One level of paren nesting, so `#[cfg(not(test))]` is captured whole.
 BLOCK = re.compile(r'((?:#\[cfg\((?:[^()]|\([^()]*\))*\)\]\n)?)extern\s+"C"\s*\{([\s\S]*?)\n\}')

@@ -13,6 +13,16 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+gtkhx-boxed = { path = "../gtkhx-boxed" }
+gtkhx-session = { path = "../gtkhx-session" }
+hxconn = { path = "../hxconn" }
+hxnews-recv = { path = "../hxnews-recv" }
+hxnews-send = { path = "../hxnews-send" }
+hxtext = { path = "../hxtext" }
+hx-image-decode = { path = "../hx-image-decode" }
+hxvoice-model = { path = "../hxvoice-model", optional = true }
+hxvoice-runtime = { path = "../hxvoice-runtime", optional = true }
+hxvoice-send = { path = "../hxvoice-send", optional = true }
 hxnews-model = { path = "../hxnews-model" }
 hxtls-trust = { path = "../hxtls-trust" }
 # First gtk4-rs UI crate in the tree. gtk4 + libadwaita were already
@@ -72,4 +82,4 @@ hxbookmarks = { path = "../hxbookmarks" }
 #     off the voice_panel_* symbols are simply absent. That's fine — every C
 #     call site (chat.c / users_bridge.c / gtkutil.c) is itself #ifdef
 #     HAVE_VOICE, so nothing references them in a voice-off build.
-voice = []
+voice = ["dep:hxvoice-model", "dep:hxvoice-runtime", "dep:hxvoice-send"]

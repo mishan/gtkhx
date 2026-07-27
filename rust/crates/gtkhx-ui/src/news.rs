@@ -37,10 +37,10 @@ type Session = c_void;
 /// Stable panel id — matches `HX_PANEL_ID_NEWS` (`panel_registry.h`).
 const HX_ID_NEWS: &str = "news";
 
-extern "C" {
-    // Wire senders — stay C (`news.c`).
-    fn hx_get_news(htlc: *mut c_void);
+use hxnews_send::hx_get_news;
+use hxtext::gtkhx_text_to_utf8;
 
+extern "C" {
     // Flat-News session seam (`gtkhx_ui_bridge.c`).
     fn gtkhx_news_set_widgets(
         sess: *mut Session,
@@ -57,7 +57,6 @@ extern "C" {
     // URL tagging (`gtkurl.c`) + Mac-Roman→UTF-8 (`text_util.c`).
     fn gtkurl_textview_install(tv: *mut gtk::ffi::GtkTextView);
     fn gtkurl_textview_apply_tags(tv: *mut gtk::ffi::GtkTextView);
-    fn gtkhx_text_to_utf8(bytes: *const c_char, len: usize, out_len: *mut usize) -> *mut c_char;
 }
 
 // Single-connection flat-news view state. Lives on the GTK main thread only.

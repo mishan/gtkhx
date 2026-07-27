@@ -17,13 +17,12 @@ use glib::translate::{from_glib_full, IntoGlibPtr};
 
 use hxmember_model::HxMemberModel;
 
+use gtkhx_boxed::media_table::{hx_media_table_free, hx_media_table_new};
+
 extern "C" {
     // hxchat-model — the Rust InputHistory (input line history), C ABI.
     fn hx_input_history_new() -> *mut c_void;
     fn hx_input_history_free(hist: *mut c_void);
-    // gtkhx-boxed — the Rust MediaTable (inline-media token → HxChatMedia), C ABI.
-    fn hx_media_table_new() -> *mut c_void;
-    fn hx_media_table_free(table: *mut c_void);
 }
 
 /// The per-chat model. Box-allocated, so `subject`'s address is stable for the
