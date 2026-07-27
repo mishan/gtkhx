@@ -78,13 +78,11 @@ extern void kill_threads (void);
  * htxf_io_write and close the channel via htxf_io_release. */
 extern gboolean htxf_connect (struct htxf_conn *htxf);
 
-extern void hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc,
-                     ...);
-
-/* Chunk-array variant of hlwrite. Same trace + write + cipher +
- * compress side-effects, but the chunks come from a caller-built
- * array (typically populated via login_packet.c::hx_login_build_chunks
- * or another shared message builder). Defined in network.c. */
+/* The control-channel send primitive. Packs the (type, flag, chunk-array)
+ * message and hands the bytes to hxnet, tearing the connection down on a send
+ * failure. Defined in Rust (hxtask::send); the wire format is built natively by
+ * hotline-proto. The old variadic hlwrite front door was dead in production and
+ * has been retired — build a struct hx_chunk[] and call this directly. */
 struct hx_chunk;
 extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                             const struct hx_chunk *chunks, int hc);

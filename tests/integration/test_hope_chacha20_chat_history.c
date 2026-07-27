@@ -46,20 +46,6 @@
 #include "integration_harness.h"
 #include "server_matrix.h"
 
-/* hlwrite stub mirrors test_chat_history.c — chat_history.c is
- * linked into the integration_harness lib and any code path that
- * unexpectedly reaches into production's async-write entry should
- * fail loudly. */
-void
-hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
-{
-    (void) htlc;
-    (void) type;
-    (void) flag;
-    (void) hc;
-    g_assert_not_reached ();
-}
-
 static const hx_test_server *
 pick_chat_history_chacha20_server (void)
 {

@@ -87,18 +87,6 @@ im_make_marker (char *out, gsize cap)
     g_snprintf (out, cap, "HX-%016" G_GINT64_MODIFIER "x", r);
 }
 
-/* hlwrite stays stubbed — production async-write entry that never
- * makes sense in a Tier 3 binary. Same shape as test_chat_history.c. */
-void
-hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
-{
-    (void) htlc;
-    (void) type;
-    (void) flag;
-    (void) hc;
-    g_assert_not_reached ();
-}
-
 /* Pick the first inline-media-capable server in the matrix, or
  * NULL if the env-var filter excluded every entry. Caller fails
  * loud (no skips per the no-silent-skip rule). */

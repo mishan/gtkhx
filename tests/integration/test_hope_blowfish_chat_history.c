@@ -38,16 +38,6 @@
 #include "integration_harness.h"
 #include "server_matrix.h"
 
-void
-hlwrite (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
-{
-    (void) htlc;
-    (void) type;
-    (void) flag;
-    (void) hc;
-    g_assert_not_reached ();
-}
-
 static const hx_test_server *
 pick_chat_history_blowfish_server (void)
 {
