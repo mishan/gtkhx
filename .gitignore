@@ -151,6 +151,7 @@ setup.log
 
 # Rust build output (Cargo workspace lives in rust/)
 /rust/target/
+rust/rust-workspace.stamp
 
 # CI relocates the Cargo target dir + CARGO_HOME here via -Dcargo_target_dir so
 # they can be cached (see .github/workflows/tests.yml). Only appear if you run
