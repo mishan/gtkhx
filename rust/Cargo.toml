@@ -21,7 +21,6 @@ members = [
     "crates/hxfiles-xfer",
     "crates/hxbookmarks",
     "crates/hxhfs",
-    "crates/hxcicn",
     "crates/hxmacres",
     "crates/hxtask",
     "crates/hxconn",

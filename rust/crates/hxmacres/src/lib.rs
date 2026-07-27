@@ -14,8 +14,15 @@
 //! mmap — unlike `macres.c`, which mmap'd and never bounds-checked, so a
 //! malformed `.rsrc` could read wild memory). The [`ffi`] module preserves the
 //! exact `macres.h` C ABI so `macres.c` can be deleted and the C consumers
-//! (`gtkhx.c` / `options.c` / `cicn.c`) link this instead.
+//! (`gtkhx.c` / `options.c`) link this instead.
+//!
+//! The [`cicn`] module decodes the one resource type GtkHx actually renders —
+//! Mac colour icons — from the bytes this walker hands back. It was the
+//! separate `hxcicn` crate until the step-3 consolidation; a `cicn` is a
+//! resource-fork resource, so decoding it belongs here rather than in a crate
+//! of its own. Its C ABI (`hxcicn_decode`) is unchanged.
 
+pub mod cicn;
 pub mod ffi;
 
 /// A parsed Mac resource fork. Owns the fork bytes; [`Resource`]s borrow into

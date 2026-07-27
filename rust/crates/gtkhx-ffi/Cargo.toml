@@ -57,7 +57,6 @@ hxtask = { path = "../hxtask" }
 
 # --- leaf utilities ---
 hxbookmarks = { path = "../hxbookmarks" }
-hxcicn = { path = "../hxcicn" }
 hxfiles-xfer = { path = "../hxfiles-xfer" }
 hxhfs = { path = "../hxhfs" }
 hx-image-decode = { path = "../hx-image-decode" }

@@ -23,7 +23,7 @@
 //! `glib::Bytes` ref, so a dismissed dialog can't free the payload out from
 //! under a pending file chooser.
 
-use std::os::raw::{c_char, c_int, c_void};
+use std::os::raw::{c_char, c_void};
 use std::ptr;
 
 use gtk4 as gtk;

@@ -26,7 +26,7 @@ pub unsafe extern "C" fn hxcicn_decode(
         return std::ptr::null_mut();
     }
     let data = std::slice::from_raw_parts(rsrc, len);
-    let Some(img) = crate::decode(data) else {
+    let Some(img) = crate::cicn::decode(data) else {
         return std::ptr::null_mut();
     };
 

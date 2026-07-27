@@ -89,7 +89,6 @@ use hxtask as _;
 // --- leaf utilities ---
 use hx_image_decode as _;
 use hxbookmarks as _;
-use hxcicn as _;
 use hxfiles_xfer as _;
 use hxhfs as _;
 use hxmacres as _;

@@ -1785,7 +1785,6 @@ dependencies = [
  "hxchat-model",
  "hxchat-recv",
  "hxchat-send",
- "hxcicn",
  "hxcompress",
  "hxconn",
  "hxcrypto-aead",
@@ -2033,13 +2032,6 @@ dependencies = [
  "glib 0.21.5",
  "hotline-proto",
  "hxtext",
-]
-
-[[package]]
-name = "hxcicn"
-version = "0.1.0"
-dependencies = [
- "glib 0.21.5",
 ]
 
 [[package]]
