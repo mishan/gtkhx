@@ -1832,6 +1832,7 @@ dependencies = [
  "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
+ "hxchat-send",
  "hxconn",
  "hxmodel",
  "hxnews-recv",
@@ -2010,9 +2011,9 @@ version = "0.1.0"
 dependencies = [
  "gtkhx-boxed",
  "gtkhx-session",
- "gtkhx-ui",
  "hotline-proto",
  "hxconn",
+ "hxmodel",
 ]
 
 [[package]]
@@ -2109,6 +2110,7 @@ version = "0.1.0"
 dependencies = [
  "gio 0.21.5",
  "glib 0.21.5",
+ "gtkhx-boxed",
  "hotline-proto",
 ]
 
@@ -2117,7 +2119,7 @@ name = "hxmsg-recv"
 version = "0.1.0"
 dependencies = [
  "gtkhx-session",
- "gtkhx-ui",
+ "hxmodel",
 ]
 
 [[package]]
@@ -2200,6 +2202,7 @@ dependencies = [
  "gtkhx-session",
  "hotline-proto",
  "hxconn",
+ "hxmodel",
 ]
 
 [[package]]

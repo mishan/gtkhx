@@ -17,20 +17,16 @@ use gtkhx_session::{gtkhx_session_emit_self_updated, gtkhx_session_emit_user_cha
 #[cfg(not(test))]
 use hxconn::{hx_conn_name, hx_conn_sess};
 
+// HxMemberInfo is a type, not one of the shadowed functions, so it is imported
+// unconditionally — the #[cfg(test)] doubles below replace the fns only.
+use hxmodel::chat_members::HxMemberInfo;
 #[cfg(not(test))]
-extern "C" {    /// Whether `uid` is a member of the per-chat model (hxmember-model).
-    fn hx_member_model_contains(model: *mut c_void, uid: u16) -> c_int;
-    /// Insert-or-update a member's fields in the per-chat model (hxmember-model),
-    /// without emitting a view signal.
-    fn hx_member_model_upsert(
-        model: *mut c_void,
-        uid: u16,
-        name: *const c_char,
-        icon: u16,
-        color: u16,
-        nick_color: u32,
-    );
-    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
+use hxmodel::chat_members::{hx_member_model_contains, hx_member_model_get_ignore, hx_member_model_get_info, hx_member_model_upsert};
+#[cfg(not(test))]
+use hxmodel::conversation::hx_chat_member_model;
+
+#[cfg(not(test))]
+extern "C" {    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
     /// Deliberately ignores the server-supplied name — our local prefs nick is
     /// authoritative. C helper in proto_helpers.c.
     fn hx_selfinfo_parse(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> u32;
@@ -39,20 +35,11 @@ extern "C" {    /// Whether `uid` is a member of the per-chat model (hxmember-mo
     fn hx_conn_set_logged_in(htlc: *mut c_void, v: c_int);
     /// `struct chat *chat_with_cid (sess, cid)` — the chat with this id, or NULL.
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
-    /// `void *hx_chat_member_model (chat)` — the chat's authoritative
-    /// `HxMemberModel` (hxmember-model).
-    fn hx_chat_member_model(chat: *mut c_void) -> *mut c_void;
-    /// Read a member's display fields by uid into `out` (chat_members.h). Returns
-    /// gboolean; leaves `out` untouched when the uid is absent.
-    fn hx_member_model_get_info(model: *mut c_void, uid: u16, out: *mut HxMemberInfo)
-        -> c_int;
     /// `int task_inerror (htlc, frame, frame_len)` — TRUE if the frame is a
     /// task-error reply we should bail on (protocol.h).
     fn task_inerror(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> c_int;
     /// `struct chat *chat_new (sess, cid)` — create (and register) a chat.
     fn chat_new(sess: *mut c_void, cid: u32) -> *mut c_void;
-    /// Client-local ignore flag for `uid` on the model (chat_members.h).
-    fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> c_int;
     /// hxconn accessors for our own identity bookkeeping.
     fn hx_conn_uid(htlc: *mut c_void) -> u16;
     fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
@@ -111,29 +98,9 @@ unsafe fn debug_trace(cat: &std::ffi::CStr, line: String) {
     }
 }
 
-/// `#[repr(C)]` mirror of `struct hx_member_info` (chat_members.h): the display
-/// snapshot `hx_member_model_get_info` fills. `name` is NUL-terminated.
-#[repr(C)]
-#[derive(Clone, Copy)]
-struct HxMemberInfo {
-    uid: u16,
-    icon: u16,
-    status: u16,
-    nick_color: u32,
-    name: [c_char; 32],
-}
-
-impl HxMemberInfo {
-    fn zeroed() -> Self {
-        HxMemberInfo {
-            uid: 0,
-            icon: 0,
-            status: 0,
-            nick_color: 0,
-            name: [0; 32],
-        }
-    }
-}
+// HxMemberInfo comes from hxmodel::chat_members. This crate used to define a
+// fourth hand-synced `#[repr(C)]` mirror of the same C struct; hxmodel's copy
+// is the one whose layout is pinned against chat_members.h by a const assert.
 
 /// Result of [`hx_user_apply_recv`] — tells the C side what (if anything) it
 /// did, so it can do the matching join/rename logging.
@@ -260,7 +227,7 @@ pub unsafe extern "C" fn hx_rcv_user_change(
 
     // Pre-change snapshot from the authoritative model, taken before the apply
     // updates it — so the preserve rules + rename notice see the old state.
-    let mut old = HxMemberInfo::zeroed();
+    let mut old = unsafe { std::mem::zeroed::<HxMemberInfo>() };
     let old_exists = hx_member_model_get_info(model, uc.uid, &mut old) != 0;
     let old_name_bytes = optr_bytes(old.name.as_ptr());
 
@@ -419,7 +386,7 @@ pub unsafe extern "C" fn hx_rcv_user_part(
 
     // Snapshot the member before the emit removes it, so we have the name for
     // the "parts" line.
-    let mut info = HxMemberInfo::zeroed();
+    let mut info = unsafe { std::mem::zeroed::<HxMemberInfo>() };
     let have = hx_member_model_get_info(model, pm.uid, &mut info) != 0;
 
     if hx_user_part_recv(htlc, chat, model, pm.uid) != 0 && have {

@@ -23,11 +23,25 @@
 //! - [`files`] — files-browser presentation/navigation logic: the file-type
 //!   icon/label tables and the remote provider's path-navigation model.
 //! - [`files_entry`] — `HxFileEntry`, one files-browser row as a GObject.
+//! - [`conversation`] — `HxConversation`: the per-chat registry entry (cid,
+//!   subject, membership, and an opaque handle to its view).
+//! - [`chat_members`] — the C ABI over [`chat`] + [`member`]: membership
+//!   queries, the per-uid ignore flag, nick completion and input history.
+//!
+//! `conversation` and `chat_members` lived in `gtkhx-ui` until the step 3
+//! consolidation, because the chat-model re-think (ROADMAP M4b.5) landed them
+//! there. They are model, not view — they hold no widgets, and their being in
+//! the UI crate forced the receive-side handlers to depend on `gtkhx-ui`,
+//! which is what created the `gtkhx-ui -> hxchat-send -> hxuser-recv` cycle
+//! that blocked both the extern-to-Cargo conversion and the `hxhandlers`
+//! merge.
 //!
 //! Each module keeps the exact C ABI its former crate exported, so the C side
 //! and the `gtkhx-ffi` façade are unaffected by the consolidation.
 
 pub mod chat;
+pub mod chat_members;
+pub mod conversation;
 pub mod files;
 pub mod files_entry;
 pub mod member;

@@ -14,9 +14,9 @@ use gtkhx_boxed::chat::hx_chat_event_free;
 #[cfg(not(test))]
 use gtkhx_session::{gtkhx_session_emit_chat, gtkhx_session_emit_chat_history_batch, gtkhx_session_emit_chat_invitation, gtkhx_session_emit_chat_subject, gtkhx_session_emit_chat_subject_notice, gtkhx_session_get_default};
 #[cfg(not(test))]
-use gtkhx_ui::chat_members::hx_member_model_get_ignore;
+use hxmodel::chat_members::hx_member_model_get_ignore;
 #[cfg(not(test))]
-use gtkhx_ui::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
+use hxmodel::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
 #[cfg(not(test))]
 use hxconn::{hx_conn_has_cap, hx_conn_name, hx_conn_sess};
 

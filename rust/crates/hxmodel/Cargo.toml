@@ -16,6 +16,7 @@ crate-type = ["rlib"]
 # GObject + ListModel modules (member, news::node, files_entry); the chat and
 # files modules stay pure. No gtk, so `cargo test -p hxmodel` runs headless.
 [dependencies]
+gtkhx-boxed = { path = "../gtkhx-boxed" }
 glib = { workspace = true }
 gio = { workspace = true }
 hotline-proto = { path = "../hotline-proto" }

@@ -27,15 +27,10 @@ use gtk::glib;
 use gtk::prelude::*;
 use glib::translate::{from_glib_borrow, from_glib_none};
 
-extern "C" {
-    fn hx_input_history_record(hist: *mut c_void, line: *const c_char);
-    fn hx_input_history_up(
-        hist: *mut c_void,
-        current: *const c_char,
-        out: *mut *mut c_char,
-    ) -> glib::ffi::gboolean;
-    fn hx_input_history_down(hist: *mut c_void, out: *mut *mut c_char) -> glib::ffi::gboolean;
+use hxmodel::chat_members::{hx_input_history_down, hx_input_history_record, hx_input_history_up};
+use hxmodel::conversation::hx_chat_member_model;
 
+extern "C" {
     // The session's htlc. gtkhx_active_htlc (gtkhx_ui_bridge.c) is always
     // compiled — unlike voice_bridge.c's hx_session_htlc, which is gated on
     // HAVE_VOICE and would leave this undefined in -Dvoice=disabled builds.
@@ -44,7 +39,6 @@ extern "C" {
     fn hotline_client_input(htlc: *mut c_void, s: *mut c_char, cid: u32, style: u16);
 
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
-    fn hx_chat_member_model(chat: *mut c_void) -> *mut c_void;
     fn tab_nick_comp(
         sess: *mut c_void,
         member_model: *mut c_void,
@@ -124,7 +118,7 @@ fn on_key(
                 let mm = if chat.is_null() {
                     ptr::null_mut()
                 } else {
-                    hx_chat_member_model(chat)
+                    hx_chat_member_model(chat.cast())
                 };
                 // tab_nick_comp rewrites the buffer + caret itself.
                 tab_nick_comp(

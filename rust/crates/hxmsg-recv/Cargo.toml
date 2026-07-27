@@ -20,5 +20,5 @@ crate-type = ["rlib"]
 # taken as rlib deps here without double-defining their #[no_mangle] symbols —
 # hence the extern-C surface, matching hxchat-recv / hxicon-recv / hxuser-recv.)
 [dependencies]
+hxmodel = { path = "../hxmodel" }
 gtkhx-session = { path = "../gtkhx-session" }
-gtkhx-ui = { path = "../gtkhx-ui" }

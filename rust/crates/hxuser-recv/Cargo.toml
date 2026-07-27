@@ -22,6 +22,7 @@ crate-type = ["rlib"]
 # deps (matching hxnews-recv / hxchat-recv / hxicon-recv); cargo test drives them
 # with in-crate #[cfg(test)] recording doubles, headless.
 [dependencies]
+hxmodel = { path = "../hxmodel" }
 gtkhx-session = { path = "../gtkhx-session" }
 hxconn = { path = "../hxconn" }
 hotline-proto = { path = "../hotline-proto" }

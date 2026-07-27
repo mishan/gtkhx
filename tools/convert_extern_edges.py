@@ -11,12 +11,12 @@ Delete once the migration is finished.
 """
 import re, collections, glob, sys
 
-# gtkhx-ui -> hxchat-send -> hxuser-recv -> gtkhx-ui: Cargo forbids circular
-# dependencies, so these three edges keep their C indirection until the crates
-# merge (scoping doc step 3).
-CYCLIC = {('gtkhx-ui', 'hxchat-send'),
-          ('hxchat-send', 'hxuser-recv'),
-          ('hxuser-recv', 'gtkhx-ui')}
+# Was gtkhx-ui -> hxchat-send -> hxuser-recv -> gtkhx-ui. Dissolved in step 3 by
+# moving conversation.rs + chat_members.rs (model code that had ended up in the
+# UI crate) into hxmodel, so nothing in the handler layer depends on gtkhx-ui
+# any more. Kept as an empty set because the cycle check is the thing to re-run
+# before adding edges, not a permanent exclusion list.
+CYCLIC: set = set()
 
 # Symbols that deliberately erase types across the FFI boundary and should keep
 # their hand-written declaration. `task_new` stores a `rcv_task_*` callback
@@ -30,7 +30,12 @@ CYCLIC = {('gtkhx-ui', 'hxchat-send'),
 # typed #[repr(C)] mirror (ROADMAP R5.1), so the two crates describe the same
 # memory with different Rust types on purpose. The C boundary is what lets both
 # views coexist; importing would just move the cast to every call site.
-SKIP_SYMS = {'task_new', 'hx_tracker_v3_meta_copy', 'hx_tracker_v3_meta_free'}
+#
+# hx_rcv_user_change is one of those rcv_task_* callbacks: hxchat-send hands it
+# to task_new already cast to the 3-arg shape, so importing its real (wider)
+# signature just moves the cast.
+SKIP_SYMS = {'task_new', 'hx_rcv_user_change',
+             'hx_tracker_v3_meta_copy', 'hx_tracker_v3_meta_free'}
 
 # One level of paren nesting, so `#[cfg(not(test))]` is captured whole.
 BLOCK = re.compile(r'((?:#\[cfg\((?:[^()]|\([^()]*\))*\)\]\n)?)extern\s+"C"\s*\{([\s\S]*?)\n\}')

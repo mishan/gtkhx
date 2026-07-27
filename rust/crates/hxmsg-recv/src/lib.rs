@@ -18,7 +18,7 @@ use std::os::raw::{c_int, c_void};
 #[cfg(not(test))]
 use gtkhx_session::{gtkhx_session_emit_msg, gtkhx_session_get_default};
 #[cfg(not(test))]
-use gtkhx_ui::chat_members::hx_member_model_get_ignore;
+use hxmodel::chat_members::hx_member_model_get_ignore;
 
 /// Outcome of [`hx_msg_recv`], telling the C handler what happened / what to do.
 /// The sender was on the ignore list — nothing emitted, nothing broadcast, and

@@ -11,11 +11,11 @@
 
 use std::ffi::{c_char, c_void};
 
-use gtk4::glib;
+use glib;
 use glib::prelude::*;
 use glib::translate::{from_glib_full, IntoGlibPtr};
 
-use hxmodel::member::HxMemberModel;
+use crate::member::HxMemberModel;
 
 use gtkhx_boxed::media_table::{hx_media_table_free, hx_media_table_new};
 

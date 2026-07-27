@@ -13,6 +13,7 @@ publish = false
 crate-type = ["rlib"]
 
 [dependencies]
+hxchat-send = { path = "../hxchat-send" }
 hxmodel = { path = "../hxmodel" }
 gtkhx-boxed = { path = "../gtkhx-boxed" }
 gtkhx-session = { path = "../gtkhx-session" }
