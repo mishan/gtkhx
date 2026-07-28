@@ -5,7 +5,23 @@ vendored `src/xtext.c`. Sibling to `docs/inline-media-plan.md` (whose §9.E
 "Option 4 — variable-height xtext" is the seed of this document) and
 `docs/rust/ROADMAP.md` Phase R5.
 
-**Status:** scoping. Nothing implemented.
+**Status:** C0–C4 shipped; C5 (default flip, then deleting xtext) is next.
+
+| Phase | State |
+|---|---|
+| C0 — `chat_view.h` seam over xtext | shipped |
+| C1 — `hxchat-layout` engine | shipped |
+| C2 — `hxchat-view` widget, behind `GTKHX_CHATVIEW=new` | shipped |
+| C3 — selection, copy, zoom, links, context menu | shipped |
+| C4 — inline media, word-click parity, word/line select, auto-scroll | shipped |
+| C5 — default flip, delete xtext | not started |
+| C6 — structured append, avatar gutter, grouping | not started |
+
+The parity ledger in §6a is the C5-readiness check. Sections below
+describe the *design*; where the shipped code diverged from the original
+plan the section says so — notably §3.6's typed signals, which were
+deferred in favour of emitting xtext's `word-click` so the existing C
+handlers keep working unchanged during the A/B.
 
 ---
 
