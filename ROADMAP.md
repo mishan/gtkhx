@@ -23,6 +23,14 @@ A quick orientation, since everything below references it:
 - **Two huge custom widgets** are the porting bottleneck:
   - **`gtk_hlist.c`** — a fork of GtkCList (~3500 LOC). 392 call sites in `files.c`, `users.c`, `tracker.c`, `news15.c`, `options.c`.
   - **`xtext.c`** — XChat 1.8.5's text widget (~3500 LOC). Immediate-mode GDK drawing. **Plan: replace with HexChat's modern xtext fork** (`src/fe-gtk/xtext.c` from hexchat/hexchat) — same widget lineage, actively maintained against modern GTK.
+    > **Superseded.** This was done, and then undone: the HexChat fork was
+    > vendored in Phase 2.6 and **deleted in chat-view phase C5**, replaced by
+    > a from-scratch Rust widget (`hxchat-layout` + `hxchat-view`). The
+    > vendoring was still the right call in 2025 — it bought the GTK 2 → 3 → 4
+    > climb cheaply — but the line-uniform layout model could not carry inline
+    > media or variable-height rows. See `docs/chat-view-scoping.md` §1 and
+    > `docs/chat-view-benchmark.md`. The Phase 2/3 notes below are kept as the
+    > record of what was decided when, not as current plans.
 - **Hygiene debt:** CVS metadata in every directory, emacs autosave/lock leftovers (`#about.c#`, `.#commands.c.1.36`, `.#news15.c.1.33`, `.#xfers.c.1.40`, `.#commands.c.1.36`, `#rcv.c#`, `#tracker.c#`), generated autotools artifacts (`configure`, `aclocal.m4`, `Makefile.in`, `autom4te.cache/`) checked into the import.
 - **Known issues from the original TODO** (still applicable):
   - "Rewrite GtkHList to be a derived class of GtkCList" — i.e. the author already wanted to delete the fork.

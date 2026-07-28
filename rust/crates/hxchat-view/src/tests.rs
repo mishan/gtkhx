@@ -315,7 +315,7 @@ fn gtk_class_and_construction_smoke() {
     // it is still alive and still floating afterwards.
     unsafe {
         let pal = [gtk4::gdk::RGBA::BLACK; crate::view::PALETTE_COLS];
-        let raw = crate::ffi::hx_chat_view_impl_new(
+        let raw = crate::ffi::hx_chat_view_new(
             pal.as_ptr() as *const gtk4::gdk::ffi::GdkRGBA,
             1,
         );
@@ -328,14 +328,14 @@ fn gtk_class_and_construction_smoke() {
         );
 
         // Every entry point create_chat calls, in order.
-        crate::ffi::hx_chat_view_impl_set_font(raw, c"Monospace 10".as_ptr());
-        crate::ffi::hx_chat_view_impl_set_word_wrap(raw, 1);
-        crate::ffi::hx_chat_view_impl_set_max_lines(raw, 500);
-        crate::ffi::hx_chat_view_impl_set_indent(raw, 1);
-        crate::ffi::hx_chat_view_impl_set_time_stamp(raw, 1);
-        crate::ffi::hx_chat_view_impl_set_max_indent(raw, 256);
-        let _ = crate::ffi::hx_chat_view_impl_get_vadjustment(raw);
-        let mark = crate::ffi::hx_chat_view_impl_append_indent(
+        crate::ffi::hx_chat_view_set_font(raw, c"Monospace 10".as_ptr());
+        crate::ffi::hx_chat_view_set_word_wrap(raw, 1);
+        crate::ffi::hx_chat_view_set_max_lines(raw, 500);
+        crate::ffi::hx_chat_view_set_indent(raw, 1);
+        crate::ffi::hx_chat_view_set_time_stamp(raw, 1);
+        crate::ffi::hx_chat_view_set_max_indent(raw, 256);
+        let _ = crate::ffi::hx_chat_view_get_vadjustment(raw);
+        let mark = crate::ffi::hx_chat_view_append_indent(
             raw,
             c"<alice>".as_ptr(),
             7,
@@ -360,7 +360,7 @@ fn gtk_class_and_construction_smoke() {
         assert_ne!(
             gtk4::glib::gobject_ffi::g_type_check_instance_is_a(
                 raw as *mut gtk4::glib::gobject_ffi::GTypeInstance,
-                crate::ffi::hx_chat_view_impl_get_type(),
+                crate::ffi::hx_chat_view_get_type(),
             ),
             0,
             "the widget was destroyed by an FFI call"

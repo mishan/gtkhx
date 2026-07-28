@@ -1,6 +1,6 @@
 //! The C ABI.
 //!
-//! Mirrors `src/chat_view.h`, one `hx_chat_view_impl_*` per
+//! Mirrors `src/chat_view.h`, one `hx_chat_view_*` per
 //! `hx_chat_view_*`. The C side (`chat_view.c`) is the dispatcher: it
 //! decides at construction which backend a view is, then routes every
 //! later call by widget type. That is why these are `_impl_`-prefixed
@@ -128,7 +128,7 @@ macro_rules! with_view {
 /// # Safety
 /// `palette` points to `HX_CHAT_PAL_COLS` `GdkRGBA`s, or is NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_new(
+pub unsafe extern "C" fn hx_chat_view_new(
     palette: *const gtk4::gdk::ffi::GdkRGBA,
     separator: c_int,
 ) -> CGtkWidget {
@@ -188,7 +188,7 @@ unsafe fn into_floating_ptr<W: IsA<gtk4::Widget>>(w: W) -> CGtkWidget {
 /// # Safety
 /// See module docs; `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_get_type() -> gtk4::glib::ffi::GType {
+pub unsafe extern "C" fn hx_chat_view_get_type() -> gtk4::glib::ffi::GType {
     crate::ensure_gtk_init();
     use gtk4::glib::prelude::StaticType;
     HxChatView::static_type().into_glib()
@@ -197,7 +197,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_get_type() -> gtk4::glib::ffi::GType 
 /// # Safety
 /// `w` is a valid `HxChatView *`; `font` a NUL-terminated string.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_font(w: CGtkWidget, font: *const c_char) {
+pub unsafe extern "C" fn hx_chat_view_set_font(w: CGtkWidget, font: *const c_char) {
     with_view!(w, v, {
         let f = cstr(font);
         if !f.is_empty() {
@@ -209,7 +209,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_font(w: CGtkWidget, font: *const 
 /// # Safety
 /// `palette` points to `HX_CHAT_PAL_COLS` `GdkRGBA`s.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_palette(
+pub unsafe extern "C" fn hx_chat_view_set_palette(
     w: CGtkWidget,
     palette: *const gtk4::gdk::ffi::GdkRGBA,
 ) {
@@ -229,42 +229,42 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_palette(
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_word_wrap(w: CGtkWidget, on: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_word_wrap(w: CGtkWidget, on: c_int) {
     with_view!(w, v, v.set_word_wrap(on != 0))
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_max_lines(w: CGtkWidget, n: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_max_lines(w: CGtkWidget, n: c_int) {
     with_view!(w, v, v.set_max_rows(n))
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_indent(w: CGtkWidget, on: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_indent(w: CGtkWidget, on: c_int) {
     with_view!(w, v, v.set_indent(on != 0))
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_max_indent(w: CGtkWidget, px: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_max_indent(w: CGtkWidget, px: c_int) {
     with_view!(w, v, v.set_max_indent(px))
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_time_stamp(w: CGtkWidget, on: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_time_stamp(w: CGtkWidget, on: c_int) {
     with_view!(w, v, v.set_time_stamp(on != 0))
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *` or NULL; `fmt` a NUL-terminated string.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_stamp_format(
+pub unsafe extern "C" fn hx_chat_view_set_stamp_format(
     w: CGtkWidget,
     fmt: *const c_char,
 ) {
@@ -295,7 +295,7 @@ pub type UrlCheckFn = unsafe extern "C" fn(CGtkWidget, *mut c_char) -> c_int;
 /// # Safety
 /// `w` is a valid `HxChatView *`; `f` is NULL or a valid function pointer.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_urlcheck_function(
+pub unsafe extern "C" fn hx_chat_view_set_urlcheck_function(
     w: CGtkWidget,
     f: Option<UrlCheckFn>,
 ) {
@@ -310,7 +310,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_urlcheck_function(
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_get_vadjustment(
+pub unsafe extern "C" fn hx_chat_view_get_vadjustment(
     w: CGtkWidget,
 ) -> *mut gtk4::ffi::GtkAdjustment {
     match view_of(w) {
@@ -340,42 +340,42 @@ pub unsafe extern "C" fn hx_chat_view_impl_get_vadjustment(
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_refresh(w: CGtkWidget) {
+pub unsafe extern "C" fn hx_chat_view_refresh(w: CGtkWidget) {
     with_view!(w, v, v.queue_draw())
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_clear(w: CGtkWidget) {
+pub unsafe extern "C" fn hx_chat_view_clear(w: CGtkWidget) {
     with_view!(w, v, v.clear())
 }
 
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_zoom_permille(w: CGtkWidget, zoom: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_zoom_permille(w: CGtkWidget, zoom: c_int) {
     with_view!(w, v, v.set_zoom_permille(zoom.max(0) as u32))
 }
 
 /// # Safety
 /// Process-wide; takes no view.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_text(enabled: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_autocopy_text(enabled: c_int) {
     crate::view::prefs::AUTOCOPY_TEXT.with(|c| c.set(enabled != 0));
 }
 
 /// # Safety
 /// Process-wide; takes no view.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_stamp(enabled: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_autocopy_stamp(enabled: c_int) {
     crate::view::prefs::AUTOCOPY_STAMP.with(|c| c.set(enabled != 0));
 }
 
 /// # Safety
 /// Process-wide; takes no view.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_color(enabled: c_int) {
+pub unsafe extern "C" fn hx_chat_view_set_autocopy_color(enabled: c_int) {
     crate::view::prefs::AUTOCOPY_COLOR.with(|c| c.set(enabled != 0));
 }
 
@@ -407,7 +407,7 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
 /// # Safety
 /// `text` points to `len` readable bytes.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_append(
+pub unsafe extern "C" fn hx_chat_view_append(
     w: CGtkWidget,
     text: *const c_char,
     len: c_int,
@@ -431,7 +431,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_append(
 /// # Safety
 /// `left` / `right` point to their respective readable byte counts.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_append_indent(
+pub unsafe extern "C" fn hx_chat_view_append_indent(
     w: CGtkWidget,
     left: *const c_char,
     left_len: c_int,
@@ -452,7 +452,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_append_indent(
 /// # Safety
 /// `left` / `right` point to their respective readable byte counts.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_insert_before(
+pub unsafe extern "C" fn hx_chat_view_insert_before(
     w: CGtkWidget,
     anchor: *mut c_void,
     left: *const c_char,
@@ -474,7 +474,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_insert_before(
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_remove(w: CGtkWidget, mark: *mut c_void) -> c_int {
+pub unsafe extern "C" fn hx_chat_view_remove(w: CGtkWidget, mark: *mut c_void) -> c_int {
     match (view_of(w), ptr_to_mark(mark)) {
         (Some(v), Some(id)) => c_int::from(v.remove(id)),
         _ => 0,
@@ -486,7 +486,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_remove(w: CGtkWidget, mark: *mut c_vo
 /// # Safety
 /// `alt` is a NUL-terminated string.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_append_media(
+pub unsafe extern "C" fn hx_chat_view_append_media(
     w: CGtkWidget,
     texture: *mut c_void,
     alt: *const c_char,
@@ -528,7 +528,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_append_media(
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_media_mark(w: CGtkWidget, token: u32) -> *mut c_void {
+pub unsafe extern "C" fn hx_chat_view_media_mark(w: CGtkWidget, token: u32) -> *mut c_void {
     match view_of(w) {
         Some(v) => v.find_image(token).map_or(std::ptr::null_mut(), mark_to_ptr),
         None => std::ptr::null_mut(),
@@ -538,7 +538,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_media_mark(w: CGtkWidget, token: u32)
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_media_set_texture(
+pub unsafe extern "C" fn hx_chat_view_media_set_texture(
     w: CGtkWidget,
     mark: *mut c_void,
     texture: *mut c_void,
@@ -576,7 +576,7 @@ unsafe fn token_for_mark(v: &HxChatView, mark: *mut c_void) -> Option<u32> {
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_media_set_animation(
+pub unsafe extern "C" fn hx_chat_view_media_set_animation(
     w: CGtkWidget,
     mark: *mut c_void,
     frames: *mut c_void,
@@ -623,7 +623,7 @@ unsafe fn put_readout(n_matches: *mut u32, current: *mut u32, r: (usize, usize))
 /// `needle` is a NUL-terminated string or NULL; the out-params are
 /// writable `guint`s or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_search(
+pub unsafe extern "C" fn hx_chat_view_search(
     w: CGtkWidget,
     needle: *const c_char,
     case_sensitive: c_int,
@@ -638,7 +638,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_search(
 /// # Safety
 /// The out-params are writable `guint`s or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_search_step(
+pub unsafe extern "C" fn hx_chat_view_search_step(
     w: CGtkWidget,
     dir: c_int,
     n_matches: *mut u32,
@@ -651,7 +651,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_search_step(
 /// # Safety
 /// `w` is an `HxChatView` or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_search_clear(w: CGtkWidget) {
+pub unsafe extern "C" fn hx_chat_view_search_clear(w: CGtkWidget) {
     with_view!(w, v, v.search_clear());
 }
 

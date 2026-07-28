@@ -17,11 +17,10 @@ The big rocks, by line count:
 
 | File                    | LOC  | Role                                                          |
 |-------------------------|------|---------------------------------------------------------------|
-| `src/xtext.c/.h`        | 4500 | **Custom widget** — HexChat's modern xtext fork (vendored Phase 2). |
 | `src/dfa.c`             | 2550 | Regex/pattern matching engine.                                |
 | `src/options.c`         | ~1900| Settings (AdwPreferencesDialog) + GKeyFile persistence.       |
 | `src/rcv.c`             | ~1700| Hotline protocol receive path.                                |
-| `src/chat.c`            | ~1500| Chat window UI (xtext output, GtkTextView input).             |
+| `src/chat.c`            | ~1500| Chat window UI (chat-view output, GtkTextView input).         |
 | `src/files.c`           | ~1500| File browser UI (GtkColumnView).                             |
 | `src/news15.c`          | ~1300| Threaded news (1.5 protocol).                                 |
 | `src/network.c`         | ~1300| Connection / pthread worker, hlwrite, ping keepalive.         |
@@ -106,10 +105,24 @@ The voice unit/proto/integration tests are likewise gated in
 `tests/meson.build`; CI's `build-no-voice` job builds the whole binary with
 `-Dvoice=disabled` on a GStreamer-free image to keep the path green.
 
+**The vendored xtext widget is gone (phase C5).** The chat output surface is
+`rust/crates/hxchat-layout` (a dependency-free layout engine: spans, wrapping,
+a chunked prefix-sum height index, scroll anchoring, selection, search) plus
+`rust/crates/hxchat-view` (the GTK4 widget). `src/chat_view.h` declares the C
+ABI; there is no `chat_view.c` — C links straight to the Rust exports. The
+replacement measured 4.9x faster on ingest and 6.3x on the worst relayout
+frame; `docs/chat-view-benchmark.md` is the record and cannot be reproduced,
+since the other half of the comparison no longer exists. Design and phasing:
+`docs/chat-view-scoping.md`.
+
+The `\003NN` mIRC escape vocabulary is **still in use** — `chat.c` and `msg.c`
+build styled strings with it and two sites re-parse their own output to
+recover a name. Retiring it is the structured-append API and is C6 work; see
+scoping §6a2 for why it isn't a shim removal.
+
 The custom GtkCList fork is gone; its five list consumers (`tracker.c`, `news15.c`,
 `options.c`, `users.c`, `files.c`) now use `GtkColumnView` directly — the interim
-`gtk_hlist_compat` shim over GtkTreeView+GtkListStore has itself been removed. xtext
-is HexChat's modern fork. The GtkApplication / activate plumbing in `gtkhx.c` drives
+`gtk_hlist_compat` shim over GtkTreeView+GtkListStore has itself been removed. The GtkApplication / activate plumbing in `gtkhx.c` drives
 all window construction.
 
 What's runnable and reasonably polished on this branch:
@@ -132,7 +145,7 @@ What's runnable and reasonably polished on this branch:
   Rust `hxnet` orchestrator + `hxcrypto-*` / `hxcompress` crates. Wire-format compat
   with 1.2/1.5/1.9 servers is preserved there.
 - Chat / private-message text is sanitised through `gtkhx_text_to_utf8` (Mac Roman →
-  UTF-8 with U+FFFD fallback) before reaching xtext/Pango.
+  UTF-8 with U+FFFD fallback) before reaching the chat view / Pango.
 - Sound playback is in-process via GSound; no fork+exec of an external player.
 
 Phase 5+ work landed (highlights — see ROADMAP for the full list):
@@ -171,9 +184,10 @@ Phase 5+ work landed (highlights — see ROADMAP for the full list):
 
 What's degraded and remaining:
 
-- **Selection auto-scroll while dragging**: scrollup/down timers read
-  `xtext->select_end_y` (kept live by the motion controller) rather than the live
-  device position; GTK 4 has no synchronous "where is the pointer" accessor.
+- ~~**Selection auto-scroll while dragging**~~: fixed in C4. xtext's timers read
+  a stale `select_end_y`; the replacement stores the drag position and consumes
+  it from a `GtkTickCallback`, frame-time based so it scrolls at the same speed
+  on a 60 Hz and a 144 Hz display.
 - **Window position restoration**: `gtk_window_get_position` is gone and Wayland
   gives clients no portable way to set absolute position. Size restores from prefs;
   position only restores when the compositor cooperates.
@@ -344,7 +358,7 @@ GResource. Schema reference: `docs/theming-file-format.md`.
 construction (so the first measure pass gets the right factors). It emits
 `GtkhxTheme::changed`. A `THEMENAME` edit re-fires it via the
 `changed_theme_name` cfgvar hook; every subscriber (button helpers, user
-list, chat xtext) rescales and repaints in place.
+list, chat view) rescales and repaints in place.
 
 Call sites multiply their raw source size by `gtkhx_theme_scale(area)`. The old
 per-call `2` literals and `TOOLBAR_ICON_SCALE` / `TASKS_ICON_SCALE` constants are
@@ -367,7 +381,7 @@ Hotline's real per-user colour is a separate u32 RGB attribute on the user
 record, not in-band markup. The vocabulary is ours to retire — see
 `docs/chat-view-scoping.md` §3.8.
 
-Non-xtext text surfaces (agreement window, news viewers, broadcast viewer,
+Non-chat-view text surfaces (agreement window, news viewers, broadcast viewer,
 chat-subject entries, and the chat / PM / pchat input boxes) get the same
 theme `fg`/`bg`/`caret-color` via three CSS classes managed by
 `gtkhx_refresh_css`: `.gtkhx-text` (read-only text — applies theme colors +
@@ -428,7 +442,8 @@ does not follow `USERLIST_*` — that carve-out is intentional, not a bug.
 and emits an HTML report at `coverage/index.html` via `gcovr` (or `lcov`
 fallback). Default is all tiers including Tier 3 against the Docker matrix;
 `--quick` skips Tier 3. Exclusions for vendored / soon-deleted code
-(`xtext.c`, `dfa.c`, `rand.c`) live in `.gcovr.cfg`. Use it to pick the
+(`dfa.c`, `rand.c`) live in `.gcovr.cfg`; `xtext.c` was there until C5
+deleted it. Use it to pick the
 heaviest-uncovered file when planning what to test next. Full notes in
 `docs/coverage.md`.
 
@@ -486,7 +501,7 @@ third-party screenshots. See ROADMAP Phase ∞ and the long-form notes in memory
   CVS-import commit). One logical change per commit, descriptive bodies. No `Co-Authored-By:
   Claude` trailers unless Misha asks.
 - **Don't re-litigate roadmap decisions** without a strong reason. The locked-in choices
-  (Meson, crypto in Rust `hxcrypto-*` crates, vendor HexChat's xtext, drop plugin API,
+  (Meson, crypto in Rust `hxcrypto-*` crates, drop plugin API,
   GPL-2.0-or-later, single-conn during ports) were made deliberately. ROADMAP.md is the
   source of truth.
 - **Don't break Hotline 1.2/1.5 wire compat.** Modern transport security is a Phase ∞

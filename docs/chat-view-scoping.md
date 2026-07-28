@@ -16,7 +16,8 @@ vendored `src/xtext.c`. Sibling to `docs/inline-media-plan.md` (whose §9.E
 | C3r — in-buffer search, markdown compose affordances | shipped |
 | C4 — inline media, word-click parity, word/line select, auto-scroll | shipped |
 | C5 — default flip, delete xtext | not started |
-| C6 — structured append, avatar gutter, grouping | not started |
+| C5 — flip the default, delete xtext, dissolve the dispatcher | shipped |
+| C6 — structured append (**incl. retiring mIRC**), avatar gutter, grouping | not started |
 
 The parity ledger in §6a is the C5-readiness check. Sections below
 describe the *design*; where the shipped code diverged from the original
@@ -738,6 +739,44 @@ fractional-scale display, and the drawn rule and the hit test share one
 `set_error_function` / `gtk_xtext_foreach` / the `buffer_new`/`_free`/
 `_show` trio are all xtext API with no caller in this tree; they die with
 xtext rather than being reproduced.
+
+### 6a2. Why retiring mIRC is C6, not C5
+
+C5 was scoped to include §3.8's retirement of the `\003NN` escape
+vocabulary, on the reasoning that a dead escape vocabulary left in the
+tree is how it survives another decade. Surveying it first changed the
+answer: **retiring mIRC is the structured-append API, which is C6's
+core.** It is not a shim removal.
+
+The escapes are produced at 28 sites — `chat.c` (17), `msg.c` (9),
+`gtkhx.c`, `proto_helpers.c` — encoding six distinct things: nick
+brackets in the speaker's colour, bold+red highlight, the dark-grey media
+placeholder, history-muted rows, the `[hx]` info prefix, and
+broadcastmsg's per-sender `[name]` prefix.
+
+Two of those sites are the real argument. `chat.c:1587` and `msg.c:711`
+**re-parse GtkHx's own escape output** to find where a name ends:
+
+```c
+static const char wrap_open[]  = " \00310[";
+static const char wrap_close[] = "\00310]\003 ";
+```
+
+That is a data structure round-tripped through a presentation format and
+parsed back out. Removing the escapes without giving the API somewhere to
+put the structure would mean inventing a *different* string convention to
+re-parse, which is the same mistake with fresh bytes.
+
+The replacement is a run-based append — `(text, style)` pairs for the
+gutter and the body, mapping 1:1 onto the span model `hxchat-layout`
+already has — after which `mirc.rs`, `chat.c::colors[]`, both round-trip
+parsers and the escapes all go at once. That is exactly the "chat.c hands
+a `Message`, not a mIRC string" item §6 lists under C6, and §3.8 (below)
+already argues should be pulled forward.
+
+So C5 shipped as xtext-only. The vocabulary is unchanged and still works;
+it is now the single largest thing standing between the current tree and
+C6.
 
 ### 6b. Notes from C3r
 

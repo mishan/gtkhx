@@ -1,4 +1,4 @@
-/* GtkHx — chat view abstraction (chat-view phase C0)
+/* GtkHx — chat view: the C-facing declaration of the chat output widget
  *
  * Copyright (C) 2000-2003 Misha Nasledov
  *
@@ -14,43 +14,48 @@
  */
 
 /*
- * The chat output surface, as an interface rather than a widget.
+ * The chat output surface. Every chat / private-chat / private-message
+ * window renders through this header.
  *
- * Every chat / private-chat / private-message window renders its
- * output through this header. Today the one and only implementation is
- * the vendored xtext widget (chat_view.c is a thin forwarding layer);
- * the point of the indirection is that xtext's internals stop being
- * part of the call sites' vocabulary.
+ * There is exactly one implementation and it is Rust: the symbols below
+ * are exported from `rust/crates/hxchat-view/src/ffi.rs`, and C links
+ * against them directly. This file is a *declaration* header, not a
+ * forwarding layer — there is no chat_view.c.
  *
- * Two things this closes off, both of which were blocking further work
- * (see docs/chat-view-scoping.md §1.3):
+ * It was one, from C0 to C5. The dispatcher existed so the new backend
+ * could coexist with the vendored xtext widget behind a runtime switch
+ * while it was brought to parity; with xtext deleted it had one branch
+ * left and became pure indirection, so it went too. The seam did its
+ * job: by the end, xtext was referenced from that one file and nowhere
+ * else in the tree, which is what made deleting 6,721 lines a
+ * mechanical change rather than an archaeology project.
  *
- *   1. Direct struct-field access. chat.c / msg.c / options.c used to
- *      write GTK_XTEXT(w)->wordwrap, ->max_lines, ->urlcheck_function
- *      and read ->buffer and ->adj. Those are hx_chat_view_set_* /
- *      _get_* calls now, so a different backend can honour them
- *      however it likes.
+ * What the seam bought, and what is worth not giving back:
  *
- *   2. Raw textentry pointers. The chat-history render cursors in
- *      struct hx_chat_history_render were live textentry* into xtext's
- *      internal linked list — which is precisely why that struct
- *      "stays C" in the Phase R5 chat-model re-think. They are opaque
- *      HxChatMark handles here. Under xtext a mark IS the textentry
- *      pointer (no allocation, just a type the caller can't
- *      dereference); a future backend can make it a message id.
+ *   1. No struct-field access. chat.c / msg.c / options.c once wrote
+ *      GTK_XTEXT(w)->wordwrap, ->max_lines, ->urlcheck_function and read
+ *      ->buffer and ->adj. Everything goes through hx_chat_view_set_* /
+ *      _get_* calls, so the implementation owes callers behaviour rather
+ *      than layout.
  *
- * Marks stay valid until the entry they name is removed — either
- * explicitly via hx_chat_view_remove, or implicitly by the scrollback
- * trim (hx_chat_view_set_max_lines) or a clear. Callers must treat
- * them as weak references: hx_chat_view_remove on a stale mark is a
- * safe no-op that returns FALSE, and that is the intended way to find
- * out. Do not hold a mark across a clear.
+ *   2. No raw entry pointers. The chat-history render cursors in
+ *      struct hx_chat_history_render used to be live textentry* into
+ *      xtext's internal linked list. They are opaque HxChatMark handles,
+ *      which the Rust side backs with a message id — so a stale one is
+ *      inert rather than dangling.
  *
- * Not abstracted in C0, deliberately: the "word_click" signal and its
- * urlcheck-function companion. Both are xtext-shaped (a click yields a
- * whitespace-delimited word, and callers demux by string prefix), and
- * replacing them with typed signals is a semantic change, not a
- * mechanical one — it belongs with the new widget in C2/C3, not here.
+ * Marks stay valid until the row they name is removed — explicitly via
+ * hx_chat_view_remove, or implicitly by the scrollback trim
+ * (hx_chat_view_set_max_lines) or a clear. Treat them as weak
+ * references: hx_chat_view_remove on a stale mark is a safe no-op
+ * returning FALSE, and that is the intended way to find out. Do not hold
+ * a mark across a clear.
+ *
+ * Still xtext-shaped, and known to be: the "word_click" signal and its
+ * urlcheck-function companion. A click yields a whitespace-delimited
+ * word and callers demux by string prefix. Replacing them with typed
+ * signals is a semantic change to three C handlers, not a mechanical
+ * one — see docs/chat-view-scoping.md §3.6.
  */
 
 #ifndef GTKHX_CHAT_VIEW_H
@@ -83,9 +88,11 @@ G_BEGIN_DECLS
  * That makes the whole vocabulary ours to retire — see
  * docs/chat-view-scoping.md §3.8.
  *
- * These mirror xtext.h's XTEXT_* constants and chat_view.c static-
- * asserts that they agree. When xtext goes away the assertions go with
- * it and these become the sole definition. */
+ * This is now the sole definition. It used to mirror xtext.h's XTEXT_*
+ * constants, with G_STATIC_ASSERTs in chat_view.c checking the two
+ * agreed; both are gone with xtext. The Rust side asserts against these
+ * values in hxchat-view (PALETTE_COLS and the PAL_* constants), so the
+ * agreement is still checked — just from the other end. */
 #define HX_CHAT_PAL_MIRC_COLS    32
 #define HX_CHAT_PAL_MARK_FG      32 /* selection foreground */
 #define HX_CHAT_PAL_MARK_BG      33 /* selection background */
@@ -214,18 +221,17 @@ void hx_chat_view_media_set_animation (GtkWidget *view, HxChatMark *mark,
 
 /* ---- in-buffer search ----------------------------------------------- *
  *
- * Only the hxchat backend implements these; with xtext they are no-ops
- * and `hx_chat_view_can_search` returns FALSE, which is how the find bar
- * knows to stay hidden.
+ * Drives hxchat-layout's search engine. The old `hx_chat_view_can_search`
+ * predicate is gone with xtext: it existed only so the find bar could
+ * hide itself on a backend that couldn't search, and there is no such
+ * backend now.
  *
- * xtext does carry a `gtk_xtext_search` (xtext.c:5190) — a GRegex engine
- * plus a `search_found` list threaded through the entry chain — but
- * nothing in GtkHx has ever called it. It came with the HexChat
- * vendoring and has never run under GTK 4. Wiring it up would mean
- * debugging a dead subsystem that C5 deletes, so it is left alone. */
-gboolean hx_chat_view_can_search (GtkWidget *view);
-
-/* Run `needle` over the whole scrollback and select the first hit at or
+ * (xtext did carry a `gtk_xtext_search` — a GRegex engine plus a
+ * `search_found` list threaded through the entry chain — that nothing in
+ * GtkHx ever called. It arrived with the HexChat vendoring and never ran
+ * under GTK 4. It was deleted unexercised.)
+ *
+ * Run `needle` over the whole scrollback and select the first hit at or
  * below the viewport. An empty or NULL needle clears the search.
  *
  * `n_matches` and `current` are out-parameters for the find bar's
