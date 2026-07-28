@@ -105,6 +105,11 @@ extern void hx_chat_view_impl_media_set_texture (GtkWidget *w, void *mark,
                                                  void *texture);
 extern void hx_chat_view_impl_media_set_animation (GtkWidget *w, void *mark,
                                                    void *frames);
+/* Process-wide, like xtext's equivalents — no view argument. Both
+ * backends get told, because a view of either kind may exist. */
+extern void hx_chat_view_impl_set_autocopy_text (int enabled);
+extern void hx_chat_view_impl_set_autocopy_stamp (int enabled);
+extern void hx_chat_view_impl_set_autocopy_color (int enabled);
 
 /* TRUE when `view` is the new backend. The single branch every entry
  * point below takes; NULL is treated as xtext so the one legal NULL
@@ -361,19 +366,34 @@ hx_chat_view_clear (GtkWidget *view)
 void
 hx_chat_view_set_autocopy_text (gboolean enabled)
 {
+    /* Both backends: these are process-wide settings, not per-view, and
+     * a session can hold views of either kind during the A/B. Telling
+     * only xtext is what left the new backend permanently autocopying
+     * regardless of the pref. */
     gtk_xtext_set_autocopy_text (enabled);
+    hx_chat_view_impl_set_autocopy_text (enabled);
 }
 
 void
 hx_chat_view_set_autocopy_stamp (gboolean enabled)
 {
+    /* Both backends: these are process-wide settings, not per-view, and
+     * a session can hold views of either kind during the A/B. Telling
+     * only xtext is what left the new backend permanently autocopying
+     * regardless of the pref. */
     gtk_xtext_set_autocopy_stamp (enabled);
+    hx_chat_view_impl_set_autocopy_stamp (enabled);
 }
 
 void
 hx_chat_view_set_autocopy_color (gboolean enabled)
 {
+    /* Both backends: these are process-wide settings, not per-view, and
+     * a session can hold views of either kind during the A/B. Telling
+     * only xtext is what left the new backend permanently autocopying
+     * regardless of the pref. */
     gtk_xtext_set_autocopy_color (enabled);
+    hx_chat_view_impl_set_autocopy_color (enabled);
 }
 
 /* ---- appending ---------------------------------------------------- */

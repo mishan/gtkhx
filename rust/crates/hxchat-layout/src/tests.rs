@@ -321,6 +321,8 @@ fn params(width: u32) -> LayoutParams {
         indent: false,
         max_indent: 256,
         indent_width: 0,
+        stamp_width: 0,
+        gutter_gap: 6,
         quote_indent: 12,
         block_padding: 2,
         word_wrap: true,
@@ -537,7 +539,14 @@ fn gutter_gets_its_own_line_box() {
     };
     let l = layout_message(&msg, &p, LayoutGeneration::default(), &m);
     assert_eq!(l.lines[0].source, crate::wrap::LineSource::Gutter);
-    assert_eq!(l.lines[0].x, 0);
+    // Right-aligned against the body column, not pinned at 0 — the
+    // latter was the bug that made "[hx]" drift away from its text as
+    // the shared column grew.
+    assert!(
+        l.lines[0].x > 0 && l.lines[0].x < 80,
+        "gutter x {} should sit inside the column, right-aligned",
+        l.lines[0].x
+    );
     assert_eq!(l.lines[1].x, 80, "body sits past the gutter");
     assert_eq!(l.lines[0].y, l.lines[1].y, "same visual row");
 }
@@ -943,6 +952,49 @@ fn buffer_indent_column_grows_to_widest_nick() {
 }
 
 #[test]
+fn every_visible_row_has_a_layout_after_ensure_visible() {
+    // The first-paint garble, reproduced.
+    //
+    // `ensure_layout` widens the shared gutter when it meets a wider
+    // nick, and that invalidates every row's cached layout — including
+    // rows laid out earlier in this same `ensure_visible` pass. The view
+    // then finds `layout_at(row) == None` for them and skips drawing
+    // them entirely, so the first paint of a fresh buffer comes out
+    // shredded and the next message (by which time the gutter has
+    // settled) looks fine.
+    //
+    // The contract `ensure_visible` owes its caller: every row it
+    // returns is laid out and ready to draw.
+    let m = FixedMeasure::new(8);
+    let mut p = params(600);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+
+    // Nicks get progressively wider, so the gutter grows repeatedly
+    // partway through the visible range.
+    for i in 0..30 {
+        b.append(
+            Message::live(
+                Speaker::new(i as u16, "n".repeat(1 + i as usize)),
+                ParsedText::plain("hello there"),
+            ),
+            &m,
+        );
+    }
+
+    let off = b.scroll_offset(400);
+    let rows = b.ensure_visible(off, 400, &m);
+    assert!(!rows.is_empty());
+    for r in &rows {
+        assert!(
+            b.layout_at(*r).is_some(),
+            "row {r} was returned by ensure_visible but has no layout — \
+             the view will skip it and the paint comes out garbled"
+        );
+    }
+}
+
+#[test]
 fn buffer_indent_column_is_capped() {
     let m = FixedMeasure::new(8);
     let mut p = params(2000);
@@ -991,4 +1043,366 @@ fn anchor_default_is_following() {
     assert_eq!(a.gravity, Gravity::Bottom);
     assert!(a.is_following());
     assert!(a.message.is_none());
+}
+
+// ---------------------------------------------------------------- selection
+
+use crate::select::{Caret, RowSelection, Selection};
+use crate::wrap::LineSource;
+
+fn sel_buf() -> (ChatBuffer, FixedMeasure) {
+    let m = FixedMeasure::new(10);
+    let mut p = params(500);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for s in ["alpha", "bravo", "charlie"] {
+        b.append(Message::system(ParsedText::plain(s)), &m);
+    }
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    (b, m)
+}
+
+fn caret(b: &ChatBuffer, row: usize, offset: usize) -> Caret {
+    Caret {
+        message: b.id_at(row).unwrap(),
+        source: LineSource::Block(0),
+        offset,
+    }
+}
+
+#[test]
+fn hit_test_maps_pixels_to_offsets() {
+    let (mut b, m) = sel_buf();
+    // Row 0 spans y 0..16 with a 10px-per-char measurer.
+    let c = b.hit_test(0, 0, &m).expect("hit");
+    assert_eq!(c.offset, 0);
+    let c = b.hit_test(25, 0, &m).expect("hit");
+    assert_eq!(c.offset, 2, "25px in is two characters at 10px each");
+    // Far right of a short line selects through its end.
+    let c = b.hit_test(9999, 0, &m).expect("hit");
+    assert_eq!(c.offset, 5, "past the end clamps to the line length");
+}
+
+#[test]
+fn hit_test_past_the_bottom_clamps_to_the_last_row() {
+    // A drag that runs off the bottom must keep selecting, not stop.
+    let (mut b, m) = sel_buf();
+    let last = b.id_at(2).unwrap();
+    let c = b.hit_test(0, 1_000_000, &m).expect("clamps");
+    assert_eq!(c.message, last);
+}
+
+#[test]
+fn hit_test_on_empty_buffer_is_none() {
+    let m = FixedMeasure::new(10);
+    let mut b = ChatBuffer::new(params(500));
+    assert!(b.hit_test(0, 0, &m).is_none());
+}
+
+#[test]
+fn selection_within_one_row() {
+    let (b, _m) = sel_buf();
+    let sel = Selection::new(caret(&b, 0, 1), caret(&b, 0, 4));
+    assert_eq!(
+        b.row_selection(0, &sel),
+        RowSelection::Partial {
+            source: LineSource::Block(0),
+            start: 1,
+            end: 4
+        }
+    );
+    assert_eq!(b.row_selection(1, &sel), RowSelection::None);
+    assert_eq!(b.selected_text(&sel), "lph");
+}
+
+#[test]
+fn selection_across_rows_joins_with_newlines() {
+    let (b, _m) = sel_buf();
+    let sel = Selection::new(caret(&b, 0, 2), caret(&b, 2, 4));
+    assert_eq!(b.row_selection(1, &sel), RowSelection::All);
+    assert_eq!(b.selected_text(&sel), "pha\nbravo\nchar");
+}
+
+#[test]
+fn selection_dragged_upwards_is_the_same_range() {
+    // anchor after focus in document order — dragging up must not
+    // produce an empty or inverted selection.
+    let (b, _m) = sel_buf();
+    let down = Selection::new(caret(&b, 0, 2), caret(&b, 2, 4));
+    let up = Selection::new(caret(&b, 2, 4), caret(&b, 0, 2));
+    assert_eq!(b.selected_text(&down), b.selected_text(&up));
+}
+
+#[test]
+fn selection_orders_by_row_not_by_message_id() {
+    // The trap: ids are allocated in *creation* order, but a
+    // chat-history batch inserts *older* messages with *higher* ids.
+    // Ordering by id would invert the selection after a backfill.
+    let m = FixedMeasure::new(10);
+    let mut p = params(500);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    let live = b.append(Message::system(ParsedText::plain("live")), &m);
+    // Higher id, but lands *above* the live row.
+    let older = b.insert_before(
+        Some(live),
+        Message::system(ParsedText::plain("older")),
+        &m,
+    );
+    assert!(older.0 > live.0, "the backfilled id is the higher one");
+    b.reindex();
+    assert_eq!(b.row_of(older), Some(0));
+
+    let sel = Selection::new(
+        Caret { message: older, source: LineSource::Block(0), offset: 0 },
+        Caret { message: live, source: LineSource::Block(0), offset: 4 },
+    );
+    let (start, end) = sel.ordered(|id| b.row_of(id));
+    assert_eq!(start.message, older, "document order, not id order");
+    assert_eq!(end.message, live);
+    assert_eq!(b.selected_text(&sel), "older\nlive");
+}
+
+#[test]
+fn empty_selection_yields_nothing() {
+    let (b, _m) = sel_buf();
+    let sel = Selection::new(caret(&b, 1, 3), caret(&b, 1, 3));
+    assert!(sel.is_empty());
+    assert_eq!(b.selected_text(&sel), "");
+    assert_eq!(b.row_selection(1, &sel), RowSelection::None);
+}
+
+#[test]
+fn selection_over_an_image_copies_its_alt_text() {
+    // Not all-or-nothing like xtext: dragging across a picture should
+    // put something meaningful on the clipboard.
+    let m = FixedMeasure::new(10);
+    let mut p = params(500);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain("before")), &m);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: None,
+            blocks: vec![Block::Image {
+                token: 1,
+                size: Some(ImageSize { width: 40, height: 40 }),
+                alt: "[image: cat.png]".into(),
+            }],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.append(Message::system(ParsedText::plain("after")), &m);
+    b.reindex();
+
+    let sel = Selection::new(caret(&b, 0, 0), caret(&b, 2, 5));
+    assert!(
+        b.selected_text(&sel).contains("[image: cat.png]"),
+        "got {:?}",
+        b.selected_text(&sel)
+    );
+}
+
+#[test]
+fn selection_survives_a_resize() {
+    // The reason a Caret names (message, source, offset) rather than
+    // pixels: re-wrapping must not move the selection.
+    let (mut b, m) = sel_buf();
+    let sel = Selection::new(caret(&b, 0, 1), caret(&b, 2, 4));
+    let before = b.selected_text(&sel);
+    b.set_width(80);
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(b.selected_text(&sel), before, "resize moved the selection");
+}
+
+#[test]
+fn gutter_is_right_aligned_against_the_body_column() {
+    // The bug from the first live screenshots: the gutter drew hard left
+    // while message bodies moved right as the shared column grew, so
+    // "[hx]" and its text drifted apart as soon as a wider nick arrived.
+    //
+    // Root cause was the view deriving the gutter x from
+    // params().indent_width, which ensure_layout only ever set on a
+    // local copy — so it read back 0 forever. The x now comes from the
+    // line box, computed here, and this pins it.
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    p.indent_width = 200;
+    p.gutter_gap = 6;
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain("<alice>")), // 7 chars = 70px
+        blocks: vec![Block::Text(ParsedText::plain("hi"))],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l = layout_message(&msg, &p, LayoutGeneration::default(), &m);
+    let g = l
+        .lines
+        .iter()
+        .find(|lb| lb.source == crate::wrap::LineSource::Gutter)
+        .expect("gutter line box");
+    assert_eq!(
+        g.x, 124,
+        "gutter should end one gap short of the body column \
+         (200 - 70 - 6), not sit at 0"
+    );
+    let body = l
+        .lines
+        .iter()
+        .find(|lb| matches!(lb.source, crate::wrap::LineSource::Block(_)))
+        .expect("body line box");
+    assert_eq!(body.x, 200);
+    assert!(
+        g.x + 70 <= body.x,
+        "gutter must not overlap the body column"
+    );
+}
+
+#[test]
+fn hit_test_distinguishes_gutter_from_body_on_the_same_line() {
+    // The other half of the same bug: gutter and first body line share a
+    // y band, so picking by y alone always returned whichever was pushed
+    // first — which made nicks unselectable.
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: Some(ParsedText::plain("<alice>")),
+            blocks: vec![Block::Text(ParsedText::plain("hello"))],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.ensure_layout(0, &m);
+    let layout = b.layout_at(0).unwrap().clone();
+    let g = layout
+        .lines
+        .iter()
+        .find(|l| l.source == crate::wrap::LineSource::Gutter)
+        .unwrap();
+    let body = layout
+        .lines
+        .iter()
+        .find(|l| matches!(l.source, crate::wrap::LineSource::Block(_)))
+        .unwrap();
+
+    let in_gutter = b.hit_test(g.x as i32 + 5, 0, &m).expect("hit");
+    assert_eq!(
+        in_gutter.source,
+        crate::wrap::LineSource::Gutter,
+        "a click on the nick must resolve to the gutter"
+    );
+    let in_body = b.hit_test(body.x as i32 + 5, 0, &m).expect("hit");
+    assert!(
+        matches!(in_body.source, crate::wrap::LineSource::Block(_)),
+        "a click on the message must resolve to the body"
+    );
+}
+
+#[test]
+fn selecting_a_nick_yields_the_nick_text() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: Some(ParsedText::plain("<alice>")),
+            blocks: vec![Block::Text(ParsedText::plain("hello"))],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.ensure_layout(0, &m);
+    b.reindex();
+    let id = b.id_at(0).unwrap();
+    let sel = Selection::new(
+        Caret { message: id, source: crate::wrap::LineSource::Gutter, offset: 0 },
+        Caret { message: id, source: crate::wrap::LineSource::Gutter, offset: 7 },
+    );
+    assert_eq!(b.selected_text(&sel), "<alice>");
+}
+
+// ------------------------------------------------------------------- links
+
+#[test]
+fn add_link_over_plain_text() {
+    let mut p = ParsedText::plain("see https://example.com now");
+    let id = p.add_link(4..23, "https://example.com").expect("link");
+    assert_eq!(id, 0);
+    assert_eq!(p.links[0].href, "https://example.com");
+    assert_eq!(p.style_at(4).link, Some(0));
+    assert!(p.style_at(4).attrs.contains(Attrs::UNDERLINE));
+    assert_eq!(p.style_at(0).link, None, "text before is untouched");
+    assert_eq!(p.style_at(24).link, None, "text after is untouched");
+    assert_eq!(p.link_at(10).map(|l| l.href.as_str()), Some("https://example.com"));
+}
+
+#[test]
+fn add_link_inside_a_styled_run_keeps_the_style() {
+    // A URL inside a bold message should stay bold *and* become a link.
+    let mut p = markdown::parse_inline("**see https://example.com ok**");
+    let start = p.text.find("https").unwrap();
+    let end = start + "https://example.com".len();
+    p.add_link(start..end, "https://example.com").unwrap();
+    let s = p.style_at(start);
+    assert!(s.attrs.contains(Attrs::BOLD), "lost the bold");
+    assert!(s.attrs.contains(Attrs::UNDERLINE));
+    assert_eq!(s.link, Some(0));
+    // And the bold either side survives without the link.
+    assert!(p.style_at(0).attrs.contains(Attrs::BOLD));
+    assert_eq!(p.style_at(0).link, None);
+}
+
+#[test]
+fn add_link_straddling_a_style_boundary() {
+    // The case that makes naive span rewriting corrupt the list.
+    let mut p = markdown::parse_inline("**bold**plain");
+    assert_eq!(p.text, "boldplain");
+    p.add_link(2..9, "https://x.example").unwrap();
+    p.debug_assert_well_formed();
+    assert_eq!(p.style_at(2).link, Some(0));
+    assert_eq!(p.style_at(8).link, Some(0));
+    assert!(p.style_at(2).attrs.contains(Attrs::BOLD), "still bold inside");
+    assert!(!p.style_at(8).attrs.contains(Attrs::BOLD), "not bold outside");
+}
+
+#[test]
+fn add_link_rejects_bad_ranges() {
+    let mut p = ParsedText::plain("héllo");
+    assert!(p.add_link(5..5, "x").is_none(), "empty range");
+    assert!(p.add_link(0..999, "x").is_none(), "out of bounds");
+    assert!(p.add_link(0..2, "x").is_none(), "splits a codepoint");
+    assert!(p.links.is_empty());
+}
+
+#[test]
+fn multiple_links_in_one_message() {
+    let mut p = ParsedText::plain("a https://one.example b https://two.example");
+    p.add_link(2..21, "https://one.example").unwrap();
+    let s2 = p.text.rfind("https").unwrap();
+    p.add_link(s2..p.text.len(), "https://two.example").unwrap();
+    p.debug_assert_well_formed();
+    assert_eq!(p.link_at(3).map(|l| l.href.as_str()), Some("https://one.example"));
+    assert_eq!(p.link_at(s2 + 2).map(|l| l.href.as_str()), Some("https://two.example"));
+    assert_eq!(p.link_at(22), None, "the space between is not a link");
 }

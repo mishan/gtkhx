@@ -15,6 +15,7 @@
 //! See docs/chat-view-scoping.md.
 
 pub mod ffi;
+pub mod links;
 pub mod measure;
 pub mod view;
 
@@ -25,6 +26,28 @@ pub mod view;
 /// aborting across the FFI even though GTK is running. Every C-ABI entry
 /// point that constructs a widget calls this first. Same trap, same
 /// remedy, as `gtkhx-ui`'s `ensure_gtk_init` (see that crate's lib.rs).
+/// gettext, mirroring `gtkhx-ui::tr`.
+///
+/// Same `gtkhx` domain as the rest of the tree, so the two crates share
+/// one catalogue rather than shipping a second. Falls back to the
+/// msgid verbatim on any failure.
+pub(crate) fn tr(s: &str) -> String {
+    use std::ffi::{c_char, CStr, CString};
+    extern "C" {
+        fn dgettext(domain: *const c_char, msgid: *const c_char) -> *mut c_char;
+    }
+    let Ok(c) = CString::new(s) else {
+        return s.to_owned();
+    };
+    unsafe {
+        let p = dgettext(c"gtkhx".as_ptr(), c.as_ptr());
+        if p.is_null() {
+            return s.to_owned();
+        }
+        CStr::from_ptr(p).to_string_lossy().into_owned()
+    }
+}
+
 pub(crate) fn ensure_gtk_init() {
     unsafe { gtk4::set_initialized() };
 }

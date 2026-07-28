@@ -71,6 +71,7 @@ pub mod index;
 pub mod markdown;
 pub mod measure;
 pub mod message;
+pub mod select;
 pub mod mirc;
 pub mod span;
 pub mod wrap;
@@ -86,5 +87,6 @@ pub use message::{
     Block, IconRef, ImageSize, LoadMoreDirection, Message, MessageFlags, MessageId, MessageKind,
     Speaker,
 };
+pub use select::{Caret, RowSelection, Selection};
 pub use span::{Attrs, ColorRef, Link, LinkId, ParsedText, Span, Style};
 pub use wrap::{LayoutCache, LayoutGeneration, LayoutParams, LineBox, LineSource};

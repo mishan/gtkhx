@@ -257,12 +257,8 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_max_indent(w: CGtkWidget, px: c_i
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_time_stamp(w: CGtkWidget, _on: c_int) {
-    // C4: the timestamp column is part of the gutter rework that lands
-    // with the chat-history row kinds. Accepting and ignoring keeps the
-    // dispatcher uniform; PM windows (C2's only surface) render the same
-    // either way because chat.c puts the stamp in the gutter text.
-    let _ = w;
+pub unsafe extern "C" fn hx_chat_view_impl_set_time_stamp(w: CGtkWidget, on: c_int) {
+    with_view!(w, v, v.set_time_stamp(on != 0))
 }
 
 /// # Safety
@@ -272,7 +268,18 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_stamp_format(
     w: CGtkWidget,
     fmt: *const c_char,
 ) {
-    let _ = (w, fmt); // C4, with the timestamp column.
+    let f = cstr(fmt);
+    // A NULL view means "format only", which `prefs_read` does before
+    // any window exists. Recording it process-wide is load-bearing: it
+    // is the *only* time the persisted pref is delivered, so dropping it
+    // would leave every view on the built-in default until the user
+    // happened to edit the setting again.
+    crate::view::prefs::STAMP_FORMAT.with(|slot| {
+        *slot.borrow_mut() = if f.is_empty() { None } else { Some(f.clone()) };
+    });
+    if !w.is_null() {
+        with_view!(w, v, v.set_stamp_format(&f))
+    }
 }
 
 /// The word classifier `chat_view.h` takes.
@@ -351,6 +358,27 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_zoom_permille(w: CGtkWidget, zoom
     with_view!(w, v, v.set_zoom_permille(zoom.max(0) as u32))
 }
 
+/// # Safety
+/// Process-wide; takes no view.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_text(enabled: c_int) {
+    crate::view::prefs::AUTOCOPY_TEXT.with(|c| c.set(enabled != 0));
+}
+
+/// # Safety
+/// Process-wide; takes no view.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_stamp(enabled: c_int) {
+    crate::view::prefs::AUTOCOPY_STAMP.with(|c| c.set(enabled != 0));
+}
+
+/// # Safety
+/// Process-wide; takes no view.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_color(enabled: c_int) {
+    crate::view::prefs::AUTOCOPY_COLOR.with(|c| c.set(enabled != 0));
+}
+
 // ---- appending -----------------------------------------------------
 
 /// Build a message from the compat path's two mIRC strings.
@@ -364,12 +392,14 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
     } else {
         Some(mirc::parse(left))
     };
+    let mut body = mirc::parse(right);
+    crate::links::autolink(&mut body);
     Message {
         kind: MessageKind::Live,
         timestamp: stamp_or_now(stamp),
         speaker: None,
         gutter,
-        blocks: vec![Block::Text(mirc::parse(right))],
+        blocks: vec![Block::Text(body)],
         flags: hxchat_layout::MessageFlags::NONE,
     }
 }
@@ -384,13 +414,15 @@ pub unsafe extern "C" fn hx_chat_view_impl_append(
     stamp: i64,
 ) {
     with_view!(w, v, {
-        let body = cslice(text, len);
+        let raw = cslice(text, len);
+        let mut body = mirc::parse(&raw);
+        crate::links::autolink(&mut body);
         v.append(Message {
             kind: MessageKind::Live,
             timestamp: stamp_or_now(stamp),
             speaker: None,
             gutter: None,
-            blocks: vec![Block::Text(mirc::parse(&body))],
+            blocks: vec![Block::Text(body)],
             flags: hxchat_layout::MessageFlags::NONE,
         });
     })

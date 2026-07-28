@@ -370,4 +370,45 @@ fn gtk_class_and_construction_smoke() {
         gtk4::glib::gobject_ffi::g_object_ref_sink(as_obj);
         gtk4::glib::gobject_ffi::g_object_unref(as_obj);
     }
+
+    // --- selection + zoom (C3) -------------------------------------
+    let view = crate::view::HxChatView::new();
+    view.set_font_from_string("Monospace 10");
+    view.set_indent(false);
+    view.append(crate::view::plain_message("alpha"));
+    view.append(crate::view::plain_message("bravo"));
+
+    assert!(!view.has_selection());
+    assert_eq!(view.selected_text(), "");
+    view.clear_selection(); // no-op, must not panic
+
+    // Zoom walks a fixed ladder and returns to exactly 100%.
+    assert_eq!(view.zoom_permille(), 1000);
+    view.zoom_step(1);
+    let zoomed = view.zoom_permille();
+    assert!(zoomed > 1000, "zoom in should raise the level");
+    view.zoom_step(-1);
+    assert_eq!(
+        view.zoom_permille(),
+        1000,
+        "in then out must land back on exactly 100%, not drift"
+    );
+    // Select All covers the buffer; Copy is a no-op with nothing
+    // selected rather than a panic.
+    view.select_all();
+    assert!(view.has_selection(), "select_all should select something");
+    assert!(view.selected_text().contains("alpha"));
+    assert!(view.selected_text().contains("bravo"));
+    view.clear_selection();
+    assert!(!view.has_selection());
+
+    // Clamps at both ends rather than running off the ladder.
+    for _ in 0..40 {
+        view.zoom_step(1);
+    }
+    assert!(view.zoom_permille() <= 4000);
+    for _ in 0..80 {
+        view.zoom_step(-1);
+    }
+    assert!(view.zoom_permille() >= 500);
 }

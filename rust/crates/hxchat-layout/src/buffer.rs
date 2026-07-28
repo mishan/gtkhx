@@ -13,6 +13,9 @@ use crate::anchor::{AnchorResolver, Gravity, ScrollAnchor};
 use crate::index::HeightIndex;
 use crate::measure::TextMeasure;
 use crate::message::{Block, Message, MessageId};
+use crate::select::{Caret, RowSelection, Selection};
+use crate::span::Style;
+use crate::wrap::LineSource;
 use crate::wrap::{estimate_height, layout_message, LayoutCache, LayoutGeneration, LayoutParams};
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -359,6 +362,23 @@ impl ChatBuffer {
         self.invalidate_layout();
     }
 
+    /// Width to reserve for the timestamp column; 0 turns it off.
+    pub fn set_stamp_width(&mut self, px: u32) {
+        if px == self.params.stamp_width {
+            return;
+        }
+        self.params.stamp_width = px;
+        // The gutter has to be re-reconciled from scratch: it may need to
+        // grow for a wider stamp, and when the stamp goes away it should
+        // shrink back rather than stay padded out.
+        self.indent_width = 0;
+        self.invalidate_layout();
+    }
+
+    pub fn stamp_width(&self) -> u32 {
+        self.params.stamp_width
+    }
+
     /// Cap on the gutter width.
     pub fn set_max_indent(&mut self, px: u32) {
         if px == self.params.max_indent {
@@ -432,7 +452,39 @@ impl ChatBuffer {
 
     /// Lay out every row intersecting `[y, y + height)` and return their
     /// positions.
+    ///
+    /// **Every returned row is guaranteed to have a current layout.**
+    /// That guarantee needs defending, because laying a row out can
+    /// invalidate the rows already done: meeting a wider nick widens the
+    /// shared gutter, which makes every other row's cached layout stale.
+    /// Without the retry below, the rows laid out earlier in the pass
+    /// come back with `layout_at(row) == None`, the view skips them, and
+    /// the first paint of a fresh buffer is visibly shredded — while the
+    /// next message, by which time the gutter has settled, looks fine.
+    ///
+    /// The gutter only ever grows and is capped by `max_indent`, so this
+    /// converges fast; the bound is belt-and-braces.
     pub fn ensure_visible(
+        &mut self,
+        y: u64,
+        viewport_height: u32,
+        measure: &dyn TextMeasure,
+    ) -> Vec<usize> {
+        const MAX_SETTLE_PASSES: usize = 4;
+        for _ in 0..MAX_SETTLE_PASSES {
+            let indent_before = self.indent_width;
+            let rows = self.layout_visible_once(y, viewport_height, measure);
+            if self.indent_width == indent_before {
+                return rows;
+            }
+        }
+        // Didn't settle (shouldn't happen: the gutter is monotonic and
+        // capped). Do one final pass so the caller still gets laid-out
+        // rows rather than holes.
+        self.layout_visible_once(y, viewport_height, measure)
+    }
+
+    fn layout_visible_once(
         &mut self,
         y: u64,
         viewport_height: u32,
@@ -451,6 +503,219 @@ impl ChatBuffer {
             self.ensure_layout(row, measure);
             out.push(row);
             consumed += u64::from(self.index.height_at(row));
+        }
+        out
+    }
+
+    /// Text of one of a message's sources, for hit-testing and copying.
+    pub fn source_text(&self, row: usize, source: LineSource) -> Option<&str> {
+        self.source_text_for(&self.rows.get(row)?.msg, source)
+    }
+
+    fn source_text_for<'a>(&self, msg: &'a Message, source: LineSource) -> Option<&'a str> {
+        match source {
+            LineSource::Gutter => msg.gutter.as_ref().map(|g| g.text.as_str()),
+            LineSource::Block(bi) => match msg.blocks.get(bi)? {
+                Block::Text(p) => Some(p.text.as_str()),
+                Block::Quote { content, .. } => Some(content.text.as_str()),
+                Block::Code { text, .. } => Some(text.as_str()),
+                // An image contributes its alt text, so a selection
+                // dragged across a picture copies something meaningful
+                // instead of nothing.
+                Block::Image { alt, .. } => Some(alt.as_str()),
+            },
+        }
+    }
+
+    /// The link under a caret, as (href, visible text).
+    ///
+    /// Returned by value rather than by reference because the caller is
+    /// the widget, which needs to hold it across a popup.
+    pub fn link_at(&self, caret: &Caret) -> Option<(String, String)> {
+        let row = self.row_of(caret.message)?;
+        let msg = &self.rows.get(row)?.msg;
+        let parsed = match caret.source {
+            LineSource::Gutter => msg.gutter.as_ref()?,
+            LineSource::Block(bi) => match msg.blocks.get(bi)? {
+                Block::Text(p) => p,
+                Block::Quote { content, .. } => content,
+                _ => return None,
+            },
+        };
+        let link = parsed.link_at(caret.offset)?;
+        let label = parsed
+            .text
+            .get(link.range.clone())
+            .unwrap_or_default()
+            .to_string();
+        Some((link.href.clone(), label))
+    }
+
+    /// The settled gutter width. 0 when not in indent mode.
+    pub fn indent_width(&self) -> u32 {
+        self.indent_width
+    }
+
+    /// Map a content-space pixel to a document position.
+    ///
+    /// `x` / `y` are in content coordinates (the view subtracts its own
+    /// padding first). `y` is absolute within the buffer, not
+    /// viewport-relative.
+    ///
+    /// Returns `None` only for an empty buffer; a point past the end
+    /// clamps to the last row, because a drag that runs off the bottom
+    /// should select to the end rather than stop tracking.
+    pub fn hit_test(
+        &mut self,
+        x: i32,
+        y: u64,
+        measure: &dyn TextMeasure,
+    ) -> Option<Caret> {
+        let hit = self.index.locate(y)?;
+        let row = hit.row;
+        self.ensure_layout(row, measure);
+        let id = self.id_at(row)?;
+        let layout = self.layout_at(row)?;
+
+        // The line whose band contains the point.
+        //
+        // Several boxes can share a y band — the gutter and the first
+        // body line always do — so x has to break the tie, otherwise
+        // every click on row 0 resolves to whichever was pushed first
+        // and the other becomes unselectable.
+        let in_band: Vec<&crate::wrap::LineBox> = layout
+            .lines
+            .iter()
+            .filter(|l| hit.offset >= l.y && hit.offset < l.y + l.height)
+            .collect();
+        let line = in_band
+            .iter()
+            .copied()
+            .find(|l| {
+                let w = self
+                    .source_text_for(&self.rows[row].msg, l.source)
+                    .and_then(|t| t.get(l.range.clone()))
+                    .map(|slice| measure.run_width(slice, Style::default()))
+                    .unwrap_or(0);
+                x >= l.x as i32 && x < (l.x + w) as i32
+            })
+            // No box owns the x: fall back to the nearest by distance,
+            // so a click in the gap between gutter and body still picks
+            // something sensible rather than nothing.
+            .or_else(|| {
+                in_band.iter().copied().min_by_key(|l| {
+                    (x - l.x as i32).abs()
+                })
+            })
+            .or_else(|| {
+                if hit.offset < layout.lines.first().map_or(0, |l| l.y) {
+                    layout.lines.first()
+                } else {
+                    layout.lines.last()
+                }
+            })?;
+
+        let source = line.source;
+        let range = line.range.clone();
+        let line_x = line.x as i32;
+        let text = self.source_text(row, source)?;
+        let slice = text.get(range.clone()).unwrap_or("");
+
+        // Within the line, find the byte the x lands on. Left of the
+        // line start selects from its beginning; right of the end
+        // selects through it, which is what makes dragging past the end
+        // of a short line feel right.
+        let rel = x - line_x;
+        let offset = if rel <= 0 {
+            range.start
+        } else {
+            let (fit, _) = measure.fit_prefix(slice, Style::default(), rel as u32);
+            (range.start + fit).min(range.end)
+        };
+
+        Some(Caret {
+            message: id,
+            source,
+            offset,
+        })
+    }
+
+    /// How much of `row` a selection covers.
+    pub fn row_selection(&self, row: usize, sel: &Selection) -> RowSelection {
+        if sel.is_empty() {
+            return RowSelection::None;
+        }
+        let (start, end) = sel.ordered(|id| self.row_of(id));
+        let (Some(sr), Some(er)) = (self.row_of(start.message), self.row_of(end.message)) else {
+            return RowSelection::None;
+        };
+        if row < sr || row > er {
+            return RowSelection::None;
+        }
+        if row > sr && row < er {
+            return RowSelection::All;
+        }
+        // A boundary row: only the named source is partially covered.
+        let (source, from, to) = if sr == er {
+            if start.source != end.source {
+                // Spanning sources within one row (gutter → body):
+                // treat as whole-row, which is what the user means.
+                return RowSelection::All;
+            }
+            (start.source, start.offset, end.offset)
+        } else if row == sr {
+            let text_len = self
+                .source_text(row, start.source)
+                .map_or(0, |t| t.len());
+            (start.source, start.offset, text_len)
+        } else {
+            (end.source, 0, end.offset)
+        };
+        let (from, to) = if from <= to { (from, to) } else { (to, from) };
+        RowSelection::Partial {
+            source,
+            start: from,
+            end: to,
+        }
+    }
+
+    /// The selected text, rows joined by newlines.
+    pub fn selected_text(&self, sel: &Selection) -> String {
+        if sel.is_empty() {
+            return String::new();
+        }
+        let (start, end) = sel.ordered(|id| self.row_of(id));
+        let (Some(sr), Some(er)) = (self.row_of(start.message), self.row_of(end.message)) else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for row in sr..=er {
+            if row > sr {
+                out.push('\n');
+            }
+            match self.row_selection(row, sel) {
+                RowSelection::None => {}
+                RowSelection::All => {
+                    if let Some(m) = self.message_at(row) {
+                        // The gutter is part of what the user sees, so
+                        // it is part of what they copy.
+                        if let Some(g) = &m.gutter {
+                            if !g.text.is_empty() {
+                                out.push_str(&g.text);
+                                out.push(' ');
+                            }
+                        }
+                        out.push_str(&m.to_plain_text());
+                    }
+                }
+                RowSelection::Partial { source, start, end } => {
+                    if let Some(t) = self.source_text(row, source) {
+                        if let Some(slice) = t.get(start..end) {
+                            out.push_str(slice);
+                        }
+                    }
+                }
+            }
         }
         out
     }
