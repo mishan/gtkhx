@@ -884,10 +884,10 @@ fn buffer_image_decode_grows_the_row() {
     assert!(b.set_image_size(
         id,
         42,
-        ImageSize {
+        Some(ImageSize {
             width: 200,
             height: 300
-        },
+        }),
         &m
     ));
     b.ensure_layout(0, &m);
@@ -1108,9 +1108,8 @@ fn selection_within_one_row() {
     assert_eq!(
         b.row_selection(0, &sel),
         RowSelection::Partial {
-            source: LineSource::Block(0),
-            start: 1,
-            end: 4
+            start: (LineSource::Block(0), 1),
+            end: (LineSource::Block(0), 4),
         }
     );
     assert_eq!(b.row_selection(1, &sel), RowSelection::None);
@@ -1405,4 +1404,558 @@ fn multiple_links_in_one_message() {
     assert_eq!(p.link_at(3).map(|l| l.href.as_str()), Some("https://one.example"));
     assert_eq!(p.link_at(s2 + 2).map(|l| l.href.as_str()), Some("https://two.example"));
     assert_eq!(p.link_at(22), None, "the space between is not a link");
+}
+
+// -------------------------------------------------------------- word_at
+
+fn word_buf(text: &str) -> (ChatBuffer, FixedMeasure, Caret) {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain(text)), &m);
+    b.ensure_layout(0, &m);
+    b.reindex();
+    let id = b.id_at(0).unwrap();
+    (
+        b,
+        m,
+        Caret { message: id, source: LineSource::Block(0), offset: 0 },
+    )
+}
+
+fn word_at(text: &str, offset: usize) -> Option<String> {
+    let (b, _m, mut c) = word_buf(text);
+    c.offset = offset;
+    b.word_at(&c)
+}
+
+#[test]
+fn word_at_splits_like_xtext() {
+    // xtext's is_del is space, newline, '<', '>' and NUL — angle
+    // brackets included, which is what makes "<nick>" yield a bare
+    // "nick". The C handlers match their targets by string, so this has
+    // to agree byte-for-byte or hxmedia:N and the load-older sentinel
+    // stop being recognised.
+    assert_eq!(word_at("hello world", 0).as_deref(), Some("hello"));
+    assert_eq!(word_at("hello world", 7).as_deref(), Some("world"));
+    assert_eq!(word_at("<misha> hi", 2).as_deref(), Some("misha"));
+    assert_eq!(word_at("a\nb", 2).as_deref(), Some("b"));
+}
+
+#[test]
+fn word_at_finds_a_media_token() {
+    // The exact shape inline_media_chat_word_click looks for.
+    let w = word_at("see hxmedia:7 here", 6);
+    assert_eq!(w.as_deref(), Some("hxmedia:7"));
+}
+
+#[test]
+fn word_at_keeps_nbsp_joined_sentinels_whole() {
+    // The chat-history sentinel is deliberately NBSP-joined so xtext's
+    // tokenizer treats it as one word. NBSP is not an ASCII space, so it
+    // must not split here either.
+    let sentinel = "\u{2191}\u{a0}Load\u{a0}older\u{a0}messages";
+    let line = format!("--- {sentinel} ---");
+    let at = line.find('\u{2191}').unwrap();
+    assert_eq!(word_at(&line, at).as_deref(), Some(sentinel));
+}
+
+#[test]
+fn word_at_on_a_delimiter_or_empty_text() {
+    assert_eq!(word_at("a b", 1), None, "the space itself is not a word");
+    assert_eq!(word_at("", 0), None);
+}
+
+#[test]
+fn word_at_handles_multibyte() {
+    let (b, _m, mut c) = word_buf("héllo wörld");
+    c.offset = 0;
+    assert_eq!(b.word_at(&c).as_deref(), Some("héllo"));
+    c.offset = 7; // inside "wörld"
+    assert_eq!(b.word_at(&c).as_deref(), Some("wörld"));
+}
+
+#[test]
+fn a_decoded_image_grows_its_row_without_moving_the_anchor() {
+    // The C4 payoff, and the thing xtext was worst at: a decode landing
+    // *above* the viewport must not shift what the user is reading.
+    // xtext had to recompute the entry's subline list, diff the count,
+    // and patch num_lines plus every scroll anchor by hand; here the
+    // anchor names a row, so it absorbs the change.
+    let m = FixedMeasure::new(10);
+    let mut p = params(400);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+
+    let img = b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: None,
+            blocks: vec![Block::Image {
+                token: 9,
+                size: None,
+                alt: "[image]".into(),
+            }],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    for i in 0..40 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    b.reindex();
+
+    // Park the viewport well below the image.
+    b.scroll_to(300, 100, 4);
+    let anchored = b.anchor().message.expect("anchored");
+    let anchor_row = b.row_of(anchored).unwrap();
+    let offset_before = b.index_mut().offset_of(anchor_row);
+
+    assert!(b.set_image_size(
+        img,
+        9,
+        Some(ImageSize { width: 200, height: 300 }),
+        &m
+    ));
+    b.ensure_layout(0, &m);
+
+    // The anchored row is still the same row, and still the same
+    // distance into the buffer *relative to itself* — the content above
+    // grew, so its absolute offset must have grown with it.
+    assert_eq!(b.anchor().message, Some(anchored), "anchor changed rows");
+    let after_row = b.row_of(anchored).unwrap();
+    let offset_after = b.index_mut().offset_of(after_row);
+    assert!(
+        offset_after > offset_before,
+        "the image grew above the viewport, so the anchored row must \
+         have moved down in absolute terms ({offset_before} -> {offset_after})"
+    );
+}
+
+// ---- selection across the gutter (the "drag left then up" bug) -------
+
+fn gutter_buf() -> (ChatBuffer, FixedMeasure) {
+    let m = FixedMeasure::new(10);
+    let mut p = params(800);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for nick in ["<a>", "<b>", "<c>"] {
+        b.append(
+            Message {
+                kind: crate::message::MessageKind::Live,
+                timestamp: 0,
+                speaker: None,
+                gutter: Some(ParsedText::plain(nick)),
+                blocks: vec![Block::Text(ParsedText::plain("hello"))],
+                flags: MessageFlagsNone::NONE,
+            },
+            &m,
+        );
+    }
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    b.reindex();
+    (b, m)
+}
+
+#[test]
+fn dragging_up_into_a_gutter_selects_the_rest_of_that_row() {
+    // The reported bug. Dragging left-then-up puts the *start* of the
+    // selection in row 0's gutter and the end in row 2's body. Row 0
+    // should then be selected from that point in the gutter through the
+    // end of its body — but RowSelection could only name one source, so
+    // it highlighted the gutter and left the body unselected, which
+    // reads as an inverted/partial selection.
+    let (b, _m) = gutter_buf();
+    let r0 = b.id_at(0).unwrap();
+    let r2 = b.id_at(2).unwrap();
+    let sel = Selection::new(
+        // anchor: body of the last row (drag started here)
+        Caret { message: r2, source: LineSource::Block(0), offset: 3 },
+        // focus: gutter of the first row (dragged left and up)
+        Caret { message: r0, source: LineSource::Gutter, offset: 1 },
+    );
+    let text = b.selected_text(&sel);
+    assert!(
+        text.contains("hello"),
+        "row 0's body must be selected too, got {text:?}"
+    );
+    assert!(text.starts_with("a>"), "should start mid-gutter, got {text:?}");
+}
+
+#[test]
+fn same_row_gutter_to_body_orders_by_source_not_offset() {
+    // Within one row the gutter precedes the body, but the two offset
+    // spaces are unrelated — comparing them numerically (which is what
+    // the tie-break did) can invert the selection.
+    let (b, _m) = gutter_buf();
+    let id = b.id_at(0).unwrap();
+    let from_gutter = Caret { message: id, source: LineSource::Gutter, offset: 2 };
+    let into_body = Caret { message: id, source: LineSource::Block(0), offset: 1 };
+
+    let forward = Selection::new(from_gutter, into_body);
+    let backward = Selection::new(into_body, from_gutter);
+    assert_eq!(
+        b.selected_text(&forward),
+        b.selected_text(&backward),
+        "dragging the same span in either direction must select the same text"
+    );
+    let t = b.selected_text(&forward);
+    assert!(t.starts_with('>'), "starts partway into the gutter, got {t:?}");
+    assert!(t.ends_with('h'), "ends one char into the body, got {t:?}");
+}
+
+#[test]
+fn a_row_with_no_gutter_still_reserves_the_stamp_column() {
+    // Info lines (`[hx] …`) are appended with no nick column at all.
+    // They still carry a timestamp, so the gutter has to be wide enough
+    // for it — otherwise the body starts at 0 and the stamp draws
+    // underneath the text.
+    //
+    // The rendering half of this was the actual reported bug: the view
+    // drew the stamp only when a Gutter line box existed, so info lines
+    // never got one.
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    p.stamp_width = 90;
+
+    let bare = Message::system(ParsedText::plain("connecting..."));
+    let l = layout_message(&bare, &p, LayoutGeneration::default(), &m);
+    assert_eq!(
+        l.natural_indent, 90,
+        "a gutterless row must still reserve the stamp column"
+    );
+
+    // And a row *with* a nick reserves stamp + nick, not just the nick.
+    let with_nick = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain("<alice>")), // 70px
+        blocks: vec![Block::Text(ParsedText::plain("hi"))],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l2 = layout_message(&with_nick, &p, LayoutGeneration::default(), &m);
+    assert!(
+        l2.natural_indent >= 90 + 70,
+        "stamp and nick share the gutter, got {}",
+        l2.natural_indent
+    );
+}
+
+// ---- word / line select ---------------------------------------------
+
+#[test]
+fn double_click_selects_the_word() {
+    let (b, _m, mut c) = word_buf("hello brave world");
+    c.offset = 8; // inside "brave"
+    let sel = b.select_word(&c).expect("word");
+    assert_eq!(b.selected_text(&sel), "brave");
+}
+
+#[test]
+fn double_click_on_a_nick_selects_just_the_nick() {
+    // xtext's tokenizer treats '<' and '>' as delimiters, which is what
+    // makes double-clicking "<alice>" give you a bare nick to paste.
+    let (b, _m) = gutter_buf();
+    let id = b.id_at(0).unwrap();
+    let c = Caret { message: id, source: LineSource::Gutter, offset: 1 };
+    let sel = b.select_word(&c).expect("word");
+    assert_eq!(b.selected_text(&sel), "a");
+}
+
+#[test]
+fn double_click_on_whitespace_selects_nothing() {
+    let (b, _m, mut c) = word_buf("a b");
+    c.offset = 1;
+    assert!(b.select_word(&c).is_none());
+}
+
+#[test]
+fn triple_click_selects_the_whole_row_including_the_gutter() {
+    let (b, _m) = gutter_buf();
+    let sel = b.select_row(1).expect("row");
+    let text = b.selected_text(&sel);
+    assert!(text.contains("<b>"), "gutter missing from {text:?}");
+    assert!(text.contains("hello"), "body missing from {text:?}");
+}
+
+#[test]
+fn triple_click_past_the_end_is_none() {
+    let (b, _m) = gutter_buf();
+    assert!(b.select_row(99).is_none());
+}
+
+#[test]
+fn selected_rows_keeps_row_boundaries_across_embedded_newlines() {
+    // The autocopy-timestamp bug in miniature: a row whose text spans
+    // several lines. Splitting the joined output by '\n' would report
+    // more "rows" than exist and desynchronise anything keyed on row
+    // index — which is exactly how stamps ended up on the wrong lines.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain("one\ntwo\nthree")), &m);
+    b.append(Message::system(ParsedText::plain("second")), &m);
+    b.reindex();
+    for r in 0..2 {
+        b.ensure_layout(r, &m);
+    }
+
+    let sel = Selection::new(
+        Caret { message: b.id_at(0).unwrap(), source: LineSource::Block(0), offset: 0 },
+        Caret { message: b.id_at(1).unwrap(), source: LineSource::Block(0), offset: 6 },
+    );
+
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 2, "two rows selected, whatever their line count");
+    assert_eq!(rows[0].0, 0);
+    assert_eq!(rows[0].1, "one\ntwo\nthree");
+    assert_eq!(rows[1].0, 1);
+    assert_eq!(rows[1].1, "second");
+
+    // And the joined form has more lines than rows, which is precisely
+    // why callers must not infer one from the other.
+    let joined = b.selected_text(&sel);
+    assert_eq!(joined.lines().count(), 4);
+    assert!(joined.lines().count() > rows.len());
+}
+
+#[test]
+fn selected_rows_separates_blocks_the_way_to_plain_text_does() {
+    // Whole-row copying used Message::to_plain_text, which puts a
+    // newline between blocks. Rebuilding the text span-by-span for
+    // partial selections must not quietly change that: joining every
+    // source with a space runs a code block into the paragraph after
+    // it. The gutter is the one place a space is right — nick and body
+    // read as a single line.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain("<a>")),
+        blocks: vec![
+            Block::Text(ParsedText::plain("look:")),
+            Block::Code {
+                text: "int x;".into(),
+                language: None,
+            },
+            Block::Text(ParsedText::plain("done")),
+        ],
+        flags: MessageFlagsNone::NONE,
+    };
+    let id = b.append(msg, &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+
+    let sel = Selection::new(
+        Caret {
+            message: id,
+            source: LineSource::Gutter,
+            offset: 0,
+        },
+        Caret {
+            message: id,
+            source: LineSource::Block(2),
+            offset: 4,
+        },
+    );
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1, "<a> look:\nint x;\ndone");
+
+    // And a whole-row select agrees with the model's own rendering.
+    let whole = b.select_row(0).expect("row 0 selectable");
+    let rows = b.selected_rows(&whole);
+    let plain = b.message(id).unwrap().to_plain_text();
+    assert_eq!(rows[0].1, format!("<a> {plain}"));
+}
+
+#[test]
+fn word_bounds_does_not_panic_on_a_caret_inside_a_codepoint() {
+    // caret.offset arrives from C through the FFI and is not guaranteed
+    // to sit on a char boundary. Slicing off one panics, and a panic
+    // here unwinds into GTK and aborts the process, so clamp instead.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    // "naïve" — the ï is two bytes at 2..4.
+    let id = b.append(Message::system(ParsedText::plain("naïve word")), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+
+    let mid = Caret {
+        message: id,
+        source: LineSource::Block(0),
+        offset: 3,
+    };
+    assert_eq!(b.word_bounds(&mid), Some((0, 6)), "clamps down into 'naïve'");
+
+    // Past the end clamps to the end, which is not inside a word.
+    let past = Caret {
+        message: id,
+        source: LineSource::Block(0),
+        offset: 999,
+    };
+    assert!(b.word_bounds(&past).is_none());
+
+    // And select_word off the same caret yields the whole word.
+    let sel = b.select_word(&mid).expect("word selected");
+    assert_eq!(b.selected_rows(&sel)[0].1, "naïve");
+}
+
+#[test]
+fn dragging_the_separator_pins_the_gutter() {
+    // The gutter auto-grows to fit the widest nick. Once the user drags
+    // the separator, that has to stop: xtext kept auto-growing after a
+    // drag, so a long nick would silently undo a narrowing the user had
+    // just made by hand.
+    let m = FixedMeasure::new(10);
+    let mut p = params(1200);
+    p.indent = true;
+    p.max_indent = 400;
+    let mut b = ChatBuffer::new(p);
+
+    let say = |nick: &str| Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain(nick)),
+        blocks: vec![Block::Text(ParsedText::plain("hi"))],
+        flags: MessageFlagsNone::NONE,
+    };
+
+    b.append(say("<a>"), &m);
+    b.ensure_layout(0, &m);
+    let auto = b.indent_width();
+    assert!(auto > 0 && !b.indent_pinned());
+
+    // A longer nick still widens it while unpinned.
+    b.append(say("<averyverylongnick>"), &m);
+    b.ensure_layout(1, &m);
+    assert!(b.indent_width() > auto, "gutter should auto-grow");
+
+    // Pin it narrower than the widest nick.
+    assert!(b.set_indent_width(40));
+    assert!(b.indent_pinned());
+    assert_eq!(b.indent_width(), 40);
+
+    // Now an even longer nick must not move it.
+    b.append(say("<anevenlongernickthanbefore>"), &m);
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(b.indent_width(), 40, "pinned gutter must not auto-grow");
+
+    // Neither must a clear or a stamp-width change, both of which reset
+    // the auto-sized gutter.
+    b.set_stamp_width(60);
+    assert_eq!(b.indent_width(), 40, "stamp width must not unpin");
+    b.clear();
+    assert_eq!(b.indent_width(), 40, "clearing the buffer must not unpin");
+
+    // Unpinning hands it back to the auto path.
+    b.unpin_indent();
+    assert!(!b.indent_pinned());
+    b.append(say("<a>"), &m);
+    b.ensure_layout(0, &m);
+    assert_ne!(b.indent_width(), 40);
+}
+
+#[test]
+fn a_pinned_gutter_has_a_floor() {
+    // Dragging the separator to zero would leave nothing to grab, so the
+    // divider could never be dragged back out.
+    let m = FixedMeasure::new(10);
+    let mut p = params(1200);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.set_indent_width(0);
+    assert_eq!(b.indent_width(), crate::buffer::MIN_INDENT);
+    let _ = &m;
+}
+
+#[test]
+fn selected_rows_omits_rows_that_contribute_nothing() {
+    // A selection that starts at the very end of one row and ends at the
+    // very start of another *covers* three rows but only one of them has
+    // any selected text in it. Reporting the empty two puts blank lines
+    // in the clipboard and, worse, gives AUTOCOPY_STAMP two rows to
+    // prefix timestamps onto that have nothing in them.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for t in ["first", "middle", "last"] {
+        b.append(Message::system(ParsedText::plain(t)), &m);
+    }
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+
+    let sel = Selection::new(
+        Caret {
+            message: b.id_at(0).unwrap(),
+            source: LineSource::Block(0),
+            offset: 5, // end of "first"
+        },
+        Caret {
+            message: b.id_at(2).unwrap(),
+            source: LineSource::Block(0),
+            offset: 0, // start of "last"
+        },
+    );
+
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 1, "only the middle row has selected text");
+    assert_eq!(rows[0], (1, "middle".to_string()));
+    assert_eq!(b.selected_text(&sel), "middle", "no leading/trailing blanks");
+}
+
+#[test]
+fn selected_rows_keeps_a_genuinely_empty_row() {
+    // The converse: a blank line inside a selection is real content and
+    // has to survive, so the skip above must key on "had text and none
+    // of it was selected" rather than "produced no text".
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for t in ["above", "", "below"] {
+        b.append(Message::system(ParsedText::plain(t)), &m);
+    }
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+
+    let sel = Selection::new(
+        Caret {
+            message: b.id_at(0).unwrap(),
+            source: LineSource::Block(0),
+            offset: 0,
+        },
+        Caret {
+            message: b.id_at(2).unwrap(),
+            source: LineSource::Block(0),
+            offset: 5,
+        },
+    );
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 3, "the blank line is content");
+    assert_eq!(rows[1], (1, String::new()));
+    assert_eq!(b.selected_text(&sel), "above\n\nbelow");
 }

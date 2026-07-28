@@ -488,16 +488,21 @@ pub unsafe extern "C" fn hx_chat_view_impl_remove(w: CGtkWidget, mark: *mut c_vo
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_impl_append_media(
     w: CGtkWidget,
-    _texture: *mut c_void,
+    texture: *mut c_void,
     alt: *const c_char,
     token: u32,
     stamp: i64,
 ) {
-    // C2 is text-only: the row appends as its placeholder, which is
-    // precisely the Phase 9.D behaviour and is spec-conformant on its
-    // own. C4 attaches the decoded size and it becomes a real
-    // variable-height image block.
     with_view!(w, v, {
+        // Append the row *first*.
+        //
+        // `set_media_frames` attaches the decoded size by looking the
+        // row up with `find_image(token)`, so installing frames before
+        // the row exists finds nothing, leaves `Block::Image.size` at
+        // None, and the snapshot path — which requires `Some` — renders
+        // the placeholder forever. Usually the texture arrives later via
+        // set_texture and the order is moot; it is the pre-decoded case
+        // that breaks.
         let alt = cstr(alt);
         v.append(Message {
             kind: MessageKind::Live,
@@ -511,6 +516,12 @@ pub unsafe extern "C" fn hx_chat_view_impl_append_media(
             }],
             flags: hxchat_layout::MessageFlags::NONE,
         });
+        if !texture.is_null() {
+            let tex: gtk4::gdk::Texture = gtk4::glib::translate::from_glib_none(
+                texture as *mut gtk4::gdk::ffi::GdkTexture,
+            );
+            v.set_media_frames(token, vec![(tex, 0)]);
+        }
     })
 }
 
@@ -532,7 +543,34 @@ pub unsafe extern "C" fn hx_chat_view_impl_media_set_texture(
     mark: *mut c_void,
     texture: *mut c_void,
 ) {
-    let _ = (w, mark, texture); // C4.
+    let Some(v) = view_of(w) else { return };
+    let Some(token) = token_for_mark(&v, mark) else {
+        return;
+    };
+    if texture.is_null() {
+        // NULL reverts the row to its placeholder — the decode-failed
+        // path, which xtext also supports.
+        v.set_media_frames(token, Vec::new());
+        return;
+    }
+    let tex: gtk4::gdk::Texture =
+        gtk4::glib::translate::from_glib_none(texture as *mut gtk4::gdk::ffi::GdkTexture);
+    v.set_media_frames(token, vec![(tex, 0)]);
+}
+
+/// One animation frame, matching `HxInlineMediaFrame`
+/// (src/inline_media_decode.h): a strong `GdkTexture *` owned by the
+/// GArray, and the milliseconds to show it for.
+#[repr(C)]
+struct HxInlineMediaFrame {
+    texture: *mut gtk4::gdk::ffi::GdkTexture,
+    delay_ms: u32,
+}
+
+/// The token carried by the image block a mark names.
+unsafe fn token_for_mark(v: &HxChatView, mark: *mut c_void) -> Option<u32> {
+    let id = ptr_to_mark(mark)?;
+    v.image_token_of(id)
 }
 
 /// # Safety
@@ -543,7 +581,29 @@ pub unsafe extern "C" fn hx_chat_view_impl_media_set_animation(
     mark: *mut c_void,
     frames: *mut c_void,
 ) {
-    let _ = (w, mark, frames); // C4.
+    let Some(v) = view_of(w) else { return };
+    let Some(token) = token_for_mark(&v, mark) else {
+        return;
+    };
+    if frames.is_null() {
+        v.set_media_frames(token, Vec::new());
+        return;
+    }
+    let arr = frames as *mut gtk4::glib::ffi::GArray;
+    let len = (*arr).len as usize;
+    let data = (*arr).data as *const HxInlineMediaFrame;
+    let mut out = Vec::with_capacity(len);
+    for i in 0..len {
+        let f = &*data.add(i);
+        if f.texture.is_null() {
+            continue;
+        }
+        // from_glib_none: the GArray owns these refs and drops them in
+        // its clear_func, so we take our own rather than stealing them.
+        let tex: gtk4::gdk::Texture = gtk4::glib::translate::from_glib_none(f.texture);
+        out.push((tex, f.delay_ms));
+    }
+    v.set_media_frames(token, out);
 }
 
 /// Unused today; keeps `ParsedText` reachable for the C4 work without a

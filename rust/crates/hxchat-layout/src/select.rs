@@ -41,6 +41,20 @@ pub struct Selection {
     pub focus: Caret,
 }
 
+/// Visual order of a row's texts.
+///
+/// A row is not one string: it is a gutter followed by body blocks, and
+/// a selection boundary can land in any of them. Ranking them is what
+/// lets carets in *different* sources be ordered against each other —
+/// comparing their byte offsets, which is what the first version did,
+/// is meaningless, because the two offsets index unrelated strings.
+pub fn source_rank(s: LineSource) -> usize {
+    match s {
+        LineSource::Gutter => 0,
+        LineSource::Block(i) => i + 1,
+    }
+}
+
 /// How far a selection extends within one row.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum RowSelection {
@@ -48,11 +62,16 @@ pub enum RowSelection {
     None,
     /// Every source in the row is fully selected.
     All,
-    /// Part of one source is selected, `start..end` bytes.
+    /// Runs from `start` to `end`, which may be in *different* sources.
+    ///
+    /// This is the shape the first version got wrong: it could name only
+    /// one source, so a boundary landing in the gutter left the rest of
+    /// that row unselected. Dragging left and then up — which puts the
+    /// start of the selection in a gutter — highlighted the nick and not
+    /// the message, which reads as the selection being inverted.
     Partial {
-        source: LineSource,
-        start: usize,
-        end: usize,
+        start: (LineSource, usize),
+        end: (LineSource, usize),
     },
 }
 
@@ -67,20 +86,26 @@ impl Selection {
 
     /// `(earlier, later)` in document order, given a row resolver.
     ///
-    /// Ordering needs row positions because `MessageId`s are allocated
-    /// in creation order, not document order — a chat-history batch
-    /// inserts *older* messages with *higher* ids. Comparing ids
-    /// directly would invert the selection across a backfill, which is
-    /// the kind of bug that only shows up after someone clicks "load
-    /// older".
+    /// Ordering is on `(row, source rank, offset)`, in that order, and
+    /// all three parts matter:
+    ///
+    /// - **row**, not `MessageId`: ids are allocated in creation order,
+    ///   but a chat-history batch inserts *older* messages with *higher*
+    ///   ids, so comparing ids inverts the selection after a backfill.
+    /// - **source rank** before offset: within a row the gutter precedes
+    ///   the body, and their offsets index unrelated strings, so
+    ///   comparing offsets across sources is meaningless. Skipping this
+    ///   is what made a same-row gutter→body drag select the whole row.
+    /// - **offset** last, within one source.
     pub fn ordered(&self, row_of: impl Fn(MessageId) -> Option<usize>) -> (Caret, Caret) {
-        let a = row_of(self.anchor.message);
-        let f = row_of(self.focus.message);
-        let anchor_first = match (a, f) {
-            (Some(ar), Some(fr)) if ar != fr => ar < fr,
-            _ => self.anchor.offset <= self.focus.offset,
+        let key = |c: &Caret| {
+            (
+                row_of(c.message).unwrap_or(usize::MAX),
+                source_rank(c.source),
+                c.offset,
+            )
         };
-        if anchor_first {
+        if key(&self.anchor) <= key(&self.focus) {
             (self.anchor, self.focus)
         } else {
             (self.focus, self.anchor)

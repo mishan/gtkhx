@@ -27,7 +27,7 @@ use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use hxchat_layout::{
     Caret, ChatBuffer, ColorRef, LayoutParams, LineSource, Message, MessageId, ParsedText,
-    RowSelection, Selection, Span, Style, TextMeasure,
+    RowSelection, Selection, Span, Style, TextMeasure, MIN_INDENT,
 };
 
 use crate::measure::PangoMeasure;
@@ -49,6 +49,41 @@ pub const PAL_MARK_BG: usize = 33;
 /// bottom" and resumes following.
 const FOLLOW_SLOP: u32 = 8;
 
+enum ScrollKey {
+    /// Viewport-sized step; -1 up, 1 down.
+    Page(i32),
+    Home,
+    End,
+}
+
+/// Does the focused widget edit text?
+///
+/// Anything that does has no meaningful use for a page key (the inputs
+/// here are a few lines tall at most), so the chat log may claim it.
+/// Anything that doesn't — notably the user list's GtkColumnView — keeps
+/// its own paging.
+fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
+    use gtk4::prelude::*;
+    let Some(root) = c.widget().and_then(|w| w.root()) else {
+        return false;
+    };
+    let Some(focus) = root.focus() else {
+        return false;
+    };
+    focus.is::<gtk4::TextView>() || focus.is::<gtk4::Text>() || focus.is::<gtk4::Entry>()
+}
+
+/// Floor for a decoded animation's per-frame delay, in ms.
+///
+/// Matches xtext, which clamps to 10 at both arm sites (xtext.c:6309 and
+/// :6365). A higher floor would visibly slow fast GIFs relative to the
+/// backend this has to be indistinguishable from during the A/B.
+const MIN_FRAME_DELAY_MS: u32 = 10;
+
+/// Grab tolerance either side of the separator rule, in px.
+const SEPARATOR_GRAB: f64 = 4.0;
+
+
 /// Inset between the widget edge and the text.
 ///
 /// xtext draws hard against its allocation, which reads as cramped now
@@ -62,6 +97,46 @@ const PAD_Y: i32 = 2;
 /// xtext's built-in timestamp format, which chat.c depends on as the
 /// default (`gtk_xtext_set_stamp_format(NULL)` restores it).
 const DEFAULT_STAMP_FORMAT: &str = "[%H:%M:%S] ";
+
+/// One decoded media item. Internal widget state.
+#[derive(Clone)]
+pub(crate) struct MediaEntry {
+    /// Animation frames with their durations. A static image is a
+    /// single frame with delay 0.
+    pub(crate) frames: Vec<(gtk4::gdk::Texture, u32)>,
+    /// Index of the frame currently showing.
+    pub(crate) current: usize,
+    /// When the current frame started, for the advance tick.
+    pub(crate) since_us: i64,
+}
+
+impl MediaEntry {
+    pub(crate) fn texture(&self) -> Option<&gtk4::gdk::Texture> {
+        self.frames.get(self.current).map(|(t, _)| t)
+    }
+
+    pub(crate) fn is_animated(&self) -> bool {
+        self.frames.len() > 1
+    }
+
+    /// Intrinsic size, from the first frame — every frame of a glycin
+    /// animation shares dimensions.
+    pub(crate) fn size(&self) -> Option<hxchat_layout::ImageSize> {
+        self.frames.first().map(|(t, _)| hxchat_layout::ImageSize {
+            width: t.width().max(0) as u32,
+            height: t.height().max(0) as u32,
+        })
+    }
+}
+
+impl std::fmt::Debug for MediaEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaEntry")
+            .field("frames", &self.frames.len())
+            .field("current", &self.current)
+            .finish()
+    }
+}
 
 mod imp {
     use super::*;
@@ -84,6 +159,9 @@ mod imp {
 
         pub font_generation: Cell<u32>,
         pub separator: Cell<bool>,
+        /// Set while a drag is moving the gutter separator rather than
+        /// selecting text.
+        pub moving_separator: Cell<bool>,
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
@@ -100,6 +178,28 @@ mod imp {
         /// strftime format for that column. xtext's default is
         /// "[%H:%M:%S] " and chat.c relies on getting it.
         pub stamp_format: RefCell<String>,
+        /// Decoded media, keyed by the per-conversation token.
+        ///
+        /// The textures live here rather than on the layout's
+        /// `Block::Image` because `hxchat-layout` is GTK-free by
+        /// design — it carries only the *size*, which is all it needs
+        /// to lay the row out. The token is the join.
+        pub(crate) media: RefCell<std::collections::HashMap<u32, MediaEntry>>,
+        /// Frame-advance tick, running only while something animates.
+        pub anim_tick: RefCell<Option<gtk4::TickCallbackId>>,
+        /// Last pointer position seen during a drag, widget-relative.
+        ///
+        /// CLAUDE.md records the xtext version of this as a known
+        /// degradation: its scroll timers read `xtext->select_end_y`
+        /// rather than the live device position, because GTK 4 has no
+        /// synchronous "where is the pointer" accessor. Storing it from
+        /// the drag handler and consuming it from a per-frame tick is
+        /// the actual answer — the staleness window becomes one frame
+        /// instead of one timer period.
+        pub drag_pointer: Cell<(f64, f64)>,
+        /// Auto-scroll tick, running only while a drag is outside the
+        /// viewport.
+        pub autoscroll_tick: RefCell<Option<gtk4::TickCallbackId>>,
     }
 
     impl Default for HxChatView {
@@ -116,11 +216,16 @@ mod imp {
                 updating_adj: Cell::new(false),
                 font_generation: Cell::new(0),
                 separator: Cell::new(false),
+                moving_separator: Cell::new(false),
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
                 root_key_handler: RefCell::new(None),
                 stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
+                media: RefCell::new(std::collections::HashMap::new()),
+                anim_tick: RefCell::new(None),
+                drag_pointer: Cell::new((0.0, 0.0)),
+                autoscroll_tick: RefCell::new(None),
             }
         }
     }
@@ -139,15 +244,19 @@ mod imp {
             static S: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
             S.get_or_init(|| {
                 vec![
-                    // xtext's signal, registered here purely so the
-                    // seven `g_signal_connect (view, "word_click", ...)`
-                    // sites in chat.c and msg.c bind without warning
-                    // during the coexistence period. It is never
-                    // emitted: a click yields a whitespace-delimited
-                    // word, callers demux it by string prefix
-                    // (`hxmedia:N`, the NBSP load-older sentinel), and
-                    // replacing that with the typed signals in scoping
-                    // §3.6 is C3 work.
+                    // xtext's signal, and now genuinely emitted.
+                    //
+                    // Parity beat purity here. The three C handlers
+                    // chat.c and msg.c connect — gtkurl, chat-history's
+                    // load-older sentinel, and inline media's
+                    // `hxmedia:N` — all recognise their targets by
+                    // matching the clicked *word* as a string. Emitting
+                    // the same signal with the same tokenisation makes
+                    // all three work against the new backend with zero
+                    // C changes, which is exactly what the A/B needs.
+                    // The typed replacements in scoping §3.6 are still
+                    // the destination, but they belong with the
+                    // structured append in C6, not ahead of parity.
                     //
                     // **"word-click", not "word_click".** glib-rs's
                     // Signal::builder requires a canonical name and
@@ -326,6 +435,12 @@ impl HxChatView {
         imp::HxChatView::from_obj(self)
     }
 
+    /// The private struct, for tests that need to reach the buffer.
+    #[cfg(test)]
+    pub(crate) fn imp_ref(&self) -> &imp::HxChatView {
+        self.imp_()
+    }
+
     // ---- configuration ------------------------------------------------
 
     pub fn set_font_from_string(&self, font: &str) {
@@ -478,6 +593,10 @@ impl HxChatView {
 
     pub fn clear(&self) {
         self.imp_().buffer.borrow_mut().clear();
+        // Textures are keyed by token, and tokens are per-conversation
+        // and reused after a clear — holding stale ones would both leak
+        // and let a new row show an old image.
+        self.clear_media();
         self.after_content_change();
     }
 
@@ -585,6 +704,39 @@ impl HxChatView {
         snapshot.save();
         snapshot.translate(&gtk4::graphene::Point::new(PAD_X as f32, PAD_Y as f32));
 
+        // The indent separator, matching gtk_xtext_draw_sep: a full-height
+        // vertical rule half a space-width left of the body column, drawn
+        // only in indent mode. `separator` was being stored and never
+        // used, so the new backend was missing a line xtext has always
+        // drawn — chat.c passes separator=TRUE for every view.
+        //
+        // xtext's non-thin variant is a two-pixel bevel (bg then fg);
+        // the thin one is a single rule. Only the bevelled form is ever
+        // requested here, so that is what is reproduced.
+        {
+            let buf_ref = imp.buffer.borrow();
+            let indent = buf_ref.indent_width();
+            let space = imp.measure.borrow().metrics().space_width;
+            drop(buf_ref);
+            if imp.separator.get() && indent > 0 {
+                // Content coordinates here (the snapshot is translated by
+                // PAD_X), so this is `separator_x() - PAD_X`.
+                let x = indent as f32 - ((space as f32 + 1.0) / 2.0);
+                if x >= 1.0 {
+                    let fg = self.imp_().palette.borrow()[PAL_FG];
+                    let bgc = self.imp_().palette.borrow()[PAL_BG];
+                    snapshot.append_color(
+                        &bgc,
+                        &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
+                    );
+                    snapshot.append_color(
+                        &fg,
+                        &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32),
+                    );
+                }
+            }
+        }
+
         let scroll = {
             let mut buf = imp.buffer.borrow_mut();
             buf.scroll_offset(height as u32)
@@ -628,8 +780,6 @@ impl HxChatView {
         draw_layout.set_font_description(Some(&font));
 
         let selection = *imp.selection.borrow();
-        let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
-        let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let show_stamp = imp.time_stamp.get();
         let stamp_format = imp.stamp_format.borrow().clone();
         let muted = self.imp_().palette.borrow()[PAL_HISTORY_MUTED];
@@ -641,6 +791,26 @@ impl HxChatView {
             let Some(msg) = buf.message_at(row) else {
                 continue;
             };
+
+            // The timestamp belongs to the *row*, not to the gutter.
+            //
+            // Tying it to the gutter line box was wrong twice over:
+            // info lines (`[hx] …`, appended with no nick column) have
+            // no gutter at all and so never got a stamp, and xtext draws
+            // it for every entry whenever auto_indent && time_stamp
+            // regardless of whether there is any left text. Drawn once
+            // here, against the row's own top edge.
+            if show_stamp && row_top + i64::from(layout.height) >= 0 && row_top <= i64::from(height)
+            {
+                if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
+                    draw_layout.set_attributes(None);
+                    draw_layout.set_text(&stamp);
+                    snapshot.save();
+                    snapshot.translate(&gtk4::graphene::Point::new(0.0, row_top as f32));
+                    snapshot.append_layout(&draw_layout, &muted);
+                    snapshot.restore();
+                }
+            }
 
             for line in &layout.lines {
                 let y = row_top + i64::from(line.y);
@@ -658,10 +828,40 @@ impl HxChatView {
                             (content.text.as_str(), &content.spans)
                         }
                         Some(hxchat_layout::Block::Code { text, .. }) => (text.as_str(), &[]),
-                        // C2 is text-only: a media row draws its
-                        // placeholder, which is exactly the Phase 9.D
-                        // behaviour. Real inline images are C4.
-                        Some(hxchat_layout::Block::Image { alt, .. }) => (alt.as_str(), &[]),
+                        // A decoded image paints as a texture; an
+                        // undecoded one falls back to its placeholder
+                        // text, which is exactly the Phase 9.D
+                        // behaviour and what the user sees while the
+                        // fetch is in flight.
+                        Some(hxchat_layout::Block::Image { alt, token, size }) => {
+                            // Borrowed, not cloned: this runs for every
+                            // visible image on every snapshot, and an
+                            // animated one snapshots at its frame rate.
+                            // A clone here is a GObject ref/unref pair
+                            // per image per frame for no gain — nothing
+                            // in the branch can touch `media`, so the
+                            // borrow safely outlives the draw.
+                            let media = imp.media.borrow();
+                            if let (Some(sz), Some(tex)) =
+                                (size, media.get(token).and_then(|m| m.texture()))
+                            {
+                                let avail =
+                                    (content_width(alloc_w)).saturating_sub(line.x);
+                                let (dw, dh) = measure.image_size(
+                                    (sz.width, sz.height),
+                                    avail,
+                                );
+                                snapshot.save();
+                                snapshot.translate(&gtk4::graphene::Point::new(
+                                    line.x as f32,
+                                    y as f32,
+                                ));
+                                tex.snapshot(snapshot, dw as f64, dh as f64);
+                                snapshot.restore();
+                                continue;
+                            }
+                            (alt.as_str(), &[][..])
+                        }
                         None => continue,
                     },
                 };
@@ -670,57 +870,35 @@ impl HxChatView {
                     continue;
                 }
 
-                // x comes straight from the line box now — the layout
+                // x comes straight from the line box — the layout
                 // engine right-aligns the gutter, so the view no longer
-                // has its own opinion about where it goes. The timestamp
-                // is the one thing drawn outside a line box, at the far
-                // left of the same band.
-                if line.source == LineSource::Gutter && show_stamp {
-                    if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
-                        draw_layout.set_attributes(None);
-                        draw_layout.set_text(&stamp);
-                        snapshot.save();
-                        snapshot.translate(&gtk4::graphene::Point::new(0.0, y as f32));
-                        snapshot.append_layout(&draw_layout, &muted);
-                        snapshot.restore();
-                    }
-                }
+                // has its own opinion about where it goes.
                 let x = line.x as f32;
 
-                // Selection band behind the text, then the text with
-                // the selected span forced to the mark colours. Drawing
-                // the highlight as a separate node under an unmodified
-                // run is what keeps selection independent of the
-                // message's own colours.
+                // What of this line is selected. Resolved by the buffer,
+                // the same call `selected_text` uses, so what is painted
+                // and what gets copied cannot drift apart.
                 let row_sel = selection
                     .as_ref()
                     .map(|s| buf.row_selection(row, s))
                     .unwrap_or(RowSelection::None);
-                let hl = selected_range_in_line(&row_sel, line.source, &line.range);
-                if let Some((hs, he)) = hl {
-                    let pre = slice.get(..hs.saturating_sub(line.range.start)).unwrap_or("");
-                    let mid = slice
-                        .get(
-                            hs.saturating_sub(line.range.start)
-                                ..he.saturating_sub(line.range.start),
-                        )
-                        .unwrap_or("");
-                    draw_layout.set_attributes(None);
-                    draw_layout.set_text(pre);
-                    let (pre_w, _) = draw_layout.pixel_size();
-                    draw_layout.set_text(mid);
-                    let (mid_w, mid_h) = draw_layout.pixel_size();
-                    if mid_w > 0 {
-                        snapshot.append_color(
-                            &mark_bg,
-                            &gtk4::graphene::Rect::new(
-                                x + pre_w as f32,
-                                y as f32,
-                                mid_w as f32,
-                                mid_h as f32,
-                            ),
-                        );
-                    }
+                let hl = buf
+                    .covered_range(row, line.source, &row_sel)
+                    .and_then(|r| {
+                        let s = r.start.max(line.range.start);
+                        let e = r.end.min(line.range.end);
+                        if s < e {
+                            Some((s, e))
+                        } else {
+                            None
+                        }
+                    });
+
+                if trace_selection() && selection.is_some() {
+                    eprintln!(
+                        "[chatview] row={row} src={:?} line={:?} row_sel={:?} hl={:?}",
+                        line.source, line.range, row_sel, hl
+                    );
                 }
 
                 self.draw_runs(
@@ -729,32 +907,10 @@ impl HxChatView {
                     slice,
                     line.range.start,
                     spans,
+                    hl,
                     x,
                     y as f32,
                 );
-
-                // Repaint just the selected glyphs in the mark
-                // foreground, so selected text stays legible against the
-                // highlight regardless of its own colour.
-                if let Some((hs, he)) = hl {
-                    let rel_s = hs.saturating_sub(line.range.start);
-                    let rel_e = he.saturating_sub(line.range.start);
-                    let pre = slice.get(..rel_s).unwrap_or("");
-                    let mid = slice.get(rel_s..rel_e).unwrap_or("");
-                    if !mid.is_empty() {
-                        draw_layout.set_attributes(None);
-                        draw_layout.set_text(pre);
-                        let (pre_w, _) = draw_layout.pixel_size();
-                        draw_layout.set_text(mid);
-                        snapshot.save();
-                        snapshot.translate(&gtk4::graphene::Point::new(
-                            x + pre_w as f32,
-                            y as f32,
-                        ));
-                        snapshot.append_layout(&draw_layout, &mark_fg);
-                        snapshot.restore();
-                    }
-                }
             }
         }
 
@@ -763,6 +919,22 @@ impl HxChatView {
 
     /// Draw one visual line as a sequence of styled runs.
     #[allow(clippy::too_many_arguments)]
+    /// Draw one visual line as styled runs, highlighting `hl`.
+    ///
+    /// **The selection is drawn here, inside the same walk that draws
+    /// the glyphs.** The first version measured the highlight with the
+    /// shared layout after `set_attributes(None)` and then drew the text
+    /// with per-span attributes — so wherever a style changed the
+    /// metrics (bold, and monospace `code` especially) the highlight
+    /// rectangle drifted away from the glyphs it was supposed to be
+    /// under.
+    ///
+    /// Splitting each style run at the selection boundaries makes every
+    /// emitted piece uniform in *both* style and selectedness, so its
+    /// width is measured with exactly the attributes it is rendered
+    /// with. Geometry agreement is structural rather than something to
+    /// keep in sync.
+    #[allow(clippy::too_many_arguments)]
     fn draw_runs(
         &self,
         snapshot: &gtk4::Snapshot,
@@ -770,6 +942,7 @@ impl HxChatView {
         slice: &str,
         slice_start: usize,
         spans: &[hxchat_layout::Span],
+        hl: Option<(usize, usize)>,
         x0: f32,
         y: f32,
     ) {
@@ -777,25 +950,77 @@ impl HxChatView {
         let mut cursor = 0usize;
         let end = slice.len();
 
-        let emit = |text: &str, style: Style, x: &mut f32| {
+        // Selection bounds in slice-local coordinates.
+        // Slice-local, and clamped to char boundaries: `&slice[a..b]`
+        // panics off a boundary, and a panic inside `snapshot` unwinds
+        // across the FFI, which aborts. Offsets come from `fit_prefix`
+        // and so should already be aligned; this makes "should" not
+        // matter.
+        let floor_boundary = |i: usize| {
+            let mut i = i.min(end);
+            while i > 0 && !slice.is_char_boundary(i) {
+                i -= 1;
+            }
+            i
+        };
+        let (hs, he) = match hl {
+            Some((a, b)) => (
+                floor_boundary(a.saturating_sub(slice_start)),
+                floor_boundary(b.saturating_sub(slice_start)),
+            ),
+            None => (0, 0),
+        };
+        let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
+        let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
+
+        let emit = |text: &str, style: Style, selected: bool, x: &mut f32| {
             if text.is_empty() {
                 return;
             }
-            // Reset the shared layout rather than allocating one.
             layout.set_attributes(Some(&PangoMeasure::attrs_for(style)));
             layout.set_text(text);
             let (w, h) = layout.pixel_size();
-            if style.bg != ColorRef::Default {
+
+            if selected {
+                snapshot.append_color(
+                    &mark_bg,
+                    &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
+                );
+            } else if style.bg != ColorRef::Default {
                 snapshot.append_color(
                     &self.resolve(style.bg, PAL_BG),
                     &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
                 );
             }
+
+            let fg = if selected {
+                mark_fg
+            } else {
+                self.resolve(style.fg, PAL_FG)
+            };
             snapshot.save();
             snapshot.translate(&gtk4::graphene::Point::new(*x, y));
-            snapshot.append_layout(layout, &self.resolve(style.fg, PAL_FG));
+            snapshot.append_layout(layout, &fg);
             snapshot.restore();
             *x += w as f32;
+        };
+
+        // Emit `range` of the slice under one style, split at the
+        // selection boundaries so each piece is uniformly selected or
+        // not.
+        let emit_split = |from: usize, to: usize, style: Style, x: &mut f32| {
+            if from >= to {
+                return;
+            }
+            let sel_from = hs.max(from);
+            let sel_to = he.min(to);
+            if sel_from >= sel_to {
+                emit(&slice[from..to], style, false, x);
+                return;
+            }
+            emit(&slice[from..sel_from], style, false, x);
+            emit(&slice[sel_from..sel_to], style, true, x);
+            emit(&slice[sel_to..to], style, false, x);
         };
 
         for s in spans {
@@ -808,17 +1033,11 @@ impl HxChatView {
             }
             let ss = ss.max(cursor).min(end);
             let se = se.min(end);
-            if ss > cursor {
-                emit(&slice[cursor..ss], Style::default(), &mut x);
-            }
-            if se > ss {
-                emit(&slice[ss..se], s.style, &mut x);
-            }
+            emit_split(cursor, ss, Style::default(), &mut x);
+            emit_split(ss, se, s.style, &mut x);
             cursor = se;
         }
-        if cursor < end {
-            emit(&slice[cursor..], Style::default(), &mut x);
-        }
+        emit_split(cursor, end, Style::default(), &mut x);
     }
 }
 
@@ -868,6 +1087,65 @@ fn format_stamp(unix: i64, format: &str) -> Option<String> {
 
 impl HxChatView {
     /// Drag-to-select, click-to-clear, and Ctrl+C.
+    /// Widget-space x of the drawn separator rule, if one is drawn.
+    ///
+    /// Single source of truth for both the snapshot and the hit test —
+    /// the two disagreeing is how a divider ends up ungrabbable at the
+    /// exact pixel it appears on.
+    fn separator_x(&self) -> Option<f64> {
+        let imp = self.imp_();
+        if !imp.separator.get() {
+            return None;
+        }
+        let indent = imp.buffer.borrow().indent_width();
+        if indent == 0 {
+            return None;
+        }
+        let half = self.half_space();
+        Some(PAD_X as f64 + indent as f64 - half)
+    }
+
+    fn half_space(&self) -> f64 {
+        let space = self.imp_().measure.borrow().metrics().space_width;
+        (space as f64 + 1.0) / 2.0
+    }
+
+    /// Is `x` close enough to the separator to grab it?
+    ///
+    /// xtext used ±1 px, which is unhittable on a fractional-scale
+    /// display; the C fork had already widened it to ±4 for that reason.
+    fn on_separator(&self, x: f64) -> bool {
+        match self.separator_x() {
+            Some(sx) => (x - sx).abs() <= SEPARATOR_GRAB,
+            None => false,
+        }
+    }
+
+    /// Move the gutter so the separator lands under the pointer.
+    ///
+    /// Clamped to a band of the viewport rather than to `max_indent`:
+    /// that cap is about how far the gutter may grow unattended, and the
+    /// point of the drag is to overrule it. The upper bound keeps the
+    /// body column from being squeezed out of existence.
+    fn drag_separator_to(&self, x: f64) {
+        let width = self.width();
+        if width <= 0 {
+            return;
+        }
+        let lo = PAD_X as f64 + MIN_INDENT as f64;
+        let hi = (3.0 * width as f64) / 5.0;
+        if hi <= lo {
+            return;
+        }
+        let x = x.clamp(lo, hi);
+        let indent = (x + self.half_space() - PAD_X as f64).max(0.0) as u32;
+        let moved = self.imp_().buffer.borrow_mut().set_indent_width(indent);
+        if moved {
+            self.queue_resize();
+            self.queue_draw();
+        }
+    }
+
     fn install_selection_gestures(&self) {
         // The widget has to be focusable for a key controller to reach
         // it; xtext's consumers call gtk_widget_set_can_focus(FALSE) to
@@ -878,6 +1156,14 @@ impl HxChatView {
 
         let this = self.clone();
         drag.connect_drag_begin(move |g, x, y| {
+            // The separator wins over selection: it lives in the gutter,
+            // where a stray text drag is cheap to redo but a divider you
+            // cannot grab is simply broken.
+            if this.on_separator(x) {
+                this.imp_().moving_separator.set(true);
+                this.imp_().selecting.set(false);
+                return;
+            }
             let start = this.caret_at(x, y);
             this.imp_().selecting.set(true);
             match start {
@@ -892,26 +1178,32 @@ impl HxChatView {
 
         let this = self.clone();
         drag.connect_drag_update(move |g, dx, dy| {
+            if this.imp_().moving_separator.get() {
+                if let Some((sx, _)) = g.start_point() {
+                    this.drag_separator_to(sx + dx);
+                }
+                return;
+            }
             if !this.imp_().selecting.get() {
                 return;
             }
             let Some((sx, sy)) = g.start_point() else {
                 return;
             };
-            let Some(focus) = this.caret_at(sx + dx, sy + dy) else {
-                return;
-            };
-            let mut sel = this.imp_().selection.borrow_mut();
-            if let Some(s) = sel.as_mut() {
-                s.focus = focus;
-            }
-            drop(sel);
-            this.queue_draw();
+            let (px, py) = (sx + dx, sy + dy);
+            this.imp_().drag_pointer.set((px, py));
+            this.sync_autoscroll();
+            this.extend_selection_to(px, py);
         });
 
         let this = self.clone();
         drag.connect_drag_end(move |_, _, _| {
+            if this.imp_().moving_separator.get() {
+                this.imp_().moving_separator.set(false);
+                return;
+            }
             this.imp_().selecting.set(false);
+            this.sync_autoscroll();
             // Drag-end autocopy, matching xtext's behaviour and driven
             // by the same three prefs (see set_autocopy_* on the C side).
             if autocopy_enabled() {
@@ -954,6 +1246,49 @@ impl HxChatView {
                 this.queue_draw();
             }
         });
+        // Double- and triple-click select a word and a line, as xtext
+        // does. Handled on `pressed` rather than `released` so the drag
+        // gesture's own begin — which fires first and collapses the
+        // selection to a caret — doesn't wipe the result.
+        let this = self.clone();
+        click.connect_pressed(move |_, n_press, x, y| {
+            if n_press < 2 {
+                return;
+            }
+            let Some(caret) = this.caret_at(x, y) else {
+                return;
+            };
+            let sel = {
+                let buf = this.imp_().buffer.borrow();
+                if n_press == 2 {
+                    buf.select_word(&caret)
+                } else {
+                    buf.row_of(caret.message).and_then(|r| buf.select_row(r))
+                }
+            };
+            if let Some(sel) = sel {
+                *this.imp_().selection.borrow_mut() = Some(sel);
+                // A multi-click is not a drag: stop the drag handler
+                // from overwriting the focus on the next motion.
+                this.imp_().selecting.set(false);
+                this.queue_draw();
+                if autocopy_enabled() {
+                    this.copy_selection_to(ClipboardTarget::Primary);
+                }
+            }
+        });
+
+        // Primary-click word-click, for the handlers that filter on it
+        // (chat-history's sentinel and inline media). Emitted on
+        // release, and only when no drag happened, so selecting text
+        // doesn't also activate whatever was under the press.
+        let this = self.clone();
+        click.connect_released(move |g, n_press, x, y| {
+            if n_press != 1 || this.has_selection() {
+                return;
+            }
+            this.emit_word_click(x, y, g.current_event().as_ref());
+        });
         self.add_controller(click);
 
         // Ctrl+C.
@@ -990,11 +1325,14 @@ impl HxChatView {
         let key = gtk4::EventControllerKey::new();
         key.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let this = self.clone();
-        key.connect_key_pressed(move |_, keyval, _, state| {
+        key.connect_key_pressed(move |c, keyval, _, state| {
             let ctrl = state.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
             let is_c = keyval == gtk4::gdk::Key::c || keyval == gtk4::gdk::Key::C;
             if ctrl && is_c && this.has_selection() {
                 this.copy_selection_to(ClipboardTarget::Clipboard);
+                return glib::Propagation::Stop;
+            }
+            if this.handle_scroll_key(c, keyval, state) {
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
@@ -1006,6 +1344,96 @@ impl HxChatView {
         if let Some((weak, _)) = imp.root_key_handler.borrow().as_ref() {
             weak.set(Some(&root_widget));
         }
+    }
+
+    /// Page/Home/End handling for the capture-phase root controller.
+    ///
+    /// These keys have to be stolen from the focus path rather than
+    /// bound here, because consumers call
+    /// `gtk_widget_set_can_focus(FALSE)` on the chat view so the message
+    /// input keeps focus — and GtkTextView binds Page_Up/Page_Down to
+    /// its own cursor movement, so a global-scope GtkShortcut (which
+    /// runs *after* normal propagation) would never fire. That is why
+    /// paging has never worked in GtkHx: nothing in the tree ever bound
+    /// it, and the widget that had focus swallowed it.
+    ///
+    /// The steal is narrow on purpose. It only applies when focus is in
+    /// a text-entry widget — the message input or the subject entry,
+    /// where paging means nothing — so the user list keeps its own
+    /// page-by-page keyboard navigation.
+    fn handle_scroll_key(
+        &self,
+        c: &gtk4::EventControllerKey,
+        keyval: gtk4::gdk::Key,
+        state: gtk4::gdk::ModifierType,
+    ) -> bool {
+        use gtk4::gdk::Key;
+        // A view that isn't on screen (a background tab, a closed private
+        // chat) must not eat the window's keys.
+        if !self.is_mapped() {
+            return false;
+        }
+        let ctrl = state.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
+        let shift = state.contains(gtk4::gdk::ModifierType::SHIFT_MASK);
+
+        let action = match keyval {
+            Key::Page_Up | Key::KP_Page_Up => ScrollKey::Page(-1),
+            Key::Page_Down | Key::KP_Page_Down => ScrollKey::Page(1),
+            Key::Home | Key::KP_Home if ctrl => ScrollKey::Home,
+            Key::End | Key::KP_End if ctrl => ScrollKey::End,
+            _ => return false,
+        };
+
+        // Shift+PgUp/PgDn is the long-standing IRC binding for "scroll
+        // the log" and is unambiguous anywhere, so it bypasses the
+        // focus check. Unmodified paging only applies over an input.
+        if !(shift && matches!(action, ScrollKey::Page(_))) && !focus_is_text_entry(c) {
+            return false;
+        }
+
+        match action {
+            ScrollKey::Page(dir) => self.scroll_page(dir),
+            ScrollKey::Home => self.scroll_to_extreme(false),
+            ScrollKey::End => self.scroll_to_extreme(true),
+        }
+        true
+    }
+
+    /// Scroll one viewport, less a line of overlap so the line being
+    /// read stays on screen across the jump.
+    pub fn scroll_page(&self, dir: i32) {
+        let height = content_height(self.height());
+        if height == 0 {
+            return;
+        }
+        let line = self.imp_().measure.borrow().metrics().line_height.max(1);
+        let step = height.saturating_sub(line).max(line) as i64;
+        let cur = {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_offset(height) as i64
+        };
+        let next = (cur + step * dir as i64).max(0) as u64;
+        self.scroll_absolute(next, height);
+    }
+
+    /// Jump to the top of the scrollback, or back to following the tail.
+    pub fn scroll_to_extreme(&self, bottom: bool) {
+        let height = content_height(self.height());
+        if bottom {
+            let total = self.imp_().buffer.borrow_mut().total_height();
+            self.scroll_absolute(total.saturating_sub(height as u64), height);
+        } else {
+            self.scroll_absolute(0, height);
+        }
+    }
+
+    fn scroll_absolute(&self, y: u64, height: u32) {
+        {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_to(y, height, FOLLOW_SLOP);
+        }
+        self.sync_adjustment(height);
+        self.queue_draw();
     }
 
     /// Widget-space point → document position.
@@ -1025,13 +1453,45 @@ impl HxChatView {
     }
 
     /// The selected text, or empty.
+    ///
+    /// Honours `autocopy_stamp`: when on, each copied row is prefixed
+    /// with its timestamp, which is what xtext's `mark_stamp` did. The
+    /// pref exists precisely because pasting a chat excerpt with times
+    /// is sometimes what you want and usually is not, so silently
+    /// ignoring it — as this did until now — loses a real behaviour.
     pub fn selected_text(&self) -> String {
         let imp = self.imp_();
         let sel = *imp.selection.borrow();
-        match sel {
-            Some(s) if !s.is_empty() => imp.buffer.borrow().selected_text(&s),
-            _ => String::new(),
+        let Some(s) = sel.filter(|s| !s.is_empty()) else {
+            return String::new();
+        };
+        let buf = imp.buffer.borrow();
+        if !prefs::AUTOCOPY_STAMP.with(|c| c.get()) {
+            return buf.selected_text(&s);
         }
+        // Per *row*, not per output line.
+        //
+        // The first version post-processed the joined string with
+        // `lines()`, assuming one line per row. A row's own text can
+        // contain hard newlines — the wrap engine supports them — so
+        // that assumption breaks on the first multi-line message, and
+        // the stamps then drift onto the wrong rows and fall off the
+        // end. Asking the buffer for the rows directly removes the
+        // guess.
+        let fmt = imp.stamp_format.borrow().clone();
+        buf.selected_rows(&s)
+            .into_iter()
+            .map(|(row, text)| {
+                match buf
+                    .message_at(row)
+                    .and_then(|m| format_stamp(m.timestamp, &fmt))
+                {
+                    Some(ts) => format!("{ts}{text}"),
+                    None => text,
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn has_selection(&self) -> bool {
@@ -1108,38 +1568,6 @@ fn autocopy_enabled() -> bool {
     prefs::AUTOCOPY_TEXT.with(|c| c.get())
 }
 
-/// Intersect a row's selection with one visual line.
-///
-/// Returns absolute byte offsets into the source text, or `None` when
-/// this line has nothing selected. Splitting it out keeps the snapshot
-/// loop readable and makes the "whole row" case explicit — an `All`
-/// selection covers every line of every source, including the gutter.
-fn selected_range_in_line(
-    row_sel: &RowSelection,
-    source: LineSource,
-    line: &std::ops::Range<usize>,
-) -> Option<(usize, usize)> {
-    match row_sel {
-        RowSelection::None => None,
-        RowSelection::All => Some((line.start, line.end)),
-        RowSelection::Partial {
-            source: s,
-            start,
-            end,
-        } => {
-            if *s != source {
-                return None;
-            }
-            let hs = (*start).max(line.start);
-            let he = (*end).min(line.end);
-            if hs < he {
-                Some((hs, he))
-            } else {
-                None
-            }
-        }
-    }
-}
 
 // ---- zoom (scoping §3.7) --------------------------------------------
 
@@ -1227,8 +1655,13 @@ impl HxChatView {
         let motion = gtk4::EventControllerMotion::new();
         let this = self.clone();
         motion.connect_motion(move |_, x, y| {
-            let over = this.link_at_point(x, y).is_some();
-            let want = if over { "pointer" } else { "text" };
+            let want = if this.on_separator(x) || this.imp_().moving_separator.get() {
+                "col-resize"
+            } else if this.link_at_point(x, y).is_some() {
+                "pointer"
+            } else {
+                "text"
+            };
             if this.cursor().and_then(|c| c.name()).as_deref() != Some(want) {
                 this.set_cursor_from_name(Some(want));
             }
@@ -1250,11 +1683,22 @@ impl HxChatView {
             let click = gtk4::GestureClick::new();
             click.set_button(button);
             let this = self.clone();
-            click.connect_pressed(move |_, _, x, y| {
+            click.connect_pressed(move |g, _, x, y| {
+                // word-click first: gtkurl's handler filters on
+                // secondary/middle and pops the URL menu itself, and the
+                // media handler wants the token. Emitting keeps every
+                // existing C consumer working.
+                this.emit_word_click(x, y, g.current_event().as_ref());
+
                 match this.link_at_point(x, y) {
-                    Some((href, _label)) => {
+                    // Only pop our own URL menu for links *we* detected
+                    // but gtkurl's word tokenisation didn't — otherwise
+                    // the emission above already popped one and we'd
+                    // stack two.
+                    Some((href, _label)) if !this.word_is_url(x, y) => {
                         crate::links::show_url_popup(&this, &href, x, y);
                     }
+                    Some(_) => {}
                     None if button == gtk4::gdk::BUTTON_SECONDARY => {
                         this.show_context_menu(x, y);
                     }
@@ -1336,5 +1780,316 @@ impl HxChatView {
             },
         ));
         self.queue_draw();
+    }
+}
+
+// ---- word-click (xtext parity) --------------------------------------
+
+impl HxChatView {
+    /// Emit `word-click` for the word under a widget-space point.
+    ///
+    /// The word is handed over as a raw `char *` because that is what
+    /// xtext's signal signature is and what the C handlers expect. The
+    /// `CString` lives for the duration of the emission and no longer —
+    /// every handler in the tree either compares it or copies out of it
+    /// synchronously, which is the same contract xtext offered (its
+    /// pointer was into a scratch buffer reused on the next click).
+    fn emit_word_click(&self, x: f64, y: f64, event: Option<&gtk4::gdk::Event>) {
+        let Some(caret) = self.caret_at(x, y) else {
+            return;
+        };
+        let Some(word) = self.imp_().buffer.borrow().word_at(&caret) else {
+            return;
+        };
+        let Ok(c_word) = std::ffi::CString::new(word) else {
+            return;
+        };
+        let word_ptr = c_word.as_ptr() as glib::ffi::gpointer;
+        let event_ptr = event
+            .map(|e| {
+                use gtk4::glib::translate::ToGlibPtr;
+                let p: *mut gtk4::gdk::ffi::GdkEvent = e.to_glib_none().0;
+                p as glib::ffi::gpointer
+            })
+            .unwrap_or(std::ptr::null_mut());
+        self.emit_by_name::<()>("word-click", &[&word_ptr, &event_ptr]);
+    }
+}
+
+impl HxChatView {
+    /// Whether the word under the point is one `gtkurl` would itself
+    /// recognise — i.e. whether the `word-click` emission has already
+    /// caused a URL menu to pop.
+    ///
+    /// Needed because two detectors are in play: `gtkurl_scan`, which
+    /// finds URLs inside a line and gives us the link spans, and
+    /// `gtkurl_is_url`, which classifies a whitespace-delimited *word*
+    /// and is what the signal handler uses. They mostly agree; where
+    /// they don't, this stops us stacking a second popover on top of
+    /// the one the handler already opened.
+    fn word_is_url(&self, x: f64, y: f64) -> bool {
+        let Some(caret) = self.caret_at(x, y) else {
+            return false;
+        };
+        let Some(word) = self.imp_().buffer.borrow().word_at(&caret) else {
+            return false;
+        };
+        crate::links::word_is_url(&word)
+    }
+}
+
+// ---- inline media (C4) ----------------------------------------------
+
+impl HxChatView {
+    /// Install (or replace) the decoded frames for a media token, and
+    /// resize the row to match.
+    ///
+    /// This is the operation the old design was worst at. xtext had to
+    /// recompute the entry's subline list, diff the count against the
+    /// old one, and patch `buf->num_lines` plus every scroll anchor
+    /// (`gtk_xtext_media_set_texture`). Here it is a size change on a
+    /// block, and the scroll anchor absorbs it — a decode landing above
+    /// the viewport no longer shifts what the user is reading.
+    pub fn set_media_frames(&self, token: u32, frames: Vec<(gtk4::gdk::Texture, u32)>) {
+        let imp = self.imp_();
+        if frames.is_empty() {
+            imp.media.borrow_mut().remove(&token);
+            // Clear the stored size too, or the row keeps the height of
+            // an image it no longer has and the placeholder text draws
+            // inside a tall empty box — contradicting the FFI's promise
+            // that a NULL texture reverts the row to its placeholder.
+            let m = imp.measure.borrow();
+            let mut buf = imp.buffer.borrow_mut();
+            if let Some(id) = buf.find_image(token) {
+                buf.set_image_size(id, token, None, &*m);
+            }
+        } else {
+            let entry = MediaEntry {
+                frames,
+                current: 0,
+                since_us: 0,
+            };
+            let size = entry.size();
+            imp.media.borrow_mut().insert(token, entry);
+
+            if let Some(size) = size {
+                let m = imp.measure.borrow();
+                let mut buf = imp.buffer.borrow_mut();
+                if let Some(id) = buf.find_image(token) {
+                    buf.set_image_size(id, token, Some(size), &*m);
+                }
+            }
+        }
+        self.sync_animation_tick();
+        self.queue_resize();
+    }
+
+    /// Start the frame timer if anything animates, stop it otherwise.
+    ///
+    /// One shared tick for the whole view rather than a timer per image
+    /// — the same shape `gif_avatar.c` settled on for the user list, and
+    /// for the same reason: dozens of independent timeouts is a lot of
+    /// wakeups for something the frame clock already provides.
+    fn sync_animation_tick(&self) {
+        let imp = self.imp_();
+        let animated = imp.media.borrow().values().any(|m| m.is_animated());
+        let running = imp.anim_tick.borrow().is_some();
+        if animated == running {
+            return;
+        }
+        if !animated {
+            if let Some(id) = imp.anim_tick.borrow_mut().take() {
+                id.remove();
+            }
+            return;
+        }
+        let id = self.add_tick_callback(move |view, clock| {
+            let imp = view.imp_();
+            let now = clock.frame_time();
+            let mut advanced = false;
+            {
+                let mut media = imp.media.borrow_mut();
+                for entry in media.values_mut() {
+                    if !entry.is_animated() {
+                        continue;
+                    }
+                    let delay = entry
+                        .frames
+                        .get(entry.current)
+                        .map(|(_, d)| *d)
+                        .unwrap_or(100)
+                        .max(MIN_FRAME_DELAY_MS) as i64
+                        * 1000;
+                    if entry.since_us == 0 {
+                        entry.since_us = now;
+                        continue;
+                    }
+                    if now - entry.since_us >= delay {
+                        entry.current = (entry.current + 1) % entry.frames.len();
+                        entry.since_us = now;
+                        advanced = true;
+                    }
+                }
+            }
+            if advanced {
+                // Only a redraw: every frame of an animation shares
+                // dimensions, so the row's height cannot change.
+                view.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        });
+        *imp.anim_tick.borrow_mut() = Some(id);
+    }
+
+    /// Drop every decoded texture. Called with `clear`.
+    fn clear_media(&self) {
+        self.imp_().media.borrow_mut().clear();
+        self.sync_animation_tick();
+    }
+}
+
+impl HxChatView {
+    /// The media token on the image block a mark names.
+    pub fn image_token_of(&self, id: MessageId) -> Option<u32> {
+        let buf = self.imp_().buffer.borrow();
+        let msg = buf.message(id)?;
+        msg.blocks.iter().find_map(|b| match b {
+            hxchat_layout::Block::Image { token, .. } => Some(*token),
+            _ => None,
+        })
+    }
+}
+
+/// `GTKHX_CHATVIEW_TRACE=selection` turns on a per-line dump of what the
+/// snapshot pass thinks is selected.
+///
+/// Added because selection state spans three layers — gesture, model,
+/// renderer — and static reading cannot tell which one is empty-handed.
+/// The equivalent trick (a `g_message` reporting what was actually
+/// constructed) is what identified the C2 floating-reference bug after
+/// several wrong guesses.
+fn trace_selection() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("GTKHX_CHATVIEW_TRACE")
+            .map(|v| v.split(',').any(|p| p.trim() == "selection"))
+            .unwrap_or(false)
+    })
+}
+
+// ---- selection auto-scroll ------------------------------------------
+
+/// Pixels per second at the maximum overshoot, and the overshoot at
+/// which that rate is reached. Between zero and this the rate ramps, so
+/// a small overshoot creeps and a large one moves.
+const AUTOSCROLL_MAX_PPS: f64 = 1200.0;
+const AUTOSCROLL_FULL_AT: f64 = 120.0;
+
+impl HxChatView {
+    /// Extend the live selection to a widget-space point.
+    fn extend_selection_to(&self, x: f64, y: f64) {
+        let Some(focus) = self.caret_at(x, y) else {
+            return;
+        };
+        let mut sel = self.imp_().selection.borrow_mut();
+        if let Some(s) = sel.as_mut() {
+            s.focus = focus;
+        }
+        drop(sel);
+        self.queue_draw();
+    }
+
+    /// How far outside the viewport the drag pointer is, in pixels.
+    /// Negative above the top, positive below the bottom, 0 inside.
+    fn drag_overshoot(&self) -> f64 {
+        let (_, y) = self.imp_().drag_pointer.get();
+        let top = f64::from(PAD_Y);
+        let bottom = f64::from(self.height().max(0) - PAD_Y);
+        if y < top {
+            y - top
+        } else if y > bottom {
+            y - bottom
+        } else {
+            0.0
+        }
+    }
+
+    /// Start the auto-scroll tick while a drag is outside the viewport,
+    /// stop it otherwise.
+    fn sync_autoscroll(&self) {
+        let imp = self.imp_();
+        let want = imp.selecting.get() && self.drag_overshoot() != 0.0;
+        let running = imp.autoscroll_tick.borrow().is_some();
+        if want == running {
+            return;
+        }
+        if !want {
+            if let Some(id) = imp.autoscroll_tick.borrow_mut().take() {
+                id.remove();
+            }
+            return;
+        }
+        // Cell, not a plain local: add_tick_callback wants an `Fn`, so
+        // the closure cannot mutate captured state directly.
+        let last_us: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
+        let id = self.add_tick_callback(move |view, clock| {
+            let imp = view.imp_();
+            // Both stop conditions have to clear the stored id as well
+            // as returning Break, or `autoscroll_tick` outlives the
+            // callback it names: sync_autoscroll reads `is_some()` as
+            // "running", so a self-terminated tick makes it believe
+            // autoscroll is live and skip the restart, and its cleanup
+            // path would call remove() on an id GTK has already
+            // invalidated. Dropping a TickCallbackId is inert (gtk4-rs
+            // has no Drop impl for it — removal is the explicit
+            // `remove()`), so taking it here is exactly right.
+            let stop = |view: &HxChatView| {
+                *view.imp_().autoscroll_tick.borrow_mut() = None;
+                glib::ControlFlow::Break
+            };
+            if !imp.selecting.get() {
+                return stop(view);
+            }
+            let overshoot = view.drag_overshoot();
+            if overshoot == 0.0 {
+                return stop(view);
+            }
+            // Frame-time based rather than per-tick constant, so the
+            // scroll speed is the same on a 60 Hz and a 144 Hz display.
+            let now = clock.frame_time();
+            let dt = match last_us.get() {
+                Some(prev) => ((now - prev) as f64 / 1_000_000.0).clamp(0.0, 0.1),
+                None => 0.0,
+            };
+            last_us.set(Some(now));
+
+            let ramp = (overshoot.abs() / AUTOSCROLL_FULL_AT).clamp(0.0, 1.0);
+            let delta = overshoot.signum() * AUTOSCROLL_MAX_PPS * ramp * dt;
+
+            let height = content_height(view.height());
+            let cur = {
+                let mut buf = imp.buffer.borrow_mut();
+                buf.scroll_offset(height) as f64
+            };
+            let next = (cur + delta).max(0.0) as u64;
+            {
+                let mut buf = imp.buffer.borrow_mut();
+                buf.scroll_to(next, height, FOLLOW_SLOP);
+            }
+            view.sync_adjustment(height);
+
+            // Extend to the pointer, clamped into the viewport — the
+            // caret we want is the one at the edge we are scrolling
+            // towards, not one off-screen.
+            let (px, py) = imp.drag_pointer.get();
+            let clamped_y = py.clamp(
+                f64::from(PAD_Y),
+                f64::from(view.height().max(0) - PAD_Y),
+            );
+            view.extend_selection_to(px, clamped_y);
+            glib::ControlFlow::Continue
+        });
+        *imp.autoscroll_tick.borrow_mut() = Some(id);
     }
 }

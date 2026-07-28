@@ -5,7 +5,23 @@ vendored `src/xtext.c`. Sibling to `docs/inline-media-plan.md` (whose §9.E
 "Option 4 — variable-height xtext" is the seed of this document) and
 `docs/rust/ROADMAP.md` Phase R5.
 
-**Status:** scoping. Nothing implemented.
+**Status:** C0–C4 shipped; C5 (default flip, then deleting xtext) is next.
+
+| Phase | State |
+|---|---|
+| C0 — `chat_view.h` seam over xtext | shipped |
+| C1 — `hxchat-layout` engine | shipped |
+| C2 — `hxchat-view` widget, behind `GTKHX_CHATVIEW=new` | shipped |
+| C3 — selection, copy, zoom, links, context menu | shipped |
+| C4 — inline media, word-click parity, word/line select, auto-scroll | shipped |
+| C5 — default flip, delete xtext | not started |
+| C6 — structured append, avatar gutter, grouping | not started |
+
+The parity ledger in §6a is the C5-readiness check. Sections below
+describe the *design*; where the shipped code diverged from the original
+plan the section says so — notably §3.6's typed signals, which were
+deferred in favour of emitting xtext's `word-click` so the existing C
+handlers keep working unchanged during the A/B.
 
 ---
 
@@ -655,6 +671,72 @@ at C5. That also means the uid reaches the renderer from the start, which is
 what the avatar gutter needs.
 
 ---
+
+## 6a. Parity ledger (C5 readiness)
+
+The coexistence period ends when the new backend can be defaulted, so the
+question that matters is "what does xtext still do that hxchat doesn't?".
+`chat_view.h` is the whole parity surface — it was built from the actual
+call sites, so anything not in it is dead xtext API and irrelevant.
+
+**Done.** Construction, font, palette, word wrap, scrollback cap (with
+xtext's `> 2` semantics), indent mode and cap, timestamp column and
+format, the scroll adjustment, refresh, clear, append, two-column
+append, insert-before-a-mark, remove, media rows with real textures and
+animation, drag-select and copy, double-click word select, triple-click
+line select, selection auto-scroll past the viewport edge, autocopy (all
+three prefs), the indent separator *and dragging it*, keyboard paging,
+zoom, links, the context menu, and `word-click` emission — which is what keeps the three existing C
+handlers working unchanged.
+
+Selection auto-scroll is worth a note: CLAUDE.md lists xtext's version as
+a known *degradation*, because its scroll timers read
+`xtext->select_end_y` rather than the live device position — GTK 4 has no
+synchronous "where is the pointer" accessor. Storing the position from
+the drag handler and consuming it from a `GtkTickCallback` is the real
+answer, so this is one place the new backend is better rather than
+merely equal. The rate is frame-time based, so it scrolls at the same
+speed on a 60 Hz and a 144 Hz display.
+
+Two more places the new backend is better rather than equal:
+
+**Keyboard paging.** PgUp/PgDn have never worked in GtkHx — nothing in
+the tree binds them, and the chat view is deliberately not focusable
+(`gtk_widget_set_can_focus(FALSE)` in `chat.c`, so the input keeps
+focus), so the focused GtkTextView swallowed the key. A global-scope
+`GtkShortcut` would not help: those run *after* normal propagation, so
+the TextView still wins. The binding therefore lives on the same
+capture-phase root controller Ctrl+C uses, and steals the key only when
+focus is in a text-entry widget — the message input or the subject entry,
+where paging means nothing. The user list's `GtkColumnView` keeps its own
+page-by-page navigation. Shift+PgUp/PgDn, the long-standing IRC binding,
+works regardless of focus; Ctrl+Home/End jump to the top of the
+scrollback and back to following the tail.
+
+**A pinned separator.** xtext left the gutter's auto-grow enabled after a
+drag, so a long nick could silently undo a narrowing the user had just
+made by hand — a widening only stuck because it happened to exceed
+`max_auto_indent`, which switched the auto path off as a side effect.
+Here a drag pins the gutter explicitly, and nothing but an explicit
+unpin releases it (not a buffer clear, not a stamp-width change). The
+grab tolerance is ±4 px rather than xtext's ±1, which is unhittable on a
+fractional-scale display, and the drawn rule and the hit test share one
+`separator_x()` so they cannot drift apart.
+
+**Known gaps, in rough order of how much they'd be missed:**
+
+| Gap | Notes |
+|---|---|
+| Marker line | xtext tracks a last-read marker (`gtk_xtext_reset_marker_pos`, `_moveto_marker_pos`, `_check_marker_visibility`). Not exposed through `chat_view.h` and not currently called from C, so it is dead today — but it was a real feature and someone will notice its absence if it is ever rewired. |
+| In-buffer search | `gtk_xtext_search` / `lastlog`. Also not routed through `chat_view.h` today. C3 item, deferred. |
+| Markdown rendering | The parser exists and is tested; nothing renders it, because the compat path parses mIRC only. Enabling it changes what chat *looks like*, which is a deliberate no during the A/B (§6, C2–C5 must be pixel-identical). |
+| `set_urlcheck_function` | Accepted and ignored. The new backend autodetects with `gtkurl_scan` directly rather than asking a per-view classifier. Same scheme list, so the behaviour matches; the callback is simply redundant. |
+| *(none currently open)* | Selection auto-scroll and word/line select were the last two; both shipped. |
+
+**Not gaps, deliberately:** `set_show_separator` / `set_thin_separator` /
+`set_error_function` / `gtk_xtext_foreach` / the `buffer_new`/`_free`/
+`_show` trio are all xtext API with no caller in this tree; they die with
+xtext rather than being reproduced.
 
 ## 7. Testing
 

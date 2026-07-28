@@ -20,6 +20,10 @@ use crate::wrap::{estimate_height, layout_message, LayoutCache, LayoutGeneration
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+/// Floor for a hand-dragged gutter, so it can't be collapsed to
+/// nothing and become impossible to grab again.
+pub const MIN_INDENT: u32 = 16;
+
 #[derive(Debug)]
 struct Row {
     id: MessageId,
@@ -54,6 +58,15 @@ pub struct ChatBuffer {
     max_rows: usize,
     /// Widest gutter any row has asked for, so columns align.
     indent_width: u32,
+    /// Set once the user drags the separator, which freezes the gutter.
+    ///
+    /// xtext left auto-growth on after a drag, so a long nick could
+    /// silently undo a narrowing the user had just made by hand (and a
+    /// widening only stuck because it happened to exceed
+    /// `max_auto_indent`, which switched the auto path off as a side
+    /// effect). An explicit pin is the behaviour that was being
+    /// approximated.
+    indent_pinned: bool,
 }
 
 impl ChatBuffer {
@@ -75,6 +88,7 @@ impl ChatBuffer {
             anchor: ScrollAnchor::bottom(),
             max_rows: 0,
             indent_width: 0,
+            indent_pinned: false,
         }
     }
 
@@ -241,11 +255,17 @@ impl ChatBuffer {
     /// recompute the entry's subline list, diff the count, and patch the
     /// buffer's `num_lines` plus the scroll anchors. Here it is a height
     /// change, and the anchor absorbs it.
+    /// Attach (or with `None`, clear) the decoded size of an image
+    /// block.
+    ///
+    /// `None` is the decode-failed path: the row must shrink back to its
+    /// placeholder height, or the alt text ends up floating inside a
+    /// tall empty box the size of an image that never arrived.
     pub fn set_image_size(
         &mut self,
         id: MessageId,
         token: u32,
-        size: crate::message::ImageSize,
+        size: Option<crate::message::ImageSize>,
         measure: &dyn TextMeasure,
     ) -> bool {
         self.reindex();
@@ -261,7 +281,7 @@ impl ChatBuffer {
             } = b
             {
                 if *t == token {
-                    *s = Some(size);
+                    *s = size;
                     hit = true;
                 }
             }
@@ -293,7 +313,7 @@ impl ChatBuffer {
         self.pos.clear();
         self.pos_dirty = false;
         self.anchor = ScrollAnchor::bottom();
-        self.indent_width = 0;
+        self.reset_indent();
     }
 
     fn trim(&mut self) {
@@ -358,7 +378,7 @@ impl ChatBuffer {
             return;
         }
         self.params.indent = on;
-        self.indent_width = 0;
+        self.reset_indent();
         self.invalidate_layout();
     }
 
@@ -371,7 +391,7 @@ impl ChatBuffer {
         // The gutter has to be re-reconciled from scratch: it may need to
         // grow for a wider stamp, and when the stamp goes away it should
         // shrink back rather than stay padded out.
-        self.indent_width = 0;
+        self.reset_indent();
         self.invalidate_layout();
     }
 
@@ -430,7 +450,7 @@ impl ChatBuffer {
         // and dropping it would leave `layout_at(row)` returning None
         // immediately after an `ensure_layout(row)` call, which is a
         // contract violation the caller has no way to recover from.
-        if layout.natural_indent > self.indent_width {
+        if layout.natural_indent > self.indent_width && !self.indent_pinned {
             self.indent_width = layout.natural_indent;
             for r in &mut self.rows {
                 r.layout = None;
@@ -551,9 +571,156 @@ impl ChatBuffer {
         Some((link.href.clone(), label))
     }
 
+    /// The whitespace-delimited word around a caret.
+    ///
+    /// Tokenised exactly like xtext's `is_del` macro (xtext.c:239):
+    /// space, newline, `<`, `>` and NUL. Matching it byte-for-byte is
+    /// the whole point — the existing C handlers in `chat.c` recognise
+    /// their targets by *string*, and the angle brackets are what let
+    /// `<nick>` split into a bare nick. Tokenise differently and
+    /// `inline_media_chat_word_click` stops finding `hxmedia:N`, and the
+    /// chat-history sentinel stops matching.
+    pub fn word_at(&self, caret: &Caret) -> Option<String> {
+        let (start, end) = self.word_bounds(caret)?;
+        let row = self.row_of(caret.message)?;
+        let text = self.source_text(row, caret.source)?;
+        Some(text[start..end].to_string())
+    }
+
+    /// Byte bounds of the word around a caret, in its own source.
+    ///
+    /// Shared by `word_at` (which the `word-click` emission needs as a
+    /// string) and double-click word-select, so the two can never
+    /// disagree about where a word begins.
+    pub fn word_bounds(&self, caret: &Caret) -> Option<(usize, usize)> {
+        let row = self.row_of(caret.message)?;
+        let text = self.source_text(row, caret.source)?;
+        if text.is_empty() {
+            return None;
+        }
+        let is_del = |c: char| c == ' ' || c == '\n' || c == '<' || c == '>' || c == '\0';
+        // Clamp to a char boundary before slicing. Carets from
+        // `hit_test` are already aligned, but this is reachable from the
+        // FFI with an arbitrary offset, and `&text[at..]` off a boundary
+        // panics — which unwinds into GTK and aborts.
+        let mut at = caret.offset.min(text.len());
+        while at > 0 && !text.is_char_boundary(at) {
+            at -= 1;
+        }
+
+        // A click *on* a delimiter yields no word, which is what xtext
+        // does: both its scan loops (xtext.c:2095, 2114) test `is_del`
+        // before stepping, so they collapse to an empty span. Returning
+        // the preceding word instead would make clicking the gap after a
+        // link activate it.
+        match text[at..].chars().next() {
+            Some(c) if !is_del(c) => {}
+            _ => return None,
+        }
+
+        let start = text[..at]
+            .rfind(is_del)
+            .map(|i| i + text[i..].chars().next().map_or(1, |c| c.len_utf8()))
+            .unwrap_or(0);
+        let end = text[at..]
+            .find(is_del)
+            .map(|i| at + i)
+            .unwrap_or(text.len());
+        if start >= end {
+            return None;
+        }
+        Some((start, end))
+    }
+
+    /// Double-click: select the word under the caret.
+    pub fn select_word(&self, caret: &Caret) -> Option<Selection> {
+        let (start, end) = self.word_bounds(caret)?;
+        Some(Selection::new(
+            Caret {
+                message: caret.message,
+                source: caret.source,
+                offset: start,
+            },
+            Caret {
+                message: caret.message,
+                source: caret.source,
+                offset: end,
+            },
+        ))
+    }
+
+    /// Triple-click: select the whole row, gutter included.
+    ///
+    /// The gutter is part of what the user sees on that line, so it is
+    /// part of what a "select this line" gesture should give them —
+    /// consistent with a whole-row selection dragged from above.
+    pub fn select_row(&self, row: usize) -> Option<Selection> {
+        let id = self.id_at(row)?;
+        let first = self.sources_of(row).first().copied()?;
+        let last = self.sources_of(row).last().copied()?;
+        let end_len = self.source_text(row, last).map_or(0, |t| t.len());
+        Some(Selection::new(
+            Caret {
+                message: id,
+                source: first,
+                offset: 0,
+            },
+            Caret {
+                message: id,
+                source: last,
+                offset: end_len,
+            },
+        ))
+    }
+
     /// The settled gutter width. 0 when not in indent mode.
     pub fn indent_width(&self) -> u32 {
         self.indent_width
+    }
+
+    /// Whether the gutter has been pinned by a separator drag.
+    pub fn indent_pinned(&self) -> bool {
+        self.indent_pinned
+    }
+
+    /// Pin the gutter to `px`, as a separator drag does.
+    ///
+    /// Deliberately not clamped to `max_indent`: that cap governs how
+    /// far the gutter may grow *on its own*, and a user dragging the
+    /// separator is saying something the cap has no business overruling.
+    /// The caller clamps to the viewport instead. Returns whether
+    /// anything moved.
+    pub fn set_indent_width(&mut self, px: u32) -> bool {
+        let px = px.max(MIN_INDENT);
+        self.indent_pinned = true;
+        if px == self.indent_width {
+            return false;
+        }
+        self.indent_width = px;
+        self.invalidate_layout();
+        true
+    }
+
+    /// Drop the auto-sized gutter so it re-reconciles from scratch.
+    ///
+    /// A no-op once pinned: every caller of this is some *other* knob
+    /// changing (buffer cleared, stamp width changed, indent toggled),
+    /// and none of them is a reason to discard a width the user set by
+    /// hand.
+    fn reset_indent(&mut self) {
+        if !self.indent_pinned {
+            self.indent_width = 0;
+        }
+    }
+
+    /// Release the pin and let the gutter auto-size again.
+    pub fn unpin_indent(&mut self) {
+        if !self.indent_pinned {
+            return;
+        }
+        self.indent_pinned = false;
+        self.indent_width = 0;
+        self.invalidate_layout();
     }
 
     /// Map a content-space pixel to a document position.
@@ -655,69 +822,171 @@ impl ChatBuffer {
         if row > sr && row < er {
             return RowSelection::All;
         }
-        // A boundary row: only the named source is partially covered.
-        let (source, from, to) = if sr == er {
-            if start.source != end.source {
-                // Spanning sources within one row (gutter → body):
-                // treat as whole-row, which is what the user means.
-                return RowSelection::All;
-            }
-            (start.source, start.offset, end.offset)
+        // A boundary row. The covered span can begin in one source and
+        // end in another (gutter → body), so both endpoints are carried
+        // and the caller resolves per source.
+        let last = self.last_source(row);
+        let (from, to) = if sr == er {
+            ((start.source, start.offset), (end.source, end.offset))
         } else if row == sr {
-            let text_len = self
-                .source_text(row, start.source)
-                .map_or(0, |t| t.len());
-            (start.source, start.offset, text_len)
+            // Starts here, runs to the end of the row.
+            (
+                (start.source, start.offset),
+                (last, self.source_text(row, last).map_or(0, |t| t.len())),
+            )
         } else {
-            (end.source, 0, end.offset)
+            // Ends here, having begun above.
+            ((self.first_source(row), 0), (end.source, end.offset))
         };
-        let (from, to) = if from <= to { (from, to) } else { (to, from) };
         RowSelection::Partial {
-            source,
             start: from,
             end: to,
         }
     }
 
-    /// The selected text, rows joined by newlines.
-    pub fn selected_text(&self, sel: &Selection) -> String {
+    /// The row's sources in visual order: gutter first, then blocks.
+    pub fn sources_of(&self, row: usize) -> Vec<LineSource> {
+        let mut out = Vec::new();
+        let Some(msg) = self.message_at(row) else {
+            return out;
+        };
+        if msg.gutter.as_ref().is_some_and(|g| !g.text.is_empty()) {
+            out.push(LineSource::Gutter);
+        }
+        for i in 0..msg.blocks.len() {
+            out.push(LineSource::Block(i));
+        }
+        out
+    }
+
+    fn first_source(&self, row: usize) -> LineSource {
+        self.sources_of(row)
+            .first()
+            .copied()
+            .unwrap_or(LineSource::Block(0))
+    }
+
+    fn last_source(&self, row: usize) -> LineSource {
+        self.sources_of(row)
+            .last()
+            .copied()
+            .unwrap_or(LineSource::Block(0))
+    }
+
+    /// The byte range of `source` covered by a row selection, if any.
+    ///
+    /// The one place that resolves a possibly-cross-source `Partial`
+    /// against a single text, so the view and `selected_text` cannot
+    /// disagree about what is highlighted versus what gets copied.
+    pub fn covered_range(
+        &self,
+        row: usize,
+        source: LineSource,
+        sel: &RowSelection,
+    ) -> Option<std::ops::Range<usize>> {
+        let len = self.source_text(row, source).map_or(0, |t| t.len());
+        match sel {
+            RowSelection::None => None,
+            RowSelection::All => Some(0..len),
+            RowSelection::Partial { start, end } => {
+                let rank = crate::select::source_rank(source);
+                let (sr, so) = *start;
+                let (er, eo) = *end;
+                let (sr, er) = (crate::select::source_rank(sr), crate::select::source_rank(er));
+                if rank < sr || rank > er {
+                    return None;
+                }
+                let from = if rank == sr { so.min(len) } else { 0 };
+                let to = if rank == er { eo.min(len) } else { len };
+                if from < to {
+                    Some(from..to)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// The selected text of each covered row, as `(row, text)`.
+    ///
+    /// Exposed per row because a row's own text may contain hard
+    /// newlines — the wrap engine supports them — so a caller cannot
+    /// recover row boundaries by splitting the joined string. The
+    /// autocopy-timestamp path needs exactly that: it prefixes each
+    /// *row* with that row's stamp, and iterating `lines()` over the
+    /// joined output drifts onto the wrong rows the moment any selected
+    /// message spans more than one line.
+    pub fn selected_rows(&self, sel: &Selection) -> Vec<(usize, String)> {
         if sel.is_empty() {
-            return String::new();
+            return Vec::new();
         }
         let (start, end) = sel.ordered(|id| self.row_of(id));
         let (Some(sr), Some(er)) = (self.row_of(start.message), self.row_of(end.message)) else {
-            return String::new();
+            return Vec::new();
         };
-        let mut out = String::new();
+        let mut out = Vec::new();
         for row in sr..=er {
-            if row > sr {
-                out.push('\n');
-            }
-            match self.row_selection(row, sel) {
-                RowSelection::None => {}
-                RowSelection::All => {
-                    if let Some(m) = self.message_at(row) {
-                        // The gutter is part of what the user sees, so
-                        // it is part of what they copy.
-                        if let Some(g) = &m.gutter {
-                            if !g.text.is_empty() {
-                                out.push_str(&g.text);
-                                out.push(' ');
-                            }
-                        }
-                        out.push_str(&m.to_plain_text());
-                    }
+            // Walk the row's sources in visual order and take whatever
+            // each contributes. One path for every case, so the gutter
+            // is copied when it is selected and only then.
+            let rsel = self.row_selection(row, sel);
+            let mut text = String::new();
+            let mut prev: Option<LineSource> = None;
+            // A row can be *covered* and still contribute nothing — the
+            // first and last rows of a selection that starts at the end
+            // of one row and ends at the start of another. Those must
+            // not be reported: they become blank lines in the copied
+            // text, and AUTOCOPY_STAMP would prefix a timestamp to a row
+            // with no content. A row that is genuinely empty is a
+            // different thing and does belong in the output as a blank
+            // line, so the test is "had text and none of it was
+            // selected", not "produced no text".
+            let mut had_text = false;
+            for source in self.sources_of(row) {
+                // Note the order: `had_text` has to be established
+                // before any early-continue, or a row whose coverage is
+                // empty everywhere looks indistinguishable from a row
+                // that is empty.
+                let Some(t) = self.source_text(row, source) else {
+                    continue;
+                };
+                had_text |= !t.is_empty();
+                let Some(range) = self.covered_range(row, source, &rsel) else {
+                    continue;
+                };
+                let Some(slice) = t.get(range) else { continue };
+                if slice.is_empty() {
+                    continue;
                 }
-                RowSelection::Partial { source, start, end } => {
-                    if let Some(t) = self.source_text(row, source) {
-                        if let Some(slice) = t.get(start..end) {
-                            out.push_str(slice);
-                        }
-                    }
+                // Separator matches Message::to_plain_text, which is
+                // what whole-row copying used before this path existed:
+                // a space between the gutter and the body (they read as
+                // one line), a newline between body blocks (they are
+                // distinct blocks and collapsing them to spaces would
+                // run a code block into the paragraph after it).
+                match prev {
+                    None => {}
+                    Some(LineSource::Gutter) => text.push(' '),
+                    Some(LineSource::Block(_)) => text.push('\n'),
                 }
+                text.push_str(slice);
+                prev = Some(source);
             }
+            if text.is_empty() && had_text {
+                continue;
+            }
+            out.push((row, text));
         }
         out
+    }
+
+    /// The selected text, rows joined by newlines.
+    pub fn selected_text(&self, sel: &Selection) -> String {
+        self.selected_rows(sel)
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn layout_at(&self, row: usize) -> Option<&LayoutCache> {
