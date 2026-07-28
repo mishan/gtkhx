@@ -20,6 +20,10 @@ use crate::wrap::{estimate_height, layout_message, LayoutCache, LayoutGeneration
 use std::collections::HashMap;
 use std::collections::VecDeque;
 
+/// Floor for a hand-dragged gutter, so it can't be collapsed to
+/// nothing and become impossible to grab again.
+pub const MIN_INDENT: u32 = 16;
+
 #[derive(Debug)]
 struct Row {
     id: MessageId,
@@ -54,6 +58,15 @@ pub struct ChatBuffer {
     max_rows: usize,
     /// Widest gutter any row has asked for, so columns align.
     indent_width: u32,
+    /// Set once the user drags the separator, which freezes the gutter.
+    ///
+    /// xtext left auto-growth on after a drag, so a long nick could
+    /// silently undo a narrowing the user had just made by hand (and a
+    /// widening only stuck because it happened to exceed
+    /// `max_auto_indent`, which switched the auto path off as a side
+    /// effect). An explicit pin is the behaviour that was being
+    /// approximated.
+    indent_pinned: bool,
 }
 
 impl ChatBuffer {
@@ -75,6 +88,7 @@ impl ChatBuffer {
             anchor: ScrollAnchor::bottom(),
             max_rows: 0,
             indent_width: 0,
+            indent_pinned: false,
         }
     }
 
@@ -299,7 +313,7 @@ impl ChatBuffer {
         self.pos.clear();
         self.pos_dirty = false;
         self.anchor = ScrollAnchor::bottom();
-        self.indent_width = 0;
+        self.reset_indent();
     }
 
     fn trim(&mut self) {
@@ -364,7 +378,7 @@ impl ChatBuffer {
             return;
         }
         self.params.indent = on;
-        self.indent_width = 0;
+        self.reset_indent();
         self.invalidate_layout();
     }
 
@@ -377,7 +391,7 @@ impl ChatBuffer {
         // The gutter has to be re-reconciled from scratch: it may need to
         // grow for a wider stamp, and when the stamp goes away it should
         // shrink back rather than stay padded out.
-        self.indent_width = 0;
+        self.reset_indent();
         self.invalidate_layout();
     }
 
@@ -436,7 +450,7 @@ impl ChatBuffer {
         // and dropping it would leave `layout_at(row)` returning None
         // immediately after an `ensure_layout(row)` call, which is a
         // contract violation the caller has no way to recover from.
-        if layout.natural_indent > self.indent_width {
+        if layout.natural_indent > self.indent_width && !self.indent_pinned {
             self.indent_width = layout.natural_indent;
             for r in &mut self.rows {
                 r.layout = None;
@@ -662,6 +676,51 @@ impl ChatBuffer {
     /// The settled gutter width. 0 when not in indent mode.
     pub fn indent_width(&self) -> u32 {
         self.indent_width
+    }
+
+    /// Whether the gutter has been pinned by a separator drag.
+    pub fn indent_pinned(&self) -> bool {
+        self.indent_pinned
+    }
+
+    /// Pin the gutter to `px`, as a separator drag does.
+    ///
+    /// Deliberately not clamped to `max_indent`: that cap governs how
+    /// far the gutter may grow *on its own*, and a user dragging the
+    /// separator is saying something the cap has no business overruling.
+    /// The caller clamps to the viewport instead. Returns whether
+    /// anything moved.
+    pub fn set_indent_width(&mut self, px: u32) -> bool {
+        let px = px.max(MIN_INDENT);
+        self.indent_pinned = true;
+        if px == self.indent_width {
+            return false;
+        }
+        self.indent_width = px;
+        self.invalidate_layout();
+        true
+    }
+
+    /// Drop the auto-sized gutter so it re-reconciles from scratch.
+    ///
+    /// A no-op once pinned: every caller of this is some *other* knob
+    /// changing (buffer cleared, stamp width changed, indent toggled),
+    /// and none of them is a reason to discard a width the user set by
+    /// hand.
+    fn reset_indent(&mut self) {
+        if !self.indent_pinned {
+            self.indent_width = 0;
+        }
+    }
+
+    /// Release the pin and let the gutter auto-size again.
+    pub fn unpin_indent(&mut self) {
+        if !self.indent_pinned {
+            return;
+        }
+        self.indent_pinned = false;
+        self.indent_width = 0;
+        self.invalidate_layout();
     }
 
     /// Map a content-space pixel to a document position.

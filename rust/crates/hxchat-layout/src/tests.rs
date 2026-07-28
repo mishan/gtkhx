@@ -1814,3 +1814,75 @@ fn word_bounds_does_not_panic_on_a_caret_inside_a_codepoint() {
     let sel = b.select_word(&mid).expect("word selected");
     assert_eq!(b.selected_rows(&sel)[0].1, "naïve");
 }
+
+#[test]
+fn dragging_the_separator_pins_the_gutter() {
+    // The gutter auto-grows to fit the widest nick. Once the user drags
+    // the separator, that has to stop: xtext kept auto-growing after a
+    // drag, so a long nick would silently undo a narrowing the user had
+    // just made by hand.
+    let m = FixedMeasure::new(10);
+    let mut p = params(1200);
+    p.indent = true;
+    p.max_indent = 400;
+    let mut b = ChatBuffer::new(p);
+
+    let say = |nick: &str| Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain(nick)),
+        blocks: vec![Block::Text(ParsedText::plain("hi"))],
+        flags: MessageFlagsNone::NONE,
+    };
+
+    b.append(say("<a>"), &m);
+    b.ensure_layout(0, &m);
+    let auto = b.indent_width();
+    assert!(auto > 0 && !b.indent_pinned());
+
+    // A longer nick still widens it while unpinned.
+    b.append(say("<averyverylongnick>"), &m);
+    b.ensure_layout(1, &m);
+    assert!(b.indent_width() > auto, "gutter should auto-grow");
+
+    // Pin it narrower than the widest nick.
+    assert!(b.set_indent_width(40));
+    assert!(b.indent_pinned());
+    assert_eq!(b.indent_width(), 40);
+
+    // Now an even longer nick must not move it.
+    b.append(say("<anevenlongernickthanbefore>"), &m);
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(b.indent_width(), 40, "pinned gutter must not auto-grow");
+
+    // Neither must a clear or a stamp-width change, both of which reset
+    // the auto-sized gutter.
+    b.set_stamp_width(60);
+    assert_eq!(b.indent_width(), 40, "stamp width must not unpin");
+    b.clear();
+    assert_eq!(b.indent_width(), 40, "clearing the buffer must not unpin");
+
+    // Unpinning hands it back to the auto path.
+    b.unpin_indent();
+    assert!(!b.indent_pinned());
+    b.append(say("<a>"), &m);
+    b.ensure_layout(0, &m);
+    assert_ne!(b.indent_width(), 40);
+}
+
+#[test]
+fn a_pinned_gutter_has_a_floor() {
+    // Dragging the separator to zero would leave nothing to grab, so the
+    // divider could never be dragged back out.
+    let m = FixedMeasure::new(10);
+    let mut p = params(1200);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.set_indent_width(0);
+    assert_eq!(b.indent_width(), crate::buffer::MIN_INDENT);
+    let _ = &m;
+}

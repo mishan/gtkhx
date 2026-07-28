@@ -685,8 +685,8 @@ format, the scroll adjustment, refresh, clear, append, two-column
 append, insert-before-a-mark, remove, media rows with real textures and
 animation, drag-select and copy, double-click word select, triple-click
 line select, selection auto-scroll past the viewport edge, autocopy (all
-three prefs), the indent separator, zoom, links, the context menu, and
-`word-click` emission — which is what keeps the three existing C
+three prefs), the indent separator *and dragging it*, keyboard paging,
+zoom, links, the context menu, and `word-click` emission — which is what keeps the three existing C
 handlers working unchanged.
 
 Selection auto-scroll is worth a note: CLAUDE.md lists xtext's version as
@@ -697,6 +697,31 @@ the drag handler and consuming it from a `GtkTickCallback` is the real
 answer, so this is one place the new backend is better rather than
 merely equal. The rate is frame-time based, so it scrolls at the same
 speed on a 60 Hz and a 144 Hz display.
+
+Two more places the new backend is better rather than equal:
+
+**Keyboard paging.** PgUp/PgDn have never worked in GtkHx — nothing in
+the tree binds them, and the chat view is deliberately not focusable
+(`gtk_widget_set_can_focus(FALSE)` in `chat.c`, so the input keeps
+focus), so the focused GtkTextView swallowed the key. A global-scope
+`GtkShortcut` would not help: those run *after* normal propagation, so
+the TextView still wins. The binding therefore lives on the same
+capture-phase root controller Ctrl+C uses, and steals the key only when
+focus is in a text-entry widget — the message input or the subject entry,
+where paging means nothing. The user list's `GtkColumnView` keeps its own
+page-by-page navigation. Shift+PgUp/PgDn, the long-standing IRC binding,
+works regardless of focus; Ctrl+Home/End jump to the top of the
+scrollback and back to following the tail.
+
+**A pinned separator.** xtext left the gutter's auto-grow enabled after a
+drag, so a long nick could silently undo a narrowing the user had just
+made by hand — a widening only stuck because it happened to exceed
+`max_auto_indent`, which switched the auto path off as a side effect.
+Here a drag pins the gutter explicitly, and nothing but an explicit
+unpin releases it (not a buffer clear, not a stamp-width change). The
+grab tolerance is ±4 px rather than xtext's ±1, which is unhittable on a
+fractional-scale display, and the drawn rule and the hit test share one
+`separator_x()` so they cannot drift apart.
 
 **Known gaps, in rough order of how much they'd be missed:**
 

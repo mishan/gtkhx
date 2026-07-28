@@ -80,7 +80,7 @@ pub mod wrap;
 mod tests;
 
 pub use anchor::{Gravity, ScrollAnchor};
-pub use buffer::ChatBuffer;
+pub use buffer::{ChatBuffer, MIN_INDENT};
 pub use index::HeightIndex;
 pub use measure::{FixedMeasure, FontMetrics, TextMeasure};
 pub use message::{

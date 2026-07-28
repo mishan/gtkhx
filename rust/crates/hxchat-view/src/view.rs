@@ -27,7 +27,7 @@ use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use hxchat_layout::{
     Caret, ChatBuffer, ColorRef, LayoutParams, LineSource, Message, MessageId, ParsedText,
-    RowSelection, Selection, Span, Style, TextMeasure,
+    RowSelection, Selection, Span, Style, TextMeasure, MIN_INDENT,
 };
 
 use crate::measure::PangoMeasure;
@@ -48,6 +48,34 @@ pub const PAL_MARK_BG: usize = 33;
 /// Pixels of slop within which a scroll position counts as "at the
 /// bottom" and resumes following.
 const FOLLOW_SLOP: u32 = 8;
+
+enum ScrollKey {
+    /// Viewport-sized step; -1 up, 1 down.
+    Page(i32),
+    Home,
+    End,
+}
+
+/// Does the focused widget edit text?
+///
+/// Anything that does has no meaningful use for a page key (the inputs
+/// here are a few lines tall at most), so the chat log may claim it.
+/// Anything that doesn't — notably the user list's GtkColumnView — keeps
+/// its own paging.
+fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
+    use gtk4::prelude::*;
+    let Some(root) = c.widget().and_then(|w| w.root()) else {
+        return false;
+    };
+    let Some(focus) = root.focus() else {
+        return false;
+    };
+    focus.is::<gtk4::TextView>() || focus.is::<gtk4::Text>() || focus.is::<gtk4::Entry>()
+}
+
+/// Grab tolerance either side of the separator rule, in px.
+const SEPARATOR_GRAB: f64 = 4.0;
+
 
 /// Inset between the widget edge and the text.
 ///
@@ -124,6 +152,9 @@ mod imp {
 
         pub font_generation: Cell<u32>,
         pub separator: Cell<bool>,
+        /// Set while a drag is moving the gutter separator rather than
+        /// selecting text.
+        pub moving_separator: Cell<bool>,
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
@@ -178,6 +209,7 @@ mod imp {
                 updating_adj: Cell::new(false),
                 font_generation: Cell::new(0),
                 separator: Cell::new(false),
+                moving_separator: Cell::new(false),
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
@@ -680,6 +712,8 @@ impl HxChatView {
             let space = imp.measure.borrow().metrics().space_width;
             drop(buf_ref);
             if imp.separator.get() && indent > 0 {
+                // Content coordinates here (the snapshot is translated by
+                // PAD_X), so this is `separator_x() - PAD_X`.
                 let x = indent as f32 - ((space as f32 + 1.0) / 2.0);
                 if x >= 1.0 {
                     let fg = self.imp_().palette.borrow()[PAL_FG];
@@ -1042,6 +1076,65 @@ fn format_stamp(unix: i64, format: &str) -> Option<String> {
 
 impl HxChatView {
     /// Drag-to-select, click-to-clear, and Ctrl+C.
+    /// Widget-space x of the drawn separator rule, if one is drawn.
+    ///
+    /// Single source of truth for both the snapshot and the hit test —
+    /// the two disagreeing is how a divider ends up ungrabbable at the
+    /// exact pixel it appears on.
+    fn separator_x(&self) -> Option<f64> {
+        let imp = self.imp_();
+        if !imp.separator.get() {
+            return None;
+        }
+        let indent = imp.buffer.borrow().indent_width();
+        if indent == 0 {
+            return None;
+        }
+        let half = self.half_space();
+        Some(PAD_X as f64 + indent as f64 - half)
+    }
+
+    fn half_space(&self) -> f64 {
+        let space = self.imp_().measure.borrow().metrics().space_width;
+        (space as f64 + 1.0) / 2.0
+    }
+
+    /// Is `x` close enough to the separator to grab it?
+    ///
+    /// xtext used ±1 px, which is unhittable on a fractional-scale
+    /// display; the C fork had already widened it to ±4 for that reason.
+    fn on_separator(&self, x: f64) -> bool {
+        match self.separator_x() {
+            Some(sx) => (x - sx).abs() <= SEPARATOR_GRAB,
+            None => false,
+        }
+    }
+
+    /// Move the gutter so the separator lands under the pointer.
+    ///
+    /// Clamped to a band of the viewport rather than to `max_indent`:
+    /// that cap is about how far the gutter may grow unattended, and the
+    /// point of the drag is to overrule it. The upper bound keeps the
+    /// body column from being squeezed out of existence.
+    fn drag_separator_to(&self, x: f64) {
+        let width = self.width();
+        if width <= 0 {
+            return;
+        }
+        let lo = PAD_X as f64 + MIN_INDENT as f64;
+        let hi = (3.0 * width as f64) / 5.0;
+        if hi <= lo {
+            return;
+        }
+        let x = x.clamp(lo, hi);
+        let indent = (x + self.half_space() - PAD_X as f64).max(0.0) as u32;
+        let moved = self.imp_().buffer.borrow_mut().set_indent_width(indent);
+        if moved {
+            self.queue_resize();
+            self.queue_draw();
+        }
+    }
+
     fn install_selection_gestures(&self) {
         // The widget has to be focusable for a key controller to reach
         // it; xtext's consumers call gtk_widget_set_can_focus(FALSE) to
@@ -1052,6 +1145,14 @@ impl HxChatView {
 
         let this = self.clone();
         drag.connect_drag_begin(move |g, x, y| {
+            // The separator wins over selection: it lives in the gutter,
+            // where a stray text drag is cheap to redo but a divider you
+            // cannot grab is simply broken.
+            if this.on_separator(x) {
+                this.imp_().moving_separator.set(true);
+                this.imp_().selecting.set(false);
+                return;
+            }
             let start = this.caret_at(x, y);
             this.imp_().selecting.set(true);
             match start {
@@ -1066,6 +1167,12 @@ impl HxChatView {
 
         let this = self.clone();
         drag.connect_drag_update(move |g, dx, dy| {
+            if this.imp_().moving_separator.get() {
+                if let Some((sx, _)) = g.start_point() {
+                    this.drag_separator_to(sx + dx);
+                }
+                return;
+            }
             if !this.imp_().selecting.get() {
                 return;
             }
@@ -1080,6 +1187,10 @@ impl HxChatView {
 
         let this = self.clone();
         drag.connect_drag_end(move |_, _, _| {
+            if this.imp_().moving_separator.get() {
+                this.imp_().moving_separator.set(false);
+                return;
+            }
             this.imp_().selecting.set(false);
             this.sync_autoscroll();
             // Drag-end autocopy, matching xtext's behaviour and driven
@@ -1203,11 +1314,14 @@ impl HxChatView {
         let key = gtk4::EventControllerKey::new();
         key.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let this = self.clone();
-        key.connect_key_pressed(move |_, keyval, _, state| {
+        key.connect_key_pressed(move |c, keyval, _, state| {
             let ctrl = state.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
             let is_c = keyval == gtk4::gdk::Key::c || keyval == gtk4::gdk::Key::C;
             if ctrl && is_c && this.has_selection() {
                 this.copy_selection_to(ClipboardTarget::Clipboard);
+                return glib::Propagation::Stop;
+            }
+            if this.handle_scroll_key(c, keyval, state) {
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
@@ -1219,6 +1333,96 @@ impl HxChatView {
         if let Some((weak, _)) = imp.root_key_handler.borrow().as_ref() {
             weak.set(Some(&root_widget));
         }
+    }
+
+    /// Page/Home/End handling for the capture-phase root controller.
+    ///
+    /// These keys have to be stolen from the focus path rather than
+    /// bound here, because consumers call
+    /// `gtk_widget_set_can_focus(FALSE)` on the chat view so the message
+    /// input keeps focus — and GtkTextView binds Page_Up/Page_Down to
+    /// its own cursor movement, so a global-scope GtkShortcut (which
+    /// runs *after* normal propagation) would never fire. That is why
+    /// paging has never worked in GtkHx: nothing in the tree ever bound
+    /// it, and the widget that had focus swallowed it.
+    ///
+    /// The steal is narrow on purpose. It only applies when focus is in
+    /// a text-entry widget — the message input or the subject entry,
+    /// where paging means nothing — so the user list keeps its own
+    /// page-by-page keyboard navigation.
+    fn handle_scroll_key(
+        &self,
+        c: &gtk4::EventControllerKey,
+        keyval: gtk4::gdk::Key,
+        state: gtk4::gdk::ModifierType,
+    ) -> bool {
+        use gtk4::gdk::Key;
+        // A view that isn't on screen (a background tab, a closed private
+        // chat) must not eat the window's keys.
+        if !self.is_mapped() {
+            return false;
+        }
+        let ctrl = state.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
+        let shift = state.contains(gtk4::gdk::ModifierType::SHIFT_MASK);
+
+        let action = match keyval {
+            Key::Page_Up | Key::KP_Page_Up => ScrollKey::Page(-1),
+            Key::Page_Down | Key::KP_Page_Down => ScrollKey::Page(1),
+            Key::Home | Key::KP_Home if ctrl => ScrollKey::Home,
+            Key::End | Key::KP_End if ctrl => ScrollKey::End,
+            _ => return false,
+        };
+
+        // Shift+PgUp/PgDn is the long-standing IRC binding for "scroll
+        // the log" and is unambiguous anywhere, so it bypasses the
+        // focus check. Unmodified paging only applies over an input.
+        if !(shift && matches!(action, ScrollKey::Page(_))) && !focus_is_text_entry(c) {
+            return false;
+        }
+
+        match action {
+            ScrollKey::Page(dir) => self.scroll_page(dir),
+            ScrollKey::Home => self.scroll_to_extreme(false),
+            ScrollKey::End => self.scroll_to_extreme(true),
+        }
+        true
+    }
+
+    /// Scroll one viewport, less a line of overlap so the line being
+    /// read stays on screen across the jump.
+    pub fn scroll_page(&self, dir: i32) {
+        let height = content_height(self.height());
+        if height == 0 {
+            return;
+        }
+        let line = self.imp_().measure.borrow().metrics().line_height.max(1);
+        let step = height.saturating_sub(line).max(line) as i64;
+        let cur = {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_offset(height) as i64
+        };
+        let next = (cur + step * dir as i64).max(0) as u64;
+        self.scroll_absolute(next, height);
+    }
+
+    /// Jump to the top of the scrollback, or back to following the tail.
+    pub fn scroll_to_extreme(&self, bottom: bool) {
+        let height = content_height(self.height());
+        if bottom {
+            let total = self.imp_().buffer.borrow_mut().total_height();
+            self.scroll_absolute(total.saturating_sub(height as u64), height);
+        } else {
+            self.scroll_absolute(0, height);
+        }
+    }
+
+    fn scroll_absolute(&self, y: u64, height: u32) {
+        {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_to(y, height, FOLLOW_SLOP);
+        }
+        self.sync_adjustment(height);
+        self.queue_draw();
     }
 
     /// Widget-space point → document position.
@@ -1440,8 +1644,13 @@ impl HxChatView {
         let motion = gtk4::EventControllerMotion::new();
         let this = self.clone();
         motion.connect_motion(move |_, x, y| {
-            let over = this.link_at_point(x, y).is_some();
-            let want = if over { "pointer" } else { "text" };
+            let want = if this.on_separator(x) || this.imp_().moving_separator.get() {
+                "col-resize"
+            } else if this.link_at_point(x, y).is_some() {
+                "pointer"
+            } else {
+                "text"
+            };
             if this.cursor().and_then(|c| c.name()).as_deref() != Some(want) {
                 this.set_cursor_from_name(Some(want));
             }
