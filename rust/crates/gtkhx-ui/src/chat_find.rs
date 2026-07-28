@@ -93,11 +93,22 @@ impl FindCtx {
         } else {
             self.count.set_text(&format!("{cur} / {n}"));
         }
-        self.entry
-            .set_css_classes(if !empty_query && n == 0 { &["error"] } else { &[] });
+        // add/remove, not set_css_classes: the latter replaces the whole
+        // list, which would drop whatever classes GtkSearchEntry itself
+        // relies on for its default styling. We only own "error" here.
+        self.set_error(!empty_query && n == 0);
         let has = n > 0;
         self.prev_btn.set_sensitive(has);
         self.next_btn.set_sensitive(has);
+    }
+
+    /// Toggle the "no results" styling without touching any other class.
+    fn set_error(&self, on: bool) {
+        if on {
+            self.entry.add_css_class("error");
+        } else {
+            self.entry.remove_css_class("error");
+        }
     }
 
     /// Run any pending debounced search immediately.
@@ -129,7 +140,7 @@ impl FindCtx {
         }
         unsafe { hx_chat_view_search_clear(self.cptr()) };
         self.count.set_text("");
-        self.entry.set_css_classes(&[]);
+        self.set_error(false);
         self.prev_btn.set_sensitive(false);
         self.next_btn.set_sensitive(false);
     }
