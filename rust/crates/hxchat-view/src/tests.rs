@@ -635,20 +635,70 @@ fn a_styled_body_keeps_its_colour_under_the_markdown() {
     let p = text_of(&blocks[0]);
     assert_eq!(p.text, "muted bold tail");
 
-    // Every byte carries the muted colour...
-    for (i, _) in p.text.char_indices() {
-        let covered = p
-            .spans
-            .iter()
-            .any(|s| s.range.contains(&i) && s.style.fg == hxchat_layout::ColorRef::Palette(37));
-        assert!(covered, "byte {i} lost the row colour");
+    // The spans must *tile* the text: start at 0, be contiguous, and
+    // reach the end, every one of them carrying the muted colour.
+    //
+    // Tiling is the property that matters, and asserting it directly is
+    // better than sampling positions. The renderer draws a gap between
+    // spans in the *default* style, so a single uncovered byte is a
+    // visibly unmuted stretch of a muted row — and a per-character loop
+    // (which this was) cannot see a gap that falls inside a character
+    // anyway.
+    let mut spans: Vec<_> = p.spans.iter().collect();
+    spans.sort_by_key(|s| s.range.start);
+    let mut at = 0usize;
+    for s in &spans {
+        assert_eq!(
+            s.range.start, at,
+            "gap or overlap before {:?} — the row would draw unmuted there",
+            &p.text[s.range.clone()]
+        );
+        assert_eq!(
+            s.style.fg,
+            hxchat_layout::ColorRef::Palette(37),
+            "{:?} lost the row colour",
+            &p.text[s.range.clone()]
+        );
+        at = s.range.end;
     }
+    assert_eq!(at, p.text.len(), "the tail of the row is uncovered");
+
     // ...and the emphasis is still there on top.
     assert!(p
         .spans
         .iter()
         .any(|s| &p.text[s.range.clone()] == "bold"
             && s.style.attrs.contains(hxchat_layout::Attrs::BOLD)));
+}
+
+#[test]
+fn the_base_colour_tiles_across_multibyte_text() {
+    // The tiling above is only interesting if it survives text where a
+    // character is several bytes: `under` splices around span
+    // boundaries, and getting that wrong on a multi-byte boundary is
+    // both a wrong render and a potential panic.
+    let text = "héllo **wörld** ☃";
+    let cs = std::ffi::CString::new(text).unwrap();
+    let runs = [crate::ffi::HxChatRun {
+        text: cs.as_ptr(),
+        len: text.len() as std::ffi::c_int,
+        color: 37,
+        attrs: 0,
+    }];
+    let blocks = unsafe { crate::ffi::body_blocks(runs.as_ptr(), 1, true) };
+    let p = text_of(&blocks[0]);
+    assert_eq!(p.text, "héllo wörld ☃");
+
+    let mut spans: Vec<_> = p.spans.iter().collect();
+    spans.sort_by_key(|s| s.range.start);
+    let mut at = 0usize;
+    for s in &spans {
+        assert_eq!(s.range.start, at);
+        assert!(p.text.is_char_boundary(s.range.start));
+        assert!(p.text.is_char_boundary(s.range.end));
+        at = s.range.end;
+    }
+    assert_eq!(at, p.text.len());
 }
 
 #[test]
