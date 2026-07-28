@@ -1,16 +1,18 @@
-//! Tests for the GTK skin.
+//! Tests for the GTK skin, in two tiers.
 //!
-//! Deliberately limited to what can run without a display. The widget
-//! itself can't be constructed on display-less CI (gtk4-rs asserts an
-//! initialised GTK on every widget constructor), so what is tested here
-//! is the piece that *can* be: the Pango measurer, which is the only
-//! part of C2 carrying real logic rather than plumbing.
+//! **Always-on:** the Pango measurer. `pangocairo`'s default font map
+//! works without a `GdkDisplay`, so the one part of C2 carrying real
+//! logic rather than plumbing is testable anywhere. Geometry correctness
+//! proper is covered in `hxchat-layout` against a deterministic
+//! measurer; what these check is that the *real* measurer upholds the
+//! invariants that engine assumes.
 //!
-//! `pangocairo`'s default font map works without a `GdkDisplay`, which
-//! is what makes even this much possible. Geometry correctness proper is
-//! covered in `hxchat-layout` against a deterministic measurer; what
-//! matters here is that the *real* measurer upholds the invariants that
-//! engine assumes.
+//! **Display-gated:** one smoke test covering class registration and
+//! widget construction, at the bottom of this file. Those need a real
+//! GTK — gtk4-rs asserts an initialised GTK inside the generated
+//! `class_init` itself — which is precisely why every C2 bring-up crash
+//! was invisible to `cargo test`. It no-ops without a display and runs
+//! on a desktop session.
 
 use crate::measure::PangoMeasure;
 use hxchat_layout::{Attrs, Style, TextMeasure};
@@ -177,60 +179,56 @@ fn font_change_invalidates_the_cache() {
     );
 }
 
-// ---- class-level tests (require a display) --------------------------
+// ---- the GTK smoke test (requires a display) ------------------------
 //
-// Every C2 bring-up crash so far lived in `class_init` or in widget
+// Every C2 bring-up crash lived in `class_init` or in widget
 // construction, and none was visible to `cargo test`: gtk4-rs asserts an
 // initialised GTK inside the generated `class_init` itself
-// (gtk4-0.10.3/src/subclass/widget.rs:563), so merely registering the
-// type needs a display.
+// (gtk4-0.10.3/src/subclass/widget.rs:563), so even registering the type
+// needs a display.
 //
-// Rather than give up on covering them, these gate on GTK actually
-// coming up. On display-less CI they no-op; on a developer machine
-// `cargo test -p hxchat-view` exercises them — which would have caught
-// all three of the C2 crashes before they ever ran.
+// **This is deliberately ONE test, not several.** `gtk4::init()` records
+// the calling thread as *the* GTK thread, and libtest runs each test on
+// its own spawned thread — so a second test that touches GTK trips
+// "GTK may only be used from the main thread", which aborts rather than
+// failing, taking the whole run with it. (That is not hypothetical: the
+// first version of this file was three tests behind a shared `OnceLock`
+// gate, and the OnceLock made it worse by telling the second thread GTK
+// was ready.) Keeping all GTK work in a single test function means only
+// one thread ever touches it, whatever the harness does.
 //
-// Rust has no first-class dynamic skip, so a gated test early-returns
-// after printing why. Run with `--nocapture` to see the notice.
+// On display-less CI it no-ops. On a developer machine it exercises the
+// exact call sequence `create_chat` performs, which is what all three
+// crashes died in.
 
 use gtk4::glib::prelude::*;
 use gtk4::glib::translate::IntoGlib;
 
-/// `true` if GTK came up. Idempotent; safe to call from every test.
-fn gtk_ready() -> bool {
-    use std::sync::OnceLock;
-    static READY: OnceLock<bool> = OnceLock::new();
-    *READY.get_or_init(|| gtk4::init().is_ok())
-}
+#[test]
+fn gtk_class_and_construction_smoke() {
+    if gtk4::init().is_err() {
+        eprintln!(
+            "skipped: no display, GTK could not be initialised \
+             (run this on a desktop session to exercise it)"
+        );
+        return;
+    }
 
-macro_rules! needs_gtk {
-    () => {
-        if !gtk_ready() {
-            eprintln!("skipped: no display, GTK could not be initialised");
-            return;
-        }
-    };
-}
-
-/// Force `class_init` to run, returning the registered GType.
-fn chat_view_type() -> gtk4::glib::Type {
     let t = crate::view::HxChatView::static_type();
+
+    // --- class_init ran at all -------------------------------------
     unsafe {
         let c = gtk4::glib::gobject_ffi::g_type_class_ref(t.into_glib());
         assert!(!c.is_null(), "class_init failed for HxChatView");
         gtk4::glib::gobject_ffi::g_type_class_unref(c);
     }
-    t
-}
 
-#[test]
-fn class_init_registers_the_scrollable_properties() {
-    needs_gtk!();
-    // The bug this pins: declaring fresh ParamSpecs named "hadjustment"
-    // etc. collides with the GtkScrollable interface's, so they never
-    // install, and g_object_new then yields a half-built object that
-    // fails GTK_IS_WIDGET. ParamSpecOverride::for_interface is the fix.
-    let t = chat_view_type();
+    // --- the GtkScrollable properties are installed ----------------
+    //
+    // Pins the third C2 crash: declaring fresh ParamSpecs named
+    // "hadjustment" etc. collides with the interface's, GLib refuses to
+    // install them, and g_object_new yields an object that fails
+    // GTK_IS_WIDGET. ParamSpecOverride::for_interface is the fix.
     unsafe {
         let class = gtk4::glib::gobject_ffi::g_type_class_ref(t.into_glib())
             as *mut gtk4::glib::gobject_ffi::GObjectClass;
@@ -246,22 +244,17 @@ fn class_init_registers_the_scrollable_properties() {
             );
             assert!(
                 !p.is_null(),
-                "GtkScrollable property {:?} is not installed on HxChatView",
-                name
+                "GtkScrollable property {name:?} is not installed on HxChatView"
             );
         }
         gtk4::glib::gobject_ffi::g_type_class_unref(class as *mut _);
     }
-}
 
-#[test]
-fn class_init_registers_word_click_under_both_spellings() {
-    needs_gtk!();
-    // The bug this pins: glib-rs's Signal::builder panics on a
-    // non-canonical name, and that panic aborts because it unwinds out
-    // of class_init across the FFI. Registering "word-click" must still
-    // satisfy the C callers, which all spell it "word_click".
-    let t = chat_view_type();
+    // --- word_click resolves under both spellings ------------------
+    //
+    // Pins the second C2 crash: glib-rs's Signal::builder panics on a
+    // non-canonical name, and that panic aborts out of class_init. The C
+    // callers all spell it "word_click".
     unsafe {
         let hyphen = gtk4::glib::gobject_ffi::g_signal_lookup(
             c"word-click".as_ptr() as *const _,
@@ -274,25 +267,34 @@ fn class_init_registers_word_click_under_both_spellings() {
         assert_ne!(hyphen, 0, "word-click is not registered");
         assert_eq!(
             hyphen, underscore,
-            "chat.c and msg.c connect \"word_click\"; GLib must resolve \
-             it to the same signal as \"word-click\""
+            "chat.c and msg.c connect \"word_click\"; GLib must resolve it \
+             to the same signal as \"word-click\""
         );
     }
-}
 
-#[test]
-fn a_constructed_view_is_a_usable_widget() {
-    needs_gtk!();
-    // The end-to-end check the three C2 crashes all needed. Every one of
-    // them produced an object that failed exactly this.
+    // --- a constructed view is a usable widget ---------------------
+    //
+    // Pins the first C2 crash (use-after-free on the returned pointer)
+    // and re-checks the third: all three produced something that failed
+    // exactly this.
     let view = crate::view::HxChatView::new();
-    assert!(view.is::<gtk4::Widget>());
-    assert!(view.is::<gtk4::Scrollable>());
-    // And it survives the call sequence create_chat performs.
+    assert!(view.is::<gtk4::Widget>(), "not a GtkWidget");
+    assert!(view.is::<gtk4::Scrollable>(), "not a GtkScrollable");
+
+    // --- it survives create_chat's call sequence -------------------
     view.set_font_from_string("Monospace 10");
     view.set_word_wrap(true);
     view.set_max_rows(500);
     view.set_indent(true);
     view.set_max_indent(256);
-    view.append(crate::view::plain_message("hello"));
+    view.set_zoom_permille(1000);
+
+    // Appending must not panic on a RefCell re-entrancy, which is the
+    // remaining untested hazard in the adjustment plumbing.
+    let a = view.append(crate::view::plain_message("hello"));
+    let b = view.append(crate::view::plain_message("world"));
+    assert_ne!(a, b, "marks must be distinct");
+    assert!(view.remove(a), "removing a live mark should succeed");
+    assert!(!view.remove(a), "removing a stale mark is a no-op, not a panic");
+    view.clear();
 }
