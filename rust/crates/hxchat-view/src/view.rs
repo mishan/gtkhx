@@ -754,39 +754,6 @@ impl HxChatView {
         snapshot.save();
         snapshot.translate(&gtk4::graphene::Point::new(PAD_X as f32, PAD_Y as f32));
 
-        // The indent separator, matching gtk_xtext_draw_sep: a full-height
-        // vertical rule half a space-width left of the body column, drawn
-        // only in indent mode. `separator` was being stored and never
-        // used, so the new backend was missing a line xtext has always
-        // drawn — chat.c passes separator=TRUE for every view.
-        //
-        // xtext's non-thin variant is a two-pixel bevel (bg then fg);
-        // the thin one is a single rule. Only the bevelled form is ever
-        // requested here, so that is what is reproduced.
-        {
-            let buf_ref = imp.buffer.borrow();
-            let indent = buf_ref.indent_width();
-            let space = imp.measure.borrow().metrics().space_width;
-            drop(buf_ref);
-            if imp.separator.get() && indent > 0 {
-                // Content coordinates here (the snapshot is translated by
-                // PAD_X), so this is `separator_x() - PAD_X`.
-                let x = indent as f32 - ((space as f32 + 1.0) / 2.0);
-                if x >= 1.0 {
-                    let fg = self.imp_().palette.borrow()[PAL_FG];
-                    let bgc = self.imp_().palette.borrow()[PAL_BG];
-                    snapshot.append_color(
-                        &bgc,
-                        &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
-                    );
-                    snapshot.append_color(
-                        &fg,
-                        &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32),
-                    );
-                }
-            }
-        }
-
         let scroll = {
             let mut buf = imp.buffer.borrow_mut();
             buf.scroll_offset(height as u32)
@@ -811,6 +778,42 @@ impl HxChatView {
                 })
                 .collect()
         };
+
+        // The indent separator, matching gtk_xtext_draw_sep: a full-height
+        // vertical rule half a space-width left of the body column, drawn
+        // only in indent mode. xtext's non-thin variant is a two-pixel
+        // bevel (bg then fg); only that form is ever requested here.
+        //
+        // Drawn *after* `ensure_visible`, and that ordering is the whole
+        // point. Laying out a row with a wider nick than any seen so far
+        // widens the shared gutter, so reading `indent_width` before the
+        // layout pass gives the value from *before* this frame's rows
+        // were measured. The rule then drew at the old position while the
+        // text drew at the new one — visible for exactly one frame, on
+        // the first message that widened the gutter, and self-correcting
+        // on the next message, which is precisely the shape of the bug
+        // that was reported.
+        //
+        // `separator_x()` rather than recomputing the geometry: the hit
+        // test uses the same function, so the rule you see and the rule
+        // you can grab cannot drift apart.
+        if let Some(sx) = self.separator_x() {
+            // Widget coords → content coords; the snapshot is translated
+            // by PAD_X above.
+            let x = (sx - PAD_X as f64) as f32;
+            if x >= 1.0 {
+                let fg = imp.palette.borrow()[PAL_FG];
+                let bgc = imp.palette.borrow()[PAL_BG];
+                snapshot.append_color(
+                    &bgc,
+                    &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
+                );
+                snapshot.append_color(
+                    &fg,
+                    &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32),
+                );
+            }
+        }
 
         let measure = imp.measure.borrow();
         let buf = imp.buffer.borrow();

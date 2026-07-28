@@ -2273,3 +2273,47 @@ fn scan_delims_agrees_with_the_renderer_on_what_is_styled() {
         );
     }
 }
+
+#[test]
+fn ensure_visible_can_widen_the_gutter_so_read_it_after() {
+    // The fact behind a draw-ordering bug in the view: laying out a row
+    // with a wider nick than any seen so far widens the *shared* gutter,
+    // so `indent_width()` read before `ensure_visible` is stale for the
+    // frame being drawn. The separator rule was read early and the rows
+    // late, so on the first message that widened the gutter the rule
+    // drew in the wrong place for exactly one frame.
+    //
+    // This pins the property rather than the pixel: if `ensure_visible`
+    // ever stops being able to move the gutter, the ordering constraint
+    // in `snapshot_content` can be relaxed — and if it can still move
+    // it, the separator must keep being drawn afterwards.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+
+    // An info-shaped row with no gutter, then a real nick.
+    b.append(Message::system(ParsedText::plain("connecting")), &m);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: Some(ParsedText::plain("<misha>")),
+            blocks: vec![Block::Text(ParsedText::plain("hello hello"))],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.reindex();
+
+    let before = b.indent_width();
+    let rows = b.ensure_visible(0, 10_000, &m);
+    let after = b.indent_width();
+
+    assert_eq!(rows.len(), 2, "both rows visible");
+    assert!(
+        after > before,
+        "the nick row must widen the gutter ({before} -> {after})"
+    );
+}
