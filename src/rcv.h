@@ -75,12 +75,15 @@ extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsi
  * repeat it. */
 extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                    void             *channel_ptr);
-/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The
- * send wrappers in gif_icons.c register these via task_new before the
- * matching hlwrite_chunks. Both delegate parsing to the Rust
- * hotline-proto crate and emit GtkhxSession::gif-icon-data.
+/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The bodies moved
+ * to the hxhandlers Rust crate (recv/icon.rs): each walks the reply natively
+ * (crate::gif_icons), flips the probe negotiation state via the
+ * hx_conn_gif_icons_* accessors, and publishes avatars through hx_icon_data_recv.
+ * The prototypes stay because the send wrappers in gif_icons.c register them via
+ * RCV_TASK_FN(task_new); the symbols resolve against the Rust crate at link.
  *   _get      — ICON_GET (1863) reply: UID + ICON_GIF. uid_ptr is
- *               GUINT_TO_POINTER(uid) from the send wrapper.
+ *               GUINT_TO_POINTER(uid) from the send wrapper (uid is echoed in
+ *               the reply, so the Rust body ignores it).
  *   _getlist  — ICON_GETLIST (1861) reply: 0..N packed ICON_LIST
  *               entries; also resolves the probe to SUPPORTED. */
 extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr);

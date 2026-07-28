@@ -1517,107 +1517,13 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
  * reply. hxnews-send registers it as the reply callback (declared in rcv.h); no
  * C body — and no news_buf/news_len scratch — remains here. */
 
-/* GIF-icons extension (fogWraith GIF-Icons.md). Parsing lives in the
- * Rust hotline-proto crate (crate::gif_icons via the gtkhx_proto_*
- * shims); these handlers pass the received frame slice straight in and only
- * emit GtkhxSession signals — no chunk walking on the C side. */
-
-/* gif-icon-data validation + emit lives in the Rust hxicon-recv crate: it
- * upholds the signal's "raw GIF bytes or empty" contract — a zero-length or
- * non-GIF-signed payload is coerced to a cleared (NULL, 0) so no subscriber
- * decodes network garbage or a dangling pointer. */
-extern void hx_icon_data_recv (struct htlc_conn *htlc, guint16 uid,
-                               const guint8 *gif, guint32 len);
-
-/* ICON_GET (1863) task reply: UID + ICON_GIF. */
-void
-rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr)
-{
-    (void) uid_ptr; /* uid is echoed in the reply; we read it from there */
-    struct gtkhx_proto_icon_entry e;
-    if (!gtkhx_proto_parse_icon_get_reply (frame, frame_len, &e)) {
-        debug_log ("icon", "ICON_GET reply missing UID");
-        return;
-    }
-    /* A get reply implies the server speaks the extension. gif_len == 0
-	 * is a valid "avatar cleared" result — we still emit it so the view
-	 * drops any stale cached avatar. */
-    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_SUPPORTED);
-    debug_log ("icon", "ICON_GET reply: uid=%u gif_len=%zu", (unsigned) e.uid,
-               e.gif_len);
-    hx_icon_data_recv (htlc, e.uid, e.gif_ptr, (guint32) e.gif_len);
-}
-
-/* ICON_GETLIST (1861) task reply: 0..N packed ICON_LIST entries. Also
- * the resolution point for the post-login probe. */
-void
-rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* The reply arriving at all means the server supports the
-	 * extension — flip the probe state and disarm the watchdog. */
-    /* GIF-icons has no capability/access bit and no version tie (a 1.5+
-     * server may or may not implement it), so support is detected purely
-     * by this probe. An ERROR reply is the "not supported" answer, exactly
-     * like the watchdog's no-reply timeout — mark unsupported, disarm the
-     * watchdog, and return WITHOUT a user toast (hx_rcv_task suppresses
-     * task_error for the "icon-list" task and dispatches us on the error
-     * path so we record the verdict). A speculative probe's rejection is
-     * expected and non-actionable. */
-    if (task_inerror (htlc, frame, frame_len)) {
-        hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
-        if (hx_conn_gif_icons_probe_timer (htlc)) {
-            g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
-            hx_conn_set_gif_icons_probe_timer (htlc, 0);
-        }
-        debug_log ("icon",
-                   "ICON_GETLIST rejected (task error) — server lacks the "
-                   "GIF-icons extension; probe verdict UNSUPPORTED");
-        return;
-    }
-
-    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_SUPPORTED);
-    if (hx_conn_gif_icons_probe_timer (htlc)) {
-        g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
-        hx_conn_set_gif_icons_probe_timer (htlc, 0);
-    }
-
-    /* The server is confirmed capable — push our saved avatar (if the
-	 * user picked one while offline / on a non-supporting server). No-op
-	 * when there's nothing saved. */
-    hx_icon_send_saved (htlc);
-
-    /* Count first (out=NULL), then allocate exactly and fill — the
-	 * Rust walker returns the total even when out is NULL. The count is
-	 * server-controlled, so clamp it: a uid is a u16, so a well-formed
-	 * list has at most 65536 entries; a hostile/buggy reply with massive
-	 * duplication shouldn't drive a huge allocation + emit storm. */
-    size_t n = gtkhx_proto_parse_icon_list (frame, frame_len, NULL, 0);
-    /* A uid is u16, so the space is 65536 distinct values (0..65535) —
-	 * clamp to that, not G_MAXUINT16, so a full list isn't off-by-one. */
-    const size_t max_entries = (size_t) G_MAXUINT16 + 1;
-    if (n > max_entries) {
-        debug_log ("icon", "ICON_GETLIST reply: clamping %zu entries to %zu", n,
-                   max_entries);
-        n = max_entries;
-    }
-    debug_log ("icon", "ICON_GETLIST reply: %zu entr%s", n,
-               n == 1 ? "y" : "ies");
-    if (n == 0) {
-        return;
-    }
-    struct gtkhx_proto_icon_entry *entries
-        = g_new0 (struct gtkhx_proto_icon_entry, n);
-    size_t got
-        = gtkhx_proto_parse_icon_list (frame, frame_len, entries, n);
-    if (got > n) {
-        got = n; /* defensive: never iterate past the allocation */
-    }
-    for (size_t i = 0; i < got; i++) {
-        hx_icon_data_recv (htlc, entries[i].uid, entries[i].gif_ptr,
-                           (guint32) entries[i].gif_len);
-    }
-    g_free (entries);
-}
+/* GIF-icons extension (fogWraith GIF-Icons.md). The ICON_GET / ICON_GETLIST
+ * task-reply handlers (rcv_task_icon_get / rcv_task_icon_getlist) moved to the
+ * hxhandlers Rust crate (rust/crates/hxhandlers/src/recv/icon.rs): each walks
+ * the reply natively (crate::gif_icons), flips the probe negotiation state via
+ * the hx_conn_gif_icons_* accessors, and publishes avatars through
+ * hx_icon_data_recv (also Rust). The C senders (gif_icons.c) still register them
+ * via RCV_TASK_FN(); the symbols resolve against the Rust crate at link. */
 
 /* ICON_CHANGE (1864) server broadcast: UID only. Parse + gif-icon-changed emit
  * live in the Rust hxicon-recv crate (rust/crates/hxicon-recv). */
