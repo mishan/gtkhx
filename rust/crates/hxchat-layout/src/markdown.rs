@@ -83,6 +83,22 @@ pub fn split_blocks(body: &str) -> Vec<RawBlock> {
 
         if let Some(rest) = trimmed.strip_prefix("```") {
             flush(&mut para, &mut out);
+
+            // A fence that opens and closes on one line — ```like this```
+            // — is by far the most common way someone types a code block
+            // in a chat box, because chat boxes send on Enter. Treating
+            // it as an *opening* fence made the rest of the line the
+            // "language", scanned for a close that never came, and
+            // produced an empty code block: a blank row where the user's
+            // text should be.
+            if let Some(inner) = rest.strip_suffix("```") {
+                out.push(RawBlock::Code {
+                    text: inner.to_string(),
+                    language: None,
+                });
+                continue;
+            }
+
             let language = {
                 let l = rest.trim();
                 if l.is_empty() {

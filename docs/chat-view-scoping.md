@@ -613,6 +613,24 @@ words muted and everything else at full contrast. There is a test.
 Fenced code is inert, and deliberately not autolinked either: a URL
 inside a code fence is being *shown*, not offered.
 
+**Code needs a box, not a font.** The first cut relied on the `CODE`
+attribute alone, which sets the Pango font family to Monospace — and
+GtkHx's chat font is *already* monospace, so `` `code` `` rendered
+identically to code with the backticks quietly deleted. Strictly worse
+than not parsing it. Inline code now gets a tint behind it and fenced
+blocks a tinted, outlined rounded box, both derived from the theme
+foreground at low alpha so they read on light and dark without a second
+colour to keep in step. The block's box is computed from its *laid-out
+line boxes* rather than from separate geometry, so it cannot land
+anywhere other than under the code it belongs to.
+
+**A one-line fence is a code block.** ```` ```like this``` ```` is how
+people actually type one in a chat box, because chat boxes send on
+Enter. The line scanner read it as an *opening* fence, made the rest of
+the line the "language", and searched for a close that never came —
+yielding an empty block, i.e. a blank row where the text should have
+been.
+
 The toggle affects messages appended after it. Rows already in a buffer
 keep the rendering they were built with, because re-parsing scrollback
 would mean holding every row's original source text alive forever — a

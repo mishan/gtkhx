@@ -666,3 +666,32 @@ fn a_body_the_caller_styled_run_by_run_is_left_alone() {
     assert_eq!(blocks.len(), 1);
     assert_eq!(text_of(&blocks[0]).text, "plain **loud**");
 }
+
+#[test]
+fn a_one_line_fence_reaches_the_view_as_a_code_block() {
+    // The reported bug end-to-end: "```hello world```" rendered as a
+    // blank row, because the scanner read it as an unterminated fence
+    // and produced an empty block.
+    let blocks = body_of("```hello world```", true);
+    assert_eq!(blocks.len(), 1);
+    match &blocks[0] {
+        hxchat_layout::Block::Code { text, .. } => assert_eq!(text, "hello world"),
+        other => panic!("expected code, got {other:?}"),
+    }
+}
+
+#[test]
+fn inline_code_carries_the_code_attr_for_the_renderer_to_tint() {
+    // `code` used to be indistinguishable from plain text, because the
+    // chat font is already monospace and CODE only set the family. The
+    // parse has to at least *mark* it so the draw path can tint it.
+    let blocks = body_of("try `ls -l` now", true);
+    let p = text_of(&blocks[0]);
+    assert_eq!(p.text, "try ls -l now");
+    assert!(
+        p.spans.iter().any(|s| &p.text[s.range.clone()] == "ls -l"
+            && s.style.attrs.contains(hxchat_layout::Attrs::CODE)),
+        "the code span must be marked: {:?}",
+        p.spans
+    );
+}

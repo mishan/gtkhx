@@ -2707,3 +2707,34 @@ fn two_users_sharing_a_nick_do_not_group() {
     assert!(!grouped(&b, 0));
     assert!(!grouped(&b, 1), "different uid means a different person");
 }
+
+#[test]
+fn a_one_line_fence_is_a_code_block_not_an_unterminated_one() {
+    use crate::markdown::{split_blocks, RawBlock};
+    // Chat boxes send on Enter, so this is how people actually type a
+    // code block. Treating it as an opening fence made the rest of the
+    // line the "language" and produced an empty block — a blank row.
+    let b = split_blocks("```hello world```");
+    assert_eq!(b.len(), 1);
+    match &b[0] {
+        RawBlock::Code { text, language } => {
+            assert_eq!(text, "hello world");
+            assert_eq!(*language, None);
+        }
+        other => panic!("expected code, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_real_multi_line_fence_still_works() {
+    use crate::markdown::{split_blocks, RawBlock};
+    let b = split_blocks("before\n```rust\nlet x = 1;\nlet y = 2;\n```\nafter");
+    assert_eq!(b.len(), 3);
+    match &b[1] {
+        RawBlock::Code { text, language } => {
+            assert_eq!(text, "let x = 1;\nlet y = 2;");
+            assert_eq!(language.as_deref(), Some("rust"));
+        }
+        other => panic!("expected code, got {other:?}"),
+    }
+}

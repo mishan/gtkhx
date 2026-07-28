@@ -184,6 +184,22 @@ const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1
 const ZOOM_BADGE_HOLD_US: i64 = 700_000;
 const ZOOM_BADGE_FADE_US: i64 = 400_000;
 
+/// Backing for `code` spans and code blocks.
+///
+/// The monospace attribute alone is invisible here: GtkHx's chat font is
+/// *already* monospace by default, so `` `code` `` rendered identically
+/// to code with the backticks quietly removed — strictly worse than not
+/// parsing it. The tint is what actually says "this is code".
+///
+/// Derived from the theme foreground at low alpha rather than a fixed
+/// grey, so it reads on light and dark without a second colour to keep
+/// in step.
+const CODE_BG_ALPHA: f32 = 0.10;
+const CODE_BORDER_ALPHA: f32 = 0.22;
+
+/// Padding around a fenced block's box, in px.
+const CODE_BOX_PAD: f32 = 4.0;
+
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
 
@@ -1062,6 +1078,59 @@ impl HxChatView {
                 }
             }
 
+            // Fenced code blocks get a box: a tinted, outlined rect
+            // spanning the block's lines. Painted before the text, and
+            // derived from the *laid-out* line boxes rather than from
+            // separate geometry, so the box cannot land anywhere other
+            // than under the code it belongs to.
+            if let Some(msg) = buf.message_at(row) {
+                for (bi, blk) in msg.blocks.iter().enumerate() {
+                    if !matches!(blk, hxchat_layout::Block::Code { .. }) {
+                        continue;
+                    }
+                    let src = LineSource::Block(bi);
+                    let mut top = i64::MAX;
+                    let mut bot = i64::MIN;
+                    let mut left = i32::MAX;
+                    for l in layout.lines.iter().filter(|l| l.source == src) {
+                        top = top.min(l.y as i64);
+                        bot = bot.max(l.y as i64 + l.height as i64);
+                        left = left.min(l.x as i32);
+                    }
+                    if top > bot {
+                        continue; // no lines: nothing to box
+                    }
+                    let x = left as f32 - CODE_BOX_PAD;
+                    let y = (row_top + top) as f32 - CODE_BOX_PAD;
+                    let w = (content_width(alloc_w) as f32 - x).max(1.0);
+                    let h = (bot - top) as f32 + CODE_BOX_PAD * 2.0;
+
+                    let fgc = imp.palette.borrow()[PAL_FG];
+                    let fill = gtk4::gdk::RGBA::new(
+                        fgc.red(),
+                        fgc.green(),
+                        fgc.blue(),
+                        CODE_BG_ALPHA,
+                    );
+                    let edge = gtk4::gdk::RGBA::new(
+                        fgc.red(),
+                        fgc.green(),
+                        fgc.blue(),
+                        CODE_BORDER_ALPHA,
+                    );
+                    let rect = gtk4::graphene::Rect::new(x, y, w, h);
+                    let rounded = gtk4::gsk::RoundedRect::from_rect(rect, 4.0);
+                    snapshot.push_rounded_clip(&rounded);
+                    snapshot.append_color(&fill, &rect);
+                    snapshot.pop();
+                    snapshot.append_border(
+                        &rounded,
+                        &[1.0; 4],
+                        &[edge, edge, edge, edge],
+                    );
+                }
+            }
+
             // The speaker's avatar, on group heads only. Resolved per
             // frame rather than cached: an animated avatar advances on a
             // shared timer, and holding a texture would freeze it on
@@ -1361,6 +1430,23 @@ impl HxChatView {
                 Mark::Match => Some(SEARCH_MATCH_BG),
                 Mark::None => None,
             };
+            // Inline `code` gets a tint under it — see CODE_BG_ALPHA for
+            // why the monospace attribute alone is not enough. Drawn
+            // beneath any band, so a selected code span still reads as
+            // selected.
+            if style.attrs.contains(hxchat_layout::Attrs::CODE) {
+                let fgc = self.imp_().palette.borrow()[PAL_FG];
+                let tint = gtk4::gdk::RGBA::new(
+                    fgc.red(),
+                    fgc.green(),
+                    fgc.blue(),
+                    CODE_BG_ALPHA,
+                );
+                snapshot.append_color(
+                    &tint,
+                    &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
+                );
+            }
             if let Some(bg) = band_bg {
                 snapshot.append_color(
                     &bg,
