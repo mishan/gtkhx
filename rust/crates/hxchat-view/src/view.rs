@@ -92,6 +92,9 @@ extern "C" {
         anchor: *mut gtk4::ffi::GtkWidget,
         uid: u16,
     ) -> *mut gtk4::gdk::ffi::GdkTexture;
+
+    /// `hx_popup_item_install_css` — see `src/users.h`. Idempotent.
+    fn hx_popup_item_install_css();
 }
 
 /// The test binary links no GtkHx C, so stub the resolver — same
@@ -104,6 +107,11 @@ unsafe fn hx_chat_avatar_for_uid(
 ) -> *mut gtk4::gdk::ffi::GdkTexture {
     std::ptr::null_mut()
 }
+
+/// Ditto: the CSS provider lives in `users.c`, which the test binary
+/// doesn't link. Styling is not what these tests check.
+#[cfg(test)]
+unsafe fn hx_popup_item_install_css() {}
 
 /// Something under the pointer that responds to being clicked.
 ///
@@ -2578,15 +2586,38 @@ impl HxChatView {
     }
 }
 
-/// One row of a bare-popover menu: a flat, left-aligned, full-width
-/// button, matching `users.c::make_user_menu_button`.
+/// One row of a bare-popover menu, matching
+/// `users.c::user_popup_append_button` — which is the working reference
+/// for this shape, so the two menus in the chat view look like each
+/// other.
+///
+/// The label needs **both** `xalign(0)` and `hexpand`. `xalign` places
+/// the text within the label's own allocation; without `hexpand` the
+/// label is only as wide as its text and gets centred in the button, so
+/// the alignment has nothing to bite on and the row still reads as a
+/// centred caption.
+///
+/// Focus is off for the same reason it is off there: the first item
+/// takes focus when the popover opens and paints a focus ring, which
+/// reads as "this item is hovered" and then fails to follow the
+/// pointer. These menus are pointer-driven — right-click, click.
 fn menu_row(label: &str, enabled: bool) -> gtk4::Button {
+    // The :hover background lives on this class, installed once by the
+    // C side. Adwaita's flat-button hover is too subtle to track a
+    // pointer against.
+    unsafe { hx_popup_item_install_css() };
+
     let b = gtk4::Button::with_label(label);
     b.add_css_class("flat");
+    b.add_css_class("gtkhx-popup-item");
+    b.set_has_frame(false);
     b.set_halign(gtk4::Align::Fill);
     b.set_sensitive(enabled);
+    b.set_focusable(false);
+    b.set_can_focus(false);
     if let Some(l) = b.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
         l.set_xalign(0.0);
+        l.set_hexpand(true);
     }
     b
 }
