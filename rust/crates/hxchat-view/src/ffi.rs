@@ -106,34 +106,44 @@ pub unsafe extern "C" fn hx_chat_view_impl_new(
         }
         view.set_palette(&pal);
     }
-    // ---- ownership: hand back refcount 1, floating -----------------
-    //
-    // This has to reproduce `gtk_xtext_new`'s contract exactly, because
-    // the caller is shared: `chat.c:1789` does `g_object_ref_sink (text)`
-    // on whatever `hx_chat_view_new` returned.
-    //
-    // `to_glib_none()` here is a use-after-free, and was: it yields a
-    // *borrowed* pointer, then the `view` wrapper drops at the end of
-    // this function and takes the last reference with it. The C side
-    // then holds freed memory — which showed up as a SIGSEGV inside
-    // `gtk_xtext_set_font`, because the freed object's type check in
-    // `is_hxchat` read garbage, failed, and sent the call down the xtext
-    // branch.
-    //
-    // `into_glib_ptr` transfers the wrapper's strong reference instead of
-    // borrowing it, so nothing is dropped. But gtk-rs sinks the floating
-    // reference when it wraps an InitiallyUnowned, so at that point the
-    // object is refcount 1 and *not* floating, while `g_object_new` —
-    // and therefore `gtk_xtext_new` — returns refcount 1 and floating.
-    // `g_object_force_floating` restores the flag without touching the
-    // count, making the two backends genuinely interchangeable: the
-    // caller's `ref_sink` then sinks a real floating ref rather than
-    // adding a second one and leaking.
-    let ptr = view.upcast::<gtk4::Widget>().into_glib_ptr();
-    gtk4::glib::gobject_ffi::g_object_force_floating(ptr as *mut _);
+    into_floating_ptr(view)
+}
+
+/// Hand a freshly-built widget to C with refcount 1 and *floating*.
+///
+/// Same helper, same two lines, as `gtkhx-ui`'s `into_floating_ptr`
+/// (`chat.rs:71`, and three more call sites in `news.rs`, `emoji.rs`,
+/// `voice_panel.rs`). Worth spelling out why both halves are needed,
+/// because getting either wrong is a crash or a leak:
+///
+/// - `to_glib_none()` would hand back a *borrowed* pointer and then drop
+///   the wrapper at scope exit, taking the last reference with it. That
+///   was the C2 startup crash: C held freed memory, and the SIGSEGV
+///   landed in `gtk_xtext_set_font` because `is_hxchat` read the dead
+///   object's type, failed the check, and dispatched to the wrong
+///   backend.
+/// - `into_glib_ptr` alone transfers the reference but leaves the object
+///   non-floating, because gtk-rs sinks the floating ref when it wraps
+///   an `InitiallyUnowned`. `g_object_new` — and so `gtk_xtext_new` —
+///   returns refcount 1 *and* floating, and `chat.c:1789` does
+///   `g_object_ref_sink (text)` on the result. A non-floating ref there
+///   leaks instead of sinking.
+///
+/// `g_object_force_floating` restores the flag without touching the
+/// count, so the two backends are genuinely interchangeable.
+///
+/// # Safety
+/// Caller takes ownership of the returned pointer.
+unsafe fn into_floating_ptr<W: IsA<gtk4::Widget>>(w: W) -> CGtkWidget {
+    let ptr = w.upcast::<gtk4::Widget>().into_glib_ptr();
+    gtk4::glib::gobject_ffi::g_object_force_floating(
+        ptr as *mut gtk4::glib::gobject_ffi::GObject,
+    );
     debug_assert!(
-        gtk4::glib::gobject_ffi::g_object_is_floating(ptr as *mut _) != 0,
-        "hx_chat_view_new must return a floating ref, like gtk_xtext_new"
+        gtk4::glib::gobject_ffi::g_object_is_floating(
+            ptr as *mut gtk4::glib::gobject_ffi::GObject
+        ) != 0,
+        "a widget handed to C must be floating, like a GTK C constructor"
     );
     ptr
 }
@@ -228,17 +238,28 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_stamp_format(
     let _ = (w, fmt); // C4, with the timestamp column.
 }
 
+/// The word classifier `chat_view.h` takes.
+///
+/// Typed rather than `*mut c_void` on purpose: casting a function
+/// pointer to a data pointer is undefined behaviour in C — the standard
+/// does not guarantee they are even the same width — so the dispatcher
+/// must be able to pass this through without an illegal cast. Matching
+/// the real signature on both sides is also what makes a link-time
+/// signature mismatch impossible.
+pub type UrlCheckFn = unsafe extern "C" fn(CGtkWidget, *mut c_char) -> c_int;
+
 /// # Safety
-/// `w` is a valid `HxChatView *`.
+/// `w` is a valid `HxChatView *`; `f` is NULL or a valid function pointer.
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_impl_set_urlcheck_function(
     w: CGtkWidget,
-    f: *mut c_void,
+    f: Option<UrlCheckFn>,
 ) {
     // C3: link activation is part of the interaction phase, and it will
     // arrive as a typed `link-activated` signal rather than a
     // word-classifier callback (scoping §3.6). Accepted and dropped so
-    // the dispatcher stays uniform.
+    // the dispatcher stays uniform — but accepted with its real type, so
+    // no caller has to launder it through void*.
     let _ = (w, f);
 }
 

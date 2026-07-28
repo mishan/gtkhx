@@ -78,7 +78,12 @@ extern void hx_chat_view_impl_set_indent (GtkWidget *w, int on);
 extern void hx_chat_view_impl_set_max_indent (GtkWidget *w, int px);
 extern void hx_chat_view_impl_set_time_stamp (GtkWidget *w, int on);
 extern void hx_chat_view_impl_set_stamp_format (GtkWidget *w, const char *fmt);
-extern void hx_chat_view_impl_set_urlcheck_function (GtkWidget *w, void *fn);
+/* Typed, not void*: casting a function pointer to a data pointer is
+ * undefined behaviour in C, so the dispatcher passes it through with its
+ * real type. The hxchat backend ignores it until C3 replaces it with a
+ * typed link-activated signal. */
+extern void hx_chat_view_impl_set_urlcheck_function (
+    GtkWidget *w, int (*fn) (GtkWidget *view, char *word));
 extern GtkAdjustment *hx_chat_view_impl_get_vadjustment (GtkWidget *w);
 extern void hx_chat_view_impl_refresh (GtkWidget *w);
 extern void hx_chat_view_impl_clear (GtkWidget *w);
@@ -299,7 +304,7 @@ hx_chat_view_set_urlcheck_function (
     GtkWidget *view, int (*urlcheck_function) (GtkWidget *view, char *word))
 {
     if (is_hxchat (view)) {
-        hx_chat_view_impl_set_urlcheck_function (view, (void *) urlcheck_function);
+        hx_chat_view_impl_set_urlcheck_function (view, urlcheck_function);
         return;
     }
     gtk_xtext_set_urlcheck_function (xt (view), urlcheck_function);

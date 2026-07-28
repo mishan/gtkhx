@@ -207,7 +207,12 @@ impl TextMeasure for PangoMeasure {
         }
         let line = match layout.line_readonly(0) {
             Some(l) => l,
-            None => return (0, 0),
+            // Pango should always give us a line for non-empty text, but
+            // returning (0, 0) here would break the trait's
+            // minimum-progress guarantee and hang the wrap loop — the
+            // exact failure mode TextMeasure::fit_prefix documents.
+            // Degrade to one character instead.
+            None => return self.min_progress(text, style),
         };
         let hit = line.x_to_index((max_width as i32) * pango::SCALE);
         // `is_inside` false means the x fell past the end of the line, so
@@ -225,14 +230,29 @@ impl TextMeasure for PangoMeasure {
             idx -= 1;
         }
         if idx == 0 {
-            // Never return an empty prefix for a non-empty run, or the
-            // wrap loop cannot make progress.
-            let mut i = 1;
-            while i < text.len() && !text.is_char_boundary(i) {
-                i += 1;
-            }
-            return (i, self.run_width(&text[..i], style));
+            return self.min_progress(text, style);
         }
         (idx, self.run_width(&text[..idx], style))
+    }
+}
+
+impl PangoMeasure {
+    /// The trait's minimum-progress case: one character, whatever it
+    /// measures.
+    ///
+    /// Every path in [`TextMeasure::fit_prefix`] that would otherwise
+    /// return a zero-length prefix routes here instead, because a zero
+    /// prefix leaves [`hxchat_layout::wrap`]'s loop unable to advance.
+    /// The returned width may exceed the caller's budget; that is the
+    /// documented exemption, and one clipped grapheme beats a hung UI.
+    fn min_progress(&self, text: &str, style: Style) -> (usize, u32) {
+        if text.is_empty() {
+            return (0, 0);
+        }
+        let mut i = 1;
+        while i < text.len() && !text.is_char_boundary(i) {
+            i += 1;
+        }
+        (i, self.run_width(&text[..i], style))
     }
 }

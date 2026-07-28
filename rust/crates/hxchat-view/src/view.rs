@@ -106,11 +106,24 @@ mod imp {
                     // replacing that with the typed signals in scoping
                     // §3.6 is C3 work.
                     //
+                    // **"word-click", not "word_click".** glib-rs's
+                    // Signal::builder requires a canonical name and
+                    // *panics* otherwise — and a panic here is an abort,
+                    // since it unwinds out of `class_init` across the
+                    // FFI. The C callers keep their underscore spelling
+                    // and still resolve: GLib canonicalises `_` to `-`
+                    // on both registration and lookup, so
+                    // `g_signal_lookup("word_click")` and
+                    // `g_signal_lookup("word-click")` return the same id.
+                    // (Verified against GLib directly, not assumed —
+                    // it's the same equivalence that lets everyone write
+                    // "size_allocate" for "size-allocate".)
+                    //
                     // Registered as (POINTER, POINTER) to match xtext,
                     // which registers both args as G_TYPE_POINTER —
                     // the marshaller never inspected the concrete
                     // GdkEvent shape.
-                    glib::subclass::Signal::builder("word_click")
+                    glib::subclass::Signal::builder("word-click")
                         .param_types([glib::Pointer::static_type(), glib::Pointer::static_type()])
                         .build(),
                 ]
@@ -478,6 +491,18 @@ impl HxChatView {
         let font = measure.scaled_font();
         let ctx = measure.context();
 
+        // One Layout for the whole pass, reset per run.
+        //
+        // Allocating a pango::Layout per styled run — which is what the
+        // first cut did — puts an allocation plus a fresh shaping setup
+        // in the innermost loop of the render path, so a long colourful
+        // line pays for dozens of them every frame. Reusing is sound
+        // because gtk_snapshot_append_layout builds its render nodes
+        // from the layout's *current* contents immediately; nothing
+        // retains a reference to it afterwards.
+        let draw_layout = pango::Layout::new(ctx);
+        draw_layout.set_font_description(Some(&font));
+
         for (row, row_top) in placed {
             let Some(layout) = buf.layout_at(row) else {
                 continue;
@@ -514,7 +539,13 @@ impl HxChatView {
                     continue;
                 }
                 self.draw_runs(
-                    snapshot, ctx, &font, slice, line.range.start, spans, line.x as f32, y as f32,
+                    snapshot,
+                    &draw_layout,
+                    slice,
+                    line.range.start,
+                    spans,
+                    line.x as f32,
+                    y as f32,
                 );
             }
         }
@@ -525,8 +556,7 @@ impl HxChatView {
     fn draw_runs(
         &self,
         snapshot: &gtk4::Snapshot,
-        ctx: &pango::Context,
-        font: &pango::FontDescription,
+        layout: &pango::Layout,
         slice: &str,
         slice_start: usize,
         spans: &[hxchat_layout::Span],
@@ -541,13 +571,11 @@ impl HxChatView {
             if text.is_empty() {
                 return;
             }
-            let layout = pango::Layout::new(ctx);
-            layout.set_font_description(Some(font));
+            // Reset the shared layout rather than allocating one.
             layout.set_attributes(Some(&PangoMeasure::attrs_for(style)));
             layout.set_text(text);
-            let fg = self.resolve(style.fg, PAL_FG);
+            let (w, h) = layout.pixel_size();
             if style.bg != ColorRef::Default {
-                let (w, h) = layout.pixel_size();
                 snapshot.append_color(
                     &self.resolve(style.bg, PAL_BG),
                     &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
@@ -555,9 +583,8 @@ impl HxChatView {
             }
             snapshot.save();
             snapshot.translate(&gtk4::graphene::Point::new(*x, y));
-            snapshot.append_layout(&layout, &fg);
+            snapshot.append_layout(layout, &self.resolve(style.fg, PAL_FG));
             snapshot.restore();
-            let (w, _) = layout.pixel_size();
             *x += w as f32;
         };
 
