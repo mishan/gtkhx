@@ -17,7 +17,7 @@
 //! raw `textentry *` would have dangled.
 
 use crate::view::{HxChatView, PALETTE_COLS};
-use gtk4::glib::translate::{FromGlibPtrNone, IntoGlib, IntoGlibPtr, ToGlibPtr};
+use gtk4::glib::translate::{IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
 use hxchat_layout::{mirc, Block, Message, MessageId, MessageKind, ParsedText};
 use std::ffi::{c_char, c_int, c_void, CStr};
@@ -75,15 +75,31 @@ fn ptr_to_mark(p: *mut c_void) -> Option<MessageId> {
     }
 }
 
-/// Wrap a borrowed `GtkWidget *` from C.
+/// Wrap a borrowed `GtkWidget *` from C, without disturbing its
+/// floating reference.
 ///
-/// `from_glib_none` is the "full" wrapping form in the sense of
-/// `docs/rust/glib-interop.md`: it takes a reference on wrap and drops
-/// it on scope exit, so the object cannot be freed underneath us even if
-/// a handler we invoke drops C's own reference. The cheaper
-/// `from_glib_borrow` would skip the refcount traffic but is not
-/// re-entrancy safe, and several of these entry points end up emitting
-/// signals or queueing draws.
+/// **Not `from_glib_none`.** That is the obvious choice and it is wrong
+/// here, in a way that is worth spelling out because it cost a long
+/// debugging session. glib-rs implements `from_glib_none` for objects as
+/// `from_glib_full(g_object_ref_sink(ptr))` — its own source carries the
+/// warning "Attention: this takes ownership of floating references". Our
+/// widgets are handed to C *floating* with refcount 1 (see
+/// [`into_floating_ptr`]), because that is `gtk_xtext_new`'s contract
+/// and `chat.c` sinks it later. So `from_glib_none` sank the floating
+/// ref into the Rust wrapper, the wrapper dropped at the end of the
+/// call, refcount hit zero, and the widget was destroyed by the *first*
+/// FFI call made on it — `hx_chat_view_set_font`, one line after
+/// construction. Everything afterwards operated on freed memory:
+/// `gtk_widget_set_can_focus` failed `GTK_IS_WIDGET`, `is_hxchat` read a
+/// dead type and answered "no", and the call was dispatched into xtext,
+/// segfaulting in `gtk_xtext_set_time_stamp`.
+///
+/// `g_object_ref` + `from_glib_full` instead: a plain reference, which
+/// leaves the floating flag alone. The wrapper drops its own reference
+/// on scope exit and the object survives with the caller's floating
+/// reference intact. This is also the re-entrancy-safe "full" form in
+/// the sense of `docs/rust/glib-interop.md` — the object cannot be freed
+/// underneath us mid-call — so we keep that property too.
 ///
 /// # Safety
 /// `w` is NULL or a valid `GtkWidget *` owned by the caller.
@@ -91,7 +107,10 @@ unsafe fn view_of(w: CGtkWidget) -> Option<HxChatView> {
     if w.is_null() {
         return None;
     }
-    let widget = gtk4::Widget::from_glib_none(w);
+    let widget: gtk4::Widget = gtk4::glib::translate::from_glib_full(
+        gtk4::glib::gobject_ffi::g_object_ref(w as *mut gtk4::glib::gobject_ffi::GObject)
+            as CGtkWidget,
+    );
     widget.downcast::<HxChatView>().ok()
 }
 

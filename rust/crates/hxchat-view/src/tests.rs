@@ -297,4 +297,77 @@ fn gtk_class_and_construction_smoke() {
     assert!(view.remove(a), "removing a live mark should succeed");
     assert!(!view.remove(a), "removing a stale mark is a no-op, not a panic");
     view.clear();
+
+    // --- the FFI path, on a floating pointer -----------------------
+    //
+    // The check the Rust-side construction above cannot make, and the
+    // one that would have caught the longest-running C2 bug.
+    //
+    // C receives the widget *floating* with refcount 1. glib-rs's
+    // `from_glib_none` sinks floating references, so wrapping the
+    // incoming pointer with it handed ownership to a temporary Rust
+    // wrapper that dropped at the end of the call and destroyed the
+    // widget — on the *first* FFI call after construction. Constructing
+    // in Rust never sees this, because the wrapper holds a real
+    // reference and nothing is floating.
+    //
+    // So: build it the way C does, call through the C ABI, and assert
+    // it is still alive and still floating afterwards.
+    unsafe {
+        let pal = [gtk4::gdk::RGBA::BLACK; crate::view::PALETTE_COLS];
+        let raw = crate::ffi::hx_chat_view_impl_new(
+            pal.as_ptr() as *const gtk4::gdk::ffi::GdkRGBA,
+            1,
+        );
+        assert!(!raw.is_null(), "impl_new returned NULL");
+        let as_obj = raw as *mut gtk4::glib::gobject_ffi::GObject;
+        assert_ne!(
+            gtk4::glib::gobject_ffi::g_object_is_floating(as_obj),
+            0,
+            "impl_new must hand C a floating ref, like gtk_xtext_new"
+        );
+
+        // Every entry point create_chat calls, in order.
+        crate::ffi::hx_chat_view_impl_set_font(raw, c"Monospace 10".as_ptr());
+        crate::ffi::hx_chat_view_impl_set_word_wrap(raw, 1);
+        crate::ffi::hx_chat_view_impl_set_max_lines(raw, 500);
+        crate::ffi::hx_chat_view_impl_set_indent(raw, 1);
+        crate::ffi::hx_chat_view_impl_set_time_stamp(raw, 1);
+        crate::ffi::hx_chat_view_impl_set_max_indent(raw, 256);
+        let _ = crate::ffi::hx_chat_view_impl_get_vadjustment(raw);
+        let mark = crate::ffi::hx_chat_view_impl_append_indent(
+            raw,
+            c"<alice>".as_ptr(),
+            7,
+            c"hello".as_ptr(),
+            5,
+            0,
+        );
+        assert!(!mark.is_null(), "append_indent returned no mark");
+
+        // Still alive, still a widget, still ours to sink.
+        assert_eq!(
+            (*as_obj).ref_count,
+            1,
+            "an FFI call leaked or dropped a reference"
+        );
+        assert_ne!(
+            gtk4::glib::gobject_ffi::g_object_is_floating(as_obj),
+            0,
+            "an FFI call sank the caller's floating reference — \
+             from_glib_none does this; use g_object_ref instead"
+        );
+        assert_ne!(
+            gtk4::glib::gobject_ffi::g_type_check_instance_is_a(
+                raw as *mut gtk4::glib::gobject_ffi::GTypeInstance,
+                crate::ffi::hx_chat_view_impl_get_type(),
+            ),
+            0,
+            "the widget was destroyed by an FFI call"
+        );
+
+        // Clean up the way chat.c would.
+        gtk4::glib::gobject_ffi::g_object_ref_sink(as_obj);
+        gtk4::glib::gobject_ffi::g_object_unref(as_obj);
+    }
 }
