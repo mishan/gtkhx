@@ -194,6 +194,7 @@ mod imp {
 
             obj.install_selection_gestures();
             obj.install_zoom_bindings();
+            obj.install_link_handlers();
         }
 
         fn properties() -> &'static [glib::ParamSpec] {
@@ -1175,5 +1176,125 @@ impl HxChatView {
         if ZOOM_STEPS[next] != cur {
             self.set_zoom_permille(ZOOM_STEPS[next]);
         }
+    }
+}
+
+// ---- links and the context menu -------------------------------------
+
+impl HxChatView {
+    fn install_link_handlers(&self) {
+        // Hover: pointer cursor over a link, default elsewhere.
+        let motion = gtk4::EventControllerMotion::new();
+        let this = self.clone();
+        motion.connect_motion(move |_, x, y| {
+            let over = this.link_at_point(x, y).is_some();
+            let want = if over { "pointer" } else { "text" };
+            if this.cursor().and_then(|c| c.name()).as_deref() != Some(want) {
+                this.set_cursor_from_name(Some(want));
+            }
+        });
+        let this = self.clone();
+        motion.connect_leave(move |_| {
+            this.set_cursor_from_name(Some("text"));
+        });
+        self.add_controller(motion);
+
+        // Secondary / middle click: the URL menu if over a link, our own
+        // context menu otherwise.
+        //
+        // Matching xtext's split exactly (`gtkurl_xtext_word_click`
+        // filters out left-click and hands everything else to
+        // gtkurl_show_popup), so the two backends agree about which
+        // button does what.
+        for button in [gtk4::gdk::BUTTON_SECONDARY, gtk4::gdk::BUTTON_MIDDLE] {
+            let click = gtk4::GestureClick::new();
+            click.set_button(button);
+            let this = self.clone();
+            click.connect_pressed(move |_, _, x, y| {
+                match this.link_at_point(x, y) {
+                    Some((href, _label)) => {
+                        crate::links::show_url_popup(&this, &href, x, y);
+                    }
+                    None if button == gtk4::gdk::BUTTON_SECONDARY => {
+                        this.show_context_menu(x, y);
+                    }
+                    None => {}
+                }
+            });
+            self.add_controller(click);
+        }
+    }
+
+    /// The link under a widget-space point, as (href, visible label).
+    fn link_at_point(&self, x: f64, y: f64) -> Option<(String, String)> {
+        let caret = self.caret_at(x, y)?;
+        self.imp_().buffer.borrow().link_at(&caret)
+    }
+
+    /// Right-click menu for ordinary text: Copy and Select All.
+    fn show_context_menu(&self, x: f64, y: f64) {
+        let menu = gtk4::gio::Menu::new();
+        menu.append(Some(&crate::tr("Copy")), Some("chatview.copy"));
+        menu.append(Some(&crate::tr("Select All")), Some("chatview.select-all"));
+
+        let group = gtk4::gio::SimpleActionGroup::new();
+
+        let copy = gtk4::gio::SimpleAction::new("copy", None);
+        let this = self.clone();
+        copy.connect_activate(move |_, _| {
+            this.copy_selection_to(ClipboardTarget::Clipboard);
+        });
+        // Greyed out with nothing selected, rather than silently doing
+        // nothing.
+        copy.set_enabled(self.has_selection());
+        group.add_action(&copy);
+
+        let select_all = gtk4::gio::SimpleAction::new("select-all", None);
+        let this = self.clone();
+        select_all.connect_activate(move |_, _| {
+            this.select_all();
+        });
+        group.add_action(&select_all);
+        self.insert_action_group("chatview", Some(&group));
+
+        let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+        popover.set_parent(self);
+        popover.set_has_arrow(false);
+        popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
+            x as i32, y as i32, 1, 1,
+        )));
+        // The popover owns itself: unparent on close, or it leaks and
+        // keeps the view alive.
+        popover.connect_closed(|p| p.unparent());
+        popover.popup();
+    }
+
+    /// Select the whole buffer.
+    pub fn select_all(&self) {
+        let imp = self.imp_();
+        let buf = imp.buffer.borrow();
+        if buf.is_empty() {
+            return;
+        }
+        let (Some(first), Some(last)) = (buf.id_at(0), buf.id_at(buf.len() - 1)) else {
+            return;
+        };
+        let last_len = buf
+            .source_text(buf.len() - 1, LineSource::Block(0))
+            .map_or(0, |t| t.len());
+        drop(buf);
+        *imp.selection.borrow_mut() = Some(Selection::new(
+            Caret {
+                message: first,
+                source: LineSource::Block(0),
+                offset: 0,
+            },
+            Caret {
+                message: last,
+                source: LineSource::Block(0),
+                offset: last_len,
+            },
+        ));
+        self.queue_draw();
     }
 }

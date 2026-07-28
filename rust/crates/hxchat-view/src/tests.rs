@@ -393,6 +393,15 @@ fn gtk_class_and_construction_smoke() {
         1000,
         "in then out must land back on exactly 100%, not drift"
     );
+    // Select All covers the buffer; Copy is a no-op with nothing
+    // selected rather than a panic.
+    view.select_all();
+    assert!(view.has_selection(), "select_all should select something");
+    assert!(view.selected_text().contains("alpha"));
+    assert!(view.selected_text().contains("bravo"));
+    view.clear_selection();
+    assert!(!view.has_selection());
+
     // Clamps at both ends rather than running off the ladder.
     for _ in 0..40 {
         view.zoom_step(1);

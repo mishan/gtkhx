@@ -527,6 +527,30 @@ impl ChatBuffer {
         }
     }
 
+    /// The link under a caret, as (href, visible text).
+    ///
+    /// Returned by value rather than by reference because the caller is
+    /// the widget, which needs to hold it across a popup.
+    pub fn link_at(&self, caret: &Caret) -> Option<(String, String)> {
+        let row = self.row_of(caret.message)?;
+        let msg = &self.rows.get(row)?.msg;
+        let parsed = match caret.source {
+            LineSource::Gutter => msg.gutter.as_ref()?,
+            LineSource::Block(bi) => match msg.blocks.get(bi)? {
+                Block::Text(p) => p,
+                Block::Quote { content, .. } => content,
+                _ => return None,
+            },
+        };
+        let link = parsed.link_at(caret.offset)?;
+        let label = parsed
+            .text
+            .get(link.range.clone())
+            .unwrap_or_default()
+            .to_string();
+        Some((link.href.clone(), label))
+    }
+
     /// The settled gutter width. 0 when not in indent mode.
     pub fn indent_width(&self) -> u32 {
         self.indent_width

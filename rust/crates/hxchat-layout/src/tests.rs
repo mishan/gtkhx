@@ -1341,3 +1341,68 @@ fn selecting_a_nick_yields_the_nick_text() {
     );
     assert_eq!(b.selected_text(&sel), "<alice>");
 }
+
+// ------------------------------------------------------------------- links
+
+#[test]
+fn add_link_over_plain_text() {
+    let mut p = ParsedText::plain("see https://example.com now");
+    let id = p.add_link(4..23, "https://example.com").expect("link");
+    assert_eq!(id, 0);
+    assert_eq!(p.links[0].href, "https://example.com");
+    assert_eq!(p.style_at(4).link, Some(0));
+    assert!(p.style_at(4).attrs.contains(Attrs::UNDERLINE));
+    assert_eq!(p.style_at(0).link, None, "text before is untouched");
+    assert_eq!(p.style_at(24).link, None, "text after is untouched");
+    assert_eq!(p.link_at(10).map(|l| l.href.as_str()), Some("https://example.com"));
+}
+
+#[test]
+fn add_link_inside_a_styled_run_keeps_the_style() {
+    // A URL inside a bold message should stay bold *and* become a link.
+    let mut p = markdown::parse_inline("**see https://example.com ok**");
+    let start = p.text.find("https").unwrap();
+    let end = start + "https://example.com".len();
+    p.add_link(start..end, "https://example.com").unwrap();
+    let s = p.style_at(start);
+    assert!(s.attrs.contains(Attrs::BOLD), "lost the bold");
+    assert!(s.attrs.contains(Attrs::UNDERLINE));
+    assert_eq!(s.link, Some(0));
+    // And the bold either side survives without the link.
+    assert!(p.style_at(0).attrs.contains(Attrs::BOLD));
+    assert_eq!(p.style_at(0).link, None);
+}
+
+#[test]
+fn add_link_straddling_a_style_boundary() {
+    // The case that makes naive span rewriting corrupt the list.
+    let mut p = markdown::parse_inline("**bold**plain");
+    assert_eq!(p.text, "boldplain");
+    p.add_link(2..9, "https://x.example").unwrap();
+    p.debug_assert_well_formed();
+    assert_eq!(p.style_at(2).link, Some(0));
+    assert_eq!(p.style_at(8).link, Some(0));
+    assert!(p.style_at(2).attrs.contains(Attrs::BOLD), "still bold inside");
+    assert!(!p.style_at(8).attrs.contains(Attrs::BOLD), "not bold outside");
+}
+
+#[test]
+fn add_link_rejects_bad_ranges() {
+    let mut p = ParsedText::plain("héllo");
+    assert!(p.add_link(5..5, "x").is_none(), "empty range");
+    assert!(p.add_link(0..999, "x").is_none(), "out of bounds");
+    assert!(p.add_link(0..2, "x").is_none(), "splits a codepoint");
+    assert!(p.links.is_empty());
+}
+
+#[test]
+fn multiple_links_in_one_message() {
+    let mut p = ParsedText::plain("a https://one.example b https://two.example");
+    p.add_link(2..21, "https://one.example").unwrap();
+    let s2 = p.text.rfind("https").unwrap();
+    p.add_link(s2..p.text.len(), "https://two.example").unwrap();
+    p.debug_assert_well_formed();
+    assert_eq!(p.link_at(3).map(|l| l.href.as_str()), Some("https://one.example"));
+    assert_eq!(p.link_at(s2 + 2).map(|l| l.href.as_str()), Some("https://two.example"));
+    assert_eq!(p.link_at(22), None, "the space between is not a link");
+}

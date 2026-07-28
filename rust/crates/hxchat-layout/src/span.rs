@@ -192,6 +192,89 @@ impl ParsedText {
         Style::default()
     }
 
+    /// Mark `range` as a hyperlink, returning its id.
+    ///
+    /// Used for *autodetected* URLs, which are found after parsing —
+    /// markdown links come out of the parser already resolved. The
+    /// difference matters: an autodetected URL can land anywhere,
+    /// including straddling existing style runs, so this splits spans at
+    /// the boundaries rather than assuming a clean fit.
+    ///
+    /// Returns `None` for an empty or out-of-bounds range, or one that
+    /// isn't on char boundaries — a detector working in bytes shouldn't
+    /// be able to corrupt the span list.
+    pub fn add_link(&mut self, range: Range<usize>, href: impl Into<String>) -> Option<LinkId> {
+        if range.start >= range.end
+            || range.end > self.text.len()
+            || !self.text.is_char_boundary(range.start)
+            || !self.text.is_char_boundary(range.end)
+        {
+            return None;
+        }
+        let id = self.links.len() as LinkId;
+        self.links.push(Link {
+            href: href.into(),
+            range: range.clone(),
+        });
+
+        let mut out: Vec<Span> = Vec::with_capacity(self.spans.len() + 2);
+        let mut cursor = range.start;
+
+        // Everything before the link, plus the part of any straddling
+        // span that lies before it.
+        for s in &self.spans {
+            if s.range.end <= range.start || s.range.start >= range.end {
+                out.push(s.clone());
+                continue;
+            }
+            if s.range.start < range.start {
+                out.push(Span {
+                    range: s.range.start..range.start,
+                    style: s.style,
+                });
+            }
+            // The overlapping middle keeps its own styling and gains the
+            // link — so a URL inside a bold run stays bold.
+            let ms = s.range.start.max(range.start);
+            let me = s.range.end.min(range.end);
+            if ms > cursor {
+                out.push(Span {
+                    range: cursor..ms,
+                    style: link_style(Style::default(), id),
+                });
+            }
+            if ms < me {
+                out.push(Span {
+                    range: ms..me,
+                    style: link_style(s.style, id),
+                });
+                cursor = me;
+            }
+            if s.range.end > range.end {
+                out.push(Span {
+                    range: range.end..s.range.end,
+                    style: s.style,
+                });
+            }
+        }
+        if cursor < range.end {
+            out.push(Span {
+                range: cursor..range.end,
+                style: link_style(Style::default(), id),
+            });
+        }
+        out.sort_by_key(|s| s.range.start);
+        self.spans = out;
+        self.debug_assert_well_formed();
+        Some(id)
+    }
+
+    /// The link covering byte `at`, if any.
+    pub fn link_at(&self, at: usize) -> Option<&Link> {
+        let id = self.style_at(at).link?;
+        self.links.get(id as usize)
+    }
+
     /// Panics (in debug) unless the spans are sorted, non-empty,
     /// non-overlapping and inside the text. Called by the parsers'
     /// tests; cheap enough to also call in debug builds of callers.
@@ -295,4 +378,13 @@ impl SpanBuilder {
             links: self.links,
         }
     }
+}
+
+/// A style with a link attached. Underlined so links read as links
+/// regardless of what colour the message already carries.
+fn link_style(base: Style, id: LinkId) -> Style {
+    let mut s = base;
+    s.link = Some(id);
+    s.attrs = s.attrs.union(Attrs::UNDERLINE);
+    s
 }

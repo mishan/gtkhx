@@ -182,6 +182,7 @@ rust_sources = files(
   'crates/hxchat-view/src/view.rs',
   'crates/hxchat-view/src/measure.rs',
   'crates/hxchat-view/src/ffi.rs',
+  'crates/hxchat-view/src/links.rs',
   'crates/hxchat-view/src/tests.rs',
   'crates/hxbookmarks/src/lib.rs',
   'crates/hxbookmarks/src/cipher.rs',

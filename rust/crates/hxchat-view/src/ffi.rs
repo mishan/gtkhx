@@ -365,12 +365,14 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
     } else {
         Some(mirc::parse(left))
     };
+    let mut body = mirc::parse(right);
+    crate::links::autolink(&mut body);
     Message {
         kind: MessageKind::Live,
         timestamp: stamp_or_now(stamp),
         speaker: None,
         gutter,
-        blocks: vec![Block::Text(mirc::parse(right))],
+        blocks: vec![Block::Text(body)],
         flags: hxchat_layout::MessageFlags::NONE,
     }
 }
@@ -385,13 +387,15 @@ pub unsafe extern "C" fn hx_chat_view_impl_append(
     stamp: i64,
 ) {
     with_view!(w, v, {
-        let body = cslice(text, len);
+        let raw = cslice(text, len);
+        let mut body = mirc::parse(&raw);
+        crate::links::autolink(&mut body);
         v.append(Message {
             kind: MessageKind::Live,
             timestamp: stamp_or_now(stamp),
             speaker: None,
             gutter: None,
-            blocks: vec![Block::Text(mirc::parse(&body))],
+            blocks: vec![Block::Text(body)],
             flags: hxchat_layout::MessageFlags::NONE,
         });
     })
