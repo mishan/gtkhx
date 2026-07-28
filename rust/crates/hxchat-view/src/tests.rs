@@ -176,3 +176,123 @@ fn font_change_invalidates_the_cache() {
          cache would return the old value"
     );
 }
+
+// ---- class-level tests (require a display) --------------------------
+//
+// Every C2 bring-up crash so far lived in `class_init` or in widget
+// construction, and none was visible to `cargo test`: gtk4-rs asserts an
+// initialised GTK inside the generated `class_init` itself
+// (gtk4-0.10.3/src/subclass/widget.rs:563), so merely registering the
+// type needs a display.
+//
+// Rather than give up on covering them, these gate on GTK actually
+// coming up. On display-less CI they no-op; on a developer machine
+// `cargo test -p hxchat-view` exercises them — which would have caught
+// all three of the C2 crashes before they ever ran.
+//
+// Rust has no first-class dynamic skip, so a gated test early-returns
+// after printing why. Run with `--nocapture` to see the notice.
+
+use gtk4::glib::prelude::*;
+use gtk4::glib::translate::IntoGlib;
+
+/// `true` if GTK came up. Idempotent; safe to call from every test.
+fn gtk_ready() -> bool {
+    use std::sync::OnceLock;
+    static READY: OnceLock<bool> = OnceLock::new();
+    *READY.get_or_init(|| gtk4::init().is_ok())
+}
+
+macro_rules! needs_gtk {
+    () => {
+        if !gtk_ready() {
+            eprintln!("skipped: no display, GTK could not be initialised");
+            return;
+        }
+    };
+}
+
+/// Force `class_init` to run, returning the registered GType.
+fn chat_view_type() -> gtk4::glib::Type {
+    let t = crate::view::HxChatView::static_type();
+    unsafe {
+        let c = gtk4::glib::gobject_ffi::g_type_class_ref(t.into_glib());
+        assert!(!c.is_null(), "class_init failed for HxChatView");
+        gtk4::glib::gobject_ffi::g_type_class_unref(c);
+    }
+    t
+}
+
+#[test]
+fn class_init_registers_the_scrollable_properties() {
+    needs_gtk!();
+    // The bug this pins: declaring fresh ParamSpecs named "hadjustment"
+    // etc. collides with the GtkScrollable interface's, so they never
+    // install, and g_object_new then yields a half-built object that
+    // fails GTK_IS_WIDGET. ParamSpecOverride::for_interface is the fix.
+    let t = chat_view_type();
+    unsafe {
+        let class = gtk4::glib::gobject_ffi::g_type_class_ref(t.into_glib())
+            as *mut gtk4::glib::gobject_ffi::GObjectClass;
+        for name in [
+            c"hadjustment",
+            c"vadjustment",
+            c"hscroll-policy",
+            c"vscroll-policy",
+        ] {
+            let p = gtk4::glib::gobject_ffi::g_object_class_find_property(
+                class,
+                name.as_ptr() as *const _,
+            );
+            assert!(
+                !p.is_null(),
+                "GtkScrollable property {:?} is not installed on HxChatView",
+                name
+            );
+        }
+        gtk4::glib::gobject_ffi::g_type_class_unref(class as *mut _);
+    }
+}
+
+#[test]
+fn class_init_registers_word_click_under_both_spellings() {
+    needs_gtk!();
+    // The bug this pins: glib-rs's Signal::builder panics on a
+    // non-canonical name, and that panic aborts because it unwinds out
+    // of class_init across the FFI. Registering "word-click" must still
+    // satisfy the C callers, which all spell it "word_click".
+    let t = chat_view_type();
+    unsafe {
+        let hyphen = gtk4::glib::gobject_ffi::g_signal_lookup(
+            c"word-click".as_ptr() as *const _,
+            t.into_glib(),
+        );
+        let underscore = gtk4::glib::gobject_ffi::g_signal_lookup(
+            c"word_click".as_ptr() as *const _,
+            t.into_glib(),
+        );
+        assert_ne!(hyphen, 0, "word-click is not registered");
+        assert_eq!(
+            hyphen, underscore,
+            "chat.c and msg.c connect \"word_click\"; GLib must resolve \
+             it to the same signal as \"word-click\""
+        );
+    }
+}
+
+#[test]
+fn a_constructed_view_is_a_usable_widget() {
+    needs_gtk!();
+    // The end-to-end check the three C2 crashes all needed. Every one of
+    // them produced an object that failed exactly this.
+    let view = crate::view::HxChatView::new();
+    assert!(view.is::<gtk4::Widget>());
+    assert!(view.is::<gtk4::Scrollable>());
+    // And it survives the call sequence create_chat performs.
+    view.set_font_from_string("Monospace 10");
+    view.set_word_wrap(true);
+    view.set_max_rows(500);
+    view.set_indent(true);
+    view.set_max_indent(256);
+    view.append(crate::view::plain_message("hello"));
+}

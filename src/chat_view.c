@@ -208,7 +208,24 @@ hx_chat_view_new (const GdkRGBA palette[], gboolean separator)
     /* gtk_xtext_new copies the palette into the widget but takes it as
      * a non-const array. */
     if (want_hxchat ()) {
-        return hx_chat_view_impl_new (palette, separator ? 1 : 0);
+        GtkWidget *v = hx_chat_view_impl_new (palette, separator ? 1 : 0);
+        /* Fail loudly rather than limping on.
+         *
+         * If the backend hands back something that isn't a usable
+         * widget, every later call silently takes the xtext branch —
+         * because is_hxchat() can only answer "no" — and the first one
+         * to dereference it segfaults somewhere in xtext.c, which is a
+         * spectacularly misleading place to land. That happened twice
+         * during C2 bring-up: once from a use-after-free, once from a
+         * botched GtkScrollable property override. Both wasted the
+         * backtrace. Check here, where the answer is unambiguous. */
+        if (!GTK_IS_WIDGET (v) || !is_hxchat (v)) {
+            g_error ("hx_chat_view_impl_new returned %p, which is not an "
+                     "HxChatView — the hxchat backend is broken; rerun "
+                     "without GTKHX_CHATVIEW=new",
+                     (void *) v);
+        }
+        return v;
     }
     return gtk_xtext_new ((GdkRGBA *) (const void *) palette,
                           separator ? 1 : 0);

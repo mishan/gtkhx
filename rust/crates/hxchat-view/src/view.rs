@@ -151,30 +151,31 @@ mod imp {
         }
 
         fn properties() -> &'static [glib::ParamSpec] {
-            // The four properties GtkScrollable requires implementors to
-            // provide. GTK looks them up by name.
             use std::sync::OnceLock;
             static P: OnceLock<Vec<glib::ParamSpec>> = OnceLock::new();
             P.get_or_init(|| {
+                // **Override, don't redeclare.**
+                //
+                // These four properties belong to the GtkScrollable
+                // interface. An implementor overrides them; it does not
+                // define new ones. Declaring fresh ParamSpecs with the
+                // same names — which is what the first cut did — collides
+                // with the interface's, `g_object_class_install_property`
+                // refuses them, and the class is left half-built.
+                //
+                // The symptom was not a warning about properties. It was
+                // `g_object_new` handing back something that failed
+                // `GTK_IS_WIDGET`, so the very first C call on it
+                // (`gtk_widget_set_can_focus`) asserted, `is_hxchat`
+                // returned false on it, and the next call was dispatched
+                // into xtext with a non-xtext pointer — segfaulting in
+                // `gtk_xtext_set_time_stamp` with a garbage buffer. Three
+                // symptoms, one cause, none of them pointing here.
                 vec![
-                    glib::ParamSpecObject::builder::<gtk4::Adjustment>("hadjustment")
-                        .explicit_notify()
-                        .build(),
-                    glib::ParamSpecObject::builder::<gtk4::Adjustment>("vadjustment")
-                        .explicit_notify()
-                        .build(),
-                    // builder_with_default, not builder: ScrollablePolicy
-                    // has no Default impl.
-                    glib::ParamSpecEnum::builder_with_default::<gtk4::ScrollablePolicy>(
-                        "hscroll-policy",
-                        gtk4::ScrollablePolicy::Minimum,
-                    )
-                    .build(),
-                    glib::ParamSpecEnum::builder_with_default::<gtk4::ScrollablePolicy>(
-                        "vscroll-policy",
-                        gtk4::ScrollablePolicy::Minimum,
-                    )
-                    .build(),
+                    glib::ParamSpecOverride::for_interface::<gtk4::Scrollable>("hadjustment"),
+                    glib::ParamSpecOverride::for_interface::<gtk4::Scrollable>("vadjustment"),
+                    glib::ParamSpecOverride::for_interface::<gtk4::Scrollable>("hscroll-policy"),
+                    glib::ParamSpecOverride::for_interface::<gtk4::Scrollable>("vscroll-policy"),
                 ]
             })
         }
