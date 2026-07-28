@@ -148,11 +148,18 @@ become native intra-crate calls once the shell is in hxhandlers.
   register natively without the fn-pointer cast the news/chat senders still use.
   `hx_conn_has_cap` is native (gtkhx-core); `resource_len` native (hxhfs);
   `path_to_hldir` / `exists_remote` / `uniquify_path` / `hx_file_size` stay C
-  externs. The resume `RFLT` blob is reproduced byte-for-byte — the original C
-  string literal's continuation-line indentation leaked 26 spaces in and pushed
-  the DATA/MACR tags past byte 74, so the record is malformed; preserved to keep
-  the wire output identical, flagged as a **latent bug for a separate fix**.
-  Remaining C in xfers.c: just `htxf_destructor` (Y5).
+  externs. Remaining C in xfers.c: just `htxf_destructor` (Y5).
+- **Resume RFLT fix (follow-up to Y4).** The Y4 port first reproduced the
+  original C resume `RFLT` blob byte-for-byte, which was malformed: the string
+  literal's continuation-line indentation leaked 26 leading spaces in, shoving
+  the RFLT magic to `[26]` and the DATA/MACR fork tags past byte 74. mhxd happens
+  to read the two fork offsets at fixed positions `[46]`/`[62]` and ignores the
+  rest, so resume still worked against it — but a spec-strict server that parses
+  the fork list would choke. Replaced with a well-formed `build_resume_rflt`
+  (RFLT magic at `[0]`, version 1, fork count 2, DATA/MACR tags, offsets at
+  `[46]`/`[62]` — byte-identical to mhxd's own client). Guarded by an hxhandlers
+  unit test on the record layout + a Tier-3 `file_resume` test (resume a
+  partial download vs mhxd, assert the completed file is byte-exact).
 - **Y5 — finalize.** `htxf_destructor` (preview unref + channel close) +
   `xfer_close_channel`; register the destructor from Rust. Delete `xfers.c` +
   `xfers.h` (keep the ABI decls where C still calls in). `htxf_destructor` may
