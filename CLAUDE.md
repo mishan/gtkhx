@@ -115,10 +115,24 @@ frame; `docs/chat-view-benchmark.md` is the record and cannot be reproduced,
 since the other half of the comparison no longer exists. Design and phasing:
 `docs/chat-view-scoping.md`.
 
-The `\003NN` mIRC escape vocabulary is **still in use** — `chat.c` and `msg.c`
-build styled strings with it and two sites re-parse their own output to
-recover a name. Retiring it is the structured-append API and is C6 work; see
-scoping §6a2 for why it isn't a shim removal.
+The `\003NN` mIRC escape vocabulary is **retired** (C6). Chat rows are built
+from `HxChatRun` arrays — `(text, palette index, attrs)` — via
+`hx_chat_view_append_runs` / `_insert_runs_before`, and the `chat-log-line`
+signal carries `(htlc, cid, name, colour, body)` rather than a pre-formatted
+string, so `INFOPREFIX` is just `"hx"` and broadcastmsg passes its sender name
+and colour as parameters (`hx_printf_named`). Nothing produces escapes and
+nothing parses them; `hxchat-layout`'s `mirc.rs` is deleted.
+
+One dead remnant is deliberately still there and flagged in place:
+`proto_helpers.c` keeps a copy of the old prefix and checks *incoming server
+chat* against it. Nothing produces the prefix and that check only ever sees
+server-sent text, so it cannot fire — removing it means retiring two
+proto-test cases, which is its own change. Every other `\003` in the tree is
+inside a comment explaining what used to be there.
+
+Message rows also carry structure now: an `HxChatSpeaker` (uid + nick +
+direction), grouping of consecutive messages from one speaker, and an avatar
+gutter on group heads. See scoping §6a2 and §6b.
 
 The custom GtkCList fork is gone; its five list consumers (`tracker.c`, `news15.c`,
 `options.c`, `users.c`, `files.c`) now use `GtkColumnView` directly — the interim

@@ -458,6 +458,11 @@ create_msg (guint16 _uid, char *name)
     hx_chat_view_set_indent (msg->outputbuf, TRUE);
     hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
     hx_chat_view_set_max_indent (msg->outputbuf, 256);
+    hx_chat_view_set_group_gap (msg->outputbuf, HX_CHAT_GROUP_GAP_DEFAULT);
+    hx_chat_view_set_avatar_size (msg->outputbuf,
+                                  gtkhx_prefs.chat_avatars
+                                      ? HX_CHAT_AVATAR_SIZE_DEFAULT
+                                      : 0);
     g_signal_connect (msg->outputbuf, "word_click",
                       G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
@@ -574,13 +579,24 @@ hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w)
  * code paths that hand-roll a name + body string pair) and
  * msg_output_from_event (the msg-signal path that has the
  * pre-parsed HxMsgEvent). */
+/* `outgoing` is direction, and is NOT derivable from `is_self`.
+ *
+ * is_self answers "is the sender me?", by comparing the name against our
+ * own nick. When you message *yourself* that is true of both halves of
+ * the conversation, so it cannot tell an echo of what you just typed
+ * from the copy the server sent back — and message grouping then
+ * collapses "you said / they said / you said" into one block, losing
+ * the alternation that is the whole content.
+ *
+ * Direction is known by *which path produced the row*: msg_output is the
+ * local echo, msg_output_from_event is the received message. So it is
+ * passed rather than inferred. */
 static void
 msg_output_render (const char *name, guint16 uid, const char *body,
-                   gboolean is_self)
+                   gboolean is_self, gboolean outgoing)
 {
     struct msgwin *msg;
-    int brack_col;
-    gchar *nick_wrapped;
+    gint16 brack_col;
     gchar *valid_body;
     gsize valid_body_len;
     const char *cur;
@@ -591,12 +607,10 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         msg = create_msgwin (uid, (char *)name);
     }
 
-    /* mIRC colour 13 (pink) for our own messages, 12 (light blue)
-	 * for incoming. */
+    /* Pink for our own messages, light blue for incoming. Keyed on
+	 * is_self rather than direction, deliberately: the colour is about
+	 * *whose words* these are, which is what is_self answers. */
     brack_col = is_self ? 13 : 12;
-
-    nick_wrapped = g_strdup_printf ("\003%d<\003%s\003%d>\003", brack_col,
-                                    name ? name : "", brack_col);
 
     /* Validate the body bytes once. the chat view hands content to Pango,
 	 * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
@@ -604,7 +618,6 @@ msg_output_render (const char *name, guint16 uid, const char *body,
     valid_body = gtkhx_text_to_utf8 (body ? body : "", body ? strlen (body) : 0,
                                      &valid_body_len);
     if (!valid_body) {
-        g_free (nick_wrapped);
         return;
     }
 
@@ -622,9 +635,32 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         const char *nl = (cur < end) ? memchr (cur, '\n', end - cur) : NULL;
         gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
         if (first) {
-            hx_chat_view_append_indent (msg->outputbuf, nick_wrapped,
-                                        strlen (nick_wrapped), cur, seg_len,
-                                        0);
+            /* "<name>": brackets coloured, name in the default
+			 * foreground. Same shape as chat.c's nick column, and
+			 * the same three runs. */
+            const char *nam = name ? name : "";
+            HxChatRun gutter[3] = {
+                { "<", 1, brack_col, HX_CHAT_ATTR_NONE },
+                HX_CHAT_RUN_PLAIN (nam, (int)strlen (nam)),
+                { ">", 1, brack_col, HX_CHAT_ATTR_NONE },
+            };
+            HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);
+            /* PM windows are per-uid, so the speaker is known outright
+			 * rather than looked up — the one place in the tree where
+			 * that is true.
+			 *
+			 * `uid` names the *window*, i.e. the other party. For our
+			 * own messages the speaker is us, so use our own uid: with
+			 * the window's, an outgoing message would show the other
+			 * person's avatar. When we haven't been told our uid yet it
+			 * stays 0, which is a miss rather than a guess. */
+            /* `nam` is NUL-terminated here (it is the window's name),
+			 * so -1 is honest rather than a shortcut. */
+            HxChatSpeaker sp
+                = { outgoing ? hx_conn_uid (hx_active_session ()->htlc) : uid,
+                    nam, -1, outgoing };
+            hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
+                                      1, 0);
             first = FALSE;
         } else {
             hx_chat_view_append (msg->outputbuf, cur, seg_len, 0);
@@ -635,7 +671,6 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         cur = nl + 1;
     }
 
-    g_free (nick_wrapped);
     g_free (valid_body);
 
     /* incoming messages set needs-attention on
@@ -652,7 +687,10 @@ msg_output (char *name, guint16 uid, char *buf)
 {
     gboolean is_self = name && hx_conn_name (hx_active_session ()->htlc)[0]
                        && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;
-    msg_output_render (name, uid, buf, is_self);
+    /* The local echo of a message we just sent — the one caller is
+	 * send_msg's input handler. Outgoing by construction, which is
+	 * exactly the fact is_self cannot recover when you PM yourself. */
+    msg_output_render (name, uid, buf, is_self, TRUE);
 }
 
 void
@@ -661,7 +699,10 @@ msg_output_from_event (HxMsgEvent *event)
     if (!event) {
         return;
     }
-    msg_output_render (event->name, event->uid, event->body, event->is_self);
+    /* Received from the server: incoming, even when the sender is us
+	 * (messaging yourself echoes back through the same path). */
+    msg_output_render (event->name, event->uid, event->body, event->is_self,
+                       FALSE);
 }
 
 /* short broadcasts go through toolbar_show_toast, long ones
@@ -680,50 +721,45 @@ msg_output_from_event (HxMsgEvent *event)
  * shape of what we've seen in the wild on hlserver.com et al. */
 #define BROADCAST_TOAST_MAX 160
 
-/* Map the legacy user->color (16-bit, % 4 status field) to a mIRC
- * palette index so we can wrap a name in `\003NN…\003` for xtext.
- * Aligned with gdk_user_colors[]:
- *   0 (regular) → no escape; let xtext use HX_CHAT_PAL_FG so the name
- *                 stays legible against both light and dark bgs
- *                 (black on a black bg would be invisible).
- *   1 (idle)    → mIRC 14, grey
- *   2 (admin)   → mIRC  4, red
- *   3 (idle adm)→ mIRC 13, pink */
-static const char *
-broadcast_name_mirc_color (guint16 color)
+/* Map the legacy user->color (16-bit, % 4 status field) to the palette
+ * index the sender's name renders in. Aligned with gdk_user_colors[]:
+ *   0 (regular) → default foreground, so the name stays legible against
+ *                 both light and dark backgrounds (a fixed black would
+ *                 be invisible on a dark one)
+ *   1 (idle)    → 14, grey
+ *   2 (admin)   →  4, red
+ *   3 (idle adm)→ 13, pink */
+static gint16
+broadcast_name_color (guint16 color)
 {
     switch (color % 4) {
     case 2:
-        return "04";
+        return 4;
     case 3:
-        return "13";
+        return 13;
     case 1:
-        return "14";
+        return 14;
     case 0:
     default:
-        return NULL;
+        return HX_CHAT_COLOR_DEFAULT;
     }
 }
 
-/* Defang a sender name before embedding it in the mIRC-coded
- * broadcast prefix. The wrapper structure is
+/* Defang a sender name before showing it.
  *
- *     " \00310[\003<col><name>\00310]\003 "
+ * This used to be load-bearing for *correctness*: the name went inside
+ * a " \00310[\003<col><name>\00310]\003 " wrapper that the chat side
+ * scanned for a closing escape sequence, so a name containing a raw
+ * \003 could terminate the wrapper early, break info-line detection,
+ * or smuggle its own colours into the log. The name is a separate
+ * signal parameter now, so none of that is reachable — there is no
+ * wrapper to escape from.
  *
- * and the chat-side detector in xprintline scans for the closing
- * "\00310]\003 " sequence to find where the name ends. A name
- * containing raw \003 (or any other xtext control byte from the
- * ATTR_* family — \002, \007, \017, \026, \031) could prematurely
- * terminate the wrapper, break info-prefix detection, or smuggle
- * its own colour escapes into the chat log.
- *
- * The wire-parse helpers (hx_msg_extract → strip_ansi) translate
- * any low-control bytes in the body but NOT in the name, so a
- * hostile server could ship `name = "\003foo"` and have us
- * render escape codes inside the brackets. Strip every ASCII
- * control byte (< 0x20) defensively here. Legitimate Hotline
- * nicks are printable ASCII / UTF-8 — control bytes have no
- * business in one. */
+ * Kept anyway, because the wire-parse helpers (hx_msg_extract →
+ * strip_ansi) translate control bytes in the body but *not* in the
+ * name, and a control byte rendered raw into a text layout is still
+ * nobody's idea of a good time. Legitimate Hotline nicks are printable
+ * ASCII / UTF-8. */
 static char *
 broadcast_sanitise_name (const char *raw)
 {
@@ -768,9 +804,9 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 
     /* Log the broadcast to chat output. When the wire carried a
 	 * sender name (mhxd-family servers echo broadcasts back with
-	 * UID + NAME chunks), render as " [name] body" with the same
-	 * blue brackets the INFOPREFIX uses and the name in the
-	 * sender's user-color slot. When the sender is unknown (older
+	 * UID + NAME chunks), render as "[name] body" with the same
+	 * brackets the "[hx]" tag uses and the name in the sender's
+	 * user-colour slot. When the sender is unknown (older
 	 * servers, anonymous rate-limit nags), fall back to the
 	 * legacy "[hx] broadcast: …" form so something still shows up
 	 * in scrollback. Task errors come through task_error() →
@@ -778,18 +814,10 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 	 * so they won't be logged as broadcasts here. */
     if (text && *text) {
         if (sender_name && *sender_name) {
-            const char *col = broadcast_name_mirc_color (sender_color);
             char *safe_name = broadcast_sanitise_name (sender_name);
-            char *prefix;
-            if (col) {
-                prefix = g_strdup_printf (" \00310[\003%s%s\00310]\003 ",
-                                          col, safe_name);
-            } else {
-                prefix = g_strdup_printf (" \00310[\003%s\00310]\003 ",
-                                          safe_name);
-            }
-            hx_printf_prefix (hx_active_session ()->htlc, 0, prefix, "%s\n", text);
-            g_free (prefix);
+            hx_printf_named (hx_active_session ()->htlc, 0, safe_name,
+                             broadcast_name_color (sender_color), "%s\n",
+                             text);
             g_free (safe_name);
         } else {
             hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,

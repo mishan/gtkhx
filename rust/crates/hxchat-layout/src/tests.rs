@@ -10,7 +10,6 @@ use crate::index::HeightIndex;
 use crate::markdown::{self, RawBlock};
 use crate::measure::{FixedMeasure, TextMeasure};
 use crate::message::{Block, ImageSize, Message, Speaker};
-use crate::mirc;
 use crate::span::{Attrs, ColorRef, ParsedText, Style};
 use crate::wrap::{layout_message, LayoutGeneration, LayoutParams};
 
@@ -235,67 +234,6 @@ fn md_utf8_is_never_split() {
 
 // -------------------------------------------------------------------- mIRC
 
-#[test]
-fn mirc_nick_bracket_shape() {
-    // Exactly what chat.c:627 emits.
-    let p = mirc::parse("\u{3}12<\u{3}alice\u{3}12>\u{3} hello");
-    assert_eq!(p.text, "<alice> hello");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(12));
-    assert_eq!(p.style_at(1).fg, ColorRef::Default, "nick uses default fg");
-    assert_eq!(p.style_at(6).fg, ColorRef::Palette(12));
-    assert_eq!(p.style_at(8).fg, ColorRef::Default);
-}
-
-#[test]
-fn mirc_highlight_shape() {
-    // chat.c:669 — bold + colour 4, closed by a reset.
-    let p = mirc::parse("\u{2}\u{3}04alice\u{f} said hi");
-    assert_eq!(p.text, "alice said hi");
-    let s = p.style_at(0);
-    assert!(s.attrs.contains(Attrs::BOLD));
-    assert_eq!(s.fg, ColorRef::Palette(4));
-    assert_eq!(p.style_at(6), Style::default(), "reset clears everything");
-}
-
-#[test]
-fn mirc_history_muted_shape() {
-    let p = mirc::parse("\u{3}37─── chat history (3 messages) ───");
-    assert_eq!(p.text, "─── chat history (3 messages) ───");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(37));
-}
-
-#[test]
-fn mirc_two_digit_and_background() {
-    let p = mirc::parse("\u{3}04,08warn");
-    assert_eq!(p.text, "warn");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(4));
-    assert_eq!(p.style_at(0).bg, ColorRef::Palette(8));
-}
-
-#[test]
-fn mirc_bare_color_resets_to_default() {
-    let p = mirc::parse("\u{3}12a\u{3}b");
-    assert_eq!(p.text, "ab");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(12));
-    assert_eq!(p.style_at(1).fg, ColorRef::Default);
-}
-
-#[test]
-fn mirc_strip_removes_everything() {
-    assert_eq!(
-        mirc::strip("\u{3}12<\u{3}bob\u{3}12>\u{3} \u{2}hi\u{f}"),
-        "<bob> hi"
-    );
-}
-
-#[test]
-fn mirc_digits_after_text_are_not_eaten() {
-    // "\003 3" then literal "7 items" must not become colour 37.
-    let p = mirc::parse("\u{3}3 7 items");
-    assert_eq!(p.text, " 7 items");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(3));
-}
-
 // ------------------------------------------------------------------ measure
 
 #[test]
@@ -326,6 +264,7 @@ fn params(width: u32) -> LayoutParams {
         quote_indent: 12,
         block_padding: 2,
         word_wrap: true,
+        avatar_size: 0,
     }
 }
 
@@ -533,7 +472,7 @@ fn gutter_gets_its_own_line_box() {
         kind: crate::message::MessageKind::Live,
         timestamp: 0,
         speaker: None,
-        gutter: Some(mirc::parse("\u{3}12<\u{3}alice\u{3}12>\u{3}")),
+        gutter: Some(ParsedText::plain("<alice>")),
         blocks: vec![Block::Text(ParsedText::plain("hello"))],
         flags: MessageFlagsNone::NONE,
     };
@@ -798,7 +737,7 @@ fn anchor_falls_back_when_its_row_is_trimmed() {
     let (mut b, m) = buf();
     b.scroll_to(50, 100, 4);
     assert!(!b.is_following());
-    b.set_max_rows(10); // trims the anchored row away
+    b.set_max_rows(10, &m); // trims the anchored row away
     let _ = b.scroll_offset(100);
     // The anchored content is gone; the least surprising place is the
     // bottom, and crucially it must not panic or return garbage.
@@ -840,7 +779,7 @@ fn buffer_stale_mark_is_inert_not_fatal() {
 fn buffer_trim_drops_oldest() {
     let m = FixedMeasure::new(8);
     let mut b = ChatBuffer::new(params(400));
-    b.set_max_rows(50);
+    b.set_max_rows(50, &m);
     for i in 0..200 {
         b.append(Message::system(ParsedText::plain(format!("{i}"))), &m);
     }
@@ -2316,4 +2255,455 @@ fn ensure_visible_can_widen_the_gutter_so_read_it_after() {
         after > before,
         "the nick row must widen the gutter ({before} -> {after})"
     );
+}
+
+// ---- message grouping (C6) ------------------------------------------
+
+fn said(uid: u16, nick: &str, body: &str, at: i64) -> Message {
+    Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: at,
+        speaker: if uid == 0 {
+            None
+        } else {
+            Some(crate::message::Speaker::new(uid, nick))
+        },
+        gutter: Some(ParsedText::plain(format!("<{nick}>"))),
+        blocks: vec![Block::Text(ParsedText::plain(body))],
+        flags: MessageFlagsNone::NONE,
+    }
+}
+
+fn grouped(b: &ChatBuffer, row: usize) -> bool {
+    b.message_at(row)
+        .unwrap()
+        .flags
+        .contains(MessageFlagsNone::GROUPED)
+}
+
+#[test]
+fn consecutive_messages_from_one_speaker_group() {
+    // The reported case: "hai / hai / hai" should read as one block
+    // under one name, not repeat the nick three times.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..4 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+
+    assert!(!grouped(&b, 0), "the first of a run always shows its nick");
+    for r in 1..4 {
+        assert!(grouped(&b, r), "row {r} continues the run");
+    }
+}
+
+#[test]
+fn a_different_speaker_or_a_long_gap_breaks_the_run() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.append(said(9, "alice", "hi", 1002), &m); // different speaker
+    b.append(said(7, "misha", "back", 1003), &m); // misha again, but after alice
+    b.append(said(7, "misha", "later", 1003 + 9999), &m); // long gap
+    b.reindex();
+
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1));
+    assert!(!grouped(&b, 2), "alice starts her own run");
+    assert!(!grouped(&b, 3), "misha's return is a new run, not a continuation");
+    assert!(!grouped(&b, 4), "a long gap breaks the run");
+}
+
+#[test]
+fn trimming_a_runs_head_promotes_the_next_row() {
+    // The invariant that makes grouping safe: a row that suppresses its
+    // nick must always have a row above it that showed one. Trim can
+    // delete the head, and without re-deciding, every remaining message
+    // in that run would render anonymously.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.set_max_rows(3, &m);
+    for i in 0..3 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1) && grouped(&b, 2));
+
+    // One more message trims the head away.
+    b.append(said(7, "misha", "hai", 1003), &m);
+    b.reindex();
+    assert_eq!(b.len(), 3);
+    assert!(
+        !grouped(&b, 0),
+        "the new front row must show its nick — nothing above it can"
+    );
+    assert!(grouped(&b, 1) && grouped(&b, 2));
+}
+
+#[test]
+fn inserting_before_re_decides_both_sides() {
+    // Load-older inserts land in the middle of the buffer and can split
+    // a run: the row below is no longer adjacent to what it continued.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    let first = b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    assert!(grouped(&b, 1));
+
+    // Someone else's message arrives between them.
+    b.insert_before(Some(b.id_at(1).unwrap()), said(9, "alice", "hi", 1000), &m);
+    b.reindex();
+    assert_eq!(b.len(), 3);
+    assert_eq!(b.row_of(first), Some(0));
+    assert!(!grouped(&b, 1), "alice does not continue misha");
+    assert!(!grouped(&b, 2), "misha no longer follows himself");
+}
+
+#[test]
+fn grouping_falls_back_to_the_nick_when_the_server_sends_no_uid() {
+    // Older servers omit the UID chunk, so speaker is None. Grouping on
+    // the gutter text keeps the feature working there rather than
+    // silently switching itself off.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(0, "misha", "one", 1000), &m);
+    b.append(said(0, "misha", "two", 1001), &m);
+    b.append(said(0, "alice", "hi", 1002), &m);
+    b.reindex();
+
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1), "same nick, no uid, still one run");
+    assert!(!grouped(&b, 2));
+}
+
+#[test]
+fn system_rows_never_group() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain("connecting")), &m);
+    b.append(Message::system(ParsedText::plain("connected")), &m);
+    b.reindex();
+    assert!(!grouped(&b, 0));
+    assert!(!grouped(&b, 1), "two system lines are not one speaker");
+}
+
+#[test]
+fn a_grouped_row_hides_its_gutter_but_keeps_the_column_width() {
+    // Hiding a nick must not narrow the shared gutter, or every other
+    // row in the buffer shifts sideways when a run forms.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    let width_after_head = b.indent_width();
+    b.ensure_layout(1, &m);
+
+    let head = b.layout_at(0).expect("head laid out");
+    let cont = b.layout_at(1).expect("continuation laid out");
+    assert!(
+        head.lines.iter().any(|l| l.source == LineSource::Gutter),
+        "the head draws its nick"
+    );
+    assert!(
+        !cont.lines.iter().any(|l| l.source == LineSource::Gutter),
+        "the continuation does not"
+    );
+    assert_eq!(
+        b.indent_width(),
+        width_after_head,
+        "a hidden gutter still reserves its width"
+    );
+}
+
+#[test]
+fn grouping_can_be_switched_off() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..3 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+    assert!(grouped(&b, 1));
+
+    b.set_group_gap_secs(0, &m);
+    assert!(!grouped(&b, 1), "existing rows are re-decided, not just new ones");
+    assert!(!grouped(&b, 2));
+
+    b.set_group_gap_secs(crate::buffer::DEFAULT_GROUP_GAP_SECS, &m);
+    assert!(grouped(&b, 1), "and back again");
+}
+
+#[test]
+fn regrouping_leaves_the_height_index_agreeing_with_a_real_layout() {
+    // Toggling GROUPED invalidates a row's layout, so its height entry
+    // has to be re-*estimated* rather than have the old value carried
+    // forward as the new estimate. Otherwise total_height drifts from
+    // what a real layout produces, and the scrollbar's upper bound with
+    // it.
+    //
+    // Today the two happen to be equal: the gutter is a left column
+    // (LineBox at y=0) and row height is driven only by body lines, so
+    // showing or hiding a nick changes no height. This test therefore
+    // passes either way *at present* — it is here for what comes next.
+    // An avatar gutter makes a head row taller than its continuations,
+    // and at that point carrying a stale estimate stops being harmless.
+    // Asserting the invariant now means that change gets caught by a
+    // test instead of by someone noticing the scrollbar is short.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..8 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+    assert!(grouped(&b, 1), "precondition: rows 1.. are a run");
+
+    b.set_group_gap_secs(0, &m);
+    assert!(!grouped(&b, 1), "grouping off");
+    let estimated = b.total_height();
+
+    for r in 0..8 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(
+        b.total_height(),
+        estimated,
+        "the post-regroup estimate must match what layout actually yields"
+    );
+
+    // And back on.
+    b.set_group_gap_secs(crate::buffer::DEFAULT_GROUP_GAP_SECS, &m);
+    let estimated = b.total_height();
+    for r in 0..8 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(b.total_height(), estimated);
+}
+
+#[test]
+fn direction_breaks_a_run_even_with_the_same_nick() {
+    // Messaging yourself in a PM window. Every line names you as the
+    // sender — including the copies the server sends back — so no
+    // identity test can separate the four lines, and an earlier fix that
+    // keyed on "is the sender me" did nothing at all here. Direction is
+    // a property of which path produced the row, and can.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+
+    let mut line = |mine: bool, at: i64| {
+        let mut msg = said(7, "misha", "asdfasdf", at);
+        if mine {
+            msg.flags = msg.flags.union(MessageFlagsNone::OUTGOING);
+        }
+        b.append(msg, &m);
+    };
+    line(true, 1000);  // outgoing
+    line(false, 1000); // incoming echo
+    line(true, 1001);  // outgoing
+    line(false, 1001); // incoming echo
+    b.reindex();
+
+    for r in 0..4 {
+        assert!(
+            !grouped(&b, r),
+            "row {r}: alternating direction means four groups, not one"
+        );
+    }
+}
+
+#[test]
+fn same_direction_still_groups() {
+    // The converse, so the fix above doesn't just disable grouping.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..3 {
+        let mut msg = said(7, "misha", "hai", 1000 + i);
+        msg.flags = msg.flags.union(MessageFlagsNone::OUTGOING);
+        b.append(msg, &m);
+    }
+    b.reindex();
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1) && grouped(&b, 2), "three outgoing lines are one run");
+}
+
+// ---- avatar gutter (C6) ---------------------------------------------
+
+#[test]
+fn only_a_group_head_gets_an_avatar_box() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 24;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    b.ensure_layout(1, &m);
+
+    let head = b.layout_at(0).unwrap();
+    let cont = b.layout_at(1).unwrap();
+    assert!(head.avatar.is_some(), "the head shows the icon");
+    assert!(cont.avatar.is_none(), "a continuation does not repeat it");
+    assert_eq!(head.avatar.unwrap().uid, 7);
+}
+
+#[test]
+fn a_continuation_still_reserves_the_avatar_width() {
+    // Same argument as the hidden nick: if a grouped row stopped
+    // reserving the icon's width, the shared gutter would narrow as soon
+    // as a run formed and every column in the buffer would jump left.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 24;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    let with_head_only = b.indent_width();
+
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(1, &m);
+    assert_eq!(
+        b.indent_width(),
+        with_head_only,
+        "a grouped row must not shrink the shared gutter"
+    );
+}
+
+#[test]
+fn an_avatar_makes_the_head_row_at_least_as_tall_as_the_icon() {
+    // The case that makes the regroup re-estimate matter: with avatars
+    // on, a head and its continuations genuinely differ in height, so a
+    // stale height carried across a GROUPED toggle is now a real bug
+    // rather than a latent one.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 48; // taller than a text line
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    b.ensure_layout(1, &m);
+
+    assert!(
+        b.layout_at(0).unwrap().height >= 48,
+        "the head must fit its icon"
+    );
+    assert!(
+        b.layout_at(1).unwrap().height < 48,
+        "a continuation has no icon and should stay text-height"
+    );
+}
+
+#[test]
+fn turning_avatars_off_re_estimates_and_narrows_the_gutter() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 48;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..4 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+    for r in 0..4 {
+        b.ensure_layout(r, &m);
+    }
+    let wide = b.indent_width();
+    let tall = b.total_height();
+
+    b.set_avatar_size(0);
+    for r in 0..4 {
+        b.ensure_layout(r, &m);
+    }
+    assert!(b.indent_width() < wide, "the gutter loses the icon slot");
+    assert!(b.total_height() < tall, "and the head row loses its floor");
+    assert!(b.layout_at(0).unwrap().avatar.is_none());
+}
+
+#[test]
+fn a_speaker_with_no_uid_gets_no_avatar_slot() {
+    // uid 0 means "unknown", so there is nothing to look an icon up by.
+    // Reserving space for an icon that can never resolve would indent
+    // every row on a server that omits the UID chunk.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 24;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(0, "misha", "one", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    assert!(b.layout_at(0).unwrap().avatar.is_none());
+}
+
+#[test]
+fn a_rename_breaks_the_run() {
+    // The uid survives a rename, so keying grouping on it alone would
+    // hide the new name entirely — the messages would group under the
+    // old one and the change, which is the thing worth noticing, would
+    // never appear on screen.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.append(said(7, "misha2", "three", 1002), &m); // same uid, new nick
+    b.append(said(7, "misha2", "four", 1003), &m);
+    b.reindex();
+
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1), "same name, same person");
+    assert!(!grouped(&b, 2), "the rename must show the new name");
+    assert!(grouped(&b, 3), "and then group again under it");
+}
+
+#[test]
+fn two_users_sharing_a_nick_do_not_group() {
+    // The converse: the nick alone is not enough either. Two people can
+    // present the same name, and merging their messages under one header
+    // would misattribute them.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(9, "misha", "two", 1001), &m); // impostor, same nick
+    b.reindex();
+
+    assert!(!grouped(&b, 0));
+    assert!(!grouped(&b, 1), "different uid means a different person");
 }

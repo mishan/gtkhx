@@ -169,7 +169,6 @@ rust_sources = files(
   'crates/hxchat-layout/src/span.rs',
   'crates/hxchat-layout/src/message.rs',
   'crates/hxchat-layout/src/markdown.rs',
-  'crates/hxchat-layout/src/mirc.rs',
   'crates/hxchat-layout/src/measure.rs',
   'crates/hxchat-layout/src/wrap.rs',
   'crates/hxchat-layout/src/index.rs',

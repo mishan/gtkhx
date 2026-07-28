@@ -155,13 +155,154 @@ void hx_chat_view_set_autocopy_text (gboolean enabled);
 void hx_chat_view_set_autocopy_stamp (gboolean enabled);
 void hx_chat_view_set_autocopy_color (gboolean enabled);
 
-/* ---- appending ---------------------------------------------------- *
+/* ---- styled runs (C6) --------------------------------------------- *
+ *
+ * A run is a slice of text with a colour and some attributes. A row is
+ * built from an array of them: the gutter (nick column) is one array,
+ * the body another.
+ *
+ * This replaces the in-band "\003NN" escape vocabulary that C0–C5 used
+ * to get style from chat.c to the view. The escapes came from the XChat
+ * xtext fork in 2000 and were never protocol — Hotline chat is plain
+ * text — so they were GtkHx talking to itself in a format neither end
+ * needed. The reason to be rid of them is not tidiness: two sites
+ * (chat.c's info-prefix branch, msg.c's broadcast prefix) used to
+ * *re-parse GtkHx's own escape output* to find where a name ended,
+ * because the structure had been flattened into presentation and the
+ * only way to get it back was to read it out again. Runs keep the
+ * structure, so nothing has to reconstruct it.
+ *
+ * Runs are borrowed for the duration of the call; the view copies what
+ * it needs. Build them on the stack.
+ */
+
+/* Palette index for a run: 0..31 mIRC-legacy slots, 32..37 UI roles
+ * (see the HX_CHAT_PAL_* block above), or DEFAULT for the theme's
+ * normal foreground. */
+#define HX_CHAT_COLOR_DEFAULT (-1)
+
+/* Named palette slots the chat code actually reaches for. These were
+ * bare numbers inside printf format strings ("\00310[", "\003" "37"),
+ * which is how a colour choice ends up undocumented and unsearchable.
+ *
+ * The values are the historical mIRC indices, kept so themes that
+ * already set slots 0..31 keep rendering the same. */
+#define HX_CHAT_INFO_COLOR      3  /* "[hx]" and broadcast sender names */
+#define HX_CHAT_INFO_BRACKET_COLOR 10 /* the [ ] around them */
+#define HX_CHAT_HIGHLIGHT_COLOR 4  /* light red: a line that mentions you */
+#define HX_CHAT_PLACEHOLDER_COLOR 14 /* dark grey: inline-media alt text */
+
+#define HX_CHAT_ATTR_NONE      0u
+#define HX_CHAT_ATTR_BOLD      (1u << 0)
+#define HX_CHAT_ATTR_ITALIC    (1u << 1)
+#define HX_CHAT_ATTR_UNDERLINE (1u << 2)
+
+typedef struct {
+    const char *text;
+    int len;       /* bytes, or -1 for strlen */
+    gint16 color;  /* palette index, or HX_CHAT_COLOR_DEFAULT */
+    guint16 attrs; /* HX_CHAT_ATTR_* bits */
+} HxChatRun;
+
+/* Convenience for the common "one unstyled run" case. */
+#define HX_CHAT_RUN_PLAIN(t, l)                                               \
+    ((HxChatRun){ (t), (l), HX_CHAT_COLOR_DEFAULT, HX_CHAT_ATTR_NONE })
+
+/* Who said it.
+ *
+ * `uid` is the Hotline user id, 0 when unknown — which is the honest
+ * answer more often than it looks: Hotline chat is a *text stream*, so
+ * a chat line carries a name and no id, and the uid has to be looked up
+ * against the conversation's membership model by nick. That lookup can
+ * miss (the user left, two users share a name, the line is server
+ * prose), and a wrong uid is worse than none: it would attach the wrong
+ * avatar and group two people's messages together.
+ *
+ * This is the identity the user list uses, not a parallel one — see
+ * hx_member_model_find_by_name in chat_members.h. One user, one record,
+ * whichever surface you clicked. */
+typedef struct {
+    guint16 uid;      /* 0 = unknown */
+    const char *nick; /* borrowed for the call; may be NULL */
+    /* Length of `nick` in bytes, or -1 when it is NUL-terminated.
+     *
+     * Explicit because the chat paths hand over a slice *into the middle
+     * of the received line* — the sender's name is bytes
+     * [sender_off, sender_off+sender_len) of "misha:  hello". Reading
+     * that as a C string would swallow the colon, the body, and
+     * everything after it. */
+    int nick_len;
+    /* Direction: did this row originate here, or arrive from the
+     * server? It breaks message grouping independently of identity.
+     *
+     * Not the same question as "is the sender me". In a private-message
+     * window with yourself, *both* halves have you as the sender, so
+     * sender-identity cannot separate the echo of what you typed from
+     * the copy the server sent back — and grouping then collapses the
+     * whole exchange into one block, losing the alternation that is the
+     * content. Direction can separate them, because it is a property of
+     * which code path produced the row.
+     *
+     * In public chat there is one row per message, so this coincides
+     * with is_self; the distinction only bites in PMs. */
+    gboolean outgoing;
+} HxChatSpeaker;
+
+#define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL, -1, FALSE })
+
+/* Append a row built from runs. `gutter` may be NULL/0 for a row with
+ * no nick column; `speaker` names who said it (HX_CHAT_SPEAKER_NONE for
+ * system lines). Returns a mark naming the appended row. */
+HxChatMark *hx_chat_view_append_runs (GtkWidget *view, HxChatSpeaker speaker,
+                                      const HxChatRun *gutter, int n_gutter,
+                                      const HxChatRun *body, int n_body,
+                                      time_t stamp);
+
+/* As above, but inserted immediately BEFORE `anchor` (NULL prepends at
+ * the head). Scroll position is preserved across the insert — see
+ * hx_chat_view_insert_before below for the reasoning. */
+HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
+                                             HxChatMark *anchor,
+                                             HxChatSpeaker speaker,
+                                             const HxChatRun *gutter,
+                                             int n_gutter,
+                                             const HxChatRun *body, int n_body,
+                                             time_t stamp);
+
+/* Show the speaker's avatar in the gutter, `px` on a side; 0 hides it.
+ *
+ * Only the first message of a run carries one — repeating an icon down
+ * a burst of messages is exactly the noise grouping exists to remove.
+ * Continuation rows still *reserve* the width, so a run forming does not
+ * shift the column.
+ *
+ * The icon is resolved per frame from the uid (see chat_avatar.h), so
+ * animated avatars animate. Rows whose speaker is unknown (uid 0) get no
+ * slot at all — there would be nothing to look up. */
+void hx_chat_view_set_avatar_size (GtkWidget *view, int px);
+
+/* Default avatar edge, in px. */
+#define HX_CHAT_AVATAR_SIZE_DEFAULT 32
+
+/* Coalesce consecutive messages from one speaker: only the first of a
+ * run draws the nick column (and, once avatars land, the icon). `secs`
+ * is how long a gap breaks a run; 0 turns grouping off.
+ *
+ * The body keeps its indent either way, and a hidden gutter still
+ * reserves its width, so switching this does not shift the column. */
+void hx_chat_view_set_group_gap (GtkWidget *view, int secs);
+
+/* Default gap, in seconds. Five minutes: short enough that a burst of
+ * messages collapses under one name, long enough that coming back to a
+ * room shows who is talking rather than attaching your message to
+ * something you said an hour ago. */
+#define HX_CHAT_GROUP_GAP_DEFAULT 300
+
+/* ---- appending (plain text) --------------------------------------- *
  *
  * `stamp` is a time_t for the row's timestamp column; 0 means "now".
- * All text is in the in-band escape vocabulary (mIRC "\003NN" colours
- * plus the ATTR_* attribute bytes) — that stays the wire format
- * between chat.c's formatting code and the view for now; C6 replaces
- * it with a structured message. */
+ * Text is plain: no escape vocabulary, no styling. Use the run API
+ * above when a row needs colour or attributes. */
 
 /* Append a plain row with no nick column (server prose, continuation
  * lines of a multi-line message). */

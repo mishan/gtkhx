@@ -313,6 +313,7 @@ fn nick_color_row(cfg: &str) -> adw::ActionRow {
 mod cfg {
     // Chat output / appearance
     pub const TIMESTAMP: &str = "TIMESTAMP";
+    pub const CHAT_AVATARS: &str = "CHATAVATARS";
     pub const WORDWRAP: &str = "WORDWRAP";
     pub const XBUF_MAX: &str = "XBUF_MAX";
     pub const STAMP_FORMAT: &str = "TIMESTAMPFORMAT";
@@ -453,6 +454,13 @@ fn page_general(page: &adw::PreferencesPage) {
 fn page_chat_appearance(page: &adw::PreferencesPage) {
     let output = group(&tr("Chat output"));
     output.add(&switch_row(cfg::TIMESTAMP, &tr("Show timestamps"), None));
+    output.add(&switch_row(
+        cfg::CHAT_AVATARS,
+        &tr("Show user icons"),
+        Some(&tr(
+            "Shows the speaker's icon beside the first message of each run",
+        )),
+    ));
     output.add(&switch_row(cfg::WORDWRAP, &tr("Word wrap"), None));
     output.add(&spin_row(
         cfg::XBUF_MAX,

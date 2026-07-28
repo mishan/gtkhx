@@ -80,6 +80,50 @@ pub struct Speaker {
     pub icon: IconRef,
 }
 
+impl Message {
+    /// The key two messages must share to be grouped, or `None` for a
+    /// message that never groups (system rows, dividers, `/me`).
+    ///
+    /// Both halves matter, and each catches a case the other misses:
+    ///
+    /// - The **uid** separates two people who happen to share a nick.
+    /// - The **rendered nick** separates one person before and after a
+    ///   rename. The uid survives a rename, so keying on it alone would
+    ///   group the messages and the new name would simply never appear —
+    ///   which is worse than repeating it, since the change is exactly
+    ///   what the reader needs to see.
+    ///
+    /// The nick compared is the *gutter text as drawn*, not
+    /// `Speaker.nick`, because what a reader notices is the label on
+    /// screen changing.
+    pub fn group_key(&self) -> Option<GroupKey<'_>> {
+        if self.flags.contains(MessageFlags::ACTION)
+            || self.flags.contains(MessageFlags::DELETED)
+        {
+            return None;
+        }
+        let uid = self.speaker.as_ref().map(|s| s.uid).unwrap_or(0);
+        // A row with no gutter at all is a system line and never groups.
+        let nick = match &self.gutter {
+            Some(g) if !g.text.is_empty() => g.text.as_str(),
+            _ => return None,
+        };
+        Some(GroupKey { uid, nick })
+    }
+}
+
+/// What makes two adjacent messages "the same speaker, still".
+///
+/// Equality is on both fields: same person *and* same displayed name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GroupKey<'a> {
+    /// 0 when the server sent no uid — then the nick carries the whole
+    /// decision, which is the best available answer on those servers.
+    pub uid: u16,
+    /// The gutter text as rendered.
+    pub nick: &'a str,
+}
+
 impl Speaker {
     pub fn new(uid: u16, nick: impl Into<String>) -> Speaker {
         Speaker {
@@ -151,10 +195,21 @@ impl MessageFlags {
     pub const MUTED: MessageFlags = MessageFlags(1 << 1);
     /// A `/me` action: "* nick does something", no nick column.
     pub const ACTION: MessageFlags = MessageFlags(1 << 2);
-    /// Sent by us — the nick draws in the self colour.
-    pub const SELF: MessageFlags = MessageFlags(1 << 3);
+    /// Originated here rather than arriving from the server.
+    ///
+    /// Direction, not sender identity — "is the sender me" cannot tell
+    /// the echo of a message you just sent from the server's copy of it
+    /// when you message yourself, and grouping needs to. See
+    /// `chat_view.h`'s `HxChatSpeaker.outgoing`.
+    pub const OUTGOING: MessageFlags = MessageFlags(1 << 3);
     /// Server tombstone for a deleted message.
     pub const DELETED: MessageFlags = MessageFlags(1 << 4);
+    /// A continuation of the row above: same speaker, close in time, so
+    /// the gutter is suppressed and only the body draws. Set by
+    /// [`ChatBuffer`](crate::ChatBuffer), never by the caller — it is a
+    /// property of a message's *neighbours*, not of the message, and
+    /// gets recomputed when they change.
+    pub const GROUPED: MessageFlags = MessageFlags(1 << 5);
 
     #[inline]
     pub fn contains(self, other: MessageFlags) -> bool {
@@ -177,7 +232,7 @@ impl std::fmt::Debug for MessageFlags {
             (MessageFlags::HIGHLIGHT, "HIGHLIGHT"),
             (MessageFlags::MUTED, "MUTED"),
             (MessageFlags::ACTION, "ACTION"),
-            (MessageFlags::SELF, "SELF"),
+            (MessageFlags::OUTGOING, "OUTGOING"),
             (MessageFlags::DELETED, "DELETED"),
         ] {
             if self.contains(bit) {

@@ -47,6 +47,7 @@
 #include "gtkutil.h"
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "chat_bench.h"
+#include "chat_members.h"
 #include "chat_view.h"
 #include "users.h"
 #ifdef HAVE_VOICE
@@ -601,32 +602,29 @@ gchat_delete (session *sess, struct gtkhx_chat *gchat)
 static void
 xprintline_render (GtkWidget *text, const char *line, gsize line_len,
                    gsize name_off, gsize name_len, gsize body_off,
-                   gsize body_len, gboolean is_info, gboolean is_self)
+                   gsize body_len, gboolean is_info, gboolean is_self,
+                   gint16 info_color, HxChatSpeaker speaker)
 {
-    gchar *display_nick = NULL;
+    /* Gutter runs. At most three: "<", the name, ">". The old code
+	 * built these as one "\003NN<\003name\003NN>\003" string, which
+	 * is why the info-prefix branch below used to have to search for
+	 * the closing escape to find where the name ended. */
+    HxChatRun gutter[3];
+    int n_gutter = 0;
+    const char *display_name = NULL;
+    gsize display_name_len = 0;
     const char *display_body = NULL;
     gsize display_body_len = 0;
+    gboolean have_nick = FALSE;
     session *sess = hx_active_session ();
     const char *self_nick = (hx_conn_name (sess->htlc)[0] != '\0')
                                 ? (const char *)hx_conn_name (sess->htlc)
                                 : NULL;
 
-    if (is_info && name_len > 0) {
-        /* The info-prefix branch: caller's name_off/len describe
-		 * the "[hx]" inside the INFOPREFIX wrapper bytes; render
-		 * it as the nick. */
-        display_nick = g_strndup (line + name_off, name_len);
-        display_body = line + body_off;
-        display_body_len = body_len;
-    } else if (name_len > 0) {
-        /* "Nick: body" — wrap the nick in coloured brackets the
-		 * same way msg.c::msg_output does. Phase 5+: brackets
-		 * coloured mIRC 13 (pink) for self, 12 (light blue) for
-		 * others. */
-        int brack_col = is_self ? 13 : 12;
-        display_nick
-            = g_strdup_printf ("\003%d<\003%.*s\003%d>\003", brack_col,
-                               (int)name_len, line + name_off, brack_col);
+    if (name_len > 0) {
+        have_nick = TRUE;
+        display_name = line + name_off;
+        display_name_len = name_len;
         display_body = line + body_off;
         display_body_len = body_len;
     }
@@ -634,7 +632,7 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     /* Highlight-on-mention. Skip if it's an info line, if we said
 	 * the line ourselves, or if there's no parsed body to scan. */
     gboolean do_highlight = FALSE;
-    if (display_nick && !is_info && !is_self && display_body_len > 0) {
+    if (have_nick && !is_info && !is_self && display_body_len > 0) {
         GPtrArray *words = g_ptr_array_new ();
         if (self_nick && *self_nick) {
             g_ptr_array_add (words, (gpointer)self_nick);
@@ -658,32 +656,148 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
         }
     }
 
-    if (display_nick) {
-        gchar *nick_buf = display_nick;
-        gchar *body_buf = NULL;
-        const char *body_ptr = display_body;
-        gsize body_ptr_len = display_body_len;
+    if (have_nick) {
+        HxChatRun body_run;
 
-        if (do_highlight) {
-            /* \002 = ATTR_BOLD, \003 04 = mIRC colour 4
-			 * (light red), \017 = ATTR_RESET. */
-            nick_buf = g_strdup_printf ("\002\00304%s", display_nick);
-            body_buf = g_strndup (display_body, display_body_len);
-            gchar *with_reset = g_strdup_printf ("%s\017", body_buf);
-            g_free (body_buf);
-            body_buf = with_reset;
-            body_ptr = body_buf;
-            body_ptr_len = strlen (body_buf);
-            g_free (display_nick);
+        if (is_info) {
+            /* "[hx]", or a broadcast sender's name. Brackets in the
+			 * wrapper colour, name in whichever colour the prefix
+			 * asked for — both were literal text with escapes around
+			 * them before. */
+            gutter[n_gutter++]
+                = (HxChatRun){ "[", 1, HX_CHAT_INFO_BRACKET_COLOR,
+                               HX_CHAT_ATTR_NONE };
+            gutter[n_gutter++] = (HxChatRun){ display_name,
+                                              (int)display_name_len,
+                                              info_color,
+                                              HX_CHAT_ATTR_NONE };
+            gutter[n_gutter++]
+                = (HxChatRun){ "]", 1, HX_CHAT_INFO_BRACKET_COLOR,
+                               HX_CHAT_ATTR_NONE };
+            body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
+        } else if (do_highlight) {
+            /* Mention: bold light-red nick, plain body. The old form
+			 * appended a \017 reset byte to the body to stop the
+			 * attribute leaking into the next row; runs have no
+			 * running state, so there is nothing to reset. */
+            gutter[n_gutter++] = (HxChatRun){ display_name,
+                                              (int)display_name_len,
+                                              HX_CHAT_HIGHLIGHT_COLOR,
+                                              HX_CHAT_ATTR_BOLD };
+            body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
+        } else {
+            /* "<nick>" — brackets coloured, name in the default
+			 * foreground. Pink for our own lines, light blue for
+			 * everyone else's, as since Phase 5. */
+            gint16 brack = is_self ? 13 : 12;
+            gutter[n_gutter++]
+                = (HxChatRun){ "<", 1, brack, HX_CHAT_ATTR_NONE };
+            gutter[n_gutter++] = HX_CHAT_RUN_PLAIN (display_name,
+                                                    (int)display_name_len);
+            gutter[n_gutter++]
+                = (HxChatRun){ ">", 1, brack, HX_CHAT_ATTR_NONE };
+            body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
         }
 
-        hx_chat_view_append_indent (text, nick_buf, strlen (nick_buf),
-                                    body_ptr, body_ptr_len, 0);
-        g_free (nick_buf);
-        g_free (body_buf);
+        hx_chat_view_append_runs (text, speaker, gutter, n_gutter, &body_run, 1,
+                                  0);
     } else {
         hx_chat_view_append (text, line, line_len, 0);
     }
+}
+
+/* Right-click on a nick in chat output.
+ *
+ * Hands straight to users.c::user_popup_show — the same builder the
+ * Users window and the pchat sidebars use, so there is one menu rather
+ * than a chat-shaped copy that drifts from it as items are added. The
+ * view supplied the uid (see HxChatSpeaker) and the pointer position;
+ * everything else the menu needs it looks up itself.
+ *
+ * `user_data` carries the cid so a private chat pops the menu against
+ * its own membership rather than the public room's. */
+static void
+chat_speaker_menu (GtkWidget *view, guint uid, double x, double y,
+                   gpointer user_data)
+{
+    guint32 cid = GPOINTER_TO_UINT (user_data);
+
+    if (uid == 0) {
+        return;
+    }
+    user_popup_show (view, hx_active_session (), cid, (guint16)uid, x, y);
+}
+
+/* Identify who said a line.
+ *
+ * `wire_uid` is the sender's uid straight off the chat message's UID
+ * chunk (`parse_chat` → `HxChatEvent.uid`). When the server sent one,
+ * that is authoritative and this does no work.
+ *
+ * It is 0 when the server sent no UID chunk — older servers omit it, and
+ * it is also 0 for lines that didn't come from a chat message at all
+ * (log lines, the `hx_printf` path). Then, and only then, fall back to
+ * looking the nick up in the conversation's membership model — the same
+ * `HxMemberModel` the user list is built from, so chat and Users resolve
+ * to one record rather than two that happen to agree.
+ *
+ * If the fallback misses too, uid stays 0 and stays a miss. The speaker
+ * may have parted since talking, two users may share a name, or the
+ * "nick" may be server prose that merely looked like one. Guessing would
+ * attach someone else's avatar and group two people's messages together,
+ * which is worse than showing neither. */
+static HxChatSpeaker
+chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
+                  gsize nick_len, gboolean is_self)
+{
+    HxChatSpeaker sp = HX_CHAT_SPEAKER_NONE;
+
+    sp.outgoing = is_self;
+    struct chat *conv;
+    char *nul;
+
+    if (!nick || nick_len == 0) {
+        return sp;
+    }
+    if (wire_uid != 0) {
+        sp.uid = wire_uid;
+        sp.nick = nick;
+        sp.nick_len = (int)nick_len;
+        return sp;
+    }
+    conv = chat_with_cid (hx_active_session (), cid);
+    if (!conv) {
+        return sp;
+    }
+    nul = g_strndup (nick, nick_len);
+    sp.uid = hx_member_model_find_by_name (hx_chat_member_model (conv), nul);
+    g_free (nul);
+    /* Borrowed for the append call only, which is why this can hand back
+	 * a pointer into the caller's buffer — and why the length has to
+	 * travel with it, since that buffer is the whole chat line and the
+	 * name is a slice from its middle. */
+    sp.nick = sp.uid ? nick : NULL;
+    sp.nick_len = (int)nick_len;
+    return sp;
+}
+
+/* Render a "[tag] body" status line: bracketed tag in the gutter, body
+ * on the right. Split out from xprintline_render because a tagged line
+ * has no nick to parse and no highlight to consider — it is the one
+ * shape where the caller already knows every part. */
+static void
+xprintline_render_tagged (GtkWidget *text, const char *tag, gsize tag_len,
+                          gint16 tag_color, const char *body, gsize body_len)
+{
+    HxChatRun gutter[3] = {
+        { "[", 1, HX_CHAT_INFO_BRACKET_COLOR, HX_CHAT_ATTR_NONE },
+        { tag, (int)tag_len, tag_color, HX_CHAT_ATTR_NONE },
+        { "]", 1, HX_CHAT_INFO_BRACKET_COLOR, HX_CHAT_ATTR_NONE },
+    };
+    HxChatRun body_run = HX_CHAT_RUN_PLAIN (body, (int)body_len);
+
+    hx_chat_view_append_runs (text, HX_CHAT_SPEAKER_NONE, gutter, 3, &body_run,
+                              1, 0);
 }
 
 /* Phase 9.E (inline media): auto-fetch a media handle on arrival
@@ -955,7 +1069,11 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 
     xprintline_render (gchat->output, e->line, e->body_off + first_body_len,
                        e->sender_off, e->sender_len, e->body_off,
-                       first_body_len, e->is_info, e->is_self);
+                       first_body_len, e->is_info, e->is_self,
+                       HX_CHAT_INFO_COLOR,
+                       chat_speaker_for (e->cid, e->uid,
+                                         e->line + e->sender_off,
+                                         e->sender_len, e->is_self));
 
     if (nl) {
         const char *cur = nl + 1;
@@ -1007,10 +1125,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         char *placeholder
             = hx_chat_media_placeholder_clickable (e->media, token);
         if (placeholder) {
-            gchar *styled = g_strdup_printf ("\003" "14%s", placeholder);
             hx_chat_view_append_media (gchat->output, NULL /* texture */,
-                                       styled, token, 0 /* stamp */);
-            g_free (styled);
+                                       placeholder, token, 0 /* stamp */);
             g_free (placeholder);
 
             /* Auto-fetch. Cap-gated: on a server that didn't
@@ -1148,15 +1264,21 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * Load-older block is chronologically ordered, oldest at the
 	 * top of the block, newest just above the original opening
 	 * divider. */
-#define HX_RENDER(LEFT, LEFT_LEN, RIGHT, RIGHT_LEN, STAMP)                    \
+/* Every history row is drawn in the muted palette slot, so the runs
+ * only ever differ in their text. HX_MUTED builds one. */
+#define HX_MUTED(TEXT, LEN)                                                   \
+    ((HxChatRun){ (TEXT), (LEN), HX_CHAT_PAL_HISTORY_MUTED,                   \
+                  HX_CHAT_ATTR_NONE })
+
+#define HX_RENDER(GUTTER, N_GUTTER, BODY, N_BODY, STAMP)                      \
     do {                                                                      \
         if (prepend_mode && gchat->render.anchor_ent) {                      \
-            hx_chat_view_insert_before (view,                                 \
-                gchat->render.anchor_ent,                                    \
-                (LEFT), (LEFT_LEN), (RIGHT), (RIGHT_LEN), (STAMP));           \
+            hx_chat_view_insert_runs_before (view,                            \
+                gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE,               \
+                (GUTTER), (N_GUTTER), (BODY), (N_BODY), (STAMP));             \
         } else {                                                              \
-            hx_chat_view_append_indent (view,                                 \
-                (LEFT), (LEFT_LEN), (RIGHT), (RIGHT_LEN), (STAMP));           \
+            hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE,             \
+                (GUTTER), (N_GUTTER), (BODY), (N_BODY), (STAMP));             \
         }                                                                     \
     } while (0)
 
@@ -1174,9 +1296,11 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             "chat history (%u messages)",
             entries->len);
         gchar *body = g_strdup_printf (fmt, entries->len);
-        gchar *divider = g_strdup_printf ("\003" "37" "─── %s ───", body);
-        gchat->render.anchor_ent = hx_chat_view_append_indent (
-            view, "", 0, divider, (int) strlen (divider), 0);
+        gchar *divider = g_strdup_printf ("─── %s ───", body);
+        HxChatRun run = HX_MUTED (divider, (int) strlen (divider));
+        gchat->render.anchor_ent
+            = hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE, NULL, 0,
+                                        &run, 1, 0);
         g_free (divider);
         g_free (body);
     }
@@ -1213,12 +1337,11 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * Load-older clicks can only fire after an initial render),
 	 * insert_indent_before falls back to head-insert. */
     if (has_more) {
-        gchar *row = g_strdup_printf (
-            "\003" "37"
-            "─── %s ───",
-            hx_load_older_sentinel ());
-        gchat->render.load_older_ent = hx_chat_view_insert_before (
-            view, gchat->render.anchor_ent, "", 0, row, (int) strlen (row), 0);
+        gchar *row = g_strdup_printf ("─── %s ───", hx_load_older_sentinel ());
+        HxChatRun run = HX_MUTED (row, (int) strlen (row));
+        gchat->render.load_older_ent = hx_chat_view_insert_runs_before (
+            view, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE, NULL, 0,
+            &run, 1, 0);
         g_free (row);
     }
 
@@ -1233,31 +1356,30 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
         if (e->flags & HX_HISTORY_FLAG_DELETED) {
             /* Tombstone — placeholder text, no nick column. */
-            const char *line = "\003" "37" "[message removed]";
-            HX_RENDER ("", 0, line, (int) strlen (line), stamp);
+            const char *line = "[message removed]";
+            HxChatRun run = HX_MUTED (line, (int) strlen (line));
+            HX_RENDER (NULL, 0, &run, 1, stamp);
             continue;
         }
 
         if (e->flags & HX_HISTORY_FLAG_SERVER_MSG) {
             /* Server / admin broadcast. Render as info-line with
 			 * no nick column. */
-            gchar *line = g_strdup_printf (
-                "\003" "37"
-                "*** %s",
-                e->message ? e->message : "");
-            HX_RENDER ("", 0, line, (int) strlen (line), stamp);
+            gchar *line
+                = g_strdup_printf ("*** %s", e->message ? e->message : "");
+            HxChatRun run = HX_MUTED (line, (int) strlen (line));
+            HX_RENDER (NULL, 0, &run, 1, stamp);
             g_free (line);
             continue;
         }
 
         if (e->flags & HX_HISTORY_FLAG_ACTION) {
             /* /me emote. Render as "* nick body" — mIRC convention. */
-            gchar *line = g_strdup_printf (
-                "\003" "37"
-                "* %s %s",
-                e->nick    ? e->nick    : "",
-                e->message ? e->message : "");
-            HX_RENDER ("", 0, line, (int) strlen (line), stamp);
+            gchar *line = g_strdup_printf ("* %s %s",
+                                           e->nick ? e->nick : "",
+                                           e->message ? e->message : "");
+            HxChatRun run = HX_MUTED (line, (int) strlen (line));
+            HX_RENDER (NULL, 0, &run, 1, stamp);
             g_free (line);
             continue;
         }
@@ -1267,19 +1389,13 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 		 * theme-aware palette slot (HX_CHAT_PAL_HISTORY_MUTED = 37,
 		 * see chat.c::gtkhx_apply_theme_palette) instead of the
 		 * live palette. */
-        gchar *nick_wrapped = g_strdup_printf (
-            "\003" "37"
-            "<%s>",
-            e->nick ? e->nick : "");
-        gchar *body_coloured = g_strdup_printf (
-            "\003" "37"
-            "%s",
-            e->message ? e->message : "");
-        HX_RENDER (nick_wrapped, (int) strlen (nick_wrapped),
-                   body_coloured, (int) strlen (body_coloured),
-                   stamp);
+        gchar *nick_wrapped
+            = g_strdup_printf ("<%s>", e->nick ? e->nick : "");
+        const char *body_text = e->message ? e->message : "";
+        HxChatRun gutter = HX_MUTED (nick_wrapped, (int) strlen (nick_wrapped));
+        HxChatRun body_run = HX_MUTED (body_text, (int) strlen (body_text));
+        HX_RENDER (&gutter, 1, &body_run, 1, stamp);
         g_free (nick_wrapped);
-        g_free (body_coloured);
     }
 
     /* Closing "── live messages ──" divider follows the initial
@@ -1287,14 +1403,15 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * divider from the initial batch is still in place further
 	 * down. */
     if (!prepend_mode) {
-        gchar *divider
-            = g_strdup_printf ("\003" "37" "─── %s ───", _ ("live messages"));
-        hx_chat_view_append_indent (view, "", 0, divider,
-                                    (int) strlen (divider), 0);
+        gchar *divider = g_strdup_printf ("─── %s ───", _ ("live messages"));
+        HxChatRun run = HX_MUTED (divider, (int) strlen (divider));
+        hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE, NULL, 0, &run, 1,
+                                  0);
         g_free (divider);
     }
 
 #undef HX_RENDER
+#undef HX_MUTED
 }
 
 /* ----- Phase 3.3 — Load Older click handler --------------------- *
@@ -1440,18 +1557,19 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 	 * the new batch still says has_more. So we just update the
 	 * pointer here, no extra teardown wiring needed.
 	 *
-	 * Text uses the same mIRC palette colour 14 (grey) and the
-	 * same divider framing as the clickable row, so visually
-	 * only the body text changes between the two states. */
+	 * Text uses the same muted palette slot and the same divider
+	 * framing as the clickable row, so visually only the body text
+	 * changes between the two states. */
     if (gchat->render.load_older_ent) {
         gchar *loading_row
-            = g_strdup_printf ("\003" "37" "─── %s ───",
-                               hx_loading_older_sentinel ());
+            = g_strdup_printf ("─── %s ───", hx_loading_older_sentinel ());
+        HxChatRun run = { loading_row, (int) strlen (loading_row),
+                          HX_CHAT_PAL_HISTORY_MUTED, HX_CHAT_ATTR_NONE };
 
         hx_chat_view_remove (gchat->output, gchat->render.load_older_ent);
-        gchat->render.load_older_ent = hx_chat_view_insert_before (
-            gchat->output, gchat->render.anchor_ent, "", 0, loading_row,
-            (int) strlen (loading_row), 0);
+        gchat->render.load_older_ent = hx_chat_view_insert_runs_before (
+            gchat->output, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE,
+            NULL, 0, &run, 1, 0);
         g_free (loading_row);
     }
 }
@@ -1513,7 +1631,8 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 }
 
 void
-xprintline (GtkWidget *text, char *chat, size_t len)
+xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
+            const char *tag, gint16 tag_color)
 {
     char *valid;
     gsize valid_len;
@@ -1569,43 +1688,23 @@ xprintline (GtkWidget *text, char *chat, size_t len)
     gsize body_off = 0, body_len = 0;
     gboolean is_info = FALSE;
     gboolean said_by_self = FALSE;
+    gint16 info_color = HX_CHAT_INFO_COLOR;
     session *sess = hx_active_session ();
     const char *self_nick = (hx_conn_name (sess->htlc)[0] != '\0')
                                 ? (const char *)hx_conn_name (sess->htlc)
                                 : NULL;
 
-    /* Recognise any line that opens with the INFOPREFIX-style
-	 * " \00310[…\00310]\003 " wrapper, not just the literal
-	 * INFOPREFIX bytes. The original detection was a strict
-	 * byte-for-byte memcmp on INFOPREFIX, which worked for
-	 * "[hx] …" log lines but not for broadcastmsg's per-sender
-	 * variant "[name] …" where the embedded color and name vary
-	 * per-call. Searching for the closing "\00310]\003 " keeps
-	 * the same name-on-the-left-of-the-xtext-separator render
-	 * for both cases. */
-    {
-        static const char wrap_open[] = " \00310[";        /* 5 bytes */
-        static const char wrap_close[] = "\00310]\003 ";   /* 6 bytes */
-        const gsize open_len = sizeof (wrap_open) - 1;
-        const gsize close_len = sizeof (wrap_close) - 1;
-
-        if (valid_len >= open_len + close_len
-            && memcmp (valid, wrap_open, open_len) == 0) {
-            const char *close
-                = g_strstr_len (valid + open_len, valid_len - open_len,
-                                wrap_close);
-            if (close) {
-                gsize close_pos = (gsize)(close - valid);
-                name_off = 1;
-                /* End of name = last byte before the trailing space
-				 * in wrap_close. Inclusive index = close_pos + close_len
-				 * - 2; length = end - start + 1. */
-                name_len = (close_pos + close_len - 2) - name_off + 1;
-                body_off = close_pos + close_len;
-                body_len = valid_len - body_off;
-                is_info = TRUE;
-            }
-        }
+    /* An info line is one the emitter *told* us is one, by naming a
+	 * gutter tag. This used to be recovered by searching the body for
+	 * the closing bytes of an escape wrapper GtkHx had written into it
+	 * moments earlier — a data structure round-tripped through a
+	 * presentation format. The tag and its colour are signal
+	 * parameters now (gtkhx_session.h, "chat-log-line"). */
+    if (tag && *tag) {
+        is_info = TRUE;
+        info_color = tag_color;
+        /* The tag isn't in `valid` at all; xprintline_render takes it
+		 * separately below. */
     }
 
     if (!is_info) {
@@ -1620,14 +1719,29 @@ xprintline (GtkWidget *text, char *chat, size_t len)
         }
     }
 
-    xprintline_render (text, valid, valid_len, name_off, name_len, body_off,
-                       body_len, is_info, said_by_self);
+    if (is_info) {
+        /* Whole line is the body; the gutter comes from `tag`. */
+        xprintline_render_tagged (text, tag, strlen (tag), info_color, valid,
+                                  valid_len);
+    } else {
+        xprintline_render (text, valid, valid_len, name_off, name_len,
+                           body_off, body_len, FALSE, said_by_self,
+                           info_color,
+                           /* No wire uid: a log line never came from a
+							* chat message, so the nick can only be
+							* resolved by lookup — and it has to be
+							* looked up in *this* conversation, not
+							* always the public one. */
+                           chat_speaker_for (cid, 0, valid + name_off,
+                                             name_len, said_by_self));
+    }
 
     g_free (valid);
 }
 
 static void
-xoutput_chat (session *sess, guint32 cid, char *chat)
+xoutput_chat (session *sess, guint32 cid, char *chat, const char *tag,
+              gint16 tag_color)
 {
     char *cr;
     struct gtkhx_chat *gchat;
@@ -1674,19 +1788,19 @@ xoutput_chat (session *sess, guint32 cid, char *chat)
     cr = strchr (chat, '\n');
     if (cr) {
         while (1) {
-            xprintline (gchat->output, chat, cr - chat);
+            xprintline (gchat->output, cid, chat, cr - chat, tag, tag_color);
             chat = cr + 1;
             if (*chat == 0) {
                 break;
             }
             cr = strchr (chat, '\n');
             if (!cr) {
-                xprintline (gchat->output, chat, -1);
+                xprintline (gchat->output, cid, chat, -1, tag, tag_color);
                 break;
             }
         }
     } else {
-        xprintline (gchat->output, chat, -1);
+        xprintline (gchat->output, cid, chat, -1, tag, tag_color);
     }
 }
 
@@ -1700,9 +1814,11 @@ xoutput_chat (session *sess, guint32 cid, char *chat)
  * Connected in gtkhx_connect_signals at startup. */
 void
 chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
-                       gpointer body, gpointer user_data)
+                       gpointer name, gint color, gpointer body,
+                       gpointer user_data)
 {
-    xoutput_chat (sess_from_htlc (htlc), cid, (char *)body);
+    xoutput_chat (sess_from_htlc (htlc), cid, (char *)body, (const char *)name,
+                  (gint16)color);
 }
 
 /* Nick completion. The C tab_nick_comp / tab_nick_comp_next / nick_comp_chng /
@@ -1816,6 +1932,13 @@ create_chat (session *sess)
 	 * timestamp. 256 px is enough room for the stamp + a medium-length
 	 * nick without dominating the chat width. */
     hx_chat_view_set_max_indent (text, 256);
+    /* Coalesce bursts from one speaker under a single nick. */
+    hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
+    hx_chat_view_set_avatar_size (text, gtkhx_prefs.chat_avatars
+                                            ? HX_CHAT_AVATAR_SIZE_DEFAULT
+                                            : 0);
+    g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
+                      GUINT_TO_POINTER (0));
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs
@@ -2016,6 +2139,13 @@ pchat_new (session *sess, struct chat *chat)
     hx_chat_view_set_indent (text, TRUE);
     hx_chat_view_set_time_stamp (text, gtkhx_prefs.timestamp);
     hx_chat_view_set_max_indent (text, 256);
+    /* Coalesce bursts from one speaker under a single nick. */
+    hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
+    hx_chat_view_set_avatar_size (text, gtkhx_prefs.chat_avatars
+                                            ? HX_CHAT_AVATAR_SIZE_DEFAULT
+                                            : 0);
+    g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
+                      GUINT_TO_POINTER (hx_chat_cid (chat)));
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs

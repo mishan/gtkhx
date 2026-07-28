@@ -22,18 +22,33 @@
 #include <glib.h>
 #include "protocol.h"
 
+/* Palette index the "[hx]" tag renders in. Mirrors chat_view.h's
+ * HX_CHAT_INFO_COLOR; duplicated rather than included so the non-widget
+ * callers that pull in this header don't drag GTK along. */
+#define HX_CHAT_LOG_INFO_COLOR 3
+
 extern void hx_printf_prefix (struct htlc_conn *htlc, guint32 cid,
                               const char *prefix, const char *fmt, ...)
     G_GNUC_PRINTF (4, 5);
+
+/* As hx_printf_prefix, but with an explicit gutter tag and colour —
+ * broadcastmsg's per-sender "[name]" lines, which used to encode the
+ * colour as escape bytes inside a pre-formatted prefix string. */
+extern void hx_printf_named (struct htlc_conn *htlc, guint32 cid,
+                             const char *name, gint32 color, const char *fmt,
+                             ...) G_GNUC_PRINTF (5, 6);
 extern void hx_printf (struct htlc_conn *htlc, guint32 cid, const char *fmt,
                        ...) G_GNUC_PRINTF (3, 4);
 
-/* INFOPREFIX is the formatting sigil hx_printf_prefix wraps user-
- * visible status lines with (the [hx] tag visible in chat
- * windows). Defined in gtkhx.c; declared here rather than in
- * session.h so non-widget callers (the test stubs that satisfy the
- * linker) don't have to pull in the GTK surface session.h drags
- * along. */
+/* INFOPREFIX is the gutter tag hx_printf_prefix marks user-visible
+ * status lines with — the "[hx]" seen in chat windows. It is now just
+ * the string "hx"; the brackets and colours are applied by the view.
+ * It used to be " \00310[\00303hx\00310]\003 ", pre-formatted with
+ * mIRC escapes the view had to parse back out.
+ *
+ * Defined in gtkhx.c; declared here rather than in session.h so
+ * non-widget callers (the test stubs that satisfy the linker) don't
+ * have to pull in the GTK surface session.h drags along. */
 extern const char *INFOPREFIX;
 
 #endif /* HX_GTKHX_LOG_H */

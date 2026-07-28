@@ -89,6 +89,7 @@ struct gtkhx_prefs gtkhx_prefs = {
     1, /* showjoin */
     0, /* tray (init_variables sets default) */
     0, /* timestamp */
+    1, /* chat_avatars — default ON; the icons are the point of C6 */
     0, /* word_wrap */
     1, /* track_case */
     0, /* old_nickcompletion */
@@ -463,6 +464,41 @@ changed_xtext (session *sess)
                                             gtkhx_prefs.xbuf_max);
                 hx_chat_view_refresh (msg->outputbuf);
             }
+        }
+    }
+}
+
+/* apply the CFG_CHAT_AVATARS toggle to every live chat view.
+ *
+ * Same shape as changed_timestamp below, and for the same reason: the
+ * setting is per-view state, so flipping it has to walk the live views
+ * rather than wait for them to be rebuilt. */
+static void
+changed_chat_avatars (session *sess)
+{
+    int px = gtkhx_prefs.chat_avatars ? HX_CHAT_AVATAR_SIZE_DEFAULT : 0;
+
+    if (!sess) {
+        return;
+    }
+    if (sess->chats) {
+        guint n = hx_chats_count (sess->chats);
+        for (guint i = 0; i < n; i++) {
+            struct chat *c = hx_chats_get_at (sess->chats, i);
+            struct gtkhx_chat *gchat = hx_chat_view (c);
+            if (!gchat) {
+                continue;
+            }
+            hx_chat_view_set_avatar_size (hx_gchat_output (gchat), px);
+        }
+    }
+    if (sess->msg_windows) {
+        GHashTableIter iter;
+        gpointer val;
+        g_hash_table_iter_init (&iter, sess->msg_windows);
+        while (g_hash_table_iter_next (&iter, NULL, &val)) {
+            struct msgwin *msg = val;
+            hx_chat_view_set_avatar_size (msg->outputbuf, px);
         }
     }
 }
@@ -860,6 +896,12 @@ struct cfgvar {
       BOOLEAN,
       0,
       changed_autocopy_text,
+      NULL },
+    { CFG_CHAT_AVATARS,
+      { &gtkhx_prefs.chat_avatars },
+      BOOLEAN,
+      0,
+      changed_chat_avatars,
       NULL },
     { CFG_CHAT_HISTORY_INITIAL,
       { &gtkhx_prefs.chat_history_initial },

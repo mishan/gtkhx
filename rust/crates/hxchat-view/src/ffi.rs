@@ -19,7 +19,7 @@
 use crate::view::{HxChatView, PALETTE_COLS};
 use gtk4::glib::translate::{IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
-use hxchat_layout::{mirc, Block, Message, MessageId, MessageKind, ParsedText};
+use hxchat_layout::{Block, ColorRef, Message, MessageId, MessageKind, ParsedText, Style};
 use std::ffi::{c_char, c_int, c_void, CStr};
 
 type CGtkWidget = *mut gtk4::ffi::GtkWidget;
@@ -386,13 +386,22 @@ pub unsafe extern "C" fn hx_chat_view_set_autocopy_color(enabled: c_int) {
 /// The left column keeps its own styling via `Message::gutter` — see the
 /// field's docs for why a bare `Speaker { nick }` can't reproduce what
 /// `chat.c` emits.
+/// Build a row from two plain strings.
+///
+/// Plain, now: these used to run through `mirc::parse`, which decoded
+/// the in-band `\003NN` escape vocabulary. Nothing produces those any
+/// more — style arrives as runs (`hx_chat_view_append_runs`) — and
+/// continuing to *interpret* them here would be actively worse than
+/// useless, because the remaining callers pass text that came off the
+/// wire. A server could set colours in your chat log by sending the
+/// bytes. It cannot now: they are characters like any other.
 fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
     let gutter = if left.is_empty() {
         None
     } else {
-        Some(mirc::parse(left))
+        Some(ParsedText::plain(left))
     };
-    let mut body = mirc::parse(right);
+    let mut body = ParsedText::plain(right);
     crate::links::autolink(&mut body);
     Message {
         kind: MessageKind::Live,
@@ -401,6 +410,198 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
         gutter,
         blocks: vec![Block::Text(body)],
         flags: hxchat_layout::MessageFlags::NONE,
+    }
+}
+
+/// # Safety
+/// `w` is a valid `HxChatView *` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_set_avatar_size(w: CGtkWidget, px: c_int) {
+    with_view!(w, v, v.set_avatar_size(px.max(0) as u32));
+}
+
+/// # Safety
+/// `w` is a valid `HxChatView *` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_set_group_gap(w: CGtkWidget, secs: c_int) {
+    with_view!(w, v, v.set_group_gap_secs(secs as i64));
+}
+
+// ---- styled runs (C6) ----------------------------------------------
+
+/// `HxChatRun` from `chat_view.h`. Layout is pinned by the assertion
+/// below; C builds these on the stack and we only read them.
+#[repr(C)]
+pub struct HxChatRun {
+    pub(crate) text: *const c_char,
+    pub(crate) len: c_int,
+    pub(crate) color: i16,
+    pub(crate) attrs: u16,
+}
+
+const HX_CHAT_COLOR_DEFAULT: i16 = -1;
+
+/// `HxChatSpeaker` from `chat_view.h`.
+#[repr(C)]
+pub struct HxChatSpeaker {
+    pub(crate) uid: u16,
+    pub(crate) nick: *const c_char,
+    pub(crate) nick_len: c_int,
+    pub(crate) outgoing: c_int,
+}
+
+/// `None` when the caller couldn't identify the speaker.
+///
+/// uid 0 means "not known", not "user zero". Chat messages carry a UID
+/// chunk and the C side passes it straight through, but the chunk is
+/// optional — older servers omit it, and `parse_chat` defaults it to 0 —
+/// so the caller falls back to a nick lookup, which can itself miss.
+/// Guessing would attach the wrong avatar and group two people's
+/// messages together, so a miss stays a miss.
+pub(crate) unsafe fn speaker_of(s: &HxChatSpeaker) -> Option<hxchat_layout::Speaker> {
+    if s.uid == 0 {
+        return None;
+    }
+    // Length-delimited, not NUL-delimited: the chat paths pass a slice
+    // into the middle of the received line, so reading to the NUL would
+    // take the colon and the whole message body with it. -1 means the
+    // caller really does have a C string.
+    let nick = if s.nick.is_null() {
+        String::new()
+    } else if s.nick_len < 0 {
+        cstr(s.nick)
+    } else {
+        cslice(s.nick, s.nick_len)
+    };
+    Some(hxchat_layout::Speaker::new(s.uid, nick))
+}
+
+/// Mirror of chat_view.h's `HX_CHAT_ATTR_*`.
+fn attrs_from_c(bits: u16) -> hxchat_layout::Attrs {
+    let mut a = hxchat_layout::Attrs::NONE;
+    if bits & (1 << 0) != 0 {
+        a = a.union(hxchat_layout::Attrs::BOLD);
+    }
+    if bits & (1 << 1) != 0 {
+        a = a.union(hxchat_layout::Attrs::ITALIC);
+    }
+    if bits & (1 << 2) != 0 {
+        a = a.union(hxchat_layout::Attrs::UNDERLINE);
+    }
+    a
+}
+
+/// Build a `ParsedText` from a C run array.
+///
+/// # Safety
+/// `runs` points to `n` readable `HxChatRun`s, each with a valid
+/// `text`/`len` pair.
+pub(crate) unsafe fn runs_to_text(runs: *const HxChatRun, n: c_int) -> ParsedText {
+    let mut out = ParsedText::default();
+    if runs.is_null() || n <= 0 {
+        return out;
+    }
+    for i in 0..n as usize {
+        let r = &*runs.add(i);
+        // `len` is documented as "bytes, or -1 for strlen" — cslice
+        // treats anything <= 0 as empty, so a legitimately NUL-terminated
+        // run would have been silently dropped.
+        let text = if r.len < 0 {
+            cstr(r.text)
+        } else {
+            cslice(r.text, r.len)
+        };
+        if text.is_empty() {
+            continue;
+        }
+        let start = out.text.len();
+        out.text.push_str(&text);
+        let style = Style {
+            fg: if r.color == HX_CHAT_COLOR_DEFAULT {
+                ColorRef::Default
+            } else {
+                ColorRef::Palette(r.color as u8)
+            },
+            attrs: attrs_from_c(r.attrs),
+            ..Style::default()
+        };
+        // Only record a span when it actually says something; a plain
+        // run is the absence of a span, which is what keeps an
+        // unstyled row's span list empty rather than one-per-run.
+        if style != Style::default() {
+            out.spans.push(hxchat_layout::Span {
+                range: start..out.text.len(),
+                style,
+            });
+        }
+    }
+    out
+}
+
+/// # Safety
+/// `gutter` / `body` point to their respective run counts, or are NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_append_runs(
+    w: CGtkWidget,
+    speaker: HxChatSpeaker,
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+    stamp: i64,
+) -> *mut c_void {
+    match view_of(w) {
+        Some(v) => mark_to_ptr(
+            v.append(runs_message(&speaker, gutter, n_gutter, body, n_body, stamp)),
+        ),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// # Safety
+/// As `hx_chat_view_append_runs`; `anchor` is a mark or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
+    w: CGtkWidget,
+    anchor: *mut c_void,
+    speaker: HxChatSpeaker,
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+    stamp: i64,
+) -> *mut c_void {
+    match view_of(w) {
+        Some(v) => {
+            let msg = runs_message(&speaker, gutter, n_gutter, body, n_body, stamp);
+            mark_to_ptr(v.insert_before(ptr_to_mark(anchor), msg))
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
+unsafe fn runs_message(
+    speaker: &HxChatSpeaker,
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+    stamp: i64,
+) -> Message {
+    let g = runs_to_text(gutter, n_gutter);
+    let mut b = runs_to_text(body, n_body);
+    crate::links::autolink(&mut b);
+    Message {
+        kind: MessageKind::Live,
+        timestamp: stamp_or_now(stamp),
+        speaker: speaker_of(speaker),
+        gutter: if g.text.is_empty() { None } else { Some(g) },
+        blocks: vec![Block::Text(b)],
+        flags: if speaker.outgoing != 0 {
+            hxchat_layout::MessageFlags::OUTGOING
+        } else {
+            hxchat_layout::MessageFlags::NONE
+        },
     }
 }
 
@@ -415,7 +616,7 @@ pub unsafe extern "C" fn hx_chat_view_append(
 ) {
     with_view!(w, v, {
         let raw = cslice(text, len);
-        let mut body = mirc::parse(&raw);
+        let mut body = ParsedText::plain(&raw);
         crate::links::autolink(&mut body);
         v.append(Message {
             kind: MessageKind::Live,
@@ -512,7 +713,7 @@ pub unsafe extern "C" fn hx_chat_view_append_media(
             blocks: vec![Block::Image {
                 token,
                 size: None,
-                alt: mirc::strip(&alt),
+                alt,
             }],
             flags: hxchat_layout::MessageFlags::NONE,
         });

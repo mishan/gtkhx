@@ -348,6 +348,16 @@ the row scales together so the layout stays proportionate:
 - inline media blocks, avatars, banner previews
 - indent / padding / the separator position
 
+**Feedback.** Zoom is otherwise silent: text changes size and nothing
+says by how much, or how to get back to 100%. A badge showing the
+percentage flashes for ~1.1 s on each change, drawn inside the widget's
+own snapshot rather than as an overlay widget — the chat view is packed
+as a bare child beside a scrollbar, so a `GtkOverlay` would mean
+restructuring every container that holds one for a label that shows for
+a second. Colours are the theme's foreground and background *inverted*,
+so it contrasts on light and dark without a third colour to keep in
+step.
+
 **Bindings.** `Ctrl` + `+` / `-` / `0`, and `Ctrl` + scroll wheel — the
 conventions every browser and terminal already trains people on. Implemented as
 a `GtkShortcutController` on the view plus a `GtkEventControllerScroll` checking
@@ -424,10 +434,26 @@ Concretely this means, in phase order:
   `Speaker` and emits `speaker-activated`. The gutter is already its own
   line box precisely so a click on the nick is distinguishable from a click
   on the body.
-- **C6** — when `chat.c` hands over structured messages, `Speaker.uid` is
-  populated from the real user record rather than reconstructed, and
-  `Speaker.icon` lights up the avatar gutter. Until then the compat path has
-  a nick string and no uid, so `speaker-activated` stays unwired rather than
+- **C6 (done for the uid half)** — `chat.c` hands over structured
+  messages, and `Speaker.uid` is resolved through
+  `hx_member_model_find_by_name` against the *same* `HxMemberModel` the
+  user list is built from. One record per user, whichever surface you
+  clicked, which is what §3.7a asked for. `Speaker.icon` and the avatar
+  gutter are still to come.
+
+  **The uid comes off the wire first.** `HTLS_HDR_CHAT` carries a UID
+  chunk — `parse_chat` reads it, and `hx_chat_recv` was already using it
+  for the ignore gate — it simply wasn't carried onto `HxChatEvent`, so
+  the render path couldn't see it. It is now (in the padding after `cid`,
+  so no other field moved). The membership lookup is the *fallback*, for
+  the servers that omit the chunk and for lines that never came from a
+  chat message at all.
+
+  If both miss, uid stays 0 and stays a miss: the user may have parted,
+  two users may share a name, or the "nick" may be server prose. A wrong
+  uid would attach someone else's avatar and group two people's messages
+  together — worse than none.
+  `speaker-activated` stays unwired rather than
   guessing.
 - **Later, optional** — `HxMember` becomes the thing `Speaker` *borrows*
   rather than copies, so a nick or colour change repaints chat rows as well
@@ -774,9 +800,50 @@ parsers and the escapes all go at once. That is exactly the "chat.c hands
 a `Message`, not a mIRC string" item §6 lists under C6, and §3.8 (below)
 already argues should be pulled forward.
 
-So C5 shipped as xtext-only. The vocabulary is unchanged and still works;
-it is now the single largest thing standing between the current tree and
-C6.
+So C5 shipped as xtext-only, and C6 took the retirement on.
+
+**Status after C6's first two commits.** The run API exists
+(`HxChatRun`, `hx_chat_view_append_runs` /
+`_insert_runs_before`) and every *chat rendering* producer now uses it:
+the nick column in `chat.c` and `msg.c`, the mention highlight, all nine
+chat-history row shapes, the load-older sentinel, and the inline-media
+placeholder. The `\017` reset byte the highlight used to append is gone
+with them — runs carry no running state, so nothing can leak into the
+next row.
+
+**Done.** The `chat-log-line` signal now carries `(htlc, cid, name,
+colour, body)` instead of a pre-formatted string, so `INFOPREFIX` is the
+bare string `"hx"` and broadcastmsg passes its sender name and colour as
+parameters (`hx_printf_named`). The forty-odd `hx_printf_prefix` callers
+are unchanged — the prefix argument simply means the tag now.
+
+With that, the parser in `chat.c` that scanned for the closing bytes of
+an escape wrapper is gone, and so is `mirc.rs`.
+
+Two things worth noting from the last step:
+
+**`broadcast_sanitise_name` used to be load-bearing for correctness.**
+The sender's name went inside a
+`" \00310[\003<col><name>\00310]\003 "` wrapper that the chat side
+scanned for a closing sequence, so a name containing a raw `\003` could
+terminate the wrapper early, break info-line detection, or smuggle its
+own colours into the log. That is unreachable now — there is no wrapper
+to escape from. The sanitiser stays because control bytes in a text
+layout are still undesirable, but it has been demoted from a security
+boundary to hygiene.
+
+**Dropping `mirc::parse` from the plain-append path is a small security
+improvement.** Those calls now do `ParsedText::plain`. The remaining
+callers pass text that came *off the wire*, so continuing to interpret
+escapes there would have let a server set colours in your chat log by
+sending the bytes. It cannot: they are characters like any other.
+
+**One dead thing remains**, flagged rather than removed:
+`proto_helpers.c:742` still holds a copy of the old prefix and checks
+incoming server chat against it. Nothing produces the prefix, and the
+check only ever sees server-sent text, so it cannot fire. Removing it
+means retiring the two proto-test cases that feed it the literal string —
+a separate change.
 
 ### 6b. Notes from C3r
 

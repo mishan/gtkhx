@@ -70,7 +70,7 @@ test_emoji_roundtrip_a_to_b (void)
     g_assert_true (integration_drain_until_chat (fd_b, &htlc_b, htlc_a.uid, &cm,
                                                  /*max_messages=*/64));
 
-    HxChatEvent *e = hx_chat_event_new (cm.text, cm.text_len, /*cid=*/0, NULL);
+    HxChatEvent *e = hx_chat_event_new (cm.text, cm.text_len, /*cid=*/0, /*uid=*/0, NULL);
     g_assert_nonnull (e);
     /* The decoded display line shows the emoji and no longer the shortcode. */
     g_assert_nonnull (g_strstr_len (e->line, e->line_len, EMOJI_BYTES));

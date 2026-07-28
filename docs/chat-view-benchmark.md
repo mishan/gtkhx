@@ -56,7 +56,7 @@ refresh rates, or window sizes.
 | relayout, 10-frame total | 396.6 ms | 166.3 ms | 2.4× |
 | scroll frame mean | 29.9 ms | 16.7 ms | 1.8× |
 | scroll frame p95 | 42.1 ms | 17.3 ms | **2.4× faster** |
-| RSS per 10k messages | — | — | **unmeasured** (§5) |
+| memory | — | — | **unmeasured** — see §5 |
 
 ## 4. Raw data
 
@@ -143,18 +143,26 @@ The honest framing is not "hxchat scrolls 2.4× faster" but "hxchat has
 stopped being the bottleneck". A further 2× improvement to the widget
 would not move this number at all.
 
-### RSS — unmeasured
+### Memory — unmeasured, and the metric has been removed
 
-The harness reports a ~0.1 MB delta across ingest for both backends. That
-is impossible: 20,000 messages of 3–19 words is several MB of text before
-any per-message structure. The measurement is wrong — most likely the
-allocator had already grown the heap during the warmup phase, so the
-pages were resident before the delta window opened.
+The harness reported a ~0.1 MB RSS delta across ingest for *both*
+backends. That is impossible: 20,000 messages of 3–19 words is several MB
+of text before any per-message structure. The measurement was wrong —
+most likely the allocator had already grown its heap during warmup, so
+the pages were resident before the delta window opened.
 
-It is recorded here as **unmeasured**, not as parity. Nobody should cite
-a memory comparison from this run. If memory becomes a question, the
-harness needs a different approach (arena accounting inside the backends,
-or `malloc_info`, not `statm` deltas).
+It has since been deleted from `chat_bench.c` rather than fixed or
+`#ifdef`-ed. Two reasons: it was measuring the wrong thing, and it also
+broke the Windows build, because `sysconf` / `_SC_PAGESIZE` are POSIX and
+the file's "Linux-only" note was a *comment* rather than anything the
+compiler enforced. Keeping a known-wrong number behind a platform guard
+would have preserved the misleading output on Linux and taught nobody
+anything.
+
+So the numbers in the table above stand, and memory is **unmeasured, not
+equal**. Nobody should cite a memory comparison from this run. Getting a
+real one needs a different approach — arena accounting inside the
+backends, or `malloc_info` — not `statm` deltas.
 
 ## 6. Two ways this benchmark lied, and how it was caught
 

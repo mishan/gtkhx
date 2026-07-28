@@ -80,6 +80,66 @@ fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
 /// backend this has to be indistinguishable from during the A/B.
 const MIN_FRAME_DELAY_MS: u32 = 10;
 
+#[cfg(not(test))]
+extern "C" {
+    /// `hx_chat_avatar_for_uid` — see `src/chat_avatar.h`.
+    ///
+    /// Borrowed, and only until the next call: animated avatars advance
+    /// on a shared frame timer, so this is asked per draw rather than
+    /// cached. The expensive half (decoding a cicn sprite) is cached on
+    /// the C side, keyed by icon id.
+    fn hx_chat_avatar_for_uid(
+        anchor: *mut gtk4::ffi::GtkWidget,
+        uid: u16,
+    ) -> *mut gtk4::gdk::ffi::GdkTexture;
+}
+
+/// The test binary links no GtkHx C, so stub the resolver — same
+/// arrangement `links.rs` uses for `gtkurl_*`. Always "no icon", which
+/// is the only answer a headless test could check anyway.
+#[cfg(test)]
+unsafe fn hx_chat_avatar_for_uid(
+    _anchor: *mut gtk4::ffi::GtkWidget,
+    _uid: u16,
+) -> *mut gtk4::gdk::ffi::GdkTexture {
+    std::ptr::null_mut()
+}
+
+/// Something under the pointer that responds to being clicked.
+///
+/// One type for both cases on purpose. Links and nicks want the same
+/// affordance — underline on hover, a pointer cursor, a menu on
+/// right-click — and modelling them separately is how the two end up
+/// underlining under subtly different conditions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HoverTarget {
+    /// A URL: the row, the source it lives in, and its byte range.
+    Link {
+        message: MessageId,
+        source: LineSource,
+        range: std::ops::Range<usize>,
+    },
+    /// A speaker's nick in the gutter. Carries the uid so the
+    /// right-click handler doesn't have to re-resolve it.
+    Nick { message: MessageId, uid: u16 },
+}
+
+impl HoverTarget {
+    /// The (message, source, range) this target underlines, if any.
+    fn underline(&self) -> Option<(MessageId, LineSource, std::ops::Range<usize>)> {
+        match self {
+            HoverTarget::Link {
+                message,
+                source,
+                range,
+            } => Some((*message, *source, range.clone())),
+            // The whole gutter underlines, which the draw path handles
+            // by range rather than specially — see hover_range_for.
+            HoverTarget::Nick { .. } => None,
+        }
+    }
+}
+
 /// What, if anything, recolours a run of text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mark {
@@ -119,6 +179,10 @@ const SEARCH_MATCH_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0
 const SEARCH_CURRENT_BG: gtk4::gdk::RGBA =
     gtk4::gdk::RGBA::new(1.0, 0.4706, 0.0, 1.0);
 const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
+
+/// How long the zoom badge stays fully opaque, then how long it fades.
+const ZOOM_BADGE_HOLD_US: i64 = 700_000;
+const ZOOM_BADGE_FADE_US: i64 = 400_000;
 
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
@@ -204,6 +268,15 @@ mod imp {
         pub moving_separator: Cell<bool>,
         /// In-buffer search: the query, its hits, and the cursor.
         pub search: RefCell<hxchat_layout::SearchState>,
+        /// Monotonic time (µs) at which the zoom badge stops showing,
+        /// or 0 when it isn't showing. See `flash_zoom_badge`.
+        pub zoom_badge_until: Cell<i64>,
+        /// Tick driving the badge's fade, so it isn't left on screen.
+        pub zoom_badge_tick: RefCell<Option<gtk4::TickCallbackId>>,
+        /// What the pointer is currently over, if it is something
+        /// activatable. Drives the cursor *and* the hover underline, so
+        /// the two cannot disagree about what is hoverable.
+        pub(crate) hovered: RefCell<Option<HoverTarget>>,
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
@@ -265,6 +338,9 @@ mod imp {
                 separator: Cell::new(false),
                 moving_separator: Cell::new(false),
                 search: RefCell::new(hxchat_layout::SearchState::new()),
+                hovered: RefCell::new(None),
+                zoom_badge_until: Cell::new(0),
+                zoom_badge_tick: RefCell::new(None),
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
@@ -327,6 +403,15 @@ mod imp {
                     // GdkEvent shape.
                     glib::subclass::Signal::builder("word-click")
                         .param_types([glib::Pointer::static_type(), glib::Pointer::static_type()])
+                        .build(),
+                    // speaker-menu: (uid, x, y) — right-click on a nick.
+                    //
+                    // The view raises it and stops; chat.c answers by
+                    // calling users.c::user_popup_show, so chat and the
+                    // user list pop the *same* menu rather than two that
+                    // have to be kept in step.
+                    glib::subclass::Signal::builder("speaker-menu")
+                        .param_types([u32::static_type(), f64::static_type(), f64::static_type()])
                         .build(),
                 ]
             })
@@ -456,7 +541,10 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
-            self.obj().snapshot_content(snapshot);
+            let obj = self.obj();
+            obj.snapshot_content(snapshot);
+            // Chrome, drawn over the content and outside its clip.
+            obj.snapshot_zoom_badge(snapshot, obj.width(), obj.height());
         }
     }
 
@@ -523,7 +611,30 @@ impl HxChatView {
         // value that is a no-op on the other backend — exactly the kind
         // of silent divergence the A/B is supposed to rule out.
         let cap = if n > 2 { n as usize } else { 0 };
-        self.imp_().buffer.borrow_mut().set_max_rows(cap);
+        let m = self.imp_().measure.borrow();
+        self.imp_().buffer.borrow_mut().set_max_rows(cap, &*m);
+    }
+
+    /// Edge length of the avatar slot in the gutter; 0 hides avatars.
+    pub fn set_avatar_size(&self, px: u32) {
+        let m = self.imp_().measure.borrow();
+        let mut buf = self.imp_().buffer.borrow_mut();
+        buf.set_avatar_size(px);
+        drop(buf);
+        drop(m);
+        self.queue_resize();
+        self.queue_draw();
+    }
+
+    /// Gap that breaks a run of messages from one speaker; 0 disables
+    /// grouping. Re-decides the rows already in the buffer, since the
+    /// flag describes neighbours rather than messages.
+    pub fn set_group_gap_secs(&self, secs: i64) {
+        let m = self.imp_().measure.borrow();
+        self.imp_().buffer.borrow_mut().set_group_gap_secs(secs, &*m);
+        drop(m);
+        self.queue_resize();
+        self.queue_draw();
     }
 
     pub fn set_indent(&self, on: bool) {
@@ -542,10 +653,96 @@ impl HxChatView {
     /// Zoom, per-mille. See docs/chat-view-scoping.md §3.7.
     pub fn set_zoom_permille(&self, zoom: u32) {
         let imp = self.imp_();
+        let was = imp.measure.borrow().zoom_permille();
         imp.measure.borrow_mut().set_zoom_permille(zoom);
         imp.buffer.borrow_mut().set_zoom_permille(zoom);
         self.recompute_stamp_width();
         self.queue_resize();
+        if zoom != was {
+            self.flash_zoom_badge();
+        }
+    }
+
+    /// Show the zoom percentage for a moment.
+    ///
+    /// Zoom is otherwise silent: text gets bigger or smaller and there is
+    /// nothing that says by how much, or how to get back to 100%. The
+    /// badge is drawn inside the widget's own snapshot rather than as an
+    /// overlay widget, because the chat view is packed as a bare child
+    /// next to a scrollbar — adding a GtkOverlay would mean restructuring
+    /// every container that holds one, for a label that shows for a
+    /// second.
+    fn flash_zoom_badge(&self) {
+        let imp = self.imp_();
+        imp.zoom_badge_until
+            .set(glib::monotonic_time() + ZOOM_BADGE_HOLD_US + ZOOM_BADGE_FADE_US);
+        self.queue_draw();
+
+        if imp.zoom_badge_tick.borrow().is_some() {
+            return; // already animating; the new deadline extends it
+        }
+        let id = self.add_tick_callback(|view, _clock| {
+            let imp = view.imp_();
+            if glib::monotonic_time() >= imp.zoom_badge_until.get() {
+                imp.zoom_badge_until.set(0);
+                *imp.zoom_badge_tick.borrow_mut() = None;
+                view.queue_draw();
+                return glib::ControlFlow::Break;
+            }
+            // Redraw so the fade advances. Same self-clearing discipline
+            // as the autoscroll tick: whatever ends the callback also
+            // clears the handle that names it, or the next flash sees a
+            // live tick that isn't.
+            view.queue_draw();
+            glib::ControlFlow::Continue
+        });
+        *imp.zoom_badge_tick.borrow_mut() = Some(id);
+    }
+
+    /// Draw the zoom badge, if it is showing. Called last in `snapshot`
+    /// so it sits above the text.
+    fn snapshot_zoom_badge(&self, snapshot: &gtk4::Snapshot, alloc_w: i32, alloc_h: i32) {
+        let imp = self.imp_();
+        let until = imp.zoom_badge_until.get();
+        if until == 0 {
+            return;
+        }
+        let remaining = until - glib::monotonic_time();
+        if remaining <= 0 {
+            return;
+        }
+        // Full opacity while held, then a linear fade.
+        let alpha = (remaining as f64 / ZOOM_BADGE_FADE_US as f64).clamp(0.0, 1.0) as f32;
+
+        let pct = (self.zoom_permille() + 5) / 10;
+        let layout = self.create_pango_layout(Some(&format!("{pct}%")));
+        let (tw, th) = layout.pixel_size();
+
+        let pad = 8.0;
+        let w = tw as f32 + pad * 2.0;
+        let h = th as f32 + pad;
+        // Bottom-right, clear of the scrollbar side's text and of the
+        // newest message, which is what the eye is on while zooming.
+        let x = (alloc_w as f32 - w - 12.0).max(0.0);
+        let y = (alloc_h as f32 - h - 12.0).max(0.0);
+
+        // Inverted theme colours, so the badge contrasts on light and
+        // dark without a third colour to keep in step.
+        let mut bg = imp.palette.borrow()[PAL_FG];
+        let mut fg = imp.palette.borrow()[PAL_BG];
+        bg = gtk4::gdk::RGBA::new(bg.red(), bg.green(), bg.blue(), 0.85 * alpha);
+        fg = gtk4::gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), alpha);
+
+        let rect = gtk4::graphene::Rect::new(x, y, w, h);
+        let rounded = gtk4::gsk::RoundedRect::from_rect(rect, h / 2.0);
+        snapshot.push_rounded_clip(&rounded);
+        snapshot.append_color(&bg, &rect);
+        snapshot.pop();
+
+        snapshot.save();
+        snapshot.translate(&gtk4::graphene::Point::new(x + pad, y + pad / 2.0));
+        snapshot.append_layout(&layout, &fg);
+        snapshot.restore();
     }
 
     pub fn zoom_permille(&self) -> u32 {
@@ -865,6 +1062,40 @@ impl HxChatView {
                 }
             }
 
+            // The speaker's avatar, on group heads only. Resolved per
+            // frame rather than cached: an animated avatar advances on a
+            // shared timer, and holding a texture would freeze it on
+            // whichever frame happened to be current when the row was
+            // appended.
+            if let Some(av) = layout.avatar {
+                let tex = unsafe {
+                    hx_chat_avatar_for_uid(
+                        self.as_ptr() as *mut gtk4::ffi::GtkWidget,
+                        av.uid,
+                    )
+                };
+                if !tex.is_null() {
+                    let tex: gtk4::gdk::Texture =
+                        unsafe { gtk4::glib::translate::from_glib_none(tex) };
+                    // Fit inside the slot preserving aspect, so a banner-
+                    // shaped icon isn't stretched into a square.
+                    let (iw, ih) = (tex.width().max(1), tex.height().max(1));
+                    let scale =
+                        (av.size as f64 / iw as f64).min(av.size as f64 / ih as f64);
+                    let (dw, dh) = (
+                        (iw as f64 * scale).max(1.0),
+                        (ih as f64 * scale).max(1.0),
+                    );
+                    snapshot.save();
+                    snapshot.translate(&gtk4::graphene::Point::new(
+                        av.x as f32,
+                        (row_top + av.y as i64) as f32,
+                    ));
+                    tex.snapshot(snapshot, dw, dh);
+                    snapshot.restore();
+                }
+            }
+
             for line in &layout.lines {
                 let y = row_top + i64::from(line.y);
                 if y + i64::from(line.height) < 0 || y > i64::from(height) {
@@ -974,6 +1205,15 @@ impl HxChatView {
                     }
                 };
 
+                let hover = buf
+                    .id_at(row)
+                    .and_then(|id| self.hover_range_for(id, line.source))
+                    .and_then(|r| {
+                        let a = r.start.max(line.range.start);
+                        let b = r.end.min(line.range.end);
+                        (a < b).then_some((a, b))
+                    });
+
                 self.draw_runs(
                     snapshot,
                     &draw_layout,
@@ -982,6 +1222,7 @@ impl HxChatView {
                     spans,
                     hl,
                     &hits,
+                    hover,
                     x,
                     y as f32,
                 );
@@ -1018,6 +1259,7 @@ impl HxChatView {
         spans: &[hxchat_layout::Span],
         hl: Option<(usize, usize)>,
         search: &[(usize, usize, bool)],
+        hover: Option<(usize, usize)>,
         x0: f32,
         y: f32,
     ) {
@@ -1070,6 +1312,21 @@ impl HxChatView {
             }
         }
 
+        // Hover is tracked separately from `bands` rather than as another
+        // Mark, because it is an *attribute* (underline) not a colour,
+        // and it has to compose: a hovered link inside a selection
+        // should be both selected and underlined.
+        let hover_band = hover.map(|(a, b)| {
+            (
+                floor_boundary(a.saturating_sub(slice_start)),
+                floor_boundary(b.saturating_sub(slice_start)),
+            )
+        });
+        let is_hovered = |pos: usize| match hover_band {
+            Some((a, b)) => pos >= a && pos < b,
+            None => false,
+        };
+
         let mark_at = |pos: usize| {
             bands
                 .iter()
@@ -1082,10 +1339,18 @@ impl HxChatView {
         let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
 
-        let emit = |text: &str, style: Style, mark: Mark, x: &mut f32| {
+        let emit = |text: &str, style: Style, mark: Mark, underline: bool, x: &mut f32| {
             if text.is_empty() {
                 return;
             }
+            let style = if underline {
+                Style {
+                    attrs: style.attrs.union(hxchat_layout::Attrs::UNDERLINE),
+                    ..style
+                }
+            } else {
+                style
+            };
             layout.set_attributes(Some(&PangoMeasure::attrs_for(style)));
             layout.set_text(text);
             let (w, h) = layout.pixel_size();
@@ -1142,13 +1407,20 @@ impl HxChatView {
                     }
                 }
             }
+            if let Some((a, b)) = hover_band {
+                for p in [a, b] {
+                    if p > from && p < to {
+                        cuts.push(p);
+                    }
+                }
+            }
             cuts.sort_unstable();
             cuts.dedup();
 
             for w in cuts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 if a < b {
-                    emit(&slice[a..b], style, mark_at(a), x);
+                    emit(&slice[a..b], style, mark_at(a), is_hovered(a), x);
                 }
             }
         };
@@ -1875,9 +2147,26 @@ impl HxChatView {
         let motion = gtk4::EventControllerMotion::new();
         let this = self.clone();
         motion.connect_motion(move |_, x, y| {
-            let want = if this.on_separator(x) || this.imp_().moving_separator.get() {
+            let on_sep = this.on_separator(x) || this.imp_().moving_separator.get();
+            let target = if on_sep {
+                None
+            } else {
+                this.hover_target_at(x, y)
+            };
+
+            // Redraw only when the target actually changed. Motion fires
+            // per pointer event; queueing a draw on every one of them
+            // would repaint the whole view while the mouse merely
+            // crosses it.
+            let changed = *this.imp_().hovered.borrow() != target;
+            if changed {
+                *this.imp_().hovered.borrow_mut() = target.clone();
+                this.queue_draw();
+            }
+
+            let want = if on_sep {
                 "col-resize"
-            } else if this.link_at_point(x, y).is_some() {
+            } else if target.is_some() {
                 "pointer"
             } else {
                 "text"
@@ -1888,6 +2177,12 @@ impl HxChatView {
         });
         let this = self.clone();
         motion.connect_leave(move |_| {
+            // Drop the hover, or an underline is left behind when the
+            // pointer leaves the widget without crossing off the target.
+            if this.imp_().hovered.borrow().is_some() {
+                *this.imp_().hovered.borrow_mut() = None;
+                this.queue_draw();
+            }
             this.set_cursor_from_name(Some("text"));
         });
         self.add_controller(motion);
@@ -1908,6 +2203,19 @@ impl HxChatView {
                 // secondary/middle and pops the URL menu itself, and the
                 // media handler wants the token. Emitting keeps every
                 // existing C consumer working.
+                // A nick outranks everything: the gutter is where nicks
+                // live, and the user menu is what a right-click there
+                // means. Handled before word-click emission so the URL
+                // handler can't also fire on a URL-shaped nick.
+                if button == gtk4::gdk::BUTTON_SECONDARY {
+                    if let Some(HoverTarget::Nick { uid, .. }) =
+                        this.hover_target_at(x, y)
+                    {
+                        this.emit_speaker_menu(uid, x, y);
+                        return;
+                    }
+                }
+
                 this.emit_word_click(x, y, g.current_event().as_ref());
 
                 match this.link_at_point(x, y) {
@@ -1930,6 +2238,66 @@ impl HxChatView {
     }
 
     /// The link under a widget-space point, as (href, visible label).
+    /// Ask the C side for the user context menu on `uid`.
+    ///
+    /// A signal rather than a direct call, because the menu is built by
+    /// `users.c::user_popup_show` — the *same* builder the Users window
+    /// and the pchat sidebars use. The view has no business knowing what
+    /// is on that menu (Get Info, Send Message, Kick, the voice volume
+    /// slider, whatever is added next); it knows a uid and where the
+    /// pointer was.
+    fn emit_speaker_menu(&self, uid: u16, x: f64, y: f64) {
+        self.emit_by_name::<()>("speaker-menu", &[&(uid as u32), &x, &y]);
+    }
+
+    /// What the pointer is over, if it is activatable.
+    ///
+    /// A nick takes precedence over a link inside it, since the gutter
+    /// is where nicks live and a URL-shaped nick is a curiosity rather
+    /// than something you want to open.
+    fn hover_target_at(&self, x: f64, y: f64) -> Option<HoverTarget> {
+        let caret = self.caret_at(x, y)?;
+        let buf = self.imp_().buffer.borrow();
+        if caret.source == LineSource::Gutter {
+            if let Some(sp) = buf.speaker_of(caret.message) {
+                if sp.uid != 0 {
+                    return Some(HoverTarget::Nick {
+                        message: caret.message,
+                        uid: sp.uid,
+                    });
+                }
+            }
+            return None;
+        }
+        buf.link_range_at(&caret).map(|range| HoverTarget::Link {
+            message: caret.message,
+            source: caret.source,
+            range,
+        })
+    }
+
+    /// The byte range this line should underline, if the hovered target
+    /// lands in it.
+    fn hover_range_for(
+        &self,
+        row_id: MessageId,
+        source: LineSource,
+    ) -> Option<std::ops::Range<usize>> {
+        let hovered = self.imp_().hovered.borrow();
+        match hovered.as_ref()? {
+            HoverTarget::Nick { message, .. } => {
+                if *message != row_id || source != LineSource::Gutter {
+                    return None;
+                }
+                self.imp_().buffer.borrow().gutter_range(row_id)
+            }
+            t => {
+                let (m, s, r) = t.underline()?;
+                (m == row_id && s == source).then_some(r)
+            }
+        }
+    }
+
     fn link_at_point(&self, x: f64, y: f64) -> Option<(String, String)> {
         let caret = self.caret_at(x, y)?;
         self.imp_().buffer.borrow().link_at(&caret)

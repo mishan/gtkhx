@@ -737,6 +737,15 @@ hx_highlight_match (const char *body, gsize body_len, const char *const *words)
  * 2 unit tests, but the prefix bytes are stable (hx_printf_prefix
  * emits exactly these) so a duplicated constant is acceptable.
  *
+ * **This is dead as of C6 and kept only until its tests come with it.**
+ * The prefix is no longer produced: INFOPREFIX is the bare string "hx"
+ * and the gutter tag travels as a chat-log-line signal parameter. The
+ * check runs against `e->line`, which only ever holds text a *server*
+ * sent, so matching now requires a server to transmit these exact
+ * escape bytes — which is not a feature worth having anyway. Removing
+ * it means retiring the two proto-test cases that feed the literal
+ * string, which is a separate change.
+ *
  * The full string is " <ETX>10[<ETX>03hx<ETX>10]<ETX> " — mIRC colour
  * 10 around brackets, colour 3 around "hx", trailing reset. */
 static const char hx_info_prefix[] = " \00310[\00303hx\00310]\003 ";
@@ -784,7 +793,7 @@ hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
 }
 
 HxChatEvent *
-hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
+hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid, guint16 uid,
                    const char *self_nick)
 {
     HxChatEvent *e;
@@ -792,6 +801,7 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
 
     e = g_new0 (HxChatEvent, 1);
     e->cid = cid;
+    e->uid = uid;
 
     /* gtkhx_text_to_utf8 always returns a g_strdup-ed copy, even
 	 * on empty input — caller owns the result. */
@@ -881,6 +891,7 @@ _Static_assert (sizeof (HxChatMedia) == 56,
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, cid) == 0, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line) == 8, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line_len) == 16, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, uid) == 4, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_off) == 24, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_len) == 32, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, body_off) == 40, "field offset");
