@@ -1694,6 +1694,23 @@ test('file_get', test_integration_file_get,
      suite   : 'integration',
      timeout : 30)
 
+# file_resume — download-resume round-trip against a real server. Sends
+# HTLC_HDR_FILE_GET for test.txt with an RFLT chunk carrying data_pos=6, asserts
+# the server reduces the transfer size by the resumed prefix, then drives
+# hxnet::xfer::hxnet_xfer_file_recv_one at data_pos=6 into a locally pre-seeded
+# "hello " and asserts the completed file is byte-exact "hello world\n". The RFLT
+# byte layout is pinned by hxhandlers' resume_rflt_is_well_formed unit test; this
+# pins mhxd's server-side contract (offsets read at [46]/[62]).
+test_integration_file_resume = executable('test_integration_file_resume',
+  'integration/test_file_resume.c',
+  dependencies        : proto_test_deps + [rust_hxfiles_xfer_dep, rust_hxhfs_dep],
+  include_directories : integration_test_inc,
+  link_with           : integration_harness_lib,
+)
+test('file_resume', test_integration_file_resume,
+     suite   : 'integration',
+     timeout : 30)
+
 # NOTE: the former file_get_htxf_io target is gone. It drove the
 # plaintext passthrough leg of the C byte pump through a hand-rolled
 # subchannel. The H2 re-wire moved that pump into the hxnet crate, and
