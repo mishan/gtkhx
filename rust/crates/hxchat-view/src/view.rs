@@ -73,6 +73,13 @@ fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
     focus.is::<gtk4::TextView>() || focus.is::<gtk4::Text>() || focus.is::<gtk4::Entry>()
 }
 
+/// Floor for a decoded animation's per-frame delay, in ms.
+///
+/// Matches xtext, which clamps to 10 at both arm sites (xtext.c:6309 and
+/// :6365). A higher floor would visibly slow fast GIFs relative to the
+/// backend this has to be indistinguishable from during the A/B.
+const MIN_FRAME_DELAY_MS: u32 = 10;
+
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
 
@@ -827,13 +834,17 @@ impl HxChatView {
                         // behaviour and what the user sees while the
                         // fetch is in flight.
                         Some(hxchat_layout::Block::Image { alt, token, size }) => {
-                            if let (Some(sz), Some(tex)) = (
-                                size,
-                                imp.media
-                                    .borrow()
-                                    .get(token)
-                                    .and_then(|m| m.texture().cloned()),
-                            ) {
+                            // Borrowed, not cloned: this runs for every
+                            // visible image on every snapshot, and an
+                            // animated one snapshots at its frame rate.
+                            // A clone here is a GObject ref/unref pair
+                            // per image per frame for no gain — nothing
+                            // in the branch can touch `media`, so the
+                            // borrow safely outlives the draw.
+                            let media = imp.media.borrow();
+                            if let (Some(sz), Some(tex)) =
+                                (size, media.get(token).and_then(|m| m.texture()))
+                            {
                                 let avail =
                                     (content_width(alloc_w)).saturating_sub(line.x);
                                 let (dw, dh) = measure.image_size(
@@ -1907,7 +1918,7 @@ impl HxChatView {
                         .get(entry.current)
                         .map(|(_, d)| *d)
                         .unwrap_or(100)
-                        .max(20) as i64
+                        .max(MIN_FRAME_DELAY_MS) as i64
                         * 1000;
                     if entry.since_us == 0 {
                         entry.since_us = now;
