@@ -22,6 +22,9 @@ gtkhx_sources = files(
   # is a single-backend regression baseline. docs/chat-view-benchmark.md
   # has the A/B numbers, which cannot be reproduced now xtext is gone.
   'chat_bench.c',
+  # chat_avatar.c — one icon resolver shared with the user list's rule
+  # (GIF avatar wins over the cicn id). See chat_avatar.h.
+  'chat_avatar.c',
   'cicn.c',
   'gif_avatar.c',
   'gif_icons.c',

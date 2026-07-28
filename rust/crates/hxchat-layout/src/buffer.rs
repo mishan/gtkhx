@@ -494,6 +494,21 @@ impl ChatBuffer {
         self.invalidate_layout();
     }
 
+    /// Edge length of the avatar slot in the gutter; 0 turns avatars
+    /// off. Invalidates every layout, since it changes the gutter width
+    /// and the height of every group head.
+    pub fn set_avatar_size(&mut self, px: u32) {
+        if px == self.params.avatar_size {
+            return;
+        }
+        self.params.avatar_size = px;
+        // The gutter has to be re-reconciled: the avatar contributes to
+        // its width, so turning avatars off should let it shrink back
+        // rather than stay padded out for icons that are gone.
+        self.reset_indent();
+        self.invalidate_layout();
+    }
+
     /// Two-column mode.
     pub fn set_indent(&mut self, on: bool) {
         if on == self.params.indent {

@@ -70,6 +70,23 @@ pub struct LayoutCache {
     /// Width the gutter/nick column actually needed, before clamping to
     /// [`LayoutParams::max_indent`].
     pub natural_indent: u32,
+    /// Where to paint the speaker's avatar, when there is one to paint.
+    ///
+    /// Only ever set on a *group head* — a continuation row shows
+    /// neither the nick nor the icon, which is the whole point of
+    /// grouping. The view resolves the actual texture from the uid at
+    /// draw time, because avatars animate and a cached frame would
+    /// freeze.
+    pub avatar: Option<AvatarBox>,
+}
+
+/// A square avatar slot in the gutter, in row-local coordinates.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct AvatarBox {
+    pub x: u32,
+    pub y: u32,
+    pub size: u32,
+    pub uid: u16,
 }
 
 /// Geometry knobs, supplied by the view.
@@ -100,6 +117,9 @@ pub struct LayoutParams {
     /// Vertical padding above and below an image or code block.
     pub block_padding: u32,
     pub word_wrap: bool,
+    /// Edge length of the avatar slot in the gutter, or 0 for no
+    /// avatars. Driven by the Settings toggle.
+    pub avatar_size: u32,
 }
 
 impl Default for LayoutParams {
@@ -114,6 +134,7 @@ impl Default for LayoutParams {
             quote_indent: 12,
             block_padding: 2,
             word_wrap: true,
+            avatar_size: 0,
         }
     }
 }
@@ -148,6 +169,18 @@ pub fn layout_message(
     // column and shifts every other row sideways.
     let grouped = msg.flags.contains(crate::message::MessageFlags::GROUPED);
 
+    // An avatar is only drawn on a group head, but *every* row with a
+    // speaker reserves its width — otherwise the shared gutter narrows
+    // the moment a run forms and every column in the buffer jumps.
+    let avatar_slot = if params.indent && params.avatar_size > 0 {
+        match &msg.speaker {
+            Some(s) if s.uid != 0 => params.avatar_size + params.gutter_gap,
+            _ => 0,
+        }
+    } else {
+        0
+    };
+
     let natural_indent = if params.indent {
         let gutter_text = match (&msg.gutter, &msg.speaker) {
             (Some(g), _) if !g.text.is_empty() => {
@@ -161,7 +194,7 @@ pub fn layout_message(
         // The gutter holds the timestamp *and* the nick, side by side,
         // so it has to be wide enough for both — reserving only the nick
         // width is what makes a stamp overlap it.
-        params.stamp_width + gutter_text
+        params.stamp_width + avatar_slot + gutter_text
     } else {
         0
     };
@@ -181,6 +214,19 @@ pub fn layout_message(
     // the column grew, and hit-testing used the same wrong x, which is
     // why nicks could not be selected. One source of truth removes both
     // bugs at once.
+    // The avatar sits at the left of the gutter, just past the stamp,
+    // with the nick to its right. Group heads only.
+    let avatar = if avatar_slot > 0 && !grouped {
+        msg.speaker.as_ref().map(|s| AvatarBox {
+            x: params.stamp_width,
+            y: 0,
+            size: params.avatar_size,
+            uid: s.uid,
+        })
+    } else {
+        None
+    };
+
     if params.indent && !grouped {
         if let Some(g) = &msg.gutter {
             if !g.text.is_empty() {
@@ -337,9 +383,14 @@ pub fn layout_message(
 
     LayoutCache {
         generation,
-        height: y.max(line_h),
+        // A head row must be at least as tall as its avatar, or the
+        // icon overflows into the row below. This is the case the
+        // "re-estimate on regroup" fix in ChatBuffer exists for: a head
+        // and its continuations now genuinely differ in height.
+        height: y.max(line_h).max(avatar.map(|a| a.size).unwrap_or(0)),
         lines,
         natural_indent: natural_indent.min(params.max_indent),
+        avatar,
     }
 }
 

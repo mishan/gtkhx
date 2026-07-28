@@ -80,6 +80,31 @@ fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
 /// backend this has to be indistinguishable from during the A/B.
 const MIN_FRAME_DELAY_MS: u32 = 10;
 
+#[cfg(not(test))]
+extern "C" {
+    /// `hx_chat_avatar_for_uid` — see `src/chat_avatar.h`.
+    ///
+    /// Borrowed, and only until the next call: animated avatars advance
+    /// on a shared frame timer, so this is asked per draw rather than
+    /// cached. The expensive half (decoding a cicn sprite) is cached on
+    /// the C side, keyed by icon id.
+    fn hx_chat_avatar_for_uid(
+        anchor: *mut gtk4::ffi::GtkWidget,
+        uid: u16,
+    ) -> *mut gtk4::gdk::ffi::GdkTexture;
+}
+
+/// The test binary links no GtkHx C, so stub the resolver — same
+/// arrangement `links.rs` uses for `gtkurl_*`. Always "no icon", which
+/// is the only answer a headless test could check anyway.
+#[cfg(test)]
+unsafe fn hx_chat_avatar_for_uid(
+    _anchor: *mut gtk4::ffi::GtkWidget,
+    _uid: u16,
+) -> *mut gtk4::gdk::ffi::GdkTexture {
+    std::ptr::null_mut()
+}
+
 /// Something under the pointer that responds to being clicked.
 ///
 /// One type for both cases on purpose. Links and nicks want the same
@@ -576,6 +601,17 @@ impl HxChatView {
         self.imp_().buffer.borrow_mut().set_max_rows(cap, &*m);
     }
 
+    /// Edge length of the avatar slot in the gutter; 0 hides avatars.
+    pub fn set_avatar_size(&self, px: u32) {
+        let m = self.imp_().measure.borrow();
+        let mut buf = self.imp_().buffer.borrow_mut();
+        buf.set_avatar_size(px);
+        drop(buf);
+        drop(m);
+        self.queue_resize();
+        self.queue_draw();
+    }
+
     /// Gap that breaks a run of messages from one speaker; 0 disables
     /// grouping. Re-decides the rows already in the buffer, since the
     /// flag describes neighbours rather than messages.
@@ -922,6 +958,40 @@ impl HxChatView {
                     snapshot.save();
                     snapshot.translate(&gtk4::graphene::Point::new(0.0, row_top as f32));
                     snapshot.append_layout(&draw_layout, &muted);
+                    snapshot.restore();
+                }
+            }
+
+            // The speaker's avatar, on group heads only. Resolved per
+            // frame rather than cached: an animated avatar advances on a
+            // shared timer, and holding a texture would freeze it on
+            // whichever frame happened to be current when the row was
+            // appended.
+            if let Some(av) = layout.avatar {
+                let tex = unsafe {
+                    hx_chat_avatar_for_uid(
+                        self.as_ptr() as *mut gtk4::ffi::GtkWidget,
+                        av.uid,
+                    )
+                };
+                if !tex.is_null() {
+                    let tex: gtk4::gdk::Texture =
+                        unsafe { gtk4::glib::translate::from_glib_none(tex) };
+                    // Fit inside the slot preserving aspect, so a banner-
+                    // shaped icon isn't stretched into a square.
+                    let (iw, ih) = (tex.width().max(1), tex.height().max(1));
+                    let scale =
+                        (av.size as f64 / iw as f64).min(av.size as f64 / ih as f64);
+                    let (dw, dh) = (
+                        (iw as f64 * scale).max(1.0),
+                        (ih as f64 * scale).max(1.0),
+                    );
+                    snapshot.save();
+                    snapshot.translate(&gtk4::graphene::Point::new(
+                        av.x as f32,
+                        (row_top + av.y as i64) as f32,
+                    ));
+                    tex.snapshot(snapshot, dw, dh);
                     snapshot.restore();
                 }
             }

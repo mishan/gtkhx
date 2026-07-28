@@ -91,4 +91,4 @@ pub use markdown::{scan_delims, SourceSpan};
 pub use search::{find_all, Match, SearchState};
 pub use select::{Caret, RowSelection, Selection};
 pub use span::{Attrs, ColorRef, Link, LinkId, ParsedText, Span, Style};
-pub use wrap::{LayoutCache, LayoutGeneration, LayoutParams, LineBox, LineSource};
+pub use wrap::{AvatarBox, LayoutCache, LayoutGeneration, LayoutParams, LineBox, LineSource};

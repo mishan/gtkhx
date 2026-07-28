@@ -416,6 +416,13 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
 /// # Safety
 /// `w` is a valid `HxChatView *` or NULL.
 #[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_set_avatar_size(w: CGtkWidget, px: c_int) {
+    with_view!(w, v, v.set_avatar_size(px.max(0) as u32));
+}
+
+/// # Safety
+/// `w` is a valid `HxChatView *` or NULL.
+#[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_set_group_gap(w: CGtkWidget, secs: c_int) {
     with_view!(w, v, v.set_group_gap_secs(secs as i64));
 }

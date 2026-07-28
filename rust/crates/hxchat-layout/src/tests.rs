@@ -264,6 +264,7 @@ fn params(width: u32) -> LayoutParams {
         quote_indent: 12,
         block_padding: 2,
         word_wrap: true,
+        avatar_size: 0,
     }
 }
 
@@ -2550,4 +2551,120 @@ fn same_direction_still_groups() {
     b.reindex();
     assert!(!grouped(&b, 0));
     assert!(grouped(&b, 1) && grouped(&b, 2), "three outgoing lines are one run");
+}
+
+// ---- avatar gutter (C6) ---------------------------------------------
+
+#[test]
+fn only_a_group_head_gets_an_avatar_box() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 24;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    b.ensure_layout(1, &m);
+
+    let head = b.layout_at(0).unwrap();
+    let cont = b.layout_at(1).unwrap();
+    assert!(head.avatar.is_some(), "the head shows the icon");
+    assert!(cont.avatar.is_none(), "a continuation does not repeat it");
+    assert_eq!(head.avatar.unwrap().uid, 7);
+}
+
+#[test]
+fn a_continuation_still_reserves_the_avatar_width() {
+    // Same argument as the hidden nick: if a grouped row stopped
+    // reserving the icon's width, the shared gutter would narrow as soon
+    // as a run formed and every column in the buffer would jump left.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 24;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    let with_head_only = b.indent_width();
+
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(1, &m);
+    assert_eq!(
+        b.indent_width(),
+        with_head_only,
+        "a grouped row must not shrink the shared gutter"
+    );
+}
+
+#[test]
+fn an_avatar_makes_the_head_row_at_least_as_tall_as_the_icon() {
+    // The case that makes the regroup re-estimate matter: with avatars
+    // on, a head and its continuations genuinely differ in height, so a
+    // stale height carried across a GROUPED toggle is now a real bug
+    // rather than a latent one.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 48; // taller than a text line
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    b.ensure_layout(1, &m);
+
+    assert!(
+        b.layout_at(0).unwrap().height >= 48,
+        "the head must fit its icon"
+    );
+    assert!(
+        b.layout_at(1).unwrap().height < 48,
+        "a continuation has no icon and should stay text-height"
+    );
+}
+
+#[test]
+fn turning_avatars_off_re_estimates_and_narrows_the_gutter() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 48;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..4 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+    for r in 0..4 {
+        b.ensure_layout(r, &m);
+    }
+    let wide = b.indent_width();
+    let tall = b.total_height();
+
+    b.set_avatar_size(0);
+    for r in 0..4 {
+        b.ensure_layout(r, &m);
+    }
+    assert!(b.indent_width() < wide, "the gutter loses the icon slot");
+    assert!(b.total_height() < tall, "and the head row loses its floor");
+    assert!(b.layout_at(0).unwrap().avatar.is_none());
+}
+
+#[test]
+fn a_speaker_with_no_uid_gets_no_avatar_slot() {
+    // uid 0 means "unknown", so there is nothing to look an icon up by.
+    // Reserving space for an icon that can never resolve would indent
+    // every row on a server that omits the UID chunk.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 24;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(0, "misha", "one", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    assert!(b.layout_at(0).unwrap().avatar.is_none());
 }

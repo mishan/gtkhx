@@ -1930,6 +1930,9 @@ create_chat (session *sess)
     hx_chat_view_set_max_indent (text, 256);
     /* Coalesce bursts from one speaker under a single nick. */
     hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
+    hx_chat_view_set_avatar_size (text, gtkhx_prefs.chat_avatars
+                                            ? HX_CHAT_AVATAR_SIZE_DEFAULT
+                                            : 0);
     g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
                       GUINT_TO_POINTER (0));
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
@@ -2134,6 +2137,9 @@ pchat_new (session *sess, struct chat *chat)
     hx_chat_view_set_max_indent (text, 256);
     /* Coalesce bursts from one speaker under a single nick. */
     hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
+    hx_chat_view_set_avatar_size (text, gtkhx_prefs.chat_avatars
+                                            ? HX_CHAT_AVATAR_SIZE_DEFAULT
+                                            : 0);
     g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
                       GUINT_TO_POINTER (hx_chat_cid (chat)));
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),

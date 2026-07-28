@@ -46,6 +46,7 @@
 
 /* Chat output */
 #define CFG_TIMESTAMP "TIMESTAMP"
+#define CFG_CHAT_AVATARS "CHATAVATARS"
 #define CFG_WORDWRAP "WORDWRAP"
 #define CFG_XBUF_MAX "XBUF_MAX"
 #define CFG_FONT "FONT"

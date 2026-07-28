@@ -261,6 +261,21 @@ HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
                                              const HxChatRun *body, int n_body,
                                              time_t stamp);
 
+/* Show the speaker's avatar in the gutter, `px` on a side; 0 hides it.
+ *
+ * Only the first message of a run carries one — repeating an icon down
+ * a burst of messages is exactly the noise grouping exists to remove.
+ * Continuation rows still *reserve* the width, so a run forming does not
+ * shift the column.
+ *
+ * The icon is resolved per frame from the uid (see chat_avatar.h), so
+ * animated avatars animate. Rows whose speaker is unknown (uid 0) get no
+ * slot at all — there would be nothing to look up. */
+void hx_chat_view_set_avatar_size (GtkWidget *view, int px);
+
+/* Default avatar edge, in px. */
+#define HX_CHAT_AVATAR_SIZE_DEFAULT 32
+
 /* Coalesce consecutive messages from one speaker: only the first of a
  * run draws the nick column (and, once avatars land, the icon). `secs`
  * is how long a gap breaks a run; 0 turns grouping off.

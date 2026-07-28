@@ -62,6 +62,9 @@ struct gtkhx_prefs {
 	 * ON; the tray module silently no-ops if no SNI host is around. */
     unsigned char tray;
     unsigned char timestamp;
+    /* Show the speaker's avatar / icon in the chat gutter. Only on the
+     * first message of a run — see chat_view.h's grouping note. */
+    unsigned char chat_avatars;
     unsigned char word_wrap;
     unsigned char track_case;
     unsigned char old_nickcompletion;
