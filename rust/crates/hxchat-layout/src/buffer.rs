@@ -640,6 +640,39 @@ impl ChatBuffer {
     ///
     /// Returned by value rather than by reference because the caller is
     /// the widget, which needs to hold it across a popup.
+    /// The byte range of the link under `caret`, in its source's text.
+    ///
+    /// Split from `link_at` because the hover underline needs the extent
+    /// and not the target — and deriving the extent a second way is how
+    /// the underline and the click end up disagreeing about where a link
+    /// stops.
+    pub fn link_range_at(&self, caret: &Caret) -> Option<std::ops::Range<usize>> {
+        let row = self.row_of(caret.message)?;
+        let msg = &self.rows.get(row)?.msg;
+        let parsed = match caret.source {
+            LineSource::Gutter => msg.gutter.as_ref()?,
+            LineSource::Block(bi) => match msg.blocks.get(bi)? {
+                Block::Text(p) => p,
+                Block::Quote { content, .. } => content,
+                _ => return None,
+            },
+        };
+        parsed.link_at(caret.offset).map(|l| l.range.clone())
+    }
+
+    /// Byte extent of a row's gutter text, for the nick hover underline.
+    pub fn gutter_range(&self, id: MessageId) -> Option<std::ops::Range<usize>> {
+        let row = self.row_of(id)?;
+        let g = self.rows.get(row)?.msg.gutter.as_ref()?;
+        (!g.text.is_empty()).then(|| 0..g.text.len())
+    }
+
+    /// The speaker of a row, if it has one.
+    pub fn speaker_of(&self, id: MessageId) -> Option<&crate::message::Speaker> {
+        let row = self.row_of(id)?;
+        self.rows.get(row)?.msg.speaker.as_ref()
+    }
+
     pub fn link_at(&self, caret: &Caret) -> Option<(String, String)> {
         let row = self.row_of(caret.message)?;
         let msg = &self.rows.get(row)?.msg;

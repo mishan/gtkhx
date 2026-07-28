@@ -80,6 +80,41 @@ fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
 /// backend this has to be indistinguishable from during the A/B.
 const MIN_FRAME_DELAY_MS: u32 = 10;
 
+/// Something under the pointer that responds to being clicked.
+///
+/// One type for both cases on purpose. Links and nicks want the same
+/// affordance — underline on hover, a pointer cursor, a menu on
+/// right-click — and modelling them separately is how the two end up
+/// underlining under subtly different conditions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum HoverTarget {
+    /// A URL: the row, the source it lives in, and its byte range.
+    Link {
+        message: MessageId,
+        source: LineSource,
+        range: std::ops::Range<usize>,
+    },
+    /// A speaker's nick in the gutter. Carries the uid so the
+    /// right-click handler doesn't have to re-resolve it.
+    Nick { message: MessageId, uid: u16 },
+}
+
+impl HoverTarget {
+    /// The (message, source, range) this target underlines, if any.
+    fn underline(&self) -> Option<(MessageId, LineSource, std::ops::Range<usize>)> {
+        match self {
+            HoverTarget::Link {
+                message,
+                source,
+                range,
+            } => Some((*message, *source, range.clone())),
+            // The whole gutter underlines, which the draw path handles
+            // by range rather than specially — see hover_range_for.
+            HoverTarget::Nick { .. } => None,
+        }
+    }
+}
+
 /// What, if anything, recolours a run of text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mark {
@@ -204,6 +239,10 @@ mod imp {
         pub moving_separator: Cell<bool>,
         /// In-buffer search: the query, its hits, and the cursor.
         pub search: RefCell<hxchat_layout::SearchState>,
+        /// What the pointer is currently over, if it is something
+        /// activatable. Drives the cursor *and* the hover underline, so
+        /// the two cannot disagree about what is hoverable.
+        pub hovered: RefCell<Option<HoverTarget>>,
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
@@ -265,6 +304,7 @@ mod imp {
                 separator: Cell::new(false),
                 moving_separator: Cell::new(false),
                 search: RefCell::new(hxchat_layout::SearchState::new()),
+                hovered: RefCell::new(None),
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
@@ -327,6 +367,15 @@ mod imp {
                     // GdkEvent shape.
                     glib::subclass::Signal::builder("word-click")
                         .param_types([glib::Pointer::static_type(), glib::Pointer::static_type()])
+                        .build(),
+                    // speaker-menu: (uid, x, y) — right-click on a nick.
+                    //
+                    // The view raises it and stops; chat.c answers by
+                    // calling users.c::user_popup_show, so chat and the
+                    // user list pop the *same* menu rather than two that
+                    // have to be kept in step.
+                    glib::subclass::Signal::builder("speaker-menu")
+                        .param_types([u32::static_type(), f64::static_type(), f64::static_type()])
                         .build(),
                 ]
             })
@@ -983,6 +1032,15 @@ impl HxChatView {
                     }
                 };
 
+                let hover = buf
+                    .id_at(row)
+                    .and_then(|id| self.hover_range_for(id, line.source))
+                    .and_then(|r| {
+                        let a = r.start.max(line.range.start);
+                        let b = r.end.min(line.range.end);
+                        (a < b).then_some((a, b))
+                    });
+
                 self.draw_runs(
                     snapshot,
                     &draw_layout,
@@ -991,6 +1049,7 @@ impl HxChatView {
                     spans,
                     hl,
                     &hits,
+                    hover,
                     x,
                     y as f32,
                 );
@@ -1027,6 +1086,7 @@ impl HxChatView {
         spans: &[hxchat_layout::Span],
         hl: Option<(usize, usize)>,
         search: &[(usize, usize, bool)],
+        hover: Option<(usize, usize)>,
         x0: f32,
         y: f32,
     ) {
@@ -1079,6 +1139,21 @@ impl HxChatView {
             }
         }
 
+        // Hover is tracked separately from `bands` rather than as another
+        // Mark, because it is an *attribute* (underline) not a colour,
+        // and it has to compose: a hovered link inside a selection
+        // should be both selected and underlined.
+        let hover_band = hover.map(|(a, b)| {
+            (
+                floor_boundary(a.saturating_sub(slice_start)),
+                floor_boundary(b.saturating_sub(slice_start)),
+            )
+        });
+        let is_hovered = |pos: usize| match hover_band {
+            Some((a, b)) => pos >= a && pos < b,
+            None => false,
+        };
+
         let mark_at = |pos: usize| {
             bands
                 .iter()
@@ -1091,10 +1166,18 @@ impl HxChatView {
         let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
 
-        let emit = |text: &str, style: Style, mark: Mark, x: &mut f32| {
+        let emit = |text: &str, style: Style, mark: Mark, underline: bool, x: &mut f32| {
             if text.is_empty() {
                 return;
             }
+            let style = if underline {
+                Style {
+                    attrs: style.attrs.union(hxchat_layout::Attrs::UNDERLINE),
+                    ..style
+                }
+            } else {
+                style
+            };
             layout.set_attributes(Some(&PangoMeasure::attrs_for(style)));
             layout.set_text(text);
             let (w, h) = layout.pixel_size();
@@ -1151,13 +1234,20 @@ impl HxChatView {
                     }
                 }
             }
+            if let Some((a, b)) = hover_band {
+                for p in [a, b] {
+                    if p > from && p < to {
+                        cuts.push(p);
+                    }
+                }
+            }
             cuts.sort_unstable();
             cuts.dedup();
 
             for w in cuts.windows(2) {
                 let (a, b) = (w[0], w[1]);
                 if a < b {
-                    emit(&slice[a..b], style, mark_at(a), x);
+                    emit(&slice[a..b], style, mark_at(a), is_hovered(a), x);
                 }
             }
         };
@@ -1884,9 +1974,26 @@ impl HxChatView {
         let motion = gtk4::EventControllerMotion::new();
         let this = self.clone();
         motion.connect_motion(move |_, x, y| {
-            let want = if this.on_separator(x) || this.imp_().moving_separator.get() {
+            let on_sep = this.on_separator(x) || this.imp_().moving_separator.get();
+            let target = if on_sep {
+                None
+            } else {
+                this.hover_target_at(x, y)
+            };
+
+            // Redraw only when the target actually changed. Motion fires
+            // per pointer event; queueing a draw on every one of them
+            // would repaint the whole view while the mouse merely
+            // crosses it.
+            let changed = *this.imp_().hovered.borrow() != target;
+            if changed {
+                *this.imp_().hovered.borrow_mut() = target.clone();
+                this.queue_draw();
+            }
+
+            let want = if on_sep {
                 "col-resize"
-            } else if this.link_at_point(x, y).is_some() {
+            } else if target.is_some() {
                 "pointer"
             } else {
                 "text"
@@ -1897,6 +2004,12 @@ impl HxChatView {
         });
         let this = self.clone();
         motion.connect_leave(move |_| {
+            // Drop the hover, or an underline is left behind when the
+            // pointer leaves the widget without crossing off the target.
+            if this.imp_().hovered.borrow().is_some() {
+                *this.imp_().hovered.borrow_mut() = None;
+                this.queue_draw();
+            }
             this.set_cursor_from_name(Some("text"));
         });
         self.add_controller(motion);
@@ -1917,6 +2030,19 @@ impl HxChatView {
                 // secondary/middle and pops the URL menu itself, and the
                 // media handler wants the token. Emitting keeps every
                 // existing C consumer working.
+                // A nick outranks everything: the gutter is where nicks
+                // live, and the user menu is what a right-click there
+                // means. Handled before word-click emission so the URL
+                // handler can't also fire on a URL-shaped nick.
+                if button == gtk4::gdk::BUTTON_SECONDARY {
+                    if let Some(HoverTarget::Nick { uid, .. }) =
+                        this.hover_target_at(x, y)
+                    {
+                        this.emit_speaker_menu(uid, x, y);
+                        return;
+                    }
+                }
+
                 this.emit_word_click(x, y, g.current_event().as_ref());
 
                 match this.link_at_point(x, y) {
@@ -1939,6 +2065,66 @@ impl HxChatView {
     }
 
     /// The link under a widget-space point, as (href, visible label).
+    /// Ask the C side for the user context menu on `uid`.
+    ///
+    /// A signal rather than a direct call, because the menu is built by
+    /// `users.c::user_popup_show` — the *same* builder the Users window
+    /// and the pchat sidebars use. The view has no business knowing what
+    /// is on that menu (Get Info, Send Message, Kick, the voice volume
+    /// slider, whatever is added next); it knows a uid and where the
+    /// pointer was.
+    fn emit_speaker_menu(&self, uid: u16, x: f64, y: f64) {
+        self.emit_by_name::<()>("speaker-menu", &[&(uid as u32), &x, &y]);
+    }
+
+    /// What the pointer is over, if it is activatable.
+    ///
+    /// A nick takes precedence over a link inside it, since the gutter
+    /// is where nicks live and a URL-shaped nick is a curiosity rather
+    /// than something you want to open.
+    fn hover_target_at(&self, x: f64, y: f64) -> Option<HoverTarget> {
+        let caret = self.caret_at(x, y)?;
+        let buf = self.imp_().buffer.borrow();
+        if caret.source == LineSource::Gutter {
+            if let Some(sp) = buf.speaker_of(caret.message) {
+                if sp.uid != 0 {
+                    return Some(HoverTarget::Nick {
+                        message: caret.message,
+                        uid: sp.uid,
+                    });
+                }
+            }
+            return None;
+        }
+        buf.link_range_at(&caret).map(|range| HoverTarget::Link {
+            message: caret.message,
+            source: caret.source,
+            range,
+        })
+    }
+
+    /// The byte range this line should underline, if the hovered target
+    /// lands in it.
+    fn hover_range_for(
+        &self,
+        row_id: MessageId,
+        source: LineSource,
+    ) -> Option<std::ops::Range<usize>> {
+        let hovered = self.imp_().hovered.borrow();
+        match hovered.as_ref()? {
+            HoverTarget::Nick { message, .. } => {
+                if *message != row_id || source != LineSource::Gutter {
+                    return None;
+                }
+                self.imp_().buffer.borrow().gutter_range(row_id)
+            }
+            t => {
+                let (m, s, r) = t.underline()?;
+                (m == row_id && s == source).then_some(r)
+            }
+        }
+    }
+
     fn link_at_point(&self, x: f64, y: f64) -> Option<(String, String)> {
         let caret = self.caret_at(x, y)?;
         self.imp_().buffer.borrow().link_at(&caret)

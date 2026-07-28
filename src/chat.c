@@ -706,6 +706,28 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     }
 }
 
+/* Right-click on a nick in chat output.
+ *
+ * Hands straight to users.c::user_popup_show — the same builder the
+ * Users window and the pchat sidebars use, so there is one menu rather
+ * than a chat-shaped copy that drifts from it as items are added. The
+ * view supplied the uid (see HxChatSpeaker) and the pointer position;
+ * everything else the menu needs it looks up itself.
+ *
+ * `user_data` carries the cid so a private chat pops the menu against
+ * its own membership rather than the public room's. */
+static void
+chat_speaker_menu (GtkWidget *view, guint uid, double x, double y,
+                   gpointer user_data)
+{
+    guint32 cid = GPOINTER_TO_UINT (user_data);
+
+    if (uid == 0) {
+        return;
+    }
+    user_popup_show (view, hx_active_session (), cid, (guint16)uid, x, y);
+}
+
 /* Identify who said a line.
  *
  * `wire_uid` is the sender's uid straight off the chat message's UID
@@ -1903,6 +1925,8 @@ create_chat (session *sess)
     hx_chat_view_set_max_indent (text, 256);
     /* Coalesce bursts from one speaker under a single nick. */
     hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
+    g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
+                      GUINT_TO_POINTER (0));
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs
@@ -2105,6 +2129,8 @@ pchat_new (session *sess, struct chat *chat)
     hx_chat_view_set_max_indent (text, 256);
     /* Coalesce bursts from one speaker under a single nick. */
     hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
+    g_signal_connect (text, "speaker-menu", G_CALLBACK (chat_speaker_menu),
+                      GUINT_TO_POINTER (hx_chat_cid (chat)));
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs
