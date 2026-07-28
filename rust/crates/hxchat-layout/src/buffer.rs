@@ -130,9 +130,9 @@ impl ChatBuffer {
     }
 
     /// Scrollback cap, in rows. Matches `hx_chat_view_set_max_lines`.
-    pub fn set_max_rows(&mut self, n: usize) {
+    pub fn set_max_rows(&mut self, n: usize, measure: &dyn TextMeasure) {
         self.max_rows = n;
-        self.trim();
+        self.trim(measure);
     }
 
     pub fn message(&self, id: MessageId) -> Option<&Message> {
@@ -156,6 +156,16 @@ impl ChatBuffer {
             return self.rows.iter().position(|r| r.id == id);
         }
         self.pos.get(&id).copied()
+    }
+
+    /// The layout params as the estimator should see them, with the
+    /// settled gutter width filled in. `ensure_layout` builds the same
+    /// thing; sharing it keeps an estimate and its eventual real layout
+    /// measuring the same shape.
+    fn layout_params(&self) -> LayoutParams {
+        let mut p = self.params;
+        p.indent_width = self.indent_width;
+        p
     }
 
     /// Rebuild the id → position map if stale.
@@ -188,7 +198,7 @@ impl ChatBuffer {
         if !self.pos_dirty {
             self.pos.insert(id, self.rows.len() - 1);
         }
-        self.trim();
+        self.trim(measure);
         id
     }
 
@@ -229,7 +239,7 @@ impl ChatBuffer {
         // An insert splits whatever run spanned this point: the new row
         // may continue the one above, and the row below may no longer
         // continue what is now two rows up.
-        self.regroup_from(at);
+        self.regroup_from(at, measure);
         id
     }
 
@@ -336,7 +346,7 @@ impl ChatBuffer {
         self.reset_indent();
     }
 
-    fn trim(&mut self) {
+    fn trim(&mut self, measure: &dyn TextMeasure) {
         if self.max_rows == 0 || self.rows.len() <= self.max_rows {
             return;
         }
@@ -348,18 +358,18 @@ impl ChatBuffer {
         self.pos_dirty = true;
         // The trimmed rows may have included a run's head. Whatever is
         // at the front now cannot be a continuation of anything.
-        self.regroup_from(0);
+        self.regroup_from(0, measure);
     }
 
     /// Grouping controls. 0 disables it; rows already in the buffer are
     /// re-evaluated, since the flag describes neighbours rather than the
     /// message itself.
-    pub fn set_group_gap_secs(&mut self, secs: i64) {
+    pub fn set_group_gap_secs(&mut self, secs: i64, measure: &dyn TextMeasure) {
         if secs == self.group_gap_secs {
             return;
         }
         self.group_gap_secs = secs.max(0);
-        self.regroup_from(0);
+        self.regroup_from(0, measure);
     }
 
     pub fn group_gap_secs(&self) -> i64 {
@@ -375,6 +385,16 @@ impl ChatBuffer {
         let Some(prev) = self.rows.get(before - 1) else {
             return false;
         };
+        // Direction breaks a run before identity does. In a private
+        // message window both halves of a conversation with yourself
+        // carry the same nick, so grouping on identity alone collapses
+        // "you said / they said / you said" into one block — which is
+        // exactly backwards, since the alternation is the content.
+        if prev.msg.flags.contains(MessageFlags::SELF)
+            != msg.flags.contains(MessageFlags::SELF)
+        {
+            return false;
+        }
         let (Some(a), Some(b)) = (prev.msg.group_key(), msg.group_key()) else {
             return false;
         };
@@ -394,7 +414,7 @@ impl ChatBuffer {
     /// nick with nothing above them to have shown it — a speaker's
     /// messages appearing anonymously. Inserting can split a run the same
     /// way.
-    fn regroup_from(&mut self, row: usize) {
+    fn regroup_from(&mut self, row: usize, measure: &dyn TextMeasure) {
         for i in row..self.rows.len() {
             let want = {
                 let msg = &self.rows[i].msg;
@@ -412,8 +432,18 @@ impl ChatBuffer {
             };
             // The gutter appears or disappears, so the row's height and
             // layout are both stale.
+            //
+            // Re-*estimate* rather than keeping the old height as the new
+            // estimate. Ungrouping adds a gutter line, so the stale value
+            // is too small; carrying it forward under-reports
+            // total_height and leaves the scrollbar's upper bound short
+            // until enough rows happen to be laid out for real. That is
+            // the kind of bug that looks like "scrolling stops early
+            // sometimes" and is miserable to trace back here.
             self.rows[i].layout = None;
-            self.index.set_height(i, self.index.height_at(i), false);
+            let params = self.layout_params();
+            let h = estimate_height(&self.rows[i].msg, &params, measure);
+            self.index.set_height(i, h, false);
         }
     }
 

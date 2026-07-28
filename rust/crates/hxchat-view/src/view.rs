@@ -242,7 +242,7 @@ mod imp {
         /// What the pointer is currently over, if it is something
         /// activatable. Drives the cursor *and* the hover underline, so
         /// the two cannot disagree about what is hoverable.
-        pub hovered: RefCell<Option<HoverTarget>>,
+        pub(crate) hovered: RefCell<Option<HoverTarget>>,
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
@@ -572,14 +572,17 @@ impl HxChatView {
         // value that is a no-op on the other backend — exactly the kind
         // of silent divergence the A/B is supposed to rule out.
         let cap = if n > 2 { n as usize } else { 0 };
-        self.imp_().buffer.borrow_mut().set_max_rows(cap);
+        let m = self.imp_().measure.borrow();
+        self.imp_().buffer.borrow_mut().set_max_rows(cap, &*m);
     }
 
     /// Gap that breaks a run of messages from one speaker; 0 disables
     /// grouping. Re-decides the rows already in the buffer, since the
     /// flag describes neighbours rather than messages.
     pub fn set_group_gap_secs(&self, secs: i64) {
-        self.imp_().buffer.borrow_mut().set_group_gap_secs(secs);
+        let m = self.imp_().measure.borrow();
+        self.imp_().buffer.borrow_mut().set_group_gap_secs(secs, &*m);
+        drop(m);
         self.queue_resize();
         self.queue_draw();
     }

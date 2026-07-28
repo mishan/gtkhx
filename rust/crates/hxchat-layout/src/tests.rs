@@ -736,7 +736,7 @@ fn anchor_falls_back_when_its_row_is_trimmed() {
     let (mut b, m) = buf();
     b.scroll_to(50, 100, 4);
     assert!(!b.is_following());
-    b.set_max_rows(10); // trims the anchored row away
+    b.set_max_rows(10, &m); // trims the anchored row away
     let _ = b.scroll_offset(100);
     // The anchored content is gone; the least surprising place is the
     // bottom, and crucially it must not panic or return garbage.
@@ -778,7 +778,7 @@ fn buffer_stale_mark_is_inert_not_fatal() {
 fn buffer_trim_drops_oldest() {
     let m = FixedMeasure::new(8);
     let mut b = ChatBuffer::new(params(400));
-    b.set_max_rows(50);
+    b.set_max_rows(50, &m);
     for i in 0..200 {
         b.append(Message::system(ParsedText::plain(format!("{i}"))), &m);
     }
@@ -2329,7 +2329,7 @@ fn trimming_a_runs_head_promotes_the_next_row() {
     let mut p = params(2000);
     p.indent = true;
     let mut b = ChatBuffer::new(p);
-    b.set_max_rows(3);
+    b.set_max_rows(3, &m);
     for i in 0..3 {
         b.append(said(7, "misha", "hai", 1000 + i), &m);
     }
@@ -2446,10 +2446,108 @@ fn grouping_can_be_switched_off() {
     b.reindex();
     assert!(grouped(&b, 1));
 
-    b.set_group_gap_secs(0);
+    b.set_group_gap_secs(0, &m);
     assert!(!grouped(&b, 1), "existing rows are re-decided, not just new ones");
     assert!(!grouped(&b, 2));
 
-    b.set_group_gap_secs(crate::buffer::DEFAULT_GROUP_GAP_SECS);
+    b.set_group_gap_secs(crate::buffer::DEFAULT_GROUP_GAP_SECS, &m);
     assert!(grouped(&b, 1), "and back again");
+}
+
+#[test]
+fn regrouping_leaves_the_height_index_agreeing_with_a_real_layout() {
+    // Toggling GROUPED invalidates a row's layout, so its height entry
+    // has to be re-*estimated* rather than have the old value carried
+    // forward as the new estimate. Otherwise total_height drifts from
+    // what a real layout produces, and the scrollbar's upper bound with
+    // it.
+    //
+    // Today the two happen to be equal: the gutter is a left column
+    // (LineBox at y=0) and row height is driven only by body lines, so
+    // showing or hiding a nick changes no height. This test therefore
+    // passes either way *at present* — it is here for what comes next.
+    // An avatar gutter makes a head row taller than its continuations,
+    // and at that point carrying a stale estimate stops being harmless.
+    // Asserting the invariant now means that change gets caught by a
+    // test instead of by someone noticing the scrollbar is short.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..8 {
+        b.append(said(7, "misha", "hai", 1000 + i), &m);
+    }
+    b.reindex();
+    assert!(grouped(&b, 1), "precondition: rows 1.. are a run");
+
+    b.set_group_gap_secs(0, &m);
+    assert!(!grouped(&b, 1), "grouping off");
+    let estimated = b.total_height();
+
+    for r in 0..8 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(
+        b.total_height(),
+        estimated,
+        "the post-regroup estimate must match what layout actually yields"
+    );
+
+    // And back on.
+    b.set_group_gap_secs(crate::buffer::DEFAULT_GROUP_GAP_SECS, &m);
+    let estimated = b.total_height();
+    for r in 0..8 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(b.total_height(), estimated);
+}
+
+#[test]
+fn direction_breaks_a_run_even_with_the_same_nick() {
+    // Messaging yourself in a PM window: every line carries your nick,
+    // and both directions carry it, so grouping on identity alone
+    // collapses the whole conversation into one block. The alternation
+    // *is* the content, so SELF-ness breaks the run before identity is
+    // even consulted.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+
+    let mut line = |mine: bool, at: i64| {
+        let mut msg = said(7, "misha", "asdfasdf", at);
+        if mine {
+            msg.flags = msg.flags.union(MessageFlagsNone::SELF);
+        }
+        b.append(msg, &m);
+    };
+    line(true, 1000);  // outgoing
+    line(false, 1000); // incoming echo
+    line(true, 1001);  // outgoing
+    line(false, 1001); // incoming echo
+    b.reindex();
+
+    for r in 0..4 {
+        assert!(
+            !grouped(&b, r),
+            "row {r}: alternating direction means four groups, not one"
+        );
+    }
+}
+
+#[test]
+fn same_direction_still_groups() {
+    // The converse, so the fix above doesn't just disable grouping.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..3 {
+        let mut msg = said(7, "misha", "hai", 1000 + i);
+        msg.flags = msg.flags.union(MessageFlagsNone::SELF);
+        b.append(msg, &m);
+    }
+    b.reindex();
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1) && grouped(&b, 2), "three outgoing lines are one run");
 }

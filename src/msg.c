@@ -630,8 +630,16 @@ msg_output_render (const char *name, guint16 uid, const char *body,
             HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);
             /* PM windows are per-uid, so the speaker is known outright
 			 * rather than looked up — the one place in the tree where
-			 * that is true. */
-            HxChatSpeaker sp = { is_self ? 0 : uid, nam };
+			 * that is true.
+			 *
+			 * `uid` names the *window*, i.e. the other party. For our
+			 * own messages the speaker is us, so use our own uid: with
+			 * the window's, an outgoing message would show the other
+			 * person's avatar. When we haven't been told our uid yet it
+			 * stays 0, which is a miss rather than a guess. */
+            HxChatSpeaker sp
+                = { is_self ? hx_conn_uid (hx_active_session ()->htlc) : uid,
+                    nam, is_self };
             hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
                                       1, 0);
             first = FALSE;

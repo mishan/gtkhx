@@ -664,9 +664,9 @@ main (int argc, char **argv)
 
     g_test_add_func ("/proto/chat_event/typical_line",
                      test_chat_event_typical_line);
-    g_test_add_func ("/chat_event/wire_uid",
+    g_test_add_func ("/proto/chat_event/wire_uid",
                      test_chat_event_carries_the_wire_uid);
-    g_test_add_func ("/chat_event/uid_defaults_zero",
+    g_test_add_func ("/proto/chat_event/uid_defaults_zero",
                      test_chat_event_uid_defaults_to_zero);
     g_test_add_func ("/proto/chat_event/preserves_cid",
                      test_chat_event_preserves_cid);

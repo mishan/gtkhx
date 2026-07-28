@@ -56,8 +56,12 @@ extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
 /* Render one log line. `tag` is the gutter tag ("hx", a broadcast
  * sender) or NULL for an untagged line; `tag_color` its palette index.
  * They arrive as parameters rather than escapes embedded in `chat` —
- * see gtkhx_session.h's chat-log-line note. */
-extern void xprintline (GtkWidget *text, char *chat, size_t len,
+ * see gtkhx_session.h's chat-log-line note.
+ *
+ * `cid` is the conversation being rendered into, and is what a nick
+ * lookup resolves against — a private chat has its own membership, so
+ * assuming the public room here misidentifies speakers in pchats. */
+extern void xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
                         const char *tag, gint16 tag_color);
 
 /* chat-signal renderer. Takes a pre-parsed HxChatEvent

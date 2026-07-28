@@ -748,9 +748,11 @@ chat_speaker_menu (GtkWidget *view, guint uid, double x, double y,
  * which is worse than showing neither. */
 static HxChatSpeaker
 chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
-                  gsize nick_len)
+                  gsize nick_len, gboolean is_self)
 {
     HxChatSpeaker sp = HX_CHAT_SPEAKER_NONE;
+
+    sp.is_self = is_self;
     struct chat *conv;
     char *nul;
 
@@ -1067,7 +1069,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
                        HX_CHAT_INFO_COLOR,
                        chat_speaker_for (e->cid, e->uid,
                                          e->line + e->sender_off,
-                                         e->sender_len));
+                                         e->sender_len, e->is_self));
 
     if (nl) {
         const char *cur = nl + 1;
@@ -1625,8 +1627,8 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 }
 
 void
-xprintline (GtkWidget *text, char *chat, size_t len, const char *tag,
-            gint16 tag_color)
+xprintline (GtkWidget *text, guint32 cid, char *chat, size_t len,
+            const char *tag, gint16 tag_color)
 {
     char *valid;
     gsize valid_len;
@@ -1721,10 +1723,13 @@ xprintline (GtkWidget *text, char *chat, size_t len, const char *tag,
         xprintline_render (text, valid, valid_len, name_off, name_len,
                            body_off, body_len, FALSE, said_by_self,
                            info_color,
-                           /* Log lines carry no wire uid — they never
-							* came from a chat message. */
-                           chat_speaker_for (0, 0, valid + name_off,
-                                             name_len));
+                           /* No wire uid: a log line never came from a
+							* chat message, so the nick can only be
+							* resolved by lookup — and it has to be
+							* looked up in *this* conversation, not
+							* always the public one. */
+                           chat_speaker_for (cid, 0, valid + name_off,
+                                             name_len, said_by_self));
     }
 
     g_free (valid);
@@ -1779,19 +1784,19 @@ xoutput_chat (session *sess, guint32 cid, char *chat, const char *tag,
     cr = strchr (chat, '\n');
     if (cr) {
         while (1) {
-            xprintline (gchat->output, chat, cr - chat, tag, tag_color);
+            xprintline (gchat->output, cid, chat, cr - chat, tag, tag_color);
             chat = cr + 1;
             if (*chat == 0) {
                 break;
             }
             cr = strchr (chat, '\n');
             if (!cr) {
-                xprintline (gchat->output, chat, -1, tag, tag_color);
+                xprintline (gchat->output, cid, chat, -1, tag, tag_color);
                 break;
             }
         }
     } else {
-        xprintline (gchat->output, chat, -1, tag, tag_color);
+        xprintline (gchat->output, cid, chat, -1, tag, tag_color);
     }
 }
 

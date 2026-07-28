@@ -224,9 +224,14 @@ typedef struct {
 typedef struct {
     guint16 uid;      /* 0 = unknown */
     const char *nick; /* borrowed for the call; may be NULL */
+    /* Did we send it? Breaks message grouping independently of identity:
+     * in a private-message window with yourself both directions carry
+     * the same nick, and collapsing them into one block loses the
+     * alternation that *is* the conversation. */
+    gboolean is_self;
 } HxChatSpeaker;
 
-#define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL })
+#define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL, FALSE })
 
 /* Append a row built from runs. `gutter` may be NULL/0 for a row with
  * no nick column; `speaker` names who said it (HX_CHAT_SPEAKER_NONE for
