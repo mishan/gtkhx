@@ -73,6 +73,7 @@ use hxfiles_xfer as _;
 use hxhfs as _;
 use hxmacres as _;
 use hxsound as _;
+use hxchat_view as _;
 use hxtext as _;
 use hxtls_trust as _;
 

@@ -1780,6 +1780,7 @@ dependencies = [
  "hx-image-decode",
  "hxbookmarks",
  "hxbridge",
+ "hxchat-view",
  "hxcrypto",
  "hxfiles-xfer",
  "hxhandlers",
@@ -1975,6 +1976,17 @@ dependencies = [
 [[package]]
 name = "hxchat-layout"
 version = "0.1.0"
+
+[[package]]
+name = "hxchat-view"
+version = "0.1.0"
+dependencies = [
+ "glib 0.21.5",
+ "gtk4",
+ "hxchat-layout",
+ "pango 0.21.5",
+ "pangocairo",
+]
 
 [[package]]
 name = "hxcrypto"
@@ -2878,6 +2890,32 @@ dependencies = [
  "glib-sys 0.21.5",
  "gobject-sys 0.21.5",
  "libc",
+ "system-deps",
+]
+
+[[package]]
+name = "pangocairo"
+version = "0.21.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b36c5c84304072939d860595d9bda2a797d3bd6f7215e20b8ccd0e72d84da8c8"
+dependencies = [
+ "cairo-rs 0.21.5",
+ "glib 0.21.5",
+ "libc",
+ "pango 0.21.5",
+ "pangocairo-sys",
+]
+
+[[package]]
+name = "pangocairo-sys"
+version = "0.21.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eadbb01ad38be76e0d37e329d40ba0f3f9ef261d7b84b05201d7a0f14f819406"
+dependencies = [
+ "cairo-sys-rs 0.21.5",
+ "glib-sys 0.21.5",
+ "libc",
+ "pango-sys 0.21.5",
  "system-deps",
 ]
 

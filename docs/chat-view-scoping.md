@@ -360,6 +360,67 @@ layout engine must support it from C1 (the generation key and the scale factor
 are part of the measure API from day one), but the bindings and the pref come
 with selection and context menus.
 
+### 3.7a One user identity across Chat and Users
+
+The goal: right-clicking a person should behave the same whether you did it
+in the Users list or on their name in chat — same menu, same handlers, one
+implementation.
+
+**Most of this already exists**, which is worth stating before proposing
+anything, because the remaining work is much smaller than it looks:
+
+- `HxMember` / `HxMemberModel` (`rust/crates/hxmodel/src/member.rs`) is
+  already the authoritative per-chat membership store — that was M2 of the
+  chat-model re-think.
+- M4b already re-keyed the view and every UI path off the `hx_user *`
+  pointer and onto `(cid, uid)`. `struct hx_user` shrank to a two-field
+  signal-payload carrier.
+- `user_popup_show (anchor, sess, cid, uid, x, y)` (`users.h:56`) is
+  **already a single shared popover builder keyed on `(cid, uid)`**, and its
+  own comment says so: "Both the standalone Users window and the pchat
+  sidebars share this single popover builder."
+
+So there is already one identity (`(cid, uid)`), one membership model
+(`HxMemberModel`), and one menu builder. What is missing is only that the
+chat *text* has no way to name a person: xtext gives a click a
+whitespace-delimited word, so the only thing a nick click could report is a
+string, and matching that string back to a member is guesswork (nicks
+collide, contain spaces, and change).
+
+The structured model fixes that by construction. `Speaker { uid, nick,
+color, icon }` rides on every message (§3.1), so the view knows exactly who
+a rendered nick belongs to, and §3.6's `speaker-activated` signal carries
+`(cid, uid, button)` — the same pair `user_popup_show` already takes. The
+wiring is then one handler:
+
+```c
+/* chat view */                     /* users list */
+speaker-activated(cid, uid, btn) ─┐  ┌─ GtkGestureClick
+                                  ├──┴──▶ user_popup_show(anchor, sess,
+                                                          cid, uid, x, y)
+```
+
+Concretely this means, in phase order:
+
+- **C2/C3** — the view hit-tests a `LineSource::Gutter` line box to a
+  `Speaker` and emits `speaker-activated`. The gutter is already its own
+  line box precisely so a click on the nick is distinguishable from a click
+  on the body.
+- **C6** — when `chat.c` hands over structured messages, `Speaker.uid` is
+  populated from the real user record rather than reconstructed, and
+  `Speaker.icon` lights up the avatar gutter. Until then the compat path has
+  a nick string and no uid, so `speaker-activated` stays unwired rather than
+  guessing.
+- **Later, optional** — `HxMember` becomes the thing `Speaker` *borrows*
+  rather than copies, so a nick or colour change repaints chat rows as well
+  as the user list. Worth doing only if it turns out we want live
+  re-rendering of historical rows; copying is cheaper and messages are
+  arguably historical records of who said what under what name at the time.
+
+The thing to avoid: introducing a *third* user structure for the chat
+view. `Speaker` is a render-time projection of `HxMember`, not a rival
+model, and it should stay that way.
+
 ### 3.8 Retiring the mIRC escape vocabulary
 
 **The mIRC escapes are not protocol.** Worth establishing before building

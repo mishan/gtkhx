@@ -200,6 +200,21 @@ pub struct Message {
     /// argument the C append API already takes.
     pub timestamp: i64,
     pub speaker: Option<Speaker>,
+    /// Pre-rendered left column, overriding whatever [`Self::speaker`]
+    /// would produce.
+    ///
+    /// This is the compat path's escape hatch, and it earns its keep
+    /// until C6. `chat.c` builds the nick column as a styled string —
+    /// `\00312<\003alice\00312>\003`, brackets in one colour and the
+    /// nick in another — and during the A/B the new view has to
+    /// reproduce that *exactly*, which a bare `Speaker { nick }` can't.
+    /// So the compat append path parses the left text into a
+    /// `ParsedText` and puts it here.
+    ///
+    /// Once `chat.c` hands over structured messages (C6), the view
+    /// renders the gutter from `speaker` — nick, colour, avatar — and
+    /// this goes away with the mIRC shim.
+    pub gutter: Option<ParsedText>,
     pub blocks: Vec<Block>,
     pub flags: MessageFlags,
 }
@@ -211,6 +226,7 @@ impl Message {
             kind: MessageKind::Live,
             timestamp: 0,
             speaker: Some(speaker),
+            gutter: None,
             blocks: vec![Block::Text(body)],
             flags: MessageFlags::NONE,
         }
@@ -222,6 +238,7 @@ impl Message {
             kind: MessageKind::System,
             timestamp: 0,
             speaker: None,
+            gutter: None,
             blocks: vec![Block::Text(body)],
             flags: MessageFlags::NONE,
         }

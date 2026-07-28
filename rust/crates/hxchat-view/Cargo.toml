@@ -1,0 +1,26 @@
+[package]
+rust-version.workspace = true
+name = "hxchat-view"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Chat-view phase C2: the GTK4 chat output widget over hxchat-layout"
+publish = false
+
+[lib]
+# rlib only. gtkhx-ffi is the workspace's single staticlib and bundles the
+# whole rlib graph into libgtkhx_ffi.a; a second staticlib here would
+# double-define this crate's #[no_mangle] symbols at the final link. See
+# crates/gtkhx-ffi/src/lib.rs for the full rationale.
+crate-type = ["rlib"]
+
+[dependencies]
+# The layout engine. All the interesting logic lives there and is tested
+# headless; this crate is the GTK skin over it.
+hxchat-layout = { path = "../hxchat-layout" }
+glib = { workspace = true }
+gtk4 = { workspace = true, features = ["v4_10"] }
+# Pango directly, for the TextMeasure implementation and the shaped
+# layouts the snapshot pass hands to GSK.
+pango = "0.21"
+pangocairo = "0.21"
