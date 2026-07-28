@@ -494,14 +494,15 @@ pub unsafe extern "C" fn hx_chat_view_impl_append_media(
     stamp: i64,
 ) {
     with_view!(w, v, {
-        // A texture may already be present (the caller decoded before
-        // appending); more often it arrives later via set_texture.
-        if !texture.is_null() {
-            let tex: gtk4::gdk::Texture = gtk4::glib::translate::from_glib_none(
-                texture as *mut gtk4::gdk::ffi::GdkTexture,
-            );
-            v.set_media_frames(token, vec![(tex, 0)]);
-        }
+        // Append the row *first*.
+        //
+        // `set_media_frames` attaches the decoded size by looking the
+        // row up with `find_image(token)`, so installing frames before
+        // the row exists finds nothing, leaves `Block::Image.size` at
+        // None, and the snapshot path — which requires `Some` — renders
+        // the placeholder forever. Usually the texture arrives later via
+        // set_texture and the order is moot; it is the pre-decoded case
+        // that breaks.
         let alt = cstr(alt);
         v.append(Message {
             kind: MessageKind::Live,
@@ -515,6 +516,12 @@ pub unsafe extern "C" fn hx_chat_view_impl_append_media(
             }],
             flags: hxchat_layout::MessageFlags::NONE,
         });
+        if !texture.is_null() {
+            let tex: gtk4::gdk::Texture = gtk4::glib::translate::from_glib_none(
+                texture as *mut gtk4::gdk::ffi::GdkTexture,
+            );
+            v.set_media_frames(token, vec![(tex, 0)]);
+        }
     })
 }
 

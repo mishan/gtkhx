@@ -63,30 +63,30 @@ const PAD_Y: i32 = 2;
 /// default (`gtk_xtext_set_stamp_format(NULL)` restores it).
 const DEFAULT_STAMP_FORMAT: &str = "[%H:%M:%S] ";
 
-/// One decoded media item.
+/// One decoded media item. Internal widget state.
 #[derive(Clone)]
-pub struct MediaEntry {
+pub(crate) struct MediaEntry {
     /// Animation frames with their durations. A static image is a
     /// single frame with delay 0.
-    pub frames: Vec<(gtk4::gdk::Texture, u32)>,
+    pub(crate) frames: Vec<(gtk4::gdk::Texture, u32)>,
     /// Index of the frame currently showing.
-    pub current: usize,
+    pub(crate) current: usize,
     /// When the current frame started, for the advance tick.
-    pub since_us: i64,
+    pub(crate) since_us: i64,
 }
 
 impl MediaEntry {
-    pub fn texture(&self) -> Option<&gtk4::gdk::Texture> {
+    pub(crate) fn texture(&self) -> Option<&gtk4::gdk::Texture> {
         self.frames.get(self.current).map(|(t, _)| t)
     }
 
-    pub fn is_animated(&self) -> bool {
+    pub(crate) fn is_animated(&self) -> bool {
         self.frames.len() > 1
     }
 
     /// Intrinsic size, from the first frame — every frame of a glycin
     /// animation shares dimensions.
-    pub fn size(&self) -> Option<hxchat_layout::ImageSize> {
+    pub(crate) fn size(&self) -> Option<hxchat_layout::ImageSize> {
         self.frames.first().map(|(t, _)| hxchat_layout::ImageSize {
             width: t.width().max(0) as u32,
             height: t.height().max(0) as u32,
@@ -146,7 +146,7 @@ mod imp {
         /// `Block::Image` because `hxchat-layout` is GTK-free by
         /// design — it carries only the *size*, which is all it needs
         /// to lay the row out. The token is the join.
-        pub media: RefCell<std::collections::HashMap<u32, MediaEntry>>,
+        pub(crate) media: RefCell<std::collections::HashMap<u32, MediaEntry>>,
         /// Frame-advance tick, running only while something animates.
         pub anim_tick: RefCell<Option<gtk4::TickCallbackId>>,
     }
@@ -797,6 +797,13 @@ impl HxChatView {
                         }
                     });
 
+                if trace_selection() && selection.is_some() {
+                    eprintln!(
+                        "[chatview] row={row} src={:?} line={:?} row_sel={:?} hl={:?}",
+                        line.source, line.range, row_sel, hl
+                    );
+                }
+
                 self.draw_runs(
                     snapshot,
                     &draw_layout,
@@ -847,10 +854,22 @@ impl HxChatView {
         let end = slice.len();
 
         // Selection bounds in slice-local coordinates.
+        // Slice-local, and clamped to char boundaries: `&slice[a..b]`
+        // panics off a boundary, and a panic inside `snapshot` unwinds
+        // across the FFI, which aborts. Offsets come from `fit_prefix`
+        // and so should already be aligned; this makes "should" not
+        // matter.
+        let floor_boundary = |i: usize| {
+            let mut i = i.min(end);
+            while i > 0 && !slice.is_char_boundary(i) {
+                i -= 1;
+            }
+            i
+        };
         let (hs, he) = match hl {
             Some((a, b)) => (
-                a.saturating_sub(slice_start).min(end),
-                b.saturating_sub(slice_start).min(end),
+                floor_boundary(a.saturating_sub(slice_start)),
+                floor_boundary(b.saturating_sub(slice_start)),
             ),
             None => (0, 0),
         };
@@ -1598,4 +1617,22 @@ impl HxChatView {
             _ => None,
         })
     }
+}
+
+/// `GTKHX_CHATVIEW_TRACE=selection` turns on a per-line dump of what the
+/// snapshot pass thinks is selected.
+///
+/// Added because selection state spans three layers — gesture, model,
+/// renderer — and static reading cannot tell which one is empty-handed.
+/// The equivalent trick (a `g_message` reporting what was actually
+/// constructed) is what identified the C2 floating-reference bug after
+/// several wrong guesses.
+fn trace_selection() -> bool {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        std::env::var("GTKHX_CHATVIEW_TRACE")
+            .map(|v| v.split(',').any(|p| p.trim() == "selection"))
+            .unwrap_or(false)
+    })
 }
