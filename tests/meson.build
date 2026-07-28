@@ -720,7 +720,6 @@ test_hlwrite = executable('test_hlwrite',
   'htlc_recv_buf.c',
   '../src/proto_helpers.c',
   '../src/debug.c',
-  '../src/login_packet.c',
   '../src/hl_code.c',
   dependencies        : proto_test_deps,
   include_directories : proto_test_inc,
@@ -1028,7 +1027,6 @@ integration_harness_lib = static_library(
   '../src/proto_helpers.c',
   '../src/debug.c',
   '../src/hl_code.c',
-  '../src/login_packet.c',
   '../src/chat_history.c',
   # The Tier 3 HOPE login + HTXF transfers run through the production
   # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
@@ -1073,7 +1071,6 @@ test_integration_real_connect = executable(
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/login_packet.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
@@ -1113,7 +1110,6 @@ test_integration_tracker_signals = executable(
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/login_packet.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
@@ -1181,7 +1177,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/network.c',
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
-  '../src/login_packet.c',
   '../src/chat_history.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
@@ -1970,10 +1965,8 @@ test_integration_chat_history = executable('test_integration_chat_history',
 # (Janus today; filtered via HX_TEST_CAP_CHACHA20). Skips silently
 # when no chacha20-capable server is in the matrix.
 #
-# The whole rest of the test-vs-prod dedup work on this branch (the
-# src/login_packet.{c,h} module, the harness AEAD wrappers,
-# integration_open_login_hope_or_skip) exists to make this test
-# possible.
+# The rest of the test-vs-prod dedup work (the harness AEAD wrappers,
+# integration_open_login_hope_or_skip) exists to make this test possible.
 test_integration_hope_chacha20 = executable('test_integration_hope_chacha20',
   'integration/test_hope_chacha20.c',
   dependencies        : proto_test_deps,

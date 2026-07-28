@@ -72,7 +72,6 @@ gtkhx_sources = files(
   'inline_media_upload.c',
   'hl_code.c',
   'human_readable.c',
-  'login_packet.c',
   'msg.c',
   'network.c',
   'hxnet_bridge.c',

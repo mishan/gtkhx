@@ -28,8 +28,8 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "hxnet_htxf.h"
+#include "hxconn.h" /* hx_conn_trans_post_inc for the LOGIN frame's trans */
 #include "hl_code.h"
-#include "login_packet.h"
 #include "hotline_proto.h"
 #include "chat_history.h"
 #include "integration_harness.h"
@@ -791,57 +791,56 @@ integration_release_htlc (struct htlc_conn *htlc)
     htlc->hope_aead = NULL;
 }
 
-/* Pack + synchronously send one LOGIN packet built by the shared
- * login_packet.c module. Used by both integration_login_guest and
- * integration_login_guest_caps so the wire-format details stay in
- * one place — the same place production uses (src/network.c calls
- * hx_login_build_chunks too, via hlwrite_chunks). */
-static gboolean
-send_login_packet (int fd, struct htlc_conn *htlc, const hx_login_request *req)
-{
-    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
-    int hc = hx_login_build_chunks (req, chunks, HX_LOGIN_MAX_CHUNKS,
-                                    scratch, sizeof (scratch));
-    if (hc <= 0) {
-        return FALSE;
-    }
-    gsize len = 0;
-    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc, &len);
+/* hxnet/src/ffi.rs — build a plaintext LOGIN frame via the production builder
+ * (crate::login::build_login_frame). Replaces the old login_packet.c: production
+ * login is Rust now (the hxnet orchestrator), so the harness drives the same
+ * builder rather than a C duplicate. */
+extern size_t hxnet_build_login_frame (const guint8 *login, size_t login_len,
+                                       const guint8 *password,
+                                       size_t password_len, const guint8 *name,
+                                       size_t name_len, guint16 icon,
+                                       guint16 version, guint16 caps,
+                                       guint32 trans, guint8 *out,
+                                       size_t out_cap);
 
-    if (!buf) {
+/* Build + synchronously send one plaintext LOGIN packet. Used by both
+ * integration_login_guest and integration_login_guest_caps. An empty password
+ * omits the PASSWORD chunk (guest login); empty name / zero icon / version / caps
+ * each omit their chunk. The trans is post-incremented off the htlc exactly as
+ * hlpack_chunks would have done. */
+static gboolean
+send_login_packet (int fd, struct htlc_conn *htlc, const char *login_name,
+                   const char *password, const char *display_name, guint16 icon,
+                   guint16 client_version, guint16 caps)
+{
+    const char *ln = login_name ? login_name : "";
+    const char *pw = password ? password : "";
+    const char *dn = display_name ? display_name : "";
+    guint8 frame[512];
+    size_t flen = hxnet_build_login_frame (
+        (const guint8 *) ln, strlen (ln), (const guint8 *) pw, strlen (pw),
+        (const guint8 *) dn, strlen (dn), icon, client_version, caps,
+        hx_conn_trans_post_inc (htlc), frame, sizeof (frame));
+    if (flen == 0) {
         return FALSE;
     }
-    gboolean ok = integration_send (fd, buf, len);
-    g_free (buf);
-    return ok;
+    return integration_send (fd, frame, flen);
 }
 
 gboolean
 integration_login_guest (int fd, struct htlc_conn *htlc,
                          const char *display_name, guint16 icon)
 {
-    /* The harness sends HTLC_DATA_NAME inline so test assertions can
-	 * check "the name we asserted round-trips back unchanged" without
-	 * driving the full AGREEMENTAGREE flow. Production deliberately
-	 * does NOT send NAME at LOGIN time; the shared builder gates the
-	 * chunk on display_name being non-empty so both paths share the
-	 * same module. */
-    const hx_login_request req = {
-        .mode = HX_LOGIN_MODE_LEGACY,
-        .icon = icon,
-        .login_name = "guest",
-        .password = NULL,
-        .display_name = display_name,
-        /* Advertise ourselves as Hotline 1.8.5. mhxd uses this in
-		 * rcv_login to decide whether to set
-		 * htlc->access_extra.can_ping (gated on clientversion >= 150
-		 * at src/hxd/rcv.c:1600). Without this chunk, mhxd silently
-		 * rejects HTLC_HDR_PING with a task-error. */
-        .client_version = 185,
-        .send_caps = 0,
-    };
-    return send_login_packet (fd, htlc, &req);
+    /* The harness sends HTLC_DATA_NAME inline so test assertions can check
+     * "the name we asserted round-trips back unchanged" without driving the full
+     * AGREEMENTAGREE flow. Production deliberately does NOT send NAME at LOGIN
+     * time; the builder gates the chunk on a non-empty name.
+     *
+     * clientversion 185 = Hotline 1.8.5: mhxd uses it in rcv_login to set
+     * access_extra.can_ping (gated on clientversion >= 150), without which mhxd
+     * rejects HTLC_HDR_PING with a task-error. */
+    return send_login_packet (fd, htlc, "guest", NULL, display_name, icon,
+                              /*client_version=*/185, /*caps=*/0);
 }
 
 gboolean
@@ -849,21 +848,11 @@ integration_login_guest_caps (int fd, struct htlc_conn *htlc,
                               const char *display_name, guint16 icon,
                               guint16 caps)
 {
-    /* DATA_CAPABILITIES is "variable-width big-endian" per spec; two
-	 * bytes covers bits 0..15 which is everything we have today
-	 * (CHAT_HISTORY is bit 4). Matches the wire layout produced by
-	 * src/network.c's production LOGIN path. */
-    const hx_login_request req = {
-        .mode = HX_LOGIN_MODE_LEGACY,
-        .icon = icon,
-        .login_name = "guest",
-        .password = NULL,
-        .display_name = display_name,
-        .client_version = 185,
-        .caps = caps,
-        .send_caps = 1,
-    };
-    return send_login_packet (fd, htlc, &req);
+    /* DATA_CAPABILITIES is "variable-width big-endian" per spec; two bytes cover
+     * bits 0..15 which is everything we have today (CHAT_HISTORY is bit 4).
+     * Matches the wire layout the production LOGIN path emits. */
+    return send_login_packet (fd, htlc, "guest", NULL, display_name, icon,
+                              /*client_version=*/185, caps);
 }
 
 /* Wall-clock safety bound for the drain helpers below. The per-message
