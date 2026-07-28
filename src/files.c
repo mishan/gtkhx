@@ -77,7 +77,7 @@ guint8 dir_char = '/';
  * files browser's remote provider can drive it off the parsed wire chunks.
  *
  * The mapping logic moved to the hxfiles-model Rust crate in Phase F1
- * (see docs/rust/files-migration-scope.md); this is a thin wrapper over
+ * (see docs/rust/ROADMAP.md); this is a thin wrapper over
  * its FFI export. */
 extern guint16 gtkhx_files_icon_of_ftype_and_name (const char *ftype,
                                                    const char *name,
@@ -102,7 +102,7 @@ icon_of_fh (struct hl_filelist_hdr *fh)
 /* FourCC → human label.
  *
  * The type→label table moved to the hxfiles-model Rust crate in Phase F1
- * (gtkhx_files_kind_label_for; see docs/rust/files-migration-scope.md).
+ * (gtkhx_files_kind_label_for; see docs/rust/ROADMAP.md).
  * This C wrapper keeps the parts that need glib/gettext: the runtime
  * `_()` translation of the (static, English) label, the null-type
  * "Unknown" case, and the unknown-FourCC "<XXXX> file" fallback (whose

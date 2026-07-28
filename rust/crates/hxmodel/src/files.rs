@@ -1,6 +1,6 @@
 //! Pure files-subsystem model helpers (the Rust re-think of the C
 //! files-browser presentation/navigation logic; see
-//! docs/rust/files-migration-scope.md).
+//! docs/rust/ROADMAP.md).
 //!
 //! Two pieces live here, both pure (no glib/gtk) so they carry real
 //! headless unit tests the display-less CI can run:

@@ -214,7 +214,7 @@ pub unsafe extern "C" fn gtkhx_bridge_spawn_blocking_with_idle(
 /// main thread through hxbridge rather than through `gtkthreads.c` —
 /// the last step before `gtkthreads.c` (whose only remaining export is
 /// `gtkhx_post_to_main`) can retire (Phase R3 X2 → X4,
-/// `docs/rust/xfers-tokio-scoping.md`). It is intentionally a pure-GLib
+/// `docs/rust/ROADMAP.md`). It is intentionally a pure-GLib
 /// shim with no tokio dependency; it lives beside
 /// `spawn_blocking_with_idle` because both are the worker→main
 /// marshalling surface the transfer worker uses.

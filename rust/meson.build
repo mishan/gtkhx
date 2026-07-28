@@ -477,7 +477,7 @@ rust_hotline_proto_dep = declare_dependency(
   ],
 )
 
-# Files-subsystem transfer codec (see docs/rust/files-migration-scope.md).
+# Files-subsystem transfer codec (see docs/rust/ROADMAP.md).
 # Pure logic, no glib/gtk — `cargo test -p hxfiles-xfer` runs headless.
 # Exposes the `gtkhx_ffo_*` FFI surface (the FFO fork-header + info-block
 # byte math behind src/xfers.c::file_recv_one). Unconditional.

@@ -35,5 +35,5 @@
 pub mod recv;
 pub mod send;
 // The file-transfer registry (the `xfers[]` list) — Y1 of the xfers.c → Rust
-// migration. See docs/rust/xfers-to-rust-scoping.md.
+// migration. See docs/rust/ROADMAP.md.
 pub mod xfer;
