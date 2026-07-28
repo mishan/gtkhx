@@ -1125,6 +1125,13 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
         const char *quit_accels[] = { "<Control>q", NULL };
         gtk_application_set_accels_for_action (app, "app.quit", quit_accels);
     }
+    {
+        /* Ctrl+U clears the focused text input, in any window. See
+		 * toolbar.c::on_action_clear_input. */
+        const char *clear_accels[] = { "<Control>u", NULL };
+        gtk_application_set_accels_for_action (app, "app.clear-input",
+                                               clear_accels);
+    }
 
     /* StatusNotifierItem tray icon. Reads the TRAY pref at
      * register-time; the changed_tray cfgvar callback flips it on/off

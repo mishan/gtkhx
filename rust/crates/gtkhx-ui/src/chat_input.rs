@@ -5,6 +5,8 @@
 //! `GtkEventControllerKey` on the input view. The bindings:
 //!
 //!   - **Ctrl+K** → open the Connect dialog.
+//!   - **Ctrl+U** → discard the draft (undoable in one step).
+//!   - **Ctrl+B / Ctrl+I / Ctrl+Shift+C** → wrap the selection in markdown.
 //!   - **Shift+Return** → newline (let the view's default insert run).
 //!   - **Return** → record the line in history, dispatch it
 //!     (`hotline_client_input`, which routes `/commands` and chat), clear.
@@ -210,6 +212,22 @@ fn on_key(
         // Ctrl chords are exclusive — no send/complete/history under Ctrl.
         if keyval == Key::k || keyval == Key::K {
             unsafe { create_connect_window(ptr::null_mut(), sess) };
+            return glib::Propagation::Stop;
+        }
+        // Ctrl+U discards the draft. Delegates to the application
+        // action rather than repeating it here: toolbar.c's
+        // on_action_clear_input already handles every focused text input
+        // in the app, and a second copy of "clear the thing" is how the
+        // two drift.
+        //
+        // Handled here at all — rather than left to the app accel — so
+        // it is certain to fire over a focused GtkTextView regardless of
+        // what GTK binds Ctrl+U to, and returning Stop keeps the accel
+        // from running a second time.
+        if keyval == Key::u || keyval == Key::U {
+            if let Some(app) = gtk::gio::Application::default() {
+                app.activate_action("clear-input", None);
+            }
             return glib::Propagation::Stop;
         }
         // Markdown compose affordances. These only touch the text you

@@ -407,6 +407,21 @@ fn server_connect(sess: *mut c_void) {
     };
     let w = widgets();
     let server = w.address.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
+
+    // Nothing to connect *to*. Enter in any row activates the default
+    // widget, so this is reachable by pressing it in an empty form —
+    // and connecting to "" fails somewhere much less obvious than here.
+    //
+    // Blank-after-trim rather than a hostname/IP syntax check: the field
+    // legitimately takes IPv4, IPv6, .local names, and bare hostnames,
+    // and a validator tight enough to be useful would reject something
+    // someone actually types.
+    if server.trim().is_empty() {
+        if let Some(e) = w.address.as_ref() {
+            e.grab_focus();
+        }
+        return;
+    }
     let login = w.login.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
     let pass = w.password.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
     let portstr = w.port.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
@@ -557,6 +572,10 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
     dlg.set_child(Some(&toolbar_view));
 
     connect_btn.set_receives_default(true);
+    // The rows all set_activates_default(true), which does nothing
+    // without this — the dialog had no default widget, so Enter in the
+    // form fell on the floor.
+    dlg.set_default_widget(Some(&connect_btn));
     // Reset the whole ConnectUi on close so every row's strong ref drops (not
     // just the window) and stale entry points (connect_set_entries /
     // set_the_entries) can't mutate a closed dialog's widgets.

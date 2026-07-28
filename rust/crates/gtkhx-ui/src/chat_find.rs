@@ -165,8 +165,8 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::Search
     ctx.count.set_margin_start(6);
     ctx.count.set_margin_end(6);
     for (b, tip) in [
-        (&ctx.prev_btn, tr("Previous match")),
-        (&ctx.next_btn, tr("Next match")),
+        (&ctx.prev_btn, tr("Previous match (Ctrl+Shift+G, Shift+F3)")),
+        (&ctx.next_btn, tr("Next match (Ctrl+G, F3)")),
     ] {
         b.set_tooltip_text(Some(&tip));
         b.add_css_class("flat");
@@ -240,25 +240,81 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::Search
         }
     });
 
-    // Ctrl+F reveals and focuses. Capture phase, because the message
-    // input has focus and would otherwise see the key first.
+    // Keyboard: open, and step. Capture phase throughout, because the
+    // message input holds focus and would otherwise see the keys first.
     {
         let sc = gtk::ShortcutController::new();
         sc.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let b = bar.clone();
-        let entry = ctx.entry.clone();
-        let action = gtk::CallbackAction::new(move |_, _| {
-            b.set_search_mode(true);
-            entry.grab_focus();
-            glib::Propagation::Stop
-        });
-        let trigger = gtk::KeyvalTrigger::new(gdk::Key::f, gdk::ModifierType::CONTROL_MASK);
-        sc.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+
+        // Ctrl+F opens and focuses — and, when the bar is *already* open
+        // with a query and the entry focused, advances instead.
+        //
+        // That second case is the one people actually reach for: you hit
+        // Ctrl+F, type, then keep hitting Ctrl+F. Gating it on the entry
+        // already having focus is what keeps the ordinary "reopen and
+        // retype" flow intact — coming from the chat or the message box,
+        // Ctrl+F still selects the old query so typing replaces it.
+        {
+            let b = bar.clone();
+            let c = ctx.clone();
+            let action = gtk::CallbackAction::new(move |_, _| {
+                let reopening = !b.is_search_mode();
+                let advancing = !reopening
+                    && c.entry.has_focus()
+                    && !c.entry.text().is_empty();
+                if advancing {
+                    c.step(1);
+                } else {
+                    b.set_search_mode(true);
+                    c.entry.grab_focus();
+                    // grab_focus selects the whole query, so typing
+                    // replaces it — the reason not to advance here.
+                    c.entry.select_region(0, -1);
+                }
+                glib::Propagation::Stop
+            });
+            let trigger =
+                gtk::KeyvalTrigger::new(gdk::Key::f, gdk::ModifierType::CONTROL_MASK);
+            sc.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+        }
+
+        // The conventional next/prev accelerators, both families, since
+        // which one is muscle memory depends entirely on where someone
+        // came from: Ctrl+G / Ctrl+Shift+G (GNOME, macOS) and F3 /
+        // Shift+F3 (Windows, most editors). They cost two shortcuts each
+        // and save the user guessing.
+        //
+        // Unlike Ctrl+F these do nothing when the bar is closed: they are
+        // "again", and there is no again without a first time.
+        for (key, mods, dir) in [
+            (gdk::Key::g, gdk::ModifierType::CONTROL_MASK, 1),
+            (
+                gdk::Key::G,
+                gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK,
+                -1,
+            ),
+            (gdk::Key::F3, gdk::ModifierType::empty(), 1),
+            (gdk::Key::F3, gdk::ModifierType::SHIFT_MASK, -1),
+        ] {
+            let b = bar.clone();
+            let c = ctx.clone();
+            let action = gtk::CallbackAction::new(move |_, _| {
+                if !b.is_search_mode() || c.entry.text().is_empty() {
+                    return glib::Propagation::Proceed;
+                }
+                c.step(dir);
+                glib::Propagation::Stop
+            });
+            let trigger = gtk::KeyvalTrigger::new(key, mods);
+            sc.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
+        }
+
         capture.as_ref().add_controller(sc);
     }
     // Deliberately *not* set_key_capture_widget: news can do that
     // because its panel has no text input, but here a bare keystroke
-    // belongs to the message box. Ctrl+F is the only way in.
+    // belongs to the message box. The shortcuts above are the only way
+    // in.
 
     bar
 }

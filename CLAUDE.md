@@ -147,6 +147,13 @@ What's runnable and reasonably polished on this branch:
   private chat, private message, news, news15, files, users, tasks, tracker, preview,
   agreement, user editor, about. Settings is `AdwPreferencesDialog`; Connect, Open
   User, broadcast, and confirmation prompts are `AdwDialog` / `AdwAlertDialog`.
+- **Ctrl+U clears the focused text input, app-wide** — a `app.clear-input`
+  GAction in `toolbar.c` walking from `gtk_window_get_focus`, so it covers
+  `GtkTextView` (the chat input) and every `GtkEditable` (entries, search
+  bars, `AdwEntryRow`) without per-widget wiring, and keeps working for
+  whatever gets added next. `chat_input.rs` intercepts the key only to
+  guarantee it fires over a focused text view, then activates the same
+  action.
 - Toolbar uses `AdwSplitButton` for Connect-with-bookmark, `AdwBanner` for connection-
   loss notice with Reconnect, `AdwToastOverlay` for transient feedback. Hamburger menu
   via `GMenu` + `GAction` on the application.
