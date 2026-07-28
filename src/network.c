@@ -60,7 +60,6 @@
 #include "voice_model.h"
 #endif
 
-#include "login_packet.h"
 #include "hotline_proto.h"
 #include "hl_code.h"
 #include "proto_helpers.h"

@@ -28,7 +28,6 @@
 #include "hxconn_layout.h"
 #include "htlc_recv_buf.h"
 #include "proto_helpers.h"
-#include "login_packet.h"
 
 /* Variadic test wrapper: pack via hlpack and return the fresh buffer
  * (caller frees) plus its length. hlpack no longer has a per-connection
@@ -411,15 +410,12 @@ test_hlwrite_round_trip_stress (void)
 
 /* ---------- hlpack_chunks equivalence ----------
  *
- * hlpack_chunks (added so shared message builders like
- * src/login_packet.c::hx_login_build_chunks can pack from a
- * pre-assembled struct hx_chunk[] without each builder needing
- * its own variadic dispatch) must produce byte-for-byte identical
- * output to hlpack for the same chunk set. If a future tweak to
- * either function drifts from the other, the production binary
- * and the integration test harness would silently emit different
- * LOGIN packets — exactly the kind of test-vs-prod fork this
- * refactor is meant to prevent.
+ * hlpack_chunks (which lets a builder pack from a pre-assembled
+ * struct hx_chunk[] without its own variadic dispatch) must produce
+ * byte-for-byte identical output to hlpack for the same chunk set. If a
+ * future tweak to either function drifts from the other, two send paths
+ * that share the packers would silently emit different bytes — exactly
+ * the kind of fork this equivalence check is meant to prevent.
  */
 
 static void
@@ -626,217 +622,6 @@ test_hl_capabilities_decode_null_input (void)
     g_assert_cmphex (hl_capabilities_decode ((guint8 *) "x", 0), ==, 0);
 }
 
-/* ---------- HX_LOGIN_MODE_HOPE_STEP2 KAT ----------
- *
- * The HOPE Step 2 authenticated LOGIN packet used to be open-coded
- * twice — once in src/rcv.c::rcv_task_login, once in the harness
- * send_hope_step2. Both call sites now share login_packet.c via the
- * HX_LOGIN_MODE_HOPE_STEP2 builder. These KATs pin the chunk
- * ordering + content so any drift in the builder fails at unit-
- * test time, not against a live server.
- *
- * The HMAC-derived fields (LOGIN, PASSWORD, CIPHER_ALG, COMPRESS_ALG)
- * are passed in pre-computed — we just feed in known fixture bytes
- * and assert the chunk array hands them back in the production
- * order.
- */
-
-static void
-test_login_build_hope_step2_full (void)
-{
-    /* "Everything set" — both cipher and compress negotiated, NAME
-	 * present, caps set. This is the happy path the harness drives
-	 * against Janus and the integration tests against mhxd-HOPE. */
-    static const guint8 login_field[]  = {
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08
-    };
-    static const guint8 password_mac[] = {
-        0xa0, 0xa1, 0xa2, 0xa3, 0xa4, 0xa5, 0xa6, 0xa7,
-        0xa8, 0xa9, 0xaa, 0xab, 0xac, 0xad, 0xae, 0xaf,
-        0xb0, 0xb1, 0xb2, 0xb3, 0xb4, 0xb5, 0xb6, 0xb7,
-        0xb8, 0xb9, 0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf
-    };
-    /* "Cipher reply" stand-ins — actual bytes don't matter to the
-	 * builder; it just splices them in. */
-    static const guint8 cipher_reply[]   = { 0xc0, 0xc1, 0xc2 };
-    static const guint8 compress_reply[] = { 0xd0, 0xd1, 0xd2, 0xd3 };
-
-    const hx_login_request req = {
-        .mode             = HX_LOGIN_MODE_HOPE_STEP2,
-        .icon             = 412,
-        .display_name     = "Tier-2 KAT",
-        .client_version   = 185,
-        .caps             = 0x0013,           /* bits 0,1,4 */
-        .login_field      = login_field,
-        .login_field_len  = (guint16) sizeof (login_field),
-        .password_mac     = password_mac,
-        .password_mac_len = (guint16) sizeof (password_mac),
-        .cipher_alg_reply     = cipher_reply,
-        .cipher_alg_reply_len = (guint16) sizeof (cipher_reply),
-        .compress_alg_reply     = compress_reply,
-        .compress_alg_reply_len = (guint16) sizeof (compress_reply),
-    };
-
-    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
-    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
-                                    scratch, sizeof (scratch));
-
-    /* LOGIN, PASSWORD, CIPHER_ALG, COMPRESS_ALG, NAME, ICON,
-	 * CLIENTVERSION, CAPS = 8 chunks (with both cipher and compress
-	 * configured and client_version != 0). */
-    g_assert_cmpint (hc, ==, 8);
-
-    /* Verify order + content matches what production used to emit
-	 * inline. */
-    g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_LOGIN);
-    g_assert_cmpmem (chunks[0].data, chunks[0].len,
-                     login_field, sizeof (login_field));
-
-    g_assert_cmpuint (chunks[1].type, ==, HTLC_DATA_PASSWORD);
-    g_assert_cmpmem (chunks[1].data, chunks[1].len,
-                     password_mac, sizeof (password_mac));
-
-    g_assert_cmpuint (chunks[2].type, ==, HTLS_DATA_CIPHER_ALG);
-    g_assert_cmpmem (chunks[2].data, chunks[2].len,
-                     cipher_reply, sizeof (cipher_reply));
-
-    g_assert_cmpuint (chunks[3].type, ==, HTLS_DATA_COMPRESS_ALG);
-    g_assert_cmpmem (chunks[3].data, chunks[3].len,
-                     compress_reply, sizeof (compress_reply));
-
-    g_assert_cmpuint (chunks[4].type, ==, HTLC_DATA_NAME);
-    g_assert_cmpuint (chunks[4].len,  ==, strlen ("Tier-2 KAT"));
-    g_assert_cmpmem (chunks[4].data, chunks[4].len,
-                     "Tier-2 KAT", strlen ("Tier-2 KAT"));
-
-    g_assert_cmpuint (chunks[5].type, ==, HTLC_DATA_ICON);
-    g_assert_cmpuint (chunks[5].len,  ==, 2);
-    /* icon is encoded BE: 412 = 0x019C */
-    g_assert_cmphex (((guint8 *)chunks[5].data)[0], ==, 0x01);
-    g_assert_cmphex (((guint8 *)chunks[5].data)[1], ==, 0x9C);
-
-    g_assert_cmpuint (chunks[6].type, ==, HTLC_DATA_CLIENTVERSION);
-    g_assert_cmpuint (chunks[6].len,  ==, 2);
-    /* 185 = 0x00B9, big-endian */
-    g_assert_cmphex (((guint8 *)chunks[6].data)[0], ==, 0x00);
-    g_assert_cmphex (((guint8 *)chunks[6].data)[1], ==, 0xB9);
-
-    g_assert_cmpuint (chunks[7].type, ==, HTLC_DATA_CAPABILITIES);
-    g_assert_cmpuint (chunks[7].len,  ==, 2);
-    g_assert_cmphex (((guint8 *)chunks[7].data)[0], ==, 0x00);
-    g_assert_cmphex (((guint8 *)chunks[7].data)[1], ==, 0x13);
-}
-
-/* CLIENTVERSION gate: explicitly verifies the chunk is omitted
- * when client_version == 0 (legacy mode and STEP2 share the same
- * "0 means don't emit" convention). Pins the behaviour so a
- * future change can't silently always-emit; the gating preserves
- * the option of identifying as a pre-1.5 client when needed. */
-static void
-test_login_build_hope_step2_omits_clientversion_when_zero (void)
-{
-    static const guint8 login_field[]  = { 0x11, 0x22, 0x33, 0x44 };
-    static const guint8 password_mac[] = {
-        0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
-        0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44
-    };
-
-    const hx_login_request req = {
-        .mode             = HX_LOGIN_MODE_HOPE_STEP2,
-        .icon             = 1,
-        .display_name     = "no-clientver",
-        /* client_version = 0 by default */
-        .login_field      = login_field,
-        .login_field_len  = (guint16) sizeof (login_field),
-        .password_mac     = password_mac,
-        .password_mac_len = (guint16) sizeof (password_mac),
-    };
-
-    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
-    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
-                                    scratch, sizeof (scratch));
-    /* LOGIN, PASSWORD, NAME, ICON, CAPS = 5. No CLIENTVERSION
-	 * (gated off by client_version == 0), no CIPHER_ALG /
-	 * COMPRESS_ALG (not negotiated). */
-    g_assert_cmpint (hc, ==, 5);
-    for (int i = 0; i < hc; i++) {
-        g_assert_cmpuint (chunks[i].type, !=, HTLC_DATA_CLIENTVERSION);
-    }
-}
-
-static void
-test_login_build_hope_step2_no_cipher_no_compress (void)
-{
-    /* Neither cipher nor compress negotiated (zero-length reply
-	 * lists). The builder must skip both ALG chunks, leaving 5
-	 * total: LOGIN, PASSWORD, NAME, ICON, CAPS. This is what we'd
-	 * send against a HOPE-MAC-only server. */
-    static const guint8 login_field[]  = { 0x11, 0x22, 0x33, 0x44 };
-    static const guint8 password_mac[] = {
-        0x55, 0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc,
-        0xdd, 0xee, 0xff, 0x00, 0x11, 0x22, 0x33, 0x44
-    };
-
-    const hx_login_request req = {
-        .mode             = HX_LOGIN_MODE_HOPE_STEP2,
-        .icon             = 1,
-        .display_name     = "",         /* empty NAME still emits a chunk */
-        .caps             = 0,
-        .login_field      = login_field,
-        .login_field_len  = (guint16) sizeof (login_field),
-        .password_mac     = password_mac,
-        .password_mac_len = (guint16) sizeof (password_mac),
-        /* cipher_alg_reply_len + compress_alg_reply_len both 0 — no
-		 * negotiation. */
-    };
-
-    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
-    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
-                                    scratch, sizeof (scratch));
-    g_assert_cmpint (hc, ==, 5);
-
-    g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_LOGIN);
-    g_assert_cmpuint (chunks[1].type, ==, HTLC_DATA_PASSWORD);
-    g_assert_cmpuint (chunks[2].type, ==, HTLC_DATA_NAME);
-    g_assert_cmpuint (chunks[2].len,  ==, 0);
-    g_assert_cmpuint (chunks[3].type, ==, HTLC_DATA_ICON);
-    g_assert_cmpuint (chunks[4].type, ==, HTLC_DATA_CAPABILITIES);
-}
-
-static void
-test_login_build_hope_step2_empty_login_field (void)
-{
-    /* HX_LOGIN_MODE_HOPE_STEP2 must accept login_field_len=0 as a
-	 * legal anonymous-guest shape (the regression
-	 * 2cce1f9-fixed-by-2cce1f9). The LOGIN chunk emits with len=0. */
-    static const guint8 password_mac[] = {
-        0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe,
-        0xfe, 0xed, 0xfa, 0xce, 0xc0, 0xff, 0xee, 0x42
-    };
-
-    const hx_login_request req = {
-        .mode             = HX_LOGIN_MODE_HOPE_STEP2,
-        .icon             = 412,
-        .display_name     = NULL,
-        .caps             = HTLC_CAP_LARGE_FILES,
-        .login_field      = NULL,
-        .login_field_len  = 0,
-        .password_mac     = password_mac,
-        .password_mac_len = (guint16) sizeof (password_mac),
-    };
-
-    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
-    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
-                                    scratch, sizeof (scratch));
-    g_assert_cmpint (hc, ==, 5);
-    g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_LOGIN);
-    g_assert_cmpuint (chunks[0].len,  ==, 0);
-}
-
 int
 main (int argc, char **argv)
 {
@@ -885,14 +670,6 @@ main (int argc, char **argv)
     g_test_add_func ("/proto/hlwrite/hl_capabilities_decode/null_input",
                      test_hl_capabilities_decode_null_input);
 
-    g_test_add_func ("/proto/hlwrite/login_build_hope_step2/full",
-                     test_login_build_hope_step2_full);
-    g_test_add_func ("/proto/hlwrite/login_build_hope_step2/no_cipher_no_compress",
-                     test_login_build_hope_step2_no_cipher_no_compress);
-    g_test_add_func ("/proto/hlwrite/login_build_hope_step2/empty_login_field",
-                     test_login_build_hope_step2_empty_login_field);
-    g_test_add_func ("/proto/hlwrite/login_build_hope_step2/omits_clientversion_when_zero",
-                     test_login_build_hope_step2_omits_clientversion_when_zero);
 
     return g_test_run ();
 }

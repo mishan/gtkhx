@@ -390,6 +390,76 @@ pub unsafe extern "C" fn hxnet_frame_free(frame: *mut HxnetFrame) {
     f.body_len = 0;
 }
 
+/// `size_t hxnet_build_login_frame(login, login_len, password, password_len,
+/// name, name_len, icon, version, caps, trans, out, out_cap)` — build a
+/// plaintext (legacy) `HTLC_HDR_LOGIN` frame into `out[..out_cap]`, returning the
+/// frame length written (`0` on failure or a too-small buffer). Exposes the
+/// production [`crate::login::build_login_frame`] so the C integration-test
+/// harness can emit the same LOGIN packet production does (replaces the old
+/// `src/login_packet.c`). Per-field rules are the builder's: LOGIN always emitted
+/// (zero-length chunk when empty), PASSWORD omitted when empty, NAME / ICON /
+/// VERSION / CAPABILITIES each omitted when empty / zero.
+///
+/// # Safety
+/// Each `(ptr, len)` pair is NULL/0 or valid for `len` bytes; `out` is valid for
+/// `out_cap` writable bytes.
+#[no_mangle]
+pub unsafe extern "C" fn hxnet_build_login_frame(
+    login: *const u8,
+    login_len: usize,
+    password: *const u8,
+    password_len: usize,
+    name: *const u8,
+    name_len: usize,
+    icon: u16,
+    version: u16,
+    caps: u16,
+    trans: u32,
+    out: *mut u8,
+    out_cap: usize,
+) -> usize {
+    // A NULL pointer with a non-zero length would silently drop the field —
+    // a caller bug. Fail closed rather than treat it as empty.
+    if out.is_null()
+        || (login.is_null() && login_len != 0)
+        || (password.is_null() && password_len != 0)
+        || (name.is_null() && name_len != 0)
+    {
+        return 0;
+    }
+    let login_s: &[u8] = if login_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(login, login_len)
+    };
+    let password_s: &[u8] = if password_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(password, password_len)
+    };
+    let name_s: &[u8] = if name_len == 0 {
+        &[]
+    } else {
+        std::slice::from_raw_parts(name, name_len)
+    };
+    let req = crate::login::LoginRequest {
+        login: login_s,
+        password: password_s,
+        name: name_s,
+        icon,
+        version,
+        caps,
+        trans,
+    };
+    match crate::login::build_login_frame(&req) {
+        Ok(frame) if frame.len() <= out_cap => {
+            std::ptr::copy_nonoverlapping(frame.as_ptr(), out, frame.len());
+            frame.len()
+        }
+        _ => 0,
+    }
+}
+
 /// Non-blocking enqueue of a write command. See the
 /// `HXNET_SEND_*` constants for return codes.
 ///
@@ -979,8 +1049,8 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
     }
 
     // Empty credential / name slices land as Vec<u8>::new(). login.rs
-    // then applies the per-field rule (matching src/login_packet.c):
-    // LOGIN is always emitted (a zero-length chunk when empty), PASSWORD
+    // then applies the per-field rule (the legacy Hotline 1.x LOGIN wire
+    // shape): LOGIN is always emitted (a zero-length chunk when empty), PASSWORD
     // is omitted entirely when empty (guest login — NOT a zero-length
     // chunk), and NAME / ICON / VERSION / CAPABILITIES are each omitted
     // when empty / zero.

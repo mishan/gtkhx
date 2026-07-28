@@ -556,7 +556,7 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
      * side effect is the trans post-increment.
      *
      * Public-API guardrails: this function is the entry point for
-     * every shared chunk-array builder (login_packet, chat_history,
+     * every shared chunk-array builder (chat_history,
      * future modules) plus the integration harness, so a NULL htlc or
      * a chunks=NULL+hc>0 caller is a programming bug we want loud —
      * not a silent NULL deref. The per-chunk NULL-data + len>0

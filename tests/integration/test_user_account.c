@@ -72,7 +72,17 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "hl_code.h"
-#include "login_packet.h"
+#include "hxconn.h" /* hx_conn_trans_post_inc for the LOGIN frame's trans */
+
+/* hxnet/src/ffi.rs — build a plaintext LOGIN frame via the production Rust
+ * builder (was src/login_packet.c, now retired; production login is Rust). */
+extern size_t hxnet_build_login_frame (const guint8 *login, size_t login_len,
+                                       const guint8 *password,
+                                       size_t password_len, const guint8 *name,
+                                       size_t name_len, guint16 icon,
+                                       guint16 version, guint16 caps,
+                                       guint32 trans, guint8 *out,
+                                       size_t out_cap);
 #include "hl_access.h"
 #include "integration_harness.h"
 
@@ -87,32 +97,16 @@ admin_login (int fd, struct htlc_conn *htlc, const char *display_name,
              guint16 icon)
 {
 
-    const hx_login_request req = {
-        .mode = HX_LOGIN_MODE_LEGACY,
-        .icon = icon,
-        .login_name = "admin",
-        .password = NULL,
-        .display_name = display_name,
-        .client_version = 185,
-        .send_caps = 0,
-    };
-
-    struct hx_chunk chunks[HX_LOGIN_MAX_CHUNKS];
-    guint8 scratch[HX_LOGIN_SCRATCH_SIZE];
-    int hc = hx_login_build_chunks (&req, chunks, HX_LOGIN_MAX_CHUNKS,
-                                    scratch, sizeof (scratch));
-    if (hc <= 0) {
+    const char *dn = display_name ? display_name : "";
+    guint8 frame[512];
+    size_t flen = hxnet_build_login_frame (
+        (const guint8 *) "admin", 5, NULL, 0, (const guint8 *) dn, strlen (dn),
+        icon, /*version=*/185, /*caps=*/0, hx_conn_trans_post_inc (htlc), frame,
+        sizeof (frame));
+    if (flen == 0) {
         return FALSE;
     }
-    gsize len = 0;
-    guint8 *buf = hlpack_chunks (htlc, HTLC_HDR_LOGIN, 0, chunks, hc, &len);
-
-    if (!buf) {
-        return FALSE;
-    }
-    gboolean ok = integration_send (fd, buf, len);
-    g_free (buf);
-    return ok;
+    return integration_send (fd, frame, flen);
 }
 
 static int
