@@ -199,6 +199,7 @@ rust_sources = files(
   # Phase-3 consolidation: the five former model crates, one module each.
   # Phase-3 consolidation: the ten former send/recv crates, one module each.
   'crates/hxhandlers/src/lib.rs',
+  'crates/hxhandlers/src/xfer.rs',
   'crates/hxhandlers/src/recv.rs',
   'crates/hxhandlers/src/send.rs',
   'crates/hxhandlers/src/recv/agreement.rs',

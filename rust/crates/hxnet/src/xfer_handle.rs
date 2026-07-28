@@ -67,38 +67,42 @@ struct Qbuf {
 /// ref/cancel/total_pos ABI below (a faithful port of the old `g_atomic_int_*`).
 #[repr(C)]
 pub struct HtxfHandle {
-    data_size: u64,
-    data_pos: u64,
-    rsrc_size: u64,
-    rsrc_pos: u64,
-    total_size: u64,
+    pub data_size: u64,
+    pub data_pos: u64,
+    pub rsrc_size: u64,
+    pub rsrc_pos: u64,
+    pub total_size: u64,
     total_pos: AtomicU64,
-    srv_data_size: u64,
+    pub srv_data_size: u64,
     refcount: AtomicI32,
     canceled: AtomicI32,
-    ref_: u32,
+    // `pub` fields are the plain (non-atomic, non-lifecycle) ones the xfers
+    // shell (hxhandlers::xfer) reads/writes directly now that it's Rust — the
+    // atomics (total_pos / refcount / canceled) stay private, reached only
+    // through the `hx_htxf_*` methods below.
+    pub ref_: u32,
     gone: u8,
-    type_: u8,
-    queue: u32,
+    pub type_: u8,
+    pub queue: u32,
     fd: c_int,
     serverhost: [c_char; HOSTLEN],
     serverport: u16,
-    htlc: *mut c_void,
-    path: [c_char; MAXPATHLEN],
-    remotepath: [c_char; MAXPATHLEN],
-    remotedir: [c_char; MAXPATHLEN],
-    remotename: [c_char; REMOTENAME_LEN],
-    remotename_len: u16,
+    pub htlc: *mut c_void,
+    pub path: [c_char; MAXPATHLEN],
+    pub remotepath: [c_char; MAXPATHLEN],
+    pub remotedir: [c_char; MAXPATHLEN],
+    pub remotename: [c_char; REMOTENAME_LEN],
+    pub remotename_len: u16,
     in_: Qbuf,
     filter_argv: *mut *mut c_char,
     start: libc::timeval,
     /// The C anonymous `struct { guint32 retry:1, ... } opt` — 4 bytes of
     /// bitfields; held as a plain `u32`, the C side owns the bit semantics.
     opt: u32,
-    preview: *mut c_void,
+    pub preview: *mut c_void,
     aead_active: c_int,
-    hx: *mut c_void,
-    abort: *mut c_void,
+    pub hx: *mut c_void,
+    pub abort: *mut c_void,
 }
 
 /// A C-side destructor invoked by [`hx_htxf_unref`] on the last ref, before the

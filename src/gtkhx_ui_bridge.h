@@ -36,6 +36,9 @@ extern void gtkhx_session_set_agreementwin (struct _session *sess,
 struct htlc_conn;
 extern struct htlc_conn *gtkhx_active_htlc (void);
 
+/* gtkhx_prefs.queuedl (queue-downloads pref) for the Rust xfers shell. */
+extern int hx_prefs_queuedl (void);
+
 /* The chat window/panel widget of `htlc`'s session (NULL if none) — the Rust
  * chat-invitation dialog's transient parent, scoped to the session that
  * received the invite (not the active session). */

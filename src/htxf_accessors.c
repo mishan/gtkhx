@@ -10,25 +10,40 @@
 
 #include "hx.h"
 #include "htxf_accessors.h"
-#include "xfers.h" /* xfers[], nxfers */
 
-int
-hx_htxf_in_list (struct htxf_conn *htxf)
-{
-    int i;
-
-    for (i = 0; i < nxfers; i++) {
-        if (xfers[i] == htxf) {
-            return 1;
-        }
-    }
-    return 0;
-}
+/* hx_htxf_in_list moved to the Rust transfer registry (hxhandlers::xfer) with
+ * the xfers[] list in Y1. */
 
 int
 hx_htxf_opt_retry (const struct htxf_conn *htxf)
 {
     return htxf->opt.retry ? 1 : 0;
+}
+
+int
+hx_htxf_opt_folder (const struct htxf_conn *htxf)
+{
+    return htxf->opt.folder ? 1 : 0;
+}
+
+int
+hx_htxf_opt_large (const struct htxf_conn *htxf)
+{
+    return htxf->opt.large ? 1 : 0;
+}
+
+/* opt is a C bitfield, so its layout is the C compiler's — the Rust xfers shell
+ * reads/sets these bits through here rather than poking the u32 mirror. */
+void
+hx_htxf_set_opt_preview (struct htxf_conn *htxf, int v)
+{
+    htxf->opt.preview = v ? 1 : 0;
+}
+
+void
+hx_htxf_set_opt_folder (struct htxf_conn *htxf, int v)
+{
+    htxf->opt.folder = v ? 1 : 0;
 }
 
 int
