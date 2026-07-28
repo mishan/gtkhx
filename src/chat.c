@@ -844,6 +844,54 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
  * just hands the slices to xprintline_render. Multi-line bodies
  * render the first line with the nick column; subsequent lines
  * fall through as continuation. */
+/* Strip a repeated "<sender>:  " prefix off a continuation line.
+ *
+ * Hotline chat is a text stream, and servers format each line as
+ * "<padded nick>:  <text>". When a client sends a message containing
+ * newlines the server prefixes *every* line, so a five-line message
+ * comes back as:
+ *
+ *     misha:  first
+ *     misha:  second
+ *     misha:  third
+ *
+ * We parse the nick off the first line and render it in the gutter, but
+ * the continuation lines used to be appended verbatim — so a multi-line
+ * message displayed with the sender's name repeated down the left of its
+ * own body.
+ *
+ * The prefix is recognised with hx_chat_split_nick_body, the same
+ * function that produced the event's sender in the first place, so what
+ * gets stripped is by construction what would have been parsed. Only an
+ * exact match on the same sender is stripped: a different name means a
+ * different speaker and belongs on screen.
+ *
+ * A continuation line the user deliberately began with their own
+ * "name: " loses that text. That is a real if vanishingly rare cost, and
+ * the alternative — leaving the prefix on every line — is wrong far more
+ * often. */
+static void
+chat_strip_repeat_sender (const char *seg, gsize seg_len, const char *sender,
+                          gsize sender_len, const char **out, gsize *out_len)
+{
+    gsize so, sl, bo, bl;
+
+    *out = seg;
+    *out_len = seg_len;
+
+    if (sender_len == 0 || seg_len == 0) {
+        return;
+    }
+    if (!hx_chat_split_nick_body (seg, seg_len, &so, &sl, &bo, &bl)) {
+        return;
+    }
+    if (sl != sender_len || memcmp (seg + so, sender, sender_len) != 0) {
+        return;
+    }
+    *out = seg + bo;
+    *out_len = bl;
+}
+
 void
 output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 {
@@ -915,7 +963,15 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             const char *next_nl = memchr (cur, '\n', end - cur);
             gsize seg_len
                 = next_nl ? (gsize)(next_nl - cur) : (gsize)(end - cur);
-            hx_chat_view_append (gchat->output, cur, seg_len, 0);
+            const char *seg;
+            gsize out_len;
+
+            /* The server re-prefixes every line of a multi-line
+			 * message with the sender's nick; drop the repeat so the
+			 * body reads as one message. */
+            chat_strip_repeat_sender (cur, seg_len, e->line + e->sender_off,
+                                      e->sender_len, &seg, &out_len);
+            hx_chat_view_append (gchat->output, seg, out_len, 0);
             if (!next_nl) {
                 break;
             }
