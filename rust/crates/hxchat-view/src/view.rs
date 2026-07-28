@@ -687,8 +687,6 @@ impl HxChatView {
         draw_layout.set_font_description(Some(&font));
 
         let selection = *imp.selection.borrow();
-        let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
-        let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let show_stamp = imp.time_stamp.get();
         let stamp_format = imp.stamp_format.borrow().clone();
         let muted = self.imp_().palette.borrow()[PAL_HISTORY_MUTED];
@@ -780,50 +778,24 @@ impl HxChatView {
                 // has its own opinion about where it goes.
                 let x = line.x as f32;
 
-                // Selection band behind the text, then the text with
-                // the selected span forced to the mark colours. Drawing
-                // the highlight as a separate node under an unmodified
-                // run is what keeps selection independent of the
-                // message's own colours.
+                // What of this line is selected. Resolved by the buffer,
+                // the same call `selected_text` uses, so what is painted
+                // and what gets copied cannot drift apart.
                 let row_sel = selection
                     .as_ref()
                     .map(|s| buf.row_selection(row, s))
                     .unwrap_or(RowSelection::None);
-                // Resolved by the buffer, not re-derived here: one
-                // implementation for what is highlighted and what gets
-                // copied, so the two cannot drift apart.
                 let hl = buf
                     .covered_range(row, line.source, &row_sel)
                     .and_then(|r| {
                         let s = r.start.max(line.range.start);
                         let e = r.end.min(line.range.end);
-                        if s < e { Some((s, e)) } else { None }
+                        if s < e {
+                            Some((s, e))
+                        } else {
+                            None
+                        }
                     });
-                if let Some((hs, he)) = hl {
-                    let pre = slice.get(..hs.saturating_sub(line.range.start)).unwrap_or("");
-                    let mid = slice
-                        .get(
-                            hs.saturating_sub(line.range.start)
-                                ..he.saturating_sub(line.range.start),
-                        )
-                        .unwrap_or("");
-                    draw_layout.set_attributes(None);
-                    draw_layout.set_text(pre);
-                    let (pre_w, _) = draw_layout.pixel_size();
-                    draw_layout.set_text(mid);
-                    let (mid_w, mid_h) = draw_layout.pixel_size();
-                    if mid_w > 0 {
-                        snapshot.append_color(
-                            &mark_bg,
-                            &gtk4::graphene::Rect::new(
-                                x + pre_w as f32,
-                                y as f32,
-                                mid_w as f32,
-                                mid_h as f32,
-                            ),
-                        );
-                    }
-                }
 
                 self.draw_runs(
                     snapshot,
@@ -831,32 +803,10 @@ impl HxChatView {
                     slice,
                     line.range.start,
                     spans,
+                    hl,
                     x,
                     y as f32,
                 );
-
-                // Repaint just the selected glyphs in the mark
-                // foreground, so selected text stays legible against the
-                // highlight regardless of its own colour.
-                if let Some((hs, he)) = hl {
-                    let rel_s = hs.saturating_sub(line.range.start);
-                    let rel_e = he.saturating_sub(line.range.start);
-                    let pre = slice.get(..rel_s).unwrap_or("");
-                    let mid = slice.get(rel_s..rel_e).unwrap_or("");
-                    if !mid.is_empty() {
-                        draw_layout.set_attributes(None);
-                        draw_layout.set_text(pre);
-                        let (pre_w, _) = draw_layout.pixel_size();
-                        draw_layout.set_text(mid);
-                        snapshot.save();
-                        snapshot.translate(&gtk4::graphene::Point::new(
-                            x + pre_w as f32,
-                            y as f32,
-                        ));
-                        snapshot.append_layout(&draw_layout, &mark_fg);
-                        snapshot.restore();
-                    }
-                }
             }
         }
 
@@ -865,6 +815,22 @@ impl HxChatView {
 
     /// Draw one visual line as a sequence of styled runs.
     #[allow(clippy::too_many_arguments)]
+    /// Draw one visual line as styled runs, highlighting `hl`.
+    ///
+    /// **The selection is drawn here, inside the same walk that draws
+    /// the glyphs.** The first version measured the highlight with the
+    /// shared layout after `set_attributes(None)` and then drew the text
+    /// with per-span attributes — so wherever a style changed the
+    /// metrics (bold, and monospace `code` especially) the highlight
+    /// rectangle drifted away from the glyphs it was supposed to be
+    /// under.
+    ///
+    /// Splitting each style run at the selection boundaries makes every
+    /// emitted piece uniform in *both* style and selectedness, so its
+    /// width is measured with exactly the attributes it is rendered
+    /// with. Geometry agreement is structural rather than something to
+    /// keep in sync.
+    #[allow(clippy::too_many_arguments)]
     fn draw_runs(
         &self,
         snapshot: &gtk4::Snapshot,
@@ -872,6 +838,7 @@ impl HxChatView {
         slice: &str,
         slice_start: usize,
         spans: &[hxchat_layout::Span],
+        hl: Option<(usize, usize)>,
         x0: f32,
         y: f32,
     ) {
@@ -879,25 +846,65 @@ impl HxChatView {
         let mut cursor = 0usize;
         let end = slice.len();
 
-        let emit = |text: &str, style: Style, x: &mut f32| {
+        // Selection bounds in slice-local coordinates.
+        let (hs, he) = match hl {
+            Some((a, b)) => (
+                a.saturating_sub(slice_start).min(end),
+                b.saturating_sub(slice_start).min(end),
+            ),
+            None => (0, 0),
+        };
+        let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
+        let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
+
+        let emit = |text: &str, style: Style, selected: bool, x: &mut f32| {
             if text.is_empty() {
                 return;
             }
-            // Reset the shared layout rather than allocating one.
             layout.set_attributes(Some(&PangoMeasure::attrs_for(style)));
             layout.set_text(text);
             let (w, h) = layout.pixel_size();
-            if style.bg != ColorRef::Default {
+
+            if selected {
+                snapshot.append_color(
+                    &mark_bg,
+                    &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
+                );
+            } else if style.bg != ColorRef::Default {
                 snapshot.append_color(
                     &self.resolve(style.bg, PAL_BG),
                     &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
                 );
             }
+
+            let fg = if selected {
+                mark_fg
+            } else {
+                self.resolve(style.fg, PAL_FG)
+            };
             snapshot.save();
             snapshot.translate(&gtk4::graphene::Point::new(*x, y));
-            snapshot.append_layout(layout, &self.resolve(style.fg, PAL_FG));
+            snapshot.append_layout(layout, &fg);
             snapshot.restore();
             *x += w as f32;
+        };
+
+        // Emit `range` of the slice under one style, split at the
+        // selection boundaries so each piece is uniformly selected or
+        // not.
+        let emit_split = |from: usize, to: usize, style: Style, x: &mut f32| {
+            if from >= to {
+                return;
+            }
+            let sel_from = hs.max(from);
+            let sel_to = he.min(to);
+            if sel_from >= sel_to {
+                emit(&slice[from..to], style, false, x);
+                return;
+            }
+            emit(&slice[from..sel_from], style, false, x);
+            emit(&slice[sel_from..sel_to], style, true, x);
+            emit(&slice[sel_to..to], style, false, x);
         };
 
         for s in spans {
@@ -910,17 +917,11 @@ impl HxChatView {
             }
             let ss = ss.max(cursor).min(end);
             let se = se.min(end);
-            if ss > cursor {
-                emit(&slice[cursor..ss], Style::default(), &mut x);
-            }
-            if se > ss {
-                emit(&slice[ss..se], s.style, &mut x);
-            }
+            emit_split(cursor, ss, Style::default(), &mut x);
+            emit_split(ss, se, s.style, &mut x);
             cursor = se;
         }
-        if cursor < end {
-            emit(&slice[cursor..], Style::default(), &mut x);
-        }
+        emit_split(cursor, end, Style::default(), &mut x);
     }
 }
 
