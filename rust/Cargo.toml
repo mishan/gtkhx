@@ -23,6 +23,7 @@ members = [
     # backend through the TextMeasure trait. Nothing links it yet: the
     # consumer is hxchat-view in C2. See docs/chat-view-scoping.md.
     "crates/hxchat-layout",
+    "crates/hxchat-view",
     "crates/hxvoice",
     "crates/hxvoice-model",
     "crates/hxvoice-send",

@@ -346,6 +346,41 @@ impl ChatBuffer {
             return;
         }
         self.params.word_wrap = on;
+        self.invalidate_layout();
+    }
+
+    /// Two-column mode.
+    pub fn set_indent(&mut self, on: bool) {
+        if on == self.params.indent {
+            return;
+        }
+        self.params.indent = on;
+        self.indent_width = 0;
+        self.invalidate_layout();
+    }
+
+    /// Cap on the gutter width.
+    pub fn set_max_indent(&mut self, px: u32) {
+        if px == self.params.max_indent {
+            return;
+        }
+        self.params.max_indent = px;
+        self.indent_width = self.indent_width.min(px);
+        self.invalidate_layout();
+    }
+
+    /// Drop every cached layout, keeping heights as estimates.
+    ///
+    /// The generation key can't express "the params changed" — it tracks
+    /// width, font, theme and zoom, and a geometry knob like indent mode
+    /// is none of those. Rather than widen the key for two setters that
+    /// fire once at construction, clear the caches directly. Heights
+    /// survive as estimates, so this is still O(1) work now and
+    /// O(visible) on the next draw.
+    fn invalidate_layout(&mut self) {
+        for r in &mut self.rows {
+            r.layout = None;
+        }
         self.index.invalidate_all_measurements();
     }
 

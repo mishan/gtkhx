@@ -87,4 +87,4 @@ pub use message::{
     Speaker,
 };
 pub use span::{Attrs, ColorRef, Link, LinkId, ParsedText, Span, Style};
-pub use wrap::{LayoutCache, LayoutGeneration, LayoutParams, LineBox};
+pub use wrap::{LayoutCache, LayoutGeneration, LayoutParams, LineBox, LineSource};

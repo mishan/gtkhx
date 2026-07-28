@@ -45,6 +45,9 @@ hx-image-decode = { path = "../hx-image-decode" }
 hxmacres = { path = "../hxmacres" }
 hxsound = { path = "../hxsound" }
 hxtext = { path = "../hxtext" }
+# chat-view C2: the GTK4 chat widget. Exports the hx_chat_view_impl_*
+# symbols src/chat_view.c dispatches to.
+hxchat-view = { path = "../hxchat-view" }
 hxtls-trust = { path = "../hxtls-trust" }
 
 # --- voice (gated by -Dvoice, see rust/meson.build) ---
