@@ -1,5 +1,5 @@
 //! Synchronous HTXF (file-transfer) subchannel transport — H2 of the
-//! HTXF→Rust migration (`docs/rust/htxf-migration-scoping.md`).
+//! HTXF→Rust migration (`docs/rust/ROADMAP.md`).
 //!
 //! A file transfer runs on its own short-lived TCP connection to the
 //! server, driven by a **blocking** C pthread worker (`xfers.c`,
@@ -394,7 +394,7 @@ impl HtxfInner {
 
 /// Thread-safe cancellation token for one HTXF subchannel — the
 /// foundation for cooperative transfer cancel (Phase R3 X1,
-/// `docs/rust/xfers-tokio-scoping.md`).
+/// `docs/rust/ROADMAP.md`).
 ///
 /// Lifecycle: created on the **main thread** before the transfer worker
 /// starts (`hxnet_htxf_abort_new`); armed with the channel's socket once

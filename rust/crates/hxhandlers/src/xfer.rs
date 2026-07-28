@@ -1,5 +1,5 @@
 //! The file-transfer **registry** — the `xfers[]` list (ported from `xfers.c`),
-//! Part of the xfers.c → Rust migration (`docs/rust/xfers-to-rust-scoping.md`).
+//! Part of the xfers.c → Rust migration (`docs/rust/ROADMAP.md`).
 //!
 //! The transfer byte-loops (`hxnet::xfer`) and the `struct htxf_conn` storage +
 //! refcount/cancel lifecycle (`hxnet::xfer_handle`) are already Rust; this owns

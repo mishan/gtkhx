@@ -629,8 +629,8 @@ where the concurrency motivation pays off.
    worker→main marshalling that remained (xfers progress) moved to
    `gtkhx_bridge_post_to_main` / `g_idle_add`. No `pthread_create` or
    `gtkthreads.c` remains outside vendored `xtext`.
-4. ✅ **`xfers.c` → tokio tasks.** *(Shipped — phases X1–X5, scoped in
-   `docs/rust/xfers-tokio-scoping.md`.)* The per-transfer pthread worker
+4. ✅ **`xfers.c` → tokio tasks.** *(Shipped — phases X1–X5; see the
+   "Files & file-transfer subsystem → Rust" section below.)* The per-transfer pthread worker
    (the last `pthread_create` in the tree; folder transfers ride it too) is
    now a tokio blocking-pool task spawned via
    `gtkhx_bridge_spawn_blocking_with_idle`, with cooperative cancellation:
@@ -829,61 +829,127 @@ URL-mode → reqwest, tracker fetch → hxnet) can land independently. The
 `MAX_CONN > 1` half-built abstraction can finally be abstracted properly
 because a connection is a struct in Rust, not a global.
 
-### File-transfer path → Rust (xfer-worker migration) ✅
+### Files & file-transfer subsystem → Rust ✅
 
-**Status: complete.** After R3 item 4 moved the transfer *worker thread* to a
-tokio blocking task, a follow-on migration (W1–W3 + S0 + S1) moved the transfer
-*logic*, the FFO/FILP codec, the HFS fork I/O, the `struct htxf_conn` storage +
-cross-thread lifecycle, and the last C shims into the `hxnet` crate. The HTXF
-file-transfer path is now Rust end-to-end; the C side (`xfers.c`) is a thin GTK
-worker shell that hands everything in by value — `hxnet` is a leaf crate and
-references no C symbols.
+**Status: complete.** The whole files/transfer stack moved to Rust across a chain
+of interrelated efforts. Deleted C files: `xfers.c`, `xfers_recv.c`,
+`xfers_send.c`, `htxf_io.c`, `htxf_subchannel.c`, `hfs.c`, `gtkthreads.c`,
+`filelist_walker.c`, `cipher_aead.c`. The HTXF file-transfer path is Rust
+end-to-end; the C side keeps only the files-browser widgets (view), the
+GIO/GObject provider shells, and a thin `htxf_accessors.c` field seam. This
+section folds the former `xfers-to-rust`, `xfers-tokio`, `htxf-migration`,
+`files-migration`, and `hfs-crate` scoping docs.
 
-| Slice | Status | What moved |
+The crates/modules, leaf-up:
+
+| Crate / module | Owns | Replaced |
 |---|---|---|
-| **W1** | ✅ | Single-file **download** loop → `hxnet::xfer::hxnet_xfer_file_recv_one` (was `xfers_recv.c::file_recv_one`). Driver hands scalars + callbacks in via `#[repr(C)] HxnetXferParams`. |
-| **W2** | ✅ | Single-file **upload** loop → `hxnet_xfer_file_send_one` (was `xfers_send.c::file_send_one`). FILP header packed from a fixed template; forks read via `hxhfs`. |
-| **W3** | ✅ | **Folder** mini-protocol → `hxnet_xfer_folder_{recv,send}_all` (was `folder_{recv,send}_all`): FILE_NEXT/FILE_SEND/FILE_RESUME state machine + DFS tree walk + RFLT resume + per-file size accounting, delegating per file to W1/W2. Path build bounded to MAXPATHLEN; nfi/size fields overflow-checked. `xfers_recv.c` / `xfers_send.c` deleted. |
-| **S0** | ✅ | `struct htxf_conn` storage + lifecycle → `hxnet::xfer_handle` (`hx_htxf_*` ABI): a `#[repr(C)]` mirror (C keeps direct field access, layout pinned at runtime by `test_htxf_layout`), atomic `refcount`/`canceled`/`total_pos`, the `HtxfAbort` token created/freed here, and a C-registered last-unref destructor. `hx_htxf_new/_ref/_unref` replace `g_malloc0`/`g_atomic`/`g_free`. |
-| **S1** | ✅ | Deleted the last C shims: the HTXF preamble packer moved to `hotline-proto::build_htxf_preamble` (via `hxnet_htxf_pack_preamble`), retiring `htxf_subchannel.c`; the `htxf_io_*` read/write/close/abort wrappers collapsed into direct `hxnet_htxf_*` calls (token-only cancellation), retiring `htxf_io.c` (its FFI decls live in `hxnet_htxf.h`). |
+| `hxhfs` | HFS metadata sidecar (CAP / AppleDouble / Netatalk): type/creator, Finder-info, resource fork, comment; byte-exact sidecars | `hfs.c` |
+| `hxfiles-xfer` (`ffo`) | FFO fork-header + FILP info-block codec (legacy + large-file split, 1904↔2000 wire epoch), unit-tested headless | the fiddly byte math in `xfers.c` |
+| `hxnet::htxf` | HTXF subchannel transport: connect, preamble pack, AEAD/TLS framing, the `HtxfAbort` cancel token | `htxf_io.c`, `htxf_subchannel.c` |
+| `hxnet::xfer` | the recv/send/folder byte loops (`hxnet_xfer_file_recv_one`/`_send_one`/`folder_{recv,send}_all`) | `xfers_recv.c`, `xfers_send.c` |
+| `hxnet::xfer_handle` | `struct htxf_conn` storage + refcount/cancel lifecycle (the `hx_htxf_*` ABI) | the `htxf_conn` alloc/lifecycle in `xfers.c` |
+| `hxhandlers::xfer` | the worker **shell**: `xfers[]` registry, worker/completion dispatch, `xfer_go` wire build, construction, the last-ref destructor | the rest of `xfers.c` |
+| `hxfiles-model` / `hxfiles-entry` | file-entry model + icon/label tables, remote-listing path nav, the `HxFileEntry` GObject, FILE_LIST populate/decode | `filelist_walker.c` + the model half of `files_entry.c` / `files_remote_provider.c` |
 
-Cancellation rides the `HtxfAbort` token (`hxnet_htxf_abort_*`): `xfer_delete` /
-`xfers_delete_all` abort it, shutting the subchannel socket so a parked
-`hxnet_htxf_read` returns `-1`. `hxnet_htxf_abort_arm` publishes the token into
-the handle unconditionally (best-effort socket-arm on top), so a cancel is still
-observed via `hxnet_htxf_read`'s `is_aborted()` pre-check even when the socket
-can't be duplicated — the token being the *sole* cancellation mechanism, never
-leaving the handle unarmed is what keeps a transfer cancellable. Covered by
-`test_htxf_cancel` (ASan), `test_htxf_layout`, the `hxnet` crate's loopback
-round-trip tests, and the Tier-3 `file_get` / `file_put` / `folder_roundtrip` /
-`banner` matrix.
+**HFS sidecar → `hxhfs`.** `hfs.c`'s CAP / AppleDouble(v2) / Netatalk(v1) sidecar
+reader/writer (resource fork + Finder info: type/creator, dates, comment) is a
+standalone crate: idiomatic `&Path`/`io::Result` native API for the Rust xfer
+loops, plus a `#[no_mangle]` shim preserving the exact `hfs.h` ABI (a `#[repr(C)]`
+`struct hfsinfo` mirror pinned by `const _: () = assert!(size_of == 224)`).
+On-disk bytes are a hard wire-compat requirement (netatalk + real Hotline clients
+read the same files), pinned by golden-byte + round-trip tests. `resource_open`
+never implicitly truncates (a resumed transfer can open + seek), and the FFI
+normalizes every "no resource fork" outcome to `-1` (dropping `hfs.c`'s
+AppleDouble "return stdin fd on open failure" quirk).
 
-Design decisions worth keeping (these folded in the former `s0-`/`s1-` scoping
-docs):
+**HTXF subchannel transport → `hxnet::htxf`, worker on tokio.** The crypto was
+*already* Rust (`hxcrypto-aead`; HTXF only ever arms ChaCha20-Poly1305 AEAD, no
+Blowfish), so this was transport glue, not a crypto port. The connect + preamble
++ AEAD/TLS byte-pump moved into `hxnet::htxf`, giving the subchannel the same
+rustls path the control channel uses and deleting the `cipher_aead.c` shim. The
+transfer worker moved off its `pthread` onto the **tokio blocking pool** via
+`gtkhx_bridge_spawn_blocking_with_idle` (the `banner.c` pattern) — retiring the
+last `pthread_create` and `gtkthreads.c`. Mid-transfer progress marshals through
+`gtkhx_bridge_post_to_main`; terminal cleanup rides the bridge's completion
+callback.
 
-- **S0 refcount stays intrusive-atomic, not `Arc` across FFI.** The "N pending
-  idles each hold a ref" pattern maps badly onto `Arc<T>` over the C boundary
-  (every `post_*` site would hand-roll `into_raw`/`from_raw`), so the handle
-  keeps an intrusive `refcount: AtomicI32` behind `hx_htxf_ref`/`_unref` — a 1:1
-  port of the old `g_atomic_int_inc`/`_dec_and_test`, allocation + free moved to
-  Rust. Revisit `Arc` only once C no longer touches the struct's fields.
-- **S0 is a `#[repr(C)]` mirror, not a full opaque type.** ~9 C files read
-  `htxf->…` scalars directly; opaque-ifying all of them buys no lifecycle safety
-  for large churn, so only the three lifecycle fields (`refcount` / `canceled` /
-  `total_pos`) moved behind accessors. The layout is pinned at runtime by
-  `test_htxf_layout` (chosen over `_Static_assert` because `MAXPATHLEN` makes a
-  hard-coded size fragile) — it immediately caught that `compat.h` clamps
-  `MAXPATHLEN` to a fixed 4095, not the host `PATH_MAX`.
-- **S1 is token-only cancellation.** The deleted `htxf_io.c` shim's canceled-flag
-  pre-check + ECANCELED-vs-EIO reclassification was dead in production (only
-  `banner.c` read through it and it never cancels; no production writers; the
-  Rust xfer loops read `hxnet_htxf_read` directly and cancel via the token), so
-  it was dropped rather than ported.
-- **S1 left `hxnet_htxf_connect`'s signature unchanged.** The preamble packer
-  became a *separate* `hxnet_htxf_pack_preamble` (over
-  `hotline-proto::build_htxf_preamble`) rather than folding the pack into
-  `connect`, so `connect`'s no-preamble passthrough path (used by
-  `test_htxf_cancel`) keeps working.
+**Cancellation** became cooperative (blocking-pool tasks can't be force-cancelled
+like `pthread_cancel`): it rides the `HtxfAbort` token (`hxnet_htxf_abort_*`).
+`xfer_delete` / `xfers_delete_all` abort it, shutting the subchannel socket so a
+parked `hxnet_htxf_read` returns `-1`. `hxnet_htxf_abort_arm` publishes the token
+into the handle *unconditionally* (best-effort socket-arm on top), so a cancel is
+still observed via `hxnet_htxf_read`'s `is_aborted()` pre-check even when the
+socket can't be duplicated — the token being the *sole* mechanism, never leaving
+the handle unarmed is what keeps a transfer cancellable.
+
+**Byte loops → `hxnet::xfer` (W1–W3).** Single-file download
+(`hxnet_xfer_file_recv_one`) and upload (`_file_send_one`), then the folder
+mini-protocol (`_folder_{recv,send}_all`: the FILE_NEXT/FILE_SEND/FILE_RESUME
+state machine + DFS tree walk + RFLT resume + per-file size accounting,
+delegating per file to the single-file loops). The C driver hands scalars +
+callbacks in by value through `#[repr(C)] HxnetXferParams`/`HxnetFolderParams`, so
+`hxnet` stays a leaf crate referencing no C symbols. A latent bug fixed en route:
+`folder_send_all` excluded the 16-byte MACR marker from its per-file size, which
+desynced multi-file folder uploads (never caught before — folder upload had never
+run end-to-end).
+
+**`struct htxf_conn` storage/lifecycle → `hxnet::xfer_handle` (S0).** A
+`#[repr(C)]` mirror (C keeps direct field access, layout pinned at runtime by
+`test_htxf_layout`), atomic `refcount`/`canceled`/`total_pos`, the `HtxfAbort`
+token, and a registered last-unref destructor. `hx_htxf_new/_ref/_unref` replace
+`g_malloc0`/`g_atomic`/`g_free`. Key calls kept: the refcount stays
+intrusive-atomic (not `Arc` across FFI — the "N pending idles each hold a ref"
+pattern maps badly onto `Arc` over the boundary); only the three lifecycle fields
+moved behind accessors, not a full opaque type (~9 C files read `htxf->…` scalars
+directly). `test_htxf_layout` immediately caught that `compat.h` clamps
+`MAXPATHLEN` to a fixed 4095, not the host `PATH_MAX`.
+
+**Worker shell → `hxhandlers::xfer` (Y1–Y5).** The remaining `xfers.c` shell moved
+into the crate that already owned the transfer *receive* handlers (`recv/xfer.rs`),
+turning those C-ABI calls into native ones. Y1 registry (`xfers[]` → a
+`thread_local Vec<*mut HtxfHandle>`, main-thread-only so no locking); Y2
+construction + progress/completion marshaling (the completion cleanup runs at
+`G_PRIORITY_DEFAULT_IDLE`, *below* the file-update idles — a load-bearing ordering
+the completion-hang fix depended on); Y3 worker dispatch + params; Y4 `xfer_go`
+wire build (native `hotline_proto::build` + `ClientHdr` opcodes + native
+`hxtask::task_new`/`hlwrite_chunks`); Y5 the last-ref destructor + `xfers.c`
+deletion. Field access is native through `hxnet`'s `HtxfHandle` (the plain fields
+are `pub`; atomics stay behind `hx_htxf_*`) rather than a Rust→C-ABI→Rust bounce.
+Y4 also fixed hxtask's stale 3-arg `RcvTaskFn` alias (the real dispatch is 5-arg)
+and a malformed download-resume `RFLT` record — a C string-literal indentation leak
+had shoved the RFLT magic to `[26]` and the fork tags past byte 74; mhxd reads the
+offsets at fixed `[46]`/`[62]` so resume still worked against it, but the rebuilt
+`build_resume_rflt` is well-formed for spec-strict servers (guarded by a layout
+unit test + a Tier-3 `file_resume` test).
+
+**Files-browser model → `hxfiles-model` / `hxfiles-entry` (F1–F4).** The pure
+helpers (file-type→icon id, FourCC→label), the remote-listing path-navigation
+model (`RemoteListing`: current path, error flag, parent/child math), the
+`HxFileEntry` row GObject (a `glib::subclass` type exporting the old
+`hx_file_entry_*` ABI), and the FILE_LIST populate/decode
+(`gtkhx_files_populate_from_reply`: parse + Mac Roman name decode + icon/kind +
+append to a `gio::ListStore`) all moved to Rust, retiring `filelist_walker.c`. The
+store stays `GListStore` (a files listing is clear-and-rebuild, so a bespoke
+`gio::ListModel` would be redundant); the size/date formatters stay C (thin GLib
+i18n wrappers whose value is GLib's locale handling). The browser widgets, both
+provider shells, and the local GIO provider stay C — the standing view=C,
+model/IO=Rust boundary.
+
+**Non-goal recorded:** nothing beyond the `hxnet::xfer` state machine was pushed
+further into Rust — the GETFOLDER/PUTFOLDER framing lives there and was not
+re-expressed as a higher-level Rust worker (H3/F-stretch — large, high
+behavior-risk, no transport payoff). (The Mac resource-fork parser + colour-icon
+renderer, once listed here as a future port, are already Rust in the `hxmacres`
+crate — a separate, non-transfer effort.)
+
+Test net across the whole subsystem: `cargo test` for `hxhfs` (golden-byte +
+round-trip), `hxfiles-xfer` (FFO codec), `hxfiles-model`/`-entry` (tables + nav +
+headless populate), `hxnet` (loopback round-trips + the refcount/destructor
+lifecycle), `hxhandlers` (registry + resume-RFLT layout); `test_htxf_cancel` /
+`test_htxf_layout` / `test_large_file` (unit, ASan); and the Tier-3 `file_get` /
+`file_put` / `file_resume` / `folder_get` / `folder_put` / `folder_roundtrip` /
+`file_list` / `file_info` / `real_htxf_connect` / `banner` matrix vs mhxd + Janus.
 
 ---
 
