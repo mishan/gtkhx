@@ -337,21 +337,13 @@ hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
     return FALSE;
 }
 
-typedef struct _GtkhxSession GtkhxSession;
-GtkhxSession *gtkhx_session_get_default (void);
-GtkhxSession *
-gtkhx_session_get_default (void)
-{
-    return NULL;
-}
-void gtkhx_session_emit_connection_state (GtkhxSession *self, int state);
-void
-gtkhx_session_emit_connection_state (GtkhxSession *self, int state)
-{
-    (void) self;
-    (void) state;
-    g_assert_not_reached ();
-}
+/* gtkhx_session_get_default + gtkhx_session_emit_connection_state (called only
+ * from hxnet_bridge.c's bridge_on_state_cb, which this Tier 1 test never drives)
+ * resolve against the real gtkhx-core symbols this target already links for
+ * hx_conn_*. They are NOT stubbed here: a local stub is a second strong
+ * definition of a symbol libgtkhx_core also exports, which the release-profile
+ * codegen layout packs into an object this target pulls (for hx_conn_fd) —
+ * yielding a multiple-definition link error. One definition, from the library. */
 
 /* Round-trip a single (type, trans, flag, hc, body_len) tuple
  * through pack_header → hl_hdr_decode and assert the fields
