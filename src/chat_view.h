@@ -224,6 +224,14 @@ typedef struct {
 typedef struct {
     guint16 uid;      /* 0 = unknown */
     const char *nick; /* borrowed for the call; may be NULL */
+    /* Length of `nick` in bytes, or -1 when it is NUL-terminated.
+     *
+     * Explicit because the chat paths hand over a slice *into the middle
+     * of the received line* — the sender's name is bytes
+     * [sender_off, sender_off+sender_len) of "misha:  hello". Reading
+     * that as a C string would swallow the colon, the body, and
+     * everything after it. */
+    int nick_len;
     /* Direction: did this row originate here, or arrive from the
      * server? It breaks message grouping independently of identity.
      *
@@ -240,7 +248,7 @@ typedef struct {
     gboolean outgoing;
 } HxChatSpeaker;
 
-#define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL, FALSE })
+#define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL, -1, FALSE })
 
 /* Append a row built from runs. `gutter` may be NULL/0 for a row with
  * no nick column; `speaker` names who said it (HX_CHAT_SPEAKER_NONE for

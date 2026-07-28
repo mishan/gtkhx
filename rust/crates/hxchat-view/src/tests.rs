@@ -495,3 +495,48 @@ fn empty_runs_are_skipped_not_recorded() {
     assert_eq!(p.text, "text");
     assert!(p.spans.is_empty());
 }
+
+#[test]
+fn a_run_with_len_minus_one_uses_strlen() {
+    // chat_view.h documents len as "bytes, or -1 for strlen". cslice
+    // treats anything <= 0 as empty, so -1 silently dropped the run —
+    // an ABI the header promised and the implementation didn't keep.
+    let cs = std::ffi::CString::new("hello").unwrap();
+    let runs = [crate::ffi::HxChatRun {
+        text: cs.as_ptr(),
+        len: -1,
+        color: -1,
+        attrs: 0,
+    }];
+    let p = unsafe { crate::ffi::runs_to_text(runs.as_ptr(), 1) };
+    assert_eq!(p.text, "hello");
+}
+
+#[test]
+fn a_speakers_nick_is_length_delimited_not_nul_delimited() {
+    // The chat path hands over a slice into the middle of the received
+    // line: the name is bytes [0,5) of "misha:  hello world". Reading to
+    // the NUL would take the colon and the body too — and that string
+    // feeds the gutter-width estimate in wrap.rs, so it would have
+    // reserved a column wide enough for the whole message.
+    let line = std::ffi::CString::new("misha:  hello world").unwrap();
+    let sp = crate::ffi::HxChatSpeaker {
+        uid: 7,
+        nick: line.as_ptr(),
+        nick_len: 5,
+        outgoing: 0,
+    };
+    let got = unsafe { crate::ffi::speaker_of(&sp) }.expect("uid 7 is known");
+    assert_eq!(got.nick, "misha");
+    assert_eq!(got.uid, 7);
+
+    // -1 still means "this really is a C string".
+    let whole = crate::ffi::HxChatSpeaker {
+        uid: 7,
+        nick: line.as_ptr(),
+        nick_len: -1,
+        outgoing: 0,
+    };
+    let got = unsafe { crate::ffi::speaker_of(&whole) }.unwrap();
+    assert_eq!(got.nick, "misha:  hello world");
+}

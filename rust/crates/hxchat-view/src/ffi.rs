@@ -446,6 +446,7 @@ const HX_CHAT_COLOR_DEFAULT: i16 = -1;
 pub struct HxChatSpeaker {
     pub(crate) uid: u16,
     pub(crate) nick: *const c_char,
+    pub(crate) nick_len: c_int,
     pub(crate) outgoing: c_int,
 }
 
@@ -457,14 +458,20 @@ pub struct HxChatSpeaker {
 /// so the caller falls back to a nick lookup, which can itself miss.
 /// Guessing would attach the wrong avatar and group two people's
 /// messages together, so a miss stays a miss.
-unsafe fn speaker_of(s: &HxChatSpeaker) -> Option<hxchat_layout::Speaker> {
+pub(crate) unsafe fn speaker_of(s: &HxChatSpeaker) -> Option<hxchat_layout::Speaker> {
     if s.uid == 0 {
         return None;
     }
+    // Length-delimited, not NUL-delimited: the chat paths pass a slice
+    // into the middle of the received line, so reading to the NUL would
+    // take the colon and the whole message body with it. -1 means the
+    // caller really does have a C string.
     let nick = if s.nick.is_null() {
         String::new()
-    } else {
+    } else if s.nick_len < 0 {
         cstr(s.nick)
+    } else {
+        cslice(s.nick, s.nick_len)
     };
     Some(hxchat_layout::Speaker::new(s.uid, nick))
 }
@@ -496,7 +503,14 @@ pub(crate) unsafe fn runs_to_text(runs: *const HxChatRun, n: c_int) -> ParsedTex
     }
     for i in 0..n as usize {
         let r = &*runs.add(i);
-        let text = cslice(r.text, r.len);
+        // `len` is documented as "bytes, or -1 for strlen" — cslice
+        // treats anything <= 0 as empty, so a legitimately NUL-terminated
+        // run would have been silently dropped.
+        let text = if r.len < 0 {
+            cstr(r.text)
+        } else {
+            cslice(r.text, r.len)
+        };
         if text.is_empty() {
             continue;
         }

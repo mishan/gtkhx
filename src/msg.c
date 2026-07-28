@@ -654,9 +654,11 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 			 * the window's, an outgoing message would show the other
 			 * person's avatar. When we haven't been told our uid yet it
 			 * stays 0, which is a miss rather than a guess. */
+            /* `nam` is NUL-terminated here (it is the window's name),
+			 * so -1 is honest rather than a shortcut. */
             HxChatSpeaker sp
                 = { outgoing ? hx_conn_uid (hx_active_session ()->htlc) : uid,
-                    nam, outgoing };
+                    nam, -1, outgoing };
             hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
                                       1, 0);
             first = FALSE;

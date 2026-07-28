@@ -762,6 +762,7 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
     if (wire_uid != 0) {
         sp.uid = wire_uid;
         sp.nick = nick;
+        sp.nick_len = (int)nick_len;
         return sp;
     }
     conv = chat_with_cid (hx_active_session (), cid);
@@ -771,9 +772,12 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
     nul = g_strndup (nick, nick_len);
     sp.uid = hx_member_model_find_by_name (hx_chat_member_model (conv), nul);
     g_free (nul);
-    /* `nick` is borrowed for the append call only, which is why this can
-	 * hand back a pointer into the caller's buffer. */
+    /* Borrowed for the append call only, which is why this can hand back
+	 * a pointer into the caller's buffer — and why the length has to
+	 * travel with it, since that buffer is the whole chat line and the
+	 * name is a slice from its middle. */
     sp.nick = sp.uid ? nick : NULL;
+    sp.nick_len = (int)nick_len;
     return sp;
 }
 
