@@ -835,25 +835,30 @@ impl ChatBuffer {
         }
     }
 
-    /// The selected text, rows joined by newlines.
-    pub fn selected_text(&self, sel: &Selection) -> String {
+    /// The selected text of each covered row, as `(row, text)`.
+    ///
+    /// Exposed per row because a row's own text may contain hard
+    /// newlines — the wrap engine supports them — so a caller cannot
+    /// recover row boundaries by splitting the joined string. The
+    /// autocopy-timestamp path needs exactly that: it prefixes each
+    /// *row* with that row's stamp, and iterating `lines()` over the
+    /// joined output drifts onto the wrong rows the moment any selected
+    /// message spans more than one line.
+    pub fn selected_rows(&self, sel: &Selection) -> Vec<(usize, String)> {
         if sel.is_empty() {
-            return String::new();
+            return Vec::new();
         }
         let (start, end) = sel.ordered(|id| self.row_of(id));
         let (Some(sr), Some(er)) = (self.row_of(start.message), self.row_of(end.message)) else {
-            return String::new();
+            return Vec::new();
         };
-        let mut out = String::new();
+        let mut out = Vec::new();
         for row in sr..=er {
-            if row > sr {
-                out.push('\n');
-            }
             // Walk the row's sources in visual order and take whatever
             // each contributes. One path for every case, so the gutter
             // is copied when it is selected and only then.
             let rsel = self.row_selection(row, sel);
-            let mut first_in_row = true;
+            let mut text = String::new();
             for source in self.sources_of(row) {
                 let Some(range) = self.covered_range(row, source, &rsel) else {
                     continue;
@@ -865,14 +870,23 @@ impl ChatBuffer {
                 if slice.is_empty() {
                     continue;
                 }
-                if !first_in_row {
-                    out.push(' ');
+                if !text.is_empty() {
+                    text.push(' ');
                 }
-                out.push_str(slice);
-                first_in_row = false;
+                text.push_str(slice);
             }
+            out.push((row, text));
         }
         out
+    }
+
+    /// The selected text, rows joined by newlines.
+    pub fn selected_text(&self, sel: &Selection) -> String {
+        self.selected_rows(sel)
+            .into_iter()
+            .map(|(_, t)| t)
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn layout_at(&self, row: usize) -> Option<&LayoutCache> {

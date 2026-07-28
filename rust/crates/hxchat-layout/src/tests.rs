@@ -1690,3 +1690,39 @@ fn triple_click_past_the_end_is_none() {
     let (b, _m) = gutter_buf();
     assert!(b.select_row(99).is_none());
 }
+
+#[test]
+fn selected_rows_keeps_row_boundaries_across_embedded_newlines() {
+    // The autocopy-timestamp bug in miniature: a row whose text spans
+    // several lines. Splitting the joined output by '\n' would report
+    // more "rows" than exist and desynchronise anything keyed on row
+    // index — which is exactly how stamps ended up on the wrong lines.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain("one\ntwo\nthree")), &m);
+    b.append(Message::system(ParsedText::plain("second")), &m);
+    b.reindex();
+    for r in 0..2 {
+        b.ensure_layout(r, &m);
+    }
+
+    let sel = Selection::new(
+        Caret { message: b.id_at(0).unwrap(), source: LineSource::Block(0), offset: 0 },
+        Caret { message: b.id_at(1).unwrap(), source: LineSource::Block(0), offset: 6 },
+    );
+
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 2, "two rows selected, whatever their line count");
+    assert_eq!(rows[0].0, 0);
+    assert_eq!(rows[0].1, "one\ntwo\nthree");
+    assert_eq!(rows[1].0, 1);
+    assert_eq!(rows[1].1, "second");
+
+    // And the joined form has more lines than rows, which is precisely
+    // why callers must not infer one from the other.
+    let joined = b.selected_text(&sel);
+    assert_eq!(joined.lines().count(), 4);
+    assert!(joined.lines().count() > rows.len());
+}

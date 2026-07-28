@@ -1251,34 +1251,32 @@ impl HxChatView {
             return String::new();
         };
         let buf = imp.buffer.borrow();
-        let body = buf.selected_text(&s);
         if !prefs::AUTOCOPY_STAMP.with(|c| c.get()) {
-            return body;
+            return buf.selected_text(&s);
         }
-        // Re-walk the covered rows to prefix each line with its stamp.
-        // Done here rather than in the layout crate because formatting a
-        // time needs a locale, which that crate deliberately has no
-        // access to.
+        // Per *row*, not per output line.
+        //
+        // The first version post-processed the joined string with
+        // `lines()`, assuming one line per row. A row's own text can
+        // contain hard newlines — the wrap engine supports them — so
+        // that assumption breaks on the first multi-line message, and
+        // the stamps then drift onto the wrong rows and fall off the
+        // end. Asking the buffer for the rows directly removes the
+        // guess.
         let fmt = imp.stamp_format.borrow().clone();
-        let (start, end) = s.ordered(|id| buf.row_of(id));
-        let (Some(sr), Some(er)) = (buf.row_of(start.message), buf.row_of(end.message)) else {
-            return body;
-        };
-        let mut out = String::new();
-        for (i, line) in body.lines().enumerate() {
-            if i > 0 {
-                out.push('\n');
-            }
-            if let Some(ts) = buf
-                .message_at(sr + i)
-                .filter(|_| sr + i <= er)
-                .and_then(|m| format_stamp(m.timestamp, &fmt))
-            {
-                out.push_str(&ts);
-            }
-            out.push_str(line);
-        }
-        out
+        buf.selected_rows(&s)
+            .into_iter()
+            .map(|(row, text)| {
+                match buf
+                    .message_at(row)
+                    .and_then(|m| format_stamp(m.timestamp, &fmt))
+                {
+                    Some(ts) => format!("{ts}{text}"),
+                    None => text,
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
     }
 
     pub fn has_selection(&self) -> bool {
