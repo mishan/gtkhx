@@ -149,6 +149,19 @@ mod imp {
         pub(crate) media: RefCell<std::collections::HashMap<u32, MediaEntry>>,
         /// Frame-advance tick, running only while something animates.
         pub anim_tick: RefCell<Option<gtk4::TickCallbackId>>,
+        /// Last pointer position seen during a drag, widget-relative.
+        ///
+        /// CLAUDE.md records the xtext version of this as a known
+        /// degradation: its scroll timers read `xtext->select_end_y`
+        /// rather than the live device position, because GTK 4 has no
+        /// synchronous "where is the pointer" accessor. Storing it from
+        /// the drag handler and consuming it from a per-frame tick is
+        /// the actual answer — the staleness window becomes one frame
+        /// instead of one timer period.
+        pub drag_pointer: Cell<(f64, f64)>,
+        /// Auto-scroll tick, running only while a drag is outside the
+        /// viewport.
+        pub autoscroll_tick: RefCell<Option<gtk4::TickCallbackId>>,
     }
 
     impl Default for HxChatView {
@@ -172,6 +185,8 @@ mod imp {
                 stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
                 media: RefCell::new(std::collections::HashMap::new()),
                 anim_tick: RefCell::new(None),
+                drag_pointer: Cell::new((0.0, 0.0)),
+                autoscroll_tick: RefCell::new(None),
             }
         }
     }
@@ -379,6 +394,12 @@ impl HxChatView {
 
     fn imp_(&self) -> &imp::HxChatView {
         imp::HxChatView::from_obj(self)
+    }
+
+    /// The private struct, for tests that need to reach the buffer.
+    #[cfg(test)]
+    pub(crate) fn imp_ref(&self) -> &imp::HxChatView {
+        self.imp_()
     }
 
     // ---- configuration ------------------------------------------------
@@ -1051,20 +1072,16 @@ impl HxChatView {
             let Some((sx, sy)) = g.start_point() else {
                 return;
             };
-            let Some(focus) = this.caret_at(sx + dx, sy + dy) else {
-                return;
-            };
-            let mut sel = this.imp_().selection.borrow_mut();
-            if let Some(s) = sel.as_mut() {
-                s.focus = focus;
-            }
-            drop(sel);
-            this.queue_draw();
+            let (px, py) = (sx + dx, sy + dy);
+            this.imp_().drag_pointer.set((px, py));
+            this.sync_autoscroll();
+            this.extend_selection_to(px, py);
         });
 
         let this = self.clone();
         drag.connect_drag_end(move |_, _, _| {
             this.imp_().selecting.set(false);
+            this.sync_autoscroll();
             // Drag-end autocopy, matching xtext's behaviour and driven
             // by the same three prefs (see set_autocopy_* on the C side).
             if autocopy_enabled() {
@@ -1107,6 +1124,38 @@ impl HxChatView {
                 this.queue_draw();
             }
         });
+        // Double- and triple-click select a word and a line, as xtext
+        // does. Handled on `pressed` rather than `released` so the drag
+        // gesture's own begin — which fires first and collapses the
+        // selection to a caret — doesn't wipe the result.
+        let this = self.clone();
+        click.connect_pressed(move |_, n_press, x, y| {
+            if n_press < 2 {
+                return;
+            }
+            let Some(caret) = this.caret_at(x, y) else {
+                return;
+            };
+            let sel = {
+                let buf = this.imp_().buffer.borrow();
+                if n_press == 2 {
+                    buf.select_word(&caret)
+                } else {
+                    buf.row_of(caret.message).and_then(|r| buf.select_row(r))
+                }
+            };
+            if let Some(sel) = sel {
+                *this.imp_().selection.borrow_mut() = Some(sel);
+                // A multi-click is not a drag: stop the drag handler
+                // from overwriting the focus on the next motion.
+                this.imp_().selecting.set(false);
+                this.queue_draw();
+                if autocopy_enabled() {
+                    this.copy_selection_to(ClipboardTarget::Primary);
+                }
+            }
+        });
+
         // Primary-click word-click, for the handlers that filter on it
         // (chat-history's sentinel and inline media). Emitted on
         // release, and only when no drag happened, so selecting text
@@ -1700,4 +1749,107 @@ fn trace_selection() -> bool {
             .map(|v| v.split(',').any(|p| p.trim() == "selection"))
             .unwrap_or(false)
     })
+}
+
+// ---- selection auto-scroll ------------------------------------------
+
+/// Pixels per second at the maximum overshoot, and the overshoot at
+/// which that rate is reached. Between zero and this the rate ramps, so
+/// a small overshoot creeps and a large one moves.
+const AUTOSCROLL_MAX_PPS: f64 = 1200.0;
+const AUTOSCROLL_FULL_AT: f64 = 120.0;
+
+impl HxChatView {
+    /// Extend the live selection to a widget-space point.
+    fn extend_selection_to(&self, x: f64, y: f64) {
+        let Some(focus) = self.caret_at(x, y) else {
+            return;
+        };
+        let mut sel = self.imp_().selection.borrow_mut();
+        if let Some(s) = sel.as_mut() {
+            s.focus = focus;
+        }
+        drop(sel);
+        self.queue_draw();
+    }
+
+    /// How far outside the viewport the drag pointer is, in pixels.
+    /// Negative above the top, positive below the bottom, 0 inside.
+    fn drag_overshoot(&self) -> f64 {
+        let (_, y) = self.imp_().drag_pointer.get();
+        let top = f64::from(PAD_Y);
+        let bottom = f64::from(self.height().max(0) - PAD_Y);
+        if y < top {
+            y - top
+        } else if y > bottom {
+            y - bottom
+        } else {
+            0.0
+        }
+    }
+
+    /// Start the auto-scroll tick while a drag is outside the viewport,
+    /// stop it otherwise.
+    fn sync_autoscroll(&self) {
+        let imp = self.imp_();
+        let want = imp.selecting.get() && self.drag_overshoot() != 0.0;
+        let running = imp.autoscroll_tick.borrow().is_some();
+        if want == running {
+            return;
+        }
+        if !want {
+            if let Some(id) = imp.autoscroll_tick.borrow_mut().take() {
+                id.remove();
+            }
+            return;
+        }
+        // Cell, not a plain local: add_tick_callback wants an `Fn`, so
+        // the closure cannot mutate captured state directly.
+        let last_us: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
+        let id = self.add_tick_callback(move |view, clock| {
+            let imp = view.imp_();
+            if !imp.selecting.get() {
+                return glib::ControlFlow::Break;
+            }
+            let overshoot = view.drag_overshoot();
+            if overshoot == 0.0 {
+                return glib::ControlFlow::Break;
+            }
+            // Frame-time based rather than per-tick constant, so the
+            // scroll speed is the same on a 60 Hz and a 144 Hz display.
+            let now = clock.frame_time();
+            let dt = match last_us.get() {
+                Some(prev) => ((now - prev) as f64 / 1_000_000.0).clamp(0.0, 0.1),
+                None => 0.0,
+            };
+            last_us.set(Some(now));
+
+            let ramp = (overshoot.abs() / AUTOSCROLL_FULL_AT).clamp(0.0, 1.0);
+            let delta = overshoot.signum() * AUTOSCROLL_MAX_PPS * ramp * dt;
+
+            let height = content_height(view.height());
+            let cur = {
+                let mut buf = imp.buffer.borrow_mut();
+                buf.scroll_offset(height) as f64
+            };
+            let next = (cur + delta).max(0.0) as u64;
+            {
+                let mut buf = imp.buffer.borrow_mut();
+                buf.scroll_to(next, height, FOLLOW_SLOP);
+            }
+            view.sync_adjustment(height);
+
+            // Extend to the pointer, clamped into the viewport — the
+            // caret we want is the one at the edge we are scrolling
+            // towards, not one off-screen.
+            let (px, py) = imp.drag_pointer.get();
+            let clamped_y = py.clamp(
+                f64::from(PAD_Y),
+                f64::from(view.height().max(0) - PAD_Y),
+            );
+            view.extend_selection_to(px, clamped_y);
+            glib::ControlFlow::Continue
+        });
+        *imp.autoscroll_tick.borrow_mut() = Some(id);
+    }
 }

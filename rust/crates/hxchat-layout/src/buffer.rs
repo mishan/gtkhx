@@ -561,6 +561,18 @@ impl ChatBuffer {
     /// `inline_media_chat_word_click` stops finding `hxmedia:N`, and the
     /// chat-history sentinel stops matching.
     pub fn word_at(&self, caret: &Caret) -> Option<String> {
+        let (start, end) = self.word_bounds(caret)?;
+        let row = self.row_of(caret.message)?;
+        let text = self.source_text(row, caret.source)?;
+        Some(text[start..end].to_string())
+    }
+
+    /// Byte bounds of the word around a caret, in its own source.
+    ///
+    /// Shared by `word_at` (which the `word-click` emission needs as a
+    /// string) and double-click word-select, so the two can never
+    /// disagree about where a word begins.
+    pub fn word_bounds(&self, caret: &Caret) -> Option<(usize, usize)> {
         let row = self.row_of(caret.message)?;
         let text = self.source_text(row, caret.source)?;
         if text.is_empty() {
@@ -590,7 +602,48 @@ impl ChatBuffer {
         if start >= end {
             return None;
         }
-        Some(text[start..end].to_string())
+        Some((start, end))
+    }
+
+    /// Double-click: select the word under the caret.
+    pub fn select_word(&self, caret: &Caret) -> Option<Selection> {
+        let (start, end) = self.word_bounds(caret)?;
+        Some(Selection::new(
+            Caret {
+                message: caret.message,
+                source: caret.source,
+                offset: start,
+            },
+            Caret {
+                message: caret.message,
+                source: caret.source,
+                offset: end,
+            },
+        ))
+    }
+
+    /// Triple-click: select the whole row, gutter included.
+    ///
+    /// The gutter is part of what the user sees on that line, so it is
+    /// part of what a "select this line" gesture should give them —
+    /// consistent with a whole-row selection dragged from above.
+    pub fn select_row(&self, row: usize) -> Option<Selection> {
+        let id = self.id_at(row)?;
+        let first = self.sources_of(row).first().copied()?;
+        let last = self.sources_of(row).last().copied()?;
+        let end_len = self.source_text(row, last).map_or(0, |t| t.len());
+        Some(Selection::new(
+            Caret {
+                message: id,
+                source: first,
+                offset: 0,
+            },
+            Caret {
+                message: id,
+                source: last,
+                offset: end_len,
+            },
+        ))
     }
 
     /// The settled gutter width. 0 when not in indent mode.

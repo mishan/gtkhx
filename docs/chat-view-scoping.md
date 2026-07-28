@@ -667,9 +667,20 @@ call sites, so anything not in it is dead xtext API and irrelevant.
 xtext's `> 2` semantics), indent mode and cap, timestamp column and
 format, the scroll adjustment, refresh, clear, append, two-column
 append, insert-before-a-mark, remove, media rows with real textures and
-animation, drag-select and copy, autocopy (all three prefs), the indent
-separator, zoom, links, the context menu, and `word-click` emission —
-which is what keeps the three existing C handlers working unchanged.
+animation, drag-select and copy, double-click word select, triple-click
+line select, selection auto-scroll past the viewport edge, autocopy (all
+three prefs), the indent separator, zoom, links, the context menu, and
+`word-click` emission — which is what keeps the three existing C
+handlers working unchanged.
+
+Selection auto-scroll is worth a note: CLAUDE.md lists xtext's version as
+a known *degradation*, because its scroll timers read
+`xtext->select_end_y` rather than the live device position — GTK 4 has no
+synchronous "where is the pointer" accessor. Storing the position from
+the drag handler and consuming it from a `GtkTickCallback` is the real
+answer, so this is one place the new backend is better rather than
+merely equal. The rate is frame-time based, so it scrolls at the same
+speed on a 60 Hz and a 144 Hz display.
 
 **Known gaps, in rough order of how much they'd be missed:**
 
@@ -679,8 +690,7 @@ which is what keeps the three existing C handlers working unchanged.
 | In-buffer search | `gtk_xtext_search` / `lastlog`. Also not routed through `chat_view.h` today. C3 item, deferred. |
 | Markdown rendering | The parser exists and is tested; nothing renders it, because the compat path parses mIRC only. Enabling it changes what chat *looks like*, which is a deliberate no during the A/B (§6, C2–C5 must be pixel-identical). |
 | `set_urlcheck_function` | Accepted and ignored. The new backend autodetects with `gtkurl_scan` directly rather than asking a per-view classifier. Same scheme list, so the behaviour matches; the callback is simply redundant. |
-| Selection auto-scroll | Dragging past the top/bottom edge does not scroll the view. xtext has this (badly — see the `select_end_y` note in CLAUDE.md); the `GtkTickCallback` approach in §3.6 is the fix and is not written yet. |
-| Word-select / line-select | xtext double-click selects a word, triple-click a line. Not implemented. |
+| *(none currently open)* | Selection auto-scroll and word/line select were the last two; both shipped. |
 
 **Not gaps, deliberately:** `set_show_separator` / `set_thin_separator` /
 `set_error_function` / `gtk_xtext_foreach` / the `buffer_new`/`_free`/

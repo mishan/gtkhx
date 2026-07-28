@@ -1647,3 +1647,46 @@ fn a_row_with_no_gutter_still_reserves_the_stamp_column() {
         l2.natural_indent
     );
 }
+
+// ---- word / line select ---------------------------------------------
+
+#[test]
+fn double_click_selects_the_word() {
+    let (b, _m, mut c) = word_buf("hello brave world");
+    c.offset = 8; // inside "brave"
+    let sel = b.select_word(&c).expect("word");
+    assert_eq!(b.selected_text(&sel), "brave");
+}
+
+#[test]
+fn double_click_on_a_nick_selects_just_the_nick() {
+    // xtext's tokenizer treats '<' and '>' as delimiters, which is what
+    // makes double-clicking "<alice>" give you a bare nick to paste.
+    let (b, _m) = gutter_buf();
+    let id = b.id_at(0).unwrap();
+    let c = Caret { message: id, source: LineSource::Gutter, offset: 1 };
+    let sel = b.select_word(&c).expect("word");
+    assert_eq!(b.selected_text(&sel), "a");
+}
+
+#[test]
+fn double_click_on_whitespace_selects_nothing() {
+    let (b, _m, mut c) = word_buf("a b");
+    c.offset = 1;
+    assert!(b.select_word(&c).is_none());
+}
+
+#[test]
+fn triple_click_selects_the_whole_row_including_the_gutter() {
+    let (b, _m) = gutter_buf();
+    let sel = b.select_row(1).expect("row");
+    let text = b.selected_text(&sel);
+    assert!(text.contains("<b>"), "gutter missing from {text:?}");
+    assert!(text.contains("hello"), "body missing from {text:?}");
+}
+
+#[test]
+fn triple_click_past_the_end_is_none() {
+    let (b, _m) = gutter_buf();
+    assert!(b.select_row(99).is_none());
+}

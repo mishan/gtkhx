@@ -382,6 +382,21 @@ fn gtk_class_and_construction_smoke() {
     assert_eq!(view.selected_text(), "");
     view.clear_selection(); // no-op, must not panic
 
+    // Word and line select, through the view's own buffer.
+    {
+        let buf = view.imp_ref().buffer.borrow();
+        let id = buf.id_at(0).expect("row 0");
+        let caret = hxchat_layout::Caret {
+            message: id,
+            source: hxchat_layout::LineSource::Block(0),
+            offset: 1,
+        };
+        let word = buf.select_word(&caret).expect("word select");
+        assert_eq!(buf.selected_text(&word), "alpha");
+        let line = buf.select_row(0).expect("row select");
+        assert_eq!(buf.selected_text(&line), "alpha");
+    }
+
     // Zoom walks a fixed ladder and returns to exactly 100%.
     assert_eq!(view.zoom_permille(), 1000);
     view.zoom_step(1);
