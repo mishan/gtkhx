@@ -1,0 +1,25 @@
+[package]
+rust-version.workspace = true
+name = "hxchat-layout"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Chat-view phase C1: the chat layout engine — message model, span parsers, wrapping, height index, scroll anchoring"
+publish = false
+
+[lib]
+# rlib only. Nothing links this crate yet: C1 is the engine, C2 is the
+# widget (hxchat-view) that will depend on it and own the C ABI. Adding a
+# staticlib target before there is a linker asking for one would just
+# lengthen the build.
+crate-type = ["rlib"]
+
+# Deliberately no dependencies.
+#
+# Not gtk4, not glib, not pango — this crate is pure logic so that the
+# whole of it runs under `cargo test` on display-less CI. Text
+# measurement, the one thing that genuinely needs a font stack, is
+# abstracted behind the `TextMeasure` trait (measure.rs); the widget
+# supplies a Pango-backed implementation in C2 and the tests here supply
+# a deterministic fixed-width one. See docs/chat-view-scoping.md §3.
+[dependencies]

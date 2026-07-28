@@ -362,12 +362,20 @@ with selection and context menus.
 
 ### 3.8 Retiring the mIRC escape vocabulary
 
-**The mIRC escapes are not protocol.** This was worth establishing before
-building anything on top of them, because several comments in the tree —
-`CLAUDE.md`'s theming section among them — asserted the opposite ("servers send
-specific indices"). They don't. Verified two ways: by tracing every generation
-site in the tree, and from Misha directly — the vocabulary came in with the
-XChat 1.8.5 xtext fork around 2000 and was never a Hotline concept.
+**The mIRC escapes are not protocol.** Worth establishing before building
+anything on top of them, because a note in `CLAUDE.md`'s theming section
+asserted the opposite ("servers send specific indices; users don't get to remap
+red"). They don't. Verified two ways: by tracing every generation site in the
+tree, and from Misha directly — the vocabulary came in with the XChat 1.8.5
+xtext fork around 2000 and was never a Hotline concept.
+
+Provenance matters here, so: that claim was **not** a longstanding project
+belief. It was introduced by an AI-assisted session in mid-2026 and sat in
+`CLAUDE.md` — a file every future session reads as ground truth — for a couple
+of months. It is corrected there now. The lesson worth carrying is that a
+plausible-sounding rationale invented for an existing design decision is more
+durable than an ordinary bug, because nothing downstream fails when it is
+wrong.
 
 The findings:
 
