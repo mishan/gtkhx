@@ -1886,3 +1886,76 @@ fn a_pinned_gutter_has_a_floor() {
     assert_eq!(b.indent_width(), crate::buffer::MIN_INDENT);
     let _ = &m;
 }
+
+#[test]
+fn selected_rows_omits_rows_that_contribute_nothing() {
+    // A selection that starts at the very end of one row and ends at the
+    // very start of another *covers* three rows but only one of them has
+    // any selected text in it. Reporting the empty two puts blank lines
+    // in the clipboard and, worse, gives AUTOCOPY_STAMP two rows to
+    // prefix timestamps onto that have nothing in them.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for t in ["first", "middle", "last"] {
+        b.append(Message::system(ParsedText::plain(t)), &m);
+    }
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+
+    let sel = Selection::new(
+        Caret {
+            message: b.id_at(0).unwrap(),
+            source: LineSource::Block(0),
+            offset: 5, // end of "first"
+        },
+        Caret {
+            message: b.id_at(2).unwrap(),
+            source: LineSource::Block(0),
+            offset: 0, // start of "last"
+        },
+    );
+
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 1, "only the middle row has selected text");
+    assert_eq!(rows[0], (1, "middle".to_string()));
+    assert_eq!(b.selected_text(&sel), "middle", "no leading/trailing blanks");
+}
+
+#[test]
+fn selected_rows_keeps_a_genuinely_empty_row() {
+    // The converse: a blank line inside a selection is real content and
+    // has to survive, so the skip above must key on "had text and none
+    // of it was selected" rather than "produced no text".
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for t in ["above", "", "below"] {
+        b.append(Message::system(ParsedText::plain(t)), &m);
+    }
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+
+    let sel = Selection::new(
+        Caret {
+            message: b.id_at(0).unwrap(),
+            source: LineSource::Block(0),
+            offset: 0,
+        },
+        Caret {
+            message: b.id_at(2).unwrap(),
+            source: LineSource::Block(0),
+            offset: 5,
+        },
+    );
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 3, "the blank line is content");
+    assert_eq!(rows[1], (1, String::new()));
+    assert_eq!(b.selected_text(&sel), "above\n\nbelow");
+}

@@ -932,11 +932,26 @@ impl ChatBuffer {
             let rsel = self.row_selection(row, sel);
             let mut text = String::new();
             let mut prev: Option<LineSource> = None;
+            // A row can be *covered* and still contribute nothing — the
+            // first and last rows of a selection that starts at the end
+            // of one row and ends at the start of another. Those must
+            // not be reported: they become blank lines in the copied
+            // text, and AUTOCOPY_STAMP would prefix a timestamp to a row
+            // with no content. A row that is genuinely empty is a
+            // different thing and does belong in the output as a blank
+            // line, so the test is "had text and none of it was
+            // selected", not "produced no text".
+            let mut had_text = false;
             for source in self.sources_of(row) {
-                let Some(range) = self.covered_range(row, source, &rsel) else {
+                // Note the order: `had_text` has to be established
+                // before any early-continue, or a row whose coverage is
+                // empty everywhere looks indistinguishable from a row
+                // that is empty.
+                let Some(t) = self.source_text(row, source) else {
                     continue;
                 };
-                let Some(t) = self.source_text(row, source) else {
+                had_text |= !t.is_empty();
+                let Some(range) = self.covered_range(row, source, &rsel) else {
                     continue;
                 };
                 let Some(slice) = t.get(range) else { continue };
@@ -956,6 +971,9 @@ impl ChatBuffer {
                 }
                 text.push_str(slice);
                 prev = Some(source);
+            }
+            if text.is_empty() && had_text {
+                continue;
             }
             out.push((row, text));
         }

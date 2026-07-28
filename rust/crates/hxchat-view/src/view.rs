@@ -2035,12 +2035,25 @@ impl HxChatView {
         let last_us: std::cell::Cell<Option<i64>> = std::cell::Cell::new(None);
         let id = self.add_tick_callback(move |view, clock| {
             let imp = view.imp_();
+            // Both stop conditions have to clear the stored id as well
+            // as returning Break, or `autoscroll_tick` outlives the
+            // callback it names: sync_autoscroll reads `is_some()` as
+            // "running", so a self-terminated tick makes it believe
+            // autoscroll is live and skip the restart, and its cleanup
+            // path would call remove() on an id GTK has already
+            // invalidated. Dropping a TickCallbackId is inert (gtk4-rs
+            // has no Drop impl for it — removal is the explicit
+            // `remove()`), so taking it here is exactly right.
+            let stop = |view: &HxChatView| {
+                *view.imp_().autoscroll_tick.borrow_mut() = None;
+                glib::ControlFlow::Break
+            };
             if !imp.selecting.get() {
-                return glib::ControlFlow::Break;
+                return stop(view);
             }
             let overshoot = view.drag_overshoot();
             if overshoot == 0.0 {
-                return glib::ControlFlow::Break;
+                return stop(view);
             }
             // Frame-time based rather than per-tick constant, so the
             // scroll speed is the same on a 60 Hz and a 144 Hz display.
