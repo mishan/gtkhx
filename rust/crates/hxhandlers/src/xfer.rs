@@ -106,9 +106,10 @@ extern "C" {
     fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx_ui_bridge.c — the queue-downloads pref (xfer_new's inline-vs-queue).
     fn hx_prefs_queuedl() -> c_int;
-    /// xfers.c — the last-ref GTK/preview + channel teardown (still C);
-    /// registered once via hx_htxf_set_destructor from xfer_init.
-    fn htxf_destructor(htxf: *mut HtxfHandle);
+    /// preview.c — drop the per-htxf ref on the preview window (NULL-safe; a
+    /// no-op on a non-preview transfer). The one bit of the last-ref teardown
+    /// (`htxf_destructor`) that still reaches into GTK/C.
+    fn hx_preview_unref(p: *mut c_void);
     /// htxf_accessors.c — the opt bitfield setters (C owns the bit layout).
     fn hx_htxf_set_opt_preview(htxf: *mut HtxfHandle, v: c_int);
     fn hx_htxf_set_opt_folder(htxf: *mut HtxfHandle, v: c_int);
@@ -549,18 +550,31 @@ pub unsafe extern "C" fn xfer_completion_entry(arg: *mut c_void) {
 
 // ---- worker dispatch + params ------------------------------------------
 
-/// `void xfer_close_channel(struct htxf_conn *htxf)` — close the hxnet HTXF
-/// channel and clear the slot. Idempotent: the worker closes on completion, then
-/// htxf_destructor closes again on the last unref; the NULL after the first close
-/// makes the second a no-op (`hxnet_htxf_close` is NULL-safe), preventing a
-/// double-free. Still called by the C `htxf_destructor`.
+/// Close the hxnet HTXF channel and clear the slot. Idempotent: the worker closes
+/// on completion, then [`htxf_destructor`] closes again on the last unref; the
+/// NULL after the first close makes the second a no-op (`hxnet_htxf_close` is
+/// NULL-safe), preventing a double-free.
 ///
 /// # Safety
 /// `htxf` is a live handle.
-#[no_mangle]
-pub unsafe extern "C" fn xfer_close_channel(htxf: *mut HtxfHandle) {
+unsafe fn xfer_close_channel(htxf: *mut HtxfHandle) {
     hxnet_htxf_close((*htxf).hx as *mut HtxfConn);
     (*htxf).hx = std::ptr::null_mut();
+}
+
+/// The last-ref teardown, registered via `hx_htxf_set_destructor` and run by
+/// `hx_htxf_unref` on a handle's final ref (just before `hx_htxf_free` releases
+/// the cancellation token + the struct). Drops the per-htxf preview-window ref
+/// (NULL / non-preview → no-op in `hx_preview_unref`) and closes the hxnet
+/// channel. The preview unref is the only step that still reaches into GTK/C.
+///
+/// # Safety
+/// `htxf` is the handle being freed; runs on the thread doing the last unref
+/// (the main thread in practice).
+unsafe extern "C" fn htxf_destructor(htxf: *mut HtxfHandle) {
+    hx_preview_unref((*htxf).preview);
+    (*htxf).preview = std::ptr::null_mut();
+    xfer_close_channel(htxf);
 }
 
 /// The per-chunk progress callback the hxnet::xfer worker calls (passed by value
@@ -1064,7 +1078,7 @@ unsafe fn hx_prefs_queuedl() -> c_int {
     0
 }
 #[cfg(test)]
-unsafe extern "C" fn htxf_destructor(_htxf: *mut HtxfHandle) {}
+unsafe fn hx_preview_unref(_p: *mut c_void) {}
 #[cfg(test)]
 unsafe fn hx_htxf_set_opt_preview(_htxf: *mut HtxfHandle, _v: c_int) {}
 #[cfg(test)]

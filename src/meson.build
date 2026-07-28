@@ -137,11 +137,11 @@ gtkhx_sources = files(
   # cell stays C; the voice column moved to gtkhx-ui's `voice` feature
   # (users_voice_col.rs).
   'users_cell.c',
-  'xfers.c',
-  # Rust-facing accessor seam over the still-C-owned htxf_conn: the field
-  # getters/setters + fs-size helper the Rust file-transfer receive handlers
-  # (hxxfer-recv) reach transfer state through, so the transfer logic lives in
-  # Rust while the refcounted, cross-thread struct stays in xfers.c.
+  # Rust-facing accessor seam over the C-declared htxf_conn: the field
+  # getters/setters + fs-size helper the Rust file-transfer handlers reach
+  # transfer state through. The whole worker shell (xfers.c) is now Rust
+  # (hxhandlers::xfer); only the struct's storage + refcount lifecycle live in
+  # hxnet::xfer_handle.
   'htxf_accessors.c',
 )
 

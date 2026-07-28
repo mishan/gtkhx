@@ -160,10 +160,18 @@ become native intra-crate calls once the shell is in hxhandlers.
   `[46]`/`[62]` — byte-identical to mhxd's own client). Guarded by an hxhandlers
   unit test on the record layout + a Tier-3 `file_resume` test (resume a
   partial download vs mhxd, assert the completed file is byte-exact).
-- **Y5 — finalize.** `htxf_destructor` (preview unref + channel close) +
-  `xfer_close_channel`; register the destructor from Rust. Delete `xfers.c` +
-  `xfers.h` (keep the ABI decls where C still calls in). `htxf_destructor` may
-  stay a tiny C shim if the GTK preview teardown is cleaner there.
+- **Y5 — finalize. ✅ SHIPPED.** Moved `htxf_destructor` (preview unref + channel
+  close) into hxhandlers::xfer as a native `unsafe extern "C" fn`, registered
+  from Rust (`hx_htxf_set_destructor(Some(htxf_destructor))` in `xfer_init`); its
+  only remaining C reach is `hx_preview_unref` (the GTK preview teardown, an
+  extern). `xfer_close_channel` lost its last C caller so it's now a private Rust
+  `fn`. **`src/xfers.c` is deleted** — the worker shell is entirely Rust. `xfers.h`
+  is kept but trimmed to the ten transfer entry points C still calls in through
+  (`xfer_go` / `xfer_new` / `xfer_new_folder` / `xfer_up` / `_down` / `_num` /
+  `xfer_tasks_update` / `xfers_delete_all` / `xfer_delete` / `htxf_with_ref`); the
+  Rust-internal exports (`xfer_ready_write`, `xfer_go_timer`, the registry ops,
+  the teardown) are declared Rust-side by their callers and no longer appear in
+  the header. The whole xfers.c → Rust migration is complete.
 
 ## Hard constraints (do not re-decide)
 
