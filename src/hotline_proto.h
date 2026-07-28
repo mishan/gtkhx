@@ -676,11 +676,9 @@ gtkhx_proto_catlist_part_get (const struct gtkhx_proto_catlist *cl,
  *
  * Each builder fills a caller-provided struct hx_chunk[] (and a
  * uint8_t scratch[] buffer for the integer chunks) and returns the
- * number of chunks populated, or 0 on validation failure. Matches the
- * pre-existing hx_agreement_agree_build_chunks API in
- * src/agreement_packet.{c,h}, so production callers hand the chunks
- * array to hlwrite_chunks() for actual wire encoding — cipher,
- * compression, and fd dispatch all stay in C until Phase R3.
+ * number of chunks populated, or 0 on validation failure. Production
+ * callers hand the chunks array to hlwrite_chunks() for actual wire
+ * encoding — cipher, compression, and fd dispatch all stay in C.
  *
  * Both the chunks buffer and the scratch buffer must outlive the
  * eventual hlwrite_chunks() call: the chunk data pointers reference
@@ -691,9 +689,8 @@ gtkhx_proto_catlist_part_get (const struct gtkhx_proto_catlist *cl,
  * caller's responsibility — gtkhx_text_for_wire is C-side and keeps
  * the Rust crate free of iconv. */
 
-/* Forward decl matches what agreement_packet.h does — only the
- * struct's tag is referenced in the prototypes below (no field
- * access). Callers that need to stack-allocate `struct hx_chunk
+/* Only the struct's tag is referenced in the prototypes below (no
+ * field access). Callers that need to stack-allocate `struct hx_chunk
  * chunks[N]` must #include "proto_helpers.h" directly. */
 struct hx_chunk;
 
@@ -773,6 +770,8 @@ extern int32_t gtkhx_proto_build_chat_subject_chunks (
 
 /* HTLC_HDR_AGREEMENTAGREE: ICON + NAME + OPTIONS (all three mandatory —
  * Mobius panics without OPTIONS). chunks_cap >= 3, scratch_cap >= 4. */
+#define HX_AGREEMENT_AGREE_MAX_CHUNKS   3
+#define HX_AGREEMENT_AGREE_SCRATCH_SIZE 16
 extern int32_t gtkhx_proto_build_agreement_agree_chunks (
     uint16_t icon, const uint8_t *name_ptr, size_t name_len, uint16_t options,
     struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,

@@ -948,10 +948,9 @@ pub unsafe extern "C" fn gtkhx_proto_catlist_part_get(
 //
 // Each builder fills a caller-provided `struct hx_chunk[]` (and, where
 // integer fields are present, a `uint8_t scratch[]` buffer) and returns
-// the chunk count. Matches `hx_agreement_agree_build_chunks` in
-// agreement_packet.c so the production code can keep using
+// the chunk count, so the production C code can keep using
 // `hlwrite_chunks` for the actual wire push (the cipher/compression/fd
-// dispatch stays in C until Phase R3). Returns 0 on validation failure
+// dispatch stays in C). Returns 0 on validation failure
 // (NULL pointer, too-small chunks or scratch slice). Body lifetime is
 // the caller's: the chunk data pointers reference into `body_ptr`, so
 // the buffer must outlive the hlwrite_chunks call.

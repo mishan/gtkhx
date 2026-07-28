@@ -1,6 +1,5 @@
 gtkhx_sources = files(
   # about.c ported to Rust (gtkhx-ui about.rs); about.h keeps the C ABI decl.
-  'algo_list.c',
   # banner.c + banner_dispatch.c ported to Rust (gtkhx-ui banner.rs);
   # banner.h keeps the C ABI decls the toolbar / rcv / network call sites use.
   # bookmark_cipher.c + bookmarks_io.c retired — bookmark storage (TOML model,
@@ -74,7 +73,6 @@ gtkhx_sources = files(
   'hl_code.c',
   'human_readable.c',
   'login_packet.c',
-  'agreement_packet.c',
   'msg.c',
   'network.c',
   'hxnet_bridge.c',
@@ -89,14 +87,12 @@ gtkhx_sources = files(
   'notify.c',
   'options.c',
   'path_hldir.c',
-  'path_util.c',
   'pict_embed.c',
   'pict_magick.c',
   'prefs_parser.c',
   'preview.c',
   'proto_helpers.c',
   'proto_trace.c',
-  'qbuf.c',
   'rcv.c',
   'sound.c',
   'sound_events.c',

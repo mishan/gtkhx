@@ -147,17 +147,6 @@ test_hmac = executable('test_hmac',
 test('hmac', test_hmac,
      suite : 'unit')
 
-# path_util — path_basename(path, sep). Pure GLib, no globals
-# (the dir_char-aware dirchar_basename in files.c is now a thin
-# wrapper around this). Compile path_util.c in directly.
-test_path_util = executable('test_path_util',
-  'unit/test_path_util.c',
-  '../src/path_util.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('path_util', test_path_util,
-     suite : 'unit')
 
 # safe_local_basename — sanitizer that defangs a remote-supplied
 # file name before joining it onto the local download path.
@@ -408,19 +397,6 @@ test_gchat_hash = executable('test_gchat_hash',
   include_directories : test_inc,
 )
 test('gchat_hash', test_gchat_hash,
-     suite : 'unit')
-
-# algo_list — HOPE algorithm-list walker (list_n). Pinned-input
-# crash defenses called out by name in the HOPE-Secure-Login spec —
-# empty list (count=0, listlen=2) used to NULL-deref the legacy
-# implementation, killing gtkhx on Mobius servers.
-test_algo_list = executable('test_algo_list',
-  'unit/test_algo_list.c',
-  '../src/algo_list.c',
-  dependencies        : test_deps,
-  include_directories : test_inc,
-)
-test('algo_list', test_algo_list,
      suite : 'unit')
 
 # uniquify_path — "foo.txt" → "foo (1).txt" collision resolver.
@@ -1053,15 +1029,12 @@ integration_harness_lib = static_library(
   '../src/debug.c',
   '../src/hl_code.c',
   '../src/login_packet.c',
-  '../src/agreement_packet.c',
   '../src/chat_history.c',
   # The Tier 3 HOPE login + HTXF transfers run through the production
   # orchestrator (Rust owns all the crypto now); the C cipher dispatchers
   # (cipher.c stream, cipher_aead.c AEAD) are gone, and so is the htxf_io.c
   # shim — the drivers call hxnet_htxf_* directly (S1.2), the preamble packer
   # is hxnet's hxnet_htxf_pack_preamble (S1.1).
-  '../src/qbuf.c',
-  '../src/algo_list.c',
   '../src/debug.c',
   # The harness login entry points drive connect + magic + LOGIN through
   # the production hxnet orchestrator via the polling FFI
@@ -1101,7 +1074,6 @@ test_integration_real_connect = executable(
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
   '../src/login_packet.c',
-  '../src/agreement_packet.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
@@ -1109,8 +1081,6 @@ test_integration_real_connect = executable(
   # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
-  '../src/qbuf.c',
-  '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_v3_meta.c',
@@ -1144,14 +1114,11 @@ test_integration_tracker_signals = executable(
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
   '../src/login_packet.c',
-  '../src/agreement_packet.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
   '../src/proto_trace.c',
   '../src/gtkhx_log.c',
   '../src/debug.c',
-  '../src/qbuf.c',
-  '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_v3_meta.c',
@@ -1215,7 +1182,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   '../src/host_port.c',
   '../src/hxnet_bridge.c',
   '../src/login_packet.c',
-  '../src/agreement_packet.c',
   '../src/chat_history.c',
   '../src/inline_media.c',
   '../src/proto_helpers.c',
@@ -1224,8 +1190,6 @@ test_integration_real_htxf_connect = executable('test_integration_real_htxf_conn
   # rust_gtkhx_core_dep in this target's dependencies.
   '../src/gtkhx_log.c',
   '../src/debug.c',
-  '../src/qbuf.c',
-  '../src/algo_list.c',
   '../src/tracker_parser.c',
   '../src/tracker_v3.c',
   '../src/tracker_v3_meta.c',

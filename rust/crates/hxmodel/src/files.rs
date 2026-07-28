@@ -159,6 +159,14 @@ pub fn kind_label_for(ftype: Option<&[u8]>) -> Option<&'static core::ffi::CStr> 
     })
 }
 
+/// Byte offset within `bytes` at which the last path component starts, where
+/// components are separated by `sep`. With no `sep` the whole string is the
+/// basename → `0`; a trailing `sep` yields an offset at the end (empty
+/// basename). The C `path_basename(path, sep)` returns `path + this`.
+pub fn basename_offset(bytes: &[u8], sep: u8) -> usize {
+    bytes.iter().rposition(|&b| b == sep).map_or(0, |i| i + 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -273,5 +281,25 @@ mod tests {
         assert_eq!(kind(b"XXXX"), None);
         assert_eq!(kind_label_for(None), None);
         assert_eq!(kind_label_for(Some(b"MP")), None); // < 4 bytes
+    }
+
+    // path_basename(path, sep) == path + basename_offset(bytes, sep).
+    #[test]
+    fn basename_offset_cases() {
+        // Mac ':' and Unix '/' separators pick the last component.
+        assert_eq!(basename_offset(b"Files:Photos:cat.jpg", b':'), 13); // "cat.jpg"
+        assert_eq!(basename_offset(b"/home/misha/photos/cat.jpg", b'/'), 19);
+        assert_eq!(basename_offset(b":alpha", b':'), 1); // separator at start
+        // No separator → whole string is the basename.
+        assert_eq!(basename_offset(b"cat.jpg", b':'), 0);
+        assert_eq!(basename_offset(b"", b'/'), 0);
+        // Trailing / all separators → empty basename at the end.
+        assert_eq!(basename_offset(b"Files:", b':'), 6);
+        assert_eq!(basename_offset(b"/", b'/'), 1);
+        assert_eq!(basename_offset(b"/////", b'/'), 5);
+        // Only the requested separator counts.
+        assert_eq!(basename_offset(b"Files:Photos:cat.jpg", b'/'), 0);
+        assert_eq!(basename_offset(b"a:b/c:d/e", b':'), 6); // "d/e"
+        assert_eq!(basename_offset(b"a:b/c:d/e", b'/'), 8); // "e"
     }
 }
