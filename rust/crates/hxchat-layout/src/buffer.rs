@@ -241,11 +241,17 @@ impl ChatBuffer {
     /// recompute the entry's subline list, diff the count, and patch the
     /// buffer's `num_lines` plus the scroll anchors. Here it is a height
     /// change, and the anchor absorbs it.
+    /// Attach (or with `None`, clear) the decoded size of an image
+    /// block.
+    ///
+    /// `None` is the decode-failed path: the row must shrink back to its
+    /// placeholder height, or the alt text ends up floating inside a
+    /// tall empty box the size of an image that never arrived.
     pub fn set_image_size(
         &mut self,
         id: MessageId,
         token: u32,
-        size: crate::message::ImageSize,
+        size: Option<crate::message::ImageSize>,
         measure: &dyn TextMeasure,
     ) -> bool {
         self.reindex();
@@ -261,7 +267,7 @@ impl ChatBuffer {
             } = b
             {
                 if *t == token {
-                    *s = Some(size);
+                    *s = size;
                     hit = true;
                 }
             }
@@ -579,7 +585,14 @@ impl ChatBuffer {
             return None;
         }
         let is_del = |c: char| c == ' ' || c == '\n' || c == '<' || c == '>' || c == '\0';
-        let at = caret.offset.min(text.len());
+        // Clamp to a char boundary before slicing. Carets from
+        // `hit_test` are already aligned, but this is reachable from the
+        // FFI with an arbitrary offset, and `&text[at..]` off a boundary
+        // panics — which unwinds into GTK and aborts.
+        let mut at = caret.offset.min(text.len());
+        while at > 0 && !text.is_char_boundary(at) {
+            at -= 1;
+        }
 
         // A click *on* a delimiter yields no word, which is what xtext
         // does: both its scan loops (xtext.c:2095, 2114) test `is_del`
@@ -859,6 +872,7 @@ impl ChatBuffer {
             // is copied when it is selected and only then.
             let rsel = self.row_selection(row, sel);
             let mut text = String::new();
+            let mut prev: Option<LineSource> = None;
             for source in self.sources_of(row) {
                 let Some(range) = self.covered_range(row, source, &rsel) else {
                     continue;
@@ -870,10 +884,19 @@ impl ChatBuffer {
                 if slice.is_empty() {
                     continue;
                 }
-                if !text.is_empty() {
-                    text.push(' ');
+                // Separator matches Message::to_plain_text, which is
+                // what whole-row copying used before this path existed:
+                // a space between the gutter and the body (they read as
+                // one line), a newline between body blocks (they are
+                // distinct blocks and collapsing them to spaces would
+                // run a code block into the paragraph after it).
+                match prev {
+                    None => {}
+                    Some(LineSource::Gutter) => text.push(' '),
+                    Some(LineSource::Block(_)) => text.push('\n'),
                 }
                 text.push_str(slice);
+                prev = Some(source);
             }
             out.push((row, text));
         }

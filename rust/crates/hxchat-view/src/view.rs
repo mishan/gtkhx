@@ -1634,6 +1634,15 @@ impl HxChatView {
         let imp = self.imp_();
         if frames.is_empty() {
             imp.media.borrow_mut().remove(&token);
+            // Clear the stored size too, or the row keeps the height of
+            // an image it no longer has and the placeholder text draws
+            // inside a tall empty box — contradicting the FFI's promise
+            // that a NULL texture reverts the row to its placeholder.
+            let m = imp.measure.borrow();
+            let mut buf = imp.buffer.borrow_mut();
+            if let Some(id) = buf.find_image(token) {
+                buf.set_image_size(id, token, None, &*m);
+            }
         } else {
             let entry = MediaEntry {
                 frames,
@@ -1647,7 +1656,7 @@ impl HxChatView {
                 let m = imp.measure.borrow();
                 let mut buf = imp.buffer.borrow_mut();
                 if let Some(id) = buf.find_image(token) {
-                    buf.set_image_size(id, token, size, &*m);
+                    buf.set_image_size(id, token, Some(size), &*m);
                 }
             }
         }

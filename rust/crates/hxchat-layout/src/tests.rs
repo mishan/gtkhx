@@ -884,10 +884,10 @@ fn buffer_image_decode_grows_the_row() {
     assert!(b.set_image_size(
         id,
         42,
-        ImageSize {
+        Some(ImageSize {
             width: 200,
             height: 300
-        },
+        }),
         &m
     ));
     b.ensure_layout(0, &m);
@@ -1517,7 +1517,7 @@ fn a_decoded_image_grows_its_row_without_moving_the_anchor() {
     assert!(b.set_image_size(
         img,
         9,
-        ImageSize { width: 200, height: 300 },
+        Some(ImageSize { width: 200, height: 300 }),
         &m
     ));
     b.ensure_layout(0, &m);
@@ -1725,4 +1725,92 @@ fn selected_rows_keeps_row_boundaries_across_embedded_newlines() {
     let joined = b.selected_text(&sel);
     assert_eq!(joined.lines().count(), 4);
     assert!(joined.lines().count() > rows.len());
+}
+
+#[test]
+fn selected_rows_separates_blocks_the_way_to_plain_text_does() {
+    // Whole-row copying used Message::to_plain_text, which puts a
+    // newline between blocks. Rebuilding the text span-by-span for
+    // partial selections must not quietly change that: joining every
+    // source with a space runs a code block into the paragraph after
+    // it. The gutter is the one place a space is right — nick and body
+    // read as a single line.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain("<a>")),
+        blocks: vec![
+            Block::Text(ParsedText::plain("look:")),
+            Block::Code {
+                text: "int x;".into(),
+                language: None,
+            },
+            Block::Text(ParsedText::plain("done")),
+        ],
+        flags: MessageFlagsNone::NONE,
+    };
+    let id = b.append(msg, &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+
+    let sel = Selection::new(
+        Caret {
+            message: id,
+            source: LineSource::Gutter,
+            offset: 0,
+        },
+        Caret {
+            message: id,
+            source: LineSource::Block(2),
+            offset: 4,
+        },
+    );
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].1, "<a> look:\nint x;\ndone");
+
+    // And a whole-row select agrees with the model's own rendering.
+    let whole = b.select_row(0).expect("row 0 selectable");
+    let rows = b.selected_rows(&whole);
+    let plain = b.message(id).unwrap().to_plain_text();
+    assert_eq!(rows[0].1, format!("<a> {plain}"));
+}
+
+#[test]
+fn word_bounds_does_not_panic_on_a_caret_inside_a_codepoint() {
+    // caret.offset arrives from C through the FFI and is not guaranteed
+    // to sit on a char boundary. Slicing off one panics, and a panic
+    // here unwinds into GTK and aborts the process, so clamp instead.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    // "naïve" — the ï is two bytes at 2..4.
+    let id = b.append(Message::system(ParsedText::plain("naïve word")), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+
+    let mid = Caret {
+        message: id,
+        source: LineSource::Block(0),
+        offset: 3,
+    };
+    assert_eq!(b.word_bounds(&mid), Some((0, 6)), "clamps down into 'naïve'");
+
+    // Past the end clamps to the end, which is not inside a word.
+    let past = Caret {
+        message: id,
+        source: LineSource::Block(0),
+        offset: 999,
+    };
+    assert!(b.word_bounds(&past).is_none());
+
+    // And select_word off the same caret yields the whole word.
+    let sel = b.select_word(&mid).expect("word selected");
+    assert_eq!(b.selected_rows(&sel)[0].1, "naïve");
 }
