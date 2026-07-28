@@ -28,7 +28,7 @@
 //! it), but it's part of the wire spec so we have to honour it.
 //!
 //! Empty password is a real case ("guest login"). Matching the
-//! legacy production builder (`src/login_packet.c`), the PASSWORD
+//! legacy Hotline client, the PASSWORD
 //! chunk is then omitted entirely rather than sent zero-length —
 //! some servers distinguish "absent PASSWORD" from "0-length
 //! PASSWORD", and a guest login must send no PASSWORD chunk at all.
@@ -132,7 +132,7 @@ pub fn build_login_frame(req: &LoginRequest<'_>) -> io::Result<Vec<u8>> {
 
     // XOR-0xFF the credentials into freshly-allocated buffers.
     // Clamp both to 64 bytes first, matching the legacy production
-    // builder (src/login_packet.c) — Hotline 1.x bounds login and
+    // builder — Hotline 1.x bounds login and
     // password well under that, and a server that capped at 64 must
     // see the same truncation we'd send the old way.
     const CRED_CAP: usize = 64;
@@ -152,7 +152,7 @@ pub fn build_login_frame(req: &LoginRequest<'_>) -> io::Result<Vec<u8>> {
 
     let mut chunks: Vec<PackChunk<'_>> = Vec::with_capacity(6);
     // LOGIN is always emitted (zero-length for an empty login name);
-    // PASSWORD only when non-empty, per src/login_packet.c.
+    // PASSWORD only when non-empty, per the legacy wire shape.
     chunks.push(PackChunk {
         tag: tag::LOGIN,
         data: &login_x,
@@ -287,7 +287,7 @@ mod tests {
     }
 
     /// Empty password (guest login) — the PASSWORD chunk is omitted
-    /// entirely, matching src/login_packet.c. Only the LOGIN chunk
+    /// entirely, matching the legacy client. Only the LOGIN chunk
     /// is emitted, and the host-chunk count is 1.
     #[test]
     fn build_login_frame_empty_password() {
@@ -357,8 +357,8 @@ mod tests {
     /// caps != 0, with the bitmask big-endian — otherwise
     /// extensions (chat-history / inline-media / voice) never
     /// negotiate, which is exactly the bug that shipped when this
-    /// chunk was missing. Mirrors the legacy login_packet.c
-    /// LEGACY-mode advertisement (0x001F).
+    /// chunk was missing. Mirrors the legacy client's
+    /// LOGIN capability advertisement (0x001F).
     #[test]
     fn build_login_frame_advertises_capabilities() {
         const CAPS: u16 = 0x001F; // large-files|text-encoding|voice|inline|chat-history

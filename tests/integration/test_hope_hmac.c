@@ -129,7 +129,7 @@ test_hope_hmac_login_and_ping (void)
 	 * (non-AEAD) PING, drain to the matching TASK reply. mhxd
 	 * gates HTLC_HDR_PING on the `can_ping` access bit, which
 	 * it sets when the LOGIN included HTLC_DATA_CLIENTVERSION
-	 * >= 150. STEP2 now emits that chunk (login_packet.c +
+	 * >= 150. STEP2 now emits that chunk (the Rust HOPE builder +
 	 * harness send_hope_step2 + production rcv.c all set
 	 * client_version=185), so this PING round-trip works.
 	 * Drops to task-error if any of those three sites regresses. */

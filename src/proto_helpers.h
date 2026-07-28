@@ -205,7 +205,7 @@ extern guint8 *hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag,
  * Same wire format and same return contract as hlpack (a fresh
  * caller-freed buffer + length), but the chunks come from a
  * caller-built array rather than a va_list. This lets shared message
- * builders (e.g. login_packet.c::hx_login_pack) assemble their chunks
+ * builders (e.g. the news / chat senders) assemble their chunks
  * programmatically and hand them to a single packer — no need for each
  * builder to wrap its own variadic dispatch.
  *

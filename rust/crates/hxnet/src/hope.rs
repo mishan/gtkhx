@@ -209,7 +209,7 @@ pub fn build_step1_login(req: &HopeStep1Request<'_>) -> io::Result<Vec<u8>> {
     // empty LOGIN/PASSWORD reads as a *plaintext* guest login, so
     // the server accepts it and replies with an empty TASK instead
     // of a HOPE step-1 reply (no sessionkey). Mirrors
-    // src/login_packet.c's HX_LOGIN_MODE_HOPE_STEP1. Caught against
+    // the legacy HOPE step-1 client. Caught against
     // live Janus, which returned a 22-byte (hc=0) reply until this
     // was fixed.
     let zero_placeholder = [0u8; 1];
@@ -372,7 +372,7 @@ pub struct HopeStep2Request<'a> {
     /// Client version (0 to omit).
     pub version: u16,
     /// Capability bitmask (`HTLC_CAP_*`). Always emitted in step 2
-    /// (matching `src/login_packet.c` STEP2, which sends it
+    /// (matching the legacy HOPE step-2 client, which sends it
     /// unconditionally — the server needs the caps echo to finalise
     /// the session, and some servers reject a step-2 that omits it).
     pub caps: u16,
@@ -435,7 +435,7 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
         });
     }
     // NAME + ICON — always emit, even empty/zero. Mirrors
-    // src/login_packet.c STEP2, which emits both unconditionally.
+    // the legacy HOPE step-2 client, which emits both unconditionally.
     // mhxd rejects (and silently closes) a step-2 that omits them;
     // Janus tolerates their absence. Caught against live mhxd.
     chunks.push(PackChunk {
@@ -460,7 +460,7 @@ pub fn build_step2_login(req: &HopeStep2Request<'_>) -> io::Result<Vec<u8>> {
             data: &req.choice.cipher_mode,
         });
     }
-    // CAPABILITIES — always emit (mirrors src/login_packet.c STEP2).
+    // CAPABILITIES — always emit (mirrors the legacy HOPE step-2 client).
     chunks.push(PackChunk {
         tag: crate::login::TAG_CAPABILITIES,
         data: &caps_be,

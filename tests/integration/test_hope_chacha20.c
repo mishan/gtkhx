@@ -32,7 +32,7 @@
  * Pre-refactor this test was infeasible: the harness had no HOPE
  * primitives and the production HOPE flow was wedged inside
  * rcv_task_login (GTK / Adwaita / GtkhxSession). The src/hope.c
- * extraction + src/login_packet.c sharing + harness AEAD wrappers
+ * extraction + harness AEAD wrappers
  * landed in earlier commits on this branch specifically to unblock
  * this test.
  */
