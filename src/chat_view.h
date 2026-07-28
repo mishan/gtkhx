@@ -269,6 +269,20 @@ HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
                                              const HxChatRun *body, int n_body,
                                              time_t stamp);
 
+/* Render markdown in incoming messages: `**bold**`, `*italic*`,
+ * `` `code` ``, fenced code blocks, `>` quotes, and `[label](url)` with
+ * a scheme allowlist.
+ *
+ * Process-wide, not per-view — it is one Settings checkbox and every
+ * chat surface should agree. Affects messages appended *after* the call;
+ * rows already in a buffer keep the rendering they were built with,
+ * since re-parsing scrollback would mean holding the original source
+ * text for every row forever.
+ *
+ * The send side is unaffected either way: markdown goes out literally,
+ * because the Hotline wire format has no styling concept at all. */
+void hx_chat_view_set_markdown (gboolean enabled);
+
 /* Show the speaker's avatar in the gutter, `px` on a side; 0 hides it.
  *
  * Only the first message of a run carries one — repeating an icon down

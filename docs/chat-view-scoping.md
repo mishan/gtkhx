@@ -592,6 +592,50 @@ shown on hover and in the click confirmation, never just the label; and a link
 whose label is itself URL-shaped but points somewhere else is flagged in the
 confirmation. Fenced code blocks are inert.
 
+**Shipped.** Rendering runs in `hxchat-view::ffi::body_blocks`, behind
+`CFG_MARKDOWN` (Settings → Chat → "Render markdown", default on).
+
+Three decisions worth recording:
+
+*The gutter is never parsed.* A nick containing asterisks is a nick.
+
+*Only a stylistically uniform body is parsed.* A body assembled from
+several differently-styled runs is chrome the caller styled deliberately
+— a divider, a `[hx]` status line — and re-parsing it would fight that.
+In practice every real body is a single run: plain for live chat, muted
+for history.
+
+*The row's own colour is laid **under** the parse.* The renderer treats a
+gap between spans as *default* style, not "whatever the row was", so
+without this a muted history line would come back with only its bold
+words muted and everything else at full contrast. There is a test.
+
+Fenced code is inert, and deliberately not autolinked either: a URL
+inside a code fence is being *shown*, not offered.
+
+**Code needs a box, not a font.** The first cut relied on the `CODE`
+attribute alone, which sets the Pango font family to Monospace — and
+GtkHx's chat font is *already* monospace, so `` `code` `` rendered
+identically to code with the backticks quietly deleted. Strictly worse
+than not parsing it. Inline code now gets a tint behind it and fenced
+blocks a tinted, outlined rounded box, both derived from the theme
+foreground at low alpha so they read on light and dark without a second
+colour to keep in step. The block's box is computed from its *laid-out
+line boxes* rather than from separate geometry, so it cannot land
+anywhere other than under the code it belongs to.
+
+**A one-line fence is a code block.** ```` ```like this``` ```` is how
+people actually type one in a chat box, because chat boxes send on
+Enter. The line scanner read it as an *opening* fence, made the rest of
+the line the "language", and searched for a close that never came —
+yielding an empty block, i.e. a blank row where the text should have
+been.
+
+The toggle affects messages appended after it. Rows already in a buffer
+keep the rendering they were built with, because re-parsing scrollback
+would mean holding every row's original source text alive forever — a
+permanent memory cost for a setting nobody flips twice.
+
 **Composing.** v1 is render-on-display only — no live preview, no WYSIWYG input.
 Two cheap affordances ride along: `Ctrl+B` / `Ctrl+I` / `Ctrl+Shift+C` wrap the
 selection (or insert the delimiter pair), and the input box gets subdued syntax
@@ -757,7 +801,6 @@ fractional-scale display, and the drawn rule and the hit test share one
 |---|---|
 | Marker line | xtext tracks a last-read marker (`gtk_xtext_reset_marker_pos`, `_moveto_marker_pos`, `_check_marker_visibility`). Not exposed through `chat_view.h` and not currently called from C, so it is dead today — but it was a real feature and someone will notice its absence if it is ever rewired. |
 | ~~In-buffer search~~ | **Shipped in C3r**, as a new feature rather than a port. xtext's `gtk_xtext_search` (xtext.c:5190) is a GRegex engine plus a `search_found` list threaded through the entry chain — and it has *no caller anywhere in GtkHx*. It arrived with the HexChat vendoring and has never run under GTK 4, so wiring it would have meant debugging a dead subsystem C5 deletes. The engine is `hxchat-layout::search` instead, driven through `hx_chat_view_search*`; `hx_chat_view_can_search` returns FALSE for xtext and the find bar simply isn't built there. |
-| Markdown rendering | The parser exists and is tested; nothing renders it, because the compat path parses mIRC only. Enabling it changes what chat *looks like*, which is a deliberate no during the A/B (§6, C2–C5 must be pixel-identical). The **compose** half shipped in C3r — Ctrl+B / Ctrl+I / Ctrl+Shift+C wrap the selection, and the input box tints live — because none of that touches incoming text, so the A/B stays clean. Markdown already transmits literally either way. |
 | `set_urlcheck_function` | Accepted and ignored. The new backend autodetects with `gtkurl_scan` directly rather than asking a per-view classifier. Same scheme list, so the behaviour matches; the callback is simply redundant. |
 | *(none currently open)* | Selection auto-scroll and word/line select were the last two; both shipped. |
 

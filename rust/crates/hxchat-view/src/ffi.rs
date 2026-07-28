@@ -21,6 +21,7 @@ use gtk4::glib::translate::{IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
 use hxchat_layout::{Block, ColorRef, Message, MessageId, MessageKind, ParsedText, Style};
 use std::ffi::{c_char, c_int, c_void, CStr};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type CGtkWidget = *mut gtk4::ffi::GtkWidget;
 
@@ -491,6 +492,45 @@ fn attrs_from_c(bits: u16) -> hxchat_layout::Attrs {
     a
 }
 
+/// The `Style` a run carries. One definition, so the uniformity test
+/// and the span builder cannot disagree about what "same style" means.
+fn run_style(r: &HxChatRun) -> Style {
+    Style {
+        fg: if r.color == HX_CHAT_COLOR_DEFAULT {
+            ColorRef::Default
+        } else {
+            ColorRef::Palette(r.color as u8)
+        },
+        attrs: attrs_from_c(r.attrs),
+        ..Style::default()
+    }
+}
+
+/// Whether incoming text is parsed as markdown.
+///
+/// Process-wide rather than per-view, matching the autocopy prefs: it is
+/// one Settings checkbox and every chat surface should agree.
+///
+/// A `static` atomic and not a `thread_local!`, because "process-wide"
+/// has to be true of the storage and not just of the comment. With a
+/// thread-local, a setter called off the main thread would flip a flag
+/// nothing ever reads and the checkbox would appear not to work — a
+/// silent failure, since nothing about the call would report an error.
+static MARKDOWN: AtomicBool = AtomicBool::new(true);
+
+fn markdown_enabled() -> bool {
+    MARKDOWN.load(Ordering::Relaxed)
+}
+
+/// # Safety
+/// Callable from any thread. The flag is a plain atomic; a view already
+/// mid-parse on the main thread finishes with whichever value it read,
+/// and the next append sees the new one.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_set_markdown(on: c_int) {
+    MARKDOWN.store(on != 0, Ordering::Relaxed);
+}
+
 /// Build a `ParsedText` from a C run array.
 ///
 /// # Safety
@@ -516,15 +556,7 @@ pub(crate) unsafe fn runs_to_text(runs: *const HxChatRun, n: c_int) -> ParsedTex
         }
         let start = out.text.len();
         out.text.push_str(&text);
-        let style = Style {
-            fg: if r.color == HX_CHAT_COLOR_DEFAULT {
-                ColorRef::Default
-            } else {
-                ColorRef::Palette(r.color as u8)
-            },
-            attrs: attrs_from_c(r.attrs),
-            ..Style::default()
-        };
+        let style = run_style(r);
         // Only record a span when it actually says something; a plain
         // run is the absence of a span, which is what keeps an
         // unstyled row's span list empty rather than one-per-run.
@@ -580,6 +612,120 @@ pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
     }
 }
 
+/// The single style every body run shares, or `None` when they differ.
+///
+/// Markdown is only applied to a *stylistically uniform* body. A body
+/// assembled from several differently-styled runs is chrome the caller
+/// styled deliberately — a divider, a `[hx]` status line — and
+/// re-parsing it would fight that. In practice every real body is one
+/// run: plain for live chat, muted for history.
+unsafe fn uniform_body_style(runs: *const HxChatRun, n: c_int) -> Option<Style> {
+    if runs.is_null() || n <= 0 {
+        return None;
+    }
+    let mut seen: Option<Style> = None;
+    for i in 0..n as usize {
+        let r = &*runs.add(i);
+        let style = run_style(r);
+        match seen {
+            None => seen = Some(style),
+            Some(prev) if prev == style => {}
+            Some(_) => return None,
+        }
+    }
+    seen
+}
+
+/// Lay `base` under `p`, so text the parser left unstyled still carries
+/// the caller's colour.
+///
+/// Needed because the renderer treats a gap between spans as *default*
+/// style, not as "whatever the row's colour was". Without this a muted
+/// history line would come back with only its bold words muted and the
+/// rest at full contrast.
+fn under(p: ParsedText, base: Style) -> ParsedText {
+    if base == Style::default() {
+        return p;
+    }
+    let mut out = ParsedText {
+        text: p.text,
+        spans: Vec::with_capacity(p.spans.len() * 2 + 1),
+        links: p.links,
+    };
+    let mut at = 0usize;
+    for sp in p.spans {
+        if sp.range.start > at {
+            out.spans.push(hxchat_layout::Span {
+                range: at..sp.range.start,
+                style: base,
+            });
+        }
+        at = sp.range.end;
+        out.spans.push(hxchat_layout::Span {
+            range: sp.range,
+            style: Style {
+                fg: if sp.style.fg == ColorRef::Default {
+                    base.fg
+                } else {
+                    sp.style.fg
+                },
+                attrs: sp.style.attrs.union(base.attrs),
+                ..sp.style
+            },
+        });
+    }
+    if at < out.text.len() {
+        out.spans.push(hxchat_layout::Span {
+            range: at..out.text.len(),
+            style: base,
+        });
+    }
+    out
+}
+
+/// Split a body into blocks, rendering markdown when it is enabled.
+pub(crate) unsafe fn body_blocks(
+    runs: *const HxChatRun,
+    n: c_int,
+    markdown: bool,
+) -> Vec<Block> {
+    let plain = runs_to_text(runs, n);
+
+    let Some(base) = uniform_body_style(runs, n).filter(|_| markdown) else {
+        // Markdown off, or a body the caller styled run by run: keep it
+        // exactly as handed over.
+        let mut b = plain;
+        crate::links::autolink(&mut b);
+        return vec![Block::Text(b)];
+    };
+
+    let mut out = Vec::new();
+    for raw in hxchat_layout::markdown::split_blocks(&plain.text) {
+        match raw {
+            hxchat_layout::markdown::RawBlock::Paragraph(t) => {
+                let mut p = under(hxchat_layout::markdown::parse_inline(&t), base);
+                crate::links::autolink(&mut p);
+                out.push(Block::Text(p));
+            }
+            // Fenced code is inert by definition: no inline parsing, and
+            // deliberately no autolinking either — a URL inside a code
+            // fence is being shown, not offered.
+            hxchat_layout::markdown::RawBlock::Code { text, language } => {
+                out.push(Block::Code { text, language });
+            }
+            hxchat_layout::markdown::RawBlock::Quote { text, depth } => {
+                let mut p = under(hxchat_layout::markdown::parse_inline(&text), base);
+                crate::links::autolink(&mut p);
+                out.push(Block::Quote { content: p, depth });
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push(Block::Text(ParsedText::default()));
+    }
+    out
+}
+
 unsafe fn runs_message(
     speaker: &HxChatSpeaker,
     gutter: *const HxChatRun,
@@ -588,15 +734,16 @@ unsafe fn runs_message(
     n_body: c_int,
     stamp: i64,
 ) -> Message {
+    // The gutter is never markdown-parsed: a nick containing asterisks
+    // is a nick, not emphasis.
     let g = runs_to_text(gutter, n_gutter);
-    let mut b = runs_to_text(body, n_body);
-    crate::links::autolink(&mut b);
+    let blocks = body_blocks(body, n_body, markdown_enabled());
     Message {
         kind: MessageKind::Live,
         timestamp: stamp_or_now(stamp),
         speaker: speaker_of(speaker),
         gutter: if g.text.is_empty() { None } else { Some(g) },
-        blocks: vec![Block::Text(b)],
+        blocks,
         flags: if speaker.outgoing != 0 {
             hxchat_layout::MessageFlags::OUTGOING
         } else {

@@ -130,6 +130,11 @@ server-sent text, so it cannot fire — removing it means retiring two
 proto-test cases, which is its own change. Every other `\003` in the tree is
 inside a comment explaining what used to be there.
 
+Markdown **renders** on incoming messages (`**bold**`, `*italic*`,
+`` `code` ``, fenced blocks, `>` quotes, `[label](url)` with a scheme
+allowlist), behind `CFG_MARKDOWN`. Sending is unaffected — markdown goes
+out literally, since the wire format has no styling concept.
+
 Message rows also carry structure now: an `HxChatSpeaker` (uid + nick +
 direction), grouping of consecutive messages from one speaker, and an avatar
 gutter on group heads. See scoping §6a2 and §6b.

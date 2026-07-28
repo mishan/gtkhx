@@ -65,6 +65,9 @@ struct gtkhx_prefs {
     /* Show the speaker's avatar / icon in the chat gutter. Only on the
      * first message of a run — see chat_view.h's grouping note. */
     unsigned char chat_avatars;
+    /* Render markdown in incoming messages. Sending is unaffected —
+     * markdown is transmitted literally, the wire format has no styling. */
+    unsigned char markdown;
     unsigned char word_wrap;
     unsigned char track_case;
     unsigned char old_nickcompletion;

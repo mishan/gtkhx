@@ -10,7 +10,7 @@ use crate::index::HeightIndex;
 use crate::markdown::{self, RawBlock};
 use crate::measure::{FixedMeasure, TextMeasure};
 use crate::message::{Block, ImageSize, Message, Speaker};
-use crate::span::{Attrs, ColorRef, ParsedText, Style};
+use crate::span::{Attrs, ParsedText, Style};
 use crate::wrap::{layout_message, LayoutGeneration, LayoutParams};
 
 // ---------------------------------------------------------------- markdown
@@ -96,6 +96,56 @@ fn md_code_span_suppresses_other_markup() {
     let p = markdown::parse_inline("use `a **b** c` here");
     assert_eq!(p.text, "use a **b** c here");
     assert_eq!(styled(&p), vec![("a **b** c", Attrs::CODE)]);
+}
+
+#[test]
+fn md_code_span_matches_run_length() {
+    // The delimiter is a *run*: N backticks open, the next run of
+    // exactly N closes. Reading one backtick at a time turned this into
+    // two empty spans with plain text between them, which is how
+    // ``hello`` rendered as an unadorned hello.
+    let p = markdown::parse_inline("``hello``");
+    assert_eq!(p.text, "hello");
+    assert_eq!(styled(&p), vec![("hello", Attrs::CODE)]);
+
+    // The point of the longer run: it can hold a shorter one.
+    let p = markdown::parse_inline("``a `b` c``");
+    assert_eq!(p.text, "a `b` c");
+    assert_eq!(styled(&p), vec![("a `b` c", Attrs::CODE)]);
+
+    // A shorter run inside a longer one does not close it.
+    let p = markdown::parse_inline("```x`y```");
+    assert_eq!(p.text, "x`y");
+    assert_eq!(styled(&p), vec![("x`y", Attrs::CODE)]);
+}
+
+#[test]
+fn md_code_span_strips_one_pad_space() {
+    // Both spaces or neither, and never from an all-space span — the
+    // rule that lets a span carry a backtick of its own.
+    let p = markdown::parse_inline("`` ` ``");
+    assert_eq!(p.text, "`");
+    assert_eq!(styled(&p), vec![("`", Attrs::CODE)]);
+
+    let p = markdown::parse_inline("` a `");
+    assert_eq!(p.text, "a");
+
+    // One-sided padding is content, not padding.
+    let p = markdown::parse_inline("` a`");
+    assert_eq!(p.text, " a");
+}
+
+#[test]
+fn md_unmatched_backtick_run_is_literal() {
+    let p = markdown::parse_inline("``unclosed");
+    assert_eq!(p.text, "``unclosed");
+    assert!(p.spans.is_empty());
+
+    // The run is skipped whole. Resuming inside it would let the second
+    // backtick open a span that closes on the one further along.
+    let p = markdown::parse_inline("``a `b` c");
+    assert_eq!(p.text, "``a b c");
+    assert_eq!(styled(&p), vec![("b", Attrs::CODE)]);
 }
 
 #[test]
@@ -266,6 +316,44 @@ fn params(width: u32) -> LayoutParams {
         word_wrap: true,
         avatar_size: 0,
     }
+}
+
+#[test]
+fn every_line_records_the_width_it_was_measured_at() {
+    let m = FixedMeasure::new(10);
+    let msg = Message::system(ParsedText::plain("aaa bbb ccc ddd"));
+    let l = layout_message(&msg, &params(80), LayoutGeneration::default(), &m);
+    for lb in &l.lines {
+        let text = &"aaa bbb ccc ddd"[lb.range.clone()];
+        assert_eq!(
+            lb.width,
+            m.run_width(text, Style::default()),
+            "line {text:?} recorded a width it was not laid out at"
+        );
+        assert!(lb.width <= 80, "a line wider than the column escaped the wrap");
+    }
+}
+
+#[test]
+fn a_code_block_is_only_as_wide_as_its_widest_line() {
+    // What the view draws the box around. Before this, the box ran to
+    // the right edge of the widget regardless of the code in it, so a
+    // one-word block read as a full-width divider.
+    let m = FixedMeasure::new(10);
+    let mut msg = Message::system(ParsedText::plain(""));
+    msg.blocks = vec![Block::Code {
+        text: "hi\nlonger line\nx".to_string(),
+        language: None,
+    }];
+    let l = layout_message(&msg, &params(1000), LayoutGeneration::default(), &m);
+    let widths: Vec<u32> = l.lines.iter().map(|lb| lb.width).collect();
+    assert_eq!(widths, vec![20, 110, 10]);
+
+    let widest = widths.iter().copied().max().unwrap();
+    assert!(
+        widest < 1000,
+        "the box would still span the full column"
+    );
 }
 
 #[test]
@@ -2706,4 +2794,177 @@ fn two_users_sharing_a_nick_do_not_group() {
 
     assert!(!grouped(&b, 0));
     assert!(!grouped(&b, 1), "different uid means a different person");
+}
+
+#[test]
+fn a_one_line_fence_is_a_code_block_not_an_unterminated_one() {
+    use crate::markdown::{split_blocks, RawBlock};
+    // Chat boxes send on Enter, so this is how people actually type a
+    // code block. Treating it as an opening fence made the rest of the
+    // line the "language" and produced an empty block — a blank row.
+    let b = split_blocks("```hello world```");
+    assert_eq!(b.len(), 1);
+    match &b[0] {
+        RawBlock::Code { text, language } => {
+            assert_eq!(text, "hello world");
+            assert_eq!(*language, None);
+        }
+        other => panic!("expected code, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_real_multi_line_fence_still_works() {
+    use crate::markdown::{split_blocks, RawBlock};
+    let b = split_blocks("before\n```rust\nlet x = 1;\nlet y = 2;\n```\nafter");
+    assert_eq!(b.len(), 3);
+    match &b[1] {
+        RawBlock::Code { text, language } => {
+            assert_eq!(text, "let x = 1;\nlet y = 2;");
+            assert_eq!(language.as_deref(), Some("rust"));
+        }
+        other => panic!("expected code, got {other:?}"),
+    }
+}
+
+#[test]
+fn select_all_shaped_selection_covers_the_buffer() {
+    // Mirrors HxChatView::select_all's caret construction exactly, to
+    // find out whether "Select All does nothing" is the model or the UI.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(9, "alice", "two", 2000), &m);
+    b.append(said(7, "misha", "three", 3000), &m);
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+
+    let first = b.id_at(0).unwrap();
+    let last = b.id_at(2).unwrap();
+    let last_len = b.source_text(2, LineSource::Block(0)).map_or(0, |t| t.len());
+    let sel = Selection::new(
+        Caret { message: first, source: LineSource::Block(0), offset: 0 },
+        Caret { message: last, source: LineSource::Block(0), offset: last_len },
+    );
+
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 3, "every row should contribute: {rows:?}");
+    assert!(rows[0].1.contains("one"));
+    assert!(rows[1].1.contains("two"));
+    assert!(rows[2].1.contains("three"));
+}
+
+#[test]
+fn select_all_covers_the_gutter_and_every_block() {
+    // Both ways the view's hand-rolled version got this wrong: it started
+    // at Block(0), skipping the first row's nick, and ended at Block(0)
+    // of the last row — which, once markdown split a body into several
+    // blocks, dropped any code block or quote after the first.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 2000,
+            speaker: Some(crate::message::Speaker::new(9, "alice")),
+            gutter: Some(ParsedText::plain("<alice>")),
+            blocks: vec![
+                Block::Text(ParsedText::plain("look:")),
+                Block::Code { text: "x = 1".into(), language: None },
+            ],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.reindex();
+
+    let sel = b.select_all().expect("non-empty buffer");
+    assert_eq!(sel.anchor.source, LineSource::Gutter, "starts at the nick");
+    assert_eq!(sel.focus.source, LineSource::Block(1), "ends at the last block");
+
+    let text = b.selected_text(&sel);
+    assert!(text.contains("<misha>"), "the first nick: {text:?}");
+    assert!(text.contains("x = 1"), "the trailing code block: {text:?}");
+}
+
+#[test]
+fn select_all_on_an_empty_buffer_is_none() {
+    let p = params(2000);
+    let b = ChatBuffer::new(p);
+    assert!(b.select_all().is_none());
+}
+
+#[test]
+fn text_is_centred_against_a_taller_avatar() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 48;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "hi", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    let l = b.layout_at(0).unwrap();
+    let line = l.lines.iter().find(|l| l.source == LineSource::Block(0)).unwrap();
+    assert!(
+        line.y > 0,
+        "a single line beside a 48px icon should be pushed down, not sit on its top edge"
+    );
+    let centre = line.y + line.height / 2;
+    assert!(
+        (centre as i64 - 24).abs() <= 1,
+        "line centre {centre} should be near the icon's centre (24)"
+    );
+}
+
+#[test]
+fn avatar_at_hits_the_painted_rect_and_returns_its_row() {
+    // Clicking an icon must resolve to the same speaker as clicking the
+    // name. The uid comes back with the message id because the caller
+    // needs both, and looking the row up a second time meant a second
+    // borrow of the buffer while the first was live.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 32;
+    let mut b = ChatBuffer::new(p);
+    let id = b.append(said(7, "misha", "hi", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+
+    let av = b.layout_at(0).unwrap().avatar.expect("head has an avatar");
+    // Dead centre of the painted rect.
+    let hit = b.avatar_at(
+        (av.x + av.size / 2) as i32,
+        (av.y + av.size / 2) as u64,
+    );
+    assert_eq!(hit, Some((id, 7)));
+
+    // Just outside it, on both axes.
+    assert!(b.avatar_at((av.x + av.size + 4) as i32, (av.size / 2) as u64).is_none());
+    assert!(b.avatar_at((av.x + av.size / 2) as i32, (av.size + 4) as u64).is_none());
+}
+
+#[test]
+fn a_continuation_row_has_no_avatar_to_hit() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 32;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    b.ensure_layout(1, &m);
+
+    let top = b.index_mut().offset_of(1);
+    assert!(b.avatar_at(4, top + 2).is_none(), "grouped rows show no icon");
 }

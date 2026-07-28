@@ -184,6 +184,25 @@ const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1
 const ZOOM_BADGE_HOLD_US: i64 = 700_000;
 const ZOOM_BADGE_FADE_US: i64 = 400_000;
 
+/// Text lines per wheel notch.
+const WHEEL_LINES: f64 = 3.0;
+
+/// Backing for `code` spans and code blocks.
+///
+/// The monospace attribute alone is invisible here: GtkHx's chat font is
+/// *already* monospace by default, so `` `code` `` rendered identically
+/// to code with the backticks quietly removed — strictly worse than not
+/// parsing it. The tint is what actually says "this is code".
+///
+/// Derived from the theme foreground at low alpha rather than a fixed
+/// grey, so it reads on light and dark without a second colour to keep
+/// in step.
+const CODE_BG_ALPHA: f32 = 0.10;
+const CODE_BORDER_ALPHA: f32 = 0.22;
+
+/// Padding around a fenced block's box, in px.
+const CODE_BOX_PAD: f32 = 4.0;
+
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
 
@@ -1062,6 +1081,69 @@ impl HxChatView {
                 }
             }
 
+            // Fenced code blocks get a box: a tinted, outlined rect
+            // spanning the block's lines. Painted before the text, and
+            // derived from the *laid-out* line boxes rather than from
+            // separate geometry, so the box cannot land anywhere other
+            // than under the code it belongs to.
+            if let Some(msg) = buf.message_at(row) {
+                for (bi, blk) in msg.blocks.iter().enumerate() {
+                    if !matches!(blk, hxchat_layout::Block::Code { .. }) {
+                        continue;
+                    }
+                    let src = LineSource::Block(bi);
+                    let mut top = i64::MAX;
+                    let mut bot = i64::MIN;
+                    let mut left = i32::MAX;
+                    let mut right = i32::MIN;
+                    for l in layout.lines.iter().filter(|l| l.source == src) {
+                        top = top.min(l.y as i64);
+                        bot = bot.max(l.y as i64 + l.height as i64);
+                        left = left.min(l.x as i32);
+                        right = right.max(l.x as i32 + l.width as i32);
+                    }
+                    if top > bot {
+                        continue; // no lines: nothing to box
+                    }
+                    let x = left as f32 - CODE_BOX_PAD;
+                    let y = (row_top + top) as f32 - CODE_BOX_PAD;
+                    // Shrink-wrap the widest line rather than running to
+                    // the right edge: the box marks the extent of the
+                    // code, and a full-width rule around one word reads
+                    // as a section divider. Clamped to the content width
+                    // so an overflowing (never-wrapped) code line cannot
+                    // push the border off-screen.
+                    let w = ((right as f32 + CODE_BOX_PAD) - x)
+                        .min(content_width(alloc_w) as f32 - x)
+                        .max(1.0);
+                    let h = (bot - top) as f32 + CODE_BOX_PAD * 2.0;
+
+                    let fgc = imp.palette.borrow()[PAL_FG];
+                    let fill = gtk4::gdk::RGBA::new(
+                        fgc.red(),
+                        fgc.green(),
+                        fgc.blue(),
+                        CODE_BG_ALPHA,
+                    );
+                    let edge = gtk4::gdk::RGBA::new(
+                        fgc.red(),
+                        fgc.green(),
+                        fgc.blue(),
+                        CODE_BORDER_ALPHA,
+                    );
+                    let rect = gtk4::graphene::Rect::new(x, y, w, h);
+                    let rounded = gtk4::gsk::RoundedRect::from_rect(rect, 4.0);
+                    snapshot.push_rounded_clip(&rounded);
+                    snapshot.append_color(&fill, &rect);
+                    snapshot.pop();
+                    snapshot.append_border(
+                        &rounded,
+                        &[1.0; 4],
+                        &[edge, edge, edge, edge],
+                    );
+                }
+            }
+
             // The speaker's avatar, on group heads only. Resolved per
             // frame rather than cached: an animated avatar advances on a
             // shared timer, and holding a texture would freeze it on
@@ -1361,6 +1443,23 @@ impl HxChatView {
                 Mark::Match => Some(SEARCH_MATCH_BG),
                 Mark::None => None,
             };
+            // Inline `code` gets a tint under it — see CODE_BG_ALPHA for
+            // why the monospace attribute alone is not enough. Drawn
+            // beneath any band, so a selected code span still reads as
+            // selected.
+            if style.attrs.contains(hxchat_layout::Attrs::CODE) {
+                let fgc = self.imp_().palette.borrow()[PAL_FG];
+                let tint = gtk4::gdk::RGBA::new(
+                    fgc.red(),
+                    fgc.green(),
+                    fgc.blue(),
+                    CODE_BG_ALPHA,
+                );
+                snapshot.append_color(
+                    &tint,
+                    &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
+                );
+            }
             if let Some(bg) = band_bg {
                 snapshot.append_color(
                     &bg,
@@ -2078,8 +2177,16 @@ impl HxChatView {
         let this = self.clone();
         scroll.connect_scroll(move |c, _dx, dy| {
             if !c.current_event_state().contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
-                // Not ours — let it scroll the view.
-                return glib::Propagation::Proceed;
+                // Scroll the view ourselves.
+                //
+                // Implementing GtkScrollable is not enough: that only
+                // does anything inside a GtkScrolledWindow, and the chat
+                // view is packed as a bare child next to a plain
+                // GtkScrollbar (chat.rs::build_content). Nothing was
+                // consuming wheel events at all — Proceed handed them to
+                // a parent that had no idea what to do with them.
+                this.scroll_by_notches(dy);
+                return glib::Propagation::Stop;
             }
             if dy < 0.0 {
                 this.zoom_step(1);
@@ -2119,6 +2226,27 @@ impl HxChatView {
             controller.add_shortcut(gtk4::Shortcut::new(Some(trigger), Some(reset)));
         }
         self.add_controller(controller);
+    }
+
+    /// Scroll by wheel notches. Three text lines each, the usual step.
+    fn scroll_by_notches(&self, notches: f64) {
+        let height = content_height(self.height());
+        if height == 0 {
+            return;
+        }
+        let line = self.imp_().measure.borrow().metrics().line_height.max(1);
+        let delta = notches * (line as f64) * WHEEL_LINES;
+        let cur = {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_offset(height) as f64
+        };
+        let next = (cur + delta).max(0.0) as u64;
+        {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_to(next, height, FOLLOW_SLOP);
+        }
+        self.sync_adjustment(height);
+        self.queue_draw();
     }
 
     /// Move `delta` notches along [`ZOOM_STEPS`].
@@ -2256,6 +2384,26 @@ impl HxChatView {
     /// is where nicks live and a URL-shaped nick is a curiosity rather
     /// than something you want to open.
     fn hover_target_at(&self, x: f64, y: f64) -> Option<HoverTarget> {
+        // The avatar first: it is painted from the layout's avatar box
+        // rather than from a line box, so the caret hit-test below cannot
+        // see it. Clicking someone's icon should mean the same thing as
+        // clicking their name.
+        {
+            let imp = self.imp_();
+            let height = content_height(self.height());
+            let scroll = imp.buffer.borrow_mut().scroll_offset(height);
+            let cx = (x as i32) - PAD_X;
+            let cy = ((y as i32) - PAD_Y).max(0) as u64 + scroll;
+            // One borrow, released before anything else touches the
+            // buffer. The first cut chained a borrow() inside an
+            // and_then() on a live borrow_mut(), which is a RefCell
+            // panic the moment the pointer crosses an icon.
+            let hit = imp.buffer.borrow_mut().avatar_at(cx, cy);
+            if let Some((message, uid)) = hit {
+                return Some(HoverTarget::Nick { message, uid });
+            }
+        }
+
         let caret = self.caret_at(x, y)?;
         let buf = self.imp_().buffer.borrow();
         if caret.source == LineSource::Gutter {
@@ -2344,29 +2492,14 @@ impl HxChatView {
     /// Select the whole buffer.
     pub fn select_all(&self) {
         let imp = self.imp_();
-        let buf = imp.buffer.borrow();
-        if buf.is_empty() {
+        // The buffer decides what "everything" is — see
+        // ChatBuffer::select_all for the two ways doing it here got it
+        // wrong.
+        let sel = imp.buffer.borrow().select_all();
+        if sel.is_none() {
             return;
         }
-        let (Some(first), Some(last)) = (buf.id_at(0), buf.id_at(buf.len() - 1)) else {
-            return;
-        };
-        let last_len = buf
-            .source_text(buf.len() - 1, LineSource::Block(0))
-            .map_or(0, |t| t.len());
-        drop(buf);
-        *imp.selection.borrow_mut() = Some(Selection::new(
-            Caret {
-                message: first,
-                source: LineSource::Block(0),
-                offset: 0,
-            },
-            Caret {
-                message: last,
-                source: LineSource::Block(0),
-                offset: last_len,
-            },
-        ));
+        *imp.selection.borrow_mut() = sel;
         self.queue_draw();
     }
 }
