@@ -776,6 +776,29 @@ unsafe fn remotedir_present(htxf: *const HtxfHandle) -> bool {
     rd[0] != 0 && !(rd[0] == b'/' as c_char && rd[1] == 0)
 }
 
+/// Borrow a `path_to_hldir` result as the DIR chunk bytes: `None` when there's
+/// no parent dir, an empty slice when the encode produced nothing, else the
+/// `hldirlen` bytes at `*hldir`. Taking `hldir` by reference ties the returned
+/// slice's lifetime to that local pointer variable (freed at the end of the
+/// caller's scope), so — unlike a plain `fn(...) -> &'a [u8]` — the slice can't
+/// outlive the allocation.
+///
+/// # Safety
+/// When `has_dir`, `*hldir` is NULL or valid for `hldirlen` bytes.
+unsafe fn hldir_dir_bytes<'a>(
+    hldir: &'a *mut u8,
+    hldirlen: u16,
+    has_dir: bool,
+) -> Option<&'a [u8]> {
+    if !has_dir {
+        None
+    } else if hldir.is_null() || hldirlen == 0 {
+        Some(&[])
+    } else {
+        Some(std::slice::from_raw_parts(*hldir, hldirlen as usize))
+    }
+}
+
 /// The download half of [`xfer_go`]: resume-vs-rename decision, then the
 /// FILE_NAME / DIR / (resume) RFLT chunk build + FILE_GET request.
 unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
@@ -816,19 +839,9 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
         if has_dir {
             hldir = path_to_hldir((*htxf).remotedir.as_ptr(), &mut hldirlen, 0);
         }
-        // Borrow the DIR bytes in this scope so the slice's lifetime is tied to
-        // `hldir` (g_free'd at the end of this closure), never an unconstrained
-        // one that could outlive the allocation.
-        let dir: Option<&[u8]> = if has_dir && !hldir.is_null() && hldirlen != 0 {
-            Some(std::slice::from_raw_parts(hldir, hldirlen as usize))
-        } else if has_dir {
-            Some(&[])
-        } else {
-            None
-        };
         let req = FileGetRequest {
             name: nm_wire,
-            dir,
+            dir: hldir_dir_bytes(&hldir, hldirlen, has_dir),
             rflt: resuming.then_some(&rflt[..]),
         };
         let mut chunks = [HxChunk::EMPTY; 3];
@@ -867,19 +880,9 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
         if has_dir {
             hldir = path_to_hldir((*htxf).remotedir.as_ptr(), &mut hldirlen, 0);
         }
-        // Borrow the DIR bytes in this scope so the slice's lifetime is tied to
-        // `hldir` (g_free'd at the end of this closure), never an unconstrained
-        // one that could outlive the allocation.
-        let dir: Option<&[u8]> = if has_dir && !hldir.is_null() && hldirlen != 0 {
-            Some(std::slice::from_raw_parts(hldir, hldirlen as usize))
-        } else if has_dir {
-            Some(&[])
-        } else {
-            None
-        };
         let req = FilePutRequest {
             name: nm_wire,
-            dir,
+            dir: hldir_dir_bytes(&hldir, hldirlen, has_dir),
             has_preview,
             size: size_host,
             size64: large.then_some((*htxf).total_size),
