@@ -53,6 +53,11 @@ extern void users_clear (struct htlc_conn *htlc, struct chat *chat);
  *
  * `anchor` is the widget the popover gets parented to (and where
  * pointing-to coords are taken from); `x`/`y` are widget-local. */
+/* Install (once) the CSS for bare-popover menu items: padding plus a
+ * legible :hover background. Add the "gtkhx-popup-item" class to a
+ * button to pick it up. Shared with the chat view's context menu. */
+extern void hx_popup_item_install_css (void);
+
 extern void user_popup_show (GtkWidget *anchor, session *sess, guint32 cid,
                              guint16 uid, double x, double y);
 

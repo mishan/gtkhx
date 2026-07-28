@@ -345,7 +345,7 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
     struct user_btn_ctx *bctx = g_new0 (struct user_btn_ctx, 1);
 
     gtk_widget_add_css_class (btn, "flat");
-    gtk_widget_add_css_class (btn, "gtkhx-user-popup-item");
+    gtk_widget_add_css_class (btn, "gtkhx-popup-item");
     gtk_button_set_has_frame (GTK_BUTTON (btn), FALSE);
     /* keyboard focus on the first button auto-paints a
      * focus ring when the popover opens; the user reads that as
@@ -374,14 +374,19 @@ user_popup_append_button (GtkBox *vbox, GtkPopover *popover,
     gtk_box_append (vbox, btn);
 }
 
-/* One-shot CSS provider giving our user-popup buttons a clearly
+/* One-shot CSS provider giving our bare-popover menu items a clearly
  * visible :hover background. Adwaita's default flat-button hover is
  * subtle enough that mouse tracking can be hard to read, especially
  * when the user is expecting menu-style highlighting. Install on the
  * default display once; namespaced selector keeps the rule scoped to
- * our popup buttons. */
-static void
-user_popup_install_css (void)
+ * our popup buttons.
+ *
+ * Shared rather than static: the chat view's own bare-popover menu
+ * (hxchat-view, view.rs::show_context_menu) wants the same affordance,
+ * and a second provider with a second class name is how the two menus
+ * start looking different from each other. */
+void
+hx_popup_item_install_css (void)
 {
     static GtkCssProvider *provider = NULL;
     if (provider) {
@@ -389,10 +394,10 @@ user_popup_install_css (void)
     }
     provider = gtk_css_provider_new ();
     gtk_css_provider_load_from_string (
-        provider, ".gtkhx-user-popup-item { "
+        provider, ".gtkhx-popup-item { "
                   "  padding: 4px 10px; "
                   "} "
-                  ".gtkhx-user-popup-item:hover { "
+                  ".gtkhx-popup-item:hover { "
                   "  background-color: alpha(currentColor, 0.10); "
                   "}");
     gtk_style_context_add_provider_for_display (
@@ -496,7 +501,7 @@ user_popup_show (GtkWidget *anchor, session *sess, guint32 cid, guint16 uid,
         }
     }
 
-    user_popup_install_css ();
+    hx_popup_item_install_css ();
 
     ctx = g_new0 (struct UserActionCtx, 1);
     ctx->sess = sess;

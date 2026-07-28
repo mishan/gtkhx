@@ -14,7 +14,8 @@
 //!     (the C `tab_nick_comp` core — kept in C so the tested completer + the
 //!     ambiguous-list `hx_printf` stay put).
 //!   - **Up / Down** → history navigation (the Rust `InputHistory` owns the
-//!     draft snapshot).
+//!     draft snapshot), but only from the edge of the draft — see
+//!     `HISTORY_NAV_KEY`.
 //!
 //! `gtkhx_chat_input_attach` captures `(sess, cid, history)` once — all three
 //! are set on the `gtkhx_chat` before the input is attached and are stable for
@@ -68,6 +69,27 @@ fn buffer_cbytes(buf: &gtk::TextBuffer) -> Vec<u8> {
 fn set_line(buf: &gtk::TextBuffer, s: &str) {
     buf.set_text(s);
     buf.place_cursor(&buf.end_iter());
+}
+
+/// Set while Up/Down are stepping through history; cleared the moment the
+/// caret moves for any other reason.
+///
+/// Up only *enters* history from the start of the draft, so that in a
+/// multi-line message Up is an ordinary "move up a line" and there is a
+/// way to reach the text you want to edit. But leaving it at that would
+/// make stepping back through several entries impossible: a recall puts
+/// the caret at the end of the text it just inserted, so the next Up
+/// would move the caret instead of continuing. Hence the flag — once
+/// you are navigating you keep navigating, and anything that moves the
+/// caret (typing, clicking, an arrow key we let through) ends it.
+const HISTORY_NAV_KEY: &str = "gtkhx-chat-input-history-nav";
+
+fn history_nav(buf: &gtk::TextBuffer) -> bool {
+    unsafe { buf.data::<bool>(HISTORY_NAV_KEY).map(|p| *p.as_ref()) }.unwrap_or(false)
+}
+
+fn set_history_nav(buf: &gtk::TextBuffer, on: bool) {
+    unsafe { buf.set_data(HISTORY_NAV_KEY, on) };
 }
 
 /// Wrap the selection in `delim`, or unwrap it if it is already
@@ -207,6 +229,7 @@ fn on_key(
     use gtk::gdk::Key;
     let buf = view.buffer();
     let point = buf.cursor_position();
+    let nav = history_nav(&buf);
 
     if state.contains(gtk::gdk::ModifierType::CONTROL_MASK) {
         // Ctrl chords are exclusive — no send/complete/history under Ctrl.
@@ -294,6 +317,12 @@ fn on_key(
         }
 
         Key::Up => {
+            // Only from the very start of the draft, or when already
+            // stepping. Otherwise this is a cursor movement and the view
+            // should have it.
+            if point != 0 && !nav {
+                return glib::Propagation::Proceed;
+            }
             let cur = buffer_cbytes(&buf);
             let mut nt: *mut c_char = ptr::null_mut();
             let got = unsafe {
@@ -305,12 +334,19 @@ fn on_key(
                     set_line(&buf, &s);
                     unsafe { glib::ffi::g_free(nt as *mut c_void) };
                 }
+                // After set_line: placing the caret fires mark-set,
+                // which clears the flag we are setting here.
+                set_history_nav(&buf, true);
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
         }
 
         Key::Down => {
+            // Mirror of Up: only from the very end of the draft.
+            if point != buf.char_count() && !nav {
+                return glib::Propagation::Proceed;
+            }
             let mut nt: *mut c_char = ptr::null_mut();
             let got = unsafe { hx_input_history_down(history, &mut nt) };
             if got != glib::ffi::GFALSE {
@@ -319,6 +355,9 @@ fn on_key(
                     set_line(&buf, &s);
                     unsafe { glib::ffi::g_free(nt as *mut c_void) };
                 }
+                // After set_line: placing the caret fires mark-set,
+                // which clears the flag we are setting here.
+                set_history_nav(&buf, true);
                 return glib::Propagation::Stop;
             }
             glib::Propagation::Proceed
@@ -377,6 +416,16 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
         }
     });
     tv.add_controller(ctrl);
+
+    // Any caret move ends a history-navigation session. `mark-set` on
+    // the insert mark rather than a key handler, because clicking into
+    // the draft has to end it too, and a key handler would never see
+    // that.
+    tv.buffer().connect_mark_set(|buf, _iter, mark| {
+        if mark.name().as_deref() == Some("insert") {
+            set_history_nav(buf, false);
+        }
+    });
 
     // Live markdown tinting. `changed` rather than a key handler, so
     // paste, emoji typeahead and history recall all tint too.

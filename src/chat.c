@@ -912,8 +912,7 @@ xprintline_render_tagged (GtkWidget *text, const char *tag, gsize tag_len,
     };
     HxChatRun body_run = HX_CHAT_RUN_PLAIN (body, (int)body_len);
 
-    hx_chat_view_append_runs (text, HX_CHAT_SPEAKER_NONE, gutter, 3, &body_run,
-                              1, 0);
+    hx_chat_view_append_system_runs (text, gutter, 3, &body_run, 1, 0);
 }
 
 /* Phase 9.E (inline media): auto-fetch a media handle on arrival

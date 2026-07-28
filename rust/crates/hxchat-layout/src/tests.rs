@@ -2478,6 +2478,15 @@ fn grouping_falls_back_to_the_nick_when_the_server_sends_no_uid() {
     assert!(!grouped(&b, 2));
 }
 
+/// A `[hx]` status line: system kind, no speaker, but a gutter — the
+/// shape `xprintline_render_tagged` produces.
+fn notice(body: &str, at: i64) -> Message {
+    let mut m = Message::system(ParsedText::plain(body));
+    m.gutter = Some(ParsedText::plain("[hx]"));
+    m.timestamp = at;
+    m
+}
+
 #[test]
 fn system_rows_never_group() {
     let m = FixedMeasure::new(10);
@@ -2489,6 +2498,34 @@ fn system_rows_never_group() {
     b.reindex();
     assert!(!grouped(&b, 0));
     assert!(!grouped(&b, 1), "two system lines are not one speaker");
+}
+
+#[test]
+fn tagged_notices_never_group_even_though_they_share_a_gutter() {
+    // The case the test above misses, and the one that shipped broken:
+    // it uses `Message::system`, which has no gutter, so it passed on
+    // the "a row with no gutter never groups" rule and never exercised
+    // the kind at all. A real `[hx]` line does have a gutter, and three
+    // consecutive ones collapsed into a single tagged block.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(notice("connecting...", 1000), &m);
+    b.append(notice("connected", 1001), &m);
+    b.append(notice("login ok", 1002), &m);
+    b.reindex();
+    for row in 0..3 {
+        assert!(!grouped(&b, row), "row {row} grouped under the [hx] tag");
+    }
+
+    // And the rule keys on the kind, not on the missing speaker: a
+    // pre-1.5 server sends real chat with no uid, and that still groups.
+    let mut b = ChatBuffer::new(params(2000));
+    b.append(said(0, "misha", "one", 1000), &m);
+    b.append(said(0, "misha", "two", 1001), &m);
+    b.reindex();
+    assert!(grouped(&b, 1), "uid-less chat is still one speaker");
 }
 
 #[test]
