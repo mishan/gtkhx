@@ -25,6 +25,7 @@
 //! existing URL detector in `gtkurl.c` owns that and has its own scheme
 //! list).
 
+use std::ops::Range;
 use crate::span::{Attrs, ParsedText, SpanBuilder, Style};
 
 /// Cap on nesting depth. `**a *b* a**` is depth 2. Real messages never
@@ -216,14 +217,17 @@ fn scan(src: &str, base: Style, depth: u8, out: &mut SpanBuilder) {
 
         // `code` — inert contents, so it is tried before everything else.
         if c == b'`' {
-            if let Some(close) = find_unescaped(bytes, i + 1, b'`') {
+            if let Some((inner, end)) = code_span(bytes, i) {
                 flush_lit!(i);
-                out.push(&src[i + 1..close], base.with_attrs(Attrs::CODE));
-                i = close + 1;
+                out.push(strip_code_pad(&src[inner]), base.with_attrs(Attrs::CODE));
+                i = end;
                 lit = i;
                 continue;
             }
-            i += 1;
+            // An unmatched run is literal text. Skip the *whole* run, not
+            // one byte: retrying at the second backtick of ``` would let
+            // a shorter run inside it close against something later.
+            i += backtick_run(bytes, i);
             continue;
         }
 
@@ -331,20 +335,63 @@ fn utf8_len(b: u8) -> usize {
     }
 }
 
-/// Next unescaped occurrence of the single byte `needle` at or after `from`.
-fn find_unescaped(bytes: &[u8], from: usize, needle: u8) -> Option<usize> {
-    let mut i = from;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' {
-            i += 2;
+/// Length of the run of backticks starting at `at`.
+fn backtick_run(bytes: &[u8], at: usize) -> usize {
+    let mut n = 0usize;
+    while bytes.get(at + n) == Some(&b'`') {
+        n += 1;
+    }
+    n
+}
+
+/// A code span starting at `at`: the byte range of its contents, and the
+/// offset just past its closing run.
+///
+/// CommonMark's rule, and the reason `` `` `hello` `` `` works: a span
+/// opens with a run of N backticks and closes on the next run of
+/// *exactly* N. Matching a single backtick against the next single
+/// backtick — what this used to do — turns ```` ``hello`` ```` into two
+/// empty spans on either side of unstyled text, which is exactly how it
+/// rendered.
+///
+/// There is no escaping inside a code span and none in front of one: a
+/// `\``  is consumed by the backslash branch in `scan` before the
+/// backtick is ever seen here.
+fn code_span(bytes: &[u8], at: usize) -> Option<(Range<usize>, usize)> {
+    let n = backtick_run(bytes, at);
+    let mut j = at + n;
+    while j < bytes.len() {
+        if bytes[j] == b'`' {
+            let m = backtick_run(bytes, j);
+            if m == n {
+                return Some((at + n..j, j + m));
+            }
+            j += m;
             continue;
         }
-        if bytes[i] == needle {
-            return Some(i);
-        }
-        i += 1;
+        j += 1;
     }
     None
+}
+
+/// Strip one leading and one trailing space, when both are there and the
+/// content is not all spaces.
+///
+/// This is what lets a span hold a backtick of its own: `` ` `` is a
+/// two-backtick span containing " ` ", and without the strip it would
+/// render with the padding the author only added to separate the
+/// delimiters.
+fn strip_code_pad(s: &str) -> &str {
+    let b = s.as_bytes();
+    if b.len() >= 2
+        && b[0] == b' '
+        && b[b.len() - 1] == b' '
+        && b.iter().any(|&c| c != b' ')
+    {
+        &s[1..s.len() - 1]
+    } else {
+        s
+    }
 }
 
 /// Next unescaped occurrence of a multi-byte delimiter, skipping code
@@ -359,9 +406,9 @@ fn find_delim(src: &str, from: usize, delim: &str) -> Option<usize> {
             continue;
         }
         if bytes[i] == b'`' {
-            match find_unescaped(bytes, i + 1, b'`') {
-                Some(close) => {
-                    i = close + 1;
+            match code_span(bytes, i) {
+                Some((_, end)) => {
+                    i = end;
                     continue;
                 }
                 None => return None,
@@ -392,9 +439,9 @@ fn find_italic_close(src: &str, from: usize, open: u8) -> Option<usize> {
             continue;
         }
         if bytes[i] == b'`' {
-            match find_unescaped(bytes, i + 1, b'`') {
-                Some(close) => {
-                    i = close + 1;
+            match code_span(bytes, i) {
+                Some((_, end)) => {
+                    i = end;
                     continue;
                 }
                 None => return None,
@@ -555,20 +602,23 @@ pub fn scan_delims(src: &str) -> Vec<SourceSpan> {
             b'*' if bytes.get(i + 1) == Some(&b'*') => (2usize, Attrs::BOLD),
             b'*' => (1, Attrs::ITALIC),
             b'_' if intraword_ok(bytes, i) => (1, Attrs::ITALIC),
-            b'`' => (1, Attrs::CODE),
+            b'`' => (backtick_run(bytes, i), Attrs::CODE),
             _ => {
                 i += 1;
                 continue;
             }
         };
 
-        if !can_open(bytes, i + run) {
+        // Code spans are literal: no escapes, no nesting, and the closer
+        // is a run of exactly the same length. They also skip the
+        // flanking rules — `` ` `` is a legitimate span whose content is
+        // a space, and can_open would reject it.
+        let literal = attrs == Attrs::CODE;
+
+        if !literal && !can_open(bytes, i + run) {
             i += run;
             continue;
         }
-
-        // Code spans are literal: no escapes, no nesting, first closer wins.
-        let literal = attrs == Attrs::CODE;
         let mut j = i + run;
         let close = loop {
             if j >= bytes.len() {
@@ -576,6 +626,18 @@ pub fn scan_delims(src: &str) -> Vec<SourceSpan> {
             }
             if !literal && bytes[j] == b'\\' {
                 j += 2;
+                continue;
+            }
+            if literal {
+                if bytes[j] == b'`' {
+                    let m = backtick_run(bytes, j);
+                    if m == run {
+                        break Some(j);
+                    }
+                    j += m;
+                    continue;
+                }
+                j += 1;
                 continue;
             }
             let hit = match run {

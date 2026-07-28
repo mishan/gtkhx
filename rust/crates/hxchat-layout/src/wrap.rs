@@ -59,6 +59,14 @@ pub struct LineBox {
     pub source: LineSource,
     /// X offset — the indent column, or 0 for full-width content.
     pub x: u32,
+    /// Measured width of the line's text, in px.
+    ///
+    /// Recorded here rather than re-measured by the view because the
+    /// wrap pass already knows it — it is the number the break decision
+    /// was made on. Anything that wants to draw a box around laid-out
+    /// text (a fenced code block, today) gets the same extent the
+    /// wrapper used, so the box cannot disagree with the wrap.
+    pub width: u32,
 }
 
 /// What a laid-out message knows about itself.
@@ -241,6 +249,7 @@ pub fn layout_message(
                     range: 0..g.text.len(),
                     source: LineSource::Gutter,
                     x: gx,
+                    width: gw,
                 });
             }
         }
@@ -249,13 +258,14 @@ pub fn layout_message(
     for (bi, block) in msg.blocks.iter().enumerate() {
         match block {
             Block::Text(p) => {
-                let n = wrap_text(p, body_width, params.word_wrap, measure, |range| {
+                let n = wrap_text(p, body_width, params.word_wrap, measure, |range, lw| {
                     lines.push(LineBox {
                         y,
                         height: line_h,
                         range,
                         source: LineSource::Block(bi),
                         x: body_x,
+                        width: lw,
                     });
                     y += line_h;
                 });
@@ -269,6 +279,7 @@ pub fn layout_message(
                         range: 0..0,
                         source: LineSource::Block(bi),
                         x: body_x,
+                        width: 0,
                     });
                     y += line_h;
                 }
@@ -279,6 +290,9 @@ pub fn layout_message(
                 // change what it says. Overflow clips; the view offers
                 // horizontal scroll in C4.
                 let mut start = 0usize;
+                // Code blocks carry no spans, so they draw — and so must
+                // measure — in the default style.
+                let plain = Style::default();
                 for (i, _) in text.match_indices('\n') {
                     lines.push(LineBox {
                         y,
@@ -286,6 +300,7 @@ pub fn layout_message(
                         range: start..i,
                         source: LineSource::Block(bi),
                         x: body_x,
+                        width: measure.run_width(&text[start..i], plain),
                     });
                     y += line_h;
                     start = i + 1;
@@ -296,19 +311,21 @@ pub fn layout_message(
                     range: start..text.len(),
                     source: LineSource::Block(bi),
                     x: body_x,
+                    width: measure.run_width(&text[start..], plain),
                 });
                 y += line_h + params.block_padding;
             }
             Block::Quote { content, depth } => {
                 let qx = body_x + params.quote_indent * u32::from(*depth).max(1);
                 let qw = params.width.saturating_sub(qx).max(line_h);
-                let n = wrap_text(content, qw, params.word_wrap, measure, |range| {
+                let n = wrap_text(content, qw, params.word_wrap, measure, |range, lw| {
                     lines.push(LineBox {
                         y,
                         height: line_h,
                         range,
                         source: LineSource::Block(bi),
                         x: qx,
+                        width: lw,
                     });
                     y += line_h;
                 });
@@ -323,6 +340,7 @@ pub fn layout_message(
                         range: 0..0,
                         source: LineSource::Block(bi),
                         x: qx,
+                        width: 0,
                     });
                     y += line_h;
                 }
@@ -334,13 +352,14 @@ pub fn layout_message(
                 // hit-testing and the marker line all just work.
                 Some(sz) => {
                     y += params.block_padding;
-                    let (_, h) = measure.image_size((sz.width, sz.height), body_width);
+                    let (iw, h) = measure.image_size((sz.width, sz.height), body_width);
                     lines.push(LineBox {
                         y,
                         height: h,
                         range: 0..alt.len(),
                         source: LineSource::Block(bi),
                         x: body_x,
+                        width: iw,
                     });
                     y += h + params.block_padding;
                 }
@@ -349,13 +368,14 @@ pub fn layout_message(
                 // than it has to.
                 None => {
                     let p = ParsedText::plain(alt.clone());
-                    let n = wrap_text(&p, body_width, params.word_wrap, measure, |range| {
+                    let n = wrap_text(&p, body_width, params.word_wrap, measure, |range, lw| {
                         lines.push(LineBox {
                             y,
                             height: line_h,
                             range,
                             source: LineSource::Block(bi),
                             x: body_x,
+                            width: lw,
                         });
                         y += line_h;
                     });
@@ -369,6 +389,7 @@ pub fn layout_message(
                             range: 0..0,
                             source: LineSource::Block(bi),
                             x: body_x,
+                            width: 0,
                         });
                         y += line_h;
                     }
@@ -423,7 +444,7 @@ fn wrap_text(
     width: u32,
     word_wrap: bool,
     measure: &dyn TextMeasure,
-    mut emit: impl FnMut(Range<usize>),
+    mut emit: impl FnMut(Range<usize>, u32),
 ) -> usize {
     if p.text.is_empty() {
         return 0;
@@ -440,7 +461,7 @@ fn wrap_text(
         let segment = &p.text[line_start..hard];
 
         if segment.is_empty() {
-            emit(line_start..line_start);
+            emit(line_start..line_start, 0);
             count += 1;
             line_start = hard + 1;
             continue;
@@ -454,13 +475,13 @@ fn wrap_text(
             }
             let w = measure_styled(p, seg_start..hard, measure);
             if w <= width {
-                emit(seg_start..hard);
+                emit(seg_start..hard, w);
                 count += 1;
                 break;
             }
             // Doesn't fit: find the break point, honouring every style
             // change between here and the boundary.
-            let (fit_abs, _) = fit_styled_prefix(p, seg_start..hard, width, measure);
+            let (fit_abs, fit_w) = fit_styled_prefix(p, seg_start..hard, width, measure);
             let mut brk = fit_abs.max(seg_start + 1);
             if word_wrap {
                 if let Some(sp) = p.text[seg_start..brk].rfind([' ', '\t']) {
@@ -475,7 +496,15 @@ fn wrap_text(
             if brk <= seg_start {
                 brk = next_boundary(&p.text, seg_start);
             }
-            emit(seg_start..brk);
+            // Reuse the prefix measurement when word-wrap didn't move
+            // the break; re-measure only the shorter line we actually
+            // emit. The common case costs nothing extra.
+            let lw = if brk == fit_abs {
+                fit_w
+            } else {
+                measure_styled(p, seg_start..brk, measure)
+            };
+            emit(seg_start..brk, lw);
             count += 1;
             // Swallow the space we broke on.
             seg_start = brk;

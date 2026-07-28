@@ -10,7 +10,7 @@ use crate::index::HeightIndex;
 use crate::markdown::{self, RawBlock};
 use crate::measure::{FixedMeasure, TextMeasure};
 use crate::message::{Block, ImageSize, Message, Speaker};
-use crate::span::{Attrs, ColorRef, ParsedText, Style};
+use crate::span::{Attrs, ParsedText, Style};
 use crate::wrap::{layout_message, LayoutGeneration, LayoutParams};
 
 // ---------------------------------------------------------------- markdown
@@ -96,6 +96,56 @@ fn md_code_span_suppresses_other_markup() {
     let p = markdown::parse_inline("use `a **b** c` here");
     assert_eq!(p.text, "use a **b** c here");
     assert_eq!(styled(&p), vec![("a **b** c", Attrs::CODE)]);
+}
+
+#[test]
+fn md_code_span_matches_run_length() {
+    // The delimiter is a *run*: N backticks open, the next run of
+    // exactly N closes. Reading one backtick at a time turned this into
+    // two empty spans with plain text between them, which is how
+    // ``hello`` rendered as an unadorned hello.
+    let p = markdown::parse_inline("``hello``");
+    assert_eq!(p.text, "hello");
+    assert_eq!(styled(&p), vec![("hello", Attrs::CODE)]);
+
+    // The point of the longer run: it can hold a shorter one.
+    let p = markdown::parse_inline("``a `b` c``");
+    assert_eq!(p.text, "a `b` c");
+    assert_eq!(styled(&p), vec![("a `b` c", Attrs::CODE)]);
+
+    // A shorter run inside a longer one does not close it.
+    let p = markdown::parse_inline("```x`y```");
+    assert_eq!(p.text, "x`y");
+    assert_eq!(styled(&p), vec![("x`y", Attrs::CODE)]);
+}
+
+#[test]
+fn md_code_span_strips_one_pad_space() {
+    // Both spaces or neither, and never from an all-space span — the
+    // rule that lets a span carry a backtick of its own.
+    let p = markdown::parse_inline("`` ` ``");
+    assert_eq!(p.text, "`");
+    assert_eq!(styled(&p), vec![("`", Attrs::CODE)]);
+
+    let p = markdown::parse_inline("` a `");
+    assert_eq!(p.text, "a");
+
+    // One-sided padding is content, not padding.
+    let p = markdown::parse_inline("` a`");
+    assert_eq!(p.text, " a");
+}
+
+#[test]
+fn md_unmatched_backtick_run_is_literal() {
+    let p = markdown::parse_inline("``unclosed");
+    assert_eq!(p.text, "``unclosed");
+    assert!(p.spans.is_empty());
+
+    // The run is skipped whole. Resuming inside it would let the second
+    // backtick open a span that closes on the one further along.
+    let p = markdown::parse_inline("``a `b` c");
+    assert_eq!(p.text, "``a b c");
+    assert_eq!(styled(&p), vec![("b", Attrs::CODE)]);
 }
 
 #[test]
@@ -266,6 +316,44 @@ fn params(width: u32) -> LayoutParams {
         word_wrap: true,
         avatar_size: 0,
     }
+}
+
+#[test]
+fn every_line_records_the_width_it_was_measured_at() {
+    let m = FixedMeasure::new(10);
+    let msg = Message::system(ParsedText::plain("aaa bbb ccc ddd"));
+    let l = layout_message(&msg, &params(80), LayoutGeneration::default(), &m);
+    for lb in &l.lines {
+        let text = &"aaa bbb ccc ddd"[lb.range.clone()];
+        assert_eq!(
+            lb.width,
+            m.run_width(text, Style::default()),
+            "line {text:?} recorded a width it was not laid out at"
+        );
+        assert!(lb.width <= 80, "a line wider than the column escaped the wrap");
+    }
+}
+
+#[test]
+fn a_code_block_is_only_as_wide_as_its_widest_line() {
+    // What the view draws the box around. Before this, the box ran to
+    // the right edge of the widget regardless of the code in it, so a
+    // one-word block read as a full-width divider.
+    let m = FixedMeasure::new(10);
+    let mut msg = Message::system(ParsedText::plain(""));
+    msg.blocks = vec![Block::Code {
+        text: "hi\nlonger line\nx".to_string(),
+        language: None,
+    }];
+    let l = layout_message(&msg, &params(1000), LayoutGeneration::default(), &m);
+    let widths: Vec<u32> = l.lines.iter().map(|lb| lb.width).collect();
+    assert_eq!(widths, vec![20, 110, 10]);
+
+    let widest = widths.iter().copied().max().unwrap();
+    assert!(
+        widest < 1000,
+        "the box would still span the full column"
+    );
 }
 
 #[test]

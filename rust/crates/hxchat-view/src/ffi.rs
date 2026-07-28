@@ -21,6 +21,7 @@ use gtk4::glib::translate::{IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
 use hxchat_layout::{Block, ColorRef, Message, MessageId, MessageKind, ParsedText, Style};
 use std::ffi::{c_char, c_int, c_void, CStr};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 type CGtkWidget = *mut gtk4::ffi::GtkWidget;
 
@@ -509,20 +510,25 @@ fn run_style(r: &HxChatRun) -> Style {
 ///
 /// Process-wide rather than per-view, matching the autocopy prefs: it is
 /// one Settings checkbox and every chat surface should agree.
-fn markdown_enabled() -> bool {
-    MARKDOWN.with(|m| m.get())
-}
+///
+/// A `static` atomic and not a `thread_local!`, because "process-wide"
+/// has to be true of the storage and not just of the comment. With a
+/// thread-local, a setter called off the main thread would flip a flag
+/// nothing ever reads and the checkbox would appear not to work — a
+/// silent failure, since nothing about the call would report an error.
+static MARKDOWN: AtomicBool = AtomicBool::new(true);
 
-thread_local! {
-    static MARKDOWN: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+fn markdown_enabled() -> bool {
+    MARKDOWN.load(Ordering::Relaxed)
 }
 
 /// # Safety
-/// Callable from any thread that owns the GTK main context; the flag is
-/// thread-local and the view is main-thread-only.
+/// Callable from any thread. The flag is a plain atomic; a view already
+/// mid-parse on the main thread finishes with whichever value it read,
+/// and the next append sees the new one.
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_set_markdown(on: c_int) {
-    MARKDOWN.with(|m| m.set(on != 0));
+    MARKDOWN.store(on != 0, Ordering::Relaxed);
 }
 
 /// Build a `ParsedText` from a C run array.

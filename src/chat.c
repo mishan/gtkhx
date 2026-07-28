@@ -775,10 +775,19 @@ chat_strip_repeat_sender (const char *seg, gsize seg_len, const char *sender,
 /* Join a multi-line body into one string, dropping the sender prefix
  * the server repeats on each line after the first.
  *
- * Returns a newly-allocated string the caller frees. */
+ * Returns a newly-allocated string the caller frees, and writes its
+ * length to *joined_len.
+ *
+ * The length is an out-parameter rather than something the caller
+ * recovers with strlen because the result can contain NUL: chat bodies
+ * arrive off the wire and gtkhx_text_to_utf8 preserves embedded NULs
+ * deliberately rather than truncating there. strlen would silently cut
+ * the message at the first one — losing the rest of the text and, since
+ * the renderer parses markdown over this buffer, potentially leaving a
+ * fence unterminated. */
 static gchar *
 chat_join_body (const char *body, gsize body_len, const char *sender,
-                gsize sender_len)
+                gsize sender_len, gsize *joined_len)
 {
     GString *out = g_string_new (NULL);
     const char *cur = body;
@@ -809,6 +818,7 @@ chat_join_body (const char *body, gsize body_len, const char *sender,
         }
         cur = nl + 1;
     }
+    *joined_len = out->len;
     return g_string_free (out, FALSE);
 }
 
@@ -1116,8 +1126,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
 	 * another block. */
     body = e->line + e->body_off;
     joined = chat_join_body (body, e->body_len, e->line + e->sender_off,
-                             e->sender_len);
-    first_body_len = joined ? strlen (joined) : 0;
+                             e->sender_len, &first_body_len);
 
     /* Phase 9.E (inline media): the send-half defaults the chat
 	 * body to "[image]" when the user attaches without typing

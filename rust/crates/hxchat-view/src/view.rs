@@ -1095,17 +1095,27 @@ impl HxChatView {
                     let mut top = i64::MAX;
                     let mut bot = i64::MIN;
                     let mut left = i32::MAX;
+                    let mut right = i32::MIN;
                     for l in layout.lines.iter().filter(|l| l.source == src) {
                         top = top.min(l.y as i64);
                         bot = bot.max(l.y as i64 + l.height as i64);
                         left = left.min(l.x as i32);
+                        right = right.max(l.x as i32 + l.width as i32);
                     }
                     if top > bot {
                         continue; // no lines: nothing to box
                     }
                     let x = left as f32 - CODE_BOX_PAD;
                     let y = (row_top + top) as f32 - CODE_BOX_PAD;
-                    let w = (content_width(alloc_w) as f32 - x).max(1.0);
+                    // Shrink-wrap the widest line rather than running to
+                    // the right edge: the box marks the extent of the
+                    // code, and a full-width rule around one word reads
+                    // as a section divider. Clamped to the content width
+                    // so an overflowing (never-wrapped) code line cannot
+                    // push the border off-screen.
+                    let w = ((right as f32 + CODE_BOX_PAD) - x)
+                        .min(content_width(alloc_w) as f32 - x)
+                        .max(1.0);
                     let h = (bot - top) as f32 + CODE_BOX_PAD * 2.0;
 
                     let fgc = imp.palette.borrow()[PAL_FG];
