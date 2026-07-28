@@ -855,6 +855,16 @@ The cost is paid with a 120 ms debounce in the find bar rather than with
 an index, because an index would have to be maintained across append,
 prepend, trim and replace for a feature used seconds at a time.
 
+**Find accelerators.** Ctrl+F opens and focuses, selecting the existing
+query so typing replaces it. Pressed *again* while the entry already has
+focus and a query, it advances to the next match instead — that is the
+"hit Ctrl+F, type, keep hitting Ctrl+F" flow, and gating it on the entry
+already being focused is what keeps the reopen-and-retype case intact.
+Ctrl+G / Ctrl+Shift+G and F3 / Shift+F3 both step, because which pair is
+muscle memory depends on where someone came from; two extra shortcuts is
+cheaper than making them guess. All of them wrap, since `SearchState::step`
+wraps at both ends.
+
 **Two find bars, one look.** The chat find bar reuses the news panel's
 highlight colours exactly (`#f6d32d` on black for hits, `#ff7800` on
 white for the active one) rather than inventing its own or widening the
