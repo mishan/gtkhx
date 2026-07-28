@@ -268,12 +268,18 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_stamp_format(
     w: CGtkWidget,
     fmt: *const c_char,
 ) {
-    // A NULL view is legal (prefs_read runs before any window exists)
-    // and means "format only" — but the format itself is per-view here,
-    // not a process-wide global as it is in xtext, so there is nothing
-    // to record and this is correctly a no-op. Each view picks the
-    // pref up through its own set_stamp_format when it is built.
-    with_view!(w, v, v.set_stamp_format(&cstr(fmt)))
+    let f = cstr(fmt);
+    // A NULL view means "format only", which `prefs_read` does before
+    // any window exists. Recording it process-wide is load-bearing: it
+    // is the *only* time the persisted pref is delivered, so dropping it
+    // would leave every view on the built-in default until the user
+    // happened to edit the setting again.
+    crate::view::prefs::STAMP_FORMAT.with(|slot| {
+        *slot.borrow_mut() = if f.is_empty() { None } else { Some(f.clone()) };
+    });
+    if !w.is_null() {
+        with_view!(w, v, v.set_stamp_format(&f))
+    }
 }
 
 /// The word classifier `chat_view.h` takes.
@@ -350,6 +356,27 @@ pub unsafe extern "C" fn hx_chat_view_impl_clear(w: CGtkWidget) {
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_impl_set_zoom_permille(w: CGtkWidget, zoom: c_int) {
     with_view!(w, v, v.set_zoom_permille(zoom.max(0) as u32))
+}
+
+/// # Safety
+/// Process-wide; takes no view.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_text(enabled: c_int) {
+    crate::view::prefs::AUTOCOPY_TEXT.with(|c| c.set(enabled != 0));
+}
+
+/// # Safety
+/// Process-wide; takes no view.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_stamp(enabled: c_int) {
+    crate::view::prefs::AUTOCOPY_STAMP.with(|c| c.set(enabled != 0));
+}
+
+/// # Safety
+/// Process-wide; takes no view.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_set_autocopy_color(enabled: c_int) {
+    crate::view::prefs::AUTOCOPY_COLOR.with(|c| c.set(enabled != 0));
 }
 
 // ---- appending -----------------------------------------------------

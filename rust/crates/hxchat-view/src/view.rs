@@ -192,6 +192,14 @@ mod imp {
             let font = pango::FontDescription::from_string("Monospace 10");
             *self.measure.borrow_mut() = PangoMeasure::new(ctx, font);
 
+            // Adopt the persisted stamp format. prefs_read applies it
+            // before any window exists, so without this a view would
+            // keep the built-in default and ignore the user's pref
+            // until they happened to change it again.
+            if let Some(f) = prefs::STAMP_FORMAT.with(|f| f.borrow().clone()) {
+                *self.stamp_format.borrow_mut() = f;
+            }
+
             obj.install_selection_gestures();
             obj.install_zoom_bindings();
             obj.install_link_handlers();
@@ -391,7 +399,9 @@ impl HxChatView {
         }
         imp.time_stamp.set(on);
         self.recompute_stamp_width();
-        self.queue_draw();
+        // Relayout, not just redraw: the gutter width changed, so
+        // wrapping, row heights and the scroll extent all move with it.
+        self.queue_resize();
     }
 
     pub fn set_stamp_format(&self, format: &str) {
@@ -406,7 +416,7 @@ impl HxChatView {
         }
         *imp.stamp_format.borrow_mut() = f;
         self.recompute_stamp_width();
-        self.queue_draw();
+        self.queue_resize();
     }
 
     /// Measure the widest plausible rendering of the current format.
@@ -923,17 +933,25 @@ impl HxChatView {
         click.set_button(gtk4::gdk::BUTTON_PRIMARY);
         let this = self.clone();
         click.connect_released(move |_, n_press, _, _| {
-            if n_press == 1 {
-                let empty = this
-                    .imp_()
-                    .selection
-                    .borrow()
-                    .map(|s| s.is_empty())
-                    .unwrap_or(true);
-                if empty {
-                    *this.imp_().selection.borrow_mut() = None;
-                    this.queue_draw();
-                }
+            // A click with no drag dismisses whatever was selected.
+            //
+            // The first cut had this backwards — it cleared only when
+            // the selection was *already* empty, so a real selection
+            // could never be dismissed. The drag handler has by now
+            // collapsed anchor==focus for a click-without-motion, so
+            // "empty but present" is exactly the click case, and a
+            // non-empty selection means a drag just finished and must
+            // be left alone.
+            if n_press != 1 {
+                return;
+            }
+            let dismiss = match *this.imp_().selection.borrow() {
+                Some(s) => s.is_empty(),
+                None => false,
+            };
+            if dismiss {
+                *this.imp_().selection.borrow_mut() = None;
+                this.queue_draw();
             }
         });
         self.add_controller(click);
@@ -1058,14 +1076,36 @@ enum ClipboardTarget {
     Clipboard,
 }
 
-/// Whether drag-end should copy to the primary selection.
+/// Process-wide prefs, mirroring the ones xtext keeps as module globals.
 ///
-/// xtext gated this on a pref (`gtk_xtext_set_autocopy_text`). Those
-/// setters are process-wide there and the C dispatcher still routes them
-/// to xtext, so until C5 retires that path this mirrors the default
-/// rather than reading the pref through a second channel.
+/// These are genuinely process-wide rather than per-view — `options.c`
+/// sets them once from the cfgvars, and `prefs_read` applies the stamp
+/// format before any window exists — so the view crate keeps them the
+/// same way. `thread_local` rather than a lock because every one of
+/// these is touched only from the GTK main thread.
+pub(crate) mod prefs {
+    use std::cell::{Cell, RefCell};
+
+    thread_local! {
+        /// Drag-end copies to the clipboards. xtext's default is on.
+        pub static AUTOCOPY_TEXT: Cell<bool> = const { Cell::new(true) };
+        /// Include the timestamp column in copied text.
+        pub static AUTOCOPY_STAMP: Cell<bool> = const { Cell::new(false) };
+        /// Retain colour codes in copied text. Meaningless here — the
+        /// new backend copies plain text — but accepted so the pref
+        /// round-trips rather than erroring.
+        pub static AUTOCOPY_COLOR: Cell<bool> = const { Cell::new(false) };
+        /// The persisted stamp format, applied by `prefs_read` before
+        /// any view exists. Views read it at construction; without this
+        /// they would silently keep the built-in default and ignore the
+        /// user's pref until they next edited it in Settings.
+        pub static STAMP_FORMAT: RefCell<Option<String>> = const { RefCell::new(None) };
+    }
+}
+
+/// Whether drag-end should copy. Driven by `CFG_AUTOCOPY_TEXT`.
 fn autocopy_enabled() -> bool {
-    true
+    prefs::AUTOCOPY_TEXT.with(|c| c.get())
 }
 
 /// Intersect a row's selection with one visual line.

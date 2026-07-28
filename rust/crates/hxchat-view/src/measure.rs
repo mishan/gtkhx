@@ -20,7 +20,7 @@
 
 use hxchat_layout::{Attrs, FontMetrics, Style, TextMeasure};
 use pango::prelude::*;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 
 /// How many measured runs to keep. Chat lines repeat heavily (nicks,
@@ -47,6 +47,13 @@ pub struct PangoMeasure {
     /// cache exists for. The outer key is the attribute bits, of which
     /// only a handful ever occur.
     cache: RefCell<HashMap<u8, HashMap<String, u32>>>,
+    /// Live entry count across every inner map.
+    ///
+    /// Tracked incrementally because the capacity check runs on every
+    /// cache *miss*, and summing the inner maps there would make
+    /// maintenance O(n) per miss on the wrapping hot path — undoing much
+    /// of what the cache is for.
+    cache_len: Cell<usize>,
 }
 
 impl std::fmt::Debug for PangoMeasure {
@@ -70,6 +77,7 @@ impl PangoMeasure {
             metrics: FontMetrics::default(),
             zoom_permille: 1000,
             cache: RefCell::new(HashMap::new()),
+            cache_len: Cell::new(0),
         };
         m.recompute_metrics();
         m
@@ -88,7 +96,7 @@ impl PangoMeasure {
 
     pub fn set_font(&mut self, font: pango::FontDescription) {
         self.font = font;
-        self.cache.borrow_mut().clear();
+        self.clear_cache();
         self.recompute_metrics();
     }
 
@@ -97,8 +105,13 @@ impl PangoMeasure {
             return;
         }
         self.zoom_permille = zoom.clamp(250, 5000);
-        self.cache.borrow_mut().clear();
+        self.clear_cache();
         self.recompute_metrics();
+    }
+
+    fn clear_cache(&self) {
+        self.cache.borrow_mut().clear();
+        self.cache_len.set(0);
     }
 
     pub fn zoom_permille(&self) -> u32 {
@@ -201,12 +214,18 @@ impl TextMeasure for PangoMeasure {
         let w = w.max(0) as u32;
         {
             let mut c = self.cache.borrow_mut();
-            let total: usize = c.values().map(|m| m.len()).sum();
-            if total >= CACHE_CAP {
+            if self.cache_len.get() >= CACHE_CAP {
                 c.clear();
+                self.cache_len.set(0);
             }
             // The one allocation, on insert only.
-            c.entry(attrs).or_default().insert(text.to_string(), w);
+            if c.entry(attrs)
+                .or_default()
+                .insert(text.to_string(), w)
+                .is_none()
+            {
+                self.cache_len.set(self.cache_len.get() + 1);
+            }
         }
         w
     }
