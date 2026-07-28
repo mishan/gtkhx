@@ -8,9 +8,10 @@
 - Build
   - GtkHx is now available for macOS and Windows
 - Code Modernization
-  - GtkHx now has more Rust code than C code
+  - GtkHx is now mostly Rust code
 - User Interface
   - Button icons now default to their original size, rather than upscaled
+  - Brand new hxchat widget for Chat (replaces forked version of HexChat's xtext)
 - Sound
   - Replaced libcanberra with rodio for notification sound playback
 
