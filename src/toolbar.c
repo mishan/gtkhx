@@ -398,7 +398,69 @@ on_action_reset_layout (GSimpleAction *action, GVariant *param, gpointer user_da
  * doesn't exist yet) the panel factory runs at toolbar build
  * time, so the registry lookup always succeeds. */
 
+/* Ctrl+U — clear whatever text input has focus, anywhere in the app.
+ *
+ * An application action rather than per-widget key handlers: the app has
+ * a dozen windows and dialogs full of entries, and wiring each one would
+ * mean every future entry silently not supporting it. This walks from
+ * the focused widget instead, so it works in the connect dialog, the
+ * settings rows, the find bar and the chat input alike, and keeps
+ * working in whatever gets added next.
+ *
+ * The whole field, not readline's kill-to-start-of-line — see the note
+ * on the chat input's own handler in chat_input.rs for why that is the
+ * right call for a compose box, and consistency is worth more than
+ * matching a shell here.
+ *
+ * Wrapped in a user action so Ctrl+Z restores it in one step. */
+static void
+on_action_clear_input (GSimpleAction *action, GVariant *param, gpointer data)
+{
+    GtkApplication *app = GTK_APPLICATION (g_application_get_default ());
+    GtkWindow *win;
+    GtkWidget *focus;
+
+    (void)action;
+    (void)param;
+    (void)data;
+
+    if (!app) {
+        return;
+    }
+    win = gtk_application_get_active_window (app);
+    if (!win) {
+        return;
+    }
+    focus = gtk_window_get_focus (win);
+    if (!focus) {
+        return;
+    }
+
+    /* GtkTextView first: it is not a GtkEditable, and the chat input is
+	 * the case this key is reached for most. */
+    if (GTK_IS_TEXT_VIEW (focus)) {
+        GtkTextBuffer *buf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (focus));
+        GtkTextIter start, end;
+        gtk_text_buffer_get_bounds (buf, &start, &end);
+        if (!gtk_text_iter_equal (&start, &end)) {
+            gtk_text_buffer_begin_user_action (buf);
+            gtk_text_buffer_delete (buf, &start, &end);
+            gtk_text_buffer_end_user_action (buf);
+        }
+        return;
+    }
+
+    /* GtkEditable covers GtkEntry, GtkSearchEntry, GtkText and the
+	 * AdwEntryRow / AdwPasswordEntryRow family, which delegate to an
+	 * internal GtkText. Asking the *focused* widget means we get the
+	 * delegate rather than the row wrapper, which is what we want. */
+    if (GTK_IS_EDITABLE (focus)) {
+        gtk_editable_set_text (GTK_EDITABLE (focus), "");
+    }
+}
+
 static const GActionEntry app_actions[] = {
+    { .name = "clear-input", .activate = on_action_clear_input },
     { .name = "settings", .activate = on_action_settings },
     { .name = "bookmarks", .activate = on_action_bookmarks },
     { .name = "about", .activate = on_action_about },
