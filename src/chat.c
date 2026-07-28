@@ -752,7 +752,7 @@ chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
 {
     HxChatSpeaker sp = HX_CHAT_SPEAKER_NONE;
 
-    sp.is_self = is_self;
+    sp.outgoing = is_self;
     struct chat *conv;
     char *nul;
 

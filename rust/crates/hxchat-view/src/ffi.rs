@@ -439,7 +439,7 @@ const HX_CHAT_COLOR_DEFAULT: i16 = -1;
 pub struct HxChatSpeaker {
     pub(crate) uid: u16,
     pub(crate) nick: *const c_char,
-    pub(crate) is_self: c_int,
+    pub(crate) outgoing: c_int,
 }
 
 /// `None` when the caller couldn't identify the speaker.
@@ -576,8 +576,8 @@ unsafe fn runs_message(
         speaker: speaker_of(speaker),
         gutter: if g.text.is_empty() { None } else { Some(g) },
         blocks: vec![Block::Text(b)],
-        flags: if speaker.is_self != 0 {
-            hxchat_layout::MessageFlags::SELF
+        flags: if speaker.outgoing != 0 {
+            hxchat_layout::MessageFlags::OUTGOING
         } else {
             hxchat_layout::MessageFlags::NONE
         },

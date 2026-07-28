@@ -187,8 +187,13 @@ impl MessageFlags {
     pub const MUTED: MessageFlags = MessageFlags(1 << 1);
     /// A `/me` action: "* nick does something", no nick column.
     pub const ACTION: MessageFlags = MessageFlags(1 << 2);
-    /// Sent by us — the nick draws in the self colour.
-    pub const SELF: MessageFlags = MessageFlags(1 << 3);
+    /// Originated here rather than arriving from the server.
+    ///
+    /// Direction, not sender identity — "is the sender me" cannot tell
+    /// the echo of a message you just sent from the server's copy of it
+    /// when you message yourself, and grouping needs to. See
+    /// `chat_view.h`'s `HxChatSpeaker.outgoing`.
+    pub const OUTGOING: MessageFlags = MessageFlags(1 << 3);
     /// Server tombstone for a deleted message.
     pub const DELETED: MessageFlags = MessageFlags(1 << 4);
     /// A continuation of the row above: same speaker, close in time, so
@@ -219,7 +224,7 @@ impl std::fmt::Debug for MessageFlags {
             (MessageFlags::HIGHLIGHT, "HIGHLIGHT"),
             (MessageFlags::MUTED, "MUTED"),
             (MessageFlags::ACTION, "ACTION"),
-            (MessageFlags::SELF, "SELF"),
+            (MessageFlags::OUTGOING, "OUTGOING"),
             (MessageFlags::DELETED, "DELETED"),
         ] {
             if self.contains(bit) {

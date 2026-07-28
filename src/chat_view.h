@@ -224,11 +224,20 @@ typedef struct {
 typedef struct {
     guint16 uid;      /* 0 = unknown */
     const char *nick; /* borrowed for the call; may be NULL */
-    /* Did we send it? Breaks message grouping independently of identity:
-     * in a private-message window with yourself both directions carry
-     * the same nick, and collapsing them into one block loses the
-     * alternation that *is* the conversation. */
-    gboolean is_self;
+    /* Direction: did this row originate here, or arrive from the
+     * server? It breaks message grouping independently of identity.
+     *
+     * Not the same question as "is the sender me". In a private-message
+     * window with yourself, *both* halves have you as the sender, so
+     * sender-identity cannot separate the echo of what you typed from
+     * the copy the server sent back — and grouping then collapses the
+     * whole exchange into one block, losing the alternation that is the
+     * content. Direction can separate them, because it is a property of
+     * which code path produced the row.
+     *
+     * In public chat there is one row per message, so this coincides
+     * with is_self; the distinction only bites in PMs. */
+    gboolean outgoing;
 } HxChatSpeaker;
 
 #define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL, FALSE })

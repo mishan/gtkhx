@@ -575,9 +575,21 @@ hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w)
  * code paths that hand-roll a name + body string pair) and
  * msg_output_from_event (the msg-signal path that has the
  * pre-parsed HxMsgEvent). */
+/* `outgoing` is direction, and is NOT derivable from `is_self`.
+ *
+ * is_self answers "is the sender me?", by comparing the name against our
+ * own nick. When you message *yourself* that is true of both halves of
+ * the conversation, so it cannot tell an echo of what you just typed
+ * from the copy the server sent back — and message grouping then
+ * collapses "you said / they said / you said" into one block, losing
+ * the alternation that is the whole content.
+ *
+ * Direction is known by *which path produced the row*: msg_output is the
+ * local echo, msg_output_from_event is the received message. So it is
+ * passed rather than inferred. */
 static void
 msg_output_render (const char *name, guint16 uid, const char *body,
-                   gboolean is_self)
+                   gboolean is_self, gboolean outgoing)
 {
     struct msgwin *msg;
     gint16 brack_col;
@@ -591,8 +603,9 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         msg = create_msgwin (uid, (char *)name);
     }
 
-    /* mIRC colour 13 (pink) for our own messages, 12 (light blue)
-	 * for incoming. */
+    /* Pink for our own messages, light blue for incoming. Keyed on
+	 * is_self rather than direction, deliberately: the colour is about
+	 * *whose words* these are, which is what is_self answers. */
     brack_col = is_self ? 13 : 12;
 
     /* Validate the body bytes once. the chat view hands content to Pango,
@@ -638,8 +651,8 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 			 * person's avatar. When we haven't been told our uid yet it
 			 * stays 0, which is a miss rather than a guess. */
             HxChatSpeaker sp
-                = { is_self ? hx_conn_uid (hx_active_session ()->htlc) : uid,
-                    nam, is_self };
+                = { outgoing ? hx_conn_uid (hx_active_session ()->htlc) : uid,
+                    nam, outgoing };
             hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
                                       1, 0);
             first = FALSE;
@@ -668,7 +681,10 @@ msg_output (char *name, guint16 uid, char *buf)
 {
     gboolean is_self = name && hx_conn_name (hx_active_session ()->htlc)[0]
                        && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;
-    msg_output_render (name, uid, buf, is_self);
+    /* The local echo of a message we just sent — the one caller is
+	 * send_msg's input handler. Outgoing by construction, which is
+	 * exactly the fact is_self cannot recover when you PM yourself. */
+    msg_output_render (name, uid, buf, is_self, TRUE);
 }
 
 void
@@ -677,7 +693,10 @@ msg_output_from_event (HxMsgEvent *event)
     if (!event) {
         return;
     }
-    msg_output_render (event->name, event->uid, event->body, event->is_self);
+    /* Received from the server: incoming, even when the sender is us
+	 * (messaging yourself echoes back through the same path). */
+    msg_output_render (event->name, event->uid, event->body, event->is_self,
+                       FALSE);
 }
 
 /* short broadcasts go through toolbar_show_toast, long ones

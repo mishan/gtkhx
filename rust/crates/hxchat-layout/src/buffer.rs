@@ -385,13 +385,16 @@ impl ChatBuffer {
         let Some(prev) = self.rows.get(before - 1) else {
             return false;
         };
-        // Direction breaks a run before identity does. In a private
-        // message window both halves of a conversation with yourself
-        // carry the same nick, so grouping on identity alone collapses
-        // "you said / they said / you said" into one block — which is
-        // exactly backwards, since the alternation is the content.
-        if prev.msg.flags.contains(MessageFlags::SELF)
-            != msg.flags.contains(MessageFlags::SELF)
+        // Direction breaks a run before identity does.
+        //
+        // In a private-message window both halves of a conversation with
+        // yourself have you as the sender, so identity cannot separate
+        // them and grouping collapses "you said / they said / you said"
+        // into one block — losing the alternation, which is the content.
+        // Direction can separate them: it is a property of which path
+        // produced the row, not of who is named on it.
+        if prev.msg.flags.contains(MessageFlags::OUTGOING)
+            != msg.flags.contains(MessageFlags::OUTGOING)
         {
             return false;
         }

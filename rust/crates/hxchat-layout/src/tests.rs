@@ -2504,11 +2504,11 @@ fn regrouping_leaves_the_height_index_agreeing_with_a_real_layout() {
 
 #[test]
 fn direction_breaks_a_run_even_with_the_same_nick() {
-    // Messaging yourself in a PM window: every line carries your nick,
-    // and both directions carry it, so grouping on identity alone
-    // collapses the whole conversation into one block. The alternation
-    // *is* the content, so SELF-ness breaks the run before identity is
-    // even consulted.
+    // Messaging yourself in a PM window. Every line names you as the
+    // sender — including the copies the server sends back — so no
+    // identity test can separate the four lines, and an earlier fix that
+    // keyed on "is the sender me" did nothing at all here. Direction is
+    // a property of which path produced the row, and can.
     let m = FixedMeasure::new(10);
     let mut p = params(2000);
     p.indent = true;
@@ -2517,7 +2517,7 @@ fn direction_breaks_a_run_even_with_the_same_nick() {
     let mut line = |mine: bool, at: i64| {
         let mut msg = said(7, "misha", "asdfasdf", at);
         if mine {
-            msg.flags = msg.flags.union(MessageFlagsNone::SELF);
+            msg.flags = msg.flags.union(MessageFlagsNone::OUTGOING);
         }
         b.append(msg, &m);
     };
@@ -2544,7 +2544,7 @@ fn same_direction_still_groups() {
     let mut b = ChatBuffer::new(p);
     for i in 0..3 {
         let mut msg = said(7, "misha", "hai", 1000 + i);
-        msg.flags = msg.flags.union(MessageFlagsNone::SELF);
+        msg.flags = msg.flags.union(MessageFlagsNone::OUTGOING);
         b.append(msg, &m);
     }
     b.reindex();
