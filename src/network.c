@@ -61,7 +61,7 @@
 #endif
 
 #include "login_packet.h"
-#include "agreement_packet.h"
+#include "hotline_proto.h"
 #include "hl_code.h"
 #include "proto_helpers.h"
 #include "tracker_parser.h"
@@ -362,10 +362,10 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 void
 hx_send_agreement_agree (struct htlc_conn *htlc)
 {
-    /* Phase E2: same as hx_change_name_icon — encode the nick to
+    /* Same as hx_change_name_icon — encode the nick to
 	 * the negotiated wire encoding. is_body = FALSE (nicks are
 	 * single-line). Encoding happens here (not inside the shared
-	 * builder) so agreement_packet.c stays free of the iconv
+	 * builder) so the Rust builder stays free of the iconv
 	 * dependency that text_util.c brings in. */
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
@@ -378,17 +378,12 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
 	 * _hope) and production stay locked to the same wire shape. The
 	 * OPTIONS-bitmap-is-mandatory rule (Mobius panics without it,
 	 * see commit history) is enforced by the builder, not here. */
-    const hx_agreement_agree_request req = {
-        .icon             = hx_conn_icon (htlc),
-        .display_name     = name_wire,
-        .display_name_len = (guint16) name_len,
-        .options          = 0,
-    };
     struct hx_chunk chunks[HX_AGREEMENT_AGREE_MAX_CHUNKS];
     guint8 scratch[HX_AGREEMENT_AGREE_SCRATCH_SIZE];
-    int hc = hx_agreement_agree_build_chunks (&req, chunks,
-                                              HX_AGREEMENT_AGREE_MAX_CHUNKS,
-                                              scratch, sizeof (scratch));
+    int hc = (int) gtkhx_proto_build_agreement_agree_chunks (
+        hx_conn_icon (htlc), (const uint8_t *) name_wire, name_len,
+        /*options=*/0, chunks, HX_AGREEMENT_AGREE_MAX_CHUNKS, scratch,
+        sizeof (scratch));
     if (hc > 0) {
         hlwrite_chunks (htlc, HTLC_HDR_AGREEMENTAGREE, 0, chunks, hc);
     }

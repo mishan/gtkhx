@@ -1781,9 +1781,6 @@ gtkhx_connect_signals (GtkhxSession *emitter)
  * implementation, so they're called by name from fe_init. */
 
 
-/* qbuf_set / qbuf_add moved to src/qbuf.c so both the GUI binary and
- * the Tier 3 integration harness link the same implementation. */
-
 void hotline_client_init (int argc, char **argv);
 
 int

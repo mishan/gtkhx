@@ -103,10 +103,10 @@ extern guint8 dir_char;
  * extern declarations stay here so callers don't have to chase a
  * second header. */
 #include "path_hldir.h"
-/* dirchar_basename is a thin wrapper around path_basename that uses
- * the dir_char global. The unit-testable underlying function lives
- * in path_util.h. */
-#include "path_util.h"
+/* dirchar_basename is a thin wrapper around gtkhx_files_basename (the
+ * dir_char-free basename split, now in the hxmodel Rust crate) that plugs in
+ * the dir_char global. */
+extern char *gtkhx_files_basename (char *path, char sep);
 extern char *dirchar_basename (char *path);
 extern void dirchar_fix (char *lpath);
 extern int exists_remote (char *path);

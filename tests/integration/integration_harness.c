@@ -30,7 +30,7 @@
 #include "hxnet_htxf.h"
 #include "hl_code.h"
 #include "login_packet.h"
-#include "agreement_packet.h"
+#include "hotline_proto.h"
 #include "chat_history.h"
 #include "integration_harness.h"
 #include "server_matrix.h"
@@ -1825,7 +1825,7 @@ integration_send_agreementagree_hope (int                       fd,
                                       guint16                   icon)
 {
     /* Drive the same chunk builder production uses
-     * (src/agreement_packet.c via hx_agreement_agree_build_chunks).
+     * (gtkhx_proto_build_agreement_agree_chunks, hotline-proto).
      * Wire shape: icon as u16 BE, display name as raw bytes, options
      * as u16 BE (zero from production; the chunk is mandatory or
      * Mobius panics — see hx_send_agreement_agree's comment). Janus
@@ -1841,17 +1841,11 @@ integration_send_agreementagree_hope (int                       fd,
      * vs Mac Roman, which is identical to ASCII for the test
      * names. */
     gsize name_len = display_name ? strlen (display_name) : 0;
-    const hx_agreement_agree_request req = {
-        .icon             = icon,
-        .display_name     = display_name,
-        .display_name_len = (guint16) name_len,
-        .options          = 0,
-    };
     struct hx_chunk chunks[HX_AGREEMENT_AGREE_MAX_CHUNKS];
     guint8 scratch[HX_AGREEMENT_AGREE_SCRATCH_SIZE];
-    int hc = hx_agreement_agree_build_chunks (&req, chunks,
-                                              HX_AGREEMENT_AGREE_MAX_CHUNKS,
-                                              scratch, sizeof (scratch));
+    int hc = (int) gtkhx_proto_build_agreement_agree_chunks (
+        icon, (const uint8_t *) display_name, name_len, /*options=*/0, chunks,
+        HX_AGREEMENT_AGREE_MAX_CHUNKS, scratch, sizeof (scratch));
     if (hc <= 0) {
         return FALSE;
     }

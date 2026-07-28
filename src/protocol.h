@@ -41,9 +41,6 @@ struct qbuf {
     guint8 *buf;
 };
 
-extern void qbuf_set (struct qbuf *q, guint32 pos, guint32 len);
-extern void qbuf_add (struct qbuf *q, void *buf, guint32 len);
-
 /* ---- Connections ---------------------------------------------------- */
 
 struct htlc_conn;

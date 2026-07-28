@@ -14,10 +14,6 @@ extern void create_connect_window (GtkWidget *btn, gpointer data);
  * Bookmarks dialog (both ported to Rust in R5.3). No C consumer of it
  * remains, so connect.h no longer re-exports it. The stable on-disk
  * cipher byte ↔ name mapping now lives in the hxbookmarks Rust crate. */
-/* list_n moved to src/algo_list.{c,h} — re-include so historic
- * connect.h consumers keep finding the declaration without an
- * extra include. */
-#include "algo_list.h"
 
 /* build a fresh GMenu of saved bookmark names. Entries
  * target the "app.open_bookmark" GAction with the bookmark name as

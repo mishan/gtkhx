@@ -1,13 +1,11 @@
 //! Outgoing-message builders for the SEND path.
 //!
-//! Phase R2 ports each `hx_send_*` function in C (chat.c, msg.c,
-//! network.c) into a `build_*_chunks` helper here. The C wrapper still
-//! calls `hlwrite_chunks()` (network.c) to push bytes onto the socket —
-//! this module is purely about the "build the message" step, mirroring
-//! the existing `agreement_packet.c::hx_agreement_agree_build_chunks`
-//! pattern.
+//! Each `hx_send_*` transaction's chunk layout lives here as a
+//! `build_*_chunks` helper; the caller pushes the resulting chunks onto
+//! the socket via `hlwrite_chunks` (a separate step). This module is
+//! purely the "build the message" half.
 //!
-//! ## API shape (matches `agreement_packet.c`)
+//! ## API shape
 //!
 //! Each builder takes a typed request struct plus two caller-owned
 //! buffers:
@@ -29,8 +27,7 @@
 //! Text conversion (`gtkhx_text_for_wire`, the iconv-backed UTF-8 ↔
 //! Mac Roman path in `src/text_util.c`) is the caller's responsibility —
 //! the builder receives already-encoded body bytes. This keeps the
-//! Rust crate free of GLib iconv dependencies, same discipline as the
-//! existing C `agreement_packet.c`.
+//! Rust crate free of GLib iconv dependencies.
 
 use crate::messages::tag;
 
@@ -386,14 +383,12 @@ pub fn build_chat_subject_chunks(
 
 // ---- HTLC_HDR_AGREEMENTAGREE ------------------------------------------
 //
-// Phase R2 port of agreement_packet.c::hx_agreement_agree_build_chunks.
-// Same wire shape (ICON + NAME + OPTIONS, all three mandatory), same
-// chunks-array + scratch contract. The C function stays as a thin
-// shim so the existing call sites (network.c::hx_send_agreement_agree
-// and the integration harness) keep working.
+// Wire shape: ICON + NAME + OPTIONS, all three mandatory (Mobius panics
+// without OPTIONS). The C call sites (network.c::hx_send_agreement_agree
+// and the integration harness) reach this through the
+// `gtkhx_proto_build_agreement_agree_chunks` FFI shim.
 
-/// Request data for [`build_agreement_agree_chunks`]. Mirrors the
-/// C `hx_agreement_agree_request` struct in `agreement_packet.h`.
+/// Request data for [`build_agreement_agree_chunks`].
 pub struct AgreementAgreeRequest<'a> {
     /// HTLC_DATA_ICON value. Always emitted.
     pub icon: u16,

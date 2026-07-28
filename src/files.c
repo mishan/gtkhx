@@ -253,15 +253,13 @@ hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
  * can link it without dragging in this TU's GTK + Adwaita pile.
  * The dir_char global below is what that extracted code references. */
 
-/* dirchar_basename is now a thin wrapper around the
- * dir_char-free path_basename(path, sep) so the unit tests can
- * exercise the underlying logic without linking files.c. The shape
- * stays identical for callers; dir_char is still the global the
- * Hotline-server-driven dirchar_change() rewrites. */
+/* dirchar_basename is a thin wrapper around the dir_char-free
+ * gtkhx_files_basename(path, sep) (hxmodel Rust crate) that plugs in the
+ * dir_char global — the Hotline-server-driven dirchar_change() rewrites it. */
 char *
 dirchar_basename (char *path)
 {
-    return path_basename (path, (char)dir_char);
+    return gtkhx_files_basename (path, (char)dir_char);
 }
 
 void

@@ -231,6 +231,28 @@ fn string_into_raw(s: String) -> *mut c_char {
         .into_raw()
 }
 
+/// `char *gtkhx_files_basename(char *path, char sep)` — pointer into `path` at
+/// the last component (components separated by `sep`), or `path` itself when
+/// there is no `sep`. The returned pointer aliases the input buffer (no
+/// allocation); the caller must not free it. The FFI shim behind
+/// `src/files.c::dirchar_basename` (was `path_util.c::path_basename`).
+///
+/// # Safety
+/// `path` is NULL or a NUL-terminated C string; the returned pointer is into
+/// that same buffer.
+#[no_mangle]
+pub unsafe extern "C" fn gtkhx_files_basename(path: *mut c_char, sep: c_char) -> *mut c_char {
+    if path.is_null() {
+        return path;
+    }
+    // SAFETY: caller guarantees a NUL-terminated string.
+    let bytes = unsafe { core::ffi::CStr::from_ptr(path) }.to_bytes();
+    let off = crate::files::basename_offset(bytes, sep as u8);
+    // SAFETY: off <= bytes.len(), so the result stays within the buffer (at
+    // most one past the last byte, the trailing NUL).
+    unsafe { path.add(off) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
