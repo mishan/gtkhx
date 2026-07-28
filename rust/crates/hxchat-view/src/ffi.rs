@@ -17,7 +17,7 @@
 //! raw `textentry *` would have dangled.
 
 use crate::view::{HxChatView, PALETTE_COLS};
-use gtk4::glib::translate::{FromGlibPtrNone, IntoGlib, ToGlibPtr};
+use gtk4::glib::translate::{FromGlibPtrNone, IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
 use hxchat_layout::{mirc, Block, Message, MessageId, MessageKind, ParsedText};
 use std::ffi::{c_char, c_int, c_void, CStr};
@@ -57,8 +57,18 @@ fn ptr_to_mark(p: *mut c_void) -> Option<MessageId> {
     }
 }
 
+/// Wrap a borrowed `GtkWidget *` from C.
+///
+/// `from_glib_none` is the "full" wrapping form in the sense of
+/// `docs/rust/glib-interop.md`: it takes a reference on wrap and drops
+/// it on scope exit, so the object cannot be freed underneath us even if
+/// a handler we invoke drops C's own reference. The cheaper
+/// `from_glib_borrow` would skip the refcount traffic but is not
+/// re-entrancy safe, and several of these entry points end up emitting
+/// signals or queueing draws.
+///
 /// # Safety
-/// `w` is a valid `HxChatView *`.
+/// `w` is NULL or a valid `GtkWidget *` owned by the caller.
 unsafe fn view_of(w: CGtkWidget) -> Option<HxChatView> {
     if w.is_null() {
         return None;
@@ -96,9 +106,36 @@ pub unsafe extern "C" fn hx_chat_view_impl_new(
         }
         view.set_palette(&pal);
     }
-    // The caller owns the floating ref, exactly as gtk_xtext_new leaves
-    // it, so the two backends hand back the same ownership.
-    view.upcast::<gtk4::Widget>().to_glib_none().0
+    // ---- ownership: hand back refcount 1, floating -----------------
+    //
+    // This has to reproduce `gtk_xtext_new`'s contract exactly, because
+    // the caller is shared: `chat.c:1789` does `g_object_ref_sink (text)`
+    // on whatever `hx_chat_view_new` returned.
+    //
+    // `to_glib_none()` here is a use-after-free, and was: it yields a
+    // *borrowed* pointer, then the `view` wrapper drops at the end of
+    // this function and takes the last reference with it. The C side
+    // then holds freed memory — which showed up as a SIGSEGV inside
+    // `gtk_xtext_set_font`, because the freed object's type check in
+    // `is_hxchat` read garbage, failed, and sent the call down the xtext
+    // branch.
+    //
+    // `into_glib_ptr` transfers the wrapper's strong reference instead of
+    // borrowing it, so nothing is dropped. But gtk-rs sinks the floating
+    // reference when it wraps an InitiallyUnowned, so at that point the
+    // object is refcount 1 and *not* floating, while `g_object_new` —
+    // and therefore `gtk_xtext_new` — returns refcount 1 and floating.
+    // `g_object_force_floating` restores the flag without touching the
+    // count, making the two backends genuinely interchangeable: the
+    // caller's `ref_sink` then sinks a real floating ref rather than
+    // adding a second one and leaking.
+    let ptr = view.upcast::<gtk4::Widget>().into_glib_ptr();
+    gtk4::glib::gobject_ffi::g_object_force_floating(ptr as *mut _);
+    debug_assert!(
+        gtk4::glib::gobject_ffi::g_object_is_floating(ptr as *mut _) != 0,
+        "hx_chat_view_new must return a floating ref, like gtk_xtext_new"
+    );
+    ptr
 }
 
 /// # Safety
@@ -224,6 +261,11 @@ pub unsafe extern "C" fn hx_chat_view_impl_get_vadjustment(
                     a
                 }
             };
+            // Borrowed, matching xtext's `return xtext->adj;`. Safe
+            // because the view itself holds a reference in either branch
+            // above — in the None branch `set_vadjustment` stored one
+            // before the local wrapper drops — and the caller
+            // (`gtk_scrollbar_new`) takes its own.
             adj.to_glib_none().0
         }
         None => std::ptr::null_mut(),

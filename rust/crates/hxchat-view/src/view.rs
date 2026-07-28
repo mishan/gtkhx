@@ -91,11 +91,44 @@ mod imp {
     }
 
     impl ObjectImpl for HxChatView {
+        fn signals() -> &'static [glib::subclass::Signal] {
+            use std::sync::OnceLock;
+            static S: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
+            S.get_or_init(|| {
+                vec![
+                    // xtext's signal, registered here purely so the
+                    // seven `g_signal_connect (view, "word_click", ...)`
+                    // sites in chat.c and msg.c bind without warning
+                    // during the coexistence period. It is never
+                    // emitted: a click yields a whitespace-delimited
+                    // word, callers demux it by string prefix
+                    // (`hxmedia:N`, the NBSP load-older sentinel), and
+                    // replacing that with the typed signals in scoping
+                    // §3.6 is C3 work.
+                    //
+                    // Registered as (POINTER, POINTER) to match xtext,
+                    // which registers both args as G_TYPE_POINTER —
+                    // the marshaller never inspected the concrete
+                    // GdkEvent shape.
+                    glib::subclass::Signal::builder("word_click")
+                        .param_types([glib::Pointer::static_type(), glib::Pointer::static_type()])
+                        .build(),
+                ]
+            })
+        }
+
         fn constructed(&self) {
             self.parent_constructed();
             let obj = self.obj();
             obj.set_hexpand(true);
             obj.set_vexpand(true);
+            // Rows are laid out against the allocation but a single
+            // over-wide grapheme can exceed it (see TextMeasure::
+            // fit_prefix's minimum-progress rule), and a partially
+            // scrolled row is drawn straddling the top edge by design.
+            // Clip rather than letting either bleed into the sibling
+            // widgets.
+            obj.set_overflow(gtk4::Overflow::Hidden);
             // Rebuild the measurer against the widget's own Pango
             // context so text is shaped with the real display's font
             // config, not the headless default the struct starts with.

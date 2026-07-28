@@ -107,8 +107,14 @@ extern void hx_chat_view_impl_media_set_animation (GtkWidget *w, void *mark,
 static inline gboolean
 is_hxchat (GtkWidget *view)
 {
-    return view != NULL
-           && G_TYPE_CHECK_INSTANCE_TYPE (view, hx_chat_view_impl_get_type ());
+    /* Cached: this runs on every call into every entry point, and
+     * hx_chat_view_impl_get_type crosses the FFI to reach glib's type
+     * registry. The GType never changes once registered. */
+    static GType t = 0;
+    if (G_UNLIKELY (t == 0)) {
+        t = hx_chat_view_impl_get_type ();
+    }
+    return view != NULL && G_TYPE_CHECK_INSTANCE_TYPE (view, t);
 }
 
 /* Which backend a newly-created view gets.
