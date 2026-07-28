@@ -261,6 +261,14 @@ fn finish(cfg: &hfs::Config, path: &Path, typecrea: [u8; 8], pi: &ffo::FilpInfo)
     0
 }
 
+/// Short per-read timeout (ms) used when draining a trailing MACR marker that a
+/// server may have over-declared in `file_budget` but never actually sends (a
+/// no-resource-fork file). Without it the worker blocks on the 16-byte marker
+/// read until the server closes the socket — the ~2s end-of-transfer stall the
+/// old C `file_recv_one` also had. Used by both the folder drain and the solo
+/// MACR read.
+const MACR_DRAIN_TIMEOUT_MS: u32 = 200;
+
 /// `int hxnet_xfer_file_recv_one (const HxnetXferParams *p)` — receive one file
 /// off the HTXF subchannel into `p->path` (was C `file_recv_one`). Returns 0 on
 /// success, an errno-like positive code on failure. Does NOT play the completion
@@ -363,7 +371,9 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
         // Folder-stream files never persist a resource fork, but the server may
         // have announced file_budget bytes and buffered a MACR marker. Drain up
         // to (file_budget - tot_len) with a short per-read timeout.
-        if tot_len < p.file_budget && crate::htxf::hxnet_htxf_set_read_timeout(hx, 200) == 0 {
+        if tot_len < p.file_budget
+            && crate::htxf::hxnet_htxf_set_read_timeout(hx, MACR_DRAIN_TIMEOUT_MS) == 0
+        {
             let mut remaining = p.file_budget - tot_len;
             let mut sink = [0u8; 2048];
             while remaining > 0 {
@@ -384,13 +394,46 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     if tot_len >= p.file_budget {
         return finish(&cfg, &path, typecrea, &pi);
     }
-    // 16-byte MACR fork header.
-    let marker = match read_exact_progress(hx, ffo::FORK_HEADER_LEN, p) {
-        Ok(m) => m,
-        Err(e) => return e,
-    };
+    // 16-byte MACR fork header. The server declared more than the data fork, so
+    // a MACR marker *should* follow — but some servers over-declare file_budget
+    // and send nothing for a no-resource-fork file. Arm a short read timeout so
+    // a missing marker finishes cleanly instead of blocking until the server
+    // closes the socket (the ~2s stall the blocking C read had). A real marker
+    // is buffered right behind the data fork, so the timeout never clips it.
+    if crate::htxf::hxnet_htxf_set_read_timeout(hx, MACR_DRAIN_TIMEOUT_MS) != 0 {
+        return EIO;
+    }
+    // Drive the marker read directly so we can tell "nothing arrived" (a phantom
+    // the server over-declared → clean no-resource-fork completion) apart from a
+    // partial read that then failed (a real marker we've lost sync on → error).
+    // read_exact_progress collapses both into one Err, which would silently
+    // truncate a real resource fork and desync the stream, so it can't be used
+    // here.
     let mut m = [0u8; ffo::FORK_HEADER_LEN];
-    m.copy_from_slice(&marker);
+    let mut got = 0usize;
+    let marker_complete = loop {
+        let n = crate::htxf::hxnet_htxf_read(hx, m[got..].as_mut_ptr(), m.len() - got);
+        if n < 1 {
+            // No bytes yet → server sent no marker (clean finish). Some bytes
+            // already consumed → partial marker, the stream is desynced.
+            break if got == 0 { Ok(false) } else { Err(EIO) };
+        }
+        p.report(n as u64);
+        got += n as usize;
+        if got == m.len() {
+            break Ok(true);
+        }
+    };
+    // Disarm before reading the resource fork itself — fork data can take longer
+    // than the drain timeout to arrive.
+    if crate::htxf::hxnet_htxf_set_read_timeout(hx, 0) != 0 {
+        return EIO;
+    }
+    match marker_complete {
+        Ok(true) => {}                                          // full 16-byte marker
+        Ok(false) => return finish(&cfg, &path, typecrea, &pi), // no marker at all
+        Err(e) => return e,                                     // partial → desync
+    }
     let rfork_len = ffo::fork_len(&m, large);
     if rfork_len == 0 {
         return finish(&cfg, &path, typecrea, &pi);
@@ -1375,5 +1418,191 @@ mod folder_loopback_tests {
         let long: Vec<u8> = vec![b'x'; 250];
         let many: Vec<&[u8]> = std::iter::repeat(long.as_slice()).take(20).collect();
         assert_eq!(recv_first_entry(1, &many), ENAMETOOLONG);
+    }
+}
+
+#[cfg(test)]
+mod recv_timeout_tests {
+    use super::*;
+    use crate::htxf::HtxfConn;
+    use std::io::{Read as _, Write as _};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::{Duration, Instant};
+
+    // Generate a valid FILP header + data fork (no trailing MACR) by running the
+    // send path into a loopback capture and slicing off its 16-byte MACR tail.
+    fn filp_header_and_data(body: &[u8]) -> Vec<u8> {
+        // Unique per call: tests run in parallel and each call makes + removes
+        // this dir, so a shared name would race.
+        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let dir = std::env::temp_dir()
+            .join(format!("hxnet_recv_gen_{}_{}", std::process::id(), seq));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("gen.txt");
+        std::fs::write(&path, body).unwrap();
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let reader = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            s.read_to_end(&mut got).unwrap();
+            got
+        });
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        let path_c = std::ffi::CString::new(path.to_str().unwrap()).unwrap();
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: path_c.as_ptr(),
+            file_budget: 0,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: body.len() as u64,
+            rsrc_size: 0,
+        };
+        assert_eq!(unsafe { hxnet_xfer_file_send_one(&params) }, 0);
+        drop(conn);
+        let full = reader.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        // Drop the trailing 16-byte MACR marker: keep 133-byte header + data.
+        full[..133 + body.len()].to_vec()
+    }
+
+    // A server that over-declares file_budget (a phantom trailing MACR) but never
+    // sends it must not hang the download worker until the socket closes — the
+    // ~2s end-of-transfer stall. The worker should finish promptly (bounded by
+    // MACR_DRAIN_TIMEOUT_MS) and return success.
+    #[test]
+    fn phantom_macr_does_not_hang_completion() {
+        let body = b"downloaded file body, no resource fork\n";
+        let wire = filp_header_and_data(body);
+        // Declare 16 phantom bytes beyond the header+data the server sends.
+        let file_budget = wire.len() as u64 + ffo::FORK_HEADER_LEN as u64;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        // Server: send header+data, then hold the socket open well past the drain
+        // timeout without sending the (nonexistent) MACR, then close.
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.write_all(&wire).unwrap();
+            s.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            // socket closes on drop
+        });
+
+        let out_dir = std::env::temp_dir().join(format!("hxnet_recv_out_{}", std::process::id()));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let out_path = out_dir.join("dl.txt");
+        let out_c = std::ffi::CString::new(out_path.to_str().unwrap()).unwrap();
+
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: out_c.as_ptr(),
+            file_budget,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: 0,
+            rsrc_size: 0,
+        };
+        let start = Instant::now();
+        let rv = unsafe { hxnet_xfer_file_recv_one(&params) };
+        let elapsed = start.elapsed();
+        drop(conn);
+
+        let got = std::fs::read(&out_path).unwrap_or_default();
+        let _ = std::fs::remove_dir_all(&out_dir);
+        let _ = server.join();
+
+        assert_eq!(rv, 0, "recv should complete cleanly despite the phantom MACR");
+        assert_eq!(got, body, "data fork must be written correctly");
+        assert!(
+            elapsed < Duration::from_millis(1000),
+            "recv should finish within the drain timeout, not block until close; took {:?}",
+            elapsed
+        );
+    }
+
+    // A *partial* MACR marker (some bytes then a stall) is a genuine desync, not
+    // a phantom: the drain timeout must not swallow it as a clean completion, or
+    // a real resource fork would be silently truncated. The worker must error.
+    #[test]
+    fn partial_macr_is_an_error_not_a_clean_finish() {
+        let body = b"file with a resource fork coming\n";
+        let mut wire = filp_header_and_data(body);
+        // Append a truncated MACR marker (8 of 16 bytes) so the drain read
+        // consumes some bytes and then stalls waiting for the rest.
+        wire.extend_from_slice(b"MACR\0\0\0\0");
+        // Declare a full marker + a resource fork beyond the header+data.
+        let file_budget = (filp_header_and_data(body).len()
+            + ffo::FORK_HEADER_LEN
+            + 32) as u64;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            s.write_all(&wire).unwrap();
+            s.flush().unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+        });
+
+        let out_dir =
+            std::env::temp_dir().join(format!("hxnet_recv_partial_{}", std::process::id()));
+        std::fs::create_dir_all(&out_dir).unwrap();
+        let out_path = out_dir.join("dl.txt");
+        let out_c = std::ffi::CString::new(out_path.to_str().unwrap()).unwrap();
+
+        let stream = TcpStream::connect(addr).unwrap();
+        let mut conn = HtxfConn::new_plain_for_test(stream);
+        extern "C" fn noop(_u: *mut c_void, _d: u64) {}
+        let params = HxnetXferParams {
+            hx: &mut conn as *mut HtxfConn,
+            path: out_c.as_ptr(),
+            file_budget,
+            data_pos: 0,
+            rsrc_pos: 0,
+            opt_preview: 0,
+            opt_folder: 0,
+            opt_large: 0,
+            preview: std::ptr::null_mut(),
+            user_data: std::ptr::null_mut(),
+            progress: Some(noop),
+            preview_chunk: None,
+            preview_set_info: None,
+            preview_done: None,
+            data_size: 0,
+            rsrc_size: 0,
+        };
+        let rv = unsafe { hxnet_xfer_file_recv_one(&params) };
+        drop(conn);
+        let _ = std::fs::remove_dir_all(&out_dir);
+        let _ = server.join();
+
+        assert_ne!(rv, 0, "a partial MACR marker must surface as an error, not a clean finish");
     }
 }
