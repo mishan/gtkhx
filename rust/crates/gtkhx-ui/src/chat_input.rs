@@ -127,20 +127,41 @@ fn strip_wrap<'a>(text: &'a str, delim: &str) -> Option<&'a str> {
 fn apply_tint(buf: &gtk::TextBuffer) {
     let tt = buf.tag_table();
     if tt.lookup("md-delim").is_none() {
-        // `alpha` rather than a fixed grey so the dimming works against
-        // whatever the theme paints the input.
-        buf.create_tag(Some("md-delim"), &[("alpha", &(110u32 << 8))]);
-        buf.create_tag(Some("md-bold"), &[("weight", &700i32)]);
-        buf.create_tag(
-            Some("md-italic"),
-            &[("style", &gtk::pango::Style::Italic)],
-        );
-        buf.create_tag(Some("md-code"), &[("family", &"monospace")]);
+        // Typed builder, not `create_tag`'s `&[(name, value)]` slice.
+        // The stringly-typed form looks up the property at runtime and
+        // *panics* if it doesn't exist — and a panic in a GTK signal
+        // callback is a non-unwinding one, so it aborts the process
+        // rather than failing the call. The first cut of this used an
+        // `alpha` property that GtkTextTag does not have, and every
+        // keystroke in the chat input killed GtkHx. With the builder a
+        // wrong property is a compile error.
+        for t in [
+            // Mid grey rather than an alpha on the theme foreground:
+            // GtkTextTag has no alpha property, and grey is legible
+            // against both the light and the dark input background.
+            gtk::TextTag::builder().name("md-delim").foreground("#888888").build(),
+            gtk::TextTag::builder().name("md-bold").weight(700).build(),
+            gtk::TextTag::builder()
+                .name("md-italic")
+                .style(gtk::pango::Style::Italic)
+                .build(),
+            gtk::TextTag::builder().name("md-code").family("monospace").build(),
+        ] {
+            tt.add(&t);
+        }
     }
 
+    // Hold the tag objects rather than their names: `*_by_name` is the
+    // same runtime-lookup shape that caused the abort above, and there
+    // is no reason to keep one instance of it around.
+    let Some(delim) = tt.lookup("md-delim") else { return };
+    let Some(bold) = tt.lookup("md-bold") else { return };
+    let Some(italic) = tt.lookup("md-italic") else { return };
+    let Some(code) = tt.lookup("md-code") else { return };
+
     let (start, end) = buf.bounds();
-    for t in ["md-delim", "md-bold", "md-italic", "md-code"] {
-        buf.remove_tag_by_name(t, &start, &end);
+    for t in [&delim, &bold, &italic, &code] {
+        buf.remove_tag(t, &start, &end);
     }
 
     let text = buf.text(&start, &end, false).to_string();
@@ -160,18 +181,16 @@ fn apply_tint(buf: &gtk::TextBuffer) {
             continue;
         };
         let (ia, ib) = (buf.iter_at_offset(a), buf.iter_at_offset(b));
-        if sp.delim {
-            buf.apply_tag_by_name("md-delim", &ia, &ib);
-            continue;
-        }
-        let name = if sp.attrs.contains(hxchat_layout::Attrs::BOLD) {
-            "md-bold"
+        let tag = if sp.delim {
+            &delim
+        } else if sp.attrs.contains(hxchat_layout::Attrs::BOLD) {
+            &bold
         } else if sp.attrs.contains(hxchat_layout::Attrs::CODE) {
-            "md-code"
+            &code
         } else {
-            "md-italic"
+            &italic
         };
-        buf.apply_tag_by_name(name, &ia, &ib);
+        buf.apply_tag(tag, &ia, &ib);
     }
 }
 
