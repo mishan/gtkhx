@@ -778,6 +778,122 @@ selection is installed on first *motion* — the moment it means
 something. Click-to-dismiss consequently keys on "the pointer never
 moved" instead of "the selection is empty".
 
+### 6c. The C5 gate: measure before deleting
+
+xtext is 6,721 lines and deleting it is irreversible in practice, so the
+flip wants numbers rather than impressions. `src/chat_bench.c` measures
+both backends *in situ* — same binary, same window, same append path,
+with `GTKHX_CHATVIEW` as the only difference:
+
+```sh
+tools/chatbench.sh 20000 3      # 20k messages, 3 repeats per backend
+```
+
+**Check the `backend` line in every report before believing any of it.**
+The first run collected was worthless: `want_hxchat` accepted only
+`"new"` / `"hxchat"`, the harness passed `GTKHX_CHATVIEW=1`, and both
+passes therefore ran xtext — producing a complete, plausible, entirely
+meaningless comparison. The selector now takes `1/true/yes/on` too and
+*warns* on a value it doesn't recognise instead of silently falling back,
+`want_hxchat` logs which backend it chose on every startup, and the
+script fails loudly if it doesn't see a report from both. A benchmark
+that can quietly measure the same thing twice is worse than no benchmark,
+because it produces numbers you'll act on.
+
+**Metrics, and how to read them.**
+
+| Metric | What it captures |
+|---|---|
+| ingest | Appending N messages. **Not comparable alone** — see below. |
+| first paint | The frame that pays off whatever layout was deferred. |
+| **ingest + paint** | The honest cost of getting N messages on screen. Compare this. |
+| reflow (width) | First frame after a width change. The most informative single number. |
+| scroll frame mean / p95 | Frame time while walking the buffer a third of a page at a time. |
+| RSS delta | Resident memory across the ingest phase, Linux only. |
+
+Ingest alone is the trap. xtext line-wraps at append time
+(`gtk_xtext_append_entry` → `calc_lines`); hxchat stores the message and
+lays it out in the frame that needs it. Timing the append call therefore
+compares "did the work" with "wrote it down", and would flatter the new
+backend for a difference that is only bookkeeping. Their sum is the
+comparable quantity.
+
+Reflow is where the architectural claim in §3.2 either shows up or
+doesn't: xtext re-wraps the entire scrollback on a width change, hxchat
+re-wraps what is visible. If that difference isn't visible at 20k
+messages, the O(visible) claim is not paying for itself and the doc
+should say so.
+
+Frame timings include GTK's own compositing, so they are comparable
+*between two runs on one machine* and nowhere else. Run repeats and read
+the spread; a single pair of runs cannot separate a real difference from
+scheduler noise.
+
+**Full write-up: [chat-view-benchmark.md](chat-view-benchmark.md)** —
+raw samples, per-metric methodology, and a record of the two ways this
+benchmark produced convincing wrong answers before it produced a right
+one. Summary below.
+
+**Results** — 20k messages, 3 repeats per backend, medians. Wayland,
+one machine, one window size; see the caveats above before quoting these
+anywhere else.
+
+| Metric | xtext | hxchat | Ratio |
+|---|---|---|---|
+| ingest + paint | 693.1 ms | 142.6 ms | **4.9×** |
+| ingest alone | 29.0k msgs/s | 143k msgs/s | 4.9× |
+| relayout, worst frame | 105.6 ms | 16.9 ms | **6.3×** |
+| relayout, 10-frame total | 396.6 ms | 166.3 ms | 2.4× |
+| scroll frame mean | 29.9 ms | 16.7 ms | 1.8× |
+| scroll frame p95 | 42.1 ms | 17.3 ms | **2.4×** |
+| RSS / 10k msgs | 0.1 MB | 0.1 MB | *not credible — see below* |
+
+**Read this way.**
+
+*Ingest + paint*: 693 ms → 143 ms to get 20k messages on screen. The §3.2
+retained-layout claim, doing what it was designed to.
+
+*Relayout is the clearest result in the table, and the most load-bearing.*
+Divide the 10-frame totals by 10: hxchat averages **16.63 ms/frame**
+against a 16.67 ms vsync interval. A font change invalidates every cached
+width and every wrap point in all 20k messages, and hxchat's frames after
+it are indistinguishable from idle — it re-wrapped what was visible and
+nothing else. xtext averages 39.7 ms/frame over the same window, ~230 ms
+of extra work, with a **105 ms** worst frame. That is the
+whole-scrollback re-wrap, and it is the §3.2 O(visible) claim confirmed
+directly rather than argued.
+
+One caveat: one of three xtext runs showed only a 22.6 ms worst frame
+(166.8 ms total, i.e. idle). Two of three showed ~105 ms. The effect is
+real but not present in every run, most likely depending on where the
+invalidation lands relative to xtext's `io_tag` render timeout.
+
+*Scroll* is what a user feels continuously rather than once. hxchat's
+16.7 ms mean is the frame budget — it is vsync-bound, i.e. out of work.
+xtext at 29.9 ms mean / 42.1 ms p95 is missing roughly every other frame.
+
+*RSS is not credible and should not be quoted.* A 0.1 MB delta for 20k
+messages is impossible; the message text alone is several MB. The harness
+is measuring something wrong — most likely the allocator had already
+grown the heap during warmup, so the pages were resident before the phase
+began. Reported only so it isn't mistaken for evidence of parity. Memory
+comparison remains **unmeasured**.
+
+**Retracted.** An earlier revision of this section recorded "reflow:
+16.4 ms vs 15.3 ms, no real difference" and speculated at length about
+why the O(visible) claim might not be paying for itself. That measurement
+was worthless: it shrank the view's `size-request`, and the chat output is
+`hexpand`, so the allocation never changed and nothing re-wrapped in
+either backend. Both numbers were one vsync interval. The lesson is
+cheap to state and was nearly expensive: **a benchmark result that clusters
+suspiciously near the frame interval is probably measuring the frame
+interval.**
+
+**Verdict for C5.** Every metric that is measured correctly shows a large
+win — ingest 4.9×, relayout worst-frame 6.3×, scroll p95 2.4× — and in
+two of them hxchat is simply vsync-bound, meaning the ceiling is the
+display rather than the widget. Memory is unmeasured. Proceed.
+
 ## 7. Testing
 
 - **Headless unit tests** (`cargo test`, no display) in `hxchat-layout`: wrap
@@ -786,12 +902,12 @@ moved" instead of "the selection is empty".
   span parsing against a corpus of real mIRC strings captured from `xprintline_render`;
   URL detection parity with `gtkurl.c`; selection → text extraction including
   image alt text.
-- **Golden-render tests**: render a fixed message list at a fixed width and font
-  into a texture via an offscreen `gsk::CairoRenderer` (works without a display)
-  and compare hashes. Pixel-level regression coverage in CI — xtext has none.
-- **Benchmarks with targets**, recorded in C1 against xtext as the baseline:
-  append throughput (msgs/s), cold reflow after resize with 50k messages,
-  steady-state scroll frame time, resident memory per 10k messages.
+- **Benchmarks with targets.** Planned for C1 and *not built there* — C1
+  shipped without them and this line went unamended, which is how a plan
+  quietly becomes fiction. The harness now exists as `src/chat_bench.c`,
+  driven by `tools/chatbench.sh`, and is the C5 gate (§6c).
+- **Golden-render tests**: still not built. Listed here since C0; worth
+  saying plainly rather than leaving as an implied "done".
 - **Tier 3 unaffected** — the protocol layer isn't touched. The existing chat /
   chat-history / inline-media integration tests keep passing against both
   backends, which is the strongest correctness argument the coexistence period

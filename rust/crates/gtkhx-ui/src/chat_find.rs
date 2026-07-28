@@ -11,7 +11,7 @@
 //! **Only the new backend can search.** `hx_chat_view_can_search`
 //! returns FALSE for xtext (see the note in `chat_view.h`), and the bar
 //! is simply not built in that case, so during the A/B the feature
-//! appears with `GTKHX_CHATVIEW=1` and is absent without it.
+//! appears with `GTKHX_CHATVIEW=new` and is absent without it.
 
 use gtk4 as gtk;
 use gtk::gdk;

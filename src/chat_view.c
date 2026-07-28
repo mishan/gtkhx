@@ -142,18 +142,53 @@ is_hxchat (GtkWidget *view)
 static gboolean
 want_hxchat (void)
 {
+    /* Accept the obvious spellings, not just the two original words.
+     *
+     * This used to match only "new" / "hxchat", so GTKHX_CHATVIEW=1 —
+     * which is what anyone types for a boolean env var, and what the
+     * benchmark harness and half the docs said — silently selected
+     * *xtext*. A whole A/B benchmark run was collected that way and had
+     * to be thrown out, because nothing in the output said which backend
+     * had actually been used.
+     *
+     * Hence also the warning on an unrecognised value: a typo must not
+     * quietly give you the other backend. Silence is only correct when
+     * the variable is unset or explicitly names xtext. */
     static int cached = -1;
     if (cached < 0) {
+        static const char *const yes[]
+            = { "1", "true", "yes", "on", "new", "hxchat", NULL };
+        static const char *const no[]
+            = { "0", "false", "no", "off", "old", "xtext", "", NULL };
         const char *v = g_getenv ("GTKHX_CHATVIEW");
-        cached = (v && (g_ascii_strcasecmp (v, "new") == 0
-                        || g_ascii_strcasecmp (v, "hxchat") == 0))
-                     ? 1
-                     : 0;
-        if (cached) {
-            g_message ("chat view: using the hxchat backend "
-                       "(GTKHX_CHATVIEW=%s)",
-                       v);
+        int i;
+
+        cached = 0;
+        if (v) {
+            for (i = 0; yes[i]; i++) {
+                if (g_ascii_strcasecmp (v, yes[i]) == 0) {
+                    cached = 1;
+                    break;
+                }
+            }
+            if (!cached) {
+                gboolean known = FALSE;
+                for (i = 0; no[i]; i++) {
+                    if (g_ascii_strcasecmp (v, no[i]) == 0) {
+                        known = TRUE;
+                        break;
+                    }
+                }
+                if (!known) {
+                    g_warning ("GTKHX_CHATVIEW=\"%s\" not understood — "
+                               "using xtext. Accepted: 1/true/yes/on/new/"
+                               "hxchat, or 0/false/no/off/old/xtext.",
+                               v);
+                }
+            }
         }
+        g_message ("chat view: using the %s backend",
+                   cached ? "hxchat" : "xtext");
     }
     return cached != 0;
 }
