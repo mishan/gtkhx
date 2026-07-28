@@ -225,6 +225,8 @@ hx_chat_view_new (const GdkRGBA palette[], gboolean separator)
                      "without GTKHX_CHATVIEW=new",
                      (void *) v);
         }
+        g_message ("chat view: constructed %s (%p)",
+                   G_OBJECT_TYPE_NAME (v), (void *) v);
         return v;
     }
     return gtk_xtext_new ((GdkRGBA *) (const void *) palette,

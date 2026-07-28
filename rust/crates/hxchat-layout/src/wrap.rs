@@ -374,32 +374,46 @@ fn wrap_text(
     count
 }
 
-/// Split `range` into maximal runs of uniform style.
+/// Walk `range` as maximal runs of uniform style, without allocating.
 ///
 /// Gaps between spans are default-styled. This is the one place that
 /// knows how to walk a `ParsedText`'s style structure, so measuring and
 /// break-point search can't drift apart.
-fn style_runs(p: &ParsedText, range: Range<usize>) -> Vec<(Range<usize>, Style)> {
-    let mut out = Vec::new();
+///
+/// Callback rather than a returned `Vec` because both callers sit on the
+/// wrapping hot path — `measure_styled` runs per candidate line and
+/// `fit_styled_prefix` per overflowing line, so an allocation each would
+/// be a per-line malloc during layout. `f` returning `Some` stops the
+/// walk early, which is what lets the prefix search bail at the run that
+/// straddles the width boundary.
+fn walk_style_runs<R>(
+    p: &ParsedText,
+    range: Range<usize>,
+    mut f: impl FnMut(Range<usize>, Style) -> Option<R>,
+) -> Option<R> {
     let mut cursor = range.start;
     for s in &p.spans {
         if s.range.end <= cursor || s.range.start >= range.end {
             continue;
         }
         if s.range.start > cursor {
-            out.push((cursor..s.range.start, Style::default()));
+            if let Some(r) = f(cursor..s.range.start, Style::default()) {
+                return Some(r);
+            }
             cursor = s.range.start;
         }
         let end = s.range.end.min(range.end);
         if end > cursor {
-            out.push((cursor..end, s.style));
+            if let Some(r) = f(cursor..end, s.style) {
+                return Some(r);
+            }
             cursor = end;
         }
     }
     if cursor < range.end {
-        out.push((cursor..range.end, Style::default()));
+        return f(cursor..range.end, Style::default());
     }
-    out
+    None
 }
 
 /// Total width of a byte range, measured one style run at a time.
@@ -407,10 +421,12 @@ fn style_runs(p: &ParsedText, range: Range<usize>) -> Vec<(Range<usize>, Style)>
 /// The per-run granularity is the point: a 200-character message with
 /// two bold words costs three measure calls, not two hundred.
 fn measure_styled(p: &ParsedText, range: Range<usize>, measure: &dyn TextMeasure) -> u32 {
-    style_runs(p, range)
-        .into_iter()
-        .map(|(r, style)| measure.run_width(&p.text[r], style))
-        .sum()
+    let mut total = 0u32;
+    walk_style_runs::<()>(p, range, |r, style| {
+        total += measure.run_width(&p.text[r], style);
+        None
+    });
+    total
 }
 
 /// Largest prefix of `range` fitting in `max_width`, honouring every
@@ -432,18 +448,20 @@ fn fit_styled_prefix(
 ) -> (usize, u32) {
     let mut total = 0u32;
     let mut cursor = range.start;
-    for (r, style) in style_runs(p, range.clone()) {
+    let straddled = walk_style_runs(p, range, |r, style| {
         let seg = &p.text[r.clone()];
         let w = measure.run_width(seg, style);
         if total + w <= max_width {
             total += w;
             cursor = r.end;
-            continue;
+            return None;
         }
+        // This run crosses the boundary — only it needs the measurer's
+        // own prefix search.
         let (fit, fw) = measure.fit_prefix(seg, style, max_width.saturating_sub(total));
-        return (r.start + fit, total + fw);
-    }
-    (cursor, total)
+        Some((r.start + fit, total + fw))
+    });
+    straddled.unwrap_or((cursor, total))
 }
 
 fn next_boundary(s: &str, from: usize) -> usize {

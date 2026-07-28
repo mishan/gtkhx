@@ -44,6 +44,24 @@ unsafe fn cslice(p: *const c_char, len: c_int) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
 
+/// Resolve the `stamp` argument the way xtext does.
+///
+/// `gtk_xtext_append_entry` (xtext.c:5399) substitutes `time (0)` when
+/// the caller passes 0, and nearly every call site in `chat.c` / `msg.c`
+/// passes 0 for live messages precisely to get that. Passing the 0
+/// through would silently date every live message to the epoch — and
+/// since the timestamp column is what surfaces it, the visible symptom
+/// would be timestamps quietly disappearing on the new backend.
+fn stamp_or_now(stamp: i64) -> i64 {
+    if stamp != 0 {
+        return stamp;
+    }
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
+}
+
 fn mark_to_ptr(id: MessageId) -> *mut c_void {
     id.0 as usize as *mut c_void
 }
@@ -329,7 +347,7 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
     };
     Message {
         kind: MessageKind::Live,
-        timestamp: stamp,
+        timestamp: stamp_or_now(stamp),
         speaker: None,
         gutter,
         blocks: vec![Block::Text(mirc::parse(right))],
@@ -350,7 +368,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_append(
         let body = cslice(text, len);
         v.append(Message {
             kind: MessageKind::Live,
-            timestamp: stamp,
+            timestamp: stamp_or_now(stamp),
             speaker: None,
             gutter: None,
             blocks: vec![Block::Text(mirc::parse(&body))],
@@ -432,7 +450,7 @@ pub unsafe extern "C" fn hx_chat_view_impl_append_media(
         let alt = cstr(alt);
         v.append(Message {
             kind: MessageKind::Live,
-            timestamp: stamp,
+            timestamp: stamp_or_now(stamp),
             speaker: None,
             gutter: None,
             blocks: vec![Block::Image {
