@@ -776,15 +776,6 @@ unsafe fn remotedir_present(htxf: *const HtxfHandle) -> bool {
     rd[0] != 0 && !(rd[0] == b'/' as c_char && rd[1] == 0)
 }
 
-/// View a `path_to_hldir` result (`*mut u8` + `u16` length) as a byte slice.
-unsafe fn hldir_slice<'a>(ptr: *mut u8, len: u16) -> &'a [u8] {
-    if ptr.is_null() || len == 0 {
-        &[]
-    } else {
-        std::slice::from_raw_parts(ptr, len as usize)
-    }
-}
-
 /// The download half of [`xfer_go`]: resume-vs-rename decision, then the
 /// FILE_NAME / DIR / (resume) RFLT chunk build + FILE_GET request.
 unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
@@ -825,9 +816,19 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
         if has_dir {
             hldir = path_to_hldir((*htxf).remotedir.as_ptr(), &mut hldirlen, 0);
         }
+        // Borrow the DIR bytes in this scope so the slice's lifetime is tied to
+        // `hldir` (g_free'd at the end of this closure), never an unconstrained
+        // one that could outlive the allocation.
+        let dir: Option<&[u8]> = if has_dir && !hldir.is_null() && hldirlen != 0 {
+            Some(std::slice::from_raw_parts(hldir, hldirlen as usize))
+        } else if has_dir {
+            Some(&[])
+        } else {
+            None
+        };
         let req = FileGetRequest {
             name: nm_wire,
-            dir: has_dir.then(|| hldir_slice(hldir, hldirlen)),
+            dir,
             rflt: resuming.then_some(&rflt[..]),
         };
         let mut chunks = [HxChunk::EMPTY; 3];
@@ -866,9 +867,19 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
         if has_dir {
             hldir = path_to_hldir((*htxf).remotedir.as_ptr(), &mut hldirlen, 0);
         }
+        // Borrow the DIR bytes in this scope so the slice's lifetime is tied to
+        // `hldir` (g_free'd at the end of this closure), never an unconstrained
+        // one that could outlive the allocation.
+        let dir: Option<&[u8]> = if has_dir && !hldir.is_null() && hldirlen != 0 {
+            Some(std::slice::from_raw_parts(hldir, hldirlen as usize))
+        } else if has_dir {
+            Some(&[])
+        } else {
+            None
+        };
         let req = FilePutRequest {
             name: nm_wire,
-            dir: has_dir.then(|| hldir_slice(hldir, hldirlen)),
+            dir,
             has_preview,
             size: size_host,
             size64: large.then_some((*htxf).total_size),
