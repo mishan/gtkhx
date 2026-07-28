@@ -2668,3 +2668,42 @@ fn a_speaker_with_no_uid_gets_no_avatar_slot() {
     b.ensure_layout(0, &m);
     assert!(b.layout_at(0).unwrap().avatar.is_none());
 }
+
+#[test]
+fn a_rename_breaks_the_run() {
+    // The uid survives a rename, so keying grouping on it alone would
+    // hide the new name entirely — the messages would group under the
+    // old one and the change, which is the thing worth noticing, would
+    // never appear on screen.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.append(said(7, "misha2", "three", 1002), &m); // same uid, new nick
+    b.append(said(7, "misha2", "four", 1003), &m);
+    b.reindex();
+
+    assert!(!grouped(&b, 0));
+    assert!(grouped(&b, 1), "same name, same person");
+    assert!(!grouped(&b, 2), "the rename must show the new name");
+    assert!(grouped(&b, 3), "and then group again under it");
+}
+
+#[test]
+fn two_users_sharing_a_nick_do_not_group() {
+    // The converse: the nick alone is not enough either. Two people can
+    // present the same name, and merging their messages under one header
+    // would misattribute them.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(9, "misha", "two", 1001), &m); // impostor, same nick
+    b.reindex();
+
+    assert!(!grouped(&b, 0));
+    assert!(!grouped(&b, 1), "different uid means a different person");
+}
