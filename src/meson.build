@@ -21,6 +21,8 @@ gtkhx_sources = files(
   # The only file outside xtext.c that names GTK_XTEXT / xtext_buffer /
   # textentry; see docs/chat-view-scoping.md phase C0.
   'chat_view.c',
+  # chat_bench.c — env-gated A/B benchmark over the chat_view.h seam.
+  'chat_bench.c',
   'cicn.c',
   'gif_avatar.c',
   'gif_icons.c',

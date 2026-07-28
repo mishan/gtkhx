@@ -778,6 +778,55 @@ selection is installed on first *motion* — the moment it means
 something. Click-to-dismiss consequently keys on "the pointer never
 moved" instead of "the selection is empty".
 
+### 6c. The C5 gate: measure before deleting
+
+xtext is 6,721 lines and deleting it is irreversible in practice, so the
+flip wants numbers rather than impressions. `src/chat_bench.c` measures
+both backends *in situ* — same binary, same window, same append path,
+with `GTKHX_CHATVIEW` as the only difference:
+
+```sh
+tools/chatbench.sh 20000 3      # 20k messages, 3 repeats per backend
+```
+
+**Metrics, and how to read them.**
+
+| Metric | What it captures |
+|---|---|
+| ingest | Appending N messages. **Not comparable alone** — see below. |
+| first paint | The frame that pays off whatever layout was deferred. |
+| **ingest + paint** | The honest cost of getting N messages on screen. Compare this. |
+| reflow (width) | First frame after a width change. The most informative single number. |
+| scroll frame mean / p95 | Frame time while walking the buffer a third of a page at a time. |
+| RSS delta | Resident memory across the ingest phase, Linux only. |
+
+Ingest alone is the trap. xtext line-wraps at append time
+(`gtk_xtext_append_entry` → `calc_lines`); hxchat stores the message and
+lays it out in the frame that needs it. Timing the append call therefore
+compares "did the work" with "wrote it down", and would flatter the new
+backend for a difference that is only bookkeeping. Their sum is the
+comparable quantity.
+
+Reflow is where the architectural claim in §3.2 either shows up or
+doesn't: xtext re-wraps the entire scrollback on a width change, hxchat
+re-wraps what is visible. If that difference isn't visible at 20k
+messages, the O(visible) claim is not paying for itself and the doc
+should say so.
+
+Frame timings include GTK's own compositing, so they are comparable
+*between two runs on one machine* and nowhere else. Run repeats and read
+the spread; a single pair of runs cannot separate a real difference from
+scheduler noise.
+
+**Results.** _(to be filled in from a real run — see task C5.0b)_
+
+| Metric | xtext | hxchat | Verdict |
+|---|---|---|---|
+| ingest + paint (20k) | | | |
+| reflow (width) | | | |
+| scroll p95 | | | |
+| RSS / 10k msgs | | | |
+
 ## 7. Testing
 
 - **Headless unit tests** (`cargo test`, no display) in `hxchat-layout`: wrap
@@ -786,12 +835,12 @@ moved" instead of "the selection is empty".
   span parsing against a corpus of real mIRC strings captured from `xprintline_render`;
   URL detection parity with `gtkurl.c`; selection → text extraction including
   image alt text.
-- **Golden-render tests**: render a fixed message list at a fixed width and font
-  into a texture via an offscreen `gsk::CairoRenderer` (works without a display)
-  and compare hashes. Pixel-level regression coverage in CI — xtext has none.
-- **Benchmarks with targets**, recorded in C1 against xtext as the baseline:
-  append throughput (msgs/s), cold reflow after resize with 50k messages,
-  steady-state scroll frame time, resident memory per 10k messages.
+- **Benchmarks with targets.** Planned for C1 and *not built there* — C1
+  shipped without them and this line went unamended, which is how a plan
+  quietly becomes fiction. The harness now exists as `src/chat_bench.c`,
+  driven by `tools/chatbench.sh`, and is the C5 gate (§6c).
+- **Golden-render tests**: still not built. Listed here since C0; worth
+  saying plainly rather than leaving as an implied "done".
 - **Tier 3 unaffected** — the protocol layer isn't touched. The existing chat /
   chat-history / inline-media integration tests keep passing against both
   backends, which is the strongest correctness argument the coexistence period
