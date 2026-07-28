@@ -8,10 +8,9 @@
 //! here the whole engine lives in `hxchat-layout` behind the
 //! `hx_chat_view_search*` C API, so this file only drives it.
 //!
-//! **Only the new backend can search.** `hx_chat_view_can_search`
-//! returns FALSE for xtext (see the note in `chat_view.h`), and the bar
-//! is simply not built in that case, so during the A/B the feature
-//! appears with `GTKHX_CHATVIEW=new` and is absent without it.
+//! Built unconditionally since C5. During the A/B this checked
+//! `hx_chat_view_can_search` and skipped building the bar on xtext,
+//! which could not search; there is one backend now and it can.
 
 use gtk4 as gtk;
 use gtk::gdk;
@@ -23,7 +22,6 @@ use std::rc::Rc;
 use crate::tr::tr;
 
 extern "C" {
-    fn hx_chat_view_can_search(view: *mut gtk::ffi::GtkWidget) -> glib::ffi::gboolean;
     fn hx_chat_view_search(
         view: *mut gtk::ffi::GtkWidget,
         needle: *const std::ffi::c_char,
@@ -146,16 +144,12 @@ impl FindCtx {
     }
 }
 
-/// Build a find bar for `view`, or `None` if the backend can't search.
+/// Build a find bar for `view`.
 ///
 /// `capture` is the subtree Ctrl+F and type-ahead are captured from —
 /// normally the chat column, so typing in the message input is not
 /// hijacked into the find entry.
-pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> Option<gtk::SearchBar> {
-    if unsafe { hx_chat_view_can_search(view.as_ptr()) } == 0 {
-        return None;
-    }
-
+pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::SearchBar {
     let ctx = Rc::new(FindCtx {
         view: view.clone(),
         entry: gtk::SearchEntry::new(),
@@ -266,5 +260,5 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> Option<gtk:
     // because its panel has no text input, but here a bare keystroke
     // belongs to the message box. Ctrl+F is the only way in.
 
-    Some(bar)
+    bar
 }

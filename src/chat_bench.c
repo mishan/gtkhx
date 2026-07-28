@@ -1,35 +1,34 @@
-/* chat_bench.c — A/B benchmark for the two chat-view backends.
+/* chat_bench.c — chat-view performance baseline.
  *
- * The point of this file is to answer one question with numbers rather
- * than impressions: is the hxchat backend good enough to delete xtext?
+ * Built in C5 to answer one question with numbers rather than
+ * impressions: is the hxchat backend good enough to delete xtext? It
+ * was, by 4.9x on ingest and 6.3x on the worst relayout frame — the
+ * full A/B is in docs/chat-view-benchmark.md, and it cannot be
+ * reproduced, because the other half of it no longer exists.
+ *
+ * What survives is a single-backend regression baseline: it can tell you
+ * the chat view got slower, not that it was ever better than what it
+ * replaced. Still worth having, and cheap.
+ *
+ *   GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
  *
  * It measures *in situ* — the real widget, in the real window, with the
  * real append path — rather than in a standalone harness, because a
  * standalone harness would have to reproduce the wiring and would then
- * be measuring the reproduction. The same binary runs both backends;
- * `GTKHX_CHATVIEW` picks which, exactly as it does normally, so the only
- * difference between the two runs is the widget under test.
- *
- *   GTKHX_CHATVIEW=xtext GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
- *   GTKHX_CHATVIEW=new   GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
- *
- * Check the `backend` line in the report before trusting any of it.
- * `want_hxchat` used to accept only "new"/"hxchat", so a run asked for
- * with `=1` reported xtext and looked entirely normal.
+ * be measuring the reproduction.
  *
  * Add `GTKHX_CHATVIEW_BENCH_QUIT=1` to exit as soon as the report is
  * printed, which is what makes it scriptable.
  *
  * ---- What the numbers mean, and what they don't -------------------
  *
- * The two backends divide the work differently, so a single "append"
- * timing would flatter the new one and mislead. xtext line-wraps at
- * append time (gtk_xtext_append_entry → calc_lines); hxchat stores the
- * message and defers layout to the frame that needs it. Measuring
- * ingest alone would therefore compare "did the work" against "wrote it
- * down". So ingest and the first paint after it are reported separately
- * and should be read together: their sum is the honest cost of getting N
- * messages on screen.
+ * Ingest and first paint are reported separately and summed. The view
+ * stores a message on append and lays it out in the frame that needs
+ * it, so ingest alone measures bookkeeping rather than work. Their sum
+ * is the honest cost of getting N messages on screen, and is the number
+ * the A/B was decided on — xtext did its wrapping inside the append
+ * call, so timing appends alone would have compared "did the work" with
+ * "wrote it down".
  *
  * Frame timings come from the frame clock, so they include GTK's own
  * compositing, not just our snapshot. That is the right denominator —
@@ -41,11 +40,12 @@
  * version shrank the view's size-request and timed one tick, which
  * measured nothing at all: the chat output is `hexpand`, so lowering its
  * minimum width does not change its allocation and nothing re-wraps.
- * Both backends reported one vsync interval. A font change is
- * client-side, needs no compositor cooperation, and really does
- * invalidate every wrap point — and the phase samples ten frames rather
- * than one, so a backend that re-wraps 20k messages cannot hide the cost
- * in the frame after the one being timed.
+ * Both backends duly reported one vsync interval and the scoping doc
+ * nearly recorded that as a finding. A font change is client-side, needs
+ * no compositor cooperation, and really does invalidate every wrap
+ * point — and the phase samples ten frames rather than one, so a
+ * re-wrap of 20k messages cannot hide in the frame after the one being
+ * timed.
  *
  * RSS is read from /proc/self/statm, so it is Linux-only and includes
  * everything the process has touched, not just the chat buffer. Only the
@@ -205,13 +205,6 @@ bench_report (Bench *b)
 
     printf ("\n");
     printf ("=== chat-view benchmark =============================\n");
-    /* can_search is the only exported predicate that distinguishes the
-     * backends — search is hxchat-only by construction (chat_view.h). It
-     * reads oddly as a backend test, so: that is what it is being used
-     * for, and if search ever lands for xtext this line needs a real
-     * predicate instead. */
-    printf ("backend            %s\n",
-            hx_chat_view_can_search (b->view) ? "hxchat (new)" : "xtext (old)");
     printf ("messages           %u\n", b->n_messages);
     printf ("-----------------------------------------------------\n");
     printf ("ingest             %8.1f ms   (%.0f msgs/s)\n",
@@ -403,8 +396,7 @@ hx_chat_bench_maybe_start (GtkWidget *view)
     b->quit_when_done = g_getenv ("GTKHX_CHATVIEW_BENCH_QUIT") != NULL;
     b->phase = PHASE_WARMUP;
 
-    debug_log ("bench", "starting: %u messages, backend=%s", b->n_messages,
-               hx_chat_view_can_search (view) ? "hxchat" : "xtext");
+    debug_log ("bench", "starting: %u messages", b->n_messages);
 
     /* g_free as the destroy notify: the callback removes itself at
      * PHASE_DONE and the tick machinery then drops the closure. */

@@ -17,11 +17,10 @@ gtkhx_sources = files(
   # chat.c). Links via the gtkhx-ffi façade archive.
   'chat_send_bridge.c',
   'chat_history.c',
-  # chat_view.c — the chat output surface as an interface (hx_chat_view_*).
-  # The only file outside xtext.c that names GTK_XTEXT / xtext_buffer /
-  # textentry; see docs/chat-view-scoping.md phase C0.
-  'chat_view.c',
-  # chat_bench.c — env-gated A/B benchmark over the chat_view.h seam.
+  # chat_bench.c — the chat-view benchmark, env-gated on
+  # GTKHX_CHATVIEW_BENCH. It compared the two backends until C5; now it
+  # is a single-backend regression baseline. docs/chat-view-benchmark.md
+  # has the A/B numbers, which cannot be reproduced now xtext is gone.
   'chat_bench.c',
   'cicn.c',
   'gif_avatar.c',
@@ -141,7 +140,6 @@ gtkhx_sources = files(
   # (hxxfer-recv) reach transfer state through, so the transfer logic lives in
   # Rust while the refcounted, cross-thread struct stays in xfers.c.
   'htxf_accessors.c',
-  'xtext.c',
 )
 
 # /exec (chat command) + its Unix process / fd-watch / signal machinery.
