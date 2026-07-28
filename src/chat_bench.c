@@ -37,6 +37,16 @@
  * comparable between two runs on the same machine, same window size,
  * same theme. Don't compare across machines.
  *
+ * The relayout phase changes the *font*, not the width. An earlier
+ * version shrank the view's size-request and timed one tick, which
+ * measured nothing at all: the chat output is `hexpand`, so lowering its
+ * minimum width does not change its allocation and nothing re-wraps.
+ * Both backends reported one vsync interval. A font change is
+ * client-side, needs no compositor cooperation, and really does
+ * invalidate every wrap point — and the phase samples ten frames rather
+ * than one, so a backend that re-wraps 20k messages cannot hide the cost
+ * in the frame after the one being timed.
+ *
  * RSS is read from /proc/self/statm, so it is Linux-only and includes
  * everything the process has touched, not just the chat buffer. Only the
  * *delta* across the ingest phase is reported, which cancels most of the
@@ -63,11 +73,29 @@
 /* Frames sampled in the scroll phase. */
 #define BENCH_SCROLL_FRAMES 120
 
+/* Frames sampled after the relayout trigger.
+ *
+ * Sampling a window rather than "the next tick" is the whole point: a
+ * backend that re-wraps the entire scrollback spends that time
+ * *somewhere*, and if it lands after the tick being timed then timing one
+ * tick reports a vsync interval and calls it a result. Which is exactly
+ * what the first version of this file did. */
+#define BENCH_RELAYOUT_FRAMES 10
+
+/* Frames to let the prep font settle before timing the real change. */
+#define BENCH_RELAYOUT_PREP_FRAMES 3
+
+/* The two fonts the relayout phase toggles between. Different sizes, so
+ * every cached width and every wrap point is genuinely invalid. */
+#define BENCH_FONT_A "Monospace 10"
+#define BENCH_FONT_B "Monospace 12" 
+
 typedef enum {
     PHASE_WARMUP = 0,
     PHASE_INGEST,      /* appending; waiting for the append loop to finish */
     PHASE_FIRST_PAINT, /* appended, waiting for the frame that shows it */
-    PHASE_REFLOW,      /* width changed, waiting for the frame that shows it */
+    PHASE_RELAYOUT_PREP, /* font set once, letting it settle before timing */
+    PHASE_RELAYOUT,      /* font changed again; sampling the frames it costs */
     PHASE_SCROLL,      /* stepping the adjustment, sampling frame times */
     PHASE_DONE
 } BenchPhase;
@@ -86,7 +114,11 @@ typedef struct {
     /* Results. */
     gint64 ingest_us;
     gint64 first_paint_us;
-    gint64 reflow_us;
+    gint64 relayout_total_us;
+    gint64 relayout_worst_us;
+    gint64 relayout_frames[BENCH_RELAYOUT_FRAMES];
+    guint relayout_count;
+    guint prep_frames;
     gsize rss_before_kb;
     gsize rss_after_kb;
 
@@ -188,7 +220,10 @@ bench_report (Bench *b)
             (double)b->first_paint_us / 1000.0);
     printf ("  ingest + paint   %8.1f ms   <- compare THIS across backends\n",
             (double)total_us / 1000.0);
-    printf ("reflow (width)     %8.1f ms\n", (double)b->reflow_us / 1000.0);
+    printf ("relayout total     %8.1f ms   (%u frames after a font change)\n",
+            (double)b->relayout_total_us / 1000.0, b->relayout_count);
+    printf ("relayout worst frm %8.1f ms   <- whole-scrollback re-wrap shows HERE\n",
+            (double)b->relayout_worst_us / 1000.0);
     printf ("scroll frame mean  %8.2f ms\n", mean_ms);
     printf ("scroll frame p95   %8.2f ms   (%u frames)\n", p95_ms,
             b->frame_count);
@@ -243,27 +278,63 @@ bench_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer data)
     case PHASE_FIRST_PAINT:
         b->first_paint_us = now - b->t_mark;
 
-        /* ---- reflow ------------------------------------------------ */
-        /* A width change invalidates every wrap. This is the case xtext
-         * is worst at (it re-wraps the whole scrollback) and the case
-         * the new backend's O(visible) claim is about, so it is the
-         * single most informative number here. */
-        b->saved_width = gtk_widget_get_width (b->view);
-        gtk_widget_set_size_request (b->view,
-                                     MAX (200, b->saved_width - 120), -1);
-        b->t_mark = g_get_monotonic_time ();
-        b->phase = PHASE_REFLOW;
+        /* ---- relayout ---------------------------------------------- */
+        /* Trigger a full invalidation with a *font* change, not a width
+         * change.
+         *
+         * The first version of this benchmark shrank the view's
+         * size-request and timed the next tick. That measured nothing:
+         * the chat output is `hexpand`, so lowering its *minimum* width
+         * leaves the allocation untouched and no re-wrap happens at all.
+         * Both backends duly reported ~16.4 ms — one vsync interval —
+         * and the scoping doc nearly recorded that as "no difference in
+         * reflow".
+         *
+         * A font change is fully client-side, needs no cooperation from
+         * the compositor, and genuinely invalidates every cached width
+         * and every wrap point in both backends. */
+        hx_chat_view_set_font (b->view, BENCH_FONT_A);
+        b->prep_frames = 0;
+        b->phase = PHASE_RELAYOUT_PREP;
         return G_SOURCE_CONTINUE;
 
-    case PHASE_REFLOW:
-        b->reflow_us = now - b->t_mark;
-        gtk_widget_set_size_request (b->view, -1, -1);
+    case PHASE_RELAYOUT_PREP:
+        /* Let font A land, so the change we time is a real transition
+         * rather than a possible no-op against whatever the prefs said. */
+        if (++b->prep_frames < BENCH_RELAYOUT_PREP_FRAMES) {
+            return G_SOURCE_CONTINUE;
+        }
+        b->relayout_count = 0;
+        b->relayout_total_us = 0;
+        b->relayout_worst_us = 0;
+        b->last_frame_time = g_get_monotonic_time ();
+        hx_chat_view_set_font (b->view, BENCH_FONT_B);
+        gtk_widget_queue_resize (b->view);
+        b->phase = PHASE_RELAYOUT;
+        return G_SOURCE_CONTINUE;
+
+    case PHASE_RELAYOUT: {
+        gint64 d = now - b->last_frame_time;
+
+        b->last_frame_time = now;
+        if (b->relayout_count < BENCH_RELAYOUT_FRAMES) {
+            b->relayout_frames[b->relayout_count++] = d;
+            b->relayout_total_us += d;
+            if (d > b->relayout_worst_us) {
+                b->relayout_worst_us = d;
+            }
+        }
+        gtk_widget_queue_draw (b->view);
+        if (b->relayout_count < BENCH_RELAYOUT_FRAMES) {
+            return G_SOURCE_CONTINUE;
+        }
 
         /* ---- scroll ------------------------------------------------ */
         b->frame_count = 0;
         b->last_frame_time = now;
         b->phase = PHASE_SCROLL;
         return G_SOURCE_CONTINUE;
+    }
 
     case PHASE_SCROLL: {
         GtkAdjustment *adj = hx_chat_view_get_vadjustment (b->view);
