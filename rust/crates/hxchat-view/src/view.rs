@@ -180,6 +180,10 @@ const SEARCH_CURRENT_BG: gtk4::gdk::RGBA =
     gtk4::gdk::RGBA::new(1.0, 0.4706, 0.0, 1.0);
 const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
 
+/// How long the zoom badge stays fully opaque, then how long it fades.
+const ZOOM_BADGE_HOLD_US: i64 = 700_000;
+const ZOOM_BADGE_FADE_US: i64 = 400_000;
+
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
 
@@ -264,6 +268,11 @@ mod imp {
         pub moving_separator: Cell<bool>,
         /// In-buffer search: the query, its hits, and the cursor.
         pub search: RefCell<hxchat_layout::SearchState>,
+        /// Monotonic time (µs) at which the zoom badge stops showing,
+        /// or 0 when it isn't showing. See `flash_zoom_badge`.
+        pub zoom_badge_until: Cell<i64>,
+        /// Tick driving the badge's fade, so it isn't left on screen.
+        pub zoom_badge_tick: RefCell<Option<gtk4::TickCallbackId>>,
         /// What the pointer is currently over, if it is something
         /// activatable. Drives the cursor *and* the hover underline, so
         /// the two cannot disagree about what is hoverable.
@@ -330,6 +339,8 @@ mod imp {
                 moving_separator: Cell::new(false),
                 search: RefCell::new(hxchat_layout::SearchState::new()),
                 hovered: RefCell::new(None),
+                zoom_badge_until: Cell::new(0),
+                zoom_badge_tick: RefCell::new(None),
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
@@ -530,7 +541,10 @@ mod imp {
         }
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
-            self.obj().snapshot_content(snapshot);
+            let obj = self.obj();
+            obj.snapshot_content(snapshot);
+            // Chrome, drawn over the content and outside its clip.
+            obj.snapshot_zoom_badge(snapshot, obj.width(), obj.height());
         }
     }
 
@@ -639,10 +653,96 @@ impl HxChatView {
     /// Zoom, per-mille. See docs/chat-view-scoping.md §3.7.
     pub fn set_zoom_permille(&self, zoom: u32) {
         let imp = self.imp_();
+        let was = imp.measure.borrow().zoom_permille();
         imp.measure.borrow_mut().set_zoom_permille(zoom);
         imp.buffer.borrow_mut().set_zoom_permille(zoom);
         self.recompute_stamp_width();
         self.queue_resize();
+        if zoom != was {
+            self.flash_zoom_badge();
+        }
+    }
+
+    /// Show the zoom percentage for a moment.
+    ///
+    /// Zoom is otherwise silent: text gets bigger or smaller and there is
+    /// nothing that says by how much, or how to get back to 100%. The
+    /// badge is drawn inside the widget's own snapshot rather than as an
+    /// overlay widget, because the chat view is packed as a bare child
+    /// next to a scrollbar — adding a GtkOverlay would mean restructuring
+    /// every container that holds one, for a label that shows for a
+    /// second.
+    fn flash_zoom_badge(&self) {
+        let imp = self.imp_();
+        imp.zoom_badge_until
+            .set(glib::monotonic_time() + ZOOM_BADGE_HOLD_US + ZOOM_BADGE_FADE_US);
+        self.queue_draw();
+
+        if imp.zoom_badge_tick.borrow().is_some() {
+            return; // already animating; the new deadline extends it
+        }
+        let id = self.add_tick_callback(|view, _clock| {
+            let imp = view.imp_();
+            if glib::monotonic_time() >= imp.zoom_badge_until.get() {
+                imp.zoom_badge_until.set(0);
+                *imp.zoom_badge_tick.borrow_mut() = None;
+                view.queue_draw();
+                return glib::ControlFlow::Break;
+            }
+            // Redraw so the fade advances. Same self-clearing discipline
+            // as the autoscroll tick: whatever ends the callback also
+            // clears the handle that names it, or the next flash sees a
+            // live tick that isn't.
+            view.queue_draw();
+            glib::ControlFlow::Continue
+        });
+        *imp.zoom_badge_tick.borrow_mut() = Some(id);
+    }
+
+    /// Draw the zoom badge, if it is showing. Called last in `snapshot`
+    /// so it sits above the text.
+    fn snapshot_zoom_badge(&self, snapshot: &gtk4::Snapshot, alloc_w: i32, alloc_h: i32) {
+        let imp = self.imp_();
+        let until = imp.zoom_badge_until.get();
+        if until == 0 {
+            return;
+        }
+        let remaining = until - glib::monotonic_time();
+        if remaining <= 0 {
+            return;
+        }
+        // Full opacity while held, then a linear fade.
+        let alpha = (remaining as f64 / ZOOM_BADGE_FADE_US as f64).clamp(0.0, 1.0) as f32;
+
+        let pct = (self.zoom_permille() + 5) / 10;
+        let layout = self.create_pango_layout(Some(&format!("{pct}%")));
+        let (tw, th) = layout.pixel_size();
+
+        let pad = 8.0;
+        let w = tw as f32 + pad * 2.0;
+        let h = th as f32 + pad;
+        // Bottom-right, clear of the scrollbar side's text and of the
+        // newest message, which is what the eye is on while zooming.
+        let x = (alloc_w as f32 - w - 12.0).max(0.0);
+        let y = (alloc_h as f32 - h - 12.0).max(0.0);
+
+        // Inverted theme colours, so the badge contrasts on light and
+        // dark without a third colour to keep in step.
+        let mut bg = imp.palette.borrow()[PAL_FG];
+        let mut fg = imp.palette.borrow()[PAL_BG];
+        bg = gtk4::gdk::RGBA::new(bg.red(), bg.green(), bg.blue(), 0.85 * alpha);
+        fg = gtk4::gdk::RGBA::new(fg.red(), fg.green(), fg.blue(), alpha);
+
+        let rect = gtk4::graphene::Rect::new(x, y, w, h);
+        let rounded = gtk4::gsk::RoundedRect::from_rect(rect, h / 2.0);
+        snapshot.push_rounded_clip(&rounded);
+        snapshot.append_color(&bg, &rect);
+        snapshot.pop();
+
+        snapshot.save();
+        snapshot.translate(&gtk4::graphene::Point::new(x + pad, y + pad / 2.0));
+        snapshot.append_layout(&layout, &fg);
+        snapshot.restore();
     }
 
     pub fn zoom_permille(&self) -> u32 {

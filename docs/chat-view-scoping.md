@@ -348,6 +348,16 @@ the row scales together so the layout stays proportionate:
 - inline media blocks, avatars, banner previews
 - indent / padding / the separator position
 
+**Feedback.** Zoom is otherwise silent: text changes size and nothing
+says by how much, or how to get back to 100%. A badge showing the
+percentage flashes for ~1.1 s on each change, drawn inside the widget's
+own snapshot rather than as an overlay widget — the chat view is packed
+as a bare child beside a scrollbar, so a `GtkOverlay` would mean
+restructuring every container that holds one for a label that shows for
+a second. Colours are the theme's foreground and background *inverted*,
+so it contrasts on light and dark without a third colour to keep in
+step.
+
 **Bindings.** `Ctrl` + `+` / `-` / `0`, and `Ctrl` + scroll wheel — the
 conventions every browser and terminal already trains people on. Implemented as
 a `GtkShortcutController` on the view plus a `GtkEventControllerScroll` checking
