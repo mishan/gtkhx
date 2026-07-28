@@ -257,12 +257,8 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_max_indent(w: CGtkWidget, px: c_i
 /// # Safety
 /// `w` is a valid `HxChatView *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_impl_set_time_stamp(w: CGtkWidget, _on: c_int) {
-    // C4: the timestamp column is part of the gutter rework that lands
-    // with the chat-history row kinds. Accepting and ignoring keeps the
-    // dispatcher uniform; PM windows (C2's only surface) render the same
-    // either way because chat.c puts the stamp in the gutter text.
-    let _ = w;
+pub unsafe extern "C" fn hx_chat_view_impl_set_time_stamp(w: CGtkWidget, on: c_int) {
+    with_view!(w, v, v.set_time_stamp(on != 0))
 }
 
 /// # Safety
@@ -272,7 +268,12 @@ pub unsafe extern "C" fn hx_chat_view_impl_set_stamp_format(
     w: CGtkWidget,
     fmt: *const c_char,
 ) {
-    let _ = (w, fmt); // C4, with the timestamp column.
+    // A NULL view is legal (prefs_read runs before any window exists)
+    // and means "format only" — but the format itself is per-view here,
+    // not a process-wide global as it is in xtext, so there is nothing
+    // to record and this is correctly a no-op. Each view picks the
+    // pref up through its own set_stamp_format when it is built.
+    with_view!(w, v, v.set_stamp_format(&cstr(fmt)))
 }
 
 /// The word classifier `chat_view.h` takes.

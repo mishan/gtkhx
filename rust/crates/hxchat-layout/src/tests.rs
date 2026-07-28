@@ -321,6 +321,7 @@ fn params(width: u32) -> LayoutParams {
         indent: false,
         max_indent: 256,
         indent_width: 0,
+        stamp_width: 0,
         quote_indent: 12,
         block_padding: 2,
         word_wrap: true,
@@ -940,6 +941,49 @@ fn buffer_indent_column_grows_to_widest_nick() {
     b.ensure_layout(1, &m);
     let wide = b.layout_at(1).unwrap().natural_indent;
     assert!(wide > narrow);
+}
+
+#[test]
+fn every_visible_row_has_a_layout_after_ensure_visible() {
+    // The first-paint garble, reproduced.
+    //
+    // `ensure_layout` widens the shared gutter when it meets a wider
+    // nick, and that invalidates every row's cached layout — including
+    // rows laid out earlier in this same `ensure_visible` pass. The view
+    // then finds `layout_at(row) == None` for them and skips drawing
+    // them entirely, so the first paint of a fresh buffer comes out
+    // shredded and the next message (by which time the gutter has
+    // settled) looks fine.
+    //
+    // The contract `ensure_visible` owes its caller: every row it
+    // returns is laid out and ready to draw.
+    let m = FixedMeasure::new(8);
+    let mut p = params(600);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+
+    // Nicks get progressively wider, so the gutter grows repeatedly
+    // partway through the visible range.
+    for i in 0..30 {
+        b.append(
+            Message::live(
+                Speaker::new(i as u16, "n".repeat(1 + i as usize)),
+                ParsedText::plain("hello there"),
+            ),
+            &m,
+        );
+    }
+
+    let off = b.scroll_offset(400);
+    let rows = b.ensure_visible(off, 400, &m);
+    assert!(!rows.is_empty());
+    for r in &rows {
+        assert!(
+            b.layout_at(*r).is_some(),
+            "row {r} was returned by ensure_visible but has no layout — \
+             the view will skip it and the paint comes out garbled"
+        );
+    }
 }
 
 #[test]

@@ -359,6 +359,23 @@ impl ChatBuffer {
         self.invalidate_layout();
     }
 
+    /// Width to reserve for the timestamp column; 0 turns it off.
+    pub fn set_stamp_width(&mut self, px: u32) {
+        if px == self.params.stamp_width {
+            return;
+        }
+        self.params.stamp_width = px;
+        // The gutter has to be re-reconciled from scratch: it may need to
+        // grow for a wider stamp, and when the stamp goes away it should
+        // shrink back rather than stay padded out.
+        self.indent_width = 0;
+        self.invalidate_layout();
+    }
+
+    pub fn stamp_width(&self) -> u32 {
+        self.params.stamp_width
+    }
+
     /// Cap on the gutter width.
     pub fn set_max_indent(&mut self, px: u32) {
         if px == self.params.max_indent {
@@ -432,7 +449,39 @@ impl ChatBuffer {
 
     /// Lay out every row intersecting `[y, y + height)` and return their
     /// positions.
+    ///
+    /// **Every returned row is guaranteed to have a current layout.**
+    /// That guarantee needs defending, because laying a row out can
+    /// invalidate the rows already done: meeting a wider nick widens the
+    /// shared gutter, which makes every other row's cached layout stale.
+    /// Without the retry below, the rows laid out earlier in the pass
+    /// come back with `layout_at(row) == None`, the view skips them, and
+    /// the first paint of a fresh buffer is visibly shredded — while the
+    /// next message, by which time the gutter has settled, looks fine.
+    ///
+    /// The gutter only ever grows and is capped by `max_indent`, so this
+    /// converges fast; the bound is belt-and-braces.
     pub fn ensure_visible(
+        &mut self,
+        y: u64,
+        viewport_height: u32,
+        measure: &dyn TextMeasure,
+    ) -> Vec<usize> {
+        const MAX_SETTLE_PASSES: usize = 4;
+        for _ in 0..MAX_SETTLE_PASSES {
+            let indent_before = self.indent_width;
+            let rows = self.layout_visible_once(y, viewport_height, measure);
+            if self.indent_width == indent_before {
+                return rows;
+            }
+        }
+        // Didn't settle (shouldn't happen: the gutter is monotonic and
+        // capped). Do one final pass so the caller still gets laid-out
+        // rows rather than holes.
+        self.layout_visible_once(y, viewport_height, measure)
+    }
+
+    fn layout_visible_once(
         &mut self,
         y: u64,
         viewport_height: u32,

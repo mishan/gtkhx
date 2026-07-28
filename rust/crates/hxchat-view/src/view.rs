@@ -36,10 +36,28 @@ use crate::measure::PangoMeasure;
 pub const PALETTE_COLS: usize = 38;
 pub const PAL_FG: usize = 34;
 pub const PAL_BG: usize = 35;
+/// `HX_CHAT_PAL_HISTORY_MUTED` — the theme's secondary text colour. The
+/// timestamp column uses it so the stamps recede behind the message
+/// text rather than competing with it.
+pub const PAL_HISTORY_MUTED: usize = 37;
 
 /// Pixels of slop within which a scroll position counts as "at the
 /// bottom" and resumes following.
 const FOLLOW_SLOP: u32 = 8;
+
+/// Inset between the widget edge and the text.
+///
+/// xtext draws hard against its allocation, which reads as cramped now
+/// that the view sits directly in a pane rather than inside a frame.
+/// Applied by shrinking the content box, not by translating the drawing,
+/// so wrapping, scroll extent and (later) hit-testing all agree about
+/// where the content actually is.
+const PAD_X: i32 = 4;
+const PAD_Y: i32 = 2;
+
+/// xtext's built-in timestamp format, which chat.c depends on as the
+/// default (`gtk_xtext_set_stamp_format(NULL)` restores it).
+const DEFAULT_STAMP_FORMAT: &str = "[%H:%M:%S] ";
 
 mod imp {
     use super::*;
@@ -62,6 +80,12 @@ mod imp {
 
         pub font_generation: Cell<u32>,
         pub separator: Cell<bool>,
+        /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
+        /// through `hx_chat_view_set_time_stamp`.
+        pub time_stamp: Cell<bool>,
+        /// strftime format for that column. xtext's default is
+        /// "[%H:%M:%S] " and chat.c relies on getting it.
+        pub stamp_format: RefCell<String>,
     }
 
     impl Default for HxChatView {
@@ -78,6 +102,8 @@ mod imp {
                 updating_adj: Cell::new(false),
                 font_generation: Cell::new(0),
                 separator: Cell::new(false),
+                time_stamp: Cell::new(false),
+                stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
             }
         }
     }
@@ -233,11 +259,12 @@ mod imp {
             let obj = self.obj();
             {
                 let mut buf = self.buffer.borrow_mut();
-                // Width change invalidates layout without recomputing
-                // it; rows are re-laid-out as they become visible.
-                buf.set_width(width.max(0) as u32);
+                // The content box is the allocation minus the padding, so
+                // wrapping, scroll extent and hit-testing all measure
+                // against the same rectangle the text is drawn in.
+                buf.set_width(content_width(width));
             }
-            obj.sync_adjustment(height.max(0) as u32);
+            obj.sync_adjustment(content_height(height));
         }
 
         fn snapshot(&self, snapshot: &gtk4::Snapshot) {
@@ -280,6 +307,8 @@ impl HxChatView {
         let g = imp.font_generation.get().wrapping_add(1);
         imp.font_generation.set(g);
         imp.buffer.borrow_mut().set_font_generation(g);
+        // The stamp column is measured in the old font otherwise.
+        self.recompute_stamp_width();
         self.queue_resize();
     }
 
@@ -318,11 +347,64 @@ impl HxChatView {
         let imp = self.imp_();
         imp.measure.borrow_mut().set_zoom_permille(zoom);
         imp.buffer.borrow_mut().set_zoom_permille(zoom);
+        self.recompute_stamp_width();
         self.queue_resize();
     }
 
     pub fn zoom_permille(&self) -> u32 {
         self.imp_().measure.borrow().zoom_permille()
+    }
+
+    /// Toggle the timestamp column.
+    ///
+    /// Recomputes the width the gutter must reserve, since the stamp and
+    /// the nick share that band — reserving only the nick width is what
+    /// makes them overlap.
+    pub fn set_time_stamp(&self, on: bool) {
+        let imp = self.imp_();
+        if imp.time_stamp.get() == on {
+            return;
+        }
+        imp.time_stamp.set(on);
+        self.recompute_stamp_width();
+        self.queue_draw();
+    }
+
+    pub fn set_stamp_format(&self, format: &str) {
+        let imp = self.imp_();
+        let f = if format.is_empty() {
+            DEFAULT_STAMP_FORMAT.to_string()
+        } else {
+            format.to_string()
+        };
+        if *imp.stamp_format.borrow() == f {
+            return;
+        }
+        *imp.stamp_format.borrow_mut() = f;
+        self.recompute_stamp_width();
+        self.queue_draw();
+    }
+
+    /// Measure the widest plausible rendering of the current format.
+    ///
+    /// The stamp is fixed-width in practice but the format is arbitrary,
+    /// so measure a real formatted value rather than guessing. A moment
+    /// with a two-digit hour keeps `%-I`-style formats honest.
+    fn recompute_stamp_width(&self) {
+        let imp = self.imp_();
+        let px = if imp.time_stamp.get() {
+            let fmt = imp.stamp_format.borrow().clone();
+            // 2001-09-09 01:46:40 UTC — every field two digits wide.
+            let sample = format_stamp(1_000_000_000, &fmt).unwrap_or_default();
+            if sample.is_empty() {
+                0
+            } else {
+                imp.measure.borrow().run_width(&sample, Style::default())
+            }
+        } else {
+            0
+        };
+        imp.buffer.borrow_mut().set_stamp_width(px);
     }
 
     pub fn set_separator(&self, on: bool) {
@@ -371,7 +453,7 @@ impl HxChatView {
     }
 
     fn after_content_change(&self) {
-        self.sync_adjustment(self.height().max(0) as u32);
+        self.sync_adjustment(content_height(self.height()));
         self.queue_draw();
     }
 
@@ -392,7 +474,7 @@ impl HxChatView {
                 if imp.updating_adj.get() {
                     return;
                 }
-                let h = this.height().max(0) as u32;
+                let h = content_height(this.height());
                 imp.buffer
                     .borrow_mut()
                     .scroll_to(adj.value().max(0.0) as u64, h, FOLLOW_SLOP);
@@ -401,7 +483,7 @@ impl HxChatView {
             *imp.vadj_handler.borrow_mut() = Some(id);
         }
         *imp.vadjustment.borrow_mut() = adj;
-        self.sync_adjustment(self.height().max(0) as u32);
+        self.sync_adjustment(content_height(self.height()));
     }
 
     /// Push the buffer's state into the scroll adjustment.
@@ -449,18 +531,25 @@ impl HxChatView {
 
     fn snapshot_content(&self, snapshot: &gtk4::Snapshot) {
         let imp = self.imp_();
-        let width = self.width().max(0) as f32;
-        let height = self.height().max(0);
-        if height <= 0 {
+        let alloc_w = self.width().max(0);
+        let alloc_h = self.height().max(0);
+        if alloc_h <= 0 {
             return;
         }
+        let height = content_height(alloc_h) as i32;
 
-        // Background.
+        // Background covers the whole allocation, padding included —
+        // the inset is meant to be empty margin, not a differently
+        // coloured border.
         let bg = self.imp_().palette.borrow()[PAL_BG];
         snapshot.append_color(
             &bg,
-            &gtk4::graphene::Rect::new(0.0, 0.0, width, height as f32),
+            &gtk4::graphene::Rect::new(0.0, 0.0, alloc_w as f32, alloc_h as f32),
         );
+
+        // Everything below draws in content coordinates.
+        snapshot.save();
+        snapshot.translate(&gtk4::graphene::Point::new(PAD_X as f32, PAD_Y as f32));
 
         let scroll = {
             let mut buf = imp.buffer.borrow_mut();
@@ -504,6 +593,11 @@ impl HxChatView {
         let draw_layout = pango::Layout::new(ctx);
         draw_layout.set_font_description(Some(&font));
 
+        let show_stamp = imp.time_stamp.get();
+        let stamp_format = imp.stamp_format.borrow().clone();
+        let indent_width = buf.params().indent_width as f32;
+        let muted = self.imp_().palette.borrow()[PAL_HISTORY_MUTED];
+
         for (row, row_top) in placed {
             let Some(layout) = buf.layout_at(row) else {
                 continue;
@@ -539,17 +633,42 @@ impl HxChatView {
                 if slice.is_empty() {
                     continue;
                 }
+
+                // The gutter is right-aligned against the body column,
+                // the way xtext aligns nicks against its separator, and
+                // the timestamp sits at the far left of the same band.
+                let x = if line.source == LineSource::Gutter {
+                    if show_stamp {
+                        if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
+                            draw_layout.set_attributes(None);
+                            draw_layout.set_text(&stamp);
+                            snapshot.save();
+                            snapshot.translate(&gtk4::graphene::Point::new(0.0, y as f32));
+                            snapshot.append_layout(&draw_layout, &muted);
+                            snapshot.restore();
+                        }
+                    }
+                    draw_layout.set_attributes(None);
+                    draw_layout.set_text(slice);
+                    let (gw, _) = draw_layout.pixel_size();
+                    (indent_width - gw as f32 - GUTTER_GAP).max(0.0)
+                } else {
+                    line.x as f32
+                };
+
                 self.draw_runs(
                     snapshot,
                     &draw_layout,
                     slice,
                     line.range.start,
                     spans,
-                    line.x as f32,
+                    x,
                     y as f32,
                 );
             }
         }
+
+        snapshot.restore();
     }
 
     /// Draw one visual line as a sequence of styled runs.
@@ -623,4 +742,37 @@ impl HxChatView {
     pub fn find_image(&self, token: u32) -> Option<MessageId> {
         self.imp_().buffer.borrow().find_image(token)
     }
+}
+
+/// Usable content width for a given allocation.
+fn content_width(alloc_width: i32) -> u32 {
+    (alloc_width - 2 * PAD_X).max(1) as u32
+}
+
+/// Usable content height for a given allocation.
+///
+/// Deliberately subtracted from the *scrollable* height too, not just
+/// the drawing origin: if the viewport reported its full allocation
+/// while the content drew inset, the last row would sit under the
+/// bottom padding and be unreachable at the end of the scroll range.
+fn content_height(alloc_height: i32) -> u32 {
+    (alloc_height - 2 * PAD_Y).max(1) as u32
+}
+
+/// Gap between the right edge of the nick and the body column.
+const GUTTER_GAP: f32 = 6.0;
+
+/// Format a unix timestamp with a strftime-style pattern.
+///
+/// `glib::DateTime::format` is strftime-compatible and locale-aware,
+/// which is what lets the existing `CFG_STAMP_FORMAT` pref keep working
+/// unchanged against the new backend. Returns `None` rather than
+/// substituting a placeholder when the timestamp or the pattern is
+/// unusable — a missing stamp is better than a wrong one.
+fn format_stamp(unix: i64, format: &str) -> Option<String> {
+    if unix <= 0 {
+        return None;
+    }
+    let dt = glib::DateTime::from_unix_local(unix).ok()?;
+    dt.format(format).ok().map(|g| g.to_string())
 }
