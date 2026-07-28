@@ -90,6 +90,7 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* tray (init_variables sets default) */
     0, /* timestamp */
     1, /* chat_avatars — default ON; the icons are the point of C6 */
+    1, /* markdown — default ON */
     0, /* word_wrap */
     1, /* track_case */
     0, /* old_nickcompletion */
@@ -466,6 +467,18 @@ changed_xtext (session *sess)
             }
         }
     }
+}
+
+/* CFG_MARKDOWN is process-wide in the view, so unlike the avatar and
+ * timestamp toggles this needs no per-view walk — one call, and every
+ * chat surface picks it up for messages appended afterwards. Rows
+ * already rendered keep their current form; re-parsing scrollback would
+ * mean keeping every row's original source text alive forever. */
+static void
+changed_markdown (session *sess)
+{
+    (void)sess;
+    hx_chat_view_set_markdown (gtkhx_prefs.markdown);
 }
 
 /* apply the CFG_CHAT_AVATARS toggle to every live chat view.
@@ -961,6 +974,12 @@ struct cfgvar {
 #if 0 /* XXX */
 	{CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
 #endif
+    { CFG_MARKDOWN,
+      { &gtkhx_prefs.markdown },
+      BOOLEAN,
+      0,
+      changed_markdown,
+      NULL },
     { CFG_NEWS_XSIZE, { &gtkhx_prefs.geo.news.xsize }, INT, 0, NULL, NULL },
     { CFG_NEWS_YSIZE, { &gtkhx_prefs.geo.news.ysize }, INT, 0, NULL, NULL },
     { CFG_NICK,
@@ -2193,6 +2212,10 @@ apply_loaded_xtext_prefs (void)
     hx_chat_view_set_autocopy_text (gtkhx_prefs.autocopy_text);
     hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
     hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
+    /* Same reason as the autocopy trio above: prefs_read doesn't run
+	 * changefuncs, so a saved "markdown off" would be ignored until the
+	 * user toggled it. */
+    hx_chat_view_set_markdown (gtkhx_prefs.markdown);
 
     /* Same load-vs-changefunc concern: prefs_read doesn't fire
 	 * changefuncs, so push the loaded emoji-shortcode toggle into the

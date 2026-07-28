@@ -540,3 +540,129 @@ fn a_speakers_nick_is_length_delimited_not_nul_delimited() {
     let got = unsafe { crate::ffi::speaker_of(&whole) }.unwrap();
     assert_eq!(got.nick, "misha:  hello world");
 }
+
+// ---- markdown rendering ---------------------------------------------
+
+/// Build a message body from one plain run, the way live chat does.
+fn body_of(text: &str, markdown: bool) -> Vec<hxchat_layout::Block> {
+    let cs = std::ffi::CString::new(text).unwrap();
+    let runs = [crate::ffi::HxChatRun {
+        text: cs.as_ptr(),
+        len: text.len() as std::ffi::c_int,
+        color: -1,
+        attrs: 0,
+    }];
+    unsafe { crate::ffi::body_blocks(runs.as_ptr(), 1, markdown) }
+}
+
+fn text_of(b: &hxchat_layout::Block) -> &hxchat_layout::ParsedText {
+    match b {
+        hxchat_layout::Block::Text(p) | hxchat_layout::Block::Quote { content: p, .. } => p,
+        _ => panic!("not a text block"),
+    }
+}
+
+#[test]
+fn markdown_renders_inline_emphasis() {
+    let blocks = body_of("look at **this** and *that*", true);
+    assert_eq!(blocks.len(), 1);
+    let p = text_of(&blocks[0]);
+    assert_eq!(p.text, "look at this and that");
+    let styled: Vec<_> = p
+        .spans
+        .iter()
+        .map(|s| (&p.text[s.range.clone()], s.style.attrs))
+        .collect();
+    assert_eq!(
+        styled,
+        vec![
+            ("this", hxchat_layout::Attrs::BOLD),
+            ("that", hxchat_layout::Attrs::ITALIC),
+        ]
+    );
+}
+
+#[test]
+fn markdown_off_leaves_the_delimiters_alone() {
+    let blocks = body_of("look at **this**", false);
+    let p = text_of(&blocks[0]);
+    assert_eq!(p.text, "look at **this**", "text is untouched");
+    assert!(p.spans.is_empty());
+}
+
+#[test]
+fn a_fenced_block_becomes_an_inert_code_block() {
+    let blocks = body_of("see:\n```\nlet x = **not bold**;\n```\ndone", true);
+    assert_eq!(blocks.len(), 3, "paragraph, code, paragraph");
+    match &blocks[1] {
+        hxchat_layout::Block::Code { text, .. } => {
+            assert!(
+                text.contains("**not bold**"),
+                "code contents stay literal: {text:?}"
+            );
+        }
+        other => panic!("expected a code block, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_quote_becomes_a_quote_block_with_its_markers_gone() {
+    let blocks = body_of("> quoted **bold**", true);
+    match &blocks[0] {
+        hxchat_layout::Block::Quote { content, depth } => {
+            assert_eq!(content.text, "quoted bold");
+            assert_eq!(*depth, 1);
+        }
+        other => panic!("expected a quote, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_styled_body_keeps_its_colour_under_the_markdown() {
+    // History rows arrive muted. The renderer treats a gap between spans
+    // as *default* style, so without laying the base colour under the
+    // parse, a muted line would come back with only its bold words muted
+    // and everything else at full contrast.
+    let text = "muted **bold** tail";
+    let cs = std::ffi::CString::new(text).unwrap();
+    let runs = [crate::ffi::HxChatRun {
+        text: cs.as_ptr(),
+        len: text.len() as std::ffi::c_int,
+        color: 37, // HX_CHAT_PAL_HISTORY_MUTED
+        attrs: 0,
+    }];
+    let blocks = unsafe { crate::ffi::body_blocks(runs.as_ptr(), 1, true) };
+    let p = text_of(&blocks[0]);
+    assert_eq!(p.text, "muted bold tail");
+
+    // Every byte carries the muted colour...
+    for (i, _) in p.text.char_indices() {
+        let covered = p
+            .spans
+            .iter()
+            .any(|s| s.range.contains(&i) && s.style.fg == hxchat_layout::ColorRef::Palette(37));
+        assert!(covered, "byte {i} lost the row colour");
+    }
+    // ...and the emphasis is still there on top.
+    assert!(p
+        .spans
+        .iter()
+        .any(|s| &p.text[s.range.clone()] == "bold"
+            && s.style.attrs.contains(hxchat_layout::Attrs::BOLD)));
+}
+
+#[test]
+fn a_body_the_caller_styled_run_by_run_is_left_alone() {
+    // Chrome — a divider, a "[hx]" line — is styled deliberately by the
+    // caller. Re-parsing it would fight that, so a non-uniform body opts
+    // out of markdown entirely.
+    let a = std::ffi::CString::new("plain ").unwrap();
+    let b = std::ffi::CString::new("**loud**").unwrap();
+    let runs = [
+        crate::ffi::HxChatRun { text: a.as_ptr(), len: 6, color: -1, attrs: 0 },
+        crate::ffi::HxChatRun { text: b.as_ptr(), len: 8, color: 4, attrs: 0 },
+    ];
+    let blocks = unsafe { crate::ffi::body_blocks(runs.as_ptr(), 2, true) };
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(text_of(&blocks[0]).text, "plain **loud**");
+}

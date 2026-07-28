@@ -314,6 +314,7 @@ mod cfg {
     // Chat output / appearance
     pub const TIMESTAMP: &str = "TIMESTAMP";
     pub const CHAT_AVATARS: &str = "CHATAVATARS";
+    pub const MARKDOWN: &str = "MARKDOWN";
     pub const WORDWRAP: &str = "WORDWRAP";
     pub const XBUF_MAX: &str = "XBUF_MAX";
     pub const STAMP_FORMAT: &str = "TIMESTAMPFORMAT";
@@ -459,6 +460,14 @@ fn page_chat_appearance(page: &adw::PreferencesPage) {
         &tr("Show user icons"),
         Some(&tr(
             "Shows the speaker's icon beside the first message of each run",
+        )),
+    ));
+    output.add(&switch_row(
+        cfg::MARKDOWN,
+        &tr("Render markdown"),
+        Some(&tr(
+            "Formats **bold**, *italic*, `code`, quotes and links in received \
+             messages. What you send is unchanged.",
         )),
     ));
     output.add(&switch_row(cfg::WORDWRAP, &tr("Word wrap"), None));
