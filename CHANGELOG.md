@@ -9,11 +9,20 @@
   - GtkHx is now available for macOS and Windows
 - Code Modernization
   - GtkHx is now mostly Rust code
+- Hotline Protocol
+  - Fixed old bug with resumable file transfers
+- Sound
+  - Replaced libcanberra with rodio for notification sound playback
 - User Interface
   - Button icons now default to their original size, rather than upscaled
   - Brand new hxchat widget for Chat (replaces forked version of HexChat's xtext)
-- Sound
-  - Replaced libcanberra with rodio for notification sound playback
+    - Significantly better performance
+    - Markdown support (toggleable)
+    - Icon display next to speaker (toggleable)
+    - Speaker grouping, so <Nick> doesn't have to keep appearing on every consecutive line
+    - Right clicking on a speaker's name or icon will now pop up a "user" popup menu
+  - Ctrl-U now works to clear any input in the app
+  - [Enter] in the Connect dialog now connects
 
 ## 1.2.2
 
