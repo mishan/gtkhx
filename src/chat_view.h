@@ -155,13 +155,70 @@ void hx_chat_view_set_autocopy_text (gboolean enabled);
 void hx_chat_view_set_autocopy_stamp (gboolean enabled);
 void hx_chat_view_set_autocopy_color (gboolean enabled);
 
-/* ---- appending ---------------------------------------------------- *
+/* ---- styled runs (C6) --------------------------------------------- *
+ *
+ * A run is a slice of text with a colour and some attributes. A row is
+ * built from an array of them: the gutter (nick column) is one array,
+ * the body another.
+ *
+ * This replaces the in-band "\003NN" escape vocabulary that C0–C5 used
+ * to get style from chat.c to the view. The escapes came from the XChat
+ * xtext fork in 2000 and were never protocol — Hotline chat is plain
+ * text — so they were GtkHx talking to itself in a format neither end
+ * needed. The reason to be rid of them is not tidiness: two sites
+ * (chat.c's info-prefix branch, msg.c's broadcast prefix) used to
+ * *re-parse GtkHx's own escape output* to find where a name ended,
+ * because the structure had been flattened into presentation and the
+ * only way to get it back was to read it out again. Runs keep the
+ * structure, so nothing has to reconstruct it.
+ *
+ * Runs are borrowed for the duration of the call; the view copies what
+ * it needs. Build them on the stack.
+ */
+
+/* Palette index for a run: 0..31 mIRC-legacy slots, 32..37 UI roles
+ * (see the HX_CHAT_PAL_* block above), or DEFAULT for the theme's
+ * normal foreground. */
+#define HX_CHAT_COLOR_DEFAULT (-1)
+
+#define HX_CHAT_ATTR_NONE      0u
+#define HX_CHAT_ATTR_BOLD      (1u << 0)
+#define HX_CHAT_ATTR_ITALIC    (1u << 1)
+#define HX_CHAT_ATTR_UNDERLINE (1u << 2)
+
+typedef struct {
+    const char *text;
+    int len;       /* bytes, or -1 for strlen */
+    gint16 color;  /* palette index, or HX_CHAT_COLOR_DEFAULT */
+    guint16 attrs; /* HX_CHAT_ATTR_* bits */
+} HxChatRun;
+
+/* Convenience for the common "one unstyled run" case. */
+#define HX_CHAT_RUN_PLAIN(t, l)                                               \
+    ((HxChatRun){ (t), (l), HX_CHAT_COLOR_DEFAULT, HX_CHAT_ATTR_NONE })
+
+/* Append a row built from runs. `gutter` may be NULL/0 for a row with
+ * no nick column. Returns a mark naming the appended row. */
+HxChatMark *hx_chat_view_append_runs (GtkWidget *view,
+                                      const HxChatRun *gutter, int n_gutter,
+                                      const HxChatRun *body, int n_body,
+                                      time_t stamp);
+
+/* As above, but inserted immediately BEFORE `anchor` (NULL prepends at
+ * the head). Scroll position is preserved across the insert — see
+ * hx_chat_view_insert_before below for the reasoning. */
+HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
+                                             HxChatMark *anchor,
+                                             const HxChatRun *gutter,
+                                             int n_gutter,
+                                             const HxChatRun *body, int n_body,
+                                             time_t stamp);
+
+/* ---- appending (plain text) --------------------------------------- *
  *
  * `stamp` is a time_t for the row's timestamp column; 0 means "now".
- * All text is in the in-band escape vocabulary (mIRC "\003NN" colours
- * plus the ATTR_* attribute bytes) — that stays the wire format
- * between chat.c's formatting code and the view for now; C6 replaces
- * it with a structured message. */
+ * Text is plain: no escape vocabulary, no styling. Use the run API
+ * above when a row needs colour or attributes. */
 
 /* Append a plain row with no nick column (server prose, continuation
  * lines of a multi-line message). */

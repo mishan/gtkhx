@@ -19,7 +19,7 @@
 use crate::view::{HxChatView, PALETTE_COLS};
 use gtk4::glib::translate::{IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
-use hxchat_layout::{mirc, Block, Message, MessageId, MessageKind, ParsedText};
+use hxchat_layout::{mirc, Block, ColorRef, Message, MessageId, MessageKind, ParsedText, Style};
 use std::ffi::{c_char, c_int, c_void, CStr};
 
 type CGtkWidget = *mut gtk4::ffi::GtkWidget;
@@ -400,6 +400,133 @@ fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
         speaker: None,
         gutter,
         blocks: vec![Block::Text(body)],
+        flags: hxchat_layout::MessageFlags::NONE,
+    }
+}
+
+// ---- styled runs (C6) ----------------------------------------------
+
+/// `HxChatRun` from `chat_view.h`. Layout is pinned by the assertion
+/// below; C builds these on the stack and we only read them.
+#[repr(C)]
+pub struct HxChatRun {
+    pub(crate) text: *const c_char,
+    pub(crate) len: c_int,
+    pub(crate) color: i16,
+    pub(crate) attrs: u16,
+}
+
+const HX_CHAT_COLOR_DEFAULT: i16 = -1;
+
+/// Mirror of chat_view.h's `HX_CHAT_ATTR_*`.
+fn attrs_from_c(bits: u16) -> hxchat_layout::Attrs {
+    let mut a = hxchat_layout::Attrs::NONE;
+    if bits & (1 << 0) != 0 {
+        a = a.union(hxchat_layout::Attrs::BOLD);
+    }
+    if bits & (1 << 1) != 0 {
+        a = a.union(hxchat_layout::Attrs::ITALIC);
+    }
+    if bits & (1 << 2) != 0 {
+        a = a.union(hxchat_layout::Attrs::UNDERLINE);
+    }
+    a
+}
+
+/// Build a `ParsedText` from a C run array.
+///
+/// # Safety
+/// `runs` points to `n` readable `HxChatRun`s, each with a valid
+/// `text`/`len` pair.
+pub(crate) unsafe fn runs_to_text(runs: *const HxChatRun, n: c_int) -> ParsedText {
+    let mut out = ParsedText::default();
+    if runs.is_null() || n <= 0 {
+        return out;
+    }
+    for i in 0..n as usize {
+        let r = &*runs.add(i);
+        let text = cslice(r.text, r.len);
+        if text.is_empty() {
+            continue;
+        }
+        let start = out.text.len();
+        out.text.push_str(&text);
+        let style = Style {
+            fg: if r.color == HX_CHAT_COLOR_DEFAULT {
+                ColorRef::Default
+            } else {
+                ColorRef::Palette(r.color as u8)
+            },
+            attrs: attrs_from_c(r.attrs),
+            ..Style::default()
+        };
+        // Only record a span when it actually says something; a plain
+        // run is the absence of a span, which is what keeps an
+        // unstyled row's span list empty rather than one-per-run.
+        if style != Style::default() {
+            out.spans.push(hxchat_layout::Span {
+                range: start..out.text.len(),
+                style,
+            });
+        }
+    }
+    out
+}
+
+/// # Safety
+/// `gutter` / `body` point to their respective run counts, or are NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_append_runs(
+    w: CGtkWidget,
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+    stamp: i64,
+) -> *mut c_void {
+    match view_of(w) {
+        Some(v) => mark_to_ptr(v.append(runs_message(gutter, n_gutter, body, n_body, stamp))),
+        None => std::ptr::null_mut(),
+    }
+}
+
+/// # Safety
+/// As `hx_chat_view_append_runs`; `anchor` is a mark or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
+    w: CGtkWidget,
+    anchor: *mut c_void,
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+    stamp: i64,
+) -> *mut c_void {
+    match view_of(w) {
+        Some(v) => {
+            let msg = runs_message(gutter, n_gutter, body, n_body, stamp);
+            mark_to_ptr(v.insert_before(ptr_to_mark(anchor), msg))
+        }
+        None => std::ptr::null_mut(),
+    }
+}
+
+unsafe fn runs_message(
+    gutter: *const HxChatRun,
+    n_gutter: c_int,
+    body: *const HxChatRun,
+    n_body: c_int,
+    stamp: i64,
+) -> Message {
+    let g = runs_to_text(gutter, n_gutter);
+    let mut b = runs_to_text(body, n_body);
+    crate::links::autolink(&mut b);
+    Message {
+        kind: MessageKind::Live,
+        timestamp: stamp_or_now(stamp),
+        speaker: None,
+        gutter: if g.text.is_empty() { None } else { Some(g) },
+        blocks: vec![Block::Text(b)],
         flags: hxchat_layout::MessageFlags::NONE,
     }
 }

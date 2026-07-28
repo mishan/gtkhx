@@ -427,3 +427,71 @@ fn gtk_class_and_construction_smoke() {
     }
     assert!(view.zoom_permille() >= 500);
 }
+
+// ---- run-based append (C6) ------------------------------------------
+
+/// Build a C run array from Rust and hand it to the FFI converter.
+///
+/// Headless: `runs_to_text` touches no GTK, which is the point of
+/// keeping the conversion separate from the widget.
+fn to_text(runs: &[(&str, i16, u16)]) -> hxchat_layout::ParsedText {
+    let cstrings: Vec<std::ffi::CString> = runs
+        .iter()
+        .map(|(t, _, _)| std::ffi::CString::new(*t).unwrap())
+        .collect();
+    let c_runs: Vec<crate::ffi::HxChatRun> = runs
+        .iter()
+        .zip(&cstrings)
+        .map(|((t, color, attrs), cs)| crate::ffi::HxChatRun {
+            text: cs.as_ptr(),
+            len: t.len() as std::ffi::c_int,
+            color: *color,
+            attrs: *attrs,
+        })
+        .collect();
+    unsafe { crate::ffi::runs_to_text(c_runs.as_ptr(), c_runs.len() as std::ffi::c_int) }
+}
+
+#[test]
+fn plain_runs_produce_no_spans() {
+    // An unstyled row must come out span-free, not one-span-per-run.
+    // Otherwise every ordinary chat line carries a span list the
+    // renderer then has to walk, and `draw_runs` splits text it has no
+    // reason to split.
+    let p = to_text(&[("hello ", -1, 0), ("world", -1, 0)]);
+    assert_eq!(p.text, "hello world");
+    assert!(p.spans.is_empty(), "plain runs must not create spans");
+}
+
+#[test]
+fn styled_runs_carry_byte_ranges_into_the_joined_text() {
+    // The nick-bracket shape: bracket coloured, name default, bracket
+    // coloured. This is what used to be
+    // "\003NN<\003name\003NN>\003" and had to be re-parsed to find
+    // where the name began.
+    let p = to_text(&[("<", 5, 0), ("alice", -1, 0), (">", 5, 0)]);
+    assert_eq!(p.text, "<alice>");
+    assert_eq!(p.spans.len(), 2, "only the styled runs get spans");
+    assert_eq!(&p.text[p.spans[0].range.clone()], "<");
+    assert_eq!(&p.text[p.spans[1].range.clone()], ">");
+    assert_eq!(p.spans[0].style.fg, hxchat_layout::ColorRef::Palette(5));
+    assert_eq!(p.spans[1].style.fg, hxchat_layout::ColorRef::Palette(5));
+}
+
+#[test]
+fn run_ranges_survive_multibyte_text() {
+    // Ranges are byte offsets into the joined string, so a multi-byte
+    // run before a styled one must not shift it.
+    let p = to_text(&[("héllo ", -1, 0), ("wörld", 3, 1)]);
+    assert_eq!(p.text, "héllo wörld");
+    assert_eq!(p.spans.len(), 1);
+    assert_eq!(&p.text[p.spans[0].range.clone()], "wörld");
+    assert!(p.spans[0].style.attrs.contains(hxchat_layout::Attrs::BOLD));
+}
+
+#[test]
+fn empty_runs_are_skipped_not_recorded() {
+    let p = to_text(&[("", 4, 0), ("text", -1, 0), ("", 4, 1)]);
+    assert_eq!(p.text, "text");
+    assert!(p.spans.is_empty());
+}
