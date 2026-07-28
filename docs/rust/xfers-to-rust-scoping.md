@@ -137,9 +137,22 @@ become native intra-crate calls once the shell is in hxhandlers.
   native `hx_htxf_ref`). New opt-bit getters `hx_htxf_opt_folder`/`_large`
   (htxf_accessors.c; the `opt` bitfield stays C-owned). Remaining C in xfers.c:
   `xfer_go`/`xfer_go_timer` + local-path helpers (Y4) + `htxf_destructor` (Y5).
-- **Y4 — wire build + path.** `xfer_go`/`xfer_go_timer` +
-  `uniquify_local_path`/`local_path_exists`. The FILE_GET/PUT chunk build +
-  resume-offset logic + task registration. Most protocol-entangled.
+- **Y4 — wire build + path. ✅ SHIPPED.** `xfer_go`/`xfer_go_timer` +
+  `uniquify_local_path`/`local_path_exists_adapter`. The FILE_GET/PUT chunk build
+  (native `hotline_proto::build::build_file_{get,put}_chunks` + `ClientHdr`
+  opcodes), the download resume-vs-rename decision, and task registration + frame
+  write through **native** `hxtask::task_new` + `hxtask::send::hlwrite_chunks`
+  (added an hxhandlers→hxtask dep; acyclic). Fixed hxtask's `RcvTaskFn` alias,
+  which was a stale 3-arg `(htlc, ptr, data)` shape — the real dispatch (rcv.c) is
+  5-arg `(htlc, frame, frame_len, ptr, data)` — so the 5-arg reply handlers now
+  register natively without the fn-pointer cast the news/chat senders still use.
+  `hx_conn_has_cap` is native (gtkhx-core); `resource_len` native (hxhfs);
+  `path_to_hldir` / `exists_remote` / `uniquify_path` / `hx_file_size` stay C
+  externs. The resume `RFLT` blob is reproduced byte-for-byte — the original C
+  string literal's continuation-line indentation leaked 26 spaces in and pushed
+  the DATA/MACR tags past byte 74, so the record is malformed; preserved to keep
+  the wire output identical, flagged as a **latent bug for a separate fix**.
+  Remaining C in xfers.c: just `htxf_destructor` (Y5).
 - **Y5 — finalize.** `htxf_destructor` (preview unref + channel close) +
   `xfer_close_channel`; register the destructor from Rust. Delete `xfers.c` +
   `xfers.h` (keep the ABI decls where C still calls in). `htxf_destructor` may

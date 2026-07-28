@@ -1,5 +1,5 @@
 //! The file-transfer **registry** — the `xfers[]` list (ported from `xfers.c`),
-//! Y1 of the xfers.c → Rust migration (`docs/rust/xfers-to-rust-scoping.md`).
+//! Part of the xfers.c → Rust migration (`docs/rust/xfers-to-rust-scoping.md`).
 //!
 //! The transfer byte-loops (`hxnet::xfer`) and the `struct htxf_conn` storage +
 //! refcount/cancel lifecycle (`hxnet::xfer_handle`) are already Rust; this owns
@@ -10,12 +10,14 @@
 //! on the GTK main thread (workers touch only their own htxf's atomic fields,
 //! never the list), so no locking is needed. A slot holds one refcount ref,
 //! dropped via `hx_htxf_unref` when the transfer is unlinked. Fields are reached
-//! natively through `hxnet`'s `HtxfHandle` (Y1 `pub`s the plain ones the shell
+//! natively through `hxnet`'s `HtxfHandle` (hxnet `pub`s the plain ones the shell
 //! needs) rather than the `hx_htxf_*` C-ABI accessor bounce.
 
 use std::cell::RefCell;
 use std::os::raw::{c_char, c_int, c_void};
 
+use hotline_proto::build::{self, FileGetRequest, FilePutRequest, HxChunk};
+use hotline_proto::messages::ClientHdr;
 use hxnet::htxf::{hxnet_htxf_abort, hxnet_htxf_close, HtxfAbort, HtxfConn};
 use hxnet::xfer::{
     hxnet_xfer_file_recv_one, hxnet_xfer_file_send_one, hxnet_xfer_folder_recv_all,
@@ -26,10 +28,49 @@ use hxnet::xfer_handle::{
     hx_htxf_set_destructor, hx_htxf_set_total_pos, hx_htxf_unref, HtxfHandle,
 };
 
+// Native collaborators for the xfer_go wire build (test build shadows them via the
+// doubles below). hx_conn_has_cap is already Rust (gtkhx-core); the reply-task
+// callbacks and the wire-encode helper are native intra-workspace calls.
+#[cfg(not(test))]
+use gtkhx_core::conn::hx_conn_has_cap;
+#[cfg(not(test))]
+use hxhfs::ffi::resource_len;
+#[cfg(not(test))]
+use hxtext::gtkhx_text_for_wire;
+#[cfg(not(test))]
+use hxtask::send::hlwrite_chunks;
+#[cfg(not(test))]
+use hxtask::task_new;
+#[cfg(not(test))]
+use crate::recv::xfer::{rcv_task_file_get, rcv_task_file_put};
+
 /// `FILE_DONE` (src/sound.h) — the transfer-complete chime.
 const FILE_DONE: c_int = 3;
 /// `XFER_GET` (src/protocol.h).
 const XFER_GET: u8 = 0;
+/// The download / upload request opcodes `xfer_go` writes (single source of
+/// truth is the `hotline_proto::messages::ClientHdr` enum).
+const HTLC_HDR_FILE_GET: u32 = ClientHdr::FileGet as u32;
+const HTLC_HDR_FILE_PUT: u32 = ClientHdr::FilePut as u32;
+/// The negotiated capability bits `xfer_go` reads — XFERSIZE64 emission
+/// (`LARGE_FILES`) and wire text encoding (`TEXT_ENCODING`). These LOGIN cap bits
+/// aren't modelled in hotline-proto; spelled here against the hotline.h reference.
+const HTLC_CAP_LARGE_FILES: u64 = 0x0001;
+const HTLC_CAP_TEXT_ENCODING: u64 = 0x0002;
+
+/// The 74-byte resume `RFLT` blob `xfer_go` sends on a download resume, with the
+/// two fork offsets big-endian-stamped at `[46..50]` (DATA) and `[62..66]` (MACR).
+///
+/// NOTE: these are the *exact* bytes the C string literal produced — its
+/// continuation-line indentation leaked 26 leading spaces in and pushed the
+/// "DATA"/"MACR" fork tags past byte 74, so the record is malformed (only the two
+/// stamped offsets are meaningful). Reproduced byte-for-byte here to keep the
+/// wire output identical; the latent bug is called out for a separate fix.
+const RFLT_RESUME_TEMPLATE: [u8; 74] = [
+    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
+    32, 32, 82, 70, 76, 84, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 32, 32, 32, 32, 32, 32,
+    32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 32, 0, 0,
+];
 
 // C environment resolved at the final link; #[cfg(test)] doubles below let
 // `cargo test -p hxhandlers` run headless (same shape recv/files.rs uses).
@@ -42,14 +83,11 @@ use gtkhx_core::session::{
 extern "C" {
     /// The session owning this htlc (tasks_bridge.c).
     fn hx_sess_from_htlc(htlc: *mut c_void) -> *mut c_void;
-    /// Kick a queued transfer's wire request (xfers.c — still C until Y4). Called
-    /// on the head of the list after a removal so the next queued transfer runs.
-    fn xfer_go(htxf: *mut HtxfHandle);
     /// gtkhx_ui_bridge.c — the active connection's htlc (xfer_init stamps it).
     fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx_ui_bridge.c — the queue-downloads pref (xfer_new's inline-vs-queue).
     fn hx_prefs_queuedl() -> c_int;
-    /// xfers.c — the last-ref GTK/preview + channel teardown (stays C until Y5);
+    /// xfers.c — the last-ref GTK/preview + channel teardown (still C);
     /// registered once via hx_htxf_set_destructor from xfer_init.
     fn htxf_destructor(htxf: *mut HtxfHandle);
     /// htxf_accessors.c — the opt bitfield setters (C owns the bit layout).
@@ -82,6 +120,24 @@ extern "C" {
     fn hx_htxf_opt_preview(htxf: *const c_void) -> c_int;
     fn hx_htxf_opt_folder(htxf: *const c_void) -> c_int;
     fn hx_htxf_opt_large(htxf: *const c_void) -> c_int;
+
+    // ---- xfer_go wire build + path collaborators ----
+    /// path_hldir.c — encode a "/a/b" path to the wire DIR bytes (g_malloc'd
+    /// buffer + out length; caller g_free's). is_file = 0 for a directory chunk.
+    fn path_to_hldir(path: *const c_char, hldirlen: *mut u16, is_file: c_int) -> *mut u8;
+    /// files.c — does a preview/companion already exist at this remote path?
+    /// (Drives the FILE_PREVIEW marker on an upload.)
+    fn exists_remote(path: *mut c_char) -> c_int;
+    /// uniquify_path.c — mutate `path` in place to a non-colliding name using the
+    /// supplied exists predicate (the core algorithm keeps its Tier-1 test in C).
+    fn uniquify_path(
+        path: *mut c_char,
+        cap: usize,
+        exists: Option<unsafe extern "C" fn(*const c_char, *mut c_void) -> c_int>,
+        user_data: *mut c_void,
+    );
+    /// htxf_accessors.c — `stat(2)` the path; data-fork byte size, or -1 on error.
+    fn hx_file_size(path: *const c_char) -> i64;
 }
 
 thread_local! {
@@ -187,7 +243,7 @@ pub unsafe extern "C" fn htxf_with_ref(ref_: u32) -> *mut HtxfHandle {
 /// `xfer-destroyed` (so subscribers null cached pointers), drop the list ref, and
 /// kick the next queued transfer. Idempotent. Emits BEFORE the unref, so handlers
 /// run with the htxf still alive (the unref drops only the list's ref). Kept
-/// `#[no_mangle]` because the still-C completion cleanup dispatcher (Y2) calls it.
+/// `#[no_mangle]` as part of the transfer C ABI surface.
 ///
 /// # Safety
 /// `htxf` is a live handle or absent. Main thread only.
@@ -266,7 +322,7 @@ pub unsafe extern "C" fn xfer_tasks_update(htlc: *mut c_void) {
     }
 }
 
-// ---- Y2: construction + progress/completion marshaling ---------------------
+// ---- construction + progress/completion marshaling ---------------------
 
 /// Copy `src` bytes into a fixed C `char` array + NUL-terminate, truncating to
 /// fit (mirrors g_strlcpy / the memcpy+NUL the C `xfer_init` did).
@@ -415,10 +471,9 @@ pub unsafe extern "C" fn xfer_new_folder(
 }
 
 /// `void post_file_update(struct htxf_conn *htxf)` — queue a tasks-window
-/// progress update onto the main loop. Called from the transfer **worker thread**
-/// (still C until Y3), so it only touches thread-safe state: takes a ref (atomic)
-/// and posts through hxbridge (`g_main_context_invoke`) — never the main-thread
-/// registry.
+/// progress update onto the main loop. Called from the transfer **worker thread**,
+/// so it only touches thread-safe state: takes a ref (atomic) and posts through
+/// hxbridge (`g_main_context_invoke`) — never the main-thread registry.
 ///
 /// # Safety
 /// `htxf` is a live handle; callable from any thread.
@@ -473,13 +528,13 @@ pub unsafe extern "C" fn xfer_completion_entry(arg: *mut c_void) {
     glib::ffi::g_idle_add(Some(xfer_cleanup_dispatch), arg);
 }
 
-// ---- Y3: worker dispatch + params ------------------------------------------
+// ---- worker dispatch + params ------------------------------------------
 
 /// `void xfer_close_channel(struct htxf_conn *htxf)` — close the hxnet HTXF
 /// channel and clear the slot. Idempotent: the worker closes on completion, then
 /// htxf_destructor closes again on the last unref; the NULL after the first close
 /// makes the second a no-op (`hxnet_htxf_close` is NULL-safe), preventing a
-/// double-free. Still called by the C `htxf_destructor` (stays C until Y5).
+/// double-free. Still called by the C `htxf_destructor`.
 ///
 /// # Safety
 /// `htxf` is a live handle.
@@ -664,6 +719,227 @@ pub unsafe extern "C" fn xfer_ready_write(htxf: *mut HtxfHandle) {
     );
 }
 
+// ---- xfer_go wire build + local-path helpers ---------------------------
+
+/// `int local_path_exists_adapter(const char *path, void *user_data)` — the
+/// exists predicate handed to `uniquify_path`: a local path is taken if either
+/// fork exists (data fork via `stat`, resource fork via `resource_len`). Matches
+/// the C `local_path_exists` + adapter.
+///
+/// # Safety
+/// `path` is a NUL-terminated C string; `user_data` is ignored.
+unsafe extern "C" fn local_path_exists_adapter(path: *const c_char, _user_data: *mut c_void) -> c_int {
+    if hx_file_size(path) >= 0 || resource_len(path) > 0 {
+        1
+    } else {
+        0
+    }
+}
+
+/// Rewrite `path` (a `[c_char; N]` buffer) in place to a collision-free name,
+/// plugging the real filesystem predicate into the C `uniquify_path` core.
+unsafe fn uniquify_local_path(path: *mut c_char, cap: usize) {
+    uniquify_path(path, cap, Some(local_path_exists_adapter), std::ptr::null_mut());
+}
+
+/// Encode `htxf`'s `remotename` (explicit length, single-line field) for the wire
+/// on this connection, run the bytes through `f`, then g_free the buffer. `f` must
+/// not retain the slice past its own return.
+unsafe fn with_name_wire<R>(
+    htxf: *const HtxfHandle,
+    utf8: glib::ffi::gboolean,
+    f: impl FnOnce(&[u8]) -> R,
+) -> R {
+    let mut wire_len: usize = 0;
+    let wire = gtkhx_text_for_wire(
+        (*htxf).remotename.as_ptr(),
+        (*htxf).remotename_len as usize,
+        utf8,
+        glib::ffi::GFALSE, // is_body = FALSE: filenames are single-line
+        &mut wire_len,
+    );
+    let slice: &[u8] = if wire.is_null() || wire_len == 0 || wire_len > isize::MAX as usize {
+        &[]
+    } else {
+        std::slice::from_raw_parts(wire as *const u8, wire_len)
+    };
+    let r = f(slice);
+    if !wire.is_null() {
+        glib::ffi::g_free(wire as *mut c_void);
+    }
+    r
+}
+
+/// Is `htxf->remotedir` a real parent directory (non-empty and not just "/")?
+unsafe fn remotedir_present(htxf: *const HtxfHandle) -> bool {
+    let rd = &(*htxf).remotedir;
+    rd[0] != 0 && !(rd[0] == b'/' as c_char && rd[1] == 0)
+}
+
+/// Borrow a `path_to_hldir` result as the DIR chunk bytes: `None` when there's
+/// no parent dir, an empty slice when the encode produced nothing, else the
+/// `hldirlen` bytes at `*hldir`. Taking `hldir` by reference ties the returned
+/// slice's lifetime to that local pointer variable (freed at the end of the
+/// caller's scope), so — unlike a plain `fn(...) -> &'a [u8]` — the slice can't
+/// outlive the allocation.
+///
+/// # Safety
+/// When `has_dir`, `*hldir` is NULL or valid for `hldirlen` bytes.
+unsafe fn hldir_dir_bytes<'a>(
+    hldir: &'a *mut u8,
+    hldirlen: u16,
+    has_dir: bool,
+) -> Option<&'a [u8]> {
+    if !has_dir {
+        None
+    } else if hldir.is_null() || hldirlen == 0 {
+        Some(&[])
+    } else {
+        Some(std::slice::from_raw_parts(*hldir, hldirlen as usize))
+    }
+}
+
+/// The download half of [`xfer_go`]: resume-vs-rename decision, then the
+/// FILE_NAME / DIR / (resume) RFLT chunk build + FILE_GET request.
+unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
+    let mut resuming = false;
+    let mut rflt = RFLT_RESUME_TEMPLATE;
+
+    // Resume vs rename (skipped for previews, which don't write to disk):
+    //   local absent            → fresh download
+    //   local < srv (known)     → resume from local size
+    //   otherwise (>= / unknown)→ rename to a free name
+    if hx_htxf_opt_preview(htxf as *const c_void) == 0 {
+        let sz = hx_file_size((*htxf).path.as_ptr());
+        if sz >= 0 {
+            let local_data = sz as u32; // C's (guint32)sb.st_size truncation
+            if (*htxf).srv_data_size > 0 && (local_data as u64) < (*htxf).srv_data_size {
+                (*htxf).data_pos = local_data as u64;
+                (*htxf).rsrc_pos = resource_len((*htxf).path.as_ptr()) as u64;
+                resuming = true;
+            } else {
+                let cap = (*htxf).path.len();
+                uniquify_local_path((*htxf).path.as_mut_ptr(), cap);
+            }
+        }
+    }
+
+    if resuming {
+        // S32HTON truncates the u64 fork positions to 32-bit big-endian.
+        rflt[46..50].copy_from_slice(&((*htxf).data_pos as u32).to_be_bytes());
+        rflt[62..66].copy_from_slice(&((*htxf).rsrc_pos as u32).to_be_bytes());
+    }
+
+    let htlc = (*htxf).htlc;
+    let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING);
+    let has_dir = remotedir_present(htxf);
+    with_name_wire(htxf, utf8, |nm_wire| {
+        let mut hldir: *mut u8 = std::ptr::null_mut();
+        let mut hldirlen: u16 = 0;
+        if has_dir {
+            hldir = path_to_hldir((*htxf).remotedir.as_ptr(), &mut hldirlen, 0);
+        }
+        let req = FileGetRequest {
+            name: nm_wire,
+            dir: hldir_dir_bytes(&hldir, hldirlen, has_dir),
+            rflt: resuming.then_some(&rflt[..]),
+        };
+        let mut chunks = [HxChunk::EMPTY; 3];
+        let hc = build::build_file_get_chunks(&req, &mut chunks);
+        if hc > 0 {
+            task_new(
+                htlc.cast(),
+                Some(rcv_task_file_get),
+                htxf as *mut c_void,
+                std::ptr::null_mut(),
+                c"xfer_go".as_ptr(),
+            );
+            hlwrite_chunks(htlc.cast(), HTLC_HDR_FILE_GET, 0, chunks.as_ptr(), hc as c_int);
+        }
+        if !hldir.is_null() {
+            glib::ffi::g_free(hldir as *mut c_void);
+        }
+    });
+}
+
+/// The upload half of [`xfer_go`]: FILE_NAME / DIR / FILE_PREVIEW / HTXF_SIZE /
+/// (large) XFERSIZE64 chunk build + FILE_PUT request.
+unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
+    // Legacy 32-bit HTXF_SIZE clamps to 0xFFFFFFFF; the 64-bit companion carries
+    // the true size when CAP_LARGE_FILES was negotiated.
+    let size_host = (*htxf).total_size.min(0xFFFF_FFFF) as u32;
+    let htlc = (*htxf).htlc;
+    let large = hx_conn_has_cap(htlc.cast(), HTLC_CAP_LARGE_FILES) != glib::ffi::GFALSE;
+    let has_dir = remotedir_present(htxf);
+    let has_preview = exists_remote((*htxf).remotepath.as_ptr() as *mut c_char) != 0;
+    let utf8 = hx_conn_has_cap(htlc.cast(), HTLC_CAP_TEXT_ENCODING);
+
+    with_name_wire(htxf, utf8, |nm_wire| {
+        let mut hldir: *mut u8 = std::ptr::null_mut();
+        let mut hldirlen: u16 = 0;
+        if has_dir {
+            hldir = path_to_hldir((*htxf).remotedir.as_ptr(), &mut hldirlen, 0);
+        }
+        let req = FilePutRequest {
+            name: nm_wire,
+            dir: hldir_dir_bytes(&hldir, hldirlen, has_dir),
+            has_preview,
+            size: size_host,
+            size64: large.then_some((*htxf).total_size),
+        };
+        let mut chunks = [HxChunk::EMPTY; 5];
+        let mut scratch = [0u8; 12];
+        let hc = build::build_file_put_chunks(&req, &mut chunks, &mut scratch);
+        if hc > 0 {
+            task_new(
+                htlc.cast(),
+                Some(rcv_task_file_put),
+                htxf as *mut c_void,
+                std::ptr::null_mut(),
+                c"xfer_go".as_ptr(),
+            );
+            hlwrite_chunks(htlc.cast(), HTLC_HDR_FILE_PUT, 0, chunks.as_ptr(), hc as c_int);
+        }
+        if !hldir.is_null() {
+            glib::ffi::g_free(hldir as *mut c_void);
+        }
+    });
+}
+
+/// `void xfer_go(struct htxf_conn *htxf)` — send the download/upload request that
+/// starts a (non-folder) transfer. Latches `gone` so a queued transfer's
+/// auto-start + an explicit kick can't double-fire, then dispatches on `type`.
+/// Called from tasks.c (queue restart) and natively (the retry timer + the
+/// next-in-queue kick after a removal).
+///
+/// # Safety
+/// `htxf` is a live handle. Main thread only.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_go(htxf: *mut HtxfHandle) {
+    if (*htxf).gone != 0 {
+        return;
+    }
+    (*htxf).gone = 1;
+
+    if (*htxf).type_ == XFER_GET {
+        xfer_go_get(htxf);
+    } else {
+        xfer_go_put(htxf);
+    }
+}
+
+/// `int xfer_go_timer(void *arg)` — the one-shot GLib-timer trampoline used by the
+/// download retry path (recv/xfer.rs arms it with the htxf). Fires `xfer_go` once
+/// and removes itself.
+///
+/// # Safety
+/// GLib timer callback on the main thread; `arg` is the transfer's htxf.
+#[no_mangle]
+pub unsafe extern "C" fn xfer_go_timer(arg: *mut c_void) -> c_int {
+    xfer_go(arg as *mut HtxfHandle);
+    0
+}
+
 // ---- test doubles for the C / GObject-emit environment ----------------------
 
 #[cfg(test)]
@@ -679,10 +955,91 @@ unsafe fn hx_sess_from_htlc(_htlc: *mut c_void) -> *mut c_void {
     std::ptr::null_mut()
 }
 #[cfg(test)]
-unsafe fn xfer_go(_htxf: *mut HtxfHandle) {}
-#[cfg(test)]
 unsafe fn gtkhx_active_htlc() -> *mut c_void {
     std::ptr::null_mut()
+}
+// The xfer_go wire-build collaborators (xfer_go compiles under test but isn't invoked by
+// the reorder/registry unit tests, so these are compile-only no-ops).
+#[cfg(test)]
+unsafe fn hx_conn_has_cap(_h: *const c_void, _cap: u64) -> glib::ffi::gboolean {
+    glib::ffi::GFALSE
+}
+#[cfg(test)]
+unsafe fn resource_len(_path: *const c_char) -> usize {
+    0
+}
+#[cfg(test)]
+unsafe fn gtkhx_text_for_wire(
+    _text: *const c_char,
+    _len: usize,
+    _utf8: glib::ffi::gboolean,
+    _is_body: glib::ffi::gboolean,
+    out_len: *mut usize,
+) -> *mut c_char {
+    if !out_len.is_null() {
+        *out_len = 0;
+    }
+    std::ptr::null_mut()
+}
+#[cfg(test)]
+unsafe fn hlwrite_chunks(
+    _htlc: *mut c_void,
+    _ty: u32,
+    _flag: u32,
+    _chunks: *const HxChunk,
+    _hc: c_int,
+) {
+}
+#[cfg(test)]
+unsafe fn task_new(
+    _htlc: *mut c_void,
+    _rcv: Option<unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void)>,
+    _ptr: *mut c_void,
+    _data: *mut c_void,
+    _str_: *const c_char,
+) -> *mut c_void {
+    std::ptr::null_mut()
+}
+#[cfg(test)]
+unsafe extern "C" fn rcv_task_file_get(
+    _htlc: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
+    _ptr: *mut c_void,
+    _data: *mut c_void,
+) {
+}
+#[cfg(test)]
+unsafe extern "C" fn rcv_task_file_put(
+    _htlc: *mut c_void,
+    _frame: *const c_void,
+    _frame_len: usize,
+    _ptr: *mut c_void,
+    _data: *mut c_void,
+) {
+}
+#[cfg(test)]
+unsafe fn path_to_hldir(_path: *const c_char, hldirlen: *mut u16, _is_file: c_int) -> *mut u8 {
+    if !hldirlen.is_null() {
+        *hldirlen = 0;
+    }
+    std::ptr::null_mut()
+}
+#[cfg(test)]
+unsafe fn exists_remote(_path: *mut c_char) -> c_int {
+    0
+}
+#[cfg(test)]
+unsafe fn uniquify_path(
+    _path: *mut c_char,
+    _cap: usize,
+    _exists: Option<unsafe extern "C" fn(*const c_char, *mut c_void) -> c_int>,
+    _user_data: *mut c_void,
+) {
+}
+#[cfg(test)]
+unsafe fn hx_file_size(_path: *const c_char) -> i64 {
+    -1
 }
 #[cfg(test)]
 unsafe fn hx_prefs_queuedl() -> c_int {

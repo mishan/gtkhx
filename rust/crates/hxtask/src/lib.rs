@@ -36,10 +36,14 @@ pub struct HtlcConn {
     _private: [u8; 0],
 }
 
-/// `rcv_task_fn` — `void (*)(struct htlc_conn *, void *, void *)` (protocol.h).
-/// The `rcv_task_*` impls have heterogeneous arg lists cast to this shape at
-/// `task_new` time; the crate only stores + hands the pointer back to C.
-pub type RcvTaskFn = Option<unsafe extern "C" fn(*mut HtlcConn, *mut c_void, *mut c_void)>;
+/// `rcv_task_fn` — `void (*)(struct htlc_conn *, const guint8 *frame,
+/// size_t frame_len, void *ptr, void *data)` (protocol.h). This is the shape the
+/// task dispatcher (`rcv.c`) actually invokes the stored handler with; `htlc` is
+/// kept opaque (`*mut c_void`) so a reply handler that also takes an opaque htlc
+/// registers natively without a fn-pointer cast. Some handlers ignore the
+/// trailing args; the crate only stores + hands the pointer back to C.
+pub type RcvTaskFn =
+    Option<unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_void, *mut c_void)>;
 
 /// `#[repr(C)]` mirror of `struct task` (protocol.h). The const block pins the
 /// Rust layout to the C offsets (LP64) so the two can't silently drift;

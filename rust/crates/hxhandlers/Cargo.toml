@@ -26,3 +26,7 @@ hxtext = { path = "../hxtext" }
 # HtxfHandle + hx_htxf_* lifecycle; native access instead of the hx_htxf_*
 # C-ABI accessor bounce. hxnet does not depend on hxhandlers (acyclic).
 hxnet = { path = "../hxnet" }
+# xfer_go writes its FILE_GET/PUT request through hxtask's native send
+# primitive (hlwrite_chunks). hxtask deps only gtkhx-core/hotline-proto/glib,
+# so hxhandlers -> hxtask is acyclic.
+hxtask = { path = "../hxtask" }

@@ -98,11 +98,14 @@ unsafe fn cstr_bytes<'a>(s: *const c_char) -> &'a [u8] {
 }
 
 /// View a `path_to_hldir` result (`*mut u8` + `u16` length) as a byte slice.
-unsafe fn hldir_slice<'a>(ptr: *mut u8, len: u16) -> &'a [u8] {
+/// Taking `ptr` by reference ties the returned slice's lifetime to that local
+/// pointer variable (g_free'd at the end of the caller's scope), so — unlike a
+/// plain `fn(...) -> &'a [u8]` — the slice can't outlive the allocation.
+unsafe fn hldir_slice<'a>(ptr: &'a *mut u8, len: u16) -> &'a [u8] {
     if ptr.is_null() || len == 0 {
         &[]
     } else {
-        std::slice::from_raw_parts(ptr, len as usize)
+        std::slice::from_raw_parts(*ptr, len as usize)
     }
 }
 
@@ -166,7 +169,7 @@ pub unsafe extern "C" fn hx_news15_get_post(
     let mime = cstr_bytes(mime_type);
     let mime = if mime.is_empty() { b"text/plain".as_slice() } else { mime };
     let req = NewsGetThreadRequest {
-        path: hldir_slice(hldir, hldirlen),
+        path: hldir_slice(&hldir, hldirlen),
         threadid: postid,
         mime_type: mime,
     };
@@ -215,7 +218,7 @@ pub unsafe extern "C" fn hx_news15_cat_list(htlc: *mut c_void, g: *mut c_void) {
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 1];
-    let hc = build::build_news_catlist_chunks(hldir_slice(hldir, hldirlen), &mut chunks);
+    let hc = build::build_news_catlist_chunks(hldir_slice(&hldir, hldirlen), &mut chunks);
     if hc > 0 {
         task_new(
             htlc,
@@ -250,7 +253,7 @@ pub unsafe extern "C" fn hx_news15_fldr_list(htlc: *mut c_void, g: *mut c_void) 
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 1];
-    let hc = build::build_news_dirlist_chunks(hldir_slice(hldir, hldirlen), &mut chunks);
+    let hc = build::build_news_dirlist_chunks(hldir_slice(&hldir, hldirlen), &mut chunks);
     if hc > 0 {
         task_new(
             htlc,
@@ -297,7 +300,7 @@ pub unsafe extern "C" fn hx_news15_post_thread(
             let mut chunks = [HxChunk::EMPTY; 6];
             let mut scratch = [0u8; 8];
             let req = NewsPostThreadRequest {
-                path: hldir_slice(hldir, hldirlen),
+                path: hldir_slice(&hldir, hldirlen),
                 parent_thread: 0,
                 mime_type: b"text/plain",
                 subject: subj_wire,
@@ -343,7 +346,7 @@ pub unsafe extern "C" fn hx_news15_delete_thread(
     let mut chunks = [HxChunk::EMPTY; 2];
     let mut scratch = [0u8; 4];
     let req = NewsDeleteThreadRequest {
-        path: hldir_slice(hldir, hldirlen),
+        path: hldir_slice(&hldir, hldirlen),
         threadid,
     };
     let hc = build::build_news_delete_thread_chunks(&req, &mut chunks, &mut scratch);
@@ -377,7 +380,7 @@ pub unsafe extern "C" fn hx_news15_delete(htlc: *mut c_void, path: *const c_char
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 1];
-    let hc = build::build_news_delete_chunks(hldir_slice(hldir, hldirlen), &mut chunks);
+    let hc = build::build_news_delete_chunks(hldir_slice(&hldir, hldirlen), &mut chunks);
     if hc > 0 {
         task_new(
             htlc,
@@ -415,7 +418,7 @@ pub unsafe extern "C" fn hx_news15_mkcat(
     with_wire(name, utf8, glib::ffi::GFALSE, |name_wire| {
         let mut chunks = [HxChunk::EMPTY; 2];
         let req = NewsMakeCategoryRequest {
-            path: hldir_slice(hldir, hldirlen),
+            path: hldir_slice(&hldir, hldirlen),
             name: name_wire,
         };
         let hc = build::build_news_mkcat_chunks(&req, &mut chunks);
@@ -450,7 +453,7 @@ pub unsafe extern "C" fn hx_news15_mkdir(htlc: *mut c_void, path: *const c_char)
     let hldir = path_to_hldir(path, &mut hldirlen, 0);
 
     let mut chunks = [HxChunk::EMPTY; 1];
-    let hc = build::build_news_mkdir_chunks(hldir_slice(hldir, hldirlen), &mut chunks);
+    let hc = build::build_news_mkdir_chunks(hldir_slice(&hldir, hldirlen), &mut chunks);
     if hc > 0 {
         task_new(
             htlc,

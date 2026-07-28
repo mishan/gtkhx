@@ -12,7 +12,7 @@
 #include "htxf_accessors.h"
 
 /* hx_htxf_in_list moved to the Rust transfer registry (hxhandlers::xfer) with
- * the xfers[] list in Y1. */
+ * the xfers[] list. */
 
 int
 hx_htxf_opt_retry (const struct htxf_conn *htxf)
