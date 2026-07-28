@@ -115,10 +115,15 @@ frame; `docs/chat-view-benchmark.md` is the record and cannot be reproduced,
 since the other half of the comparison no longer exists. Design and phasing:
 `docs/chat-view-scoping.md`.
 
-The `\003NN` mIRC escape vocabulary is **still in use** — `chat.c` and `msg.c`
-build styled strings with it and two sites re-parse their own output to
-recover a name. Retiring it is the structured-append API and is C6 work; see
-scoping §6a2 for why it isn't a shim removal.
+The `\003NN` mIRC escape vocabulary is **mostly retired** (C6). Chat rows are
+built from `HxChatRun` arrays — `(text, palette index, attrs)` — via
+`hx_chat_view_append_runs` / `_insert_runs_before`, so nothing embeds escapes
+in a string for the view to parse back out. What remains is the `INFOPREFIX` /
+broadcast-prefix path (`gtkhx.c:506`, `proto_helpers.c:742`, `msg.c:788`, and
+the parser at `chat.c:1609`), which survives because `hx_printf_prefix` hands
+the `chat-log-line` signal a formatted string and a prefix is the only place
+to put a sender's name and colour. Finishing it means that signal carrying
+`(name, colour, body)`. See scoping §6a2.
 
 The custom GtkCList fork is gone; its five list consumers (`tracker.c`, `news15.c`,
 `options.c`, `users.c`, `files.c`) now use `GtkColumnView` directly — the interim

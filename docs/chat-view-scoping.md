@@ -774,9 +774,38 @@ parsers and the escapes all go at once. That is exactly the "chat.c hands
 a `Message`, not a mIRC string" item §6 lists under C6, and §3.8 (below)
 already argues should be pulled forward.
 
-So C5 shipped as xtext-only. The vocabulary is unchanged and still works;
-it is now the single largest thing standing between the current tree and
-C6.
+So C5 shipped as xtext-only, and C6 took the retirement on.
+
+**Status after C6's first two commits.** The run API exists
+(`HxChatRun`, `hx_chat_view_append_runs` /
+`_insert_runs_before`) and every *chat rendering* producer now uses it:
+the nick column in `chat.c` and `msg.c`, the mention highlight, all nine
+chat-history row shapes, the load-older sentinel, and the inline-media
+placeholder. The `\017` reset byte the highlight used to append is gone
+with them — runs carry no running state, so nothing can leak into the
+next row.
+
+**What is left is one path.** Every remaining `\003NN` is the
+`INFOPREFIX` / broadcast-prefix wrapper:
+
+| Site | What |
+|---|---|
+| `gtkhx.c:506` | `INFOPREFIX` itself |
+| `proto_helpers.c:742` | the copy used to detect an info line |
+| `msg.c:788`, `msg.c:791` | broadcastmsg's per-sender `[name]` prefix |
+| `chat.c:1609` | the parser that reads them back |
+
+These survive because `hx_printf` / `hx_printf_prefix` hand the
+`chat-log-line` signal a *formatted string*, so a prefix is the only
+place to put the sender's name and colour. Finishing the job means the
+signal carrying `(name, colour, body)` instead — a change to
+`gtkhx_log.c` and the `GtkhxSession` signal, not to the view.
+
+The parser at `chat.c:1609` was updated rather than left alone: it now
+extracts the bare name and its colour instead of passing escape bytes on
+as the nick. It had to be — the renderer draws runs literally, so escapes
+reaching it would have been *printed*. It also preserves broadcastmsg's
+per-sender colour, which a straight conversion would have flattened.
 
 ### 6b. Notes from C3r
 
