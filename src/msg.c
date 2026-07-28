@@ -579,8 +579,7 @@ msg_output_render (const char *name, guint16 uid, const char *body,
                    gboolean is_self)
 {
     struct msgwin *msg;
-    int brack_col;
-    gchar *nick_wrapped;
+    gint16 brack_col;
     gchar *valid_body;
     gsize valid_body_len;
     const char *cur;
@@ -595,16 +594,12 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 	 * for incoming. */
     brack_col = is_self ? 13 : 12;
 
-    nick_wrapped = g_strdup_printf ("\003%d<\003%s\003%d>\003", brack_col,
-                                    name ? name : "", brack_col);
-
     /* Validate the body bytes once. the chat view hands content to Pango,
 	 * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
 	 * from vintage servers. */
     valid_body = gtkhx_text_to_utf8 (body ? body : "", body ? strlen (body) : 0,
                                      &valid_body_len);
     if (!valid_body) {
-        g_free (nick_wrapped);
         return;
     }
 
@@ -622,9 +617,18 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         const char *nl = (cur < end) ? memchr (cur, '\n', end - cur) : NULL;
         gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
         if (first) {
-            hx_chat_view_append_indent (msg->outputbuf, nick_wrapped,
-                                        strlen (nick_wrapped), cur, seg_len,
-                                        0);
+            /* "<name>": brackets coloured, name in the default
+			 * foreground. Same shape as chat.c's nick column, and
+			 * the same three runs. */
+            const char *nam = name ? name : "";
+            HxChatRun gutter[3] = {
+                { "<", 1, brack_col, HX_CHAT_ATTR_NONE },
+                HX_CHAT_RUN_PLAIN (nam, (int)strlen (nam)),
+                { ">", 1, brack_col, HX_CHAT_ATTR_NONE },
+            };
+            HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);
+            hx_chat_view_append_runs (msg->outputbuf, gutter, 3, &body_run, 1,
+                                      0);
             first = FALSE;
         } else {
             hx_chat_view_append (msg->outputbuf, cur, seg_len, 0);
@@ -635,7 +639,6 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         cur = nl + 1;
     }
 
-    g_free (nick_wrapped);
     g_free (valid_body);
 
     /* incoming messages set needs-attention on

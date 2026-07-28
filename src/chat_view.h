@@ -181,6 +181,17 @@ void hx_chat_view_set_autocopy_color (gboolean enabled);
  * normal foreground. */
 #define HX_CHAT_COLOR_DEFAULT (-1)
 
+/* Named palette slots the chat code actually reaches for. These were
+ * bare numbers inside printf format strings ("\00310[", "\003" "37"),
+ * which is how a colour choice ends up undocumented and unsearchable.
+ *
+ * The values are the historical mIRC indices, kept so themes that
+ * already set slots 0..31 keep rendering the same. */
+#define HX_CHAT_INFO_COLOR      3  /* "[hx]" and broadcast sender names */
+#define HX_CHAT_INFO_BRACKET_COLOR 10 /* the [ ] around them */
+#define HX_CHAT_HIGHLIGHT_COLOR 4  /* light red: a line that mentions you */
+#define HX_CHAT_PLACEHOLDER_COLOR 14 /* dark grey: inline-media alt text */
+
 #define HX_CHAT_ATTR_NONE      0u
 #define HX_CHAT_ATTR_BOLD      (1u << 0)
 #define HX_CHAT_ATTR_ITALIC    (1u << 1)
