@@ -39,7 +39,6 @@
 #include "connect.h"
 #include "gtkhx.h"
 #include "files.h"
-#include "xtext.h"
 #include "gtkutil.h"
 #include "hl_access.h"
 #include "hxconn.h"

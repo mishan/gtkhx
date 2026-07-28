@@ -17,6 +17,10 @@ gtkhx_sources = files(
   # chat.c). Links via the gtkhx-ffi façade archive.
   'chat_send_bridge.c',
   'chat_history.c',
+  # chat_view.c — the chat output surface as an interface (hx_chat_view_*).
+  # The only file outside xtext.c that names GTK_XTEXT / xtext_buffer /
+  # textentry; see docs/chat-view-scoping.md phase C0.
+  'chat_view.c',
   'cicn.c',
   'gif_avatar.c',
   'gif_icons.c',

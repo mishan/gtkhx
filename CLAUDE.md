@@ -354,8 +354,16 @@ and 1.25× user-list factors as explicit overrides.
 
 `chat.c::gtkhx_apply_theme_palette(dark)` pulls each UI-role slot via
 `gtkhx_theme_get_color(role, dark)`. The mIRC slots (0..31) stay in
-`chat.c::colors[]` because they're protocol-shaped, not theme-shaped (servers
-send specific indices; users don't get to remap "red").
+`chat.c::colors[]`. **Correction (chat-view scoping):** an earlier version of
+this note said they were "protocol-shaped, not theme-shaped (servers send
+specific indices)". That is wrong. The Hotline wire format has no text-styling
+concept at all — no colour field, no style field; chat / message / news bodies
+are plain text. The `\003NN` escape vocabulary arrived with the XChat xtext
+fork in 2000, and every such byte in a buffer was written by GtkHx itself (nick
+brackets, highlight, the info prefix, history-muted rows, media placeholders).
+Hotline's real per-user colour is a separate u32 RGB attribute on the user
+record, not in-band markup. The vocabulary is ours to retire — see
+`docs/chat-view-scoping.md` §3.8.
 
 Non-xtext text surfaces (agreement window, news viewers, broadcast viewer,
 chat-subject entries, and the chat / PM / pchat input boxes) get the same

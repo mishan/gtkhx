@@ -110,6 +110,10 @@ That last point is the one that blocks what we actually want next.
   proportional to what is *visible*, not to scrollback size.
 - A real message model: id, timestamp, speaker (with uid), typed blocks, flags.
   Extensible by adding a block variant, not by adding a string prefix.
+- **Retire the mIRC escape vocabulary** (§3.8). It is GtkHx's own invention, not
+  a protocol surface, and structured styling replaces it outright.
+- **Markdown as the inline formatting vocabulary** (§3.9), for composing and
+  reading.
 - Typed signals for interaction — no string-prefix demux.
 - Headless-testable: wrapping, height indexing, scroll anchoring, span parsing
   and selection extraction all unit-tested in CI without a display.
@@ -123,6 +127,8 @@ That last point is the one that blocks what we actually want next.
 **Non-goals**
 
 - No wire-protocol change of any kind. This is client-side rendering only.
+  Markdown included: it rides the wire as literal text, needs no capability
+  bit, and degrades to asterisks on every other client (§3.9).
 - Not a general-purpose rich-text widget. It renders Hotline chat.
 - Not replacing the chat *input* — that stays `GtkTextView`.
 - Not reproducing xtext's every pref. Anything unused gets dropped deliberately
@@ -354,6 +360,138 @@ layout engine must support it from C1 (the generation key and the scale factor
 are part of the measure API from day one), but the bindings and the pref come
 with selection and context menus.
 
+### 3.8 Retiring the mIRC escape vocabulary
+
+**The mIRC escapes are not protocol.** This was worth establishing before
+building anything on top of them, because several comments in the tree —
+`CLAUDE.md`'s theming section among them — asserted the opposite ("servers send
+specific indices"). They don't. Verified two ways: by tracing every generation
+site in the tree, and from Misha directly — the vocabulary came in with the
+XChat 1.8.5 xtext fork around 2000 and was never a Hotline concept.
+
+The findings:
+
+- **The Hotline wire format has no text styling.** `HTLS_HDR_CHAT` is
+  `uid + flags + body`. `HTLS_HDR_MSG` is `uid + body`. News, broadcasts, file
+  comments, agreements — all plain text. There is no colour field and no style
+  field anywhere in the protocol.
+- **Every `\003NN` byte in a buffer was written by GtkHx.** All of them, in five
+  places: the nick brackets (`chat.c:627`, `msg.c:598`), the highlight wrap
+  (`chat.c:669`), the `INFOPREFIX` constant, the history-muted rows and dividers
+  (colour 37), and the inline-media placeholder (colour 14).
+- **Only three of the eight escape codes are ever generated** — colour, bold,
+  reset. Italic, strikethrough, reverse and hidden have no producer at all;
+  underline appears only in divider text.
+- **Hotline's real per-user colour is a separate `u32` RGB attribute** on the
+  user record (`nick_color`), applied by the client when rendering a name. It
+  is not, and never was, in-band markup.
+- **Nothing else consumes them.** The news viewers, agreement window, user-info
+  window and the broadcast dialog are all `GtkTextView` and ignore escapes
+  entirely. xtext is the only consumer.
+- **A server couldn't inject them anyway.** `hotline-proto`'s `strip_ansi`
+  (`sanitize.rs`, mirroring the old `strip_ansi` in `protocol.h`) folds bytes
+  14–30 into the printable range on every received text field.
+
+So the escape vocabulary is a private encoding between `chat.c` and xtext, and
+it can go. That is a substantial simplification, and it lands in three places:
+
+1. **The span parser stops being a state machine over control bytes.** Nick
+   colour, highlight, muted-history and the info prefix become what they
+   actually are — `MessageFlags` and `Speaker.color` on the structured message
+   (§3.1) — resolved by the layout engine against the theme palette. Slots
+   32..37 survive as theme roles; slots 0..31 have no remaining producer once
+   the last hard-coded index is gone.
+2. **It pulls the structured append API forward.** §6's C6 originally deferred
+   "chat.c hands a `Message`, not a mIRC string" to after xtext's deletion, on
+   the theory that a string round-trip kept the A/B honest. With no
+   compatibility constraint, the *native* API should be structured from C1.
+   The mIRC parser survives only as a **compatibility shim** feeding the same
+   `Span` output, used solely so the xtext-backed and new-widget-backed views
+   render identical content during coexistence — then deleted at C5 with xtext.
+3. **It frees `\003` for markdown** (§3.9) rather than having two competing
+   inline formatting vocabularies.
+
+The one thing that must not regress: hand-written escapes reaching the wire.
+`chat.c` builds display strings *after* the send path, so this is already true —
+but the C1 span parser should assert it, and `strip_ansi` stays exactly as it is
+on the receive side regardless.
+
+### 3.9 Markdown
+
+With mIRC retired, markdown becomes *the* inline formatting vocabulary — for
+composing as well as reading. It produces the same `Vec<Span>` the layout engine
+already consumes (§3.1), so this is a new front-end on the parser, not a new
+rendering path.
+
+**Supported subset — inline only.** Chat lines are not documents:
+
+| Syntax | Renders as |
+|---|---|
+| `**bold**` | bold |
+| `*italic*` / `_italic_` | italic |
+| `` `code` `` | monospace, background-tinted |
+| `~~strike~~` | strikethrough |
+| `[label](url)` | link (see security note) |
+| ` ```lang ` fenced block | code block — the one block-level construct |
+| `> quote` | quoted block, at line start |
+
+**Deliberately not supported:** headings (`#` starts far too many real chat
+lines), images (`![]()` — inline media has its own server-validated pipeline and
+must not be bypassed by arbitrary URLs), tables, raw HTML, footnotes, reference
+links, setext headings and thematic breaks (`---` is common in plain prose).
+Autolinking stays with the existing URL detector rather than markdown's.
+
+**Escaping.** Backslash escapes any construct char. Code spans suppress all
+other parsing inside them. Unmatched delimiters render literally — never eat a
+lone asterisk.
+
+**Parser choice: hand-written inline scanner, not `pulldown-cmark`.**
+`pulldown-cmark` is the obvious pick (pure Rust, MIT, well-tested) and was
+considered. Passed over for three reasons: it has no inline-only mode, so we'd
+be filtering a block-level event stream and fighting CommonMark's block rules to
+suppress exactly the constructs listed above; its event stream would need
+converting into byte-ranged `Span`s anyway, which is most of the work; and a
+scanner for seven constructs is a few hundred lines that is exhaustively
+unit-testable and behaves predictably on the pathological input chat actually
+produces. This matches how the tree treats its other parsers — `hotline-proto`
+is hand-written for the same reasons. Revisit if the subset grows.
+
+**Send side — what goes on the wire is the literal text.** The protocol carries
+plain text, so `**bold**` is transmitted as `**bold**`. Other GtkHx users see
+bold; everyone else sees asterisks. This is exactly how Slack, Discord and IRC
+clients have always behaved and needs no capability negotiation, no wire change,
+and no server cooperation. It is the reason markdown is the right choice here
+and a custom binary styling extension would not be.
+
+**Receive side — the honest tradeoff.** Rendering markdown on *incoming* text
+means a message typed as literal `*emphasis*` by a user on a 1997 Mac client
+renders as italics. Mitigations, in order: the subset is conservative; unmatched
+delimiters stay literal; and a Settings → Chat toggle (`CFG_MARKDOWN`, default
+on) turns rendering off entirely for people who'd rather see exactly what was
+typed. A per-message "show source" in the context menu is a cheap addition once
+messages are structured.
+
+**Security.** `[label](url)` is a phishing vector — the visible text can lie
+about the destination. Three rules, all enforced in the parser, not the UI:
+scheme allowlist (`http`, `https`, `ftp`, `hotline`, `mailto` — matching
+`gtkurl.c`; everything else renders as literal text); the resolved URL is always
+shown on hover and in the click confirmation, never just the label; and a link
+whose label is itself URL-shaped but points somewhere else is flagged in the
+confirmation. Fenced code blocks are inert.
+
+**Composing.** v1 is render-on-display only — no live preview, no WYSIWYG input.
+Two cheap affordances ride along: `Ctrl+B` / `Ctrl+I` / `Ctrl+Shift+C` wrap the
+selection (or insert the delimiter pair), and the input box gets subdued syntax
+tinting so you can see what will render. The `:shortcode:` emoji typeahead
+already in the input is unaffected — emoji decoding happens before span parsing
+and the two vocabularies don't collide.
+
+**Phasing.** The parser is **C1** work (it is the span front-end, and it is pure
+logic with a large unit-test surface). Rendering the resulting spans needs no
+new engine support beyond the code-block and quote block variants, which land
+with the other `Block` variants in **C4**. The compose affordances and the
+Settings toggle come in **C3** with the rest of the interaction work.
+
 ---
 
 ## 4. What this unlocks
@@ -431,16 +569,21 @@ smallest surface: no inline media, no chat history, no load-older sentinel, one
 | Phase | Scope | Ships on its own? |
 |---|---|---|
 | **C0** | `chat_view.h` shim over xtext only. Close the five struct leaks; opaque `HxChatMark`. No new widget, no behaviour change. | Yes — pure cleanup |
-| **C1** | `hxchat-layout` crate: model, span parser, wrap/measure, chunked height index, scroll anchor, hit test, selection extraction. No widget. Benchmark harness + baseline numbers vs xtext. | Yes — unit-tested library |
+| **C1** | `hxchat-layout` crate: model, **structured append API**, wrap/measure, chunked height index, scroll anchor, hit test, selection extraction, **markdown span parser (§3.9)** + the mIRC compat shim. No widget. Benchmark harness + baseline numbers vs xtext. | Yes — unit-tested library |
 | **C2** | `hxchat-view` crate: the GtkWidget. `measure` / `size_allocate` / `snapshot` / `GtkScrollable`, text only. Wired to PM windows behind the env selector. | Yes — behind selector |
-| **C3** | Selection, hit testing, links, context menus, autocopy, in-buffer search, scrollback trim, **zoom (§3.7)**. Enable for private chat tabs. | Yes |
-| **C4** | Inline media as a real variable-height block; chat history as first-class row kinds with typed `load-more`. Enable for main chat. | Yes |
-| **C5** | Default flip; then delete `xtext.c`, `xtext.h`, and the shim's xtext arm — separate commits. | Yes |
-| **C6** | The payoff: structured append API (`chat.c` hands a `Message`, not a mIRC string), avatar gutter, banner previews, message grouping. | Yes, incrementally |
+| **C3** | Selection, hit testing, links, context menus, autocopy, in-buffer search, scrollback trim, **zoom (§3.7)**, markdown compose affordances + Settings toggles. Enable for private chat tabs. | Yes |
+| **C4** | Inline media as a real variable-height block; code-block and quote blocks; chat history as first-class row kinds with typed `load-more`. Enable for main chat. | Yes |
+| **C5** | Default flip; then delete `xtext.c`, `xtext.h`, **the mIRC compat shim**, and the shim's xtext arm — separate commits. | Yes |
+| **C6** | The payoff: avatar gutter, banner previews, message grouping. | Yes, incrementally |
 
-Note C6's structured-append: at v1 the view parses the mIRC string `chat.c`
-already builds, so C2–C5 are a genuine drop-in and the A/B is honest. C6 removes
-the string round-trip and is what actually lets a uid reach the renderer.
+Note on the structured append API: an earlier draft of this plan deferred it to
+C6, on the theory that having the view parse the mIRC string `chat.c` already
+builds kept C2–C5 an honest drop-in. §3.8 removed that constraint — the escape
+vocabulary is GtkHx's own, not a compatibility surface — so the native API is
+structured from C1 and the mIRC parser survives only as a compat shim, kept
+purely so the two backends render identical content during the A/B, and deleted
+at C5. That also means the uid reaches the renderer from the start, which is
+what the avatar gutter needs.
 
 ---
 

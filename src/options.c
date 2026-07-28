@@ -29,7 +29,7 @@
 #include "hxconn.h"
 #include "gtkhx.h"
 #include "news.h"
-#include "xtext.h"
+#include "chat_view.h"
 #include "cicn.h"
 #include "sound.h"
 #include "users.h"
@@ -401,8 +401,8 @@ reinit_gtktexts (session *sess)
                     && !gtkhx_prefs.geo.chat.open) {
                     continue;
                 }
-                gtk_xtext_set_font (GTK_XTEXT (hx_gchat_output (gchat)), fontname);
-                gtk_xtext_refresh (GTK_XTEXT (hx_gchat_output (gchat)));
+                hx_chat_view_set_font (hx_gchat_output (gchat), fontname);
+                hx_chat_view_refresh (hx_gchat_output (gchat));
                 if (hx_gchat_input (gchat)) {
                     gtkhx_apply_input_font (hx_gchat_input (gchat));
                 }
@@ -424,8 +424,8 @@ reinit_gtktexts (session *sess)
             g_hash_table_iter_init (&iter, sess->msg_windows);
             while (g_hash_table_iter_next (&iter, NULL, &val)) {
                 struct msgwin *msg = val;
-                gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
-                gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+                hx_chat_view_set_font (msg->outputbuf, fontname);
+                hx_chat_view_refresh (msg->outputbuf);
                 gtkhx_apply_input_font (msg->inputbuf);
             }
         }
@@ -445,9 +445,10 @@ changed_xtext (session *sess)
                 if (!gchat) {
                     continue;
                 }
-                GTK_XTEXT (hx_gchat_output (gchat))->wordwrap = gtkhx_prefs.word_wrap;
-                GTK_XTEXT (hx_gchat_output (gchat))->max_lines = gtkhx_prefs.xbuf_max;
-                gtk_xtext_refresh (GTK_XTEXT (hx_gchat_output (gchat)));
+                GtkWidget *out = hx_gchat_output (gchat);
+                hx_chat_view_set_word_wrap (out, gtkhx_prefs.word_wrap);
+                hx_chat_view_set_max_lines (out, gtkhx_prefs.xbuf_max);
+                hx_chat_view_refresh (out);
             }
         }
         if (sess->msg_windows) {
@@ -456,18 +457,20 @@ changed_xtext (session *sess)
             g_hash_table_iter_init (&iter, sess->msg_windows);
             while (g_hash_table_iter_next (&iter, NULL, &val)) {
                 struct msgwin *msg = val;
-                GTK_XTEXT (msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
-                GTK_XTEXT (msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
-                gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+                hx_chat_view_set_word_wrap (msg->outputbuf,
+                                            gtkhx_prefs.word_wrap);
+                hx_chat_view_set_max_lines (msg->outputbuf,
+                                            gtkhx_prefs.xbuf_max);
+                hx_chat_view_refresh (msg->outputbuf);
             }
         }
     }
 }
 
-/* apply the CFG_TIMESTAMP toggle to every live xtext buffer
+/* apply the CFG_TIMESTAMP toggle to every live chat view
  * — chat / pchat outputs in gchat_list, plus PM outputs in msg_windows.
- * Native xtext stamps are flipped per-buffer via gtk_xtext_set_time_stamp.
- * gtk_xtext_refresh forces a full re-render so the new state is visible
+ * View-native stamps are flipped per-view via hx_chat_view_set_time_stamp.
+ * hx_chat_view_refresh forces a full re-render so the new state is visible
  * without scrolling the buffer first. */
 static void
 changed_timestamp (session *sess)
@@ -483,9 +486,9 @@ changed_timestamp (session *sess)
             if (!gchat) {
                 continue;
             }
-            gtk_xtext_set_time_stamp (GTK_XTEXT (hx_gchat_output (gchat))->buffer,
-                                      gtkhx_prefs.timestamp);
-            gtk_xtext_refresh (GTK_XTEXT (hx_gchat_output (gchat)));
+            hx_chat_view_set_time_stamp (hx_gchat_output (gchat),
+                                         gtkhx_prefs.timestamp);
+            hx_chat_view_refresh (hx_gchat_output (gchat));
         }
     }
     if (sess->msg_windows) {
@@ -494,9 +497,9 @@ changed_timestamp (session *sess)
         g_hash_table_iter_init (&iter, sess->msg_windows);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
-            gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
-                                      gtkhx_prefs.timestamp);
-            gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+            hx_chat_view_set_time_stamp (msg->outputbuf,
+                                         gtkhx_prefs.timestamp);
+            hx_chat_view_refresh (msg->outputbuf);
         }
     }
 }
@@ -626,22 +629,22 @@ static void
 changed_autocopy_text (session *sess)
 {
     (void)sess;
-    gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
+    hx_chat_view_set_autocopy_text (gtkhx_prefs.autocopy_text);
 }
 static void
 changed_autocopy_stamp (session *sess)
 {
     (void)sess;
-    gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
+    hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
 }
 static void
 changed_autocopy_color (session *sess)
 {
     (void)sess;
-    gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
+    hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
 }
 
-/* apply CFG_STAMP_FORMAT to every live xtext widget. The
+/* apply CFG_STAMP_FORMAT to every live chat view. The
  * setter stashes the new format in xtext's module-global, recomputes
  * stamp_width per widget (font-dependent), and grows the buffer
  * indent if the new column is wider than before. queue_draw fires
@@ -660,8 +663,8 @@ changed_stampformat (session *sess)
             if (!gchat) {
                 continue;
             }
-            gtk_xtext_set_stamp_format (GTK_XTEXT (hx_gchat_output (gchat)),
-                                        gtkhx_prefs.stamp_format);
+            hx_chat_view_set_stamp_format (hx_gchat_output (gchat),
+                                           gtkhx_prefs.stamp_format);
         }
     }
     if (sess->msg_windows) {
@@ -670,8 +673,8 @@ changed_stampformat (session *sess)
         g_hash_table_iter_init (&iter, sess->msg_windows);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
-            gtk_xtext_set_stamp_format (GTK_XTEXT (msg->outputbuf),
-                                        gtkhx_prefs.stamp_format);
+            hx_chat_view_set_stamp_format (msg->outputbuf,
+                                           gtkhx_prefs.stamp_format);
         }
     }
 }
@@ -2145,9 +2148,9 @@ apply_loaded_xtext_prefs (void)
     hx_conn_set_nick_color (hx_active_session ()->htlc,
                             (guint32)gtkhx_prefs.nick_color);
 
-    gtk_xtext_set_autocopy_text (gtkhx_prefs.autocopy_text);
-    gtk_xtext_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
-    gtk_xtext_set_autocopy_color (gtkhx_prefs.autocopy_color);
+    hx_chat_view_set_autocopy_text (gtkhx_prefs.autocopy_text);
+    hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
+    hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
 
     /* Same load-vs-changefunc concern: prefs_read doesn't fire
 	 * changefuncs, so push the loaded emoji-shortcode toggle into the
@@ -2175,14 +2178,12 @@ apply_loaded_xtext_prefs (void)
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 #endif
 
-    /* Stamp format is widget-aware but the module-global it stashes
-	 * into is read by xtext_get_stamp_str. Pass NULL for the widget
-	 * here — at this point no xtext widgets exist yet (chat windows
-	 * are constructed AFTER prefs_read in fe_init). The recompute-
-	 * stamp_width / re-grow-indent paths inside the setter are
-	 * widget-conditioned, so passing NULL is a clean
-	 * format-only update. */
-    gtk_xtext_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
+    /* Stamp format is view-aware but the format itself is process-wide.
+	 * Pass NULL for the view here — at this point no chat views exist
+	 * yet (chat windows are constructed AFTER prefs_read in fe_init).
+	 * The recompute-stamp-width / re-grow-indent paths inside the setter
+	 * are view-conditioned, so NULL is a clean format-only update. */
+    hx_chat_view_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
 }
 
 void

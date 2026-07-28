@@ -126,7 +126,7 @@
 
 /* xtext autocopy controls — Settings → Advanced → Auto Copy
  * Behavior. Three independent toggles for the drag-end clipboard
- * behaviour. See xtext.h:gtk_xtext_set_autocopy_* for the per-field
+ * behaviour. See chat_view.h:hx_chat_view_set_autocopy_* for the per-field
  * semantics. */
 #define CFG_AUTOCOPY_TEXT "AUTOCOPYTEXT"
 #define CFG_AUTOCOPY_STAMP "AUTOCOPYSTAMP"

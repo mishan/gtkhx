@@ -578,7 +578,7 @@ extern gboolean hx_news_file_extract (const guint8 *frame, gsize frame_len, char
  * name, no colon found, or a name longer than the 31-byte Hotline
  * nick cap (lines like "Subject Changed to: X" or "https://..."
  * pass through unsplit). Callers should fall back to passing the
- * whole line through gtk_xtext_append unchanged.
+ * whole line through hx_chat_view_append unchanged.
  *
  * The name length cap is intentional: it lets us reliably skip
  * URLs and other long colon-containing prose that isn't a chat

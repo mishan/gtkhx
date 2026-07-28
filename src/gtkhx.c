@@ -64,7 +64,6 @@
 #include "voice_model.h"
 #endif
 #include "tray.h"
-#include "xtext.h"
 #include "sound_events.h"
 #include "options.h"
 #include "xfers.h"
