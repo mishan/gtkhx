@@ -21,6 +21,7 @@
     - Icon display next to speaker (toggleable)
     - Speaker grouping, so <Nick> doesn't have to keep appearing on every consecutive line
     - Right clicking on a speaker's name or icon will now pop up a "user" popup menu
+    - Chat history can be searched via Ctrl-F
   - Ctrl-U now works to clear any input in the app
   - [Enter] in the Connect dialog now connects
 
