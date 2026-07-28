@@ -68,6 +68,113 @@ fn set_line(buf: &gtk::TextBuffer, s: &str) {
     buf.place_cursor(&buf.end_iter());
 }
 
+/// Wrap the selection in `delim`, or unwrap it if it is already
+/// wrapped; with no selection, insert the pair and sit between them.
+///
+/// Toggling matters more than it looks: without it, Ctrl+B on text you
+/// just bolded gives `****text****`, and the only way back is to hunt
+/// down four asterisks by hand.
+fn wrap_selection(buf: &gtk::TextBuffer, delim: &str) {
+    // GtkTextBuffer offsets are in characters, not bytes.
+    let dlen = delim.chars().count() as i32;
+
+    buf.begin_user_action();
+    match buf.selection_bounds() {
+        Some((mut start, mut end)) => {
+            let text = buf.text(&start, &end, false).to_string();
+            let at = start.offset();
+            let (body, wrapped) = match strip_wrap(&text, delim) {
+                Some(inner) => (inner.to_string(), false),
+                None => (format!("{delim}{text}{delim}"), true),
+            };
+            buf.delete(&mut start, &mut end);
+            buf.insert(&mut start, &body);
+            // Keep the *content* selected either way, so a second press
+            // round-trips exactly rather than drifting by a delimiter.
+            let inner_start = at + if wrapped { dlen } else { 0 };
+            let inner_len = body.chars().count() as i32 - if wrapped { 2 * dlen } else { 0 };
+            buf.select_range(
+                &buf.iter_at_offset(inner_start),
+                &buf.iter_at_offset(inner_start + inner_len),
+            );
+        }
+        None => {
+            let at = buf.cursor_position();
+            let mut it = buf.iter_at_offset(at);
+            buf.insert(&mut it, &format!("{delim}{delim}"));
+            buf.place_cursor(&buf.iter_at_offset(at + dlen));
+        }
+    }
+    buf.end_user_action();
+}
+
+/// The inside of `text` if it is exactly `delim...delim`, else None.
+fn strip_wrap<'a>(text: &'a str, delim: &str) -> Option<&'a str> {
+    let n = delim.len();
+    if text.len() >= 2 * n && text.starts_with(delim) && text.ends_with(delim) {
+        Some(&text[n..text.len() - n])
+    } else {
+        None
+    }
+}
+
+/// Live markdown tinting for the compose box.
+///
+/// Purely a hint: the delimiters are dimmed and their contents shown in
+/// the style they will render as, so you can see that `**this**` took
+/// before you send it. Nothing here changes the text, and the text is
+/// what goes on the wire.
+fn apply_tint(buf: &gtk::TextBuffer) {
+    let tt = buf.tag_table();
+    if tt.lookup("md-delim").is_none() {
+        // `alpha` rather than a fixed grey so the dimming works against
+        // whatever the theme paints the input.
+        buf.create_tag(Some("md-delim"), &[("alpha", &(110u32 << 8))]);
+        buf.create_tag(Some("md-bold"), &[("weight", &700i32)]);
+        buf.create_tag(
+            Some("md-italic"),
+            &[("style", &gtk::pango::Style::Italic)],
+        );
+        buf.create_tag(Some("md-code"), &[("family", &"monospace")]);
+    }
+
+    let (start, end) = buf.bounds();
+    for t in ["md-delim", "md-bold", "md-italic", "md-code"] {
+        buf.remove_tag_by_name(t, &start, &end);
+    }
+
+    let text = buf.text(&start, &end, false).to_string();
+    if text.is_empty() {
+        return;
+    }
+    // GtkTextBuffer indexes by character; the scanner reports bytes.
+    let char_of: std::collections::HashMap<usize, i32> = text
+        .char_indices()
+        .enumerate()
+        .map(|(ci, (bi, _))| (bi, ci as i32))
+        .chain(std::iter::once((text.len(), text.chars().count() as i32)))
+        .collect();
+
+    for sp in hxchat_layout::scan_delims(&text) {
+        let (Some(&a), Some(&b)) = (char_of.get(&sp.start), char_of.get(&sp.end)) else {
+            continue;
+        };
+        let (ia, ib) = (buf.iter_at_offset(a), buf.iter_at_offset(b));
+        if sp.delim {
+            buf.apply_tag_by_name("md-delim", &ia, &ib);
+            continue;
+        }
+        let name = if sp.attrs.contains(hxchat_layout::Attrs::BOLD) {
+            "md-bold"
+        } else if sp.attrs.contains(hxchat_layout::Attrs::CODE) {
+            "md-code"
+        } else {
+            "md-italic"
+        };
+        buf.apply_tag_by_name(name, &ia, &ib);
+    }
+}
+
 fn on_key(
     view: &gtk::TextView,
     sess: *mut c_void,
@@ -84,6 +191,21 @@ fn on_key(
         // Ctrl chords are exclusive — no send/complete/history under Ctrl.
         if keyval == Key::k || keyval == Key::K {
             unsafe { create_connect_window(ptr::null_mut(), sess) };
+            return glib::Propagation::Stop;
+        }
+        // Markdown compose affordances. These only touch the text you
+        // are typing: markdown is transmitted literally (the Hotline
+        // wire format has no styling concept at all), so `**bold**`
+        // goes out as `**bold**` and other GtkHx clients render it.
+        let shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+        let delim = match keyval {
+            Key::b | Key::B if !shift => Some("**"),
+            Key::i | Key::I if !shift => Some("*"),
+            Key::c | Key::C if shift => Some("`"),
+            _ => None,
+        };
+        if let Some(d) = delim {
+            wrap_selection(&buf, d);
             return glib::Propagation::Stop;
         }
         return glib::Propagation::Proceed;
@@ -218,4 +340,8 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
         }
     });
     tv.add_controller(ctrl);
+
+    // Live markdown tinting. `changed` rather than a key handler, so
+    // paste, emoji typeahead and history recall all tint too.
+    tv.buffer().connect_changed(apply_tint);
 }

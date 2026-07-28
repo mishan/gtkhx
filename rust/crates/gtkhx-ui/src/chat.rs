@@ -133,8 +133,12 @@ unsafe fn build_content(sess: *mut Session) -> *mut gtk::ffi::GtkWidget {
     inputframe.set_child(Some(&input_hbox));
     inputframe.set_vexpand(false);
 
-    // Chat column: output over input, under the subject bar.
+    // Chat column: find bar over output over input, under the subject
+    // bar. The bar is None with the xtext backend, which cannot search.
     let vstack = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    if let Some(bar) = crate::chat_find::build(&output, &vstack) {
+        vstack.append(&bar);
+    }
     vstack.append(&outputframe);
     vstack.append(&inputframe);
 

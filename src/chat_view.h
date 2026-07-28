@@ -212,6 +212,37 @@ void hx_chat_view_media_set_texture (GtkWidget *view, HxChatMark *mark,
 void hx_chat_view_media_set_animation (GtkWidget *view, HxChatMark *mark,
                                        GArray *frames);
 
+/* ---- in-buffer search ----------------------------------------------- *
+ *
+ * Only the hxchat backend implements these; with xtext they are no-ops
+ * and `hx_chat_view_can_search` returns FALSE, which is how the find bar
+ * knows to stay hidden.
+ *
+ * xtext does carry a `gtk_xtext_search` (xtext.c:5190) — a GRegex engine
+ * plus a `search_found` list threaded through the entry chain — but
+ * nothing in GtkHx has ever called it. It came with the HexChat
+ * vendoring and has never run under GTK 4. Wiring it up would mean
+ * debugging a dead subsystem that C5 deletes, so it is left alone. */
+gboolean hx_chat_view_can_search (GtkWidget *view);
+
+/* Run `needle` over the whole scrollback and select the first hit at or
+ * below the viewport. An empty or NULL needle clears the search.
+ *
+ * `n_matches` and `current` are out-parameters for the find bar's
+ * readout; `current` is 1-based, or 0 when nothing is current. Either
+ * may be NULL. */
+void hx_chat_view_search (GtkWidget *view, const char *needle,
+                          gboolean case_sensitive,
+                          guint *n_matches, guint *current);
+
+/* Step to the next (dir > 0) or previous (dir < 0) match, wrapping at
+ * both ends, and scroll it into view. */
+void hx_chat_view_search_step (GtkWidget *view, int dir,
+                               guint *n_matches, guint *current);
+
+/* Drop the query and its highlights. */
+void hx_chat_view_search_clear (GtkWidget *view);
+
 G_END_DECLS
 
 #endif /* GTKHX_CHAT_VIEW_H */

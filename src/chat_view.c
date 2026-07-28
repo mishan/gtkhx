@@ -84,6 +84,12 @@ extern void hx_chat_view_impl_set_stamp_format (GtkWidget *w, const char *fmt);
  * typed link-activated signal. */
 extern void hx_chat_view_impl_set_urlcheck_function (
     GtkWidget *w, int (*fn) (GtkWidget *view, char *word));
+extern void hx_chat_view_impl_search (GtkWidget *w, const char *needle,
+                                      int case_sensitive, guint *n_matches,
+                                      guint *current);
+extern void hx_chat_view_impl_search_step (GtkWidget *w, int dir,
+                                           guint *n_matches, guint *current);
+extern void hx_chat_view_impl_search_clear (GtkWidget *w);
 extern GtkAdjustment *hx_chat_view_impl_get_vadjustment (GtkWidget *w);
 extern void hx_chat_view_impl_refresh (GtkWidget *w);
 extern void hx_chat_view_impl_clear (GtkWidget *w);
@@ -507,4 +513,53 @@ hx_chat_view_media_set_animation (GtkWidget *view, HxChatMark *mark,
         return;
     }
     gtk_xtext_media_set_animation (xbuf (view), ent_of (mark), frames);
+}
+
+/* ---- in-buffer search ------------------------------------------------ */
+
+gboolean
+hx_chat_view_can_search (GtkWidget *view)
+{
+    return is_hxchat (view);
+}
+
+void
+hx_chat_view_search (GtkWidget *view, const char *needle,
+                     gboolean case_sensitive, guint *n_matches, guint *current)
+{
+    if (n_matches) {
+        *n_matches = 0;
+    }
+    if (current) {
+        *current = 0;
+    }
+    if (!is_hxchat (view)) {
+        return;
+    }
+    hx_chat_view_impl_search (view, needle ? needle : "", case_sensitive,
+                              n_matches, current);
+}
+
+void
+hx_chat_view_search_step (GtkWidget *view, int dir, guint *n_matches,
+                          guint *current)
+{
+    if (n_matches) {
+        *n_matches = 0;
+    }
+    if (current) {
+        *current = 0;
+    }
+    if (!is_hxchat (view)) {
+        return;
+    }
+    hx_chat_view_impl_search_step (view, dir, n_matches, current);
+}
+
+void
+hx_chat_view_search_clear (GtkWidget *view)
+{
+    if (is_hxchat (view)) {
+        hx_chat_view_impl_search_clear (view);
+    }
 }

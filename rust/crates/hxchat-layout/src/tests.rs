@@ -1959,3 +1959,317 @@ fn selected_rows_keeps_a_genuinely_empty_row() {
     assert_eq!(rows[1], (1, String::new()));
     assert_eq!(b.selected_text(&sel), "above\n\nbelow");
 }
+
+// ---------------------------------------------------------------- search
+
+use crate::search::{self, SearchState};
+
+#[test]
+fn find_all_is_literal_and_non_overlapping() {
+    assert_eq!(search::find_all("aaaa", "aa", true), vec![(0, 2), (2, 4)]);
+    assert_eq!(search::find_all("abcabc", "abc", true), vec![(0, 3), (3, 6)]);
+    assert_eq!(search::find_all("abc", "", true), vec![]);
+    assert_eq!(search::find_all("", "abc", true), vec![]);
+    // No regex vocabulary: metacharacters are just characters.
+    assert_eq!(search::find_all("a.c", ".", true), vec![(1, 2)]);
+    assert_eq!(search::find_all("abc", ".", true), vec![]);
+}
+
+#[test]
+fn find_all_case_insensitive_returns_offsets_into_the_original() {
+    // The trap this is written to avoid: lowercasing the haystack and
+    // searching *that* gives offsets into a string the caller doesn't
+    // have, because lowercasing can change byte length. U+0130 (İ) is
+    // two bytes and lowercases to two *chars* (i + U+0307), so any
+    // offset past it in a lowercased copy is wrong for the original.
+    let hay = "İstanbul and stanbul";
+    let hits = search::find_all(hay, "STANBUL", false);
+    assert_eq!(hits.len(), 2);
+    for (a, b) in hits {
+        assert_eq!(&hay[a..b].to_lowercase(), "stanbul", "offsets must index the original");
+    }
+
+    // Same-length folds work in both directions.
+    assert_eq!(search::find_all("Grüße", "GRÜ", false), vec![(0, 4)]);
+    assert_eq!(search::find_all("ÉCOLE", "école", false), vec![(0, 6)]);
+}
+
+#[test]
+fn find_all_never_splits_a_codepoint() {
+    // Every returned offset has to be a char boundary, or the renderer
+    // slices off one and panics into GTK.
+    let hay = "aé—b日本語aé";
+    for needle in ["a", "é", "—", "本", "aé"] {
+        for cs in [true, false] {
+            for (a, b) in search::find_all(hay, needle, cs) {
+                assert!(hay.is_char_boundary(a), "{needle:?} start {a}");
+                assert!(hay.is_char_boundary(b), "{needle:?} end {b}");
+            }
+        }
+    }
+}
+
+#[test]
+fn search_cursor_wraps_in_both_directions() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for t in ["needle one", "nothing", "needle two", "needle three"] {
+        b.append(Message::system(ParsedText::plain(t)), &m);
+    }
+    b.reindex();
+
+    let hits = b.search("needle", false);
+    assert_eq!(hits.len(), 3, "one per matching row");
+
+    let mut st = SearchState::new();
+    st.set_results("needle", false, hits);
+    assert_eq!(st.len(), 3);
+    assert!(st.current().is_none(), "no match is current until stepped");
+
+    // Forward from nothing selects the first, then wraps at the end.
+    assert_eq!(st.step(1), Some(st.matches()[0]));
+    assert_eq!(st.ordinal(), Some(1));
+    st.step(1);
+    st.step(1);
+    assert_eq!(st.ordinal(), Some(3));
+    st.step(1);
+    assert_eq!(st.ordinal(), Some(1), "forward wraps to the first");
+
+    // Backward from the first wraps to the last.
+    st.step(-1);
+    assert_eq!(st.ordinal(), Some(3));
+
+    // Backward from nothing selects the last.
+    let mut st2 = SearchState::new();
+    st2.set_results("needle", false, b.search("needle", false));
+    assert_eq!(st2.step(-1), st2.matches().last().copied());
+}
+
+#[test]
+fn search_walks_rows_in_reading_order_including_gutters() {
+    // Matches have to come back in the order the eye reads them —
+    // gutter before body, row by row — or stepping through them jumps
+    // around the screen.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for (nick, body) in [("<sam>", "hello sam"), ("<pat>", "sam said hi")] {
+        b.append(
+            Message {
+                kind: crate::message::MessageKind::Live,
+                timestamp: 0,
+                speaker: None,
+                gutter: Some(ParsedText::plain(nick)),
+                blocks: vec![Block::Text(ParsedText::plain(body))],
+                flags: MessageFlagsNone::NONE,
+            },
+            &m,
+        );
+    }
+    b.reindex();
+
+    let hits = b.search("sam", false);
+    let shape: Vec<_> = hits
+        .iter()
+        .map(|h| (b.row_of(h.message).unwrap(), h.source, h.start))
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            (0, LineSource::Gutter, 1),  // <sam>
+            (0, LineSource::Block(0), 6), // hello sam
+            (1, LineSource::Block(0), 0), // sam said hi
+        ]
+    );
+}
+
+#[test]
+fn search_reaches_rows_that_were_never_laid_out() {
+    // Searching the layout instead of the model would only ever find
+    // what you had already scrolled to, which defeats the point.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..500 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    b.reindex();
+    // Lay out only the first handful.
+    for r in 0..5 {
+        b.ensure_layout(r, &m);
+    }
+    let hits = b.search("line 499", false);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(b.row_of(hits[0].message), Some(499));
+}
+
+#[test]
+fn seek_from_starts_at_the_viewport_rather_than_the_top() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..20 {
+        b.append(
+            Message::system(ParsedText::plain(if i % 5 == 0 { "hit" } else { "miss" })),
+            &m,
+        );
+    }
+    b.reindex();
+
+    let mut st = SearchState::new();
+    st.set_results("hit", false, b.search("hit", false));
+    assert_eq!(st.len(), 4); // rows 0, 5, 10, 15
+
+    st.seek_from(|id| b.row_of(id), 7);
+    assert_eq!(b.row_of(st.current().unwrap().message), Some(10));
+
+    // Everything above the viewport: fall back to the last match, since
+    // scrollback's interesting end is the recent one.
+    st.seek_from(|id| b.row_of(id), 18);
+    assert_eq!(b.row_of(st.current().unwrap().message), Some(15));
+}
+
+#[test]
+fn reveal_leaves_an_already_visible_row_alone() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..200 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    b.reindex();
+    for r in 0..200 {
+        b.ensure_layout(r, &m);
+    }
+
+    let vh = 100u32;
+    // Park the viewport exactly on a row boundary so row 40 is *fully*
+    // inside it — "visible" means the whole row, and picking an offset
+    // at random lands on a row straddling the top edge.
+    let top40 = b.index_mut().offset_of(40);
+    b.scroll_to(top40, vh, 0);
+    let before = b.scroll_offset(vh);
+    assert_eq!(before, top40);
+
+    let id = b.id_at(40).unwrap();
+    b.reveal(id, vh, &m);
+    assert_eq!(b.scroll_offset(vh), before, "fully visible row must not scroll");
+
+    // A row far away gets centred.
+    let far = b.id_at(190).unwrap();
+    b.reveal(far, vh, &m);
+    let after = b.scroll_offset(vh);
+    assert_ne!(after, before);
+    let top = b.index_mut().offset_of(190);
+    assert!(
+        top >= after && top < after + vh as u64,
+        "row 190 (at {top}) must be inside [{after}, {})",
+        after + vh as u64
+    );
+}
+
+#[test]
+fn reveal_pulls_a_half_visible_row_fully_into_view() {
+    // The converse of the case above, and the reason "visible" is the
+    // whole row rather than any part of it: stepping onto a match whose
+    // row is clipped by the top edge should show you the whole row, not
+    // leave you reading the bottom half of it.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for i in 0..200 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    b.reindex();
+    for r in 0..200 {
+        b.ensure_layout(r, &m);
+    }
+
+    let vh = 100u32;
+    let top40 = b.index_mut().offset_of(40);
+    let h40 = b.index_mut().height_at(40) as u64;
+    assert!(h40 > 1, "need a row with height to clip");
+
+    // Scroll so row 40 is cut in half by the top edge.
+    b.scroll_to(top40 + h40 / 2, vh, 0);
+    b.reveal(b.id_at(40).unwrap(), vh, &m);
+
+    let after = b.scroll_offset(vh);
+    assert!(
+        top40 >= after && top40 + h40 <= after + vh as u64,
+        "row 40 ({top40}..{}) must be wholly inside [{after}, {})",
+        top40 + h40,
+        after + vh as u64
+    );
+}
+
+#[test]
+fn scan_delims_reports_source_offsets_and_respects_flanking() {
+    use crate::markdown::scan_delims;
+
+    let src = "a **bold** b";
+    let got = scan_delims(src);
+    let shape: Vec<_> = got
+        .iter()
+        .map(|s| (&src[s.start..s.end], s.attrs, s.delim))
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            ("**", Attrs::BOLD, true),
+            ("bold", Attrs::BOLD, false),
+            ("**", Attrs::BOLD, true),
+        ]
+    );
+
+    // The flanking rules are shared with the renderer, so arithmetic is
+    // left alone here too — this is the one thing the tinting must not
+    // get wrong, since it would light up ordinary prose.
+    assert!(scan_delims("2 * 3 * 4").is_empty());
+    assert!(scan_delims("a * b *").is_empty());
+    // snake_case survives, same as in the renderer.
+    assert!(scan_delims("some_var_name").is_empty());
+    // Backslash hides a delimiter from tinting.
+    assert!(scan_delims(r"\*not em\*").is_empty());
+}
+
+#[test]
+fn scan_delims_agrees_with_the_renderer_on_what_is_styled() {
+    // The two are separate passes (one reports source offsets, one
+    // rendered offsets), so this pins the cases where they must agree:
+    // whether a delimiter is live at all, and what attribute it carries.
+    use crate::markdown::{parse_inline, scan_delims};
+    for src in [
+        "**bold**",
+        "*it*",
+        "`code`",
+        "plain text",
+        "2 * 3 * 4",
+        "a **b** c *d* e",
+        "snake_case_word",
+    ] {
+        let rendered = parse_inline(src);
+        let styled_attrs: std::collections::BTreeSet<u8> = rendered
+            .spans
+            .iter()
+            .map(|s| s.style.attrs.0)
+            .filter(|a| *a != 0)
+            .collect();
+        let tinted_attrs: std::collections::BTreeSet<u8> = scan_delims(src)
+            .iter()
+            .filter(|s| !s.delim)
+            .map(|s| s.attrs.0)
+            .collect();
+        assert_eq!(
+            styled_attrs, tinted_attrs,
+            "{src:?}: renderer and tinting disagree on what is styled"
+        );
+    }
+}

@@ -25,6 +25,7 @@ pub mod about;
 pub mod agreement;
 pub mod bookmark_store;
 pub mod bookmarks;
+pub mod chat_find;
 pub mod cipher_vocab;
 pub mod connect;
 // the Settings form. 10 of 11 pages are Rust and wired live via the
