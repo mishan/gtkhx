@@ -656,6 +656,37 @@ what the avatar gutter needs.
 
 ---
 
+## 6a. Parity ledger (C5 readiness)
+
+The coexistence period ends when the new backend can be defaulted, so the
+question that matters is "what does xtext still do that hxchat doesn't?".
+`chat_view.h` is the whole parity surface — it was built from the actual
+call sites, so anything not in it is dead xtext API and irrelevant.
+
+**Done.** Construction, font, palette, word wrap, scrollback cap (with
+xtext's `> 2` semantics), indent mode and cap, timestamp column and
+format, the scroll adjustment, refresh, clear, append, two-column
+append, insert-before-a-mark, remove, media rows with real textures and
+animation, drag-select and copy, autocopy (all three prefs), the indent
+separator, zoom, links, the context menu, and `word-click` emission —
+which is what keeps the three existing C handlers working unchanged.
+
+**Known gaps, in rough order of how much they'd be missed:**
+
+| Gap | Notes |
+|---|---|
+| Marker line | xtext tracks a last-read marker (`gtk_xtext_reset_marker_pos`, `_moveto_marker_pos`, `_check_marker_visibility`). Not exposed through `chat_view.h` and not currently called from C, so it is dead today — but it was a real feature and someone will notice its absence if it is ever rewired. |
+| In-buffer search | `gtk_xtext_search` / `lastlog`. Also not routed through `chat_view.h` today. C3 item, deferred. |
+| Markdown rendering | The parser exists and is tested; nothing renders it, because the compat path parses mIRC only. Enabling it changes what chat *looks like*, which is a deliberate no during the A/B (§6, C2–C5 must be pixel-identical). |
+| `set_urlcheck_function` | Accepted and ignored. The new backend autodetects with `gtkurl_scan` directly rather than asking a per-view classifier. Same scheme list, so the behaviour matches; the callback is simply redundant. |
+| Selection auto-scroll | Dragging past the top/bottom edge does not scroll the view. xtext has this (badly — see the `select_end_y` note in CLAUDE.md); the `GtkTickCallback` approach in §3.6 is the fix and is not written yet. |
+| Word-select / line-select | xtext double-click selects a word, triple-click a line. Not implemented. |
+
+**Not gaps, deliberately:** `set_show_separator` / `set_thin_separator` /
+`set_error_function` / `gtk_xtext_foreach` / the `buffer_new`/`_free`/
+`_show` trio are all xtext API with no caller in this tree; they die with
+xtext rather than being reproduced.
+
 ## 7. Testing
 
 - **Headless unit tests** (`cargo test`, no display) in `hxchat-layout`: wrap
