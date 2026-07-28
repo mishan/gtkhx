@@ -1108,9 +1108,8 @@ fn selection_within_one_row() {
     assert_eq!(
         b.row_selection(0, &sel),
         RowSelection::Partial {
-            source: LineSource::Block(0),
-            start: 1,
-            end: 4
+            start: (LineSource::Block(0), 1),
+            end: (LineSource::Block(0), 4),
         }
     );
     assert_eq!(b.row_selection(1, &sel), RowSelection::None);
@@ -1533,5 +1532,118 @@ fn a_decoded_image_grows_its_row_without_moving_the_anchor() {
         offset_after > offset_before,
         "the image grew above the viewport, so the anchored row must \
          have moved down in absolute terms ({offset_before} -> {offset_after})"
+    );
+}
+
+// ---- selection across the gutter (the "drag left then up" bug) -------
+
+fn gutter_buf() -> (ChatBuffer, FixedMeasure) {
+    let m = FixedMeasure::new(10);
+    let mut p = params(800);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    for nick in ["<a>", "<b>", "<c>"] {
+        b.append(
+            Message {
+                kind: crate::message::MessageKind::Live,
+                timestamp: 0,
+                speaker: None,
+                gutter: Some(ParsedText::plain(nick)),
+                blocks: vec![Block::Text(ParsedText::plain("hello"))],
+                flags: MessageFlagsNone::NONE,
+            },
+            &m,
+        );
+    }
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    b.reindex();
+    (b, m)
+}
+
+#[test]
+fn dragging_up_into_a_gutter_selects_the_rest_of_that_row() {
+    // The reported bug. Dragging left-then-up puts the *start* of the
+    // selection in row 0's gutter and the end in row 2's body. Row 0
+    // should then be selected from that point in the gutter through the
+    // end of its body — but RowSelection could only name one source, so
+    // it highlighted the gutter and left the body unselected, which
+    // reads as an inverted/partial selection.
+    let (b, _m) = gutter_buf();
+    let r0 = b.id_at(0).unwrap();
+    let r2 = b.id_at(2).unwrap();
+    let sel = Selection::new(
+        // anchor: body of the last row (drag started here)
+        Caret { message: r2, source: LineSource::Block(0), offset: 3 },
+        // focus: gutter of the first row (dragged left and up)
+        Caret { message: r0, source: LineSource::Gutter, offset: 1 },
+    );
+    let text = b.selected_text(&sel);
+    assert!(
+        text.contains("hello"),
+        "row 0's body must be selected too, got {text:?}"
+    );
+    assert!(text.starts_with("a>"), "should start mid-gutter, got {text:?}");
+}
+
+#[test]
+fn same_row_gutter_to_body_orders_by_source_not_offset() {
+    // Within one row the gutter precedes the body, but the two offset
+    // spaces are unrelated — comparing them numerically (which is what
+    // the tie-break did) can invert the selection.
+    let (b, _m) = gutter_buf();
+    let id = b.id_at(0).unwrap();
+    let from_gutter = Caret { message: id, source: LineSource::Gutter, offset: 2 };
+    let into_body = Caret { message: id, source: LineSource::Block(0), offset: 1 };
+
+    let forward = Selection::new(from_gutter, into_body);
+    let backward = Selection::new(into_body, from_gutter);
+    assert_eq!(
+        b.selected_text(&forward),
+        b.selected_text(&backward),
+        "dragging the same span in either direction must select the same text"
+    );
+    let t = b.selected_text(&forward);
+    assert!(t.starts_with('>'), "starts partway into the gutter, got {t:?}");
+    assert!(t.ends_with('h'), "ends one char into the body, got {t:?}");
+}
+
+#[test]
+fn a_row_with_no_gutter_still_reserves_the_stamp_column() {
+    // Info lines (`[hx] …`) are appended with no nick column at all.
+    // They still carry a timestamp, so the gutter has to be wide enough
+    // for it — otherwise the body starts at 0 and the stamp draws
+    // underneath the text.
+    //
+    // The rendering half of this was the actual reported bug: the view
+    // drew the stamp only when a Gutter line box existed, so info lines
+    // never got one.
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    p.stamp_width = 90;
+
+    let bare = Message::system(ParsedText::plain("connecting..."));
+    let l = layout_message(&bare, &p, LayoutGeneration::default(), &m);
+    assert_eq!(
+        l.natural_indent, 90,
+        "a gutterless row must still reserve the stamp column"
+    );
+
+    // And a row *with* a nick reserves stamp + nick, not just the nick.
+    let with_nick = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain("<alice>")), // 70px
+        blocks: vec![Block::Text(ParsedText::plain("hi"))],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l2 = layout_message(&with_nick, &p, LayoutGeneration::default(), &m);
+    assert!(
+        l2.natural_indent >= 90 + 70,
+        "stamp and nick share the gutter, got {}",
+        l2.natural_indent
     );
 }

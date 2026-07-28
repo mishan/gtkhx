@@ -701,6 +701,26 @@ impl HxChatView {
                 continue;
             };
 
+            // The timestamp belongs to the *row*, not to the gutter.
+            //
+            // Tying it to the gutter line box was wrong twice over:
+            // info lines (`[hx] …`, appended with no nick column) have
+            // no gutter at all and so never got a stamp, and xtext draws
+            // it for every entry whenever auto_indent && time_stamp
+            // regardless of whether there is any left text. Drawn once
+            // here, against the row's own top edge.
+            if show_stamp && row_top + i64::from(layout.height) >= 0 && row_top <= i64::from(height)
+            {
+                if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
+                    draw_layout.set_attributes(None);
+                    draw_layout.set_text(&stamp);
+                    snapshot.save();
+                    snapshot.translate(&gtk4::graphene::Point::new(0.0, row_top as f32));
+                    snapshot.append_layout(&draw_layout, &muted);
+                    snapshot.restore();
+                }
+            }
+
             for line in &layout.lines {
                 let y = row_top + i64::from(line.y);
                 if y + i64::from(line.height) < 0 || y > i64::from(height) {
@@ -755,21 +775,9 @@ impl HxChatView {
                     continue;
                 }
 
-                // x comes straight from the line box now — the layout
+                // x comes straight from the line box — the layout
                 // engine right-aligns the gutter, so the view no longer
-                // has its own opinion about where it goes. The timestamp
-                // is the one thing drawn outside a line box, at the far
-                // left of the same band.
-                if line.source == LineSource::Gutter && show_stamp {
-                    if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
-                        draw_layout.set_attributes(None);
-                        draw_layout.set_text(&stamp);
-                        snapshot.save();
-                        snapshot.translate(&gtk4::graphene::Point::new(0.0, y as f32));
-                        snapshot.append_layout(&draw_layout, &muted);
-                        snapshot.restore();
-                    }
-                }
+                // has its own opinion about where it goes.
                 let x = line.x as f32;
 
                 // Selection band behind the text, then the text with
@@ -781,7 +789,16 @@ impl HxChatView {
                     .as_ref()
                     .map(|s| buf.row_selection(row, s))
                     .unwrap_or(RowSelection::None);
-                let hl = selected_range_in_line(&row_sel, line.source, &line.range);
+                // Resolved by the buffer, not re-derived here: one
+                // implementation for what is highlighted and what gets
+                // copied, so the two cannot drift apart.
+                let hl = buf
+                    .covered_range(row, line.source, &row_sel)
+                    .and_then(|r| {
+                        let s = r.start.max(line.range.start);
+                        let e = r.end.min(line.range.end);
+                        if s < e { Some((s, e)) } else { None }
+                    });
                 if let Some((hs, he)) = hl {
                     let pre = slice.get(..hs.saturating_sub(line.range.start)).unwrap_or("");
                     let mid = slice
@@ -1204,38 +1221,6 @@ fn autocopy_enabled() -> bool {
     prefs::AUTOCOPY_TEXT.with(|c| c.get())
 }
 
-/// Intersect a row's selection with one visual line.
-///
-/// Returns absolute byte offsets into the source text, or `None` when
-/// this line has nothing selected. Splitting it out keeps the snapshot
-/// loop readable and makes the "whole row" case explicit — an `All`
-/// selection covers every line of every source, including the gutter.
-fn selected_range_in_line(
-    row_sel: &RowSelection,
-    source: LineSource,
-    line: &std::ops::Range<usize>,
-) -> Option<(usize, usize)> {
-    match row_sel {
-        RowSelection::None => None,
-        RowSelection::All => Some((line.start, line.end)),
-        RowSelection::Partial {
-            source: s,
-            start,
-            end,
-        } => {
-            if *s != source {
-                return None;
-            }
-            let hs = (*start).max(line.start);
-            let he = (*end).min(line.end);
-            if hs < he {
-                Some((hs, he))
-            } else {
-                None
-            }
-        }
-    }
-}
 
 // ---- zoom (scoping §3.7) --------------------------------------------
 

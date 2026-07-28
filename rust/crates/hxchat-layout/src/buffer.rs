@@ -697,27 +697,88 @@ impl ChatBuffer {
         if row > sr && row < er {
             return RowSelection::All;
         }
-        // A boundary row: only the named source is partially covered.
-        let (source, from, to) = if sr == er {
-            if start.source != end.source {
-                // Spanning sources within one row (gutter → body):
-                // treat as whole-row, which is what the user means.
-                return RowSelection::All;
-            }
-            (start.source, start.offset, end.offset)
+        // A boundary row. The covered span can begin in one source and
+        // end in another (gutter → body), so both endpoints are carried
+        // and the caller resolves per source.
+        let last = self.last_source(row);
+        let (from, to) = if sr == er {
+            ((start.source, start.offset), (end.source, end.offset))
         } else if row == sr {
-            let text_len = self
-                .source_text(row, start.source)
-                .map_or(0, |t| t.len());
-            (start.source, start.offset, text_len)
+            // Starts here, runs to the end of the row.
+            (
+                (start.source, start.offset),
+                (last, self.source_text(row, last).map_or(0, |t| t.len())),
+            )
         } else {
-            (end.source, 0, end.offset)
+            // Ends here, having begun above.
+            ((self.first_source(row), 0), (end.source, end.offset))
         };
-        let (from, to) = if from <= to { (from, to) } else { (to, from) };
         RowSelection::Partial {
-            source,
             start: from,
             end: to,
+        }
+    }
+
+    /// The row's sources in visual order: gutter first, then blocks.
+    pub fn sources_of(&self, row: usize) -> Vec<LineSource> {
+        let mut out = Vec::new();
+        let Some(msg) = self.message_at(row) else {
+            return out;
+        };
+        if msg.gutter.as_ref().is_some_and(|g| !g.text.is_empty()) {
+            out.push(LineSource::Gutter);
+        }
+        for i in 0..msg.blocks.len() {
+            out.push(LineSource::Block(i));
+        }
+        out
+    }
+
+    fn first_source(&self, row: usize) -> LineSource {
+        self.sources_of(row)
+            .first()
+            .copied()
+            .unwrap_or(LineSource::Block(0))
+    }
+
+    fn last_source(&self, row: usize) -> LineSource {
+        self.sources_of(row)
+            .last()
+            .copied()
+            .unwrap_or(LineSource::Block(0))
+    }
+
+    /// The byte range of `source` covered by a row selection, if any.
+    ///
+    /// The one place that resolves a possibly-cross-source `Partial`
+    /// against a single text, so the view and `selected_text` cannot
+    /// disagree about what is highlighted versus what gets copied.
+    pub fn covered_range(
+        &self,
+        row: usize,
+        source: LineSource,
+        sel: &RowSelection,
+    ) -> Option<std::ops::Range<usize>> {
+        let len = self.source_text(row, source).map_or(0, |t| t.len());
+        match sel {
+            RowSelection::None => None,
+            RowSelection::All => Some(0..len),
+            RowSelection::Partial { start, end } => {
+                let rank = crate::select::source_rank(source);
+                let (sr, so) = *start;
+                let (er, eo) = *end;
+                let (sr, er) = (crate::select::source_rank(sr), crate::select::source_rank(er));
+                if rank < sr || rank > er {
+                    return None;
+                }
+                let from = if rank == sr { so.min(len) } else { 0 };
+                let to = if rank == er { eo.min(len) } else { len };
+                if from < to {
+                    Some(from..to)
+                } else {
+                    None
+                }
+            }
         }
     }
 
@@ -735,28 +796,27 @@ impl ChatBuffer {
             if row > sr {
                 out.push('\n');
             }
-            match self.row_selection(row, sel) {
-                RowSelection::None => {}
-                RowSelection::All => {
-                    if let Some(m) = self.message_at(row) {
-                        // The gutter is part of what the user sees, so
-                        // it is part of what they copy.
-                        if let Some(g) = &m.gutter {
-                            if !g.text.is_empty() {
-                                out.push_str(&g.text);
-                                out.push(' ');
-                            }
-                        }
-                        out.push_str(&m.to_plain_text());
-                    }
+            // Walk the row's sources in visual order and take whatever
+            // each contributes. One path for every case, so the gutter
+            // is copied when it is selected and only then.
+            let rsel = self.row_selection(row, sel);
+            let mut first_in_row = true;
+            for source in self.sources_of(row) {
+                let Some(range) = self.covered_range(row, source, &rsel) else {
+                    continue;
+                };
+                let Some(t) = self.source_text(row, source) else {
+                    continue;
+                };
+                let Some(slice) = t.get(range) else { continue };
+                if slice.is_empty() {
+                    continue;
                 }
-                RowSelection::Partial { source, start, end } => {
-                    if let Some(t) = self.source_text(row, source) {
-                        if let Some(slice) = t.get(start..end) {
-                            out.push_str(slice);
-                        }
-                    }
+                if !first_in_row {
+                    out.push(' ');
                 }
+                out.push_str(slice);
+                first_in_row = false;
             }
         }
         out
