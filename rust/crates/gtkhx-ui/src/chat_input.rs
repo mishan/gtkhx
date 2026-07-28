@@ -5,6 +5,8 @@
 //! `GtkEventControllerKey` on the input view. The bindings:
 //!
 //!   - **Ctrl+K** → open the Connect dialog.
+//!   - **Ctrl+U** → discard the draft (undoable in one step).
+//!   - **Ctrl+B / Ctrl+I / Ctrl+Shift+C** → wrap the selection in markdown.
 //!   - **Shift+Return** → newline (let the view's default insert run).
 //!   - **Return** → record the line in history, dispatch it
 //!     (`hotline_client_input`, which routes `/commands` and chat), clear.
@@ -210,6 +212,27 @@ fn on_key(
         // Ctrl chords are exclusive — no send/complete/history under Ctrl.
         if keyval == Key::k || keyval == Key::K {
             unsafe { create_connect_window(ptr::null_mut(), sess) };
+            return glib::Propagation::Stop;
+        }
+        // Ctrl+U discards the draft, as it does in a shell and in most
+        // chat clients.
+        //
+        // The whole buffer, not readline's kill-to-start-of-line: this
+        // is a compose box, and Shift+Return means a multi-line draft is
+        // one message rather than several lines. Clearing to the cursor
+        // would leave half a message behind, which is not what anyone
+        // pressing it wants.
+        //
+        // Wrapped in a user action so Ctrl+Z brings it back in one step —
+        // a discard with no undo is a bad trade for a key this easy to
+        // hit by accident.
+        if keyval == Key::u || keyval == Key::U {
+            let (mut start, mut end) = buf.bounds();
+            if start != end {
+                buf.begin_user_action();
+                buf.delete(&mut start, &mut end);
+                buf.end_user_action();
+            }
             return glib::Propagation::Stop;
         }
         // Markdown compose affordances. These only touch the text you
