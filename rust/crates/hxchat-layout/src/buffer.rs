@@ -885,10 +885,12 @@ impl ChatBuffer {
     /// icon found nothing at all. Asking the layout directly keeps the
     /// clickable area and the painted area the same rectangle by
     /// construction.
-    pub fn avatar_at(&mut self, x: i32, y: u64) -> Option<u16> {
+    pub fn avatar_at(&mut self, x: i32, y: u64) -> Option<(MessageId, u16)> {
         let hit = self.index.locate(y)?;
         let top = self.index.offset_of(hit.row);
-        let av = self.rows.get(hit.row)?.layout.as_ref()?.avatar?;
+        let row = self.rows.get(hit.row)?;
+        let av = row.layout.as_ref()?.avatar?;
+        let id = row.id;
         let local_y = y.checked_sub(top)? as i64;
         let (ax, ay, size) = (av.x as i64, av.y as i64, av.size as i64);
         if (x as i64) >= ax
@@ -896,7 +898,12 @@ impl ChatBuffer {
             && local_y >= ay
             && local_y < ay + size
         {
-            Some(av.uid)
+            // The id comes back with the uid because the caller needs
+            // both and this has already found the row. Making it look
+            // the row up again meant a second borrow of the buffer while
+            // this one was still live — an instant RefCell panic on the
+            // first avatar hover.
+            Some((id, av.uid))
         } else {
             None
         }

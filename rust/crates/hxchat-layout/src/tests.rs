@@ -2835,3 +2835,48 @@ fn text_is_centred_against_a_taller_avatar() {
         "line centre {centre} should be near the icon's centre (24)"
     );
 }
+
+#[test]
+fn avatar_at_hits_the_painted_rect_and_returns_its_row() {
+    // Clicking an icon must resolve to the same speaker as clicking the
+    // name. The uid comes back with the message id because the caller
+    // needs both, and looking the row up a second time meant a second
+    // borrow of the buffer while the first was live.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 32;
+    let mut b = ChatBuffer::new(p);
+    let id = b.append(said(7, "misha", "hi", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+
+    let av = b.layout_at(0).unwrap().avatar.expect("head has an avatar");
+    // Dead centre of the painted rect.
+    let hit = b.avatar_at(
+        (av.x + av.size / 2) as i32,
+        (av.y + av.size / 2) as u64,
+    );
+    assert_eq!(hit, Some((id, 7)));
+
+    // Just outside it, on both axes.
+    assert!(b.avatar_at((av.x + av.size + 4) as i32, (av.size / 2) as u64).is_none());
+    assert!(b.avatar_at((av.x + av.size / 2) as i32, (av.size + 4) as u64).is_none());
+}
+
+#[test]
+fn a_continuation_row_has_no_avatar_to_hit() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 32;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(7, "misha", "two", 1001), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    b.ensure_layout(1, &m);
+
+    let top = b.index_mut().offset_of(1);
+    assert!(b.avatar_at(4, top + 2).is_none(), "grouped rows show no icon");
+}

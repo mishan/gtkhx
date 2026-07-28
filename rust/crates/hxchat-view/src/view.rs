@@ -2384,20 +2384,13 @@ impl HxChatView {
             let scroll = imp.buffer.borrow_mut().scroll_offset(height);
             let cx = (x as i32) - PAD_X;
             let cy = ((y as i32) - PAD_Y).max(0) as u64 + scroll;
+            // One borrow, released before anything else touches the
+            // buffer. The first cut chained a borrow() inside an
+            // and_then() on a live borrow_mut(), which is a RefCell
+            // panic the moment the pointer crosses an icon.
             let hit = imp.buffer.borrow_mut().avatar_at(cx, cy);
-            if let Some(uid) = hit {
-                // The row id is what the underline logic keys on; the
-                // avatar has no text to underline, so any id in the row
-                // does — use the one the buffer just hit.
-                let msg = imp
-                    .buffer
-                    .borrow_mut()
-                    .index_mut()
-                    .locate(cy)
-                    .and_then(|h| self.imp_().buffer.borrow().id_at(h.row));
-                if let Some(message) = msg {
-                    return Some(HoverTarget::Nick { message, uid });
-                }
+            if let Some((message, uid)) = hit {
+                return Some(HoverTarget::Nick { message, uid });
             }
         }
 

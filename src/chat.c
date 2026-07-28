@@ -785,8 +785,14 @@ chat_join_body (const char *body, gsize body_len, const char *sender,
     const char *end = body + body_len;
     gboolean first = TRUE;
 
-    while (cur <= end) {
-        const char *nl = (cur < end) ? memchr (cur, '\n', end - cur) : NULL;
+    /* `<`, not `<=`: at cur == end there is nothing left to emit, but
+	 * the !first branch would still have appended a separator — so a
+	 * body ending in '\n' (which broadcasts and many chat lines do)
+	 * gained a trailing blank line. The old per-line loop stopped at
+	 * `< end` too, which is why this only appeared once the lines were
+	 * joined. */
+    while (cur < end) {
+        const char *nl = memchr (cur, '\n', end - cur);
         gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
         const char *seg = cur;
         gsize out_len = seg_len;
@@ -1128,13 +1134,15 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
         first_body_len = 0;
     }
 
-    xprintline_render (gchat->output, e->line, e->body_off + first_body_len,
-                       e->sender_off, e->sender_len, e->body_off,
-                       first_body_len, e->is_info, e->is_self,
-                       HX_CHAT_INFO_COLOR,
-                       chat_speaker_for (e->cid, e->uid,
-                                         e->line + e->sender_off,
-                                         e->sender_len, e->is_self));
+    xprintline_render_parts (gchat->output, e->line + e->sender_off,
+                             e->sender_len, joined ? joined : "",
+                             first_body_len, e->is_info, e->is_self,
+                             HX_CHAT_INFO_COLOR,
+                             chat_speaker_for (e->cid, e->uid,
+                                               e->line + e->sender_off,
+                                               e->sender_len, e->is_self));
+    g_free (joined);
+    joined = NULL;
 
     /* Phase 9.D + 9.E — inline-media row. When the chat carried
 	 * companion CHAT_MEDIA_ID + CHAT_MEDIA_TYPE fields (rcv.c
