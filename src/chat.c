@@ -46,7 +46,7 @@
 #include "inline_media.h"
 #include "gtkutil.h"
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
-#include "xtext.h"
+#include "chat_view.h"
 #include "users.h"
 #ifdef HAVE_VOICE
 #include "voice_panel.h"
@@ -67,16 +67,17 @@
 /* The per-conversation view aggregate. Opaque outside this file (see the
  * forward decl in session.h); moved here so a stray gchat->field access
  * elsewhere is a compile error. It stays C: GTK widget handles + the
- * xtext render cursors (raw textentry* into xtext internals) can't cross
- * into Rust. The Rust-owned handles it holds (chat_history / media_table /
- * userlist) are opaque pointers. */
+ * chat-view render cursors can't cross into Rust. The Rust-owned handles
+ * it holds (chat_history / media_table / userlist) are opaque pointers. */
 /* fogWraith chat-history extension render cursors, grouped.
  * Was five loose gtkhx_chat fields; contained here so their
- * widget-coupled lifetime is one named object. The two textentry*
- * are raw pointers into xtext's internal buffer entries — they stay a
- * C view concern, which is why this render state isn't a Rust
- * sub-model like chat_history / media_table. Embedded in gtkhx_chat
- * (zero-init'd by its g_malloc0); reset to zero on (re)render. */
+ * widget-coupled lifetime is one named object. The two cursors are
+ * HxChatMark handles (chat_view.h) — opaque weak references to rows in
+ * the output view. Chat-view phase C0 made them opaque; they used to be
+ * raw textentry* into xtext's internal buffer, which is what kept this
+ * render state a C view concern rather than a Rust sub-model like
+ * chat_history / media_table. Embedded in gtkhx_chat (zero-init'd by
+ * its g_malloc0); reset to zero on (re)render. */
 struct hx_chat_history_render {
     /* Smallest message_id we've already rendered for this chat. Used
      * as the BEFORE= cursor on "Load older" fetches so the server
@@ -91,18 +92,18 @@ struct hx_chat_history_render {
     /* TRUE while a "Load older" fetch is in-flight; the click handler
      * refuses a second request until the receive path clears it. */
     gboolean   loading;
-    /* textentry of the opening "── chat history (N) ──" divider, saved
+    /* Mark for the opening "── chat history (N) ──" divider row, saved
      * on initial render. Insert-point for all subsequent Load-Older
      * inserts: older entries + the refreshed sentinel land just BEFORE
      * this anchor, so older content stays inside the chat-history block
      * instead of jumping above the server-notice preamble that
      * hx_printf wrote first. */
-    textentry *anchor_ent;
-    /* textentry of the currently-rendered "↑ Load older" sentinel row,
-     * or NULL when none is rendered. Refreshed every batch: removed via
-     * gtk_xtext_remove_entry, then re-inserted before the anchor if
+    HxChatMark *anchor_ent;
+    /* Mark for the currently-rendered "↑ Load older" sentinel row, or
+     * NULL when none is rendered. Refreshed every batch: removed via
+     * hx_chat_view_remove, then re-inserted before the anchor if
      * has_more is still true on the new batch. */
-    textentry *load_older_ent;
+    HxChatMark *load_older_ent;
 };
 
 /* The per-conversation window/view. No longer stored in its own
@@ -140,9 +141,10 @@ struct gtkhx_chat {
     /* fogWraith chat-history extension render cursors (Phase 3+),
      * grouped into one named sub-object — see struct
      * hx_chat_history_render above for the per-field notes. The
-     * anchor / load-older textentry* are raw pointers into xtext and
-     * can be invalidated by entry trims, so treat them as live only
-     * during a render pass. */
+     * anchor / load-older marks are weak references that a scrollback
+     * trim or a clear can invalidate, so treat them as live only
+     * during a render pass; hx_chat_view_remove on a stale mark is a
+     * safe FALSE. */
     struct hx_chat_history_render render;
 
     /* Inline-media extension (Phase 9.C UI). Pointer to the
@@ -211,16 +213,16 @@ hx_loading_older_sentinel (void)
 #define WORD_EMAIL 5
 
 /*
- * Phase 2.6.B: 37-entry palette laid out for HexChat's xtext.
+ * Phase 2.6.B: 37-entry palette laid out for the chat view.
  *
- * Slot layout expected by GtkXText (see xtext.h):
+ * Slot layout (see chat_view.h's HX_CHAT_PAL_* vocabulary):
  *   0..15   mIRC colors 0..15
  *   16..31  mIRC colors 16..31 (bold/extended; HexChat duplicates 0..15)
- *   32      XTEXT_MARK_FG   selection foreground
- *   33      XTEXT_MARK_BG   selection background
- *   34      XTEXT_FG        default text foreground
- *   35      XTEXT_BG        default text background
- *   36      XTEXT_MARKER    marker line color
+ *   32      HX_CHAT_PAL_MARK_FG   selection foreground
+ *   33      HX_CHAT_PAL_MARK_BG   selection background
+ *   34      HX_CHAT_PAL_FG        default text foreground
+ *   35      HX_CHAT_PAL_BG        default text background
+ *   36      HX_CHAT_PAL_MARKER    marker line color
  *
  * The previous (GTK 1.2 / XChat 1.8.5) widget only consulted slots 0..19,
  * with 16/17 = mark bg/fg and 18/19 = fg/bg.  HexChat's xtext reads
@@ -267,12 +269,12 @@ GdkRGBA colors[] = {
     RGB16 (0x7777, 0x7777, 0x7777), /* 30 grey */
     RGB16 (0x9999, 0x9999, 0x9999), /* 31 light grey */
     /* UI roles */
-    RGB16 (0xeeee, 0xeeee, 0xeeee), /* 32 XTEXT_MARK_FG (light) */
-    RGB16 (0x2020, 0x4a4a, 0x8787), /* 33 XTEXT_MARK_BG (blue) */
-    RGB16 (0xcccc, 0xcccc, 0xcccc), /* 34 XTEXT_FG (light) */
-    RGB16 (0, 0, 0),                /* 35 XTEXT_BG (black) */
-    RGB16 (0xcccc, 0, 0),           /* 36 XTEXT_MARKER (red) */
-    /* 37 XTEXT_HISTORY_MUTED — chat-history secondary text.
+    RGB16 (0xeeee, 0xeeee, 0xeeee), /* 32 HX_CHAT_PAL_MARK_FG (light) */
+    RGB16 (0x2020, 0x4a4a, 0x8787), /* 33 HX_CHAT_PAL_MARK_BG (blue) */
+    RGB16 (0xcccc, 0xcccc, 0xcccc), /* 34 HX_CHAT_PAL_FG (light) */
+    RGB16 (0, 0, 0),                /* 35 HX_CHAT_PAL_BG (black) */
+    RGB16 (0xcccc, 0, 0),           /* 36 HX_CHAT_PAL_MARKER (red) */
+    /* 37 HX_CHAT_PAL_HISTORY_MUTED — chat-history secondary text.
 	 * Static default is the dark-theme value (medium grey, visible
 	 * against black bg); gtkhx_apply_theme_palette recomputes it
 	 * for the active light/dark scheme as soon as AdwStyleManager
@@ -289,16 +291,16 @@ GdkRGBA colors[] = {
  * the historical light/dark constants byte-for-byte. The historical
  * defaults for reference:
  *
- *   Light  XTEXT_FG            = #1d1d1d  (near-black on white)
- *          XTEXT_BG            = #fafafa  (matches Adwaita's view bg)
+ *   Light  HX_CHAT_PAL_FG            = #1d1d1d  (near-black on white)
+ *          HX_CHAT_PAL_BG            = #fafafa  (matches Adwaita's view bg)
  *          MARK_FG             = #ffffff  (selection contrast)
  *          MARK_BG             = #3584e4  (Adwaita accent blue)
- *          XTEXT_HISTORY_MUTED = #5e5e5e  (~5.7:1 vs #fafafa)
- *   Dark   XTEXT_FG            = #cccccc
- *          XTEXT_BG            = #000000
+ *          HX_CHAT_PAL_HISTORY_MUTED = #5e5e5e  (~5.7:1 vs #fafafa)
+ *   Dark   HX_CHAT_PAL_FG            = #cccccc
+ *          HX_CHAT_PAL_BG            = #000000
  *          MARK_FG             = #eeeeee
  *          MARK_BG             = #204a87  (Tango blue, the original)
- *          XTEXT_HISTORY_MUTED = #9a9a9a  (~7:1 vs #000000)
+ *          HX_CHAT_PAL_HISTORY_MUTED = #9a9a9a  (~7:1 vs #000000)
  *
  * Called once at startup from gtkhx_activate after the
  * AdwStyleManager has settled on Light or Dark; again any time the
@@ -307,19 +309,19 @@ GdkRGBA colors[] = {
 void
 gtkhx_apply_theme_palette (gboolean dark)
 {
-    /* Slot ↔ role mapping. The slot numbers (32..37) match
-	 * xtext.h's XTEXT_* defines exactly; the roles are the
+    /* Slot ↔ role mapping. The slot numbers (32..37) are
+	 * chat_view.h's HX_CHAT_PAL_* vocabulary; the roles are the
 	 * theme-file-visible names. */
     static const struct {
         int slot;
         GtkhxPaletteRole role;
     } role_to_slot[] = {
-        { XTEXT_MARK_FG,        GTKHX_PAL_MARK_FG },
-        { XTEXT_MARK_BG,        GTKHX_PAL_MARK_BG },
-        { XTEXT_FG,             GTKHX_PAL_FG },
-        { XTEXT_BG,             GTKHX_PAL_BG },
-        { XTEXT_MARKER,         GTKHX_PAL_MARKER },
-        { XTEXT_HISTORY_MUTED,  GTKHX_PAL_HISTORY_MUTED },
+        { HX_CHAT_PAL_MARK_FG,        GTKHX_PAL_MARK_FG },
+        { HX_CHAT_PAL_MARK_BG,        GTKHX_PAL_MARK_BG },
+        { HX_CHAT_PAL_FG,             GTKHX_PAL_FG },
+        { HX_CHAT_PAL_BG,             GTKHX_PAL_BG },
+        { HX_CHAT_PAL_MARKER,         GTKHX_PAL_MARKER },
+        { HX_CHAT_PAL_HISTORY_MUTED,  GTKHX_PAL_HISTORY_MUTED },
     };
     size_t i;
 
@@ -340,8 +342,8 @@ gtkhx_apply_theme_palette (gboolean dark)
             struct chat *c = hx_chats_get_at (sess->chats, i);
             struct gtkhx_chat *gchat = hx_chat_view (c);
             if (gchat && gchat->output) {
-                gtk_xtext_set_palette (GTK_XTEXT (gchat->output), colors);
-                gtk_xtext_refresh (GTK_XTEXT (gchat->output));
+                hx_chat_view_set_palette (gchat->output, colors);
+                hx_chat_view_refresh (gchat->output);
             }
         }
     }
@@ -352,8 +354,8 @@ gtkhx_apply_theme_palette (gboolean dark)
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
             if (msg->outputbuf) {
-                gtk_xtext_set_palette (GTK_XTEXT (msg->outputbuf), colors);
-                gtk_xtext_refresh (GTK_XTEXT (msg->outputbuf));
+                hx_chat_view_set_palette (msg->outputbuf, colors);
+                hx_chat_view_refresh (msg->outputbuf);
             }
         }
     }
@@ -441,9 +443,9 @@ word_check (GtkWidget *xtext, char *word)
 
 /* timecpy is gone. The "[HH:MM:SS] " inline-timestamp prefix
  * it produced is now drawn by xtext as a left-column stamp via
- * gtk_xtext_set_time_stamp on each buffer. xprintline / xoutput_chat
+ * hx_chat_view_set_time_stamp on each view. xprintline / xoutput_chat
  * just append the bare message text; the per-entry timestamp is
- * auto-set in gtk_xtext_append_entry. */
+ * auto-set by the view on append. */
 
 /* chat lifecycle on the HxChatRegistry. chat_free() is the destroy callback the
  * session->chats registry invokes when an entry is removed or the registry is
@@ -674,14 +676,12 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
             g_free (display_nick);
         }
 
-        gtk_xtext_append_indent (GTK_XTEXT (text)->buffer,
-                                 (unsigned char *)nick_buf, strlen (nick_buf),
-                                 (unsigned char *)body_ptr, body_ptr_len, 0);
+        hx_chat_view_append_indent (text, nick_buf, strlen (nick_buf),
+                                    body_ptr, body_ptr_len, 0);
         g_free (nick_buf);
         g_free (body_buf);
     } else {
-        gtk_xtext_append (GTK_XTEXT (text)->buffer, (unsigned char *)line,
-                          line_len, 0);
+        hx_chat_view_append (text, line, line_len, 0);
     }
 }
 
@@ -796,16 +796,15 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
 
     /* gchat may have been freed (disconnect / chat-close) and
 	 * a fresh one with the same cid may even exist — in which
-	 * case find_media_entry_by_token returns NULL (the token
+	 * case hx_chat_view_media_mark returns NULL (the token
 	 * lives in the gchat's media table, which was rebuilt
 	 * fresh). The texture quietly drops. */
     struct gtkhx_chat *gchat
         = gchat_with_cid (hx_active_session (), ctx->cid);
     if (gchat && gchat->output) {
-        xtext_buffer *buf = GTK_XTEXT (gchat->output)->buffer;
-        textentry *ent
-            = gtk_xtext_find_media_entry_by_token (buf, ctx->token);
-        if (ent) {
+        HxChatMark *mark
+            = hx_chat_view_media_mark (gchat->output, ctx->token);
+        if (mark) {
             if (decoded->frames && decoded->frames->len > 1) {
                 /* Animation (G.3). Install the frames array on
 				 * the entry; xtext drives the per-frame tick
@@ -818,7 +817,8 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
                     gdk_texture_get_width (decoded->texture),
                     gdk_texture_get_height (decoded->texture),
                     decoded->frames->len);
-                gtk_xtext_media_set_animation (buf, ent, decoded->frames);
+                hx_chat_view_media_set_animation (gchat->output, mark,
+                                                  decoded->frames);
             } else {
                 debug_log (
                     "media",
@@ -827,7 +827,8 @@ on_inline_media_autofetch_decoded (HxInlineMediaDecoded *decoded,
                     ctx->cid, ctx->token,
                     gdk_texture_get_width (decoded->texture),
                     gdk_texture_get_height (decoded->texture));
-                gtk_xtext_media_set_texture (buf, ent, decoded->texture);
+                hx_chat_view_media_set_texture (gchat->output, mark,
+                                                decoded->texture);
             }
         }
     }
@@ -872,8 +873,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             const char *next_nl = memchr (cur, '\n', end - cur);
             gsize seg_len
                 = next_nl ? (gsize)(next_nl - cur) : (gsize)(end - cur);
-            gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
-                              (unsigned char *)cur, seg_len, 0);
+            hx_chat_view_append (gchat->output, cur, seg_len, 0);
             if (!next_nl) {
                 break;
             }
@@ -915,8 +915,7 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             const char *next_nl = memchr (cur, '\n', end - cur);
             gsize seg_len
                 = next_nl ? (gsize)(next_nl - cur) : (gsize)(end - cur);
-            gtk_xtext_append (GTK_XTEXT (gchat->output)->buffer,
-                              (unsigned char *)cur, seg_len, 0);
+            hx_chat_view_append (gchat->output, cur, seg_len, 0);
             if (!next_nl) {
                 break;
             }
@@ -952,9 +951,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
             = hx_chat_media_placeholder_clickable (e->media, token);
         if (placeholder) {
             gchar *styled = g_strdup_printf ("\003" "14%s", placeholder);
-            gtk_xtext_append_media (
-                GTK_XTEXT (gchat->output)->buffer, NULL /* texture */,
-                styled, token, 0 /* stamp */);
+            hx_chat_view_append_media (gchat->output, NULL /* texture */,
+                                       styled, token, 0 /* stamp */);
             g_free (styled);
             g_free (placeholder);
 
@@ -1057,16 +1055,15 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     }
     gchat->render.has_more = has_more;
 
-    xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
+    GtkWidget *view = gchat->output;
 
     /* evict the existing Load-older sentinel up front.
 	 * We'll re-insert a fresh one below if has_more is still true
-	 * on the new batch. Stored pointer; cleared regardless of
-	 * remove_entry's return — a stale pointer means the entry
-	 * was already gone, so dropping our reference is the right
-	 * thing either way. */
+	 * on the new batch. Cleared regardless of hx_chat_view_remove's
+	 * return — a stale mark means the row was already gone, so
+	 * dropping our reference is the right thing either way. */
     if (gchat->render.load_older_ent) {
-        gtk_xtext_remove_entry (xbuf, gchat->render.load_older_ent);
+        hx_chat_view_remove (view, gchat->render.load_older_ent);
         gchat->render.load_older_ent = NULL;
     }
 
@@ -1097,16 +1094,12 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 #define HX_RENDER(LEFT, LEFT_LEN, RIGHT, RIGHT_LEN, STAMP)                    \
     do {                                                                      \
         if (prepend_mode && gchat->render.anchor_ent) {                      \
-            gtk_xtext_insert_indent_before (xbuf,                             \
+            hx_chat_view_insert_before (view,                                 \
                 gchat->render.anchor_ent,                                    \
-                (unsigned char *) (LEFT), (LEFT_LEN),                         \
-                (unsigned char *) (RIGHT), (RIGHT_LEN),                       \
-                (STAMP));                                                     \
+                (LEFT), (LEFT_LEN), (RIGHT), (RIGHT_LEN), (STAMP));           \
         } else {                                                              \
-            gtk_xtext_append_indent (xbuf,                                    \
-                (unsigned char *) (LEFT), (LEFT_LEN),                         \
-                (unsigned char *) (RIGHT), (RIGHT_LEN),                       \
-                (STAMP));                                                     \
+            hx_chat_view_append_indent (view,                                 \
+                (LEFT), (LEFT_LEN), (RIGHT), (RIGHT_LEN), (STAMP));           \
         }                                                                     \
     } while (0)
 
@@ -1115,9 +1108,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 	 * anchor divider already marks the bottom of the cumulative
 	 * chat-history block.
 	 *
-	 * Save the new entry's textentry pointer as our anchor for
-	 * any future Load-older inserts. gtk_xtext_get_last_entry
-	 * returns buf->text_last, which is the entry we just appended. */
+	 * Save the appended row's mark as our anchor for any future
+	 * Load-older inserts — hx_chat_view_append_indent hands it back. */
     if (!prepend_mode) {
         const char *fmt = g_dngettext (
             NULL,
@@ -1126,13 +1118,10 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             entries->len);
         gchar *body = g_strdup_printf (fmt, entries->len);
         gchar *divider = g_strdup_printf ("\003" "37" "─── %s ───", body);
-        gtk_xtext_append_indent (xbuf,
-                                 (unsigned char *) "", 0,
-                                 (unsigned char *) divider,
-                                 (int) strlen (divider), 0);
+        gchat->render.anchor_ent = hx_chat_view_append_indent (
+            view, "", 0, divider, (int) strlen (divider), 0);
         g_free (divider);
         g_free (body);
-        gchat->render.anchor_ent = gtk_xtext_get_last_entry (xbuf);
     }
 
     /* insert the "Load older messages" sentinel BEFORE
@@ -1171,11 +1160,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
             "\003" "37"
             "─── %s ───",
             hx_load_older_sentinel ());
-        gchat->render.load_older_ent = gtk_xtext_insert_indent_before (xbuf,
-            gchat->render.anchor_ent,
-            (unsigned char *) "", 0,
-            (unsigned char *) row,
-            (int) strlen (row), 0);
+        gchat->render.load_older_ent = hx_chat_view_insert_before (
+            view, gchat->render.anchor_ent, "", 0, row, (int) strlen (row), 0);
         g_free (row);
     }
 
@@ -1221,7 +1207,7 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
 
         /* Standard message: two-column layout matching the live
 		 * chat path, but the whole thing rendered in the muted
-		 * theme-aware palette slot (XTEXT_HISTORY_MUTED = 37,
+		 * theme-aware palette slot (HX_CHAT_PAL_HISTORY_MUTED = 37,
 		 * see chat.c::gtkhx_apply_theme_palette) instead of the
 		 * live palette. */
         gchar *nick_wrapped = g_strdup_printf (
@@ -1246,10 +1232,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     if (!prepend_mode) {
         gchar *divider
             = g_strdup_printf ("\003" "37" "─── %s ───", _ ("live messages"));
-        gtk_xtext_append_indent (xbuf,
-                                 (unsigned char *) "", 0,
-                                 (unsigned char *) divider,
-                                 (int) strlen (divider), 0);
+        hx_chat_view_append_indent (view, "", 0, divider,
+                                    (int) strlen (divider), 0);
         g_free (divider);
     }
 
@@ -1403,16 +1387,13 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 	 * same divider framing as the clickable row, so visually
 	 * only the body text changes between the two states. */
     if (gchat->render.load_older_ent) {
-        xtext_buffer *xbuf = GTK_XTEXT (gchat->output)->buffer;
         gchar *loading_row
             = g_strdup_printf ("\003" "37" "─── %s ───",
                                hx_loading_older_sentinel ());
 
-        gtk_xtext_remove_entry (xbuf, gchat->render.load_older_ent);
-        gchat->render.load_older_ent = gtk_xtext_insert_indent_before (
-            xbuf, gchat->render.anchor_ent,
-            (unsigned char *) "", 0,
-            (unsigned char *) loading_row,
+        hx_chat_view_remove (gchat->output, gchat->render.load_older_ent);
+        gchat->render.load_older_ent = hx_chat_view_insert_before (
+            gchat->output, gchat->render.anchor_ent, "", 0, loading_row,
             (int) strlen (loading_row), 0);
         g_free (loading_row);
     }
@@ -1517,7 +1498,7 @@ xprintline (GtkWidget *text, char *chat, size_t len)
 	 *      prepending its own stamp on top of our inline one.
 	 *
 	 * xtext renders the per-entry stamp (ent->stamp, auto-set in
-	 * gtk_xtext_append_entry) iff xtext->auto_indent &&
+	 * the view on append) iff indent mode is on &&
 	 * buf->time_stamp. Both are flipped on per-buffer at creation
 	 * time in chat.c / msg.c, and re-applied to live buffers when
 	 * the user toggles CFG_TIMESTAMP via Settings. */
@@ -1756,29 +1737,28 @@ create_chat (session *sess)
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        text = gtk_xtext_new (colors, 1);
-        gtk_xtext_set_font (GTK_XTEXT (text), fontname);
+        text = hx_chat_view_new (colors, TRUE);
+        hx_chat_view_set_font (text, fontname);
         g_free (fontname);
     }
     gtk_widget_set_can_focus (text, FALSE);
-    GTK_XTEXT (text)->wordwrap = gtkhx_prefs.word_wrap;
-    GTK_XTEXT (text)->urlcheck_function = word_check;
-    GTK_XTEXT (text)->max_lines = gtkhx_prefs.xbuf_max;
-    /* enable xtext's left-column timestamp rendering. The
-	 * stamp draws iff auto_indent && buf->time_stamp; the latter is
+    hx_chat_view_set_word_wrap (text, gtkhx_prefs.word_wrap);
+    hx_chat_view_set_urlcheck_function (text, word_check);
+    hx_chat_view_set_max_lines (text, gtkhx_prefs.xbuf_max);
+    /* enable the left-column timestamp rendering. The stamp draws iff
+	 * the view is in indent mode and the timestamp is on; the latter is
 	 * flipped from CFG_TIMESTAMP / gtkhx_prefs.timestamp. See xprintline
-	 * for the rationale (HexChat-style stamps separate from message
-	 * text, no double-stamping on autocopy_stamp). */
-    gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
-    gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer, gtkhx_prefs.timestamp);
-    /* Allow the indent column to grow past its initial
-	 * stamp_width floor when the first message is appended.
-	 * gtk_xtext_append_indent's auto-bump check is gated on
-	 * `buf->indent < max_auto_indent`, so a zero default makes
-	 * the bump impossible and the nick column overlaps the
-	 * timestamp. 256 px is enough room for the stamp + a
-	 * medium-length nick without dominating the chat width. */
-    gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
+	 * for the rationale (stamps rendered separately from message text,
+	 * so autocopy_stamp doesn't double-stamp). */
+    hx_chat_view_set_indent (text, TRUE);
+    hx_chat_view_set_time_stamp (text, gtkhx_prefs.timestamp);
+    /* Allow the indent column to grow past its initial stamp-width
+	 * floor when the first message is appended: the auto-bump is gated
+	 * on the current indent being below this cap, so a zero default
+	 * makes the bump impossible and the nick column overlaps the
+	 * timestamp. 256 px is enough room for the stamp + a medium-length
+	 * nick without dominating the chat width. */
+    hx_chat_view_set_max_indent (text, 256);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs
@@ -1795,7 +1775,8 @@ create_chat (session *sess)
                       G_CALLBACK (inline_media_chat_word_click), NULL);
 
     vscroll
-        = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
+        = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
+                             hx_chat_view_get_vadjustment (text));
 
     /* Keep the xtext output + its scrollbar alive parentless (ref-sunk)
 	 * until the Rust content build (chat.rs::build_content) reads them back
@@ -1959,18 +1940,18 @@ pchat_new (session *sess, struct chat *chat)
 
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        text = gtk_xtext_new (colors, 1);
-        gtk_xtext_set_font (GTK_XTEXT (text), fontname);
+        text = hx_chat_view_new (colors, TRUE);
+        hx_chat_view_set_font (text, fontname);
         g_free (fontname);
     }
-    GTK_XTEXT (text)->wordwrap = gtkhx_prefs.word_wrap;
-    GTK_XTEXT (text)->urlcheck_function = word_check;
-    GTK_XTEXT (text)->max_lines = gtkhx_prefs.xbuf_max;
-    /* native xtext timestamps — see the matching call in
+    hx_chat_view_set_word_wrap (text, gtkhx_prefs.word_wrap);
+    hx_chat_view_set_urlcheck_function (text, word_check);
+    hx_chat_view_set_max_lines (text, gtkhx_prefs.xbuf_max);
+    /* view-native timestamps — see the matching call in
 	 * create_chat_window above for the rationale. */
-    gtk_xtext_set_indent (GTK_XTEXT (text), TRUE);
-    gtk_xtext_set_time_stamp (GTK_XTEXT (text)->buffer, gtkhx_prefs.timestamp);
-    gtk_xtext_set_max_indent (GTK_XTEXT (text), 256);
+    hx_chat_view_set_indent (text, TRUE);
+    hx_chat_view_set_time_stamp (text, gtkhx_prefs.timestamp);
+    hx_chat_view_set_max_indent (text, 256);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs
@@ -1987,7 +1968,8 @@ pchat_new (session *sess, struct chat *chat)
                       G_CALLBACK (inline_media_chat_word_click), NULL);
 
     vscroll
-        = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL, GTK_XTEXT (text)->adj);
+        = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
+                             hx_chat_view_get_vadjustment (text));
 
     subject = gtk_entry_new ();
     gtkhx_apply_text_style (subject);
@@ -2403,7 +2385,7 @@ hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
     if (!gchat) {
         return;
     }
-    gtk_xtext_clear (GTK_XTEXT (gchat->output)->buffer, 0);
+    hx_chat_view_clear (gchat->output);
     if (gtkhx_prefs.geo.chat.open) {
         if (subj) {
             gtk_editable_set_text (GTK_EDITABLE (gchat->subject), "");

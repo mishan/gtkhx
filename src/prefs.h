@@ -84,7 +84,7 @@ struct gtkhx_prefs {
     /* HexChat-style xtext autocopy controls — driven by
 	 * Settings → Advanced → Auto Copy Behavior, persisted as the
 	 * AUTOCOPY_TEXT / AUTOCOPY_STAMP / AUTOCOPY_COLOR keys, applied
-	 * to xtext via gtk_xtext_set_autocopy_*. See the comment on the
+	 * to the view via hx_chat_view_set_autocopy_*. See the comment on the
 	 * `prefs` struct in xtext.c for the per-field semantics. */
     unsigned char autocopy_text;
     unsigned char autocopy_stamp;

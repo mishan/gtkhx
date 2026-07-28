@@ -106,13 +106,6 @@ struct ifn {
     unsigned int n;
 };
 
-/* Forward declaration so the chat-history bookkeeping below can
- * carry textentry pointers without dragging in xtext.h (which
- * itself #include "session.h" — including it back here would be a
- * circular include). The full typedef lives in xtext.h; C11
- * allows redundant typedefs of the same struct. */
-typedef struct textentry textentry;
-
 /* The Rust cid → conversation registry backing session->chats (defined in the
  * gtkhx-session crate; full FFI in chat.h). Opaque here — session.h only needs
  * the pointer type for the struct field below. gnu11 permits this redundant

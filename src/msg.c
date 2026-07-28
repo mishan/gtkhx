@@ -36,7 +36,7 @@
 #include "gtkhx.h"
 #include "gtkhx_log.h"
 #include "gtkutil.h"
-#include "xtext.h"
+#include "chat_view.h"
 #include "rcv.h"
 #include "tasks.h"
 #include "connect.h"
@@ -446,24 +446,24 @@ create_msg (guint16 _uid, char *name)
      * sub-widgets (xtext + input + ctrl). */
     {
         gchar *fontname = pango_font_description_to_string (gtkhx_font_desc);
-        msg->outputbuf = gtk_xtext_new (colors, 1);
-        gtk_xtext_set_font (GTK_XTEXT (msg->outputbuf), fontname);
+        msg->outputbuf = hx_chat_view_new (colors, TRUE);
+        hx_chat_view_set_font (msg->outputbuf, fontname);
         g_free (fontname);
     }
-    GTK_XTEXT (msg->outputbuf)->wordwrap = gtkhx_prefs.word_wrap;
-    GTK_XTEXT (msg->outputbuf)->urlcheck_function = word_check;
-    GTK_XTEXT (msg->outputbuf)->max_lines = gtkhx_prefs.xbuf_max;
-    /* native xtext timestamps — see chat.c::create_chat_window
+    hx_chat_view_set_word_wrap (msg->outputbuf, gtkhx_prefs.word_wrap);
+    hx_chat_view_set_urlcheck_function (msg->outputbuf, word_check);
+    hx_chat_view_set_max_lines (msg->outputbuf, gtkhx_prefs.xbuf_max);
+    /* view-native timestamps — see chat.c::create_chat_window
 	 * for the rationale. */
-    gtk_xtext_set_indent (GTK_XTEXT (msg->outputbuf), TRUE);
-    gtk_xtext_set_time_stamp (GTK_XTEXT (msg->outputbuf)->buffer,
-                              gtkhx_prefs.timestamp);
-    gtk_xtext_set_max_indent (GTK_XTEXT (msg->outputbuf), 256);
+    hx_chat_view_set_indent (msg->outputbuf, TRUE);
+    hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
+    hx_chat_view_set_max_indent (msg->outputbuf, 256);
     g_signal_connect (msg->outputbuf, "word_click",
                       G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
-    msg->vscroll = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
-                                      GTK_XTEXT (msg->outputbuf)->adj);
+    msg->vscroll = gtk_scrollbar_new (
+        GTK_ORIENTATION_VERTICAL,
+        hx_chat_view_get_vadjustment (msg->outputbuf));
     msg->inputbuf = gtk_text_view_new ();
 
     /* Theme monospace via gtk_text_view_set_monospace — see chat.c for
@@ -598,7 +598,7 @@ msg_output_render (const char *name, guint16 uid, const char *body,
     nick_wrapped = g_strdup_printf ("\003%d<\003%s\003%d>\003", brack_col,
                                     name ? name : "", brack_col);
 
-    /* Validate the body bytes once. xtext hands content to Pango,
+    /* Validate the body bytes once. the chat view hands content to Pango,
 	 * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
 	 * from vintage servers. */
     valid_body = gtkhx_text_to_utf8 (body ? body : "", body ? strlen (body) : 0,
@@ -610,7 +610,7 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 
     /* Each newline-separated line in the body becomes its own
 	 * xtext entry. The first one carries the nick column via
-	 * gtk_xtext_append_indent (HexChat two-column layout — names
+	 * hx_chat_view_append_indent (two-column layout — names
 	 * on the left, message on the right, with the auto-aligned
 	 * separator the chat output uses); subsequent lines append
 	 * as plain continuation rows so multi-line messages don't
@@ -622,14 +622,12 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         const char *nl = (cur < end) ? memchr (cur, '\n', end - cur) : NULL;
         gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
         if (first) {
-            gtk_xtext_append_indent (GTK_XTEXT (msg->outputbuf)->buffer,
-                                     (unsigned char *)nick_wrapped,
-                                     strlen (nick_wrapped),
-                                     (unsigned char *)cur, seg_len, 0);
+            hx_chat_view_append_indent (msg->outputbuf, nick_wrapped,
+                                        strlen (nick_wrapped), cur, seg_len,
+                                        0);
             first = FALSE;
         } else {
-            gtk_xtext_append (GTK_XTEXT (msg->outputbuf)->buffer,
-                              (unsigned char *)cur, seg_len, 0);
+            hx_chat_view_append (msg->outputbuf, cur, seg_len, 0);
         }
         if (!nl) {
             break;
@@ -685,7 +683,7 @@ msg_output_from_event (HxMsgEvent *event)
 /* Map the legacy user->color (16-bit, % 4 status field) to a mIRC
  * palette index so we can wrap a name in `\003NN…\003` for xtext.
  * Aligned with gdk_user_colors[]:
- *   0 (regular) → no escape; let xtext use XTEXT_FG so the name
+ *   0 (regular) → no escape; let xtext use HX_CHAT_PAL_FG so the name
  *                 stays legible against both light and dark bgs
  *                 (black on a black bg would be invisible).
  *   1 (idle)    → mIRC 14, grey
