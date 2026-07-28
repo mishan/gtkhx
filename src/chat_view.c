@@ -81,13 +81,18 @@ ent_of (HxChatMark *mark)
     return (textentry *) mark;
 }
 
-/* xtext's append/insert entry points take non-const unsigned char* and
- * never write through them. Casting away const at this one boundary
- * keeps the public header honest for every caller. */
+/* xtext's append/insert entry points take non-const `unsigned char *`
+ * and never write through them. Dropping const at this one boundary
+ * keeps the public header honest for every caller.
+ *
+ * A single cast, not a pointer→integer→pointer round trip: going via
+ * uintptr_t would launder away the pointer's provenance for no benefit
+ * (and would need <stdint.h>, which this file only gets transitively
+ * through glib). */
 static inline unsigned char *
 bytes (const char *s)
 {
-    return (unsigned char *) (uintptr_t) (const void *) s;
+    return (unsigned char *) (const void *) s;
 }
 
 /* ---- construction / configuration --------------------------------- */
@@ -97,21 +102,21 @@ hx_chat_view_new (const GdkRGBA palette[], gboolean separator)
 {
     /* gtk_xtext_new copies the palette into the widget but takes it as
      * a non-const array. */
-    return gtk_xtext_new ((GdkRGBA *) (uintptr_t) (const void *) palette,
+    return gtk_xtext_new ((GdkRGBA *) (const void *) palette,
                           separator ? 1 : 0);
 }
 
 void
 hx_chat_view_set_font (GtkWidget *view, const char *font)
 {
-    gtk_xtext_set_font (xt (view), (char *) (uintptr_t) (const void *) font);
+    gtk_xtext_set_font (xt (view), (char *) (const void *) font);
 }
 
 void
 hx_chat_view_set_palette (GtkWidget *view, const GdkRGBA palette[])
 {
     gtk_xtext_set_palette (xt (view),
-                           (GdkRGBA *) (uintptr_t) (const void *) palette);
+                           (GdkRGBA *) (const void *) palette);
 }
 
 void

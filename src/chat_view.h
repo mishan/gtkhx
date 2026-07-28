@@ -125,8 +125,9 @@ void hx_chat_view_set_time_stamp (GtkWidget *view, gboolean time_stamp);
  * which is what prefs_read needs, since it runs before any chat window
  * exists. */
 void hx_chat_view_set_stamp_format (GtkWidget *view, const char *format);
-/* Classifier the view calls to decide whether a word under the pointer
- * is a link (drives the hand cursor and the word_click routing). */
+/* Classifier that the view calls to decide whether a word under the
+ * pointer is a link (drives the hand cursor and the word_click
+ * routing). */
 void hx_chat_view_set_urlcheck_function (
     GtkWidget *view, int (*urlcheck_function) (GtkWidget *view, char *word));
 
