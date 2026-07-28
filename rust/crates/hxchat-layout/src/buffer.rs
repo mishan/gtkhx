@@ -509,7 +509,10 @@ impl ChatBuffer {
 
     /// Text of one of a message's sources, for hit-testing and copying.
     pub fn source_text(&self, row: usize, source: LineSource) -> Option<&str> {
-        let msg = &self.rows.get(row)?.msg;
+        self.source_text_for(&self.rows.get(row)?.msg, source)
+    }
+
+    fn source_text_for<'a>(&self, msg: &'a Message, source: LineSource) -> Option<&'a str> {
         match source {
             LineSource::Gutter => msg.gutter.as_ref().map(|g| g.text.as_str()),
             LineSource::Block(bi) => match msg.blocks.get(bi)? {
@@ -522,6 +525,11 @@ impl ChatBuffer {
                 Block::Image { alt, .. } => Some(alt.as_str()),
             },
         }
+    }
+
+    /// The settled gutter width. 0 when not in indent mode.
+    pub fn indent_width(&self) -> u32 {
+        self.indent_width
     }
 
     /// Map a content-space pixel to a document position.
@@ -545,12 +553,36 @@ impl ChatBuffer {
         let id = self.id_at(row)?;
         let layout = self.layout_at(row)?;
 
-        // The line whose vertical band contains the point, or the
-        // nearest one — a drag can be above or below every band.
-        let line = layout
+        // The line whose band contains the point.
+        //
+        // Several boxes can share a y band — the gutter and the first
+        // body line always do — so x has to break the tie, otherwise
+        // every click on row 0 resolves to whichever was pushed first
+        // and the other becomes unselectable.
+        let in_band: Vec<&crate::wrap::LineBox> = layout
             .lines
             .iter()
-            .find(|l| hit.offset >= l.y && hit.offset < l.y + l.height)
+            .filter(|l| hit.offset >= l.y && hit.offset < l.y + l.height)
+            .collect();
+        let line = in_band
+            .iter()
+            .copied()
+            .find(|l| {
+                let w = self
+                    .source_text_for(&self.rows[row].msg, l.source)
+                    .and_then(|t| t.get(l.range.clone()))
+                    .map(|slice| measure.run_width(slice, Style::default()))
+                    .unwrap_or(0);
+                x >= l.x as i32 && x < (l.x + w) as i32
+            })
+            // No box owns the x: fall back to the nearest by distance,
+            // so a click in the gap between gutter and body still picks
+            // something sensible rather than nothing.
+            .or_else(|| {
+                in_band.iter().copied().min_by_key(|l| {
+                    (x - l.x as i32).abs()
+                })
+            })
             .or_else(|| {
                 if hit.offset < layout.lines.first().map_or(0, |l| l.y) {
                     layout.lines.first()

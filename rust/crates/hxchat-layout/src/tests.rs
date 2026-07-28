@@ -322,6 +322,7 @@ fn params(width: u32) -> LayoutParams {
         max_indent: 256,
         indent_width: 0,
         stamp_width: 0,
+        gutter_gap: 6,
         quote_indent: 12,
         block_padding: 2,
         word_wrap: true,
@@ -538,7 +539,14 @@ fn gutter_gets_its_own_line_box() {
     };
     let l = layout_message(&msg, &p, LayoutGeneration::default(), &m);
     assert_eq!(l.lines[0].source, crate::wrap::LineSource::Gutter);
-    assert_eq!(l.lines[0].x, 0);
+    // Right-aligned against the body column, not pinned at 0 — the
+    // latter was the bug that made "[hx]" drift away from its text as
+    // the shared column grew.
+    assert!(
+        l.lines[0].x > 0 && l.lines[0].x < 80,
+        "gutter x {} should sit inside the column, right-aligned",
+        l.lines[0].x
+    );
     assert_eq!(l.lines[1].x, 80, "body sits past the gutter");
     assert_eq!(l.lines[0].y, l.lines[1].y, "same visual row");
 }
@@ -1213,4 +1221,123 @@ fn selection_survives_a_resize() {
         b.ensure_layout(r, &m);
     }
     assert_eq!(b.selected_text(&sel), before, "resize moved the selection");
+}
+
+#[test]
+fn gutter_is_right_aligned_against_the_body_column() {
+    // The bug from the first live screenshots: the gutter drew hard left
+    // while message bodies moved right as the shared column grew, so
+    // "[hx]" and its text drifted apart as soon as a wider nick arrived.
+    //
+    // Root cause was the view deriving the gutter x from
+    // params().indent_width, which ensure_layout only ever set on a
+    // local copy — so it read back 0 forever. The x now comes from the
+    // line box, computed here, and this pins it.
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    p.indent_width = 200;
+    p.gutter_gap = 6;
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(ParsedText::plain("<alice>")), // 7 chars = 70px
+        blocks: vec![Block::Text(ParsedText::plain("hi"))],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l = layout_message(&msg, &p, LayoutGeneration::default(), &m);
+    let g = l
+        .lines
+        .iter()
+        .find(|lb| lb.source == crate::wrap::LineSource::Gutter)
+        .expect("gutter line box");
+    assert_eq!(
+        g.x, 124,
+        "gutter should end one gap short of the body column \
+         (200 - 70 - 6), not sit at 0"
+    );
+    let body = l
+        .lines
+        .iter()
+        .find(|lb| matches!(lb.source, crate::wrap::LineSource::Block(_)))
+        .expect("body line box");
+    assert_eq!(body.x, 200);
+    assert!(
+        g.x + 70 <= body.x,
+        "gutter must not overlap the body column"
+    );
+}
+
+#[test]
+fn hit_test_distinguishes_gutter_from_body_on_the_same_line() {
+    // The other half of the same bug: gutter and first body line share a
+    // y band, so picking by y alone always returned whichever was pushed
+    // first — which made nicks unselectable.
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: Some(ParsedText::plain("<alice>")),
+            blocks: vec![Block::Text(ParsedText::plain("hello"))],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.ensure_layout(0, &m);
+    let layout = b.layout_at(0).unwrap().clone();
+    let g = layout
+        .lines
+        .iter()
+        .find(|l| l.source == crate::wrap::LineSource::Gutter)
+        .unwrap();
+    let body = layout
+        .lines
+        .iter()
+        .find(|l| matches!(l.source, crate::wrap::LineSource::Block(_)))
+        .unwrap();
+
+    let in_gutter = b.hit_test(g.x as i32 + 5, 0, &m).expect("hit");
+    assert_eq!(
+        in_gutter.source,
+        crate::wrap::LineSource::Gutter,
+        "a click on the nick must resolve to the gutter"
+    );
+    let in_body = b.hit_test(body.x as i32 + 5, 0, &m).expect("hit");
+    assert!(
+        matches!(in_body.source, crate::wrap::LineSource::Block(_)),
+        "a click on the message must resolve to the body"
+    );
+}
+
+#[test]
+fn selecting_a_nick_yields_the_nick_text() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(600);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: Some(ParsedText::plain("<alice>")),
+            blocks: vec![Block::Text(ParsedText::plain("hello"))],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.ensure_layout(0, &m);
+    b.reindex();
+    let id = b.id_at(0).unwrap();
+    let sel = Selection::new(
+        Caret { message: id, source: crate::wrap::LineSource::Gutter, offset: 0 },
+        Caret { message: id, source: crate::wrap::LineSource::Gutter, offset: 7 },
+    );
+    assert_eq!(b.selected_text(&sel), "<alice>");
 }

@@ -92,6 +92,11 @@ mod imp {
         /// True while a drag is in progress, so motion extends the
         /// selection rather than being ignored.
         pub selecting: Cell<bool>,
+        /// The capture-phase Ctrl+C controller installed on our root,
+        /// plus a weak ref to that root so it can be removed when the
+        /// view moves to a different window.
+        pub root_key_handler:
+            RefCell<Option<(glib::object::WeakRef<gtk4::Widget>, gtk4::EventController)>>,
         /// strftime format for that column. xtext's default is
         /// "[%H:%M:%S] " and chat.c relies on getting it.
         pub stamp_format: RefCell<String>,
@@ -114,6 +119,7 @@ mod imp {
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
+                root_key_handler: RefCell::new(None),
                 stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
             }
         }
@@ -615,7 +621,6 @@ impl HxChatView {
         let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let show_stamp = imp.time_stamp.get();
         let stamp_format = imp.stamp_format.borrow().clone();
-        let indent_width = buf.params().indent_width as f32;
         let muted = self.imp_().palette.borrow()[PAL_HISTORY_MUTED];
 
         for (row, row_top) in placed {
@@ -654,27 +659,22 @@ impl HxChatView {
                     continue;
                 }
 
-                // The gutter is right-aligned against the body column,
-                // the way xtext aligns nicks against its separator, and
-                // the timestamp sits at the far left of the same band.
-                let x = if line.source == LineSource::Gutter {
-                    if show_stamp {
-                        if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
-                            draw_layout.set_attributes(None);
-                            draw_layout.set_text(&stamp);
-                            snapshot.save();
-                            snapshot.translate(&gtk4::graphene::Point::new(0.0, y as f32));
-                            snapshot.append_layout(&draw_layout, &muted);
-                            snapshot.restore();
-                        }
+                // x comes straight from the line box now — the layout
+                // engine right-aligns the gutter, so the view no longer
+                // has its own opinion about where it goes. The timestamp
+                // is the one thing drawn outside a line box, at the far
+                // left of the same band.
+                if line.source == LineSource::Gutter && show_stamp {
+                    if let Some(stamp) = format_stamp(msg.timestamp, &stamp_format) {
+                        draw_layout.set_attributes(None);
+                        draw_layout.set_text(&stamp);
+                        snapshot.save();
+                        snapshot.translate(&gtk4::graphene::Point::new(0.0, y as f32));
+                        snapshot.append_layout(&draw_layout, &muted);
+                        snapshot.restore();
                     }
-                    draw_layout.set_attributes(None);
-                    draw_layout.set_text(slice);
-                    let (gw, _) = draw_layout.pixel_size();
-                    (indent_width - gw as f32 - GUTTER_GAP).max(0.0)
-                } else {
-                    line.x as f32
-                };
+                }
+                let x = line.x as f32;
 
                 // Selection band behind the text, then the text with
                 // the selected span forced to the mark colours. Drawing
@@ -838,9 +838,6 @@ fn content_height(alloc_height: i32) -> u32 {
     (alloc_height - 2 * PAD_Y).max(1) as u32
 }
 
-/// Gap between the right edge of the nick and the body column.
-const GUTTER_GAP: f32 = 6.0;
-
 /// Format a unix timestamp with a strftime-style pattern.
 ///
 /// `glib::DateTime::format` is strftime-compatible and locale-aware,
@@ -907,7 +904,14 @@ impl HxChatView {
             // Drag-end autocopy, matching xtext's behaviour and driven
             // by the same three prefs (see set_autocopy_* on the C side).
             if autocopy_enabled() {
+                // Both clipboards, matching xtext's autocopy: it took
+                // clipboard ownership on drag-end
+                // (gtk_xtext_set_clip_owner), and PRIMARY is what
+                // middle-click paste reads. Writing both is also what
+                // makes copying usable at all right now — see the note
+                // on the Ctrl+C shortcut below.
                 this.copy_selection_to(ClipboardTarget::Primary);
+                this.copy_selection_to(ClipboardTarget::Clipboard);
             }
         });
         self.add_controller(drag);
@@ -933,20 +937,56 @@ impl HxChatView {
         });
         self.add_controller(click);
 
-        // Ctrl+C. A shortcut controller with GLOBAL scope so it works
-        // while focus is in the chat input, which is where it always is.
-        let controller = gtk4::ShortcutController::new();
-        controller.set_scope(gtk4::ShortcutScope::Global);
+        // Ctrl+C.
+        //
+        // A ShortcutController on this widget does not work, global
+        // scope or not: `chat.c` calls gtk_widget_set_can_focus(FALSE)
+        // so typing goes to the input, the input is a GtkTextView with
+        // its own Ctrl+C binding, and being the focused widget it
+        // consumes the key first — copying its own (empty) selection.
+        //
+        // So the handler goes on the *root*, in the capture phase, which
+        // runs before the focus path. It consumes the key only when this
+        // view actually has a selection, so Ctrl+C in the input still
+        // behaves normally the rest of the time.
         let this = self.clone();
-        let action = gtk4::CallbackAction::new(move |_, _| {
-            this.copy_selection_to(ClipboardTarget::Clipboard);
-            glib::Propagation::Stop
+        self.connect_root_notify(move |v| v.rebind_root_copy_shortcut());
+        this.rebind_root_copy_shortcut();
+    }
+
+    /// (Re)install the capture-phase Ctrl+C handler on the current root.
+    fn rebind_root_copy_shortcut(&self) {
+        let imp = self.imp_();
+        // Drop the old one first — a view can be re-rooted when its tab
+        // moves, and leaving handlers on stale windows would both leak
+        // and double-fire.
+        if let Some((root, id)) = imp.root_key_handler.borrow_mut().take() {
+            if let Some(w) = root.upgrade() {
+                w.remove_controller(&id);
+            }
+        }
+        let Some(root) = self.root() else {
+            return;
+        };
+        let key = gtk4::EventControllerKey::new();
+        key.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let this = self.clone();
+        key.connect_key_pressed(move |_, keyval, _, state| {
+            let ctrl = state.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
+            let is_c = keyval == gtk4::gdk::Key::c || keyval == gtk4::gdk::Key::C;
+            if ctrl && is_c && this.has_selection() {
+                this.copy_selection_to(ClipboardTarget::Clipboard);
+                return glib::Propagation::Stop;
+            }
+            glib::Propagation::Proceed
         });
-        controller.add_shortcut(gtk4::Shortcut::new(
-            gtk4::ShortcutTrigger::parse_string("<Control>c"),
-            Some(action),
-        ));
-        self.add_controller(controller);
+        let root_widget: gtk4::Widget = root.clone().upcast();
+        root_widget.add_controller(key.clone());
+        *imp.root_key_handler.borrow_mut() =
+            Some((glib::object::WeakRef::new(), key.upcast()));
+        if let Some((weak, _)) = imp.root_key_handler.borrow().as_ref() {
+            weak.set(Some(&root_widget));
+        }
     }
 
     /// Widget-space point → document position.

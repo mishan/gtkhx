@@ -93,6 +93,8 @@ pub struct LayoutParams {
     /// locale or time formatting — it only reserves the space the view
     /// says it needs, so the gutter is wide enough for stamp + nick.
     pub stamp_width: u32,
+    /// Gap between the right edge of the gutter and the body column.
+    pub gutter_gap: u32,
     /// Left padding inside a quote block, per nesting level.
     pub quote_indent: u32,
     /// Vertical padding above and below an image or code block.
@@ -108,6 +110,7 @@ impl Default for LayoutParams {
             max_indent: 256,
             indent_width: 0,
             stamp_width: 0,
+            gutter_gap: 6,
             quote_indent: 12,
             block_padding: 2,
             word_wrap: true,
@@ -154,18 +157,32 @@ pub fn layout_message(
     let body_x = if params.indent { params.indent_width } else { 0 };
     let body_width = params.width.saturating_sub(body_x).max(line_h);
 
-    // The gutter is one unwrapped line at x=0, always first, so the view
-    // can find it without scanning and hit-testing can distinguish a
-    // click on the nick from a click on the body.
+    // The gutter is one unwrapped line, always first, carrying the x it
+    // is actually drawn at.
+    //
+    // Right-aligned against the body column, the way xtext aligns its
+    // left text (`ent->indent = buf->indent - left_width - space_width`,
+    // xtext.c). Computing it *here* rather than in the view matters: the
+    // view previously derived it from `params().indent_width`, which is
+    // only ever set on a local copy inside `ensure_layout` and so read
+    // back as 0 — the gutter drew hard left while bodies moved right as
+    // the column grew, and hit-testing used the same wrong x, which is
+    // why nicks could not be selected. One source of truth removes both
+    // bugs at once.
     if params.indent {
         if let Some(g) = &msg.gutter {
             if !g.text.is_empty() {
+                let gw = measure_styled(g, 0..g.text.len(), measure);
+                let gx = params
+                    .indent_width
+                    .saturating_sub(gw + params.gutter_gap)
+                    .max(params.stamp_width);
                 lines.push(LineBox {
                     y: 0,
                     height: line_h,
                     range: 0..g.text.len(),
                     source: LineSource::Gutter,
-                    x: 0,
+                    x: gx,
                 });
             }
         }
