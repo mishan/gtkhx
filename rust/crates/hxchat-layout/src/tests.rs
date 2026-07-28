@@ -2738,3 +2738,100 @@ fn a_real_multi_line_fence_still_works() {
         other => panic!("expected code, got {other:?}"),
     }
 }
+
+#[test]
+fn select_all_shaped_selection_covers_the_buffer() {
+    // Mirrors HxChatView::select_all's caret construction exactly, to
+    // find out whether "Select All does nothing" is the model or the UI.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(said(9, "alice", "two", 2000), &m);
+    b.append(said(7, "misha", "three", 3000), &m);
+    b.reindex();
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+
+    let first = b.id_at(0).unwrap();
+    let last = b.id_at(2).unwrap();
+    let last_len = b.source_text(2, LineSource::Block(0)).map_or(0, |t| t.len());
+    let sel = Selection::new(
+        Caret { message: first, source: LineSource::Block(0), offset: 0 },
+        Caret { message: last, source: LineSource::Block(0), offset: last_len },
+    );
+
+    let rows = b.selected_rows(&sel);
+    assert_eq!(rows.len(), 3, "every row should contribute: {rows:?}");
+    assert!(rows[0].1.contains("one"));
+    assert!(rows[1].1.contains("two"));
+    assert!(rows[2].1.contains("three"));
+}
+
+#[test]
+fn select_all_covers_the_gutter_and_every_block() {
+    // Both ways the view's hand-rolled version got this wrong: it started
+    // at Block(0), skipping the first row's nick, and ended at Block(0)
+    // of the last row — which, once markdown split a body into several
+    // blocks, dropped any code block or quote after the first.
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "one", 1000), &m);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 2000,
+            speaker: Some(crate::message::Speaker::new(9, "alice")),
+            gutter: Some(ParsedText::plain("<alice>")),
+            blocks: vec![
+                Block::Text(ParsedText::plain("look:")),
+                Block::Code { text: "x = 1".into(), language: None },
+            ],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.reindex();
+
+    let sel = b.select_all().expect("non-empty buffer");
+    assert_eq!(sel.anchor.source, LineSource::Gutter, "starts at the nick");
+    assert_eq!(sel.focus.source, LineSource::Block(1), "ends at the last block");
+
+    let text = b.selected_text(&sel);
+    assert!(text.contains("<misha>"), "the first nick: {text:?}");
+    assert!(text.contains("x = 1"), "the trailing code block: {text:?}");
+}
+
+#[test]
+fn select_all_on_an_empty_buffer_is_none() {
+    let p = params(2000);
+    let b = ChatBuffer::new(p);
+    assert!(b.select_all().is_none());
+}
+
+#[test]
+fn text_is_centred_against_a_taller_avatar() {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = true;
+    p.avatar_size = 48;
+    let mut b = ChatBuffer::new(p);
+    b.append(said(7, "misha", "hi", 1000), &m);
+    b.reindex();
+    b.ensure_layout(0, &m);
+    let l = b.layout_at(0).unwrap();
+    let line = l.lines.iter().find(|l| l.source == LineSource::Block(0)).unwrap();
+    assert!(
+        line.y > 0,
+        "a single line beside a 48px icon should be pushed down, not sit on its top edge"
+    );
+    let centre = line.y + line.height / 2;
+    assert!(
+        (centre as i64 - 24).abs() <= 1,
+        "line centre {centre} should be near the icon's centre (24)"
+    );
+}

@@ -184,6 +184,9 @@ const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1
 const ZOOM_BADGE_HOLD_US: i64 = 700_000;
 const ZOOM_BADGE_FADE_US: i64 = 400_000;
 
+/// Text lines per wheel notch.
+const WHEEL_LINES: f64 = 3.0;
+
 /// Backing for `code` spans and code blocks.
 ///
 /// The monospace attribute alone is invisible here: GtkHx's chat font is
@@ -2164,8 +2167,16 @@ impl HxChatView {
         let this = self.clone();
         scroll.connect_scroll(move |c, _dx, dy| {
             if !c.current_event_state().contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
-                // Not ours — let it scroll the view.
-                return glib::Propagation::Proceed;
+                // Scroll the view ourselves.
+                //
+                // Implementing GtkScrollable is not enough: that only
+                // does anything inside a GtkScrolledWindow, and the chat
+                // view is packed as a bare child next to a plain
+                // GtkScrollbar (chat.rs::build_content). Nothing was
+                // consuming wheel events at all — Proceed handed them to
+                // a parent that had no idea what to do with them.
+                this.scroll_by_notches(dy);
+                return glib::Propagation::Stop;
             }
             if dy < 0.0 {
                 this.zoom_step(1);
@@ -2205,6 +2216,27 @@ impl HxChatView {
             controller.add_shortcut(gtk4::Shortcut::new(Some(trigger), Some(reset)));
         }
         self.add_controller(controller);
+    }
+
+    /// Scroll by wheel notches. Three text lines each, the usual step.
+    fn scroll_by_notches(&self, notches: f64) {
+        let height = content_height(self.height());
+        if height == 0 {
+            return;
+        }
+        let line = self.imp_().measure.borrow().metrics().line_height.max(1);
+        let delta = notches * (line as f64) * WHEEL_LINES;
+        let cur = {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_offset(height) as f64
+        };
+        let next = (cur + delta).max(0.0) as u64;
+        {
+            let mut buf = self.imp_().buffer.borrow_mut();
+            buf.scroll_to(next, height, FOLLOW_SLOP);
+        }
+        self.sync_adjustment(height);
+        self.queue_draw();
     }
 
     /// Move `delta` notches along [`ZOOM_STEPS`].
@@ -2342,6 +2374,33 @@ impl HxChatView {
     /// is where nicks live and a URL-shaped nick is a curiosity rather
     /// than something you want to open.
     fn hover_target_at(&self, x: f64, y: f64) -> Option<HoverTarget> {
+        // The avatar first: it is painted from the layout's avatar box
+        // rather than from a line box, so the caret hit-test below cannot
+        // see it. Clicking someone's icon should mean the same thing as
+        // clicking their name.
+        {
+            let imp = self.imp_();
+            let height = content_height(self.height());
+            let scroll = imp.buffer.borrow_mut().scroll_offset(height);
+            let cx = (x as i32) - PAD_X;
+            let cy = ((y as i32) - PAD_Y).max(0) as u64 + scroll;
+            let hit = imp.buffer.borrow_mut().avatar_at(cx, cy);
+            if let Some(uid) = hit {
+                // The row id is what the underline logic keys on; the
+                // avatar has no text to underline, so any id in the row
+                // does — use the one the buffer just hit.
+                let msg = imp
+                    .buffer
+                    .borrow_mut()
+                    .index_mut()
+                    .locate(cy)
+                    .and_then(|h| self.imp_().buffer.borrow().id_at(h.row));
+                if let Some(message) = msg {
+                    return Some(HoverTarget::Nick { message, uid });
+                }
+            }
+        }
+
         let caret = self.caret_at(x, y)?;
         let buf = self.imp_().buffer.borrow();
         if caret.source == LineSource::Gutter {
@@ -2430,29 +2489,14 @@ impl HxChatView {
     /// Select the whole buffer.
     pub fn select_all(&self) {
         let imp = self.imp_();
-        let buf = imp.buffer.borrow();
-        if buf.is_empty() {
+        // The buffer decides what "everything" is — see
+        // ChatBuffer::select_all for the two ways doing it here got it
+        // wrong.
+        let sel = imp.buffer.borrow().select_all();
+        if sel.is_none() {
             return;
         }
-        let (Some(first), Some(last)) = (buf.id_at(0), buf.id_at(buf.len() - 1)) else {
-            return;
-        };
-        let last_len = buf
-            .source_text(buf.len() - 1, LineSource::Block(0))
-            .map_or(0, |t| t.len());
-        drop(buf);
-        *imp.selection.borrow_mut() = Some(Selection::new(
-            Caret {
-                message: first,
-                source: LineSource::Block(0),
-                offset: 0,
-            },
-            Caret {
-                message: last,
-                source: LineSource::Block(0),
-                offset: last_len,
-            },
-        ));
+        *imp.selection.borrow_mut() = sel;
         self.queue_draw();
     }
 }

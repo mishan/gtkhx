@@ -381,13 +381,35 @@ pub fn layout_message(
         y = line_h;
     }
 
+    // Centre the text against the icon when the icon is the taller of
+    // the two.
+    //
+    // Without this the text sits on the icon's top edge, which reads as
+    // misalignment rather than as a design: the eye pairs a 32px icon
+    // with the line beside it, and "beside" means centred. Shifting
+    // every line box (rather than only the first) keeps a two-line
+    // message centred as a block, which is what looks right when the
+    // message is still shorter than the icon.
+    //
+    // Done here, on the finished line boxes, so hit-testing and painting
+    // move together — the alternative, offsetting only at draw time, is
+    // the class of bug where you can see text you cannot select.
+    let text_h = y.max(line_h);
+    let row_h = text_h.max(avatar.map(|a| a.size).unwrap_or(0));
+    if row_h > text_h {
+        let shift = (row_h - text_h) / 2;
+        for l in &mut lines {
+            l.y += shift;
+        }
+    }
+
     LayoutCache {
         generation,
         // A head row must be at least as tall as its avatar, or the
         // icon overflows into the row below. This is the case the
         // "re-estimate on regroup" fix in ChatBuffer exists for: a head
         // and its continuations now genuinely differ in height.
-        height: y.max(line_h).max(avatar.map(|a| a.size).unwrap_or(0)),
+        height: row_h,
         lines,
         natural_indent: natural_indent.min(params.max_indent),
         avatar,

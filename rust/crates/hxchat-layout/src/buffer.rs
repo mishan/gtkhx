@@ -878,6 +878,62 @@ impl ChatBuffer {
         out
     }
 
+    /// The speaker whose avatar covers content point `(x, y)`, if any.
+    ///
+    /// The avatar is painted from `LayoutCache::avatar`, not from a line
+    /// box, so the ordinary caret hit-test cannot see it — clicking an
+    /// icon found nothing at all. Asking the layout directly keeps the
+    /// clickable area and the painted area the same rectangle by
+    /// construction.
+    pub fn avatar_at(&mut self, x: i32, y: u64) -> Option<u16> {
+        let hit = self.index.locate(y)?;
+        let top = self.index.offset_of(hit.row);
+        let av = self.rows.get(hit.row)?.layout.as_ref()?.avatar?;
+        let local_y = y.checked_sub(top)? as i64;
+        let (ax, ay, size) = (av.x as i64, av.y as i64, av.size as i64);
+        if (x as i64) >= ax
+            && (x as i64) < ax + size
+            && local_y >= ay
+            && local_y < ay + size
+        {
+            Some(av.uid)
+        } else {
+            None
+        }
+    }
+
+    /// A selection covering the whole buffer, or `None` when empty.
+    ///
+    /// The model owns what "everything" means, because the view kept
+    /// getting it wrong: it hard-coded `Block(0)` at both ends, which
+    /// skipped the first row's *gutter* and — once markdown started
+    /// splitting a body into several blocks — stopped at the end of the
+    /// first block of the last row, dropping any code block or quote
+    /// after it.
+    pub fn select_all(&self) -> Option<Selection> {
+        if self.rows.is_empty() {
+            return None;
+        }
+        let last_row = self.rows.len() - 1;
+        let first_src = *self.sources_of(0).first()?;
+        let last_src = *self.sources_of(last_row).last()?;
+        let end = self
+            .source_text(last_row, last_src)
+            .map_or(0, |t| t.len());
+        Some(Selection::new(
+            Caret {
+                message: self.id_at(0)?,
+                source: first_src,
+                offset: 0,
+            },
+            Caret {
+                message: self.id_at(last_row)?,
+                source: last_src,
+                offset: end,
+            },
+        ))
+    }
+
     /// Matches falling inside one row's one source, for the renderer.
     ///
     /// The renderer asks per source per row while drawing, so this is a
