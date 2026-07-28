@@ -359,6 +359,189 @@ fn wrap_honours_hard_newlines() {
     assert_eq!(l.lines.len(), 3);
 }
 
+/// A measurer whose per-character width depends on the *style*, not just
+/// the text.
+///
+/// [`FixedMeasure`] can't catch a whole class of bug, because if every
+/// character is the same width then measuring a run with the wrong style
+/// still gives the right answer. Real fonts are not like that: bold and
+/// monospace are wider than the base face. This measurer reproduces that,
+/// and it is what makes the overflow assertions below meaningful.
+#[derive(Clone, Copy, Debug)]
+struct StyleMeasure {
+    base: u32,
+}
+
+impl TextMeasure for StyleMeasure {
+    fn metrics(&self) -> crate::measure::FontMetrics {
+        crate::measure::FontMetrics {
+            line_height: 16,
+            ascent: 12,
+            space_width: self.base,
+        }
+    }
+
+    fn run_width(&self, text: &str, style: Style) -> u32 {
+        let per = if style.attrs.contains(Attrs::BOLD) {
+            self.base * 2
+        } else if style.attrs.contains(Attrs::CODE) {
+            self.base * 3
+        } else {
+            self.base
+        };
+        (text.chars().count() as u32) * per
+    }
+}
+
+/// Every wrapped line's *actually rendered* width must fit the box.
+///
+/// This is the property the old break-point search violated: it measured
+/// the remaining text with the style in effect at the line's start, so a
+/// bold or code run later in the line was under-measured and the drawn
+/// line overflowed.
+fn assert_no_line_overflows(
+    p: &ParsedText,
+    lines: &[crate::wrap::LineBox],
+    width: u32,
+    m: &dyn TextMeasure,
+) {
+    for lb in lines {
+        let mut w = 0u32;
+        let mut cursor = lb.range.start;
+        for s in &p.spans {
+            if s.range.end <= cursor || s.range.start >= lb.range.end {
+                continue;
+            }
+            if s.range.start > cursor {
+                w += m.run_width(&p.text[cursor..s.range.start], Style::default());
+                cursor = s.range.start;
+            }
+            let e = s.range.end.min(lb.range.end);
+            if e > cursor {
+                w += m.run_width(&p.text[cursor..e], s.style);
+                cursor = e;
+            }
+        }
+        if cursor < lb.range.end {
+            w += m.run_width(&p.text[cursor..lb.range.end], Style::default());
+        }
+        assert!(
+            w <= width,
+            "line {:?} ({:?}) renders {w}px, over the {width}px box",
+            lb.range,
+            &p.text[lb.range.clone()]
+        );
+    }
+}
+
+#[test]
+fn wrap_accounts_for_style_changes_mid_line() {
+    let m = StyleMeasure { base: 10 };
+    // Bold measures 2x, so a break point chosen from the leading plain
+    // style overshoots badly.
+    let p = markdown::parse_inline("aaa **bbbbbbbbbb** ccc");
+    let msg = Message::system(p.clone());
+    let l = layout_message(&msg, &params(100), LayoutGeneration::default(), &m);
+    assert_no_line_overflows(&p, &l.lines, 100, &m);
+}
+
+#[test]
+fn wrap_accounts_for_code_runs() {
+    let m = StyleMeasure { base: 10 };
+    // Code measures 3x.
+    let p = markdown::parse_inline("run `hx_chat_view_append_indent` now");
+    let msg = Message::system(p.clone());
+    let l = layout_message(&msg, &params(120), LayoutGeneration::default(), &m);
+    assert_no_line_overflows(&p, &l.lines, 120, &m);
+}
+
+#[test]
+fn wrap_style_at_the_very_start_of_a_line() {
+    // The mirror case: the line *begins* bold and turns plain, where a
+    // start-style-only search over-measures and wraps too early.
+    let m = StyleMeasure { base: 10 };
+    let p = markdown::parse_inline("**bb** aaaaaaaaaaaaaaaaaaaaaaaa");
+    let msg = Message::system(p.clone());
+    let l = layout_message(&msg, &params(100), LayoutGeneration::default(), &m);
+    assert_no_line_overflows(&p, &l.lines, 100, &m);
+    // And no content is lost across the wrap.
+    let joined: String = l
+        .lines
+        .iter()
+        .map(|lb| &p.text[lb.range.clone()])
+        .collect::<Vec<_>>()
+        .join("");
+    assert_eq!(joined.replace(' ', ""), p.text.replace(' ', ""));
+}
+
+#[test]
+fn empty_quote_still_has_a_line_box() {
+    let m = FixedMeasure::new(8);
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: None,
+        blocks: vec![Block::Quote {
+            content: ParsedText::plain(""),
+            depth: 1,
+        }],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l = layout_message(&msg, &params(400), LayoutGeneration::default(), &m);
+    assert_eq!(
+        l.lines.len(),
+        1,
+        "an empty quote occupies space, so it must be hit-testable"
+    );
+    assert_eq!(l.height, m.metrics().line_height);
+}
+
+#[test]
+fn empty_alt_image_still_has_a_line_box() {
+    let m = FixedMeasure::new(8);
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: None,
+        blocks: vec![Block::Image {
+            token: 1,
+            size: None,
+            alt: String::new(),
+        }],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l = layout_message(&msg, &params(400), LayoutGeneration::default(), &m);
+    assert_eq!(
+        l.lines.len(),
+        1,
+        "an undecoded image must stay clickable — that is how the \
+         media dialog gets opened"
+    );
+}
+
+#[test]
+fn gutter_gets_its_own_line_box() {
+    let m = FixedMeasure::new(8);
+    let mut p = params(400);
+    p.indent = true;
+    p.indent_width = 80;
+    let msg = Message {
+        kind: crate::message::MessageKind::Live,
+        timestamp: 0,
+        speaker: None,
+        gutter: Some(mirc::parse("\u{3}12<\u{3}alice\u{3}12>\u{3}")),
+        blocks: vec![Block::Text(ParsedText::plain("hello"))],
+        flags: MessageFlagsNone::NONE,
+    };
+    let l = layout_message(&msg, &p, LayoutGeneration::default(), &m);
+    assert_eq!(l.lines[0].source, crate::wrap::LineSource::Gutter);
+    assert_eq!(l.lines[0].x, 0);
+    assert_eq!(l.lines[1].x, 80, "body sits past the gutter");
+    assert_eq!(l.lines[0].y, l.lines[1].y, "same visual row");
+}
+
 #[test]
 fn wrap_disabled_produces_one_line() {
     let m = FixedMeasure::new(10);
@@ -381,6 +564,7 @@ fn image_block_has_real_pixel_height() {
         kind: crate::message::MessageKind::Live,
         timestamp: 0,
         speaker: None,
+        gutter: None,
         blocks: vec![Block::Image {
             token: 7,
             size: Some(ImageSize {
@@ -406,6 +590,7 @@ fn undecoded_image_measures_as_placeholder() {
         kind: crate::message::MessageKind::Live,
         timestamp: 0,
         speaker: None,
+        gutter: None,
         blocks: vec![Block::Image {
             token: 7,
             size: None,
@@ -674,6 +859,7 @@ fn buffer_image_decode_grows_the_row() {
         kind: crate::message::MessageKind::Live,
         timestamp: 0,
         speaker: None,
+        gutter: None,
         blocks: vec![Block::Image {
             token: 42,
             size: None,

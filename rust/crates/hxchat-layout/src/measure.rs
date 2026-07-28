@@ -59,6 +59,19 @@ pub trait TextMeasure {
     /// The largest prefix of `text` that fits in `max_width`, returned as
     /// a byte offset, together with its width.
     ///
+    /// # Contract
+    ///
+    /// - The returned offset is always on a `char` boundary.
+    /// - The returned width is `<= max_width` **except** in the
+    ///   minimum-progress case below.
+    /// - **Minimum progress:** for non-empty `text` and non-zero
+    ///   `max_width`, the offset is always `> 0`, even when not a single
+    ///   character fits. This is deliberate and the overflow is
+    ///   unavoidable — you cannot render less than one character, and the
+    ///   alternative (returning 0) makes the wrap loop in
+    ///   [`crate::wrap`] unable to advance. A single over-wide grapheme
+    ///   clips; an infinite loop hangs the UI.
+    ///
     /// The default implementation is a binary search over
     /// [`TextMeasure::run_width`] on character boundaries — correct for
     /// any monotonic measurer and adequate for the fixed-width test one.

@@ -37,16 +37,26 @@ pub struct LayoutGeneration {
     pub zoom_permille: u32,
 }
 
+/// What a [`LineBox`] draws text from.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LineSource {
+    /// The left column — the pre-rendered gutter, or the speaker's nick.
+    /// Always the message's first line box when present.
+    Gutter,
+    /// Body block `n`.
+    Block(usize),
+}
+
 /// One visual line within a message.
 #[derive(Clone, PartialEq, Eq, Debug)]
 pub struct LineBox {
     /// Y offset from the top of the message.
     pub y: u32,
     pub height: u32,
-    /// Byte range within the owning block's text.
+    /// Byte range within the owning source's text.
     pub range: Range<usize>,
-    /// Which block of the message this line came from.
-    pub block: usize,
+    /// Where this line's text comes from.
+    pub source: LineSource,
     /// X offset — the indent column, or 0 for full-width content.
     pub x: u32,
 }
@@ -111,17 +121,43 @@ pub fn layout_message(
 
     // The gutter is only as wide as this message needs; the buffer
     // reconciles the maximum across rows and re-lays out when it grows.
+    //
+    // A pre-rendered gutter (the compat path — see Message::gutter) wins
+    // over the speaker's bare nick, because it carries the styling
+    // chat.c already applied and the A/B has to match it exactly.
     let natural_indent = if params.indent {
-        msg.speaker
-            .as_ref()
-            .map(|s| measure.run_width(&s.nick, Style::default()) + metrics.space_width * 2)
-            .unwrap_or(0)
+        match (&msg.gutter, &msg.speaker) {
+            (Some(g), _) if !g.text.is_empty() => {
+                measure_styled(g, 0..g.text.len(), measure) + metrics.space_width
+            }
+            (_, Some(s)) => {
+                measure.run_width(&s.nick, Style::default()) + metrics.space_width * 2
+            }
+            _ => 0,
+        }
     } else {
         0
     };
 
     let body_x = if params.indent { params.indent_width } else { 0 };
     let body_width = params.width.saturating_sub(body_x).max(line_h);
+
+    // The gutter is one unwrapped line at x=0, always first, so the view
+    // can find it without scanning and hit-testing can distinguish a
+    // click on the nick from a click on the body.
+    if params.indent {
+        if let Some(g) = &msg.gutter {
+            if !g.text.is_empty() {
+                lines.push(LineBox {
+                    y: 0,
+                    height: line_h,
+                    range: 0..g.text.len(),
+                    source: LineSource::Gutter,
+                    x: 0,
+                });
+            }
+        }
+    }
 
     for (bi, block) in msg.blocks.iter().enumerate() {
         match block {
@@ -131,7 +167,7 @@ pub fn layout_message(
                         y,
                         height: line_h,
                         range,
-                        block: bi,
+                        source: LineSource::Block(bi),
                         x: body_x,
                     });
                     y += line_h;
@@ -144,7 +180,7 @@ pub fn layout_message(
                         y,
                         height: line_h,
                         range: 0..0,
-                        block: bi,
+                        source: LineSource::Block(bi),
                         x: body_x,
                     });
                     y += line_h;
@@ -161,7 +197,7 @@ pub fn layout_message(
                         y,
                         height: line_h,
                         range: start..i,
-                        block: bi,
+                        source: LineSource::Block(bi),
                         x: body_x,
                     });
                     y += line_h;
@@ -171,7 +207,7 @@ pub fn layout_message(
                     y,
                     height: line_h,
                     range: start..text.len(),
-                    block: bi,
+                    source: LineSource::Block(bi),
                     x: body_x,
                 });
                 y += line_h + params.block_padding;
@@ -184,12 +220,23 @@ pub fn layout_message(
                         y,
                         height: line_h,
                         range,
-                        block: bi,
+                        source: LineSource::Block(bi),
                         x: qx,
                     });
                     y += line_h;
                 });
+                // An empty quote still gets a line box, for the same
+                // reason an empty text block does: a row with no line
+                // boxes occupies vertical space that nothing can hit-test
+                // or select, which reads as a dead patch in the buffer.
                 if n == 0 {
+                    lines.push(LineBox {
+                        y,
+                        height: line_h,
+                        range: 0..0,
+                        source: LineSource::Block(bi),
+                        x: qx,
+                    });
                     y += line_h;
                 }
             }
@@ -205,7 +252,7 @@ pub fn layout_message(
                         y,
                         height: h,
                         range: 0..alt.len(),
-                        block: bi,
+                        source: LineSource::Block(bi),
                         x: body_x,
                     });
                     y += h + params.block_padding;
@@ -220,12 +267,22 @@ pub fn layout_message(
                             y,
                             height: line_h,
                             range,
-                            block: bi,
+                            source: LineSource::Block(bi),
                             x: body_x,
                         });
                         y += line_h;
                     });
+                    // Same rule: an image whose alt text is empty must
+                    // still be clickable — that is how the user opens
+                    // the media dialog before the decode lands.
                     if n == 0 {
+                        lines.push(LineBox {
+                            y,
+                            height: line_h,
+                            range: 0..0,
+                            source: LineSource::Block(bi),
+                            x: body_x,
+                        });
                         y += line_h;
                     }
                 }
@@ -287,9 +344,10 @@ fn wrap_text(
                 count += 1;
                 break;
             }
-            // Doesn't fit: find the break point.
-            let (fit, _) = measure.fit_prefix(rest, style_at_start(p, seg_start), width);
-            let mut brk = seg_start + fit.max(1);
+            // Doesn't fit: find the break point, honouring every style
+            // change between here and the boundary.
+            let (fit_abs, _) = fit_styled_prefix(p, seg_start..hard, width, measure);
+            let mut brk = fit_abs.max(seg_start + 1);
             if word_wrap {
                 if let Some(sp) = p.text[seg_start..brk].rfind([' ', '\t']) {
                     if sp > 0 {
@@ -316,35 +374,76 @@ fn wrap_text(
     count
 }
 
-/// Total width of a byte range, measured one span at a time.
+/// Split `range` into maximal runs of uniform style.
 ///
-/// The per-run granularity is the point: a 200-character message with
-/// two bold words costs three measure calls, not two hundred.
-fn measure_styled(p: &ParsedText, range: Range<usize>, measure: &dyn TextMeasure) -> u32 {
-    let mut total = 0u32;
+/// Gaps between spans are default-styled. This is the one place that
+/// knows how to walk a `ParsedText`'s style structure, so measuring and
+/// break-point search can't drift apart.
+fn style_runs(p: &ParsedText, range: Range<usize>) -> Vec<(Range<usize>, Style)> {
+    let mut out = Vec::new();
     let mut cursor = range.start;
     for s in &p.spans {
         if s.range.end <= cursor || s.range.start >= range.end {
             continue;
         }
         if s.range.start > cursor {
-            total += measure.run_width(&p.text[cursor..s.range.start], Style::default());
+            out.push((cursor..s.range.start, Style::default()));
             cursor = s.range.start;
         }
         let end = s.range.end.min(range.end);
         if end > cursor {
-            total += measure.run_width(&p.text[cursor..end], s.style);
+            out.push((cursor..end, s.style));
             cursor = end;
         }
     }
     if cursor < range.end {
-        total += measure.run_width(&p.text[cursor..range.end], Style::default());
+        out.push((cursor..range.end, Style::default()));
     }
-    total
+    out
 }
 
-fn style_at_start(p: &ParsedText, at: usize) -> Style {
-    p.style_at(at)
+/// Total width of a byte range, measured one style run at a time.
+///
+/// The per-run granularity is the point: a 200-character message with
+/// two bold words costs three measure calls, not two hundred.
+fn measure_styled(p: &ParsedText, range: Range<usize>, measure: &dyn TextMeasure) -> u32 {
+    style_runs(p, range)
+        .into_iter()
+        .map(|(r, style)| measure.run_width(&p.text[r], style))
+        .sum()
+}
+
+/// Largest prefix of `range` fitting in `max_width`, honouring every
+/// style change inside it.
+///
+/// The naive version — measure the whole rest with the style in effect
+/// at its *start* — is wrong as soon as a run changes style partway
+/// through, which `**bold**` and `` `code` `` both do. Bold and
+/// monospace are wider than the base font, so a break point chosen from
+/// the start style under-measures and the drawn line overflows its box.
+/// Walking runs and only calling the measurer's own prefix search on the
+/// single run that straddles the boundary is both correct and no more
+/// expensive.
+fn fit_styled_prefix(
+    p: &ParsedText,
+    range: Range<usize>,
+    max_width: u32,
+    measure: &dyn TextMeasure,
+) -> (usize, u32) {
+    let mut total = 0u32;
+    let mut cursor = range.start;
+    for (r, style) in style_runs(p, range.clone()) {
+        let seg = &p.text[r.clone()];
+        let w = measure.run_width(seg, style);
+        if total + w <= max_width {
+            total += w;
+            cursor = r.end;
+            continue;
+        }
+        let (fit, fw) = measure.fit_prefix(seg, style, max_width.saturating_sub(total));
+        return (r.start + fit, total + fw);
+    }
+    (cursor, total)
 }
 
 fn next_boundary(s: &str, from: usize) -> usize {
