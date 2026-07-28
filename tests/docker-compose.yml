@@ -41,6 +41,15 @@
 
 name: gtkhx-rig
 
+# Every service carries `restart: on-failure`: a container that exits with a
+# non-zero status is restarted, but a clean `docker compose down` (SIGTERM →
+# exit 0) is not, so it won't fight teardown. This matters most for mhxd,
+# which keeps getting wedged during testing — its entrypoint now runs a
+# health watchdog that kills a wedged server and exits non-zero, so a fresh
+# one comes up automatically. mhxd also has a Docker HEALTHCHECK, so
+# `docker compose up --wait` blocks until it's actually answering the Hotline
+# handshake (not just started).
+
 services:
   # ── Trackers ──────────────────────────────────────────────────────
   # hxtrackd binds its hardcoded HTRK_TCPPORT/HTRK_UDPPORT (5498/5499);
@@ -52,6 +61,7 @@ services:
     image: gtkhx-hxtrackd
     container_name: gtkhx-hxtrackd
     network_mode: host
+    restart: on-failure
 
   argus:
     build:
@@ -59,6 +69,7 @@ services:
     image: gtkhx-argus
     container_name: gtkhx-argus
     network_mode: host
+    restart: on-failure
 
   # ── Servers ───────────────────────────────────────────────────────
   mhxd:
@@ -67,6 +78,7 @@ services:
     image: gtkhx-mhxd
     container_name: gtkhx-mhxd
     network_mode: host
+    restart: on-failure
     depends_on: [argus, hxtrackd]
     environment:
       # hxd registers on the fixed HTRK port 5499, which on host loopback
@@ -80,6 +92,7 @@ services:
     image: gtkhx-janus
     container_name: gtkhx-janus
     network_mode: host
+    restart: on-failure
     depends_on: [argus, hxtrackd]
     environment:
       # Janus's Trackers list is host:port, so it registers with both:
@@ -97,4 +110,5 @@ services:
     image: gtkhx-socks
     container_name: gtkhx-socks
     network_mode: host
+    restart: on-failure
     depends_on: [mhxd]
