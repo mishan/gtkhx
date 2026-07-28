@@ -84,8 +84,8 @@ pub use buffer::{ChatBuffer, MIN_INDENT};
 pub use index::HeightIndex;
 pub use measure::{FixedMeasure, FontMetrics, TextMeasure};
 pub use message::{
-    Block, IconRef, ImageSize, LoadMoreDirection, Message, MessageFlags, MessageId, MessageKind,
-    Speaker,
+    Block, GroupKey, IconRef, ImageSize, LoadMoreDirection, Message, MessageFlags, MessageId,
+    MessageKind, Speaker,
 };
 pub use markdown::{scan_delims, SourceSpan};
 pub use search::{find_all, Match, SearchState};

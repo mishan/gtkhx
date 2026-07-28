@@ -12,7 +12,7 @@
 use crate::anchor::{AnchorResolver, Gravity, ScrollAnchor};
 use crate::index::HeightIndex;
 use crate::measure::TextMeasure;
-use crate::message::{Block, Message, MessageId};
+use crate::message::{Block, Message, MessageFlags, MessageId};
 use crate::select::{Caret, RowSelection, Selection};
 use crate::span::Style;
 use crate::wrap::LineSource;
@@ -23,6 +23,14 @@ use std::collections::VecDeque;
 /// Floor for a hand-dragged gutter, so it can't be collapsed to
 /// nothing and become impossible to grab again.
 pub const MIN_INDENT: u32 = 16;
+
+/// Default gap that breaks a run of messages from one speaker.
+///
+/// Five minutes. Short enough that "hai / hai / hai" collapses to one
+/// block with one nick, long enough that returning to a room after a
+/// break shows who is talking again rather than silently attaching your
+/// message to something you said an hour ago.
+pub const DEFAULT_GROUP_GAP_SECS: i64 = 300;
 
 #[derive(Debug)]
 struct Row {
@@ -58,6 +66,10 @@ pub struct ChatBuffer {
     max_rows: usize,
     /// Widest gutter any row has asked for, so columns align.
     indent_width: u32,
+    /// How long a gap breaks a run of messages from one speaker, in
+    /// seconds. 0 disables grouping entirely.
+    group_gap_secs: i64,
+
     /// Set once the user drags the separator, which freezes the gutter.
     ///
     /// xtext left auto-growth on after a drag, so a long nick could
@@ -87,6 +99,7 @@ impl ChatBuffer {
             generation,
             anchor: ScrollAnchor::bottom(),
             max_rows: 0,
+            group_gap_secs: DEFAULT_GROUP_GAP_SECS,
             indent_width: 0,
             indent_pinned: false,
         }
@@ -160,8 +173,11 @@ impl ChatBuffer {
     // ---- mutation --------------------------------------------------
 
     /// Append a message; returns its mark.
-    pub fn append(&mut self, msg: Message, measure: &dyn TextMeasure) -> MessageId {
+    pub fn append(&mut self, mut msg: Message, measure: &dyn TextMeasure) -> MessageId {
         let id = self.alloc_id();
+        if self.groups_with_previous(&msg, self.rows.len()) {
+            msg.flags = msg.flags.union(MessageFlags::GROUPED);
+        }
         let h = estimate_height(&msg, &self.params, measure);
         self.rows.push_back(Row {
             id,
@@ -210,6 +226,10 @@ impl ChatBuffer {
         );
         self.index.insert(at, h, false);
         self.pos_dirty = true;
+        // An insert splits whatever run spanned this point: the new row
+        // may continue the one above, and the row below may no longer
+        // continue what is now two rows up.
+        self.regroup_from(at);
         id
     }
 
@@ -326,6 +346,75 @@ impl ChatBuffer {
         }
         self.index.drain_front(excess);
         self.pos_dirty = true;
+        // The trimmed rows may have included a run's head. Whatever is
+        // at the front now cannot be a continuation of anything.
+        self.regroup_from(0);
+    }
+
+    /// Grouping controls. 0 disables it; rows already in the buffer are
+    /// re-evaluated, since the flag describes neighbours rather than the
+    /// message itself.
+    pub fn set_group_gap_secs(&mut self, secs: i64) {
+        if secs == self.group_gap_secs {
+            return;
+        }
+        self.group_gap_secs = secs.max(0);
+        self.regroup_from(0);
+    }
+
+    pub fn group_gap_secs(&self) -> i64 {
+        self.group_gap_secs
+    }
+
+    /// Would `msg` continue the run ending at `before` (an index into
+    /// `rows`, so `rows.len()` means "appending at the end")?
+    fn groups_with_previous(&self, msg: &Message, before: usize) -> bool {
+        if self.group_gap_secs == 0 || before == 0 {
+            return false;
+        }
+        let Some(prev) = self.rows.get(before - 1) else {
+            return false;
+        };
+        let (Some(a), Some(b)) = (prev.msg.group_key(), msg.group_key()) else {
+            return false;
+        };
+        if a != b {
+            return false;
+        }
+        // Timestamps are seconds; a message that predates the one above
+        // it (history interleaving, clock skew) is not a continuation.
+        let dt = msg.timestamp - prev.msg.timestamp;
+        (0..=self.group_gap_secs).contains(&dt)
+    }
+
+    /// Recompute the GROUPED flag from `row` to the end.
+    ///
+    /// Needed because the flag is a property of a message's *neighbours*.
+    /// Trimming can delete a run's head, leaving rows that suppress their
+    /// nick with nothing above them to have shown it — a speaker's
+    /// messages appearing anonymously. Inserting can split a run the same
+    /// way.
+    fn regroup_from(&mut self, row: usize) {
+        for i in row..self.rows.len() {
+            let want = {
+                let msg = &self.rows[i].msg;
+                self.groups_with_previous(msg, i)
+            };
+            let had = self.rows[i].msg.flags.contains(MessageFlags::GROUPED);
+            if want == had {
+                continue;
+            }
+            let f = &mut self.rows[i].msg.flags;
+            *f = if want {
+                f.union(MessageFlags::GROUPED)
+            } else {
+                MessageFlags(f.0 & !MessageFlags::GROUPED.0)
+            };
+            // The gutter appears or disappears, so the row's height and
+            // layout are both stale.
+            self.rows[i].layout = None;
+            self.index.set_height(i, self.index.height_at(i), false);
+        }
     }
 
     fn alloc_id(&mut self) -> MessageId {

@@ -1901,6 +1901,8 @@ create_chat (session *sess)
 	 * timestamp. 256 px is enough room for the stamp + a medium-length
 	 * nick without dominating the chat width. */
     hx_chat_view_set_max_indent (text, 256);
+    /* Coalesce bursts from one speaker under a single nick. */
+    hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs
@@ -2101,6 +2103,8 @@ pchat_new (session *sess, struct chat *chat)
     hx_chat_view_set_indent (text, TRUE);
     hx_chat_view_set_time_stamp (text, gtkhx_prefs.timestamp);
     hx_chat_view_set_max_indent (text, 256);
+    /* Coalesce bursts from one speaker under a single nick. */
+    hx_chat_view_set_group_gap (text, HX_CHAT_GROUP_GAP_DEFAULT);
     g_signal_connect (text, "word_click", G_CALLBACK (gtkurl_xtext_word_click),
                       NULL);
     /* chat-history "Load older" sentinel handler runs

@@ -458,6 +458,7 @@ create_msg (guint16 _uid, char *name)
     hx_chat_view_set_indent (msg->outputbuf, TRUE);
     hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
     hx_chat_view_set_max_indent (msg->outputbuf, 256);
+    hx_chat_view_set_group_gap (msg->outputbuf, HX_CHAT_GROUP_GAP_DEFAULT);
     g_signal_connect (msg->outputbuf, "word_click",
                       G_CALLBACK (gtkurl_xtext_word_click), NULL);
 

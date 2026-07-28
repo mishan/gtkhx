@@ -526,6 +526,15 @@ impl HxChatView {
         self.imp_().buffer.borrow_mut().set_max_rows(cap);
     }
 
+    /// Gap that breaks a run of messages from one speaker; 0 disables
+    /// grouping. Re-decides the rows already in the buffer, since the
+    /// flag describes neighbours rather than messages.
+    pub fn set_group_gap_secs(&self, secs: i64) {
+        self.imp_().buffer.borrow_mut().set_group_gap_secs(secs);
+        self.queue_resize();
+        self.queue_draw();
+    }
+
     pub fn set_indent(&self, on: bool) {
         self.imp_().buffer.borrow_mut().set_indent(on);
         self.queue_draw();

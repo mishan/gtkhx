@@ -247,6 +247,20 @@ HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
                                              const HxChatRun *body, int n_body,
                                              time_t stamp);
 
+/* Coalesce consecutive messages from one speaker: only the first of a
+ * run draws the nick column (and, once avatars land, the icon). `secs`
+ * is how long a gap breaks a run; 0 turns grouping off.
+ *
+ * The body keeps its indent either way, and a hidden gutter still
+ * reserves its width, so switching this does not shift the column. */
+void hx_chat_view_set_group_gap (GtkWidget *view, int secs);
+
+/* Default gap, in seconds. Five minutes: short enough that a burst of
+ * messages collapses under one name, long enough that coming back to a
+ * room shows who is talking rather than attaching your message to
+ * something you said an hour ago. */
+#define HX_CHAT_GROUP_GAP_DEFAULT 300
+
 /* ---- appending (plain text) --------------------------------------- *
  *
  * `stamp` is a time_t for the row's timestamp column; 0 means "now".

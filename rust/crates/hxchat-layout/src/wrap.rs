@@ -136,6 +136,18 @@ pub fn layout_message(
     // A pre-rendered gutter (the compat path — see Message::gutter) wins
     // over the speaker's bare nick, because it carries the styling
     // chat.c already applied and the A/B has to match it exactly.
+    // A grouped row is a continuation of the one above: same speaker,
+    // close in time. Its gutter is suppressed so a burst of messages
+    // reads as one block under one name instead of repeating the nick
+    // (and, once avatars land, the icon) on every line. The body keeps
+    // its indent, so the column stays straight.
+    //
+    // The flag is set by ChatBuffer, which is the only thing that can
+    // see a message's neighbours. It still contributes its *natural*
+    // gutter width below, so hiding a nick never narrows the shared
+    // column and shifts every other row sideways.
+    let grouped = msg.flags.contains(crate::message::MessageFlags::GROUPED);
+
     let natural_indent = if params.indent {
         let gutter_text = match (&msg.gutter, &msg.speaker) {
             (Some(g), _) if !g.text.is_empty() => {
@@ -169,7 +181,7 @@ pub fn layout_message(
     // the column grew, and hit-testing used the same wrong x, which is
     // why nicks could not be selected. One source of truth removes both
     // bugs at once.
-    if params.indent {
+    if params.indent && !grouped {
         if let Some(g) = &msg.gutter {
             if !g.text.is_empty() {
                 let gw = measure_styled(g, 0..g.text.len(), measure);

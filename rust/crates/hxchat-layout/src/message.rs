@@ -80,6 +80,42 @@ pub struct Speaker {
     pub icon: IconRef,
 }
 
+impl Message {
+    /// The key two messages must share to be grouped, or `None` for a
+    /// message that never groups (system rows, dividers, `/me`).
+    ///
+    /// Prefers the uid, which is authoritative when the server sent a
+    /// UID chunk. Falls back to the gutter text when it didn't, because
+    /// otherwise grouping would simply not happen on the older servers
+    /// that omit the chunk — and consecutive lines under one nick are
+    /// the same person for display purposes, which is all this decides.
+    pub fn group_key(&self) -> Option<GroupKey<'_>> {
+        if self.flags.contains(MessageFlags::ACTION)
+            || self.flags.contains(MessageFlags::DELETED)
+        {
+            return None;
+        }
+        if let Some(sp) = &self.speaker {
+            if sp.uid != 0 {
+                return Some(GroupKey::Uid(sp.uid));
+            }
+        }
+        // No uid: fall back to the rendered nick column. A row with no
+        // gutter at all is a system line and never groups.
+        match &self.gutter {
+            Some(g) if !g.text.is_empty() => Some(GroupKey::Nick(&g.text)),
+            _ => None,
+        }
+    }
+}
+
+/// What makes two adjacent messages "the same speaker".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GroupKey<'a> {
+    Uid(u16),
+    Nick(&'a str),
+}
+
 impl Speaker {
     pub fn new(uid: u16, nick: impl Into<String>) -> Speaker {
         Speaker {
@@ -155,6 +191,12 @@ impl MessageFlags {
     pub const SELF: MessageFlags = MessageFlags(1 << 3);
     /// Server tombstone for a deleted message.
     pub const DELETED: MessageFlags = MessageFlags(1 << 4);
+    /// A continuation of the row above: same speaker, close in time, so
+    /// the gutter is suppressed and only the body draws. Set by
+    /// [`ChatBuffer`](crate::ChatBuffer), never by the caller — it is a
+    /// property of a message's *neighbours*, not of the message, and
+    /// gets recomputed when they change.
+    pub const GROUPED: MessageFlags = MessageFlags(1 << 5);
 
     #[inline]
     pub fn contains(self, other: MessageFlags) -> bool {
