@@ -33,11 +33,47 @@
 
 /* ---------- Basic split: "Nick: body" ---------- */
 
+/* The sender's uid comes off the wire's UID chunk and has to survive the
+ * constructor and a deep copy. It sits in the padding after `cid` — the
+ * offset is pinned by _Static_asserts on both sides of the FFI, so this
+ * covers the plumbing rather than the layout. */
+static void
+test_chat_event_carries_the_wire_uid (void)
+{
+    const char *raw = " misha:  hello";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 3, /*uid=*/4242,
+                                        NULL);
+    HxChatEvent *c;
+
+    g_assert_nonnull (e);
+    g_assert_cmpuint (e->uid, ==, 4242);
+    g_assert_cmpuint (e->cid, ==, 3);
+
+    c = hx_chat_event_copy (e);
+    g_assert_nonnull (c);
+    g_assert_cmpuint (c->uid, ==, 4242);
+    hx_chat_event_free (c);
+    hx_chat_event_free (e);
+}
+
+/* A server that sends no UID chunk leaves it 0, which the render path
+ * reads as "unknown" and falls back on a nick lookup for. */
+static void
+test_chat_event_uid_defaults_to_zero (void)
+{
+    const char *raw = " misha:  hello";
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
+
+    g_assert_nonnull (e);
+    g_assert_cmpuint (e->uid, ==, 0);
+    hx_chat_event_free (e);
+}
+
 static void
 test_chat_event_typical_line (void)
 {
     const char *raw = " misha:  hello world";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_nonnull (e);
     g_assert_cmpuint (e->cid, ==, 0);
@@ -61,7 +97,7 @@ test_chat_event_preserves_cid (void)
 {
     /* cid round-trips verbatim — the constructor only stashes it. */
     const char *raw = "alice: hi";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0xdeadbeef, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0xdeadbeef, /*uid=*/0, NULL);
 
     g_assert_cmphex (e->cid, ==, 0xdeadbeefu);
 
@@ -75,7 +111,7 @@ test_chat_event_is_self_matches (void)
 {
     /* Sender byte-for-byte equal to self_nick: is_self TRUE. */
     const char *raw = "misha: hi all";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, "misha");
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "misha");
 
     g_assert_true (e->is_self);
     g_assert_false (e->is_info);
@@ -88,7 +124,7 @@ static void
 test_chat_event_is_self_mismatch (void)
 {
     const char *raw = "alice: hi all";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, "misha");
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "misha");
 
     g_assert_false (e->is_self);
     g_assert_cmpuint (e->sender_len, ==, 5);
@@ -103,7 +139,7 @@ test_chat_event_is_self_substring_does_not_match (void)
     /* self_nick "mish" matches a prefix of "misha" — should NOT
 	 * flip is_self. The compare requires exact length equality. */
     const char *raw = "misha: hi";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, "mish");
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "mish");
 
     g_assert_false (e->is_self);
 
@@ -115,7 +151,7 @@ test_chat_event_is_self_null_self_nick (void)
 {
     /* NULL self_nick: is_self always FALSE, no crash. */
     const char *raw = "misha: hi";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_false (e->is_self);
     g_assert_cmpuint (e->sender_len, ==, 5);
@@ -128,7 +164,7 @@ test_chat_event_is_self_empty_self_nick (void)
 {
     /* Empty-string self_nick is treated the same as NULL. */
     const char *raw = "misha: hi";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, "");
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "");
 
     g_assert_false (e->is_self);
 
@@ -144,7 +180,7 @@ test_chat_event_info_prefix_detected (void)
 	 * constructor must spot it AND skip the sender split (info
 	 * lines aren't "Nick: body" — they're internal notices). */
     const char *raw = " \00310[\00303hx\00310]\003 reconnected";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_true (e->is_info);
     /* No split on info lines, even when the body trailing the
@@ -162,7 +198,7 @@ test_chat_event_info_prefix_skips_split (void)
     /* Even if the info-prefix trailer contains a colon-bearing
 	 * line, we must not extract a sender from it. */
     const char *raw = " \00310[\00303hx\00310]\003 server: hello";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, "server");
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "server");
 
     g_assert_true (e->is_info);
     g_assert_cmpuint (e->sender_len, ==, 0);
@@ -180,7 +216,7 @@ test_chat_event_no_sender_emote (void)
 	 * still UTF-8-sanitised and preserved, sender_len and body_len
 	 * both stay 0 — downstream consumers render the line verbatim. */
     const char *raw = "*** misha waves";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_false (e->is_info);
     g_assert_cmpstr (e->line, ==, raw);
@@ -198,7 +234,7 @@ test_chat_event_no_sender_long_pre_colon (void)
 	 * reject. Verifies the constructor honours hx_chat_split_nick_body
 	 * 's URL-rejection behaviour. */
     const char *raw = " the long preamble I wrote before: was here";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_cmpuint (e->sender_len, ==, 0);
     g_assert_cmpuint (e->body_len, ==, 0);
@@ -211,7 +247,7 @@ test_chat_event_no_sender_long_pre_colon (void)
 static void
 test_chat_event_empty_line (void)
 {
-    HxChatEvent *e = hx_chat_event_new ("", 0, 7, "misha");
+    HxChatEvent *e = hx_chat_event_new ("", 0, 7, /*uid=*/0, "misha");
 
     g_assert_nonnull (e);
     g_assert_cmpuint (e->cid, ==, 7);
@@ -230,7 +266,7 @@ test_chat_event_null_raw (void)
 {
     /* gtkhx_text_to_utf8 tolerates NULL raw (treats as empty),
 	 * so the constructor mustn't crash either. */
-    HxChatEvent *e = hx_chat_event_new (NULL, 0, 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (NULL, 0, 0, /*uid=*/0, NULL);
 
     g_assert_nonnull (e);
     g_assert_nonnull (e->line);
@@ -249,7 +285,7 @@ test_chat_event_utf8_passthrough (void)
     /* Already-valid UTF-8 multibyte input flows through unchanged
 	 * (sender slice still indexes by bytes, not characters). */
     const char raw[] = "misha: héllo wörld";
-    HxChatEvent *e = hx_chat_event_new (raw, sizeof (raw) - 1, 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, sizeof (raw) - 1, 0, /*uid=*/0, NULL);
 
     g_assert_cmpstr (e->line, ==, raw);
     g_assert_cmpuint (e->line_len, ==, sizeof (raw) - 1);
@@ -268,7 +304,7 @@ test_chat_event_mac_roman_converts (void)
 	 * the resulting line must be valid UTF-8 and the sender split
 	 * must still find "misha". */
     const char raw[] = "misha: h\xe9llo"; /* the 0xe9 byte */
-    HxChatEvent *e = hx_chat_event_new (raw, sizeof (raw) - 1, 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, sizeof (raw) - 1, 0, /*uid=*/0, NULL);
 
     g_assert_nonnull (e->line);
     g_assert_true (g_utf8_validate (e->line, e->line_len, NULL));
@@ -284,7 +320,7 @@ static void
 test_chat_event_copy_preserves_fields (void)
 {
     const char *raw = "misha: a test line";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 11, "misha");
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 11, /*uid=*/0, "misha");
     HxChatEvent *c = hx_chat_event_copy (e);
 
     g_assert_nonnull (c);
@@ -324,7 +360,7 @@ static void
 test_chat_event_media_attach_round_trips (void)
 {
     HxChatEvent *e = hx_chat_event_new ("alice: look", strlen ("alice: look"),
-                                        0, NULL);
+                                        0, /*uid=*/0, NULL);
     g_assert_nonnull (e);
     g_assert_null (e->media);
 
@@ -347,7 +383,7 @@ static void
 test_chat_event_media_attach_copy_deep (void)
 {
     HxChatEvent *e = hx_chat_event_new ("alice: look", strlen ("alice: look"),
-                                        7, NULL);
+                                        7, /*uid=*/0, NULL);
     g_assert_nonnull (e);
     const guint8 id[] = {0x01, 0x02, 0x03};
     hx_chat_event_attach_media (e, id, sizeof (id), "image/gif",
@@ -377,7 +413,7 @@ static void
 test_chat_event_media_attach_detach (void)
 {
     HxChatEvent *e = hx_chat_event_new ("alice: hi", strlen ("alice: hi"),
-                                        0, NULL);
+                                        0, /*uid=*/0, NULL);
     const guint8 id[] = {0xFF};
     hx_chat_event_attach_media (e, id, 1, "image/png", 9, 0, FALSE, 0, FALSE,
                                 0, FALSE);
@@ -542,7 +578,7 @@ static void
 test_chat_event_decodes_emoji_in_body (void)
 {
     const char *raw = " misha:  :tada: party";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     /* :tada: → 🎉 in the body; the " misha:  " head is untouched. */
     g_assert_cmpstr (e->line, ==, " misha:  \xf0\x9f\x8e\x89 party");
@@ -569,7 +605,7 @@ test_chat_event_does_not_decode_nick (void)
 	 * boundary could misfire. Here the body has the shortcode and the nick
 	 * is plain — verify the nick text survives verbatim. */
     const char *raw = " bob:  hi :fire:";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_cmpstr (e->line, ==, " bob:  hi \xf0\x9f\x94\xa5");
     g_assert_cmpuint (e->sender_len, ==, 3);
@@ -585,7 +621,7 @@ static void
 test_chat_event_decodes_emoji_when_unsplit (void)
 {
     const char *raw = ":tada: everyone";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_cmpuint (e->sender_len, ==, 0);
     g_assert_cmpstr (e->line, ==, "\xf0\x9f\x8e\x89 everyone");
@@ -600,7 +636,7 @@ static void
 test_chat_event_leaves_non_shortcodes (void)
 {
     const char *raw = " misha:  meet at 10:30, ratio 4:3, :notacode:";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_cmpstr (e->line, ==, raw);
     g_assert_cmpuint (e->line_len, ==, strlen (raw));
@@ -615,7 +651,7 @@ test_chat_event_decode_respects_toggle (void)
 {
     gtkhx_text_set_emoji_shortcodes_enabled (FALSE);
     const char *raw = " misha:  :tada: party";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, NULL);
+    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
     g_assert_cmpstr (e->line, ==, raw); /* unchanged */
     hx_chat_event_free (e);
     gtkhx_text_set_emoji_shortcodes_enabled (TRUE); /* restore default */
@@ -628,6 +664,10 @@ main (int argc, char **argv)
 
     g_test_add_func ("/proto/chat_event/typical_line",
                      test_chat_event_typical_line);
+    g_test_add_func ("/chat_event/wire_uid",
+                     test_chat_event_carries_the_wire_uid);
+    g_test_add_func ("/chat_event/uid_defaults_zero",
+                     test_chat_event_uid_defaults_to_zero);
     g_test_add_func ("/proto/chat_event/preserves_cid",
                      test_chat_event_preserves_cid);
 

@@ -429,10 +429,20 @@ Concretely this means, in phase order:
   `hx_member_model_find_by_name` against the *same* `HxMemberModel` the
   user list is built from. One record per user, whichever surface you
   clicked, which is what §3.7a asked for. `Speaker.icon` and the avatar
-  gutter are still to come. A lookup miss stays uid 0 rather than a
-  guess: the user may have parted, two users may share a name, or the
-  "nick" may be server prose. A wrong uid would attach someone else's
-  avatar and group two people's messages together — worse than none.
+  gutter are still to come.
+
+  **The uid comes off the wire first.** `HTLS_HDR_CHAT` carries a UID
+  chunk — `parse_chat` reads it, and `hx_chat_recv` was already using it
+  for the ignore gate — it simply wasn't carried onto `HxChatEvent`, so
+  the render path couldn't see it. It is now (in the padding after `cid`,
+  so no other field moved). The membership lookup is the *fallback*, for
+  the servers that omit the chunk and for lines that never came from a
+  chat message at all.
+
+  If both miss, uid stays 0 and stays a miss: the user may have parted,
+  two users may share a name, or the "nick" may be server prose. A wrong
+  uid would attach someone else's avatar and group two people's messages
+  together — worse than none.
   `speaker-activated` stays unwired rather than
   guessing.
 - **Later, optional** — `HxMember` becomes the thing `Speaker` *borrows*

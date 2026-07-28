@@ -793,7 +793,7 @@ hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
 }
 
 HxChatEvent *
-hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
+hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid, guint16 uid,
                    const char *self_nick)
 {
     HxChatEvent *e;
@@ -801,6 +801,7 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid,
 
     e = g_new0 (HxChatEvent, 1);
     e->cid = cid;
+    e->uid = uid;
 
     /* gtkhx_text_to_utf8 always returns a g_strdup-ed copy, even
 	 * on empty input — caller owns the result. */
@@ -890,6 +891,7 @@ _Static_assert (sizeof (HxChatMedia) == 56,
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, cid) == 0, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line) == 8, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line_len) == 16, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, uid) == 4, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_off) == 24, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_len) == 32, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, body_off) == 40, "field offset");

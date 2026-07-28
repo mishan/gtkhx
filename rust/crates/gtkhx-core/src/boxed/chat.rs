@@ -50,6 +50,10 @@ const _: () = {
 #[repr(C)]
 pub struct HxChatEvent {
     pub cid: u32,
+    /// Sender's Hotline uid from the wire's UID chunk; 0 when the
+    /// server sent none. Occupies the padding after `cid`, so the
+    /// struct is still 72 bytes and no other offset moved.
+    pub uid: u16,
     pub line: *mut c_char, // UTF-8, NUL-terminated, owned
     pub line_len: usize,
     pub sender_off: usize,
@@ -64,6 +68,7 @@ pub struct HxChatEvent {
 const _: () = {
     assert!(size_of::<HxChatEvent>() == 72);
     assert!(offset_of!(HxChatEvent, cid) == 0);
+    assert!(offset_of!(HxChatEvent, uid) == 4);
     assert!(offset_of!(HxChatEvent, line) == 8);
     assert!(offset_of!(HxChatEvent, line_len) == 16);
     assert!(offset_of!(HxChatEvent, sender_off) == 24);
@@ -134,6 +139,7 @@ pub unsafe extern "C" fn hx_chat_event_copy(e: *mut HxChatEvent) -> *mut HxChatE
     }
     let c = g_malloc0(size_of::<HxChatEvent>()) as *mut HxChatEvent;
     (*c).cid = (*e).cid;
+    (*c).uid = (*e).uid;
     (*c).line_len = (*e).line_len;
     (*c).sender_off = (*e).sender_off;
     (*c).sender_len = (*e).sender_len;

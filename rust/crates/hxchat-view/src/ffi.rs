@@ -436,11 +436,12 @@ pub struct HxChatSpeaker {
 
 /// `None` when the caller couldn't identify the speaker.
 ///
-/// uid 0 means "not known", not "user zero": Hotline chat is a text
-/// stream, so the id has to be resolved by nick against the membership
-/// model and the lookup can legitimately miss. Guessing would attach the
-/// wrong avatar and group two people's messages together, so a miss
-/// stays a miss.
+/// uid 0 means "not known", not "user zero". Chat messages carry a UID
+/// chunk and the C side passes it straight through, but the chunk is
+/// optional — older servers omit it, and `parse_chat` defaults it to 0 —
+/// so the caller falls back to a nick lookup, which can itself miss.
+/// Guessing would attach the wrong avatar and group two people's
+/// messages together, so a miss stays a miss.
 unsafe fn speaker_of(s: &HxChatSpeaker) -> Option<hxchat_layout::Speaker> {
     if s.uid == 0 {
         return None;

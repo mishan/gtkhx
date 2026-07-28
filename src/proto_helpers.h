@@ -670,6 +670,16 @@ typedef struct {
 typedef struct _HxChatEvent HxChatEvent;
 struct _HxChatEvent {
     guint32 cid;
+    /* Sender's Hotline user id, straight off the wire's UID chunk.
+	 *
+	 * 0 means the server didn't send one — parse_chat defaults it, and
+	 * older servers omit the chunk entirely. It does *not* mean "user
+	 * zero". The render path falls back to a nick lookup against the
+	 * membership model in that case; see chat.c::chat_speaker_for.
+	 *
+	 * Sits in the padding after `cid`, so adding it moved no other
+	 * field and the struct is still 72 bytes. */
+    guint16 uid;
     char *line; /* UTF-8-valid; NUL-terminated; owned */
     gsize line_len;
 
@@ -695,7 +705,8 @@ extern GType hx_chat_event_get_type (void) G_GNUC_CONST;
  * is NULL-safe — passing NULL means is_self always comes back
  * FALSE. Returns a freshly-allocated event the caller owns. */
 extern HxChatEvent *hx_chat_event_new (const char *raw, gsize raw_len,
-                                       guint32 cid, const char *self_nick);
+                                       guint32 cid, guint16 uid,
+                                       const char *self_nick);
 
 extern HxChatEvent *hx_chat_event_copy (HxChatEvent *e);
 extern void hx_chat_event_free (HxChatEvent *e);

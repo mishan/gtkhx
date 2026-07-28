@@ -31,6 +31,7 @@ extern "C" {    /// Look up a chat by id on a session (`struct chat *`; NULL if 
         raw: *const c_char,
         raw_len: usize,
         cid: u32,
+        uid: u16,
         self_nick: *const c_char,
     ) -> *mut c_void;
     /// Attach inline-media metadata to a chat event (copies id + mime;
@@ -252,7 +253,17 @@ pub unsafe extern "C" fn hx_rcv_chat(htlc: *mut c_void, frame: *const u8, frame_
         std::ptr::null()
     };
     let text = cm.text();
-    let ev = hx_chat_event_new(text.as_ptr() as *const c_char, text.len(), cm.cid, self_nick);
+    // cm.uid comes straight off the wire's UID chunk (parse_chat), and
+    // is 0 when the server sent none. Passing it through means the
+    // render path gets the sender's identity from the protocol rather
+    // than by looking the nick up — see chat.c::chat_speaker_for.
+    let ev = hx_chat_event_new(
+        text.as_ptr() as *const c_char,
+        text.len(),
+        cm.cid,
+        cm.uid,
+        self_nick,
+    );
     if let Some(m) = media {
         hx_chat_event_attach_media(
             ev,
@@ -529,6 +540,7 @@ unsafe fn hx_chat_event_new(
     raw: *const c_char,
     raw_len: usize,
     cid: u32,
+    _uid: u16,
     _self_nick: *const c_char,
 ) -> *mut c_void {
     let body = std::slice::from_raw_parts(raw as *const u8, raw_len).to_vec();

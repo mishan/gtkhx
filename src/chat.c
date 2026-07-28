@@ -706,27 +706,38 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     }
 }
 
-/* Resolve a chat nick to the user record the *user list* holds.
+/* Identify who said a line.
  *
- * Hotline chat is a text stream: a line carries a name and no id, so
- * this is a lookup rather than a read. It goes through the conversation's
- * membership model — the same `HxMemberModel` the user list is built
- * from — so a right-click in chat and a right-click in Users are looking
- * at one record, not two views that happen to agree.
+ * `wire_uid` is the sender's uid straight off the chat message's UID
+ * chunk (`parse_chat` → `HxChatEvent.uid`). When the server sent one,
+ * that is authoritative and this does no work.
  *
- * A miss returns uid 0, and that is left as a miss. The user may have
- * parted since speaking, two users may share a name, or the "nick" may
- * be server prose that merely looked like one. Guessing would attach
- * someone else's avatar and group two people's messages together, which
- * is worse than showing none. */
+ * It is 0 when the server sent no UID chunk — older servers omit it, and
+ * it is also 0 for lines that didn't come from a chat message at all
+ * (log lines, the `hx_printf` path). Then, and only then, fall back to
+ * looking the nick up in the conversation's membership model — the same
+ * `HxMemberModel` the user list is built from, so chat and Users resolve
+ * to one record rather than two that happen to agree.
+ *
+ * If the fallback misses too, uid stays 0 and stays a miss. The speaker
+ * may have parted since talking, two users may share a name, or the
+ * "nick" may be server prose that merely looked like one. Guessing would
+ * attach someone else's avatar and group two people's messages together,
+ * which is worse than showing neither. */
 static HxChatSpeaker
-chat_speaker_for (guint32 cid, const char *nick, gsize nick_len)
+chat_speaker_for (guint32 cid, guint16 wire_uid, const char *nick,
+                  gsize nick_len)
 {
     HxChatSpeaker sp = HX_CHAT_SPEAKER_NONE;
     struct chat *conv;
     char *nul;
 
     if (!nick || nick_len == 0) {
+        return sp;
+    }
+    if (wire_uid != 0) {
+        sp.uid = wire_uid;
+        sp.nick = nick;
         return sp;
     }
     conv = chat_with_cid (hx_active_session (), cid);
@@ -1032,7 +1043,8 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
                        e->sender_off, e->sender_len, e->body_off,
                        first_body_len, e->is_info, e->is_self,
                        HX_CHAT_INFO_COLOR,
-                       chat_speaker_for (e->cid, e->line + e->sender_off,
+                       chat_speaker_for (e->cid, e->uid,
+                                         e->line + e->sender_off,
                                          e->sender_len));
 
     if (nl) {
@@ -1687,7 +1699,10 @@ xprintline (GtkWidget *text, char *chat, size_t len, const char *tag,
         xprintline_render (text, valid, valid_len, name_off, name_len,
                            body_off, body_len, FALSE, said_by_self,
                            info_color,
-                           chat_speaker_for (0, valid + name_off, name_len));
+                           /* Log lines carry no wire uid — they never
+							* came from a chat message. */
+                           chat_speaker_for (0, 0, valid + name_off,
+                                             name_len));
     }
 
     g_free (valid);
