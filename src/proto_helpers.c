@@ -737,6 +737,15 @@ hx_highlight_match (const char *body, gsize body_len, const char *const *words)
  * 2 unit tests, but the prefix bytes are stable (hx_printf_prefix
  * emits exactly these) so a duplicated constant is acceptable.
  *
+ * **This is dead as of C6 and kept only until its tests come with it.**
+ * The prefix is no longer produced: INFOPREFIX is the bare string "hx"
+ * and the gutter tag travels as a chat-log-line signal parameter. The
+ * check runs against `e->line`, which only ever holds text a *server*
+ * sent, so matching now requires a server to transmit these exact
+ * escape bytes — which is not a feature worth having anyway. Removing
+ * it means retiring the two proto-test cases that feed the literal
+ * string, which is a separate change.
+ *
  * The full string is " <ETX>10[<ETX>03hx<ETX>10]<ETX> " — mIRC colour
  * 10 around brackets, colour 3 around "hx", trailing reset. */
 static const char hx_info_prefix[] = " \00310[\00303hx\00310]\003 ";

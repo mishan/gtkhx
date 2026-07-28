@@ -19,7 +19,7 @@
 use crate::view::{HxChatView, PALETTE_COLS};
 use gtk4::glib::translate::{IntoGlib, IntoGlibPtr, ToGlibPtr};
 use gtk4::prelude::*;
-use hxchat_layout::{mirc, Block, ColorRef, Message, MessageId, MessageKind, ParsedText, Style};
+use hxchat_layout::{Block, ColorRef, Message, MessageId, MessageKind, ParsedText, Style};
 use std::ffi::{c_char, c_int, c_void, CStr};
 
 type CGtkWidget = *mut gtk4::ffi::GtkWidget;
@@ -386,13 +386,22 @@ pub unsafe extern "C" fn hx_chat_view_set_autocopy_color(enabled: c_int) {
 /// The left column keeps its own styling via `Message::gutter` — see the
 /// field's docs for why a bare `Speaker { nick }` can't reproduce what
 /// `chat.c` emits.
+/// Build a row from two plain strings.
+///
+/// Plain, now: these used to run through `mirc::parse`, which decoded
+/// the in-band `\003NN` escape vocabulary. Nothing produces those any
+/// more — style arrives as runs (`hx_chat_view_append_runs`) — and
+/// continuing to *interpret* them here would be actively worse than
+/// useless, because the remaining callers pass text that came off the
+/// wire. A server could set colours in your chat log by sending the
+/// bytes. It cannot now: they are characters like any other.
 fn compat_message(left: &str, right: &str, stamp: i64) -> Message {
     let gutter = if left.is_empty() {
         None
     } else {
-        Some(mirc::parse(left))
+        Some(ParsedText::plain(left))
     };
-    let mut body = mirc::parse(right);
+    let mut body = ParsedText::plain(right);
     crate::links::autolink(&mut body);
     Message {
         kind: MessageKind::Live,
@@ -542,7 +551,7 @@ pub unsafe extern "C" fn hx_chat_view_append(
 ) {
     with_view!(w, v, {
         let raw = cslice(text, len);
-        let mut body = mirc::parse(&raw);
+        let mut body = ParsedText::plain(&raw);
         crate::links::autolink(&mut body);
         v.append(Message {
             kind: MessageKind::Live,
@@ -639,7 +648,7 @@ pub unsafe extern "C" fn hx_chat_view_append_media(
             blocks: vec![Block::Image {
                 token,
                 size: None,
-                alt: mirc::strip(&alt),
+                alt,
             }],
             flags: hxchat_layout::MessageFlags::NONE,
         });

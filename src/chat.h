@@ -53,7 +53,12 @@ extern struct gtkhx_chat *hx_chat_view (struct chat *chat);
 extern void hx_chat_set_view (struct chat *chat, struct gtkhx_chat *view);
 extern struct gtkhx_chat *gchat_with_cid (session *sess, guint32 cid);
 extern void gchat_delete (session *sess, struct gtkhx_chat *gchat);
-extern void xprintline (GtkWidget *text, char *chat, size_t len);
+/* Render one log line. `tag` is the gutter tag ("hx", a broadcast
+ * sender) or NULL for an untagged line; `tag_color` its palette index.
+ * They arrive as parameters rather than escapes embedded in `chat` —
+ * see gtkhx_session.h's chat-log-line note. */
+extern void xprintline (GtkWidget *text, char *chat, size_t len,
+                        const char *tag, gint16 tag_color);
 
 /* chat-signal renderer. Takes a pre-parsed HxChatEvent
  * (sender/body slices + is_info/is_self flags from
@@ -128,7 +133,8 @@ struct _GtkhxSession;
 typedef struct _GtkhxSession GtkhxSession;
 extern void chat_log_line_handler (GtkhxSession *emitter,
                                    struct htlc_conn *htlc, guint cid,
-                                   gpointer body, gpointer user_data);
+                                   gpointer name, gint color, gpointer body,
+                                   gpointer user_data);
 extern void generate_colors (GtkWidget *widget);
 extern void create_chat (session *sess);
 /* create_chat_window is the gtkhx-ui `chat` Rust shell (dock registration via

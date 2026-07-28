@@ -243,13 +243,18 @@ void gtkhx_session_emit_tracker_batch_begin (GtkhxSession *self,
 void gtkhx_session_emit_task_update (GtkhxSession *self, session *sess,
                                      struct task *tsk);
 
-/* chat-log-line — "show this string in chat `cid`'s output". The
- * payload is already fully formatted text (post-vsnprintf).
- * gtkhx_log.{c,h} wraps this in printf-style helpers
- * (hx_printf / hx_printf_prefix); model-side files keep calling
- * those, but the model→view edge is now signal-shaped. */
+/* chat-log-line — "show this in chat `cid`'s output". `body` is fully
+ * formatted text (post-vsnprintf); `name` is the bracketed tag for the
+ * gutter ("hx", or a broadcast sender's name) or NULL, and `color` its
+ * palette index.
+ *
+ * name/color used to live *inside* body as \003NN escapes, which the
+ * view then parsed back out to find where the name ended. They are
+ * parameters now — see chat_view.h's note on runs. gtkhx_log.{c,h}
+ * wraps this in the printf-style helpers model-side files call. */
 void gtkhx_session_emit_chat_log_line (GtkhxSession *self,
                                        struct htlc_conn *htlc, guint32 cid,
+                                       const char *name, gint32 color,
                                        const char *body);
 
 /* user-notice — a roster notice line for chat `cid`: someone joined, parted, or

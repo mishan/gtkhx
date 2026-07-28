@@ -704,6 +704,24 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
     }
 }
 
+/* Render a "[tag] body" status line: bracketed tag in the gutter, body
+ * on the right. Split out from xprintline_render because a tagged line
+ * has no nick to parse and no highlight to consider — it is the one
+ * shape where the caller already knows every part. */
+static void
+xprintline_render_tagged (GtkWidget *text, const char *tag, gsize tag_len,
+                          gint16 tag_color, const char *body, gsize body_len)
+{
+    HxChatRun gutter[3] = {
+        { "[", 1, HX_CHAT_INFO_BRACKET_COLOR, HX_CHAT_ATTR_NONE },
+        { tag, (int)tag_len, tag_color, HX_CHAT_ATTR_NONE },
+        { "]", 1, HX_CHAT_INFO_BRACKET_COLOR, HX_CHAT_ATTR_NONE },
+    };
+    HxChatRun body_run = HX_CHAT_RUN_PLAIN (body, (int)body_len);
+
+    hx_chat_view_append_runs (text, gutter, 3, &body_run, 1, 0);
+}
+
 /* Phase 9.E (inline media): auto-fetch a media handle on arrival
  * and swap the styled placeholder row to a true inline-rendered
  * texture once decoding finishes. The ctx is the smallest thing
@@ -1528,7 +1546,8 @@ inline_media_chat_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 }
 
 void
-xprintline (GtkWidget *text, char *chat, size_t len)
+xprintline (GtkWidget *text, char *chat, size_t len, const char *tag,
+            gint16 tag_color)
 {
     char *valid;
     gsize valid_len;
@@ -1590,48 +1609,17 @@ xprintline (GtkWidget *text, char *chat, size_t len)
                                 ? (const char *)hx_conn_name (sess->htlc)
                                 : NULL;
 
-    /* Recognise the INFOPREFIX-style " \00310[…\00310]\003 " wrapper —
-	 * "[hx]" for log lines, "[name]" for broadcastmsg's per-sender
-	 * variant where the embedded colour and name vary per call.
-	 *
-	 * This is the last place that reads GtkHx's own escape output back
-	 * in, and it only survives because the chat-log-line signal still
-	 * carries a formatted string. It now extracts the *bare* name and
-	 * its colour rather than handing the escape bytes on as the nick:
-	 * the renderer builds styled runs, so escapes reaching it would be
-	 * drawn literally. When the log-line signal carries structure this
-	 * whole block goes. */
-    {
-        static const char wrap_open[] = " \00310[";        /* 5 bytes */
-        static const char wrap_close[] = "\00310]\003 ";   /* 6 bytes */
-        const gsize open_len = sizeof (wrap_open) - 1;
-        const gsize close_len = sizeof (wrap_close) - 1;
-
-        if (valid_len >= open_len + close_len
-            && memcmp (valid, wrap_open, open_len) == 0) {
-            const char *close
-                = g_strstr_len (valid + open_len, valid_len - open_len,
-                                wrap_close);
-            if (close) {
-                gsize close_pos = (gsize)(close - valid);
-                gsize inner = open_len;
-
-                /* An inner "\003NN" sets the name's colour. INFOPREFIX
-				 * uses 03; broadcastmsg picks per sender. */
-                if (close_pos >= inner + 3 && valid[inner] == '\003'
-                    && g_ascii_isdigit (valid[inner + 1])
-                    && g_ascii_isdigit (valid[inner + 2])) {
-                    info_color = (gint16)((valid[inner + 1] - '0') * 10
-                                          + (valid[inner + 2] - '0'));
-                    inner += 3;
-                }
-                name_off = inner;
-                name_len = close_pos > inner ? close_pos - inner : 0;
-                body_off = close_pos + close_len;
-                body_len = valid_len - body_off;
-                is_info = TRUE;
-            }
-        }
+    /* An info line is one the emitter *told* us is one, by naming a
+	 * gutter tag. This used to be recovered by searching the body for
+	 * the closing bytes of an escape wrapper GtkHx had written into it
+	 * moments earlier — a data structure round-tripped through a
+	 * presentation format. The tag and its colour are signal
+	 * parameters now (gtkhx_session.h, "chat-log-line"). */
+    if (tag && *tag) {
+        is_info = TRUE;
+        info_color = tag_color;
+        /* The tag isn't in `valid` at all; xprintline_render takes it
+		 * separately below. */
     }
 
     if (!is_info) {
@@ -1646,14 +1634,22 @@ xprintline (GtkWidget *text, char *chat, size_t len)
         }
     }
 
-    xprintline_render (text, valid, valid_len, name_off, name_len, body_off,
-                       body_len, is_info, said_by_self, info_color);
+    if (is_info) {
+        /* Whole line is the body; the gutter comes from `tag`. */
+        xprintline_render_tagged (text, tag, strlen (tag), info_color, valid,
+                                  valid_len);
+    } else {
+        xprintline_render (text, valid, valid_len, name_off, name_len,
+                           body_off, body_len, FALSE, said_by_self,
+                           info_color);
+    }
 
     g_free (valid);
 }
 
 static void
-xoutput_chat (session *sess, guint32 cid, char *chat)
+xoutput_chat (session *sess, guint32 cid, char *chat, const char *tag,
+              gint16 tag_color)
 {
     char *cr;
     struct gtkhx_chat *gchat;
@@ -1700,19 +1696,19 @@ xoutput_chat (session *sess, guint32 cid, char *chat)
     cr = strchr (chat, '\n');
     if (cr) {
         while (1) {
-            xprintline (gchat->output, chat, cr - chat);
+            xprintline (gchat->output, chat, cr - chat, tag, tag_color);
             chat = cr + 1;
             if (*chat == 0) {
                 break;
             }
             cr = strchr (chat, '\n');
             if (!cr) {
-                xprintline (gchat->output, chat, -1);
+                xprintline (gchat->output, chat, -1, tag, tag_color);
                 break;
             }
         }
     } else {
-        xprintline (gchat->output, chat, -1);
+        xprintline (gchat->output, chat, -1, tag, tag_color);
     }
 }
 
@@ -1726,9 +1722,11 @@ xoutput_chat (session *sess, guint32 cid, char *chat)
  * Connected in gtkhx_connect_signals at startup. */
 void
 chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
-                       gpointer body, gpointer user_data)
+                       gpointer name, gint color, gpointer body,
+                       gpointer user_data)
 {
-    xoutput_chat (sess_from_htlc (htlc), cid, (char *)body);
+    xoutput_chat (sess_from_htlc (htlc), cid, (char *)body, (const char *)name,
+                  (gint16)color);
 }
 
 /* Nick completion. The C tab_nick_comp / tab_nick_comp_next / nick_comp_chng /

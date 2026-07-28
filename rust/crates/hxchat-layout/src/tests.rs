@@ -10,7 +10,6 @@ use crate::index::HeightIndex;
 use crate::markdown::{self, RawBlock};
 use crate::measure::{FixedMeasure, TextMeasure};
 use crate::message::{Block, ImageSize, Message, Speaker};
-use crate::mirc;
 use crate::span::{Attrs, ColorRef, ParsedText, Style};
 use crate::wrap::{layout_message, LayoutGeneration, LayoutParams};
 
@@ -234,67 +233,6 @@ fn md_utf8_is_never_split() {
 }
 
 // -------------------------------------------------------------------- mIRC
-
-#[test]
-fn mirc_nick_bracket_shape() {
-    // Exactly what chat.c:627 emits.
-    let p = mirc::parse("\u{3}12<\u{3}alice\u{3}12>\u{3} hello");
-    assert_eq!(p.text, "<alice> hello");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(12));
-    assert_eq!(p.style_at(1).fg, ColorRef::Default, "nick uses default fg");
-    assert_eq!(p.style_at(6).fg, ColorRef::Palette(12));
-    assert_eq!(p.style_at(8).fg, ColorRef::Default);
-}
-
-#[test]
-fn mirc_highlight_shape() {
-    // chat.c:669 — bold + colour 4, closed by a reset.
-    let p = mirc::parse("\u{2}\u{3}04alice\u{f} said hi");
-    assert_eq!(p.text, "alice said hi");
-    let s = p.style_at(0);
-    assert!(s.attrs.contains(Attrs::BOLD));
-    assert_eq!(s.fg, ColorRef::Palette(4));
-    assert_eq!(p.style_at(6), Style::default(), "reset clears everything");
-}
-
-#[test]
-fn mirc_history_muted_shape() {
-    let p = mirc::parse("\u{3}37─── chat history (3 messages) ───");
-    assert_eq!(p.text, "─── chat history (3 messages) ───");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(37));
-}
-
-#[test]
-fn mirc_two_digit_and_background() {
-    let p = mirc::parse("\u{3}04,08warn");
-    assert_eq!(p.text, "warn");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(4));
-    assert_eq!(p.style_at(0).bg, ColorRef::Palette(8));
-}
-
-#[test]
-fn mirc_bare_color_resets_to_default() {
-    let p = mirc::parse("\u{3}12a\u{3}b");
-    assert_eq!(p.text, "ab");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(12));
-    assert_eq!(p.style_at(1).fg, ColorRef::Default);
-}
-
-#[test]
-fn mirc_strip_removes_everything() {
-    assert_eq!(
-        mirc::strip("\u{3}12<\u{3}bob\u{3}12>\u{3} \u{2}hi\u{f}"),
-        "<bob> hi"
-    );
-}
-
-#[test]
-fn mirc_digits_after_text_are_not_eaten() {
-    // "\003 3" then literal "7 items" must not become colour 37.
-    let p = mirc::parse("\u{3}3 7 items");
-    assert_eq!(p.text, " 7 items");
-    assert_eq!(p.style_at(0).fg, ColorRef::Palette(3));
-}
 
 // ------------------------------------------------------------------ measure
 
@@ -533,7 +471,7 @@ fn gutter_gets_its_own_line_box() {
         kind: crate::message::MessageKind::Live,
         timestamp: 0,
         speaker: None,
-        gutter: Some(mirc::parse("\u{3}12<\u{3}alice\u{3}12>\u{3}")),
+        gutter: Some(ParsedText::plain("<alice>")),
         blocks: vec![Block::Text(ParsedText::plain("hello"))],
         flags: MessageFlagsNone::NONE,
     };

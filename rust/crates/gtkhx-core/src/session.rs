@@ -321,9 +321,21 @@ mod imp {
                     Signal::builder("task-update")
                         .param_types([Type::POINTER, Type::POINTER])
                         .build(),
-                    // chat-log-line: (htlc*, cid, body*)
+                    // chat-log-line: (htlc*, cid, name*, color, body*)
+                    //
+                    // `name` is the bracketed tag shown in the gutter
+                    // ("hx", or a broadcast sender), NULL for an
+                    // unprefixed line; `color` its palette index. These
+                    // used to be *inside* `body` as \003NN escapes that
+                    // the view then parsed back out — see chat_view.h.
                     Signal::builder("chat-log-line")
-                        .param_types([Type::POINTER, Type::U32, Type::POINTER])
+                        .param_types([
+                            Type::POINTER,
+                            Type::U32,
+                            Type::POINTER,
+                            Type::I32,
+                            Type::POINTER,
+                        ])
                         .build(),
                     // user-notice: (htlc*, cid, kind, name*, old_name*) — a
                     // roster notice line (join / parts / rename). The view
@@ -909,9 +921,17 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_log_line(
     self_: *mut c_void,
     htlc: *mut c_void,
     cid: u32,
+    name: *const c_char,
+    color: i32,
     body: *const c_char,
 ) {
-    let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(body as *const c_void)];
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(cid),
+        ptr_value(name as *const c_void),
+        glib::Value::from(color),
+        ptr_value(body as *const c_void),
+    ];
     emit(self_, "chat-log-line", &v);
 }
 

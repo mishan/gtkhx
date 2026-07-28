@@ -683,50 +683,45 @@ msg_output_from_event (HxMsgEvent *event)
  * shape of what we've seen in the wild on hlserver.com et al. */
 #define BROADCAST_TOAST_MAX 160
 
-/* Map the legacy user->color (16-bit, % 4 status field) to a mIRC
- * palette index so we can wrap a name in `\003NN…\003` for xtext.
- * Aligned with gdk_user_colors[]:
- *   0 (regular) → no escape; let xtext use HX_CHAT_PAL_FG so the name
- *                 stays legible against both light and dark bgs
- *                 (black on a black bg would be invisible).
- *   1 (idle)    → mIRC 14, grey
- *   2 (admin)   → mIRC  4, red
- *   3 (idle adm)→ mIRC 13, pink */
-static const char *
-broadcast_name_mirc_color (guint16 color)
+/* Map the legacy user->color (16-bit, % 4 status field) to the palette
+ * index the sender's name renders in. Aligned with gdk_user_colors[]:
+ *   0 (regular) → default foreground, so the name stays legible against
+ *                 both light and dark backgrounds (a fixed black would
+ *                 be invisible on a dark one)
+ *   1 (idle)    → 14, grey
+ *   2 (admin)   →  4, red
+ *   3 (idle adm)→ 13, pink */
+static gint16
+broadcast_name_color (guint16 color)
 {
     switch (color % 4) {
     case 2:
-        return "04";
+        return 4;
     case 3:
-        return "13";
+        return 13;
     case 1:
-        return "14";
+        return 14;
     case 0:
     default:
-        return NULL;
+        return HX_CHAT_COLOR_DEFAULT;
     }
 }
 
-/* Defang a sender name before embedding it in the mIRC-coded
- * broadcast prefix. The wrapper structure is
+/* Defang a sender name before showing it.
  *
- *     " \00310[\003<col><name>\00310]\003 "
+ * This used to be load-bearing for *correctness*: the name went inside
+ * a " \00310[\003<col><name>\00310]\003 " wrapper that the chat side
+ * scanned for a closing escape sequence, so a name containing a raw
+ * \003 could terminate the wrapper early, break info-line detection,
+ * or smuggle its own colours into the log. The name is a separate
+ * signal parameter now, so none of that is reachable — there is no
+ * wrapper to escape from.
  *
- * and the chat-side detector in xprintline scans for the closing
- * "\00310]\003 " sequence to find where the name ends. A name
- * containing raw \003 (or any other xtext control byte from the
- * ATTR_* family — \002, \007, \017, \026, \031) could prematurely
- * terminate the wrapper, break info-prefix detection, or smuggle
- * its own colour escapes into the chat log.
- *
- * The wire-parse helpers (hx_msg_extract → strip_ansi) translate
- * any low-control bytes in the body but NOT in the name, so a
- * hostile server could ship `name = "\003foo"` and have us
- * render escape codes inside the brackets. Strip every ASCII
- * control byte (< 0x20) defensively here. Legitimate Hotline
- * nicks are printable ASCII / UTF-8 — control bytes have no
- * business in one. */
+ * Kept anyway, because the wire-parse helpers (hx_msg_extract →
+ * strip_ansi) translate control bytes in the body but *not* in the
+ * name, and a control byte rendered raw into a text layout is still
+ * nobody's idea of a good time. Legitimate Hotline nicks are printable
+ * ASCII / UTF-8. */
 static char *
 broadcast_sanitise_name (const char *raw)
 {
@@ -771,9 +766,9 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 
     /* Log the broadcast to chat output. When the wire carried a
 	 * sender name (mhxd-family servers echo broadcasts back with
-	 * UID + NAME chunks), render as " [name] body" with the same
-	 * blue brackets the INFOPREFIX uses and the name in the
-	 * sender's user-color slot. When the sender is unknown (older
+	 * UID + NAME chunks), render as "[name] body" with the same
+	 * brackets the "[hx]" tag uses and the name in the sender's
+	 * user-colour slot. When the sender is unknown (older
 	 * servers, anonymous rate-limit nags), fall back to the
 	 * legacy "[hx] broadcast: …" form so something still shows up
 	 * in scrollback. Task errors come through task_error() →
@@ -781,18 +776,10 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
 	 * so they won't be logged as broadcasts here. */
     if (text && *text) {
         if (sender_name && *sender_name) {
-            const char *col = broadcast_name_mirc_color (sender_color);
             char *safe_name = broadcast_sanitise_name (sender_name);
-            char *prefix;
-            if (col) {
-                prefix = g_strdup_printf (" \00310[\003%s%s\00310]\003 ",
-                                          col, safe_name);
-            } else {
-                prefix = g_strdup_printf (" \00310[\003%s\00310]\003 ",
-                                          safe_name);
-            }
-            hx_printf_prefix (hx_active_session ()->htlc, 0, prefix, "%s\n", text);
-            g_free (prefix);
+            hx_printf_named (hx_active_session ()->htlc, 0, safe_name,
+                             broadcast_name_color (sender_color), "%s\n",
+                             text);
             g_free (safe_name);
         } else {
             hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,

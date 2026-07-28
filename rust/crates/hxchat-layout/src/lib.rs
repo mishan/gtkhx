@@ -57,10 +57,10 @@
 //!
 //! [`markdown`] is the one going forward (scoping §3.9): an inline
 //! subset, rendered on display, transmitted literally, no capability
-//! negotiation needed. [`mirc`] decodes the legacy in-band escapes into
-//! the same [`span::ParsedText`], purely so the xtext-backed and
-//! new-widget-backed views render identically during the A/B; it is
-//! deleted at C5 along with xtext.
+//! negotiation needed. The legacy in-band `\003NN` escape vocabulary is
+//! gone (C6): style arrives as runs from the C side, so nothing decodes
+//! escapes and nothing can inject them.
+
 
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
@@ -72,7 +72,6 @@ pub mod markdown;
 pub mod measure;
 pub mod message;
 pub mod select;
-pub mod mirc;
 pub mod search;
 pub mod span;
 pub mod wrap;

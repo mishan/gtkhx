@@ -503,7 +503,10 @@ gtkhx_apply_userlist_style (GtkWidget *w)
 static struct timer *timer_list;
 
 
-const char *INFOPREFIX = " \00310[\00303hx\00310]\003 ";
+/* The gutter tag on status lines. Just the name now — the view draws
+ * the brackets and picks the colours (chat.c::chat_log_line_handler).
+ * Was " \00310[\00303hx\00310]\003 " until C6. */
+const char *INFOPREFIX = "hx";
 
 session the_session;
 

@@ -785,27 +785,39 @@ placeholder. The `\017` reset byte the highlight used to append is gone
 with them — runs carry no running state, so nothing can leak into the
 next row.
 
-**What is left is one path.** Every remaining `\003NN` is the
-`INFOPREFIX` / broadcast-prefix wrapper:
+**Done.** The `chat-log-line` signal now carries `(htlc, cid, name,
+colour, body)` instead of a pre-formatted string, so `INFOPREFIX` is the
+bare string `"hx"` and broadcastmsg passes its sender name and colour as
+parameters (`hx_printf_named`). The forty-odd `hx_printf_prefix` callers
+are unchanged — the prefix argument simply means the tag now.
 
-| Site | What |
-|---|---|
-| `gtkhx.c:506` | `INFOPREFIX` itself |
-| `proto_helpers.c:742` | the copy used to detect an info line |
-| `msg.c:788`, `msg.c:791` | broadcastmsg's per-sender `[name]` prefix |
-| `chat.c:1609` | the parser that reads them back |
+With that, the parser in `chat.c` that scanned for the closing bytes of
+an escape wrapper is gone, and so is `mirc.rs`.
 
-These survive because `hx_printf` / `hx_printf_prefix` hand the
-`chat-log-line` signal a *formatted string*, so a prefix is the only
-place to put the sender's name and colour. Finishing the job means the
-signal carrying `(name, colour, body)` instead — a change to
-`gtkhx_log.c` and the `GtkhxSession` signal, not to the view.
+Two things worth noting from the last step:
 
-The parser at `chat.c:1609` was updated rather than left alone: it now
-extracts the bare name and its colour instead of passing escape bytes on
-as the nick. It had to be — the renderer draws runs literally, so escapes
-reaching it would have been *printed*. It also preserves broadcastmsg's
-per-sender colour, which a straight conversion would have flattened.
+**`broadcast_sanitise_name` used to be load-bearing for correctness.**
+The sender's name went inside a
+`" \00310[\003<col><name>\00310]\003 "` wrapper that the chat side
+scanned for a closing sequence, so a name containing a raw `\003` could
+terminate the wrapper early, break info-line detection, or smuggle its
+own colours into the log. That is unreachable now — there is no wrapper
+to escape from. The sanitiser stays because control bytes in a text
+layout are still undesirable, but it has been demoted from a security
+boundary to hygiene.
+
+**Dropping `mirc::parse` from the plain-append path is a small security
+improvement.** Those calls now do `ParsedText::plain`. The remaining
+callers pass text that came *off the wire*, so continuing to interpret
+escapes there would have let a server set colours in your chat log by
+sending the bytes. It cannot: they are characters like any other.
+
+**One dead thing remains**, flagged rather than removed:
+`proto_helpers.c:742` still holds a copy of the old prefix and checks
+incoming server chat against it. Nothing produces the prefix, and the
+check only ever sees server-sent text, so it cannot fire. Removing it
+means retiring the two proto-test cases that feed it the literal string —
+a separate change.
 
 ### 6b. Notes from C3r
 
