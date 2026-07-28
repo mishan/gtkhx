@@ -47,10 +47,18 @@
  * re-wrap of 20k messages cannot hide in the frame after the one being
  * timed.
  *
- * RSS is read from /proc/self/statm, so it is Linux-only and includes
- * everything the process has touched, not just the chat buffer. Only the
- * *delta* across the ingest phase is reported, which cancels most of the
- * shared baseline.
+ * There is deliberately no memory metric. One was tried — an RSS delta
+ * across the ingest phase from /proc/self/statm — and it reported ~0.1 MB
+ * for 20,000 messages, which is impossible: the message text alone is
+ * several MB. It was most likely measuring an allocator that had already
+ * grown its heap during warmup, so the pages were resident before the
+ * delta window opened. It also failed to compile on Windows, since
+ * sysconf/_SC_PAGESIZE are POSIX.
+ *
+ * Rather than #ifdef a measurement known to be wrong, it is gone.
+ * Memory is *unmeasured*, not equal, and getting a real number needs a
+ * different approach — arena accounting inside the backends, or
+ * malloc_info — not a statm delta.
  */
 
 #include "chat_bench.h"
@@ -63,7 +71,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* Frames to let settle before timing anything. The first frames after a
  * window maps are dominated by one-off GTK work (CSS, font map, GL
@@ -119,8 +126,6 @@ typedef struct {
     gint64 relayout_frames[BENCH_RELAYOUT_FRAMES];
     guint relayout_count;
     guint prep_frames;
-    gsize rss_before_kb;
-    gsize rss_after_kb;
 
     /* Scroll sampling. */
     gint64 frame_us[BENCH_SCROLL_FRAMES];
@@ -128,23 +133,6 @@ typedef struct {
     gint64 last_frame_time;
     int saved_width;
 } Bench;
-
-/* Resident set size in KB, or 0 where /proc isn't available. */
-static gsize
-bench_rss_kb (void)
-{
-    gsize pages = 0, resident = 0;
-    FILE *f = fopen ("/proc/self/statm", "r");
-
-    if (!f) {
-        return 0;
-    }
-    if (fscanf (f, "%zu %zu", &pages, &resident) != 2) {
-        resident = 0;
-    }
-    fclose (f);
-    return resident * (gsize)(sysconf (_SC_PAGESIZE) / 1024);
-}
 
 /* One synthetic chat line. Deliberately varied in length so wrapping is
  * exercised rather than one cached width being reused for every row, and
@@ -220,16 +208,6 @@ bench_report (Bench *b)
     printf ("scroll frame mean  %8.2f ms\n", mean_ms);
     printf ("scroll frame p95   %8.2f ms   (%u frames)\n", p95_ms,
             b->frame_count);
-    if (b->rss_before_kb && b->rss_after_kb) {
-        double per10k
-            = b->n_messages
-                  ? ((double)(b->rss_after_kb - b->rss_before_kb) * 10000.0
-                     / (double)b->n_messages)
-                  : 0.0;
-        printf ("RSS delta          %8.1f MB  (%.1f MB / 10k msgs)\n",
-                (double)(b->rss_after_kb - b->rss_before_kb) / 1024.0,
-                per10k / 1024.0);
-    }
     printf ("=====================================================\n");
     fflush (stdout);
 }
@@ -248,13 +226,11 @@ bench_tick (GtkWidget *widget, GdkFrameClock *clock, gpointer data)
             return G_SOURCE_CONTINUE;
         }
         /* ---- ingest ------------------------------------------------ */
-        b->rss_before_kb = bench_rss_kb ();
         b->t_mark = g_get_monotonic_time ();
         for (guint i = 0; i < b->n_messages; i++) {
             bench_append_one (b->view, i);
         }
         b->ingest_us = g_get_monotonic_time () - b->t_mark;
-        b->rss_after_kb = bench_rss_kb ();
 
         /* Whatever layout the backend deferred is still owed; time the
          * frame that pays it. */
