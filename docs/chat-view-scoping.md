@@ -829,14 +829,65 @@ Frame timings include GTK's own compositing, so they are comparable
 the spread; a single pair of runs cannot separate a real difference from
 scheduler noise.
 
-**Results.** _(to be filled in from a real run — see task C5.0b)_
+**Results** — 20k messages, 3 repeats per backend, medians. Wayland,
+one machine, one window size; see the caveats above before quoting these
+anywhere else.
 
-| Metric | xtext | hxchat | Verdict |
+| Metric | xtext | hxchat | Ratio |
 |---|---|---|---|
-| ingest + paint (20k) | | | |
-| reflow (width) | | | |
-| scroll p95 | | | |
-| RSS / 10k msgs | | | |
+| ingest + paint | 783.3 ms | 166.4 ms | **4.7× faster** |
+| ingest alone | 25.5k msgs/s | 141k msgs/s | 5.4× |
+| reflow (width) | 16.4 ms | 15.3 ms | 1.07× — *no real difference* |
+| scroll frame mean | 27.2 ms | 16.7 ms | 1.6× |
+| scroll frame p95 | 34.1 ms | 17.5 ms | **1.95×** |
+| RSS / 10k msgs | 0.1 MB | 0.1 MB | *not credible — see below* |
+
+**Read this way.**
+
+*Ingest + paint* is the headline: 783 ms → 166 ms to get 20k messages on
+screen. That is the §3.2 retained-layout claim doing exactly what it was
+supposed to.
+
+*Scroll* is arguably the more meaningful result, because it is what a
+user feels continuously rather than once. hxchat's mean of 16.7 ms is the
+60 Hz frame budget — it is vsync-bound, i.e. it has run out of work to
+do. xtext's 27.2 ms mean and 34.1 ms p95 means it is missing roughly
+every other frame. The new backend isn't "faster at scrolling" so much as
+it has stopped being the bottleneck.
+
+*Reflow did **not** show what §6c predicted.* This section previously
+called reflow "the number that decides it", on the reasoning that xtext
+re-wraps the whole scrollback and hxchat re-wraps what is visible. The
+medians are 16.4 ms vs 15.3 ms — a wash. Two possible readings, and the
+honest answer is that this run does not distinguish them:
+
+1. The measurement is wrong. `PHASE_REFLOW` waits for the *next frame
+   tick* after a `set_size_request`, but xtext drives its re-render from
+   an `io_tag` timeout (`gtk_xtext_adjustment_timeout`), so the expensive
+   part may land after the tick being timed. If so this number is
+   undercounting xtext and the real gap is hidden.
+2. GTK is coalescing the resize such that neither backend re-wraps
+   everything within the sampled frame.
+
+What the reflow column *does* show is variance: xtext produced an 85 ms
+outlier in one of three runs (and 77–90 ms outliers in the discarded
+run), while hxchat's three samples span 12.7–16.9 ms. That is consistent
+with xtext occasionally paying a whole-scrollback cost, but three samples
+is not enough to claim it. **Fixing the reflow measurement is worth doing
+before this number is cited for anything.**
+
+*RSS is not credible and should not be quoted.* A 0.1 MB delta for 20k
+messages is impossible — the message text alone is a few MB. The harness
+is measuring something wrong (most likely the allocator had already grown
+the heap during warmup, so the pages were resident before the phase
+began). Reported here only so the number isn't mistaken for evidence of
+parity. Memory comparison remains **unmeasured**.
+
+**Verdict for C5.** Two of four metrics show a large, unambiguous win;
+one is a wash under a measurement known to be suspect; one is unmeasured.
+Nothing here argues against the flip, and the scroll result argues
+strongly for it — but the record should say that the case rests on ingest
+and scroll, not on the reflow claim the design was originally sold on.
 
 ## 7. Testing
 
