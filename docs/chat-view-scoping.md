@@ -424,10 +424,16 @@ Concretely this means, in phase order:
   `Speaker` and emits `speaker-activated`. The gutter is already its own
   line box precisely so a click on the nick is distinguishable from a click
   on the body.
-- **C6** — when `chat.c` hands over structured messages, `Speaker.uid` is
-  populated from the real user record rather than reconstructed, and
-  `Speaker.icon` lights up the avatar gutter. Until then the compat path has
-  a nick string and no uid, so `speaker-activated` stays unwired rather than
+- **C6 (done for the uid half)** — `chat.c` hands over structured
+  messages, and `Speaker.uid` is resolved through
+  `hx_member_model_find_by_name` against the *same* `HxMemberModel` the
+  user list is built from. One record per user, whichever surface you
+  clicked, which is what §3.7a asked for. `Speaker.icon` and the avatar
+  gutter are still to come. A lookup miss stays uid 0 rather than a
+  guess: the user may have parted, two users may share a name, or the
+  "nick" may be server prose. A wrong uid would attach someone else's
+  avatar and group two people's messages together — worse than none.
+  `speaker-activated` stays unwired rather than
   guessing.
 - **Later, optional** — `HxMember` becomes the thing `Speaker` *borrows*
   rather than copies, so a nick or colour change repaints chat rows as well

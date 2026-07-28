@@ -208,9 +208,30 @@ typedef struct {
 #define HX_CHAT_RUN_PLAIN(t, l)                                               \
     ((HxChatRun){ (t), (l), HX_CHAT_COLOR_DEFAULT, HX_CHAT_ATTR_NONE })
 
+/* Who said it.
+ *
+ * `uid` is the Hotline user id, 0 when unknown — which is the honest
+ * answer more often than it looks: Hotline chat is a *text stream*, so
+ * a chat line carries a name and no id, and the uid has to be looked up
+ * against the conversation's membership model by nick. That lookup can
+ * miss (the user left, two users share a name, the line is server
+ * prose), and a wrong uid is worse than none: it would attach the wrong
+ * avatar and group two people's messages together.
+ *
+ * This is the identity the user list uses, not a parallel one — see
+ * hx_member_model_find_by_name in chat_members.h. One user, one record,
+ * whichever surface you clicked. */
+typedef struct {
+    guint16 uid;      /* 0 = unknown */
+    const char *nick; /* borrowed for the call; may be NULL */
+} HxChatSpeaker;
+
+#define HX_CHAT_SPEAKER_NONE ((HxChatSpeaker){ 0, NULL })
+
 /* Append a row built from runs. `gutter` may be NULL/0 for a row with
- * no nick column. Returns a mark naming the appended row. */
-HxChatMark *hx_chat_view_append_runs (GtkWidget *view,
+ * no nick column; `speaker` names who said it (HX_CHAT_SPEAKER_NONE for
+ * system lines). Returns a mark naming the appended row. */
+HxChatMark *hx_chat_view_append_runs (GtkWidget *view, HxChatSpeaker speaker,
                                       const HxChatRun *gutter, int n_gutter,
                                       const HxChatRun *body, int n_body,
                                       time_t stamp);
@@ -220,6 +241,7 @@ HxChatMark *hx_chat_view_append_runs (GtkWidget *view,
  * hx_chat_view_insert_before below for the reasoning. */
 HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
                                              HxChatMark *anchor,
+                                             HxChatSpeaker speaker,
                                              const HxChatRun *gutter,
                                              int n_gutter,
                                              const HxChatRun *body, int n_body,

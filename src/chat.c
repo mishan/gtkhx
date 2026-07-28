@@ -47,6 +47,7 @@
 #include "gtkutil.h"
 #include "gtkhx_icon.h" /* gtkhx_icon_load — theme-bundled chrome icons */
 #include "chat_bench.h"
+#include "chat_members.h"
 #include "chat_view.h"
 #include "users.h"
 #ifdef HAVE_VOICE
@@ -602,7 +603,7 @@ static void
 xprintline_render (GtkWidget *text, const char *line, gsize line_len,
                    gsize name_off, gsize name_len, gsize body_off,
                    gsize body_len, gboolean is_info, gboolean is_self,
-                   gint16 info_color)
+                   gint16 info_color, HxChatSpeaker speaker)
 {
     /* Gutter runs. At most three: "<", the name, ">". The old code
 	 * built these as one "\003NN<\003name\003NN>\003" string, which
@@ -698,10 +699,47 @@ xprintline_render (GtkWidget *text, const char *line, gsize line_len,
             body_run = HX_CHAT_RUN_PLAIN (display_body, (int)display_body_len);
         }
 
-        hx_chat_view_append_runs (text, gutter, n_gutter, &body_run, 1, 0);
+        hx_chat_view_append_runs (text, speaker, gutter, n_gutter, &body_run, 1,
+                                  0);
     } else {
         hx_chat_view_append (text, line, line_len, 0);
     }
+}
+
+/* Resolve a chat nick to the user record the *user list* holds.
+ *
+ * Hotline chat is a text stream: a line carries a name and no id, so
+ * this is a lookup rather than a read. It goes through the conversation's
+ * membership model — the same `HxMemberModel` the user list is built
+ * from — so a right-click in chat and a right-click in Users are looking
+ * at one record, not two views that happen to agree.
+ *
+ * A miss returns uid 0, and that is left as a miss. The user may have
+ * parted since speaking, two users may share a name, or the "nick" may
+ * be server prose that merely looked like one. Guessing would attach
+ * someone else's avatar and group two people's messages together, which
+ * is worse than showing none. */
+static HxChatSpeaker
+chat_speaker_for (guint32 cid, const char *nick, gsize nick_len)
+{
+    HxChatSpeaker sp = HX_CHAT_SPEAKER_NONE;
+    struct chat *conv;
+    char *nul;
+
+    if (!nick || nick_len == 0) {
+        return sp;
+    }
+    conv = chat_with_cid (hx_active_session (), cid);
+    if (!conv) {
+        return sp;
+    }
+    nul = g_strndup (nick, nick_len);
+    sp.uid = hx_member_model_find_by_name (hx_chat_member_model (conv), nul);
+    g_free (nul);
+    /* `nick` is borrowed for the append call only, which is why this can
+	 * hand back a pointer into the caller's buffer. */
+    sp.nick = sp.uid ? nick : NULL;
+    return sp;
 }
 
 /* Render a "[tag] body" status line: bracketed tag in the gutter, body
@@ -719,7 +757,8 @@ xprintline_render_tagged (GtkWidget *text, const char *tag, gsize tag_len,
     };
     HxChatRun body_run = HX_CHAT_RUN_PLAIN (body, (int)body_len);
 
-    hx_chat_view_append_runs (text, gutter, 3, &body_run, 1, 0);
+    hx_chat_view_append_runs (text, HX_CHAT_SPEAKER_NONE, gutter, 3, &body_run,
+                              1, 0);
 }
 
 /* Phase 9.E (inline media): auto-fetch a media handle on arrival
@@ -992,7 +1031,9 @@ output_chat_from_event (struct htlc_conn *htlc, HxChatEvent *e)
     xprintline_render (gchat->output, e->line, e->body_off + first_body_len,
                        e->sender_off, e->sender_len, e->body_off,
                        first_body_len, e->is_info, e->is_self,
-                       HX_CHAT_INFO_COLOR);
+                       HX_CHAT_INFO_COLOR,
+                       chat_speaker_for (e->cid, e->line + e->sender_off,
+                                         e->sender_len));
 
     if (nl) {
         const char *cur = nl + 1;
@@ -1193,10 +1234,10 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     do {                                                                      \
         if (prepend_mode && gchat->render.anchor_ent) {                      \
             hx_chat_view_insert_runs_before (view,                            \
-                gchat->render.anchor_ent,                                    \
+                gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE,               \
                 (GUTTER), (N_GUTTER), (BODY), (N_BODY), (STAMP));             \
         } else {                                                              \
-            hx_chat_view_append_runs (view,                                   \
+            hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE,             \
                 (GUTTER), (N_GUTTER), (BODY), (N_BODY), (STAMP));             \
         }                                                                     \
     } while (0)
@@ -1218,7 +1259,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         gchar *divider = g_strdup_printf ("─── %s ───", body);
         HxChatRun run = HX_MUTED (divider, (int) strlen (divider));
         gchat->render.anchor_ent
-            = hx_chat_view_append_runs (view, NULL, 0, &run, 1, 0);
+            = hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE, NULL, 0,
+                                        &run, 1, 0);
         g_free (divider);
         g_free (body);
     }
@@ -1258,7 +1300,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
         gchar *row = g_strdup_printf ("─── %s ───", hx_load_older_sentinel ());
         HxChatRun run = HX_MUTED (row, (int) strlen (row));
         gchat->render.load_older_ent = hx_chat_view_insert_runs_before (
-            view, gchat->render.anchor_ent, NULL, 0, &run, 1, 0);
+            view, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE, NULL, 0,
+            &run, 1, 0);
         g_free (row);
     }
 
@@ -1322,7 +1365,8 @@ output_chat_history_batch (struct htlc_conn *htlc, guint32 cid,
     if (!prepend_mode) {
         gchar *divider = g_strdup_printf ("─── %s ───", _ ("live messages"));
         HxChatRun run = HX_MUTED (divider, (int) strlen (divider));
-        hx_chat_view_append_runs (view, NULL, 0, &run, 1, 0);
+        hx_chat_view_append_runs (view, HX_CHAT_SPEAKER_NONE, NULL, 0, &run, 1,
+                                  0);
         g_free (divider);
     }
 
@@ -1484,7 +1528,8 @@ chat_history_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
 
         hx_chat_view_remove (gchat->output, gchat->render.load_older_ent);
         gchat->render.load_older_ent = hx_chat_view_insert_runs_before (
-            gchat->output, gchat->render.anchor_ent, NULL, 0, &run, 1, 0);
+            gchat->output, gchat->render.anchor_ent, HX_CHAT_SPEAKER_NONE,
+            NULL, 0, &run, 1, 0);
         g_free (loading_row);
     }
 }
@@ -1641,7 +1686,8 @@ xprintline (GtkWidget *text, char *chat, size_t len, const char *tag,
     } else {
         xprintline_render (text, valid, valid_len, name_off, name_len,
                            body_off, body_len, FALSE, said_by_self,
-                           info_color);
+                           info_color,
+                           chat_speaker_for (0, valid + name_off, name_len));
     }
 
     g_free (valid);

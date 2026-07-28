@@ -627,8 +627,12 @@ msg_output_render (const char *name, guint16 uid, const char *body,
                 { ">", 1, brack_col, HX_CHAT_ATTR_NONE },
             };
             HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);
-            hx_chat_view_append_runs (msg->outputbuf, gutter, 3, &body_run, 1,
-                                      0);
+            /* PM windows are per-uid, so the speaker is known outright
+			 * rather than looked up — the one place in the tree where
+			 * that is true. */
+            HxChatSpeaker sp = { is_self ? 0 : uid, nam };
+            hx_chat_view_append_runs (msg->outputbuf, sp, gutter, 3, &body_run,
+                                      1, 0);
             first = FALSE;
         } else {
             hx_chat_view_append (msg->outputbuf, cur, seg_len, 0);

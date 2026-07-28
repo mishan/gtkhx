@@ -427,6 +427,32 @@ pub struct HxChatRun {
 
 const HX_CHAT_COLOR_DEFAULT: i16 = -1;
 
+/// `HxChatSpeaker` from `chat_view.h`.
+#[repr(C)]
+pub struct HxChatSpeaker {
+    pub(crate) uid: u16,
+    pub(crate) nick: *const c_char,
+}
+
+/// `None` when the caller couldn't identify the speaker.
+///
+/// uid 0 means "not known", not "user zero": Hotline chat is a text
+/// stream, so the id has to be resolved by nick against the membership
+/// model and the lookup can legitimately miss. Guessing would attach the
+/// wrong avatar and group two people's messages together, so a miss
+/// stays a miss.
+unsafe fn speaker_of(s: &HxChatSpeaker) -> Option<hxchat_layout::Speaker> {
+    if s.uid == 0 {
+        return None;
+    }
+    let nick = if s.nick.is_null() {
+        String::new()
+    } else {
+        cstr(s.nick)
+    };
+    Some(hxchat_layout::Speaker::new(s.uid, nick))
+}
+
 /// Mirror of chat_view.h's `HX_CHAT_ATTR_*`.
 fn attrs_from_c(bits: u16) -> hxchat_layout::Attrs {
     let mut a = hxchat_layout::Attrs::NONE;
@@ -487,6 +513,7 @@ pub(crate) unsafe fn runs_to_text(runs: *const HxChatRun, n: c_int) -> ParsedTex
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_append_runs(
     w: CGtkWidget,
+    speaker: HxChatSpeaker,
     gutter: *const HxChatRun,
     n_gutter: c_int,
     body: *const HxChatRun,
@@ -494,7 +521,9 @@ pub unsafe extern "C" fn hx_chat_view_append_runs(
     stamp: i64,
 ) -> *mut c_void {
     match view_of(w) {
-        Some(v) => mark_to_ptr(v.append(runs_message(gutter, n_gutter, body, n_body, stamp))),
+        Some(v) => mark_to_ptr(
+            v.append(runs_message(&speaker, gutter, n_gutter, body, n_body, stamp)),
+        ),
         None => std::ptr::null_mut(),
     }
 }
@@ -505,6 +534,7 @@ pub unsafe extern "C" fn hx_chat_view_append_runs(
 pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
     w: CGtkWidget,
     anchor: *mut c_void,
+    speaker: HxChatSpeaker,
     gutter: *const HxChatRun,
     n_gutter: c_int,
     body: *const HxChatRun,
@@ -513,7 +543,7 @@ pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
 ) -> *mut c_void {
     match view_of(w) {
         Some(v) => {
-            let msg = runs_message(gutter, n_gutter, body, n_body, stamp);
+            let msg = runs_message(&speaker, gutter, n_gutter, body, n_body, stamp);
             mark_to_ptr(v.insert_before(ptr_to_mark(anchor), msg))
         }
         None => std::ptr::null_mut(),
@@ -521,6 +551,7 @@ pub unsafe extern "C" fn hx_chat_view_insert_runs_before(
 }
 
 unsafe fn runs_message(
+    speaker: &HxChatSpeaker,
     gutter: *const HxChatRun,
     n_gutter: c_int,
     body: *const HxChatRun,
@@ -533,7 +564,7 @@ unsafe fn runs_message(
     Message {
         kind: MessageKind::Live,
         timestamp: stamp_or_now(stamp),
-        speaker: None,
+        speaker: speaker_of(speaker),
         gutter: if g.text.is_empty() { None } else { Some(g) },
         blocks: vec![Block::Text(b)],
         flags: hxchat_layout::MessageFlags::NONE,
