@@ -81,7 +81,7 @@ pub struct HtxfHandle {
     // atomics (total_pos / refcount / canceled) stay private, reached only
     // through the `hx_htxf_*` methods below.
     pub ref_: u32,
-    gone: u8,
+    pub gone: u8,
     pub type_: u8,
     pub queue: u32,
     fd: c_int,

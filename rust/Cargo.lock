@@ -2021,6 +2021,7 @@ dependencies = [
  "hxhfs",
  "hxmodel",
  "hxnet",
+ "hxtask",
  "hxtext",
 ]
 
