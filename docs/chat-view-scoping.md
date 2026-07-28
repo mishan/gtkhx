@@ -789,6 +789,17 @@ with `GTKHX_CHATVIEW` as the only difference:
 tools/chatbench.sh 20000 3      # 20k messages, 3 repeats per backend
 ```
 
+**Check the `backend` line in every report before believing any of it.**
+The first run collected was worthless: `want_hxchat` accepted only
+`"new"` / `"hxchat"`, the harness passed `GTKHX_CHATVIEW=1`, and both
+passes therefore ran xtext — producing a complete, plausible, entirely
+meaningless comparison. The selector now takes `1/true/yes/on` too and
+*warns* on a value it doesn't recognise instead of silently falling back,
+`want_hxchat` logs which backend it chose on every startup, and the
+script fails loudly if it doesn't see a report from both. A benchmark
+that can quietly measure the same thing twice is worse than no benchmark,
+because it produces numbers you'll act on.
+
 **Metrics, and how to read them.**
 
 | Metric | What it captures |

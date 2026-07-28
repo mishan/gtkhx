@@ -10,8 +10,12 @@
  * `GTKHX_CHATVIEW` picks which, exactly as it does normally, so the only
  * difference between the two runs is the widget under test.
  *
- *   GTKHX_CHATVIEW=0 GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
- *   GTKHX_CHATVIEW=1 GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
+ *   GTKHX_CHATVIEW=xtext GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
+ *   GTKHX_CHATVIEW=new   GTKHX_CHATVIEW_BENCH=20000 ./src/gtkhx
+ *
+ * Check the `backend` line in the report before trusting any of it.
+ * `want_hxchat` used to accept only "new"/"hxchat", so a run asked for
+ * with `=1` reported xtext and looked entirely normal.
  *
  * Add `GTKHX_CHATVIEW_BENCH_QUIT=1` to exit as soon as the report is
  * printed, which is what makes it scriptable.
