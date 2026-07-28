@@ -162,6 +162,20 @@ rust_sources = files(
   'crates/hxvoice-send/src/tests.rs',
   'crates/hxtext/src/lib.rs',
   'crates/hxtext/src/tests.rs',
+  # hxchat-layout (chat-view C1) — the chat layout engine. No linkable
+  # output yet; listed so edits retrigger the cargo build and the
+  # workspace test run.
+  'crates/hxchat-layout/src/lib.rs',
+  'crates/hxchat-layout/src/span.rs',
+  'crates/hxchat-layout/src/message.rs',
+  'crates/hxchat-layout/src/markdown.rs',
+  'crates/hxchat-layout/src/mirc.rs',
+  'crates/hxchat-layout/src/measure.rs',
+  'crates/hxchat-layout/src/wrap.rs',
+  'crates/hxchat-layout/src/index.rs',
+  'crates/hxchat-layout/src/anchor.rs',
+  'crates/hxchat-layout/src/buffer.rs',
+  'crates/hxchat-layout/src/tests.rs',
   'crates/hxbookmarks/src/lib.rs',
   'crates/hxbookmarks/src/cipher.rs',
   'crates/hxbookmarks/src/legacy.rs',
@@ -243,6 +257,7 @@ rust_sources = files(
   'crates/hxvoice-model/Cargo.toml',
   'crates/hxvoice-send/Cargo.toml',
   'crates/hxtext/Cargo.toml',
+  'crates/hxchat-layout/Cargo.toml',
   'crates/hxmodel/Cargo.toml',
   'crates/hxfiles-xfer/Cargo.toml',
   'crates/hxhfs/Cargo.toml',

@@ -16,6 +16,13 @@ members = [
     "crates/hxtls-trust",
     "crates/hxnet",
     "crates/hxtext",
+    # Chat-view phase C1: the chat layout engine (message model, span
+    # parsers, wrapping, height index, scroll anchoring). Deliberately
+    # dependency-free — no gtk4/glib/pango — so the whole of it runs under
+    # `cargo test` on display-less CI; the C2 widget supplies the font
+    # backend through the TextMeasure trait. Nothing links it yet: the
+    # consumer is hxchat-view in C2. See docs/chat-view-scoping.md.
+    "crates/hxchat-layout",
     "crates/hxvoice",
     "crates/hxvoice-model",
     "crates/hxvoice-send",

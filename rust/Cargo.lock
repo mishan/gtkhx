@@ -1973,6 +1973,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hxchat-layout"
+version = "0.1.0"
+
+[[package]]
 name = "hxcrypto"
 version = "0.1.0"
 dependencies = [
