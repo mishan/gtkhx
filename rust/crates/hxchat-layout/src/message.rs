@@ -102,6 +102,18 @@ impl Message {
         {
             return None;
         }
+        // Client-generated notices never group. They share a gutter
+        // ("[hx]") without sharing a speaker, so keying on the drawn
+        // nick would collapse a run of unrelated status lines —
+        // "connecting", "connected", "login ok" — into one block under
+        // a single tag, which reads as one event rather than three.
+        //
+        // Checked on the kind rather than on `speaker.is_none()`: a
+        // pre-1.5 server sends chat with no uid, and those rows are real
+        // messages from a real person that should still group by nick.
+        if self.kind == MessageKind::System {
+            return None;
+        }
         let uid = self.speaker.as_ref().map(|s| s.uid).unwrap_or(0);
         // A row with no gutter at all is a system line and never groups.
         let nick = match &self.gutter {

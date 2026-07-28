@@ -2352,7 +2352,16 @@ impl HxChatView {
                     // the emission above already popped one and we'd
                     // stack two.
                     Some((href, _label)) if !this.word_is_url(x, y) => {
-                        crate::links::show_url_popup(&this, &href, x, y);
+                        // gtkurl_show_popup documents its (x, y) as
+                        // toplevel-root-relative and does no translation
+                        // of its own — the xtext caller fed it
+                        // gdk_event_get_position, which is surface- (so
+                        // root-) local. These are gesture coordinates,
+                        // i.e. widget-local, so they need converting or
+                        // the popup lands off by the view's offset
+                        // within the window.
+                        let (_, rx, ry) = this.point_in_root(x, y);
+                        crate::links::show_url_popup(&this, &href, rx, ry);
                     }
                     Some(_) => {}
                     None if button == gtk4::gdk::BUTTON_SECONDARY => {
@@ -2451,40 +2460,105 @@ impl HxChatView {
         self.imp_().buffer.borrow().link_at(&caret)
     }
 
+    /// Translate a widget-local point into root (toplevel) coordinates.
+    ///
+    /// Popovers here are parented to the root, so their `pointing-to`
+    /// rectangle has to be in the root's space. Falls back to the
+    /// untranslated point, which is only right when the view *is* at the
+    /// origin — but a menu in the wrong place beats no menu.
+    fn point_in_root(&self, x: f64, y: f64) -> (gtk4::Widget, f64, f64) {
+        let Some(root) = self.root() else {
+            return (self.clone().upcast(), x, y);
+        };
+        let root: gtk4::Widget = root.upcast();
+        match self.compute_point(&root, &gtk4::graphene::Point::new(x as f32, y as f32)) {
+            Some(p) => (root, f64::from(p.x()), f64::from(p.y())),
+            None => (root, x, y),
+        }
+    }
+
     /// Right-click menu for ordinary text: Copy and Select All.
+    ///
+    /// A bare `GtkPopover` of buttons rather than a `GtkPopoverMenu`
+    /// driven by a `GActionGroup`, and parented to the *root* rather
+    /// than to the view. Both of those are deliberate, and both are
+    /// settled questions elsewhere in this tree — this menu was the last
+    /// one that had not caught up:
+    ///
+    /// * `users.c::user_popup_show` notes that its `GActionEntry` table
+    ///   "is gone — the bare-popover rewrite invokes the on_user_*
+    ///   handlers directly". A menu item's action is resolved by walking
+    ///   the widget hierarchy for a group, which makes whether the item
+    ///   works depend on when the popover was parented relative to when
+    ///   its model was built, and fails silently when it goes wrong. A
+    ///   direct `clicked` callback cannot miss.
+    /// * `gtkurl.c::gtkurl_show_popup` parents to the root because
+    ///   anchoring a grabbing popover to a widget nested inside a
+    ///   scrolled window trips GDK's "Tried to map a grabbing popup with
+    ///   a non-top most parent", after which click-outside-to-dismiss
+    ///   breaks and Escape leaks the grab. The chat view is exactly such
+    ///   a widget.
+    ///
+    /// Which of the two was making Select All do nothing is not settled
+    /// — but both are real, and this shape has worked twice in this tree
+    /// for years.
     fn show_context_menu(&self, x: f64, y: f64) {
-        let menu = gtk4::gio::Menu::new();
-        menu.append(Some(&crate::tr("Copy")), Some("chatview.copy"));
-        menu.append(Some(&crate::tr("Select All")), Some("chatview.select-all"));
+        let (parent, px, py) = self.point_in_root(x, y);
 
-        let group = gtk4::gio::SimpleActionGroup::new();
-
-        let copy = gtk4::gio::SimpleAction::new("copy", None);
-        let this = self.clone();
-        copy.connect_activate(move |_, _| {
-            this.copy_selection_to(ClipboardTarget::Clipboard);
-        });
-        // Greyed out with nothing selected, rather than silently doing
-        // nothing.
-        copy.set_enabled(self.has_selection());
-        group.add_action(&copy);
-
-        let select_all = gtk4::gio::SimpleAction::new("select-all", None);
-        let this = self.clone();
-        select_all.connect_activate(move |_, _| {
-            this.select_all();
-        });
-        group.add_action(&select_all);
-        self.insert_action_group("chatview", Some(&group));
-
-        let popover = gtk4::PopoverMenu::from_model(Some(&menu));
-        popover.set_parent(self);
+        let popover = gtk4::Popover::new();
         popover.set_has_arrow(false);
+        popover.set_halign(gtk4::Align::Start);
         popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
-            x as i32, y as i32, 1, 1,
+            px as i32, py as i32, 1, 1,
         )));
+
+        let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+        for set in [
+            gtk4::Box::set_margin_start,
+            gtk4::Box::set_margin_end,
+            gtk4::Box::set_margin_top,
+            gtk4::Box::set_margin_bottom,
+        ] {
+            set(&vbox, 4);
+        }
+        popover.set_child(Some(&vbox));
+
+        // Copy is greyed with nothing selected, rather than silently
+        // doing nothing — which is what Select All was doing.
+        let copy = menu_row(&crate::tr("Copy"), self.has_selection());
+        {
+            let this = self.clone();
+            // Weak: the button owns this closure and the popover owns
+            // the button, so a strong popover ref here is a cycle that
+            // outlives the unparent and leaks the view with it.
+            let weak = popover.downgrade();
+            copy.connect_clicked(move |_| {
+                this.copy_selection_to(ClipboardTarget::Clipboard);
+                if let Some(p) = weak.upgrade() {
+                    p.popdown();
+                }
+            });
+        }
+        vbox.append(&copy);
+
+        let select_all = menu_row(&crate::tr("Select All"), true);
+        {
+            let this = self.clone();
+            let weak = popover.downgrade();
+            select_all.connect_clicked(move |_| {
+                this.select_all();
+                if let Some(p) = weak.upgrade() {
+                    p.popdown();
+                }
+            });
+        }
+        vbox.append(&select_all);
+
+        popover.set_parent(&parent);
         // The popover owns itself: unparent on close, or it leaks and
-        // keeps the view alive.
+        // keeps the view alive. Safe synchronously here — the click has
+        // already run its callback, which is not true of an action
+        // resolved through the hierarchy.
         popover.connect_closed(|p| p.unparent());
         popover.popup();
     }
@@ -2502,6 +2576,19 @@ impl HxChatView {
         *imp.selection.borrow_mut() = sel;
         self.queue_draw();
     }
+}
+
+/// One row of a bare-popover menu: a flat, left-aligned, full-width
+/// button, matching `users.c::make_user_menu_button`.
+fn menu_row(label: &str, enabled: bool) -> gtk4::Button {
+    let b = gtk4::Button::with_label(label);
+    b.add_css_class("flat");
+    b.set_halign(gtk4::Align::Fill);
+    b.set_sensitive(enabled);
+    if let Some(l) = b.child().and_then(|c| c.downcast::<gtk4::Label>().ok()) {
+        l.set_xalign(0.0);
+    }
+    b
 }
 
 // ---- word-click (xtext parity) --------------------------------------

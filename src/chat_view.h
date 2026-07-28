@@ -258,6 +258,19 @@ HxChatMark *hx_chat_view_append_runs (GtkWidget *view, HxChatSpeaker speaker,
                                       const HxChatRun *body, int n_body,
                                       time_t stamp);
 
+/* Append a client-generated notice — a "[hx]" status line.
+ *
+ * Same shape as hx_chat_view_append_runs minus the speaker, but the row
+ * is marked as a *system* message, which is what stops a run of them
+ * grouping together. Status lines share a gutter without sharing a
+ * speaker, so as ordinary messages "connecting" / "connected" /
+ * "login ok" collapse under a single [hx] tag and read as one event. */
+HxChatMark *hx_chat_view_append_system_runs (GtkWidget *view,
+                                             const HxChatRun *gutter,
+                                             int n_gutter,
+                                             const HxChatRun *body,
+                                             int n_body, time_t stamp);
+
 /* As above, but inserted immediately BEFORE `anchor` (NULL prepends at
  * the head). Scroll position is preserved across the insert — see
  * hx_chat_view_insert_before below for the reasoning. */
