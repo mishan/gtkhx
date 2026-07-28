@@ -63,6 +63,46 @@ const PAD_Y: i32 = 2;
 /// default (`gtk_xtext_set_stamp_format(NULL)` restores it).
 const DEFAULT_STAMP_FORMAT: &str = "[%H:%M:%S] ";
 
+/// One decoded media item.
+#[derive(Clone)]
+pub struct MediaEntry {
+    /// Animation frames with their durations. A static image is a
+    /// single frame with delay 0.
+    pub frames: Vec<(gtk4::gdk::Texture, u32)>,
+    /// Index of the frame currently showing.
+    pub current: usize,
+    /// When the current frame started, for the advance tick.
+    pub since_us: i64,
+}
+
+impl MediaEntry {
+    pub fn texture(&self) -> Option<&gtk4::gdk::Texture> {
+        self.frames.get(self.current).map(|(t, _)| t)
+    }
+
+    pub fn is_animated(&self) -> bool {
+        self.frames.len() > 1
+    }
+
+    /// Intrinsic size, from the first frame — every frame of a glycin
+    /// animation shares dimensions.
+    pub fn size(&self) -> Option<hxchat_layout::ImageSize> {
+        self.frames.first().map(|(t, _)| hxchat_layout::ImageSize {
+            width: t.width().max(0) as u32,
+            height: t.height().max(0) as u32,
+        })
+    }
+}
+
+impl std::fmt::Debug for MediaEntry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MediaEntry")
+            .field("frames", &self.frames.len())
+            .field("current", &self.current)
+            .finish()
+    }
+}
+
 mod imp {
     use super::*;
     use std::cell::{Cell, RefCell};
@@ -100,6 +140,15 @@ mod imp {
         /// strftime format for that column. xtext's default is
         /// "[%H:%M:%S] " and chat.c relies on getting it.
         pub stamp_format: RefCell<String>,
+        /// Decoded media, keyed by the per-conversation token.
+        ///
+        /// The textures live here rather than on the layout's
+        /// `Block::Image` because `hxchat-layout` is GTK-free by
+        /// design — it carries only the *size*, which is all it needs
+        /// to lay the row out. The token is the join.
+        pub media: RefCell<std::collections::HashMap<u32, MediaEntry>>,
+        /// Frame-advance tick, running only while something animates.
+        pub anim_tick: RefCell<Option<gtk4::TickCallbackId>>,
     }
 
     impl Default for HxChatView {
@@ -121,6 +170,8 @@ mod imp {
                 selecting: Cell::new(false),
                 root_key_handler: RefCell::new(None),
                 stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
+                media: RefCell::new(std::collections::HashMap::new()),
+                anim_tick: RefCell::new(None),
             }
         }
     }
@@ -139,15 +190,19 @@ mod imp {
             static S: OnceLock<Vec<glib::subclass::Signal>> = OnceLock::new();
             S.get_or_init(|| {
                 vec![
-                    // xtext's signal, registered here purely so the
-                    // seven `g_signal_connect (view, "word_click", ...)`
-                    // sites in chat.c and msg.c bind without warning
-                    // during the coexistence period. It is never
-                    // emitted: a click yields a whitespace-delimited
-                    // word, callers demux it by string prefix
-                    // (`hxmedia:N`, the NBSP load-older sentinel), and
-                    // replacing that with the typed signals in scoping
-                    // §3.6 is C3 work.
+                    // xtext's signal, and now genuinely emitted.
+                    //
+                    // Parity beat purity here. The three C handlers
+                    // chat.c and msg.c connect — gtkurl, chat-history's
+                    // load-older sentinel, and inline media's
+                    // `hxmedia:N` — all recognise their targets by
+                    // matching the clicked *word* as a string. Emitting
+                    // the same signal with the same tokenisation makes
+                    // all three work against the new backend with zero
+                    // C changes, which is exactly what the A/B needs.
+                    // The typed replacements in scoping §3.6 are still
+                    // the destination, but they belong with the
+                    // structured append in C6, not ahead of parity.
                     //
                     // **"word-click", not "word_click".** glib-rs's
                     // Signal::builder requires a canonical name and
@@ -478,6 +533,10 @@ impl HxChatView {
 
     pub fn clear(&self) {
         self.imp_().buffer.borrow_mut().clear();
+        // Textures are keyed by token, and tokens are per-conversation
+        // and reused after a clear — holding stale ones would both leak
+        // and let a new row show an old image.
+        self.clear_media();
         self.after_content_change();
     }
 
@@ -658,10 +717,36 @@ impl HxChatView {
                             (content.text.as_str(), &content.spans)
                         }
                         Some(hxchat_layout::Block::Code { text, .. }) => (text.as_str(), &[]),
-                        // C2 is text-only: a media row draws its
-                        // placeholder, which is exactly the Phase 9.D
-                        // behaviour. Real inline images are C4.
-                        Some(hxchat_layout::Block::Image { alt, .. }) => (alt.as_str(), &[]),
+                        // A decoded image paints as a texture; an
+                        // undecoded one falls back to its placeholder
+                        // text, which is exactly the Phase 9.D
+                        // behaviour and what the user sees while the
+                        // fetch is in flight.
+                        Some(hxchat_layout::Block::Image { alt, token, size }) => {
+                            if let (Some(sz), Some(tex)) = (
+                                size,
+                                imp.media
+                                    .borrow()
+                                    .get(token)
+                                    .and_then(|m| m.texture().cloned()),
+                            ) {
+                                let avail =
+                                    (content_width(alloc_w)).saturating_sub(line.x);
+                                let (dw, dh) = measure.image_size(
+                                    (sz.width, sz.height),
+                                    avail,
+                                );
+                                snapshot.save();
+                                snapshot.translate(&gtk4::graphene::Point::new(
+                                    line.x as f32,
+                                    y as f32,
+                                ));
+                                tex.snapshot(snapshot, dw as f64, dh as f64);
+                                snapshot.restore();
+                                continue;
+                            }
+                            (alt.as_str(), &[][..])
+                        }
                         None => continue,
                     },
                 };
@@ -953,6 +1038,17 @@ impl HxChatView {
                 *this.imp_().selection.borrow_mut() = None;
                 this.queue_draw();
             }
+        });
+        // Primary-click word-click, for the handlers that filter on it
+        // (chat-history's sentinel and inline media). Emitted on
+        // release, and only when no drag happened, so selecting text
+        // doesn't also activate whatever was under the press.
+        let this = self.clone();
+        click.connect_released(move |g, n_press, x, y| {
+            if n_press != 1 || this.has_selection() {
+                return;
+            }
+            this.emit_word_click(x, y, g.current_event().as_ref());
         });
         self.add_controller(click);
 
@@ -1250,11 +1346,22 @@ impl HxChatView {
             let click = gtk4::GestureClick::new();
             click.set_button(button);
             let this = self.clone();
-            click.connect_pressed(move |_, _, x, y| {
+            click.connect_pressed(move |g, _, x, y| {
+                // word-click first: gtkurl's handler filters on
+                // secondary/middle and pops the URL menu itself, and the
+                // media handler wants the token. Emitting keeps every
+                // existing C consumer working.
+                this.emit_word_click(x, y, g.current_event().as_ref());
+
                 match this.link_at_point(x, y) {
-                    Some((href, _label)) => {
+                    // Only pop our own URL menu for links *we* detected
+                    // but gtkurl's word tokenisation didn't — otherwise
+                    // the emission above already popped one and we'd
+                    // stack two.
+                    Some((href, _label)) if !this.word_is_url(x, y) => {
                         crate::links::show_url_popup(&this, &href, x, y);
                     }
+                    Some(_) => {}
                     None if button == gtk4::gdk::BUTTON_SECONDARY => {
                         this.show_context_menu(x, y);
                     }
@@ -1336,5 +1443,173 @@ impl HxChatView {
             },
         ));
         self.queue_draw();
+    }
+}
+
+// ---- word-click (xtext parity) --------------------------------------
+
+impl HxChatView {
+    /// Emit `word-click` for the word under a widget-space point.
+    ///
+    /// The word is handed over as a raw `char *` because that is what
+    /// xtext's signal signature is and what the C handlers expect. The
+    /// `CString` lives for the duration of the emission and no longer —
+    /// every handler in the tree either compares it or copies out of it
+    /// synchronously, which is the same contract xtext offered (its
+    /// pointer was into a scratch buffer reused on the next click).
+    fn emit_word_click(&self, x: f64, y: f64, event: Option<&gtk4::gdk::Event>) {
+        let Some(caret) = self.caret_at(x, y) else {
+            return;
+        };
+        let Some(word) = self.imp_().buffer.borrow().word_at(&caret) else {
+            return;
+        };
+        let Ok(c_word) = std::ffi::CString::new(word) else {
+            return;
+        };
+        let word_ptr = c_word.as_ptr() as glib::ffi::gpointer;
+        let event_ptr = event
+            .map(|e| {
+                use gtk4::glib::translate::ToGlibPtr;
+                let p: *mut gtk4::gdk::ffi::GdkEvent = e.to_glib_none().0;
+                p as glib::ffi::gpointer
+            })
+            .unwrap_or(std::ptr::null_mut());
+        self.emit_by_name::<()>("word-click", &[&word_ptr, &event_ptr]);
+    }
+}
+
+impl HxChatView {
+    /// Whether the word under the point is one `gtkurl` would itself
+    /// recognise — i.e. whether the `word-click` emission has already
+    /// caused a URL menu to pop.
+    ///
+    /// Needed because two detectors are in play: `gtkurl_scan`, which
+    /// finds URLs inside a line and gives us the link spans, and
+    /// `gtkurl_is_url`, which classifies a whitespace-delimited *word*
+    /// and is what the signal handler uses. They mostly agree; where
+    /// they don't, this stops us stacking a second popover on top of
+    /// the one the handler already opened.
+    fn word_is_url(&self, x: f64, y: f64) -> bool {
+        let Some(caret) = self.caret_at(x, y) else {
+            return false;
+        };
+        let Some(word) = self.imp_().buffer.borrow().word_at(&caret) else {
+            return false;
+        };
+        crate::links::word_is_url(&word)
+    }
+}
+
+// ---- inline media (C4) ----------------------------------------------
+
+impl HxChatView {
+    /// Install (or replace) the decoded frames for a media token, and
+    /// resize the row to match.
+    ///
+    /// This is the operation the old design was worst at. xtext had to
+    /// recompute the entry's subline list, diff the count against the
+    /// old one, and patch `buf->num_lines` plus every scroll anchor
+    /// (`gtk_xtext_media_set_texture`). Here it is a size change on a
+    /// block, and the scroll anchor absorbs it — a decode landing above
+    /// the viewport no longer shifts what the user is reading.
+    pub fn set_media_frames(&self, token: u32, frames: Vec<(gtk4::gdk::Texture, u32)>) {
+        let imp = self.imp_();
+        if frames.is_empty() {
+            imp.media.borrow_mut().remove(&token);
+        } else {
+            let entry = MediaEntry {
+                frames,
+                current: 0,
+                since_us: 0,
+            };
+            let size = entry.size();
+            imp.media.borrow_mut().insert(token, entry);
+
+            if let Some(size) = size {
+                let m = imp.measure.borrow();
+                let mut buf = imp.buffer.borrow_mut();
+                if let Some(id) = buf.find_image(token) {
+                    buf.set_image_size(id, token, size, &*m);
+                }
+            }
+        }
+        self.sync_animation_tick();
+        self.queue_resize();
+    }
+
+    /// Start the frame timer if anything animates, stop it otherwise.
+    ///
+    /// One shared tick for the whole view rather than a timer per image
+    /// — the same shape `gif_avatar.c` settled on for the user list, and
+    /// for the same reason: dozens of independent timeouts is a lot of
+    /// wakeups for something the frame clock already provides.
+    fn sync_animation_tick(&self) {
+        let imp = self.imp_();
+        let animated = imp.media.borrow().values().any(|m| m.is_animated());
+        let running = imp.anim_tick.borrow().is_some();
+        if animated == running {
+            return;
+        }
+        if !animated {
+            if let Some(id) = imp.anim_tick.borrow_mut().take() {
+                id.remove();
+            }
+            return;
+        }
+        let id = self.add_tick_callback(move |view, clock| {
+            let imp = view.imp_();
+            let now = clock.frame_time();
+            let mut advanced = false;
+            {
+                let mut media = imp.media.borrow_mut();
+                for entry in media.values_mut() {
+                    if !entry.is_animated() {
+                        continue;
+                    }
+                    let delay = entry
+                        .frames
+                        .get(entry.current)
+                        .map(|(_, d)| *d)
+                        .unwrap_or(100)
+                        .max(20) as i64
+                        * 1000;
+                    if entry.since_us == 0 {
+                        entry.since_us = now;
+                        continue;
+                    }
+                    if now - entry.since_us >= delay {
+                        entry.current = (entry.current + 1) % entry.frames.len();
+                        entry.since_us = now;
+                        advanced = true;
+                    }
+                }
+            }
+            if advanced {
+                // Only a redraw: every frame of an animation shares
+                // dimensions, so the row's height cannot change.
+                view.queue_draw();
+            }
+            glib::ControlFlow::Continue
+        });
+        *imp.anim_tick.borrow_mut() = Some(id);
+    }
+
+    /// Drop every decoded texture. Called with `clear`.
+    fn clear_media(&self) {
+        self.imp_().media.borrow_mut().clear();
+        self.sync_animation_tick();
+    }
+}
+
+impl HxChatView {
+    /// The media token on the image block a mark names.
+    pub fn image_token_of(&self, id: MessageId) -> Option<u32> {
+        let buf = self.imp_().buffer.borrow();
+        let msg = buf.message(id)?;
+        msg.blocks.iter().find_map(|b| match b {
+            hxchat_layout::Block::Image { token, .. } => Some(*token),
+            _ => None,
+        })
     }
 }

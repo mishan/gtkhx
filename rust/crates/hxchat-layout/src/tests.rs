@@ -1406,3 +1406,132 @@ fn multiple_links_in_one_message() {
     assert_eq!(p.link_at(s2 + 2).map(|l| l.href.as_str()), Some("https://two.example"));
     assert_eq!(p.link_at(22), None, "the space between is not a link");
 }
+
+// -------------------------------------------------------------- word_at
+
+fn word_buf(text: &str) -> (ChatBuffer, FixedMeasure, Caret) {
+    let m = FixedMeasure::new(10);
+    let mut p = params(2000);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain(text)), &m);
+    b.ensure_layout(0, &m);
+    b.reindex();
+    let id = b.id_at(0).unwrap();
+    (
+        b,
+        m,
+        Caret { message: id, source: LineSource::Block(0), offset: 0 },
+    )
+}
+
+fn word_at(text: &str, offset: usize) -> Option<String> {
+    let (b, _m, mut c) = word_buf(text);
+    c.offset = offset;
+    b.word_at(&c)
+}
+
+#[test]
+fn word_at_splits_like_xtext() {
+    // xtext's is_del is space, newline, '<', '>' and NUL — angle
+    // brackets included, which is what makes "<nick>" yield a bare
+    // "nick". The C handlers match their targets by string, so this has
+    // to agree byte-for-byte or hxmedia:N and the load-older sentinel
+    // stop being recognised.
+    assert_eq!(word_at("hello world", 0).as_deref(), Some("hello"));
+    assert_eq!(word_at("hello world", 7).as_deref(), Some("world"));
+    assert_eq!(word_at("<misha> hi", 2).as_deref(), Some("misha"));
+    assert_eq!(word_at("a\nb", 2).as_deref(), Some("b"));
+}
+
+#[test]
+fn word_at_finds_a_media_token() {
+    // The exact shape inline_media_chat_word_click looks for.
+    let w = word_at("see hxmedia:7 here", 6);
+    assert_eq!(w.as_deref(), Some("hxmedia:7"));
+}
+
+#[test]
+fn word_at_keeps_nbsp_joined_sentinels_whole() {
+    // The chat-history sentinel is deliberately NBSP-joined so xtext's
+    // tokenizer treats it as one word. NBSP is not an ASCII space, so it
+    // must not split here either.
+    let sentinel = "\u{2191}\u{a0}Load\u{a0}older\u{a0}messages";
+    let line = format!("--- {sentinel} ---");
+    let at = line.find('\u{2191}').unwrap();
+    assert_eq!(word_at(&line, at).as_deref(), Some(sentinel));
+}
+
+#[test]
+fn word_at_on_a_delimiter_or_empty_text() {
+    assert_eq!(word_at("a b", 1), None, "the space itself is not a word");
+    assert_eq!(word_at("", 0), None);
+}
+
+#[test]
+fn word_at_handles_multibyte() {
+    let (b, _m, mut c) = word_buf("héllo wörld");
+    c.offset = 0;
+    assert_eq!(b.word_at(&c).as_deref(), Some("héllo"));
+    c.offset = 7; // inside "wörld"
+    assert_eq!(b.word_at(&c).as_deref(), Some("wörld"));
+}
+
+#[test]
+fn a_decoded_image_grows_its_row_without_moving_the_anchor() {
+    // The C4 payoff, and the thing xtext was worst at: a decode landing
+    // *above* the viewport must not shift what the user is reading.
+    // xtext had to recompute the entry's subline list, diff the count,
+    // and patch num_lines plus every scroll anchor by hand; here the
+    // anchor names a row, so it absorbs the change.
+    let m = FixedMeasure::new(10);
+    let mut p = params(400);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+
+    let img = b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: None,
+            blocks: vec![Block::Image {
+                token: 9,
+                size: None,
+                alt: "[image]".into(),
+            }],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    for i in 0..40 {
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
+    }
+    b.reindex();
+
+    // Park the viewport well below the image.
+    b.scroll_to(300, 100, 4);
+    let anchored = b.anchor().message.expect("anchored");
+    let anchor_row = b.row_of(anchored).unwrap();
+    let offset_before = b.index_mut().offset_of(anchor_row);
+
+    assert!(b.set_image_size(
+        img,
+        9,
+        ImageSize { width: 200, height: 300 },
+        &m
+    ));
+    b.ensure_layout(0, &m);
+
+    // The anchored row is still the same row, and still the same
+    // distance into the buffer *relative to itself* — the content above
+    // grew, so its absolute offset must have grown with it.
+    assert_eq!(b.anchor().message, Some(anchored), "anchor changed rows");
+    let after_row = b.row_of(anchored).unwrap();
+    let offset_after = b.index_mut().offset_of(after_row);
+    assert!(
+        offset_after > offset_before,
+        "the image grew above the viewport, so the anchored row must \
+         have moved down in absolute terms ({offset_before} -> {offset_after})"
+    );
+}

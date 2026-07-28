@@ -36,7 +36,18 @@ extern "C" {
         x: f64,
         y: f64,
     );
+    /// `gtkurl_is_url` — does this whitespace-delimited word look like
+    /// a link? The same classifier the word-click handler uses.
+    fn gtkurl_is_url(word: *const c_char) -> i32;
     fn g_free(p: *mut c_void);
+}
+
+/// Whether `gtkurl` classifies this word as a URL.
+pub fn word_is_url(word: &str) -> bool {
+    let Ok(c) = CString::new(word) else {
+        return false;
+    };
+    unsafe { gtkurl_is_url(c.as_ptr()) != 0 }
 }
 
 /// Pop the shared URL menu, reusing the one every other surface uses.
@@ -185,6 +196,12 @@ mod c_stubs {
         _x: f64,
         _y: f64,
     ) {
+    }
+
+    #[no_mangle]
+    unsafe extern "C" fn gtkurl_is_url(word: *const c_char) -> i32 {
+        let s = std::ffi::CStr::from_ptr(word).to_string_lossy();
+        i32::from(s.starts_with("http://") || s.starts_with("https://"))
     }
 
     #[no_mangle]

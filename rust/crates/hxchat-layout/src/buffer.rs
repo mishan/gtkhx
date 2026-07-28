@@ -551,6 +551,48 @@ impl ChatBuffer {
         Some((link.href.clone(), label))
     }
 
+    /// The whitespace-delimited word around a caret.
+    ///
+    /// Tokenised exactly like xtext's `is_del` macro (xtext.c:239):
+    /// space, newline, `<`, `>` and NUL. Matching it byte-for-byte is
+    /// the whole point — the existing C handlers in `chat.c` recognise
+    /// their targets by *string*, and the angle brackets are what let
+    /// `<nick>` split into a bare nick. Tokenise differently and
+    /// `inline_media_chat_word_click` stops finding `hxmedia:N`, and the
+    /// chat-history sentinel stops matching.
+    pub fn word_at(&self, caret: &Caret) -> Option<String> {
+        let row = self.row_of(caret.message)?;
+        let text = self.source_text(row, caret.source)?;
+        if text.is_empty() {
+            return None;
+        }
+        let is_del = |c: char| c == ' ' || c == '\n' || c == '<' || c == '>' || c == '\0';
+        let at = caret.offset.min(text.len());
+
+        // A click *on* a delimiter yields no word, which is what xtext
+        // does: both its scan loops (xtext.c:2095, 2114) test `is_del`
+        // before stepping, so they collapse to an empty span. Returning
+        // the preceding word instead would make clicking the gap after a
+        // link activate it.
+        match text[at..].chars().next() {
+            Some(c) if !is_del(c) => {}
+            _ => return None,
+        }
+
+        let start = text[..at]
+            .rfind(is_del)
+            .map(|i| i + text[i..].chars().next().map_or(1, |c| c.len_utf8()))
+            .unwrap_or(0);
+        let end = text[at..]
+            .find(is_del)
+            .map(|i| at + i)
+            .unwrap_or(text.len());
+        if start >= end {
+            return None;
+        }
+        Some(text[start..end].to_string())
+    }
+
     /// The settled gutter width. 0 when not in indent mode.
     pub fn indent_width(&self) -> u32 {
         self.indent_width
