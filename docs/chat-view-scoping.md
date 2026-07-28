@@ -835,59 +835,59 @@ anywhere else.
 
 | Metric | xtext | hxchat | Ratio |
 |---|---|---|---|
-| ingest + paint | 783.3 ms | 166.4 ms | **4.7× faster** |
-| ingest alone | 25.5k msgs/s | 141k msgs/s | 5.4× |
-| reflow (width) | 16.4 ms | 15.3 ms | 1.07× — *no real difference* |
-| scroll frame mean | 27.2 ms | 16.7 ms | 1.6× |
-| scroll frame p95 | 34.1 ms | 17.5 ms | **1.95×** |
+| ingest + paint | 693.1 ms | 142.6 ms | **4.9×** |
+| ingest alone | 29.0k msgs/s | 143k msgs/s | 4.9× |
+| relayout, worst frame | 105.6 ms | 16.9 ms | **6.3×** |
+| relayout, 10-frame total | 396.6 ms | 166.3 ms | 2.4× |
+| scroll frame mean | 29.9 ms | 16.7 ms | 1.8× |
+| scroll frame p95 | 42.1 ms | 17.3 ms | **2.4×** |
 | RSS / 10k msgs | 0.1 MB | 0.1 MB | *not credible — see below* |
 
 **Read this way.**
 
-*Ingest + paint* is the headline: 783 ms → 166 ms to get 20k messages on
-screen. That is the §3.2 retained-layout claim doing exactly what it was
-supposed to.
+*Ingest + paint*: 693 ms → 143 ms to get 20k messages on screen. The §3.2
+retained-layout claim, doing what it was designed to.
 
-*Scroll* is arguably the more meaningful result, because it is what a
-user feels continuously rather than once. hxchat's mean of 16.7 ms is the
-60 Hz frame budget — it is vsync-bound, i.e. it has run out of work to
-do. xtext's 27.2 ms mean and 34.1 ms p95 means it is missing roughly
-every other frame. The new backend isn't "faster at scrolling" so much as
-it has stopped being the bottleneck.
+*Relayout is the clearest result in the table, and the most load-bearing.*
+Divide the 10-frame totals by 10: hxchat averages **16.63 ms/frame**
+against a 16.67 ms vsync interval. A font change invalidates every cached
+width and every wrap point in all 20k messages, and hxchat's frames after
+it are indistinguishable from idle — it re-wrapped what was visible and
+nothing else. xtext averages 39.7 ms/frame over the same window, ~230 ms
+of extra work, with a **105 ms** worst frame. That is the
+whole-scrollback re-wrap, and it is the §3.2 O(visible) claim confirmed
+directly rather than argued.
 
-*Reflow did **not** show what §6c predicted.* This section previously
-called reflow "the number that decides it", on the reasoning that xtext
-re-wraps the whole scrollback and hxchat re-wraps what is visible. The
-medians are 16.4 ms vs 15.3 ms — a wash. Two possible readings, and the
-honest answer is that this run does not distinguish them:
+One caveat: one of three xtext runs showed only a 22.6 ms worst frame
+(166.8 ms total, i.e. idle). Two of three showed ~105 ms. The effect is
+real but not present in every run, most likely depending on where the
+invalidation lands relative to xtext's `io_tag` render timeout.
 
-1. The measurement is wrong. `PHASE_REFLOW` waits for the *next frame
-   tick* after a `set_size_request`, but xtext drives its re-render from
-   an `io_tag` timeout (`gtk_xtext_adjustment_timeout`), so the expensive
-   part may land after the tick being timed. If so this number is
-   undercounting xtext and the real gap is hidden.
-2. GTK is coalescing the resize such that neither backend re-wraps
-   everything within the sampled frame.
-
-What the reflow column *does* show is variance: xtext produced an 85 ms
-outlier in one of three runs (and 77–90 ms outliers in the discarded
-run), while hxchat's three samples span 12.7–16.9 ms. That is consistent
-with xtext occasionally paying a whole-scrollback cost, but three samples
-is not enough to claim it. **Fixing the reflow measurement is worth doing
-before this number is cited for anything.**
+*Scroll* is what a user feels continuously rather than once. hxchat's
+16.7 ms mean is the frame budget — it is vsync-bound, i.e. out of work.
+xtext at 29.9 ms mean / 42.1 ms p95 is missing roughly every other frame.
 
 *RSS is not credible and should not be quoted.* A 0.1 MB delta for 20k
-messages is impossible — the message text alone is a few MB. The harness
-is measuring something wrong (most likely the allocator had already grown
-the heap during warmup, so the pages were resident before the phase
-began). Reported here only so the number isn't mistaken for evidence of
-parity. Memory comparison remains **unmeasured**.
+messages is impossible; the message text alone is several MB. The harness
+is measuring something wrong — most likely the allocator had already
+grown the heap during warmup, so the pages were resident before the phase
+began. Reported only so it isn't mistaken for evidence of parity. Memory
+comparison remains **unmeasured**.
 
-**Verdict for C5.** Two of four metrics show a large, unambiguous win;
-one is a wash under a measurement known to be suspect; one is unmeasured.
-Nothing here argues against the flip, and the scroll result argues
-strongly for it — but the record should say that the case rests on ingest
-and scroll, not on the reflow claim the design was originally sold on.
+**Retracted.** An earlier revision of this section recorded "reflow:
+16.4 ms vs 15.3 ms, no real difference" and speculated at length about
+why the O(visible) claim might not be paying for itself. That measurement
+was worthless: it shrank the view's `size-request`, and the chat output is
+`hexpand`, so the allocation never changed and nothing re-wrapped in
+either backend. Both numbers were one vsync interval. The lesson is
+cheap to state and was nearly expensive: **a benchmark result that clusters
+suspiciously near the frame interval is probably measuring the frame
+interval.**
+
+**Verdict for C5.** Every metric that is measured correctly shows a large
+win — ingest 4.9×, relayout worst-frame 6.3×, scroll p95 2.4× — and in
+two of them hxchat is simply vsync-bound, meaning the ceiling is the
+display rather than the widget. Memory is unmeasured. Proceed.
 
 ## 7. Testing
 
