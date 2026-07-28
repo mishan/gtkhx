@@ -80,6 +80,46 @@ fn focus_is_text_entry(c: &gtk4::EventControllerKey) -> bool {
 /// backend this has to be indistinguishable from during the A/B.
 const MIN_FRAME_DELAY_MS: u32 = 10;
 
+/// What, if anything, recolours a run of text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Mark {
+    None,
+    Match,
+    CurrentMatch,
+    Selection,
+}
+
+impl Mark {
+    /// Precedence when bands overlap. Higher wins.
+    fn rank(self) -> u8 {
+        match self {
+            Mark::None => 0,
+            Mark::Match => 1,
+            Mark::CurrentMatch => 2,
+            Mark::Selection => 3,
+        }
+    }
+}
+
+/// Search highlight colours.
+///
+/// These are the *same* colours the news panel's find bar already uses
+/// (`news.rs`, tags `search-match` / `search-current`): Adwaita yellow-4
+/// `#f6d32d` on black for every hit, orange `#ff7800` on white for the
+/// active one. Two find bars in one app that highlight differently is a
+/// papercut, and this way there is one place to change it.
+///
+/// Fixed rather than themed, deliberately: the palette is a contract
+/// with `chat_view.h` (38 slots, mirrored in the theme file format), so
+/// widening it for this would mean a schema change every theme has to
+/// answer.
+const SEARCH_MATCH_BG: gtk4::gdk::RGBA =
+    gtk4::gdk::RGBA::new(0.9647, 0.8275, 0.1765, 1.0);
+const SEARCH_MATCH_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
+const SEARCH_CURRENT_BG: gtk4::gdk::RGBA =
+    gtk4::gdk::RGBA::new(1.0, 0.4706, 0.0, 1.0);
+const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
+
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
 
@@ -162,6 +202,8 @@ mod imp {
         /// Set while a drag is moving the gutter separator rather than
         /// selecting text.
         pub moving_separator: Cell<bool>,
+        /// In-buffer search: the query, its hits, and the cursor.
+        pub search: RefCell<hxchat_layout::SearchState>,
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
@@ -197,6 +239,11 @@ mod imp {
         /// the actual answer — the staleness window becomes one frame
         /// instead of one timer period.
         pub drag_pointer: Cell<(f64, f64)>,
+        /// Caret the current press landed on, installed as a selection
+        /// only once the pointer actually moves. See `install_selection_gestures`.
+        pub drag_start: RefCell<Option<Caret>>,
+        /// Whether the current press has turned into a real drag.
+        pub drag_moved: Cell<bool>,
         /// Auto-scroll tick, running only while a drag is outside the
         /// viewport.
         pub autoscroll_tick: RefCell<Option<gtk4::TickCallbackId>>,
@@ -217,6 +264,7 @@ mod imp {
                 font_generation: Cell::new(0),
                 separator: Cell::new(false),
                 moving_separator: Cell::new(false),
+                search: RefCell::new(hxchat_layout::SearchState::new()),
                 time_stamp: Cell::new(false),
                 selection: RefCell::new(None),
                 selecting: Cell::new(false),
@@ -225,6 +273,8 @@ mod imp {
                 media: RefCell::new(std::collections::HashMap::new()),
                 anim_tick: RefCell::new(None),
                 drag_pointer: Cell::new((0.0, 0.0)),
+                drag_start: RefCell::new(None),
+                drag_moved: Cell::new(false),
                 autoscroll_tick: RefCell::new(None),
             }
         }
@@ -704,39 +754,6 @@ impl HxChatView {
         snapshot.save();
         snapshot.translate(&gtk4::graphene::Point::new(PAD_X as f32, PAD_Y as f32));
 
-        // The indent separator, matching gtk_xtext_draw_sep: a full-height
-        // vertical rule half a space-width left of the body column, drawn
-        // only in indent mode. `separator` was being stored and never
-        // used, so the new backend was missing a line xtext has always
-        // drawn — chat.c passes separator=TRUE for every view.
-        //
-        // xtext's non-thin variant is a two-pixel bevel (bg then fg);
-        // the thin one is a single rule. Only the bevelled form is ever
-        // requested here, so that is what is reproduced.
-        {
-            let buf_ref = imp.buffer.borrow();
-            let indent = buf_ref.indent_width();
-            let space = imp.measure.borrow().metrics().space_width;
-            drop(buf_ref);
-            if imp.separator.get() && indent > 0 {
-                // Content coordinates here (the snapshot is translated by
-                // PAD_X), so this is `separator_x() - PAD_X`.
-                let x = indent as f32 - ((space as f32 + 1.0) / 2.0);
-                if x >= 1.0 {
-                    let fg = self.imp_().palette.borrow()[PAL_FG];
-                    let bgc = self.imp_().palette.borrow()[PAL_BG];
-                    snapshot.append_color(
-                        &bgc,
-                        &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
-                    );
-                    snapshot.append_color(
-                        &fg,
-                        &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32),
-                    );
-                }
-            }
-        }
-
         let scroll = {
             let mut buf = imp.buffer.borrow_mut();
             buf.scroll_offset(height as u32)
@@ -761,6 +778,42 @@ impl HxChatView {
                 })
                 .collect()
         };
+
+        // The indent separator, matching gtk_xtext_draw_sep: a full-height
+        // vertical rule half a space-width left of the body column, drawn
+        // only in indent mode. xtext's non-thin variant is a two-pixel
+        // bevel (bg then fg); only that form is ever requested here.
+        //
+        // Drawn *after* `ensure_visible`, and that ordering is the whole
+        // point. Laying out a row with a wider nick than any seen so far
+        // widens the shared gutter, so reading `indent_width` before the
+        // layout pass gives the value from *before* this frame's rows
+        // were measured. The rule then drew at the old position while the
+        // text drew at the new one — visible for exactly one frame, on
+        // the first message that widened the gutter, and self-correcting
+        // on the next message, which is precisely the shape of the bug
+        // that was reported.
+        //
+        // `separator_x()` rather than recomputing the geometry: the hit
+        // test uses the same function, so the rule you see and the rule
+        // you can grab cannot drift apart.
+        if let Some(sx) = self.separator_x() {
+            // Widget coords → content coords; the snapshot is translated
+            // by PAD_X above.
+            let x = (sx - PAD_X as f64) as f32;
+            if x >= 1.0 {
+                let fg = imp.palette.borrow()[PAL_FG];
+                let bgc = imp.palette.borrow()[PAL_BG];
+                snapshot.append_color(
+                    &bgc,
+                    &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
+                );
+                snapshot.append_color(
+                    &fg,
+                    &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32),
+                );
+            }
+        }
 
         let measure = imp.measure.borrow();
         let buf = imp.buffer.borrow();
@@ -901,6 +954,26 @@ impl HxChatView {
                     );
                 }
 
+                // Search bands for this line, in block-local bytes and
+                // clipped to the line, exactly as `hl` is above.
+                let hits: Vec<(usize, usize, bool)> = {
+                    let st = imp.search.borrow();
+                    if st.is_active() {
+                        let id = buf.id_at(row);
+                        st.matches()
+                            .iter()
+                            .filter(|m| Some(m.message) == id && m.source == line.source)
+                            .filter_map(|m| {
+                                let a = m.start.max(line.range.start);
+                                let b = m.end.min(line.range.end);
+                                (a < b).then(|| (a, b, st.is_current(m)))
+                            })
+                            .collect()
+                    } else {
+                        Vec::new()
+                    }
+                };
+
                 self.draw_runs(
                     snapshot,
                     &draw_layout,
@@ -908,6 +981,7 @@ impl HxChatView {
                     line.range.start,
                     spans,
                     hl,
+                    &hits,
                     x,
                     y as f32,
                 );
@@ -943,6 +1017,7 @@ impl HxChatView {
         slice_start: usize,
         spans: &[hxchat_layout::Span],
         hl: Option<(usize, usize)>,
+        search: &[(usize, usize, bool)],
         x0: f32,
         y: f32,
     ) {
@@ -963,17 +1038,51 @@ impl HxChatView {
             }
             i
         };
-        let (hs, he) = match hl {
-            Some((a, b)) => (
+        // Every band that recolours part of this slice, in slice-local
+        // coordinates. Selection outranks the current match outranks a
+        // plain match, so a selection dragged over a hit still looks
+        // selected.
+        let mut bands: Vec<(usize, usize, Mark)> = Vec::new();
+        if let Some((a, b)) = hl {
+            let (a, b) = (
                 floor_boundary(a.saturating_sub(slice_start)),
                 floor_boundary(b.saturating_sub(slice_start)),
-            ),
-            None => (0, 0),
+            );
+            if a < b {
+                bands.push((a, b, Mark::Selection));
+            }
+        }
+        for (a, b, is_current) in search {
+            let (a, b) = (
+                floor_boundary(a.saturating_sub(slice_start)),
+                floor_boundary(b.saturating_sub(slice_start)),
+            );
+            if a < b {
+                bands.push((
+                    a,
+                    b,
+                    if *is_current {
+                        Mark::CurrentMatch
+                    } else {
+                        Mark::Match
+                    },
+                ));
+            }
+        }
+
+        let mark_at = |pos: usize| {
+            bands
+                .iter()
+                .filter(|(a, b, _)| pos >= *a && pos < *b)
+                .map(|(_, _, m)| *m)
+                .max_by_key(|m| m.rank())
+                .unwrap_or(Mark::None)
         };
+
         let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
 
-        let emit = |text: &str, style: Style, selected: bool, x: &mut f32| {
+        let emit = |text: &str, style: Style, mark: Mark, x: &mut f32| {
             if text.is_empty() {
                 return;
             }
@@ -981,9 +1090,15 @@ impl HxChatView {
             layout.set_text(text);
             let (w, h) = layout.pixel_size();
 
-            if selected {
+            let band_bg = match mark {
+                Mark::Selection => Some(mark_bg),
+                Mark::CurrentMatch => Some(SEARCH_CURRENT_BG),
+                Mark::Match => Some(SEARCH_MATCH_BG),
+                Mark::None => None,
+            };
+            if let Some(bg) = band_bg {
                 snapshot.append_color(
-                    &mark_bg,
+                    &bg,
                     &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
                 );
             } else if style.bg != ColorRef::Default {
@@ -993,10 +1108,14 @@ impl HxChatView {
                 );
             }
 
-            let fg = if selected {
-                mark_fg
-            } else {
-                self.resolve(style.fg, PAL_FG)
+            // The search bands are fixed colours, so their ink is fixed
+            // too — the theme foreground is near-white on a dark theme
+            // and would vanish against yellow.
+            let fg = match mark {
+                Mark::Selection => mark_fg,
+                Mark::CurrentMatch => SEARCH_CURRENT_FG,
+                Mark::Match => SEARCH_MATCH_FG,
+                Mark::None => self.resolve(style.fg, PAL_FG),
             };
             snapshot.save();
             snapshot.translate(&gtk4::graphene::Point::new(*x, y));
@@ -1005,22 +1124,33 @@ impl HxChatView {
             *x += w as f32;
         };
 
-        // Emit `range` of the slice under one style, split at the
-        // selection boundaries so each piece is uniformly selected or
-        // not.
+        // Emit `from..to` of the slice under one style, split wherever
+        // the mark changes so each piece is uniformly marked. Splitting
+        // here rather than measuring separately is what keeps the
+        // highlight geometry and the glyphs in agreement — they come
+        // from the same `layout.pixel_size()` call.
         let emit_split = |from: usize, to: usize, style: Style, x: &mut f32| {
             if from >= to {
                 return;
             }
-            let sel_from = hs.max(from);
-            let sel_to = he.min(to);
-            if sel_from >= sel_to {
-                emit(&slice[from..to], style, false, x);
-                return;
+            // Boundaries of interest inside this run, sorted.
+            let mut cuts: Vec<usize> = vec![from, to];
+            for (a, b, _) in &bands {
+                for p in [*a, *b] {
+                    if p > from && p < to {
+                        cuts.push(p);
+                    }
+                }
             }
-            emit(&slice[from..sel_from], style, false, x);
-            emit(&slice[sel_from..sel_to], style, true, x);
-            emit(&slice[sel_to..to], style, false, x);
+            cuts.sort_unstable();
+            cuts.dedup();
+
+            for w in cuts.windows(2) {
+                let (a, b) = (w[0], w[1]);
+                if a < b {
+                    emit(&slice[a..b], style, mark_at(a), x);
+                }
+            }
         };
 
         for s in spans {
@@ -1156,6 +1286,7 @@ impl HxChatView {
 
         let this = self.clone();
         drag.connect_drag_begin(move |g, x, y| {
+            let _ = g;
             // The separator wins over selection: it lives in the gutter,
             // where a stray text drag is cheap to redo but a divider you
             // cannot grab is simply broken.
@@ -1164,16 +1295,22 @@ impl HxChatView {
                 this.imp_().selecting.set(false);
                 return;
             }
-            let start = this.caret_at(x, y);
+            // Record where the press landed, but do NOT install a
+            // collapsed selection yet.
+            //
+            // This used to set `selection = Some(empty at caret)` right
+            // here, which is what broke double- and triple-click: the
+            // multi-click handler sets a word/row selection on the same
+            // press, and whichever of the two gestures ran second won.
+            // GTK gives no ordering guarantee between two controllers on
+            // one widget, so the fix is to remove the conflict rather
+            // than to sequence it — a press alone now changes nothing,
+            // and the collapsed selection appears on first motion, which
+            // is the moment it actually means something.
+            *this.imp_().drag_start.borrow_mut() = this.caret_at(x, y);
+            this.imp_().drag_moved.set(false);
             this.imp_().selecting.set(true);
-            match start {
-                Some(c) => {
-                    *this.imp_().selection.borrow_mut() = Some(Selection::new(c, c));
-                }
-                None => *this.imp_().selection.borrow_mut() = None,
-            }
-            let _ = g;
-            this.queue_draw();
+            trace_clicks(|| format!("drag_begin at ({x:.0},{y:.0})"));
         });
 
         let this = self.clone();
@@ -1190,6 +1327,16 @@ impl HxChatView {
             let Some((sx, sy)) = g.start_point() else {
                 return;
             };
+            if !this.imp_().drag_moved.get() {
+                this.imp_().drag_moved.set(true);
+                // First real motion: this is a drag, so anchor the
+                // selection at the press point and drop whatever a
+                // previous gesture had selected.
+                let start = *this.imp_().drag_start.borrow();
+                *this.imp_().selection.borrow_mut() =
+                    start.map(|c| Selection::new(c, c));
+                trace_clicks(|| "drag_update: first motion".to_string());
+            }
             let (px, py) = (sx + dx, sy + dy);
             this.imp_().drag_pointer.set((px, py));
             this.sync_autoscroll();
@@ -1206,7 +1353,9 @@ impl HxChatView {
             this.sync_autoscroll();
             // Drag-end autocopy, matching xtext's behaviour and driven
             // by the same three prefs (see set_autocopy_* on the C side).
-            if autocopy_enabled() {
+            // Only for a real drag: a bare click selects nothing, and a
+            // multi-click does its own copy in the press handler.
+            if this.imp_().drag_moved.get() && autocopy_enabled() {
                 // Both clipboards, matching xtext's autocopy: it took
                 // clipboard ownership on drag-end
                 // (gtk_xtext_set_clip_owner), and PRIMARY is what
@@ -1234,14 +1383,15 @@ impl HxChatView {
             // "empty but present" is exactly the click case, and a
             // non-empty selection means a drag just finished and must
             // be left alone.
-            if n_press != 1 {
+            // A single click that involved no motion dismisses the
+            // selection. Keying on "the pointer never moved" rather than
+            // on "the selection is empty" is what lets drag_begin stop
+            // collapsing the selection — which is what unbroke
+            // double-click.
+            if n_press != 1 || this.imp_().drag_moved.get() {
                 return;
             }
-            let dismiss = match *this.imp_().selection.borrow() {
-                Some(s) => s.is_empty(),
-                None => false,
-            };
-            if dismiss {
+            if this.imp_().selection.borrow().is_some() {
                 *this.imp_().selection.borrow_mut() = None;
                 this.queue_draw();
             }
@@ -1252,6 +1402,7 @@ impl HxChatView {
         // selection to a caret — doesn't wipe the result.
         let this = self.clone();
         click.connect_pressed(move |_, n_press, x, y| {
+            trace_clicks(|| format!("pressed n_press={n_press} at ({x:.0},{y:.0})"));
             if n_press < 2 {
                 return;
             }
@@ -1266,11 +1417,13 @@ impl HxChatView {
                     buf.row_of(caret.message).and_then(|r| buf.select_row(r))
                 }
             };
+            trace_clicks(|| format!("multi-click n={n_press} -> sel={}", sel.is_some()));
             if let Some(sel) = sel {
                 *this.imp_().selection.borrow_mut() = Some(sel);
                 // A multi-click is not a drag: stop the drag handler
                 // from overwriting the focus on the next motion.
                 this.imp_().selecting.set(false);
+                this.imp_().drag_moved.set(false);
                 this.queue_draw();
                 if autocopy_enabled() {
                     this.copy_selection_to(ClipboardTarget::Primary);
@@ -1433,6 +1586,73 @@ impl HxChatView {
             buf.scroll_to(y, height, FOLLOW_SLOP);
         }
         self.sync_adjustment(height);
+        self.queue_draw();
+    }
+
+    // ---- in-buffer search --------------------------------------------
+
+    /// Run a query and reveal the first hit at or below the viewport.
+    ///
+    /// Returns `(match_count, current_ordinal)` for the find bar's
+    /// readout. An empty needle clears the search rather than matching
+    /// everything.
+    pub fn search_set(&self, needle: &str, case_sensitive: bool) -> (usize, usize) {
+        let imp = self.imp_();
+        if needle.is_empty() {
+            self.search_clear();
+            return (0, 0);
+        }
+        let hits = imp.buffer.borrow().search(needle, case_sensitive);
+        let height = content_height(self.height());
+        // Anchor the first step to whatever is on screen, so opening the
+        // bar in a long scrollback starts where you are looking rather
+        // than at the top.
+        let from_row = {
+            let mut buf = imp.buffer.borrow_mut();
+            let y = buf.scroll_offset(height);
+            buf.index_mut().locate(y).map(|h| h.row).unwrap_or(0)
+        };
+        {
+            let mut st = imp.search.borrow_mut();
+            st.set_results(needle, case_sensitive, hits);
+            let buf = imp.buffer.borrow();
+            st.seek_from(|id| buf.row_of(id), from_row);
+        }
+        self.reveal_current_match();
+        self.search_readout()
+    }
+
+    /// Step to the next (`dir > 0`) or previous (`dir < 0`) match.
+    pub fn search_step(&self, dir: i32) -> (usize, usize) {
+        {
+            let mut st = self.imp_().search.borrow_mut();
+            st.step(dir);
+        }
+        self.reveal_current_match();
+        self.search_readout()
+    }
+
+    pub fn search_clear(&self) {
+        self.imp_().search.borrow_mut().clear();
+        self.queue_draw();
+    }
+
+    /// `(total, ordinal)`; ordinal is 1-based, 0 for "none current".
+    pub fn search_readout(&self) -> (usize, usize) {
+        let st = self.imp_().search.borrow();
+        (st.len(), st.ordinal().unwrap_or(0))
+    }
+
+    fn reveal_current_match(&self) {
+        let imp = self.imp_();
+        let cur = imp.search.borrow().current();
+        if let Some(m) = cur {
+            let height = content_height(self.height());
+            let measure = imp.measure.borrow();
+            imp.buffer.borrow_mut().reveal(m.message, height, &*measure);
+            drop(measure);
+            self.sync_adjustment(height);
+        }
         self.queue_draw();
     }
 
@@ -1968,6 +2188,25 @@ impl HxChatView {
 /// The equivalent trick (a `g_message` reporting what was actually
 /// constructed) is what identified the C2 floating-reference bug after
 /// several wrong guesses.
+/// `GTKHX_CHATVIEW_TRACE=clicks` — press counts and drag transitions.
+///
+/// Here because the sandbox this was developed in has no display, so a
+/// click-handling bug can only be observed on the user's machine. One
+/// run with this on says whether GTK is delivering `n_press >= 2` at
+/// all, which is the fork in the road for any further diagnosis.
+fn trace_clicks(msg: impl FnOnce() -> String) {
+    use std::sync::OnceLock;
+    static ON: OnceLock<bool> = OnceLock::new();
+    let on = *ON.get_or_init(|| {
+        std::env::var("GTKHX_CHATVIEW_TRACE")
+            .map(|v| v.split(',').any(|p| p.trim() == "clicks"))
+            .unwrap_or(false)
+    });
+    if on {
+        eprintln!("[chatview] {}", msg());
+    }
+}
+
 fn trace_selection() -> bool {
     use std::sync::OnceLock;
     static ON: OnceLock<bool> = OnceLock::new();

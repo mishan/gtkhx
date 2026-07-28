@@ -491,3 +491,96 @@ fn parse_link(src: &str, open: usize) -> Option<(&str, &str, usize)> {
     }
     Some((label, href, j + 1))
 }
+
+// ---- input tinting --------------------------------------------------
+
+/// One tintable region of *source* text, for the compose box.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceSpan {
+    pub start: usize,
+    pub end: usize,
+    pub attrs: Attrs,
+    /// True for the delimiter characters themselves, which the input
+    /// box dims rather than styles.
+    pub delim: bool,
+}
+
+/// Locate the markdown delimiters in `src` that will actually be
+/// consumed, reporting ranges **in the source**.
+///
+/// This exists because [`parse_inline`] reports ranges in the *rendered*
+/// text, with the delimiters removed — exactly the offsets the compose
+/// box does not have. Rather than teach the renderer to carry source
+/// offsets through its recursion (a change to a heavily-tested function
+/// for a cosmetic feature), this is a separate, deliberately shallower
+/// pass that reuses the *rules* that are actually subtle: `can_open` /
+/// `can_close` flanking and the `_` intraword guards.
+///
+/// **It is an approximation, and that is fine here.** It doesn't nest,
+/// doesn't handle links, and takes the first valid closer. Being wrong
+/// in the compose box means a character is tinted that won't be, on text
+/// the user is still editing and can see; being wrong in the renderer
+/// would change what a message *says*. The two failure modes are not
+/// comparable, which is why they don't share a code path.
+pub fn scan_delims(src: &str) -> Vec<SourceSpan> {
+    let bytes = src.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0usize;
+
+    while i < bytes.len() {
+        // A backslash escape hides the next character from tinting, the
+        // same way it hides it from the parser.
+        if bytes[i] == b'\\' && i + 1 < bytes.len() {
+            i += 2;
+            continue;
+        }
+
+        let (run, attrs) = match bytes[i] {
+            b'*' if bytes.get(i + 1) == Some(&b'*') => (2usize, Attrs::BOLD),
+            b'*' => (1, Attrs::ITALIC),
+            b'_' if intraword_ok(bytes, i) => (1, Attrs::ITALIC),
+            b'`' => (1, Attrs::CODE),
+            _ => {
+                i += 1;
+                continue;
+            }
+        };
+
+        if !can_open(bytes, i + run) {
+            i += run;
+            continue;
+        }
+
+        // Code spans are literal: no escapes, no nesting, first closer wins.
+        let literal = attrs == Attrs::CODE;
+        let mut j = i + run;
+        let close = loop {
+            if j >= bytes.len() {
+                break None;
+            }
+            if !literal && bytes[j] == b'\\' {
+                j += 2;
+                continue;
+            }
+            let hit = match run {
+                2 => bytes[j] == b'*' && bytes.get(j + 1) == Some(&b'*'),
+                _ => bytes[j] == bytes[i] && (bytes[i] != b'_' || intraword_close_ok(bytes, j)),
+            };
+            if hit && can_close(bytes, j) {
+                break Some(j);
+            }
+            j += 1;
+        };
+
+        let Some(close) = close else {
+            i += run;
+            continue;
+        };
+
+        out.push(SourceSpan { start: i, end: i + run, attrs, delim: true });
+        out.push(SourceSpan { start: i + run, end: close, attrs, delim: false });
+        out.push(SourceSpan { start: close, end: close + run, attrs, delim: true });
+        i = close + run;
+    }
+    out
+}

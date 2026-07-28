@@ -1810,6 +1810,7 @@ dependencies = [
  "hotline-proto",
  "hx-image-decode",
  "hxbookmarks",
+ "hxchat-layout",
  "hxhandlers",
  "hxmodel",
  "hxtext",

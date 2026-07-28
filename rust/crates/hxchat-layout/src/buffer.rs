@@ -673,6 +673,82 @@ impl ChatBuffer {
         ))
     }
 
+    /// Every occurrence of `needle`, in reading order.
+    ///
+    /// Reading order means row by row, and within a row by
+    /// [`source_rank`](crate::select::source_rank) — the same order
+    /// `selected_rows` walks and the same order the eye does, so
+    /// stepping through matches never jumps backwards on screen.
+    ///
+    /// Searches the *model*, not the layout, so matches in rows that
+    /// have never been laid out are found too. That matters: the whole
+    /// point of search is to reach the part of the scrollback you
+    /// haven't scrolled to.
+    pub fn search(&self, needle: &str, case_sensitive: bool) -> Vec<crate::search::Match> {
+        let mut out = Vec::new();
+        if needle.is_empty() {
+            return out;
+        }
+        for row in 0..self.rows.len() {
+            let Some(id) = self.id_at(row) else { continue };
+            for source in self.sources_of(row) {
+                let Some(text) = self.source_text(row, source) else {
+                    continue;
+                };
+                for (start, end) in crate::search::find_all(text, needle, case_sensitive) {
+                    out.push(crate::search::Match {
+                        message: id,
+                        source,
+                        start,
+                        end,
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// Matches falling inside one row's one source, for the renderer.
+    ///
+    /// The renderer asks per source per row while drawing, so this is a
+    /// filter over the result set rather than a fresh search.
+    pub fn matches_in(
+        all: &[crate::search::Match],
+        id: MessageId,
+        source: LineSource,
+    ) -> Vec<crate::search::Match> {
+        all.iter()
+            .filter(|m| m.message == id && m.source == source)
+            .copied()
+            .collect()
+    }
+
+    /// Scroll so `id` is on screen, centred if it isn't already visible.
+    ///
+    /// Leaves an already-visible row where it is. Yanking the viewport
+    /// on every step would make walking a cluster of matches in one
+    /// screenful feel like the view was fighting you.
+    pub fn reveal(&mut self, id: MessageId, viewport_height: u32, measure: &dyn TextMeasure) {
+        self.reindex();
+        let Some(row) = self.row_of(id) else { return };
+        // The offset is only meaningful once the row has a real height
+        // rather than an estimate, so measure it first.
+        self.ensure_layout(row, measure);
+        let top = self.index.offset_of(row);
+        let h = self.index.height_at(row) as u64;
+        let cur = self.scroll_offset(viewport_height);
+        let vh = viewport_height as u64;
+        if top >= cur && top + h <= cur + vh {
+            return;
+        }
+        let target = if h >= vh {
+            top
+        } else {
+            top.saturating_sub((vh - h) / 2)
+        };
+        self.scroll_to(target, viewport_height, 0);
+    }
+
     /// The settled gutter width. 0 when not in indent mode.
     pub fn indent_width(&self) -> u32 {
         self.indent_width

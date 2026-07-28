@@ -68,6 +68,132 @@ fn set_line(buf: &gtk::TextBuffer, s: &str) {
     buf.place_cursor(&buf.end_iter());
 }
 
+/// Wrap the selection in `delim`, or unwrap it if it is already
+/// wrapped; with no selection, insert the pair and sit between them.
+///
+/// Toggling matters more than it looks: without it, Ctrl+B on text you
+/// just bolded gives `****text****`, and the only way back is to hunt
+/// down four asterisks by hand.
+fn wrap_selection(buf: &gtk::TextBuffer, delim: &str) {
+    // GtkTextBuffer offsets are in characters, not bytes.
+    let dlen = delim.chars().count() as i32;
+
+    buf.begin_user_action();
+    match buf.selection_bounds() {
+        Some((mut start, mut end)) => {
+            let text = buf.text(&start, &end, false).to_string();
+            let at = start.offset();
+            let (body, wrapped) = match strip_wrap(&text, delim) {
+                Some(inner) => (inner.to_string(), false),
+                None => (format!("{delim}{text}{delim}"), true),
+            };
+            buf.delete(&mut start, &mut end);
+            buf.insert(&mut start, &body);
+            // Keep the *content* selected either way, so a second press
+            // round-trips exactly rather than drifting by a delimiter.
+            let inner_start = at + if wrapped { dlen } else { 0 };
+            let inner_len = body.chars().count() as i32 - if wrapped { 2 * dlen } else { 0 };
+            buf.select_range(
+                &buf.iter_at_offset(inner_start),
+                &buf.iter_at_offset(inner_start + inner_len),
+            );
+        }
+        None => {
+            let at = buf.cursor_position();
+            let mut it = buf.iter_at_offset(at);
+            buf.insert(&mut it, &format!("{delim}{delim}"));
+            buf.place_cursor(&buf.iter_at_offset(at + dlen));
+        }
+    }
+    buf.end_user_action();
+}
+
+/// The inside of `text` if it is exactly `delim...delim`, else None.
+fn strip_wrap<'a>(text: &'a str, delim: &str) -> Option<&'a str> {
+    let n = delim.len();
+    if text.len() >= 2 * n && text.starts_with(delim) && text.ends_with(delim) {
+        Some(&text[n..text.len() - n])
+    } else {
+        None
+    }
+}
+
+/// Live markdown tinting for the compose box.
+///
+/// Purely a hint: the delimiters are dimmed and their contents shown in
+/// the style they will render as, so you can see that `**this**` took
+/// before you send it. Nothing here changes the text, and the text is
+/// what goes on the wire.
+fn apply_tint(buf: &gtk::TextBuffer) {
+    let tt = buf.tag_table();
+    if tt.lookup("md-delim").is_none() {
+        // Typed builder, not `create_tag`'s `&[(name, value)]` slice.
+        // The stringly-typed form looks up the property at runtime and
+        // *panics* if it doesn't exist — and a panic in a GTK signal
+        // callback is a non-unwinding one, so it aborts the process
+        // rather than failing the call. The first cut of this used an
+        // `alpha` property that GtkTextTag does not have, and every
+        // keystroke in the chat input killed GtkHx. With the builder a
+        // wrong property is a compile error.
+        for t in [
+            // Mid grey rather than an alpha on the theme foreground:
+            // GtkTextTag has no alpha property, and grey is legible
+            // against both the light and the dark input background.
+            gtk::TextTag::builder().name("md-delim").foreground("#888888").build(),
+            gtk::TextTag::builder().name("md-bold").weight(700).build(),
+            gtk::TextTag::builder()
+                .name("md-italic")
+                .style(gtk::pango::Style::Italic)
+                .build(),
+            gtk::TextTag::builder().name("md-code").family("monospace").build(),
+        ] {
+            tt.add(&t);
+        }
+    }
+
+    // Hold the tag objects rather than their names: `*_by_name` is the
+    // same runtime-lookup shape that caused the abort above, and there
+    // is no reason to keep one instance of it around.
+    let Some(delim) = tt.lookup("md-delim") else { return };
+    let Some(bold) = tt.lookup("md-bold") else { return };
+    let Some(italic) = tt.lookup("md-italic") else { return };
+    let Some(code) = tt.lookup("md-code") else { return };
+
+    let (start, end) = buf.bounds();
+    for t in [&delim, &bold, &italic, &code] {
+        buf.remove_tag(t, &start, &end);
+    }
+
+    let text = buf.text(&start, &end, false).to_string();
+    if text.is_empty() {
+        return;
+    }
+    // GtkTextBuffer indexes by character; the scanner reports bytes.
+    let char_of: std::collections::HashMap<usize, i32> = text
+        .char_indices()
+        .enumerate()
+        .map(|(ci, (bi, _))| (bi, ci as i32))
+        .chain(std::iter::once((text.len(), text.chars().count() as i32)))
+        .collect();
+
+    for sp in hxchat_layout::scan_delims(&text) {
+        let (Some(&a), Some(&b)) = (char_of.get(&sp.start), char_of.get(&sp.end)) else {
+            continue;
+        };
+        let (ia, ib) = (buf.iter_at_offset(a), buf.iter_at_offset(b));
+        let tag = if sp.delim {
+            &delim
+        } else if sp.attrs.contains(hxchat_layout::Attrs::BOLD) {
+            &bold
+        } else if sp.attrs.contains(hxchat_layout::Attrs::CODE) {
+            &code
+        } else {
+            &italic
+        };
+        buf.apply_tag(tag, &ia, &ib);
+    }
+}
+
 fn on_key(
     view: &gtk::TextView,
     sess: *mut c_void,
@@ -84,6 +210,21 @@ fn on_key(
         // Ctrl chords are exclusive — no send/complete/history under Ctrl.
         if keyval == Key::k || keyval == Key::K {
             unsafe { create_connect_window(ptr::null_mut(), sess) };
+            return glib::Propagation::Stop;
+        }
+        // Markdown compose affordances. These only touch the text you
+        // are typing: markdown is transmitted literally (the Hotline
+        // wire format has no styling concept at all), so `**bold**`
+        // goes out as `**bold**` and other GtkHx clients render it.
+        let shift = state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+        let delim = match keyval {
+            Key::b | Key::B if !shift => Some("**"),
+            Key::i | Key::I if !shift => Some("*"),
+            Key::c | Key::C if shift => Some("`"),
+            _ => None,
+        };
+        if let Some(d) = delim {
+            wrap_selection(&buf, d);
             return glib::Propagation::Stop;
         }
         return glib::Propagation::Proceed;
@@ -218,4 +359,8 @@ pub unsafe extern "C" fn gtkhx_chat_input_attach(
         }
     });
     tv.add_controller(ctrl);
+
+    // Live markdown tinting. `changed` rather than a key handler, so
+    // paste, emoji typeahead and history recall all tint too.
+    tv.buffer().connect_changed(apply_tint);
 }

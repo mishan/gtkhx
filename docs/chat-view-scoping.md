@@ -13,6 +13,7 @@ vendored `src/xtext.c`. Sibling to `docs/inline-media-plan.md` (whose §9.E
 | C1 — `hxchat-layout` engine | shipped |
 | C2 — `hxchat-view` widget, behind `GTKHX_CHATVIEW=new` | shipped |
 | C3 — selection, copy, zoom, links, context menu | shipped |
+| C3r — in-buffer search, markdown compose affordances | shipped |
 | C4 — inline media, word-click parity, word/line select, auto-scroll | shipped |
 | C5 — default flip, delete xtext | not started |
 | C6 — structured append, avatar gutter, grouping | not started |
@@ -728,8 +729,8 @@ fractional-scale display, and the drawn rule and the hit test share one
 | Gap | Notes |
 |---|---|
 | Marker line | xtext tracks a last-read marker (`gtk_xtext_reset_marker_pos`, `_moveto_marker_pos`, `_check_marker_visibility`). Not exposed through `chat_view.h` and not currently called from C, so it is dead today — but it was a real feature and someone will notice its absence if it is ever rewired. |
-| In-buffer search | `gtk_xtext_search` / `lastlog`. Also not routed through `chat_view.h` today. C3 item, deferred. |
-| Markdown rendering | The parser exists and is tested; nothing renders it, because the compat path parses mIRC only. Enabling it changes what chat *looks like*, which is a deliberate no during the A/B (§6, C2–C5 must be pixel-identical). |
+| ~~In-buffer search~~ | **Shipped in C3r**, as a new feature rather than a port. xtext's `gtk_xtext_search` (xtext.c:5190) is a GRegex engine plus a `search_found` list threaded through the entry chain — and it has *no caller anywhere in GtkHx*. It arrived with the HexChat vendoring and has never run under GTK 4, so wiring it would have meant debugging a dead subsystem C5 deletes. The engine is `hxchat-layout::search` instead, driven through `hx_chat_view_search*`; `hx_chat_view_can_search` returns FALSE for xtext and the find bar simply isn't built there. |
+| Markdown rendering | The parser exists and is tested; nothing renders it, because the compat path parses mIRC only. Enabling it changes what chat *looks like*, which is a deliberate no during the A/B (§6, C2–C5 must be pixel-identical). The **compose** half shipped in C3r — Ctrl+B / Ctrl+I / Ctrl+Shift+C wrap the selection, and the input box tints live — because none of that touches incoming text, so the A/B stays clean. Markdown already transmits literally either way. |
 | `set_urlcheck_function` | Accepted and ignored. The new backend autodetects with `gtkurl_scan` directly rather than asking a per-view classifier. Same scheme list, so the behaviour matches; the callback is simply redundant. |
 | *(none currently open)* | Selection auto-scroll and word/line select were the last two; both shipped. |
 
@@ -737,6 +738,45 @@ fractional-scale display, and the drawn rule and the hit test share one
 `set_error_function` / `gtk_xtext_foreach` / the `buffer_new`/`_free`/
 `_show` trio are all xtext API with no caller in this tree; they die with
 xtext rather than being reproduced.
+
+### 6b. Notes from C3r
+
+**Search is O(scrollback), on purpose.** `ChatBuffer::search` walks the
+*model*, not the layout, so a match in a row that has never been laid
+out is still found — which is the entire point, since the reason to
+search is to reach the part of the scrollback you haven't scrolled to.
+The cost is paid with a 120 ms debounce in the find bar rather than with
+an index, because an index would have to be maintained across append,
+prepend, trim and replace for a feature used seconds at a time.
+
+**Two find bars, one look.** The chat find bar reuses the news panel's
+highlight colours exactly (`#f6d32d` on black for hits, `#ff7800` on
+white for the active one) rather than inventing its own or widening the
+38-slot palette contract in `chat_view.h`.
+
+**The tinting scanner is deliberately not the renderer.**
+`markdown::scan_delims` reports ranges in the *source*, which
+`parse_inline` cannot — it reports ranges in the rendered text, with the
+delimiters removed. Teaching the renderer to carry source offsets
+through its recursion would mean changing a heavily-tested function for
+a cosmetic feature, so the tinting is a separate, shallower pass that
+reuses the rules that are actually subtle (`can_open` / `can_close`
+flanking, the `_` intraword guards). It doesn't nest and doesn't do
+links. Being wrong in the compose box tints a character that won't
+render, on text the user is still editing and can see; being wrong in
+the renderer would change what a message *says*. A test pins the one
+thing they must agree on: whether a delimiter is live at all.
+
+**Double- and triple-click were broken on arrival.** The multi-click
+handler set a word/row selection on press, and the drag gesture's
+`drag-begin` collapsed the selection to a caret on the same press. GTK
+gives no ordering guarantee between two controllers on one widget, so
+the C4 comment claiming drag "fires first" was an assumption, not a
+fact. Fixed by removing the conflict rather than sequencing it:
+`drag-begin` now only records the press point, and the collapsed
+selection is installed on first *motion* — the moment it means
+something. Click-to-dismiss consequently keys on "the pointer never
+moved" instead of "the selection is empty".
 
 ## 7. Testing
 

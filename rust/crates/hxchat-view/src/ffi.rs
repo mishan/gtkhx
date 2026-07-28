@@ -606,6 +606,55 @@ pub unsafe extern "C" fn hx_chat_view_impl_media_set_animation(
     v.set_media_frames(token, out);
 }
 
+// ---- in-buffer search ---------------------------------------------
+
+/// Write the `(total, ordinal)` readout back through the out-params,
+/// either of which may be NULL.
+unsafe fn put_readout(n_matches: *mut u32, current: *mut u32, r: (usize, usize)) {
+    if !n_matches.is_null() {
+        *n_matches = r.0 as u32;
+    }
+    if !current.is_null() {
+        *current = r.1 as u32;
+    }
+}
+
+/// # Safety
+/// `needle` is a NUL-terminated string or NULL; the out-params are
+/// writable `guint`s or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_search(
+    w: CGtkWidget,
+    needle: *const c_char,
+    case_sensitive: c_int,
+    n_matches: *mut u32,
+    current: *mut u32,
+) {
+    let needle = cstr(needle);
+    let r = with_view!(w, v, v.search_set(&needle, case_sensitive != 0));
+    put_readout(n_matches, current, r);
+}
+
+/// # Safety
+/// The out-params are writable `guint`s or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_search_step(
+    w: CGtkWidget,
+    dir: c_int,
+    n_matches: *mut u32,
+    current: *mut u32,
+) {
+    let r = with_view!(w, v, v.search_step(dir));
+    put_readout(n_matches, current, r);
+}
+
+/// # Safety
+/// `w` is an `HxChatView` or NULL.
+#[no_mangle]
+pub unsafe extern "C" fn hx_chat_view_impl_search_clear(w: CGtkWidget) {
+    with_view!(w, v, v.search_clear());
+}
+
 /// Unused today; keeps `ParsedText` reachable for the C4 work without a
 /// dead-import warning in the meantime.
 #[allow(dead_code)]
