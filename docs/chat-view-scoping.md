@@ -829,6 +829,11 @@ Frame timings include GTK's own compositing, so they are comparable
 the spread; a single pair of runs cannot separate a real difference from
 scheduler noise.
 
+**Full write-up: [chat-view-benchmark.md](chat-view-benchmark.md)** —
+raw samples, per-metric methodology, and a record of the two ways this
+benchmark produced convincing wrong answers before it produced a right
+one. Summary below.
+
 **Results** — 20k messages, 3 repeats per backend, medians. Wayland,
 one machine, one window size; see the caveats above before quoting these
 anywhere else.
