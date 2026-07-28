@@ -1036,3 +1036,181 @@ fn anchor_default_is_following() {
     assert!(a.is_following());
     assert!(a.message.is_none());
 }
+
+// ---------------------------------------------------------------- selection
+
+use crate::select::{Caret, RowSelection, Selection};
+use crate::wrap::LineSource;
+
+fn sel_buf() -> (ChatBuffer, FixedMeasure) {
+    let m = FixedMeasure::new(10);
+    let mut p = params(500);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    for s in ["alpha", "bravo", "charlie"] {
+        b.append(Message::system(ParsedText::plain(s)), &m);
+    }
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    (b, m)
+}
+
+fn caret(b: &ChatBuffer, row: usize, offset: usize) -> Caret {
+    Caret {
+        message: b.id_at(row).unwrap(),
+        source: LineSource::Block(0),
+        offset,
+    }
+}
+
+#[test]
+fn hit_test_maps_pixels_to_offsets() {
+    let (mut b, m) = sel_buf();
+    // Row 0 spans y 0..16 with a 10px-per-char measurer.
+    let c = b.hit_test(0, 0, &m).expect("hit");
+    assert_eq!(c.offset, 0);
+    let c = b.hit_test(25, 0, &m).expect("hit");
+    assert_eq!(c.offset, 2, "25px in is two characters at 10px each");
+    // Far right of a short line selects through its end.
+    let c = b.hit_test(9999, 0, &m).expect("hit");
+    assert_eq!(c.offset, 5, "past the end clamps to the line length");
+}
+
+#[test]
+fn hit_test_past_the_bottom_clamps_to_the_last_row() {
+    // A drag that runs off the bottom must keep selecting, not stop.
+    let (mut b, m) = sel_buf();
+    let last = b.id_at(2).unwrap();
+    let c = b.hit_test(0, 1_000_000, &m).expect("clamps");
+    assert_eq!(c.message, last);
+}
+
+#[test]
+fn hit_test_on_empty_buffer_is_none() {
+    let m = FixedMeasure::new(10);
+    let mut b = ChatBuffer::new(params(500));
+    assert!(b.hit_test(0, 0, &m).is_none());
+}
+
+#[test]
+fn selection_within_one_row() {
+    let (b, _m) = sel_buf();
+    let sel = Selection::new(caret(&b, 0, 1), caret(&b, 0, 4));
+    assert_eq!(
+        b.row_selection(0, &sel),
+        RowSelection::Partial {
+            source: LineSource::Block(0),
+            start: 1,
+            end: 4
+        }
+    );
+    assert_eq!(b.row_selection(1, &sel), RowSelection::None);
+    assert_eq!(b.selected_text(&sel), "lph");
+}
+
+#[test]
+fn selection_across_rows_joins_with_newlines() {
+    let (b, _m) = sel_buf();
+    let sel = Selection::new(caret(&b, 0, 2), caret(&b, 2, 4));
+    assert_eq!(b.row_selection(1, &sel), RowSelection::All);
+    assert_eq!(b.selected_text(&sel), "pha\nbravo\nchar");
+}
+
+#[test]
+fn selection_dragged_upwards_is_the_same_range() {
+    // anchor after focus in document order — dragging up must not
+    // produce an empty or inverted selection.
+    let (b, _m) = sel_buf();
+    let down = Selection::new(caret(&b, 0, 2), caret(&b, 2, 4));
+    let up = Selection::new(caret(&b, 2, 4), caret(&b, 0, 2));
+    assert_eq!(b.selected_text(&down), b.selected_text(&up));
+}
+
+#[test]
+fn selection_orders_by_row_not_by_message_id() {
+    // The trap: ids are allocated in *creation* order, but a
+    // chat-history batch inserts *older* messages with *higher* ids.
+    // Ordering by id would invert the selection after a backfill.
+    let m = FixedMeasure::new(10);
+    let mut p = params(500);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    let live = b.append(Message::system(ParsedText::plain("live")), &m);
+    // Higher id, but lands *above* the live row.
+    let older = b.insert_before(
+        Some(live),
+        Message::system(ParsedText::plain("older")),
+        &m,
+    );
+    assert!(older.0 > live.0, "the backfilled id is the higher one");
+    b.reindex();
+    assert_eq!(b.row_of(older), Some(0));
+
+    let sel = Selection::new(
+        Caret { message: older, source: LineSource::Block(0), offset: 0 },
+        Caret { message: live, source: LineSource::Block(0), offset: 4 },
+    );
+    let (start, end) = sel.ordered(|id| b.row_of(id));
+    assert_eq!(start.message, older, "document order, not id order");
+    assert_eq!(end.message, live);
+    assert_eq!(b.selected_text(&sel), "older\nlive");
+}
+
+#[test]
+fn empty_selection_yields_nothing() {
+    let (b, _m) = sel_buf();
+    let sel = Selection::new(caret(&b, 1, 3), caret(&b, 1, 3));
+    assert!(sel.is_empty());
+    assert_eq!(b.selected_text(&sel), "");
+    assert_eq!(b.row_selection(1, &sel), RowSelection::None);
+}
+
+#[test]
+fn selection_over_an_image_copies_its_alt_text() {
+    // Not all-or-nothing like xtext: dragging across a picture should
+    // put something meaningful on the clipboard.
+    let m = FixedMeasure::new(10);
+    let mut p = params(500);
+    p.indent = false;
+    let mut b = ChatBuffer::new(p);
+    b.append(Message::system(ParsedText::plain("before")), &m);
+    b.append(
+        Message {
+            kind: crate::message::MessageKind::Live,
+            timestamp: 0,
+            speaker: None,
+            gutter: None,
+            blocks: vec![Block::Image {
+                token: 1,
+                size: Some(ImageSize { width: 40, height: 40 }),
+                alt: "[image: cat.png]".into(),
+            }],
+            flags: MessageFlagsNone::NONE,
+        },
+        &m,
+    );
+    b.append(Message::system(ParsedText::plain("after")), &m);
+    b.reindex();
+
+    let sel = Selection::new(caret(&b, 0, 0), caret(&b, 2, 5));
+    assert!(
+        b.selected_text(&sel).contains("[image: cat.png]"),
+        "got {:?}",
+        b.selected_text(&sel)
+    );
+}
+
+#[test]
+fn selection_survives_a_resize() {
+    // The reason a Caret names (message, source, offset) rather than
+    // pixels: re-wrapping must not move the selection.
+    let (mut b, m) = sel_buf();
+    let sel = Selection::new(caret(&b, 0, 1), caret(&b, 2, 4));
+    let before = b.selected_text(&sel);
+    b.set_width(80);
+    for r in 0..3 {
+        b.ensure_layout(r, &m);
+    }
+    assert_eq!(b.selected_text(&sel), before, "resize moved the selection");
+}

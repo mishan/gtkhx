@@ -37,7 +37,16 @@ pub struct PangoMeasure {
     /// Zoom, per-mille. Applied to the font size, so the whole row
     /// scales together (scoping §3.7).
     zoom_permille: u32,
-    cache: RefCell<HashMap<(String, u8), u32>>,
+    /// Measured run widths, nested attrs → text → width.
+    ///
+    /// Nested rather than keyed on `(String, u8)` so a lookup can borrow:
+    /// `String: Borrow<str>` lets the inner map be probed with a plain
+    /// `&str`, whereas a tuple key forces a `to_string()` on *every*
+    /// call — including cache hits, which is most of them on the
+    /// wrapping hot path, and which would eat most of the benefit the
+    /// cache exists for. The outer key is the attribute bits, of which
+    /// only a handful ever occur.
+    cache: RefCell<HashMap<u8, HashMap<String, u32>>>,
 }
 
 impl std::fmt::Debug for PangoMeasure {
@@ -177,9 +186,14 @@ impl TextMeasure for PangoMeasure {
             return 0;
         }
         // Only the attribute bits affect width; colour does not, so the
-        // cache key ignores it and gets far better hit rates.
-        let key = (text.to_string(), style.attrs.0);
-        if let Some(w) = self.cache.borrow().get(&key) {
+        // key ignores it and gets far better hit rates.
+        let attrs = style.attrs.0;
+        if let Some(w) = self
+            .cache
+            .borrow()
+            .get(&attrs)
+            .and_then(|inner| inner.get(text))
+        {
             return *w;
         }
         let layout = self.prepare(text, style);
@@ -187,10 +201,12 @@ impl TextMeasure for PangoMeasure {
         let w = w.max(0) as u32;
         {
             let mut c = self.cache.borrow_mut();
-            if c.len() >= CACHE_CAP {
+            let total: usize = c.values().map(|m| m.len()).sum();
+            if total >= CACHE_CAP {
                 c.clear();
             }
-            c.insert(key, w);
+            // The one allocation, on insert only.
+            c.entry(attrs).or_default().insert(text.to_string(), w);
         }
         w
     }

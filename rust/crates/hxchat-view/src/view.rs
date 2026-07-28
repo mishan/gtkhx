@@ -26,8 +26,8 @@ use gtk4::glib;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use hxchat_layout::{
-    ChatBuffer, ColorRef, LayoutParams, LineSource, Message, MessageId, ParsedText, Span, Style,
-    TextMeasure,
+    Caret, ChatBuffer, ColorRef, LayoutParams, LineSource, Message, MessageId, ParsedText,
+    RowSelection, Selection, Span, Style, TextMeasure,
 };
 
 use crate::measure::PangoMeasure;
@@ -40,6 +40,10 @@ pub const PAL_BG: usize = 35;
 /// timestamp column uses it so the stamps recede behind the message
 /// text rather than competing with it.
 pub const PAL_HISTORY_MUTED: usize = 37;
+/// `HX_CHAT_PAL_MARK_FG` / `_MARK_BG` — the selection colours, filled by
+/// the theme exactly as they were for xtext.
+pub const PAL_MARK_FG: usize = 32;
+pub const PAL_MARK_BG: usize = 33;
 
 /// Pixels of slop within which a scroll position counts as "at the
 /// bottom" and resumes following.
@@ -83,6 +87,11 @@ mod imp {
         /// Whether the timestamp column renders. Driven by CFG_TIMESTAMP
         /// through `hx_chat_view_set_time_stamp`.
         pub time_stamp: Cell<bool>,
+        /// The live selection, or None when nothing is selected.
+        pub selection: RefCell<Option<Selection>>,
+        /// True while a drag is in progress, so motion extends the
+        /// selection rather than being ignored.
+        pub selecting: Cell<bool>,
         /// strftime format for that column. xtext's default is
         /// "[%H:%M:%S] " and chat.c relies on getting it.
         pub stamp_format: RefCell<String>,
@@ -103,6 +112,8 @@ mod imp {
                 font_generation: Cell::new(0),
                 separator: Cell::new(false),
                 time_stamp: Cell::new(false),
+                selection: RefCell::new(None),
+                selecting: Cell::new(false),
                 stamp_format: RefCell::new(DEFAULT_STAMP_FORMAT.to_string()),
             }
         }
@@ -174,6 +185,9 @@ mod imp {
             let ctx = obj.pango_context();
             let font = pango::FontDescription::from_string("Monospace 10");
             *self.measure.borrow_mut() = PangoMeasure::new(ctx, font);
+
+            obj.install_selection_gestures();
+            obj.install_zoom_bindings();
         }
 
         fn properties() -> &'static [glib::ParamSpec] {
@@ -323,10 +337,13 @@ impl HxChatView {
     }
 
     pub fn set_max_rows(&self, n: i32) {
-        self.imp_()
-            .buffer
-            .borrow_mut()
-            .set_max_rows(if n > 0 { n as usize } else { 0 });
+        // xtext only auto-trims when max_lines > 2 (xtext.c:5442), so 1
+        // and 2 mean "no limit" there. Treating them as a literal cap
+        // here would truncate the scrollback to nearly nothing on a pref
+        // value that is a no-op on the other backend — exactly the kind
+        // of silent divergence the A/B is supposed to rule out.
+        let cap = if n > 2 { n as usize } else { 0 };
+        self.imp_().buffer.borrow_mut().set_max_rows(cap);
     }
 
     pub fn set_indent(&self, on: bool) {
@@ -593,6 +610,9 @@ impl HxChatView {
         let draw_layout = pango::Layout::new(ctx);
         draw_layout.set_font_description(Some(&font));
 
+        let selection = *imp.selection.borrow();
+        let mark_bg = self.imp_().palette.borrow()[PAL_MARK_BG];
+        let mark_fg = self.imp_().palette.borrow()[PAL_MARK_FG];
         let show_stamp = imp.time_stamp.get();
         let stamp_format = imp.stamp_format.borrow().clone();
         let indent_width = buf.params().indent_width as f32;
@@ -656,6 +676,42 @@ impl HxChatView {
                     line.x as f32
                 };
 
+                // Selection band behind the text, then the text with
+                // the selected span forced to the mark colours. Drawing
+                // the highlight as a separate node under an unmodified
+                // run is what keeps selection independent of the
+                // message's own colours.
+                let row_sel = selection
+                    .as_ref()
+                    .map(|s| buf.row_selection(row, s))
+                    .unwrap_or(RowSelection::None);
+                let hl = selected_range_in_line(&row_sel, line.source, &line.range);
+                if let Some((hs, he)) = hl {
+                    let pre = slice.get(..hs.saturating_sub(line.range.start)).unwrap_or("");
+                    let mid = slice
+                        .get(
+                            hs.saturating_sub(line.range.start)
+                                ..he.saturating_sub(line.range.start),
+                        )
+                        .unwrap_or("");
+                    draw_layout.set_attributes(None);
+                    draw_layout.set_text(pre);
+                    let (pre_w, _) = draw_layout.pixel_size();
+                    draw_layout.set_text(mid);
+                    let (mid_w, mid_h) = draw_layout.pixel_size();
+                    if mid_w > 0 {
+                        snapshot.append_color(
+                            &mark_bg,
+                            &gtk4::graphene::Rect::new(
+                                x + pre_w as f32,
+                                y as f32,
+                                mid_w as f32,
+                                mid_h as f32,
+                            ),
+                        );
+                    }
+                }
+
                 self.draw_runs(
                     snapshot,
                     &draw_layout,
@@ -665,6 +721,29 @@ impl HxChatView {
                     x,
                     y as f32,
                 );
+
+                // Repaint just the selected glyphs in the mark
+                // foreground, so selected text stays legible against the
+                // highlight regardless of its own colour.
+                if let Some((hs, he)) = hl {
+                    let rel_s = hs.saturating_sub(line.range.start);
+                    let rel_e = he.saturating_sub(line.range.start);
+                    let pre = slice.get(..rel_s).unwrap_or("");
+                    let mid = slice.get(rel_s..rel_e).unwrap_or("");
+                    if !mid.is_empty() {
+                        draw_layout.set_attributes(None);
+                        draw_layout.set_text(pre);
+                        let (pre_w, _) = draw_layout.pixel_size();
+                        draw_layout.set_text(mid);
+                        snapshot.save();
+                        snapshot.translate(&gtk4::graphene::Point::new(
+                            x + pre_w as f32,
+                            y as f32,
+                        ));
+                        snapshot.append_layout(&draw_layout, &mark_fg);
+                        snapshot.restore();
+                    }
+                }
             }
         }
 
@@ -775,4 +854,286 @@ fn format_stamp(unix: i64, format: &str) -> Option<String> {
     }
     let dt = glib::DateTime::from_unix_local(unix).ok()?;
     dt.format(format).ok().map(|g| g.to_string())
+}
+
+// ---- selection ------------------------------------------------------
+
+impl HxChatView {
+    /// Drag-to-select, click-to-clear, and Ctrl+C.
+    fn install_selection_gestures(&self) {
+        // The widget has to be focusable for a key controller to reach
+        // it; xtext's consumers call gtk_widget_set_can_focus(FALSE) to
+        // keep the input box focused, so Ctrl+C is bound on the widget
+        // rather than requiring focus.
+        let drag = gtk4::GestureDrag::new();
+        drag.set_button(gtk4::gdk::BUTTON_PRIMARY);
+
+        let this = self.clone();
+        drag.connect_drag_begin(move |g, x, y| {
+            let start = this.caret_at(x, y);
+            this.imp_().selecting.set(true);
+            match start {
+                Some(c) => {
+                    *this.imp_().selection.borrow_mut() = Some(Selection::new(c, c));
+                }
+                None => *this.imp_().selection.borrow_mut() = None,
+            }
+            let _ = g;
+            this.queue_draw();
+        });
+
+        let this = self.clone();
+        drag.connect_drag_update(move |g, dx, dy| {
+            if !this.imp_().selecting.get() {
+                return;
+            }
+            let Some((sx, sy)) = g.start_point() else {
+                return;
+            };
+            let Some(focus) = this.caret_at(sx + dx, sy + dy) else {
+                return;
+            };
+            let mut sel = this.imp_().selection.borrow_mut();
+            if let Some(s) = sel.as_mut() {
+                s.focus = focus;
+            }
+            drop(sel);
+            this.queue_draw();
+        });
+
+        let this = self.clone();
+        drag.connect_drag_end(move |_, _, _| {
+            this.imp_().selecting.set(false);
+            // Drag-end autocopy, matching xtext's behaviour and driven
+            // by the same three prefs (see set_autocopy_* on the C side).
+            if autocopy_enabled() {
+                this.copy_selection_to(ClipboardTarget::Primary);
+            }
+        });
+        self.add_controller(drag);
+
+        // A plain click with no drag clears the selection, which is what
+        // every text view does and what makes "click to dismiss" work.
+        let click = gtk4::GestureClick::new();
+        click.set_button(gtk4::gdk::BUTTON_PRIMARY);
+        let this = self.clone();
+        click.connect_released(move |_, n_press, _, _| {
+            if n_press == 1 {
+                let empty = this
+                    .imp_()
+                    .selection
+                    .borrow()
+                    .map(|s| s.is_empty())
+                    .unwrap_or(true);
+                if empty {
+                    *this.imp_().selection.borrow_mut() = None;
+                    this.queue_draw();
+                }
+            }
+        });
+        self.add_controller(click);
+
+        // Ctrl+C. A shortcut controller with GLOBAL scope so it works
+        // while focus is in the chat input, which is where it always is.
+        let controller = gtk4::ShortcutController::new();
+        controller.set_scope(gtk4::ShortcutScope::Global);
+        let this = self.clone();
+        let action = gtk4::CallbackAction::new(move |_, _| {
+            this.copy_selection_to(ClipboardTarget::Clipboard);
+            glib::Propagation::Stop
+        });
+        controller.add_shortcut(gtk4::Shortcut::new(
+            gtk4::ShortcutTrigger::parse_string("<Control>c"),
+            Some(action),
+        ));
+        self.add_controller(controller);
+    }
+
+    /// Widget-space point → document position.
+    fn caret_at(&self, x: f64, y: f64) -> Option<Caret> {
+        let imp = self.imp_();
+        let height = content_height(self.height());
+        let scroll = {
+            let mut buf = imp.buffer.borrow_mut();
+            buf.scroll_offset(height)
+        };
+        // Undo the padding origin, then convert to buffer coordinates.
+        let cx = (x as i32) - PAD_X;
+        let cy = ((y as i32) - PAD_Y).max(0) as u64 + scroll;
+        let m = imp.measure.borrow();
+        let mut buf = imp.buffer.borrow_mut();
+        buf.hit_test(cx, cy, &*m)
+    }
+
+    /// The selected text, or empty.
+    pub fn selected_text(&self) -> String {
+        let imp = self.imp_();
+        let sel = *imp.selection.borrow();
+        match sel {
+            Some(s) if !s.is_empty() => imp.buffer.borrow().selected_text(&s),
+            _ => String::new(),
+        }
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.imp_()
+            .selection
+            .borrow()
+            .map(|s| !s.is_empty())
+            .unwrap_or(false)
+    }
+
+    pub fn clear_selection(&self) {
+        if self.imp_().selection.borrow().is_some() {
+            *self.imp_().selection.borrow_mut() = None;
+            self.queue_draw();
+        }
+    }
+
+    /// Which clipboard a copy targets.
+    ///
+    /// GTK 4 dropped `GdkAtom` selections: there are exactly two
+    /// clipboards on a display, so this is a bool with a name.
+    fn copy_selection_to(&self, target: ClipboardTarget) {
+        let text = self.selected_text();
+        if text.is_empty() {
+            return;
+        }
+        let display = WidgetExt::display(self);
+        let cb = match target {
+            ClipboardTarget::Primary => display.primary_clipboard(),
+            ClipboardTarget::Clipboard => display.clipboard(),
+        };
+        cb.set_text(&text);
+    }
+}
+
+/// Which of a display's two clipboards to write.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ClipboardTarget {
+    /// Middle-click paste buffer; drag-end writes here, as xtext did.
+    Primary,
+    /// Ctrl+V clipboard.
+    Clipboard,
+}
+
+/// Whether drag-end should copy to the primary selection.
+///
+/// xtext gated this on a pref (`gtk_xtext_set_autocopy_text`). Those
+/// setters are process-wide there and the C dispatcher still routes them
+/// to xtext, so until C5 retires that path this mirrors the default
+/// rather than reading the pref through a second channel.
+fn autocopy_enabled() -> bool {
+    true
+}
+
+/// Intersect a row's selection with one visual line.
+///
+/// Returns absolute byte offsets into the source text, or `None` when
+/// this line has nothing selected. Splitting it out keeps the snapshot
+/// loop readable and makes the "whole row" case explicit — an `All`
+/// selection covers every line of every source, including the gutter.
+fn selected_range_in_line(
+    row_sel: &RowSelection,
+    source: LineSource,
+    line: &std::ops::Range<usize>,
+) -> Option<(usize, usize)> {
+    match row_sel {
+        RowSelection::None => None,
+        RowSelection::All => Some((line.start, line.end)),
+        RowSelection::Partial {
+            source: s,
+            start,
+            end,
+        } => {
+            if *s != source {
+                return None;
+            }
+            let hs = (*start).max(line.start);
+            let he = (*end).min(line.end);
+            if hs < he {
+                Some((hs, he))
+            } else {
+                None
+            }
+        }
+    }
+}
+
+// ---- zoom (scoping §3.7) --------------------------------------------
+
+/// Zoom steps, per-mille. The browser/terminal ladder people already
+/// have muscle memory for.
+const ZOOM_STEPS: [u32; 13] = [
+    500, 670, 800, 900, 1000, 1100, 1250, 1500, 1750, 2000, 2500, 3000, 4000,
+];
+
+impl HxChatView {
+    fn install_zoom_bindings(&self) {
+        // Ctrl + scroll.
+        let scroll = gtk4::EventControllerScroll::new(
+            gtk4::EventControllerScrollFlags::VERTICAL,
+        );
+        let this = self.clone();
+        scroll.connect_scroll(move |c, _dx, dy| {
+            if !c.current_event_state().contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+                // Not ours — let it scroll the view.
+                return glib::Propagation::Proceed;
+            }
+            if dy < 0.0 {
+                this.zoom_step(1);
+            } else if dy > 0.0 {
+                this.zoom_step(-1);
+            }
+            glib::Propagation::Stop
+        });
+        self.add_controller(scroll);
+
+        // Ctrl + / - / 0. Global scope because focus lives in the chat
+        // input, not here.
+        let controller = gtk4::ShortcutController::new();
+        controller.set_scope(gtk4::ShortcutScope::Global);
+        for (accel, delta) in [
+            ("<Control>plus", 1i32),
+            ("<Control>equal", 1),
+            ("<Control>KP_Add", 1),
+            ("<Control>minus", -1),
+            ("<Control>KP_Subtract", -1),
+        ] {
+            let this = self.clone();
+            let action = gtk4::CallbackAction::new(move |_, _| {
+                this.zoom_step(delta);
+                glib::Propagation::Stop
+            });
+            if let Some(trigger) = gtk4::ShortcutTrigger::parse_string(accel) {
+                controller.add_shortcut(gtk4::Shortcut::new(Some(trigger), Some(action)));
+            }
+        }
+        let this = self.clone();
+        let reset = gtk4::CallbackAction::new(move |_, _| {
+            this.set_zoom_permille(1000);
+            glib::Propagation::Stop
+        });
+        if let Some(trigger) = gtk4::ShortcutTrigger::parse_string("<Control>0") {
+            controller.add_shortcut(gtk4::Shortcut::new(Some(trigger), Some(reset)));
+        }
+        self.add_controller(controller);
+    }
+
+    /// Move `delta` notches along [`ZOOM_STEPS`].
+    ///
+    /// Stepping through a fixed ladder rather than multiplying keeps the
+    /// levels round and reproducible — repeated in/out returns to
+    /// exactly 100% instead of drifting.
+    pub fn zoom_step(&self, delta: i32) {
+        let cur = self.zoom_permille();
+        let idx = ZOOM_STEPS
+            .iter()
+            .position(|z| *z >= cur)
+            .unwrap_or(ZOOM_STEPS.len() - 1) as i32;
+        let next = (idx + delta).clamp(0, ZOOM_STEPS.len() as i32 - 1) as usize;
+        if ZOOM_STEPS[next] != cur {
+            self.set_zoom_permille(ZOOM_STEPS[next]);
+        }
+    }
 }

@@ -175,6 +175,7 @@ rust_sources = files(
   'crates/hxchat-layout/src/index.rs',
   'crates/hxchat-layout/src/anchor.rs',
   'crates/hxchat-layout/src/buffer.rs',
+  'crates/hxchat-layout/src/select.rs',
   'crates/hxchat-layout/src/tests.rs',
   # hxchat-view (chat-view C2) — the GTK4 widget over hxchat-layout.
   'crates/hxchat-view/src/lib.rs',

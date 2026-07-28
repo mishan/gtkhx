@@ -13,6 +13,9 @@ use crate::anchor::{AnchorResolver, Gravity, ScrollAnchor};
 use crate::index::HeightIndex;
 use crate::measure::TextMeasure;
 use crate::message::{Block, Message, MessageId};
+use crate::select::{Caret, RowSelection, Selection};
+use crate::span::Style;
+use crate::wrap::LineSource;
 use crate::wrap::{estimate_height, layout_message, LayoutCache, LayoutGeneration, LayoutParams};
 use std::collections::HashMap;
 use std::collections::VecDeque;
@@ -500,6 +503,163 @@ impl ChatBuffer {
             self.ensure_layout(row, measure);
             out.push(row);
             consumed += u64::from(self.index.height_at(row));
+        }
+        out
+    }
+
+    /// Text of one of a message's sources, for hit-testing and copying.
+    pub fn source_text(&self, row: usize, source: LineSource) -> Option<&str> {
+        let msg = &self.rows.get(row)?.msg;
+        match source {
+            LineSource::Gutter => msg.gutter.as_ref().map(|g| g.text.as_str()),
+            LineSource::Block(bi) => match msg.blocks.get(bi)? {
+                Block::Text(p) => Some(p.text.as_str()),
+                Block::Quote { content, .. } => Some(content.text.as_str()),
+                Block::Code { text, .. } => Some(text.as_str()),
+                // An image contributes its alt text, so a selection
+                // dragged across a picture copies something meaningful
+                // instead of nothing.
+                Block::Image { alt, .. } => Some(alt.as_str()),
+            },
+        }
+    }
+
+    /// Map a content-space pixel to a document position.
+    ///
+    /// `x` / `y` are in content coordinates (the view subtracts its own
+    /// padding first). `y` is absolute within the buffer, not
+    /// viewport-relative.
+    ///
+    /// Returns `None` only for an empty buffer; a point past the end
+    /// clamps to the last row, because a drag that runs off the bottom
+    /// should select to the end rather than stop tracking.
+    pub fn hit_test(
+        &mut self,
+        x: i32,
+        y: u64,
+        measure: &dyn TextMeasure,
+    ) -> Option<Caret> {
+        let hit = self.index.locate(y)?;
+        let row = hit.row;
+        self.ensure_layout(row, measure);
+        let id = self.id_at(row)?;
+        let layout = self.layout_at(row)?;
+
+        // The line whose vertical band contains the point, or the
+        // nearest one — a drag can be above or below every band.
+        let line = layout
+            .lines
+            .iter()
+            .find(|l| hit.offset >= l.y && hit.offset < l.y + l.height)
+            .or_else(|| {
+                if hit.offset < layout.lines.first().map_or(0, |l| l.y) {
+                    layout.lines.first()
+                } else {
+                    layout.lines.last()
+                }
+            })?;
+
+        let source = line.source;
+        let range = line.range.clone();
+        let line_x = line.x as i32;
+        let text = self.source_text(row, source)?;
+        let slice = text.get(range.clone()).unwrap_or("");
+
+        // Within the line, find the byte the x lands on. Left of the
+        // line start selects from its beginning; right of the end
+        // selects through it, which is what makes dragging past the end
+        // of a short line feel right.
+        let rel = x - line_x;
+        let offset = if rel <= 0 {
+            range.start
+        } else {
+            let (fit, _) = measure.fit_prefix(slice, Style::default(), rel as u32);
+            (range.start + fit).min(range.end)
+        };
+
+        Some(Caret {
+            message: id,
+            source,
+            offset,
+        })
+    }
+
+    /// How much of `row` a selection covers.
+    pub fn row_selection(&self, row: usize, sel: &Selection) -> RowSelection {
+        if sel.is_empty() {
+            return RowSelection::None;
+        }
+        let (start, end) = sel.ordered(|id| self.row_of(id));
+        let (Some(sr), Some(er)) = (self.row_of(start.message), self.row_of(end.message)) else {
+            return RowSelection::None;
+        };
+        if row < sr || row > er {
+            return RowSelection::None;
+        }
+        if row > sr && row < er {
+            return RowSelection::All;
+        }
+        // A boundary row: only the named source is partially covered.
+        let (source, from, to) = if sr == er {
+            if start.source != end.source {
+                // Spanning sources within one row (gutter → body):
+                // treat as whole-row, which is what the user means.
+                return RowSelection::All;
+            }
+            (start.source, start.offset, end.offset)
+        } else if row == sr {
+            let text_len = self
+                .source_text(row, start.source)
+                .map_or(0, |t| t.len());
+            (start.source, start.offset, text_len)
+        } else {
+            (end.source, 0, end.offset)
+        };
+        let (from, to) = if from <= to { (from, to) } else { (to, from) };
+        RowSelection::Partial {
+            source,
+            start: from,
+            end: to,
+        }
+    }
+
+    /// The selected text, rows joined by newlines.
+    pub fn selected_text(&self, sel: &Selection) -> String {
+        if sel.is_empty() {
+            return String::new();
+        }
+        let (start, end) = sel.ordered(|id| self.row_of(id));
+        let (Some(sr), Some(er)) = (self.row_of(start.message), self.row_of(end.message)) else {
+            return String::new();
+        };
+        let mut out = String::new();
+        for row in sr..=er {
+            if row > sr {
+                out.push('\n');
+            }
+            match self.row_selection(row, sel) {
+                RowSelection::None => {}
+                RowSelection::All => {
+                    if let Some(m) = self.message_at(row) {
+                        // The gutter is part of what the user sees, so
+                        // it is part of what they copy.
+                        if let Some(g) = &m.gutter {
+                            if !g.text.is_empty() {
+                                out.push_str(&g.text);
+                                out.push(' ');
+                            }
+                        }
+                        out.push_str(&m.to_plain_text());
+                    }
+                }
+                RowSelection::Partial { source, start, end } => {
+                    if let Some(t) = self.source_text(row, source) {
+                        if let Some(slice) = t.get(start..end) {
+                            out.push_str(slice);
+                        }
+                    }
+                }
+            }
         }
         out
     }
