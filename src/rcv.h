@@ -75,10 +75,14 @@ extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsi
  * GPtrArray<HxHistoryEntry*> via glib + the native hx_history_entry_parse,
  * advances the newest-msgid cursor, and emits GtkhxSession::chat-history-batch.
  * The channel id rides the task ptr (GUINT_TO_POINTER) since the reply doesn't
- * repeat it. The prototype stays for the RCV_TASK_FN(task_new) registration in
- * chat_history.c; the symbol resolves against the Rust crate at link. */
+ * repeat it. The prototype stays for the RCV_TASK_FN(task_new) registrations at
+ * the send call sites (chat.c's Load-older flow and rcv.c's
+ * hx_post_login_fetches, which register the reply task before calling
+ * hx_get_chat_history); the symbol resolves against the Rust crate at link. The
+ * Rust body takes the canonical rcv_task_fn shape, so the prototype matches it
+ * (ptr = channel id, data unused) rather than the historical short form. */
 extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                                   void             *channel_ptr);
+                                   void *channel_ptr, void *data);
 /* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The bodies moved
  * to the hxhandlers Rust crate (recv/icon.rs): each walks the reply natively
  * (crate::gif_icons), flips the probe negotiation state via the

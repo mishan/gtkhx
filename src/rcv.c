@@ -1537,9 +1537,11 @@ hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
 /* rcv_task_chat_history (the TRAN_GET_CHAT_HISTORY 700 reply walker) moved to the
  * hxhandlers Rust crate (recv/chat.rs): it walks the reply chunks natively, builds
  * the GPtrArray<HxHistoryEntry*> via glib + the native hx_history_entry_parse,
- * advances the newest-msgid cursor, and emits chat-history-batch. The C sender
- * (chat_history.c) registers it via RCV_TASK_FN(task_new); the symbol resolves
- * against the Rust crate at link. */
+ * advances the newest-msgid cursor, and emits chat-history-batch. The reply task
+ * is registered via RCV_TASK_FN(task_new) at each send call site — chat.c's
+ * Load-older flow and hx_post_login_fetches below — right before calling
+ * hx_get_chat_history (chat_history.c itself stays free of tasks.h/rcv.h). The
+ * symbol resolves against the Rust crate at link. */
 
 /* rcv_task_user_list / rcv_task_user_list_switch / rcv_task_user_info moved to
  * the hxhandlers Rust crate (recv/user.rs) — see the note above rcv_task_login. */
