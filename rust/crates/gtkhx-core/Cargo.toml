@@ -16,3 +16,7 @@ crate-type = ["staticlib", "rlib"]
 
 [dependencies]
 glib = { workspace = true }
+# hotline-proto is pure Rust (no undefined C externs), so the boxed::history
+# parser can call parse_history_entry without breaking this crate's
+# "self-contained, glib-only linkage" invariant (see [lib] above).
+hotline-proto = { path = "../hotline-proto" }

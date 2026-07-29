@@ -1534,91 +1534,14 @@ hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len
     hx_icon_change_recv (htlc, frame, frame_len);
 }
 
-/* TRAN_GET_CHAT_HISTORY (700) reply walker. The reply carries:
- *   - 0..N HTLS_DATA_HISTORY_ENTRY (0x0F05) packed-binary chunks
- *   - 1 HTLS_DATA_HISTORY_HAS_MORE (0x0F06) u8 flag
- *
- * Channel id isn't repeated in the reply per the spec — we passed
- * it to task_new via GUINT_TO_POINTER and recover it here.
- *
- * Entries are parsed via hx_history_entry_parse, accumulated into
- * a GPtrArray with hx_history_entry_free as the free_func, and the
- * array (plus has_more) is handed to the chat-history-batch signal
- * subscribers. After every subscriber returns, the array is
- * unref'd and entries free along with it. */
-
-/* chat-history-batch + initial-subject-discovery emits — Rust hxchat-recv
- * crate (rust/crates/hxchat-recv). */
-extern void hx_chat_history_recv (struct htlc_conn *htlc, guint32 cid,
-                                  GPtrArray *entries, int has_more);
-extern void hx_chat_subject_emit (struct htlc_conn *htlc, guint32 cid,
-                                  const char *subject);
-
-void
-rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *channel_ptr)
-{
-    guint32 cid = GPOINTER_TO_UINT (channel_ptr);
-    GPtrArray *entries
-        = g_ptr_array_new_with_free_func ((GDestroyNotify) hx_history_entry_free);
-    gboolean has_more = FALSE;
-
-    dh_start (frame, frame_len)
-    {
-        switch (_type) {
-        case HTLS_DATA_HISTORY_ENTRY: {
-            HxHistoryEntry *e = hx_history_entry_parse (dh->data, _len);
-            if (e) {
-                g_ptr_array_add (entries, e);
-            } else {
-                debug_log ("chat-history",
-                           "skipping malformed entry, len=%u", _len);
-            }
-            break;
-        }
-        case HTLS_DATA_HISTORY_HAS_MORE:
-            if (_len >= 1) {
-                has_more = (dh->data[0] != 0);
-            }
-            break;
-        case HTLS_DATA_TASKERROR:
-            /* Server refused the request — log and stop. The
-			 * subscriber gets zero entries + has_more=FALSE, which
-			 * is the same shape as "no history to return," and
-			 * shouldn't make the UI do anything dramatic. */
-            debug_log ("chat-history",
-                       "server returned task error for GET_CHAT_HISTORY "
-                       "(cid=%u, len=%u)", cid, _len);
-            break;
-        }
-    }
-    dh_end ();
-
-    /* advance the session-wide newest-msgid cursor used
-	 * for AFTER= reconnect catch-up. This is independent of the
-	 * per-chat oldest-msgid (gtkhx_chat::render.oldest_msgid) the
-	 * Load-older flow uses — the cursor we maintain here grows
-	 * monotonically over the htlc's lifetime, while the per-chat
-	 * oldest shrinks as new older batches arrive. */
-    for (guint i = 0; i < entries->len; i++) {
-        HxHistoryEntry *e = g_ptr_array_index (entries, i);
-        if (e && e->message_id > hx_conn_chat_history_last_msgid (htlc)) {
-            hx_conn_set_chat_history_last_msgid (htlc, e->message_id);
-        }
-    }
-
-    debug_log ("chat-history",
-               "received batch: cid=%u entries=%u has_more=%d last_msgid=%"
-               G_GUINT64_FORMAT,
-               cid, entries->len, (int) has_more,
-               hx_conn_chat_history_last_msgid (htlc));
-
-    /* chat-history-batch emit — Rust hxchat-recv crate. */
-    hx_chat_history_recv (htlc, cid, entries, has_more);
-
-    /* Free the array (and via free_func, every entry inside) now
-	 * that subscribers have had their pass. */
-    g_ptr_array_unref (entries);
-}
+/* rcv_task_chat_history (the TRAN_GET_CHAT_HISTORY 700 reply walker) moved to the
+ * hxhandlers Rust crate (recv/chat.rs): it walks the reply chunks natively, builds
+ * the GPtrArray<HxHistoryEntry*> via glib + the native hx_history_entry_parse,
+ * advances the newest-msgid cursor, and emits chat-history-batch. The reply task
+ * is registered via RCV_TASK_FN(task_new) at each send call site — chat.c's
+ * Load-older flow and hx_post_login_fetches below — right before calling
+ * hx_get_chat_history (chat_history.c itself stays free of tasks.h/rcv.h). The
+ * symbol resolves against the Rust crate at link. */
 
 /* rcv_task_user_list / rcv_task_user_list_switch / rcv_task_user_info moved to
  * the hxhandlers Rust crate (recv/user.rs) — see the note above rcv_task_login. */

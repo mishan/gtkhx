@@ -54,6 +54,8 @@ pub enum ClientHdr {
     AccountModify = 0x0000_0161,
     MsgBroadcast = 0x0000_0163,
     GetThread = 0x0000_0190,
+    /// 700 — chat-history extension request (fogWraith Capabilities-Chat-History).
+    GetChatHistory = 0x0000_02bc,
     PostThread = 0x0000_019a,
     Ping = 0x0000_01f4,
     /// Voice-chat extension (fogWraith `Capabilities-Voice.md`).
@@ -266,6 +268,17 @@ pub mod tag {
     pub const SERVERNAME: u16 = 0x00a2;
     /// `0x01f0` — negotiated session capabilities echo (LOGIN reply).
     pub const CAPABILITIES: u16 = 0x01f0;
+    /// `0x0f01` — chat-history channel id (client → server, GET_CHAT_HISTORY
+    /// request; also the reply's channel echo). u32 BE.
+    pub const CHANNEL_ID: u16 = 0x0f01;
+    /// `0x0f02` — GET_CHAT_HISTORY "before" cursor (messages older than this
+    /// message id). u64 BE; omitted when zero.
+    pub const HISTORY_BEFORE: u16 = 0x0f02;
+    /// `0x0f03` — GET_CHAT_HISTORY "after" cursor (messages newer than this
+    /// message id — reconnect catch-up). u64 BE; omitted when zero.
+    pub const HISTORY_AFTER: u16 = 0x0f03;
+    /// `0x0f04` — GET_CHAT_HISTORY max-results limit. u16 BE; omitted when zero.
+    pub const HISTORY_LIMIT: u16 = 0x0f04;
     /// `0x0f07` — chat-history retention hint: max message count (LOGIN reply).
     pub const HISTORY_MAX_MSGS: u16 = 0x0f07;
     /// `0x0f08` — chat-history retention hint: max age in days (LOGIN reply).

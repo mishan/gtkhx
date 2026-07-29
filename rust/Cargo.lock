@@ -1768,6 +1768,7 @@ name = "gtkhx-core"
 version = "0.1.0"
 dependencies = [
  "glib 0.21.5",
+ "hotline-proto",
 ]
 
 [[package]]

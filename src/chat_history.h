@@ -90,7 +90,13 @@ typedef struct {
  *
  * Optional mini-TLV sub-fields after the message body are walked
  * but not surfaced — every spec'd sub-field is "future use" as
- * of this draft. */
+ * of this draft.
+ *
+ * NOTE: both functions moved to the Rust gtkhx-core crate
+ * (boxed/history.rs) — parse delegates to
+ * hotline_proto::parse::parse_history_entry, free releases the glib
+ * buffers. The struct above stays C-visible (chat.c reads its fields)
+ * and its layout is pinned by _Static_asserts in chat_history.c. */
 extern HxHistoryEntry *hx_history_entry_parse (const guint8 *data,
                                                gsize         len);
 
@@ -119,6 +125,13 @@ extern void hx_history_entry_free (HxHistoryEntry *entry);
  * negotiate CAP_CHAT_HISTORY — sending TRAN 700 to a server that
  * doesn't speak the extension earns a task-error toast every
  * time.
+ *
+ * Body moved to the hxhandlers Rust crate (send/chat_history.rs): it
+ * cap-gates, builds the chunks with the native
+ * hotline_proto::build::build_get_chat_history_chunks, and calls
+ * hlwrite_chunks. The prototype stays for the C callers (chat.c's
+ * Load-older flow, rcv.c's hx_post_login_fetches). Callers still
+ * task_new()-register rcv_task_chat_history first (keyed on htlc->trans).
  */
 extern gboolean hx_get_chat_history (struct htlc_conn *htlc,
                                      guint32 channel_id, guint64 before,
@@ -126,7 +139,9 @@ extern gboolean hx_get_chat_history (struct htlc_conn *htlc,
 
 /* Caller-owned backing storage for hx_get_chat_history_build_chunks.
  * The struct hx_chunk array it fills points into these fields, so the
- * scratch must outlive the eventual hlpack_chunks call. */
+ * scratch must outlive the eventual hlpack_chunks call. The Rust shim
+ * uses it only as opaque ≥22-byte backing storage; the field layout is
+ * retained for the C caller (the harness) that allocates it. */
 struct hx_get_chat_history_scratch {
     guint32 channel_be;
     guint64 before_be;
@@ -142,11 +157,11 @@ struct hx_chunk;
  * channel_id is mandatory, before/after/limit are emitted only when
  * non-zero. Returns the chunk count (always <= 4), or 0 on bad args.
  *
- * Used by both production (via hx_get_chat_history which wraps it
- * with cap-gate + hlwrite_chunks) and the integration test harness
- * (which packs the chunks via hlpack_chunks and sends them
- * synchronously over its blocking fd). Pre-refactor, the two had
- * independent 8-way variadic dispatches that drifted easily.
+ * Moved to the Rust hotline-proto crate: a C-ABI shim over the native
+ * build_get_chat_history_chunks, kept under this historical name for the
+ * one remaining C caller — the integration test harness, which packs the
+ * chunks via hlpack_chunks and sends them synchronously over its blocking
+ * fd. Production sends through hx_get_chat_history above.
  */
 extern int
 hx_get_chat_history_build_chunks (guint32 channel_id, guint64 before,

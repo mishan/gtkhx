@@ -5,4 +5,5 @@
 //! the exact C ABI their former crates exported.
 
 pub mod chat;
+pub mod chat_history;
 pub mod news;
