@@ -393,3 +393,213 @@ fn rcv_selfinfo_parses_marks_logged_in_then_emits() {
     assert_eq!(test_env::LOGGED_IN.with(|c| c.get()), 1);
     assert_eq!(test_env::take(), Some(Emit::SelfUpdated));
 }
+
+// ---- rcv_task_user_list / _switch / news_users / user_info -----------------
+
+/// A sentinel chat pointer (the doubles ignore its value).
+const FAKE_CHAT_PTR: *mut c_void = 0x2 as *mut c_void;
+
+/// Pack one HTLS_DATA_USER_LIST record body: u16 uid, icon, color, nlen, name,
+/// [optional u32 nick_color trailer].
+fn ul_record(uid: u16, icon: u16, color: u16, name: &[u8], nick_color: Option<u32>) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&uid.to_be_bytes());
+    v.extend_from_slice(&icon.to_be_bytes());
+    v.extend_from_slice(&color.to_be_bytes());
+    v.extend_from_slice(&(name.len() as u16).to_be_bytes());
+    v.extend_from_slice(name);
+    if let Some(nc) = nick_color {
+        v.extend_from_slice(&nc.to_be_bytes());
+    }
+    v
+}
+
+unsafe fn call_user_list(f: &[u8]) {
+    rcv_task_user_list(
+        std::ptr::null_mut(),
+        f.as_ptr(),
+        f.len(),
+        FAKE_CHAT_PTR,
+        std::ptr::null_mut(),
+    );
+}
+
+#[test]
+fn user_list_new_user_creates_without_join_chime() {
+    test_env::reset();
+    test_env::CONTAINS.with(|c| c.set(false)); // not a member yet → is_new
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(7, 128, 4, b"Alice", None))]);
+    unsafe { call_user_list(&f) };
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Create {
+            uid: 7,
+            nick_color: HX_NICK_COLOR_NONE,
+            name: b"Alice".to_vec(),
+            icon: 128,
+            color: 4,
+            incremental: false, // bulk login load, chime suppressed
+        })
+    );
+}
+
+#[test]
+fn user_list_existing_user_upserts_silently() {
+    test_env::reset();
+    test_env::CONTAINS.with(|c| c.set(true)); // already a member → silent upsert
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(9, 130, 2, b"Bob", None))]);
+    unsafe { call_user_list(&f) };
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Upsert {
+            uid: 9,
+            nick_color: HX_NICK_COLOR_NONE,
+            name: b"Bob".to_vec(),
+            icon: 130,
+            color: 2,
+        })
+    );
+}
+
+#[test]
+fn user_list_colored_nick_mirrors_onto_self() {
+    test_env::reset();
+    test_env::SELF_UID.with(|c| c.set(5));
+    test_env::CONTAINS.with(|c| c.set(true));
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(5, 100, 1, b"Me", Some(0x0011_2233)))]);
+    unsafe { call_user_list(&f) };
+    assert_eq!(test_env::SELF_NICK_COLOR.with(|c| c.get()), 0x0011_2233);
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Upsert {
+            uid: 5,
+            nick_color: 0x0011_2233,
+            name: b"Me".to_vec(),
+            icon: 100,
+            color: 1,
+        })
+    );
+}
+
+#[test]
+fn user_list_adopts_self_uid_when_unset() {
+    test_env::reset();
+    test_env::SELF_UID.with(|c| c.set(0)); // no self uid yet
+    test_env::SELF_ICON.with(|c| c.set(100));
+    test_env::set_self_name("Me");
+    test_env::CONTAINS.with(|c| c.set(false));
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(42, 100, 1, b"Me", None))]);
+    unsafe { call_user_list(&f) };
+    assert_eq!(test_env::SELF_UID.with(|c| c.get()), 42);
+}
+
+#[test]
+fn user_list_chat_subject_seeds_and_emits() {
+    test_env::reset();
+    test_env::CHAT_CID.with(|c| c.set(0));
+    let f = frame(0, &[(HTLS_DATA_CHAT_SUBJECT, b"Welcome".to_vec())]);
+    unsafe { call_user_list(&f) };
+    assert_eq!(
+        test_env::SUBJECT_EMITTED.with(|c| c.borrow().clone()),
+        Some((0, b"Welcome".to_vec()))
+    );
+}
+
+#[test]
+fn news_users_loads_users_then_reloads_news() {
+    test_env::reset();
+    test_env::CONTAINS.with(|c| c.set(false));
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(1, 1, 1, b"X", None))]);
+    unsafe {
+        rcv_task_news_users(
+            std::ptr::null_mut(),
+            f.as_ptr(),
+            f.len(),
+            FAKE_CHAT_PTR,
+            std::ptr::null_mut(),
+        )
+    };
+    assert!(test_env::RELOAD_NEWS.with(|c| c.get()));
+    assert!(matches!(test_env::take(), Some(Emit::Create { uid: 1, .. })));
+}
+
+#[test]
+fn user_list_switch_error_deletes_chat() {
+    test_env::reset();
+    test_env::TASK_ERROR.with(|c| c.set(true));
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(1, 1, 1, b"X", None))]);
+    unsafe {
+        rcv_task_user_list_switch(
+            std::ptr::null_mut(),
+            f.as_ptr(),
+            f.len(),
+            FAKE_CHAT_PTR,
+            std::ptr::null_mut(),
+        )
+    };
+    assert!(test_env::CHAT_DELETED.with(|c| c.get()));
+    assert_eq!(test_env::take(), None); // no apply on the error path
+}
+
+#[test]
+fn user_list_switch_ok_loads_users() {
+    test_env::reset();
+    test_env::TASK_ERROR.with(|c| c.set(false));
+    test_env::CONTAINS.with(|c| c.set(false));
+    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(3, 1, 1, b"Y", None))]);
+    unsafe {
+        rcv_task_user_list_switch(
+            std::ptr::null_mut(),
+            f.as_ptr(),
+            f.len(),
+            FAKE_CHAT_PTR,
+            std::ptr::null_mut(),
+        )
+    };
+    assert!(!test_env::CHAT_DELETED.with(|c| c.get()));
+    assert!(matches!(test_env::take(), Some(Emit::Create { uid: 3, .. })));
+}
+
+#[test]
+fn user_info_publishes_when_both_present() {
+    use hotline_proto::messages::tag;
+    test_env::reset();
+    let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
+    let f = frame(0, &[(tag::NAME, b"Alice".to_vec()), (tag::BODY, b"info text".to_vec())]);
+    unsafe {
+        rcv_task_user_info(
+            std::ptr::null_mut(),
+            f.as_ptr(),
+            f.len(),
+            uid_box,
+            std::ptr::null_mut(),
+        )
+    };
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Info {
+            uid: 11,
+            name: b"Alice".to_vec(),
+            info: b"info text".to_vec(),
+            len: 9,
+        })
+    );
+}
+
+#[test]
+fn user_info_dropped_when_info_empty() {
+    use hotline_proto::messages::tag;
+    test_env::reset();
+    let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
+    let f = frame(0, &[(tag::NAME, b"Alice".to_vec())]); // no BODY → gate fails
+    unsafe {
+        rcv_task_user_info(
+            std::ptr::null_mut(),
+            f.as_ptr(),
+            f.len(),
+            uid_box,
+            std::ptr::null_mut(),
+        )
+    };
+    assert_eq!(test_env::take(), None);
+}

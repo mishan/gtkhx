@@ -23,7 +23,17 @@ use hxmodel::chat_members::HxMemberInfo;
 #[cfg(not(test))]
 use hxmodel::chat_members::{hx_member_model_contains, hx_member_model_get_ignore, hx_member_model_get_info, hx_member_model_upsert};
 #[cfg(not(test))]
-use hxmodel::conversation::hx_chat_member_model;
+use hxmodel::conversation::{hx_chat_cid, hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
+
+// Native reply parsers — pure Rust, identical in test and production. The old C
+// rcv_task_user_list / _user_info round-tripped through the
+// gtkhx_proto_parse_user_* C ABI; here we call the native parsers directly.
+use hotline_proto::parse::{parse_user_info, parse_user_list_record};
+use hotline_proto::wire::ChunkIter;
+
+/// Wire chunk types carried in a USER_LIST reply (hotline.h).
+const HTLS_DATA_USER_LIST: u16 = 0x012c;
+const HTLS_DATA_CHAT_SUBJECT: u16 = 0x0073;
 
 #[cfg(not(test))]
 extern "C" {    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
@@ -40,6 +50,17 @@ extern "C" {    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / u
     fn task_inerror(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> c_int;
     /// `struct chat *chat_new (sess, cid)` — create (and register) a chat.
     fn chat_new(sess: *mut c_void, cid: u32) -> *mut c_void;
+    /// `void chat_delete (sess, chat)` — drop a chat (chat.c). Used when a join's
+    /// USER_LIST reply comes back a task error.
+    fn chat_delete(sess: *mut c_void, chat: *mut c_void);
+    /// `void reload_news (widget, data)` — kick off the post-login news fetch
+    /// (news.c); `data` is the session, `widget` is unused (pass NULL).
+    fn reload_news(widget: *mut c_void, data: *mut c_void);
+    /// The initial-subject-discovery emit (recv/chat.rs): publish a chat subject
+    /// with no "Subject Changed to" log line.
+    fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: *const c_char);
+    /// GLib `g_free` — release the `guint16 *` uid task parameter.
+    fn g_free(p: *mut c_void);
     /// hxconn accessors for our own identity bookkeeping.
     fn hx_conn_uid(htlc: *mut c_void) -> u16;
     fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
@@ -461,6 +482,164 @@ pub unsafe extern "C" fn hx_rcv_user_selfinfo(
     hx_selfinfo_recv(htlc);
 }
 
+/// `void rcv_task_user_list (htlc, frame, frame_len, chat, text)` — the bulk
+/// USER_LIST login-load reply (was `rcv.c`). Walks the reply's chunks natively:
+/// each `HTLS_DATA_USER_LIST` record parses via [`parse_user_list_record`]
+/// (8-byte fixed header, two-stage nlen clamp, `strip_ansi`, the
+/// Colored-Nicknames trailer) and folds into the roster through the shared
+/// [`hx_user_apply_recv`] with `incremental=FALSE` — the join chime is
+/// suppressed because these users are already in the room at login. A
+/// `HTLS_DATA_CHAT_SUBJECT` chunk seeds the chat's subject and publishes it via
+/// the initial-subject-discovery emit ([`hx_chat_subject_emit`], no "Subject
+/// Changed to" line).
+///
+/// Two self-bookkeeping gates from the old C move here: the Colored-Nicknames
+/// self-mirror (copy the trailer colour onto `htlc` when the record is us), and
+/// the self-uid adoption for servers that omit USER_LIST from SELFINFO (the first
+/// record matching our nick+icon claims our uid). `text` is vestigial.
+///
+/// # Safety
+/// C-ABI reply callback (`hx_rcv_task`, main thread). `frame` is valid for
+/// `frame_len` bytes; `chat` is the reply's target `struct chat *` (task ptr).
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_user_list(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+    chat: *mut c_void,
+    _text: *mut c_void,
+) {
+    if frame.is_null() {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    let model = hx_chat_member_model(chat.cast());
+    for chunk in ChunkIter::over_message(buf, frame_len) {
+        match chunk.tag {
+            HTLS_DATA_USER_LIST => {
+                let Some(rec) = parse_user_list_record(chunk.data, 31) else {
+                    continue;
+                };
+                let name_c = cstring_first_nul(&rec.name);
+                // "not already in this chat's membership" — recomputed per record
+                // so a stale new=1 doesn't spawn spurious creates for later users.
+                let is_new = hx_member_model_contains(model, rec.uid) == 0;
+                // Colored-Nicknames: mirror the trailer colour onto htlc when this
+                // record is us (absent trailer => leave htlc's colour alone).
+                if let Some(nc) = rec.nick_color {
+                    if rec.uid == hx_conn_uid(htlc) {
+                        hx_conn_set_nick_color(htlc, nc);
+                    }
+                }
+                // Self-adoption for servers that omit USER_LIST from SELFINFO: the
+                // first record matching our nick+icon claims our uid.
+                if hx_conn_uid(htlc) == 0 && rec.icon == hx_conn_icon(htlc) {
+                    if let Some(sn) = optr_bytes(hx_conn_name(htlc.cast())) {
+                        if name_c.as_bytes() == sn.as_slice() {
+                            hx_conn_set_uid(htlc, rec.uid);
+                        }
+                    }
+                }
+                hx_user_apply_recv(
+                    htlc,
+                    chat,
+                    model,
+                    rec.uid,
+                    rec.nick_color.unwrap_or(HX_NICK_COLOR_NONE),
+                    name_c.as_ptr(),
+                    rec.icon,
+                    rec.color,
+                    gbool(is_new),
+                    gbool(false), // skip_self_create = FALSE
+                    gbool(false), // incremental = FALSE (bulk login load)
+                );
+            }
+            HTLS_DATA_CHAT_SUBJECT => {
+                let slen = chunk.data.len().min(255);
+                hx_chat_set_subject(chat.cast(), chunk.data.as_ptr() as *const c_char, slen);
+                hx_chat_subject_emit(htlc, hx_chat_cid(chat.cast()), hx_chat_subject(chat.cast()));
+            }
+            _ => {}
+        }
+    }
+}
+
+/// `void rcv_task_user_list_switch (htlc, frame, frame_len, chat, data)` — the
+/// USER_LIST reply for a *join* (channel switch). On a task error the join
+/// failed, so drop the half-created chat; otherwise it's a normal user-list load.
+///
+/// # Safety
+/// See [`rcv_task_user_list`]. `chat` is the joined `struct chat *`.
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_user_list_switch(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+    chat: *mut c_void,
+    _data: *mut c_void,
+) {
+    if task_inerror(htlc, frame, frame_len) != 0 {
+        chat_delete(hx_conn_sess(htlc.cast()), chat);
+        return;
+    }
+    rcv_task_user_list(htlc, frame, frame_len, chat, std::ptr::null_mut());
+}
+
+/// `void rcv_task_news_users (htlc, frame, frame_len, chat, text)` — the
+/// post-login USER_GETLIST reply: load the user list, then kick off the news
+/// fetch. Login-path only.
+///
+/// # Safety
+/// See [`rcv_task_user_list`].
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_news_users(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+    chat: *mut c_void,
+    text: *mut c_void,
+) {
+    rcv_task_user_list(htlc, frame, frame_len, chat, text);
+    reload_news(std::ptr::null_mut(), hx_conn_sess(htlc.cast()));
+}
+
+/// `void rcv_task_user_info (htlc, frame, frame_len, uid_ptr, text)` — the
+/// USER_GETINFO reply. Parses the (name, info) pair natively ([`parse_user_info`],
+/// 31 / 4096 caps, `strip_ansi` + CR2LF), then — when both are non-empty (the
+/// `nlen && ilen` gate that filters unanswered server frames) — publishes via
+/// [`hx_user_info_recv`]. `uid_ptr` is a `g_malloc`'d `guint16` (the request's
+/// uid, which the reply doesn't echo); it's freed here.
+///
+/// # Safety
+/// C-ABI reply callback. `frame` is valid for `frame_len` bytes; `uid_ptr` is a
+/// live `guint16 *` from the send wrapper (freed here).
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_user_info(
+    _htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+    uid_ptr: *mut c_void,
+    _text: *mut c_void,
+) {
+    let uid = if uid_ptr.is_null() {
+        0
+    } else {
+        *(uid_ptr as *const u16)
+    };
+    g_free(uid_ptr);
+    if frame.is_null() {
+        return;
+    }
+    let buf = std::slice::from_raw_parts(frame, frame_len);
+    let ui = parse_user_info(buf, frame_len, 31, 4096);
+    if ui.name.is_empty() || ui.info.is_empty() {
+        return;
+    }
+    let name_c = cstring_first_nul(&ui.name);
+    let info_c = cstring_first_nul(&ui.info);
+    hx_user_info_recv(uid, name_c.as_ptr(), info_c.as_ptr(), ui.info.len() as u16);
+}
+
 // ---- test doubles for the C environment ------------------------------------
 
 #[cfg(test)]
@@ -536,6 +715,18 @@ pub(crate) mod test_env {
         /// Our own display name (hx_conn_name returns a pointer into this).
         pub static SELF_NAME: RefCell<std::ffi::CString> =
             RefCell::new(std::ffi::CString::new("").unwrap());
+        /// The chat subject the set-subject double stored (hx_chat_subject
+        /// returns a pointer into it).
+        pub static SUBJECT_STORE: RefCell<std::ffi::CString> =
+            RefCell::new(std::ffi::CString::new("").unwrap());
+        /// The last (cid, subject) the initial-subject-discovery emit saw.
+        pub static SUBJECT_EMITTED: RefCell<Option<(u32, Vec<u8>)>> = const { RefCell::new(None) };
+        /// The cid hx_chat_cid returns.
+        pub static CHAT_CID: Cell<u32> = const { Cell::new(0) };
+        /// True once reload_news fired (rcv_task_news_users).
+        pub static RELOAD_NEWS: Cell<bool> = const { Cell::new(false) };
+        /// True once chat_delete fired (rcv_task_user_list_switch error path).
+        pub static CHAT_DELETED: Cell<bool> = const { Cell::new(false) };
     }
 
     /// A member snapshot the get_info double hands back.
@@ -570,6 +761,11 @@ pub(crate) mod test_env {
         SELF_NICK_COLOR.with(|c| c.set(0));
         IGNORE.with(|c| c.set(false));
         SELF_NAME.with(|c| *c.borrow_mut() = std::ffi::CString::new("").unwrap());
+        SUBJECT_STORE.with(|c| *c.borrow_mut() = std::ffi::CString::new("").unwrap());
+        SUBJECT_EMITTED.with(|c| *c.borrow_mut() = None);
+        CHAT_CID.with(|c| c.set(0));
+        RELOAD_NEWS.with(|c| c.set(false));
+        CHAT_DELETED.with(|c| c.set(false));
     }
 
     /// Set the self display name the hx_conn_name double returns.
@@ -830,6 +1026,46 @@ unsafe fn hx_member_model_upsert(
         color,
     });
 }
+
+#[cfg(test)]
+unsafe fn hx_chat_set_subject(_chat: *mut c_void, s: *const c_char, len: usize) {
+    let bytes = std::slice::from_raw_parts(s as *const u8, len);
+    // NUL-truncate like the real model stores it.
+    let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    test_env::SUBJECT_STORE
+        .with(|c| *c.borrow_mut() = std::ffi::CString::new(&bytes[..end]).unwrap_or_default());
+}
+
+#[cfg(test)]
+unsafe fn hx_chat_cid(_chat: *const c_void) -> u32 {
+    test_env::CHAT_CID.with(|c| c.get())
+}
+
+#[cfg(test)]
+unsafe fn hx_chat_subject(_chat: *const c_void) -> *const c_char {
+    // The stored CString lives in the thread-local and isn't mutated during the
+    // emit, so the borrowed pointer stays valid for the caller.
+    test_env::SUBJECT_STORE.with(|c| c.borrow().as_ptr())
+}
+
+#[cfg(test)]
+unsafe fn hx_chat_subject_emit(_htlc: *mut c_void, cid: u32, subject: *const c_char) {
+    let b = cstr_bytes(subject);
+    test_env::SUBJECT_EMITTED.with(|c| *c.borrow_mut() = Some((cid, b)));
+}
+
+#[cfg(test)]
+unsafe fn chat_delete(_sess: *mut c_void, _chat: *mut c_void) {
+    test_env::CHAT_DELETED.with(|c| c.set(true));
+}
+
+#[cfg(test)]
+unsafe fn reload_news(_widget: *mut c_void, _data: *mut c_void) {
+    test_env::RELOAD_NEWS.with(|c| c.set(true));
+}
+
+#[cfg(test)]
+unsafe fn g_free(_p: *mut c_void) {}
 
 #[cfg(test)]
 mod tests;

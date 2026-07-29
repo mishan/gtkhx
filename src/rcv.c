@@ -1244,15 +1244,13 @@ rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char
  * get_post sender still registers it; the symbol now resolves against
  * hxnews-recv. With this, no news code remains in rcv.c. */
 
-void
-rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat, int text)
-{
-    /* output user list and then grab news */
-    /* this is only used for login events  */
-    rcv_task_user_list (htlc, frame, frame_len, chat, text);
-
-    reload_news (0, sess_from_htlc (htlc));
-}
+/* rcv_task_news_users / rcv_task_user_list / rcv_task_user_list_switch /
+ * rcv_task_user_info moved to the hxhandlers Rust crate (recv/user.rs): they
+ * walk the reply chunks natively (hotline_proto::parse::parse_user_list_record /
+ * parse_user_info) and fold into the roster through the shared, already-Rust
+ * hx_user_apply_recv — no C chunk-walk or C↔Rust bounce. The C senders still
+ * register them via RCV_TASK_FN(); the symbols resolve against the Rust crate at
+ * link. rcv_task_kick stays here (it logs via the variadic hx_printf_prefix). */
 
 /* Post-login fetch sequencing decision — Rust hotline-proto (login module).
  * Returns HX_POST_LOGIN_FETCH_NOW (1.0/1.2: fire fetches now),
@@ -1622,89 +1620,8 @@ rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
     g_ptr_array_unref (entries);
 }
 
-void
-rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat, int text)
-{
-    guint16 uid;
-    int new;
-
-    dh_start (frame, frame_len)
-    {
-        if (_type == HTLS_DATA_USER_LIST) {
-            /* chunk-record parsing moved to Rust
-			 * gtkhx_proto_parse_user_list_record. The parser handles
-			 * the 8-byte fixed header, two-stage nlen clamp
-			 * (avail-first, then cap-31), strip_ansi, and the
-			 * Colored-Nicknames trailer at `8 + clamped_nlen`. The C
-			 * side keeps the "is this us?" adoption gate that sets
-			 * hx_conn_uid (htlc) / ->color, and the GtkhxSession signal emit —
-			 * all of which need session/chat objects the Rust layer
-			 * doesn't see. */
-            struct gtkhx_proto_user_list_record rec;
-            char name_buf[32];
-            if (!gtkhx_proto_parse_user_list_record (
-                    dh->data, _len, (uint8_t *)name_buf, sizeof (name_buf),
-                    &rec)) {
-                continue;
-            }
-            uid = rec.uid;
-            name_buf[rec.name_len] = 0;
-            /* `new` means "not already in this chat's membership". Computed
-             * per record: a stale new=1 from a previous new user would
-             * otherwise spawn a spurious user_create for every subsequent
-             * EXISTING user, doubling the UI row. Existence is a model query —
-             * the same store every reader uses. */
-            new = !hx_member_model_contains (hx_chat_member_model (chat), uid);
-
-            /* Colored-Nicknames: mirror the trailer colour onto htlc when
-             * this record is us (absent trailer => HX_NICK_COLOR_NONE). */
-            if (rec.got_nick_color && uid == hx_conn_uid (htlc)) {
-                hx_conn_set_nick_color (htlc, rec.nick_color);
-            }
-            /* "is this us?" adoption for servers that omit USER_LIST from
-             * SELFINFO: the first record matching our nick+icon claims our
-             * uid. (The server's status colour used to be mirrored onto
-             * htlc->color here, but that field was write-only and is gone.) */
-            if (!hx_conn_uid (htlc) && !strcmp (name_buf, hx_conn_name (htlc))
-                && rec.icon == hx_conn_icon (htlc)) {
-                hx_conn_set_uid (htlc, uid);
-            }
-
-            /* Same shared roster-apply as the live USER_CHANGE path, but
-             * incremental=FALSE: a new record emits user-create with the join
-             * chime suppressed (we're loading users already in the room at
-             * login), and an existing record folds into the model silently. */
-            hx_user_apply_recv (htlc, chat, hx_chat_member_model (chat), uid,
-                                rec.nick_color, name_buf, rec.icon, rec.color,
-                                new, /*skip_self_create=*/FALSE,
-                                /*incremental=*/FALSE);
-        }
-
-        else if (_type == HTLS_DATA_CHAT_SUBJECT) {
-            guint16 slen = (_len > 255) ? 255 : _len;
-            hx_chat_set_subject (chat, (const char *) (dh->data), slen);
-            /* Initial-subject-discovery path — the Rust hxchat-recv crate
-			 * publishes chat-subject unconditionally (no 'Subject Changed
-			 * to X' log line). */
-            hx_chat_subject_emit (htlc, hx_chat_cid (chat),
-                                  hx_chat_subject (chat));
-        }
-    }
-    dh_end ();
-}
-
-void
-rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat)
-{
-    session *sess = sess_from_htlc (htlc);
-
-    if (task_inerror (htlc, frame, frame_len)) {
-        chat_delete (sess, chat);
-        return;
-    }
-
-    rcv_task_user_list (htlc, frame, frame_len, chat, 0);
-}
+/* rcv_task_user_list / rcv_task_user_list_switch / rcv_task_user_info moved to
+ * the hxhandlers Rust crate (recv/user.rs) — see the note above rcv_task_login. */
 
 void
 rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -1714,27 +1631,5 @@ rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 
     hx_printf_prefix (htlc, 0, INFOPREFIX, "%s\n", _ ("kick successful"));
-}
-
-void
-rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, guint16 *_uid, int text)
-{
-    char info[4096 + 1], name[32];
-    guint16 uid = *_uid;
-    g_free (_uid);
-
-    /* chunk-walk + CR2LF + strip_ansi moved to the Rust
-	 * hotline-proto crate's parse_user_info. The C side keeps the
-	 * uid carry-through (it's a task parameter, not a chunk) and
-	 * the `nlen && ilen` dispatch gate that filters out unanswered
-	 * server frames. */
-    struct gtkhx_proto_user_info ui;
-    bool ok = gtkhx_proto_parse_user_info (frame, frame_len, (uint8_t *)name,
-                                           sizeof (name), (uint8_t *)info,
-                                           sizeof (info), &ui);
-    if (ok && ui.name_len && ui.info_len) {
-        /* user-info emit — Rust hxuser-recv crate. */
-        hx_user_info_recv (uid, name, info, ui.info_len);
-    }
 }
 
