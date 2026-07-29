@@ -586,6 +586,38 @@ fn user_info_publishes_when_both_present() {
     );
 }
 
+/// A BODY carrying an interior NUL is truncated at the NUL (C-string
+/// semantics), and the emitted len must match the truncated buffer — not the
+/// full wire length — so a downstream length-aware reader can't run past it.
+#[test]
+fn user_info_body_interior_nul_truncates_len() {
+    use hotline_proto::messages::tag;
+    test_env::reset();
+    let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
+    let f = frame(
+        0,
+        &[(tag::NAME, b"Alice".to_vec()), (tag::BODY, b"ab\0cd".to_vec())],
+    );
+    unsafe {
+        rcv_task_user_info(
+            std::ptr::null_mut(),
+            f.as_ptr(),
+            f.len(),
+            uid_box,
+            std::ptr::null_mut(),
+        )
+    };
+    assert_eq!(
+        test_env::take(),
+        Some(Emit::Info {
+            uid: 11,
+            name: b"Alice".to_vec(),
+            info: b"ab".to_vec(), // truncated at the interior NUL
+            len: 2,               // matches info_c, not the full wire length (5)
+        })
+    );
+}
+
 #[test]
 fn user_info_dropped_when_info_empty() {
     use hotline_proto::messages::tag;

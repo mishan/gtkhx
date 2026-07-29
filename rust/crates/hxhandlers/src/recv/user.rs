@@ -621,11 +621,13 @@ pub unsafe extern "C" fn rcv_task_user_info(
     uid_ptr: *mut c_void,
     _text: *mut c_void,
 ) {
-    let uid = if uid_ptr.is_null() {
-        0
-    } else {
-        *(uid_ptr as *const u16)
-    };
+    // uid is the request's `g_malloc`'d task parameter (the reply doesn't echo
+    // it). A NULL here would be a caller bug — return without emitting rather
+    // than publish a bogus uid=0 user-info event. Nothing to free on that path.
+    if uid_ptr.is_null() {
+        return;
+    }
+    let uid = *(uid_ptr as *const u16);
     g_free(uid_ptr);
     if frame.is_null() {
         return;
@@ -637,7 +639,12 @@ pub unsafe extern "C" fn rcv_task_user_info(
     }
     let name_c = cstring_first_nul(&ui.name);
     let info_c = cstring_first_nul(&ui.info);
-    hx_user_info_recv(uid, name_c.as_ptr(), info_c.as_ptr(), ui.info.len() as u16);
+    // Pass the *truncated* length, not `ui.info.len()`: `cstring_first_nul`
+    // truncates the body at the first interior NUL, so the emitted len must match
+    // `info_c`'s buffer. Passing the full wire length would let a downstream
+    // length-aware reader run past the shorter allocation.
+    let info_len = info_c.as_bytes().len() as u16;
+    hx_user_info_recv(uid, name_c.as_ptr(), info_c.as_ptr(), info_len);
 }
 
 // ---- test doubles for the C environment ------------------------------------
