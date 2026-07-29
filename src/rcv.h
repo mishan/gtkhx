@@ -70,12 +70,13 @@ extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gs
                                  int text);
 extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 
-/* TRAN_GET_CHAT_HISTORY (700) reply walker. Parses 0..N
- * HTLS_DATA_HISTORY_ENTRY packed-binary chunks and the
- * HTLS_DATA_HISTORY_HAS_MORE u8 flag out of htlc->in, then emits
- * GtkhxSession::chat-history-batch. The channel id is carried via
- * the task ptr (GUINT_TO_POINTER) since the reply itself doesn't
- * repeat it. */
+/* TRAN_GET_CHAT_HISTORY (700) reply walker. Moved to the hxhandlers Rust crate
+ * (recv/chat.rs): it walks the reply chunks natively, builds the
+ * GPtrArray<HxHistoryEntry*> via glib + the native hx_history_entry_parse,
+ * advances the newest-msgid cursor, and emits GtkhxSession::chat-history-batch.
+ * The channel id rides the task ptr (GUINT_TO_POINTER) since the reply doesn't
+ * repeat it. The prototype stays for the RCV_TASK_FN(task_new) registration in
+ * chat_history.c; the symbol resolves against the Rust crate at link. */
 extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                    void             *channel_ptr);
 /* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The bodies moved

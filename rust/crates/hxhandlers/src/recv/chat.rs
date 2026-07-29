@@ -18,7 +18,19 @@ use hxmodel::chat_members::hx_member_model_get_ignore;
 #[cfg(not(test))]
 use hxmodel::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
 #[cfg(not(test))]
-use gtkhx_core::conn::{hx_conn_has_cap, hx_conn_name, hx_conn_sess};
+use gtkhx_core::conn::{hx_conn_chat_history_last_msgid, hx_conn_has_cap, hx_conn_name, hx_conn_sess, hx_conn_set_chat_history_last_msgid};
+
+// Chat-history batch build: native parse + free (gtkhx-core boxed value type),
+// the glib GPtrArray the signal carries, and the native chunk walker. All are
+// real in both builds — glib and gtkhx-core work under `cargo test`.
+use glib::ffi::{g_ptr_array_add, g_ptr_array_new_with_free_func, g_ptr_array_unref, gpointer};
+use gtkhx_core::boxed::history::{hx_history_entry_free, hx_history_entry_parse, HxHistoryEntry};
+use hotline_proto::wire::ChunkIter;
+
+/// Wire chunk types in a GET_CHAT_HISTORY (700) reply (hotline.h).
+const HTLS_DATA_HISTORY_ENTRY: u16 = 0x0f05;
+const HTLS_DATA_HISTORY_HAS_MORE: u16 = 0x0f06;
+const HTLS_DATA_TASKERROR: u16 = 0x0064;
 
 #[cfg(not(test))]
 extern "C" {    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0
@@ -369,6 +381,98 @@ pub unsafe extern "C" fn hx_chat_history_recv(
     gtkhx_session_emit_chat_history_batch(gtkhx_session_get_default(), htlc, cid, entries, has_more);
 }
 
+/// `GDestroyNotify` shim: the `GPtrArray` frees each entry with the gtkhx-core
+/// `hx_history_entry_free` (which is typed `*mut HxHistoryEntry`).
+///
+/// # Safety
+/// `p` is NULL or a valid `HxHistoryEntry*` (the array only ever holds those).
+unsafe extern "C" fn destroy_history_entry(p: gpointer) {
+    hx_history_entry_free(p as *mut HxHistoryEntry);
+}
+
+/// `void rcv_task_chat_history (htlc, frame, frame_len, channel_ptr, data)` — the
+/// TRAN_GET_CHAT_HISTORY (700) reply walker (was `rcv.c`). Walks the reply's
+/// chunks natively: each `HTLS_DATA_HISTORY_ENTRY` parses into a heap
+/// `HxHistoryEntry` (gtkhx-core `hx_history_entry_parse`) accumulated into a
+/// `GPtrArray` whose destroy-func frees them; `HTLS_DATA_HISTORY_HAS_MORE` sets
+/// the more-pages flag; a `HTLS_DATA_TASKERROR` means the server refused the
+/// request (logged — the subscriber then sees zero entries + has_more=FALSE, the
+/// same shape as "no history to return"). The channel id isn't echoed in the
+/// reply, so it rides the task ptr (`GUINT_TO_POINTER`) and is recovered here.
+///
+/// Before emitting, advance the session-wide newest-msgid cursor used for the
+/// `AFTER=` reconnect catch-up (it grows monotonically over the htlc's lifetime,
+/// independent of the per-chat oldest-msgid the Load-older flow shrinks). The
+/// `chat-history-batch` emit borrows the array for the call; it's unref'd (and
+/// every entry freed via the destroy-func) right after.
+///
+/// # Safety
+/// C-ABI reply callback (`hx_rcv_task`, main thread). `frame` is valid for
+/// `frame_len` bytes; `channel_ptr` is `GUINT_TO_POINTER(cid)`.
+#[no_mangle]
+pub unsafe extern "C" fn rcv_task_chat_history(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+    channel_ptr: *mut c_void,
+    _data: *mut c_void,
+) {
+    let cid = channel_ptr as usize as u32; // GPOINTER_TO_UINT
+    let entries = g_ptr_array_new_with_free_func(Some(destroy_history_entry));
+    let mut has_more = false;
+    let mut max_msgid: u64 = 0;
+
+    if !frame.is_null() {
+        let buf = std::slice::from_raw_parts(frame, frame_len);
+        for chunk in ChunkIter::over_message(buf, frame_len) {
+            match chunk.tag {
+                HTLS_DATA_HISTORY_ENTRY => {
+                    let e = hx_history_entry_parse(chunk.data.as_ptr(), chunk.data.len());
+                    if e.is_null() {
+                        debug_trace(
+                            c"chat-history",
+                            format!("skipping malformed entry, len={}", chunk.data.len()),
+                        );
+                        continue;
+                    }
+                    if (*e).message_id > max_msgid {
+                        max_msgid = (*e).message_id;
+                    }
+                    g_ptr_array_add(entries, e as gpointer);
+                }
+                HTLS_DATA_HISTORY_HAS_MORE => {
+                    if let Some(&b0) = chunk.data.first() {
+                        has_more = b0 != 0;
+                    }
+                }
+                HTLS_DATA_TASKERROR => {
+                    debug_trace(
+                        c"chat-history",
+                        format!("server returned task error for GET_CHAT_HISTORY (cid={cid})"),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if max_msgid > hx_conn_chat_history_last_msgid(htlc.cast()) {
+        hx_conn_set_chat_history_last_msgid(htlc.cast(), max_msgid);
+    }
+
+    debug_trace(
+        c"chat-history",
+        format!(
+            "received batch: cid={cid} entries={} has_more={}",
+            (*entries).len,
+            has_more as i32
+        ),
+    );
+
+    hx_chat_history_recv(htlc, cid, entries as *mut c_void, has_more as c_int);
+    g_ptr_array_unref(entries);
+}
+
 /// `int hx_chat_recv (htlc, member_model, uid, event)` — the public-chat line
 /// receive path: drop the line when its sender (`uid`) is on the ignore list,
 /// otherwise emit the `chat` signal carrying the boxed `HxChatEvent`. Returns 1
@@ -422,6 +526,8 @@ pub(crate) mod test_env {
             const { std::cell::RefCell::new(None) };
         /// Whether the stubbed hx_chat_event_attach_media was called.
         pub static MEDIA_ATTACHED: Cell<bool> = const { Cell::new(false) };
+        /// The session-wide chat-history newest-msgid cursor.
+        pub static CURSOR: Cell<u64> = const { Cell::new(0) };
     }
 
     pub fn reset() {
@@ -433,6 +539,7 @@ pub(crate) mod test_env {
         HAS_CAP.with(|c| c.set(false));
         EVENT_NEW.with(|c| *c.borrow_mut() = None);
         MEDIA_ATTACHED.with(|c| c.set(false));
+        CURSOR.with(|c| c.set(0));
     }
 }
 
@@ -568,6 +675,16 @@ unsafe fn hx_chat_event_attach_media(
 unsafe fn hx_chat_event_free(_ev: *mut c_void) {}
 #[cfg(test)]
 unsafe fn debug_log_str(_cat: *const c_char, _msg: *const c_char) {}
+
+#[cfg(test)]
+unsafe fn hx_conn_chat_history_last_msgid(_h: *const c_void) -> u64 {
+    test_env::CURSOR.with(|c| c.get())
+}
+
+#[cfg(test)]
+unsafe fn hx_conn_set_chat_history_last_msgid(_h: *mut c_void, v: u64) {
+    test_env::CURSOR.with(|c| c.set(v));
+}
 
 #[cfg(test)]
 mod tests;

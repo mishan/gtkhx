@@ -340,3 +340,104 @@ fn chat_history_batch_forwards_array_and_flag() {
         Some((0, entries, true))
     );
 }
+
+// ---- rcv_task_chat_history (full walker) -----------------------------------
+
+/// Pack one HTLS_DATA_HISTORY_ENTRY body: 8+8+2+2 fixed header, u16 nick_len +
+/// nick, u16 msg_len + msg.
+fn history_entry_body(message_id: u64, flags: u16, icon: u16, nick: &[u8], msg: &[u8]) -> Vec<u8> {
+    let mut v = Vec::new();
+    v.extend_from_slice(&message_id.to_be_bytes());
+    v.extend_from_slice(&0i64.to_be_bytes()); // timestamp
+    v.extend_from_slice(&flags.to_be_bytes());
+    v.extend_from_slice(&icon.to_be_bytes());
+    v.extend_from_slice(&(nick.len() as u16).to_be_bytes());
+    v.extend_from_slice(nick);
+    v.extend_from_slice(&(msg.len() as u16).to_be_bytes());
+    v.extend_from_slice(msg);
+    v
+}
+
+/// Build a real GET_CHAT_HISTORY (700) TASK reply: 22-byte header + the given
+/// chunks (the handler walks them with production `ChunkIter` + native parse).
+fn chat_history_frame(chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
+    use hotline_proto::messages::ServerHdr;
+    let mut v = Vec::new();
+    v.extend_from_slice(&(ServerHdr::Task as u32).to_be_bytes()); // type
+    v.extend_from_slice(&[0u8; 18]); // trans(4) flag(4) len(4) len2(4) hc(2)
+    for (t, d) in chunks {
+        push_chunk(&mut v, *t, d);
+    }
+    v
+}
+
+unsafe fn call_chat_history(cid: u32, frame: &[u8]) {
+    rcv_task_chat_history(
+        std::ptr::null_mut(),
+        frame.as_ptr(),
+        frame.len(),
+        cid as usize as *mut std::os::raw::c_void, // GUINT_TO_POINTER(cid)
+        std::ptr::null_mut(),
+    );
+}
+
+#[test]
+fn chat_history_builds_batch_and_advances_cursor() {
+    test_env::reset();
+    let frame = chat_history_frame(&[
+        (HTLS_DATA_HISTORY_ENTRY, history_entry_body(10, 0, 0, b"a", b"hi")),
+        (HTLS_DATA_HISTORY_ENTRY, history_entry_body(25, 0, 0, b"b", b"yo")),
+        (HTLS_DATA_HISTORY_HAS_MORE, vec![1]),
+    ]);
+    unsafe { call_chat_history(7, &frame) };
+    let (cid, ptr, has_more) = test_env::HISTORY_EMITTED
+        .with(|c| c.take())
+        .expect("batch emitted");
+    assert_eq!(cid, 7);
+    assert!(!ptr.is_null()); // a real GPtrArray was built and passed
+    assert!(has_more);
+    // Cursor advanced to the newest message id seen (implies both parsed).
+    assert_eq!(test_env::CURSOR.with(|c| c.get()), 25);
+}
+
+#[test]
+fn chat_history_has_more_false_when_flag_zero() {
+    test_env::reset();
+    let frame = chat_history_frame(&[
+        (HTLS_DATA_HISTORY_ENTRY, history_entry_body(3, 0, 0, b"", b"x")),
+        (HTLS_DATA_HISTORY_HAS_MORE, vec![0]),
+    ]);
+    unsafe { call_chat_history(0, &frame) };
+    let (_, _, has_more) = test_env::HISTORY_EMITTED
+        .with(|c| c.take())
+        .expect("batch emitted");
+    assert!(!has_more);
+    assert_eq!(test_env::CURSOR.with(|c| c.get()), 3);
+}
+
+#[test]
+fn chat_history_task_error_emits_empty_batch() {
+    test_env::reset();
+    test_env::CURSOR.with(|c| c.set(99)); // pre-existing cursor
+    let frame = chat_history_frame(&[(HTLS_DATA_TASKERROR, b"boom".to_vec())]);
+    unsafe { call_chat_history(0, &frame) };
+    let (cid, ptr, has_more) = test_env::HISTORY_EMITTED
+        .with(|c| c.take())
+        .expect("empty batch still emitted");
+    assert_eq!(cid, 0);
+    assert!(!ptr.is_null()); // empty GPtrArray, still non-null
+    assert!(!has_more);
+    assert_eq!(test_env::CURSOR.with(|c| c.get()), 99); // unchanged
+}
+
+#[test]
+fn chat_history_cursor_never_regresses() {
+    test_env::reset();
+    test_env::CURSOR.with(|c| c.set(100));
+    let frame = chat_history_frame(&[(
+        HTLS_DATA_HISTORY_ENTRY,
+        history_entry_body(25, 0, 0, b"", b"x"),
+    )]);
+    unsafe { call_chat_history(0, &frame) };
+    assert_eq!(test_env::CURSOR.with(|c| c.get()), 100);
+}
