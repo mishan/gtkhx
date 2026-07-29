@@ -1244,15 +1244,13 @@ rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char
  * get_post sender still registers it; the symbol now resolves against
  * hxnews-recv. With this, no news code remains in rcv.c. */
 
-void
-rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat, int text)
-{
-    /* output user list and then grab news */
-    /* this is only used for login events  */
-    rcv_task_user_list (htlc, frame, frame_len, chat, text);
-
-    reload_news (0, sess_from_htlc (htlc));
-}
+/* rcv_task_news_users / rcv_task_user_list / rcv_task_user_list_switch /
+ * rcv_task_user_info moved to the hxhandlers Rust crate (recv/user.rs): they
+ * walk the reply chunks natively (hotline_proto::parse::parse_user_list_record /
+ * parse_user_info) and fold into the roster through the shared, already-Rust
+ * hx_user_apply_recv — no C chunk-walk or C↔Rust bounce. The C senders still
+ * register them via RCV_TASK_FN(); the symbols resolve against the Rust crate at
+ * link. rcv_task_kick stays here (it logs via the variadic hx_printf_prefix). */
 
 /* Post-login fetch sequencing decision — Rust hotline-proto (login module).
  * Returns HX_POST_LOGIN_FETCH_NOW (1.0/1.2: fire fetches now),
@@ -1517,107 +1515,13 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, ch
  * reply. hxnews-send registers it as the reply callback (declared in rcv.h); no
  * C body — and no news_buf/news_len scratch — remains here. */
 
-/* GIF-icons extension (fogWraith GIF-Icons.md). Parsing lives in the
- * Rust hotline-proto crate (crate::gif_icons via the gtkhx_proto_*
- * shims); these handlers pass the received frame slice straight in and only
- * emit GtkhxSession signals — no chunk walking on the C side. */
-
-/* gif-icon-data validation + emit lives in the Rust hxicon-recv crate: it
- * upholds the signal's "raw GIF bytes or empty" contract — a zero-length or
- * non-GIF-signed payload is coerced to a cleared (NULL, 0) so no subscriber
- * decodes network garbage or a dangling pointer. */
-extern void hx_icon_data_recv (struct htlc_conn *htlc, guint16 uid,
-                               const guint8 *gif, guint32 len);
-
-/* ICON_GET (1863) task reply: UID + ICON_GIF. */
-void
-rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr)
-{
-    (void) uid_ptr; /* uid is echoed in the reply; we read it from there */
-    struct gtkhx_proto_icon_entry e;
-    if (!gtkhx_proto_parse_icon_get_reply (frame, frame_len, &e)) {
-        debug_log ("icon", "ICON_GET reply missing UID");
-        return;
-    }
-    /* A get reply implies the server speaks the extension. gif_len == 0
-	 * is a valid "avatar cleared" result — we still emit it so the view
-	 * drops any stale cached avatar. */
-    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_SUPPORTED);
-    debug_log ("icon", "ICON_GET reply: uid=%u gif_len=%zu", (unsigned) e.uid,
-               e.gif_len);
-    hx_icon_data_recv (htlc, e.uid, e.gif_ptr, (guint32) e.gif_len);
-}
-
-/* ICON_GETLIST (1861) task reply: 0..N packed ICON_LIST entries. Also
- * the resolution point for the post-login probe. */
-void
-rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
-{
-    /* The reply arriving at all means the server supports the
-	 * extension — flip the probe state and disarm the watchdog. */
-    /* GIF-icons has no capability/access bit and no version tie (a 1.5+
-     * server may or may not implement it), so support is detected purely
-     * by this probe. An ERROR reply is the "not supported" answer, exactly
-     * like the watchdog's no-reply timeout — mark unsupported, disarm the
-     * watchdog, and return WITHOUT a user toast (hx_rcv_task suppresses
-     * task_error for the "icon-list" task and dispatches us on the error
-     * path so we record the verdict). A speculative probe's rejection is
-     * expected and non-actionable. */
-    if (task_inerror (htlc, frame, frame_len)) {
-        hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
-        if (hx_conn_gif_icons_probe_timer (htlc)) {
-            g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
-            hx_conn_set_gif_icons_probe_timer (htlc, 0);
-        }
-        debug_log ("icon",
-                   "ICON_GETLIST rejected (task error) — server lacks the "
-                   "GIF-icons extension; probe verdict UNSUPPORTED");
-        return;
-    }
-
-    hx_conn_set_gif_icons_state (htlc, GIF_ICONS_SUPPORTED);
-    if (hx_conn_gif_icons_probe_timer (htlc)) {
-        g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
-        hx_conn_set_gif_icons_probe_timer (htlc, 0);
-    }
-
-    /* The server is confirmed capable — push our saved avatar (if the
-	 * user picked one while offline / on a non-supporting server). No-op
-	 * when there's nothing saved. */
-    hx_icon_send_saved (htlc);
-
-    /* Count first (out=NULL), then allocate exactly and fill — the
-	 * Rust walker returns the total even when out is NULL. The count is
-	 * server-controlled, so clamp it: a uid is a u16, so a well-formed
-	 * list has at most 65536 entries; a hostile/buggy reply with massive
-	 * duplication shouldn't drive a huge allocation + emit storm. */
-    size_t n = gtkhx_proto_parse_icon_list (frame, frame_len, NULL, 0);
-    /* A uid is u16, so the space is 65536 distinct values (0..65535) —
-	 * clamp to that, not G_MAXUINT16, so a full list isn't off-by-one. */
-    const size_t max_entries = (size_t) G_MAXUINT16 + 1;
-    if (n > max_entries) {
-        debug_log ("icon", "ICON_GETLIST reply: clamping %zu entries to %zu", n,
-                   max_entries);
-        n = max_entries;
-    }
-    debug_log ("icon", "ICON_GETLIST reply: %zu entr%s", n,
-               n == 1 ? "y" : "ies");
-    if (n == 0) {
-        return;
-    }
-    struct gtkhx_proto_icon_entry *entries
-        = g_new0 (struct gtkhx_proto_icon_entry, n);
-    size_t got
-        = gtkhx_proto_parse_icon_list (frame, frame_len, entries, n);
-    if (got > n) {
-        got = n; /* defensive: never iterate past the allocation */
-    }
-    for (size_t i = 0; i < got; i++) {
-        hx_icon_data_recv (htlc, entries[i].uid, entries[i].gif_ptr,
-                           (guint32) entries[i].gif_len);
-    }
-    g_free (entries);
-}
+/* GIF-icons extension (fogWraith GIF-Icons.md). The ICON_GET / ICON_GETLIST
+ * task-reply handlers (rcv_task_icon_get / rcv_task_icon_getlist) moved to the
+ * hxhandlers Rust crate (rust/crates/hxhandlers/src/recv/icon.rs): each walks
+ * the reply natively (crate::gif_icons), flips the probe negotiation state via
+ * the hx_conn_gif_icons_* accessors, and publishes avatars through
+ * hx_icon_data_recv (also Rust). The C senders (gif_icons.c) still register them
+ * via RCV_TASK_FN(); the symbols resolve against the Rust crate at link. */
 
 /* ICON_CHANGE (1864) server broadcast: UID only. Parse + gif-icon-changed emit
  * live in the Rust hxicon-recv crate (rust/crates/hxicon-recv). */
@@ -1716,89 +1620,8 @@ rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_
     g_ptr_array_unref (entries);
 }
 
-void
-rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat, int text)
-{
-    guint16 uid;
-    int new;
-
-    dh_start (frame, frame_len)
-    {
-        if (_type == HTLS_DATA_USER_LIST) {
-            /* chunk-record parsing moved to Rust
-			 * gtkhx_proto_parse_user_list_record. The parser handles
-			 * the 8-byte fixed header, two-stage nlen clamp
-			 * (avail-first, then cap-31), strip_ansi, and the
-			 * Colored-Nicknames trailer at `8 + clamped_nlen`. The C
-			 * side keeps the "is this us?" adoption gate that sets
-			 * hx_conn_uid (htlc) / ->color, and the GtkhxSession signal emit —
-			 * all of which need session/chat objects the Rust layer
-			 * doesn't see. */
-            struct gtkhx_proto_user_list_record rec;
-            char name_buf[32];
-            if (!gtkhx_proto_parse_user_list_record (
-                    dh->data, _len, (uint8_t *)name_buf, sizeof (name_buf),
-                    &rec)) {
-                continue;
-            }
-            uid = rec.uid;
-            name_buf[rec.name_len] = 0;
-            /* `new` means "not already in this chat's membership". Computed
-             * per record: a stale new=1 from a previous new user would
-             * otherwise spawn a spurious user_create for every subsequent
-             * EXISTING user, doubling the UI row. Existence is a model query —
-             * the same store every reader uses. */
-            new = !hx_member_model_contains (hx_chat_member_model (chat), uid);
-
-            /* Colored-Nicknames: mirror the trailer colour onto htlc when
-             * this record is us (absent trailer => HX_NICK_COLOR_NONE). */
-            if (rec.got_nick_color && uid == hx_conn_uid (htlc)) {
-                hx_conn_set_nick_color (htlc, rec.nick_color);
-            }
-            /* "is this us?" adoption for servers that omit USER_LIST from
-             * SELFINFO: the first record matching our nick+icon claims our
-             * uid. (The server's status colour used to be mirrored onto
-             * htlc->color here, but that field was write-only and is gone.) */
-            if (!hx_conn_uid (htlc) && !strcmp (name_buf, hx_conn_name (htlc))
-                && rec.icon == hx_conn_icon (htlc)) {
-                hx_conn_set_uid (htlc, uid);
-            }
-
-            /* Same shared roster-apply as the live USER_CHANGE path, but
-             * incremental=FALSE: a new record emits user-create with the join
-             * chime suppressed (we're loading users already in the room at
-             * login), and an existing record folds into the model silently. */
-            hx_user_apply_recv (htlc, chat, hx_chat_member_model (chat), uid,
-                                rec.nick_color, name_buf, rec.icon, rec.color,
-                                new, /*skip_self_create=*/FALSE,
-                                /*incremental=*/FALSE);
-        }
-
-        else if (_type == HTLS_DATA_CHAT_SUBJECT) {
-            guint16 slen = (_len > 255) ? 255 : _len;
-            hx_chat_set_subject (chat, (const char *) (dh->data), slen);
-            /* Initial-subject-discovery path — the Rust hxchat-recv crate
-			 * publishes chat-subject unconditionally (no 'Subject Changed
-			 * to X' log line). */
-            hx_chat_subject_emit (htlc, hx_chat_cid (chat),
-                                  hx_chat_subject (chat));
-        }
-    }
-    dh_end ();
-}
-
-void
-rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat)
-{
-    session *sess = sess_from_htlc (htlc);
-
-    if (task_inerror (htlc, frame, frame_len)) {
-        chat_delete (sess, chat);
-        return;
-    }
-
-    rcv_task_user_list (htlc, frame, frame_len, chat, 0);
-}
+/* rcv_task_user_list / rcv_task_user_list_switch / rcv_task_user_info moved to
+ * the hxhandlers Rust crate (recv/user.rs) — see the note above rcv_task_login. */
 
 void
 rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
@@ -1808,27 +1631,5 @@ rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 
     hx_printf_prefix (htlc, 0, INFOPREFIX, "%s\n", _ ("kick successful"));
-}
-
-void
-rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, guint16 *_uid, int text)
-{
-    char info[4096 + 1], name[32];
-    guint16 uid = *_uid;
-    g_free (_uid);
-
-    /* chunk-walk + CR2LF + strip_ansi moved to the Rust
-	 * hotline-proto crate's parse_user_info. The C side keeps the
-	 * uid carry-through (it's a task parameter, not a chunk) and
-	 * the `nlen && ilen` dispatch gate that filters out unanswered
-	 * server frames. */
-    struct gtkhx_proto_user_info ui;
-    bool ok = gtkhx_proto_parse_user_info (frame, frame_len, (uint8_t *)name,
-                                           sizeof (name), (uint8_t *)info,
-                                           sizeof (info), &ui);
-    if (ok && ui.name_len && ui.info_len) {
-        /* user-info emit — Rust hxuser-recv crate. */
-        hx_user_info_recv (uid, name, info, ui.info_len);
-    }
 }
 

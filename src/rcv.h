@@ -63,6 +63,9 @@ extern void rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize fra
  * task_new — so the old 2-arg prototypes are gone rather than left to drift
  * from the real ABI. */
 extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *pass);
+/* rcv_task_news_users (post-login USER_GETLIST reply) moved to the hxhandlers
+ * Rust crate (recv/user.rs); the prototype stays for the RCV_TASK_FN(task_new)
+ * registration in the post-login fetch path. */
 extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
                                  int text);
 extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
@@ -75,12 +78,15 @@ extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsi
  * repeat it. */
 extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                                    void             *channel_ptr);
-/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The
- * send wrappers in gif_icons.c register these via task_new before the
- * matching hlwrite_chunks. Both delegate parsing to the Rust
- * hotline-proto crate and emit GtkhxSession::gif-icon-data.
+/* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The bodies moved
+ * to the hxhandlers Rust crate (recv/icon.rs): each walks the reply natively
+ * (crate::gif_icons), flips the probe negotiation state via the
+ * hx_conn_gif_icons_* accessors, and publishes avatars through hx_icon_data_recv.
+ * The prototypes stay because the send wrappers in gif_icons.c register them via
+ * RCV_TASK_FN(task_new); the symbols resolve against the Rust crate at link.
  *   _get      — ICON_GET (1863) reply: UID + ICON_GIF. uid_ptr is
- *               GUINT_TO_POINTER(uid) from the send wrapper.
+ *               GUINT_TO_POINTER(uid) from the send wrapper (uid is echoed in
+ *               the reply, so the Rust body ignores it).
  *   _getlist  — ICON_GETLIST (1861) reply: 0..N packed ICON_LIST
  *               entries; also resolves the probe to SUPPORTED. */
 extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr);
@@ -89,6 +95,12 @@ extern void rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, 
  * view can re-fetch the avatar via hx_icon_get. */
 extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
 
+/* rcv_task_user_list / _user_list_switch / _user_info moved to the hxhandlers
+ * Rust crate (recv/user.rs): they walk the reply chunks natively
+ * (parse_user_list_record / parse_user_info) and fold into the roster through the
+ * shared, already-Rust hx_user_apply_recv. The prototypes stay for the
+ * RCV_TASK_FN(task_new) registrations in users.c / chat.c. rcv_task_kick stays C
+ * (it logs via the variadic hx_printf_prefix). */
 extern void rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
                                 int text);
 extern void rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
