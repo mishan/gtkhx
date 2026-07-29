@@ -8,11 +8,6 @@
  *          HxHistoryEntry. We hand-build entries with known
  *          values and assert every field round-trips.
  *
- *   send   hx_get_chat_history packs the right HTLC_DATA_*
- *          chunks into an HTLC_HDR_GET_CHAT_HISTORY (700)
- *          request. Drive it with various cursor/limit
- *          combinations and verify the wire-side chunk shape.
- *
  *   subs   The mini-TLV sub-field skip path — append a known
  *          + unknown sub-field after the message body and
  *          verify the parser walks past both cleanly and
@@ -28,39 +23,8 @@
 
 #include "config.h"
 #include <string.h>
-#include <stdarg.h>
 #include <glib.h>
-#include "protocol.h"
-#include "hotline.h"
-#include "hxconn_layout.h"
-#include "htlc_recv_buf.h"
-#include "proto_helpers.h"
 #include "chat_history.h"
-
-/* The production `hlwrite_chunks` lives in Rust (hxtask::send); linking it would
- * drag in the hxnet send bridge + proto_trace + connection-state signal
- * emission. None of that is needed (or wanted) here; the test only cares about
- * the buffer the send produces. Provide a minimal in-test stub that does the
- * buffer side — call hlpack_chunks — and skip everything else. The linker picks
- * this stub because we don't link the Rust send primitive.
- *
- * Production declaration lives in network.h, which we deliberately
- * don't include (it would drag in GIOChannel + proto_trace + cipher
- * + compress). Forward-declare here so -Wmissing-prototypes is
- * happy — same pattern integration_harness.c uses. */
-extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type,
-                            guint32 flag, const struct hx_chunk *chunks,
-                            int hc);
-void
-hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
-                const struct hx_chunk *chunks, int hc)
-{
-    gsize len = 0;
-    guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = buf;
-    hx_test_in(htlc)->pos = len;
-}
 
 /* ---------- entry-buffer construction helper ---------- */
 
@@ -252,199 +216,6 @@ test_parse_null_data_returns_null (void)
     g_assert_null (hx_history_entry_parse ((const guint8 *) "x", 0));
 }
 
-/* ---------- send-side tests ---------- */
-
-static void
-htlc_init (struct htlc_conn *htlc, guint64 caps)
-{
-    memset (htlc, 0, sizeof (*htlc));
-    htlc->trans = 1;
-    htlc->caps  = caps;
-}
-
-static void
-htlc_free (struct htlc_conn *htlc)
-{
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = NULL;
-}
-
-static void
-test_send_skipped_without_cap (void)
-{
-    /* No CAP_CHAT_HISTORY in htlc->caps → sender refuses. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, /*caps=*/0);
-
-    g_assert_false (hx_get_chat_history (&htlc, 0, 0, 0, 0));
-    /* Nothing got written. */
-    g_assert_cmpuint (hx_test_in(&htlc)->pos, ==, 0);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_bare_request (void)
-{
-    /* Negotiated cap is set; bare request with no cursors / limit.
-     * Wire should carry exactly one chunk: DATA_CHANNEL_ID=0. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_CHAT_HISTORY);
-
-    g_assert_true (hx_get_chat_history (&htlc, /*channel=*/0,
-                                        /*before=*/0, /*after=*/0,
-                                        /*limit=*/0));
-
-
-    int saw_channel = 0;
-    int total = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
-    {
-        total++;
-        switch (_type) {
-        case HTLC_DATA_CHANNEL_ID:
-            saw_channel++;
-            g_assert_cmpuint (_len, ==, 4);
-            /* big-endian u32 == 0 */
-            for (int i = 0; i < 4; i++) {
-                g_assert_cmpuint (dh->data[i], ==, 0);
-            }
-            break;
-        default:
-            g_error ("unexpected chunk type 0x%04x in bare request", _type);
-            break;
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_channel, ==, 1);
-    g_assert_cmpint (total, ==, 1);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_with_before_cursor (void)
-{
-    /* "Scroll back" — channel 0, before=1000, limit=50. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_CHAT_HISTORY);
-
-    g_assert_true (hx_get_chat_history (&htlc, /*channel=*/0,
-                                        /*before=*/1000,
-                                        /*after=*/0, /*limit=*/50));
-
-
-    int saw_channel = 0, saw_before = 0, saw_limit = 0, saw_after = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
-    {
-        switch (_type) {
-        case HTLC_DATA_CHANNEL_ID:
-            saw_channel++;
-            g_assert_cmpuint (_len, ==, 4);
-            break;
-        case HTLC_DATA_HISTORY_BEFORE:
-            saw_before++;
-            g_assert_cmpuint (_len, ==, 8);
-            /* Big-endian u64 == 1000 → last byte = 0xe8, 2nd-last
-             * = 0x03, rest zero. */
-            g_assert_cmpuint (dh->data[6], ==, 0x03);
-            g_assert_cmpuint (dh->data[7], ==, 0xe8);
-            break;
-        case HTLC_DATA_HISTORY_AFTER:
-            saw_after++;
-            break;
-        case HTLC_DATA_HISTORY_LIMIT:
-            saw_limit++;
-            g_assert_cmpuint (_len, ==, 2);
-            g_assert_cmpuint (dh->data[0], ==, 0);
-            g_assert_cmpuint (dh->data[1], ==, 50);
-            break;
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_channel, ==, 1);
-    g_assert_cmpint (saw_before,  ==, 1);
-    g_assert_cmpint (saw_after,   ==, 0);
-    g_assert_cmpint (saw_limit,   ==, 1);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_with_after_cursor (void)
-{
-    /* "Catch up after reconnect" — channel 0, after=5000. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_CHAT_HISTORY);
-
-    g_assert_true (hx_get_chat_history (&htlc, 0, /*before=*/0,
-                                        /*after=*/5000, /*limit=*/0));
-
-
-    int saw_after = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
-    {
-        if (_type == HTLC_DATA_HISTORY_AFTER) {
-            saw_after++;
-            g_assert_cmpuint (_len, ==, 8);
-            /* big-endian u64 == 5000 → 0x00...0x13 0x88 */
-            g_assert_cmpuint (dh->data[6], ==, 0x13);
-            g_assert_cmpuint (dh->data[7], ==, 0x88);
-        }
-    }
-    dh_end ();
-    g_assert_cmpint (saw_after, ==, 1);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_with_range_query (void)
-{
-    /* Range query — both before AND after set. */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_CHAT_HISTORY);
-
-    g_assert_true (hx_get_chat_history (&htlc, 0, /*before=*/600,
-                                        /*after=*/200, /*limit=*/50));
-
-
-    int saw_before = 0, saw_after = 0, saw_limit = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
-    {
-        if (_type == HTLC_DATA_HISTORY_BEFORE) saw_before++;
-        if (_type == HTLC_DATA_HISTORY_AFTER)  saw_after++;
-        if (_type == HTLC_DATA_HISTORY_LIMIT)  saw_limit++;
-    }
-    dh_end ();
-    g_assert_cmpint (saw_before, ==, 1);
-    g_assert_cmpint (saw_after,  ==, 1);
-    g_assert_cmpint (saw_limit,  ==, 1);
-
-    htlc_free (&htlc);
-}
-
-static void
-test_send_request_type_and_trans (void)
-{
-    /* The on-wire transaction type must be 700 (HTLC_HDR_GET_CHAT_HISTORY). */
-    struct htlc_conn htlc;
-    htlc_init (&htlc, HTLC_CAP_CHAT_HISTORY);
-
-    g_assert_true (hx_get_chat_history (&htlc, 0, 0, 0, 0));
-
-    /* hl_hdr starts with guint32 type at offset 0 (big-endian on
-     * the wire — see struct hl_hdr in hotline.h). */
-    g_assert_cmpuint (hx_test_in(&htlc)->pos, >=, 4);
-    guint32 hdr_type = ((guint32) hx_test_in(&htlc)->buf[0] << 24)
-                     | ((guint32) hx_test_in(&htlc)->buf[1] << 16)
-                     | ((guint32) hx_test_in(&htlc)->buf[2] << 8)
-                     |  (guint32) hx_test_in(&htlc)->buf[3];
-    g_assert_cmphex (hdr_type, ==, HTLC_HDR_GET_CHAT_HISTORY);
-
-    htlc_free (&htlc);
-}
-
 /* ---------- main ---------- */
 
 int
@@ -469,18 +240,11 @@ main (int argc, char **argv)
     g_test_add_func ("/proto/chat_history/parse/null-input",
                      test_parse_null_data_returns_null);
 
-    g_test_add_func ("/proto/chat_history/send/skipped-without-cap",
-                     test_send_skipped_without_cap);
-    g_test_add_func ("/proto/chat_history/send/bare-request",
-                     test_send_bare_request);
-    g_test_add_func ("/proto/chat_history/send/before-cursor",
-                     test_send_with_before_cursor);
-    g_test_add_func ("/proto/chat_history/send/after-cursor",
-                     test_send_with_after_cursor);
-    g_test_add_func ("/proto/chat_history/send/range-query",
-                     test_send_with_range_query);
-    g_test_add_func ("/proto/chat_history/send/header-type",
-                     test_send_request_type_and_trans);
+    /* The send-side cases (cap-gate + cursor / limit chunk shape + opcode)
+     * moved to the hxhandlers Rust crate's send/chat_history.rs unit tests
+     * when hx_get_chat_history became Rust — they run under
+     * `cargo test -p hxhandlers`. This proto test keeps the parser cases,
+     * which drive the Rust hx_history_entry_parse through its C ABI. */
 
     return g_test_run ();
 }

@@ -381,6 +381,78 @@ pub fn build_chat_subject_chunks(
     2
 }
 
+// ---- HTLC_HDR_GET_CHAT_HISTORY (700) ----------------------------------
+//
+// fogWraith chat-history extension. Wire shape: a mandatory CHANNEL_ID (u32)
+// plus up to three optional cursor / limit chunks, each emitted only when its
+// value is non-zero (the server treats absence as "default"):
+//   BEFORE (u64) → messages older than this id
+//   AFTER  (u64) → messages newer than this id (reconnect catch-up)
+//   LIMIT  (u16) → max results (0 = server default)
+
+/// Request data for [`build_get_chat_history_chunks`].
+pub struct GetChatHistoryRequest {
+    pub channel_id: u32,
+    /// "before" cursor; omitted when 0.
+    pub before: u64,
+    /// "after" cursor; omitted when 0.
+    pub after: u64,
+    /// max-results limit; omitted when 0.
+    pub limit: u16,
+}
+
+/// Build the chunk array for `HTLC_HDR_GET_CHAT_HISTORY`. `channel_id` is
+/// always emitted; `before` / `after` / `limit` are emitted only when non-zero,
+/// so the count is 1..4. Scratch layout: channel @0..4, before @4..12,
+/// after @12..20, limit @20..22 (22 bytes). Returns the chunk count, or 0 if
+/// `chunks` has fewer than 4 slots or `scratch` fewer than 22 bytes.
+pub fn build_get_chat_history_chunks(
+    req: &GetChatHistoryRequest,
+    chunks: &mut [HxChunk],
+    scratch: &mut [u8],
+) -> usize {
+    if chunks.len() < 4 || scratch.len() < 22 {
+        return 0;
+    }
+    scratch[0..4].copy_from_slice(&req.channel_id.to_be_bytes());
+    scratch[4..12].copy_from_slice(&req.before.to_be_bytes());
+    scratch[12..20].copy_from_slice(&req.after.to_be_bytes());
+    scratch[20..22].copy_from_slice(&req.limit.to_be_bytes());
+
+    let mut hc = 0;
+    chunks[hc] = HxChunk {
+        tag: tag::CHANNEL_ID,
+        len: 4,
+        data: scratch[0..4].as_ptr(),
+    };
+    hc += 1;
+    if req.before != 0 {
+        chunks[hc] = HxChunk {
+            tag: tag::HISTORY_BEFORE,
+            len: 8,
+            data: scratch[4..12].as_ptr(),
+        };
+        hc += 1;
+    }
+    if req.after != 0 {
+        chunks[hc] = HxChunk {
+            tag: tag::HISTORY_AFTER,
+            len: 8,
+            data: scratch[12..20].as_ptr(),
+        };
+        hc += 1;
+    }
+    if req.limit != 0 {
+        chunks[hc] = HxChunk {
+            tag: tag::HISTORY_LIMIT,
+            len: 2,
+            data: scratch[20..22].as_ptr(),
+        };
+        hc += 1;
+    }
+    hc
+}
+
 // ---- HTLC_HDR_AGREEMENTAGREE ------------------------------------------
 //
 // Wire shape: ICON + NAME + OPTIONS, all three mandatory (Mobius panics

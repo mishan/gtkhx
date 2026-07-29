@@ -1014,6 +1014,46 @@ pub unsafe extern "C" fn gtkhx_proto_build_chat_chunks(
     build::build_chat_chunks(&req, chunks_slice, scratch_slice) as i32
 }
 
+/// C-ABI wrapper over [`build::build_get_chat_history_chunks`] — retains the
+/// historical `hx_get_chat_history_build_chunks` symbol (`src/chat_history.h`)
+/// so the integration harness's synchronous chat-history request builder links
+/// unchanged. The sender proper (`hx_get_chat_history`) moved to the hxhandlers
+/// Rust crate; only this pure chunk-builder is kept for the harness.
+///
+/// `scratch` points at a `struct hx_get_chat_history_scratch` — the harness only
+/// uses it as backing storage for the chunks' bytes (never reads the fields), so
+/// this treats it as a plain ≥22-byte buffer. `chunks_cap` is the C `int` slot
+/// count (must be ≥ 4).
+///
+/// # Safety
+/// `chunks` valid for `chunks_cap` `HxChunk` slots; `scratch` valid for at least
+/// 22 bytes (the C struct is larger).
+#[no_mangle]
+pub unsafe extern "C" fn hx_get_chat_history_build_chunks(
+    channel_id: u32,
+    before: u64,
+    after: u64,
+    limit: u16,
+    chunks: *mut HxChunk,
+    chunks_cap: i32,
+    scratch: *mut core::ffi::c_void,
+) -> i32 {
+    const MAX_CHUNKS: usize = 4;
+    const MAX_SCRATCH: usize = 22;
+    if chunks.is_null() || scratch.is_null() || chunks_cap < MAX_CHUNKS as i32 {
+        return 0;
+    }
+    let chunks = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
+    let scratch = slice::from_raw_parts_mut(scratch as *mut u8, MAX_SCRATCH);
+    let req = build::GetChatHistoryRequest {
+        channel_id,
+        before,
+        after,
+        limit,
+    };
+    build::build_get_chat_history_chunks(&req, chunks, scratch) as i32
+}
+
 /// Build `HTLC_HDR_MSG` chunks: UID + MSG body, exactly 2 chunks.
 /// Requires `chunks_cap >= 2` and `scratch_cap >= 2` (the BE-encoded
 /// uid at offset 0).

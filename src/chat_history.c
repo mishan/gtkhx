@@ -10,25 +10,23 @@
 #include "config.h"
 #include <stddef.h> /* offsetof — for the HxHistoryEntry layout pin */
 #include <glib.h>
-#include "compat.h"   /* PACKED — required before hotline.h */
-#include "hotline.h"
-#include "protocol.h"
-#include "hxconn.h"
-#include "proto_helpers.h" /* struct hx_chunk */
-#include "network.h"       /* hlwrite_chunks */
 #include "chat_history.h"
-#include "debug.h"
 
 /* ---- HxHistoryEntry layout pin --------------------------------- */
 
-/* The packed-binary entry parser (hx_history_entry_parse) and the free
- * (hx_history_entry_free) moved to the Rust gtkhx-core crate
- * (rust/crates/gtkhx-core/src/boxed/history.rs): parse delegates to
- * hotline_proto::parse::parse_history_entry and wraps it with the glib
- * allocation the entry's owner expects; free releases the same glib buffers.
- * C consumers (chat.c) still read the struct's fields directly, so the byte
- * layout is pinned on both sides — these _Static_asserts against the
- * `offset_of!` block in history.rs. */
+/* Every function that used to live here moved to Rust:
+ *   - hx_history_entry_parse / hx_history_entry_free → the gtkhx-core crate
+ *     (rust/crates/gtkhx-core/src/boxed/history.rs).
+ *   - hx_get_chat_history (the TRAN 700 sender) → the hxhandlers crate
+ *     (rust/crates/hxhandlers/src/send/chat_history.rs).
+ *   - hx_get_chat_history_build_chunks (the pure chunk builder) → hotline-proto
+ *     (native build_get_chat_history_chunks + the C-ABI shim of the same name in
+ *     ffi.rs, kept for the integration harness).
+ *
+ * All that remains in C is the byte-layout pin for HxHistoryEntry: chat.c reads
+ * the struct's fields directly, so the layout is fixed on both sides — these
+ * _Static_asserts against the `offset_of!` block in history.rs. The struct
+ * definition stays in chat_history.h. */
 _Static_assert (sizeof (HxHistoryEntry) == 56, "HxHistoryEntry size drift");
 _Static_assert (offsetof (HxHistoryEntry, message_id) == 0, "field drift");
 _Static_assert (offsetof (HxHistoryEntry, timestamp) == 8, "field drift");
@@ -38,85 +36,3 @@ _Static_assert (offsetof (HxHistoryEntry, nick) == 24, "field drift");
 _Static_assert (offsetof (HxHistoryEntry, nick_len) == 32, "field drift");
 _Static_assert (offsetof (HxHistoryEntry, message) == 40, "field drift");
 _Static_assert (offsetof (HxHistoryEntry, message_len) == 48, "field drift");
-
-/* ---- Request sender -------------------------------------------- */
-
-int
-hx_get_chat_history_build_chunks (guint32 channel_id, guint64 before,
-                                  guint64 after, guint16 limit,
-                                  struct hx_chunk *chunks, int chunks_cap,
-                                  struct hx_get_chat_history_scratch *scratch)
-{
-    if (!chunks || chunks_cap < 4 || !scratch) {
-        return 0;
-    }
-
-    /* All numeric fields are sent big-endian. Stash host→network
-     * conversions into caller-owned scratch storage so the
-     * struct hx_chunk data pointers below remain valid past
-     * function return — the eventual hlpack_chunks/hlwrite_chunks
-     * call memcpys out of them, but the harness path may delay
-     * the pack briefly past the build. */
-    scratch->channel_be = GUINT32_TO_BE (channel_id);
-    scratch->before_be  = GUINT64_TO_BE (before);
-    scratch->after_be   = GUINT64_TO_BE (after);
-    scratch->limit_be   = GUINT16_TO_BE (limit);
-
-    /* Build the chunk list dynamically — only include optional
-     * cursor / limit chunks when their host-side value is non-zero.
-     * channel_id is always sent (the spec mandates it). The
-     * hlwrite_chunks array-style packer collapses the 2^3 = 8
-     * combinations of (before, after, limit) into one call site
-     * — no variadic-dispatch enumeration. */
-    int hc = 0;
-    chunks[hc++] = (struct hx_chunk) { HTLC_DATA_CHANNEL_ID, 4,
-                                       &scratch->channel_be };
-    if (before) {
-        chunks[hc++] = (struct hx_chunk) { HTLC_DATA_HISTORY_BEFORE, 8,
-                                           &scratch->before_be };
-    }
-    if (after) {
-        chunks[hc++] = (struct hx_chunk) { HTLC_DATA_HISTORY_AFTER, 8,
-                                           &scratch->after_be };
-    }
-    if (limit) {
-        chunks[hc++] = (struct hx_chunk) { HTLC_DATA_HISTORY_LIMIT, 2,
-                                           &scratch->limit_be };
-    }
-
-    return hc;
-}
-
-gboolean
-hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
-                     guint64 before, guint64 after, guint16 limit)
-{
-    if (!htlc) {
-        return FALSE;
-    }
-
-    /* Spec: clients MUST NOT send TRAN 700 if CAP_CHAT_HISTORY
-     * wasn't echoed by the server in the login reply. Sending it
-     * anyway earns a task-error every time. */
-    if (!(hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY))) {
-        debug_log ("chat-history",
-                   "skip GET_CHAT_HISTORY: server didn't echo "
-                   "CAP_CHAT_HISTORY (caps=0x%" G_GINT64_MODIFIER "x)",
-                   hx_conn_caps (htlc));
-        return FALSE;
-    }
-
-    /* Note: callers are responsible for task_new()-registering
-     * rcv_task_chat_history BEFORE invoking this function — the
-     * task is keyed on htlc->trans which hlwrite_chunks is about
-     * to consume. chat_history.c stays free of tasks.h / rcv.h
-     * (which need the full hx.h context) so the Tier 2 fixture
-     * tests can build the parser + sender without dragging in
-     * the GTK pile. */
-    struct hx_chunk chunks[4];
-    struct hx_get_chat_history_scratch scratch;
-    int hc = hx_get_chat_history_build_chunks (channel_id, before, after,
-                                               limit, chunks, 4, &scratch);
-    hlwrite_chunks (htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks, hc);
-    return TRUE;
-}
