@@ -69,12 +69,8 @@ fn non_gif_payload_coerced_to_cleared() {
 
 // ---- ICON_GET / ICON_GETLIST reply handlers --------------------------------
 
+use hotline_proto::messages::{tag, ServerHdr};
 use std::os::raw::c_void;
-
-// Wire tags (hotline-proto messages::tag).
-const TAG_UID: u16 = 0x0067;
-const TAG_ICON_GIF: u16 = 0x0300;
-const TAG_ICON_LIST: u16 = 0x0301;
 
 const GIF87: &[u8] = b"GIF87a\x00\x00";
 
@@ -82,7 +78,7 @@ const GIF87: &[u8] = b"GIF87a\x00\x00";
 /// concatenated TLV chunks — the shape `ChunkIter::over_message` expects.
 fn reply(error: bool, chunks: &[(u16, Vec<u8>)]) -> Vec<u8> {
     let mut v = Vec::new();
-    v.extend_from_slice(&0x0001_0000u32.to_be_bytes()); // type (TASK)
+    v.extend_from_slice(&(ServerHdr::Task as u32).to_be_bytes()); // type
     v.extend_from_slice(&1u32.to_be_bytes()); // trans
     v.extend_from_slice(&(error as u32).to_be_bytes()); // flag
     v.extend_from_slice(&0u32.to_be_bytes()); // len
@@ -124,8 +120,8 @@ fn icon_get_flips_supported_and_emits() {
     let frame = reply(
         false,
         &[
-            (TAG_UID, 7u16.to_be_bytes().to_vec()),
-            (TAG_ICON_GIF, GIF87.to_vec()),
+            (tag::UID, 7u16.to_be_bytes().to_vec()),
+            (tag::ICON_GIF, GIF87.to_vec()),
         ],
     );
     unsafe { call_frame(rcv_task_icon_get, &frame) };
@@ -140,7 +136,7 @@ fn icon_get_flips_supported_and_emits() {
 #[test]
 fn icon_get_missing_uid_drops() {
     test_env::reset();
-    let frame = reply(false, &[(TAG_ICON_GIF, GIF87.to_vec())]);
+    let frame = reply(false, &[(tag::ICON_GIF, GIF87.to_vec())]);
     unsafe { call_frame(rcv_task_icon_get, &frame) };
     assert_eq!(test_env::STATE.with(|c| c.get()), 0 /* untouched */);
     assert_eq!(test_env::DATA_EMITTED.with(|c| c.take()), None);
@@ -170,9 +166,9 @@ fn icon_getlist_success_publishes_entries() {
     let frame = reply(
         false,
         &[
-            (TAG_ICON_LIST, list_entry(1, GIF87)),
-            (TAG_ICON_LIST, list_entry(2, GIF87)),
-            (TAG_ICON_LIST, list_entry(3, &[])), // cleared avatar
+            (tag::ICON_LIST, list_entry(1, GIF87)),
+            (tag::ICON_LIST, list_entry(2, GIF87)),
+            (tag::ICON_LIST, list_entry(3, &[])), // cleared avatar
         ],
     );
     unsafe { call_frame(rcv_task_icon_getlist, &frame) };
