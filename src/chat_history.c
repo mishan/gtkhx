@@ -8,80 +8,36 @@
  */
 
 #include "config.h"
-#include <stdlib.h>
-#include <string.h>
+#include <stddef.h> /* offsetof — for the HxHistoryEntry layout pin */
 #include <glib.h>
 #include "compat.h"   /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
 #include "hxconn.h"
 #include "proto_helpers.h" /* struct hx_chunk */
-#include "hotline_proto.h" /* gtkhx_proto_parse_history_entry */
 #include "network.h"       /* hlwrite_chunks */
 #include "chat_history.h"
 #include "debug.h"
 
-/* ---- Packed-binary entry parser -------------------------------- */
+/* ---- HxHistoryEntry layout pin --------------------------------- */
 
-HxHistoryEntry *
-hx_history_entry_parse (const guint8 *data, gsize len)
-{
-    /* packed-binary decode (24-byte fixed header + nick
-	 * + message + best-effort mini-TLV walk) moved to the Rust
-	 * hotline-proto crate's parse_history_entry. The C side keeps
-	 * the HxHistoryEntry allocation and the by-length nick /
-	 * message copies (g_malloc + memcpy + trailing NUL — see the
-	 * comment on those allocations below for why g_strndup is
-	 * wrong here) — the entry's owner expects g_free-able
-	 * strings, and crossing the FFI allocator boundary would
-	 * complicate the contract for no gain. */
-    struct gtkhx_proto_history_entry parsed;
-    if (!gtkhx_proto_parse_history_entry (data, len, &parsed)) {
-        return NULL;
-    }
-
-    HxHistoryEntry *entry = g_new0 (HxHistoryEntry, 1);
-    entry->message_id = parsed.message_id;
-    entry->timestamp = parsed.timestamp;
-    entry->flags = parsed.flags;
-    entry->icon_id = parsed.icon_id;
-
-    /* Copy by length, not by g_strndup. g_strndup stops at the
-	 * first embedded NUL and allocates only what it copied + 1,
-	 * but we record nick_len / message_len from the wire and
-	 * downstream consumers (e.g. g_strstr_len) use those lengths
-	 * with length-aware APIs. A wire payload that contains an
-	 * interior NUL (the server has no obligation to scrub them)
-	 * would then have the length-aware reader walk past the
-	 * truncated allocation. g_malloc + memcpy + trailing NUL
-	 * keeps allocation length and recorded length in lockstep. */
-    entry->nick_len = parsed.nick_len;
-    entry->nick = g_malloc (parsed.nick_len + 1);
-    if (parsed.nick_len) {
-        memcpy (entry->nick, data + parsed.nick_off, parsed.nick_len);
-    }
-    entry->nick[parsed.nick_len] = '\0';
-
-    entry->message_len = parsed.msg_len;
-    entry->message = g_malloc (parsed.msg_len + 1);
-    if (parsed.msg_len) {
-        memcpy (entry->message, data + parsed.msg_off, parsed.msg_len);
-    }
-    entry->message[parsed.msg_len] = '\0';
-
-    return entry;
-}
-
-void
-hx_history_entry_free (HxHistoryEntry *entry)
-{
-    if (!entry) {
-        return;
-    }
-    g_free (entry->nick);
-    g_free (entry->message);
-    g_free (entry);
-}
+/* The packed-binary entry parser (hx_history_entry_parse) and the free
+ * (hx_history_entry_free) moved to the Rust gtkhx-core crate
+ * (rust/crates/gtkhx-core/src/boxed/history.rs): parse delegates to
+ * hotline_proto::parse::parse_history_entry and wraps it with the glib
+ * allocation the entry's owner expects; free releases the same glib buffers.
+ * C consumers (chat.c) still read the struct's fields directly, so the byte
+ * layout is pinned on both sides — these _Static_asserts against the
+ * `offset_of!` block in history.rs. */
+_Static_assert (sizeof (HxHistoryEntry) == 56, "HxHistoryEntry size drift");
+_Static_assert (offsetof (HxHistoryEntry, message_id) == 0, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, timestamp) == 8, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, flags) == 16, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, icon_id) == 18, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, nick) == 24, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, nick_len) == 32, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, message) == 40, "field drift");
+_Static_assert (offsetof (HxHistoryEntry, message_len) == 48, "field drift");
 
 /* ---- Request sender -------------------------------------------- */
 

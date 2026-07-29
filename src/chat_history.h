@@ -90,7 +90,13 @@ typedef struct {
  *
  * Optional mini-TLV sub-fields after the message body are walked
  * but not surfaced — every spec'd sub-field is "future use" as
- * of this draft. */
+ * of this draft.
+ *
+ * NOTE: both functions moved to the Rust gtkhx-core crate
+ * (boxed/history.rs) — parse delegates to
+ * hotline_proto::parse::parse_history_entry, free releases the glib
+ * buffers. The struct above stays C-visible (chat.c reads its fields)
+ * and its layout is pinned by _Static_asserts in chat_history.c. */
 extern HxHistoryEntry *hx_history_entry_parse (const guint8 *data,
                                                gsize         len);
 
