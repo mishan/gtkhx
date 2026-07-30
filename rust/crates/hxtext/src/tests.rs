@@ -173,7 +173,7 @@ fn out_len_optional_on_mac_roman() {
 #[test]
 fn len_above_max_returns_empty() {
     // Tiny buffer + huge len: the guard must short-circuit before reading.
-    let input = [b'a'];
+    let input = *b"a";
     let huge = TO_UTF8_MAX_LEN + 1;
     let (out, len) = unsafe { to_utf8_raw(input.as_ptr() as *const c_char, huge) };
     assert_eq!(out, b"");
@@ -182,7 +182,7 @@ fn len_above_max_returns_empty() {
 
 #[test]
 fn len_usize_max_returns_empty() {
-    let input = [b'a'];
+    let input = *b"a";
     let (out, len) = unsafe { to_utf8_raw(input.as_ptr() as *const c_char, usize::MAX) };
     assert_eq!(out, b"");
     assert_eq!(len, 0);
@@ -191,7 +191,7 @@ fn len_usize_max_returns_empty() {
 #[test]
 fn len_at_isize_max_plus_one_returns_empty() {
     // The gssize-wraparound threshold for the old C g_utf8_validate cast.
-    let input = [b'a'];
+    let input = *b"a";
     let n = (isize::MAX as usize) + 1;
     let (out, len) = unsafe { to_utf8_raw(input.as_ptr() as *const c_char, n) };
     assert_eq!(out, b"");
@@ -202,7 +202,7 @@ fn len_at_isize_max_plus_one_returns_empty() {
 fn len_above_decoded_isize_cap_returns_empty() {
     // Just above the (isize::MAX - 1)/3 bound but below isize::MAX — the gap
     // where len*3 would overflow. The tight cap rejects it.
-    let input = [b'a'];
+    let input = *b"a";
     let bad_len = TO_UTF8_MAX_LEN + 1;
     assert!(bad_len <= isize::MAX as usize);
     assert!(bad_len > (isize::MAX as usize) / 3);
@@ -337,7 +337,7 @@ fn for_wire_null_input() {
 #[test]
 fn for_wire_len_above_max_returns_empty_utf8_mode() {
     // utf8_mode: previously the unguarded branch — this is the regression pin.
-    let input = [b'a'];
+    let input = *b"a";
     let huge = FOR_WIRE_MAX_LEN + 1;
     let (out, len) = unsafe { for_wire_raw(input.as_ptr() as *const c_char, huge, GTRUE, GFALSE) };
     assert_eq!(out, b"");
@@ -346,7 +346,7 @@ fn for_wire_len_above_max_returns_empty_utf8_mode() {
 
 #[test]
 fn for_wire_len_above_max_returns_empty_legacy_mode() {
-    let input = [b'a'];
+    let input = *b"a";
     let huge = FOR_WIRE_MAX_LEN + 1;
     let (out, len) = unsafe { for_wire_raw(input.as_ptr() as *const c_char, huge, GFALSE, GFALSE) };
     assert_eq!(out, b"");
@@ -356,7 +356,7 @@ fn for_wire_len_above_max_returns_empty_legacy_mode() {
 #[test]
 fn for_wire_len_usize_max_returns_empty() {
     // The isize-wraparound extreme, both modes.
-    let input = [b'a'];
+    let input = *b"a";
     for mode in [GTRUE, GFALSE] {
         let (out, len) =
             unsafe { for_wire_raw(input.as_ptr() as *const c_char, usize::MAX, mode, GTRUE) };

@@ -91,7 +91,7 @@ where
             io::ErrorKind::InvalidData,
             format!(
                 "HTLS_MAGIC mismatch: expected {:02x?}, got {:02x?}",
-                HTLS_MAGIC, &reply
+                HTLS_MAGIC, reply
             ),
         ));
     }
