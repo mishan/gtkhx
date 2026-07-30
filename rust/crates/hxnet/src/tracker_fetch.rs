@@ -844,7 +844,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(64);
         run_fetch(
             &mut conn,
-            &[url.clone()],
+            std::slice::from_ref(&url),
             0,
             Duration::from_secs(5),
             &mut verdicts,

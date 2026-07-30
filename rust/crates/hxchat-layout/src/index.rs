@@ -332,17 +332,16 @@ impl HeightIndex {
         }
         let ci = lo;
         let mut acc = self.prefix[ci];
-        let mut row = self.chunk_start_row(ci);
-        for h in &self.chunks[ci].heights {
+        let start_row = self.chunk_start_row(ci);
+        for (i, h) in self.chunks[ci].heights.iter().enumerate() {
             let h64 = u64::from(*h);
             if acc + h64 > y {
                 return Some(Hit {
-                    row,
+                    row: start_row + i,
                     offset: (y - acc) as u32,
                 });
             }
             acc += h64;
-            row += 1;
         }
         // Only reachable on a zero-height tail; clamp.
         Some(Hit {

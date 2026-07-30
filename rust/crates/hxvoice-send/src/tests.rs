@@ -100,7 +100,7 @@ fn last() -> Option<Sent> {
 
 /// A non-NULL opaque htlc token (the stubs ignore its contents).
 fn htlc() -> *mut c_void {
-    1usize as *mut c_void
+    std::ptr::dangling_mut::<c_void>()
 }
 
 // ---- tests ----------------------------------------------------------

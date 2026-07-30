@@ -318,7 +318,7 @@ pub unsafe extern "C" fn xfer_delete(htxf: *mut HtxfHandle) {
 /// Main thread only (shutdown path).
 #[no_mangle]
 pub unsafe extern "C" fn xfers_delete_all() {
-    let all: Vec<*mut HtxfHandle> = with_list(|xs| std::mem::take(xs));
+    let all: Vec<*mut HtxfHandle> = with_list(std::mem::take);
     for htxf in all {
         hx_htxf_cancel(htxf);
         hxnet_htxf_abort((*htxf).abort as *const HtxfAbort);
@@ -818,11 +818,11 @@ unsafe fn remotedir_present(htxf: *const HtxfHandle) -> bool {
 ///
 /// # Safety
 /// When `has_dir`, `*hldir` is NULL or valid for `hldirlen` bytes.
-unsafe fn hldir_dir_bytes<'a>(
-    hldir: &'a *mut u8,
+unsafe fn hldir_dir_bytes(
+    hldir: &*mut u8,
     hldirlen: u16,
     has_dir: bool,
-) -> Option<&'a [u8]> {
+) -> Option<&[u8]> {
     if !has_dir {
         None
     } else if hldir.is_null() || hldirlen == 0 {

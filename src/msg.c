@@ -683,7 +683,7 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 }
 
 void
-msg_output (char *name, guint16 uid, char *buf)
+msg_output (const char *name, guint16 uid, char *buf)
 {
     gboolean is_self = name && hx_conn_name (hx_active_session ()->htlc)[0]
                        && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;

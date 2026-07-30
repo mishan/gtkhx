@@ -196,7 +196,7 @@ mod tests {
         let buf = chunk(b"fldr", 0, b"Docs");
         unsafe {
             gtkhx_files_populate_from_reply(
-                store.as_ptr() as *mut gio::ffi::GListStore,
+                store.as_ptr(),
                 buf.as_ptr(),
                 buf.len(),
             );
@@ -213,7 +213,7 @@ mod tests {
         assert_eq!(store.n_items(), 1);
         unsafe {
             gtkhx_files_populate_from_reply(
-                store.as_ptr() as *mut gio::ffi::GListStore,
+                store.as_ptr(),
                 core::ptr::null(),
                 0,
             );

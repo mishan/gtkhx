@@ -85,7 +85,7 @@ pub unsafe extern "C" fn gtkhx_news_build_tree_model(
     let root: gio::ListModel = from_glib_full(root_model);
     let model = gtk::TreeListModel::new(
         root, /* passthrough */ false, /* autoexpand */ false,
-        |item| create_child_model(item),
+        create_child_model,
     );
     model.into_glib_ptr()
 }

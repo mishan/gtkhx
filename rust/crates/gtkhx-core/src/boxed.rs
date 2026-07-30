@@ -10,7 +10,7 @@
 //!   - [`chat`]    — `HxChatEvent` + `HxChatMedia` (R4.2c ✅)
 //!   - [`tracker`] — `HxTrackerServer` + `HxTrackerV3Meta` (R4.2b ✅)
 //!   - [`history`] — `HxHistoryEntry` (chat-history; a plain value struct
-//!                   carried in a `GPtrArray`, **not** a registered `GType`)
+//!     carried in a `GPtrArray`, **not** a registered `GType`)
 //!
 //! # The struct layout stays C-visible
 //!

@@ -163,7 +163,7 @@ fn last_task() -> Option<Task> {
 
 /// A non-NULL opaque htlc token (the stubs ignore its contents).
 fn htlc() -> *mut c_void {
-    1usize as *mut c_void
+    std::ptr::dangling_mut::<c_void>()
 }
 
 fn cstr(s: &str) -> std::ffi::CString {

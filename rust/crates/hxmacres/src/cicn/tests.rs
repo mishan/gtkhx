@@ -75,9 +75,7 @@ fn default_palette_when_no_ct_overlay() {
     // check the 1-bpp default palette (white / black) drives index 1 → black.
     let mut b = checkerboard_cicn();
     put16(&mut b, 92, 0); // ctSize=0 → one entry {value 0, rgb 0} overrides idx 0 only
-    for i in 94..110 {
-        b[i] = 0;
-    }
+    b[94..110].fill(0);
     let img = decode(&b).unwrap();
     // idx-1 pixels keep the default black (RGB_1[1]); the (0,0) entry got
     // overridden to rgb=0 (black) too, so idx-0 is black as well here.

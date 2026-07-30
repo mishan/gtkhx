@@ -19,7 +19,6 @@ use std::ffi::{c_char, c_void, CStr};
 
 use gtk4 as gtk;
 use gtk::glib;
-use gtk::prelude::*;
 use libadwaita as adw;
 use adw::prelude::*;
 

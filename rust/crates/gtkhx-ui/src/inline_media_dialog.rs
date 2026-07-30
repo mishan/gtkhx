@@ -61,7 +61,7 @@ struct DownloadResult {
     error_message_len: usize,
 }
 
-/// `#[repr(C)]` mirror of `HxInlineMediaDecoded` (`inline_media_decode.h`).
+// `#[repr(C)]` mirror of `HxInlineMediaDecoded` (`inline_media_decode.h`).
 // The decode result type comes from hx-image-decode directly. This module
 // used to keep a hand-synced `#[repr(C)] struct Decoded` mirroring it, which
 // the old `extern "C"` declaration could not check — and which had already
@@ -416,7 +416,7 @@ pub unsafe extern "C" fn inline_media_show_dialog(
             &[
                 &width_hint.to_string(),
                 &height_hint.to_string(),
-                &(((bytes_hint as u64 + 1023) / 1024).to_string()),
+                &((bytes_hint as u64).div_ceil(1024).to_string()),
             ],
         )
     } else if width_hint != 0 && height_hint != 0 {

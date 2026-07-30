@@ -1919,7 +1919,7 @@ impl HxChatView {
         // Shift+PgUp/PgDn is the long-standing IRC binding for "scroll
         // the log" and is unambiguous anywhere, so it bypasses the
         // focus check. Unmodified paging only applies over an input.
-        if !(shift && matches!(action, ScrollKey::Page(_))) && !focus_is_text_entry(c) {
+        if !(focus_is_text_entry(c) || shift && matches!(action, ScrollKey::Page(_))) {
             return false;
         }
 

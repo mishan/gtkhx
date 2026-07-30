@@ -192,7 +192,7 @@ const _: () = {
 };
 
 /// Copy an `HxMember`'s display fields into a C `HxMemberInfo` (name truncated
-/// + NUL-terminated into the fixed 32-byte buffer, matching the old
+/// and NUL-terminated into the fixed 32-byte buffer, matching the old
 /// `hx_user::name[32]`).
 fn fill_member_info(m: &HxMember, o: &mut HxMemberInfo) {
     o.uid = m.uid();

@@ -38,8 +38,12 @@ static MAIN_CTX_LOCK: Mutex<()> = Mutex::new(());
 /// stderr (visible with `cargo test -- --nocapture`, and on a failing
 /// test cargo prints captured output anyway), so a CI decode failure is
 /// self-diagnosing instead of needing a guess-and-rerun cycle.
+/// # Safety
+/// `msg` must be either null or a valid pointer to a NUL-terminated C
+/// string that stays live for the duration of the call. Called by the
+/// decoder's telemetry path with pointers it owns.
 #[no_mangle]
-pub extern "C" fn hx_image_decode_log(msg: *const std::ffi::c_char) {
+pub unsafe extern "C" fn hx_image_decode_log(msg: *const std::ffi::c_char) {
     if msg.is_null() {
         return;
     }

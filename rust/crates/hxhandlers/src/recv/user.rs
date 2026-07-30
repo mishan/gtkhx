@@ -824,7 +824,10 @@ unsafe fn gtkhx_session_emit_user_create(
     });
 }
 
+// Test double that must match the production `extern "C"` emit signature
+// (same argument count) so the handler under test calls it unchanged.
 #[cfg(test)]
+#[allow(clippy::too_many_arguments)]
 unsafe fn gtkhx_session_emit_user_change(
     _self_: *mut c_void,
     _htlc: *mut c_void,

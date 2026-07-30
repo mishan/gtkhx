@@ -5143,10 +5143,8 @@ mod tests {
                 is_speaking: false,
             },
         );
-        assert_eq!(
-            SPEAKER_PAYLOAD.load(Ordering::SeqCst),
-            (42u64 << 32) | 0
-        );
+        // High 32 bits = uid (42), low 32 bits = speaking flag (0).
+        assert_eq!(SPEAKER_PAYLOAD.load(Ordering::SeqCst), 42u64 << 32);
     }
 
     #[test]

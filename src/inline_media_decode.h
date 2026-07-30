@@ -244,4 +244,12 @@ extern void inline_media_decode_cancel (gpointer token);
  * and frees the struct itself. NULL-safe. */
 extern void inline_media_decoded_free (HxInlineMediaDecoded *decoded);
 
+/* Telemetry bridge: the hx-image-decode Rust crate
+ * (`rust/crates/hx-image-decode/src/telemetry.rs`) calls this for
+ * every decode-start / decode-done / decode-failed line so the
+ * output flows through the C-side `debug_log("media", ...)`
+ * infrastructure. `msg` is a Rust-owned, read-only C string valid
+ * only for the duration of the call. */
+extern void hx_image_decode_log (const char *msg);
+
 #endif /* HX_INLINE_MEDIA_DECODE_H */

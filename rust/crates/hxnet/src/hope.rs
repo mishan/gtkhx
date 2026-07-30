@@ -3,30 +3,30 @@
 //!
 //! HOPE-Secure-Login is the two-step login flow that derives a
 //! session-keyed HMAC over the password and negotiates a cipher
-//! + compression layer for the post-login stream. The wire
+//! and compression layer for the post-login stream. The wire
 //! shape:
 //!
-//! 1. **Step 1 — client sends LOGIN** with empty `DATA_LOGIN`
-//!    + empty `DATA_PASSWORD` + `DATA_MAC_ALG` list (client's
-//!    supported MACs) + `DATA_HOPE_APP_ID` ("GTKx") +
-//!    `DATA_HOPE_APP_STRING` + `HTLC_DATA_CIPHER_ALG` list +
+//! 1. **Step 1 — client sends LOGIN** with empty `DATA_LOGIN`,
+//!    empty `DATA_PASSWORD`, `DATA_MAC_ALG` list (client's
+//!    supported MACs), `DATA_HOPE_APP_ID` ("GTKx"),
+//!    `DATA_HOPE_APP_STRING`, `HTLC_DATA_CIPHER_ALG` list, and
 //!    empty `DATA_SESSIONKEY`.
 //!
 //! 2. **Step 1 reply — server sends TASK** with chosen
-//!    `DATA_SESSIONKEY` (server-generated 64-byte nonce) +
-//!    chosen `DATA_MAC_ALG` (single entry) + chosen
-//!    `S_DATA_CIPHER_ALG` + `S_DATA_CIPHER_MODE` (STREAM or
+//!    `DATA_SESSIONKEY` (server-generated 64-byte nonce),
+//!    chosen `DATA_MAC_ALG` (single entry), chosen
+//!    `S_DATA_CIPHER_ALG`, and `S_DATA_CIPHER_MODE` (STREAM or
 //!    AEAD). Parsed in Phase E's `LoginReply`.
 //!
 //! 3. **Step 2 — client sends LOGIN** with real `DATA_LOGIN`
-//!    (XOR-0xFF as plaintext) + `DATA_PASSWORD` (HMAC over the
-//!    plaintext password using the server's sessionkey + the
-//!    chosen MAC) + echoes of the chosen
+//!    (XOR-0xFF as plaintext), `DATA_PASSWORD` (HMAC over the
+//!    plaintext password using the server's sessionkey and the
+//!    chosen MAC), and echoes of the chosen
 //!    `S_DATA_CIPHER_ALG`/`S_DATA_COMPRESS_ALG`.
 //!
 //! 4. **Step 2 reply — server sends TASK** with `flag=0` for
 //!    success. After this, both sides derive the cipher keys
-//!    from the sessionkey + chosen algorithms, and the
+//!    from the sessionkey and chosen algorithms, and the
 //!    transport wraps in the corresponding adapter.
 //!
 //! # Phase F scope
@@ -524,12 +524,14 @@ mod tests {
 
     #[test]
     fn select_algorithms_from_step1_reply() {
-        let mut reply = LoginReply::default();
-        reply.flag = 0;
-        reply.sessionkey = Some(vec![0u8; 64]);
-        reply.mac_alg = Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap());
-        reply.cipher_alg = Some(encode_alg_list(&[b"BLOWFISH"]).unwrap());
-        reply.cipher_mode = Some(b"STREAM".to_vec());
+        let reply = LoginReply {
+            flag: 0,
+            sessionkey: Some(vec![0u8; 64]),
+            mac_alg: Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap()),
+            cipher_alg: Some(encode_alg_list(&[b"BLOWFISH"]).unwrap()),
+            cipher_mode: Some(b"STREAM".to_vec()),
+            ..Default::default()
+        };
 
         let choice = select_algorithms(&reply).expect("choice");
         assert_eq!(&choice.mac_alg, b"HMAC-SHA256");
@@ -549,10 +551,12 @@ mod tests {
         // mhxd's non-cipher_only secure-login: sessionkey + MAC present,
         // an empty (length-0) cipher list. The choice should carry an
         // empty cipher_alg (no transport cipher), not return None.
-        let mut reply = LoginReply::default();
-        reply.sessionkey = Some(vec![0u8; 64]);
-        reply.mac_alg = Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap());
-        reply.cipher_alg = Some(Vec::new()); // empty cipher list
+        let reply = LoginReply {
+            sessionkey: Some(vec![0u8; 64]),
+            mac_alg: Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap()),
+            cipher_alg: Some(Vec::new()), // empty cipher list
+            ..Default::default()
+        };
 
         let choice = select_algorithms(&reply).expect("choice");
         assert_eq!(&choice.mac_alg, b"HMAC-SHA256");
@@ -562,10 +566,12 @@ mod tests {
     #[test]
     fn select_algorithms_absent_cipher_means_no_cipher() {
         // Cipher chunk entirely absent → also no cipher.
-        let mut reply = LoginReply::default();
-        reply.sessionkey = Some(vec![0u8; 64]);
-        reply.mac_alg = Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap());
-        reply.cipher_alg = None;
+        let reply = LoginReply {
+            sessionkey: Some(vec![0u8; 64]),
+            mac_alg: Some(encode_alg_list(&[b"HMAC-SHA256"]).unwrap()),
+            cipher_alg: None,
+            ..Default::default()
+        };
 
         let choice = select_algorithms(&reply).expect("choice");
         assert!(choice.cipher_alg.is_empty());

@@ -148,10 +148,20 @@ pub unsafe extern "C" fn hx_conn_free(h: *mut HtlcConn) {
 
 macro_rules! scalar {
     ($get:ident, $set:ident, $field:ident, $ty:ty) => {
+        /// Read one scalar field of a connection.
+        ///
+        /// # Safety
+        /// `h` must be a non-null, live `*const HtlcConn` obtained from
+        /// `hx_conn_new` and not yet freed.
         #[no_mangle]
         pub unsafe extern "C" fn $get(h: *const HtlcConn) -> $ty {
             (*h).$field
         }
+        /// Write one scalar field of a connection.
+        ///
+        /// # Safety
+        /// `h` must be a non-null, live `*mut HtlcConn` obtained from
+        /// `hx_conn_new` and not yet freed.
         #[no_mangle]
         pub unsafe extern "C" fn $set(h: *mut HtlcConn, v: $ty) {
             (*h).$field = v;
@@ -243,6 +253,10 @@ scalar!(
 
 /// `guint32 hx_conn_trans_post_inc` — return the current trans, then increment
 /// (the hlpack trans-stamp idiom).
+///
+/// # Safety
+/// `h` must be a non-null, live `*mut HtlcConn` obtained from `hx_conn_new`
+/// and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_trans_post_inc(h: *mut HtlcConn) -> u32 {
     let t = (*h).trans;
@@ -251,6 +265,10 @@ pub unsafe extern "C" fn hx_conn_trans_post_inc(h: *mut HtlcConn) -> u32 {
 }
 
 /// Reset all six inline-media advisory limits to 0 ("use client defaults").
+///
+/// # Safety
+/// `h` must be a non-null, live `*mut HtlcConn` obtained from `hx_conn_new`
+/// and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_reset_media_limits(h: *mut HtlcConn) {
     (*h).media_max_bytes = 0;
@@ -263,6 +281,11 @@ pub unsafe extern "C" fn hx_conn_reset_media_limits(h: *mut HtlcConn) {
 
 // ---- Capability bitmask ---------------------------------------------------
 
+/// TRUE iff the connection advertises capability bit(s) `cap`.
+///
+/// # Safety
+/// `h` must be a non-null, live `*const HtlcConn` obtained from `hx_conn_new`
+/// and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_has_cap(h: *const HtlcConn, cap: u64) -> gboolean {
     if (*h).caps & cap != 0 {
@@ -276,6 +299,11 @@ pub unsafe extern "C" fn hx_conn_has_cap(h: *const HtlcConn, cap: u64) -> gboole
 
 macro_rules! flag {
     ($get:ident, $set:ident, $bit:expr) => {
+        /// Read one login-lifecycle flag bit as a `gboolean`.
+        ///
+        /// # Safety
+        /// `h` must be a non-null, live `*const HtlcConn` obtained from
+        /// `hx_conn_new` and not yet freed.
         #[no_mangle]
         pub unsafe extern "C" fn $get(h: *const HtlcConn) -> gboolean {
             if (*h).flags & $bit != 0 {
@@ -284,6 +312,11 @@ macro_rules! flag {
                 GFALSE
             }
         }
+        /// Set or clear one login-lifecycle flag bit.
+        ///
+        /// # Safety
+        /// `h` must be a non-null, live `*mut HtlcConn` obtained from
+        /// `hx_conn_new` and not yet freed.
         #[no_mangle]
         pub unsafe extern "C" fn $set(h: *mut HtlcConn, v: gboolean) {
             if v != GFALSE {
@@ -309,6 +342,11 @@ unsafe fn access_any_set(h: *const HtlcConn) -> bool {
     (*h).access != 0
 }
 
+/// TRUE iff access-bitmap bit `bit` (0..64) is set.
+///
+/// # Safety
+/// `h` must be a non-null, live `*const HtlcConn` obtained from `hx_conn_new`
+/// and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_access_has(h: *const HtlcConn, bit: c_int) -> gboolean {
     if !(0..64).contains(&bit) {
@@ -322,6 +360,12 @@ pub unsafe extern "C" fn hx_conn_access_has(h: *const HtlcConn, bit: c_int) -> g
     }
 }
 
+/// TRUE iff `bit` is permitted — either the server sent no access bitmap
+/// (permissive default) or the bit is explicitly set.
+///
+/// # Safety
+/// `h` must be a non-null, live `*const HtlcConn` obtained from `hx_conn_new`
+/// and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_access_permits(h: *const HtlcConn, bit: c_int) -> gboolean {
     if !access_any_set(h) || hx_conn_access_has(h, bit) != GFALSE {
@@ -333,6 +377,10 @@ pub unsafe extern "C" fn hx_conn_access_permits(h: *const HtlcConn, bit: c_int) 
 
 /// Copy the 8-byte wire bitmap into `access`, preserving byte order (the old
 /// `memcpy(&h->access, bytes, 8)`).
+///
+/// # Safety
+/// `h` must be a non-null, live `*mut HtlcConn` from `hx_conn_new`; `bytes`
+/// must be non-null and valid for reads of 8 bytes.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_access(h: *mut HtlcConn, bytes: *const u8) {
     let mut b = [0u8; 8];
@@ -341,58 +389,91 @@ pub unsafe extern "C" fn hx_conn_set_access(h: *mut HtlcConn, bytes: *const u8) 
 }
 
 // ---- Strings --------------------------------------------------------------
+//
+// # Safety (applies to every string accessor below)
+// The getters take a non-null, live `*const HtlcConn` and return a borrowed
+// `*const c_char` into the connection's own storage, valid until the field is
+// next set or the connection is freed. The setters take a non-null, live
+// `*mut HtlcConn` and a `v` that is either null or a valid NUL-terminated C
+// string; the string is copied, not retained.
 
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_serverhost(h: *const HtlcConn) -> *const c_char {
     (*h).serverhost.as_ptr()
 }
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_serverhost(h: *mut HtlcConn, v: *const c_char) {
     strlcpy(&mut (*h).serverhost, v);
 }
 
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_ip_addr(h: *const HtlcConn) -> *const c_char {
     (*h).ip_addr.as_ptr()
 }
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_ip_addr(h: *mut HtlcConn, v: *const c_char) {
     strlcpy(&mut (*h).ip_addr, v);
 }
 
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_name(h: *const HtlcConn) -> *const c_char {
     (*h).name.as_ptr()
 }
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_name(h: *mut HtlcConn, v: *const c_char) {
     strlcpy(&mut (*h).name, v);
 }
 /// The writable name buffer for the NICK cfgvar binding (options.c) — a stable
 /// `char *` into this connection's storage.
+///
+/// # Safety
+/// `h` must be a non-null, live `*mut HtlcConn` from `hx_conn_new`. The
+/// returned pointer is valid for the connection's lifetime.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_name_buf(h: *mut HtlcConn) -> *mut c_char {
     (*h).name.as_mut_ptr()
 }
 
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_login(h: *mut HtlcConn, v: *const c_char) {
     strlcpy(&mut (*h).login, v);
 }
 
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_cipheralg(h: *const HtlcConn) -> *const c_char {
     (*h).cipheralg.as_ptr()
 }
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_cipheralg(h: *mut HtlcConn, v: *const c_char) {
     set_zeroed_str(&mut (*h).cipheralg, v);
 }
 
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_compressalg(h: *const HtlcConn) -> *const c_char {
     (*h).compressalg.as_ptr()
 }
+/// # Safety
+/// See the module note above the string accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_compressalg(h: *mut HtlcConn, v: *const c_char) {
     set_zeroed_str(&mut (*h).compressalg, v);
@@ -403,26 +484,43 @@ pub unsafe extern "C" fn hx_conn_set_compressalg(h: *mut HtlcConn, v: *const c_c
 /// The raw address of the icon field for the ICON cfgvar binding (options.c),
 /// which needs a stable `guint16 *`. Deliberate escape hatch — the pointer is
 /// into this connection's storage (stable under `Box`), valid for its lifetime.
+///
+/// # Safety
+/// `h` must be a non-null, live `*mut HtlcConn` from `hx_conn_new`; the
+/// returned pointer is valid for the connection's lifetime.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_icon_ptr(h: *mut HtlcConn) -> *mut u16 {
     &mut (*h).icon as *mut u16
 }
 
 // ---- Opaque pointers (sess back-pointer, HOPE AEAD handle) ----------------
+//
+// # Safety (applies to every opaque-pointer accessor below)
+// The getters/setters take a non-null, live `HtlcConn` from `hx_conn_new`.
+// The stored pointers are opaque to this crate — ownership of what they point
+// at is managed by the caller, not here.
 
+/// # Safety
+/// See the module note above the opaque-pointer accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_sess(h: *const HtlcConn) -> *mut c_void {
     (*h).sess
 }
+/// # Safety
+/// See the module note above the opaque-pointer accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_sess(h: *mut HtlcConn, s: *mut c_void) {
     (*h).sess = s;
 }
 
+/// # Safety
+/// See the module note above the opaque-pointer accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_hope_aead(h: *const HtlcConn) -> *mut c_void {
     (*h).hope_aead
 }
+/// # Safety
+/// See the module note above the opaque-pointer accessors.
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_hope_aead(h: *mut HtlcConn, p: *mut c_void) {
     (*h).hope_aead = p;

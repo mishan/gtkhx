@@ -360,7 +360,7 @@ mod tests {
         });
 
         let raw = raw_gobject(&signaller);
-        let sig_name = CStr::from_bytes_with_nul(b"test-pair\0").unwrap();
+        let sig_name = c"test-pair";
         let arg0: *mut c_void = 0xdead_beef as *mut c_void;
         let arg1: *mut c_void = 0xcafe_babe as *mut c_void;
         unsafe { emit_pointer_pair_signal(raw, sig_name, arg0, arg1) };
@@ -377,7 +377,7 @@ mod tests {
         signaller.connect_local("test-pair", false, |_| None);
 
         let raw = raw_gobject(&signaller);
-        let sig_name = CStr::from_bytes_with_nul(b"test-pair\0").unwrap();
+        let sig_name = c"test-pair";
         let before = signaller.ref_count();
         for _ in 0..1000 {
             unsafe {
@@ -416,7 +416,7 @@ mod tests {
             }
             // Re-enter once — emit again from inside the handler.
             if d < 2 {
-                let sig_name = CStr::from_bytes_with_nul(b"test-pair\0").unwrap();
+                let sig_name = c"test-pair";
                 unsafe {
                     emit_pointer_pair_signal(
                         signaller_ptr,
@@ -431,7 +431,7 @@ mod tests {
         });
 
         let raw = raw_gobject(&signaller);
-        let sig_name = CStr::from_bytes_with_nul(b"test-pair\0").unwrap();
+        let sig_name = c"test-pair";
         let before = signaller.ref_count();
         unsafe {
             emit_pointer_pair_signal(
@@ -515,7 +515,7 @@ mod tests {
         // Drop the Rust binding: refcount = 2 → 1 (extra ref only).
         drop(signaller);
 
-        let sig_name = CStr::from_bytes_with_nul(b"test-pair\0").unwrap();
+        let sig_name = c"test-pair";
         unsafe {
             emit_pointer_pair_signal(
                 raw,

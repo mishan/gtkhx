@@ -353,7 +353,7 @@ mod tests {
         };
         fs::write(legacy.join("My Old Server"), legacy::write(&old)).unwrap();
 
-        let store = load_or_bootstrap(&cfg, &[legacy.clone()]).unwrap();
+        let store = load_or_bootstrap(&cfg, std::slice::from_ref(&legacy)).unwrap();
         // imported (name from filename) + built-in both present, import first
         assert_eq!(store.bookmarks[0].name, "My Old Server");
         assert_eq!(store.bookmarks[0].server, "legacy.example");

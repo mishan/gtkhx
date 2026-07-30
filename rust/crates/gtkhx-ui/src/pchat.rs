@@ -10,9 +10,10 @@
 //! `gtkhx_pchat_new` makes the gchat model + the leaf widgets (xtext output,
 //! input with its key controller, subject entry, inline-media button), and
 //! `gtkhx_pchat_user_sidebar` builds the whole user sidebar (the HxUserListView
-//! + the six action buttons wired to the C `view_*_btn` handlers + the voice
-//! panel). Rust reads the leaf widgets via `hx_gchat_*` accessors, assembles
-//! the frame/box/pane skeleton, and writes back the window via a setter.
+//! plus the six action buttons wired to the C `view_*_btn` handlers plus the
+//! voice panel). Rust reads the leaf widgets via `hx_gchat_*` accessors,
+//! assembles the frame/box/pane skeleton, and writes back the window via a
+//! setter.
 
 use std::ffi::c_void;
 

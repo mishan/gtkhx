@@ -325,9 +325,7 @@ gtkhx_apply_theme_palette (gboolean dark)
         { HX_CHAT_PAL_MARKER,         GTKHX_PAL_MARKER },
         { HX_CHAT_PAL_HISTORY_MUTED,  GTKHX_PAL_HISTORY_MUTED },
     };
-    size_t i;
-
-    for (i = 0; i < G_N_ELEMENTS (role_to_slot); i++) {
+    for (size_t i = 0; i < G_N_ELEMENTS (role_to_slot); i++) {
         colors[role_to_slot[i].slot]
             = gtkhx_theme_get_color (role_to_slot[i].role, dark);
     }

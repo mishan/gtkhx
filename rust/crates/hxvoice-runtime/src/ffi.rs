@@ -205,6 +205,11 @@ pub unsafe extern "C" fn gtkhx_voice_device_list_name(
 
 /// User-facing display name for the entry at `idx`, NUL-terminated.
 /// Same lifetime + safety contract as `gtkhx_voice_device_list_name`.
+///
+/// # Safety
+/// `list` must be null or a live `*mut GtkhxVoiceDeviceList` from this
+/// module; the returned pointer is borrowed from the list and valid until it
+/// is freed.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_voice_device_list_display_name(
     list: *mut GtkhxVoiceDeviceList,

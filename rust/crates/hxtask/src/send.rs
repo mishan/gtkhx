@@ -184,7 +184,7 @@ pub unsafe extern "C" fn hlwrite_chunks(
             "hlwrite_chunks: no bridge installed; dropping {} packed bytes",
             frame.len()
         )) {
-            debug_log_str(b"net\0".as_ptr() as *const c_char, msg.as_ptr());
+            debug_log_str(c"net".as_ptr(), msg.as_ptr());
         }
     }
     // `frame` (a Vec) frees itself here — no g_malloc / g_free round-trip.
@@ -300,7 +300,7 @@ mod tests {
     // A non-NULL htlc for the tests that get past the null guard; the doubles
     // never dereference it.
     fn fake_htlc() -> *mut HtlcConn {
-        1 as *mut HtlcConn
+        std::ptr::dangling_mut::<HtlcConn>()
     }
 
     fn one_chunk() -> [HxChunk; 1] {

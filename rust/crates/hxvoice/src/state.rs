@@ -76,7 +76,7 @@ use crate::event::{
 /// without cloning. The variants match the spec lifecycle 1:1;
 /// renegotiation cycles through `OfferPending → Connecting →
 /// Connected → OfferPending` without dropping back to `Idle`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub enum SessionState {
     /// No voice room joined. Both the initial state on
@@ -88,6 +88,7 @@ pub enum SessionState {
     /// `Leaving → Idle` transition; recovery from `Leaving`
     /// (post-`fail()` collapse) goes straight to `JoinSent` via
     /// the room-switch arm.
+    #[default]
     Idle,
     /// We sent VOICE_JOIN (600); waiting for the server's reply
     /// or its accompanying SDP offer (602). Both arrive in
@@ -183,12 +184,6 @@ pub struct SessionMachine {
     queued_offer: Option<(u32, String)>,
 }
 
-impl Default for SessionState {
-    fn default() -> Self {
-        SessionState::Idle
-    }
-}
-
 impl SessionMachine {
     /// Fresh machine. Equivalent to `Default::default()` but
     /// reads better at call sites.
@@ -276,16 +271,14 @@ impl SessionMachine {
             // where a stuck UI re-fires JoinRequested for the
             // already-active room and we'd tear down a healthy
             // session for no reason.
-            (s, Event::JoinRequested { cid })
-                if matches!(
-                    s,
-                    SessionState::JoinSent
-                        | SessionState::OfferPending
-                        | SessionState::Connecting
-                        | SessionState::Connected
-                        | SessionState::Leaving
-                ) =>
-            {
+            (
+                SessionState::JoinSent
+                | SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected
+                | SessionState::Leaving,
+                Event::JoinRequested { cid },
+            ) => {
                 // Same-cid re-join: silent no-op unless we're in
                 // Leaving (post-fail() collapse), in which case
                 // re-joining the same room is exactly the
@@ -347,15 +340,13 @@ impl SessionMachine {
             // `Leaving → Idle` transition (no `step` arm consumes
             // `WebrtcConnectionStateChanged::Closed` here); the
             // runtime owns the lifecycle past TearDown.
-            (s, Event::LeaveRequested { cid })
-                if matches!(
-                    s,
-                    SessionState::JoinSent
-                        | SessionState::OfferPending
-                        | SessionState::Connecting
-                        | SessionState::Connected
-                ) =>
-            {
+            (
+                SessionState::JoinSent
+                | SessionState::OfferPending
+                | SessionState::Connecting
+                | SessionState::Connected,
+                Event::LeaveRequested { cid },
+            ) => {
                 // Sanity: ignore a stray LeaveRequested for a
                 // different cid than the one we joined. Don't
                 // crash — UI bugs are recoverable.

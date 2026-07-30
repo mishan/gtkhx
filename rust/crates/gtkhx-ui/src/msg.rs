@@ -140,7 +140,7 @@ pub unsafe extern "C" fn create_msgwin(uid: u16, name: *mut c_char) -> *mut c_vo
     // msg->window is the tab content; stash msg on it via the same raw qdata
     // the C code used ("msg" key), so the close dispatcher path is unchanged.
     hx_msgwin_set_window(msg, wptr(&outer_vbox));
-    let key = b"msg\0".as_ptr() as *const c_char;
+    let key = c"msg".as_ptr();
     glib::gobject_ffi::g_object_set_data(outer_vbox.as_ptr() as *mut _, key, msg);
 
     // Add the tab, populate the info pane, surface it, wire accelerators.
