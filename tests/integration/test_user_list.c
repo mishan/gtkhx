@@ -36,39 +36,39 @@ test_user_list_contains_self (void)
     }
 
     /* Capture our own UID before we issue the request — the
-	 * subsequent recv_message will overwrite htlc->in but
-	 * htlc->uid stays. */
+     * subsequent recv_message will overwrite htlc->in but
+     * htlc->uid stays. */
     guint16 self_uid = htlc.uid;
 
     /* Save the trans value hlpack will assign to our request, so
-	 * we can match the reply against it. mhxd's reply uses the
-	 * SAME trans the request carried — that's how task replies
-	 * are correlated to their originating request. */
+     * we can match the reply against it. mhxd's reply uses the
+     * SAME trans the request carried — that's how task replies
+     * are correlated to their originating request. */
     guint32 our_trans = htlc.trans;
 
     /* Send HTLC_HDR_USER_GETLIST with no chunks (the request
-	 * carries no payload — server replies with the list). */
+     * carries no payload — server replies with the list). */
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_USER_GETLIST,
                                              /*flag=*/0, /*hc=*/0));
 
     /* Drain looking for the TASK reply matching our trans. The
-	 * trans-filter matters because meson runs integration test
-	 * binaries in parallel: USER_CHANGE / CHAT broadcasts from
-	 * concurrent test processes hit our connection too and we
-	 * need to walk past them.
-	 *
-	 * Budget: 64 messages × 3 s timeout. The matching TASK
-	 * normally arrives within 1-2 messages even under contention. */
+     * trans-filter matters because meson runs integration test
+     * binaries in parallel: USER_CHANGE / CHAT broadcasts from
+     * concurrent test processes hit our connection too and we
+     * need to walk past them.
+     *
+     * Budget: 64 messages × 3 s timeout. The matching TASK
+     * normally arrives within 1-2 messages even under contention. */
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     /* The TASK reply must carry at least one HTLS_DATA_USER_LIST
-	 * chunk (mhxd writes one per logged-in user). The walk below
-	 * inspects every entry; this peek just confirms the reply
-	 * isn't empty before we start parsing. */
+     * chunk (mhxd writes one per logged-in user). The walk below
+     * inspects every entry; this peek just confirms the reply
+     * isn't empty before we start parsing. */
     gboolean got_user_list = FALSE;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             got_user_list = TRUE;
@@ -78,11 +78,11 @@ test_user_list_contains_self (void)
     g_assert_true (got_user_list);
 
     /* Walk every USER_LIST chunk, find the one whose uid matches
-	 * our own session uid, assert name + icon round-trip. */
+     * our own session uid, assert name + icon round-trip. */
     struct hl_userlist_hdr *uh;
     guint16 chunk_uid, chunk_icon, chunk_nlen;
     gboolean found_self = FALSE;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type != HTLS_DATA_USER_LIST) {
             continue;

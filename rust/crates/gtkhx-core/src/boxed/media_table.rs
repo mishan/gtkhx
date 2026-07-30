@@ -68,10 +68,7 @@ impl MediaTable {
     /// valid until the entry is removed or the table dropped (the caller
     /// reads it synchronously). Mirrors the `g_hash_table_lookup`.
     fn lookup(&self, token: u32) -> *const HxChatMedia {
-        self.handles
-            .get(&token)
-            .copied()
-            .unwrap_or(ptr::null_mut()) as *const HxChatMedia
+        self.handles.get(&token).copied().unwrap_or(ptr::null_mut()) as *const HxChatMedia
     }
 }
 

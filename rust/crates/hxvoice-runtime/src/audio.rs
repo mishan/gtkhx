@@ -62,11 +62,10 @@ use gstreamer::prelude::*;
 /// cheap and avoids the need to reason about that ordering. The
 /// reads happen once per call (at construction) and the writes
 /// happen on every settings save (rare); contention is negligible.
-static DEVICE_PREFS: std::sync::Mutex<DevicePrefs> =
-    std::sync::Mutex::new(DevicePrefs {
-        input: None,
-        output: None,
-    });
+static DEVICE_PREFS: std::sync::Mutex<DevicePrefs> = std::sync::Mutex::new(DevicePrefs {
+    input: None,
+    output: None,
+});
 
 struct DevicePrefs {
     input: Option<String>,
@@ -386,10 +385,7 @@ pub fn make_pcm8khz_caps_filter() -> Option<gst::Element> {
 ///
 /// `name` becomes the bin's element name so pipeline introspection
 /// can tell receive legs apart — convention is `"hxvoice-recv-<mid>"`.
-pub fn make_receive_bin(
-    name: &str,
-    device_name: Option<&str>,
-) -> Option<gst::Bin> {
+pub fn make_receive_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> {
     let bin = gst::Bin::builder().name(name).build();
     let depay = gst::ElementFactory::make("rtppcmudepay").build().ok()?;
     let dec = gst::ElementFactory::make("mulawdec").build().ok()?;
@@ -427,17 +423,15 @@ pub fn make_receive_bin(
              Install gst-plugins-good to enable VAD."
         );
     }
-    bin.add_many([&depay, &dec, &conv, &volume, &res, &sink]).ok()?;
+    bin.add_many([&depay, &dec, &conv, &volume, &res, &sink])
+        .ok()?;
     if let Some(ref level) = level {
         bin.add(level).ok()?;
         // depay -> dec -> conv -> level -> volume -> res -> sink
-        gst::Element::link_many([&depay, &dec, &conv, level, &volume, &res,
-                                 &sink])
-            .ok()?;
+        gst::Element::link_many([&depay, &dec, &conv, level, &volume, &res, &sink]).ok()?;
     } else {
         // depay -> dec -> conv -> volume -> res -> sink (no VAD tap)
-        gst::Element::link_many([&depay, &dec, &conv, &volume, &res, &sink])
-            .ok()?;
+        gst::Element::link_many([&depay, &dec, &conv, &volume, &res, &sink]).ok()?;
     }
     // Diagnostic: attach pad probes at FOUR points along the
     // receive chain so we can tell exactly where buffers stop
@@ -508,14 +502,9 @@ fn attach_buffer_probe(
     let bin_name = bin_name.to_string();
     let counter = std::sync::atomic::AtomicU64::new(0);
     pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
-        let n = counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            + 1;
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         if n == 1 || n % 50 == 0 {
-            crate::debug::log!(
-                "voice-flow",
-                "{bin_name} {where_}: buffer #{n}"
-            );
+            crate::debug::log!("voice-flow", "{bin_name} {where_}: buffer #{n}");
         }
         gst::PadProbeReturn::Ok
     });
@@ -640,14 +629,11 @@ pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> 
     if let Some(level) = &level {
         bin.add_many([&src, &conv, &volume, level, &res, &caps, &enc, &pay])
             .ok()?;
-        gst::Element::link_many([&src, &conv, &volume, level, &res, &caps,
-                                 &enc, &pay])
-            .ok()?;
+        gst::Element::link_many([&src, &conv, &volume, level, &res, &caps, &enc, &pay]).ok()?;
     } else {
-        bin.add_many([&src, &conv, &volume, &res, &caps, &enc, &pay]).ok()?;
-        gst::Element::link_many([&src, &conv, &volume, &res, &caps, &enc,
-                                 &pay])
+        bin.add_many([&src, &conv, &volume, &res, &caps, &enc, &pay])
             .ok()?;
+        gst::Element::link_many([&src, &conv, &volume, &res, &caps, &enc, &pay]).ok()?;
     }
     // Diagnostic probe: count buffers as they exit the
     // payloader. If both peers receive exactly one packet over
@@ -683,29 +669,17 @@ pub fn make_send_bin(name: &str, device_name: Option<&str>) -> Option<gst::Bin> 
 /// src pad. Same shape as `attach_buffer_probe` above but with a
 /// distinct log prefix so it's easy to tell apart from the
 /// receive-side counters.
-fn attach_send_buffer_probe(
-    element: &gst::Element,
-    pad_name: &str,
-    bin_name: &str,
-) {
+fn attach_send_buffer_probe(element: &gst::Element, pad_name: &str, bin_name: &str) {
     let Some(pad) = element.static_pad(pad_name) else {
-        crate::debug::log!(
-            "voice-flow",
-            "send {bin_name}: could not get pad to probe"
-        );
+        crate::debug::log!("voice-flow", "send {bin_name}: could not get pad to probe");
         return;
     };
     let bin_name = bin_name.to_string();
     let counter = std::sync::atomic::AtomicU64::new(0);
     pad.add_probe(gst::PadProbeType::BUFFER, move |_pad, _info| {
-        let n = counter
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-            + 1;
+        let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
         if n == 1 || n % 50 == 0 {
-            crate::debug::log!(
-                "voice-flow",
-                "{bin_name} pay.src: buffer #{n}"
-            );
+            crate::debug::log!("voice-flow", "{bin_name} pay.src: buffer #{n}");
         }
         gst::PadProbeReturn::Ok
     });

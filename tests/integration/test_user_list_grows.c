@@ -64,7 +64,7 @@ user_list_contains (int fd, struct htlc_conn *htlc, const char *wanted_name)
 
     gsize wlen = strlen (wanted_name);
     gboolean found = FALSE;
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         if (_type != HTLS_DATA_USER_LIST) {
             continue;
@@ -74,7 +74,7 @@ user_list_contains (int fd, struct htlc_conn *htlc, const char *wanted_name)
         }
         guint16 nlen;
         memcpy (&nlen, dh->data + 6, 2);
-        nlen = g_ntohs(nlen);
+        nlen = g_ntohs (nlen);
         if (8 + (gsize)nlen > _len) {
             continue;
         }
@@ -106,7 +106,7 @@ test_user_list_includes_other_client (void)
     }
 
     /* Drain Alice's join broadcast for Bob so the recv_message
-	 * loop inside user_list_contains starts on a clean stream. */
+     * loop inside user_list_contains starts on a clean stream. */
     for (int i = 0; i < 8; i++) {
         if (!integration_recv_message (fd_a, &htlc_a, /*timeout_ms=*/500)) {
             break;

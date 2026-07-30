@@ -63,24 +63,32 @@ extern "C" {
         data: *mut c_void,
         str_: *const c_char,
     ) -> *mut c_void;
-    fn hlwrite_chunks(
-        htlc: *mut c_void,
-        ty: u32,
-        flag: u32,
-        chunks: *const HxChunk,
-        hc: c_int,
-    );
+    fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
 
     // rcv.c — reply-task handlers. Declared with the 3-arg RcvTaskFn shape
     // (see the typedef note); the linker resolves the real symbols.
-    fn rcv_task_voice_join(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_voice_simple_ack(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn rcv_task_voice_join(
+        htlc: *mut c_void,
+        frame: *const c_void,
+        frame_len: usize,
+        ptr: *mut c_void,
+        data: *mut c_void,
+    );
+    fn rcv_task_voice_simple_ack(
+        htlc: *mut c_void,
+        frame: *const c_void,
+        frame_len: usize,
+        ptr: *mut c_void,
+        data: *mut c_void,
+    );
 }
 
 // The C send-path primitives are stubbed under `cfg(test)` (see tests.rs), so
 // the cargo-test build resolves without linking network.c / tasks.c / rcv.c.
 #[cfg(test)]
-use tests::{hlwrite_chunks, hx_htlc_voice_cap, rcv_task_voice_join, rcv_task_voice_simple_ack, task_new};
+use tests::{
+    hlwrite_chunks, hx_htlc_voice_cap, rcv_task_voice_join, rcv_task_voice_simple_ack, task_new,
+};
 
 /// `GUINT_TO_POINTER` for a u32.
 fn to_ptr(v: u32) -> *mut c_void {
@@ -190,7 +198,10 @@ pub unsafe extern "C" fn hx_send_voice_sdp_answer(
     let mut scratch = [0u8; 4];
     let hc = voice::build_voice_answer_chunks(cid, sdp_slice, &mut chunks, &mut scratch);
     if hc == 0 {
-        glib::g_debug!("gtkhx", "VOICE_SDP_ANSWER builder failed (sdp_len={sdp_len})");
+        glib::g_debug!(
+            "gtkhx",
+            "VOICE_SDP_ANSWER builder failed (sdp_len={sdp_len})"
+        );
         return glib::ffi::GFALSE;
     }
     // 603 reply: empty-body success; an error here is fatal to the session.
@@ -201,7 +212,13 @@ pub unsafe extern "C" fn hx_send_voice_sdp_answer(
         to_ptr(cid),
         c"voice-sdp-answer".as_ptr(),
     );
-    hlwrite_chunks(htlc, HTLC_HDR_VOICE_SDP_ANSWER, 0, chunks.as_ptr(), hc as c_int);
+    hlwrite_chunks(
+        htlc,
+        HTLC_HDR_VOICE_SDP_ANSWER,
+        0,
+        chunks.as_ptr(),
+        hc as c_int,
+    );
     glib::ffi::GTRUE
 }
 

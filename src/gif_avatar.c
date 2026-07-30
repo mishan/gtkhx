@@ -72,11 +72,11 @@ ensure_tables (void)
     }
     if (!avatar_pending) {
         /* Token value destroy is inline_media_decode_cancel — removing
-		 * an entry (supersede / clear) cancels the in-flight decode and
-		 * frees the token in one step. */
+         * an entry (supersede / clear) cancels the in-flight decode and
+         * frees the token in one step. */
         avatar_pending = g_hash_table_new_full (
             g_direct_hash, g_direct_equal, NULL,
-            (GDestroyNotify) inline_media_decode_cancel);
+            (GDestroyNotify)inline_media_decode_cancel);
     }
 }
 
@@ -92,7 +92,8 @@ gtkhx_avatar_get (guint16 uid)
     if (!avatar_cache || uid == 0) {
         return NULL;
     }
-    Avatar *a = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint) uid));
+    Avatar *a
+        = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid));
     if (!a) {
         return NULL;
     }
@@ -143,7 +144,7 @@ anim_timer_sync (void)
 static gboolean
 anim_tick (gpointer data)
 {
-    (void) data;
+    (void)data;
     gint64 now = g_get_monotonic_time ();
     GHashTableIter iter;
     gpointer key, val;
@@ -157,7 +158,7 @@ anim_tick (gpointer data)
         if (delay == 0) {
             delay = 100; /* defensive: a 0-delay frame would busy-loop */
         }
-        if ((now - a->cur_since_us) < (gint64) delay * 1000) {
+        if ((now - a->cur_since_us) < (gint64)delay * 1000) {
             continue; /* current frame hasn't outlived its delay yet */
         }
         a->cur = (a->cur + 1) % a->frames->len;
@@ -165,8 +166,8 @@ anim_tick (gpointer data)
         users_refresh_avatar (GPOINTER_TO_UINT (key));
     }
     /* If a pref/pause change left nothing to animate, stop. Returning
-	 * G_SOURCE_REMOVE here would race anim_timer_sync's bookkeeping, so
-	 * sync explicitly and report whether we kept the source. */
+     * G_SOURCE_REMOVE here would race anim_timer_sync's bookkeeping, so
+     * sync explicitly and report whether we kept the source. */
     if (any_avatar_running ()) {
         return G_SOURCE_CONTINUE;
     }
@@ -250,34 +251,35 @@ static void
 on_avatar_decoded (HxInlineMediaDecoded *result, gpointer user_data)
 {
     /* The uid rides through user_data (GUINT_TO_POINTER) — no heap ctx.
-	 * A heap ctx would leak whenever a decode is cancelled (supersede /
-	 * clear-all), because inline_media_decode_cancel suppresses this
-	 * callback, which is the only place a ctx would be freed. */
-    guint16 uid = (guint16) GPOINTER_TO_UINT (user_data);
+     * A heap ctx would leak whenever a decode is cancelled (supersede /
+     * clear-all), because inline_media_decode_cancel suppresses this
+     * callback, which is the only place a ctx would be freed. */
+    guint16 uid = (guint16)GPOINTER_TO_UINT (user_data);
 
     /* The token for this uid has resolved — drop the pending entry.
-	 * Removing it runs the value-destroy (inline_media_decode_cancel),
-	 * the canonical free for the token: cancel-after-completion is a
-	 * documented no-op that still releases our token ref. */
+     * Removing it runs the value-destroy (inline_media_decode_cancel),
+     * the canonical free for the token: cancel-after-completion is a
+     * documented no-op that still releases our token ref. */
     if (avatar_pending) {
-        g_hash_table_remove (avatar_pending, GUINT_TO_POINTER ((guint) uid));
+        g_hash_table_remove (avatar_pending, GUINT_TO_POINTER ((guint)uid));
     }
 
     Avatar *a = avatar_from_result (result);
     if (a) {
         ensure_tables ();
         /* Insert replaces (and frees) any prior Avatar for this uid. */
-        g_hash_table_insert (avatar_cache, GUINT_TO_POINTER ((guint) uid), a);
+        g_hash_table_insert (avatar_cache, GUINT_TO_POINTER ((guint)uid), a);
         debug_log ("icon", "avatar decoded for uid=%u (%u frame%s)",
-                   (unsigned) uid, a->frames->len, a->frames->len == 1 ? "" : "s");
+                   (unsigned)uid, a->frames->len,
+                   a->frames->len == 1 ? "" : "s");
     } else {
         /* Decode failed (non-GIF, oversize, corrupt). Drop any stale
-		 * avatar so the cell falls back to the standard icon. */
+         * avatar so the cell falls back to the standard icon. */
         if (avatar_cache) {
-            g_hash_table_remove (avatar_cache, GUINT_TO_POINTER ((guint) uid));
+            g_hash_table_remove (avatar_cache, GUINT_TO_POINTER ((guint)uid));
         }
         debug_log ("icon", "avatar decode failed for uid=%u (code=%u)",
-                   (unsigned) uid, result ? result->error_code : 0);
+                   (unsigned)uid, result ? result->error_code : 0);
     }
 
     inline_media_decoded_free (result);
@@ -294,24 +296,24 @@ gtkhx_avatar_update (guint16 uid, const guint8 *gif, gsize len)
     ensure_tables ();
 
     /* Cancel any in-flight decode for this uid (removing the entry
-	 * invokes inline_media_decode_cancel via the value-destroy). */
-    g_hash_table_remove (avatar_pending, GUINT_TO_POINTER ((guint) uid));
+     * invokes inline_media_decode_cancel via the value-destroy). */
+    g_hash_table_remove (avatar_pending, GUINT_TO_POINTER ((guint)uid));
 
     if (!gif || len == 0) {
         /* Clear: the user dropped their avatar. */
-        g_hash_table_remove (avatar_cache, GUINT_TO_POINTER ((guint) uid));
+        g_hash_table_remove (avatar_cache, GUINT_TO_POINTER ((guint)uid));
         anim_timer_sync ();
         users_refresh_avatar (uid);
         return;
     }
 
-    gpointer token = inline_media_decode_async (
-        gif, len, &avatar_caps, on_avatar_decoded,
-        GUINT_TO_POINTER ((guint) uid));
+    gpointer token
+        = inline_media_decode_async (gif, len, &avatar_caps, on_avatar_decoded,
+                                     GUINT_TO_POINTER ((guint)uid));
     /* token == NULL means the decode synchronously rejected (and the
-	 * callback already fired). Only track a live token. */
+     * callback already fired). Only track a live token. */
     if (token) {
-        g_hash_table_insert (avatar_pending, GUINT_TO_POINTER ((guint) uid),
+        g_hash_table_insert (avatar_pending, GUINT_TO_POINTER ((guint)uid),
                              token);
     }
 }
@@ -320,7 +322,7 @@ void
 gtkhx_avatar_clear_all (void)
 {
     /* Cancel in-flight decodes first (value-destroy cancels each token),
-	 * so no late callback writes into a just-cleared cache. */
+     * so no late callback writes into a just-cleared cache. */
     if (avatar_pending) {
         g_hash_table_remove_all (avatar_pending);
     }
@@ -341,7 +343,7 @@ gtkhx_avatar_set_animation_enabled (gboolean enabled)
     anim_enabled = (enabled != FALSE);
     anim_timer_sync ();
     /* Repaint every animated avatar: off → snaps to the still first
-	 * frame, on → resumes from each avatar's current frame. */
+     * frame, on → resumes from each avatar's current frame. */
     if (avatar_cache) {
         gint64 now = g_get_monotonic_time ();
         GHashTableIter iter;
@@ -351,9 +353,9 @@ gtkhx_avatar_set_animation_enabled (gboolean enabled)
             Avatar *a = val;
             if (avatar_is_animated (a)) {
                 /* Re-enabling: restart the running frame's clock so the
-				 * next tick measures from now, not from a timestamp left
-				 * stale by the disabled span (same fix as resume-from-
-				 * pause). Skip paused avatars — they keep their own clock. */
+                 * next tick measures from now, not from a timestamp left
+                 * stale by the disabled span (same fix as resume-from-
+                 * pause). Skip paused avatars — they keep their own clock. */
                 if (anim_enabled && !a->paused) {
                     a->cur_since_us = now;
                 }
@@ -367,15 +369,15 @@ gboolean
 gtkhx_avatar_is_animated (guint16 uid)
 {
     /* UI-facing: when animation is globally off, treat avatars as stills
-	 * so the click-to-pause gesture doesn't claim and the right-click
-	 * "Pause/Resume" item doesn't appear — there's nothing animating to
-	 * pause. (The internal avatar_is_animated, used by the timer, stays
-	 * purely structural; any_avatar_running gates it on anim_enabled.) */
+     * so the click-to-pause gesture doesn't claim and the right-click
+     * "Pause/Resume" item doesn't appear — there's nothing animating to
+     * pause. (The internal avatar_is_animated, used by the timer, stays
+     * purely structural; any_avatar_running gates it on anim_enabled.) */
     if (!anim_enabled || !avatar_cache || uid == 0) {
         return FALSE;
     }
     return avatar_is_animated (
-        g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint) uid)));
+        g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid)));
 }
 
 gboolean
@@ -384,7 +386,8 @@ gtkhx_avatar_is_paused (guint16 uid)
     if (!avatar_cache || uid == 0) {
         return FALSE;
     }
-    Avatar *a = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint) uid));
+    Avatar *a
+        = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid));
     return a ? a->paused : FALSE;
 }
 
@@ -394,14 +397,15 @@ gtkhx_avatar_set_paused (guint16 uid, gboolean paused)
     if (!avatar_cache || uid == 0) {
         return;
     }
-    Avatar *a = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint) uid));
+    Avatar *a
+        = g_hash_table_lookup (avatar_cache, GUINT_TO_POINTER ((guint)uid));
     if (!a || a->paused == (paused != FALSE)) {
         return;
     }
     a->paused = (paused != FALSE);
     if (!a->paused) {
         /* Resuming: restart this frame's clock so it doesn't instantly
-		 * jump (it may have sat paused well past its delay). */
+         * jump (it may have sat paused well past its delay). */
         a->cur_since_us = g_get_monotonic_time ();
     }
     anim_timer_sync ();

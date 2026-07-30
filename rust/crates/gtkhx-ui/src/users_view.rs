@@ -26,12 +26,12 @@ use std::collections::HashMap;
 use std::ffi::{c_char, c_void};
 use std::sync::Once;
 
-use gtk4 as gtk;
+use glib::subclass::prelude::*;
+use glib::translate::{from_glib_full, from_glib_none, IntoGlib};
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::subclass::prelude::*;
-use glib::translate::{from_glib_full, from_glib_none, IntoGlib};
+use gtk4 as gtk;
 
 use crate::tr::tr;
 use crate::user_row::HxUserRow;
@@ -236,8 +236,7 @@ impl HxUserListView {
 
         // Model chain.
         let store = gio::ListStore::new::<HxUserRow>();
-        let sort_model =
-            gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
+        let sort_model = gtk::SortListModel::new(Some(store.clone()), None::<gtk::Sorter>);
         sort_model.set_incremental(false);
         let selection = gtk::SingleSelection::new(Some(sort_model.clone()));
         selection.set_autoselect(false);
@@ -421,8 +420,14 @@ fn make_uid_column(fixed_width: i32) -> gtk::ColumnViewColumn {
     col.set_resizable(true);
 
     let sorter = gtk::CustomSorter::new(|a, b| {
-        let ua = a.downcast_ref::<HxUserRow>().map(|r| r.uid_of()).unwrap_or(0);
-        let ub = b.downcast_ref::<HxUserRow>().map(|r| r.uid_of()).unwrap_or(0);
+        let ua = a
+            .downcast_ref::<HxUserRow>()
+            .map(|r| r.uid_of())
+            .unwrap_or(0);
+        let ub = b
+            .downcast_ref::<HxUserRow>()
+            .map(|r| r.uid_of())
+            .unwrap_or(0);
         ua.cmp(&ub).into()
     });
     col.set_sorter(Some(&sorter));

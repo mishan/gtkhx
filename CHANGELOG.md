@@ -496,7 +496,7 @@ is clicked, they will be raised
 - Added ability to timestamp chat
 - Fixed private chat /me commands
 - Redid options window
-- Added perl scripting feature (in progress)	
+- Added perl scripting feature (in progress)
 - Autoconf improvements
 - News no longer loads if news button is clicked while news is open
 - Show private messages at back now works
@@ -799,7 +799,7 @@ is clicked, they will be raised
 
 ## 0.3
 
-- Displays ip of server connected to in titles of Users, Tasks, News, and 
+- Displays ip of server connected to in titles of Users, Tasks, News, and
 Chat
 - Certain buttons greyed out when disconnected
 - Bugfixes
@@ -879,7 +879,7 @@ Chat
 - The current nickname and icon # is displayed in the options window now.
 - Options window UI improvements
 - Connect works
-- No longer have to type something/receive something in chat for nick change, 
+- No longer have to type something/receive something in chat for nick change,
 news post, etc to occur.
 
 ## 0.1.7a
@@ -922,7 +922,7 @@ news post, etc to occur.
 ## 0.1.2a
 
 - Added ability to change nick and icon via Options.
-- The Quit button no longer makes the program do an Illegal Instruction 
+- The Quit button no longer makes the program do an Illegal Instruction
 or Segmentation Fault.
 - Re-added agreement.
 

@@ -34,7 +34,7 @@
 
 #include "config.h"
 #include "hxnet_bridge.h"
-#include "hotline_proto.h"      /* gtkhx_proto_pack_header (wire header encode) */
+#include "hotline_proto.h" /* gtkhx_proto_pack_header (wire header encode) */
 #include "proto_helpers.h"
 #include "protocol.h"
 
@@ -47,9 +47,9 @@ char *gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len);
 char *
 gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len)
 {
-    (void) bytes;
-    (void) len;
-    (void) out_len;
+    (void)bytes;
+    (void)len;
+    (void)out_len;
     g_assert_not_reached ();
     return NULL;
 }
@@ -80,17 +80,16 @@ void debug_log (const char *cat, const char *fmt, ...);
 void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
 
 void
-hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
-                   gsize frame_len, guint32 type, guint32 trans,
-                   guint32 flag, guint32 body_len)
+hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+                   guint32 type, guint32 trans, guint32 flag, guint32 body_len)
 {
-    (void) htlc;
-    (void) frame;
-    (void) frame_len;
-    (void) type;
-    (void) trans;
-    (void) flag;
-    (void) body_len;
+    (void)htlc;
+    (void)frame;
+    (void)frame_len;
+    (void)type;
+    (void)trans;
+    (void)flag;
+    (void)body_len;
     g_assert_not_reached ();
 }
 
@@ -100,32 +99,32 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
 void
 hx_orchestrator_register_login_task (struct htlc_conn *htlc)
 {
-    (void) htlc;
+    (void)htlc;
     g_assert_not_reached ();
 }
 
 void
 hx_htlc_close (struct htlc_conn *htlc, int expected)
 {
-    (void) htlc;
-    (void) expected;
+    (void)htlc;
+    (void)expected;
     g_assert_not_reached ();
 }
 
 void
 qbuf_set (struct qbuf *q, guint32 pos, guint32 len)
 {
-    (void) q;
-    (void) pos;
-    (void) len;
+    (void)q;
+    (void)pos;
+    (void)len;
     g_assert_not_reached ();
 }
 
 void
 debug_log (const char *cat, const char *fmt, ...)
 {
-    (void) cat;
-    (void) fmt;
+    (void)cat;
+    (void)fmt;
     /* No-op: proto_helpers calls into this for trace events
      * that the test paths don't trigger. */
 }
@@ -163,9 +162,9 @@ int
 hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
                              const guint8 *data, guint32 len)
 {
-    (void) handle;
-    (void) data;
-    (void) len;
+    (void)handle;
+    (void)data;
+    (void)len;
     g_assert_not_reached ();
     return -1;
 }
@@ -173,14 +172,14 @@ hxnet_connection_send_frame (struct hxnet_connection_opaque *handle,
 void
 hxnet_connection_destroy (struct hxnet_connection_opaque *handle)
 {
-    (void) handle;
+    (void)handle;
     g_assert_not_reached ();
 }
 
 void
 hxnet_frame_free (struct hxnet_frame_t *f)
 {
-    (void) f;
+    (void)f;
     g_assert_not_reached ();
 }
 
@@ -189,12 +188,12 @@ hxnet_frame_free (struct hxnet_frame_t *f)
  * connection, so a g_assert_not_reached stub satisfies the link without
  * dragging in the staticlib. */
 struct HxnetHopeAead;
-struct HxnetHopeAead *hxnet_connection_hope_aead_material (
-    struct hxnet_connection_opaque *conn);
+struct HxnetHopeAead *
+hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn);
 struct HxnetHopeAead *
 hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn)
 {
-    (void) conn;
+    (void)conn;
     g_assert_not_reached ();
     return NULL;
 }
@@ -204,16 +203,15 @@ hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn)
  * Tier 1 test never invokes the install path, so a
  * g_assert_not_reached stub keeps the symbol satisfied without
  * dragging the staticlib in. */
-void
-gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
-                                 guint32 *out_num);
+void gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
+                                      guint32 *out_num);
 void
 gtkhx_blowfish_ofb64_save_state (const void *state, guint8 *out_ivec,
                                  guint32 *out_num)
 {
-    (void) state;
-    (void) out_ivec;
-    (void) out_num;
+    (void)state;
+    (void)out_ivec;
+    (void)out_num;
     g_assert_not_reached ();
 }
 
@@ -235,25 +233,37 @@ struct hxnet_connection_opaque *hxnet_connection_open_plaintext (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *proxy_uri,
-    gsize proxy_uri_len, test_stub_event_cb on_event,
-    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
-    void *user_data);
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
+    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
+    test_stub_state_cb on_state, void *user_data);
 struct hxnet_connection_opaque *
 hxnet_connection_open_plaintext (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *proxy_uri,
-    gsize proxy_uri_len, test_stub_event_cb on_event,
-    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
-    void *user_data)
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
+    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
+    test_stub_state_cb on_state, void *user_data)
 {
-    (void) host; (void) host_len; (void) port; (void) login;
-    (void) login_len; (void) password; (void) password_len; (void) name;
-    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
-    (void) proxy_uri; (void) proxy_uri_len;
-    (void) on_event; (void) on_shutdown; (void) on_state; (void) user_data;
+    (void)host;
+    (void)host_len;
+    (void)port;
+    (void)login;
+    (void)login_len;
+    (void)password;
+    (void)password_len;
+    (void)name;
+    (void)name_len;
+    (void)icon;
+    (void)version;
+    (void)caps;
+    (void)trans;
+    (void)proxy_uri;
+    (void)proxy_uri_len;
+    (void)on_event;
+    (void)on_shutdown;
+    (void)on_state;
+    (void)user_data;
     g_assert_not_reached ();
     return NULL;
 }
@@ -262,28 +272,43 @@ struct hxnet_connection_opaque *hxnet_connection_open_hope (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *cipher_alg,
-    gsize cipher_alg_len, const guint8 *proxy_uri, gsize proxy_uri_len,
-    test_stub_event_cb on_event,
+    guint16 caps, guint32 trans, const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *proxy_uri, gsize proxy_uri_len, test_stub_event_cb on_event,
     test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
     void *user_data);
 struct hxnet_connection_opaque *
-hxnet_connection_open_hope (
-    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
-    gsize login_len, const guint8 *password, gsize password_len,
-    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *cipher_alg,
-    gsize cipher_alg_len, const guint8 *proxy_uri, gsize proxy_uri_len,
-    test_stub_event_cb on_event,
-    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
-    void *user_data)
+hxnet_connection_open_hope (const guint8 *host, gsize host_len, guint16 port,
+                            const guint8 *login, gsize login_len,
+                            const guint8 *password, gsize password_len,
+                            const guint8 *name, gsize name_len, guint16 icon,
+                            guint16 version, guint16 caps, guint32 trans,
+                            const guint8 *cipher_alg, gsize cipher_alg_len,
+                            const guint8 *proxy_uri, gsize proxy_uri_len,
+                            test_stub_event_cb on_event,
+                            test_stub_shutdown_cb on_shutdown,
+                            test_stub_state_cb on_state, void *user_data)
 {
-    (void) host; (void) host_len; (void) port; (void) login;
-    (void) login_len; (void) password; (void) password_len; (void) name;
-    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
-    (void) cipher_alg; (void) cipher_alg_len;
-    (void) proxy_uri; (void) proxy_uri_len;
-    (void) on_event; (void) on_shutdown; (void) on_state; (void) user_data;
+    (void)host;
+    (void)host_len;
+    (void)port;
+    (void)login;
+    (void)login_len;
+    (void)password;
+    (void)password_len;
+    (void)name;
+    (void)name_len;
+    (void)icon;
+    (void)version;
+    (void)caps;
+    (void)trans;
+    (void)cipher_alg;
+    (void)cipher_alg_len;
+    (void)proxy_uri;
+    (void)proxy_uri_len;
+    (void)on_event;
+    (void)on_shutdown;
+    (void)on_state;
+    (void)user_data;
     g_assert_not_reached ();
     return NULL;
 }
@@ -292,26 +317,40 @@ struct hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *proxy_uri,
-    gsize proxy_uri_len, test_stub_event_cb on_event,
-    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
-    test_stub_verify_cb verify_cert, void *user_data);
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
+    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
+    test_stub_state_cb on_state, test_stub_verify_cb verify_cert,
+    void *user_data);
 struct hxnet_connection_opaque *
 hxnet_connection_open_plaintext_tls (
     const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
     gsize login_len, const guint8 *password, gsize password_len,
     const guint8 *name, gsize name_len, guint16 icon, guint16 version,
-    guint16 caps, guint32 trans, const guint8 *proxy_uri,
-    gsize proxy_uri_len, test_stub_event_cb on_event,
-    test_stub_shutdown_cb on_shutdown, test_stub_state_cb on_state,
-    test_stub_verify_cb verify_cert, void *user_data)
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
+    test_stub_event_cb on_event, test_stub_shutdown_cb on_shutdown,
+    test_stub_state_cb on_state, test_stub_verify_cb verify_cert,
+    void *user_data)
 {
-    (void) host; (void) host_len; (void) port; (void) login;
-    (void) login_len; (void) password; (void) password_len; (void) name;
-    (void) name_len; (void) icon; (void) version; (void) caps; (void) trans;
-    (void) proxy_uri; (void) proxy_uri_len;
-    (void) on_event; (void) on_shutdown; (void) on_state; (void) verify_cert;
-    (void) user_data;
+    (void)host;
+    (void)host_len;
+    (void)port;
+    (void)login;
+    (void)login_len;
+    (void)password;
+    (void)password_len;
+    (void)name;
+    (void)name_len;
+    (void)icon;
+    (void)version;
+    (void)caps;
+    (void)trans;
+    (void)proxy_uri;
+    (void)proxy_uri_len;
+    (void)on_event;
+    (void)on_shutdown;
+    (void)on_state;
+    (void)verify_cert;
+    (void)user_data;
     g_assert_not_reached ();
     return NULL;
 }
@@ -331,8 +370,8 @@ gboolean
 hx_tls_orchestrator_verify_cert (struct htlc_conn *htlc,
                                  const char *fingerprint)
 {
-    (void) htlc;
-    (void) fingerprint;
+    (void)htlc;
+    (void)fingerprint;
     g_assert_not_reached ();
     return FALSE;
 }
@@ -422,13 +461,29 @@ test_pack_header_byte_layout (void)
     guint8 hdr[SIZEOF_HL_HDR];
     /* Sentinel so we'd notice an off-by-one write past the end. */
     guint8 expected[SIZEOF_HL_HDR] = {
-        /* type 0x01020304 BE */ 0x01, 0x02, 0x03, 0x04,
-        /* trans 0x05060708 BE */ 0x05, 0x06, 0x07, 0x08,
-        /* flag 0x090a0b0c BE */ 0x09, 0x0a, 0x0b, 0x0c,
+        /* type 0x01020304 BE */ 0x01,
+        0x02,
+        0x03,
+        0x04,
+        /* trans 0x05060708 BE */ 0x05,
+        0x06,
+        0x07,
+        0x08,
+        /* flag 0x090a0b0c BE */ 0x09,
+        0x0a,
+        0x0b,
+        0x0c,
         /* len = body_len(=10) + sizeof(hc)=2 = 12, BE */
-        0x00, 0x00, 0x00, 0x0c,
-        /* len2 == len (matches hlpack) */ 0x00, 0x00, 0x00, 0x0c,
-        /* hc 0x0d0e BE */ 0x0d, 0x0e,
+        0x00,
+        0x00,
+        0x00,
+        0x0c,
+        /* len2 == len (matches hlpack) */ 0x00,
+        0x00,
+        0x00,
+        0x0c,
+        /* hc 0x0d0e BE */ 0x0d,
+        0x0e,
     };
     gtkhx_proto_pack_header (hdr, 0x01020304, 0x05060708, 0x090a0b0c, 0x0d0e,
                              10);

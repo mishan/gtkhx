@@ -69,28 +69,29 @@ test_hope_chacha20_login_and_ping (void)
 {
     const hx_test_server *srv = pick_chacha20_server ();
     if (!srv) {
-        g_test_fail_printf ("no HX_TEST_CAP_CHACHA20 server in the matrix. "
-                     "The Janus container at tests/janus/ advertises this "
-                     "cap by default — bring it up with "
-                     "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`. "
-                     "If GTKHX_TEST_SERVERS is filtering Janus out, "
-                     "include it in the list.");
+        g_test_fail_printf (
+            "no HX_TEST_CAP_CHACHA20 server in the matrix. "
+            "The Janus container at tests/janus/ advertises this "
+            "cap by default — bring it up with "
+            "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`. "
+            "If GTKHX_TEST_SERVERS is filtering Janus out, "
+            "include it in the list.");
         return;
     }
 
     struct htlc_conn htlc;
     integration_hope_session hope;
     /* Janus's bundled guest account ships with an empty password
-	 * (bcrypt-of-empty in the YAML, no HOPEPassword: field). At
-	 * HOPE login time the server computes HMAC(key="", session_key)
-	 * directly and compares — no stored HOPEPassword needed. This
-	 * is the path production GtkHx uses against hotline.vespernet
-	 * .net's guest account with cipher=CHACHA20-POLY1305, verified
-	 * by tracing a live connection. The PATCH-the-password path
-	 * via Janus's admin API writes a HOPEPassword: field but
-	 * doesn't validate at login (likely a Janus issue) — see the
-	 * preamble of tests/janus/seed-hope-passwords.sh for the full
-	 * write-up. */
+     * (bcrypt-of-empty in the YAML, no HOPEPassword: field). At
+     * HOPE login time the server computes HMAC(key="", session_key)
+     * directly and compares — no stored HOPEPassword needed. This
+     * is the path production GtkHx uses against hotline.vespernet
+     * .net's guest account with cipher=CHACHA20-POLY1305, verified
+     * by tracing a live connection. The PATCH-the-password path
+     * via Janus's admin API writes a HOPEPassword: field but
+     * doesn't validate at login (likely a Janus issue) — see the
+     * preamble of tests/janus/seed-hope-passwords.sh for the full
+     * write-up. */
     int fd = integration_open_login_hope_or_skip (
         srv, &htlc, &hope,
         /*username=*/"guest",
@@ -101,11 +102,11 @@ test_hope_chacha20_login_and_ping (void)
         /*compressalg=*/NULL);
     if (fd < 0) {
         /* Harness already called g_test_fail_printf with a
-		 * diagnostic. Anything we'd want to special-case here
-		 * (e.g. a known container limitation) would deserve a
-		 * skip-instead-of-fail conversion, but with the
-		 * Dockerfile-side HOPE seeding in place there's no such
-		 * known limitation left. Just return. */
+         * diagnostic. Anything we'd want to special-case here
+         * (e.g. a known container limitation) would deserve a
+         * skip-instead-of-fail conversion, but with the
+         * Dockerfile-side HOPE seeding in place there's no such
+         * known limitation left. Just return. */
         return;
     }
 
@@ -126,7 +127,7 @@ test_hope_chacha20_login_and_ping (void)
         fd, &htlc, &hope, HTLC_HDR_PING, /*flag=*/0, /*hc=*/0));
 
     /* drain_until_task_trans pulls plain frames; for AEAD we use a
-	 * mini loop that calls integration_recv_message_hope. */
+     * mini loop that calls integration_recv_message_hope. */
     gboolean got_reply = FALSE;
     for (int i = 0; i < 16 && !got_reply; i++) {
         if (!integration_recv_message_hope (fd, &htlc, &hope,

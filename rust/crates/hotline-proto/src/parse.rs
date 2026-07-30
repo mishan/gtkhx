@@ -524,11 +524,10 @@ pub fn parse_banner(buf: &[u8], len: usize, max_url: usize) -> Banner {
 
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
-            tag::BANNER_TYPE
-                if chunk.data.len() == 4 => {
-                    out.type_code.copy_from_slice(chunk.data);
-                    out.got_type = true;
-                }
+            tag::BANNER_TYPE if chunk.data.len() == 4 => {
+                out.type_code.copy_from_slice(chunk.data);
+                out.got_type = true;
+            }
             tag::BANNER_URL => {
                 let take = chunk.data.len().min(max_url);
                 out.url = Some(chunk.data[..take].to_vec());
@@ -552,7 +551,10 @@ pub struct XferQueue {
 
 /// Parse `HTLS_HDR_QUEUE`.
 pub fn parse_xfer_queue(buf: &[u8], len: usize) -> XferQueue {
-    let mut out = XferQueue { htxf_ref: 0, queueid: 0 };
+    let mut out = XferQueue {
+        htxf_ref: 0,
+        queueid: 0,
+    };
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
             tag::HTXF_REF => out.htxf_ref = chunk.as_uint(),
@@ -677,11 +679,7 @@ pub struct NewsThreadReply {
 /// TASK_ERROR short-circuits: when seen, the walk stops immediately
 /// and the body is dropped, matching the C `case HTLS_DATA_TASKERROR:
 /// return;` early-out.
-pub fn parse_news_thread_reply(
-    buf: &[u8],
-    len: usize,
-    max_text: usize,
-) -> NewsThreadReply {
+pub fn parse_news_thread_reply(buf: &[u8], len: usize, max_text: usize) -> NewsThreadReply {
     let mut out = NewsThreadReply::default();
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
@@ -1089,9 +1087,7 @@ pub struct TrackerV3HandshakeResponse {
 /// 6 bytes first; if the version comes back as v3 it then reads
 /// the trailing 2 bytes and calls us again with `buf.len() == 8`.
 /// Returns `None` on bad magic or a wrong-length buffer.
-pub fn parse_tracker_v3_handshake_response(
-    buf: &[u8],
-) -> Option<TrackerV3HandshakeResponse> {
+pub fn parse_tracker_v3_handshake_response(buf: &[u8]) -> Option<TrackerV3HandshakeResponse> {
     if buf.len() != 6 && buf.len() != 8 {
         return None;
     }
@@ -1180,10 +1176,7 @@ pub struct TrackerV3Record<'a> {
 /// count the caller advances past for the next record. Returns
 /// `None` on truncation, an unknown address-type byte, or any
 /// declared length that overruns the buffer.
-pub fn parse_tracker_v3_record(
-    buf: &[u8],
-    off: usize,
-) -> Option<(TrackerV3Record<'_>, usize)> {
+pub fn parse_tracker_v3_record(buf: &[u8], off: usize) -> Option<(TrackerV3Record<'_>, usize)> {
     if off > buf.len() {
         return None;
     }
@@ -1421,14 +1414,22 @@ pub fn tracker_v3_meta_read_bool(value: &[u8]) -> bool {
 /// {0 GENERAL, 1 TEEN, 2 MATURE, 3 ADULT}. Spec rule: unknown values
 /// MUST be treated as 0 (GENERAL).
 pub fn tracker_v3_meta_clamp_maturity(raw: u8) -> u8 {
-    if raw <= 3 { raw } else { 0 }
+    if raw <= 3 {
+        raw
+    } else {
+        0
+    }
 }
 
 /// Clamp a raw listing-category byte to the closed vocabulary
 /// 0..=12 (UNSPECIFIED .. CREATIVE). Spec rule: unknown values MUST
 /// be treated as 0 (UNSPECIFIED).
 pub fn tracker_v3_meta_clamp_listing_category(raw: u8) -> u8 {
-    if raw <= 12 { raw } else { 0 }
+    if raw <= 12 {
+        raw
+    } else {
+        0
+    }
 }
 
 // ---- HTLS_DATA_CAPABILITIES decode -------------------------------------
@@ -1676,7 +1677,7 @@ pub fn parse_news_categoryitem(data: &[u8], max_name: usize) -> Option<NewsDirEn
     let mut d = Decoder::new(data);
     let ntype = d.u16()?;
     let (kind, header_after_ntype) = match ntype {
-        2 => (NewsDirKind::Folder, 2usize),   // count(2) before namelen
+        2 => (NewsDirKind::Folder, 2usize),    // count(2) before namelen
         3 => (NewsDirKind::Category, 26usize), // count(2)+guid(16)+addsn(4)+deletesn(4)
         _ => return None,
     };
@@ -2099,11 +2100,10 @@ pub fn parse_account_read(
                     out.pass.clear();
                 }
             }
-            tag::ACCESS
-                if chunk.data.len() >= 8 => {
-                    out.access.copy_from_slice(&chunk.data[..8]);
-                    out.got_access = true;
-                }
+            tag::ACCESS if chunk.data.len() >= 8 => {
+                out.access.copy_from_slice(&chunk.data[..8]);
+                out.got_access = true;
+            }
             _ => {}
         }
     }
@@ -2242,21 +2242,20 @@ pub fn parse_file_put_reply(buf: &[u8], len: usize) -> FilePutReply {
         match chunk.tag {
             tag::HTXF_REF => out.ref_ = chunk.as_uint(),
             tag::QUEUE => out.queue = chunk.as_uint(),
-            tag::RFLT
-                if chunk.data.len() >= 66 => {
-                    out.data_pos = u32::from_be_bytes([
-                        chunk.data[46],
-                        chunk.data[47],
-                        chunk.data[48],
-                        chunk.data[49],
-                    ]);
-                    out.rsrc_pos = u32::from_be_bytes([
-                        chunk.data[62],
-                        chunk.data[63],
-                        chunk.data[64],
-                        chunk.data[65],
-                    ]);
-                }
+            tag::RFLT if chunk.data.len() >= 66 => {
+                out.data_pos = u32::from_be_bytes([
+                    chunk.data[46],
+                    chunk.data[47],
+                    chunk.data[48],
+                    chunk.data[49],
+                ]);
+                out.rsrc_pos = u32::from_be_bytes([
+                    chunk.data[62],
+                    chunk.data[63],
+                    chunk.data[64],
+                    chunk.data[65],
+                ]);
+            }
             _ => {}
         }
     }
@@ -2361,11 +2360,10 @@ pub fn parse_file_getinfo(
     let mut out = FileGetInfo::default();
     for chunk in ChunkIter::over_message(buf, len) {
         match chunk.tag {
-            tag::FILE_ICON
-                if chunk.data.len() >= 4 => {
-                    out.icon.copy_from_slice(&chunk.data[..4]);
-                    out.got_icon = true;
-                }
+            tag::FILE_ICON if chunk.data.len() >= 4 => {
+                out.icon.copy_from_slice(&chunk.data[..4]);
+                out.got_icon = true;
+            }
             tag::FILE_TYPE => {
                 let take = chunk.data.len().min(max_type);
                 out.type_ = chunk.data[..take].to_vec();
@@ -2385,14 +2383,12 @@ pub fn parse_file_getinfo(
                 let take = chunk.data.len().min(max_name);
                 out.name = chunk.data[..take].to_vec();
             }
-            tag::FILE_DATE_CREATE
-                if chunk.data.len() >= 8 => {
-                    out.date_create.copy_from_slice(&chunk.data[..8]);
-                }
-            tag::FILE_DATE_MODIFY
-                if chunk.data.len() >= 8 => {
-                    out.date_modify.copy_from_slice(&chunk.data[..8]);
-                }
+            tag::FILE_DATE_CREATE if chunk.data.len() >= 8 => {
+                out.date_create.copy_from_slice(&chunk.data[..8]);
+            }
+            tag::FILE_DATE_MODIFY if chunk.data.len() >= 8 => {
+                out.date_modify.copy_from_slice(&chunk.data[..8]);
+            }
             tag::FILE_COMMENT => {
                 let take = chunk.data.len().min(max_comment);
                 out.comment = chunk.data[..take].to_vec();
@@ -2550,7 +2546,10 @@ mod tests {
 
         let m = msg(0x0000_0162, 1, 0, &body);
         let si = parse_selfinfo(&m, m.len());
-        assert_eq!(si.seen, SELFINFO_ACCESS | SELFINFO_USER_LIST | SELFINFO_NICK_COLOR);
+        assert_eq!(
+            si.seen,
+            SELFINFO_ACCESS | SELFINFO_USER_LIST | SELFINFO_NICK_COLOR
+        );
         assert_eq!(si.access, 0xDEAD_BEEF);
         assert_eq!(si.uid, 0x1234);
         assert_eq!(si.icon, 0x0005);
@@ -2597,12 +2596,21 @@ mod tests {
         body.extend(chunk(tag::SERVERNAME, b"My Server"));
         // caps: 2 wire bytes -> big-endian accumulate = 0x0102
         body.extend(chunk(tag::CAPABILITIES, &[0x01, 0x02]));
-        body.extend(chunk(tag::CHAT_MEDIA_MAX_BYTES, &1_000_000u32.to_be_bytes()));
+        body.extend(chunk(
+            tag::CHAT_MEDIA_MAX_BYTES,
+            &1_000_000u32.to_be_bytes(),
+        ));
         body.extend(chunk(tag::CHAT_MEDIA_MAX_DIMENSION, &4096u32.to_be_bytes()));
-        body.extend(chunk(tag::CHAT_MEDIA_MAX_PIXELS, &8_000_000u32.to_be_bytes()));
+        body.extend(chunk(
+            tag::CHAT_MEDIA_MAX_PIXELS,
+            &8_000_000u32.to_be_bytes(),
+        ));
         body.extend(chunk(tag::CHAT_MEDIA_CHUNK_SIZE, &16384u32.to_be_bytes()));
         body.extend(chunk(tag::CHAT_MEDIA_MAX_FRAMES, &60u32.to_be_bytes()));
-        body.extend(chunk(tag::CHAT_MEDIA_MAX_DURATION_MS, &30_000u32.to_be_bytes()));
+        body.extend(chunk(
+            tag::CHAT_MEDIA_MAX_DURATION_MS,
+            &30_000u32.to_be_bytes(),
+        ));
         body.extend(chunk(tag::HISTORY_MAX_MSGS, &50u32.to_be_bytes()));
         body.extend(chunk(tag::HISTORY_MAX_DAYS, &7u32.to_be_bytes()));
 
@@ -2685,7 +2693,11 @@ mod tests {
         let m = msg(0x0000_0000, 1, 0, &body);
         let mut sn: [u8; 0] = [];
         let (li, sn_len) = parse_login(&m, m.len(), &mut sn);
-        assert_eq!(li.seen & LOGIN_SEEN_SERVERNAME, 0, "name skipped, bit unset");
+        assert_eq!(
+            li.seen & LOGIN_SEEN_SERVERNAME,
+            0,
+            "name skipped, bit unset"
+        );
         assert_eq!(sn_len, 0);
         // The UID chunk before it still lands, so the walk isn't derailed.
         assert_eq!(li.seen & LOGIN_SEEN_UID, LOGIN_SEEN_UID);
@@ -3038,7 +3050,12 @@ mod tests {
 
     #[test]
     fn task_error_extracts_and_sanitises() {
-        let m = msg(0x0001_0000, 1, 1, &chunk(tag::TASK_ERROR, b"bad\rthing\x0e"));
+        let m = msg(
+            0x0001_0000,
+            1,
+            1,
+            &chunk(tag::TASK_ERROR, b"bad\rthing\x0e"),
+        );
         let e = parse_task_error(&m, m.len(), 256).expect("present");
         assert_eq!(e, b"bad\nthing\x4e"); // CR → LF, 0x0e → 'N' (0x4e)
     }
@@ -3122,7 +3139,10 @@ mod tests {
         let b = parse_banner(&m, m.len(), 1024);
         assert!(b.got_type);
         assert_eq!(&b.type_code, b"URL ");
-        assert_eq!(b.url.as_deref(), Some(&b"https://example.com/banner.png"[..]));
+        assert_eq!(
+            b.url.as_deref(),
+            Some(&b"https://example.com/banner.png"[..])
+        );
     }
 
     #[test]
@@ -3729,10 +3749,10 @@ mod tests {
         // reserved 0x0000, name_len 11.
         let buf: &[u8] = &[
             0x55, 0x36, 0x82, 0xda, // addr (BE)
-            0x15, 0x7c,             // port = 5500
-            0x00, 0x07,             // nusers = 7
-            0x00, 0x00,             // reserved
-            0x0b,                   // name_len = 11
+            0x15, 0x7c, // port = 5500
+            0x00, 0x07, // nusers = 7
+            0x00, 0x00, // reserved
+            0x0b, // name_len = 11
         ];
         let r = parse_tracker_record_fixed(buf).expect("ok");
         // addr_be stores the wire bytes verbatim; verify by reading
@@ -3755,11 +3775,11 @@ mod tests {
     fn tracker_record_fixed_ignores_reserved_bytes() {
         // Whatever is at [8..10] must not affect the parse.
         let buf: &[u8] = &[
-            1, 2, 3, 4,             // addr
-            0, 80,                  // port
-            0, 0,                   // nusers
-            0xde, 0xad,             // reserved — garbage, ignored
-            5,                      // name_len
+            1, 2, 3, 4, // addr
+            0, 80, // port
+            0, 0, // nusers
+            0xde, 0xad, // reserved — garbage, ignored
+            5,    // name_len
         ];
         let r = parse_tracker_record_fixed(buf).expect("ok");
         assert_eq!(r.port, 80);
@@ -3941,15 +3961,7 @@ mod tests {
         let addr = [
             0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01,
         ];
-        let rec = build_tracker_v3_record(
-            tracker_v3::ADDR_IPV6,
-            &addr,
-            5500,
-            0,
-            b"",
-            b"",
-            &[],
-        );
+        let rec = build_tracker_v3_record(tracker_v3::ADDR_IPV6, &addr, 5500, 0, b"", b"", &[]);
         let (r, _) = parse_tracker_v3_record(&rec, 0).expect("ok");
         assert_eq!(r.addr_type, tracker_v3::ADDR_IPV6);
         assert_eq!(r.address, &addr);
@@ -3989,10 +4001,7 @@ mod tests {
             0,
             b"Srv",
             b"",
-            &[
-                (0x0100, b"v6-addr-here-16b"),
-                (0x0200, b"hxd 1.9"),
-            ],
+            &[(0x0100, b"v6-addr-here-16b"), (0x0200, b"hxd 1.9")],
         );
         let (r, _) = parse_tracker_v3_record(&rec, 0).expect("ok");
         assert_eq!(r.tlv_count, 2);
@@ -4033,10 +4042,22 @@ mod tests {
         // Two records back-to-back.
         let mut buf = Vec::new();
         buf.extend(build_tracker_v3_record(
-            tracker_v3::ADDR_IPV4, &[1, 2, 3, 4], 80, 1, b"A", b"", &[],
+            tracker_v3::ADDR_IPV4,
+            &[1, 2, 3, 4],
+            80,
+            1,
+            b"A",
+            b"",
+            &[],
         ));
         buf.extend(build_tracker_v3_record(
-            tracker_v3::ADDR_HOSTNAME, b"x.example", 81, 2, b"B", b"", &[],
+            tracker_v3::ADDR_HOSTNAME,
+            b"x.example",
+            81,
+            2,
+            b"B",
+            b"",
+            &[],
         ));
 
         let mut entries = Vec::new();
@@ -4997,8 +5018,14 @@ mod tests {
         body.extend(chunk(tag::FILE_CREATOR, b"MSWD"));
         body.extend(chunk(tag::FILE_SIZE, &12345u32.to_be_bytes()));
         body.extend(chunk(tag::FILE_NAME, b"hello.txt"));
-        body.extend(chunk(tag::FILE_DATE_CREATE, &date_stamp(0x0102_0304_0506_0708)));
-        body.extend(chunk(tag::FILE_DATE_MODIFY, &date_stamp(0x0807_0605_0403_0201)));
+        body.extend(chunk(
+            tag::FILE_DATE_CREATE,
+            &date_stamp(0x0102_0304_0506_0708),
+        ));
+        body.extend(chunk(
+            tag::FILE_DATE_MODIFY,
+            &date_stamp(0x0807_0605_0403_0201),
+        ));
         body.extend(chunk(tag::FILE_COMMENT, b"first line\rsecond line"));
         let m = msg(0x0001_0000, 1, 0, &body);
         let f = parse_file_getinfo(&m, m.len(), 255, 31, 31, 255);

@@ -74,10 +74,7 @@ fn config() -> &'static Mutex<Config> {
 /// `hxnet::xfer` transfer loop) can read the same global the C callers set,
 /// rather than threading a `Config` through the FFI.
 pub fn current_config() -> Config {
-    config()
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+    config().lock().unwrap_or_else(|e| e.into_inner()).clone()
 }
 
 /// Copy a C string into an owned [`PathBuf`]. Owned (not a borrow) so the
@@ -559,13 +556,13 @@ mod tests {
         assert_eq!(rc, 0);
 
         // NULL path → EINVAL (invalid input, not a length error).
-        let rc = unsafe {
-            finderinfo_path(buf.as_mut_ptr(), std::ptr::null(), std::ptr::null_mut())
-        };
+        let rc =
+            unsafe { finderinfo_path(buf.as_mut_ptr(), std::ptr::null(), std::ptr::null_mut()) };
         assert_eq!(rc, libc::EINVAL);
 
         // NULL output buffer → EINVAL, no write-through-NULL.
-        let rc = unsafe { finderinfo_path(std::ptr::null_mut(), data.as_ptr(), std::ptr::null_mut()) };
+        let rc =
+            unsafe { finderinfo_path(std::ptr::null_mut(), data.as_ptr(), std::ptr::null_mut()) };
         assert_eq!(rc, libc::EINVAL);
 
         // type_creator tolerates a NULL buffer (no-op, no crash).

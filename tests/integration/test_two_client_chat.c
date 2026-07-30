@@ -47,16 +47,16 @@ test_two_client_chat_a_to_b (void)
     }
 
     /* A sends a unique line. B should see it as a CHAT broadcast
-	 * with A's uid and A's name in the body. */
+     * with A's uid and A's name in the body. */
     const char *line = "two-client integration ping";
     g_assert_true (integration_send_chat (fd_a, &htlc_a, line));
 
     struct hx_chat_msg cm;
     g_assert_true (integration_drain_until_chat (fd_b, &htlc_b, htlc_a.uid, &cm,
-                                              /*max_messages=*/64));
+                                                 /*max_messages=*/64));
 
     /* B's view of the broadcast: A's uid, A's name in the
-	 * formatted body, and our line in there too. */
+     * formatted body, and our line in there too. */
     g_assert_cmphex (cm.uid, ==, htlc_a.uid);
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "Alice Tier-3"));

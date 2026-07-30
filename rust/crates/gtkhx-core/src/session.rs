@@ -80,9 +80,7 @@ use crate::boxed::tracker::hx_tracker_server_get_type;
 // (the standalone cargo test binary can't resolve the external symbols
 // otherwise — it doesn't link gtkhx-boxed).
 #[cfg(test)]
-use test_boxed_stubs::{
-    hx_chat_event_get_type, hx_msg_event_get_type, hx_tracker_server_get_type,
-};
+use test_boxed_stubs::{hx_chat_event_get_type, hx_msg_event_get_type, hx_tracker_server_get_type};
 
 #[inline]
 fn chat_event_type() -> glib::Type {
@@ -156,12 +154,7 @@ mod imp {
                         .build(),
                     // chat-history-batch: (htlc*, cid, GPtrArray*, has_more)
                     Signal::builder("chat-history-batch")
-                        .param_types([
-                            Type::POINTER,
-                            Type::U32,
-                            Type::POINTER,
-                            Type::BOOL,
-                        ])
+                        .param_types([Type::POINTER, Type::U32, Type::POINTER, Type::BOOL])
                         .build(),
                     // gif-icon-changed: (htlc*, uid) — GIF-icons extension
                     // (Phase 10). The ICON_CHANGE broadcast carries only the
@@ -174,12 +167,7 @@ mod imp {
                     // pointer rides as G_TYPE_POINTER and is valid only for
                     // the emit; len == 0 means the avatar was cleared.
                     Signal::builder("gif-icon-data")
-                        .param_types([
-                            Type::POINTER,
-                            Type::U32,
-                            Type::POINTER,
-                            Type::U32,
-                        ])
+                        .param_types([Type::POINTER, Type::U32, Type::POINTER, Type::U32])
                         .build(),
                     // msg: (HxMsgEvent* boxed)
                     Signal::builder("msg")
@@ -244,12 +232,7 @@ mod imp {
                     // `incremental` mirrors user-create — TRUE for a real
                     // part broadcast, FALSE for a teardown-driven removal.
                     Signal::builder("user-delete")
-                        .param_types([
-                            Type::POINTER,
-                            Type::POINTER,
-                            Type::U32,
-                            Type::BOOL,
-                        ])
+                        .param_types([Type::POINTER, Type::POINTER, Type::U32, Type::BOOL])
                         .build(),
                     // user-change: (htlc*, chat*, uid, nick_color, nam*, icon, color)
                     Signal::builder("user-change")
@@ -269,12 +252,7 @@ mod imp {
                         .build(),
                     // user-info: (uid, nam*, info*, len)
                     Signal::builder("user-info")
-                        .param_types([
-                            Type::U32,
-                            Type::POINTER,
-                            Type::POINTER,
-                            Type::U32,
-                        ])
+                        .param_types([Type::U32, Type::POINTER, Type::POINTER, Type::U32])
                         .build(),
                     // file-info: (path*, name*, creator*, type*, comments*,
                     //             date_modify* (8 raw wire bytes), date_create*
@@ -412,7 +390,10 @@ unsafe fn boxed_value(gtype: glib::ffi::GType, p: *mut c_void) -> glib::Value {
 /// `self_ptr` must be a valid non-NULL `GtkhxSession*`.
 unsafe fn emit(self_ptr: *mut c_void, name: &str, values: &[glib::Value]) {
     if self_ptr.is_null() {
-        glib::g_critical!("gtkhx-session", "{name}: NULL session pointer; emit skipped");
+        glib::g_critical!(
+            "gtkhx-session",
+            "{name}: NULL session pointer; emit skipped"
+        );
         return;
     }
     let obj: glib::Object =
@@ -485,7 +466,10 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat(
     htlc: *mut c_void,
     event: *mut c_void,
 ) {
-    let v = [ptr_value(htlc), boxed_value(hx_chat_event_get_type(), event)];
+    let v = [
+        ptr_value(htlc),
+        boxed_value(hx_chat_event_get_type(), event),
+    ];
     emit(self_, "chat", &v);
 }
 
@@ -498,7 +482,11 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_subject(
     cid: u32,
     subj: *const c_char,
 ) {
-    let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(subj as *const c_void)];
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(cid),
+        ptr_value(subj as *const c_void),
+    ];
     emit(self_, "chat-subject", &v);
 }
 
@@ -515,7 +503,11 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_subject_notice(
     cid: u32,
     subj: *const c_char,
 ) {
-    let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(subj as *const c_void)];
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(cid),
+        ptr_value(subj as *const c_void),
+    ];
     emit(self_, "chat-subject-notice", &v);
 }
 
@@ -528,7 +520,11 @@ pub unsafe extern "C" fn gtkhx_session_emit_chat_invitation(
     cid: u32,
     name: *const c_char,
 ) {
-    let v = [ptr_value(htlc), glib::Value::from(cid), ptr_value(name as *const c_void)];
+    let v = [
+        ptr_value(htlc),
+        glib::Value::from(cid),
+        ptr_value(name as *const c_void),
+    ];
     emit(self_, "chat-invitation", &v);
 }
 
@@ -603,10 +599,7 @@ pub unsafe extern "C" fn gtkhx_session_emit_msg(self_: *mut c_void, event: *mut 
 /// # Safety
 /// `self_`/`htlc` valid pointers.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_logged_in(
-    self_: *mut c_void,
-    htlc: *mut c_void,
-) {
+pub unsafe extern "C" fn gtkhx_session_emit_logged_in(self_: *mut c_void, htlc: *mut c_void) {
     let v = [ptr_value(htlc)];
     emit(self_, "logged-in", &v);
 }
@@ -614,10 +607,7 @@ pub unsafe extern "C" fn gtkhx_session_emit_logged_in(
 /// # Safety
 /// `self_`/`htlc` valid pointers.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_session_emit_self_updated(
-    self_: *mut c_void,
-    htlc: *mut c_void,
-) {
+pub unsafe extern "C" fn gtkhx_session_emit_self_updated(self_: *mut c_void, htlc: *mut c_void) {
     let v = [ptr_value(htlc)];
     emit(self_, "self-updated", &v);
 }
@@ -631,7 +621,11 @@ pub unsafe extern "C" fn gtkhx_session_emit_agreement(
     agreement: *const c_char,
     len: u16,
 ) {
-    let v = [ptr_value(sess), ptr_value(agreement as *const c_void), glib::Value::from(len as u32)];
+    let v = [
+        ptr_value(sess),
+        ptr_value(agreement as *const c_void),
+        glib::Value::from(len as u32),
+    ];
     emit(self_, "agreement", &v);
 }
 
@@ -644,7 +638,11 @@ pub unsafe extern "C" fn gtkhx_session_emit_news_file(
     news: *const c_char,
     len: u16,
 ) {
-    let v = [ptr_value(htlc), ptr_value(news as *const c_void), glib::Value::from(len as u32)];
+    let v = [
+        ptr_value(htlc),
+        ptr_value(news as *const c_void),
+        glib::Value::from(len as u32),
+    ];
     emit(self_, "news-file", &v);
 }
 
@@ -657,7 +655,11 @@ pub unsafe extern "C" fn gtkhx_session_emit_news_post(
     news: *const c_char,
     len: u16,
 ) {
-    let v = [ptr_value(htlc), ptr_value(news as *const c_void), glib::Value::from(len as u32)];
+    let v = [
+        ptr_value(htlc),
+        ptr_value(news as *const c_void),
+        glib::Value::from(len as u32),
+    ];
     emit(self_, "news-post", &v);
 }
 
@@ -1056,10 +1058,7 @@ mod tests {
                 std::ptr::null(),
             );
         }
-        assert_eq!(
-            got.get(),
-            (0xABCD, 7, 2, name.as_ptr() as usize, 0)
-        );
+        assert_eq!(got.get(), (0xABCD, 7, 2, name.as_ptr() as usize, 0));
     }
 
     #[test]
@@ -1070,7 +1069,11 @@ mod tests {
         let got: Rc<Cell<(usize, u32, usize)>> = Rc::new(Cell::new((0, 0, 0)));
         let got2 = got.clone();
         s.connect_local("chat-subject-notice", false, move |args| {
-            got2.set((pval(&args[1]), args[2].get::<u32>().unwrap(), pval(&args[3])));
+            got2.set((
+                pval(&args[1]),
+                args[2].get::<u32>().unwrap(),
+                pval(&args[3]),
+            ));
             None
         });
         let raw = s.as_ptr() as *mut c_void;

@@ -200,8 +200,8 @@ COMMAND (server)
     }
 
     /* commands.c::cmd_connect drives connect from the in-app /connect
-	 * shell command — Phase 4 will add a /tls flag; for now this
-	 * inherits the GTKHX_TLS env var like the rest of the callers. */
+     * shell command — Phase 4 will add a /tls flag; for now this
+     * inherits the GTKHX_TLS env var like the rest of the callers. */
     hx_connect (htlc, serverstr, port, login, pass, 0, /*tls=*/0);
 }
 
@@ -345,17 +345,15 @@ COMMAND (me)
                                       /*is_body=*/TRUE, &wire_len);
 
     /* chunk layout moved to gtkhx_proto_build_chat_chunks.
-	 * Same shape as hx_send_chat; the only difference is the style
-	 * value — /me sends style=1 (emote) vs. style=0 (normal). The
-	 * builder takes style as host-order and big-endian-encodes it
-	 * into scratch. */
+     * Same shape as hx_send_chat; the only difference is the style
+     * value — /me sends style=1 (emote) vs. style=0 (normal). The
+     * builder takes style as host-order and big-endian-encodes it
+     * into scratch. */
     struct hx_chunk chunks[3];
     guint8 scratch[8];
-    int hc = (int)gtkhx_proto_build_chat_chunks (cid, /*style=*/1,
-                                                 (const uint8_t *)wire,
-                                                 wire_len, chunks,
-                                                 G_N_ELEMENTS (chunks),
-                                                 scratch, sizeof (scratch));
+    int hc = (int)gtkhx_proto_build_chat_chunks (
+        cid, /*style=*/1, (const uint8_t *)wire, wire_len, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
     if (hc > 0) {
         hlwrite_chunks (htlc, HTLC_HDR_CHAT, 0, chunks, hc);
     }
@@ -408,7 +406,8 @@ COMMAND (ignore)
                           "%s: no such user with uid %d\n", argv[0], uid);
         return;
     }
-    gboolean ig = hx_member_model_toggle_ignore (hx_chat_member_model (chat), uid);
+    gboolean ig
+        = hx_member_model_toggle_ignore (hx_chat_member_model (chat), uid);
 
     hx_printf_prefix (htlc, cid, INFOPREFIX, "%s: %s is now %s", argv[0],
                       mi.name, ig ? "ignored" : "unignored");

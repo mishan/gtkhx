@@ -25,7 +25,7 @@
 #include "config.h"
 
 #include <glib.h>
-#include "hotline_proto.h"          /* gtkhx_proto_tracker_v3_* */
+#include "hotline_proto.h" /* gtkhx_proto_tracker_v3_* */
 #include "tracker_v3.h"
 
 /* pack / parse moved to the Rust hotline-proto crate's
@@ -48,9 +48,8 @@ hx_tracker_v3_parse_handshake_response (const guint8 *buf, gsize len,
     if (!buf || !version_out || !features_out) {
         return FALSE;
     }
-    return gtkhx_proto_tracker_v3_parse_handshake_response (buf, len,
-                                                            version_out,
-                                                            features_out);
+    return gtkhx_proto_tracker_v3_parse_handshake_response (
+        buf, len, version_out, features_out);
 }
 
 gboolean
@@ -62,7 +61,7 @@ hx_tracker_v3_pack_listing_request_simple (guint8 *out, gsize out_len,
     }
     size_t written = 0;
     if (!gtkhx_proto_tracker_v3_pack_listing_request_simple (out, out_len,
-                                                              &written)) {
+                                                             &written)) {
         return FALSE;
     }
     *out_written = written;
@@ -98,19 +97,19 @@ hx_tracker_v3_parse_record (const guint8 *buf, gsize buf_len,
     /* All slices in the public struct borrow into the caller's
      * buf — recompute the borrowed pointers from the offsets the
      * Rust shim returned. */
-    out->addr_type     = parsed.addr_type;
-    out->address       = buf + parsed.addr_off;
-    out->address_len   = parsed.addr_len;
-    out->port          = parsed.port;
-    out->nusers        = parsed.nusers;
-    out->name          = buf + parsed.name_off;
-    out->name_len      = parsed.name_len;
-    out->desc          = buf + parsed.desc_off;
-    out->desc_len      = parsed.desc_len;
-    out->tlv_count     = parsed.tlv_count;
-    out->tlv_bytes     = buf + parsed.tlv_off;
+    out->addr_type = parsed.addr_type;
+    out->address = buf + parsed.addr_off;
+    out->address_len = parsed.addr_len;
+    out->port = parsed.port;
+    out->nusers = parsed.nusers;
+    out->name = buf + parsed.name_off;
+    out->name_len = parsed.name_len;
+    out->desc = buf + parsed.desc_off;
+    out->desc_len = parsed.desc_len;
+    out->tlv_count = parsed.tlv_count;
+    out->tlv_bytes = buf + parsed.tlv_off;
     out->tlv_bytes_len = parsed.tlv_len;
-    *consumed_out      = parsed.consumed;
+    *consumed_out = parsed.consumed;
     return TRUE;
 }
 
@@ -132,7 +131,7 @@ hx_tracker_v3_walk_tlvs (const guint8 *buf, gsize buf_len, guint16 count,
             return FALSE;
         }
         if (cb
-            && !cb (tlv.id, (guint16) tlv.value_len, buf + tlv.value_off,
+            && !cb (tlv.id, (guint16)tlv.value_len, buf + tlv.value_off,
                     user_data)) {
             /* Caller asked us to stop early; unconsumed bytes past
              * the stop point are by definition expected. */

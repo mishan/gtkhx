@@ -24,7 +24,7 @@
 #include "config.h"
 #include <string.h>
 #include <glib.h>
-#include <sys/param.h>          /* MAXPATHLEN */
+#include <sys/param.h> /* MAXPATHLEN */
 #include "uniquify_path.h"
 
 /* Predicate that consults a GHashTable<gchar*, gpointer> of seeded
@@ -121,8 +121,7 @@ test_leading_dot_basename (void)
 static void
 test_counter_advances_past_taken_variants (void)
 {
-    const char *taken[]
-        = { "/dl/foo.txt", "/dl/foo (1).txt", NULL };
+    const char *taken[] = { "/dl/foo.txt", "/dl/foo (1).txt", NULL };
     char *result = run_uniquify ("/dl/foo.txt", taken);
     g_assert_cmpstr (result, ==, "/dl/foo (2).txt");
     g_free (result);
@@ -132,9 +131,8 @@ test_counter_advances_past_taken_variants (void)
 static void
 test_counter_advances_three_slots (void)
 {
-    const char *taken[] = { "/dl/foo.txt",      "/dl/foo (1).txt",
-                            "/dl/foo (2).txt",  "/dl/foo (3).txt",
-                            NULL };
+    const char *taken[] = { "/dl/foo.txt", "/dl/foo (1).txt", "/dl/foo (2).txt",
+                            "/dl/foo (3).txt", NULL };
     char *result = run_uniquify ("/dl/foo.txt", taken);
     g_assert_cmpstr (result, ==, "/dl/foo (4).txt");
     g_free (result);

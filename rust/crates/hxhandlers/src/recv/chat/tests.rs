@@ -51,7 +51,10 @@ fn rcv_handler_parses_and_emits() {
     rcv_invite(&f);
 
     // native parse → lookups → hx_chat_invite_recv → chat-invitation emit.
-    assert_eq!(test_env::EMITTED.with(|c| c.take()), Some((9, b"Alice".to_vec())));
+    assert_eq!(
+        test_env::EMITTED.with(|c| c.take()),
+        Some((9, b"Alice".to_vec()))
+    );
 }
 
 #[test]
@@ -153,7 +156,10 @@ fn rcv_chat_handler_parses_and_emits() {
         test_env::EVENT_NEW.with(|c| c.borrow().clone()),
         Some((0, b"hello world".to_vec()))
     );
-    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(FAKE_CHAT_EVENT));
+    assert_eq!(
+        test_env::CHAT_EMITTED.with(|c| c.take()),
+        Some(FAKE_CHAT_EVENT)
+    );
     assert!(!test_env::MEDIA_ATTACHED.with(|c| c.get()));
 }
 
@@ -183,7 +189,10 @@ fn rcv_chat_handler_attaches_media_when_cap_set() {
     rcv_chat(&f);
 
     assert!(test_env::MEDIA_ATTACHED.with(|c| c.get()));
-    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(FAKE_CHAT_EVENT));
+    assert_eq!(
+        test_env::CHAT_EMITTED.with(|c| c.take()),
+        Some(FAKE_CHAT_EVENT)
+    );
 }
 
 #[test]
@@ -215,7 +224,10 @@ fn rcv_chat_handler_ignores_media_without_cap() {
     rcv_chat(&f);
 
     assert!(!test_env::MEDIA_ATTACHED.with(|c| c.get()));
-    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(FAKE_CHAT_EVENT));
+    assert_eq!(
+        test_env::CHAT_EMITTED.with(|c| c.take()),
+        Some(FAKE_CHAT_EVENT)
+    );
 }
 
 #[test]
@@ -290,7 +302,14 @@ fn fake_event() -> *mut std::os::raw::c_void {
 }
 
 fn chat(uid: u16) -> c_int {
-    unsafe { hx_chat_recv(std::ptr::null_mut(), std::ptr::null_mut(), uid, fake_event()) }
+    unsafe {
+        hx_chat_recv(
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            uid,
+            fake_event(),
+        )
+    }
 }
 
 #[test]
@@ -298,7 +317,10 @@ fn emits_chat_when_not_ignored() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(false));
     assert_eq!(chat(42), 1);
-    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(fake_event()));
+    assert_eq!(
+        test_env::CHAT_EMITTED.with(|c| c.take()),
+        Some(fake_event())
+    );
 }
 
 #[test]
@@ -315,7 +337,10 @@ fn system_line_uid_zero_always_emits() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(true));
     assert_eq!(chat(0), 1);
-    assert_eq!(test_env::CHAT_EMITTED.with(|c| c.take()), Some(fake_event()));
+    assert_eq!(
+        test_env::CHAT_EMITTED.with(|c| c.take()),
+        Some(fake_event())
+    );
 }
 
 #[test]
@@ -385,8 +410,14 @@ unsafe fn call_chat_history(cid: u32, frame: &[u8]) {
 fn chat_history_builds_batch_and_advances_cursor() {
     test_env::reset();
     let frame = chat_history_frame(&[
-        (HTLS_DATA_HISTORY_ENTRY, history_entry_body(10, 0, 0, b"a", b"hi")),
-        (HTLS_DATA_HISTORY_ENTRY, history_entry_body(25, 0, 0, b"b", b"yo")),
+        (
+            HTLS_DATA_HISTORY_ENTRY,
+            history_entry_body(10, 0, 0, b"a", b"hi"),
+        ),
+        (
+            HTLS_DATA_HISTORY_ENTRY,
+            history_entry_body(25, 0, 0, b"b", b"yo"),
+        ),
         (HTLS_DATA_HISTORY_HAS_MORE, vec![1]),
     ]);
     unsafe { call_chat_history(7, &frame) };
@@ -404,7 +435,10 @@ fn chat_history_builds_batch_and_advances_cursor() {
 fn chat_history_has_more_false_when_flag_zero() {
     test_env::reset();
     let frame = chat_history_frame(&[
-        (HTLS_DATA_HISTORY_ENTRY, history_entry_body(3, 0, 0, b"", b"x")),
+        (
+            HTLS_DATA_HISTORY_ENTRY,
+            history_entry_body(3, 0, 0, b"", b"x"),
+        ),
         (HTLS_DATA_HISTORY_HAS_MORE, vec![0]),
     ]);
     unsafe { call_chat_history(0, &frame) };

@@ -1238,11 +1238,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
     let proxy = match parse_proxy_arg(proxy_uri, proxy_uri_len) {
         Ok(p) => p,
         Err(e) => {
-            glib::g_critical!(
-                "hxnet",
-                "hxnet_connection_open_plaintext_polling: {}",
-                e
-            );
+            glib::g_critical!("hxnet", "hxnet_connection_open_plaintext_polling: {}", e);
             return std::ptr::null_mut();
         }
     };
@@ -2071,9 +2067,7 @@ pub unsafe extern "C" fn hxnet_connection_hope_aead_material(
 /// `h` must be NULL or a live pointer from one of the handle-producing
 /// functions, not yet freed.
 #[no_mangle]
-pub unsafe extern "C" fn hxnet_hope_aead_clone(
-    h: *const HxnetHopeAead,
-) -> *mut HxnetHopeAead {
+pub unsafe extern "C" fn hxnet_hope_aead_clone(h: *const HxnetHopeAead) -> *mut HxnetHopeAead {
     if h.is_null() {
         return std::ptr::null_mut();
     }
@@ -2232,9 +2226,7 @@ fn _silence_unused_c_void(_p: *mut c_void) {}
 // handle/drain shape: spawn run_fetch on the global runtime, keep the
 // event receiver for poll, drop + abort on close.
 
-use crate::tracker_fetch::{
-    run_fetch, TcpTlsConnector, TrackerEvent, VerdictCache, VerifyFn,
-};
+use crate::tracker_fetch::{run_fetch, TcpTlsConnector, TrackerEvent, VerdictCache, VerifyFn};
 
 /// Opaque handle for an in-flight tracker fetch walk. Created by
 /// [`hxnet_tracker_fetch_open`], drained by [`hxnet_tracker_fetch_poll`],
@@ -2375,7 +2367,11 @@ unsafe fn fill_tracker_event(out: *mut HxnetTrackerEvent, ev: &TrackerEvent) {
     std::ptr::write_bytes(out, 0, 1);
     let o = &mut *out;
     match ev {
-        TrackerEvent::BatchBegin { url, version, count } => {
+        TrackerEvent::BatchBegin {
+            url,
+            version,
+            count,
+        } => {
             o.kind = HXNET_TRK_KIND_BEGIN;
             o.version = *version;
             o.count = *count;
@@ -2460,8 +2456,7 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
     // `urls.add(i)` for i in 0..n is UB if n * size_of::<*const c_char>()
     // overruns isize::MAX. Bound n the same way the other FFI entrypoints
     // bound their length arguments.
-    if (n as u64).saturating_mul(std::mem::size_of::<*const c_void>() as u64)
-        > (isize::MAX as u64)
+    if (n as u64).saturating_mul(std::mem::size_of::<*const c_void>() as u64) > (isize::MAX as u64)
     {
         glib::g_critical!(
             "hxnet",
@@ -2551,7 +2546,15 @@ pub unsafe extern "C" fn hxnet_tracker_fetch_open(
         // `.await` (no lock held across it); a cancelled walk that never
         // reaches the writeback just loses its updates, which is fine.
         let mut verdicts = tracker_verdicts_snapshot();
-        run_fetch(&mut connector, &url_vec, features, probe_timeout, &mut verdicts, &tx).await;
+        run_fetch(
+            &mut connector,
+            &url_vec,
+            features,
+            probe_timeout,
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         tracker_verdicts_store(verdicts);
     });
 

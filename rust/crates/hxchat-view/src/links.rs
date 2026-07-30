@@ -30,12 +30,7 @@ extern "C" {
     fn gtkurl_normalize(word: *const c_char) -> *mut c_char;
     /// The Adwaita right-click popover: URL header, "Open Link in
     /// Browser", "Copy Selected Link", plus alternate browsers.
-    fn gtkurl_show_popup(
-        anchor: *mut gtk4::ffi::GtkWidget,
-        url: *const c_char,
-        x: f64,
-        y: f64,
-    );
+    fn gtkurl_show_popup(anchor: *mut gtk4::ffi::GtkWidget, url: *const c_char, x: f64, y: f64);
     /// `gtkurl_is_url` — does this whitespace-delimited word look like
     /// a link? The same classifier the word-click handler uses.
     fn gtkurl_is_url(word: *const c_char) -> i32;
@@ -56,12 +51,7 @@ pub fn show_url_popup(anchor: &impl IsA<gtk4::Widget>, url: &str, x: f64, y: f64
         return;
     };
     unsafe {
-        gtkurl_show_popup(
-            anchor.as_ref().to_glib_none().0,
-            c_url.as_ptr(),
-            x,
-            y,
-        );
+        gtkurl_show_popup(anchor.as_ref().to_glib_none().0, c_url.as_ptr(), x, y);
     }
 }
 
@@ -69,12 +59,7 @@ pub fn show_url_popup(anchor: &impl IsA<gtk4::Widget>, url: &str, x: f64, y: f64
 #[derive(Default)]
 struct Matches(Vec<(usize, usize)>);
 
-unsafe extern "C" fn collect(
-    _text: *const c_char,
-    start: c_int,
-    end: c_int,
-    user: *mut c_void,
-) {
+unsafe extern "C" fn collect(_text: *const c_char, start: c_int, end: c_int, user: *mut c_void) {
     if user.is_null() || start < 0 || end <= start {
         return;
     }

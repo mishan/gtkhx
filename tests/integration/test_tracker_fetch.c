@@ -52,9 +52,10 @@
  * invoked; it's here so a future TLS tracker doesn't get rejected and
  * turn this test red for the wrong reason. */
 static int
-accept_all_verify (const guint8 *host G_GNUC_UNUSED, gsize host_len G_GNUC_UNUSED,
-                   guint16 port G_GNUC_UNUSED, const guint8 *fp G_GNUC_UNUSED,
-                   gsize fp_len G_GNUC_UNUSED, void *user_data G_GNUC_UNUSED)
+accept_all_verify (const guint8 *host G_GNUC_UNUSED,
+                   gsize host_len G_GNUC_UNUSED, guint16 port G_GNUC_UNUSED,
+                   const guint8 *fp G_GNUC_UNUSED, gsize fp_len G_GNUC_UNUSED,
+                   void *user_data G_GNUC_UNUSED)
 {
     return 1;
 }
@@ -71,7 +72,7 @@ probe_ms (void)
         char *endp = NULL;
         long v = strtol (env, &endp, 10);
         if (endp != env && *endp == '\0' && v >= 100 && v <= 60000) {
-            return (guint32) v;
+            return (guint32)v;
         }
     }
     return 800;
@@ -101,7 +102,7 @@ test_tracker_fetch_listing (void)
     for (guint i = 0; i < targets->len; i++) {
         const hx_test_tracker *t = g_ptr_array_index (targets, i);
         g_ptr_array_add (url_strs,
-                         g_strdup_printf ("%s:%u", t->host, (unsigned) t->port));
+                         g_strdup_printf ("%s:%u", t->host, (unsigned)t->port));
     }
     const char **urls = g_new (const char *, url_strs->len);
     for (guint i = 0; i < url_strs->len; i++) {
@@ -117,7 +118,7 @@ test_tracker_fetch_listing (void)
         proxy_uri = NULL;
     }
     HxnetTrackerFetch *fetch = hxnet_tracker_fetch_open (
-        (const char *const *) urls, url_strs->len, HTRK_V3_FEAT_IPV6, pms,
+        (const char *const *)urls, url_strs->len, HTRK_V3_FEAT_IPV6, pms,
         proxy_uri, accept_all_verify, NULL);
     g_free (urls);
     g_assert_nonnull (fetch);
@@ -131,7 +132,7 @@ test_tracker_fetch_listing (void)
      * serial. Cap at 55s — just under the 60s meson test timeout — so we
      * fail with a clear diagnostic instead of getting SIGTERM'd, and so a
      * large GTKHX_TRACKER_V3_PROBE_MS doesn't push us past it. */
-    gint64 budget_s = (gint64) url_strs->len * ((pms / 1000) + 5) + 10;
+    gint64 budget_s = (gint64)url_strs->len * ((pms / 1000) + 5) + 10;
     if (budget_s > 55) {
         budget_s = 55;
     }
@@ -157,7 +158,7 @@ test_tracker_fetch_listing (void)
         case HXNET_TRK_KIND_RECORD:
             records++;
             if (!first_name && ev.name_len) {
-                first_name = g_strndup ((const char *) ev.name_ptr, ev.name_len);
+                first_name = g_strndup ((const char *)ev.name_ptr, ev.name_len);
             }
             break;
         case HXNET_TRK_KIND_ERROR:
@@ -179,10 +180,10 @@ test_tracker_fetch_listing (void)
                url_strs->len, begins, records, errors,
                first_name ? first_name : "(none)");
 
-    g_assert_true (closed);             /* walk finished + drained in time */
-    g_assert_true (done);               /* explicit Done event arrived */
-    g_assert_cmpint (begins, >=, 1);    /* at least one tracker replied */
-    g_assert_cmpint (records, >=, 1);   /* at least one server listed */
+    g_assert_true (closed);           /* walk finished + drained in time */
+    g_assert_true (done);             /* explicit Done event arrived */
+    g_assert_cmpint (begins, >=, 1);  /* at least one tracker replied */
+    g_assert_cmpint (records, >=, 1); /* at least one server listed */
     g_assert_nonnull (first_name);
 
     g_free (first_name);

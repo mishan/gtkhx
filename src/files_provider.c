@@ -21,10 +21,10 @@ hx_files_provider_default_init (HxFilesProviderInterface *iface)
     (void)iface;
 
     /* Both signals are declared on the interface; implementations
-	 * emit by name (g_signal_emit_by_name) so the dispatch finds
-	 * the per-instance signal IDs through GType inheritance. The
-	 * signals carry the same payload shape across all providers
-	 * so the panel can listen once at the interface level. */
+     * emit by name (g_signal_emit_by_name) so the dispatch finds
+     * the per-instance signal IDs through GType inheritance. The
+     * signals carry the same payload shape across all providers
+     * so the panel can listen once at the interface level. */
     g_signal_new ("navigated", HX_TYPE_FILES_PROVIDER, G_SIGNAL_RUN_LAST, 0,
                   NULL, NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 
@@ -32,9 +32,9 @@ hx_files_provider_default_init (HxFilesProviderInterface *iface)
                   NULL, NULL, G_TYPE_NONE, 1, G_TYPE_STRING);
 
     /* The "unavailable-changed" signal lets a panel know when
-	 * get_unavailable_reason() flipped from / to NULL — typically
-	 * the remote provider firing this on login + disconnect.
-	 * Implementations without an unavailable state never emit it. */
+     * get_unavailable_reason() flipped from / to NULL — typically
+     * the remote provider firing this on login + disconnect.
+     * Implementations without an unavailable state never emit it. */
     g_signal_new ("unavailable-changed", HX_TYPE_FILES_PROVIDER,
                   G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
@@ -115,7 +115,7 @@ hx_files_provider_get_unavailable_reason (HxFilesProvider *self)
     g_return_val_if_fail (HX_IS_FILES_PROVIDER (self), NULL);
     iface = HX_FILES_PROVIDER_GET_IFACE (self);
     /* Optional method — providers that don't override report
-	 * "always available" by returning NULL. */
+     * "always available" by returning NULL. */
     return iface->get_unavailable_reason ? iface->get_unavailable_reason (self)
                                          : NULL;
 }
@@ -127,9 +127,9 @@ hx_files_provider_activate_entry (HxFilesProvider *self, HxFileEntry *e)
     g_return_if_fail (HX_IS_FILES_PROVIDER (self));
     iface = HX_FILES_PROVIDER_GET_IFACE (self);
     /* Optional method — providers without an activate action
-	 * just silently no-op (the panel's row-activate handler
-	 * was the caller; user gets no feedback, same as the
-	 * current behaviour pre-feature). */
+     * just silently no-op (the panel's row-activate handler
+     * was the caller; user gets no feedback, same as the
+     * current behaviour pre-feature). */
     if (iface->activate_entry) {
         iface->activate_entry (self, e);
     }
@@ -142,8 +142,8 @@ hx_files_provider_preview_entry (HxFilesProvider *self, HxFileEntry *e)
     g_return_if_fail (HX_IS_FILES_PROVIDER (self));
     iface = HX_FILES_PROVIDER_GET_IFACE (self);
     /* preview_entry is optional and falls back to activate_entry
-	 * — for the local provider that means "the OS default app IS
-	 * the preview", which is the right answer. */
+     * — for the local provider that means "the OS default app IS
+     * the preview", which is the right answer. */
     if (iface->preview_entry) {
         iface->preview_entry (self, e);
     } else if (iface->activate_entry) {
@@ -162,10 +162,10 @@ hx_files_provider_safe_local_basename (const char *remote_name)
     }
 
     /* Replace path separators with '_'. Hotline's wire name can
-	 * legitimately contain '/' under the Classic-Mac convention,
-	 * but we're constructing a local path — '/' (and '\\' for
-	 * Win-style names) would let a hostile server break out of
-	 * the user's download directory. */
+     * legitimately contain '/' under the Classic-Mac convention,
+     * but we're constructing a local path — '/' (and '\\' for
+     * Win-style names) would let a hostile server break out of
+     * the user's download directory. */
     out = g_strdup (remote_name);
     for (p = out; *p; p++) {
         if (*p == '/' || *p == '\\') {
@@ -174,8 +174,8 @@ hx_files_provider_safe_local_basename (const char *remote_name)
     }
 
     /* Pure-dot names map to the parent / current directory at the
-	 * filesystem level; replace with the generic placeholder so
-	 * the resulting g_build_filename can't escape upward. */
+     * filesystem level; replace with the generic placeholder so
+     * the resulting g_build_filename can't escape upward. */
     if (g_strcmp0 (out, ".") == 0 || g_strcmp0 (out, "..") == 0) {
         g_free (out);
         return g_strdup ("download");

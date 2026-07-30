@@ -17,10 +17,10 @@
 
 use std::ffi::c_void;
 
-use gtk4 as gtk;
+use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::from_glib_none;
+use gtk4 as gtk;
 
 use crate::tr::tr;
 
@@ -31,8 +31,7 @@ use hxmodel::conversation::hx_chat_cid;
 
 extern "C" {
     fn gtkhx_pchat_new(htlc: *mut c_void, chat: *mut c_void) -> *mut Gchat;
-    fn gtkhx_pchat_user_sidebar(htlc: *mut c_void, chat: *mut c_void)
-        -> *mut gtk::ffi::GtkWidget;
+    fn gtkhx_pchat_user_sidebar(htlc: *mut c_void, chat: *mut c_void) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_output(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_vscroll(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;
     fn hx_gchat_input(g: *mut Gchat) -> *mut gtk::ffi::GtkWidget;

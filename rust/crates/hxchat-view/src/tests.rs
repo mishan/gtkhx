@@ -297,7 +297,10 @@ fn gtk_class_and_construction_smoke() {
     let b = view.append(crate::view::plain_message("world"));
     assert_ne!(a, b, "marks must be distinct");
     assert!(view.remove(a), "removing a live mark should succeed");
-    assert!(!view.remove(a), "removing a stale mark is a no-op, not a panic");
+    assert!(
+        !view.remove(a),
+        "removing a stale mark is a no-op, not a panic"
+    );
     view.clear();
 
     // --- the FFI path, on a floating pointer -----------------------
@@ -317,10 +320,7 @@ fn gtk_class_and_construction_smoke() {
     // it is still alive and still floating afterwards.
     unsafe {
         let pal = [gtk4::gdk::RGBA::BLACK; crate::view::PALETTE_COLS];
-        let raw = crate::ffi::hx_chat_view_new(
-            pal.as_ptr() as *const gtk4::gdk::ffi::GdkRGBA,
-            1,
-        );
+        let raw = crate::ffi::hx_chat_view_new(pal.as_ptr() as *const gtk4::gdk::ffi::GdkRGBA, 1);
         assert!(!raw.is_null(), "impl_new returned NULL");
         let as_obj = raw as *mut gtk4::glib::gobject_ffi::GObject;
         assert_ne!(
@@ -651,7 +651,8 @@ fn a_styled_body_keeps_its_colour_under_the_markdown() {
     let mut at = 0usize;
     for s in &spans {
         assert_eq!(
-            s.range.start, at,
+            s.range.start,
+            at,
             "gap or overlap before {:?} — the row would draw unmuted there",
             &p.text[s.range.clone()]
         );
@@ -666,11 +667,8 @@ fn a_styled_body_keeps_its_colour_under_the_markdown() {
     assert_eq!(at, p.text.len(), "the tail of the row is uncovered");
 
     // ...and the emphasis is still there on top.
-    assert!(p
-        .spans
-        .iter()
-        .any(|s| &p.text[s.range.clone()] == "bold"
-            && s.style.attrs.contains(hxchat_layout::Attrs::BOLD)));
+    assert!(p.spans.iter().any(|s| &p.text[s.range.clone()] == "bold"
+        && s.style.attrs.contains(hxchat_layout::Attrs::BOLD)));
 }
 
 #[test]
@@ -711,8 +709,18 @@ fn a_body_the_caller_styled_run_by_run_is_left_alone() {
     let a = std::ffi::CString::new("plain ").unwrap();
     let b = std::ffi::CString::new("**loud**").unwrap();
     let runs = [
-        crate::ffi::HxChatRun { text: a.as_ptr(), len: 6, color: -1, attrs: 0 },
-        crate::ffi::HxChatRun { text: b.as_ptr(), len: 8, color: 4, attrs: 0 },
+        crate::ffi::HxChatRun {
+            text: a.as_ptr(),
+            len: 6,
+            color: -1,
+            attrs: 0,
+        },
+        crate::ffi::HxChatRun {
+            text: b.as_ptr(),
+            len: 8,
+            color: 4,
+            attrs: 0,
+        },
     ];
     let blocks = unsafe { crate::ffi::body_blocks(runs.as_ptr(), 2, true) };
     assert_eq!(blocks.len(), 1);

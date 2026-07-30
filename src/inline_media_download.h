@@ -63,26 +63,26 @@ typedef struct hx_inline_media_download hx_inline_media_download;
  * spec MediaErrorCode (0..=5). */
 typedef struct {
     /* Accumulated canonical bytes. NULL on failure. The pointer
-	 * is borrowed and only valid for the duration of the
-	 * callback — copy out (or grab a ref via g_byte_array_ref
-	 * before the helper g_byte_array_unref's its copy) if
-	 * needed afterwards. */
+     * is borrowed and only valid for the duration of the
+     * callback — copy out (or grab a ref via g_byte_array_ref
+     * before the helper g_byte_array_unref's its copy) if
+     * needed afterwards. */
     GByteArray *bytes;
     /* Canonical MIME (NUL-terminated). NULL on failure. Borrowed
-	 * for the callback's duration. */
+     * for the callback's duration. */
     const char *canonical_mime;
     /* Spec MediaErrorCode wire value. 0 on success. */
     guint16 error_code;
     /* Best-effort error text describing the failure. NULL on
-	 * success and may be NULL on failure when the server didn't
-	 * include DATA_ERROR. When non-NULL the pointer borrows
-	 * transient storage — sometimes a stack buffer the helper
-	 * filled via task_error_extract before invoking the
-	 * callback, sometimes a string literal for synthesised
-	 * failure paths (malformed reply, chunked-download resend
-	 * failed). NEVER points into htlc->in.buf directly. Valid
-	 * only for the duration of the callback; copy out
-	 * (g_strndup) if needed afterwards. */
+     * success and may be NULL on failure when the server didn't
+     * include DATA_ERROR. When non-NULL the pointer borrows
+     * transient storage — sometimes a stack buffer the helper
+     * filled via task_error_extract before invoking the
+     * callback, sometimes a string literal for synthesised
+     * failure paths (malformed reply, chunked-download resend
+     * failed). NEVER points into htlc->in.buf directly. Valid
+     * only for the duration of the callback; copy out
+     * (g_strndup) if needed afterwards. */
     const char *error_message;
     gsize error_message_len;
 } HxInlineMediaDownloadResult;
@@ -101,10 +101,8 @@ typedef void (*HxInlineMediaDownloadCallback) (
  * the callback fires (success or failure). DO NOT free it
  * yourself — only use it for cancel. */
 extern hx_inline_media_download *inline_media_download_start (
-    struct htlc_conn *htlc,
-    const guint8 *handle, gsize handle_len,
-    HxInlineMediaDownloadCallback on_done,
-    gpointer user_data);
+    struct htlc_conn *htlc, const guint8 *handle, gsize handle_len,
+    HxInlineMediaDownloadCallback on_done, gpointer user_data);
 
 /* Cancel an in-flight download. The callback will NOT fire after
  * this call returns; the context is invalidated. Safe to call
@@ -113,7 +111,8 @@ extern void inline_media_download_cancel (hx_inline_media_download *dl);
 
 /* TASK-reply handler hooked through task_new from
  * inline_media_download_start. Not called directly. */
-extern void rcv_task_download_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ctx_ptr,
-                                     void *unused);
+extern void rcv_task_download_media (struct htlc_conn *htlc,
+                                     const guint8 *frame, gsize frame_len,
+                                     void *ctx_ptr, void *unused);
 
 #endif /* HX_INLINE_MEDIA_DOWNLOAD_H */

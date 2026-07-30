@@ -43,7 +43,8 @@ drain_for_user_change (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
             continue;
         }
         struct hx_user_change_msg uc;
-        if (!hx_user_change_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &uc)) {
+        if (!hx_user_change_extract (hx_test_in (htlc)->buf,
+                                     hx_test_in (htlc)->pos, &uc)) {
             continue;
         }
         if (uc.uid == wanted_uid) {
@@ -65,7 +66,8 @@ drain_for_user_part (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
             continue;
         }
         struct hx_user_part_msg pm;
-        if (!hx_user_part_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &pm)) {
+        if (!hx_user_part_extract (hx_test_in (htlc)->buf,
+                                   hx_test_in (htlc)->pos, &pm)) {
             continue;
         }
         if (pm.uid == wanted_uid) {
@@ -96,14 +98,14 @@ test_user_change_join_and_part (void)
     }
 
     /* Alice should have received a USER_CHANGE notification for
-	 * Bob's join. The broadcast may arrive before, during, or
-	 * after Alice's own SELFINFO drain — we generously look up to
-	 * 16 messages back through Alice's pending receive queue. */
+     * Bob's join. The broadcast may arrive before, during, or
+     * after Alice's own SELFINFO drain — we generously look up to
+     * 16 messages back through Alice's pending receive queue. */
     g_assert_true (
         drain_for_user_change (fd_a, &htlc_a, htlc_b.uid, /*max_messages=*/64));
 
     /* Disconnect Bob — close socket, expect mhxd to broadcast
-	 * USER_PART to Alice. */
+     * USER_PART to Alice. */
     integration_release_htlc (&htlc_b);
     integration_close (fd_b);
 

@@ -179,11 +179,7 @@ pub struct MsgRequest<'a> {
 /// Scratch usage: 2 bytes (the uid). Returns 2 on success, or 0 on
 /// validation failure: too-small chunks / scratch buffers, or
 /// `body.len() > u16::MAX` (chunk lengths are 16-bit on the wire).
-pub fn build_msg_chunks(
-    req: &MsgRequest<'_>,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_msg_chunks(req: &MsgRequest<'_>, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     if chunks.len() < 2 || scratch.len() < 2 || req.body.len() > u16::MAX as usize {
         return 0;
     }
@@ -221,10 +217,7 @@ pub struct BroadcastRequest<'a> {
 /// No scratch needed (no integer chunks). Returns 1 on success, or 0
 /// on validation failure: empty `chunks` slice, or `body.len() >
 /// u16::MAX` (chunk lengths are 16-bit on the wire).
-pub fn build_broadcast_chunks(
-    req: &BroadcastRequest<'_>,
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_broadcast_chunks(req: &BroadcastRequest<'_>, chunks: &mut [HxChunk]) -> usize {
     if chunks.is_empty() || req.body.len() > u16::MAX as usize {
         return 0;
     }
@@ -249,11 +242,7 @@ pub fn build_broadcast_chunks(
 
 /// Build chunks for `HTLC_HDR_CHAT_CREATE` — `HTLC_DATA_UID` (u16 BE)
 /// only, 1 chunk. Requires `chunks_cap >= 1`, `scratch_cap >= 2`.
-pub fn build_chat_create_chunks(
-    uid: u16,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_chat_create_chunks(uid: u16, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     if chunks.is_empty() || scratch.len() < 2 {
         return 0;
     }
@@ -298,11 +287,7 @@ pub fn build_chat_invite_chunks(
 /// Internal helper: single-`CHAT_ID` chunk for the JOIN / PART / DECLINE
 /// opcodes (all three share the wire shape). The caller picks the
 /// header type when handing the chunks to `hlwrite_chunks`.
-fn build_chat_id_only_chunks(
-    cid: u32,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+fn build_chat_id_only_chunks(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     if chunks.is_empty() || scratch.len() < 4 {
         return 0;
     }
@@ -316,29 +301,17 @@ fn build_chat_id_only_chunks(
 }
 
 /// Build chunks for `HTLC_HDR_CHAT_JOIN` — `HTLC_DATA_CHAT_ID` only.
-pub fn build_chat_join_chunks(
-    cid: u32,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_chat_join_chunks(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     build_chat_id_only_chunks(cid, chunks, scratch)
 }
 
 /// Build chunks for `HTLC_HDR_CHAT_PART` — `HTLC_DATA_CHAT_ID` only.
-pub fn build_chat_part_chunks(
-    cid: u32,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_chat_part_chunks(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     build_chat_id_only_chunks(cid, chunks, scratch)
 }
 
 /// Build chunks for `HTLC_HDR_CHAT_DECLINE` — `HTLC_DATA_CHAT_ID` only.
-pub fn build_chat_decline_chunks(
-    cid: u32,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_chat_decline_chunks(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     build_chat_id_only_chunks(cid, chunks, scratch)
 }
 
@@ -657,11 +630,7 @@ pub fn build_user_kick_chunks(
 /// Build the chunk array for `HTLC_HDR_USER_GETINFO`. Single
 /// `HTLC_DATA_UID` chunk (u16 BE). Returns 1 on success, 0 on a
 /// too-small chunks / scratch buffer.
-pub fn build_user_getinfo_chunks(
-    uid: u16,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_user_getinfo_chunks(uid: u16, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     if chunks.is_empty() || scratch.len() < 2 {
         return 0;
     }
@@ -695,10 +664,7 @@ pub fn build_user_getinfo_chunks(
 /// *unencoded* (a deliberate mhxd convention — READ takes a raw login,
 /// MODIFY / DELETE take an hl_encoded one). Either way, the encoding
 /// decision belongs to the caller.
-pub fn build_account_read_chunks(
-    login: &[u8],
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_account_read_chunks(login: &[u8], chunks: &mut [HxChunk]) -> usize {
     if chunks.is_empty() || login.len() > u16::MAX as usize {
         return 0;
     }
@@ -718,10 +684,7 @@ pub fn build_account_read_chunks(
 /// shape as ACCOUNT_READ (a single `HTLC_DATA_LOGIN` chunk); the
 /// caller picks the header opcode. Returns 1 on success, 0 on a
 /// too-small chunks buffer or `login.len() > u16::MAX`.
-pub fn build_account_delete_chunks(
-    login: &[u8],
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_account_delete_chunks(login: &[u8], chunks: &mut [HxChunk]) -> usize {
     // Same wire shape as READ — reuse the helper.
     build_account_read_chunks(login, chunks)
 }
@@ -828,10 +791,7 @@ pub fn build_account_modify_chunks(
 /// Note: `HTLC_DATA_NEWS_POST` shares the 0x0065 tag with BODY / MSG /
 /// CHAT / AGREEMENT — same opcode-distinct reuse pattern the protocol
 /// uses everywhere. The Rust crate spells this as [`tag::BODY`].
-pub fn build_news_post_chunks(
-    body: &[u8],
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_news_post_chunks(body: &[u8], chunks: &mut [HxChunk]) -> usize {
     if chunks.is_empty() || body.len() > u16::MAX as usize {
         return 0;
     }
@@ -851,10 +811,7 @@ pub fn build_news_post_chunks(
 /// public wrapper picks the matching header type when handing the
 /// chunks to `hlwrite_chunks`. Returns 1 on success, 0 on too-small
 /// `chunks` slice or `path.len() > u16::MAX`.
-fn build_newspath_only_chunks(
-    path: &[u8],
-    chunks: &mut [HxChunk],
-) -> usize {
+fn build_newspath_only_chunks(path: &[u8], chunks: &mut [HxChunk]) -> usize {
     if chunks.is_empty() || path.len() > u16::MAX as usize {
         return 0;
     }
@@ -1008,13 +965,8 @@ pub struct NewsMakeCategoryRequest<'a> {
 /// u16::MAX`). NULL-pointer rejects live in the FFI shim
 /// `gtkhx_proto_build_news_mkcat_chunks` — at the Rust level the
 /// arguments are slices and a reference, so they can't be null.
-pub fn build_news_mkcat_chunks(
-    req: &NewsMakeCategoryRequest<'_>,
-    chunks: &mut [HxChunk],
-) -> usize {
-    if chunks.len() < 2
-        || req.path.len() > u16::MAX as usize
-        || req.name.len() > u16::MAX as usize
+pub fn build_news_mkcat_chunks(req: &NewsMakeCategoryRequest<'_>, chunks: &mut [HxChunk]) -> usize {
+    if chunks.len() < 2 || req.path.len() > u16::MAX as usize || req.name.len() > u16::MAX as usize
     {
         return 0;
     }
@@ -1242,21 +1194,13 @@ fn build_file_name_with_optional_dir_chunks(
 /// optional DIR. Returns 1 (no dir) or 2 (with dir) on success, or 0
 /// on validation failure (`chunks` too short, `name.len()` or
 /// `dir.len() > u16::MAX`).
-pub fn build_file_delete_chunks(
-    name: &[u8],
-    dir: Option<&[u8]>,
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_file_delete_chunks(name: &[u8], dir: Option<&[u8]>, chunks: &mut [HxChunk]) -> usize {
     build_file_name_with_optional_dir_chunks(name, dir, chunks)
 }
 
 /// Build the chunk array for `HTLC_HDR_FILE_GETINFO`. Same wire shape
 /// as FILE_DELETE.
-pub fn build_file_getinfo_chunks(
-    name: &[u8],
-    dir: Option<&[u8]>,
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_file_getinfo_chunks(name: &[u8], dir: Option<&[u8]>, chunks: &mut [HxChunk]) -> usize {
     build_file_name_with_optional_dir_chunks(name, dir, chunks)
 }
 
@@ -1319,13 +1263,8 @@ pub struct FileSetInfoRequest<'a> {
 /// failure (`chunks` slice too small for the chunks that will be
 /// emitted, or any of `name` / `rename` / `comment` / `dir` longer
 /// than `u16::MAX`).
-pub fn build_file_setinfo_chunks(
-    req: &FileSetInfoRequest<'_>,
-    chunks: &mut [HxChunk],
-) -> usize {
-    if req.name.len() > u16::MAX as usize
-        || req.rename.len() > u16::MAX as usize
-    {
+pub fn build_file_setinfo_chunks(req: &FileSetInfoRequest<'_>, chunks: &mut [HxChunk]) -> usize {
+    if req.name.len() > u16::MAX as usize || req.rename.len() > u16::MAX as usize {
         return 0;
     }
     if let Some(c) = req.comment {
@@ -1366,7 +1305,11 @@ pub fn build_file_setinfo_chunks(
         chunks[hc] = HxChunk {
             tag: tag::FILE_COMMENT,
             len: c.len() as u16,
-            data: if c.is_empty() { b"".as_ptr() } else { c.as_ptr() },
+            data: if c.is_empty() {
+                b"".as_ptr()
+            } else {
+                c.as_ptr()
+            },
         };
         hc += 1;
     }
@@ -1374,7 +1317,11 @@ pub fn build_file_setinfo_chunks(
         chunks[hc] = HxChunk {
             tag: tag::DIR,
             len: d.len() as u16,
-            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+            data: if d.is_empty() {
+                b"".as_ptr()
+            } else {
+                d.as_ptr()
+            },
         };
         hc += 1;
     }
@@ -1395,10 +1342,7 @@ pub struct FileMoveRequest<'a> {
 /// DIR_RENAME. 3 chunks; `chunks.len() >= 3`. No scratch needed.
 /// Returns 3 on success, 0 on validation failure (short slice or
 /// any field longer than `u16::MAX`).
-pub fn build_file_move_chunks(
-    req: &FileMoveRequest<'_>,
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_file_move_chunks(req: &FileMoveRequest<'_>, chunks: &mut [HxChunk]) -> usize {
     if chunks.len() < 3
         || req.name.len() > u16::MAX as usize
         || req.dir.len() > u16::MAX as usize
@@ -1452,10 +1396,7 @@ pub struct FileSymlinkRequest<'a> {
 /// DIR_RENAME + RENAME. 4 chunks. Returns 4 on success, 0 on
 /// validation failure (short slice or any field longer than
 /// `u16::MAX`).
-pub fn build_file_symlink_chunks(
-    req: &FileSymlinkRequest<'_>,
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_file_symlink_chunks(req: &FileSymlinkRequest<'_>, chunks: &mut [HxChunk]) -> usize {
     if chunks.len() < 4
         || req.name.len() > u16::MAX as usize
         || req.dir.len() > u16::MAX as usize
@@ -1566,7 +1507,11 @@ pub fn build_file_putfolder_chunks(
         chunks[hc] = HxChunk {
             tag: tag::DIR,
             len: d.len() as u16,
-            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+            data: if d.is_empty() {
+                b"".as_ptr()
+            } else {
+                d.as_ptr()
+            },
         };
         hc += 1;
     }
@@ -1626,10 +1571,7 @@ pub struct FileGetRequest<'a> {
 /// failure (`chunks` slice too small for the chunks that will be
 /// emitted, `name.len() > u16::MAX`, `dir.len() > u16::MAX`, or
 /// `rflt.is_some() && rflt.len() != 74`).
-pub fn build_file_get_chunks(
-    req: &FileGetRequest<'_>,
-    chunks: &mut [HxChunk],
-) -> usize {
+pub fn build_file_get_chunks(req: &FileGetRequest<'_>, chunks: &mut [HxChunk]) -> usize {
     if req.name.len() > u16::MAX as usize {
         return 0;
     }
@@ -1662,7 +1604,11 @@ pub fn build_file_get_chunks(
         chunks[hc] = HxChunk {
             tag: tag::DIR,
             len: d.len() as u16,
-            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+            data: if d.is_empty() {
+                b"".as_ptr()
+            } else {
+                d.as_ptr()
+            },
         };
         hc += 1;
     }
@@ -1751,7 +1697,11 @@ pub fn build_file_put_chunks(
         chunks[hc] = HxChunk {
             tag: tag::DIR,
             len: d.len() as u16,
-            data: if d.is_empty() { b"".as_ptr() } else { d.as_ptr() },
+            data: if d.is_empty() {
+                b"".as_ptr()
+            } else {
+                d.as_ptr()
+            },
         };
         hc += 1;
     }
@@ -2112,12 +2062,19 @@ mod tests {
         assert_eq!(chunks[1].tag, tag::BODY);
         assert_eq!(chunks[2].tag, tag::CHAT_ID);
         assert_eq!(chunks[2].len, 4);
-        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[2]) },
+            &[0xde, 0xad, 0xbe, 0xef]
+        );
     }
 
     #[test]
     fn chat_empty_body_is_legal() {
-        let req = ChatRequest { cid: 0, style: 0, body: b"" };
+        let req = ChatRequest {
+            cid: 0,
+            style: 0,
+            body: b"",
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 8];
         let hc = build_chat_chunks(&req, &mut chunks, &mut scratch);
@@ -2129,7 +2086,11 @@ mod tests {
 
     #[test]
     fn chat_rejects_short_chunks_buffer() {
-        let req = ChatRequest { cid: 1, style: 0, body: b"" };
+        let req = ChatRequest {
+            cid: 1,
+            style: 0,
+            body: b"",
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY]; // 2 < 3
         let mut scratch = [0u8; 8];
         assert_eq!(build_chat_chunks(&req, &mut chunks, &mut scratch), 0);
@@ -2137,7 +2098,11 @@ mod tests {
 
     #[test]
     fn chat_rejects_short_scratch_buffer() {
-        let req = ChatRequest { cid: 1, style: 0, body: b"" };
+        let req = ChatRequest {
+            cid: 1,
+            style: 0,
+            body: b"",
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4]; // 4 < 6
         assert_eq!(build_chat_chunks(&req, &mut chunks, &mut scratch), 0);
@@ -2145,7 +2110,10 @@ mod tests {
 
     #[test]
     fn msg_emits_uid_then_body() {
-        let req = MsgRequest { uid: 0x1234, body: b"hello" };
+        let req = MsgRequest {
+            uid: 0x1234,
+            body: b"hello",
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         let hc = build_msg_chunks(&req, &mut chunks, &mut scratch);
@@ -2171,7 +2139,9 @@ mod tests {
 
     #[test]
     fn broadcast_emits_just_body() {
-        let req = BroadcastRequest { body: b"server going down" };
+        let req = BroadcastRequest {
+            body: b"server going down",
+        };
         let mut chunks = [HxChunk::EMPTY];
         let hc = build_broadcast_chunks(&req, &mut chunks);
         assert_eq!(hc, 1);
@@ -2199,7 +2169,11 @@ mod tests {
     #[test]
     fn chat_rejects_body_larger_than_u16_max() {
         let big = vec![0u8; u16::MAX as usize + 1];
-        let req = ChatRequest { cid: 0, style: 0, body: &big };
+        let req = ChatRequest {
+            cid: 0,
+            style: 0,
+            body: &big,
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 8];
         assert_eq!(build_chat_chunks(&req, &mut chunks, &mut scratch), 0);
@@ -2208,7 +2182,11 @@ mod tests {
     #[test]
     fn chat_accepts_body_exactly_u16_max() {
         let big = vec![0u8; u16::MAX as usize];
-        let req = ChatRequest { cid: 0, style: 0, body: &big };
+        let req = ChatRequest {
+            cid: 0,
+            style: 0,
+            body: &big,
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 8];
         let hc = build_chat_chunks(&req, &mut chunks, &mut scratch);
@@ -2271,7 +2249,10 @@ mod tests {
         assert_eq!(hc, 2);
         assert_eq!(chunks[0].tag, tag::CHAT_ID);
         assert_eq!(chunks[0].len, 4);
-        assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, &[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[0]) },
+            &[0xde, 0xad, 0xbe, 0xef]
+        );
         assert_eq!(chunks[1].tag, tag::UID);
         assert_eq!(chunks[1].len, 2);
         assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0x00, 0x42]);
@@ -2299,12 +2280,9 @@ mod tests {
         // join, part, decline all wrap the same helper — verify each
         // emits a single CHAT_ID chunk with the BE-encoded cid.
         for &builder in &[
-            build_chat_join_chunks
-                as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
-            build_chat_part_chunks
-                as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
-            build_chat_decline_chunks
-                as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
+            build_chat_join_chunks as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
+            build_chat_part_chunks as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
+            build_chat_decline_chunks as fn(u32, &mut [HxChunk], &mut [u8]) -> usize,
         ] {
             let mut chunks = [HxChunk::EMPTY];
             let mut scratch = [0u8; 4];
@@ -2355,7 +2333,10 @@ mod tests {
 
     #[test]
     fn chat_subject_empty_subject_legal() {
-        let req = ChatSubjectRequest { cid: 1, subject: b"" };
+        let req = ChatSubjectRequest {
+            cid: 1,
+            subject: b"",
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         let hc = build_chat_subject_chunks(&req, &mut chunks, &mut scratch);
@@ -2366,7 +2347,10 @@ mod tests {
 
     #[test]
     fn chat_subject_rejects_short_buffers() {
-        let req = ChatSubjectRequest { cid: 1, subject: b"" };
+        let req = ChatSubjectRequest {
+            cid: 1,
+            subject: b"",
+        };
         let mut chunks_short = [HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         assert_eq!(
@@ -2453,7 +2437,10 @@ mod tests {
     #[test]
     fn chat_subject_rejects_subject_larger_than_u16_max() {
         let big = vec![0u8; u16::MAX as usize + 1];
-        let req = ChatSubjectRequest { cid: 1, subject: &big };
+        let req = ChatSubjectRequest {
+            cid: 1,
+            subject: &big,
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         assert_eq!(
@@ -2465,7 +2452,10 @@ mod tests {
     #[test]
     fn chat_subject_accepts_subject_exactly_u16_max() {
         let big = vec![b's'; u16::MAX as usize];
-        let req = ChatSubjectRequest { cid: 1, subject: &big };
+        let req = ChatSubjectRequest {
+            cid: 1,
+            subject: &big,
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         let hc = build_chat_subject_chunks(&req, &mut chunks, &mut scratch);
@@ -2525,7 +2515,10 @@ mod tests {
         assert_eq!(chunks[1].tag, tag::NAME);
         assert_eq!(chunks[2].tag, tag::COLOR);
         assert_eq!(chunks[2].len, 4);
-        assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &[0x00, 0xff, 0x88, 0x00]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[2]) },
+            &[0x00, 0xff, 0x88, 0x00]
+        );
     }
 
     #[test]
@@ -2575,17 +2568,17 @@ mod tests {
         };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 8];
-        assert_eq!(
-            build_user_change_chunks(&req, &mut chunks, &mut scratch),
-            0
-        );
+        assert_eq!(build_user_change_chunks(&req, &mut chunks, &mut scratch), 0);
     }
 
     // ---- user kick ----
 
     #[test]
     fn user_kick_no_ban_emits_just_uid() {
-        let req = UserKickRequest { uid: 0x1234, ban: 0 };
+        let req = UserKickRequest {
+            uid: 0x1234,
+            ban: 0,
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         let hc = build_user_kick_chunks(&req, &mut chunks, &mut scratch);
@@ -2599,7 +2592,10 @@ mod tests {
     fn user_kick_with_ban_emits_ban_then_uid() {
         // BAN comes BEFORE UID — matches the C call-site ordering, which
         // mhxd cares about (the kick handler reads chunks in order).
-        let req = UserKickRequest { uid: 0x1234, ban: 1 };
+        let req = UserKickRequest {
+            uid: 0x1234,
+            ban: 1,
+        };
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         let hc = build_user_kick_chunks(&req, &mut chunks, &mut scratch);
@@ -2726,7 +2722,10 @@ mod tests {
         assert_eq!(chunks[0].tag, tag::LOGIN);
         assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"admin");
         assert_eq!(chunks[1].tag, tag::PASSWORD);
-        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0x9e, 0x90, 0x93, 0x9e, 0x91]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[1]) },
+            &[0x9e, 0x90, 0x93, 0x9e, 0x91]
+        );
         assert_eq!(chunks[2].tag, tag::NAME);
         assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, b"Administrator");
         assert_eq!(chunks[3].tag, tag::ACCESS);
@@ -2899,12 +2898,18 @@ mod tests {
         assert_eq!(unsafe { chunk_bytes(&chunks[0]) }, b"/Articles");
         assert_eq!(chunks[1].tag, tag::THREADID);
         assert_eq!(chunks[1].len, 4);
-        assert_eq!(unsafe { chunk_bytes(&chunks[1]) }, &[0xde, 0xad, 0xbe, 0xef]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[1]) },
+            &[0xde, 0xad, 0xbe, 0xef]
+        );
     }
 
     #[test]
     fn news_delete_thread_rejects_short_buffers() {
-        let req = NewsDeleteThreadRequest { path: b"p", threadid: 1 };
+        let req = NewsDeleteThreadRequest {
+            path: b"p",
+            threadid: 1,
+        };
         let mut chunks_short = [HxChunk::EMPTY];
         let mut scratch = [0u8; 4];
         assert_eq!(
@@ -2987,17 +2992,26 @@ mod tests {
 
     #[test]
     fn news_mkcat_rejects_short_buffer_or_oversize_fields() {
-        let req = NewsMakeCategoryRequest { path: b"p", name: b"n" };
+        let req = NewsMakeCategoryRequest {
+            path: b"p",
+            name: b"n",
+        };
         let mut chunks_short = [HxChunk::EMPTY];
         assert_eq!(build_news_mkcat_chunks(&req, &mut chunks_short), 0);
 
         let big = vec![b'q'; u16::MAX as usize + 1];
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         // Oversize path.
-        let req_path = NewsMakeCategoryRequest { path: &big, name: b"n" };
+        let req_path = NewsMakeCategoryRequest {
+            path: &big,
+            name: b"n",
+        };
         assert_eq!(build_news_mkcat_chunks(&req_path, &mut chunks), 0);
         // Oversize name.
-        let req_name = NewsMakeCategoryRequest { path: b"p", name: &big };
+        let req_name = NewsMakeCategoryRequest {
+            path: b"p",
+            name: &big,
+        };
         assert_eq!(build_news_mkcat_chunks(&req_name, &mut chunks), 0);
     }
 
@@ -3027,7 +3041,10 @@ mod tests {
         assert_eq!(chunks[4].tag, tag::NEWSDATA);
         assert_eq!(unsafe { chunk_bytes(&chunks[4]) }, b"World");
         assert_eq!(chunks[5].tag, tag::THREADID);
-        assert_eq!(unsafe { chunk_bytes(&chunks[5]) }, &[0xca, 0xfe, 0xba, 0xbe]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[5]) },
+            &[0xca, 0xfe, 0xba, 0xbe]
+        );
     }
 
     #[test]
@@ -3122,8 +3139,7 @@ mod tests {
         // FILE_NAME first, then DIR — verified across all three
         // wrappers that share the helper.
         for &builder in &[
-            build_file_delete_chunks
-                as fn(&[u8], Option<&[u8]>, &mut [HxChunk]) -> usize,
+            build_file_delete_chunks as fn(&[u8], Option<&[u8]>, &mut [HxChunk]) -> usize,
             build_file_getinfo_chunks,
             build_file_getfolder_chunks,
         ] {
@@ -3154,10 +3170,7 @@ mod tests {
     fn file_name_with_dir_rejects_short_chunks_slice() {
         // With dir present, builder needs >= 2 slots.
         let mut chunks = [HxChunk::EMPTY];
-        assert_eq!(
-            build_file_getinfo_chunks(b"f", Some(b"d"), &mut chunks),
-            0
-        );
+        assert_eq!(build_file_getinfo_chunks(b"f", Some(b"d"), &mut chunks), 0);
     }
 
     #[test]
@@ -3184,21 +3197,12 @@ mod tests {
         let big = vec![b'q'; u16::MAX as usize + 1];
         let mut chunks = [HxChunk::EMPTY, HxChunk::EMPTY];
         // Oversize name.
-        assert_eq!(
-            build_file_delete_chunks(&big, Some(b"d"), &mut chunks),
-            0
-        );
+        assert_eq!(build_file_delete_chunks(&big, Some(b"d"), &mut chunks), 0);
         // Oversize dir.
-        assert_eq!(
-            build_file_delete_chunks(b"n", Some(&big), &mut chunks),
-            0
-        );
+        assert_eq!(build_file_delete_chunks(b"n", Some(&big), &mut chunks), 0);
         // Oversize name with no dir.
         let mut chunks_single = [HxChunk::EMPTY];
-        assert_eq!(
-            build_file_delete_chunks(&big, None, &mut chunks_single),
-            0
-        );
+        assert_eq!(build_file_delete_chunks(&big, None, &mut chunks_single), 0);
     }
 
     // ---- file setinfo ----
@@ -3766,7 +3770,10 @@ mod tests {
         assert_eq!(unsafe { chunk_bytes(&chunks[2]) }, &[0, 1]);
         assert_eq!(chunks[3].tag, tag::HTXF_SIZE);
         assert_eq!(chunks[3].len, 4);
-        assert_eq!(unsafe { chunk_bytes(&chunks[3]) }, &[0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(
+            unsafe { chunk_bytes(&chunks[3]) },
+            &[0xff, 0xff, 0xff, 0xff]
+        );
         assert_eq!(chunks[4].tag, tag::XFERSIZE64);
         assert_eq!(chunks[4].len, 8);
         assert_eq!(
@@ -3935,7 +3942,10 @@ mod tests {
 
         // Legacy variant fails closed for a >4 GiB size (no silent truncation).
         let mut out = [0u8; 24];
-        assert_eq!(build_htxf_preamble(&mut out, 1, 0x1_0000_0000, 1, 0, false), 0);
+        assert_eq!(
+            build_htxf_preamble(&mut out, 1, 0x1_0000_0000, 1, 0, false),
+            0
+        );
         // Too-small buffers return 0.
         assert_eq!(build_htxf_preamble(&mut [0u8; 15], 1, 1, 1, 0, false), 0);
         assert_eq!(build_htxf_preamble(&mut [0u8; 23], 1, 1, 1, 0, true), 0);

@@ -69,10 +69,10 @@ extern void disconnect_clicked (void);
  *   hx_panel_registry_register (panel);
  */
 extern GtkWidget *toolbar_dock;
-extern GtkWidget *toolbar_sidebar_frame;  /* News default */
-extern GtkWidget *toolbar_end_frame;      /* Users default */
-extern GtkWidget *toolbar_bottom_frame;   /* Tasks default */
-extern GtkWidget *toolbar_center_frame;   /* Chat + Files + News 1.5 default */
+extern GtkWidget *toolbar_sidebar_frame; /* News default */
+extern GtkWidget *toolbar_end_frame;     /* Users default */
+extern GtkWidget *toolbar_bottom_frame;  /* Tasks default */
+extern GtkWidget *toolbar_center_frame;  /* Chat + Files + News 1.5 default */
 
 /* register the hamburger-menu's GActions on the application.
  * Call from gtkhx_activate after the AdwApplication is constructed —

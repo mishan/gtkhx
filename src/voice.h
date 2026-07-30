@@ -62,9 +62,8 @@ extern gboolean hx_send_voice_leave (struct htlc_conn *htlc, guint32 cid);
 /* Send HTLC_HDR_VOICE_SDP_ANSWER (603). `sdp` must be a non-empty UTF-8
  * SDP blob; an empty answer is rejected at the builder. `sdp_len` is in
  * bytes and must not exceed 65535 (Hotline data-chunk wire limit). */
-extern gboolean hx_send_voice_sdp_answer (struct htlc_conn *htlc,
-                                          guint32 cid, const guint8 *sdp,
-                                          gsize sdp_len);
+extern gboolean hx_send_voice_sdp_answer (struct htlc_conn *htlc, guint32 cid,
+                                          const guint8 *sdp, gsize sdp_len);
 
 /* Send HTLC_HDR_VOICE_ICE (604). `ice` is the JSON-encoded
  * RTCIceCandidateInit (build via gtkhx_proto_build_voice_ice_json from

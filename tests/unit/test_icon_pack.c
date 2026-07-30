@@ -62,17 +62,16 @@ static void
 write_theme_icon (const char *config_dir, const char *theme,
                   const char *basename, int r, int g, int b)
 {
-    char *dir = g_build_filename (config_dir, "themes", theme, "icons",
-                                  NULL);
+    char *dir = g_build_filename (config_dir, "themes", theme, "icons", NULL);
     g_assert_cmpint (g_mkdir_with_parents (dir, 0700), ==, 0);
     char *path = g_build_filename (dir, basename, NULL);
 
     GdkPixbuf *pb = gdk_pixbuf_new (GDK_COLORSPACE_RGB, FALSE, 8, 1, 1);
     g_assert_nonnull (pb);
     guchar *pixels = gdk_pixbuf_get_pixels (pb);
-    pixels[0] = (guchar) r;
-    pixels[1] = (guchar) g;
-    pixels[2] = (guchar) b;
+    pixels[0] = (guchar)r;
+    pixels[1] = (guchar)g;
+    pixels[2] = (guchar)b;
 
     GError *err = NULL;
     gboolean ok = gdk_pixbuf_save (pb, path, "png", &err, NULL);

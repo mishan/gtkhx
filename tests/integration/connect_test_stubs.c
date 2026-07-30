@@ -47,11 +47,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/select.h>       /* FD_SETSIZE — see init_fd_table cap below */
+#include <sys/select.h> /* FD_SETSIZE — see init_fd_table cap below */
 #include <glib.h>
-#include <gtk/gtk.h>          /* session.h drags this in */
+#include <gtk/gtk.h> /* session.h drags this in */
 #include "compat.h"
-#include "hotline.h"            /* struct hl_hdr — Phase G replay recorder */
+#include "hotline.h" /* struct hl_hdr — Phase G replay recorder */
 #include "protocol.h"
 #include "hxconn_layout.h"
 #include "session.h"
@@ -112,19 +112,22 @@ gtkhx_config_dir (void)
 void
 hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
 {
-    (void) htlc; (void) cid; (void) subj;
+    (void)htlc;
+    (void)cid;
+    (void)subj;
 }
 
 void
 close_connected_windows (session *sess)
 {
-    (void) sess;
+    (void)sess;
 }
 
 void
 error_dialog (char *title, char *msg)
 {
-    (void) title; (void) msg;
+    (void)title;
+    (void)msg;
 }
 
 void
@@ -168,7 +171,7 @@ guint connect_test_rcv_count = 0;
  * the Phase G Tier 3 test prove the orchestrator advertised caps
  * end-to-end against a real cap-aware server. */
 gboolean connect_test_first_rcv_caps_present = FALSE;
-guint16  connect_test_first_rcv_caps_value = 0;
+guint16 connect_test_first_rcv_caps_value = 0;
 
 void connect_test_reset_rcv_record (void);
 void
@@ -200,11 +203,11 @@ connect_test_rcv_body (const guint8 *frame, gsize frame_len)
     }
     guint16 hc_be;
     guint32 len_be;
-    memcpy (&hc_be, frame + 20, 2);    /* hl_hdr.hc  @ offset 20 */
-    memcpy (&len_be, frame + 12, 4);   /* hl_hdr.len @ offset 12 */
+    memcpy (&hc_be, frame + 20, 2);  /* hl_hdr.hc  @ offset 20 */
+    memcpy (&len_be, frame + 12, 4); /* hl_hdr.len @ offset 12 */
     guint16 hc = GUINT16_FROM_BE (hc_be);
     guint32 wire_len = GUINT32_FROM_BE (len_be);
-    gsize body_len = wire_len >= 2 ? (gsize) (wire_len - 2) : 0;
+    gsize body_len = wire_len >= 2 ? (gsize)(wire_len - 2) : 0;
     gsize off = SIZEOF_HL_HDR;
     gsize end = SIZEOF_HL_HDR + body_len;
     if (end > frame_len) {
@@ -234,7 +237,7 @@ connect_test_rcv_body (const guint8 *frame, gsize frame_len)
             for (guint16 b = 0; b < dlen; b++) {
                 caps = (caps << 8) | frame[off + b];
             }
-            connect_test_first_rcv_caps_value = (guint16) caps;
+            connect_test_first_rcv_caps_value = (guint16)caps;
         }
         off += dlen;
     }
@@ -244,8 +247,8 @@ void
 hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                    guint32 type, guint32 trans, guint32 flag, guint32 body_len)
 {
-    (void) htlc;
-    (void) body_len;
+    (void)htlc;
+    (void)body_len;
     gboolean is_first = (connect_test_rcv_count == 0);
     if (is_first) {
         connect_test_first_rcv_type = type;
@@ -267,7 +270,7 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 void
 hx_post_login_fetches (struct htlc_conn *htlc)
 {
-    (void) htlc;
+    (void)htlc;
 }
 
 /* tasks.c stubs — production task_new allocates a struct task,
@@ -280,12 +283,26 @@ struct task *
 task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
           const char *str)
 {
-    (void) htlc; (void) rcv; (void) ptr; (void) data; (void) str;
+    (void)htlc;
+    (void)rcv;
+    (void)ptr;
+    (void)data;
+    (void)str;
     return NULL;
 }
 
-void task_update (session *sess, struct task *tsk) { (void) sess; (void) tsk; }
-void task_delete (session *sess, struct task *tsk) { (void) sess; (void) tsk; }
+void
+task_update (session *sess, struct task *tsk)
+{
+    (void)sess;
+    (void)tsk;
+}
+void
+task_delete (session *sess, struct task *tsk)
+{
+    (void)sess;
+    (void)tsk;
+}
 
 /* network.c::update_task looks up a task by trans on incoming
  * HTLS_HDR_TASK frames. The real test path doesn't trigger any
@@ -294,14 +311,16 @@ void task_delete (session *sess, struct task *tsk) { (void) sess; (void) tsk; }
 struct task *
 task_with_trans (session *sess, guint32 trans)
 {
-    (void) sess; (void) trans;
+    (void)sess;
+    (void)trans;
     return NULL;
 }
 
 void
 gtask_delete_tsk (session *sess, guint32 trans)
 {
-    (void) sess; (void) trans;
+    (void)sess;
+    (void)trans;
 }
 
 /* hlwrite_chunks — the production send primitive is now Rust (hxtask::send),
@@ -315,9 +334,9 @@ gtask_delete_tsk (session *sess, guint32 trans)
  * it only has to link). Forward-declared inline to avoid the proto_helpers.h /
  * hxnet_bridge.h header piles, same pattern as the stubs above. */
 struct hx_chunk;
-extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
-                              const struct hx_chunk *chunks, int hc,
-                              gsize *out_len);
+extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type,
+                              guint32 flag, const struct hx_chunk *chunks,
+                              int hc, gsize *out_len);
 extern gboolean hx_bridge_is_installed (void);
 extern int hx_bridge_send_frame (const guint8 *data, guint32 len);
 
@@ -336,7 +355,7 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
         /* Fail loudly if the bridge refuses the send (FULL/CLOSED/…) rather than
          * continue with a half-initialised connection that fails obscurely
          * later. `len` casts to the guint32 the FFI takes. */
-        int rc = hx_bridge_send_frame (buf, (guint32) len);
+        int rc = hx_bridge_send_frame (buf, (guint32)len);
         g_assert_cmpint (rc, ==, 0);
     }
     g_free (buf);
@@ -348,13 +367,19 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
 void
 track_prog_update (session *sess, char *str, int num, int total)
 {
-    (void) sess; (void) str; (void) num; (void) total;
+    (void)sess;
+    (void)str;
+    (void)num;
+    (void)total;
 }
 
 void
 trackconn_prog_update (session *sess, char *str, int num, int total)
 {
-    (void) sess; (void) str; (void) num; (void) total;
+    (void)sess;
+    (void)str;
+    (void)num;
+    (void)total;
 }
 
 /* users.c — referenced by hx_htlc_close. The test path with
@@ -362,7 +387,7 @@ trackconn_prog_update (session *sess, char *str, int num, int total)
 void
 hx_change_name_icon (struct htlc_conn *htlc)
 {
-    (void) htlc;
+    (void)htlc;
 }
 
 /* rcv_task_login is referenced by network.c via the RCV_TASK_FN
@@ -373,7 +398,10 @@ void
 rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
                 char *pass)
 {
-    (void) htlc; (void) frame; (void) frame_len; (void) pass;
+    (void)htlc;
+    (void)frame;
+    (void)frame_len;
+    (void)pass;
 }
 
 /* Phase 8.D runtime-wire stub. network.c::hx_htlc_close calls
@@ -385,7 +413,7 @@ extern void gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt);
 void
 gtkhx_voice_runtime_free (gtkhx_voice_runtime *rt)
 {
-    (void) rt;
+    (void)rt;
 }
 
 /* Speaker-indicator model stub. Same rationale as the runtime stub
@@ -398,5 +426,5 @@ extern void hx_voice_model_clear (HxVoiceModel *self);
 void
 hx_voice_model_clear (HxVoiceModel *self)
 {
-    (void) self;
+    (void)self;
 }

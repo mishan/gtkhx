@@ -64,8 +64,7 @@ fn sniff_svg(buf: &[u8]) -> bool {
         i = 3;
     }
     // Skip leading whitespace.
-    while i < buf.len()
-        && (buf[i] == b' ' || buf[i] == b'\t' || buf[i] == b'\n' || buf[i] == b'\r')
+    while i < buf.len() && (buf[i] == b' ' || buf[i] == b'\t' || buf[i] == b'\n' || buf[i] == b'\r')
     {
         i += 1;
     }
@@ -134,8 +133,7 @@ pub fn sniff(bytes: &[u8]) -> Format {
             return Format::Avif;
         }
         const HEIC_BRANDS: &[&[u8; 4]] = &[
-            b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs",
-            b"mif1",
+            b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1",
         ];
         if HEIC_BRANDS.iter().any(|b| brand == b.as_slice()) {
             return Format::Heic;
@@ -213,9 +211,7 @@ mod tests {
 
     #[test]
     fn png() {
-        let png = [
-            0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00,
-        ];
+        let png = [0x89u8, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00];
         assert_eq!(sniff(&png), Format::Png);
         assert!(format_is_allowed(Format::Png));
         assert_eq!(format_to_mime(Format::Png), Some("image/png"));
@@ -254,8 +250,7 @@ mod tests {
     #[test]
     fn heic_brands() {
         for brand in [
-            b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs",
-            b"mif1",
+            b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"hevm", b"hevs", b"mif1",
         ] {
             let mut buf = vec![0u8; 16];
             buf[4..8].copy_from_slice(b"ftyp");

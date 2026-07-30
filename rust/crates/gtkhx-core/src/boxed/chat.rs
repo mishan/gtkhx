@@ -189,7 +189,14 @@ unsafe extern "C" fn boxed_free(p: *mut c_void) {
 #[no_mangle]
 pub extern "C" fn hx_chat_event_get_type() -> GType {
     static TYPE: OnceLock<usize> = OnceLock::new();
-    unsafe { register_once(&TYPE, c"HxChatEvent".as_ptr(), Some(boxed_copy), Some(boxed_free)) }
+    unsafe {
+        register_once(
+            &TYPE,
+            c"HxChatEvent".as_ptr(),
+            Some(boxed_copy),
+            Some(boxed_free),
+        )
+    }
 }
 
 #[cfg(test)]
@@ -264,14 +271,20 @@ mod tests {
             assert_ne!(ma.id, mb.id);
             assert_ne!(ma.mime, mb.mime);
             assert_eq!(mb.id_len, 4);
-            assert_eq!(std::slice::from_raw_parts(mb.id, 4), &[0xDE, 0xAD, 0xBE, 0xEF]);
+            assert_eq!(
+                std::slice::from_raw_parts(mb.id, 4),
+                &[0xDE, 0xAD, 0xBE, 0xEF]
+            );
             assert_eq!(cstr(mb.mime, mb.mime_len), "image/png");
             assert_eq!(mb.width, 800);
             assert_eq!(mb.height_present, 1);
             // Free original; copy must remain intact.
             hx_chat_event_free(a);
             assert_eq!(cstr((*b).line, (*b).line_len), "alice: hello there");
-            assert_eq!(cstr((*(*b).media).mime, (*(*b).media).mime_len), "image/png");
+            assert_eq!(
+                cstr((*(*b).media).mime, (*(*b).media).mime_len),
+                "image/png"
+            );
             hx_chat_event_free(b);
         }
     }
@@ -308,7 +321,10 @@ mod tests {
             assert!(!b.is_null());
             assert_ne!(a, b);
             assert_eq!(cstr((*b).line, (*b).line_len), "bob: hi");
-            assert_eq!(cstr((*(*b).media).mime, (*(*b).media).mime_len), "image/png");
+            assert_eq!(
+                cstr((*(*b).media).mime, (*(*b).media).mime_len),
+                "image/png"
+            );
             glib::gobject_ffi::g_boxed_free(t, b as *mut c_void);
             hx_chat_event_free(a);
         }

@@ -112,17 +112,16 @@ pub unsafe extern "C" fn gtkhx_files_listing_current_path(
 /// `l` must be a live handle (NULL is a no-op). `path`, when non-null, must
 /// be a valid NUL-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_files_listing_set_path(
-    l: *mut RemoteListing,
-    path: *const c_char,
-) {
+pub unsafe extern "C" fn gtkhx_files_listing_set_path(l: *mut RemoteListing, path: *const c_char) {
     if l.is_null() {
         return;
     }
     let p = if path.is_null() {
         String::new()
     } else {
-        core::ffi::CStr::from_ptr(path).to_string_lossy().into_owned()
+        core::ffi::CStr::from_ptr(path)
+            .to_string_lossy()
+            .into_owned()
     };
     (*l).set_path(&p);
 }
@@ -183,7 +182,9 @@ pub unsafe extern "C" fn gtkhx_files_listing_child(
     let n = if name.is_null() {
         String::new()
     } else {
-        core::ffi::CStr::from_ptr(name).to_string_lossy().into_owned()
+        core::ffi::CStr::from_ptr(name)
+            .to_string_lossy()
+            .into_owned()
     };
     string_into_raw((*l).child(&n))
 }
@@ -322,7 +323,10 @@ mod tests {
             // child at root, then adopt it
             let uploads = std::ffi::CString::new("Uploads").unwrap();
             let child = gtkhx_files_listing_child(l, uploads.as_ptr());
-            assert_eq!(core::ffi::CStr::from_ptr(child).to_str().unwrap(), "/Uploads");
+            assert_eq!(
+                core::ffi::CStr::from_ptr(child).to_str().unwrap(),
+                "/Uploads"
+            );
             gtkhx_files_listing_set_path(l, child);
             gtkhx_files_string_free(child);
 

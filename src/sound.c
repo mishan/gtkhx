@@ -59,7 +59,7 @@ sound_resolve (const char *name)
     }
     g_free (candidate);
 
-    for (const gchar * const *d = g_get_system_data_dirs (); d && *d; d++) {
+    for (const gchar *const *d = g_get_system_data_dirs (); d && *d; d++) {
         candidate = g_build_filename (*d, "gtkhx", "sounds", name, NULL);
         if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
             return candidate;
@@ -70,7 +70,8 @@ sound_resolve (const char *name)
 #ifdef G_OS_WIN32
     {
         /* …\bin\gtkhx.exe -> install root; find <root>\share\gtkhx\sounds. */
-        char *root = g_win32_get_package_installation_directory_of_module (NULL);
+        char *root
+            = g_win32_get_package_installation_directory_of_module (NULL);
         if (root) {
             candidate = g_build_filename (root, "share", "gtkhx", "sounds",
                                           name, NULL);
@@ -83,7 +84,8 @@ sound_resolve (const char *name)
     }
 #endif
 
-    candidate = g_build_filename (PREFIX, "share", "gtkhx", "sounds", name, NULL);
+    candidate
+        = g_build_filename (PREFIX, "share", "gtkhx", "sounds", name, NULL);
     if (g_file_test (candidate, G_FILE_TEST_EXISTS)) {
         return candidate;
     }

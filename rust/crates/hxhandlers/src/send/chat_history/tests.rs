@@ -101,22 +101,40 @@ fn bare_request_is_channel_only() {
 fn before_cursor_and_limit() {
     reset(/*cap=*/ true);
     assert_eq!(
-        unsafe { hx_get_chat_history(HTLC, 0, /*before=*/ 1000, /*after=*/ 0, /*limit=*/ 50) },
+        unsafe {
+            hx_get_chat_history(
+                HTLC, 0, /*before=*/ 1000, /*after=*/ 0, /*limit=*/ 50,
+            )
+        },
         GTRUE
     );
     let s = last().expect("sent");
     assert_eq!(chunk(&s, tag::CHANNEL_ID), Some(&vec![0, 0, 0, 0]));
-    assert_eq!(chunk(&s, tag::HISTORY_BEFORE), Some(&1000u64.to_be_bytes().to_vec()));
-    assert_eq!(chunk(&s, tag::HISTORY_LIMIT), Some(&50u16.to_be_bytes().to_vec()));
+    assert_eq!(
+        chunk(&s, tag::HISTORY_BEFORE),
+        Some(&1000u64.to_be_bytes().to_vec())
+    );
+    assert_eq!(
+        chunk(&s, tag::HISTORY_LIMIT),
+        Some(&50u16.to_be_bytes().to_vec())
+    );
     assert!(chunk(&s, tag::HISTORY_AFTER).is_none()); // after omitted when 0
 }
 
 #[test]
 fn after_cursor_only() {
     reset(/*cap=*/ true);
-    assert_eq!(unsafe { hx_get_chat_history(HTLC, 0, 0, /*after=*/ 5000, 0) }, GTRUE);
+    assert_eq!(
+        unsafe {
+            hx_get_chat_history(HTLC, 0, 0, /*after=*/ 5000, 0)
+        },
+        GTRUE
+    );
     let s = last().expect("sent");
-    assert_eq!(chunk(&s, tag::HISTORY_AFTER), Some(&5000u64.to_be_bytes().to_vec()));
+    assert_eq!(
+        chunk(&s, tag::HISTORY_AFTER),
+        Some(&5000u64.to_be_bytes().to_vec())
+    );
     assert!(chunk(&s, tag::HISTORY_BEFORE).is_none());
     assert!(chunk(&s, tag::HISTORY_LIMIT).is_none());
 }
@@ -125,7 +143,11 @@ fn after_cursor_only() {
 fn range_query_has_before_after_limit() {
     reset(/*cap=*/ true);
     assert_eq!(
-        unsafe { hx_get_chat_history(HTLC, 0, /*before=*/ 600, /*after=*/ 200, /*limit=*/ 50) },
+        unsafe {
+            hx_get_chat_history(
+                HTLC, 0, /*before=*/ 600, /*after=*/ 200, /*limit=*/ 50,
+            )
+        },
         GTRUE
     );
     let s = last().expect("sent");

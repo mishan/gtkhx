@@ -41,12 +41,7 @@ extern "C" {
         access: u64,
     );
     fn hx_useredit_delete(htlc: *mut c_void, login: *const c_char);
-    fn hx_useredit_open(
-        htlc: *mut c_void,
-        login: *const c_char,
-        cb: UserOpenCb,
-        uesp: *mut c_void,
-    );
+    fn hx_useredit_open(htlc: *mut c_void, login: *const c_char, cb: UserOpenCb, uesp: *mut c_void);
     // gtkhx_ui_bridge.c — &hx_active_session()->htlc.
     fn gtkhx_active_htlc() -> *mut c_void;
 }
@@ -124,7 +119,8 @@ impl UserEdit {
 const GENERATED_PASSWORD_LEN: usize = 16;
 
 fn gen_password(len: usize) -> Option<String> {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%^&*()-_=+?";
+    const ALPHABET: &[u8] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!#$%^&*()-_=+?";
     let alpha = ALPHABET.len();
     let limit = (256 / alpha) * alpha;
     let mut out = String::with_capacity(len);

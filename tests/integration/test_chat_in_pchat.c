@@ -58,17 +58,16 @@ test_chat_in_pchat_routes_to_member (void)
                                                      &chat_id, 64));
 
     /* Bob drains for the invite. */
-    g_assert_true (integration_drain_until_chat_invite (
-        fd_b, &htlc_b, 64));
+    g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
 
     /* Bob joins. */
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
-    guint32 cid_be = g_htonl(chat_id);
+    guint32 cid_be = g_htonl (chat_id);
 
     /* Drain Alice's CHAT_USER_CHANGE so the next-event-on-Alice
-	 * search isn't fooled by the stale join broadcast. We don't
-	 * fail the test if it never arrives — at worst the chat-message
-	 * assertion below catches a real bug. */
+     * search isn't fooled by the stale join broadcast. We don't
+     * fail the test if it never arrives — at worst the chat-message
+     * assertion below catches a real bug. */
     (void)integration_drain_until_type (fd_a, &htlc_a,
                                         HTLS_HDR_CHAT_USER_CHANGE, 64);
 
@@ -90,15 +89,16 @@ test_chat_in_pchat_routes_to_member (void)
         }
 
         struct hx_chat_msg cm = { 0 };
-        if (!hx_chat_extract (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos, &cm)) {
+        if (!hx_chat_extract (hx_test_in (&htlc_b)->buf,
+                              hx_test_in (&htlc_b)->pos, &cm)) {
             continue;
         }
         if (cm.cid != chat_id) {
             continue;
         }
         /* Body should contain our payload. mhxd may add a
-		 * "<name>:" prefix to the chat line per the chat handler;
-		 * substring-match is the right contract. */
+         * "<name>:" prefix to the chat line per the chat handler;
+         * substring-match is the right contract. */
         g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, body));
         bob_got_chat = TRUE;
     }

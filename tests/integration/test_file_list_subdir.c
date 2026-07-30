@@ -48,7 +48,7 @@ build_hldir_one (const char *name, guint16 *outlen)
     guint8 nlen = (guint8)strlen (name);
     guint16 total = 2 + 3 + nlen;
     guint8 *buf = g_malloc (total);
-    guint16 count = g_htons(1);
+    guint16 count = g_htons (1);
 
     memcpy (buf, &count, 2);
     /* enc = 0 */
@@ -80,21 +80,23 @@ test_file_list_subdir_uploads (void)
         (int)hldirlen, hldir));
     g_free (hldir);
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     guint32 flag = hdr_flag (&htlc);
     if (flag & 1) {
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                           hx_test_in (&htlc)->pos, err,
+                                           sizeof (err), &err_len));
         g_test_message ("server returned task-error for "
                         "FILE_LIST Uploads/: \"%s\" "
                         "(check Dockerfile creates the dir)",
                         err);
     } else {
         int n = 0;
-        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+        dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
         {
             if (_type == HTLS_DATA_FILE_LIST) {
                 n++;

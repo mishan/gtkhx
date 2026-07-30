@@ -51,13 +51,13 @@ pub struct HxConversation {
 /// `hx_conversation_free`.
 #[no_mangle]
 pub extern "C" fn hx_conversation_new(cid: u32) -> *mut HxConversation {
-    let mm: *mut glib::gobject_ffi::GObject =
-        HxMemberModel::new().upcast::<glib::Object>().into_glib_ptr();
+    let mm: *mut glib::gobject_ffi::GObject = HxMemberModel::new()
+        .upcast::<glib::Object>()
+        .into_glib_ptr();
     let member_model = mm as *mut c_void;
     // SAFETY: hx_input_history_new / hx_media_table_new are the C-ABI
     // constructors from hxchat-model / gtkhx-boxed; each returns an owned handle.
-    let (chat_history, media_table) =
-        unsafe { (hx_input_history_new(), hx_media_table_new()) };
+    let (chat_history, media_table) = unsafe { (hx_input_history_new(), hx_media_table_new()) };
     Box::into_raw(Box::new(HxConversation {
         cid,
         subject: [0; 256],
@@ -81,8 +81,7 @@ pub unsafe extern "C" fn hx_conversation_free(conv: *mut HxConversation) {
     }
     let conv = Box::from_raw(conv);
     if !conv.member_model.is_null() {
-        let _: glib::Object =
-            from_glib_full(conv.member_model as *mut glib::gobject_ffi::GObject);
+        let _: glib::Object = from_glib_full(conv.member_model as *mut glib::gobject_ffi::GObject);
     }
     if !conv.chat_history.is_null() {
         hx_input_history_free(conv.chat_history);
@@ -136,7 +135,11 @@ pub unsafe extern "C" fn hx_chat_set_subject(
         return;
     }
     let buf = &mut (*conv).subject;
-    let n = if s.is_null() { 0 } else { len.min(buf.len() - 1) };
+    let n = if s.is_null() {
+        0
+    } else {
+        len.min(buf.len() - 1)
+    };
     if n > 0 {
         std::ptr::copy_nonoverlapping(s, buf.as_mut_ptr(), n);
     }

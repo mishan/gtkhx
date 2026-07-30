@@ -62,13 +62,9 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::mem;
 
+use crate::action::{Action, SignalKind, SignalPayload, TimerKind, WireFrameBody};
+use crate::event::{ConnectionState, Event, Participant, ServerError, Timeout};
 use hashbrown::HashMap;
-use crate::action::{
-    Action, SignalKind, SignalPayload, TimerKind, WireFrameBody,
-};
-use crate::event::{
-    ConnectionState, Event, Participant, ServerError, Timeout,
-};
 
 /// What the machine is currently doing.
 ///
@@ -287,9 +283,7 @@ impl SessionMachine {
                 // through cleanly for that case; we only short-
                 // circuit on a stuck UI re-fire against a still-
                 // live session.
-                if self.state != SessionState::Leaving
-                    && self.active_cid == Some(cid)
-                {
+                if self.state != SessionState::Leaving && self.active_cid == Some(cid) {
                     return Vec::new();
                 }
                 // Cancel every armed timer kind (the runtime
@@ -382,12 +376,18 @@ impl SessionMachine {
                     // pipeline has been torn down, which the runtime
                     // would then dispatch back into a torn-down
                     // SessionMachine.
-                    actions.push(Action::CancelTimer { kind: TimerKind::JoinReply });
-                    actions.push(Action::CancelTimer { kind: TimerKind::Dtls });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::JoinReply,
+                    });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::Dtls,
+                    });
                     actions.push(Action::CancelTimer {
                         kind: TimerKind::IceConnectivity,
                     });
-                    actions.push(Action::CancelTimer { kind: TimerKind::Media });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::Media,
+                    });
                     actions.push(Action::SendWireFrame {
                         opcode: HTLC_HDR_VOICE_LEAVE,
                         body: WireFrameBody(encode_cid_only(cid)),
@@ -417,7 +417,9 @@ impl SessionMachine {
                 let inactive = Self::inactive_recv_mids(&sdp);
                 self.bind_cid_for_offer(cid);
                 self.set_state(SessionState::OfferPending, move |actions| {
-                    actions.push(Action::CancelTimer { kind: TimerKind::JoinReply });
+                    actions.push(Action::CancelTimer {
+                        kind: TimerKind::JoinReply,
+                    });
                     for mid in inactive {
                         actions.push(Action::StopReceivePipeline { mid });
                     }
@@ -507,10 +509,7 @@ impl SessionMachine {
             // OfferPending so the queued offer's answer flow can
             // proceed. Only when the queue is empty do we walk to
             // Connecting + arm the DTLS / ICE timers.
-            (
-                SessionState::OfferPending,
-                Event::WebrtcAnswerCreated { sdp },
-            ) => {
+            (SessionState::OfferPending, Event::WebrtcAnswerCreated { sdp }) => {
                 let cid = self.active_cid.unwrap_or(0);
                 // The wire-format build runs in the runtime layer
                 // (we don't link hotline-proto here to keep the
@@ -546,17 +545,14 @@ impl SessionMachine {
                 // fall through to the normal Connecting
                 // transition so the current answer still
                 // progresses the session.
-                if let Some((queued_cid, queued_sdp)) = self.queued_offer.take()
-                {
+                if let Some((queued_cid, queued_sdp)) = self.queued_offer.take() {
                     if self.active_cid == Some(queued_cid) {
                         self.cache_offer_mids(&queued_sdp);
                         for mid in Self::inactive_recv_mids(&queued_sdp) {
-                            answer_actions
-                                .push(Action::StopReceivePipeline { mid });
+                            answer_actions.push(Action::StopReceivePipeline { mid });
                         }
                         self.bind_cid_for_offer(queued_cid);
-                        answer_actions
-                            .push(Action::SetRemoteDescription { sdp: queued_sdp });
+                        answer_actions.push(Action::SetRemoteDescription { sdp: queued_sdp });
                         answer_actions.push(Action::CreateAnswer);
                         return answer_actions;
                     }
@@ -595,10 +591,11 @@ impl SessionMachine {
             // already left would otherwise leak into the current
             // session's webrtcbin and corrupt the ICE table.
             (
-                SessionState::Connecting
-                | SessionState::Connected
-                | SessionState::OfferPending,
-                Event::IceCandidateReceived { cid, candidate_json },
+                SessionState::Connecting | SessionState::Connected | SessionState::OfferPending,
+                Event::IceCandidateReceived {
+                    cid,
+                    candidate_json,
+                },
             ) => {
                 if self.active_cid != Some(cid) {
                     return Vec::new();
@@ -610,9 +607,7 @@ impl SessionMachine {
             // WebRTC stack uses it for diagnostics but doesn't
             // strictly require it. Same cid filter as ICE.
             (
-                SessionState::Connecting
-                | SessionState::Connected
-                | SessionState::OfferPending,
+                SessionState::Connecting | SessionState::Connected | SessionState::OfferPending,
                 Event::EndOfRemoteCandidates { cid },
             ) => {
                 if self.active_cid != Some(cid) {
@@ -623,9 +618,7 @@ impl SessionMachine {
 
             // Local candidate; ship over 604.
             (
-                SessionState::Connecting
-                | SessionState::Connected
-                | SessionState::OfferPending,
+                SessionState::Connecting | SessionState::Connected | SessionState::OfferPending,
                 Event::WebrtcLocalIceGathered { candidate_json },
             ) => {
                 let cid = self.active_cid.unwrap_or(0);
@@ -667,13 +660,10 @@ impl SessionMachine {
             // lose the audio leg for the entire renegotiation
             // cycle.
             (
-                SessionState::OfferPending
-                | SessionState::Connecting
-                | SessionState::Connected,
+                SessionState::OfferPending | SessionState::Connecting | SessionState::Connected,
                 Event::WebrtcPadAdded { mid },
             ) => {
-                let user_id =
-                    self.mid_to_user.get(&mid).copied().unwrap_or(0);
+                let user_id = self.mid_to_user.get(&mid).copied().unwrap_or(0);
                 vec![Action::StartReceivePipeline { mid, user_id }]
             }
 
@@ -692,9 +682,7 @@ impl SessionMachine {
             // mid-renegotiation when the new remote description
             // removes a media line.
             (
-                SessionState::OfferPending
-                | SessionState::Connecting
-                | SessionState::Connected,
+                SessionState::OfferPending | SessionState::Connecting | SessionState::Connected,
                 Event::WebrtcPadRemoved { mid },
             ) => vec![Action::StopReceivePipeline { mid }],
 
@@ -725,9 +713,7 @@ impl SessionMachine {
                     kind: SignalKind::RoomStatus,
                     payload: SignalPayload::RoomStatus {
                         cid,
-                        connection_state: connection_state_for_session(
-                            self.state,
-                        ),
+                        connection_state: connection_state_for_session(self.state),
                     },
                 }]
             }
@@ -778,7 +764,9 @@ impl SessionMachine {
                     state: ConnectionState::Connected,
                 },
             ) => self.set_state(SessionState::Connected, |actions| {
-                actions.push(Action::CancelTimer { kind: TimerKind::Dtls });
+                actions.push(Action::CancelTimer {
+                    kind: TimerKind::Dtls,
+                });
                 actions.push(Action::CancelTimer {
                     kind: TimerKind::IceConnectivity,
                 });
@@ -790,9 +778,7 @@ impl SessionMachine {
 
             // Failure on the active connection — tear down.
             (
-                SessionState::Connecting
-                | SessionState::Connected
-                | SessionState::OfferPending,
+                SessionState::Connecting | SessionState::Connected | SessionState::OfferPending,
                 Event::WebrtcConnectionStateChanged {
                     state: ConnectionState::Failed,
                 },
@@ -805,17 +791,18 @@ impl SessionMachine {
             // down — without those there's no voice session.
             // MUTE / ICE / LEAVE errors are benign rollbacks; we
             // log via the toast but stay where we are.
-            (_, Event::ServerTaskError(err)) => {
-                self.handle_server_error(err)
-            }
+            (_, Event::ServerTaskError(err)) => self.handle_server_error(err),
 
             // ---- Timeouts ----
 
             // Join reply didn't arrive — server's wedged. Tear
             // down.
-            (SessionState::JoinSent, Event::Timeout { kind: Timeout::JoinReply }) => {
-                self.fail("Server did not reply to voice join".into())
-            }
+            (
+                SessionState::JoinSent,
+                Event::Timeout {
+                    kind: Timeout::JoinReply,
+                },
+            ) => self.fail("Server did not reply to voice join".into()),
 
             // ICE / DTLS / Media watchdogs.
             //
@@ -845,7 +832,9 @@ impl SessionMachine {
             // quick unblock.
             (
                 SessionState::Connecting | SessionState::Connected,
-                Event::Timeout { kind: Timeout::IceConnectivity },
+                Event::Timeout {
+                    kind: Timeout::IceConnectivity,
+                },
             ) => vec![Action::EmitSignal {
                 kind: SignalKind::Error,
                 payload: SignalPayload::Error {
@@ -862,18 +851,21 @@ impl SessionMachine {
             }],
             (
                 SessionState::Connecting,
-                Event::Timeout { kind: Timeout::Dtls },
+                Event::Timeout {
+                    kind: Timeout::Dtls,
+                },
             ) => vec![Action::EmitSignal {
                 kind: SignalKind::Error,
                 payload: SignalPayload::Error {
-                    text: concat!(
-                        "Voice DTLS handshake slow — ",
-                        "keeping session alive",
-                    )
-                    .into(),
+                    text: concat!("Voice DTLS handshake slow — ", "keeping session alive",).into(),
                 },
             }],
-            (SessionState::Connected, Event::Timeout { kind: Timeout::Media }) => {
+            (
+                SessionState::Connected,
+                Event::Timeout {
+                    kind: Timeout::Media,
+                },
+            ) => {
                 // Soften the Media timer to match the DTLS / ICE
                 // treatment above: emit an Error toast (so the user
                 // sees something if media really has stalled) but
@@ -915,15 +907,18 @@ impl SessionMachine {
             // response. Outside of Connecting, the runtime cancels
             // the watchdog, so seeing this in any other state is
             // a late delivery race that the catch-all swallows.
-            (SessionState::Connecting, Event::Timeout { kind: Timeout::WedgeDeadline }) => {
-                self.fail(
-                    concat!(
-                        "Voice connection wedged — no media received ",
-                        "during the runtime's wedge-watchdog window",
-                    )
-                    .into(),
+            (
+                SessionState::Connecting,
+                Event::Timeout {
+                    kind: Timeout::WedgeDeadline,
+                },
+            ) => self.fail(
+                concat!(
+                    "Voice connection wedged — no media received ",
+                    "during the runtime's wedge-watchdog window",
                 )
-            }
+                .into(),
+            ),
 
             // ---- Catch-all ----
 
@@ -989,14 +984,21 @@ impl SessionMachine {
         let mut actions = vec![Action::CancelTimer {
             kind: TimerKind::JoinReply,
         }];
-        if matches!(prior_state, SessionState::Connecting | SessionState::Connected) {
-            actions.push(Action::CancelTimer { kind: TimerKind::Dtls });
+        if matches!(
+            prior_state,
+            SessionState::Connecting | SessionState::Connected
+        ) {
+            actions.push(Action::CancelTimer {
+                kind: TimerKind::Dtls,
+            });
             actions.push(Action::CancelTimer {
                 kind: TimerKind::IceConnectivity,
             });
         }
         if matches!(prior_state, SessionState::Connected) {
-            actions.push(Action::CancelTimer { kind: TimerKind::Media });
+            actions.push(Action::CancelTimer {
+                kind: TimerKind::Media,
+            });
         }
         actions.push(Action::EmitSignal {
             kind: SignalKind::Error,
@@ -1027,9 +1029,7 @@ impl SessionMachine {
         match err.origin_opcode {
             // JOIN / SDP_ANSWER errors = no voice session. Tear
             // down with the server-supplied text.
-            HTLC_HDR_VOICE_JOIN | HTLC_HDR_VOICE_SDP_ANSWER => {
-                self.fail(err.text)
-            }
+            HTLC_HDR_VOICE_JOIN | HTLC_HDR_VOICE_SDP_ANSWER => self.fail(err.text),
             // MUTE / ICE / LEAVE: surface as toast only, no
             // state change. We could roll mute state back here,
             // but the spec doesn't require it and "mute didn't
@@ -1057,8 +1057,7 @@ impl SessionMachine {
                     }
                     if let Ok(uid) = uid_str.parse::<u32>() {
                         if (1..=u16::MAX as u32).contains(&uid) {
-                            self.mid_to_user
-                                .insert(rest.to_string(), uid as u16);
+                            self.mid_to_user.insert(rest.to_string(), uid as u16);
                         }
                     }
                 }
@@ -1158,9 +1157,9 @@ fn encode_cid_plus_muted(cid: u32, muted: bool) -> Vec<u8> {
 fn connection_state_for_session(s: SessionState) -> ConnectionState {
     match s {
         SessionState::Idle => ConnectionState::Closed,
-        SessionState::JoinSent
-        | SessionState::OfferPending
-        | SessionState::Connecting => ConnectionState::Connecting,
+        SessionState::JoinSent | SessionState::OfferPending | SessionState::Connecting => {
+            ConnectionState::Connecting
+        }
         SessionState::Connected => ConnectionState::Connected,
         // Leaving is the post-fail() collapse state — the
         // session has *ended* on its current room, even though
@@ -1249,7 +1248,10 @@ mod tests {
         }
         assert!(matches!(
             acts[1],
-            Action::ArmTimer { kind: Timeout::JoinReply, .. }
+            Action::ArmTimer {
+                kind: Timeout::JoinReply,
+                ..
+            }
         ));
         assert_eq!(drain_state_changed(&acts), Some(SessionState::JoinSent));
     }
@@ -1262,7 +1264,9 @@ mod tests {
             cid: 7,
             sdp: "v=0\na=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -1307,7 +1311,9 @@ mod tests {
             cid: 0,
             sdp: "v=0\na=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -1322,10 +1328,9 @@ mod tests {
         let acts = m.step(Event::JoinRequested { cid: 0 });
         assert_eq!(m.state(), SessionState::JoinSent);
         assert_eq!(m.active_cid(), Some(0));
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 600, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 600, .. })));
         assert!(acts.iter().any(|a| matches!(
             a,
             Action::EmitSignal {
@@ -1357,10 +1362,9 @@ mod tests {
         let acts = m.step(Event::JoinRequested { cid: 5 });
         assert_eq!(m.state(), SessionState::JoinSent);
         assert_eq!(m.active_cid(), Some(5));
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 600, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 600, .. })));
     }
 
     /// Regression (Copilot review): Event::JoinRequested docs
@@ -1379,7 +1383,9 @@ mod tests {
             cid: 1,
             sdp: "a=mid:user-5\na=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -1396,13 +1402,15 @@ mod tests {
         assert_eq!(m.participant_count(), 0);
         // TearDown + 600 for new cid + JoinReply timer armed.
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 600, .. })));
         assert!(acts.iter().any(|a| matches!(
             a,
-            Action::SendWireFrame { opcode: 600, .. }
-        )));
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::ArmTimer { kind: Timeout::JoinReply, .. }
+            Action::ArmTimer {
+                kind: Timeout::JoinReply,
+                ..
+            }
         )));
     }
 
@@ -1417,7 +1425,9 @@ mod tests {
             cid: 7,
             sdp: "v=0\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -1447,8 +1457,13 @@ mod tests {
     fn leave_cancels_every_armed_timer() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -1488,10 +1503,15 @@ mod tests {
         assert_eq!(m.mid_to_user.get("user-12").copied(), Some(12));
         // Should: cancel JoinReply, SetRemoteDescription, CreateAnswer,
         // StateChanged.
+        assert!(acts.iter().any(|a| matches!(
+            a,
+            Action::CancelTimer {
+                kind: Timeout::JoinReply
+            }
+        )));
         assert!(acts
             .iter()
-            .any(|a| matches!(a, Action::CancelTimer { kind: Timeout::JoinReply })));
-        assert!(acts.iter().any(|a| matches!(a, Action::SetRemoteDescription { .. })));
+            .any(|a| matches!(a, Action::SetRemoteDescription { .. })));
         assert!(acts.iter().any(|a| matches!(a, Action::CreateAnswer)));
     }
 
@@ -1507,7 +1527,10 @@ mod tests {
         // state machine.
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 5 });
-        m.step(Event::SdpOfferReceived { cid: 5, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 5,
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(m.state(), SessionState::OfferPending);
 
         // Second offer arrives mid-pending: enqueue, no actions.
@@ -1563,8 +1586,7 @@ mod tests {
         let set_local_pos = kinds.iter().position(|k| *k == "set_local");
         let send_603_pos = kinds.iter().position(|k| *k == "send_603");
         let set_remote_pos = kinds.iter().position(|k| *k == "set_remote");
-        let create_answer_pos =
-            kinds.iter().position(|k| *k == "create_answer");
+        let create_answer_pos = kinds.iter().position(|k| *k == "create_answer");
         assert!(
             set_local_pos < set_remote_pos,
             "SetLocalDescription must precede the queued \
@@ -1595,8 +1617,13 @@ mod tests {
         // the joiner ("second participant not heard at all").
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 5 });
-        m.step(Event::SdpOfferReceived { cid: 5, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 5,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(
             m.state(),
             SessionState::Connecting,
@@ -1645,7 +1672,9 @@ mod tests {
                   m=audio 9 x\na=mid:user-5\na=sendonly\n"
                 .into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(m.state(), SessionState::Connecting);
 
         // user-5 leaves: its section flips to a=inactive.
@@ -1655,9 +1684,9 @@ mod tests {
                   m=audio 9 x\na=mid:user-5\na=inactive\n"
                 .into(),
         });
-        let stop_pos = acts.iter().position(|a| {
-            matches!(a, Action::StopReceivePipeline { mid } if mid == "user-5")
-        });
+        let stop_pos = acts
+            .iter()
+            .position(|a| matches!(a, Action::StopReceivePipeline { mid } if mid == "user-5"));
         assert!(
             stop_pos.is_some(),
             "expected StopReceivePipeline for inactivated user-5; got {acts:?}"
@@ -1683,7 +1712,9 @@ mod tests {
                   m=audio 9 x\na=mid:user-5\na=sendonly\n"
                 .into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::SdpOfferReceived {
             cid: 7,
             sdp: "v=0\nm=audio 9 x\na=mid:send\na=recvonly\n\
@@ -1703,7 +1734,10 @@ mod tests {
     fn answer_created_emits_set_local_send_603_and_arms_watchdogs() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 3 });
-        m.step(Event::SdpOfferReceived { cid: 3, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 3,
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcAnswerCreated {
             sdp: "v=0\no=- 1 1 IN IP4 0.0.0.0\n".into(),
         });
@@ -1716,10 +1750,14 @@ mod tests {
             match a {
                 Action::SetLocalDescription { .. } => saw_set_local = true,
                 Action::SendWireFrame { opcode: 603, .. } => saw_send_603 = true,
-                Action::ArmTimer { kind: Timeout::Dtls, .. } => saw_dtls = true,
-                Action::ArmTimer { kind: Timeout::IceConnectivity, .. } => {
-                    saw_ice = true
-                }
+                Action::ArmTimer {
+                    kind: Timeout::Dtls,
+                    ..
+                } => saw_dtls = true,
+                Action::ArmTimer {
+                    kind: Timeout::IceConnectivity,
+                    ..
+                } => saw_ice = true,
                 _ => {}
             }
         }
@@ -1734,36 +1772,52 @@ mod tests {
     fn local_ice_gathered_sends_604() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcLocalIceGathered {
             candidate_json: "{\"candidate\":\"c\",\"sdpMid\":\"send\"}".into(),
         });
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 604, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 604, .. })));
     }
 
     #[test]
     fn remote_ice_received_adds_to_webrtcbin() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::IceCandidateReceived {
             cid: 1,
             candidate_json: "{\"candidate\":\"c\",\"sdpMid\":\"send\"}".into(),
         });
-        assert!(acts.iter().any(|a| matches!(a, Action::AddRemoteIce { .. })));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::AddRemoteIce { .. })));
     }
 
     #[test]
     fn end_of_remote_candidates_is_informational_only() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::EndOfRemoteCandidates { cid: 1 });
         assert!(acts.is_empty());
     }
@@ -1776,8 +1830,13 @@ mod tests {
     fn remote_ice_for_wrong_cid_is_dropped() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         // ICE for a different room: dropped, no action.
         let acts = m.step(Event::IceCandidateReceived {
             cid: 99,
@@ -1800,7 +1859,9 @@ mod tests {
             cid: 1,
             sdp: "a=mid:user-23\na=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcPadAdded {
             mid: "user-23".into(),
         });
@@ -1833,7 +1894,9 @@ mod tests {
             cid: 1,
             sdp: "a=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcPadAdded { mid: "send".into() });
         assert_eq!(
             acts,
@@ -1857,7 +1920,9 @@ mod tests {
             cid: 1,
             sdp: "a=mid:user-5\na=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         // Pad arrives for an uncached mid.
         let acts = m.step(Event::WebrtcPadAdded {
             mid: "user-99".into(),
@@ -1899,9 +1964,7 @@ mod tests {
                 assert_eq!(mid, "user-5");
                 assert_eq!(*user_id, 5);
             }
-            _ => panic!(
-                "expected StartReceivePipeline in OfferPending, got {acts:?}"
-            ),
+            _ => panic!("expected StartReceivePipeline in OfferPending, got {acts:?}"),
         }
         // Sanity: state is still OfferPending (pad-added didn't
         // transition us).
@@ -1916,7 +1979,9 @@ mod tests {
             cid: 1,
             sdp: "a=mid:user-9\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcPadRemoved {
             mid: "user-9".into(),
         });
@@ -1928,8 +1993,13 @@ mod tests {
     fn mute_request_emits_pipeline_wire_and_signal() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 4 });
-        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 4,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::MuteToggleRequested { muted: true });
         assert!(m.is_muted());
         let kinds: Vec<&'static str> = acts
@@ -1937,7 +2007,10 @@ mod tests {
             .map(|a| match a {
                 Action::SetSendPipelineMute { .. } => "pipeline",
                 Action::SendWireFrame { opcode: 606, .. } => "wire606",
-                Action::EmitSignal { kind: SignalKind::MuteChanged, .. } => "signal",
+                Action::EmitSignal {
+                    kind: SignalKind::MuteChanged,
+                    ..
+                } => "signal",
                 _ => "other",
             })
             .collect();
@@ -1970,15 +2043,17 @@ mod tests {
                 payload: SignalPayload::MuteChanged { muted: true }
             }
         )));
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 606, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 606, .. })));
 
         // OfferPending: SDP offer in, answer not ready yet.
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 4 });
-        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 4,
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(m.state(), SessionState::OfferPending);
         let acts = m.step(Event::MuteToggleRequested { muted: true });
         assert!(m.is_muted());
@@ -1995,8 +2070,13 @@ mod tests {
     fn redundant_mute_is_noop() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 4 });
-        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 4,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::MuteToggleRequested { muted: true });
         let acts = m.step(Event::MuteToggleRequested { muted: true });
         assert!(acts.is_empty());
@@ -2011,8 +2091,16 @@ mod tests {
         let acts = m.step(Event::ParticipantsUpdated {
             cid: 1,
             entries: vec![
-                Participant { user_id: 5, codec_id: 0, muted: false },
-                Participant { user_id: 12, codec_id: 0, muted: true },
+                Participant {
+                    user_id: 5,
+                    codec_id: 0,
+                    muted: false,
+                },
+                Participant {
+                    user_id: 12,
+                    codec_id: 0,
+                    muted: true,
+                },
             ],
         });
         let saw_signal = acts.iter().any(|a| {
@@ -2054,8 +2142,16 @@ mod tests {
         let acts = m.step(Event::ParticipantsUpdated {
             cid: 99,
             entries: vec![
-                Participant { user_id: 1, codec_id: 0, muted: false },
-                Participant { user_id: 2, codec_id: 0, muted: true },
+                Participant {
+                    user_id: 1,
+                    codec_id: 0,
+                    muted: false,
+                },
+                Participant {
+                    user_id: 2,
+                    codec_id: 0,
+                    muted: true,
+                },
             ],
         });
         assert!(acts.is_empty());
@@ -2076,8 +2172,16 @@ mod tests {
         m.step(Event::ParticipantsUpdated {
             cid: 1,
             entries: vec![
-                Participant { user_id: 3, codec_id: 0, muted: false },
-                Participant { user_id: 8, codec_id: 0, muted: true },
+                Participant {
+                    user_id: 3,
+                    codec_id: 0,
+                    muted: false,
+                },
+                Participant {
+                    user_id: 8,
+                    codec_id: 0,
+                    muted: true,
+                },
             ],
         });
         assert_eq!(m.participant_count(), 2);
@@ -2093,8 +2197,13 @@ mod tests {
     fn connecting_to_connected_cancels_watchdogs_and_arms_media_timeout() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -2104,9 +2213,16 @@ mod tests {
         let mut arm_media = false;
         for a in &acts {
             match a {
-                Action::CancelTimer { kind: Timeout::Dtls } => cancel_dtls = true,
-                Action::CancelTimer { kind: Timeout::IceConnectivity } => cancel_ice = true,
-                Action::ArmTimer { kind: Timeout::Media, .. } => arm_media = true,
+                Action::CancelTimer {
+                    kind: Timeout::Dtls,
+                } => cancel_dtls = true,
+                Action::CancelTimer {
+                    kind: Timeout::IceConnectivity,
+                } => cancel_ice = true,
+                Action::ArmTimer {
+                    kind: Timeout::Media,
+                    ..
+                } => arm_media = true,
                 _ => {}
             }
         }
@@ -2119,8 +2235,13 @@ mod tests {
     fn connection_state_failed_tears_down() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let acts = m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Failed,
         });
@@ -2128,7 +2249,10 @@ mod tests {
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
         assert!(acts.iter().any(|a| matches!(
             a,
-            Action::EmitSignal { kind: SignalKind::Error, .. }
+            Action::EmitSignal {
+                kind: SignalKind::Error,
+                ..
+            }
         )));
     }
 
@@ -2168,8 +2292,13 @@ mod tests {
     fn dtls_and_ice_timeouts_no_longer_tear_down() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let connecting_state = m.state();
         assert_eq!(connecting_state, SessionState::Connecting);
 
@@ -2250,8 +2379,13 @@ mod tests {
     fn task_error_on_mute_is_toast_only() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         let prior_state = m.state();
         let acts = m.step(Event::ServerTaskError(ServerError {
             origin_opcode: HTLC_HDR_VOICE_MUTE,
@@ -2260,7 +2394,10 @@ mod tests {
         assert_eq!(m.state(), prior_state);
         assert!(acts.iter().any(|a| matches!(
             a,
-            Action::EmitSignal { kind: SignalKind::Error, .. }
+            Action::EmitSignal {
+                kind: SignalKind::Error,
+                ..
+            }
         )));
         assert!(!acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
@@ -2285,11 +2422,17 @@ mod tests {
         // stalled. Expect fail() — Leaving + TearDown.
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(m.state(), SessionState::Connecting);
-        let acts =
-            m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::WedgeDeadline,
+        });
         assert_eq!(m.state(), SessionState::Leaving);
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
@@ -2309,11 +2452,17 @@ mod tests {
     fn fail_emits_voice_leave_before_tear_down() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 42 });
-        m.step(Event::SdpOfferReceived { cid: 42, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 42,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(m.state(), SessionState::Connecting);
-        let acts =
-            m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::WedgeDeadline,
+        });
 
         // VOICE_LEAVE must appear, carrying the active cid. We
         // match on the module-local HTLC_HDR_VOICE_LEAVE constant
@@ -2321,10 +2470,15 @@ mod tests {
         // move (e.g. consolidating the wire-protocol numbers into
         // hotline-proto::messages) doesn't silently leave the
         // assertion checking a stale number.
-        let leave_idx = acts.iter().position(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode, .. } if *opcode == HTLC_HDR_VOICE_LEAVE
-        )).expect("fail() must emit a VOICE_LEAVE wire frame");
+        let leave_idx = acts
+            .iter()
+            .position(|a| {
+                matches!(
+                    a,
+                    Action::SendWireFrame { opcode, .. } if *opcode == HTLC_HDR_VOICE_LEAVE
+                )
+            })
+            .expect("fail() must emit a VOICE_LEAVE wire frame");
         if let Action::SendWireFrame { body, .. } = &acts[leave_idx] {
             assert_eq!(
                 body.0,
@@ -2337,10 +2491,10 @@ mod tests {
         // LEAVE wire frame. Otherwise the local pipeline goes down
         // before the LEAVE has been queued onto the control
         // channel.
-        let tear_idx = acts.iter().position(|a| matches!(
-            a,
-            Action::TearDown
-        )).expect("fail() must still emit TearDown");
+        let tear_idx = acts
+            .iter()
+            .position(|a| matches!(a, Action::TearDown))
+            .expect("fail() must still emit TearDown");
         assert!(
             leave_idx < tear_idx,
             "VOICE_LEAVE must be emitted before TearDown so the wire frame \
@@ -2359,7 +2513,9 @@ mod tests {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 9 });
         assert_eq!(m.state(), SessionState::JoinSent);
-        let acts = m.step(Event::Timeout { kind: Timeout::JoinReply });
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::JoinReply,
+        });
         assert_eq!(m.state(), SessionState::Leaving);
         assert!(
             acts.iter().any(|a| matches!(
@@ -2381,8 +2537,9 @@ mod tests {
         // and leave the state untouched.
         let mut m = machine();
         assert_eq!(m.state(), SessionState::Idle);
-        let acts =
-            m.step(Event::Timeout { kind: Timeout::WedgeDeadline });
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::WedgeDeadline,
+        });
         assert!(acts.is_empty());
         assert_eq!(m.state(), SessionState::Idle);
     }
@@ -2400,17 +2557,27 @@ mod tests {
     fn media_timeout_in_connected_emits_error_but_stays_connected() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
-        let acts = m.step(Event::Timeout { kind: Timeout::Media });
+        let acts = m.step(Event::Timeout {
+            kind: Timeout::Media,
+        });
         assert_eq!(m.state(), SessionState::Connected);
         assert!(
             acts.iter().any(|a| matches!(
                 a,
-                Action::EmitSignal { kind: SignalKind::Error, .. }
+                Action::EmitSignal {
+                    kind: SignalKind::Error,
+                    ..
+                }
             )),
             "Media timeout must surface an Error signal so the user sees \
              the quiet-session warning"
@@ -2435,10 +2602,9 @@ mod tests {
         // in voice.
         let acts = m.step(Event::JoinRequested { cid: 42 });
         assert_eq!(m.state(), SessionState::JoinSent);
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 600, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 600, .. })));
 
         // Server replies with SDP offer (the JOIN reply carries
         // it). Offer contains B's own send leg + receive leg for A.
@@ -2457,7 +2623,9 @@ mod tests {
             sdp: offer.into(),
         });
         assert_eq!(m.state(), SessionState::OfferPending);
-        assert!(acts.iter().any(|a| matches!(a, Action::SetRemoteDescription { .. })));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SetRemoteDescription { .. })));
         assert!(acts.iter().any(|a| matches!(a, Action::CreateAnswer)));
         assert_eq!(m.mid_to_user.get("user-1").copied(), Some(1));
 
@@ -2466,10 +2634,9 @@ mod tests {
             sdp: "v=0\r\na=mid:user-1\r\na=mid:send\r\n".into(),
         });
         assert_eq!(m.state(), SessionState::Connecting);
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 603, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 603, .. })));
 
         // ICE trickle exchange.
         m.step(Event::WebrtcLocalIceGathered {
@@ -2488,11 +2655,16 @@ mod tests {
         assert_eq!(m.state(), SessionState::Connected);
         assert!(acts.iter().any(|a| matches!(
             a,
-            Action::ArmTimer { kind: Timeout::Media, .. }
+            Action::ArmTimer {
+                kind: Timeout::Media,
+                ..
+            }
         )));
 
         // A's receive pad appears.
-        let acts = m.step(Event::WebrtcPadAdded { mid: "user-1".into() });
+        let acts = m.step(Event::WebrtcPadAdded {
+            mid: "user-1".into(),
+        });
         match &acts[..] {
             [Action::StartReceivePipeline { mid, user_id }] => {
                 assert_eq!(mid, "user-1");
@@ -2505,13 +2677,24 @@ mod tests {
         let acts = m.step(Event::ParticipantsUpdated {
             cid: 42,
             entries: vec![
-                Participant { user_id: 1, codec_id: 0, muted: false },
-                Participant { user_id: 2, codec_id: 0, muted: false },
+                Participant {
+                    user_id: 1,
+                    codec_id: 0,
+                    muted: false,
+                },
+                Participant {
+                    user_id: 2,
+                    codec_id: 0,
+                    muted: false,
+                },
             ],
         });
         assert!(acts.iter().any(|a| matches!(
             a,
-            Action::EmitSignal { kind: SignalKind::RoomStatus, .. }
+            Action::EmitSignal {
+                kind: SignalKind::RoomStatus,
+                ..
+            }
         )));
     }
 
@@ -2527,7 +2710,9 @@ mod tests {
             cid: 42,
             sdp: "a=mid:user-1\na=mid:send\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -2537,10 +2722,9 @@ mod tests {
         // (see leave_from_connected_emits_tear_down for why).
         let acts = m.step(Event::LeaveRequested { cid: 42 });
         assert_eq!(m.state(), SessionState::Idle);
-        assert!(acts.iter().any(|a| matches!(
-            a,
-            Action::SendWireFrame { opcode: 601, .. }
-        )));
+        assert!(acts
+            .iter()
+            .any(|a| matches!(a, Action::SendWireFrame { opcode: 601, .. })));
         assert!(acts.iter().any(|a| matches!(a, Action::TearDown)));
     }
 
@@ -2615,7 +2799,9 @@ mod tests {
             cid: 7,
             sdp: "a=mid:user-1\n".into(),
         });
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::WebrtcConnectionStateChanged {
             state: ConnectionState::Connected,
         });
@@ -2699,7 +2885,10 @@ mod tests {
     fn multiple_queued_offers_keep_only_the_latest() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
         // First queued offer.
         m.step(Event::SdpOfferReceived {
             cid: 1,
@@ -2730,7 +2919,10 @@ mod tests {
     fn wrong_cid_offer_is_not_queued_while_offer_pending() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::SdpOfferReceived {
             cid: 99, // wrong cid
             sdp: "v=0\na=mid:user-7\n".into(),
@@ -2755,7 +2947,10 @@ mod tests {
     fn stale_queued_offer_does_not_wedge_the_drain() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
         // Queue a renegotiation offer for cid=1.
         m.step(Event::SdpOfferReceived {
             cid: 1,
@@ -2786,11 +2981,10 @@ mod tests {
         // The current answer's SetLocalDescription + 603 send
         // are emitted; the dropped offer contributes no
         // SetRemoteDescription / CreateAnswer.
-        let has_set_remote = acts.iter().any(|a| {
-            matches!(a, Action::SetRemoteDescription { .. })
-        });
-        let has_create_answer =
-            acts.iter().any(|a| matches!(a, Action::CreateAnswer));
+        let has_set_remote = acts
+            .iter()
+            .any(|a| matches!(a, Action::SetRemoteDescription { .. }));
+        let has_create_answer = acts.iter().any(|a| matches!(a, Action::CreateAnswer));
         assert!(
             !has_set_remote,
             "stale queued offer must not produce SetRemoteDescription"
@@ -2808,7 +3002,10 @@ mod tests {
     fn leave_request_clears_queued_offer() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::SdpOfferReceived {
             cid: 1,
             sdp: "v=0\na=mid:user-2\n".into(),
@@ -2835,7 +3032,10 @@ mod tests {
     fn fail_path_clears_queued_offer() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::SdpOfferReceived {
             cid: 1,
             sdp: "v=0\na=mid:user-2\n".into(),
@@ -2858,7 +3058,10 @@ mod tests {
     fn mid_session_room_switch_clears_queued_offer() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 1 });
-        m.step(Event::SdpOfferReceived { cid: 1, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 1,
+            sdp: "v=0\n".into(),
+        });
         m.step(Event::SdpOfferReceived {
             cid: 1,
             sdp: "v=0\na=mid:user-2\n".into(),
@@ -2877,10 +3080,15 @@ mod tests {
     fn empty_queue_lets_answer_walk_to_connecting() {
         let mut m = machine();
         m.step(Event::JoinRequested { cid: 4 });
-        m.step(Event::SdpOfferReceived { cid: 4, sdp: "v=0\n".into() });
+        m.step(Event::SdpOfferReceived {
+            cid: 4,
+            sdp: "v=0\n".into(),
+        });
         assert!(m.queued_offer.is_none());
 
-        m.step(Event::WebrtcAnswerCreated { sdp: "v=0\n".into() });
+        m.step(Event::WebrtcAnswerCreated {
+            sdp: "v=0\n".into(),
+        });
         assert_eq!(m.state(), SessionState::Connecting);
     }
 }

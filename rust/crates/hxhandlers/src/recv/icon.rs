@@ -11,7 +11,10 @@
 use std::os::raw::{c_int, c_uint, c_void};
 
 #[cfg(not(test))]
-use gtkhx_core::session::{gtkhx_session_emit_gif_icon_changed, gtkhx_session_emit_gif_icon_data, gtkhx_session_get_default};
+use gtkhx_core::session::{
+    gtkhx_session_emit_gif_icon_changed, gtkhx_session_emit_gif_icon_data,
+    gtkhx_session_get_default,
+};
 #[cfg(not(test))]
 use hotline_proto::ffi::{gtkhx_proto_gif_icon_is_gif, gtkhx_proto_parse_icon_change};
 
@@ -151,12 +154,7 @@ pub unsafe extern "C" fn rcv_task_icon_getlist(
 /// When `len > 0`, `gif` must point to `len` readable bytes; `htlc` is only
 /// forwarded to the signal.
 #[no_mangle]
-pub unsafe extern "C" fn hx_icon_data_recv(
-    htlc: *mut c_void,
-    uid: u16,
-    gif: *const u8,
-    len: u32,
-) {
+pub unsafe extern "C" fn hx_icon_data_recv(htlc: *mut c_void, uid: u16, gif: *const u8, len: u32) {
     let (ptr, out_len): (*const c_void, u32) =
         if len == 0 || !gtkhx_proto_gif_icon_is_gif(gif, len as usize) {
             (std::ptr::null(), 0)

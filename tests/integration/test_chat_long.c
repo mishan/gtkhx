@@ -51,10 +51,10 @@ test_chat_long_message_roundtrips (void)
     }
 
     /* Build a deterministic 1500-byte body. Use a repeating
-	 * pattern of mixed-case ASCII so any byte truncation or
-	 * mid-string corruption shows up in a diff against the
-	 * known input. Avoid '\r' / '\n' (which mhxd rewrites via
-	 * CR2LF / strip_ansi) so the round-trip is bytewise stable. */
+     * pattern of mixed-case ASCII so any byte truncation or
+     * mid-string corruption shows up in a diff against the
+     * known input. Avoid '\r' / '\n' (which mhxd rewrites via
+     * CR2LF / strip_ansi) so the round-trip is bytewise stable. */
     char *body = g_malloc (LONG_BODY_LEN + 1);
     for (int i = 0; i < LONG_BODY_LEN; i++) {
         static const char alpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -69,15 +69,15 @@ test_chat_long_message_roundtrips (void)
         LONG_BODY_LEN, (guint8 *)body));
 
     /* Bob drains for HTLS_HDR_CHAT and pulls the body via the
-	 * Tier 2 hx_chat_extract helper. mhxd's rcv_chat formats the
-	 * broadcast body as
-	 *
-	 *   "\r <name>:  <body>"
-	 *
-	 * (CR + space + name + ':' + 2 spaces + body), then the chat
-	 * handler chains LF / CR replacement. So the broadcast text
-	 * we observe contains our body as a substring; we
-	 * substring-compare rather than equality-compare. */
+     * Tier 2 hx_chat_extract helper. mhxd's rcv_chat formats the
+     * broadcast body as
+     *
+     *   "\r <name>:  <body>"
+     *
+     * (CR + space + name + ':' + 2 spaces + body), then the chat
+     * handler chains LF / CR replacement. So the broadcast text
+     * we observe contains our body as a substring; we
+     * substring-compare rather than equality-compare. */
     gboolean got_chat = FALSE;
     for (int i = 0; i < 64 && !got_chat; i++) {
         if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/3000)) {
@@ -88,13 +88,14 @@ test_chat_long_message_roundtrips (void)
         }
 
         struct hx_chat_msg cm = { 0 };
-        if (!hx_chat_extract (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos, &cm)) {
+        if (!hx_chat_extract (hx_test_in (&htlc_b)->buf,
+                              hx_test_in (&htlc_b)->pos, &cm)) {
             continue;
         }
 
         /* Body must contain our entire 1500-byte payload as a
-		 * contiguous substring. memmem is the right primitive
-		 * here — strstr would fail on any embedded nul. */
+         * contiguous substring. memmem is the right primitive
+         * here — strstr would fail on any embedded nul. */
         if (memmem (cm.text, cm.text_len, body, LONG_BODY_LEN)) {
             got_chat = TRUE;
             g_test_message ("received chat: text_len=%u "

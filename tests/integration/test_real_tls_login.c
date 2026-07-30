@@ -103,8 +103,8 @@ test_login_round_trip (void)
     }
 
     struct htlc_conn htlc;
-    int fd = integration_open_login_tls_or_skip (
-        srv, &htlc, "TLS-Login Tier-3", 412);
+    int fd = integration_open_login_tls_or_skip (srv, &htlc, "TLS-Login Tier-3",
+                                                 412);
     if (fd < 0) {
         /* integration_open_login_tls_or_skip already called
          * g_test_fail_printf with the specific failure mode. */
@@ -120,7 +120,7 @@ test_login_round_trip (void)
      * with a task-error (which the drain reports as a failure).
      * Pin the contract by sanity-checking htlc->in has a parsed
      * header buffer of at least the wire-header size. */
-    g_assert_cmpuint (hx_test_in(&htlc)->len, >=, SIZEOF_HL_HDR);
+    g_assert_cmpuint (hx_test_in (&htlc)->len, >=, SIZEOF_HL_HDR);
 
     integration_release_htlc (&htlc);
     integration_close (fd);
@@ -138,8 +138,8 @@ test_chat_round_trip (void)
     }
 
     struct htlc_conn htlc;
-    int fd = integration_open_login_tls_or_skip (
-        srv, &htlc, "TLS-Chat Tier-3", 412);
+    int fd = integration_open_login_tls_or_skip (srv, &htlc, "TLS-Chat Tier-3",
+                                                 412);
     if (fd < 0) {
         return;
     }
@@ -170,7 +170,8 @@ test_chat_round_trip (void)
         if (hdr_type (&htlc) != HTLS_HDR_CHAT) {
             continue;
         }
-        if (!hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &cm)) {
+        if (!hx_chat_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                              &cm)) {
             continue;
         }
         if (g_strstr_len (cm.text, cm.text_len, marker) != NULL) {
@@ -192,10 +193,8 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
 
-    g_test_add_func ("/real_tls_login/login_round_trip",
-                     test_login_round_trip);
-    g_test_add_func ("/real_tls_login/chat_round_trip",
-                     test_chat_round_trip);
+    g_test_add_func ("/real_tls_login/login_round_trip", test_login_round_trip);
+    g_test_add_func ("/real_tls_login/chat_round_trip", test_chat_round_trip);
 
     return g_test_run ();
 }

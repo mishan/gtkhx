@@ -80,12 +80,7 @@ fn ffi_matches_pure_fn() {
     let pids: Vec<u32> = posts.iter().map(|p| p.parentid).collect();
     let mut out = vec![0i32; posts.len()];
     unsafe {
-        hx_news_thread_parent_indices(
-            ids.as_ptr(),
-            pids.as_ptr(),
-            posts.len(),
-            out.as_mut_ptr(),
-        );
+        hx_news_thread_parent_indices(ids.as_ptr(), pids.as_ptr(), posts.len(), out.as_mut_ptr());
     }
     assert_eq!(out, thread_parent_indices(&posts));
 }
@@ -108,12 +103,7 @@ fn ffi_zero_len_is_noop() {
     // n == 0 must not touch out_parent (or deref the arrays).
     let mut out = [7i32; 1];
     unsafe {
-        hx_news_thread_parent_indices(
-            std::ptr::null(),
-            std::ptr::null(),
-            0,
-            out.as_mut_ptr(),
-        );
+        hx_news_thread_parent_indices(std::ptr::null(), std::ptr::null(), 0, out.as_mut_ptr());
     }
     assert_eq!(out, [7]);
 }

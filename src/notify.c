@@ -136,8 +136,8 @@ truncated (const char *body)
     }
 
     /* g_utf8_find_prev_char-safe truncation: walk back from the
-	 * cap to the previous UTF-8 boundary so we don't slice through
-	 * a multi-byte sequence. */
+     * cap to the previous UTF-8 boundary so we don't slice through
+     * a multi-byte sequence. */
     cut = g_utf8_find_prev_char (body, body + NOTIFY_BODY_MAX);
     if (!cut) {
         cut = body + NOTIFY_BODY_MAX;
@@ -163,8 +163,8 @@ send_notify (const char *id, const char *title, const char *body)
     g_notification_set_priority (n, G_NOTIFICATION_PRIORITY_NORMAL);
 
     /* The icon is sourced from the app's installed icon (matching
-	 * the GApplication app-id) so we don't have to bundle a
-	 * separate notification glyph. */
+     * the GApplication app-id) so we don't have to bundle a
+     * separate notification glyph. */
 
     g_application_send_notification (G_APPLICATION (notify_app), id, n);
     g_object_unref (n);
@@ -207,8 +207,8 @@ gtkhx_notify_chat (HxChatEvent *event)
     }
 
     /* cid > 0 is a private chat; the dedicated pchat entry point
-	 * handles those. This entry point is for the public chat
-	 * (cid == 0). */
+     * handles those. This entry point is for the public chat
+     * (cid == 0). */
     if (event->cid != 0) {
         gtkhx_notify_pchat (event);
         return;
@@ -264,7 +264,7 @@ gtkhx_notify_msg (HxMsgEvent *event)
     }
 
     /* Don't notify on our own outbound PMs (echoed back by the
-	 * server, or local self-injects). */
+     * server, or local self-injects). */
     if (event->is_self) {
         return;
     }
@@ -355,10 +355,10 @@ gtkhx_notify_news (const char *headline)
     }
 
     /* News notifications are coarse — one ID for all news, so a
-	 * burst of posts only fires the most recent. No focus check
-	 * (news window isn't tracked by uid/cid, and a news post
-	 * arriving while the news window is open is still
-	 * notification-worthy). */
+     * burst of posts only fires the most recent. No focus check
+     * (news window isn't tracked by uid/cid, and a news post
+     * arriving while the news window is open is still
+     * notification-worthy). */
     send_notify ("news", "New news post", headline ? headline : NULL);
 }
 

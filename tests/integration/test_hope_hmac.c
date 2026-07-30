@@ -85,18 +85,18 @@ test_hope_hmac_login_and_ping (void)
     const hx_test_server *srv = pick_hope_server ();
     if (!srv) {
         g_test_fail_printf ("no HX_TEST_CAP_HOPE server in the matrix. "
-                     "Default mhxd container at tests/mhxd/ advertises "
-                     "this cap; check GTKHX_TEST_SERVERS env if you've "
-                     "filtered it out.");
+                            "Default mhxd container at tests/mhxd/ advertises "
+                            "this cap; check GTKHX_TEST_SERVERS env if you've "
+                            "filtered it out.");
         return;
     }
 
     struct htlc_conn htlc;
     integration_hope_session hope;
     /* cipheralg=NULL → "don't advertise a cipher". Server picks
-	 * NONE; harness leaves hope.aead_active = 0 and we'll
-	 * round-trip the PING through plain framing. Same goes for
-	 * compress (we don't need either layer to validate HMAC). */
+     * NONE; harness leaves hope.aead_active = 0 and we'll
+     * round-trip the PING through plain framing. Same goes for
+     * compress (we don't need either layer to validate HMAC). */
     int fd = integration_open_login_hope_or_skip (
         srv, &htlc, &hope,
         /*username=*/"guest",
@@ -107,10 +107,10 @@ test_hope_hmac_login_and_ping (void)
         /*compressalg=*/NULL);
     if (fd < 0) {
         /* Harness already called g_test_fail_printf with a
-		 * diagnostic. Anything other than "Step 1 task-error" is a
-		 * real protocol bug — if mhxd ever returns one for the
-		 * default guest account, fix it in the test container
-		 * rather than masking the failure here. */
+         * diagnostic. Anything other than "Step 1 task-error" is a
+         * real protocol bug — if mhxd ever returns one for the
+         * default guest account, fix it in the test container
+         * rather than masking the failure here. */
         return;
     }
 
@@ -118,25 +118,25 @@ test_hope_hmac_login_and_ping (void)
     g_assert_false (hope.aead_active);
 
     /* Sanity check the harness populated htlc->uid from the
-	 * post-Step-2 SELFINFO drain. A clean fd return from
-	 * integration_open_login_hope_or_skip already implies SELFINFO
-	 * was parsed without task-error, but checking htlc->uid != 0
-	 * catches the (hypothetical) drift where the harness silently
-	 * returns success on an empty SELFINFO chunk. */
+     * post-Step-2 SELFINFO drain. A clean fd return from
+     * integration_open_login_hope_or_skip already implies SELFINFO
+     * was parsed without task-error, but checking htlc->uid != 0
+     * catches the (hypothetical) drift where the harness silently
+     * returns success on an empty SELFINFO chunk. */
     g_assert_cmphex (htlc.uid, !=, 0);
 
     /* Confirm the post-HOPE channel is usable: send a plain
-	 * (non-AEAD) PING, drain to the matching TASK reply. mhxd
-	 * gates HTLC_HDR_PING on the `can_ping` access bit, which
-	 * it sets when the LOGIN included HTLC_DATA_CLIENTVERSION
-	 * >= 150. STEP2 now emits that chunk (the Rust HOPE builder +
-	 * harness send_hope_step2 + production rcv.c all set
-	 * client_version=185), so this PING round-trip works.
-	 * Drops to task-error if any of those three sites regresses. */
+     * (non-AEAD) PING, drain to the matching TASK reply. mhxd
+     * gates HTLC_HDR_PING on the `can_ping` access bit, which
+     * it sets when the LOGIN included HTLC_DATA_CLIENTVERSION
+     * >= 150. STEP2 now emits that chunk (the Rust HOPE builder +
+     * harness send_hope_step2 + production rcv.c all set
+     * client_version=185), so this PING round-trip works.
+     * Drops to task-error if any of those three sites regresses. */
     guint32 ping_trans = integration_send_ping (fd, &htlc);
     g_assert_cmpuint (ping_trans, !=, 0);
-    g_assert_true (integration_drain_until_task_trans (fd, &htlc, ping_trans,
-                                                       64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, ping_trans, 64));
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     integration_release_htlc (&htlc);

@@ -56,9 +56,7 @@ static void
 test_reply_header_basic (void)
 {
     /* 14-byte response header with nservers=7 at [10..11] BE. */
-    guint8 buf[14] = {
-        0,0,0,0, 0,0,0,0, 0,0, 0x00, 0x07, 0,0
-    };
+    guint8 buf[14] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x07, 0, 0 };
     guint16 n = 0xffff;
     g_assert_true (hx_tracker_reply_parse_header (buf, sizeof (buf), &n));
     g_assert_cmpuint (n, ==, 7);
@@ -69,14 +67,14 @@ test_reply_header_large_count (void)
 {
     /* The tracker reply count is a u16, so the maximum value is
      * 65535. Pin both ends of the range. */
-    guint8 buf[14] = {
-        /* opaque [0..9] */
-        0xaa,0xbb,0xcc,0xdd, 0x11,0x22,0x33,0x44, 0x55,0x66,
-        /* nservers [10..11] = 0xffff */
-        0xff, 0xff,
-        /* opaque [12..13] */
-        0x99,0x88
-    };
+    guint8 buf[14]
+        = { /* opaque [0..9] */
+            0xaa, 0xbb, 0xcc, 0xdd, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66,
+            /* nservers [10..11] = 0xffff */
+            0xff, 0xff,
+            /* opaque [12..13] */
+            0x99, 0x88
+          };
     guint16 n = 0;
     g_assert_true (hx_tracker_reply_parse_header (buf, sizeof (buf), &n));
     g_assert_cmpuint (n, ==, 0xffff);
@@ -162,11 +160,11 @@ test_record_parse_basic (void)
     /* 11-byte fixed prefix: 192.168.1.42 : 5500, 17 users,
      * reserved=0xabcd, name_len=23. */
     guint8 buf[11] = {
-        192, 168, 1, 42,        /* addr */
-        0x15, 0x7c,             /* port = 5500 (0x157c) */
-        0x00, 0x11,             /* nusers = 17 */
-        0xab, 0xcd,             /* reserved (skipped) */
-        23                       /* name_len */
+        192,  168,  1, 42, /* addr */
+        0x15, 0x7c,        /* port = 5500 (0x157c) */
+        0x00, 0x11,        /* nusers = 17 */
+        0xab, 0xcd,        /* reserved (skipped) */
+        23                 /* name_len */
     };
     hx_tracker_record_fixed rec = { 0 };
     g_assert_true (hx_tracker_record_parse_fixed (buf, sizeof (buf), &rec));
@@ -175,8 +173,8 @@ test_record_parse_basic (void)
      * host order; g_htonl gives the network-order value the parser stores. */
     g_assert_cmpuint (rec.addr, ==,
                       g_htonl ((192u << 24) | (168u << 16) | (1u << 8) | 42u));
-    g_assert_cmpuint (rec.port,     ==, 5500);
-    g_assert_cmpuint (rec.nusers,   ==, 17);
+    g_assert_cmpuint (rec.port, ==, 5500);
+    g_assert_cmpuint (rec.nusers, ==, 17);
     g_assert_cmpuint (rec.name_len, ==, 23);
 }
 
@@ -187,19 +185,14 @@ test_record_parse_max_values (void)
      * Pins that there's no signed-overflow lurking in the
      * accessors and that name_len=255 (the max u8) is accepted
      * (production reads 255 name bytes afterward). */
-    guint8 buf[11] = {
-        0xff, 0xff, 0xff, 0xff,
-        0xff, 0xff,
-        0xff, 0xff,
-        0xaa, 0xbb,
-        0xff
-    };
+    guint8 buf[11]
+        = { 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xaa, 0xbb, 0xff };
     hx_tracker_record_fixed rec = { 0 };
     g_assert_true (hx_tracker_record_parse_fixed (buf, 11, &rec));
     g_assert_cmpuint (rec.addr, ==, 0xffffffffu);
-    g_assert_cmpuint (rec.port,        ==, 0xffff);
-    g_assert_cmpuint (rec.nusers,      ==, 0xffff);
-    g_assert_cmpuint (rec.name_len,    ==, 0xff);
+    g_assert_cmpuint (rec.port, ==, 0xffff);
+    g_assert_cmpuint (rec.nusers, ==, 0xffff);
+    g_assert_cmpuint (rec.name_len, ==, 0xff);
 }
 
 static void
@@ -211,20 +204,16 @@ test_record_parse_reserved_bytes_ignored (void)
      * contents. Cheap insurance for a future spec change that
      * tries to repurpose those bytes — the test will fire and
      * force a conscious decision instead of silently misparsing. */
-    guint8 buf_a[11] = {
-        10, 0, 0, 1, 0x13, 0x88, 0, 5, 0x00, 0x00, 4
-    };
-    guint8 buf_b[11] = {
-        10, 0, 0, 1, 0x13, 0x88, 0, 5, 0xde, 0xad, 4
-    };
+    guint8 buf_a[11] = { 10, 0, 0, 1, 0x13, 0x88, 0, 5, 0x00, 0x00, 4 };
+    guint8 buf_b[11] = { 10, 0, 0, 1, 0x13, 0x88, 0, 5, 0xde, 0xad, 4 };
     hx_tracker_record_fixed a = { 0 };
     hx_tracker_record_fixed b = { 0 };
     g_assert_true (hx_tracker_record_parse_fixed (buf_a, 11, &a));
     g_assert_true (hx_tracker_record_parse_fixed (buf_b, 11, &b));
     g_assert_cmpuint (a.addr, ==, b.addr);
-    g_assert_cmpuint (a.port,        ==, b.port);
-    g_assert_cmpuint (a.nusers,      ==, b.nusers);
-    g_assert_cmpuint (a.name_len,    ==, b.name_len);
+    g_assert_cmpuint (a.port, ==, b.port);
+    g_assert_cmpuint (a.nusers, ==, b.nusers);
+    g_assert_cmpuint (a.name_len, ==, b.name_len);
 }
 
 static void
@@ -234,8 +223,8 @@ test_record_parse_short_input (void)
     hx_tracker_record_fixed rec = { 0xdeadbeef, 9, 9, 9 };
     g_assert_false (hx_tracker_record_parse_fixed (buf, 10, &rec));
     /* On failure the out struct is left as-is. */
-    g_assert_cmpuint (rec.port,     ==, 9);
-    g_assert_cmpuint (rec.nusers,   ==, 9);
+    g_assert_cmpuint (rec.port, ==, 9);
+    g_assert_cmpuint (rec.nusers, ==, 9);
     g_assert_cmpuint (rec.name_len, ==, 9);
 }
 
@@ -330,8 +319,7 @@ main (int argc, char **argv)
                      test_normalize_cr_to_lf);
     g_test_add_func ("/tracker_parser/normalize/strip_ansi",
                      test_normalize_strip_ansi);
-    g_test_add_func ("/tracker_parser/normalize/empty",
-                     test_normalize_empty);
+    g_test_add_func ("/tracker_parser/normalize/empty", test_normalize_empty);
 
     return g_test_run ();
 }

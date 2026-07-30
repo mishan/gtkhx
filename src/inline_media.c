@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "compat.h"        /* PACKED — required before hotline.h */
+#include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h"
 #include "hxconn.h"
@@ -45,7 +45,7 @@ inline_media_cap_ok (struct htlc_conn *htlc)
         debug_log ("media",
                    "skip inline-media send: server didn't echo "
                    "CAP_INLINE_MEDIA (caps=0x%" G_GINT64_MODIFIER "x)",
-                   (guint64) hx_conn_caps (htlc));
+                   (guint64)hx_conn_caps (htlc));
         return FALSE;
     }
     return TRUE;
@@ -70,10 +70,10 @@ inline_media_log_advertised_limits (struct htlc_conn *htlc)
                "server inline-media limits: max_bytes=%u max_dim=%u "
                "max_pixels=%u chunk_size=%u max_frames=%u "
                "max_duration_ms=%u (0 = use default)",
-               (unsigned) hx_conn_media_max_bytes (htlc),
-               (unsigned) hx_conn_media_max_dimension (htlc),
-               (unsigned) hx_conn_media_max_pixels (htlc),
-               (unsigned) hx_conn_media_chunk_size (htlc),
-               (unsigned) hx_conn_media_max_frames (htlc),
-               (unsigned) hx_conn_media_max_duration_ms (htlc));
+               (unsigned)hx_conn_media_max_bytes (htlc),
+               (unsigned)hx_conn_media_max_dimension (htlc),
+               (unsigned)hx_conn_media_max_pixels (htlc),
+               (unsigned)hx_conn_media_chunk_size (htlc),
+               (unsigned)hx_conn_media_max_frames (htlc),
+               (unsigned)hx_conn_media_max_duration_ms (htlc));
 }

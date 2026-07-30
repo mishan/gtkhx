@@ -54,7 +54,7 @@
 #include "hxconn.h"
 #include "banner.h"
 #include "debug.h"
-#include "hxnet_htxf.h"           /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
+#include "hxnet_htxf.h" /* HxnetHopeAead, hxnet_htxf_connect, hxnet_hope_aead_free */
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_model.h"
@@ -73,7 +73,6 @@ guint16 server_port;
 /* The connect + magic-exchange flow runs on the main loop via
  * GSocketClient's async API; cancellation goes through current_cancel. */
 static GCancellable *current_cancel;
-
 
 int connected;
 
@@ -106,8 +105,8 @@ ping_tick (gpointer data)
         return G_SOURCE_REMOVE;
     }
     /* PING is a zero-chunk opcode. Send directly through
-	 * hlwrite_chunks with hc=0 so the trace path matches the rest of
-	 * the SEND opcodes (no fallback to the variadic hlwrite). */
+     * hlwrite_chunks with hc=0 so the trace path matches the rest of
+     * the SEND opcodes (no fallback to the variadic hlwrite). */
     hlwrite_chunks (htlc, HTLC_HDR_PING, 0, NULL, 0);
     return G_SOURCE_CONTINUE;
 }
@@ -142,42 +141,42 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     banner_clear ();
 
     /* Reset the per-session login flag so the next connect starts
-	 * fresh. concurrence() reads this to decide whether to send
-	 * AGREEMENTAGREE; a stale 1 from a previous session would skip
-	 * the legacy flow on the next connect. */
+     * fresh. concurrence() reads this to decide whether to send
+     * AGREEMENTAGREE; a stale 1 from a previous session would skip
+     * the legacy flow on the next connect. */
     hx_conn_set_logged_in (htlc, 0);
     /* Same reset for the "we've reached the spec-correct fully-
-	 * joined boundary" flag — see hx_post_login_fetches in rcv.c
-	 * and the comment on the flag in protocol.h. The files browser's
-	 * remote provider reads this to know when FILE_LIST is safe to
-	 * send. */
+     * joined boundary" flag — see hx_post_login_fetches in rcv.c
+     * and the comment on the flag in protocol.h. The files browser's
+     * remote provider reads this to know when FILE_LIST is safe to
+     * send. */
     hx_conn_set_post_login_fetched (htlc, 0);
 
     /* Same idea for the DATA_CAPABILITIES bitmask — the next
-	 * connect renegotiates from zero. A stale CAP_TEXT_ENCODING
-	 * bit could otherwise survive a reconnect to a Mac Roman
-	 * server and cause us to skip text transcoding once Phase E2
-	 * lands. */
+     * connect renegotiates from zero. A stale CAP_TEXT_ENCODING
+     * bit could otherwise survive a reconnect to a Mac Roman
+     * server and cause us to skip text transcoding once Phase E2
+     * lands. */
     hx_conn_set_caps (htlc, 0);
     /* Chat-history retention hints from the LOGIN reply — wiped
-	 * on disconnect so a reconnect to a server with different
-	 * retention doesn't carry stale numbers into the UI. */
+     * on disconnect so a reconnect to a server with different
+     * retention doesn't carry stale numbers into the UI. */
     hx_conn_set_history_max_msgs (htlc, 0);
     hx_conn_set_history_max_days (htlc, 0);
     /* Inline-media advisory limits from the LOGIN reply — same
-	 * reasoning. The accessors in src/inline_media.h gate on
-	 * CAP_INLINE_MEDIA being lit so callers see spec defaults
-	 * when the new server doesn't echo the cap; this reset is
-	 * defence-in-depth for any future path that reads the raw
-	 * fields directly (and matches the pattern history_max_*
-	 * uses one line up). */
+     * reasoning. The accessors in src/inline_media.h gate on
+     * CAP_INLINE_MEDIA being lit so callers see spec defaults
+     * when the new server doesn't echo the cap; this reset is
+     * defence-in-depth for any future path that reads the raw
+     * fields directly (and matches the pattern history_max_*
+     * uses one line up). */
     inline_media_reset_advisory_limits (htlc);
 
     /* GIF-icons probe state — drop the watchdog timer (if still armed)
-	 * and reset to UNKNOWN so a reconnect re-probes cleanly. Inlined
-	 * (rather than calling into gif_icons.c) to avoid pulling the
-	 * task_new / rcv_task_icon_* dependency chain into every test
-	 * harness that links network.c. */
+     * and reset to UNKNOWN so a reconnect re-probes cleanly. Inlined
+     * (rather than calling into gif_icons.c) to avoid pulling the
+     * task_new / rcv_task_icon_* dependency chain into every test
+     * harness that links network.c. */
     if (hx_conn_gif_icons_probe_timer (htlc)) {
         g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
         hx_conn_set_gif_icons_probe_timer (htlc, 0);
@@ -207,13 +206,12 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
 #endif /* HAVE_VOICE */
 
     /* Cancel any in-flight async connect (DNS / TCP-connect / magic
-	 * exchange). Safe to call whether or not one's running. */
+     * exchange). Safe to call whether or not one's running. */
     if (current_cancel) {
         g_cancellable_cancel (current_cancel);
         g_clear_object (&current_cancel);
     }
-    g_strlcpy (buf,
-               hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
+    g_strlcpy (buf, hx_conn_ip_addr (htlc)[0] ? hx_conn_ip_addr (htlc) : "?",
                sizeof (buf));
     hx_printf_prefix (htlc, 0, INFOPREFIX, "%s: %s\n", buf,
 
@@ -247,33 +245,33 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     hx_conn_set_fd (htlc, 0);
     hx_conn_set_uid (htlc, 0);
     /* Colored-Nicknames: nick_color is a per-session pref
-	 * echo, not per-connection state. On connection teardown we
-	 * deliberately re-seed (not reset) from gtkhx_prefs.nick_color so
-	 * the next login's USER_CHANGE carries the user's preferred color
-	 * out of the gate. Resetting to HX_NICK_COLOR_NONE here used to
-	 * leave the value stuck — apply_loaded_xtext_prefs only fires at
-	 * startup from prefs_read, so on Disconnect → Connect the htlc
-	 * lost the color and only re-gained it when the user touched the
-	 * Settings picker (which fires changed_nick_color). Re-seeding
-	 * here both (a) avoids leaking a previous connection's
-	 * server-side admin override into the next one (we overwrite with
-	 * the local pref, which is independent of the prior server state)
-	 * and (b) fixes the reconnect-loses-color bug. */
+     * echo, not per-connection state. On connection teardown we
+     * deliberately re-seed (not reset) from gtkhx_prefs.nick_color so
+     * the next login's USER_CHANGE carries the user's preferred color
+     * out of the gate. Resetting to HX_NICK_COLOR_NONE here used to
+     * leave the value stuck — apply_loaded_xtext_prefs only fires at
+     * startup from prefs_read, so on Disconnect → Connect the htlc
+     * lost the color and only re-gained it when the user touched the
+     * Settings picker (which fires changed_nick_color). Re-seeding
+     * here both (a) avoids leaking a previous connection's
+     * server-side admin override into the next one (we overwrite with
+     * the local pref, which is independent of the prior server state)
+     * and (b) fixes the reconnect-loses-color bug. */
     hx_conn_set_nick_color (htlc, (guint32)gtkhx_prefs.nick_color);
     hx_conn_set_version (htlc, 0);
     hx_conn_set_login (htlc, "");
 
     /* chats live in a GHashTable<u32 cid, struct chat*>.
-	 * For each chat:
-	 *   1. Clear the UI's user-list rendering (users_clear is a no-op
-	 *      on cid != 0 since the global user-list widget only shows
-	 *      the public chat's members).
-	 *   2. The hashtable's value-destroy notify (chat_free in chat.c)
-	 *      reclaims the chat's member model + the struct chat itself
-	 *      on remove; we do not need to walk + free members by hand.
-	 * The public chat (cid=0) must stay alive across reconnects, so
-	 * we remove all *non-public* chats; the public chat's membership
-	 * and subject were both reset by its users-clear emit above. */
+     * For each chat:
+     *   1. Clear the UI's user-list rendering (users_clear is a no-op
+     *      on cid != 0 since the global user-list widget only shows
+     *      the public chat's members).
+     *   2. The hashtable's value-destroy notify (chat_free in chat.c)
+     *      reclaims the chat's member model + the struct chat itself
+     *      on remove; we do not need to walk + free members by hand.
+     * The public chat (cid=0) must stay alive across reconnects, so
+     * we remove all *non-public* chats; the public chat's membership
+     * and subject were both reset by its users-clear emit above. */
     if (sess->chats) {
         GArray *non_public = g_array_new (FALSE, FALSE, sizeof (guint32));
         /* Snapshot pass: emit users-clear for every chat, collect the
@@ -287,8 +285,8 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
             struct chat *chat = hx_chats_get_at (sess->chats, i);
             guint32 cid = hx_chats_cid_at (sess->chats, i);
             /* The users-clear emit drops this chat's membership and
-			 * (view-side) resets its subject — the public chat persists
-			 * across reconnect, so its subject must not carry over. */
+             * (view-side) resets its subject — the public chat persists
+             * across reconnect, so its subject must not carry over. */
             gtkhx_session_emit_users_clear (gtkhx_session_get_default (), htlc,
                                             chat);
             if (cid != 0) {
@@ -303,10 +301,10 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     }
 
     /* tasks live in a GHashTable<u32 trans, struct task*>.
-	 * Use foreach_remove so we can run the per-task UI cleanup
-	 * (gtask_delete_tsk) and let the table's value-destroy notify
-	 * (task_free) reclaim the task struct itself. Safe to call on a
-	 * table currently being iterated. */
+     * Use foreach_remove so we can run the per-task UI cleanup
+     * (gtask_delete_tsk) and let the table's value-destroy notify
+     * (task_free) reclaim the task struct itself. Safe to call on a
+     * table currently being iterated. */
     if (sess->tasks) {
         GHashTableIter iter;
         gpointer key;
@@ -318,10 +316,10 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
     }
 
     /* htlc no longer carries an addrinfo —
-	 * the post-connect peer-identification now lives in plain
-	 * htlc->serverhost / serverport / ip_addr fields, none of which
-	 * need explicit teardown. The legacy freeaddrinfo() call (and
-	 * the conn_addr shim that briefly replaced it) belonged here. */
+     * the post-connect peer-identification now lives in plain
+     * htlc->serverhost / serverport / ip_addr fields, none of which
+     * need explicit teardown. The legacy freeaddrinfo() call (and
+     * the conn_addr shim that briefly replaced it) belonged here. */
 
     /* No per-direction cipher / compression state to tear down: the
      * orchestrator (hxnet + the Rust hxcrypto-* / hxcompress crates) owns all
@@ -362,25 +360,25 @@ void
 hx_send_agreement_agree (struct htlc_conn *htlc)
 {
     /* Same as hx_change_name_icon — encode the nick to
-	 * the negotiated wire encoding. is_body = FALSE (nicks are
-	 * single-line). Encoding happens here (not inside the shared
-	 * builder) so the Rust builder stays free of the iconv
-	 * dependency that text_util.c brings in. */
+     * the negotiated wire encoding. is_body = FALSE (nicks are
+     * single-line). Encoding happens here (not inside the shared
+     * builder) so the Rust builder stays free of the iconv
+     * dependency that text_util.c brings in. */
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
-    char *name_wire
-        = gtkhx_text_for_wire ((const char *)hx_conn_name (htlc), strlen (hx_conn_name (htlc)),
-                               utf8, /*is_body=*/FALSE, &name_len);
+    char *name_wire = gtkhx_text_for_wire ((const char *)hx_conn_name (htlc),
+                                           strlen (hx_conn_name (htlc)), utf8,
+                                           /*is_body=*/FALSE, &name_len);
 
     /* Build the AGREEMENTAGREE chunk array through the shared
-	 * builder so the test harness (integration_send_agreementagree
-	 * _hope) and production stay locked to the same wire shape. The
-	 * OPTIONS-bitmap-is-mandatory rule (Mobius panics without it,
-	 * see commit history) is enforced by the builder, not here. */
+     * builder so the test harness (integration_send_agreementagree
+     * _hope) and production stay locked to the same wire shape. The
+     * OPTIONS-bitmap-is-mandatory rule (Mobius panics without it,
+     * see commit history) is enforced by the builder, not here. */
     struct hx_chunk chunks[HX_AGREEMENT_AGREE_MAX_CHUNKS];
     guint8 scratch[HX_AGREEMENT_AGREE_SCRATCH_SIZE];
-    int hc = (int) gtkhx_proto_build_agreement_agree_chunks (
-        hx_conn_icon (htlc), (const uint8_t *) name_wire, name_len,
+    int hc = (int)gtkhx_proto_build_agreement_agree_chunks (
+        hx_conn_icon (htlc), (const uint8_t *)name_wire, name_len,
         /*options=*/0, chunks, HX_AGREEMENT_AGREE_MAX_CHUNKS, scratch,
         sizeof (scratch));
     if (hc > 0) {
@@ -389,30 +387,30 @@ hx_send_agreement_agree (struct htlc_conn *htlc)
     g_free (name_wire);
 
     /* Colored-Nicknames: AGREEMENTAGREE carries NAME + ICON
-	 * + OPTIONS but not DATA_COLOR — the spec only lists USER_CHANGE
-	 * / CHAT_USER_CHANGE / SELFINFO as color-carrying opcodes, so
-	 * extending AGREEMENTAGREE unilaterally would be off-spec. Instead
-	 * push a follow-up USER_CHANGE that carries our preferred color,
-	 * which doubles as the spec's auto-opt-in trigger ("once the
-	 * server sees DATA_COLOR from us, decorate other users' USER_
-	 * CHANGE broadcasts to us with their colors"). The 1.0/1.2 login
-	 * path calls hx_change_name_icon directly (rcv.c, version==0
-	 * branch) so this only matters for the 1.5+/AGREEMENTAGREE path.
-	 * Gate on nick_color != NONE so a no-color client doesn't ride
-	 * the auto-opt-in train it doesn't want. */
+     * + OPTIONS but not DATA_COLOR — the spec only lists USER_CHANGE
+     * / CHAT_USER_CHANGE / SELFINFO as color-carrying opcodes, so
+     * extending AGREEMENTAGREE unilaterally would be off-spec. Instead
+     * push a follow-up USER_CHANGE that carries our preferred color,
+     * which doubles as the spec's auto-opt-in trigger ("once the
+     * server sees DATA_COLOR from us, decorate other users' USER_
+     * CHANGE broadcasts to us with their colors"). The 1.0/1.2 login
+     * path calls hx_change_name_icon directly (rcv.c, version==0
+     * branch) so this only matters for the 1.5+/AGREEMENTAGREE path.
+     * Gate on nick_color != NONE so a no-color client doesn't ride
+     * the auto-opt-in train it doesn't want. */
     if (hx_conn_nick_color (htlc) != HX_NICK_COLOR_NONE) {
         hx_change_name_icon (htlc);
     }
 
     /* fogWraith caught us mixing 1.2 + 1.5 conventions: per the
-	 * 1.5 spec, USER_GETLIST and the news/messages fetch must not
-	 * land at the server until AFTER the client sends TranAgreed
-	 * — that's when the server officially treats us as joined.
-	 * Used to fire from hx_rcv_user_selfinfo, which arrives BEFORE
-	 * the agreement in 1.5 — too early. Single-fire guard makes
-	 * the call idempotent: the 2s fallback timer in rcv_task_login
-	 * (which still arms in case a 1.2 server skips the agreement
-	 * step entirely) is harmless once this has run. */
+     * 1.5 spec, USER_GETLIST and the news/messages fetch must not
+     * land at the server until AFTER the client sends TranAgreed
+     * — that's when the server officially treats us as joined.
+     * Used to fire from hx_rcv_user_selfinfo, which arrives BEFORE
+     * the agreement in 1.5 — too early. Single-fire guard makes
+     * the call idempotent: the 2s fallback timer in rcv_task_login
+     * (which still arms in case a 1.2 server skips the agreement
+     * step entirely) is harmless once this has run. */
     hx_post_login_fetches (htlc);
 }
 
@@ -470,7 +468,8 @@ hx_orchestrator_register_login_task (struct htlc_conn *htlc)
     }
     /* Idempotent: never double-register (LOGIN_SENDING fires once, but
      * guard anyway so a stray repeat can't strand a duplicate row). */
-    if (task_with_trans (sess_from_htlc (htlc), orchestrator_login_reply_trans)) {
+    if (task_with_trans (sess_from_htlc (htlc),
+                         orchestrator_login_reply_trans)) {
         return;
     }
     guint32 saved = hx_conn_trans (htlc);
@@ -523,13 +522,13 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     hx_conn_set_login (htlc, login ? login : "");
 
     /* Seed htlc->ip_addr from the server string so the post-login
-	 * "<addr>: login successful" line in rcv_task_login isn't "?".
-	 * The legacy path fills this with the resolved numeric IP via
-	 * populate_htlc_remote_ip; the orchestrator owns the socket and
-	 * doesn't surface the peer addr yet, so the connect target is
-	 * the best display string we have. TODO: plumb the resolved
-	 * SocketAddr out of the hxnet lifecycle to match the legacy
-	 * numeric-IP display exactly. */
+     * "<addr>: login successful" line in rcv_task_login isn't "?".
+     * The legacy path fills this with the resolved numeric IP via
+     * populate_htlc_remote_ip; the orchestrator owns the socket and
+     * doesn't surface the peer addr yet, so the connect target is
+     * the best display string we have. TODO: plumb the resolved
+     * SocketAddr out of the hxnet lifecycle to match the legacy
+     * numeric-IP display exactly. */
     hx_conn_set_ip_addr (htlc, serverstr);
 
     hx_printf_prefix (htlc, 0, INFOPREFIX, _ ("connecting to %s\n"),
@@ -560,8 +559,8 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * replays the LOGIN reply (trans HX_LOGIN_TRANS); the HOPE path
      * replays the step-2 reply, which carries HX_LOGIN_TRANS+1 (the
      * orchestrator sends step 1 as HX_LOGIN_TRANS, step 2 as +1). */
-    orchestrator_login_reply_trans = secure ? (HX_LOGIN_TRANS + 1)
-                                            : HX_LOGIN_TRANS;
+    orchestrator_login_reply_trans
+        = secure ? (HX_LOGIN_TRANS + 1) : HX_LOGIN_TRANS;
     hx_conn_set_trans (htlc, orchestrator_login_reply_trans + 1);
 
     /* 3. fd sentinel. The orchestrator owns the socket; the C side
@@ -585,13 +584,12 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * until this function returns — so installing synchronously here
      * closes the window. */
     /* Advertise the same capability bits the legacy LOGIN does
-	 * (network.c::send_login) so extensions — chat-history,
-	 * inline-media, voice — negotiate on the orchestrator path too.
-	 * Without this chunk the server never sees our capabilities and
-	 * silently falls back to the legacy feature set. */
+     * (network.c::send_login) so extensions — chat-history,
+     * inline-media, voice — negotiate on the orchestrator path too.
+     * Without this chunk the server never sees our capabilities and
+     * silently falls back to the legacy feature set. */
     guint16 caps = HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING
-                 | HTLC_CAP_CHAT_HISTORY
-                 | HTLC_CAP_INLINE_MEDIA;
+                   | HTLC_CAP_CHAT_HISTORY | HTLC_CAP_INLINE_MEDIA;
 #ifdef HAVE_VOICE
     /* Only advertise voice when the runtime is actually compiled in —
      * otherwise a server would offer voice we can't honour. */
@@ -603,15 +601,18 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
     if (tls) {
         /* plaintext LOGIN over TLS (secure+tls is gated out upstream). */
         ok = hx_bridge_install_orchestrated_plaintext_tls (
-            htlc, serverstr, port, login, pass, /*name=*/"", hx_conn_icon (htlc),
+            htlc, serverstr, port, login, pass, /*name=*/"",
+            hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS);
     } else if (secure) {
         ok = hx_bridge_install_orchestrated_hope (
-            htlc, serverstr, port, login, pass, hx_conn_name (htlc), hx_conn_icon (htlc),
+            htlc, serverstr, port, login, pass, hx_conn_name (htlc),
+            hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS, hx_conn_cipheralg (htlc));
     } else {
         ok = hx_bridge_install_orchestrated_plaintext (
-            htlc, serverstr, port, login, pass, /*name=*/"", hx_conn_icon (htlc),
+            htlc, serverstr, port, login, pass, /*name=*/"",
+            hx_conn_icon (htlc),
             /*version=*/185, caps, HX_LOGIN_TRANS);
     }
     if (!ok) {
@@ -707,9 +708,9 @@ htxf_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
     if (!htxf || !fp) {
         return 0; /* reject: no context / no fingerprint */
     }
-    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    g_autofree char *fp_str = g_strndup ((const char *)fp, fp_len);
     return hx_tls_verify_cert (htxf->serverhost, htxf->serverport, fp_str) ? 1
-                                                                         : 0;
+                                                                           : 0;
 }
 
 /* Public host:port-keyed subchannel cert verify for callers outside
@@ -727,94 +728,91 @@ gboolean
 htxf_connect (struct htxf_conn *htxf)
 {
     /* htxf is required — every caller in the codebase (xfers.c,
-	 * news worker, banner worker, xfer_go) allocates the struct
-	 * before calling. The original code had a vestigial NULL guard
-	 * inside the body, but the preceding lines unconditionally
-	 * dereferenced htxf, so the guard was dead anyway. Assert and
-	 * fail loud rather than papering over a programmer error. */
+     * news worker, banner worker, xfer_go) allocates the struct
+     * before calling. The original code had a vestigial NULL guard
+     * inside the body, but the preceding lines unconditionally
+     * dereferenced htxf, so the guard was dead anyway. Assert and
+     * fail loud rather than papering over a programmer error. */
     g_return_val_if_fail (htxf != NULL, FALSE);
 
     /* Large-file (CAP_LARGE_FILES) mode: when the negotiated
-	 * caps include the bit AND the transfer actually needs 64-bit
-	 * sizing (total_size > 0xFFFFFFFF), advertise both flags and
-	 * use the 24-byte handshake variant. Stamp htxf->opt.large
-	 * so file_send_one / file_recv_one know to use the split-
-	 * encoded fork headers (and raw-data uploads).
-	 *
-	 * Why we DON'T set LARGE_FILE for sub-4-GiB transfers even
-	 * when caps include it: spec says large-file uploads send
-	 * raw data only, no FFO. If we set the flag for every
-	 * transfer on a large-file-capable server, we lose the
-	 * INFO fork on small uploads — type/creator/comment go
-	 * missing server-side. Keeping LARGE_FILE off for fits-in-
-	 * 32-bit transfers preserves the legacy FFO behaviour for
-	 * the common case. The cap negotiation still works — both
-	 * peers KNOW they can speak large-file, they just don't have
-	 * to use the wire shape for this particular transfer. */
-    gboolean size64 = htxf->htlc
-                      && (hx_conn_has_cap (htxf->htlc, HTLC_CAP_LARGE_FILES)) != 0
-                      && htxf->total_size > 0xFFFFFFFFULL;
+     * caps include the bit AND the transfer actually needs 64-bit
+     * sizing (total_size > 0xFFFFFFFF), advertise both flags and
+     * use the 24-byte handshake variant. Stamp htxf->opt.large
+     * so file_send_one / file_recv_one know to use the split-
+     * encoded fork headers (and raw-data uploads).
+     *
+     * Why we DON'T set LARGE_FILE for sub-4-GiB transfers even
+     * when caps include it: spec says large-file uploads send
+     * raw data only, no FFO. If we set the flag for every
+     * transfer on a large-file-capable server, we lose the
+     * INFO fork on small uploads — type/creator/comment go
+     * missing server-side. Keeping LARGE_FILE off for fits-in-
+     * 32-bit transfers preserves the legacy FFO behaviour for
+     * the common case. The cap negotiation still works — both
+     * peers KNOW they can speak large-file, they just don't have
+     * to use the wire shape for this particular transfer. */
+    gboolean size64
+        = htxf->htlc
+          && (hx_conn_has_cap (htxf->htlc, HTLC_CAP_LARGE_FILES)) != 0
+          && htxf->total_size > 0xFFFFFFFFULL;
     htxf->opt.large = size64 ? 1 : 0;
 
     /* Plaintext preamble (16 bytes legacy, 24 bytes when SIZE64
-	 * is set). hxnet_htxf_pack_preamble handles the
-	 * LARGE_FILE / SIZE64 flag-setting and the legacy-field
-	 * zeroing for the 24-byte variant. hxnet_htxf_connect writes it
-	 * raw (before any AEAD arms) — the server matches the subchannel
-	 * to the queued transfer by ref before any cipher state exists. */
+     * is set). hxnet_htxf_pack_preamble handles the
+     * LARGE_FILE / SIZE64 flag-setting and the legacy-field
+     * zeroing for the 24-byte variant. hxnet_htxf_connect writes it
+     * raw (before any AEAD arms) — the server matches the subchannel
+     * to the queued transfer by ref before any cipher state exists. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    guint16 type
-        = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
-    size_t hdr_len = hxnet_htxf_pack_preamble (
-        hdr_buf, sizeof (hdr_buf),
-        htxf->ref, htxf->total_size,
-        type, /*flags=*/0, size64);
+    guint16 type = htxf->opt.folder ? HTXF_TYPE_FOLDER : HTXF_TYPE_FILE;
+    size_t hdr_len = hxnet_htxf_pack_preamble (hdr_buf, sizeof (hdr_buf),
+                                               htxf->ref, htxf->total_size,
+                                               type, /*flags=*/0, size64);
     if (hdr_len == 0) {
         return FALSE;
     }
 
     /* Resolve the SOCKS proxy (if any) for this subchannel target the
-	 * same way the control channel does, then let hxnet own the whole
-	 * connect: DNS + IPv4/IPv6 fallback + optional SOCKS tunnel all run
-	 * in Rust (resolve_and_connect), so there's no C-side GSocketClient
-	 * connect + fd dup/adopt anymore. */
-    g_autofree char *proxy_uri =
-        hx_bridge_lookup_socks_proxy (htxf->serverhost, htxf->serverport);
+     * same way the control channel does, then let hxnet own the whole
+     * connect: DNS + IPv4/IPv6 fallback + optional SOCKS tunnel all run
+     * in Rust (resolve_and_connect), so there's no C-side GSocketClient
+     * connect + fd dup/adopt anymore. */
+    g_autofree char *proxy_uri
+        = hx_bridge_lookup_socks_proxy (htxf->serverhost, htxf->serverport);
 
     /* HOPE-ChaCha20-Poly1305 HTXF subchannel arming. When the control
-	 * channel negotiated ChaCha20-Poly1305, the per-transfer keys are
-	 * derived INSIDE hxnet_htxf_connect from the control connection's
-	 * retained HOPE material (htlc->hope_aead, an opaque handle seeded at
-	 * login) plus this transfer's ref — mixing ref into the salt so two
-	 * transfers in one session can never share a nonce, counters from 0 —
-	 * and hxnet owns the seal/open framing thereafter. The session key
-	 * never comes back to C. The preamble itself always travels plaintext
-	 * per spec. A NULL handle (no HOPE, a stream cipher, or no-cipher)
-	 * selects plaintext passthrough. The handle is seeded at login from
-	 * the orchestrator's retained HOPE material. */
-    const HxnetHopeAead *hope_aead =
-        (htxf->htlc != NULL) ? (const HxnetHopeAead *) hx_conn_hope_aead (htxf->htlc)
-                             : NULL;
+     * channel negotiated ChaCha20-Poly1305, the per-transfer keys are
+     * derived INSIDE hxnet_htxf_connect from the control connection's
+     * retained HOPE material (htlc->hope_aead, an opaque handle seeded at
+     * login) plus this transfer's ref — mixing ref into the salt so two
+     * transfers in one session can never share a nonce, counters from 0 —
+     * and hxnet owns the seal/open framing thereafter. The session key
+     * never comes back to C. The preamble itself always travels plaintext
+     * per spec. A NULL handle (no HOPE, a stream cipher, or no-cipher)
+     * selects plaintext passthrough. The handle is seeded at login from
+     * the orchestrator's retained HOPE material. */
+    const HxnetHopeAead *hope_aead
+        = (htxf->htlc != NULL)
+              ? (const HxnetHopeAead *)hx_conn_hope_aead (htxf->htlc)
+              : NULL;
     if (hope_aead) {
         debug_log ("xfer-aead", "ref=%u: AEAD active (HOPE material present)",
                    htxf->ref);
     }
 
     /* Mirror the control channel's TLS mode onto this subchannel —
-	 * separate-port model pairs TLS-HTXF on port+1 with TLS-HTLS.
-	 * hxnet_htxf_connect does the TCP connect (+ optional SOCKS tunnel),
-	 * the rustls handshake, and the WebPKI→TOFU trust gate internally;
-	 * htxf_verify_cert_cb bridges a WebPKI failure back to the C
-	 * known-hosts decision. */
+     * separate-port model pairs TLS-HTXF on port+1 with TLS-HTLS.
+     * hxnet_htxf_connect does the TCP connect (+ optional SOCKS tunnel),
+     * the rustls handshake, and the WebPKI→TOFU trust gate internally;
+     * htxf_verify_cert_cb bridges a WebPKI failure back to the C
+     * known-hosts decision. */
     int xfer_tls = (htxf->htlc != NULL) ? hx_conn_tls (htxf->htlc) : 0;
     htxf->hx = hxnet_htxf_connect (
-        (const guint8 *) htxf->serverhost, strlen (htxf->serverhost),
-        htxf->serverport,
-        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
-        xfer_tls,
-        hdr_buf, hdr_len,
-        hope_aead, htxf->ref,
-        htxf_verify_cert_cb, htxf);
+        (const guint8 *)htxf->serverhost, strlen (htxf->serverhost),
+        htxf->serverport, (const guint8 *)proxy_uri,
+        proxy_uri ? strlen (proxy_uri) : 0, xfer_tls, hdr_buf, hdr_len,
+        hope_aead, htxf->ref, htxf_verify_cert_cb, htxf);
     if (!htxf->hx) {
         debug_log ("xfer", "htxf_connect: hxnet_htxf_connect failed (ref=%u)",
                    htxf->ref);
@@ -822,11 +820,11 @@ htxf_connect (struct htxf_conn *htxf)
     }
 
     /* Arm the cancellation token (allocated at xfer_new) with the now-
-	 * open channel's socket, so a main-thread xfer_delete can shut the
-	 * subchannel down and unblock this worker's blocking reads/writes.
-	 * Cheap and idempotent; NULL-safe on the banner transient path,
-	 * which doesn't route through htxf_connect. */
-    hxnet_htxf_abort_arm ((HtxfConn *) htxf->hx, (const HtxfAbort *) htxf->abort);
+     * open channel's socket, so a main-thread xfer_delete can shut the
+     * subchannel down and unblock this worker's blocking reads/writes.
+     * Cheap and idempotent; NULL-safe on the banner transient path,
+     * which doesn't route through htxf_connect. */
+    hxnet_htxf_abort_arm ((HtxfConn *)htxf->hx, (const HtxfAbort *)htxf->abort);
     return TRUE;
 }
 
@@ -902,10 +900,10 @@ hx_tracker_v3_probe_ms (void)
         debug_log ("tracker",
                    "ignoring GTKHX_TRACKER_V3_PROBE_MS=%s "
                    "(must be an integer in [100, 60000]); using default %u ms",
-                   env, (unsigned) HX_TRACKER_V3_PROBE_TIMEOUT_MS);
+                   env, (unsigned)HX_TRACKER_V3_PROBE_TIMEOUT_MS);
         return HX_TRACKER_V3_PROBE_TIMEOUT_MS;
     }
-    return (guint) v;
+    return (guint)v;
 }
 
 /* TOFU verify keyed on the tracker's (host, port). Runs on the hxnet
@@ -922,8 +920,8 @@ tracker_verify_cert_cb (const guint8 *host, gsize host_len, guint16 port,
          * trust cache on "" and produce a confusing prompt. */
         return 0;
     }
-    g_autofree char *host_str = g_strndup ((const char *) host, host_len);
-    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    g_autofree char *host_str = g_strndup ((const char *)host, host_len);
+    g_autofree char *fp_str = g_strndup ((const char *)fp, fp_len);
     return hx_tls_verify_cert (host_str, port, fp_str) ? 1 : 0;
 }
 
@@ -936,7 +934,7 @@ tracker_dup_str (const guint8 *ptr, gsize len)
     if (!ptr || len == 0) {
         return g_strdup ("");
     }
-    return g_strndup ((const char *) ptr, len);
+    return g_strndup ((const char *)ptr, len);
 }
 
 /* Re-emit one drained fetch event as the legacy view signals. */
@@ -953,7 +951,7 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
         gtkhx_session_emit_tracker_batch_begin (gtkhx_session_get_default (),
                                                 tracker_batch_url, ev->version,
                                                 ev->count);
-        track_prog_update (sess, tracker_batch_url, 0, (int) ev->count);
+        track_prog_update (sess, tracker_batch_url, 0, (int)ev->count);
         break;
     }
     case HXNET_TRK_KIND_RECORD: {
@@ -968,24 +966,23 @@ tracker_fetch_dispatch_event (session *sess, const HxnetTrackerEvent *ev)
                 memcpy (&addr, ev->address_ptr, 4);
             }
             e = hx_tracker_server_new_v1 (
-                addr, ev->port, ev->nusers, (const char *) ev->name_ptr,
-                ev->name_len, (const char *) ev->desc_ptr, ev->desc_len,
-                (int) ev->total);
+                addr, ev->port, ev->nusers, (const char *)ev->name_ptr,
+                ev->name_len, (const char *)ev->desc_ptr, ev->desc_len,
+                (int)ev->total);
         } else {
             /* v3 record: UTF-8 name/desc, addr_type-tagged address. */
             e = hx_tracker_server_new_v3 (
                 ev->addr_type, ev->address_ptr, ev->address_len, ev->port,
-                ev->nusers, (const char *) ev->name_ptr, ev->name_len,
-                (const char *) ev->desc_ptr, ev->desc_len, ev->tlv_count,
-                ev->tlv_len ? ev->tlv_ptr : NULL, ev->tlv_len,
-                (int) ev->total);
+                ev->nusers, (const char *)ev->name_ptr, ev->name_len,
+                (const char *)ev->desc_ptr, ev->desc_len, ev->tlv_count,
+                ev->tlv_len ? ev->tlv_ptr : NULL, ev->tlv_len, (int)ev->total);
         }
         if (e) {
             gtkhx_session_emit_tracker_server_create (
                 gtkhx_session_get_default (), e);
             hx_tracker_server_free (e);
-            track_prog_update (sess, (char *) url, tracker_batch_server_i,
-                               (int) ev->total);
+            track_prog_update (sess, (char *)url, tracker_batch_server_i,
+                               (int)ev->total);
             tracker_batch_server_i++;
         }
         break;
@@ -1061,7 +1058,7 @@ hx_tracker_list_async (session *sess)
     }
 
     int n = gtkhx_prefs.num_tracker;
-    const char **urls = g_new (const char *, (gsize) n);
+    const char **urls = g_new (const char *, (gsize)n);
     for (int i = 0; i < n; i++) {
         urls[i] = gtkhx_prefs.tracker[i];
     }
@@ -1084,7 +1081,7 @@ hx_tracker_list_async (session *sess)
     }
 
     current_tracker_fetch = hxnet_tracker_fetch_open (
-        (const char *const *) urls, (gsize) n, HTRK_V3_FEAT_IPV6,
+        (const char *const *)urls, (gsize)n, HTRK_V3_FEAT_IPV6,
         hx_tracker_v3_probe_ms (), proxy_uri, tracker_verify_cert_cb, NULL);
     g_free (urls);
     if (!current_tracker_fetch) {
@@ -1112,13 +1109,13 @@ void
 kill_threads (void)
 {
     /* cancel the async connect chain. Safe whether or not
-	 * one's in flight. */
+     * one's in flight. */
     if (current_cancel) {
         g_cancellable_cancel (current_cancel);
         g_clear_object (&current_cancel);
     }
     /* And the async tracker fetch, which has its own cancellation
-	 * inside current_tracker_fetch. */
+     * inside current_tracker_fetch. */
     tracker_kill_threads ();
 }
 

@@ -177,7 +177,10 @@ fn form_from_bookmark(w: &BmWidgets, d: &Bookmark) {
     // dropdown index. An unknown byte (e.g. RC4) maps to 0 ("Off").
     // clamp_combo still wraps a corrupt / forward-format byte past the
     // model length back into range.
-    let cipher_idx = clamp_combo(&w.cipher_row, cipher_vocab::cipher_byte_to_dropdown(d.cipher));
+    let cipher_idx = clamp_combo(
+        &w.cipher_row,
+        cipher_vocab::cipher_byte_to_dropdown(d.cipher),
+    );
     w.cipher_row.set_selected(cipher_idx);
     let compress_idx = clamp_combo(&w.compress_row, d.compress as u32);
     w.compress_row.set_selected(compress_idx);
@@ -369,7 +372,8 @@ fn rebuild_list(w: &BmWidgets, select_name: Option<&str>) {
         }
     }
     if let Some(r) = &to_select {
-        w.list_box.select_row(Some(r.upcast_ref::<gtk::ListBoxRow>()));
+        w.list_box
+            .select_row(Some(r.upcast_ref::<gtk::ListBoxRow>()));
     }
 
     unblock_row_selected(&w.list_box);
@@ -535,24 +539,23 @@ fn on_export_legacy() {
     let Some(w) = widgets() else { return };
     let dialog = gtk::FileDialog::new();
     dialog.set_title(&tr("Export Bookmarks (legacy format)"));
-    dialog.select_folder(
-        Some(&w.window),
-        gtk::gio::Cancellable::NONE,
-        move |res| {
-            // Cancelled / dismissed → nothing to do.
-            let Ok(folder) = res else { return };
-            let Some(path) = folder.path() else { return };
-            let Some(w) = widgets() else { return };
-            match bookmark_store::export_legacy(&path) {
-                Ok(n) => info_dialog(
-                    &w,
-                    &tr("Bookmarks exported"),
-                    &tr1("Wrote %s bookmark file(s) in the legacy format.", &n.to_string()),
+    dialog.select_folder(Some(&w.window), gtk::gio::Cancellable::NONE, move |res| {
+        // Cancelled / dismissed → nothing to do.
+        let Ok(folder) = res else { return };
+        let Some(path) = folder.path() else { return };
+        let Some(w) = widgets() else { return };
+        match bookmark_store::export_legacy(&path) {
+            Ok(n) => info_dialog(
+                &w,
+                &tr("Bookmarks exported"),
+                &tr1(
+                    "Wrote %s bookmark file(s) in the legacy format.",
+                    &n.to_string(),
                 ),
-                Err(e) => toast_error(&w, &tr1("Export failed: %s", &e)),
-            }
-        },
-    );
+            ),
+            Err(e) => toast_error(&w, &tr1("Export failed: %s", &e)),
+        }
+    });
 }
 
 // ======================================================================
@@ -627,11 +630,17 @@ fn build_window() {
     shortcuts.set_propagation_phase(gtk::PropagationPhase::Capture);
     shortcuts.set_scope(gtk::ShortcutScope::Local);
     shortcuts.add_shortcut(gtk::Shortcut::new(
-        Some(gtk::KeyvalTrigger::new(gdk::Key::Escape, gdk::ModifierType::empty())),
+        Some(gtk::KeyvalTrigger::new(
+            gdk::Key::Escape,
+            gdk::ModifierType::empty(),
+        )),
         Some(gtk::NamedAction::new("window.close")),
     ));
     shortcuts.add_shortcut(gtk::Shortcut::new(
-        Some(gtk::KeyvalTrigger::new(gdk::Key::w, gdk::ModifierType::CONTROL_MASK)),
+        Some(gtk::KeyvalTrigger::new(
+            gdk::Key::w,
+            gdk::ModifierType::CONTROL_MASK,
+        )),
         Some(gtk::NamedAction::new("window.close")),
     ));
     window.add_controller(shortcuts);

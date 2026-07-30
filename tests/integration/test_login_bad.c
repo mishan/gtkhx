@@ -62,7 +62,7 @@ test_login_bad_account_rejected (void)
     hl_encode_local (encbogus, bogus, blen);
 
     const char *display = "BadLoginTier-3";
-    guint16 icon_be = g_htons(412);
+    guint16 icon_be = g_htons (412);
 
     guint32 our_trans = htlc.trans;
     g_assert_true (integration_send_message (
@@ -74,14 +74,14 @@ test_login_bad_account_rejected (void)
     (void)our_trans; /* not asserted; mhxd doesn't always echo */
 
     /* Drain everything the server hands us before either:
-	 *   - a task-error frame (rejection mode (a)), or
-	 *   - the recv loop returns FALSE because the server closed
-	 *     the connection (rejection mode (b) — mhxd's real path).
-	 * Whichever happens first counts as a successful rejection.
-	 *
-	 * Crucially we record whether SELFINFO ever appeared; if it
-	 * did, the server let us in despite the bad account, and that
-	 * is the failure case worth catching. */
+     *   - a task-error frame (rejection mode (a)), or
+     *   - the recv loop returns FALSE because the server closed
+     *     the connection (rejection mode (b) — mhxd's real path).
+     * Whichever happens first counts as a successful rejection.
+     *
+     * Crucially we record whether SELFINFO ever appeared; if it
+     * did, the server let us in despite the bad account, and that
+     * is the failure case worth catching. */
     gboolean got_error = FALSE;
     gboolean conn_closed = FALSE;
     gboolean got_selfinfo = FALSE;
@@ -105,7 +105,9 @@ test_login_bad_account_rejected (void)
 
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                           hx_test_in (&htlc)->pos, err,
+                                           sizeof (err), &err_len));
         g_assert_cmpuint (err_len, >, 0);
         g_test_message ("server rejected bad login (task-error): \"%s\"", err);
     }

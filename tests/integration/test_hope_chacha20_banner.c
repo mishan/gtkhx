@@ -64,8 +64,8 @@
 static const hx_test_server *
 pick_banner_chacha20_server (void)
 {
-    GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_CHACHA20
-                                               | HX_TEST_CAP_BANNER_HTXF);
+    GPtrArray *servers
+        = hx_test_servers_with (HX_TEST_CAP_CHACHA20 | HX_TEST_CAP_BANNER_HTXF);
     if (!servers) {
         return NULL;
     }
@@ -112,10 +112,11 @@ test_hope_chacha20_banner_htxf (void)
 {
     const hx_test_server *srv = pick_banner_chacha20_server ();
     if (!srv) {
-        g_test_fail_printf ("no server in matrix advertising both "
-                     "HX_TEST_CAP_CHACHA20 and HX_TEST_CAP_BANNER_HTXF. "
-                     "Janus advertises both — bring it up with "
-                     "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`.");
+        g_test_fail_printf (
+            "no server in matrix advertising both "
+            "HX_TEST_CAP_CHACHA20 and HX_TEST_CAP_BANNER_HTXF. "
+            "Janus advertises both — bring it up with "
+            "`docker run -p 5510:5500 -p 5511:5501 gtkhx-janus`.");
         return;
     }
 
@@ -158,18 +159,18 @@ test_hope_chacha20_banner_htxf (void)
         if (hdr_type (&htlc) != HTLS_HDR_BANNER) {
             continue;
         }
-        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+        dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
         {
             if (_type == HTLS_DATA_BANNER_TYPE) {
-                banner_type = g_strndup ((const char *) dh->data, _len);
+                banner_type = g_strndup ((const char *)dh->data, _len);
             }
         }
         dh_end ();
     }
     if (!banner_type) {
         g_test_fail_printf ("server did not send HTLS_HDR_BANNER in the "
-                     "post-login window — this target may not advertise "
-                     "a banner under HOPE.");
+                            "post-login window — this target may not advertise "
+                            "a banner under HOPE.");
         goto cleanup;
     }
     g_test_message ("banner type=\"%s\"", banner_type);
@@ -178,7 +179,7 @@ test_hope_chacha20_banner_htxf (void)
      * to fetch over HTXF — that test is covered by URL-mode tests. */
     if (strncmp (banner_type, "URL", 3) == 0) {
         g_test_fail_printf ("server is in URL banner mode — HTXF fetch path "
-                     "doesn't apply.");
+                            "doesn't apply.");
         goto cleanup;
     }
 
@@ -201,7 +202,8 @@ test_hope_chacha20_banner_htxf (void)
             continue;
         }
         got_reply = TRUE;
-        hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+        hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (reply.ref, >, 0);
@@ -226,8 +228,7 @@ test_hope_chacha20_banner_htxf (void)
      * writes it raw before arming AEAD, so we don't send it ourselves. */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
     size_t hdr_len = hxnet_htxf_pack_preamble (
-        hdr_buf, sizeof (hdr_buf),
-        ref, size, HTXF_TYPE_BANNER, /*flags=*/0,
+        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER, /*flags=*/0,
         /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
 
@@ -242,9 +243,8 @@ test_hope_chacha20_banner_htxf (void)
     xfer.ref = ref;
     g_assert_nonnull (htlc.hope_aead);
     xfer.hx = hxnet_htxf_connect (
-        (const guint8 *) srv->host, strlen (srv->host), srv->xfer_port,
-        NULL, 0, /*tls=*/0, hdr_buf, hdr_len,
-        (const HxnetHopeAead *) htlc.hope_aead, ref,
+        (const guint8 *)srv->host, strlen (srv->host), srv->xfer_port, NULL, 0,
+        /*tls=*/0, hdr_buf, hdr_len, (const HxnetHopeAead *)htlc.hope_aead, ref,
         /*verify_cert=*/NULL, /*user_data=*/NULL);
     g_assert_nonnull (xfer.hx);
 
@@ -253,20 +253,21 @@ test_hope_chacha20_banner_htxf (void)
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
+        ssize_t r
+            = hxnet_htxf_read ((HtxfConn *)xfer.hx, bytes + got, size - got);
         if (r <= 0) {
             g_test_message ("hxnet_htxf_read returned %zd at got=%zu errno=%d "
                             "(%s)",
                             r, got, errno, g_strerror (errno));
             break;
         }
-        got += (gsize) r;
+        got += (gsize)r;
     }
-    g_assert_cmpuint ((guint) got, ==, size);
-    hxnet_htxf_close ((HtxfConn *) xfer.hx);
+    g_assert_cmpuint ((guint)got, ==, size);
+    hxnet_htxf_close ((HtxfConn *)xfer.hx);
 
-    g_test_message ("first 4 bytes: %02x %02x %02x %02x",
-                    bytes[0], bytes[1], bytes[2], bytes[3]);
+    g_test_message ("first 4 bytes: %02x %02x %02x %02x", bytes[0], bytes[1],
+                    bytes[2], bytes[3]);
     g_assert_true (banner_bytes_match_type (banner_type, bytes, size));
 
     g_free (bytes);

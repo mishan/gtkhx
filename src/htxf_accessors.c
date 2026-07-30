@@ -150,5 +150,5 @@ hx_file_size (const char *path)
     if (stat (path, &sb)) {
         return -1;
     }
-    return (gint64) sb.st_size;
+    return (gint64)sb.st_size;
 }

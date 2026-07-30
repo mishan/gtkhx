@@ -26,10 +26,10 @@ use std::os::raw::c_int;
 use std::rc::{Rc, Weak};
 use std::time::Duration;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_borrow, IntoGlibPtr};
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_borrow, IntoGlibPtr};
+use gtk4 as gtk;
 
 use crate::tr::tr;
 
@@ -57,8 +57,7 @@ const STATE_KEY: &str = "voice-panel-state";
 // FFI seam.
 // ---------------------------------------------------------------------
 
-type SendWireFrameCb =
-    unsafe extern "C" fn(*mut c_void, u32, *const u8, usize);
+type SendWireFrameCb = unsafe extern "C" fn(*mut c_void, u32, *const u8, usize);
 
 /// `#[repr(C)]` mirror of `gtkhx_voice_runtime_signal_callbacks`. Field order
 /// pinned by voice_runtime.h; read once at construction.
@@ -106,11 +105,7 @@ extern "C" {
 
     // voice_model.c.
     fn hx_voice_model_set_self_uid(model: *mut c_void, uid: u16);
-    fn hx_voice_model_set_speaking(
-        model: *mut c_void,
-        uid: u16,
-        speaking: glib::ffi::gboolean,
-    );
+    fn hx_voice_model_set_speaking(model: *mut c_void, uid: u16, speaking: glib::ffi::gboolean);
     fn hx_voice_model_clear(model: *mut c_void);
 
     // voice_bridge.c — session/htlc field access.
@@ -157,7 +152,10 @@ thread_local! {
 
 /// Recover a panel's `Rc<PanelInner>` from its widget qdata.
 fn panel_state(w: &gtk::Widget) -> Option<Rc<PanelInner>> {
-    unsafe { w.data::<Rc<PanelInner>>(STATE_KEY).map(|p| p.as_ref().clone()) }
+    unsafe {
+        w.data::<Rc<PanelInner>>(STATE_KEY)
+            .map(|p| p.as_ref().clone())
+    }
 }
 
 /// Snapshot the live panels (upgrading + pruning dead weaks), then run `f`
@@ -205,11 +203,7 @@ unsafe fn ensure_voice_runtime(sess: *mut c_void) -> *mut c_void {
         };
         // user_data = &sess->htlc; the signal handlers reach sess back via
         // hx_active_session().
-        rt = gtkhx_voice_runtime_new_v2(
-            hx_session_htlc(sess),
-            send_wire_frame_cb,
-            &signals,
-        );
+        rt = gtkhx_voice_runtime_new_v2(hx_session_htlc(sess), send_wire_frame_cb, &signals);
         hx_session_set_voice_runtime(sess, rt);
     }
     rt
@@ -332,11 +326,7 @@ unsafe extern "C" fn mute_changed_cb(_user_data: *mut c_void, muted: c_int) {
     });
 }
 
-unsafe extern "C" fn speaker_changed_cb(
-    _user_data: *mut c_void,
-    uid: u16,
-    is_speaking: c_int,
-) {
+unsafe extern "C" fn speaker_changed_cb(_user_data: *mut c_void, uid: u16, is_speaking: c_int) {
     let sess = hx_active_session();
     let model = hx_session_voice_model(sess);
     if model.is_null() {
@@ -359,8 +349,8 @@ unsafe extern "C" fn error_cb(_user_data: *mut c_void, text: *const c_char) {
 fn update_button_labels(inner: &PanelInner) {
     let joined = inner.joined.get();
     let muted = inner.muted.get();
-    let access_ok = !inner.sess.is_null()
-        && unsafe { hx_htlc_voice_access(hx_session_htlc(inner.sess)) != 0 };
+    let access_ok =
+        !inner.sess.is_null() && unsafe { hx_htlc_voice_access(hx_session_htlc(inner.sess)) != 0 };
 
     // Join ↔ Leave (icon-only; the tooltip carries the words).
     inner.join_btn.set_icon_name(if joined {
@@ -582,10 +572,7 @@ fn autojoin_poll(w: &Weak<PanelInner>) -> glib::ControlFlow {
 /// `gtk_box_append` / `gtk_widget_set_parent` sinks it), matching the C
 /// constructor convention.
 #[no_mangle]
-pub unsafe extern "C" fn voice_panel_new(
-    sess: *mut c_void,
-    cid: u32,
-) -> *mut gtk::ffi::GtkWidget {
+pub unsafe extern "C" fn voice_panel_new(sess: *mut c_void, cid: u32) -> *mut gtk::ffi::GtkWidget {
     crate::ensure_gtk_init();
 
     let panel = gtk::Box::new(gtk::Orientation::Horizontal, 2);
@@ -685,10 +672,7 @@ pub unsafe extern "C" fn voice_panel_new(
 /// # Safety
 /// `panel` is NULL or a valid voice-panel widget; `sess` NULL or valid.
 #[no_mangle]
-pub unsafe extern "C" fn voice_panel_refresh(
-    panel: *mut gtk::ffi::GtkWidget,
-    sess: *mut c_void,
-) {
+pub unsafe extern "C" fn voice_panel_refresh(panel: *mut gtk::ffi::GtkWidget, sess: *mut c_void) {
     if panel.is_null() || sess.is_null() {
         return;
     }

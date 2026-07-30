@@ -52,9 +52,9 @@
 #include "xfers_recv.h"
 #include "integration_harness.h"
 
-#define SEED          "hello world\n"
-#define SEED_LEN      12
-#define RESUME_AT     6           /* download from byte 6: skip "hello " */
+#define SEED "hello world\n"
+#define SEED_LEN 12
+#define RESUME_AT 6 /* download from byte 6: skip "hello " */
 
 static void
 noop_progress (void *user_data, guint64 delta)
@@ -109,14 +109,15 @@ test_file_resume_round_trip (void)
         (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname,
         (int)HTLC_DATA_RFLT, 74, rflt));
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
-                                err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_fail_printf ("file_get(resume) refused by server: \"%s\". "
                                 "Is files/test.txt seeded in the container?",
                                 err);
@@ -129,7 +130,8 @@ test_file_resume_round_trip (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                           &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     guint32 xfer_ref = reply.ref;
@@ -147,7 +149,8 @@ test_file_resume_round_trip (void)
     }
 
     g_autoptr (GError) tmperr = NULL;
-    g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx_fileresume_XXXXXX", &tmperr);
+    g_autofree char *tmpdir
+        = g_dir_make_tmp ("gtkhx_fileresume_XXXXXX", &tmperr);
     g_assert_no_error (tmperr);
     g_assert_nonnull (tmpdir);
 
@@ -191,11 +194,11 @@ test_file_resume_round_trip (void)
     g_assert_cmpuint (clen, ==, SEED_LEN);
     g_assert_cmpmem (content, clen, SEED, SEED_LEN);
 
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
 
     unlink (htxf.path);
-    g_autofree char *finfo =
-        g_build_filename (tmpdir, ".finderinfo", "out.txt", NULL);
+    g_autofree char *finfo
+        = g_build_filename (tmpdir, ".finderinfo", "out.txt", NULL);
     unlink (finfo);
     g_autofree char *finfo_dir = g_build_filename (tmpdir, ".finderinfo", NULL);
     g_rmdir (finfo_dir);

@@ -61,11 +61,11 @@
 #include <gio/gio.h>
 
 typedef enum {
-    HX_FAKE_BEHAVIOR_SEND_MAGIC         = 0,
-    HX_FAKE_BEHAVIOR_SEND_WRONG_MAGIC   = 1,
-    HX_FAKE_BEHAVIOR_DROP_BEFORE_MAGIC  = 2,
-    HX_FAKE_BEHAVIOR_SEND_SHORT_MAGIC   = 3,
-    HX_FAKE_BEHAVIOR_HANG               = 4,
+    HX_FAKE_BEHAVIOR_SEND_MAGIC = 0,
+    HX_FAKE_BEHAVIOR_SEND_WRONG_MAGIC = 1,
+    HX_FAKE_BEHAVIOR_DROP_BEFORE_MAGIC = 2,
+    HX_FAKE_BEHAVIOR_SEND_SHORT_MAGIC = 3,
+    HX_FAKE_BEHAVIOR_HANG = 4,
 } hx_fake_server_behavior;
 
 typedef struct hx_fake_server hx_fake_server;

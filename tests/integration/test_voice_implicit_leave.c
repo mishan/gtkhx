@@ -69,11 +69,11 @@ pick_voice_server (void)
 static guint32
 send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
-    if (!integration_send_message (
-            fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0, /*hc=*/1,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be)) {
+    if (!integration_send_message (fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
         return 0;
     }
     return trans;
@@ -82,11 +82,11 @@ send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 static guint32
 send_voice_leave (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
-    if (!integration_send_message (
-            fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0, /*hc=*/1,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be)) {
+    if (!integration_send_message (fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
         return 0;
     }
     return trans;
@@ -102,12 +102,12 @@ test_voice_implicit_leave (void)
     }
 
     char nick[32];
-    g_snprintf (nick, sizeof (nick), "VoiceImpl-%d-%04x", (int) getpid (),
+    g_snprintf (nick, sizeof (nick), "VoiceImpl-%d-%04x", (int)getpid (),
                 g_random_int () & 0xffff);
 
     struct htlc_conn htlc;
-    int fd = integration_open_login_to_caps_or_skip (
-        srv, &htlc, nick, 412, HTLC_CAP_VOICE);
+    int fd = integration_open_login_to_caps_or_skip (srv, &htlc, nick, 412,
+                                                     HTLC_CAP_VOICE);
     if (fd < 0) {
         return;
     }
@@ -130,7 +130,9 @@ test_voice_implicit_leave (void)
          * the error message in the test log. */
         char err[256] = { 0 };
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_message ("duplicate VOICE_JOIN(0) rejected: \"%s\"", err);
         }
     } else {
@@ -138,7 +140,8 @@ test_voice_implicit_leave (void)
          * fresh SDP offer. Validate the reply shape. */
         struct gtkhx_proto_voice_reply r;
         memset (&r, 0, sizeof (r));
-        gtkhx_proto_parse_voice_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &r);
+        gtkhx_proto_parse_voice_reply (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, &r);
         g_assert_true (r.sdp_present);
         g_assert_true (r.codec_present);
         g_assert_true (r.participants_present);

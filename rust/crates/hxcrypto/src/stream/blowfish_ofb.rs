@@ -124,7 +124,11 @@ impl BlowfishOfb64State {
     /// BF_KEY/ivec/num pattern was — the key schedule doesn't change
     /// during a single rollback, so saving + restoring it is wasted
     /// work.
-    pub fn save_ofb_state(&self, out_ivec: &mut [u8; BLOWFISH_OFB64_BLOCK_SIZE], out_num: &mut u32) {
+    pub fn save_ofb_state(
+        &self,
+        out_ivec: &mut [u8; BLOWFISH_OFB64_BLOCK_SIZE],
+        out_num: &mut u32,
+    ) {
         *out_ivec = self.ivec;
         *out_num = self.num as u32;
     }

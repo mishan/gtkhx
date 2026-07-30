@@ -61,7 +61,7 @@ extern gboolean connect_open_hotline_url (const char *url);
  * `out_name` (optional) receives the chosen bookmark name on success;
  * caller frees with g_free. NULL on failure. */
 extern gboolean connect_save_hotline_url_as_bookmark (const char *url,
-                                                     char **out_name,
-                                                     GError **err);
+                                                      char **out_name,
+                                                      GError **err);
 
 #endif

@@ -36,8 +36,7 @@
 
 gboolean
 task_error_extract (const guint8 *frame, gsize frame_len, char *out,
-                    gsize out_size,
-                    gsize *out_len)
+                    gsize out_size, gsize *out_len)
 {
     if (!out || out_size == 0) {
         return FALSE;
@@ -46,8 +45,8 @@ task_error_extract (const guint8 *frame, gsize frame_len, char *out,
     /* chunk walk + CR2LF + strip_ansi moved to
      * gtkhx_proto_parse_task_error. The crate sentinel SIZE_MAX
      * distinguishes "no TASK_ERROR chunk" from "empty error string". */
-    size_t n = gtkhx_proto_parse_task_error (frame, frame_len,
-                                             (uint8_t *) out, out_size);
+    size_t n = gtkhx_proto_parse_task_error (frame, frame_len, (uint8_t *)out,
+                                             out_size);
     if (n == (size_t)-1) {
         return FALSE;
     }
@@ -69,9 +68,8 @@ hx_chat_extract (const guint8 *frame, gsize frame_len, struct hx_chat_msg *out)
      * writes the full sanitised line into out->buf (NUL-terminated, capped
      * at sizeof(out->buf)-1) and reports where the display text starts. */
     struct gtkhx_proto_chat c;
-    if (!gtkhx_proto_parse_chat (frame, frame_len,
-                                 (uint8_t *) out->buf, sizeof (out->buf),
-                                 &c)) {
+    if (!gtkhx_proto_parse_chat (frame, frame_len, (uint8_t *)out->buf,
+                                 sizeof (out->buf), &c)) {
         return FALSE;
     }
 
@@ -92,10 +90,9 @@ hx_msg_extract (const guint8 *frame, gsize frame_len, struct hx_msg_msg *out)
 
     /* chunk walk moved to gtkhx_proto_parse_msg. */
     struct gtkhx_proto_msg m;
-    if (!gtkhx_proto_parse_msg (frame, frame_len,
-                                (uint8_t *) out->name, sizeof (out->name),
-                                (uint8_t *) out->msg, sizeof (out->msg),
-                                &m)) {
+    if (!gtkhx_proto_parse_msg (frame, frame_len, (uint8_t *)out->name,
+                                sizeof (out->name), (uint8_t *)out->msg,
+                                sizeof (out->msg), &m)) {
         return FALSE;
     }
 
@@ -107,7 +104,8 @@ hx_msg_extract (const guint8 *frame, gsize frame_len, struct hx_msg_msg *out)
 }
 
 gboolean
-hx_banner_extract (const guint8 *frame, gsize frame_len, struct hx_banner_msg *out)
+hx_banner_extract (const guint8 *frame, gsize frame_len,
+                   struct hx_banner_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -120,9 +118,8 @@ hx_banner_extract (const guint8 *frame, gsize frame_len, struct hx_banner_msg *o
      * those 4 bytes into out->type and NUL-terminate to match the
      * existing C contract. */
     struct gtkhx_proto_banner b;
-    bool got_type = gtkhx_proto_parse_banner (frame, frame_len,
-                                              (uint8_t *) out->url,
-                                              sizeof (out->url), &b);
+    bool got_type = gtkhx_proto_parse_banner (
+        frame, frame_len, (uint8_t *)out->url, sizeof (out->url), &b);
 
     memcpy (out->type, b.type_code, 4);
     out->type[4] = '\0';
@@ -157,8 +154,7 @@ hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
      *     AGREEMENTAGREE, so the local value still wins.
      *     HX_NICK_COLOR_NONE passes through verbatim. */
     struct gtkhx_proto_selfinfo si;
-    unsigned seen
-        = gtkhx_proto_parse_selfinfo (frame, frame_len, &si);
+    unsigned seen = gtkhx_proto_parse_selfinfo (frame, frame_len, &si);
 
     if (seen & HX_SELFINFO_ACCESS) {
         hx_conn_set_access (htlc, si.access);
@@ -191,7 +187,8 @@ hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 }
 
 gboolean
-hx_user_part_extract (const guint8 *frame, gsize frame_len, struct hx_user_part_msg *out)
+hx_user_part_extract (const guint8 *frame, gsize frame_len,
+                      struct hx_user_part_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -222,7 +219,7 @@ hx_chat_subject_extract (const guint8 *frame, gsize frame_len,
      * endings); the crate preserves that. */
     struct gtkhx_proto_chat_subject sub;
     if (!gtkhx_proto_parse_chat_subject (frame, frame_len,
-                                         (uint8_t *) out->subject,
+                                         (uint8_t *)out->subject,
                                          sizeof (out->subject), &sub)) {
         return FALSE;
     }
@@ -234,7 +231,8 @@ hx_chat_subject_extract (const guint8 *frame, gsize frame_len,
 }
 
 gboolean
-hx_chat_invite_extract (const guint8 *frame, gsize frame_len, struct hx_chat_invite_msg *out)
+hx_chat_invite_extract (const guint8 *frame, gsize frame_len,
+                        struct hx_chat_invite_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -244,8 +242,7 @@ hx_chat_invite_extract (const guint8 *frame, gsize frame_len, struct hx_chat_inv
      * strip_ansi's the inviter name (no CR2LF) and caps it at
      * sizeof(out->name)-1. */
     struct gtkhx_proto_chat_invite inv;
-    if (!gtkhx_proto_parse_chat_invite (frame, frame_len,
-                                        (uint8_t *) out->name,
+    if (!gtkhx_proto_parse_chat_invite (frame, frame_len, (uint8_t *)out->name,
                                         sizeof (out->name), &inv)) {
         return FALSE;
     }
@@ -258,7 +255,8 @@ hx_chat_invite_extract (const guint8 *frame, gsize frame_len, struct hx_chat_inv
 }
 
 gboolean
-hx_user_change_extract (const guint8 *frame, gsize frame_len, struct hx_user_change_msg *out)
+hx_user_change_extract (const guint8 *frame, gsize frame_len,
+                        struct hx_user_change_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -269,8 +267,7 @@ hx_user_change_extract (const guint8 *frame, gsize frame_len, struct hx_user_cha
      * endings) and gates the Colored-Nicknames COLOR chunk at exactly
      * 4 bytes; nick_color defaults to HX_NICK_COLOR_NONE when absent. */
     struct gtkhx_proto_user_change uc;
-    if (!gtkhx_proto_parse_user_change (frame, frame_len,
-                                        (uint8_t *) out->name,
+    if (!gtkhx_proto_parse_user_change (frame, frame_len, (uint8_t *)out->name,
                                         sizeof (out->name), &uc)) {
         return FALSE;
     }
@@ -301,10 +298,12 @@ _Static_assert (offsetof (struct hx_user_change_msg, name_len) == 56, "");
 _Static_assert (sizeof (struct hx_user_change_plan) == 28,
                 "hx_user_change_plan layout drifted from the Rust mirror");
 _Static_assert (offsetof (struct hx_user_change_plan, eff_color) == 20, "");
-_Static_assert (offsetof (struct hx_user_change_plan, eff_nick_color) == 24, "");
+_Static_assert (offsetof (struct hx_user_change_plan, eff_nick_color) == 24,
+                "");
 
 gboolean
-hx_xfer_queue_extract (const guint8 *frame, gsize frame_len, struct hx_xfer_queue_msg *out)
+hx_xfer_queue_extract (const guint8 *frame, gsize frame_len,
+                       struct hx_xfer_queue_msg *out)
 {
     if (!out) {
         return FALSE;
@@ -323,7 +322,8 @@ hx_xfer_queue_extract (const guint8 *frame, gsize frame_len, struct hx_xfer_queu
 }
 
 gboolean
-hx_htxf_reply_extract (const guint8 *frame, gsize frame_len, struct hx_htxf_reply *out)
+hx_htxf_reply_extract (const guint8 *frame, gsize frame_len,
+                       struct hx_htxf_reply *out)
 {
     if (!out) {
         return FALSE;
@@ -349,16 +349,15 @@ hx_htxf_reply_extract (const guint8 *frame, gsize frame_len, struct hx_htxf_repl
 }
 
 hx_agreement_result
-hx_agreement_extract (const guint8 *frame, gsize frame_len, char *out, gsize out_size,
-                      gsize *out_len)
+hx_agreement_extract (const guint8 *frame, gsize frame_len, char *out,
+                      gsize out_size, gsize *out_len)
 {
     /* chunk walk moved to gtkhx_proto_parse_agreement. The
      * Rust crate leaves *out untouched on NONE / MISSING (matching the
      * "untouched" sentinel assertions in tests/proto/test_agreement.c),
      * and only writes *out_len when both out and out_len are non-NULL. */
-    uint32_t r = gtkhx_proto_parse_agreement (frame, frame_len,
-                                              (uint8_t *) out, out_size,
-                                              out_len);
+    uint32_t r = gtkhx_proto_parse_agreement (frame, frame_len, (uint8_t *)out,
+                                              out_size, out_len);
     switch (r) {
     case GTKHX_PROTO_AGREEMENT_OK:
         return HX_AGREEMENT_OK;
@@ -370,8 +369,8 @@ hx_agreement_extract (const guint8 *frame, gsize frame_len, char *out, gsize out
 }
 
 gboolean
-hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out, gsize out_size,
-                      gsize *out_len)
+hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out,
+                      gsize out_size, gsize *out_len)
 {
     if (!out || out_size == 0) {
         return FALSE;
@@ -381,8 +380,8 @@ hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out, gsize out
      * gtkhx_proto_parse_news_file. The SIZE_MAX sentinel return
      * preserves the "leave *out untouched when no NEWS chunk is
      * present" contract tests/proto/test_news_file.c pins. */
-    size_t n = gtkhx_proto_parse_news_file (frame, frame_len,
-                                            (uint8_t *) out, out_size);
+    size_t n = gtkhx_proto_parse_news_file (frame, frame_len, (uint8_t *)out,
+                                            out_size);
     if (n == (size_t)-1) {
         return FALSE;
     }
@@ -419,15 +418,16 @@ hx_news_post_emit (void *t, const uint8_t *bytes, size_t len)
 }
 
 int
-hx_news_post_walk (const guint8 *frame, gsize frame_len, hx_news_post_cb cb, void *user)
+hx_news_post_walk (const guint8 *frame, gsize frame_len, hx_news_post_cb cb,
+                   void *user)
 {
     /* chunk walk + sanitise moved to
      * gtkhx_proto_walk_news_post. Per-chunk buffer ownership is
      * Rust's; the trampoline above adapts the FFI callback signature
      * to the public hx_news_post_cb's (char *, gsize) shape. */
     struct hx_news_post_trampoline tr = { cb, user };
-    return (int)gtkhx_proto_walk_news_post (frame, frame_len,
-                                            hx_news_post_emit, &tr);
+    return (int)gtkhx_proto_walk_news_post (frame, frame_len, hx_news_post_emit,
+                                            &tr);
 }
 
 guint8 *
@@ -444,11 +444,11 @@ hlpack (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, va_list ap,
     struct hx_chunk chunks[64];
 
     g_return_val_if_fail (htlc != NULL, NULL);
-    g_return_val_if_fail (hc >= 0 && hc <= (int) G_N_ELEMENTS (chunks), NULL);
+    g_return_val_if_fail (hc >= 0 && hc <= (int)G_N_ELEMENTS (chunks), NULL);
 
     for (int i = 0; i < hc; i++) {
-        chunks[i].type = (guint16) va_arg (ap, int);
-        chunks[i].len = (guint16) va_arg (ap, int);
+        chunks[i].type = (guint16)va_arg (ap, int);
+        chunks[i].len = (guint16)va_arg (ap, int);
         chunks[i].data = va_arg (ap, const void *);
     }
 
@@ -484,13 +484,13 @@ hl_htxf_hdr_pack (guint8 *buf, guint32 ref, guint32 len, guint16 type,
     if (buf == NULL) {
         g_error ("hl_htxf_hdr_pack: NULL buf — programmer error");
     }
-    bool ok = gtkhx_proto_htxf_hdr_pack (buf, SIZEOF_HTXF_HDR, ref, len,
-                                         type, flags);
+    bool ok = gtkhx_proto_htxf_hdr_pack (buf, SIZEOF_HTXF_HDR, ref, len, type,
+                                         flags);
     if (!ok) {
         g_error ("hl_htxf_hdr_pack: Rust FFI rejected the call — "
                  "out_cap %zu would not fit a %u-byte header; "
                  "programmer error",
-                 (size_t) SIZEOF_HTXF_HDR, (unsigned) SIZEOF_HTXF_HDR);
+                 (size_t)SIZEOF_HTXF_HDR, (unsigned)SIZEOF_HTXF_HDR);
     }
 }
 
@@ -519,7 +519,7 @@ hl_hdr_decode (const void *hdr_bytes, guint32 *type_out, guint32 *trans_out,
         return FALSE;
     }
     struct gtkhx_proto_header_decoded d;
-    if (!gtkhx_proto_decode_header ((const uint8_t *) hdr_bytes, SIZEOF_HL_HDR,
+    if (!gtkhx_proto_decode_header ((const uint8_t *)hdr_bytes, SIZEOF_HL_HDR,
                                     MAX_HOTLINE_PACKET_LEN, &d)) {
         return FALSE;
     }
@@ -568,7 +568,7 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     g_return_val_if_fail (hc >= 0, NULL);
     g_return_val_if_fail (hc == 0 || chunks != NULL, NULL);
 
-    gsize needed = gtkhx_proto_pack_message_size (chunks, (size_t) hc);
+    gsize needed = gtkhx_proto_pack_message_size (chunks, (size_t)hc);
     if (needed == 0) {
         /* pack_message_size returns 0 on hc > MAX_PACK_CHUNKS (currently
          * 64 — well above the largest production builder), on NULL chunks
@@ -587,7 +587,7 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
     guint32 my_trans = hx_conn_trans_post_inc (htlc);
 
     size_t written = gtkhx_proto_pack_message (buf, needed, type, my_trans,
-                                               flag, chunks, (size_t) hc);
+                                               flag, chunks, (size_t)hc);
     if (written != needed) {
         /* pack_message returns 0 on: hc > MAX_PACK_CHUNKS, NULL chunks
          * with hc > 0, any chunk with len > 0 && data == NULL, or
@@ -597,7 +597,7 @@ hlpack_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                  "(programmer error — too many chunks (hc > MAX_PACK_CHUNKS "
                  "= 64), NULL chunks with hc > 0, or NULL data with non-zero "
                  "len in some chunk)",
-                 written, (size_t) needed);
+                 written, (size_t)needed);
     }
 
     if (out_len) {
@@ -618,8 +618,8 @@ hx_chat_split_nick_body (const char *line, gsize line_len, gsize *name_offset,
     }
 
     /* Strip leading horizontal whitespace. Hotline servers
-	 * commonly pad the line with spaces (right-aligning the
-	 * nick) before the actual nick text. */
+     * commonly pad the line with spaces (right-aligning the
+     * nick) before the actual nick text. */
     ws = 0;
     while (ws < line_len && (line[ws] == ' ' || line[ws] == '\t')) {
         ws++;
@@ -629,8 +629,8 @@ hx_chat_split_nick_body (const char *line, gsize line_len, gsize *name_offset,
     }
 
     /* Find the first ':' after the whitespace. The
-	 * "nick: body" Hotline format uses a single colon as the
-	 * separator. */
+     * "nick: body" Hotline format uses a single colon as the
+     * separator. */
     colon = ws;
     while (colon < line_len && line[colon] != ':') {
         colon++;
@@ -643,18 +643,18 @@ hx_chat_split_nick_body (const char *line, gsize line_len, gsize *name_offset,
     }
 
     /* Cap nick length at 31 — the Hotline protocol's nick
-	 * field is a 31-byte STRING32. Lines whose pre-colon
-	 * portion exceeds that are almost certainly not chat
-	 * (URLs, "Subject Changed to:", arbitrary system prose);
-	 * pass them through unsplit. */
+     * field is a 31-byte STRING32. Lines whose pre-colon
+     * portion exceeds that are almost certainly not chat
+     * (URLs, "Subject Changed to:", arbitrary system prose);
+     * pass them through unsplit. */
     if (colon - ws > 31) {
         return FALSE;
     }
 
     /* Skip the spaces between ':' and the body. Conventional
-	 * mhxd output pads to two spaces; one-space variants exist;
-	 * a body that's all-whitespace is still a valid (empty)
-	 * message. */
+     * mhxd output pads to two spaces; one-space variants exist;
+     * a body that's all-whitespace is still a valid (empty)
+     * message. */
     body_start = colon + 1;
     while (body_start < line_len && line[body_start] == ' ') {
         body_start++;
@@ -708,14 +708,14 @@ hx_highlight_match (const char *body, gsize body_len, const char *const *words)
         /* Walk every possible match start position. */
         for (gsize i = 0; i + wlen <= body_len; i++) {
             /* Before-edge boundary check: position i must
-			 * either be at the buffer start, or follow a
-			 * non-word byte. */
+             * either be at the buffer start, or follow a
+             * non-word byte. */
             if (i > 0 && is_word_byte ((guchar)body[i - 1])) {
                 continue;
             }
             /* After-edge boundary check: position i + wlen
-			 * must either be at the buffer end, or precede
-			 * a non-word byte. */
+             * must either be at the buffer end, or precede
+             * a non-word byte. */
             if (i + wlen < body_len && is_word_byte ((guchar)body[i + wlen])) {
                 continue;
             }
@@ -766,20 +766,20 @@ static char *
 hx_decode_emoji_shortcodes (const char *src, gsize len, gsize *out_len)
 {
     /* Phase E6: honour the user's emoji-shortcode toggle (the same flag
-	 * gates the send encode). Disabled → leave the text verbatim. The flag
-	 * lives in text_util.c so this TU stays free of the gtkhx_prefs global
-	 * for its unit tests. */
+     * gates the send encode). Disabled → leave the text verbatim. The flag
+     * lives in text_util.c so this TU stays free of the gtkhx_prefs global
+     * for its unit tests. */
     if (len == 0 || !gtkhx_text_emoji_shortcodes_enabled ()) {
         return NULL;
     }
     gsize cap = len + 16;
     char *dec = g_malloc (cap + 1);
-    gsize need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *) src, len,
-                                                  (uint8_t *) dec, cap);
+    gsize need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *)src, len,
+                                                  (uint8_t *)dec, cap);
     if (need > cap) {
         dec = g_realloc (dec, need + 1);
-        need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *) src, len,
-                                                (uint8_t *) dec, need);
+        need = gtkhx_proto_shortcodes_to_emoji ((const uint8_t *)src, len,
+                                                (uint8_t *)dec, need);
     }
     if (need == len && memcmp (dec, src, len) == 0) {
         g_free (dec); /* unchanged — let the caller keep the original */
@@ -804,22 +804,22 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid, guint16 uid,
     e->uid = uid;
 
     /* gtkhx_text_to_utf8 always returns a g_strdup-ed copy, even
-	 * on empty input — caller owns the result. */
+     * on empty input — caller owns the result. */
     e->line = gtkhx_text_to_utf8 (raw, raw_len, &line_len);
     e->line_len = line_len;
 
     /* Phase E3/E6: decode :shortcodes: → emoji across the WHOLE line,
-	 * before the info-prefix check and the nick split. Whole-line (not
-	 * body-only) is deliberate: some servers format public chat without a
-	 * "Nick:" colon (e.g. " *** Name message"), so scoping to the
-	 * post-colon "body" would let a shortcode's own colon be mistaken for
-	 * the nick separator and skip the conversion. Decoding first is safe
-	 * for the nick column because the grammar only matches colon-delimited
-	 * lowercase tokens — a "Nick:" prefix (colon on one side only, or
-	 * uppercase) never matches — and for info lines, whose mIRC-coloured
-	 * "[hx]" prefix carries no shortcodes (the decoder skips colour runs
-	 * regardless). The split below then runs on the final decoded text so
-	 * the sender/body offsets stay consistent. */
+     * before the info-prefix check and the nick split. Whole-line (not
+     * body-only) is deliberate: some servers format public chat without a
+     * "Nick:" colon (e.g. " *** Name message"), so scoping to the
+     * post-colon "body" would let a shortcode's own colon be mistaken for
+     * the nick separator and skip the conversion. Decoding first is safe
+     * for the nick column because the grammar only matches colon-delimited
+     * lowercase tokens — a "Nick:" prefix (colon on one side only, or
+     * uppercase) never matches — and for info lines, whose mIRC-coloured
+     * "[hx]" prefix carries no shortcodes (the decoder skips colour runs
+     * regardless). The split below then runs on the final decoded text so
+     * the sender/body offsets stay consistent. */
     {
         gsize dlen = 0;
         char *dec = hx_decode_emoji_shortcodes (e->line, e->line_len, &dlen);
@@ -831,8 +831,8 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid, guint16 uid,
     }
 
     /* Detect the info-prefix branch up front — info lines should
-	 * skip both the sender/body split and any highlight matching
-	 * downstream. */
+     * skip both the sender/body split and any highlight matching
+     * downstream. */
     if (e->line_len >= HX_INFO_PREFIX_LEN
         && memcmp (e->line, hx_info_prefix, HX_INFO_PREFIX_LEN) == 0) {
         e->is_info = TRUE;
@@ -892,8 +892,10 @@ _Static_assert (G_STRUCT_OFFSET (HxChatEvent, cid) == 0, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line) == 8, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line_len) == 16, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, uid) == 4, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_off) == 24, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_len) == 32, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_off) == 24,
+                "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatEvent, sender_len) == 32,
+                "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, body_off) == 40, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, body_len) == 48, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, is_info) == 56, "field offset");
@@ -906,17 +908,19 @@ _Static_assert (G_STRUCT_OFFSET (HxChatMedia, mime_len) == 24, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatMedia, width) == 32, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatMedia, height) == 36, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatMedia, bytes) == 40, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxChatMedia, width_present) == 44, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxChatMedia, height_present) == 48, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxChatMedia, bytes_present) == 52, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, width_present) == 44,
+                "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, height_present) == 48,
+                "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxChatMedia, bytes_present) == 52,
+                "field offset");
 
 void
-hx_chat_event_attach_media (HxChatEvent *ev,
-                            const guint8 *id, gsize id_len,
-                            const char *mime, gsize mime_len,
-                            guint32 width, gboolean width_present,
-                            guint32 height, gboolean height_present,
-                            guint32 bytes, gboolean bytes_present)
+hx_chat_event_attach_media (HxChatEvent *ev, const guint8 *id, gsize id_len,
+                            const char *mime, gsize mime_len, guint32 width,
+                            gboolean width_present, guint32 height,
+                            gboolean height_present, guint32 bytes,
+                            gboolean bytes_present)
 {
     if (!ev) {
         return;
@@ -980,10 +984,10 @@ mime_short_label (const char *mime)
         return "GIF";
     }
     /* Unknown MIME — only pass through verbatim if UTF-8-valid.
-	 * `mime` is NUL-terminated (hx_chat_event_attach_media
-	 * g_strndup'd it), so g_utf8_validate's length=-1 walk
-	 * terminates. Pass NULL for the end-of-valid-bytes out param;
-	 * we only care about the all-or-nothing verdict. */
+     * `mime` is NUL-terminated (hx_chat_event_attach_media
+     * g_strndup'd it), so g_utf8_validate's length=-1 walk
+     * terminates. Pass NULL for the end-of-valid-bytes out param;
+     * we only care about the all-or-nothing verdict. */
     if (!g_utf8_validate (mime, -1, NULL)) {
         return "?";
     }
@@ -1001,9 +1005,9 @@ format_bytes_short (guint32 bytes)
         return g_strdup_printf ("%u B", bytes);
     }
     if (bytes < 1024 * 1024) {
-        return g_strdup_printf ("%.1f KB", (double) bytes / 1024.0);
+        return g_strdup_printf ("%.1f KB", (double)bytes / 1024.0);
     }
-    return g_strdup_printf ("%.1f MB", (double) bytes / (1024.0 * 1024.0));
+    return g_strdup_printf ("%.1f MB", (double)bytes / (1024.0 * 1024.0));
 }
 
 /* Append a piece of text to `out`, replacing every ASCII space
@@ -1063,12 +1067,11 @@ build_placeholder (const HxChatMedia *m, gboolean nbsp_joined, guint token_id)
     }
     if (nbsp_joined) {
         /* Embed the click-to-dialog token. The handler scans for
-		 * `hxmedia:` and parses the digits. */
+         * `hxmedia:` and parses the digits. */
         g_string_append_printf (out, "\xc2\xa0\xc2\xb7\xc2\xa0hxmedia:%u",
                                 token_id);
-        g_string_append (out,
-                         "\xc2\xa0\xc2\xb7\xc2\xa0"
-                         "click\xc2\xa0to\xc2\xa0view]");
+        g_string_append (out, "\xc2\xa0\xc2\xb7\xc2\xa0"
+                              "click\xc2\xa0to\xc2\xa0view]");
     } else {
         g_string_append (out, " · click to view]");
     }
@@ -1094,9 +1097,9 @@ hx_chat_media_parse_token (const char *word, guint *out_token)
         return FALSE;
     }
     /* Locate the `hxmedia:` substring anywhere in the word. The
-	 * placeholder NBSP-joins the row so the entire row arrives at
-	 * the click handler as a single token, with `hxmedia:N`
-	 * embedded between NBSP punctuation. */
+     * placeholder NBSP-joins the row so the entire row arrives at
+     * the click handler as a single token, with `hxmedia:N`
+     * embedded between NBSP punctuation. */
     const char *p = strstr (word, "hxmedia:");
     if (!p) {
         return FALSE;
@@ -1113,7 +1116,7 @@ hx_chat_media_parse_token (const char *word, guint *out_token)
         }
         p++;
     }
-    *out_token = (guint) v;
+    *out_token = (guint)v;
     return TRUE;
 }
 
@@ -1138,7 +1141,7 @@ hx_msg_event_new (guint16 uid, const char *name, gsize name_len,
     e->body_len = blen;
 
     /* Phase E3: decode :shortcodes: to emoji in the PM body (the name
-	 * stays literal). Standalone buffer, so no offset juggling. */
+     * stays literal). Standalone buffer, so no offset juggling. */
     {
         gsize dlen = 0;
         char *dec = hx_decode_emoji_shortcodes (e->body, e->body_len, &dlen);
@@ -1174,4 +1177,5 @@ _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, name_len) == 16, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, body) == 24, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, body_len) == 32, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_self) == 40, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_broadcast) == 44, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxMsgEvent, is_broadcast) == 44,
+                "field offset");

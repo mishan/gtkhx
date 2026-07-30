@@ -4,7 +4,7 @@
 #include <gtk/gtk.h>
 
 /* OSType 'cicn' — the Mac colour-icon resource. */
-#define TYPE_cicn	0x6369636e
+#define TYPE_cicn 0x6369636e
 
 struct ifn;
 

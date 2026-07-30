@@ -20,10 +20,10 @@ use std::cell::{Cell, RefCell};
 use std::ffi::c_char;
 use std::os::raw::c_int;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_borrow, IntoGlibPtr};
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_borrow, IntoGlibPtr};
+use gtk4 as gtk;
 
 use crate::tr::tr;
 
@@ -208,9 +208,9 @@ fn ta_position(ta: &EmojiTypeahead) {
     let buf = ta.view.buffer();
     let cur = buf.iter_at_mark(&buf.get_insert());
     let loc = ta.view.iter_location(&cur);
-    let (wx, wy) =
-        ta.view
-            .buffer_to_window_coords(gtk::TextWindowType::Widget, loc.x(), loc.y());
+    let (wx, wy) = ta
+        .view
+        .buffer_to_window_coords(gtk::TextWindowType::Widget, loc.x(), loc.y());
     let r = gtk::gdk::Rectangle::new(wx, wy, 1, if loc.height() > 0 { loc.height() } else { 1 });
     if let Some(pop) = ta.popover.borrow().as_ref() {
         pop.set_pointing_to(Some(&r));
@@ -252,10 +252,10 @@ fn ta_update(ta: &EmojiTypeahead) {
 
 /// Replace the `:prefix` token with the selected emoji glyph.
 fn ta_commit(ta: &EmojiTypeahead) {
-    let emoji = ta
-        .listbox
-        .selected_row()
-        .and_then(|row| unsafe { row.data::<String>(ROW_EMOJI_KEY).map(|p| p.as_ref().clone()) });
+    let emoji = ta.listbox.selected_row().and_then(|row| unsafe {
+        row.data::<String>(ROW_EMOJI_KEY)
+            .map(|p| p.as_ref().clone())
+    });
     let Some(emoji) = emoji else {
         ta_hide(ta);
         return;
@@ -355,8 +355,9 @@ pub unsafe extern "C" fn hx_emoji_typeahead_attach(target_text_view: *mut gtk::f
         ta_commit(ta);
     });
     let changed_id = buffer.connect_changed(move |_| ta_update(unsafe { &*ptr }));
-    let cursor_id =
-        buffer.connect_notify_local(Some("cursor-position"), move |_, _| ta_update(unsafe { &*ptr }));
+    let cursor_id = buffer.connect_notify_local(Some("cursor-position"), move |_, _| {
+        ta_update(unsafe { &*ptr })
+    });
     (*ptr).changed_id.replace(Some(changed_id));
     (*ptr).cursor_id.replace(Some(cursor_id));
 

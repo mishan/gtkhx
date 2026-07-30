@@ -29,9 +29,9 @@ use gtk4 as gtk;
 use libadwaita as adw;
 
 use adw::prelude::*;
+use glib::translate::IntoGlibPtr;
 use gtk::gio;
 use gtk::glib;
-use glib::translate::IntoGlibPtr;
 use std::cell::RefCell;
 use std::ffi::c_char;
 use std::os::raw::{c_int, c_void};
@@ -161,8 +161,10 @@ fn connect_with_args(
     } else {
         None
     };
-    let compress_name: *const c_char =
-        compress_cs.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
+    let compress_name: *const c_char = compress_cs
+        .as_ref()
+        .map(|c| c.as_ptr())
+        .unwrap_or(std::ptr::null());
     let cipher_cs: Option<std::ffi::CString> = if secure != 0 && cipher != 0 {
         cipher::name(cipher)
             .filter(|n| cipher_vocab::valid_cipher(n))
@@ -170,8 +172,10 @@ fn connect_with_args(
     } else {
         None
     };
-    let cipher_name: *const c_char =
-        cipher_cs.as_ref().map(|c| c.as_ptr()).unwrap_or(std::ptr::null());
+    let cipher_name: *const c_char = cipher_cs
+        .as_ref()
+        .map(|c| c.as_ptr())
+        .unwrap_or(std::ptr::null());
 
     LAST_CONN.with_borrow_mut(|lc| {
         *lc = Some(LastConn {
@@ -213,8 +217,15 @@ pub extern "C" fn connect_reconnect_last() {
         Some(lc) if !lc.server.is_empty() => {
             let sess = unsafe { cffi::hx_active_session() };
             connect_with_args(
-                sess, &lc.server, lc.port, &lc.login, &lc.pass, lc.secure, lc.compress,
-                lc.cipher, lc.tls,
+                sess,
+                &lc.server,
+                lc.port,
+                &lc.login,
+                &lc.pass,
+                lc.secure,
+                lc.compress,
+                lc.cipher,
+                lc.tls,
             );
         }
         _ => unsafe {
@@ -327,7 +338,11 @@ fn set_the_entries_impl(
         // index (GTK warning / undefined selection). Clamp anything outside
         // 0..=N back to 0 (NONE).
         let n = cipher_vocab::VALID_COMPRESSORS.len() as u32;
-        let sel = if (compress as u32) <= n { compress as u32 } else { 0 };
+        let sel = if (compress as u32) <= n {
+            compress as u32
+        } else {
+            0
+        };
         c.set_selected(sel);
     }
     if let Some(c) = &w.cipher {
@@ -412,7 +427,11 @@ fn server_connect(sess: *mut c_void) {
         sess
     };
     let w = widgets();
-    let server = w.address.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
+    let server = w
+        .address
+        .as_ref()
+        .map(|e| e.text().to_string())
+        .unwrap_or_default();
 
     // Nothing to connect *to*. Enter in any row activates the default
     // widget, so this is reachable by pressing it in an empty form —
@@ -428,14 +447,25 @@ fn server_connect(sess: *mut c_void) {
         }
         return;
     }
-    let login = w.login.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
-    let pass = w.password.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
-    let portstr = w.port.as_ref().map(|e| e.text().to_string()).unwrap_or_default();
+    let login = w
+        .login
+        .as_ref()
+        .map(|e| e.text().to_string())
+        .unwrap_or_default();
+    let pass = w
+        .password
+        .as_ref()
+        .map(|e| e.text().to_string())
+        .unwrap_or_default();
+    let portstr = w
+        .port
+        .as_ref()
+        .map(|e| e.text().to_string())
+        .unwrap_or_default();
     let secure = w.hope.as_ref().map(|h| h.is_active()).unwrap_or(false) as u8;
     let compress = w.compress.as_ref().map(|c| c.selected()).unwrap_or(0) as u8;
-    let cipher = cipher_vocab::dropdown_to_cipher_byte(
-        w.cipher.as_ref().map(|c| c.selected()).unwrap_or(0),
-    );
+    let cipher =
+        cipher_vocab::dropdown_to_cipher_byte(w.cipher.as_ref().map(|c| c.selected()).unwrap_or(0));
     let tls = w.tls.as_ref().map(|t| t.is_active()).unwrap_or(false) as u8;
 
     // Empty port field keeps the 5500 default; a non-empty field parses
@@ -446,7 +476,9 @@ fn server_connect(sess: *mut c_void) {
         atoi_port(&portstr)
     };
 
-    connect_with_args(sess, &server, port, &login, &pass, secure, compress, cipher, tls);
+    connect_with_args(
+        sess, &server, port, &login, &pass, secure, compress, cipher, tls,
+    );
 
     if let Some(dlg) = w.window {
         dlg.close();
@@ -472,7 +504,11 @@ fn vocab_string_list(items: &[&str]) -> gtk::StringList {
 pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data: *mut c_void) {
     // Already open → raise it.
     if let Some(dlg) = widgets().window {
-        dlg.present(active_window().as_ref().map(|w| w.upcast_ref::<gtk::Widget>()));
+        dlg.present(
+            active_window()
+                .as_ref()
+                .map(|w| w.upcast_ref::<gtk::Widget>()),
+        );
         return;
     }
     crate::ensure_gtk_init();
@@ -622,7 +658,11 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
         }
     }
 
-    dlg.present(active_window().as_ref().map(|w| w.upcast_ref::<gtk::Widget>()));
+    dlg.present(
+        active_window()
+            .as_ref()
+            .map(|w| w.upcast_ref::<gtk::Widget>()),
+    );
     address.grab_focus();
 }
 
@@ -635,10 +675,26 @@ fn save_bookmark_from_form(name: &str) {
     let w = widgets();
     let bm = Bookmark {
         name: name.to_string(),
-        server: w.address.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
-        port: w.port.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
-        login: w.login.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
-        password: w.password.as_ref().map(|e| e.text().to_string()).unwrap_or_default(),
+        server: w
+            .address
+            .as_ref()
+            .map(|e| e.text().to_string())
+            .unwrap_or_default(),
+        port: w
+            .port
+            .as_ref()
+            .map(|e| e.text().to_string())
+            .unwrap_or_default(),
+        login: w
+            .login
+            .as_ref()
+            .map(|e| e.text().to_string())
+            .unwrap_or_default(),
+        password: w
+            .password
+            .as_ref()
+            .map(|e| e.text().to_string())
+            .unwrap_or_default(),
         hope: w.hope.as_ref().map(|h| h.is_active()).unwrap_or(false),
         compress: w.compress.as_ref().map(|c| c.selected()).unwrap_or(0) as u8,
         cipher: cipher_vocab::dropdown_to_cipher_byte(
@@ -699,7 +755,11 @@ fn save_dialog() {
         name_entry.connect_activate(move |_| dlg.emit_by_name::<()>("response", &[&"save"]));
     }
 
-    dialog.present(active_window().as_ref().map(|w| w.upcast_ref::<gtk::Widget>()));
+    dialog.present(
+        active_window()
+            .as_ref()
+            .map(|w| w.upcast_ref::<gtk::Widget>()),
+    );
 }
 
 // ======================================================================
@@ -756,7 +816,14 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
     };
     let sess = cffi::hx_active_session();
     connect_with_args(
-        sess, &bm.server, port, &bm.login, &bm.password, bm.hope as u8, bm.compress, cipher_byte,
+        sess,
+        &bm.server,
+        port,
+        &bm.login,
+        &bm.password,
+        bm.hope as u8,
+        bm.compress,
+        cipher_byte,
         bm.tls as u8,
     );
 }
@@ -779,7 +846,13 @@ fn open_bookmark_preload(name: &str) {
         return;
     };
     set_the_entries_impl(
-        &bm.server, &bm.login, &bm.password, &bm.port, bm.hope as u8, bm.compress, cipher_byte,
+        &bm.server,
+        &bm.login,
+        &bm.password,
+        &bm.port,
+        bm.hope as u8,
+        bm.compress,
+        cipher_byte,
         bm.tls as u8,
     );
 }
@@ -847,7 +920,17 @@ pub unsafe extern "C" fn connect_open_hotline_url(url: *const c_char) -> glib::f
     let pass = cstr(parts.pass.as_ptr());
     let port = if parts.port != 0 { parts.port } else { 5500 };
     // Plain Hotline — the URL form carries no HOPE / TLS / compress / cipher.
-    connect_with_args(cffi::hx_active_session(), &host, port, &login, &pass, 0, 0, 0, 0);
+    connect_with_args(
+        cffi::hx_active_session(),
+        &host,
+        port,
+        &login,
+        &pass,
+        0,
+        0,
+        0,
+        0,
+    );
     glib::ffi::GTRUE
 }
 
@@ -967,10 +1050,5 @@ fn atoi_port(s: &str) -> u16 {
 /// the C connect_save_hotline_url_as_bookmark used, so callers that branch on
 /// err->code (INVAL vs EXIST vs NOMEM) keep working.
 unsafe fn set_file_error(err: *mut *mut glib::ffi::GError, code: c_int, msg: &str) {
-    glib::ffi::g_set_error_literal(
-        err,
-        glib::ffi::g_file_error_quark(),
-        code,
-        cs(msg).as_ptr(),
-    );
+    glib::ffi::g_set_error_literal(err, glib::ffi::g_file_error_quark(), code, cs(msg).as_ptr());
 }

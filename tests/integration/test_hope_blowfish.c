@@ -73,9 +73,9 @@ test_hope_blowfish_login_and_ping (void)
     const hx_test_server *srv = pick_blowfish_server ();
     if (!srv) {
         g_test_fail_printf ("no HX_TEST_CAP_BLOWFISH server in the matrix. "
-                     "mhxd advertises this cap; bring it up with "
-                     "`docker run -p 5500:5500 -p 5501:5501 "
-                     "gtkhx-mhxd-test`.");
+                            "mhxd advertises this cap; bring it up with "
+                            "`docker run -p 5500:5500 -p 5501:5501 "
+                            "gtkhx-mhxd-test`.");
         return;
     }
 

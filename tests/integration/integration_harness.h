@@ -50,22 +50,22 @@
 static inline guint32
 hdr_type (const struct htlc_conn *htlc)
 {
-    const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
-    return g_ntohl(h->type);
+    const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in (htlc)->buf;
+    return g_ntohl (h->type);
 }
 
 static inline guint32
 hdr_flag (const struct htlc_conn *htlc)
 {
-    const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
-    return g_ntohl(h->flag);
+    const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in (htlc)->buf;
+    return g_ntohl (h->flag);
 }
 
 static inline guint32
 hdr_trans (const struct htlc_conn *htlc)
 {
-    const struct hl_hdr *h = (const struct hl_hdr *) hx_test_in(htlc)->buf;
-    return g_ntohl(h->trans);
+    const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in (htlc)->buf;
+    return g_ntohl (h->trans);
 }
 
 /*
@@ -174,8 +174,7 @@ extern gboolean integration_send_message (int fd, struct htlc_conn *htlc,
  */
 extern gboolean integration_send_chunks (int fd, struct htlc_conn *htlc,
                                          guint32 type, guint32 flag,
-                                         const struct hx_chunk *chunks,
-                                         int hc);
+                                         const struct hx_chunk *chunks, int hc);
 
 /*
  * Read one full Hotline message into htlc->in (overwriting any
@@ -290,11 +289,10 @@ extern int integration_open_login_or_skip (struct htlc_conn *htlc,
  * htlc->caps populated with whatever bits the server echoed back
  * in HTLS_DATA_CAPABILITIES during the drain.
  */
-extern int
-integration_open_login_to_caps_or_skip (const hx_test_server *srv,
-                                        struct htlc_conn *htlc,
-                                        const char *display_name,
-                                        guint16 icon, guint16 caps);
+extern int integration_open_login_to_caps_or_skip (const hx_test_server *srv,
+                                                   struct htlc_conn *htlc,
+                                                   const char *display_name,
+                                                   guint16 icon, guint16 caps);
 
 /*
  * TLS sibling of integration_open_login_or_skip: connect + magic +
@@ -304,10 +302,10 @@ integration_open_login_to_caps_or_skip (const hx_test_server *srv,
  * or -1 (g_test_fail_printf already called). Pre-filter the matrix with
  * hx_test_servers_with (HX_TEST_CAP_TLS) to pick `srv`.
  */
-extern int
-integration_open_login_tls_or_skip (const hx_test_server *srv,
-                                    struct htlc_conn *htlc,
-                                    const char *display_name, guint16 icon);
+extern int integration_open_login_tls_or_skip (const hx_test_server *srv,
+                                               struct htlc_conn *htlc,
+                                               const char *display_name,
+                                               guint16 icon);
 
 /*
  * Send HTLC_HDR_GET_CHAT_HISTORY (TRAN 700) for `channel_id`
@@ -445,8 +443,8 @@ extern gboolean integration_join_chat (int fd, struct htlc_conn *htlc,
  * walk; the only difference between them was the type sentinel.
  */
 extern gboolean integration_drain_until_chat_user_event (
-    int fd, struct htlc_conn *htlc, guint16 wanted_type,
-    guint32 wanted_cid, guint16 wanted_uid, int max_messages);
+    int fd, struct htlc_conn *htlc, guint16 wanted_type, guint32 wanted_cid,
+    guint16 wanted_uid, int max_messages);
 
 /*
  * Encode a single-component HTLC_DATA_DIR chunk into `out` and
@@ -606,12 +604,10 @@ typedef struct {
  * whether to honour them.
  */
 extern int integration_open_login_hope_or_skip (
-    const hx_test_server *srv,
-    struct htlc_conn *htlc,
-    integration_hope_session *hope,
-    const char *username, const char *password,
-    const char *display_name, guint16 icon,
-    const char *cipheralg, const char *compressalg);
+    const hx_test_server *srv, struct htlc_conn *htlc,
+    integration_hope_session *hope, const char *username, const char *password,
+    const char *display_name, guint16 icon, const char *cipheralg,
+    const char *compressalg);
 
 /*
  * Release any malloc'd state inside `hope`. Safe to call on a
@@ -625,8 +621,7 @@ extern void integration_hope_session_release (integration_hope_session *hope);
  * passthrough to integration_send. Same hlpack-driven message
  * assembly as integration_send_message.
  */
-extern gboolean integration_send_message_hope (int fd,
-                                               struct htlc_conn *htlc,
+extern gboolean integration_send_message_hope (int fd, struct htlc_conn *htlc,
                                                integration_hope_session *hope,
                                                guint32 type, guint32 flag,
                                                int hc, ...);
@@ -637,8 +632,7 @@ extern gboolean integration_send_message_hope (int fd,
  * and copies the plaintext into htlc->in. Otherwise passthrough to
  * integration_recv_message.
  */
-extern gboolean integration_recv_message_hope (int fd,
-                                               struct htlc_conn *htlc,
+extern gboolean integration_recv_message_hope (int fd, struct htlc_conn *htlc,
                                                integration_hope_session *hope,
                                                int timeout_ms);
 
@@ -676,9 +670,10 @@ extern guint32 integration_send_get_chat_history_hope (
  * framing applies the same way as any other client→server message.
  * Returns TRUE on success, FALSE on send failure.
  */
-extern gboolean integration_send_agreementagree_hope (
-    int fd, struct htlc_conn *htlc, integration_hope_session *hope,
-    const char *display_name, guint16 icon);
+extern gboolean
+integration_send_agreementagree_hope (int fd, struct htlc_conn *htlc,
+                                      integration_hope_session *hope,
+                                      const char *display_name, guint16 icon);
 
 /* ---- HTXF subchannel helpers ---------------------------------- */
 

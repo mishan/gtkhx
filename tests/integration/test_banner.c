@@ -79,8 +79,8 @@ send_skinny_login (int fd, struct htlc_conn *htlc, guint16 icon)
     gsize llen = strlen (login);
     guint8 enclogin[16];
     hl_code_inline (enclogin, login, llen);
-    guint16 icon_be = g_htons(icon);
-    guint16 cv_be = g_htons(185);
+    guint16 icon_be = g_htons (icon);
+    guint16 cv_be = g_htons (185);
 
     return integration_send_message (
         fd, htlc, HTLC_HDR_LOGIN, /*flag=*/0, /*hc=*/3, (int)HTLC_DATA_ICON,
@@ -118,7 +118,7 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
                                         /*timeout_ms=*/2000);
     if (fd < 0) {
         g_test_fail_printf ("connect to %s (%s:%d) failed", srv->name,
-                            srv->host, (int) srv->port);
+                            srv->host, (int)srv->port);
         return -1;
     }
     if (!integration_handshake (fd)) {
@@ -135,8 +135,8 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
     }
 
     /* Drain past the loginreply TASK + AGREEMENT mhxd sends
-	 * before we agree. The real interesting messages arrive
-	 * after AGREEMENTAGREE. */
+     * before we agree. The real interesting messages arrive
+     * after AGREEMENTAGREE. */
     for (int i = 0; i < 4; i++) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/2000)) {
             break;
@@ -144,14 +144,14 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
     }
 
     const char *name = "Banner Tier-3";
-    guint16 icon_be = g_htons(412);
+    guint16 icon_be = g_htons (412);
     /* OPTIONS bitmap (0x0071, same code as HTLC_DATA_BAN in mhxd's
-	 * naming). Mhxd ignores the body; Mobius reads it as a big-
-	 * endian u16 and panics if the chunk is missing. Send 0x0000.
-	 * Matches the production hx_send_agreement_agree shape so an
-	 * eventual Mobius Tier-3 target exercises the same wire bytes
-	 * the real client sends. See [[gtkhx_mobius_options_field]]. */
-    guint16 options_be = g_htons(0);
+     * naming). Mhxd ignores the body; Mobius reads it as a big-
+     * endian u16 and panics if the chunk is missing. Send 0x0000.
+     * Matches the production hx_send_agreement_agree shape so an
+     * eventual Mobius Tier-3 target exercises the same wire bytes
+     * the real client sends. See [[gtkhx_mobius_options_field]]. */
+    guint16 options_be = g_htons (0);
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_AGREEMENTAGREE, /*flag=*/0, /*hc=*/3,
             (int)HTLC_DATA_NAME, (int)strlen (name), (guint8 *)name,
@@ -169,7 +169,7 @@ banner_setup_or_skip (const hx_test_server *srv, struct htlc_conn *htlc,
         integration_close (fd);
         return -1;
     }
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_BANNER_TYPE:
@@ -227,9 +227,9 @@ test_banner_url_mode (void)
     g_assert_cmpstr (banner_type, ==, "URL ");
 
     /* URL must match the container's configured banner exactly.
-	 * Kept in sync with tests/mhxd/docker-entrypoint.sh's
-	 * URL_DEFAULT. $GTKHX_TEST_BANNER_URL overrides for ad-hoc
-	 * runs against a non-default test server. */
+     * Kept in sync with tests/mhxd/docker-entrypoint.sh's
+     * URL_DEFAULT. $GTKHX_TEST_BANNER_URL overrides for ad-hoc
+     * runs against a non-default test server. */
     const char *expected_url = g_getenv ("GTKHX_TEST_BANNER_URL");
     if (!expected_url || !*expected_url) {
         expected_url = GTKHX_TEST_BANNER_URL_DEFAULT;
@@ -261,8 +261,8 @@ banner_bytes_match_type (const char *type, const guint8 *bytes, gsize len)
     }
     if (strcmp (type, "PICT") == 0) {
         /* QuickDraw PICT: first 512 bytes are header padding;
-		 * we don't validate the inner format, just accept any
-		 * non-zero prefix. */
+         * we don't validate the inner format, just accept any
+         * non-zero prefix. */
         return TRUE;
     }
     if (strcmp (type, "PNG ") == 0) {
@@ -270,7 +270,7 @@ banner_bytes_match_type (const char *type, const guint8 *bytes, gsize len)
                && bytes[3] == 'G';
     }
     /* Unknown / unhandled image types: accept rather than fail
-	 * the test on an unfamiliar magic. */
+     * the test on an unfamiliar magic. */
     return TRUE;
 }
 
@@ -324,19 +324,19 @@ test_banner_htxf_mode (void)
     }
     if (banner_url && *banner_url) {
         /* Server is in a confused state — declared a binary type
-		 * but also shipped a URL. Per 1.9 spec the client
-		 * dispatches on type, so this is still a valid test
-		 * target; flag it in the log but proceed with HTXF. */
+         * but also shipped a URL. Per 1.9 spec the client
+         * dispatches on type, so this is still a valid test
+         * target; flag it in the log but proceed with HTXF. */
         g_test_message ("warning: server type=\"%s\" but also sent URL=\"%s\"; "
                         "proceeding with HTXF fetch per spec",
                         banner_type, banner_url);
     }
 
     /* hlpack (called inside integration_send_message) reads
-	 * htlc->trans for the on-wire value and *then* increments
-	 * it. Capture the pre-send value so we can match the TASK
-	 * reply's trans field against what actually went out — not
-	 * the post-increment value. */
+     * htlc->trans for the on-wire value and *then* increments
+     * it. Capture the pre-send value so we can match the TASK
+     * reply's trans field against what actually went out — not
+     * the post-increment value. */
     guint32 our_trans = htlc.trans;
     if (!integration_send_message (fd, &htlc, HTLC_HDR_DOWNLOAD_BANNER,
                                    /*flag=*/0, /*hc=*/0)) {
@@ -358,7 +358,8 @@ test_banner_htxf_mode (void)
             continue;
         }
         got_reply = TRUE;
-        hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+        hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (reply.ref, >, 0);
@@ -368,21 +369,21 @@ test_banner_htxf_mode (void)
     g_test_message ("HTXF ref=%u size=%u", ref, size);
 
     /* Open the HTXF subchannel on the SAME server we drove the
-	 * control channel against — integration_connect_xfer routes
-	 * through hx_test_server_default and would return mhxd's xfer
-	 * port (5501), which knows nothing about the ref Janus issued.
-	 * Same fix-pattern as the HOPE+stream banner tests. Also use
-	 * the production preamble packer with HTXF_TYPE_BANNER (not
-	 * integration_send_xfer_hdr's default FILE — Janus refuses a
-	 * banner ref on a FILE-typed connection). */
+     * control channel against — integration_connect_xfer routes
+     * through hx_test_server_default and would return mhxd's xfer
+     * port (5501), which knows nothing about the ref Janus issued.
+     * Same fix-pattern as the HOPE+stream banner tests. Also use
+     * the production preamble packer with HTXF_TYPE_BANNER (not
+     * integration_send_xfer_hdr's default FILE — Janus refuses a
+     * banner ref on a FILE-typed connection). */
     int xfer_fd = hx_integration_connect_to (srv->host, srv->xfer_port,
                                              /*timeout_ms=*/2000);
     g_assert_cmpint (xfer_fd, >=, 0);
 
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hxnet_htxf_pack_preamble (
-        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
-        /*flags=*/0, /*size64=*/FALSE);
+    size_t hdr_len = hxnet_htxf_pack_preamble (hdr_buf, sizeof (hdr_buf), ref,
+                                               size, HTXF_TYPE_BANNER,
+                                               /*flags=*/0, /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
     g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 

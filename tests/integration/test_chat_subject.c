@@ -56,14 +56,14 @@ test_chat_subject_broadcasts (void)
 
     /* Alice sets the subject. */
     const char *subject = "Tier-3 chat subject smoke test";
-    guint32 cid_be = g_htonl(chat_id);
+    guint32 cid_be = g_htonl (chat_id);
     g_assert_true (integration_send_message (
         fd_a, &htlc_a, HTLC_HDR_CHAT_SUBJECT, /*flag=*/0, /*hc=*/2,
         (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be,
         (int)HTLC_DATA_CHAT_SUBJECT, (int)strlen (subject), (guint8 *)subject));
 
     /* Drain Alice's connection looking for HTLS_HDR_CHAT_SUBJECT
-	 * with the matching chat_id. */
+     * with the matching chat_id. */
     gboolean got_subject = FALSE;
     gchar *seen_subject = NULL;
     guint32 seen_cid = 0;
@@ -75,7 +75,7 @@ test_chat_subject_broadcasts (void)
             continue;
         }
 
-        dh_start (hx_test_in(&htlc_a)->buf, hx_test_in(&htlc_a)->pos)
+        dh_start (hx_test_in (&htlc_a)->buf, hx_test_in (&htlc_a)->pos)
         {
             switch (_type) {
             case HTLS_DATA_CHAT_ID:

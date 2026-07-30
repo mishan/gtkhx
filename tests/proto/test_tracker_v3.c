@@ -43,7 +43,7 @@
 #include <string.h>
 #include <glib.h>
 #include <gio/gio.h>
-#include "compat.h"  /* PACKED — used by structs in hotline.h */
+#include "compat.h" /* PACKED — used by structs in hotline.h */
 #include "hotline.h"
 #include "tracker_v3.h"
 
@@ -76,12 +76,10 @@ test_handshake_pack (void)
      * value. Easy to mis-read so the explicit annotation in the
      * test helps the next reader. */
     guint8 buf[8];
-    const guint8 expect[8] = { 'H', 'T', 'R', 'K',
-                               0x00, 0x03,      /* version */
-                               0x00, 0x03 };    /* features */
-    g_assert_true (
-        hx_tracker_v3_pack_handshake (buf, sizeof (buf),
-                                      HTRK_V3_FEAT_IPV6 | HTRK_V3_FEAT_QUERY));
+    const guint8 expect[8] = { 'H',  'T', 'R', 'K', 0x00, 0x03, /* version */
+                               0x00, 0x03 };                    /* features */
+    g_assert_true (hx_tracker_v3_pack_handshake (
+        buf, sizeof (buf), HTRK_V3_FEAT_IPV6 | HTRK_V3_FEAT_QUERY));
     g_assert_cmpmem (buf, 8, expect, 8);
 }
 
@@ -91,8 +89,7 @@ test_handshake_pack_no_features (void)
     /* features == 0 is the spec-minimum (no capabilities offered).
      * Make sure the encoder doesn't decide on a default value. */
     guint8 buf[8];
-    const guint8 expect[8] = { 'H', 'T', 'R', 'K',
-                               0x00, 0x03, 0x00, 0x00 };
+    const guint8 expect[8] = { 'H', 'T', 'R', 'K', 0x00, 0x03, 0x00, 0x00 };
     g_assert_true (hx_tracker_v3_pack_handshake (buf, sizeof (buf), 0));
     g_assert_cmpmem (buf, 8, expect, 8);
 }
@@ -111,14 +108,10 @@ static void
 test_handshake_response_v3 (void)
 {
     /* Tracker speaks v3, offers IPV6 + REG_ACK = 0x0009. */
-    guint8 buf[8] = {
-        'H', 'T', 'R', 'K',
-        0x00, 0x03,
-        0x00, 0x09
-    };
+    guint8 buf[8] = { 'H', 'T', 'R', 'K', 0x00, 0x03, 0x00, 0x09 };
     guint16 ver = 0, feat = 0;
-    g_assert_true (
-        hx_tracker_v3_parse_handshake_response (buf, sizeof (buf), &ver, &feat));
+    g_assert_true (hx_tracker_v3_parse_handshake_response (buf, sizeof (buf),
+                                                           &ver, &feat));
     g_assert_cmpuint (ver, ==, HTRK_VERSION_V3);
     g_assert_cmpuint (feat, ==, (HTRK_V3_FEAT_IPV6 | HTRK_V3_FEAT_REG_ACK));
 }
@@ -129,13 +122,10 @@ test_handshake_response_v1_fallback (void)
     /* Tracker speaks v1: 6 bytes, no feature flags. The state
      * machine sees a 6-byte reply and feeds those to us; we
      * confirm version and leave features at zero. */
-    guint8 buf[6] = {
-        'H', 'T', 'R', 'K',
-        0x00, 0x01
-    };
+    guint8 buf[6] = { 'H', 'T', 'R', 'K', 0x00, 0x01 };
     guint16 ver = 0xdead, feat = 0xbeef;
-    g_assert_true (
-        hx_tracker_v3_parse_handshake_response (buf, sizeof (buf), &ver, &feat));
+    g_assert_true (hx_tracker_v3_parse_handshake_response (buf, sizeof (buf),
+                                                           &ver, &feat));
     g_assert_cmpuint (ver, ==, HTRK_VERSION_V1);
     g_assert_cmpuint (feat, ==, 0);
 }
@@ -146,13 +136,10 @@ test_handshake_response_v2 (void)
     /* v2 trackers exist in spec land (HotlineX added an auth
      * challenge on top of v1's wire). Pin that v2 maps to "fall
      * back to v1-shaped read" — features still zero. */
-    guint8 buf[6] = {
-        'H', 'T', 'R', 'K',
-        0x00, 0x02
-    };
+    guint8 buf[6] = { 'H', 'T', 'R', 'K', 0x00, 0x02 };
     guint16 ver = 0, feat = 0xabcd;
-    g_assert_true (
-        hx_tracker_v3_parse_handshake_response (buf, sizeof (buf), &ver, &feat));
+    g_assert_true (hx_tracker_v3_parse_handshake_response (buf, sizeof (buf),
+                                                           &ver, &feat));
     g_assert_cmpuint (ver, ==, HTRK_VERSION_V2);
     g_assert_cmpuint (feat, ==, 0);
 }
@@ -163,8 +150,8 @@ test_handshake_response_bad_magic (void)
     /* Wrong magic — connect to something that isn't a tracker. */
     guint8 buf[8] = { 'X', 'X', 'X', 'X', 0x00, 0x03, 0, 0 };
     guint16 ver = 0, feat = 0;
-    g_assert_false (
-        hx_tracker_v3_parse_handshake_response (buf, sizeof (buf), &ver, &feat));
+    g_assert_false (hx_tracker_v3_parse_handshake_response (buf, sizeof (buf),
+                                                            &ver, &feat));
 }
 
 static void
@@ -174,8 +161,8 @@ test_handshake_response_bad_length (void)
      * is a state-machine bug. */
     guint8 buf[7] = { 'H', 'T', 'R', 'K', 0x00, 0x03, 0x00 };
     guint16 ver = 0, feat = 0;
-    g_assert_false (
-        hx_tracker_v3_parse_handshake_response (buf, sizeof (buf), &ver, &feat));
+    g_assert_false (hx_tracker_v3_parse_handshake_response (buf, sizeof (buf),
+                                                            &ver, &feat));
 }
 
 /* ---------- listing request encoder ---------- */
@@ -211,10 +198,10 @@ test_response_header_basic (void)
     /* response_type=1, total_size=0x12345678, total_servers=42,
      * record_count=42. */
     guint8 buf[10] = {
-        0x00, 0x01,                      /* response_type */
-        0x12, 0x34, 0x56, 0x78,          /* total_size u32 */
-        0x00, 0x2a,                      /* total_servers */
-        0x00, 0x2a                       /* record_count */
+        0x00, 0x01,             /* response_type */
+        0x12, 0x34, 0x56, 0x78, /* total_size u32 */
+        0x00, 0x2a,             /* total_servers */
+        0x00, 0x2a              /* record_count */
     };
     guint16 type = 0, total_s = 0, rec = 0;
     guint32 total_b = 0;
@@ -232,10 +219,9 @@ test_response_header_pagination (void)
     /* Pagination case: total_servers reflects the full match
      * count, record_count just this page. */
     guint8 buf[10] = {
-        0x00, 0x01,
-        0x00, 0x00, 0x10, 0x00,          /* 4096 bytes in this batch */
-        0x03, 0xe8,                      /* total 1000 */
-        0x00, 0x32                       /* this page = 50 */
+        0x00, 0x01, 0x00, 0x00, 0x10, 0x00, /* 4096 bytes in this batch */
+        0x03, 0xe8,                         /* total 1000 */
+        0x00, 0x32                          /* this page = 50 */
     };
     guint16 type, total_s, rec;
     guint32 total_b;
@@ -261,10 +247,8 @@ test_response_header_wrong_type (void)
     /* A non-listing response type should be rejected — the state
      * machine bails on this because it has no other RPC defined
      * for the listing connection. */
-    guint8 buf[10] = {
-        0x00, 0x02,                      /* not RESP_LIST */
-        0, 0, 0, 0, 0, 0, 0, 0
-    };
+    guint8 buf[10] = { 0x00, 0x02, /* not RESP_LIST */
+                       0,    0,    0, 0, 0, 0, 0, 0 };
     guint16 type, total_s, rec;
     guint32 total_b;
     g_assert_false (hx_tracker_v3_parse_response_header (
@@ -289,8 +273,8 @@ ipv4_be (const char *dotted)
 }
 
 static GByteArray *
-build_ipv4_record (guint32 addr, guint16 port, guint16 nusers,
-                   const char *name, const char *desc)
+build_ipv4_record (guint32 addr, guint16 port, guint16 nusers, const char *name,
+                   const char *desc)
 {
     GByteArray *r = g_byte_array_new ();
     guint8 type = HTRK_V3_ADDR_IPV4;
@@ -299,10 +283,10 @@ build_ipv4_record (guint32 addr, guint16 port, guint16 nusers,
     buf_append_u16_be (r, port);
     buf_append_u16_be (r, nusers);
     gsize nl = strlen (name);
-    buf_append_u16_be (r, (guint16) nl);
+    buf_append_u16_be (r, (guint16)nl);
     g_byte_array_append (r, (const guint8 *)name, nl);
     gsize dl = strlen (desc);
-    buf_append_u16_be (r, (guint16) dl);
+    buf_append_u16_be (r, (guint16)dl);
     g_byte_array_append (r, (const guint8 *)desc, dl);
     /* TLVs: 3 entries. */
     buf_append_u16_be (r, 3);
@@ -326,8 +310,8 @@ static void
 test_record_ipv4_basic (void)
 {
     guint32 a = ipv4_be ("203.0.113.42");
-    GByteArray *r = build_ipv4_record (a, 5500, 17, "Retro Hub",
-                                       "Vintage Mac hangout");
+    GByteArray *r
+        = build_ipv4_record (a, 5500, 17, "Retro Hub", "Vintage Mac hangout");
 
     hx_tracker_v3_record rec = { 0 };
     gsize consumed = 0;
@@ -369,10 +353,8 @@ test_record_ipv6 (void)
     /* 2001:db8::1 → 20 01 0d b8 00 ... 01. We construct the
      * address bytes directly rather than depending on inet_pton
      * to avoid platform variance in the test. */
-    static const guint8 v6_addr[16] = {
-        0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0,
-        0, 0, 0, 0, 0, 0, 0, 0x01
-    };
+    static const guint8 v6_addr[16]
+        = { 0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0x01 };
     GByteArray *r = g_byte_array_new ();
     guint8 type = HTRK_V3_ADDR_IPV6;
     g_byte_array_append (r, &type, 1);
@@ -381,8 +363,8 @@ test_record_ipv6 (void)
     buf_append_u16_be (r, 0);
     buf_append_u16_be (r, 5);
     g_byte_array_append (r, (const guint8 *)"hello", 5);
-    buf_append_u16_be (r, 0);    /* zero-length desc */
-    buf_append_u16_be (r, 0);    /* zero TLVs */
+    buf_append_u16_be (r, 0); /* zero-length desc */
+    buf_append_u16_be (r, 0); /* zero TLVs */
 
     hx_tracker_v3_record rec = { 0 };
     gsize consumed = 0;
@@ -410,7 +392,7 @@ test_record_hostname (void)
     GByteArray *r = g_byte_array_new ();
     guint8 type = HTRK_V3_ADDR_HOSTNAME;
     g_byte_array_append (r, &type, 1);
-    buf_append_u16_be (r, (guint16) strlen (host));
+    buf_append_u16_be (r, (guint16)strlen (host));
     g_byte_array_append (r, (const guint8 *)host, strlen (host));
     buf_append_u16_be (r, 5500);
     buf_append_u16_be (r, 0);
@@ -473,7 +455,7 @@ test_record_truncated_in_name (void)
     }
     buf_append_u16_be (r, 5500);
     buf_append_u16_be (r, 0);
-    buf_append_u16_be (r, 10);       /* lies — only 3 bytes follow */
+    buf_append_u16_be (r, 10); /* lies — only 3 bytes follow */
     g_byte_array_append (r, (const guint8 *)"abc", 3);
 
     hx_tracker_v3_record rec = { 0 };
@@ -532,8 +514,8 @@ test_record_two_back_to_back (void)
     hx_tracker_v3_record rec = { 0 };
     gsize pos = 0, consumed = 0;
 
-    g_assert_true (hx_tracker_v3_parse_record (
-        cat->data + pos, cat->len - pos, &rec, &consumed));
+    g_assert_true (hx_tracker_v3_parse_record (cat->data + pos, cat->len - pos,
+                                               &rec, &consumed));
     g_assert_cmpuint (rec.port, ==, 5500);
     g_assert_cmpuint (rec.nusers, ==, 3);
     g_assert_cmpmem (rec.name, rec.name_len, "alpha", 5);
@@ -541,8 +523,8 @@ test_record_two_back_to_back (void)
 
     g_assert_cmpuint (pos, ==, r1->len);
 
-    g_assert_true (hx_tracker_v3_parse_record (
-        cat->data + pos, cat->len - pos, &rec, &consumed));
+    g_assert_true (hx_tracker_v3_parse_record (cat->data + pos, cat->len - pos,
+                                               &rec, &consumed));
     g_assert_cmpuint (rec.nusers, ==, 7);
     g_assert_cmpmem (rec.name, rec.name_len, "beta", 4);
     pos += consumed;
@@ -595,8 +577,8 @@ test_walk_tlvs_basic (void)
     }
 
     struct tlv_collect c = { 0, 0, 0, 0 };
-    g_assert_true (hx_tracker_v3_walk_tlvs (blob->data, blob->len, 3,
-                                            tlv_collect_cb, &c));
+    g_assert_true (
+        hx_tracker_v3_walk_tlvs (blob->data, blob->len, 3, tlv_collect_cb, &c));
     g_assert_cmpuint (c.count, ==, 3);
     g_assert_cmpuint (c.last_id, ==, HTRK_V3_TLV_MATURITY);
     g_assert_cmpuint (c.last_len, ==, 1);
@@ -615,8 +597,8 @@ test_walk_tlvs_truncated (void)
     g_byte_array_append (blob, (const guint8 *)"ab", 2);
 
     struct tlv_collect c = { 0, 0, 0, 0 };
-    g_assert_false (hx_tracker_v3_walk_tlvs (blob->data, blob->len, 1,
-                                             tlv_collect_cb, &c));
+    g_assert_false (
+        hx_tracker_v3_walk_tlvs (blob->data, blob->len, 1, tlv_collect_cb, &c));
 
     g_byte_array_free (blob, TRUE);
 }
@@ -630,7 +612,7 @@ tlv_stop_after_first (guint16 id, guint16 value_len, const guint8 *value,
     (void)value;
     int *n = user_data;
     (*n)++;
-    return FALSE;            /* stop walking */
+    return FALSE; /* stop walking */
 }
 
 static void
@@ -673,8 +655,8 @@ test_walk_tlvs_leftover_bytes (void)
     g_byte_array_append (blob, (const guint8 *)"xx", 2);
 
     struct tlv_collect c = { 0, 0, 0, 0 };
-    g_assert_false (hx_tracker_v3_walk_tlvs (blob->data, blob->len, 1,
-                                             tlv_collect_cb, &c));
+    g_assert_false (
+        hx_tracker_v3_walk_tlvs (blob->data, blob->len, 1, tlv_collect_cb, &c));
     /* The callback still ran for the one declared TLV — pin that
      * so a future refactor doesn't accidentally turn the walker
      * into a "validate first, dispatch after" two-pass. */
@@ -690,8 +672,7 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
 
-    g_test_add_func ("/tracker_v3/handshake/pack",
-                     test_handshake_pack);
+    g_test_add_func ("/tracker_v3/handshake/pack", test_handshake_pack);
     g_test_add_func ("/tracker_v3/handshake/pack_no_features",
                      test_handshake_pack_no_features);
     g_test_add_func ("/tracker_v3/handshake/pack_short_buf",
@@ -708,8 +689,7 @@ main (int argc, char **argv)
     g_test_add_func ("/tracker_v3/handshake/response_bad_length",
                      test_handshake_response_bad_length);
 
-    g_test_add_func ("/tracker_v3/request/simple",
-                     test_listing_request_simple);
+    g_test_add_func ("/tracker_v3/request/simple", test_listing_request_simple);
     g_test_add_func ("/tracker_v3/request/short_buf",
                      test_listing_request_short_buf);
 
@@ -722,12 +702,9 @@ main (int argc, char **argv)
     g_test_add_func ("/tracker_v3/response/header_wrong_type",
                      test_response_header_wrong_type);
 
-    g_test_add_func ("/tracker_v3/record/ipv4_basic",
-                     test_record_ipv4_basic);
-    g_test_add_func ("/tracker_v3/record/ipv6",
-                     test_record_ipv6);
-    g_test_add_func ("/tracker_v3/record/hostname",
-                     test_record_hostname);
+    g_test_add_func ("/tracker_v3/record/ipv4_basic", test_record_ipv4_basic);
+    g_test_add_func ("/tracker_v3/record/ipv6", test_record_ipv6);
+    g_test_add_func ("/tracker_v3/record/hostname", test_record_hostname);
     g_test_add_func ("/tracker_v3/record/unknown_addr_type",
                      test_record_unknown_addr_type);
     g_test_add_func ("/tracker_v3/record/truncated_after_addr",

@@ -124,12 +124,11 @@ struct access_name {
     char *name;
 } access_names[] = {
 #define ENTRY(x, y)                                                            \
-    { ((x) != -1)                                                              \
-          ? (63                                                                \
-             - ((G_BYTE_ORDER == G_BIG_ENDIAN)                                 \
-                    ? (x)                                                      \
-                    : ((x) % 8) + 8 * (7 - (x) / 8)))                          \
-          : -1,                                                                \
+    { ((x) != -1) ? (63                                                        \
+                     - ((G_BYTE_ORDER == G_BIG_ENDIAN)                         \
+                            ? (x)                                              \
+                            : ((x) % 8) + 8 * (7 - (x) / 8)))                  \
+                  : -1,                                                        \
       (y) }
     ENTRY (-1, "File Privileges"),
     ENTRY (1, "Can Upload Files"),

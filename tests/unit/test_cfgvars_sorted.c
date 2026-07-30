@@ -53,8 +53,8 @@ static GHashTable *
 parse_cfgkeys (const char *cfgkeys_path)
 {
     char *contents = slurp (cfgkeys_path);
-    GHashTable *t = g_hash_table_new_full (g_str_hash, g_str_equal,
-                                           g_free, g_free);
+    GHashTable *t
+        = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
     /* (multiline) ^#define\s+(CFG_[A-Z0-9_]+)\s+"([^"]*)" */
     GRegex *re = g_regex_new ("^#define\\s+(CFG_[A-Z0-9_]+)\\s+\"([^\"]*)\"",
                               G_REGEX_MULTILINE, 0, NULL);
@@ -93,10 +93,10 @@ parse_cfgvars_order (const char *options_path)
     GError *err = NULL;
 
     /* Find the block. .*? in DOTALL mode is lazy across newlines so
-	 * we don't accidentally swallow a later struct declaration. */
-    GRegex *block_re = g_regex_new (
-        "\\}\\s*cfgvars\\s*\\[\\s*\\]\\s*=\\s*\\{(.*?)\\n\\};",
-        G_REGEX_DOTALL, 0, &err);
+     * we don't accidentally swallow a later struct declaration. */
+    GRegex *block_re
+        = g_regex_new ("\\}\\s*cfgvars\\s*\\[\\s*\\]\\s*=\\s*\\{(.*?)\\n\\};",
+                       G_REGEX_DOTALL, 0, &err);
     g_assert_no_error (err);
 
     GMatchInfo *bmi = NULL;
@@ -111,10 +111,9 @@ parse_cfgvars_order (const char *options_path)
     g_regex_unref (block_re);
 
     /* Match each row's leading `{ CFG_<NAME>,`. The cfgvars table
-	 * entries are uniform in shape — every row begins this way —
-	 * so a simple regex suffices without needing a full C parser. */
-    GRegex *row_re = g_regex_new ("\\{\\s*(CFG_[A-Z0-9_]+)\\s*,",
-                                  0, 0, NULL);
+     * entries are uniform in shape — every row begins this way —
+     * so a simple regex suffices without needing a full C parser. */
+    GRegex *row_re = g_regex_new ("\\{\\s*(CFG_[A-Z0-9_]+)\\s*,", 0, 0, NULL);
     GMatchInfo *rmi = NULL;
     g_regex_match (row_re, block, 0, &rmi);
     while (g_match_info_matches (rmi)) {
@@ -145,12 +144,12 @@ test_cfgvars_alphabetical (void)
     GPtrArray *order = parse_cfgvars_order (options_path);
 
     /* Sanity: we found *something*. If parsing failed silently the
-	 * test could otherwise pass with zero comparisons. */
+     * test could otherwise pass with zero comparisons. */
     g_assert_cmpint (order->len, >=, 10);
 
     /* Walk the table in order. Report the first violation with
-	 * enough context (both macro name and on-disk string) that
-	 * fixing it is mechanical. */
+     * enough context (both macro name and on-disk string) that
+     * fixing it is mechanical. */
     for (guint i = 1; i < order->len; i++) {
         const char *prev_macro = g_ptr_array_index (order, i - 1);
         const char *curr_macro = g_ptr_array_index (order, i);
@@ -168,11 +167,10 @@ test_cfgvars_alphabetical (void)
                      curr_macro);
         }
         if (strcmp (prev_str, curr_str) >= 0) {
-            g_error (
-                "cfgvars[] is not sorted: \"%s\" (%s) must come before "
-                "\"%s\" (%s). bsearch() in cfgvar_for_name relies on "
-                "the table being alphabetical by on-disk key.",
-                curr_str, curr_macro, prev_str, prev_macro);
+            g_error ("cfgvars[] is not sorted: \"%s\" (%s) must come before "
+                     "\"%s\" (%s). bsearch() in cfgvar_for_name relies on "
+                     "the table being alphabetical by on-disk key.",
+                     curr_str, curr_macro, prev_str, prev_macro);
         }
     }
 
@@ -188,16 +186,15 @@ main (int argc, char **argv)
     g_test_init (&argc, &argv, NULL);
 
     /* Meson wires meson.project_source_root() through as argv[1]
-	 * (see tests/meson.build). Running the binary by hand:
-	 *
-	 *   build/tests/test_cfgvars_sorted /path/to/gtkhx
-	 */
+     * (see tests/meson.build). Running the binary by hand:
+     *
+     *   build/tests/test_cfgvars_sorted /path/to/gtkhx
+     */
     if (argc < 2) {
-        g_printerr (
-            "usage: %s <gtkhx-source-root>\n"
-            "  (when running under meson, the source root is wired\n"
-            "  in via tests/meson.build args:)\n",
-            argv[0]);
+        g_printerr ("usage: %s <gtkhx-source-root>\n"
+                    "  (when running under meson, the source root is wired\n"
+                    "  in via tests/meson.build args:)\n",
+                    argv[0]);
         return 2;
     }
     source_root = argv[1];

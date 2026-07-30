@@ -7,12 +7,12 @@
 
 #include "hx.h"
 #include "chat_avatar.h"
-#include "chat.h"          /* chat_with_cid / hx_chat_member_model */
-#include "chat_members.h"  /* hx_member_model_get_info */
-#include "cicn.h"          /* load_icon */
+#include "chat.h"         /* chat_with_cid / hx_chat_member_model */
+#include "chat_members.h" /* hx_member_model_get_info */
+#include "cicn.h"         /* load_icon */
 #include "gif_avatar.h"
-#include "gtkhx.h"         /* icon_files */
-#include "gtkutil.h"       /* gtkhx_texture_from_pixbuf */
+#include "gtkhx.h"   /* icon_files */
+#include "gtkutil.h" /* gtkhx_texture_from_pixbuf */
 
 /* cicn sprites keyed by icon id. Small, bounded by how many distinct
  * icons a server's users pick, and decoding one per frame per visible
@@ -31,8 +31,8 @@ icon_texture (GtkWidget *anchor, guint16 icon_id)
         return NULL;
     }
     if (!icon_cache) {
-        icon_cache = g_hash_table_new_full (g_direct_hash, g_direct_equal,
-                                            NULL, g_object_unref);
+        icon_cache = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
+                                            g_object_unref);
     }
     tex = g_hash_table_lookup (icon_cache, GUINT_TO_POINTER (icon_id));
     if (tex) {
@@ -63,18 +63,18 @@ hx_chat_avatar_for_uid (GtkWidget *anchor, guint16 uid)
     }
 
     /* Same precedence as users_cell.c: the GIF avatar wins. Re-fetched
-	 * every call because it advances on a shared frame timer, so a
-	 * cached texture would freeze the animation. */
+     * every call because it advances on a shared frame timer, so a
+     * cached texture would freeze the animation. */
     avatar = gtkhx_avatar_get (uid);
     if (avatar) {
         return avatar;
     }
 
     /* The icon id comes from the membership model — the same record the
-	 * user list draws from, so the two cannot show different icons for
-	 * one person. Public chat holds every connected user, which is where
-	 * a chat speaker's icon lives regardless of which room they spoke
-	 * in. */
+     * user list draws from, so the two cannot show different icons for
+     * one person. Public chat holds every connected user, which is where
+     * a chat speaker's icon lives regardless of which room they spoke
+     * in. */
     conv = chat_with_cid (hx_active_session (), 0);
     if (!conv) {
         return NULL;

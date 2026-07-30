@@ -43,7 +43,7 @@ G_BEGIN_DECLS
 /* Panel kind — mirrors HxPanelKind (hx_panel.h). Passed as an int so
  * Rust doesn't name the libpanel-adjacent enum. */
 typedef enum {
-    GTKHX_DOCK_KIND_CENTER  = 0, /* chat, news 1.5 (news browser), files */
+    GTKHX_DOCK_KIND_CENTER = 0,  /* chat, news 1.5 (news browser), files */
     GTKHX_DOCK_KIND_SIDEBAR = 1, /* users, tasks, news */
     GTKHX_DOCK_KIND_DYNAMIC = 2, /* private chats, private messages */
 } GtkhxDockKind;
@@ -53,8 +53,8 @@ typedef enum {
  * the caller picks a single value and the area→frame pairing stays in
  * one place. */
 typedef enum {
-    GTKHX_DOCK_AREA_START  = 0, /* toolbar_sidebar_frame — News */
-    GTKHX_DOCK_AREA_END    = 1, /* toolbar_end_frame     — Users */
+    GTKHX_DOCK_AREA_START = 0,  /* toolbar_sidebar_frame — News */
+    GTKHX_DOCK_AREA_END = 1,    /* toolbar_end_frame     — Users */
     GTKHX_DOCK_AREA_BOTTOM = 2, /* toolbar_bottom_frame  — Tasks */
     GTKHX_DOCK_AREA_CENTER = 3, /* toolbar_center_frame  — Chat/Files/News15 */
 } GtkhxDockArea;
@@ -82,12 +82,9 @@ void gtkhx_dock_set_needs_attention (const char *id, gboolean state);
  * caller never has to clean it up. Callers should skip any post-embed work
  * (e.g. after_embed) when this returns FALSE. Do not touch `content` after
  * the call regardless. */
-gboolean gtkhx_dock_embed (const char   *id,
-                           GtkhxDockKind kind,
-                           GtkhxDockArea area,
-                           const char   *title,
-                           const char   *icon_name,
-                           GtkWidget    *content);
+gboolean gtkhx_dock_embed (const char *id, GtkhxDockKind kind,
+                           GtkhxDockArea area, const char *title,
+                           const char *icon_name, GtkWidget *content);
 
 /* Dynamic-panel variant (per-pchat / per-PM tabs): same embed, plus a
  * close trampoline. When the tab is closed, `on_close(user_data)` fires
@@ -102,14 +99,11 @@ gboolean gtkhx_dock_embed (const char   *id,
  * (always consumed — embedded on success, destroyed on failure). On
  * failure the close callback is never installed and `destroy` is run on
  * `user_data` immediately so the caller's teardown still fires. */
-gboolean gtkhx_dock_embed_dynamic (const char   *id,
-                                   GtkhxDockArea area,
-                                   const char   *title,
-                                   const char   *icon_name,
-                                   GtkWidget    *content,
-                                   void        (*on_close) (gpointer user_data),
-                                   gpointer      user_data,
-                                   GDestroyNotify destroy);
+gboolean gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area,
+                                   const char *title, const char *icon_name,
+                                   GtkWidget *content,
+                                   void (*on_close) (gpointer user_data),
+                                   gpointer user_data, GDestroyNotify destroy);
 
 G_END_DECLS
 

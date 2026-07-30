@@ -37,7 +37,7 @@
 #include <string.h>
 
 #include "gtkhx_icon.h"
-#include "gtkhx_theme.h"  /* gtkhx_theme_active_name */
+#include "gtkhx_theme.h" /* gtkhx_theme_active_name */
 
 /* gtkhx_config_dir lives in gtkhx.c (declared in gtkhx.h). Including
  * gtkhx.h pulls in GtkWidget / GdkRGBA / PangoFontDescription, which
@@ -45,10 +45,10 @@
  * it. Forward-declare instead — same shape tls_trust.c uses. */
 extern const char *gtkhx_config_dir (void);
 
-#define GTKHX_ICON_PIXMAP_PREFIX  "/com/nasledov/gtkhx/pixmaps/"
-#define GTKHX_ICON_THEME_PREFIX   "/com/nasledov/gtkhx/themes/"
-#define GTKHX_ICON_THEME_SUBDIR   "themes"
-#define GTKHX_ICON_ICONS_SUBDIR   "icons"
+#define GTKHX_ICON_PIXMAP_PREFIX "/com/nasledov/gtkhx/pixmaps/"
+#define GTKHX_ICON_THEME_PREFIX "/com/nasledov/gtkhx/themes/"
+#define GTKHX_ICON_THEME_SUBDIR "themes"
+#define GTKHX_ICON_ICONS_SUBDIR "icons"
 
 /* logical-name (gchar *, owned) → GdkPixbuf * (owned). NULL until
  * the first load. */
@@ -91,22 +91,21 @@ static GdkPixbuf *
 load_from_user_theme (const char *theme, const char *logical)
 {
     /* Defensive: reject theme names with a path separator (matches
-	 * the safe_active_theme_name / gtkhx_theme_active_name check
-	 * in gtkhx_theme.c). */
+     * the safe_active_theme_name / gtkhx_theme_active_name check
+     * in gtkhx_theme.c). */
     if (strchr (theme, '/') || strchr (theme, '\\')) {
         return NULL;
     }
-    char *path = g_strdup_printf (
-        "%s/%s/%s/%s/%s.png",
-        gtkhx_config_dir (), GTKHX_ICON_THEME_SUBDIR, theme,
-        GTKHX_ICON_ICONS_SUBDIR, logical);
+    char *path = g_strdup_printf ("%s/%s/%s/%s/%s.png", gtkhx_config_dir (),
+                                  GTKHX_ICON_THEME_SUBDIR, theme,
+                                  GTKHX_ICON_ICONS_SUBDIR, logical);
     GdkPixbuf *pb = NULL;
     if (g_file_test (path, G_FILE_TEST_IS_REGULAR)) {
         GError *err = NULL;
         pb = gdk_pixbuf_new_from_file (path, &err);
         if (!pb) {
-            g_warning ("gtkhx_icon: %s exists but won't decode: %s",
-                       path, err ? err->message : "(unknown)");
+            g_warning ("gtkhx_icon: %s exists but won't decode: %s", path,
+                       err ? err->message : "(unknown)");
             g_clear_error (&err);
         }
     }
@@ -122,9 +121,8 @@ load_from_builtin_theme (const char *theme, const char *logical)
     if (strchr (theme, '/') || strchr (theme, '\\')) {
         return NULL;
     }
-    char *res = g_strdup_printf (
-        "%s%s/%s/%s.png", GTKHX_ICON_THEME_PREFIX, theme,
-        GTKHX_ICON_ICONS_SUBDIR, logical);
+    char *res = g_strdup_printf ("%s%s/%s/%s.png", GTKHX_ICON_THEME_PREFIX,
+                                 theme, GTKHX_ICON_ICONS_SUBDIR, logical);
     GdkPixbuf *pb = gdk_pixbuf_new_from_resource (res, NULL);
     g_free (res);
     return pb;
@@ -136,8 +134,7 @@ load_from_builtin_theme (const char *theme, const char *logical)
 static GdkPixbuf *
 load_from_default_pixmaps (const char *logical)
 {
-    char *res = g_strdup_printf ("%s%s.png",
-                                 GTKHX_ICON_PIXMAP_PREFIX, logical);
+    char *res = g_strdup_printf ("%s%s.png", GTKHX_ICON_PIXMAP_PREFIX, logical);
     GdkPixbuf *pb = gdk_pixbuf_new_from_resource (res, NULL);
     g_free (res);
     return pb;
@@ -157,14 +154,14 @@ gtkhx_icon_load (const char *name_or_path)
     }
 
     /* Cache key is "<active-theme>/<logical>" — including the
-	 * active-theme prefix keeps entries from the previous theme
-	 * from being served after a switch, even if the theme
-	 * "changed" handler order means a button rebuild runs before
-	 * gtkhx_icon_invalidate_cache. (Belt-and-braces — the
-	 * invalidate path still runs, but key-by-theme makes the cache
-	 * correct independent of that ordering. A "/" separator is
-	 * fine because active_theme() rejects names with path
-	 * separators — see active_theme.) */
+     * active-theme prefix keeps entries from the previous theme
+     * from being served after a switch, even if the theme
+     * "changed" handler order means a button rebuild runs before
+     * gtkhx_icon_invalidate_cache. (Belt-and-braces — the
+     * invalidate path still runs, but key-by-theme makes the cache
+     * correct independent of that ordering. A "/" separator is
+     * fine because active_theme() rejects names with path
+     * separators — see active_theme.) */
     const char *theme = active_theme ();
     char *cache_key = g_strdup_printf ("%s/%s", theme, logical);
 
@@ -178,7 +175,7 @@ gtkhx_icon_load (const char *name_or_path)
     }
 
     /* Lookup order: user theme bundle → built-in theme bundle →
-	 * stock pixmaps. */
+     * stock pixmaps. */
     GdkPixbuf *pb = load_from_user_theme (theme, logical);
     if (!pb) {
         pb = load_from_builtin_theme (theme, logical);
@@ -189,11 +186,11 @@ gtkhx_icon_load (const char *name_or_path)
 
     if (pb) {
         if (!icon_cache) {
-            icon_cache = g_hash_table_new_full (g_str_hash, g_str_equal,
-                                                g_free, g_object_unref);
+            icon_cache = g_hash_table_new_full (g_str_hash, g_str_equal, g_free,
+                                                g_object_unref);
         }
         /* Cache holds its own reference; hand the caller a fresh one.
-		 * Insert transfers ownership of cache_key to the hash table. */
+         * Insert transfers ownership of cache_key to the hash table. */
         g_hash_table_insert (icon_cache, cache_key, g_object_ref (pb));
     } else {
         g_free (cache_key);

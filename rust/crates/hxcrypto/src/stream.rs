@@ -308,7 +308,7 @@ mod tests {
         state.restore_ofb_state(&ivec, 999);
         let mut out = [0u8; 1];
         state.crypt(&[0u8; 1], &mut out); // must not panic
-        // num=u32::MAX → masked to 7
+                                          // num=u32::MAX → masked to 7
         state.restore_ofb_state(&ivec, u32::MAX);
         state.crypt(&[0u8; 1], &mut out); // must not panic
     }

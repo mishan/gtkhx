@@ -50,13 +50,13 @@
 static void
 test_token_init (struct htxf_conn *xfer)
 {
-    xfer->abort = (void *) hxnet_htxf_abort_new ();
+    xfer->abort = (void *)hxnet_htxf_abort_new ();
 }
 static void
 test_token_free (struct htxf_conn *xfer)
 {
     if (xfer && xfer->abort) {
-        hxnet_htxf_abort_free ((const HtxfAbort *) xfer->abort);
+        hxnet_htxf_abort_free ((const HtxfAbort *)xfer->abort);
         xfer->abort = NULL;
     }
 }
@@ -83,20 +83,20 @@ open_passthrough_loopback (struct htxf_conn *xfer, int *server_fd)
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
     addr.sin_port = 0;
-    if (bind (listener, (struct sockaddr *) &addr, sizeof (addr)) < 0) {
+    if (bind (listener, (struct sockaddr *)&addr, sizeof (addr)) < 0) {
         g_error ("bind: %s", g_strerror (errno));
     }
     if (listen (listener, 1) < 0) {
         g_error ("listen: %s", g_strerror (errno));
     }
     socklen_t alen = sizeof (addr);
-    if (getsockname (listener, (struct sockaddr *) &addr, &alen) < 0) {
+    if (getsockname (listener, (struct sockaddr *)&addr, &alen) < 0) {
         g_error ("getsockname: %s", g_strerror (errno));
     }
     guint16 port = ntohs (addr.sin_port);
 
     memset (xfer, 0, sizeof (*xfer));
-    xfer->hx = hxnet_htxf_connect ((const guint8 *) "127.0.0.1",
+    xfer->hx = hxnet_htxf_connect ((const guint8 *)"127.0.0.1",
                                    strlen ("127.0.0.1"), port, NULL, 0,
                                    /*tls=*/0, /*preamble=*/NULL, 0,
                                    /*hope_aead=*/NULL, /*xfer_ref=*/0,
@@ -118,8 +118,8 @@ struct reader_ctx {
     int saved_errno;
     gint64 elapsed_us;
     /* Set (atomically) the instant before the worker calls
-	 * htxf_io_read, so the main thread can wait for the reader to be
-	 * about to park rather than guessing with a fixed sleep. */
+     * htxf_io_read, so the main thread can wait for the reader to be
+     * about to park rather than guessing with a fixed sleep. */
     gint entered;
 };
 
@@ -131,12 +131,13 @@ parked_reader (gpointer data)
     gint64 start = g_get_monotonic_time ();
     errno = 0;
     /* Announce we're about to enter the (blocking) transport read. The
-	 * main thread waits for this before cancelling, so the cancel
-	 * genuinely races a parked recv rather than landing before the read
-	 * even started (which would pass via the canceled-flag short-circuit
-	 * and prove nothing about waking a blocked read). */
+     * main thread waits for this before cancelling, so the cancel
+     * genuinely races a parked recv rather than landing before the read
+     * even started (which would pass via the canceled-flag short-circuit
+     * and prove nothing about waking a blocked read). */
     g_atomic_int_set (&ctx->entered, 1);
-    ctx->result = hxnet_htxf_read ((HtxfConn *) ctx->xfer->hx, buf, sizeof (buf));
+    ctx->result
+        = hxnet_htxf_read ((HtxfConn *)ctx->xfer->hx, buf, sizeof (buf));
     ctx->saved_errno = errno;
     ctx->elapsed_us = g_get_monotonic_time () - start;
     return NULL;
@@ -155,23 +156,30 @@ test_abort_wakes_parked_read (void)
     int server_fd;
     open_passthrough_loopback (&xfer, &server_fd);
     test_token_init (&xfer); /* main-thread token alloc */
-    hxnet_htxf_abort_arm ((HtxfConn *) xfer.hx, (const HtxfAbort *) xfer.abort);  /* arm with the channel's socket */
+    hxnet_htxf_abort_arm (
+        (HtxfConn *)xfer.hx,
+        (const HtxfAbort *)xfer.abort); /* arm with the channel's socket */
 
     /* Fail-fast backstop: if abort ever stops waking the read, the read
-	 * timeout returns on its own instead of wedging the whole test run.
-	 * The elapsed assertion below is keyed to this so a timeout-driven
-	 * return (≈ READ_TIMEOUT_MS) fails while an abort-driven wake
-	 * (tens of ms) passes — robust to CI scheduling variance. */
+     * timeout returns on its own instead of wedging the whole test run.
+     * The elapsed assertion below is keyed to this so a timeout-driven
+     * return (≈ READ_TIMEOUT_MS) fails while an abort-driven wake
+     * (tens of ms) passes — robust to CI scheduling variance. */
     const guint READ_TIMEOUT_MS = 3000;
-    g_assert_cmpint (hxnet_htxf_set_read_timeout ((HtxfConn *) xfer.hx, READ_TIMEOUT_MS), ==, 0);
+    g_assert_cmpint (
+        hxnet_htxf_set_read_timeout ((HtxfConn *)xfer.hx, READ_TIMEOUT_MS), ==,
+        0);
 
-    struct reader_ctx ctx = { .xfer = &xfer, .result = 0, .saved_errno = 0,
-                              .elapsed_us = 0, .entered = 0 };
+    struct reader_ctx ctx = { .xfer = &xfer,
+                              .result = 0,
+                              .saved_errno = 0,
+                              .elapsed_us = 0,
+                              .entered = 0 };
     GThread *t = g_thread_new ("parked-reader", parked_reader, &ctx);
 
     /* Wait until the reader has reached the read call, then a short
-	 * extra beat so it's actually parked in recv() — not a fixed guess.
-	 * Bounded so a reader that never starts can't hang the test. */
+     * extra beat so it's actually parked in recv() — not a fixed guess.
+     * Bounded so a reader that never starts can't hang the test. */
     for (int i = 0; i < 5000 && !g_atomic_int_get (&ctx.entered); i++) {
         g_usleep (1000);
     }
@@ -179,21 +187,20 @@ test_abort_wakes_parked_read (void)
     g_usleep (50 * 1000); /* let the recv() actually block */
 
     /* Cancel as xfer_delete does: abort the token, which shuts the subchannel
-	 * socket down so the parked hxnet_htxf_read wakes and returns -1. (Since
-	 * S1.2 there's no separate canceled-flag pre-check — the token is the
-	 * cancellation mechanism.) */
-    hxnet_htxf_abort ((const HtxfAbort *) xfer.abort);
+     * socket down so the parked hxnet_htxf_read wakes and returns -1. (Since
+     * S1.2 there's no separate canceled-flag pre-check — the token is the
+     * cancellation mechanism.) */
+    hxnet_htxf_abort ((const HtxfAbort *)xfer.abort);
 
     g_thread_join (t);
 
     /* The parked read woke with an error (the aborted socket). */
     g_assert_cmpint (ctx.result, ==, -1);
     /* Woke via the abort, not the timeout backstop: well under the
-	 * configured read timeout (half of it leaves ample CI margin). */
-    g_assert_cmpint (ctx.elapsed_us, <,
-                     (gint64) READ_TIMEOUT_MS * 1000 / 2);
+     * configured read timeout (half of it leaves ample CI margin). */
+    g_assert_cmpint (ctx.elapsed_us, <, (gint64)READ_TIMEOUT_MS * 1000 / 2);
 
-    hxnet_htxf_close ((HtxfConn *) xfer.hx);
+    hxnet_htxf_close ((HtxfConn *)xfer.hx);
     test_token_free (&xfer);
     close (server_fd);
 }
@@ -220,20 +227,21 @@ test_abort_before_arm (void)
     test_token_init (&xfer);
 
     /* Abort BEFORE arm (no socket on the token yet), then arm late. */
-    hxnet_htxf_abort ((const HtxfAbort *) xfer.abort);
-    hxnet_htxf_abort_arm ((HtxfConn *) xfer.hx, (const HtxfAbort *) xfer.abort);
+    hxnet_htxf_abort ((const HtxfAbort *)xfer.abort);
+    hxnet_htxf_abort_arm ((HtxfConn *)xfer.hx, (const HtxfAbort *)xfer.abort);
 
     /* The late arm must have shut the client socket (shutdown both
-	 * directions), so the server side sees EOF. A recv timeout keeps a
-	 * broken latch from hanging the test. */
+     * directions), so the server side sees EOF. A recv timeout keeps a
+     * broken latch from hanging the test. */
     struct timeval tv = { .tv_sec = 2, .tv_usec = 0 };
     g_assert_cmpint (
-        setsockopt (server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof (tv)), ==, 0);
+        setsockopt (server_fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof (tv)), ==,
+        0);
     guint8 b = 0;
     ssize_t n = read (server_fd, &b, 1);
     g_assert_cmpint (n, ==, 0); /* clean EOF — the socket was shut down */
 
-    hxnet_htxf_close ((HtxfConn *) xfer.hx);
+    hxnet_htxf_close ((HtxfConn *)xfer.hx);
     test_token_free (&xfer);
     close (server_fd);
 }
@@ -252,12 +260,14 @@ test_abort_shims_null_safe (void)
     hxnet_htxf_abort_free (NULL); /* the primitive itself is NULL-safe */
 
     /* A zeroed htxf with no token / no channel (banner's transient
-	 * shape): abort + free are no-ops, arm is a no-op (no hx). */
+     * shape): abort + free are no-ops, arm is a no-op (no hx). */
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
-    hxnet_htxf_abort_arm ((HtxfConn *) xfer.hx, (const HtxfAbort *) xfer.abort);  /* no hx, no token → no-op */
-    hxnet_htxf_abort ((const HtxfAbort *) xfer.abort);      /* no token → no-op */
-    test_token_free (&xfer); /* no token → no-op */
+    hxnet_htxf_abort_arm (
+        (HtxfConn *)xfer.hx,
+        (const HtxfAbort *)xfer.abort); /* no hx, no token → no-op */
+    hxnet_htxf_abort ((const HtxfAbort *)xfer.abort); /* no token → no-op */
+    test_token_free (&xfer);                          /* no token → no-op */
 
     /* init then free with no channel ever opened: leak-clean (ASan). */
     test_token_init (&xfer);
@@ -279,14 +289,15 @@ test_many_channels_abort_clean (void)
     for (int i = 0; i < N; i++) {
         open_passthrough_loopback (&xfers[i], &srv[i]);
         test_token_init (&xfers[i]);
-        hxnet_htxf_abort_arm ((HtxfConn *) xfers[i].hx, (const HtxfAbort *) xfers[i].abort);
+        hxnet_htxf_abort_arm ((HtxfConn *)xfers[i].hx,
+                              (const HtxfAbort *)xfers[i].abort);
     }
     /* Cancel all, as xfers_delete_all does (abort each token). */
     for (int i = 0; i < N; i++) {
-        hxnet_htxf_abort ((const HtxfAbort *) xfers[i].abort);
+        hxnet_htxf_abort ((const HtxfAbort *)xfers[i].abort);
     }
     for (int i = 0; i < N; i++) {
-        hxnet_htxf_close ((HtxfConn *) xfers[i].hx);
+        hxnet_htxf_close ((HtxfConn *)xfers[i].hx);
         test_token_free (&xfers[i]);
         close (srv[i]);
     }

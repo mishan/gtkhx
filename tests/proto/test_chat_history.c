@@ -32,36 +32,34 @@
  * Returns the number of bytes written. Sub-field bytes (if any)
  * are appended verbatim — pass them already-packed. */
 static gsize
-pack_entry (guint8 *out,
-            guint64 message_id, gint64 timestamp,
-            guint16 flags, guint16 icon_id,
-            const char *nick, guint16 nick_len,
-            const char *message, guint16 msg_len,
-            const guint8 *subs, gsize subs_len)
+pack_entry (guint8 *out, guint64 message_id, gint64 timestamp, guint16 flags,
+            guint16 icon_id, const char *nick, guint16 nick_len,
+            const char *message, guint16 msg_len, const guint8 *subs,
+            gsize subs_len)
 {
     gsize off = 0;
 
     /* Fixed header — manually pack big-endian. */
     for (int i = 7; i >= 0; i--) {
-        out[off++] = (guint8) ((message_id >> (i * 8)) & 0xff);
+        out[off++] = (guint8)((message_id >> (i * 8)) & 0xff);
     }
     for (int i = 7; i >= 0; i--) {
-        out[off++] = (guint8) ((((guint64) timestamp) >> (i * 8)) & 0xff);
+        out[off++] = (guint8)((((guint64)timestamp) >> (i * 8)) & 0xff);
     }
-    out[off++] = (guint8) (flags >> 8);
-    out[off++] = (guint8) (flags & 0xff);
-    out[off++] = (guint8) (icon_id >> 8);
-    out[off++] = (guint8) (icon_id & 0xff);
-    out[off++] = (guint8) (nick_len >> 8);
-    out[off++] = (guint8) (nick_len & 0xff);
+    out[off++] = (guint8)(flags >> 8);
+    out[off++] = (guint8)(flags & 0xff);
+    out[off++] = (guint8)(icon_id >> 8);
+    out[off++] = (guint8)(icon_id & 0xff);
+    out[off++] = (guint8)(nick_len >> 8);
+    out[off++] = (guint8)(nick_len & 0xff);
 
     if (nick_len) {
         memcpy (out + off, nick, nick_len);
         off += nick_len;
     }
 
-    out[off++] = (guint8) (msg_len >> 8);
-    out[off++] = (guint8) (msg_len & 0xff);
+    out[off++] = (guint8)(msg_len >> 8);
+    out[off++] = (guint8)(msg_len & 0xff);
 
     if (msg_len) {
         memcpy (out + off, message, msg_len);
@@ -91,13 +89,13 @@ test_parse_minimum_entry (void)
     HxHistoryEntry *e = hx_history_entry_parse (buf, len);
     g_assert_nonnull (e);
     g_assert_cmpuint (e->message_id, ==, 1);
-    g_assert_cmpint  (e->timestamp,  ==, 0);
-    g_assert_cmphex  (e->flags,      ==, 0);
-    g_assert_cmpuint (e->icon_id,    ==, 0);
-    g_assert_cmpuint (e->nick_len,   ==, 0);
-    g_assert_cmpstr  (e->nick,       ==, "");
+    g_assert_cmpint (e->timestamp, ==, 0);
+    g_assert_cmphex (e->flags, ==, 0);
+    g_assert_cmpuint (e->icon_id, ==, 0);
+    g_assert_cmpuint (e->nick_len, ==, 0);
+    g_assert_cmpstr (e->nick, ==, "");
     g_assert_cmpuint (e->message_len, ==, 0);
-    g_assert_cmpstr  (e->message,    ==, "");
+    g_assert_cmpstr (e->message, ==, "");
     hx_history_entry_free (e);
 }
 
@@ -108,21 +106,21 @@ test_parse_typical_entry (void)
      * Unix epoch 1729137536 (2024-10-17T12:32:16Z), icon 128. */
     guint8 buf[128];
     const char *nick = "greg";
-    const char *msg  = "Hello everyone";
-    gsize len = pack_entry (buf, /*id=*/1000, /*ts=*/1729137536,
-                            /*flags=*/0, /*icon=*/128,
-                            nick, 4, msg, 14, NULL, 0);
+    const char *msg = "Hello everyone";
+    gsize len
+        = pack_entry (buf, /*id=*/1000, /*ts=*/1729137536,
+                      /*flags=*/0, /*icon=*/128, nick, 4, msg, 14, NULL, 0);
 
     HxHistoryEntry *e = hx_history_entry_parse (buf, len);
     g_assert_nonnull (e);
     g_assert_cmpuint (e->message_id, ==, 1000);
-    g_assert_cmpint  (e->timestamp,  ==, 1729137536);
-    g_assert_cmphex  (e->flags,      ==, 0);
-    g_assert_cmpuint (e->icon_id,    ==, 128);
-    g_assert_cmpuint (e->nick_len,   ==, 4);
-    g_assert_cmpstr  (e->nick,       ==, "greg");
+    g_assert_cmpint (e->timestamp, ==, 1729137536);
+    g_assert_cmphex (e->flags, ==, 0);
+    g_assert_cmpuint (e->icon_id, ==, 128);
+    g_assert_cmpuint (e->nick_len, ==, 4);
+    g_assert_cmpstr (e->nick, ==, "greg");
     g_assert_cmpuint (e->message_len, ==, 14);
-    g_assert_cmpstr  (e->message,    ==, "Hello everyone");
+    g_assert_cmpstr (e->message, ==, "Hello everyone");
     hx_history_entry_free (e);
 }
 
@@ -131,16 +129,15 @@ test_parse_flag_bits_decode (void)
 {
     /* All three known flag bits set simultaneously. */
     guint8 buf[64];
-    gsize len = pack_entry (
-        buf, /*id=*/77, /*ts=*/-1, /*flags=*/(HX_HISTORY_FLAG_ACTION
-                                              | HX_HISTORY_FLAG_SERVER_MSG
-                                              | HX_HISTORY_FLAG_DELETED),
-        /*icon=*/0, NULL, 0, NULL, 0, NULL, 0);
+    gsize len = pack_entry (buf, /*id=*/77, /*ts=*/-1, /*flags=*/
+                            (HX_HISTORY_FLAG_ACTION | HX_HISTORY_FLAG_SERVER_MSG
+                             | HX_HISTORY_FLAG_DELETED),
+                            /*icon=*/0, NULL, 0, NULL, 0, NULL, 0);
     HxHistoryEntry *e = hx_history_entry_parse (buf, len);
     g_assert_nonnull (e);
-    g_assert_true  (e->flags & HX_HISTORY_FLAG_ACTION);
-    g_assert_true  (e->flags & HX_HISTORY_FLAG_SERVER_MSG);
-    g_assert_true  (e->flags & HX_HISTORY_FLAG_DELETED);
+    g_assert_true (e->flags & HX_HISTORY_FLAG_ACTION);
+    g_assert_true (e->flags & HX_HISTORY_FLAG_SERVER_MSG);
+    g_assert_true (e->flags & HX_HISTORY_FLAG_DELETED);
     /* Signed timestamp preserved across the cast. */
     g_assert_cmpint (e->timestamp, ==, -1);
     hx_history_entry_free (e);
@@ -154,18 +151,27 @@ test_parse_skips_subfields (void)
      * surfacing. Use unknown sub-types to prove forward-compat. */
     guint8 subs[] = {
         /* sub 1: type=0x0001, len=4, data=DEADBEEF */
-        0x00, 0x01, 0x00, 0x04, 0xde, 0xad, 0xbe, 0xef,
+        0x00,
+        0x01,
+        0x00,
+        0x04,
+        0xde,
+        0xad,
+        0xbe,
+        0xef,
         /* sub 2: type=0xABCD, len=0 (degenerate empty sub-field) */
-        0xab, 0xcd, 0x00, 0x00,
+        0xab,
+        0xcd,
+        0x00,
+        0x00,
     };
     guint8 buf[128];
     gsize len = pack_entry (buf, /*id=*/10, /*ts=*/0, /*flags=*/0,
-                            /*icon=*/0, "x", 1, "y", 1,
-                            subs, sizeof subs);
+                            /*icon=*/0, "x", 1, "y", 1, subs, sizeof subs);
 
     HxHistoryEntry *e = hx_history_entry_parse (buf, len);
     g_assert_nonnull (e);
-    g_assert_cmpstr (e->nick,    ==, "x");
+    g_assert_cmpstr (e->nick, ==, "x");
     g_assert_cmpstr (e->message, ==, "y");
     hx_history_entry_free (e);
 }
@@ -213,7 +219,7 @@ static void
 test_parse_null_data_returns_null (void)
 {
     g_assert_null (hx_history_entry_parse (NULL, 24));
-    g_assert_null (hx_history_entry_parse ((const guint8 *) "x", 0));
+    g_assert_null (hx_history_entry_parse ((const guint8 *)"x", 0));
 }
 
 /* ---------- main ---------- */

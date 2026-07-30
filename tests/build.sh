@@ -24,9 +24,9 @@ set -eu
 DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 
 if [ "$#" -lt 1 ]; then
-	echo "usage: $0 <container> [docker build args...]" >&2
-	echo "  container: argus | hxtrackd | mhxd | janus | socks" >&2
-	exit 64
+    echo "usage: $0 <container> [docker build args...]" >&2
+    echo "  container: argus | hxtrackd | mhxd | janus | socks" >&2
+    exit 64
 fi
 
 container=$1
@@ -39,10 +39,10 @@ shift
 # the `-proxy` directory form up front so the mismatch can't happen.
 case "$container" in
 *-proxy)
-	echo "$0: pass the short build name, not the directory (e.g. use" >&2
-	echo "  'socks', not '$container' — the socks image is gtkhx-socks)." >&2
-	exit 64
-	;;
+    echo "$0: pass the short build name, not the directory (e.g. use" >&2
+    echo "  'socks', not '$container' — the socks image is gtkhx-socks)." >&2
+    exit 64
+    ;;
 esac
 
 # Resolve the build-context directory. Most images live in tests/<name>;
@@ -50,13 +50,13 @@ esac
 # gtkhx-socks, so map the `socks` short name to socks-proxy/.
 ctxdir="$container"
 if [ ! -d "$DIR/$ctxdir" ] && [ -d "$DIR/$ctxdir-proxy" ]; then
-	ctxdir="$container-proxy"
+    ctxdir="$container-proxy"
 fi
 
 if [ ! -f "$DIR/$ctxdir/Dockerfile" ]; then
-	echo "$0: unknown container '$container' (no $ctxdir/Dockerfile)" >&2
-	echo "  expected one of: argus, hxtrackd, mhxd, janus, socks" >&2
-	exit 64
+    echo "$0: unknown container '$container' (no $ctxdir/Dockerfile)" >&2
+    echo "  expected one of: argus, hxtrackd, mhxd, janus, socks" >&2
+    exit 64
 fi
 
 exec docker build -t "gtkhx-$container" "$@" "$DIR/$ctxdir"

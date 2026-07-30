@@ -95,8 +95,7 @@ extern void hx_preview_done (hx_preview *p);
  * The callback runs on the main thread. user_data is opaque to
  * the preview module. */
 typedef void (*hx_preview_cancel_fn) (void *user_data);
-extern void hx_preview_set_cancel_cb (hx_preview *p,
-                                      hx_preview_cancel_fn fn,
+extern void hx_preview_set_cancel_cb (hx_preview *p, hx_preview_cancel_fn fn,
                                       void *user_data);
 
 #endif /* HX_PREVIEW_H */

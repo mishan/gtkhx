@@ -103,12 +103,12 @@ double gtkhx_theme_scale (GtkhxScaleArea area);
  * to redo their palette twice. */
 
 typedef enum {
-    GTKHX_PAL_FG,             /* XTEXT_FG (slot 34): default text fg */
-    GTKHX_PAL_BG,             /* XTEXT_BG (slot 35): default text bg */
-    GTKHX_PAL_MARK_FG,        /* XTEXT_MARK_FG (slot 32): selection fg */
-    GTKHX_PAL_MARK_BG,        /* XTEXT_MARK_BG (slot 33): selection bg */
-    GTKHX_PAL_MARKER,         /* XTEXT_MARKER (slot 36): marker line */
-    GTKHX_PAL_HISTORY_MUTED,  /* XTEXT_HISTORY_MUTED (slot 37): secondary */
+    GTKHX_PAL_FG,            /* XTEXT_FG (slot 34): default text fg */
+    GTKHX_PAL_BG,            /* XTEXT_BG (slot 35): default text bg */
+    GTKHX_PAL_MARK_FG,       /* XTEXT_MARK_FG (slot 32): selection fg */
+    GTKHX_PAL_MARK_BG,       /* XTEXT_MARK_BG (slot 33): selection bg */
+    GTKHX_PAL_MARKER,        /* XTEXT_MARKER (slot 36): marker line */
+    GTKHX_PAL_HISTORY_MUTED, /* XTEXT_HISTORY_MUTED (slot 37): secondary */
     GTKHX_PAL_N_ROLES
 } GtkhxPaletteRole;
 
@@ -148,10 +148,10 @@ gboolean gtkhx_theme_palette_role_is_set (GtkhxPaletteRole role, gboolean dark);
  * the others fall back to the historical default. */
 
 typedef enum {
-    GTKHX_USER_COLOR_ACTIVE,      /* regular user */
-    GTKHX_USER_COLOR_IDLE,        /* idle / away */
-    GTKHX_USER_COLOR_ADMIN,       /* admin */
-    GTKHX_USER_COLOR_ADMIN_IDLE,  /* admin + idle */
+    GTKHX_USER_COLOR_ACTIVE,     /* regular user */
+    GTKHX_USER_COLOR_IDLE,       /* idle / away */
+    GTKHX_USER_COLOR_ADMIN,      /* admin */
+    GTKHX_USER_COLOR_ADMIN_IDLE, /* admin + idle */
     GTKHX_USER_COLOR_N
 } GtkhxUserColor;
 
@@ -200,8 +200,8 @@ void gtkhx_theme_load_from_keyfile (GKeyFile *kf);
  * (the obvious starting point) then alphabetically by display name. */
 
 typedef struct {
-    char *name;     /* basename without .ini — the THEMENAME value */
-    char *display;  /* user-visible title from the file, or basename */
+    char *name;    /* basename without .ini — the THEMENAME value */
+    char *display; /* user-visible title from the file, or basename */
 } GtkhxThemeEntry;
 
 void gtkhx_theme_entry_free (GtkhxThemeEntry *e);

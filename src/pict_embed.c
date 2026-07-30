@@ -25,10 +25,10 @@ static gboolean
 header_looks_padded (const guint8 *data, gsize len)
 {
     /* The header should be all zeros, but in practice some tools
-	 * left a few stray bytes near the end (the 2-byte picSize that
-	 * v1 PICTs stored at offset 512, the picFrame Rect, etc.). Be
-	 * loose: if the first 256 bytes are all zero, assume the header
-	 * is present. */
+     * left a few stray bytes near the end (the 2-byte picSize that
+     * v1 PICTs stored at offset 512, the picFrame Rect, etc.). Be
+     * loose: if the first 256 bytes are all zero, assume the header
+     * is present. */
     if (len < 256) {
         return FALSE;
     }
@@ -64,12 +64,12 @@ GBytes *
 hx_pict_extract_embedded (const guint8 *data, gsize len)
 {
     /* Recognised image signatures. Order matters only for tie-
-	 * breaking when two would match at the same offset, which won't
-	 * happen — these byte patterns don't overlap. JPEG SOI is the
-	 * shortest (3 bytes) and therefore most prone to a false-
-	 * positive match in random data; we treat it the same as the
-	 * others because in practice PICT files don't contain stray
-	 * 0xFF 0xD8 0xFF byte triples outside of an embedded JPEG. */
+     * breaking when two would match at the same offset, which won't
+     * happen — these byte patterns don't overlap. JPEG SOI is the
+     * shortest (3 bytes) and therefore most prone to a false-
+     * positive match in random data; we treat it the same as the
+     * others because in practice PICT files don't contain stray
+     * 0xFF 0xD8 0xFF byte triples outside of an embedded JPEG. */
     static const guint8 sig_jpeg[3] = { 0xFF, 0xD8, 0xFF };
     static const guint8 sig_png[8]
         = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A };
@@ -100,9 +100,9 @@ hx_pict_extract_embedded (const guint8 *data, gsize len)
     }
 
     /* Skip the 512-byte padding when present. When stripped (the
-	 * tool that produced the file already excised it), scan the
-	 * whole input. We don't know up front which case we're in, so
-	 * pick based on a cheap zero-prefix check. */
+     * tool that produced the file already excised it), scan the
+     * whole input. We don't know up front which case we're in, so
+     * pick based on a cheap zero-prefix check. */
     if (header_looks_padded (data, len) && len > PICT_HEADER_SIZE) {
         scan = data + PICT_HEADER_SIZE;
         scan_len = len - PICT_HEADER_SIZE;

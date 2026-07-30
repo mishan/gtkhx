@@ -56,10 +56,11 @@ test_chat_create_invites_target (void)
     /* On Bob's connection, drain looking for HTLS_HDR_CHAT_INVITE. */
     g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    g_assert_true (hx_chat_invite_extract (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos, &im));
+    g_assert_true (hx_chat_invite_extract (hx_test_in (&htlc_b)->buf,
+                                           hx_test_in (&htlc_b)->pos, &im));
 
     /* Bob's invite carries Alice's uid, the chat_id, and Alice's
-	 * name. */
+     * name. */
     g_assert_cmphex (im.uid, ==, htlc_a.uid);
     g_assert_cmphex (im.cid, ==, chat_id);
     g_assert_cmpstr (im.name, ==, "PChatAlice Tier-3");

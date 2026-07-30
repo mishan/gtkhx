@@ -161,9 +161,10 @@ pub fn host_has_fingerprint(known_hosts: &Path, host: &str, fingerprint: &str) -
         return false;
     };
     let contents = String::from_utf8_lossy(&bytes);
-    contents.lines().filter_map(parse_line).any(|e| {
-        e.host.eq_ignore_ascii_case(host) && e.fingerprint == fingerprint
-    })
+    contents
+        .lines()
+        .filter_map(parse_line)
+        .any(|e| e.host.eq_ignore_ascii_case(host) && e.fingerprint == fingerprint)
 }
 
 /// Append (or replace) a `(host, port, fingerprint)` pin. Existing entries for
@@ -197,9 +198,7 @@ pub fn pin(
             }
         }
     }
-    out.push_str(&format!(
-        "{host}:{port} {fingerprint} # added {now_date}\n"
-    ));
+    out.push_str(&format!("{host}:{port} {fingerprint} # added {now_date}\n"));
 
     write_atomic(known_hosts, out.as_bytes())
 }

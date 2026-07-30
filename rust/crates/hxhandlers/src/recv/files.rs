@@ -163,7 +163,8 @@ pub unsafe extern "C" fn hx_cfl_set_filter_argv(cfl: *mut CachedFileList, argv: 
 use gtkhx_core::session::{gtkhx_session_emit_file_list, gtkhx_session_get_default};
 
 #[cfg(not(test))]
-extern "C" {    /// Give the remote provider a chance to show an empty-state hint before we
+extern "C" {
+    /// Give the remote provider a chance to show an empty-state hint before we
     /// drop the cfl on a task-error listing (files_remote_provider.c). Returns a
     /// `gboolean` (whether the reply had a recognised provider carrier); we don't
     /// act on it, but the declaration must match the C ABI.
@@ -246,7 +247,8 @@ pub unsafe extern "C" fn rcv_task_file_list(
         }
         // The raw record is the 4-byte header immediately before `d` plus `d`
         // itself (ChunkIter positions data right after the header).
-        let record = std::slice::from_raw_parts(d.as_ptr().sub(HL_DATA_HDR_LEN), HL_DATA_HDR_LEN + d.len());
+        let record =
+            std::slice::from_raw_parts(d.as_ptr().sub(HL_DATA_HDR_LEN), HL_DATA_HDR_LEN + d.len());
         (*cfl).append_entry(record);
     }
 

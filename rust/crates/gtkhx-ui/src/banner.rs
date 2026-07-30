@@ -27,11 +27,11 @@ use std::cell::RefCell;
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int, c_void};
 
-use gtk4 as gtk;
+use glib::translate::IntoGlibPtr;
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::IntoGlibPtr;
+use gtk4 as gtk;
 
 use gtkhx_core::conn::{hx_conn_hope_aead, hx_conn_serverhost, hx_conn_serverport, hx_conn_tls};
 use hotline_proto::build::HxChunk;
@@ -553,7 +553,8 @@ fn start_image_decode(bytes: &[u8]) {
             match outcome {
                 ImageDecodeOutcome::Ok(tex) => show_texture(ui, &tex),
                 ImageDecodeOutcome::Err { .. } => {
-                    ui.caption.set_text(&tr("Server banner: image not decodable"));
+                    ui.caption
+                        .set_text(&tr("Server banner: image not decodable"));
                 }
             }
         });
@@ -577,9 +578,8 @@ fn start_url_fetch(url: &str) {
             return; // bad URL — the caption (the URL itself) stays up
         }
         // 50 ms drain — a small banner image lands quickly.
-        let source = glib::timeout_add_local(std::time::Duration::from_millis(50), || {
-            banner_url_drain()
-        });
+        let source =
+            glib::timeout_add_local(std::time::Duration::from_millis(50), banner_url_drain);
         BANNER.with(|b| {
             if let Some(ui) = b.borrow_mut().as_mut() {
                 ui.url_fetch = handle;
@@ -659,14 +659,24 @@ fn send_download_request(htlc: *mut c_void) {
             std::ptr::null_mut(),
             label.as_ptr(),
         );
-        hlwrite_chunks(htlc, HTLC_HDR_DOWNLOAD_BANNER, 0, std::ptr::null::<HxChunk>(), 0);
+        hlwrite_chunks(
+            htlc,
+            HTLC_HDR_DOWNLOAD_BANNER,
+            0,
+            std::ptr::null::<HxChunk>(),
+            0,
+        );
     }
 }
 
 /// TLS TOFU trampoline for the banner HTXF subchannel — hxnet calls this only
 /// when WebPKI validation failed. Runs on the worker thread; `verify_cert` is
 /// safe on any thread. `user_data` is the `HtxfFetch` (endpoint snapshot).
-unsafe extern "C" fn banner_verify_cb(fp: *const u8, fp_len: usize, user_data: *mut c_void) -> c_int {
+unsafe extern "C" fn banner_verify_cb(
+    fp: *const u8,
+    fp_len: usize,
+    user_data: *mut c_void,
+) -> c_int {
     if user_data.is_null() || fp.is_null() {
         return 0;
     }

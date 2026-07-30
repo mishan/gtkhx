@@ -8,20 +8,20 @@
  */
 
 #include "config.h"
-#include <gtk/gtk.h>  /* tasks.h references GtkWidget */
+#include <gtk/gtk.h>     /* tasks.h references GtkWidget */
 #include <glib/gstdio.h> /* g_unlink */
 #include <errno.h>
-#include "compat.h"   /* PACKED — required before hotline.h */
+#include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
 #include "protocol.h" /* struct htlc_conn, RCV_TASK_FN */
 #include "hxconn.h"
 #include "proto_helpers.h" /* struct hx_chunk */
 #include "hotline_proto.h"
-#include "network.h"  /* hlwrite_chunks */
+#include "network.h"       /* hlwrite_chunks */
 #include "gtkhx_session.h" /* `session` typedef needed by tasks.h */
-#include "session.h"  /* sess_from_htlc (for gtask_delete_tsk on probe timeout) */
-#include "tasks.h"    /* task_new, gtask_delete_tsk */
-#include "rcv.h"      /* rcv_task_icon_get / _getlist */
+#include "session.h" /* sess_from_htlc (for gtask_delete_tsk on probe timeout) */
+#include "tasks.h"   /* task_new, gtask_delete_tsk */
+#include "rcv.h"     /* rcv_task_icon_get / _getlist */
 #include "gif_icons.h"
 #include "debug.h"
 
@@ -49,16 +49,16 @@ gif_icons_probe_timeout (gpointer data)
     hx_conn_set_gif_icons_probe_timer (htlc, 0);
     if (hx_conn_gif_icons_state (htlc) == GIF_ICONS_UNKNOWN) {
         hx_conn_set_gif_icons_state (htlc, GIF_ICONS_UNSUPPORTED);
-        debug_log ("icon",
-                   "GIF-icons probe timed out; server appears not to "
-                   "support the extension");
+        debug_log ("icon", "GIF-icons probe timed out; server appears not to "
+                           "support the extension");
         /* Dismiss the probe's Tasks-window row. A legacy server drops
-		 * the unknown ICON_GETLIST opcode with no reply, so the task
-		 * would otherwise sit in the UI forever. We only remove the
-		 * gtask row (not the model task), so a late reply — slow
-		 * server, not an unsupporting one — still dispatches through
-		 * hx_rcv_task -> rcv_task_icon_getlist and loads avatars. */
-        gtask_delete_tsk (sess_from_htlc (htlc), hx_conn_gif_icons_probe_trans (htlc));
+         * the unknown ICON_GETLIST opcode with no reply, so the task
+         * would otherwise sit in the UI forever. We only remove the
+         * gtask row (not the model task), so a late reply — slow
+         * server, not an unsupporting one — still dispatches through
+         * hx_rcv_task -> rcv_task_icon_getlist and loads avatars. */
+        gtask_delete_tsk (sess_from_htlc (htlc),
+                          hx_conn_gif_icons_probe_trans (htlc));
     }
     return G_SOURCE_REMOVE;
 }
@@ -74,8 +74,8 @@ hx_icon_probe (struct htlc_conn *htlc)
         g_source_remove (hx_conn_gif_icons_probe_timer (htlc));
     }
     /* hx_icon_getlist's task_new snapshots htlc->trans (the increment
-	 * happens later inside hlwrite_chunks), so the trans the probe task
-	 * is keyed on is htlc->trans right now. Stash it for the watchdog. */
+     * happens later inside hlwrite_chunks), so the trans the probe task
+     * is keyed on is htlc->trans right now. Stash it for the watchdog. */
     hx_conn_set_gif_icons_probe_trans (htlc, hx_conn_trans (htlc));
     hx_icon_getlist (htlc);
     hx_conn_set_gif_icons_probe_timer (
@@ -92,11 +92,11 @@ hx_icon_get (struct htlc_conn *htlc, guint16 uid)
     }
     struct hx_chunk chunks[1];
     guint8 scratch[2];
-    int hc = (int) gtkhx_proto_build_icon_get_chunks (
+    int hc = (int)gtkhx_proto_build_icon_get_chunks (
         uid, chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
     if (hc > 0) {
         task_new (htlc, RCV_TASK_FN (rcv_task_icon_get),
-                  GUINT_TO_POINTER ((guint) uid), 0, "icon-get");
+                  GUINT_TO_POINTER ((guint)uid), 0, "icon-get");
         hlwrite_chunks (htlc, HTLC_HDR_ICON_GET, 0, chunks, hc);
     }
 }
@@ -108,33 +108,33 @@ hx_icon_set (struct htlc_conn *htlc, const guint8 *gif, gsize len)
         return;
     }
     /* A non-empty payload must be a real GIF — the server validates
-	 * the signature and rejects non-GIF uploads, so mirror that
-	 * client-side rather than earn a task error. A clear (len == 0)
-	 * is always allowed. */
+     * the signature and rejects non-GIF uploads, so mirror that
+     * client-side rather than earn a task error. A clear (len == 0)
+     * is always allowed. */
     if (len > 0 && !gtkhx_proto_gif_icon_is_gif (gif, len)) {
         debug_log ("icon",
                    "refusing ICON_SET: payload is not a GIF (%zu bytes)",
-                   (size_t) len);
+                   (size_t)len);
         return;
     }
     struct hx_chunk chunks[1];
-    int hc = (int) gtkhx_proto_build_icon_set_chunks (gif, len, chunks,
-                                                      G_N_ELEMENTS (chunks));
+    int hc = (int)gtkhx_proto_build_icon_set_chunks (gif, len, chunks,
+                                                     G_N_ELEMENTS (chunks));
     if (hc <= 0) {
         /* Builder rejected it — the only failure for a validated GIF is
-		 * exceeding the u16 wire-length limit. Log + bail so an oversize
-		 * upload is diagnosable rather than a silent no-op that looks
-		 * like a hang. */
+         * exceeding the u16 wire-length limit. Log + bail so an oversize
+         * upload is diagnosable rather than a silent no-op that looks
+         * like a hang. */
         debug_log ("icon",
                    "ICON_SET not sent: builder rejected %zu-byte payload "
                    "(over the 64 KiB wire limit?)",
-                   (size_t) len);
+                   (size_t)len);
         return;
     }
     /* The reply is a bare task completion with no payload; we don't
-	 * register a task handler — an unmatched TASK reply is handled
-	 * benignly by hx_rcv_task, and a task error surfaces through its
-	 * standard error path. */
+     * register a task handler — an unmatched TASK reply is handled
+     * benignly by hx_rcv_task, and a task error surfaces through its
+     * standard error path. */
     hlwrite_chunks (htlc, HTLC_HDR_ICON_SET, 0, chunks, hc);
 }
 
@@ -187,17 +187,17 @@ avatar_cache_ensure_loaded (void)
     avatar_cache_loaded = TRUE;
     char *path = avatar_store_path ();
     /* Size preflight before slurping the file. A valid avatar is at most
-	 * GTKHX_AVATAR_MAX_BYTES, so anything larger can't be one — refuse to
-	 * read it rather than allocating a large buffer for a file that's
-	 * accidentally or maliciously oversized (and which avatar_bytes_valid
-	 * would reject afterwards anyway). */
+     * GTKHX_AVATAR_MAX_BYTES, so anything larger can't be one — refuse to
+     * read it rather than allocating a large buffer for a file that's
+     * accidentally or maliciously oversized (and which avatar_bytes_valid
+     * would reject afterwards anyway). */
     GStatBuf st;
     if (g_stat (path, &st) == 0 && st.st_size > 0
-        && (guint64) st.st_size <= GTKHX_AVATAR_MAX_BYTES) {
+        && (guint64)st.st_size <= GTKHX_AVATAR_MAX_BYTES) {
         char *data = NULL;
         gsize len = 0;
         if (g_file_get_contents (path, &data, &len, NULL)
-            && avatar_bytes_valid ((const guint8 *) data, len)) {
+            && avatar_bytes_valid ((const guint8 *)data, len)) {
             avatar_cache = g_bytes_new_take (data, len); /* takes ownership */
         } else {
             g_free (data);
@@ -210,21 +210,21 @@ gboolean
 hx_icon_save (const guint8 *gif, gsize len)
 {
     /* Validate before persisting: a non-GIF or oversize blob would only
-	 * be rejected later by the server, so don't store it. */
+     * be rejected later by the server, so don't store it. */
     if (!avatar_bytes_valid (gif, len)) {
         return FALSE;
     }
     char *path = avatar_store_path ();
     GError *err = NULL;
     gboolean ok
-        = g_file_set_contents (path, (const char *) gif, (gssize) len, &err);
+        = g_file_set_contents (path, (const char *)gif, (gssize)len, &err);
     if (!ok) {
         debug_log ("icon", "failed to save avatar to %s: %s", path,
                    err ? err->message : "?");
         g_clear_error (&err);
     } else {
         /* Mirror into the cache so the receive-path send + the preview
-		 * see the new avatar without re-reading the disk. */
+         * see the new avatar without re-reading the disk. */
         g_clear_pointer (&avatar_cache, g_bytes_unref);
         avatar_cache = g_bytes_new (gif, len);
         avatar_cache_loaded = TRUE;
@@ -238,14 +238,14 @@ hx_icon_forget (void)
 {
     char *path = avatar_store_path ();
     /* ENOENT just means there was nothing saved — that's a clean "gone".
-	 * Any other errno (permissions / I/O) leaves the file on disk where it
-	 * reappears (and re-sends) next start, so report failure: the in-memory
-	 * cache is cleared for this session, but the persisted avatar is NOT
-	 * gone, and the caller shouldn't claim it was. */
+     * Any other errno (permissions / I/O) leaves the file on disk where it
+     * reappears (and re-sends) next start, so report failure: the in-memory
+     * cache is cleared for this session, but the persisted avatar is NOT
+     * gone, and the caller shouldn't claim it was. */
     gboolean removed = TRUE;
     if (g_unlink (path) != 0 && errno != ENOENT) {
-        g_warning ("hx_icon_forget: could not delete saved avatar %s: %s",
-                   path, g_strerror (errno));
+        g_warning ("hx_icon_forget: could not delete saved avatar %s: %s", path,
+                   g_strerror (errno));
         removed = FALSE;
     }
     g_free (path);
@@ -274,11 +274,11 @@ hx_icon_send_saved (struct htlc_conn *htlc)
     gsize len = 0;
     const guint8 *gif = g_bytes_get_data (avatar_cache, &len);
     /* Cache only ever holds validated bytes, but guard anyway so the
-	 * log line below is never a lie about an invalid send. */
+     * log line below is never a lie about an invalid send. */
     if (!avatar_bytes_valid (gif, len)) {
         return;
     }
     hx_icon_set (htlc, gif, len);
     debug_log ("icon", "sent saved avatar (%zu bytes) to capable server",
-               (size_t) len);
+               (size_t)len);
 }

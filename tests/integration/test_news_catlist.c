@@ -70,7 +70,7 @@ build_news_dir_one (const char *name, guint16 *outlen)
     /* 2 (count) + 2 (reserved) + 1 (nlen) + name */
     guint16 total = 5 + nlen;
     guint8 *buf = g_malloc (total);
-    guint16 count = g_htons(1);
+    guint16 count = g_htons (1);
 
     memcpy (buf, &count, 2);
     buf[2] = 0;
@@ -100,13 +100,15 @@ test_news_catlist_seeded_irasshaimase (void)
         (int)HTLC_DATA_NEWS_DIR, (int)dirlen, dir));
     g_free (dir);
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_message ("news catlist refused: \"%s\" "
                             "(server may have tnews disabled)",
                             err);
@@ -117,7 +119,7 @@ test_news_catlist_seeded_irasshaimase (void)
     }
 
     int catlist_chunks = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type == HTLS_DATA_NEWS_CATLIST) {
             catlist_chunks++;

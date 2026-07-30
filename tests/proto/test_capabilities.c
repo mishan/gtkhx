@@ -47,9 +47,9 @@ hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = buf;
-    hx_test_in(htlc)->pos = len;
+    g_free (hx_test_in (htlc)->buf);
+    hx_test_in (htlc)->buf = buf;
+    hx_test_in (htlc)->pos = len;
 }
 
 static void
@@ -62,8 +62,8 @@ htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
 static void
 htlc_free (struct htlc_conn *htlc)
 {
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = NULL;
+    g_free (hx_test_in (htlc)->buf);
+    hx_test_in (htlc)->buf = NULL;
 }
 
 /* The minimum cap chunk we'd send on a legacy LOGIN: u16 big-endian
@@ -74,13 +74,12 @@ test_send_capabilities_chunk_layout (void)
     struct htlc_conn htlc;
     htlc_init (&htlc, 1);
 
-    guint16 caps16 = g_htons(HTLC_CAP_TEXT_ENCODING);
+    guint16 caps16 = g_htons (HTLC_CAP_TEXT_ENCODING);
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/1, (int)HTLC_DATA_CAPABILITIES,
               2, &caps16);
 
-
     int found = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         found++;
         g_assert_cmphex (_type, ==, HTLC_DATA_CAPABILITIES);
@@ -104,17 +103,14 @@ test_send_multiple_caps_bits (void)
     struct htlc_conn htlc;
     htlc_init (&htlc, 1);
 
-    guint16 caps16
-        = g_htons(HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
+    guint16 caps16 = g_htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
     hlpack_v (&htlc, HTLC_HDR_LOGIN, 0, /*hc=*/1, (int)HTLC_DATA_CAPABILITIES,
               2, &caps16);
 
-
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         guint16 wire = (guint16)dh->data[0] << 8 | (guint16)dh->data[1];
-        g_assert_cmphex (wire & HTLC_CAP_LARGE_FILES, ==,
-                         HTLC_CAP_LARGE_FILES);
+        g_assert_cmphex (wire & HTLC_CAP_LARGE_FILES, ==, HTLC_CAP_LARGE_FILES);
         g_assert_cmphex (wire & HTLC_CAP_TEXT_ENCODING, ==,
                          HTLC_CAP_TEXT_ENCODING);
     }
@@ -138,7 +134,7 @@ static guint64
 decode_caps_from_reply (struct htlc_conn *htlc)
 {
     guint64 caps = 0;
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         if (_type != HTLS_DATA_CAPABILITIES) {
             continue;
@@ -157,7 +153,7 @@ test_recv_caps_2byte_text_encoding (void)
     memset (&htlc, 0, sizeof htlc);
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
-    guint16 caps_be = g_htons(HTLC_CAP_TEXT_ENCODING);
+    guint16 caps_be = g_htons (HTLC_CAP_TEXT_ENCODING);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 2, &caps_be);
 
     guint64 caps = decode_caps_from_reply (&htlc);
@@ -177,8 +173,7 @@ test_recv_caps_multiple_bits (void)
     memset (&htlc, 0, sizeof htlc);
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
-    guint16 caps_be
-        = g_htons(HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
+    guint16 caps_be = g_htons (HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 2, &caps_be);
 
     guint64 caps = decode_caps_from_reply (&htlc);
@@ -197,8 +192,8 @@ test_recv_caps_8byte_wide_form (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
     /* High word = some hypothetical future bit; low word = our
-	 * familiar TEXT_ENCODING. The shift-and-OR loop must walk
-	 * the whole 8 bytes to preserve the high bits. */
+     * familiar TEXT_ENCODING. The shift-and-OR loop must walk
+     * the whole 8 bytes to preserve the high bits. */
     guint8 body[8]
         = { 0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, HTLC_CAP_TEXT_ENCODING };
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CAPABILITIES, 8, body);
@@ -222,7 +217,7 @@ test_recv_caps_absent_field_means_zero (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/1, /*flag=*/0);
 
     /* Some other unrelated chunk, no CAPABILITIES. */
-    guint16 version_be = g_htons(190);
+    guint16 version_be = g_htons (190);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_VERSION, 2, &version_be);
 
     guint64 caps = decode_caps_from_reply (&htlc);

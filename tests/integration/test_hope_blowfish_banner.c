@@ -35,8 +35,8 @@
 static const hx_test_server *
 pick_banner_blowfish_server (void)
 {
-    GPtrArray *servers = hx_test_servers_with (HX_TEST_CAP_BLOWFISH
-                                               | HX_TEST_CAP_BANNER_HTXF);
+    GPtrArray *servers
+        = hx_test_servers_with (HX_TEST_CAP_BLOWFISH | HX_TEST_CAP_BANNER_HTXF);
     if (!servers) {
         return NULL;
     }
@@ -74,9 +74,9 @@ test_hope_blowfish_banner_htxf (void)
     const hx_test_server *srv = pick_banner_blowfish_server ();
     if (!srv) {
         g_test_fail_printf ("no server in matrix advertising both "
-                     "HX_TEST_CAP_BLOWFISH and HX_TEST_CAP_BANNER_HTXF. "
-                     "mhxd advertises both — bring it up with "
-                     "BANNER_MODE=JPEG (or GIFf / PNG).");
+                            "HX_TEST_CAP_BLOWFISH and HX_TEST_CAP_BANNER_HTXF. "
+                            "mhxd advertises both — bring it up with "
+                            "BANNER_MODE=JPEG (or GIFf / PNG).");
         return;
     }
 
@@ -117,24 +117,24 @@ test_hope_blowfish_banner_htxf (void)
         if (hdr_type (&htlc) != HTLS_HDR_BANNER) {
             continue;
         }
-        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+        dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
         {
             if (_type == HTLS_DATA_BANNER_TYPE) {
-                banner_type = g_strndup ((const char *) dh->data, _len);
+                banner_type = g_strndup ((const char *)dh->data, _len);
             }
         }
         dh_end ();
     }
     if (!banner_type) {
         g_test_fail_printf ("server did not send HTLS_HDR_BANNER in the "
-                     "post-login window.");
+                            "post-login window.");
         goto cleanup;
     }
     g_test_message ("banner type=\"%s\"", banner_type);
 
     if (strncmp (banner_type, "URL", 3) == 0) {
         g_test_fail_printf ("server is in URL banner mode — HTXF fetch path "
-                     "doesn't apply.");
+                            "doesn't apply.");
         goto cleanup;
     }
 
@@ -154,7 +154,8 @@ test_hope_blowfish_banner_htxf (void)
             continue;
         }
         got_reply = TRUE;
-        hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+        hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmpuint (reply.ref, >, 0);
@@ -178,9 +179,9 @@ test_hope_blowfish_banner_htxf (void)
     g_assert_cmpint (xfer_fd, >=, 0);
 
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hxnet_htxf_pack_preamble (
-        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
-        /*flags=*/0, /*size64=*/FALSE);
+    size_t hdr_len = hxnet_htxf_pack_preamble (hdr_buf, sizeof (hdr_buf), ref,
+                                               size, HTXF_TYPE_BANNER,
+                                               /*flags=*/0, /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
     g_assert_true (integration_send (xfer_fd, hdr_buf, hdr_len));
 
@@ -188,8 +189,8 @@ test_hope_blowfish_banner_htxf (void)
     g_assert_true (integration_recv (xfer_fd, bytes, size));
     integration_close (xfer_fd);
 
-    g_test_message ("first 4 bytes: %02x %02x %02x %02x",
-                    bytes[0], bytes[1], bytes[2], bytes[3]);
+    g_test_message ("first 4 bytes: %02x %02x %02x %02x", bytes[0], bytes[1],
+                    bytes[2], bytes[3]);
     g_assert_true (banner_bytes_match_type (banner_type, bytes, size));
 
     g_free (bytes);

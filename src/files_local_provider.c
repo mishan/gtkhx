@@ -118,9 +118,9 @@ hx_local_files_provider_new (const char *initial_path)
         = initial_path ? g_strdup (initial_path) : default_root ();
 
     /* Initial list happens on first show — caller can also fire
-	 * navigate() / reload() immediately if it wants. We don't
-	 * auto-list here to avoid emitting "navigated" before the
-	 * caller has connected its handler. */
+     * navigate() / reload() immediately if it wants. We don't
+     * auto-list here to avoid emitting "navigated" before the
+     * caller has connected its handler. */
     return self;
 }
 
@@ -213,8 +213,8 @@ do_list (HxLocalFilesProvider *self, const char *path)
         content_type = g_file_info_get_content_type (info);
 
         /* Skip dotfiles by default; matches most file managers'
-		 * out-of-the-box behaviour. A "show hidden" toggle is a
-		 * polish-item deferred. */
+         * out-of-the-box behaviour. A "show hidden" toggle is a
+         * polish-item deferred. */
         if (is_hidden) {
             g_object_unref (info);
             continue;
@@ -232,9 +232,9 @@ do_list (HxLocalFilesProvider *self, const char *path)
         }
 
         /* icon_id 0 → hx_file_entry_new picks the generic folder
-		 * vs. file icon based on is_dir. Polish-item: map the GIO
-		 * content_type to richer icons (image/audio/archive) the
-		 * same way the remote provider does for Hotline FourCCs. */
+         * vs. file icon based on is_dir. Polish-item: map the GIO
+         * content_type to richer icons (image/audio/archive) the
+         * same way the remote provider does for Hotline FourCCs. */
         entry = hx_file_entry_new (name, is_dir, size, (gint64)mtime, kind, 0);
         g_list_store_append (self->listing, entry);
         g_object_unref (entry);
@@ -244,8 +244,8 @@ do_list (HxLocalFilesProvider *self, const char *path)
 
     if (err) {
         /* Partial-read error — keep what we got and tell the user. */
-        char *msg
-            = g_strdup_printf (_ ("Error reading %1$s: %2$s"), path, err->message);
+        char *msg = g_strdup_printf (_ ("Error reading %1$s: %2$s"), path,
+                                     err->message);
         g_signal_emit_by_name (self, "error", msg);
         g_free (msg);
         g_clear_error (&err);
@@ -356,7 +356,7 @@ hx_local_files_provider_delete (HxLocalFilesProvider *self, const char *name,
     }
     f = g_file_new_for_path (path);
     /* g_file_delete is non-recursive — directories must be empty.
-	 * Recursive / trash variants deferred. */
+     * Recursive / trash variants deferred. */
     ok = g_file_delete (f, NULL, err);
     g_object_unref (f);
     g_free (path);
@@ -489,10 +489,10 @@ iface_activate_entry (HxFilesProvider *self, HxFileEntry *e)
     }
 
     /* g_app_info_launch_default_for_uri spins up the system's
-	 * registered handler (the same one a "Open" right-click in
-	 * GNOME Files would use). NULL launch context = default
-	 * environment. Errors get logged but not surfaced — the
-	 * panel doesn't have a toast hook reaching down here yet. */
+     * registered handler (the same one a "Open" right-click in
+     * GNOME Files would use). NULL launch context = default
+     * environment. Errors get logged but not surfaced — the
+     * panel doesn't have a toast hook reaching down here yet. */
     if (!g_app_info_launch_default_for_uri (uri, NULL, &err)) {
         g_warning ("launch %s: %s", uri, err ? err->message : "unknown");
         g_clear_error (&err);

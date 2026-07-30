@@ -65,9 +65,9 @@ static void
 test_hmac_md5_rfc2104_vector_1 (void)
 {
     /* Test Case 1:
-	 *   key  = 16 × 0x0b
-	 *   data = "Hi There"
-	 *   HMAC-MD5 = 0x9294727a3638bb1c13f48ef8158bfc9d */
+     *   key  = 16 × 0x0b
+     *   data = "Hi There"
+     *   HMAC-MD5 = 0x9294727a3638bb1c13f48ef8158bfc9d */
     guint8 key[16];
     memset (key, 0x0b, sizeof (key));
     const char *data = "Hi There";
@@ -83,9 +83,9 @@ static void
 test_hmac_md5_rfc2104_vector_2 (void)
 {
     /* Test Case 2:
-	 *   key  = "Jefe"
-	 *   data = "what do ya want for nothing?"
-	 *   HMAC-MD5 = 0x750c783e6ab0b503eaa86e310a5db738 */
+     *   key  = "Jefe"
+     *   data = "what do ya want for nothing?"
+     *   HMAC-MD5 = 0x750c783e6ab0b503eaa86e310a5db738 */
     const char *key = "Jefe";
     const char *data = "what do ya want for nothing?";
     guint8 md[16] = { 0 };
@@ -100,9 +100,9 @@ static void
 test_hmac_md5_rfc2104_vector_3 (void)
 {
     /* Test Case 3:
-	 *   key  = 16 × 0xaa
-	 *   data = 50 × 0xdd
-	 *   HMAC-MD5 = 0x56be34521d144c88dbb8c733f0e8b3f6 */
+     *   key  = 16 × 0xaa
+     *   data = 50 × 0xdd
+     *   HMAC-MD5 = 0x56be34521d144c88dbb8c733f0e8b3f6 */
     guint8 key[16];
     memset (key, 0xaa, sizeof (key));
     guint8 data[50];
@@ -121,9 +121,9 @@ static void
 test_hmac_sha1_rfc2202_vector_1 (void)
 {
     /* Test Case 1:
-	 *   key  = 20 × 0x0b
-	 *   data = "Hi There"
-	 *   HMAC-SHA1 = 0xb617318655057264e28bc0b6fb378c8ef146be00 */
+     *   key  = 20 × 0x0b
+     *   data = "Hi There"
+     *   HMAC-SHA1 = 0xb617318655057264e28bc0b6fb378c8ef146be00 */
     guint8 key[20];
     memset (key, 0x0b, sizeof (key));
     const char *data = "Hi There";
@@ -139,9 +139,9 @@ static void
 test_hmac_sha1_rfc2202_vector_2 (void)
 {
     /* Test Case 2:
-	 *   key  = "Jefe"
-	 *   data = "what do ya want for nothing?"
-	 *   HMAC-SHA1 = 0xeffcdf6ae5eb2fa2d27416d5f184df9c259a7c79 */
+     *   key  = "Jefe"
+     *   data = "what do ya want for nothing?"
+     *   HMAC-SHA1 = 0xeffcdf6ae5eb2fa2d27416d5f184df9c259a7c79 */
     const char *key = "Jefe";
     const char *data = "what do ya want for nothing?";
     guint8 md[20] = { 0 };
@@ -156,9 +156,9 @@ static void
 test_hmac_sha1_rfc2202_vector_3 (void)
 {
     /* Test Case 3:
-	 *   key  = 20 × 0xaa
-	 *   data = 50 × 0xdd
-	 *   HMAC-SHA1 = 0x125d7342b9ac11cd91a39af48aa17b4f63f175d3 */
+     *   key  = 20 × 0xaa
+     *   data = 50 × 0xdd
+     *   HMAC-SHA1 = 0x125d7342b9ac11cd91a39af48aa17b4f63f175d3 */
     guint8 key[20];
     memset (key, 0xaa, sizeof (key));
     guint8 data[50];
@@ -200,7 +200,7 @@ test_unprefixed_md5_concatenates_key_and_text (void)
     g_assert_cmpmem (md, mdlen, expected, expected_len);
 
     /* And it must NOT equal the RFC 2104 HMAC-MD5 of the same key /
-	 * text — that's the whole point of the two branches. */
+     * text — that's the whole point of the two branches. */
     guint8 hmac_md[16] = { 0 };
     hmac_xxx (hmac_md, key, strlen (key), data, strlen (data), "HMAC-MD5");
     g_assert_false (memcmp (md, hmac_md, 16) == 0);
@@ -237,11 +237,11 @@ test_unknown_algorithm_returns_zero (void)
     guint8 data[8] = { 0 };
 
     /* HAVAL was deleted (advertised by no server, computed by no
-	 * client). Anything we don't know goes to the "return 0" arm.
-	 * SHA256 / HMAC-SHA256 used to be in this list — they're now
-	 * supported (see test_hmac_sha256_*) for the HOPE-Secure-Login
-	 * preferred-strongest path and the AEAD key-derivation
-	 * requirement in HOPE-ChaCha20-Poly1305. */
+     * client). Anything we don't know goes to the "return 0" arm.
+     * SHA256 / HMAC-SHA256 used to be in this list — they're now
+     * supported (see test_hmac_sha256_*) for the HOPE-Secure-Login
+     * preferred-strongest path and the AEAD key-derivation
+     * requirement in HOPE-ChaCha20-Poly1305. */
     g_assert_cmpuint (
         hmac_xxx (md, key, sizeof (key), data, sizeof (data), "HAVAL"), ==, 0);
     g_assert_cmpuint (
@@ -263,15 +263,14 @@ test_hmac_sha256_rfc4231_vector_1 (void)
     memset (key, 0x0b, sizeof key);
     const char *data = "Hi There";
     const guint8 expected[32] = {
-        0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53,
-        0x5c, 0xa8, 0xaf, 0xce, 0xaf, 0x0b, 0xf1, 0x2b,
-        0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83, 0x3d, 0xa7,
-        0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
+        0xb0, 0x34, 0x4c, 0x61, 0xd8, 0xdb, 0x38, 0x53, 0x5c, 0xa8, 0xaf,
+        0xce, 0xaf, 0x0b, 0xf1, 0x2b, 0x88, 0x1d, 0xc2, 0x00, 0xc9, 0x83,
+        0x3d, 0xa7, 0x26, 0xe9, 0x37, 0x6c, 0x2e, 0x32, 0xcf, 0xf7,
     };
 
-    g_assert_cmpuint (hmac_xxx (md, key, sizeof key, data, strlen (data),
-                                "HMAC-SHA256"),
-                      ==, 32);
+    g_assert_cmpuint (
+        hmac_xxx (md, key, sizeof key, data, strlen (data), "HMAC-SHA256"), ==,
+        32);
     g_assert_cmpmem (md, 32, expected, 32);
 }
 
@@ -284,15 +283,14 @@ test_hmac_sha256_rfc4231_vector_2 (void)
     const char *key = "Jefe";
     const char *data = "what do ya want for nothing?";
     const guint8 expected[32] = {
-        0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e,
-        0x6a, 0x04, 0x24, 0x26, 0x08, 0x95, 0x75, 0xc7,
-        0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27, 0x39, 0x83,
-        0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43,
+        0x5b, 0xdc, 0xc1, 0x46, 0xbf, 0x60, 0x75, 0x4e, 0x6a, 0x04, 0x24,
+        0x26, 0x08, 0x95, 0x75, 0xc7, 0x5a, 0x00, 0x3f, 0x08, 0x9d, 0x27,
+        0x39, 0x83, 0x9d, 0xec, 0x58, 0xb9, 0x64, 0xec, 0x38, 0x43,
     };
 
-    g_assert_cmpuint (hmac_xxx (md, key, strlen (key), data, strlen (data),
-                                "HMAC-SHA256"),
-                      ==, 32);
+    g_assert_cmpuint (
+        hmac_xxx (md, key, strlen (key), data, strlen (data), "HMAC-SHA256"),
+        ==, 32);
     g_assert_cmpmem (md, 32, expected, 32);
 }
 
@@ -302,13 +300,12 @@ test_sha256_empty_input (void)
 {
     guint8 md[32] = { 0 };
     const guint8 expected[32] = {
-        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14,
-        0x9a, 0xfb, 0xf4, 0xc8, 0x99, 0x6f, 0xb9, 0x24,
-        0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b, 0x93, 0x4c,
-        0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
+        0xe3, 0xb0, 0xc4, 0x42, 0x98, 0xfc, 0x1c, 0x14, 0x9a, 0xfb, 0xf4,
+        0xc8, 0x99, 0x6f, 0xb9, 0x24, 0x27, 0xae, 0x41, 0xe4, 0x64, 0x9b,
+        0x93, 0x4c, 0xa4, 0x95, 0x99, 0x1b, 0x78, 0x52, 0xb8, 0x55,
     };
     /* Plain (non-HMAC) SHA256 over key||text. With both empty the
-	 * digest is just SHA-256 of the empty string. */
+     * digest is just SHA-256 of the empty string. */
     g_assert_cmpuint (hmac_xxx (md, "", 0, "", 0, "SHA256"), ==, 32);
     g_assert_cmpmem (md, 32, expected, 32);
 }

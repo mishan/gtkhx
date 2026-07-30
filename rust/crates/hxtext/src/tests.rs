@@ -31,7 +31,11 @@ unsafe fn to_utf8(input: &[u8]) -> (Vec<u8>, usize) {
 /// `gtkhx_text_to_utf8` with a NULL `out_len` — must still succeed; reads the
 /// result via C-string length (trailing NUL).
 unsafe fn to_utf8_no_len(input: &[u8]) -> Vec<u8> {
-    let r = gtkhx_text_to_utf8(input.as_ptr() as *const c_char, input.len(), std::ptr::null_mut());
+    let r = gtkhx_text_to_utf8(
+        input.as_ptr() as *const c_char,
+        input.len(),
+        std::ptr::null_mut(),
+    );
     assert!(!r.is_null());
     let s = std::ffi::CStr::from_ptr(r).to_bytes().to_vec();
     glib::ffi::g_free(r as *mut c_void);

@@ -27,7 +27,6 @@ pub const VERSION: &str = match option_env!("GTKHX_VERSION") {
 /// enum (`gtkhx_theme.h`); the themable area action buttons use.
 pub const GTKHX_SCALE_WINDOW_BUTTONS: c_int = 1;
 
-
 extern "C" {
     // ---- gtkhx util helpers (gtkutil.c / gtkhx.c / host_port.c) ------
     /// Themed pixel-art GResource button. Pass `cb = NULL` / `data =

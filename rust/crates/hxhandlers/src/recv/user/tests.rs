@@ -7,8 +7,18 @@ use std::ffi::CString;
 
 /// A live `USER_CHANGE` apply (incremental=1).
 #[allow(clippy::too_many_arguments)]
-fn change(uid: u16, nick_color: u32, name: &str, icon: u16, color: u16, is_new: bool, skip_self: bool) -> c_int {
-    apply(uid, nick_color, name, icon, color, is_new, skip_self, /*incremental=*/ true)
+fn change(
+    uid: u16,
+    nick_color: u32,
+    name: &str,
+    icon: u16,
+    color: u16,
+    is_new: bool,
+    skip_self: bool,
+) -> c_int {
+    apply(
+        uid, nick_color, name, icon, color, is_new, skip_self, /*incremental=*/ true,
+    )
 }
 
 /// The unified roster-apply — mirrors both callers (USER_CHANGE = incremental,
@@ -45,7 +55,9 @@ fn apply(
 #[test]
 fn new_user_routes_to_create() {
     test_env::reset();
-    let r = change(7, 3, "Alice", 128, 4, /*is_new=*/ true, /*skip_self=*/ false);
+    let r = change(
+        7, 3, "Alice", 128, 4, /*is_new=*/ true, /*skip_self=*/ false,
+    );
     assert_eq!(r, HX_USER_CHANGE_CREATED);
     assert_eq!(
         test_env::take(),
@@ -63,7 +75,9 @@ fn new_user_routes_to_create() {
 #[test]
 fn existing_user_routes_to_change() {
     test_env::reset();
-    let r = change(9, 5, "Alice2", 129, 2, /*is_new=*/ false, /*skip_self=*/ false);
+    let r = change(
+        9, 5, "Alice2", 129, 2, /*is_new=*/ false, /*skip_self=*/ false,
+    );
     assert_eq!(r, HX_USER_CHANGE_CHANGED);
     assert_eq!(
         test_env::take(),
@@ -80,7 +94,9 @@ fn existing_user_routes_to_change() {
 #[test]
 fn self_join_is_skipped_without_emit() {
     test_env::reset();
-    let r = change(1, 0, "Me", 128, 0, /*is_new=*/ true, /*skip_self=*/ true);
+    let r = change(
+        1, 0, "Me", 128, 0, /*is_new=*/ true, /*skip_self=*/ true,
+    );
     assert_eq!(r, HX_USER_CHANGE_SKIPPED);
     assert_eq!(test_env::take(), None);
 }
@@ -90,7 +106,10 @@ fn bulk_load_new_user_creates_without_chime() {
     // USER_LIST login load: a new member emits user-create, but incremental=0
     // so the join chime stays silent.
     test_env::reset();
-    let r = apply(7, 3, "Alice", 128, 4, /*is_new=*/ true, /*skip_self=*/ false, /*incremental=*/ false);
+    let r = apply(
+        7, 3, "Alice", 128, 4, /*is_new=*/ true, /*skip_self=*/ false,
+        /*incremental=*/ false,
+    );
     assert_eq!(r, HX_USER_CHANGE_CREATED);
     assert_eq!(
         test_env::take(),
@@ -110,7 +129,10 @@ fn bulk_load_existing_user_upserts_silently() {
     // USER_LIST re-load of a member already in the room: fold the fields into
     // the model directly, no view signal.
     test_env::reset();
-    let r = apply(9, 5, "Alice2", 129, 2, /*is_new=*/ false, /*skip_self=*/ false, /*incremental=*/ false);
+    let r = apply(
+        9, 5, "Alice2", 129, 2, /*is_new=*/ false, /*skip_self=*/ false,
+        /*incremental=*/ false,
+    );
     assert_eq!(r, HX_USER_CHANGE_UPDATED);
     assert_eq!(
         test_env::take(),
@@ -297,7 +319,10 @@ fn rcv_change_ignored_user_emits_change_but_no_notice() {
     set_member("Bob");
     rcv_change(&change_frame(7, 0, "Bobby", 128));
     // The view still gets the row update, but no rename notice line.
-    assert!(matches!(test_env::take(), Some(Emit::Change { uid: 7, .. })));
+    assert!(matches!(
+        test_env::take(),
+        Some(Emit::Change { uid: 7, .. })
+    ));
     assert_eq!(take_notice(), None);
 }
 
@@ -428,7 +453,10 @@ unsafe fn call_user_list(f: &[u8]) {
 fn user_list_new_user_creates_without_join_chime() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(false)); // not a member yet → is_new
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(7, 128, 4, b"Alice", None))]);
+    let f = frame(
+        0,
+        &[(HTLS_DATA_USER_LIST, ul_record(7, 128, 4, b"Alice", None))],
+    );
     unsafe { call_user_list(&f) };
     assert_eq!(
         test_env::take(),
@@ -447,7 +475,10 @@ fn user_list_new_user_creates_without_join_chime() {
 fn user_list_existing_user_upserts_silently() {
     test_env::reset();
     test_env::CONTAINS.with(|c| c.set(true)); // already a member → silent upsert
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(9, 130, 2, b"Bob", None))]);
+    let f = frame(
+        0,
+        &[(HTLS_DATA_USER_LIST, ul_record(9, 130, 2, b"Bob", None))],
+    );
     unsafe { call_user_list(&f) };
     assert_eq!(
         test_env::take(),
@@ -466,7 +497,13 @@ fn user_list_colored_nick_mirrors_onto_self() {
     test_env::reset();
     test_env::SELF_UID.with(|c| c.set(5));
     test_env::CONTAINS.with(|c| c.set(true));
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(5, 100, 1, b"Me", Some(0x0011_2233)))]);
+    let f = frame(
+        0,
+        &[(
+            HTLS_DATA_USER_LIST,
+            ul_record(5, 100, 1, b"Me", Some(0x0011_2233)),
+        )],
+    );
     unsafe { call_user_list(&f) };
     assert_eq!(test_env::SELF_NICK_COLOR.with(|c| c.get()), 0x0011_2233);
     assert_eq!(
@@ -488,7 +525,10 @@ fn user_list_adopts_self_uid_when_unset() {
     test_env::SELF_ICON.with(|c| c.set(100));
     test_env::set_self_name("Me");
     test_env::CONTAINS.with(|c| c.set(false));
-    let f = frame(0, &[(HTLS_DATA_USER_LIST, ul_record(42, 100, 1, b"Me", None))]);
+    let f = frame(
+        0,
+        &[(HTLS_DATA_USER_LIST, ul_record(42, 100, 1, b"Me", None))],
+    );
     unsafe { call_user_list(&f) };
     assert_eq!(test_env::SELF_UID.with(|c| c.get()), 42);
 }
@@ -520,7 +560,10 @@ fn news_users_loads_users_then_reloads_news() {
         )
     };
     assert!(test_env::RELOAD_NEWS.with(|c| c.get()));
-    assert!(matches!(test_env::take(), Some(Emit::Create { uid: 1, .. })));
+    assert!(matches!(
+        test_env::take(),
+        Some(Emit::Create { uid: 1, .. })
+    ));
 }
 
 #[test]
@@ -557,7 +600,10 @@ fn user_list_switch_ok_loads_users() {
         )
     };
     assert!(!test_env::CHAT_DELETED.with(|c| c.get()));
-    assert!(matches!(test_env::take(), Some(Emit::Create { uid: 3, .. })));
+    assert!(matches!(
+        test_env::take(),
+        Some(Emit::Create { uid: 3, .. })
+    ));
 }
 
 #[test]
@@ -565,7 +611,13 @@ fn user_info_publishes_when_both_present() {
     use hotline_proto::messages::tag;
     test_env::reset();
     let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
-    let f = frame(0, &[(tag::NAME, b"Alice".to_vec()), (tag::BODY, b"info text".to_vec())]);
+    let f = frame(
+        0,
+        &[
+            (tag::NAME, b"Alice".to_vec()),
+            (tag::BODY, b"info text".to_vec()),
+        ],
+    );
     unsafe {
         rcv_task_user_info(
             std::ptr::null_mut(),
@@ -596,7 +648,10 @@ fn user_info_body_interior_nul_truncates_len() {
     let uid_box = Box::into_raw(Box::new(11u16)) as *mut c_void;
     let f = frame(
         0,
-        &[(tag::NAME, b"Alice".to_vec()), (tag::BODY, b"ab\0cd".to_vec())],
+        &[
+            (tag::NAME, b"Alice".to_vec()),
+            (tag::BODY, b"ab\0cd".to_vec()),
+        ],
     );
     unsafe {
         rcv_task_user_info(

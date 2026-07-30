@@ -95,15 +95,15 @@
 /* The two fonts the relayout phase toggles between. Different sizes, so
  * every cached width and every wrap point is genuinely invalid. */
 #define BENCH_FONT_A "Monospace 10"
-#define BENCH_FONT_B "Monospace 12" 
+#define BENCH_FONT_B "Monospace 12"
 
 typedef enum {
     PHASE_WARMUP = 0,
-    PHASE_INGEST,      /* appending; waiting for the append loop to finish */
-    PHASE_FIRST_PAINT, /* appended, waiting for the frame that shows it */
+    PHASE_INGEST,        /* appending; waiting for the append loop to finish */
+    PHASE_FIRST_PAINT,   /* appended, waiting for the frame that shows it */
     PHASE_RELAYOUT_PREP, /* font set once, letting it settle before timing */
     PHASE_RELAYOUT,      /* font changed again; sampling the frames it costs */
-    PHASE_SCROLL,      /* stepping the adjustment, sampling frame times */
+    PHASE_SCROLL,        /* stepping the adjustment, sampling frame times */
     PHASE_DONE
 } BenchPhase;
 
@@ -156,17 +156,17 @@ bench_append_one (GtkWidget *view, guint i)
         off += (gsize)g_snprintf (body + off, sizeof body - off, "%sword%u",
                                   w ? " " : "", (i * 7 + w) % 1000);
     }
-    hx_chat_view_append_indent (view, nick, (int)strlen (nick), body,
-                                (int)off, 0);
+    hx_chat_view_append_indent (view, nick, (int)strlen (nick), body, (int)off,
+                                0);
 }
 
 static void
 bench_report (Bench *b)
 {
     gint64 total_us = b->ingest_us + b->first_paint_us;
-    double ingest_rate
-        = b->ingest_us > 0 ? (double)b->n_messages / ((double)b->ingest_us / 1e6)
-                           : 0.0;
+    double ingest_rate = b->ingest_us > 0 ? (double)b->n_messages
+                                                / ((double)b->ingest_us / 1e6)
+                                          : 0.0;
     gint64 sorted[BENCH_SCROLL_FRAMES];
     gint64 sum = 0;
     guint i;
@@ -203,7 +203,8 @@ bench_report (Bench *b)
             (double)total_us / 1000.0);
     printf ("relayout total     %8.1f ms   (%u frames after a font change)\n",
             (double)b->relayout_total_us / 1000.0, b->relayout_count);
-    printf ("relayout worst frm %8.1f ms   <- whole-scrollback re-wrap shows HERE\n",
+    printf ("relayout worst frm %8.1f ms   <- whole-scrollback re-wrap shows "
+            "HERE\n",
             (double)b->relayout_worst_us / 1000.0);
     printf ("scroll frame mean  %8.2f ms\n", mean_ms);
     printf ("scroll frame p95   %8.2f ms   (%u frames)\n", p95_ms,

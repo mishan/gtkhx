@@ -319,7 +319,7 @@ test_dirmask_first_byte_mismatch (void)
     dirmask (dst, src, mask);
 
     /* Both pointers advance once on the mismatch, so the first byte
-	 * gets eaten and dst receives the remainder. */
+     * gets eaten and dst receives the remainder. */
     g_assert_cmpstr (dst, ==, "foo");
 }
 
@@ -351,8 +351,7 @@ main (int argc, char **argv)
     g_test_add_func ("/path_hldir/nested_path", test_nested_path);
     g_test_add_func ("/path_hldir/nested_path_is_file",
                      test_nested_path_is_file);
-    g_test_add_func ("/path_hldir/trailing_separator",
-                     test_trailing_separator);
+    g_test_add_func ("/path_hldir/trailing_separator", test_trailing_separator);
     g_test_add_func ("/path_hldir/repeated_separators",
                      test_repeated_separators);
     g_test_add_func ("/path_hldir/dir_char_colon", test_dir_char_colon);

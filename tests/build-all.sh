@@ -14,10 +14,10 @@ DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 # Tracker images first, then the servers that register with them, then
 # the SOCKS proxy the socks Tier 3 test routes through.
 for c in argus hxtrackd mhxd janus socks; do
-	echo "============================================================"
-	echo "  building $c  (gtkhx-$c)"
-	echo "============================================================"
-	"$DIR/build.sh" "$c" "$@"
+    echo "============================================================"
+    echo "  building $c  (gtkhx-$c)"
+    echo "============================================================"
+    "$DIR/build.sh" "$c" "$@"
 done
 
 echo

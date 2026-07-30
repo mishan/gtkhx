@@ -77,12 +77,12 @@ gtkhx_parse_host_port (const char *str, guint16 default_port, char **host_out,
             || v > 65535) {
             return FALSE; /* non-numeric / garbage / out of range */
         }
-        port = (guint16) v;
+        port = (guint16)v;
         had_port = TRUE;
     }
 
     if (host_out) {
-        *host_out = g_strndup (host_start, (gsize) (host_end - host_start));
+        *host_out = g_strndup (host_start, (gsize)(host_end - host_start));
     }
     if (port_out) {
         *port_out = port;
@@ -102,7 +102,7 @@ gtkhx_join_host_port (const char *host, guint16 port)
      * back unambiguously (RFC 3986 §3.2.2). IPv4 / hostnames pass
      * through as-is. */
     if (strchr (host, ':') != NULL) {
-        return g_strdup_printf ("[%s]:%u", host, (unsigned) port);
+        return g_strdup_printf ("[%s]:%u", host, (unsigned)port);
     }
-    return g_strdup_printf ("%s:%u", host, (unsigned) port);
+    return g_strdup_printf ("%s:%u", host, (unsigned)port);
 }

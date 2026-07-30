@@ -72,12 +72,10 @@ test_accepted_modified (void)
     /* Strong modifier (Control, Alt, Super) makes any keyval a
      * valid bind. Letters, digits, Space all become non-typing
      * combinations. */
-    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_a,
-                                                 GDK_CONTROL_MASK));
-    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_1,
-                                                 GDK_ALT_MASK));
-    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_space,
-                                                 GDK_SUPER_MASK));
+    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_a, GDK_CONTROL_MASK));
+    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_1, GDK_ALT_MASK));
+    g_assert_true (
+        hx_voice_ptt_keyspec_allowed (GDK_KEY_space, GDK_SUPER_MASK));
     /* Dedicated key + strong modifier is also fine. */
     g_assert_true (hx_voice_ptt_keyspec_allowed (
         GDK_KEY_F12, GDK_CONTROL_MASK | GDK_ALT_MASK));
@@ -107,16 +105,13 @@ test_rejected_shift_only (void)
     /* Shift alone doesn't make a typing key into a valid PTT bind.
      * Shift+a is just an uppercase letter on every keyboard layout
      * — still a typing keystroke. */
-    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_a,
-                                                  GDK_SHIFT_MASK));
-    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_1,
-                                                  GDK_SHIFT_MASK));
-    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_space,
-                                                  GDK_SHIFT_MASK));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_a, GDK_SHIFT_MASK));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_1, GDK_SHIFT_MASK));
+    g_assert_false (
+        hx_voice_ptt_keyspec_allowed (GDK_KEY_space, GDK_SHIFT_MASK));
     /* …but Shift on a dedicated key is fine (the dedicated key
      * is already non-typing). */
-    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_F8,
-                                                 GDK_SHIFT_MASK));
+    g_assert_true (hx_voice_ptt_keyspec_allowed (GDK_KEY_F8, GDK_SHIFT_MASK));
 }
 
 static void
@@ -125,21 +120,16 @@ test_rejected_modifier_alone (void)
     /* The modifier keysyms (the keysym that fires when Ctrl is
      * pressed on its own) are never a valid bind, with or without
      * other modifiers held. */
-    g_assert_false (
-        hx_voice_ptt_keyspec_allowed (GDK_KEY_Control_L, 0));
-    g_assert_false (
-        hx_voice_ptt_keyspec_allowed (GDK_KEY_Control_R, 0));
-    g_assert_false (
-        hx_voice_ptt_keyspec_allowed (GDK_KEY_Alt_L, 0));
-    g_assert_false (
-        hx_voice_ptt_keyspec_allowed (GDK_KEY_Shift_L, 0));
-    g_assert_false (
-        hx_voice_ptt_keyspec_allowed (GDK_KEY_Super_L, 0));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_Control_L, 0));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_Control_R, 0));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_Alt_L, 0));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_Shift_L, 0));
+    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_Super_L, 0));
     /* Even with modifier state set — pressing Ctrl while Alt is
      * already held still produces the Ctrl_L keysym, still not a
      * bind. */
-    g_assert_false (hx_voice_ptt_keyspec_allowed (GDK_KEY_Control_L,
-                                                  GDK_ALT_MASK));
+    g_assert_false (
+        hx_voice_ptt_keyspec_allowed (GDK_KEY_Control_L, GDK_ALT_MASK));
 }
 
 /* ------------------------------------------------------------------ */
@@ -152,13 +142,11 @@ round_trip (guint keyval, GdkModifierType state)
 
     guint out_keyval = 0;
     GdkModifierType out_state = 0;
-    g_assert_true (
-        hx_voice_ptt_keyspec_parse (spec, &out_keyval, &out_state));
+    g_assert_true (hx_voice_ptt_keyspec_parse (spec, &out_keyval, &out_state));
     g_assert_cmpuint (out_keyval, ==, keyval);
     /* parse masks to the PTT modifier subset — comparing the input
      * needs the same mask applied. */
-    g_assert_cmphex (out_state, ==,
-                     state & HX_VOICE_PTT_MODIFIER_MASK);
+    g_assert_cmphex (out_state, ==, state & HX_VOICE_PTT_MODIFIER_MASK);
     g_free (spec);
 }
 
@@ -197,7 +185,7 @@ static void
 test_parse_rejects_vocabulary_violations (void)
 {
     guint k = 99;
-    GdkModifierType s = (GdkModifierType) 99;
+    GdkModifierType s = (GdkModifierType)99;
 
     /* Plain typing keys — gtk_accelerator_parse("a") succeeds with
      * (keyval=GDK_KEY_a, state=0). Must be rejected. */
@@ -242,11 +230,9 @@ test_canonicalize_modifier_order (void)
      * inputs in different orders must yield byte-identical output
      * so the prefs file doesn't churn between launches. */
     char *a = hx_voice_ptt_keyspec_canonicalize (
-        GDK_KEY_F12,
-        GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK);
+        GDK_KEY_F12, GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK);
     char *b = hx_voice_ptt_keyspec_canonicalize (
-        GDK_KEY_F12,
-        GDK_ALT_MASK | GDK_CONTROL_MASK | GDK_SHIFT_MASK);
+        GDK_KEY_F12, GDK_ALT_MASK | GDK_CONTROL_MASK | GDK_SHIFT_MASK);
     g_assert_nonnull (a);
     g_assert_nonnull (b);
     g_assert_cmpstr (a, ==, b);
@@ -278,8 +264,7 @@ main (int argc, char **argv)
                      test_rejected_modifier_alone);
     g_test_add_func ("/voice_ptt_keyspec/canonicalize_round_trip",
                      test_canonicalize_round_trip);
-    g_test_add_func ("/voice_ptt_keyspec/parse_empty",
-                     test_parse_empty);
+    g_test_add_func ("/voice_ptt_keyspec/parse_empty", test_parse_empty);
     g_test_add_func ("/voice_ptt_keyspec/parse_rejects_vocabulary_violations",
                      test_parse_rejects_vocabulary_violations);
     g_test_add_func ("/voice_ptt_keyspec/canonicalize_modifier_order",

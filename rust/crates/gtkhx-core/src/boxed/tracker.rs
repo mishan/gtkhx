@@ -211,7 +211,12 @@ unsafe extern "C" fn boxed_free(p: *mut c_void) {
 pub extern "C" fn hx_tracker_server_get_type() -> GType {
     static TYPE: OnceLock<usize> = OnceLock::new();
     unsafe {
-        register_once(&TYPE, c"HxTrackerServer".as_ptr(), Some(boxed_copy), Some(boxed_free))
+        register_once(
+            &TYPE,
+            c"HxTrackerServer".as_ptr(),
+            Some(boxed_copy),
+            Some(boxed_free),
+        )
     }
 }
 
@@ -269,8 +274,7 @@ mod tests {
         if with_tlv {
             let data: [u8; 3] = [1, 2, 3];
             (*e).tlv_count = 1;
-            (*e).tlv_bytes =
-                glib::ffi::g_bytes_new(data.as_ptr() as *const c_void, data.len());
+            (*e).tlv_bytes = glib::ffi::g_bytes_new(data.as_ptr() as *const c_void, data.len());
         }
         if with_meta {
             (*e).meta = make_meta();

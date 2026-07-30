@@ -12,13 +12,20 @@ use std::os::raw::{c_char, c_int, c_void};
 #[cfg(not(test))]
 use gtkhx_core::boxed::chat::hx_chat_event_free;
 #[cfg(not(test))]
-use gtkhx_core::session::{gtkhx_session_emit_chat, gtkhx_session_emit_chat_history_batch, gtkhx_session_emit_chat_invitation, gtkhx_session_emit_chat_subject, gtkhx_session_emit_chat_subject_notice, gtkhx_session_get_default};
+use gtkhx_core::conn::{
+    hx_conn_chat_history_last_msgid, hx_conn_has_cap, hx_conn_name, hx_conn_sess,
+    hx_conn_set_chat_history_last_msgid,
+};
+#[cfg(not(test))]
+use gtkhx_core::session::{
+    gtkhx_session_emit_chat, gtkhx_session_emit_chat_history_batch,
+    gtkhx_session_emit_chat_invitation, gtkhx_session_emit_chat_subject,
+    gtkhx_session_emit_chat_subject_notice, gtkhx_session_get_default,
+};
 #[cfg(not(test))]
 use hxmodel::chat_members::hx_member_model_get_ignore;
 #[cfg(not(test))]
 use hxmodel::conversation::{hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
-#[cfg(not(test))]
-use gtkhx_core::conn::{hx_conn_chat_history_last_msgid, hx_conn_has_cap, hx_conn_name, hx_conn_sess, hx_conn_set_chat_history_last_msgid};
 
 // Chat-history batch build: native parse + free (gtkhx-core boxed value type),
 // the glib GPtrArray the signal carries, and the native chunk walker. All are
@@ -33,7 +40,8 @@ const HTLS_DATA_HISTORY_HAS_MORE: u16 = 0x0f06;
 const HTLS_DATA_TASKERROR: u16 = 0x0064;
 
 #[cfg(not(test))]
-extern "C" {    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0
+extern "C" {
+    /// Look up a chat by id on a session (`struct chat *`; NULL if absent). cid 0
     /// is the always-present public chat (chat.c).
     fn chat_with_cid(sess: *mut c_void, cid: u32) -> *mut c_void;
     /// Build a boxed `HxChatEvent` from the raw (CR2LF + strip_ansi'd) chat body
@@ -173,7 +181,11 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
 /// C-ABI handler invoked from the receive dispatch on the main thread. `htlc` is
 /// a valid connection handle; `frame` is valid for `frame_len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn hx_rcv_chat_subject(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
+pub unsafe extern "C" fn hx_rcv_chat_subject(
+    htlc: *mut c_void,
+    frame: *const u8,
+    frame_len: usize,
+) {
     if frame.is_null() {
         return;
     }
@@ -354,11 +366,7 @@ pub unsafe extern "C" fn hx_chat_subject_recv(
 /// # Safety
 /// `subject` is a NUL-terminated C string; `htlc` is opaque and only forwarded.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_subject_emit(
-    htlc: *mut c_void,
-    cid: u32,
-    subject: *const c_char,
-) {
+pub unsafe extern "C" fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: *const c_char) {
     gtkhx_session_emit_chat_subject(gtkhx_session_get_default(), htlc, cid, subject);
 }
 
@@ -378,7 +386,13 @@ pub unsafe extern "C" fn hx_chat_history_recv(
     entries: *mut c_void,
     has_more: c_int,
 ) {
-    gtkhx_session_emit_chat_history_batch(gtkhx_session_get_default(), htlc, cid, entries, has_more);
+    gtkhx_session_emit_chat_history_batch(
+        gtkhx_session_get_default(),
+        htlc,
+        cid,
+        entries,
+        has_more,
+    );
 }
 
 /// `GDestroyNotify` shim: the `GPtrArray` frees each entry with the gtkhx-core

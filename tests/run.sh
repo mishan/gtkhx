@@ -27,13 +27,13 @@ COMPOSE_FILE="$DIR/docker-compose.yml"
 # Prefer the `docker compose` plugin; accept the standalone
 # `docker-compose` binary only if it self-reports v2+.
 if docker compose version >/dev/null 2>&1; then
-	COMPOSE="docker compose"
+    COMPOSE="docker compose"
 elif docker-compose version >/dev/null 2>&1; then
-	COMPOSE="docker-compose"
+    COMPOSE="docker-compose"
 else
-	echo "run.sh: Docker Compose v2 is required but was not found." >&2
-	echo "  Install the 'docker compose' plugin." >&2
-	exit 1
+    echo "run.sh: Docker Compose v2 is required but was not found." >&2
+    echo "  Install the 'docker compose' plugin." >&2
+    exit 1
 fi
 
 # Parse MAJOR from the selected CLI and enforce the v2 floor.
@@ -41,9 +41,9 @@ ver=$($COMPOSE version --short 2>/dev/null | sed 's/^[vV]//')
 major=${ver%%.*}
 case "$major" in '' | *[!0-9]*) major=0 ;; esac
 if [ "$major" -lt 2 ]; then
-	echo "run.sh: Docker Compose v2+ required, but '$COMPOSE' reports $ver." >&2
-	echo "  This compose file uses v2-only features (top-level name:)." >&2
-	exit 1
+    echo "run.sh: Docker Compose v2+ required, but '$COMPOSE' reports $ver." >&2
+    echo "  This compose file uses v2-only features (top-level name:)." >&2
+    exit 1
 fi
 
 # Invoke compose with the file path quoted so a repo path containing
@@ -51,7 +51,7 @@ fi
 # word(s), either "docker compose" or the single token "docker-compose",
 # never a path.
 dc() {
-	$COMPOSE -f "$COMPOSE_FILE" "$@"
+    $COMPOSE -f "$COMPOSE_FILE" "$@"
 }
 
 echo ">> Rebuilding images"

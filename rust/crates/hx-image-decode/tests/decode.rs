@@ -176,10 +176,7 @@ thread_local! {
     static LAST_RESULT: RefCell<Option<DecodeResult>> = const { RefCell::new(None) };
 }
 
-extern "C" fn collect_cb(
-    decoded: *mut HxInlineMediaDecoded,
-    _user_data: *mut c_void,
-) {
+extern "C" fn collect_cb(decoded: *mut HxInlineMediaDecoded, _user_data: *mut c_void) {
     unsafe {
         let r = &*decoded;
         let mime = if r.canonical_mime.is_null() {

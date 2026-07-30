@@ -49,10 +49,10 @@
 /* Parsed fixed portion of a single server record. The variable
  * name + description come on separate reads. */
 typedef struct {
-    guint32        addr;    /* IPv4 address, network byte order */
-    guint16        port;    /* TCP port, host byte order */
-    guint16        nusers;  /* user count, host byte order */
-    guint8         name_len;
+    guint32 addr;   /* IPv4 address, network byte order */
+    guint16 port;   /* TCP port, host byte order */
+    guint16 nusers; /* user count, host byte order */
+    guint8 name_len;
 } hx_tracker_record_fixed;
 
 /* Parse the 14-byte HTRK reply header. Returns TRUE iff `len >=
@@ -73,9 +73,8 @@ extern gboolean hx_tracker_record_is_padding (const guint8 *buf, gsize len);
 /* Parse the 11-byte fixed prefix of a server record into `out`.
  * Returns TRUE iff `len >= 11`. Layout: addr[0..3] / port[4..5]
  * / nusers[6..7] / reserved[8..9] / name_len[10]. */
-extern gboolean
-hx_tracker_record_parse_fixed (const guint8 *buf, gsize len,
-                               hx_tracker_record_fixed *out);
+extern gboolean hx_tracker_record_parse_fixed (const guint8 *buf, gsize len,
+                                               hx_tracker_record_fixed *out);
 
 /* Normalize a server name or description in place: CR (0x0D)
  * bytes become LF (0x0A); low control bytes that strip_ansi

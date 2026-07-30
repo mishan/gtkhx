@@ -97,9 +97,7 @@ impl Message {
     /// `Speaker.nick`, because what a reader notices is the label on
     /// screen changing.
     pub fn group_key(&self) -> Option<GroupKey<'_>> {
-        if self.flags.contains(MessageFlags::ACTION)
-            || self.flags.contains(MessageFlags::DELETED)
-        {
+        if self.flags.contains(MessageFlags::ACTION) || self.flags.contains(MessageFlags::DELETED) {
             return None;
         }
         // Client-generated notices never group. They share a gutter

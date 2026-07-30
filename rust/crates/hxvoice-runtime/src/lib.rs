@@ -52,8 +52,8 @@
 
 pub mod audio;
 pub mod debug;
-pub mod runtime;
 pub mod ffi;
+pub mod runtime;
 
 /// Initialise the GStreamer subsystem.
 ///

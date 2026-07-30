@@ -16,11 +16,11 @@
 use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 
-use gtk4 as gtk;
-use gtk::glib;
-use libadwaita as adw;
 use adw::prelude::*;
 use glib::translate::from_glib_none;
+use gtk::glib;
+use gtk4 as gtk;
+use libadwaita as adw;
 
 use hotline_proto::build::{build_broadcast_chunks, BroadcastRequest, HxChunk};
 use hotline_proto::messages::ClientHdr;
@@ -41,13 +41,7 @@ extern "C" {
         data: *mut c_void,
         str_: *const c_char,
     ) -> *mut c_void;
-    fn hlwrite_chunks(
-        htlc: *mut c_void,
-        ty: u32,
-        flag: u32,
-        chunks: *const HxChunk,
-        hc: c_int,
-    );
+    fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
 
     // gtkhx_ui_bridge.c — active-session accessors.
     fn gtkhx_active_htlc() -> *mut c_void;

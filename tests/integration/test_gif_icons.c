@@ -71,8 +71,8 @@ send_icon_set (int fd, struct htlc_conn *htlc, const guint8 *gif, gsize len)
 {
     guint32 trans = htlc->trans;
     if (!integration_send_message (fd, htlc, HTLC_HDR_ICON_SET, /*flag=*/0,
-                                   /*hc=*/1, (int) HTLC_DATA_ICON_GIF,
-                                   (int) len, gif)) {
+                                   /*hc=*/1, (int)HTLC_DATA_ICON_GIF, (int)len,
+                                   gif)) {
         return 0;
     }
     return trans;
@@ -82,11 +82,11 @@ send_icon_set (int fd, struct htlc_conn *htlc, const guint8 *gif, gsize len)
 static guint32
 send_icon_get (int fd, struct htlc_conn *htlc, guint16 uid)
 {
-    guint16 uid_be = g_htons(uid);
+    guint16 uid_be = g_htons (uid);
     guint32 trans = htlc->trans;
     if (!integration_send_message (fd, htlc, HTLC_HDR_ICON_GET, /*flag=*/0,
-                                   /*hc=*/1, (int) HTLC_DATA_UID,
-                                   (int) sizeof (uid_be), &uid_be)) {
+                                   /*hc=*/1, (int)HTLC_DATA_UID,
+                                   (int)sizeof (uid_be), &uid_be)) {
         return 0;
     }
     return trans;
@@ -118,7 +118,8 @@ static void
 test_gif_icons_set_get_roundtrip (void)
 {
     struct htlc_conn htlc;
-    int fd = integration_open_login_or_skip (&htlc, "IconRoundtrip Tier-3", 412);
+    int fd
+        = integration_open_login_or_skip (&htlc, "IconRoundtrip Tier-3", 412);
     if (fd < 0) {
         return;
     }
@@ -131,9 +132,9 @@ test_gif_icons_set_get_roundtrip (void)
     g_assert_cmphex ((hdr_flag (&htlc) & 1), ==, 0);
 
     /* Give the server a beat to commit the per-session icon before we
-	 * fetch — Janus stores it asynchronously, so an immediate ICON_GET
-	 * can race ahead of the write (mhxd stores synchronously). Mirrors
-	 * the same guard in test_chat_history. */
+     * fetch — Janus stores it asynchronously, so an immediate ICON_GET
+     * can race ahead of the write (mhxd stores synchronously). Mirrors
+     * the same guard in test_chat_history. */
     g_usleep (200000); /* 200 ms */
 
     guint32 get_trans = send_icon_get (fd, &htlc, htlc.uid);
@@ -142,8 +143,8 @@ test_gif_icons_set_get_roundtrip (void)
         integration_drain_until_task_trans (fd, &htlc, get_trans, 32));
 
     struct gtkhx_proto_icon_entry entry;
-    g_assert_true (
-        gtkhx_proto_parse_icon_get_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &entry));
+    g_assert_true (gtkhx_proto_parse_icon_get_reply (
+        hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos, &entry));
     g_assert_cmpuint (entry.uid, ==, htlc.uid);
     g_assert_cmpuint (entry.gif_len, ==, sizeof (TINY_GIF));
     g_assert_cmpmem (entry.gif_ptr, entry.gif_len, TINY_GIF, sizeof (TINY_GIF));
@@ -177,13 +178,14 @@ test_gif_icons_getlist_self (void)
         integration_drain_until_task_trans (fd, &htlc, list_trans, 32));
 
     /* Count, then fill exactly — the same two-pass shape the C rcv
-	 * handler (rcv_task_icon_getlist) uses. */
-    size_t n = gtkhx_proto_parse_icon_list (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL, 0);
+     * handler (rcv_task_icon_getlist) uses. */
+    size_t n = gtkhx_proto_parse_icon_list (hx_test_in (&htlc)->buf,
+                                            hx_test_in (&htlc)->pos, NULL, 0);
     g_assert_cmpuint (n, >, 0);
     struct gtkhx_proto_icon_entry *entries
         = g_new0 (struct gtkhx_proto_icon_entry, n);
-    size_t got
-        = gtkhx_proto_parse_icon_list (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, entries, n);
+    size_t got = gtkhx_proto_parse_icon_list (
+        hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos, entries, n);
     g_assert_cmpuint (got, ==, n);
 
     gboolean found = FALSE;
@@ -207,28 +209,31 @@ static void
 test_gif_icons_change_broadcast (void)
 {
     struct htlc_conn htlc_a;
-    int fd_a = integration_open_login_or_skip (&htlc_a, "IconChangeA Tier-3", 412);
+    int fd_a
+        = integration_open_login_or_skip (&htlc_a, "IconChangeA Tier-3", 412);
     if (fd_a < 0) {
         return;
     }
     struct htlc_conn htlc_b;
-    int fd_b = integration_open_login_or_skip (&htlc_b, "IconChangeB Tier-3", 412);
+    int fd_b
+        = integration_open_login_or_skip (&htlc_b, "IconChangeB Tier-3", 412);
     if (fd_b < 0) {
         close_session (fd_a, &htlc_a);
         return;
     }
 
-    guint32 set_trans = send_icon_set (fd_a, &htlc_a, TINY_GIF, sizeof (TINY_GIF));
+    guint32 set_trans
+        = send_icon_set (fd_a, &htlc_a, TINY_GIF, sizeof (TINY_GIF));
     g_assert_cmpuint (set_trans, !=, 0);
     /* Confirm A's set was accepted before waiting on B — otherwise a
-	 * rejected upload would surface as an opaque ICON_CHANGE timeout. */
+     * rejected upload would surface as an opaque ICON_CHANGE timeout. */
     g_assert_true (
         integration_drain_until_task_trans (fd_a, &htlc_a, set_trans, 32));
     g_assert_cmphex ((hdr_flag (&htlc_a) & 1), ==, 0);
 
     /* B drains until an ICON_CHANGE broadcast carrying A's uid arrives.
-	 * The matrix runs binaries in parallel, so filter by uid to skip
-	 * change notices triggered by other concurrent test sessions. */
+     * The matrix runs binaries in parallel, so filter by uid to skip
+     * change notices triggered by other concurrent test sessions. */
     gboolean saw = FALSE;
     for (int i = 0; i < 64 && !saw; i++) {
         if (!integration_recv_message (fd_b, &htlc_b, /*timeout_ms=*/4000)) {
@@ -238,8 +243,8 @@ test_gif_icons_change_broadcast (void)
             continue;
         }
         guint16 changed = 0;
-        if (gtkhx_proto_parse_icon_change (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos,
-                                           &changed)
+        if (gtkhx_proto_parse_icon_change (hx_test_in (&htlc_b)->buf,
+                                           hx_test_in (&htlc_b)->pos, &changed)
             && changed == htlc_a.uid) {
             saw = TRUE;
         }
@@ -287,13 +292,13 @@ test_gif_icons_clear (void)
         integration_drain_until_task_trans (fd, &htlc, get_trans, 32));
 
     /* A cleared reply still parses: UID is present, the GIF is empty
-	 * (whether the server omitted DATA_ICON_GIF, like Janus, or echoed
-	 * a zero-length field). parse_icon_get_reply only fails on a
-	 * missing UID, so a false return here would mean a malformed reply
-	 * — we require success and an empty avatar. */
+     * (whether the server omitted DATA_ICON_GIF, like Janus, or echoed
+     * a zero-length field). parse_icon_get_reply only fails on a
+     * missing UID, so a false return here would mean a malformed reply
+     * — we require success and an empty avatar. */
     struct gtkhx_proto_icon_entry entry;
-    g_assert_true (
-        gtkhx_proto_parse_icon_get_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &entry));
+    g_assert_true (gtkhx_proto_parse_icon_get_reply (
+        hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos, &entry));
     g_assert_cmpuint (entry.uid, ==, htlc.uid);
     g_assert_cmpuint (entry.gif_len, ==, 0);
 

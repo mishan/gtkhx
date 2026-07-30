@@ -11,9 +11,9 @@
 #include <glib.h>
 #include <stddef.h>
 
-#include "protocol.h"   /* struct htlc_conn, struct task */
-#include "hxconn.h"      /* hx_conn_trans */
-#include "session.h"    /* struct _session (for ->tasks) */
+#include "protocol.h" /* struct htlc_conn, struct task */
+#include "hxconn.h"   /* hx_conn_trans */
+#include "session.h"  /* struct _session (for ->tasks) */
 #include "tasks_bridge.h"
 
 /* sess_from_htlc is a static-inline container_of in session.h — not a linkable

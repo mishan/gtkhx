@@ -123,7 +123,11 @@ pub unsafe extern "C" fn hx_tls_test_set_known_hosts(path: *const c_char) {
 #[no_mangle]
 pub extern "C" fn hx_tls_test_force_tls() -> c_int {
     let o = FORCE_TLS_OV.load(Ordering::SeqCst);
-    let on = if o >= 0 { o != 0 } else { env_nonempty("GTKHX_TLS") };
+    let on = if o >= 0 {
+        o != 0
+    } else {
+        env_nonempty("GTKHX_TLS")
+    };
     on as c_int
 }
 
@@ -218,7 +222,13 @@ fn call_prompt(host: &str, port: u16, fp: &str, status: TrustStatus, kh: Option<
     let fp_c = CString::new(fp).unwrap_or_default();
     let kh_c = kh.and_then(|p| CString::new(path_to_c_bytes(p)).ok());
     let kh_ptr = kh_c.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
-    cb(host_c.as_ptr(), port, fp_c.as_ptr(), status as c_int, kh_ptr) != 0
+    cb(
+        host_c.as_ptr(),
+        port,
+        fp_c.as_ptr(),
+        status as c_int,
+        kh_ptr,
+    ) != 0
 }
 
 // ---- decision + pin ----
@@ -443,7 +453,10 @@ mod tests {
         // Unknown + no auto-accept, no verdict seam, no GUI → reject.
         assert!(!decide("host", 5600, FP_A));
         // …and nothing was pinned.
-        assert_eq!(crate::lookup(&tmp.kh(), "host", 5600, FP_A), TrustStatus::Unknown);
+        assert_eq!(
+            crate::lookup(&tmp.kh(), "host", 5600, FP_A),
+            TrustStatus::Unknown
+        );
         reset_seams();
     }
 
@@ -458,7 +471,10 @@ mod tests {
         // A different fp for the pinned host:port is a MISMATCH; auto-accept
         // overrides + re-pins to the new fp.
         assert!(decide("host", 5600, FP_B));
-        assert_eq!(crate::lookup(&tmp.kh(), "host", 5600, FP_B), TrustStatus::Trusted);
+        assert_eq!(
+            crate::lookup(&tmp.kh(), "host", 5600, FP_B),
+            TrustStatus::Trusted
+        );
         reset_seams();
     }
 
@@ -470,7 +486,10 @@ mod tests {
         set_kh(&tmp.kh());
         PROMPT_OV.store(2, Ordering::SeqCst); // reject
         assert!(!decide("host", 5600, FP_A));
-        assert_eq!(crate::lookup(&tmp.kh(), "host", 5600, FP_A), TrustStatus::Unknown);
+        assert_eq!(
+            crate::lookup(&tmp.kh(), "host", 5600, FP_A),
+            TrustStatus::Unknown
+        );
         reset_seams();
     }
 
@@ -483,7 +502,10 @@ mod tests {
         crate::pin(&tmp.kh(), "host", 5600, FP_A, "2026-06-01").unwrap();
         // Same cert on a new port → silent accept + pin, no prompt needed.
         assert!(decide("host", 5601, FP_A));
-        assert_eq!(crate::lookup(&tmp.kh(), "host", 5601, FP_A), TrustStatus::Trusted);
+        assert_eq!(
+            crate::lookup(&tmp.kh(), "host", 5601, FP_A),
+            TrustStatus::Trusted
+        );
         reset_seams();
     }
 

@@ -88,7 +88,11 @@ fn file_get_ready_stamps_and_announces() {
     test_env::reset();
     let f = reply(
         false,
-        &[(HTXF_REF, u32b(7)), (HTXF_SIZE, u32b(4096)), (QUEUE, u32b(0))],
+        &[
+            (HTXF_REF, u32b(7)),
+            (HTXF_SIZE, u32b(4096)),
+            (QUEUE, u32b(0)),
+        ],
     );
     unsafe { call(rcv_task_file_get, &f) };
     let h = htxf();
@@ -188,7 +192,10 @@ fn file_put_sizes_upload_from_fs_probes() {
     let mut rflt = vec![0u8; 66];
     rflt[46..50].copy_from_slice(&100u32.to_be_bytes()); // data_pos
     rflt[62..66].copy_from_slice(&20u32.to_be_bytes()); // rsrc_pos
-    let f = reply(false, &[(HTXF_REF, u32b(11)), (QUEUE, u32b(2)), (RFLT, rflt)]);
+    let f = reply(
+        false,
+        &[(HTXF_REF, u32b(11)), (QUEUE, u32b(2)), (RFLT, rflt)],
+    );
     unsafe { call(rcv_task_file_put, &f) };
     let h = htxf();
     assert_eq!(h.ref_, 11);

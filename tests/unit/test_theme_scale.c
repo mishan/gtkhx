@@ -76,9 +76,9 @@ test_default_scale (void)
 static void
 assert_rgba_eq_bytes (GdkRGBA c, int r, int g, int b)
 {
-    int cr = (int) (c.red   * 255.0 + 0.5);
-    int cg = (int) (c.green * 255.0 + 0.5);
-    int cb = (int) (c.blue  * 255.0 + 0.5);
+    int cr = (int)(c.red * 255.0 + 0.5);
+    int cg = (int)(c.green * 255.0 + 0.5);
+    int cb = (int)(c.blue * 255.0 + 0.5);
     g_assert_cmpint (cr, ==, r);
     g_assert_cmpint (cg, ==, g);
     g_assert_cmpint (cb, ==, b);
@@ -96,14 +96,14 @@ test_default_palette (void)
     assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_BG, FALSE),
                           0xfa, 0xfa, 0xfa);
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_FG, FALSE),
-        0xff, 0xff, 0xff);
+        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_FG, FALSE), 0xff, 0xff,
+        0xff);
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_BG, FALSE),
-        0x35, 0x84, 0xe4);
+        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_BG, FALSE), 0x35, 0x84,
+        0xe4);
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_HISTORY_MUTED, FALSE),
-        0x5e, 0x5e, 0x5e);
+        gtkhx_theme_get_default_color (GTKHX_PAL_HISTORY_MUTED, FALSE), 0x5e,
+        0x5e, 0x5e);
 
     /* Dark: FG = #cccccc, BG = #000000 — the original look. */
     assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_FG, TRUE),
@@ -111,20 +111,20 @@ test_default_palette (void)
     assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_BG, TRUE),
                           0x00, 0x00, 0x00);
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_BG, TRUE),
-        0x20, 0x4a, 0x87);
+        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_BG, TRUE), 0x20, 0x4a,
+        0x87);
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_HISTORY_MUTED, TRUE),
-        0x9a, 0x9a, 0x9a);
+        gtkhx_theme_get_default_color (GTKHX_PAL_HISTORY_MUTED, TRUE), 0x9a,
+        0x9a, 0x9a);
 
     /* MARKER is theme-agnostic in the default — same red on both
      * variants. */
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARKER, FALSE),
-        0xcc, 0x00, 0x00);
+        gtkhx_theme_get_default_color (GTKHX_PAL_MARKER, FALSE), 0xcc, 0x00,
+        0x00);
     assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARKER, TRUE),
-        0xcc, 0x00, 0x00);
+        gtkhx_theme_get_default_color (GTKHX_PAL_MARKER, TRUE), 0xcc, 0x00,
+        0x00);
 }
 
 /* Loading an empty GKeyFile clears all overrides → every accessor
@@ -141,8 +141,8 @@ test_load_empty_keyfile_uses_defaults (void)
     g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_TOOLBAR), ==, 200);
     g_assert_cmpfloat (gtkhx_theme_scale (GTKHX_SCALE_USERLIST_ICON), ==, 1.25);
 
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE),
-                          0x1d, 0x1d, 0x1d);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE), 0x1d,
+                          0x1d, 0x1d);
 
     g_key_file_free (kf);
 }
@@ -206,14 +206,14 @@ test_load_palette (void)
 
     gtkhx_theme_load_from_keyfile (kf);
 
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE),
-                          0x11, 0x22, 0x33);
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, FALSE),
-                          0xff, 0xee, 0xdd);
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, TRUE),
-                          0xab, 0xcd, 0xef);
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, TRUE),
-                          0x0a, 0x0b, 0x0c);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE), 0x11,
+                          0x22, 0x33);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, FALSE), 0xff,
+                          0xee, 0xdd);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, TRUE), 0xab,
+                          0xcd, 0xef);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, TRUE), 0x0a,
+                          0x0b, 0x0c);
 
     /* MARK_FG was not in the file → inherits the built-in default
      * (#ffffff on light). */
@@ -238,15 +238,15 @@ test_load_palette_bad_hex_falls_back (void)
                            "gtkhx_theme: bad color*");
 
     g_key_file_set_string (kf, "palette.light", "fg", "not a color");
-    g_key_file_set_string (kf, "palette.light", "bg", "#ABCD");   /* too short */
+    g_key_file_set_string (kf, "palette.light", "bg", "#ABCD"); /* too short */
 
     gtkhx_theme_load_from_keyfile (kf);
 
     /* Both bad slots silently fall back to defaults. */
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE),
-                          0x1d, 0x1d, 0x1d);
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, FALSE),
-                          0xfa, 0xfa, 0xfa);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE), 0x1d,
+                          0x1d, 0x1d);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_BG, FALSE), 0xfa,
+                          0xfa, 0xfa);
 
     g_test_assert_expected_messages ();
     g_key_file_free (kf);
@@ -261,7 +261,7 @@ test_load_replaces_not_merges (void)
     GKeyFile *kf2 = g_key_file_new ();
 
     g_key_file_set_integer (kf1, "scale", "toolbar", 150);
-    g_key_file_set_string  (kf1, "palette.light", "fg", "#112233");
+    g_key_file_set_string (kf1, "palette.light", "fg", "#112233");
     gtkhx_theme_load_from_keyfile (kf1);
 
     /* Confirm setup. */
@@ -275,8 +275,8 @@ test_load_replaces_not_merges (void)
     g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_TOOLBAR), ==, 200);
     g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_USERLIST_TEXT), ==,
                      90);
-    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE),
-                          0x1d, 0x1d, 0x1d);
+    assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE), 0x1d,
+                          0x1d, 0x1d);
 
     g_key_file_free (kf1);
     g_key_file_free (kf2);
@@ -302,8 +302,8 @@ test_load_emits_changed (void)
     gulong handler;
 
     g_assert_nonnull (theme);
-    handler = g_signal_connect (theme, "changed", G_CALLBACK (on_changed),
-                                NULL);
+    handler
+        = g_signal_connect (theme, "changed", G_CALLBACK (on_changed), NULL);
     changed_count = 0;
 
     gtkhx_theme_load_from_keyfile (kf);
@@ -326,38 +326,38 @@ test_load_user_colors (void)
     GKeyFile *kf = g_key_file_new ();
     GdkRGBA out;
 
-    g_key_file_set_string (kf, "users.light", "active",     "#112233");
-    g_key_file_set_string (kf, "users.light", "admin",      "#dc322f");
-    g_key_file_set_string (kf, "users.dark",  "idle",       "#445566");
-    g_key_file_set_string (kf, "users.dark",  "admin_idle", "#aabbcc");
+    g_key_file_set_string (kf, "users.light", "active", "#112233");
+    g_key_file_set_string (kf, "users.light", "admin", "#dc322f");
+    g_key_file_set_string (kf, "users.dark", "idle", "#445566");
+    g_key_file_set_string (kf, "users.dark", "admin_idle", "#aabbcc");
 
     gtkhx_theme_load_from_keyfile (kf);
 
     /* Light: active + admin set, idle + admin_idle not. */
-    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ACTIVE,
-                                               FALSE, &out));
-    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0x11);
-    g_assert_cmpint ((int) (out.green * 255.0 + 0.5), ==, 0x22);
-    g_assert_cmpint ((int) (out.blue  * 255.0 + 0.5), ==, 0x33);
-    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN,
-                                               FALSE, &out));
-    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0xdc);
-    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_IDLE,
-                                                FALSE, &out));
-    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN_IDLE,
-                                                FALSE, &out));
+    g_assert_true (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ACTIVE, FALSE, &out));
+    g_assert_cmpint ((int)(out.red * 255.0 + 0.5), ==, 0x11);
+    g_assert_cmpint ((int)(out.green * 255.0 + 0.5), ==, 0x22);
+    g_assert_cmpint ((int)(out.blue * 255.0 + 0.5), ==, 0x33);
+    g_assert_true (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN, FALSE, &out));
+    g_assert_cmpint ((int)(out.red * 255.0 + 0.5), ==, 0xdc);
+    g_assert_false (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_IDLE, FALSE, &out));
+    g_assert_false (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN_IDLE, FALSE, &out));
 
     /* Dark: idle + admin_idle set, active + admin not. */
-    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ACTIVE,
-                                                TRUE, &out));
-    g_assert_false (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN,
-                                                TRUE, &out));
-    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_IDLE,
-                                               TRUE, &out));
-    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0x44);
-    g_assert_true (gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN_IDLE,
-                                               TRUE, &out));
-    g_assert_cmpint ((int) (out.red   * 255.0 + 0.5), ==, 0xaa);
+    g_assert_false (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ACTIVE, TRUE, &out));
+    g_assert_false (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN, TRUE, &out));
+    g_assert_true (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_IDLE, TRUE, &out));
+    g_assert_cmpint ((int)(out.red * 255.0 + 0.5), ==, 0x44);
+    g_assert_true (
+        gtkhx_theme_get_user_color (GTKHX_USER_COLOR_ADMIN_IDLE, TRUE, &out));
+    g_assert_cmpint ((int)(out.red * 255.0 + 0.5), ==, 0xaa);
 
     g_key_file_free (kf);
 }
@@ -371,8 +371,7 @@ main (int argc, char **argv)
     g_test_add_func ("/theme/default-palette", test_default_palette);
     g_test_add_func ("/theme/load-empty-uses-defaults",
                      test_load_empty_keyfile_uses_defaults);
-    g_test_add_func ("/theme/load-scale-overrides",
-                     test_load_scale_overrides);
+    g_test_add_func ("/theme/load-scale-overrides", test_load_scale_overrides);
     g_test_add_func ("/theme/load-scale-clamps", test_load_scale_clamps);
     g_test_add_func ("/theme/load-palette", test_load_palette);
     g_test_add_func ("/theme/load-palette-bad-hex-falls-back",

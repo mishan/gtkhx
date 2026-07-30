@@ -25,10 +25,10 @@
 #include <string.h>
 #include <glib.h>
 
-#include "session.h"     /* hx_active_session, hx_connect */
-#include "hxconn.h"      /* hx_conn_set_cipheralg / _compressalg */
-#include "prefs.h"       /* gtkhx_prefs */
-#include "gtkhx_log.h"   /* hx_printf_prefix, INFOPREFIX */
+#include "session.h"   /* hx_active_session, hx_connect */
+#include "hxconn.h"    /* hx_conn_set_cipheralg / _compressalg */
+#include "prefs.h"     /* gtkhx_prefs */
+#include "gtkhx_log.h" /* hx_printf_prefix, INFOPREFIX */
 #include "tracker_bridge.h"
 
 /* These UI-side actions route through hx_active_session() (the
@@ -52,8 +52,7 @@ gtkhx_tracker_connect_apply (const char *address, guint16 port, char secure,
 
     hx_conn_set_compressalg (sess->htlc, NULL);
     hx_conn_set_cipheralg (sess->htlc, cipher_name);
-    hx_connect (sess->htlc, address ? address : "", port, "", "", secure,
-                tls);
+    hx_connect (sess->htlc, address ? address : "", port, "", "", secure, tls);
 }
 
 void

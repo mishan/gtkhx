@@ -123,8 +123,15 @@ pub unsafe extern "C" fn hlwrite_chunks(
     } else {
         let trans = hx_conn_trans_post_inc(htlc); // == my_trans; advances the counter
         let mut buf = vec![0u8; needed];
-        let written =
-            gtkhx_proto_pack_message(buf.as_mut_ptr(), needed, ty, trans, flag, chunks, hc as usize);
+        let written = gtkhx_proto_pack_message(
+            buf.as_mut_ptr(),
+            needed,
+            ty,
+            trans,
+            flag,
+            chunks,
+            hc as usize,
+        );
         if written == needed {
             Ok(buf)
         } else {
@@ -314,7 +321,9 @@ mod tests {
 
     #[test]
     fn null_htlc_is_noop() {
-        doubles::reset(/*fd=*/ 1, /*trans=*/ 7, /*installed=*/ true, /*rc=*/ 0);
+        doubles::reset(
+            /*fd=*/ 1, /*trans=*/ 7, /*installed=*/ true, /*rc=*/ 0,
+        );
         unsafe {
             hlwrite_chunks(std::ptr::null_mut(), 200, 0, std::ptr::null(), 0);
         }
@@ -358,7 +367,9 @@ mod tests {
 
     #[test]
     fn success_sends_traces_stamps_trans_and_does_not_close() {
-        doubles::reset(/*fd=*/ 1, /*trans=*/ 42, /*installed=*/ true, /*rc=*/ 0);
+        doubles::reset(
+            /*fd=*/ 1, /*trans=*/ 42, /*installed=*/ true, /*rc=*/ 0,
+        );
         let chunks = one_chunk();
         unsafe {
             hlwrite_chunks(fake_htlc(), 200, 0, chunks.as_ptr(), 1);
@@ -395,7 +406,9 @@ mod tests {
 
     #[test]
     fn send_failure_closes_the_connection() {
-        doubles::reset(/*fd=*/ 1, 42, /*installed=*/ true, /*rc=*/ -1);
+        doubles::reset(
+            /*fd=*/ 1, 42, /*installed=*/ true, /*rc=*/ -1,
+        );
         let chunks = one_chunk();
         unsafe {
             hlwrite_chunks(fake_htlc(), 200, 0, chunks.as_ptr(), 1);
@@ -409,7 +422,9 @@ mod tests {
 
     #[test]
     fn no_bridge_drops_without_send_or_close() {
-        doubles::reset(/*fd=*/ 1, 42, /*installed=*/ false, /*rc=*/ 0);
+        doubles::reset(
+            /*fd=*/ 1, 42, /*installed=*/ false, /*rc=*/ 0,
+        );
         let chunks = one_chunk();
         unsafe {
             hlwrite_chunks(fake_htlc(), 200, 0, chunks.as_ptr(), 1);

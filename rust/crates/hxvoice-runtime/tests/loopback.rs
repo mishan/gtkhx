@@ -51,8 +51,7 @@ fn loopback_audiotestsrc_to_fakesink_reaches_playing() {
         .expect("audiotestsrc plugin available");
     let enc = hxvoice_runtime::audio::make_mulaw_encoder()
         .expect("mulawenc plugin available (gst-plugins-good or -bad)");
-    let dec = hxvoice_runtime::audio::make_mulaw_decoder()
-        .expect("mulawdec plugin available");
+    let dec = hxvoice_runtime::audio::make_mulaw_decoder().expect("mulawdec plugin available");
     let sink = gst::ElementFactory::make("fakesink")
         .property("sync", false)
         .build()
@@ -62,23 +61,18 @@ fn loopback_audiotestsrc_to_fakesink_reaches_playing() {
     pipeline
         .add_many([&src, &enc, &dec, &sink])
         .expect("add elements to pipeline");
-    gst::Element::link_many([&src, &enc, &dec, &sink])
-        .expect("link pipeline elements");
+    gst::Element::link_many([&src, &enc, &dec, &sink]).expect("link pipeline elements");
 
     // Drive to Playing. `set_state` returns a typed
     // StateChangeSuccess; `Async` means the state change is in
     // flight on a worker thread, which is normal — we wait below.
     let res = pipeline.set_state(gst::State::Playing);
-    assert!(
-        res.is_ok(),
-        "set_state(Playing) returned: {res:?}"
-    );
+    assert!(res.is_ok(), "set_state(Playing) returned: {res:?}");
 
     // Block until the pipeline reaches Playing or 2 s elapse.
     // `get_state` with a non-None timeout blocks the calling thread;
     // we explicitly bound it so a hung state-change can't pin CI.
-    let (status, current, _pending) =
-        pipeline.state(Some(gst::ClockTime::from_seconds(2)));
+    let (status, current, _pending) = pipeline.state(Some(gst::ClockTime::from_seconds(2)));
     assert!(
         status.is_ok(),
         "state(Playing) returned status {status:?} current={current:?}"
@@ -111,12 +105,11 @@ fn loopback_audiotestsrc_to_fakesink_reaches_playing() {
 fn send_bin_exposes_named_volume_mute() {
     hxvoice_runtime::init();
 
-    let bin = hxvoice_runtime::audio::make_send_bin("hxvoice-send-test", None)
-        .expect(
-            "send bin must build — check gst-plugins-good (mulawenc / \
+    let bin = hxvoice_runtime::audio::make_send_bin("hxvoice-send-test", None).expect(
+        "send bin must build — check gst-plugins-good (mulawenc / \
              rtppcmupay) + gst-plugins-base (audioconvert / audioresample / \
              volume)",
-        );
+    );
     use gst::prelude::*;
     let vol = bin
         .by_name(hxvoice_runtime::audio::SEND_VOLUME_ELEMENT_NAME)
@@ -146,7 +139,10 @@ fn device_enumeration_does_not_panic() {
     let outputs = hxvoice_runtime::audio::list_output_devices();
 
     for d in inputs.iter().chain(outputs.iter()) {
-        assert!(!d.class.is_empty(), "device class string should be non-empty");
+        assert!(
+            !d.class.is_empty(),
+            "device class string should be non-empty"
+        );
         assert!(!d.name.is_empty(), "device name should be non-empty");
     }
 }
@@ -176,18 +172,14 @@ fn auto_source_and_sink_factories_succeed() {
 fn pcm_caps_filter_pins_8khz_mono_s16le() {
     hxvoice_runtime::init();
 
-    let filter = hxvoice_runtime::audio::make_pcm8khz_caps_filter()
-        .expect("capsfilter element");
+    let filter = hxvoice_runtime::audio::make_pcm8khz_caps_filter().expect("capsfilter element");
     let caps: gst::Caps = filter.property("caps");
     let s = caps.structure(0).expect("caps has at least one structure");
 
     assert_eq!(s.name(), "audio/x-raw");
     assert_eq!(s.get::<i32>("rate").expect("rate field"), 8000);
     assert_eq!(s.get::<i32>("channels").expect("channels field"), 1);
-    assert_eq!(
-        s.get::<&str>("format").expect("format field"),
-        "S16LE"
-    );
+    assert_eq!(s.get::<&str>("format").expect("format field"), "S16LE");
 }
 
 /// Phase 8.C step 5's receive-leg bin builds end-to-end against
@@ -202,12 +194,11 @@ fn pcm_caps_filter_pins_8khz_mono_s16le() {
 fn receive_bin_builds_and_exposes_ghost_sink_pad() {
     hxvoice_runtime::init();
 
-    let bin = hxvoice_runtime::audio::make_receive_bin("hxvoice-recv-test", None)
-        .expect(
-            "receive bin must build — check gst-plugins-good \
+    let bin = hxvoice_runtime::audio::make_receive_bin("hxvoice-recv-test", None).expect(
+        "receive bin must build — check gst-plugins-good \
              (rtppcmudepay / mulawdec / autoaudiosink) + \
              gst-plugins-base (audioconvert / audioresample)",
-        );
+    );
     use gst::prelude::*;
     assert_eq!(bin.name(), "hxvoice-recv-test");
     let sink_pad = bin

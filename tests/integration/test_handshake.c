@@ -24,9 +24,9 @@ test_handshake_smoke (void)
         return;
     }
     /* integration_open_or_skip already ran the magic handshake; if
-	 * we got fd >= 0 the exchange succeeded. Closing here exercises
-	 * the disconnect path on the server too — mhxd should accept
-	 * the close cleanly without error logs. */
+     * we got fd >= 0 the exchange succeeded. Closing here exercises
+     * the disconnect path on the server too — mhxd should accept
+     * the close cleanly without error logs. */
     integration_close (fd);
 }
 

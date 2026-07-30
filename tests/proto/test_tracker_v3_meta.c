@@ -35,7 +35,7 @@
 static void
 buf_append_u16_be (GByteArray *dst, guint16 v)
 {
-    guint8 b[2] = { (guint8) (v >> 8), (guint8) (v & 0xff) };
+    guint8 b[2] = { (guint8)(v >> 8), (guint8)(v & 0xff) };
     g_byte_array_append (dst, b, 2);
 }
 
@@ -59,7 +59,7 @@ add_tlv_u8 (GByteArray *dst, guint16 id, guint8 v)
 static void
 add_tlv_u16 (GByteArray *dst, guint16 id, guint16 v)
 {
-    guint8 b[2] = { (guint8) (v >> 8), (guint8) (v & 0xff) };
+    guint8 b[2] = { (guint8)(v >> 8), (guint8)(v & 0xff) };
     add_tlv (dst, id, b, 2);
 }
 
@@ -67,10 +67,10 @@ static void
 add_tlv_u32 (GByteArray *dst, guint16 id, guint32 v)
 {
     guint8 b[4] = {
-        (guint8) ((v >> 24) & 0xff),
-        (guint8) ((v >> 16) & 0xff),
-        (guint8) ((v >> 8)  & 0xff),
-        (guint8) (v & 0xff),
+        (guint8)((v >> 24) & 0xff),
+        (guint8)((v >> 16) & 0xff),
+        (guint8)((v >> 8) & 0xff),
+        (guint8)(v & 0xff),
     };
     add_tlv (dst, id, b, 4);
 }
@@ -85,7 +85,7 @@ add_tlv_bool (GByteArray *dst, guint16 id, gboolean v)
 static void
 add_tlv_str (GByteArray *dst, guint16 id, const char *s)
 {
-    add_tlv (dst, id, (const guint8 *) s, (guint16) strlen (s));
+    add_tlv (dst, id, (const guint8 *)s, (guint16)strlen (s));
 }
 
 /* ---- Empty / degenerate inputs --------------------------------- */
@@ -124,33 +124,28 @@ static void
 test_descriptive_block (void)
 {
     GByteArray *blob = g_byte_array_new ();
-    add_tlv_str  (blob, HTRK_V3_TLV_SERVER_SOFTWARE,  "hxd/2.0.8-dev");
-    add_tlv_str  (blob, HTRK_V3_TLV_COUNTRY_CODE,     "US");
-    add_tlv_str  (blob, HTRK_V3_TLV_REGION,           "Bay Area");
-    add_tlv_str  (blob, HTRK_V3_TLV_LANGUAGE,         "en");
-    add_tlv_u16  (blob, HTRK_V3_TLV_MAX_USERS,        128);
-    add_tlv_u8   (blob, HTRK_V3_TLV_MATURITY,
-                  HX_TRACKER_V3_MATURITY_MATURE);
-    add_tlv_u32  (blob, HTRK_V3_TLV_UPTIME,           86400);
-    add_tlv_str  (blob, HTRK_V3_TLV_RULES_URL,
-                  "https://example.org/rules");
-    add_tlv_str  (blob, HTRK_V3_TLV_BANNER_URL,
-                  "https://example.org/banner.gif");
-    add_tlv_str  (blob, HTRK_V3_TLV_ICON_URL,
-                  "https://example.org/icon.png");
-    add_tlv_u32  (blob, HTRK_V3_TLV_LINK_DOWN_MBIT,   1000);
-    add_tlv_u32  (blob, HTRK_V3_TLV_LINK_UP_MBIT,     100);
+    add_tlv_str (blob, HTRK_V3_TLV_SERVER_SOFTWARE, "hxd/2.0.8-dev");
+    add_tlv_str (blob, HTRK_V3_TLV_COUNTRY_CODE, "US");
+    add_tlv_str (blob, HTRK_V3_TLV_REGION, "Bay Area");
+    add_tlv_str (blob, HTRK_V3_TLV_LANGUAGE, "en");
+    add_tlv_u16 (blob, HTRK_V3_TLV_MAX_USERS, 128);
+    add_tlv_u8 (blob, HTRK_V3_TLV_MATURITY, HX_TRACKER_V3_MATURITY_MATURE);
+    add_tlv_u32 (blob, HTRK_V3_TLV_UPTIME, 86400);
+    add_tlv_str (blob, HTRK_V3_TLV_RULES_URL, "https://example.org/rules");
+    add_tlv_str (blob, HTRK_V3_TLV_BANNER_URL,
+                 "https://example.org/banner.gif");
+    add_tlv_str (blob, HTRK_V3_TLV_ICON_URL, "https://example.org/icon.png");
+    add_tlv_u32 (blob, HTRK_V3_TLV_LINK_DOWN_MBIT, 1000);
+    add_tlv_u32 (blob, HTRK_V3_TLV_LINK_UP_MBIT, 100);
     /* i16 — -480 = UTC-8. Pack via add_tlv_u16 since we know
      * two's-complement representation matches u16 bits. */
-    add_tlv_u16  (blob, HTRK_V3_TLV_TIMEZONE_OFFSET,
-                  (guint16) ((gint16) -480));
-    add_tlv_str  (blob, HTRK_V3_TLV_CONTACT_URL,
-                  "mailto:admin@example.org");
-    add_tlv_u32  (blob, HTRK_V3_TLV_SERVER_LAUNCHED,  1700000000);
-    add_tlv_u16  (blob, HTRK_V3_TLV_MIN_PROTO_VERSION, 0x00be);
-    add_tlv_u16  (blob, HTRK_V3_TLV_PEAK_24H,         42);
-    add_tlv_u16  (blob, HTRK_V3_TLV_AVG_24H,          17);
-    add_tlv_str  (blob, HTRK_V3_TLV_TAGS,             "mac,retro,dev");
+    add_tlv_u16 (blob, HTRK_V3_TLV_TIMEZONE_OFFSET, (guint16)((gint16)-480));
+    add_tlv_str (blob, HTRK_V3_TLV_CONTACT_URL, "mailto:admin@example.org");
+    add_tlv_u32 (blob, HTRK_V3_TLV_SERVER_LAUNCHED, 1700000000);
+    add_tlv_u16 (blob, HTRK_V3_TLV_MIN_PROTO_VERSION, 0x00be);
+    add_tlv_u16 (blob, HTRK_V3_TLV_PEAK_24H, 42);
+    add_tlv_u16 (blob, HTRK_V3_TLV_AVG_24H, 17);
+    add_tlv_str (blob, HTRK_V3_TLV_TAGS, "mac,retro,dev");
 
     HxTrackerV3Meta *m = hx_tracker_v3_meta_new (blob->data, blob->len, 19);
     g_assert_nonnull (m);
@@ -168,7 +163,7 @@ test_descriptive_block (void)
     g_assert_cmpstr (m->icon_url, ==, "https://example.org/icon.png");
     g_assert_cmpuint (m->link_down_mbit, ==, 1000);
     g_assert_cmpuint (m->link_up_mbit, ==, 100);
-    g_assert_cmpint  (m->timezone_offset_min, ==, -480);
+    g_assert_cmpint (m->timezone_offset_min, ==, -480);
     g_assert_true (m->has_timezone_offset);
     g_assert_cmpstr (m->contact_url, ==, "mailto:admin@example.org");
     g_assert_cmpuint (m->server_launched, ==, 1700000000);
@@ -187,16 +182,16 @@ static void
 test_capability_block (void)
 {
     GByteArray *blob = g_byte_array_new ();
-    add_tlv_u16  (blob, HTRK_V3_TLV_PROTOCOL_VERSION, 0x0197); /* 1.9.x */
-    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_HOPE,    TRUE);
-    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_TLS,     TRUE);
-    add_tlv_u16  (blob, HTRK_V3_TLV_TLS_PORT,         5600);
-    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_INLINE,  FALSE);
-    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_VOICE,   FALSE);
+    add_tlv_u16 (blob, HTRK_V3_TLV_PROTOCOL_VERSION, 0x0197); /* 1.9.x */
+    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_HOPE, TRUE);
+    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_TLS, TRUE);
+    add_tlv_u16 (blob, HTRK_V3_TLV_TLS_PORT, 5600);
+    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_INLINE, FALSE);
+    add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_VOICE, FALSE);
     add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_LARGEFILE, TRUE);
     add_tlv_bool (blob, HTRK_V3_TLV_SUPPORTS_IPV6_TLV, TRUE);
-    add_tlv_str  (blob, HTRK_V3_TLV_HOPE_CIPHERS,
-                  "CHACHA20-POLY1305,RC4,BLOWFISH");
+    add_tlv_str (blob, HTRK_V3_TLV_HOPE_CIPHERS,
+                 "CHACHA20-POLY1305,RC4,BLOWFISH");
 
     HxTrackerV3Meta *m = hx_tracker_v3_meta_new (blob->data, blob->len, 9);
     g_assert_nonnull (m);
@@ -209,8 +204,7 @@ test_capability_block (void)
     g_assert_false (m->supports_voice);
     g_assert_true (m->supports_large_files);
     g_assert_true (m->supports_ipv6);
-    g_assert_cmpstr (m->hope_ciphers, ==,
-                     "CHACHA20-POLY1305,RC4,BLOWFISH");
+    g_assert_cmpstr (m->hope_ciphers, ==, "CHACHA20-POLY1305,RC4,BLOWFISH");
 
     hx_tracker_v3_meta_free (m);
     g_byte_array_free (blob, TRUE);
@@ -222,12 +216,12 @@ static void
 test_content_index_block (void)
 {
     GByteArray *blob = g_byte_array_new ();
-    add_tlv_u32 (blob, HTRK_V3_TLV_NEWS_COUNT,        500);
-    add_tlv_u32 (blob, HTRK_V3_TLV_MSGBOARD_COUNT,    1200);
-    add_tlv_u32 (blob, HTRK_V3_TLV_FILES_COUNT,       8400);
-    add_tlv_u32 (blob, HTRK_V3_TLV_TOTAL_FILE_SIZE,   0xffffffffu);
-    add_tlv_u32 (blob, HTRK_V3_TLV_LAST_NEWS_TIME,    1700001234);
-    add_tlv_u32 (blob, HTRK_V3_TLV_LAST_CHAT_TIME,    1700005678);
+    add_tlv_u32 (blob, HTRK_V3_TLV_NEWS_COUNT, 500);
+    add_tlv_u32 (blob, HTRK_V3_TLV_MSGBOARD_COUNT, 1200);
+    add_tlv_u32 (blob, HTRK_V3_TLV_FILES_COUNT, 8400);
+    add_tlv_u32 (blob, HTRK_V3_TLV_TOTAL_FILE_SIZE, 0xffffffffu);
+    add_tlv_u32 (blob, HTRK_V3_TLV_LAST_NEWS_TIME, 1700001234);
+    add_tlv_u32 (blob, HTRK_V3_TLV_LAST_CHAT_TIME, 1700005678);
 
     HxTrackerV3Meta *m = hx_tracker_v3_meta_new (blob->data, blob->len, 6);
     g_assert_nonnull (m);
@@ -249,21 +243,20 @@ static void
 test_privacy_and_tracker_injected (void)
 {
     GByteArray *blob = g_byte_array_new ();
-    add_tlv_bool (blob, HTRK_V3_TLV_PRIVATE_LISTING,  FALSE);
-    add_tlv_u8   (blob, HTRK_V3_TLV_LISTING_CATEGORY,
-                  HX_TRACKER_V3_CATEGORY_GAMING);
-    add_tlv_bool (blob, HTRK_V3_TLV_LANGUAGE_STRICT,  TRUE);
-    add_tlv_bool (blob, HTRK_V3_TLV_IS_PROMOTED,      TRUE);
-    add_tlv_u32  (blob, HTRK_V3_TLV_FIRST_SEEN,       1690000000);
-    add_tlv_u32  (blob, HTRK_V3_TLV_LAST_HEARTBEAT,   1700100000);
-    add_tlv_bool (blob, HTRK_V3_TLV_VERIFIED_ONLINE,  TRUE);
+    add_tlv_bool (blob, HTRK_V3_TLV_PRIVATE_LISTING, FALSE);
+    add_tlv_u8 (blob, HTRK_V3_TLV_LISTING_CATEGORY,
+                HX_TRACKER_V3_CATEGORY_GAMING);
+    add_tlv_bool (blob, HTRK_V3_TLV_LANGUAGE_STRICT, TRUE);
+    add_tlv_bool (blob, HTRK_V3_TLV_IS_PROMOTED, TRUE);
+    add_tlv_u32 (blob, HTRK_V3_TLV_FIRST_SEEN, 1690000000);
+    add_tlv_u32 (blob, HTRK_V3_TLV_LAST_HEARTBEAT, 1700100000);
+    add_tlv_bool (blob, HTRK_V3_TLV_VERIFIED_ONLINE, TRUE);
 
     HxTrackerV3Meta *m = hx_tracker_v3_meta_new (blob->data, blob->len, 7);
     g_assert_nonnull (m);
 
     g_assert_false (m->private_listing);
-    g_assert_cmpuint (m->listing_category, ==,
-                      HX_TRACKER_V3_CATEGORY_GAMING);
+    g_assert_cmpuint (m->listing_category, ==, HX_TRACKER_V3_CATEGORY_GAMING);
     g_assert_true (m->language_strict);
     g_assert_true (m->is_promoted);
     g_assert_cmpuint (m->first_seen, ==, 1690000000);
@@ -336,7 +329,7 @@ test_truncated_blob_returns_null (void)
     GByteArray *blob = g_byte_array_new ();
     buf_append_u16_be (blob, HTRK_V3_TLV_SERVER_SOFTWARE);
     buf_append_u16_be (blob, 20);
-    g_byte_array_append (blob, (const guint8 *) "abcd", 4);
+    g_byte_array_append (blob, (const guint8 *)"abcd", 4);
 
     HxTrackerV3Meta *m = hx_tracker_v3_meta_new (blob->data, blob->len, 1);
     g_assert_null (m);
@@ -425,7 +418,7 @@ test_oversized_numeric_falls_back_to_default (void)
     g_assert_cmpuint (m->maturity, ==, HX_TRACKER_V3_MATURITY_GENERAL);
     g_assert_cmpuint (m->max_users, ==, 0);
     g_assert_true (m->has_max_users);
-    g_assert_cmpint  (m->timezone_offset_min, ==, 0);
+    g_assert_cmpint (m->timezone_offset_min, ==, 0);
     g_assert_true (m->has_timezone_offset);
     g_assert_cmpuint (m->uptime_secs, ==, 0);
 
@@ -463,7 +456,7 @@ test_invalid_utf8_replaced_not_dropped (void)
     HxTrackerV3Meta *m = hx_tracker_v3_meta_new (blob->data, blob->len, 1);
     g_assert_nonnull (m);
     g_assert_nonnull (m->server_software);
-    g_assert_null (strchr (m->server_software, (char) 0xff));
+    g_assert_null (strchr (m->server_software, (char)0xff));
     /* And the resulting string IS valid UTF-8 — Pango-safe. */
     g_assert_true (g_utf8_validate (m->server_software, -1, NULL));
     hx_tracker_v3_meta_free (m);
@@ -477,8 +470,8 @@ test_copy_deep_strings (void)
 {
     GByteArray *blob = g_byte_array_new ();
     add_tlv_str (blob, HTRK_V3_TLV_SERVER_SOFTWARE, "ServerName");
-    add_tlv_str (blob, HTRK_V3_TLV_TAGS,            "a,b,c");
-    add_tlv_u16 (blob, HTRK_V3_TLV_MAX_USERS,       50);
+    add_tlv_str (blob, HTRK_V3_TLV_TAGS, "a,b,c");
+    add_tlv_u16 (blob, HTRK_V3_TLV_MAX_USERS, 50);
 
     HxTrackerV3Meta *src = hx_tracker_v3_meta_new (blob->data, blob->len, 3);
     g_assert_nonnull (src);

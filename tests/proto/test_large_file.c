@@ -48,9 +48,9 @@ hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = buf;
-    hx_test_in(htlc)->pos = len;
+    g_free (hx_test_in (htlc)->buf);
+    hx_test_in (htlc)->buf = buf;
+    hx_test_in (htlc)->pos = len;
 }
 
 /* Drive hlpack with the same chunk list a large-file-mode file_put
@@ -66,20 +66,19 @@ test_send_xfersize64_alongside_legacy (void)
     const char *name = "huge.bin";
     /* True size: 5 GiB = 0x140000000. Legacy clamped, 64-bit full. */
     guint64 true_size = 0x140000000ULL;
-    guint32 legacy = g_htonl(0xFFFFFFFFu);
+    guint32 legacy = g_htonl (0xFFFFFFFFu);
     guint64 size64 = GUINT64_TO_BE (true_size);
 
-    hlpack_v (&htlc, HTLC_HDR_FILE_PUT, 0, 3,
-              (int)HTLC_DATA_FILE_NAME, (guint16)strlen (name), name,
-              (int)HTLC_DATA_HTXF_SIZE, 4, &legacy,
-              (int)HTLC_DATA_XFERSIZE64, 8, &size64);
+    hlpack_v (&htlc, HTLC_HDR_FILE_PUT, 0, 3, (int)HTLC_DATA_FILE_NAME,
+              (guint16)strlen (name), name, (int)HTLC_DATA_HTXF_SIZE, 4,
+              &legacy, (int)HTLC_DATA_XFERSIZE64, 8, &size64);
 
     int saw_legacy = 0;
     int saw_64 = 0;
     guint32 decoded_legacy = 0;
     guint64 decoded_64 = 0;
 
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type == HTLC_DATA_HTXF_SIZE) {
             g_assert_cmpuint (_len, ==, 4);
@@ -102,7 +101,7 @@ test_send_xfersize64_alongside_legacy (void)
     g_assert_cmphex (decoded_legacy, ==, 0xFFFFFFFFu);
     g_assert_cmpuint (decoded_64, ==, true_size);
 
-    g_free (hx_test_in(&htlc)->buf);
+    g_free (hx_test_in (&htlc)->buf);
 }
 
 /* ---------- recv side: DATA_XFERSIZE64 in file_get reply ---------- */
@@ -124,7 +123,7 @@ test_recv_xfersize64_chunk_decode (void)
 
     int found = 0;
     guint64 size64 = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type == HTLS_DATA_XFERSIZE64 && _len >= 8) {
             for (guint16 i = 0; i < 8; i++) {
@@ -150,11 +149,11 @@ static void
 test_htxf_handshake_legacy_16byte (void)
 {
     struct htxf_hdr h;
-    h.magic = g_htonl(HTXF_MAGIC_INT);
-    h.ref = g_htonl(0xABCDu);
-    h.len = g_htonl(1234567u);
+    h.magic = g_htonl (HTXF_MAGIC_INT);
+    h.ref = g_htonl (0xABCDu);
+    h.len = g_htonl (1234567u);
     /* Legacy: high u16 = type (0 = file), low u16 = zero. */
-    h.unknown = g_htonl((guint32)HTXF_TYPE_FILE << 16);
+    h.unknown = g_htonl ((guint32)HTXF_TYPE_FILE << 16);
 
     const guint8 *bytes = (const guint8 *)&h;
     g_assert_cmphex (bytes[0], ==, 'H');
@@ -185,10 +184,11 @@ static void
 test_htxf_handshake_large_file_under_4gib (void)
 {
     struct htxf_hdr h;
-    h.magic = g_htonl(HTXF_MAGIC_INT);
-    h.ref = g_htonl(0xABCDu);
-    h.len = g_htonl(2000u);
-    h.unknown = g_htonl(((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE);
+    h.magic = g_htonl (HTXF_MAGIC_INT);
+    h.ref = g_htonl (0xABCDu);
+    h.len = g_htonl (2000u);
+    h.unknown
+        = g_htonl (((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE);
 
     const guint8 *bytes = (const guint8 *)&h;
     /* Legacy length intact. */
@@ -214,16 +214,16 @@ test_htxf_handshake_large_file_over_4gib (void)
     /* 5 GiB FFO. */
     guint64 size64 = 0x140000066ULL;
     struct htxf_hdr h;
-    h.magic = g_htonl(HTXF_MAGIC_INT);
-    h.ref = g_htonl(0xABCDu);
+    h.magic = g_htonl (HTXF_MAGIC_INT);
+    h.ref = g_htonl (0xABCDu);
     h.len = 0; /* zeroed when SIZE64 is set */
-    h.unknown = g_htonl(((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE
-                       | HTXF_FLAG_SIZE64);
+    h.unknown = g_htonl (((guint32)HTXF_TYPE_FILE << 16) | HTXF_FLAG_LARGE_FILE
+                         | HTXF_FLAG_SIZE64);
     guint64 size64_be = GUINT64_TO_BE (size64);
 
     /* Splice the 16-byte header + 8-byte appendix into a 24-byte
-	 * buffer the way htxf_connect would write it (two consecutive
-	 * write() calls) and inspect the resulting bytes. */
+     * buffer the way htxf_connect would write it (two consecutive
+     * write() calls) and inspect the resulting bytes. */
     guint8 buf[24];
     memcpy (buf, &h, 16);
     memcpy (buf + 16, &size64_be, 8);
@@ -258,7 +258,7 @@ pack_fork_header (guint8 buf[16], const char *type4, guint64 length,
     memcpy (buf, type4, 4);
     if (large) {
         /* Compression field at offset 4-7 carries the HIGH 32 bits;
-		 * DataSize at offset 12-15 carries the LOW 32 bits. */
+         * DataSize at offset 12-15 carries the LOW 32 bits. */
         guint32 hi = (guint32)(length >> 32);
         guint32 lo = (guint32)(length & 0xFFFFFFFFu);
         buf[4] = (hi >> 24) & 0xff;
@@ -412,11 +412,11 @@ static void
 test_htxf_handshake_folder_with_large_file (void)
 {
     struct htxf_hdr h;
-    h.magic = g_htonl(HTXF_MAGIC_INT);
-    h.ref = g_htonl(0xABCDu);
-    h.len = g_htonl(1000u);
+    h.magic = g_htonl (HTXF_MAGIC_INT);
+    h.ref = g_htonl (0xABCDu);
+    h.len = g_htonl (1000u);
     h.unknown
-        = g_htonl(((guint32)HTXF_TYPE_FOLDER << 16) | HTXF_FLAG_LARGE_FILE);
+        = g_htonl (((guint32)HTXF_TYPE_FOLDER << 16) | HTXF_FLAG_LARGE_FILE);
 
     const guint8 *bytes = (const guint8 *)&h;
     /* type=1 in bytes 12-13. */
@@ -454,8 +454,9 @@ main (int argc, char **argv)
                      test_ffo_fork_header_large_mode_over_4gib);
     g_test_add_func ("/large_file/ffo/fork_header_legacy_decoder_truncates",
                      test_ffo_fork_header_legacy_decoder_truncates);
-    g_test_add_func ("/large_file/ffo/fork_header_macr_and_info_use_same_layout",
-                     test_ffo_fork_header_macr_and_info_use_same_layout);
+    g_test_add_func (
+        "/large_file/ffo/fork_header_macr_and_info_use_same_layout",
+        test_ffo_fork_header_macr_and_info_use_same_layout);
 
     return g_test_run ();
 }

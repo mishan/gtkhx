@@ -17,10 +17,10 @@
 
 use std::ffi::{c_char, c_void, CStr};
 
-use gtk4 as gtk;
-use gtk::glib;
-use libadwaita as adw;
 use adw::prelude::*;
+use gtk::glib;
+use gtk4 as gtk;
+use libadwaita as adw;
 
 use hotline_proto::build::{build_file_setinfo_chunks, FileSetInfoRequest, HxChunk};
 
@@ -107,8 +107,16 @@ unsafe fn with_wire<R>(text: &str, utf8: bool, is_body: bool, f: impl FnOnce(&[u
     let buf = gtkhx_text_for_wire(
         text.as_ptr() as *const c_char,
         text.len(),
-        if utf8 { glib::ffi::GTRUE } else { glib::ffi::GFALSE },
-        if is_body { glib::ffi::GTRUE } else { glib::ffi::GFALSE },
+        if utf8 {
+            glib::ffi::GTRUE
+        } else {
+            glib::ffi::GFALSE
+        },
+        if is_body {
+            glib::ffi::GTRUE
+        } else {
+            glib::ffi::GFALSE
+        },
         &mut len,
     );
     if buf.is_null() {
@@ -176,7 +184,13 @@ unsafe fn save_file_info(path: &str, new_name: &str, comments: &str) {
                 let hc = build_file_setinfo_chunks(&req, &mut chunks);
                 if hc > 0 {
                     let label = crate::cs("set file info");
-                    task_new(htlc, None, std::ptr::null_mut(), std::ptr::null_mut(), label.as_ptr());
+                    task_new(
+                        htlc,
+                        None,
+                        std::ptr::null_mut(),
+                        std::ptr::null_mut(),
+                        label.as_ptr(),
+                    );
                     hlwrite_chunks(htlc, HTLC_HDR_FILE_SETINFO, 0, chunks.as_ptr(), hc as i32);
                 }
             })

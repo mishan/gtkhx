@@ -84,8 +84,8 @@ extern GtkWidget *hx_user_list_view_get_widget (HxUserListView *v);
  * pointer). The row copies what it needs and holds no pointer into any
  * C store. */
 extern void hx_user_list_view_add (HxUserListView *v, guint16 uid,
-                                   const char *nam, guint16 icon,
-                                   guint16 color, guint32 nick_color);
+                                   const char *nam, guint16 icon, guint16 color,
+                                   guint32 nick_color);
 extern void hx_user_list_view_remove (HxUserListView *v, guint16 uid);
 extern void hx_user_list_view_update (HxUserListView *v, guint16 uid,
                                       const char *nam, guint16 icon,

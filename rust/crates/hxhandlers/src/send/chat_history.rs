@@ -75,7 +75,13 @@ pub unsafe extern "C" fn hx_get_chat_history(
         limit,
     };
     let hc = build::build_get_chat_history_chunks(&req, &mut chunks, &mut scratch);
-    hlwrite_chunks(htlc, HTLC_HDR_GET_CHAT_HISTORY, 0, chunks.as_ptr(), hc as c_int);
+    hlwrite_chunks(
+        htlc,
+        HTLC_HDR_GET_CHAT_HISTORY,
+        0,
+        chunks.as_ptr(),
+        hc as c_int,
+    );
     GTRUE
 }
 

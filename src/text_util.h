@@ -63,7 +63,7 @@
  * comfortably under the bound; this exists for "what if a future
  * caller hands us garbage" defense.
  */
-#define GTKHX_TEXT_TO_UTF8_MAX_LEN (((gsize) G_MAXSSIZE - 1) / 3)
+#define GTKHX_TEXT_TO_UTF8_MAX_LEN (((gsize)G_MAXSSIZE - 1) / 3)
 extern char *gtkhx_text_to_utf8 (const char *bytes, gsize len, gsize *out_len);
 
 /*

@@ -25,10 +25,10 @@
 use std::ffi::{c_char, c_void};
 use std::ptr;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_borrow, from_glib_none};
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_borrow, from_glib_none};
+use gtk4 as gtk;
 
 use hxmodel::chat_members::{hx_input_history_down, hx_input_history_record, hx_input_history_up};
 use hxmodel::conversation::hx_chat_member_model;
@@ -163,13 +163,19 @@ fn apply_tint(buf: &gtk::TextBuffer) {
             // Mid grey rather than an alpha on the theme foreground:
             // GtkTextTag has no alpha property, and grey is legible
             // against both the light and the dark input background.
-            gtk::TextTag::builder().name("md-delim").foreground("#888888").build(),
+            gtk::TextTag::builder()
+                .name("md-delim")
+                .foreground("#888888")
+                .build(),
             gtk::TextTag::builder().name("md-bold").weight(700).build(),
             gtk::TextTag::builder()
                 .name("md-italic")
                 .style(gtk::pango::Style::Italic)
                 .build(),
-            gtk::TextTag::builder().name("md-code").family("monospace").build(),
+            gtk::TextTag::builder()
+                .name("md-code")
+                .family("monospace")
+                .build(),
         ] {
             tt.add(&t);
         }
@@ -178,10 +184,18 @@ fn apply_tint(buf: &gtk::TextBuffer) {
     // Hold the tag objects rather than their names: `*_by_name` is the
     // same runtime-lookup shape that caused the abort above, and there
     // is no reason to keep one instance of it around.
-    let Some(delim) = tt.lookup("md-delim") else { return };
-    let Some(bold) = tt.lookup("md-bold") else { return };
-    let Some(italic) = tt.lookup("md-italic") else { return };
-    let Some(code) = tt.lookup("md-code") else { return };
+    let Some(delim) = tt.lookup("md-delim") else {
+        return;
+    };
+    let Some(bold) = tt.lookup("md-bold") else {
+        return;
+    };
+    let Some(italic) = tt.lookup("md-italic") else {
+        return;
+    };
+    let Some(code) = tt.lookup("md-code") else {
+        return;
+    };
 
     let (start, end) = buf.bounds();
     for t in [&delim, &bold, &italic, &code] {
@@ -292,8 +306,8 @@ fn on_key(
         }
 
         Key::Tab | Key::ISO_Left_Tab => {
-            let reverse = keyval == Key::ISO_Left_Tab
-                || state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
+            let reverse =
+                keyval == Key::ISO_Left_Tab || state.contains(gtk::gdk::ModifierType::SHIFT_MASK);
             let mut text = buffer_cbytes(&buf);
             unsafe {
                 let chat = chat_with_cid(sess, cid);
@@ -325,9 +339,8 @@ fn on_key(
             }
             let cur = buffer_cbytes(&buf);
             let mut nt: *mut c_char = ptr::null_mut();
-            let got = unsafe {
-                hx_input_history_up(history, cur.as_ptr() as *const c_char, &mut nt)
-            };
+            let got =
+                unsafe { hx_input_history_up(history, cur.as_ptr() as *const c_char, &mut nt) };
             if got != glib::ffi::GFALSE {
                 if !nt.is_null() {
                     let s: String = unsafe { from_glib_none(nt) };

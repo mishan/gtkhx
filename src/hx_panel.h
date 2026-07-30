@@ -63,18 +63,16 @@ G_DECLARE_FINAL_TYPE (HxPanel, hx_panel, HX, PANEL, PanelWidget)
  * needs to know which case it is dealing with to flip the
  * revealer back on after Redock. */
 typedef enum {
-    HX_PANEL_KIND_CENTER,    /* chat, news 1.5 (news browser), files */
-    HX_PANEL_KIND_SIDEBAR,   /* users, tasks, news */
-    HX_PANEL_KIND_DYNAMIC,   /* private chats, private messages */
+    HX_PANEL_KIND_CENTER,  /* chat, news 1.5 (news browser), files */
+    HX_PANEL_KIND_SIDEBAR, /* users, tasks, news */
+    HX_PANEL_KIND_DYNAMIC, /* private chats, private messages */
 } HxPanelKind;
 
-HxPanel    *hx_panel_new           (const char  *id,
-                                    HxPanelKind  kind,
-                                    PanelArea    home_area);
+HxPanel *hx_panel_new (const char *id, HxPanelKind kind, PanelArea home_area);
 
-const char *hx_panel_get_id        (HxPanel     *self);
-HxPanelKind hx_panel_get_kind      (HxPanel     *self);
-PanelArea   hx_panel_get_home_area (HxPanel     *self);
+const char *hx_panel_get_id (HxPanel *self);
+HxPanelKind hx_panel_get_kind (HxPanel *self);
+PanelArea hx_panel_get_home_area (HxPanel *self);
 
 /* Set / get the PanelFrame the panel should return to on Redock
  * (i.e., when the undocked window closes). Called by the per-panel
@@ -87,9 +85,8 @@ PanelArea   hx_panel_get_home_area (HxPanel     *self);
  * out; returning a "borrowed" pointer would dangle if the weak ref
  * was the last live reference.) Returns NULL if the home frame has
  * been disposed. */
-void        hx_panel_set_home_frame (HxPanel    *self,
-                                     GtkWidget  *frame);
-GtkWidget  *hx_panel_get_home_frame (HxPanel    *self);
+void hx_panel_set_home_frame (HxPanel *self, GtkWidget *frame);
+GtkWidget *hx_panel_get_home_frame (HxPanel *self);
 
 /* Re-attach a panel that's been detached from the dock (e.g. via
  * the frame chevron menu's "Close all pages" or a per-tab close).
@@ -113,7 +110,7 @@ GtkWidget  *hx_panel_get_home_frame (HxPanel    *self);
  * CENTER resolves to a PanelFrame — toolbar_center_frame —
  * rather than a grid). The stored home_frame is updated to that
  * fallback target. */
-void        hx_panel_ensure_attached (HxPanel   *self);
+void hx_panel_ensure_attached (HxPanel *self);
 
 /* Per-panel close callback for DYNAMIC kind panels. Phase 3.
  *
@@ -132,25 +129,22 @@ void        hx_panel_ensure_attached (HxPanel   *self);
  * read the panel's id and any data set via g_object_set_data. */
 typedef void (*HxPanelCloseFunc) (HxPanel *panel, gpointer user_data);
 
-void        hx_panel_set_close_handler (HxPanel          *self,
-                                        HxPanelCloseFunc  func,
-                                        gpointer          user_data);
+void hx_panel_set_close_handler (HxPanel *self, HxPanelCloseFunc func,
+                                 gpointer user_data);
 
 /* Move the panel into the leaf adjacent to its current frame in
  * the given direction (across the HxSplit tree, found via
  * hx_split_neighbor). No-op when there's no neighbour. Used by
  * HxPanelFrame's page.move-* class-action handlers so the chevron
  * "Move Page L/R/U/D" items perform a cross-frame move. */
-void        hx_panel_do_move_in_direction (HxPanel          *self,
-                                           GtkDirectionType  dir);
+void hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir);
 
 /* Returns TRUE iff hx_panel_do_move_in_direction(self, dir) would
  * actually move the panel — i.e. there is a neighbour leaf in
  * that direction in the dock's HxSplit tree. Used to gate the
  * enabled state of the chevron's per-direction Move Page items so
  * a no-op direction renders greyed instead of clickable-but-inert. */
-gboolean    hx_panel_can_move_in_direction (HxPanel          *self,
-                                            GtkDirectionType  dir);
+gboolean hx_panel_can_move_in_direction (HxPanel *self, GtkDirectionType dir);
 
 /* Hook the dispatcher onto a PanelFrame's page-closed signal.
  * Called once per frame at toolbar build time and from the
@@ -158,7 +152,7 @@ gboolean    hx_panel_can_move_in_direction (HxPanel          *self,
  * callback + unregisters dynamic panels; static panels pass
  * through untouched (their close is just a detach — the
  * registry keeps them alive for re-attach). */
-void        hx_panel_install_close_dispatcher (GtkWidget *frame);
+void hx_panel_install_close_dispatcher (GtkWidget *frame);
 
 /* Pop the panel out of its current frame into a fresh top-level
  * AdwApplicationWindow + PanelDock + PanelGrid. The window's
@@ -166,7 +160,7 @@ void        hx_panel_install_close_dispatcher (GtkWidget *frame);
  * (Redock). Phase 4 / docking — used by both the panel.undock
  * GAction (chevron menu) and the drag-out detector. No-op if the
  * panel isn't currently in a frame ancestor. */
-void        hx_panel_undock (HxPanel *self);
+void hx_panel_undock (HxPanel *self);
 
 /* drag-out detection. libpanel's drag system
  * lives on a "grab" button inside each PanelFrame's header bar
@@ -178,7 +172,7 @@ void        hx_panel_undock (HxPanel *self);
  * released the drag outside any drop target), we run hx_panel_undock
  * on the dragged panel. Call once per frame at toolbar-build /
  * frame-create time. */
-void        hx_panel_install_drag_out_on_frame (GtkWidget *frame);
+void hx_panel_install_drag_out_on_frame (GtkWidget *frame);
 
 /* disable libpanel's PanelDropControls overlay
  * inside the frame so it doesn't claim drop events. The overlay is
@@ -188,14 +182,14 @@ void        hx_panel_install_drag_out_on_frame (GtkWidget *frame);
  * target (hx_panel_install_drop_target_on_dock).
  *
  * Call once per frame at toolbar-build / frame-create time. */
-void        hx_panel_defang_drop_controls_on_frame (GtkWidget *frame);
+void hx_panel_defang_drop_controls_on_frame (GtkWidget *frame);
 
 /* dock-level drop target. When per-frame drop
  * targets don't receive events (libpanel internals consume them
  * before they bubble up), install one at the dock level. The
  * handler picks the target frame by hit-testing the drop
  * coordinates against the dock's child frames. */
-void        hx_panel_install_drop_target_on_dock (GtkWidget *dock);
+void hx_panel_install_drop_target_on_dock (GtkWidget *dock);
 
 G_END_DECLS
 

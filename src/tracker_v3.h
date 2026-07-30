@@ -75,10 +75,10 @@ extern gboolean hx_tracker_v3_pack_handshake (guint8 *out, gsize out_len,
  *
  * Validates the "HTRK" magic prefix. Returns FALSE on bad magic,
  * NULL pointers, or wrong length. */
-extern gboolean
-hx_tracker_v3_parse_handshake_response (const guint8 *buf, gsize len,
-                                        guint16 *version_out,
-                                        guint16 *features_out);
+extern gboolean hx_tracker_v3_parse_handshake_response (const guint8 *buf,
+                                                        gsize len,
+                                                        guint16 *version_out,
+                                                        guint16 *features_out);
 
 /* ---- Listing request ------------------------------------------- */
 
@@ -89,9 +89,9 @@ hx_tracker_v3_parse_handshake_response (const guint8 *buf, gsize len,
  *
  * Phase C will add a richer builder that takes SEARCH_TEXT +
  * pagination as parameters and writes TLV fields. */
-extern gboolean
-hx_tracker_v3_pack_listing_request_simple (guint8 *out, gsize out_len,
-                                           gsize *out_written);
+extern gboolean hx_tracker_v3_pack_listing_request_simple (guint8 *out,
+                                                           gsize out_len,
+                                                           gsize *out_written);
 
 /* ---- Listing response ------------------------------------------ */
 
@@ -103,12 +103,12 @@ hx_tracker_v3_pack_listing_request_simple (guint8 *out, gsize out_len,
  *   *total_size_out     → u32 BE from [2..5]  (records-blob bytes)
  *   *total_servers_out  → u16 BE from [6..7]  (full match count)
  *   *record_count_out   → u16 BE from [8..9]  (records in this msg) */
-extern gboolean
-hx_tracker_v3_parse_response_header (const guint8 *buf, gsize len,
-                                     guint16 *response_type_out,
-                                     guint32 *total_size_out,
-                                     guint16 *total_servers_out,
-                                     guint16 *record_count_out);
+extern gboolean hx_tracker_v3_parse_response_header (const guint8 *buf,
+                                                     gsize len,
+                                                     guint16 *response_type_out,
+                                                     guint32 *total_size_out,
+                                                     guint16 *total_servers_out,
+                                                     guint16 *record_count_out);
 
 /* ---- Server record --------------------------------------------- */
 
@@ -126,22 +126,23 @@ hx_tracker_v3_parse_response_header (const guint8 *buf, gsize len,
  * For hostname (0x48): UTF-8 hostname bytes (no length prefix).
  */
 typedef struct {
-    guint8       addr_type;
+    guint8 addr_type;
     const guint8 *address;
-    gsize         address_len;
+    gsize address_len;
 
     guint16 port;
     guint16 nusers;
 
     const guint8 *name;
-    gsize         name_len;
+    gsize name_len;
 
     const guint8 *desc;
-    gsize         desc_len;
+    gsize desc_len;
 
-    guint16       tlv_count;
-    const guint8 *tlv_bytes;   /* raw TLV blob — walk with hx_tracker_v3_walk_tlvs */
-    gsize         tlv_bytes_len;
+    guint16 tlv_count;
+    const guint8
+        *tlv_bytes; /* raw TLV blob — walk with hx_tracker_v3_walk_tlvs */
+    gsize tlv_bytes_len;
 } hx_tracker_v3_record;
 
 /* Parse a single record starting at `buf`. On success, `*record_out`
@@ -153,10 +154,9 @@ typedef struct {
  *
  * The parser tolerates unknown TLV IDs in the trailer — it just
  * walks past them. That's the forward-compat rule from the spec. */
-extern gboolean
-hx_tracker_v3_parse_record (const guint8 *buf, gsize buf_len,
-                            hx_tracker_v3_record *record_out,
-                            gsize *consumed_out);
+extern gboolean hx_tracker_v3_parse_record (const guint8 *buf, gsize buf_len,
+                                            hx_tracker_v3_record *record_out,
+                                            gsize *consumed_out);
 
 /* ---- TLV walker ------------------------------------------------ */
 
@@ -173,9 +173,9 @@ typedef gboolean (*hx_tracker_v3_tlv_cb) (guint16 id, guint16 value_len,
  * we hit exactly `count` entries, no leftover bytes). Returns FALSE
  * on truncation. Stops early — and returns TRUE — if the callback
  * returns FALSE. */
-extern gboolean
-hx_tracker_v3_walk_tlvs (const guint8 *buf, gsize buf_len, guint16 count,
-                         hx_tracker_v3_tlv_cb cb, gpointer user_data);
+extern gboolean hx_tracker_v3_walk_tlvs (const guint8 *buf, gsize buf_len,
+                                         guint16 count, hx_tracker_v3_tlv_cb cb,
+                                         gpointer user_data);
 
 G_END_DECLS
 

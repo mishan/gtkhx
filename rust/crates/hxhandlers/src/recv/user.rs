@@ -13,17 +13,26 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 #[cfg(not(test))]
-use gtkhx_core::session::{gtkhx_session_emit_self_updated, gtkhx_session_emit_user_change, gtkhx_session_emit_user_create, gtkhx_session_emit_user_delete, gtkhx_session_emit_user_info, gtkhx_session_emit_user_notice, gtkhx_session_get_default};
-#[cfg(not(test))]
 use gtkhx_core::conn::{hx_conn_name, hx_conn_sess};
+#[cfg(not(test))]
+use gtkhx_core::session::{
+    gtkhx_session_emit_self_updated, gtkhx_session_emit_user_change,
+    gtkhx_session_emit_user_create, gtkhx_session_emit_user_delete, gtkhx_session_emit_user_info,
+    gtkhx_session_emit_user_notice, gtkhx_session_get_default,
+};
 
 // HxMemberInfo is a type, not one of the shadowed functions, so it is imported
 // unconditionally — the #[cfg(test)] doubles below replace the fns only.
 use hxmodel::chat_members::HxMemberInfo;
 #[cfg(not(test))]
-use hxmodel::chat_members::{hx_member_model_contains, hx_member_model_get_ignore, hx_member_model_get_info, hx_member_model_upsert};
+use hxmodel::chat_members::{
+    hx_member_model_contains, hx_member_model_get_ignore, hx_member_model_get_info,
+    hx_member_model_upsert,
+};
 #[cfg(not(test))]
-use hxmodel::conversation::{hx_chat_cid, hx_chat_member_model, hx_chat_set_subject, hx_chat_subject};
+use hxmodel::conversation::{
+    hx_chat_cid, hx_chat_member_model, hx_chat_set_subject, hx_chat_subject,
+};
 
 // Native reply parsers — pure Rust, identical in test and production. The old C
 // rcv_task_user_list / _user_info round-tripped through the
@@ -36,7 +45,8 @@ const HTLS_DATA_USER_LIST: u16 = 0x012c;
 const HTLS_DATA_CHAT_SUBJECT: u16 = 0x0073;
 
 #[cfg(not(test))]
-extern "C" {    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
+extern "C" {
+    /// Parse a SELFINFO frame's chunks into `htlc` (access bits / uid / icon).
     /// Deliberately ignores the server-supplied name — our local prefs nick is
     /// authoritative. C helper in proto_helpers.c.
     fn hx_selfinfo_parse(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> u32;
@@ -228,11 +238,7 @@ pub unsafe extern "C" fn hx_user_apply_recv(
 /// # Safety
 /// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
 #[no_mangle]
-pub unsafe extern "C" fn hx_rcv_user_change(
-    htlc: *mut c_void,
-    frame: *const u8,
-    frame_len: usize,
-) {
+pub unsafe extern "C" fn hx_rcv_user_change(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
     if frame.is_null() || task_inerror(htlc, frame, frame_len) != 0 {
         return;
     }
@@ -263,8 +269,16 @@ pub unsafe extern "C" fn hx_rcv_user_change(
         nick_color: uc.nick_color,
         old_exists,
         old_status: old.status,
-        old_nick_color: if old_exists { old.nick_color } else { HX_NICK_COLOR_NONE },
-        old_name: if old_exists { old_name_bytes.as_deref() } else { None },
+        old_nick_color: if old_exists {
+            old.nick_color
+        } else {
+            HX_NICK_COLOR_NONE
+        },
+        old_name: if old_exists {
+            old_name_bytes.as_deref()
+        } else {
+            None
+        },
         self_uid: hx_conn_uid(htlc.cast()),
         self_name: self_name_bytes.as_deref(),
     });
@@ -387,11 +401,7 @@ pub unsafe extern "C" fn hx_user_part_recv(
 /// # Safety
 /// `frame` is valid for `frame_len` bytes; `htlc` is the opaque connection.
 #[no_mangle]
-pub unsafe extern "C" fn hx_rcv_user_part(
-    htlc: *mut c_void,
-    frame: *const u8,
-    frame_len: usize,
-) {
+pub unsafe extern "C" fn hx_rcv_user_part(htlc: *mut c_void, frame: *const u8, frame_len: usize) {
     if frame.is_null() {
         return;
     }

@@ -82,8 +82,8 @@ read_exact (int fd, void *buf, gsize len, const char *what)
 {
     gboolean ok = integration_recv (fd, buf, len);
     if (!ok) {
-        g_test_fail_printf ("integration_recv (%s, %zu bytes) failed",
-                            what, (size_t) len);
+        g_test_fail_printf ("integration_recv (%s, %zu bytes) failed", what,
+                            (size_t)len);
     }
     g_assert_true (ok);
 }
@@ -133,7 +133,8 @@ test_v1_fallback_listing (void)
     if (fd < 0) {
         g_test_fail_printf (
             "couldn't connect to %s tracker at %s:%u — is its container "
-            "up?", trk->name, trk->host, (unsigned) trk->port);
+            "up?",
+            trk->name, trk->host, (unsigned)trk->port);
         return;
     }
 
@@ -160,9 +161,8 @@ test_v1_fallback_listing (void)
     /* nservers lives at offset [10..11] (u16 BE) per the pure
      * helper in src/tracker_parser.c. */
     guint16 nservers = 0xffff;
-    g_assert_true (
-        hx_tracker_reply_parse_header (reply_hdr, sizeof (reply_hdr),
-                                       &nservers));
+    g_assert_true (hx_tracker_reply_parse_header (reply_hdr, sizeof (reply_hdr),
+                                                  &nservers));
     /* Demand >= 1 record. A v1-only test container is expected to
      * have at least one server (either a seeded registration or a
      * real one) so the test exercises record parsing as well as
@@ -181,8 +181,7 @@ test_v1_fallback_listing (void)
      * — that's the field-offset regression net. For other v1
      * trackers, just pin that records decode cleanly. Skip
      * padding entries (first byte = 0 sentinel). */
-    const gboolean expect_hxtrackd_seed
-        = (strcmp (trk->name, "hxtrackd") == 0);
+    const gboolean expect_hxtrackd_seed = (strcmp (trk->name, "hxtrackd") == 0);
     int decoded = 0;
     int seen_hxtrackd_seed = 0;
     for (guint16 i = 0; i < nservers; i++) {

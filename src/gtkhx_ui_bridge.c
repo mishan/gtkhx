@@ -24,10 +24,10 @@
 #include <string.h>
 #include <gtk/gtk.h>
 
-#include "session.h"  /* session, hx_htlc_close */
+#include "session.h" /* session, hx_htlc_close */
 #include "hxconn.h"
-#include "network.h"  /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
-#include "hotline.h"  /* HTLC_CAP_TEXT_ENCODING */
+#include "network.h"   /* hx_send_agreement_agree, hx_htlc_close, hx_connect */
+#include "hotline.h"   /* HTLC_CAP_TEXT_ENCODING */
 #include "gtkhx.h"     /* gtkhx_prefs */
 #include "hl_access.h" /* hl_access_permits, HL_ACCESS_READ_NEWS */
 #include "debug.h"     /* debug_log */
@@ -130,8 +130,8 @@ gtkhx_news_set_widgets (session *sess, GtkWidget *text, GtkWidget *post,
                         GtkWidget *reload)
 {
     if (sess) {
-        sess->news_text    = text;
-        sess->postButton   = post;
+        sess->news_text = text;
+        sess->postButton = post;
         sess->reloadButton = reload;
     }
 }

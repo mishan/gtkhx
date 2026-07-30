@@ -17,11 +17,11 @@
 
 use std::ffi::{c_char, c_int, c_void};
 
-use gtk4 as gtk;
-use gtk::glib;
-use libadwaita as adw;
 use adw::prelude::*;
 use glib::translate::from_glib_none;
+use gtk::glib;
+use gtk4 as gtk;
+use libadwaita as adw;
 
 use crate::tr::tr;
 
@@ -30,7 +30,9 @@ const NB_KIND_FOLDER: c_int = 1;
 const NB_KIND_CATEGORY: c_int = 2;
 const NB_KIND_POST: c_int = 3;
 
-use hxhandlers::send::news::{hx_news15_delete, hx_news15_delete_thread, hx_news15_mkcat, hx_news15_mkdir};
+use hxhandlers::send::news::{
+    hx_news15_delete, hx_news15_delete_thread, hx_news15_mkcat, hx_news15_mkdir,
+};
 
 extern "C" {
     // hxnews-model C ABI — the node's Hotline path (NULL for a pathless node).

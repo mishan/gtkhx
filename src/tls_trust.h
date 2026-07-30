@@ -32,8 +32,8 @@
  * needed, is marshalled to the main thread inside the crate's
  * registered prompt callback.
  */
-extern gboolean
-hx_tls_verify_cert (const char *host, guint16 port, const char *fingerprint);
+extern gboolean hx_tls_verify_cert (const char *host, guint16 port,
+                                    const char *fingerprint);
 
 /*
  * Pin (host, port, fingerprint) into the known_hosts store (today's
@@ -42,8 +42,8 @@ hx_tls_verify_cert (const char *host, guint16 port, const char *fingerprint);
  * integration tests to seed a trust state through the same path
  * resolver production uses.
  */
-extern gboolean
-hx_tls_trust_pin (const char *host, guint16 port, const char *fingerprint);
+extern gboolean hx_tls_trust_pin (const char *host, guint16 port,
+                                  const char *fingerprint);
 
 /*
  * Register the Adwaita TOFU prompt (gtkhx-ui) with the trust brain.

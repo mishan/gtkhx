@@ -58,9 +58,7 @@ hx_htlc_voice_cap (struct htlc_conn *htlc)
 gboolean
 hx_htlc_voice_access (struct htlc_conn *htlc)
 {
-    return htlc
-           && hx_conn_access_has (htlc,
-                             HL_ACCESS_VOICE_CHAT);
+    return htlc && hx_conn_access_has (htlc, HL_ACCESS_VOICE_CHAT);
 }
 
 guint16

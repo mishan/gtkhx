@@ -45,16 +45,15 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 // gtk-rs family + glycin major are version-selected — see crate::compat.
-use crate::compat::glib::{Bytes, MainContext};
 use crate::compat::gdk;
+use crate::compat::glib::{Bytes, MainContext};
 // glycin is Linux-only; the non-Linux backend below uses the `image` crate.
 #[cfg(target_os = "linux")]
 use crate::compat::glycin;
 
 use crate::caps::HxInlineMediaCaps;
 use crate::ffi_result::{
-    decoded_alloc, decoded_set_error, decoded_set_frames, decoded_set_texture,
-    HxInlineMediaDecoded,
+    decoded_alloc, decoded_set_error, decoded_set_frames, decoded_set_texture, HxInlineMediaDecoded,
 };
 use crate::sniff::{format_is_allowed, format_to_mime, sniff, Format};
 use crate::telemetry::{
@@ -96,10 +95,8 @@ impl DecodeToken {
 /// Callable that the C caller passes to `inline_media_decode_
 /// async`. The Rust side wraps it in a tiny adapter that carries
 /// `user_data` opaquely.
-pub(crate) type DecodeCallback = unsafe extern "C" fn(
-    result: *mut HxInlineMediaDecoded,
-    user_data: *mut c_void,
-);
+pub(crate) type DecodeCallback =
+    unsafe extern "C" fn(result: *mut HxInlineMediaDecoded, user_data: *mut c_void);
 
 /// Caller's user_data pointer, ferried through to the callback.
 /// `*mut c_void` is not `Send`, but we never cross threads —
@@ -491,17 +488,14 @@ async fn run_decode(
     if std::env::var_os("GTKHX_GLYCIN_NO_SANDBOX").is_some() {
         loader.sandbox_selector(glycin::SandboxSelector::NotSandboxed);
     }
-    let image = loader
-        .load()
-        .await
-        .map_err(|ctx| DecodeErr {
-            code: MEDIA_ERR_UNSUPPORTED,
-            // The category is what matters at the wire level; glycin's
-            // full ErrorCtx (descriptive, but not 'static) rides the
-            // `detail` field to the telemetry / debug log.
-            message: glycin_err_category(&ctx),
-            detail: Some(format!("{ctx}")),
-        })?;
+    let image = loader.load().await.map_err(|ctx| DecodeErr {
+        code: MEDIA_ERR_UNSUPPORTED,
+        // The category is what matters at the wire level; glycin's
+        // full ErrorCtx (descriptive, but not 'static) rides the
+        // `detail` field to the telemetry / debug log.
+        message: glycin_err_category(&ctx),
+        detail: Some(format!("{ctx}")),
+    })?;
 
     // Dimension cap: glycin parsed the header during load(). Reject
     // before the pixel-data step of next_frame() runs — keeps the
@@ -573,8 +567,7 @@ async fn run_decode(
     };
     push(&mut frames, &mut total_ms, first_tex, first_delay);
 
-    while frames.len() < max_frames as usize && total_ms < max_duration_ms as u64
-    {
+    while frames.len() < max_frames as usize && total_ms < max_duration_ms as u64 {
         let frame = match image.next_frame().await {
             Ok(f) => f,
             // Anything other than success ends the loop. Glycin's

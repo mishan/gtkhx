@@ -21,10 +21,10 @@
 
 use std::ffi::c_void;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_none, IntoGlibPtr};
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_none, IntoGlibPtr};
+use gtk4 as gtk;
 use libadwaita as adw;
 
 use crate::dock;
@@ -59,7 +59,10 @@ extern "C" {
 
     /// chat_tabs.c — the singleton AdwTabView + the pinned public-chat tab.
     fn gtkhx_chat_tabs_init() -> *mut gtk::ffi::GtkWidget;
-    fn gtkhx_chat_tabs_add_public(content: *mut gtk::ffi::GtkWidget, title: *const std::ffi::c_char);
+    fn gtkhx_chat_tabs_add_public(
+        content: *mut gtk::ffi::GtkWidget,
+        title: *const std::ffi::c_char,
+    );
 }
 
 /// `*mut GtkWidget` for a gtk-rs widget.

@@ -56,8 +56,8 @@
 static const hx_test_server *
 pick_tls_banner_server (void)
 {
-    GPtrArray *cand = hx_test_servers_with (
-        HX_TEST_CAP_TLS | HX_TEST_CAP_BANNER_HTXF);
+    GPtrArray *cand
+        = hx_test_servers_with (HX_TEST_CAP_TLS | HX_TEST_CAP_BANNER_HTXF);
     if (!cand) {
         return NULL;
     }
@@ -81,9 +81,9 @@ pick_tls_banner_server (void)
 static int
 tls_banner_xfer_verify_cb (const guint8 *fp, gsize fp_len, void *user_data)
 {
-    (void) fp;
-    (void) fp_len;
-    (void) user_data;
+    (void)fp;
+    (void)fp_len;
+    (void)user_data;
     return 1;
 }
 
@@ -134,8 +134,8 @@ test_banner_htxf_mode_tls (void)
      * banner regardless, which is what production's banner worker
      * relies on too. */
     struct htlc_conn htlc;
-    int ctrl = integration_open_login_tls_or_skip (
-        srv, &htlc, "TLS-Banner Tier-3", 412);
+    int ctrl = integration_open_login_tls_or_skip (srv, &htlc,
+                                                   "TLS-Banner Tier-3", 412);
     if (ctrl < 0) {
         return;
     }
@@ -155,7 +155,8 @@ test_banner_htxf_mode_tls (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                           &reply);
     g_assert_cmpuint (reply.ref, >, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1u << 20); /* sanity cap: < 1 MB */
@@ -177,23 +178,22 @@ test_banner_htxf_mode_tls (void)
      * the TLS record layer here: on this TLS-from-byte-zero subchannel
      * every application byte, preamble included, is encrypted by TLS.) */
     guint8 hdr_buf[HX_HTXF_PREAMBLE_MAX_BYTES];
-    size_t hdr_len = hxnet_htxf_pack_preamble (
-        hdr_buf, sizeof (hdr_buf), ref, size, HTXF_TYPE_BANNER,
-        /*flags=*/0, /*size64=*/FALSE);
+    size_t hdr_len = hxnet_htxf_pack_preamble (hdr_buf, sizeof (hdr_buf), ref,
+                                               size, HTXF_TYPE_BANNER,
+                                               /*flags=*/0, /*size64=*/FALSE);
     g_assert_cmpuint (hdr_len, >, 0);
 
     struct htxf_conn xfer;
     memset (&xfer, 0, sizeof (xfer));
     xfer.ref = ref;
     /* hope_aead = NULL: plaintext-TLS banner, no HOPE AEAD framing. */
-    xfer.hx = hxnet_htxf_connect (
-        (const guint8 *) srv->host, strlen (srv->host), srv->tls_xfer_port,
-        NULL, 0, /*tls=*/1, hdr_buf, hdr_len, /*hope_aead=*/NULL, ref,
-        tls_banner_xfer_verify_cb, NULL);
+    xfer.hx = hxnet_htxf_connect ((const guint8 *)srv->host, strlen (srv->host),
+                                  srv->tls_xfer_port, NULL, 0, /*tls=*/1,
+                                  hdr_buf, hdr_len, /*hope_aead=*/NULL, ref,
+                                  tls_banner_xfer_verify_cb, NULL);
     if (!xfer.hx) {
-        g_test_fail_printf (
-            "TLS HTXF subchannel (port %u) connect/open failed",
-            (unsigned) srv->tls_xfer_port);
+        g_test_fail_printf ("TLS HTXF subchannel (port %u) connect/open failed",
+                            (unsigned)srv->tls_xfer_port);
         goto cleanup;
     }
 
@@ -202,21 +202,22 @@ test_banner_htxf_mode_tls (void)
     guint8 *bytes = g_malloc (size);
     gsize got = 0;
     while (got < size) {
-        ssize_t r = hxnet_htxf_read ((HtxfConn *) xfer.hx, bytes + got, size - got);
+        ssize_t r
+            = hxnet_htxf_read ((HtxfConn *)xfer.hx, bytes + got, size - got);
         if (r <= 0) {
             g_test_message ("hxnet_htxf_read returned %zd at got=%zu", r, got);
             break;
         }
-        got += (gsize) r;
+        got += (gsize)r;
     }
-    g_assert_cmpuint ((guint) got, ==, size);
+    g_assert_cmpuint ((guint)got, ==, size);
 
-    g_test_message ("first 4 bytes: %02x %02x %02x %02x", bytes[0],
-                    bytes[1], bytes[2], bytes[3]);
+    g_test_message ("first 4 bytes: %02x %02x %02x %02x", bytes[0], bytes[1],
+                    bytes[2], bytes[3]);
     g_assert_true (banner_bytes_look_like_image (bytes, size));
 
     g_free (bytes);
-    hxnet_htxf_close ((HtxfConn *) xfer.hx);
+    hxnet_htxf_close ((HtxfConn *)xfer.hx);
 
 cleanup:
     integration_release_htlc (&htlc);

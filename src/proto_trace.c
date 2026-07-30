@@ -237,7 +237,7 @@ proto_data_name (guint16 type)
         return "HTLS_DATA_COLOUR";
     case HTLC_DATA_COLOR:
         /* Colored-Nicknames extension. Same code point
-		 * (0x0500) in both directions. */
+         * (0x0500) in both directions. */
         return "HTLC/S_DATA_COLOR";
     case HTLC_DATA_BAN:
         return "HTLC_DATA_BAN";
@@ -254,7 +254,7 @@ proto_data_name (guint16 type)
     case HTLS_DATA_BANNER_URL:
         return "HTLS_DATA_BANNER_URL";
     /* HTLS_DATA_HTXF_SIZE shares opcode 0x6c with
-	 * HTLC_DATA_HTXF_SIZE — already named above. */
+     * HTLC_DATA_HTXF_SIZE — already named above. */
     case HTLS_DATA_SERVERNAME:
         return "HTLS_DATA_SERVERNAME";
     case HTLS_DATA_NOAGREEMENT:
@@ -513,7 +513,7 @@ void
 proto_trace_send_end (void)
 {
     /* Reserved for a future "—" footer / total-byte report. No-op
-	 * for now so the call sites are stable. */
+     * for now so the call sites are stable. */
 }
 
 /* ---------- Incoming trace ---------- */

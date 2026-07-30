@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(basename_offset(b"Files:Photos:cat.jpg", b':'), 13); // "cat.jpg"
         assert_eq!(basename_offset(b"/home/misha/photos/cat.jpg", b'/'), 19);
         assert_eq!(basename_offset(b":alpha", b':'), 1); // separator at start
-        // No separator → whole string is the basename.
+                                                         // No separator → whole string is the basename.
         assert_eq!(basename_offset(b"cat.jpg", b':'), 0);
         assert_eq!(basename_offset(b"", b'/'), 0);
         // Trailing / all separators → empty basename at the end.

@@ -20,7 +20,7 @@
 #include "config.h"
 #include <string.h>
 #include <glib.h>
-#include "compat.h"   /* PACKED — required before hotline.h */
+#include "compat.h" /* PACKED — required before hotline.h */
 #include "protocol.h"
 #include "hotline.h"
 #include "proto_helpers.h"
@@ -33,10 +33,10 @@ static void
 pack_chunk (guint8 *out, gsize *off, guint16 tag, const guint8 *data,
             guint16 len)
 {
-    out[(*off)++] = (guint8) (tag >> 8);
-    out[(*off)++] = (guint8) (tag & 0xff);
-    out[(*off)++] = (guint8) (len >> 8);
-    out[(*off)++] = (guint8) (len & 0xff);
+    out[(*off)++] = (guint8)(tag >> 8);
+    out[(*off)++] = (guint8)(tag & 0xff);
+    out[(*off)++] = (guint8)(len >> 8);
+    out[(*off)++] = (guint8)(len & 0xff);
     if (len) {
         memcpy (out + *off, data, len);
         *off += len;
@@ -55,7 +55,7 @@ test_parse_voice_reply_extracts_join_reply_shape (void)
     gsize off = SIZEOF_HL_HDR;
 
     /* CHAT_ID = 42 (u32 BE). */
-    guint8 cid_be[4] = {0, 0, 0, 42};
+    guint8 cid_be[4] = { 0, 0, 0, 42 };
     pack_chunk (buf, &off, HTLC_DATA_CHAT_ID, cid_be, 4);
 
     /* SDP. */
@@ -67,9 +67,8 @@ test_parse_voice_reply_extracts_join_reply_shape (void)
     pack_chunk (buf, &off, HTLS_DATA_VOICE_CODEC, codec, sizeof (codec) - 1);
 
     /* One participant: uid=5, unmuted, codec=PCMU(0). */
-    guint8 parts[6] = {0, 5, 0, 0, 0, 0};
-    pack_chunk (buf, &off, HTLS_DATA_VOICE_PARTICIPANTS, parts,
-                sizeof (parts));
+    guint8 parts[6] = { 0, 5, 0, 0, 0, 0 };
+    pack_chunk (buf, &off, HTLS_DATA_VOICE_PARTICIPANTS, parts, sizeof (parts));
 
     struct gtkhx_proto_voice_reply r;
     g_assert_true (gtkhx_proto_parse_voice_reply (buf, off, &r));
@@ -87,18 +86,18 @@ test_parse_voice_reply_extracts_join_reply_shape (void)
      * per-field accessor. */
     const guint8 *sdp_out = NULL;
     gsize sdp_out_len = 0;
-    g_assert_true (gtkhx_proto_voice_reply_field (
-        buf, off, /*field=SDP*/ 0, &sdp_out, &sdp_out_len));
+    g_assert_true (gtkhx_proto_voice_reply_field (buf, off, /*field=SDP*/ 0,
+                                                  &sdp_out, &sdp_out_len));
     g_assert_cmpuint (sdp_out_len, ==, sizeof (sdp) - 1);
     g_assert_cmpint (memcmp (sdp_out, sdp, sdp_out_len), ==, 0);
 
     /* Asking for an absent field returns false. */
-    g_assert_false (gtkhx_proto_voice_reply_field (
-        buf, off, /*field=ICE*/ 1, NULL, NULL));
+    g_assert_false (
+        gtkhx_proto_voice_reply_field (buf, off, /*field=ICE*/ 1, NULL, NULL));
 
     /* Invalid field id returns false. */
-    g_assert_false (gtkhx_proto_voice_reply_field (
-        buf, off, /*field=*/99, NULL, NULL));
+    g_assert_false (
+        gtkhx_proto_voice_reply_field (buf, off, /*field=*/99, NULL, NULL));
 }
 
 static void
@@ -129,8 +128,8 @@ test_parse_voice_participants_walks_packed_entries (void)
     blob[17] = 0;
 
     struct gtkhx_proto_voice_participant ents[8];
-    size_t n = gtkhx_proto_parse_voice_participants (blob, sizeof (blob),
-                                                     ents, 8);
+    size_t n
+        = gtkhx_proto_parse_voice_participants (blob, sizeof (blob), ents, 8);
     g_assert_cmpuint (n, ==, 3);
     g_assert_cmpuint (ents[0].user_id, ==, 5);
     g_assert_cmphex (ents[0].flags, ==, 0x0001);
@@ -144,31 +143,26 @@ test_parse_voice_mid_label_accepts_send_and_user (void)
 {
     uint16_t uid = 0;
     g_assert_cmpuint (
-        gtkhx_proto_parse_voice_mid_label ((const uint8_t *) "send", 4,
-                                           &uid),
+        gtkhx_proto_parse_voice_mid_label ((const uint8_t *)"send", 4, &uid),
         ==, GTKHX_PROTO_VOICE_MID_SEND);
     /* SEND doesn't write uid. */
     g_assert_cmpuint (uid, ==, 0);
 
-    g_assert_cmpuint (
-        gtkhx_proto_parse_voice_mid_label ((const uint8_t *) "user-12345",
-                                           10, &uid),
-        ==, GTKHX_PROTO_VOICE_MID_USER);
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"user-12345", 10, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_USER);
     g_assert_cmpuint (uid, ==, 12345);
 
     /* Spec violations: leading zero, uid 0, overflow. */
     g_assert_cmpuint (
-        gtkhx_proto_parse_voice_mid_label ((const uint8_t *) "user-0", 6,
-                                           &uid),
+        gtkhx_proto_parse_voice_mid_label ((const uint8_t *)"user-0", 6, &uid),
         ==, GTKHX_PROTO_VOICE_MID_INVALID);
     g_assert_cmpuint (
-        gtkhx_proto_parse_voice_mid_label ((const uint8_t *) "user-05", 7,
-                                           &uid),
+        gtkhx_proto_parse_voice_mid_label ((const uint8_t *)"user-05", 7, &uid),
         ==, GTKHX_PROTO_VOICE_MID_INVALID);
-    g_assert_cmpuint (
-        gtkhx_proto_parse_voice_mid_label ((const uint8_t *) "user-65536", 10,
-                                           &uid),
-        ==, GTKHX_PROTO_VOICE_MID_INVALID);
+    g_assert_cmpuint (gtkhx_proto_parse_voice_mid_label (
+                          (const uint8_t *)"user-65536", 10, &uid),
+                      ==, GTKHX_PROTO_VOICE_MID_INVALID);
 }
 
 static void
@@ -182,8 +176,8 @@ test_parse_voice_sdp_summary_extracts_pcmu_and_mids (void)
                       "m=audio 9 UDP/TLS/RTP/SAVPF 0\r\n"
                       "a=mid:send\r\n";
     struct gtkhx_proto_voice_sdp_summary sum;
-    g_assert_true (gtkhx_proto_parse_voice_sdp_summary (
-        (const uint8_t *) sdp, strlen (sdp), &sum));
+    g_assert_true (gtkhx_proto_parse_voice_sdp_summary ((const uint8_t *)sdp,
+                                                        strlen (sdp), &sum));
     g_assert_cmpuint (sum.mid_count, ==, 2);
     g_assert_cmpuint (sum.unknown_mid_count, ==, 0);
     g_assert_cmpuint (sum.bundle_count, ==, 2);
@@ -202,14 +196,14 @@ static void
 test_parse_voice_sdp_summary_mid_count_includes_unknowns (void)
 {
     const char *sdp = "v=0\r\n"
-                      "a=mid:user-12\r\n"   /* recognised */
-                      "a=mid:foo\r\n"       /* unknown */
-                      "a=mid:user-0\r\n"    /* spec violation: UID 0 reserved */
-                      "a=mid:user-05\r\n"   /* spec violation: leading zero */
-                      "a=mid:send\r\n";     /* recognised */
+                      "a=mid:user-12\r\n" /* recognised */
+                      "a=mid:foo\r\n"     /* unknown */
+                      "a=mid:user-0\r\n"  /* spec violation: UID 0 reserved */
+                      "a=mid:user-05\r\n" /* spec violation: leading zero */
+                      "a=mid:send\r\n";   /* recognised */
     struct gtkhx_proto_voice_sdp_summary sum;
-    g_assert_true (gtkhx_proto_parse_voice_sdp_summary (
-        (const uint8_t *) sdp, strlen (sdp), &sum));
+    g_assert_true (gtkhx_proto_parse_voice_sdp_summary ((const uint8_t *)sdp,
+                                                        strlen (sdp), &sum));
     g_assert_cmpuint (sum.unknown_mid_count, ==, 3);
     /* mid_count is the total across both buckets — the field's
      * point is "how many a=mid lines did the SDP have?", not
@@ -234,8 +228,8 @@ test_parse_voice_ice_json_roundtrip (void)
         = gtkhx_proto_parse_voice_ice_json (buf, n, &out);
     g_assert_nonnull (h);
     g_assert_cmpuint (out.candidate_len, ==, sizeof (cand) - 1);
-    g_assert_cmpint (
-        memcmp (out.candidate_ptr, cand, out.candidate_len), ==, 0);
+    g_assert_cmpint (memcmp (out.candidate_ptr, cand, out.candidate_len), ==,
+                     0);
     g_assert_cmpuint (out.sdp_mid_len, ==, sizeof (mid) - 1);
     g_assert_true (out.sdp_mline_index_present);
     g_assert_cmpuint (out.sdp_mline_index, ==, 0);
@@ -251,11 +245,10 @@ test_parse_voice_ice_json_end_of_candidates (void)
      * remains a required key so we set it to "send" matching the
      * spec's annotated EOC example. */
     const guint8 *json
-        = (const guint8 *) "{\"candidate\":\"\",\"sdpMid\":\"send\"}";
+        = (const guint8 *)"{\"candidate\":\"\",\"sdpMid\":\"send\"}";
     struct gtkhx_proto_voice_ice_candidate out;
-    struct gtkhx_proto_voice_ice_handle *h
-        = gtkhx_proto_parse_voice_ice_json (json, strlen ((const char *) json),
-                                            &out);
+    struct gtkhx_proto_voice_ice_handle *h = gtkhx_proto_parse_voice_ice_json (
+        json, strlen ((const char *)json), &out);
     g_assert_nonnull (h);
     g_assert_true (out.is_end_of_candidates);
     g_assert_cmpuint (out.candidate_len, ==, 0);
@@ -267,11 +260,10 @@ static void
 test_parse_voice_ice_json_rejects_garbage (void)
 {
     /* Garbage JSON returns NULL handle, doesn't crash. */
-    const guint8 *junk = (const guint8 *) "not json";
+    const guint8 *junk = (const guint8 *)"not json";
     struct gtkhx_proto_voice_ice_candidate out;
-    struct gtkhx_proto_voice_ice_handle *h
-        = gtkhx_proto_parse_voice_ice_json (junk, strlen ((const char *) junk),
-                                            &out);
+    struct gtkhx_proto_voice_ice_handle *h = gtkhx_proto_parse_voice_ice_json (
+        junk, strlen ((const char *)junk), &out);
     g_assert_null (h);
 }
 
@@ -284,19 +276,18 @@ test_parse_voice_ice_json_rejects_missing_required_keys (void)
     struct gtkhx_proto_voice_ice_candidate out;
 
     /* Empty object. */
-    const guint8 *empty = (const guint8 *) "{}";
-    g_assert_null (
-        gtkhx_proto_parse_voice_ice_json (empty, 2, &out));
+    const guint8 *empty = (const guint8 *)"{}";
+    g_assert_null (gtkhx_proto_parse_voice_ice_json (empty, 2, &out));
 
     /* Only candidate. */
-    const guint8 *only_cand = (const guint8 *) "{\"candidate\":\"c\"}";
+    const guint8 *only_cand = (const guint8 *)"{\"candidate\":\"c\"}";
     g_assert_null (gtkhx_proto_parse_voice_ice_json (
-        only_cand, strlen ((const char *) only_cand), &out));
+        only_cand, strlen ((const char *)only_cand), &out));
 
     /* Only sdpMid. */
-    const guint8 *only_mid = (const guint8 *) "{\"sdpMid\":\"send\"}";
+    const guint8 *only_mid = (const guint8 *)"{\"sdpMid\":\"send\"}";
     g_assert_null (gtkhx_proto_parse_voice_ice_json (
-        only_mid, strlen ((const char *) only_mid), &out));
+        only_mid, strlen ((const char *)only_mid), &out));
 }
 
 /* Regression (Copilot review): the build shim rejects NULL pointers
@@ -311,22 +302,22 @@ test_build_voice_ice_json_rejects_null_required_keys (void)
     const guint8 mid[] = "send";
 
     /* NULL candidate, valid sdpMid → reject. */
-    g_assert_cmpuint (gtkhx_proto_build_voice_ice_json (
-                          NULL, 0, mid, sizeof (mid) - 1, 0, false,
-                          NULL, 0, buf, sizeof (buf)),
-                      ==, 0);
+    g_assert_cmpuint (
+        gtkhx_proto_build_voice_ice_json (NULL, 0, mid, sizeof (mid) - 1, 0,
+                                          false, NULL, 0, buf, sizeof (buf)),
+        ==, 0);
 
     /* Valid candidate, NULL sdpMid → reject. */
     const guint8 cand[] = "candidate:1 1 UDP 1 1.2.3.4 5004 typ host";
-    g_assert_cmpuint (gtkhx_proto_build_voice_ice_json (
-                          cand, sizeof (cand) - 1, NULL, 0, 0, false,
-                          NULL, 0, buf, sizeof (buf)),
+    g_assert_cmpuint (gtkhx_proto_build_voice_ice_json (cand, sizeof (cand) - 1,
+                                                        NULL, 0, 0, false, NULL,
+                                                        0, buf, sizeof (buf)),
                       ==, 0);
 
     /* Both NULL → reject. */
-    g_assert_cmpuint (gtkhx_proto_build_voice_ice_json (
-                          NULL, 0, NULL, 0, 0, false, NULL, 0, buf,
-                          sizeof (buf)),
+    g_assert_cmpuint (gtkhx_proto_build_voice_ice_json (NULL, 0, NULL, 0, 0,
+                                                        false, NULL, 0, buf,
+                                                        sizeof (buf)),
                       ==, 0);
 
     /* Empty-string candidate (EOC) with valid sdpMid → accept;
@@ -341,14 +332,14 @@ test_build_voice_ice_json_rejects_null_required_keys (void)
      * terminator safely inside `buf`. */
     const guint8 empty_cand[] = "";
     size_t n = gtkhx_proto_build_voice_ice_json (
-        empty_cand, 0, mid, sizeof (mid) - 1, 0, /*mline_present=*/true,
-        NULL, 0, buf, sizeof (buf) - 1);
+        empty_cand, 0, mid, sizeof (mid) - 1, 0, /*mline_present=*/true, NULL,
+        0, buf, sizeof (buf) - 1);
     g_assert_cmpuint (n, >, 0);
     g_assert_cmpuint (n, <, sizeof (buf));
     /* The emitted JSON should carry both keys. */
     buf[n] = '\0';
-    g_assert_nonnull (strstr ((const char *) buf, "\"candidate\":\"\""));
-    g_assert_nonnull (strstr ((const char *) buf, "\"sdpMid\":\"send\""));
+    g_assert_nonnull (strstr ((const char *)buf, "\"candidate\":\"\""));
+    g_assert_nonnull (strstr ((const char *)buf, "\"sdpMid\":\"send\""));
 }
 
 /* ---------- main ---------- */
@@ -378,9 +369,8 @@ main (int argc, char **argv)
     g_test_add_func (
         "/proto/voice/parse/ice-json-rejects-missing-required-keys",
         test_parse_voice_ice_json_rejects_missing_required_keys);
-    g_test_add_func (
-        "/proto/voice/send/ice-json-rejects-null-required-keys",
-        test_build_voice_ice_json_rejects_null_required_keys);
+    g_test_add_func ("/proto/voice/send/ice-json-rejects-null-required-keys",
+                     test_build_voice_ice_json_rejects_null_required_keys);
 
     return g_test_run ();
 }

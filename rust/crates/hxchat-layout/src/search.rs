@@ -217,7 +217,9 @@ fn match_at(hay: &str, needle: &str) -> Option<usize> {
     let mut n = needle.chars();
     let mut used = 0usize;
     loop {
-        let Some(nc) = n.next() else { return Some(used) };
+        let Some(nc) = n.next() else {
+            return Some(used);
+        };
         let hc = h.next()?;
         if !eq_fold(hc, nc) {
             return None;

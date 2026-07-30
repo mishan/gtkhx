@@ -43,7 +43,7 @@ extern guchar *hxcicn_decode (const guint8 *rsrc, gsize len, guint *out_w,
 static void
 free_pixels (guchar *pixels, gpointer data)
 {
-    (void) data;
+    (void)data;
     g_free (pixels);
 }
 
@@ -51,7 +51,7 @@ GdkPixbuf *
 cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
 {
     guint w = 0, h = 0;
-    guchar *rgba = hxcicn_decode ((const guint8 *) cicn_rsrc, len, &w, &h);
+    guchar *rgba = hxcicn_decode ((const guint8 *)cicn_rsrc, len, &w, &h);
 
     if (!rgba) {
         return NULL;
@@ -60,9 +60,9 @@ cicn_to_pixbuf (void *cicn_rsrc, unsigned int len)
     /* Zero-copy: on success the pixbuf owns the RGBA buffer and g_free's it on
      * finalize. If construction fails the destroy-notify never runs, so free
      * the buffer here rather than leak it. */
-    GdkPixbuf *pb = gdk_pixbuf_new_from_data (rgba, GDK_COLORSPACE_RGB, TRUE, 8,
-                                              w, h, (int) (w * 4), free_pixels,
-                                              NULL);
+    GdkPixbuf *pb
+        = gdk_pixbuf_new_from_data (rgba, GDK_COLORSPACE_RGB, TRUE, 8, w, h,
+                                    (int)(w * 4), free_pixels, NULL);
     if (!pb) {
         g_free (rgba);
     }
@@ -82,7 +82,7 @@ load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
     macres_res *cicn = NULL;
     unsigned int i;
 
-    (void) widget;
+    (void)widget;
 
     for (i = 0; i < ifn->n; i++) {
         if (!ifn->cicns[i]) {
@@ -100,7 +100,7 @@ load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
         g_free (cicn);
         if (pb) {
             debug_log ("icon", "load_icon: id=%u -> %dx%d pixbuf",
-                       (unsigned) icon, gdk_pixbuf_get_width (pb),
+                       (unsigned)icon, gdk_pixbuf_get_width (pb),
                        gdk_pixbuf_get_height (pb));
             *pixbuf_out = pb;
             if (mask_out) {
@@ -110,7 +110,7 @@ load_icon (GtkWidget *widget, guint16 icon, struct ifn *ifn, char recurse,
         }
     }
 
-    debug_log ("icon", "load_icon: id=%u not resolved (n=%u)%s", (unsigned) icon,
+    debug_log ("icon", "load_icon: id=%u not resolved (n=%u)%s", (unsigned)icon,
                ifn->n, recurse ? " — falling back" : "");
 
     if (recurse) {

@@ -39,22 +39,22 @@ build_userlist_payload (guint8 *out, gsize out_size, guint16 uid, guint16 icon,
                         guint16 color, const char *name, gsize name_len)
 {
     /* Layout from hotline.h, sans the leading hl_data_hdr that
-	 * wire_fixture_add_chunk handles for us:
-	 *
-	 *   guint16 uid, icon, color, nlen
-	 *   guint8  name[]
-	 */
+     * wire_fixture_add_chunk handles for us:
+     *
+     *   guint16 uid, icon, color, nlen
+     *   guint8  name[]
+     */
     gsize need = 8 + name_len;
     g_assert_cmpuint (need, <=, out_size);
 
     guint16 v;
-    v = g_htons(uid);
+    v = g_htons (uid);
     memcpy (out + 0, &v, 2);
-    v = g_htons(icon);
+    v = g_htons (icon);
     memcpy (out + 2, &v, 2);
-    v = g_htons(color);
+    v = g_htons (color);
     memcpy (out + 4, &v, 2);
-    v = g_htons((guint16)name_len);
+    v = g_htons ((guint16)name_len);
     memcpy (out + 6, &v, 2);
     memcpy (out + 8, name, name_len);
     return need;
@@ -69,17 +69,18 @@ test_selfinfo_extracts_access_bitmap (void)
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
     /* The hlserver-guest canonical access bitmap (same vector
-	 * test_hl_access uses). Pin it byte-for-byte here so a future
-	 * selfinfo parser that swaps endianness or shifts bytes fails
-	 * loudly on a known-good value. */
+     * test_hl_access uses). Pin it byte-for-byte here so a future
+     * selfinfo parser that swaps endianness or shifts bytes fails
+     * loudly on a known-good value. */
     const guint8 access[8] = { 0x60, 0x70, 0x00, 0xa0, 0x00, 0x80, 0x00, 0x00 };
     wire_fixture_add_chunk (&htlc, HTLS_DATA_ACCESS, sizeof (access), access);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_true (seen & HX_SELFINFO_ACCESS);
     g_assert_false (seen & HX_SELFINFO_USER_LIST);
     /* htlc.access is a guint64; compare its bytes against the wire
-	 * vector. memcpy preserved the wire bytes in memory order. */
+     * vector. memcpy preserved the wire bytes in memory order. */
     g_assert_cmpmem (&htlc.access, 8, access, 8);
 
     wire_fixture_free (&htlc);
@@ -98,7 +99,8 @@ test_selfinfo_skips_malformed_short_access (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_ACCESS, sizeof (too_short),
                             too_short);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_false (seen & HX_SELFINFO_ACCESS);
     /* And htlc.access stays zeroed by wire_fixture_init. */
     g_assert_cmphex (htlc.access, ==, 0);
@@ -117,10 +119,11 @@ test_selfinfo_skips_malformed_long_access (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_ACCESS, sizeof (too_long),
                             too_long);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_false (seen & HX_SELFINFO_ACCESS);
     /* Crucially: nothing got copied into htlc.access (which would
-	 * have to overflow into adjacent fields with a 16-byte chunk). */
+     * have to overflow into adjacent fields with a 16-byte chunk). */
     g_assert_cmphex (htlc.access, ==, 0);
 
     wire_fixture_free (&htlc);
@@ -143,7 +146,7 @@ test_selfinfo_extracts_user_list (void)
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
     /* Pre-populate htlc.name with the user's local nick. The parse
-	 * must leave it alone. */
+     * must leave it alone. */
     strncpy ((char *)htlc.name, "Local", sizeof (htlc.name) - 1);
 
     guint8 payload[64];
@@ -155,13 +158,14 @@ test_selfinfo_extracts_user_list (void)
                                          strlen (server_name));
     wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST, (guint16)plen, payload);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_true (seen & HX_SELFINFO_USER_LIST);
 
     g_assert_cmphex (htlc.uid, ==, 0x1234);
     g_assert_cmphex (htlc.icon, ==, 412);
     /* htlc.name is unchanged — the server-supplied "Misha" must not
-	 * overwrite the pre-call "Local". */
+     * overwrite the pre-call "Local". */
     g_assert_cmpstr ((const char *)htlc.name, ==, "Local");
 
     wire_fixture_free (&htlc);
@@ -182,7 +186,7 @@ test_selfinfo_uid_overrides_pre_call_value (void)
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
     /* Pre-populate htlc->uid (this is what the LOGIN_REPLY handler
-	 * does earlier in the connection lifecycle). */
+     * does earlier in the connection lifecycle). */
     htlc.uid = 0xbeef;
 
     guint8 payload[32];
@@ -190,11 +194,11 @@ test_selfinfo_uid_overrides_pre_call_value (void)
                                          /*uid*/ 0x00cd, 0, 0, "x", 1);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST, (guint16)plen, payload);
 
-    hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos);
 
     /* The wire UID wins; the pre-call value is irrelevant.
-	 * Specifically NOT equal to (0xbe << 8) | 0xbe = 0xbebe — that
-	 * was the buggy outcome of the self-aliasing HN16. */
+     * Specifically NOT equal to (0xbe << 8) | 0xbe = 0xbebe — that
+     * was the buggy outcome of the self-aliasing HN16. */
     g_assert_cmphex (htlc.uid, ==, 0x00cd);
     g_assert_cmphex (htlc.uid, !=, 0xbebe);
 }
@@ -210,10 +214,10 @@ test_selfinfo_long_server_name_leaves_local_intact (void)
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
     /* Pre-populate htlc.name and htlc.login with sentinels. Both
-	 * 32-byte fixed buffers sit adjacent in struct htlc_conn; an
-	 * old-style memcpy(htlc->name, uh->name, nlen) without a length
-	 * cap could spill into htlc->login. The new behaviour writes
-	 * neither. */
+     * 32-byte fixed buffers sit adjacent in struct htlc_conn; an
+     * old-style memcpy(htlc->name, uh->name, nlen) without a length
+     * cap could spill into htlc->login. The new behaviour writes
+     * neither. */
     strncpy ((char *)htlc.name, "Local", sizeof (htlc.name) - 1);
     strncpy ((char *)htlc.login, "user", sizeof (htlc.login) - 1);
 
@@ -224,7 +228,7 @@ test_selfinfo_long_server_name_leaves_local_intact (void)
                                          long_name, sizeof (long_name));
     wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST, (guint16)plen, payload);
 
-    hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos);
 
     g_assert_cmpstr ((const char *)htlc.name, ==, "Local");
     g_assert_cmpstr ((const char *)htlc.login, ==, "user");
@@ -239,17 +243,18 @@ test_selfinfo_skips_too_short_user_list (void)
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
     /* hl_userlist_hdr's tail is 8 bytes (uid/icon/color/nlen);
-	 * a chunk shorter than that should be skipped. */
+     * a chunk shorter than that should be skipped. */
     guint8 too_short[5] = { 0 };
     wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST, sizeof (too_short),
                             too_short);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_false (seen & HX_SELFINFO_USER_LIST);
     g_assert_cmpuint (htlc.icon, ==, 0);
     /* htlc.name is not touched by the parse path anyway (see
-	 * test_selfinfo_extracts_user_list); the wire_fixture_init
-	 * memset leaves it zeroed, so the [0]==0 check still holds. */
+     * test_selfinfo_extracts_user_list); the wire_fixture_init
+     * memset leaves it zeroed, so the [0]==0 check still holds. */
     g_assert_cmphex (htlc.name[0], ==, 0);
 
     wire_fixture_free (&htlc);
@@ -274,14 +279,15 @@ test_selfinfo_parses_both_chunks (void)
                                          name, strlen (name));
     wire_fixture_add_chunk (&htlc, HTLS_DATA_USER_LIST, (guint16)plen, payload);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_cmpuint (seen, ==, (HX_SELFINFO_ACCESS | HX_SELFINFO_USER_LIST));
     g_assert_cmphex (htlc.uid, ==, 5);
     g_assert_cmphex (htlc.icon, ==, 100);
     /* Phase 5: htlc.name is not written by hx_selfinfo_parse; the
-	 * server-supplied "admin" stays in the wire chunk but doesn't
-	 * land in htlc.name. wire_fixture_init zeros the struct so the
-	 * pre-call value is "". */
+     * server-supplied "admin" stays in the wire chunk but doesn't
+     * land in htlc.name. wire_fixture_init zeros the struct so the
+     * pre-call value is "". */
     g_assert_cmpstr ((const char *)htlc.name, ==, "");
     /* All-ones in every byte → guint64 is 0xffffffffffffffff. */
     g_assert_cmphex (htlc.access, ==, G_GUINT64_CONSTANT (0xffffffffffffffff));
@@ -295,7 +301,8 @@ test_selfinfo_empty_message_returns_zero (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_cmpuint (seen, ==, 0);
 
     wire_fixture_free (&htlc);
@@ -316,14 +323,15 @@ test_selfinfo_decodes_nick_color (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
     /* Pre-set htlc->nick_color to a sentinel so we can prove the
-	 * parse overwrote it (not just left a zero in place). */
+     * parse overwrote it (not just left a zero in place). */
     htlc.nick_color = 0xdeadbeefu;
 
-    const guint32 color_wire = g_htonl(0x00abcdefu);
+    const guint32 color_wire = g_htonl (0x00abcdefu);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
                             &color_wire);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_true (seen & HX_SELFINFO_NICK_COLOR);
     g_assert_cmphex (htlc.nick_color, ==, 0x00abcdefu);
 
@@ -336,11 +344,12 @@ test_selfinfo_nick_color_none_round_trips (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
 
-    const guint32 color_wire = g_htonl(HX_NICK_COLOR_NONE);
+    const guint32 color_wire = g_htonl (HX_NICK_COLOR_NONE);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (color_wire),
                             &color_wire);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_true (seen & HX_SELFINFO_NICK_COLOR);
     g_assert_cmphex (htlc.nick_color, ==, HX_NICK_COLOR_NONE);
 
@@ -353,14 +362,15 @@ test_selfinfo_nick_color_absent_leaves_seen_clear (void)
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_USER_SELFINFO, 1, 0);
     /* Pre-set the field to prove the parser doesn't touch it when
-	 * the chunk isn't there. */
+     * the chunk isn't there. */
     htlc.nick_color = 0x11223344u;
 
     /* Unrelated chunk so the message isn't empty. */
-    const guint16 some_uid = g_htons(1);
+    const guint16 some_uid = g_htons (1);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_false (seen & HX_SELFINFO_NICK_COLOR);
     g_assert_cmphex (htlc.nick_color, ==, 0x11223344u);
 
@@ -378,10 +388,11 @@ test_selfinfo_nick_color_too_short_is_skipped (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_short),
                             too_short);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_false (seen & HX_SELFINFO_NICK_COLOR);
     /* Crucial: the parser must not have partial-read or zero-filled
-	 * htlc->nick_color from a malformed-length chunk. */
+     * htlc->nick_color from a malformed-length chunk. */
     g_assert_cmphex (htlc.nick_color, ==, 0xfeedfaceu);
 
     wire_fixture_free (&htlc);
@@ -396,9 +407,11 @@ test_selfinfo_nick_color_too_long_is_skipped (void)
 
     const guint8 too_long[8]
         = { 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88 };
-    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_long), too_long);
+    wire_fixture_add_chunk (&htlc, HTLS_DATA_COLOR, sizeof (too_long),
+                            too_long);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_false (seen & HX_SELFINFO_NICK_COLOR);
     g_assert_cmphex (htlc.nick_color, ==, 0xfeedfaceu);
 
@@ -416,7 +429,8 @@ test_selfinfo_unrelated_chunks_are_ignored (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (some_uid),
                             &some_uid);
 
-    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos);
+    unsigned seen = hx_selfinfo_parse (&htlc, hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos);
     g_assert_cmpuint (seen, ==, 0);
 
     wire_fixture_free (&htlc);

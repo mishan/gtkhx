@@ -114,11 +114,13 @@ impl AeadState {
         let nonce = Nonce::from_slice(&nonce_bytes);
         let key = Key::from_slice(&self.key);
         let cipher = ChaCha20Poly1305::new(key);
-        let payload = Payload { msg: plaintext, aad: &[] };
+        let payload = Payload {
+            msg: plaintext,
+            aad: &[],
+        };
         match cipher.encrypt(nonce, payload) {
             Ok(ct) => {
-                out[AEAD_LENGTH_PREFIX..AEAD_LENGTH_PREFIX + ct.len()]
-                    .copy_from_slice(&ct);
+                out[AEAD_LENGTH_PREFIX..AEAD_LENGTH_PREFIX + ct.len()].copy_from_slice(&ct);
                 self.counter += 1;
                 Some(framed_len)
             }
@@ -164,7 +166,10 @@ impl AeadState {
         let key = Key::from_slice(&self.key);
         let cipher = ChaCha20Poly1305::new(key);
         let ct_and_tag = &framed[AEAD_LENGTH_PREFIX..frame_total];
-        let payload = Payload { msg: ct_and_tag, aad: &[] };
+        let payload = Payload {
+            msg: ct_and_tag,
+            aad: &[],
+        };
         match cipher.decrypt(nonce, payload) {
             Ok(pt) => {
                 out[..pt_len].copy_from_slice(&pt);
@@ -231,9 +236,21 @@ pub unsafe extern "C" fn gtkhx_aead_hkdf_sha256(
     if out_len == 0 {
         return;
     }
-    let salt_s = if salt.is_null() { &[] } else { slice::from_raw_parts(salt, salt_len) };
-    let ikm_s = if ikm.is_null() { &[] } else { slice::from_raw_parts(ikm, ikm_len) };
-    let info_s = if info.is_null() { &[] } else { slice::from_raw_parts(info, info_len) };
+    let salt_s = if salt.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts(salt, salt_len)
+    };
+    let ikm_s = if ikm.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts(ikm, ikm_len)
+    };
+    let info_s = if info.is_null() {
+        &[]
+    } else {
+        slice::from_raw_parts(info, info_len)
+    };
     let out_s = slice::from_raw_parts_mut(out, out_len);
     let _ = hkdf_sha256(salt_s, ikm_s, info_s, out_s);
 }
@@ -411,19 +428,14 @@ pub unsafe extern "C" fn gtkhx_aead_seal(
 /// # Safety
 /// `framed` must be valid for `framed_len` bytes.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_aead_peek_frame_size(
-    framed: *const u8,
-    framed_len: usize,
-) -> usize {
+pub unsafe extern "C" fn gtkhx_aead_peek_frame_size(framed: *const u8, framed_len: usize) -> usize {
     if framed.is_null() || framed_len < AEAD_LENGTH_PREFIX {
         return 0;
     }
 
     let f = slice::from_raw_parts(framed, framed_len);
-    let body_len = ((f[0] as u32) << 24)
-        | ((f[1] as u32) << 16)
-        | ((f[2] as u32) << 8)
-        | (f[3] as u32);
+    let body_len =
+        ((f[0] as u32) << 24) | ((f[1] as u32) << 16) | ((f[2] as u32) << 8) | (f[3] as u32);
 
     if body_len < AEAD_TAG_SIZE as u32 {
         return 0;
@@ -591,18 +603,29 @@ mod tests {
         let framed_cap = AEAD_LENGTH_PREFIX + plaintext.len() + AEAD_TAG_SIZE;
 
         // Same starting state for both paths.
-        let mk = || AeadState { key: [0x5au8; 32], counter: 7, dir: AEAD_DIR_SERVER_TO_CLIENT };
+        let mk = || AeadState {
+            key: [0x5au8; 32],
+            counter: 7,
+            dir: AEAD_DIR_SERVER_TO_CLIENT,
+        };
 
         let mut st_native = mk();
         let mut framed_native = vec![0u8; framed_cap];
-        let n = st_native.seal(plaintext, &mut framed_native).expect("native seal");
+        let n = st_native
+            .seal(plaintext, &mut framed_native)
+            .expect("native seal");
         assert_eq!(n, framed_cap);
 
         let mut st_ffi = mk();
         let mut framed_ffi = vec![0u8; framed_cap];
         let m = unsafe {
-            gtkhx_aead_seal(&mut st_ffi, plaintext.as_ptr(), plaintext.len(),
-                            framed_ffi.as_mut_ptr(), framed_ffi.len())
+            gtkhx_aead_seal(
+                &mut st_ffi,
+                plaintext.as_ptr(),
+                plaintext.len(),
+                framed_ffi.as_mut_ptr(),
+                framed_ffi.len(),
+            )
         };
         assert_eq!(m, framed_cap);
 
@@ -613,8 +636,14 @@ mod tests {
         // peek + open parity.
         assert_eq!(AeadState::peek_frame_size(&framed_native), Some(framed_cap));
         let mut dec_native = vec![0u8; plaintext.len()];
-        let mut st_dec = AeadState { key: [0x5au8; 32], counter: 7, dir: AEAD_DIR_SERVER_TO_CLIENT };
-        let d = st_dec.open(&framed_native, &mut dec_native).expect("native open");
+        let mut st_dec = AeadState {
+            key: [0x5au8; 32],
+            counter: 7,
+            dir: AEAD_DIR_SERVER_TO_CLIENT,
+        };
+        let d = st_dec
+            .open(&framed_native, &mut dec_native)
+            .expect("native open");
         assert_eq!(d, plaintext.len());
         assert_eq!(&dec_native, plaintext);
     }
@@ -747,8 +776,10 @@ mod tests {
         assert!(!hkdf_sha256(salt, ikm, info, &mut huge_out));
         // On failure the function zeroes the output so downstream
         // key derivation lands somewhere deterministic.
-        assert!(huge_out.iter().all(|&b| b == 0),
-                "failed hkdf_sha256 should zero its output");
+        assert!(
+            huge_out.iter().all(|&b| b == 0),
+            "failed hkdf_sha256 should zero its output"
+        );
 
         // Also sanity-check the exact-boundary case (8160 bytes — the
         // RFC 5869 limit — should succeed).
@@ -771,26 +802,38 @@ mod tests {
         unsafe {
             // NULL out + non-zero len — bail without UB.
             gtkhx_aead_hkdf_sha256(
-                salt.as_ptr(), salt.len(),
-                ikm.as_ptr(), ikm.len(),
-                info.as_ptr(), info.len(),
-                std::ptr::null_mut(), 32,
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                std::ptr::null_mut(),
+                32,
             );
             // NULL out + zero len — also a no-op (and would still be
             // UB if we constructed a zero-len slice from a NULL ptr).
             gtkhx_aead_hkdf_sha256(
-                salt.as_ptr(), salt.len(),
-                ikm.as_ptr(), ikm.len(),
-                info.as_ptr(), info.len(),
-                std::ptr::null_mut(), 0,
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                std::ptr::null_mut(),
+                0,
             );
             // Sanity: a valid call still works after the bad ones.
             let mut out = [0u8; 32];
             gtkhx_aead_hkdf_sha256(
-                salt.as_ptr(), salt.len(),
-                ikm.as_ptr(), ikm.len(),
-                info.as_ptr(), info.len(),
-                out.as_mut_ptr(), out.len(),
+                salt.as_ptr(),
+                salt.len(),
+                ikm.as_ptr(),
+                ikm.len(),
+                info.as_ptr(),
+                info.len(),
+                out.as_mut_ptr(),
+                out.len(),
             );
             assert!(out.iter().any(|&b| b != 0));
         }

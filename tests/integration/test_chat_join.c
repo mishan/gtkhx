@@ -62,17 +62,18 @@ test_chat_join_member_visible (void)
     /* Step 3: Bob drains for the CHAT_INVITE. */
     g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
     struct hx_chat_invite_msg im = { 0 };
-    g_assert_true (hx_chat_invite_extract (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos, &im));
+    g_assert_true (hx_chat_invite_extract (hx_test_in (&htlc_b)->buf,
+                                           hx_test_in (&htlc_b)->pos, &im));
     g_assert_cmphex (im.cid, ==, chat_id);
 
     /* Steps 4 + 5: Bob CHAT_JOIN; harness drains to the TASK reply
-	 * (correlated by trans) and asserts flag & 1 == 0. Reply frame
-	 * is still in htlc_b.in afterward so we can walk the USER_LIST
-	 * chunks below. */
+     * (correlated by trans) and asserts flag & 1 == 0. Reply frame
+     * is still in htlc_b.in afterward so we can walk the USER_LIST
+     * chunks below. */
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
 
     int n_user_list = 0;
-    dh_start (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos)
+    dh_start (hx_test_in (&htlc_b)->buf, hx_test_in (&htlc_b)->pos)
     {
         if (_type == HTLS_DATA_USER_LIST) {
             n_user_list++;
@@ -80,11 +81,11 @@ test_chat_join_member_visible (void)
     }
     dh_end ();
     /* Alice and Bob both joined → 2 entries. Some servers may
-	 * vary; insist on >= 1 to leave room for differing flushes. */
+     * vary; insist on >= 1 to leave room for differing flushes. */
     g_assert_cmpint (n_user_list, >=, 1);
 
     /* Step 6: Alice receives CHAT_USER_CHANGE for Bob — same cid,
-	 * Bob's uid. */
+     * Bob's uid. */
     g_assert_true (integration_drain_until_chat_user_event (
         fd_a, &htlc_a, HTLS_HDR_CHAT_USER_CHANGE, chat_id, htlc_b.uid, 64));
 

@@ -145,7 +145,7 @@ test_human_readable_nontrivial_from_block (void)
 static void
 test_suffix_letters_are_stable (void)
 {
-    g_assert_cmphex (human_suffixes[0], ==, 0);   /* unused */
+    g_assert_cmphex (human_suffixes[0], ==, 0); /* unused */
     g_assert_cmphex (human_suffixes[1], ==, 'k');
     g_assert_cmphex (human_suffixes[2], ==, 'M');
     g_assert_cmphex (human_suffixes[3], ==, 'G');

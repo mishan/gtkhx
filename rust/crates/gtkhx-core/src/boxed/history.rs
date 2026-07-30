@@ -75,7 +75,10 @@ unsafe fn dup_by_len(src: &[u8]) -> *mut c_char {
 /// # Safety
 /// `data` is valid for `len` bytes, or NULL (returns NULL).
 #[no_mangle]
-pub unsafe extern "C" fn hx_history_entry_parse(data: *const u8, len: usize) -> *mut HxHistoryEntry {
+pub unsafe extern "C" fn hx_history_entry_parse(
+    data: *const u8,
+    len: usize,
+) -> *mut HxHistoryEntry {
     if data.is_null() {
         return ptr::null_mut();
     }
@@ -117,7 +120,14 @@ mod tests {
 
     /// Build a minimal well-formed entry body: 8+8+2+2 fixed header, u16 nick_len
     /// + nick, u16 msg_len + msg.
-    fn entry_body(message_id: u64, timestamp: i64, flags: u16, icon: u16, nick: &[u8], msg: &[u8]) -> Vec<u8> {
+    fn entry_body(
+        message_id: u64,
+        timestamp: i64,
+        flags: u16,
+        icon: u16,
+        nick: &[u8],
+        msg: &[u8],
+    ) -> Vec<u8> {
         let mut v = Vec::new();
         v.extend_from_slice(&message_id.to_be_bytes());
         v.extend_from_slice(&timestamp.to_be_bytes());

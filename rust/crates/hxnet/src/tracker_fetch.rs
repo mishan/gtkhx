@@ -229,7 +229,10 @@ async fn emit_listing(
         // No per-record url allocation — Record is associated with the
         // BatchBegin above by the consumer.
         if out
-            .send(TrackerEvent::Record { total: count, record })
+            .send(TrackerEvent::Record {
+                total: count,
+                record,
+            })
             .await
             .is_err()
         {
@@ -432,10 +435,9 @@ impl TrackerConnector for TcpTlsConnector {
         // channel held only for the call absorbs them (no consumer needed
         // here — the tracker walk has its own event stream).
         let (evt_tx, _evt_rx) = mpsc::channel(4);
-        let tcp =
-            crate::connect::resolve_and_connect(&host, port, self.proxy.as_ref(), &evt_tx)
-                .await
-                .map_err(|e| ConnectError::Transport(e.to_string()))?;
+        let tcp = crate::connect::resolve_and_connect(&host, port, self.proxy.as_ref(), &evt_tx)
+            .await
+            .map_err(|e| ConnectError::Transport(e.to_string()))?;
 
         match transport {
             Transport::Plain => Ok(TrackerTransport::Plain(tcp)),
@@ -524,7 +526,11 @@ mod tests {
             transport: Transport,
         ) -> Result<Self::Stream, ConnectError> {
             self.calls.push((url.to_owned(), transport));
-            match self.plans.pop_front().expect("connect with no scripted plan") {
+            match self
+                .plans
+                .pop_front()
+                .expect("connect with no scripted plan")
+            {
                 Plan::FailTls => Err(ConnectError::Tls("scripted".into())),
                 Plan::FailTrust => Err(ConnectError::TrustRejected("scripted".into())),
                 Plan::FailTransport => Err(ConnectError::Transport("scripted".into())),
@@ -591,9 +597,9 @@ mod tests {
         r.extend_from_slice(&HTRK_MAGIC);
         r.extend_from_slice(&3u16.to_be_bytes());
         r.extend_from_slice(&0u16.to_be_bytes()); // features
-        // 10-byte listing-response header, matching the layout
-        // parse_tracker_v3_response_header reads: response_type(2) +
-        // total_size(4) + total_servers(2) + record_count(2).
+                                                  // 10-byte listing-response header, matching the layout
+                                                  // parse_tracker_v3_response_header reads: response_type(2) +
+                                                  // total_size(4) + total_servers(2) + record_count(2).
         r.extend_from_slice(&tracker_v3::RESP_LIST.to_be_bytes());
         r.extend_from_slice(&(records.len() as u32).to_be_bytes());
         r.extend_from_slice(&record_count.to_be_bytes());
@@ -626,7 +632,15 @@ mod tests {
         let mut conn = ScriptedConnector::new(vec![Plan::Reply(script)]);
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
-        run_fetch(&mut conn, &urls(&["t1"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        run_fetch(
+            &mut conn,
+            &urls(&["t1"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         drop(tx);
 
         let events = collect(rx).await;
@@ -634,7 +648,11 @@ mod tests {
         assert_eq!(verdicts.lookup("t1"), TlsVerdict::Ok);
         assert!(matches!(
             events[0],
-            TrackerEvent::BatchBegin { version: 1, count: 1, .. }
+            TrackerEvent::BatchBegin {
+                version: 1,
+                count: 1,
+                ..
+            }
         ));
         assert!(matches!(events[1], TrackerEvent::Record { total: 1, .. }));
         assert!(matches!(events.last(), Some(TrackerEvent::Done)));
@@ -650,7 +668,15 @@ mod tests {
         let mut conn = ScriptedConnector::new(vec![Plan::Silent, Plan::Reply(script)]);
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
-        run_fetch(&mut conn, &urls(&["t1"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        run_fetch(
+            &mut conn,
+            &urls(&["t1"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         drop(tx);
 
         let events = collect(rx).await;
@@ -664,9 +690,15 @@ mod tests {
         );
         assert!(matches!(
             events[0],
-            TrackerEvent::BatchBegin { version: 1, count: 1, .. }
+            TrackerEvent::BatchBegin {
+                version: 1,
+                count: 1,
+                ..
+            }
         ));
-        assert!(matches!(&events[1], TrackerEvent::Record { record, .. } if record.name == b"late"));
+        assert!(
+            matches!(&events[1], TrackerEvent::Record { record, .. } if record.name == b"late")
+        );
     }
 
     #[tokio::test]
@@ -678,7 +710,15 @@ mod tests {
         let mut conn = ScriptedConnector::new(vec![Plan::FailTls, Plan::Reply(script)]);
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
-        run_fetch(&mut conn, &urls(&["t1"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        run_fetch(
+            &mut conn,
+            &urls(&["t1"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         drop(tx);
 
         let events = collect(rx).await;
@@ -704,7 +744,15 @@ mod tests {
         let mut conn = ScriptedConnector::new(vec![Plan::FailTrust]);
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
-        run_fetch(&mut conn, &urls(&["t1"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        run_fetch(
+            &mut conn,
+            &urls(&["t1"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         drop(tx);
 
         let events = collect(rx).await;
@@ -726,7 +774,15 @@ mod tests {
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
         verdicts.record("t1", TlsVerdict::No);
-        run_fetch(&mut conn, &urls(&["t1"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        run_fetch(
+            &mut conn,
+            &urls(&["t1"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         drop(tx);
 
         let _ = collect(rx).await;
@@ -785,13 +841,25 @@ mod tests {
         let mut conn = ScriptedConnector::new(vec![Plan::Reply(reply)]);
         let (tx, rx) = mpsc::channel(64);
         let mut verdicts = VerdictCache::new();
-        run_fetch(&mut conn, &urls(&["t3"]), 0, Duration::from_secs(5), &mut verdicts, &tx).await;
+        run_fetch(
+            &mut conn,
+            &urls(&["t3"]),
+            0,
+            Duration::from_secs(5),
+            &mut verdicts,
+            &tx,
+        )
+        .await;
         drop(tx);
 
         let events = collect(rx).await;
         assert!(matches!(
             events[0],
-            TrackerEvent::BatchBegin { version: 3, count: 1, .. }
+            TrackerEvent::BatchBegin {
+                version: 3,
+                count: 1,
+                ..
+            }
         ));
         assert!(matches!(
             &events[1],
@@ -801,16 +869,31 @@ mod tests {
 
     #[test]
     fn parse_host_port_cases() {
-        assert_eq!(parse_host_port("tracker.example.com"), ("tracker.example.com".into(), HTRK_TCPPORT));
-        assert_eq!(parse_host_port("tracker.example.com:5499"), ("tracker.example.com".into(), 5499));
-        assert_eq!(parse_host_port("127.0.0.1:1234"), ("127.0.0.1".into(), 1234));
+        assert_eq!(
+            parse_host_port("tracker.example.com"),
+            ("tracker.example.com".into(), HTRK_TCPPORT)
+        );
+        assert_eq!(
+            parse_host_port("tracker.example.com:5499"),
+            ("tracker.example.com".into(), 5499)
+        );
+        assert_eq!(
+            parse_host_port("127.0.0.1:1234"),
+            ("127.0.0.1".into(), 1234)
+        );
         // Bare IPv6 literal: colons are address, not a port.
         assert_eq!(parse_host_port("::1"), ("::1".into(), HTRK_TCPPORT));
         // Bracketed IPv6, with and without a port.
         assert_eq!(parse_host_port("[::1]"), ("::1".into(), HTRK_TCPPORT));
-        assert_eq!(parse_host_port("[2001:db8::1]:5499"), ("2001:db8::1".into(), 5499));
+        assert_eq!(
+            parse_host_port("[2001:db8::1]:5499"),
+            ("2001:db8::1".into(), 5499)
+        );
         // Non-numeric tail is part of the host, not a port.
-        assert_eq!(parse_host_port("host:notaport"), ("host:notaport".into(), HTRK_TCPPORT));
+        assert_eq!(
+            parse_host_port("host:notaport"),
+            ("host:notaport".into(), HTRK_TCPPORT)
+        );
     }
 
     #[tokio::test]

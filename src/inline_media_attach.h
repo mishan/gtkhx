@@ -62,8 +62,8 @@ struct _session;
  * gchat->media_attach_btn so the refresh helper can find it,
  * and gtk_box_append it alongside the emoji button. The button
  * connects its own clicked handler. */
-extern GtkWidget *hx_inline_media_attach_button_new (
-    struct gtkhx_chat *gchat, struct htlc_conn *htlc);
+extern GtkWidget *hx_inline_media_attach_button_new (struct gtkhx_chat *gchat,
+                                                     struct htlc_conn *htlc);
 
 /* Walk every gchat in the session and refresh each attach
  * button's visibility against the current

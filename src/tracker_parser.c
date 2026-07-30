@@ -18,7 +18,7 @@
 #include "config.h"
 
 #include <glib.h>
-#include "hotline_proto.h"     /* gtkhx_proto_parse_tracker_* */
+#include "hotline_proto.h" /* gtkhx_proto_parse_tracker_* */
 #include "tracker_parser.h"
 
 /* HTRK reply parsing moved to the Rust hotline-proto
@@ -63,5 +63,5 @@ hx_tracker_record_parse_fixed (const guint8 *buf, gsize len,
 void
 hx_tracker_normalize_text (char *buf, gsize len)
 {
-    gtkhx_proto_tracker_normalize_text ((uint8_t *) buf, len);
+    gtkhx_proto_tracker_normalize_text ((uint8_t *)buf, len);
 }

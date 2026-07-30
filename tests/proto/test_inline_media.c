@@ -19,7 +19,7 @@
 #include <string.h>
 #include <stdarg.h>
 #include <glib.h>
-#include "compat.h"   /* PACKED — required before hotline.h */
+#include "compat.h" /* PACKED — required before hotline.h */
 #include "protocol.h"
 #include "hotline.h"
 #include "hxconn_layout.h"
@@ -57,18 +57,17 @@ struct task *
 task_new (struct htlc_conn *htlc, rcv_task_fn rcv, void *ptr, void *data,
           const char *str)
 {
-    (void) htlc;
-    (void) rcv;
-    (void) data;
-    (void) str;
+    (void)htlc;
+    (void)rcv;
+    (void)data;
+    (void)str;
     fake_task.ptr = ptr;
     captured_upload_ctx = ptr;
     return &fake_task;
 }
 
-extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type,
-                            guint32 flag, const struct hx_chunk *chunks,
-                            int hc);
+extern void hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
+                            const struct hx_chunk *chunks, int hc);
 void
 hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
                 const struct hx_chunk *chunks, int hc)
@@ -77,9 +76,9 @@ hlwrite_chunks (struct htlc_conn *htlc, guint32 type, guint32 flag,
      * fresh buffer (there's no htlc->out). */
     gsize len = 0;
     guint8 *buf = hlpack_chunks (htlc, type, flag, chunks, hc, &len);
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = buf;
-    hx_test_in(htlc)->pos = len;
+    g_free (hx_test_in (htlc)->buf);
+    hx_test_in (htlc)->buf = buf;
+    hx_test_in (htlc)->pos = len;
 }
 
 /* the_session is a session*, dereferenced by inline_media_upload.c
@@ -95,11 +94,12 @@ void *the_session = NULL;
  * task_inerror==FALSE check). Return 0 unconditionally — the
  * oversized-token test won't go anywhere near an actual error
  * reply. */
-extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
+                         gsize frame_len);
 int
 task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 {
-    (void) htlc;
+    (void)htlc;
     return 0;
 }
 
@@ -113,8 +113,8 @@ extern struct task *task_with_trans (void *sess, guint32 trans);
 struct task *
 task_with_trans (void *sess, guint32 trans)
 {
-    (void) sess;
-    (void) trans;
+    (void)sess;
+    (void)trans;
     return NULL;
 }
 
@@ -170,16 +170,16 @@ test_limits_accessors_pass_through_server_values (void)
     struct htlc_conn h;
     memset (&h, 0, sizeof (h));
     h.caps = HTLC_CAP_INLINE_MEDIA;
-    h.media_max_bytes        = 65536;
-    h.media_max_dimension    = 1024;
-    h.media_max_pixels       = 1024u * 768u;
-    h.media_max_frames       = 50;
-    h.media_max_duration_ms  = 5000;
+    h.media_max_bytes = 65536;
+    h.media_max_dimension = 1024;
+    h.media_max_pixels = 1024u * 768u;
+    h.media_max_frames = 50;
+    h.media_max_duration_ms = 5000;
 
-    g_assert_cmpuint (inline_media_max_bytes (&h),       ==, 65536u);
-    g_assert_cmpuint (inline_media_max_dimension (&h),   ==, 1024u);
-    g_assert_cmpuint (inline_media_max_pixels (&h),      ==, 1024u * 768u);
-    g_assert_cmpuint (inline_media_max_frames (&h),      ==, 50u);
+    g_assert_cmpuint (inline_media_max_bytes (&h), ==, 65536u);
+    g_assert_cmpuint (inline_media_max_dimension (&h), ==, 1024u);
+    g_assert_cmpuint (inline_media_max_pixels (&h), ==, 1024u * 768u);
+    g_assert_cmpuint (inline_media_max_frames (&h), ==, 50u);
     g_assert_cmpuint (inline_media_max_duration_ms (&h), ==, 5000u);
 }
 
@@ -190,7 +190,7 @@ test_chunk_size_clamps_oversized_advertisement (void)
     memset (&h, 0, sizeof (h));
     h.caps = HTLC_CAP_INLINE_MEDIA;
     /* Server advertises an absurd chunk size — gtkhx clamps to
-	 * a sane ceiling to avoid alloc-of-the-month attacks. */
+     * a sane ceiling to avoid alloc-of-the-month attacks. */
     h.media_chunk_size = 5u * 1024u * 1024u;
     g_assert_cmpuint (inline_media_chunk_size (&h), ==,
                       HX_MEDIA_DEFAULT_CHUNK_SIZE);
@@ -211,17 +211,17 @@ test_limits_accessors_drop_stale_on_cap_lost (void)
     struct htlc_conn h;
     memset (&h, 0, sizeof (h));
     /* Stale advertisement from a prior session. */
-    h.media_max_bytes        = 65536;
-    h.media_max_dimension    = 1024;
-    h.media_max_pixels       = 1024u * 768u;
-    h.media_chunk_size       = 32000;
-    h.media_max_frames       = 50;
-    h.media_max_duration_ms  = 5000;
+    h.media_max_bytes = 65536;
+    h.media_max_dimension = 1024;
+    h.media_max_pixels = 1024u * 768u;
+    h.media_chunk_size = 32000;
+    h.media_max_frames = 50;
+    h.media_max_duration_ms = 5000;
     /* New session: cap NOT echoed by the new server. */
     h.caps = 0;
 
     /* Every accessor falls through to its spec default rather
-	 * than honouring the stale advertised values. */
+     * than honouring the stale advertised values. */
     g_assert_cmpuint (inline_media_max_bytes (&h), ==,
                       HX_MEDIA_DEFAULT_MAX_BYTES);
     g_assert_cmpuint (inline_media_max_dimension (&h), ==,
@@ -248,9 +248,7 @@ test_build_upload_single_shape (void)
 
     /* Without declared type → 2 chunks: PAYLOAD + PART_FINAL. */
     hc = gtkhx_proto_build_upload_media_single_chunks (
-        payload, sizeof (payload) - 1,
-        NULL, 0,
-        chunks, G_N_ELEMENTS (chunks),
+        payload, sizeof (payload) - 1, NULL, 0, chunks, G_N_ELEMENTS (chunks),
         scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 2);
     g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_CHAT_MEDIA_PAYLOAD);
@@ -258,15 +256,13 @@ test_build_upload_single_shape (void)
     g_assert_cmpuint (chunks[1].type, ==, HTLC_DATA_CHAT_MEDIA_PART_FINAL);
     g_assert_cmpuint (chunks[1].len, ==, 1);
     /* PART_FINAL points at scratch holding 1. */
-    g_assert_cmpuint (((const uint8_t *) chunks[1].data)[0], ==, 1);
+    g_assert_cmpuint (((const uint8_t *)chunks[1].data)[0], ==, 1);
 
     /* With declared type → 3 chunks. */
     const uint8_t declared[] = "image/png";
     hc = gtkhx_proto_build_upload_media_single_chunks (
-        payload, sizeof (payload) - 1,
-        declared, sizeof (declared) - 1,
-        chunks, G_N_ELEMENTS (chunks),
-        scratch, sizeof (scratch));
+        payload, sizeof (payload) - 1, declared, sizeof (declared) - 1, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 3);
     g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_CHAT_MEDIA_PAYLOAD);
     g_assert_cmpuint (chunks[1].type, ==, HTLC_DATA_CHAT_MEDIA_DECLARED_TYPE);
@@ -280,9 +276,8 @@ test_build_upload_single_rejects_empty (void)
     uint8_t scratch[1];
     /* Empty payload — builder refuses. */
     int32_t hc = gtkhx_proto_build_upload_media_single_chunks (
-        (const uint8_t *) "", 0, NULL, 0,
-        chunks, G_N_ELEMENTS (chunks),
-        scratch, sizeof (scratch));
+        (const uint8_t *)"", 0, NULL, 0, chunks, G_N_ELEMENTS (chunks), scratch,
+        sizeof (scratch));
     g_assert_cmpint (hc, ==, 0);
 }
 
@@ -297,22 +292,21 @@ test_build_upload_first_shape (void)
 
     int32_t hc = gtkhx_proto_build_upload_media_first_chunks (
         payload, sizeof (payload) - 1, NULL, 0,
-        /* part_count */ 3,
-        chunks, G_N_ELEMENTS (chunks),
-        scratch, sizeof (scratch));
+        /* part_count */ 3, chunks, G_N_ELEMENTS (chunks), scratch,
+        sizeof (scratch));
     g_assert_cmpint (hc, ==, 4);
     g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_CHAT_MEDIA_PAYLOAD);
     g_assert_cmpuint (chunks[1].type, ==, HTLC_DATA_CHAT_MEDIA_PART_INDEX);
     g_assert_cmpuint (chunks[2].type, ==, HTLC_DATA_CHAT_MEDIA_PART_COUNT);
     g_assert_cmpuint (chunks[3].type, ==, HTLC_DATA_CHAT_MEDIA_PART_FINAL);
     /* PART_INDEX == 0 (big-endian u16). */
-    g_assert_cmpuint (((const uint8_t *) chunks[1].data)[0], ==, 0);
-    g_assert_cmpuint (((const uint8_t *) chunks[1].data)[1], ==, 0);
+    g_assert_cmpuint (((const uint8_t *)chunks[1].data)[0], ==, 0);
+    g_assert_cmpuint (((const uint8_t *)chunks[1].data)[1], ==, 0);
     /* PART_COUNT == 3. */
-    g_assert_cmpuint (((const uint8_t *) chunks[2].data)[0], ==, 0);
-    g_assert_cmpuint (((const uint8_t *) chunks[2].data)[1], ==, 3);
+    g_assert_cmpuint (((const uint8_t *)chunks[2].data)[0], ==, 0);
+    g_assert_cmpuint (((const uint8_t *)chunks[2].data)[1], ==, 3);
     /* PART_FINAL == 0. */
-    g_assert_cmpuint (((const uint8_t *) chunks[3].data)[0], ==, 0);
+    g_assert_cmpuint (((const uint8_t *)chunks[3].data)[0], ==, 0);
 }
 
 static void
@@ -322,9 +316,8 @@ test_build_upload_first_rejects_count_one (void)
     struct hx_chunk chunks[5];
     uint8_t scratch[5];
     int32_t hc = gtkhx_proto_build_upload_media_first_chunks (
-        payload, 1, NULL, 0, /* part_count = */ 1,
-        chunks, G_N_ELEMENTS (chunks),
-        scratch, sizeof (scratch));
+        payload, 1, NULL, 0, /* part_count = */ 1, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 0);
 }
 
@@ -339,10 +332,8 @@ test_build_upload_followup_final_shape (void)
     uint8_t scratch[3];
 
     int32_t hc = gtkhx_proto_build_upload_media_followup_chunks (
-        token, sizeof (token) - 1,
-        payload, sizeof (payload) - 1,
-        /* part_index */ 3, /* final */ true,
-        chunks, G_N_ELEMENTS (chunks),
+        token, sizeof (token) - 1, payload, sizeof (payload) - 1,
+        /* part_index */ 3, /* final */ true, chunks, G_N_ELEMENTS (chunks),
         scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 4);
     g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_CHAT_MEDIA_UPLOAD_TOKEN);
@@ -350,10 +341,10 @@ test_build_upload_followup_final_shape (void)
     g_assert_cmpuint (chunks[2].type, ==, HTLC_DATA_CHAT_MEDIA_PAYLOAD);
     g_assert_cmpuint (chunks[3].type, ==, HTLC_DATA_CHAT_MEDIA_PART_FINAL);
     /* PART_INDEX == 3 (BE u16). */
-    g_assert_cmpuint (((const uint8_t *) chunks[1].data)[0], ==, 0);
-    g_assert_cmpuint (((const uint8_t *) chunks[1].data)[1], ==, 3);
+    g_assert_cmpuint (((const uint8_t *)chunks[1].data)[0], ==, 0);
+    g_assert_cmpuint (((const uint8_t *)chunks[1].data)[1], ==, 3);
     /* PART_FINAL == 1. */
-    g_assert_cmpuint (((const uint8_t *) chunks[3].data)[0], ==, 1);
+    g_assert_cmpuint (((const uint8_t *)chunks[3].data)[0], ==, 1);
 }
 
 static void
@@ -364,9 +355,8 @@ test_build_upload_followup_rejects_zero_index (void)
     struct hx_chunk chunks[4];
     uint8_t scratch[3];
     int32_t hc = gtkhx_proto_build_upload_media_followup_chunks (
-        token, 3, payload, 4, /* part_index = */ 0, false,
-        chunks, G_N_ELEMENTS (chunks),
-        scratch, sizeof (scratch));
+        token, 3, payload, 4, /* part_index = */ 0, false, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 0);
 }
 
@@ -382,8 +372,7 @@ test_build_download_first_request_shape (void)
     /* First request omits PART_INDEX. */
     int32_t hc = gtkhx_proto_build_download_media_chunks (
         handle, sizeof (handle) - 1,
-        /* part_index */ 0, /* present */ false,
-        chunks, G_N_ELEMENTS (chunks),
+        /* part_index */ 0, /* present */ false, chunks, G_N_ELEMENTS (chunks),
         scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 1);
     g_assert_cmpuint (chunks[0].type, ==, HTLC_DATA_CHAT_MEDIA_ID);
@@ -392,12 +381,11 @@ test_build_download_first_request_shape (void)
     /* Followup chunk-fetch request includes PART_INDEX. */
     hc = gtkhx_proto_build_download_media_chunks (
         handle, sizeof (handle) - 1,
-        /* part_index */ 2, /* present */ true,
-        chunks, G_N_ELEMENTS (chunks),
+        /* part_index */ 2, /* present */ true, chunks, G_N_ELEMENTS (chunks),
         scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 2);
     g_assert_cmpuint (chunks[1].type, ==, HTLC_DATA_CHAT_MEDIA_PART_INDEX);
-    g_assert_cmpuint (((const uint8_t *) chunks[1].data)[1], ==, 2);
+    g_assert_cmpuint (((const uint8_t *)chunks[1].data)[1], ==, 2);
 }
 
 static void
@@ -406,8 +394,7 @@ test_build_download_rejects_empty_handle (void)
     struct hx_chunk chunks[2];
     uint8_t scratch[2];
     int32_t hc = gtkhx_proto_build_download_media_chunks (
-        (const uint8_t *) "", 0, 0, false,
-        chunks, G_N_ELEMENTS (chunks),
+        (const uint8_t *)"", 0, 0, false, chunks, G_N_ELEMENTS (chunks),
         scratch, sizeof (scratch));
     g_assert_cmpint (hc, ==, 0);
 }
@@ -417,8 +404,8 @@ test_build_download_rejects_empty_handle (void)
 /* Helper: emit one chunk into buf at *pos. tag and payload as
  * documented; returns the new position. */
 static size_t
-append_chunk (uint8_t *buf, size_t pos, uint16_t tag,
-              const uint8_t *payload, uint16_t len)
+append_chunk (uint8_t *buf, size_t pos, uint16_t tag, const uint8_t *payload,
+              uint16_t len)
 {
     buf[pos++] = (tag >> 8) & 0xff;
     buf[pos++] = tag & 0xff;
@@ -453,8 +440,7 @@ test_extract_limits_picks_up_advertised_fields (void)
 
     struct gtkhx_proto_inline_media_limits limits;
     memset (&limits, 0, sizeof (limits));
-    g_assert_true (
-        gtkhx_proto_extract_inline_media_limits (buf, pos, &limits));
+    g_assert_true (gtkhx_proto_extract_inline_media_limits (buf, pos, &limits));
     g_assert_true (limits.max_bytes_present);
     g_assert_cmpuint (limits.max_bytes, ==, 65536u);
     g_assert_true (limits.max_dimension_present);
@@ -476,11 +462,11 @@ test_extract_chat_media_meta_present (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
 
-    pos = append_chunk (buf, pos, HTLC_DATA_CHAT, (const uint8_t *) "hi", 2);
+    pos = append_chunk (buf, pos, HTLC_DATA_CHAT, (const uint8_t *)"hi", 2);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ID,
-                        (const uint8_t *) "opaque-handle", 13);
+                        (const uint8_t *)"opaque-handle", 13);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_TYPE,
-                        (const uint8_t *) "image/png", 9);
+                        (const uint8_t *)"image/png", 9);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_WIDTH, 800);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_HEIGHT, 600);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_BYTES, 124000);
@@ -507,7 +493,7 @@ test_extract_chat_media_meta_none_when_text_only (void)
     uint8_t buf[64];
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
-    pos = append_chunk (buf, pos, HTLC_DATA_CHAT, (const uint8_t *) "hi", 2);
+    pos = append_chunk (buf, pos, HTLC_DATA_CHAT, (const uint8_t *)"hi", 2);
 
     struct gtkhx_proto_chat_media_meta meta;
     int status = gtkhx_proto_extract_chat_media_meta (buf, pos, &meta);
@@ -521,9 +507,9 @@ test_extract_chat_media_meta_rejects_orphan (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
     /* ID present, TYPE absent → orphan; spec says receiver MUST
-	 * reject. */
+     * reject. */
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ID,
-                        (const uint8_t *) "orphan-handle", 13);
+                        (const uint8_t *)"orphan-handle", 13);
 
     struct gtkhx_proto_chat_media_meta meta;
     int status = gtkhx_proto_extract_chat_media_meta (buf, pos, &meta);
@@ -539,9 +525,9 @@ test_parse_upload_final_reply_extracts_handle (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ID,
-                        (const uint8_t *) "new-handle", 10);
+                        (const uint8_t *)"new-handle", 10);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_TYPE,
-                        (const uint8_t *) "image/jpeg", 10);
+                        (const uint8_t *)"image/jpeg", 10);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_WIDTH, 1024);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_HEIGHT, 768);
     pos = append_u32_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_BYTES, 95432);
@@ -565,7 +551,7 @@ test_parse_upload_token_reply (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN,
-                        (const uint8_t *) "tok-X", 5);
+                        (const uint8_t *)"tok-X", 5);
 
     const uint8_t *tok = NULL;
     size_t tlen = 0;
@@ -579,8 +565,7 @@ test_parse_upload_token_reply (void)
 
 /* Captures the result the callback fires with so the test can
  * inspect after the rcv handler returns. */
-typedef struct
-{
+typedef struct {
     gboolean fired;
     guint16 error_code;
     gboolean has_media_id;
@@ -591,7 +576,7 @@ static void
 capture_upload_callback (struct htlc_conn *htlc,
                          const HxInlineMediaUploadResult *r, gpointer user_data)
 {
-    (void) htlc;
+    (void)htlc;
     upload_callback_capture *cap = user_data;
     cap->fired = TRUE;
     cap->error_code = r->error_code;
@@ -641,10 +626,10 @@ test_rcv_task_upload_media_rejects_oversized_token (void)
     htlc.caps = HTLC_CAP_INLINE_MEDIA;
     htlc.trans = 1;
     /* Pick a chunk size that forces hx_send_upload_media_chunked
-	 * into the chunked path on a small payload — keeps the test
-	 * cheap. inline_media_chunk_size clamps to
-	 * HX_MEDIA_DEFAULT_CHUNK_SIZE on the upper end, so anything
-	 * smaller than that passes through unchanged. */
+     * into the chunked path on a small payload — keeps the test
+     * cheap. inline_media_chunk_size clamps to
+     * HX_MEDIA_DEFAULT_CHUNK_SIZE on the upper end, so anything
+     * smaller than that passes through unchanged. */
     htlc.media_chunk_size = 100;
 
     guint8 payload[300];
@@ -657,55 +642,55 @@ test_rcv_task_upload_media_rejects_oversized_token (void)
         &htlc, payload, sizeof (payload), "image/png", 9,
         capture_upload_callback, &cap, /*user_data_free=*/NULL));
     /* The stubbed task_new captured the upload ctx; without it
-	 * the test can't drive rcv_task_upload_media. */
+     * the test can't drive rcv_task_upload_media. */
     g_assert_nonnull (captured_upload_ctx);
 
     /* Build an intermediate reply with an UPLOAD_TOKEN that
-	 * deliberately overshoots the client-side ceiling. We hand-
-	 * roll the buffer instead of going through hlpack_chunks so
-	 * the oversized chunk length lands intact on the wire even
-	 * though no production sender would emit one. */
+     * deliberately overshoots the client-side ceiling. We hand-
+     * roll the buffer instead of going through hlpack_chunks so
+     * the oversized chunk length lands intact on the wire even
+     * though no production sender would emit one. */
     gsize oversized_len = HX_MEDIA_MAX_UPLOAD_TOKEN + 1;
     /* Each chunk on the wire is {2 byte tag, 2 byte len, len
-	 * bytes payload}, on top of the SIZEOF_HL_HDR transaction
-	 * header. */
+     * bytes payload}, on top of the SIZEOF_HL_HDR transaction
+     * header. */
     gsize chunk_overhead = SIZEOF_HL_HDR + 4;
-    g_free (hx_test_in(&htlc)->buf);
-    hx_test_in(&htlc)->buf = g_malloc0 (chunk_overhead + oversized_len);
-    hx_test_in(&htlc)->pos = chunk_overhead + oversized_len;
-    hx_test_in(&htlc)->len = hx_test_in(&htlc)->pos;
+    g_free (hx_test_in (&htlc)->buf);
+    hx_test_in (&htlc)->buf = g_malloc0 (chunk_overhead + oversized_len);
+    hx_test_in (&htlc)->pos = chunk_overhead + oversized_len;
+    hx_test_in (&htlc)->len = hx_test_in (&htlc)->pos;
     /* Tag = HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN, big-endian. */
-    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 0]
+    hx_test_in (&htlc)->buf[SIZEOF_HL_HDR + 0]
         = (HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN >> 8) & 0xff;
-    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 1]
+    hx_test_in (&htlc)->buf[SIZEOF_HL_HDR + 1]
         = HTLS_DATA_CHAT_MEDIA_UPLOAD_TOKEN & 0xff;
-    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 2] = (oversized_len >> 8) & 0xff;
-    hx_test_in(&htlc)->buf[SIZEOF_HL_HDR + 3] = oversized_len & 0xff;
+    hx_test_in (&htlc)->buf[SIZEOF_HL_HDR + 2] = (oversized_len >> 8) & 0xff;
+    hx_test_in (&htlc)->buf[SIZEOF_HL_HDR + 3] = oversized_len & 0xff;
     /* Payload bytes left at zero — content doesn't matter, only
-	 * length does. */
+     * length does. */
 
     /* Drive the production rcv handler. */
-    rcv_task_upload_media (&htlc, hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, captured_upload_ctx,
-                           NULL);
+    rcv_task_upload_media (&htlc, hx_test_in (&htlc)->buf,
+                           hx_test_in (&htlc)->pos, captured_upload_ctx, NULL);
 
     /* Callback must have fired with a synthetic failure. */
     g_assert_true (cap.fired);
     g_assert_false (cap.has_media_id);
     /* error_code is the spec MediaErrorCode — synthetic failures
-	 * use Generic (0). */
+     * use Generic (0). */
     g_assert_cmpuint (cap.error_code, ==, 0);
     /* Message must call out the oversized-token branch so we
-	 * don't silently treat any other synthetic-failure code path
-	 * as a pass. */
+     * don't silently treat any other synthetic-failure code path
+     * as a pass. */
     g_assert_nonnull (strstr (cap.error_message, "oversized"));
 
     /* Clean ctx + buffers. fake_task.ptr_free was populated by
-	 * hx_send_upload_media_chunked when it registered the
-	 * task. */
+     * hx_send_upload_media_chunked when it registered the
+     * task. */
     if (fake_task.ptr_free && captured_upload_ctx) {
         fake_task.ptr_free (captured_upload_ctx);
     }
-    g_free (hx_test_in(&htlc)->buf);
+    g_free (hx_test_in (&htlc)->buf);
 }
 
 /* ---------- FFI parser: download reply + error code ---------- */
@@ -717,11 +702,11 @@ test_parse_download_reply_single_shot (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_PAYLOAD,
-                        (const uint8_t *) "\x89PNG...", 7);
+                        (const uint8_t *)"\x89PNG...", 7);
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_TYPE,
-                        (const uint8_t *) "image/png", 9);
+                        (const uint8_t *)"image/png", 9);
     /* PART_COUNT == 1 (BE u16). */
-    uint8_t pc[2] = {0, 1};
+    uint8_t pc[2] = { 0, 1 };
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_PART_COUNT, pc, 2);
     /* PART_FINAL == 1 (u8). */
     uint8_t pf = 1;
@@ -744,9 +729,9 @@ test_extract_error_code_picks_up_when_present (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
     pos = append_chunk (buf, pos, HTLS_DATA_TASKERROR,
-                        (const uint8_t *) "Media rejected", 14);
+                        (const uint8_t *)"Media rejected", 14);
     /* CODE = 1 (PayloadTooLarge), BE u16. */
-    uint8_t code[2] = {0, 1};
+    uint8_t code[2] = { 0, 1 };
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ERROR_CODE, code, 2);
 
     uint16_t got = gtkhx_proto_extract_media_error_code (buf, pos);
@@ -760,7 +745,7 @@ test_extract_error_code_unknown_collapses_to_generic (void)
     memset (buf, 0, sizeof (buf));
     size_t pos = SIZEOF_HL_HDR;
     /* CODE = 99 (unspecified-by-spec) — must collapse to 0. */
-    uint8_t code[2] = {0, 99};
+    uint8_t code[2] = { 0, 99 };
     pos = append_chunk (buf, pos, HTLS_DATA_CHAT_MEDIA_ERROR_CODE, code, 2);
 
     uint16_t got = gtkhx_proto_extract_media_error_code (buf, pos);

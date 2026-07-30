@@ -102,11 +102,11 @@ pick_chat_history_server (void)
 static void
 make_marker (char *out, gsize cap)
 {
-    guint64 r = (((guint64) g_random_int ()) << 32) ^ (guint64) g_random_int ();
+    guint64 r = (((guint64)g_random_int ()) << 32) ^ (guint64)g_random_int ();
     /* Also mix in the pid + wall-clock seconds to defend against
-	 * extremely unlucky g_random_int reseeds across test binaries
-	 * that started in the same second. */
-    r ^= ((guint64) getpid () << 16) ^ (guint64) time (NULL);
+     * extremely unlucky g_random_int reseeds across test binaries
+     * that started in the same second. */
+    r ^= ((guint64)getpid () << 16) ^ (guint64)time (NULL);
     g_snprintf (out, cap, "HX-%016" G_GINT64_MODIFIER "x", r);
 }
 
@@ -115,11 +115,11 @@ make_marker (char *out, gsize cap)
 static gboolean
 send_chat_line (int fd, struct htlc_conn *htlc, const char *text)
 {
-    guint16 style = g_htons(1);
+    guint16 style = g_htons (1);
     return integration_send_message (
-        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2,
-        (int) HTLC_DATA_STYLE, (int) sizeof (style), &style,
-        (int) HTLC_DATA_CHAT, (int) strlen (text), (guint8 *) text);
+        fd, htlc, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_STYLE,
+        (int)sizeof (style), &style, (int)HTLC_DATA_CHAT, (int)strlen (text),
+        (guint8 *)text);
 }
 
 /* Drain the next HTLS_HDR_TASK reply that correlates to `wanted_trans`.
@@ -127,8 +127,8 @@ send_chat_line (int fd, struct htlc_conn *htlc, const char *text)
  * Walks past unrelated broadcasts (USER_CHANGE, CHAT, BANNER) and
  * TASK replies for other clients' transactions. */
 static gboolean
-drain_until_task_with_trans (int fd, struct htlc_conn *htlc, guint32 wanted_trans,
-                             int max_messages)
+drain_until_task_with_trans (int fd, struct htlc_conn *htlc,
+                             guint32 wanted_trans, int max_messages)
 {
     for (int i = 0; i < max_messages; i++) {
         if (!integration_recv_message (fd, htlc, /*timeout_ms=*/4000)) {
@@ -157,7 +157,7 @@ walk_history_reply (struct htlc_conn *htlc, GPtrArray *out,
 {
     guint added = 0;
     gboolean has_more = FALSE;
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         if (_type == HTLS_DATA_HISTORY_ENTRY) {
             HxHistoryEntry *e = hx_history_entry_parse (dh->data, _len);
@@ -244,7 +244,7 @@ test_chat_history_cap_negotiation (void)
     const hx_test_server *srv = pick_chat_history_server ();
     if (!srv) {
         g_test_fail_printf ("no chat-history-capable server in matrix "
-                     "(GTKHX_TEST_SERVERS filter excluded all).");
+                            "(GTKHX_TEST_SERVERS filter excluded all).");
         return;
     }
 
@@ -256,9 +256,9 @@ test_chat_history_cap_negotiation (void)
     }
 
     /* The drain helper stashed any DATA_CAPABILITIES echo it saw
-	 * into htlc->caps. Janus / spec-compliant servers reply with
-	 * just the bits they support; we asked for chat-history and
-	 * the server says it has it, so the bit must be lit. */
+     * into htlc->caps. Janus / spec-compliant servers reply with
+     * just the bits they support; we asked for chat-history and
+     * the server says it has it, so the bit must be lit. */
     g_assert_cmphex ((htlc.caps & HTLC_CAP_CHAT_HISTORY), ==,
                      HTLC_CAP_CHAT_HISTORY);
 
@@ -292,11 +292,11 @@ test_chat_history_round_trip (void)
     g_assert_true (send_chat_line (fd, &htlc, line));
 
     /* Give the server a beat to persist the row before we fetch.
-	 * Janus is SQLite-backed and the INSERT lands inside the same
-	 * goroutine that received the chat, so this is normally fast,
-	 * but the integration suite cross-talks heavily — a short
-	 * sleep dodges any flake from "TRAN 700 ran before our row
-	 * committed." */
+     * Janus is SQLite-backed and the INSERT lands inside the same
+     * goroutine that received the chat, so this is normally fast,
+     * but the integration suite cross-talks heavily — a short
+     * sleep dodges any flake from "TRAN 700 ran before our row
+     * committed." */
     g_usleep (200000); /* 200 ms */
 
     guint32 trans = integration_send_get_chat_history (
@@ -307,21 +307,21 @@ test_chat_history_round_trip (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, trans, 32));
 
     GPtrArray *entries = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     gboolean has_more = FALSE;
     guint n = walk_history_reply (&htlc, entries, &has_more);
-    (void) has_more;
+    (void)has_more;
     g_assert_cmpuint (n, >, 0);
 
     const HxHistoryEntry *mine = find_entry_by_marker (entries, marker);
     g_assert_nonnull (mine);
     /* The server stores our raw send body; Hotline doesn't reformat
-	 * chat into the broadcast template before persisting it. So we
-	 * expect to see exactly the line we sent. */
+     * chat into the broadcast template before persisting it. So we
+     * expect to see exactly the line we sent. */
     g_assert_nonnull (g_strstr_len (mine->message, mine->message_len, marker));
     g_assert_cmpstr (mine->nick, ==, "RoundTrip Tier-3");
     /* message_id is server-assigned and monotonic; non-zero is the
-	 * only spec guarantee. */
+     * only spec guarantee. */
     g_assert_cmpuint (mine->message_id, >, 0);
 
     g_ptr_array_unref (entries);
@@ -349,9 +349,9 @@ test_chat_history_limit (void)
     }
 
     /* Seed five messages so any sane LIMIT≥5 actually has something
-	 * to return — without this, a freshly-reset container would
-	 * legitimately yield zero rows and the cap assertion would be
-	 * trivially satisfied. */
+     * to return — without this, a freshly-reset container would
+     * legitimately yield zero rows and the cap assertion would be
+     * trivially satisfied. */
     char marker[32];
     make_marker (marker, sizeof (marker));
     for (int i = 0; i < 5; i++) {
@@ -370,7 +370,7 @@ test_chat_history_limit (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, trans, 32));
 
     GPtrArray *entries = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     gboolean has_more = FALSE;
     guint n = walk_history_reply (&htlc, entries, &has_more);
     g_assert_cmpuint (n, <=, wanted);
@@ -416,7 +416,7 @@ test_chat_history_has_more (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, trans, 32));
 
     GPtrArray *entries = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     gboolean has_more = FALSE;
     walk_history_reply (&htlc, entries, &has_more);
     g_assert_true (has_more);
@@ -451,16 +451,16 @@ test_chat_history_before_pagination (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, t1, 32));
 
     GPtrArray *first = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     gboolean has_more1 = FALSE;
     guint n1 = walk_history_reply (&htlc, first, &has_more1);
     if (n1 < 2) {
         /* Channel has fewer than two persisted messages — can't
-		 * meaningfully exercise pagination. Skip silently rather
-		 * than asserting; the round_trip / limit tests already
-		 * cover the populated-channel happy path. */
+         * meaningfully exercise pagination. Skip silently rather
+         * than asserting; the round_trip / limit tests already
+         * cover the populated-channel happy path. */
         g_test_fail_printf ("channel has too few persisted messages for "
-                     "BEFORE-cursor pagination.");
+                            "BEFORE-cursor pagination.");
         g_ptr_array_unref (first);
         close_session (fd, &htlc);
         return;
@@ -477,13 +477,13 @@ test_chat_history_before_pagination (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, t2, 32));
 
     GPtrArray *second = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     gboolean has_more2 = FALSE;
     guint n2 = walk_history_reply (&htlc, second, &has_more2);
-    (void) has_more2;
+    (void)has_more2;
 
     /* Spec: BEFORE returns entries with message_id < cursor. Zero
-	 * results is legitimate (cursor was the oldest in the table). */
+     * results is legitimate (cursor was the oldest in the table). */
     for (guint i = 0; i < n2; i++) {
         HxHistoryEntry *e = g_ptr_array_index (second, i);
         g_assert_cmpuint (e->message_id, <, cursor);
@@ -522,19 +522,19 @@ test_chat_history_after_catchup (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, t1, 32));
 
     GPtrArray *prefix = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     gboolean has_more = FALSE;
     walk_history_reply (&htlc, prefix, &has_more);
     guint64 cursor = newest_msgid (prefix);
     g_ptr_array_unref (prefix);
     if (cursor == 0) {
         /* Brand-new channel with no history at all — fetching with
-		 * AFTER=0 is the same as fetching with no cursor and would
-		 * trip the "give me everything" path. Skip gracefully; the
-		 * round_trip / limit tests cover the empty-channel happy
-		 * path well enough. */
+         * AFTER=0 is the same as fetching with no cursor and would
+         * trip the "give me everything" path. Skip gracefully; the
+         * round_trip / limit tests cover the empty-channel happy
+         * path well enough. */
         g_test_fail_printf ("channel has no persisted messages to anchor "
-                     "an AFTER cursor against.");
+                            "an AFTER cursor against.");
         close_session (fd, &htlc);
         return;
     }
@@ -555,7 +555,7 @@ test_chat_history_after_catchup (void)
     g_assert_true (drain_until_task_with_trans (fd, &htlc, t2, 32));
 
     GPtrArray *catchup = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     has_more = FALSE;
     guint n = walk_history_reply (&htlc, catchup, &has_more);
     g_assert_cmpuint (n, >, 0);

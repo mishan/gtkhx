@@ -44,7 +44,6 @@
 #include "xfers_recv.h"
 #include "integration_harness.h"
 
-
 /* HxnetXferParams progress shape (user_data + byte delta) for the Rust
  * hxnet_xfer_file_{recv,send}_one paths. */
 static void
@@ -65,10 +64,10 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
     gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
     guint32 our_trans = htlc->trans;
 
-    if (!integration_send_message (
-            ctrl, htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/2,
-            (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname,
-            (int)HTLC_DATA_DIR, (int)hldir_len, hldir)) {
+    if (!integration_send_message (ctrl, htlc, HTLC_HDR_FILE_GET, /*flag=*/0,
+                                   /*hc=*/2, (int)HTLC_DATA_FILE_NAME,
+                                   (int)strlen (fname), (guint8 *)fname,
+                                   (int)HTLC_DATA_DIR, (int)hldir_len, hldir)) {
         return NULL;
     }
     if (!integration_drain_until_task_trans (ctrl, htlc, our_trans, 64)
@@ -77,7 +76,8 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
+                           &reply);
     if (!reply.ref || !reply.size) {
         return NULL;
     }
@@ -117,7 +117,7 @@ download_uploaded (int ctrl, struct htlc_conn *htlc, const char *fname,
             content = NULL;
         }
     }
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
 
     unlink (htxf.path);
     g_rmdir (tmpdir);
@@ -144,12 +144,11 @@ test_file_put_round_trip (void)
     g_autofree char *srcdir = g_dir_make_tmp ("gtkhx_putsrc_XXXXXX", NULL);
     g_assert_nonnull (srcdir);
     g_autofree char *srcpath = g_build_filename (srcdir, "src.txt", NULL);
-    g_assert_true (
-        g_file_set_contents (srcpath, body, (gssize)body_len, NULL));
+    g_assert_true (g_file_set_contents (srcpath, body, (gssize)body_len, NULL));
 
     /* Unique remote name so reruns don't collide / hit resume. */
-    g_autofree char *fname =
-        g_strdup_printf ("tier3_put_%08x.txt", g_random_int ());
+    g_autofree char *fname
+        = g_strdup_printf ("tier3_put_%08x.txt", g_random_int ());
 
     /* FFO upload total: 133-byte FILP header + data fork (no comment, no
      * rsrc). Matches rcv_task_file_put's HTXF_SIZE accounting; the
@@ -159,14 +158,14 @@ test_file_put_round_trip (void)
 
     guint8 hldir[64];
     gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
-    guint32 size_be = g_htonl(up_total);
+    guint32 size_be = g_htonl (up_total);
     guint32 our_trans = htlc.trans;
 
     g_assert_true (integration_send_message (
         fd, &htlc, HTLC_HDR_FILE_PUT, /*flag=*/0, /*hc=*/3,
         (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname,
-        (int)HTLC_DATA_DIR, (int)hldir_len, hldir,
-        (int)HTLC_DATA_HTXF_SIZE, (int)sizeof (size_be), &size_be));
+        (int)HTLC_DATA_DIR, (int)hldir_len, hldir, (int)HTLC_DATA_HTXF_SIZE,
+        (int)sizeof (size_be), &size_be));
 
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
@@ -174,7 +173,9 @@ test_file_put_round_trip (void)
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_fail_printf ("file_put refused by server: \"%s\". Does the "
                                 "guest account have UPLOAD_FILES + "
                                 "UPLOAD_ANYWHERE?",
@@ -186,7 +187,7 @@ test_file_put_round_trip (void)
     }
 
     guint32 xfer_ref = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type == HTLS_DATA_HTXF_REF) {
             dh_getint (xfer_ref);
@@ -196,8 +197,8 @@ test_file_put_round_trip (void)
     g_assert_cmphex (xfer_ref, !=, 0);
 
     /* Open the subchannel, send the upload preamble, wrap the fd. */
-    HtxfConn *ch =
-        integration_htxf_open_xfer_file (xfer_ref, up_total, NULL, xfer_ref);
+    HtxfConn *ch
+        = integration_htxf_open_xfer_file (xfer_ref, up_total, NULL, xfer_ref);
     if (!ch) {
         g_test_fail_printf ("HTXF subchannel port (5501) unreachable.");
         goto out_src;
@@ -227,7 +228,7 @@ test_file_put_round_trip (void)
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_file_send_one (&params);
     g_assert_cmpint (rv, ==, 0);
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
 
     /* Round-trip: download it back and assert byte-exact. mhxd commits
      * the uploaded file to disk asynchronously once the subchannel

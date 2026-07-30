@@ -44,8 +44,8 @@ test_news_post_then_fetch (void)
     }
 
     /* Build a unique marker per run so re-running this test
-	 * doesn't false-positive on the previous run's residue
-	 * already in the news file. */
+     * doesn't false-positive on the previous run's residue
+     * already in the news file. */
     gchar *marker = g_strdup_printf ("Tier-3 news-post marker %u",
                                      (guint)g_random_int ());
 
@@ -54,23 +54,24 @@ test_news_post_then_fetch (void)
         (int)HTLC_DATA_NEWS_POST, (int)strlen (marker), (guint8 *)marker));
 
     /* Now fetch the news file back. mhxd's NEWS_POST handler
-	 * sends an empty TASK ack first, then broadcasts
-	 * HTLS_HDR_NEWS_POST to all clients. We drain through those
-	 * via our trans match on the GETFILE reply. */
+     * sends an empty TASK ack first, then broadcasts
+     * HTLS_HDR_NEWS_POST to all clients. We drain through those
+     * via our trans match on the GETFILE reply. */
     guint32 fetch_trans = htlc.trans;
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_NEWS_GETFILE,
                                              /*flag=*/0, /*hc=*/0));
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, fetch_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, fetch_trans, 64));
 
     char body[8192 + 1];
     gsize body_len = 0;
-    g_assert_true (
-        hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, body, sizeof (body), &body_len));
+    g_assert_true (hx_news_file_extract (hx_test_in (&htlc)->buf,
+                                         hx_test_in (&htlc)->pos, body,
+                                         sizeof (body), &body_len));
 
     /* Our marker should be somewhere in the body. mhxd prepends
-	 * a "From <name>" header line per post, so the body grew. */
+     * a "From <name>" header line per post, so the body grew. */
     g_assert_nonnull (g_strstr_len (body, body_len, marker));
 
     g_free (marker);
@@ -108,12 +109,12 @@ test_news_post_broadcasts_to_other_clients (void)
         (int)HTLC_DATA_NEWS_POST, (int)strlen (marker), (guint8 *)marker));
 
     /* On B's connection, drain looking for HTLS_HDR_NEWS_POST. */
-    g_assert_true (integration_drain_until_type (fd_b, &htlc_b,
-                                                 HTLS_HDR_NEWS_POST, 64));
+    g_assert_true (
+        integration_drain_until_type (fd_b, &htlc_b, HTLS_HDR_NEWS_POST, 64));
 
     /* Walk the chunks via dh_start to find the NEWS body. */
     gboolean found_marker = FALSE;
-    dh_start (hx_test_in(&htlc_b)->buf, hx_test_in(&htlc_b)->pos)
+    dh_start (hx_test_in (&htlc_b)->buf, hx_test_in (&htlc_b)->pos)
     {
         if (_type != HTLS_DATA_NEWS) {
             continue;

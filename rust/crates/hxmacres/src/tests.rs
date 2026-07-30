@@ -23,11 +23,11 @@ fn build_resfork(res_type: u32, resources: &[(i16, &[u8])]) -> Vec<u8> {
     map.extend_from_slice(&28u16.to_be_bytes()); // @24 type_list_off
     map.extend_from_slice(&0u16.to_be_bytes()); // @26 name_list_off (unused)
     map.extend_from_slice(&0u16.to_be_bytes()); // @28 num_types-1 (one type here)
-    // Type entry @30: res_type, num_res-1, ref_list_off.
+                                                // Type entry @30: res_type, num_res-1, ref_list_off.
     map.extend_from_slice(&res_type.to_be_bytes());
     map.extend_from_slice(&((resources.len() as u16).wrapping_sub(1)).to_be_bytes());
     map.extend_from_slice(&10u16.to_be_bytes()); // ref_list_off (38 - 28)
-    // Reference entries @38: resid, name_off, attrs, data_off(u24), reserved.
+                                                 // Reference entries @38: resid, name_off, attrs, data_off(u24), reserved.
     for (i, (resid, _)) in resources.iter().enumerate() {
         map.extend_from_slice(&resid.to_be_bytes());
         map.extend_from_slice(&0xffffu16.to_be_bytes()); // name_off (none)
@@ -53,7 +53,10 @@ const CICN: u32 = 0x6369_636e; // 'cicn'
 
 #[test]
 fn parse_and_lookup() {
-    let fork = build_resfork(CICN, &[(128, b"first"), (135, b"second-icon"), (200, b"third")]);
+    let fork = build_resfork(
+        CICN,
+        &[(128, b"first"), (135, b"second-icon"), (200, b"third")],
+    );
     let rf = ResourceFork::parse(fork).expect("parse");
 
     assert_eq!(rf.num_res_of_type(CICN), 3);

@@ -67,7 +67,8 @@ enum {
     HX_SELFINFO_NICK_COLOR = 1u << 2,
 };
 
-extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern unsigned hx_selfinfo_parse (struct htlc_conn *htlc, const guint8 *frame,
+                                   gsize frame_len);
 
 /*
  * Result of parsing a HTLS_HDR_CHAT message. Output of hx_chat_extract.
@@ -132,7 +133,8 @@ struct hx_msg_msg {
     guint16 msg_len;
 };
 
-extern gboolean hx_msg_extract (const guint8 *frame, gsize frame_len, struct hx_msg_msg *out);
+extern gboolean hx_msg_extract (const guint8 *frame, gsize frame_len,
+                                struct hx_msg_msg *out);
 
 /*
  * HTLS_HDR_BANNER — extract the banner type (4 bytes) and optional
@@ -262,12 +264,9 @@ extern guint8 *hlpack_chunks (struct htlc_conn *htlc, guint32 type,
  * equivalent but written differently; centralising the decode
  * here prevents drift.
  */
-extern gboolean hl_hdr_decode (const void *hdr_bytes,
-                               guint32 *type_out,
-                               guint32 *trans_out,
-                               guint32 *flag_out,
-                               guint16 *hc_out,
-                               guint32 *wire_len_out,
+extern gboolean hl_hdr_decode (const void *hdr_bytes, guint32 *type_out,
+                               guint32 *trans_out, guint32 *flag_out,
+                               guint16 *hc_out, guint32 *wire_len_out,
                                guint32 *body_len_out);
 
 /*
@@ -425,14 +424,10 @@ struct hx_user_change_plan {
     guint16 eff_color;         /* status bitmap to render/store */
     guint32 eff_nick_color;    /* RGB nick colour to render/store */
 };
-extern void hx_user_change_plan_resolve (const struct hx_user_change_msg *uc,
-                                         gboolean old_exists,
-                                         guint16 old_status,
-                                         guint32 old_nick_color,
-                                         const char *old_name,
-                                         guint16 self_uid,
-                                         const char *self_name,
-                                         struct hx_user_change_plan *out);
+extern void hx_user_change_plan_resolve (
+    const struct hx_user_change_msg *uc, gboolean old_exists,
+    guint16 old_status, guint32 old_nick_color, const char *old_name,
+    guint16 self_uid, const char *self_name, struct hx_user_change_plan *out);
 
 /*
  * Result of parsing a HTLS_HDR_XFER_QUEUE message.
@@ -491,8 +486,8 @@ extern gboolean hx_htxf_reply_extract (const guint8 *frame, gsize frame_len,
  * Returns the number of NEWS chunks seen.
  */
 typedef void (*hx_news_post_cb) (void *user, const char *bytes, gsize len);
-extern int hx_news_post_walk (const guint8 *frame, gsize frame_len, hx_news_post_cb cb,
-                              void *user);
+extern int hx_news_post_walk (const guint8 *frame, gsize frame_len,
+                              hx_news_post_cb cb, void *user);
 
 /* The 1.5 news dirlist / catlist C parse shims (hx_news_dirlist_parse_* +
  * hx_newscat_parse) and their result structs (hx_news_dirlist_entry /
@@ -530,8 +525,9 @@ typedef enum {
     HX_AGREEMENT_NOT_FOUND,
 } hx_agreement_result;
 
-extern hx_agreement_result hx_agreement_extract (const guint8 *frame, gsize frame_len,
-                                                 char *out, gsize out_size,
+extern hx_agreement_result hx_agreement_extract (const guint8 *frame,
+                                                 gsize frame_len, char *out,
+                                                 gsize out_size,
                                                  gsize *out_len);
 
 /*
@@ -549,8 +545,9 @@ extern hx_agreement_result hx_agreement_extract (const guint8 *frame, gsize fram
  * (which other code paths still reach for) — this extractor exists
  * to make the parsing testable without sharing global state.
  */
-extern gboolean hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out,
-                                      gsize out_size, gsize *out_len);
+extern gboolean hx_news_file_extract (const guint8 *frame, gsize frame_len,
+                                      char *out, gsize out_size,
+                                      gsize *out_len);
 
 /*
  * Split a single chat line into a "name" portion and a "body"
@@ -649,16 +646,16 @@ extern gboolean hx_highlight_match (const char *body, gsize body_len,
  * surfaced here). Owned by the parent HxChatEvent; freed alongside
  * it. */
 typedef struct {
-    guint8 *id;    /* opaque handle bytes (owned) */
+    guint8 *id; /* opaque handle bytes (owned) */
     gsize id_len;
-    char *mime;    /* canonical MIME (NUL-terminated, owned) */
+    char *mime; /* canonical MIME (NUL-terminated, owned) */
     gsize mime_len;
     /* Server-advertised hints. value is 0 / *_present is FALSE
-	 * when the field was absent on the wire; the placeholder
-	 * formatter elides any column whose *_present flag is FALSE
-	 * (no literal "unknown" substitution). Per spec, advisory
-	 * only; clients MUST NOT trust these as a substitute for
-	 * actually decoding the bytes. */
+     * when the field was absent on the wire; the placeholder
+     * formatter elides any column whose *_present flag is FALSE
+     * (no literal "unknown" substitution). Per spec, advisory
+     * only; clients MUST NOT trust these as a substitute for
+     * actually decoding the bytes. */
     guint32 width;
     guint32 height;
     guint32 bytes;
@@ -671,14 +668,14 @@ typedef struct _HxChatEvent HxChatEvent;
 struct _HxChatEvent {
     guint32 cid;
     /* Sender's Hotline user id, straight off the wire's UID chunk.
-	 *
-	 * 0 means the server didn't send one — parse_chat defaults it, and
-	 * older servers omit the chunk entirely. It does *not* mean "user
-	 * zero". The render path falls back to a nick lookup against the
-	 * membership model in that case; see chat.c::chat_speaker_for.
-	 *
-	 * Sits in the padding after `cid`, so adding it moved no other
-	 * field and the struct is still 72 bytes. */
+     *
+     * 0 means the server didn't send one — parse_chat defaults it, and
+     * older servers omit the chunk entirely. It does *not* mean "user
+     * zero". The render path falls back to a nick lookup against the
+     * membership model in that case; see chat.c::chat_speaker_for.
+     *
+     * Sits in the padding after `cid`, so adding it moved no other
+     * field and the struct is still 72 bytes. */
     guint16 uid;
     char *line; /* UTF-8-valid; NUL-terminated; owned */
     gsize line_len;
@@ -690,9 +687,9 @@ struct _HxChatEvent {
     gboolean is_self; /* sender == own nick */
 
     /* Inline-media extension (Phase 9.D). NULL when the chat
-	 * carried no media chunks. The companion-fields-orphan case
-	 * (exactly one of ID / TYPE present) never reaches here —
-	 * rcv.c drops those at the receive site per spec. */
+     * carried no media chunks. The companion-fields-orphan case
+     * (exactly one of ID / TYPE present) never reaches here —
+     * rcv.c drops those at the receive site per spec. */
     HxChatMedia *media;
 };
 
@@ -716,13 +713,11 @@ extern void hx_chat_event_free (HxChatEvent *e);
  * be released afterwards. Replaces any previously-attached
  * media. Idempotent on NULL `ev`. Setting `mime` to NULL or
  * `id_len`/`mime_len` to 0 detaches existing media. */
-extern void hx_chat_event_attach_media (HxChatEvent *ev,
-                                        const guint8 *id, gsize id_len,
-                                        const char *mime, gsize mime_len,
-                                        guint32 width, gboolean width_present,
-                                        guint32 height,
-                                        gboolean height_present,
-                                        guint32 bytes,
+extern void hx_chat_event_attach_media (HxChatEvent *ev, const guint8 *id,
+                                        gsize id_len, const char *mime,
+                                        gsize mime_len, guint32 width,
+                                        gboolean width_present, guint32 height,
+                                        gboolean height_present, guint32 bytes,
                                         gboolean bytes_present);
 
 /* Format-friendly helper for the placeholder row. Returns a
@@ -773,8 +768,7 @@ extern char *hx_chat_media_placeholder_clickable (const HxChatMedia *m,
  * found, returns TRUE and writes N into *out_token; otherwise
  * returns FALSE. Used by the word_click handler to recover the
  * token from the clicked word. NUL-terminated input. */
-extern gboolean hx_chat_media_parse_token (const char *word,
-                                           guint *out_token);
+extern gboolean hx_chat_media_parse_token (const char *word, guint *out_token);
 
 /*
  * MediaTable — the per-chat token → HxChatMedia handle table (M3;

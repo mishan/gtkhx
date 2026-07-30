@@ -96,7 +96,9 @@ fn cipheralg_zeroes_then_sets() {
         let a = std::ffi::CString::new("CHACHA20-POLY1305").unwrap();
         hx_conn_set_cipheralg(h, a.as_ptr());
         assert_eq!(
-            std::ffi::CStr::from_ptr(hx_conn_cipheralg(h)).to_str().unwrap(),
+            std::ffi::CStr::from_ptr(hx_conn_cipheralg(h))
+                .to_str()
+                .unwrap(),
             "CHACHA20-POLY1305"
         );
         // empty string clears it

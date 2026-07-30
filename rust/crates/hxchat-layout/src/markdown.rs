@@ -25,8 +25,8 @@
 //! existing URL detector in `gtkurl.c` owns that and has its own scheme
 //! list).
 
-use std::ops::Range;
 use crate::span::{Attrs, ParsedText, SpanBuilder, Style};
+use std::ops::Range;
 
 /// Cap on nesting depth. `**a *b* a**` is depth 2. Real messages never
 /// approach this; the cap exists so a line of 5,000 asterisks can't
@@ -318,7 +318,10 @@ fn scan(src: &str, base: Style, depth: u8, out: &mut SpanBuilder) {
 /// Bytes markdown lets you escape. A backslash before anything else is
 /// itself literal — `C:\path` must not lose its separators.
 fn is_escapable(s: &str) -> bool {
-    matches!(s, "\\" | "*" | "_" | "`" | "~" | "[" | "]" | "(" | ")" | ">" | "#")
+    matches!(
+        s,
+        "\\" | "*" | "_" | "`" | "~" | "[" | "]" | "(" | ")" | ">" | "#"
+    )
 }
 
 fn utf8_len(b: u8) -> usize {
@@ -383,11 +386,7 @@ fn code_span(bytes: &[u8], at: usize) -> Option<(Range<usize>, usize)> {
 /// delimiters.
 fn strip_code_pad(s: &str) -> &str {
     let b = s.as_bytes();
-    if b.len() >= 2
-        && b[0] == b' '
-        && b[b.len() - 1] == b' '
-        && b.iter().any(|&c| c != b' ')
-    {
+    if b.len() >= 2 && b[0] == b' ' && b[b.len() - 1] == b' ' && b.iter().any(|&c| c != b' ') {
         &s[1..s.len() - 1]
     } else {
         s
@@ -494,9 +493,7 @@ fn intraword_ok(bytes: &[u8], i: usize) -> bool {
 
 /// `_` closes emphasis only at a word boundary.
 fn intraword_close_ok(bytes: &[u8], i: usize) -> bool {
-    bytes
-        .get(i + 1)
-        .is_none_or(|b| !b.is_ascii_alphanumeric())
+    bytes.get(i + 1).is_none_or(|b| !b.is_ascii_alphanumeric())
 }
 
 /// Parse `[label](url)` starting at `open`. Returns label, href and the
@@ -655,9 +652,24 @@ pub fn scan_delims(src: &str) -> Vec<SourceSpan> {
             continue;
         };
 
-        out.push(SourceSpan { start: i, end: i + run, attrs, delim: true });
-        out.push(SourceSpan { start: i + run, end: close, attrs, delim: false });
-        out.push(SourceSpan { start: close, end: close + run, attrs, delim: true });
+        out.push(SourceSpan {
+            start: i,
+            end: i + run,
+            attrs,
+            delim: true,
+        });
+        out.push(SourceSpan {
+            start: i + run,
+            end: close,
+            attrs,
+            delim: false,
+        });
+        out.push(SourceSpan {
+            start: close,
+            end: close + run,
+            attrs,
+            delim: true,
+        });
         i = close + run;
     }
     out

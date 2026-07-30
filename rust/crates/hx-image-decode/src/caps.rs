@@ -11,8 +11,7 @@
 /// fields, 20 bytes total). `#[repr(C)]` is load-bearing — the
 /// FFI shim passes a `*const HxInlineMediaCaps` directly.
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct HxInlineMediaCaps {
     pub max_bytes: u32,
     pub max_dimension: u32,

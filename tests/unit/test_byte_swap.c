@@ -61,7 +61,7 @@ static void
 test_hn32_canonical_pattern (void)
 {
     /* The classic byte-order test pattern; if this fails on a
-	 * little-endian host the swap arithmetic is broken. */
+     * little-endian host the swap arithmetic is broken. */
     const guint8 wire[4] = { 0x12, 0x34, 0x56, 0x78 };
     guint32 host = 0;
     HN32 (&host, wire);

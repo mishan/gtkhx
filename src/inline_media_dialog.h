@@ -51,10 +51,8 @@
 extern void inline_media_show_dialog (GtkWidget *parent_widget,
                                       struct htlc_conn *htlc,
                                       const guint8 *media_id,
-                                      gsize media_id_len,
-                                      const char *mime,
-                                      guint32 width_hint,
-                                      guint32 height_hint,
+                                      gsize media_id_len, const char *mime,
+                                      guint32 width_hint, guint32 height_hint,
                                       guint32 bytes_hint);
 
 #endif /* HX_INLINE_MEDIA_DIALOG_H */

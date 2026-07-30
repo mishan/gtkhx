@@ -40,7 +40,7 @@ expect_ok (const char *in, guint16 def, const char *want_host,
 static void
 expect_fail (const char *in)
 {
-    char *host = (char *) 0x1; /* poison — must be cleared to NULL */
+    char *host = (char *)0x1; /* poison — must be cleared to NULL */
     gboolean ok = gtkhx_parse_host_port (in, 5500, &host, NULL, NULL);
     g_assert_false (ok);
     g_assert_null (host);
@@ -49,8 +49,7 @@ expect_fail (const char *in)
 static void
 test_parse_plain (void)
 {
-    expect_ok ("hotline.example.com", 5500, "hotline.example.com", 5500,
-               FALSE);
+    expect_ok ("hotline.example.com", 5500, "hotline.example.com", 5500, FALSE);
     expect_ok ("hotline.example.com:1234", 5500, "hotline.example.com", 1234,
                TRUE);
     expect_ok ("1.2.3.4", 5500, "1.2.3.4", 5500, FALSE);
@@ -80,18 +79,18 @@ test_parse_rejects (void)
 {
     expect_fail (NULL);
     expect_fail ("");
-    expect_fail (":5500");            /* empty host */
-    expect_fail ("host:");            /* empty port */
-    expect_fail ("host:0");           /* port out of 1..65535 */
-    expect_fail ("host:65536");       /* port out of range */
-    expect_fail ("host:99999");       /* port out of range */
-    expect_fail ("host:12ab");        /* trailing garbage */
-    expect_fail ("host:notaport");    /* non-numeric */
-    expect_fail ("[::1");             /* unterminated bracket */
-    expect_fail ("[::1]x");           /* junk after bracket */
-    expect_fail ("[::1]:");           /* empty port after bracket */
-    expect_fail ("[::1]:bad");        /* bad port after bracket */
-    expect_fail ("[]:5500");          /* empty bracketed host */
+    expect_fail (":5500");         /* empty host */
+    expect_fail ("host:");         /* empty port */
+    expect_fail ("host:0");        /* port out of 1..65535 */
+    expect_fail ("host:65536");    /* port out of range */
+    expect_fail ("host:99999");    /* port out of range */
+    expect_fail ("host:12ab");     /* trailing garbage */
+    expect_fail ("host:notaport"); /* non-numeric */
+    expect_fail ("[::1");          /* unterminated bracket */
+    expect_fail ("[::1]x");        /* junk after bracket */
+    expect_fail ("[::1]:");        /* empty port after bracket */
+    expect_fail ("[::1]:bad");     /* bad port after bracket */
+    expect_fail ("[]:5500");       /* empty bracketed host */
 }
 
 static void
@@ -120,15 +119,14 @@ test_join (void)
 static void
 test_roundtrip (void)
 {
-    const char *hosts[] = { "host", "1.2.3.4", "::1", "2001:db8::1",
-                            "fe80::dead:beef" };
+    const char *hosts[]
+        = { "host", "1.2.3.4", "::1", "2001:db8::1", "fe80::dead:beef" };
     for (gsize i = 0; i < G_N_ELEMENTS (hosts); i++) {
         char *joined = gtkhx_join_host_port (hosts[i], 5512);
         char *host = NULL;
         guint16 port = 0;
         gboolean had = FALSE;
-        g_assert_true (
-            gtkhx_parse_host_port (joined, 1, &host, &port, &had));
+        g_assert_true (gtkhx_parse_host_port (joined, 1, &host, &port, &had));
         g_assert_cmpstr (host, ==, hosts[i]);
         g_assert_cmpuint (port, ==, 5512);
         g_assert_true (had);

@@ -32,7 +32,7 @@ test_user_info_self (void)
         return;
     }
 
-    guint16 self_uid_be = g_htons(htlc.uid);
+    guint16 self_uid_be = g_htons (htlc.uid);
     guint32 our_trans = htlc.trans;
 
     g_assert_true (integration_send_message (
@@ -40,8 +40,8 @@ test_user_info_self (void)
         (int)HTLC_DATA_UID, (int)sizeof (self_uid_be), &self_uid_be));
 
     /* Drain to TASK reply matching our trans. */
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     /* Walk the chunks; expect HTLS_DATA_USER_INFO + HTLS_DATA_NAME. */
@@ -49,7 +49,7 @@ test_user_info_self (void)
     gsize info_len = 0;
     gchar *name_text = NULL;
     gsize name_len = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_USER_INFO:
@@ -73,8 +73,8 @@ test_user_info_self (void)
     g_assert_cmpstr (name_text, ==, "Info Tier-3");
 
     /* Info text should mention our login (mhxd's format puts
-	 * "login: guest" on its own line; case-sensitive substring
-	 * is fine). */
+     * "login: guest" on its own line; case-sensitive substring
+     * is fine). */
     g_assert_nonnull (g_strstr_len (info_text, info_len, "guest"));
 
     g_free (info_text);

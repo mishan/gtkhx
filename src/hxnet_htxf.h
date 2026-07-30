@@ -79,15 +79,12 @@ typedef int (*hxnet_htxf_verify_cb_t) (const guint8 *fp, gsize fp_len,
  * runtime (bounded by the shared handshake timeout) and blocks the
  * calling worker for the result. Returns an owned handle, or NULL on a
  * bad argument / connect / TLS / TOFU failure. */
-extern HtxfConn *hxnet_htxf_connect (const guint8 *host, size_t host_len,
-                                     guint16 port, const guint8 *proxy_uri,
-                                     size_t proxy_uri_len, int tls,
-                                     const guint8 *preamble,
-                                     size_t preamble_len,
-                                     const HxnetHopeAead *hope_aead,
-                                     guint32 xfer_ref,
-                                     hxnet_htxf_verify_cb_t verify_cert,
-                                     void *user_data);
+extern HtxfConn *
+hxnet_htxf_connect (const guint8 *host, size_t host_len, guint16 port,
+                    const guint8 *proxy_uri, size_t proxy_uri_len, int tls,
+                    const guint8 *preamble, size_t preamble_len,
+                    const HxnetHopeAead *hope_aead, guint32 xfer_ref,
+                    hxnet_htxf_verify_cb_t verify_cert, void *user_data);
 
 /* Pack the HTXF subchannel handshake preamble into buf[..cap] (S1.1, was
  * hx_htxf_subchannel_pack_preamble in the retired htxf_subchannel.c). Returns

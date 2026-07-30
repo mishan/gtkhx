@@ -37,7 +37,8 @@ const BITMAP_BOUNDS_RIGHT: usize = 12;
 const MASK_DATA: usize = 82; // mask bitmap image data starts here
 
 fn be16(b: &[u8], off: usize) -> Option<u16> {
-    b.get(off..off + 2).map(|s| u16::from_be_bytes([s[0], s[1]]))
+    b.get(off..off + 2)
+        .map(|s| u16::from_be_bytes([s[0], s[1]]))
 }
 
 /// Pack a legacy 16-bit-per-channel `(r, g, b)` (high byte = the 8-bit value)
@@ -69,9 +70,12 @@ fn build_palette(data: &[u8], ct_off: usize, bpp: u32) -> [u32; 256] {
     if let Some(ctsize) = be16(data, ct_off + 6) {
         for i in 0..(ctsize as usize + 1) {
             let e = ct_off + 8 + i * 8;
-            let (Some(value), Some(r), Some(g), Some(b)) =
-                (be16(data, e), be16(data, e + 2), be16(data, e + 4), be16(data, e + 6))
-            else {
+            let (Some(value), Some(r), Some(g), Some(b)) = (
+                be16(data, e),
+                be16(data, e + 2),
+                be16(data, e + 4),
+                be16(data, e + 6),
+            ) else {
                 break;
             };
             out[(value as usize) & (n - 1)] = rgb_pack((r, g, b));

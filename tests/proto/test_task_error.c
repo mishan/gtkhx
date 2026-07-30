@@ -42,7 +42,9 @@ test_task_error_extracts_simple_message (void)
 
     char out[64];
     gsize out_len = 0;
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), &out_len));
     g_assert_cmpstr (out, ==, "Permission denied.");
     g_assert_cmpuint (out_len, ==, strlen (msg));
 
@@ -63,7 +65,9 @@ test_task_error_hlserver_uh_no (void)
 
     char out[64];
     gsize out_len = 0;
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), &out_len));
     g_assert_cmpstr (out, ==, "Uh, no.");
     g_assert_cmpuint (out_len, ==, 7);
 
@@ -86,7 +90,9 @@ test_task_error_converts_cr_to_lf (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
     char out[128];
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "line one\nline two\nline three");
 
     wire_fixture_free (&htlc);
@@ -109,7 +115,9 @@ test_task_error_strips_ansi (void)
                             input);
 
     char out[64];
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), NULL));
     g_assert_cmpstr (out, ==, expected);
 
     wire_fixture_free (&htlc);
@@ -130,11 +138,13 @@ test_task_error_no_taskerror_chunk_returns_false (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
 
     char out[64] = "untouched";
-    g_assert_false (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
+    g_assert_false (task_error_extract (hx_test_in (&htlc)->buf,
+                                        hx_test_in (&htlc)->pos, out,
+                                        sizeof (out), NULL));
     /* The extractor doesn't write to out on FALSE. We can't assert
-	 * exact contents because the contract says "MUST NOT read out",
-	 * but we can at least confirm we still have a valid C string at
-	 * the start. */
+     * exact contents because the contract says "MUST NOT read out",
+     * but we can at least confirm we still have a valid C string at
+     * the start. */
     g_assert_cmpstr (out, ==, "untouched");
 
     wire_fixture_free (&htlc);
@@ -144,13 +154,15 @@ static void
 test_task_error_empty_message_returns_false (void)
 {
     /* No chunks at all. dh_start walks zero iterations, found
-	 * stays FALSE. */
+     * stays FALSE. */
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
 
     char out[64];
     gsize out_len = 99;
-    g_assert_false (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len));
+    g_assert_false (task_error_extract (hx_test_in (&htlc)->buf,
+                                        hx_test_in (&htlc)->pos, out,
+                                        sizeof (out), &out_len));
     g_assert_cmpuint (out_len, ==, 99); /* unchanged */
 
     wire_fixture_free (&htlc);
@@ -163,7 +175,7 @@ test_task_error_truncates_to_buffer_size (void)
 {
     struct htlc_conn htlc;
     /* 100-byte message, but we only give the extractor 16 bytes
-	 * (15 + NUL). It should truncate. */
+     * (15 + NUL). It should truncate. */
     char msg[100];
     memset (msg, 'A', sizeof (msg));
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
@@ -171,7 +183,9 @@ test_task_error_truncates_to_buffer_size (void)
 
     char out[16];
     gsize out_len = 0;
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), &out_len));
     g_assert_cmpuint (out_len, ==, sizeof (out) - 1);
     g_assert_cmpuint (strlen (out), ==, sizeof (out) - 1);
     for (gsize i = 0; i < out_len; i++) {
@@ -200,7 +214,9 @@ test_task_error_first_taskerror_wins_when_duplicated (void)
                             second);
 
     char out[64];
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "first error");
 
     wire_fixture_free (&htlc);
@@ -221,7 +237,9 @@ test_task_error_skips_unrelated_chunks (void)
                             &some_uid);
 
     char out[64];
-    g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL));
+    g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                       hx_test_in (&htlc)->pos, out,
+                                       sizeof (out), NULL));
     g_assert_cmpstr (out, ==, "the real error");
 
     wire_fixture_free (&htlc);
@@ -237,7 +255,8 @@ test_task_error_null_out_returns_false (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, 1, 1);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
-    g_assert_false (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL, 64, NULL));
+    g_assert_false (task_error_extract (
+        hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos, NULL, 64, NULL));
 
     wire_fixture_free (&htlc);
 }
@@ -251,7 +270,8 @@ test_task_error_zero_out_size_returns_false (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_TASKERROR, strlen (msg), msg);
 
     char out[64];
-    g_assert_false (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, 0, NULL));
+    g_assert_false (task_error_extract (hx_test_in (&htlc)->buf,
+                                        hx_test_in (&htlc)->pos, out, 0, NULL));
 
     wire_fixture_free (&htlc);
 }

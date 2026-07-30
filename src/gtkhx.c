@@ -215,124 +215,125 @@ gtkhx_refresh_css (void)
     fontprops = pango_to_css_props (gtkhx_font_desc);
 
     /* Two themed rules:
-	 *
-	 *   .gtkhx-text   — read-only text surfaces (agreement window, news
-	 *                   bodies, broadcast viewer, gchat subject entry).
-	 *                   Gets the active theme's font AND fg/bg/caret
-	 *                   so themed surfaces match the chat output.
-	 *
-	 *   .gtkhx-input  — editable text views (chat / PM / pchat input
-	 *                   boxes). Gets ONLY the theme's fg/bg/caret —
-	 *                   font stays on the built-in .monospace class
-	 *                   (applied via gtkhx_apply_input_font). Setting
-	 *                   font on the input via .gtkhx-text-style CSS
-	 *                   triggered an ascender-ink clip on newly typed
-	 *                   glyphs at small Monospace sizes (Phase-5 bug);
-	 *                   colors don't have that problem.
-	 *
-	 * The descendant ".gtkhx-{text,input} text" rule reaches
-	 * GtkTextView's inner "text" CSS node so the actual body picks
-	 * up the same look (GtkTextView's outer node is just chrome).
-	 *
-	 * Earlier we deliberately omitted color/background-color here
-	 * because the source was a *single* hardcoded (fg_col, bg_col)
-	 * pair that forced light-grey-on-black on those widgets
-	 * regardless of the user's Light/Dark choice. The theme model
-	 * fixes that: each theme has explicit light + dark palette
-	 * variants, and we pick the variant via AdwStyleManager's `dark`
-	 * property — same dispatch the xtext palette uses — so the
-	 * applied colors always match the active light/dark mode. */
-    gchar *fghex = g_strdup_printf ("#%02x%02x%02x",
-                                    (int) (fg.red   * 255.0 + 0.5),
-                                    (int) (fg.green * 255.0 + 0.5),
-                                    (int) (fg.blue  * 255.0 + 0.5));
-    gchar *bghex = g_strdup_printf ("#%02x%02x%02x",
-                                    (int) (bg.red   * 255.0 + 0.5),
-                                    (int) (bg.green * 255.0 + 0.5),
-                                    (int) (bg.blue  * 255.0 + 0.5));
+     *
+     *   .gtkhx-text   — read-only text surfaces (agreement window, news
+     *                   bodies, broadcast viewer, gchat subject entry).
+     *                   Gets the active theme's font AND fg/bg/caret
+     *                   so themed surfaces match the chat output.
+     *
+     *   .gtkhx-input  — editable text views (chat / PM / pchat input
+     *                   boxes). Gets ONLY the theme's fg/bg/caret —
+     *                   font stays on the built-in .monospace class
+     *                   (applied via gtkhx_apply_input_font). Setting
+     *                   font on the input via .gtkhx-text-style CSS
+     *                   triggered an ascender-ink clip on newly typed
+     *                   glyphs at small Monospace sizes (Phase-5 bug);
+     *                   colors don't have that problem.
+     *
+     * The descendant ".gtkhx-{text,input} text" rule reaches
+     * GtkTextView's inner "text" CSS node so the actual body picks
+     * up the same look (GtkTextView's outer node is just chrome).
+     *
+     * Earlier we deliberately omitted color/background-color here
+     * because the source was a *single* hardcoded (fg_col, bg_col)
+     * pair that forced light-grey-on-black on those widgets
+     * regardless of the user's Light/Dark choice. The theme model
+     * fixes that: each theme has explicit light + dark palette
+     * variants, and we pick the variant via AdwStyleManager's `dark`
+     * property — same dispatch the xtext palette uses — so the
+     * applied colors always match the active light/dark mode. */
+    gchar *fghex = g_strdup_printf (
+        "#%02x%02x%02x", (int)(fg.red * 255.0 + 0.5),
+        (int)(fg.green * 255.0 + 0.5), (int)(fg.blue * 255.0 + 0.5));
+    gchar *bghex = g_strdup_printf (
+        "#%02x%02x%02x", (int)(bg.red * 255.0 + 0.5),
+        (int)(bg.green * 255.0 + 0.5), (int)(bg.blue * 255.0 + 0.5));
 
     /* .gtkhx-listview — color theming for list-shaped surfaces
-	 * (GtkColumnView, GtkListView, GtkListBox): tracker, tasks,
-	 * files browser, news browser.
-	 *
-	 * Only emitted for *non-default* themes. The built-in "default"
-	 * theme is supposed to feel like vanilla GtkHx + system colors
-	 * — its [palette] values are tuned for the chat output, not for
-	 * sidebar lists, and forcing #fafafa on a user's GNOME dark
-	 * desktop's listview was visually wrong. A user who picks
-	 * Solarized signed up for the cream-on-cream look across every
-	 * surface; the default theme stays out of the way.
-	 *
-	 * Header rows (.gtkhx-listview > header on GtkColumnView) are
-	 * never themed — column titles always render in the system
-	 * theme so they stay legible on any background.
-	 *
-	 * Two cases to cover, because the class is sometimes applied
-	 * to a parent of the listview/list node and sometimes directly
-	 * to it:
-	 *
-	 *   GtkColumnView (tracker, files panels): class sits on the
-	 *     `columnview` node, so the rows are .gtkhx-listview
-	 *     descendants — `listview > row` / `> row > cell` match.
-	 *   GtkListView (news_browser): class sits on the `listview`
-	 *     node itself; rows are direct children → `.gtkhx-listview
-	 *     > row` matches.
-	 *   GtkListBox (tasks): class sits on the `list` node itself;
-	 *     rows are direct children → same direct-child rule.
-	 *
-	 * Both descendant and direct-child selectors are emitted so a
-	 * caller can apply .gtkhx-listview at either layer without
-	 * worrying about the node tree. Headers (.gtkhx-listview >
-	 * header) stay system-themed so column titles are always
-	 * legible. Selection (row:selected) keeps the system accent.
-	 *
-	 * The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
-	 * get painted — chat is the surface the palette was designed
-	 * for, and built-in defaults are tuned for it.
-	 *
-	 * The listview-shaped surfaces only get painted when the active
-	 * theme has *explicitly* set FG or BG. That gates the "force
-	 * chat colors onto sidebar lists" behavior to themes that opted
-	 * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
-	 * theme that omits FG/BG (the shipped default, post-cleanup)
-	 * leaves the listview surfaces at the system theme. */
+     * (GtkColumnView, GtkListView, GtkListBox): tracker, tasks,
+     * files browser, news browser.
+     *
+     * Only emitted for *non-default* themes. The built-in "default"
+     * theme is supposed to feel like vanilla GtkHx + system colors
+     * — its [palette] values are tuned for the chat output, not for
+     * sidebar lists, and forcing #fafafa on a user's GNOME dark
+     * desktop's listview was visually wrong. A user who picks
+     * Solarized signed up for the cream-on-cream look across every
+     * surface; the default theme stays out of the way.
+     *
+     * Header rows (.gtkhx-listview > header on GtkColumnView) are
+     * never themed — column titles always render in the system
+     * theme so they stay legible on any background.
+     *
+     * Two cases to cover, because the class is sometimes applied
+     * to a parent of the listview/list node and sometimes directly
+     * to it:
+     *
+     *   GtkColumnView (tracker, files panels): class sits on the
+     *     `columnview` node, so the rows are .gtkhx-listview
+     *     descendants — `listview > row` / `> row > cell` match.
+     *   GtkListView (news_browser): class sits on the `listview`
+     *     node itself; rows are direct children → `.gtkhx-listview
+     *     > row` matches.
+     *   GtkListBox (tasks): class sits on the `list` node itself;
+     *     rows are direct children → same direct-child rule.
+     *
+     * Both descendant and direct-child selectors are emitted so a
+     * caller can apply .gtkhx-listview at either layer without
+     * worrying about the node tree. Headers (.gtkhx-listview >
+     * header) stay system-themed so column titles are always
+     * legible. Selection (row:selected) keeps the system accent.
+     *
+     * The chat-shaped surfaces (.gtkhx-text / .gtkhx-input) ALWAYS
+     * get painted — chat is the surface the palette was designed
+     * for, and built-in defaults are tuned for it.
+     *
+     * The listview-shaped surfaces only get painted when the active
+     * theme has *explicitly* set FG or BG. That gates the "force
+     * chat colors onto sidebar lists" behavior to themes that opted
+     * in: Solarized's palette.{light,dark} fg/bg keys trigger it; a
+     * theme that omits FG/BG (the shipped default, post-cleanup)
+     * leaves the listview surfaces at the system theme. */
     GString *css_buf = g_string_new (NULL);
-    g_string_append_printf (
-        css_buf,
-        ".gtkhx-text, .gtkhx-text text {"
-        "  %s"
-        "  color: %s;"
-        "  background-color: %s;"
-        "  caret-color: %s;"
-        "}"
-        ".gtkhx-input, .gtkhx-input text {"
-        "  color: %s;"
-        "  background-color: %s;"
-        "  caret-color: %s;"
-        "}",
-        fontprops, fghex, bghex, fghex,
-        fghex, bghex, fghex);
+    g_string_append_printf (css_buf,
+                            ".gtkhx-text, .gtkhx-text text {"
+                            "  %s"
+                            "  color: %s;"
+                            "  background-color: %s;"
+                            "  caret-color: %s;"
+                            "}"
+                            ".gtkhx-input, .gtkhx-input text {"
+                            "  color: %s;"
+                            "  background-color: %s;"
+                            "  caret-color: %s;"
+                            "}",
+                            fontprops, fghex, bghex, fghex, fghex, bghex,
+                            fghex);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
         || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
         /* Row selectors carry :not(:hover):not(:active) so the
-		 * system theme's hover overlay and click-feedback rules
-		 * still win for those pseudo-classes — without that
-		 * exclusion our PRIORITY_APPLICATION background paints
-		 * over the system's :hover overlay and the user sees no
-		 * feedback when mousing over rows. The outer columnview /
-		 * listview / list nodes (no row state) and the cells (read
-		 * row state via parent matching) keep the theme bg in the
-		 * steady state. */
+         * system theme's hover overlay and click-feedback rules
+         * still win for those pseudo-classes — without that
+         * exclusion our PRIORITY_APPLICATION background paints
+         * over the system's :hover overlay and the user sees no
+         * feedback when mousing over rows. The outer columnview /
+         * listview / list nodes (no row state) and the cells (read
+         * row state via parent matching) keep the theme bg in the
+         * steady state. */
         g_string_append_printf (
             css_buf,
             ".gtkhx-listview,"
             ".gtkhx-listview listview,"
-            ".gtkhx-listview listview > row:not(:selected):not(:hover):not(:active),"
-            ".gtkhx-listview listview > row:not(:selected):not(:hover):not(:active) > cell,"
+            ".gtkhx-listview listview > "
+            "row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview listview > "
+            "row:not(:selected):not(:hover):not(:active) > cell,"
             ".gtkhx-listview list,"
-            ".gtkhx-listview list > row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-listview list > "
+            "row:not(:selected):not(:hover):not(:active),"
             ".gtkhx-listview > row:not(:selected):not(:hover):not(:active),"
-            ".gtkhx-listview > row:not(:selected):not(:hover):not(:active) > cell {"
+            ".gtkhx-listview > row:not(:selected):not(:hover):not(:active) > "
+            "cell {"
             "  color: %s;"
             "  background-color: %s;"
             "}",
@@ -366,38 +367,38 @@ gtkhx_refresh_userlist_css (PangoFontDescription *fd)
     }
 
     fontprops = pango_to_css_props (fd);
-    fghex = g_strdup_printf ("#%02x%02x%02x",
-                             (int) (fg.red   * 255.0 + 0.5),
-                             (int) (fg.green * 255.0 + 0.5),
-                             (int) (fg.blue  * 255.0 + 0.5));
-    bghex = g_strdup_printf ("#%02x%02x%02x",
-                             (int) (bg.red   * 255.0 + 0.5),
-                             (int) (bg.green * 255.0 + 0.5),
-                             (int) (bg.blue  * 255.0 + 0.5));
+    fghex = g_strdup_printf ("#%02x%02x%02x", (int)(fg.red * 255.0 + 0.5),
+                             (int)(fg.green * 255.0 + 0.5),
+                             (int)(fg.blue * 255.0 + 0.5));
+    bghex = g_strdup_printf ("#%02x%02x%02x", (int)(bg.red * 255.0 + 0.5),
+                             (int)(bg.green * 255.0 + 0.5),
+                             (int)(bg.blue * 255.0 + 0.5));
 
     /* Font selector stays on .gtkhx-userlist itself (the users-list
-	 * font pref) regardless of theme — separate user pref the
-	 * userlist always honors. Theme fg/bg are painted across the
-	 * column-view's inner nodes ONLY when the active theme has
-	 * explicitly set FG or BG; themes that didn't opt in (and the
-	 * shipped default after the default.ini cleanup) leave the
-	 * userlist at system colors. Headers always keep system styling
-	 * so column titles stay legible. Selection (row:selected)
-	 * keeps the system accent. */
+     * font pref) regardless of theme — separate user pref the
+     * userlist always honors. Theme fg/bg are painted across the
+     * column-view's inner nodes ONLY when the active theme has
+     * explicitly set FG or BG; themes that didn't opt in (and the
+     * shipped default after the default.ini cleanup) leave the
+     * userlist at system colors. Headers always keep system styling
+     * so column titles stay legible. Selection (row:selected)
+     * keeps the system accent. */
     GString *css_buf = g_string_new (NULL);
     g_string_append_printf (css_buf, ".gtkhx-userlist { %s }", fontprops);
     if (gtkhx_theme_palette_role_is_set (GTKHX_PAL_FG, dark)
         || gtkhx_theme_palette_role_is_set (GTKHX_PAL_BG, dark)) {
         /* :not(:hover):not(:active) so the system theme's hover
-		 * overlay + click feedback still paint over our theme bg.
-		 * Same reasoning as the .gtkhx-listview rule in
-		 * gtkhx_refresh_css. */
+         * overlay + click feedback still paint over our theme bg.
+         * Same reasoning as the .gtkhx-listview rule in
+         * gtkhx_refresh_css. */
         g_string_append_printf (
             css_buf,
             ".gtkhx-userlist,"
             ".gtkhx-userlist listview,"
-            ".gtkhx-userlist listview > row:not(:selected):not(:hover):not(:active),"
-            ".gtkhx-userlist listview > row:not(:selected):not(:hover):not(:active) > cell {"
+            ".gtkhx-userlist listview > "
+            "row:not(:selected):not(:hover):not(:active),"
+            ".gtkhx-userlist listview > "
+            "row:not(:selected):not(:hover):not(:active) > cell {"
             "  color: %s;"
             "  background-color: %s;"
             "}",
@@ -424,9 +425,9 @@ gtkhx_apply_text_style (GtkWidget *w)
     }
 
     /* gtk_style_context_add_class is deprecated in GTK 4.10
-	 * and was the source of a gtk_css_node_insert_after assertion when
-	 * adding the class on a widget whose CSS node hadn't been parented
-	 * yet. gtk_widget_add_css_class is the modern, safer path. */
+     * and was the source of a gtk_css_node_insert_after assertion when
+     * adding the class on a widget whose CSS node hadn't been parented
+     * yet. gtk_widget_add_css_class is the modern, safer path. */
     if (!gtk_widget_has_css_class (w, "gtkhx-text")) {
         gtk_widget_add_css_class (w, "gtkhx-text");
     }
@@ -501,7 +502,6 @@ gtkhx_apply_userlist_style (GtkWidget *w)
     }
 }
 static struct timer *timer_list;
-
 
 /* The gutter tag on status lines. Just the name now — the view draws
  * the brackets and picks the colours (chat.c::chat_log_line_handler).
@@ -639,7 +639,7 @@ hx_quit (void)
 {
     gtkhx_save_window_positions ();
     prefs_write ();
-    dock_layout_shutdown ();   /* flush pending debounced save */
+    dock_layout_shutdown (); /* flush pending debounced save */
     xfers_delete_all ();
     tracker_kill_threads ();
 
@@ -648,7 +648,7 @@ hx_quit (void)
     }
 
 #if 0 /* XXX */
-	close_logs();
+    close_logs();
 #endif
 
     if (gtkhx_app) {
@@ -879,7 +879,8 @@ init_icons (void)
         /* Relocatable Windows build: derive the prefix from the running module
          * (…\gtkhx.exe → prefix) so a moved/unzipped install finds its
          * icons.rsrc even though g_get_system_data_dirs() may not cover it. */
-        char *root = g_win32_get_package_installation_directory_of_module (NULL);
+        char *root
+            = g_win32_get_package_installation_directory_of_module (NULL);
         if (root) {
             char *p = g_build_filename (root, "share", "gtkhx", "icons", NULL);
             collect_rsrc_files (paths, p);
@@ -903,7 +904,8 @@ init_icons (void)
         /* macres_file_open reads the file itself (portable — no fd handoff). */
         ifn->cicns[i] = macres_file_open (ifn->files[i]);
         if (!ifn->cicns[i]) {
-            g_warning ("%s: not readable or not a valid Mac resource file\n", ifn->files[i]);
+            g_warning ("%s: not readable or not a valid Mac resource file\n",
+                       ifn->files[i]);
         }
     }
     ifn->n = paths->len;
@@ -987,7 +989,7 @@ fe_init (void)
      * path consumes when it runs create_chat_window /
      * create_tasks_window. Order matters: model state first, then
      * the toolbar (which now hosts everything). */
-    create_chat  (&the_session);
+    create_chat (&the_session);
     create_tasks (&the_session);
 
     create_toolbar_window (&the_session);
@@ -1127,7 +1129,7 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     }
     {
         /* Ctrl+U clears the focused text input, in any window. See
-		 * toolbar.c::on_action_clear_input. */
+         * toolbar.c::on_action_clear_input. */
         const char *clear_accels[] = { "<Control>u", NULL };
         gtk_application_set_accels_for_action (app, "app.clear-input",
                                                clear_accels);
@@ -1198,7 +1200,6 @@ loop (void)
 static void
 init (int argc, char **argv)
 {
-
     /* parse the GTKHX_DEBUG env var into the categorised
      * debug logger before anything else, so init paths can already
      * call debug_log("startup", ...) etc. The proto_trace module
@@ -1207,7 +1208,7 @@ init (int argc, char **argv)
      * enough to leave unconditionally. */
     debug_init ();
     /* gtk_set_locale() was removed in GTK 3 — gtk_init() now handles
-	 * setlocale() itself. */
+     * setlocale() itself. */
     setlocale (LC_ALL, "");
     /* Tell gettext where our message catalogues live and which domain
      * the _() macro should look up. Without these calls dgettext()
@@ -1390,7 +1391,7 @@ on_news_post_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     output_news_post (htlc, (char *)news, (guint16)len);
 
     /* News posts can be paragraphs long; pull just the first
-	 * line as the notification preview. */
+     * line as the notification preview. */
     {
         const char *raw = (const char *)news;
         const char *nl;
@@ -1488,9 +1489,9 @@ on_users_clear_signal (GtkhxSession *emitter, struct htlc_conn *htlc,
     (void)user_data;
     users_clear (htlc, chat);
     /* Clearing the public user list is the view-side disconnect
-	 * boundary. GIF avatars are per-session server-side, so drop the
-	 * whole cache (and cancel any in-flight decodes) — a reconnect
-	 * re-probes and re-fetches from scratch. */
+     * boundary. GIF avatars are per-session server-side, so drop the
+     * whole cache (and cancel any in-flight decodes) — a reconnect
+     * re-probes and re-fetches from scratch. */
     if (chat && hx_chat_cid (chat) == 0) {
         gtkhx_avatar_clear_all ();
     }
@@ -1553,11 +1554,11 @@ on_file_list_signal (GtkhxSession *emitter, gpointer cfl, gpointer fh,
     (void)emitter;
     (void)user_data;
     /* only the new files browser remains; route the
-	 * response to its remote-files-provider. The legacy
-	 * output_file_list fallback is gone with the rest of the
-	 * legacy gfile_list UI. Responses without a recognised
-	 * provider carrier (e.g. stale FILE_LIST tasks from a
-	 * closed window) get harmlessly dropped inside the handler. */
+     * response to its remote-files-provider. The legacy
+     * output_file_list fallback is gone with the rest of the
+     * legacy gfile_list UI. Responses without a recognised
+     * provider carrier (e.g. stale FILE_LIST tasks from a
+     * closed window) get harmlessly dropped inside the handler. */
     (void)hx_remote_files_provider_handle_file_list (cfl, fh, data);
 }
 
@@ -1571,23 +1572,23 @@ on_file_update_signal (GtkhxSession *emitter, gpointer sess, gpointer htxf,
     file_update ((session *)sess, x);
 
     /* file_update fires repeatedly during a transfer. Detect
-	 * "just finished" by total_pos catching up to total_size and
-	 * notify once. The xfer worker sets total_pos = total_size
-	 * explicitly at end-of-stream and then exits (post_xfer_
-	 * cleanup follows), so this state is reached exactly once
-	 * per htxf in practice. The notification ID is shared
-	 * ("xfer"), so even if it fired twice the second would just
-	 * refresh the popup, not stack.
-	 *
-	 * For folder transfers, prefer the original folder name
-	 * (htxf->remotename, set at xfer_new_folder time and never
-	 * touched again) over htxf->path: the threshold can be
-	 * crossed inside file_recv_one when the LAST file's data
-	 * fork completes, at which point htxf->path is the per-file
-	 * path, not the folder root. folder_get_thread restores
-	 * htxf->path to the folder root before the final
-	 * post_file_update, but the in-flight one beats it. Using
-	 * remotename sidesteps the timing entirely. */
+     * "just finished" by total_pos catching up to total_size and
+     * notify once. The xfer worker sets total_pos = total_size
+     * explicitly at end-of-stream and then exits (post_xfer_
+     * cleanup follows), so this state is reached exactly once
+     * per htxf in practice. The notification ID is shared
+     * ("xfer"), so even if it fired twice the second would just
+     * refresh the popup, not stack.
+     *
+     * For folder transfers, prefer the original folder name
+     * (htxf->remotename, set at xfer_new_folder time and never
+     * touched again) over htxf->path: the threshold can be
+     * crossed inside file_recv_one when the LAST file's data
+     * fork completes, at which point htxf->path is the per-file
+     * path, not the folder root. folder_get_thread restores
+     * htxf->path to the folder root before the final
+     * post_file_update, but the in-flight one beats it. Using
+     * remotename sidesteps the timing entirely. */
     if (x && x->total_size > 0 && hx_htxf_total_pos (x) >= x->total_size) {
         const char *display = NULL;
         if (x->opt.folder && x->remotename_len > 0) {
@@ -1769,8 +1770,8 @@ gtkhx_connect_signals (GtkhxSession *emitter)
                       G_CALLBACK (on_task_update_signal), NULL);
     g_signal_connect (emitter, "chat-log-line",
                       G_CALLBACK (chat_log_line_handler), NULL);
-    g_signal_connect (emitter, "user-notice",
-                      G_CALLBACK (user_notice_handler), NULL);
+    g_signal_connect (emitter, "user-notice", G_CALLBACK (user_notice_handler),
+                      NULL);
     g_signal_connect (emitter, "connection-state-changed",
                       G_CALLBACK (on_connection_state_changed_signal), NULL);
 }
@@ -1779,7 +1780,6 @@ gtkhx_connect_signals (GtkhxSession *emitter)
  * carry is now a signal on GtkhxSession (see gtkhx_session.{c,h}).
  * The two lifecycle hooks (init, loop) only ever had one
  * implementation, so they're called by name from fe_init. */
-
 
 void hotline_client_init (int argc, char **argv);
 
@@ -1802,19 +1802,19 @@ main (int argc, char **argv, char **envp)
     g_unsetenv ("GTKHX_TLS_TEST_PROMPT");
 
     /* Set the GLib program name early so GTK 4 picks it up as the
-	 * Wayland xdg_toplevel app_id (and the X11 WM_CLASS) on every
-	 * window's first commit. The default would be argv[0]
-	 * ("gtkhx"), which is not what the .desktop file declares —
-	 * compositors look up the icon and group windows by app_id, so
-	 * a mismatch leaves the dock with no icon and no .desktop
-	 * association.
-	 *
-	 * Has to happen before any window is created. fe_init() (called
-	 * from hotline_client_init below) constructs the toolbar and
-	 * the auto-opened windows synchronously, so this must precede
-	 * that. The same value is repeated in adw_application_new in
-	 * loop() — both call sites have to match for GTK 4 to be
-	 * consistent. */
+     * Wayland xdg_toplevel app_id (and the X11 WM_CLASS) on every
+     * window's first commit. The default would be argv[0]
+     * ("gtkhx"), which is not what the .desktop file declares —
+     * compositors look up the icon and group windows by app_id, so
+     * a mismatch leaves the dock with no icon and no .desktop
+     * association.
+     *
+     * Has to happen before any window is created. fe_init() (called
+     * from hotline_client_init below) constructs the toolbar and
+     * the auto-opened windows synchronously, so this must precede
+     * that. The same value is repeated in adw_application_new in
+     * loop() — both call sites have to match for GTK 4 to be
+     * consistent. */
     g_set_prgname ("com.nasledov.gtkhx");
     g_set_application_name ("GtkHx");
 
@@ -1897,12 +1897,12 @@ get_password (char *buf)
     tcsetattr (0, TCSANOW, &termio);
 
     /* The knights who say "nee" demand a..
-	   SHRUBBERY! */
+       SHRUBBERY! */
     printf ("Password: ");
     if (!fgets (buf, 128, stdin)) {
         /* EOF or read error on stdin (e.g. tty closed mid-prompt).
-		 * Restore the terminal flags before returning so the
-		 * caller's shell isn't left with echo disabled. */
+         * Restore the terminal flags before returning so the
+         * caller's shell isn't left with echo disabled. */
         buf[0] = '\0';
         tcsetattr (0, TCSANOW, &termio);
         return;
@@ -1953,7 +1953,7 @@ extern void connect_bookmark_name (char *name);
 void
 hotline_client_init (int argc, char **argv)
 {
-    const char *user = g_getenv("USER");
+    const char *user = g_getenv ("USER");
     char opt_char;
     int index = 0;
     char *server = 0;
@@ -2046,7 +2046,7 @@ hotline_client_init (int argc, char **argv)
         }
 #endif
         /* CLI --server bootstrap: tls=0 default. GTKHX_TLS=1 env-var
-		 * override applies (Phase 4 adds a --tls CLI flag). */
+         * override applies (Phase 4 adds a --tls CLI flag). */
         hx_connect (the_session.htlc, server, port, login ? login : "guest",
                     pass ? pass : "", 0, /*tls=*/0);
         g_free (server);

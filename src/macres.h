@@ -23,11 +23,11 @@ typedef struct macres_file macres_file;
  * name / namelen are always NULL / 0.
  */
 struct macres_res {
-	guint32 datalen;
-	guint16 resid;
-	guint16 namelen;
-	guint8 *name;
-	void *data;
+    guint32 datalen;
+    guint16 resid;
+    guint16 namelen;
+    guint8 *name;
+    void *data;
 };
 
 typedef struct macres_res macres_res;

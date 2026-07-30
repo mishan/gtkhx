@@ -26,9 +26,7 @@
 use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 
-use hotline_proto::build::{
-    self, ChatRequest, ChatSubjectRequest, HxChunk,
-};
+use hotline_proto::build::{self, ChatRequest, ChatSubjectRequest, HxChunk};
 use hotline_proto::messages::ClientHdr;
 
 // Wire opcodes — single source of truth is hotline_proto::messages::ClientHdr
@@ -74,18 +72,24 @@ extern "C" {
         data: *mut c_void,
         str_: *const c_char,
     ) -> *mut c_void;
-    fn hlwrite_chunks(
-        htlc: *mut c_void,
-        ty: u32,
-        flag: u32,
-        chunks: *const HxChunk,
-        hc: c_int,
-    );
+    fn hlwrite_chunks(htlc: *mut c_void, ty: u32, flag: u32, chunks: *const HxChunk, hc: c_int);
 
     // rcv.c — reply-task handlers. Declared with the 3-arg RcvTaskFn shape (see
     // the typedef note); the linker resolves the real symbols.
-    fn hx_rcv_user_change(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
-    fn rcv_task_user_list_switch(htlc: *mut c_void, frame: *const c_void, frame_len: usize, ptr: *mut c_void, data: *mut c_void);
+    fn hx_rcv_user_change(
+        htlc: *mut c_void,
+        frame: *const c_void,
+        frame_len: usize,
+        ptr: *mut c_void,
+        data: *mut c_void,
+    );
+    fn rcv_task_user_list_switch(
+        htlc: *mut c_void,
+        frame: *const c_void,
+        frame_len: usize,
+        ptr: *mut c_void,
+        data: *mut c_void,
+    );
 }
 
 // The C send-path primitives are stubbed under cfg(test) (see tests.rs), so the
@@ -119,13 +123,7 @@ unsafe fn with_wire<R>(
     let bytes = cstr_bytes(text);
     let utf8_mode = hx_htlc_text_encoding_cap(htlc);
     let mut wire_len: usize = 0;
-    let wire = gtkhx_text_for_wire(
-        text,
-        bytes.len(),
-        utf8_mode,
-        is_body,
-        &mut wire_len,
-    );
+    let wire = gtkhx_text_for_wire(text, bytes.len(), utf8_mode, is_body, &mut wire_len);
     // gtkhx_text_for_wire never returns NULL (empty buffer on any guard), but
     // treat NULL / 0 / oversized as empty defensively — from_raw_parts requires
     // a non-NULL base and len <= isize::MAX.
@@ -307,11 +305,7 @@ pub unsafe extern "C" fn hx_reject_chat(htlc: *mut c_void, cid: u32) {
 /// `htlc` is NULL or a valid `htlc_conn *`; `subject` is a NUL-terminated C
 /// string or NULL; main thread only.
 #[no_mangle]
-pub unsafe extern "C" fn hx_change_subject(
-    htlc: *mut c_void,
-    cid: u32,
-    subject: *const c_char,
-) {
+pub unsafe extern "C" fn hx_change_subject(htlc: *mut c_void, cid: u32, subject: *const c_char) {
     if htlc.is_null() {
         return;
     }

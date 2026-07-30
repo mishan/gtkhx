@@ -56,13 +56,13 @@ G_DECLARE_FINAL_TYPE (HxSplit, hx_split, HX, SPLIT, GtkWidget)
 
 /* Construct a leaf wrapping a fresh empty PanelFrame. Mostly used
  * by hx_split_split when the new sibling needs a blank canvas. */
-HxSplit       *hx_split_new                  (void);
+HxSplit *hx_split_new (void);
 
 /* Construct a leaf wrapping an existing PanelFrame. The frame
  * becomes a child of the new HxSplit (its previous parent, if any,
  * MUST be NULL — the typical use site is right after
  * panel_frame_new). */
-HxSplit       *hx_split_new_with_frame       (PanelFrame    *frame);
+HxSplit *hx_split_new_with_frame (PanelFrame *frame);
 
 /* Construct an internal-split HxSplit directly from two existing
  * HxSplit children + an orientation. Both children must be
@@ -71,37 +71,35 @@ HxSplit       *hx_split_new_with_frame       (PanelFrame    *frame);
  * (the leaves get constructed first, then nested splits wrap
  * them) without going through hx_split_split which manufactures
  * a blank sibling for you. */
-HxSplit       *hx_split_new_internal         (HxSplit         *child_a,
-                                              HxSplit         *child_b,
-                                              GtkOrientation   orientation);
+HxSplit *hx_split_new_internal (HxSplit *child_a, HxSplit *child_b,
+                                GtkOrientation orientation);
 
 /* True iff this node currently holds a PanelFrame leaf. */
-gboolean       hx_split_is_leaf              (HxSplit       *self);
+gboolean hx_split_is_leaf (HxSplit *self);
 
 /* Leaf accessor. NULL on an internal split. */
-PanelFrame    *hx_split_get_frame            (HxSplit       *self);
+PanelFrame *hx_split_get_frame (HxSplit *self);
 
 /* Internal-split accessors. NULL / 0 on a leaf. The orientation
  * is the orientation of the paned (GTK_ORIENTATION_HORIZONTAL =
  * side-by-side children, GTK_ORIENTATION_VERTICAL = stacked). */
-HxSplit       *hx_split_get_child_a          (HxSplit       *self);
-HxSplit       *hx_split_get_child_b          (HxSplit       *self);
-GtkOrientation hx_split_get_orientation      (HxSplit       *self);
+HxSplit *hx_split_get_child_a (HxSplit *self);
+HxSplit *hx_split_get_child_b (HxSplit *self);
+GtkOrientation hx_split_get_orientation (HxSplit *self);
 
 /* Underlying GtkPaned for an internal-split node. NULL on a leaf.
  * Exposed so callers can tweak paned-level properties — divider
  * position, shrink semantics — that don't have a meaningful
  * HxSplit-level abstraction. The pointer is owned by the HxSplit;
  * don't unparent or sink. */
-GtkPaned      *hx_split_get_paned            (HxSplit       *self);
+GtkPaned *hx_split_get_paned (HxSplit *self);
 
 /* Convert a leaf into an internal split. The current PanelFrame
  * becomes the start child (child_a)'s frame; a brand-new empty
  * PanelFrame leaf is created for child_b. Returns the new sibling
  * leaf so the caller can populate it. Returns NULL and warns when
  * called on an internal split. */
-HxSplit       *hx_split_split                (HxSplit        *self,
-                                              GtkOrientation  orientation);
+HxSplit *hx_split_split (HxSplit *self, GtkOrientation orientation);
 
 /* Collapse a leaf. The leaf's PanelFrame is destroyed and its
  * sibling under the same parent paned takes the parent's place in
@@ -110,27 +108,24 @@ HxSplit       *hx_split_split                (HxSplit        *self,
  *   - the leaf is the area root (no parent to collapse into), OR
  *   - the leaf's PanelFrame still has pages (caller should move
  *     panels out first via panel_frame_remove / panel_frame_add). */
-gboolean       hx_split_close_leaf           (HxSplit       *self);
+gboolean hx_split_close_leaf (HxSplit *self);
 
 /* Walk the tree from this leaf looking for the leaf that lies in
  * the given direction. Returns NULL if no such leaf exists in this
  * tree. Used by the chevron menu's relative-move actions
  * (panel.move-left / right / up / down). */
-HxSplit       *hx_split_neighbor             (HxSplit          *leaf,
-                                              GtkDirectionType  direction);
+HxSplit *hx_split_neighbor (HxSplit *leaf, GtkDirectionType direction);
 
 /* Find the HxSplit leaf that contains the given PanelFrame. NULL
  * if the frame isn't in this tree. */
-HxSplit       *hx_split_find_for_frame       (HxSplit       *root,
-                                              PanelFrame    *frame);
+HxSplit *hx_split_find_for_frame (HxSplit *root, PanelFrame *frame);
 
 /* Iterate over every leaf in left-to-right / top-to-bottom order.
  * The callback must not mutate the tree (no split / close from
  * inside; collect leaves first if a mutating pass is needed). */
 typedef void (*HxSplitLeafFunc) (HxSplit *leaf, gpointer user_data);
-void           hx_split_foreach_leaf         (HxSplit         *root,
-                                              HxSplitLeafFunc  func,
-                                              gpointer         user_data);
+void hx_split_foreach_leaf (HxSplit *root, HxSplitLeafFunc func,
+                            gpointer user_data);
 
 /* Install the per-frame split UI on the given PanelFrame:
  *
@@ -147,7 +142,7 @@ void           hx_split_foreach_leaf         (HxSplit         *root,
  * setup and every hx_split_split). Empty frames keep the button
  * visible — that's how the user discovers split + close on an
  * otherwise-empty area. */
-void           hx_split_install_frame_ui     (GtkWidget       *frame);
+void hx_split_install_frame_ui (GtkWidget *frame);
 
 G_END_DECLS
 

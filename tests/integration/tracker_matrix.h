@@ -51,35 +51,42 @@
  * advertises all three. Bits are independent (a tracker can speak
  * v1+v3 but not v2, for instance).
  */
-#define HX_TEST_TRACKER_CAP_V1            (1u << 0)  /* v1 listing (HTRK\0\1) */
-#define HX_TEST_TRACKER_CAP_V2            (1u << 1)  /* v2 listing (HTRK\0\2) */
-#define HX_TEST_TRACKER_CAP_V3            (1u << 2)  /* v3 listing (HTRK + 0x0003 + features) */
-#define HX_TEST_TRACKER_CAP_SEARCH_TEXT   (1u << 3)  /* v3 FEAT_QUERY — accepts SEARCH_TEXT TLV */
-#define HX_TEST_TRACKER_CAP_PAGINATION    (1u << 4)  /* v3 PAGE_OFFSET / PAGE_LIMIT TLVs */
-#define HX_TEST_TRACKER_CAP_IPV6_RECORDS  (1u << 5)  /* emits 0x06 records when applicable */
-#define HX_TEST_TRACKER_CAP_HOSTNAME_RECS (1u << 6)  /* emits 0x48 records (Argus does for ALL promoted) */
-#define HX_TEST_TRACKER_CAP_TLS           (1u << 7)  /* TLS on the listing port (Phase D) */
-#define HX_TEST_TRACKER_CAP_PROMOTED      (1u << 8)  /* config-driven pinned entries */
+#define HX_TEST_TRACKER_CAP_V1 (1u << 0) /* v1 listing (HTRK\0\1) */
+#define HX_TEST_TRACKER_CAP_V2 (1u << 1) /* v2 listing (HTRK\0\2) */
+#define HX_TEST_TRACKER_CAP_V3                                                 \
+    (1u << 2) /* v3 listing (HTRK + 0x0003 + features) */
+#define HX_TEST_TRACKER_CAP_SEARCH_TEXT                                        \
+    (1u << 3) /* v3 FEAT_QUERY — accepts SEARCH_TEXT TLV */
+#define HX_TEST_TRACKER_CAP_PAGINATION                                         \
+    (1u << 4) /* v3 PAGE_OFFSET / PAGE_LIMIT TLVs */
+#define HX_TEST_TRACKER_CAP_IPV6_RECORDS                                       \
+    (1u << 5) /* emits 0x06 records when applicable */
+#define HX_TEST_TRACKER_CAP_HOSTNAME_RECS                                      \
+    (1u << 6) /* emits 0x48 records (Argus does for ALL promoted) */
+#define HX_TEST_TRACKER_CAP_TLS                                                \
+    (1u << 7) /* TLS on the listing port (Phase D) */
+#define HX_TEST_TRACKER_CAP_PROMOTED                                           \
+    (1u << 8) /* config-driven pinned entries */
 
 /* ---- The matrix struct ------------------------------------------ */
 
 typedef struct {
-    const char *name;            /* "argus" | "hxtrackd" | ... */
-    const char *host;            /* DNS name or IP, used by getaddrinfo */
-    guint16     port;            /* TCP listing port (canonical 5498) */
-    guint16     udp_port;        /* UDP registration port (canonical 5499) */
+    const char *name; /* "argus" | "hxtrackd" | ... */
+    const char *host; /* DNS name or IP, used by getaddrinfo */
+    guint16 port;     /* TCP listing port (canonical 5498) */
+    guint16 udp_port; /* UDP registration port (canonical 5499) */
     /* TLS-on-listing-port future-proofing — Argus doesn't support TLS
      * today (v3 spec recommends but doesn't require it). Janus's
      * separate-port TLS pattern doesn't apply here because the
      * tracker listener has no STARTTLS shape. tls_port == 0 means
      * the entry doesn't advertise TLS. */
-    guint16     tls_port;
+    guint16 tls_port;
     /* Expected number of promoted_servers entries the container
      * config seeds. Lets a test assert "this listing returned at
      * least N records" without hard-coding the magic number. Zero
      * for trackers that don't advertise HX_TEST_TRACKER_CAP_PROMOTED. */
-    int         expected_promoted_count;
-    guint32     caps;            /* HX_TEST_TRACKER_CAP_* bitmask */
+    int expected_promoted_count;
+    guint32 caps; /* HX_TEST_TRACKER_CAP_* bitmask */
 } hx_test_tracker;
 
 /* Static, immutable table. Defined in tracker_matrix.c. */

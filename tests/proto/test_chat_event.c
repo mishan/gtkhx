@@ -41,8 +41,8 @@ static void
 test_chat_event_carries_the_wire_uid (void)
 {
     const char *raw = " misha:  hello";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 3, /*uid=*/4242,
-                                        NULL);
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 3, /*uid=*/4242, NULL);
     HxChatEvent *c;
 
     g_assert_nonnull (e);
@@ -97,7 +97,8 @@ test_chat_event_preserves_cid (void)
 {
     /* cid round-trips verbatim — the constructor only stashes it. */
     const char *raw = "alice: hi";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0xdeadbeef, /*uid=*/0, NULL);
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 0xdeadbeef, /*uid=*/0, NULL);
 
     g_assert_cmphex (e->cid, ==, 0xdeadbeefu);
 
@@ -111,7 +112,8 @@ test_chat_event_is_self_matches (void)
 {
     /* Sender byte-for-byte equal to self_nick: is_self TRUE. */
     const char *raw = "misha: hi all";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "misha");
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "misha");
 
     g_assert_true (e->is_self);
     g_assert_false (e->is_info);
@@ -124,7 +126,8 @@ static void
 test_chat_event_is_self_mismatch (void)
 {
     const char *raw = "alice: hi all";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "misha");
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "misha");
 
     g_assert_false (e->is_self);
     g_assert_cmpuint (e->sender_len, ==, 5);
@@ -137,9 +140,10 @@ static void
 test_chat_event_is_self_substring_does_not_match (void)
 {
     /* self_nick "mish" matches a prefix of "misha" — should NOT
-	 * flip is_self. The compare requires exact length equality. */
+     * flip is_self. The compare requires exact length equality. */
     const char *raw = "misha: hi";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "mish");
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "mish");
 
     g_assert_false (e->is_self);
 
@@ -177,14 +181,14 @@ static void
 test_chat_event_info_prefix_detected (void)
 {
     /* hx_printf_prefix emits exactly this byte sequence. The
-	 * constructor must spot it AND skip the sender split (info
-	 * lines aren't "Nick: body" — they're internal notices). */
+     * constructor must spot it AND skip the sender split (info
+     * lines aren't "Nick: body" — they're internal notices). */
     const char *raw = " \00310[\00303hx\00310]\003 reconnected";
     HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
     g_assert_true (e->is_info);
     /* No split on info lines, even when the body trailing the
-	 * prefix happens to look like "name: thing". */
+     * prefix happens to look like "name: thing". */
     g_assert_cmpuint (e->sender_len, ==, 0);
     g_assert_cmpuint (e->body_len, ==, 0);
     g_assert_false (e->is_self);
@@ -196,9 +200,10 @@ static void
 test_chat_event_info_prefix_skips_split (void)
 {
     /* Even if the info-prefix trailer contains a colon-bearing
-	 * line, we must not extract a sender from it. */
+     * line, we must not extract a sender from it. */
     const char *raw = " \00310[\00303hx\00310]\003 server: hello";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "server");
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, "server");
 
     g_assert_true (e->is_info);
     g_assert_cmpuint (e->sender_len, ==, 0);
@@ -213,8 +218,8 @@ static void
 test_chat_event_no_sender_emote (void)
 {
     /* Emote / raw server prose: no colon, no split. The line is
-	 * still UTF-8-sanitised and preserved, sender_len and body_len
-	 * both stay 0 — downstream consumers render the line verbatim. */
+     * still UTF-8-sanitised and preserved, sender_len and body_len
+     * both stay 0 — downstream consumers render the line verbatim. */
     const char *raw = "*** misha waves";
     HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
@@ -231,8 +236,8 @@ static void
 test_chat_event_no_sender_long_pre_colon (void)
 {
     /* Pre-colon portion exceeds the 31-byte nick cap; split must
-	 * reject. Verifies the constructor honours hx_chat_split_nick_body
-	 * 's URL-rejection behaviour. */
+     * reject. Verifies the constructor honours hx_chat_split_nick_body
+     * 's URL-rejection behaviour. */
     const char *raw = " the long preamble I wrote before: was here";
     HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
@@ -265,7 +270,7 @@ static void
 test_chat_event_null_raw (void)
 {
     /* gtkhx_text_to_utf8 tolerates NULL raw (treats as empty),
-	 * so the constructor mustn't crash either. */
+     * so the constructor mustn't crash either. */
     HxChatEvent *e = hx_chat_event_new (NULL, 0, 0, /*uid=*/0, NULL);
 
     g_assert_nonnull (e);
@@ -283,9 +288,10 @@ static void
 test_chat_event_utf8_passthrough (void)
 {
     /* Already-valid UTF-8 multibyte input flows through unchanged
-	 * (sender slice still indexes by bytes, not characters). */
+     * (sender slice still indexes by bytes, not characters). */
     const char raw[] = "misha: héllo wörld";
-    HxChatEvent *e = hx_chat_event_new (raw, sizeof (raw) - 1, 0, /*uid=*/0, NULL);
+    HxChatEvent *e
+        = hx_chat_event_new (raw, sizeof (raw) - 1, 0, /*uid=*/0, NULL);
 
     g_assert_cmpstr (e->line, ==, raw);
     g_assert_cmpuint (e->line_len, ==, sizeof (raw) - 1);
@@ -299,12 +305,13 @@ static void
 test_chat_event_mac_roman_converts (void)
 {
     /* MacRoman 0xE9 = é; in raw Mac Roman it's a single high-bit
-	 * byte that's invalid UTF-8. gtkhx_text_to_utf8 either converts
-	 * via the fallback charset or substitutes U+FFFD — either way,
-	 * the resulting line must be valid UTF-8 and the sender split
-	 * must still find "misha". */
+     * byte that's invalid UTF-8. gtkhx_text_to_utf8 either converts
+     * via the fallback charset or substitutes U+FFFD — either way,
+     * the resulting line must be valid UTF-8 and the sender split
+     * must still find "misha". */
     const char raw[] = "misha: h\xe9llo"; /* the 0xe9 byte */
-    HxChatEvent *e = hx_chat_event_new (raw, sizeof (raw) - 1, 0, /*uid=*/0, NULL);
+    HxChatEvent *e
+        = hx_chat_event_new (raw, sizeof (raw) - 1, 0, /*uid=*/0, NULL);
 
     g_assert_nonnull (e->line);
     g_assert_true (g_utf8_validate (e->line, e->line_len, NULL));
@@ -320,7 +327,8 @@ static void
 test_chat_event_copy_preserves_fields (void)
 {
     const char *raw = "misha: a test line";
-    HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 11, /*uid=*/0, "misha");
+    HxChatEvent *e
+        = hx_chat_event_new (raw, strlen (raw), 11, /*uid=*/0, "misha");
     HxChatEvent *c = hx_chat_event_copy (e);
 
     g_assert_nonnull (c);
@@ -364,10 +372,10 @@ test_chat_event_media_attach_round_trips (void)
     g_assert_nonnull (e);
     g_assert_null (e->media);
 
-    const guint8 id[] = {0xAB, 0xCD, 0xEF, 0x01};
+    const guint8 id[] = { 0xAB, 0xCD, 0xEF, 0x01 };
     hx_chat_event_attach_media (e, id, sizeof (id), "image/png",
-                                strlen ("image/png"),
-                                800, TRUE, 600, TRUE, 124000, TRUE);
+                                strlen ("image/png"), 800, TRUE, 600, TRUE,
+                                124000, TRUE);
     g_assert_nonnull (e->media);
     g_assert_cmpuint (e->media->id_len, ==, 4);
     g_assert (memcmp (e->media->id, id, 4) == 0);
@@ -385,16 +393,16 @@ test_chat_event_media_attach_copy_deep (void)
     HxChatEvent *e = hx_chat_event_new ("alice: look", strlen ("alice: look"),
                                         7, /*uid=*/0, NULL);
     g_assert_nonnull (e);
-    const guint8 id[] = {0x01, 0x02, 0x03};
+    const guint8 id[] = { 0x01, 0x02, 0x03 };
     hx_chat_event_attach_media (e, id, sizeof (id), "image/gif",
-                                strlen ("image/gif"),
-                                64, TRUE, 64, TRUE, 0, FALSE);
+                                strlen ("image/gif"), 64, TRUE, 64, TRUE, 0,
+                                FALSE);
 
     HxChatEvent *c = hx_chat_event_copy (e);
     g_assert_nonnull (c);
     g_assert_nonnull (c->media);
     /* Distinct allocations — modify e's media and verify c's
-	 * remained intact. */
+     * remained intact. */
     g_assert (c->media != e->media);
     g_assert (c->media->id != e->media->id);
     g_assert (c->media->mime != e->media->mime);
@@ -412,11 +420,11 @@ test_chat_event_media_attach_copy_deep (void)
 static void
 test_chat_event_media_attach_detach (void)
 {
-    HxChatEvent *e = hx_chat_event_new ("alice: hi", strlen ("alice: hi"),
-                                        0, /*uid=*/0, NULL);
-    const guint8 id[] = {0xFF};
-    hx_chat_event_attach_media (e, id, 1, "image/png", 9, 0, FALSE, 0, FALSE,
-                                0, FALSE);
+    HxChatEvent *e = hx_chat_event_new ("alice: hi", strlen ("alice: hi"), 0,
+                                        /*uid=*/0, NULL);
+    const guint8 id[] = { 0xFF };
+    hx_chat_event_attach_media (e, id, 1, "image/png", 9, 0, FALSE, 0, FALSE, 0,
+                                FALSE);
     g_assert_nonnull (e->media);
 
     /* Re-attach with NULL id detaches. */
@@ -425,8 +433,8 @@ test_chat_event_media_attach_detach (void)
     g_assert_null (e->media);
 
     /* Idempotent on NULL ev. */
-    hx_chat_event_attach_media (NULL, id, 1, "image/png", 9, 0, FALSE, 0,
-                                FALSE, 0, FALSE);
+    hx_chat_event_attach_media (NULL, id, 1, "image/png", 9, 0, FALSE, 0, FALSE,
+                                0, FALSE);
     hx_chat_event_free (e);
 }
 
@@ -434,7 +442,7 @@ static void
 test_chat_event_media_placeholder_full (void)
 {
     HxChatMedia m = {
-        .id = (guint8 *) "x",
+        .id = (guint8 *)"x",
         .id_len = 1,
         .mime = "image/png",
         .mime_len = 9,
@@ -458,7 +466,7 @@ test_chat_event_media_placeholder_minimal (void)
 {
     /* No dims, no bytes — formatter should elide those columns. */
     HxChatMedia m = {
-        .id = (guint8 *) "x",
+        .id = (guint8 *)"x",
         .id_len = 1,
         .mime = "image/jpeg",
         .mime_len = 10,
@@ -482,11 +490,11 @@ static void
 test_chat_event_media_placeholder_unknown_mime_passes_through (void)
 {
     /* Unknown but UTF-8-valid MIME — formatter prints it
-	 * verbatim. Future-proofs the placeholder against a server
-	 * that advertises image/webp / image/avif / etc. without
-	 * breaking the row. */
+     * verbatim. Future-proofs the placeholder against a server
+     * that advertises image/webp / image/avif / etc. without
+     * breaking the row. */
     HxChatMedia m = {
-        .id = (guint8 *) "x",
+        .id = (guint8 *)"x",
         .id_len = 1,
         .mime = "image/webp",
         .mime_len = 10,
@@ -501,13 +509,13 @@ static void
 test_chat_event_media_placeholder_rejects_invalid_utf8_mime (void)
 {
     /* Hostile / buggy server emits a CHAT_MEDIA_TYPE chunk with
-	 * invalid UTF-8 bytes (a lone 0xC3 continuation byte). The
-	 * Rust extractor doesn't UTF-8-validate the type field; the
-	 * placeholder formatter must defensively elide the column
-	 * rather than interpolate arbitrary bytes into UI text. The
-	 * row falls through to mime-less "[image · click to view]". */
+     * invalid UTF-8 bytes (a lone 0xC3 continuation byte). The
+     * Rust extractor doesn't UTF-8-validate the type field; the
+     * placeholder formatter must defensively elide the column
+     * rather than interpolate arbitrary bytes into UI text. The
+     * row falls through to mime-less "[image · click to view]". */
     HxChatMedia m = {
-        .id = (guint8 *) "x",
+        .id = (guint8 *)"x",
         .id_len = 1,
         .mime = "\xC3\xC3invalid",
         .mime_len = 9,
@@ -522,9 +530,9 @@ static void
 test_chat_event_media_placeholder_clickable_embeds_token (void)
 {
     /* Clickable variant: NBSP-joined + `hxmedia:N` embedded so
-	 * xtext word_click recovers the token. */
+     * xtext word_click recovers the token. */
     HxChatMedia m = {
-        .id = (guint8 *) "x",
+        .id = (guint8 *)"x",
         .id_len = 1,
         .mime = "image/png",
         .mime_len = 9,
@@ -548,7 +556,7 @@ static void
 test_chat_event_media_parse_token_finds_embedded (void)
 {
     /* Word the click handler receives: a NBSP-joined string with
-	 * `hxmedia:N` somewhere in it. Validate the parser. */
+     * `hxmedia:N` somewhere in it. Validate the parser. */
     guint token = 0;
     g_assert_true (hx_chat_media_parse_token (
         "[image\xc2\xa0\xc2\xb7\xc2\xa0hxmedia:7\xc2\xa0\xc2\xb7\xc2\xa0xyz]",
@@ -588,9 +596,9 @@ test_chat_event_decodes_emoji_in_body (void)
     g_assert_true (memcmp (e->line + e->sender_off, "misha", 5) == 0);
     /* Body slice now points at the decoded text. */
     g_assert_cmpuint (e->body_len, ==, strlen ("\xf0\x9f\x8e\x89 party"));
-    g_assert_true (memcmp (e->line + e->body_off, "\xf0\x9f\x8e\x89 party",
-                           e->body_len)
-                   == 0);
+    g_assert_true (
+        memcmp (e->line + e->body_off, "\xf0\x9f\x8e\x89 party", e->body_len)
+        == 0);
 
     hx_chat_event_free (e);
 }
@@ -602,8 +610,8 @@ static void
 test_chat_event_does_not_decode_nick (void)
 {
     /* If the whole line were decoded, ":joy:" formed across the nick colon
-	 * boundary could misfire. Here the body has the shortcode and the nick
-	 * is plain — verify the nick text survives verbatim. */
+     * boundary could misfire. Here the body has the shortcode and the nick
+     * is plain — verify the nick text survives verbatim. */
     const char *raw = " bob:  hi :fire:";
     HxChatEvent *e = hx_chat_event_new (raw, strlen (raw), 0, /*uid=*/0, NULL);
 
@@ -733,12 +741,15 @@ main (int argc, char **argv)
                      test_chat_event_media_placeholder_minimal);
     g_test_add_func ("/proto/chat_event/media_placeholder_null",
                      test_chat_event_media_placeholder_null);
-    g_test_add_func ("/proto/chat_event/media_placeholder_unknown_mime",
-                     test_chat_event_media_placeholder_unknown_mime_passes_through);
-    g_test_add_func ("/proto/chat_event/media_placeholder_rejects_invalid_utf8",
-                     test_chat_event_media_placeholder_rejects_invalid_utf8_mime);
-    g_test_add_func ("/proto/chat_event/media_placeholder_clickable_embeds_token",
-                     test_chat_event_media_placeholder_clickable_embeds_token);
+    g_test_add_func (
+        "/proto/chat_event/media_placeholder_unknown_mime",
+        test_chat_event_media_placeholder_unknown_mime_passes_through);
+    g_test_add_func (
+        "/proto/chat_event/media_placeholder_rejects_invalid_utf8",
+        test_chat_event_media_placeholder_rejects_invalid_utf8_mime);
+    g_test_add_func (
+        "/proto/chat_event/media_placeholder_clickable_embeds_token",
+        test_chat_event_media_placeholder_clickable_embeds_token);
     g_test_add_func ("/proto/chat_event/media_parse_token_finds_embedded",
                      test_chat_event_media_parse_token_finds_embedded);
 

@@ -55,12 +55,12 @@ test_chat_roundtrip_simple (void)
     g_assert_true (integration_send_chat (fd, &htlc, line));
 
     struct hx_chat_msg cm;
-    g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_true (integration_drain_until_chat (fd, &htlc, htlc.uid, &cm,
+                                                 CHAT_DRAIN_BUDGET));
 
     /* The server prepends the name and a colon to the body via its
-	 * chat_format template. Pin down the parts that should always
-	 * be present without over-specifying the exact format. */
+     * chat_format template. Pin down the parts that should always
+     * be present without over-specifying the exact format. */
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "ChatBot Tier-3"));
 
@@ -75,9 +75,9 @@ static void
 test_chat_roundtrip_unicode_payload (void)
 {
     /* Make sure non-ASCII bytes survive the wire intact (mhxd
-	 * doesn't re-encode the body, just runs strip_ansi-style
-	 * sanitisation). UTF-8 emoji + multi-byte glyphs are the
-	 * typical real-world stress case. */
+     * doesn't re-encode the body, just runs strip_ansi-style
+     * sanitisation). UTF-8 emoji + multi-byte glyphs are the
+     * typical real-world stress case. */
     struct htlc_conn htlc;
     int fd = integration_open_login_or_skip (&htlc, "Unicode Tier-3", 412);
     if (fd < 0) {
@@ -90,8 +90,8 @@ test_chat_roundtrip_unicode_payload (void)
     g_assert_true (integration_send_chat (fd, &htlc, line));
 
     struct hx_chat_msg cm;
-    g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_true (integration_drain_until_chat (fd, &htlc, htlc.uid, &cm,
+                                                 CHAT_DRAIN_BUDGET));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, line));
 
     integration_release_htlc (&htlc);
@@ -113,13 +113,13 @@ test_chat_roundtrip_two_messages_in_order (void)
     struct hx_chat_msg cm;
 
     /* Read first broadcast (filtered to our own uid). */
-    g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_true (integration_drain_until_chat (fd, &htlc, htlc.uid, &cm,
+                                                 CHAT_DRAIN_BUDGET));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "first message"));
 
     /* Read second broadcast. */
-    g_assert_true (
-        integration_drain_until_chat (fd, &htlc, htlc.uid, &cm, CHAT_DRAIN_BUDGET));
+    g_assert_true (integration_drain_until_chat (fd, &htlc, htlc.uid, &cm,
+                                                 CHAT_DRAIN_BUDGET));
     g_assert_nonnull (g_strstr_len (cm.text, cm.text_len, "second message"));
 
     integration_release_htlc (&htlc);

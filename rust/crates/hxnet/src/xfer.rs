@@ -227,7 +227,11 @@ unsafe fn rd_wr_recv(
 }
 
 /// Stream `data_len` bytes through the preview widget (C `preview_get`).
-unsafe fn preview_get(hx: *mut HtxfConn, mut data_len: u64, p: &HxnetXferParams) -> Result<(), c_int> {
+unsafe fn preview_get(
+    hx: *mut HtxfConn,
+    mut data_len: u64,
+    p: &HxnetXferParams,
+) -> Result<(), c_int> {
     let mut buf = vec![0u8; 0xf000];
     while data_len > 0 {
         let want = std::cmp::min(buf.len() as u64, data_len) as usize;
@@ -1012,7 +1016,15 @@ pub unsafe extern "C" fn hxnet_xfer_folder_send_all(fp: *const HxnetFolderParams
             Some(c) => c,
             None => return EINVAL,
         };
-        let per = per_file_params(fp, path_c.as_ptr(), 0, data_pos, rsrc_pos, data_size, rsrc_size);
+        let per = per_file_params(
+            fp,
+            path_c.as_ptr(),
+            0,
+            data_pos,
+            rsrc_pos,
+            data_size,
+            rsrc_size,
+        );
         let rv = hxnet_xfer_file_send_one(&per);
         if rv != 0 {
             return rv;
@@ -1101,9 +1113,17 @@ mod send_capture_tests {
         assert_eq!(&got[117..121], b"DATA", "DATA fork marker at 117");
         let data_len = u32::from_be_bytes([got[129], got[130], got[131], got[132]]);
         assert_eq!(data_len as usize, body.len(), "DATA length at offset 129");
-        assert_eq!(&got[133..133 + body.len()], body, "raw data fork follows header");
+        assert_eq!(
+            &got[133..133 + body.len()],
+            body,
+            "raw data fork follows header"
+        );
         // Trailing 16 bytes are the MACR marker (rsrc_size == 0).
-        assert_eq!(&got[133 + body.len()..133 + body.len() + 4], b"MACR", "MACR marker");
+        assert_eq!(
+            &got[133 + body.len()..133 + body.len() + 4],
+            b"MACR",
+            "MACR marker"
+        );
     }
 }
 
@@ -1242,7 +1262,11 @@ mod folder_loopback_tests {
             let body: &[u8] = if name == b"a.txt" { b"aaa" } else { b"bbbb" };
             // Declared size == actual bytes == 133 header + body + 16 MACR.
             assert_eq!(*size as usize, blob.len(), "declared size matches bytes");
-            assert_eq!(*size as usize, 133 + body.len() + 16, "folder file size accounting");
+            assert_eq!(
+                *size as usize,
+                133 + body.len() + 16,
+                "folder file size accounting"
+            );
             assert_eq!(&blob[133..133 + body.len()], body, "data fork bytes");
         }
     }
@@ -1346,8 +1370,7 @@ mod folder_loopback_tests {
             let _ = s.read_exact(&mut cmd);
         });
 
-        let dest =
-            std::env::temp_dir().join(format!("hxnet_frecv_drib_{}", std::process::id()));
+        let dest = std::env::temp_dir().join(format!("hxnet_frecv_drib_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dest);
         let stream = TcpStream::connect(addr).unwrap();
         let mut conn = HtxfConn::new_plain_for_test(stream);
@@ -1360,7 +1383,10 @@ mod folder_loopback_tests {
         assert_eq!(rv, 0, "folder_recv_all returned error under dribbled reads");
         let got = std::fs::read(dest.join("drib.txt")).unwrap_or_default();
         let _ = std::fs::remove_dir_all(&dest);
-        assert_eq!(got, body, "download must reassemble the dribbled control reads");
+        assert_eq!(
+            got, body,
+            "download must reassemble the dribbled control reads"
+        );
     }
 
     // Drive hxnet_xfer_folder_recv_all's first nfi entry with attacker-shaped
@@ -1442,8 +1468,8 @@ mod recv_timeout_tests {
         // this dir, so a shared name would race.
         static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        let dir = std::env::temp_dir()
-            .join(format!("hxnet_recv_gen_{}_{}", std::process::id(), seq));
+        let dir =
+            std::env::temp_dir().join(format!("hxnet_recv_gen_{}_{}", std::process::id(), seq));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("gen.txt");
         std::fs::write(&path, body).unwrap();
@@ -1544,7 +1570,10 @@ mod recv_timeout_tests {
         let _ = std::fs::remove_dir_all(&out_dir);
         let _ = server.join();
 
-        assert_eq!(rv, 0, "recv should complete cleanly despite the phantom MACR");
+        assert_eq!(
+            rv, 0,
+            "recv should complete cleanly despite the phantom MACR"
+        );
         assert_eq!(got, body, "data fork must be written correctly");
         assert!(
             elapsed < Duration::from_millis(1000),
@@ -1564,9 +1593,7 @@ mod recv_timeout_tests {
         // consumes some bytes and then stalls waiting for the rest.
         wire.extend_from_slice(b"MACR\0\0\0\0");
         // Declare a full marker + a resource fork beyond the header+data.
-        let file_budget = (filp_header_and_data(body).len()
-            + ffo::FORK_HEADER_LEN
-            + 32) as u64;
+        let file_budget = (filp_header_and_data(body).len() + ffo::FORK_HEADER_LEN + 32) as u64;
 
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
@@ -1609,6 +1636,9 @@ mod recv_timeout_tests {
         let _ = std::fs::remove_dir_all(&out_dir);
         let _ = server.join();
 
-        assert_ne!(rv, 0, "a partial MACR marker must surface as an error, not a clean finish");
+        assert_ne!(
+            rv, 0,
+            "a partial MACR marker must surface as an error, not a clean finish"
+        );
     }
 }

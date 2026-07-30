@@ -90,17 +90,17 @@
  * DATA_ERROR text. */
 typedef struct {
     /* Server-issued opaque handle. NULL on failure. Borrows into
-	 * htlc->in.buf; only valid during the callback. */
+     * htlc->in.buf; only valid during the callback. */
     const guint8 *media_id;
     gsize media_id_len;
 
     /* Server-canonical MIME (NUL-terminated). NULL on failure.
-	 * Borrows a transient buffer; only valid during the callback. */
+     * Borrows a transient buffer; only valid during the callback. */
     const char *media_type;
     gsize media_type_len;
 
     /* Server-canonical image metadata. 0 / FALSE on failure or
-	 * when the server omitted the field (advisory only). */
+     * when the server omitted the field (advisory only). */
     guint32 width;
     guint32 height;
     guint32 bytes;
@@ -109,11 +109,11 @@ typedef struct {
     gboolean bytes_present;
 
     /* Error reporting. Only meaningful when error_code != 0 OR
-	 * the success fields above are NULL. error_message may be
-	 * NULL when the server didn't include DATA_ERROR; when set,
-	 * it borrows a transient buffer (NOT htlc->in.buf — the
-	 * helper copies the text out under sanitisation before
-	 * invoking the callback). Only valid during the callback. */
+     * the success fields above are NULL. error_message may be
+     * NULL when the server didn't include DATA_ERROR; when set,
+     * it borrows a transient buffer (NOT htlc->in.buf — the
+     * helper copies the text out under sanitisation before
+     * invoking the callback). Only valid during the callback. */
     guint16 error_code;
     const char *error_message;
     gsize error_message_len;
@@ -171,13 +171,12 @@ typedef void (*HxInlineMediaUploadCallback) (
  * on_done. The upload-helper context is reclaimed via the task
  * table's ptr_free hook (task_free → upload_ctx_free), which also
  * runs on disconnect-time g_hash_table_remove_all. */
-extern gboolean hx_send_upload_media_single (
-    struct htlc_conn *htlc,
-    const guint8 *payload, gsize payload_len,
-    const char *declared_type, gsize declared_type_len,
-    HxInlineMediaUploadCallback on_done,
-    gpointer user_data,
-    GDestroyNotify user_data_free);
+extern gboolean
+hx_send_upload_media_single (struct htlc_conn *htlc, const guint8 *payload,
+                             gsize payload_len, const char *declared_type,
+                             gsize declared_type_len,
+                             HxInlineMediaUploadCallback on_done,
+                             gpointer user_data, GDestroyNotify user_data_free);
 
 /* Send a chunked TranUploadMedia request.
  *
@@ -199,11 +198,9 @@ extern gboolean hx_send_upload_media_single (
  *
  * user_data + user_data_free semantics match _single. */
 extern gboolean hx_send_upload_media_chunked (
-    struct htlc_conn *htlc,
-    const guint8 *payload, gsize payload_len,
+    struct htlc_conn *htlc, const guint8 *payload, gsize payload_len,
     const char *declared_type, gsize declared_type_len,
-    HxInlineMediaUploadCallback on_done,
-    gpointer user_data,
+    HxInlineMediaUploadCallback on_done, gpointer user_data,
     GDestroyNotify user_data_free);
 
 /* Dispatcher: chooses single-shot vs chunked based on payload
@@ -212,13 +209,13 @@ extern gboolean hx_send_upload_media_chunked (
  * framing ceiling). Production callers should use this entry
  * point; single-shot and chunked siblings stay public for tests
  * and for callers wanting explicit framing. */
-extern gboolean hx_send_upload_media (
-    struct htlc_conn *htlc,
-    const guint8 *payload, gsize payload_len,
-    const char *declared_type, gsize declared_type_len,
-    HxInlineMediaUploadCallback on_done,
-    gpointer user_data,
-    GDestroyNotify user_data_free);
+extern gboolean hx_send_upload_media (struct htlc_conn *htlc,
+                                      const guint8 *payload, gsize payload_len,
+                                      const char *declared_type,
+                                      gsize declared_type_len,
+                                      HxInlineMediaUploadCallback on_done,
+                                      gpointer user_data,
+                                      GDestroyNotify user_data_free);
 
 /* ---- Chat with attached media ---- */
 
@@ -239,15 +236,16 @@ extern gboolean hx_send_upload_media (
  *   0 — normal chat
  *   1 — emote (/me) line
  */
-extern void hx_send_chat_with_media (
-    struct htlc_conn *htlc, const char *str, guint32 cid, guint16 style,
-    const guint8 *media_id, gsize media_id_len,
-    const char *mime, gsize mime_len);
+extern void hx_send_chat_with_media (struct htlc_conn *htlc, const char *str,
+                                     guint32 cid, guint16 style,
+                                     const guint8 *media_id, gsize media_id_len,
+                                     const char *mime, gsize mime_len);
 
 /* TASK-reply handler for HTLC_HDR_UPLOAD_MEDIA. Hooked into
  * rcv.c's task table via task_new(...) inside
  * hx_send_upload_media_single. Not called directly. */
-extern void rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *ctx_ptr,
+extern void rcv_task_upload_media (struct htlc_conn *htlc, const guint8 *frame,
+                                   gsize frame_len, void *ctx_ptr,
                                    void *unused);
 
 #endif /* HX_INLINE_MEDIA_UPLOAD_H */

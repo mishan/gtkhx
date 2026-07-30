@@ -112,17 +112,11 @@ pub unsafe fn spawn_blocking_with_idle(
     user_data: *mut c_void,
 ) {
     let Some(worker) = worker else {
-        glib::g_critical!(
-            "hxbridge",
-            "spawn_blocking_with_idle: NULL worker"
-        );
+        glib::g_critical!("hxbridge", "spawn_blocking_with_idle: NULL worker");
         return;
     };
     let Some(completion) = completion else {
-        glib::g_critical!(
-            "hxbridge",
-            "spawn_blocking_with_idle: NULL completion"
-        );
+        glib::g_critical!("hxbridge", "spawn_blocking_with_idle: NULL completion");
         return;
     };
 
@@ -148,9 +142,7 @@ pub unsafe fn spawn_blocking_with_idle(
     // is correct: we don't have mutable state that could be left
     // in an invalid intermediate state by the panic; we're just
     // calling a static accessor.
-    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(
-        Runtime::global,
-    )) {
+    let rt = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(Runtime::global)) {
         Ok(rt) => rt,
         Err(_) => {
             glib::g_critical!(
@@ -318,11 +310,7 @@ mod tests {
     /// Uses non-blocking iterations plus a 1 ms sleep so the loop
     /// doesn't spin-burn through 1000 iterations before the
     /// blocking-pool task even gets a chance to run.
-    fn pump_until_deadline(
-        ctx: &MainContext,
-        pred: impl Fn() -> bool,
-        deadline: Duration,
-    ) -> bool {
+    fn pump_until_deadline(ctx: &MainContext, pred: impl Fn() -> bool, deadline: Duration) -> bool {
         let start = Instant::now();
         while start.elapsed() < deadline {
             if pred() {
@@ -345,11 +333,7 @@ mod tests {
         let raw_arc = Box::into_raw(Box::new(state_for_ffi)) as *mut c_void;
 
         unsafe {
-            spawn_blocking_with_idle(
-                Some(test_worker),
-                Some(test_completion),
-                raw_arc,
-            );
+            spawn_blocking_with_idle(Some(test_worker), Some(test_completion), raw_arc);
         }
 
         let drained = pump_until_deadline(
@@ -388,11 +372,7 @@ mod tests {
         let raw_arc = Box::into_raw(Box::new(state_for_ffi)) as *mut c_void;
 
         unsafe {
-            spawn_blocking_with_idle(
-                Some(test_worker),
-                Some(test_completion),
-                raw_arc,
-            );
+            spawn_blocking_with_idle(Some(test_worker), Some(test_completion), raw_arc);
         }
 
         // Assert the completion landed before reclaiming the
@@ -414,7 +394,11 @@ mod tests {
             "completion did not arrive within deadline; cannot reclaim Box without risking UAF"
         );
 
-        let worker_tid = state.worker_tid.get().copied().expect("worker recorded tid");
+        let worker_tid = state
+            .worker_tid
+            .get()
+            .copied()
+            .expect("worker recorded tid");
         assert_ne!(
             worker_tid, main_tid,
             "worker must NOT run on the caller's (main) thread — that would defeat the blocking-pool purpose"
@@ -435,11 +419,7 @@ mod tests {
         let raw_arc = Box::into_raw(Box::new(state_for_ffi)) as *mut c_void;
 
         unsafe {
-            spawn_blocking_with_idle(
-                Some(test_worker),
-                Some(test_completion),
-                raw_arc,
-            );
+            spawn_blocking_with_idle(Some(test_worker), Some(test_completion), raw_arc);
         }
 
         let drained = pump_until_deadline(
@@ -548,11 +528,7 @@ mod tests {
 
         for raw in &raw_arcs {
             unsafe {
-                spawn_blocking_with_idle(
-                    Some(test_worker),
-                    Some(test_completion),
-                    *raw,
-                );
+                spawn_blocking_with_idle(Some(test_worker), Some(test_completion), *raw);
             }
         }
 

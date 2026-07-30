@@ -35,8 +35,9 @@ test_agreement_extracts_text (void)
 
     char out[256];
     gsize out_len = 0;
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), &out_len);
     g_assert_cmpint (r, ==, HX_AGREEMENT_OK);
     g_assert_cmpstr (out, ==, "Welcome to the server.\nNo spam.\nEnjoy.");
     g_assert_cmpuint (out_len, ==, strlen (body));
@@ -54,8 +55,9 @@ test_agreement_strips_ansi (void)
                             body);
 
     char out[128];
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), NULL);
     g_assert_cmpint (r, ==, HX_AGREEMENT_OK);
     g_assert_cmpstr (out, ==, "[[1mHEADER[[0m\nRules apply.");
 
@@ -74,8 +76,9 @@ test_agreement_truncates_to_buffer (void)
 
     char out[64];
     gsize out_len = 0;
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), &out_len);
     g_assert_cmpint (r, ==, HX_AGREEMENT_OK);
     g_assert_cmpuint (out_len, ==, sizeof (out) - 1);
     g_assert_cmpuint (strlen (out), ==, sizeof (out) - 1);
@@ -98,8 +101,9 @@ test_agreement_noagreement_chunk_returns_none (void)
 
     char out[64] = "untouched";
     gsize out_len = 0;
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), &out_len);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), &out_len);
     g_assert_cmpint (r, ==, HX_AGREEMENT_NONE);
     g_assert_cmpstr (out, ==, "untouched"); /* not written */
 
@@ -123,8 +127,9 @@ test_agreement_noagreement_before_agreement_wins (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_AGREEMENT, strlen (body), body);
 
     char out[64];
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), NULL);
     g_assert_cmpint (r, ==, HX_AGREEMENT_NONE);
 
     wire_fixture_free (&htlc);
@@ -134,8 +139,8 @@ static void
 test_agreement_agreement_before_noagreement_wins (void)
 {
     /* The flip side: AGREEMENT first, NOAGREEMENT after — we
-	 * return OK with the agreement text and never see the later
-	 * NOAGREEMENT. */
+     * return OK with the agreement text and never see the later
+     * NOAGREEMENT. */
     struct htlc_conn htlc;
     const char *body = "the rules";
     wire_fixture_init (&htlc, HTLS_HDR_AGREEMENT, 1, 0);
@@ -143,8 +148,9 @@ test_agreement_agreement_before_noagreement_wins (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NOAGREEMENT, 0, NULL);
 
     char out[64];
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), NULL);
     g_assert_cmpint (r, ==, HX_AGREEMENT_OK);
     g_assert_cmpstr (out, ==, "the rules");
 
@@ -157,15 +163,16 @@ static void
 test_agreement_no_relevant_chunks_returns_not_found (void)
 {
     struct htlc_conn htlc;
-    const guint16 some_uid = g_htons(5);
+    const guint16 some_uid = g_htons (5);
     wire_fixture_init (&htlc, HTLS_HDR_AGREEMENT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (some_uid), &some_uid);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (some_uid),
                             &some_uid);
 
     char out[64];
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), NULL);
     g_assert_cmpint (r, ==, HX_AGREEMENT_NOT_FOUND);
 
     wire_fixture_free (&htlc);
@@ -178,8 +185,10 @@ test_agreement_empty_message_returns_not_found (void)
     wire_fixture_init (&htlc, HTLS_HDR_AGREEMENT, 1, 0);
 
     char out[64];
-    g_assert_cmpint (hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL), ==,
-                     HX_AGREEMENT_NOT_FOUND);
+    g_assert_cmpint (hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                           hx_test_in (&htlc)->pos, out,
+                                           sizeof (out), NULL),
+                     ==, HX_AGREEMENT_NOT_FOUND);
 
     wire_fixture_free (&htlc);
 }
@@ -195,8 +204,8 @@ static void
 test_agreement_skips_unrelated_chunks_before_agreement (void)
 {
     struct htlc_conn htlc;
-    const guint16 uid_wire = g_htons(1);
-    const guint32 cid_wire = g_htonl(2);
+    const guint16 uid_wire = g_htons (1);
+    const guint32 cid_wire = g_htonl (2);
     const char *body = "real agreement";
     wire_fixture_init (&htlc, HTLS_HDR_AGREEMENT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
@@ -205,8 +214,9 @@ test_agreement_skips_unrelated_chunks_before_agreement (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_AGREEMENT, strlen (body), body);
 
     char out[64];
-    hx_agreement_result r
-        = hx_agreement_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, out, sizeof (out), NULL);
+    hx_agreement_result r = hx_agreement_extract (hx_test_in (&htlc)->buf,
+                                                  hx_test_in (&htlc)->pos, out,
+                                                  sizeof (out), NULL);
     g_assert_cmpint (r, ==, HX_AGREEMENT_OK);
     g_assert_cmpstr (out, ==, "real agreement");
 

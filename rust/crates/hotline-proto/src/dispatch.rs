@@ -130,13 +130,13 @@ mod tests {
         // handler, and the chat-room USER_CHANGE / USER_PART variants share the
         // roster handlers with their globals.
         let table: &[(u32, HandlerKind)] = &[
-            (0x0000_006a, Chat),        // CHAT — 0x6a; guards the old 0x68/0x6a swap
-            (0x0000_0068, Msg),         // MSG
-            (0x0000_0163, Msg),         // MSG_BROADCAST folds onto msg
-            (0x0000_012d, UserChange),  // USER_CHANGE
-            (0x0000_0075, UserChange),  // CHAT_USER_CHANGE (room variant)
-            (0x0000_012e, UserPart),    // USER_PART
-            (0x0000_0076, UserPart),    // CHAT_USER_PART (room variant)
+            (0x0000_006a, Chat),       // CHAT — 0x6a; guards the old 0x68/0x6a swap
+            (0x0000_0068, Msg),        // MSG
+            (0x0000_0163, Msg),        // MSG_BROADCAST folds onto msg
+            (0x0000_012d, UserChange), // USER_CHANGE
+            (0x0000_0075, UserChange), // CHAT_USER_CHANGE (room variant)
+            (0x0000_012e, UserPart),   // USER_PART
+            (0x0000_0076, UserPart),   // CHAT_USER_PART (room variant)
             (0x0000_0066, NewsPost),
             (0x0001_0000, Task),
             (0x0000_0077, ChatSubject),

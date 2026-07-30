@@ -42,7 +42,8 @@ test_chat_extracts_simple_body (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "hello, world");
     g_assert_cmpuint (msg.text_len, ==, strlen (body));
     g_assert_cmpuint (msg.cid, ==, 0);
@@ -55,15 +56,16 @@ static void
 test_chat_strips_leading_newline (void)
 {
     /* Hotline servers commonly format chat as "\nUser: message".
-	 * The handler skips the leading LF so the chat widget doesn't
-	 * render a blank line above the message. */
+     * The handler skips the leading LF so the chat widget doesn't
+     * render a blank line above the message. */
     struct htlc_conn htlc;
     const char *body = "\nMisha: hello!";
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     /* Note the leading '\n' is gone. */
     g_assert_cmpstr (msg.text, ==, "Misha: hello!");
     g_assert_cmpuint (msg.text_len, ==, strlen (body) - 1);
@@ -77,14 +79,15 @@ static void
 test_chat_does_not_strip_internal_newline (void)
 {
     /* Leading-LF strip is exactly one byte, only at position 0.
-	 * Internal newlines stay. */
+     * Internal newlines stay. */
     struct htlc_conn htlc;
     const char *body = "alpha\nbeta\ngamma";
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "alpha\nbeta\ngamma");
     g_assert_true (msg.text == msg.buf); /* no leading-LF strip */
 
@@ -95,15 +98,16 @@ static void
 test_chat_converts_cr_to_lf (void)
 {
     /* Hotline wire endings are '\r'. CR2LF runs before the
-	 * leading-LF strip — so a body of "\rUser: hi" becomes
-	 * "\nUser: hi" then strips to "User: hi". */
+     * leading-LF strip — so a body of "\rUser: hi" becomes
+     * "\nUser: hi" then strips to "User: hi". */
     struct htlc_conn htlc;
     const char *body = "\rUser: hi\rline two";
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "User: hi\nline two");
 
     wire_fixture_free (&htlc);
@@ -119,7 +123,8 @@ test_chat_strips_ansi (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, sizeof (body) - 1, body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, expected);
 
     wire_fixture_free (&htlc);
@@ -132,14 +137,15 @@ test_chat_extracts_chat_id (void)
 {
     struct htlc_conn htlc;
     const char *body = "hi";
-    const guint32 cid_wire = g_htonl(0x12345678);
+    const guint32 cid_wire = g_htonl (0x12345678);
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),
                             &cid_wire);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmphex (msg.cid, ==, 0x12345678u);
     g_assert_cmpstr (msg.text, ==, "hi");
 
@@ -154,13 +160,14 @@ test_chat_extracts_uid (void)
 {
     struct htlc_conn htlc;
     const char *body = "msg";
-    const guint16 uid_wire = g_htons(0xabcd);
+    const guint16 uid_wire = g_htons (0xabcd);
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_UID, sizeof (uid_wire), &uid_wire);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmphex (msg.uid, ==, 0xabcdu);
 
     wire_fixture_free (&htlc);
@@ -172,17 +179,18 @@ static void
 test_chat_truncates_oversized_body (void)
 {
     /* The handler caps the copy at sizeof(buf) - 1 = 8192 bytes.
-	 * Send 9000 bytes of 'A', expect 8192 'A's plus NUL. */
+     * Send 9000 bytes of 'A', expect 8192 'A's plus NUL. */
     struct htlc_conn htlc;
     guint8 big[9000];
     memset (big, 'A', sizeof (big));
     /* DATA_CHAT chunk len is uint16 — values must fit in 65535,
-	 * which 9000 does. */
+     * which 9000 does. */
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, sizeof (big), big);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpuint (strlen (msg.text), ==, 8192);
     for (gsize i = 0; i < 8192; i++) {
         g_assert_cmphex (msg.text[i], ==, 'A');
@@ -198,17 +206,18 @@ static void
 test_chat_empty_body_is_valid (void)
 {
     /* Zero-length DATA_CHAT chunk: text is "", text_len == 0.
-	 * Some servers send these as keepalives.
-	 *
-	 * Note: wire_fixture_add_chunk's dh->data field is the FAM tail
-	 * of the hl_data_hdr struct, but with zero len there's nothing
-	 * to memcpy and the helper handles NULL data. */
+     * Some servers send these as keepalives.
+     *
+     * Note: wire_fixture_add_chunk's dh->data field is the FAM tail
+     * of the hl_data_hdr struct, but with zero len there's nothing
+     * to memcpy and the helper handles NULL data. */
     struct htlc_conn htlc;
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, 0, NULL);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "");
     g_assert_cmpuint (msg.text_len, ==, 0);
 
@@ -219,15 +228,16 @@ static void
 test_chat_missing_body_is_valid (void)
 {
     /* No DATA_CHAT chunk at all (bizarre but defensively handled).
-	 * text == "", cid / uid pulled from whatever IDs were sent. */
+     * text == "", cid / uid pulled from whatever IDs were sent. */
     struct htlc_conn htlc;
-    const guint32 cid_wire = g_htonl(5);
+    const guint32 cid_wire = g_htonl (5);
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),
                             &cid_wire);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmpstr (msg.text, ==, "");
     g_assert_cmphex (msg.cid, ==, 5);
 
@@ -244,7 +254,8 @@ test_chat_null_out_returns_false (void)
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
-    g_assert_false (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL));
+    g_assert_false (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                     hx_test_in (&htlc)->pos, NULL));
 
     wire_fixture_free (&htlc);
 }
@@ -255,8 +266,8 @@ static void
 test_chat_all_three_chunks_combined (void)
 {
     struct htlc_conn htlc;
-    const guint32 cid_wire = g_htonl(7);
-    const guint16 uid_wire = g_htons(42);
+    const guint32 cid_wire = g_htonl (7);
+    const guint16 uid_wire = g_htons (42);
     const char *body = "\nMisha: hello team";
     wire_fixture_init (&htlc, HTLS_HDR_CHAT, 1, 0);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT_ID, sizeof (cid_wire),
@@ -265,7 +276,8 @@ test_chat_all_three_chunks_combined (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_CHAT, strlen (body), body);
 
     struct hx_chat_msg msg;
-    g_assert_true (hx_chat_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &msg));
+    g_assert_true (hx_chat_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, &msg));
     g_assert_cmphex (msg.cid, ==, 7);
     g_assert_cmphex (msg.uid, ==, 42);
     g_assert_cmpstr (msg.text, ==, "Misha: hello team");
@@ -331,10 +343,10 @@ static void
 test_chat_split_rejects_long_pre_colon (void)
 {
     /* Pre-colon portion exceeds the 31-byte Hotline nick cap.
-	 * Lines like a sentence that happens to contain a colon
-	 * deep in the prose ("the part you were curious about:
-	 * here") shouldn't be misread as nick + body — the colon
-	 * is a regular punctuation mark, not the chat separator. */
+     * Lines like a sentence that happens to contain a colon
+     * deep in the prose ("the part you were curious about:
+     * here") shouldn't be misread as nick + body — the colon
+     * is a regular punctuation mark, not the chat separator. */
     gsize n_off, n_len, b_off, b_len;
     const char *line = " the long thing I wanted to mention: here is the body";
     g_assert_false (hx_chat_split_nick_body (line, strlen (line), &n_off,
@@ -443,7 +455,7 @@ static void
 test_highlight_match_skips_empty_words (void)
 {
     /* g_strsplit can leave empty entries from "a,,b" — make
-	 * sure those don't false-match anywhere. */
+     * sure those don't false-match anywhere. */
     const char *words[] = { "", "a", "", NULL };
     const char *body = "nothing here";
     g_assert_false (hx_highlight_match (body, strlen (body), words));

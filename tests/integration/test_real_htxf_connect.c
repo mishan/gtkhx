@@ -45,7 +45,7 @@
 #include "protocol.h"
 #include "proto_helpers.h"
 #include "hxnet_htxf.h"
-#include "network.h"             /* htxf_connect */
+#include "network.h" /* htxf_connect */
 #include "integration_harness.h"
 #include "server_matrix.h"
 
@@ -59,15 +59,17 @@ drain_and_check (struct htxf_conn *htxf, guint64 xfer_size)
     guint8 *payload = g_malloc (xfer_size);
     gsize got = 0;
     while (got < xfer_size) {
-        ssize_t r = hxnet_htxf_read ((HtxfConn *) htxf->hx, payload + got, xfer_size - got);
+        ssize_t r = hxnet_htxf_read ((HtxfConn *)htxf->hx, payload + got,
+                                     xfer_size - got);
         if (r <= 0) {
-            g_test_message ("hxnet_htxf_read returned %zd at got=%zu errno=%d (%s)",
-                            r, got, errno, g_strerror (errno));
+            g_test_message (
+                "hxnet_htxf_read returned %zd at got=%zu errno=%d (%s)", r, got,
+                errno, g_strerror (errno));
             break;
         }
-        got += (gsize) r;
+        got += (gsize)r;
     }
-    g_assert_cmpuint ((guint) got, ==, xfer_size);
+    g_assert_cmpuint ((guint)got, ==, xfer_size);
 
     const char *needle = "hello world";
     gsize needle_len = strlen (needle);
@@ -95,14 +97,17 @@ test_htxf_connect_file_get_plaintext (void)
     guint32 our_trans = htlc.trans;
     g_assert_true (integration_send_message (
         fd, &htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
-        (int) HTLC_DATA_FILE_NAME, (int) strlen (fname), (guint8 *) fname));
+        (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname));
 
-    g_assert_true (integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_fail_printf ("file_get refused by server: \"%s\". Is "
                                 "files/test.txt seeded in the container?",
                                 err);
@@ -115,7 +120,8 @@ test_htxf_connect_file_get_plaintext (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                           &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024);
@@ -129,8 +135,8 @@ test_htxf_connect_file_get_plaintext (void)
         host = "127.0.0.1";
     }
     const char *xfer_port_s = g_getenv ("GTKHX_TEST_XFER_PORT");
-    guint16 xfer_port =
-        (xfer_port_s && *xfer_port_s) ? (guint16) atoi (xfer_port_s) : 5501;
+    guint16 xfer_port
+        = (xfer_port_s && *xfer_port_s) ? (guint16)atoi (xfer_port_s) : 5501;
 
     /* Zero-initialised htxf_conn: htlc carries no AEAD cipher state
      * (mhxd guest is plaintext), so htxf_connect leaves the subchannel
@@ -147,8 +153,8 @@ test_htxf_connect_file_get_plaintext (void)
     if (!htxf_connect (&htxf)) {
         g_test_fail_printf ("htxf_connect failed (HTXF port %u reachable? "
                             "publish -p %u:%u or set GTKHX_TEST_XFER_PORT).",
-                            (unsigned) xfer_port, (unsigned) xfer_port,
-                            (unsigned) xfer_port);
+                            (unsigned)xfer_port, (unsigned)xfer_port,
+                            (unsigned)xfer_port);
         integration_release_htlc (&htlc);
         integration_close (fd);
         return;
@@ -158,7 +164,7 @@ test_htxf_connect_file_get_plaintext (void)
     /* Drain the body through production htxf_io_read (passthrough leg). */
     drain_and_check (&htxf, xfer_size);
 
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
     integration_release_htlc (&htlc);
     integration_close (fd);
 }
@@ -182,8 +188,8 @@ pick_aead_server (void)
     if (!servers) {
         return NULL;
     }
-    const hx_test_server *srv =
-        (servers->len > 0) ? g_ptr_array_index (servers, 0) : NULL;
+    const hx_test_server *srv
+        = (servers->len > 0) ? g_ptr_array_index (servers, 0) : NULL;
     g_ptr_array_unref (servers);
     return srv;
 }
@@ -219,7 +225,7 @@ test_htxf_connect_file_get_aead (void)
     guint32 our_trans = htlc.trans;
     g_assert_true (integration_send_message_hope (
         fd, &htlc, &hope, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
-        (int) HTLC_DATA_FILE_NAME, (int) strlen (fname), (guint8 *) fname));
+        (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname));
 
     struct hx_htxf_reply reply = { 0 };
     gboolean got_reply = FALSE;
@@ -236,7 +242,9 @@ test_htxf_connect_file_get_aead (void)
         if (hdr_flag (&htlc) & 1) {
             char err[256];
             gsize err_len = 0;
-            if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+            if (task_error_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, err, sizeof (err),
+                                    &err_len)) {
                 g_test_fail_printf ("file_get refused: \"%s\"", err);
             } else {
                 g_test_fail_printf ("file_get refused (no error chunk)");
@@ -245,7 +253,8 @@ test_htxf_connect_file_get_aead (void)
             integration_close (fd);
             return;
         }
-        hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+        hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               &reply);
     }
     g_assert_true (got_reply);
     g_assert_cmphex (reply.ref, !=, 0);
@@ -272,7 +281,7 @@ test_htxf_connect_file_get_aead (void)
     if (!htxf_connect (&htxf)) {
         g_test_fail_printf ("htxf_connect failed (HTXF port %u on %s "
                             "reachable?)",
-                            (unsigned) srv->xfer_port, srv->host);
+                            (unsigned)srv->xfer_port, srv->host);
         integration_release_htlc (&htlc);
         integration_close (fd);
         return;
@@ -285,7 +294,7 @@ test_htxf_connect_file_get_aead (void)
      * bytes on the wire wouldn't decode to "hello world". */
     drain_and_check (&htxf, reply.size);
 
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
     integration_release_htlc (&htlc);
     integration_close (fd);
 }
@@ -344,15 +353,17 @@ test_htxf_connect_file_get_tls (void)
     guint32 our_trans = htlc.trans;
     g_assert_true (integration_send_message (
         ctrl, &htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
-        (int) HTLC_DATA_FILE_NAME, (int) strlen (fname), (guint8 *) fname));
+        (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname));
 
-    g_assert_true (integration_drain_until_task_trans (
-        ctrl, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (ctrl, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_fail_printf ("file_get refused: \"%s\"", err);
         } else {
             g_test_fail_printf ("file_get refused (no error chunk)");
@@ -363,7 +374,8 @@ test_htxf_connect_file_get_tls (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                           &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024);
@@ -383,7 +395,7 @@ test_htxf_connect_file_get_tls (void)
     if (!htxf_connect (&htxf)) {
         g_test_fail_printf ("htxf_connect (TLS) failed (TLS HTXF port %u "
                             "on %s reachable?)",
-                            (unsigned) srv->tls_xfer_port, srv->host);
+                            (unsigned)srv->tls_xfer_port, srv->host);
         integration_release_htlc (&htlc);
         integration_close (ctrl);
         return;
@@ -392,7 +404,7 @@ test_htxf_connect_file_get_tls (void)
 
     drain_and_check (&htxf, reply.size);
 
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
     integration_release_htlc (&htlc);
     integration_close (ctrl);
 }
