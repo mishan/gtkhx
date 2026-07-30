@@ -1122,10 +1122,10 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 }
 
 /// Polling-mode sibling of [`hxnet_connection_open_plaintext`]: runs
-/// the same production plaintext lifecycle (DNS + TCP + magic + LOGIN
-/// + LOGIN-reply + Option-B replay + actor), but exposes events
-/// through the polling API ([`hxnet_connection_try_recv_frame`])
-/// instead of the GLib-main-thread callback forwarder.
+/// the same production plaintext lifecycle (DNS, TCP, magic, LOGIN,
+/// LOGIN-reply, Option-B replay, actor), but exposes events through
+/// the polling API ([`hxnet_connection_try_recv_frame`]) instead of
+/// the GLib-main-thread callback forwarder.
 ///
 /// This is the foundation for routing the synchronous Tier 3 test
 /// harness through the production connect path (increment 2): the
@@ -1142,6 +1142,13 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext(
 /// the optional `proxy_uri` / `proxy_uri_len` (NULL/0 = connect direct).
 /// The proxy params let the Tier 3 harness drive a proxied connect
 /// through the production path (the SOCKS-proxy integration test).
+///
+/// # Safety
+/// Each `*const u8` / length pair (`host`/`host_len`, `login`/`login_len`,
+/// `password`/`password_len`, `name`/`name_len`, `proxy_uri`/`proxy_uri_len`)
+/// must either be a null pointer with length 0 or a pointer valid for reads
+/// of that many bytes for the duration of the call. The returned handle must
+/// be freed with the matching `hxnet_connection_*` destructor.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
     host: *const u8,
@@ -1288,6 +1295,11 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_polling(
 ///
 /// Other parameters and safety are identical to
 /// [`hxnet_connection_open_plaintext`].
+///
+/// # Safety
+/// Each `*const u8` / length pair must either be null with length 0 or a
+/// pointer valid for reads of that many bytes for the duration of the call.
+/// The returned handle must be freed with the matching destructor.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     host: *const u8,
@@ -1430,7 +1442,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
     // calls post-handshake with the cert fingerprint. The opaque
     // user_data is shared with the other callbacks; the SendUserData
     // wrapper lets the closure move into the spawned task.
-    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> = verify_cert.map(|cb| {
+    let verify_closure: crate::lifecycle::TlsVerifyFn = verify_cert.map(|cb| {
         let ud = SendUserData(user_data);
         let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
             let ud = &ud;
@@ -1471,6 +1483,11 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls(
 /// harness. Same parameter / safety contract as
 /// [`hxnet_connection_open_plaintext_tls`], minus the event/shutdown/state
 /// callbacks.
+///
+/// # Safety
+/// Each `*const u8` / length pair must either be null with length 0 or a
+/// pointer valid for reads of that many bytes for the duration of the call.
+/// The returned handle must be freed with the matching destructor.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
     host: *const u8,
@@ -1587,7 +1604,7 @@ pub unsafe extern "C" fn hxnet_connection_open_plaintext_tls_polling(
         // proxied-TLS harness path is ever needed.
         proxy: None,
     };
-    let verify_closure: Option<Box<dyn Fn(&str) -> bool + Send>> = verify_cert.map(|cb| {
+    let verify_closure: crate::lifecycle::TlsVerifyFn = verify_cert.map(|cb| {
         let ud = SendUserData(user_data);
         let boxed: Box<dyn Fn(&str) -> bool + Send> = Box::new(move |fp: &str| {
             let ud = &ud;
@@ -1846,6 +1863,11 @@ pub unsafe extern "C" fn hxnet_connection_open_hope(
 /// the callbacks.
 ///
 /// [`run_hope_lifecycle`]: crate::lifecycle::run_hope_lifecycle
+///
+/// # Safety
+/// Each `*const u8` / length pair must either be null with length 0 or a
+/// pointer valid for reads of that many bytes for the duration of the call.
+/// The returned handle must be freed with the matching destructor.
 #[no_mangle]
 pub unsafe extern "C" fn hxnet_connection_open_hope_polling(
     host: *const u8,
@@ -2080,6 +2102,10 @@ pub unsafe extern "C" fn hxnet_hope_aead_free(h: *mut HxnetHopeAead) {
 /// forwarder. Reuses the same
 /// pump→forward_to_main shape as the older wiring helper —
 /// only the per-event dispatch differs.
+// Arguments mirror the C callback-wiring surface (the three callback fn
+// pointers plus their shared `user_data`); grouping them would just re-split
+// at the FFI call sites.
+#[allow(clippy::too_many_arguments)]
 fn wire_callback_state_with_on_state(
     rt: &Runtime,
     cmd: ConnectionHandle,

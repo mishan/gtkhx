@@ -27,13 +27,13 @@ const STATUS_MISMATCH: c_int = 2;
 
 use hxtls_trust::ffi::hx_tls_trust_set_prompt;
 
-/// The callback signature `hxtls-trust` calls. See its `PromptFn`.
+// The callback signature `hxtls-trust` calls. See its `PromptFn`.
 
 /// `void gtkhx_tls_prompt_install (void)` — register the Adwaita TOFU prompt
 /// with `hxtls-trust`. Called once from C at UI init (before any connect).
 #[no_mangle]
 pub extern "C" fn gtkhx_tls_prompt_install() {
-    unsafe { hx_tls_trust_set_prompt(Some(prompt_trampoline)) };
+    hx_tls_trust_set_prompt(Some(prompt_trampoline));
 }
 
 /// Called by `hxtls-trust::decide` on the verify (worker) thread. Marshal the

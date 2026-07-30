@@ -19,7 +19,7 @@ extern void hx_msgwin_set_window (struct msgwin *msg, GtkWidget *w);
 extern void hx_msgwin_set_info_image (struct msgwin *msg, GtkWidget *w);
 extern void hx_msgwin_set_info_label (struct msgwin *msg, GtkWidget *w);
 extern struct msgwin *msgwin_with_uid (guint16 uid);
-extern void msg_output (char *name, guint16 uid, char *buf);
+extern void msg_output (const char *name, guint16 uid, char *buf);
 
 /* msg-signal renderer. Same as msg_output but reads from
  * a pre-parsed HxMsgEvent (uid + UTF-8-validated name/body +

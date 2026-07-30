@@ -11,7 +11,6 @@ use std::ffi::{c_char, c_void};
 
 use gtk4 as gtk;
 use gtk::glib;
-use gtk::prelude::*;
 use libadwaita as adw;
 use adw::prelude::*;
 use glib::translate::from_glib_none;

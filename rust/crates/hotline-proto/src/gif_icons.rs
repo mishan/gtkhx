@@ -113,10 +113,8 @@ pub fn parse_icon_get_reply<'a>(
     let mut gif: &[u8] = &[];
     for c in chunks {
         match c.tag {
-            tag::UID => {
-                if c.data.len() == 2 {
-                    uid = u16_at(c.data, 0);
-                }
+            tag::UID if c.data.len() == 2 => {
+                uid = u16_at(c.data, 0);
             }
             tag::ICON_GIF => gif = c.data,
             _ => {}

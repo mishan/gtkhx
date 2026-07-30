@@ -249,8 +249,9 @@ fn sync_action_buttons(br: &NewsBrowser) {
 // ---------- RPC dispatch ----------
 
 /// Whether it's worth speaking the 1.5 threaded-news protocol: server version
-/// >= 150 AND read-news permission (an empty legacy access map is permitted; the
-/// version gate is what excludes 1.0/1.2 servers that reject NEWSDIRLIST).
+/// at least 150 AND read-news permission (an empty legacy access map is
+/// permitted; the version gate is what excludes 1.0/1.2 servers that reject
+/// NEWSDIRLIST).
 unsafe fn threaded_news_available() -> bool {
     let htlc = gtkhx_active_htlc();
     hx_conn_version(htlc.cast()) >= 150 && hx_conn_access_permits(htlc.cast(), HL_ACCESS_READ_NEWS) != 0
@@ -575,7 +576,7 @@ unsafe extern "C" fn on_new_folder_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *
             std::ptr::null_mut()
         };
         crate::news_dialogs::gtkhx_news_create_dialog_open(
-            br.window.as_ptr() as *mut gtk::ffi::GtkWidget,
+            br.window.as_ptr(),
             parent,
             NB_KIND_FOLDER as c_int,
         );
@@ -591,7 +592,7 @@ unsafe extern "C" fn on_new_category_clicked(_btn: *mut gtk::ffi::GtkButton, _u:
             std::ptr::null_mut()
         };
         crate::news_dialogs::gtkhx_news_create_dialog_open(
-            br.window.as_ptr() as *mut gtk::ffi::GtkWidget,
+            br.window.as_ptr(),
             parent,
             NB_KIND_CATEGORY as c_int,
         );
@@ -652,7 +653,7 @@ unsafe extern "C" fn on_delete_clicked(_btn: *mut gtk::ffi::GtkButton, _u: *mut 
             return;
         }
         crate::news_dialogs::gtkhx_news_delete_dialog_open(
-            br.window.as_ptr() as *mut gtk::ffi::GtkWidget,
+            br.window.as_ptr(),
             hx_news_node_kind(sel.cast()) as c_int,
             hx_news_node_name(sel.cast()),
             hx_news_node_path(sel.cast()),
@@ -1009,7 +1010,7 @@ pub unsafe extern "C" fn open_news_browser(widget: *mut c_void, sess: *mut c_voi
     if !was_open {
         // Freshly built: Ctrl+Q / Ctrl+K / Ctrl+T on the content box.
         with_browser(|br| {
-            crate::ffi::init_keyaccel(br.window.as_ptr() as *mut gtk::ffi::GtkWidget)
+            crate::ffi::init_keyaccel(br.window.as_ptr())
         });
     }
 

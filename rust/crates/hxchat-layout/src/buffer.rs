@@ -712,7 +712,7 @@ impl ChatBuffer {
     pub fn gutter_range(&self, id: MessageId) -> Option<std::ops::Range<usize>> {
         let row = self.row_of(id)?;
         let g = self.rows.get(row)?.msg.gutter.as_ref()?;
-        (!g.text.is_empty()).then(|| 0..g.text.len())
+        (!g.text.is_empty()).then_some(0..g.text.len())
     }
 
     /// The speaker of a row, if it has one.

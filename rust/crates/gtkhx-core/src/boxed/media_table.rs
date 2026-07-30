@@ -209,7 +209,7 @@ mod tests {
             let g = as_ref(got);
             let s = as_ref(src);
             // Distinct struct + distinct id/mime allocations.
-            assert_ne!(got as *const HxChatMedia, src as *const HxChatMedia);
+            assert_ne!(got, src as *const HxChatMedia);
             assert_ne!(g.id as *const u8, s.id as *const u8);
             assert_ne!(g.mime as *const c_char, s.mime as *const c_char);
             // Same contents.

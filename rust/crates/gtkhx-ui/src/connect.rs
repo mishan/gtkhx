@@ -128,6 +128,10 @@ fn active_window() -> Option<gtk::Window> {
 /// NONE, 1..N → valid_compressors[N-1]); `cipher` is a stable bookmark
 /// byte. TLS forces HOPE / cipher / compress off (mutually-exclusive
 /// transports). Updates the last-connection cache and fires hx_connect.
+// The arguments mirror the flat connection-parameter set the C bookmark
+// bridge hands over (server/port/login/pass + the four transport flags);
+// bundling them into a struct here would just re-split at every call site.
+#[allow(clippy::too_many_arguments)]
 fn connect_with_args(
     sess: *mut c_void,
     server: &str,
@@ -282,6 +286,8 @@ fn on_secure_combo_selected(selected: u32) {
 /// Fill the form. `compress` is a dropdown index; `cipher` is a stable byte
 /// (translated to a dropdown index here). Repairs legacy bookmarks that
 /// selected an algorithm but left HOPE off.
+// Arguments mirror the flat bookmark field set passed from the C bridge.
+#[allow(clippy::too_many_arguments)]
 fn set_the_entries_impl(
     address: &str,
     login: &str,
@@ -706,7 +712,7 @@ fn save_dialog() {
 fn rc4_migrate(name: &str, hope: bool, cipher_byte: u8) -> Option<u8> {
     if hope && cipher_byte == cipher::RC4 {
         let parent = unsafe { cffi::gtkhx_active_window() };
-        let nb = crate::rc4_dialog::run_sync(parent, name);
+        let nb = unsafe { crate::rc4_dialog::run_sync(parent, name) };
         if nb < 0 {
             return None;
         }

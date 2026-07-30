@@ -1009,10 +1009,12 @@ mod test_boxed_stubs {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use glib::subclass::prelude::ObjectImpl;
     use glib::translate::ToGlibPtr;
     use std::cell::Cell;
     use std::rc::Rc;
+
+    /// Captured 5-arg roster-notice payload: (htlc, cid, kind, name, old_name).
+    type NoticeCapture = Rc<Cell<(usize, u32, u32, usize, usize)>>;
 
     fn new_session() -> GtkhxSession {
         glib::Object::new::<GtkhxSession>()
@@ -1030,7 +1032,7 @@ mod tests {
         // that the signal is registered (an unregistered signal would
         // GLib-critical on emit rather than reach the handler).
         let s = new_session();
-        let got: Rc<Cell<(usize, u32, u32, usize, usize)>> = Rc::new(Cell::new((0, 0, 0, 0, 0)));
+        let got: NoticeCapture = Rc::new(Cell::new((0, 0, 0, 0, 0)));
         let got2 = got.clone();
         s.connect_local("user-notice", false, move |args| {
             got2.set((

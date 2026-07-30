@@ -128,13 +128,11 @@ pub unsafe extern "C" fn rcv_task_icon_getlist(
     // the walk so a hostile/duplicated reply can't drive an unbounded emit storm.
     const MAX_ENTRIES: usize = u16::MAX as usize + 1;
     let s = frame_slice(frame, frame_len);
-    let mut n = 0usize;
-    for e in parse_icon_list(ChunkIter::over_message(s, s.len())) {
+    for (n, e) in parse_icon_list(ChunkIter::over_message(s, s.len())).enumerate() {
         if n >= MAX_ENTRIES {
             break;
         }
         hx_icon_data_recv(htlc, e.uid, e.gif.as_ptr(), e.gif.len() as u32);
-        n += 1;
     }
 }
 
@@ -159,13 +157,12 @@ pub unsafe extern "C" fn hx_icon_data_recv(
     gif: *const u8,
     len: u32,
 ) {
-    let (ptr, out_len): (*const c_void, u32) = if len == 0 {
-        (std::ptr::null(), 0)
-    } else if !gtkhx_proto_gif_icon_is_gif(gif, len as usize) {
-        (std::ptr::null(), 0)
-    } else {
-        (gif as *const c_void, len)
-    };
+    let (ptr, out_len): (*const c_void, u32) =
+        if len == 0 || !gtkhx_proto_gif_icon_is_gif(gif, len as usize) {
+            (std::ptr::null(), 0)
+        } else {
+            (gif as *const c_void, len)
+        };
     gtkhx_session_emit_gif_icon_data(gtkhx_session_get_default(), htlc, uid, ptr, out_len);
 }
 

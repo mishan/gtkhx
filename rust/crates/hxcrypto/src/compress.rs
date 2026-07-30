@@ -52,7 +52,7 @@ pub enum CompressEncoder {
 pub enum CompressDecoder {
     Gzip(Decompress),
     #[cfg(feature = "lz4")]
-    Lz4(Lz4StreamDecoder),
+    Lz4(Box<Lz4StreamDecoder>),
     #[cfg(feature = "zstd")]
     Zstd(zstd::stream::raw::Decoder<'static>),
 }
@@ -134,6 +134,10 @@ pub extern "C" fn gtkhx_compress_encoder_new(algo: u16) -> *mut CompressEncoder 
 }
 
 /// Free an encoder.
+///
+/// # Safety
+/// `enc` must be either null or a pointer returned by the matching encoder
+/// constructor in this module and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_compress_encoder_free(enc: *mut CompressEncoder) {
     if !enc.is_null() {
@@ -248,13 +252,13 @@ pub extern "C" fn gtkhx_compress_decoder_new(algo: u16) -> *mut CompressDecoder 
         // on gtkhx_compress_encoder_new for the rationale.
         COMPRESS_GZIP => CompressDecoder::Gzip(Decompress::new(true)),
         #[cfg(feature = "lz4")]
-        COMPRESS_LZ4 => CompressDecoder::Lz4(Lz4StreamDecoder {
+        COMPRESS_LZ4 => CompressDecoder::Lz4(Box::new(Lz4StreamDecoder {
             decoder: lz4_flex::frame::FrameDecoder::new(Lz4InputBuf {
                 bytes: Vec::new(),
                 pos: 0,
             }),
             output_staging: Vec::new(),
-        }),
+        })),
         #[cfg(feature = "zstd")]
         COMPRESS_ZSTD => match zstd::stream::raw::Decoder::new() {
             Ok(dec) => CompressDecoder::Zstd(dec),
@@ -266,6 +270,10 @@ pub extern "C" fn gtkhx_compress_decoder_new(algo: u16) -> *mut CompressDecoder 
 }
 
 /// Free a decoder.
+///
+/// # Safety
+/// `dec` must be either null or a pointer returned by the matching decoder
+/// constructor in this module and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_compress_decoder_free(dec: *mut CompressDecoder) {
     if !dec.is_null() {
@@ -599,7 +607,7 @@ mod tests {
         // subsequent calls without any new input).
         let mut decoded = Vec::with_capacity(plaintext.len());
         let mut out_chunk = [0u8; 64];
-        let dec = unsafe { gtkhx_compress_decoder_new(COMPRESS_LZ4) };
+        let dec = gtkhx_compress_decoder_new(COMPRESS_LZ4);
         assert!(!dec.is_null());
 
         // First call: feed all the framed bytes.

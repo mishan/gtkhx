@@ -603,7 +603,7 @@ unsafe fn hx_member_model_get_ignore(_model: *mut c_void, _uid: u16) -> c_int {
 // the doubles above ignore the actual pointer values.
 #[cfg(test)]
 unsafe fn hx_conn_sess(_htlc: *const c_void) -> *mut c_void {
-    1 as *mut c_void
+    std::ptr::dangling_mut::<c_void>()
 }
 #[cfg(test)]
 unsafe fn chat_with_cid(_sess: *mut c_void, _cid: u32) -> *mut c_void {

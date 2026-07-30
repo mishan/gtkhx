@@ -290,7 +290,7 @@ fn section_new(url: &str, version: u8, expected: u16, filter: &gtk::CustomFilter
         make_column(&column_view, &tr("Users"), 0.5, 76, false, |r| r.nusers().to_string(), |a, b| {
             a.nusers().cmp(&b.nusers()).into()
         }),
-        make_column(&column_view, &tr("Country"), 0.5, 60, false, |r| meta_country(r), |a, b| {
+        make_column(&column_view, &tr("Country"), 0.5, 60, false, meta_country, |a, b| {
             coll(&meta_country(a), &meta_country(b))
         }),
         make_column(&column_view, &tr("Address"), 0.0, 150, false, |r| r.address(), |a, b| {
@@ -299,7 +299,7 @@ fn section_new(url: &str, version: u8, expected: u16, filter: &gtk::CustomFilter
         make_column(&column_view, &tr("Port"), 0.5, 70, false, |r| r.port().to_string(), |a, b| {
             a.port().cmp(&b.port()).into()
         }),
-        make_column(&column_view, &tr("Caps"), 0.0, 110, false, |r| caps_of(r), |a, b| {
+        make_column(&column_view, &tr("Caps"), 0.0, 110, false, caps_of, |a, b| {
             coll(&caps_of(a), &caps_of(b))
         }),
         make_column(&column_view, &tr("Description"), 0.0, 280, true, |r| r.desc(), |a, b| {
@@ -551,15 +551,19 @@ fn rerun_search() {
 /// `void tracker_batch_begin(const char *url, guint8 version, guint16
 /// expected)` — set up (or recycle) the section that subsequent
 /// `tracker_server_create` records land in.
+///
+/// # Safety
+/// `url` must be a valid pointer to a NUL-terminated C string that stays
+/// live for the duration of the call. Called from the C tracker bridge.
 #[no_mangle]
-pub extern "C" fn tracker_batch_begin(url: *const c_char, version: u8, expected: u16) {
+pub unsafe extern "C" fn tracker_batch_begin(url: *const c_char, version: u8, expected: u16) {
     let url = unsafe { cstr(url) };
     // Recycle path: compute counter deltas + mark current under a short
     // borrow, then do the store/selection mutations OUTSIDE it — both
     // set_selected(INVALID) and remove_all can re-enter the selection
     // handler (which borrows WIN).
     let recycled = WIN.with_borrow_mut(|w| {
-        let Some(win) = w.as_mut() else { return None };
+        let win = w.as_mut()?;
         let sec = win.by_url.get(&url).cloned()?;
         let old_total = section_num_total(&sec) as i32;
         let old_found = section_num_found(&sec) as i32;

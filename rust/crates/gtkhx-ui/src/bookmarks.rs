@@ -298,7 +298,7 @@ fn load_selection() {
     // dialog rewrites the store entry in place; reload to pick up the new byte.
     if data.hope && data.cipher == cipher::RC4 {
         let parent = w.window.as_ptr() as *mut cffi::GtkWindow;
-        let new_byte = crate::rc4_dialog::run_sync(parent, &name);
+        let new_byte = unsafe { crate::rc4_dialog::run_sync(parent, &name) };
         if new_byte < 0 {
             show_empty_state(&w);
             return;

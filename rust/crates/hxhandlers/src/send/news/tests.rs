@@ -167,7 +167,7 @@ fn last_task() -> Option<Task> {
     LAST_TASK.with(|t| t.borrow_mut().take())
 }
 fn htlc() -> *mut c_void {
-    1usize as *mut c_void
+    std::ptr::dangling_mut::<c_void>()
 }
 fn tok() -> *mut c_void {
     0xABCDusize as *mut c_void

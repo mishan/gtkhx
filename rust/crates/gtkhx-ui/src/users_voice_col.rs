@@ -235,6 +235,9 @@ mod voice_impl {
     }
 }
 
+/// # Safety
+/// `sess` must be a non-null pointer to a live `Session`; it is borrowed
+/// only for the duration of the call to build the voice-indicator column.
 #[cfg(feature = "voice")]
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_users_voice_column_new(

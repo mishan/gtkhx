@@ -101,7 +101,7 @@ unsafe fn cstr_bytes<'a>(s: *const c_char) -> &'a [u8] {
 /// Taking `ptr` by reference ties the returned slice's lifetime to that local
 /// pointer variable (g_free'd at the end of the caller's scope), so — unlike a
 /// plain `fn(...) -> &'a [u8]` — the slice can't outlive the allocation.
-unsafe fn hldir_slice<'a>(ptr: &'a *mut u8, len: u16) -> &'a [u8] {
+unsafe fn hldir_slice(ptr: &*mut u8, len: u16) -> &[u8] {
     if ptr.is_null() || len == 0 {
         &[]
     } else {

@@ -259,6 +259,10 @@ impl<S> HopeBlowfishStream<S, OsRng> {
     /// fire on the wire. `session_key` is the HOPE session-key
     /// bytes that the rotation hashes against. `macalg` is the
     /// HMAC algorithm HOPE negotiated.
+    // The arguments are the per-direction cipher state + key material HOPE
+    // negotiated; one crypto bundle that would only re-split at the call site
+    // if wrapped in a struct.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         inner: S,
         read_state: BlowfishOfb64State,
@@ -286,6 +290,8 @@ impl<S> HopeBlowfishStream<S, OsRng> {
 impl<S, R: HopeRng> HopeBlowfishStream<S, R> {
     /// Constructor that lets the test suite inject a
     /// deterministic [`HopeRng`].
+    // Same crypto-material bundle as `new`, plus an injected RNG.
+    #[allow(clippy::too_many_arguments)]
     pub fn with_rng(
         inner: S,
         read_state: BlowfishOfb64State,
@@ -735,10 +741,7 @@ impl<S: AsyncWrite + Unpin, R: HopeRng + Unpin> AsyncWrite for HopeBlowfishStrea
 
         // Is the frame now complete? If not, leave the state
         // machine in AccumulateFrame and report bytes-consumed.
-        let complete = match new_frame_len {
-            Some(len) if new_pos >= len => true,
-            _ => false,
-        };
+        let complete = matches!(new_frame_len, Some(len) if new_pos >= len);
 
         if !complete {
             this.write_sm = WriteState::AccumulateFrame {
@@ -1241,7 +1244,7 @@ mod tests {
 
         // ---- Frame 1: TASK reply, no marker ----
         // type=0x010000 (HTLS_HDR_TASK), trans=2, body 87 bytes.
-        let mut frame1 = make_frame(0x010000, 2, &vec![0xAAu8; 87]);
+        let mut frame1 = make_frame(0x010000, 2, &[0xAAu8; 87]);
         server_state.crypt_in_place(&mut frame1);
         server_writer
             .write_all(&frame1)
@@ -1264,7 +1267,7 @@ mod tests {
         let marker: u8 = 0x26;
         let opcode_low: u32 = 0x000062;
         let stamped_type = ((marker as u32) << 24) | opcode_low;
-        let mut frame2 = make_frame(stamped_type, 1586751229, &vec![0xBBu8; 14]);
+        let mut frame2 = make_frame(stamped_type, 1586751229, &[0xBBu8; 14]);
         // Server side: encrypt header with current state,
         // rotate key by `marker` HMAC iterations, encrypt body
         // with new state.

@@ -20,7 +20,7 @@
 //! What stays C behind the FFI seam is the send-path *infrastructure*, not the
 //! protocol: the text encoder (`gtkhx_text_for_wire`, hxtext), the per-htlc
 //! cap + chat-model lookups (`chat_send_bridge.c`), the task table (`task_new`
-//! + the `hx_rcv_user_change` / `rcv_task_user_list_switch` reply handlers,
+//! and the `hx_rcv_user_change` / `rcv_task_user_list_switch` reply handlers,
 //! rcv.c), and the write primitive (`hlwrite_chunks`, network.c).
 
 use std::ffi::{c_char, c_void};

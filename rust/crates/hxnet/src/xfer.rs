@@ -326,7 +326,14 @@ pub unsafe extern "C" fn hxnet_xfer_file_recv_one(p: *const HxnetXferParams) -> 
     tot_len += fork_len;
     if fork_len != 0 {
         if !is_preview {
-            let mut f = match std::fs::OpenOptions::new().create(true).write(true).open(&path) {
+            // No truncate: a resumed download seeks to `data_pos` and writes
+            // into an existing partial file, so truncating would discard it.
+            let mut f = match std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(false)
+                .open(&path)
+            {
                 Ok(f) => f,
                 Err(e) => return io_errno(&e),
             };
@@ -1416,7 +1423,7 @@ mod folder_loopback_tests {
         // A joined path past MAXPATHLEN (20 × 250-byte components) must be
         // refused with ENAMETOOLONG rather than building an unbounded path.
         let long: Vec<u8> = vec![b'x'; 250];
-        let many: Vec<&[u8]> = std::iter::repeat(long.as_slice()).take(20).collect();
+        let many: Vec<&[u8]> = std::iter::repeat_n(long.as_slice(), 20).collect();
         assert_eq!(recv_first_entry(1, &many), ENAMETOOLONG);
     }
 }
@@ -1425,7 +1432,6 @@ mod folder_loopback_tests {
 mod recv_timeout_tests {
     use super::*;
     use crate::htxf::HtxfConn;
-    use std::io::{Read as _, Write as _};
     use std::net::{TcpListener, TcpStream};
     use std::time::{Duration, Instant};
 

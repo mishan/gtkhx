@@ -158,8 +158,10 @@ fn cache_returns_consistent_widths() {
     let m = m();
     let s = "cached";
     let a = Style::default();
-    let mut b = Style::default();
-    b.fg = hxchat_layout::ColorRef::Palette(4);
+    let b = Style {
+        fg: hxchat_layout::ColorRef::Palette(4),
+        ..Default::default()
+    };
     assert_eq!(m.run_width(s, a), m.run_width(s, b));
     // And a repeat hit agrees with the first.
     assert_eq!(m.run_width(s, a), m.run_width(s, a));

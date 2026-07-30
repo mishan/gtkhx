@@ -152,7 +152,7 @@ thread_local! {
     /// Every live voice panel (weak widget refs). The runtime signal
     /// callbacks reach panels through this; entries are pruned lazily on
     /// iterate and on the panel's `destroy`.
-    static PANELS: RefCell<Vec<glib::WeakRef<gtk::Widget>>> = RefCell::new(Vec::new());
+    static PANELS: RefCell<Vec<glib::WeakRef<gtk::Widget>>> = const { RefCell::new(Vec::new()) };
 }
 
 /// Recover a panel's `Rc<PanelInner>` from its widget qdata.
@@ -189,7 +189,7 @@ fn gbool(b: bool) -> glib::ffi::gboolean {
 // ---------------------------------------------------------------------
 
 /// Lazy-create the per-session runtime on first use, registering the wire-out
-/// + signal bridges. Returns the runtime (NULL on construction failure —
+/// and signal bridges. Returns the runtime (NULL on construction failure —
 /// GStreamer not initialised / webrtcbin missing). Idempotent.
 unsafe fn ensure_voice_runtime(sess: *mut c_void) -> *mut c_void {
     if sess.is_null() {
@@ -260,7 +260,11 @@ unsafe extern "C" fn send_wire_frame_cb(
             }
         }
         HTLC_HDR_VOICE_LEAVE => {
-            if hx_send_voice_leave(htlc, cid) == 0 {
+            // Bind the send result first (it has the side effect of sending
+            // LEAVE); a bare nested `if` here trips clippy::collapsible_match,
+            // and hoisting the send into a match guard would hide it.
+            let sent = hx_send_voice_leave(htlc, cid);
+            if sent == 0 {
                 glib::g_debug!("gtkhx", "voice bridge: leave FAILED cid={cid}");
             }
         }

@@ -54,7 +54,7 @@ pub(crate) unsafe fn hlwrite_chunks(
 // ---- helpers ---------------------------------------------------------------
 
 /// A non-NULL sentinel htlc (the stubs never dereference it).
-const HTLC: *mut c_void = 0x1 as *mut c_void;
+const HTLC: *mut c_void = std::ptr::dangling_mut::<c_void>();
 
 fn reset(cap: bool) {
     CAP.with(|c| c.set(cap));
@@ -65,7 +65,7 @@ fn last() -> Option<Sent> {
     LAST_SEND.with(|s| s.borrow_mut().take())
 }
 
-fn chunk<'a>(s: &'a Sent, t: u16) -> Option<&'a Vec<u8>> {
+fn chunk(s: &Sent, t: u16) -> Option<&Vec<u8>> {
     s.chunks.iter().find(|(tag, _)| *tag == t).map(|(_, d)| d)
 }
 

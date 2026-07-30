@@ -27,7 +27,12 @@ use std::rc::Rc;
 /// return the chosen stable cipher byte — or -1 on cancel / Esc / close.
 /// An empty `name` means "no on-disk bookmark to name or rewrite" (the
 /// last-connection-derived caller).
-pub fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
+///
+/// # Safety
+/// `parent` must be either NULL or a valid pointer to a live
+/// `GtkWindow`; it is borrowed (not consumed) for the lifetime of the
+/// dialog and is only dereferenced when non-NULL.
+pub unsafe fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
     crate::ensure_gtk_init();
 
     // Body text: reuse the exact C msgids (including the `%s`) so the

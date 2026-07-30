@@ -23,7 +23,7 @@ use crate::sniff::{format_is_allowed, sniff, Format};
 
 /// Window the sniff layer ever reads. Mirrors the 32-byte bound
 /// documented in `sniff` — every magic signature in the allowlist
-/// + blocklist fits in the first 12 bytes, the SVG check scans
+/// and blocklist fits in the first 12 bytes, the SVG check scans
 /// past leading whitespace but is bounded by `sniff` itself, and
 /// the FFI shim clamps before constructing the slice so
 /// `slice::from_raw_parts` only needs the *clamped* prefix to be
@@ -74,6 +74,11 @@ fn format_to_u32(f: Format) -> u32 {
 /// extern guint32 hx_image_decode_sniff(const guint8 *bytes, gsize len);
 /// ```
 /// Returns a discriminant matching `HxInlineMediaFormat`.
+///
+/// # Safety
+/// `bytes` must be either null or valid for reads of at least
+/// `min(len, SNIFF_WINDOW_BYTES)` initialised bytes for the duration of the
+/// call (see [`slice_from_raw`]).
 #[no_mangle]
 pub unsafe extern "C" fn hx_image_decode_sniff(
     bytes: *const u8,
@@ -91,6 +96,10 @@ pub unsafe extern "C" fn hx_image_decode_sniff(
 ///
 /// Unknown discriminants map to `Format::Unknown` (rejected) — a
 /// caller passing garbage gets `FALSE`, not a panic.
+///
+/// # Safety
+/// Takes a plain `u32` by value and dereferences no pointers; the `unsafe`
+/// marker exists only for uniformity across this FFI module.
 #[no_mangle]
 pub unsafe extern "C" fn hx_image_decode_format_is_allowed(fmt: u32) -> i32 {
     let f = u32_to_format(fmt);
@@ -109,6 +118,10 @@ pub unsafe extern "C" fn hx_image_decode_format_is_allowed(fmt: u32) -> i32 {
 /// caller doesn't free. `NULL` for unknown / unrecognised
 /// discriminants. The pointer is valid for the lifetime of the
 /// process.
+///
+/// # Safety
+/// Takes a plain `u32` by value and dereferences no pointers; the returned
+/// pointer is a static literal the caller must not free.
 #[no_mangle]
 pub unsafe extern "C" fn hx_image_decode_format_to_mime(
     fmt: u32,
@@ -160,17 +173,17 @@ fn u32_to_format(v: u32) -> Format {
     }
 }
 
-/// ---- Async decode (G.2) ----------------------------------------
-///
-/// C signatures (mirror `src/inline_media_decode.h`):
-/// ```c
-/// extern gpointer inline_media_decode_async(
-///     const guint8 *bytes, gsize len,
-///     const HxInlineMediaCaps *caps,
-///     HxInlineMediaDecodeCallback cb, gpointer user_data);
-/// extern void inline_media_decode_cancel(gpointer token);
-/// extern void inline_media_decoded_free(HxInlineMediaDecoded *r);
-/// ```
+// ---- Async decode (G.2) ----------------------------------------
+//
+// C signatures (mirror `src/inline_media_decode.h`):
+// ```c
+// extern gpointer inline_media_decode_async(
+//     const guint8 *bytes, gsize len,
+//     const HxInlineMediaCaps *caps,
+//     HxInlineMediaDecodeCallback cb, gpointer user_data);
+// extern void inline_media_decode_cancel(gpointer token);
+// extern void inline_media_decoded_free(HxInlineMediaDecoded *r);
+// ```
 
 /// Wire values for `HxImageDecodePolicy`. Discriminants pinned
 /// `_Static_assert`-style on the C side so a reordering on
@@ -240,6 +253,13 @@ unsafe fn decode_async_common(
 /// Strict inline-media decode entry. Sniff gate enforces the
 /// fogWraith inline-media spec allowlist (JPEG / PNG / GIF);
 /// other formats fail at sniff before glycin spawns.
+///
+/// # Safety
+/// `bytes` must be null or valid for reads of `len` initialised bytes;
+/// `caps_in` must be null or a valid `*const HxInlineMediaCaps`; `cb` is
+/// invoked once with `user_data`, which is passed through opaquely. The
+/// returned token must be released via `inline_media_decode_cancel` (and its
+/// result via `inline_media_decoded_free`).
 #[no_mangle]
 pub unsafe extern "C" fn inline_media_decode_async(
     bytes: *const u8,
@@ -264,6 +284,12 @@ pub unsafe extern "C" fn inline_media_decode_async(
 /// `inline_media_decode_async`; reuse the existing
 /// `inline_media_decode_cancel` / `inline_media_decoded_free`
 /// helpers regardless of which entry built the token.
+///
+/// # Safety
+/// Same pointer contract as [`inline_media_decode_async`]: `bytes` valid for
+/// `len` bytes (or null), `caps_in` a valid `*const HxInlineMediaCaps` or
+/// null, `cb`/`user_data` an opaque callback pair. The returned token must be
+/// released via `inline_media_decode_cancel`.
 #[no_mangle]
 pub unsafe extern "C" fn hx_image_decode_async_with_policy(
     bytes: *const u8,
@@ -276,6 +302,12 @@ pub unsafe extern "C" fn hx_image_decode_async_with_policy(
     decode_async_common(bytes, len, caps_in, u32_to_policy(policy), cb, user_data)
 }
 
+/// Cancel a pending decode and release its token.
+///
+/// # Safety
+/// `token` must be either null or a token returned by
+/// `inline_media_decode_async` / `hx_image_decode_async_with_policy` that has
+/// not already been passed to this function.
 #[no_mangle]
 pub unsafe extern "C" fn inline_media_decode_cancel(token: *mut c_void) {
     if token.is_null() {
@@ -291,6 +323,11 @@ pub unsafe extern "C" fn inline_media_decode_cancel(token: *mut c_void) {
     drop(rc);
 }
 
+/// Free a decode result produced by the decode callback.
+///
+/// # Safety
+/// `result` must be either null or a `*mut HxInlineMediaDecoded` handed to a
+/// decode callback and not yet freed.
 #[no_mangle]
 pub unsafe extern "C" fn inline_media_decoded_free(
     result: *mut HxInlineMediaDecoded,

@@ -69,6 +69,10 @@ use crate::{
     Frame, ShutdownReason,
 };
 
+/// Optional TLS certificate-verify (TOFU) callback: given a fingerprint
+/// string, returns whether to trust the peer.
+pub type TlsVerifyFn = Option<Box<dyn Fn(&str) -> bool + Send>>;
+
 /// Parameters for the plaintext lifecycle. Strings are passed by
 /// owned `Vec<u8>` / `String` because the orchestrator runs as a
 /// spawned task and can't hold caller borrows.
@@ -146,7 +150,7 @@ pub async fn run_plaintext_lifecycle(
 /// [`crate::tls`].
 pub async fn run_plaintext_tls_lifecycle(
     req: PlaintextOpenRequest,
-    verify: Option<Box<dyn Fn(&str) -> bool + Send>>,
+    verify: TlsVerifyFn,
     cmd_rx: mpsc::Receiver<crate::Command>,
     evt_tx: mpsc::Sender<Event>,
 ) {
@@ -386,6 +390,7 @@ fn mac_label_to_hopemacalg(label: &[u8]) -> Option<HopeMacAlg> {
 ///    `Event::Frame` before `HandshakeDone` — same Option B shape as
 ///    the plaintext path — then hand the wrapped transport to the
 ///    actor.
+///
 /// Control-channel HOPE AEAD material, retained so an HTXF subchannel
 /// can derive its per-transfer keys in-process without the session key
 /// ever crossing the FFI back to C. Populated by [`run_hope_lifecycle`]
@@ -997,7 +1002,7 @@ mod tests {
             proxy: None,
         };
         let (_handle, mut evt_rx, cmd_rx, evt_tx) = Connection::make_channels();
-        let verify: Option<Box<dyn Fn(&str) -> bool + Send>> = Some(Box::new(|fp: &str| {
+        let verify: TlsVerifyFn = Some(Box::new(|fp: &str| {
             eprintln!("CERT fingerprint: {fp}");
             true
         }));

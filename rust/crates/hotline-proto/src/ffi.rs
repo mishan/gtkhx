@@ -3746,6 +3746,10 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_bool(
 
 /// Clamp a raw maturity-rating byte to {0..=3}, defaulting to 0
 /// (GENERAL) on unknown values. Spec rule.
+///
+/// # Safety
+/// Takes a plain `u8` by value and dereferences no pointers; the `unsafe`
+/// marker exists only for uniformity across this FFI module.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(
     raw: u8,
@@ -3755,6 +3759,10 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(
 
 /// Clamp a raw listing-category byte to {0..=12}, defaulting to 0
 /// (UNSPECIFIED) on unknown values. Spec rule.
+///
+/// # Safety
+/// Takes a plain `u8` by value and dereferences no pointers; the `unsafe`
+/// marker exists only for uniformity across this FFI module.
 #[no_mangle]
 pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
     raw: u8,

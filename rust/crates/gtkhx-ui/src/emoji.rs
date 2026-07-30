@@ -132,7 +132,7 @@ fn ta_is_name_char(c: char) -> bool {
 fn ta_current_token(view: &gtk::TextView) -> Option<(i32, String)> {
     let buf = view.buffer();
     let cur = buf.iter_at_mark(&buf.get_insert());
-    let mut it = cur.clone();
+    let mut it = cur;
 
     let mut steps = 0i32;
     while it.backward_char() {
@@ -145,13 +145,13 @@ fn ta_current_token(view: &gtk::TextView) -> Option<(i32, String)> {
             continue;
         }
         if c == ':' {
-            let mut before = it.clone();
+            let mut before = it;
             let at_start = !before.backward_char();
             let ok_prev = at_start || before.char().is_whitespace();
             if !ok_prev || steps < TA_MIN_PREFIX {
                 return None;
             }
-            let mut pstart = it.clone();
+            let mut pstart = it;
             pstart.forward_char(); // skip the colon
             let prefix = buf.text(&pstart, &cur, false).to_string();
             return Some((it.offset(), prefix));

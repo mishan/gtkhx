@@ -336,6 +336,24 @@ fn cpath_to_pathbuf(cstr: &CStr) -> Option<PathBuf> {
     }
 }
 
+/// `void hx_sound_play (const char *path)` — play the WAV at `path`,
+/// fire-and-forget. Thread-safe (callable from any thread); a no-op on a NULL
+/// path, an unreadable / non-WAV file, or when no audio device is available.
+///
+/// # Safety
+/// `path` must be NULL or a valid NUL-terminated C string, valid for the
+/// duration of the call.
+#[no_mangle]
+pub unsafe extern "C" fn hx_sound_play(path: *const c_char) {
+    if path.is_null() {
+        return;
+    }
+    if let Some(pb) = cpath_to_pathbuf(CStr::from_ptr(path)) {
+        // Best-effort: a full/closed channel just means the sound is skipped.
+        let _ = player().send(pb);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::resample_to;
@@ -409,23 +427,5 @@ mod tests {
     fn empty_input_is_noop() {
         let empty: [f32; 0] = [];
         assert!(resample_to(&empty, 1, 8000, 48000).unwrap().is_empty());
-    }
-}
-
-/// `void hx_sound_play (const char *path)` — play the WAV at `path`,
-/// fire-and-forget. Thread-safe (callable from any thread); a no-op on a NULL
-/// path, an unreadable / non-WAV file, or when no audio device is available.
-///
-/// # Safety
-/// `path` must be NULL or a valid NUL-terminated C string, valid for the
-/// duration of the call.
-#[no_mangle]
-pub unsafe extern "C" fn hx_sound_play(path: *const c_char) {
-    if path.is_null() {
-        return;
-    }
-    if let Some(pb) = cpath_to_pathbuf(CStr::from_ptr(path)) {
-        // Best-effort: a full/closed channel just means the sound is skipped.
-        let _ = player().send(pb);
     }
 }
