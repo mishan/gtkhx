@@ -19,10 +19,10 @@ use std::ffi::{c_char, c_void};
 use std::os::raw::c_int;
 use std::rc::Rc;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_borrow, IntoGlib};
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_borrow, IntoGlib};
+use gtk4 as gtk;
 
 /// gtk-rs qdata key: the idempotence sentinel on the window.
 const ATTACHED_KEY: &str = "voice-ptt-attached";
@@ -76,8 +76,7 @@ struct PttState {
 /// The live PTT bind from prefs, or None when disabled / unset. Returns
 /// `(keyval, masked_state_bits)`.
 fn current_bind() -> Option<(u32, u32)> {
-    let enabled =
-        unsafe { gtkhx_prefs_get_bool(crate::cs("VOICEPTTENABLED").as_ptr()) != 0 };
+    let enabled = unsafe { gtkhx_prefs_get_bool(crate::cs("VOICEPTTENABLED").as_ptr()) != 0 };
     if !enabled {
         return None;
     }
@@ -129,7 +128,11 @@ fn session_in_voice(sess: *mut c_void) -> Option<u32> {
 /// helper refused (e.g. CAP_VOICE cleared mid-session).
 fn drive_mute(sess: *mut c_void, cid: u32, muted: bool) -> bool {
     let htlc = unsafe { hx_session_htlc(sess) };
-    let mflag = if muted { glib::ffi::GTRUE } else { glib::ffi::GFALSE };
+    let mflag = if muted {
+        glib::ffi::GTRUE
+    } else {
+        glib::ffi::GFALSE
+    };
     if unsafe { hx_send_voice_mute(htlc, cid, mflag) } == 0 {
         return false;
     }
@@ -191,10 +194,7 @@ fn on_key_released(state: &PttState, keyval: gtk::gdk::Key) {
 /// `window` is a valid `GtkWidget *`; `sess` a valid session pointer. Main
 /// thread only.
 #[no_mangle]
-pub unsafe extern "C" fn hx_voice_ptt_attach(
-    window: *mut gtk::ffi::GtkWidget,
-    sess: *mut c_void,
-) {
+pub unsafe extern "C" fn hx_voice_ptt_attach(window: *mut gtk::ffi::GtkWidget, sess: *mut c_void) {
     if window.is_null() || sess.is_null() {
         return;
     }

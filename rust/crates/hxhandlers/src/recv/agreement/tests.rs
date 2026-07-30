@@ -19,7 +19,10 @@ fn recv(has_agreement: bool, body: &str) -> c_int {
 #[test]
 fn real_agreement_is_shown() {
     test_env::reset();
-    assert_eq!(recv(/*has_agreement=*/ true, "Be nice."), HX_AGREEMENT_ACT_SHOWN);
+    assert_eq!(
+        recv(/*has_agreement=*/ true, "Be nice."),
+        HX_AGREEMENT_ACT_SHOWN
+    );
     assert_eq!(
         test_env::EMITTED.with(|c| c.take()),
         Some((b"Be nice.".to_vec(), 8))
@@ -30,6 +33,9 @@ fn real_agreement_is_shown() {
 fn no_agreement_auto_agrees_without_emit() {
     // No-agreement / malformed → nothing to show; the C side sends AGREEMENTAGREE.
     test_env::reset();
-    assert_eq!(recv(/*has_agreement=*/ false, ""), HX_AGREEMENT_ACT_AUTO_AGREE);
+    assert_eq!(
+        recv(/*has_agreement=*/ false, ""),
+        HX_AGREEMENT_ACT_AUTO_AGREE
+    );
     assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
 }

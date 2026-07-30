@@ -17,10 +17,10 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::c_char;
 
-use gtk4 as gtk;
+use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::from_glib_none;
+use gtk4 as gtk;
 use libadwaita as adw;
 
 use crate::dock;
@@ -171,7 +171,13 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_public(
     let page = view.append_pinned(&w);
     let t = crate::cstr(title);
     page.set_title(if t.is_empty() { "Chat" } else { &t });
-    set_meta(&page, TabMeta { kind: KIND_PUBLIC, id: 0 });
+    set_meta(
+        &page,
+        TabMeta {
+            kind: KIND_PUBLIC,
+            id: 0,
+        },
+    );
     view.set_selected_page(&page);
 }
 
@@ -191,7 +197,13 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_pchat(
     let page = view.append(&w);
     let t = crate::cstr(title);
     page.set_title(if t.is_empty() { "Private Chat" } else { &t });
-    set_meta(&page, TabMeta { kind: KIND_PCHAT, id: cid });
+    set_meta(
+        &page,
+        TabMeta {
+            kind: KIND_PCHAT,
+            id: cid,
+        },
+    );
 
     let ptr = page.as_ptr();
     STATE.with(|s| {
@@ -216,7 +228,13 @@ pub unsafe extern "C" fn gtkhx_chat_tabs_add_msg(
     let page = view.append(&w);
     let t = crate::cstr(title);
     page.set_title(if t.is_empty() { "PM" } else { &t });
-    set_meta(&page, TabMeta { kind: KIND_MSG, id: uid as u32 });
+    set_meta(
+        &page,
+        TabMeta {
+            kind: KIND_MSG,
+            id: uid as u32,
+        },
+    );
 
     let ptr = page.as_ptr();
     STATE.with(|s| {

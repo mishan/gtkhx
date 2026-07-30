@@ -12,10 +12,10 @@
 //! `hx_chat_view_can_search` and skipped building the bar on xtext,
 //! which could not search; there is one backend now and it can.
 
-use gtk4 as gtk;
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
+use gtk4 as gtk;
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -259,9 +259,7 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::Search
             let c = ctx.clone();
             let action = gtk::CallbackAction::new(move |_, _| {
                 let reopening = !b.is_search_mode();
-                let advancing = !reopening
-                    && c.entry.has_focus()
-                    && !c.entry.text().is_empty();
+                let advancing = !reopening && c.entry.has_focus() && !c.entry.text().is_empty();
                 if advancing {
                     c.step(1);
                 } else {
@@ -273,8 +271,7 @@ pub fn build(view: &gtk::Widget, capture: &impl IsA<gtk::Widget>) -> gtk::Search
                 }
                 glib::Propagation::Stop
             });
-            let trigger =
-                gtk::KeyvalTrigger::new(gdk::Key::f, gdk::ModifierType::CONTROL_MASK);
+            let trigger = gtk::KeyvalTrigger::new(gdk::Key::f, gdk::ModifierType::CONTROL_MASK);
             sc.add_shortcut(gtk::Shortcut::new(Some(trigger), Some(action)));
         }
 

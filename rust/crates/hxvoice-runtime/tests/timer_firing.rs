@@ -81,9 +81,7 @@ fn timer_firing_scenarios() {
     //    state machine to Leaving via fail().
     {
         let backend = Rc::new(RefCell::new(RecordingBackend::default()));
-        let runtime = VoiceRuntime::new_without_pipeline(Box::new(
-            SharedRec(backend.clone()),
-        ));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(SharedRec(backend.clone())));
 
         runtime.handle_event(Event::JoinRequested { cid: 7 });
         assert_eq!(runtime.state(), SessionState::JoinSent);
@@ -118,16 +116,16 @@ fn timer_firing_scenarios() {
     //    timer never fires.
     {
         let backend = Rc::new(RefCell::new(RecordingBackend::default()));
-        let runtime = VoiceRuntime::new_without_pipeline(Box::new(
-            SharedRec(backend.clone()),
-        ));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(SharedRec(backend.clone())));
         runtime.dispatch(Action::ArmTimer {
             kind: Timeout::Dtls,
             ms: 10,
         });
         assert!(runtime.armed_timers().contains(&Timeout::Dtls));
 
-        runtime.dispatch(Action::CancelTimer { kind: Timeout::Dtls });
+        runtime.dispatch(Action::CancelTimer {
+            kind: Timeout::Dtls,
+        });
         assert!(!runtime.armed_timers().contains(&Timeout::Dtls));
 
         let start = std::time::Instant::now();
@@ -153,9 +151,7 @@ fn timer_firing_scenarios() {
     //    loop doesn't fire a callback against a dropped runtime.
     {
         let backend = Rc::new(RefCell::new(RecordingBackend::default()));
-        let runtime = VoiceRuntime::new_without_pipeline(Box::new(
-            SharedRec(backend.clone()),
-        ));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(SharedRec(backend.clone())));
         runtime.dispatch(Action::ArmTimer {
             kind: Timeout::Media,
             ms: 10,

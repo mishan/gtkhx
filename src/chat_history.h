@@ -64,20 +64,20 @@ struct htlc_conn;
 
 typedef struct {
     guint64 message_id;
-    gint64  timestamp;   /* Unix epoch UTC seconds */
-    guint16 flags;       /* HX_HISTORY_FLAG_* */
+    gint64 timestamp; /* Unix epoch UTC seconds */
+    guint16 flags;    /* HX_HISTORY_FLAG_* */
     guint16 icon_id;
     /* nick / message are NUL-terminated, owned by the struct.
-	 * The wire bytes are NOT NUL-terminated; the parser appends
-	 * a trailing zero for convenience. The server has already
-	 * transcoded to whatever the negotiated text encoding is
-	 * (UTF-8 if CAP_TEXT_ENCODING is set, Mac Roman otherwise);
-	 * callers that need UTF-8 should pass these through
-	 * gtkhx_text_to_utf8. */
-    gchar  *nick;
-    gsize   nick_len;
-    gchar  *message;
-    gsize   message_len;
+     * The wire bytes are NOT NUL-terminated; the parser appends
+     * a trailing zero for convenience. The server has already
+     * transcoded to whatever the negotiated text encoding is
+     * (UTF-8 if CAP_TEXT_ENCODING is set, Mac Roman otherwise);
+     * callers that need UTF-8 should pass these through
+     * gtkhx_text_to_utf8. */
+    gchar *nick;
+    gsize nick_len;
+    gchar *message;
+    gsize message_len;
 } HxHistoryEntry;
 
 /* Allocate and parse a single packed-binary entry from `data`
@@ -97,8 +97,7 @@ typedef struct {
  * hotline_proto::parse::parse_history_entry, free releases the glib
  * buffers. The struct above stays C-visible (chat.c reads its fields)
  * and its layout is pinned by _Static_asserts in chat_history.c. */
-extern HxHistoryEntry *hx_history_entry_parse (const guint8 *data,
-                                               gsize         len);
+extern HxHistoryEntry *hx_history_entry_parse (const guint8 *data, gsize len);
 
 extern void hx_history_entry_free (HxHistoryEntry *entry);
 
@@ -133,9 +132,9 @@ extern void hx_history_entry_free (HxHistoryEntry *entry);
  * Load-older flow, rcv.c's hx_post_login_fetches). Callers still
  * task_new()-register rcv_task_chat_history first (keyed on htlc->trans).
  */
-extern gboolean hx_get_chat_history (struct htlc_conn *htlc,
-                                     guint32 channel_id, guint64 before,
-                                     guint64 after, guint16 limit);
+extern gboolean hx_get_chat_history (struct htlc_conn *htlc, guint32 channel_id,
+                                     guint64 before, guint64 after,
+                                     guint16 limit);
 
 /* Caller-owned backing storage for hx_get_chat_history_build_chunks.
  * The struct hx_chunk array it fills points into these fields, so the

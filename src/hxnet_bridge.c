@@ -13,28 +13,28 @@
 #include "config.h"
 
 #include <string.h>
-#include <unistd.h>             /* close() — fd cleanup on pre-spawn failure */
+#include <unistd.h> /* close() — fd cleanup on pre-spawn failure */
 
 #include <glib.h>
-#include <gio/gio.h>            /* GProxyResolver (SOCKS proxy lookup) */
+#include <gio/gio.h> /* GProxyResolver (SOCKS proxy lookup) */
 
-#include "compat.h"             /* MAX_HOTLINE_PACKET_LEN */
+#include "compat.h" /* MAX_HOTLINE_PACKET_LEN */
 #include "hxnet_bridge.h"
 #include "protocol.h"
 #include "hxconn.h"
 #include "proto_helpers.h"
-#include "hotline_proto.h"      /* gtkhx_proto_pack_header (wire header encode) */
-#include "gtkhx_session.h"      /* GtkhxConnectionState + emit (Phase G state cb) */
-#include "network.h"            /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
-#include "hxnet_htxf.h"            /* HxnetHopeAead (orchestrated HOPE AEAD material) */
-#include "host_port.h"          /* gtkhx_join_host_port (proxy lookup URI) */
+#include "hotline_proto.h" /* gtkhx_proto_pack_header (wire header encode) */
+#include "gtkhx_session.h" /* GtkhxConnectionState + emit (Phase G state cb) */
+#include "network.h" /* hx_orchestrator_register_login_task (LOGIN_SENDING) */
+#include "hxnet_htxf.h" /* HxnetHopeAead (orchestrated HOPE AEAD material) */
+#include "host_port.h"  /* gtkhx_join_host_port (proxy lookup URI) */
 
 /* The production receive dispatch (rcv.c). We hand it the assembled frame
  * as an explicit (frame, frame_len) slice plus the parsed header fields; it
  * routes the opcode to a body handler and calls it. */
 extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
-                              gsize frame_len, guint32 type,
-                               guint32 trans, guint32 flag, guint32 body_len);
+                               gsize frame_len, guint32 type, guint32 trans,
+                               guint32 flag, guint32 body_len);
 
 /* Forward declaration of the production teardown. Defined in
  * network.c; we trampoline to it from the shutdown bridge.
@@ -56,10 +56,10 @@ extern int connected;
  * having to ship hxnet_frame's full ABI just for the reason
  * codes. Production's on_shutdown callback will pass these in
  * verbatim. */
-#define HXNET_SHUTDOWN_EOF             0
-#define HXNET_SHUTDOWN_STREAM_ERROR    1
+#define HXNET_SHUTDOWN_EOF 0
+#define HXNET_SHUTDOWN_STREAM_ERROR 1
 #define HXNET_SHUTDOWN_FRAME_TOO_LARGE 2
-#define HXNET_SHUTDOWN_HANDLE_DROPPED  3
+#define HXNET_SHUTDOWN_HANDLE_DROPPED 3
 
 void
 hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
@@ -101,8 +101,7 @@ hx_bridge_dispatch_frame (struct htlc_conn *htlc, guint32 type, guint32 trans,
         g_critical (
             "hxnet_bridge: dispatch_frame body_len %u exceeds "
             "MAX_HOTLINE_PACKET_LEN - sizeof(hc) %u; closing connection",
-            (unsigned) body_len,
-            (unsigned) (MAX_HOTLINE_PACKET_LEN - 2));
+            (unsigned)body_len, (unsigned)(MAX_HOTLINE_PACKET_LEN - 2));
         hx_htlc_close (htlc, /*expected=*/0);
         return;
     }
@@ -149,11 +148,21 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
      * -2" with no clue what killed the actor. */
     const char *reason_str;
     switch (reason) {
-    case HXNET_SHUTDOWN_EOF:             reason_str = "EOF (peer closed)"; break;
-    case HXNET_SHUTDOWN_STREAM_ERROR:    reason_str = "STREAM_ERROR (mid-stream IO error)"; break;
-    case HXNET_SHUTDOWN_FRAME_TOO_LARGE: reason_str = "FRAME_TOO_LARGE (oversized wire len)"; break;
-    case HXNET_SHUTDOWN_HANDLE_DROPPED:  reason_str = "HANDLE_DROPPED (we dropped the handle)"; break;
-    default:                             reason_str = "(unknown reason code)"; break;
+    case HXNET_SHUTDOWN_EOF:
+        reason_str = "EOF (peer closed)";
+        break;
+    case HXNET_SHUTDOWN_STREAM_ERROR:
+        reason_str = "STREAM_ERROR (mid-stream IO error)";
+        break;
+    case HXNET_SHUTDOWN_FRAME_TOO_LARGE:
+        reason_str = "FRAME_TOO_LARGE (oversized wire len)";
+        break;
+    case HXNET_SHUTDOWN_HANDLE_DROPPED:
+        reason_str = "HANDLE_DROPPED (we dropped the handle)";
+        break;
+    default:
+        reason_str = "(unknown reason code)";
+        break;
     }
     /* Visibility / level. A clean shutdown (EOF, HANDLE_DROPPED) is
      * expected during normal disconnect. So is ANY failure before the
@@ -166,8 +175,7 @@ hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason)
      * alarming warning to the console). Only a STREAM_ERROR /
      * FRAME_TOO_LARGE *after* a working login (connected == 1) is the
      * noteworthy mid-session-drop signal — promote that to g_warning. */
-    gboolean noteworthy = connected != 0
-                          && reason != HXNET_SHUTDOWN_EOF
+    gboolean noteworthy = connected != 0 && reason != HXNET_SHUTDOWN_EOF
                           && reason != HXNET_SHUTDOWN_HANDLE_DROPPED;
     if (noteworthy) {
         g_warning ("hxnet_bridge: actor exited mid-session with reason=%d "
@@ -267,8 +275,8 @@ typedef int (*hxnet_verify_cert_cb_t) (const guint8 *fp, gsize fp_len,
  * rust/crates/hxnet/src/ffi.rs (only the two with a coarse
  * GtkhxConnectionState equivalent are named here; the
  * intermediate handshake states are dropped). */
-#define HXNET_BRIDGE_STATE_CONNECTED       2
-#define HXNET_BRIDGE_STATE_LOGIN_SENDING   5
+#define HXNET_BRIDGE_STATE_CONNECTED 2
+#define HXNET_BRIDGE_STATE_LOGIN_SENDING 5
 #define HXNET_BRIDGE_STATE_HANDSHAKE_DONE 10
 
 extern int hxnet_connection_send_frame (hxnet_connection_opaque *handle,
@@ -281,12 +289,10 @@ extern void hxnet_frame_free (hxnet_frame_t *f);
  * frame. Mirror of hxnet_connection_open_plaintext in
  * rust/crates/hxnet/src/ffi.rs. */
 extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
-    const guint8 *host, gsize host_len, guint16 port,
-    const guint8 *login, gsize login_len,
-    const guint8 *password, gsize password_len,
-    const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint16 caps, guint32 trans,
-    const guint8 *proxy_uri, gsize proxy_uri_len,
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, void *user_data);
 
@@ -295,27 +301,23 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext (
  * post-login stream. Mirror of hxnet_connection_open_hope in
  * rust/crates/hxnet/src/ffi.rs. */
 extern hxnet_connection_opaque *hxnet_connection_open_hope (
-    const guint8 *host, gsize host_len, guint16 port,
-    const guint8 *login, gsize login_len,
-    const guint8 *password, gsize password_len,
-    const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint16 caps, guint32 trans,
-    const guint8 *cipher_alg, gsize cipher_alg_len,
-    const guint8 *proxy_uri, gsize proxy_uri_len,
-    hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
-    hxnet_state_cb_t on_state, void *user_data);
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *cipher_alg, gsize cipher_alg_len,
+    const guint8 *proxy_uri, gsize proxy_uri_len, hxnet_event_cb_t on_event,
+    hxnet_shutdown_cb_t on_shutdown, hxnet_state_cb_t on_state,
+    void *user_data);
 
 /* Phase G TLS: plaintext Hotline over TLS-from-byte-zero (Mobius /
  * Janus separate-port model). Mirror of
  * hxnet_connection_open_plaintext_tls in rust/crates/hxnet/src/ffi.rs.
  * Cert trust is the verify_cert callback (TOFU, post-handshake). */
 extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
-    const guint8 *host, gsize host_len, guint16 port,
-    const guint8 *login, gsize login_len,
-    const guint8 *password, gsize password_len,
-    const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint16 caps, guint32 trans,
-    const guint8 *proxy_uri, gsize proxy_uri_len,
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len,
     hxnet_event_cb_t on_event, hxnet_shutdown_cb_t on_shutdown,
     hxnet_state_cb_t on_state, hxnet_verify_cert_cb_t verify_cert,
     void *user_data);
@@ -324,8 +326,8 @@ extern hxnet_connection_opaque *hxnet_connection_open_plaintext_tls (
  * returns an opaque HxnetHopeAead handle for a HOPE-ChaCha20 control
  * connection, or NULL otherwise. HxnetHopeAead is declared in
  * htxf_io.h (included above). */
-extern HxnetHopeAead *hxnet_connection_hope_aead_material (
-    hxnet_connection_opaque *conn);
+extern HxnetHopeAead *
+hxnet_connection_hope_aead_material (hxnet_connection_opaque *conn);
 
 /* hx_tls_orchestrator_verify_cert (production TOFU verify, defined in
  * network.c) and hx_orchestrator_register_login_task are both declared
@@ -344,7 +346,7 @@ static hxnet_connection_opaque *bridge_handle;
  * G_GNUC_UNUSED so single-conn builds don't emit a dead-store
  * warning under -Wunused-but-set-variable. Same fate as
  * hx.h's MAX_CONN scaffold — it lives until multi-conn does. */
-static struct htlc_conn        *bridge_htlc G_GNUC_UNUSED;
+static struct htlc_conn *bridge_htlc G_GNUC_UNUSED;
 
 /* C-side trampolines hxnet calls on the GLib main thread per
  * Event::Frame / Event::Shutdown. They translate the FFI
@@ -352,8 +354,8 @@ static struct htlc_conn        *bridge_htlc G_GNUC_UNUSED;
  * frame body (per the on_event ownership contract), and clear
  * the global on shutdown so the install gate flips off. */
 static void
-bridge_on_event_cb (hxnet_connection_opaque *conn,
-                    hxnet_frame_t *frame, void *user_data)
+bridge_on_event_cb (hxnet_connection_opaque *conn, hxnet_frame_t *frame,
+                    void *user_data)
 {
     struct htlc_conn *htlc = user_data;
     /* Only the currently-installed handle may dispatch. After an
@@ -366,9 +368,8 @@ bridge_on_event_cb (hxnet_connection_opaque *conn,
      * frame is still freed below regardless, honouring the ownership
      * contract even when the event is dropped as stale. */
     if (conn == bridge_handle && frame && htlc) {
-        hx_bridge_dispatch_frame (htlc, frame->type_, frame->trans,
-                                  frame->flag, frame->hc, frame->body_ptr,
-                                  frame->body_len);
+        hx_bridge_dispatch_frame (htlc, frame->type_, frame->trans, frame->flag,
+                                  frame->hc, frame->body_ptr, frame->body_len);
     }
     /* Per the hxnet callback contract, the C side owns the
      * body memory behind body_ptr/body_len for the lifetime of
@@ -471,7 +472,7 @@ bridge_on_state_cb (hxnet_connection_opaque *conn G_GNUC_UNUSED, guint32 state,
          * ordered event channel, so registering here is in time. */
         gtkhx_session_emit_connection_state (sess,
                                              GTKHX_CONNECTION_HANDSHAKE_DONE);
-        hx_orchestrator_register_login_task ((struct htlc_conn *) user_data);
+        hx_orchestrator_register_login_task ((struct htlc_conn *)user_data);
         break;
     case HXNET_BRIDGE_STATE_HANDSHAKE_DONE:
         /* Rust's end-of-handshake state. No view transition here: the
@@ -527,8 +528,8 @@ bridge_redact_uri_userinfo (const char *uri)
     const char *slash = strchr (authority, '/');
     /* Only an `@` before the first path `/` is userinfo. */
     if (at && (!slash || at < slash)) {
-        return g_strdup_printf ("%.*s://***@%s",
-                                (int) (scheme_end - uri), uri, at + 1);
+        return g_strdup_printf ("%.*s://***@%s", (int)(scheme_end - uri), uri,
+                                at + 1);
     }
     return g_strdup (uri);
 }
@@ -553,8 +554,8 @@ hx_bridge_lookup_socks_proxy (const char *host, guint16 port)
     GError *err = NULL;
     char **proxies = g_proxy_resolver_lookup (resolver, uri, NULL, &err);
     if (err) {
-        g_warning ("hxnet_bridge: proxy lookup for %s failed: %s",
-                   uri, err->message);
+        g_warning ("hxnet_bridge: proxy lookup for %s failed: %s", uri,
+                   err->message);
         g_error_free (err);
         return NULL;
     }
@@ -601,8 +602,8 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
     }
 
     login = login ? login : "";
-    pass  = pass  ? pass  : "";
-    name  = name  ? name  : "";
+    pass = pass ? pass : "";
+    name = name ? name : "";
 
     /* open_plaintext spawns the lifecycle task and wires the
      * forwarder synchronously; events don't fire until we return to
@@ -614,12 +615,10 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
      * lifecycle task), so this g_autofree URI is safe to free on return. */
     g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext (
-        (const guint8 *) host, strlen (host), port,
-        (const guint8 *) login, strlen (login),
-        (const guint8 *) pass, strlen (pass),
-        (const guint8 *) name, strlen (name),
-        icon, version, caps, trans,
-        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
+        (const guint8 *)host, strlen (host), port, (const guint8 *)login,
+        strlen (login), (const guint8 *)pass, strlen (pass),
+        (const guint8 *)name, strlen (name), icon, version, caps, trans,
+        (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
     if (!h) {
         /* open_plaintext logs its own g_critical on the failure
@@ -628,17 +627,17 @@ hx_bridge_install_orchestrated_plaintext (struct htlc_conn *htlc,
         return FALSE;
     }
     bridge_handle = h;
-    bridge_htlc   = htlc;
+    bridge_htlc = htlc;
     return TRUE;
 }
 
 gboolean
-hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
-                                     const char *host, guint16 port,
-                                     const char *login, const char *pass,
-                                     const char *name, guint16 icon,
-                                     guint16 version, guint16 caps,
-                                     guint32 trans, const char *cipher_alg)
+hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc, const char *host,
+                                     guint16 port, const char *login,
+                                     const char *pass, const char *name,
+                                     guint16 icon, guint16 version,
+                                     guint16 caps, guint32 trans,
+                                     const char *cipher_alg)
 {
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
@@ -654,27 +653,25 @@ hx_bridge_install_orchestrated_hope (struct htlc_conn *htlc,
     }
 
     login = login ? login : "";
-    pass  = pass  ? pass  : "";
-    name  = name  ? name  : "";
+    pass = pass ? pass : "";
+    name = name ? name : "";
 
     /* Same synchronous-install-before-return discipline as the
      * plaintext variant: the bridge handle must be live before the
      * forwarder can deliver the replayed step-2 reply. */
     g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_hope (
-        (const guint8 *) host, strlen (host), port,
-        (const guint8 *) login, strlen (login),
-        (const guint8 *) pass, strlen (pass),
-        (const guint8 *) name, strlen (name),
-        icon, version, caps, trans,
-        (const guint8 *) cipher_alg, strlen (cipher_alg),
-        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
+        (const guint8 *)host, strlen (host), port, (const guint8 *)login,
+        strlen (login), (const guint8 *)pass, strlen (pass),
+        (const guint8 *)name, strlen (name), icon, version, caps, trans,
+        (const guint8 *)cipher_alg, strlen (cipher_alg),
+        (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb, htlc);
     if (!h) {
         return FALSE;
     }
     bridge_handle = h;
-    bridge_htlc   = htlc;
+    bridge_htlc = htlc;
     return TRUE;
 }
 
@@ -707,18 +704,15 @@ bridge_on_verify_cert_cb (const guint8 *fp, gsize fp_len, void *user_data)
     if (!htlc || !fp) {
         return 0; /* reject: no context / no fingerprint */
     }
-    g_autofree char *fp_str = g_strndup ((const char *) fp, fp_len);
+    g_autofree char *fp_str = g_strndup ((const char *)fp, fp_len);
     return hx_tls_orchestrator_verify_cert (htlc, fp_str) ? 1 : 0;
 }
 
 gboolean
-hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
-                                              const char *host, guint16 port,
-                                              const char *login,
-                                              const char *pass,
-                                              const char *name, guint16 icon,
-                                              guint16 version, guint16 caps,
-                                              guint32 trans)
+hx_bridge_install_orchestrated_plaintext_tls (
+    struct htlc_conn *htlc, const char *host, guint16 port, const char *login,
+    const char *pass, const char *name, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans)
 {
     g_return_val_if_fail (htlc != NULL, FALSE);
     g_return_val_if_fail (host != NULL && *host, FALSE);
@@ -730,24 +724,22 @@ hx_bridge_install_orchestrated_plaintext_tls (struct htlc_conn *htlc,
     }
 
     login = login ? login : "";
-    pass  = pass  ? pass  : "";
-    name  = name  ? name  : "";
+    pass = pass ? pass : "";
+    name = name ? name : "";
 
     g_autofree char *proxy_uri = hx_bridge_lookup_socks_proxy (host, port);
     hxnet_connection_opaque *h = hxnet_connection_open_plaintext_tls (
-        (const guint8 *) host, strlen (host), port,
-        (const guint8 *) login, strlen (login),
-        (const guint8 *) pass, strlen (pass),
-        (const guint8 *) name, strlen (name),
-        icon, version, caps, trans,
-        (const guint8 *) proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
+        (const guint8 *)host, strlen (host), port, (const guint8 *)login,
+        strlen (login), (const guint8 *)pass, strlen (pass),
+        (const guint8 *)name, strlen (name), icon, version, caps, trans,
+        (const guint8 *)proxy_uri, proxy_uri ? strlen (proxy_uri) : 0,
         bridge_on_event_cb, bridge_on_shutdown_cb, bridge_on_state_cb,
         bridge_on_verify_cert_cb, htlc);
     if (!h) {
         return FALSE;
     }
     bridge_handle = h;
-    bridge_htlc   = htlc;
+    bridge_htlc = htlc;
     return TRUE;
 }
 
@@ -786,6 +778,6 @@ hx_bridge_uninstall (void)
     }
     hxnet_connection_opaque *h = bridge_handle;
     bridge_handle = NULL;
-    bridge_htlc   = NULL;
+    bridge_htlc = NULL;
     hxnet_connection_destroy (h);
 }

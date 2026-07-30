@@ -115,7 +115,9 @@ pub(crate) unsafe extern "C" fn task_new(
     _data: *mut c_void,
     str_: *const c_char,
 ) -> *mut c_void {
-    let label = std::ffi::CStr::from_ptr(str_).to_string_lossy().into_owned();
+    let label = std::ffi::CStr::from_ptr(str_)
+        .to_string_lossy()
+        .into_owned();
     LAST_TASK.with(|t| {
         *t.borrow_mut() = Some(Task {
             has_rcv: rcv.is_some(),

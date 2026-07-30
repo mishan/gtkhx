@@ -141,9 +141,10 @@ struct gtkhx_proto_chat_subject {
 
 /* Parse HTLS_HDR_CHAT_SUBJECT. Writes the subject into buf (no CR2LF /
  * strip_ansi — subjects carry no line endings). */
-extern bool gtkhx_proto_parse_chat_subject (const uint8_t *msg, size_t msglen,
-                                            uint8_t *buf, size_t bufcap,
-                                            struct gtkhx_proto_chat_subject *out);
+extern bool
+gtkhx_proto_parse_chat_subject (const uint8_t *msg, size_t msglen, uint8_t *buf,
+                                size_t bufcap,
+                                struct gtkhx_proto_chat_subject *out);
 
 struct gtkhx_proto_chat_invite {
     uint32_t cid;
@@ -216,10 +217,10 @@ struct gtkhx_proto_user_list_record {
  * Caller iterates HTLS_DATA_USER_LIST chunks (with the dh_start /
  * dh_end macros in the rcv path) and invokes this for each chunk's
  * (data, len) pair. */
-extern bool gtkhx_proto_parse_user_list_record (
-    const uint8_t *data, size_t data_len,
-    uint8_t *name_buf, size_t name_cap,
-    struct gtkhx_proto_user_list_record *out);
+extern bool
+gtkhx_proto_parse_user_list_record (const uint8_t *data, size_t data_len,
+                                    uint8_t *name_buf, size_t name_cap,
+                                    struct gtkhx_proto_user_list_record *out);
 
 /* ---- Account / user-info reply parsers (post-TASK payloads) ---- */
 
@@ -264,11 +265,10 @@ struct gtkhx_proto_account_read {
  * `plen > 1 && dh->data[0]` gate. ACCESS lands in out->access (8
  * bytes); out->got_access is the dispatch gate. Returns false on any
  * NULL / zero-cap pointer; otherwise true. */
-extern bool gtkhx_proto_parse_account_read (const uint8_t *msg, size_t msglen,
-                                            uint8_t *name_buf, size_t name_cap,
-                                            uint8_t *login_buf, size_t login_cap,
-                                            uint8_t *pass_buf, size_t pass_cap,
-                                            struct gtkhx_proto_account_read *out);
+extern bool gtkhx_proto_parse_account_read (
+    const uint8_t *msg, size_t msglen, uint8_t *name_buf, size_t name_cap,
+    uint8_t *login_buf, size_t login_cap, uint8_t *pass_buf, size_t pass_cap,
+    struct gtkhx_proto_account_read *out);
 
 /* ---- Xfer-reply parsers (post-TASK payloads on FILE_GET / FOLDER_GET /
  * FILE_GETINFO replies) ---- */
@@ -289,9 +289,9 @@ struct gtkhx_proto_file_get_reply {
  * XFERSIZE64 + optional QUEUE). Missing chunks default to zero; the
  * caller applies the C extractor's `(!size && !size64_seen) || !ref`
  * dispatch gate. Returns false on NULL out; otherwise true. */
-extern bool gtkhx_proto_parse_file_get_reply (
-    const uint8_t *msg, size_t msglen,
-    struct gtkhx_proto_file_get_reply *out);
+extern bool
+gtkhx_proto_parse_file_get_reply (const uint8_t *msg, size_t msglen,
+                                  struct gtkhx_proto_file_get_reply *out);
 
 struct gtkhx_proto_folder_get_reply {
     uint32_t ref_;
@@ -304,9 +304,9 @@ struct gtkhx_proto_folder_get_reply {
 
 /* Parse the FOLDER_GET reply scalars. Same contract as
  * gtkhx_proto_parse_file_get_reply with the addition of FILE_NFILES. */
-extern bool gtkhx_proto_parse_folder_get_reply (
-    const uint8_t *msg, size_t msglen,
-    struct gtkhx_proto_folder_get_reply *out);
+extern bool
+gtkhx_proto_parse_folder_get_reply (const uint8_t *msg, size_t msglen,
+                                    struct gtkhx_proto_folder_get_reply *out);
 
 struct gtkhx_proto_file_put_reply {
     uint32_t ref_;
@@ -322,9 +322,9 @@ struct gtkhx_proto_file_put_reply {
 /* Parse the FILE_PUT reply scalars. Returns false on NULL out;
  * otherwise true (missing chunks default to zero — caller applies
  * the `!ref` dispatch gate). */
-extern bool gtkhx_proto_parse_file_put_reply (
-    const uint8_t *msg, size_t msglen,
-    struct gtkhx_proto_file_put_reply *out);
+extern bool
+gtkhx_proto_parse_file_put_reply (const uint8_t *msg, size_t msglen,
+                                  struct gtkhx_proto_file_put_reply *out);
 
 struct gtkhx_proto_folder_put_reply {
     uint32_t ref_;
@@ -334,9 +334,9 @@ struct gtkhx_proto_folder_put_reply {
 /* Parse the FOLDER_PUT reply scalars (strict subset of
  * gtkhx_proto_parse_file_put_reply — no RFLT; per-file resume
  * happens inside folder_put_thread, not at the task boundary). */
-extern bool gtkhx_proto_parse_folder_put_reply (
-    const uint8_t *msg, size_t msglen,
-    struct gtkhx_proto_folder_put_reply *out);
+extern bool
+gtkhx_proto_parse_folder_put_reply (const uint8_t *msg, size_t msglen,
+                                    struct gtkhx_proto_folder_put_reply *out);
 
 struct gtkhx_proto_banner_get_reply {
     uint32_t ref_;
@@ -346,9 +346,9 @@ struct gtkhx_proto_banner_get_reply {
 /* Parse the DOWNLOAD_BANNER reply scalars. Just the transfer
  * reference + total byte count for the HTXF subchannel fetch
  * banner.c spins up. */
-extern bool gtkhx_proto_parse_banner_get_reply (
-    const uint8_t *msg, size_t msglen,
-    struct gtkhx_proto_banner_get_reply *out);
+extern bool
+gtkhx_proto_parse_banner_get_reply (const uint8_t *msg, size_t msglen,
+                                    struct gtkhx_proto_banner_get_reply *out);
 
 struct gtkhx_proto_news_thread_reply {
     uint32_t thread_id;
@@ -370,10 +370,10 @@ struct gtkhx_proto_news_thread_reply {
  * false on NULL out, NULL text_buf, or zero text_cap; otherwise true.
  * The out->has_text gate filters out the missing-body and TASK_ERROR
  * paths the way the C extractor does. */
-extern bool gtkhx_proto_parse_news_thread_reply (
-    const uint8_t *msg, size_t msglen,
-    uint8_t *text_buf, size_t text_cap,
-    struct gtkhx_proto_news_thread_reply *out);
+extern bool
+gtkhx_proto_parse_news_thread_reply (const uint8_t *msg, size_t msglen,
+                                     uint8_t *text_buf, size_t text_cap,
+                                     struct gtkhx_proto_news_thread_reply *out);
 
 /* ---- Chat-history extension (HTLS_DATA_HISTORY_ENTRY) ---- */
 
@@ -382,7 +382,7 @@ struct gtkhx_proto_history_entry {
     /* i64 on the wire (Unix epoch UTC). Two's-complement preserved;
      * negative values are legal pre-1970 timestamps. */
     int64_t timestamp;
-    uint16_t flags;     /* HX_HISTORY_FLAG_* */
+    uint16_t flags; /* HX_HISTORY_FLAG_* */
     uint16_t icon_id;
     /* nick / message land in (offset, length) pairs into the
      * caller's `data` buffer — the call site allocates owned
@@ -417,8 +417,9 @@ _Static_assert (sizeof (struct gtkhx_proto_history_entry) == 32,
  * message body are walked past silently — v1 defines no sub-types
  * and a malformed sub-field stops the walk but the entry is still
  * returned. */
-extern bool gtkhx_proto_parse_history_entry (const uint8_t *data, size_t len,
-                                              struct gtkhx_proto_history_entry *out);
+extern bool
+gtkhx_proto_parse_history_entry (const uint8_t *data, size_t len,
+                                 struct gtkhx_proto_history_entry *out);
 
 /* ---- HTLS_DATA_FILE_LIST entry walker ---- */
 
@@ -450,9 +451,9 @@ struct gtkhx_proto_file_list_entry {
  * Returns true on success with *out filled; false at end-of-buffer
  * or on a malformed chunk (< 24 bytes remaining, declared chunk
  * length runs past the buffer, fnlen runs past the chunk). */
-extern bool gtkhx_proto_parse_file_list_entry (const uint8_t *data, size_t len,
-                                                size_t off,
-                                                struct gtkhx_proto_file_list_entry *out);
+extern bool
+gtkhx_proto_parse_file_list_entry (const uint8_t *data, size_t len, size_t off,
+                                   struct gtkhx_proto_file_list_entry *out);
 
 struct gtkhx_proto_file_getinfo {
     uint8_t icon[4];
@@ -477,11 +478,9 @@ struct gtkhx_proto_file_getinfo {
  * FILE_DATE_MODIFY land in fixed-size byte arrays in *out. Returns
  * false on any NULL / zero-cap pointer; otherwise true. */
 extern bool gtkhx_proto_parse_file_getinfo (
-    const uint8_t *msg, size_t msglen,
-    uint8_t *name_buf, size_t name_cap,
-    uint8_t *type_buf, size_t type_cap,
-    uint8_t *creator_buf, size_t creator_cap,
-    uint8_t *comment_buf, size_t comment_cap,
+    const uint8_t *msg, size_t msglen, uint8_t *name_buf, size_t name_cap,
+    uint8_t *type_buf, size_t type_cap, uint8_t *creator_buf,
+    size_t creator_cap, uint8_t *comment_buf, size_t comment_cap,
     struct gtkhx_proto_file_getinfo *out);
 
 /* ---- Misc smaller parsers ---- */
@@ -535,8 +534,8 @@ extern bool gtkhx_proto_parse_xfer_queue (const uint8_t *msg, size_t msglen,
                                           struct gtkhx_proto_xfer_queue *out);
 
 /* HTLS_HDR_AGREEMENT result codes matching hx_agreement_result. */
-#define GTKHX_PROTO_AGREEMENT_OK      0u
-#define GTKHX_PROTO_AGREEMENT_NONE    1u
+#define GTKHX_PROTO_AGREEMENT_OK 0u
+#define GTKHX_PROTO_AGREEMENT_NONE 1u
 #define GTKHX_PROTO_AGREEMENT_MISSING 2u
 
 /* Parse HTLS_HDR_AGREEMENT. Returns one of GTKHX_PROTO_AGREEMENT_*.
@@ -590,7 +589,7 @@ extern int32_t gtkhx_proto_walk_news_post (const uint8_t *msg, size_t msglen,
                                            void *user);
 
 struct gtkhx_proto_news_dir_entry {
-    int32_t kind;     /* 1 = folder, 2 = category */
+    int32_t kind; /* 1 = folder, 2 = category */
     uint16_t name_len;
 };
 
@@ -663,7 +662,8 @@ gtkhx_proto_catlist_post_count (const struct gtkhx_proto_catlist *cl);
 /* Fill *view with a borrowed snapshot of post idx. Returns false on
  * NULL / out-of-range idx. */
 extern bool
-gtkhx_proto_catlist_post_get (const struct gtkhx_proto_catlist *cl, uint32_t idx,
+gtkhx_proto_catlist_post_get (const struct gtkhx_proto_catlist *cl,
+                              uint32_t idx,
                               struct gtkhx_proto_catlist_post_view *view);
 
 /* Fill *view with a borrowed snapshot of part (post_idx, part_idx). */
@@ -697,23 +697,19 @@ struct hx_chunk;
 /* HTLC_HDR_CHAT: STYLE (u16) + CHAT body + CHAT_ID (u32, only when
  * cid != 0). Requires chunks_cap >= 3 and scratch_cap >= 6. Returns
  * 2 (no cid) or 3 (with cid) on success, or 0 on validation failure. */
-extern int32_t gtkhx_proto_build_chat_chunks (uint32_t cid, uint16_t style,
-                                              const uint8_t *body_ptr,
-                                              size_t body_len,
-                                              struct hx_chunk *chunks,
-                                              size_t chunks_cap,
-                                              uint8_t *scratch,
-                                              size_t scratch_cap);
+extern int32_t
+gtkhx_proto_build_chat_chunks (uint32_t cid, uint16_t style,
+                               const uint8_t *body_ptr, size_t body_len,
+                               struct hx_chunk *chunks, size_t chunks_cap,
+                               uint8_t *scratch, size_t scratch_cap);
 
 /* HTLC_HDR_MSG: UID (u16) + MSG body. Requires chunks_cap >= 2 and
  * scratch_cap >= 2. Returns 2 on success, 0 on validation failure. */
-extern int32_t gtkhx_proto_build_msg_chunks (uint16_t uid,
-                                             const uint8_t *body_ptr,
-                                             size_t body_len,
-                                             struct hx_chunk *chunks,
-                                             size_t chunks_cap,
-                                             uint8_t *scratch,
-                                             size_t scratch_cap);
+extern int32_t
+gtkhx_proto_build_msg_chunks (uint16_t uid, const uint8_t *body_ptr,
+                              size_t body_len, struct hx_chunk *chunks,
+                              size_t chunks_cap, uint8_t *scratch,
+                              size_t scratch_cap);
 
 /* HTLC_HDR_MSG_BROADCAST: just MSG body. No scratch needed. Requires
  * chunks_cap >= 1. Returns 1 on success, 0 on validation failure. */
@@ -770,7 +766,7 @@ extern int32_t gtkhx_proto_build_chat_subject_chunks (
 
 /* HTLC_HDR_AGREEMENTAGREE: ICON + NAME + OPTIONS (all three mandatory —
  * Mobius panics without OPTIONS). chunks_cap >= 3, scratch_cap >= 4. */
-#define HX_AGREEMENT_AGREE_MAX_CHUNKS   3
+#define HX_AGREEMENT_AGREE_MAX_CHUNKS 3
 #define HX_AGREEMENT_AGREE_SCRATCH_SIZE 16
 extern int32_t gtkhx_proto_build_agreement_agree_chunks (
     uint16_t icon, const uint8_t *name_ptr, size_t name_len, uint16_t options,
@@ -784,14 +780,10 @@ extern int32_t gtkhx_proto_build_agreement_agree_chunks (
  * Returns 2 (no color) or 3 (with color) on success, or 0 on
  * validation failure (NULL pointer, short buffer, name_len > u16
  * max). */
-extern int32_t
-gtkhx_proto_build_user_change_chunks (uint16_t icon,
-                                      const uint8_t *name_ptr, size_t name_len,
-                                      uint8_t has_nick_color,
-                                      uint32_t nick_color,
-                                      struct hx_chunk *chunks,
-                                      size_t chunks_cap,
-                                      uint8_t *scratch, size_t scratch_cap);
+extern int32_t gtkhx_proto_build_user_change_chunks (
+    uint16_t icon, const uint8_t *name_ptr, size_t name_len,
+    uint8_t has_nick_color, uint32_t nick_color, struct hx_chunk *chunks,
+    size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
 
 /* HTLC_HDR_USER_KICK: optional BAN + UID. When ban != 0, emits BAN
  * first, then UID; when ban == 0, emits just UID. chunks_cap >= 2,
@@ -820,21 +812,18 @@ extern int32_t gtkhx_proto_build_account_read_chunks (const uint8_t *login_ptr,
                                                       size_t chunks_cap);
 
 /* HTLC_HDR_ACCOUNT_DELETE: single LOGIN chunk (same shape as READ). */
-extern int32_t gtkhx_proto_build_account_delete_chunks (const uint8_t *login_ptr,
-                                                        size_t login_len,
-                                                        struct hx_chunk *chunks,
-                                                        size_t chunks_cap);
+extern int32_t gtkhx_proto_build_account_delete_chunks (
+    const uint8_t *login_ptr, size_t login_len, struct hx_chunk *chunks,
+    size_t chunks_cap);
 
 /* HTLC_HDR_ACCOUNT_MODIFY: LOGIN + PASSWORD + NAME + ACCESS (8 raw
  * bytes — the hl_access_bits bitmap). chunks_cap >= 4, scratch_cap >= 8.
  * access_ptr must point at exactly 8 bytes (NULL is rejected). Returns
  * 4 on success. */
 extern int32_t gtkhx_proto_build_account_modify_chunks (
-    const uint8_t *login_ptr, size_t login_len,
-    const uint8_t *password_ptr, size_t password_len,
-    const uint8_t *name_ptr, size_t name_len,
-    const uint8_t *access_ptr,
-    struct hx_chunk *chunks, size_t chunks_cap,
+    const uint8_t *login_ptr, size_t login_len, const uint8_t *password_ptr,
+    size_t password_len, const uint8_t *name_ptr, size_t name_len,
+    const uint8_t *access_ptr, struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
 /* HTLC_HDR_NEWS_POST (1.0 flat news): single body chunk. No scratch.
@@ -876,24 +865,22 @@ extern int32_t gtkhx_proto_build_news_mkdir_chunks (const uint8_t *path_ptr,
  * scratch_cap >= 4. Returns 2 on success, 0 on validation failure. */
 extern int32_t gtkhx_proto_build_news_delete_thread_chunks (
     const uint8_t *path_ptr, size_t path_len, uint32_t threadid,
-    struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+    struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
+    size_t scratch_cap);
 
 /* HTLC_HDR_GETTHREAD: NEWSPATH + THREADID + NEWSTYPE.
  * chunks_cap >= 3, scratch_cap >= 4. Returns 3 on success, 0 on
  * validation failure. */
 extern int32_t gtkhx_proto_build_news_getthread_chunks (
     const uint8_t *path_ptr, size_t path_len, uint32_t threadid,
-    const uint8_t *mime_type_ptr, size_t mime_type_len,
-    struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+    const uint8_t *mime_type_ptr, size_t mime_type_len, struct hx_chunk *chunks,
+    size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
 
 /* HTLC_HDR_MAKECATEGORY: NEWSPATH + CATEGORY name. chunks_cap >= 2.
  * No scratch. Returns 2 on success, 0 on validation failure. */
 extern int32_t gtkhx_proto_build_news_mkcat_chunks (
-    const uint8_t *path_ptr, size_t path_len,
-    const uint8_t *name_ptr, size_t name_len,
-    struct hx_chunk *chunks, size_t chunks_cap);
+    const uint8_t *path_ptr, size_t path_len, const uint8_t *name_ptr,
+    size_t name_len, struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_POSTTHREAD: 6 chunks in wire order — NEWSPATH +
  * PARENTTHREAD (u32) + NEWSTYPE + NEWSSUBJECT + NEWSDATA + THREADID
@@ -902,10 +889,9 @@ extern int32_t gtkhx_proto_build_news_mkcat_chunks (
 extern int32_t gtkhx_proto_build_news_post_thread_chunks (
     const uint8_t *path_ptr, size_t path_len, uint32_t parent_thread,
     const uint8_t *mime_type_ptr, size_t mime_type_len,
-    const uint8_t *subject_ptr, size_t subject_len,
-    const uint8_t *text_ptr, size_t text_len, uint32_t thread_id,
-    struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+    const uint8_t *subject_ptr, size_t subject_len, const uint8_t *text_ptr,
+    size_t text_len, uint32_t thread_id, struct hx_chunk *chunks,
+    size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
 
 /* HTLC_HDR_FILE_MKDIR: single HTLC_DATA_DIR chunk. chunks_cap >= 1.
  * No scratch needed. Returns 1 on success, 0 on validation failure. */
@@ -927,31 +913,24 @@ extern int32_t gtkhx_proto_build_file_list_chunks (const uint8_t *dir_ptr,
  * omit (dir_ptr / dir_len are ignored). chunks_cap >= 2.
  * Returns 1 (no dir) or 2 (with dir) on success, 0 on validation
  * failure (NULL pointer, short buffer, oversize field). */
-extern int32_t gtkhx_proto_build_file_delete_chunks (const uint8_t *name_ptr,
-                                                     size_t name_len,
-                                                     uint8_t has_dir,
-                                                     const uint8_t *dir_ptr,
-                                                     size_t dir_len,
-                                                     struct hx_chunk *chunks,
-                                                     size_t chunks_cap);
+extern int32_t
+gtkhx_proto_build_file_delete_chunks (const uint8_t *name_ptr, size_t name_len,
+                                      uint8_t has_dir, const uint8_t *dir_ptr,
+                                      size_t dir_len, struct hx_chunk *chunks,
+                                      size_t chunks_cap);
 
 /* HTLC_HDR_FILE_GETINFO: same shape as FILE_DELETE. */
-extern int32_t gtkhx_proto_build_file_getinfo_chunks (const uint8_t *name_ptr,
-                                                      size_t name_len,
-                                                      uint8_t has_dir,
-                                                      const uint8_t *dir_ptr,
-                                                      size_t dir_len,
-                                                      struct hx_chunk *chunks,
-                                                      size_t chunks_cap);
+extern int32_t
+gtkhx_proto_build_file_getinfo_chunks (const uint8_t *name_ptr, size_t name_len,
+                                       uint8_t has_dir, const uint8_t *dir_ptr,
+                                       size_t dir_len, struct hx_chunk *chunks,
+                                       size_t chunks_cap);
 
 /* HTLC_HDR_FILE_GETFOLDER: same shape as FILE_DELETE. */
-extern int32_t gtkhx_proto_build_file_getfolder_chunks (const uint8_t *name_ptr,
-                                                        size_t name_len,
-                                                        uint8_t has_dir,
-                                                        const uint8_t *dir_ptr,
-                                                        size_t dir_len,
-                                                        struct hx_chunk *chunks,
-                                                        size_t chunks_cap);
+extern int32_t gtkhx_proto_build_file_getfolder_chunks (
+    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
+    const uint8_t *dir_ptr, size_t dir_len, struct hx_chunk *chunks,
+    size_t chunks_cap);
 
 /* HTLC_HDR_FILE_SETINFO: FILE_NAME + FILE_RENAME + optional
  * FILE_COMMENT + optional DIR. has_comment / has_dir are 0/1 flags;
@@ -960,39 +939,35 @@ extern int32_t gtkhx_proto_build_file_getfolder_chunks (const uint8_t *name_ptr,
  * Returns 2..=4 on success, 0 on validation failure (NULL pointer,
  * short buffer, oversize field). */
 extern int32_t gtkhx_proto_build_file_setinfo_chunks (
-    const uint8_t *name_ptr, size_t name_len,
-    const uint8_t *rename_ptr, size_t rename_len,
-    uint8_t has_comment, const uint8_t *comment_ptr, size_t comment_len,
-    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
+    const uint8_t *name_ptr, size_t name_len, const uint8_t *rename_ptr,
+    size_t rename_len, uint8_t has_comment, const uint8_t *comment_ptr,
+    size_t comment_len, uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
     struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_FILE_MOVE: FILE_NAME + DIR + DIR_RENAME. chunks_cap >= 3.
  * Returns 3 on success, 0 on validation failure. */
 extern int32_t gtkhx_proto_build_file_move_chunks (
-    const uint8_t *name_ptr, size_t name_len,
-    const uint8_t *dir_ptr, size_t dir_len,
-    const uint8_t *dir_rename_ptr, size_t dir_rename_len,
+    const uint8_t *name_ptr, size_t name_len, const uint8_t *dir_ptr,
+    size_t dir_len, const uint8_t *dir_rename_ptr, size_t dir_rename_len,
     struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_FILE_SYMLINK: FILE_NAME + DIR + DIR_RENAME + FILE_RENAME.
  * chunks_cap >= 4. Returns 4 on success, 0 on validation failure. */
 extern int32_t gtkhx_proto_build_file_symlink_chunks (
-    const uint8_t *name_ptr, size_t name_len,
-    const uint8_t *dir_ptr, size_t dir_len,
-    const uint8_t *dir_rename_ptr, size_t dir_rename_len,
-    const uint8_t *rename_ptr, size_t rename_len,
-    struct hx_chunk *chunks, size_t chunks_cap);
+    const uint8_t *name_ptr, size_t name_len, const uint8_t *dir_ptr,
+    size_t dir_len, const uint8_t *dir_rename_ptr, size_t dir_rename_len,
+    const uint8_t *rename_ptr, size_t rename_len, struct hx_chunk *chunks,
+    size_t chunks_cap);
 
 /* HTLC_HDR_FILE_PUTFOLDER: FILE_NAME + optional DIR + HTXF_SIZE (u32
  * BE, host order in) + FILE_NFILES (u32 BE, host order in).
  * chunks_cap >= 4, scratch_cap >= 8. Returns 3 (no dir) or 4 (with
  * dir) on success, 0 on validation failure. */
 extern int32_t gtkhx_proto_build_file_putfolder_chunks (
-    const uint8_t *name_ptr, size_t name_len,
-    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
-    uint32_t size, uint32_t nfiles,
-    struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
+    const uint8_t *dir_ptr, size_t dir_len, uint32_t size, uint32_t nfiles,
+    struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
+    size_t scratch_cap);
 
 /* HTLC_HDR_FILE_GET: FILE_NAME + optional DIR + optional RFLT (74
  * bytes — fixed-size resume payload built by the C caller).
@@ -1000,10 +975,9 @@ extern int32_t gtkhx_proto_build_file_putfolder_chunks (
  * 74 bytes when has_rflt is set. chunks_cap >= 3. Returns 1..=3 on
  * success, 0 on validation failure. */
 extern int32_t gtkhx_proto_build_file_get_chunks (
-    const uint8_t *name_ptr, size_t name_len,
-    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
-    uint8_t has_rflt, const uint8_t *rflt_ptr,
-    struct hx_chunk *chunks, size_t chunks_cap);
+    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
+    const uint8_t *dir_ptr, size_t dir_len, uint8_t has_rflt,
+    const uint8_t *rflt_ptr, struct hx_chunk *chunks, size_t chunks_cap);
 
 /* HTLC_HDR_FILE_PUT: FILE_NAME + optional DIR + optional FILE_PREVIEW
  * (2 bytes "\0\1", set when overwriting an existing remote file) +
@@ -1013,12 +987,10 @@ extern int32_t gtkhx_proto_build_file_get_chunks (
  * at +0, u64 at +4). Returns 2..=5 on success, 0 on validation
  * failure. */
 extern int32_t gtkhx_proto_build_file_put_chunks (
-    const uint8_t *name_ptr, size_t name_len,
-    uint8_t has_dir, const uint8_t *dir_ptr, size_t dir_len,
-    uint8_t has_preview, uint32_t size,
-    uint8_t has_size64, uint64_t size64,
-    struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+    const uint8_t *name_ptr, size_t name_len, uint8_t has_dir,
+    const uint8_t *dir_ptr, size_t dir_len, uint8_t has_preview, uint32_t size,
+    uint8_t has_size64, uint64_t size64, struct hx_chunk *chunks,
+    size_t chunks_cap, uint8_t *scratch, size_t scratch_cap);
 
 /* ---- HTRK (Hotline tracker, v1) reply parsers ---- */
 
@@ -1026,21 +998,21 @@ extern int32_t gtkhx_proto_build_file_put_chunks (
  * order) into *out_nservers. Returns false on NULL out_nservers
  * or a buffer shorter than 14; otherwise true. */
 extern bool gtkhx_proto_parse_tracker_header (const uint8_t *buf, size_t len,
-                                               uint16_t *out_nservers);
+                                              uint16_t *out_nservers);
 
 /* True iff buf[0] == 0 — the HTRK padding-slot marker the async
  * fetch state machine skips without advancing the record counter.
  * False on empty input. */
 extern bool gtkhx_proto_tracker_record_is_padding (const uint8_t *buf,
-                                                    size_t len);
+                                                   size_t len);
 
 struct gtkhx_proto_tracker_record_fixed {
     /* 4 IPv4 address bytes verbatim from the wire. memcpy straight
      * into a network-byte-order guint32 (same network-byte-order storage
      * convention). */
     uint32_t addr_be;
-    uint16_t port;       /* host byte order */
-    uint16_t nusers;     /* host byte order */
+    uint16_t port;   /* host byte order */
+    uint16_t nusers; /* host byte order */
     uint8_t name_len;
 };
 
@@ -1048,8 +1020,9 @@ struct gtkhx_proto_tracker_record_fixed {
  * or targets surfaces at build time rather than memory corruption
  * on the Rust side. Layout: u32 + 2×u16 + u8 = 9 bytes of data +
  * 3 bytes of trailing alignment-to-4 padding = 12 bytes. */
-_Static_assert (sizeof (struct gtkhx_proto_tracker_record_fixed) == 12,
-                "gtkhx_proto_tracker_record_fixed size drifted from Rust ABI mirror");
+_Static_assert (
+    sizeof (struct gtkhx_proto_tracker_record_fixed) == 12,
+    "gtkhx_proto_tracker_record_fixed size drifted from Rust ABI mirror");
 
 /* Parse the 11-byte fixed prefix of a HTRK server record. Returns
  * false on NULL out or a buffer shorter than 11; otherwise true.
@@ -1072,16 +1045,17 @@ extern void gtkhx_proto_tracker_normalize_text (uint8_t *buf, size_t len);
  * (0x0003 BE) + features (BE). Returns false on NULL out or
  * out_len < 8; otherwise true. */
 extern bool gtkhx_proto_tracker_v3_pack_handshake (uint8_t *out, size_t out_len,
-                                                    uint16_t features);
+                                                   uint16_t features);
 
 /* Parse the tracker's handshake response. State machine reads 6
  * bytes first; if version comes back as v3 it reads the trailing
  * 2 and calls us again with len == 8. Returns false on NULL out
  * pointers, wrong length (must be 6 or 8), or bad magic. The
  * 6-byte form leaves *features_out = 0. */
-extern bool gtkhx_proto_tracker_v3_parse_handshake_response (
-    const uint8_t *buf, size_t len,
-    uint16_t *version_out, uint16_t *features_out);
+extern bool
+gtkhx_proto_tracker_v3_parse_handshake_response (const uint8_t *buf, size_t len,
+                                                 uint16_t *version_out,
+                                                 uint16_t *features_out);
 
 /* Build the 4-byte minimum listing-request body (request_type =
  * 0x0001 + field_count = 0). Writes byte count actually written
@@ -1094,9 +1068,9 @@ extern bool gtkhx_proto_tracker_v3_pack_listing_request_simple (
  * NULL out pointers, short buffer, or a response_type that isn't
  * HTRK_V3_RESP_LIST (0x0001). */
 extern bool gtkhx_proto_tracker_v3_parse_response_header (
-    const uint8_t *buf, size_t len,
-    uint16_t *response_type_out, uint32_t *total_size_out,
-    uint16_t *total_servers_out, uint16_t *record_count_out);
+    const uint8_t *buf, size_t len, uint16_t *response_type_out,
+    uint32_t *total_size_out, uint16_t *total_servers_out,
+    uint16_t *record_count_out);
 
 struct gtkhx_proto_tracker_v3_record {
     /* Offsets into the caller's `buf` argument. Lengths give the
@@ -1122,9 +1096,9 @@ struct gtkhx_proto_tracker_v3_record {
 /* Parse one tracker v3 server record at buf[off..]. Returns false
  * on truncation, an unknown addr_type, or any declared length that
  * overruns the buffer. */
-extern bool gtkhx_proto_tracker_v3_parse_record (
-    const uint8_t *buf, size_t len, size_t off,
-    struct gtkhx_proto_tracker_v3_record *out);
+extern bool
+gtkhx_proto_tracker_v3_parse_record (const uint8_t *buf, size_t len, size_t off,
+                                     struct gtkhx_proto_tracker_v3_record *out);
 
 struct gtkhx_proto_tracker_v3_tlv {
     size_t value_off;
@@ -1137,9 +1111,9 @@ struct gtkhx_proto_tracker_v3_tlv {
  * buffer (< 4 bytes for the id+len header) or when the declared
  * value_len runs past the buffer. The hx_tracker_v3_walk_tlvs C
  * wrapper iterates this and fires its callback per entry. */
-extern bool gtkhx_proto_tracker_v3_parse_tlv_at (
-    const uint8_t *buf, size_t len, size_t off,
-    struct gtkhx_proto_tracker_v3_tlv *out);
+extern bool
+gtkhx_proto_tracker_v3_parse_tlv_at (const uint8_t *buf, size_t len, size_t off,
+                                     struct gtkhx_proto_tracker_v3_tlv *out);
 
 /* ---- HTRK v3 meta TLV typed readers ----
  *
@@ -1150,16 +1124,20 @@ extern bool gtkhx_proto_tracker_v3_parse_tlv_at (
  * (g_utf8_make_valid + g_strndup); these cover only the numeric /
  * bool / enum-clamp half. */
 
-extern uint8_t gtkhx_proto_tracker_v3_meta_read_u8 (
-    const uint8_t *value, size_t value_len, uint8_t default_);
-extern uint16_t gtkhx_proto_tracker_v3_meta_read_u16 (
-    const uint8_t *value, size_t value_len, uint16_t default_);
-extern int16_t gtkhx_proto_tracker_v3_meta_read_i16 (
-    const uint8_t *value, size_t value_len, int16_t default_);
-extern uint32_t gtkhx_proto_tracker_v3_meta_read_u32 (
-    const uint8_t *value, size_t value_len, uint32_t default_);
-extern bool gtkhx_proto_tracker_v3_meta_read_bool (
-    const uint8_t *value, size_t value_len);
+extern uint8_t gtkhx_proto_tracker_v3_meta_read_u8 (const uint8_t *value,
+                                                    size_t value_len,
+                                                    uint8_t default_);
+extern uint16_t gtkhx_proto_tracker_v3_meta_read_u16 (const uint8_t *value,
+                                                      size_t value_len,
+                                                      uint16_t default_);
+extern int16_t gtkhx_proto_tracker_v3_meta_read_i16 (const uint8_t *value,
+                                                     size_t value_len,
+                                                     int16_t default_);
+extern uint32_t gtkhx_proto_tracker_v3_meta_read_u32 (const uint8_t *value,
+                                                      size_t value_len,
+                                                      uint32_t default_);
+extern bool gtkhx_proto_tracker_v3_meta_read_bool (const uint8_t *value,
+                                                   size_t value_len);
 
 /* Closed-vocab enum clamps. raw values inside the spec-defined
  * range pass through; out-of-range values reset to 0 (GENERAL /
@@ -1410,33 +1388,27 @@ extern int32_t gtkhx_proto_build_voice_leave_chunks (uint32_t cid,
 
 /* Build chunks for HTLC_HDR_VOICE_SDP_ANSWER (603): CHAT_ID + VOICE_SDP.
  * Empty sdp rejected. chunks_cap >= 2, scratch_cap >= 4. */
-extern int32_t gtkhx_proto_build_voice_answer_chunks (uint32_t cid,
-                                                      const uint8_t *sdp_ptr,
-                                                      size_t sdp_len,
-                                                      struct hx_chunk *chunks,
-                                                      size_t chunks_cap,
-                                                      uint8_t *scratch,
-                                                      size_t scratch_cap);
+extern int32_t
+gtkhx_proto_build_voice_answer_chunks (uint32_t cid, const uint8_t *sdp_ptr,
+                                       size_t sdp_len, struct hx_chunk *chunks,
+                                       size_t chunks_cap, uint8_t *scratch,
+                                       size_t scratch_cap);
 
 /* Build chunks for HTLC_HDR_VOICE_ICE (604): CHAT_ID + VOICE_ICE.
  * ice_len 0 with NULL/non-NULL ice_ptr is the end-of-candidates marker. */
-extern int32_t gtkhx_proto_build_voice_ice_chunks (uint32_t cid,
-                                                   const uint8_t *ice_ptr,
-                                                   size_t ice_len,
-                                                   struct hx_chunk *chunks,
-                                                   size_t chunks_cap,
-                                                   uint8_t *scratch,
-                                                   size_t scratch_cap);
+extern int32_t
+gtkhx_proto_build_voice_ice_chunks (uint32_t cid, const uint8_t *ice_ptr,
+                                    size_t ice_len, struct hx_chunk *chunks,
+                                    size_t chunks_cap, uint8_t *scratch,
+                                    size_t scratch_cap);
 
 /* Build chunks for HTLC_HDR_VOICE_MUTE (606): CHAT_ID + VOICE_MUTED (u16).
  * chunks_cap >= 2, scratch_cap >= 6. The C caller normalises `muted` to
  * 0/1 before the call. */
-extern int32_t gtkhx_proto_build_voice_mute_chunks (uint32_t cid,
-                                                    uint16_t muted,
-                                                    struct hx_chunk *chunks,
-                                                    size_t chunks_cap,
-                                                    uint8_t *scratch,
-                                                    size_t scratch_cap);
+extern int32_t
+gtkhx_proto_build_voice_mute_chunks (uint32_t cid, uint16_t muted,
+                                     struct hx_chunk *chunks, size_t chunks_cap,
+                                     uint8_t *scratch, size_t scratch_cap);
 
 /* C-ABI mirror of crate::voice::Participant. */
 struct gtkhx_proto_voice_participant {
@@ -1450,10 +1422,10 @@ _Static_assert (sizeof (struct gtkhx_proto_voice_participant) == 6,
 /* Walk the packed DATA_VOICE_PARTICIPANTS blob into a caller buffer.
  * Returns the number of entries written (capped at `cap`). Returns
  * 0 on NULL out or NULL blob with nonzero blob_len. */
-extern size_t gtkhx_proto_parse_voice_participants (const uint8_t *blob_ptr,
-                                                    size_t blob_len,
-                                                    struct gtkhx_proto_voice_participant *out,
-                                                    size_t cap);
+extern size_t
+gtkhx_proto_parse_voice_participants (const uint8_t *blob_ptr, size_t blob_len,
+                                      struct gtkhx_proto_voice_participant *out,
+                                      size_t cap);
 
 /* Mid-label parse return codes. */
 #define GTKHX_PROTO_VOICE_MID_INVALID 0
@@ -1479,9 +1451,9 @@ struct gtkhx_proto_voice_sdp_summary {
 
 /* Returns true on success; false (leaves *out untouched) only on NULL
  * out or NULL sdp_ptr with nonzero sdp_len. */
-extern bool gtkhx_proto_parse_voice_sdp_summary (
-    const uint8_t *sdp_ptr, size_t sdp_len,
-    struct gtkhx_proto_voice_sdp_summary *out);
+extern bool
+gtkhx_proto_parse_voice_sdp_summary (const uint8_t *sdp_ptr, size_t sdp_len,
+                                     struct gtkhx_proto_voice_sdp_summary *out);
 
 /* C-ABI view of a parsed ICE candidate; strings borrow into the
  * opaque handle and stay valid until gtkhx_proto_voice_ice_free is
@@ -1509,8 +1481,7 @@ extern struct gtkhx_proto_voice_ice_handle *
 gtkhx_proto_parse_voice_ice_json (const uint8_t *json_ptr, size_t json_len,
                                   struct gtkhx_proto_voice_ice_candidate *out);
 
-extern void
-gtkhx_proto_voice_ice_free (struct gtkhx_proto_voice_ice_handle *h);
+extern void gtkhx_proto_voice_ice_free (struct gtkhx_proto_voice_ice_handle *h);
 
 /* Build the outgoing JSON for an ICE candidate into out_buf.
  *
@@ -1534,10 +1505,9 @@ gtkhx_proto_voice_ice_free (struct gtkhx_proto_voice_ice_handle *h);
  * cap, then write out_buf[returned] = '\0' from the spare slot. */
 extern size_t gtkhx_proto_build_voice_ice_json (
     const uint8_t *candidate_ptr, size_t candidate_len,
-    const uint8_t *sdp_mid_ptr, size_t sdp_mid_len,
-    uint32_t sdp_mline_index, bool sdp_mline_index_present,
-    const uint8_t *username_fragment_ptr, size_t username_fragment_len,
-    uint8_t *out_buf, size_t out_cap);
+    const uint8_t *sdp_mid_ptr, size_t sdp_mid_len, uint32_t sdp_mline_index,
+    bool sdp_mline_index_present, const uint8_t *username_fragment_ptr,
+    size_t username_fragment_len, uint8_t *out_buf, size_t out_cap);
 
 /* Scalar fields parsed from a voice reply / notification body. The
  * variable-length payloads (SDP / ICE / codec / participants) are
@@ -1624,9 +1594,9 @@ struct gtkhx_proto_chat_media_meta {
 };
 
 /* Outcome enum. Matches Rust's ChatMediaMetaStatus repr. */
-#define GTKHX_PROTO_MEDIA_META_NONE   0
+#define GTKHX_PROTO_MEDIA_META_NONE 0
 #define GTKHX_PROTO_MEDIA_META_PRESENT 1
-#define GTKHX_PROTO_MEDIA_META_ORPHAN  2
+#define GTKHX_PROTO_MEDIA_META_ORPHAN 2
 
 /* Walk a chat-transaction body (105/106/108/104) for the
  * CHAT_MEDIA_ID + CHAT_MEDIA_TYPE companion fields. Returns:
@@ -1637,9 +1607,9 @@ struct gtkhx_proto_chat_media_meta {
  *                                    per spec receiver MUST reject
  *                                    the inbound chat (*out unchanged)
  */
-extern int gtkhx_proto_extract_chat_media_meta (
-    const uint8_t *buf, size_t len,
-    struct gtkhx_proto_chat_media_meta *out);
+extern int
+gtkhx_proto_extract_chat_media_meta (const uint8_t *buf, size_t len,
+                                     struct gtkhx_proto_chat_media_meta *out);
 
 /* Parsed TranUploadMedia success reply on the final chunk. id_ptr
  * / type_ptr borrow into the reply buffer; copy out before the
@@ -1658,15 +1628,15 @@ struct gtkhx_proto_upload_final_reply {
 };
 
 extern bool gtkhx_proto_parse_upload_final_reply (
-    const uint8_t *buf, size_t len,
-    struct gtkhx_proto_upload_final_reply *out);
+    const uint8_t *buf, size_t len, struct gtkhx_proto_upload_final_reply *out);
 
 /* Extract the upload-session token from an intermediate TranUploadMedia
  * reply. On success writes *out_ptr / *out_len pointing into `buf`;
  * pointer stays valid for the lifetime of `buf`. */
-extern bool gtkhx_proto_parse_upload_token_reply (
-    const uint8_t *buf, size_t len,
-    const uint8_t **out_ptr, size_t *out_len);
+extern bool gtkhx_proto_parse_upload_token_reply (const uint8_t *buf,
+                                                  size_t len,
+                                                  const uint8_t **out_ptr,
+                                                  size_t *out_len);
 
 /* Parsed TranDownloadMedia reply. payload_ptr / type_ptr borrow
  * into the reply buffer; the C-side accumulator copies bytes out
@@ -1680,9 +1650,9 @@ struct gtkhx_proto_download_reply {
     bool final_chunk;
 };
 
-extern bool gtkhx_proto_parse_download_reply (
-    const uint8_t *buf, size_t len,
-    struct gtkhx_proto_download_reply *out);
+extern bool
+gtkhx_proto_parse_download_reply (const uint8_t *buf, size_t len,
+                                  struct gtkhx_proto_download_reply *out);
 
 /* Optional machine-readable rejection category on TranUploadMedia /
  * TranDownloadMedia error replies. Returns 0..=5; unknown codes
@@ -1696,31 +1666,28 @@ extern uint16_t gtkhx_proto_extract_media_error_code (const uint8_t *buf,
 extern int32_t gtkhx_proto_build_upload_media_single_chunks (
     const uint8_t *payload_ptr, size_t payload_len,
     const uint8_t *declared_type_ptr, size_t declared_type_len,
-    struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+    struct hx_chunk *chunks, size_t chunks_cap, uint8_t *scratch,
+    size_t scratch_cap);
 
 /* Build first-chunk TranUploadMedia (750). part_count ≥ 2. */
 extern int32_t gtkhx_proto_build_upload_media_first_chunks (
     const uint8_t *payload_ptr, size_t payload_len,
     const uint8_t *declared_type_ptr, size_t declared_type_len,
-    uint16_t part_count,
-    struct hx_chunk *chunks, size_t chunks_cap,
+    uint16_t part_count, struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
 /* Build follow-up-chunk TranUploadMedia (750). part_index ≥ 1. */
 extern int32_t gtkhx_proto_build_upload_media_followup_chunks (
     const uint8_t *upload_token_ptr, size_t upload_token_len,
-    const uint8_t *payload_ptr, size_t payload_len,
-    uint16_t part_index, bool final_chunk,
-    struct hx_chunk *chunks, size_t chunks_cap,
+    const uint8_t *payload_ptr, size_t payload_len, uint16_t part_index,
+    bool final_chunk, struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
 /* Build TranDownloadMedia (751). part_index_present == false omits
  * the CHAT_MEDIA_PART_INDEX chunk (first request). */
 extern int32_t gtkhx_proto_build_download_media_chunks (
-    const uint8_t *media_id_ptr, size_t media_id_len,
-    uint16_t part_index, bool part_index_present,
-    struct hx_chunk *chunks, size_t chunks_cap,
+    const uint8_t *media_id_ptr, size_t media_id_len, uint16_t part_index,
+    bool part_index_present, struct hx_chunk *chunks, size_t chunks_cap,
     uint8_t *scratch, size_t scratch_cap);
 
 /* ---- GIF-icons extension (fogWraith GIF-Icons.md) ---- */
@@ -1731,15 +1698,18 @@ extern bool gtkhx_proto_gif_icon_is_gif (const uint8_t *buf, size_t len);
 /* Build the single ICON_SET (1862) chunk. gif_len == 0 (or NULL
  * gif_ptr) builds a clear request (zero-length ICON_GIF field).
  * chunks_cap >= 1. Returns 1 on success, 0 on oversize / no room. */
-extern int32_t gtkhx_proto_build_icon_set_chunks (
-    const uint8_t *gif_ptr, size_t gif_len,
-    struct hx_chunk *chunks, size_t chunks_cap);
+extern int32_t gtkhx_proto_build_icon_set_chunks (const uint8_t *gif_ptr,
+                                                  size_t gif_len,
+                                                  struct hx_chunk *chunks,
+                                                  size_t chunks_cap);
 
 /* Build the single ICON_GET (1863) chunk: a UID field. chunks_cap >= 1,
  * scratch_cap >= 2. Returns 1 on success, 0 on undersized buffers. */
-extern int32_t gtkhx_proto_build_icon_get_chunks (
-    uint16_t uid, struct hx_chunk *chunks, size_t chunks_cap,
-    uint8_t *scratch, size_t scratch_cap);
+extern int32_t gtkhx_proto_build_icon_get_chunks (uint16_t uid,
+                                                  struct hx_chunk *chunks,
+                                                  size_t chunks_cap,
+                                                  uint8_t *scratch,
+                                                  size_t scratch_cap);
 
 /* One unpacked avatar entry. gif_ptr borrows into the reply buffer;
  * copy out before the buffer is recycled. */
@@ -1753,21 +1723,22 @@ struct gtkhx_proto_icon_entry {
  * is reported as a cleared avatar (out->gif_len == 0). Returns true and
  * fills *out when a UID is present, false otherwise. out must be
  * non-NULL. */
-extern bool gtkhx_proto_parse_icon_get_reply (
-    const uint8_t *buf, size_t len, struct gtkhx_proto_icon_entry *out);
+extern bool
+gtkhx_proto_parse_icon_get_reply (const uint8_t *buf, size_t len,
+                                  struct gtkhx_proto_icon_entry *out);
 
 /* Parse an ICON_CHANGE (1864) broadcast: UID only. Returns true and
  * writes *out_uid when present, false otherwise. */
-extern bool gtkhx_proto_parse_icon_change (
-    const uint8_t *buf, size_t len, uint16_t *out_uid);
+extern bool gtkhx_proto_parse_icon_change (const uint8_t *buf, size_t len,
+                                           uint16_t *out_uid);
 
 /* Walk an ICON_GETLIST (1861) reply, writing up to cap unpacked
  * entries into out (each gif_ptr borrows into buf). Returns the TOTAL
  * number of valid entries, which may exceed cap; pass out=NULL/cap=0
  * for a count-only pass, then allocate and call again. */
-extern size_t gtkhx_proto_parse_icon_list (
-    const uint8_t *buf, size_t len,
-    struct gtkhx_proto_icon_entry *out, size_t cap);
+extern size_t gtkhx_proto_parse_icon_list (const uint8_t *buf, size_t len,
+                                           struct gtkhx_proto_icon_entry *out,
+                                           size_t cap);
 
 /*
  * Receive-dispatch routing. hx_dispatch_frame calls hx_recv_route(type) to map

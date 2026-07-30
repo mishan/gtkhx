@@ -27,35 +27,35 @@ set -eu
 CONF=/opt/janus/Server/config.yaml
 
 if [ -n "${TRACKERS:-}" ]; then
-	# Enable registration.
-	sed -i \
-		's|^EnableTrackerRegistration:.*|EnableTrackerRegistration: true|' \
-		"$CONF"
+    # Enable registration.
+    sed -i \
+        's|^EnableTrackerRegistration:.*|EnableTrackerRegistration: true|' \
+        "$CONF"
 
-	# Drop the upstream default single entry so we don't also try to
-	# register against the public hltracker.com from inside the test
-	# rig.
-	sed -i '/^[[:space:]]*-[[:space:]]*hltracker\.com:5499$/d' "$CONF"
+    # Drop the upstream default single entry so we don't also try to
+    # register against the public hltracker.com from inside the test
+    # rig.
+    sed -i '/^[[:space:]]*-[[:space:]]*hltracker\.com:5499$/d' "$CONF"
 
-	# Insert each requested tracker right after the `Trackers:` key.
-	# Each insert lands immediately after the anchor, so the final
-	# on-disk order is the reverse of the env order — irrelevant for
-	# registration. Two-space indentation matches the upstream style
-	# and parses cleanly (verified with a YAML loader).
-	#
-	# `printf '%s'` rather than `echo` to split the list: echo mangles
-	# values that look like options (a leading `-n`, `-e`) on some
-	# shells. Backslashes in an entry are escaped before the sed `a\`
-	# insertion, whose append text otherwise consumes them.
-	for t in $(printf '%s' "$TRACKERS" | tr ',' ' '); do
-		[ -n "$t" ] || continue
-		t_esc=$(printf '%s' "$t" | sed 's/\\/\\\\/g')
-		sed -i "/^Trackers:/a\\  - ${t_esc}" "$CONF"
-	done
+    # Insert each requested tracker right after the `Trackers:` key.
+    # Each insert lands immediately after the anchor, so the final
+    # on-disk order is the reverse of the env order — irrelevant for
+    # registration. Two-space indentation matches the upstream style
+    # and parses cleanly (verified with a YAML loader).
+    #
+    # `printf '%s'` rather than `echo` to split the list: echo mangles
+    # values that look like options (a leading `-n`, `-e`) on some
+    # shells. Backslashes in an entry are escaped before the sed `a\`
+    # insertion, whose append text otherwise consumes them.
+    for t in $(printf '%s' "$TRACKERS" | tr ',' ' '); do
+        [ -n "$t" ] || continue
+        t_esc=$(printf '%s' "$t" | sed 's/\\/\\\\/g')
+        sed -i "/^Trackers:/a\\  - ${t_esc}" "$CONF"
+    done
 
-	echo "docker-entrypoint: tracker registration enabled -> $TRACKERS"
+    echo "docker-entrypoint: tracker registration enabled -> $TRACKERS"
 else
-	echo "docker-entrypoint: TRACKERS unset; using config.yaml as-is"
+    echo "docker-entrypoint: TRACKERS unset; using config.yaml as-is"
 fi
 
 exec /opt/janus/janus "$@"

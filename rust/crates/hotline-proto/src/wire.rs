@@ -174,8 +174,7 @@ impl<'a> Iterator for ChunkIter<'a> {
             return None;
         }
         let tag = u16::from_be_bytes([self.buf[self.pos], self.buf[self.pos + 1]]);
-        let len =
-            u16::from_be_bytes([self.buf[self.pos + 2], self.buf[self.pos + 3]]) as usize;
+        let len = u16::from_be_bytes([self.buf[self.pos + 2], self.buf[self.pos + 3]]) as usize;
         let data_start = self.pos + HL_DATA_HDR_LEN;
         // Declared length must fit in the remaining buffer; else stop
         // (matches the C macro's bounds `break`).
@@ -224,7 +223,10 @@ impl Encoder {
     /// Panics if `data` exceeds `u16::MAX` (a wire-format impossibility —
     /// chunk lengths are 16-bit).
     pub fn put_chunk(&mut self, tag: u16, data: &[u8]) -> &mut Self {
-        assert!(data.len() <= u16::MAX as usize, "chunk too long for u16 length");
+        assert!(
+            data.len() <= u16::MAX as usize,
+            "chunk too long for u16 length"
+        );
         self.put_u16(tag);
         self.put_u16(data.len() as u16);
         self.put_bytes(data);
@@ -265,9 +267,30 @@ mod tests {
 
     #[test]
     fn chunk_as_uint_matches_dh_getint() {
-        assert_eq!(Chunk { tag: 1, data: &[0x00, 0x00, 0x01, 0x02] }.as_uint(), 0x102);
-        assert_eq!(Chunk { tag: 1, data: &[0x01, 0x02] }.as_uint(), 0x102);
-        assert_eq!(Chunk { tag: 1, data: &[0x09] }.as_uint(), 0);
+        assert_eq!(
+            Chunk {
+                tag: 1,
+                data: &[0x00, 0x00, 0x01, 0x02]
+            }
+            .as_uint(),
+            0x102
+        );
+        assert_eq!(
+            Chunk {
+                tag: 1,
+                data: &[0x01, 0x02]
+            }
+            .as_uint(),
+            0x102
+        );
+        assert_eq!(
+            Chunk {
+                tag: 1,
+                data: &[0x09]
+            }
+            .as_uint(),
+            0
+        );
     }
 
     #[test]

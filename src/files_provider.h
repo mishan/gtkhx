@@ -41,21 +41,21 @@ struct _HxFilesProviderInterface {
     GTypeInterface parent;
 
     /* Read accessors. None of these transfer ownership; all
-	 * three return pointers to internal state. */
+     * three return pointers to internal state. */
     GListModel *(*get_listing) (HxFilesProvider *self);
     const char *(*get_current_path) (HxFilesProvider *self);
     const char *(*get_label) (HxFilesProvider *self);
 
     /* Navigation. `navigate` is async; `reload` re-fires whatever
-	 * the current path is; `navigate_up` walks to the parent
-	 * directory (no-op at the FS / Hotline root). */
+     * the current path is; `navigate_up` walks to the parent
+     * directory (no-op at the FS / Hotline root). */
     void (*navigate) (HxFilesProvider *self, const char *path);
     void (*reload) (HxFilesProvider *self);
     void (*navigate_up) (HxFilesProvider *self);
 
     /* Mutations. `name` is the leaf entry name; the provider
-	 * joins it onto current_path. `err` is filled on synchronous
-	 * failure paths; asynchronous failures fire "error" instead. */
+     * joins it onto current_path. `err` is filled on synchronous
+     * failure paths; asynchronous failures fire "error" instead. */
     gboolean (*mkdir) (HxFilesProvider *self, const char *name, GError **err);
     gboolean (*delete_entry) (HxFilesProvider *self, const char *name,
                               GError **err);
@@ -63,36 +63,36 @@ struct _HxFilesProviderInterface {
                         const char *new_name, GError **err);
 
     /* Optional capability check. NULL == ready. A non-NULL
-	 * return is a localized message explaining why the panel
-	 * can't list right now (e.g., "Not connected" for the
-	 * remote provider before login). The panel paints this in
-	 * place of the file list. */
+     * return is a localized message explaining why the panel
+     * can't list right now (e.g., "Not connected" for the
+     * remote provider before login). The panel paints this in
+     * place of the file list. */
     const char *(*get_unavailable_reason) (HxFilesProvider *self);
 
     /* Activate a single non-directory entry — fires the
-	 * provider-appropriate default action for "the user pressed
-	 * Enter (or double-clicked) on this row". Local: launch
-	 * with the desktop's default app via xdg-open. Remote:
-	 * download to the configured download folder (the closest
-	 * analogue to xdg-open's "do the obvious thing" semantic
-	 * for a remote file). Optional; NULL means "no action on
-	 * activate".
-	 *
-	 * Preview is a separate action — see preview_entry below.
-	 * Misha asked for Enter-on-remote to download rather than
-	 * preview because download is the action users almost
-	 * always want on a remote row, and preview stays one F-key
-	 * (F3) or one button click away. */
+     * provider-appropriate default action for "the user pressed
+     * Enter (or double-clicked) on this row". Local: launch
+     * with the desktop's default app via xdg-open. Remote:
+     * download to the configured download folder (the closest
+     * analogue to xdg-open's "do the obvious thing" semantic
+     * for a remote file). Optional; NULL means "no action on
+     * activate".
+     *
+     * Preview is a separate action — see preview_entry below.
+     * Misha asked for Enter-on-remote to download rather than
+     * preview because download is the action users almost
+     * always want on a remote row, and preview stays one F-key
+     * (F3) or one button click away. */
     void (*activate_entry) (HxFilesProvider *self, HxFileEntry *e);
 
     /* Explicit preview action — fired by the headerbar Preview
-	 * button and F3/Ctrl+P. Local: same as activate_entry
-	 * (xdg-open); the OS default app for the type IS the
-	 * preview. Remote: stream the file into the in-app preview
-	 * window (the old activate_entry body). Optional; default
-	 * fallback is to call activate_entry, which gives the
-	 * "preview means open by default" behaviour for any
-	 * provider that doesn't override it. */
+     * button and F3/Ctrl+P. Local: same as activate_entry
+     * (xdg-open); the OS default app for the type IS the
+     * preview. Remote: stream the file into the in-app preview
+     * window (the old activate_entry body). Optional; default
+     * fallback is to call activate_entry, which gives the
+     * "preview means open by default" behaviour for any
+     * provider that doesn't override it. */
     void (*preview_entry) (HxFilesProvider *self, HxFileEntry *e);
 };
 

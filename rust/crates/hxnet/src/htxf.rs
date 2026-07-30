@@ -647,12 +647,11 @@ unsafe fn htxf_blocking_connect(
         // runs inside the runtime so the stream deregisters from the
         // reactor cleanly before it crosses back to the blocking worker.
         let (evt_tx, _evt_rx) = tokio::sync::mpsc::channel::<crate::Event>(4);
-        let res = match crate::connect::resolve_and_connect(&host, port, proxy.as_ref(), &evt_tx)
-            .await
-        {
-            Ok(tcp) => tcp.into_std(),
-            Err(e) => Err(e),
-        };
+        let res =
+            match crate::connect::resolve_and_connect(&host, port, proxy.as_ref(), &evt_tx).await {
+                Ok(tcp) => tcp.into_std(),
+                Err(e) => Err(e),
+            };
         let _ = tx.send(res);
     });
     rx.recv()
@@ -699,11 +698,17 @@ pub unsafe extern "C" fn hxnet_htxf_connect(
         return std::ptr::null_mut();
     }
     if (host_len as u64) > (isize::MAX as u64) || (preamble_len as u64) > (isize::MAX as u64) {
-        glib::g_critical!("hxnet", "hxnet_htxf_connect: length argument exceeds isize::MAX");
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_htxf_connect: length argument exceeds isize::MAX"
+        );
         return std::ptr::null_mut();
     }
     if preamble_len != 0 && preamble.is_null() {
-        glib::g_critical!("hxnet", "hxnet_htxf_connect: NULL preamble with non-zero len");
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_htxf_connect: NULL preamble with non-zero len"
+        );
         return std::ptr::null_mut();
     }
 
@@ -910,7 +915,12 @@ pub unsafe extern "C" fn hxnet_htxf_pack_preamble(
     }
     let out = slice::from_raw_parts_mut(buf, cap);
     hotline_proto::build::build_htxf_preamble(
-        out, ref_id, total_size, type_code, flags, size64 != 0,
+        out,
+        ref_id,
+        total_size,
+        type_code,
+        flags,
+        size64 != 0,
     )
 }
 

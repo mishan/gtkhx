@@ -18,16 +18,16 @@
 #include "dock_layout.h"
 #include "dock_layout_parse.h"
 
-#include "hx.h"        /* session typedef — toolbar.h needs it */
+#include "hx.h" /* session typedef — toolbar.h needs it */
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
 #include "hx_split.h"
 #include "panel_registry.h"
-#include "toolbar.h"   /* DEFAULT_LEAF_MIN_WIDTH */
+#include "toolbar.h" /* DEFAULT_LEAF_MIN_WIDTH */
 #include "debug.h"
 
 #include <errno.h>
-#include <stdio.h>   /* sscanf — used by the [Undocked] parser */
+#include <stdio.h> /* sscanf — used by the [Undocked] parser */
 #include <string.h>
 
 #include <glib/gstdio.h>
@@ -44,30 +44,30 @@ typedef struct {
 } UndockedSize;
 
 static struct {
-    gboolean   loaded;                /* TRUE iff dock_layout_load
+    gboolean loaded;               /* TRUE iff dock_layout_load
                                        * found and parsed a file. */
-    GHashTable *id_to_frame;          /* char* (panel id) → GtkWidget*
+    GHashTable *id_to_frame;       /* char* (panel id) → GtkWidget*
                                        * (PanelFrame*, borrowed). */
-    GHashTable *id_to_undock_size;    /* char* (panel id) → UndockedSize*;
+    GHashTable *id_to_undock_size; /* char* (panel id) → UndockedSize*;
                                        * panels saved as living in their
                                        * own undocked window. Consumed by
                                        * dock_layout_place_panel — each
                                        * matching id triggers a one-time
                                        * hx_panel_undock + size apply. */
-    GtkPaned  **paned_order;          /* depth-first order, set by load
+    GtkPaned **paned_order;        /* depth-first order, set by load
                                        * + apply_geometry, used by save */
-    guint       n_paned;
-    guint       save_idle_id;
-    gboolean    save_disabled;        /* TRUE after dock_layout_reset until
+    guint n_paned;
+    guint save_idle_id;
+    gboolean save_disabled; /* TRUE after dock_layout_reset until
                                        * the next process — every save
                                        * request is dropped on the floor.
                                        * Without this, paned-position
                                        * notify::s during the rest of the
                                        * session re-create the file we
                                        * just deleted. */
-    HxSplit   *dock_root;             /* set by dock_layout_set_dock_root;
+    HxSplit *dock_root;     /* set by dock_layout_set_dock_root;
                                        * walked at save time */
-} dock = {0};
+} dock = { 0 };
 
 void
 dock_layout_set_dock_root (HxSplit *root)
@@ -75,8 +75,8 @@ dock_layout_set_dock_root (HxSplit *root)
     dock.dock_root = root;
 }
 
-static const char *LAYOUT_FILE       = "dock-layout.ini";
-static const guint SAVE_DEBOUNCE_MS  = 200;
+static const char *LAYOUT_FILE = "dock-layout.ini";
+static const guint SAVE_DEBOUNCE_MS = 200;
 
 static char *
 layout_file_path (void)
@@ -100,27 +100,37 @@ extern GtkWidget *toolbar_window;
 static const char *
 role_for_frame (GtkWidget *frame)
 {
-    if (frame == toolbar_sidebar_frame) return "start";
-    if (frame == toolbar_end_frame)     return "end";
-    if (frame == toolbar_bottom_frame)  return "bottom";
-    if (frame == toolbar_center_frame)  return "center";
+    if (frame == toolbar_sidebar_frame) {
+        return "start";
+    }
+    if (frame == toolbar_end_frame) {
+        return "end";
+    }
+    if (frame == toolbar_bottom_frame) {
+        return "bottom";
+    }
+    if (frame == toolbar_center_frame) {
+        return "center";
+    }
     return NULL;
 }
 
 static void
 serialize_leaf (GString *out, PanelFrame *frame)
 {
-    guint       n   = panel_frame_get_n_pages (frame);
+    guint n = panel_frame_get_n_pages (frame);
     const char *role = role_for_frame (GTK_WIDGET (frame));
-    gboolean    first = TRUE;
+    gboolean first = TRUE;
 
     g_string_append (out, "L[");
     for (guint i = 0; i < n; i++) {
         PanelWidget *p = panel_frame_get_page (frame, i);
-        if (p == NULL || !HX_IS_PANEL (p))
+        if (p == NULL || !HX_IS_PANEL (p)) {
             continue;
-        if (!first)
+        }
+        if (!first) {
             g_string_append_c (out, ',');
+        }
         g_string_append (out, hx_panel_get_id (HX_PANEL (p)));
         first = FALSE;
     }
@@ -145,7 +155,7 @@ serialize_node (GString *out, HxSplit *node, GArray *paned_positions)
     }
 
     GtkOrientation o = hx_split_get_orientation (node);
-    GtkPaned      *paned = hx_split_get_paned (node);
+    GtkPaned *paned = hx_split_get_paned (node);
 
     g_string_append (out, o == GTK_ORIENTATION_HORIZONTAL ? "h(" : "v(");
     serialize_node (out, hx_split_get_child_a (node), paned_positions);
@@ -172,51 +182,52 @@ serialize_node (GString *out, HxSplit *node, GArray *paned_positions)
  * role-tagged leaves into out_sidebar/center/bottom/end and seeds
  * dock.id_to_frame with each leaf's panel-id list. */
 static HxSplit *
-build_node (DLParsedNode *node,
-            GtkWidget **out_sidebar,
-            GtkWidget **out_center,
-            GtkWidget **out_bottom,
-            GtkWidget **out_end,
-            GPtrArray  *paned_collect)
+build_node (DLParsedNode *node, GtkWidget **out_sidebar, GtkWidget **out_center,
+            GtkWidget **out_bottom, GtkWidget **out_end,
+            GPtrArray *paned_collect)
 {
     if (node->is_leaf) {
         PanelFrame *frame = hx_panel_frame_new ();
         panel_frame_set_header (
             frame, PANEL_FRAME_HEADER (panel_frame_header_bar_new ()));
-        gtk_widget_set_size_request (GTK_WIDGET (frame),
-                                     DEFAULT_LEAF_MIN_WIDTH, -1);
+        gtk_widget_set_size_request (GTK_WIDGET (frame), DEFAULT_LEAF_MIN_WIDTH,
+                                     -1);
 
         HxSplit *leaf = hx_split_new_with_frame (frame);
 
         /* Wire role pointers. */
         if (node->role != NULL) {
             GtkWidget *fw = GTK_WIDGET (frame);
-            if (g_strcmp0 (node->role, "start")  == 0) *out_sidebar = fw;
-            else if (g_strcmp0 (node->role, "end")    == 0) *out_end     = fw;
-            else if (g_strcmp0 (node->role, "bottom") == 0) *out_bottom  = fw;
-            else if (g_strcmp0 (node->role, "center") == 0) *out_center  = fw;
+            if (g_strcmp0 (node->role, "start") == 0) {
+                *out_sidebar = fw;
+            } else if (g_strcmp0 (node->role, "end") == 0) {
+                *out_end = fw;
+            } else if (g_strcmp0 (node->role, "bottom") == 0) {
+                *out_bottom = fw;
+            } else if (g_strcmp0 (node->role, "center") == 0) {
+                *out_center = fw;
+            }
         }
 
         /* Seed id_to_frame. */
         for (guint i = 0; i < node->panel_ids->len; i++) {
             const char *id = g_ptr_array_index (node->panel_ids, i);
-            g_hash_table_replace (dock.id_to_frame,
-                                  g_strdup (id),
-                                  frame);
+            g_hash_table_replace (dock.id_to_frame, g_strdup (id), frame);
         }
         return leaf;
     }
 
-    HxSplit *a = build_node (node->child_a, out_sidebar, out_center,
-                             out_bottom, out_end, paned_collect);
-    HxSplit *b = build_node (node->child_b, out_sidebar, out_center,
-                             out_bottom, out_end, paned_collect);
+    HxSplit *a = build_node (node->child_a, out_sidebar, out_center, out_bottom,
+                             out_end, paned_collect);
+    HxSplit *b = build_node (node->child_b, out_sidebar, out_center, out_bottom,
+                             out_end, paned_collect);
     GtkOrientation o = (node->orientation == DL_ORIENT_HORIZONTAL)
-                         ? GTK_ORIENTATION_HORIZONTAL
-                         : GTK_ORIENTATION_VERTICAL;
+                           ? GTK_ORIENTATION_HORIZONTAL
+                           : GTK_ORIENTATION_VERTICAL;
     HxSplit *split = hx_split_new_internal (a, b, o);
-    if (paned_collect != NULL)
+    if (paned_collect != NULL) {
         g_ptr_array_add (paned_collect, hx_split_get_paned (split));
+    }
     return split;
 }
 
@@ -230,27 +241,31 @@ build_node (DLParsedNode *node,
 static void
 visit_undocked_panel (HxPanel *panel, gpointer user_data)
 {
-    GKeyFile  *kf;
-    GtkRoot   *root;
-    int        w   = 0;
-    int        h   = 0;
+    GKeyFile *kf;
+    GtkRoot *root;
+    int w = 0;
+    int h = 0;
     const char *id;
-    char       buf[32];
+    char buf[32];
 
-    kf   = (GKeyFile *) user_data;
+    kf = (GKeyFile *)user_data;
     root = gtk_widget_get_root (GTK_WIDGET (panel));
-    if (root == NULL || GTK_WIDGET (root) == toolbar_window)
+    if (root == NULL || GTK_WIDGET (root) == toolbar_window) {
         return;
-    if (!GTK_IS_WINDOW (root))
+    }
+    if (!GTK_IS_WINDOW (root)) {
         return;
+    }
 
     gtk_window_get_default_size (GTK_WINDOW (root), &w, &h);
-    if (w <= 0 || h <= 0)
+    if (w <= 0 || h <= 0) {
         return;
+    }
 
     id = hx_panel_get_id (panel);
-    if (id == NULL || id[0] == '\0')
+    if (id == NULL || id[0] == '\0') {
         return;
+    }
 
     g_snprintf (buf, sizeof buf, "%d,%d", w, h);
     g_key_file_set_string (kf, "Undocked", id, buf);
@@ -272,8 +287,8 @@ on_save_idle (gpointer user_data)
         return G_SOURCE_REMOVE;
     }
 
-    GString *tree   = g_string_new (NULL);
-    GArray  *sizes  = g_array_new (FALSE, FALSE, sizeof (int));
+    GString *tree = g_string_new (NULL);
+    GArray *sizes = g_array_new (FALSE, FALSE, sizeof (int));
     serialize_node (tree, root, sizes);
 
     GKeyFile *kf = g_key_file_new ();
@@ -282,7 +297,7 @@ on_save_idle (gpointer user_data)
      * and Window_Geo — don't duplicate it here. dock-layout.ini
      * stays focused on the tree shape and paned positions. */
 
-    g_key_file_set_string  (kf, "Dock", "tree", tree->str);
+    g_key_file_set_string (kf, "Dock", "tree", tree->str);
     /* Walk every registered panel and serialise the ones whose
      * root is an undocked window. The [Undocked] section ends up
      * with one key per panel, value "W,H". Empty section when
@@ -292,20 +307,21 @@ on_save_idle (gpointer user_data)
     if (sizes->len > 0) {
         GString *sz = g_string_new (NULL);
         for (guint i = 0; i < sizes->len; i++) {
-            if (i > 0) g_string_append_c (sz, ';');
+            if (i > 0) {
+                g_string_append_c (sz, ';');
+            }
             g_string_append_printf (sz, "%d", g_array_index (sizes, int, i));
         }
         g_key_file_set_string (kf, "Dock", "sizes", sz->str);
         g_string_free (sz, TRUE);
     }
 
-    gsize  len  = 0;
-    char  *data = g_key_file_to_data (kf, &len, NULL);
-    char  *path = layout_file_path ();
+    gsize len = 0;
+    char *data = g_key_file_to_data (kf, &len, NULL);
+    char *path = layout_file_path ();
     GError *err = NULL;
-    if (!g_file_set_contents (path, data, (gssize) len, &err)) {
-        g_warning ("dock_layout: write %s: %s",
-                   path, err ? err->message : "?");
+    if (!g_file_set_contents (path, data, (gssize)len, &err)) {
+        g_warning ("dock_layout: write %s: %s", path, err ? err->message : "?");
         g_clear_error (&err);
     } else {
         debug_log ("layout", "saved: %s", path);
@@ -322,16 +338,17 @@ on_save_idle (gpointer user_data)
 void
 dock_layout_request_save (void)
 {
-    if (dock.save_disabled)
+    if (dock.save_disabled) {
         return;
+    }
     /* Debounce, not throttle: every request resets the timer so a
      * burst of notify::position during a divider drag (or rapid
      * undock/redock) collapses to one write 200 ms after the last
      * request, not a write every 200 ms across the burst. */
-    if (dock.save_idle_id != 0)
+    if (dock.save_idle_id != 0) {
         g_source_remove (dock.save_idle_id);
-    dock.save_idle_id = g_timeout_add (SAVE_DEBOUNCE_MS,
-                                       on_save_idle, NULL);
+    }
+    dock.save_idle_id = g_timeout_add (SAVE_DEBOUNCE_MS, on_save_idle, NULL);
 }
 
 /* ----------------------------------------------------------------- */
@@ -346,57 +363,61 @@ find_first_leaf_frame_cb (HxSplit *leaf, gpointer user_data)
     GtkWidget **out = user_data;
     PanelFrame *frame;
 
-    if (*out != NULL)
+    if (*out != NULL) {
         return;
+    }
     frame = hx_split_get_frame (leaf);
-    if (frame != NULL)
+    if (frame != NULL) {
         *out = GTK_WIDGET (frame);
+    }
 }
 
 gboolean
-dock_layout_load (HxSplit   **out_root,
-                  GtkWidget **out_sidebar_frame,
-                  GtkWidget **out_center_frame,
-                  GtkWidget **out_bottom_frame,
+dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
+                  GtkWidget **out_center_frame, GtkWidget **out_bottom_frame,
                   GtkWidget **out_end_frame)
 {
-    char     *path = layout_file_path ();
-    GKeyFile *kf   = g_key_file_new ();
-    GError   *err  = NULL;
-    gboolean  ok   = FALSE;
+    char *path = layout_file_path ();
+    GKeyFile *kf = g_key_file_new ();
+    GError *err = NULL;
+    gboolean ok = FALSE;
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, &err)) {
-        if (!g_error_matches (err, G_FILE_ERROR, G_FILE_ERROR_NOENT))
-            g_warning ("dock_layout: load %s: %s",
-                       path, err ? err->message : "?");
+        if (!g_error_matches (err, G_FILE_ERROR, G_FILE_ERROR_NOENT)) {
+            g_warning ("dock_layout: load %s: %s", path,
+                       err ? err->message : "?");
+        }
         g_clear_error (&err);
         goto out;
     }
 
     char *tree_str = g_key_file_get_string (kf, "Dock", "tree", NULL);
-    if (tree_str == NULL)
+    if (tree_str == NULL) {
         goto out;
+    }
 
     DLParsedNode *parsed = dl_parse_tree (tree_str);
     g_free (tree_str);
     if (parsed == NULL) {
         g_warning ("dock_layout: malformed tree in %s; "
-                   "falling back to defaults", path);
+                   "falling back to defaults",
+                   path);
         goto out;
     }
 
     /* Prime / reset module state. */
-    if (dock.id_to_frame != NULL)
+    if (dock.id_to_frame != NULL) {
         g_hash_table_remove_all (dock.id_to_frame);
-    else
-        dock.id_to_frame = g_hash_table_new_full (
-            g_str_hash, g_str_equal, g_free, NULL);
+    } else {
+        dock.id_to_frame
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    }
 
     GPtrArray *paneds = g_ptr_array_new ();
     *out_sidebar_frame = NULL;
-    *out_center_frame  = NULL;
-    *out_bottom_frame  = NULL;
-    *out_end_frame     = NULL;
+    *out_center_frame = NULL;
+    *out_bottom_frame = NULL;
+    *out_end_frame = NULL;
     HxSplit *root = build_node (parsed, out_sidebar_frame, out_center_frame,
                                 out_bottom_frame, out_end_frame, paneds);
     dl_parsed_node_free (parsed);
@@ -432,14 +453,23 @@ dock_layout_load (HxSplit   **out_root,
                        "falling back to defaults");
             g_ptr_array_unref (paneds);
             g_hash_table_remove_all (dock.id_to_frame);
-            if (root != NULL)
+            if (root != NULL) {
                 g_object_unref (g_object_ref_sink (root));
+            }
             goto out;
         }
-        if (*out_sidebar_frame == NULL) *out_sidebar_frame = first_leaf_frame;
-        if (*out_center_frame  == NULL) *out_center_frame  = first_leaf_frame;
-        if (*out_bottom_frame  == NULL) *out_bottom_frame  = first_leaf_frame;
-        if (*out_end_frame     == NULL) *out_end_frame     = first_leaf_frame;
+        if (*out_sidebar_frame == NULL) {
+            *out_sidebar_frame = first_leaf_frame;
+        }
+        if (*out_center_frame == NULL) {
+            *out_center_frame = first_leaf_frame;
+        }
+        if (*out_bottom_frame == NULL) {
+            *out_bottom_frame = first_leaf_frame;
+        }
+        if (*out_end_frame == NULL) {
+            *out_end_frame = first_leaf_frame;
+        }
     }
 
     *out_root = root;
@@ -447,7 +477,7 @@ dock_layout_load (HxSplit   **out_root,
     /* Stash paneds for apply_geometry. */
     g_free (dock.paned_order);
     dock.n_paned = paneds->len;
-    dock.paned_order = (GtkPaned **) g_ptr_array_free (paneds, FALSE);
+    dock.paned_order = (GtkPaned **)g_ptr_array_free (paneds, FALSE);
 
     /* Stash sizes for apply_geometry. */
     /* Stored as a static array of ints alongside the paned order;
@@ -458,21 +488,22 @@ dock_layout_load (HxSplit   **out_root,
      * dock_layout_place_panel — when each panel's factory runs and
      * registers, the placement hook checks this map and calls
      * hx_panel_undock with the saved size. */
-    if (dock.id_to_undock_size != NULL)
+    if (dock.id_to_undock_size != NULL) {
         g_hash_table_remove_all (dock.id_to_undock_size);
-    else
-        dock.id_to_undock_size = g_hash_table_new_full (
-            g_str_hash, g_str_equal, g_free, g_free);
+    } else {
+        dock.id_to_undock_size
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, g_free);
+    }
 
     {
-        gsize  n_keys = 0;
-        char **keys   = g_key_file_get_keys (kf, "Undocked", &n_keys, NULL);
+        gsize n_keys = 0;
+        char **keys = g_key_file_get_keys (kf, "Undocked", &n_keys, NULL);
         for (gsize i = 0; keys != NULL && i < n_keys; i++) {
             char *val = g_key_file_get_string (kf, "Undocked", keys[i], NULL);
-            int   w   = 0;
-            int   h   = 0;
-            if (val != NULL && sscanf (val, "%d,%d", &w, &h) == 2
-                && w > 0 && h > 0) {
+            int w = 0;
+            int h = 0;
+            if (val != NULL && sscanf (val, "%d,%d", &w, &h) == 2 && w > 0
+                && h > 0) {
                 UndockedSize *sz = g_new (UndockedSize, 1);
                 sz->w = w;
                 sz->h = h;
@@ -502,34 +533,36 @@ out:
  *
  * pos is passed via the data pointer (GPOINTER_TO_INT). */
 static void
-on_paned_apply_saved_position (GObject *object, GParamSpec *pspec, gpointer data)
+on_paned_apply_saved_position (GObject *object, GParamSpec *pspec,
+                               gpointer data)
 {
     int max_position = 0;
-    int pos          = GPOINTER_TO_INT (data);
+    int pos = GPOINTER_TO_INT (data);
 
     (void)pspec;
     g_object_get (object, "max-position", &max_position, NULL);
-    if (max_position <= 0)
+    if (max_position <= 0) {
         return;
+    }
 
     gtk_paned_set_position (GTK_PANED (object), pos);
-    g_signal_handlers_disconnect_by_func (object,
-                                          on_paned_apply_saved_position,
+    g_signal_handlers_disconnect_by_func (object, on_paned_apply_saved_position,
                                           data);
 }
 
 void
 dock_layout_apply_geometry (GtkWindow *window)
 {
-    (void)window;  /* Window size lives in gtkhxrc; we only
+    (void)window; /* Window size lives in gtkhxrc; we only
                     * restore paned positions here. */
 
-    if (!dock.loaded)
-        return;  /* No saved tree — nothing to restore. */
+    if (!dock.loaded) {
+        return; /* No saved tree — nothing to restore. */
+    }
 
-    char     *path = layout_file_path ();
-    GKeyFile *kf   = g_key_file_new ();
-    GError   *err  = NULL;
+    char *path = layout_file_path ();
+    GKeyFile *kf = g_key_file_new ();
+    GError *err = NULL;
 
     if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_NONE, &err)) {
         g_clear_error (&err);
@@ -540,12 +573,12 @@ dock_layout_apply_geometry (GtkWindow *window)
     if (sizes_str != NULL) {
         char **parts = g_strsplit (sizes_str, ";", -1);
         for (guint i = 0; parts[i] != NULL && i < dock.n_paned; i++) {
-            int pos = (int) g_ascii_strtoll (parts[i], NULL, 10);
-            if (pos > 0 && dock.paned_order[i] != NULL)
-                g_signal_connect (dock.paned_order[i],
-                                  "notify::max-position",
+            int pos = (int)g_ascii_strtoll (parts[i], NULL, 10);
+            if (pos > 0 && dock.paned_order[i] != NULL) {
+                g_signal_connect (dock.paned_order[i], "notify::max-position",
                                   G_CALLBACK (on_paned_apply_saved_position),
                                   GINT_TO_POINTER (pos));
+            }
         }
         g_strfreev (parts);
         g_free (sizes_str);
@@ -565,12 +598,14 @@ dock_layout_place_panel (HxPanel *panel)
 {
     const char *id;
 
-    if (!dock.loaded)
+    if (!dock.loaded) {
         return;
+    }
 
     id = hx_panel_get_id (panel);
-    if (id == NULL)
+    if (id == NULL) {
         return;
+    }
 
     /* Main-dock reseat. The factory just placed the panel in some
      * default frame; if the saved layout puts it elsewhere, move
@@ -582,9 +617,10 @@ dock_layout_place_panel (HxPanel *panel)
                                                           PANEL_TYPE_FRAME);
             if (current != target) {
                 g_object_ref (panel);
-                if (current != NULL)
+                if (current != NULL) {
                     panel_frame_remove (PANEL_FRAME (current),
                                         PANEL_WIDGET (panel));
+                }
                 panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (panel));
                 hx_panel_set_home_frame (panel, target);
                 g_object_unref (panel);
@@ -611,8 +647,9 @@ dock_layout_place_panel (HxPanel *panel)
              * If the size doesn't take on some compositor, that's
              * a follow-up. */
             GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (panel));
-            if (GTK_IS_WINDOW (root))
+            if (GTK_IS_WINDOW (root)) {
                 gtk_window_set_default_size (GTK_WINDOW (root), w, h);
+            }
         }
     }
 }
@@ -625,14 +662,17 @@ void
 dock_layout_reset (void)
 {
     char *path = layout_file_path ();
-    if (g_unlink (path) != 0 && errno != ENOENT)
+    if (g_unlink (path) != 0 && errno != ENOENT) {
         g_warning ("dock_layout: unlink %s: %s", path, g_strerror (errno));
+    }
     g_free (path);
 
-    if (dock.id_to_frame != NULL)
+    if (dock.id_to_frame != NULL) {
         g_hash_table_remove_all (dock.id_to_frame);
-    if (dock.id_to_undock_size != NULL)
+    }
+    if (dock.id_to_undock_size != NULL) {
         g_hash_table_remove_all (dock.id_to_undock_size);
+    }
     dock.loaded = FALSE;
 
     if (dock.save_idle_id != 0) {
@@ -656,9 +696,10 @@ dock_layout_reset (void)
 void
 dock_layout_init (void)
 {
-    if (dock.id_to_frame == NULL)
-        dock.id_to_frame = g_hash_table_new_full (
-            g_str_hash, g_str_equal, g_free, NULL);
+    if (dock.id_to_frame == NULL) {
+        dock.id_to_frame
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
+    }
 }
 
 void

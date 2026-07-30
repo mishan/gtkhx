@@ -32,8 +32,8 @@ use libadwaita as adw;
 // adw::prelude re-exports gtk::prelude (+ gio / glib preludes transitively),
 // so the widget / file traits used below all resolve through it.
 use adw::prelude::*;
-use gtk::glib;
 use glib::translate::from_glib_none;
+use gtk::glib;
 
 use crate::cstr;
 use crate::tr::{tr, tr1, tr_argv};
@@ -70,11 +70,12 @@ struct DownloadResult {
 // HxInlineMediaCaps also comes from hx-image-decode now (all-zero still means
 // "fall back to HX_MEDIA_DEFAULT_* per field", as the C dialog passed).
 
-type DownloadCb =
-    unsafe extern "C" fn(*mut c_void, *const DownloadResult, *mut c_void);
+type DownloadCb = unsafe extern "C" fn(*mut c_void, *const DownloadResult, *mut c_void);
 
+use hx_image_decode::ffi::{
+    inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free,
+};
 use hx_image_decode::ffi::{HxInlineMediaCaps, HxInlineMediaDecoded};
-use hx_image_decode::ffi::{inline_media_decode_async, inline_media_decode_cancel, inline_media_decoded_free};
 
 extern "C" {
     fn inline_media_download_start(
@@ -167,10 +168,7 @@ unsafe extern "C" fn on_download_done(
     // UB on a NULL/dangling base or a len past isize::MAX — so guard those
     // into an empty slice rather than trust the C-side GByteArray blindly.
     let ga = &*r.bytes;
-    let slice: &[u8] = if ga.data.is_null()
-        || ga.len == 0
-        || ga.len as u64 > isize::MAX as u64
-    {
+    let slice: &[u8] = if ga.data.is_null() || ga.len == 0 || ga.len as u64 > isize::MAX as u64 {
         &[]
     } else {
         std::slice::from_raw_parts(ga.data, ga.len as usize)
@@ -189,13 +187,8 @@ unsafe extern "C" fn on_download_done(
     // on_decode_done already fired.
     let caps = HxInlineMediaCaps::default();
     let data: &[u8] = md.bytes.as_ref().unwrap();
-    md.decode_token = inline_media_decode_async(
-        data.as_ptr(),
-        data.len(),
-        &caps,
-        on_decode_done,
-        user_data,
-    );
+    md.decode_token =
+        inline_media_decode_async(data.as_ptr(), data.len(), &caps, on_decode_done, user_data);
 }
 
 // ---------------------------------------------------------------------
@@ -248,7 +241,10 @@ fn on_save_clicked(md: &MediaDialog) {
     };
     let fd = gtk::FileDialog::new();
     fd.set_title(&tr("Save Image"));
-    fd.set_initial_name(Some(&format!("image{}", mime_to_suffix(md.mime.as_deref()))));
+    fd.set_initial_name(Some(&format!(
+        "image{}",
+        mime_to_suffix(md.mime.as_deref())
+    )));
 
     // Own-lifetime payload: the closure keeps its own glib::Bytes ref, so a
     // dismissed parent dialog can't free it out from under the file chooser.

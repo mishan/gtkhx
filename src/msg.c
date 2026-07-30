@@ -53,28 +53,27 @@ hx_send_msg (struct htlc_conn *htlc, guint16 uid, const char *msg, guint16 len,
              void *data)
 {
     /* Phase E2/E3: body field — UTF-8 / Mac Roman conversion plus
-	 * LF→CR for legacy servers. See [[gtkhx_text_for_wire]] in
-	 * src/text_util.c. */
+     * LF→CR for legacy servers. See [[gtkhx_text_for_wire]] in
+     * src/text_util.c. */
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize wire_len = 0;
     char *wire
         = gtkhx_text_for_wire (msg, len, utf8, /*is_body=*/TRUE, &wire_len);
 
     /* chunk layout moved to gtkhx_proto_build_msg_chunks.
-	 * Build chunks BEFORE registering the task — task_new() snapshots
-	 * the current htlc->trans into a new task table entry (which then
-	 * waits for the server's matching TASK reply); the actual increment
-	 * of htlc->trans happens later inside hlpack_chunks during packing.
-	 * If we registered the task first and the builder then failed
-	 * (validation reject), hlwrite_chunks would be skipped — leaving a
-	 * pending task with no on-wire request to reply to and hanging the
-	 * tasks UI. Build, register, send is the safe order. */
+     * Build chunks BEFORE registering the task — task_new() snapshots
+     * the current htlc->trans into a new task table entry (which then
+     * waits for the server's matching TASK reply); the actual increment
+     * of htlc->trans happens later inside hlpack_chunks during packing.
+     * If we registered the task first and the builder then failed
+     * (validation reject), hlwrite_chunks would be skipped — leaving a
+     * pending task with no on-wire request to reply to and hanging the
+     * tasks UI. Build, register, send is the safe order. */
     struct hx_chunk chunks[2];
     guint8 scratch[2];
-    int hc = (int)gtkhx_proto_build_msg_chunks (uid, (const uint8_t *)wire,
-                                                wire_len, chunks,
-                                                G_N_ELEMENTS (chunks), scratch,
-                                                sizeof (scratch));
+    int hc = (int)gtkhx_proto_build_msg_chunks (
+        uid, (const uint8_t *)wire, wire_len, chunks, G_N_ELEMENTS (chunks),
+        scratch, sizeof (scratch));
     if (hc > 0) {
         task_new (htlc, RCV_TASK_FN (rcv_task_msg), data, 0,
                   data ? data : "msg");
@@ -325,7 +324,7 @@ msg_apply_user_view (struct msgwin *msg, const char *display_name, guint16 icon,
         const char *away = (color % 2) ? _ (" (Away)") : "";
         if (rgba) {
             /* gdk_user_colors stores values in [0..1] floats;
-			 * convert to the 8-bit hex Pango wants. */
+             * convert to the 8-bit hex Pango wants. */
             char hex[8];
             g_snprintf (hex, sizeof (hex), "#%02x%02x%02x",
                         (int)(rgba->red * 255.0 + 0.5),
@@ -350,24 +349,24 @@ msg_apply_user_view (struct msgwin *msg, const char *display_name, guint16 icon,
     g_free (name_esc);
 
     /* Always reload — icon ID can change when the user changes their
-	 * icon mid-conversation. load_icon falls back through the icon
-	 * file chain; pixbuf comes back NULL when nothing matches and we
-	 * just blank the GtkImage in that case. GTK 4 deprecates
-	 * gtk_image_set_from_pixbuf; wrap the pixbuf in a GdkTexture via
-	 * gtkhx_texture_from_pixbuf (the non-deprecated gdk_memory_
-	 * texture_new helper) and feed it to set_from_paintable. */
+     * icon mid-conversation. load_icon falls back through the icon
+     * file chain; pixbuf comes back NULL when nothing matches and we
+     * just blank the GtkImage in that case. GTK 4 deprecates
+     * gtk_image_set_from_pixbuf; wrap the pixbuf in a GdkTexture via
+     * gtkhx_texture_from_pixbuf (the non-deprecated gdk_memory_
+     * texture_new helper) and feed it to set_from_paintable. */
     load_icon (msg->info_image, icon, &icon_files, 1, &pixbuf, &unused_mask);
     if (pixbuf) {
         /* load_icon transfers ownership of the freshly-allocated
-		 * pixbuf to us. gtkhx_texture_from_pixbuf takes its own
-		 * ref (via the GBytes free_func that holds the pixbuf
-		 * alive for the texture's lifetime), so we always drop
-		 * our reference — both on the success path AND on the
-		 * texture-conversion-failed path, otherwise every
-		 * msg_apply_user_view refresh would leak one pixbuf.
-		 * (The pre-migration code had the same shape and the
-		 * same leak; fixing it here as part of the texture
-		 * conversion review.) */
+         * pixbuf to us. gtkhx_texture_from_pixbuf takes its own
+         * ref (via the GBytes free_func that holds the pixbuf
+         * alive for the texture's lifetime), so we always drop
+         * our reference — both on the success path AND on the
+         * texture-conversion-failed path, otherwise every
+         * msg_apply_user_view refresh would leak one pixbuf.
+         * (The pre-migration code had the same shape and the
+         * same leak; fixing it here as part of the texture
+         * conversion review.) */
         GdkTexture *tex = gtkhx_texture_from_pixbuf (pixbuf);
         if (tex) {
             gtk_image_set_from_paintable (GTK_IMAGE (msg->info_image),
@@ -400,7 +399,8 @@ msgwin_refresh_user_info (struct msgwin *msg)
     pubchat = chat_with_cid (hx_active_session (), 0);
 
     if (pubchat
-        && hx_member_model_get_info (hx_chat_member_model (pubchat), *msg->uid, &mi)) {
+        && hx_member_model_get_info (hx_chat_member_model (pubchat), *msg->uid,
+                                     &mi)) {
         msg_apply_user_view (msg, mi.name, mi.icon, mi.status, TRUE);
     } else {
         msg_apply_user_view (msg, NULL, 0, 0, FALSE);
@@ -454,32 +454,31 @@ create_msg (guint16 _uid, char *name)
     hx_chat_view_set_urlcheck_function (msg->outputbuf, word_check);
     hx_chat_view_set_max_lines (msg->outputbuf, gtkhx_prefs.xbuf_max);
     /* view-native timestamps — see chat.c::create_chat_window
-	 * for the rationale. */
+     * for the rationale. */
     hx_chat_view_set_indent (msg->outputbuf, TRUE);
     hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
     hx_chat_view_set_max_indent (msg->outputbuf, 256);
     hx_chat_view_set_group_gap (msg->outputbuf, HX_CHAT_GROUP_GAP_DEFAULT);
-    hx_chat_view_set_avatar_size (msg->outputbuf,
-                                  gtkhx_prefs.chat_avatars
-                                      ? HX_CHAT_AVATAR_SIZE_DEFAULT
-                                      : 0);
+    hx_chat_view_set_avatar_size (
+        msg->outputbuf,
+        gtkhx_prefs.chat_avatars ? HX_CHAT_AVATAR_SIZE_DEFAULT : 0);
     g_signal_connect (msg->outputbuf, "word_click",
                       G_CALLBACK (gtkurl_xtext_word_click), NULL);
 
-    msg->vscroll = gtk_scrollbar_new (
-        GTK_ORIENTATION_VERTICAL,
-        hx_chat_view_get_vadjustment (msg->outputbuf));
+    msg->vscroll
+        = gtk_scrollbar_new (GTK_ORIENTATION_VERTICAL,
+                             hx_chat_view_get_vadjustment (msg->outputbuf));
     msg->inputbuf = gtk_text_view_new ();
 
     /* Theme monospace via gtk_text_view_set_monospace — see chat.c for
-	 * the rationale and gtkhx_apply_input_font for the implementation. */
+     * the rationale and gtkhx_apply_input_font for the implementation. */
     gtkhx_apply_input_font (msg->inputbuf);
     /* GtkHx-theme fg/bg via .gtkhx-input. */
     gtkhx_apply_input_style (msg->inputbuf);
     gtk_text_view_set_editable (GTK_TEXT_VIEW (msg->inputbuf), TRUE);
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (msg->inputbuf), GTK_WRAP_WORD);
     /* Inner margins so the text isn't clipped by the input frame's
-	 * rounded corners — same fix as the chat inputs. */
+     * rounded corners — same fix as the chat inputs. */
     gtk_text_view_set_left_margin (GTK_TEXT_VIEW (msg->inputbuf), 6);
     gtk_text_view_set_right_margin (GTK_TEXT_VIEW (msg->inputbuf), 6);
     gtk_text_view_set_top_margin (GTK_TEXT_VIEW (msg->inputbuf), 4);
@@ -488,9 +487,9 @@ create_msg (guint16 _uid, char *name)
     g_object_set_data (G_OBJECT (msg->inputbuf), "msg", msg);
     g_object_set_data (G_OBJECT (msg->inputbuf), "sess", hx_active_session ());
     /* Note: GtkTextView has no "activate" signal — Return is dispatched
-	 * from msg_input_key_pressed, which calls msg_input_activate().
-	 * key-press-event is gone in GTK 4; install a
-	 * GtkEventControllerKey on the input view instead. */
+     * from msg_input_key_pressed, which calls msg_input_activate().
+     * key-press-event is gone in GTK 4; install a
+     * GtkEventControllerKey on the input view instead. */
     {
         GtkEventController *kctrl = gtk_event_controller_key_new ();
         g_signal_connect (kctrl, "key-pressed",
@@ -499,8 +498,8 @@ create_msg (guint16 _uid, char *name)
     }
 
     /* stash the msgwin in the session's PM-windows table
-	 * keyed on uid. msg_windows_init() at startup guarantees the
-	 * table exists by the time we land here. */
+     * keyed on uid. msg_windows_init() at startup guarantees the
+     * table exists by the time we land here. */
     g_hash_table_insert (hx_active_session ()->msg_windows,
                          GUINT_TO_POINTER ((guint)_uid), msg);
     return msg;
@@ -608,13 +607,13 @@ msg_output_render (const char *name, guint16 uid, const char *body,
     }
 
     /* Pink for our own messages, light blue for incoming. Keyed on
-	 * is_self rather than direction, deliberately: the colour is about
-	 * *whose words* these are, which is what is_self answers. */
+     * is_self rather than direction, deliberately: the colour is about
+     * *whose words* these are, which is what is_self answers. */
     brack_col = is_self ? 13 : 12;
 
     /* Validate the body bytes once. the chat view hands content to Pango,
-	 * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
-	 * from vintage servers. */
+     * which asserts UTF-8 — and PM bodies can arrive in Mac Roman
+     * from vintage servers. */
     valid_body = gtkhx_text_to_utf8 (body ? body : "", body ? strlen (body) : 0,
                                      &valid_body_len);
     if (!valid_body) {
@@ -622,12 +621,12 @@ msg_output_render (const char *name, guint16 uid, const char *body,
     }
 
     /* Each newline-separated line in the body becomes its own
-	 * xtext entry. The first one carries the nick column via
-	 * hx_chat_view_append_indent (two-column layout — names
-	 * on the left, message on the right, with the auto-aligned
-	 * separator the chat output uses); subsequent lines append
-	 * as plain continuation rows so multi-line messages don't
-	 * repeat the nick column on every line. */
+     * xtext entry. The first one carries the nick column via
+     * hx_chat_view_append_indent (two-column layout — names
+     * on the left, message on the right, with the auto-aligned
+     * separator the chat output uses); subsequent lines append
+     * as plain continuation rows so multi-line messages don't
+     * repeat the nick column on every line. */
     cur = valid_body;
     end = valid_body + valid_body_len;
     gboolean first = TRUE;
@@ -636,8 +635,8 @@ msg_output_render (const char *name, guint16 uid, const char *body,
         gsize seg_len = nl ? (gsize)(nl - cur) : (gsize)(end - cur);
         if (first) {
             /* "<name>": brackets coloured, name in the default
-			 * foreground. Same shape as chat.c's nick column, and
-			 * the same three runs. */
+             * foreground. Same shape as chat.c's nick column, and
+             * the same three runs. */
             const char *nam = name ? name : "";
             HxChatRun gutter[3] = {
                 { "<", 1, brack_col, HX_CHAT_ATTR_NONE },
@@ -646,16 +645,16 @@ msg_output_render (const char *name, guint16 uid, const char *body,
             };
             HxChatRun body_run = HX_CHAT_RUN_PLAIN (cur, (int)seg_len);
             /* PM windows are per-uid, so the speaker is known outright
-			 * rather than looked up — the one place in the tree where
-			 * that is true.
-			 *
-			 * `uid` names the *window*, i.e. the other party. For our
-			 * own messages the speaker is us, so use our own uid: with
-			 * the window's, an outgoing message would show the other
-			 * person's avatar. When we haven't been told our uid yet it
-			 * stays 0, which is a miss rather than a guess. */
+             * rather than looked up — the one place in the tree where
+             * that is true.
+             *
+             * `uid` names the *window*, i.e. the other party. For our
+             * own messages the speaker is us, so use our own uid: with
+             * the window's, an outgoing message would show the other
+             * person's avatar. When we haven't been told our uid yet it
+             * stays 0, which is a miss rather than a guess. */
             /* `nam` is NUL-terminated here (it is the window's name),
-			 * so -1 is honest rather than a shortcut. */
+             * so -1 is honest rather than a shortcut. */
             HxChatSpeaker sp
                 = { outgoing ? hx_conn_uid (hx_active_session ()->htlc) : uid,
                     nam, -1, outgoing };
@@ -685,11 +684,12 @@ msg_output_render (const char *name, guint16 uid, const char *body,
 void
 msg_output (const char *name, guint16 uid, char *buf)
 {
-    gboolean is_self = name && hx_conn_name (hx_active_session ()->htlc)[0]
-                       && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;
+    gboolean is_self
+        = name && hx_conn_name (hx_active_session ()->htlc)[0]
+          && strcmp (name, hx_conn_name (hx_active_session ()->htlc)) == 0;
     /* The local echo of a message we just sent — the one caller is
-	 * send_msg's input handler. Outgoing by construction, which is
-	 * exactly the fact is_self cannot recover when you PM yourself. */
+     * send_msg's input handler. Outgoing by construction, which is
+     * exactly the fact is_self cannot recover when you PM yourself. */
     msg_output_render (name, uid, buf, is_self, TRUE);
 }
 
@@ -700,7 +700,7 @@ msg_output_from_event (HxMsgEvent *event)
         return;
     }
     /* Received from the server: incoming, even when the sender is us
-	 * (messaging yourself echoes back through the same path). */
+     * (messaging yourself echoes back through the same path). */
     msg_output_render (event->name, event->uid, event->body, event->is_self,
                        FALSE);
 }
@@ -790,34 +790,33 @@ broadcastmsg (const char *sender_name, guint16 sender_color, char *text)
     gsize len = text ? strlen (text) : 0;
 
     /* notify-dispatch happens before the toast/alert so
-	 * the user sees a system-level alert regardless of whether
-	 * the broadcast renders as a transient toast or a modal
-	 * dialog. */
+     * the user sees a system-level alert regardless of whether
+     * the broadcast renders as a transient toast or a modal
+     * dialog. */
     gtkhx_notify_broadcast (text);
 
     /* Broadcasts share the MSG chime with private messages. The "msg"
-	 * signal (which the sound_events subscriber keys on) fires only for
-	 * the private-message branch of hx_rcv_msg, not for broadcasts, so
-	 * play it here to preserve the chime that used to fire inline for
-	 * both branches. */
+     * signal (which the sound_events subscriber keys on) fires only for
+     * the private-message branch of hx_rcv_msg, not for broadcasts, so
+     * play it here to preserve the chime that used to fire inline for
+     * both branches. */
     play_sound (MSG);
 
     /* Log the broadcast to chat output. When the wire carried a
-	 * sender name (mhxd-family servers echo broadcasts back with
-	 * UID + NAME chunks), render as "[name] body" with the same
-	 * brackets the "[hx]" tag uses and the name in the sender's
-	 * user-colour slot. When the sender is unknown (older
-	 * servers, anonymous rate-limit nags), fall back to the
-	 * legacy "[hx] broadcast: …" form so something still shows up
-	 * in scrollback. Task errors come through task_error() →
-	 * toolbar_show_toast directly and never reach this function,
-	 * so they won't be logged as broadcasts here. */
+     * sender name (mhxd-family servers echo broadcasts back with
+     * UID + NAME chunks), render as "[name] body" with the same
+     * brackets the "[hx]" tag uses and the name in the sender's
+     * user-colour slot. When the sender is unknown (older
+     * servers, anonymous rate-limit nags), fall back to the
+     * legacy "[hx] broadcast: …" form so something still shows up
+     * in scrollback. Task errors come through task_error() →
+     * toolbar_show_toast directly and never reach this function,
+     * so they won't be logged as broadcasts here. */
     if (text && *text) {
         if (sender_name && *sender_name) {
             char *safe_name = broadcast_sanitise_name (sender_name);
             hx_printf_named (hx_active_session ()->htlc, 0, safe_name,
-                             broadcast_name_color (sender_color), "%s\n",
-                             text);
+                             broadcast_name_color (sender_color), "%s\n", text);
             g_free (safe_name);
         } else {
             hx_printf_prefix (hx_active_session ()->htlc, 0, INFOPREFIX,

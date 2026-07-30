@@ -15,20 +15,21 @@
 
 use std::ffi::{c_char, c_void};
 
-use gtk4 as gtk;
+use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::prelude::*;
+use gtk4 as gtk;
 use libadwaita as adw;
-use glib::translate::from_glib_none;
 
 use crate::tr::{tr, tr_fmt};
 
 const NB_KIND_POST: i32 = 3;
 
-use hxmodel::news::node::hx_news_node_name;
 use hxhandlers::send::news::hx_news15_post_thread;
+use hxmodel::news::node::hx_news_node_name;
 
-extern "C" {    // hxnews-model node accessors (for the reply-context card).
+extern "C" {
+    // hxnews-model node accessors (for the reply-context card).
     fn hx_news_node_kind(node: *mut c_void) -> i32;
     fn hx_news_node_postid(node: *mut c_void) -> u32;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
@@ -74,7 +75,11 @@ pub unsafe extern "C" fn gtkhx_news_compose_open(
     };
 
     let window = gtk::Window::new();
-    window.set_title(Some(&if is_reply { tr("Reply") } else { tr("New Post") }));
+    window.set_title(Some(&if is_reply {
+        tr("Reply")
+    } else {
+        tr("New Post")
+    }));
     window.set_size_request(560, if is_reply { 540 } else { 380 });
     // br->window is a PanelWidget, not a GtkWindow — parent on the toolbar
     // window every panel uses for sub-dialogs.
@@ -197,7 +202,11 @@ unsafe fn build_reply_context_panel(reply_to: *mut c_void) -> gtk::Box {
     header_row.set_margin_top(6);
 
     let sender = crate::cstr(hx_news_node_sender(reply_to.cast()));
-    let sender = if sender.is_empty() { "?".to_string() } else { sender };
+    let sender = if sender.is_empty() {
+        "?".to_string()
+    } else {
+        sender
+    };
     let date = crate::hl_date::news_node_date_string(reply_to).unwrap_or_default();
     // Single translatable msgid with positional args (was the C
     // _("Replying to %1$s — %2$s")) so translators keep one string + can

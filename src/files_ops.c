@@ -46,9 +46,9 @@ hx_files_ops_result_message (HxOpsResult r)
                   "relocate the file, or drag to your local panel first.");
     case HX_OPS_ERR_FOLDER_UNSUPPORTED:
         /* Retained as a safety-net enum value. All four directions
-		 * (local↔remote files, local↔remote folders, local↔local)
-		 * have working implementations now; nothing returns this
-		 * code in tree. If it shows up, it's a regression. */
+         * (local↔remote files, local↔remote folders, local↔local)
+         * have working implementations now; nothing returns this
+         * code in tree. If it shows up, it's a regression. */
         return _ ("Folder transfer not supported here.");
     case HX_OPS_ERR_LOCAL_FAIL:
         return _ ("Local copy failed.");
@@ -122,9 +122,9 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
 
     if (hx_file_entry_is_dir (e)) {
         /* Folder uploads use HTLC_HDR_FILE_PUTFOLDER (0xd5) and
-		 * stream the whole tree over a single HTXF subchannel
-		 * via folder_put_thread (driving the FILE_NEXT state
-		 * machine from the client side). */
+         * stream the whole tree over a single HTXF subchannel
+         * via folder_put_thread (driving the FILE_NEXT state
+         * machine from the client side). */
         const char *nm = hx_file_entry_get_name (e);
         gsize nm_len = nm ? strlen (nm) : 0;
         char *src_full;
@@ -132,8 +132,8 @@ copy_local_to_remote (HxFilesProvider *src, HxFilesProvider *dst,
             return HX_OPS_ERR_NO_PERMISSION;
         }
         src_full = join_path (src_dir, nm);
-        hx_put_folder (hx_active_session ()->htlc, src_full, dst_dir ? dst_dir : "", nm,
-                       nm_len);
+        hx_put_folder (hx_active_session ()->htlc, src_full,
+                       dst_dir ? dst_dir : "", nm, nm_len);
         g_free (src_full);
         return HX_OPS_OK;
     }
@@ -174,9 +174,9 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
 
     if (hx_file_entry_is_dir (e)) {
         /* Folder downloads use HTLC_HDR_FILE_GETFOLDER (0xd2),
-		 * which streams the whole tree over an HTXF subchannel
-		 * with HTXF_TYPE_FOLDER framing. The folder_get_thread
-		 * in xfers.c drives the FILE_NEXT state machine. */
+         * which streams the whole tree over an HTXF subchannel
+         * with HTXF_TYPE_FOLDER framing. The folder_get_thread
+         * in xfers.c drives the FILE_NEXT state machine. */
         const char *nm = hx_file_entry_get_name (e);
         gsize nm_len = nm ? strlen (nm) : 0;
         if (!has_access (HL_ACCESS_DOWNLOAD_FOLDERS)) {
@@ -188,11 +188,11 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
     }
 
     /* Sanitize the remote name into a safe local basename before
-	 * joining onto the local download dir — a hostile server could
-	 * ship a name like "../../etc/passwd" that would let
-	 * join_path escape dst_dir. The wire-side request below still
-	 * passes the raw name to xfer_new as a separate (name,
-	 * name_len) tuple so the FILE_NAME chunk is unchanged. */
+     * joining onto the local download dir — a hostile server could
+     * ship a name like "../../etc/passwd" that would let
+     * join_path escape dst_dir. The wire-side request below still
+     * passes the raw name to xfer_new as a separate (name,
+     * name_len) tuple so the FILE_NAME chunk is unchanged. */
     {
         char *safe = hx_files_provider_safe_local_basename (
             hx_file_entry_get_name (e));
@@ -202,8 +202,8 @@ copy_remote_to_local (HxFilesProvider *src, HxFilesProvider *dst,
 
     size = hx_file_entry_get_size (e);
     /* xfer_new takes the remote location as (dir, name, name_len)
-	 * so the name's bytes (possibly including '/') ride through to
-	 * the wire FILE_NAME chunk untouched. */
+     * so the name's bytes (possibly including '/') ride through to
+     * the wire FILE_NAME chunk untouched. */
     {
         const char *nm = hx_file_entry_get_name (e);
         gsize nm_len = nm ? strlen (nm) : 0;
@@ -238,7 +238,7 @@ copy_local_dir_recursive (GFile *src_dir, GFile *dst_dir, GError **err_out)
     gboolean all_ok = TRUE;
 
     /* Make the destination directory. Pre-existing is OK — the
-	 * caller may have created it already. */
+     * caller may have created it already. */
     if (!g_file_make_directory_with_parents (dst_dir, NULL, &err)) {
         if (!g_error_matches (err, G_IO_ERROR, G_IO_ERROR_EXISTS)) {
             if (err_out && !*err_out) {
@@ -296,7 +296,7 @@ copy_local_dir_recursive (GFile *src_dir, GFile *dst_dir, GError **err_out)
     }
 
     /* Enumerator EOF — `err` from next_file is NULL on normal
-	 * termination, set on IO failure. */
+     * termination, set on IO failure. */
     if (err) {
         if (err_out && !*err_out) {
             *err_out = err;
@@ -375,13 +375,13 @@ hx_files_ops_copy (HxFilesProvider *src, HxFilesProvider *dst, HxFileEntry *e)
     }
 
     /* Remote → remote: Hotline has no FILE_COPY opcode. The
-	 * server-side SYMLINK opcode creates a HARD link (shared
-	 * bytes), which isn't a real copy — modifying or deleting
-	 * one path affects the other. We don't pretend otherwise.
-	 * Drag-and-drop between two remote panels routes through
-	 * hx_file_move in files_browser.c instead (orthodox-FM
-	 * "drag-within-same-volume = move" convention). The Copy
-	 * button between two remote panels falls through here and
-	 * the toast points the user at Move. */
+     * server-side SYMLINK opcode creates a HARD link (shared
+     * bytes), which isn't a real copy — modifying or deleting
+     * one path affects the other. We don't pretend otherwise.
+     * Drag-and-drop between two remote panels routes through
+     * hx_file_move in files_browser.c instead (orthodox-FM
+     * "drag-within-same-volume = move" convention). The Copy
+     * button between two remote panels falls through here and
+     * the toast points the user at Move. */
     return HX_OPS_ERR_UNSUPPORTED;
 }

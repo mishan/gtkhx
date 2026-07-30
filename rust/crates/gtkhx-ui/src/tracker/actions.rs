@@ -283,7 +283,11 @@ pub(super) fn on_secondary_press(url: &str, gesture: &gtk::GestureClick, x: f64,
     popover.set_child(Some(&vbox));
 
     vbox.append(&menu_button(&tr("Connect"), &popover, tracker_connect));
-    vbox.append(&menu_button(&tr("Save Bookmark"), &popover, tracker_save_bookmark));
+    vbox.append(&menu_button(
+        &tr("Save Bookmark"),
+        &popover,
+        tracker_save_bookmark,
+    ));
     vbox.append(&menu_button(&tr("Get Info"), &popover, tracker_details));
 
     popover.popup();
@@ -444,7 +448,11 @@ fn show_server_details(row: &HxTrackerRow) {
     content.set_margin_end(18);
 
     let m = row.meta();
-    let m = if m.is_null() { None } else { Some(unsafe { &*m }) };
+    let m = if m.is_null() {
+        None
+    } else {
+        Some(unsafe { &*m })
+    };
 
     // --- Server (always) ---
     let grp = adw::PreferencesGroup::new();

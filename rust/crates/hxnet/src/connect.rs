@@ -81,7 +81,10 @@ impl std::fmt::Debug for ProxyConfig {
             // password.
             .field(
                 "auth",
-                &self.auth.as_ref().map(|(user, _)| (user.as_str(), "<redacted>")),
+                &self
+                    .auth
+                    .as_ref()
+                    .map(|(user, _)| (user.as_str(), "<redacted>")),
             )
             .finish()
     }
@@ -131,7 +134,11 @@ impl ProxyConfig {
         validate_host_port(hostport)?;
         // SOCKS4 has no user/pass auth — drop any creds rather than
         // pretend we'll honour them.
-        let auth = if scheme == ProxyScheme::Socks5 { auth } else { None };
+        let auth = if scheme == ProxyScheme::Socks5 {
+            auth
+        } else {
+            None
+        };
         Ok(ProxyConfig {
             scheme,
             addr: hostport.to_owned(),
@@ -201,7 +208,11 @@ struct ProxyConnectError {
 #[cfg(feature = "socks")]
 impl std::fmt::Display for ProxyConnectError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "SOCKS connect to {} via {} failed", self.target, self.proxy)
+        write!(
+            f,
+            "SOCKS connect to {} via {} failed",
+            self.target, self.proxy
+        )
     }
 }
 
@@ -498,7 +509,9 @@ mod tests {
         let (evt_tx, mut evt_rx) = mpsc::channel(8);
 
         let connect_handle =
-            tokio::spawn(async move { resolve_and_connect("127.0.0.1", port, None, &evt_tx).await });
+            tokio::spawn(
+                async move { resolve_and_connect("127.0.0.1", port, None, &evt_tx).await },
+            );
 
         // Consume state events as they fire.
         let first = evt_rx.recv().await.expect("first event");

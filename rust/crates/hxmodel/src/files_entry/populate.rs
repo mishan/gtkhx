@@ -195,11 +195,7 @@ mod tests {
         // which does the remove_all.
         let buf = chunk(b"fldr", 0, b"Docs");
         unsafe {
-            gtkhx_files_populate_from_reply(
-                store.as_ptr(),
-                buf.as_ptr(),
-                buf.len(),
-            );
+            gtkhx_files_populate_from_reply(store.as_ptr(), buf.as_ptr(), buf.len());
         }
         assert_eq!(store.n_items(), 1);
         let only = store.item(0).unwrap().downcast::<HxFileEntry>().unwrap();
@@ -212,11 +208,7 @@ mod tests {
         fill(&store, &chunk(b"TEXT", 1, b"a.txt"));
         assert_eq!(store.n_items(), 1);
         unsafe {
-            gtkhx_files_populate_from_reply(
-                store.as_ptr(),
-                core::ptr::null(),
-                0,
-            );
+            gtkhx_files_populate_from_reply(store.as_ptr(), core::ptr::null(), 0);
         }
         assert_eq!(store.n_items(), 0);
         // NULL store is a no-op (must not crash).

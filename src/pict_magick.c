@@ -86,12 +86,12 @@ hx_pict_magick_decode (const guint8 *data, gsize len, GError **err)
     }
 
     /* Pin the input format to PICT. ImageMagick has decoders for ~200
-	 * formats and will auto-detect from magic bytes by default; we
-	 * explicitly want the PICT decoder here so a non-PICT blob (which
-	 * shouldn't get here in practice — the caller gates on the v2
-	 * version marker) doesn't accidentally hit a different decoder.
-	 * Defense in depth against the long history of CVEs in
-	 * ImageMagick's secondary coders. */
+     * formats and will auto-detect from magic bytes by default; we
+     * explicitly want the PICT decoder here so a non-PICT blob (which
+     * shouldn't get here in practice — the caller gates on the v2
+     * version marker) doesn't accidentally hit a different decoder.
+     * Defense in depth against the long history of CVEs in
+     * ImageMagick's secondary coders. */
     MagickSetFormat (w, "PICT");
 
     if (MagickReadImageBlob (w, data, len) == MagickFalse) {
@@ -111,11 +111,11 @@ hx_pict_magick_decode (const guint8 *data, gsize len, GError **err)
     }
 
     /* Extract raw RGBA at 8 bpc. This is the most direct path —
-	 * MagickGetImageBlob would round-trip through a re-encoded PNG
-	 * (and in practice returns the cached source bytes anyway, not
-	 * the re-encoded ones), whereas MagickExportImagePixels hands
-	 * back a flat buffer of pixels we can wrap in a GdkMemoryTexture
-	 * with zero further decoding. */
+     * MagickGetImageBlob would round-trip through a re-encoded PNG
+     * (and in practice returns the cached source bytes anyway, not
+     * the re-encoded ones), whereas MagickExportImagePixels hands
+     * back a flat buffer of pixels we can wrap in a GdkMemoryTexture
+     * with zero further decoding. */
     stride = (gsize)width * 4;
     rgba = g_malloc ((gsize)height * stride);
 
@@ -131,8 +131,8 @@ hx_pict_magick_decode (const guint8 *data, gsize len, GError **err)
     DestroyMagickWand (w);
 
     /* Wrap the pixel buffer in a GBytes — GdkMemoryTexture takes a
-	 * reference to the bytes object. Use g_bytes_new_with_free_func
-	 * so the texture's last-ref triggers our free hook. */
+     * reference to the bytes object. Use g_bytes_new_with_free_func
+     * so the texture's last-ref triggers our free hook. */
     gb = g_bytes_new_with_free_func (rgba, (gsize)height * stride,
                                      free_rgba_buffer, rgba);
 

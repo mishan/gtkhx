@@ -1,0 +1,122 @@
+# GtkHx lint / formatting checks — runs on every push and pull request.
+#
+# Two jobs:
+#
+#   format     — whitespace hygiene (tools/fix-whitespace.py) and C
+#                formatting (clang-format via tools/reformat.sh). Runs on a
+#                plain ubuntu runner; no GTK / GStreamer needed.
+#   rust-lint  — rustfmt + `cargo clippy -D warnings`, run inside the same
+#                Fedora gtkhx-ci-base image the build uses, so the rustc /
+#                rustfmt / clippy versions match the canonical build
+#                environment exactly (avoids "formatted with a different
+#                rustfmt" drift).
+#
+# Branch protection on `main` can require these green before merge, alongside
+# the `tests` workflow.
+
+name: lint
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  format:
+    name: whitespace + clang-format
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: whitespace hygiene
+        # No tab indentation, no trailing whitespace, single final newline.
+        run: python3 tools/fix-whitespace.py --check
+
+      - name: install clang-format (pinned)
+        # Pin the exact version the tree was formatted with. clang-format's
+        # output drifts between major versions (notably around braced-list
+        # macros), so a floating apt/distro version would flag spurious
+        # violations. The pip package ships a self-contained binary, so the
+        # same version is reproducible on any runner or dev machine
+        # (pip install 'clang-format==21.1.8').
+        run: pipx install 'clang-format==21.1.8'
+
+      - name: clang-format (C sources)
+        run: tools/reformat.sh --check
+
+  rust-lint:
+    name: rustfmt + clippy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read          # pull the pre-built base image from GHCR
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: cache rust build
+        # Shares the on-disk layout the `tests` workflow uses: the Cargo
+        # target dir and CARGO_HOME live under /src so a runner-side cache
+        # warms clippy's ~300-crate compile. Keyed on Cargo.lock.
+        uses: actions/cache@v4
+        with:
+          path: |
+            rust-cargo-target
+            .cargo-home
+          key: clippy-rust-${{ hashFiles('rust/Cargo.lock') }}
+          restore-keys: |
+            clippy-rust-
+
+      - name: log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: rustfmt + clippy
+        # Runs in the gtkhx-ci-base image (GTK4 + GStreamer + rust already
+        # installed) so voice + glycin + the whole workspace lint. clippy is
+        # run twice: once with the voice-enabled feature set the shipping
+        # meson build uses, and once with default features (voice off) so the
+        # `#[cfg(not(feature = "voice"))]` stubs are linted too.
+        run: |
+          docker run --network host \
+            -v "$PWD:/src" -w /src \
+            -e CARGO_HOME=/src/.cargo-home \
+            -e CARGO_TARGET_DIR=/src/rust-cargo-target \
+            ghcr.io/mishan/gtkhx-ci-base:latest bash -c '
+              set -e
+
+              # Fedora rust ships without the rustfmt/clippy components on
+              # some spins; install them if the base image lacks them.
+              command -v rustfmt      >/dev/null || dnf install -y rustfmt
+              command -v cargo-clippy >/dev/null || dnf install -y clippy
+
+              cd rust
+
+              cargo fmt --all --check
+
+              # Voice-enabled feature set — mirrors the shipping meson build.
+              cargo clippy --workspace --all-targets \
+                --features "hxbridge/runtime,hxnet/socks,hx-image-decode/glycin-v3,gtkhx-ffi/voice" \
+                --ignore-rust-version -- -D warnings
+
+              # Default (voice-off) configuration.
+              cargo clippy --workspace --all-targets \
+                --ignore-rust-version -- -D warnings
+
+              # Hand the cache dirs back to the runner user for the post-job save.
+              chown -R "$(stat -c %u:%g /src)" \
+                /src/rust-cargo-target /src/.cargo-home 2>/dev/null || true
+            '

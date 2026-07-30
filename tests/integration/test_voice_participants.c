@@ -66,11 +66,11 @@ pick_voice_server (void)
 static guint32
 send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
-    if (!integration_send_message (
-            fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0, /*hc=*/1,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be)) {
+    if (!integration_send_message (fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
         return 0;
     }
     return trans;
@@ -79,11 +79,11 @@ send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 static guint32
 send_voice_leave (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
-    if (!integration_send_message (
-            fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0, /*hc=*/1,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be)) {
+    if (!integration_send_message (fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
         return 0;
     }
     return trans;
@@ -97,13 +97,15 @@ participant_count (struct htlc_conn *htlc)
 {
     struct gtkhx_proto_voice_reply r;
     memset (&r, 0, sizeof (r));
-    gtkhx_proto_parse_voice_reply (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in (htlc)->buf,
+                                   hx_test_in (htlc)->pos, &r);
     if (!r.participants_present) {
         return -1;
     }
     const guint8 *blob = NULL;
     gsize blob_len = 0;
-    if (!gtkhx_proto_voice_reply_field (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, 3, &blob,
+    if (!gtkhx_proto_voice_reply_field (hx_test_in (htlc)->buf,
+                                        hx_test_in (htlc)->pos, 3, &blob,
                                         &blob_len)) {
         return -1;
     }
@@ -114,8 +116,8 @@ participant_count (struct htlc_conn *htlc)
      * change. */
     enum { MAX_P = 64 };
     struct gtkhx_proto_voice_participant ents[MAX_P];
-    return (int) gtkhx_proto_parse_voice_participants (blob, blob_len, ents,
-                                                       MAX_P);
+    return (int)gtkhx_proto_parse_voice_participants (blob, blob_len, ents,
+                                                      MAX_P);
 }
 
 /* Drain on `fd` until a 605 ROOM_STATUS arrives whose participant
@@ -150,9 +152,9 @@ test_voice_participants_broadcast (void)
     }
 
     char a_nick[32], b_nick[32];
-    g_snprintf (a_nick, sizeof (a_nick), "VoicePartA-%d-%04x", (int) getpid (),
+    g_snprintf (a_nick, sizeof (a_nick), "VoicePartA-%d-%04x", (int)getpid (),
                 g_random_int () & 0xffff);
-    g_snprintf (b_nick, sizeof (b_nick), "VoicePartB-%d-%04x", (int) getpid (),
+    g_snprintf (b_nick, sizeof (b_nick), "VoicePartB-%d-%04x", (int)getpid (),
                 g_random_int () & 0xffff);
 
     struct htlc_conn htlc_a;
@@ -179,8 +181,8 @@ test_voice_participants_broadcast (void)
      * participants blob (just her — Bob hasn't joined yet). */
     guint32 a_join = send_voice_join (fd_a, &htlc_a, 0);
     g_assert_cmpuint (a_join, !=, 0);
-    g_assert_true (integration_drain_until_task_trans (fd_a, &htlc_a, a_join,
-                                                       64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd_a, &htlc_a, a_join, 64));
     g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     int baseline = participant_count (&htlc_a);
@@ -190,8 +192,8 @@ test_voice_participants_broadcast (void)
     /* Bob joins. Bob's TASK reply also lands non-error. */
     guint32 b_join = send_voice_join (fd_b, &htlc_b, 0);
     g_assert_cmpuint (b_join, !=, 0);
-    g_assert_true (integration_drain_until_task_trans (fd_b, &htlc_b, b_join,
-                                                       64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd_b, &htlc_b, b_join, 64));
     g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
 
     /* Alice should now receive a 605 update with count > baseline.
@@ -202,7 +204,8 @@ test_voice_participants_broadcast (void)
     if (grown < 0) {
         g_test_fail_printf (
             "Alice did not receive a VOICE_ROOM_STATUS (605) with "
-            "participant_count > %d after Bob joined.", baseline);
+            "participant_count > %d after Bob joined.",
+            baseline);
     } else {
         g_test_message ("Alice saw 605 with participants=%d (baseline=%d).",
                         grown, baseline);

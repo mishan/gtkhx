@@ -54,9 +54,11 @@ type RcvTaskFn = unsafe extern "C" fn(*mut c_void, *const c_void, usize, *mut c_
 // Real build: these resolve at the final C link. Test build: `use tests::{…}`
 // below shadows them with recording stubs, so the extern block is gated off.
 #[cfg(not(test))]
-use crate::recv::news::{rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list};
-#[cfg(not(test))]
 use crate::recv::news::carrier::{gnews_catalog_path, gnews_folder_path};
+#[cfg(not(test))]
+use crate::recv::news::{
+    rcv_task_news_file, rcv_task_news_post, rcv_task_newscat_list, rcv_task_newsfolder_list,
+};
 #[cfg(not(test))]
 use hxtext::gtkhx_text_for_wire;
 
@@ -167,7 +169,11 @@ pub unsafe extern "C" fn hx_news15_get_post(
     let mut chunks = [HxChunk::EMPTY; 3];
     let mut scratch = [0u8; 4];
     let mime = cstr_bytes(mime_type);
-    let mime = if mime.is_empty() { b"text/plain".as_slice() } else { mime };
+    let mime = if mime.is_empty() {
+        b"text/plain".as_slice()
+    } else {
+        mime
+    };
     let req = NewsGetThreadRequest {
         path: hldir_slice(&hldir, hldirlen),
         threadid: postid,
@@ -389,7 +395,13 @@ pub unsafe extern "C" fn hx_news15_delete(htlc: *mut c_void, path: *const c_char
             std::ptr::null_mut(),
             c"news15_rm".as_ptr(),
         );
-        hlwrite_chunks(htlc, HTLC_HDR_DELNEWSDIRCAT, 0, chunks.as_ptr(), hc as c_int);
+        hlwrite_chunks(
+            htlc,
+            HTLC_HDR_DELNEWSDIRCAT,
+            0,
+            chunks.as_ptr(),
+            hc as c_int,
+        );
     }
     glib::ffi::g_free(hldir as *mut c_void);
 }

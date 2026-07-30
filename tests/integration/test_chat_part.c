@@ -56,26 +56,25 @@ test_chat_part_broadcasts (void)
                                                      &chat_id, 64));
 
     /* Bob drains for the invite. */
-    g_assert_true (integration_drain_until_chat_invite (
-        fd_b, &htlc_b, 64));
+    g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
 
     /* Bob joins. We need Bob in the chat before he can part it. */
     g_assert_true (integration_join_chat (fd_b, &htlc_b, chat_id, 64));
-    guint32 cid_be = g_htonl(chat_id);
+    guint32 cid_be = g_htonl (chat_id);
 
     /* Drain Alice's CHAT_USER_CHANGE for Bob (the join broadcast)
-	 * so the remaining test only sees the part broadcast. */
+     * so the remaining test only sees the part broadcast. */
     g_assert_true (integration_drain_until_type (
         fd_a, &htlc_a, HTLS_HDR_CHAT_USER_CHANGE, 64));
 
     /* Bob parts. mhxd doesn't reply directly to the parter — the
-	 * broadcast goes only to OTHER joined members. */
+     * broadcast goes only to OTHER joined members. */
     g_assert_true (integration_send_message (
         fd_b, &htlc_b, HTLC_HDR_CHAT_PART, /*flag=*/0, /*hc=*/1,
         (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));
 
     /* Alice receives HTLS_HDR_CHAT_USER_PART for Bob — same cid,
-	 * Bob's uid. */
+     * Bob's uid. */
     g_assert_true (integration_drain_until_chat_user_event (
         fd_a, &htlc_a, HTLS_HDR_CHAT_USER_PART, chat_id, htlc_b.uid, 64));
 

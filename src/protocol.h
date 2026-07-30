@@ -53,49 +53,49 @@ typedef struct _session session;
 
 struct htxf_conn {
     /* All size / position fields are guint64 to support the
-	 * Large-File extension (CAP_LARGE_FILES). The protocol still
-	 * defaults to 32-bit on the wire; the upgrade only matters
-	 * when both peers negotiate the capability. Internally we
-	 * always operate in 64-bit so progress reporting, resume,
-	 * and rename-on-collision logic do not have to branch on
-	 * the negotiated mode. */
+     * Large-File extension (CAP_LARGE_FILES). The protocol still
+     * defaults to 32-bit on the wire; the upgrade only matters
+     * when both peers negotiate the capability. Internally we
+     * always operate in 64-bit so progress reporting, resume,
+     * and rename-on-collision logic do not have to branch on
+     * the negotiated mode. */
     guint64 data_size, data_pos, rsrc_size, rsrc_pos;
     guint64 total_size, total_pos;
     /* Server's data-fork size from the file listing, captured at
-	 * xfer_new time. Used by xfer_go to choose between resume
-	 * (local exists and is strictly smaller than server) and
-	 * rename-on-collision (local is the same size or larger, or
-	 * server size is unknown). 0 == unknown — listing wasn't
-	 * available for this transfer. */
+     * xfer_new time. Used by xfer_go to choose between resume
+     * (local exists and is strictly smaller than server) and
+     * rename-on-collision (local is the same size or larger, or
+     * server size is unknown). 0 == unknown — listing wasn't
+     * available for this transfer. */
     guint64 srv_data_size;
     /* Lifecycle: htxf_conn is reference-counted to handle the
-	 * cross-thread ownership knot between the xfers[] array, the
-	 * per-xfer worker thread, and any pending main-thread idles
-	 * the worker has queued (post_file_update / post_xfer_cleanup).
-	 *
-	 * Owners that increment refcount on acquire and decrement on
-	 * release:
-	 *   1  the xfers[] array (xfer_new → xfer_remove_from_list)
-	 *   1  the worker (xfer_ready_write → xfer_completion_entry)
-	 *   N  each pending post_* idle (post_*  → its dispatcher)
-	 *
-	 * xfer_delete (called from rcv.c when the server cancels) sets
-	 * `canceled` and removes the htxf from xfers[] (which drops the
-	 * xfers[] ref).
-	 * If the worker and queued idles still hold refs, the htxf
-	 * stays alive, the worker exits cleanly, idles run with the
-	 * canceled flag set and skip their work, and the last unref
-	 * frees. No use-after-free; no race window.
-	 *
-	 * Since S0.2, refcount + canceled + total_pos are held as atomics in
-	 * hxnet's xfer_handle #[repr(C)] mirror and the C side touches them ONLY
-	 * through the hx_htxf_* ABI (hx_htxf_ref/_unref, hx_htxf_cancel/
-	 * _is_canceled, hx_htxf_add_total_pos/_set_total_pos/_total_pos) — a 1:1
-	 * port of the old g_atomic_int_* calls. `canceled` is cross-thread: the
-	 * main thread sets it (xfer_delete / xfers_delete_all) and the worker
-	 * reads it at every transfer read/write boundary (htxf_io_read/_write).
-	 * Declared as plain gint/guint64 here; the mirror's atomic types are
-	 * layout-identical, so C's struct size + field offsets are unchanged. */
+     * cross-thread ownership knot between the xfers[] array, the
+     * per-xfer worker thread, and any pending main-thread idles
+     * the worker has queued (post_file_update / post_xfer_cleanup).
+     *
+     * Owners that increment refcount on acquire and decrement on
+     * release:
+     *   1  the xfers[] array (xfer_new → xfer_remove_from_list)
+     *   1  the worker (xfer_ready_write → xfer_completion_entry)
+     *   N  each pending post_* idle (post_*  → its dispatcher)
+     *
+     * xfer_delete (called from rcv.c when the server cancels) sets
+     * `canceled` and removes the htxf from xfers[] (which drops the
+     * xfers[] ref).
+     * If the worker and queued idles still hold refs, the htxf
+     * stays alive, the worker exits cleanly, idles run with the
+     * canceled flag set and skip their work, and the last unref
+     * frees. No use-after-free; no race window.
+     *
+     * Since S0.2, refcount + canceled + total_pos are held as atomics in
+     * hxnet's xfer_handle #[repr(C)] mirror and the C side touches them ONLY
+     * through the hx_htxf_* ABI (hx_htxf_ref/_unref, hx_htxf_cancel/
+     * _is_canceled, hx_htxf_add_total_pos/_set_total_pos/_total_pos) — a 1:1
+     * port of the old g_atomic_int_* calls. `canceled` is cross-thread: the
+     * main thread sets it (xfer_delete / xfers_delete_all) and the worker
+     * reads it at every transfer read/write boundary (htxf_io_read/_write).
+     * Declared as plain gint/guint64 here; the mirror's atomic types are
+     * layout-identical, so C's struct size + field offsets are unchanged. */
     gint refcount;
     gint canceled;
     guint32 ref; /* xfer id */
@@ -105,21 +105,21 @@ struct htxf_conn {
     int fd;
 
     /* HTXF subchannel target: same hostname as the main control
-	 * channel, port + 1. Stored as plain strings so the worker
-	 * thread can hand them straight to GSocketClient without any
-	 * addrinfo dance. */
+     * channel, port + 1. Stored as plain strings so the worker
+     * thread can hand them straight to GSocketClient without any
+     * addrinfo dance. */
     char serverhost[HOSTLEN];
     guint16 serverport;
     struct htlc_conn *htlc;
     char path[MAXPATHLEN];
     char remotepath[MAXPATHLEN]; /* dir + name joined; display only */
     /* Structured remote location. The wire protocol identifies a
-	 * file by a separate per-component DIR list plus a flat NAME
-	 * chunk — names can contain any byte including `/`, which is
-	 * otherwise dir_char. Storing the dir and name apart from the
-	 * joined remotepath is what lets xfer_go correctly request
-	 * files like "Cheeseman goes 56k/sec.pct" without the `/` in
-	 * the name getting reinterpreted as a directory boundary. */
+     * file by a separate per-component DIR list plus a flat NAME
+     * chunk — names can contain any byte including `/`, which is
+     * otherwise dir_char. Storing the dir and name apart from the
+     * joined remotepath is what lets xfer_go correctly request
+     * files like "Cheeseman goes 56k/sec.pct" without the `/` in
+     * the name getting reinterpreted as a directory boundary. */
     char remotedir[MAXPATHLEN];
     char remotename[256];
     guint16 remotename_len;
@@ -130,48 +130,48 @@ struct htxf_conn {
     struct {
         guint32 retry : 1, preview : 1,
             /* When set, the worker uses folder_{get,put}_thread
-		 * instead of {get,put}_thread, and the wire format is
-		 * the HTXF_TYPE_FOLDER stream (FILE_NEXT/FILE_SEND/
-		 * FILE_RESUME commands, per-file size headers, nested
-		 * file_send_one/file_recv_one calls per leaf). Set on
-		 * htxf right after xfer_new for folder transfers. */
+         * instead of {get,put}_thread, and the wire format is
+         * the HTXF_TYPE_FOLDER stream (FILE_NEXT/FILE_SEND/
+         * FILE_RESUME commands, per-file size headers, nested
+         * file_send_one/file_recv_one calls per leaf). Set on
+         * htxf right after xfer_new for folder transfers. */
             folder : 1,
             /* When set, this transfer uses the Large-File extension
-		 * wire shape: HTXF_FLAG_LARGE_FILE in the handshake; FFO
-		 * fork headers use the high/low 32-bit split encoding on
-		 * the wire (the Compression field at offset 4-7 carries
-		 * the high 32 bits of the fork length, DataSize at 12-15
-		 * carries the low 32 bits); large-file uploads (>4 GiB)
-		 * send raw data only, no FFO wrapper.
-		 * Decided once by htxf_connect based on CAP_LARGE_FILES
-		 * plus the actual transfer size. */
+         * wire shape: HTXF_FLAG_LARGE_FILE in the handshake; FFO
+         * fork headers use the high/low 32-bit split encoding on
+         * the wire (the Compression field at offset 4-7 carries
+         * the high 32 bits of the fork length, DataSize at 12-15
+         * carries the low 32 bits); large-file uploads (>4 GiB)
+         * send raw data only, no FFO wrapper.
+         * Decided once by htxf_connect based on CAP_LARGE_FILES
+         * plus the actual transfer size. */
             large : 1, reserved : 28;
     } opt;
 
     /* when opt.preview is set, the preview window is created
-	 * on the main thread (in rcv_task_file_get) and stashed here so
-	 * the download worker thread doesn't have to construct GTK widgets
-	 * itself. The worker only feeds bytes through preview->output()
-	 * (which g_idle_add's them onto the main thread's queue). NULL
-	 * for non-preview transfers. */
+     * on the main thread (in rcv_task_file_get) and stashed here so
+     * the download worker thread doesn't have to construct GTK widgets
+     * itself. The worker only feeds bytes through preview->output()
+     * (which g_idle_add's them onto the main thread's queue). NULL
+     * for non-preview transfers. */
     void *preview;
 
     gboolean aead_active;
     void *hx;
 
     /* Thread-safe cancellation token for the HTXF subchannel (Rust
-	 * HtxfAbort *, opaque here). Created by hx_htxf_new (S0.3, was
-	 * xfer_init's htxf_io_abort_init), armed with the channel's socket by
-	 * htxf_connect once `hx` is open (worker thread), and triggered by
-	 * xfer_delete / xfers_delete_all (main thread) to shut the socket down
-	 * and unblock a worker parked in a blocking htxf_io_read / _write.
-	 * Distinct from `hx` precisely because main and worker touch it
-	 * concurrently — `hx` is worker-owned and racy to read from the
-	 * main thread, whereas the token is reference-counted and safe to
-	 * abort from either side. Always non-NULL on an xfers.c transfer
-	 * (hx_htxf_new creates it before the worker can start); NULL only
-	 * on the banner.c transient-htxf path, which drives hxnet_htxf_*
-	 * directly without a token. Freed by hx_htxf_free. */
+     * HtxfAbort *, opaque here). Created by hx_htxf_new (S0.3, was
+     * xfer_init's htxf_io_abort_init), armed with the channel's socket by
+     * htxf_connect once `hx` is open (worker thread), and triggered by
+     * xfer_delete / xfers_delete_all (main thread) to shut the socket down
+     * and unblock a worker parked in a blocking htxf_io_read / _write.
+     * Distinct from `hx` precisely because main and worker touch it
+     * concurrently — `hx` is worker-owned and racy to read from the
+     * main thread, whereas the token is reference-counted and safe to
+     * abort from either side. Always non-NULL on an xfers.c transfer
+     * (hx_htxf_new creates it before the worker can start); NULL only
+     * on the banner.c transient-htxf path, which drives hxnet_htxf_*
+     * directly without a token. Freed by hx_htxf_free. */
     void *abort;
 };
 
@@ -209,7 +209,7 @@ extern void hl_code (void *__dst, const void *__src, size_t len);
  * of this header. */
 struct htlc_conn;
 typedef void (*rcv_task_fn) (struct htlc_conn *htlc, const guint8 *frame,
-                            gsize frame_len, void *ptr, void *data);
+                             gsize frame_len, void *ptr, void *data);
 
 /* Cast a heterogeneous rcv_task_* implementation to the canonical
  * 3-arg rcv_task_fn shape. The intermediate (void(*)(void)) cast is
@@ -219,10 +219,10 @@ typedef void (*rcv_task_fn) (struct htlc_conn *htlc, const guint8 *frame,
 
 struct task {
     /* no next/prev — tasks live in session->tasks, a
-	 * GHashTable<u32 trans, struct task*>. Lookup by trans goes
-	 * through task_with_trans (now an O(1) wrapper around
-	 * g_hash_table_lookup); iteration goes through GHashTableIter
-	 * at the very small number of call sites that need it. */
+     * GHashTable<u32 trans, struct task*>. Lookup by trans goes
+     * through task_with_trans (now an O(1) wrapper around
+     * g_hash_table_lookup); iteration goes through GHashTableIter
+     * at the very small number of call sites that need it. */
     guint32 trans;
     guint32 pos, len;
     void *data;
@@ -230,19 +230,19 @@ struct task {
     char *str;
     void *ptr;
     /* Optional destructor for `ptr`. When non-NULL, task_free
-	 * invokes it as ptr_free(ptr) before reclaiming the task
-	 * struct itself. Callers that allocate a per-task context
-	 * — and want it freed when the connection is torn down
-	 * (sess->tasks is cleared with g_hash_table_remove_all,
-	 * which fires task_free per entry) — assign this after
-	 * task_new returns. NULL means "no owned state", matching
-	 * the historic default. */
+     * invokes it as ptr_free(ptr) before reclaiming the task
+     * struct itself. Callers that allocate a per-task context
+     * — and want it freed when the connection is torn down
+     * (sess->tasks is cleared with g_hash_table_remove_all,
+     * which fires task_free per entry) — assign this after
+     * task_new returns. NULL means "no owned state", matching
+     * the historic default. */
     GDestroyNotify ptr_free;
     rcv_task_fn rcv;
 };
 
 extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
-                          gsize frame_len);
+                         gsize frame_len);
 
 #define XFER_GET 0
 #define XFER_PUT 1
@@ -260,19 +260,16 @@ extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
  * sits in protocol.h (rather than a new hmac.h) so every TU that
  * already includes protocol.h for the wire types picks it up
  * automatically. */
-extern uint16_t gtkhx_hmac_xxx (uint8_t *md,
-                                 const uint8_t *key, uint32_t keylen,
-                                 const uint8_t *text, uint32_t textlen,
-                                 const char *macalg);
+extern uint16_t gtkhx_hmac_xxx (uint8_t *md, const uint8_t *key,
+                                uint32_t keylen, const uint8_t *text,
+                                uint32_t textlen, const char *macalg);
 
 static inline uint16_t
-hmac_xxx (uint8_t *md, const void *key, uint32_t keylen,
-          const void *text, uint32_t textlen, const char *macalg)
+hmac_xxx (uint8_t *md, const void *key, uint32_t keylen, const void *text,
+          uint32_t textlen, const char *macalg)
 {
-    return gtkhx_hmac_xxx (md,
-                           (const uint8_t *) key, keylen,
-                           (const uint8_t *) text, textlen,
-                           macalg);
+    return gtkhx_hmac_xxx (md, (const uint8_t *)key, keylen,
+                           (const uint8_t *)text, textlen, macalg);
 }
 
 /* Cryptographic RNG used by cipher rekey, usermod password salt, and
@@ -323,8 +320,8 @@ memory_copy (void *__dst, void *__src, unsigned int len)
 
 #define S32HTON(_word, _addr)                                                  \
     do {                                                                       \
-        uint32_t _x;                                                          \
-        _x = g_htonl (_word);                                                    \
+        uint32_t _x;                                                           \
+        _x = g_htonl (_word);                                                  \
         memory_copy ((_addr), &_x, 4);                                         \
     } while (0)
 /* _word is passed straight to g_htonl(), which already takes a value
@@ -357,29 +354,29 @@ memory_copy (void *__dst, void *__src, unsigned int len)
  * effect and ANDs the bounds checks. Reads dh->len, then bounds-
  * checks; reads dh->type only after we've confirmed the chunk fits.
  */
-#define dh_start(_buf, _buflen)                                                \
-    {                                                                          \
-        const guint8 *_dhbuf = (_buf);                                         \
-        struct hl_data_hdr *dh = NULL;                                         \
-        guint32 _pos = SIZEOF_HL_HDR;                                          \
-        guint32 _max = (_buflen);                                              \
-        guint16 _len = 0, _type = 0;                                           \
+#define dh_start(_buf, _buflen)                                                  \
+    {                                                                            \
+        const guint8 *_dhbuf = (_buf);                                           \
+        struct hl_data_hdr *dh = NULL;                                           \
+        guint32 _pos = SIZEOF_HL_HDR;                                            \
+        guint32 _max = (_buflen);                                                \
+        guint16 _len = 0, _type = 0;                                             \
         /* Form the chunk pointer only after the loop guard proves _pos is     \
          * in bounds — computing _dhbuf + _pos up front would be UB when       \
-         * _buflen < SIZEOF_HL_HDR. */                                         \
-        for (; _pos + SIZEOF_HL_DATA_HDR <= _max;                              \
-             _pos += SIZEOF_HL_DATA_HDR + _len) {                              \
-            dh = (struct hl_data_hdr *)(_dhbuf + _pos);                        \
-            HN16 (&_len, &dh->len);                                            \
-            if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR)                     \
-                break;                                                         \
+         * _buflen < SIZEOF_HL_HDR. */ \
+        for (; _pos + SIZEOF_HL_DATA_HDR <= _max;                                \
+             _pos += SIZEOF_HL_DATA_HDR + _len) {                                \
+            dh = (struct hl_data_hdr *)(_dhbuf + _pos);                          \
+            HN16 (&_len, &dh->len);                                              \
+            if (_len > (_max - _pos) - SIZEOF_HL_DATA_HDR)                       \
+                break;                                                           \
             HN16 (&_type, &dh->type);
 
 #define dh_getint(_word)                                                       \
     do {                                                                       \
         if (_len == 4)                                                         \
             HN32 (&(_word), dh->data);                                         \
-        else /* if (g_ntohs(dh->len) == 2) */                                    \
+        else /* if (g_ntohs(dh->len) == 2) */                                  \
             HN16 (&(_word), dh->data);                                         \
     } while (0)
 

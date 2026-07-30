@@ -61,17 +61,17 @@ test_folder_put_request_reply (void)
     }
 
     /* Upload-target lives under Uploads/<random>. mhxd's
-	 * default config gates folder uploads on the same substring
-	 * permission check as solo uploads — directories whose names
-	 * (or some parent's name) contain 'UPLOAD' or 'DROP BOX' are
-	 * acceptable destinations for guest. We anchor at Uploads/. */
+     * default config gates folder uploads on the same substring
+     * permission check as solo uploads — directories whose names
+     * (or some parent's name) contain 'UPLOAD' or 'DROP BOX' are
+     * acceptable destinations for guest. We anchor at Uploads/. */
     guint8 hldir[64];
     gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
 
     gchar *fname
         = g_strdup_printf ("tier3_putfolder_%u", (guint)g_random_int ());
-    guint32 size_be = g_htonl(256); /* aggregate size hint */
-    guint32 nfiles_be = g_htonl(2); /* aggregate count hint */
+    guint32 size_be = g_htonl (256); /* aggregate size hint */
+    guint32 nfiles_be = g_htonl (2); /* aggregate count hint */
     guint32 our_trans = htlc.trans;
 
     g_assert_true (integration_send_message (
@@ -87,15 +87,17 @@ test_folder_put_request_reply (void)
 
     if (hdr_flag (&htlc) & 1) {
         /* Server refused. Most common reason: the guest account
-		 * isn't granted UPLOAD_FOLDERS, or mhxd's substring
-		 * permission gate didn't accept 'Uploads' as a valid
-		 * folder-upload target. Surface the message but treat
-		 * the round-trip as successful — the request reached the
-		 * dispatcher and got an error reply, which is all the
-		 * setup-phase test needs to prove. */
+         * isn't granted UPLOAD_FOLDERS, or mhxd's substring
+         * permission gate didn't accept 'Uploads' as a valid
+         * folder-upload target. Surface the message but treat
+         * the round-trip as successful — the request reached the
+         * dispatcher and got an error reply, which is all the
+         * setup-phase test needs to prove. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_message ("PUTFOLDER refused: \"%s\" (request/reply "
                             "round-trip itself worked)",
                             err);
@@ -105,7 +107,7 @@ test_folder_put_request_reply (void)
     } else {
         /* Success path. Pull HTXF_REF — should be non-zero. */
         guint32 xfer_ref = 0;
-        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+        dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
         {
             if (_type == HTLS_DATA_HTXF_REF) {
                 dh_getint (xfer_ref);
@@ -116,11 +118,11 @@ test_folder_put_request_reply (void)
         g_test_message ("PUTFOLDER accepted; ref=0x%08x", (unsigned)xfer_ref);
 
         /* TODO future batch: connect to the HTXF subchannel,
-		 * drive the FILE_NEXT loop (server drives, we send
-		 * nfi entries + FILP-wrapped payloads), verify mhxd
-		 * created the folder + landed both files. Skipping for
-		 * the same reason test_file_put skips the post-setup
-		 * upload phase — needs hand-rolled FILP wrappers. */
+         * drive the FILE_NEXT loop (server drives, we send
+         * nfi entries + FILP-wrapped payloads), verify mhxd
+         * created the folder + landed both files. Skipping for
+         * the same reason test_file_put skips the post-setup
+         * upload phase — needs hand-rolled FILP wrappers. */
     }
 
     g_free (fname);

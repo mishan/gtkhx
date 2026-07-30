@@ -49,13 +49,13 @@ static void
 test_round_trip (void)
 {
     const guint8 *inputs[] = {
-        (const guint8 *)"",                  /* empty                  */
-        (const guint8 *)"a",                 /* single byte            */
-        (const guint8 *)"guest",             /* the classic login      */
-        (const guint8 *)"P@ssw0rd!",         /* mixed punct + digits   */
-        (const guint8 *)"\x00\x00\x00\x00",  /* all zero               */
-        (const guint8 *)"\xff\xff\xff\xff",  /* all ones               */
-        (const guint8 *)"\x80\x81\x82\x83",  /* high-bit set           */
+        (const guint8 *)"",                 /* empty                  */
+        (const guint8 *)"a",                /* single byte            */
+        (const guint8 *)"guest",            /* the classic login      */
+        (const guint8 *)"P@ssw0rd!",        /* mixed punct + digits   */
+        (const guint8 *)"\x00\x00\x00\x00", /* all zero               */
+        (const guint8 *)"\xff\xff\xff\xff", /* all ones               */
+        (const guint8 *)"\x80\x81\x82\x83", /* high-bit set           */
     };
     const size_t lens[] = { 0, 1, 5, 9, 4, 4, 4 };
 
@@ -64,10 +64,10 @@ test_round_trip (void)
         guint8 plain[32];
 
         memset (cipher, 0xa5, sizeof cipher);
-        memset (plain,  0xa5, sizeof plain);
+        memset (plain, 0xa5, sizeof plain);
 
         hl_code (cipher, inputs[i], lens[i]);
-        hl_code (plain,  cipher,    lens[i]);
+        hl_code (plain, cipher, lens[i]);
 
         g_assert_cmpint (memcmp (plain, inputs[i], lens[i]), ==, 0);
     }
@@ -143,7 +143,7 @@ test_does_not_overrun_dst (void)
 static void
 test_guest_login_wire_pattern (void)
 {
-    const guint8 plain[]  = { 'g', 'u', 'e', 's', 't' };
+    const guint8 plain[] = { 'g', 'u', 'e', 's', 't' };
     const guint8 expect[] = { 0x98, 0x8a, 0x9a, 0x8c, 0x8b };
     guint8 cipher[5];
 

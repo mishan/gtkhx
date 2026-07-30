@@ -270,8 +270,7 @@ fn section_new(url: &str, version: u8, expected: u16, filter: &gtk::CustomFilter
     let store = gio::ListStore::new::<HxTrackerRow>();
     let filter_model = gtk::FilterListModel::new(Some(store.clone()), Some(filter.clone()));
     filter_model.set_incremental(false);
-    let sort_model =
-        gtk::SortListModel::new(Some(filter_model.clone()), None::<gtk::Sorter>);
+    let sort_model = gtk::SortListModel::new(Some(filter_model.clone()), None::<gtk::Sorter>);
     sort_model.set_incremental(false);
     let selection = gtk::SingleSelection::new(Some(sort_model.clone()));
     selection.set_autoselect(false);
@@ -284,27 +283,69 @@ fn section_new(url: &str, version: u8, expected: u16, filter: &gtk::CustomFilter
     column_view.set_show_row_separators(false);
 
     let columns: Vec<gtk::ColumnViewColumn> = vec![
-        make_column(&column_view, &tr("Name"), 0.0, 200, true, |r| r.name(), |a, b| {
-            coll(&a.name(), &b.name())
-        }),
-        make_column(&column_view, &tr("Users"), 0.5, 76, false, |r| r.nusers().to_string(), |a, b| {
-            a.nusers().cmp(&b.nusers()).into()
-        }),
-        make_column(&column_view, &tr("Country"), 0.5, 60, false, meta_country, |a, b| {
-            coll(&meta_country(a), &meta_country(b))
-        }),
-        make_column(&column_view, &tr("Address"), 0.0, 150, false, |r| r.address(), |a, b| {
-            coll(&a.address(), &b.address())
-        }),
-        make_column(&column_view, &tr("Port"), 0.5, 70, false, |r| r.port().to_string(), |a, b| {
-            a.port().cmp(&b.port()).into()
-        }),
-        make_column(&column_view, &tr("Caps"), 0.0, 110, false, caps_of, |a, b| {
-            coll(&caps_of(a), &caps_of(b))
-        }),
-        make_column(&column_view, &tr("Description"), 0.0, 280, true, |r| r.desc(), |a, b| {
-            coll(&a.desc(), &b.desc())
-        }),
+        make_column(
+            &column_view,
+            &tr("Name"),
+            0.0,
+            200,
+            true,
+            |r| r.name(),
+            |a, b| coll(&a.name(), &b.name()),
+        ),
+        make_column(
+            &column_view,
+            &tr("Users"),
+            0.5,
+            76,
+            false,
+            |r| r.nusers().to_string(),
+            |a, b| a.nusers().cmp(&b.nusers()).into(),
+        ),
+        make_column(
+            &column_view,
+            &tr("Country"),
+            0.5,
+            60,
+            false,
+            meta_country,
+            |a, b| coll(&meta_country(a), &meta_country(b)),
+        ),
+        make_column(
+            &column_view,
+            &tr("Address"),
+            0.0,
+            150,
+            false,
+            |r| r.address(),
+            |a, b| coll(&a.address(), &b.address()),
+        ),
+        make_column(
+            &column_view,
+            &tr("Port"),
+            0.5,
+            70,
+            false,
+            |r| r.port().to_string(),
+            |a, b| a.port().cmp(&b.port()).into(),
+        ),
+        make_column(
+            &column_view,
+            &tr("Caps"),
+            0.0,
+            110,
+            false,
+            caps_of,
+            |a, b| coll(&caps_of(a), &caps_of(b)),
+        ),
+        make_column(
+            &column_view,
+            &tr("Description"),
+            0.0,
+            280,
+            true,
+            |r| r.desc(),
+            |a, b| coll(&a.desc(), &b.desc()),
+        ),
     ];
     let col_country = columns[2].clone();
     let col_caps = columns[5].clone();
@@ -431,8 +472,10 @@ fn update_title(sec: &Section) {
 }
 
 fn set_count_labels(win: &Win) {
-    win.lbl_found.set_text(&format!("  {}", win.num_found_total));
-    win.lbl_total.set_text(&format!(" / {}", win.num_total_total));
+    win.lbl_found
+        .set_text(&format!("  {}", win.num_found_total));
+    win.lbl_total
+        .set_text(&format!(" / {}", win.num_total_total));
 }
 
 // ---------------------------------------------------------------------
@@ -483,8 +526,8 @@ fn rerun_search() {
     // shared filter. Selection clearing + title refresh happen outside
     // any WIN borrow because set_selected re-enters the selection
     // handler.
-    let (filter, entry_text, sections): (gtk::CustomFilter, String, Vec<Rc<Section>>) =
-        match WIN.with_borrow(|w| {
+    let (filter, entry_text, sections): (gtk::CustomFilter, String, Vec<Rc<Section>>) = match WIN
+        .with_borrow(|w| {
             w.as_ref().map(|win| {
                 (
                     win.filter.clone(),
@@ -493,9 +536,9 @@ fn rerun_search() {
                 )
             })
         }) {
-            Some(v) => v,
-            None => return,
-        };
+        Some(v) => v,
+        None => return,
+    };
 
     // Compile.
     {
@@ -635,9 +678,11 @@ pub unsafe extern "C" fn tracker_server_create(event: *mut HxTrackerServer) {
             win.num_found_total += new_found - old_found;
         }
         update_title(&sec);
-        win.lbl_total.set_text(&format!(" / {}", win.num_total_total));
+        win.lbl_total
+            .set_text(&format!(" / {}", win.num_total_total));
         if new_found != old_found {
-            win.lbl_found.set_text(&format!("  {}", win.num_found_total));
+            win.lbl_found
+                .set_text(&format!("  {}", win.num_found_total));
         }
     });
 }
@@ -856,5 +901,7 @@ fn tracker_getlist() {
 
 // actions (connect / bookmark / details / context menu) live here too.
 mod actions;
-use actions::{on_secondary_press, on_section_activate, tracker_connect, tracker_details,
-              tracker_save_bookmark};
+use actions::{
+    on_secondary_press, on_section_activate, tracker_connect, tracker_details,
+    tracker_save_bookmark,
+};

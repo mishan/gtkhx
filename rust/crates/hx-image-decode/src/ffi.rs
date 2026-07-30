@@ -12,7 +12,7 @@ use std::ffi::{c_char, c_void, CStr};
 use std::rc::Rc;
 use std::slice;
 
-pub use crate::caps::{HxInlineMediaCaps};
+pub use crate::caps::HxInlineMediaCaps;
 use crate::decode::{decode_async, DecodeCallback, DecodePolicy, DecodeToken};
 use crate::ffi_result::decoded_drop;
 /// Re-export so integration tests and other Rust consumers can
@@ -80,10 +80,7 @@ fn format_to_u32(f: Format) -> u32 {
 /// `min(len, SNIFF_WINDOW_BYTES)` initialised bytes for the duration of the
 /// call (see [`slice_from_raw`]).
 #[no_mangle]
-pub unsafe extern "C" fn hx_image_decode_sniff(
-    bytes: *const u8,
-    len: usize,
-) -> u32 {
+pub unsafe extern "C" fn hx_image_decode_sniff(bytes: *const u8, len: usize) -> u32 {
     let buf = slice_from_raw(bytes, len);
     format_to_u32(sniff(buf))
 }
@@ -123,9 +120,7 @@ pub unsafe extern "C" fn hx_image_decode_format_is_allowed(fmt: u32) -> i32 {
 /// Takes a plain `u32` by value and dereferences no pointers; the returned
 /// pointer is a static literal the caller must not free.
 #[no_mangle]
-pub unsafe extern "C" fn hx_image_decode_format_to_mime(
-    fmt: u32,
-) -> *const c_char {
+pub unsafe extern "C" fn hx_image_decode_format_to_mime(fmt: u32) -> *const c_char {
     static_mime_for_format(u32_to_format(fmt)).unwrap_or(std::ptr::null())
 }
 
@@ -329,9 +324,7 @@ pub unsafe extern "C" fn inline_media_decode_cancel(token: *mut c_void) {
 /// `result` must be either null or a `*mut HxInlineMediaDecoded` handed to a
 /// decode callback and not yet freed.
 #[no_mangle]
-pub unsafe extern "C" fn inline_media_decoded_free(
-    result: *mut HxInlineMediaDecoded,
-) {
+pub unsafe extern "C" fn inline_media_decoded_free(result: *mut HxInlineMediaDecoded) {
     decoded_drop(result);
 }
 

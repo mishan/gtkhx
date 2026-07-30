@@ -190,48 +190,46 @@ on_send_wire_frame (void *user_data, uint32_t opcode, const uint8_t *body,
     if (!c || body_len < 4) {
         return;
     }
-    guint32 cid = ((guint32) body[0] << 24) | ((guint32) body[1] << 16)
-                  | ((guint32) body[2] << 8) | (guint32) body[3];
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid = ((guint32)body[0] << 24) | ((guint32)body[1] << 16)
+                  | ((guint32)body[2] << 8) | (guint32)body[3];
+    guint32 cid_be = g_htonl (cid);
     const guint8 *payload = body + 4;
     gsize plen = body_len - 4;
     guint32 trans = c->htlc.trans;
 
     switch (opcode) {
     case HTLC_HDR_VOICE_JOIN:
-        if (integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_JOIN,
-                                      0, 1, (int) HTLC_DATA_CHAT_ID, 4,
-                                      &cid_be)) {
+        if (integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_JOIN, 0,
+                                      1, (int)HTLC_DATA_CHAT_ID, 4, &cid_be)) {
             c->join_trans = trans;
         }
         break;
     case HTLC_HDR_VOICE_LEAVE:
         integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_LEAVE, 0, 1,
-                                  (int) HTLC_DATA_CHAT_ID, 4, &cid_be);
+                                  (int)HTLC_DATA_CHAT_ID, 4, &cid_be);
         break;
     case HTLC_HDR_VOICE_SDP_ANSWER:
         /* Audit the send-track SSRC declaration on the way past (spec
          * REQUIRED — see answer_declares_send_ssrc). */
         c->answers_seen++;
-        if (answer_declares_send_ssrc ((const char *) payload, plen)) {
+        if (answer_declares_send_ssrc ((const char *)payload, plen)) {
             c->answers_with_send_ssrc++;
         }
-        integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_SDP_ANSWER,
-                                  0, 2, (int) HTLC_DATA_CHAT_ID, 4, &cid_be,
-                                  (int) HTLC_DATA_VOICE_SDP, (int) plen,
-                                  (guint8 *) payload);
+        integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_SDP_ANSWER, 0,
+                                  2, (int)HTLC_DATA_CHAT_ID, 4, &cid_be,
+                                  (int)HTLC_DATA_VOICE_SDP, (int)plen,
+                                  (guint8 *)payload);
         break;
     case HTLC_HDR_VOICE_ICE:
-        integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_ICE, 0, 2,
-                                  (int) HTLC_DATA_CHAT_ID, 4, &cid_be,
-                                  (int) HTLC_DATA_VOICE_ICE, (int) plen,
-                                  (guint8 *) payload);
+        integration_send_message (
+            c->fd, &c->htlc, HTLC_HDR_VOICE_ICE, 0, 2, (int)HTLC_DATA_CHAT_ID,
+            4, &cid_be, (int)HTLC_DATA_VOICE_ICE, (int)plen, (guint8 *)payload);
         break;
     case HTLC_HDR_VOICE_MUTE:
         integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_MUTE, 0, 2,
-                                  (int) HTLC_DATA_CHAT_ID, 4, &cid_be,
-                                  (int) HTLC_DATA_VOICE_MUTED, (int) plen,
-                                  (guint8 *) payload);
+                                  (int)HTLC_DATA_CHAT_ID, 4, &cid_be,
+                                  (int)HTLC_DATA_VOICE_MUTED, (int)plen,
+                                  (guint8 *)payload);
         break;
     default:
         break;
@@ -258,7 +256,8 @@ reply_cid (const struct htlc_conn *htlc)
 {
     struct gtkhx_proto_voice_reply r;
     memset (&r, 0, sizeof (r));
-    gtkhx_proto_parse_voice_reply (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in (htlc)->buf,
+                                   hx_test_in (htlc)->pos, &r);
     return r.cid;
 }
 
@@ -298,9 +297,9 @@ feed_room_status (voice_client *c)
 {
     const guint8 *blob = NULL;
     size_t blob_len = 0;
-    if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
-                                       /*field=participants*/ 3, &blob,
-                                       &blob_len)) {
+    if (gtkhx_proto_voice_reply_field (
+            hx_test_in (&c->htlc)->buf, hx_test_in (&c->htlc)->pos,
+            /*field=participants*/ 3, &blob, &blob_len)) {
         gtkhx_voice_runtime_room_status (c->rt, reply_cid (&c->htlc), blob,
                                          blob_len);
     }
@@ -311,10 +310,11 @@ feed_sdp_offer (voice_client *c)
 {
     const guint8 *sdp = NULL;
     size_t sdp_len = 0;
-    if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
+    if (gtkhx_proto_voice_reply_field (hx_test_in (&c->htlc)->buf,
+                                       hx_test_in (&c->htlc)->pos,
                                        /*field=SDP*/ 0, &sdp, &sdp_len)
         && sdp_len > 0) {
-        char *s = g_strndup ((const char *) sdp, sdp_len);
+        char *s = g_strndup ((const char *)sdp, sdp_len);
         gtkhx_voice_runtime_sdp_offer (c->rt, reply_cid (&c->htlc), s);
         g_free (s);
     }
@@ -326,8 +326,7 @@ dispatch_frame (voice_client *c)
     guint32 type = hdr_type (&c->htlc);
     guint32 trans = hdr_trans (&c->htlc);
 
-    if (type == HTLS_HDR_TASK && c->join_trans != 0
-        && trans == c->join_trans) {
+    if (type == HTLS_HDR_TASK && c->join_trans != 0 && trans == c->join_trans) {
         /* JOIN reply — carries the server's initial SDP offer AND the
          * participants blob. Mirror rcv.c's hx_rcv_task join-reply path
          * exactly: feed room_status (ParticipantsUpdated) BEFORE the
@@ -346,16 +345,19 @@ dispatch_frame (voice_client *c)
     if (type == HTLS_HDR_VOICE_ICE) {
         const guint8 *ice = NULL;
         size_t ice_len = 0;
-        if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
+        if (gtkhx_proto_voice_reply_field (hx_test_in (&c->htlc)->buf,
+                                           hx_test_in (&c->htlc)->pos,
                                            /*field=ICE*/ 1, &ice, &ice_len)) {
             /* Mirror production (rcv.c): forward the parsed cid, and
              * pass NULL for the zero-length end-of-candidates marker
              * rather than an empty allocated string. */
             if (ice_len == 0) {
-                gtkhx_voice_runtime_ice_candidate (c->rt, reply_cid (&c->htlc), NULL);
+                gtkhx_voice_runtime_ice_candidate (c->rt, reply_cid (&c->htlc),
+                                                   NULL);
             } else {
-                char *json = g_strndup ((const char *) ice, ice_len);
-                gtkhx_voice_runtime_ice_candidate (c->rt, reply_cid (&c->htlc), json);
+                char *json = g_strndup ((const char *)ice, ice_len);
+                gtkhx_voice_runtime_ice_candidate (c->rt, reply_cid (&c->htlc),
+                                                   json);
                 g_free (json);
             }
         }
@@ -364,9 +366,9 @@ dispatch_frame (voice_client *c)
     if (type == HTLS_HDR_VOICE_ROOM_STATUS) {
         const guint8 *blob = NULL;
         size_t blob_len = 0;
-        if (gtkhx_proto_voice_reply_field (hx_test_in(&c->htlc)->buf, hx_test_in(&c->htlc)->pos,
-                                           /*field=participants*/ 3, &blob,
-                                           &blob_len)) {
+        if (gtkhx_proto_voice_reply_field (
+                hx_test_in (&c->htlc)->buf, hx_test_in (&c->htlc)->pos,
+                /*field=participants*/ 3, &blob, &blob_len)) {
             gtkhx_voice_runtime_room_status (c->rt, reply_cid (&c->htlc), blob,
                                              blob_len);
         }
@@ -380,11 +382,11 @@ dispatch_frame (voice_client *c)
 static void
 wire_unmute (voice_client *c)
 {
-    guint32 cid_be = g_htonl(0);
-    guint16 muted_be = g_htons(0);
+    guint32 cid_be = g_htonl (0);
+    guint16 muted_be = g_htons (0);
     integration_send_message (c->fd, &c->htlc, HTLC_HDR_VOICE_MUTE, 0, 2,
-                              (int) HTLC_DATA_CHAT_ID, 4, &cid_be,
-                              (int) HTLC_DATA_VOICE_MUTED, 2, &muted_be);
+                              (int)HTLC_DATA_CHAT_ID, 4, &cid_be,
+                              (int)HTLC_DATA_VOICE_MUTED, 2, &muted_be);
 }
 
 /* Mirror the GUI's join sequence exactly (voice_panel.c on_join_toggled):
@@ -422,9 +424,8 @@ pick_voice_server (void)
     if (!servers) {
         return NULL;
     }
-    const hx_test_server *srv = servers->len > 0
-                                    ? g_ptr_array_index (servers, 0)
-                                    : NULL;
+    const hx_test_server *srv
+        = servers->len > 0 ? g_ptr_array_index (servers, 0) : NULL;
     g_ptr_array_unref (servers);
     if (!srv) {
         return NULL;
@@ -455,7 +456,7 @@ pick_voice_server (void)
         if (port_env && *port_env) {
             int v = atoi (port_env);
             if (v > 0 && v < 65536) {
-                overridden.port = (guint16) v;
+                overridden.port = (guint16)v;
             }
         }
         return &overridden;
@@ -487,7 +488,7 @@ client_open (voice_client *c, const char *label, const hx_test_server *srv,
     c->spoke_uids = g_array_new (FALSE, FALSE, sizeof (guint16));
 
     char nick[40];
-    g_snprintf (nick, sizeof (nick), "VMed-%s-%d-%04x", label, (int) getpid (),
+    g_snprintf (nick, sizeof (nick), "VMed-%s-%d-%04x", label, (int)getpid (),
                 g_random_int () & 0xffff);
 
     c->fd = integration_open_login_to_caps_or_skip (srv, &c->htlc, nick, icon,
@@ -552,7 +553,7 @@ typedef enum {
     PH_WAIT_SECOND_RX,
 } phase;
 
-#define SECS(n) ((gint64) (n) * G_USEC_PER_SEC)
+#define SECS(n) ((gint64)(n) * G_USEC_PER_SEC)
 #define RX_MARGIN 100 /* ~2 s of PCMU at 50 pps */
 
 typedef struct {
@@ -614,7 +615,7 @@ driver_tick (gpointer data)
             driver_fail (d,
                          "A never reached CONNECTED (state=%d). ICE/DTLS to "
                          "Janus from this host may be blocked.",
-                         (int) d->A->state);
+                         (int)d->A->state);
         }
         break;
 
@@ -625,7 +626,7 @@ driver_tick (gpointer data)
             d->deadline = now + SECS (15);
         } else if (now >= d->deadline) {
             driver_fail (d, "B never reached CONNECTED (state=%d).",
-                         (int) d->B->state);
+                         (int)d->B->state);
         }
         break;
 
@@ -633,9 +634,8 @@ driver_tick (gpointer data)
         guint64 rx = gtkhx_voice_runtime_rtp_buffers_received (d->A->rt);
         if (rx >= RX_MARGIN) {
             d->after_first_rx = rx;
-            g_test_message ("A rtp_buffers after B's first join: %"
-                            G_GUINT64_FORMAT,
-                            rx);
+            g_test_message (
+                "A rtp_buffers after B's first join: %" G_GUINT64_FORMAT, rx);
             gtkhx_voice_runtime_leave (d->B->rt, 0);
             d->ph = PH_B_LEAVING;
             d->deadline = now + SECS (3); /* let the leave settle */
@@ -667,7 +667,7 @@ driver_tick (gpointer data)
             d->deadline = now + SECS (15);
         } else if (now >= d->deadline) {
             driver_fail (d, "B never reached CONNECTED on rejoin (state=%d).",
-                         (int) d->B->state);
+                         (int)d->B->state);
         }
         break;
 
@@ -741,7 +741,8 @@ test_voice_rejoin_media (void)
         g_test_message ("A rtp_buffers before rejoin: %" G_GUINT64_FORMAT
                         ", after: %" G_GUINT64_FORMAT,
                         d.before_rejoin_rx, d.after_rejoin_rx);
-        g_assert_cmpuint (d.after_rejoin_rx, >=, d.before_rejoin_rx + RX_MARGIN);
+        g_assert_cmpuint (d.after_rejoin_rx, >=,
+                          d.before_rejoin_rx + RX_MARGIN);
     }
 
     /* Spec REQUIRED (fogWraith "Send SSRC Declaration"): every SDP
@@ -849,7 +850,7 @@ vad_tick (gpointer data)
             d->deadline = now + SECS (15);
         } else if (now >= d->deadline) {
             vad_fail (d, "A never reached CONNECTED (state=%d).",
-                      (int) d->A->state);
+                      (int)d->A->state);
         }
         break;
     case VPH_WAIT_B:
@@ -859,23 +860,22 @@ vad_tick (gpointer data)
             d->deadline = now + SECS (20);
         } else if (now >= d->deadline) {
             vad_fail (d, "B never reached CONNECTED (state=%d).",
-                      (int) d->B->state);
+                      (int)d->B->state);
         }
         break;
     case VPH_WAIT_SPEAKING: {
-        guint16 a_uid = (guint16) d->A->htlc.uid;
-        guint16 b_uid = (guint16) d->B->htlc.uid;
+        guint16 a_uid = (guint16)d->A->htlc.uid;
+        guint16 b_uid = (guint16)d->B->htlc.uid;
         gboolean a_saw_b = client_saw_speaking (d->A, b_uid);
         gboolean b_saw_a = client_saw_speaking (d->B, a_uid);
         if (a_saw_b && b_saw_a) {
             g_main_loop_quit (d->loop); /* PASS */
         } else if (now >= d->deadline) {
-            vad_fail (
-                d,
-                "VAD attribution incomplete after 20s: A saw B(uid=%u) "
-                "speaking=%d (bundled mid=send / cname path), B saw "
-                "A(uid=%u) speaking=%d (per-user mid path).",
-                (unsigned) b_uid, a_saw_b, (unsigned) a_uid, b_saw_a);
+            vad_fail (d,
+                      "VAD attribution incomplete after 20s: A saw B(uid=%u) "
+                      "speaking=%d (bundled mid=send / cname path), B saw "
+                      "A(uid=%u) speaking=%d (per-user mid path).",
+                      (unsigned)b_uid, a_saw_b, (unsigned)a_uid, b_saw_a);
         }
         break;
     }
@@ -931,7 +931,7 @@ test_voice_vad_speaker (void)
             "speaking. Against a spec-compliant server both resolve via "
             "the per-user mid:user-<uid> leg; the bundled mid=send cname "
             "fallback remains only for older/non-compliant servers.",
-            (unsigned) B.htlc.uid, (unsigned) A.htlc.uid);
+            (unsigned)B.htlc.uid, (unsigned)A.htlc.uid);
     }
 
     if (B.rt) {
@@ -1053,7 +1053,7 @@ cj_tick (gpointer data)
             cj_fail (d,
                      "A never reached CONNECTING (state=%d). ICE/DTLS to "
                      "Janus from this host may be blocked.",
-                     (int) d->A->state);
+                     (int)d->A->state);
         }
         break;
 
@@ -1063,9 +1063,10 @@ cj_tick (gpointer data)
             d->ph = CJ_WAIT_RX;
             d->deadline = now + SECS (CJ_RX_DEADLINE_S);
         } else if (now >= d->deadline) {
-            cj_fail (d, "B never reached CONNECTED after concurrent join "
-                        "(state=%d).",
-                     (int) d->B->state);
+            cj_fail (d,
+                     "B never reached CONNECTED after concurrent join "
+                     "(state=%d).",
+                     (int)d->B->state);
         }
         break;
 
@@ -1180,8 +1181,7 @@ main (int argc, char **argv)
     g_test_init (&argc, &argv, NULL);
     g_test_add_func ("/integration/voice/rejoin_media",
                      test_voice_rejoin_media);
-    g_test_add_func ("/integration/voice/vad_speaker",
-                     test_voice_vad_speaker);
+    g_test_add_func ("/integration/voice/vad_speaker", test_voice_vad_speaker);
     g_test_add_func ("/integration/voice/concurrent_join",
                      test_voice_concurrent_join);
     return g_test_run ();

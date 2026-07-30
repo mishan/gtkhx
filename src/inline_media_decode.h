@@ -77,8 +77,7 @@ typedef enum {
  * the bytes don't match any known image signature. Inspects at
  * most the first 32 bytes; safe to call with len < 32 (just
  * returns _UNKNOWN early). */
-extern HxInlineMediaFormat inline_media_sniff (const guint8 *bytes,
-                                               gsize len);
+extern HxInlineMediaFormat inline_media_sniff (const guint8 *bytes, gsize len);
 
 /* True for the formats that are allowed under the inline-media
  * cap bit (JPEG / PNG / GIF). False for everything else,
@@ -139,24 +138,24 @@ typedef struct {
     const char *canonical_mime;
     HxInlineMediaFormat sniffed_format;
     /* Maps to inline_media.rs::MediaErrorCode wire values
-	 * (0 = generic, 1 = too large, 2 = unsupported, etc.). */
+     * (0 = generic, 1 = too large, 2 = unsupported, etc.). */
     guint16 error_code;
     /* 16-bit pad to match Rust #[repr(C)] field layout. */
     guint16 _pad0;
     /* Human-readable failure reason for the log. Static
-	 * string; caller doesn't free. NULL on success. */
+     * string; caller doesn't free. NULL on success. */
     const char *error_message;
     /* Animation frames (G.3). When non-NULL: a
-	 * GArray<HxInlineMediaFrame> with the full frame set +
-	 * per-frame delay. The first entry's texture is the same
-	 * pointer as `texture` above (the GArray's clear_func
-	 * drops the per-element refs; the top-level texture ref
-	 * is separate). The static-image case leaves this NULL
-	 * and the consumer reads `texture` directly.
-	 *
-	 * Caller doesn't touch the GArray's storage layout;
-	 * iterate via the typed accessor or `g_array_index
-	 * (frames, HxInlineMediaFrame, i)`. */
+     * GArray<HxInlineMediaFrame> with the full frame set +
+     * per-frame delay. The first entry's texture is the same
+     * pointer as `texture` above (the GArray's clear_func
+     * drops the per-element refs; the top-level texture ref
+     * is separate). The static-image case leaves this NULL
+     * and the consumer reads `texture` directly.
+     *
+     * Caller doesn't touch the GArray's storage layout;
+     * iterate via the typed accessor or `g_array_index
+     * (frames, HxInlineMediaFrame, i)`. */
     GArray *frames;
 } HxInlineMediaDecoded;
 
@@ -200,11 +199,10 @@ typedef struct {
  *
  * caps may be NULL — the decoder falls back to HX_MEDIA_DEFAULT_*
  * per missing field. */
-typedef void (*HxInlineMediaDecodeCallback)(HxInlineMediaDecoded *result,
-                                            gpointer user_data);
+typedef void (*HxInlineMediaDecodeCallback) (HxInlineMediaDecoded *result,
+                                             gpointer user_data);
 
-extern gpointer inline_media_decode_async (const guint8 *bytes,
-                                           gsize len,
+extern gpointer inline_media_decode_async (const guint8 *bytes, gsize len,
                                            const HxInlineMediaCaps *caps,
                                            HxInlineMediaDecodeCallback cb,
                                            gpointer user_data);
@@ -222,15 +220,12 @@ extern gpointer inline_media_decode_async (const guint8 *bytes,
  * inline_media_decoded_free apply to both. */
 typedef enum {
     HX_IMAGE_DECODE_STRICT = 0,
-    HX_IMAGE_DECODE_WIDE   = 1,
+    HX_IMAGE_DECODE_WIDE = 1,
 } HxImageDecodePolicy;
 
 extern gpointer hx_image_decode_async_with_policy (
-    const guint8 *bytes,
-    gsize len,
-    const HxInlineMediaCaps *caps,
-    HxImageDecodePolicy policy,
-    HxInlineMediaDecodeCallback cb,
+    const guint8 *bytes, gsize len, const HxInlineMediaCaps *caps,
+    HxImageDecodePolicy policy, HxInlineMediaDecodeCallback cb,
     gpointer user_data);
 
 /* Cancel an in-flight decode + release the cancel token. The

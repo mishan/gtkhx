@@ -426,10 +426,11 @@ pub async fn run_hope_lifecycle(
         }};
     }
 
-    let mut stream = match resolve_and_connect(&req.host, req.port, req.proxy.as_ref(), &evt_tx).await {
-        Ok(s) => s,
-        Err(e) => bail!("connect: {e}"),
-    };
+    let mut stream =
+        match resolve_and_connect(&req.host, req.port, req.proxy.as_ref(), &evt_tx).await {
+            Ok(s) => s,
+            Err(e) => bail!("connect: {e}"),
+        };
     if evt_tx
         .send(Event::State(ConnectionState::Connected))
         .await

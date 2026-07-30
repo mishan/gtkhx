@@ -179,7 +179,9 @@ node_cell_get!(hx_news_node_postid, postid, u32, 0);
 /// # Safety
 /// `ptr` is NULL or a valid `HxNewsNode *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_news_node_loaded(ptr: *mut glib::gobject_ffi::GObject) -> glib::ffi::gboolean {
+pub unsafe extern "C" fn hx_news_node_loaded(
+    ptr: *mut glib::gobject_ffi::GObject,
+) -> glib::ffi::gboolean {
     with_node(ptr, |n| n.imp().loaded.get())
         .unwrap_or(false)
         .into_glib()
@@ -221,7 +223,10 @@ pub unsafe extern "C" fn hx_news_node_set_body_fetching(
 /// # Safety
 /// `ptr` is NULL or a valid `HxNewsNode *`.
 #[no_mangle]
-pub unsafe extern "C" fn hx_news_node_set_postid(ptr: *mut glib::gobject_ffi::GObject, postid: u32) {
+pub unsafe extern "C" fn hx_news_node_set_postid(
+    ptr: *mut glib::gobject_ffi::GObject,
+    postid: u32,
+) {
     with_node(ptr, |n| n.imp().postid.set(postid));
 }
 
@@ -416,11 +421,7 @@ fn bytes_or(bytes: &[u8], default: &str, empty_is_default: bool) -> CString {
 /// Ownership stays inside Rust: each node is created here (one ref), appended to
 /// its owning store (which takes a ref), and the transient `Vec` ref is released
 /// when the vector drops — the tree survives, held by the stores.
-fn build_category_tree_core(
-    dest: &gio::ListStore,
-    path: Option<&CString>,
-    posts: Vec<CorePost>,
-) {
+fn build_category_tree_core(dest: &gio::ListStore, path: Option<&CString>, posts: Vec<CorePost>) {
     let count = posts.len();
     let mut nodes: Vec<HxNewsNode> = Vec::with_capacity(count);
     let mut links: Vec<crate::news::PostLink> = Vec::with_capacity(count);

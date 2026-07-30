@@ -53,8 +53,8 @@ test_news_bit_position (void)
     guint8 access[8];
     bitmap_set_bit (access, HL_ACCESS_READ_NEWS);
     /* HL_ACCESS_READ_NEWS == 20: byte 2, MSB-3-positions-down
-	 * (mask 0x08). Cross-check the placement so a future renumber
-	 * trips this immediately. */
+     * (mask 0x08). Cross-check the placement so a future renumber
+     * trips this immediately. */
     g_assert_cmphex (access[2], ==, 0x08);
     g_assert_true (hl_access_has (access, HL_ACCESS_READ_NEWS));
     g_assert_false (hl_access_has (access, HL_ACCESS_POST_NEWS));
@@ -143,7 +143,7 @@ test_hlserver_guest_vector (void)
     g_assert_true (hl_access_has (access, HL_ACCESS_SEND_MSGS));
 
     /* Denied — these were the basis for the news / kick / ban
-	 * gating in users.c and the toolbar. */
+     * gating in users.c and the toolbar. */
     g_assert_false (hl_access_has (access, HL_ACCESS_DELETE_FILES));
     g_assert_false (hl_access_has (access, HL_ACCESS_RENAME_FILES));
     g_assert_false (hl_access_has (access, HL_ACCESS_READ_NEWS));

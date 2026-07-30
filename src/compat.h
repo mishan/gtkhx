@@ -41,10 +41,18 @@
  * descriptor on both. */
 #ifdef _WIN32
 #include <io.h>
-static inline int hx_fsync (int fd) { return _commit (fd); }
+static inline int
+hx_fsync (int fd)
+{
+    return _commit (fd);
+}
 #else
 #include <unistd.h>
-static inline int hx_fsync (int fd) { return fsync (fd); }
+static inline int
+hx_fsync (int fd)
+{
+    return fsync (fd);
+}
 #endif
 
 #define HOSTLEN 256

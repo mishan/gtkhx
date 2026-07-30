@@ -73,18 +73,18 @@
 #include <stdlib.h>
 #include <string.h>
 #include <glib.h>
-#include <glib/gstdio.h>      /* g_unlink, g_rmdir */
+#include <glib/gstdio.h> /* g_unlink, g_rmdir */
 #include <gio/gio.h>
 
 #include "compat.h"
-#include "hotline.h"            /* HTLS_HDR_TASK */
+#include "hotline.h" /* HTLS_HDR_TASK */
 #include "protocol.h"
-#include "hxconn_layout.h"     /* struct htlc_conn mirror — stack-allocated below */
-#include "network.h"           /* hx_connect, hx_htlc_close */
-#include "gtkhx_session.h"     /* GtkhxConnectionState */
-#include "hxnet_bridge.h"      /* hx_bridge_is_installed */
-#include "server_matrix.h"     /* hx_test_servers_with — cap-aware server pick */
-#include "tls_trust.h"         /* hx_tls_trust_pin + the thread-safe TLS
+#include "hxconn_layout.h" /* struct htlc_conn mirror — stack-allocated below */
+#include "network.h"       /* hx_connect, hx_htlc_close */
+#include "gtkhx_session.h" /* GtkhxConnectionState */
+#include "hxnet_bridge.h"  /* hx_bridge_is_installed */
+#include "server_matrix.h" /* hx_test_servers_with — cap-aware server pick */
+#include "tls_trust.h"     /* hx_tls_trust_pin + the thread-safe TLS
                                 * test seams (hx_tls_test_set_*): the TLS
                                 * subtests steer trust/connect behaviour
                                 * through these instead of g_setenv, because
@@ -111,9 +111,9 @@ int hx_integration_connect_to (const char *host, int port, int timeout_ms);
 int
 hx_integration_connect_to (const char *host, int port, int timeout_ms)
 {
-    (void) host;
-    (void) port;
-    (void) timeout_ms;
+    (void)host;
+    (void)port;
+    (void)timeout_ms;
     return -1;
 }
 
@@ -123,10 +123,10 @@ hx_integration_connect_to (const char *host, int port, int timeout_ms)
 
 typedef struct {
     GMainLoop *loop;
-    GArray    *states;
-    guint      timeout_id;
+    GArray *states;
+    guint timeout_id;
     GtkhxConnectionState wait_for;
-    gboolean   wait_arrived;
+    gboolean wait_arrived;
 } test_observer;
 
 static void
@@ -134,7 +134,7 @@ on_connection_state (GtkhxSession *self, GtkhxConnectionState state,
                      gpointer user_data)
 {
     test_observer *obs = user_data;
-    (void) self;
+    (void)self;
     g_array_append_val (obs->states, state);
     if (state == obs->wait_for) {
         obs->wait_arrived = TRUE;
@@ -224,7 +224,7 @@ observer_index_of (test_observer *obs, GtkhxConnectionState state)
 {
     for (guint i = 0; i < obs->states->len; i++) {
         if (g_array_index (obs->states, GtkhxConnectionState, i) == state) {
-            return (int) i;
+            return (int)i;
         }
     }
     return -1;
@@ -275,7 +275,8 @@ test_orchestrator_login (void)
 
     /* Force the orchestrator path on; force the post-HOPE hxnet
      * opt-out (force TLS off via the thread-safe test seam, not g_setenv)
-     * so neither interferes with the gate. */    hx_tls_test_set_force_tls (0);
+     * so neither interferes with the gate. */
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_htlc_rearm ();
@@ -285,13 +286,12 @@ test_orchestrator_login (void)
      * binary — rcv_task_login is stubbed) so the observer doesn't quit
      * early on the now-earlier HANDSHAKE_DONE; drive_until_rcv quits on
      * the replayed frame instead. */
-    test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_LOGIN_READY);
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
 
     /* Sanity: bridge starts uninstalled. */
     g_assert_false (hx_bridge_is_installed ());
 
-    hx_connect (&test_htlc, host, (guint16) port, "guest", "",
+    hx_connect (&test_htlc, host, (guint16)port, "guest", "",
                 /*secure=*/0, /*tls=*/0);
 
     drive_until_rcv (obs, 10000);
@@ -304,11 +304,12 @@ test_orchestrator_login (void)
 
     /* Coarse connection-state sequence in order. */
     int idx_connecting = observer_index_of (obs, GTKHX_CONNECTION_CONNECTING);
-    int idx_tcp        = observer_index_of (obs, GTKHX_CONNECTION_TCP_CONNECTED);
-    int idx_handshake  = observer_index_of (obs, GTKHX_CONNECTION_HANDSHAKE_DONE);
+    int idx_tcp = observer_index_of (obs, GTKHX_CONNECTION_TCP_CONNECTED);
+    int idx_handshake
+        = observer_index_of (obs, GTKHX_CONNECTION_HANDSHAKE_DONE);
     g_assert_cmpint (idx_connecting, >=, 0);
-    g_assert_cmpint (idx_tcp,        >, idx_connecting);
-    g_assert_cmpint (idx_handshake,  >, idx_tcp);
+    g_assert_cmpint (idx_tcp, >, idx_connecting);
+    g_assert_cmpint (idx_handshake, >, idx_tcp);
 
     /* The orchestrator installed the bridge. */
     g_assert_true (hx_bridge_is_installed ());
@@ -325,9 +326,10 @@ test_orchestrator_login (void)
     /* mhxd sends the plain 0x00010000 TASK opcode for every TASK
      * reply (the high-16-bit opcode-echo variant is a Heidrun-family
      * quirk, not mhxd). */
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
     /* Pinned trans round-tripped through the real server. */
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
+                      REAL_CONNECT_LOGIN_TRANS);
     /* mhxd accepted the guest login — error bit clear. */
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
@@ -364,10 +366,9 @@ test_orchestrator_capabilities_negotiated (void)
         if (cand) {
             g_ptr_array_unref (cand);
         }
-        g_test_fail_printf (
-            "no capability-aware server in matrix; need "
-            "HX_TEST_CAP_CHAT_HISTORY (Janus). Start the Janus "
-            "container or set GTKHX_TEST_SERVERS=janus.");
+        g_test_fail_printf ("no capability-aware server in matrix; need "
+                            "HX_TEST_CAP_CHAT_HISTORY (Janus). Start the Janus "
+                            "container or set GTKHX_TEST_SERVERS=janus.");
         return;
     }
     hx_tls_test_set_force_tls (0);
@@ -376,8 +377,7 @@ test_orchestrator_capabilities_negotiated (void)
     test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
-    test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_LOGIN_READY);
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
 
     hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
                 /*secure=*/0, /*tls=*/0);
@@ -389,7 +389,7 @@ test_orchestrator_capabilities_negotiated (void)
      * cap-aware server echoes the capability bits it accepted; the
      * orchestrator must therefore have advertised them. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
     g_assert_true (connect_test_first_rcv_caps_present);
     /* The server echoes the subset it accepted; chat-history (bit 4)
      * is the one we picked this server for, so it must be lit. */
@@ -399,7 +399,8 @@ test_orchestrator_capabilities_negotiated (void)
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
-    }    g_ptr_array_unref (cand);
+    }
+    g_ptr_array_unref (cand);
 }
 
 /* Drive the production hx_connect HOPE-Secure-Login path through the
@@ -442,8 +443,7 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
     g_strlcpy (test_htlc.name, "PhaseGHope", sizeof (test_htlc.name));
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
-    test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_LOGIN_READY);
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
     g_assert_false (hx_bridge_is_installed ());
 
     hx_connect (&test_htlc, srv->host, srv->port, "guest", "",
@@ -456,15 +456,17 @@ run_hope_orchestrator_against (guint32 required_cap, const char *cipheralg)
     /* HOPE replays the step-2 reply, which carries HX_LOGIN_TRANS+1
      * (step 1 = HX_LOGIN_TRANS, step 2 = +1). */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
+                      REAL_CONNECT_LOGIN_TRANS + 1);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());    g_ptr_array_unref (cand);
+    g_assert_false (hx_bridge_is_installed ());
+    g_ptr_array_unref (cand);
 }
 
 static void
@@ -533,15 +535,17 @@ test_orchestrator_hope_no_cipher (void)
     /* HOPE replays the step-2 reply (HX_LOGIN_TRANS+1); mhxd accepted
      * the no-cipher secure login (error bit clear). */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS + 1);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
+                      REAL_CONNECT_LOGIN_TRANS + 1);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
     }
-    g_assert_false (hx_bridge_is_installed ());    g_ptr_array_unref (cand);
+    g_assert_false (hx_bridge_is_installed ());
+    g_ptr_array_unref (cand);
 }
 
 /* Drive the production hx_connect TLS path (tls=1, secure=0) against
@@ -590,7 +594,8 @@ test_orchestrator_tls_login (void)
      * TOFU path (the hxtls-trust crate) end-to-end. */
     g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-tofu-XXXXXX", NULL);
     g_assert_nonnull (tmpdir);
-    g_autofree char *known_hosts = g_build_filename (tmpdir, "known_hosts", NULL);
+    g_autofree char *known_hosts
+        = g_build_filename (tmpdir, "known_hosts", NULL);
     hx_tls_test_set_known_hosts (known_hosts);
     hx_tls_test_set_auto_accept (1);
     hx_tls_test_set_force_tls (0);
@@ -599,8 +604,7 @@ test_orchestrator_tls_login (void)
     test_htlc_rearm ();
 
     GtkhxSession *gtkhx = gtkhx_session_get_default ();
-    test_observer *obs = observer_new (gtkhx,
-                                       GTKHX_CONNECTION_LOGIN_READY);
+    test_observer *obs = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
     g_assert_false (hx_bridge_is_installed ());
 
     hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
@@ -614,8 +618,9 @@ test_orchestrator_tls_login (void)
      * LOGIN reply (trans HX_LOGIN_TRANS), like the non-TLS plaintext
      * path. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
-    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (connect_test_first_rcv_trans, ==, REAL_CONNECT_LOGIN_TRANS);
+    g_assert_cmpuint (connect_test_first_rcv_type, ==, (guint32)HTLS_HDR_TASK);
+    g_assert_cmpuint (connect_test_first_rcv_trans, ==,
+                      REAL_CONNECT_LOGIN_TRANS);
     g_assert_cmpuint (connect_test_first_rcv_flag & 1u, ==, 0);
 
     /* The pin now runs synchronously inside the verify callback (the
@@ -647,8 +652,7 @@ test_orchestrator_tls_login (void)
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_htlc_rearm ();
-    test_observer *obs2 = observer_new (gtkhx,
-                                        GTKHX_CONNECTION_LOGIN_READY);
+    test_observer *obs2 = observer_new (gtkhx, GTKHX_CONNECTION_LOGIN_READY);
     hx_connect (&test_htlc, srv->host, srv->tls_port, "guest", "",
                 /*secure=*/0, /*tls=*/1);
     drive_until_rcv (obs2, 10000);
@@ -702,13 +706,12 @@ test_orchestrator_tls_mismatch_rejected (void)
      * real Janus cert can't match → MISMATCH. */
     g_autofree char *tmpdir = g_dir_make_tmp ("gtkhx-phaseg-rej-XXXXXX", NULL);
     g_assert_nonnull (tmpdir);
-    g_autofree char *known_hosts =
-        g_build_filename (tmpdir, "known_hosts", NULL);
-    (void) g_unlink (known_hosts);
+    g_autofree char *known_hosts
+        = g_build_filename (tmpdir, "known_hosts", NULL);
+    (void)g_unlink (known_hosts);
     hx_tls_test_set_known_hosts (known_hosts);
-    const char *bogus =
-        "sha256:00112233445566778899aabbccddeeff"
-        "00112233445566778899aabbccddeeff";
+    const char *bogus = "sha256:00112233445566778899aabbccddeeff"
+                        "00112233445566778899aabbccddeeff";
     /* The pin MUST succeed — if it silently failed the real cert would
      * resolve UNKNOWN, not MISMATCH, and the test would pass by rejecting
      * at the prompt seam without ever exercising the mismatch path. */
@@ -757,7 +760,8 @@ test_orchestrator_tls_mismatch_rejected (void)
  * unbound, so the connect is refused. */
 static void
 test_orchestrator_connect_refused (void)
-{    hx_tls_test_set_force_tls (0);
+{
+    hx_tls_test_set_force_tls (0);
     connect_test_reset_rcv_record ();
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_htlc_rearm ();
@@ -780,7 +784,8 @@ test_orchestrator_connect_refused (void)
     observer_free (obs, gtkhx);
     if (test_htlc.fd) {
         hx_htlc_close (&test_htlc, /*expected=*/1);
-    }}
+    }
+}
 
 /* HOPE-over-TLS is unsupported on every path. hx_connect must reject
  * it synchronously — no orchestrator install, no connection attempt,
@@ -788,7 +793,8 @@ test_orchestrator_connect_refused (void)
  * connect). */
 static void
 test_hope_tls_rejected (void)
-{    hx_tls_test_set_force_tls (0);
+{
+    hx_tls_test_set_force_tls (0);
     memset (&test_htlc, 0, sizeof (test_htlc));
     test_htlc_rearm ();
     g_strlcpy (test_htlc.cipheralg, "BLOWFISH", sizeof (test_htlc.cipheralg));
@@ -811,18 +817,22 @@ test_hope_tls_rejected (void)
     g_assert_false (hx_bridge_is_installed ());
     g_assert_cmpint (test_htlc.fd, ==, 0);
 
-    hx_tls_test_set_force_tls (0);}
+    hx_tls_test_set_force_tls (0);
+}
 
 int
 main (int argc, char *argv[])
 {
     g_test_init (&argc, &argv, NULL);
 
-    g_test_add_func ("/real_connect/orchestrator_login", test_orchestrator_login);
+    g_test_add_func ("/real_connect/orchestrator_login",
+                     test_orchestrator_login);
     g_test_add_func ("/real_connect/capabilities_negotiated",
                      test_orchestrator_capabilities_negotiated);
-    g_test_add_func ("/real_connect/hope_blowfish", test_orchestrator_hope_blowfish);
-    g_test_add_func ("/real_connect/hope_chacha20", test_orchestrator_hope_chacha20);
+    g_test_add_func ("/real_connect/hope_blowfish",
+                     test_orchestrator_hope_blowfish);
+    g_test_add_func ("/real_connect/hope_chacha20",
+                     test_orchestrator_hope_chacha20);
     g_test_add_func ("/real_connect/hope_no_cipher",
                      test_orchestrator_hope_no_cipher);
     g_test_add_func ("/real_connect/tls_login", test_orchestrator_tls_login);

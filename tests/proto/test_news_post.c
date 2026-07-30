@@ -75,7 +75,8 @@ test_news_post_single_chunk (void)
 
     struct recorder r;
     recorder_init (&r);
-    int n = hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    int n = hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               record_cb, &r);
     g_assert_cmpint (n, ==, 1);
     g_assert_cmpuint (r.calls->len, ==, 1);
 
@@ -104,7 +105,8 @@ test_news_post_multiple_chunks_emit_in_order (void)
 
     struct recorder r;
     recorder_init (&r);
-    int n = hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    int n = hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               record_cb, &r);
     g_assert_cmpint (n, ==, 3);
     g_assert_cmpuint (r.calls->len, ==, 3);
 
@@ -131,7 +133,8 @@ test_news_post_converts_cr_to_lf (void)
 
     struct recorder r;
     recorder_init (&r);
-    hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                       record_cb, &r);
     g_assert_cmpstr (g_array_index (r.calls, struct call_record, 0).bytes, ==,
                      "line one\nline two\nline three");
 
@@ -149,7 +152,8 @@ test_news_post_strips_ansi (void)
 
     struct recorder r;
     recorder_init (&r);
-    hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                       record_cb, &r);
     g_assert_cmpstr (g_array_index (r.calls, struct call_record, 0).bytes, ==,
                      "[[31malert[[0m post");
 
@@ -163,7 +167,7 @@ static void
 test_news_post_skips_non_news_chunks (void)
 {
     struct htlc_conn htlc;
-    const guint16 some_uid = g_htons(5);
+    const guint16 some_uid = g_htons (5);
     const char *body = "real post";
 
     wire_fixture_init (&htlc, HTLS_HDR_NEWS_POST, 1, 0);
@@ -174,7 +178,8 @@ test_news_post_skips_non_news_chunks (void)
 
     struct recorder r;
     recorder_init (&r);
-    int n = hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    int n = hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               record_cb, &r);
     g_assert_cmpint (n, ==, 1); /* only the one NEWS chunk */
     g_assert_cmpuint (r.calls->len, ==, 1);
     g_assert_cmpstr (g_array_index (r.calls, struct call_record, 0).bytes, ==,
@@ -194,7 +199,8 @@ test_news_post_empty_message_returns_zero (void)
 
     struct recorder r;
     recorder_init (&r);
-    int n = hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    int n = hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               record_cb, &r);
     g_assert_cmpint (n, ==, 0);
     g_assert_cmpuint (r.calls->len, ==, 0);
 
@@ -218,7 +224,8 @@ test_news_post_empty_news_chunk (void)
 
     struct recorder r;
     recorder_init (&r);
-    int n = hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, record_cb, &r);
+    int n = hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               record_cb, &r);
     g_assert_cmpint (n, ==, 1);
     g_assert_cmpuint (r.calls->len, ==, 1);
     g_assert_cmpuint (g_array_index (r.calls, struct call_record, 0).len, ==,
@@ -242,7 +249,8 @@ test_news_post_null_cb_still_counts (void)
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, strlen (a), a);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_NEWS, strlen (b), b);
 
-    int n = hx_news_post_walk (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, NULL, NULL);
+    int n = hx_news_post_walk (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                               NULL, NULL);
     g_assert_cmpint (n, ==, 2);
 
     wire_fixture_free (&htlc);
@@ -266,7 +274,8 @@ test_news_post_no_cross_call_accumulation (void)
 
     struct recorder r1;
     recorder_init (&r1);
-    hx_news_post_walk (hx_test_in(&htlc1)->buf, hx_test_in(&htlc1)->pos, record_cb, &r1);
+    hx_news_post_walk (hx_test_in (&htlc1)->buf, hx_test_in (&htlc1)->pos,
+                       record_cb, &r1);
     g_assert_cmpuint (r1.calls->len, ==, 1);
     g_assert_cmpuint (g_array_index (r1.calls, struct call_record, 0).len, ==,
                       1);
@@ -275,14 +284,15 @@ test_news_post_no_cross_call_accumulation (void)
     recorder_free (&r1);
 
     /* Second call: post "BB" (different length, different content).
-	 * The walker MUST NOT carry over the "A" from the first call. */
+     * The walker MUST NOT carry over the "A" from the first call. */
     struct htlc_conn htlc2;
     wire_fixture_init (&htlc2, HTLS_HDR_NEWS_POST, 1, 0);
     wire_fixture_add_chunk (&htlc2, HTLS_DATA_NEWS, 2, "BB");
 
     struct recorder r2;
     recorder_init (&r2);
-    hx_news_post_walk (hx_test_in(&htlc2)->buf, hx_test_in(&htlc2)->pos, record_cb, &r2);
+    hx_news_post_walk (hx_test_in (&htlc2)->buf, hx_test_in (&htlc2)->pos,
+                       record_cb, &r2);
     g_assert_cmpuint (r2.calls->len, ==, 1);
     g_assert_cmpuint (g_array_index (r2.calls, struct call_record, 0).len, ==,
                       2);

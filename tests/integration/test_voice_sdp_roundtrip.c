@@ -71,11 +71,11 @@ pick_voice_server (void)
 static guint32
 send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
-    if (!integration_send_message (
-            fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0, /*hc=*/1,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be)) {
+    if (!integration_send_message (fd, htlc, HTLC_HDR_VOICE_JOIN, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
         return 0;
     }
     return trans;
@@ -84,11 +84,11 @@ send_voice_join (int fd, struct htlc_conn *htlc, guint32 cid)
 static guint32
 send_voice_leave (int fd, struct htlc_conn *htlc, guint32 cid)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
-    if (!integration_send_message (
-            fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0, /*hc=*/1,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be)) {
+    if (!integration_send_message (fd, htlc, HTLC_HDR_VOICE_LEAVE, /*flag=*/0,
+                                   /*hc=*/1, (int)HTLC_DATA_CHAT_ID,
+                                   (int)sizeof (cid_be), &cid_be)) {
         return 0;
     }
     return trans;
@@ -98,12 +98,12 @@ static guint32
 send_voice_sdp_answer (int fd, struct htlc_conn *htlc, guint32 cid,
                        const char *sdp)
 {
-    guint32 cid_be = g_htonl(cid);
+    guint32 cid_be = g_htonl (cid);
     guint32 trans = htlc->trans;
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_VOICE_SDP_ANSWER, /*flag=*/0, /*hc=*/2,
-            (int) HTLC_DATA_CHAT_ID, (int) sizeof (cid_be), &cid_be,
-            (int) HTLC_DATA_VOICE_SDP, (int) strlen (sdp), (guint8 *) sdp)) {
+            (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be,
+            (int)HTLC_DATA_VOICE_SDP, (int)strlen (sdp), (guint8 *)sdp)) {
         return 0;
     }
     return trans;
@@ -120,12 +120,12 @@ test_voice_sdp_roundtrip (void)
     }
 
     char nick[32];
-    g_snprintf (nick, sizeof (nick), "VoiceSDP-%d-%04x", (int) getpid (),
+    g_snprintf (nick, sizeof (nick), "VoiceSDP-%d-%04x", (int)getpid (),
                 g_random_int () & 0xffff);
 
     struct htlc_conn htlc;
-    int fd = integration_open_login_to_caps_or_skip (
-        srv, &htlc, nick, 412, HTLC_CAP_VOICE);
+    int fd = integration_open_login_to_caps_or_skip (srv, &htlc, nick, 412,
+                                                     HTLC_CAP_VOICE);
     if (fd < 0) {
         return;
     }
@@ -136,8 +136,8 @@ test_voice_sdp_roundtrip (void)
     /* JOIN. */
     guint32 join_trans = send_voice_join (fd, &htlc, 0);
     g_assert_cmpuint (join_trans, !=, 0);
-    g_assert_true (integration_drain_until_task_trans (fd, &htlc, join_trans,
-                                                       64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, join_trans, 64));
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     /* Pull the offer out so we can spot-check it was real before
@@ -145,7 +145,8 @@ test_voice_sdp_roundtrip (void)
      * the answer below is synthetic. */
     struct gtkhx_proto_voice_reply r;
     memset (&r, 0, sizeof (r));
-    gtkhx_proto_parse_voice_reply (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &r);
+    gtkhx_proto_parse_voice_reply (hx_test_in (&htlc)->buf,
+                                   hx_test_in (&htlc)->pos, &r);
     g_assert_true (r.sdp_present);
     g_assert_cmpuint (r.sdp_len, >, 0);
 
@@ -177,8 +178,8 @@ test_voice_sdp_roundtrip (void)
 
     guint32 ans_trans = send_voice_sdp_answer (fd, &htlc, 0, answer_sdp);
     g_assert_cmpuint (ans_trans, !=, 0);
-    g_assert_true (integration_drain_until_task_trans (fd, &htlc, ans_trans,
-                                                       64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, ans_trans, 64));
     /* We deliberately do NOT assert flag&1 == 0 here. See header
      * preamble: either outcome (clean ack or graceful task-error) is
      * a valid wire round-trip; we're catching connection drops or
@@ -190,9 +191,12 @@ test_voice_sdp_roundtrip (void)
          * future answer-shape tests. */
         char err[256] = { 0 };
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_message ("VOICE_SDP_ANSWER rejected (expected, synthetic "
-                            "answer lacks real DTLS+ICE): \"%s\"", err);
+                            "answer lacks real DTLS+ICE): \"%s\"",
+                            err);
         }
     } else {
         g_test_message ("VOICE_SDP_ANSWER accepted by server.");
@@ -201,8 +205,8 @@ test_voice_sdp_roundtrip (void)
     /* LEAVE round-trip to clean up. */
     guint32 leave_trans = send_voice_leave (fd, &htlc, 0);
     g_assert_cmpuint (leave_trans, !=, 0);
-    g_assert_true (integration_drain_until_task_trans (fd, &htlc, leave_trans,
-                                                       32));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, leave_trans, 32));
     /* LEAVE must succeed — we joined, server has us in the room. */
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 

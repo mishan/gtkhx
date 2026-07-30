@@ -40,11 +40,11 @@ test_login_guest_succeeds (void)
     }
 
     /* integration_open_login_or_skip already parsed SELFINFO into
-	 * htlc.access / uid / icon / name. Sanity-check the session
-	 * state. */
+     * htlc.access / uid / icon / name. Sanity-check the session
+     * state. */
 
     /* Some access bit must be set — even a guest account has
-	 * download / chat permissions. */
+     * download / chat permissions. */
     g_assert_cmphex (htlc.access, !=, 0);
 
     /* Our display name should round-trip back unchanged. */
@@ -69,14 +69,14 @@ test_login_malformed_does_not_succeed (void)
     struct htlc_conn htlc;
     memset (&htlc, 0, sizeof (htlc));
 
-    guint16 icon_be = g_htons(0);
+    guint16 icon_be = g_htons (0);
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_LOGIN, 0,
                                              /*hc=*/1, (int)HTLC_DATA_ICON,
                                              (int)sizeof (icon_be), &icon_be));
 
     /* Read whatever the server responds with (or doesn't). If it
-	 * ever sends SELFINFO that's a server bug; otherwise either
-	 * task-error or socket-close is acceptable. */
+     * ever sends SELFINFO that's a server bug; otherwise either
+     * task-error or socket-close is acceptable. */
     if (integration_recv_message (fd, &htlc, /*timeout_ms=*/3000)) {
         guint32 type = hdr_type (&htlc);
         g_assert_cmphex (type, !=, HTLS_HDR_USER_SELFINFO);

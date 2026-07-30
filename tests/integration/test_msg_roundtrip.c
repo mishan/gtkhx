@@ -34,7 +34,8 @@ drain_until_msg_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
         if (hdr_type (htlc) != HTLS_HDR_MSG) {
             continue;
         }
-        if (!hx_msg_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, out)) {
+        if (!hx_msg_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
+                             out)) {
             continue;
         }
         if (out->uid == wanted_uid) {
@@ -47,7 +48,7 @@ drain_until_msg_from_uid (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
 static gboolean
 send_msg (int fd, struct htlc_conn *htlc, guint16 to_uid, const char *body)
 {
-    guint16 uid_be = g_htons(to_uid);
+    guint16 uid_be = g_htons (to_uid);
     return integration_send_message (
         fd, htlc, HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_UID,
         (int)sizeof (uid_be), &uid_be, (int)HTLC_DATA_MSG, (int)strlen (body),

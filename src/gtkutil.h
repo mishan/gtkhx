@@ -165,9 +165,8 @@ extern GdkTexture *gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf);
  * theme; see gtkhx_theme.{c,h}).
  */
 extern GtkWidget *gtkhx_pixmap_button (const char *resource_name,
-                                       const char *tooltip,
-                                       GtkhxScaleArea area, GCallback cb,
-                                       gpointer user_data);
+                                       const char *tooltip, GtkhxScaleArea area,
+                                       GCallback cb, gpointer user_data);
 
 /*
  * like gtkhx_pixmap_button, but takes an already-loaded

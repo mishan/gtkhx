@@ -63,9 +63,9 @@ test_unauthorized_mkdir_silently_dropped (void)
         (int)HTLC_DATA_FILE_NAME, (int)strlen (new_dir), (guint8 *)new_dir));
 
     /* Drain to the TASK reply matching our trans. With guest's
-	 * create_folders bit cleared, the dispatcher's post-switch
-	 * tail emits HTLS_HDR_TASK with flag=1 carrying a
-	 * "Transaction rejected" TASKERROR chunk. */
+     * create_folders bit cleared, the dispatcher's post-switch
+     * tail emits HTLS_HDR_TASK with flag=1 carrying a
+     * "Transaction rejected" TASKERROR chunk. */
     gboolean got_reject = FALSE;
     gboolean got_success = FALSE;
     for (int i = 0; i < 32 && !got_reject && !got_success; i++) {
@@ -81,7 +81,9 @@ test_unauthorized_mkdir_silently_dropped (void)
             got_reject = TRUE;
             char err[256];
             gsize err_len = 0;
-            if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+            if (task_error_extract (hx_test_in (&htlc)->buf,
+                                    hx_test_in (&htlc)->pos, err, sizeof (err),
+                                    &err_len)) {
                 g_test_message ("server rejected mkdir: \"%s\"", err);
             }
         } else {
@@ -92,7 +94,7 @@ test_unauthorized_mkdir_silently_dropped (void)
     g_assert_true (got_reject);
 
     /* Probe with PING — the dispatcher should still be in a clean
-	 * state, accepting the next request and replying normally. */
+     * state, accepting the next request and replying normally. */
     guint32 ping_trans = integration_send_ping (fd, &htlc);
     g_assert_cmpuint (ping_trans, !=, 0);
 

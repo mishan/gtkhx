@@ -96,8 +96,8 @@ dup_utf8 (const guint8 *v, guint16 len)
     if (len == 0) {
         return g_strdup ("");
     }
-    gchar *raw = g_strndup ((const char *) v, len);
-    gchar *valid = g_utf8_make_valid (raw, (gssize) len);
+    gchar *raw = g_strndup ((const char *)v, len);
+    gchar *valid = g_utf8_make_valid (raw, (gssize)len);
     g_free (raw);
     return valid;
 }
@@ -128,7 +128,7 @@ on_tlv (guint16 id, guint16 value_len, const guint8 *value, gpointer user_data)
         m->language = dup_utf8 (value, value_len);
         break;
     case HTRK_V3_TLV_MAX_USERS:
-        m->max_users     = read_u16 (value, value_len, 0);
+        m->max_users = read_u16 (value, value_len, 0);
         m->has_max_users = TRUE;
         break;
     case HTRK_V3_TLV_MATURITY: {
@@ -136,8 +136,9 @@ on_tlv (guint16 id, guint16 value_len, const guint8 *value, gpointer user_data)
         /* Spec: unknown values MUST be treated as 0 (GENERAL).
          * Closed-vocab clamp lives in the Rust crate so the C side
          * and any future Rust caller stay locked to the same rule. */
-        m->maturity = (HxTrackerV3Maturity)
-            gtkhx_proto_tracker_v3_meta_clamp_maturity (raw);
+        m->maturity
+            = (HxTrackerV3Maturity)gtkhx_proto_tracker_v3_meta_clamp_maturity (
+                raw);
         break;
     }
     case HTRK_V3_TLV_UPTIME:
@@ -335,13 +336,23 @@ _Static_assert (sizeof (HxTrackerV3Meta) == 216,
 /* G_STRUCT_OFFSET (not <stddef.h>'s offsetof) for consistency with the
  * rest of the tree; pins the ten owned char* fields the Rust offset-
  * based copy/free fix up. */
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, server_software) == 0, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, country_code) == 8, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, region) == 16, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, language) == 24, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, rules_url) == 48, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, banner_url) == 56, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, icon_url) == 64, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, contact_url) == 88, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, tags) == 112, "meta str offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, hope_ciphers) == 152, "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, server_software) == 0,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, country_code) == 8,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, region) == 16,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, language) == 24,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, rules_url) == 48,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, banner_url) == 56,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, icon_url) == 64,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, contact_url) == 88,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, tags) == 112,
+                "meta str offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerV3Meta, hope_ciphers) == 152,
+                "meta str offset");

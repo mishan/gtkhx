@@ -50,8 +50,8 @@ pub struct HxTrackerV3Meta {
     pub language: *mut c_char,        // 0x0203
     pub max_users: u16,               // 0x0204
     pub has_max_users: i32,
-    pub maturity: i32, // 0x0205 (HxTrackerV3Maturity)
-    pub uptime_secs: u32, // 0x0206
+    pub maturity: i32,            // 0x0205 (HxTrackerV3Maturity)
+    pub uptime_secs: u32,         // 0x0206
     pub rules_url: *mut c_char,   // 0x0207
     pub banner_url: *mut c_char,  // 0x0208
     pub icon_url: *mut c_char,    // 0x0209
@@ -63,18 +63,18 @@ pub struct HxTrackerV3Meta {
     pub server_launched: u32,     // 0x020E
     pub min_proto_version: u16,   // 0x0210
     pub peak_24h: u16,            // 0x0211
-    pub avg_24h: u16,            // 0x0212
-    pub tags: *mut c_char,       // 0x0310
+    pub avg_24h: u16,             // 0x0212
+    pub tags: *mut c_char,        // 0x0310
 
-    pub protocol_version: u16, // 0x0300
-    pub supports_hope: i32,    // 0x0301
-    pub supports_tls: i32,     // 0x0302
-    pub tls_port: u16,         // 0x0303
+    pub protocol_version: u16,      // 0x0300
+    pub supports_hope: i32,         // 0x0301
+    pub supports_tls: i32,          // 0x0302
+    pub tls_port: u16,              // 0x0303
     pub supports_inline_media: i32, // 0x0304
-    pub supports_voice: i32,   // 0x0305
-    pub supports_large_files: i32, // 0x0306
-    pub supports_ipv6: i32,    // 0x0307
-    pub hope_ciphers: *mut c_char, // 0x0309
+    pub supports_voice: i32,        // 0x0305
+    pub supports_large_files: i32,  // 0x0306
+    pub supports_ipv6: i32,         // 0x0307
+    pub hope_ciphers: *mut c_char,  // 0x0309
 
     pub news_count: u32,          // 0x0450
     pub msgboard_count: u32,      // 0x0451

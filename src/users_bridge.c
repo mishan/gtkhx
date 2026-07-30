@@ -27,9 +27,9 @@
 #include "users.h"
 #include "users_view.h"
 #include "gtkhx_theme.h"
-#include "gtkutil.h"       /* gtkhx_pixmap_button, gtkhx_widget_set_child */
-#include "gtkhx.h"         /* gtkhx_refresh_userlist_css */
-#include "network.h"       /* connected */
+#include "gtkutil.h" /* gtkhx_pixmap_button, gtkhx_widget_set_child */
+#include "gtkhx.h"   /* gtkhx_refresh_userlist_css */
+#include "network.h" /* connected */
 #ifdef HAVE_VOICE
 #include "voice_panel.h"
 #endif
@@ -38,8 +38,8 @@
 static GtkWidget *
 build_view (session *sess)
 {
-    GtkWidget      *scroll;
-    GtkWidget      *cv_widget;
+    GtkWidget *scroll;
+    GtkWidget *cv_widget;
     HxUserListView *view;
 
     g_return_val_if_fail (sess != NULL, NULL);
@@ -74,7 +74,7 @@ build_view (session *sess)
 static GtkWidget *
 build_button_bar (session *sess)
 {
-    GtkWidget      *button_bar;
+    GtkWidget *button_bar;
     HxUserListView *view;
 
     g_return_val_if_fail (sess != NULL, NULL);
@@ -97,9 +97,9 @@ build_button_bar (session *sess)
     banbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ban.png",
                                   _ ("Ban"), GTKHX_SCALE_WINDOW_BUTTONS,
                                   G_CALLBACK (view_ban_btn), view);
-    chatbtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/chat.png",
-                                   _ ("Private Chat"), GTKHX_SCALE_WINDOW_BUTTONS,
-                                   G_CALLBACK (view_chat_btn), view);
+    chatbtn = gtkhx_pixmap_button (
+        "/com/nasledov/gtkhx/pixmaps/chat.png", _ ("Private Chat"),
+        GTKHX_SCALE_WINDOW_BUTTONS, G_CALLBACK (view_chat_btn), view);
     ignobtn = gtkhx_pixmap_button ("/com/nasledov/gtkhx/pixmaps/ignore.png",
                                    _ ("Ignore"), GTKHX_SCALE_WINDOW_BUTTONS,
                                    G_CALLBACK (view_igno_btn), view);
@@ -117,9 +117,9 @@ build_button_bar (session *sess)
      * slim GtkBox at the top of the panel content. Spacing + halign keep
      * the start / end grouping the headerbar layout implied. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start (button_bar,  6);
-    gtk_widget_set_margin_end   (button_bar,  6);
-    gtk_widget_set_margin_top   (button_bar,  6);
+    gtk_widget_set_margin_start (button_bar, 6);
+    gtk_widget_set_margin_end (button_bar, 6);
+    gtk_widget_set_margin_top (button_bar, 6);
     gtk_widget_set_margin_bottom (button_bar, 4);
     gtk_box_append (GTK_BOX (button_bar), msgbtn);
     gtk_box_append (GTK_BOX (button_bar), chatbtn);
@@ -154,7 +154,7 @@ gtkhx_users_bridge_build_content (session *sess)
 
     /* build_view first: it stashes sess->users_view, which
      * build_button_bar reads for the button handler data. */
-    scroll     = build_view (sess);
+    scroll = build_view (sess);
     button_bar = build_button_bar (sess);
 
     content_vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 0);

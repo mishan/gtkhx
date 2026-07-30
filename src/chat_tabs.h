@@ -63,7 +63,7 @@ AdwTabPage *gtkhx_chat_tabs_add_msg (GtkWidget *content, guint16 uid,
 
 /* Lookup. Return NULL if the cid/uid isn't currently a tab. */
 AdwTabPage *gtkhx_chat_tabs_find_pchat (guint32 cid);
-AdwTabPage *gtkhx_chat_tabs_find_msg   (guint16 uid);
+AdwTabPage *gtkhx_chat_tabs_find_msg (guint16 uid);
 
 /* Make a specific tab the visible one + raise the Chat dock panel
  * if it isn't already focused. Used both on user actions (click
@@ -71,8 +71,8 @@ AdwTabPage *gtkhx_chat_tabs_find_msg   (guint16 uid);
  * user is already in the right tab; otherwise sets attention
  * rather than auto-selecting — see _set_attention_* below for
  * the "subtle" indicator). */
-void gtkhx_chat_tabs_raise_pchat  (guint32 cid);
-void gtkhx_chat_tabs_raise_msg    (guint16 uid);
+void gtkhx_chat_tabs_raise_pchat (guint32 cid);
+void gtkhx_chat_tabs_raise_msg (guint16 uid);
 void gtkhx_chat_tabs_raise_public (void);
 
 /* Set / clear the needs-attention indicator on a tab. Also flags
@@ -80,17 +80,17 @@ void gtkhx_chat_tabs_raise_public (void);
  * when the panel isn't the visible dock tab. Selecting the tab
  * clears the indicator automatically. */
 void gtkhx_chat_tabs_set_attention_pchat (guint32 cid, gboolean state);
-void gtkhx_chat_tabs_set_attention_msg   (guint16 uid, gboolean state);
+void gtkhx_chat_tabs_set_attention_msg (guint16 uid, gboolean state);
 
 /* Update the tab's title (e.g. rename or status change). */
 void gtkhx_chat_tabs_set_title_pchat (guint32 cid, const char *title);
-void gtkhx_chat_tabs_set_title_msg   (guint16 uid, const char *title);
+void gtkhx_chat_tabs_set_title_msg (guint16 uid, const char *title);
 
 /* Programmatically close a tab. Used when the server tears down a
  * private chat or kicks us out, etc. (NOT the user clicking the
  * tab X — that path runs the close handlers below.) */
 void gtkhx_chat_tabs_close_pchat (guint32 cid);
-void gtkhx_chat_tabs_close_msg   (guint16 uid);
+void gtkhx_chat_tabs_close_msg (guint16 uid);
 
 /* Close handlers — chat.c (pchat) and msg.c (msg) register these
  * once at startup so the close-page dispatcher in chat_tabs.c can
@@ -106,10 +106,10 @@ void gtkhx_chat_tabs_close_msg   (guint16 uid);
  * are destroyed by AdwTabView. The handler must NOT touch the
  * tab widgets after it returns. */
 typedef void (*ChatTabsClosePchatFunc) (guint32 cid);
-typedef void (*ChatTabsCloseMsgFunc)   (guint16 uid);
+typedef void (*ChatTabsCloseMsgFunc) (guint16 uid);
 
 void gtkhx_chat_tabs_set_close_pchat_handler (ChatTabsClosePchatFunc func);
-void gtkhx_chat_tabs_set_close_msg_handler   (ChatTabsCloseMsgFunc   func);
+void gtkhx_chat_tabs_set_close_msg_handler (ChatTabsCloseMsgFunc func);
 
 G_END_DECLS
 

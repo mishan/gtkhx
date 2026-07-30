@@ -208,14 +208,8 @@ impl HxVoiceModel {
             // the loop: a re-entrant "indicator-changed" handler may call
             // clear() / set_self_uid() during this ingest, and the C original
             // read self->seeded / self->self_uid at exactly this point.
-            if self.imp().seeded.get()
-                && !was_in_voice
-                && uid != self.imp().self_uid.get()
-            {
-                self.emit_by_name::<()>(
-                    "voice-presence-chime",
-                    &[&(uid as u32), &true],
-                );
+            if self.imp().seeded.get() && !was_in_voice && uid != self.imp().self_uid.get() {
+                self.emit_by_name::<()>("voice-presence-chime", &[&(uid as u32), &true]);
             }
         }
 
@@ -245,10 +239,7 @@ impl HxVoiceModel {
             // first-pass note) — re-entrancy safe against a handler that flips
             // them mid-ingest.
             if self.imp().seeded.get() && uid != self.imp().self_uid.get() {
-                self.emit_by_name::<()>(
-                    "voice-presence-chime",
-                    &[&(uid as u32), &false],
-                );
+                self.emit_by_name::<()>("voice-presence-chime", &[&(uid as u32), &false]);
             }
             // Drop the entry so a malicious server cycling random uids can't
             // grow the table unboundedly; re-join re-inserts cheaply.

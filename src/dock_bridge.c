@@ -25,10 +25,10 @@
 #include <glib.h>
 #include <libpanel.h>
 
-#include "hx.h"            /* session (toolbar.h's prototypes reference it) */
+#include "hx.h" /* session (toolbar.h's prototypes reference it) */
 #include "hx_panel.h"
 #include "panel_registry.h"
-#include "toolbar.h"        /* toolbar_*_frame globals */
+#include "toolbar.h" /* toolbar_*_frame globals */
 #include "dock_bridge.h"
 
 /* Map a bridge area to its libpanel PanelArea + home PanelFrame. The
@@ -59,10 +59,13 @@ static HxPanelKind
 dock_kind_to_panel_kind (GtkhxDockKind kind)
 {
     switch (kind) {
-    case GTKHX_DOCK_KIND_CENTER:  return HX_PANEL_KIND_CENTER;
-    case GTKHX_DOCK_KIND_SIDEBAR: return HX_PANEL_KIND_SIDEBAR;
+    case GTKHX_DOCK_KIND_CENTER:
+        return HX_PANEL_KIND_CENTER;
+    case GTKHX_DOCK_KIND_SIDEBAR:
+        return HX_PANEL_KIND_SIDEBAR;
     case GTKHX_DOCK_KIND_DYNAMIC:
-    default:                      return HX_PANEL_KIND_DYNAMIC;
+    default:
+        return HX_PANEL_KIND_DYNAMIC;
     }
 }
 
@@ -104,16 +107,12 @@ gtkhx_dock_set_needs_attention (const char *id, gboolean state)
  * it, registers it. Returns the panel (still owned by the registry's
  * strong ref) or NULL if the dock wasn't built. */
 static HxPanel *
-dock_embed_common (const char   *id,
-                   GtkhxDockKind kind,
-                   GtkhxDockArea area,
-                   const char   *title,
-                   const char   *icon_name,
-                   GtkWidget    *content)
+dock_embed_common (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
+                   const char *title, const char *icon_name, GtkWidget *content)
 {
-    HxPanel   *panel;
+    HxPanel *panel;
     GtkWidget *home_frame = NULL;
-    PanelArea  panel_area;
+    PanelArea panel_area;
 
     panel_area = dock_area_to_panel_area (area, &home_frame);
     if (home_frame == NULL) {
@@ -149,12 +148,8 @@ dock_embed_common (const char   *id,
 }
 
 gboolean
-gtkhx_dock_embed (const char   *id,
-                  GtkhxDockKind kind,
-                  GtkhxDockArea area,
-                  const char   *title,
-                  const char   *icon_name,
-                  GtkWidget    *content)
+gtkhx_dock_embed (const char *id, GtkhxDockKind kind, GtkhxDockArea area,
+                  const char *title, const char *icon_name, GtkWidget *content)
 {
     g_return_val_if_fail (id != NULL, FALSE);
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
@@ -167,8 +162,8 @@ gtkhx_dock_embed (const char   *id,
  * so it's freed when the panel finalizes; hx_panel_set_close_handler
  * gets it as user_data. */
 typedef struct {
-    void        (*on_close) (gpointer user_data);
-    gpointer      user_data;
+    void (*on_close) (gpointer user_data);
+    gpointer user_data;
     GDestroyNotify destroy;
 } DockDynClose;
 
@@ -189,30 +184,26 @@ static void
 dock_dyn_close_trampoline (HxPanel *panel, gpointer user_data)
 {
     DockDynClose *c = user_data;
-    (void) panel;
+    (void)panel;
     if (c != NULL && c->on_close != NULL) {
         c->on_close (c->user_data);
     }
 }
 
 gboolean
-gtkhx_dock_embed_dynamic (const char   *id,
-                          GtkhxDockArea area,
-                          const char   *title,
-                          const char   *icon_name,
-                          GtkWidget    *content,
-                          void        (*on_close) (gpointer user_data),
-                          gpointer      user_data,
-                          GDestroyNotify destroy)
+gtkhx_dock_embed_dynamic (const char *id, GtkhxDockArea area, const char *title,
+                          const char *icon_name, GtkWidget *content,
+                          void (*on_close) (gpointer user_data),
+                          gpointer user_data, GDestroyNotify destroy)
 {
-    HxPanel      *panel;
+    HxPanel *panel;
     DockDynClose *c;
 
     g_return_val_if_fail (id != NULL, FALSE);
     g_return_val_if_fail (GTK_IS_WIDGET (content), FALSE);
 
-    panel = dock_embed_common (id, GTKHX_DOCK_KIND_DYNAMIC, area,
-                               title, icon_name, content);
+    panel = dock_embed_common (id, GTKHX_DOCK_KIND_DYNAMIC, area, title,
+                               icon_name, content);
     if (panel == NULL) {
         /* Embed failed (content already destroyed by dock_embed_common).
          * The close callback was never installed, so run the caller's
@@ -224,14 +215,14 @@ gtkhx_dock_embed_dynamic (const char   *id,
     }
 
     c = g_new0 (DockDynClose, 1);
-    c->on_close  = on_close;
+    c->on_close = on_close;
     c->user_data = user_data;
-    c->destroy   = destroy;
+    c->destroy = destroy;
 
     /* Keep the payload alive for the panel's lifetime and free it (which
      * runs `destroy` on user_data) on finalize. */
-    g_object_set_data_full (G_OBJECT (panel), "gtkhx-dock-dyn-close",
-                            c, dock_dyn_close_free);
+    g_object_set_data_full (G_OBJECT (panel), "gtkhx-dock-dyn-close", c,
+                            dock_dyn_close_free);
     hx_panel_set_close_handler (panel, dock_dyn_close_trampoline, c);
     return TRUE;
 }

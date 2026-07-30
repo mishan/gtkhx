@@ -33,7 +33,10 @@ fn broadcast_reports_broadcast_without_emitting() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(false));
     // Broadcast branch: no boxed event, C renders it via broadcastmsg.
-    assert_eq!(recv(7, /*is_pm=*/ false, std::ptr::null_mut()), HX_MSG_BROADCAST);
+    assert_eq!(
+        recv(7, /*is_pm=*/ false, std::ptr::null_mut()),
+        HX_MSG_BROADCAST
+    );
     assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
 }
 
@@ -41,6 +44,9 @@ fn broadcast_reports_broadcast_without_emitting() {
 fn ignored_broadcast_is_dropped() {
     test_env::reset();
     test_env::IGNORE.with(|c| c.set(true));
-    assert_eq!(recv(7, /*is_pm=*/ false, std::ptr::null_mut()), HX_MSG_DROPPED);
+    assert_eq!(
+        recv(7, /*is_pm=*/ false, std::ptr::null_mut()),
+        HX_MSG_DROPPED
+    );
     assert_eq!(test_env::EMITTED.with(|c| c.take()), None);
 }

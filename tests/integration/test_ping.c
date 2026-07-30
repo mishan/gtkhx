@@ -36,14 +36,14 @@ test_ping_round_trip (void)
     }
 
     /* integration_send_ping captures + returns the trans hlpack
-	 * stamps onto the PING frame, so the caller can match it
-	 * against the TASK reply below. */
+     * stamps onto the PING frame, so the caller can match it
+     * against the TASK reply below. */
     guint32 ping_trans = integration_send_ping (fd, &htlc);
     g_assert_cmpuint (ping_trans, !=, 0);
 
     /* Drain past unsolicited server messages (banners, USER_CHANGE
-	 * broadcasts from parallel test connections, etc.) until the
-	 * TASK matching our PING trans lands. */
+     * broadcasts from parallel test connections, etc.) until the
+     * TASK matching our PING trans lands. */
     g_assert_true (
         integration_drain_until_task_trans (fd, &htlc, ping_trans, 8));
 

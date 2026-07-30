@@ -139,7 +139,14 @@ async fn frames_by_datasize_when_totalsize_is_larger() {
     // Frame 1: TotalSize claims a 1000-byte transaction, but this frame
     // carries only 4 body bytes (DataSize = 4 + 2 hc). A reader that
     // trusted TotalSize would try to read ~1000 bytes and stall.
-    let hdr1 = build_header_split(0x65, 10, 0, /*total_wire=*/ 1000 + 2, /*data_wire=*/ 4 + 2, 0);
+    let hdr1 = build_header_split(
+        0x65,
+        10,
+        0,
+        /*total_wire=*/ 1000 + 2,
+        /*data_wire=*/ 4 + 2,
+        0,
+    );
     // Frame 2: an ordinary complete frame immediately after — only read
     // intact if frame 1 consumed exactly its DataSize.
     let hdr2 = build_header(0x66, 11, 0, 4, 0);
@@ -167,7 +174,10 @@ async fn frames_by_datasize_when_totalsize_is_larger() {
 
     // Frame 1 body is DataSize-sized (4), NOT TotalSize-sized (1000).
     assert_eq!(f1.header.trans, 10);
-    assert_eq!(f1.header.body_len, 4, "body sized by DataSize (len2), not TotalSize");
+    assert_eq!(
+        f1.header.body_len, 4,
+        "body sized by DataSize (len2), not TotalSize"
+    );
     assert_eq!(&f1.body, b"aaaa");
     // Frame 2 arrived intact ⇒ the read loop stayed aligned.
     assert_eq!(f2.header.trans, 11);

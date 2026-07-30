@@ -25,50 +25,48 @@
 #include "dock_layout.h"
 #include "panel_registry.h"
 #include "debug.h"
-#include "compat.h"   /* _() gettext macro for menu labels */
-#include "hx.h"       /* session typedef, required by gtkutil.h and toolbar.h */
-#include "gtkutil.h"  /* init_keyaccel for undocked windows */
-#include "toolbar.h"  /* toolbar_window — main-dock root comparison */
+#include "compat.h"  /* _() gettext macro for menu labels */
+#include "hx.h"      /* session typedef, required by gtkutil.h and toolbar.h */
+#include "gtkutil.h" /* init_keyaccel for undocked windows */
+#include "toolbar.h" /* toolbar_window — main-dock root comparison */
 
 #include <adwaita.h>
 
-struct _HxPanel
-{
-    PanelWidget  parent_instance;
+struct _HxPanel {
+    PanelWidget parent_instance;
 
-    char        *id;
-    HxPanelKind  kind;
-    PanelArea    home_area;
-    GWeakRef     home_frame;     /* PanelFrame the Undock action returns to */
+    char *id;
+    HxPanelKind kind;
+    PanelArea home_area;
+    GWeakRef home_frame; /* PanelFrame the Undock action returns to */
 
     /* DYNAMIC panel close callback. NULL on static
      * panels; for pchat / msg panels the factory installs a
      * tear-down function that runs from the frame dispatcher
      * (page-closed signal) before the registry unregisters the
      * panel. */
-    HxPanelCloseFunc  close_func;
-    gpointer          close_data;
+    HxPanelCloseFunc close_func;
+    gpointer close_data;
 };
 
 G_DEFINE_FINAL_TYPE (HxPanel, hx_panel, PANEL_TYPE_WIDGET)
 
 /* Forward decls */
-static void        on_undock_activate           (GSimpleAction *action,
-                                                 GVariant      *parameter,
-                                                 gpointer       user_data);
-static gboolean    on_undocked_close_request    (GtkWindow     *window,
-                                                 gpointer       user_data);
-static PanelFrame *hx_panel_undocked_create_frame (PanelGrid   *grid,
-                                                   gpointer     user_data);
+static void on_undock_activate (GSimpleAction *action, GVariant *parameter,
+                                gpointer user_data);
+static gboolean on_undocked_close_request (GtkWindow *window,
+                                           gpointer user_data);
+static PanelFrame *hx_panel_undocked_create_frame (PanelGrid *grid,
+                                                   gpointer user_data);
 
 /* Toolbar globals exposed by toolbar.c — the home frames for each
  * of the four sidebar areas. NULL until create_toolbar_window has
  * run, but Phase 2 panels are constructed inside its tail so the
  * pointers are live by the time any move action fires. */
-extern GtkWidget *toolbar_sidebar_frame;  /* PANEL_AREA_START  */
-extern GtkWidget *toolbar_end_frame;      /* PANEL_AREA_END    */
-extern GtkWidget *toolbar_bottom_frame;   /* PANEL_AREA_BOTTOM */
-extern GtkWidget *toolbar_center_frame;   /* PANEL_AREA_CENTER */
+extern GtkWidget *toolbar_sidebar_frame; /* PANEL_AREA_START  */
+extern GtkWidget *toolbar_end_frame;     /* PANEL_AREA_END    */
+extern GtkWidget *toolbar_bottom_frame;  /* PANEL_AREA_BOTTOM */
+extern GtkWidget *toolbar_center_frame;  /* PANEL_AREA_CENTER */
 extern GtkWidget *toolbar_dock;
 
 /* Map a default-leaf frame back to its PanelArea. Returns TRUE and
@@ -90,10 +88,22 @@ extern GtkWidget *toolbar_dock;
 static gboolean
 panel_area_for_default_frame (GtkWidget *frame, PanelArea *out)
 {
-    if (frame == toolbar_sidebar_frame) { *out = PANEL_AREA_START;  return TRUE; }
-    if (frame == toolbar_end_frame)     { *out = PANEL_AREA_END;    return TRUE; }
-    if (frame == toolbar_bottom_frame)  { *out = PANEL_AREA_BOTTOM; return TRUE; }
-    if (frame == toolbar_center_frame)  { *out = PANEL_AREA_CENTER; return TRUE; }
+    if (frame == toolbar_sidebar_frame) {
+        *out = PANEL_AREA_START;
+        return TRUE;
+    }
+    if (frame == toolbar_end_frame) {
+        *out = PANEL_AREA_END;
+        return TRUE;
+    }
+    if (frame == toolbar_bottom_frame) {
+        *out = PANEL_AREA_BOTTOM;
+        return TRUE;
+    }
+    if (frame == toolbar_center_frame) {
+        *out = PANEL_AREA_CENTER;
+        return TRUE;
+    }
     return FALSE;
 }
 
@@ -118,12 +128,12 @@ static void
 hx_panel_init (HxPanel *self)
 {
     GSimpleActionGroup *group;
-    GSimpleAction      *undock;
-    GMenu              *menu;
+    GSimpleAction *undock;
+    GMenu *menu;
 
     /* Sensible defaults: every panel starts assuming it's a center
      * document. SIDEBAR / DYNAMIC panels override via hx_panel_new. */
-    self->kind      = HX_PANEL_KIND_CENTER;
+    self->kind = HX_PANEL_KIND_CENTER;
     self->home_area = PANEL_AREA_CENTER;
     g_weak_ref_init (&self->home_frame, NULL);
 
@@ -136,10 +146,10 @@ hx_panel_init (HxPanel *self)
      * silently installs the action on the wrong muxer; the menu
      * item appears greyed out (or doesn't appear at all in older
      * libpanel) because the action lookup fails. */
-    group  = g_simple_action_group_new ();
+    group = g_simple_action_group_new ();
     undock = g_simple_action_new ("undock", NULL);
-    g_signal_connect (undock, "activate",
-                      G_CALLBACK (on_undock_activate), self);
+    g_signal_connect (undock, "activate", G_CALLBACK (on_undock_activate),
+                      self);
     g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (undock));
     g_object_unref (undock);
 
@@ -171,17 +181,15 @@ hx_panel_init (HxPanel *self)
 }
 
 HxPanel *
-hx_panel_new (const char  *id,
-              HxPanelKind  kind,
-              PanelArea    home_area)
+hx_panel_new (const char *id, HxPanelKind kind, PanelArea home_area)
 {
     HxPanel *self;
 
     g_return_val_if_fail (id != NULL && id[0] != '\0', NULL);
 
     self = g_object_new (HX_TYPE_PANEL, NULL);
-    self->id        = g_strdup (id);
-    self->kind      = kind;
+    self->id = g_strdup (id);
+    self->kind = kind;
     self->home_area = home_area;
 
     /* The base class already exposes "id" as a property
@@ -216,9 +224,8 @@ hx_panel_get_home_area (HxPanel *self)
 }
 
 void
-hx_panel_set_close_handler (HxPanel          *self,
-                            HxPanelCloseFunc  func,
-                            gpointer          user_data)
+hx_panel_set_close_handler (HxPanel *self, HxPanelCloseFunc func,
+                            gpointer user_data)
 {
     g_return_if_fail (HX_IS_PANEL (self));
     self->close_func = func;
@@ -231,9 +238,7 @@ hx_panel_set_close_handler (HxPanel          *self,
  * libpanel's testsuite/test-frame.c). Dispatches to the dynamic-
  * panel teardown path; static panels fall through unchanged. */
 static void
-on_frame_page_closed (PanelFrame  *frame,
-                      PanelWidget *page,
-                      gpointer     user_data)
+on_frame_page_closed (PanelFrame *frame, PanelWidget *page, gpointer user_data)
 {
     HxPanel *self;
     const char *id;
@@ -243,44 +248,49 @@ on_frame_page_closed (PanelFrame  *frame,
     (void)frame;
     (void)user_data;
 
-    if (!HX_IS_PANEL (page))
+    if (!HX_IS_PANEL (page)) {
         return;
+    }
 
     self = HX_PANEL (page);
-    if (self->kind != HX_PANEL_KIND_DYNAMIC)
+    if (self->kind != HX_PANEL_KIND_DYNAMIC) {
         return;
+    }
 
     /* Snapshot the callback fields before the teardown runs — the
      * callback is allowed to set them to NULL (and may even
      * destroy the gchat/msgwin struct that close_data points at). */
-    cb      = self->close_func;
+    cb = self->close_func;
     cb_data = self->close_data;
     self->close_func = NULL;
     self->close_data = NULL;
 
-    if (cb)
+    if (cb) {
         cb (self, cb_data);
+    }
 
     /* Take the registry's last strong ref off. The panel widget
      * is already orphaned (page-closed runs post-detach); dropping
      * the registry ref hits refcount 0 → finalize. */
     id = self->id;
-    if (id != NULL)
+    if (id != NULL) {
         hx_panel_registry_unregister (id);
+    }
 }
 
 void
 hx_panel_install_close_dispatcher (GtkWidget *frame)
 {
     g_return_if_fail (frame == NULL || PANEL_IS_FRAME (frame));
-    if (frame == NULL)
+    if (frame == NULL) {
         return;
+    }
 
     /* g_signal_connect is fine — frames live for the application's
      * lifetime (the toolbar dock owns them) so there's no
      * disconnect-on-frame-death case to worry about. */
-    g_signal_connect (frame, "page-closed",
-                      G_CALLBACK (on_frame_page_closed), NULL);
+    g_signal_connect (frame, "page-closed", G_CALLBACK (on_frame_page_closed),
+                      NULL);
 }
 
 /* --- Drag-out detection ----------------------------------------- */
@@ -297,21 +307,23 @@ find_drag_button (GtkWidget *root)
 {
     GtkWidget *child;
 
-    if (root == NULL)
+    if (root == NULL) {
         return NULL;
+    }
 
     if (GTK_IS_BUTTON (root)) {
         const char *icon = gtk_button_get_icon_name (GTK_BUTTON (root));
-        if (g_strcmp0 (icon, "list-drag-handle-symbolic") == 0)
+        if (g_strcmp0 (icon, "list-drag-handle-symbolic") == 0) {
             return GTK_BUTTON (root);
+        }
     }
 
-    for (child = gtk_widget_get_first_child (root);
-         child != NULL;
+    for (child = gtk_widget_get_first_child (root); child != NULL;
          child = gtk_widget_get_next_sibling (child)) {
         GtkButton *found = find_drag_button (child);
-        if (found != NULL)
+        if (found != NULL) {
             return found;
+        }
     }
     return NULL;
 }
@@ -327,8 +339,9 @@ find_drag_source (GtkWidget *widget)
     GtkDragSource *result = NULL;
 
     controllers = gtk_widget_observe_controllers (widget);
-    if (controllers == NULL)
+    if (controllers == NULL) {
         return NULL;
+    }
 
     n = g_list_model_get_n_items (controllers);
     for (i = 0; i < n; i++) {
@@ -355,10 +368,8 @@ find_drag_source (GtkWidget *widget)
  * runs as usual; the panel undock is performed as a side effect
  * before we return. */
 static gboolean
-on_libpanel_drag_cancel (GtkDragSource       *src,
-                         GdkDrag             *drag,
-                         GdkDragCancelReason  reason,
-                         gpointer             user_data)
+on_libpanel_drag_cancel (GtkDragSource *src, GdkDrag *drag,
+                         GdkDragCancelReason reason, gpointer user_data)
 {
     GdkContentProvider *cp;
     GValue value = G_VALUE_INIT;
@@ -375,22 +386,25 @@ on_libpanel_drag_cancel (GtkDragSource       *src,
      * drag protocol surfaces protocol-level "couldn't complete"
      * as ERROR generically. Treating both as undock-intent gives
      * the user the behaviour they expect on either backend. */
-    if (reason == GDK_DRAG_CANCEL_USER_CANCELLED)
+    if (reason == GDK_DRAG_CANCEL_USER_CANCELLED) {
         return FALSE;
+    }
 
     /* libpanel installs the content via the GtkDragSource::prepare
      * signal's return value (not gtk_drag_source_set_content), so
      * gtk_drag_source_get_content returns NULL. The actual content
      * lives on the GdkDrag for the duration of the operation. */
     cp = gdk_drag_get_content (drag);
-    if (cp == NULL)
+    if (cp == NULL) {
         return FALSE;
+    }
 
     g_value_init (&value, PANEL_TYPE_WIDGET);
     if (gdk_content_provider_get_value (cp, &value, NULL)) {
         GObject *obj = g_value_get_object (&value);
-        if (obj != NULL && HX_IS_PANEL (obj))
+        if (obj != NULL && HX_IS_PANEL (obj)) {
             hx_panel_undock (HX_PANEL (obj));
+        }
     }
     g_value_unset (&value);
     return FALSE;
@@ -399,12 +413,13 @@ on_libpanel_drag_cancel (GtkDragSource       *src,
 void
 hx_panel_install_drag_out_on_frame (GtkWidget *frame)
 {
-    GtkButton     *btn;
+    GtkButton *btn;
     GtkDragSource *src;
 
     g_return_if_fail (frame == NULL || PANEL_IS_FRAME (frame));
-    if (frame == NULL)
+    if (frame == NULL) {
         return;
+    }
 
     btn = find_drag_button (frame);
     if (btn == NULL) {
@@ -420,8 +435,8 @@ hx_panel_install_drag_out_on_frame (GtkWidget *frame)
         return;
     }
 
-    g_signal_connect (src, "drag-cancel",
-                      G_CALLBACK (on_libpanel_drag_cancel), NULL);
+    g_signal_connect (src, "drag-cancel", G_CALLBACK (on_libpanel_drag_cancel),
+                      NULL);
 
     /* libpanel doesn't set actions on its drag source, leaving it at
      * the default (0). With actions=0 the drag-drop action
@@ -431,8 +446,8 @@ hx_panel_install_drag_out_on_frame (GtkWidget *frame)
      * the path have something to negotiate against. */
     gtk_drag_source_set_actions (src, GDK_ACTION_MOVE | GDK_ACTION_COPY);
 
-    debug_log ("dnd", "installed drag-out on frame=%p (drag_source=%p)",
-               frame, src);
+    debug_log ("dnd", "installed drag-out on frame=%p (drag_source=%p)", frame,
+               src);
 }
 
 /* --- Per-frame drop target -------------------------------------- */
@@ -458,23 +473,20 @@ static void collect_frames (GtkWidget *root, GPtrArray *out);
  * undocked-window close handler before destroying the source
  * window, just like the old toolbar-level redock handler did. */
 static gboolean on_undocked_close_request (GtkWindow *window,
-                                           gpointer   user_data);
+                                           gpointer user_data);
 
 static gboolean
-on_frame_drop (GtkDropTarget *target,
-               const GValue  *value,
-               double         x,
-               double         y,
-               gpointer       user_data)
+on_frame_drop (GtkDropTarget *target, const GValue *value, double x, double y,
+               gpointer user_data)
 {
     PanelFrame *target_frame = PANEL_FRAME (user_data);
-    GObject   *obj;
-    HxPanel   *panel;
+    GObject *obj;
+    HxPanel *panel;
     GtkWidget *src_frame;
     GtkWidget *src_dock;
     GtkWidget *target_dock;
-    GtkRoot   *src_root = NULL;
-    gboolean   was_cross_dock = FALSE;
+    GtkRoot *src_root = NULL;
+    gboolean was_cross_dock = FALSE;
 
     (void)target;
     (void)x;
@@ -483,23 +495,24 @@ on_frame_drop (GtkDropTarget *target,
     debug_log ("dnd", "frame_drop: value type=%s, target_frame=%p",
                G_VALUE_TYPE_NAME (value), target_frame);
 
-    if (!G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET))
+    if (!G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET)) {
         return FALSE;
+    }
     obj = g_value_get_object (value);
-    if (obj == NULL || !HX_IS_PANEL (obj))
+    if (obj == NULL || !HX_IS_PANEL (obj)) {
         return FALSE;
+    }
     panel = HX_PANEL (obj);
 
-    src_frame = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                         PANEL_TYPE_FRAME);
-    src_dock  = gtk_widget_get_ancestor (GTK_WIDGET (panel),
-                                         PANEL_TYPE_DOCK);
-    target_dock = gtk_widget_get_ancestor (GTK_WIDGET (target_frame),
-                                           PANEL_TYPE_DOCK);
+    src_frame = gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_FRAME);
+    src_dock = gtk_widget_get_ancestor (GTK_WIDGET (panel), PANEL_TYPE_DOCK);
+    target_dock
+        = gtk_widget_get_ancestor (GTK_WIDGET (target_frame), PANEL_TYPE_DOCK);
 
     /* No-op when dropping onto the panel's current frame. */
-    if (src_frame == (GtkWidget *)target_frame)
+    if (src_frame == (GtkWidget *)target_frame) {
         return FALSE;
+    }
 
     /* Was this a cross-dock drag? If so we'll close the source
      * window once the panel has moved. */
@@ -509,8 +522,9 @@ on_frame_drop (GtkDropTarget *target,
     }
 
     g_object_ref (panel);
-    if (src_frame != NULL)
+    if (src_frame != NULL) {
         panel_frame_remove (PANEL_FRAME (src_frame), PANEL_WIDGET (panel));
+    }
 
     panel_frame_add (target_frame, PANEL_WIDGET (panel));
     panel_widget_raise (PANEL_WIDGET (panel));
@@ -528,7 +542,7 @@ on_frame_drop (GtkDropTarget *target,
      * panel goes "home" to itself.) */
     if (target_dock == toolbar_dock) {
         GtkWidget *tf = GTK_WIDGET (target_frame);
-        PanelArea  new_area;
+        PanelArea new_area;
         /* Update home_frame unconditionally — the user's exact
          * destination leaf is what should come back on re-show.
          *
@@ -541,8 +555,9 @@ on_frame_drop (GtkDropTarget *target,
          * (e.g. a sidebar panel returns to its sidebar default),
          * not to whatever area the user-created leaf might happen
          * to overlap. */
-        if (panel_area_for_default_frame (tf, &new_area))
+        if (panel_area_for_default_frame (tf, &new_area)) {
             panel->home_area = new_area;
+        }
         hx_panel_set_home_frame (panel, tf);
     }
     g_object_unref (panel);
@@ -551,8 +566,9 @@ on_frame_drop (GtkDropTarget *target,
      * the new layout. No-op on cross-dock drops since the panel
      * left the main dock — the destination is an undocked window
      * whose state isn't part of the saved layout (yet). */
-    if (target_dock == toolbar_dock)
+    if (target_dock == toolbar_dock) {
         dock_layout_request_save ();
+    }
 
     /* On a cross-dock drop, if the source undocked window is now
      * empty, destroy it. Earlier this assumed an undocked window
@@ -593,14 +609,12 @@ on_frame_drop (GtkDropTarget *target,
              * silent no-op, leaving on_undocked_close_request to
              * fire on destroy and redock the original panel
              * unexpectedly. */
-            gulong handler_id = (gulong)GPOINTER_TO_SIZE (
-                g_object_get_data (G_OBJECT (src_root),
-                                   "hx-undocked-close-handler-id"));
+            gulong handler_id = (gulong)GPOINTER_TO_SIZE (g_object_get_data (
+                G_OBJECT (src_root), "hx-undocked-close-handler-id"));
             if (handler_id != 0) {
                 g_signal_handler_disconnect (src_root, handler_id);
                 g_object_set_data (G_OBJECT (src_root),
-                                   "hx-undocked-close-handler-id",
-                                   NULL);
+                                   "hx-undocked-close-handler-id", NULL);
             }
             gtk_window_destroy (GTK_WINDOW (src_root));
         }
@@ -614,16 +628,16 @@ defang_drop_controls (GtkWidget *root)
 {
     GtkWidget *child;
 
-    if (root == NULL)
+    if (root == NULL) {
         return;
+    }
 
     if (g_strcmp0 (G_OBJECT_TYPE_NAME (root), "PanelDropControls") == 0) {
         gtk_widget_set_can_target (root, FALSE);
         return;
     }
 
-    for (child = gtk_widget_get_first_child (root);
-         child != NULL;
+    for (child = gtk_widget_get_first_child (root); child != NULL;
          child = gtk_widget_get_next_sibling (child)) {
         defang_drop_controls (child);
     }
@@ -633,8 +647,9 @@ void
 hx_panel_defang_drop_controls_on_frame (GtkWidget *frame)
 {
     g_return_if_fail (frame == NULL || PANEL_IS_FRAME (frame));
-    if (frame == NULL)
+    if (frame == NULL) {
         return;
+    }
 
     /* Disable libpanel's invisible PanelDropControls so they don't
      * claim drop events. They become visible during a drag in
@@ -658,13 +673,16 @@ static void
 collect_frames (GtkWidget *root, GPtrArray *out)
 {
     GtkWidget *child;
-    if (root == NULL) return;
-    if (PANEL_IS_FRAME (root))
+    if (root == NULL) {
+        return;
+    }
+    if (PANEL_IS_FRAME (root)) {
         g_ptr_array_add (out, root);
-    for (child = gtk_widget_get_first_child (root);
-         child != NULL;
-         child = gtk_widget_get_next_sibling (child))
+    }
+    for (child = gtk_widget_get_first_child (root); child != NULL;
+         child = gtk_widget_get_next_sibling (child)) {
         collect_frames (child, out);
+    }
 }
 
 static PanelFrame *
@@ -680,9 +698,9 @@ frame_at_dock_coords (GtkWidget *dock, double x, double y)
         graphene_point_t pt = GRAPHENE_POINT_INIT ((float)x, (float)y);
         graphene_point_t out_pt;
         graphene_rect_t bounds;
-        if (gtk_widget_compute_point (dock, frame, &pt, &out_pt) &&
-            gtk_widget_compute_bounds (frame, frame, &bounds) &&
-            graphene_rect_contains_point (&bounds, &out_pt)) {
+        if (gtk_widget_compute_point (dock, frame, &pt, &out_pt)
+            && gtk_widget_compute_bounds (frame, frame, &bounds)
+            && graphene_rect_contains_point (&bounds, &out_pt)) {
             /* Prefer the most-nested matching frame (a center grid
              * is a descendant of its dock; both might match — the
              * frame is more specific). Since we walked the tree,
@@ -695,27 +713,26 @@ frame_at_dock_coords (GtkWidget *dock, double x, double y)
 }
 
 static gboolean
-on_dock_drop (GtkDropTarget *target,
-              const GValue  *value,
-              double         x,
-              double         y,
-              gpointer       user_data)
+on_dock_drop (GtkDropTarget *target, const GValue *value, double x, double y,
+              gpointer user_data)
 {
     GtkWidget *dock = GTK_WIDGET (user_data);
     PanelFrame *target_frame;
     GValue val_copy = G_VALUE_INIT;
     gboolean ret;
 
-    debug_log ("dnd", "dock_drop: x=%g y=%g, value type=%s",
-               x, y, G_VALUE_TYPE_NAME (value));
+    debug_log ("dnd", "dock_drop: x=%g y=%g, value type=%s", x, y,
+               G_VALUE_TYPE_NAME (value));
 
-    if (!G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET))
+    if (!G_VALUE_HOLDS (value, PANEL_TYPE_WIDGET)) {
         return FALSE;
+    }
 
     target_frame = frame_at_dock_coords (dock, x, y);
     debug_log ("dnd", "dock_drop: target_frame=%p", target_frame);
-    if (target_frame == NULL)
+    if (target_frame == NULL) {
         return FALSE;
+    }
 
     /* Reuse on_frame_drop's logic by calling it directly with the
      * target frame as user_data. We have to copy the value because
@@ -754,8 +771,9 @@ hx_panel_install_drop_target_on_dock (GtkWidget *dock)
     GType types[] = { PANEL_TYPE_WIDGET, GTK_TYPE_WIDGET, G_TYPE_OBJECT };
 
     g_return_if_fail (dock == NULL || PANEL_IS_DOCK (dock));
-    if (dock == NULL)
+    if (dock == NULL) {
         return;
+    }
 
     /* Accept anything widget-typed and ALL drag actions. libpanel's
      * GtkDragSource doesn't set explicit actions (it relies on the
@@ -770,8 +788,8 @@ hx_panel_install_drop_target_on_dock (GtkWidget *dock)
                                   GDK_ACTION_MOVE | GDK_ACTION_COPY);
     gtk_drop_target_set_gtypes (target, types, G_N_ELEMENTS (types));
     gtk_drop_target_set_preload (target, TRUE);
-    g_signal_connect (target, "drop",   G_CALLBACK (on_dock_drop),   dock);
-    g_signal_connect (target, "enter",  G_CALLBACK (on_dock_enter),  dock);
+    g_signal_connect (target, "drop", G_CALLBACK (on_dock_drop), dock);
+    g_signal_connect (target, "enter", G_CALLBACK (on_dock_enter), dock);
     g_signal_connect (target, "motion", G_CALLBACK (on_dock_motion), dock);
     gtk_widget_add_controller (dock, GTK_EVENT_CONTROLLER (target));
 
@@ -803,10 +821,10 @@ hx_panel_ensure_attached (HxPanel *self)
      * as the panel's parent until its dispose runs. The
      * PanelFrame-ancestor test catches both the "really detached"
      * case (no ancestor) and the "stale AdwBin hanging on" case. */
-    frame_anc = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                         PANEL_TYPE_FRAME);
-    if (frame_anc != NULL)
+    frame_anc = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
+    if (frame_anc != NULL) {
         return;
+    }
 
     /* No frame ancestor — we're going to re-attach. If there's a
      * dangling parent left over from a half-cleaned close (an AdwBin
@@ -850,8 +868,9 @@ hx_panel_ensure_attached (HxPanel *self)
         } else {
             target = NULL;
         }
-        if (home != NULL)
-            g_object_unref (home);  /* get_home_frame strong ref */
+        if (home != NULL) {
+            g_object_unref (home); /* get_home_frame strong ref */
+        }
 
         if (!home_usable) {
             /* Fall back to home_area default. Only update the
@@ -859,14 +878,23 @@ hx_panel_ensure_attached (HxPanel *self)
              * was already usable, leave it untouched so the user's
              * choice persists. */
             switch (self->home_area) {
-            case PANEL_AREA_START:  target = toolbar_sidebar_frame; break;
-            case PANEL_AREA_END:    target = toolbar_end_frame;     break;
-            case PANEL_AREA_BOTTOM: target = toolbar_bottom_frame;  break;
+            case PANEL_AREA_START:
+                target = toolbar_sidebar_frame;
+                break;
+            case PANEL_AREA_END:
+                target = toolbar_end_frame;
+                break;
+            case PANEL_AREA_BOTTOM:
+                target = toolbar_bottom_frame;
+                break;
             case PANEL_AREA_CENTER:
-            default:                target = toolbar_center_frame;  break;
+            default:
+                target = toolbar_center_frame;
+                break;
             }
-            if (target == NULL)
+            if (target == NULL) {
                 return;
+            }
             panel_frame_add (PANEL_FRAME (target), PANEL_WIDGET (self));
             hx_panel_set_home_frame (self, target);
             return;
@@ -891,8 +919,9 @@ hx_panel_get_home_frame (HxPanel *self)
      * strong ref, the frame is destroyed inside the unref and the
      * returned pointer dangles. */
     obj = g_weak_ref_get (&self->home_frame);
-    if (obj == NULL)
+    if (obj == NULL) {
         return NULL;
+    }
     return GTK_WIDGET (obj);
 }
 
@@ -902,90 +931,94 @@ hx_panel_get_home_frame (HxPanel *self)
 static gboolean
 on_undocked_close_request (GtkWindow *window, gpointer user_data)
 {
-    HxPanel   *self = HX_PANEL (user_data);
+    HxPanel *self = HX_PANEL (user_data);
     GtkWidget *home;
     GtkWidget *parent_frame;
 
     g_object_ref (self);
 
     home = hx_panel_get_home_frame (self);
-    parent_frame = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                            PANEL_TYPE_FRAME);
-    if (parent_frame != NULL)
+    parent_frame
+        = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
+    if (parent_frame != NULL) {
         panel_frame_remove (PANEL_FRAME (parent_frame), PANEL_WIDGET (self));
+    }
 
     if (home != NULL) {
         panel_frame_add (PANEL_FRAME (home), PANEL_WIDGET (self));
         /* no more PanelDock revealers; the
          * tree just shows everything that's in it. No area
          * reveal flip needed on Redock. */
-        g_object_unref (home);  /* hx_panel_get_home_frame strong ref */
+        g_object_unref (home); /* hx_panel_get_home_frame strong ref */
     }
 
     /* Redock changes which main-dock leaf the panel lives in. */
     dock_layout_request_save ();
 
     g_object_unref (self);
-    return FALSE;  /* let the window close */
+    return FALSE; /* let the window close */
 }
 
 /* notify::default-width / notify::default-height handler attached
  * to every undocked window. Resize fires this; we just request a
  * debounced save so the [Undocked] section captures the new size. */
 static void
-on_undocked_window_size_notify (GObject *object, GParamSpec *pspec, gpointer data)
+on_undocked_window_size_notify (GObject *object, GParamSpec *pspec,
+                                gpointer data)
 {
-    (void)object; (void)pspec; (void)data;
+    (void)object;
+    (void)pspec;
+    (void)data;
     dock_layout_request_save ();
 }
 
 void
 hx_panel_undock (HxPanel *self)
 {
-    GtkWidget         *current_frame;
-    GtkBuilder        *builder;
-    GtkBuilderScope   *scope;
-    GtkWindow         *window;
-    PanelGrid         *grid;
-    GApplication      *app;
-    GError            *err = NULL;
-    const char        *title;
+    GtkWidget *current_frame;
+    GtkBuilder *builder;
+    GtkBuilderScope *scope;
+    GtkWindow *window;
+    PanelGrid *grid;
+    GApplication *app;
+    GError *err = NULL;
+    const char *title;
 
     /* Same XML the spike uses — minimal AdwApplicationWindow with a
      * PanelDock whose center is a PanelGrid. Built via GtkBuilder so
      * libpanel's GtkBuildable add-child wraps the grid in the dock's
      * CENTER area correctly (gtk_widget_set_parent would skip that). */
-    static const char *undocked_ui_xml =
-        "<interface>"
-        "  <object class='AdwApplicationWindow' id='window'>"
-        "    <property name='default-width'>640</property>"
-        "    <property name='default-height'>480</property>"
-        "    <property name='content'>"
-        "      <object class='AdwToolbarView'>"
-        "        <child type='top'>"
-        "          <object class='AdwHeaderBar'/>"
-        "        </child>"
-        "        <property name='content'>"
-        "          <object class='PanelDock' id='dock'>"
-        "            <child>"
-        "              <object class='PanelGrid' id='grid'>"
-        "                <signal name='create-frame' "
-        "                        handler='hx_panel_undocked_create_frame'/>"
-        "              </object>"
-        "            </child>"
-        "          </object>"
-        "        </property>"
-        "      </object>"
-        "    </property>"
-        "  </object>"
-        "</interface>";
+    static const char *undocked_ui_xml
+        = "<interface>"
+          "  <object class='AdwApplicationWindow' id='window'>"
+          "    <property name='default-width'>640</property>"
+          "    <property name='default-height'>480</property>"
+          "    <property name='content'>"
+          "      <object class='AdwToolbarView'>"
+          "        <child type='top'>"
+          "          <object class='AdwHeaderBar'/>"
+          "        </child>"
+          "        <property name='content'>"
+          "          <object class='PanelDock' id='dock'>"
+          "            <child>"
+          "              <object class='PanelGrid' id='grid'>"
+          "                <signal name='create-frame' "
+          "                        handler='hx_panel_undocked_create_frame'/>"
+          "              </object>"
+          "            </child>"
+          "          </object>"
+          "        </property>"
+          "      </object>"
+          "    </property>"
+          "  </object>"
+          "</interface>";
 
     g_return_if_fail (HX_IS_PANEL (self));
 
     g_object_ref (self);
 
-    current_frame = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                             PANEL_TYPE_FRAME);
+    current_frame
+        = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
     if (current_frame == NULL) {
         // g_warning ("Undock: panel %s has no ancestor frame", self->id);
         g_object_unref (self);
@@ -1008,8 +1041,9 @@ hx_panel_undock (HxPanel *self)
     {
         GtkRoot *root = gtk_widget_get_root (GTK_WIDGET (self));
         if (root != NULL && GTK_WIDGET (root) != toolbar_window) {
-            if (GTK_IS_WINDOW (root))
+            if (GTK_IS_WINDOW (root)) {
                 gtk_window_close (GTK_WINDOW (root));
+            }
             g_object_unref (self);
             return;
         }
@@ -1032,11 +1066,12 @@ hx_panel_undock (HxPanel *self)
     }
 
     window = GTK_WINDOW (gtk_builder_get_object (builder, "window"));
-    grid   = PANEL_GRID (gtk_builder_get_object (builder, "grid"));
+    grid = PANEL_GRID (gtk_builder_get_object (builder, "grid"));
 
     app = g_application_get_default ();
-    if (app != NULL)
+    if (app != NULL) {
         gtk_window_set_application (window, GTK_APPLICATION (app));
+    }
 
     title = panel_widget_get_title (PANEL_WIDGET (self));
     gtk_window_set_title (window, title ? title : _ ("Undocked panel"));
@@ -1044,9 +1079,9 @@ hx_panel_undock (HxPanel *self)
     panel_grid_add (grid, PANEL_WIDGET (self));
 
     {
-        gulong handler_id = g_signal_connect (
-            window, "close-request",
-            G_CALLBACK (on_undocked_close_request), self);
+        gulong handler_id
+            = g_signal_connect (window, "close-request",
+                                G_CALLBACK (on_undocked_close_request), self);
         /* Stash the handler id so the cross-dock-drop path
          * (on_frame_drop) can disconnect it by id rather than by
          * (function + user_data). disconnect-by-func only matches
@@ -1054,8 +1089,7 @@ hx_panel_undock (HxPanel *self)
          * is the panel currently being moved — false whenever the
          * user has stacked multiple panels into the same undocked
          * window. */
-        g_object_set_data (G_OBJECT (window),
-                           "hx-undocked-close-handler-id",
+        g_object_set_data (G_OBJECT (window), "hx-undocked-close-handler-id",
                            GSIZE_TO_POINTER ((gsize)handler_id));
     }
 
@@ -1092,9 +1126,8 @@ hx_panel_undock (HxPanel *self)
  * undock function. The drag-out detector calls hx_panel_undock
  * directly without going through here. */
 static void
-on_undock_activate (GSimpleAction *action,
-                    GVariant      *parameter,
-                    gpointer       user_data)
+on_undock_activate (GSimpleAction *action, GVariant *parameter,
+                    gpointer user_data)
 {
     (void)action;
     (void)parameter;
@@ -1119,8 +1152,9 @@ on_undock_activate (GSimpleAction *action,
 static PanelFrame *
 hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
 {
-    GtkWidget        *frame  = panel_frame_new ();
-    PanelFrameHeader *header = PANEL_FRAME_HEADER (panel_frame_header_bar_new ());
+    GtkWidget *frame = panel_frame_new ();
+    PanelFrameHeader *header
+        = PANEL_FRAME_HEADER (panel_frame_header_bar_new ());
     (void)grid;
     (void)user_data;
     panel_frame_set_header (PANEL_FRAME (frame), header);
@@ -1153,18 +1187,19 @@ hx_panel_undocked_create_frame (PanelGrid *grid, gpointer user_data)
 static HxSplit *
 panel_get_split_leaf (HxPanel *self)
 {
-    GtkWidget *anc = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                              HX_TYPE_SPLIT);
-    if (anc == NULL)
+    GtkWidget *anc = gtk_widget_get_ancestor (GTK_WIDGET (self), HX_TYPE_SPLIT);
+    if (anc == NULL) {
         return NULL;
+    }
     if (!hx_split_is_leaf (HX_SPLIT (anc))) {
         /* HxSplit ancestor is an internal split — find the leaf
          * by walking from the panel's PanelFrame ancestor to the
          * matching leaf within `anc`'s tree. */
-        GtkWidget *frame_anc = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                                        PANEL_TYPE_FRAME);
-        if (frame_anc == NULL)
+        GtkWidget *frame_anc
+            = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
+        if (frame_anc == NULL) {
             return NULL;
+        }
         return hx_split_find_for_frame (HX_SPLIT (anc),
                                         PANEL_FRAME (frame_anc));
     }
@@ -1179,17 +1214,16 @@ panel_get_split_leaf (HxPanel *self)
 void
 hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir)
 {
-    HxSplit    *leaf;
-    HxSplit    *target_leaf;
-    GtkWidget  *current_frame;
+    HxSplit *leaf;
+    HxSplit *target_leaf;
+    GtkWidget *current_frame;
     PanelFrame *target_frame;
 
     g_return_if_fail (HX_IS_PANEL (self));
 
     leaf = panel_get_split_leaf (self);
     if (leaf == NULL) {
-        debug_log ("dock",
-                   "hx_panel %s: page.move-* — no HxSplit ancestor",
+        debug_log ("dock", "hx_panel %s: page.move-* — no HxSplit ancestor",
                    self->id ? self->id : "(unset)");
         return;
     }
@@ -1202,21 +1236,24 @@ hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir)
         return;
     }
     target_frame = hx_split_get_frame (target_leaf);
-    if (target_frame == NULL)
+    if (target_frame == NULL) {
         return;
+    }
 
-    current_frame = gtk_widget_get_ancestor (GTK_WIDGET (self),
-                                             PANEL_TYPE_FRAME);
-    if (current_frame == (GtkWidget *) target_frame)
-        return;  /* shouldn't happen — neighbour by definition is elsewhere */
+    current_frame
+        = gtk_widget_get_ancestor (GTK_WIDGET (self), PANEL_TYPE_FRAME);
+    if (current_frame == (GtkWidget *)target_frame) {
+        return; /* shouldn't happen — neighbour by definition is elsewhere */
+    }
 
     g_object_ref (self);
-    if (current_frame != NULL)
+    if (current_frame != NULL) {
         panel_frame_remove (PANEL_FRAME (current_frame), PANEL_WIDGET (self));
+    }
     panel_frame_add (target_frame, PANEL_WIDGET (self));
     {
         GtkWidget *tf = GTK_WIDGET (target_frame);
-        PanelArea  new_area;
+        PanelArea new_area;
         /* home_frame tracks the exact leaf the user chose.
          * home_area only follows along when the destination is one
          * of the four default leaves; a move into a user-created
@@ -1226,8 +1263,9 @@ hx_panel_do_move_in_direction (HxPanel *self, GtkDirectionType dir)
          * hx_panel_ensure_attached returns the panel to its
          * original default frame rather than coercing it onto
          * whatever area sentinel the custom leaf might map to. */
-        if (panel_area_for_default_frame (tf, &new_area))
+        if (panel_area_for_default_frame (tf, &new_area)) {
             self->home_area = new_area;
+        }
         hx_panel_set_home_frame (self, tf);
     }
     panel_widget_raise (PANEL_WIDGET (self));
@@ -1243,8 +1281,9 @@ hx_panel_can_move_in_direction (HxPanel *self, GtkDirectionType dir)
     g_return_val_if_fail (HX_IS_PANEL (self), FALSE);
 
     leaf = panel_get_split_leaf (self);
-    if (leaf == NULL)
+    if (leaf == NULL) {
         return FALSE;
+    }
     return hx_split_neighbor (leaf, dir) != NULL;
 }
 

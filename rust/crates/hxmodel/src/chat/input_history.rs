@@ -133,7 +133,7 @@ mod tests {
         // must not overwrite it (we're no longer at the draft position).
         assert_eq!(h.up("first"), Some("a".to_string()));
         assert_eq!(h.up("second"), None); // at oldest
-        // Down past the newest restores the *first* snapshot, not "second".
+                                          // Down past the newest restores the *first* snapshot, not "second".
         assert_eq!(h.down(), Some("first".to_string()));
     }
 
@@ -142,7 +142,7 @@ mod tests {
         let mut h = InputHistory::new();
         h.record("a");
         h.up("draft"); // navigate up to "a"
-        // A new send resets to the bottom + clears the draft.
+                       // A new send resets to the bottom + clears the draft.
         h.record("b");
         assert_eq!(h.len(), 2);
         // Down at the bottom is inert; Up starts a fresh cycle from the newest.

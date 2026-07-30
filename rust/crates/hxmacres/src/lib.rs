@@ -79,9 +79,7 @@ impl ResourceFork {
         let num_res_types = be16(&data, mo.checked_add(28)?)?.checked_add(1)?;
 
         // Type list begins 2 bytes past the type-list offset (past its own count).
-        let tl_base = mo
-            .checked_add(res_type_list_off as usize)?
-            .checked_add(2)?;
+        let tl_base = mo.checked_add(res_type_list_off as usize)?.checked_add(2)?;
         let mut types = Vec::with_capacity(num_res_types as usize);
         for i in 0..num_res_types as usize {
             let o = tl_base.checked_add(i.checked_mul(8)?)?;

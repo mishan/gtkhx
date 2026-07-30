@@ -35,14 +35,13 @@
 
 #include "config.h"
 
-#include "compat.h"  /* _() gettext macro */
+#include "compat.h" /* _() gettext macro */
 #include "dock_layout.h"
 #include "hx_panel.h"
 #include "hx_panel_frame.h"
 #include "hx_split.h"
 
-struct _HxSplit
-{
+struct _HxSplit {
     GtkWidget parent_instance;
 
     /* Leaf state: frame non-NULL, paned NULL, child_a/b NULL. */
@@ -51,8 +50,8 @@ struct _HxSplit
     /* Internal-split state: paned non-NULL, child_a/b non-NULL,
      * frame NULL. */
     GtkPaned *paned;
-    HxSplit  *child_a;   /* start of paned */
-    HxSplit  *child_b;   /* end of paned   */
+    HxSplit *child_a; /* start of paned */
+    HxSplit *child_b; /* end of paned   */
 };
 
 G_DEFINE_FINAL_TYPE (HxSplit, hx_split, GTK_TYPE_WIDGET)
@@ -72,11 +71,12 @@ hx_split_dispose (GObject *object)
      * can be finalized cleanly. The leaf PanelFrame or the
      * GtkPaned is the only one; child_a / child_b ride inside the
      * paned's normal child slots. */
-    while ((child = gtk_widget_get_first_child (GTK_WIDGET (self))) != NULL)
+    while ((child = gtk_widget_get_first_child (GTK_WIDGET (self))) != NULL) {
         gtk_widget_unparent (child);
+    }
 
-    self->frame   = NULL;
-    self->paned   = NULL;
+    self->frame = NULL;
+    self->paned = NULL;
     self->child_a = NULL;
     self->child_b = NULL;
 
@@ -86,7 +86,7 @@ hx_split_dispose (GObject *object)
 static void
 hx_split_class_init (HxSplitClass *klass)
 {
-    GObjectClass   *object_class = G_OBJECT_CLASS (klass);
+    GObjectClass *object_class = G_OBJECT_CLASS (klass);
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
 
     object_class->dispose = hx_split_dispose;
@@ -111,7 +111,9 @@ hx_split_init (HxSplit *self)
 static void
 on_dock_change_notify (GObject *obj, GParamSpec *pspec, gpointer data)
 {
-    (void)obj; (void)pspec; (void)data;
+    (void)obj;
+    (void)pspec;
+    (void)data;
     dock_layout_request_save ();
 }
 
@@ -165,11 +167,10 @@ hx_split_new_with_frame (PanelFrame *frame)
 }
 
 HxSplit *
-hx_split_new_internal (HxSplit        *child_a,
-                       HxSplit        *child_b,
-                       GtkOrientation  orientation)
+hx_split_new_internal (HxSplit *child_a, HxSplit *child_b,
+                       GtkOrientation orientation)
 {
-    HxSplit   *self;
+    HxSplit *self;
     GtkWidget *paned;
 
     g_return_val_if_fail (HX_IS_SPLIT (child_a), NULL);
@@ -182,15 +183,15 @@ hx_split_new_internal (HxSplit        *child_a,
     self = g_object_new (HX_TYPE_SPLIT, NULL);
 
     paned = gtk_paned_new (orientation);
-    gtk_paned_set_resize_start_child  (GTK_PANED (paned), TRUE);
-    gtk_paned_set_resize_end_child    (GTK_PANED (paned), TRUE);
-    gtk_paned_set_shrink_start_child  (GTK_PANED (paned), FALSE);
-    gtk_paned_set_shrink_end_child    (GTK_PANED (paned), FALSE);
+    gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
+    gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
 
     gtk_paned_set_start_child (GTK_PANED (paned), GTK_WIDGET (child_a));
-    gtk_paned_set_end_child   (GTK_PANED (paned), GTK_WIDGET (child_b));
+    gtk_paned_set_end_child (GTK_PANED (paned), GTK_WIDGET (child_b));
 
-    self->paned   = GTK_PANED (paned);
+    self->paned = GTK_PANED (paned);
     self->child_a = child_a;
     self->child_b = child_b;
 
@@ -235,8 +236,9 @@ GtkOrientation
 hx_split_get_orientation (HxSplit *self)
 {
     g_return_val_if_fail (HX_IS_SPLIT (self), GTK_ORIENTATION_HORIZONTAL);
-    if (self->paned == NULL)
-        return GTK_ORIENTATION_HORIZONTAL;  /* arbitrary; leaf */
+    if (self->paned == NULL) {
+        return GTK_ORIENTATION_HORIZONTAL; /* arbitrary; leaf */
+    }
     return gtk_orientable_get_orientation (GTK_ORIENTABLE (self->paned));
 }
 
@@ -255,8 +257,8 @@ HxSplit *
 hx_split_split (HxSplit *self, GtkOrientation orientation)
 {
     PanelFrame *original_frame;
-    HxSplit    *sibling;
-    GtkWidget  *paned;
+    HxSplit *sibling;
+    GtkWidget *paned;
 
     g_return_val_if_fail (HX_IS_SPLIT (self), NULL);
     if (!hx_split_is_leaf (self)) {
@@ -276,18 +278,18 @@ hx_split_split (HxSplit *self, GtkOrientation orientation)
     /* Build the paned + two child splits. child_a wraps the
      * original frame so its contents (panels) move with it. */
     paned = gtk_paned_new (orientation);
-    gtk_paned_set_resize_start_child  (GTK_PANED (paned), TRUE);
-    gtk_paned_set_resize_end_child    (GTK_PANED (paned), TRUE);
-    gtk_paned_set_shrink_start_child  (GTK_PANED (paned), FALSE);
-    gtk_paned_set_shrink_end_child    (GTK_PANED (paned), FALSE);
+    gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
+    gtk_paned_set_shrink_start_child (GTK_PANED (paned), FALSE);
+    gtk_paned_set_shrink_end_child (GTK_PANED (paned), FALSE);
 
     self->child_a = hx_split_new_with_frame (original_frame);
-    g_object_unref (original_frame);  /* the new leaf parented it */
+    g_object_unref (original_frame); /* the new leaf parented it */
 
     self->child_b = hx_split_new ();
 
     gtk_paned_set_start_child (GTK_PANED (paned), GTK_WIDGET (self->child_a));
-    gtk_paned_set_end_child   (GTK_PANED (paned), GTK_WIDGET (self->child_b));
+    gtk_paned_set_end_child (GTK_PANED (paned), GTK_WIDGET (self->child_b));
 
     self->paned = GTK_PANED (paned);
     gtk_widget_set_parent (paned, GTK_WIDGET (self));
@@ -337,11 +339,13 @@ hx_split_close_leaf (HxSplit *self)
     {
         GtkWidget *paned_widget = gtk_widget_get_parent (GTK_WIDGET (self));
         GtkWidget *parent_widget;
-        if (paned_widget == NULL)
-            goto out;  /* detached — shouldn't happen, but bail */
+        if (paned_widget == NULL) {
+            goto out; /* detached — shouldn't happen, but bail */
+        }
         parent_widget = gtk_widget_get_parent (paned_widget);
-        if (parent_widget == NULL || !HX_IS_SPLIT (parent_widget))
-            goto out;  /* area root — close-on-root is a no-op */
+        if (parent_widget == NULL || !HX_IS_SPLIT (parent_widget)) {
+            goto out; /* area root — close-on-root is a no-op */
+        }
         parent = HX_SPLIT (parent_widget);
     }
 
@@ -354,7 +358,7 @@ hx_split_close_leaf (HxSplit *self)
     if (sibling == NULL || sibling == self) {
         g_critical ("hx_split_close_leaf: corrupt parent split (sibling=%p, "
                     "self=%p) — refusing to close",
-                    (void *) sibling, (void *) self);
+                    (void *)sibling, (void *)self);
         goto out;
     }
 
@@ -362,7 +366,7 @@ hx_split_close_leaf (HxSplit *self)
      * the paned, reparent the sibling into the parent split. */
     g_object_ref (sibling);
     gtk_paned_set_start_child (parent->paned, NULL);
-    gtk_paned_set_end_child   (parent->paned, NULL);
+    gtk_paned_set_end_child (parent->paned, NULL);
 
     /* Now the parent's HxSplit holds a GtkPaned child that's about
      * to be unparented + dropped. */
@@ -378,24 +382,24 @@ hx_split_close_leaf (HxSplit *self)
         gtk_widget_unparent (GTK_WIDGET (frame));
         sibling->frame = NULL;
 
-        parent->frame   = frame;
-        parent->paned   = NULL;
+        parent->frame = frame;
+        parent->paned = NULL;
         parent->child_a = NULL;
         parent->child_b = NULL;
         gtk_widget_set_parent (GTK_WIDGET (frame), GTK_WIDGET (parent));
         g_object_unref (frame);
     } else {
         GtkPaned *p = sibling->paned;
-        HxSplit  *a = sibling->child_a;
-        HxSplit  *b = sibling->child_b;
+        HxSplit *a = sibling->child_a;
+        HxSplit *b = sibling->child_b;
         g_object_ref (p);
         gtk_widget_unparent (GTK_WIDGET (p));
-        sibling->paned   = NULL;
+        sibling->paned = NULL;
         sibling->child_a = NULL;
         sibling->child_b = NULL;
 
-        parent->frame   = NULL;
-        parent->paned   = p;
+        parent->frame = NULL;
+        parent->paned = p;
         parent->child_a = a;
         parent->child_b = b;
         gtk_widget_set_parent (GTK_WIDGET (p), GTK_WIDGET (parent));
@@ -412,8 +416,9 @@ hx_split_close_leaf (HxSplit *self)
 
 out:
     g_object_unref (self);
-    if (result)
+    if (result) {
         dock_layout_request_save ();
+    }
     return result;
 }
 
@@ -473,55 +478,59 @@ hx_split_neighbor (HxSplit *leaf, GtkDirectionType direction)
     /* Walk up looking for the first ancestor split whose
      * orientation matches the direction AND where we entered from
      * the side that allows further travel. */
-    child  = leaf;
+    child = leaf;
     parent = NULL;
     {
         GtkWidget *p = gtk_widget_get_parent (GTK_WIDGET (leaf));
-        if (p != NULL)
-            p = gtk_widget_get_parent (p);  /* skip the GtkPaned */
-        if (p != NULL && HX_IS_SPLIT (p))
+        if (p != NULL) {
+            p = gtk_widget_get_parent (p); /* skip the GtkPaned */
+        }
+        if (p != NULL && HX_IS_SPLIT (p)) {
             parent = HX_SPLIT (p);
+        }
     }
 
     while (parent != NULL) {
-        GtkOrientation o     = hx_split_get_orientation (parent);
-        gboolean       horiz = (o == GTK_ORIENTATION_HORIZONTAL);
-        gboolean       on_a  = (parent->child_a == child);
-        HxSplit       *other = on_a ? parent->child_b : parent->child_a;
+        GtkOrientation o = hx_split_get_orientation (parent);
+        gboolean horiz = (o == GTK_ORIENTATION_HORIZONTAL);
+        gboolean on_a = (parent->child_a == child);
+        HxSplit *other = on_a ? parent->child_b : parent->child_a;
 
         gboolean direction_matches = FALSE;
         gboolean travelling_to_other = FALSE;
 
         switch (direction) {
         case GTK_DIR_LEFT:
-            direction_matches  = horiz;
+            direction_matches = horiz;
             travelling_to_other = !on_a; /* we're on B; A is to our left */
             break;
         case GTK_DIR_RIGHT:
-            direction_matches  = horiz;
-            travelling_to_other = on_a;  /* we're on A; B is to our right */
+            direction_matches = horiz;
+            travelling_to_other = on_a; /* we're on A; B is to our right */
             break;
         case GTK_DIR_UP:
-            direction_matches  = !horiz;
+            direction_matches = !horiz;
             travelling_to_other = !on_a; /* we're on B (lower); A is up */
             break;
         case GTK_DIR_DOWN:
-            direction_matches  = !horiz;
-            travelling_to_other = on_a;  /* we're on A (upper); B is down */
+            direction_matches = !horiz;
+            travelling_to_other = on_a; /* we're on A (upper); B is down */
             break;
         default:
             return NULL;
         }
 
-        if (direction_matches && travelling_to_other)
+        if (direction_matches && travelling_to_other) {
             return descend_to_edge (other, direction);
+        }
 
         /* Otherwise keep climbing. */
-        child  = parent;
+        child = parent;
         {
             GtkWidget *p = gtk_widget_get_parent (GTK_WIDGET (parent));
-            if (p != NULL)
-                p = gtk_widget_get_parent (p);  /* skip the GtkPaned */
+            if (p != NULL) {
+                p = gtk_widget_get_parent (p); /* skip the GtkPaned */
+            }
             parent = (p != NULL && HX_IS_SPLIT (p)) ? HX_SPLIT (p) : NULL;
         }
     }
@@ -539,21 +548,21 @@ hx_split_find_for_frame (HxSplit *root, PanelFrame *frame)
     g_return_val_if_fail (HX_IS_SPLIT (root), NULL);
     g_return_val_if_fail (PANEL_IS_FRAME (frame), NULL);
 
-    if (hx_split_is_leaf (root))
+    if (hx_split_is_leaf (root)) {
         return (root->frame == frame) ? root : NULL;
+    }
 
     {
         HxSplit *hit = hx_split_find_for_frame (root->child_a, frame);
-        if (hit != NULL)
+        if (hit != NULL) {
             return hit;
+        }
     }
     return hx_split_find_for_frame (root->child_b, frame);
 }
 
 void
-hx_split_foreach_leaf (HxSplit *root,
-                       HxSplitLeafFunc func,
-                       gpointer user_data)
+hx_split_foreach_leaf (HxSplit *root, HxSplitLeafFunc func, gpointer user_data)
 {
     g_return_if_fail (HX_IS_SPLIT (root));
     g_return_if_fail (func != NULL);
@@ -591,11 +600,13 @@ leaf_parent_split (HxSplit *leaf)
     GtkWidget *paned_anc;
     GtkWidget *p;
 
-    if (leaf == NULL)
+    if (leaf == NULL) {
         return NULL;
+    }
     paned_anc = gtk_widget_get_parent (GTK_WIDGET (leaf));
-    if (paned_anc == NULL)
+    if (paned_anc == NULL) {
         return NULL;
+    }
     p = gtk_widget_get_parent (paned_anc);
     return (p != NULL && HX_IS_SPLIT (p)) ? HX_SPLIT (p) : NULL;
 }
@@ -624,20 +635,23 @@ static void refresh_close_enabled_leaf (HxSplit *leaf, gpointer user_data);
 static void
 frame_do_split (GtkWidget *frame, GtkOrientation orientation)
 {
-    HxSplit    *leaf = frame_to_leaf (frame);
-    HxSplit    *new_leaf;
+    HxSplit *leaf = frame_to_leaf (frame);
+    HxSplit *new_leaf;
     PanelFrame *new_frame;
 
-    if (leaf == NULL)
+    if (leaf == NULL) {
         return;
+    }
 
     new_leaf = hx_split_split (leaf, orientation);
-    if (new_leaf == NULL)
+    if (new_leaf == NULL) {
         return;
+    }
 
     new_frame = hx_split_get_frame (new_leaf);
-    if (new_frame == NULL)
+    if (new_frame == NULL) {
         return;
+    }
 
     /* The new sibling leaf's PanelFrame needs the same plumbing
      * every other leaf carries (close-dispatcher / drag-out /
@@ -655,9 +669,13 @@ frame_do_split (GtkWidget *frame, GtkOrientation orientation)
         HxSplit *area_root = leaf;
         while (TRUE) {
             GtkWidget *p = gtk_widget_get_parent (GTK_WIDGET (area_root));
-            if (p == NULL) break;
+            if (p == NULL) {
+                break;
+            }
             p = gtk_widget_get_parent (p);
-            if (p == NULL || !HX_IS_SPLIT (p)) break;
+            if (p == NULL || !HX_IS_SPLIT (p)) {
+                break;
+            }
             area_root = HX_SPLIT (p);
         }
         hx_split_foreach_leaf (area_root, refresh_close_enabled_leaf, NULL);
@@ -665,43 +683,44 @@ frame_do_split (GtkWidget *frame, GtkOrientation orientation)
 }
 
 static void
-on_frame_split_h (GSimpleAction *action,
-                  GVariant      *parameter,
-                  gpointer       user_data)
+on_frame_split_h (GSimpleAction *action, GVariant *parameter,
+                  gpointer user_data)
 {
-    (void)action; (void)parameter;
+    (void)action;
+    (void)parameter;
     frame_do_split (GTK_WIDGET (user_data), GTK_ORIENTATION_HORIZONTAL);
 }
 
 static void
-on_frame_split_v (GSimpleAction *action,
-                  GVariant      *parameter,
-                  gpointer       user_data)
+on_frame_split_v (GSimpleAction *action, GVariant *parameter,
+                  gpointer user_data)
 {
-    (void)action; (void)parameter;
+    (void)action;
+    (void)parameter;
     frame_do_split (GTK_WIDGET (user_data), GTK_ORIENTATION_VERTICAL);
 }
 
 static void
-on_frame_close (GSimpleAction *action,
-                GVariant      *parameter,
-                gpointer       user_data)
+on_frame_close (GSimpleAction *action, GVariant *parameter, gpointer user_data)
 {
-    GtkWidget  *frame = GTK_WIDGET (user_data);
-    HxSplit    *leaf  = frame_to_leaf (frame);
-    HxSplit    *parent;
-    HxSplit    *sibling_leaf;
+    GtkWidget *frame = GTK_WIDGET (user_data);
+    HxSplit *leaf = frame_to_leaf (frame);
+    HxSplit *parent;
+    HxSplit *sibling_leaf;
     PanelFrame *sibling_frame;
     PanelFrame *current_frame;
 
-    (void)action; (void)parameter;
+    (void)action;
+    (void)parameter;
 
-    if (leaf == NULL)
+    if (leaf == NULL) {
         return;
+    }
 
     parent = leaf_parent_split (leaf);
-    if (parent == NULL)
-        return;  /* area root — close-on-root is refused */
+    if (parent == NULL) {
+        return; /* area root — close-on-root is refused */
+    }
 
     /* Pick the sibling and walk down to the leaf nearest the
      * split boundary — i.e. the side of the sibling subtree
@@ -717,24 +736,26 @@ on_frame_close (GSimpleAction *action,
      * direction-toward-sibling along the parent's orientation
      * axis. */
     {
-        gboolean horiz = (hx_split_get_orientation (parent)
-                          == GTK_ORIENTATION_HORIZONTAL);
+        gboolean horiz
+            = (hx_split_get_orientation (parent) == GTK_ORIENTATION_HORIZONTAL);
         gboolean closing_is_a = (hx_split_get_child_a (parent) == leaf);
-        HxSplit *sib = closing_is_a
-                         ? hx_split_get_child_b (parent)
-                         : hx_split_get_child_a (parent);
+        HxSplit *sib = closing_is_a ? hx_split_get_child_b (parent)
+                                    : hx_split_get_child_a (parent);
         GtkDirectionType dir;
-        if (horiz)
+        if (horiz) {
             dir = closing_is_a ? GTK_DIR_RIGHT : GTK_DIR_LEFT;
-        else
-            dir = closing_is_a ? GTK_DIR_DOWN  : GTK_DIR_UP;
+        } else {
+            dir = closing_is_a ? GTK_DIR_DOWN : GTK_DIR_UP;
+        }
 
         sibling_leaf = descend_to_edge (sib, dir);
-        if (sibling_leaf == NULL)
+        if (sibling_leaf == NULL) {
             return;
+        }
         sibling_frame = hx_split_get_frame (sibling_leaf);
-        if (sibling_frame == NULL)
+        if (sibling_frame == NULL) {
             return;
+        }
     }
 
     current_frame = PANEL_FRAME (frame);
@@ -758,14 +779,16 @@ on_frame_close (GSimpleAction *action,
         guint n = panel_frame_get_n_pages (current_frame);
         for (guint i = n; i > 0; i--) {
             PanelWidget *p = panel_frame_get_page (current_frame, i - 1);
-            if (p == NULL)
+            if (p == NULL) {
                 continue;
+            }
             g_object_ref (p);
             panel_frame_remove (current_frame, p);
-            panel_frame_add    (sibling_frame, p);
-            if (HX_IS_PANEL (p))
+            panel_frame_add (sibling_frame, p);
+            if (HX_IS_PANEL (p)) {
                 hx_panel_set_home_frame (HX_PANEL (p),
                                          GTK_WIDGET (sibling_frame));
+            }
             g_object_unref (p);
         }
     }
@@ -776,14 +799,15 @@ on_frame_close (GSimpleAction *action,
      * those globals would dangle after hx_split_close_leaf
      * returns. Reseat the relevant global on the surviving
      * sibling frame BEFORE the close. */
-    if (frame == toolbar_sidebar_frame)
+    if (frame == toolbar_sidebar_frame) {
         toolbar_sidebar_frame = GTK_WIDGET (sibling_frame);
-    else if (frame == toolbar_end_frame)
-        toolbar_end_frame    = GTK_WIDGET (sibling_frame);
-    else if (frame == toolbar_bottom_frame)
+    } else if (frame == toolbar_end_frame) {
+        toolbar_end_frame = GTK_WIDGET (sibling_frame);
+    } else if (frame == toolbar_bottom_frame) {
         toolbar_bottom_frame = GTK_WIDGET (sibling_frame);
-    else if (frame == toolbar_center_frame)
+    } else if (frame == toolbar_center_frame) {
         toolbar_center_frame = GTK_WIDGET (sibling_frame);
+    }
 
     hx_split_close_leaf (leaf);
 
@@ -798,9 +822,13 @@ on_frame_close (GSimpleAction *action,
         HxSplit *area_root = parent;
         while (TRUE) {
             GtkWidget *p = gtk_widget_get_parent (GTK_WIDGET (area_root));
-            if (p == NULL) break;
+            if (p == NULL) {
+                break;
+            }
             p = gtk_widget_get_parent (p);
-            if (p == NULL || !HX_IS_SPLIT (p)) break;
+            if (p == NULL || !HX_IS_SPLIT (p)) {
+                break;
+            }
             area_root = HX_SPLIT (p);
         }
         hx_split_foreach_leaf (area_root, refresh_close_enabled_leaf, NULL);
@@ -818,8 +846,8 @@ update_frame_action_enabled (GtkWidget *frame)
     gboolean can_close = (leaf != NULL && leaf_parent_split (leaf) != NULL);
 
     gtk_widget_action_set_enabled (frame, "frame-ops.close-frame", can_close);
-    gtk_widget_action_set_enabled (frame, "frame-ops.split-h",     TRUE);
-    gtk_widget_action_set_enabled (frame, "frame-ops.split-v",     TRUE);
+    gtk_widget_action_set_enabled (frame, "frame-ops.split-h", TRUE);
+    gtk_widget_action_set_enabled (frame, "frame-ops.split-v", TRUE);
 }
 
 /* hx_split_foreach_leaf callback — runs update_frame_action_enabled
@@ -833,17 +861,18 @@ refresh_close_enabled_leaf (HxSplit *leaf, gpointer user_data)
     PanelFrame *frame;
     (void)user_data;
     frame = hx_split_get_frame (leaf);
-    if (frame != NULL)
+    if (frame != NULL) {
         update_frame_action_enabled (GTK_WIDGET (frame));
+    }
 }
 
 void
 hx_split_install_frame_ui (GtkWidget *frame)
 {
     GSimpleActionGroup *group;
-    GMenu              *menu;
-    GtkWidget          *button;
-    PanelFrameHeader   *header;
+    GMenu *menu;
+    GtkWidget *button;
+    PanelFrameHeader *header;
 
     g_return_if_fail (PANEL_IS_FRAME (frame));
 
@@ -856,28 +885,24 @@ hx_split_install_frame_ui (GtkWidget *frame)
         GSimpleAction *act;
 
         act = g_simple_action_new ("split-h", NULL);
-        g_signal_connect_object (act, "activate",
-                                 G_CALLBACK (on_frame_split_h),
+        g_signal_connect_object (act, "activate", G_CALLBACK (on_frame_split_h),
                                  frame, G_CONNECT_DEFAULT);
         g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (act));
         g_object_unref (act);
 
         act = g_simple_action_new ("split-v", NULL);
-        g_signal_connect_object (act, "activate",
-                                 G_CALLBACK (on_frame_split_v),
+        g_signal_connect_object (act, "activate", G_CALLBACK (on_frame_split_v),
                                  frame, G_CONNECT_DEFAULT);
         g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (act));
         g_object_unref (act);
 
         act = g_simple_action_new ("close-frame", NULL);
-        g_signal_connect_object (act, "activate",
-                                 G_CALLBACK (on_frame_close),
+        g_signal_connect_object (act, "activate", G_CALLBACK (on_frame_close),
                                  frame, G_CONNECT_DEFAULT);
         g_action_map_add_action (G_ACTION_MAP (group), G_ACTION (act));
         g_object_unref (act);
     }
-    gtk_widget_insert_action_group (frame, "frame-ops",
-                                    G_ACTION_GROUP (group));
+    gtk_widget_insert_action_group (frame, "frame-ops", G_ACTION_GROUP (group));
     g_object_unref (group);
 
     update_frame_action_enabled (frame);
@@ -887,8 +912,8 @@ hx_split_install_frame_ui (GtkWidget *frame)
      * start of the suffix area, before the existing controls. */
     menu = g_menu_new ();
     g_menu_append (menu, _ ("Split horizontally"), "frame-ops.split-h");
-    g_menu_append (menu, _ ("Split vertically"),   "frame-ops.split-v");
-    g_menu_append (menu, _ ("Close frame"),        "frame-ops.close-frame");
+    g_menu_append (menu, _ ("Split vertically"), "frame-ops.split-v");
+    g_menu_append (menu, _ ("Close frame"), "frame-ops.close-frame");
 
     button = gtk_menu_button_new ();
     gtk_menu_button_set_icon_name (GTK_MENU_BUTTON (button),
@@ -899,6 +924,7 @@ hx_split_install_frame_ui (GtkWidget *frame)
     g_object_unref (menu);
 
     header = panel_frame_get_header (PANEL_FRAME (frame));
-    if (header != NULL)
+    if (header != NULL) {
         panel_frame_header_add_suffix (header, 0, button);
+    }
 }

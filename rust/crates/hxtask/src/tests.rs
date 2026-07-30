@@ -55,7 +55,13 @@ fn new_lookup_delete_roundtrip() {
         tasks_init(sp);
 
         s.trans = 0x1001;
-        let tsk = task_new(hp, None, std::ptr::null_mut(), std::ptr::null_mut(), c"login".as_ptr());
+        let tsk = task_new(
+            hp,
+            None,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            c"login".as_ptr(),
+        );
         assert!(!tsk.is_null());
         assert_eq!((*tsk).trans, 0x1001);
         assert_eq!((*tsk).len, 1);
@@ -79,7 +85,13 @@ fn trans_zero_is_a_real_key() {
         let (sp, hp) = ptrs(&mut s);
         tasks_init(sp);
         s.trans = 0; // first transaction on a fresh connection
-        let tsk = task_new(hp, None, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
+        let tsk = task_new(
+            hp,
+            None,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
         assert_eq!(task_with_trans(sp, 0), tsk);
         assert_eq!(glib::ffi::g_hash_table_size(hx_session_tasks(sp)), 1);
         glib::ffi::g_hash_table_destroy(hx_session_tasks(sp));
@@ -93,7 +105,13 @@ fn null_str_leaves_null_label() {
         let (sp, hp) = ptrs(&mut s);
         tasks_init(sp);
         s.trans = 7;
-        let tsk = task_new(hp, None, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
+        let tsk = task_new(
+            hp,
+            None,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
         assert!((*tsk).str_.is_null());
         glib::ffi::g_hash_table_destroy(hx_session_tasks(sp));
     }
@@ -118,11 +136,23 @@ fn duplicate_trans_replaces_and_frees_old() {
         // Register a task with an owned ptr context + destructor (mirrors how a
         // real caller sets ptr_free after task_new). ptr is a non-NULL sentinel
         // count_dup never dereferences.
-        let a = task_new(hp, None, sentinel_ptr(), std::ptr::null_mut(), std::ptr::null());
+        let a = task_new(
+            hp,
+            None,
+            sentinel_ptr(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
         (*a).ptr_free = Some(count_dup);
 
         // Same trans → the insert replaces `a`, firing task_free(a) → count_dup.
-        let b = task_new(hp, None, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null());
+        let b = task_new(
+            hp,
+            None,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null(),
+        );
         assert_eq!(DUP_FREED.load(Ordering::SeqCst), 1);
         assert_eq!(glib::ffi::g_hash_table_size(hx_session_tasks(sp)), 1);
         assert_eq!(task_with_trans(sp, 0x4242), b);
@@ -146,7 +176,13 @@ fn destroy_frees_every_surviving_value() {
 
         for i in 100u32..132 {
             s.trans = i;
-            let t = task_new(hp, None, sentinel_ptr(), std::ptr::null_mut(), std::ptr::null());
+            let t = task_new(
+                hp,
+                None,
+                sentinel_ptr(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            );
             (*t).ptr_free = Some(count_destroy);
         }
         assert_eq!(glib::ffi::g_hash_table_size(hx_session_tasks(sp)), 32);
@@ -174,7 +210,13 @@ fn high_trans_ids_stay_distinct() {
         let mut handles = Vec::new();
         for &id in &ids {
             s.trans = id;
-            handles.push(task_new(hp, None, std::ptr::null_mut(), std::ptr::null_mut(), std::ptr::null()));
+            handles.push(task_new(
+                hp,
+                None,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            ));
         }
         assert_eq!(
             glib::ffi::g_hash_table_size(hx_session_tasks(sp)),

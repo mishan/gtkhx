@@ -75,43 +75,33 @@ _Static_assert (sizeof (HxInlineMediaFormat) == 4,
                 "rust discriminant pin (sizeof matches #[repr(u32)])");
 _Static_assert (INLINE_MEDIA_FORMAT_UNKNOWN == 0,
                 "rust discriminant pin (unknown)");
-_Static_assert (INLINE_MEDIA_FORMAT_JPEG == 1,
-                "rust discriminant pin (jpeg)");
-_Static_assert (INLINE_MEDIA_FORMAT_PNG == 2,
-                "rust discriminant pin (png)");
-_Static_assert (INLINE_MEDIA_FORMAT_GIF == 3,
-                "rust discriminant pin (gif)");
-_Static_assert (INLINE_MEDIA_FORMAT_SVG == 4,
-                "rust discriminant pin (svg)");
-_Static_assert (INLINE_MEDIA_FORMAT_WEBP == 5,
-                "rust discriminant pin (webp)");
-_Static_assert (INLINE_MEDIA_FORMAT_AVIF == 6,
-                "rust discriminant pin (avif)");
-_Static_assert (INLINE_MEDIA_FORMAT_HEIC == 7,
-                "rust discriminant pin (heic)");
-_Static_assert (INLINE_MEDIA_FORMAT_TIFF == 8,
-                "rust discriminant pin (tiff)");
-_Static_assert (INLINE_MEDIA_FORMAT_ICO == 9,
-                "rust discriminant pin (ico)");
-_Static_assert (INLINE_MEDIA_FORMAT_BMP == 10,
-                "rust discriminant pin (bmp)");
+_Static_assert (INLINE_MEDIA_FORMAT_JPEG == 1, "rust discriminant pin (jpeg)");
+_Static_assert (INLINE_MEDIA_FORMAT_PNG == 2, "rust discriminant pin (png)");
+_Static_assert (INLINE_MEDIA_FORMAT_GIF == 3, "rust discriminant pin (gif)");
+_Static_assert (INLINE_MEDIA_FORMAT_SVG == 4, "rust discriminant pin (svg)");
+_Static_assert (INLINE_MEDIA_FORMAT_WEBP == 5, "rust discriminant pin (webp)");
+_Static_assert (INLINE_MEDIA_FORMAT_AVIF == 6, "rust discriminant pin (avif)");
+_Static_assert (INLINE_MEDIA_FORMAT_HEIC == 7, "rust discriminant pin (heic)");
+_Static_assert (INLINE_MEDIA_FORMAT_TIFF == 8, "rust discriminant pin (tiff)");
+_Static_assert (INLINE_MEDIA_FORMAT_ICO == 9, "rust discriminant pin (ico)");
+_Static_assert (INLINE_MEDIA_FORMAT_BMP == 10, "rust discriminant pin (bmp)");
 
 HxInlineMediaFormat
 inline_media_sniff (const guint8 *bytes, gsize len)
 {
-    return (HxInlineMediaFormat) hx_image_decode_sniff (bytes, len);
+    return (HxInlineMediaFormat)hx_image_decode_sniff (bytes, len);
 }
 
 gboolean
 inline_media_format_is_allowed (HxInlineMediaFormat f)
 {
-    return hx_image_decode_format_is_allowed ((guint32) f);
+    return hx_image_decode_format_is_allowed ((guint32)f);
 }
 
 const char *
 inline_media_format_to_mime (HxInlineMediaFormat f)
 {
-    return hx_image_decode_format_to_mime ((guint32) f);
+    return hx_image_decode_format_to_mime ((guint32)f);
 }
 
 /* ---- Decode pipeline (glycin migration G.2) ------------------ */

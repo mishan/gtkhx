@@ -75,23 +75,20 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          * Argus is shifted to 5698/5699 (TLS 6498) so it doesn't
          * collide with hxtrackd's un-moveable 5498/5499 under host
          * networking. */
-        .name                    = "argus",
-        .host                    = "127.0.0.1",
-        .port                    = 5698,
-        .udp_port                = 5699,
-        .tls_port                = 6498,
+        .name = "argus",
+        .host = "127.0.0.1",
+        .port = 5698,
+        .udp_port = 5699,
+        .tls_port = 6498,
         /* tests/argus/conf/config.yaml seeds three promoted
          * entries (Alpha / Beta / Gamma). Test asserts on this
          * count. If the config grows, bump this. */
         .expected_promoted_count = 3,
-        .caps                    = HX_TEST_TRACKER_CAP_V1
-                                 | HX_TEST_TRACKER_CAP_V2
-                                 | HX_TEST_TRACKER_CAP_V3
-                                 | HX_TEST_TRACKER_CAP_SEARCH_TEXT
-                                 | HX_TEST_TRACKER_CAP_PAGINATION
-                                 | HX_TEST_TRACKER_CAP_HOSTNAME_RECS
-                                 | HX_TEST_TRACKER_CAP_PROMOTED
-                                 | HX_TEST_TRACKER_CAP_TLS,
+        .caps = HX_TEST_TRACKER_CAP_V1 | HX_TEST_TRACKER_CAP_V2
+                | HX_TEST_TRACKER_CAP_V3 | HX_TEST_TRACKER_CAP_SEARCH_TEXT
+                | HX_TEST_TRACKER_CAP_PAGINATION
+                | HX_TEST_TRACKER_CAP_HOSTNAME_RECS
+                | HX_TEST_TRACKER_CAP_PROMOTED | HX_TEST_TRACKER_CAP_TLS,
     },
     {
         /* hxtrackd: mhxd's bundled pre-spec v1 tracker, wrapped
@@ -113,18 +110,18 @@ const hx_test_tracker hx_test_tracker_matrix[] = {
          * just a regular registration. expected_promoted_count
          * stays 0; the v1 Tier 3 test asserts at least one
          * record arrives, not a specific count. */
-        .name                    = "hxtrackd",
-        .host                    = "127.0.0.1",
-        .port                    = 5498,
-        .udp_port                = 5499,
-        .tls_port                = 0,
+        .name = "hxtrackd",
+        .host = "127.0.0.1",
+        .port = 5498,
+        .udp_port = 5499,
+        .tls_port = 0,
         .expected_promoted_count = 0,
-        .caps                    = HX_TEST_TRACKER_CAP_V1,
+        .caps = HX_TEST_TRACKER_CAP_V1,
     },
 };
 
-const gsize hx_test_tracker_matrix_count =
-    G_N_ELEMENTS (hx_test_tracker_matrix);
+const gsize hx_test_tracker_matrix_count
+    = G_N_ELEMENTS (hx_test_tracker_matrix);
 
 /* ---- GTKHX_TEST_TRACKERS env filter ------------------------------ */
 /*
@@ -135,7 +132,7 @@ const gsize hx_test_tracker_matrix_count =
  * isn't an entry in anyway).
  */
 
-static gchar **env_filter_names = NULL;       /* NULL-terminated, owned */
+static gchar **env_filter_names = NULL; /* NULL-terminated, owned */
 static gboolean env_filter_loaded = FALSE;
 
 static void
@@ -164,7 +161,7 @@ load_env_filter (void)
     g_strfreev (parts);
 
     g_ptr_array_add (names, NULL);
-    env_filter_names = (gchar **) g_ptr_array_free (names, FALSE);
+    env_filter_names = (gchar **)g_ptr_array_free (names, FALSE);
 }
 
 static gboolean
@@ -199,7 +196,7 @@ hx_test_trackers_with (guint32 required_caps)
         if (!name_passes_env_filter (t->name)) {
             continue;
         }
-        g_ptr_array_add (result, (gpointer) t);
+        g_ptr_array_add (result, (gpointer)t);
     }
     return result;
 }

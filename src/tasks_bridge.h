@@ -11,7 +11,7 @@
 #define HX_TASKS_BRIDGE_H
 
 #include <glib.h>
-#include "gtkhx_session.h"   /* the `session` typedef */
+#include "gtkhx_session.h" /* the `session` typedef */
 
 struct htlc_conn;
 

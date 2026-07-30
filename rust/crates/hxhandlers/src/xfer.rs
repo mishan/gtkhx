@@ -32,17 +32,17 @@ use hxnet::xfer_handle::{
 // doubles below). hx_conn_has_cap is already Rust (gtkhx-core); the reply-task
 // callbacks and the wire-encode helper are native intra-workspace calls.
 #[cfg(not(test))]
+use crate::recv::xfer::{rcv_task_file_get, rcv_task_file_put};
+#[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_has_cap;
 #[cfg(not(test))]
 use hxhfs::ffi::resource_len;
-#[cfg(not(test))]
-use hxtext::gtkhx_text_for_wire;
 #[cfg(not(test))]
 use hxtask::send::hlwrite_chunks;
 #[cfg(not(test))]
 use hxtask::task_new;
 #[cfg(not(test))]
-use crate::recv::xfer::{rcv_task_file_get, rcv_task_file_put};
+use hxtext::gtkhx_text_for_wire;
 
 /// `FILE_DONE` (src/sound.h) — the transfer-complete chime.
 const FILE_DONE: c_int = 3;
@@ -241,7 +241,11 @@ pub unsafe extern "C" fn xfer_down(num: c_int) -> c_int {
 /// Main thread only.
 #[no_mangle]
 pub unsafe extern "C" fn xfer_num(htxf: *mut HtxfHandle) -> c_int {
-    with_list(|xs| xs.iter().position(|&e| e == htxf).map_or(-1, |i| i as c_int))
+    with_list(|xs| {
+        xs.iter()
+            .position(|&e| e == htxf)
+            .map_or(-1, |i| i as c_int)
+    })
 }
 
 /// `struct htxf_conn *htxf_with_ref(guint32 ref)` — find a transfer by its
@@ -384,7 +388,12 @@ unsafe fn slice_bytes<'a>(p: *const c_char, len: usize) -> &'a [u8] {
 /// to the registry, and emit the initial `file-update`. Does NOT drive the wire
 /// request — the caller decides (xfer_new → xfer_go, xfer_new_folder → its own
 /// GETFOLDER/PUTFOLDER later).
-unsafe fn xfer_init(path: &[u8], remotedir: &[u8], remotename: &[u8], type_: u16) -> *mut HtxfHandle {
+unsafe fn xfer_init(
+    path: &[u8],
+    remotedir: &[u8],
+    remotename: &[u8],
+    type_: u16,
+) -> *mut HtxfHandle {
     // Register the last-ref destructor once — every handle comes through here, so
     // this runs before any can be dropped (was the g_once_init in xfer_init).
     static DTOR: std::sync::Once = std::sync::Once::new();
@@ -761,7 +770,10 @@ pub unsafe extern "C" fn xfer_ready_write(htxf: *mut HtxfHandle) {
 ///
 /// # Safety
 /// `path` is a NUL-terminated C string; `user_data` is ignored.
-unsafe extern "C" fn local_path_exists_adapter(path: *const c_char, _user_data: *mut c_void) -> c_int {
+unsafe extern "C" fn local_path_exists_adapter(
+    path: *const c_char,
+    _user_data: *mut c_void,
+) -> c_int {
     if hx_file_size(path) >= 0 || resource_len(path) > 0 {
         1
     } else {
@@ -772,7 +784,12 @@ unsafe extern "C" fn local_path_exists_adapter(path: *const c_char, _user_data: 
 /// Rewrite `path` (a `[c_char; N]` buffer) in place to a collision-free name,
 /// plugging the real filesystem predicate into the C `uniquify_path` core.
 unsafe fn uniquify_local_path(path: *mut c_char, cap: usize) {
-    uniquify_path(path, cap, Some(local_path_exists_adapter), std::ptr::null_mut());
+    uniquify_path(
+        path,
+        cap,
+        Some(local_path_exists_adapter),
+        std::ptr::null_mut(),
+    );
 }
 
 /// Encode `htxf`'s `remotename` (explicit length, single-line field) for the wire
@@ -818,11 +835,7 @@ unsafe fn remotedir_present(htxf: *const HtxfHandle) -> bool {
 ///
 /// # Safety
 /// When `has_dir`, `*hldir` is NULL or valid for `hldirlen` bytes.
-unsafe fn hldir_dir_bytes(
-    hldir: &*mut u8,
-    hldirlen: u16,
-    has_dir: bool,
-) -> Option<&[u8]> {
+unsafe fn hldir_dir_bytes(hldir: &*mut u8, hldirlen: u16, has_dir: bool) -> Option<&[u8]> {
     if !has_dir {
         None
     } else if hldir.is_null() || hldirlen == 0 {
@@ -886,7 +899,13 @@ unsafe fn xfer_go_get(htxf: *mut HtxfHandle) {
                 std::ptr::null_mut(),
                 c"xfer_go".as_ptr(),
             );
-            hlwrite_chunks(htlc.cast(), HTLC_HDR_FILE_GET, 0, chunks.as_ptr(), hc as c_int);
+            hlwrite_chunks(
+                htlc.cast(),
+                HTLC_HDR_FILE_GET,
+                0,
+                chunks.as_ptr(),
+                hc as c_int,
+            );
         }
         if !hldir.is_null() {
             glib::ffi::g_free(hldir as *mut c_void);
@@ -930,7 +949,13 @@ unsafe fn xfer_go_put(htxf: *mut HtxfHandle) {
                 std::ptr::null_mut(),
                 c"xfer_go".as_ptr(),
             );
-            hlwrite_chunks(htlc.cast(), HTLC_HDR_FILE_PUT, 0, chunks.as_ptr(), hc as c_int);
+            hlwrite_chunks(
+                htlc.cast(),
+                HTLC_HDR_FILE_PUT,
+                0,
+                chunks.as_ptr(),
+                hc as c_int,
+            );
         }
         if !hldir.is_null() {
             glib::ffi::g_free(hldir as *mut c_void);

@@ -32,21 +32,8 @@ indent_size = 2
 [{Makefile,*.mk}]
 indent_style = tab
 
-# Vendored sources we explicitly do NOT want to restyle. Keep
-# EditorConfig out of their way so the upstream-matching whitespace
-# survives editor saves.
-[src/xtext.{c,h}]
-indent_style = tab
-indent_size = 8
-
-[src/dfa.c]
-indent_style = tab
-indent_size = 8
-
-[src/{md5,sha,haval,hmac,rand,cipher,hfs,macres,cicn}.{c,h}]
-indent_style = tab
-indent_size = 8
-
-[mhxd/**]
-indent_style = tab
-indent_size = 8
+# There used to be per-file carve-outs here keeping tabs on vendored
+# sources (HexChat's xtext, the in-tree crypto, the DFA engine, the
+# Mac-format parsers, and the mhxd server clone). Those are all gone —
+# deleted or ported into the Rust crates under rust/ — so the space
+# rules above now apply to every hand-authored source without exception.

@@ -176,8 +176,8 @@
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
 use std::rc::{Rc, Weak};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use gstreamer::prelude::*;
 use gstreamer_webrtc::WebRTCSDPType;
@@ -255,9 +255,7 @@ where
     F: FnOnce(&VoiceRuntime),
 {
     let upgraded = MAIN_THREAD_RUNTIMES
-        .try_with(|cell| {
-            cell.borrow().get(&id).and_then(WeakRuntime::upgrade)
-        })
+        .try_with(|cell| cell.borrow().get(&id).and_then(WeakRuntime::upgrade))
         .ok()
         .flatten();
     if let Some(rt) = upgraded {
@@ -388,23 +386,18 @@ pub type SendWireFrameCallback = unsafe extern "C" fn(
 /// the FFI mirror of [`hxvoice::state::SessionState`]; integer
 /// values match the C header's `gtkhx_voice_state` enum
 /// (`Idle=0` through `Leaving=5`).
-pub type StateChangedCallback =
-    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, state: u32);
+pub type StateChangedCallback = unsafe extern "C" fn(user_data: *mut core::ffi::c_void, state: u32);
 
 /// C-callback for `SignalKind::MuteChanged`. `muted` is 0 or 1.
-pub type MuteChangedCallback =
-    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, muted: i32);
+pub type MuteChangedCallback = unsafe extern "C" fn(user_data: *mut core::ffi::c_void, muted: i32);
 
 /// C-callback for `SignalKind::SpeakerChanged`. `uid` is the
 /// Hotline user id whose speaking state just flipped; `is_speaking`
 /// is 0 or 1. The runtime invokes this from the periodic
 /// voice-activity evaluator (default cadence 200 ms) on the GLib
 /// main thread, so the C side does NOT need its own marshalling.
-pub type SpeakerChangedCallback = unsafe extern "C" fn(
-    user_data: *mut core::ffi::c_void,
-    uid: u16,
-    is_speaking: i32,
-);
+pub type SpeakerChangedCallback =
+    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, uid: u16, is_speaking: i32);
 
 /// C-callback for `SignalKind::Error`. `text` is a NUL-terminated
 /// UTF-8 string with a user-facing message — typically the body
@@ -419,10 +412,8 @@ pub type SpeakerChangedCallback = unsafe extern "C" fn(
 /// initiated voice opcodes (600 / 601 / 603 / 606). 604 is a
 /// bidirectional notification with no task reply, so it never
 /// surfaces as an Error here.
-pub type ErrorCallback = unsafe extern "C" fn(
-    user_data: *mut core::ffi::c_void,
-    text: *const core::ffi::c_char,
-);
+pub type ErrorCallback =
+    unsafe extern "C" fn(user_data: *mut core::ffi::c_void, text: *const core::ffi::c_char);
 
 /// Bundle of per-`SignalKind` C callbacks. Mirrors
 /// `gtkhx_voice_runtime_signal_callbacks` in `src/voice_runtime.h`.
@@ -464,9 +455,7 @@ impl SignalCallbacks {
 /// C header uses (`gtkhx_voice_state`). Pulled out so the test
 /// suite can pin the mapping without dragging in unsafe extern fn
 /// noise.
-pub(crate) fn session_state_to_ffi(
-    state: hxvoice::state::SessionState,
-) -> u32 {
+pub(crate) fn session_state_to_ffi(state: hxvoice::state::SessionState) -> u32 {
     use hxvoice::state::SessionState as S;
     match state {
         S::Idle => 0,
@@ -522,11 +511,7 @@ impl CallbackBackend {
         user_data: *mut core::ffi::c_void,
         send_wire_frame_cb: Option<SendWireFrameCallback>,
     ) -> Self {
-        Self::new_with_signals(
-            user_data,
-            send_wire_frame_cb,
-            SignalCallbacks::none(),
-        )
+        Self::new_with_signals(user_data, send_wire_frame_cb, SignalCallbacks::none())
     }
 
     /// Construct a backend with both wire-frame and signal
@@ -560,10 +545,7 @@ impl Backend for CallbackBackend {
     }
     fn emit_signal(&mut self, kind: SignalKind, payload: SignalPayload) {
         match (kind, payload) {
-            (
-                SignalKind::StateChanged,
-                SignalPayload::StateChanged { new_state },
-            ) => {
+            (SignalKind::StateChanged, SignalPayload::StateChanged { new_state }) => {
                 if let Some(cb) = self.signal_callbacks.state_changed {
                     let ffi_state = session_state_to_ffi(new_state);
                     // SAFETY: same lifetime contract as
@@ -571,38 +553,21 @@ impl Backend for CallbackBackend {
                     unsafe { cb(self.user_data, ffi_state) };
                 }
             }
-            (
-                SignalKind::MuteChanged,
-                SignalPayload::MuteChanged { muted },
-            ) => {
+            (SignalKind::MuteChanged, SignalPayload::MuteChanged { muted }) => {
                 if let Some(cb) = self.signal_callbacks.mute_changed {
                     // SAFETY: same lifetime contract as
                     // send_wire_frame.
-                    unsafe {
-                        cb(self.user_data, if muted { 1 } else { 0 })
-                    };
+                    unsafe { cb(self.user_data, if muted { 1 } else { 0 }) };
                 }
             }
-            (
-                SignalKind::SpeakerChanged,
-                SignalPayload::SpeakerChanged { uid, is_speaking },
-            ) => {
+            (SignalKind::SpeakerChanged, SignalPayload::SpeakerChanged { uid, is_speaking }) => {
                 if let Some(cb) = self.signal_callbacks.speaker_changed {
                     // SAFETY: same lifetime contract as
                     // send_wire_frame.
-                    unsafe {
-                        cb(
-                            self.user_data,
-                            uid,
-                            if is_speaking { 1 } else { 0 },
-                        )
-                    };
+                    unsafe { cb(self.user_data, uid, if is_speaking { 1 } else { 0 }) };
                 }
             }
-            (
-                SignalKind::Error,
-                SignalPayload::Error { text },
-            ) => {
+            (SignalKind::Error, SignalPayload::Error { text }) => {
                 if let Some(cb) = self.signal_callbacks.error {
                     // Build a NUL-terminated C string the callback
                     // can read for the duration of the call. The
@@ -760,8 +725,7 @@ struct Inner {
     /// Drop on `Inner` walks this map and `remove`s every
     /// `Some` source so glib doesn't fire a callback against a
     /// dropped runtime.
-    armed_timer_sources:
-        HashMap<Timeout, Option<gstreamer::glib::SourceId>>,
+    armed_timer_sources: HashMap<Timeout, Option<gstreamer::glib::SourceId>>,
     /// True while `handle_event` is walking the action list for
     /// an event. A re-entrant call (backend dispatches an action
     /// that triggers a Hotline signal which calls back into
@@ -999,8 +963,7 @@ struct Inner {
     /// (new participant joins), so contention is non-existent
     /// and the std-only dependency surface is cheaper than
     /// adding `dashmap`.
-    per_user_voice_activity:
-        Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
+    per_user_voice_activity: Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
     /// Previous-tick snapshot of [`per_user_voice_activity`] —
     /// used by [`speaker_tick`] to compute deltas. A uid with a
     /// non-zero delta since the last tick is considered
@@ -1196,9 +1159,7 @@ impl VoiceRuntime {
                 wedge_watchdog_armed_flag: false,
                 last_seen_peer_state: None,
                 has_been_connected_since_join: false,
-                per_user_voice_activity: Arc::new(std::sync::Mutex::new(
-                    HashMap::new(),
-                )),
+                per_user_voice_activity: Arc::new(std::sync::Mutex::new(HashMap::new())),
                 per_user_activity_prev_snapshot: HashMap::new(),
                 per_user_speaking: HashMap::new(),
                 speaker_timer_source: None,
@@ -1232,8 +1193,7 @@ struct PipelineBits {
     webrtcbin: gstreamer::Element,
     bus_watch_guard: Option<gstreamer::bus::BusWatchGuard>,
     rtp_buffers_received: Arc<AtomicU64>,
-    per_user_voice_activity:
-        Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
+    per_user_voice_activity: Arc<std::sync::Mutex<HashMap<u16, Arc<AtomicU64>>>>,
 }
 
 /// Construct a fresh pipeline + webrtcbin + signal wiring for a
@@ -1263,84 +1223,80 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
     // from "pipeline rejected the element."
     //
     // Build webrtcbin with `bundle-policy=max-bundle`. This
-        // is critical for the multi-mline case (join-second
-        // client receives an SDP offer carrying BOTH a=mid:send
-        // for our outgoing leg AND a=mid:user-N for forwarded
-        // audio from another participant).
-        //
-        // Default `bundle-policy` is `none`. Reading
-        // gstwebrtcbin.c:6212-6214:
-        //
-        //   if (webrtc->bundle_policy != GST_WEBRTC_BUNDLE_POLICY_NONE)
-        //     if (!_parse_bundle (sdp->sdp, &bundled, error))
-        //       goto done;
-        //
-        // …with `none`, webrtcbin SKIPS parsing the BUNDLE
-        // group from the offer entirely. It then creates a
-        // SEPARATE transportstream per mline. Janus's offer
-        // includes `a=group:BUNDLE 0 1`, but our default-policy
-        // answer ignores it, so the receive side ends up on
-        // its own transportstream1 with its own session 1 in
-        // rtpbin. Incoming RTP arriving on the bundled UDP
-        // socket goes through transportstream0/session 0 (the
-        // send transceiver's), where rtpbin can't find a
-        // matching recvonly transceiver, doesn't fire its
-        // pad-added, doesn't create a jitterbuffer, and our
-        // webrtcbin.pad-added never gets called. The receive
-        // leg dies silently and Janus times the session out.
-        //
-        // `max-bundle` makes webrtcbin parse + honour the
-        // BUNDLE group, share a single transportstream + rtp
-        // session across all mlines, and demux incoming RTP
-        // via the MID extension to the right transceiver.
-        // The fix complements the codec-preferences pin we set
-        // in `connect_on_new_transceiver`: without that, the
-        // answer mline lacks a codec; without this, the
-        // answer lacks a working BUNDLE group. Both have to
-        // be in place for the receive side to function.
-        let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
-            .name("hxvoice-webrtcbin")
-            .property_from_str("bundle-policy", "max-bundle")
-            .build()
-            .map_err(|e| {
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "hxvoice: failed to build webrtcbin element: {e}"
-                );
-                RuntimeError::WebrtcbinUnavailable
-            })?;
-        pipeline
-            .add(&webrtcbin)
-            .map_err(|e| {
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "hxvoice: failed to add webrtcbin to pipeline: {e}"
-                );
-                RuntimeError::WebrtcbinUnavailable
-            })?;
-        // Add the send-leg stub so webrtcbin has something to
-        // advertise on the audio mline when it answers. Without
-        // a sink pad attached, webrtcbin produces an answer with
-        // `a=inactive` for the audio media — Janus then has nothing
-        // to route the media stream through, and the ICE
-        // connection-state walks new → checking → failed at the
-        // ~7 second mark.
-        //
-        // The send bin captures from `autoaudiosrc` (system-
-        // default microphone). Phase 8.E adds settings-driven
-        // device override via the DEVICE_PREFS in audio.rs; the
-        // encoder + payloader chain is identical either way.
-        //
-        // Build failure here means the user's GStreamer install
-        // is missing `mulawenc` or `rtppcmupay` (both in
-        // gst-plugins-good); collapse to WebrtcbinUnavailable
-        // since the runtime can't function without the send leg
-        // either way.
-        let input_device = crate::audio::input_device();
-        let send_bin = crate::audio::make_send_bin(
-            crate::audio::SEND_BIN_NAME,
-            input_device.as_deref(),
-        )
+    // is critical for the multi-mline case (join-second
+    // client receives an SDP offer carrying BOTH a=mid:send
+    // for our outgoing leg AND a=mid:user-N for forwarded
+    // audio from another participant).
+    //
+    // Default `bundle-policy` is `none`. Reading
+    // gstwebrtcbin.c:6212-6214:
+    //
+    //   if (webrtc->bundle_policy != GST_WEBRTC_BUNDLE_POLICY_NONE)
+    //     if (!_parse_bundle (sdp->sdp, &bundled, error))
+    //       goto done;
+    //
+    // …with `none`, webrtcbin SKIPS parsing the BUNDLE
+    // group from the offer entirely. It then creates a
+    // SEPARATE transportstream per mline. Janus's offer
+    // includes `a=group:BUNDLE 0 1`, but our default-policy
+    // answer ignores it, so the receive side ends up on
+    // its own transportstream1 with its own session 1 in
+    // rtpbin. Incoming RTP arriving on the bundled UDP
+    // socket goes through transportstream0/session 0 (the
+    // send transceiver's), where rtpbin can't find a
+    // matching recvonly transceiver, doesn't fire its
+    // pad-added, doesn't create a jitterbuffer, and our
+    // webrtcbin.pad-added never gets called. The receive
+    // leg dies silently and Janus times the session out.
+    //
+    // `max-bundle` makes webrtcbin parse + honour the
+    // BUNDLE group, share a single transportstream + rtp
+    // session across all mlines, and demux incoming RTP
+    // via the MID extension to the right transceiver.
+    // The fix complements the codec-preferences pin we set
+    // in `connect_on_new_transceiver`: without that, the
+    // answer mline lacks a codec; without this, the
+    // answer lacks a working BUNDLE group. Both have to
+    // be in place for the receive side to function.
+    let webrtcbin = gstreamer::ElementFactory::make("webrtcbin")
+        .name("hxvoice-webrtcbin")
+        .property_from_str("bundle-policy", "max-bundle")
+        .build()
+        .map_err(|e| {
+            gstreamer::warning!(
+                gstreamer::CAT_RUST,
+                "hxvoice: failed to build webrtcbin element: {e}"
+            );
+            RuntimeError::WebrtcbinUnavailable
+        })?;
+    pipeline.add(&webrtcbin).map_err(|e| {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: failed to add webrtcbin to pipeline: {e}"
+        );
+        RuntimeError::WebrtcbinUnavailable
+    })?;
+    // Add the send-leg stub so webrtcbin has something to
+    // advertise on the audio mline when it answers. Without
+    // a sink pad attached, webrtcbin produces an answer with
+    // `a=inactive` for the audio media — Janus then has nothing
+    // to route the media stream through, and the ICE
+    // connection-state walks new → checking → failed at the
+    // ~7 second mark.
+    //
+    // The send bin captures from `autoaudiosrc` (system-
+    // default microphone). Phase 8.E adds settings-driven
+    // device override via the DEVICE_PREFS in audio.rs; the
+    // encoder + payloader chain is identical either way.
+    //
+    // Build failure here means the user's GStreamer install
+    // is missing `mulawenc` or `rtppcmupay` (both in
+    // gst-plugins-good); collapse to WebrtcbinUnavailable
+    // since the runtime can't function without the send leg
+    // either way.
+    let input_device = crate::audio::input_device();
+    let send_bin =
+        crate::audio::make_send_bin(crate::audio::SEND_BIN_NAME, input_device.as_deref())
             .ok_or_else(|| {
                 gstreamer::warning!(
                     gstreamer::CAT_RUST,
@@ -1350,233 +1306,228 @@ fn build_pipeline_bits(runtime_id: u64) -> Result<PipelineBits, RuntimeError> {
                 );
                 RuntimeError::WebrtcbinUnavailable
             })?;
-        pipeline.add(&send_bin).map_err(|e| {
-            gstreamer::warning!(
-                gstreamer::CAT_RUST,
-                "hxvoice: failed to add send bin to pipeline: {e}"
-            );
-            RuntimeError::WebrtcbinUnavailable
-        })?;
-        // Request a sink pad on webrtcbin and link the send bin's
-        // src ghost pad to it. `sink_%u` returns a new sink pad
-        // backed by a fresh transceiver — webrtcbin picks the
-        // mline index. We DO NOT pre-add a transceiver via
-        // `add-transceiver` because that creates a second,
-        // unwired transceiver: SDP negotiation matches our
-        // pre-added one to mline 0 (a=mid:send) leaving its
-        // freshly-created send pad orphaned, then matches the
-        // `request_pad_simple` transceiver to mline 1
-        // (a=mid:user-N) collapsing it to recvonly. End result:
-        // our send chain is wired into a recvonly transceiver,
-        // packets get dropped, and the receive pad on the same
-        // transceiver never gets exposed via `pad-added` because
-        // webrtcbin thinks the output stream is "already
-        // connected" from the sink_%u setup. Janus's per-user
-        // mlines are the canonical way receive transceivers
-        // materialise here: this `sink_%u` request creates one
-        // sendonly transceiver for our outgoing audio, and
-        // webrtcbin auto-creates a recvonly transceiver (with a
-        // src pad) for every `a=mid:user-N` line in the offer.
-        //
-        // The link must happen BEFORE pipeline.set_state(Playing)
-        // so the negotiation sees a populated transceiver
-        // direction when create-answer fires later.
-        let webrtc_sink = webrtcbin
-            .request_pad_simple("sink_%u")
-            .ok_or_else(|| {
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "hxvoice: webrtcbin refused to grant a sink_%u pad"
-                );
-                RuntimeError::WebrtcbinUnavailable
-            })?;
-        let send_src = send_bin
-            .static_pad("src")
-            .ok_or_else(|| {
-                gstreamer::warning!(
-                    gstreamer::CAT_RUST,
-                    "hxvoice: send_bin missing its ghost src pad"
-                );
-                RuntimeError::WebrtcbinUnavailable
-            })?;
-        send_src.link(&webrtc_sink).map_err(|e| {
-            gstreamer::warning!(
-                gstreamer::CAT_RUST,
-                "hxvoice: failed to link send_bin → webrtcbin sink: {e:?}"
-            );
-            RuntimeError::WebrtcbinUnavailable
-        })?;
-        // Note: we deliberately do NOT pre-add a Recvonly
-        // transceiver here, even though the receive pad-added
-        // misfire suggests it might help.
-        //
-        // We tried that on claude/voice-pre-add-recvonly: SDP
-        // matching DID become symmetric (transceiver0 →
-        // sendonly for the send mline, transceiver1 → recvonly
-        // for the user-N mline) and the test trace showed both
-        // transceivers reaching the SDP processor's "creating
-        // new receive pad" branch. But:
-        //
-        //   (a) pad-added STILL didn't fire — the receive
-        //       src_0 pad stayed in detached state and the
-        //       "stream already connected to rtpbin" short-
-        //       circuit kept firing exactly as before. So
-        //       pre-adding the transceiver doesn't solve the
-        //       underlying gst_element_add_pad gating.
-        //   (b) ICE connectivity checks now fail — the peer
-        //       connection state goes `new → connecting →
-        //       failed` at the 30 s checking timeout, instead
-        //       of reaching `connected` as it did with one
-        //       transceiver. Something about the second
-        //       transceiver's SDP shape or BUNDLE wiring
-        //       confuses libnice or Janus.
-        //
-        // Until we understand the receive pad-add gate
-        // (probably needs reading gstwebrtcbin.c source for
-        // `_update_transceiver_from_sdp_media` and whatever
-        // pad-add path it expects after "creating new receive
-        // pad"), the right move is to stay on the single-
-        // transceiver setup that at least has working ICE +
-        // working send-direction RTP, and pick this back up
-        // once we have a clearer picture of the webrtcbin
-        // internals.
-        //
-        // `runtime_id` is taken from the caller — `VoiceRuntime::new`
-        // allocates a fresh id on construction; the
-        // `Action::TearDown` rebuild path reuses the existing id so
-        // the registry entry survives the wedge → rejoin cycle.
-        // Allocate the RTP-activity counter UPFRONT so we can both
-        // (a) clone an `Arc` into `connect_pad_added`'s streaming-
-        // thread closure for the receive-bin liveness probe to
-        // increment, and (b) move the same allocation into Inner
-        // for the wedge watchdog to read from. Sharing the
-        // allocation guarantees the closure and Inner are talking
-        // to the same counter — no risk of a "probe writes one
-        // counter, watchdog reads a different one" mismatch.
-        let rtp_buffers_received = Arc::new(AtomicU64::new(0));
-        // Per-user voice-activity counters. Allocated UPFRONT so
-        // `Inner` and the `level`-message bus handler share the live
-        // collection — `handle_level_message` populates new uids on
-        // the fly (main thread); the evaluator reads snapshots on
-        // each tick (main thread).
-        let per_user_voice_activity = Arc::new(std::sync::Mutex::new(
-            HashMap::<u16, Arc<AtomicU64>>::new(),
-        ));
-        // Wire the on-ice-candidate signal BEFORE registering.
-        // The signal callback only looks the runtime up via
-        // `with_main_thread_runtime` (which acquires the registry
-        // entry lazily), so the order is safe in either direction;
-        // doing it pre-register keeps the construction sequence
-        // strictly linear.
-        connect_on_ice_candidate(&webrtcbin, runtime_id);
-        connect_pad_added(
-            &webrtcbin,
-            &pipeline,
-            runtime_id,
-            Arc::clone(&rtp_buffers_received),
+    pipeline.add(&send_bin).map_err(|e| {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: failed to add send bin to pipeline: {e}"
         );
-        connect_pad_removed(&webrtcbin, runtime_id);
-        connect_connection_state_notify(&webrtcbin, runtime_id);
-        connect_on_new_transceiver(&webrtcbin);
-        let bus_watch_guard = attach_pipeline_bus_watch(&pipeline, runtime_id);
-        if bus_watch_guard.is_none() {
-            // No bus watch means three things silently stop working
-            // for this session: GStreamer error/warning triage
-            // logging, and — since the VAD landed — the `level`
-            // element's RMS messages that drive the per-uid speaker
-            // indicator (so SPEAKING never lights up). The only way
-            // `attach_pipeline_bus_watch` returns `None` in
-            // production is a failure to acquire the default
-            // `MainContext` (the cargo-parallel-test loser-of-the-
-            // race path is expected and harmless; production runs
-            // single-threaded on the main thread and shouldn't hit
-            // it). Make it loud so a field report is diagnosable
-            // rather than a mystery "indicator never moves".
-            gstreamer::warning!(
-                gstreamer::CAT_RUST,
-                "hxvoice: could not attach the pipeline bus watch \
+        RuntimeError::WebrtcbinUnavailable
+    })?;
+    // Request a sink pad on webrtcbin and link the send bin's
+    // src ghost pad to it. `sink_%u` returns a new sink pad
+    // backed by a fresh transceiver — webrtcbin picks the
+    // mline index. We DO NOT pre-add a transceiver via
+    // `add-transceiver` because that creates a second,
+    // unwired transceiver: SDP negotiation matches our
+    // pre-added one to mline 0 (a=mid:send) leaving its
+    // freshly-created send pad orphaned, then matches the
+    // `request_pad_simple` transceiver to mline 1
+    // (a=mid:user-N) collapsing it to recvonly. End result:
+    // our send chain is wired into a recvonly transceiver,
+    // packets get dropped, and the receive pad on the same
+    // transceiver never gets exposed via `pad-added` because
+    // webrtcbin thinks the output stream is "already
+    // connected" from the sink_%u setup. Janus's per-user
+    // mlines are the canonical way receive transceivers
+    // materialise here: this `sink_%u` request creates one
+    // sendonly transceiver for our outgoing audio, and
+    // webrtcbin auto-creates a recvonly transceiver (with a
+    // src pad) for every `a=mid:user-N` line in the offer.
+    //
+    // The link must happen BEFORE pipeline.set_state(Playing)
+    // so the negotiation sees a populated transceiver
+    // direction when create-answer fires later.
+    let webrtc_sink = webrtcbin.request_pad_simple("sink_%u").ok_or_else(|| {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: webrtcbin refused to grant a sink_%u pad"
+        );
+        RuntimeError::WebrtcbinUnavailable
+    })?;
+    let send_src = send_bin.static_pad("src").ok_or_else(|| {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: send_bin missing its ghost src pad"
+        );
+        RuntimeError::WebrtcbinUnavailable
+    })?;
+    send_src.link(&webrtc_sink).map_err(|e| {
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: failed to link send_bin → webrtcbin sink: {e:?}"
+        );
+        RuntimeError::WebrtcbinUnavailable
+    })?;
+    // Note: we deliberately do NOT pre-add a Recvonly
+    // transceiver here, even though the receive pad-added
+    // misfire suggests it might help.
+    //
+    // We tried that on claude/voice-pre-add-recvonly: SDP
+    // matching DID become symmetric (transceiver0 →
+    // sendonly for the send mline, transceiver1 → recvonly
+    // for the user-N mline) and the test trace showed both
+    // transceivers reaching the SDP processor's "creating
+    // new receive pad" branch. But:
+    //
+    //   (a) pad-added STILL didn't fire — the receive
+    //       src_0 pad stayed in detached state and the
+    //       "stream already connected to rtpbin" short-
+    //       circuit kept firing exactly as before. So
+    //       pre-adding the transceiver doesn't solve the
+    //       underlying gst_element_add_pad gating.
+    //   (b) ICE connectivity checks now fail — the peer
+    //       connection state goes `new → connecting →
+    //       failed` at the 30 s checking timeout, instead
+    //       of reaching `connected` as it did with one
+    //       transceiver. Something about the second
+    //       transceiver's SDP shape or BUNDLE wiring
+    //       confuses libnice or Janus.
+    //
+    // Until we understand the receive pad-add gate
+    // (probably needs reading gstwebrtcbin.c source for
+    // `_update_transceiver_from_sdp_media` and whatever
+    // pad-add path it expects after "creating new receive
+    // pad"), the right move is to stay on the single-
+    // transceiver setup that at least has working ICE +
+    // working send-direction RTP, and pick this back up
+    // once we have a clearer picture of the webrtcbin
+    // internals.
+    //
+    // `runtime_id` is taken from the caller — `VoiceRuntime::new`
+    // allocates a fresh id on construction; the
+    // `Action::TearDown` rebuild path reuses the existing id so
+    // the registry entry survives the wedge → rejoin cycle.
+    // Allocate the RTP-activity counter UPFRONT so we can both
+    // (a) clone an `Arc` into `connect_pad_added`'s streaming-
+    // thread closure for the receive-bin liveness probe to
+    // increment, and (b) move the same allocation into Inner
+    // for the wedge watchdog to read from. Sharing the
+    // allocation guarantees the closure and Inner are talking
+    // to the same counter — no risk of a "probe writes one
+    // counter, watchdog reads a different one" mismatch.
+    let rtp_buffers_received = Arc::new(AtomicU64::new(0));
+    // Per-user voice-activity counters. Allocated UPFRONT so
+    // `Inner` and the `level`-message bus handler share the live
+    // collection — `handle_level_message` populates new uids on
+    // the fly (main thread); the evaluator reads snapshots on
+    // each tick (main thread).
+    let per_user_voice_activity =
+        Arc::new(std::sync::Mutex::new(HashMap::<u16, Arc<AtomicU64>>::new()));
+    // Wire the on-ice-candidate signal BEFORE registering.
+    // The signal callback only looks the runtime up via
+    // `with_main_thread_runtime` (which acquires the registry
+    // entry lazily), so the order is safe in either direction;
+    // doing it pre-register keeps the construction sequence
+    // strictly linear.
+    connect_on_ice_candidate(&webrtcbin, runtime_id);
+    connect_pad_added(
+        &webrtcbin,
+        &pipeline,
+        runtime_id,
+        Arc::clone(&rtp_buffers_received),
+    );
+    connect_pad_removed(&webrtcbin, runtime_id);
+    connect_connection_state_notify(&webrtcbin, runtime_id);
+    connect_on_new_transceiver(&webrtcbin);
+    let bus_watch_guard = attach_pipeline_bus_watch(&pipeline, runtime_id);
+    if bus_watch_guard.is_none() {
+        // No bus watch means three things silently stop working
+        // for this session: GStreamer error/warning triage
+        // logging, and — since the VAD landed — the `level`
+        // element's RMS messages that drive the per-uid speaker
+        // indicator (so SPEAKING never lights up). The only way
+        // `attach_pipeline_bus_watch` returns `None` in
+        // production is a failure to acquire the default
+        // `MainContext` (the cargo-parallel-test loser-of-the-
+        // race path is expected and harmless; production runs
+        // single-threaded on the main thread and shouldn't hit
+        // it). Make it loud so a field report is diagnosable
+        // rather than a mystery "indicator never moves".
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: could not attach the pipeline bus watch \
                  (default MainContext unavailable). Voice will still \
                  connect, but pipeline error/warning logging and the \
                  `level`-based speaker indicator are disabled for this \
                  session."
-            );
-        }
-        // Transition the pipeline out of Null so webrtcbin's
-        // internal peer connection becomes usable. While the
-        // pipeline is in Null, webrtcbin reports its peer
-        // connection as `closed` and silently aborts every task
-        // we hand it — set-remote-description, create-answer,
-        // add-ice-candidate, the lot. That manifests as the
-        // state machine getting stuck in OfferPending: webrtcbin
-        // accepts the call, logs "Peerconnection is closed,
-        // aborting execution" at DEBUG level, and never resolves
-        // the promise.
-        //
-        // Playing is the production target — that's the state
-        // webrtcbin needs to actually flow media. A failure here
-        // (state-change rejected by an element) is fatal to the
-        // session, so collapse to WebrtcbinUnavailable rather
-        // than soldier on with a half-initialised pipeline.
-        // Move the pipeline to Playing. webrtcbin's internal
-        // `is_closed` flag mirrors the bin's element state: it's
-        // TRUE while in Null, FALSE in any higher state. With
-        // is_closed=TRUE every peer-connection task (set-remote-
-        // description, create-answer, add-ice-candidate, ...)
-        // logs "Peerconnection is closed, aborting execution" at
-        // DEBUG level and returns silently — which manifests
-        // user-side as the state machine getting stuck in
-        // OfferPending forever.
-        //
-        // The state change is best-effort: in test environments
-        // (no audio devices, no GLib main loop driving the bus)
-        // rtpbin and other internal elements may refuse to
-        // preroll and the call returns StateChangeError. That's
-        // fine for the unit tests, which exit the dispatch arms
-        // cleanly regardless of peer-connection state. In
-        // production the pipeline reaches at least Ready (often
-        // Async toward Playing as transceivers are added by the
-        // SDP exchange) which is enough to clear `is_closed` so
-        // the negotiation can proceed.
-        if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
-            // Failure here is usually one of two things:
-            //   1. Missing GStreamer nice plugin (libnice).
-            //      webrtcbin refuses to leave NULL when nicesink /
-            //      nicesrc aren't registered, and silently aborts
-            //      every peer-connection task afterwards
-            //      ("Peerconnection is closed, aborting execution"
-            //      at DEBUG level). On Debian / Ubuntu the plugin
-            //      lives in its own package — gst-plugins-bad
-            //      doesn't include it because of libnice's split
-            //      licensing. Fix: `apt install gstreamer1.0-nice`.
-            //      Fedora: gstreamer1-plugins-bad-free-extras or
-            //      build gst-plugins-bad with --enable-nice.
-            //   2. Test environment with no audio devices and no
-            //      GLib main loop driving the bus — rtpbin can't
-            //      preroll. Unit tests hit this path deliberately
-            //      and don't drive real peer-connection work, so
-            //      they exit cleanly even with the pipeline stuck
-            //      in NULL.
-            // (1) is the user-visible production case and the
-            // reason this warning is loud about the package name.
-            gstreamer::warning!(
-                gstreamer::CAT_RUST,
-                "hxvoice: pipeline set_state(Playing) returned {e:?}. \
+        );
+    }
+    // Transition the pipeline out of Null so webrtcbin's
+    // internal peer connection becomes usable. While the
+    // pipeline is in Null, webrtcbin reports its peer
+    // connection as `closed` and silently aborts every task
+    // we hand it — set-remote-description, create-answer,
+    // add-ice-candidate, the lot. That manifests as the
+    // state machine getting stuck in OfferPending: webrtcbin
+    // accepts the call, logs "Peerconnection is closed,
+    // aborting execution" at DEBUG level, and never resolves
+    // the promise.
+    //
+    // Playing is the production target — that's the state
+    // webrtcbin needs to actually flow media. A failure here
+    // (state-change rejected by an element) is fatal to the
+    // session, so collapse to WebrtcbinUnavailable rather
+    // than soldier on with a half-initialised pipeline.
+    // Move the pipeline to Playing. webrtcbin's internal
+    // `is_closed` flag mirrors the bin's element state: it's
+    // TRUE while in Null, FALSE in any higher state. With
+    // is_closed=TRUE every peer-connection task (set-remote-
+    // description, create-answer, add-ice-candidate, ...)
+    // logs "Peerconnection is closed, aborting execution" at
+    // DEBUG level and returns silently — which manifests
+    // user-side as the state machine getting stuck in
+    // OfferPending forever.
+    //
+    // The state change is best-effort: in test environments
+    // (no audio devices, no GLib main loop driving the bus)
+    // rtpbin and other internal elements may refuse to
+    // preroll and the call returns StateChangeError. That's
+    // fine for the unit tests, which exit the dispatch arms
+    // cleanly regardless of peer-connection state. In
+    // production the pipeline reaches at least Ready (often
+    // Async toward Playing as transceivers are added by the
+    // SDP exchange) which is enough to clear `is_closed` so
+    // the negotiation can proceed.
+    if let Err(e) = pipeline.set_state(gstreamer::State::Playing) {
+        // Failure here is usually one of two things:
+        //   1. Missing GStreamer nice plugin (libnice).
+        //      webrtcbin refuses to leave NULL when nicesink /
+        //      nicesrc aren't registered, and silently aborts
+        //      every peer-connection task afterwards
+        //      ("Peerconnection is closed, aborting execution"
+        //      at DEBUG level). On Debian / Ubuntu the plugin
+        //      lives in its own package — gst-plugins-bad
+        //      doesn't include it because of libnice's split
+        //      licensing. Fix: `apt install gstreamer1.0-nice`.
+        //      Fedora: gstreamer1-plugins-bad-free-extras or
+        //      build gst-plugins-bad with --enable-nice.
+        //   2. Test environment with no audio devices and no
+        //      GLib main loop driving the bus — rtpbin can't
+        //      preroll. Unit tests hit this path deliberately
+        //      and don't drive real peer-connection work, so
+        //      they exit cleanly even with the pipeline stuck
+        //      in NULL.
+        // (1) is the user-visible production case and the
+        // reason this warning is loud about the package name.
+        gstreamer::warning!(
+            gstreamer::CAT_RUST,
+            "hxvoice: pipeline set_state(Playing) returned {e:?}. \
                  If you see 'libnice elements are not available' on the \
                  webrtcbin channel just above, install the GStreamer nice \
                  plugin: `apt install gstreamer1.0-nice` on Debian/Ubuntu, \
                  or gstreamer1-plugins-bad-free-extras on Fedora. \
                  webrtcbin won't leave NULL without it and every SDP / \
                  ICE op will silently no-op."
-            );
-        }
-        Ok(PipelineBits {
-            pipeline,
-            webrtcbin,
-            bus_watch_guard,
-            rtp_buffers_received,
-            per_user_voice_activity,
-        })
+        );
     }
+    Ok(PipelineBits {
+        pipeline,
+        webrtcbin,
+        bus_watch_guard,
+        rtp_buffers_received,
+        per_user_voice_activity,
+    })
+}
 
 /// Drive the existing pipeline back to Null, drop every
 /// per-session GStreamer resource, then rebuild fresh handles via
@@ -1796,19 +1747,14 @@ impl VoiceRuntime {
             } = *inner;
             receive_bins
                 .values()
-                .filter(|bin| {
-                    recv_bin_matches_uid(bin, uid, recv_bin_uid_cache)
-                })
+                .filter(|bin| recv_bin_matches_uid(bin, uid, recv_bin_uid_cache))
                 .cloned()
                 .collect()
         };
         for bin in bins {
             set_bin_volume(&bin, gain);
         }
-        crate::debug::log!(
-            "voice-pipe",
-            "set playback volume for uid {uid} to {gain}"
-        );
+        crate::debug::log!("voice-pipe", "set playback volume for uid {uid} to {gain}");
     }
 
     /// Read the stored per-listener gain for a uid, or `1.0` (unity)
@@ -1942,9 +1888,7 @@ impl VoiceRuntime {
                 // purposes — switching rooms means new webrtcbin
                 // negotiation, new ICE handshake, new "have we
                 // reached Connected yet?" timeline.
-                (b, SessionState::JoinSent)
-                    if b != SessionState::JoinSent =>
-                {
+                (b, SessionState::JoinSent) if b != SessionState::JoinSent => {
                     let mut inner = self.inner.borrow_mut();
                     inner.has_been_connected_since_join = false;
                     inner.last_seen_peer_state = None;
@@ -1975,16 +1919,11 @@ impl VoiceRuntime {
                 //   3. First entry to Connecting — the genuine
                 //      never-connected case the wedge watchdog
                 //      was designed for. Arm it.
-                (b, SessionState::Connecting)
-                    if b != SessionState::Connecting =>
-                {
+                (b, SessionState::Connecting) if b != SessionState::Connecting => {
                     let (already_connected, has_been_connected) = {
                         let inner = self.inner.borrow();
                         (
-                            matches!(
-                                inner.last_seen_peer_state,
-                                Some(ConnectionState::Connected),
-                            ),
+                            matches!(inner.last_seen_peer_state, Some(ConnectionState::Connected),),
                             inner.has_been_connected_since_join,
                         )
                     };
@@ -2020,8 +1959,7 @@ impl VoiceRuntime {
                 // semantics as the legacy code, plus the new
                 // bookkeeping bit.
                 (SessionState::Connecting, SessionState::Connected) => {
-                    self.inner.borrow_mut().has_been_connected_since_join =
-                        true;
+                    self.inner.borrow_mut().has_been_connected_since_join = true;
                     cancel_wedge_watchdog(self);
                 }
 
@@ -2090,7 +2028,10 @@ impl VoiceRuntime {
     /// reason about atomic ordering.
     #[doc(hidden)]
     pub fn rtp_buffers_received_for_test(&self) -> u64 {
-        self.inner.borrow().rtp_buffers_received.load(Ordering::Relaxed)
+        self.inner
+            .borrow()
+            .rtp_buffers_received
+            .load(Ordering::Relaxed)
     }
 
     /// Test-only mutator: bump the RTP-activity counter so the
@@ -2290,11 +2231,7 @@ impl VoiceRuntime {
             // fires. `None` entries (test-fallback bookkeeping)
             // just drop.
             Action::CancelTimer { kind } => {
-                let source = self
-                    .inner
-                    .borrow_mut()
-                    .armed_timer_sources
-                    .remove(&kind);
+                let source = self.inner.borrow_mut().armed_timer_sources.remove(&kind);
                 if let Some(Some(s)) = source {
                     s.remove();
                 }
@@ -2346,8 +2283,7 @@ impl VoiceRuntime {
                 // dropped as stale.
                 let (webrtcbin, runtime_id, generation) = {
                     let mut inner = self.inner.borrow_mut();
-                    inner.answer_generation =
-                        inner.answer_generation.wrapping_add(1);
+                    inner.answer_generation = inner.answer_generation.wrapping_add(1);
                     (
                         inner.webrtcbin.clone(),
                         inner.runtime_id,
@@ -2369,16 +2305,11 @@ impl VoiceRuntime {
                 for line in sdp.lines() {
                     let trimmed = line.trim_end_matches('\r');
                     if let Some(rest) = trimmed.strip_prefix("a=mid:") {
-                        crate::debug::log!(
-                            "voice-pipe",
-                            "SDP offer carries a=mid:{rest}"
-                        );
+                        crate::debug::log!("voice-pipe", "SDP offer carries a=mid:{rest}");
                     }
                 }
                 if let Some(bin) = webrtcbin {
-                    apply_remote_offer_and_chain_answer(
-                        &bin, &sdp, runtime_id, generation,
-                    );
+                    apply_remote_offer_and_chain_answer(&bin, &sdp, runtime_id, generation);
                 }
             }
             Action::CreateAnswer => {
@@ -2391,11 +2322,7 @@ impl VoiceRuntime {
                 // (once stale, once correctly chained).
             }
             Action::SetLocalDescription { sdp } => {
-                let webrtcbin = self
-                    .inner
-                    .borrow()
-                    .webrtcbin
-                    .clone();
+                let webrtcbin = self.inner.borrow().webrtcbin.clone();
                 if let Some(bin) = webrtcbin {
                     apply_local_answer(&bin, &sdp);
                 }
@@ -2411,11 +2338,7 @@ impl VoiceRuntime {
             // webrtcbin a (mlineindex, candidate) pair through
             // its `add-ice-candidate` signal.
             Action::AddRemoteIce { candidate_json } => {
-                let webrtcbin = self
-                    .inner
-                    .borrow()
-                    .webrtcbin
-                    .clone();
+                let webrtcbin = self.inner.borrow().webrtcbin.clone();
                 if let Some(bin) = webrtcbin {
                     apply_remote_ice(&bin, &candidate_json);
                 }
@@ -2446,10 +2369,7 @@ impl VoiceRuntime {
                 // pad-added event.
                 let (pipeline, pad) = {
                     let mut inner = self.inner.borrow_mut();
-                    (
-                        inner.pipeline.clone(),
-                        inner.pending_pads.remove(&mid),
-                    )
+                    (inner.pipeline.clone(), inner.pending_pads.remove(&mid))
                 };
                 let (Some(pipeline), Some(pad)) = (pipeline, pad) else {
                     // Pipeline-less runtime (test) or no pending
@@ -2466,9 +2386,7 @@ impl VoiceRuntime {
                 // `mid=send` case) are left alone — they belong to
                 // different remote SSRCs and `pad-removed` reaps them.
                 let pad_key = pad.name().to_string();
-                if let Some(existing) =
-                    self.inner.borrow_mut().receive_bins.remove(&pad_key)
-                {
+                if let Some(existing) = self.inner.borrow_mut().receive_bins.remove(&pad_key) {
                     stop_receive_bin(&pipeline, &existing);
                 }
                 let counter = {
@@ -2479,17 +2397,12 @@ impl VoiceRuntime {
                 // the `level` element's RMS bus messages
                 // (`handle_level_message`), not from here, so this
                 // path only needs the global wedge-watchdog counter.
-                if let Some(bin) =
-                    start_receive_bin(&pipeline, &pad, &mid, &counter)
-                {
+                if let Some(bin) = start_receive_bin(&pipeline, &pad, &mid, &counter) {
                     // Replay any per-user playback gain the user set
                     // earlier this session so a rejoin keeps their
                     // chosen level.
                     self.apply_stored_volume_to_bin(&bin);
-                    self.inner
-                        .borrow_mut()
-                        .receive_bins
-                        .insert(pad_key, bin);
+                    self.inner.borrow_mut().receive_bins.insert(pad_key, bin);
                 }
             }
 
@@ -2516,17 +2429,14 @@ impl VoiceRuntime {
                         .iter()
                         .filter(|(_, bin)| {
                             let name = bin.name();
-                            mid_from_recv_bin_name(name.as_str())
-                                == Some(mid.as_str())
+                            mid_from_recv_bin_name(name.as_str()) == Some(mid.as_str())
                         })
                         .map(|(k, _)| k.clone())
                         .collect();
                     let mut victims: Vec<gstreamer::Bin> = Vec::new();
                     for k in keys {
                         if let Some(bin) = inner.receive_bins.remove(&k) {
-                            inner
-                                .recv_bin_uid_cache
-                                .remove(bin.name().as_str());
+                            inner.recv_bin_uid_cache.remove(bin.name().as_str());
                             victims.push(bin);
                         }
                     }
@@ -2561,8 +2471,7 @@ impl VoiceRuntime {
             Action::SetSendPipelineMute { muted } => {
                 let pipeline = self.inner.borrow().pipeline.clone();
                 if let Some(pipeline) = pipeline {
-                    match pipeline.by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME)
-                    {
+                    match pipeline.by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME) {
                         Some(volume) => {
                             volume.set_property("mute", muted);
                             crate::debug::log!(
@@ -2636,8 +2545,7 @@ fn build_session_description(
     if sdp.is_empty() {
         return None;
     }
-    let message = match gstreamer_sdp::SDPMessage::parse_buffer(sdp.as_bytes())
-    {
+    let message = match gstreamer_sdp::SDPMessage::parse_buffer(sdp.as_bytes()) {
         Ok(m) => m,
         Err(e) => {
             gstreamer::warning!(
@@ -2680,13 +2588,8 @@ fn apply_remote_offer_and_chain_answer(
     runtime_id: u64,
     generation: u64,
 ) {
-    crate::debug::log!(
-        "voice-sdp",
-        "REMOTE OFFER ({} bytes):\n{sdp}",
-        sdp.len()
-    );
-    let Some(desc) = build_session_description(sdp, WebRTCSDPType::Offer)
-    else {
+    crate::debug::log!("voice-sdp", "REMOTE OFFER ({} bytes):\n{sdp}", sdp.len());
+    let Some(desc) = build_session_description(sdp, WebRTCSDPType::Offer) else {
         return;
     };
     let main_ctx = gstreamer::glib::MainContext::default();
@@ -2717,18 +2620,14 @@ fn apply_remote_offer_and_chain_answer(
                 if rt.inner.borrow().answer_generation != generation {
                     return;
                 }
-                let webrtcbin =
-                    rt.inner.borrow().webrtcbin.clone();
+                let webrtcbin = rt.inner.borrow().webrtcbin.clone();
                 if let Some(bin) = webrtcbin {
                     create_answer(&bin, runtime_id, generation);
                 }
             });
         });
     });
-    webrtcbin.emit_by_name::<()>(
-        "set-remote-description",
-        &[&desc, &promise],
-    );
+    webrtcbin.emit_by_name::<()>("set-remote-description", &[&desc, &promise]);
 }
 
 /// Dispatch arm for `Action::SetLocalDescription`. Parses the
@@ -2737,13 +2636,8 @@ fn apply_remote_offer_and_chain_answer(
 /// the matching `SendWireFrame(603)` separately so the server
 /// gets the answer.
 fn apply_local_answer(webrtcbin: &gstreamer::Element, sdp: &str) {
-    crate::debug::log!(
-        "voice-sdp",
-        "LOCAL ANSWER ({} bytes):\n{sdp}",
-        sdp.len()
-    );
-    let Some(desc) = build_session_description(sdp, WebRTCSDPType::Answer)
-    else {
+    crate::debug::log!("voice-sdp", "LOCAL ANSWER ({} bytes):\n{sdp}", sdp.len());
+    let Some(desc) = build_session_description(sdp, WebRTCSDPType::Answer) else {
         return;
     };
     webrtcbin.emit_by_name::<()>(
@@ -2766,11 +2660,7 @@ fn apply_local_answer(webrtcbin: &gstreamer::Element, sdp: &str) {
 /// and `generation: u64` and the main context); the runtime itself
 /// stays `!Send`. See the module-level "Threading" section for the
 /// full reasoning.
-fn create_answer(
-    webrtcbin: &gstreamer::Element,
-    runtime_id: u64,
-    generation: u64,
-) {
+fn create_answer(webrtcbin: &gstreamer::Element, runtime_id: u64, generation: u64) {
     // Snapshot the main context up front so the closure carries
     // a `Send` handle into the worker thread without having to
     // re-acquire it there. `MainContext::default()` returns the
@@ -2787,9 +2677,7 @@ fn create_answer(
             // Nothing to do here.
             return;
         };
-        let Ok(desc) = reply
-            .get::<gstreamer_webrtc::WebRTCSessionDescription>("answer")
-        else {
+        let Ok(desc) = reply.get::<gstreamer_webrtc::WebRTCSessionDescription>("answer") else {
             return;
         };
         // Serialize the answer SDP. `as_text()` returns
@@ -2840,10 +2728,7 @@ fn create_answer(
             });
         });
     });
-    webrtcbin.emit_by_name::<()>(
-        "create-answer",
-        &[&None::<gstreamer::Structure>, &promise],
-    );
+    webrtcbin.emit_by_name::<()>("create-answer", &[&None::<gstreamer::Structure>, &promise]);
 }
 
 /// Dispatch arm for `Action::AddRemoteIce`. Parses the JSON via
@@ -2867,9 +2752,7 @@ fn create_answer(
 ///    requires the index; without it we'd have to guess, which
 ///    is worse than dropping the candidate.
 fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
-    let parsed = match hotline_proto::voice::ice::parse(
-        candidate_json.as_bytes(),
-    ) {
+    let parsed = match hotline_proto::voice::ice::parse(candidate_json.as_bytes()) {
         Some(p) => p,
         None => {
             gstreamer::warning!(
@@ -2903,10 +2786,7 @@ fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
         );
         return;
     };
-    webrtcbin.emit_by_name::<()>(
-        "add-ice-candidate",
-        &[&mline_index, &candidate],
-    );
+    webrtcbin.emit_by_name::<()>("add-ice-candidate", &[&mline_index, &candidate]);
 }
 
 /// Wire `webrtcbin.on-ice-candidate` so locally-gathered candidates
@@ -2940,10 +2820,7 @@ fn apply_remote_ice(webrtcbin: &gstreamer::Element, candidate_json: &str) {
 /// so production gets ICE wiring for every fresh runtime
 /// automatically. The pipeline-less constructor skips this — there's
 /// no bin to attach to.
-fn connect_on_ice_candidate(
-    webrtcbin: &gstreamer::Element,
-    runtime_id: u64,
-) {
+fn connect_on_ice_candidate(webrtcbin: &gstreamer::Element, runtime_id: u64) {
     let main_ctx = gstreamer::glib::MainContext::default();
     webrtcbin.connect("on-ice-candidate", false, move |values| {
         // The signal-emit returns no value (we return None at the
@@ -2983,20 +2860,17 @@ fn connect_on_ice_candidate(
                 return None;
             }
         };
-        let candidate_json = hotline_proto::voice::ice::build(
-            &hotline_proto::voice::ice::IceCandidate {
+        let candidate_json =
+            hotline_proto::voice::ice::build(&hotline_proto::voice::ice::IceCandidate {
                 candidate: Some(candidate),
                 sdp_mid: Some(sdp_mid),
                 sdp_mline_index: Some(mline_index),
                 username_fragment: None,
-            },
-        );
+            });
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
             with_main_thread_runtime(runtime_id, |rt| {
-                rt.handle_event(Event::WebrtcLocalIceGathered {
-                    candidate_json,
-                });
+                rt.handle_event(Event::WebrtcLocalIceGathered { candidate_json });
             });
         });
         None
@@ -3011,14 +2885,9 @@ fn connect_on_ice_candidate(
 /// Pulled into its own helper so the on-ice-candidate callback
 /// stays linear and the lookup logic can be reused by the
 /// step-5 pad-added path when it lands.
-fn lookup_local_sdp_mid(
-    webrtcbin: &gstreamer::Element,
-    mline_index: u32,
-) -> Option<String> {
-    let desc: gstreamer_webrtc::WebRTCSessionDescription = webrtcbin
-        .property_value("local-description")
-        .get()
-        .ok()?;
+fn lookup_local_sdp_mid(webrtcbin: &gstreamer::Element, mline_index: u32) -> Option<String> {
+    let desc: gstreamer_webrtc::WebRTCSessionDescription =
+        webrtcbin.property_value("local-description").get().ok()?;
     let sdp = desc.sdp();
     let media = sdp.media(mline_index)?;
     media.attribute_val("mid").map(|s| s.to_string())
@@ -3118,8 +2987,7 @@ fn connect_pad_added(
         // thread and own the `per_user_voice_activity` map directly,
         // so `start_receive_bin` only needs the global wedge-watchdog
         // counter on this path.
-        let recv_bin =
-            start_receive_bin(&pipeline, pad, &mid, &rtp_buffers_received);
+        let recv_bin = start_receive_bin(&pipeline, pad, &mid, &rtp_buffers_received);
         let pad = pad.clone();
         let main_ctx = main_ctx.clone();
         main_ctx.invoke(move || {
@@ -3174,8 +3042,7 @@ fn connect_pad_added(
                         // calls `pipeline.remove(bin)` and sets
                         // the bin to Null, dropping our local
                         // reference releases the last refcount.
-                        let pipeline =
-                            rt.inner.borrow().pipeline.clone();
+                        let pipeline = rt.inner.borrow().pipeline.clone();
                         if let Some(pipeline) = pipeline {
                             stop_receive_bin(&pipeline, bin);
                         }
@@ -3195,14 +3062,9 @@ fn connect_pad_added(
                 // "no pending pad" early return and leave our
                 // pre-linked bin alone.
                 if recv_bin.is_none() {
-                    rt.inner
-                        .borrow_mut()
-                        .pending_pads
-                        .insert(mid.clone(), pad);
+                    rt.inner.borrow_mut().pending_pads.insert(mid.clone(), pad);
                 }
-                rt.handle_event(Event::WebrtcPadAdded {
-                    mid: mid.clone(),
-                });
+                rt.handle_event(Event::WebrtcPadAdded { mid: mid.clone() });
             });
             // The "did the state machine consume the parked pad?"
             // cleanup runs on the NEXT main-loop tick, not
@@ -3226,8 +3088,7 @@ fn connect_pad_added(
             let mid = mid.clone();
             gstreamer::glib::idle_add_local_once(move || {
                 with_main_thread_runtime(runtime_id, |rt| {
-                    let stale =
-                        rt.inner.borrow_mut().pending_pads.remove(&mid);
+                    let stale = rt.inner.borrow_mut().pending_pads.remove(&mid);
                     // A stale entry at idle time means the state
                     // machine didn't consume the pad — either it
                     // wasn't in a state that accepts
@@ -3289,10 +3150,7 @@ fn connect_pad_removed(webrtcbin: &gstreamer::Element, runtime_id: u64) {
             with_main_thread_runtime(runtime_id, |rt| {
                 let (pipeline, bin) = {
                     let mut inner = rt.inner.borrow_mut();
-                    (
-                        inner.pipeline.clone(),
-                        inner.receive_bins.remove(&pad_key),
-                    )
+                    (inner.pipeline.clone(), inner.receive_bins.remove(&pad_key))
                 };
                 if let (Some(pipeline), Some(bin)) = (pipeline, bin) {
                     crate::debug::log!(
@@ -3328,12 +3186,9 @@ fn connect_pad_removed(webrtcbin: &gstreamer::Element, runtime_id: u64) {
 /// channels) or the transceiver hasn't been assigned a `mid` yet
 /// (the bin is still negotiating).
 fn lookup_pad_mid(pad: &gstreamer::Pad) -> Option<String> {
-    let trans: gstreamer_webrtc::WebRTCRTPTransceiver = pad
-        .property_value("transceiver")
-        .get()
-        .ok()?;
-    let mid: Option<String> =
-        trans.property_value("mid").get().ok().flatten();
+    let trans: gstreamer_webrtc::WebRTCRTPTransceiver =
+        pad.property_value("transceiver").get().ok()?;
+    let mid: Option<String> = trans.property_value("mid").get().ok().flatten();
     mid
 }
 
@@ -3452,37 +3307,28 @@ fn connect_on_new_transceiver(webrtcbin: &gstreamer::Element) {
 /// only the `runtime_id` (`u64`, `Copy`) and the main context
 /// handle; the per-fire `peer-connection-state` lookup reads from
 /// the bin handed back through the signal args.
-fn connect_connection_state_notify(
-    webrtcbin: &gstreamer::Element,
-    runtime_id: u64,
-) {
+fn connect_connection_state_notify(webrtcbin: &gstreamer::Element, runtime_id: u64) {
     let main_ctx = gstreamer::glib::MainContext::default();
-    webrtcbin.connect_notify(
-        Some("connection-state"),
-        move |bin, _pspec| {
-            let state: gstreamer_webrtc::WebRTCPeerConnectionState =
-                bin.property("connection-state");
-            let mapped = map_peer_connection_state(state);
-            let main_ctx = main_ctx.clone();
-            main_ctx.invoke(move || {
-                with_main_thread_runtime(runtime_id, |rt| {
-                    // Mirror the post-translate state onto Inner
-                    // BEFORE firing the event. The state machine's
-                    // step() runs synchronously inside handle_event,
-                    // and the post-step state diff (in handle_event)
-                    // reads `last_seen_peer_state` to decide whether
-                    // to synthesize a Connected event for a stuck
-                    // renegotiation. Updating before keeps the post-
-                    // step diff strictly post-mortem on the latest
-                    // notify.
-                    rt.inner.borrow_mut().last_seen_peer_state = Some(mapped);
-                    rt.handle_event(
-                        Event::WebrtcConnectionStateChanged { state: mapped },
-                    );
-                });
+    webrtcbin.connect_notify(Some("connection-state"), move |bin, _pspec| {
+        let state: gstreamer_webrtc::WebRTCPeerConnectionState = bin.property("connection-state");
+        let mapped = map_peer_connection_state(state);
+        let main_ctx = main_ctx.clone();
+        main_ctx.invoke(move || {
+            with_main_thread_runtime(runtime_id, |rt| {
+                // Mirror the post-translate state onto Inner
+                // BEFORE firing the event. The state machine's
+                // step() runs synchronously inside handle_event,
+                // and the post-step state diff (in handle_event)
+                // reads `last_seen_peer_state` to decide whether
+                // to synthesize a Connected event for a stuck
+                // renegotiation. Updating before keeps the post-
+                // step diff strictly post-mortem on the latest
+                // notify.
+                rt.inner.borrow_mut().last_seen_peer_state = Some(mapped);
+                rt.handle_event(Event::WebrtcConnectionStateChanged { state: mapped });
             });
-        },
-    );
+        });
+    });
 }
 
 /// Translate a `gstreamer_webrtc::WebRTCPeerConnectionState` into the
@@ -3649,7 +3495,9 @@ fn mid_from_recv_bin_name(name: &str) -> Option<&str> {
 /// `cname:voice-<uid>`; that's the only place the uid lives for a
 /// bundled receive leg.
 fn parse_voice_cname(cname: &str) -> Option<u16> {
-    cname.strip_prefix("voice-").and_then(|n| n.parse::<u16>().ok())
+    cname
+        .strip_prefix("voice-")
+        .and_then(|n| n.parse::<u16>().ok())
 }
 
 /// Fallback uid resolution for a bundled `mid=send` receive bin,
@@ -3754,40 +3602,36 @@ fn handle_level_message(
             }
         } else {
             match mid_uid {
-            Some(u) => u,
-            None => {
-                let key = bin.name().to_string();
-                let cached =
-                    rt.inner.borrow().recv_bin_uid_cache.get(&key).copied();
-                match cached {
-                    Some(u) => u,
-                    None => {
-                        let Some(u) = uid_from_recv_pad_cname(&bin) else {
-                            // No `ssrc-<N>-cname` on the bundled leg's
-                            // pad caps yet — can't attribute this
-                            // speaker. Try again on a later message.
+                Some(u) => u,
+                None => {
+                    let key = bin.name().to_string();
+                    let cached = rt.inner.borrow().recv_bin_uid_cache.get(&key).copied();
+                    match cached {
+                        Some(u) => u,
+                        None => {
+                            let Some(u) = uid_from_recv_pad_cname(&bin) else {
+                                // No `ssrc-<N>-cname` on the bundled leg's
+                                // pad caps yet — can't attribute this
+                                // speaker. Try again on a later message.
+                                crate::debug::log!(
+                                    "voice-vad",
+                                    "speaking on bundled bin={} but no caps \
+                                 cname yet — unattributed",
+                                    bin.name()
+                                );
+                                return;
+                            };
                             crate::debug::log!(
                                 "voice-vad",
-                                "speaking on bundled bin={} but no caps \
-                                 cname yet — unattributed",
+                                "resolved bundled speaker bin={} -> uid={u} \
+                             (caps cname)",
                                 bin.name()
                             );
-                            return;
-                        };
-                        crate::debug::log!(
-                            "voice-vad",
-                            "resolved bundled speaker bin={} -> uid={u} \
-                             (caps cname)",
-                            bin.name()
-                        );
-                        rt.inner
-                            .borrow_mut()
-                            .recv_bin_uid_cache
-                            .insert(key, u);
-                        u
+                            rt.inner.borrow_mut().recv_bin_uid_cache.insert(key, u);
+                            u
+                        }
                     }
                 }
-            }
             }
         };
         crate::debug::log!("voice-vad", "speaking uid={uid}");
@@ -3924,9 +3768,7 @@ fn start_receive_bin(
         let counter = std::sync::atomic::AtomicU64::new(0);
         let mid_owned = mid.to_string();
         src_pad.add_probe(gstreamer::PadProbeType::BUFFER, move |_pad, _info| {
-            let n = counter
-                .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-                + 1;
+            let n = counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
             if n == 1 || n % 50 == 0 {
                 crate::debug::log!(
                     "voice-flow",
@@ -3938,10 +3780,7 @@ fn start_receive_bin(
     }
     let bin_name = recv_bin_name(mid, src_pad.name().as_str());
     let output_device = crate::audio::output_device();
-    let bin = match crate::audio::make_receive_bin(
-        &bin_name,
-        output_device.as_deref(),
-    ) {
+    let bin = match crate::audio::make_receive_bin(&bin_name, output_device.as_deref()) {
         Some(b) => b,
         None => {
             gstreamer::warning!(
@@ -4041,10 +3880,7 @@ fn start_receive_bin(
 /// peer ref. A subsequent `StartReceivePipeline` for the same mid
 /// would then try to link the (still-linked) src pad and fail with
 /// "already linked", leaving the new bin orphaned in the pipeline.
-fn stop_receive_bin(
-    pipeline: &gstreamer::Pipeline,
-    bin: &gstreamer::Bin,
-) {
+fn stop_receive_bin(pipeline: &gstreamer::Pipeline, bin: &gstreamer::Bin) {
     if let Some(sink_pad) = bin.static_pad("sink") {
         if let Some(peer) = sink_pad.peer() {
             // Unlink the src→sink direction. The src pad's peer
@@ -4077,11 +3913,7 @@ fn arm_timer(runtime: &VoiceRuntime, kind: Timeout, ms: u32) {
     // Cancel any existing timer of this kind first — the
     // re-arm semantics on `ArmTimer` are "restart the
     // watchdog from now", not "no-op if already armed".
-    let prev = runtime
-        .inner
-        .borrow_mut()
-        .armed_timer_sources
-        .remove(&kind);
+    let prev = runtime.inner.borrow_mut().armed_timer_sources.remove(&kind);
     if let Some(Some(s)) = prev {
         s.remove();
     }
@@ -4201,8 +4033,7 @@ fn arm_wedge_watchdog(runtime: &VoiceRuntime) {
         if let Some(s) = inner.wedge_watchdog_source.take() {
             s.remove();
         }
-        inner.wedge_watchdog_last_snapshot =
-            inner.rtp_buffers_received.load(Ordering::Relaxed);
+        inner.wedge_watchdog_last_snapshot = inner.rtp_buffers_received.load(Ordering::Relaxed);
         inner.wedge_watchdog_armed_flag = true;
     }
 
@@ -4347,9 +4178,7 @@ fn arm_speaker_timer(runtime: &VoiceRuntime) {
         }
     };
     let source_id = gstreamer::glib::timeout_add_local(
-        core::time::Duration::from_millis(
-            SPEAKER_EVAL_INTERVAL_MS as u64,
-        ),
+        core::time::Duration::from_millis(SPEAKER_EVAL_INTERVAL_MS as u64),
         move || {
             with_main_thread_runtime(runtime_id, |rt| {
                 speaker_tick(rt);
@@ -4420,8 +4249,7 @@ fn speaker_tick(runtime: &VoiceRuntime) {
                 .copied()
                 .unwrap_or(0);
             let speaking = *current > prev;
-            let was_speaking =
-                inner.per_user_speaking.get(uid).copied().unwrap_or(false);
+            let was_speaking = inner.per_user_speaking.get(uid).copied().unwrap_or(false);
             if speaking != was_speaking {
                 flips.push((*uid, speaking));
                 inner.per_user_speaking.insert(*uid, speaking);
@@ -4539,8 +4367,7 @@ mod tests {
     /// Returns a runtime and a shared handle the test can read.
     fn rec() -> (VoiceRuntime, Rc<RefCell<RecordingBackend>>) {
         let shared = Rc::new(RefCell::new(RecordingBackend::default()));
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(SharedRec(shared.clone())));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(SharedRec(shared.clone())));
         (runtime, shared)
     }
 
@@ -5041,10 +4868,8 @@ mod tests {
         let conv = gstreamer::ElementFactory::make("audioconvert")
             .build()
             .expect("audioconvert plugin available");
-        let caps = crate::audio::make_pcm8khz_caps_filter()
-            .expect("capsfilter element");
-        let level =
-            crate::audio::make_level_meter().expect("level plugin available");
+        let caps = crate::audio::make_pcm8khz_caps_filter().expect("capsfilter element");
+        let level = crate::audio::make_level_meter().expect("level plugin available");
         // Shorter interval than production so a message lands fast.
         level.set_property("interval", 50_000_000u64);
         let sink = gstreamer::ElementFactory::make("fakesink")
@@ -5054,8 +4879,7 @@ mod tests {
         pipeline
             .add_many([&src, &conv, &caps, &level, &sink])
             .expect("add elements");
-        gstreamer::Element::link_many([&src, &conv, &caps, &level, &sink])
-            .expect("link elements");
+        gstreamer::Element::link_many([&src, &conv, &caps, &level, &sink]).expect("link elements");
         pipeline
             .set_state(gstreamer::State::Playing)
             .expect("pipeline reaches Playing");
@@ -5064,8 +4888,7 @@ mod tests {
         // is robust under cargo's parallel test runner where the
         // default MainContext may be owned by another thread.
         let bus = pipeline.bus().expect("pipeline has a bus");
-        let deadline =
-            std::time::Instant::now() + std::time::Duration::from_secs(5);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
         let mut got: Option<f64> = None;
         while std::time::Instant::now() < deadline {
             let Some(msg) = bus.timed_pop_filtered(
@@ -5102,11 +4925,7 @@ mod tests {
         // tuple.
         use core::sync::atomic::AtomicU64;
         static SPEAKER_PAYLOAD: AtomicU64 = AtomicU64::new(0);
-        unsafe extern "C" fn cb(
-            _ud: *mut core::ffi::c_void,
-            uid: u16,
-            is_speaking: i32,
-        ) {
+        unsafe extern "C" fn cb(_ud: *mut core::ffi::c_void, uid: u16, is_speaking: i32) {
             // Pack as (uid << 32) | is_speaking so the test can
             // distinguish multiple emits.
             SPEAKER_PAYLOAD.store(
@@ -5120,11 +4939,7 @@ mod tests {
             speaker_changed: Some(cb),
             error: None,
         };
-        let mut backend = CallbackBackend::new_with_signals(
-            core::ptr::null_mut(),
-            None,
-            signals,
-        );
+        let mut backend = CallbackBackend::new_with_signals(core::ptr::null_mut(), None, signals);
         backend.emit_signal(
             SignalKind::SpeakerChanged,
             SignalPayload::SpeakerChanged {
@@ -5132,10 +4947,7 @@ mod tests {
                 is_speaking: true,
             },
         );
-        assert_eq!(
-            SPEAKER_PAYLOAD.load(Ordering::SeqCst),
-            (42u64 << 32) | 1
-        );
+        assert_eq!(SPEAKER_PAYLOAD.load(Ordering::SeqCst), (42u64 << 32) | 1);
         backend.emit_signal(
             SignalKind::SpeakerChanged,
             SignalPayload::SpeakerChanged {
@@ -5161,11 +4973,7 @@ mod tests {
         assert_eq!(runtime.state(), SessionState::Connecting);
         let backend = backend.borrow();
         // 600 (JOIN) then 603 (SDP_ANSWER).
-        let opcodes: Vec<u32> = backend
-            .wire_frames
-            .iter()
-            .map(|(op, _)| *op)
-            .collect();
+        let opcodes: Vec<u32> = backend.wire_frames.iter().map(|(op, _)| *op).collect();
         assert_eq!(opcodes, vec![600, 603]);
     }
 
@@ -5255,11 +5063,7 @@ mod tests {
         // for the canonical pin.
         assert_eq!(runtime.state(), SessionState::Idle);
         let backend = backend.borrow();
-        let opcodes: Vec<u32> = backend
-            .wire_frames
-            .iter()
-            .map(|(op, _)| *op)
-            .collect();
+        let opcodes: Vec<u32> = backend.wire_frames.iter().map(|(op, _)| *op).collect();
         assert!(opcodes.contains(&601));
         assert_eq!(backend.tear_downs, 1);
     }
@@ -5293,8 +5097,7 @@ mod tests {
         // Coverage smoke for the NoopBackend — confirms the
         // production-not-yet-wired path doesn't panic during a
         // full join → leave walk.
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         runtime.handle_event(Event::JoinRequested { cid: 1 });
         runtime.handle_event(Event::SdpOfferReceived {
             cid: 1,
@@ -5357,8 +5160,7 @@ mod tests {
             fn tear_down(&mut self) {}
         }
 
-        let runtime_slot: Rc<RefCell<Option<VoiceRuntime>>> =
-            Rc::new(RefCell::new(None));
+        let runtime_slot: Rc<RefCell<Option<VoiceRuntime>>> = Rc::new(RefCell::new(None));
         let backend = Box::new(ReentrantBackend {
             runtime: runtime_slot.clone(),
             fired: Cell::new(false),
@@ -5443,10 +5245,7 @@ mod tests {
         let runtime = VoiceRuntime::new(Box::new(NoopBackend))
             .expect("runtime should construct with a fresh pipeline");
         let inner = runtime.inner.borrow();
-        let bin = inner
-            .webrtcbin
-            .as_ref()
-            .expect("webrtcbin must be present");
+        let bin = inner.webrtcbin.as_ref().expect("webrtcbin must be present");
         assert_eq!(bin.factory().unwrap().name(), "webrtcbin");
         // And it should live inside the pipeline.
         let pipeline = inner.pipeline.as_ref().unwrap();
@@ -5477,10 +5276,7 @@ mod tests {
         let vol = pipeline
             .by_name(crate::audio::SEND_VOLUME_ELEMENT_NAME)
             .expect("send volume element present in the pipeline");
-        assert!(
-            !vol.property::<bool>("mute"),
-            "send volume starts unmuted"
-        );
+        assert!(!vol.property::<bool>("mute"), "send volume starts unmuted");
 
         // MuteToggleRequested is only honoured in an active-room
         // state, so join first (Idle → JoinSent).
@@ -5664,28 +5460,26 @@ mod tests {
         // Read signaling-state to prove the bin is alive before
         // we hand it garbage. The actual value is not asserted on
         // (see above).
-        let _before: gstreamer_webrtc::WebRTCSignalingState =
-            runtime
-                .inner
-                .borrow()
-                .webrtcbin
-                .as_ref()
-                .unwrap()
-                .property("signaling-state");
+        let _before: gstreamer_webrtc::WebRTCSignalingState = runtime
+            .inner
+            .borrow()
+            .webrtcbin
+            .as_ref()
+            .unwrap()
+            .property("signaling-state");
         runtime.dispatch(Action::SetRemoteDescription {
             sdp: "not an sdp".into(),
         });
         // Re-read to confirm the bin is still alive — a panic
         // inside dispatch would have unwound here. Any value is
         // acceptable; we just verify the property query succeeds.
-        let _after: gstreamer_webrtc::WebRTCSignalingState =
-            runtime
-                .inner
-                .borrow()
-                .webrtcbin
-                .as_ref()
-                .unwrap()
-                .property("signaling-state");
+        let _after: gstreamer_webrtc::WebRTCSignalingState = runtime
+            .inner
+            .borrow()
+            .webrtcbin
+            .as_ref()
+            .unwrap()
+            .property("signaling-state");
     }
 
     /// Pipeline-less runtime: SDP dispatch arms early-return cleanly.
@@ -5694,8 +5488,7 @@ mod tests {
     /// crash just because there's no bin.
     #[test]
     fn pipeline_less_runtime_no_ops_sdp_dispatch() {
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         // None of these should panic.
         runtime.dispatch(Action::SetRemoteDescription {
             sdp: MIN_OFFER_SDP.into(),
@@ -5715,18 +5508,15 @@ mod tests {
     /// id sees None.
     #[test]
     fn dropping_runtime_evicts_thread_local_registry_entry() {
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         let id = runtime.inner.borrow().runtime_id;
         // Confirm registered.
-        let present = MAIN_THREAD_RUNTIMES
-            .with(|cell| cell.borrow().contains_key(&id));
+        let present = MAIN_THREAD_RUNTIMES.with(|cell| cell.borrow().contains_key(&id));
         assert!(present, "runtime should be registered post-construction");
 
         drop(runtime);
 
-        let still_present = MAIN_THREAD_RUNTIMES
-            .with(|cell| cell.borrow().contains_key(&id));
+        let still_present = MAIN_THREAD_RUNTIMES.with(|cell| cell.borrow().contains_key(&id));
         assert!(
             !still_present,
             "Drop for Inner should evict the registry entry"
@@ -5743,10 +5533,7 @@ mod tests {
         // Use a deliberately-bogus id — far above NEXT_RUNTIME_ID's
         // monotonic floor for the test.
         with_main_thread_runtime(u64::MAX - 1, |_| ran = true);
-        assert!(
-            !ran,
-            "closure must not run when the runtime id is unknown"
-        );
+        assert!(!ran, "closure must not run when the runtime id is unknown");
     }
 
     /// SetLocalDescription on the answerer path: after accepting
@@ -5807,8 +5594,7 @@ mod tests {
     /// chain's promise.
     #[test]
     fn set_remote_description_dispatch_bumps_answer_generation() {
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         let before = runtime.inner.borrow().answer_generation;
         runtime.dispatch(Action::SetRemoteDescription {
             sdp: "v=0\r\n".into(),
@@ -5837,8 +5623,7 @@ mod tests {
     /// actions back-to-back.
     #[test]
     fn create_answer_dispatch_is_now_a_noop_on_generation() {
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         let before = runtime.inner.borrow().answer_generation;
         runtime.dispatch(Action::CreateAnswer);
         let after = runtime.inner.borrow().answer_generation;
@@ -5936,8 +5721,7 @@ mod tests {
     /// existing pipeline-less SDP test.
     #[test]
     fn pipeline_less_runtime_no_ops_add_remote_ice() {
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         runtime.dispatch(Action::AddRemoteIce {
             candidate_json: VALID_ICE_JSON.into(),
         });
@@ -5981,8 +5765,7 @@ mod tests {
     /// decides whether to drive GStreamer.
     #[test]
     fn pipeline_less_runtime_no_ops_start_receive_pipeline() {
-        let runtime =
-            VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
+        let runtime = VoiceRuntime::new_without_pipeline(Box::new(NoopBackend));
         runtime.dispatch(Action::StartReceivePipeline {
             mid: "audio0".into(),
             user_id: 42,
@@ -6099,7 +5882,10 @@ mod tests {
             map_peer_connection_state(Src::Disconnected),
             Dst::Disconnected
         ));
-        assert!(matches!(map_peer_connection_state(Src::Failed), Dst::Failed));
+        assert!(matches!(
+            map_peer_connection_state(Src::Failed),
+            Dst::Failed
+        ));
     }
 
     /// Constructing a runtime with a real pipeline runs
@@ -6164,8 +5950,7 @@ mod tests {
     #[test]
     fn callback_backend_forwards_opcode_and_body() {
         let captured = CapturedFrames(RefCell::new(Vec::new()));
-        let user_data =
-            &captured as *const CapturedFrames as *mut core::ffi::c_void;
+        let user_data = &captured as *const CapturedFrames as *mut core::ffi::c_void;
         let mut backend = CallbackBackend::new(user_data, Some(callback_capture));
 
         backend.send_wire_frame(603, b"v=0\r\no=- 0 0 IN IP4 0.0.0.0\r\n");
@@ -6198,8 +5983,7 @@ mod tests {
         // body slice may be any length the encoder produced.
         // Pin that an empty slice routes through cleanly.
         let captured = CapturedFrames(RefCell::new(Vec::new()));
-        let user_data =
-            &captured as *const CapturedFrames as *mut core::ffi::c_void;
+        let user_data = &captured as *const CapturedFrames as *mut core::ffi::c_void;
         let mut backend = CallbackBackend::new(user_data, Some(callback_capture));
 
         backend.send_wire_frame(600, &[]);
@@ -6217,18 +6001,12 @@ mod tests {
     /// Capture site for mute-changed signals.
     struct CapturedMutes(RefCell<Vec<i32>>);
 
-    unsafe extern "C" fn state_capture(
-        user_data: *mut core::ffi::c_void,
-        state: u32,
-    ) {
+    unsafe extern "C" fn state_capture(user_data: *mut core::ffi::c_void, state: u32) {
         let captured = unsafe { &*(user_data as *const CapturedStates) };
         captured.0.borrow_mut().push(state);
     }
 
-    unsafe extern "C" fn mute_capture(
-        user_data: *mut core::ffi::c_void,
-        muted: i32,
-    ) {
+    unsafe extern "C" fn mute_capture(user_data: *mut core::ffi::c_void, muted: i32) {
         let captured = unsafe { &*(user_data as *const CapturedMutes) };
         captured.0.borrow_mut().push(muted);
     }
@@ -6252,19 +6030,14 @@ mod tests {
     fn callback_backend_forwards_state_changed_signal() {
         use hxvoice::state::SessionState;
         let captured = CapturedStates(RefCell::new(Vec::new()));
-        let user_data =
-            &captured as *const CapturedStates as *mut core::ffi::c_void;
+        let user_data = &captured as *const CapturedStates as *mut core::ffi::c_void;
         let signals = SignalCallbacks {
             state_changed: Some(state_capture),
             mute_changed: None,
             speaker_changed: None,
             error: None,
         };
-        let mut backend = CallbackBackend::new_with_signals(
-            user_data,
-            None,
-            signals,
-        );
+        let mut backend = CallbackBackend::new_with_signals(user_data, None, signals);
 
         backend.emit_signal(
             SignalKind::StateChanged,
@@ -6291,19 +6064,14 @@ mod tests {
     #[test]
     fn callback_backend_forwards_mute_changed_signal() {
         let captured = CapturedMutes(RefCell::new(Vec::new()));
-        let user_data =
-            &captured as *const CapturedMutes as *mut core::ffi::c_void;
+        let user_data = &captured as *const CapturedMutes as *mut core::ffi::c_void;
         let signals = SignalCallbacks {
             state_changed: None,
             mute_changed: Some(mute_capture),
             speaker_changed: None,
             error: None,
         };
-        let mut backend = CallbackBackend::new_with_signals(
-            user_data,
-            None,
-            signals,
-        );
+        let mut backend = CallbackBackend::new_with_signals(user_data, None, signals);
 
         backend.emit_signal(
             SignalKind::MuteChanged,
@@ -6322,11 +6090,8 @@ mod tests {
         // None callback in SignalCallbacks must not be invoked.
         // Pair with NULL user_data so a wayward invocation would
         // segfault.
-        let mut backend = CallbackBackend::new_with_signals(
-            core::ptr::null_mut(),
-            None,
-            SignalCallbacks::none(),
-        );
+        let mut backend =
+            CallbackBackend::new_with_signals(core::ptr::null_mut(), None, SignalCallbacks::none());
         backend.emit_signal(
             SignalKind::StateChanged,
             SignalPayload::StateChanged {
@@ -6350,17 +6115,11 @@ mod tests {
     static MUTE_FIRED: AtomicBool = AtomicBool::new(false);
     static STATE_FIRED: AtomicBool = AtomicBool::new(false);
 
-    unsafe extern "C" fn mute_must_not_fire(
-        _user_data: *mut core::ffi::c_void,
-        _muted: i32,
-    ) {
+    unsafe extern "C" fn mute_must_not_fire(_user_data: *mut core::ffi::c_void, _muted: i32) {
         MUTE_FIRED.store(true, Ordering::SeqCst);
     }
 
-    unsafe extern "C" fn state_must_not_fire(
-        _user_data: *mut core::ffi::c_void,
-        _state: u32,
-    ) {
+    unsafe extern "C" fn state_must_not_fire(_user_data: *mut core::ffi::c_void, _state: u32) {
         STATE_FIRED.store(true, Ordering::SeqCst);
     }
 
@@ -6381,22 +6140,19 @@ mod tests {
             speaker_changed: None,
             error: None,
         };
-        let mut backend = CallbackBackend::new_with_signals(
-            core::ptr::null_mut(),
-            None,
-            signals,
-        );
+        let mut backend = CallbackBackend::new_with_signals(core::ptr::null_mut(), None, signals);
         backend.emit_signal(
             SignalKind::RoomStatus,
             SignalPayload::RoomStatus {
                 cid: 42,
-                connection_state:
-                    hxvoice::event::ConnectionState::Connected,
+                connection_state: hxvoice::event::ConnectionState::Connected,
             },
         );
         backend.emit_signal(
             SignalKind::Error,
-            SignalPayload::Error { text: "oops".into() },
+            SignalPayload::Error {
+                text: "oops".into(),
+            },
         );
         assert!(
             !STATE_FIRED.load(Ordering::SeqCst),

@@ -30,14 +30,14 @@ G_BEGIN_DECLS
 typedef struct HxnetTrackerFetch HxnetTrackerFetch;
 
 /* HxnetTrackerEvent.kind discriminants. */
-#define HXNET_TRK_KIND_BEGIN  0u
+#define HXNET_TRK_KIND_BEGIN 0u
 #define HXNET_TRK_KIND_RECORD 1u
-#define HXNET_TRK_KIND_ERROR  2u
-#define HXNET_TRK_KIND_DONE   3u
+#define HXNET_TRK_KIND_ERROR 2u
+#define HXNET_TRK_KIND_DONE 3u
 
 /* hxnet_tracker_fetch_poll return codes. */
-#define HXNET_TRK_POLL_EMPTY  0
-#define HXNET_TRK_POLL_EVENT  1
+#define HXNET_TRK_POLL_EMPTY 0
+#define HXNET_TRK_POLL_EVENT 1
 #define HXNET_TRK_POLL_CLOSED (-1)
 
 /* Host-aware TOFU verify: (tracker host, port, leaf "sha256:<hex>" fp)

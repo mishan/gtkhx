@@ -39,8 +39,8 @@ macroman_to_utf8_dup (const char *src, gsize len)
      * fallback char fires when MacRoman has a byte the converter
      * can't map to a Unicode code point; '?' matches what the old
      * tracker_server_create did. */
-    gchar *u8 = g_convert_with_fallback (src, (gssize) len, "UTF-8",
-                                         "MACINTOSH", "?", NULL, NULL, NULL);
+    gchar *u8 = g_convert_with_fallback (src, (gssize)len, "UTF-8", "MACINTOSH",
+                                         "?", NULL, NULL, NULL);
     if (!u8) {
         /* Pathological — return a length-bounded raw copy so the
          * view side at least gets something it can render. */
@@ -59,8 +59,8 @@ format_ip (const guint8 *bytes, GSocketFamily family)
     /* A family-appropriate placeholder for the failure paths below, so a
      * malformed tracker record yields a harmless string rather than a
      * crash while building the event. */
-    const char *placeholder =
-        (family == G_SOCKET_FAMILY_IPV6) ? "::" : "0.0.0.0";
+    const char *placeholder
+        = (family == G_SOCKET_FAMILY_IPV6) ? "::" : "0.0.0.0";
 
     GInetAddress *a = g_inet_address_new_from_bytes (bytes, family);
     if (!a) {
@@ -109,8 +109,8 @@ format_address (guint8 addr_type, const guint8 *address, gsize address_len)
         if (!address || address_len == 0) {
             return g_strdup ("");
         }
-        gchar *raw = g_strndup ((const char *) address, address_len);
-        gchar *valid = g_utf8_make_valid (raw, (gssize) address_len);
+        gchar *raw = g_strndup ((const char *)address, address_len);
+        gchar *valid = g_utf8_make_valid (raw, (gssize)address_len);
         g_free (raw);
         return valid;
     }
@@ -132,9 +132,9 @@ hx_tracker_server_new_v1 (guint32 addr, guint16 port, guint16 nusers,
     /* Render the IPv4 into a printable form. `addr`'s bytes are already
      * in network order — exactly what g_inet_address_new_from_bytes
      * expects — so hand them straight over. */
-    e->address = format_ip ((const guint8 *) &addr, G_SOCKET_FAMILY_IPV4);
+    e->address = format_ip ((const guint8 *)&addr, G_SOCKET_FAMILY_IPV4);
 
-    e->port   = port;
+    e->port = port;
     e->nusers = nusers;
 
     /* v1 names + descriptions arrived MacRoman; transcode once
@@ -166,13 +166,13 @@ hx_tracker_server_new_v3 (guint8 addr_type, const guint8 *address,
     HxTrackerServer *e = g_new0 (HxTrackerServer, 1);
 
     e->addr_type = addr_type;
-    e->address   = format_address (addr_type, address, address_len);
+    e->address = format_address (addr_type, address, address_len);
     if (!e->address) {
         g_free (e);
         return NULL;
     }
 
-    e->port   = port;
+    e->port = port;
     e->nusers = nusers;
 
     /* v3 strings are already UTF-8 per spec — but defensively
@@ -243,13 +243,18 @@ _Static_assert (sizeof (HxTrackerServer) == 72,
 /* Field offsets too — a size-only pin misses field reorderings /
  * padding changes that keep the total size. Mirror gtkhx-boxed::tracker's
  * offset_of! asserts exactly. */
-_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, addr_type) == 0, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, address) == 8, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, addr_type) == 0,
+                "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, address) == 8,
+                "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, port) == 16, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, nusers) == 18, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, nusers) == 18,
+                "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, name) == 24, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, desc) == 32, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_count) == 40, "field offset");
-_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_bytes) == 48, "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_count) == 40,
+                "field offset");
+_Static_assert (G_STRUCT_OFFSET (HxTrackerServer, tlv_bytes) == 48,
+                "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, meta) == 56, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, total) == 64, "field offset");

@@ -37,12 +37,12 @@
  * accept the historical "www.example.com" pattern that lots of
  * users still type without a scheme. */
 static const char *url_schemes[]
-    = { "http://",    "https://", "ftp://",  "ftps://", "irc://", "mailto:",
-        "magnet:",    "git://",   "ssh://",  "sftp://",
+    = { "http://", "https://", "ftp://", "ftps://", "irc://",
+        "mailto:", "magnet:", "git://", "ssh://", "sftp://",
         /* hotline:// is the protocol-native URL — we route it through
-		 * a different right-click popup (Save Bookmark / Connect to
-		 * Server / Copy Link) instead of the browser-launch menu. The
-		 * branch lives in gtkurl_show_popup. */
+         * a different right-click popup (Save Bookmark / Connect to
+         * Server / Copy Link) instead of the browser-launch menu. The
+         * branch lives in gtkurl_show_popup. */
         "hotline://", NULL };
 static const char *url_bare_prefixes[] = { "www.", "ftp.", "irc.", NULL };
 
@@ -90,8 +90,8 @@ trim_trailing_url_punct (const char *s, int len)
     while (len > 0 && is_strip_char (s[len - 1])) {
         char c = s[len - 1];
         /* Don't strip a closing paren / bracket if the URL
-		 * itself contains a matching opener (Wikipedia URL
-		 * shape). */
+         * itself contains a matching opener (Wikipedia URL
+         * shape). */
         if (c == ')' && count_char (s, len, '(') > 0) {
             break;
         }
@@ -145,9 +145,9 @@ gtkurl_is_url (const char *word)
     }
 
     /* Bare email address — handled here so right-click on an email
-	 * gets the same Open / Copy popup, mailto:-prefixed at launch
-	 * time. word_check returns WORD_EMAIL for these, kept in
-	 * lockstep. */
+     * gets the same Open / Copy popup, mailto:-prefixed at launch
+     * time. word_check returns WORD_EMAIL for these, kept in
+     * lockstep. */
     len = strlen (word);
     at = strchr (word, '@');
     dot = strrchr (word, '.');
@@ -480,22 +480,22 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
     }
 
     /* GtkPopover has to be parented to a widget that's safe
-	 * to grab from. Anchoring directly to a GtkTextView nested inside
-	 * a GtkScrolledWindow (or an xtext deep in the chat layout) tripped
-	 * GDK's "Tried to map a grabbing popup with a non-top most parent"
-	 * — the popover appeared but click-outside-to-dismiss broke and
-	 * Escape leaked the grab, freezing the rest of the app. Parenting
-	 * to the toplevel sidesteps this.
-	 *
-	 * Contract: callers pass (x, y) in TOPLEVEL-ROOT-RELATIVE coords.
-	 * gtkurl_textview_install's gesture handler hands us widget-local
-	 * coords, which it converts via gtk_widget_compute_point before
-	 * calling. gtkurl_xtext_word_click hands us coords from
-	 * gdk_event_get_position, which are surface-local (= root-local
-	 * in single-surface GTK 4) — no translation needed. The earlier
-	 * version of this function did the anchor→root translation
-	 * unconditionally, which left the xtext path double-translated
-	 * and the popup landed off-screen, looking inert. */
+     * to grab from. Anchoring directly to a GtkTextView nested inside
+     * a GtkScrolledWindow (or an xtext deep in the chat layout) tripped
+     * GDK's "Tried to map a grabbing popup with a non-top most parent"
+     * — the popover appeared but click-outside-to-dismiss broke and
+     * Escape leaked the grab, freezing the rest of the app. Parenting
+     * to the toplevel sidesteps this.
+     *
+     * Contract: callers pass (x, y) in TOPLEVEL-ROOT-RELATIVE coords.
+     * gtkurl_textview_install's gesture handler hands us widget-local
+     * coords, which it converts via gtk_widget_compute_point before
+     * calling. gtkurl_xtext_word_click hands us coords from
+     * gdk_event_get_position, which are surface-local (= root-local
+     * in single-surface GTK 4) — no translation needed. The earlier
+     * version of this function did the anchor→root translation
+     * unconditionally, which left the xtext path double-translated
+     * and the popup landed off-screen, looking inert. */
     parent = GTK_WIDGET (gtk_widget_get_root (anchor));
     if (!parent) {
         parent = anchor;
@@ -520,7 +520,7 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
     gtk_popover_set_child (GTK_POPOVER (popover), vbox);
 
     /* Header: the URL itself, single-line, ellipsised. dim-label
-	 * makes it read as caption rather than command. */
+     * makes it read as caption rather than command. */
     header = gtk_label_new (url);
     gtk_label_set_xalign (GTK_LABEL (header), 0.0);
     gtk_label_set_ellipsize (GTK_LABEL (header), PANGO_ELLIPSIZE_END);
@@ -536,11 +536,11 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
 
     if (is_hotline_url (url)) {
         /* hotline:// — Hotline-native menu. Connect routes through
-		 * connect_open_hotline_url (parses + plain-Hotline connect_with_args);
-		 * Save Bookmark routes through connect_save_hotline_url_as_
-		 * bookmark (parses + persists to the bookmarks TOML store). The
-		 * browser-launch entries below are skipped — xdg-open on a
-		 * hotline:// URL has nowhere good to go. */
+         * connect_open_hotline_url (parses + plain-Hotline connect_with_args);
+         * Save Bookmark routes through connect_save_hotline_url_as_
+         * bookmark (parses + persists to the bookmarks TOML store). The
+         * browser-launch entries below are skipped — xdg-open on a
+         * hotline:// URL has nowhere good to go. */
         GtkWidget *connect_item, *bookmark_item;
         {
             struct popup_ctx *ctx = g_new0 (struct popup_ctx, 1);
@@ -564,8 +564,7 @@ gtkurl_show_popup (GtkWidget *anchor, const char *url, double x, double y)
             struct popup_ctx *ctx = g_new0 (struct popup_ctx, 1);
             ctx->url = g_strdup (url);
             ctx->popover = GTK_POPOVER (popover);
-            copy_btn = make_menu_button ("edit-copy-symbolic",
-                                         _ ("Copy Link"),
+            copy_btn = make_menu_button ("edit-copy-symbolic", _ ("Copy Link"),
                                          G_CALLBACK (on_copy_link), ctx);
             gtk_box_append (GTK_BOX (vbox), copy_btn);
         }
@@ -663,9 +662,9 @@ gtkurl_xtext_word_click (GtkWidget *xtext, char *word, GdkEvent *event,
     }
 
     /* gdk_event_get_position is surface-relative, which is the same
-	 * as toplevel-root-relative in GTK 4's single-surface model.
-	 * gtkurl_show_popup expects root-local coords, so pass through
-	 * directly with no translation. */
+     * as toplevel-root-relative in GTK 4's single-surface model.
+     * gtkurl_show_popup expects root-local coords, so pass through
+     * directly with no translation. */
     if (!gdk_event_get_position (event, &x, &y)) {
         x = y = 0;
     }
@@ -695,8 +694,8 @@ ensure_url_tags (GtkTextView *tv)
 
     if (!gtk_text_tag_table_lookup (tt, "url")) {
         /* Adwaita-friendly accent for links. The exact hex matches
-		 * libadwaita's @accent_color in light mode; dark theme also
-		 * reads acceptably. */
+         * libadwaita's @accent_color in light mode; dark theme also
+         * reads acceptably. */
         gtk_text_buffer_create_tag (buf, "url", "foreground", "#1c71d8", NULL);
     }
     if (!gtk_text_tag_table_lookup (tt, "url-hover")) {
@@ -717,8 +716,8 @@ apply_url_tag_cb (const char *text, int start_byte, int end_byte, gpointer user)
     (void)text;
 
     /* GtkTextBuffer iterates by character offset, not byte offset.
-	 * Convert via gtk_text_iter_get_offset on a fresh start iter
-	 * advanced by g_utf8_pointer_to_offset. */
+     * Convert via gtk_text_iter_get_offset on a fresh start iter
+     * advanced by g_utf8_pointer_to_offset. */
     gtk_text_buffer_get_start_iter (ctx->buf, &s);
     gtk_text_buffer_get_start_iter (ctx->buf, &e);
     {
@@ -889,7 +888,7 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
     }
 
     /* gesture x/y are widget-local; gtkurl_show_popup wants them in
-	 * the toplevel-root coordinate space. Translate. */
+     * the toplevel-root coordinate space. Translate. */
     root = GTK_WIDGET (gtk_widget_get_root (GTK_WIDGET (tv)));
     if (root && root != GTK_WIDGET (tv)) {
         if (gtk_widget_compute_point (GTK_WIDGET (tv), root, &src_pt,
@@ -903,7 +902,7 @@ on_textview_pressed (GtkGestureClick *gesture, int n_press, double x, double y,
     g_free (url);
 
     /* Swallow the event so the textview's default right-click
-	 * (selection / paste menu) doesn't also fire. */
+     * (selection / paste menu) doesn't also fire. */
     gtk_gesture_set_state (GTK_GESTURE (gesture), GTK_EVENT_SEQUENCE_CLAIMED);
 }
 
@@ -926,10 +925,10 @@ gtkurl_textview_install (GtkTextView *tv)
     gtk_gesture_single_set_button (GTK_GESTURE_SINGLE (click),
                                    GDK_BUTTON_SECONDARY);
     /* CAPTURE phase so we run before GtkTextView's own
-	 * right-click-to-popup-context-menu controller, which is in
-	 * BUBBLE phase by default. We claim the sequence inside the
-	 * handler to suppress the default menu when the click landed
-	 * on a URL. */
+     * right-click-to-popup-context-menu controller, which is in
+     * BUBBLE phase by default. We claim the sequence inside the
+     * handler to suppress the default menu when the click landed
+     * on a URL. */
     gtk_event_controller_set_propagation_phase (click, GTK_PHASE_CAPTURE);
     g_signal_connect (click, "pressed", G_CALLBACK (on_textview_pressed), tv);
     gtk_widget_add_controller (GTK_WIDGET (tv), click);

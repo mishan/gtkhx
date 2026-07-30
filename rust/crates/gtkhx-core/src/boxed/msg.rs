@@ -96,7 +96,14 @@ unsafe extern "C" fn boxed_free(p: *mut c_void) {
 #[no_mangle]
 pub extern "C" fn hx_msg_event_get_type() -> GType {
     static TYPE: OnceLock<usize> = OnceLock::new();
-    unsafe { register_once(&TYPE, c"HxMsgEvent".as_ptr(), Some(boxed_copy), Some(boxed_free)) }
+    unsafe {
+        register_once(
+            &TYPE,
+            c"HxMsgEvent".as_ptr(),
+            Some(boxed_copy),
+            Some(boxed_free),
+        )
+    }
 }
 
 #[cfg(test)]

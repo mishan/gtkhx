@@ -9,17 +9,18 @@
 
 use std::ffi::{c_char, c_void};
 
-use gtk4 as gtk;
-use gtk::glib;
-use libadwaita as adw;
 use adw::prelude::*;
 use glib::translate::from_glib_none;
+use gtk::glib;
+use gtk4 as gtk;
+use libadwaita as adw;
 
 use crate::tr::tr;
 
 use hxhandlers::send::chat::{hx_chat_join, hx_reject_chat};
 
-extern "C" {    // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
+extern "C" {
+    // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
     fn gtkhx_dialog_add_close_shortcuts(dialog: *mut gtk::ffi::GtkWidget);
     // gtkhx_ui_bridge.c — the chat window of `htlc`'s session (parent), may be
     // NULL. Scoped to the invited session, not the active one.
@@ -33,11 +34,7 @@ extern "C" {    // gtkutil.c — Ctrl+W / Esc close accelerators on a dialog.
 /// C-ABI entry from the model-side signal adapter, on the GTK main thread.
 /// `htlc` is a valid session htlc; `name` is NULL or a NUL-terminated C string.
 #[no_mangle]
-pub unsafe extern "C" fn output_chat_invitation(
-    htlc: *mut c_void,
-    cid: u32,
-    name: *const c_char,
-) {
+pub unsafe extern "C" fn output_chat_invitation(htlc: *mut c_void, cid: u32, name: *const c_char) {
     crate::ensure_gtk_init();
 
     let name = crate::cstr(name);

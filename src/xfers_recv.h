@@ -34,8 +34,8 @@ extern size_t gtkhx_ffo_info_block_len (guint8 b38, guint8 b39);
 extern guint64 gtkhx_ffo_fork_len (const guint8 *marker, size_t marker_len,
                                    int large);
 extern void gtkhx_ffo_pack_fork_header (const guint8 *tag, size_t tag_len,
-                                        guint64 length, int large,
-                                        guint8 *out, size_t out_len);
+                                        guint64 length, int large, guint8 *out,
+                                        size_t out_len);
 
 /* Fields the Rust FILP parser fills. Layout mirrors hxfiles-xfer's
  * #[repr(C)] GtkhxFilpInfo; offsets pinned on both sides so a field
@@ -74,22 +74,23 @@ extern void gtkhx_ffo_parse_filp_info (const guint8 *info, size_t info_len,
  *
  * MUST match hxnet::xfer::HxnetXferParams (a #[repr(C)] struct) field-for-field. */
 struct HxnetXferParams {
-    void *hx;               /* htxf->hx (the Rust HtxfConn *) */
-    const char *path;       /* htxf->path */
-    guint64 file_budget;    /* solo: htxf->total_size; folder: FILE_SEND size */
-    guint64 data_pos;       /* htxf->data_pos (resume offset) */
-    guint64 rsrc_pos;       /* htxf->rsrc_pos */
+    void *hx;            /* htxf->hx (the Rust HtxfConn *) */
+    const char *path;    /* htxf->path */
+    guint64 file_budget; /* solo: htxf->total_size; folder: FILE_SEND size */
+    guint64 data_pos;    /* htxf->data_pos (resume offset) */
+    guint64 rsrc_pos;    /* htxf->rsrc_pos */
     int opt_preview;
     int opt_folder;
     int opt_large;
-    void *preview;          /* htxf->preview (hx_preview *) or NULL */
-    void *user_data;        /* passed back to progress (the C side uses it as htxf) */
+    void *preview;   /* htxf->preview (hx_preview *) or NULL */
+    void *user_data; /* passed back to progress (the C side uses it as htxf) */
     void (*progress) (void *user_data, guint64 delta);
     void (*preview_chunk) (void *preview, const char *buf, gsize len);
-    void (*preview_set_info) (void *preview, const char *type, const char *creator);
+    void (*preview_set_info) (void *preview, const char *type,
+                              const char *creator);
     void (*preview_done) (void *preview);
-    guint64 data_size;      /* send-only: htxf->data_size (local data fork) */
-    guint64 rsrc_size;      /* send-only: htxf->rsrc_size (local rsrc fork) */
+    guint64 data_size; /* send-only: htxf->data_size (local data fork) */
+    guint64 rsrc_size; /* send-only: htxf->rsrc_size (local rsrc fork) */
 };
 
 /* Returns 0 on success, an errno-like positive code on failure. Does NOT play
@@ -114,13 +115,13 @@ extern int hxnet_xfer_file_send_one (const struct HxnetXferParams *params);
  * MUST match hxnet::xfer::HxnetFolderParams (a #[repr(C)] struct) field-for-
  * field. */
 struct HxnetFolderParams {
-    void *hx;               /* htxf->hx (the Rust HtxfConn *) */
-    const char *base_path;  /* local tree root: created + written (recv) or
+    void *hx;              /* htxf->hx (the Rust HtxfConn *) */
+    const char *base_path; /* local tree root: created + written (recv) or
                              * walked (send) */
     int opt_preview;
     int opt_folder;
     int opt_large;
-    void *user_data;        /* passed back to progress (the C side uses it as htxf) */
+    void *user_data; /* passed back to progress (the C side uses it as htxf) */
     void (*progress) (void *user_data, guint64 delta);
 };
 

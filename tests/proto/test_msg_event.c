@@ -54,8 +54,8 @@ static void
 test_msg_event_broadcast_when_uid_zero (void)
 {
     /* uid 0 is the convention for server broadcasts (the server
-	 * has no client-side UID). Constructor stamps is_broadcast
-	 * automatically — consumers don't have to re-check. */
+     * has no client-side UID). Constructor stamps is_broadcast
+     * automatically — consumers don't have to re-check. */
     HxMsgEvent *e = hx_msg_event_new (0, "Server", 6, "back in 5", 9, NULL);
 
     g_assert_true (e->is_broadcast);
@@ -96,9 +96,9 @@ static void
 test_msg_event_is_self_substring_does_not_match (void)
 {
     /* The compare requires byte-equal AND length-equal. A self_nick
-	 * that's a strict prefix of the sender name must NOT match —
-	 * otherwise "mish" would self-flag a PM from "misha" and notify
-	 * would skip it. */
+     * that's a strict prefix of the sender name must NOT match —
+     * otherwise "mish" would self-flag a PM from "misha" and notify
+     * would skip it. */
     HxMsgEvent *e = hx_msg_event_new (7, "misha", 5, "hi", 2, "mish");
     g_assert_false (e->is_self);
     hx_msg_event_free (e);
@@ -108,7 +108,7 @@ static void
 test_msg_event_is_self_with_self_nick_longer (void)
 {
     /* Reverse: self_nick longer than the sender name. Length-equal
-	 * check rejects this too. */
+     * check rejects this too. */
     HxMsgEvent *e = hx_msg_event_new (7, "mish", 4, "hi", 2, "misha");
     g_assert_false (e->is_self);
     hx_msg_event_free (e);
@@ -118,7 +118,7 @@ static void
 test_msg_event_is_self_null_self_nick (void)
 {
     /* NULL self_nick is the "we don't have a logged-in identity
-	 * yet" case (pre-SELFINFO). Must not crash; is_self stays FALSE. */
+     * yet" case (pre-SELFINFO). Must not crash; is_self stays FALSE. */
     HxMsgEvent *e = hx_msg_event_new (7, "misha", 5, "hi", 2, NULL);
     g_assert_false (e->is_self);
     hx_msg_event_free (e);
@@ -139,8 +139,8 @@ static void
 test_msg_event_empty_name_and_body (void)
 {
     /* Defensively-handled corner: name_len 0 and body_len 0. Both
-	 * fields end up as freshly-allocated empty strings (per
-	 * gtkhx_text_to_utf8's contract). */
+     * fields end up as freshly-allocated empty strings (per
+     * gtkhx_text_to_utf8's contract). */
     HxMsgEvent *e = hx_msg_event_new (5, "", 0, "", 0, NULL);
 
     g_assert_nonnull (e);
@@ -159,7 +159,7 @@ static void
 test_msg_event_null_name_and_body (void)
 {
     /* gtkhx_text_to_utf8 tolerates NULL bytes — the constructor
-	 * mustn't crash on NULL name or NULL body. */
+     * mustn't crash on NULL name or NULL body. */
     HxMsgEvent *e = hx_msg_event_new (5, NULL, 0, NULL, 0, NULL);
 
     g_assert_nonnull (e);
@@ -196,9 +196,9 @@ static void
 test_msg_event_mac_roman_converts (void)
 {
     /* MacRoman 0xE9 = é. Raw single high-bit byte is not valid
-	 * UTF-8; gtkhx_text_to_utf8 either converts via the fallback
-	 * charset or substitutes U+FFFD. Either way the result must be
-	 * valid UTF-8 — Pango / xtext crash on invalid encoding. */
+     * UTF-8; gtkhx_text_to_utf8 either converts via the fallback
+     * charset or substitutes U+FFFD. Either way the result must be
+     * valid UTF-8 — Pango / xtext crash on invalid encoding. */
     const char name[] = "Caf\xe9";  /* "Café" in MacRoman */
     const char body[] = "h\xe9llo"; /* "héllo" in MacRoman */
     HxMsgEvent *e = hx_msg_event_new (1, name, sizeof (name) - 1, body,
@@ -216,14 +216,14 @@ static void
 test_msg_event_is_self_after_utf8_fixup (void)
 {
     /* If gtkhx_text_to_utf8 substitutes U+FFFD for invalid bytes,
-	 * the self-nick compare runs on the *post-fixup* name. So a
-	 * MacRoman "Café" sender against a pre-fixed "Café" self_nick
-	 * (both encoded as UTF-8 "Café") should match. The name input
-	 * comes in raw, the self_nick comes from htlc->name (which is
-	 * already sanitised to UTF-8 by the loader).
-	 *
-	 * Compute the expected post-fixup name by running the same
-	 * helper on the raw bytes, then feed that back as self_nick. */
+     * the self-nick compare runs on the *post-fixup* name. So a
+     * MacRoman "Café" sender against a pre-fixed "Café" self_nick
+     * (both encoded as UTF-8 "Café") should match. The name input
+     * comes in raw, the self_nick comes from htlc->name (which is
+     * already sanitised to UTF-8 by the loader).
+     *
+     * Compute the expected post-fixup name by running the same
+     * helper on the raw bytes, then feed that back as self_nick. */
     const char raw[] = "Caf\xe9"; /* "Café" in MacRoman */
     HxMsgEvent *probe
         = hx_msg_event_new (1, raw, sizeof (raw) - 1, "x", 1, NULL);
@@ -243,7 +243,7 @@ static void
 test_msg_event_preserves_uid (void)
 {
     /* uid is u16 — verify the high-byte uid (e.g. 0xdead would
-	 * truncate but 0xbeef wouldn't) round-trips cleanly. */
+     * truncate but 0xbeef wouldn't) round-trips cleanly. */
     HxMsgEvent *e = hx_msg_event_new (0xbeef, "x", 1, "y", 1, NULL);
     g_assert_cmphex (e->uid, ==, 0xbeef);
     g_assert_false (e->is_broadcast);
@@ -280,10 +280,10 @@ static void
 test_msg_event_copy_preserves_broadcast (void)
 {
     /* Specific regression: is_broadcast is computed from uid=0
-	 * at new() time; copy must carry it forward without rederiving
-	 * (a future change that lazily recomputes from `c->uid` would
-	 * still pass — but if anyone forgets to copy the flag at all
-	 * this catches that). */
+     * at new() time; copy must carry it forward without rederiving
+     * (a future change that lazily recomputes from `c->uid` would
+     * still pass — but if anyone forgets to copy the flag at all
+     * this catches that). */
     HxMsgEvent *e = hx_msg_event_new (0, "Server", 6, "msg", 3, NULL);
     HxMsgEvent *c = hx_msg_event_copy (e);
     g_assert_true (c->is_broadcast);

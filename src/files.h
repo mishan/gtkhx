@@ -57,15 +57,16 @@ extern void output_file_info (char *path, char *name, char *creator, char *type,
  * live in the Rust rcv_task_file_list; C touches cfl only to start a listing
  * (files_remote_provider.c) and to drive the recursive engine below. */
 extern struct cached_filelist *hx_cfl_new (void);
-extern void         hx_cfl_free (struct cached_filelist *cfl);
-extern const char  *hx_cfl_path (const struct cached_filelist *cfl);
-extern void         hx_cfl_set_path (struct cached_filelist *cfl, const char *path);
-extern const void  *hx_cfl_fh (const struct cached_filelist *cfl);
-extern guint32      hx_cfl_fhlen (const struct cached_filelist *cfl);
-extern guint        hx_cfl_completing (const struct cached_filelist *cfl);
-extern void         hx_cfl_set_completing (struct cached_filelist *cfl, guint completing);
-extern void        *hx_cfl_filter_argv (const struct cached_filelist *cfl);
-extern void         hx_cfl_set_filter_argv (struct cached_filelist *cfl, void *argv);
+extern void hx_cfl_free (struct cached_filelist *cfl);
+extern const char *hx_cfl_path (const struct cached_filelist *cfl);
+extern void hx_cfl_set_path (struct cached_filelist *cfl, const char *path);
+extern const void *hx_cfl_fh (const struct cached_filelist *cfl);
+extern guint32 hx_cfl_fhlen (const struct cached_filelist *cfl);
+extern guint hx_cfl_completing (const struct cached_filelist *cfl);
+extern void hx_cfl_set_completing (struct cached_filelist *cfl,
+                                   guint completing);
+extern void *hx_cfl_filter_argv (const struct cached_filelist *cfl);
+extern void hx_cfl_set_filter_argv (struct cached_filelist *cfl, void *argv);
 
 /* Recursive folder-listing / GET_R engine for one FILE_LIST entry, invoked by
  * the Rust rcv_task_file_list when cfl is in a recursive mode (completing > 1).

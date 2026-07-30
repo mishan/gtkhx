@@ -32,8 +32,8 @@ typedef struct _session session;
  * reconnect path); hx_conn_free releases a hx_conn_new allocation. Production
  * keeps exactly one connection for the process lifetime and never frees it. */
 extern struct htlc_conn *hx_conn_new (void);
-extern void              hx_conn_reset (struct htlc_conn *h);
-extern void              hx_conn_free (struct htlc_conn *h);
+extern void hx_conn_reset (struct htlc_conn *h);
+extern void hx_conn_free (struct htlc_conn *h);
 
 /* ---- Chat-history extension session state ---------------------------------
  *
@@ -42,12 +42,12 @@ extern void              hx_conn_free (struct htlc_conn *h);
  * message_id rendered this run, used as the AFTER= reconnect cursor. All three
  * are wiped on disconnect. */
 extern guint32 hx_conn_history_max_msgs (const struct htlc_conn *h);
-extern void    hx_conn_set_history_max_msgs (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_history_max_msgs (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_history_max_days (const struct htlc_conn *h);
-extern void    hx_conn_set_history_max_days (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_history_max_days (struct htlc_conn *h, guint32 v);
 extern guint64 hx_conn_chat_history_last_msgid (const struct htlc_conn *h);
-extern void    hx_conn_set_chat_history_last_msgid (struct htlc_conn *h,
-                                                    guint64 v);
+extern void hx_conn_set_chat_history_last_msgid (struct htlc_conn *h,
+                                                 guint64 v);
 
 /* Inline-media advisory limits — server hints from the LOGIN reply
  * (0 = "use the client default"). Set as a group by rcv_task_login,
@@ -55,20 +55,19 @@ extern void    hx_conn_set_chat_history_last_msgid (struct htlc_conn *h,
  * inline_media.h ceiling helpers. Survive reconnect intentionally
  * (see the inline_media.h caps/limits note) until explicitly reset. */
 extern guint32 hx_conn_media_max_bytes (const struct htlc_conn *h);
-extern void    hx_conn_set_media_max_bytes (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_media_max_bytes (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_media_max_dimension (const struct htlc_conn *h);
-extern void    hx_conn_set_media_max_dimension (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_media_max_dimension (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_media_max_pixels (const struct htlc_conn *h);
-extern void    hx_conn_set_media_max_pixels (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_media_max_pixels (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_media_chunk_size (const struct htlc_conn *h);
-extern void    hx_conn_set_media_chunk_size (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_media_chunk_size (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_media_max_frames (const struct htlc_conn *h);
-extern void    hx_conn_set_media_max_frames (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_media_max_frames (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_media_max_duration_ms (const struct htlc_conn *h);
-extern void    hx_conn_set_media_max_duration_ms (struct htlc_conn *h,
-                                                  guint32 v);
+extern void hx_conn_set_media_max_duration_ms (struct htlc_conn *h, guint32 v);
 /* Reset all six advisory limits to 0 ("use client defaults"). */
-extern void    hx_conn_reset_media_limits (struct htlc_conn *h);
+extern void hx_conn_reset_media_limits (struct htlc_conn *h);
 
 /* ---- Server endpoint identity --------------------------------------------
  *
@@ -80,13 +79,13 @@ extern void    hx_conn_reset_media_limits (struct htlc_conn *h);
  * ip_addr is the resolved printable peer address; hx_conn_set_ip_addr with ""
  * clears it. */
 extern const char *hx_conn_serverhost (const struct htlc_conn *h);
-extern void        hx_conn_set_serverhost (struct htlc_conn *h, const char *v);
-extern guint16     hx_conn_serverport (const struct htlc_conn *h);
-extern void        hx_conn_set_serverport (struct htlc_conn *h, guint16 v);
+extern void hx_conn_set_serverhost (struct htlc_conn *h, const char *v);
+extern guint16 hx_conn_serverport (const struct htlc_conn *h);
+extern void hx_conn_set_serverport (struct htlc_conn *h, guint16 v);
 extern const char *hx_conn_ip_addr (const struct htlc_conn *h);
-extern void        hx_conn_set_ip_addr (struct htlc_conn *h, const char *v);
-extern char        hx_conn_tls (const struct htlc_conn *h);
-extern void        hx_conn_set_tls (struct htlc_conn *h, char v);
+extern void hx_conn_set_ip_addr (struct htlc_conn *h, const char *v);
+extern char hx_conn_tls (const struct htlc_conn *h);
+extern void hx_conn_set_tls (struct htlc_conn *h, char v);
 
 /* ---- Negotiated protocol identity ----------------------------------------
  *
@@ -96,10 +95,10 @@ extern void        hx_conn_set_tls (struct htlc_conn *h, char v);
  * session (0 on legacy servers). Both are wiped on disconnect. hx_conn_has_cap
  * is the predicate every `htlc->caps & HTLC_CAP_*` bit-test now goes through;
  * hx_conn_caps exposes the raw bitmask for the rare whole-value consumer. */
-extern guint16  hx_conn_version (const struct htlc_conn *h);
-extern void     hx_conn_set_version (struct htlc_conn *h, guint16 v);
-extern guint64  hx_conn_caps (const struct htlc_conn *h);
-extern void     hx_conn_set_caps (struct htlc_conn *h, guint64 v);
+extern guint16 hx_conn_version (const struct htlc_conn *h);
+extern void hx_conn_set_version (struct htlc_conn *h, guint16 v);
+extern guint64 hx_conn_caps (const struct htlc_conn *h);
+extern void hx_conn_set_caps (struct htlc_conn *h, guint64 v);
 extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
 
 /* ---- Our own user identity -----------------------------------------------
@@ -116,12 +115,12 @@ extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
  * pointer-based consumer; at the E1c flip the Rust hxconn owner returns a raw
  * pointer into its struct here. Everything else uses the value get/set. */
 extern guint16 hx_conn_uid (const struct htlc_conn *h);
-extern void    hx_conn_set_uid (struct htlc_conn *h, guint16 v);
+extern void hx_conn_set_uid (struct htlc_conn *h, guint16 v);
 extern guint16 hx_conn_icon (const struct htlc_conn *h);
-extern void    hx_conn_set_icon (struct htlc_conn *h, guint16 v);
+extern void hx_conn_set_icon (struct htlc_conn *h, guint16 v);
 extern guint16 *hx_conn_icon_ptr (struct htlc_conn *h);
 extern guint32 hx_conn_nick_color (const struct htlc_conn *h);
-extern void    hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
 
 /* name: our display nick (NUL-terminated, <= 31 chars). login: our account
  * login (set at connect, not read back in production — kept as a field only so
@@ -131,9 +130,9 @@ extern void    hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
  * hx_conn_icon_ptr); everything else reads via hx_conn_name / writes via
  * hx_conn_set_name (which truncates to the field capacity). */
 extern const char *hx_conn_name (const struct htlc_conn *h);
-extern void        hx_conn_set_name (struct htlc_conn *h, const char *v);
-extern char       *hx_conn_name_buf (struct htlc_conn *h);
-extern void        hx_conn_set_login (struct htlc_conn *h, const char *v);
+extern void hx_conn_set_name (struct htlc_conn *h, const char *v);
+extern char *hx_conn_name_buf (struct htlc_conn *h);
+extern void hx_conn_set_login (struct htlc_conn *h, const char *v);
 
 /* ---- Login lifecycle flags -----------------------------------------------
  *
@@ -142,9 +141,9 @@ extern void        hx_conn_set_login (struct htlc_conn *h, const char *v);
  * spec-correct "we're a fully-joined user" boundary (USER_GETLIST / news / file
  * listing are safe only after it). Both are 1-bit flags, cleared on disconnect. */
 extern gboolean hx_conn_logged_in (const struct htlc_conn *h);
-extern void     hx_conn_set_logged_in (struct htlc_conn *h, gboolean v);
+extern void hx_conn_set_logged_in (struct htlc_conn *h, gboolean v);
 extern gboolean hx_conn_post_login_fetched (const struct htlc_conn *h);
-extern void     hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v);
+extern void hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v);
 
 /* ---- GIF-icons capability probe ------------------------------------------
  *
@@ -155,16 +154,15 @@ extern void     hx_conn_set_post_login_fetched (struct htlc_conn *h, gboolean v)
  * connect. The state getter/setter keep the int wire vocabulary of the
  * GIF_ICONS_* enum; the timer setter takes 0 to record "disarmed" after the
  * caller has removed the source. */
-extern int  hx_conn_gif_icons_state (const struct htlc_conn *h);
+extern int hx_conn_gif_icons_state (const struct htlc_conn *h);
 extern void hx_conn_set_gif_icons_state (struct htlc_conn *h, int v);
 extern guint hx_conn_gif_icons_probe_timer (const struct htlc_conn *h);
-extern void  hx_conn_set_gif_icons_probe_timer (struct htlc_conn *h, guint v);
+extern void hx_conn_set_gif_icons_probe_timer (struct htlc_conn *h, guint v);
 /* gif_icons_probe_trans: the trans of the probe's task, stashed so the
  * watchdog can dismiss the orphaned Tasks-window row when a legacy server
  * silently drops ICON_GETLIST. */
 extern guint32 hx_conn_gif_icons_probe_trans (const struct htlc_conn *h);
-extern void    hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h,
-                                                  guint32 v);
+extern void hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h, guint32 v);
 
 /* ---- Account access bitmap -----------------------------------------------
  *
@@ -177,7 +175,7 @@ extern void    hx_conn_set_gif_icons_probe_trans (struct htlc_conn *h,
  * sole writer). */
 extern gboolean hx_conn_access_has (const struct htlc_conn *h, int bit);
 extern gboolean hx_conn_access_permits (const struct htlc_conn *h, int bit);
-extern void     hx_conn_set_access (struct htlc_conn *h, const guint8 *bytes);
+extern void hx_conn_set_access (struct htlc_conn *h, const guint8 *bytes);
 
 /* ---- Control-channel socket descriptor -----------------------------------
  *
@@ -188,7 +186,7 @@ extern void     hx_conn_set_access (struct htlc_conn *h, const guint8 *bytes);
  * so the truthiness (!= 0), not fd > 0, is the connected test. The raw value
  * is also formatted into the disconnect-diagnostics log lines. The writers all
  * live in network.c's connect/close paths. */
-extern int  hx_conn_fd (const struct htlc_conn *h);
+extern int hx_conn_fd (const struct htlc_conn *h);
 extern void hx_conn_set_fd (struct htlc_conn *h, int v);
 
 /* ---- Owning-session back-pointer -----------------------------------------
@@ -208,9 +206,9 @@ extern void hx_conn_set_sess (struct htlc_conn *h, session *s);
  * _compressalg copy into the fixed buffer (truncating), and clear it when
  * passed NULL or "". */
 extern const char *hx_conn_cipheralg (const struct htlc_conn *h);
-extern void        hx_conn_set_cipheralg (struct htlc_conn *h, const char *v);
+extern void hx_conn_set_cipheralg (struct htlc_conn *h, const char *v);
 extern const char *hx_conn_compressalg (const struct htlc_conn *h);
-extern void        hx_conn_set_compressalg (struct htlc_conn *h, const char *v);
+extern void hx_conn_set_compressalg (struct htlc_conn *h, const char *v);
 
 /* ---- HOPE control-channel AEAD material handle ---------------------------
  *
@@ -220,7 +218,7 @@ extern void        hx_conn_set_compressalg (struct htlc_conn *h, const char *v);
  * key crossing back to C. The caller owns the lifecycle (clone / free via the
  * hxnet_hope_aead_* API); this seam only stores and returns the pointer. */
 extern void *hx_conn_hope_aead (const struct htlc_conn *h);
-extern void  hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
+extern void hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
 
 /* ---- Outgoing transaction counter ----------------------------------------
  *
@@ -231,7 +229,7 @@ extern void  hx_conn_set_hope_aead (struct htlc_conn *h, void *p);
  * hx_conn_set_trans cover the login-replay save/restore in network.c and the
  * trace/task snapshots that just read it. */
 extern guint32 hx_conn_trans (const struct htlc_conn *h);
-extern void    hx_conn_set_trans (struct htlc_conn *h, guint32 v);
+extern void hx_conn_set_trans (struct htlc_conn *h, guint32 v);
 extern guint32 hx_conn_trans_post_inc (struct htlc_conn *h);
 
 #endif /* GTKHX_HXCONN_H */

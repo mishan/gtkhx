@@ -711,9 +711,7 @@ pub fn parse_upload_final_reply<'a>(
 /// Followup chunks echo this token on every subsequent
 /// TranUploadMedia request; the C-side state machine stashes it
 /// on the upload session struct.
-pub fn parse_upload_token_reply<'a>(
-    chunks: impl Iterator<Item = Chunk<'a>>,
-) -> Option<&'a [u8]> {
+pub fn parse_upload_token_reply<'a>(chunks: impl Iterator<Item = Chunk<'a>>) -> Option<&'a [u8]> {
     for c in chunks {
         if c.tag == tag::CHAT_MEDIA_UPLOAD_TOKEN {
             return Some(c.data);
@@ -822,7 +820,10 @@ mod tests {
     fn error_code_roundtrip_known_values() {
         assert_eq!(MediaErrorCode::from_u16(0), MediaErrorCode::Generic);
         assert_eq!(MediaErrorCode::from_u16(1), MediaErrorCode::PayloadTooLarge);
-        assert_eq!(MediaErrorCode::from_u16(2), MediaErrorCode::UnsupportedFormat);
+        assert_eq!(
+            MediaErrorCode::from_u16(2),
+            MediaErrorCode::UnsupportedFormat
+        );
         assert_eq!(MediaErrorCode::from_u16(3), MediaErrorCode::RateLimited);
         assert_eq!(MediaErrorCode::from_u16(4), MediaErrorCode::NotAuthorized);
         assert_eq!(MediaErrorCode::from_u16(5), MediaErrorCode::ServerBusy);
@@ -1178,8 +1179,8 @@ mod tests {
         e.put_chunk(tag::CHAT_MEDIA_HEIGHT, &(768u32).to_be_bytes());
         e.put_chunk(tag::CHAT_MEDIA_BYTES, &(98_765u32).to_be_bytes());
         let buf = header_padded(e.as_slice());
-        let reply = parse_upload_final_reply(ChunkIter::over_message(&buf, buf.len()))
-            .expect("present");
+        let reply =
+            parse_upload_final_reply(ChunkIter::over_message(&buf, buf.len())).expect("present");
         assert_eq!(reply.media_id, b"opaque-handle");
         assert_eq!(reply.media_type, b"image/png");
         assert_eq!(reply.width, Some(1024));

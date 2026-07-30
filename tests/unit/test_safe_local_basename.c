@@ -25,7 +25,7 @@ test_passthrough (void)
     check ("readme.txt", "readme.txt");
     check ("Photo 2026-05-25.jpg", "Photo 2026-05-25.jpg");
     /* Dots are fine when not the entire name — only "." / ".." map
-	 * to filesystem traversal targets. */
+     * to filesystem traversal targets. */
     check ("..readme..", "..readme..");
     check (".hidden", ".hidden");
 }
@@ -34,7 +34,7 @@ static void
 test_path_separators_replaced (void)
 {
     /* '/' is legal in Hotline names (Classic-Mac convention) but
-	 * unsafe in a local path component; replace with '_'. */
+     * unsafe in a local path component; replace with '_'. */
     check ("foo/bar", "foo_bar");
     check ("foo\\bar", "foo_bar");
     /* Multiple separators each get replaced independently. */
@@ -48,7 +48,7 @@ static void
 test_pure_dot_names (void)
 {
     /* Pure "." and ".." would resolve to the parent/current dir
-	 * at the filesystem level — replace with a safe placeholder. */
+     * at the filesystem level — replace with a safe placeholder. */
     check (".", "download");
     check ("..", "download");
 }
@@ -64,10 +64,10 @@ static void
 test_traversal_attack_payloads (void)
 {
     /* The defensive question to ask: after sanitization, does
-	 * g_build_filename ("/home/user/Downloads", out) stay inside
-	 * "/home/user/Downloads"? Sanitization passes iff `out` has
-	 * no path separators AND isn't pure-dot. Spot-check a few
-	 * classic traversal payloads. */
+     * g_build_filename ("/home/user/Downloads", out) stay inside
+     * "/home/user/Downloads"? Sanitization passes iff `out` has
+     * no path separators AND isn't pure-dot. Spot-check a few
+     * classic traversal payloads. */
     char *out;
 
     out = hx_files_provider_safe_local_basename ("../../../etc/passwd");
@@ -91,7 +91,8 @@ int
 main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
-    g_test_add_func ("/files/safe_local_basename/passthrough", test_passthrough);
+    g_test_add_func ("/files/safe_local_basename/passthrough",
+                     test_passthrough);
     g_test_add_func ("/files/safe_local_basename/path_separators_replaced",
                      test_path_separators_replaced);
     g_test_add_func ("/files/safe_local_basename/pure_dot_names",

@@ -132,11 +132,7 @@ impl Drop for MainForwarder {
 ///   (`recv` returns `Err`, the loop exits, the future resolves);
 /// - the returned [`MainForwarder`] is dropped (glib aborts the
 ///   future at its next poll point).
-pub fn forward_to_main<T, F>(
-    ctx: &MainContext,
-    rx: Receiver<T>,
-    mut handler: F,
-) -> MainForwarder
+pub fn forward_to_main<T, F>(ctx: &MainContext, rx: Receiver<T>, mut handler: F) -> MainForwarder
 where
     T: 'static,
     F: FnMut(T) + 'static,
@@ -227,11 +223,7 @@ mod tests {
     /// parallel tests are loading the CPU (the `many_concurrent_*`
     /// sibling tests can starve the tokio worker for several ms
     /// before it polls a backpressured send).
-    fn pump_until(
-        ctx: &MainContext,
-        pred: impl Fn() -> bool,
-        deadline: Duration,
-    ) -> bool {
+    fn pump_until(ctx: &MainContext, pred: impl Fn() -> bool, deadline: Duration) -> bool {
         let start = std::time::Instant::now();
         while start.elapsed() < deadline {
             if pred() {
@@ -264,14 +256,12 @@ mod tests {
                 tx_clone.send(v).await.expect("send succeeds");
             }
         });
-        Runtime::global().block_on(handle).expect("sender completes");
+        Runtime::global()
+            .block_on(handle)
+            .expect("sender completes");
         drop(tx); // closes the channel so the forwarder loop ends
 
-        let drained = pump_until(
-            &ctx,
-            || seen.borrow().len() == 4,
-            Duration::from_secs(5),
-        );
+        let drained = pump_until(&ctx, || seen.borrow().len() == 4, Duration::from_secs(5));
         assert!(drained, "main loop drained all 4 items");
         assert_eq!(*seen.borrow(), vec![1, 2, 3, 4], "FIFO order preserved");
     }
@@ -312,14 +302,12 @@ mod tests {
         let handle = Runtime::global().spawn(async move {
             tx_clone.send(()).await.expect("send succeeds");
         });
-        Runtime::global().block_on(handle).expect("sender completes");
+        Runtime::global()
+            .block_on(handle)
+            .expect("sender completes");
         drop(tx);
 
-        let _ = pump_until(
-            &ctx,
-            || observed.borrow().is_some(),
-            Duration::from_secs(5),
-        );
+        let _ = pump_until(&ctx, || observed.borrow().is_some(), Duration::from_secs(5));
         assert_eq!(
             observed.borrow().expect("handler ran"),
             main_tid,
@@ -348,11 +336,7 @@ mod tests {
         });
 
         tx.send_blocking(1).expect("send 1 succeeds");
-        let _ = pump_until(
-            &ctx,
-            || seen.borrow().len() == 1,
-            Duration::from_secs(5),
-        );
+        let _ = pump_until(&ctx, || seen.borrow().len() == 1, Duration::from_secs(5));
         assert_eq!(*seen.borrow(), vec![1]);
 
         drop(forwarder);
@@ -388,8 +372,7 @@ mod tests {
         let (tx, rx) = channel::<u32>(4);
         let calls = Rc::new(RefCell::new(0u32));
         let c = calls.clone();
-        let tx_cell: Rc<RefCell<Option<Sender<u32>>>> =
-            Rc::new(RefCell::new(Some(tx.clone())));
+        let tx_cell: Rc<RefCell<Option<Sender<u32>>>> = Rc::new(RefCell::new(Some(tx.clone())));
         let tc = tx_cell.clone();
         let _forwarder = forward_to_main(&ctx, rx, move |_v| {
             *c.borrow_mut() += 1;
@@ -436,12 +419,10 @@ mod tests {
                 .expect("second send succeeds");
         });
 
-        let _ = pump_until(
-            &ctx,
-            || seen.borrow().len() == 2,
-            Duration::from_secs(10),
-        );
-        Runtime::global().block_on(handle).expect("sender completes");
+        let _ = pump_until(&ctx, || seen.borrow().len() == 2, Duration::from_secs(10));
+        Runtime::global()
+            .block_on(handle)
+            .expect("sender completes");
         drop(tx);
         assert_eq!(*seen.borrow(), vec![1, 2]);
     }

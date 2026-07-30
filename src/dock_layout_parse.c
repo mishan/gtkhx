@@ -32,23 +32,29 @@
 void
 dl_parsed_node_free (DLParsedNode *n)
 {
-    if (n == NULL)
+    if (n == NULL) {
         return;
-    if (n->panel_ids != NULL)
+    }
+    if (n->panel_ids != NULL) {
         g_ptr_array_unref (n->panel_ids);
+    }
     g_free (n->role);
     dl_parsed_node_free (n->child_a);
     dl_parsed_node_free (n->child_b);
     g_free (n);
 }
 
-typedef struct { const char *p; const char *end; } Cursor;
+typedef struct {
+    const char *p;
+    const char *end;
+} Cursor;
 
 static void
 skip_ws (Cursor *c)
 {
-    while (c->p < c->end && g_ascii_isspace (*c->p))
+    while (c->p < c->end && g_ascii_isspace (*c->p)) {
         c->p++;
+    }
 }
 
 static gboolean
@@ -67,7 +73,7 @@ match_prefix (Cursor *c, const char *prefix)
 {
     skip_ws (c);
     gsize n = strlen (prefix);
-    if ((gsize) (c->end - c->p) >= n && strncmp (c->p, prefix, n) == 0) {
+    if ((gsize)(c->end - c->p) >= n && strncmp (c->p, prefix, n) == 0) {
         c->p += n;
         return TRUE;
     }
@@ -81,20 +87,22 @@ parse_leaf (Cursor *c)
 {
     /* Already consumed 'L'. Now '['; ids separated by ','; optional
      * ':role' inside the brackets; closing ']'. */
-    if (!match (c, '['))
+    if (!match (c, '[')) {
         return NULL;
+    }
 
     DLParsedNode *n = g_new0 (DLParsedNode, 1);
-    n->is_leaf   = TRUE;
+    n->is_leaf = TRUE;
     n->panel_ids = g_ptr_array_new_with_free_func (g_free);
 
     skip_ws (c);
     /* Empty leaf ("L[]" or "L[:role]")? */
     while (c->p < c->end && *c->p != ']' && *c->p != ':') {
         const char *start = c->p;
-        while (c->p < c->end && *c->p != ',' && *c->p != ']'
-               && *c->p != ':' && !g_ascii_isspace (*c->p))
+        while (c->p < c->end && *c->p != ',' && *c->p != ']' && *c->p != ':'
+               && !g_ascii_isspace (*c->p)) {
             c->p++;
+        }
         /* Reject zero-length ids ("L[,a]", "L[a,,b]", "L[a,]" all
          * have at least one empty slot). The serialiser would
          * never produce these, so a hand-edited file with them is
@@ -104,10 +112,11 @@ parse_leaf (Cursor *c)
             return NULL;
         }
         g_ptr_array_add (n->panel_ids,
-                         g_strndup (start, (gsize) (c->p - start)));
+                         g_strndup (start, (gsize)(c->p - start)));
         skip_ws (c);
-        if (!match (c, ','))
+        if (!match (c, ',')) {
             break;
+        }
         skip_ws (c);
         /* A comma must be followed by another id — anything else
          * is a trailing-comma typo ("L[a,]", "L[a,:end]"). */
@@ -119,17 +128,18 @@ parse_leaf (Cursor *c)
 
     skip_ws (c);
     if (match (c, ':')) {
-        skip_ws (c);   /* allow "L[a : role]" — match() already
+        skip_ws (c); /* allow "L[a : role]" — match() already
                         * stripped ws before ':' on the way in. */
         const char *start = c->p;
-        while (c->p < c->end && *c->p != ']' && !g_ascii_isspace (*c->p))
+        while (c->p < c->end && *c->p != ']' && !g_ascii_isspace (*c->p)) {
             c->p++;
+        }
         if (c->p == start) {
             /* "L[a:]" — colon with no role behind it is a typo. */
             dl_parsed_node_free (n);
             return NULL;
         }
-        n->role = g_strndup (start, (gsize) (c->p - start));
+        n->role = g_strndup (start, (gsize)(c->p - start));
     }
 
     if (!match (c, ']')) {
@@ -143,12 +153,14 @@ static DLParsedNode *
 parse_split (Cursor *c, DLOrientation orientation)
 {
     /* Already consumed "h" or "v". Now '('; child_a; ','; child_b; ')'. */
-    if (!match (c, '('))
+    if (!match (c, '(')) {
         return NULL;
+    }
 
     DLParsedNode *a = parse_node (c);
-    if (a == NULL)
+    if (a == NULL) {
         return NULL;
+    }
     if (!match (c, ',')) {
         dl_parsed_node_free (a);
         return NULL;
@@ -166,8 +178,8 @@ parse_split (Cursor *c, DLOrientation orientation)
 
     DLParsedNode *n = g_new0 (DLParsedNode, 1);
     n->orientation = orientation;
-    n->child_a     = a;
-    n->child_b     = b;
+    n->child_a = a;
+    n->child_b = b;
     return n;
 }
 
@@ -175,15 +187,19 @@ static DLParsedNode *
 parse_node (Cursor *c)
 {
     skip_ws (c);
-    if (c->p >= c->end)
+    if (c->p >= c->end) {
         return NULL;
+    }
 
-    if (match_prefix (c, "h"))
+    if (match_prefix (c, "h")) {
         return parse_split (c, DL_ORIENT_HORIZONTAL);
-    if (match_prefix (c, "v"))
+    }
+    if (match_prefix (c, "v")) {
         return parse_split (c, DL_ORIENT_VERTICAL);
-    if (match_prefix (c, "L"))
+    }
+    if (match_prefix (c, "L")) {
         return parse_leaf (c);
+    }
 
     return NULL;
 }
@@ -191,8 +207,9 @@ parse_node (Cursor *c)
 DLParsedNode *
 dl_parse_tree (const char *text)
 {
-    if (text == NULL)
+    if (text == NULL) {
         return NULL;
+    }
     Cursor c = { text, text + strlen (text) };
     DLParsedNode *root = parse_node (&c);
     skip_ws (&c);

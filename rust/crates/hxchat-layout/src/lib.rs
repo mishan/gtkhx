@@ -61,7 +61,6 @@
 //! gone (C6): style arrives as runs from the C side, so nothing decodes
 //! escapes and nothing can inject them.
 
-
 #![forbid(unsafe_code)]
 #![warn(missing_debug_implementations)]
 
@@ -71,8 +70,8 @@ pub mod index;
 pub mod markdown;
 pub mod measure;
 pub mod message;
-pub mod select;
 pub mod search;
+pub mod select;
 pub mod span;
 pub mod wrap;
 
@@ -82,12 +81,12 @@ mod tests;
 pub use anchor::{Gravity, ScrollAnchor};
 pub use buffer::{ChatBuffer, MIN_INDENT};
 pub use index::HeightIndex;
+pub use markdown::{scan_delims, SourceSpan};
 pub use measure::{FixedMeasure, FontMetrics, TextMeasure};
 pub use message::{
     Block, GroupKey, IconRef, ImageSize, LoadMoreDirection, Message, MessageFlags, MessageId,
     MessageKind, Speaker,
 };
-pub use markdown::{scan_delims, SourceSpan};
 pub use search::{find_all, Match, SearchState};
 pub use select::{Caret, RowSelection, Selection};
 pub use span::{Attrs, ColorRef, Link, LinkId, ParsedText, Span, Style};

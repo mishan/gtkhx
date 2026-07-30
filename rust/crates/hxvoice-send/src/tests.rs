@@ -195,7 +195,10 @@ fn send_ice_rejects_null_with_nonzero_len() {
 fn send_mute_normalises_to_zero_or_one() {
     reset(true);
     // Non-canonical TRUE (42) → the wrapper normalises to wire 1.
-    assert_eq!(unsafe { hx_send_voice_mute(htlc(), 4, 42) }, glib::ffi::GTRUE);
+    assert_eq!(
+        unsafe { hx_send_voice_mute(htlc(), 4, 42) },
+        glib::ffi::GTRUE
+    );
     let s = last().unwrap();
     assert_eq!(s.ty, HTLC_HDR_VOICE_MUTE);
     let muted = s

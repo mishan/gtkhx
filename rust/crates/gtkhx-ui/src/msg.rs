@@ -14,11 +14,11 @@
 
 use std::ffi::{c_char, c_void};
 
-use gtk4 as gtk;
+use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::pango;
 use gtk::prelude::*;
-use glib::translate::from_glib_none;
+use gtk4 as gtk;
 
 /// Opaque C `struct msgwin *`.
 type Msgwin = c_void;

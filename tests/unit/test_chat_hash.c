@@ -169,9 +169,9 @@ test_duplicate_cid_replaces_value (void)
     struct chat_stub *second = make_chat (7);
 
     /* `first` carries three users; if we drop the destroy notify
-	 * those three g_malloc'd nodes leak. valgrind / ASan catch
-	 * the regression at runtime; the in-test assertions verify
-	 * the visible API stays consistent. */
+     * those three g_malloc'd nodes leak. valgrind / ASan catch
+     * the regression at runtime; the in-test assertions verify
+     * the visible API stays consistent. */
     add_user (first, 100);
     add_user (first, 101);
     add_user (first, 102);

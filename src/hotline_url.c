@@ -74,18 +74,18 @@ hotline_url_parse (const char *url, HotlineUrlParts *out)
     p = url + 10;
 
     /* Path / query strip — Hotline URLs don't carry a path component,
-	 * but tolerate a trailing "/" or "/?foo=bar" so paste-from-browser
-	 * doesn't fail on a stray slash. */
+     * but tolerate a trailing "/" or "/?foo=bar" so paste-from-browser
+     * doesn't fail on a stray slash. */
     path_start = strpbrk (p, "/?#");
     if (!path_start) {
         path_start = p + strlen (p);
     }
 
     /* userinfo split: the LAST '@' before the path. URL-encoded '@'
-	 * inside the userinfo (%40) is fine — we only split on a literal
-	 * '@'. Scanning to the last '@' instead of the first means a
-	 * password containing an unescaped '@' lands in the password
-	 * field as long as it isn't trailing. */
+     * inside the userinfo (%40) is fine — we only split on a literal
+     * '@'. Scanning to the last '@' instead of the first means a
+     * password containing an unescaped '@' lands in the password
+     * field as long as it isn't trailing. */
     userinfo_end = NULL;
     {
         const char *scan;
@@ -121,9 +121,9 @@ hotline_url_parse (const char *url, HotlineUrlParts *out)
     }
 
     /* host[:port]. IPv6 literals would arrive bracketed
-	 * ("[::1]:5500"); Hotline 1.x is IPv4 in practice, but accept
-	 * the bracket form so a v6 paste doesn't get mis-split on the
-	 * last colon. */
+     * ("[::1]:5500"); Hotline 1.x is IPv4 in practice, but accept
+     * the bracket form so a v6 paste doesn't get mis-split on the
+     * last colon. */
     host_start = hostinfo;
     host_end = path_start;
     port_sep = NULL;
@@ -136,9 +136,9 @@ hotline_url_parse (const char *url, HotlineUrlParts *out)
         host_start++;
         host_end = close;
         /* After ']' the only allowed continuation before the path is
-		 * ":port". Reject trailing junk like "[::1]foo" — otherwise
-		 * the trailing bytes get silently dropped and we'd connect to
-		 * an endpoint that doesn't match what the user typed. */
+         * ":port". Reject trailing junk like "[::1]foo" — otherwise
+         * the trailing bytes get silently dropped and we'd connect to
+         * an endpoint that doesn't match what the user typed. */
         if (close + 1 < path_start) {
             if (*(close + 1) != ':') {
                 return FALSE;
@@ -155,10 +155,10 @@ hotline_url_parse (const char *url, HotlineUrlParts *out)
             }
         }
         /* Unbracketed multi-colon hostinfo is ambiguous: "2001:db8::1"
-		 * could be an IPv6 literal OR "2001" with port "db8::1". The
-		 * last-':' rule would misread the IPv6 as host="2001:db8::"
-		 * port="1" and silently connect to the wrong place. Reject
-		 * and require brackets ("[2001:db8::1]") for IPv6 literals. */
+         * could be an IPv6 literal OR "2001" with port "db8::1". The
+         * last-':' rule would misread the IPv6 as host="2001:db8::"
+         * port="1" and silently connect to the wrong place. Reject
+         * and require brackets ("[2001:db8::1]") for IPv6 literals. */
         if (n_colons > 1) {
             return FALSE;
         }

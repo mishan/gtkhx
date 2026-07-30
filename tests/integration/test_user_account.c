@@ -76,13 +76,10 @@
 
 /* hxnet/src/ffi.rs — build a plaintext LOGIN frame via the production Rust
  * builder (was src/login_packet.c, now retired; production login is Rust). */
-extern size_t hxnet_build_login_frame (const guint8 *login, size_t login_len,
-                                       const guint8 *password,
-                                       size_t password_len, const guint8 *name,
-                                       size_t name_len, guint16 icon,
-                                       guint16 version, guint16 caps,
-                                       guint32 trans, guint8 *out,
-                                       size_t out_cap);
+extern size_t hxnet_build_login_frame (
+    const guint8 *login, size_t login_len, const guint8 *password,
+    size_t password_len, const guint8 *name, size_t name_len, guint16 icon,
+    guint16 version, guint16 caps, guint32 trans, guint8 *out, size_t out_cap);
 #include "hl_access.h"
 #include "integration_harness.h"
 
@@ -96,11 +93,10 @@ static gboolean
 admin_login (int fd, struct htlc_conn *htlc, const char *display_name,
              guint16 icon)
 {
-
     const char *dn = display_name ? display_name : "";
     guint8 frame[512];
     size_t flen = hxnet_build_login_frame (
-        (const guint8 *) "admin", 5, NULL, 0, (const guint8 *) dn, strlen (dn),
+        (const guint8 *)"admin", 5, NULL, 0, (const guint8 *)dn, strlen (dn),
         icon, /*version=*/185, /*caps=*/0, hx_conn_trans_post_inc (htlc), frame,
         sizeof (frame));
     if (flen == 0) {
@@ -129,13 +125,15 @@ open_admin_login_or_fail (struct htlc_conn *htlc, const char *display_name)
     if (type == HTLS_HDR_TASK) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
+                                err, sizeof (err), &err_len)) {
             g_test_fail_printf (
                 "server rejected admin login: \"%s\". Check the test server's "
                 "accounts/ for an `admin` account with no password.",
                 err);
         } else {
-            g_test_fail_printf ("server rejected admin login (no error chunk).");
+            g_test_fail_printf (
+                "server rejected admin login (no error chunk).");
         }
         integration_release_htlc (htlc);
         integration_close (fd);
@@ -148,7 +146,7 @@ open_admin_login_or_fail (struct htlc_conn *htlc, const char *display_name)
         return -1;
     }
 
-    hx_selfinfo_parse (htlc, hx_test_in(htlc)->buf, hx_test_in(htlc)->pos);
+    hx_selfinfo_parse (htlc, hx_test_in (htlc)->buf, hx_test_in (htlc)->pos);
 
     /* Sanity: admin needs at least the user-management bits, otherwise
      * mhxd silently drops the ACCOUNT_* dispatches and our trans-
@@ -157,7 +155,7 @@ open_admin_login_or_fail (struct htlc_conn *htlc, const char *display_name)
      * htlc->access is a guint64 holding the on-wire 8 raw bytes in
      * memory order (big-endian); hl_access_has takes a byte pointer
      * so cast through that. */
-    const guint8 *acc_bytes = (const guint8 *) &htlc->access;
+    const guint8 *acc_bytes = (const guint8 *)&htlc->access;
     if (!hl_access_has (acc_bytes, HL_ACCESS_CREATE_USERS)
         || !hl_access_has (acc_bytes, HL_ACCESS_MODIFY_USERS)
         || !hl_access_has (acc_bytes, HL_ACCESS_DELETE_USERS)
@@ -216,7 +214,7 @@ read_account_reply (struct htlc_conn *htlc, char *name_out, gsize name_cap,
                     char *login_out, gsize login_cap, guint8 *access_out)
 {
     unsigned seen = 0;
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_NAME:
@@ -294,7 +292,9 @@ send_account_modify (int fd, struct htlc_conn *htlc, const char *login,
     char elogin[64], epass[64];
     int llen = (int)strlen (login);
     int plen;
-    if (llen > 63) llen = 63;
+    if (llen > 63) {
+        llen = 63;
+    }
     hl_code (elogin, login, llen);
 
     if (!password || !*password) {
@@ -302,7 +302,9 @@ send_account_modify (int fd, struct htlc_conn *htlc, const char *login,
         epass[0] = 0;
     } else {
         plen = (int)strlen (password);
-        if (plen > 63) plen = 63;
+        if (plen > 63) {
+            plen = 63;
+        }
         hl_code (epass, password, plen);
     }
 
@@ -310,16 +312,15 @@ send_account_modify (int fd, struct htlc_conn *htlc, const char *login,
     guint8 scratch[8];
     int hc = (int)gtkhx_proto_build_account_modify_chunks (
         (const uint8_t *)elogin, llen, (const uint8_t *)epass, plen,
-        (const uint8_t *)name, strlen (name), access,
-        chunks, G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
+        (const uint8_t *)name, strlen (name), access, chunks,
+        G_N_ELEMENTS (chunks), scratch, sizeof (scratch));
     if (hc <= 0) {
         return 0;
     }
 
     guint32 trans = htlc->trans;
-    return send_chunks (fd, htlc, HTLC_HDR_ACCOUNT_MODIFY, chunks, hc)
-               ? trans
-               : 0;
+    return send_chunks (fd, htlc, HTLC_HDR_ACCOUNT_MODIFY, chunks, hc) ? trans
+                                                                       : 0;
 }
 
 static guint32
@@ -336,7 +337,7 @@ send_account_read (int fd, struct htlc_conn *htlc, const char *login)
 
     guint32 trans = htlc->trans;
     return send_chunks (fd, htlc, HTLC_HDR_ACCOUNT_READ, chunks, hc) ? trans
-                                                                    : 0;
+                                                                     : 0;
 }
 
 static guint32
@@ -344,7 +345,9 @@ send_account_delete (int fd, struct htlc_conn *htlc, const char *login)
 {
     char elogin[64];
     int llen = (int)strlen (login);
-    if (llen > 63) llen = 63;
+    if (llen > 63) {
+        llen = 63;
+    }
     hl_code (elogin, login, llen);
 
     struct hx_chunk chunks[1];
@@ -355,9 +358,8 @@ send_account_delete (int fd, struct htlc_conn *htlc, const char *login)
     }
 
     guint32 trans = htlc->trans;
-    return send_chunks (fd, htlc, HTLC_HDR_ACCOUNT_DELETE, chunks, hc)
-               ? trans
-               : 0;
+    return send_chunks (fd, htlc, HTLC_HDR_ACCOUNT_DELETE, chunks, hc) ? trans
+                                                                       : 0;
 }
 
 /* ---- Fixture ------------------------------------------------------- */
@@ -410,8 +412,7 @@ ensure_account_gone (int fd, struct htlc_conn *htlc, const char *login)
  * exercising MODIFY / DELETE. */
 static void
 create_account (int fd, struct htlc_conn *htlc, const char *login,
-                const char *password, const char *name,
-                const guint8 access[8])
+                const char *password, const char *name, const guint8 access[8])
 {
     guint32 trans
         = send_account_modify (fd, htlc, login, password, name, access);
@@ -429,7 +430,9 @@ test_create_and_read (void)
 
     struct htlc_conn htlc;
     int fd = open_admin_login_or_fail (&htlc, "AdminCreate");
-    if (fd < 0) return;
+    if (fd < 0) {
+        return;
+    }
 
     char test_login[40];
     make_test_login (test_login, sizeof (test_login), "create");
@@ -467,9 +470,9 @@ test_create_and_read (void)
     char name_back[64] = { 0 };
     char login_back[64] = { 0 };
     guint8 access_back[8] = { 0 };
-    unsigned seen = read_account_reply (&htlc, name_back, sizeof (name_back),
-                                        login_back, sizeof (login_back),
-                                        access_back);
+    unsigned seen
+        = read_account_reply (&htlc, name_back, sizeof (name_back), login_back,
+                              sizeof (login_back), access_back);
     g_assert_cmphex (seen, ==,
                      GOT_NAME | GOT_LOGIN | GOT_PASSWORD | GOT_ACCESS);
     g_assert_cmpstr (name_back, ==, "Tier3 Initial");
@@ -488,7 +491,9 @@ test_modify_and_read (void)
 
     struct htlc_conn htlc;
     int fd = open_admin_login_or_fail (&htlc, "AdminModify");
-    if (fd < 0) return;
+    if (fd < 0) {
+        return;
+    }
 
     char test_login[40];
     make_test_login (test_login, sizeof (test_login), "modify");
@@ -521,9 +526,9 @@ test_modify_and_read (void)
     char name_back[64] = { 0 };
     char login_back[64] = { 0 };
     guint8 access_back[8] = { 0 };
-    unsigned seen = read_account_reply (&htlc, name_back, sizeof (name_back),
-                                        login_back, sizeof (login_back),
-                                        access_back);
+    unsigned seen
+        = read_account_reply (&htlc, name_back, sizeof (name_back), login_back,
+                              sizeof (login_back), access_back);
     g_assert_cmphex (seen, ==,
                      GOT_NAME | GOT_LOGIN | GOT_PASSWORD | GOT_ACCESS);
     g_assert_cmpstr (name_back, ==, "Tier3 Modified");
@@ -542,7 +547,9 @@ test_delete (void)
 
     struct htlc_conn htlc;
     int fd = open_admin_login_or_fail (&htlc, "AdminDelete");
-    if (fd < 0) return;
+    if (fd < 0) {
+        return;
+    }
 
     char test_login[40];
     make_test_login (test_login, sizeof (test_login), "delete");
@@ -552,8 +559,7 @@ test_delete (void)
      * test wouldn't actually exercise the successful-delete path. */
     ensure_account_gone (fd, &htlc, test_login);
     guint8 access[8] = { 0x60, 0x60, 0x0c, 0x00, 0x00, 0x00, 0x00, 0x00 };
-    create_account (fd, &htlc, test_login, "secret", "Tier3 To Delete",
-                    access);
+    create_account (fd, &htlc, test_login, "secret", "Tier3 To Delete", access);
 
     guint32 trans = send_account_delete (fd, &htlc, test_login);
     g_assert_cmpuint (trans, !=, 0);
@@ -594,7 +600,9 @@ test_access_bits_roundtrip (void)
 
     struct htlc_conn htlc;
     int fd = open_admin_login_or_fail (&htlc, "AdminBits");
-    if (fd < 0) return;
+    if (fd < 0) {
+        return;
+    }
 
     char test_login[40];
     make_test_login (test_login, sizeof (test_login), "bits");
@@ -616,8 +624,7 @@ test_access_bits_roundtrip (void)
     g_assert_cmphex (hdr_flag (&htlc) & 1, ==, 0);
 
     guint8 access_back[8] = { 0 };
-    unsigned seen
-        = read_account_reply (&htlc, NULL, 0, NULL, 0, access_back);
+    unsigned seen = read_account_reply (&htlc, NULL, 0, NULL, 0, access_back);
     g_assert_true (seen & GOT_ACCESS);
     g_assert_cmpmem (access_back, 8, access, 8);
 

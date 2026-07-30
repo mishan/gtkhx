@@ -133,10 +133,38 @@ pub(crate) unsafe extern "C" fn task_new(
     std::ptr::null_mut()
 }
 
-pub(crate) unsafe extern "C" fn rcv_task_news_file(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
-pub(crate) unsafe extern "C" fn rcv_task_news_post(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
-pub(crate) unsafe extern "C" fn rcv_task_newscat_list(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
-pub(crate) unsafe extern "C" fn rcv_task_newsfolder_list(_h: *mut c_void, _f: *const c_void, _fl: usize, _p: *mut c_void, _d: *mut c_void) {}
+pub(crate) unsafe extern "C" fn rcv_task_news_file(
+    _h: *mut c_void,
+    _f: *const c_void,
+    _fl: usize,
+    _p: *mut c_void,
+    _d: *mut c_void,
+) {
+}
+pub(crate) unsafe extern "C" fn rcv_task_news_post(
+    _h: *mut c_void,
+    _f: *const c_void,
+    _fl: usize,
+    _p: *mut c_void,
+    _d: *mut c_void,
+) {
+}
+pub(crate) unsafe extern "C" fn rcv_task_newscat_list(
+    _h: *mut c_void,
+    _f: *const c_void,
+    _fl: usize,
+    _p: *mut c_void,
+    _d: *mut c_void,
+) {
+}
+pub(crate) unsafe extern "C" fn rcv_task_newsfolder_list(
+    _h: *mut c_void,
+    _f: *const c_void,
+    _fl: usize,
+    _p: *mut c_void,
+    _d: *mut c_void,
+) {
+}
 
 pub(crate) unsafe extern "C" fn gnews_catalog_path(_g: *mut c_void) -> *const c_char {
     if PATH_NULL.with(|c| c.get()) {
@@ -352,11 +380,22 @@ fn null_htlc_is_no_op() {
         hx_get_news(std::ptr::null_mut());
         hx_post_news(std::ptr::null_mut(), name.as_ptr(), 1);
         // NULL target so the transfer-full release is a no-op (not an unref).
-        hx_news15_get_post(std::ptr::null_mut(), path.as_ptr(), 0, name.as_ptr(),
-                           std::ptr::null_mut());
+        hx_news15_get_post(
+            std::ptr::null_mut(),
+            path.as_ptr(),
+            0,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+        );
         hx_news15_cat_list(std::ptr::null_mut(), tok());
         hx_news15_fldr_list(std::ptr::null_mut(), tok());
-        hx_news15_post_thread(std::ptr::null_mut(), path.as_ptr(), name.as_ptr(), 0, name.as_ptr());
+        hx_news15_post_thread(
+            std::ptr::null_mut(),
+            path.as_ptr(),
+            name.as_ptr(),
+            0,
+            name.as_ptr(),
+        );
         hx_news15_delete_thread(std::ptr::null_mut(), path.as_ptr(), 1);
         hx_news15_delete(std::ptr::null_mut(), path.as_ptr());
         hx_news15_mkcat(std::ptr::null_mut(), path.as_ptr(), name.as_ptr());
@@ -385,7 +424,13 @@ fn null_path_arg_is_no_op() {
     unsafe {
         // get_post takes its path directly now; NULL path must bail before
         // path_to_hldir (and release the transfer-full target — NULL here).
-        hx_news15_get_post(htlc(), std::ptr::null(), 0, name.as_ptr(), std::ptr::null_mut());
+        hx_news15_get_post(
+            htlc(),
+            std::ptr::null(),
+            0,
+            name.as_ptr(),
+            std::ptr::null_mut(),
+        );
         hx_news15_post_thread(htlc(), std::ptr::null(), name.as_ptr(), 0, name.as_ptr());
         hx_news15_delete_thread(htlc(), std::ptr::null(), 1);
         hx_news15_delete(htlc(), std::ptr::null());

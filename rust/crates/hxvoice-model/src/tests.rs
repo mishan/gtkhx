@@ -32,7 +32,11 @@ fn install_chime_recorder(m: &HxVoiceModel) -> Chimes {
 
 /// Count recorded chimes matching `joined` (true = join, false = leave).
 fn chime_count(chimes: &Chimes, joined: bool) -> usize {
-    chimes.borrow().iter().filter(|&&(_, j)| j == joined).count()
+    chimes
+        .borrow()
+        .iter()
+        .filter(|&&(_, j)| j == joined)
+        .count()
 }
 
 fn chime_reset(chimes: &Chimes) {

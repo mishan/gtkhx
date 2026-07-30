@@ -41,7 +41,7 @@
 #include "toolbar.h"
 #include "inline_media.h"
 #include "inline_media_attach.h"
-#include "inline_media_decode.h"  /* sniff + format_is_allowed */
+#include "inline_media_decode.h" /* sniff + format_is_allowed */
 #include "inline_media_upload.h"
 #include "debug.h"
 
@@ -101,9 +101,8 @@ preflight_check (struct htlc_conn *htlc, GBytes *bytes,
         char *msg = g_strdup_printf (
             _ ("%s is %.1f KB — over the %u KB cap. "
                "Pick a smaller image."),
-            display_name ? display_name : _ ("image"),
-            (double) len / 1024.0,
-            (unsigned) (effective_max_bytes (htlc) / 1024));
+            display_name ? display_name : _ ("image"), (double)len / 1024.0,
+            (unsigned)(effective_max_bytes (htlc) / 1024));
         toolbar_show_toast (msg);
         g_free (msg);
         return FALSE;
@@ -119,10 +118,10 @@ preflight_check (struct htlc_conn *htlc, GBytes *bytes,
                    "Try PNG, JPEG, or GIF."),
                 display_name ? display_name : _ ("image"), kind);
         } else {
-            msg = g_strdup_printf (
-                _ ("%s isn't a recognised image. "
-                   "Try PNG, JPEG, or GIF."),
-                display_name ? display_name : _ ("this file"));
+            msg = g_strdup_printf (_ ("%s isn't a recognised image. "
+                                      "Try PNG, JPEG, or GIF."),
+                                   display_name ? display_name
+                                                : _ ("this file"));
         }
         toolbar_show_toast (msg);
         g_free (msg);
@@ -138,40 +137,50 @@ error_toast_text (guint16 code, const char *server_text, gsize server_text_len)
 {
     const char *what;
     switch (code) {
-    case 1: what = _ ("Image too large for this server."); break;
-    case 2: what = _ ("Server rejected the image format."); break;
-    case 3: what = _ ("Rate limited — try again shortly."); break;
-    case 4: what = _ ("Not authorised to send images."); break;
-    case 5: what = _ ("Server temporarily busy."); break;
+    case 1:
+        what = _ ("Image too large for this server.");
+        break;
+    case 2:
+        what = _ ("Server rejected the image format.");
+        break;
+    case 3:
+        what = _ ("Rate limited — try again shortly.");
+        break;
+    case 4:
+        what = _ ("Not authorised to send images.");
+        break;
+    case 5:
+        what = _ ("Server temporarily busy.");
+        break;
     case 0:
-    default: what = _ ("Image upload failed."); break;
+    default:
+        what = _ ("Image upload failed.");
+        break;
     }
     if (server_text && server_text_len > 0) {
         /* Pure layout combiner — no translatable content. */
         return g_strdup_printf (
             "%s (%.*s)", what,
-            (int) (server_text_len > 200 ? 200 : server_text_len),
-            server_text);
+            (int)(server_text_len > 200 ? 200 : server_text_len), server_text);
     }
     return g_strdup (what);
 }
 
 /* Upload-callback. Borrowed pointers; copy or use immediately. */
 static void
-on_upload_done (struct htlc_conn *htlc,
-                const HxInlineMediaUploadResult *r, gpointer user_data)
+on_upload_done (struct htlc_conn *htlc, const HxInlineMediaUploadResult *r,
+                gpointer user_data)
 {
     hx_attach_ctx *ctx = user_data;
 
     if (!r->media_id) {
         char *toast = error_toast_text (r->error_code, r->error_message,
                                         r->error_message_len);
-        debug_log ("media", "attach upload failed: code=%u msg=%.*s",
-                   (unsigned) r->error_code,
-                   (int) (r->error_message_len > 200
-                              ? 200
-                              : r->error_message_len),
-                   r->error_message ? r->error_message : "");
+        debug_log (
+            "media", "attach upload failed: code=%u msg=%.*s",
+            (unsigned)r->error_code,
+            (int)(r->error_message_len > 200 ? 200 : r->error_message_len),
+            r->error_message ? r->error_message : "");
         toolbar_show_toast (toast);
         g_free (toast);
         attach_ctx_free (ctx);
@@ -179,19 +188,17 @@ on_upload_done (struct htlc_conn *htlc,
     }
 
     /* Attach the handle + canonical mime to a chat send. The
-	 * text body is empty for now; callers wanting a caption will
-	 * be handled by a future 'compose preview' that lets the
-	 * user type alongside the attachment. For v1 the text just
-	 * defaults to "[image]" so legacy recipients see a sensible
-	 * placeholder; capable recipients render the inline media. */
+     * text body is empty for now; callers wanting a caption will
+     * be handled by a future 'compose preview' that lets the
+     * user type alongside the attachment. For v1 the text just
+     * defaults to "[image]" so legacy recipients see a sensible
+     * placeholder; capable recipients render the inline media. */
     hx_send_chat_with_media (htlc, "[image]", ctx->cid, /*style=*/0,
-                             r->media_id, r->media_id_len,
-                             r->media_type, r->media_type_len);
+                             r->media_id, r->media_id_len, r->media_type,
+                             r->media_type_len);
 
-    char *toast
-        = g_strdup_printf (_ ("Sent %s"),
-                           ctx->display_name ? ctx->display_name
-                                             : _ ("image"));
+    char *toast = g_strdup_printf (
+        _ ("Sent %s"), ctx->display_name ? ctx->display_name : _ ("image"));
     toolbar_show_toast (toast);
     g_free (toast);
 
@@ -206,13 +213,12 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
     hx_attach_ctx *ctx = user_data;
     GError *err = NULL;
 
-    GBytes *bytes
-        = g_file_load_bytes_finish (G_FILE (src), res, NULL, &err);
+    GBytes *bytes = g_file_load_bytes_finish (G_FILE (src), res, NULL, &err);
     if (!bytes) {
-        char *msg = g_strdup_printf (
-            _ ("Couldn't read %s: %s"),
-            ctx->display_name ? ctx->display_name : _ ("image"),
-            err ? err->message : _ ("unknown error"));
+        char *msg = g_strdup_printf (_ ("Couldn't read %s: %s"),
+                                     ctx->display_name ? ctx->display_name
+                                                       : _ ("image"),
+                                     err ? err->message : _ ("unknown error"));
         toolbar_show_toast (msg);
         g_free (msg);
         g_clear_error (&err);
@@ -221,17 +227,16 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
     }
 
     /* Re-check the cap one more time before committing the
-	 * upload — a disconnect / reconnect-to-non-capable-server
-	 * race during the async load_bytes is the same shape as
-	 * the file-dialog race above. Without the explicit check
-	 * here, hx_send_upload_media_single's internal cap gate
-	 * would fail and we'd surface the generic
-	 * "couldn't start image upload" toast even though
-	 * "inline media isn't available" is what actually
-	 * happened. */
+     * upload — a disconnect / reconnect-to-non-capable-server
+     * race during the async load_bytes is the same shape as
+     * the file-dialog race above. Without the explicit check
+     * here, hx_send_upload_media_single's internal cap gate
+     * would fail and we'd surface the generic
+     * "couldn't start image upload" toast even though
+     * "inline media isn't available" is what actually
+     * happened. */
     if (!inline_media_cap_ok (ctx->htlc)) {
-        toolbar_show_toast (
-            _ ("Inline media isn't available on this server."));
+        toolbar_show_toast (_ ("Inline media isn't available on this server."));
         g_bytes_unref (bytes);
         attach_ctx_free (ctx);
         return;
@@ -247,25 +252,24 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
     const guchar *data = g_bytes_get_data (bytes, &len);
 
     /* declared_type passes the file's sniffed format through as
-	 * a hint. Server uses magic-byte sniff for the authoritative
-	 * decision regardless. */
+     * a hint. Server uses magic-byte sniff for the authoritative
+     * decision regardless. */
     HxInlineMediaFormat fmt = inline_media_sniff (data, len);
     const char *declared = inline_media_format_to_mime (fmt);
 
     /* Pass attach_ctx_free as the upload's user_data_free hook.
-	 * On the success / failure path on_upload_done frees ctx
-	 * itself; the hook only fires when the upload helper's
-	 * task_table entry is reclaimed without on_done having run
-	 * (the connection-tear-down case). Without this the attach
-	 * ctx leaks one-per-click during the disconnected window.
-	 *
-	 * The dispatcher picks single-shot vs chunked framing
-	 * automatically based on the server-advertised CHAT_MEDIA_
-	 * CHUNK_SIZE. */
-    if (!hx_send_upload_media (
-            ctx->htlc, data, len, declared,
-            declared ? strlen (declared) : 0,
-            on_upload_done, ctx, (GDestroyNotify) attach_ctx_free)) {
+     * On the success / failure path on_upload_done frees ctx
+     * itself; the hook only fires when the upload helper's
+     * task_table entry is reclaimed without on_done having run
+     * (the connection-tear-down case). Without this the attach
+     * ctx leaks one-per-click during the disconnected window.
+     *
+     * The dispatcher picks single-shot vs chunked framing
+     * automatically based on the server-advertised CHAT_MEDIA_
+     * CHUNK_SIZE. */
+    if (!hx_send_upload_media (ctx->htlc, data, len, declared,
+                               declared ? strlen (declared) : 0, on_upload_done,
+                               ctx, (GDestroyNotify)attach_ctx_free)) {
         /* Synchronous reject — cap gone, oversized, builder bug. */
         toolbar_show_toast (_ ("Couldn't start image upload."));
         g_bytes_unref (bytes);
@@ -274,10 +278,10 @@ on_bytes_loaded (GObject *src, GAsyncResult *res, gpointer user_data)
     }
 
     /* The upload helper copied the bytes it needed onto the
-	 * wire; we're done with the GBytes. The Phase 9.A builder
-	 * works against the payload pointer until hlwrite_chunks
-	 * returns, which is inside hx_send_upload_media_single, so
-	 * unref is safe here. */
+     * wire; we're done with the GBytes. The Phase 9.A builder
+     * works against the payload pointer until hlwrite_chunks
+     * returns, which is inside hx_send_upload_media_single, so
+     * unref is safe here. */
     g_bytes_unref (bytes);
 }
 
@@ -287,17 +291,17 @@ on_file_picked (GObject *src, GAsyncResult *res, gpointer user_data)
 {
     hx_attach_ctx *ctx = user_data;
     GError *err = NULL;
-    GFile *file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (src), res,
-                                               &err);
+    GFile *file
+        = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (src), res, &err);
     if (!file) {
         /* User cancelled, or actual error — drop silently for the
-		 * dismissed case (toast would be noisy). Surface a toast
-		 * only on genuine errors. */
-        if (err && !g_error_matches (err, GTK_DIALOG_ERROR,
-                                     GTK_DIALOG_ERROR_DISMISSED)) {
+         * dismissed case (toast would be noisy). Surface a toast
+         * only on genuine errors. */
+        if (err
+            && !g_error_matches (err, GTK_DIALOG_ERROR,
+                                 GTK_DIALOG_ERROR_DISMISSED)) {
             char *msg
-                = g_strdup_printf (_ ("File picker failed: %s"),
-                                   err->message);
+                = g_strdup_printf (_ ("File picker failed: %s"), err->message);
             toolbar_show_toast (msg);
             g_free (msg);
         }
@@ -310,43 +314,42 @@ on_file_picked (GObject *src, GAsyncResult *res, gpointer user_data)
     ctx->display_name = basename;
 
     /* Re-check the inline-media cap before any further I/O.
-	 * The file dialog is async: between the click that opened it
-	 * and this callback firing the server connection can have
-	 * dropped (or reconnected to a server that doesn't speak
-	 * the extension). Surfacing the actionable "not available
-	 * on this server" toast here avoids a slow path through
-	 * stat / load_bytes / preflight only to land on a generic
-	 * "couldn't start upload" message at the very end. */
+     * The file dialog is async: between the click that opened it
+     * and this callback firing the server connection can have
+     * dropped (or reconnected to a server that doesn't speak
+     * the extension). Surfacing the actionable "not available
+     * on this server" toast here avoids a slow path through
+     * stat / load_bytes / preflight only to land on a generic
+     * "couldn't start upload" message at the very end. */
     if (!inline_media_cap_ok (ctx->htlc)) {
-        toolbar_show_toast (
-            _ ("Inline media isn't available on this server."));
+        toolbar_show_toast (_ ("Inline media isn't available on this server."));
         g_object_unref (file);
         attach_ctx_free (ctx);
         return;
     }
 
     /* Pre-flight the file size BEFORE loading bytes — the MIME
-	 * filter doesn't bound size, and reading e.g. a 50 MB photo
-	 * into memory just to reject it after is wasteful. Query
-	 * G_FILE_ATTRIBUTE_STANDARD_SIZE synchronously (one stat()
-	 * on local files; cheap). On failure (network mounts that
-	 * don't report size, permission errors) we fall through to
-	 * the async load and let the preflight_check after the read
-	 * catch it. */
+     * filter doesn't bound size, and reading e.g. a 50 MB photo
+     * into memory just to reject it after is wasteful. Query
+     * G_FILE_ATTRIBUTE_STANDARD_SIZE synchronously (one stat()
+     * on local files; cheap). On failure (network mounts that
+     * don't report size, permission errors) we fall through to
+     * the async load and let the preflight_check after the read
+     * catch it. */
     GError *info_err = NULL;
-    GFileInfo *info = g_file_query_info (
-        file, G_FILE_ATTRIBUTE_STANDARD_SIZE,
-        G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS, NULL, &info_err);
+    GFileInfo *info = g_file_query_info (file, G_FILE_ATTRIBUTE_STANDARD_SIZE,
+                                         G_FILE_QUERY_INFO_NOFOLLOW_SYMLINKS,
+                                         NULL, &info_err);
     if (info) {
         goffset size = g_file_info_get_size (info);
         g_object_unref (info);
         guint32 max_bytes = effective_max_bytes (ctx->htlc);
-        if (size > 0 && (guint64) size > (guint64) max_bytes) {
+        if (size > 0 && (guint64)size > (guint64)max_bytes) {
             char *msg = g_strdup_printf (
                 _ ("%s is %.1f KB — over the %u KB cap. "
                    "Pick a smaller image."),
                 ctx->display_name ? ctx->display_name : _ ("image"),
-                (double) size / 1024.0, (unsigned) (max_bytes / 1024));
+                (double)size / 1024.0, (unsigned)(max_bytes / 1024));
             toolbar_show_toast (msg);
             g_free (msg);
             g_object_unref (file);
@@ -358,8 +361,8 @@ on_file_picked (GObject *src, GAsyncResult *res, gpointer user_data)
     }
 
     /* Load the bytes async — small images finish on the main
-	 * thread fast but still benefit from non-blocking I/O for
-	 * slow disks / network mounts. */
+     * thread fast but still benefit from non-blocking I/O for
+     * slow disks / network mounts. */
     g_file_load_bytes_async (file, NULL, on_bytes_loaded, ctx);
     g_object_unref (file);
 }
@@ -385,18 +388,17 @@ on_attach_clicked (GtkButton *btn, gpointer user_data)
 
     if (!inline_media_cap_ok (seed->htlc)) {
         /* Belt-and-braces: the button is normally hidden when
-		 * the cap isn't negotiated (see
-		 * inline_media_attach_refresh_all_chats), but the cap
-		 * could disappear between paint and click on a session
-		 * tear-down race. */
-        toolbar_show_toast (
-            _ ("Inline media isn't available on this server."));
+         * the cap isn't negotiated (see
+         * inline_media_attach_refresh_all_chats), but the cap
+         * could disappear between paint and click on a session
+         * tear-down race. */
+        toolbar_show_toast (_ ("Inline media isn't available on this server."));
         return;
     }
 
     /* Allocate a per-click context. The seed holds the shape
-	 * (gchat + htlc + cid) but we don't share it across clicks
-	 * since each upload owns its own lifecycle. */
+     * (gchat + htlc + cid) but we don't share it across clicks
+     * since each upload owns its own lifecycle. */
     hx_attach_ctx *ctx = g_new0 (hx_attach_ctx, 1);
     ctx->gchat = seed->gchat;
     ctx->htlc = seed->htlc;
@@ -429,27 +431,28 @@ hx_inline_media_attach_button_new (struct gtkhx_chat *gchat,
     gtk_widget_set_tooltip_text (btn, _ ("Attach Image"));
 
     /* Visibility is gated on HTLC_CAP_INLINE_MEDIA. The seed
-	 * sets the initial state to match the htlc's current caps
-	 * directly so pchat windows created LATER in the session
-	 * (private chats opened on first user-interaction with
-	 * a user from users.c, etc.) don't stay hidden indefinitely
-	 * waiting for the next setbtns→refresh cycle. The setbtns
-	 * path keeps walking every existing button to handle the
-	 * disconnect / reconnect case. Most Hotline servers don't
-	 * support the extension; leaving the button visible (and
-	 * inert on a click) would be misleading. */
-    gboolean show_now = htlc && (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) != 0;
+     * sets the initial state to match the htlc's current caps
+     * directly so pchat windows created LATER in the session
+     * (private chats opened on first user-interaction with
+     * a user from users.c, etc.) don't stay hidden indefinitely
+     * waiting for the next setbtns→refresh cycle. The setbtns
+     * path keeps walking every existing button to handle the
+     * disconnect / reconnect case. Most Hotline servers don't
+     * support the extension; leaving the button visible (and
+     * inert on a click) would be misleading. */
+    gboolean show_now
+        = htlc && (hx_conn_has_cap (htlc, HTLC_CAP_INLINE_MEDIA)) != 0;
     gtk_widget_set_visible (btn, show_now);
 
     /* Persistent click-seed holds the shape we need on every
-	 * click — gchat + htlc + cid. Lifetime is tied to the
-	 * button; freed via the "destroy" weak-notify. */
+     * click — gchat + htlc + cid. Lifetime is tied to the
+     * button; freed via the "destroy" weak-notify. */
     hx_attach_ctx *seed = g_new0 (hx_attach_ctx, 1);
     seed->gchat = gchat;
     seed->htlc = htlc;
     seed->cid = gchat ? hx_gchat_cid (gchat) : 0;
     g_object_set_data_full (G_OBJECT (btn), "attach-seed", seed,
-                            (GDestroyNotify) attach_ctx_free);
+                            (GDestroyNotify)attach_ctx_free);
 
     g_signal_connect (btn, "clicked", G_CALLBACK (on_attach_clicked), seed);
     return btn;

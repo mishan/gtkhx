@@ -39,16 +39,17 @@ drain_for_rename (int fd, struct htlc_conn *htlc, guint16 wanted_uid,
         if (hdr_type (htlc) != HTLS_HDR_USER_CHANGE) {
             continue;
         }
-        if (!hx_user_change_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, out)) {
+        if (!hx_user_change_extract (hx_test_in (htlc)->buf,
+                                     hx_test_in (htlc)->pos, out)) {
             continue;
         }
         if (out->uid != wanted_uid) {
             continue;
         }
         /* Distinguish the rename USER_CHANGE from the on-join
-		 * USER_CHANGE Alice received when Bob logged in (whose
-		 * name field is Bob's, not the renamed Alice's). Match
-		 * on the wanted name. */
+         * USER_CHANGE Alice received when Bob logged in (whose
+         * name field is Bob's, not the renamed Alice's). Match
+         * on the wanted name. */
         if (strcmp (out->name, wanted_name) != 0) {
             continue;
         }
@@ -77,18 +78,18 @@ test_user_rename_broadcasts (void)
     }
 
     /* Alice changes her name and icon. mhxd's rcv_user_change
-	 * compares the chunk values to her current htlc state; if
-	 * either differs it sets `diff` and broadcasts via
-	 * snd_user_change. */
+     * compares the chunk values to her current htlc state; if
+     * either differs it sets `diff` and broadcasts via
+     * snd_user_change. */
     const char *new_name = "RenameAlice 2.0";
-    guint16 new_icon_be = g_htons(999); /* differs from 412 */
+    guint16 new_icon_be = g_htons (999); /* differs from 412 */
     g_assert_true (integration_send_message (
         fd_a, &htlc_a, HTLC_HDR_USER_CHANGE, /*flag=*/0, /*hc=*/2,
         (int)HTLC_DATA_ICON, (int)sizeof (new_icon_be), &new_icon_be,
         (int)HTLC_DATA_NAME, (int)strlen (new_name), (guint8 *)new_name));
 
     /* Bob's connection should receive HTLS_HDR_USER_CHANGE with
-	 * Alice's uid + the new name + new icon. */
+     * Alice's uid + the new name + new icon. */
     struct hx_user_change_msg uc;
     g_assert_true (drain_for_rename (fd_b, &htlc_b, htlc_a.uid, new_name, &uc,
                                      /*max_messages=*/64));

@@ -35,8 +35,8 @@ get_table (void)
          * panel itself owns; the registry just borrows the pointer.
          * value destroy is g_object_unref so the registry's strong
          * ref is dropped when the entry is removed. */
-        table = g_hash_table_new_full (g_str_hash, g_str_equal,
-                                       NULL, g_object_unref);
+        table = g_hash_table_new_full (g_str_hash, g_str_equal, NULL,
+                                       g_object_unref);
     }
     return table;
 }
@@ -54,7 +54,7 @@ hx_panel_registry_register (HxPanel *panel)
     /* g_hash_table_replace drops the old entry's strong ref before
      * inserting the new one; protects against a re-register on the
      * same id (which would otherwise leak the previous panel). */
-    g_hash_table_replace (get_table (), (gpointer) id, g_object_ref (panel));
+    g_hash_table_replace (get_table (), (gpointer)id, g_object_ref (panel));
 
     /* If a saved layout is in effect, the panel may belong in a
      * different leaf than the factory just added it to. Reseat it
@@ -81,15 +81,15 @@ hx_panel_registry_lookup (const char *id)
 }
 
 void
-hx_panel_registry_foreach (HxPanelRegistryForeachFunc func,
-                           gpointer                   user_data)
+hx_panel_registry_foreach (HxPanelRegistryForeachFunc func, gpointer user_data)
 {
     GHashTableIter iter;
-    gpointer       value;
+    gpointer value;
 
     g_return_if_fail (func != NULL);
 
     g_hash_table_iter_init (&iter, get_table ());
-    while (g_hash_table_iter_next (&iter, NULL, &value))
+    while (g_hash_table_iter_next (&iter, NULL, &value)) {
         func (HX_PANEL (value), user_data);
+    }
 }

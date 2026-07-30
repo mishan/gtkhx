@@ -50,17 +50,17 @@ debug_init (void)
         gchar *trim = g_strstrip (parts[i]);
         if (*trim) {
             /* The string slot is owned by `parts` for the
-			 * duration of this loop; g_strdup so the table
-			 * keeps a stable pointer after we strfreev. */
+             * duration of this loop; g_strdup so the table
+             * keeps a stable pointer after we strfreev. */
             g_hash_table_add (enabled_cats, g_strdup (trim));
         }
     }
     g_strfreev (parts);
 
     /* Surface the configuration once so the user can verify their
-	 * env var was actually picked up — common mistake is setting
-	 * GTKHX_DEBUG only in one shell and launching the app from
-	 * another. */
+     * env var was actually picked up — common mistake is setting
+     * GTKHX_DEBUG only in one shell and launching the app from
+     * another. */
     if (g_hash_table_size (enabled_cats) > 0) {
         g_printerr ("[debug] enabled categories: %s\n", spec);
     }
@@ -94,7 +94,7 @@ debug_log (const char *cat, const char *fmt, ...)
     va_end (ap);
 
     /* Auto-newline if the caller didn't supply one — most users
-	 * forget, and unterminated lines fragment the log. */
+     * forget, and unterminated lines fragment the log. */
     fmtlen = strlen (fmt);
     if (fmtlen == 0 || fmt[fmtlen - 1] != '\n') {
         g_printerr ("\n");

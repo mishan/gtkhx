@@ -51,10 +51,10 @@ hlpack_v (struct htlc_conn *htlc, guint32 type, guint32 flag, int hc, ...)
     guint8 *buf = hlpack (htlc, type, flag, hc, ap, &len);
     va_end (ap);
 
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = buf;
-    hx_test_in(htlc)->pos = len;
-    hx_test_in(htlc)->len = len;
+    g_free (hx_test_in (htlc)->buf);
+    hx_test_in (htlc)->buf = buf;
+    hx_test_in (htlc)->pos = len;
+    hx_test_in (htlc)->len = len;
 }
 
 static void
@@ -67,8 +67,8 @@ htlc_init (struct htlc_conn *htlc, guint32 starting_trans)
 static void
 htlc_free (struct htlc_conn *htlc)
 {
-    g_free (hx_test_in(htlc)->buf);
-    hx_test_in(htlc)->buf = NULL;
+    g_free (hx_test_in (htlc)->buf);
+    hx_test_in (htlc)->buf = NULL;
 }
 
 /* Walk the packed message in hx_test_in(htlc)->buf and assert it has the
@@ -76,9 +76,9 @@ htlc_free (struct htlc_conn *htlc)
 static void
 assert_packed_opcode (struct htlc_conn *htlc, guint32 expected)
 {
-    g_assert_cmpuint (hx_test_in(htlc)->pos, >=, SIZEOF_HL_HDR);
-    const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in(htlc)->buf;
-    g_assert_cmphex (g_ntohl(h->type), ==, expected);
+    g_assert_cmpuint (hx_test_in (htlc)->pos, >=, SIZEOF_HL_HDR);
+    const struct hl_hdr *h = (const struct hl_hdr *)hx_test_in (htlc)->buf;
+    g_assert_cmphex (g_ntohl (h->type), ==, expected);
 }
 
 /* ---------- GETFOLDER request ---------- */
@@ -98,7 +98,7 @@ test_getfolder_request_name_only (void)
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_GETFOLDER);
 
     int found = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         found++;
         g_assert_cmphex (_type, ==, HTLC_DATA_FILE_NAME);
@@ -123,10 +123,10 @@ test_getfolder_request_with_dir (void)
     htlc_init (&htlc, 99);
 
     const char *name = "leaf";
-    const guint8 dir_chunk[] = { 0x00, 0x01,   /* dc = 1 */
-                                 0x00, 0x00,   /* enc */
-                                 0x05,         /* namelen */
-                                 'f', 'i', 'l', 'e', 's' };
+    const guint8 dir_chunk[] = { 0x00, 0x01, /* dc = 1 */
+                                 0x00, 0x00, /* enc */
+                                 0x05,       /* namelen */
+                                 'f',  'i',  'l', 'e', 's' };
 
     hlpack_v (&htlc, HTLC_HDR_FILE_GETFOLDER, 0, /*hc=*/2,
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name,
@@ -135,7 +135,7 @@ test_getfolder_request_with_dir (void)
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_GETFOLDER);
 
     int saw_name = 0, saw_dir = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         switch (_type) {
         case HTLC_DATA_FILE_NAME:
@@ -171,20 +171,20 @@ test_putfolder_request_name_size_nfiles (void)
 
     const char *name = "uploads";
     /* hx_put_folder htonl's the numbers before passing — replicate
-	 * that here so the packed bytes match the production caller. */
-    guint32 size_n = g_htonl(12345);
-    guint32 nfiles_n = g_htonl(3);
+     * that here so the packed bytes match the production caller. */
+    guint32 size_n = g_htonl (12345);
+    guint32 nfiles_n = g_htonl (3);
 
     hlpack_v (&htlc, HTLC_HDR_FILE_PUTFOLDER, 0, /*hc=*/3,
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name,
-              (int)HTLC_DATA_HTXF_SIZE, 4, &size_n,
-              (int)HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
+              (int)HTLC_DATA_HTXF_SIZE, 4, &size_n, (int)HTLC_DATA_FILE_NFILES,
+              4, &nfiles_n);
 
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_PUTFOLDER);
 
     int saw_name = 0, saw_size = 0, saw_nfiles = 0;
     guint32 got_size = 0, got_nfiles = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         switch (_type) {
         case HTLC_DATA_FILE_NAME:
@@ -225,24 +225,24 @@ test_putfolder_request_with_dir (void)
     htlc_init (&htlc, 7);
 
     const char *name = "uploads";
-    const guint8 dir_chunk[] = { 0x00, 0x01,   /* dc = 1 */
-                                 0x00, 0x00,   /* enc */
-                                 0x05,         /* namelen */
-                                 'p', 'u', 'b', 'l', 'i' };
-    guint32 size_n = g_htonl(1);
-    guint32 nfiles_n = g_htonl(1);
+    const guint8 dir_chunk[] = { 0x00, 0x01, /* dc = 1 */
+                                 0x00, 0x00, /* enc */
+                                 0x05,       /* namelen */
+                                 'p',  'u',  'b', 'l', 'i' };
+    guint32 size_n = g_htonl (1);
+    guint32 nfiles_n = g_htonl (1);
 
     hlpack_v (&htlc, HTLC_HDR_FILE_PUTFOLDER, 0, /*hc=*/4,
               (int)HTLC_DATA_FILE_NAME, (int)strlen (name), (guint8 *)name,
               (int)HTLC_DATA_DIR, (int)sizeof (dir_chunk), dir_chunk,
-              (int)HTLC_DATA_HTXF_SIZE, 4, &size_n,
-              (int)HTLC_DATA_FILE_NFILES, 4, &nfiles_n);
+              (int)HTLC_DATA_HTXF_SIZE, 4, &size_n, (int)HTLC_DATA_FILE_NFILES,
+              4, &nfiles_n);
 
     assert_packed_opcode (&htlc, HTLC_HDR_FILE_PUTFOLDER);
 
     int chunks = 0;
     int saw_dir = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         chunks++;
         if (_type == HTLC_DATA_DIR) {
@@ -273,16 +273,16 @@ test_folder_get_reply_parse (void)
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/123, /*flag=*/0);
 
     /* The server's order is implementation-defined; rcv handles
-	 * arbitrary order. Mix it up to prove that. */
-    guint32 size_n = g_htonl(8192);
-    guint32 ref_n = g_htonl(0xdeadbeef);
-    guint32 nfiles_n = g_htonl(5);
+     * arbitrary order. Mix it up to prove that. */
+    guint32 size_n = g_htonl (8192);
+    guint32 ref_n = g_htonl (0xdeadbeef);
+    guint32 nfiles_n = g_htonl (5);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_SIZE, 4, &size_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_FILE_NFILES, 4, &nfiles_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
 
     guint32 ref = 0, size = 0, queue = 0, nfiles = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_SIZE:
@@ -321,15 +321,15 @@ test_folder_get_reply_with_queue (void)
 
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/200, /*flag=*/0);
 
-    guint32 ref_n = g_htonl(1);
-    guint32 size_n = g_htonl(1024);
-    guint32 queue_n = g_htonl(3); /* third in line */
+    guint32 ref_n = g_htonl (1);
+    guint32 size_n = g_htonl (1024);
+    guint32 queue_n = g_htonl (3); /* third in line */
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_SIZE, 4, &size_n);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_QUEUE, 4, &queue_n);
 
     guint32 ref = 0, size = 0, queue = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_HTXF_REF:
@@ -365,12 +365,12 @@ test_folder_put_reply_parse (void)
 
     wire_fixture_init (&htlc, HTLS_HDR_TASK, /*trans=*/77, /*flag=*/0);
 
-    guint32 ref_n = g_htonl(0xabad1dea);
+    guint32 ref_n = g_htonl (0xabad1dea);
     wire_fixture_add_chunk (&htlc, HTLS_DATA_HTXF_REF, 4, &ref_n);
 
     guint32 ref = 0, queue = 0;
     int chunks = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         chunks++;
         switch (_type) {

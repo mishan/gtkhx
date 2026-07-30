@@ -62,36 +62,35 @@ test_chat_decline_silent (void)
                                                      &chat_id, 64));
 
     /* Bob drains for the CHAT_INVITE so we know he's actually been
-	 * invited at the protocol level (and hasn't seen anything stale
-	 * left over from a previous test run). */
-    g_assert_true (integration_drain_until_chat_invite (
-        fd_b, &htlc_b, 64));
+     * invited at the protocol level (and hasn't seen anything stale
+     * left over from a previous test run). */
+    g_assert_true (integration_drain_until_chat_invite (fd_b, &htlc_b, 64));
 
     /* Bob declines. Server should accept silently. */
-    guint32 cid_be = g_htonl(chat_id);
+    guint32 cid_be = g_htonl (chat_id);
     g_assert_true (integration_send_message (
         fd_b, &htlc_b, HTLC_HDR_CHAT_DECLINE, /*flag=*/0, /*hc=*/1,
         (int)HTLC_DATA_CHAT_ID, (int)sizeof (cid_be), &cid_be));
 
     /* Round-trip a PING on Alice's connection. The ping's TASK
-	 * reply must correlate by trans; if the server slipped in a
-	 * decline-broadcast (shouldn't happen) we'd see an unrelated
-	 * frame first and the trans match would fail. */
+     * reply must correlate by trans; if the server slipped in a
+     * decline-broadcast (shouldn't happen) we'd see an unrelated
+     * frame first and the trans match would fail. */
     guint32 ping_trans = integration_send_ping (fd_a, &htlc_a);
     g_assert_cmpuint (ping_trans, !=, 0);
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd_a, &htlc_a, ping_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd_a, &htlc_a, ping_trans, 64));
     /* Ping mustn't error out either. */
     g_assert_cmphex (hdr_flag (&htlc_a) & 1, ==, 0);
 
     /* Same shape on Bob's connection: we expect his stream to be
-	 * idle after the DECLINE, so a ping round-trip works cleanly. */
+     * idle after the DECLINE, so a ping round-trip works cleanly. */
     guint32 bob_ping_trans = integration_send_ping (fd_b, &htlc_b);
     g_assert_cmpuint (bob_ping_trans, !=, 0);
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd_b, &htlc_b, bob_ping_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd_b, &htlc_b, bob_ping_trans, 64));
     g_assert_cmphex (hdr_flag (&htlc_b) & 1, ==, 0);
 
     integration_release_htlc (&htlc_b);

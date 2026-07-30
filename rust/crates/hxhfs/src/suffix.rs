@@ -9,7 +9,9 @@ const UNKNOWN: [u8; 8] = *b"TEXTR*ch";
 
 /// The bytes after the last `.` in `path`, or `None` if there is no `.`.
 fn suffix(path: &[u8]) -> Option<&[u8]> {
-    path.iter().rposition(|&b| b == b'.').map(|i| &path[i + 1..])
+    path.iter()
+        .rposition(|&b| b == b'.')
+        .map(|i| &path[i + 1..])
 }
 
 /// The 8-byte type+creator derived from `path`'s extension. The match is
@@ -65,7 +67,7 @@ mod tests {
         assert_eq!(suffix_type_creator(b"file.xyz"), UNKNOWN); // unknown ext
         assert_eq!(suffix_type_creator(b"trailing."), UNKNOWN); // empty suffix
         assert_eq!(suffix_type_creator(b"JPG.JPG"), UNKNOWN); // case-sensitive
-        // Uses the *last* dot, and matches a leading-dot name.
+                                                              // Uses the *last* dot, and matches a leading-dot name.
         assert_eq!(&suffix_type_creator(b"a.tar.gif"), b"GIFfGKON");
         assert_eq!(&suffix_type_creator(b".png"), b"PNGfGKON");
     }

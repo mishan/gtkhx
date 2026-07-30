@@ -118,9 +118,7 @@ pub extern "C" fn gtkhx_compress_encoder_new(algo: u16) -> *mut CompressEncoder 
         // what the HOPE "GZIP" algorithm actually wires. Despite the
         // protocol name, this is NOT RFC 1952 gzip. Wire-compat with
         // every hx-family server's deflateInit/inflateInit.
-        COMPRESS_GZIP => {
-            CompressEncoder::Gzip(Compress::new(flate2::Compression::default(), true))
-        }
+        COMPRESS_GZIP => CompressEncoder::Gzip(Compress::new(flate2::Compression::default(), true)),
         #[cfg(feature = "lz4")]
         COMPRESS_LZ4 => CompressEncoder::Lz4,
         #[cfg(feature = "zstd")]
@@ -390,8 +388,7 @@ pub unsafe extern "C" fn gtkhx_compress_decode(
             }
 
             let to_caller = state.output_staging.len().min(out_slice.len());
-            out_slice[..to_caller]
-                .copy_from_slice(&state.output_staging[..to_caller]);
+            out_slice[..to_caller].copy_from_slice(&state.output_staging[..to_caller]);
             state.output_staging.drain(..to_caller);
 
             *in_used = input_len;
@@ -473,8 +470,10 @@ mod tests {
             // called with zlib_header=false (raw DEFLATE, which would
             // produce different leading bytes and break wire-compat
             // with hx-family servers).
-            assert_eq!(compressed[0], 0x78,
-                       "GZIP output should start with zlib's CMF byte (0x78), not raw DEFLATE");
+            assert_eq!(
+                compressed[0], 0x78,
+                "GZIP output should start with zlib's CMF byte (0x78), not raw DEFLATE"
+            );
             gtkhx_compress_encoder_free(enc);
 
             let dec = gtkhx_compress_decoder_new(COMPRESS_GZIP);
@@ -528,8 +527,10 @@ mod tests {
                 zero.as_mut_ptr(),
                 0,
             );
-            assert_eq!(comp_len, 0,
-                       "encoder must surface BufError as failure, not return a truncated frame");
+            assert_eq!(
+                comp_len, 0,
+                "encoder must surface BufError as failure, not return a truncated frame"
+            );
             gtkhx_compress_encoder_free(enc);
         }
     }
@@ -553,20 +554,29 @@ mod tests {
             let enc = gtkhx_compress_encoder_new(COMPRESS_ZSTD);
             assert!(!enc.is_null());
             let comp_len = gtkhx_compress_encode(
-                enc, input.as_ptr(), input.len() as u32,
-                compressed.as_mut_ptr(), compressed.len() as u32,
+                enc,
+                input.as_ptr(),
+                input.len() as u32,
+                compressed.as_mut_ptr(),
+                compressed.len() as u32,
             );
             assert!(comp_len > 4, "ZSTD frame is at least 4 magic bytes + body");
-            assert_eq!(&compressed[..4], &[0x28, 0xb5, 0x2f, 0xfd],
-                       "ZSTD output should start with the ZSTD frame magic (0xFD2FB528 LE)");
+            assert_eq!(
+                &compressed[..4],
+                &[0x28, 0xb5, 0x2f, 0xfd],
+                "ZSTD output should start with the ZSTD frame magic (0xFD2FB528 LE)"
+            );
             gtkhx_compress_encoder_free(enc);
 
             let dec = gtkhx_compress_decoder_new(COMPRESS_ZSTD);
             assert!(!dec.is_null());
             let mut in_used = 0u32;
             let decomp_len = gtkhx_compress_decode(
-                dec, compressed.as_ptr(), comp_len,
-                decompressed.as_mut_ptr(), decompressed.len() as u32,
+                dec,
+                compressed.as_ptr(),
+                comp_len,
+                decompressed.as_mut_ptr(),
+                decompressed.len() as u32,
                 &mut in_used,
             );
             assert_eq!(decomp_len, input.len() as u32);
@@ -591,8 +601,11 @@ mod tests {
         let comp_len = unsafe {
             let enc = gtkhx_compress_encoder_new(COMPRESS_LZ4);
             let n = gtkhx_compress_encode(
-                enc, plaintext.as_ptr(), plaintext.len() as u32,
-                framed.as_mut_ptr(), framed.len() as u32,
+                enc,
+                plaintext.as_ptr(),
+                plaintext.len() as u32,
+                framed.as_mut_ptr(),
+                framed.len() as u32,
             );
             gtkhx_compress_encoder_free(enc);
             n as usize
@@ -614,13 +627,18 @@ mod tests {
         let mut in_used = 0u32;
         let mut produced = unsafe {
             gtkhx_compress_decode(
-                dec, framed.as_ptr(), comp_len as u32,
-                out_chunk.as_mut_ptr(), out_chunk.len() as u32,
+                dec,
+                framed.as_ptr(),
+                comp_len as u32,
+                out_chunk.as_mut_ptr(),
+                out_chunk.len() as u32,
                 &mut in_used,
             )
         };
-        assert_eq!(in_used, comp_len as u32,
-                   "first call should consume the entire framed input into its buffer");
+        assert_eq!(
+            in_used, comp_len as u32,
+            "first call should consume the entire framed input into its buffer"
+        );
         decoded.extend_from_slice(&out_chunk[..produced as usize]);
 
         // Subsequent calls: zero new input, just drain.
@@ -628,8 +646,11 @@ mod tests {
             in_used = 0;
             produced = unsafe {
                 gtkhx_compress_decode(
-                    dec, std::ptr::null(), 0,
-                    out_chunk.as_mut_ptr(), out_chunk.len() as u32,
+                    dec,
+                    std::ptr::null(),
+                    0,
+                    out_chunk.as_mut_ptr(),
+                    out_chunk.len() as u32,
                     &mut in_used,
                 )
             };
@@ -640,8 +661,11 @@ mod tests {
         }
         unsafe { gtkhx_compress_decoder_free(dec) };
 
-        assert_eq!(decoded.len(), plaintext.len(),
-                   "should drain the whole frame across multiple small-out_cap calls");
+        assert_eq!(
+            decoded.len(),
+            plaintext.len(),
+            "should drain the whole frame across multiple small-out_cap calls"
+        );
         assert_eq!(decoded, plaintext);
     }
 
@@ -669,9 +693,15 @@ mod tests {
                 compressed.as_mut_ptr(),
                 compressed.len() as u32,
             );
-            assert!(comp_len > 4, "LZ4F frame is at least the 4-byte magic + body");
-            assert_eq!(&compressed[..4], &[0x04, 0x22, 0x4d, 0x18],
-                       "LZ4 output should start with the LZ4F frame magic (0x184D2204 LE)");
+            assert!(
+                comp_len > 4,
+                "LZ4F frame is at least the 4-byte magic + body"
+            );
+            assert_eq!(
+                &compressed[..4],
+                &[0x04, 0x22, 0x4d, 0x18],
+                "LZ4 output should start with the LZ4F frame magic (0x184D2204 LE)"
+            );
             gtkhx_compress_encoder_free(enc);
 
             let dec = gtkhx_compress_decoder_new(COMPRESS_LZ4);
@@ -688,8 +718,10 @@ mod tests {
             );
             assert_eq!(decomp_len, input.len() as u32);
             assert_eq!(&decompressed[..input.len()], input);
-            assert_eq!(in_used, comp_len,
-                       "LZ4F decoder should consume the entire frame");
+            assert_eq!(
+                in_used, comp_len,
+                "LZ4F decoder should consume the entire frame"
+            );
             gtkhx_compress_decoder_free(dec);
         }
     }

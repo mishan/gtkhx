@@ -83,21 +83,13 @@ fn build_chat_id_only(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> u
 /// still emits the CHAT_ID chunk so the server can disambiguate the
 /// lobby from "missing field, fall back to legacy chat-history
 /// behaviour" elsewhere in its dispatcher.
-pub fn build_voice_join_chunks(
-    cid: u32,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_voice_join_chunks(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     build_chat_id_only(cid, chunks, scratch)
 }
 
 /// Build chunks for `HTLC_HDR_VOICE_LEAVE` (601). Same wire shape as
 /// JOIN: a single CHAT_ID chunk.
-pub fn build_voice_leave_chunks(
-    cid: u32,
-    chunks: &mut [HxChunk],
-    scratch: &mut [u8],
-) -> usize {
+pub fn build_voice_leave_chunks(cid: u32, chunks: &mut [HxChunk], scratch: &mut [u8]) -> usize {
     build_chat_id_only(cid, chunks, scratch)
 }
 
@@ -118,11 +110,7 @@ pub fn build_voice_answer_chunks(
     chunks: &mut [HxChunk],
     scratch: &mut [u8],
 ) -> usize {
-    if chunks.len() < 2
-        || scratch.len() < 4
-        || sdp.is_empty()
-        || sdp.len() > u16::MAX as usize
-    {
+    if chunks.len() < 2 || scratch.len() < 4 || sdp.is_empty() || sdp.len() > u16::MAX as usize {
         return 0;
     }
     scratch[0..4].copy_from_slice(&cid.to_be_bytes());
@@ -636,24 +624,14 @@ pub mod ice {
                 match b {
                     b'"' => {
                         if self.pos > lit_start {
-                            s.push_str(
-                                std::str::from_utf8(
-                                    &self.buf[lit_start..self.pos],
-                                )
-                                .ok()?,
-                            );
+                            s.push_str(std::str::from_utf8(&self.buf[lit_start..self.pos]).ok()?);
                         }
                         self.pos += 1;
                         return Some(s);
                     }
                     b'\\' => {
                         if self.pos > lit_start {
-                            s.push_str(
-                                std::str::from_utf8(
-                                    &self.buf[lit_start..self.pos],
-                                )
-                                .ok()?,
-                            );
+                            s.push_str(std::str::from_utf8(&self.buf[lit_start..self.pos]).ok()?);
                         }
                         self.pos += 1;
                         let esc = self.next()?;
@@ -685,18 +663,14 @@ pub mod ice {
                                         // High surrogate — must be
                                         // followed by `\u` and a low
                                         // surrogate (0xDC00..=0xDFFF).
-                                        if self.next()? != b'\\'
-                                            || self.next()? != b'u'
-                                        {
+                                        if self.next()? != b'\\' || self.next()? != b'u' {
                                             return None;
                                         }
                                         let low = self.parse_hex4()?;
                                         if !(0xDC00..=0xDFFF).contains(&low) {
                                             return None;
                                         }
-                                        0x10000
-                                            + ((unit - 0xD800) << 10)
-                                            + (low - 0xDC00)
+                                        0x10000 + ((unit - 0xD800) << 10) + (low - 0xDC00)
                                     }
                                     0xDC00..=0xDFFF => {
                                         // Lone low surrogate.
@@ -1068,7 +1042,10 @@ mod tests {
         let mut scratch = [0u8; 16];
         // An empty SDP answer would tell the server we accept nothing
         // — silently corrupt the session. Reject at the builder.
-        assert_eq!(build_voice_answer_chunks(7, b"", &mut chunks, &mut scratch), 0);
+        assert_eq!(
+            build_voice_answer_chunks(7, b"", &mut chunks, &mut scratch),
+            0
+        );
     }
 
     #[test]
@@ -1232,9 +1209,7 @@ mod tests {
     #[test]
     fn ice_build_full_dict() {
         let c = ice::IceCandidate {
-            candidate: Some(
-                "candidate:1 1 UDP 2130706431 192.0.2.1 5004 typ host".to_string(),
-            ),
+            candidate: Some("candidate:1 1 UDP 2130706431 192.0.2.1 5004 typ host".to_string()),
             sdp_mid: Some("0".to_string()),
             sdp_mline_index: Some(0),
             username_fragment: Some("abc123".to_string()),
@@ -1324,27 +1299,19 @@ mod tests {
         // Only candidate.
         assert!(ice::parse(br#"{"candidate":"c"}"#).is_none());
         // candidate missing, optional fields present.
-        assert!(
-            ice::parse(br#"{"sdpMid":"send","sdpMLineIndex":0}"#).is_none()
-        );
+        assert!(ice::parse(br#"{"sdpMid":"send","sdpMLineIndex":0}"#).is_none());
         // sdpMid missing, optional fields present.
         assert!(
-            ice::parse(
-                br#"{"candidate":"c","sdpMLineIndex":0,"usernameFragment":"x"}"#
-            )
-            .is_none()
+            ice::parse(br#"{"candidate":"c","sdpMLineIndex":0,"usernameFragment":"x"}"#).is_none()
         );
         // Both keys present even with optional whitespace / order
         // variations succeed — pinned alongside as a positive
         // control so the strict check doesn't over-reject.
-        assert!(
-            ice::parse(br#"{ "candidate" : "" , "sdpMid" : "send" }"#).is_some()
-        );
+        assert!(ice::parse(br#"{ "candidate" : "" , "sdpMid" : "send" }"#).is_some());
         // Empty candidate (end-of-candidates) is valid as long as
         // sdpMid is present.
-        let eoc =
-            ice::parse(br#"{"candidate":"","sdpMid":"send","sdpMLineIndex":0}"#)
-                .expect("EOC with sdpMid should parse");
+        let eoc = ice::parse(br#"{"candidate":"","sdpMid":"send","sdpMLineIndex":0}"#)
+            .expect("EOC with sdpMid should parse");
         assert!(eoc.is_end_of_candidates());
         assert_eq!(eoc.sdp_mid.as_deref(), Some("send"));
     }
@@ -1412,7 +1379,10 @@ mod tests {
             br#"{"extra":-1.5E+3,"candidate":"c","sdpMid":"send"}"#.as_slice(),
         ] {
             let parsed = ice::parse(body).unwrap_or_else(|| {
-                panic!("parse should accept legal JSON: {}", String::from_utf8_lossy(body))
+                panic!(
+                    "parse should accept legal JSON: {}",
+                    String::from_utf8_lossy(body)
+                )
             });
             assert_eq!(parsed.candidate.as_deref(), Some("c"));
         }
@@ -1430,12 +1400,12 @@ mod tests {
         // Two-byte sequence (Latin-1 supplement), three-byte (BMP),
         // four-byte (supplementary plane / emoji).
         for s in &[
-            "café",                       // two-byte é (0xC3 0xA9)
-            "münch",                      // umlaut
-            "日本語",                       // three-byte CJK
-            "🦀 Rust",                    // four-byte emoji (U+1F980)
-            "mix: café 日本語 🦀",          // all together
-            "user-12345",                 // pure ASCII still works
+            "café",                // two-byte é (0xC3 0xA9)
+            "münch",               // umlaut
+            "日本語",              // three-byte CJK
+            "🦀 Rust",             // four-byte emoji (U+1F980)
+            "mix: café 日本語 🦀", // all together
+            "user-12345",          // pure ASCII still works
         ] {
             let c = ice::IceCandidate {
                 candidate: Some((*s).to_string()),
@@ -1443,8 +1413,8 @@ mod tests {
                 ..Default::default()
             };
             let json = ice::build(&c);
-            let parsed = ice::parse(json.as_bytes())
-                .unwrap_or_else(|| panic!("parse failed for: {s:?}"));
+            let parsed =
+                ice::parse(json.as_bytes()).unwrap_or_else(|| panic!("parse failed for: {s:?}"));
             assert_eq!(
                 parsed.candidate.as_deref(),
                 Some(*s),
@@ -1468,16 +1438,19 @@ mod tests {
         // Missing colon.
         assert!(ice::parse(br#"{"extra":{"k" 1},"candidate":"c","sdpMid":"send"}"#).is_none());
         // Bare bytes between members.
-        assert!(ice::parse(br#"{"extra":{"k":1 garbage},"candidate":"c","sdpMid":"send"}"#).is_none());
+        assert!(
+            ice::parse(br#"{"extra":{"k":1 garbage},"candidate":"c","sdpMid":"send"}"#).is_none()
+        );
         // Unquoted key.
         assert!(ice::parse(br#"{"extra":{k:1},"candidate":"c","sdpMid":"send"}"#).is_none());
         // Trailing comma after member.
         assert!(ice::parse(br#"{"extra":{"k":1,},"candidate":"c","sdpMid":"send"}"#).is_none());
         // Nested object with malformed inner number — recursion
         // must catch it.
-        assert!(ice::parse(
-            br#"{"extra":{"k":{"inner":01}},"candidate":"c","sdpMid":"send"}"#
-        ).is_none());
+        assert!(
+            ice::parse(br#"{"extra":{"k":{"inner":01}},"candidate":"c","sdpMid":"send"}"#)
+                .is_none()
+        );
         // Nested object that drops the closing brace.
         assert!(ice::parse(br#"{"extra":{"k":1,"candidate":"c","sdpMid":"send"}"#).is_none());
     }
@@ -1498,7 +1471,10 @@ mod tests {
             br#"{"extra":{"k":[1,2,3]},"candidate":"c","sdpMid":"send"}"#.as_slice(),
         ] {
             let parsed = ice::parse(body).unwrap_or_else(|| {
-                panic!("parse should accept legal JSON: {}", String::from_utf8_lossy(body))
+                panic!(
+                    "parse should accept legal JSON: {}",
+                    String::from_utf8_lossy(body)
+                )
             });
             assert_eq!(parsed.candidate.as_deref(), Some("c"));
         }
@@ -1540,7 +1516,10 @@ mod tests {
             br#"{"extra":[{"k":1}],"candidate":"c","sdpMid":"send"}"#.as_slice(),
         ] {
             let parsed = ice::parse(body).unwrap_or_else(|| {
-                panic!("parse should accept legal JSON: {}", String::from_utf8_lossy(body))
+                panic!(
+                    "parse should accept legal JSON: {}",
+                    String::from_utf8_lossy(body)
+                )
             });
             assert_eq!(parsed.candidate.as_deref(), Some("c"));
         }
@@ -1558,30 +1537,23 @@ mod tests {
     fn ice_parse_accepts_utf16_surrogate_pairs() {
         // 🦀 = U+1F980 = 🦀.
         let json = r#"{"candidate":"crab 🦀 here","sdpMid":"send"}"#;
-        let parsed =
-            ice::parse(json.as_bytes()).expect("surrogate pair should decode");
-        assert_eq!(
-            parsed.candidate.as_deref(),
-            Some("crab \u{1F980} here")
-        );
+        let parsed = ice::parse(json.as_bytes()).expect("surrogate pair should decode");
+        assert_eq!(parsed.candidate.as_deref(), Some("crab \u{1F980} here"));
 
         // 𠮷 (U+20BB7, supplementary plane) = 𠮷.
         let json2 = r#"{"candidate":"𠮷","sdpMid":"send"}"#;
-        let parsed2 =
-            ice::parse(json2.as_bytes()).expect("surrogate pair should decode");
+        let parsed2 = ice::parse(json2.as_bytes()).expect("surrogate pair should decode");
         assert_eq!(parsed2.candidate.as_deref(), Some("\u{20BB7}"));
 
         // BMP escapes still work (regression for the refactor).
         // é = é.
         let bmp = r#"{"candidate":"café","sdpMid":"send"}"#;
-        let parsed_bmp =
-            ice::parse(bmp.as_bytes()).expect("BMP \\u should still decode");
+        let parsed_bmp = ice::parse(bmp.as_bytes()).expect("BMP \\u should still decode");
         assert_eq!(parsed_bmp.candidate.as_deref(), Some("café"));
 
         // ASCII-range \u escape (A = 'A').
         let ascii = r#"{"candidate":"A","sdpMid":"send"}"#;
-        let parsed_ascii =
-            ice::parse(ascii.as_bytes()).expect("ASCII \\u should decode");
+        let parsed_ascii = ice::parse(ascii.as_bytes()).expect("ASCII \\u should decode");
         assert_eq!(parsed_ascii.candidate.as_deref(), Some("A"));
     }
 
@@ -1591,38 +1563,23 @@ mod tests {
     #[test]
     fn ice_parse_rejects_lone_surrogates() {
         // Lone high surrogate at end of string.
-        assert!(ice::parse(
-            br#"{"candidate":"\uD83E","sdpMid":"send"}"#
-        )
-        .is_none());
+        assert!(ice::parse(br#"{"candidate":"\uD83E","sdpMid":"send"}"#).is_none());
 
         // Lone high surrogate followed by a regular character (no
         // \u trailer).
-        assert!(ice::parse(
-            br#"{"candidate":"\uD83Ex","sdpMid":"send"}"#
-        )
-        .is_none());
+        assert!(ice::parse(br#"{"candidate":"\uD83Ex","sdpMid":"send"}"#).is_none());
 
         // High surrogate followed by a \u escape that isn't a low
         // surrogate (A = 'A').
-        assert!(ice::parse(
-            br#"{"candidate":"\uD83EA","sdpMid":"send"}"#
-        )
-        .is_none());
+        assert!(ice::parse(br#"{"candidate":"\uD83EA","sdpMid":"send"}"#).is_none());
 
         // Lone low surrogate.
-        assert!(ice::parse(
-            br#"{"candidate":"\uDD80","sdpMid":"send"}"#
-        )
-        .is_none());
+        assert!(ice::parse(br#"{"candidate":"\uDD80","sdpMid":"send"}"#).is_none());
 
         // High surrogate followed by a non-\u escape ('\\n' is legal
         // JSON in isolation but invalid as the low half of a
         // surrogate pair).
-        assert!(ice::parse(
-            br#"{"candidate":"\uD83E\n","sdpMid":"send"}"#
-        )
-        .is_none());
+        assert!(ice::parse(br#"{"candidate":"\uD83E\n","sdpMid":"send"}"#).is_none());
     }
 
     /// Invalid UTF-8 (lone continuation byte / truncated 2-byte
@@ -1664,8 +1621,7 @@ mod tests {
         assert_eq!(r.sdp, Some(&b"v=0\r\n"[..]));
         assert_eq!(r.codec, Some(&b"PCMU"[..]));
         assert!(r.participants.is_some());
-        let v: Vec<Participant> =
-            parse_voice_participants(r.participants.unwrap()).collect();
+        let v: Vec<Participant> = parse_voice_participants(r.participants.unwrap()).collect();
         assert_eq!(v.len(), 1);
         assert_eq!(v[0].user_id, 5);
     }

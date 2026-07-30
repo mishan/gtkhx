@@ -78,7 +78,11 @@ pub fn emoji_to_shortcodes(input: &str) -> String {
             let max_l = MAX_ENCODE_CHARS.min(n - i);
             let mut matched = false;
             for l in (1..=max_l).rev() {
-                let end = if i + l < n { chars[i + l].0 } else { input.len() };
+                let end = if i + l < n {
+                    chars[i + l].0
+                } else {
+                    input.len()
+                };
                 let sub = &input[start..end];
                 if let Some(sc) = shortcode_for_emoji(sub) {
                     out.push(':');
@@ -236,8 +240,14 @@ mod tests {
     #[test]
     fn table_sorted_and_searchable() {
         // Binary search relies on both tables being sorted by key.
-        assert!(ENCODE.windows(2).all(|w| w[0].0 < w[1].0), "ENCODE unsorted");
-        assert!(DECODE.windows(2).all(|w| w[0].0 < w[1].0), "DECODE unsorted");
+        assert!(
+            ENCODE.windows(2).all(|w| w[0].0 < w[1].0),
+            "ENCODE unsorted"
+        );
+        assert!(
+            DECODE.windows(2).all(|w| w[0].0 < w[1].0),
+            "DECODE unsorted"
+        );
         assert!(!ENCODE.is_empty() && !DECODE.is_empty());
     }
 
@@ -300,7 +310,10 @@ mod tests {
 
     #[test]
     fn decode_leaves_unknown_and_stray_colons() {
-        assert_eq!(shortcodes_to_emoji(":notareal_shortcode:"), ":notareal_shortcode:");
+        assert_eq!(
+            shortcodes_to_emoji(":notareal_shortcode:"),
+            ":notareal_shortcode:"
+        );
         assert_eq!(shortcodes_to_emoji("10:30:00"), "10:30:00");
         assert_eq!(shortcodes_to_emoji("C:\\path"), "C:\\path");
         assert_eq!(shortcodes_to_emoji("ratio a:b"), "ratio a:b");

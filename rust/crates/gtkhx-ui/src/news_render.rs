@@ -12,10 +12,10 @@
 
 use std::ffi::{c_char, c_void};
 
-use gtk4 as gtk;
+use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::from_glib_none;
+use gtk4 as gtk;
 
 use crate::tr::{tr, tr_fmt};
 
@@ -54,8 +54,7 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     crate::ensure_gtk_init();
     // Bail rather than abort the process if the widget wiring ever drifts — a
     // panic can't unwind across this extern "C" boundary.
-    let Ok(post_view) =
-        from_glib_none::<_, gtk::Widget>(post_view).downcast::<gtk::TextView>()
+    let Ok(post_view) = from_glib_none::<_, gtk::Widget>(post_view).downcast::<gtk::TextView>()
     else {
         return;
     };
@@ -81,7 +80,11 @@ pub unsafe extern "C" fn gtkhx_news_render_post(
     subject_label.set_text(&subject_display);
 
     let sender = crate::cstr(hx_news_node_sender(node.cast()));
-    let sender = if sender.is_empty() { "?".to_string() } else { sender };
+    let sender = if sender.is_empty() {
+        "?".to_string()
+    } else {
+        sender
+    };
     let date = crate::hl_date::news_node_date_string(node).unwrap_or_default();
     // Single translatable msgid with positional args (was the C
     // _("%1$s — %2$s")) so a translation can reorder sender / date.

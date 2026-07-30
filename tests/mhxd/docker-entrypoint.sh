@@ -66,8 +66,8 @@ TRACKERS="${TRACKERS:-127.0.0.1}"
 # permits — could corrupt the replacement or break the s/// expression.
 TRACKERS_ESC=$(printf '%s' "$TRACKERS" | sed -e 's/[\\&|]/\\&/g')
 sed -i \
-	-e "s|^\\([[:space:]]*\\)trackers .*;|\\1trackers ${TRACKERS_ESC};|" \
-	"$CONF"
+    -e "s|^\\([[:space:]]*\\)trackers .*;|\\1trackers ${TRACKERS_ESC};|" \
+    "$CONF"
 echo "docker-entrypoint: trackers=\"$TRACKERS\""
 
 MODE="${BANNER_MODE:-URL}"
@@ -85,39 +85,39 @@ URL="${BANNER_URL:-$URL_DEFAULT}"
 # happily include a stale URL chunk inside a JPEG-type banner.
 # Empty string in the config = no chunk on the wire.
 case "$MODE" in
-	JPEG)
-		FILE="${BANNER_FILE:-/opt/mhxd/run/banner.jpg}"
-		URL=""
-		# mhxd's type strings are exactly 4 bytes — the docs note
-		# "GIFf" is the GIF type and "JPEG" is JPEG; URL is the
-		# special pseudo-type. Pass through verbatim.
-		TYPE="JPEG"
-		;;
-	GIFf|GIF)
-		FILE="${BANNER_FILE:-/opt/mhxd/run/banner.gif}"
-		URL=""
-		TYPE="GIFf"
-		;;
-	URL|"URL ")
-		FILE=""
-		# URL kept from the BANNER_URL var above.
-		TYPE="URL"
-		;;
-	*)
-		echo "docker-entrypoint: unknown BANNER_MODE=$MODE" >&2
-		echo "  supported: URL, GIFf, JPEG" >&2
-		exit 64
-		;;
+    JPEG)
+        FILE="${BANNER_FILE:-/opt/mhxd/run/banner.jpg}"
+        URL=""
+        # mhxd's type strings are exactly 4 bytes — the docs note
+        # "GIFf" is the GIF type and "JPEG" is JPEG; URL is the
+        # special pseudo-type. Pass through verbatim.
+        TYPE="JPEG"
+        ;;
+    GIFf|GIF)
+        FILE="${BANNER_FILE:-/opt/mhxd/run/banner.gif}"
+        URL=""
+        TYPE="GIFf"
+        ;;
+    URL|"URL ")
+        FILE=""
+        # URL kept from the BANNER_URL var above.
+        TYPE="URL"
+        ;;
+    *)
+        echo "docker-entrypoint: unknown BANNER_MODE=$MODE" >&2
+        echo "  supported: URL, GIFf, JPEG" >&2
+        exit 64
+        ;;
 esac
 
 # In file modes, fail early if the file isn't there — otherwise
 # mhxd will read 0 bytes at runtime and clients will get an empty
 # transfer with no diagnostic.
 if [ "$MODE" != "URL" ]; then
-	if [ ! -r "$FILE" ]; then
-		echo "docker-entrypoint: BANNER_FILE=$FILE not readable" >&2
-		exit 65
-	fi
+    if [ ! -r "$FILE" ]; then
+        echo "docker-entrypoint: BANNER_FILE=$FILE not readable" >&2
+        exit 65
+    fi
 fi
 
 # Patch the three fields in the banner block. The hxd.conf format
@@ -128,10 +128,10 @@ fi
 # Wrap the URL and FILE values in '|' delimiters because URLs and
 # absolute paths both contain '/' which is sed's default delimiter.
 sed -i \
-	-e "s|^\\([[:space:]]*\\)type \"[^\"]*\";|\\1type \"$TYPE\";|" \
-	-e "s|^\\([[:space:]]*\\)file \"[^\"]*\";|\\1file \"$FILE\";|" \
-	-e "s|^\\([[:space:]]*\\)url \"[^\"]*\";|\\1url \"$URL\";|" \
-	"$CONF"
+    -e "s|^\\([[:space:]]*\\)type \"[^\"]*\";|\\1type \"$TYPE\";|" \
+    -e "s|^\\([[:space:]]*\\)file \"[^\"]*\";|\\1file \"$FILE\";|" \
+    -e "s|^\\([[:space:]]*\\)url \"[^\"]*\";|\\1url \"$URL\";|" \
+    "$CONF"
 
 echo "docker-entrypoint: banner mode=$TYPE file=\"$FILE\" url=\"$URL\""
 

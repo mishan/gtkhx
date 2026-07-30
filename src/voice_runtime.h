@@ -76,10 +76,11 @@ typedef struct gtkhx_voice_device_list gtkhx_voice_device_list;
 extern gtkhx_voice_device_list *gtkhx_voice_list_input_devices (void);
 extern gtkhx_voice_device_list *gtkhx_voice_list_output_devices (void);
 extern size_t gtkhx_voice_device_list_len (const gtkhx_voice_device_list *list);
-extern const char *gtkhx_voice_device_list_name (
-    gtkhx_voice_device_list *list, size_t idx);
-extern const char *gtkhx_voice_device_list_display_name (
-    gtkhx_voice_device_list *list, size_t idx);
+extern const char *gtkhx_voice_device_list_name (gtkhx_voice_device_list *list,
+                                                 size_t idx);
+extern const char *
+gtkhx_voice_device_list_display_name (gtkhx_voice_device_list *list,
+                                      size_t idx);
 extern void gtkhx_voice_device_list_free (gtkhx_voice_device_list *list);
 
 extern void gtkhx_voice_set_input_device (const char *name);
@@ -160,8 +161,7 @@ extern gtkhx_voice_runtime *gtkhx_voice_runtime_new (void);
  * this constructor is equivalent to gtkhx_voice_runtime_new).
  */
 extern gtkhx_voice_runtime *gtkhx_voice_runtime_new_with_callbacks (
-    void *user_data,
-    gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb);
+    void *user_data, gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb);
 
 /*
  * High-level voice-session state mirror of hxvoice::SessionState.
@@ -171,12 +171,12 @@ extern gtkhx_voice_runtime *gtkhx_voice_runtime_new_with_callbacks (
  * runtime maps via an exhaustive match at the FFI boundary.
  */
 typedef enum {
-    GTKHX_VOICE_STATE_IDLE          = 0,
-    GTKHX_VOICE_STATE_JOIN_SENT     = 1,
+    GTKHX_VOICE_STATE_IDLE = 0,
+    GTKHX_VOICE_STATE_JOIN_SENT = 1,
     GTKHX_VOICE_STATE_OFFER_PENDING = 2,
-    GTKHX_VOICE_STATE_CONNECTING    = 3,
-    GTKHX_VOICE_STATE_CONNECTED     = 4,
-    GTKHX_VOICE_STATE_LEAVING       = 5,
+    GTKHX_VOICE_STATE_CONNECTING = 3,
+    GTKHX_VOICE_STATE_CONNECTED = 4,
+    GTKHX_VOICE_STATE_LEAVING = 5,
 } gtkhx_voice_state;
 
 /*
@@ -282,10 +282,10 @@ typedef void (*gtkhx_voice_runtime_error_cb) (void *user_data,
  * directly from rcv.c, with no round-trip through the runtime signal.
  */
 typedef struct {
-    gtkhx_voice_runtime_state_changed_cb    state_changed;
-    gtkhx_voice_runtime_mute_changed_cb     mute_changed;
-    gtkhx_voice_runtime_speaker_changed_cb  speaker_changed;
-    gtkhx_voice_runtime_error_cb            error;
+    gtkhx_voice_runtime_state_changed_cb state_changed;
+    gtkhx_voice_runtime_mute_changed_cb mute_changed;
+    gtkhx_voice_runtime_speaker_changed_cb speaker_changed;
+    gtkhx_voice_runtime_error_cb error;
 } gtkhx_voice_runtime_signal_callbacks;
 
 /*
@@ -301,8 +301,7 @@ typedef struct {
  * the returned runtime.
  */
 extern gtkhx_voice_runtime *gtkhx_voice_runtime_new_v2 (
-    void *user_data,
-    gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb,
+    void *user_data, gtkhx_voice_runtime_send_wire_frame_cb send_wire_frame_cb,
     const gtkhx_voice_runtime_signal_callbacks *signals);
 
 /*
@@ -329,8 +328,8 @@ extern int gtkhx_voice_runtime_active_cid (gtkhx_voice_runtime *rt,
  * digital-silence PCMU and needs no audio device. NULL-safe
  * (returns 0).
  */
-extern uint64_t gtkhx_voice_runtime_rtp_buffers_received (
-    gtkhx_voice_runtime *rt);
+extern uint64_t
+gtkhx_voice_runtime_rtp_buffers_received (gtkhx_voice_runtime *rt);
 
 /*
  * Free a runtime. Safe to call with NULL. The caller must not use
@@ -372,8 +371,7 @@ extern void gtkhx_voice_runtime_set_self_uid (gtkhx_voice_runtime *rt,
  * NULL-safe on the runtime pointer (drops the call). Main-thread only.
  */
 extern void gtkhx_voice_runtime_set_user_volume (gtkhx_voice_runtime *rt,
-                                                 uint16_t uid,
-                                                 double gain);
+                                                 uint16_t uid, double gain);
 
 /*
  * Read back the stored gain for a uid so the slider can initialise to
@@ -387,8 +385,7 @@ extern double gtkhx_voice_runtime_user_volume (gtkhx_voice_runtime *rt,
  * C string; NULL is treated as empty (and dropped by the state
  * machine's downstream parser). */
 extern void gtkhx_voice_runtime_sdp_offer (gtkhx_voice_runtime *rt,
-                                           uint32_t cid,
-                                           const char *sdp);
+                                           uint32_t cid, const char *sdp);
 
 /* Fire Event::IceCandidateReceived { cid, candidate_json }. The
  * empty-string end-of-candidates marker is handled inside the
@@ -403,8 +400,7 @@ extern void gtkhx_voice_runtime_ice_candidate (gtkhx_voice_runtime *rt,
  * hotline_proto::voice::parse_voice_participants iterator. NULL
  * blob with len==0 is an empty list (room is empty). */
 extern void gtkhx_voice_runtime_room_status (gtkhx_voice_runtime *rt,
-                                             uint32_t cid,
-                                             const uint8_t *blob,
+                                             uint32_t cid, const uint8_t *blob,
                                              size_t len);
 
 /* Fire Event::ServerTaskError { origin_opcode, text }. Called from

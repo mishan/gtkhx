@@ -20,8 +20,7 @@
 
 #include <adwaita.h>
 
-struct _HxPanelFrame
-{
+struct _HxPanelFrame {
     PanelFrame parent_instance;
 };
 
@@ -37,36 +36,41 @@ do_move (GtkWidget *widget, GtkDirectionType dir)
     PanelWidget *visible;
 
     visible = panel_frame_get_visible_child (PANEL_FRAME (widget));
-    if (visible == NULL || !HX_IS_PANEL (visible))
+    if (visible == NULL || !HX_IS_PANEL (visible)) {
         return;
+    }
     hx_panel_do_move_in_direction (HX_PANEL (visible), dir);
 }
 
 static void
 move_left_action (GtkWidget *widget, const char *name, GVariant *param)
 {
-    (void)name; (void)param;
+    (void)name;
+    (void)param;
     do_move (widget, GTK_DIR_LEFT);
 }
 
 static void
 move_right_action (GtkWidget *widget, const char *name, GVariant *param)
 {
-    (void)name; (void)param;
+    (void)name;
+    (void)param;
     do_move (widget, GTK_DIR_RIGHT);
 }
 
 static void
 move_up_action (GtkWidget *widget, const char *name, GVariant *param)
 {
-    (void)name; (void)param;
+    (void)name;
+    (void)param;
     do_move (widget, GTK_DIR_UP);
 }
 
 static void
 move_down_action (GtkWidget *widget, const char *name, GVariant *param)
 {
-    (void)name; (void)param;
+    (void)name;
+    (void)param;
     do_move (widget, GTK_DIR_DOWN);
 }
 
@@ -97,31 +101,34 @@ move_down_action (GtkWidget *widget, const char *name, GVariant *param)
 static void
 refresh_move_enabled (HxPanelFrame *self)
 {
-    GtkWidget        *w       = GTK_WIDGET (self);
-    PanelWidget      *visible = panel_frame_get_visible_child (PANEL_FRAME (w));
-    HxPanel          *panel   = (visible != NULL && HX_IS_PANEL (visible))
-                                  ? HX_PANEL (visible) : NULL;
-    gboolean          left    = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_LEFT);
-    gboolean          right   = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_RIGHT);
-    gboolean          up      = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_UP);
-    gboolean          down    = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_DOWN);
+    GtkWidget *w = GTK_WIDGET (self);
+    PanelWidget *visible = panel_frame_get_visible_child (PANEL_FRAME (w));
+    HxPanel *panel = (visible != NULL && HX_IS_PANEL (visible))
+                         ? HX_PANEL (visible)
+                         : NULL;
+    gboolean left
+        = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_LEFT);
+    gboolean right
+        = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_RIGHT);
+    gboolean up = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_UP);
+    gboolean down
+        = panel && hx_panel_can_move_in_direction (panel, GTK_DIR_DOWN);
 
-    debug_log ("dock",
-               "HxPanelFrame[%p]: refresh L=%d R=%d U=%d D=%d",
-               w, left, right, up, down);
+    debug_log ("dock", "HxPanelFrame[%p]: refresh L=%d R=%d U=%d D=%d", w, left,
+               right, up, down);
 
-    gtk_widget_action_set_enabled (w, "page.move-left",  left);
+    gtk_widget_action_set_enabled (w, "page.move-left", left);
     gtk_widget_action_set_enabled (w, "page.move-right", right);
-    gtk_widget_action_set_enabled (w, "page.move-up",    up);
-    gtk_widget_action_set_enabled (w, "page.move-down",  down);
+    gtk_widget_action_set_enabled (w, "page.move-up", up);
+    gtk_widget_action_set_enabled (w, "page.move-down", down);
 }
 
 static void
-on_visible_child_notify (HxPanelFrame *self,
-                         GParamSpec   *pspec,
-                         gpointer      user_data)
+on_visible_child_notify (HxPanelFrame *self, GParamSpec *pspec,
+                         gpointer user_data)
 {
-    (void)pspec; (void)user_data;
+    (void)pspec;
+    (void)user_data;
     /* connect_after: libpanel's notify::visible-child handler
      * (which calls panel_frame_update_actions) has already run. */
     refresh_move_enabled (self);
@@ -140,13 +147,12 @@ on_visible_child_notify (HxPanelFrame *self,
  * time and only flips when a fresh action-enabled-changed signal
  * arrives. */
 static void
-on_setup_menu (AdwTabView   *tab_view,
-               AdwTabPage   *page,
-               gpointer      user_data)
+on_setup_menu (AdwTabView *tab_view, AdwTabPage *page, gpointer user_data)
 {
     HxPanelFrame *self = HX_PANEL_FRAME (user_data);
 
-    (void)tab_view; (void)page;
+    (void)tab_view;
+    (void)page;
     refresh_move_enabled (self);
 }
 
@@ -160,15 +166,16 @@ find_descendant_tab_view (GtkWidget *root)
 {
     GtkWidget *child;
 
-    if (ADW_IS_TAB_VIEW (root))
+    if (ADW_IS_TAB_VIEW (root)) {
         return ADW_TAB_VIEW (root);
+    }
 
-    for (child = gtk_widget_get_first_child (root);
-         child != NULL;
+    for (child = gtk_widget_get_first_child (root); child != NULL;
          child = gtk_widget_get_next_sibling (child)) {
         AdwTabView *found = find_descendant_tab_view (child);
-        if (found != NULL)
+        if (found != NULL) {
             return found;
+        }
     }
     return NULL;
 }
@@ -180,7 +187,7 @@ find_descendant_tab_view (GtkWidget *root)
 static void
 hx_panel_frame_constructed (GObject *object)
 {
-    GtkWidget  *widget = GTK_WIDGET (object);
+    GtkWidget *widget = GTK_WIDGET (object);
     AdwTabView *tab_view;
 
     G_OBJECT_CLASS (hx_panel_frame_parent_class)->constructed (object);
@@ -225,24 +232,24 @@ static void
 hx_panel_frame_class_init (HxPanelFrameClass *klass)
 {
     GtkWidgetClass *widget_class = GTK_WIDGET_CLASS (klass);
-    GObjectClass   *object_class = G_OBJECT_CLASS (klass);
+    GObjectClass *object_class = G_OBJECT_CLASS (klass);
 
     object_class->constructed = hx_panel_frame_constructed;
-    widget_class->root        = hx_panel_frame_root;
-    widget_class->unroot      = hx_panel_frame_unroot;
+    widget_class->root = hx_panel_frame_root;
+    widget_class->unroot = hx_panel_frame_unroot;
 
     /* gtk_widget_class_install_action prepends onto the
      * priv->actions list inherited from PanelFrameClass; lookup is
      * head-first by strcmp, so ours beat libpanel's same-named
      * class actions for both activation and enabled-state queries. */
-    gtk_widget_class_install_action (widget_class, "page.move-left",
-                                     NULL, move_left_action);
-    gtk_widget_class_install_action (widget_class, "page.move-right",
-                                     NULL, move_right_action);
-    gtk_widget_class_install_action (widget_class, "page.move-up",
-                                     NULL, move_up_action);
-    gtk_widget_class_install_action (widget_class, "page.move-down",
-                                     NULL, move_down_action);
+    gtk_widget_class_install_action (widget_class, "page.move-left", NULL,
+                                     move_left_action);
+    gtk_widget_class_install_action (widget_class, "page.move-right", NULL,
+                                     move_right_action);
+    gtk_widget_class_install_action (widget_class, "page.move-up", NULL,
+                                     move_up_action);
+    gtk_widget_class_install_action (widget_class, "page.move-down", NULL,
+                                     move_down_action);
 }
 
 static void

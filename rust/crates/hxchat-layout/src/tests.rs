@@ -330,7 +330,10 @@ fn every_line_records_the_width_it_was_measured_at() {
             m.run_width(text, Style::default()),
             "line {text:?} recorded a width it was not laid out at"
         );
-        assert!(lb.width <= 80, "a line wider than the column escaped the wrap");
+        assert!(
+            lb.width <= 80,
+            "a line wider than the column escaped the wrap"
+        );
     }
 }
 
@@ -350,10 +353,7 @@ fn a_code_block_is_only_as_wide_as_its_widest_line() {
     assert_eq!(widths, vec![20, 110, 10]);
 
     let widest = widths.iter().copied().max().unwrap();
-    assert!(
-        widest < 1000,
-        "the box would still span the full column"
-    );
+    assert!(widest < 1000, "the box would still span the full column");
 }
 
 #[test]
@@ -376,7 +376,11 @@ fn wrap_hard_breaks_long_token() {
     let word = "aaaaaaaaaaaaaaaaaaaa"; // 20 chars, no spaces
     let msg = Message::system(ParsedText::plain(word));
     let l = layout_message(&msg, &params(50), LayoutGeneration::default(), &m);
-    assert!(l.lines.len() >= 4, "must break mid-token, got {:?}", l.lines);
+    assert!(
+        l.lines.len() >= 4,
+        "must break mid-token, got {:?}",
+        l.lines
+    );
     assert_eq!(l.height, l.lines.len() as u32 * m.metrics().line_height);
 }
 
@@ -752,10 +756,7 @@ fn buf() -> (ChatBuffer, FixedMeasure) {
     let m = FixedMeasure::new(8);
     let mut b = ChatBuffer::new(params(400));
     for i in 0..200 {
-        b.append(
-            Message::system(ParsedText::plain(format!("line {i}"))),
-            &m,
-        );
+        b.append(Message::system(ParsedText::plain(format!("line {i}"))), &m);
     }
     (b, m)
 }
@@ -798,7 +799,10 @@ fn anchor_holds_position_across_prepend() {
     );
     // And the anchored row is still at the same place in the viewport.
     let row = b.row_of(anchored.unwrap()).unwrap();
-    assert_eq!(b.index_mut().offset_of(row), after - u64::from(b.anchor().offset));
+    assert_eq!(
+        b.index_mut().offset_of(row),
+        after - u64::from(b.anchor().offset)
+    );
 }
 
 #[test]
@@ -1172,18 +1176,22 @@ fn selection_orders_by_row_not_by_message_id() {
     let mut b = ChatBuffer::new(p);
     let live = b.append(Message::system(ParsedText::plain("live")), &m);
     // Higher id, but lands *above* the live row.
-    let older = b.insert_before(
-        Some(live),
-        Message::system(ParsedText::plain("older")),
-        &m,
-    );
+    let older = b.insert_before(Some(live), Message::system(ParsedText::plain("older")), &m);
     assert!(older.0 > live.0, "the backfilled id is the higher one");
     b.reindex();
     assert_eq!(b.row_of(older), Some(0));
 
     let sel = Selection::new(
-        Caret { message: older, source: LineSource::Block(0), offset: 0 },
-        Caret { message: live, source: LineSource::Block(0), offset: 4 },
+        Caret {
+            message: older,
+            source: LineSource::Block(0),
+            offset: 0,
+        },
+        Caret {
+            message: live,
+            source: LineSource::Block(0),
+            offset: 4,
+        },
     );
     let (start, end) = sel.ordered(|id| b.row_of(id));
     assert_eq!(start.message, older, "document order, not id order");
@@ -1217,7 +1225,10 @@ fn selection_over_an_image_copies_its_alt_text() {
             gutter: None,
             blocks: vec![Block::Image {
                 token: 1,
-                size: Some(ImageSize { width: 40, height: 40 }),
+                size: Some(ImageSize {
+                    width: 40,
+                    height: 40,
+                }),
                 alt: "[image: cat.png]".into(),
             }],
             flags: MessageFlagsNone::NONE,
@@ -1362,8 +1373,16 @@ fn selecting_a_nick_yields_the_nick_text() {
     b.reindex();
     let id = b.id_at(0).unwrap();
     let sel = Selection::new(
-        Caret { message: id, source: crate::wrap::LineSource::Gutter, offset: 0 },
-        Caret { message: id, source: crate::wrap::LineSource::Gutter, offset: 7 },
+        Caret {
+            message: id,
+            source: crate::wrap::LineSource::Gutter,
+            offset: 0,
+        },
+        Caret {
+            message: id,
+            source: crate::wrap::LineSource::Gutter,
+            offset: 7,
+        },
     );
     assert_eq!(b.selected_text(&sel), "<alice>");
 }
@@ -1380,7 +1399,10 @@ fn add_link_over_plain_text() {
     assert!(p.style_at(4).attrs.contains(Attrs::UNDERLINE));
     assert_eq!(p.style_at(0).link, None, "text before is untouched");
     assert_eq!(p.style_at(24).link, None, "text after is untouched");
-    assert_eq!(p.link_at(10).map(|l| l.href.as_str()), Some("https://example.com"));
+    assert_eq!(
+        p.link_at(10).map(|l| l.href.as_str()),
+        Some("https://example.com")
+    );
 }
 
 #[test]
@@ -1408,8 +1430,14 @@ fn add_link_straddling_a_style_boundary() {
     p.debug_assert_well_formed();
     assert_eq!(p.style_at(2).link, Some(0));
     assert_eq!(p.style_at(8).link, Some(0));
-    assert!(p.style_at(2).attrs.contains(Attrs::BOLD), "still bold inside");
-    assert!(!p.style_at(8).attrs.contains(Attrs::BOLD), "not bold outside");
+    assert!(
+        p.style_at(2).attrs.contains(Attrs::BOLD),
+        "still bold inside"
+    );
+    assert!(
+        !p.style_at(8).attrs.contains(Attrs::BOLD),
+        "not bold outside"
+    );
 }
 
 #[test]
@@ -1428,8 +1456,14 @@ fn multiple_links_in_one_message() {
     let s2 = p.text.rfind("https").unwrap();
     p.add_link(s2..p.text.len(), "https://two.example").unwrap();
     p.debug_assert_well_formed();
-    assert_eq!(p.link_at(3).map(|l| l.href.as_str()), Some("https://one.example"));
-    assert_eq!(p.link_at(s2 + 2).map(|l| l.href.as_str()), Some("https://two.example"));
+    assert_eq!(
+        p.link_at(3).map(|l| l.href.as_str()),
+        Some("https://one.example")
+    );
+    assert_eq!(
+        p.link_at(s2 + 2).map(|l| l.href.as_str()),
+        Some("https://two.example")
+    );
     assert_eq!(p.link_at(22), None, "the space between is not a link");
 }
 
@@ -1447,7 +1481,11 @@ fn word_buf(text: &str) -> (ChatBuffer, FixedMeasure, Caret) {
     (
         b,
         m,
-        Caret { message: id, source: LineSource::Block(0), offset: 0 },
+        Caret {
+            message: id,
+            source: LineSource::Block(0),
+            offset: 0,
+        },
     )
 }
 
@@ -1544,7 +1582,10 @@ fn a_decoded_image_grows_its_row_without_moving_the_anchor() {
     assert!(b.set_image_size(
         img,
         9,
-        Some(ImageSize { width: 200, height: 300 }),
+        Some(ImageSize {
+            width: 200,
+            height: 300
+        }),
         &m
     ));
     b.ensure_layout(0, &m);
@@ -1602,16 +1643,27 @@ fn dragging_up_into_a_gutter_selects_the_rest_of_that_row() {
     let r2 = b.id_at(2).unwrap();
     let sel = Selection::new(
         // anchor: body of the last row (drag started here)
-        Caret { message: r2, source: LineSource::Block(0), offset: 3 },
+        Caret {
+            message: r2,
+            source: LineSource::Block(0),
+            offset: 3,
+        },
         // focus: gutter of the first row (dragged left and up)
-        Caret { message: r0, source: LineSource::Gutter, offset: 1 },
+        Caret {
+            message: r0,
+            source: LineSource::Gutter,
+            offset: 1,
+        },
     );
     let text = b.selected_text(&sel);
     assert!(
         text.contains("hello"),
         "row 0's body must be selected too, got {text:?}"
     );
-    assert!(text.starts_with("a>"), "should start mid-gutter, got {text:?}");
+    assert!(
+        text.starts_with("a>"),
+        "should start mid-gutter, got {text:?}"
+    );
 }
 
 #[test]
@@ -1621,8 +1673,16 @@ fn same_row_gutter_to_body_orders_by_source_not_offset() {
     // the tie-break did) can invert the selection.
     let (b, _m) = gutter_buf();
     let id = b.id_at(0).unwrap();
-    let from_gutter = Caret { message: id, source: LineSource::Gutter, offset: 2 };
-    let into_body = Caret { message: id, source: LineSource::Block(0), offset: 1 };
+    let from_gutter = Caret {
+        message: id,
+        source: LineSource::Gutter,
+        offset: 2,
+    };
+    let into_body = Caret {
+        message: id,
+        source: LineSource::Block(0),
+        offset: 1,
+    };
 
     let forward = Selection::new(from_gutter, into_body);
     let backward = Selection::new(into_body, from_gutter);
@@ -1632,7 +1692,10 @@ fn same_row_gutter_to_body_orders_by_source_not_offset() {
         "dragging the same span in either direction must select the same text"
     );
     let t = b.selected_text(&forward);
-    assert!(t.starts_with('>'), "starts partway into the gutter, got {t:?}");
+    assert!(
+        t.starts_with('>'),
+        "starts partway into the gutter, got {t:?}"
+    );
     assert!(t.ends_with('h'), "ends one char into the body, got {t:?}");
 }
 
@@ -1691,7 +1754,11 @@ fn double_click_on_a_nick_selects_just_the_nick() {
     // makes double-clicking "<alice>" give you a bare nick to paste.
     let (b, _m) = gutter_buf();
     let id = b.id_at(0).unwrap();
-    let c = Caret { message: id, source: LineSource::Gutter, offset: 1 };
+    let c = Caret {
+        message: id,
+        source: LineSource::Gutter,
+        offset: 1,
+    };
     let sel = b.select_word(&c).expect("word");
     assert_eq!(b.selected_text(&sel), "a");
 }
@@ -1736,12 +1803,24 @@ fn selected_rows_keeps_row_boundaries_across_embedded_newlines() {
     }
 
     let sel = Selection::new(
-        Caret { message: b.id_at(0).unwrap(), source: LineSource::Block(0), offset: 0 },
-        Caret { message: b.id_at(1).unwrap(), source: LineSource::Block(0), offset: 6 },
+        Caret {
+            message: b.id_at(0).unwrap(),
+            source: LineSource::Block(0),
+            offset: 0,
+        },
+        Caret {
+            message: b.id_at(1).unwrap(),
+            source: LineSource::Block(0),
+            offset: 6,
+        },
     );
 
     let rows = b.selected_rows(&sel);
-    assert_eq!(rows.len(), 2, "two rows selected, whatever their line count");
+    assert_eq!(
+        rows.len(),
+        2,
+        "two rows selected, whatever their line count"
+    );
     assert_eq!(rows[0].0, 0);
     assert_eq!(rows[0].1, "one\ntwo\nthree");
     assert_eq!(rows[1].0, 1);
@@ -1827,7 +1906,11 @@ fn word_bounds_does_not_panic_on_a_caret_inside_a_codepoint() {
         source: LineSource::Block(0),
         offset: 3,
     };
-    assert_eq!(b.word_bounds(&mid), Some((0, 6)), "clamps down into 'naïve'");
+    assert_eq!(
+        b.word_bounds(&mid),
+        Some((0, 6)),
+        "clamps down into 'naïve'"
+    );
 
     // Past the end clamps to the end, which is not inside a word.
     let past = Caret {
@@ -1949,7 +2032,11 @@ fn selected_rows_omits_rows_that_contribute_nothing() {
     let rows = b.selected_rows(&sel);
     assert_eq!(rows.len(), 1, "only the middle row has selected text");
     assert_eq!(rows[0], (1, "middle".to_string()));
-    assert_eq!(b.selected_text(&sel), "middle", "no leading/trailing blanks");
+    assert_eq!(
+        b.selected_text(&sel),
+        "middle",
+        "no leading/trailing blanks"
+    );
 }
 
 #[test]
@@ -1994,7 +2081,10 @@ use crate::search::{self, SearchState};
 #[test]
 fn find_all_is_literal_and_non_overlapping() {
     assert_eq!(search::find_all("aaaa", "aa", true), vec![(0, 2), (2, 4)]);
-    assert_eq!(search::find_all("abcabc", "abc", true), vec![(0, 3), (3, 6)]);
+    assert_eq!(
+        search::find_all("abcabc", "abc", true),
+        vec![(0, 3), (3, 6)]
+    );
     assert_eq!(search::find_all("abc", "", true), vec![]);
     assert_eq!(search::find_all("", "abc", true), vec![]);
     // No regex vocabulary: metacharacters are just characters.
@@ -2013,7 +2103,11 @@ fn find_all_case_insensitive_returns_offsets_into_the_original() {
     let hits = search::find_all(hay, "STANBUL", false);
     assert_eq!(hits.len(), 2);
     for (a, b) in hits {
-        assert_eq!(&hay[a..b].to_lowercase(), "stanbul", "offsets must index the original");
+        assert_eq!(
+            &hay[a..b].to_lowercase(),
+            "stanbul",
+            "offsets must index the original"
+        );
     }
 
     // Same-length folds work in both directions.
@@ -2106,7 +2200,7 @@ fn search_walks_rows_in_reading_order_including_gutters() {
     assert_eq!(
         shape,
         vec![
-            (0, LineSource::Gutter, 1),  // <sam>
+            (0, LineSource::Gutter, 1),   // <sam>
             (0, LineSource::Block(0), 6), // hello sam
             (1, LineSource::Block(0), 0), // sam said hi
         ]
@@ -2186,7 +2280,11 @@ fn reveal_leaves_an_already_visible_row_alone() {
 
     let id = b.id_at(40).unwrap();
     b.reveal(id, vh, &m);
-    assert_eq!(b.scroll_offset(vh), before, "fully visible row must not scroll");
+    assert_eq!(
+        b.scroll_offset(vh),
+        before,
+        "fully visible row must not scroll"
+    );
 
     // A row far away gets centred.
     let far = b.id_at(190).unwrap();
@@ -2404,7 +2502,10 @@ fn a_different_speaker_or_a_long_gap_breaks_the_run() {
     assert!(!grouped(&b, 0));
     assert!(grouped(&b, 1));
     assert!(!grouped(&b, 2), "alice starts her own run");
-    assert!(!grouped(&b, 3), "misha's return is a new run, not a continuation");
+    assert!(
+        !grouped(&b, 3),
+        "misha's return is a new run, not a continuation"
+    );
     assert!(!grouped(&b, 4), "a long gap breaks the run");
 }
 
@@ -2573,7 +2674,10 @@ fn grouping_can_be_switched_off() {
     assert!(grouped(&b, 1));
 
     b.set_group_gap_secs(0, &m);
-    assert!(!grouped(&b, 1), "existing rows are re-decided, not just new ones");
+    assert!(
+        !grouped(&b, 1),
+        "existing rows are re-decided, not just new ones"
+    );
     assert!(!grouped(&b, 2));
 
     b.set_group_gap_secs(crate::buffer::DEFAULT_GROUP_GAP_SECS, &m);
@@ -2647,9 +2751,9 @@ fn direction_breaks_a_run_even_with_the_same_nick() {
         }
         b.append(msg, &m);
     };
-    line(true, 1000);  // outgoing
+    line(true, 1000); // outgoing
     line(false, 1000); // incoming echo
-    line(true, 1001);  // outgoing
+    line(true, 1001); // outgoing
     line(false, 1001); // incoming echo
     b.reindex();
 
@@ -2675,7 +2779,10 @@ fn same_direction_still_groups() {
     }
     b.reindex();
     assert!(!grouped(&b, 0));
-    assert!(grouped(&b, 1) && grouped(&b, 2), "three outgoing lines are one run");
+    assert!(
+        grouped(&b, 1) && grouped(&b, 2),
+        "three outgoing lines are one run"
+    );
 }
 
 // ---- avatar gutter (C6) ---------------------------------------------
@@ -2882,10 +2989,20 @@ fn select_all_shaped_selection_covers_the_buffer() {
 
     let first = b.id_at(0).unwrap();
     let last = b.id_at(2).unwrap();
-    let last_len = b.source_text(2, LineSource::Block(0)).map_or(0, |t| t.len());
+    let last_len = b
+        .source_text(2, LineSource::Block(0))
+        .map_or(0, |t| t.len());
     let sel = Selection::new(
-        Caret { message: first, source: LineSource::Block(0), offset: 0 },
-        Caret { message: last, source: LineSource::Block(0), offset: last_len },
+        Caret {
+            message: first,
+            source: LineSource::Block(0),
+            offset: 0,
+        },
+        Caret {
+            message: last,
+            source: LineSource::Block(0),
+            offset: last_len,
+        },
     );
 
     let rows = b.selected_rows(&sel);
@@ -2914,7 +3031,10 @@ fn select_all_covers_the_gutter_and_every_block() {
             gutter: Some(ParsedText::plain("<alice>")),
             blocks: vec![
                 Block::Text(ParsedText::plain("look:")),
-                Block::Code { text: "x = 1".into(), language: None },
+                Block::Code {
+                    text: "x = 1".into(),
+                    language: None,
+                },
             ],
             flags: MessageFlagsNone::NONE,
         },
@@ -2924,7 +3044,11 @@ fn select_all_covers_the_gutter_and_every_block() {
 
     let sel = b.select_all().expect("non-empty buffer");
     assert_eq!(sel.anchor.source, LineSource::Gutter, "starts at the nick");
-    assert_eq!(sel.focus.source, LineSource::Block(1), "ends at the last block");
+    assert_eq!(
+        sel.focus.source,
+        LineSource::Block(1),
+        "ends at the last block"
+    );
 
     let text = b.selected_text(&sel);
     assert!(text.contains("<misha>"), "the first nick: {text:?}");
@@ -2949,7 +3073,11 @@ fn text_is_centred_against_a_taller_avatar() {
     b.reindex();
     b.ensure_layout(0, &m);
     let l = b.layout_at(0).unwrap();
-    let line = l.lines.iter().find(|l| l.source == LineSource::Block(0)).unwrap();
+    let line = l
+        .lines
+        .iter()
+        .find(|l| l.source == LineSource::Block(0))
+        .unwrap();
     assert!(
         line.y > 0,
         "a single line beside a 48px icon should be pushed down, not sit on its top edge"
@@ -2978,15 +3106,16 @@ fn avatar_at_hits_the_painted_rect_and_returns_its_row() {
 
     let av = b.layout_at(0).unwrap().avatar.expect("head has an avatar");
     // Dead centre of the painted rect.
-    let hit = b.avatar_at(
-        (av.x + av.size / 2) as i32,
-        (av.y + av.size / 2) as u64,
-    );
+    let hit = b.avatar_at((av.x + av.size / 2) as i32, (av.y + av.size / 2) as u64);
     assert_eq!(hit, Some((id, 7)));
 
     // Just outside it, on both axes.
-    assert!(b.avatar_at((av.x + av.size + 4) as i32, (av.size / 2) as u64).is_none());
-    assert!(b.avatar_at((av.x + av.size / 2) as i32, (av.size + 4) as u64).is_none());
+    assert!(b
+        .avatar_at((av.x + av.size + 4) as i32, (av.size / 2) as u64)
+        .is_none());
+    assert!(b
+        .avatar_at((av.x + av.size / 2) as i32, (av.size + 4) as u64)
+        .is_none());
 }
 
 #[test]
@@ -3003,5 +3132,8 @@ fn a_continuation_row_has_no_avatar_to_hit() {
     b.ensure_layout(1, &m);
 
     let top = b.index_mut().offset_of(1);
-    assert!(b.avatar_at(4, top + 2).is_none(), "grouped rows show no icon");
+    assert!(
+        b.avatar_at(4, top + 2).is_none(),
+        "grouped rows show no icon"
+    );
 }

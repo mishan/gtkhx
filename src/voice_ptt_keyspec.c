@@ -27,14 +27,30 @@ static gboolean
 is_dedicated_ptt_key (guint keyval)
 {
     switch (keyval) {
-    case GDK_KEY_F1: case GDK_KEY_F2: case GDK_KEY_F3:
-    case GDK_KEY_F4: case GDK_KEY_F5: case GDK_KEY_F6:
-    case GDK_KEY_F7: case GDK_KEY_F8: case GDK_KEY_F9:
-    case GDK_KEY_F10: case GDK_KEY_F11: case GDK_KEY_F12:
-    case GDK_KEY_F13: case GDK_KEY_F14: case GDK_KEY_F15:
-    case GDK_KEY_F16: case GDK_KEY_F17: case GDK_KEY_F18:
-    case GDK_KEY_F19: case GDK_KEY_F20: case GDK_KEY_F21:
-    case GDK_KEY_F22: case GDK_KEY_F23: case GDK_KEY_F24:
+    case GDK_KEY_F1:
+    case GDK_KEY_F2:
+    case GDK_KEY_F3:
+    case GDK_KEY_F4:
+    case GDK_KEY_F5:
+    case GDK_KEY_F6:
+    case GDK_KEY_F7:
+    case GDK_KEY_F8:
+    case GDK_KEY_F9:
+    case GDK_KEY_F10:
+    case GDK_KEY_F11:
+    case GDK_KEY_F12:
+    case GDK_KEY_F13:
+    case GDK_KEY_F14:
+    case GDK_KEY_F15:
+    case GDK_KEY_F16:
+    case GDK_KEY_F17:
+    case GDK_KEY_F18:
+    case GDK_KEY_F19:
+    case GDK_KEY_F20:
+    case GDK_KEY_F21:
+    case GDK_KEY_F22:
+    case GDK_KEY_F23:
+    case GDK_KEY_F24:
     case GDK_KEY_Pause:
     case GDK_KEY_Scroll_Lock:
     case GDK_KEY_Insert:
@@ -52,12 +68,18 @@ static gboolean
 is_modifier_keyval (guint keyval)
 {
     switch (keyval) {
-    case GDK_KEY_Shift_L: case GDK_KEY_Shift_R:
-    case GDK_KEY_Control_L: case GDK_KEY_Control_R:
-    case GDK_KEY_Alt_L: case GDK_KEY_Alt_R:
-    case GDK_KEY_Meta_L: case GDK_KEY_Meta_R:
-    case GDK_KEY_Super_L: case GDK_KEY_Super_R:
-    case GDK_KEY_Hyper_L: case GDK_KEY_Hyper_R:
+    case GDK_KEY_Shift_L:
+    case GDK_KEY_Shift_R:
+    case GDK_KEY_Control_L:
+    case GDK_KEY_Control_R:
+    case GDK_KEY_Alt_L:
+    case GDK_KEY_Alt_R:
+    case GDK_KEY_Meta_L:
+    case GDK_KEY_Meta_R:
+    case GDK_KEY_Super_L:
+    case GDK_KEY_Super_R:
+    case GDK_KEY_Hyper_L:
+    case GDK_KEY_Hyper_R:
     case GDK_KEY_Caps_Lock:
     case GDK_KEY_Num_Lock:
     case GDK_KEY_ISO_Level3_Shift:
@@ -74,8 +96,7 @@ is_modifier_keyval (guint keyval)
 static gboolean
 has_strong_modifier (GdkModifierType state)
 {
-    return (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK))
-           != 0;
+    return (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) != 0;
 }
 
 gboolean

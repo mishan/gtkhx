@@ -32,33 +32,29 @@
  * in gtkhx.h; pulled in via hx.h. */
 #include "gtkhx.h"
 
-#define GTKHX_DEFAULT_THEME_RESOURCE \
-    "/com/nasledov/gtkhx/themes/default.ini"
+#define GTKHX_DEFAULT_THEME_RESOURCE "/com/nasledov/gtkhx/themes/default.ini"
 
 struct _GtkhxTheme {
     GObject parent_instance;
 
     /* Loaded scale overrides. 0 = "not set in the active theme" → fall
-	 * back to default_theme_pct[]. */
+     * back to default_theme_pct[]. */
     int scale_pct[GTKHX_SCALE_N_AREAS];
 
     /* Loaded palette overrides, packed as 0x00RRGGBB. -1 = "not set"
-	 * → fall back to default_palette_{light,dark}[]. Two variants per
-	 * role (index 0 = light, index 1 = dark). */
+     * → fall back to default_palette_{light,dark}[]. Two variants per
+     * role (index 0 = light, index 1 = dark). */
     int palette_rgb[GTKHX_PAL_N_ROLES][2];
 
     /* Loaded user-list name color overrides, same packed-int shape as
-	 * palette_rgb. -1 = "not set" → caller (users.c::user_color_gdk)
-	 * keeps its historical default. */
+     * palette_rgb. -1 = "not set" → caller (users.c::user_color_gdk)
+     * keeps its historical default. */
     int user_color_rgb[GTKHX_USER_COLOR_N][2];
 };
 
 G_DEFINE_FINAL_TYPE (GtkhxTheme, gtkhx_theme, G_TYPE_OBJECT)
 
-enum {
-    SIGNAL_CHANGED,
-    N_SIGNALS
-};
+enum { SIGNAL_CHANGED, N_SIGNALS };
 
 static guint signals[N_SIGNALS];
 
@@ -84,20 +80,20 @@ static const int default_theme_pct[GTKHX_SCALE_N_AREAS] = {
 #define RGB8(r, g, b) { (r) / 255.0, (g) / 255.0, (b) / 255.0, 1.0 }
 
 static const GdkRGBA default_palette_light[GTKHX_PAL_N_ROLES] = {
-    [GTKHX_PAL_FG]            = RGB8 (0x1d, 0x1d, 0x1d), /* near-black on white */
-    [GTKHX_PAL_BG]            = RGB8 (0xfa, 0xfa, 0xfa), /* Adwaita view bg */
-    [GTKHX_PAL_MARK_FG]       = RGB8 (0xff, 0xff, 0xff), /* selection contrast */
-    [GTKHX_PAL_MARK_BG]       = RGB8 (0x35, 0x84, 0xe4), /* Adwaita accent */
-    [GTKHX_PAL_MARKER]        = RGB8 (0xcc, 0x00, 0x00), /* red marker line */
+    [GTKHX_PAL_FG] = RGB8 (0x1d, 0x1d, 0x1d),      /* near-black on white */
+    [GTKHX_PAL_BG] = RGB8 (0xfa, 0xfa, 0xfa),      /* Adwaita view bg */
+    [GTKHX_PAL_MARK_FG] = RGB8 (0xff, 0xff, 0xff), /* selection contrast */
+    [GTKHX_PAL_MARK_BG] = RGB8 (0x35, 0x84, 0xe4), /* Adwaita accent */
+    [GTKHX_PAL_MARKER] = RGB8 (0xcc, 0x00, 0x00),  /* red marker line */
     [GTKHX_PAL_HISTORY_MUTED] = RGB8 (0x5e, 0x5e, 0x5e), /* ~5.7:1 vs #fafafa */
 };
 
 static const GdkRGBA default_palette_dark[GTKHX_PAL_N_ROLES] = {
-    [GTKHX_PAL_FG]            = RGB8 (0xcc, 0xcc, 0xcc), /* light grey on black */
-    [GTKHX_PAL_BG]            = RGB8 (0x00, 0x00, 0x00),
-    [GTKHX_PAL_MARK_FG]       = RGB8 (0xee, 0xee, 0xee),
-    [GTKHX_PAL_MARK_BG]       = RGB8 (0x20, 0x4a, 0x87), /* Tango blue, original */
-    [GTKHX_PAL_MARKER]        = RGB8 (0xcc, 0x00, 0x00),
+    [GTKHX_PAL_FG] = RGB8 (0xcc, 0xcc, 0xcc), /* light grey on black */
+    [GTKHX_PAL_BG] = RGB8 (0x00, 0x00, 0x00),
+    [GTKHX_PAL_MARK_FG] = RGB8 (0xee, 0xee, 0xee),
+    [GTKHX_PAL_MARK_BG] = RGB8 (0x20, 0x4a, 0x87), /* Tango blue, original */
+    [GTKHX_PAL_MARKER] = RGB8 (0xcc, 0x00, 0x00),
     [GTKHX_PAL_HISTORY_MUTED] = RGB8 (0x9a, 0x9a, 0x9a), /* ~7:1 vs #000 */
 };
 
@@ -107,12 +103,12 @@ static void
 gtkhx_theme_class_init (GtkhxThemeClass *klass)
 {
     /* Zero-argument notification. Subscribers re-read whatever
-	 * scales / colors they care about and refresh. A single coalesced
-	 * signal keeps fan-out cheap — every consumer already re-reads
-	 * only its own slots. */
+     * scales / colors they care about and refresh. A single coalesced
+     * signal keeps fan-out cheap — every consumer already re-reads
+     * only its own slots. */
     signals[SIGNAL_CHANGED]
-        = g_signal_new ("changed", G_TYPE_FROM_CLASS (klass),
-                        G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL, G_TYPE_NONE, 0);
+        = g_signal_new ("changed", G_TYPE_FROM_CLASS (klass), G_SIGNAL_RUN_LAST,
+                        0, NULL, NULL, NULL, G_TYPE_NONE, 0);
 }
 
 static void
@@ -122,7 +118,7 @@ gtkhx_theme_init (GtkhxTheme *self)
     int r;
 
     /* "Not overridden" sentinels — get_percent / get_color fall back
-	 * to the built-in defaults when these are unset. */
+     * to the built-in defaults when these are unset. */
     for (a = 0; a < GTKHX_SCALE_N_AREAS; a++) {
         self->scale_pct[a] = 0;
     }
@@ -177,8 +173,8 @@ gtkhx_theme_get_percent (GtkhxScaleArea area)
         return 100;
     }
     /* 0 means "active theme didn't override" → use the default. A
-	 * stored negative is treated as unset too (corrupt-file
-	 * defensiveness — the loader clamps real values into range). */
+     * stored negative is treated as unset too (corrupt-file
+     * defensiveness — the loader clamps real values into range). */
     if (self->scale_pct[area] <= 0) {
         return gtkhx_theme_get_default_percent (area);
     }
@@ -219,9 +215,9 @@ gtkhx_theme_get_color (GtkhxPaletteRole role, gboolean dark)
     if (packed < 0) {
         return gtkhx_theme_get_default_color (role, dark);
     }
-    rgba.red   = ((packed >> 16) & 0xff) / 255.0;
-    rgba.green = ((packed >>  8) & 0xff) / 255.0;
-    rgba.blue  = ((packed      ) & 0xff) / 255.0;
+    rgba.red = ((packed >> 16) & 0xff) / 255.0;
+    rgba.green = ((packed >> 8) & 0xff) / 255.0;
+    rgba.blue = ((packed) & 0xff) / 255.0;
     rgba.alpha = 1.0;
     return rgba;
 }
@@ -248,9 +244,9 @@ gtkhx_theme_get_user_color (GtkhxUserColor slot, gboolean dark, GdkRGBA *out)
     if (packed < 0) {
         return FALSE;
     }
-    out->red   = ((packed >> 16) & 0xff) / 255.0;
-    out->green = ((packed >>  8) & 0xff) / 255.0;
-    out->blue  = ((packed      ) & 0xff) / 255.0;
+    out->red = ((packed >> 16) & 0xff) / 255.0;
+    out->green = ((packed >> 8) & 0xff) / 255.0;
+    out->blue = ((packed) & 0xff) / 255.0;
     out->alpha = 1.0;
     return TRUE;
 }
@@ -259,8 +255,8 @@ const char *
 gtkhx_theme_active_name (void)
 {
     const char *name = (gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name)
-                       ? gtkhx_prefs.theme_name
-                       : "default";
+                           ? gtkhx_prefs.theme_name
+                           : "default";
     /* Same defensive rejection the loader applies (see
      * safe_active_theme_name): a name with a path separator could
      * escape the themes directory. Without this check the icon
@@ -301,15 +297,15 @@ parse_hex_color (const char *s)
     }
     p = s;
     /* Exactly 6 hex digits. We don't accept the short "#abc" form —
-	 * theme files are machine-edited often enough that a typo here
-	 * should fail loudly (fall back to default) rather than silently
-	 * pick a weird color. */
+     * theme files are machine-edited often enough that a typo here
+     * should fail loudly (fall back to default) rather than silently
+     * pick a weird color. */
     for (i = 0; i < 6; i++) {
         char c = p[i];
         int nib;
         /* Stop at the terminator before indexing further: a string
-		 * shorter than 6 hex digits ("#abc", "", …) cleanly falls back
-		 * to the default instead of walking past the NUL. */
+         * shorter than 6 hex digits ("#abc", "", …) cleanly falls back
+         * to the default instead of walking past the NUL. */
         if (c == '\0') {
             return -1;
         }
@@ -342,20 +338,20 @@ parse_hex_color (const char *s)
 /* Mapping table for the [scale] keys. Indexing is by GtkhxScaleArea
  * so the loader can iterate. */
 static const char *const scale_key_name[GTKHX_SCALE_N_AREAS] = {
-    [GTKHX_SCALE_TOOLBAR]        = "toolbar",
+    [GTKHX_SCALE_TOOLBAR] = "toolbar",
     [GTKHX_SCALE_WINDOW_BUTTONS] = "window_buttons",
-    [GTKHX_SCALE_USERLIST_ICON]  = "userlist_icon",
-    [GTKHX_SCALE_USERLIST_TEXT]  = "userlist_text",
+    [GTKHX_SCALE_USERLIST_ICON] = "userlist_icon",
+    [GTKHX_SCALE_USERLIST_TEXT] = "userlist_text",
     [GTKHX_SCALE_TASKS_ROW_ICON] = "tasks_row_icon",
 };
 
 /* Mapping for the [palette.light] / [palette.dark] keys. */
 static const char *const palette_key_name[GTKHX_PAL_N_ROLES] = {
-    [GTKHX_PAL_FG]            = "fg",
-    [GTKHX_PAL_BG]            = "bg",
-    [GTKHX_PAL_MARK_FG]       = "mark_fg",
-    [GTKHX_PAL_MARK_BG]       = "mark_bg",
-    [GTKHX_PAL_MARKER]        = "marker",
+    [GTKHX_PAL_FG] = "fg",
+    [GTKHX_PAL_BG] = "bg",
+    [GTKHX_PAL_MARK_FG] = "mark_fg",
+    [GTKHX_PAL_MARK_BG] = "mark_bg",
+    [GTKHX_PAL_MARKER] = "marker",
     [GTKHX_PAL_HISTORY_MUTED] = "history_muted",
 };
 
@@ -366,9 +362,9 @@ static const char *const palette_key_name[GTKHX_PAL_N_ROLES] = {
 #define USERS_DARK_GROUP "users.dark"
 
 static const char *const user_color_key_name[GTKHX_USER_COLOR_N] = {
-    [GTKHX_USER_COLOR_ACTIVE]     = "active",
-    [GTKHX_USER_COLOR_IDLE]       = "idle",
-    [GTKHX_USER_COLOR_ADMIN]      = "admin",
+    [GTKHX_USER_COLOR_ACTIVE] = "active",
+    [GTKHX_USER_COLOR_IDLE] = "idle",
+    [GTKHX_USER_COLOR_ADMIN] = "admin",
     [GTKHX_USER_COLOR_ADMIN_IDLE] = "admin_idle",
 };
 
@@ -394,9 +390,9 @@ load_palette_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
             self->palette_rgb[r][variant_idx] = packed;
         } else {
             /* Leave at -1 (unset) → falls back to the built-in
-			 * default for this slot. Log so a typo isn't silent. */
-            g_warning ("gtkhx_theme: bad color in [%s] %s = %s",
-                       group, palette_key_name[r], raw ? raw : "");
+             * default for this slot. Log so a typo isn't silent. */
+            g_warning ("gtkhx_theme: bad color in [%s] %s = %s", group,
+                       palette_key_name[r], raw ? raw : "");
         }
         g_free (raw);
     }
@@ -428,8 +424,8 @@ load_user_color_group (GtkhxTheme *self, GKeyFile *kf, const char *group,
         if (packed >= 0) {
             self->user_color_rgb[s][variant_idx] = packed;
         } else {
-            g_warning ("gtkhx_theme: bad color in [%s] %s = %s",
-                       group, user_color_key_name[s], raw ? raw : "");
+            g_warning ("gtkhx_theme: bad color in [%s] %s = %s", group,
+                       user_color_key_name[s], raw ? raw : "");
         }
         g_free (raw);
     }
@@ -443,11 +439,11 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     int r;
 
     /* Reset everything to "unset" first — load_from_keyfile is a
-	 * replacement, not a merge. Done unconditionally so a NULL
-	 * argument is a clean "load empty theme" (resets state to
-	 * built-in defaults + still emits "changed"). The header
-	 * contract documents that behavior; callers / tests rely on
-	 * it as the "reset to defaults" primitive. */
+     * replacement, not a merge. Done unconditionally so a NULL
+     * argument is a clean "load empty theme" (resets state to
+     * built-in defaults + still emits "changed"). The header
+     * contract documents that behavior; callers / tests rely on
+     * it as the "reset to defaults" primitive. */
     for (a = 0; a < GTKHX_SCALE_N_AREAS; a++) {
         self->scale_pct[a] = 0;
     }
@@ -461,7 +457,7 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
     }
 
     /* NULL keyfile: nothing else to parse — fall through to the
-	 * "changed" emit so subscribers reset in lockstep. */
+     * "changed" emit so subscribers reset in lockstep. */
     if (!kf) {
         g_signal_emit (self, signals[SIGNAL_CHANGED], 0);
         return;
@@ -486,9 +482,9 @@ gtkhx_theme_load_from_keyfile (GKeyFile *kf)
                 continue;
             }
             /* Clamp on load so a slightly-out-of-range value sticks at
-			 * the boundary rather than getting silently treated as
-			 * "unset". A zero or negative IS treated as unset (matches
-			 * the get_percent contract). */
+             * the boundary rather than getting silently treated as
+             * "unset". A zero or negative IS treated as unset (matches
+             * the get_percent contract). */
             if (v > 0) {
                 self->scale_pct[a] = gtkhx_theme_clamp_percent (v);
             }
@@ -515,8 +511,8 @@ static const char *
 safe_active_theme_name (void)
 {
     const char *name = gtkhx_prefs.theme_name && *gtkhx_prefs.theme_name
-                       ? gtkhx_prefs.theme_name
-                       : "default";
+                           ? gtkhx_prefs.theme_name
+                           : "default";
     if (strchr (name, '/') || strchr (name, '\\')) {
         g_warning ("gtkhx_theme: rejecting theme name %s (path separator)",
                    name);
@@ -538,23 +534,24 @@ load_keyfile_from_resource (const char *resource_path)
     GError *err = NULL;
 
     /* "Not present" (G_RESOURCE_ERROR_NOT_FOUND) is a normal outcome
-	 * — load_builtin_theme tries the dir-form first and the flat-form
-	 * second, so the dir-form lookup for a flat-form built-in (e.g.
-	 * solarized) misses on every successful load. Returning NULL
-	 * silently for NOT_FOUND lets the fallback chain in
-	 * gtkhx_theme_load_active do its job without spamming the
-	 * console. Other GResource errors (internal resource-table
-	 * corruption, IO failures inside the bundle reader) DO get
-	 * warned about — they're real bugs worth surfacing rather than
-	 * silently treating as "no such theme". A genuine parse failure
-	 * (file present but unparseable) still warns below. */
+     * — load_builtin_theme tries the dir-form first and the flat-form
+     * second, so the dir-form lookup for a flat-form built-in (e.g.
+     * solarized) misses on every successful load. Returning NULL
+     * silently for NOT_FOUND lets the fallback chain in
+     * gtkhx_theme_load_active do its job without spamming the
+     * console. Other GResource errors (internal resource-table
+     * corruption, IO failures inside the bundle reader) DO get
+     * warned about — they're real bugs worth surfacing rather than
+     * silently treating as "no such theme". A genuine parse failure
+     * (file present but unparseable) still warns below. */
     bytes = g_resources_lookup_data (resource_path,
                                      G_RESOURCE_LOOKUP_FLAGS_NONE, &err);
     if (!bytes) {
-        if (err && !g_error_matches (err, G_RESOURCE_ERROR,
-                                     G_RESOURCE_ERROR_NOT_FOUND)) {
-            g_warning ("gtkhx_theme: resource lookup %s: %s",
-                       resource_path, err->message);
+        if (err
+            && !g_error_matches (err, G_RESOURCE_ERROR,
+                                 G_RESOURCE_ERROR_NOT_FOUND)) {
+            g_warning ("gtkhx_theme: resource lookup %s: %s", resource_path,
+                       err->message);
         }
         g_clear_error (&err);
         return NULL;
@@ -586,15 +583,14 @@ static GKeyFile *
 load_user_theme (const char *name)
 {
     /* Dir-form first — it's the richer layout. */
-    char *dir_path = g_strdup_printf ("%s/themes/%s/theme.ini",
-                                      gtkhx_config_dir (), name);
+    char *dir_path
+        = g_strdup_printf ("%s/themes/%s/theme.ini", gtkhx_config_dir (), name);
     GKeyFile *kf = NULL;
     GError *err = NULL;
 
     if (g_file_test (dir_path, G_FILE_TEST_IS_REGULAR)) {
         kf = g_key_file_new ();
-        if (!g_key_file_load_from_file (kf, dir_path, G_KEY_FILE_NONE,
-                                        &err)) {
+        if (!g_key_file_load_from_file (kf, dir_path, G_KEY_FILE_NONE, &err)) {
             g_warning ("gtkhx_theme: load %s failed: %s", dir_path,
                        err ? err->message : "(unknown)");
             g_clear_error (&err);
@@ -608,12 +604,11 @@ load_user_theme (const char *name)
         return kf;
     }
 
-    char *flat_path = g_strdup_printf ("%s/themes/%s.ini",
-                                       gtkhx_config_dir (), name);
+    char *flat_path
+        = g_strdup_printf ("%s/themes/%s.ini", gtkhx_config_dir (), name);
     if (g_file_test (flat_path, G_FILE_TEST_IS_REGULAR)) {
         kf = g_key_file_new ();
-        if (!g_key_file_load_from_file (kf, flat_path, G_KEY_FILE_NONE,
-                                        &err)) {
+        if (!g_key_file_load_from_file (kf, flat_path, G_KEY_FILE_NONE, &err)) {
             g_warning ("gtkhx_theme: load %s failed: %s", flat_path,
                        err ? err->message : "(unknown)");
             g_clear_error (&err);
@@ -631,15 +626,15 @@ load_user_theme (const char *name)
 static GKeyFile *
 load_builtin_theme (const char *name)
 {
-    char *dir_res = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s/theme.ini",
-                                     name);
+    char *dir_res
+        = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s/theme.ini", name);
     GKeyFile *kf = load_keyfile_from_resource (dir_res);
     g_free (dir_res);
     if (kf) {
         return kf;
     }
-    char *flat_res = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s.ini",
-                                      name);
+    char *flat_res
+        = g_strdup_printf ("/com/nasledov/gtkhx/themes/%s.ini", name);
     kf = load_keyfile_from_resource (flat_res);
     g_free (flat_res);
     return kf;
@@ -652,17 +647,17 @@ gtkhx_theme_load_active (void)
     GKeyFile *kf = load_user_theme (name);
 
     /* If the user side didn't have the theme, try the same name in
-	 * the GResource themes prefix — that's how the built-ins (default,
-	 * solarized) get loaded when the user hasn't dropped a same-name
-	 * override into $CONFIG/themes/. */
+     * the GResource themes prefix — that's how the built-ins (default,
+     * solarized) get loaded when the user hasn't dropped a same-name
+     * override into $CONFIG/themes/. */
     if (!kf) {
         kf = load_builtin_theme (name);
     }
 
     /* Last-ditch fallback: the default GResource. If even that fails
-	 * (shouldn't — it ships in-binary), we load nothing and every
-	 * accessor returns its built-in default, which is the same shape
-	 * the user would see from a default-theme load anyway. */
+     * (shouldn't — it ships in-binary), we load nothing and every
+     * accessor returns its built-in default, which is the same shape
+     * the user would see from a default-theme load anyway. */
     if (!kf) {
         kf = load_keyfile_from_resource (GTKHX_DEFAULT_THEME_RESOURCE);
     }
@@ -672,8 +667,8 @@ gtkhx_theme_load_active (void)
         g_key_file_free (kf);
     } else {
         /* Still emit "changed" so subscribers reset to defaults on
-		 * the path where no source loaded — keeps the boot sequence
-		 * predictable. */
+         * the path where no source loaded — keeps the boot sequence
+         * predictable. */
         g_signal_emit (gtkhx_theme_get_default (), signals[SIGNAL_CHANGED], 0);
     }
 }
@@ -792,7 +787,7 @@ theme_entry_cmp (gconstpointer ap, gconstpointer bp)
         return 1;
     }
     /* Locale-aware so "Şarki" sorts under S rather than after Z, etc.
-	 * Display names are UTF-8 by GKeyFile contract. */
+     * Display names are UTF-8 by GKeyFile contract. */
     return g_utf8_collate (a->display ? a->display : "",
                            b->display ? b->display : "");
 }
@@ -802,19 +797,19 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                                const char *user_themes_dir)
 {
     GPtrArray *out = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) gtkhx_theme_entry_free);
+        (GDestroyNotify)gtkhx_theme_entry_free);
     /* Tracks names we've already added so user-dir entries shadow
-	 * GResource entries with the same basename. Borrows the
-	 * GtkhxThemeEntry::name pointer — destruction of the array
-	 * outlives this set. */
+     * GResource entries with the same basename. Borrows the
+     * GtkhxThemeEntry::name pointer — destruction of the array
+     * outlives this set. */
     GHashTable *seen = g_hash_table_new (g_str_hash, g_str_equal);
 
     /* Walk the user dir first so its entries take precedence.
-	 * A "theme" surfaces either as a flat .ini file
-	 * (<name>.ini, no bundled icons) OR a directory containing a
-	 * theme.ini (<name>/theme.ini, can ship icons under
-	 * <name>/icons/). Skip dotfiles and anything that doesn't
-	 * match either shape. */
+     * A "theme" surfaces either as a flat .ini file
+     * (<name>.ini, no bundled icons) OR a directory containing a
+     * theme.ini (<name>/theme.ini, can ship icons under
+     * <name>/icons/). Skip dotfiles and anything that doesn't
+     * match either shape. */
     if (user_themes_dir) {
         GDir *dir = g_dir_open (user_themes_dir, 0, NULL);
         if (dir) {
@@ -855,26 +850,25 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                             display = read_display_name_from_file (manifest);
                         }
                         g_free (manifest);
-                    } else if (pass == 1 && !is_dir
-                               && strlen (cn) > 4
+                    } else if (pass == 1 && !is_dir && strlen (cn) > 4
                                && g_ascii_strcasecmp (cn + strlen (cn) - 4,
-                                                      ".ini") == 0
-                               && g_file_test (child,
-                                               G_FILE_TEST_IS_REGULAR)) {
+                                                      ".ini")
+                                      == 0
+                               && g_file_test (child, G_FILE_TEST_IS_REGULAR)) {
                         /* Flat-form: strip the .ini suffix. Require
-						 * a regular file so a FIFO / dead symlink /
-						 * other non-regular entry named "foo.ini"
-						 * doesn't surface as an unselectable theme
-						 * (gtkhx_theme_load_active needs IS_REGULAR
-						 * to open it). */
+                         * a regular file so a FIFO / dead symlink /
+                         * other non-regular entry named "foo.ini"
+                         * doesn't surface as an unselectable theme
+                         * (gtkhx_theme_load_active needs IS_REGULAR
+                         * to open it). */
                         name = strip_ini_suffix (cn);
                         display = read_display_name_from_file (child);
                     }
 
                     if (name && !theme_name_is_safe (name)) {
                         /* Path-separator in the directory or .ini
-						 * basename — the loader would reject it
-						 * anyway, so don't surface it in the picker. */
+                         * basename — the loader would reject it
+                         * anyway, so don't surface it in the picker. */
                         g_free (name);
                         g_free (display);
                         name = NULL;
@@ -899,9 +893,9 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
     }
 
     /* Then enumerate the GResource prefix, skipping anything already
-	 * shadowed by a user-dir entry. GResource enumeration returns
-	 * dirs with a trailing "/", files without — same as a normal
-	 * VFS walk. */
+     * shadowed by a user-dir entry. GResource enumeration returns
+     * dirs with a trailing "/", files without — same as a normal
+     * VFS walk. */
     if (resource_prefix) {
         char **children = g_resources_enumerate_children (
             resource_prefix, G_RESOURCE_LOOKUP_FLAGS_NONE, NULL);
@@ -929,7 +923,8 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                         char *subdir = g_strndup (*p, n - 1);
                         char *manifest_res = g_strdup_printf (
                             "%s%s%s/theme.ini", resource_prefix, sep, subdir);
-                        display = read_display_name_from_resource (manifest_res);
+                        display
+                            = read_display_name_from_resource (manifest_res);
                         if (display
                             || g_resources_get_info (
                                 manifest_res, G_RESOURCE_LOOKUP_FLAGS_NONE,
@@ -945,7 +940,8 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
                         name = strip_ini_suffix (*p);
                         char *resource_path = g_strdup_printf (
                             "%s%s%s", resource_prefix, sep, *p);
-                        display = read_display_name_from_resource (resource_path);
+                        display
+                            = read_display_name_from_resource (resource_path);
                         g_free (resource_path);
                     }
 
@@ -974,8 +970,8 @@ gtkhx_theme_list_available_at (const char *resource_prefix,
     }
 
     /* Guarantee "default" is always there even if neither source
-	 * surfaced it (shouldn't happen — the GResource ships it — but
-	 * a Settings combo that's empty would be alarming). */
+     * surfaced it (shouldn't happen — the GResource ships it — but
+     * a Settings combo that's empty would be alarming). */
     if (!g_hash_table_contains (seen, "default")) {
         GtkhxThemeEntry *e = g_new0 (GtkhxThemeEntry, 1);
         e->name = g_strdup ("default");
@@ -1021,17 +1017,17 @@ gtkhx_theme_names_begin (void)
      * overflow the int return into a negative value (which the Rust side
      * would turn into a huge allocation). */
     guint len = hx_theme_names_snapshot->len;
-    return len > (guint) G_MAXINT ? G_MAXINT : (int) len;
+    return len > (guint)G_MAXINT ? G_MAXINT : (int)len;
 }
 
 const char *
 gtkhx_theme_names_name (int i)
 {
     if (!hx_theme_names_snapshot || i < 0
-        || (guint) i >= hx_theme_names_snapshot->len) {
+        || (guint)i >= hx_theme_names_snapshot->len) {
         return "";
     }
-    return ((GtkhxThemeEntry *) g_ptr_array_index (hx_theme_names_snapshot, i))
+    return ((GtkhxThemeEntry *)g_ptr_array_index (hx_theme_names_snapshot, i))
         ->name;
 }
 
@@ -1039,10 +1035,10 @@ const char *
 gtkhx_theme_names_display (int i)
 {
     if (!hx_theme_names_snapshot || i < 0
-        || (guint) i >= hx_theme_names_snapshot->len) {
+        || (guint)i >= hx_theme_names_snapshot->len) {
         return "";
     }
-    return ((GtkhxThemeEntry *) g_ptr_array_index (hx_theme_names_snapshot, i))
+    return ((GtkhxThemeEntry *)g_ptr_array_index (hx_theme_names_snapshot, i))
         ->display;
 }
 

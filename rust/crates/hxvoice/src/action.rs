@@ -103,7 +103,10 @@ pub enum Action {
     /// Emit a GtkhxSession signal so the UI updates without the
     /// state machine knowing anything about GLib. The runtime
     /// maps `SignalKind` to the concrete signal name + payload.
-    EmitSignal { kind: SignalKind, payload: SignalPayload },
+    EmitSignal {
+        kind: SignalKind,
+        payload: SignalPayload,
+    },
 
     // ---- Timers ----
     /// Arm a one-shot timer of the given kind to fire `ms`

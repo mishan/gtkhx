@@ -137,13 +137,11 @@ hx_tracker_server_new_v1 (guint32 addr, guint16 port, guint16 nusers,
  * tlv_count=0 + tlv_bytes=NULL + tlv_bytes_len=0 for records with
  * no trailer. Returns NULL only on a wholly malformed address
  * (e.g. unknown addr_type sneaking past the wire parser). */
-extern HxTrackerServer *
-hx_tracker_server_new_v3 (guint8 addr_type, const guint8 *address,
-                          gsize address_len, guint16 port, guint16 nusers,
-                          const char *name, gsize name_len, const char *desc,
-                          gsize desc_len, guint16 tlv_count,
-                          const guint8 *tlv_bytes, gsize tlv_bytes_len,
-                          int total);
+extern HxTrackerServer *hx_tracker_server_new_v3 (
+    guint8 addr_type, const guint8 *address, gsize address_len, guint16 port,
+    guint16 nusers, const char *name, gsize name_len, const char *desc,
+    gsize desc_len, guint16 tlv_count, const guint8 *tlv_bytes,
+    gsize tlv_bytes_len, int total);
 
 extern HxTrackerServer *hx_tracker_server_copy (HxTrackerServer *e);
 extern void hx_tracker_server_free (HxTrackerServer *e);

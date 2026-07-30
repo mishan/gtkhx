@@ -41,7 +41,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <glib.h>
-#include "compat.h"             /* MAXPATHLEN */
+#include "compat.h" /* MAXPATHLEN */
 #include "uniquify_path.h"
 
 void
@@ -79,9 +79,9 @@ uniquify_path (char *path, size_t cap, uniquify_exists_fn exists, void *ud)
 
     for (n = 1; n < 10000; n++) {
         /* The precision specifiers cap each component at slightly under
-		 * half of MAXPATHLEN so GCC can prove the format fits in path's
-		 * cap bytes. snprintf would truncate safely either way; the
-		 * specifiers exist only to satisfy the static analysis. */
+         * half of MAXPATHLEN so GCC can prove the format fits in path's
+         * cap bytes. snprintf would truncate safely either way; the
+         * specifiers exist only to satisfy the static analysis. */
         snprintf (path, cap, "%.*s (%d)%.*s", MAXPATHLEN / 2 - 16, prefix, n,
                   MAXPATHLEN / 2 - 16, suffix);
         if (!exists (path, ud)) {

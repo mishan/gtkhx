@@ -23,7 +23,7 @@ hx_test_in (const struct htlc_conn *htlc)
     struct qbuf *q = g_hash_table_lookup (table, htlc);
     if (!q) {
         q = g_new0 (struct qbuf, 1);
-        g_hash_table_insert (table, (gpointer) htlc, q);
+        g_hash_table_insert (table, (gpointer)htlc, q);
     }
     return q;
 }

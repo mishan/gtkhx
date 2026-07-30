@@ -68,8 +68,8 @@ void hxd_fd_set (int fd, int rw);
 static gboolean
 hxd_gtk_read (GIOChannel *source, GIOCondition cond, struct hxd_file *file)
 {
-    (void) source;
-    (void) cond;
+    (void)source;
+    (void)cond;
     if (file->ready_read) {
         file->ready_read (file->fd);
     }
@@ -79,8 +79,8 @@ hxd_gtk_read (GIOChannel *source, GIOCondition cond, struct hxd_file *file)
 static gboolean
 hxd_gtk_write (GIOChannel *source, GIOCondition cond, struct hxd_file *file)
 {
-    (void) source;
-    (void) cond;
+    (void)source;
+    (void)cond;
     if (file->ready_write) {
         file->ready_write (file->fd);
     }
@@ -158,7 +158,7 @@ sig_chld (int sig)
     int status, serrno = errno;
     pid_t pid;
 
-    (void) sig;
+    (void)sig;
     /* Reap every finished /exec child so they don't linger as zombies.
      * There's no per-pid bookkeeping to do beyond the waitpid itself. */
     for (;;) {
@@ -179,7 +179,7 @@ sig_chld (int sig)
 static RETSIGTYPE
 sig_bus (int sig)
 {
-    (void) sig;
+    (void)sig;
     abort ();
 }
 
@@ -224,7 +224,8 @@ exec_ready_read (int fd)
             }
             hx_send_chat (out_htlc, buf, hxd_files[fd].cid, 0);
         } else {
-            hx_printf (hx_active_session ()->htlc, hxd_files[fd].cid, "%s", buf);
+            hx_printf (hx_active_session ()->htlc, hxd_files[fd].cid, "%s",
+                       buf);
         }
     }
 }

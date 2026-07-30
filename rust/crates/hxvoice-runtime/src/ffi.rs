@@ -23,9 +23,8 @@ use hxvoice::event::Event;
 use hxvoice::event::ServerError;
 
 use crate::runtime::{
-    CallbackBackend, ErrorCallback, MuteChangedCallback, NoopBackend,
-    SendWireFrameCallback, SignalCallbacks, SpeakerChangedCallback,
-    StateChangedCallback, VoiceRuntime,
+    CallbackBackend, ErrorCallback, MuteChangedCallback, NoopBackend, SendWireFrameCallback,
+    SignalCallbacks, SpeakerChangedCallback, StateChangedCallback, VoiceRuntime,
 };
 
 /// FFI mirror of [`crate::runtime::SignalCallbacks`]. The C header
@@ -141,8 +140,7 @@ fn build_device_list(devices: Vec<crate::audio::AudioDevice>) -> Box<GtkhxVoiceD
 /// No memory parameters. Caller takes ownership of the returned
 /// pointer.
 #[no_mangle]
-pub extern "C" fn gtkhx_voice_list_input_devices(
-) -> *mut GtkhxVoiceDeviceList {
+pub extern "C" fn gtkhx_voice_list_input_devices() -> *mut GtkhxVoiceDeviceList {
     let devices = crate::audio::list_input_devices();
     Box::into_raw(build_device_list(devices))
 }
@@ -150,8 +148,7 @@ pub extern "C" fn gtkhx_voice_list_input_devices(
 /// Enumerate available playback devices. Same shape as
 /// `gtkhx_voice_list_input_devices`.
 #[no_mangle]
-pub extern "C" fn gtkhx_voice_list_output_devices(
-) -> *mut GtkhxVoiceDeviceList {
+pub extern "C" fn gtkhx_voice_list_output_devices() -> *mut GtkhxVoiceDeviceList {
     let devices = crate::audio::list_output_devices();
     Box::into_raw(build_device_list(devices))
 }
@@ -162,9 +159,7 @@ pub extern "C" fn gtkhx_voice_list_output_devices(
 /// `list` must be a pointer returned by `gtkhx_voice_list_*_devices`
 /// and not yet freed.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_device_list_len(
-    list: *const GtkhxVoiceDeviceList,
-) -> usize {
+pub unsafe extern "C" fn gtkhx_voice_device_list_len(list: *const GtkhxVoiceDeviceList) -> usize {
     if list.is_null() {
         return 0;
     }
@@ -192,10 +187,7 @@ pub unsafe extern "C" fn gtkhx_voice_device_list_name(
         return std::ptr::null();
     }
     if list.name_c[idx].is_none() {
-        list.name_c[idx] = std::ffi::CString::new(
-            list.devices[idx].name.as_str(),
-        )
-        .ok();
+        list.name_c[idx] = std::ffi::CString::new(list.devices[idx].name.as_str()).ok();
     }
     list.name_c[idx]
         .as_ref()
@@ -223,10 +215,7 @@ pub unsafe extern "C" fn gtkhx_voice_device_list_display_name(
         return std::ptr::null();
     }
     if list.display_c[idx].is_none() {
-        list.display_c[idx] = std::ffi::CString::new(
-            list.devices[idx].display_name.as_str(),
-        )
-        .ok();
+        list.display_c[idx] = std::ffi::CString::new(list.devices[idx].display_name.as_str()).ok();
     }
     list.display_c[idx]
         .as_ref()
@@ -240,9 +229,7 @@ pub unsafe extern "C" fn gtkhx_voice_device_list_display_name(
 /// `list` must have been returned by `gtkhx_voice_list_*_devices`
 /// and not yet freed.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_device_list_free(
-    list: *mut GtkhxVoiceDeviceList,
-) {
+pub unsafe extern "C" fn gtkhx_voice_device_list_free(list: *mut GtkhxVoiceDeviceList) {
     if !list.is_null() {
         drop(Box::from_raw(list));
     }
@@ -366,8 +353,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_new_with_callbacks(
     user_data: *mut core::ffi::c_void,
     send_wire_frame_cb: Option<SendWireFrameCallback>,
 ) -> *mut VoiceRuntime {
-    let backend =
-        Box::new(CallbackBackend::new(user_data, send_wire_frame_cb));
+    let backend = Box::new(CallbackBackend::new(user_data, send_wire_frame_cb));
     match VoiceRuntime::new(backend) {
         Ok(rt) => Box::into_raw(Box::new(rt)),
         Err(e) => {
@@ -486,9 +472,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_active_cid(
 /// # Safety
 /// `rt` must be NULL or a valid runtime pointer.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_runtime_rtp_buffers_received(
-    rt: *mut VoiceRuntime,
-) -> u64 {
+pub unsafe extern "C" fn gtkhx_voice_runtime_rtp_buffers_received(rt: *mut VoiceRuntime) -> u64 {
     match unsafe { rt_from_ptr(rt) } {
         Some(rt) => rt.rtp_buffers_received_for_test(),
         None => 0,
@@ -541,10 +525,7 @@ unsafe fn rt_from_ptr<'a>(rt: *mut VoiceRuntime) -> Option<&'a VoiceRuntime> {
 /// `rt` must be NULL or a valid runtime pointer. No memory params
 /// beyond the pointer.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_runtime_join(
-    rt: *mut VoiceRuntime,
-    cid: u32,
-) {
+pub unsafe extern "C" fn gtkhx_voice_runtime_join(rt: *mut VoiceRuntime, cid: u32) {
     let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
         return;
     };
@@ -557,10 +538,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_join(
 /// # Safety
 /// Same as `gtkhx_voice_runtime_join`.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_runtime_leave(
-    rt: *mut VoiceRuntime,
-    cid: u32,
-) {
+pub unsafe extern "C" fn gtkhx_voice_runtime_leave(rt: *mut VoiceRuntime, cid: u32) {
     let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
         return;
     };
@@ -575,16 +553,11 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_leave(
 /// # Safety
 /// Same as `gtkhx_voice_runtime_join`.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_runtime_mute(
-    rt: *mut VoiceRuntime,
-    muted: i32,
-) {
+pub unsafe extern "C" fn gtkhx_voice_runtime_mute(rt: *mut VoiceRuntime, muted: i32) {
     let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
         return;
     };
-    rt.handle_event(Event::MuteToggleRequested {
-        muted: muted != 0,
-    });
+    rt.handle_event(Event::MuteToggleRequested { muted: muted != 0 });
 }
 
 /// Record the local user's Hotline uid so the send leg's `level` VAD
@@ -594,10 +567,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_mute(
 /// # Safety
 /// `rt` must be NULL or a valid runtime pointer.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_runtime_set_self_uid(
-    rt: *mut VoiceRuntime,
-    uid: u16,
-) {
+pub unsafe extern "C" fn gtkhx_voice_runtime_set_self_uid(rt: *mut VoiceRuntime, uid: u16) {
     let Some(rt) = (unsafe { rt_from_ptr(rt) }) else {
         return;
     };
@@ -637,10 +607,7 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_set_user_volume(
 /// `rt` must be NULL or a valid runtime pointer. Returns `1.0` for a
 /// NULL runtime.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_voice_runtime_user_volume(
-    rt: *mut VoiceRuntime,
-    uid: u16,
-) -> f64 {
+pub unsafe extern "C" fn gtkhx_voice_runtime_user_volume(rt: *mut VoiceRuntime, uid: u16) -> f64 {
     match unsafe { rt_from_ptr(rt) } {
         Some(rt) => rt.user_volume(uid),
         None => 1.0,
@@ -731,12 +698,11 @@ pub unsafe extern "C" fn gtkhx_voice_runtime_room_status(
     // result is "treat malformed input as a zero-participant
     // update" — the state machine's wrong-cid + empty-blob
     // paths handle that cleanly.
-    let bytes: &[u8] =
-        if blob.is_null() || len == 0 || len > isize::MAX as usize {
-            &[]
-        } else {
-            unsafe { slice::from_raw_parts(blob, len) }
-        };
+    let bytes: &[u8] = if blob.is_null() || len == 0 || len > isize::MAX as usize {
+        &[]
+    } else {
+        unsafe { slice::from_raw_parts(blob, len) }
+    };
     // Cap participants to a sane ceiling. The on-wire u16 length
     // would let a server (or a corrupt frame) ship up to ~10k
     // entries — collecting that uncapped into a Vec + handing it

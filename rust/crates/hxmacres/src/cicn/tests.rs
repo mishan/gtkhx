@@ -38,7 +38,7 @@ fn checkerboard_cicn() -> Vec<u8> {
 
     // ColorTable @86: ctSeed(4), ctFlags(2), ctSize(2)=1, then 2 entries.
     put16(&mut b, 92, 1); // ctSize (→ 2 entries)
-    // entry 0 @94: value=0, rgb = red (0xffff, 0, 0)
+                          // entry 0 @94: value=0, rgb = red (0xffff, 0, 0)
     put16(&mut b, 94, 0);
     put16(&mut b, 96, 0xffff);
     // entry 1 @102: value=1, rgb = blue (0, 0, 0xffff)

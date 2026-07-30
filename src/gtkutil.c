@@ -176,8 +176,8 @@ init_keyaccel_full (GtkWidget *widget, gboolean esc_closes)
     gtk_shortcut_controller_add_shortcut (GTK_SHORTCUT_CONTROLLER (ctrl), sc);
 
     /* Ctrl+W → close, except on the toolbar (see keyaccel_close_cb).
-	 * Compared by pointer equality: at this call site, toolbar.c
-	 * passes the same toolbar_window global that we read here. */
+     * Compared by pointer equality: at this call site, toolbar.c
+     * passes the same toolbar_window global that we read here. */
     if (widget != toolbar_window) {
         sc = gtk_shortcut_new (
             gtk_keyval_trigger_new ('w', GDK_CONTROL_MASK),
@@ -186,14 +186,14 @@ init_keyaccel_full (GtkWidget *widget, gboolean esc_closes)
                                               sc);
 
         /* Esc → close for dialog-like windows (Settings, Bookmarks,
-		 * User Editor, About, Agreement, etc.). Off by default so that
-		 * the main user-facing windows (chat, news, files, tracker)
-		 * don't swallow Esc — those windows give Esc to widgets like
-		 * search entries and inline editors. AdwDialog wires Esc
-		 * itself, so this path is only for GtkWindows that we *want*
-		 * to behave dialog-y: gtk_window_close runs through any
-		 * close-request handler the window registered, just like the
-		 * Ctrl+W path. */
+         * User Editor, About, Agreement, etc.). Off by default so that
+         * the main user-facing windows (chat, news, files, tracker)
+         * don't swallow Esc — those windows give Esc to widgets like
+         * search entries and inline editors. AdwDialog wires Esc
+         * itself, so this path is only for GtkWindows that we *want*
+         * to behave dialog-y: gtk_window_close runs through any
+         * close-request handler the window registered, just like the
+         * Ctrl+W path. */
         if (esc_closes) {
             sc = gtk_shortcut_new (
                 gtk_keyval_trigger_new (GDK_KEY_Escape, 0),
@@ -274,19 +274,18 @@ setbtns (session *sess, int stat)
         gtk_widget_set_sensitive (chatbtn, stat);
         gtk_widget_set_sensitive (ignobtn, stat);
         /* kick / ban get visibility gating in the Users
-		 * window — hide them entirely when the account doesn't
-		 * have HL_ACCESS_DISCONNECT_USERS. (One bit gates both per
-		 * mhxd's struct.) On disconnect, hide them too: we don't
-		 * know what the next server will allow, and an unauthorised
-		 * kick button next to a friendly Msg button is worse UX
-		 * than just dropping the icon.
-		 *
-		 * Same access-bit gate as the right-click popup's Kick/Ban
-		 * section, so the toolbar and the popup agree on what's
-		 * available. */
+         * window — hide them entirely when the account doesn't
+         * have HL_ACCESS_DISCONNECT_USERS. (One bit gates both per
+         * mhxd's struct.) On disconnect, hide them too: we don't
+         * know what the next server will allow, and an unauthorised
+         * kick button next to a friendly Msg button is worse UX
+         * than just dropping the icon.
+         *
+         * Same access-bit gate as the right-click popup's Kick/Ban
+         * section, so the toolbar and the popup agree on what's
+         * available. */
         if (stat
-            && hx_conn_access_has (sess->htlc,
-                              HL_ACCESS_DISCONNECT_USERS)) {
+            && hx_conn_access_has (sess->htlc, HL_ACCESS_DISCONNECT_USERS)) {
             gtk_widget_set_visible (kickbtn, TRUE);
             gtk_widget_set_sensitive (kickbtn, TRUE);
             gtk_widget_set_visible (banbtn, TRUE);
@@ -309,42 +308,39 @@ setbtns (session *sess, int stat)
      * sensitivity comment. */
 
     /* Broadcast button: always present in the toolbar, greyed out
-	 * when unavailable. Unavailable means either the connection is
-	 * down (stat==0) or the account lacks HL_ACCESS_CAN_BROADCAST.
-	 * We used to hide-when-not-permitted to match Kick/Ban; Misha
-	 * preferred always-visible with sensitivity reflecting the
-	 * actual permission, which is also more discoverable for users
-	 * who don't realise the feature exists. */
+     * when unavailable. Unavailable means either the connection is
+     * down (stat==0) or the account lacks HL_ACCESS_CAN_BROADCAST.
+     * We used to hide-when-not-permitted to match Kick/Ban; Misha
+     * preferred always-visible with sensitivity reflecting the
+     * actual permission, which is also more discoverable for users
+     * who don't realise the feature exists. */
     if (broadcast_btn) {
         gboolean can_broadcast
-            = stat
-              && hx_conn_access_has (sess->htlc,
-                                HL_ACCESS_CAN_BROADCAST);
+            = stat && hx_conn_access_has (sess->htlc, HL_ACCESS_CAN_BROADCAST);
         gtk_widget_set_sensitive (broadcast_btn, can_broadcast);
     }
 
     /* New User / Edit User moved from toolbar buttons to
-	 * the hamburger menu's Admin submenu. Flip the corresponding
-	 * GActions instead of the old GtkWidget pointers. Each item is
-	 * gated independently on its access bit so a sysop with view-
-	 * only privileges can still open the editor on an existing
-	 * account but can't fire off the New User dialog (or vice
-	 * versa for create-only).
-	 *
-	 *   user_new  → HL_ACCESS_CREATE_USERS
-	 *   user_edit → HL_ACCESS_READ_USERS (lets you open the dialog;
-	 *                MODIFY_USERS still gates Save server-side, but
-	 *                even view-only privilege should let you inspect)
-	 *
-	 * On disconnect (`stat == 0`) both are always disabled —
-	 * there's no session to talk to. */
+     * the hamburger menu's Admin submenu. Flip the corresponding
+     * GActions instead of the old GtkWidget pointers. Each item is
+     * gated independently on its access bit so a sysop with view-
+     * only privileges can still open the editor on an existing
+     * account but can't fire off the New User dialog (or vice
+     * versa for create-only).
+     *
+     *   user_new  → HL_ACCESS_CREATE_USERS
+     *   user_edit → HL_ACCESS_READ_USERS (lets you open the dialog;
+     *                MODIFY_USERS still gates Save server-side, but
+     *                even view-only privilege should let you inspect)
+     *
+     * On disconnect (`stat == 0`) both are always disabled —
+     * there's no session to talk to. */
     if (stat) {
         set_app_action_enabled (
             "user_new",
             hx_conn_access_has (sess->htlc, HL_ACCESS_CREATE_USERS));
         set_app_action_enabled (
-            "user_edit",
-            hx_conn_access_has (sess->htlc, HL_ACCESS_READ_USERS));
+            "user_edit", hx_conn_access_has (sess->htlc, HL_ACCESS_READ_USERS));
     } else {
         set_app_action_enabled ("user_new", FALSE);
         set_app_action_enabled ("user_edit", FALSE);
@@ -365,38 +361,38 @@ setbtns (session *sess, int stat)
 #endif /* HAVE_VOICE */
 
     /* Same gating discipline for the Phase 9.C inline-media
-	 * attach buttons: visible only when the server echoed
-	 * HTLC_CAP_INLINE_MEDIA. Most Hotline servers don't ship
-	 * the extension; hiding the button on those sessions is
-	 * less confusing than a button that always shows an
-	 * inert toast. Cleared on disconnect via the same caps
-	 * reset path. */
+     * attach buttons: visible only when the server echoed
+     * HTLC_CAP_INLINE_MEDIA. Most Hotline servers don't ship
+     * the extension; hiding the button on those sessions is
+     * less confusing than a button that always shows an
+     * inert toast. Cleared on disconnect via the same caps
+     * reset path. */
     inline_media_attach_refresh_all_chats (sess);
 
     /* News-related toolbar buttons get sensitivity-only
-	 * gating — they always remain visible so the toolbar shape
-	 * doesn't reshape between connections.
-	 *
-	 *   news_btn   (legacy News): enabled when the account has
-	 *               HL_ACCESS_READ_NEWS. The legacy news file
-	 *               protocol exists on every Hotline server
-	 *               version including 1.5+ — Badmoon (1.9) and
-	 *               other modern servers serve both legacy and
-	 *               threaded news side by side, so don't gate this
-	 *               on server version. The legacy "Post" button
-	 *               that used to live on the toolbar was removed
-	 *               in 2026-05; the News window's own headerbar
-	 *               already exposes a Post action gated on
-	 *               HL_ACCESS_POST_NEWS, so the toolbar copy was
-	 *               redundant.
-	 *
-	 *   news15_btn (threaded News): NOT gated here. Like Files,
-	 *               News 1.5 is a permanent panel in the dock now;
-	 *               clicking the button just brings it forward.
-	 *               The panel itself can show its cached state
-	 *               when disconnected, or a 'this server is older
-	 *               than 1.5' message when connected to an old
-	 *               server. */
+     * gating — they always remain visible so the toolbar shape
+     * doesn't reshape between connections.
+     *
+     *   news_btn   (legacy News): enabled when the account has
+     *               HL_ACCESS_READ_NEWS. The legacy news file
+     *               protocol exists on every Hotline server
+     *               version including 1.5+ — Badmoon (1.9) and
+     *               other modern servers serve both legacy and
+     *               threaded news side by side, so don't gate this
+     *               on server version. The legacy "Post" button
+     *               that used to live on the toolbar was removed
+     *               in 2026-05; the News window's own headerbar
+     *               already exposes a Post action gated on
+     *               HL_ACCESS_POST_NEWS, so the toolbar copy was
+     *               redundant.
+     *
+     *   news15_btn (threaded News): NOT gated here. Like Files,
+     *               News 1.5 is a permanent panel in the dock now;
+     *               clicking the button just brings it forward.
+     *               The panel itself can show its cached state
+     *               when disconnected, or a 'this server is older
+     *               than 1.5' message when connected to an old
+     *               server. */
     if (!stat) {
         gtk_widget_set_sensitive (news_btn, FALSE);
     } else {
@@ -406,8 +402,7 @@ setbtns (session *sess, int stat)
          * that case. Gate the button by the same rule so it isn't greyed
          * out on a server where News actually works. */
         gtk_widget_set_sensitive (
-            news_btn,
-            hx_conn_access_permits (sess->htlc, HL_ACCESS_READ_NEWS));
+            news_btn, hx_conn_access_permits (sess->htlc, HL_ACCESS_READ_NEWS));
     }
 }
 
@@ -443,14 +438,14 @@ set_status_bar (int status)
     case -1:
         fmt = g_strdup_printf ("%s %s", _ ("Connecting to"), server_addr);
         /* Hide any leftover "lost connection" banner — the user
-		 * is actively trying to reconnect. */
+         * is actively trying to reconnect. */
         toolbar_hide_banner ();
         break;
     case 0:
         fixed = _ ("Not Connected");
         /* Toast + banner only on a real disconnect — first-launch
-		 * state change of 0 -> 0 shouldn't surface a notification,
-		 * and neither should a Connect-canceled (last_status == -1). */
+         * state change of 0 -> 0 shouldn't surface a notification,
+         * and neither should a Connect-canceled (last_status == -1). */
         if (last_status == 1 || last_status == 2) {
             toast = g_strdup_printf ("%s %s", _ ("Disconnected from"),
                                      server_addr);
@@ -500,13 +495,13 @@ changetitlespecific (GtkWidget *widget, char *name)
 {
     char *futuretitle;
     /* When opened pre-connect (or during a brief reconnect window
-	 * where server_addr has been cleared but the window stays up),
-	 * skip the " (server)" suffix rather than printing "(null)" or
-	 * "()". The window will get re-titled by the rcv path's
-	 * changetitlesconnected once SERVERNAME arrives — for managed
-	 * windows; on-demand windows like Threaded News and Files
-	 * Browser get the right title on first open since they call
-	 * this from inside the toolbar action, well after connect. */
+     * where server_addr has been cleared but the window stays up),
+     * skip the " (server)" suffix rather than printing "(null)" or
+     * "()". The window will get re-titled by the rcv path's
+     * changetitlesconnected once SERVERNAME arrives — for managed
+     * windows; on-demand windows like Threaded News and Files
+     * Browser get the right title on first open since they call
+     * this from inside the toolbar action, well after connect. */
     if (server_addr && *server_addr) {
         futuretitle = g_strdup_printf ("%s (%s)", name, server_addr);
     } else {
@@ -539,28 +534,28 @@ close_connected_windows (session *sess)
         sess->agreementwin = NULL;
     }
     /* legacy gfile_list cleanup is gone with the legacy
-	 * files browser. The new browser (files_browser.c) is a
-	 * singleton owned by its open_files_browser entry point and
-	 * cleans itself up via the close-request handler. */
+     * files browser. The new browser (files_browser.c) is a
+     * singleton owned by its open_files_browser entry point and
+     * cleans itself up via the close-request handler. */
 
     /* walk sess->chats, closing the view of every non-public
-	 * pchat tab via the chat_tabs API. The public chat (cid=0) UI
-	 * persists across reconnects, like its model-side counterpart
-	 * in sess->chats.
-	 *
-	 * gtkhx_chat_tabs_close_pchat fires AdwTabView::close-page,
-	 * which runs the registered teardown (pchat_close in chat.c).
-	 * That teardown calls gchat_delete, which detaches the view.
-	 * Closing tabs mutates the chat registry as we go, so collect
-	 * cids in a first pass and close in a second.
-	 *
-	 * this was destroying gchat->window
-	 * directly, but gchat->window now points at the tab content
-	 * widget (hpane). Destroying that unparented the child but
-	 * left the AdwTabPage and the pchat_tabs index entry stale —
-	 * a real leak on every disconnect. Routing through the
-	 * close-page dispatcher keeps the AdwTabView, the registry
-	 * index, and gchat lifecycle consistent. */
+     * pchat tab via the chat_tabs API. The public chat (cid=0) UI
+     * persists across reconnects, like its model-side counterpart
+     * in sess->chats.
+     *
+     * gtkhx_chat_tabs_close_pchat fires AdwTabView::close-page,
+     * which runs the registered teardown (pchat_close in chat.c).
+     * That teardown calls gchat_delete, which detaches the view.
+     * Closing tabs mutates the chat registry as we go, so collect
+     * cids in a first pass and close in a second.
+     *
+     * this was destroying gchat->window
+     * directly, but gchat->window now points at the tab content
+     * widget (hpane). Destroying that unparented the child but
+     * left the AdwTabPage and the pchat_tabs index entry stale —
+     * a real leak on every disconnect. Routing through the
+     * close-page dispatcher keeps the AdwTabView, the registry
+     * index, and gchat lifecycle consistent. */
     if (sess->chats) {
         GArray *cids = g_array_new (FALSE, FALSE, sizeof (guint32));
         guint n = hx_chats_count (sess->chats);
@@ -568,10 +563,11 @@ close_connected_windows (session *sess)
             guint32 cid = hx_chats_cid_at (sess->chats, i);
             struct chat *c = hx_chats_get_at (sess->chats, i);
             /* Only non-public conversations that actually have an
-			 * open window need closing (models without a view have no
-			 * tab to tear down). */
-            if (cid != 0 && hx_chat_view (c))
+             * open window need closing (models without a view have no
+             * tab to tear down). */
+            if (cid != 0 && hx_chat_view (c)) {
                 g_array_append_val (cids, cid);
+            }
         }
         for (guint i = 0; i < cids->len; i++) {
             guint32 cid = g_array_index (cids, guint32, i);
@@ -606,7 +602,7 @@ error_dialog (char *title, char *msg)
     adw_alert_dialog_set_close_response (ADW_ALERT_DIALOG (dlg), "ok");
 
     /* Ctrl+W / Ctrl+Q for keyboard parity. Esc dismisses via the
-	 * close_response set above. */
+     * close_response set above. */
     gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
 
     adw_dialog_present (dlg, GTK_WIDGET (gtkhx_active_window ()));
@@ -656,7 +652,7 @@ gtkhx_grid_attach_table_defaults (GtkGrid *grid, GtkWidget *child, int left,
                                   int right, int top, int bottom)
 {
     /* Mirror gtk_table_attach_defaults: GTK_EXPAND|GTK_FILL on both
-	 * axes, no padding. */
+     * axes, no padding. */
     gtk_widget_set_hexpand (child, TRUE);
     gtk_widget_set_vexpand (child, TRUE);
     gtk_widget_set_halign (child, GTK_ALIGN_FILL);
@@ -791,7 +787,7 @@ gtkhx_box_pack_end (GtkWidget *box, GtkWidget *child, gboolean expand,
 static void
 gtkhx_texture_pixbuf_pixels_unref (gpointer data)
 {
-    g_object_unref ((GObject *) data);
+    g_object_unref ((GObject *)data);
 }
 
 /* gdk_texture_new_for_pixbuf is deprecated in GTK
@@ -837,9 +833,9 @@ gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf)
         format = GDK_MEMORY_R8G8B8;
     } else {
         /* GdkPixbuf API contract: 8-bit-per-sample RGB or
-		 * RGBA, so n_channels is always 3 or 4. A buggy or
-		 * pre-loaded pixbuf reporting something else would
-		 * silently render garbage — fail closed instead. */
+         * RGBA, so n_channels is always 3 or 4. A buggy or
+         * pre-loaded pixbuf reporting something else would
+         * silently render garbage — fail closed instead. */
         return NULL;
     }
 
@@ -850,15 +846,14 @@ gtkhx_texture_from_pixbuf (GdkPixbuf *pixbuf)
         return NULL;
     }
 
-    buffer_size = (gsize) stride * (gsize) height;
+    buffer_size = (gsize)stride * (gsize)height;
 
     g_object_ref (pixbuf);
-    bytes = g_bytes_new_with_free_func (gdk_pixbuf_read_pixels (pixbuf),
-                                        buffer_size,
-                                        gtkhx_texture_pixbuf_pixels_unref,
-                                        pixbuf);
-    texture = gdk_memory_texture_new (width, height, format, bytes,
-                                      (gsize) stride);
+    bytes = g_bytes_new_with_free_func (
+        gdk_pixbuf_read_pixels (pixbuf), buffer_size,
+        gtkhx_texture_pixbuf_pixels_unref, pixbuf);
+    texture
+        = gdk_memory_texture_new (width, height, format, bytes, (gsize)stride);
     g_bytes_unref (bytes);
     return texture;
 }
@@ -917,8 +912,7 @@ gtkhx_image_new_from_pixbuf (GdkPixbuf *pixbuf)
 /* Compute effective pixel dimensions for a source pixbuf at the
  * button's area scale, clamped to >= 1. */
 static void
-button_scaled_size (GdkPixbuf *src, GtkhxScaleArea area, int *out_w,
-                    int *out_h)
+button_scaled_size (GdkPixbuf *src, GtkhxScaleArea area, int *out_w, int *out_h)
 {
     double mul = gtkhx_theme_scale (area);
     int w = (int)(gdk_pixbuf_get_width (src) * mul + 0.5);

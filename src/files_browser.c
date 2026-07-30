@@ -16,10 +16,10 @@
 #include "session.h"   /* active session — remote drag uses htlc.access */
 #include "hl_access.h" /* HL_ACCESS_DOWNLOAD_FILES */
 #include "hxconn.h"
-#include "xfers.h"     /* xfer_new for remote drag-to-Downloads */
+#include "xfers.h"          /* xfer_new for remote drag-to-Downloads */
 #include "htxf_accessors.h" /* hx_htxf_total_pos */
-#include "prefs.h"     /* gtkhx_prefs.download_path */
-#include "files.h"     /* hx_file_move for cross-dir Move */
+#include "prefs.h"          /* gtkhx_prefs.download_path */
+#include "files.h"          /* hx_file_move for cross-dir Move */
 #include "files_entry.h"
 #include "files_provider.h"
 #include "files_local_provider.h"
@@ -99,36 +99,36 @@ struct browser {
     files_panel *active;
 
     /* Keep refs on the providers separately from the panels so
-	 * the connection-state hook can reach the remote one even if
-	 * the panel pointer ever needs to be swapped (per-panel side
-	 * selector, deferred). */
+     * the connection-state hook can reach the remote one even if
+     * the panel pointer ever needs to be swapped (per-panel side
+     * selector, deferred). */
     HxFilesProvider *left_provider;
     HxFilesProvider *right_provider;
 
     /* GtkhxSession::connection-state handler — fires the remote
-	 * provider's "unavailable-changed" so the panel reloads on
-	 * the LOGIN_READY transition + paints the not-connected
-	 * state on DISCONNECTED. Intermediate states (CONNECTING /
-	 * TCP_CONNECTED / HANDSHAKE_DONE) are ignored — the remote
-	 * provider reports as unavailable until login is fully
-	 * established, so a reload at any of those points would
-	 * either no-op (good) or fire HTLC_HDR_FILE_LIST before the
-	 * server has accepted our AGREEMENTAGREE (bad — strict 1.5+
-	 * servers disconnect on that). */
+     * provider's "unavailable-changed" so the panel reloads on
+     * the LOGIN_READY transition + paints the not-connected
+     * state on DISCONNECTED. Intermediate states (CONNECTING /
+     * TCP_CONNECTED / HANDSHAKE_DONE) are ignored — the remote
+     * provider reports as unavailable until login is fully
+     * established, so a reload at any of those points would
+     * either no-op (good) or fire HTLC_HDR_FILE_LIST before the
+     * server has accepted our AGREEMENTAGREE (bad — strict 1.5+
+     * servers disconnect on that). */
     gulong conn_state_handler;
 
     /* GtkhxSession::file-update handler — used to spot
-	 * just-completed transfers and refresh both panels so the
-	 * new file appears without the user needing to hit Reload. */
+     * just-completed transfers and refresh both panels so the
+     * new file appears without the user needing to hit Reload. */
     gulong file_update_handler;
 
     /* CSS provider that paints the .files-panel-active border.
-	 * Lives for the window's lifetime; unrefed in on_close. */
+     * Lives for the window's lifetime; unrefed in on_close. */
     GtkCssProvider *css;
 
     /* AdwToastOverlay wrapping the window content — used by the
-	 * Copy action to surface "no permission" / "not connected" /
-	 * etc. results without an interrupting dialog. */
+     * Copy action to surface "no permission" / "not connected" /
+     * etc. results without an interrupting dialog. */
     AdwToastOverlay *toast;
 };
 
@@ -216,19 +216,19 @@ attach_panel_focus_tracking (struct browser *br, files_panel *p)
     gtk_widget_add_controller (root, focus_ctrl);
 
     /* BUBBLE phase: column view sees the click first and runs
-	 * its built-in click-counting (selection on first press,
-	 * activate on second press of a double-click). We observe
-	 * on the way back up to flip the active panel. The earlier
-	 * CAPTURE-phase version of this gesture broke double-click
-	 * activation on the non-active panel — the column view saw
-	 * the first click of a double-click pair as just a
-	 * selection-with-focus-shift and waited for another pair
-	 * before treating it as a double. Symptom: first double-
-	 * click in the remote panel did nothing, second double-
-	 * click descended. BUBBLE phase keeps the active-flip
-	 * working for all cases except clicks that the column view
-	 * fully consumes — and even then the focus controller
-	 * above catches focus-enter and flips active. */
+     * its built-in click-counting (selection on first press,
+     * activate on second press of a double-click). We observe
+     * on the way back up to flip the active panel. The earlier
+     * CAPTURE-phase version of this gesture broke double-click
+     * activation on the non-active panel — the column view saw
+     * the first click of a double-click pair as just a
+     * selection-with-focus-shift and waited for another pair
+     * before treating it as a double. Symptom: first double-
+     * click in the remote panel did nothing, second double-
+     * click descended. BUBBLE phase keeps the active-flip
+     * working for all cases except clicks that the column view
+     * fully consumes — and even then the focus controller
+     * above catches focus-enter and flips active. */
     click = gtk_gesture_click_new ();
     gtk_event_controller_set_propagation_phase (GTK_EVENT_CONTROLLER (click),
                                                 GTK_PHASE_BUBBLE);
@@ -274,7 +274,7 @@ on_panel_swap_request (files_panel *p, gboolean want_local, gpointer user_data)
     }
 
     /* Update br's provider-side cache. The browser cleanup path
-	 * (on_close) and the connection-state hook key off these. */
+     * (on_close) and the connection-state hook key off these. */
     if (p == br->left) {
         g_clear_object (&br->left_provider);
         br->left_provider = g_object_ref (new_prov);
@@ -327,10 +327,10 @@ on_preview_clicked (GtkButton *btn, gpointer user_data)
         return;
     }
     /* Route through preview_entry — activate_entry was repurposed
-	 * to download (the row-Enter default) so the explicit Preview
-	 * button has its own dispatch path that still streams into the
-	 * in-app preview window. Local providers fall back to
-	 * activate_entry (xdg-open) inside the wrapper. */
+     * to download (the row-Enter default) so the explicit Preview
+     * button has its own dispatch path that still streams into the
+     * in-app preview window. Local providers fall back to
+     * activate_entry (xdg-open) inside the wrapper. */
     hx_files_provider_preview_entry (files_panel_get_provider (br->active), e);
 }
 
@@ -485,15 +485,15 @@ open_rename_dialog (struct browser *br, files_panel *panel, HxFileEntry *e)
     ctx->entry = entry;
 
     /* Single-handler ownership — see the libadwaita ordering note
-	 * above on_rename_response. */
+     * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_rename_response), ctx);
 
     adw_dialog_present (dialog, br->window);
 
     /* Focus + select all → user can either accept the default
-	 * (just hit Enter to confirm same name = no-op safety) or
-	 * start typing immediately to replace. Matches the file-
-	 * manager convention. */
+     * (just hit Enter to confirm same name = no-op safety) or
+     * start typing immediately to replace. Matches the file-
+     * manager convention. */
     gtk_widget_grab_focus (entry);
     gtk_editable_select_region (GTK_EDITABLE (entry), 0, -1);
 }
@@ -516,9 +516,9 @@ on_rename_clicked (GtkButton *btn, gpointer user_data)
     }
 
     /* Rename is a singleton operation — only meaningful when
-	 * exactly one row is selected. Multi-rename (mass rename
-	 * with a pattern) is a separate feature; toast a hint
-	 * and bail. */
+     * exactly one row is selected. Multi-rename (mass rename
+     * with a pattern) is a separate feature; toast a hint
+     * and bail. */
     e = files_panel_get_single_selected (br->active);
     if (!e) {
         show_toast (br, _ ("Select a single file to rename."));
@@ -595,7 +595,7 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
     (void)dialog;
 
     /* Single-handler ownership of ctx lifecycle — see the
-	 * libadwaita ordering note above on_rename_response. */
+     * libadwaita ordering note above on_rename_response. */
     if (g_strcmp0 (response, "move") != 0) {
         goto cleanup;
     }
@@ -611,9 +611,9 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
     }
 
     /* Same-dir → defer to the regular Rename path; if there's no
-	 * rename intent the user could just have done nothing. We
-	 * proceed anyway: hx_files_provider_rename treats it as a
-	 * no-op-ish call. */
+     * rename intent the user could just have done nothing. We
+     * proceed anyway: hx_files_provider_rename treats it as a
+     * no-op-ish call. */
     for (i = 0; i < ctx->names->len; i++) {
         const char *src_name = g_ptr_array_index (ctx->names, i);
         char *new_path = g_build_filename (dest_dir, src_name, NULL);
@@ -621,22 +621,22 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
         gboolean ok;
 
         /* The provider's rename takes leaf names within the
-		 * current dir. For cross-dir we pass an absolute path
-		 * as new_name — both impls treat new_name starting
-		 * with '/' as an absolute path and join correctly.
-		 *
-		 * Actually checking the impls: local's
-		 * hx_local_files_provider_rename calls child_path
-		 * which always joins under current_path. Remote's
-		 * does the same. So they DON'T support cross-dir
-		 * via the existing rename method.
-		 *
-		 * Workaround: call hx_file_move (remote) /
-		 * g_file_move (local) directly with absolute paths.
-		 * The provider interface gains a follow-up "move"
-		 * method later if cross-dir becomes a routine
-		 * operation. For now we punch through the
-		 * abstraction. */
+         * current dir. For cross-dir we pass an absolute path
+         * as new_name — both impls treat new_name starting
+         * with '/' as an absolute path and join correctly.
+         *
+         * Actually checking the impls: local's
+         * hx_local_files_provider_rename calls child_path
+         * which always joins under current_path. Remote's
+         * does the same. So they DON'T support cross-dir
+         * via the existing rename method.
+         *
+         * Workaround: call hx_file_move (remote) /
+         * g_file_move (local) directly with absolute paths.
+         * The provider interface gains a follow-up "move"
+         * method later if cross-dir becomes a routine
+         * operation. For now we punch through the
+         * abstraction. */
         char *src_abs
             = g_build_filename (src_dir ? src_dir : "/", src_name, NULL);
 
@@ -652,7 +652,7 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("Not connected to a server."));
             } else if (!hx_conn_access_has (hx_active_session ()->htlc,
-                                       HL_ACCESS_MOVE_FILES)) {
+                                            HL_ACCESS_MOVE_FILES)) {
                 ok = FALSE;
                 err = g_error_new (G_FILE_ERROR, G_FILE_ERROR_FAILED,
                                    _ ("You don't have permission to move files "
@@ -660,8 +660,8 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
             } else {
                 hx_file_move (hx_active_session ()->htlc, src_abs, new_path);
                 ok = TRUE; /* fire-and-forget — server task
-				              * error would surface via the
-				              * existing task-error toast */
+                              * error would surface via the
+                              * existing task-error toast */
             }
         } else {
             ok = FALSE;
@@ -687,13 +687,13 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
         char *msg;
         if (ctx->is_remote) {
             /* Remote move is fire-and-forget over the wire: server
-			 * acks asynchronously, and any rejection (no permission,
-			 * destination exists, etc.) flows through the generic
-			 * task_error toast on the toolbar window. So our success
-			 * line has to read as "request sent" rather than
-			 * "definitely done" — otherwise we cheerfully claim
-			 * success while the toolbar simultaneously announces
-			 * a permission denial. */
+             * acks asynchronously, and any rejection (no permission,
+             * destination exists, etc.) flows through the generic
+             * task_error toast on the toolbar window. So our success
+             * line has to read as "request sent" rather than
+             * "definitely done" — otherwise we cheerfully claim
+             * success while the toolbar simultaneously announces
+             * a permission denial. */
             msg = g_strdup_printf (
                 g_dngettext (NULL, "Move requested for %u item.",
                              "Move requested for %u items.", moved),
@@ -714,12 +714,12 @@ on_move_response (AdwAlertDialog *dialog, const char *response,
 
 cleanup:
     /* Tear the path-completion popover down BEFORE the dialog's
-	 * own destruction drags the entry away — hx_path_complete_free
-	 * disconnects the per-entry signal handler and key controller,
-	 * and needs the entry to still be valid for that. We're inside
-	 * adw_alert_dialog emit_response which holds a strong ref on
-	 * the dialog across both "closed" and "response", so the entry
-	 * is still alive here. */
+     * own destruction drags the entry away — hx_path_complete_free
+     * disconnects the per-entry signal handler and key controller,
+     * and needs the entry to still be valid for that. We're inside
+     * adw_alert_dialog emit_response which holds a strong ref on
+     * the dialog across both "closed" and "response", so the entry
+     * is still alive here. */
     if (ctx->complete) {
         hx_path_complete_free (ctx->complete);
         ctx->complete = NULL;
@@ -807,12 +807,12 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     dst_panel = (br->active == br->left) ? br->right : br->left;
 
     /* Cross-side moves are out of scope — Hotline's MOVEFILE only
-	 * works within one server, and GIO's g_file_move only within
-	 * one filesystem. The user can either drag the items across
-	 * (Copy via the existing DnD path) and Delete the source,
-	 * or invoke Copy + Delete from the toolbar. Refuse here with
-	 * a directed toast so they're not left typing a destination
-	 * path that wouldn't actually move anything. */
+     * works within one server, and GIO's g_file_move only within
+     * one filesystem. The user can either drag the items across
+     * (Copy via the existing DnD path) and Delete the source,
+     * or invoke Copy + Delete from the toolbar. Refuse here with
+     * a directed toast so they're not left typing a destination
+     * path that wouldn't actually move anything. */
     if (dst_panel) {
         HxFilesProvider *dp = files_panel_get_provider (dst_panel);
         if (HX_IS_LOCAL_FILES_PROVIDER (sp)
@@ -825,7 +825,7 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     }
 
     /* Default destination: the other panel's current path
-	 * (guaranteed same-side after the cross-side refusal above). */
+     * (guaranteed same-side after the cross-side refusal above). */
     default_dest = NULL;
     if (dst_panel) {
         HxFilesProvider *dp = files_panel_get_provider (dst_panel);
@@ -875,18 +875,18 @@ on_move_clicked (GtkButton *btn, gpointer user_data)
     g_ptr_array_unref (entries);
 
     /* Attach the same smart-case path-completion popover the
-	 * local panel's path entry uses. Local-source only — the
-	 * completion needs synchronous directory enumeration, which
-	 * isn't viable against a Hotline server (each typed char
-	 * would trigger an RPC round-trip). Stored on ctx so the
-	 * cleanup tail in on_move_response can free it before the
-	 * entry is destroyed with the dialog. */
+     * local panel's path entry uses. Local-source only — the
+     * completion needs synchronous directory enumeration, which
+     * isn't viable against a Hotline server (each typed char
+     * would trigger an RPC round-trip). Stored on ctx so the
+     * cleanup tail in on_move_response can free it before the
+     * entry is destroyed with the dialog. */
     if (!ctx->is_remote) {
         ctx->complete = hx_path_complete_attach (GTK_ENTRY (entry));
     }
 
     /* Single-handler ownership — see the libadwaita ordering note
-	 * above on_rename_response. */
+     * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_move_response), ctx);
 
     adw_dialog_present (dialog, br->window);
@@ -1051,9 +1051,9 @@ copy_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
     }
 
     /* Lead with the failure reason when anything failed since
-	 * that's the actionable bit. last_err alone is enough for
-	 * the common case where every failure had the same global
-	 * cause (no permission, not connected, folder unsupported). */
+     * that's the actionable bit. last_err alone is enough for
+     * the common case where every failure had the same global
+     * cause (no permission, not connected, folder unsupported). */
     if (failed == 0) {
         char *msg = g_strdup_printf (
             g_dngettext (NULL, "Transfer queued (%u item).",
@@ -1105,7 +1105,7 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
         return;
     }
     if (!hx_conn_access_has (hx_active_session ()->htlc,
-                        HL_ACCESS_MOVE_FILES)) {
+                             HL_ACCESS_MOVE_FILES)) {
         show_toast (br, _ ("You don't have permission to move files on the "
                            "server."));
         return;
@@ -1127,8 +1127,8 @@ move_entries_and_toast (struct browser *br, files_panel *src, files_panel *dst,
     }
 
     /* Reload both panels so the file appears in the destination
-	 * and disappears from the source once the server's task acks
-	 * come back. */
+     * and disappears from the source once the server's task acks
+     * come back. */
     hx_files_provider_reload (sp);
     hx_files_provider_reload (dp);
 
@@ -1208,8 +1208,8 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
     }
 
     /* gdk_content_provider_new_for_value deep-copies the boxed
-	 * payload via hx_files_drag_copy, so freeing our locals
-	 * afterwards is safe. */
+     * payload via hx_files_drag_copy, so freeing our locals
+     * afterwards is safe. */
     drag.src_panel = p;
     drag.entries = entries;
 
@@ -1219,36 +1219,36 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
     g_value_unset (&val);
 
     /* External-drag enrichment.
-	 *
-	 *   LOCAL panel  → offer GDK_TYPE_FILE_LIST pointing at the
-	 *                  real on-disk files. External apps drop
-	 *                  this as a normal GFile copy. Folders
-	 *                  ride in too; GIO handles recursion on
-	 *                  the receiver side.
-	 *
-	 *   REMOTE panel → kick off an xfer_new download to
-	 *                  ~/Downloads (or whatever download_path
-	 *                  is set to) for each selected file, and
-	 *                  publish a text/uri-list pointing at the
-	 *                  eventual paths. The receiver app gets
-	 *                  URIs that may not have full data yet —
-	 *                  for small files on fast links the copy
-	 *                  completes before the receiver reads;
-	 *                  for large files the user will see the
-	 *                  file appear in Downloads via the tasks
-	 *                  window regardless. Not a "true" promised
-	 *                  drag (no FileTransferPortal plumbing)
-	 *                  but a workable approximation. Folders
-	 *                  on the remote side are skipped — Hotline
-	 *                  folder downloads need a recursive
-	 *                  xfer path. Toast tells the user what
-	 *                  happened so the drag completing without
-	 *                  the receiver getting bytes isn't a
-	 *                  mystery. */
+     *
+     *   LOCAL panel  → offer GDK_TYPE_FILE_LIST pointing at the
+     *                  real on-disk files. External apps drop
+     *                  this as a normal GFile copy. Folders
+     *                  ride in too; GIO handles recursion on
+     *                  the receiver side.
+     *
+     *   REMOTE panel → kick off an xfer_new download to
+     *                  ~/Downloads (or whatever download_path
+     *                  is set to) for each selected file, and
+     *                  publish a text/uri-list pointing at the
+     *                  eventual paths. The receiver app gets
+     *                  URIs that may not have full data yet —
+     *                  for small files on fast links the copy
+     *                  completes before the receiver reads;
+     *                  for large files the user will see the
+     *                  file appear in Downloads via the tasks
+     *                  window regardless. Not a "true" promised
+     *                  drag (no FileTransferPortal plumbing)
+     *                  but a workable approximation. Folders
+     *                  on the remote side are skipped — Hotline
+     *                  folder downloads need a recursive
+     *                  xfer path. Toast tells the user what
+     *                  happened so the drag completing without
+     *                  the receiver getting bytes isn't a
+     *                  mystery. */
     {
         HxFilesProvider *prov = files_panel_get_provider (p);
         /* "Other panel is local" gate for the remote-source path —
-	 * see the comment on the remote branch below. */
+     * see the comment on the remote branch below. */
         files_panel *other_panel = NULL;
         gboolean other_is_local = FALSE;
         if (the_browser) {
@@ -1280,24 +1280,24 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
             g_slist_free_full (flist, g_object_unref);
         }
         /* Remote-source drags used to take an "eager download"
-		 * path here: at drag-prepare time we'd kick xfer_new for
-		 * every selected file (to the configured download dir)
-		 * and publish a text/uri-list pointing at the eventual
-		 * local paths. The idea was to make remote-to-external-
-		 * app drops "just work" — but it fired on every drag
-		 * start, even ones the user immediately cancelled, so
-		 * picking up a file in the remote panel to look at it
-		 * downloaded the whole thing unconditionally. We hit
-		 * that as a real bug in 2026-05 testing.
-		 *
-		 * The eager path is gone. Remote-to-local-panel drops
-		 * still work — on_drop routes them through
-		 * copy_entries_and_toast, which does the right thing
-		 * at the actual drop time. Remote-to-external-app
-		 * drops on the host filesystem don't carry a uri-list
-		 * anymore; supporting those properly needs
-		 * FileTransferPortal (promise-style transfers) which
-		 * isn't wired up yet. */
+         * path here: at drag-prepare time we'd kick xfer_new for
+         * every selected file (to the configured download dir)
+         * and publish a text/uri-list pointing at the eventual
+         * local paths. The idea was to make remote-to-external-
+         * app drops "just work" — but it fired on every drag
+         * start, even ones the user immediately cancelled, so
+         * picking up a file in the remote panel to look at it
+         * downloaded the whole thing unconditionally. We hit
+         * that as a real bug in 2026-05 testing.
+         *
+         * The eager path is gone. Remote-to-local-panel drops
+         * still work — on_drop routes them through
+         * copy_entries_and_toast, which does the right thing
+         * at the actual drop time. Remote-to-external-app
+         * drops on the host filesystem don't carry a uri-list
+         * anymore; supporting those properly needs
+         * FileTransferPortal (promise-style transfers) which
+         * isn't wired up yet. */
         (void)other_is_local;
     }
 
@@ -1305,18 +1305,18 @@ on_drag_prepare (GtkDragSource *source, double x, double y, gpointer user_data)
 
     if (cp_files) {
         /* Union: external apps receive GDK_TYPE_FILE_LIST (or
-		 * text/uri-list), our internal drop target receives
-		 * HX_TYPE_FILES_DRAG. GDK negotiates whichever the
-		 * target accepts.
-		 *
-		 * gdk_content_provider_new_union takes ownership of
-		 * every provider in the array (transfer-full per the
-		 * GIR annotation). DON'T unref cp_internal / cp_files
-		 * after the call — those refs now belong to the union,
-		 * and dropping them double-frees. The crash signature
-		 * is a SIGSEGV inside gdk_content_provider_ref_formats
-		 * later in the drag lifecycle when GDK queries the
-		 * union's now-dangling inner providers. */
+         * text/uri-list), our internal drop target receives
+         * HX_TYPE_FILES_DRAG. GDK negotiates whichever the
+         * target accepts.
+         *
+         * gdk_content_provider_new_union takes ownership of
+         * every provider in the array (transfer-full per the
+         * GIR annotation). DON'T unref cp_internal / cp_files
+         * after the call — those refs now belong to the union,
+         * and dropping them double-frees. The crash signature
+         * is a SIGSEGV inside gdk_content_provider_ref_formats
+         * later in the drag lifecycle when GDK queries the
+         * union's now-dangling inner providers. */
         GdkContentProvider *providers[2] = { cp_internal, cp_files };
         return gdk_content_provider_new_union (providers, 2);
     }
@@ -1356,29 +1356,29 @@ on_drop (GtkDropTarget *target, const GValue *value, double x, double y,
     }
 
     /* Drop on the same panel — no-op. GTK still considers the
-	 * drop "accepted" so we return TRUE; otherwise the drag
-	 * animates back to the source with a rejection sting. */
+     * drop "accepted" so we return TRUE; otherwise the drag
+     * animates back to the source with a rejection sting. */
     if (drag->src_panel == dst) {
         return TRUE;
     }
 
     /* Source panel must be one of ours (paranoia — if the drag
-	 * came from somewhere else with a matching type, refuse). */
+     * came from somewhere else with a matching type, refuse). */
     if (drag->src_panel != br->left && drag->src_panel != br->right) {
         return FALSE;
     }
 
     /* Orthodox-FM convention: drag-within-same-volume is a MOVE,
-	 * not a copy. Remote→remote on the same server is the case
-	 * the user hits when both panels are set to Remote via the
-	 * side selector. Route through hx_file_move so the file
-	 * relocates rather than getting symlinked or download-then-
-	 * re-uploaded.
-	 *
-	 * Cross-side (local→remote, remote→local) and local→local
-	 * keep their existing Copy semantics; cross-side because the
-	 * filesystems are distinct, local→local because the user has
-	 * not yet asked for a behaviour change there. */
+     * not a copy. Remote→remote on the same server is the case
+     * the user hits when both panels are set to Remote via the
+     * side selector. Route through hx_file_move so the file
+     * relocates rather than getting symlinked or download-then-
+     * re-uploaded.
+     *
+     * Cross-side (local→remote, remote→local) and local→local
+     * keep their existing Copy semantics; cross-side because the
+     * filesystems are distinct, local→local because the user has
+     * not yet asked for a behaviour change there. */
     {
         HxFilesProvider *sp = files_panel_get_provider (drag->src_panel);
         HxFilesProvider *dp = files_panel_get_provider (dst);
@@ -1405,9 +1405,9 @@ attach_panel_dnd (struct browser *br, files_panel *p)
     }
 
     /* Source: drags initiated by clicking a row and pulling
-	 * past GTK's movement threshold. Action is COPY only — Move is
-	 * a deferred follow-up and Link doesn't map cleanly onto
-	 * either side. */
+     * past GTK's movement threshold. Action is COPY only — Move is
+     * a deferred follow-up and Link doesn't map cleanly onto
+     * either side. */
     src = gtk_drag_source_new ();
     gtk_drag_source_set_actions (src, GDK_ACTION_COPY);
     g_object_set_data (G_OBJECT (src), "panel", p);
@@ -1415,9 +1415,9 @@ attach_panel_dnd (struct browser *br, files_panel *p)
     gtk_widget_add_controller (view, GTK_EVENT_CONTROLLER (src));
 
     /* Target: accepts our boxed type only. GtkDropTarget adds
-	 * a .drop-active CSS class to the widget while a compatible
-	 * drag hovers, which gives a visual cue for free (Adwaita's
-	 * default style for it is fine). */
+     * a .drop-active CSS class to the widget while a compatible
+     * drag hovers, which gives a visual cue for free (Adwaita's
+     * default style for it is fine). */
     drop = gtk_drop_target_new (HX_TYPE_FILES_DRAG, GDK_ACTION_COPY);
     g_object_set_data (G_OBJECT (drop), "browser", br);
     g_object_set_data (G_OBJECT (drop), "panel", p);
@@ -1441,7 +1441,7 @@ on_mkdir_response (AdwAlertDialog *dialog, const char *response,
     (void)dialog;
 
     /* Single-handler ownership of ctx lifecycle — see the
-	 * libadwaita ordering note above on_rename_response. */
+     * libadwaita ordering note above on_rename_response. */
     if (g_strcmp0 (response, "create") != 0) {
         goto cleanup;
     }
@@ -1499,16 +1499,16 @@ on_mkdir_clicked (GtkButton *btn, gpointer user_data)
     ctx->entry = entry;
 
     /* Single-handler ownership — see the libadwaita ordering note
-	 * above on_rename_response. */
+     * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_mkdir_response), ctx);
 
     adw_dialog_present (dialog, br->window);
     /* Focus the entry so the user can type immediately + hit
-	 * Enter. activates-default = TRUE on the entry routes that
-	 * Enter to AdwAlertDialog's default response ("create").
-	 * Has to happen AFTER adw_dialog_present — the dialog isn't
-	 * realized before that and grab_focus is a no-op on an
-	 * unmapped widget. */
+     * Enter. activates-default = TRUE on the entry routes that
+     * Enter to AdwAlertDialog's default response ("create").
+     * Has to happen AFTER adw_dialog_present — the dialog isn't
+     * realized before that and grab_focus is a no-op on an
+     * unmapped widget. */
     gtk_widget_grab_focus (entry);
 }
 
@@ -1528,11 +1528,11 @@ on_delete_response (AdwAlertDialog *dialog, const char *response,
     (void)dialog;
 
     /* Single-handler ownership of ctx lifecycle — see the
-	 * libadwaita ordering note above on_rename_response. The
-	 * historical split with on_delete_closed crashed concretely
-	 * here: "closed" fired first, freed ctx->names, then
-	 * "response" ran on the freed GPtrArray and SIGSEGV'd at
-	 * ctx->names->len once the slab got reused. */
+     * libadwaita ordering note above on_rename_response. The
+     * historical split with on_delete_closed crashed concretely
+     * here: "closed" fired first, freed ctx->names, then
+     * "response" ran on the freed GPtrArray and SIGSEGV'd at
+     * ctx->names->len once the slab got reused. */
     if (g_strcmp0 (response, "delete") != 0) {
         goto cleanup;
     }
@@ -1617,8 +1617,8 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
     gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dialog));
 
     /* Snapshot just the names — the dialog runs async and the
-	 * selection set could shift in between. Same defensive
-	 * pattern the news_browser delete uses. */
+     * selection set could shift in between. Same defensive
+     * pattern the news_browser delete uses. */
     ctx = g_new0 (struct delete_ctx, 1);
     ctx->br = br;
     ctx->panel = br->active;
@@ -1630,7 +1630,7 @@ on_delete_clicked (GtkButton *btn, gpointer user_data)
     g_ptr_array_unref (entries);
 
     /* Single-handler ownership — see the libadwaita ordering note
-	 * above on_rename_response. */
+     * above on_rename_response. */
     g_signal_connect (dialog, "response", G_CALLBACK (on_delete_response), ctx);
 
     adw_dialog_present (dialog, br->window);
@@ -1668,9 +1668,9 @@ focus_is_editable (struct browser *br)
         return FALSE;
     }
     /* GtkEntry delegates editing to an internal GtkText, so when
-	 * the path entry has focus gtk_window_get_focus returns the
-	 * GtkText, not the GtkEntry. Both implement GtkEditable, so
-	 * GTK_IS_EDITABLE covers both cases. */
+     * the path entry has focus gtk_window_get_focus returns the
+     * GtkText, not the GtkEntry. Both implement GtkEditable, so
+     * GTK_IS_EDITABLE covers both cases. */
     return GTK_IS_EDITABLE (focused);
 }
 
@@ -1745,16 +1745,16 @@ on_backspace_shortcut (GtkWidget *widget, GVariant *args, gpointer user_data)
  * Inactive panel keeps a 1px subtle border (.files-panel) so the
  * pane region is always perceptible and the active state has
  * something to transition from. */
-static const char *active_css =
-    ".files-panel {\n"
-    "  border-radius: 8px;\n"
-    "}\n"
-    ".files-panel-active {\n"
-    "  box-shadow: inset 0 0 0 3px @accent_color,\n"
-    "              0 0 8px 0 alpha(@accent_color, 0.35);\n"
-    "  background-color: alpha(@accent_bg_color, 0.08);\n"
-    "  border-radius: 8px;\n"
-    "}\n";
+static const char *active_css
+    = ".files-panel {\n"
+      "  border-radius: 8px;\n"
+      "}\n"
+      ".files-panel-active {\n"
+      "  box-shadow: inset 0 0 0 3px @accent_color,\n"
+      "              0 0 8px 0 alpha(@accent_color, 0.35);\n"
+      "  background-color: alpha(@accent_bg_color, 0.08);\n"
+      "  border-radius: 8px;\n"
+      "}\n";
 
 static void
 install_css (struct browser *br)
@@ -1914,9 +1914,9 @@ gtkhx_files_build_content (void)
 {
     struct browser *br;
     GtkWidget *button_bar, *content_vbox;
-    GtkWidget *paned, *right_side, *center_col, *refresh_btn,
-        *mkdir_btn, *copy_lr_btn, *copy_rl_btn, *preview_btn, *info_btn,
-        *rename_btn, *delete_btn;
+    GtkWidget *paned, *right_side, *center_col, *refresh_btn, *mkdir_btn,
+        *copy_lr_btn, *copy_rl_btn, *preview_btn, *info_btn, *rename_btn,
+        *delete_btn;
     GtkEventController *shortcuts;
     GtkShortcut *sh;
 
@@ -1929,36 +1929,38 @@ gtkhx_files_build_content (void)
     install_css (br);
 
     /* Headerbar:
-	 *   pack_start: Refresh, New Folder, Preview, Get Info
-	 *   pack_end:   Delete, Rename
-	 *
-	 * Cross-pane Copy + Move are NOT in the headerbar — they're
-	 * the three buttons in the vertical column between the two
-	 * panels (see center_col below). That position matches the
-	 * user's mental model: the actions transfer between panes,
-	 * so the buttons that fire them sit between the panes. The
-	 * single-panel actions (refresh, mkdir, preview, info, rename,
-	 * delete) stay in the headerbar.
-	 *
-	 * Icons:
-	 *   Rename:  pencil.png — a yellow pencil glyph (also used
-	 *            by news_browser's New Post button). Renamed
-	 *            from news_reply.png to match its actual
-	 *            visual content; "pencil" is the cross-app
-	 *            shorthand for "edit name" and reads better
-	 *            than the previous generic person-with-pencil
-	 *            edituser.png.
-	 *   Copy →:  file_move_lr.png — cicn 219, a stacked-paper
-	 *            glyph with a right-pointing arrow. Copy ← uses
-	 *            file_move_rl.png, the same icon flipped along
-	 *            the vertical axis. Both extracted via
-	 *            tools/cicndump and committed under src/pixmaps.
-	 *            The filenames still say "move" — they were
-	 *            originally drawn for the Move action and reused
-	 *            verbatim when the center column flipped to Copy
-	 *            semantics. Rename of the PNGs deferred to keep
-	 *            this diff focused on UX rather than asset moves. */
-#define FB_BTN(resource) gtkhx_pixmap_button ((resource), NULL, GTKHX_SCALE_WINDOW_BUTTONS, NULL, NULL)
+     *   pack_start: Refresh, New Folder, Preview, Get Info
+     *   pack_end:   Delete, Rename
+     *
+     * Cross-pane Copy + Move are NOT in the headerbar — they're
+     * the three buttons in the vertical column between the two
+     * panels (see center_col below). That position matches the
+     * user's mental model: the actions transfer between panes,
+     * so the buttons that fire them sit between the panes. The
+     * single-panel actions (refresh, mkdir, preview, info, rename,
+     * delete) stay in the headerbar.
+     *
+     * Icons:
+     *   Rename:  pencil.png — a yellow pencil glyph (also used
+     *            by news_browser's New Post button). Renamed
+     *            from news_reply.png to match its actual
+     *            visual content; "pencil" is the cross-app
+     *            shorthand for "edit name" and reads better
+     *            than the previous generic person-with-pencil
+     *            edituser.png.
+     *   Copy →:  file_move_lr.png — cicn 219, a stacked-paper
+     *            glyph with a right-pointing arrow. Copy ← uses
+     *            file_move_rl.png, the same icon flipped along
+     *            the vertical axis. Both extracted via
+     *            tools/cicndump and committed under src/pixmaps.
+     *            The filenames still say "move" — they were
+     *            originally drawn for the Move action and reused
+     *            verbatim when the center column flipped to Copy
+     *            semantics. Rename of the PNGs deferred to keep
+     *            this diff focused on UX rather than asset moves. */
+#define FB_BTN(resource)                                                       \
+    gtkhx_pixmap_button ((resource), NULL, GTKHX_SCALE_WINDOW_BUTTONS, NULL,   \
+                         NULL)
     refresh_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/refresh.png");
     mkdir_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/mkdir.png");
     copy_lr_btn = FB_BTN ("/com/nasledov/gtkhx/pixmaps/file_move_lr.png");
@@ -1989,10 +1991,10 @@ gtkhx_files_build_content (void)
     g_signal_connect (refresh_btn, "clicked", G_CALLBACK (on_refresh_clicked),
                       br);
     g_signal_connect (mkdir_btn, "clicked", G_CALLBACK (on_mkdir_clicked), br);
-    g_signal_connect (copy_lr_btn, "clicked",
-                      G_CALLBACK (on_copy_lr_clicked), br);
-    g_signal_connect (copy_rl_btn, "clicked",
-                      G_CALLBACK (on_copy_rl_clicked), br);
+    g_signal_connect (copy_lr_btn, "clicked", G_CALLBACK (on_copy_lr_clicked),
+                      br);
+    g_signal_connect (copy_rl_btn, "clicked", G_CALLBACK (on_copy_rl_clicked),
+                      br);
     g_signal_connect (preview_btn, "clicked", G_CALLBACK (on_preview_clicked),
                       br);
     g_signal_connect (info_btn, "clicked", G_CALLBACK (on_get_info_clicked),
@@ -2007,9 +2009,9 @@ gtkhx_files_build_content (void)
      * relocates to a slim GtkBox at the top of the panel content
      * with the same start/end grouping via an hexpand spacer. */
     button_bar = gtk_box_new (GTK_ORIENTATION_HORIZONTAL, 4);
-    gtk_widget_set_margin_start  (button_bar, 6);
-    gtk_widget_set_margin_end    (button_bar, 6);
-    gtk_widget_set_margin_top    (button_bar, 6);
+    gtk_widget_set_margin_start (button_bar, 6);
+    gtk_widget_set_margin_end (button_bar, 6);
+    gtk_widget_set_margin_top (button_bar, 6);
     gtk_widget_set_margin_bottom (button_bar, 4);
     gtk_box_append (GTK_BOX (button_bar), refresh_btn);
     gtk_box_append (GTK_BOX (button_bar), mkdir_btn);
@@ -2024,17 +2026,17 @@ gtkhx_files_build_content (void)
     gtk_box_append (GTK_BOX (button_bar), delete_btn);
 
     /* L = local FS (XDG_DOWNLOAD_DIR by default).
-	 * R = remote Hotline server. The remote provider sits idle
-	 * until the connection is up — the panel paints a
-	 * "Not connected" state until then.
-	 *
-	 * Either side can be swapped at runtime via the per-panel
-	 * side selector (see on_panel_swap_request below). When a
-	 * swap fires we build a fresh provider of the requested
-	 * kind — providers store current_path internally, so sharing
-	 * one across both panels wouldn't compose (navigating one
-	 * would yank the other). Fresh instances keep their state
-	 * independent. */
+     * R = remote Hotline server. The remote provider sits idle
+     * until the connection is up — the panel paints a
+     * "Not connected" state until then.
+     *
+     * Either side can be swapped at runtime via the per-panel
+     * side selector (see on_panel_swap_request below). When a
+     * swap fires we build a fresh provider of the requested
+     * kind — providers store current_path internally, so sharing
+     * one across both panels wouldn't compose (navigating one
+     * would yank the other). Fresh instances keep their state
+     * independent. */
     {
         HxLocalFilesProvider *local;
         HxRemoteFilesProvider *remote;
@@ -2051,35 +2053,35 @@ gtkhx_files_build_content (void)
         G_CALLBACK (on_connection_state), br);
 
     /* file-update for auto-refresh on transfer completion. The
-	 * same signal already routes through gtkhx.c::on_file_update_signal
-	 * for the legacy progress + toast notifications; we ride
-	 * alongside that with a second listener. */
+     * same signal already routes through gtkhx.c::on_file_update_signal
+     * for the legacy progress + toast notifications; we ride
+     * alongside that with a second listener. */
     br->file_update_handler
         = g_signal_connect (gtkhx_session_get_default (), "file-update",
                             G_CALLBACK (on_file_update), br);
 
     /* Center column: two explicit-direction Copy buttons (→ and ←)
-	 * live between the two panels. Norton / Krusader / Total
-	 * Commander all place cross-pane buttons here for the same
-	 * reason: the action transfers items between panes, so the
-	 * buttons that fire it should physically sit between them.
-	 *
-	 * Direction is baked into each button (its icon and its
-	 * handler), so the user doesn't have to inspect the active-
-	 * panel marker to know what will happen — clicking Copy →
-	 * always copies the LEFT pane's selection into the RIGHT
-	 * pane's current path, and vice versa. F5 still fires the
-	 * direction-aware active-panel Copy for keyboard users.
-	 *
-	 * Move isn't represented in the column — cross-side move
-	 * doesn't work and same-side move is rarely a copy-button-
-	 * replacement gesture. The F6 destination-picker dialog
-	 * covers the rare case.
-	 *
-	 * valign=CENTER keeps the buttons floating at the vertical
-	 * midpoint of the window: easy to reach without eye-tracking
-	 * up to the headerbar, and out of the way of any particular
-	 * file row most of the time. */
+     * live between the two panels. Norton / Krusader / Total
+     * Commander all place cross-pane buttons here for the same
+     * reason: the action transfers items between panes, so the
+     * buttons that fire it should physically sit between them.
+     *
+     * Direction is baked into each button (its icon and its
+     * handler), so the user doesn't have to inspect the active-
+     * panel marker to know what will happen — clicking Copy →
+     * always copies the LEFT pane's selection into the RIGHT
+     * pane's current path, and vice versa. F5 still fires the
+     * direction-aware active-panel Copy for keyboard users.
+     *
+     * Move isn't represented in the column — cross-side move
+     * doesn't work and same-side move is rarely a copy-button-
+     * replacement gesture. The F6 destination-picker dialog
+     * covers the rare case.
+     *
+     * valign=CENTER keeps the buttons floating at the vertical
+     * midpoint of the window: easy to reach without eye-tracking
+     * up to the headerbar, and out of the way of any particular
+     * file row most of the time. */
     center_col = gtk_box_new (GTK_ORIENTATION_VERTICAL, 6);
     gtk_widget_set_valign (center_col, GTK_ALIGN_CENTER);
     gtk_widget_set_margin_start (center_col, 4);
@@ -2088,21 +2090,21 @@ gtkhx_files_build_content (void)
     gtk_box_append (GTK_BOX (center_col), copy_rl_btn);
 
     /* Layout: outer GtkPaned [left_panel, right_side]
-	 *           right_side = horizontal GtkBox [center_col, right_panel]
-	 *
-	 * The user can drag the paned divider to resize the left
-	 * panel; right_panel takes the remaining space minus the
-	 * center column's fixed width. The center column itself
-	 * doesn't reflow on drag — keeping the buttons at a
-	 * stable horizontal anchor right next to the divider.
-	 *
-	 * The position-set workaround the previous GtkPaned-only
-	 * layout used (setting position=490 to avoid a focus-drift
-	 * bug from repeated allocation passes) still applies here:
-	 * without it, the divider recomputes on every items-changed,
-	 * which steals focus mid-population. The starting split is
-	 * tuned for the 980px default window with the center column
-	 * taking ~60px in the middle. */
+     *           right_side = horizontal GtkBox [center_col, right_panel]
+     *
+     * The user can drag the paned divider to resize the left
+     * panel; right_panel takes the remaining space minus the
+     * center column's fixed width. The center column itself
+     * doesn't reflow on drag — keeping the buttons at a
+     * stable horizontal anchor right next to the divider.
+     *
+     * The position-set workaround the previous GtkPaned-only
+     * layout used (setting position=490 to avoid a focus-drift
+     * bug from repeated allocation passes) still applies here:
+     * without it, the divider recomputes on every items-changed,
+     * which steals focus mid-population. The starting split is
+     * tuned for the 980px default window with the center column
+     * taking ~60px in the middle. */
     paned = gtk_paned_new (GTK_ORIENTATION_HORIZONTAL);
     gtk_paned_set_resize_start_child (GTK_PANED (paned), TRUE);
     gtk_paned_set_resize_end_child (GTK_PANED (paned), TRUE);
@@ -2123,9 +2125,9 @@ gtkhx_files_build_content (void)
     gtk_paned_set_end_child (GTK_PANED (paned), right_side);
 
     /* Wrap in a toast overlay so the Copy action (and future
-	 * polish-phase actions) have somewhere to surface transient
-	 * feedback ("Transfer queued.", "You don't have permission
-	 * for that.", etc.) without an interrupting dialog. */
+     * polish-phase actions) have somewhere to surface transient
+     * feedback ("Transfer queued.", "You don't have permission
+     * for that.", etc.) without an interrupting dialog. */
     br->toast = ADW_TOAST_OVERLAY (adw_toast_overlay_new ());
     adw_toast_overlay_set_child (br->toast, paned);
 
@@ -2142,28 +2144,28 @@ gtkhx_files_build_content (void)
     br->window = content_vbox;
 
     /* Track which panel has focus / was clicked so the headerbar
-	 * actions know who to operate on. Wired AFTER both panels
-	 * exist so attach_panel_focus_tracking can reach them via
-	 * files_panel_get_widget. */
+     * actions know who to operate on. Wired AFTER both panels
+     * exist so attach_panel_focus_tracking can reach them via
+     * files_panel_get_widget. */
     attach_panel_focus_tracking (br, br->left);
     attach_panel_focus_tracking (br, br->right);
 
     /* DnD between panels: drag a row out of one panel and drop
-	 * on the other to fire the same Copy machinery the headerbar
-	 * button uses. Same-panel drops are a no-op. */
+     * on the other to fire the same Copy machinery the headerbar
+     * button uses. Same-panel drops are a no-op. */
     attach_panel_dnd (br, br->left);
     attach_panel_dnd (br, br->right);
 
     /* Window-level keyboard shortcuts.
-	 *
-	 *   Tab        — switch active panel
-	 *   Backspace  — up one directory in active panel
-	 *
-	 * Capture phase is the only way to intercept Tab — without it,
-	 * GtkColumnView's built-in focus chain consumes the keystroke
-	 * for column-to-column navigation before the window-level
-	 * shortcut sees it. Same logic for Backspace though that one
-	 * isn't normally claimed by descendants. */
+     *
+     *   Tab        — switch active panel
+     *   Backspace  — up one directory in active panel
+     *
+     * Capture phase is the only way to intercept Tab — without it,
+     * GtkColumnView's built-in focus chain consumes the keystroke
+     * for column-to-column navigation before the window-level
+     * shortcut sees it. Same logic for Backspace though that one
+     * isn't normally claimed by descendants. */
     shortcuts = gtk_shortcut_controller_new ();
     gtk_event_controller_set_propagation_phase (shortcuts, GTK_PHASE_CAPTURE);
     gtk_shortcut_controller_set_scope (GTK_SHORTCUT_CONTROLLER (shortcuts),
@@ -2182,14 +2184,14 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* F4 = "view/edit" (Norton F4 was Edit). Same action as
-	 * Enter-on-row / double-click — routes through the
-	 * provider's activate_entry, which for remote queues a
-	 * download to the user's download folder and for local
-	 * fires xdg-open. Useful for users whose row focus isn't
-	 * where their selection is (keyboard navigation in a
-	 * multi-select). Preview lives on F3 / Ctrl+P; see
-	 * preview_entry on the provider iface for the explicit
-	 * preview dispatch. */
+     * Enter-on-row / double-click — routes through the
+     * provider's activate_entry, which for remote queues a
+     * download to the user's download folder and for local
+     * fires xdg-open. Useful for users whose row focus isn't
+     * where their selection is (keyboard navigation in a
+     * multi-select). Preview lives on F3 / Ctrl+P; see
+     * preview_entry on the provider iface for the explicit
+     * preview dispatch. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F4, 0),
         gtk_callback_action_new (on_open_shortcut, br, NULL));
@@ -2197,8 +2199,8 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* F2 = Rename (modern Files-Manager keybinding). Route
-	 * through on_rename_shortcut so the column view's internal
-	 * F2 handling doesn't preempt us. */
+     * through on_rename_shortcut so the column view's internal
+     * F2 handling doesn't preempt us. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F2, 0),
         gtk_callback_action_new (on_rename_shortcut, br, NULL));
@@ -2206,7 +2208,7 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* F6 = Move (classic Norton). Opens the move-destination
-	 * dialog defaulting to the inactive panel's path. */
+     * dialog defaulting to the inactive panel's path. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F6, 0),
         gtk_callback_action_new (on_move_shortcut, br, NULL));
@@ -2214,8 +2216,8 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* Ctrl+I = Get Info. Classic Mac was Cmd+I; we map to the
-	 * Linux conventional equivalent. Remote-only — see the
-	 * on_get_info_clicked toast for the local-panel hint. */
+     * Linux conventional equivalent. Remote-only — see the
+     * on_get_info_clicked toast for the local-panel hint. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_i, GDK_CONTROL_MASK),
         gtk_callback_action_new (on_get_info_shortcut, br, NULL));
@@ -2223,19 +2225,19 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* Norton-orthodox F-key bindings: F3=View (preview), F5=Copy,
-	 * F7=MkDir, F8=Delete. Each is followed by a Wayland-friendly
-	 * Ctrl-equivalent so users on compositors that grab F-keys
-	 * for media controls have a path that works. The Ctrl side
-	 * follows GNOME convention where it overlaps (Ctrl+N new,
-	 * Ctrl+R reload) and is novel-but-reasonable where it doesn't
-	 * (Ctrl+P preview, Ctrl+D delete). Ctrl+M for Move is left
-	 * unmapped — Ctrl+M overlaps with Return in some terminal
-	 * legacies and F6 covers the case; Ctrl+I already maps to
-	 * Get Info so the Move case stays F6-only.
-	 *
-	 * All wrappers route to the matching headerbar button's
-	 * handler so the behaviour is identical whether the user
-	 * pressed the key or clicked the icon. */
+     * F7=MkDir, F8=Delete. Each is followed by a Wayland-friendly
+     * Ctrl-equivalent so users on compositors that grab F-keys
+     * for media controls have a path that works. The Ctrl side
+     * follows GNOME convention where it overlaps (Ctrl+N new,
+     * Ctrl+R reload) and is novel-but-reasonable where it doesn't
+     * (Ctrl+P preview, Ctrl+D delete). Ctrl+M for Move is left
+     * unmapped — Ctrl+M overlaps with Return in some terminal
+     * legacies and F6 covers the case; Ctrl+I already maps to
+     * Get Info so the Move case stays F6-only.
+     *
+     * All wrappers route to the matching headerbar button's
+     * handler so the behaviour is identical whether the user
+     * pressed the key or clicked the icon. */
 
     /* F3 / Ctrl+P — Preview. */
     sh = gtk_shortcut_new (
@@ -2250,8 +2252,8 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* F5 — Copy (Norton F5). No Ctrl-equivalent because Ctrl+C
-	 * is universally bound to clipboard-copy and overriding it
-	 * would break the user's mental model for the whole app. */
+     * is universally bound to clipboard-copy and overriding it
+     * would break the user's mental model for the whole app. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F5, 0),
         gtk_callback_action_new (on_copy_shortcut, br, NULL));
@@ -2271,8 +2273,8 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* F8 / Delete / Ctrl+D — Delete. F8 is Norton; Delete is the
-	 * modern Files-Manager convention; Ctrl+D is the Wayland-
-	 * friendly fallback. */
+     * modern Files-Manager convention; Ctrl+D is the Wayland-
+     * friendly fallback. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_F8, 0),
         gtk_callback_action_new (on_delete_shortcut, br, NULL));
@@ -2290,9 +2292,9 @@ gtkhx_files_build_content (void)
                                           sh);
 
     /* Ctrl+R — Reload (the browser convention). No primary F-key
-	 * — Norton's F-keys don't include refresh because their panels
-	 * auto-reloaded on every focus. We do too via the file-update
-	 * signal, but explicit reload is still occasionally useful. */
+     * — Norton's F-keys don't include refresh because their panels
+     * auto-reloaded on every focus. We do too via the file-update
+     * signal, but explicit reload is still occasionally useful. */
     sh = gtk_shortcut_new (
         gtk_keyval_trigger_new (GDK_KEY_r, GDK_CONTROL_MASK),
         gtk_callback_action_new (on_refresh_shortcut, br, NULL));
@@ -2310,14 +2312,14 @@ gtkhx_files_build_content (void)
     the_browser = br;
 
     /* Standard window accelerators — Ctrl+W close, Ctrl+Q quit,
-	 * Ctrl+K connect, Ctrl+T tracker. Same set every other
-	 * window in the app picks up via init_keyaccel. Capture
-	 * phase means the column views' internal focus chain
-	 * doesn't swallow them. */
+     * Ctrl+K connect, Ctrl+T tracker. Same set every other
+     * window in the app picks up via init_keyaccel. Capture
+     * phase means the column views' internal focus chain
+     * doesn't swallow them. */
     init_keyaccel (br->window);
 
     /* Initial focus on the left panel so the user has a working
-	 * active selection right away. */
+     * active selection right away. */
     set_active (br, br->left);
     gtk_widget_grab_focus (files_panel_get_column_view (br->left));
 

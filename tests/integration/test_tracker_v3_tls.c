@@ -85,11 +85,10 @@ read_exact_stream (GInputStream *in, void *buf, gsize len, const char *what)
 {
     gsize n = 0;
     GError *err = NULL;
-    gboolean ok
-        = g_input_stream_read_all (in, buf, len, &n, NULL, &err);
+    gboolean ok = g_input_stream_read_all (in, buf, len, &n, NULL, &err);
     if (!ok || n != len) {
         g_test_fail_printf ("read_all (%s, %zu bytes) → ok=%d n=%zu err=%s",
-                            what, (size_t) len, (int) ok, (size_t) n,
+                            what, (size_t)len, (int)ok, (size_t)n,
                             err ? err->message : "(none)");
         g_clear_error (&err);
         return FALSE;
@@ -106,7 +105,7 @@ write_exact_stream (GOutputStream *out, const void *buf, gsize len,
     gboolean ok = g_output_stream_write_all (out, buf, len, &n, NULL, &err);
     if (!ok || n != len) {
         g_test_fail_printf ("write_all (%s, %zu bytes) → ok=%d n=%zu err=%s",
-                            what, (size_t) len, (int) ok, (size_t) n,
+                            what, (size_t)len, (int)ok, (size_t)n,
                             err ? err->message : "(none)");
         g_clear_error (&err);
         return FALSE;
@@ -179,17 +178,16 @@ test_v3_tls_handshake_and_listing (void)
     GSocketClient *client = g_socket_client_new ();
     g_socket_client_set_timeout (client, 5);
     g_socket_client_set_tls (client, TRUE);
-    g_signal_connect (client, "event",
-                      G_CALLBACK (on_event_attach_accept), NULL);
+    g_signal_connect (client, "event", G_CALLBACK (on_event_attach_accept),
+                      NULL);
 
     GSocketConnection *conn = g_socket_client_connect_to_host (
         client, trk->host, trk->tls_port, NULL, &err);
     g_object_unref (client);
     if (!conn) {
-        g_test_fail_printf (
-            "TLS connect to %s:%u failed: %s",
-            trk->host, (unsigned) trk->tls_port,
-            err ? err->message : "(no error)");
+        g_test_fail_printf ("TLS connect to %s:%u failed: %s", trk->host,
+                            (unsigned)trk->tls_port,
+                            err ? err->message : "(no error)");
         g_clear_error (&err);
         g_ptr_array_unref (targets);
         return;
@@ -200,10 +198,8 @@ test_v3_tls_handshake_and_listing (void)
 
     /* ---- Handshake -------------------------------------------- */
     guint8 hs[8];
-    g_assert_true (
-        hx_tracker_v3_pack_handshake (hs, sizeof (hs),
-                                      HTRK_V3_FEAT_IPV6
-                                          | HTRK_V3_FEAT_QUERY));
+    g_assert_true (hx_tracker_v3_pack_handshake (
+        hs, sizeof (hs), HTRK_V3_FEAT_IPV6 | HTRK_V3_FEAT_QUERY));
     if (!write_exact_stream (out, hs, sizeof (hs), "v3 handshake")) {
         goto done;
     }
@@ -220,9 +216,8 @@ test_v3_tls_handshake_and_listing (void)
     /* ---- Listing request -------------------------------------- */
     guint8 req[4];
     gsize req_len = 0;
-    g_assert_true (
-        hx_tracker_v3_pack_listing_request_simple (req, sizeof (req),
-                                                   &req_len));
+    g_assert_true (hx_tracker_v3_pack_listing_request_simple (req, sizeof (req),
+                                                              &req_len));
     g_assert_cmpuint (req_len, ==, 4);
     if (!write_exact_stream (out, req, req_len, "v3 listing request")) {
         goto done;
@@ -240,8 +235,7 @@ test_v3_tls_handshake_and_listing (void)
         rhdr, sizeof (rhdr), &rtype, &total_size, &total_servers,
         &record_count));
     g_assert_cmpuint (rtype, ==, HTRK_V3_RESP_LIST);
-    g_assert_cmpuint (record_count, >=,
-                      (unsigned) trk->expected_promoted_count);
+    g_assert_cmpuint (record_count, >=, (unsigned)trk->expected_promoted_count);
     g_assert_cmpuint (total_size, >, 0u);
     g_assert_cmpuint (total_size, <, 16u * 1024u * 1024u); /* sanity cap */
 
@@ -258,13 +252,12 @@ test_v3_tls_handshake_and_listing (void)
     for (guint16 i = 0; i < record_count; i++) {
         hx_tracker_v3_record rec = { 0 };
         gsize consumed = 0;
-        gboolean ok = hx_tracker_v3_parse_record (cursor, remaining, &rec,
-                                                  &consumed);
+        gboolean ok
+            = hx_tracker_v3_parse_record (cursor, remaining, &rec, &consumed);
         if (!ok) {
             g_test_fail_printf (
                 "record %u/%u failed to parse over TLS (remaining=%zu)",
-                (unsigned) (i + 1), (unsigned) record_count,
-                (size_t) remaining);
+                (unsigned)(i + 1), (unsigned)record_count, (size_t)remaining);
             break;
         }
         decoded++;
@@ -277,8 +270,8 @@ test_v3_tls_handshake_and_listing (void)
             g_test_fail_printf (
                 "record %u/%u over TLS: typed-meta decoder rejected the "
                 "TLV trailer (count=%u, bytes=%zu)",
-                (unsigned) (i + 1), (unsigned) record_count,
-                (unsigned) rec.tlv_count, (size_t) rec.tlv_bytes_len);
+                (unsigned)(i + 1), (unsigned)record_count,
+                (unsigned)rec.tlv_count, (size_t)rec.tlv_bytes_len);
             break;
         }
         hx_tracker_v3_meta_free (meta);
@@ -287,7 +280,7 @@ test_v3_tls_handshake_and_listing (void)
         remaining -= consumed;
     }
 
-    g_assert_cmpint (decoded, ==, (int) record_count);
+    g_assert_cmpint (decoded, ==, (int)record_count);
     g_assert_cmpuint (remaining, ==, 0u);
 
     g_free (payload);

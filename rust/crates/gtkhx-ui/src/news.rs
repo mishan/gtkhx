@@ -21,11 +21,11 @@ use std::ffi::{c_char, c_void};
 use std::ptr;
 use std::rc::Rc;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_none, IntoGlibPtr};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_none, IntoGlibPtr};
+use gtk4 as gtk;
 
 use crate::dock;
 use crate::ffi as cffi;

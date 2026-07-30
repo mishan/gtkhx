@@ -93,14 +93,14 @@ G_BEGIN_DECLS
  * agreed; both are gone with xtext. The Rust side asserts against these
  * values in hxchat-view (PALETTE_COLS and the PAL_* constants), so the
  * agreement is still checked — just from the other end. */
-#define HX_CHAT_PAL_MIRC_COLS    32
-#define HX_CHAT_PAL_MARK_FG      32 /* selection foreground */
-#define HX_CHAT_PAL_MARK_BG      33 /* selection background */
-#define HX_CHAT_PAL_FG           34 /* default text foreground */
-#define HX_CHAT_PAL_BG           35 /* default text background */
-#define HX_CHAT_PAL_MARKER       36 /* marker line */
+#define HX_CHAT_PAL_MIRC_COLS 32
+#define HX_CHAT_PAL_MARK_FG 32       /* selection foreground */
+#define HX_CHAT_PAL_MARK_BG 33       /* selection background */
+#define HX_CHAT_PAL_FG 34            /* default text foreground */
+#define HX_CHAT_PAL_BG 35            /* default text background */
+#define HX_CHAT_PAL_MARKER 36        /* marker line */
 #define HX_CHAT_PAL_HISTORY_MUTED 37 /* rendered chat-history secondary text */
-#define HX_CHAT_PAL_COLS         38 /* 32 mIRC + 6 UI roles */
+#define HX_CHAT_PAL_COLS 38          /* 32 mIRC + 6 UI roles */
 
 /* ---- marks -------------------------------------------------------- *
  *
@@ -187,14 +187,14 @@ void hx_chat_view_set_autocopy_color (gboolean enabled);
  *
  * The values are the historical mIRC indices, kept so themes that
  * already set slots 0..31 keep rendering the same. */
-#define HX_CHAT_INFO_COLOR      3  /* "[hx]" and broadcast sender names */
+#define HX_CHAT_INFO_COLOR 3          /* "[hx]" and broadcast sender names */
 #define HX_CHAT_INFO_BRACKET_COLOR 10 /* the [ ] around them */
-#define HX_CHAT_HIGHLIGHT_COLOR 4  /* light red: a line that mentions you */
-#define HX_CHAT_PLACEHOLDER_COLOR 14 /* dark grey: inline-media alt text */
+#define HX_CHAT_HIGHLIGHT_COLOR 4     /* light red: a line that mentions you */
+#define HX_CHAT_PLACEHOLDER_COLOR 14  /* dark grey: inline-media alt text */
 
-#define HX_CHAT_ATTR_NONE      0u
-#define HX_CHAT_ATTR_BOLD      (1u << 0)
-#define HX_CHAT_ATTR_ITALIC    (1u << 1)
+#define HX_CHAT_ATTR_NONE 0u
+#define HX_CHAT_ATTR_BOLD (1u << 0)
+#define HX_CHAT_ATTR_ITALIC (1u << 1)
 #define HX_CHAT_ATTR_UNDERLINE (1u << 2)
 
 typedef struct {
@@ -205,7 +205,7 @@ typedef struct {
 } HxChatRun;
 
 /* Convenience for the common "one unstyled run" case. */
-#define HX_CHAT_RUN_PLAIN(t, l)                                               \
+#define HX_CHAT_RUN_PLAIN(t, l)                                                \
     ((HxChatRun){ (t), (l), HX_CHAT_COLOR_DEFAULT, HX_CHAT_ATTR_NONE })
 
 /* Who said it.
@@ -268,19 +268,17 @@ HxChatMark *hx_chat_view_append_runs (GtkWidget *view, HxChatSpeaker speaker,
 HxChatMark *hx_chat_view_append_system_runs (GtkWidget *view,
                                              const HxChatRun *gutter,
                                              int n_gutter,
-                                             const HxChatRun *body,
-                                             int n_body, time_t stamp);
+                                             const HxChatRun *body, int n_body,
+                                             time_t stamp);
 
 /* As above, but inserted immediately BEFORE `anchor` (NULL prepends at
  * the head). Scroll position is preserved across the insert — see
  * hx_chat_view_insert_before below for the reasoning. */
-HxChatMark *hx_chat_view_insert_runs_before (GtkWidget *view,
-                                             HxChatMark *anchor,
-                                             HxChatSpeaker speaker,
-                                             const HxChatRun *gutter,
-                                             int n_gutter,
-                                             const HxChatRun *body, int n_body,
-                                             time_t stamp);
+HxChatMark *
+hx_chat_view_insert_runs_before (GtkWidget *view, HxChatMark *anchor,
+                                 HxChatSpeaker speaker, const HxChatRun *gutter,
+                                 int n_gutter, const HxChatRun *body,
+                                 int n_body, time_t stamp);
 
 /* Render markdown in incoming messages: `**bold**`, `*italic*`,
  * `` `code` ``, fenced code blocks, `>` quotes, and `[label](url)` with
@@ -406,13 +404,13 @@ void hx_chat_view_media_set_animation (GtkWidget *view, HxChatMark *mark,
  * readout; `current` is 1-based, or 0 when nothing is current. Either
  * may be NULL. */
 void hx_chat_view_search (GtkWidget *view, const char *needle,
-                          gboolean case_sensitive,
-                          guint *n_matches, guint *current);
+                          gboolean case_sensitive, guint *n_matches,
+                          guint *current);
 
 /* Step to the next (dir > 0) or previous (dir < 0) match, wrapping at
  * both ends, and scroll it into view. */
-void hx_chat_view_search_step (GtkWidget *view, int dir,
-                               guint *n_matches, guint *current);
+void hx_chat_view_search_step (GtkWidget *view, int dir, guint *n_matches,
+                               guint *current);
 
 /* Drop the query and its highlights. */
 void hx_chat_view_search_clear (GtkWidget *view);

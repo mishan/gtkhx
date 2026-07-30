@@ -51,9 +51,9 @@
 
 #include "compat.h" /* PACKED — required before hotline.h */
 #include "hotline.h"
-#include "session.h"      /* the_session, hx_tracker_list_async */
-#include "prefs.h"        /* gtkhx_prefs */
-#include "tracker.h"      /* tracker_kill_threads */
+#include "session.h"       /* the_session, hx_tracker_list_async */
+#include "prefs.h"         /* gtkhx_prefs */
+#include "tracker.h"       /* tracker_kill_threads */
 #include "tracker_event.h" /* HxTrackerServer */
 #include "gtkhx_session.h" /* GtkhxSession, gtkhx_session_get_default */
 #include "tracker_matrix.h"
@@ -70,8 +70,9 @@ typedef struct {
 
 /* tracker-batch-begin: (url:string, version:u8, count:u32). */
 static void
-on_batch_begin (GtkhxSession *hxsession G_GNUC_UNUSED, const char *url G_GNUC_UNUSED,
-                guchar version, guint count G_GNUC_UNUSED, gpointer user_data)
+on_batch_begin (GtkhxSession *hxsession G_GNUC_UNUSED,
+                const char *url G_GNUC_UNUSED, guchar version,
+                guint count G_GNUC_UNUSED, gpointer user_data)
 {
     Collected *c = user_data;
     c->begins++;
@@ -121,7 +122,7 @@ probe_ms (void)
         char *endp = NULL;
         long v = strtol (env, &endp, 10);
         if (endp != env && *endp == '\0' && v >= 100 && v <= 60000) {
-            return (guint32) v;
+            return (guint32)v;
         }
     }
     return 800;
@@ -145,12 +146,12 @@ test_tracker_signals (void)
 
     /* Point gtkhx_prefs.tracker[] at the matrix trackers the way the
      * Settings page would; hx_tracker_list_async reads this list. */
-    int n = (int) targets->len;
+    int n = (int)targets->len;
     gtkhx_prefs.tracker = g_new0 (char *, n);
     for (int i = 0; i < n; i++) {
         const hx_test_tracker *t = g_ptr_array_index (targets, i);
         gtkhx_prefs.tracker[i]
-            = g_strdup_printf ("%s:%u", t->host, (unsigned) t->port);
+            = g_strdup_printf ("%s:%u", t->host, (unsigned)t->port);
     }
     gtkhx_prefs.num_tracker = n;
 
@@ -172,7 +173,7 @@ test_tracker_signals (void)
      * test_tracker_fetch) and break early once results have landed and
      * gone quiet for ~600 ms. */
     guint32 pms = probe_ms ();
-    gint64 budget_s = (gint64) n * ((pms / 1000) + 5) + 10;
+    gint64 budget_s = (gint64)n * ((pms / 1000) + 5) + 10;
     if (budget_s > 55) {
         budget_s = 55;
     }

@@ -81,7 +81,7 @@ static void
 test_cr2lf_respects_len_not_nul (void)
 {
     /* The macro walks until len, ignoring embedded NULs. CR after
-	 * an embedded NUL must still be converted. */
+     * an embedded NUL must still be converted. */
     char buf[] = { 'a', '\0', '\r', 'b' };
     CR2LF (buf, sizeof (buf));
     g_assert_cmphex (buf[0], ==, 'a');
@@ -127,8 +127,8 @@ static void
 test_lf2cr_round_trip_via_cr2lf (void)
 {
     /* Round-trip property: LF2CR followed by CR2LF returns the
-	 * original buffer. Tests that the two macros are exact
-	 * inverses byte-for-byte. */
+     * original buffer. Tests that the two macros are exact
+     * inverses byte-for-byte. */
     char buf[] = "line one\nline two\nline three";
     char orig[] = "line one\nline two\nline three";
     const gsize len = sizeof (buf) - 1;
@@ -164,7 +164,7 @@ static void
 test_strip_ansi_converts_esc (void)
 {
     /* ESC (0x1b = 27) is in the targeted range. (27 & 127) | 64 = 91
-	 * = '['. Everyone's favorite "ESC[" sequence reduces to "[[". */
+     * = '['. Everyone's favorite "ESC[" sequence reduces to "[[". */
     char buf[] = "\x1b[31mred\x1b[0m";
     const gsize len = sizeof (buf) - 1;
     strip_ansi (buf, len);
@@ -175,7 +175,7 @@ static void
 test_strip_ansi_passes_through_tab_lf_cr (void)
 {
     /* TAB (9), LF (10), CR (13) are below 14 so the range check
-	 * skips them. They MUST survive — chat lines depend on this. */
+     * skips them. They MUST survive — chat lines depend on this. */
     char buf[] = "tab\there\nnewline\rcarriage";
     const gsize len = sizeof (buf) - 1;
     char copy[64];
@@ -188,11 +188,11 @@ static void
 test_strip_ansi_passes_through_si_and_syn (void)
 {
     /* SI (15) and SYN (22) are explicitly excluded from the targeted
-	 * range — they're known mIRC color / formatting codes that the
-	 * codebase wants to keep. */
+     * range — they're known mIRC color / formatting codes that the
+     * codebase wants to keep. */
     /* String-concat to keep the hex escapes from greedily eating
-	 * the following ASCII chars (\x16d would be parsed as hex 0x16d,
-	 * out of range for char — gcc warns). */
+     * the following ASCII chars (\x16d would be parsed as hex 0x16d,
+     * out of range for char — gcc warns). */
     char buf[] = "\x0f"
                  "format"
                  "\x0f"
@@ -211,8 +211,8 @@ static void
 test_strip_ansi_boundary_bytes (void)
 {
     /* Boundaries: 13 keeps, 14 maps, 21 maps, 22 keeps, 23 maps,
-	 * 30 maps, 31 keeps. Spell out the expected output byte-for-
-	 * byte so a future tweak to the range check fails loudly. */
+     * 30 maps, 31 keeps. Spell out the expected output byte-for-
+     * byte so a future tweak to the range check fails loudly. */
     char buf[] = { 13, 14, 21, 22, 23, 30, 31 };
     const gsize len = sizeof (buf);
     const char expected[] = {
@@ -242,8 +242,8 @@ static void
 test_strip_ansi_idempotent (void)
 {
     /* The transform output range is 64..94 ('@'..'^'), which is
-	 * outside the targeted 14..30 range, so applying strip_ansi
-	 * twice is the same as applying it once. */
+     * outside the targeted 14..30 range, so applying strip_ansi
+     * twice is the same as applying it once. */
     char a[] = "\x1b[31mred\x1b[0m";
     char b[] = "\x1b[31mred\x1b[0m";
     const gsize len = sizeof (a) - 1;

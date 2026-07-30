@@ -43,29 +43,31 @@ test_file_list_round_trip (void)
                                              /*flag=*/0, /*hc=*/0));
 
     /* Drain looking for the TASK reply matching our trans. */
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     /* Either a clean reply with zero or more FILE_LIST chunks, or
-	 * a task-error (e.g. ENOENT if files/ doesn't exist on the
-	 * server). Both prove the round-trip works. */
+     * a task-error (e.g. ENOENT if files/ doesn't exist on the
+     * server). Both prove the round-trip works. */
     guint32 flag = hdr_flag (&htlc);
     if (flag & 1) {
         /* task-error — confirm there's a TASKERROR chunk. The
-		 * actual message text is server-implementation-detail. */
+         * actual message text is server-implementation-detail. */
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                           hx_test_in (&htlc)->pos, err,
+                                           sizeof (err), &err_len));
         g_test_message ("server returned task-error for FILE_LIST: "
                         "\"%s\" (this is fine if files/ is empty)",
                         err);
     } else {
         /* Success path — count the FILE_LIST chunks for the test
-		 * log. We don't assert a specific count because the
-		 * contents of mhxd's files/ are container-deployment-
-		 * specific. */
+         * log. We don't assert a specific count because the
+         * contents of mhxd's files/ are container-deployment-
+         * specific. */
         int n = 0;
-        dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+        dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
         {
             if (_type == HTLS_DATA_FILE_LIST) {
                 n++;

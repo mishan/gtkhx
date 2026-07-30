@@ -85,10 +85,7 @@ fn ffi_optional_strings_null_when_unset_and_settable() {
         let empty = cs("");
         hx_news_node_set_body(obj, empty.as_ptr());
         assert!(!hx_news_node_body(obj).is_null());
-        assert_eq!(
-            CStr::from_ptr(hx_news_node_body(obj)).to_str().unwrap(),
-            ""
-        );
+        assert_eq!(CStr::from_ptr(hx_news_node_body(obj)).to_str().unwrap(), "");
         // NULL clears back to unset.
         hx_news_node_set_body(obj, std::ptr::null());
         assert!(hx_news_node_body(obj).is_null());
@@ -187,8 +184,14 @@ fn build_category_tree_threads_replies_under_parents() {
     let n1 = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(n0.imp().postid.get(), 10);
     assert_eq!(n0.imp().name.borrow().to_str().unwrap(), "First");
-    assert_eq!(n0.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(), "alice");
-    assert_eq!(n0.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/general");
+    assert_eq!(
+        n0.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(),
+        "alice"
+    );
+    assert_eq!(
+        n0.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/news/general"
+    );
     assert_eq!(n1.imp().postid.get(), 12);
 
     // #10 has one reply (#11) in its children store; #12 is a leaf.
@@ -220,8 +223,20 @@ fn build_category_tree_defaults_empty_fields() {
     assert_eq!(dest.n_items(), 1);
     let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(n.imp().name.borrow().to_str().unwrap(), "(no subject)");
-    assert_eq!(n.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(), "");
-    assert_eq!(n.imp().mime_type.borrow().as_ref().unwrap().to_str().unwrap(), "text/plain");
+    assert_eq!(
+        n.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(),
+        ""
+    );
+    assert_eq!(
+        n.imp()
+            .mime_type
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/plain"
+    );
 }
 
 #[test]
@@ -234,7 +249,8 @@ fn build_category_tree_empty_or_null_is_no_op() {
     let posts = [post(1, 0, &subj, &sndr, &mime)];
     unsafe {
         hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), posts.as_ptr(), 0); // count 0
-        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3); // null posts
+        hx_news_build_category_tree(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3);
+        // null posts
     }
     assert_eq!(dest.n_items(), 0);
 }
@@ -246,8 +262,14 @@ fn build_dirlist_appends_folder_and_category_nodes() {
     // type==1 → folder (kind 1); anything else → category (kind 2).
     let (n0, n1) = (cs("Docs"), cs("Announcements"));
     let items = [
-        HxNewsDirItem { item_type: 1, name: n0.as_ptr() },
-        HxNewsDirItem { item_type: 0, name: n1.as_ptr() },
+        HxNewsDirItem {
+            item_type: 1,
+            name: n0.as_ptr(),
+        },
+        HxNewsDirItem {
+            item_type: 0,
+            name: n1.as_ptr(),
+        },
     ];
     let parent = cs("/news");
     let dest = gio::ListStore::with_type(HxNewsNode::static_type());
@@ -258,16 +280,25 @@ fn build_dirlist_appends_folder_and_category_nodes() {
     let a = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(a.imp().kind.get(), 1);
     assert_eq!(a.imp().name.borrow().to_str().unwrap(), "Docs");
-    assert_eq!(a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/Docs");
+    assert_eq!(
+        a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/news/Docs"
+    );
     let b = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(b.imp().kind.get(), 2);
-    assert_eq!(b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/Announcements");
+    assert_eq!(
+        b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/news/Announcements"
+    );
 }
 
 #[test]
 fn build_dirlist_null_parent_and_null_name() {
     // NULL parent → root "/"; NULL name → empty label; root + "" → "/".
-    let items = [HxNewsDirItem { item_type: 0, name: std::ptr::null() }];
+    let items = [HxNewsDirItem {
+        item_type: 0,
+        name: std::ptr::null(),
+    }];
     let dest = gio::ListStore::with_type(HxNewsNode::static_type());
     unsafe {
         hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), items.as_ptr(), 1);
@@ -275,17 +306,24 @@ fn build_dirlist_null_parent_and_null_name() {
     assert_eq!(dest.n_items(), 1);
     let n = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(n.imp().name.borrow().to_str().unwrap(), "");
-    assert_eq!(n.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/");
+    assert_eq!(
+        n.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/"
+    );
 }
 
 #[test]
 fn build_dirlist_empty_or_null_is_no_op() {
     let dest = gio::ListStore::with_type(HxNewsNode::static_type());
     let name = cs("x");
-    let items = [HxNewsDirItem { item_type: 1, name: name.as_ptr() }];
+    let items = [HxNewsDirItem {
+        item_type: 1,
+        name: name.as_ptr(),
+    }];
     unsafe {
         hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), items.as_ptr(), 0); // count 0
-        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3); // null items
+        hx_news_build_dirlist_into(dest.as_ptr(), std::ptr::null(), std::ptr::null(), 3);
+        // null items
     }
     assert_eq!(dest.n_items(), 0);
 }
@@ -305,7 +343,10 @@ fn cat_post(postid: u32, parentid: u32, subject: &str, sender: &str, mime: &str)
         size_total: 0,
         subject: subject.as_bytes().to_vec(),
         sender: sender.as_bytes().to_vec(),
-        parts: vec![CatPart { mime_type: mime.as_bytes().to_vec(), size: 0 }],
+        parts: vec![CatPart {
+            mime_type: mime.as_bytes().to_vec(),
+            size: 0,
+        }],
     }
 }
 
@@ -341,22 +382,59 @@ fn build_from_catlist_threads_and_defaults() {
     let n0 = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(n0.imp().postid.get(), 10);
     assert_eq!(n0.imp().name.borrow().to_str().unwrap(), "First");
-    assert_eq!(n0.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(), "alice");
-    assert_eq!(n0.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/general");
-    assert_eq!(n0.imp().mime_type.borrow().as_ref().unwrap().to_str().unwrap(), "text/plain");
+    assert_eq!(
+        n0.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(),
+        "alice"
+    );
+    assert_eq!(
+        n0.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/news/general"
+    );
+    assert_eq!(
+        n0.imp()
+            .mime_type
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/plain"
+    );
     let kids = n0.imp().children.borrow();
     let kids = kids.as_ref().expect("parent got a children store");
     assert_eq!(kids.n_items(), 1);
     let reply = kids.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(reply.imp().postid.get(), 11);
-    assert_eq!(reply.imp().mime_type.borrow().as_ref().unwrap().to_str().unwrap(), "text/html");
+    assert_eq!(
+        reply
+            .imp()
+            .mime_type
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/html"
+    );
 
     // #12: empty subject/sender + no parts → the array-path defaults.
     let n2 = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(n2.imp().postid.get(), 12);
     assert_eq!(n2.imp().name.borrow().to_str().unwrap(), "(no subject)");
-    assert_eq!(n2.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(), "");
-    assert_eq!(n2.imp().mime_type.borrow().as_ref().unwrap().to_str().unwrap(), "text/plain");
+    assert_eq!(
+        n2.imp().sender.borrow().as_ref().unwrap().to_str().unwrap(),
+        ""
+    );
+    assert_eq!(
+        n2.imp()
+            .mime_type
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        "text/plain"
+    );
     assert!(n2.imp().children.borrow().is_none());
 }
 
@@ -364,11 +442,7 @@ fn build_from_catlist_threads_and_defaults() {
 fn build_from_catlist_null_is_no_op() {
     let dest = gio::ListStore::with_type(HxNewsNode::static_type());
     unsafe {
-        hx_news_build_category_tree_from_catlist(
-            dest.as_ptr(),
-            std::ptr::null(),
-            std::ptr::null(),
-        );
+        hx_news_build_category_tree_from_catlist(dest.as_ptr(), std::ptr::null(), std::ptr::null());
     }
     assert_eq!(dest.n_items(), 0);
 }
@@ -381,8 +455,14 @@ use hotline_proto::parse::{DirList, NewsDirEntry, NewsDirKind};
 fn build_dirlist_from_dirlist_reads_handle() {
     let dl = DirList {
         entries: vec![
-            NewsDirEntry { kind: NewsDirKind::Folder, name: b"Docs".to_vec() },
-            NewsDirEntry { kind: NewsDirKind::Category, name: b"News".to_vec() },
+            NewsDirEntry {
+                kind: NewsDirKind::Folder,
+                name: b"Docs".to_vec(),
+            },
+            NewsDirEntry {
+                kind: NewsDirKind::Category,
+                name: b"News".to_vec(),
+            },
         ],
     };
     let parent = cs("/news");
@@ -394,10 +474,16 @@ fn build_dirlist_from_dirlist_reads_handle() {
     let a = dest.item(0).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(a.imp().kind.get(), 1); // folder
     assert_eq!(a.imp().name.borrow().to_str().unwrap(), "Docs");
-    assert_eq!(a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/Docs");
+    assert_eq!(
+        a.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/news/Docs"
+    );
     let b = dest.item(1).unwrap().downcast::<HxNewsNode>().unwrap();
     assert_eq!(b.imp().kind.get(), 2); // category
-    assert_eq!(b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(), "/news/News");
+    assert_eq!(
+        b.imp().path.borrow().as_ref().unwrap().to_str().unwrap(),
+        "/news/News"
+    );
 }
 
 #[test]

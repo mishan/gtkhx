@@ -48,7 +48,7 @@
 #include <glib.h>
 
 #include "compat.h"
-#include "hotline.h"           /* HTLS_HDR_TASK */
+#include "hotline.h" /* HTLS_HDR_TASK */
 
 /* ---- hxnet FFI surface (mirror of rust/crates/hxnet/src/ffi.rs) --- */
 
@@ -65,17 +65,15 @@ typedef struct {
 } hxnet_frame_t;
 
 /* try_recv_frame return codes. */
-#define HXNET_RECV_EMPTY    0
-#define HXNET_RECV_FRAME    1
+#define HXNET_RECV_EMPTY 0
+#define HXNET_RECV_FRAME 1
 #define HXNET_RECV_SHUTDOWN 2
 
 extern hxnet_connection *hxnet_connection_open_plaintext_polling (
-    const guint8 *host, gsize host_len, guint16 port,
-    const guint8 *login, gsize login_len,
-    const guint8 *password, gsize password_len,
-    const guint8 *name, gsize name_len,
-    guint16 icon, guint16 version, guint16 caps, guint32 trans,
-    const guint8 *proxy_uri, gsize proxy_uri_len);
+    const guint8 *host, gsize host_len, guint16 port, const guint8 *login,
+    gsize login_len, const guint8 *password, gsize password_len,
+    const guint8 *name, gsize name_len, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const guint8 *proxy_uri, gsize proxy_uri_len);
 
 extern int hxnet_connection_try_recv_frame (hxnet_connection *handle,
                                             hxnet_frame_t *out_frame,
@@ -89,7 +87,7 @@ static int
 poll_frame (hxnet_connection *h, hxnet_frame_t *out, int *reason,
             int timeout_ms)
 {
-    gint64 deadline = g_get_monotonic_time () + (gint64) timeout_ms * 1000;
+    gint64 deadline = g_get_monotonic_time () + (gint64)timeout_ms * 1000;
     for (;;) {
         int rc = hxnet_connection_try_recv_frame (h, out, reason);
         if (rc != HXNET_RECV_EMPTY) {
@@ -135,14 +133,13 @@ test_via_proxy_login (void)
 
     const char *login = "guest";
     hxnet_connection *h = hxnet_connection_open_plaintext_polling (
-        (const guint8 *) host, strlen (host), (guint16) port,
-        (const guint8 *) login, strlen (login),
-        (const guint8 *) "", 0,   /* password */
-        (const guint8 *) "", 0,   /* name */
+        (const guint8 *)host, strlen (host), (guint16)port,
+        (const guint8 *)login, strlen (login), (const guint8 *)"",
+        0,                     /* password */
+        (const guint8 *)"", 0, /* name */
         /*icon=*/0, /*version=*/185,
         /*caps=*/HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING,
-        /*trans=*/1,
-        (const guint8 *) proxy, strlen (proxy));
+        /*trans=*/1, (const guint8 *)proxy, strlen (proxy));
     g_assert_nonnull (h);
 
     /* First frame: the replayed LOGIN reply. Reaching it means connect +
@@ -151,9 +148,9 @@ test_via_proxy_login (void)
     int reason = 0;
     int rc = poll_frame (h, &frame, &reason, 15000);
     g_assert_cmpint (rc, ==, HXNET_RECV_FRAME);
-    g_assert_cmpuint (frame.type_, ==, (guint32) HTLS_HDR_TASK);
-    g_assert_cmpuint (frame.trans, ==, 1);          /* HX_LOGIN_TRANS */
-    g_assert_cmpuint (frame.flag & 1u, ==, 0);      /* login accepted */
+    g_assert_cmpuint (frame.type_, ==, (guint32)HTLS_HDR_TASK);
+    g_assert_cmpuint (frame.trans, ==, 1);     /* HX_LOGIN_TRANS */
+    g_assert_cmpuint (frame.flag & 1u, ==, 0); /* login accepted */
     hxnet_frame_free (&frame);
 
     /* A post-login server frame — the actor keeps reading the tunnelled
@@ -180,14 +177,12 @@ test_dead_proxy_fails (void)
     const char *dead_proxy = "socks5://127.0.0.1:1";
     const char *login = "guest";
     hxnet_connection *h = hxnet_connection_open_plaintext_polling (
-        (const guint8 *) host, strlen (host), (guint16) port,
-        (const guint8 *) login, strlen (login),
-        (const guint8 *) "", 0,
-        (const guint8 *) "", 0,
+        (const guint8 *)host, strlen (host), (guint16)port,
+        (const guint8 *)login, strlen (login), (const guint8 *)"", 0,
+        (const guint8 *)"", 0,
         /*icon=*/0, /*version=*/185,
         /*caps=*/HTLC_CAP_LARGE_FILES | HTLC_CAP_TEXT_ENCODING,
-        /*trans=*/1,
-        (const guint8 *) dead_proxy, strlen (dead_proxy));
+        /*trans=*/1, (const guint8 *)dead_proxy, strlen (dead_proxy));
     g_assert_nonnull (h);
 
     /* The lifecycle reports the failed connect as a shutdown event. If the

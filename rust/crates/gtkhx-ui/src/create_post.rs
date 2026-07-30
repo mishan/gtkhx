@@ -12,11 +12,11 @@
 use std::cell::RefCell;
 use std::ffi::{c_char, c_void};
 
-use gtk4 as gtk;
+use glib::translate::from_glib_none;
 use gtk::glib;
 use gtk::prelude::*;
+use gtk4 as gtk;
 use libadwaita as adw;
-use glib::translate::from_glib_none;
 
 use crate::ffi as cffi;
 use crate::tr::tr;
@@ -33,7 +33,8 @@ thread_local! {
 
 use hxhandlers::send::news::hx_post_news;
 
-extern "C" {    /// gtkhx_ui_bridge.c — the focused session's `&htlc` (single-session).
+extern "C" {
+    /// gtkhx_ui_bridge.c — the focused session's `&htlc` (single-session).
     fn gtkhx_active_htlc() -> *mut c_void;
     /// gtkhx.c — apply the themed `.gtkhx-text` CSS class + font.
     fn gtkhx_apply_text_style(w: *mut gtk::ffi::GtkWidget);

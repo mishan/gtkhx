@@ -43,9 +43,9 @@ mod voice_impl {
     use std::cell::Cell;
     use std::ffi::c_char;
 
+    use glib::translate::{from_glib_none, ToGlibPtr};
     use gtk::glib;
     use gtk::prelude::*;
-    use glib::translate::{from_glib_none, ToGlibPtr};
 
     /// qdata key planting the bound `GtkListItem` on the cell so the
     /// right-click handler in `users_view.rs` can recover the row. Must use
@@ -100,17 +100,15 @@ mod voice_impl {
     /// Map the indicator enum to a stock symbolic icon, or None for NONE.
     fn indicator_icon(ind: u32) -> Option<&'static str> {
         match ind {
-            1 => Some("audio-volume-low-symbolic"),   // IN_VOICE — dim speaker
-            2 => Some("audio-volume-high-symbolic"),  // SPEAKING
+            1 => Some("audio-volume-low-symbolic"), // IN_VOICE — dim speaker
+            2 => Some("audio-volume-high-symbolic"), // SPEAKING
             3 => Some("microphone-disabled-symbolic"), // MUTED
-            _ => None,                                 // NONE / unknown
+            _ => None,                              // NONE / unknown
         }
     }
 
     fn voice_cell_refresh(img: &gtk::Image, model: &glib::Object, uid: u16) {
-        let ind = unsafe {
-            hx_voice_model_get_indicator(model.as_ptr() as *mut c_void, uid)
-        };
+        let ind = unsafe { hx_voice_model_get_indicator(model.as_ptr() as *mut c_void, uid) };
         match indicator_icon(ind) {
             Some(name) => {
                 img.set_icon_name(Some(name));
@@ -139,9 +137,7 @@ mod voice_impl {
         unsafe { img.data::<VoiceCellData>(CELL_DATA_KEY).map(|p| p.as_ref()) }
     }
 
-    pub(super) unsafe fn build_column(
-        sess: *mut c_void,
-    ) -> *mut gtk::ffi::GtkColumnViewColumn {
+    pub(super) unsafe fn build_column(sess: *mut c_void) -> *mut gtk::ffi::GtkColumnViewColumn {
         if sess.is_null() {
             return std::ptr::null_mut();
         }
@@ -168,10 +164,7 @@ mod voice_impl {
                 // Fires whenever ANY uid's indicator flips; this cell only
                 // cares about its currently-bound row.
                 let handler = model.connect_local("indicator-changed", false, move |args| {
-                    let changed = args
-                        .get(1)
-                        .and_then(|v| v.get::<u32>().ok())
-                        .unwrap_or(0) as u16;
+                    let changed = args.get(1).and_then(|v| v.get::<u32>().ok()).unwrap_or(0) as u16;
                     if let Some(img) = img_weak.upgrade() {
                         if let Some(data) = cell_data(&img) {
                             let bound = data.uid.get();

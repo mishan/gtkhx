@@ -158,11 +158,7 @@ pub(crate) fn decoded_set_frames(
             _pad0: 0,
         };
         unsafe {
-            glib::ffi::g_array_append_vals(
-                arr,
-                &elem as *const _ as glib::ffi::gconstpointer,
-                1,
-            );
+            glib::ffi::g_array_append_vals(arr, &elem as *const _ as glib::ffi::gconstpointer, 1);
         }
         if i == 0 {
             // Keep the first frame's texture available at the

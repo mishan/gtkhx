@@ -42,7 +42,6 @@
 #include "xfers_recv.h"
 #include "integration_harness.h"
 
-
 /* HxnetFolderParams progress shape for the Rust folder transfer paths
  * (hxnet_xfer_folder_{recv,send}_all forward it per file). */
 static void
@@ -58,8 +57,8 @@ static HtxfConn *
 open_folder_channel (guint32 ref, guint64 total_size)
 {
     guint8 pre[24];
-    size_t plen = hxnet_htxf_pack_preamble (
-        pre, sizeof (pre), ref, total_size, HTXF_TYPE_FOLDER, 0, FALSE);
+    size_t plen = hxnet_htxf_pack_preamble (pre, sizeof (pre), ref, total_size,
+                                            HTXF_TYPE_FOLDER, 0, FALSE);
     if (!plen) {
         return NULL;
     }
@@ -119,12 +118,12 @@ assert_file_is (const char *root, const char *rel, const char *body)
 static gsize
 build_hldir (guint8 *out, const char *const *comps, int n)
 {
-    guint16 count_be = g_htons((guint16)n);
+    guint16 count_be = g_htons ((guint16)n);
     memcpy (out, &count_be, 2);
     gsize pos = 2;
     for (int i = 0; i < n; i++) {
         gsize nl = strlen (comps[i]);
-        guint16 nl_be = g_htons((guint16)nl);
+        guint16 nl_be = g_htons ((guint16)nl);
         out[pos++] = 0;
         memcpy (out + pos, &nl_be, 2);
         pos += 2;
@@ -143,10 +142,10 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
     guint8 hldir[512];
     gsize hldir_len = build_hldir (hldir, comps, ncomp);
     guint32 our_trans = htlc->trans;
-    if (!integration_send_message (
-            ctrl, htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/2,
-            (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname,
-            (int)HTLC_DATA_DIR, (int)hldir_len, hldir)) {
+    if (!integration_send_message (ctrl, htlc, HTLC_HDR_FILE_GET, /*flag=*/0,
+                                   /*hc=*/2, (int)HTLC_DATA_FILE_NAME,
+                                   (int)strlen (fname), (guint8 *)fname,
+                                   (int)HTLC_DATA_DIR, (int)hldir_len, hldir)) {
         return NULL;
     }
     if (!integration_drain_until_task_trans (ctrl, htlc, our_trans, 64)
@@ -154,7 +153,8 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
         return NULL;
     }
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
+                           &reply);
     if (!reply.ref || !reply.size) {
         return NULL;
     }
@@ -192,7 +192,7 @@ get_file_direct (int ctrl, struct htlc_conn *htlc, const char *const *comps,
             content = NULL;
         }
     }
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
     unlink (htxf.path);
     g_rmdir (tmpdir);
     return content;
@@ -210,15 +210,15 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
 
     guint8 hldir[64];
     gsize hldir_len = integration_encode_hldir_one (hldir, "Uploads");
-    guint32 size_be = g_htonl((guint32)total);
-    guint32 nfiles_be = g_htonl(nfiles);
+    guint32 size_be = g_htonl ((guint32)total);
+    guint32 nfiles_be = g_htonl (nfiles);
     guint32 our_trans = htlc->trans;
     if (!integration_send_message (
             fd, htlc, HTLC_HDR_FILE_PUTFOLDER, /*flag=*/0, /*hc=*/4,
             (int)HTLC_DATA_FILE_NAME, (int)strlen (folder), (guint8 *)folder,
-            (int)HTLC_DATA_DIR, (int)hldir_len, hldir,
-            (int)HTLC_DATA_HTXF_SIZE, (int)sizeof (size_be), &size_be,
-            (int)HTLC_DATA_FILE_NFILES, (int)sizeof (nfiles_be), &nfiles_be)) {
+            (int)HTLC_DATA_DIR, (int)hldir_len, hldir, (int)HTLC_DATA_HTXF_SIZE,
+            (int)sizeof (size_be), &size_be, (int)HTLC_DATA_FILE_NFILES,
+            (int)sizeof (nfiles_be), &nfiles_be)) {
         return FALSE;
     }
     if (!integration_drain_until_task_trans (fd, htlc, our_trans, 64)
@@ -226,7 +226,7 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
         return FALSE;
     }
     guint32 xfer_ref = 0;
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         if (_type == HTLS_DATA_HTXF_REF) {
             dh_getint (xfer_ref);
@@ -255,7 +255,7 @@ upload_folder_tree (int fd, struct htlc_conn *htlc, const char *srcroot,
     params.user_data = &htxf;
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_folder_send_all (&params);
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
     return rv == 0;
 }
 
@@ -281,7 +281,8 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos,
+                           &reply);
     if (!reply.ref) {
         return FALSE;
     }
@@ -306,7 +307,7 @@ download_folder (int ctrl, struct htlc_conn *htlc, const char *name,
     params.user_data = &htxf;
     params.progress = noop_progress_bump;
     int rv = hxnet_xfer_folder_recv_all (&params);
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
     return rv == 0;
 }
 
@@ -332,8 +333,8 @@ test_folder_round_trip (void)
     g_assert_true (g_file_set_contents (alpha, alpha_body, -1, NULL));
     g_assert_true (g_file_set_contents (beta, beta_body, -1, NULL));
 
-    g_autofree char *folder =
-        g_strdup_printf ("tier3_frt_%08x", g_random_int ());
+    g_autofree char *folder
+        = g_strdup_printf ("tier3_frt_%08x", g_random_int ());
     /* Declared before any `goto out` so the g_autofree cleanups never run
      * over an uninitialised pointer. */
     g_autofree char *dstroot = NULL;
@@ -404,8 +405,8 @@ test_folder_nested_upload (void)
     g_assert_true (g_file_set_contents (alpha, alpha_body, -1, NULL));
     g_assert_true (g_file_set_contents (beta, beta_body, -1, NULL));
 
-    g_autofree char *folder =
-        g_strdup_printf ("tier3_frn_%08x", g_random_int ());
+    g_autofree char *folder
+        = g_strdup_printf ("tier3_frn_%08x", g_random_int ());
     /* Declared before any `goto out` so the g_autofree cleanups are safe. */
     g_autofree char *got_alpha = NULL;
     g_autofree char *got_beta = NULL;
@@ -427,12 +428,12 @@ test_folder_nested_upload (void)
             g_usleep (100 * 1000);
         }
         if (!got_alpha) {
-            got_alpha = get_file_direct (fd, &htlc, top_dir, 2, "alpha.txt",
-                                         &alen);
+            got_alpha
+                = get_file_direct (fd, &htlc, top_dir, 2, "alpha.txt", &alen);
         }
         if (!got_beta) {
-            got_beta = get_file_direct (fd, &htlc, nested_dir, 3, "beta.txt",
-                                        &blen);
+            got_beta
+                = get_file_direct (fd, &htlc, nested_dir, 3, "beta.txt", &blen);
         }
     }
 

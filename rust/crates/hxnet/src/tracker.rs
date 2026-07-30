@@ -48,10 +48,9 @@ use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 use hotline_proto::parse::{
-    pack_tracker_v3_handshake, pack_tracker_v3_listing_request_simple,
-    parse_tracker_header, parse_tracker_record_fixed, parse_tracker_v3_record,
-    parse_tracker_v3_response_header, tracker_normalize_text, tracker_record_is_padding,
-    tracker_v3,
+    pack_tracker_v3_handshake, pack_tracker_v3_listing_request_simple, parse_tracker_header,
+    parse_tracker_record_fixed, parse_tracker_v3_record, parse_tracker_v3_response_header,
+    tracker_normalize_text, tracker_record_is_padding, tracker_v3,
 };
 
 /// `"HTRK"` magic + `u16` version that opens every tracker response.
@@ -454,12 +453,11 @@ async fn read_v3_listing<S: AsyncRead + AsyncWrite + Unpin>(
     let mut records = Vec::new();
     let mut off = 0usize;
     for i in 0..h.record_count {
-        let (rec, consumed) = parse_tracker_v3_record(&payload, off).ok_or(
-            TrackerError::MalformedV3Record {
+        let (rec, consumed) =
+            parse_tracker_v3_record(&payload, off).ok_or(TrackerError::MalformedV3Record {
                 index: i,
                 count: h.record_count,
-            },
-        )?;
+            })?;
         records.push(TrackerRecord {
             addr_type: rec.addr_type,
             address: rec.address.to_vec(),
@@ -622,9 +620,11 @@ mod tests {
         script.extend_from_slice(&v1_record([1, 2, 3, 4], 5500, 3, b"srv1", b"abc"));
         script.extend_from_slice(&v1_record([5, 6, 7, 8], 6000, 0, b"", b""));
 
-        let listing = with_server(&v1_client_magic(), script, |mut c| async move { run_v1(&mut c).await })
-            .await
-            .expect("v1 listing");
+        let listing = with_server(&v1_client_magic(), script, |mut c| async move {
+            run_v1(&mut c).await
+        })
+        .await
+        .expect("v1 listing");
 
         assert_eq!(listing.version, 1);
         assert_eq!(listing.expected, 2);
@@ -753,9 +753,11 @@ mod tests {
     #[tokio::test]
     async fn bad_magic_is_rejected() {
         let script = vec![b'N', b'O', b'P', b'E', 0, 1];
-        let err = with_server(&v1_client_magic(), script, |mut c| async move { run_v1(&mut c).await })
-            .await
-            .unwrap_err();
+        let err = with_server(&v1_client_magic(), script, |mut c| async move {
+            run_v1(&mut c).await
+        })
+        .await
+        .unwrap_err();
         assert!(matches!(err, TrackerError::BadMagic));
     }
 
@@ -764,9 +766,11 @@ mod tests {
         let mut script = Vec::new();
         script.extend_from_slice(&HTRK_MAGIC);
         script.extend_from_slice(&0x0009u16.to_be_bytes()); // not v1/v2/v3
-        let err = with_server(&v1_client_magic(), script, |mut c| async move { run_v1(&mut c).await })
-            .await
-            .unwrap_err();
+        let err = with_server(&v1_client_magic(), script, |mut c| async move {
+            run_v1(&mut c).await
+        })
+        .await
+        .unwrap_err();
         assert!(matches!(err, TrackerError::UnsupportedVersion(0x0009)));
     }
 
@@ -789,9 +793,11 @@ mod tests {
         // Server sends 3 bytes then hangs up before the full 6-byte
         // response. A connection close mid-reply is inconclusive → v1
         // retry, even though the watchdog never fired (generous timeout).
-        let outcome = with_closing_server(&v3_client_handshake(0), vec![b'H', b'T', b'R'], |mut c| async move {
-            run_v3_probe(&mut c, 0, Duration::from_secs(5)).await
-        })
+        let outcome = with_closing_server(
+            &v3_client_handshake(0),
+            vec![b'H', b'T', b'R'],
+            |mut c| async move { run_v3_probe(&mut c, 0, Duration::from_secs(5)).await },
+        )
         .await
         .expect("probe returns Ok");
         assert!(matches!(outcome, Outcome::ProbeInconclusive));
@@ -955,9 +961,11 @@ mod tests {
         let mut script = v1_header(1); // promises 1 server, never delivered
         let slots = (MAX_V1_PADDING_SLOTS as usize) + 1;
         script.extend_from_slice(&vec![0u8; slots * 8]); // all-zero = padding
-        let err = with_server(&v1_client_magic(), script, |mut c| async move { run_v1(&mut c).await })
-            .await
-            .unwrap_err();
+        let err = with_server(&v1_client_magic(), script, |mut c| async move {
+            run_v1(&mut c).await
+        })
+        .await
+        .unwrap_err();
         assert!(matches!(err, TrackerError::ExcessivePadding));
     }
 
@@ -971,12 +979,11 @@ mod tests {
         // showed up as a CI timeout).
         let mut script = v1_header(1);
         script.extend_from_slice(&[1, 2, 3, 4, 0x15, 0x7c]); // only 6 of the 8 head bytes
-        let err =
-            with_closing_server(&v1_client_magic(), script, |mut c| async move {
-                run_v1(&mut c).await
-            })
-            .await
-            .unwrap_err();
+        let err = with_closing_server(&v1_client_magic(), script, |mut c| async move {
+            run_v1(&mut c).await
+        })
+        .await
+        .unwrap_err();
         assert!(matches!(err, TrackerError::ShortRead));
     }
 }

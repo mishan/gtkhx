@@ -102,8 +102,7 @@ extern char *hx_voice_ptt_keyspec_canonicalize (guint keyval,
  * sentinel); the caller decides whether that's an error or a
  * legitimate "PTT enabled but key unset" state.
  */
-extern gboolean hx_voice_ptt_keyspec_parse (const char *spec,
-                                            guint *out_keyval,
+extern gboolean hx_voice_ptt_keyspec_parse (const char *spec, guint *out_keyval,
                                             GdkModifierType *out_state);
 
 /*
@@ -112,7 +111,7 @@ extern gboolean hx_voice_ptt_keyspec_parse (const char *spec,
  * state rather than being held, and the canonical string would
  * change under the user's feet.
  */
-#define HX_VOICE_PTT_MODIFIER_MASK \
+#define HX_VOICE_PTT_MODIFIER_MASK                                             \
     (GDK_CONTROL_MASK | GDK_SHIFT_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)
 
 G_END_DECLS

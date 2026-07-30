@@ -133,7 +133,7 @@ test_reopen_same_uid_replaces_window (void)
     g_assert_cmpuint (g_hash_table_size (t), ==, 1);
 
     /* `first` is freed here via msgwin_stub_free; valgrind / ASan
-	 * catches a regression that drops the destroy notify. */
+     * catches a regression that drops the destroy notify. */
     g_hash_table_insert (t, GUINT_TO_POINTER (7u), second);
     g_assert_cmpuint (g_hash_table_size (t), ==, 1);
     g_assert_true (g_hash_table_lookup (t, GUINT_TO_POINTER (7u)) == second);

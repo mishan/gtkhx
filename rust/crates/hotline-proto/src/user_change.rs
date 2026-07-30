@@ -103,7 +103,8 @@ pub fn resolve(inp: &ChangeInput) -> ChangePlan {
     // USER_CHANGE is the server echoing our own post-SELFINFO USER_CHANGE back —
     // its name matches our nick and carries our freshly-assigned uid. Adopt it.
     let mut eff_self = inp.self_uid;
-    if inp.self_uid == 0 && inp.uid != 0 && !inp.name.is_empty() && inp.self_name == Some(inp.name) {
+    if inp.self_uid == 0 && inp.uid != 0 && !inp.name.is_empty() && inp.self_name == Some(inp.name)
+    {
         out.adopt_self_uid = true;
         eff_self = inp.uid;
     }
@@ -458,7 +459,16 @@ mod tests {
         let uc = mk_msg(1, b"X", 0, false);
         unsafe {
             // NULL out — must not crash.
-            hx_user_change_plan_resolve(&uc, 1, 0, 0, x.as_ptr(), 1, x.as_ptr(), std::ptr::null_mut());
+            hx_user_change_plan_resolve(
+                &uc,
+                1,
+                0,
+                0,
+                x.as_ptr(),
+                1,
+                x.as_ptr(),
+                std::ptr::null_mut(),
+            );
         }
     }
 }

@@ -49,17 +49,17 @@ test_emoji_roundtrip_a_to_b (void)
     }
 
     /* A encodes via the legacy send path: emoji → :shortcode:, then Mac
-	 * Roman (a no-op for the now-ASCII text). The result must carry
-	 * ":tada:" and contain no high bytes. */
+     * Roman (a no-op for the now-ASCII text). The result must carry
+     * ":tada:" and contain no high bytes. */
     gsize wlen = 0;
-    char *wire = gtkhx_text_for_wire (TYPED_LINE, strlen (TYPED_LINE),
-                                      /*utf8_mode=*/FALSE, /*is_body=*/TRUE,
-                                      &wlen);
+    char *wire
+        = gtkhx_text_for_wire (TYPED_LINE, strlen (TYPED_LINE),
+                               /*utf8_mode=*/FALSE, /*is_body=*/TRUE, &wlen);
     g_assert_nonnull (wire);
     g_assert_nonnull (strstr (wire, ":tada:"));
     g_assert_null (strstr (wire, EMOJI_BYTES));
     for (gsize i = 0; i < wlen; i++) {
-        g_assert_true ((guint8) wire[i] < 0x80);
+        g_assert_true ((guint8)wire[i] < 0x80);
     }
 
     g_assert_true (integration_send_chat (fd_a, &htlc_a, wire));
@@ -70,7 +70,8 @@ test_emoji_roundtrip_a_to_b (void)
     g_assert_true (integration_drain_until_chat (fd_b, &htlc_b, htlc_a.uid, &cm,
                                                  /*max_messages=*/64));
 
-    HxChatEvent *e = hx_chat_event_new (cm.text, cm.text_len, /*cid=*/0, /*uid=*/0, NULL);
+    HxChatEvent *e
+        = hx_chat_event_new (cm.text, cm.text_len, /*cid=*/0, /*uid=*/0, NULL);
     g_assert_nonnull (e);
     /* The decoded display line shows the emoji and no longer the shortcode. */
     g_assert_nonnull (g_strstr_len (e->line, e->line_len, EMOJI_BYTES));

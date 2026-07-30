@@ -61,7 +61,5 @@ pub mod event;
 pub mod state;
 
 pub use action::{Action, SignalKind, TimerKind};
-pub use event::{
-    ConnectionState, Event, Participant, ServerError, Timeout,
-};
+pub use event::{ConnectionState, Event, Participant, ServerError, Timeout};
 pub use state::{SessionMachine, SessionState};

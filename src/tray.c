@@ -222,8 +222,8 @@ gtkhx_tray_show_all_windows (void)
         GtkWidget *w = GTK_WIDGET (l->data);
         gtk_widget_set_visible (w, TRUE);
         /* gtk_window_present requests user attention; on
-		 * compositors with xdg-activation this brings the
-		 * window onto the current workspace and raises it. */
+         * compositors with xdg-activation this brings the
+         * window onto the current workspace and raises it. */
         gtk_window_present (GTK_WINDOW (w));
     }
     g_list_free (wins);
@@ -277,8 +277,8 @@ sni_method_call (GDBusConnection *conn, const char *sender,
         || g_strcmp0 (method, "ContextMenu") == 0
         || g_strcmp0 (method, "Scroll") == 0) {
         /* No-op: ContextMenu is served by the host via our Menu
-		 * property pointing at /MenuBar. SecondaryActivate and
-		 * Scroll have no useful meaning for us. */
+         * property pointing at /MenuBar. SecondaryActivate and
+         * Scroll have no useful meaning for us. */
         g_dbus_method_invocation_return_value (invocation, NULL);
         return;
     }
@@ -312,9 +312,9 @@ sni_get_property (GDBusConnection *conn, const char *sender,
     }
     if (g_strcmp0 (property, "IconName") == 0) {
         /* Falls back to the bundled gresource icon. Hosts query
-		 * the icon theme using this name; we registered the
-		 * gresource icon path under the same name at startup
-		 * (gtkhx.c::gtkhx_activate). */
+         * the icon theme using this name; we registered the
+         * gresource icon path under the same name at startup
+         * (gtkhx.c::gtkhx_activate). */
         return g_variant_new_string ("com.nasledov.gtkhx");
     }
     if (g_strcmp0 (property, "IconThemePath") == 0) {
@@ -498,11 +498,11 @@ menu_method_call (GDBusConnection *conn, const char *sender,
         const char *event_id;
 
         /* Spec: Event(IN i id, IN s eventId, IN v data,
-		 * IN u timestamp). The previous '(i&sva{sv}u)' had a
-		 * stray a{sv} between the variant and the timestamp;
-		 * g_variant_get hit the type mismatch and bailed before
-		 * extracting event_id, so every click was silently
-		 * ignored. */
+         * IN u timestamp). The previous '(i&sva{sv}u)' had a
+         * stray a{sv} between the variant and the timestamp;
+         * g_variant_get hit the type mismatch and bailed before
+         * extracting event_id, so every click was silently
+         * ignored. */
         g_variant_get (params, "(i&svu)", &id, &event_id, NULL, NULL);
         if (g_strcmp0 (event_id, "clicked") == 0) {
             switch (id) {
@@ -529,8 +529,8 @@ menu_method_call (GDBusConnection *conn, const char *sender,
 
     if (g_strcmp0 (method, "AboutToShow") == 0) {
         /* needUpdate=false — properties update via the
-		 * ItemsPropertiesUpdated signal as state changes, so the
-		 * host never has to refetch. */
+         * ItemsPropertiesUpdated signal as state changes, so the
+         * host never has to refetch. */
         g_dbus_method_invocation_return_value (invocation,
                                                g_variant_new ("(b)", FALSE));
         return;
@@ -607,10 +607,10 @@ on_register_done (GObject *src, GAsyncResult *res, gpointer u)
     r = g_dbus_proxy_call_finish (G_DBUS_PROXY (src), res, &err);
     if (err) {
         /* Watcher not around — common on Wayland GNOME without
-		 * the AppIndicator extension. Stay registered on the
-		 * bus; the watcher can pick us up later if it shows up
-		 * (its IsStatusNotifierHostRegistered notifications will
-		 * trigger our re-register path). */
+         * the AppIndicator extension. Stay registered on the
+         * bus; the watcher can pick us up later if it shows up
+         * (its IsStatusNotifierHostRegistered notifications will
+         * trigger our re-register path). */
         tray_host_present = FALSE;
         g_clear_error (&err);
         return;
@@ -651,7 +651,7 @@ on_watcher_proxy_ready (GObject *src, GAsyncResult *res, gpointer u)
         tray_watcher_proxy, "g-signal", G_CALLBACK (on_watcher_signal), NULL);
 
     /* If the proxy already has an owner, the watcher is live —
-	 * register. */
+     * register. */
     {
         char *owner = g_dbus_proxy_get_name_owner (tray_watcher_proxy);
         if (owner) {
@@ -671,7 +671,7 @@ on_watcher_signal (GDBusProxy *p, const char *sender, const char *signal,
     (void)u;
     if (g_strcmp0 (signal, "StatusNotifierHostRegistered") == 0) {
         /* A host just appeared — re-register in case we beat
-		 * it to the punch at startup. */
+         * it to the punch at startup. */
         tray_host_present = TRUE;
         tray_register_with_watcher ();
     }
@@ -772,7 +772,7 @@ on_name_lost (GDBusConnection *conn, const char *name, gpointer u)
     (void)u;
     if (!conn) {
         /* Couldn't connect to session bus at all. Nothing to
-		 * do; user environment probably doesn't have one. */
+         * do; user environment probably doesn't have one. */
         return;
     }
 }
@@ -824,9 +824,9 @@ gtkhx_tray_init (GtkApplication *app)
     }
     tray_app = app;
     /* Pull the initial pref straight out of gtkhx_prefs here so the
-	 * caller doesn't have to remember to do it. Subsequent changes
-	 * arrive via gtkhx_tray_set_enabled() from the changed_tray
-	 * cfgvar callback. */
+     * caller doesn't have to remember to do it. Subsequent changes
+     * arrive via gtkhx_tray_set_enabled() from the changed_tray
+     * cfgvar callback. */
     tray_enabled = gtkhx_prefs.tray ? TRUE : FALSE;
     if (tray_enabled) {
         tray_activate_register ();

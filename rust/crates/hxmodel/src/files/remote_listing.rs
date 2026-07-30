@@ -65,8 +65,8 @@ impl RemoteListing {
     /// interior NUL (impossible from real navigation, defensive against
     /// hostile wire bytes) falls back to `/`.
     fn sync_c(&mut self) {
-        self.current_c = CString::new(self.current.as_bytes())
-            .unwrap_or_else(|_| CString::new("/").unwrap());
+        self.current_c =
+            CString::new(self.current.as_bytes()).unwrap_or_else(|_| CString::new("/").unwrap());
     }
 
     /// The canonical current path (`/` at the root).

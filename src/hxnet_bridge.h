@@ -120,9 +120,9 @@ extern void hx_bridge_dispatch_shutdown (struct htlc_conn *htlc, int reason);
  * HOPE-secure logins still go through the legacy connect path.
  */
 extern gboolean hx_bridge_install_orchestrated_plaintext (
-    struct htlc_conn *htlc, const char *host, guint16 port,
-    const char *login, const char *pass, const char *name, guint16 icon,
-    guint16 version, guint16 caps, guint32 trans);
+    struct htlc_conn *htlc, const char *host, guint16 port, const char *login,
+    const char *pass, const char *name, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans);
 
 /*
  * HOPE sibling of hx_bridge_install_orchestrated_plaintext: hxnet
@@ -135,9 +135,9 @@ extern gboolean hx_bridge_install_orchestrated_plaintext (
  * caller registers its login task under that value).
  */
 extern gboolean hx_bridge_install_orchestrated_hope (
-    struct htlc_conn *htlc, const char *host, guint16 port,
-    const char *login, const char *pass, const char *name, guint16 icon,
-    guint16 version, guint16 caps, guint32 trans, const char *cipher_alg);
+    struct htlc_conn *htlc, const char *host, guint16 port, const char *login,
+    const char *pass, const char *name, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans, const char *cipher_alg);
 
 /*
  * TLS sibling of hx_bridge_install_orchestrated_plaintext: plaintext
@@ -154,9 +154,9 @@ extern gboolean hx_bridge_install_orchestrated_hope (
  * guaranteed to run on every connection.
  */
 extern gboolean hx_bridge_install_orchestrated_plaintext_tls (
-    struct htlc_conn *htlc, const char *host, guint16 port,
-    const char *login, const char *pass, const char *name, guint16 icon,
-    guint16 version, guint16 caps, guint32 trans);
+    struct htlc_conn *htlc, const char *host, guint16 port, const char *login,
+    const char *pass, const char *name, guint16 icon, guint16 version,
+    guint16 caps, guint32 trans);
 
 /*
  * TRUE when an hxnet connection is currently installed.

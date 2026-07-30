@@ -24,8 +24,9 @@ struct htxf_conn;
  * first step of moving its cross-thread lifecycle behind this ABI. The mirror
  * layout is pinned at runtime by tests/unit/test_htxf_layout.c against the
  * introspection helpers below. */
-extern struct htxf_conn *hx_htxf_new (void);   /* zeroed; replaces g_malloc0 */
-extern void hx_htxf_free (struct htxf_conn *htxf); /* NULL-safe; replaces g_free */
+extern struct htxf_conn *hx_htxf_new (void); /* zeroed; replaces g_malloc0 */
+extern void
+hx_htxf_free (struct htxf_conn *htxf); /* NULL-safe; replaces g_free */
 
 /* Layout introspection — a C test asserts these against sizeof / offsetof on the
  * real struct htxf_conn, so a field drift on either side fails the build/test. */
@@ -40,7 +41,7 @@ extern size_t hx_htxf_offsetof_total_pos (void);
  * main thread and the tokio transfer worker; these are the atomic ABI (a 1:1
  * port of the old g_atomic_int_* calls) the C side now goes through instead of
  * accessing htxf->{refcount,canceled,total_pos} directly. */
-extern gint hx_htxf_ref (struct htxf_conn *htxf);   /* inc; returns new count */
+extern gint hx_htxf_ref (struct htxf_conn *htxf); /* inc; returns new count */
 /* dec; on the last ref (count → 0) runs the registered destructor (the C
  * GTK/preview + channel teardown) then frees the handle. NULL-safe. */
 extern void hx_htxf_unref (struct htxf_conn *htxf);
@@ -63,17 +64,17 @@ extern void hx_htxf_set_destructor (void (*cb) (struct htxf_conn *htxf));
 extern int hx_htxf_in_list (struct htxf_conn *htxf);
 
 /* Getters. */
-extern int          hx_htxf_opt_retry (const struct htxf_conn *htxf);
-extern int          hx_htxf_opt_preview (const struct htxf_conn *htxf);
-extern int          hx_htxf_opt_folder (const struct htxf_conn *htxf);
-extern int          hx_htxf_opt_large (const struct htxf_conn *htxf);
+extern int hx_htxf_opt_retry (const struct htxf_conn *htxf);
+extern int hx_htxf_opt_preview (const struct htxf_conn *htxf);
+extern int hx_htxf_opt_folder (const struct htxf_conn *htxf);
+extern int hx_htxf_opt_large (const struct htxf_conn *htxf);
 /* opt-bitfield setters (C owns the bit layout) — used by the Rust xfers shell's
  * xfer_new / xfer_new_folder. */
-extern void         hx_htxf_set_opt_preview (struct htxf_conn *htxf, int v);
-extern void         hx_htxf_set_opt_folder (struct htxf_conn *htxf, int v);
-extern void        *hx_htxf_preview (const struct htxf_conn *htxf);
-extern const char  *hx_htxf_path (const struct htxf_conn *htxf);
-extern guint64      hx_htxf_data_size (const struct htxf_conn *htxf);
+extern void hx_htxf_set_opt_preview (struct htxf_conn *htxf, int v);
+extern void hx_htxf_set_opt_folder (struct htxf_conn *htxf, int v);
+extern void *hx_htxf_preview (const struct htxf_conn *htxf);
+extern const char *hx_htxf_path (const struct htxf_conn *htxf);
+extern guint64 hx_htxf_data_size (const struct htxf_conn *htxf);
 
 /* Setters. */
 extern void hx_htxf_set_ref (struct htxf_conn *htxf, guint32 ref);

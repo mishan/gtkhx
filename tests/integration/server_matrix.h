@@ -44,39 +44,39 @@
  * BANNER_HTXF, ...) live in the high half so they don't collide.
  */
 
-#define HX_TEST_CAP_LARGE_FILES   (1u << 0)  /* >4 GiB file transfers */
-#define HX_TEST_CAP_TEXT_ENCODING (1u << 1)  /* UTF-8 negotiation     */
+#define HX_TEST_CAP_LARGE_FILES (1u << 0)   /* >4 GiB file transfers */
+#define HX_TEST_CAP_TEXT_ENCODING (1u << 1) /* UTF-8 negotiation     */
 /* (1u << 2) reserved — CAPABILITY_DATE_FORMAT in protocol.h */
-#define HX_TEST_CAP_INLINE_MEDIA  (1u << 3)  /* fogWraith spec        */
-#define HX_TEST_CAP_CHAT_HISTORY  (1u << 4)  /* fogWraith spec        */
+#define HX_TEST_CAP_INLINE_MEDIA (1u << 3) /* fogWraith spec        */
+#define HX_TEST_CAP_CHAT_HISTORY (1u << 4) /* fogWraith spec        */
 
 /* Non-wire test-only bits live in the high half. */
-#define HX_TEST_CAP_HOPE          (1u << 16) /* HOPE handshake        */
-#define HX_TEST_CAP_BANNER_HTXF   (1u << 17) /* HTXF-mode banner      */
-#define HX_TEST_CAP_NEWS_15       (1u << 18) /* threaded 1.5+ news    */
-#define HX_TEST_CAP_CHACHA20      (1u << 19) /* HOPE ChaCha20-Poly1305*/
-#define HX_TEST_CAP_BLOWFISH      (1u << 20) /* HOPE Blowfish OFB-64  */
+#define HX_TEST_CAP_HOPE (1u << 16)        /* HOPE handshake        */
+#define HX_TEST_CAP_BANNER_HTXF (1u << 17) /* HTXF-mode banner      */
+#define HX_TEST_CAP_NEWS_15 (1u << 18)     /* threaded 1.5+ news    */
+#define HX_TEST_CAP_CHACHA20 (1u << 19)    /* HOPE ChaCha20-Poly1305*/
+#define HX_TEST_CAP_BLOWFISH (1u << 20)    /* HOPE Blowfish OFB-64  */
 /* (1u << 21) reserved — was HX_TEST_CAP_RC4 before RC4 was
  * removed in claude/remove-rc4. Slot stays out of rotation so
  * existing capability bitmasks don't accidentally light it up. */
-#define HX_TEST_CAP_NICK_COLORS   (1u << 22) /* Colored-Nicknames     */
-#define HX_TEST_CAP_TLS           (1u << 23) /* TLS on a separate port*/
-#define HX_TEST_CAP_VOICE         (1u << 24) /* WebRTC voice extension*/
+#define HX_TEST_CAP_NICK_COLORS (1u << 22) /* Colored-Nicknames     */
+#define HX_TEST_CAP_TLS (1u << 23)         /* TLS on a separate port*/
+#define HX_TEST_CAP_VOICE (1u << 24)       /* WebRTC voice extension*/
 
 /* ---- The matrix struct ------------------------------------------ */
 
 typedef struct {
-    const char *name;       /* "mhxd" | "mobius" | "vespernet" | ... */
-    const char *host;       /* DNS name or IP, used by getaddrinfo  */
-    guint16     port;       /* HTLS server port                     */
-    guint16     xfer_port;  /* HTXF subchannel port (usually port+1)*/
+    const char *name;  /* "mhxd" | "mobius" | "vespernet" | ... */
+    const char *host;  /* DNS name or IP, used by getaddrinfo  */
+    guint16 port;      /* HTLS server port                     */
+    guint16 xfer_port; /* HTXF subchannel port (usually port+1)*/
     /* Mobius / Janus separate-port TLS model: when the server
      * advertises HX_TEST_CAP_TLS, tls_port is the host-side port
      * that speaks HTLS-over-TLS from byte zero (no STARTTLS), and
      * tls_xfer_port is the matching HTXF subchannel port for the
      * Phase 2 wrap. Both are 0 when the server doesn't expose TLS. */
-    guint16     tls_port;
-    guint16     tls_xfer_port;
+    guint16 tls_port;
+    guint16 tls_xfer_port;
     /* WebRTC voice subchannel (Phase 8.F). When the server advertises
      * HX_TEST_CAP_VOICE this is the host-side UDP port the server
      * receives ICE/DTLS/RTP on (Janus: container's VoiceUDPPort, which
@@ -85,9 +85,9 @@ typedef struct {
      * channel — none of them sends UDP — but the field is recorded
      * here so a future GStreamer-backed media test can pick it up
      * without changing the matrix shape again. */
-    guint16     voice_port;
-    guint16     hl_version; /* HTLS_DATA_VERSION value, e.g. 185    */
-    guint32     caps;       /* HX_TEST_CAP_* bitmask                */
+    guint16 voice_port;
+    guint16 hl_version; /* HTLS_DATA_VERSION value, e.g. 185    */
+    guint32 caps;       /* HX_TEST_CAP_* bitmask                */
 } hx_test_server;
 
 /* Static, immutable table of known test targets. Defined in

@@ -86,8 +86,8 @@ void gtkhx_session_emit_chat_subject (GtkhxSession *self,
  * view-side handler (chat.c chat_subject_notice_handler) owns the gettext +
  * INFOPREFIX. */
 void gtkhx_session_emit_chat_subject_notice (GtkhxSession *self,
-                                             struct htlc_conn *htlc, guint32 cid,
-                                             const char *subj);
+                                             struct htlc_conn *htlc,
+                                             guint32 cid, const char *subj);
 
 void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
                                          struct htlc_conn *htlc, guint32 cid,
@@ -107,11 +107,10 @@ void gtkhx_session_emit_chat_invitation (GtkhxSession *self,
  * cid is the channel id requested. Today the only meaningful
  * channel is 0 (public chat); the spec reserves 1+ for future
  * named channels. */
-void gtkhx_session_emit_chat_history_batch (GtkhxSession     *self,
-                                            struct htlc_conn *htlc,
-                                            guint32           cid,
-                                            GPtrArray        *entries,
-                                            gboolean          has_more);
+void gtkhx_session_emit_chat_history_batch (GtkhxSession *self,
+                                            struct htlc_conn *htlc, guint32 cid,
+                                            GPtrArray *entries,
+                                            gboolean has_more);
 
 /* GIF-icons extension (fogWraith GIF-Icons.md).
  *
@@ -124,14 +123,11 @@ void gtkhx_session_emit_chat_history_batch (GtkhxSession     *self,
  * The pointer is valid only during the emit — subscribers decode /
  * copy before returning. len == 0 means the user has no avatar
  * (cleared). */
-void gtkhx_session_emit_gif_icon_changed (GtkhxSession     *self,
-                                          struct htlc_conn *htlc,
-                                          guint16           uid);
-void gtkhx_session_emit_gif_icon_data (GtkhxSession     *self,
-                                       struct htlc_conn *htlc,
-                                       guint16           uid,
-                                       gconstpointer     gif,
-                                       guint             len);
+void gtkhx_session_emit_gif_icon_changed (GtkhxSession *self,
+                                          struct htlc_conn *htlc, guint16 uid);
+void gtkhx_session_emit_gif_icon_data (GtkhxSession *self,
+                                       struct htlc_conn *htlc, guint16 uid,
+                                       gconstpointer gif, guint len);
 
 /* The "msg" (private message) signal payload is a boxed HxMsgEvent
  * for the same reason "chat" carries an HxChatEvent: every
@@ -268,8 +264,8 @@ enum {
     HX_USER_NOTICE_RENAME = 2,
 };
 void gtkhx_session_emit_user_notice (GtkhxSession *self, struct htlc_conn *htlc,
-                                     guint32 cid, guint32 kind, const char *name,
-                                     const char *old_name);
+                                     guint32 cid, guint32 kind,
+                                     const char *name, const char *old_name);
 
 /* High-level connection state. The signal's view-side handler
  * translates each state into the per-aspect UI updates (toolbar
@@ -279,28 +275,28 @@ void gtkhx_session_emit_user_notice (GtkhxSession *self, struct htlc_conn *htlc,
  * hx_htlc_close) used to issue by name. */
 typedef enum {
     GTKHX_CONNECTION_DISCONNECTED,   /* No connection. UI shows
-	                                  * disconnected chrome. */
+                                      * disconnected chrome. */
     GTKHX_CONNECTION_CONNECTING,     /* DNS resolve + TCP connect in
-	                                  * flight. Status bar reads
-	                                  * "connecting", disconnect
-	                                  * button is shown. */
+                                      * flight. Status bar reads
+                                      * "connecting", disconnect
+                                      * button is shown. */
     GTKHX_CONNECTION_TCP_CONNECTED,  /* TCP connected; magic
-	                                  * exchange + login send in
-	                                  * flight. Status bar reads
-	                                  * "connected". */
+                                      * exchange + login send in
+                                      * flight. Status bar reads
+                                      * "connected". */
     GTKHX_CONNECTION_HANDSHAKE_DONE, /* LOGIN sent. Connect task
-	                                  * progress ticker is done. */
+                                      * progress ticker is done. */
     GTKHX_CONNECTION_LOGIN_READY,    /* hx_post_login_fetches has
-	                                  * fired — the server has accepted
-	                                  * us as a fully-joined user
-	                                  * (either AGREEMENTAGREE went out
-	                                  * for 1.5+ servers, or the 1.0/
-	                                  * 1.2 fallback timer fired). This
-	                                  * is the boundary at which post-
-	                                  * login RPCs (USER_GETLIST,
-	                                  * FILE_LIST for the files
-	                                  * browser, chat history catch-up)
-	                                  * are spec-safe to send. */
+                                      * fired — the server has accepted
+                                      * us as a fully-joined user
+                                      * (either AGREEMENTAGREE went out
+                                      * for 1.5+ servers, or the 1.0/
+                                      * 1.2 fallback timer fired). This
+                                      * is the boundary at which post-
+                                      * login RPCs (USER_GETLIST,
+                                      * FILE_LIST for the files
+                                      * browser, chat history catch-up)
+                                      * are spec-safe to send. */
 } GtkhxConnectionState;
 
 void gtkhx_session_emit_connection_state (GtkhxSession *self,

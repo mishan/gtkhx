@@ -106,9 +106,7 @@ pub fn parse_icon_list<'a>(
 /// absent `UID` is the only failure (returns `None`). Validating the
 /// GIF signature on a non-empty payload is the caller's job
 /// ([`is_gif`]).
-pub fn parse_icon_get_reply<'a>(
-    chunks: impl Iterator<Item = Chunk<'a>>,
-) -> Option<IconEntry<'a>> {
+pub fn parse_icon_get_reply<'a>(chunks: impl Iterator<Item = Chunk<'a>>) -> Option<IconEntry<'a>> {
     let mut uid: Option<u16> = None;
     let mut gif: &[u8] = &[];
     for c in chunks {

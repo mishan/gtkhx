@@ -87,8 +87,14 @@ fn cap_record_golden_bytes() {
     assert_eq!(rec[CAP_OFF_DATEMAGIC], CAP_DMAGIC);
     assert_eq!(rec[CAP_OFF_DATEVALID], CAP_MDATE | CAP_CDATE);
     assert_eq!(&rec[0..8], b"TEXTMSIE");
-    assert_eq!(&rec[CAP_OFF_CTIME..CAP_OFF_CTIME + 4], &[0x11, 0x22, 0x33, 0x44]);
-    assert_eq!(&rec[CAP_OFF_CTIME + 4..CAP_OFF_CTIME + 8], &[0x55, 0x66, 0x77, 0x88]);
+    assert_eq!(
+        &rec[CAP_OFF_CTIME..CAP_OFF_CTIME + 4],
+        &[0x11, 0x22, 0x33, 0x44]
+    );
+    assert_eq!(
+        &rec[CAP_OFF_CTIME + 4..CAP_OFF_CTIME + 8],
+        &[0x55, 0x66, 0x77, 0x88]
+    );
     assert_eq!(rec[CAP_OFF_COMLN] as usize, sample().comment.len());
     assert_eq!(
         &rec[CAP_OFF_COMNT..CAP_OFF_COMNT + sample().comment.len()],

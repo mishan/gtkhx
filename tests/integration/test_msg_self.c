@@ -43,7 +43,7 @@ test_msg_self_doesnt_break_stream (void)
     }
 
     /* Send a PM addressed to our own uid. */
-    guint16 self_uid_be = g_htons(htlc.uid);
+    guint16 self_uid_be = g_htons (htlc.uid);
     const char *body = "tier-3 self-msg edge case";
     g_assert_true (integration_send_message (
         fd, &htlc, HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_UID,
@@ -51,9 +51,9 @@ test_msg_self_doesnt_break_stream (void)
         (int)strlen (body), (guint8 *)body));
 
     /* Drain a short window. We don't care whether the server echoes
-	 * the MSG back, task-errors it, or drops it silently — only that
-	 * whatever it does happens cleanly. Stop draining as soon as we
-	 * see anything (or after a brief idle). */
+     * the MSG back, task-errors it, or drops it silently — only that
+     * whatever it does happens cleanly. Stop draining as soon as we
+     * see anything (or after a brief idle). */
     int drained = 0;
     gboolean saw_self_msg = FALSE;
     gboolean saw_task_error = FALSE;
@@ -64,7 +64,9 @@ test_msg_self_doesnt_break_stream (void)
         drained++;
         if (hdr_type (&htlc) == HTLS_HDR_MSG) {
             struct hx_msg_msg pm;
-            if (hx_msg_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &pm) && pm.uid == htlc.uid) {
+            if (hx_msg_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, &pm)
+                && pm.uid == htlc.uid) {
                 saw_self_msg = TRUE;
             }
         } else if (hdr_type (&htlc) == HTLS_HDR_TASK
@@ -77,8 +79,8 @@ test_msg_self_doesnt_break_stream (void)
                     saw_task_error ? "yes" : "no");
 
     /* Probe the stream — a PING should still round-trip cleanly.
-	 * A protocol-framing slip caused by the self-msg would surface
-	 * as either no pong arriving (timeout) or a wrong-trans frame. */
+     * A protocol-framing slip caused by the self-msg would surface
+     * as either no pong arriving (timeout) or a wrong-trans frame. */
     guint32 ping_trans = integration_send_ping (fd, &htlc);
     g_assert_cmpuint (ping_trans, !=, 0);
 

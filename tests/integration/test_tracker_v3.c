@@ -92,8 +92,8 @@ read_exact (int fd, void *buf, gsize len, const char *what)
 {
     gboolean ok = integration_recv (fd, buf, len);
     if (!ok) {
-        g_test_fail_printf ("integration_recv (%s, %zu bytes) failed",
-                            what, (size_t) len);
+        g_test_fail_printf ("integration_recv (%s, %zu bytes) failed", what,
+                            (size_t)len);
     }
     g_assert_true (ok);
 }
@@ -123,7 +123,8 @@ test_v3_handshake_and_listing (void)
     if (fd < 0) {
         g_test_fail_printf (
             "couldn't connect to %s tracker at %s:%u — is its container "
-            "up?", trk->name, trk->host, (unsigned) trk->port);
+            "up?",
+            trk->name, trk->host, (unsigned)trk->port);
         g_ptr_array_unref (targets);
         return;
     }
@@ -133,10 +134,8 @@ test_v3_handshake_and_listing (void)
      * features it supports; the intersection matters less than the
      * round-trip working at all. */
     guint8 hs[8];
-    g_assert_true (
-        hx_tracker_v3_pack_handshake (hs, sizeof (hs),
-                                      HTRK_V3_FEAT_IPV6
-                                          | HTRK_V3_FEAT_QUERY));
+    g_assert_true (hx_tracker_v3_pack_handshake (
+        hs, sizeof (hs), HTRK_V3_FEAT_IPV6 | HTRK_V3_FEAT_QUERY));
     g_assert_true (integration_send (fd, hs, sizeof (hs)));
 
     /* Read 6 bytes first — same shape the production state machine
@@ -160,16 +159,14 @@ test_v3_handshake_and_listing (void)
      * dropped the feature breaks loudly instead of silently failing
      * the Phase C SEARCH_TEXT path when it lands. */
     if (trk->caps & HX_TEST_TRACKER_CAP_SEARCH_TEXT) {
-        g_assert_cmpuint (feat & HTRK_V3_FEAT_QUERY, ==,
-                          HTRK_V3_FEAT_QUERY);
+        g_assert_cmpuint (feat & HTRK_V3_FEAT_QUERY, ==, HTRK_V3_FEAT_QUERY);
     }
 
     /* ---- Listing request -------------------------------------- */
     guint8 req[4];
     gsize req_len = 0;
-    g_assert_true (
-        hx_tracker_v3_pack_listing_request_simple (req, sizeof (req),
-                                                   &req_len));
+    g_assert_true (hx_tracker_v3_pack_listing_request_simple (req, sizeof (req),
+                                                              &req_len));
     g_assert_cmpuint (req_len, ==, 4);
     g_assert_true (integration_send (fd, req, req_len));
 
@@ -188,8 +185,7 @@ test_v3_handshake_and_listing (void)
      * but the test containers don't have upstream HTLS servers
      * registering against them; the count is usually exactly the
      * promoted total.) */
-    g_assert_cmpuint (record_count, >=,
-                      (unsigned) trk->expected_promoted_count);
+    g_assert_cmpuint (record_count, >=, (unsigned)trk->expected_promoted_count);
     g_assert_cmpuint (total_size, >, 0u);
     g_assert_cmpuint (total_size, <, 16u * 1024u * 1024u); /* sanity cap */
 
@@ -226,13 +222,12 @@ test_v3_handshake_and_listing (void)
     for (guint16 i = 0; i < record_count; i++) {
         hx_tracker_v3_record rec = { 0 };
         gsize consumed = 0;
-        gboolean ok = hx_tracker_v3_parse_record (cursor, remaining, &rec,
-                                                  &consumed);
+        gboolean ok
+            = hx_tracker_v3_parse_record (cursor, remaining, &rec, &consumed);
         if (!ok) {
-            g_test_fail_printf (
-                "record %u/%u failed to parse (remaining=%zu)",
-                (unsigned) (i + 1), (unsigned) record_count,
-                (size_t) remaining);
+            g_test_fail_printf ("record %u/%u failed to parse (remaining=%zu)",
+                                (unsigned)(i + 1), (unsigned)record_count,
+                                (size_t)remaining);
             break;
         }
         decoded++;
@@ -248,13 +243,12 @@ test_v3_handshake_and_listing (void)
             g_test_fail_printf (
                 "record %u/%u: typed-meta decoder rejected the TLV "
                 "trailer (count=%u, bytes=%zu)",
-                (unsigned) (i + 1), (unsigned) record_count,
-                (unsigned) rec.tlv_count, (size_t) rec.tlv_bytes_len);
+                (unsigned)(i + 1), (unsigned)record_count,
+                (unsigned)rec.tlv_count, (size_t)rec.tlv_bytes_len);
             break;
         }
 
-        if (expect_argus_seed
-            && rec.name_len == strlen ("Promoted Alpha")
+        if (expect_argus_seed && rec.name_len == strlen ("Promoted Alpha")
             && memcmp (rec.name, "Promoted Alpha", rec.name_len) == 0) {
             seen_argus_seed = 1;
             /* Sanity: addr_type should be 0x48 hostname (Argus
@@ -273,7 +267,7 @@ test_v3_handshake_and_listing (void)
         remaining -= consumed;
     }
 
-    g_assert_cmpint (decoded, ==, (int) record_count);
+    g_assert_cmpint (decoded, ==, (int)record_count);
     /* The state-machine pattern (read total_size bytes, walk all
      * records, check cursor lands at end) — replicates Tier 2's
      * two_back_to_back test against real wire bytes. */

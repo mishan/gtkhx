@@ -151,7 +151,10 @@ pub unsafe extern "C" fn hxnet_banner_fetch_open(
         return std::ptr::null_mut();
     }
     if url_len > (isize::MAX as usize) {
-        glib::g_critical!("hxnet", "hxnet_banner_fetch_open: url_len exceeds isize::MAX");
+        glib::g_critical!(
+            "hxnet",
+            "hxnet_banner_fetch_open: url_len exceeds isize::MAX"
+        );
         return std::ptr::null_mut();
     }
     let url_str = match std::str::from_utf8(std::slice::from_raw_parts(url, url_len)) {
@@ -283,7 +286,10 @@ mod tests {
 
     /// Spawn a one-shot HTTP/1.1 server that replies `status` with `body`,
     /// returning its base URL.
-    fn serve_once(status_line: &'static str, body: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
+    fn serve_once(
+        status_line: &'static str,
+        body: &'static [u8],
+    ) -> (String, std::thread::JoinHandle<()>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let handle = std::thread::spawn(move || {
@@ -315,7 +321,10 @@ mod tests {
         let (url, server) = serve_once("404 Not Found", b"nope");
         let err = http_get(&url).unwrap_err();
         server.join().unwrap();
-        assert!(err.contains("404"), "error should mention the status: {err}");
+        assert!(
+            err.contains("404"),
+            "error should mention the status: {err}"
+        );
     }
 
     #[test]
@@ -338,8 +347,7 @@ mod tests {
             std::thread::sleep(Duration::from_millis(5));
         }
         assert_eq!(rc, HXNET_BANNER_DONE);
-        let got1 =
-            unsafe { std::slice::from_raw_parts(out.bytes_ptr, out.bytes_len) }.to_vec();
+        let got1 = unsafe { std::slice::from_raw_parts(out.bytes_ptr, out.bytes_len) }.to_vec();
         assert_eq!(got1, body);
 
         // Poll again — still DONE, same bytes.

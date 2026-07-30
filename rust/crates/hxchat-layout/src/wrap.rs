@@ -194,9 +194,7 @@ pub fn layout_message(
             (Some(g), _) if !g.text.is_empty() => {
                 measure_styled(g, 0..g.text.len(), measure) + metrics.space_width
             }
-            (_, Some(s)) => {
-                measure.run_width(&s.nick, Style::default()) + metrics.space_width * 2
-            }
+            (_, Some(s)) => measure.run_width(&s.nick, Style::default()) + metrics.space_width * 2,
             _ => 0,
         };
         // The gutter holds the timestamp *and* the nick, side by side,
@@ -207,7 +205,11 @@ pub fn layout_message(
         0
     };
 
-    let body_x = if params.indent { params.indent_width } else { 0 };
+    let body_x = if params.indent {
+        params.indent_width
+    } else {
+        0
+    };
     let body_width = params.width.saturating_sub(body_x).max(line_h);
 
     // The gutter is one unwrapped line, always first, carrying the x it

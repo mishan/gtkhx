@@ -129,10 +129,10 @@ kind_of_ftype (const char *ftype, gboolean *is_static_out)
     }
 
     /* Fall-through: format a one-off string with the raw FourCC.
-	 * Caller frees. Avoids embedding non-printable bytes by
-	 * substituting '?' for anything outside printable ASCII —
-	 * some Hotline FourCCs are control bytes (NUL-padded
-	 * short strings, etc.) that would render as boxes. */
+     * Caller frees. Avoids embedding non-printable bytes by
+     * substituting '?' for anything outside printable ASCII —
+     * some Hotline FourCCs are control bytes (NUL-padded
+     * short strings, etc.) that would render as boxes. */
     {
         char safe[5];
         gsize k;
@@ -190,7 +190,7 @@ hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
         hldir = path_to_hldir (pathbuf, &hldirlen, 0);
 
         /* chunk layout via gtkhx_proto_build_file_list_chunks; build BEFORE
-		 * task_new — see hx_send_msg for the rationale. */
+         * task_new — see hx_send_msg for the rationale. */
         struct hx_chunk chunks[1];
         int hc = (int)gtkhx_proto_build_file_list_chunks (
             hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
@@ -225,8 +225,8 @@ hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
             }
         }
         /* Basename in place: pointer to the last '/'-delimited component within
-		 * lpath; dirchar_fix rewrites those bytes, which lpath+1 (passed to
-		 * xfer_new) then carries. */
+         * lpath; dirchar_fix rewrites those bytes, which lpath+1 (passed to
+         * xfer_new) then carries. */
         p = strrchr (lpath + 1, '/');
         p = p ? p + 1 : lpath + 1;
         dirchar_fix (p);
@@ -234,10 +234,10 @@ hx_cfl_complete_entry (struct htlc_conn *htlc, struct cached_filelist *cfl,
             char *nm_utf8;
             gsize nm_utf8_len = 0;
             /* Store remotename as UTF-8 in memory so the folder-xfer label and
-			 * the file_list populate path agree; xfer_go re-encodes to the wire
-			 * format. */
-            nm_utf8 = gtkhx_text_to_utf8 ((const char *)fname, fnlen,
-                                          &nm_utf8_len);
+             * the file_list populate path agree; xfer_go re-encodes to the wire
+             * format. */
+            nm_utf8
+                = gtkhx_text_to_utf8 ((const char *)fname, fnlen, &nm_utf8_len);
             htxf = xfer_new (lpath + 1, cfl_path,
                              nm_utf8 ? nm_utf8 : (const char *)fname,
                              nm_utf8 ? nm_utf8_len : fnlen, XFER_GET, 0, fsize);
@@ -281,19 +281,19 @@ int
 exists_remote (char *path)
 {
     /* the legacy implementation walked the now-deleted
-	 * gfile_list cache to answer "is path present in any open
-	 * browser's last listing?" The new files browser doesn't
-	 * maintain that global cache — its listings live inside the
-	 * provider as a transient GListStore that's rebuilt per
-	 * directory.
-	 *
-	 * The single caller (xfers.c::xfer_go on the upload path)
-	 * uses the answer to decide whether to attach a FILE_PREVIEW
-	 * "is-resume" chunk to HTLC_HDR_FILE_PUT. Returning 0 here
-	 * matches the legacy code's first-call behaviour (cache miss
-	 * → async listing fires → return 0, no FILE_PREVIEW on this
-	 * upload). The server's rename-on-collision behaviour is
-	 * unchanged. */
+     * gfile_list cache to answer "is path present in any open
+     * browser's last listing?" The new files browser doesn't
+     * maintain that global cache — its listings live inside the
+     * provider as a transient GListStore that's rebuilt per
+     * directory.
+     *
+     * The single caller (xfers.c::xfer_go on the upload path)
+     * uses the answer to decide whether to attach a FILE_PREVIEW
+     * "is-resume" chunk to HTLC_HDR_FILE_PUT. Returning 0 here
+     * matches the legacy code's first-call behaviour (cache miss
+     * → async listing fires → return 0, no FILE_PREVIEW on this
+     * upload). The server's rename-on-collision behaviour is
+     * unchanged. */
     (void)path;
     return 0;
 }
@@ -314,10 +314,10 @@ hx_make_dir (struct htlc_conn *htlc, char *path)
     hldir = path_to_hldir (path, &hldirlen, 0);
 
     /* chunk layout moved to gtkhx_proto_build_file_mkdir_chunks.
-	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
+     * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[1];
-    int hc = (int)gtkhx_proto_build_file_mkdir_chunks (
-        hldir, hldirlen, chunks, G_N_ELEMENTS (chunks));
+    int hc = (int)gtkhx_proto_build_file_mkdir_chunks (hldir, hldirlen, chunks,
+                                                       G_N_ELEMENTS (chunks));
     if (hc > 0) {
         task_new (htlc, 0, 0, 0, "mkdir");
         hlwrite_chunks (htlc, HTLC_HDR_FILE_MKDIR, 0, chunks, hc);
@@ -336,7 +336,7 @@ hx_file_delete (struct htlc_conn *htlc, char *path)
     file = dirchar_basename (path);
 
     /* Phase E (follow-up): encode the filename. is_body = FALSE
-	 * (filenames are single-line). */
+     * (filenames are single-line). */
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize file_len = 0;
     char *file_wire
@@ -348,7 +348,7 @@ hx_file_delete (struct htlc_conn *htlc, char *path)
     }
 
     /* chunk layout moved to gtkhx_proto_build_file_delete_chunks.
-	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
+     * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[2];
     int hc = (int)gtkhx_proto_build_file_delete_chunks (
         (const uint8_t *)file_wire, file_len, has_dir ? 1 : 0, hldir, hldirlen,
@@ -369,9 +369,9 @@ hx_file_info (struct htlc_conn *htlc, const char *dir_path,
     char *task_label;
 
     /* task_new captures a copy of a path-shaped string for display
-	 * in the tasks window; rcv_task_file_getinfo also forwards it
-	 * to the file-info widget. Build a display string from dir +
-	 * name; the display layer just shows it, doesn't split it back. */
+     * in the tasks window; rcv_task_file_getinfo also forwards it
+     * to the file-info widget. Build a display string from dir +
+     * name; the display layer just shows it, doesn't split it back. */
     if (dir_path && *dir_path
         && !(dir_path[0] == (char)dir_char && dir_path[1] == 0)) {
         task_label = g_strdup_printf ("%s%c%.*s", dir_path, (char)dir_char,
@@ -380,10 +380,10 @@ hx_file_info (struct htlc_conn *htlc, const char *dir_path,
         task_label = g_strndup (file_name, file_name_len);
     }
     /* Phase E (follow-up): encode FILE_NAME for the wire. The
-	 * dir_path portion is built into a DIR chunk by path_to_hldir
-	 * which copies the bytes verbatim — same encoding shape as
-	 * other DIR-chunk sends (deferred for now; ASCII paths are
-	 * the overwhelming common case). */
+     * dir_path portion is built into a DIR chunk by path_to_hldir
+     * which copies the bytes verbatim — same encoding shape as
+     * other DIR-chunk sends (deferred for now; ASCII paths are
+     * the overwhelming common case). */
     gboolean utf8 = (hx_conn_has_cap (htlc, HTLC_CAP_TEXT_ENCODING)) != 0;
     gsize name_len = 0;
     char *name_wire = gtkhx_text_for_wire (file_name, file_name_len, utf8,
@@ -398,9 +398,9 @@ hx_file_info (struct htlc_conn *htlc, const char *dir_path,
     }
 
     /* chunk layout moved to gtkhx_proto_build_file_getinfo
-	 * _chunks. Build BEFORE task_new — see hx_send_msg for the
-	 * rationale. task_label is owned by task_new on success and
-	 * leaked otherwise; free it on the failure path. */
+     * _chunks. Build BEFORE task_new — see hx_send_msg for the
+     * rationale. task_label is owned by task_new on success and
+     * leaked otherwise; free it on the failure path. */
     struct hx_chunk chunks[2];
     int hc = (int)gtkhx_proto_build_file_getinfo_chunks (
         (const uint8_t *)name_wire, name_len, has_dir ? 1 : 0, hldir, hldirlen,
@@ -425,9 +425,9 @@ hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)
     gsize dir_len;
 
     /* The caller still passes a flat rpath here — uploads pick
-	 * the upload target via a local file picker, so the filename
-	 * portion is whatever POSIX rules permit (no `/`). Split off
-	 * the last component for the structured xfer_new call. */
+     * the upload target via a local file picker, so the filename
+     * portion is whatever POSIX rules permit (no `/`). Split off
+     * the last component for the structured xfer_new call. */
     base = dirchar_basename (rpath);
     dir_len = (gsize)(base - rpath);
     if (dir_len >= sizeof rdir) {
@@ -436,13 +436,13 @@ hx_put_file (struct htlc_conn *htlc, char *lpath, char *rpath)
     memcpy (rdir, rpath, dir_len);
     rdir[dir_len] = 0;
     /* Strip trailing dir_char if present so xfer_go's "is this
-	 * just the root?" test matches the local-path expectation. */
+     * just the root?" test matches the local-path expectation. */
     if (dir_len > 1 && rdir[dir_len - 1] == (char)dir_char) {
         rdir[dir_len - 1] = 0;
     }
 
     /* Uploads don't use srv_data_size — that's a download-side
-	 * heuristic for resume vs rename. */
+     * heuristic for resume vs rename. */
     htxf = xfer_new (lpath, rdir, base, strlen (base), XFER_PUT, 0, 0);
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
@@ -464,8 +464,8 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
     }
 
     /* Build the local destination root: lpath_root + '/' + name.
-	 * folder_get_thread snapshots this as base_path and rebuilds
-	 * the full per-file path inside its loop. */
+     * folder_get_thread snapshots this as base_path and rebuilds
+     * the full per-file path inside its loop. */
     {
         gsize root_len = strlen (lpath_root);
         gsize sep = (root_len > 0 && lpath_root[root_len - 1] != '/') ? 1 : 0;
@@ -481,8 +481,8 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
     }
 
     /* The remote directory for the GETFOLDER request is the
-	 * parent — the basename of the folder is the FILE_NAME chunk.
-	 * The wire framing is the same as FILE_GET in that respect. */
+     * parent — the basename of the folder is the FILE_NAME chunk.
+     * The wire framing is the same as FILE_GET in that respect. */
     rdir_len = rdir ? strlen (rdir) : 0;
     if (rdir_len >= sizeof (rdir_buf)) {
         rdir_len = sizeof (rdir_buf) - 1;
@@ -507,10 +507,10 @@ hx_get_folder (struct htlc_conn *htlc, const char *lpath_root, const char *rdir,
     }
 
     /* chunk layout moved to gtkhx_proto_build_file_getfolder
-	 * _chunks. Build BEFORE task_new — see hx_send_msg for the
-	 * rationale (the rcv-callback registration must still capture
-	 * htlc->trans before hlwrite_chunks bumps it, so task_new sits
-	 * inside the if(hc > 0) block alongside hlwrite_chunks). */
+     * _chunks. Build BEFORE task_new — see hx_send_msg for the
+     * rationale (the rcv-callback registration must still capture
+     * htlc->trans before hlwrite_chunks bumps it, so task_new sits
+     * inside the if(hc > 0) block alongside hlwrite_chunks). */
     struct hx_chunk chunks[2];
     int hc = (int)gtkhx_proto_build_file_getfolder_chunks (
         (const uint8_t *)name_wire, name_wire_len, has_dir ? 1 : 0, hldir,
@@ -574,10 +574,10 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
     }
 
     /* Pre-walk for the SIZE / NFILES chunks. The server uses
-	 * these for the queue/display, not for framing.
-	 * HTLC_DATA_HTXF_SIZE is u32 on the wire; total_bytes is u64
-	 * here, so we clamp on the C side at the build call below
-	 * before handing the u32 to the builder. */
+     * these for the queue/display, not for framing.
+     * HTLC_DATA_HTXF_SIZE is u32 on the wire; total_bytes is u64
+     * here, so we clamp on the C side at the build call below
+     * before handing the u32 to the builder. */
     hx_folder_aggregate (lpath, &total_bytes, &nfiles);
 
     rdir_len = rdir ? strlen (rdir) : 0;
@@ -591,7 +591,7 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
     htxf->filter_argv = 0;
     htxf->opt.retry = 0;
     /* Stash the aggregate up front; folder_put_thread fills
-	 * total_pos as the stream progresses. */
+     * total_pos as the stream progresses. */
     if (total_bytes > G_MAXUINT32) {
         htxf->total_size = G_MAXUINT32;
     } else if (total_bytes > 0) {
@@ -613,17 +613,17 @@ hx_put_folder (struct htlc_conn *htlc, const char *lpath, const char *rdir,
     }
 
     /* chunk layout moved to
-	 * gtkhx_proto_build_file_putfolder_chunks. Build BEFORE task_new —
-	 * see hx_send_msg for the rationale. The builder takes host-order
-	 * u32s for SIZE and NFILES and big-endian-encodes them into scratch
-	 * internally.
-	 *
-	 * Note: on builder failure the task isn't created and hlwrite is
-	 * skipped — matches the rest of the SEND-path opcodes (no orphaned
-	 * task, no unmatched server response). htxf was already created
-	 * above for the xfer machinery; folder_put_thread is dormant until
-	 * the server replies, so a builder-failure xfer is effectively a
-	 * no-op slot in the xfer list. */
+     * gtkhx_proto_build_file_putfolder_chunks. Build BEFORE task_new —
+     * see hx_send_msg for the rationale. The builder takes host-order
+     * u32s for SIZE and NFILES and big-endian-encodes them into scratch
+     * internally.
+     *
+     * Note: on builder failure the task isn't created and hlwrite is
+     * skipped — matches the rest of the SEND-path opcodes (no orphaned
+     * task, no unmatched server response). htxf was already created
+     * above for the xfer machinery; folder_put_thread is dormant until
+     * the server replies, so a builder-failure xfer is effectively a
+     * no-op slot in the xfer list. */
     guint32 size_host
         = (total_bytes > G_MAXUINT32) ? G_MAXUINT32 : (guint32)total_bytes;
     struct hx_chunk chunks[4];
@@ -662,7 +662,7 @@ hx_file_link (struct htlc_conn *htlc, char *src_path, char *dst_path)
                                           FALSE, &dst_len);
 
     /* chunk layout moved to gtkhx_proto_build_file_symlink_chunks.
-	 * Build BEFORE task_new — see hx_send_msg for the rationale. */
+     * Build BEFORE task_new — see hx_send_msg for the rationale. */
     struct hx_chunk chunks[4];
     int hc = (int)gtkhx_proto_build_file_symlink_chunks (
         (const uint8_t *)src_wire, src_len, hldir, hldirlen, rnhldir,
@@ -708,8 +708,8 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
         rnhldir = path_to_hldir (dst_path, &rnhldirlen, 1);
 
         /* chunk layout moved to gtkhx_proto_build_file_move
-		 * _chunks. Build BEFORE task_new — see hx_send_msg for the
-		 * rationale. */
+         * _chunks. Build BEFORE task_new — see hx_send_msg for the
+         * rationale. */
         struct hx_chunk chunks[3];
         int hc = (int)gtkhx_proto_build_file_move_chunks (
             (const uint8_t *)src_wire, src_len, hldir, hldirlen, rnhldir,
@@ -722,7 +722,7 @@ hx_file_move (struct htlc_conn *htlc, char *src_path, char *dst_path)
     }
     if (*dst_file && strcmp (src_file, dst_file) != 0) {
         /* Rename-within-dir variant: FILE_SETINFO with NAME + RENAME +
-		 * DIR (no COMMENT chunk). */
+         * DIR (no COMMENT chunk). */
         struct hx_chunk chunks[4];
         int hc = (int)gtkhx_proto_build_file_setinfo_chunks (
             (const uint8_t *)src_wire, src_len, (const uint8_t *)dst_wire,

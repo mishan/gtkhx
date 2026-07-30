@@ -161,11 +161,11 @@ static void
 test_bool_first_char_drives_decision (void)
 {
     /* Documented behaviour: only the first character matters.
-	 * "tarantino" starts with 't' so it parses as TRUE; "facetious"
-	 * with 'f' parses as FALSE. Same as the historical options.c
-	 * parser. Test catches anyone who tries to "tighten" the parser
-	 * into a strict word-list match without thinking through the
-	 * implications. */
+     * "tarantino" starts with 't' so it parses as TRUE; "facetious"
+     * with 'f' parses as FALSE. Same as the historical options.c
+     * parser. Test catches anyone who tries to "tighten" the parser
+     * into a strict word-list match without thinking through the
+     * implications. */
     unsigned char out = 99;
     g_assert_true (prefs_parse_boolean ("tarantino", &out));
     g_assert_cmpuint (out, ==, 1);
@@ -214,9 +214,9 @@ static void
 test_bool_leading_whitespace_not_tolerated (void)
 {
     /* Leading whitespace is not a recognised prefix; first char is
-	 * ' ' which doesn't match. This documents the historical
-	 * behaviour — if we ever decide to whitespace-trim we'll need
-	 * to update the test together with the implementation. */
+     * ' ' which doesn't match. This documents the historical
+     * behaviour — if we ever decide to whitespace-trim we'll need
+     * to update the test together with the implementation. */
     unsigned char out = 4;
     g_assert_false (prefs_parse_boolean (" true", &out));
     g_assert_cmpuint (out, ==, 4);
@@ -228,7 +228,7 @@ static void
 test_bool_null_out_pointer_just_returns_recognition (void)
 {
     /* NULL out is allowed; the function still does the recognition
-	 * check and returns TRUE / FALSE accordingly. */
+     * check and returns TRUE / FALSE accordingly. */
     g_assert_true (prefs_parse_boolean ("true", NULL));
     g_assert_true (prefs_parse_boolean ("false", NULL));
     g_assert_true (prefs_parse_boolean ("0", NULL));

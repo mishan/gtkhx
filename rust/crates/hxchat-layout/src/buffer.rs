@@ -136,7 +136,9 @@ impl ChatBuffer {
     }
 
     pub fn message(&self, id: MessageId) -> Option<&Message> {
-        self.row_of(id).and_then(|r| self.rows.get(r)).map(|r| &r.msg)
+        self.row_of(id)
+            .and_then(|r| self.rows.get(r))
+            .map(|r| &r.msg)
     }
 
     pub fn message_at(&self, row: usize) -> Option<&Message> {
@@ -305,9 +307,7 @@ impl ChatBuffer {
         let mut hit = false;
         for b in &mut self.rows[row].msg.blocks {
             if let Block::Image {
-                token: t,
-                size: s,
-                ..
+                token: t, size: s, ..
             } = b
             {
                 if *t == token {
@@ -330,9 +330,10 @@ impl ChatBuffer {
         self.rows
             .iter()
             .find(|r| {
-                r.msg.blocks.iter().any(|b| {
-                    matches!(b, Block::Image { token: t, .. } if *t == token)
-                })
+                r.msg
+                    .blocks
+                    .iter()
+                    .any(|b| matches!(b, Block::Image { token: t, .. } if *t == token))
             })
             .map(|r| r.id)
     }
@@ -893,11 +894,7 @@ impl ChatBuffer {
         let id = row.id;
         let local_y = y.checked_sub(top)? as i64;
         let (ax, ay, size) = (av.x as i64, av.y as i64, av.size as i64);
-        if (x as i64) >= ax
-            && (x as i64) < ax + size
-            && local_y >= ay
-            && local_y < ay + size
-        {
+        if (x as i64) >= ax && (x as i64) < ax + size && local_y >= ay && local_y < ay + size {
             // The id comes back with the uid because the caller needs
             // both and this has already found the row. Making it look
             // the row up again meant a second borrow of the buffer while
@@ -924,9 +921,7 @@ impl ChatBuffer {
         let last_row = self.rows.len() - 1;
         let first_src = *self.sources_of(0).first()?;
         let last_src = *self.sources_of(last_row).last()?;
-        let end = self
-            .source_text(last_row, last_src)
-            .map_or(0, |t| t.len());
+        let end = self.source_text(last_row, last_src).map_or(0, |t| t.len());
         Some(Selection::new(
             Caret {
                 message: self.id_at(0)?,
@@ -1041,12 +1036,7 @@ impl ChatBuffer {
     /// Returns `None` only for an empty buffer; a point past the end
     /// clamps to the last row, because a drag that runs off the bottom
     /// should select to the end rather than stop tracking.
-    pub fn hit_test(
-        &mut self,
-        x: i32,
-        y: u64,
-        measure: &dyn TextMeasure,
-    ) -> Option<Caret> {
+    pub fn hit_test(&mut self, x: i32, y: u64, measure: &dyn TextMeasure) -> Option<Caret> {
         let hit = self.index.locate(y)?;
         let row = hit.row;
         self.ensure_layout(row, measure);
@@ -1079,9 +1069,10 @@ impl ChatBuffer {
             // so a click in the gap between gutter and body still picks
             // something sensible rather than nothing.
             .or_else(|| {
-                in_band.iter().copied().min_by_key(|l| {
-                    (x - l.x as i32).abs()
-                })
+                in_band
+                    .iter()
+                    .copied()
+                    .min_by_key(|l| (x - l.x as i32).abs())
             })
             .or_else(|| {
                 if hit.offset < layout.lines.first().map_or(0, |l| l.y) {
@@ -1201,7 +1192,10 @@ impl ChatBuffer {
                 let rank = crate::select::source_rank(source);
                 let (sr, so) = *start;
                 let (er, eo) = *end;
-                let (sr, er) = (crate::select::source_rank(sr), crate::select::source_rank(er));
+                let (sr, er) = (
+                    crate::select::source_rank(sr),
+                    crate::select::source_rank(er),
+                );
                 if rank < sr || rank > er {
                     return None;
                 }
@@ -1324,13 +1318,10 @@ impl ChatBuffer {
     /// Re-anchor from a pixel position — a scrollbar drag.
     pub fn scroll_to(&mut self, y: u64, viewport_height: u32, follow_slop: u32) {
         let ids: Vec<MessageId> = self.rows.iter().map(|r| r.id).collect();
-        self.anchor = AnchorResolver::from_pixels(
-            y,
-            &mut self.index,
-            viewport_height,
-            follow_slop,
-            |row| ids.get(row).copied(),
-        );
+        self.anchor =
+            AnchorResolver::from_pixels(y, &mut self.index, viewport_height, follow_slop, |row| {
+                ids.get(row).copied()
+            });
     }
 
     /// Pin to the bottom and resume following.

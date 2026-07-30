@@ -371,8 +371,7 @@ mod tests {
         let expected = in_frames * 6;
         // Within a few percent of the ideal 6× ratio.
         assert!(
-            out.len() as f64 > expected as f64 * 0.95
-                && out.len() as f64 <= expected as f64 * 1.02,
+            out.len() as f64 > expected as f64 * 0.95 && out.len() as f64 <= expected as f64 * 1.02,
             "got {} frames, expected ~{expected}",
             out.len()
         );
@@ -390,7 +389,10 @@ mod tests {
         }
         let out = resample_to(&input, 2, 22050, 44100).expect("resampler builds");
         assert_eq!(out.len() % 2, 0, "stereo output must stay frame-aligned");
-        assert!(out.len() >= frames * 2, "44.1k from 22.05k should ~2× frames");
+        assert!(
+            out.len() >= frames * 2,
+            "44.1k from 22.05k should ~2× frames"
+        );
         assert!(out.iter().all(|s| s.is_finite()));
     }
 

@@ -20,12 +20,12 @@ static void
 test_layout_matches (void)
 {
     /* The allocation size + alignment Rust uses must equal what the C side
-	 * believes the struct is, or hx_htxf_new under/over-allocates. */
+     * believes the struct is, or hx_htxf_new under/over-allocates. */
     g_assert_cmpuint (hx_htxf_sizeof (), ==, sizeof (struct htxf_conn));
     g_assert_cmpuint (hx_htxf_alignof (), ==, G_ALIGNOF (struct htxf_conn));
 
     /* The S0.2 lifecycle fields Rust will drive as atomics must sit where C
-	 * puts them. */
+     * puts them. */
     g_assert_cmpuint (hx_htxf_offsetof_refcount (), ==,
                       offsetof (struct htxf_conn, refcount));
     g_assert_cmpuint (hx_htxf_offsetof_canceled (), ==,
@@ -41,7 +41,7 @@ test_new_is_zeroed_and_free_is_safe (void)
     g_assert_nonnull (htxf);
 
     /* Fresh handle: the old g_malloc0 semantics, plus (S0.3) a pre-created
-	 * cancellation token — hx_htxf_new now owns what htxf_io_abort_init did. */
+     * cancellation token — hx_htxf_new now owns what htxf_io_abort_init did. */
     g_assert_cmpint (htxf->refcount, ==, 0);
     g_assert_cmpint (htxf->canceled, ==, 0);
     g_assert_cmpuint (htxf->total_pos, ==, 0);
@@ -59,6 +59,7 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
     g_test_add_func ("/htxf/layout_matches", test_layout_matches);
-    g_test_add_func ("/htxf/new_is_zeroed", test_new_is_zeroed_and_free_is_safe);
+    g_test_add_func ("/htxf/new_is_zeroed",
+                     test_new_is_zeroed_and_free_is_safe);
     return g_test_run ();
 }

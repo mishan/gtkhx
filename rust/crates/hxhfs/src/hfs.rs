@@ -361,10 +361,12 @@ fn read_cap_info(f: &mut File, fi: &mut HfsInfo) {
     if read_exact_or_none(f, &mut buf).ok().flatten().is_none() {
         return;
     }
-    fi.type_creator.copy_from_slice(&buf[CAP_OFF_FNDR..CAP_OFF_FNDR + 8]);
+    fi.type_creator
+        .copy_from_slice(&buf[CAP_OFF_FNDR..CAP_OFF_FNDR + 8]);
     let datevalid = buf[CAP_OFF_DATEVALID];
     if datevalid & CAP_CDATE != 0 {
-        fi.create_time.copy_from_slice(&buf[CAP_OFF_CTIME..CAP_OFF_CTIME + 4]);
+        fi.create_time
+            .copy_from_slice(&buf[CAP_OFF_CTIME..CAP_OFF_CTIME + 4]);
     }
     if datevalid & CAP_MDATE != 0 {
         fi.modify_time
@@ -456,10 +458,26 @@ fn write_dbl_info(cfg: &Config, info: &Path, fi: &HfsInfo) -> io::Result<()> {
         None => {
             let base = (SIZEOF_DBL_HDR + SIZEOF_HDR_DESCR * NENTRIES as usize) as u32;
             vec![
-                Descr { id: HDR_COMNT, offset: base, length: comlen },
-                Descr { id: HDR_DATES, offset: base + comlen, length: 8 },
-                Descr { id: HDR_FINFO, offset: base + comlen + 8, length: 8 },
-                Descr { id: HDR_RSRC, offset: base + comlen + 8 + 8, length: 0 },
+                Descr {
+                    id: HDR_COMNT,
+                    offset: base,
+                    length: comlen,
+                },
+                Descr {
+                    id: HDR_DATES,
+                    offset: base + comlen,
+                    length: 8,
+                },
+                Descr {
+                    id: HDR_FINFO,
+                    offset: base + comlen + 8,
+                    length: 8,
+                },
+                Descr {
+                    id: HDR_RSRC,
+                    offset: base + comlen + 8 + 8,
+                    length: 0,
+                },
             ]
         }
     };
@@ -530,7 +548,11 @@ pub fn comment_len(cfg: &Config, path: &Path) -> usize {
             len = match cfg.fork {
                 Fork::Cap => {
                     let mut buf = [0u8; SIZEOF_CAP_INFO];
-                    if read_exact_or_none(&mut f, &mut buf).ok().flatten().is_some() {
+                    if read_exact_or_none(&mut f, &mut buf)
+                        .ok()
+                        .flatten()
+                        .is_some()
+                    {
                         (buf[CAP_OFF_COMLN] as usize).min(MAX_COMMENT)
                     } else {
                         0
@@ -571,7 +593,11 @@ pub fn comment_write(cfg: &Config, path: &Path, comment: &[u8]) -> io::Result<()
     // Preserve an existing record, or synthesize a fresh one with suffix-derived
     // type/creator (matching hfs.c's comment_write).
     let mut buf = [0u8; SIZEOF_CAP_INFO];
-    if read_exact_or_none(&mut f, &mut buf).ok().flatten().is_none() {
+    if read_exact_or_none(&mut f, &mut buf)
+        .ok()
+        .flatten()
+        .is_none()
+    {
         buf = [0u8; SIZEOF_CAP_INFO];
         buf[CAP_OFF_MAGIC1] = CAP_MAGIC1;
         buf[CAP_OFF_VERSION] = CAP_VERSION;
@@ -609,7 +635,11 @@ pub fn resource_len(cfg: &Config, path: &Path) -> u64 {
             read_dbl_descrs(&mut f)
                 .ok()
                 .flatten()
-                .and_then(|ds| ds.iter().find(|d| d.id == HDR_RSRC).map(|d| d.length as u64))
+                .and_then(|ds| {
+                    ds.iter()
+                        .find(|d| d.id == HDR_RSRC)
+                        .map(|d| d.length as u64)
+                })
                 .unwrap_or(0)
         }
     }

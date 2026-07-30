@@ -151,10 +151,10 @@ gtkhx_sound_events_init (GtkhxSession *emitter, gpointer voice_model)
                       NULL);
     g_signal_connect (emitter, "chat-invitation",
                       G_CALLBACK (sound_on_chat_invitation), NULL);
-    g_signal_connect (emitter, "user-create",
-                      G_CALLBACK (sound_on_user_create), NULL);
-    g_signal_connect (emitter, "user-delete",
-                      G_CALLBACK (sound_on_user_delete), NULL);
+    g_signal_connect (emitter, "user-create", G_CALLBACK (sound_on_user_create),
+                      NULL);
+    g_signal_connect (emitter, "user-delete", G_CALLBACK (sound_on_user_delete),
+                      NULL);
     g_signal_connect (emitter, "logged-in", G_CALLBACK (sound_on_logged_in),
                       NULL);
 

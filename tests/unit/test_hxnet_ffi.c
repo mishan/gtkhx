@@ -54,12 +54,9 @@ typedef struct {
     uint8_t *body_ptr;
 } hxnet_frame;
 
-_Static_assert (offsetof (hxnet_frame, type_) == 0,
-                "hxnet_frame.type_ offset");
-_Static_assert (offsetof (hxnet_frame, trans) == 4,
-                "hxnet_frame.trans offset");
-_Static_assert (offsetof (hxnet_frame, flag) == 8,
-                "hxnet_frame.flag offset");
+_Static_assert (offsetof (hxnet_frame, type_) == 0, "hxnet_frame.type_ offset");
+_Static_assert (offsetof (hxnet_frame, trans) == 4, "hxnet_frame.trans offset");
+_Static_assert (offsetof (hxnet_frame, flag) == 8, "hxnet_frame.flag offset");
 _Static_assert (offsetof (hxnet_frame, hc) == 12, "hxnet_frame.hc offset");
 _Static_assert (offsetof (hxnet_frame, _pad) == 14, "hxnet_frame._pad offset");
 _Static_assert (offsetof (hxnet_frame, body_len) == 16,
@@ -79,17 +76,17 @@ _Static_assert (sizeof (hxnet_frame)
                 "hxnet_frame total size");
 
 /* Return codes mirrored from rust/crates/hxnet/src/ffi.rs. */
-#define HXNET_RECV_EMPTY    0
-#define HXNET_RECV_FRAME    1
+#define HXNET_RECV_EMPTY 0
+#define HXNET_RECV_FRAME 1
 #define HXNET_RECV_SHUTDOWN 2
 
-#define HXNET_SHUTDOWN_EOF            0
-#define HXNET_SHUTDOWN_STREAM_ERROR   1
+#define HXNET_SHUTDOWN_EOF 0
+#define HXNET_SHUTDOWN_STREAM_ERROR 1
 #define HXNET_SHUTDOWN_FRAME_TOO_LARGE 2
-#define HXNET_SHUTDOWN_HANDLE_DROPPED  3
+#define HXNET_SHUTDOWN_HANDLE_DROPPED 3
 
-#define HXNET_SEND_OK      0
-#define HXNET_SEND_FULL   -1
+#define HXNET_SEND_OK 0
+#define HXNET_SEND_FULL -1
 #define HXNET_SEND_CLOSED -2
 #define HXNET_SEND_INVALID -3
 
@@ -117,10 +114,11 @@ typedef void (*hxnet_state_cb) (hxnet_connection *conn, unsigned int state,
 
 /* fd-free connect entry: hxnet resolves + connects host:port on the
  * shared tokio runtime and routes events through the callbacks. */
-extern hxnet_connection *hxnet_connection_open_tcp (
-    const uint8_t *host, size_t host_len, uint16_t port,
-    hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
-    hxnet_state_cb on_state, void *user_data);
+extern hxnet_connection *
+hxnet_connection_open_tcp (const uint8_t *host, size_t host_len, uint16_t port,
+                           hxnet_event_cb on_event,
+                           hxnet_shutdown_cb on_shutdown,
+                           hxnet_state_cb on_state, void *user_data);
 
 /* Write `len` bytes of `buf` to `fd`, retrying on short writes
  * and on EINTR. A real I/O error (broken pipe, etc.) or a 0-byte
@@ -141,8 +139,8 @@ write_all_or_die (int fd, const uint8_t *buf, size_t len)
         if (w == 0) {
             g_error ("write(fd=%d) returned 0 — peer closed mid-write", fd);
         }
-        buf += (size_t) w;
-        len -= (size_t) w;
+        buf += (size_t)w;
+        len -= (size_t)w;
     }
 }
 
@@ -162,11 +160,12 @@ read_all_or_die (int fd, uint8_t *buf, size_t len)
                      g_strerror (errno));
         }
         if (r == 0) {
-            g_error ("read(fd=%d) hit unexpected EOF with %zu bytes still expected",
-                     fd, len);
+            g_error (
+                "read(fd=%d) hit unexpected EOF with %zu bytes still expected",
+                fd, len);
         }
-        buf += (size_t) r;
-        len -= (size_t) r;
+        buf += (size_t)r;
+        len -= (size_t)r;
     }
 }
 
@@ -213,7 +212,7 @@ open_tcp_to_listener (hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htonl (INADDR_LOOPBACK);
     addr.sin_port = 0; /* kernel picks */
-    if (bind (listener, (struct sockaddr *) &addr, sizeof (addr)) < 0) {
+    if (bind (listener, (struct sockaddr *)&addr, sizeof (addr)) < 0) {
         g_error ("bind: %s", g_strerror (errno));
     }
     if (listen (listener, 1) < 0) {
@@ -221,14 +220,14 @@ open_tcp_to_listener (hxnet_event_cb on_event, hxnet_shutdown_cb on_shutdown,
     }
 
     socklen_t alen = sizeof (addr);
-    if (getsockname (listener, (struct sockaddr *) &addr, &alen) < 0) {
+    if (getsockname (listener, (struct sockaddr *)&addr, &alen) < 0) {
         g_error ("getsockname: %s", g_strerror (errno));
     }
     uint16_t port = ntohs (addr.sin_port);
 
     const char *host = "127.0.0.1";
     hxnet_connection *conn = hxnet_connection_open_tcp (
-        (const uint8_t *) host, strlen (host), port, on_event, on_shutdown,
+        (const uint8_t *)host, strlen (host), port, on_event, on_shutdown,
         /*on_state=*/NULL, user_data);
     if (!conn) {
         g_error ("hxnet_connection_open_tcp returned NULL");
@@ -270,7 +269,7 @@ test_on_event (hxnet_connection *conn, hxnet_frame *frame, void *user_data)
      * future test sending a body > sizeof(last_body) would leave
      * last_body_len exceeding the bytes-in-buffer and the assert_cmpmem
      * path could read past the array. */
-    uint32_t cap = (uint32_t) sizeof (s->last_body);
+    uint32_t cap = (uint32_t)sizeof (s->last_body);
     s->last_body_len = frame->body_len > cap ? cap : frame->body_len;
     memcpy (s->last_body, frame->body_ptr, s->last_body_len);
     s->frames_seen++;
@@ -343,7 +342,7 @@ test_open_tcp_frame_then_shutdown (void)
     uint8_t hdr[22];
     build_header (hdr, 0x69, 7, 0, 4, 0);
     write_all_or_die (server, hdr, sizeof (hdr));
-    write_all_or_die (server, (const uint8_t *) "abcd", 4);
+    write_all_or_die (server, (const uint8_t *)"abcd", 4);
 
     /* Pump main context until the callback fires. */
     g_assert_true (pump_main_until (saw_one_frame, &state, 5 * 1000000));
@@ -368,17 +367,17 @@ test_open_tcp_frame_then_shutdown (void)
 static void
 noop_event (hxnet_connection *conn, hxnet_frame *frame, void *user_data)
 {
-    (void) conn;
-    (void) user_data;
+    (void)conn;
+    (void)user_data;
     hxnet_frame_free (frame);
 }
 
 static void
 noop_shutdown (hxnet_connection *conn, int reason, void *user_data)
 {
-    (void) conn;
-    (void) reason;
-    (void) user_data;
+    (void)conn;
+    (void)reason;
+    (void)user_data;
 }
 
 /* ------------------------------------------------------------------- *
@@ -446,16 +445,16 @@ test_invalid_args_return_invalid_not_crash (void)
 static void
 test_open_tcp_null_args_rejected (void)
 {
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL or empty host*");
-    hxnet_connection *r = hxnet_connection_open_tcp (
-        NULL, 0, 5500, noop_event, noop_shutdown, NULL, NULL);
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL,
+                           "*NULL or empty host*");
+    hxnet_connection *r = hxnet_connection_open_tcp (NULL, 0, 5500, noop_event,
+                                                     noop_shutdown, NULL, NULL);
     g_test_assert_expected_messages ();
     g_assert_null (r);
 
     const char *host = "127.0.0.1";
-    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL,
-                           "*NULL on_event*");
-    r = hxnet_connection_open_tcp ((const uint8_t *) host, strlen (host), 5500,
+    g_test_expect_message ("hxnet", G_LOG_LEVEL_CRITICAL, "*NULL on_event*");
+    r = hxnet_connection_open_tcp ((const uint8_t *)host, strlen (host), 5500,
                                    NULL, noop_shutdown, NULL, NULL);
     g_test_assert_expected_messages ();
     g_assert_null (r);

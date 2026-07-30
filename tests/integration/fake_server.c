@@ -13,8 +13,8 @@
 #include <glib.h>
 #include <gio/gio.h>
 
-#include "compat.h"          /* PACKED — hotline.h's struct attrs */
-#include "hotline.h"         /* HTLS_MAGIC, HTLS_MAGIC_LEN */
+#include "compat.h"  /* PACKED — hotline.h's struct attrs */
+#include "hotline.h" /* HTLS_MAGIC, HTLS_MAGIC_LEN */
 #include "fake_server.h"
 
 struct hx_fake_server {
@@ -58,7 +58,8 @@ react_after_read (hx_fake_server *srv)
     if (!srv->active) {
         return;
     }
-    GOutputStream *out = g_io_stream_get_output_stream (G_IO_STREAM (srv->active));
+    GOutputStream *out
+        = g_io_stream_get_output_stream (G_IO_STREAM (srv->active));
 
     switch (srv->behavior) {
     case HX_FAKE_BEHAVIOR_SEND_MAGIC: {
@@ -136,12 +137,12 @@ on_read_done (GObject *src, GAsyncResult *res, gpointer u)
 /* ---- accept handler ------------------------------------------ */
 
 static gboolean
-on_incoming (GSocketService *service, GSocketConnection *conn,
-             GObject *source, gpointer u)
+on_incoming (GSocketService *service, GSocketConnection *conn, GObject *source,
+             gpointer u)
 {
     hx_fake_server *srv = u;
-    (void) service;
-    (void) source;
+    (void)service;
+    (void)source;
 
     /* Single-client only. The test rig always drives one
      * GSocketClient at a time; a second accept means the test
@@ -167,10 +168,9 @@ on_incoming (GSocketService *service, GSocketConnection *conn,
         react_after_read (srv);
     } else {
         GInputStream *in = g_io_stream_get_input_stream (G_IO_STREAM (conn));
-        g_input_stream_read_all_async (in, srv->read_scratch,
-                                       srv->expected_client_bytes,
-                                       G_PRIORITY_DEFAULT, srv->cancel,
-                                       on_read_done, srv);
+        g_input_stream_read_all_async (
+            in, srv->read_scratch, srv->expected_client_bytes,
+            G_PRIORITY_DEFAULT, srv->cancel, on_read_done, srv);
     }
 
     /* Returning TRUE keeps the service from closing the
@@ -214,8 +214,8 @@ hx_fake_server_new (hx_fake_server_behavior behavior,
      * use g_socket_listener_add_inet_port because we need the
      * actual port back, and add_any_inet_port gives us that. */
     GError *local_err = NULL;
-    srv->port = (guint16)
-        g_socket_listener_add_any_inet_port (srv->listener, NULL, &local_err);
+    srv->port = (guint16)g_socket_listener_add_any_inet_port (srv->listener,
+                                                              NULL, &local_err);
     if (srv->port == 0) {
         if (err) {
             *err = local_err;

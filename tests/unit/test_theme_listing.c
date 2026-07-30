@@ -214,10 +214,9 @@ test_skips_unsafe_theme_names (void)
 {
     char *dir = make_tmp_themes_dir ();
     /* Flat-form file with a backslash in the basename — would
-	 * surface as theme name "foo\\bar" without the filter, which
-	 * the loader then rejects. */
-    write_theme_file (dir, "foo\\bar.ini",
-                      "[gtkhx-theme]\nname = Phantom\n");
+     * surface as theme name "foo\\bar" without the filter, which
+     * the loader then rejects. */
+    write_theme_file (dir, "foo\\bar.ini", "[gtkhx-theme]\nname = Phantom\n");
 
     GPtrArray *themes = gtkhx_theme_list_available_at (NULL, dir);
     /* Synthetic default only — phantom should be filtered. */
@@ -240,11 +239,11 @@ test_built_in_themes_from_resource (void)
 {
     char *dir = make_tmp_themes_dir ();
 
-    GPtrArray *themes = gtkhx_theme_list_available_at (
-        "/com/nasledov/gtkhx/themes/", dir);
+    GPtrArray *themes
+        = gtkhx_theme_list_available_at ("/com/nasledov/gtkhx/themes/", dir);
     /* Exactly the two built-ins we ship. If a third ever lands,
-	 * adjust the count — better to fail loudly than have the test
-	 * silently drift. */
+     * adjust the count — better to fail loudly than have the test
+     * silently drift. */
     g_assert_cmpint (themes->len, ==, 2);
 
     g_assert_nonnull (entry_named (themes, "default"));
@@ -273,10 +272,10 @@ test_user_file_shadows_built_in (void)
                       "[gtkhx-theme]\n"
                       "name = User Solarized Override\n");
 
-    GPtrArray *themes = gtkhx_theme_list_available_at (
-        "/com/nasledov/gtkhx/themes/", dir);
+    GPtrArray *themes
+        = gtkhx_theme_list_available_at ("/com/nasledov/gtkhx/themes/", dir);
     /* Still two entries (the user's solarized replaced the
-	 * built-in one — no duplication). */
+     * built-in one — no duplication). */
     g_assert_cmpint (themes->len, ==, 2);
 
     GtkhxThemeEntry *s = entry_named (themes, "solarized");

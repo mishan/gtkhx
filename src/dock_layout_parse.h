@@ -40,15 +40,15 @@ G_BEGIN_DECLS
 
 typedef enum {
     DL_ORIENT_HORIZONTAL = 0,
-    DL_ORIENT_VERTICAL   = 1,
+    DL_ORIENT_VERTICAL = 1,
 } DLOrientation;
 
 typedef struct DLParsedNode {
     /* Leaf state. is_leaf TRUE → these are populated, the
      * internal-split fields are NULL/0. */
-    gboolean      is_leaf;
-    GPtrArray    *panel_ids;          /* char *, owned */
-    char         *role;               /* owned; NULL when untagged */
+    gboolean is_leaf;
+    GPtrArray *panel_ids; /* char *, owned */
+    char *role;           /* owned; NULL when untagged */
 
     /* Internal-split state. is_leaf FALSE → these are populated. */
     DLOrientation orientation;
@@ -60,9 +60,9 @@ typedef struct DLParsedNode {
  * (truncated, extra trailing input, unbalanced brackets, etc.).
  * The returned tree is owned by the caller — free with
  * dl_parsed_node_free. */
-DLParsedNode *dl_parse_tree       (const char *text);
+DLParsedNode *dl_parse_tree (const char *text);
 
-void          dl_parsed_node_free (DLParsedNode *n);
+void dl_parsed_node_free (DLParsedNode *n);
 
 G_END_DECLS
 

@@ -81,13 +81,13 @@ struct hx_viewer {
     const char *name;
 
     /* Score (0..N) — higher wins. 0 means "doesn't claim this
-	 * file". The text viewer returns 1 unconditionally so it's
-	 * always the fallback. */
+     * file". The text viewer returns 1 unconditionally so it's
+     * always the fallback. */
     int (*score) (const char *type, const char *creator, const char *filename);
 
     /* Build the body widget; stash viewer-private state on
-	 * p->viewer_data. Runs on main; called from
-	 * preview_install_viewer once dispatch has been made. */
+     * p->viewer_data. Runs on main; called from
+     * preview_install_viewer once dispatch has been made. */
     GtkWidget *(*create) (hx_preview *p);
 
     /* Append a chunk to the in-flight render. Runs on main. */
@@ -97,7 +97,7 @@ struct hx_viewer {
     void (*done) (hx_preview *p);
 
     /* Window close-request — viewer frees private state. Runs on
-	 * main. The window itself is destroyed by the caller. */
+     * main. The window itself is destroyed by the caller. */
     void (*close) (hx_preview *p);
 };
 
@@ -117,45 +117,45 @@ struct hx_preview {
     void *viewer_data;
 
     /* Full byte stream of the file's data fork, accumulated as
-	 * chunks arrive. Always present; outlives the viewer; the
-	 * Save button writes this to disk. Viewers that need to look
-	 * at the whole buffer once (image, PDF) read from this at
-	 * done() time instead of keeping their own copy. The text
-	 * and source viewers don't need the bytes (their content
-	 * lives in a GtkTextBuffer / GtkSourceBuffer) but the bytes
-	 * stay around regardless so Save works for them too. */
+     * chunks arrive. Always present; outlives the viewer; the
+     * Save button writes this to disk. Viewers that need to look
+     * at the whole buffer once (image, PDF) read from this at
+     * done() time instead of keeping their own copy. The text
+     * and source viewers don't need the bytes (their content
+     * lives in a GtkTextBuffer / GtkSourceBuffer) but the bytes
+     * stay around regardless so Save works for them too. */
     GByteArray *bytes;
 
     /* Set when the user closes the window. Both the worker's
-	 * marshal helpers and queued idle callbacks bail before
-	 * touching widgets if this is TRUE. */
+     * marshal helpers and queued idle callbacks bail before
+     * touching widgets if this is TRUE. */
     gboolean closed;
 
     /* Refcount for the worker→main marshal payloads. The window
-	 * holds one ref, each queued job holds one. Last unref frees
-	 * the hx_preview. */
+     * holds one ref, each queued job holds one. Last unref frees
+     * the hx_preview. */
     gint refcount;
 
     /* Set TRUE (atomically) the moment the worker calls
-	 * hx_preview_done — *not* in the main-thread done_dispatch.
-	 * preview_close_request uses this to decide whether to fire
-	 * cancel_cb. If we keyed off the main-thread idle landing,
-	 * there would be a race window where the worker has finished
-	 * streaming + queued done_dispatch but the idle hasn't run
-	 * yet — closing the window in that window would invoke
-	 * xfer_delete on an htxf whose worker has already exited,
-	 * a redundant cancel of an already-finished transfer.
-	 *
-	 * Accessed across threads (worker writes, main reads), hence
-	 * the atomic. */
+     * hx_preview_done — *not* in the main-thread done_dispatch.
+     * preview_close_request uses this to decide whether to fire
+     * cancel_cb. If we keyed off the main-thread idle landing,
+     * there would be a race window where the worker has finished
+     * streaming + queued done_dispatch but the idle hasn't run
+     * yet — closing the window in that window would invoke
+     * xfer_delete on an htxf whose worker has already exited,
+     * a redundant cancel of an already-finished transfer.
+     *
+     * Accessed across threads (worker writes, main reads), hence
+     * the atomic. */
     gint stream_finished;
 
     /* User-close-window cancel hook. Registered by the caller of
-	 * hx_preview_new (rcv.c::rcv_task_file_get hands in xfer_delete
-	 * + the matching htxf pointer). Fired at most once, on the
-	 * main thread, from preview_close_request when !done. NULL =
-	 * no cancel hook installed (legitimate for callers that don't
-	 * back the preview with an HTXF transfer). */
+     * hx_preview_new (rcv.c::rcv_task_file_get hands in xfer_delete
+     * + the matching htxf pointer). Fired at most once, on the
+     * main thread, from preview_close_request when !done. NULL =
+     * no cancel hook installed (legitimate for callers that don't
+     * back the preview with an HTXF transfer). */
     hx_preview_cancel_fn cancel_cb;
     void *cancel_data;
 };
@@ -177,7 +177,7 @@ text_score (const char *type, const char *creator, const char *filename)
     (void)creator;
     (void)filename;
     /* Catch-all: any file we can't otherwise classify shows up as
-	 * text. Lowest non-zero score so any real match wins. */
+     * text. Lowest non-zero score so any real match wins. */
     return 1;
 }
 
@@ -218,8 +218,8 @@ text_chunk (hx_preview *p, const char *buf, gsize len)
     }
 
     /* CR→LF: Mac-style line endings show up as one big line otherwise.
-	 * Operating on a heap copy because the caller's buffer is shared
-	 * with the queue infrastructure. */
+     * Operating on a heap copy because the caller's buffer is shared
+     * with the queue infrastructure. */
     fixed = g_memdup2 (buf, len);
     {
         gsize i;
@@ -231,8 +231,8 @@ text_chunk (hx_preview *p, const char *buf, gsize len)
     }
 
     /* g_utf8_make_valid replaces invalid sequences with U+FFFD so
-	 * any text-ish file stays renderable. Binary files get noisy
-	 * but at least don't blow up Pango. */
+     * any text-ish file stays renderable. Binary files get noisy
+     * but at least don't blow up Pango. */
     valid = g_utf8_make_valid (fixed, len);
     tbuf = gtk_text_view_get_buffer (GTK_TEXT_VIEW (s->text_view));
     gtk_text_buffer_get_end_iter (tbuf, &end);
@@ -279,19 +279,19 @@ static const char *const image_type_codes[] = {
     "WBMP", /* WebP — sometimes seen */
     "TIFF", /* TIFF */
     "PICT", /* QuickDraw PICT — glycin has no PICT loader (the
-	          * format is essentially Mac-only and historically
-	          * tied to QuickDraw raster opcodes). image_done
-	          * walks a two-step fallback when the primary
-	          * glycin decode fails on PICT input: first a cheap
-	          * embedded-image sniff via hx_pict_extract_
-	          * embedded (covers v2 PICT files that wrapped a
-	          * JPEG/PNG/GIF/TIFF in opcode 0x8200/0x8201 — the
-	          * common case for mid-90s+ screenshots), then
-	          * ImageMagick's PICT decoder via hx_pict_magick_
-	          * decode for the long-tail classic-QuickDraw raster
-	          * files. The ImageMagick step is optional at build
-	          * time; when it's compiled out the classic-PICT
-	          * case degrades to a "couldn't decode" message. */
+              * format is essentially Mac-only and historically
+              * tied to QuickDraw raster opcodes). image_done
+              * walks a two-step fallback when the primary
+              * glycin decode fails on PICT input: first a cheap
+              * embedded-image sniff via hx_pict_extract_
+              * embedded (covers v2 PICT files that wrapped a
+              * JPEG/PNG/GIF/TIFF in opcode 0x8200/0x8201 — the
+              * common case for mid-90s+ screenshots), then
+              * ImageMagick's PICT decoder via hx_pict_magick_
+              * decode for the long-tail classic-QuickDraw raster
+              * files. The ImageMagick step is optional at build
+              * time; when it's compiled out the classic-PICT
+              * case degrades to a "couldn't decode" message. */
     NULL,
 };
 
@@ -337,7 +337,7 @@ image_score (const char *type, const char *creator, const char *filename)
     }
 
     /* Match extensions case-insensitively. g_str_has_suffix is
-	 * case-sensitive; lowercase the comparison instead. */
+     * case-sensitive; lowercase the comparison instead. */
     if (filename) {
         const char *dot = strrchr (filename, '.');
         if (dot && strlen (dot) < sizeof (ext_match)) {
@@ -375,16 +375,17 @@ enum image_stage {
 
 struct image_state {
     GtkWidget *picture;
-    GtkWidget *status; /* caption shown while loading / on error */
-    hx_preview *preview; /* back-ref for callback bytes access */
-    gpointer decode_token; /* in-flight glycin decode, NULL when idle */
+    GtkWidget *status;      /* caption shown while loading / on error */
+    hx_preview *preview;    /* back-ref for callback bytes access */
+    gpointer decode_token;  /* in-flight glycin decode, NULL when idle */
     GBytes *embedded_bytes; /* alive across the embedded decode async hop */
     enum image_stage stage;
 };
 
 static void image_kick_decode (struct image_state *s, const guint8 *bytes,
                                gsize len, enum image_stage stage);
-static void image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data);
+static void image_decode_done (HxInlineMediaDecoded *decoded,
+                               gpointer user_data);
 static void image_try_magick_fallback (struct image_state *s);
 static void image_show_decode_error (struct image_state *s, const char *msg);
 static void image_show_texture (struct image_state *s, GdkTexture *tex);
@@ -410,7 +411,8 @@ image_create (hx_preview *p)
     gtk_widget_set_vexpand (s->picture, TRUE);
     gtk_widget_set_hexpand (s->picture, TRUE);
     gtk_picture_set_can_shrink (GTK_PICTURE (s->picture), TRUE);
-    gtk_picture_set_content_fit (GTK_PICTURE (s->picture), GTK_CONTENT_FIT_CONTAIN);
+    gtk_picture_set_content_fit (GTK_PICTURE (s->picture),
+                                 GTK_CONTENT_FIT_CONTAIN);
     gtk_widget_set_visible (s->picture, FALSE);
 
     scroll = gtk_scrolled_window_new ();
@@ -428,8 +430,8 @@ static void
 image_chunk (hx_preview *p, const char *buf, gsize len)
 {
     /* Bytes already in p->bytes (the dispatcher appends there
-	 * before calling our chunk hook). We're a one-shot decoder —
-	 * everything happens in image_done. */
+     * before calling our chunk hook). We're a one-shot decoder —
+     * everything happens in image_done. */
     (void)p;
     (void)buf;
     (void)len;
@@ -451,12 +453,11 @@ image_done (hx_preview *p)
     }
 
     /* Kick off the primary glycin decode (WIDE policy — see
-	 * the file-header include comment). On success the
-	 * callback paints; on failure it walks the PICT fallback
-	 * chain (embedded sniff → glycin again, then ImageMagick
-	 * for classic QuickDraw raster opcodes). */
-    image_kick_decode (s, p->bytes->data, p->bytes->len,
-                       IMAGE_STAGE_PRIMARY);
+     * the file-header include comment). On success the
+     * callback paints; on failure it walks the PICT fallback
+     * chain (embedded sniff → glycin again, then ImageMagick
+     * for classic QuickDraw raster opcodes). */
+    image_kick_decode (s, p->bytes->data, p->bytes->len, IMAGE_STAGE_PRIMARY);
 }
 
 /* Schedule an async glycin decode for the given bytes and
@@ -469,32 +470,31 @@ static void
 image_kick_decode (struct image_state *s, const guint8 *bytes, gsize len,
                    enum image_stage stage)
 {
-    HxInlineMediaCaps caps = {0};
+    HxInlineMediaCaps caps = { 0 };
     gpointer token;
 
     s->stage = stage;
     /* Preview is user-driven — they explicitly opened the
-	 * file. Use the spec defaults (256 KiB / 2048×2048 /
-	 * ~4 megapixels) for the caps; max_frames=1 because the
-	 * image viewer renders a single still (animated GIF
-	 * preview is a follow-up, mirrors xtext's per-frame
-	 * tick). */
+     * file. Use the spec defaults (256 KiB / 2048×2048 /
+     * ~4 megapixels) for the caps; max_frames=1 because the
+     * image viewer renders a single still (animated GIF
+     * preview is a follow-up, mirrors xtext's per-frame
+     * tick). */
     caps.max_frames = 1;
     caps.max_duration_ms = 1;
     /* Bump the byte cap: previewable files are routinely
-	 * larger than the 256 KiB inline-media spec floor (the
-	 * user explicitly opened it). Cap at 16 MiB — enough
-	 * for typical screenshots without letting a hostile
-	 * server pin the main thread on a multi-gig "image". */
+     * larger than the 256 KiB inline-media spec floor (the
+     * user explicitly opened it). Cap at 16 MiB — enough
+     * for typical screenshots without letting a hostile
+     * server pin the main thread on a multi-gig "image". */
     caps.max_bytes = 16u * 1024u * 1024u;
     /* Loosen the dimension / pixel caps too: a 4K JPEG is a
-	 * reasonable thing to preview. */
+     * reasonable thing to preview. */
     caps.max_dimension = 8192;
     caps.max_pixels = 8192u * 8192u;
 
     token = hx_image_decode_async_with_policy (
-        bytes, len, &caps, HX_IMAGE_DECODE_WIDE,
-        image_decode_done, s);
+        bytes, len, &caps, HX_IMAGE_DECODE_WIDE, image_decode_done, s);
     if (token) {
         s->decode_token = token;
     }
@@ -513,7 +513,7 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
     p = s->preview;
 
     /* Release the cancel token regardless of result — cancel-
-	 * after-completion is the canonical free for it. */
+     * after-completion is the canonical free for it. */
     if (s->decode_token) {
         inline_media_decode_cancel (s->decode_token);
         s->decode_token = NULL;
@@ -523,8 +523,8 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
         image_show_texture (s, decoded->texture);
         inline_media_decoded_free (decoded);
         /* If we held an intermediate bytes buffer for the
-		 * embedded stage, the decoded texture is paintable
-		 * now and the embedded bytes can drop. */
+         * embedded stage, the decoded texture is paintable
+         * now and the embedded bytes can drop. */
         g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
         s->stage = IMAGE_STAGE_DONE;
         return;
@@ -533,20 +533,20 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
     inline_media_decoded_free (decoded);
 
     /* Primary decode failed. Walk the PICT fallback chain.
-	 *
-	 *   IMAGE_STAGE_PRIMARY → try hx_pict_extract_embedded
-	 *     against the original bytes. If a JPEG/PNG/GIF/TIFF
-	 *     prefix is found inside the PICT envelope, kick off
-	 *     another glycin decode on the extracted bytes.
-	 *
-	 *   IMAGE_STAGE_EMBEDDED → embedded sniff found a
-	 *     signature but glycin couldn't decode the payload.
-	 *     Fall through to the ImageMagick step.
-	 *
-	 * Both end-of-chain branches call image_try_magick_
-	 * fallback, which runs ImageMagick's QuickDraw raster
-	 * opcode decoder synchronously (it's the long-tail
-	 * recovery for classic PICT files). */
+     *
+     *   IMAGE_STAGE_PRIMARY → try hx_pict_extract_embedded
+     *     against the original bytes. If a JPEG/PNG/GIF/TIFF
+     *     prefix is found inside the PICT envelope, kick off
+     *     another glycin decode on the extracted bytes.
+     *
+     *   IMAGE_STAGE_EMBEDDED → embedded sniff found a
+     *     signature but glycin couldn't decode the payload.
+     *     Fall through to the ImageMagick step.
+     *
+     * Both end-of-chain branches call image_try_magick_
+     * fallback, which runs ImageMagick's QuickDraw raster
+     * opcode decoder synchronously (it's the long-tail
+     * recovery for classic PICT files). */
     if (s->stage == IMAGE_STAGE_PRIMARY && p && p->bytes && p->bytes->len
         && image_input_is_likely_pict (p)) {
         GBytes *embedded
@@ -555,10 +555,10 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
             gsize emb_len = 0;
             const guint8 *emb_data = g_bytes_get_data (embedded, &emb_len);
             /* Stash the GBytes so it outlives the async
-			 * decode hop — glycin copies internally so we
-			 * could unref now, but keeping it lets the
-			 * image_close path drop it cleanly if the
-			 * preview window closes mid-decode. */
+             * decode hop — glycin copies internally so we
+             * could unref now, but keeping it lets the
+             * image_close path drop it cleanly if the
+             * preview window closes mid-decode. */
             g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
             s->embedded_bytes = embedded;
             image_kick_decode (s, emb_data, emb_len, IMAGE_STAGE_EMBEDDED);
@@ -567,13 +567,13 @@ image_decode_done (HxInlineMediaDecoded *decoded, gpointer user_data)
     }
 
     /* Either embedded sniff missed, or the embedded decode
-	 * itself failed, or the input was never a plausible PICT.
-	 * ImageMagick is the last resort — gated to likely-PICT
-	 * inputs the same way the embedded-image recovery above
-	 * is. A corrupted JPEG/PNG falling through here would
-	 * uselessly invoke ImageMagick's QuickDraw decoder and
-	 * still surface a "Failed to decode image" message; cut
-	 * the round-trip and just render the error directly. */
+     * itself failed, or the input was never a plausible PICT.
+     * ImageMagick is the last resort — gated to likely-PICT
+     * inputs the same way the embedded-image recovery above
+     * is. A corrupted JPEG/PNG falling through here would
+     * uselessly invoke ImageMagick's QuickDraw decoder and
+     * still surface a "Failed to decode image" message; cut
+     * the round-trip and just render the error directly. */
     g_clear_pointer (&s->embedded_bytes, g_bytes_unref);
     if (image_input_is_likely_pict (p)) {
         image_try_magick_fallback (s);
@@ -596,9 +596,9 @@ image_try_magick_fallback (struct image_state *s)
     }
 
     /* hx_pict_magick_decode is a no-op stub when ImageMagick
-	 * isn't compiled in — returns NULL and sets a "PICT
-	 * support not built" GError. The user-visible message
-	 * collapses to "Failed to decode image" in that case. */
+     * isn't compiled in — returns NULL and sets a "PICT
+     * support not built" GError. The user-visible message
+     * collapses to "Failed to decode image" in that case. */
     tex = hx_pict_magick_decode (p->bytes->data, p->bytes->len, &err);
     if (tex) {
         image_show_texture (s, tex);
@@ -681,9 +681,9 @@ image_close (hx_preview *p)
         return;
     }
     /* Cancel any in-flight glycin decode — the callback
-	 * would otherwise dereference the freed viewer state
-	 * when it lands. inline_media_decode_cancel suppresses
-	 * the callback AND drops the token reference. */
+     * would otherwise dereference the freed viewer state
+     * when it lands. inline_media_decode_cancel suppresses
+     * the callback AND drops the token reference. */
     if (s->decode_token) {
         inline_media_decode_cancel (s->decode_token);
         s->decode_token = NULL;
@@ -761,13 +761,13 @@ pdf_draw_page (GtkDrawingArea *area, cairo_t *cr, int width, int height,
     }
 
     /* White paper background — most PDFs assume a white canvas
-	 * and look broken without it on dark themes. */
+     * and look broken without it on dark themes. */
     cairo_set_source_rgb (cr, 1.0, 1.0, 1.0);
     cairo_paint (cr);
 
     /* Fit-width scaling: stretch to the widget's current width and
-	 * letterbox the height. The drawing area's content-height
-	 * sizing (set after page load) keeps the proportion right. */
+     * letterbox the height. The drawing area's content-height
+     * sizing (set after page load) keeps the proportion right. */
     scale = (double)width / pw;
     (void)height;
     cairo_scale (cr, scale, scale);
@@ -810,7 +810,7 @@ static void
 pdf_chunk (hx_preview *p, const char *buf, gsize len)
 {
     /* Bytes are accumulated by the dispatcher in p->bytes; we
-	 * only need to act at end-of-stream. */
+     * only need to act at end-of-stream. */
     (void)p;
     (void)buf;
     (void)len;
@@ -833,7 +833,7 @@ pdf_done (hx_preview *p)
     }
 
     /* g_bytes_new copies; we don't want to surrender ownership
-	 * of p->bytes — the Save button still needs it. */
+     * of p->bytes — the Save button still needs it. */
     bytes = g_bytes_new (p->bytes->data, p->bytes->len);
     s->doc = poppler_document_new_from_bytes (bytes, NULL, &err);
     g_bytes_unref (bytes);
@@ -866,10 +866,10 @@ pdf_done (hx_preview *p)
 
         area = gtk_drawing_area_new ();
         /* Set a fixed content width (the natural page width at
-		 * PDF_RENDER_SCALE) and a matching content height — the
-		 * draw callback scales to whatever width the layout
-		 * ends up giving us, but content-height keeps the
-		 * vertical proportion correct as the window resizes. */
+         * PDF_RENDER_SCALE) and a matching content height — the
+         * draw callback scales to whatever width the layout
+         * ends up giving us, but content-height keeps the
+         * vertical proportion correct as the window resizes. */
         gtk_drawing_area_set_content_width (GTK_DRAWING_AREA (area),
                                             (int)(pw * PDF_RENDER_SCALE));
         content_h = (int)(ph * PDF_RENDER_SCALE);
@@ -878,9 +878,9 @@ pdf_done (hx_preview *p)
         gtk_widget_set_hexpand (area, TRUE);
 
         /* Stash the page on the widget for the draw callback.
-		 * g_object_unref runs at widget destroy time, which
-		 * happens before the PopplerDocument is unref'd in
-		 * pdf_close, so the page outlives any redraw. */
+         * g_object_unref runs at widget destroy time, which
+         * happens before the PopplerDocument is unref'd in
+         * pdf_close, so the page outlives any redraw. */
         g_object_set_data_full (G_OBJECT (area), "pdf-page", page,
                                 g_object_unref);
 
@@ -970,7 +970,7 @@ source_score (const char *type, const char *creator, const char *filename)
     for (i = 0; source_extensions[i]; i++) {
         if (g_strcmp0 (ext_match, source_extensions[i]) == 0) {
             /* Beat the text fallback but lose to image / PDF
-			 * matches (which score 15+ on extension). */
+             * matches (which score 15+ on extension). */
             return 10;
         }
     }
@@ -1006,8 +1006,8 @@ source_create (hx_preview *p)
     gtk_text_view_set_wrap_mode (GTK_TEXT_VIEW (s->view), GTK_WRAP_WORD_CHAR);
 
     /* Pick a syntax based on the filename. Returns NULL for
-	 * extensions we listed but GtkSourceView doesn't know about;
-	 * the buffer just stays unhighlighted in that case. */
+     * extensions we listed but GtkSourceView doesn't know about;
+     * the buffer just stays unhighlighted in that case. */
     langs = gtk_source_language_manager_get_default ();
     lang = gtk_source_language_manager_guess_language (langs, p->name, NULL);
     if (lang) {
@@ -1015,7 +1015,7 @@ source_create (hx_preview *p)
     }
 
     /* Track the libadwaita color scheme: classic for light,
-	 * classic-dark for dark. Both ship with GtkSourceView. */
+     * classic-dark for dark. Both ship with GtkSourceView. */
     schemes = gtk_source_style_scheme_manager_get_default ();
     dark = adw_style_manager_get_dark (adw_style_manager_get_default ());
     scheme = gtk_source_style_scheme_manager_get_scheme (
@@ -1047,7 +1047,7 @@ source_chunk (hx_preview *p, const char *buf, gsize len)
     }
 
     /* Same CR→LF + UTF-8 fix-up as the text viewer — Hotline files
-	 * often arrive with classic-Mac line endings. */
+     * often arrive with classic-Mac line endings. */
     fixed = g_memdup2 (buf, len);
     for (i = 0; i < len; i++) {
         if (fixed[i] == '\r') {
@@ -1163,16 +1163,16 @@ preview_close_request (GtkWindow *window, gpointer user_data)
         p->viewer->close (p);
     }
     /* Cancel the underlying transfer if it's still in flight.
-	 * After Cancel runs, the worker stops sending chunks our way
-	 * and the htxf eventually unref's its preview reference via
-	 * htxf_unref. Skipped when the worker has already signalled
-	 * end-of-stream via hx_preview_done (atomic flag, set on the
-	 * worker side at call time — not at idle-dispatch time, so
-	 * there's no race window where the worker has finished but
-	 * the main thread hasn't seen the done_dispatch yet). Clear
-	 * the cb pointer first so a re-entrant close (e.g. cancel_cb
-	 * synchronously tearing down something that calls close again)
-	 * can't double-fire. */
+     * After Cancel runs, the worker stops sending chunks our way
+     * and the htxf eventually unref's its preview reference via
+     * htxf_unref. Skipped when the worker has already signalled
+     * end-of-stream via hx_preview_done (atomic flag, set on the
+     * worker side at call time — not at idle-dispatch time, so
+     * there's no race window where the worker has finished but
+     * the main thread hasn't seen the done_dispatch yet). Clear
+     * the cb pointer first so a re-entrant close (e.g. cancel_cb
+     * synchronously tearing down something that calls close again)
+     * can't double-fire. */
     if (!g_atomic_int_get (&p->stream_finished) && p->cancel_cb) {
         hx_preview_cancel_fn cb = p->cancel_cb;
         void *data = p->cancel_data;
@@ -1181,9 +1181,9 @@ preview_close_request (GtkWindow *window, gpointer user_data)
         cb (data);
     }
     /* Drop the window's ref. The htxf side still holds the second
-	 * ref (see hx_preview_new); the struct survives until both
-	 * the window ref and the htxf ref are gone, and any in-flight
-	 * worker→main marshal jobs each carry their own ref on top. */
+     * ref (see hx_preview_new); the struct survives until both
+     * the window ref and the htxf ref are gone, and any in-flight
+     * worker→main marshal jobs each carry their own ref on top. */
     hx_preview_unref (p);
     return FALSE; /* let default destroy proceed */
 }
@@ -1206,15 +1206,15 @@ preview_install_viewer (hx_preview *p)
     p->viewer = v;
 
     /* gtkhx_widget_set_child unparents the previous child (the
-	 * placeholder, on the common path), so the placeholder
-	 * pointer is stale immediately after this call. */
+     * placeholder, on the common path), so the placeholder
+     * pointer is stale immediately after this call. */
     gtkhx_widget_set_child (p->window, body);
     p->placeholder = NULL;
     p->body = body;
 
     /* Replay any chunks that arrived before the viewer was
-	 * installed. p->bytes always carries the full stream so
-	 * the viewer sees the same bytes the dispatcher saw. */
+     * installed. p->bytes always carries the full stream so
+     * the viewer sees the same bytes the dispatcher saw. */
     if (p->bytes && p->bytes->len > 0 && v->chunk) {
         v->chunk (p, (const char *)p->bytes->data, p->bytes->len);
     }
@@ -1254,25 +1254,25 @@ chunk_dispatch (gpointer data)
     struct chunk_job *j = data;
     if (!j->p->closed) {
         /* Always append to the shared byte buffer first — the
-		 * Save button reads from there, and viewers that need
-		 * the whole buffer at once (image, PDF) read from there
-		 * at done() time. Streaming-friendly viewers (text,
-		 * source) also get a chunk callback below. */
+         * Save button reads from there, and viewers that need
+         * the whole buffer at once (image, PDF) read from there
+         * at done() time. Streaming-friendly viewers (text,
+         * source) also get a chunk callback below. */
         if (!j->p->bytes) {
             j->p->bytes = g_byte_array_new ();
         }
         g_byte_array_append (j->p->bytes, (const guint8 *)j->data, j->len);
 
         /* Enable the Save button as soon as we have any data —
-		 * the user might want to save a partial transfer if
-		 * something downstream goes sideways. */
+         * the user might want to save a partial transfer if
+         * something downstream goes sideways. */
         if (j->p->save_btn) {
             gtk_widget_set_sensitive (j->p->save_btn, TRUE);
         }
 
         /* If the viewer is installed, hand it the new chunk.
-		 * If not, the bytes will be replayed in
-		 * preview_install_viewer once the viewer arrives. */
+         * If not, the bytes will be replayed in
+         * preview_install_viewer once the viewer arrives. */
         if (j->p->viewer && j->p->viewer->chunk) {
             j->p->viewer->chunk (j->p, j->data, j->len);
         }
@@ -1288,8 +1288,8 @@ done_dispatch (gpointer data)
 {
     hx_preview *p = data;
     /* stream_finished is already TRUE (set by hx_preview_done on
-	 * the worker side before this idle was queued). All we do here
-	 * is the main-thread viewer commit step. */
+     * the worker side before this idle was queued). All we do here
+     * is the main-thread viewer commit step. */
     if (!p->closed && p->viewer && p->viewer->done) {
         p->viewer->done (p);
     }
@@ -1336,10 +1336,11 @@ on_save_finished (GObject *src, GAsyncResult *res, gpointer user_data)
     gf = gtk_file_dialog_save_finish (GTK_FILE_DIALOG (src), res, &err);
     if (!gf) {
         /* GTK_DIALOG_ERROR_DISMISSED is the user-cancel case
-		 * — don't log it as an error. Anything else is worth
-		 * a warning. */
-        if (err && !g_error_matches (err, GTK_DIALOG_ERROR,
-                                     GTK_DIALOG_ERROR_DISMISSED)) {
+         * — don't log it as an error. Anything else is worth
+         * a warning. */
+        if (err
+            && !g_error_matches (err, GTK_DIALOG_ERROR,
+                                 GTK_DIALOG_ERROR_DISMISSED)) {
             g_warning ("preview save: %s", err->message);
         }
         g_clear_error (&err);
@@ -1348,15 +1349,13 @@ on_save_finished (GObject *src, GAsyncResult *res, gpointer user_data)
     }
 
     if (p->bytes && p->bytes->len > 0) {
-        if (!g_file_replace_contents (gf, (const char *) p->bytes->data,
+        if (!g_file_replace_contents (gf, (const char *)p->bytes->data,
                                       p->bytes->len, NULL, /* etag */
                                       FALSE,               /* make_backup */
-                                      G_FILE_CREATE_NONE,
-                                      NULL, /* new_etag */
+                                      G_FILE_CREATE_NONE, NULL, /* new_etag */
                                       NULL, /* cancellable */
                                       &err)) {
-            g_warning ("preview save: %s",
-                       err ? err->message : "(unknown)");
+            g_warning ("preview save: %s", err ? err->message : "(unknown)");
             g_clear_error (&err);
         }
     }
@@ -1373,22 +1372,22 @@ save_clicked (GtkButton *btn, gpointer user_data)
     GtkRoot *root;
     struct save_dialog_ctx *ctx;
 
-    (void) btn;
+    (void)btn;
 
     fd = gtk_file_dialog_new ();
     gtk_file_dialog_set_title (fd, "Save File");
 
     /* Suggest the file's original name as the destination
-	 * filename so the user just clicks Save in the common
-	 * case. */
+     * filename so the user just clicks Save in the common
+     * case. */
     if (p->name && *p->name) {
         gtk_file_dialog_set_initial_name (fd, p->name);
     }
 
     /* Default folder = the preferences-configured download
-	 * dir, matching what a full Download would do. Falls back
-	 * to the platform default if the pref is empty /
-	 * nonexistent. */
+     * dir, matching what a full Download would do. Falls back
+     * to the platform default if the pref is empty /
+     * nonexistent. */
     if (gtkhx_prefs.download_path && *gtkhx_prefs.download_path) {
         GFile *gd = g_file_new_for_path (gtkhx_prefs.download_path);
         gtk_file_dialog_set_initial_folder (fd, gd);
@@ -1418,19 +1417,19 @@ hx_preview_new (const char *name)
 
     p = g_new0 (hx_preview, 1);
     /* Two initial refs:
-	 *   - one held by the preview window (dropped in
-	 *     preview_close_request when the user closes the window);
-	 *   - one transferred to the caller, who stashes the pointer
-	 *     on htxf->preview and drops the ref in htxf_unref when the
-	 *     HTXF worker connection is torn down.
-	 *
-	 * The second ref closes a use-after-free window: without it,
-	 * closing the preview window mid-transfer would free the struct
-	 * while the worker was still reading htxf->preview, and the next
-	 * hx_preview_chunk call would atomically-increment freed memory
-	 * and queue a chunk_job with a stale pointer. The job's
-	 * eventual hx_preview_unref decrement would then re-enter the
-	 * free path and abort in malloc on the already-freed name. */
+     *   - one held by the preview window (dropped in
+     *     preview_close_request when the user closes the window);
+     *   - one transferred to the caller, who stashes the pointer
+     *     on htxf->preview and drops the ref in htxf_unref when the
+     *     HTXF worker connection is torn down.
+     *
+     * The second ref closes a use-after-free window: without it,
+     * closing the preview window mid-transfer would free the struct
+     * while the worker was still reading htxf->preview, and the next
+     * hx_preview_chunk call would atomically-increment freed memory
+     * and queue a chunk_job with a stale pointer. The job's
+     * eventual hx_preview_unref decrement would then re-enter the
+     * free path and abort in malloc on the already-freed name. */
     p->refcount = 2;
     p->name = g_strdup (name ? name : "");
 
@@ -1441,10 +1440,10 @@ hx_preview_new (const char *name)
     gtk_window_set_default_size (GTK_WINDOW (p->window), 480, 360);
 
     /* Trailing-edge Save button — writes p->bytes to a
-	 * user-chosen file. Insensitive until the first chunk lands
-	 * (chunk_dispatch flips it on). The document-save-symbolic
-	 * icon is the standard GNOME save glyph; the tooltip carries
-	 * the verb for screen readers. */
+     * user-chosen file. Insensitive until the first chunk lands
+     * (chunk_dispatch flips it on). The document-save-symbolic
+     * icon is the standard GNOME save glyph; the tooltip carries
+     * the verb for screen readers. */
     p->save_btn = gtk_button_new_from_icon_name ("document-save-symbolic");
     gtk_widget_set_tooltip_text (p->save_btn, "Save file");
     gtk_widget_set_sensitive (p->save_btn, FALSE);
@@ -1464,9 +1463,9 @@ hx_preview_new (const char *name)
                       G_CALLBACK (preview_close_request), p);
 
     /* Standard close / quit shortcuts. Preview is a viewer window
-	 * rather than a dialog (Esc could plausibly land on something
-	 * inside the preview content like a sourceview), so use the
-	 * non-dialog variant — Ctrl+W / Ctrl+Q only. */
+     * rather than a dialog (Esc could plausibly land on something
+     * inside the preview content like a sourceview), so use the
+     * non-dialog variant — Ctrl+W / Ctrl+Q only. */
     init_keyaccel (p->window);
 
     gtk_window_present (GTK_WINDOW (p->window));
@@ -1525,13 +1524,13 @@ hx_preview_done (hx_preview *p)
         return;
     }
     /* Signal end-of-stream to preview_close_request before queuing
-	 * the main-thread done_dispatch. Setting this here (on the
-	 * worker, at hx_preview_done call time) instead of inside
-	 * done_dispatch closes a race: without it, a close-window
-	 * arriving after the worker finished but before the idle ran
-	 * would see stream_finished=FALSE and incorrectly fire the
-	 * cancel hook on a transfer that's already done. Atomic store
-	 * is paired with an atomic load in preview_close_request. */
+     * the main-thread done_dispatch. Setting this here (on the
+     * worker, at hx_preview_done call time) instead of inside
+     * done_dispatch closes a race: without it, a close-window
+     * arriving after the worker finished but before the idle ran
+     * would see stream_finished=FALSE and incorrectly fire the
+     * cancel hook on a transfer that's already done. Atomic store
+     * is paired with an atomic load in preview_close_request. */
     g_atomic_int_set (&p->stream_finished, 1);
     hx_preview_ref (p);
     g_idle_add (done_dispatch, p);

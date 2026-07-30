@@ -36,8 +36,8 @@ test_msg_to_unknown_uid_doesnt_break_stream (void)
     }
 
     /* uid 0xFFFE — high enough that no real connection will ever
-	 * be assigned it within the test's lifetime. */
-    guint16 dead_uid_be = g_htons(0xFFFE);
+     * be assigned it within the test's lifetime. */
+    guint16 dead_uid_be = g_htons (0xFFFE);
     const char *body = "tier-3 unknown-uid msg";
     g_assert_true (integration_send_message (
         fd, &htlc, HTLC_HDR_MSG, /*flag=*/0, /*hc=*/2, (int)HTLC_DATA_UID,
@@ -45,8 +45,8 @@ test_msg_to_unknown_uid_doesnt_break_stream (void)
         (int)strlen (body), (guint8 *)body));
 
     /* Drain a brief window. We expect nothing — no echo, no
-	 * task-error. Note for future readers: any frame that DOES
-	 * appear is suspicious and worth recording. */
+     * task-error. Note for future readers: any frame that DOES
+     * appear is suspicious and worth recording. */
     int drained = 0;
     gboolean saw_msg_echo = FALSE;
     gboolean saw_task_error = FALSE;

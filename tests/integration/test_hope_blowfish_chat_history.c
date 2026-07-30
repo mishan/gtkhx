@@ -57,8 +57,8 @@ pick_chat_history_blowfish_server (void)
 static void
 make_marker (char *out, gsize cap)
 {
-    guint64 r = (((guint64) g_random_int ()) << 32) ^ (guint64) g_random_int ();
-    r ^= ((guint64) getpid () << 16) ^ (guint64) time (NULL);
+    guint64 r = (((guint64)g_random_int ()) << 32) ^ (guint64)g_random_int ();
+    r ^= ((guint64)getpid () << 16) ^ (guint64)time (NULL);
     g_snprintf (out, cap, "HX-%016" G_GINT64_MODIFIER "x", r);
 }
 
@@ -66,7 +66,7 @@ static guint
 walk_history_reply (struct htlc_conn *htlc, GPtrArray *out)
 {
     guint added = 0;
-    dh_start (hx_test_in(htlc)->buf, hx_test_in(htlc)->pos)
+    dh_start (hx_test_in (htlc)->buf, hx_test_in (htlc)->pos)
     {
         if (_type == HTLS_DATA_HISTORY_ENTRY) {
             HxHistoryEntry *e = hx_history_entry_parse (dh->data, _len);
@@ -99,11 +99,11 @@ static gboolean
 send_chat_line_hope (int fd, struct htlc_conn *htlc,
                      integration_hope_session *hope, const char *text)
 {
-    guint16 style = g_htons(1);
+    guint16 style = g_htons (1);
     return integration_send_message_hope (
         fd, htlc, hope, HTLC_HDR_CHAT, /*flag=*/0, /*hc=*/2,
-        (int) HTLC_DATA_STYLE, (int) sizeof (style), &style,
-        (int) HTLC_DATA_CHAT, (int) strlen (text), (guint8 *) text);
+        (int)HTLC_DATA_STYLE, (int)sizeof (style), &style, (int)HTLC_DATA_CHAT,
+        (int)strlen (text), (guint8 *)text);
 }
 
 static gboolean
@@ -129,11 +129,12 @@ test_hope_blowfish_chat_history_round_trip (void)
 {
     const hx_test_server *srv = pick_chat_history_blowfish_server ();
     if (!srv) {
-        g_test_fail_printf ("no server in matrix advertising both "
-                     "HX_TEST_CAP_CHAT_HISTORY and HX_TEST_CAP_BLOWFISH. "
-                     "Janus has chat-history but only ChaCha20; mhxd has "
-                     "Blowfish but no chat-history. Add a matrix entry "
-                     "combining both and this test will fire.");
+        g_test_fail_printf (
+            "no server in matrix advertising both "
+            "HX_TEST_CAP_CHAT_HISTORY and HX_TEST_CAP_BLOWFISH. "
+            "Janus has chat-history but only ChaCha20; mhxd has "
+            "Blowfish but no chat-history. Add a matrix entry "
+            "combining both and this test will fire.");
         return;
     }
 
@@ -171,7 +172,7 @@ test_hope_blowfish_chat_history_round_trip (void)
     g_assert_true (drain_until_task_hope (fd, &htlc, &hope, trans, 32));
 
     GPtrArray *entries = g_ptr_array_new_with_free_func (
-        (GDestroyNotify) hx_history_entry_free);
+        (GDestroyNotify)hx_history_entry_free);
     guint n = walk_history_reply (&htlc, entries);
     g_assert_cmpuint (n, >, 0);
 

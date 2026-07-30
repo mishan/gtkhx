@@ -58,8 +58,8 @@ static void
 test_login_pass_host_port (void)
 {
     HotlineUrlParts p;
-    g_assert_true (hotline_url_parse (
-        "hotline://alice:secret@hl.example.com:5501", &p));
+    g_assert_true (
+        hotline_url_parse ("hotline://alice:secret@hl.example.com:5501", &p));
     g_assert_cmpstr (p.host, ==, "hl.example.com");
     g_assert_cmpstr (p.login, ==, "alice");
     g_assert_cmpstr (p.pass, ==, "secret");
@@ -89,10 +89,10 @@ static void
 test_url_decoding (void)
 {
     /* %20 in login decodes to space; %40 in password is a literal
-	 * '@' that doesn't re-trigger the userinfo split. */
+     * '@' that doesn't re-trigger the userinfo split. */
     HotlineUrlParts p;
-    g_assert_true (hotline_url_parse (
-        "hotline://alice%20a:p%40ss@hl.example.com", &p));
+    g_assert_true (
+        hotline_url_parse ("hotline://alice%20a:p%40ss@hl.example.com", &p));
     g_assert_cmpstr (p.host, ==, "hl.example.com");
     g_assert_cmpstr (p.login, ==, "alice a");
     g_assert_cmpstr (p.pass, ==, "p@ss");
@@ -125,9 +125,9 @@ static void
 test_rejects_ipv6_trailing_junk (void)
 {
     /* "[::1]foo" — anything after the closing bracket that isn't
-	 * ":port" gets rejected. The earlier permissive form would
-	 * silently drop the trailing bytes and connect to "::1", which
-	 * isn't what the user typed. */
+     * ":port" gets rejected. The earlier permissive form would
+     * silently drop the trailing bytes and connect to "::1", which
+     * isn't what the user typed. */
     HotlineUrlParts p;
     g_assert_false (hotline_url_parse ("hotline://[2001:db8::1]foo", &p));
     g_assert_false (hotline_url_parse ("hotline://[2001:db8::1]5500", &p));
@@ -139,16 +139,15 @@ static void
 test_rejects_unbracketed_ipv6 (void)
 {
     /* "2001:db8::1" has multiple ':' and no brackets — ambiguous
-	 * between an IPv6 literal and host+port. The last-':' rule
-	 * would silently misread the IPv6 as host="2001:db8::" port="1".
-	 * Reject and require brackets for IPv6 literals. */
+     * between an IPv6 literal and host+port. The last-':' rule
+     * would silently misread the IPv6 as host="2001:db8::" port="1".
+     * Reject and require brackets for IPv6 literals. */
     HotlineUrlParts p;
     g_assert_false (hotline_url_parse ("hotline://2001:db8::1", &p));
     g_assert_false (hotline_url_parse ("hotline://2001:db8::1:5500", &p));
     /* User-info form with embedded IPv6 — still ambiguous, still
-	 * rejected. */
-    g_assert_false (
-        hotline_url_parse ("hotline://alice@2001:db8::1:5500", &p));
+     * rejected. */
+    g_assert_false (hotline_url_parse ("hotline://alice@2001:db8::1:5500", &p));
 }
 
 static void
@@ -182,7 +181,7 @@ static void
 test_rejects_bad_port (void)
 {
     /* Bad port silently falls back to 0; the URL still parses
-	 * because the host is fine. Caller defaults port to 5500. */
+     * because the host is fine. Caller defaults port to 5500. */
     HotlineUrlParts p;
     g_assert_true (hotline_url_parse ("hotline://hl.example.com:abcd", &p));
     g_assert_cmpuint (p.port, ==, 0);
@@ -196,11 +195,11 @@ static void
 test_password_with_unescaped_at (void)
 {
     /* User pastes an unescaped '@' inside the password. We split on
-	 * the LAST '@', which keeps the host intact and lets the unescaped
-	 * '@' land in the password. */
+     * the LAST '@', which keeps the host intact and lets the unescaped
+     * '@' land in the password. */
     HotlineUrlParts p;
-    g_assert_true (hotline_url_parse (
-        "hotline://alice:p@ss@hl.example.com:5500", &p));
+    g_assert_true (
+        hotline_url_parse ("hotline://alice:p@ss@hl.example.com:5500", &p));
     g_assert_cmpstr (p.host, ==, "hl.example.com");
     g_assert_cmpstr (p.login, ==, "alice");
     g_assert_cmpstr (p.pass, ==, "p@ss");

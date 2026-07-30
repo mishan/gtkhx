@@ -39,9 +39,11 @@ pub unsafe fn run_sync(parent: *mut cffi::GtkWindow, name: &str) -> i32 {
     // existing translation catalog still resolves, then substitute the
     // bookmark name in ourselves.
     let mut body = if name.is_empty() {
-        tr("This connection was saved with RC4 as its HOPE cipher. GtkHx no longer \
+        tr(
+            "This connection was saved with RC4 as its HOPE cipher. GtkHx no longer \
             offers RC4 — it's a known-broken stream cipher and the \"Secure\" label \
-            it used to wear was misleading.")
+            it used to wear was misleading.",
+        )
     } else {
         tr1(
             "The bookmark \"%s\" was saved with RC4 as its HOPE cipher. GtkHx no longer \

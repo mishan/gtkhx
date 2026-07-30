@@ -75,13 +75,13 @@ struct msgwin {
     GtkWidget *vscroll;
     GtkWidget *window;
     /* header pane above the chat showing the recipient's
-	 * icon + name + status. info_image is a GtkImage (Mac classic
-	 * cicn rendered to GdkPixbuf via load_icon); info_label is a
-	 * single GtkLabel with Pango markup — bold (optionally
-	 * coloured) name on top, dim small details (UID · Icon ·
-	 * Admin/Guest [Away]) below. msgwin_refresh_user_info()
-	 * repopulates both when the user changes their nick / icon /
-	 * idle state. */
+     * icon + name + status. info_image is a GtkImage (Mac classic
+     * cicn rendered to GdkPixbuf via load_icon); info_label is a
+     * single GtkLabel with Pango markup — bold (optionally
+     * coloured) name on top, dim small details (UID · Icon ·
+     * Admin/Guest [Away]) below. msgwin_refresh_user_info()
+     * repopulates both when the user changes their nick / icon /
+     * idle state. */
     GtkWidget *info_image;
     GtkWidget *info_label;
     /* PM input line history — a Rust InputHistory (hxchat-model), like
@@ -172,12 +172,12 @@ typedef struct _session {
     GtkWidget *users_window;
 
     /* the standalone Users window's row list is now a
-	 * HxUserListView GObject (GtkColumnView-backed). Forward-declared
-	 * as an opaque typedef so this header doesn't have to pull in
-	 * gtk-side users_view.h — the field is read/written from
-	 * users.c only. The view holds the GtkColumnView widget
-	 * internally; the column view is packed into a scrolled window
-	 * inside the toplevel users_window. */
+     * HxUserListView GObject (GtkColumnView-backed). Forward-declared
+     * as an opaque typedef so this header doesn't have to pull in
+     * gtk-side users_view.h — the field is read/written from
+     * users.c only. The view holds the GtkColumnView widget
+     * internally; the column view is packed into a scrolled window
+     * inside the toplevel users_window. */
     struct _HxUserListView *users_view;
 
     /* Phase 8.D runtime wiring: opaque per-session voice runtime
@@ -212,52 +212,52 @@ typedef struct _session {
     struct gnews_folder *gfnews_list;
 
     /* per-session gfile_list pointer retired with the
-	 * legacy files browser. The new orthodox-FM browser
-	 * (files_browser.c) is a singleton owned by its own static
-	 * `the_browser` variable. */
+     * legacy files browser. The new orthodox-FM browser
+     * (files_browser.c) is a singleton owned by its own static
+     * `the_browser` variable. */
 
     /* open PM windows keyed on the recipient's uid.
-	 * Replaces the file-scope `msg_list` global in msg.c and the
-	 * dead `sess->msg_list` field that was declared here but never
-	 * populated (a long-standing bug — options.c font / wordwrap /
-	 * timestamp iterations over the dead session pointer were
-	 * silently no-oping). Lookup is O(1) via msgwin_with_uid;
-	 * iteration uses GHashTableIter. */
+     * Replaces the file-scope `msg_list` global in msg.c and the
+     * dead `sess->msg_list` field that was declared here but never
+     * populated (a long-standing bug — options.c font / wordwrap /
+     * timestamp iterations over the dead session pointer were
+     * silently no-oping). Lookup is O(1) via msgwin_with_uid;
+     * iteration uses GHashTableIter. */
     GHashTable *msg_windows;
 
     struct gnews_catalog *gcnews_list;
 
     /* tasks keyed on the 32-bit trans id. Replaces the
-	 * intrusive __task_list / task_list / task_tail trio. Lookup
-	 * by trans is O(1); iteration is via GHashTableIter. The
-	 * hashtable owns each task; values get freed via task_free
-	 * (tasks.c) when removed. */
+     * intrusive __task_list / task_list / task_tail trio. Lookup
+     * by trans is O(1); iteration is via GHashTableIter. The
+     * hashtable owns each task; values get freed via task_free
+     * (tasks.c) when removed. */
     GHashTable *tasks;
 
     /* No session-level user_list / user_tail / __user_list — the
-	 * canonical "global user list" lookup is the public chat at cid=0
-	 * (use chat_with_cid(sess, 0)->user_list). Do not reintroduce
-	 * session.user_list — it was a dead field that had no writer but
-	 * looked plausible to read, and tripped a segfault from the PM info
-	 * pane the last time someone tried. */
+     * canonical "global user list" lookup is the public chat at cid=0
+     * (use chat_with_cid(sess, 0)->user_list). Do not reintroduce
+     * session.user_list — it was a dead field that had no writer but
+     * looked plausible to read, and tripped a segfault from the PM info
+     * pane the last time someone tried. */
 
     /* chats keyed on the 32-bit chat-id. Replaces the
-	 * chat_front / chat_tail / chat_list trio + the embedded
-	 * __chat_list sentinel. cid=0 is the public/server-wide chat
-	 * and is created at session init by chats_init() — it must
-	 * always exist while the table does. Other chats (private
-	 * pchats) are inserted by chat_new and removed by chat_delete.
-	 * Lookup via chat_with_cid; the registry's destroy callback
-	 * (chat_free in chat.c) tears down each conversation's view then the
-	 * conversation handle when it is removed. It's the Rust HxChatRegistry
-	 * (gtkhx-session crate — see chat.h), not a GHashTable. */
+     * chat_front / chat_tail / chat_list trio + the embedded
+     * __chat_list sentinel. cid=0 is the public/server-wide chat
+     * and is created at session init by chats_init() — it must
+     * always exist while the table does. Other chats (private
+     * pchats) are inserted by chat_new and removed by chat_delete.
+     * Lookup via chat_with_cid; the registry's destroy callback
+     * (chat_free in chat.c) tears down each conversation's view then the
+     * conversation handle when it is removed. It's the Rust HxChatRegistry
+     * (gtkhx-session crate — see chat.h), not a GHashTable. */
     HxChatRegistry *chats;
 
     /* The connection this session owns. Heap-allocated (g_new0) once at
-	 * startup and owned by the session for its lifetime — a pointer, not an
-	 * embedded value, so the struct's storage can move behind an opaque Rust
-	 * owner (network-endgame.md phase E1) without every `sess->htlc->` call
-	 * site changing again. Never NULL after fe_init. */
+     * startup and owned by the session for its lifetime — a pointer, not an
+     * embedded value, so the struct's storage can move behind an opaque Rust
+     * owner (network-endgame.md phase E1) without every `sess->htlc->` call
+     * site changing again. Never NULL after fe_init. */
     struct htlc_conn *htlc;
 
     unsigned int connected : 1;
@@ -287,8 +287,9 @@ extern session the_session;
 static inline session *
 sess_from_htlc (struct htlc_conn *htlc)
 {
-    if (htlc == NULL)
+    if (htlc == NULL) {
         return NULL;
+    }
     return hx_conn_sess (htlc);
 }
 

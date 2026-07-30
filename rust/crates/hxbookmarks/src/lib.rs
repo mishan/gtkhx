@@ -16,8 +16,8 @@
 //! so everything here is unit-tested headless against temp dirs.
 
 pub mod cipher;
-pub mod legacy;
 mod hostport;
+pub mod legacy;
 
 use std::fs;
 use std::io;
@@ -238,8 +238,8 @@ pub fn load_or_bootstrap(config_dir: &Path, legacy_dirs: &[PathBuf]) -> Result<S
 /// if needed.
 pub fn save(config_dir: &Path, store: &Store) -> io::Result<()> {
     fs::create_dir_all(config_dir)?;
-    let text = toml::to_string_pretty(store)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let text =
+        toml::to_string_pretty(store).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     let final_path = store_path(config_dir);
     let tmp_path = config_dir.join("bookmarks.toml.tmp");
     fs::write(&tmp_path, text.as_bytes())?;

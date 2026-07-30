@@ -105,10 +105,10 @@ human_readable (guint64 n, char *buf, int from_block_size,
 
         if (amt / multiplier != n) {
             /* Overflow occurred during multiplication.  We should use
-	     multiple precision arithmetic here, but we'll be lazy and
-	     resort to floating point.  This can yield answers that
-	     are slightly off.  In practice it is quite rare to
-	     overflow uintmax_t, so this is good enough for now.  */
+         multiple precision arithmetic here, but we'll be lazy and
+         resort to floating point.  This can yield answers that
+         are slightly off.  In practice it is quite rare to
+         overflow uintmax_t, so this is good enough for now.  */
 
             double damt = n * (double)multiplier;
 

@@ -1,28 +1,42 @@
 #ifndef HX_RCV_H
 #define HX_RCV_H
 
-extern void hx_rcv_chat (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_magic (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_chat (struct htlc_conn *htlc, const guint8 *frame,
+                         gsize frame_len);
+extern void hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame,
+                        gsize frame_len);
+extern void hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
+                                   gsize frame_len);
+extern void hx_rcv_news_post (struct htlc_conn *htlc, const guint8 *frame,
+                              gsize frame_len);
+extern void hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame,
+                         gsize frame_len);
+extern void hx_rcv_user_change (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len);
+extern void hx_rcv_user_part (struct htlc_conn *htlc, const guint8 *frame,
+                              gsize frame_len);
+extern void hx_rcv_chat_subject (struct htlc_conn *htlc, const guint8 *frame,
+                                 gsize frame_len);
+extern void hx_rcv_chat_invite (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len);
+extern void hx_rcv_user_selfinfo (struct htlc_conn *htlc, const guint8 *frame,
+                                  gsize frame_len);
+extern void hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame,
+                         gsize frame_len);
+extern void hx_rcv_xfer_queue (struct htlc_conn *htlc, const guint8 *frame,
+                               gsize frame_len);
+extern void hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame,
+                           gsize frame_len);
+extern void hx_rcv_magic (struct htlc_conn *htlc, const guint8 *frame,
+                          gsize frame_len);
 /* Dispatch a received frame: route the (already-parsed) opcode to a body
  * handler and call it. The hxnet bridge assembles the 22-byte header + body
  * into a transient buffer and passes it here as an explicit (frame, frame_len)
  * slice alongside the parsed header fields. Replaces the old hx_rcv_hdr
  * two-phase state machine. */
 extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
-                              gsize frame_len, guint32 type,
-                               guint32 trans, guint32 flag, guint32 body_len);
+                               gsize frame_len, guint32 type, guint32 trans,
+                               guint32 flag, guint32 body_len);
 
 /* Voice-chat extension (fogWraith Capabilities-Voice.md), Phase 8.A.
  * Server-initiated notifications dispatched from the hx_dispatch_frame switch.
@@ -32,9 +46,12 @@ extern void hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame,
  * Phase 8.A logs the parsed payload via debug_log("voice", ...) and
  * proto_trace; the runtime state machine + GtkhxSession signals land
  * in Phase 8.C with hxvoice-runtime. */
-extern void hx_rcv_voice_sdp_offer (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_voice_ice (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_voice_sdp_offer (struct htlc_conn *htlc, const guint8 *frame,
+                                    gsize frame_len);
+extern void hx_rcv_voice_ice (struct htlc_conn *htlc, const guint8 *frame,
+                              gsize frame_len);
+extern void hx_rcv_voice_room_status (struct htlc_conn *htlc,
+                                      const guint8 *frame, gsize frame_len);
 
 /* TASK-reply handlers for the client-initiated 600/601/603/606
  * transactions. The voice send wrappers in src/voice.c register
@@ -51,24 +68,30 @@ extern void hx_rcv_voice_room_status (struct htlc_conn *htlc, const guint8 *fram
  *                   the originating opcode (label only),
  *                   `cid_ptr` is the originating cid (diagnostic
  *                   only). */
-extern void rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *channel_ptr);
-extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+extern void rcv_task_voice_join (struct htlc_conn *htlc, const guint8 *frame,
+                                 gsize frame_len, void *channel_ptr);
+extern void rcv_task_voice_simple_ack (struct htlc_conn *htlc,
+                                       const guint8 *frame, gsize frame_len,
                                        void *opcode_ptr, void *cid_ptr);
 
-extern void rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct uesp_fn *uespfn);
-extern void rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *msg_buf);
+extern void rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len, struct uesp_fn *uespfn);
+extern void rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame,
+                          gsize frame_len, char *msg_buf);
 /* rcv_task_newscat_list moved to the hxnews-recv Rust crate as a 3-arg
  * rcv_task_fn (htlc, ptr, data). No C caller references them by name — the
  * hxnews-send cat_list / fldr_list / get_post senders register them via
  * task_new — so the old 2-arg prototypes are gone rather than left to drift
  * from the real ABI. */
-extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *pass);
+extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame,
+                            gsize frame_len, char *pass);
 /* rcv_task_news_users (post-login USER_GETLIST reply) moved to the hxhandlers
  * Rust crate (recv/user.rs); the prototype stays for the RCV_TASK_FN(task_new)
  * registration in the post-login fetch path. */
-extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
-                                 int text);
-extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void rcv_task_news_users (struct htlc_conn *htlc, const guint8 *frame,
+                                 gsize frame_len, struct chat *chat, int text);
+extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len);
 
 /* TRAN_GET_CHAT_HISTORY (700) reply walker. Moved to the hxhandlers Rust crate
  * (recv/chat.rs): it walks the reply chunks natively, builds the
@@ -81,8 +104,9 @@ extern void rcv_task_news_file (struct htlc_conn *htlc, const guint8 *frame, gsi
  * hx_get_chat_history); the symbol resolves against the Rust crate at link. The
  * Rust body takes the canonical rcv_task_fn shape, so the prototype matches it
  * (ptr = channel id, data unused) rather than the historical short form. */
-extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                                   void *channel_ptr, void *data);
+extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame,
+                                   gsize frame_len, void *channel_ptr,
+                                   void *data);
 /* GIF-icons extension (fogWraith GIF-Icons.md) reply handlers. The bodies moved
  * to the hxhandlers Rust crate (recv/icon.rs): each walks the reply natively
  * (crate::gif_icons), flips the probe negotiation state via the
@@ -94,11 +118,14 @@ extern void rcv_task_chat_history (struct htlc_conn *htlc, const guint8 *frame, 
  *               the reply, so the Rust body ignores it).
  *   _getlist  — ICON_GETLIST (1861) reply: 0..N packed ICON_LIST
  *               entries; also resolves the probe to SUPPORTED. */
-extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, void *uid_ptr);
-extern void rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void rcv_task_icon_get (struct htlc_conn *htlc, const guint8 *frame,
+                               gsize frame_len, void *uid_ptr);
+extern void rcv_task_icon_getlist (struct htlc_conn *htlc, const guint8 *frame,
+                                   gsize frame_len);
 /* ICON_CHANGE (1864) broadcast: UID only. Emits gif-icon-changed so a
  * view can re-fetch the avatar via hx_icon_get. */
-extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
+extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len);
 
 /* rcv_task_user_list / _user_list_switch / _user_info moved to the hxhandlers
  * Rust crate (recv/user.rs): they walk the reply chunks natively
@@ -106,18 +133,21 @@ extern void hx_rcv_icon_change (struct htlc_conn *htlc, const guint8 *frame, gsi
  * shared, already-Rust hx_user_apply_recv. The prototypes stay for the
  * RCV_TASK_FN(task_new) registrations in users.c / chat.c. rcv_task_kick stays C
  * (it logs via the variadic hx_printf_prefix). */
-extern void rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct chat *chat,
-                                int text);
-extern void rcv_task_user_list_switch (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
+extern void rcv_task_user_list (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len, struct chat *chat, int text);
+extern void rcv_task_user_list_switch (struct htlc_conn *htlc,
+                                       const guint8 *frame, gsize frame_len,
                                        struct chat *chat);
-extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len);
-extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, guint16 *_uid,
-                                int text);
+extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame,
+                           gsize frame_len);
+extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len, guint16 *_uid, int text);
 /* rcv_task_file_list moved to the hxfiles-recv Rust crate, which also owns struct
  * cached_filelist (the hx_cfl_* accessor facade in files.h). It walks the
  * FILE_LIST chunks natively and accumulates them into the Rust-owned cfl. */
-extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                                struct cached_filelist *cfl, void *data);
+extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame,
+                                gsize frame_len, struct cached_filelist *cfl,
+                                void *data);
 /* rcv_task_file_getinfo / _file_get / _file_put / _folder_get / _folder_put (and
  * rcv_task_banner_get in banner.h) moved to the hxxfer-recv Rust crate: each
  * parses its reply natively (hotline_proto::parse::*) and reaches the C-owned
@@ -125,17 +155,20 @@ extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame, gsi
  * prototypes stay because the C senders (xfers.c, files.c, banner.c) register the
  * handlers via RCV_TASK_FN(); the symbols now resolve against the Rust crate at
  * link. */
-extern void rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, char *path);
-extern void rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf);
-extern void rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len, struct htxf_conn *htxf);
+extern void rcv_task_file_getinfo (struct htlc_conn *htlc, const guint8 *frame,
+                                   gsize frame_len, char *path);
+extern void rcv_task_file_get (struct htlc_conn *htlc, const guint8 *frame,
+                               gsize frame_len, struct htxf_conn *htxf);
+extern void rcv_task_file_put (struct htlc_conn *htlc, const guint8 *frame,
+                               gsize frame_len, struct htxf_conn *htxf);
 /* Folder transfer task replies. Mirror rcv_task_file_get /
  * rcv_task_file_put but also parse HTLS_DATA_FILE_NFILES so the
  * tasks-window can show the leaf count. The actual stream is
  * handled by folder_get_thread / folder_put_thread in xfers.c. */
-extern void rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                                 struct htxf_conn *htxf);
-extern void rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
-                                 struct htxf_conn *htxf);
+extern void rcv_task_folder_get (struct htlc_conn *htlc, const guint8 *frame,
+                                 gsize frame_len, struct htxf_conn *htxf);
+extern void rcv_task_folder_put (struct htlc_conn *htlc, const guint8 *frame,
+                                 gsize frame_len, struct htxf_conn *htxf);
 
 /* drop any pending post-login fallback timer. Called from
  * hx_htlc_close so we don't fire fetches into a closed connection if

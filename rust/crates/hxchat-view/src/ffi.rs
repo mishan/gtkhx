@@ -174,13 +174,10 @@ pub unsafe extern "C" fn hx_chat_view_new(
 /// Caller takes ownership of the returned pointer.
 unsafe fn into_floating_ptr<W: IsA<gtk4::Widget>>(w: W) -> CGtkWidget {
     let ptr = w.upcast::<gtk4::Widget>().into_glib_ptr();
-    gtk4::glib::gobject_ffi::g_object_force_floating(
-        ptr as *mut gtk4::glib::gobject_ffi::GObject,
-    );
+    gtk4::glib::gobject_ffi::g_object_force_floating(ptr as *mut gtk4::glib::gobject_ffi::GObject);
     debug_assert!(
-        gtk4::glib::gobject_ffi::g_object_is_floating(
-            ptr as *mut gtk4::glib::gobject_ffi::GObject
-        ) != 0,
+        gtk4::glib::gobject_ffi::g_object_is_floating(ptr as *mut gtk4::glib::gobject_ffi::GObject)
+            != 0,
         "a widget handed to C must be floating, like a GTK C constructor"
     );
     ptr
@@ -265,10 +262,7 @@ pub unsafe extern "C" fn hx_chat_view_set_time_stamp(w: CGtkWidget, on: c_int) {
 /// # Safety
 /// `w` is a valid `HxChatView *` or NULL; `fmt` a NUL-terminated string.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_set_stamp_format(
-    w: CGtkWidget,
-    fmt: *const c_char,
-) {
+pub unsafe extern "C" fn hx_chat_view_set_stamp_format(w: CGtkWidget, fmt: *const c_char) {
     let f = cstr(fmt);
     // A NULL view means "format only", which `prefs_read` does before
     // any window exists. Recording it process-wide is load-bearing: it
@@ -296,10 +290,7 @@ pub type UrlCheckFn = unsafe extern "C" fn(CGtkWidget, *mut c_char) -> c_int;
 /// # Safety
 /// `w` is a valid `HxChatView *`; `f` is NULL or a valid function pointer.
 #[no_mangle]
-pub unsafe extern "C" fn hx_chat_view_set_urlcheck_function(
-    w: CGtkWidget,
-    f: Option<UrlCheckFn>,
-) {
+pub unsafe extern "C" fn hx_chat_view_set_urlcheck_function(w: CGtkWidget, f: Option<UrlCheckFn>) {
     // C3: link activation is part of the interaction phase, and it will
     // arrive as a typed `link-activated` signal rather than a
     // word-classifier callback (scoping §3.6). Accepted and dropped so
@@ -743,11 +734,7 @@ fn under(p: ParsedText, base: Style) -> ParsedText {
 }
 
 /// Split a body into blocks, rendering markdown when it is enabled.
-pub(crate) unsafe fn body_blocks(
-    runs: *const HxChatRun,
-    n: c_int,
-    markdown: bool,
-) -> Vec<Block> {
+pub(crate) unsafe fn body_blocks(runs: *const HxChatRun, n: c_int, markdown: bool) -> Vec<Block> {
     let plain = runs_to_text(runs, n);
 
     let Some(base) = uniform_body_style(runs, n).filter(|_| markdown) else {
@@ -925,9 +912,8 @@ pub unsafe extern "C" fn hx_chat_view_append_media(
             flags: hxchat_layout::MessageFlags::NONE,
         });
         if !texture.is_null() {
-            let tex: gtk4::gdk::Texture = gtk4::glib::translate::from_glib_none(
-                texture as *mut gtk4::gdk::ffi::GdkTexture,
-            );
+            let tex: gtk4::gdk::Texture =
+                gtk4::glib::translate::from_glib_none(texture as *mut gtk4::gdk::ffi::GdkTexture);
             v.set_media_frames(token, vec![(tex, 0)]);
         }
     })
@@ -938,7 +924,9 @@ pub unsafe extern "C" fn hx_chat_view_append_media(
 #[no_mangle]
 pub unsafe extern "C" fn hx_chat_view_media_mark(w: CGtkWidget, token: u32) -> *mut c_void {
     match view_of(w) {
-        Some(v) => v.find_image(token).map_or(std::ptr::null_mut(), mark_to_ptr),
+        Some(v) => v
+            .find_image(token)
+            .map_or(std::ptr::null_mut(), mark_to_ptr),
         None => std::ptr::null_mut(),
     }
 }

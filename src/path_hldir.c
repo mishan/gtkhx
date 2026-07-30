@@ -37,7 +37,7 @@
 #include <stddef.h>
 #include <string.h>
 #include <glib.h>
-#include "compat.h"             /* PACKED */
+#include "compat.h" /* PACKED */
 #include "path_hldir.h"
 
 extern guint8 dir_char;
@@ -87,7 +87,7 @@ path_to_hldir (const char *path, guint16 *hldirlen, int is_file)
         memcpy (fh->name, p, nlen);
         dc++;
     }
-    *((guint16 *)hldir) = g_htons(dc);
+    *((guint16 *)hldir) = g_htons (dc);
 
     *hldirlen = pos;
     return hldir;

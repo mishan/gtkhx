@@ -62,12 +62,12 @@ G_BEGIN_DECLS
 /* Standard ids — keep in sync with the per-window construction
  * sites as they're migrated in Phase 2. New ids land here so
  * collisions show up at compile time, not runtime. */
-#define HX_PANEL_ID_CHAT      "chat"
-#define HX_PANEL_ID_USERS     "users"
-#define HX_PANEL_ID_TASKS     "tasks"
-#define HX_PANEL_ID_NEWS      "news"
-#define HX_PANEL_ID_NEWS15    "news15"
-#define HX_PANEL_ID_FILES     "files"
+#define HX_PANEL_ID_CHAT "chat"
+#define HX_PANEL_ID_USERS "users"
+#define HX_PANEL_ID_TASKS "tasks"
+#define HX_PANEL_ID_NEWS "news"
+#define HX_PANEL_ID_NEWS15 "news15"
+#define HX_PANEL_ID_FILES "files"
 /* No HX_PANEL_ID_TRACKER: the Tracker is a standalone top-level window,
  * not a docked panel — it has never had an HxPanel. */
 
@@ -75,17 +75,16 @@ G_BEGIN_DECLS
  * called from each HxPanel-owning factory once the panel is
  * constructed; unregister is called when the panel is being
  * destroyed for good (not on a transient Undock). */
-void     hx_panel_registry_register   (HxPanel    *panel);
-void     hx_panel_registry_unregister (const char *id);
-HxPanel *hx_panel_registry_lookup     (const char *id);
+void hx_panel_registry_register (HxPanel *panel);
+void hx_panel_registry_unregister (const char *id);
+HxPanel *hx_panel_registry_lookup (const char *id);
 
 /* Iterate over every registered panel. Iteration order is
  * undefined; the callback must not register / unregister inside
  * the loop (GLib's hash-table iter would dislike it). */
-typedef void (*HxPanelRegistryForeachFunc) (HxPanel  *panel,
-                                            gpointer  user_data);
-void     hx_panel_registry_foreach    (HxPanelRegistryForeachFunc func,
-                                       gpointer                   user_data);
+typedef void (*HxPanelRegistryForeachFunc) (HxPanel *panel, gpointer user_data);
+void hx_panel_registry_foreach (HxPanelRegistryForeachFunc func,
+                                gpointer user_data);
 
 G_END_DECLS
 

@@ -52,23 +52,21 @@ const hx_test_server hx_test_server_matrix[] = {
          * (test_hope_blowfish_banner) needs a server that actually
          * serves HTXF banner under HOPE+stream — only Janus
          * today. */
-        .name          = "mhxd",
-        .host          = "127.0.0.1",
-        .port          = 5500,
-        .xfer_port     = 5501,
+        .name = "mhxd",
+        .host = "127.0.0.1",
+        .port = 5500,
+        .xfer_port = 5501,
         /* mhxd doesn't ship a TLS listener (no built-in cert/key
          * config). tls_port=0 marks "no TLS"; the matrix-filter
          * for HX_TEST_CAP_TLS won't pick mhxd. */
-        .tls_port      = 0,
+        .tls_port = 0,
         .tls_xfer_port = 0,
         /* mhxd has no voice support — the extension is a Janus
          * (VesperNet) thing. voice_port=0 keeps mhxd out of the
          * HX_TEST_CAP_VOICE matrix filter. */
-        .voice_port    = 0,
-        .hl_version    = 185,
-        .caps          = HX_TEST_CAP_HOPE
-                       | HX_TEST_CAP_NEWS_15
-                       | HX_TEST_CAP_BLOWFISH,
+        .voice_port = 0,
+        .hl_version = 185,
+        .caps = HX_TEST_CAP_HOPE | HX_TEST_CAP_NEWS_15 | HX_TEST_CAP_BLOWFISH,
     },
     {
         /* Janus: VesperNet's closed-source server, pulled from
@@ -95,11 +93,11 @@ const hx_test_server hx_test_server_matrix[] = {
          * HX_TEST_CAP_TLS today; the cap-filter routes the TLS Tier 3
          * tests (real_connect's tls_login / tls_mismatch_rejected
          * and the real_tls_login / _banner / _file_get suite) here. */
-        .name          = "janus",
-        .host          = "127.0.0.1",
-        .port          = 5510,
-        .xfer_port     = 5511,
-        .tls_port      = 5610,
+        .name = "janus",
+        .host = "127.0.0.1",
+        .port = 5510,
+        .xfer_port = 5511,
+        .tls_port = 5610,
         .tls_xfer_port = 5611,
         /* Janus must publish its WebRTC subchannel on a real host
          * UDP port the test client can reach. With the container
@@ -108,16 +106,13 @@ const hx_test_server hx_test_server_matrix[] = {
          * — `docker run -p` strips the kernel route the way
          * WebRTC depends on it), Janus's internal VoiceUDPPort IS
          * the host port. config.yaml pins it to 5514 to match. */
-        .voice_port    = 5514,
-        .hl_version    = 190,
-        .caps          = HX_TEST_CAP_LARGE_FILES
-                       | HX_TEST_CAP_TEXT_ENCODING
-                       | HX_TEST_CAP_CHAT_HISTORY
-                       | HX_TEST_CAP_BANNER_HTXF
-                       | HX_TEST_CAP_NEWS_15
-                       | HX_TEST_CAP_HOPE
-                       | HX_TEST_CAP_CHACHA20
-                       /* Janus also accepts Blowfish under HOPE
+        .voice_port = 5514,
+        .hl_version = 190,
+        .caps = HX_TEST_CAP_LARGE_FILES | HX_TEST_CAP_TEXT_ENCODING
+                | HX_TEST_CAP_CHAT_HISTORY | HX_TEST_CAP_BANNER_HTXF
+                | HX_TEST_CAP_NEWS_15 | HX_TEST_CAP_HOPE
+                | HX_TEST_CAP_CHACHA20
+                /* Janus also accepts Blowfish under HOPE
                         * Step 2 in addition to ChaCha20 AEAD.
                         * Asserting the cap here lets the
                         * test_hope_blowfish_chat_history matrix pick
@@ -127,18 +122,17 @@ const hx_test_server hx_test_server_matrix[] = {
                         * has both" at pick time. Confirmed by Misha
                         * 2026-05-24. RC4 used to be asserted here too
                         * but was retired alongside the RC4 removal. */
-                       | HX_TEST_CAP_BLOWFISH
-                       | HX_TEST_CAP_NICK_COLORS
-                       | HX_TEST_CAP_TLS
-                       /* Phase 8.F voice tests. Janus is the only
+                | HX_TEST_CAP_BLOWFISH | HX_TEST_CAP_NICK_COLORS
+                | HX_TEST_CAP_TLS
+                /* Phase 8.F voice tests. Janus is the only
                         * matrix entry shipping the WebRTC voice
                         * extension; mhxd has no voice support. The
                         * Dockerfile EnableVoice: true + the bundled
                         * guest/admin account VoiceChat: true flip
                         * cover both the cap echo and the per-account
                         * access bit the toolbar gates on. */
-                       | HX_TEST_CAP_VOICE
-                       /* Phase 9.F inline-media tests. Janus
+                | HX_TEST_CAP_VOICE
+                /* Phase 9.F inline-media tests. Janus
                         * ships the extension but defaults
                         * InlineMedia.Enabled to false — the Tier
                         * 3 container's config.yaml flips it on
@@ -146,12 +140,11 @@ const hx_test_server hx_test_server_matrix[] = {
                         * account template) so the cap-negotiation
                         * probe finds it echoed in the LOGIN reply.
                         * See docs/inline-media-plan.md. */
-                       | HX_TEST_CAP_INLINE_MEDIA,
+                | HX_TEST_CAP_INLINE_MEDIA,
     },
 };
 
-const gsize hx_test_server_matrix_count =
-    G_N_ELEMENTS (hx_test_server_matrix);
+const gsize hx_test_server_matrix_count = G_N_ELEMENTS (hx_test_server_matrix);
 
 /* ---- GTKHX_TEST_SERVERS env filter ------------------------------- */
 /*
@@ -190,7 +183,7 @@ load_env_filter (void)
     g_strfreev (parts);
 
     g_ptr_array_add (names, NULL);
-    env_filter_names = (gchar **) g_ptr_array_free (names, FALSE);
+    env_filter_names = (gchar **)g_ptr_array_free (names, FALSE);
 }
 
 static gboolean
@@ -225,7 +218,7 @@ hx_test_servers_with (guint32 required_caps)
         if (!name_passes_env_filter (s->name)) {
             continue;
         }
-        g_ptr_array_add (result, (gpointer) s);
+        g_ptr_array_add (result, (gpointer)s);
     }
     return result;
 }
@@ -281,17 +274,17 @@ hx_test_server_default (void)
     if (port_env && *port_env) {
         int v = atoi (port_env);
         if (v > 0 && v < 65536) {
-            overridden.port = (guint16) v;
+            overridden.port = (guint16)v;
             /* HTXF port follows HTLS port + 1 unless explicitly
              * overridden. Honour GTKHX_TEST_XFER_PORT if set. */
-            overridden.xfer_port = (guint16) (v + 1);
+            overridden.xfer_port = (guint16)(v + 1);
         }
     }
     const char *xfer_env = g_getenv ("GTKHX_TEST_XFER_PORT");
     if (xfer_env && *xfer_env) {
         int v = atoi (xfer_env);
         if (v > 0 && v < 65536) {
-            overridden.xfer_port = (guint16) v;
+            overridden.xfer_port = (guint16)v;
         }
     }
     return &overridden;

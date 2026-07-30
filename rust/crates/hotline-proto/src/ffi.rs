@@ -14,9 +14,7 @@ use crate::build::{
     ChatSubjectRequest, HxChunk, MsgRequest, NewsDeleteThreadRequest, NewsGetThreadRequest,
     NewsMakeCategoryRequest, NewsPostThreadRequest, UserChangeRequest, UserKickRequest,
 };
-use crate::parse::{
-    self, AgreementResult, CatList, DirList, Header, NewsDirEntry, NewsDirKind,
-};
+use crate::parse::{self, AgreementResult, CatList, DirList, Header, NewsDirEntry, NewsDirKind};
 use std::slice;
 
 /// Borrow a `(ptr, len)` pair as a slice, or an empty slice if `ptr` is
@@ -449,12 +447,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_msg(
     msg_cap: usize,
     out: *mut MsgOut,
 ) -> bool {
-    if out.is_null()
-        || name_buf.is_null()
-        || name_cap == 0
-        || msg_buf.is_null()
-        || msg_cap == 0
-    {
+    if out.is_null() || name_buf.is_null() || name_cap == 0 || msg_buf.is_null() || msg_cap == 0 {
         return false;
     }
     let s = as_slice(msg, msglen);
@@ -798,10 +791,7 @@ fn empty_view_ptr(bytes: &[u8]) -> (*const u8, usize) {
 /// # Safety
 /// `msg` valid for `msglen` bytes (or NULL).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_parse_catlist(
-    msg: *const u8,
-    msglen: usize,
-) -> *mut CatList {
+pub unsafe extern "C" fn gtkhx_proto_parse_catlist(msg: *const u8, msglen: usize) -> *mut CatList {
     let s = as_slice(msg, msglen);
     match parse::parse_catlist(s, s.len()) {
         Some(cl) => Box::into_raw(Box::new(cl)),
@@ -830,10 +820,7 @@ pub unsafe extern "C" fn gtkhx_proto_catlist_free(cl: *mut CatList) {
 /// # Safety
 /// `msg` valid for `msglen` bytes (or NULL).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_parse_dirlist(
-    msg: *const u8,
-    msglen: usize,
-) -> *mut DirList {
+pub unsafe extern "C" fn gtkhx_proto_parse_dirlist(msg: *const u8, msglen: usize) -> *mut DirList {
     if msg.is_null() {
         return std::ptr::null_mut();
     }
@@ -1381,7 +1368,11 @@ pub unsafe extern "C" fn gtkhx_proto_build_agreement_agree_chunks(
     let chunks_slice = slice::from_raw_parts_mut(chunks, MAX_CHUNKS);
     let scratch_slice = slice::from_raw_parts_mut(scratch, MAX_SCRATCH);
     let display_name = as_slice(name_ptr, name_len);
-    let req = AgreementAgreeRequest { icon, display_name, options };
+    let req = AgreementAgreeRequest {
+        icon,
+        display_name,
+        options,
+    };
     build::build_agreement_agree_chunks(&req, chunks_slice, scratch_slice) as i32
 }
 
@@ -1564,12 +1555,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_user_info(
     info_cap: usize,
     out: *mut UserInfoOut,
 ) -> bool {
-    if out.is_null()
-        || name_buf.is_null()
-        || name_cap == 0
-        || info_buf.is_null()
-        || info_cap == 0
-    {
+    if out.is_null() || name_buf.is_null() || name_cap == 0 || info_buf.is_null() || info_cap == 0 {
         return false;
     }
     let s = as_slice(msg, msglen);
@@ -1634,13 +1620,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_account_read(
         return false;
     }
     let s = as_slice(msg, msglen);
-    let ar = parse::parse_account_read(
-        s,
-        s.len(),
-        name_cap - 1,
-        login_cap - 1,
-        pass_cap - 1,
-    );
+    let ar = parse::parse_account_read(s, s.len(), name_cap - 1, login_cap - 1, pass_cap - 1);
     let nw = write_cstr(name_buf, name_cap, &ar.name);
     let lw = write_cstr(login_buf, login_cap, &ar.login);
     let pw = write_cstr(pass_buf, pass_cap, &ar.pass);
@@ -1969,10 +1949,18 @@ pub unsafe extern "C" fn gtkhx_proto_parse_history_entry(
             // out-of-bounds `data + off` reads on the C side.
             // Reject explicitly rather than write a truncated
             // offset / length.
-            let Ok(nick_off_u16) = u16::try_from(nick_off) else { return false; };
-            let Ok(nick_len_u16) = u16::try_from(e.nick.len()) else { return false; };
-            let Ok(msg_off_u16) = u16::try_from(msg_off) else { return false; };
-            let Ok(msg_len_u16) = u16::try_from(e.message.len()) else { return false; };
+            let Ok(nick_off_u16) = u16::try_from(nick_off) else {
+                return false;
+            };
+            let Ok(nick_len_u16) = u16::try_from(e.nick.len()) else {
+                return false;
+            };
+            let Ok(msg_off_u16) = u16::try_from(msg_off) else {
+                return false;
+            };
+            let Ok(msg_len_u16) = u16::try_from(e.message.len()) else {
+                return false;
+            };
             (*out).message_id = e.message_id;
             (*out).timestamp = e.timestamp;
             (*out).flags = e.flags;
@@ -2177,7 +2165,11 @@ pub unsafe extern "C" fn gtkhx_proto_build_user_change_chunks(
     let req = UserChangeRequest {
         icon,
         name,
-        nick_color: if has_nick_color != 0 { Some(nick_color) } else { None },
+        nick_color: if has_nick_color != 0 {
+            Some(nick_color)
+        } else {
+            None
+        },
     };
     build::build_user_change_chunks(&req, chunks_slice, scratch_slice) as i32
 }
@@ -2609,9 +2601,7 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_getthread_chunks(
     if chunks_cap < MAX_CHUNKS || scratch_cap < MAX_SCRATCH {
         return 0;
     }
-    if (path_ptr.is_null() && path_len != 0)
-        || (mime_type_ptr.is_null() && mime_type_len != 0)
-    {
+    if (path_ptr.is_null() && path_len != 0) || (mime_type_ptr.is_null() && mime_type_len != 0) {
         return 0;
     }
     if path_len > u16::MAX as usize || mime_type_len > u16::MAX as usize {
@@ -2649,9 +2639,7 @@ pub unsafe extern "C" fn gtkhx_proto_build_news_mkcat_chunks(
     if chunks_cap < MAX_CHUNKS {
         return 0;
     }
-    if (path_ptr.is_null() && path_len != 0)
-        || (name_ptr.is_null() && name_len != 0)
-    {
+    if (path_ptr.is_null() && path_len != 0) || (name_ptr.is_null() && name_len != 0) {
         return 0;
     }
     if path_len > u16::MAX as usize || name_len > u16::MAX as usize {
@@ -3363,10 +3351,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_tracker_header(
 /// `buf` either valid for `len` bytes or NULL (treated as an empty
 /// slice regardless of `len`).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_tracker_record_is_padding(
-    buf: *const u8,
-    len: usize,
-) -> bool {
+pub unsafe extern "C" fn gtkhx_proto_tracker_record_is_padding(buf: *const u8, len: usize) -> bool {
     parse::tracker_record_is_padding(as_slice(buf, len))
 }
 
@@ -3438,10 +3423,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_tracker_record_fixed(
 /// `buf` either valid (writable) for `len` bytes or NULL (no-op,
 /// independent of `len`).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_tracker_normalize_text(
-    buf: *mut u8,
-    len: usize,
-) {
+pub unsafe extern "C" fn gtkhx_proto_tracker_normalize_text(buf: *mut u8, len: usize) {
     if buf.is_null() || len == 0 {
         return;
     }
@@ -3751,9 +3733,7 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_read_bool(
 /// Takes a plain `u8` by value and dereferences no pointers; the `unsafe`
 /// marker exists only for uniformity across this FFI module.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(
-    raw: u8,
-) -> u8 {
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(raw: u8) -> u8 {
     parse::tracker_v3_meta_clamp_maturity(raw)
 }
 
@@ -3764,9 +3744,7 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_maturity(
 /// Takes a plain `u8` by value and dereferences no pointers; the `unsafe`
 /// marker exists only for uniformity across this FFI module.
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
-    raw: u8,
-) -> u8 {
+pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(raw: u8) -> u8 {
     parse::tracker_v3_meta_clamp_listing_category(raw)
 }
 
@@ -3782,10 +3760,7 @@ pub unsafe extern "C" fn gtkhx_proto_tracker_v3_meta_clamp_listing_category(
 /// `bytes` either valid for `len` bytes or NULL (treated as empty
 /// regardless of `len`).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_capabilities_decode(
-    bytes: *const u8,
-    len: usize,
-) -> u64 {
+pub unsafe extern "C" fn gtkhx_proto_capabilities_decode(bytes: *const u8, len: usize) -> u64 {
     parse::capabilities_decode(as_slice(bytes, len))
 }
 
@@ -3819,10 +3794,7 @@ pub unsafe extern "C" fn gtkhx_proto_htxf_hdr_pack(
     // passes a small buffer (or a placeholder pointer they expect us to
     // reject), building an oversized slice over it would be UB even if we
     // never read or write through the bad tail.
-    if out.is_null()
-        || out_cap < crate::build::HTXF_HDR_SIZE
-        || out_cap > isize::MAX as usize
-    {
+    if out.is_null() || out_cap < crate::build::HTXF_HDR_SIZE || out_cap > isize::MAX as usize {
         return false;
     }
     let buf = slice::from_raw_parts_mut(out, out_cap);
@@ -3848,7 +3820,7 @@ pub unsafe extern "C" fn gtkhx_proto_htxf_hdr_pack(
 unsafe fn hxchunks_to_packchunks<'a>(
     chunks: &'a [crate::build::HxChunk],
     out: &'a mut [std::mem::MaybeUninit<crate::build::PackChunk<'a>>;
-             crate::build::MAX_PACK_CHUNKS],
+                crate::build::MAX_PACK_CHUNKS],
 ) -> Option<&'a [crate::build::PackChunk<'a>]> {
     if chunks.len() > crate::build::MAX_PACK_CHUNKS {
         return None;
@@ -3957,8 +3929,7 @@ pub unsafe extern "C" fn gtkhx_proto_pack_message(
     if chunks_len == 0 {
         // chunks ptr is irrelevant when chunks_len is 0; pack a
         // header-only message.
-        return crate::build::pack_message(buf, type_, trans, flag, &[])
-            .unwrap_or(0);
+        return crate::build::pack_message(buf, type_, trans, flag, &[]).unwrap_or(0);
     }
     if chunks.is_null()
         || chunks_len > crate::build::MAX_PACK_CHUNKS
@@ -4532,8 +4503,10 @@ pub unsafe extern "C" fn gtkhx_proto_parse_voice_sdp_summary(
     // `send` with malformed labels. Saturating arithmetic on u32 +
     // u32 because either component is bounded by the wire's u16
     // SDP length anyway, but the cast is required either way.
-    let total_mids =
-        summary.mids.len().saturating_add(summary.unknown_mids.len());
+    let total_mids = summary
+        .mids
+        .len()
+        .saturating_add(summary.unknown_mids.len());
     *out = VoiceSdpSummaryOut {
         mid_count: total_mids as u32,
         unknown_mid_count: summary.unknown_mids.len() as u32,
@@ -4616,13 +4589,13 @@ pub unsafe extern "C" fn gtkhx_proto_parse_voice_ice_json(
         let mid_bytes = p.sdp_mid.as_deref().map(str::as_bytes);
         let ufrag_bytes = p.username_fragment.as_deref().map(str::as_bytes);
         *out = VoiceIceCandidateOut {
-            candidate_ptr: candidate_bytes.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
+            candidate_ptr: candidate_bytes
+                .map(|b| b.as_ptr())
+                .unwrap_or(std::ptr::null()),
             candidate_len: candidate_bytes.map(|b| b.len()).unwrap_or(0),
             sdp_mid_ptr: mid_bytes.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
             sdp_mid_len: mid_bytes.map(|b| b.len()).unwrap_or(0),
-            username_fragment_ptr: ufrag_bytes
-                .map(|b| b.as_ptr())
-                .unwrap_or(std::ptr::null()),
+            username_fragment_ptr: ufrag_bytes.map(|b| b.as_ptr()).unwrap_or(std::ptr::null()),
             username_fragment_len: ufrag_bytes.map(|b| b.len()).unwrap_or(0),
             sdp_mline_index: p.sdp_mline_index.unwrap_or(0),
             sdp_mline_index_present: p.sdp_mline_index.is_some(),
@@ -4721,12 +4694,9 @@ pub unsafe extern "C" fn gtkhx_proto_build_voice_ice_json(
         }
         if !username_fragment_ptr.is_null() {
             c.username_fragment = Some(
-                std::str::from_utf8(as_slice(
-                    username_fragment_ptr,
-                    username_fragment_len,
-                ))
-                .ok()?
-                .to_string(),
+                std::str::from_utf8(as_slice(username_fragment_ptr, username_fragment_len))
+                    .ok()?
+                    .to_string(),
             );
         }
         Some(c)
@@ -5146,10 +5116,7 @@ pub unsafe extern "C" fn gtkhx_proto_parse_download_reply(
 /// # Safety
 /// `buf` valid for `len` bytes (or NULL).
 #[no_mangle]
-pub unsafe extern "C" fn gtkhx_proto_extract_media_error_code(
-    buf: *const u8,
-    len: usize,
-) -> u16 {
+pub unsafe extern "C" fn gtkhx_proto_extract_media_error_code(buf: *const u8, len: usize) -> u16 {
     let s = as_slice(buf, len);
     let walker = ChunkIter::over_message(s, s.len());
     inline_media::extract_error_code(walker).as_u16()
@@ -5444,7 +5411,8 @@ pub unsafe extern "C" fn gtkhx_proto_parse_icon_get_reply(
         return false;
     }
     let s = as_slice(buf, len);
-    let Some(e) = crate::gif_icons::parse_icon_get_reply(ChunkIter::over_message(s, s.len())) else {
+    let Some(e) = crate::gif_icons::parse_icon_get_reply(ChunkIter::over_message(s, s.len()))
+    else {
         return false;
     };
     *out = IconEntryOut {
@@ -5606,23 +5574,13 @@ mod tests {
         // an empty result. (`as_slice` is the helper enforcing this.)
         let mut dst = [0u8; 16];
         unsafe {
-            let n = gtkhx_proto_text_to_utf8(
-                std::ptr::null(),
-                42,
-                dst.as_mut_ptr(),
-                dst.len(),
-            );
+            let n = gtkhx_proto_text_to_utf8(std::ptr::null(), 42, dst.as_mut_ptr(), dst.len());
             assert_eq!(n, 0);
         }
         // Also cover the literal "no input at all" edge.
         let mut dst = [0u8; 16];
         unsafe {
-            let n = gtkhx_proto_text_to_utf8(
-                std::ptr::null(),
-                0,
-                dst.as_mut_ptr(),
-                dst.len(),
-            );
+            let n = gtkhx_proto_text_to_utf8(std::ptr::null(), 0, dst.as_mut_ptr(), dst.len());
             assert_eq!(n, 0);
         }
     }
@@ -5654,12 +5612,7 @@ mod tests {
         // Exhaustive coverage of input shapes is in text.rs.
         let mut dst = [0u8; 32];
         unsafe {
-            let n = gtkhx_proto_text_to_utf8(
-                [0x8E].as_ptr(),
-                1,
-                dst.as_mut_ptr(),
-                dst.len(),
-            );
+            let n = gtkhx_proto_text_to_utf8([0x8E].as_ptr(), 1, dst.as_mut_ptr(), dst.len());
             assert_eq!(n, 2);
             assert_eq!(&dst[..n], b"\xC3\xA9");
         }
@@ -5767,14 +5720,7 @@ mod tests {
     #[test]
     fn htxf_hdr_pack_ffi_null_out_rejected() {
         unsafe {
-            let ok = gtkhx_proto_htxf_hdr_pack(
-                std::ptr::null_mut(),
-                16,
-                1,
-                2,
-                3,
-                4,
-            );
+            let ok = gtkhx_proto_htxf_hdr_pack(std::ptr::null_mut(), 16, 1, 2, 3, 4);
             assert!(!ok);
         }
     }

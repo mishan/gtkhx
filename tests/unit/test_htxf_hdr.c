@@ -31,9 +31,9 @@
 #include "config.h"
 #include <string.h>
 #include <glib.h>
-#include "compat.h"             /* PACKED — used inside hotline.h */
+#include "compat.h" /* PACKED — used inside hotline.h */
 #include "hotline.h"
-#include "proto_helpers.h"      /* hl_htxf_hdr_pack — the shared packer */
+#include "proto_helpers.h" /* hl_htxf_hdr_pack — the shared packer */
 
 /* Wrap the production packer so each test stays focused on the
  * field values rather than the packer signature. Production
@@ -81,10 +81,10 @@ test_file_layout (void)
                      HTXF_TYPE_FILE);
 
     const guint8 expected[16] = {
-        'H', 'T', 'X', 'F',                       /* magic */
-        0x11, 0x22, 0x33, 0x44,                   /* ref */
-        0x00, 0x01, 0x00, 0x00,                   /* len = 65536 */
-        0x00, 0x00, 0x00, 0x00,                   /* type=0, reserved=0 */
+        'H',  'T',  'X',  'F',  /* magic */
+        0x11, 0x22, 0x33, 0x44, /* ref */
+        0x00, 0x01, 0x00, 0x00, /* len = 65536 */
+        0x00, 0x00, 0x00, 0x00, /* type=0, reserved=0 */
     };
     g_assert_cmpmem (buf, 16, expected, 16);
 }
@@ -110,8 +110,7 @@ static void
 test_banner_layout (void)
 {
     guint8 buf[16];
-    encode_htxf_hdr (buf, /*ref=*/0xdeadbeef, /*len=*/12345,
-                     HTXF_TYPE_BANNER);
+    encode_htxf_hdr (buf, /*ref=*/0xdeadbeef, /*len=*/12345, HTXF_TYPE_BANNER);
 
     g_assert_cmphex (buf[12], ==, 0x00);
     g_assert_cmphex (buf[13], ==, 0x02); /* type = HTXF_TYPE_BANNER */

@@ -75,11 +75,10 @@ G_BEGIN_DECLS
  * default-layout code). On success, fills the four toolbar_*_frame
  * pointers from the role-tagged leaves and primes the internal
  * "place panel id X into frame Y on register" map. */
-gboolean dock_layout_load            (HxSplit   **out_root,
-                                      GtkWidget **out_sidebar_frame,
-                                      GtkWidget **out_center_frame,
-                                      GtkWidget **out_bottom_frame,
-                                      GtkWidget **out_end_frame);
+gboolean dock_layout_load (HxSplit **out_root, GtkWidget **out_sidebar_frame,
+                           GtkWidget **out_center_frame,
+                           GtkWidget **out_bottom_frame,
+                           GtkWidget **out_end_frame);
 
 /* Apply restored window size + paned positions. Call from the
  * toolbar window after the dock has been attached to its surface
@@ -87,7 +86,7 @@ gboolean dock_layout_load            (HxSplit   **out_root,
  *
  * No-op if dock_layout_load wasn't successful — the defaults are
  * already in place. */
-void     dock_layout_apply_geometry  (GtkWindow *toolbar_window);
+void dock_layout_apply_geometry (GtkWindow *toolbar_window);
 
 /* Request a save. Coalesces with other requests in the same
  * 200 ms window so a burst of changes (paned drag, repeated
@@ -97,17 +96,17 @@ void     dock_layout_apply_geometry  (GtkWindow *toolbar_window);
  * The save walks the live HxSplit tree from the root, serialises
  * panel placement based on the registry, captures paned positions
  * depth-first, and writes the file atomically (g_file_set_contents). */
-void     dock_layout_request_save    (void);
+void dock_layout_request_save (void);
 
 /* Hook called from hx_panel_registry_register: if the panel's id
  * appears in a saved-layout entry, reseat it to the saved frame.
  * No-op for unknown ids or when no saved layout is in effect. */
-void     dock_layout_place_panel     (HxPanel *panel);
+void dock_layout_place_panel (HxPanel *panel);
 
 /* Delete the saved file and reset the in-memory map so the next
  * launch comes up with defaults. Wired into the hamburger menu's
  * Reset Layout action. */
-void     dock_layout_reset           (void);
+void dock_layout_reset (void);
 
 /* Init / shutdown bookends.
  *
@@ -121,15 +120,15 @@ void     dock_layout_reset           (void);
  * dock_layout_shutdown flushes any pending debounced save
  * synchronously so the file is up to date by the time hx_quit
  * exits. */
-void     dock_layout_init            (void);
-void     dock_layout_shutdown        (void);
+void dock_layout_init (void);
+void dock_layout_shutdown (void);
 
 /* Tell the layout module which HxSplit node is the dock root.
  * Called by toolbar.c once the tree is mounted in toolbar_dock
  * — used by the save path to walk + serialise the current tree.
  * Stable for the lifetime of the toolbar window (hx_split_close_leaf
  * refuses to close the root). */
-void     dock_layout_set_dock_root   (HxSplit *root);
+void dock_layout_set_dock_root (HxSplit *root);
 
 G_END_DECLS
 

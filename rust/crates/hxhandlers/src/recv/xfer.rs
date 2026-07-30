@@ -26,9 +26,11 @@ use std::os::raw::{c_char, c_void};
 use std::os::raw::{c_int, c_long};
 
 #[cfg(not(test))]
-use gtkhx_core::session::{gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default};
-#[cfg(not(test))]
 use gtkhx_core::conn::hx_conn_serverhost;
+#[cfg(not(test))]
+use gtkhx_core::session::{
+    gtkhx_session_emit_file_info, gtkhx_session_emit_xfer_queue, gtkhx_session_get_default,
+};
 #[cfg(not(test))]
 use hxhfs::ffi::{comment_len, resource_len};
 
@@ -69,7 +71,11 @@ extern "C" {
     fn xfer_delete(htxf: *mut c_void);
     fn gtask_delete_htxf(sess: *mut c_void, htxf: *mut c_void);
     /// `timer_add_secs(secs, fn, ptr)` — arm a one-shot GLib timer.
-    fn timer_add_secs(secs: c_long, f: Option<unsafe extern "C" fn(*mut c_void) -> c_int>, ptr: *mut c_void);
+    fn timer_add_secs(
+        secs: c_long,
+        f: Option<unsafe extern "C" fn(*mut c_void) -> c_int>,
+        ptr: *mut c_void,
+    );
     /// The retry callback armed on a download task-error when `opt.retry` is set.
     fn xfer_go_timer(arg: *mut c_void) -> c_int;
     /// Build the preview window (main thread) — returns an `hx_preview *`.
@@ -190,7 +196,11 @@ pub unsafe extern "C" fn rcv_task_file_get(
     if (r.size == 0 && !r.size64_seen) || r.ref_ == 0 {
         return;
     }
-    let total = if r.size64_seen { r.size64 } else { r.size as u64 };
+    let total = if r.size64_seen {
+        r.size64
+    } else {
+        r.size as u64
+    };
     hx_htxf_set_ref(htxf, r.ref_);
     hx_htxf_set_total_size(htxf, total);
     hx_htxf_set_queue(htxf, r.queue);
@@ -202,7 +212,11 @@ pub unsafe extern "C" fn rcv_task_file_get(
     if hx_htxf_opt_preview(htxf) != 0 && hx_htxf_preview(htxf).is_null() {
         let path = hx_htxf_path(htxf);
         let name = dirchar_basename(path as *mut c_char);
-        let title = if name.is_null() { path } else { name as *const c_char };
+        let title = if name.is_null() {
+            path
+        } else {
+            name as *const c_char
+        };
         let pv = hx_preview_new(title);
         hx_htxf_set_preview(htxf, pv);
         hx_preview_set_cancel_cb(pv, Some(preview_cancel_xfer), htxf);
@@ -306,7 +320,11 @@ pub unsafe extern "C" fn rcv_task_file_put(
     // Wrapping subtraction matches the C guint64 arithmetic (data_pos <=
     // data_size in practice; wrapping avoids a Rust debug overflow panic).
     let total = 133u64
-        + if rsrc_size.wrapping_sub(rsrc_pos) != 0 { 16 } else { 0 }
+        + if rsrc_size.wrapping_sub(rsrc_pos) != 0 {
+            16
+        } else {
+            0
+        }
         + comment_len(path) as u64
         + data_size.wrapping_sub(data_pos)
         + rsrc_size.wrapping_sub(rsrc_pos);
@@ -410,7 +428,11 @@ pub unsafe extern "C" fn rcv_task_file_getinfo(
     }
     let s = frame_slice(frame, frame_len);
     let f = hotline_proto::parse::parse_file_getinfo(s, s.len(), 255, 31, 31, 255);
-    let size = if f.size64_seen { f.size64 } else { f.size as u64 };
+    let size = if f.size64_seen {
+        f.size64
+    } else {
+        f.size as u64
+    };
     let name = cstr_lossy(&f.name);
     let type_ = cstr_lossy(&f.type_);
     let creator = cstr_lossy(&f.creator);

@@ -40,8 +40,8 @@
 
 /* The /exec command handler (COMMAND-macro signature). Non-static so
  * commands.c's dispatch table can reference it. */
-extern void cmd_exec (int argc, char **argv, char *str,
-                      struct htlc_conn *htlc, guint32 cid);
+extern void cmd_exec (int argc, char **argv, char *str, struct htlc_conn *htlc,
+                      guint32 cid);
 
 /* Startup wiring for the /exec machinery: sizes + allocates the fd
  * table, zeroes the GIOChannel-watch tag arrays, stashes the environment

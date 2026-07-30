@@ -103,19 +103,19 @@ struct gtkhx_prefs gtkhx_prefs = {
     1, /* emoji_typeahead */
 
     /* HexChat-style autocopy controls. Default-on for text
-	 * matches every modern chat client (HexChat, Discord, Slack, etc.)
-	 * and matches the Settings mockup. Stamp / color stay off — most
-	 * users want a clean copy of the message body. */
+     * matches every modern chat client (HexChat, Discord, Slack, etc.)
+     * and matches the Settings mockup. Stamp / color stay off — most
+     * users want a clean copy of the message body. */
     1, /* autocopy_text */
     0, /* autocopy_stamp */
     0, /* autocopy_color */
 
     /* notification toggles. Zero-initialised here;
-	 * init_variables sets the user-facing defaults (mentions on,
-	 * private messages on, etc.) and prefs_read overrides those
-	 * from gtkhxrc. The static-init defaults are deliberately
-	 * conservative (all-off) so a barebones init path doesn't
-	 * spam notifications. */
+     * init_variables sets the user-facing defaults (mentions on,
+     * private messages on, etc.) and prefs_read overrides those
+     * from gtkhxrc. The static-init defaults are deliberately
+     * conservative (all-off) so a barebones init path doesn't
+     * spam notifications. */
     0, /* notify_chat */
     0, /* notify_chat_highlight */
     0, /* notify_msg */
@@ -131,14 +131,14 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* in_bps */
 
     /* chat-history initial fetch count. 50 matches the
-	 * fogWraith spec's recommended default and what Phase 1/2/3
-	 * shipped with hard-coded. */
+     * fogWraith spec's recommended default and what Phase 1/2/3
+     * shipped with hard-coded. */
     50, /* chat_history_initial */
 
     /* Colored-Nicknames extension. Default -1 ==
-	 * HX_NICK_COLOR_NONE (cast to signed int) so a fresh prefs file
-	 * means "no color, use theme default" and hx_change_name_icon
-	 * skips the optional HTLC_DATA_COLOR chunk. */
+     * HX_NICK_COLOR_NONE (cast to signed int) so a fresh prefs file
+     * means "no color, use theme default" and hx_change_name_icon
+     * skips the optional HTLC_DATA_COLOR chunk. */
     -1, /* nick_color */
 
     /* Phase 8.E + 8.E follow-up: voice device + PTT defaults. NULL
@@ -155,9 +155,9 @@ struct gtkhx_prefs gtkhx_prefs = {
     NULL, /* voice_ptt_key */
 
     /* Theming: active theme name. NULL / empty falls back to the
-	 * built-in "default" theme. All scale and palette state lives in
-	 * the theme file ($CONFIG/themes/<name>.ini, fallback to GResource).
-	 * See gtkhx_theme.{c,h} and docs/theming-file-format.md. */
+     * built-in "default" theme. All scale and palette state lives in
+     * the theme file ($CONFIG/themes/<name>.ini, fallback to GResource).
+     * See gtkhx_theme.{c,h} and docs/theming-file-format.md. */
     NULL, /* theme_name */
 
     1, /* animate_avatars — default ON (init_variables re-asserts) */
@@ -202,24 +202,24 @@ static void
 list_icons (void)
 {
     /* GtkFlowBox auto-flows multiple icons per row. Each entry is a
-	 * 64x64 image plus the resource-ID label, packed into a vertical
-	 * box and inserted as a flowbox child. The flowbox itself is
-	 * configured with min/max children per line so the picker grows
-	 * to as many columns as fit the picker width without going
-	 * single-column-narrow.
-	 *
-	 * cicn_to_pixbuf returns a GdkPixbuf directly with the Mac
-	 * classic mask folded into the alpha channel. Wide icons (the
-	 * 32x32 family bundles four variants in a 4*32-pixel row)
-	 * are clipped to the rightmost 32 px to mirror the historical
-	 * "off = width > 400 ? 198 : 0" hack.
-	 *
-	 * Two passes: first walk every rsrc file in icon_files priority
-	 * order (user $CONFIG/icons → XDG → $PREFIX per init_icons) and
-	 * pick a single winning resource per resid, keeping the FIRST
-	 * occurrence so user customizations override system defaults
-	 * instead of both showing up as duplicates in the picker.
-	 * Second pass renders the winners. */
+     * 64x64 image plus the resource-ID label, packed into a vertical
+     * box and inserted as a flowbox child. The flowbox itself is
+     * configured with min/max children per line so the picker grows
+     * to as many columns as fit the picker width without going
+     * single-column-narrow.
+     *
+     * cicn_to_pixbuf returns a GdkPixbuf directly with the Mac
+     * classic mask folded into the alpha channel. Wide icons (the
+     * 32x32 family bundles four variants in a 4*32-pixel row)
+     * are clipped to the rightmost 32 px to mirror the historical
+     * "off = width > 400 ? 198 : 0" hack.
+     *
+     * Two passes: first walk every rsrc file in icon_files priority
+     * order (user $CONFIG/icons → XDG → $PREFIX per init_icons) and
+     * pick a single winning resource per resid, keeping the FIRST
+     * occurrence so user customizations override system defaults
+     * instead of both showing up as duplicates in the picker.
+     * Second pass renders the winners. */
     GtkWidget *icon_list = iv->icon_list;
     guint16 nres;
     guint32 icon;
@@ -230,8 +230,8 @@ list_icons (void)
     GHashTableIter iter;
     gpointer iter_key, iter_val;
 
-    winners = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL,
-                                     g_free);
+    winners
+        = g_hash_table_new_full (g_direct_hash, g_direct_equal, NULL, g_free);
 
     for (i = 0; i < icon_files.n; ++i) {
         if (!icon_files.cicns[i]) {
@@ -247,12 +247,12 @@ list_icons (void)
             if (!r) {
                 continue;
             }
-            key = GUINT_TO_POINTER ((guint) r->resid);
+            key = GUINT_TO_POINTER ((guint)r->resid);
             if (g_hash_table_contains (winners, key)) {
                 /* A higher-priority file already claimed this
-				 * resid — discard the duplicate so it doesn't
-				 * show up alongside the user's version in the
-				 * picker. */
+                 * resid — discard the duplicate so it doesn't
+                 * show up alongside the user's version in the
+                 * picker. */
                 g_free (r);
                 continue;
             }
@@ -287,10 +287,10 @@ list_icons (void)
         }
 
         /* Narrow icons → uniform 56x56 thumbnail for the grid.
-		 * Wide banners → preserve aspect ratio (scale to a row-
-		 * height of 56 and proportional width) so the banner
-		 * art is recognisable instead of being squashed into a
-		 * square cell. */
+         * Wide banners → preserve aspect ratio (scale to a row-
+         * height of 56 and proportional width) so the banner
+         * art is recognisable instead of being squashed into a
+         * square cell. */
         if (is_wide) {
             int target_h = 56;
             int target_w = width * target_h / (height > 0 ? height : 1);
@@ -301,7 +301,7 @@ list_icons (void)
                                               GDK_INTERP_NEAREST);
         } else {
             /* Nearest-neighbor preserves pixel-art look at
-			 * 3.5x of 16px / 1.75x of 32px sources. */
+             * 3.5x of 16px / 1.75x of 32px sources. */
             scaled = gdk_pixbuf_scale_simple (pb, 56, 56, GDK_INTERP_NEAREST);
         }
         g_object_unref (pb);
@@ -312,13 +312,13 @@ list_icons (void)
 
         vbox = gtk_box_new (GTK_ORIENTATION_VERTICAL, 4);
         /* GtkPicture, not GtkImage. Adwaita's
-		 * stylesheet sizes GtkImage to icon-button dimensions
-		 * (~16-24px) regardless of the paintable's natural
-		 * size, so set_size_request on a wrapper grew the cell
-		 * but kept the icon clamped tiny inside it. GtkPicture
-		 * with can_shrink=FALSE pins to the paintable's natural
-		 * size — same fix gtkhx_pixmap_button uses for the
-		 * toolbar buttons. */
+         * stylesheet sizes GtkImage to icon-button dimensions
+         * (~16-24px) regardless of the paintable's natural
+         * size, so set_size_request on a wrapper grew the cell
+         * but kept the icon clamped tiny inside it. GtkPicture
+         * with can_shrink=FALSE pins to the paintable's natural
+         * size — same fix gtkhx_pixmap_button uses for the
+         * toolbar buttons. */
         {
             GdkTexture *tex = gtkhx_texture_from_pixbuf (pb);
             if (tex) {
@@ -343,7 +343,7 @@ list_icons (void)
         g_object_set_data (G_OBJECT (child), "resid",
                            GUINT_TO_POINTER (r->resid));
         /* Wide banners go into their own dedicated flowbox so
-		 * they show one-per-row at natural aspect ratio. */
+         * they show one-per-row at natural aspect ratio. */
         if (is_wide && iv->wide_list) {
             gtk_flow_box_append (GTK_FLOW_BOX (iv->wide_list), child);
         } else {
@@ -353,7 +353,7 @@ list_icons (void)
         g_object_unref (pb);
 
         /* Cooperative multitasking — keep the dialog responsive while
-		 * paging through hundreds of resource entries. */
+         * paging through hundreds of resource entries. */
         rendered++;
         if (rendered % 10 == 0) {
             while (g_main_context_pending (NULL)) {
@@ -414,12 +414,12 @@ reinit_gtktexts (session *sess)
             }
         }
         /* walk the PM-window hashtable. The pre-port
-		 * code walked `sess->msg_list` here, but that field was
-		 * never populated — the real msg_list global lived in
-		 * msg.c, so this loop was a silent no-op for years and
-		 * font-changes never reached open PM windows. The
-		 * migration to session->msg_windows fixes that as a side
-		 * effect. */
+         * code walked `sess->msg_list` here, but that field was
+         * never populated — the real msg_list global lived in
+         * msg.c, so this loop was a silent no-op for years and
+         * font-changes never reached open PM windows. The
+         * migration to session->msg_windows fixes that as a side
+         * effect. */
         if (sess->msg_windows) {
             GHashTableIter iter;
             gpointer val;
@@ -546,8 +546,7 @@ changed_timestamp (session *sess)
         g_hash_table_iter_init (&iter, sess->msg_windows);
         while (g_hash_table_iter_next (&iter, NULL, &val)) {
             struct msgwin *msg = val;
-            hx_chat_view_set_time_stamp (msg->outputbuf,
-                                         gtkhx_prefs.timestamp);
+            hx_chat_view_set_time_stamp (msg->outputbuf, gtkhx_prefs.timestamp);
             hx_chat_view_refresh (msg->outputbuf);
         }
     }
@@ -589,18 +588,18 @@ changed_nick_color (session *sess)
     hx_change_name_icon (hx_active_session ()->htlc);
 
     /* Locally re-render our own row in the public chat user list.
-	 * Pre-login (no uid yet, or no chat container yet) just no-ops —
-	 * apply_loaded_xtext_prefs stamps the loaded pref onto htlc, and
-	 * the SELFINFO-driven membership add for self picks it up the same
-	 * way it picks up the loaded nick. */
+     * Pre-login (no uid yet, or no chat container yet) just no-ops —
+     * apply_loaded_xtext_prefs stamps the loaded pref onto htlc, and
+     * the SELFINFO-driven membership add for self picks it up the same
+     * way it picks up the loaded nick. */
     struct chat *pub = chat_with_cid (hx_active_session (), 0);
     if (pub && hx_conn_uid (hx_active_session ()->htlc)) {
         struct hx_member_info mi;
         if (hx_member_model_get_info (hx_chat_member_model (pub),
                                       hx_conn_uid (hx_active_session ()->htlc),
                                       &mi)) {
-            user_change (hx_active_session ()->htlc, pub, mi.uid, nc,
-                         mi.name, mi.icon, mi.status);
+            user_change (hx_active_session ()->htlc, pub, mi.uid, nc, mi.name,
+                         mi.icon, mi.status);
         }
     }
 }
@@ -628,7 +627,7 @@ changed_font (session *sess)
     }
 
     /* rebuild the screen-wide CSS provider so already-tagged
-	 * widgets pick up the new font without needing per-widget calls. */
+     * widgets pick up the new font without needing per-widget calls. */
     gtkhx_refresh_css ();
 
     if (sess) {
@@ -661,9 +660,9 @@ changed_animate_avatars (session *sess)
 #if 0 /* XXX */
 static void changed_logging (session *sess)
 {
-	if(!gtkhx_prefs.logging) {
-		close_logs();
-	}
+    if(!gtkhx_prefs.logging) {
+        close_logs();
+    }
 }
 #endif
 
@@ -733,11 +732,11 @@ changed_downloadpath (session *sess)
 {
     (void)sess;
     /* Empty pref value → use the user's XDG Downloads dir as
-	 * the natural default. Falls back further to $HOME if
-	 * XDG_DOWNLOAD_DIR isn't set / not a directory, then to "."
-	 * as a last resort. This is the value the Files browser
-	 * also consults for its initial local panel path, so the
-	 * two stay in sync. */
+     * the natural default. Falls back further to $HOME if
+     * XDG_DOWNLOAD_DIR isn't set / not a directory, then to "."
+     * as a last resort. This is the value the Files browser
+     * also consults for its initial local panel path, so the
+     * two stay in sync. */
     if (!gtkhx_prefs.download_path || !*gtkhx_prefs.download_path) {
         const char *xdg = g_get_user_special_dir (G_USER_DIRECTORY_DOWNLOAD);
         const char *home = g_get_home_dir ();
@@ -883,9 +882,9 @@ struct cfgvar {
     GtkWidget *widget;
 } cfgvars[] = {
     /* GIF-icons (Phase 10.D): animate avatars. Kept first to preserve
-	 * the alphabetical key order ("ANIMATEAVATARS" < "AUTOCOPY…") that
-	 * the bsearch in this table requires. changefunc pushes the toggle
-	 * into gif_avatar.c so a live change starts/stops animation. */
+     * the alphabetical key order ("ANIMATEAVATARS" < "AUTOCOPY…") that
+     * the bsearch in this table requires. changefunc pushes the toggle
+     * into gif_avatar.c so a live change starts/stops animation. */
     { CFG_ANIMATE_AVATARS,
       { &gtkhx_prefs.animate_avatars },
       BOOLEAN,
@@ -931,10 +930,10 @@ struct cfgvar {
       changed_downloadpath,
       NULL },
     /* Emoji shortcodes (phase E6). emoji_shortcodes drives both the
-	 * legacy-server send encode and the always-on receive decode; its
-	 * changefunc pushes the value to the text_util/proto_helpers toggle.
-	 * emoji_typeahead drives the inline :prefix popup and is read live in
-	 * emoji.c, so it needs no changefunc. */
+     * legacy-server send encode and the always-on receive decode; its
+     * changefunc pushes the value to the text_util/proto_helpers toggle.
+     * emoji_typeahead drives the inline :prefix popup and is read live in
+     * emoji.c, so it needs no changefunc. */
     { CFG_EMOJI_SHORTCODES,
       { &gtkhx_prefs.emoji_shortcodes },
       BOOLEAN,
@@ -948,9 +947,9 @@ struct cfgvar {
       NULL,
       NULL },
     /* file_samewin pref: retired in Phase 5 with the legacy single-pane
-	 * files browser. Loaded values from old gtkhxrc files are silently
-	 * ignored — the cfgvars table just doesn't list the key anymore,
-	 * so prefs_read passes over it. */
+     * files browser. Loaded values from old gtkhxrc files are silently
+     * ignored — the cfgvars table just doesn't list the key anymore,
+     * so prefs_read passes over it. */
     { CFG_FONT, { &gtkhx_prefs.font }, STRING, 0, changed_font, NULL },
     { CFG_HIGHLIGHT_WORDS,
       { &gtkhx_prefs.highlight_words },
@@ -972,7 +971,7 @@ struct cfgvar {
       changed_nickoricon,
       NULL },
 #if 0 /* XXX */
-	{CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
+    {CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
 #endif
     { CFG_MARKDOWN,
       { &gtkhx_prefs.markdown },
@@ -983,7 +982,7 @@ struct cfgvar {
     { CFG_NEWS_XSIZE, { &gtkhx_prefs.geo.news.xsize }, INT, 0, NULL, NULL },
     { CFG_NEWS_YSIZE, { &gtkhx_prefs.geo.news.ysize }, INT, 0, NULL, NULL },
     { CFG_NICK,
-      { NULL },  /* bound at runtime by hx_options_bind_identity — see CFG_ICON */
+      { NULL }, /* bound at runtime by hx_options_bind_identity — see CFG_ICON */
       STRING32,
       0,
       changed_nickoricon,
@@ -1195,12 +1194,12 @@ cfgvar_for_name (const char *name)
                  sizeof (cfgvars[0]), cfgnamecmp_const);
     if (!r) {
         /* Returning &cfgvars[0] as a fallback was actively dangerous —
-		 * callers write to whatever field they expect (uchar / int /
-		 * char**), and treating a STRING entry as a BOOLEAN scribbles
-		 * across the str pointer and crashes on the next free(). NULL
-		 * is the honest return; every caller in this file is paired
-		 * with a *valid* name literal, so a NULL is a coding bug we
-		 * want to surface, not paper over. */
+         * callers write to whatever field they expect (uchar / int /
+         * char**), and treating a STRING entry as a BOOLEAN scribbles
+         * across the str pointer and crashes on the next free(). NULL
+         * is the honest return; every caller in this file is paired
+         * with a *valid* name literal, so a NULL is a coding bug we
+         * want to surface, not paper over. */
         g_warning ("cfgvar_for_name: unknown pref \"%s\"", name);
         return NULL;
     }
@@ -1328,7 +1327,7 @@ int
 gtkhx_prefs_type (const char *name)
 {
     struct cfgvar *v = cfgvar_for_name (name);
-    return v ? (int) v->type : 0;
+    return v ? (int)v->type : 0;
 }
 
 int
@@ -1352,9 +1351,9 @@ gtkhx_prefs_get_int (const char *name)
     case INT:
         return *v->variable.integer;
     case UINT16:
-        return (int) *v->variable.uint16;
+        return (int)*v->variable.uint16;
     case TIME_T:
-        return (int) *v->variable.timet;
+        return (int)*v->variable.timet;
     default:
         return 0;
     }
@@ -1372,10 +1371,10 @@ gtkhx_prefs_set_int (const char *name, int val)
         *v->variable.integer = val;
         break;
     case UINT16:
-        *v->variable.uint16 = (guint16) val;
+        *v->variable.uint16 = (guint16)val;
         break;
     case TIME_T:
-        *v->variable.timet = (time_t) val;
+        *v->variable.timet = (time_t)val;
         break;
     default:
         return;
@@ -1665,24 +1664,24 @@ on_nick_color_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
 {
     struct cfgvar *v = user_data;
     const GdkRGBA *rgba;
-    (void) pspec;
+    (void)pspec;
 
     rgba = gtk_color_dialog_button_get_rgba (GTK_COLOR_DIALOG_BUTTON (obj));
     if (!rgba) {
         return;
     }
     /* Pack as 0x00RRGGBB per fogWraith spec — high byte reserved. */
-    guint8 r = (guint8) (rgba->red * 255.0 + 0.5);
-    guint8 g = (guint8) (rgba->green * 255.0 + 0.5);
-    guint8 b = (guint8) (rgba->blue * 255.0 + 0.5);
-    int packed = (int) (((guint32) r << 16) | ((guint32) g << 8) | (guint32) b);
+    guint8 r = (guint8)(rgba->red * 255.0 + 0.5);
+    guint8 g = (guint8)(rgba->green * 255.0 + 0.5);
+    guint8 b = (guint8)(rgba->blue * 255.0 + 0.5);
+    int packed = (int)(((guint32)r << 16) | ((guint32)g << 8) | (guint32)b);
     if (v && v->type == INT && *v->variable.integer != packed) {
         *v->variable.integer = packed;
         /* Route through pref_apply so the changefunc receives the
-		 * session pointer the other rows pass and prefs_write lands
-		 * on the same code path. Without this the changefunc gets
-		 * NULL — currently changed_nick_color ignores its arg, but
-		 * future logic could need the session. */
+         * session pointer the other rows pass and prefs_write lands
+         * on the same code path. Without this the changefunc gets
+         * NULL — currently changed_nick_color ignores its arg, but
+         * future logic could need the session. */
         pref_apply (v);
     }
 }
@@ -1702,10 +1701,10 @@ on_nick_color_clear (GtkButton *btn, gpointer user_data)
     }
     *v->variable.integer = -1;
     /* Reset the picker swatch to black so the user gets a clear
-	 * "no color is set" visual cue. We block the notify::rgba
-	 * signal around the call so the synthetic set doesn't fight
-	 * the clear (it would otherwise pack 0x000000 back into the
-	 * pref). */
+     * "no color is set" visual cue. We block the notify::rgba
+     * signal around the call so the synthetic set doesn't fight
+     * the clear (it would otherwise pack 0x000000 back into the
+     * pref). */
     if (picker) {
         GdkRGBA black = { 0, 0, 0, 1.0 };
         g_signal_handlers_block_by_func (picker, on_nick_color_changed, v);
@@ -1713,7 +1712,7 @@ on_nick_color_clear (GtkButton *btn, gpointer user_data)
         g_signal_handlers_unblock_by_func (picker, on_nick_color_changed, v);
     }
     /* Same pref_apply routing as on_nick_color_changed, for the
-	 * same reasons (consistent session-arg + persistence path). */
+     * same reasons (consistent session-arg + persistence path). */
     pref_apply (v);
 }
 
@@ -1737,29 +1736,29 @@ pref_nick_color_row (void)
     }
 
     /* Picker. GtkColorDialogButton (4.10+) supersedes the
-	 * deprecated GtkColorButton; presents a GtkColorDialog
-	 * when the user clicks the swatch and exposes the picked
-	 * colour via the `rgba` property. We don't need to keep a
-	 * separate ref on the dialog — the button retains it
-	 * internally for the widget's lifetime. */
+     * deprecated GtkColorButton; presents a GtkColorDialog
+     * when the user clicks the swatch and exposes the picked
+     * colour via the `rgba` property. We don't need to keep a
+     * separate ref on the dialog — the button retains it
+     * internally for the widget's lifetime. */
     dialog = gtk_color_dialog_new ();
     gtk_color_dialog_set_title (dialog, _ ("Pick Nickname Color"));
     picker = gtk_color_dialog_button_new (dialog);
 
     if (*v->variable.integer != -1) {
-        guint32 packed = (guint32) *v->variable.integer;
-        GdkRGBA rgba = { ((packed >> 16) & 0xff) / 255.0,
-                         ((packed >> 8) & 0xff) / 255.0,
-                         (packed & 0xff) / 255.0, 1.0 };
+        guint32 packed = (guint32)*v->variable.integer;
+        GdkRGBA rgba
+            = { ((packed >> 16) & 0xff) / 255.0, ((packed >> 8) & 0xff) / 255.0,
+                (packed & 0xff) / 255.0, 1.0 };
         gtk_color_dialog_button_set_rgba (GTK_COLOR_DIALOG_BUTTON (picker),
                                           &rgba);
     }
     gtk_widget_set_valign (picker, GTK_ALIGN_CENTER);
     /* The GtkColorButton "color-set" signal was a per-pick
-	 * notification; on GtkColorDialogButton the equivalent is
-	 * the notify::rgba property change — fires whenever the
-	 * picked colour actually changes, which is the behaviour
-	 * we want here. */
+     * notification; on GtkColorDialogButton the equivalent is
+     * the notify::rgba property change — fires whenever the
+     * picked colour actually changes, which is the behaviour
+     * we want here. */
     g_signal_connect (picker, "notify::rgba",
                       G_CALLBACK (on_nick_color_changed), v);
 
@@ -1859,7 +1858,7 @@ init_variables (void) /* default settings if prefs file is not found. */
     (*cfgvar_for_name (CFG_FONT)).allocated = 1;
 
     /* GdkRGBA defaults — light grey foreground on black,
-	 * preserving the historic 0xcccc/0xffff fraction. */
+     * preserving the historic 0xcccc/0xffff fraction. */
     fg_col.red = 0xcccc / 65535.0;
     fg_col.green = 0xcccc / 65535.0;
     fg_col.blue = 0xcccc / 65535.0;
@@ -1874,21 +1873,21 @@ init_variables (void) /* default settings if prefs file is not found. */
     parse_tracker (NULL);
 
     /* Tray icon defaults to ON. The runtime is a no-op without an SNI
-	 * host (e.g. stock GNOME Wayland minus AppIndicator extension),
-	 * so leaving it on by default doesn't hurt environments that
-	 * can't render it. */
+     * host (e.g. stock GNOME Wayland minus AppIndicator extension),
+     * so leaving it on by default doesn't hurt environments that
+     * can't render it. */
     gtkhx_prefs.tray = 1;
 
     /* Notification defaults match the HexChat convention: the
-	 * high-signal events (mentions, PMs, invites) are on; the
-	 * noisy ones (every chat line, every news post) are off so a
-	 * fresh install doesn't immediately spam the user. They can
-	 * dial each event up or down individually in Settings →
-	 * Notifications.
-	 *
-	 * notify_omit_focused defaults ON so a notification only
-	 * fires when the relevant window doesn't already have the
-	 * user's attention. */
+     * high-signal events (mentions, PMs, invites) are on; the
+     * noisy ones (every chat line, every news post) are off so a
+     * fresh install doesn't immediately spam the user. They can
+     * dial each event up or down individually in Settings →
+     * Notifications.
+     *
+     * notify_omit_focused defaults ON so a notification only
+     * fires when the relevant window doesn't already have the
+     * user's attention. */
     gtkhx_prefs.notify_chat = 0;
     gtkhx_prefs.notify_chat_highlight = 1;
     gtkhx_prefs.notify_msg = 1;
@@ -1901,7 +1900,7 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_prefs.notify_omit_focused = 1;
 
     /* Emoji shortcodes — both on by default (Mac Roman fallback +
-	 * Slack-style typeahead). */
+     * Slack-style typeahead). */
     gtkhx_prefs.emoji_shortcodes = 1;
     gtkhx_prefs.emoji_typeahead = 1;
 
@@ -1909,11 +1908,11 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_prefs.animate_avatars = 1;
 
     /* Voice device defaults: empty string === "use system default
-	 * via autoaudiosrc / autoaudiosink". The Rust runtime side
-	 * normalises NULL and "" identically, so we just allocate an
-	 * empty string for the prefs round-trip. cfgvar_for_name's
-	 * allocated flag tells the read/write path the string is
-	 * heap-owned. */
+     * via autoaudiosrc / autoaudiosink". The Rust runtime side
+     * normalises NULL and "" identically, so we just allocate an
+     * empty string for the prefs round-trip. cfgvar_for_name's
+     * allocated flag tells the read/write path the string is
+     * heap-owned. */
     gtkhx_prefs.voice_input_device = g_strdup ("");
     (*cfgvar_for_name (CFG_VOICE_INPUT_DEVICE)).allocated = 1;
     gtkhx_prefs.voice_output_device = g_strdup ("");
@@ -1951,15 +1950,15 @@ prefs_allocate (char *tag, char *rest)
     }
     case BOOLEAN: {
         /* prefs_write emits booleans via
-			 * g_key_file_set_boolean which writes the literal
-			 * "true" / "false" — but the historical parser only
-			 * accepted '0'/'1' and silently fell through on
-			 * anything else, reverting every BOOLEAN pref to its
-			 * struct-init default on every startup. The fix
-			 * accepts both spellings, case-insensitively, plus
-			 * "yes"/"no" since GKeyFile's own get_boolean does
-			 * too. The parser logic now lives in prefs_parser.c
-			 * so the unit tests can drive it without a GTK build. */
+             * g_key_file_set_boolean which writes the literal
+             * "true" / "false" — but the historical parser only
+             * accepted '0'/'1' and silently fell through on
+             * anything else, reverting every BOOLEAN pref to its
+             * struct-init default on every startup. The fix
+             * accepts both spellings, case-insensitively, plus
+             * "yes"/"no" since GKeyFile's own get_boolean does
+             * too. The parser logic now lives in prefs_parser.c
+             * so the unit tests can drive it without a GTK build. */
         unsigned char c;
         if (!prefs_parse_boolean (rest, &c)) {
             return;
@@ -1971,7 +1970,8 @@ prefs_allocate (char *tag, char *rest)
         break;
     }
     case STRING:
-        if (!*result->variable.str || strcmp (rest, *result->variable.str) != 0) {
+        if (!*result->variable.str
+            || strcmp (rest, *result->variable.str) != 0) {
             if (result->allocated) {
                 g_free (*result->variable.str);
             }
@@ -1991,26 +1991,26 @@ prefs_allocate (char *tag, char *rest)
     case STRING32: {
         gsize rest_len = strlen (rest);
         /* trace every STRING32 load so the hx_conn_name (htlc)
-			 * corruption hunt has a full audit trail of what came
-			 * out of gtkhxrc before any sanitisation. The label
-			 * encodes the key name so we can disambiguate NICK
-			 * from any future STRING32. */
+             * corruption hunt has a full audit trail of what came
+             * out of gtkhxrc before any sanitisation. The label
+             * encodes the key name so we can disambiguate NICK
+             * from any future STRING32. */
         {
             char lbl[64];
             g_snprintf (lbl, sizeof lbl, "prefs_load %s", result->name);
             debug_log_name_write (lbl, rest, rest_len);
         }
         /* Defend against corrupt non-UTF-8 bytes in the prefs
-			 * file. NICK lives in a STRING32 buffer that doubles
-			 * as hx_conn_name (htlc) on the wire AND as the source for a
-			 * GtkEntry in Settings. GTK's input method context
-			 * asserts the surrounding text is valid UTF-8
-			 * (gtk_im_context_set_surrounding_with_selection),
-			 * so a NICK with non-UTF-8 bytes makes the field
-			 * un-editable. Validate UTF-8 here and pipe through
-			 * gtkhx_text_to_utf8 (Mac Roman → UTF-8, then
-			 * g_utf8_make_valid replacement-char fallback) if
-			 * the bytes aren't already valid. */
+             * file. NICK lives in a STRING32 buffer that doubles
+             * as hx_conn_name (htlc) on the wire AND as the source for a
+             * GtkEntry in Settings. GTK's input method context
+             * asserts the surrounding text is valid UTF-8
+             * (gtk_im_context_set_surrounding_with_selection),
+             * so a NICK with non-UTF-8 bytes makes the field
+             * un-editable. Validate UTF-8 here and pipe through
+             * gtkhx_text_to_utf8 (Mac Roman → UTF-8, then
+             * g_utf8_make_valid replacement-char fallback) if
+             * the bytes aren't already valid. */
         if (g_utf8_validate (rest, rest_len, NULL)) {
             if (!strncmp (result->variable.str32, rest, 31)) {
                 return;
@@ -2137,8 +2137,8 @@ prefs_read_keyfile (const char *path)
     keys = g_key_file_get_keys (kf, CFG_KEYFILE_GROUP, &n_keys, &err);
     if (!keys) {
         /* No [gtkhx] section — almost certainly a legacy KEY=VALUE
-		 * file we just got lucky parsing. Fall through to the
-		 * line-by-line parser. */
+         * file we just got lucky parsing. Fall through to the
+         * line-by-line parser. */
         g_clear_error (&err);
         g_key_file_free (kf);
         return FALSE;
@@ -2200,12 +2200,12 @@ static void
 apply_loaded_xtext_prefs (void)
 {
     /* Colored-Nicknames extension. Stamp htlc->nick_color
-	 * from the loaded pref so the first hx_change_name_icon (fired
-	 * at login) carries our color. Same load-vs-changefunc concern
-	 * as the xtext autocopy_* knobs below: the cfgvars changefunc
-	 * doesn't fire on prefs_read, so without an explicit copy here
-	 * htlc->nick_color stays at network.c's HX_NICK_COLOR_NONE
-	 * default and we'd silently never advertise. */
+     * from the loaded pref so the first hx_change_name_icon (fired
+     * at login) carries our color. Same load-vs-changefunc concern
+     * as the xtext autocopy_* knobs below: the cfgvars changefunc
+     * doesn't fire on prefs_read, so without an explicit copy here
+     * htlc->nick_color stays at network.c's HX_NICK_COLOR_NONE
+     * default and we'd silently never advertise. */
     hx_conn_set_nick_color (hx_active_session ()->htlc,
                             (guint32)gtkhx_prefs.nick_color);
 
@@ -2213,41 +2213,41 @@ apply_loaded_xtext_prefs (void)
     hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
     hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
     /* Same reason as the autocopy trio above: prefs_read doesn't run
-	 * changefuncs, so a saved "markdown off" would be ignored until the
-	 * user toggled it. */
+     * changefuncs, so a saved "markdown off" would be ignored until the
+     * user toggled it. */
     hx_chat_view_set_markdown (gtkhx_prefs.markdown);
 
     /* Same load-vs-changefunc concern: prefs_read doesn't fire
-	 * changefuncs, so push the loaded emoji-shortcode toggle into the
-	 * text_util/proto_helpers conversion gate explicitly. (Typeahead is
-	 * read live from gtkhx_prefs in emoji.c, so it needs no push.) */
+     * changefuncs, so push the loaded emoji-shortcode toggle into the
+     * text_util/proto_helpers conversion gate explicitly. (Typeahead is
+     * read live from gtkhx_prefs in emoji.c, so it needs no push.) */
     gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
 
     /* GIF-icons (Phase 10.D): same concern — push the loaded
-	 * animate-avatars toggle into gif_avatar.c so a persisted OFF takes
-	 * effect at startup, not only after the user touches the setting. */
+     * animate-avatars toggle into gif_avatar.c so a persisted OFF takes
+     * effect at startup, not only after the user touches the setting. */
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
 
 #ifdef HAVE_VOICE
     /* Voice capture / playback device: same load-vs-changefunc concern.
-	 * prefs_read doesn't fire changed_voice_{input,output}_device, so the
-	 * loaded device names live in gtkhx_prefs but never reach the Rust
-	 * runtime's DEVICE_PREFS. Without this push a saved device is shown
-	 * correctly in Settings yet ignored on the first Join after launch —
-	 * the send/receive bins fall back to autoaudiosrc/autoaudiosink. Push
-	 * both here so a persisted pick actually takes effect at startup, not
-	 * only after the user re-touches the setting. (The setters just store
-	 * into a Mutex-guarded static; no GStreamer init required, so it's
-	 * safe this early in fe_init.) */
+     * prefs_read doesn't fire changed_voice_{input,output}_device, so the
+     * loaded device names live in gtkhx_prefs but never reach the Rust
+     * runtime's DEVICE_PREFS. Without this push a saved device is shown
+     * correctly in Settings yet ignored on the first Join after launch —
+     * the send/receive bins fall back to autoaudiosrc/autoaudiosink. Push
+     * both here so a persisted pick actually takes effect at startup, not
+     * only after the user re-touches the setting. (The setters just store
+     * into a Mutex-guarded static; no GStreamer init required, so it's
+     * safe this early in fe_init.) */
     gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 #endif
 
     /* Stamp format is view-aware but the format itself is process-wide.
-	 * Pass NULL for the view here — at this point no chat views exist
-	 * yet (chat windows are constructed AFTER prefs_read in fe_init).
-	 * The recompute-stamp-width / re-grow-indent paths inside the setter
-	 * are view-conditioned, so NULL is a clean format-only update. */
+     * Pass NULL for the view here — at this point no chat views exist
+     * yet (chat windows are constructed AFTER prefs_read in fe_init).
+     * The recompute-stamp-width / re-grow-indent paths inside the setter
+     * are view-conditioned, so NULL is a clean format-only update. */
     hx_chat_view_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
 }
 
@@ -2260,9 +2260,9 @@ prefs_read (void)
     if (g_file_test (path, G_FILE_TEST_EXISTS)) {
         if (!prefs_read_keyfile (path)) {
             /* File exists but isn't a GKeyFile — must be the
-			 * pre-migration KEY=VALUE format sitting at the new
-			 * path. Read it via the legacy line parser; the next
-			 * prefs_write will rewrite it as GKeyFile. */
+             * pre-migration KEY=VALUE format sitting at the new
+             * path. Read it via the legacy line parser; the next
+             * prefs_write will rewrite it as GKeyFile. */
             if (!prefs_read_legacy_lines (path)) {
                 fprintf (stderr, "prefs_read: %s: %s\n", path,
                          strerror (errno));
@@ -2275,7 +2275,7 @@ prefs_read (void)
     }
 
     /* New-style file doesn't exist; try the legacy ~/.gtkhxrc as a
-	 * migration read so existing users don't lose their config. */
+     * migration read so existing users don't lose their config. */
     {
         char *legacy = prefs_legacy_path ();
         if (legacy) {
@@ -2339,11 +2339,11 @@ prefs_write (void)
             break;
         case STRING32: {
             /* trace the value about to be persisted. If
-			 * the hx_conn_name (htlc) corruption has happened between the
-			 * explicit write site and this save, the hex here
-			 * shows what's actually going to disk. The gtkhxrc
-			 * file is the only stable record of the corrupt
-			 * state, so log the bytes here too. */
+             * the hx_conn_name (htlc) corruption has happened between the
+             * explicit write site and this save, the hex here
+             * shows what's actually going to disk. The gtkhxrc
+             * file is the only stable record of the corrupt
+             * state, so log the bytes here too. */
             char lbl[64];
             g_snprintf (lbl, sizeof lbl, "prefs_write %s", v->name);
             debug_log_name_write (lbl, v->variable.str32,
@@ -2433,16 +2433,16 @@ close_options_bookkeeping (GtkWidget *widget, gpointer data)
      * drop with the dialog's widget tree, so there's nothing to clear here. */
 
     /* per-cfgvar widget pointers are populated as Settings
-	 * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
-	 * point at AdwPreferencesRow children of the dialog. Once the dialog
-	 * tears down those rows are freed; any external caller that later
-	 * does `if (v->widget) ...` would dereference garbage. Clear the
-	 * pointers so callers like gtkhx_prefs_set_bool() can safely test
-	 * v->widget for "Settings is open right now".
-	 *
-	 * Flush any pending entry-row debounce timers first so a close
-	 * mid-keystroke doesn't lose the change — entry_apply_flush runs
-	 * pref_apply synchronously when there's a pending timer. */
+     * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
+     * point at AdwPreferencesRow children of the dialog. Once the dialog
+     * tears down those rows are freed; any external caller that later
+     * does `if (v->widget) ...` would dereference garbage. Clear the
+     * pointers so callers like gtkhx_prefs_set_bool() can safely test
+     * v->widget for "Settings is open right now".
+     *
+     * Flush any pending entry-row debounce timers first so a close
+     * mid-keystroke doesn't lose the change — entry_apply_flush runs
+     * pref_apply synchronously when there's a pending timer. */
     for (i = 0; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++) {
         entry_apply_flush (&cfgvars[i]);
     }
@@ -2507,14 +2507,14 @@ gtkhx_prefs_set_bool (const char *name, int value)
 static void
 avatar_loader_size_prepared (GdkPixbufLoader *ld, int w, int h, gpointer data)
 {
-    (void) data;
+    (void)data;
     int big = w > h ? w : h;
     if (big <= AVATAR_PREVIEW_MAX_DIM) {
         return;
     }
-    double s = (double) AVATAR_PREVIEW_MAX_DIM / big;
-    int nw = (int) (w * s);
-    int nh = (int) (h * s);
+    double s = (double)AVATAR_PREVIEW_MAX_DIM / big;
+    int nw = (int)(w * s);
+    int nh = (int)(h * s);
     gdk_pixbuf_loader_set_size (ld, nw > 0 ? nw : 1, nh > 0 ? nh : 1);
 }
 
@@ -2526,9 +2526,9 @@ avatar_preview_from_gif (GtkWidget *preview, const guchar *bytes, gsize len)
     g_signal_connect (ld, "size-prepared",
                       G_CALLBACK (avatar_loader_size_prepared), NULL);
     /* close() must run exactly once regardless of how write() fared, so
-	 * sequence the two calls into separate statements rather than relying
-	 * on && short-circuit (which would skip close() when write() fails,
-	 * and tempt a second close() in an else branch). */
+     * sequence the two calls into separate statements rather than relying
+     * on && short-circuit (which would skip close() when write() fails,
+     * and tempt a second close() in an else branch). */
     gboolean wrote = gdk_pixbuf_loader_write (ld, bytes, len, NULL);
     gboolean closed = gdk_pixbuf_loader_close (ld, NULL);
     if (wrote && closed) {
@@ -2548,7 +2548,8 @@ on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
 {
     GtkWidget *preview = user_data; /* reffed by on_avatar_choose_clicked */
     GError *err = NULL;
-    GFile *file = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (src), res, &err);
+    GFile *file
+        = gtk_file_dialog_open_finish (GTK_FILE_DIALOG (src), res, &err);
 
     if (!file) {
         if (err
@@ -2565,19 +2566,18 @@ on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
     }
 
     /* Preflight the size before reading the whole file into memory —
-	 * picking a huge file shouldn't cause a long synchronous read +
-	 * allocation on the UI thread just to reject it afterward. One
-	 * stat() on local files; cheap. If size can't be queried (some
-	 * network mounts) we fall through and the post-read cap catches it. */
-    GFileInfo *finfo = g_file_query_info (
-        file, G_FILE_ATTRIBUTE_STANDARD_SIZE, G_FILE_QUERY_INFO_NONE, NULL,
-        NULL);
+     * picking a huge file shouldn't cause a long synchronous read +
+     * allocation on the UI thread just to reject it afterward. One
+     * stat() on local files; cheap. If size can't be queried (some
+     * network mounts) we fall through and the post-read cap catches it. */
+    GFileInfo *finfo = g_file_query_info (file, G_FILE_ATTRIBUTE_STANDARD_SIZE,
+                                          G_FILE_QUERY_INFO_NONE, NULL, NULL);
     if (finfo) {
         goffset sz = g_file_info_get_size (finfo);
         g_object_unref (finfo);
         if (sz > GTKHX_AVATAR_MAX_BYTES) {
             /* Size is checked before the GIF-signature validation below,
-			 * so a large non-GIF lands here too — keep the wording neutral. */
+             * so a large non-GIF lands here too — keep the wording neutral. */
             char *m = g_strdup_printf (
                 _ ("That file is %.1f KB — the limit is %d KB. Pick a smaller "
                    "one."),
@@ -2622,7 +2622,7 @@ on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
         g_object_unref (preview);
         return;
     }
-    if (!gtkhx_proto_gif_icon_is_gif ((const guint8 *) contents, len)) {
+    if (!gtkhx_proto_gif_icon_is_gif ((const guint8 *)contents, len)) {
         toolbar_show_toast (_ ("That file isn't a GIF image."));
         g_free (contents);
         g_object_unref (preview);
@@ -2630,19 +2630,20 @@ on_avatar_file_chosen (GObject *src, GAsyncResult *res, gpointer user_data)
     }
 
     /* Persist the choice regardless of the current connection, then
-	 * send it if (and only if) the live server supports the extension.
-	 * If not, it'll be sent automatically the next time we connect to a
-	 * capable server (hx_icon_send_saved, from the post-login probe). */
-    if (!hx_icon_save ((const guint8 *) contents, len)) {
+     * send it if (and only if) the live server supports the extension.
+     * If not, it'll be sent automatically the next time we connect to a
+     * capable server (hx_icon_send_saved, from the post-login probe). */
+    if (!hx_icon_save ((const guint8 *)contents, len)) {
         toolbar_show_toast (
             _ ("Couldn't save the avatar to disk — check permissions."));
         g_free (contents);
         g_object_unref (preview);
         return;
     }
-    avatar_preview_from_gif (preview, (const guchar *) contents, len);
-    if (hx_conn_gif_icons_state (hx_active_session ()->htlc) == GIF_ICONS_SUPPORTED) {
-        hx_icon_set (hx_active_session ()->htlc, (const guint8 *) contents, len);
+    avatar_preview_from_gif (preview, (const guchar *)contents, len);
+    if (hx_conn_gif_icons_state (hx_active_session ()->htlc)
+        == GIF_ICONS_SUPPORTED) {
+        hx_icon_set (hx_active_session ()->htlc, (const guint8 *)contents, len);
         toolbar_show_toast (_ ("Avatar updated."));
     } else {
         toolbar_show_toast (_ ("Avatar saved — it'll be sent when you connect "
@@ -2682,19 +2683,19 @@ static void
 on_avatar_clear_clicked (GtkButton *btn, gpointer user_data)
 {
     GtkWidget *preview = user_data;
-    (void) btn;
+    (void)btn;
     gboolean removed = hx_icon_forget ();
     gtk_picture_set_paintable (GTK_PICTURE (preview), NULL);
     /* Tell the server to drop it too, if we're on a capable one. */
-    if (hx_conn_gif_icons_state (hx_active_session ()->htlc) == GIF_ICONS_SUPPORTED) {
+    if (hx_conn_gif_icons_state (hx_active_session ()->htlc)
+        == GIF_ICONS_SUPPORTED) {
         hx_icon_clear (hx_active_session ()->htlc);
     }
     /* Don't claim it's cleared if the persisted file survived deletion —
-	 * it'll reload and re-send next start. */
-    toolbar_show_toast (removed
-                            ? _ ("Avatar cleared.")
-                            : _ ("Avatar cleared for now, but the saved "
-                                 "file could not be deleted."));
+     * it'll reload and re-send next start. */
+    toolbar_show_toast (removed ? _ ("Avatar cleared.")
+                                : _ ("Avatar cleared for now, but the saved "
+                                     "file could not be deleted."));
 }
 
 /* --- Identity icon: inline preview + Browse popup ----------------- *
@@ -2808,7 +2809,7 @@ icon_picker_scroll_to_selected (gpointer data)
                 g_object_get_data (G_OBJECT (child), "resid"));
             if (id == want) {
                 gtk_flow_box_select_child (boxes[b],
-                                          GTK_FLOW_BOX_CHILD (child));
+                                           GTK_FLOW_BOX_CHILD (child));
                 gtk_widget_grab_focus (child);
                 return G_SOURCE_REMOVE;
             }
@@ -2914,10 +2915,10 @@ settings_page_identity (AdwPreferencesPage *page)
     adw_preferences_group_set_title (id_grp, _ ("Identity icon"));
     {
         /* pref_spin_row hands back an AdwSpinRow (an AdwActionRow
-		 * subclass), so we can hang a live preview of the selected icon
-		 * on the prefix and a "Browse…" button (which pops the full
-		 * icon grid) on the suffix. The numeric ID stays directly
-		 * editable in the spin entry. */
+         * subclass), so we can hang a live preview of the selected icon
+         * on the prefix and a "Browse…" button (which pops the full
+         * icon grid) on the suffix. The numeric ID stays directly
+         * editable in the spin entry. */
         GtkWidget *icon_row = pref_spin_row (
             CFG_ICON, _ ("Icon ID"),
             _ ("Numeric ID from the loaded icon resource files"), 0, 65535, 1);
@@ -2949,11 +2950,11 @@ settings_page_identity (AdwPreferencesPage *page)
     adw_preferences_page_add (page, id_grp);
 
     /* Custom GIF avatar (GIF-icons extension, Phase 10.C). Independent
-	 * of the numeric icon above — a GIF other capable clients see in
-	 * place of your icon, rendered like a normal icon / wide banner.
-	 * You can pick one any time; it's persisted ($CONFIG/avatar.gif)
-	 * and sent automatically once you're on a server that supports the
-	 * extension, so the picker is never gated on the live connection. */
+     * of the numeric icon above — a GIF other capable clients see in
+     * place of your icon, rendered like a normal icon / wide banner.
+     * You can pick one any time; it's persisted ($CONFIG/avatar.gif)
+     * and sent automatically once you're on a server that supports the
+     * extension, so the picker is never gated on the live connection. */
     {
         AdwPreferencesGroup *gif_grp
             = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -2974,7 +2975,7 @@ settings_page_identity (AdwPreferencesPage *page)
         gtk_picture_set_content_fit (GTK_PICTURE (preview),
                                      GTK_CONTENT_FIT_CONTAIN);
         /* Seed from the saved avatar (the user's choice), not the live
-		 * per-session cache — so it shows even before connecting. */
+         * per-session cache — so it shows even before connecting. */
         {
             GBytes *saved = hx_icon_load_saved ();
             if (saved) {
@@ -3000,7 +3001,7 @@ settings_page_identity (AdwPreferencesPage *page)
         adw_preferences_group_add (gif_grp, GTK_WIDGET (gif_row));
 
         /* Animate avatars (Phase 10.D). Off renders the still first
-		 * frame; per-user pause (click / right-click) is separate. */
+         * frame; per-user pause (click / right-click) is separate. */
         adw_preferences_group_add (
             gif_grp,
             pref_switch_row (CFG_ANIMATE_AVATARS, _ ("Animate GIF avatars"),
@@ -3042,8 +3043,7 @@ static void
 ptt_row_refresh_subtitle (AdwActionRow *row)
 {
     const char *spec = gtkhx_prefs.voice_ptt_key;
-    if (spec && *spec
-        && hx_voice_ptt_keyspec_parse (spec, NULL, NULL)) {
+    if (spec && *spec && hx_voice_ptt_keyspec_parse (spec, NULL, NULL)) {
         adw_action_row_set_subtitle (row, spec);
     } else {
         adw_action_row_set_subtitle (row, _ ("Not set — click to capture"));
@@ -3086,8 +3086,8 @@ ptt_capture_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
     AdwActionRow *parent_row
         = g_object_get_data (G_OBJECT (dlg), "ptt-parent-row");
     GtkLabel *err_lbl = g_object_get_data (G_OBJECT (dlg), "ptt-err-label");
-    (void) ctrl;
-    (void) keycode;
+    (void)ctrl;
+    (void)keycode;
 
     if (keyval == GDK_KEY_Escape
         && (state & (GDK_CONTROL_MASK | GDK_ALT_MASK | GDK_SUPER_MASK)) == 0) {
@@ -3101,11 +3101,10 @@ ptt_capture_key_pressed (GtkEventControllerKey *ctrl, guint keyval,
          * label widget too — it's hidden by default so the
          * dialog body doesn't reserve a blank row. */
         if (err_lbl) {
-            gtk_label_set_text (
-                err_lbl,
-                _ ("That key would conflict with chat typing. "
-                   "Try a function key (F1–F24), Pause, or a "
-                   "Ctrl/Alt-modified combination."));
+            gtk_label_set_text (err_lbl,
+                                _ ("That key would conflict with chat typing. "
+                                   "Try a function key (F1–F24), Pause, or a "
+                                   "Ctrl/Alt-modified combination."));
             gtk_widget_set_visible (GTK_WIDGET (err_lbl), TRUE);
         }
         return TRUE;
@@ -3169,7 +3168,7 @@ ptt_open_capture_dialog (AdwActionRow *parent_row)
 static void
 on_ptt_row_activated (AdwActionRow *row, gpointer user_data)
 {
-    (void) user_data;
+    (void)user_data;
     ptt_open_capture_dialog (row);
 }
 
@@ -3180,7 +3179,7 @@ static void
 on_ptt_clear_clicked (GtkButton *btn, gpointer user_data)
 {
     AdwActionRow *row = user_data;
-    (void) btn;
+    (void)btn;
     ptt_save_key_spec ("");
     ptt_row_refresh_subtitle (row);
 }
@@ -3195,27 +3194,24 @@ settings_page_voice_ptt_group (AdwPreferencesPage *page)
         = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
     adw_preferences_group_set_title (grp, _ ("Push-to-Talk"));
     adw_preferences_group_set_description (
-        grp,
-        _ ("When enabled, you start muted and unmute by holding the "
-           "captured key. Works from any focused widget in the GtkHx "
-           "window."));
+        grp, _ ("When enabled, you start muted and unmute by holding the "
+                "captured key. Works from any focused widget in the GtkHx "
+                "window."));
 
     /* Enable toggle. */
-    adw_preferences_group_add (
-        grp,
-        pref_switch_row (CFG_VOICE_PTT_ENABLED,
-                         _ ("Enable push-to-talk"), NULL));
+    adw_preferences_group_add (grp, pref_switch_row (CFG_VOICE_PTT_ENABLED,
+                                                     _ ("Enable push-to-talk"),
+                                                     NULL));
 
     /* Key capture row. */
-    AdwActionRow *key_row
-        = ADW_ACTION_ROW (adw_action_row_new ());
+    AdwActionRow *key_row = ADW_ACTION_ROW (adw_action_row_new ());
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (key_row),
                                    _ ("PTT key"));
     /* AdwActionRow inherits from GtkListBoxRow; activatable is the
      * row-level "click / Enter fires 'activated'" toggle. */
     gtk_list_box_row_set_activatable (GTK_LIST_BOX_ROW (key_row), TRUE);
-    g_signal_connect (key_row, "activated",
-                      G_CALLBACK (on_ptt_row_activated), NULL);
+    g_signal_connect (key_row, "activated", G_CALLBACK (on_ptt_row_activated),
+                      NULL);
 
     /* Suffix Clear button. */
     GtkWidget *clear_btn
@@ -3223,8 +3219,8 @@ settings_page_voice_ptt_group (AdwPreferencesPage *page)
     gtk_widget_set_valign (clear_btn, GTK_ALIGN_CENTER);
     gtk_widget_set_tooltip_text (clear_btn, _ ("Clear PTT key"));
     gtk_widget_add_css_class (clear_btn, "flat");
-    g_signal_connect (clear_btn, "clicked",
-                      G_CALLBACK (on_ptt_clear_clicked), key_row);
+    g_signal_connect (clear_btn, "clicked", G_CALLBACK (on_ptt_clear_clicked),
+                      key_row);
     adw_action_row_add_suffix (key_row, clear_btn);
 
     ptt_row_refresh_subtitle (key_row);
@@ -3251,16 +3247,14 @@ settings_page_voice (AdwPreferencesPage *page)
     in_labels[0] = _ ("System default");
     for (i = 0; i < n_in; i++) {
         in_vals[i + 1] = gtkhx_voice_device_list_name (inputs, i);
-        in_labels[i + 1]
-            = gtkhx_voice_device_list_display_name (inputs, i);
+        in_labels[i + 1] = gtkhx_voice_device_list_display_name (inputs, i);
     }
 
     out_vals[0] = "";
     out_labels[0] = _ ("System default");
     for (i = 0; i < n_out; i++) {
         out_vals[i + 1] = gtkhx_voice_device_list_name (outputs, i);
-        out_labels[i + 1]
-            = gtkhx_voice_device_list_display_name (outputs, i);
+        out_labels[i + 1] = gtkhx_voice_device_list_display_name (outputs, i);
     }
 
     devices_grp = ADW_PREFERENCES_GROUP (adw_preferences_group_new ());
@@ -3281,20 +3275,18 @@ settings_page_voice (AdwPreferencesPage *page)
     adw_preferences_page_add (page, devices_grp);
 
     /* pref_combo_row's gtk_string_list_append copies each string into
-	 * its own GtkStringList, so freeing the parallel arrays here is
-	 * safe. The underlying char* pointers for index >= 1 live as long
-	 * as the device list does — we hold those lists alive for the
-	 * page's lifetime by stashing them on the page widget so a later
-	 * close-then-reopen rebuilds against a fresh scan. */
+     * its own GtkStringList, so freeing the parallel arrays here is
+     * safe. The underlying char* pointers for index >= 1 live as long
+     * as the device list does — we hold those lists alive for the
+     * page's lifetime by stashing them on the page widget so a later
+     * close-then-reopen rebuilds against a fresh scan. */
     g_free (in_vals);
     g_free (in_labels);
     g_free (out_vals);
     g_free (out_labels);
-    g_object_set_data_full (G_OBJECT (page), "voice-input-devices",
-                            inputs,
+    g_object_set_data_full (G_OBJECT (page), "voice-input-devices", inputs,
                             (GDestroyNotify)gtkhx_voice_device_list_free);
-    g_object_set_data_full (G_OBJECT (page), "voice-output-devices",
-                            outputs,
+    g_object_set_data_full (G_OBJECT (page), "voice-output-devices", outputs,
                             (GDestroyNotify)gtkhx_voice_device_list_free);
 
     /* Push-to-talk: toggle + key capture. The toggle binds via the
@@ -3355,8 +3347,8 @@ extern void gtkhx_options_rs_page_sound (AdwPreferencesPage *);
 extern void gtkhx_options_rs_page_tracker (AdwPreferencesPage *);
 
 static const struct settings_entry settings_entries[] = {
-    { N_ ("General"), "general", N_ ("General"),
-      "preferences-system-symbolic", gtkhx_options_rs_page_general },
+    { N_ ("General"), "general", N_ ("General"), "preferences-system-symbolic",
+      gtkhx_options_rs_page_general },
     { NULL, "identity", N_ ("Identity"), "user-info-symbolic",
       settings_page_identity },
     { NULL, "filexfer", N_ ("File Transfers"), "folder-download-symbolic",
@@ -3473,15 +3465,15 @@ create_options_window (GtkWidget *widget, gpointer data)
     }
 
     /* Outer container is a plain AdwDialog (the project's meson floor is
-	 * libadwaita >= 1.6): it
-	 * auto-handles transient_for / modal-against-parent / adaptive
-	 * sizing. content_width is the *preferred* size and must be wide
-	 * enough for the sidebar + a preferences page side-by-side, or Adw
-	 * warns "AdwNavigationSplitView exceeds AdwDialog width". The
-	 * width/height-request set the collapsed *minimum* — without them
-	 * Adw warns "AdwDialog does not have a minimum size". Below the
-	 * breakpoint the split view collapses to a single navigable pane,
-	 * so the minimum only needs to fit one pane. */
+     * libadwaita >= 1.6): it
+     * auto-handles transient_for / modal-against-parent / adaptive
+     * sizing. content_width is the *preferred* size and must be wide
+     * enough for the sidebar + a preferences page side-by-side, or Adw
+     * warns "AdwNavigationSplitView exceeds AdwDialog width". The
+     * width/height-request set the collapsed *minimum* — without them
+     * Adw warns "AdwDialog does not have a minimum size". Below the
+     * breakpoint the split view collapses to a single navigable pane,
+     * so the minimum only needs to fit one pane. */
     dlg = ADW_DIALOG (adw_dialog_new ());
     adw_dialog_set_title (dlg, _ ("GtkHx Preferences"));
     adw_dialog_set_content_width (dlg, 920);
@@ -3489,7 +3481,7 @@ create_options_window (GtkWidget *widget, gpointer data)
     gtk_widget_set_size_request (GTK_WIDGET (dlg), 360, 480);
 
     /* Esc closes via AdwDialog's built-in close_response; wire Ctrl+W
-	 * (close) and Ctrl+Q (app.quit) for keyboard parity. */
+     * (close) and Ctrl+Q (app.quit) for keyboard parity. */
     gtkhx_dialog_add_close_shortcuts (GTK_WIDGET (dlg));
 
     g_object_set_data (G_OBJECT (dlg), "sess", sess);
@@ -3543,13 +3535,13 @@ create_options_window (GtkWidget *widget, gpointer data)
         gtk_list_box_row_set_child (GTK_LIST_BOX_ROW (row), rbox);
 
         /* qdata drives the header func + selection handler. name is a
-		 * static literal (no dup); section/title are gettext returns
-		 * (stable, but dup'd for lifetime safety across teardown). */
+         * static literal (no dup); section/title are gettext returns
+         * (stable, but dup'd for lifetime safety across teardown). */
         g_object_set_data_full (G_OBJECT (row), "section",
                                 g_strdup (cur_section), g_free);
         g_object_set_data (G_OBJECT (row), "page-name", (gpointer)e->name);
-        g_object_set_data_full (G_OBJECT (row), "page-title",
-                                g_strdup (title), g_free);
+        g_object_set_data_full (G_OBJECT (row), "page-title", g_strdup (title),
+                                g_free);
         gtk_list_box_append (GTK_LIST_BOX (listbox), row);
         if (!first_row) {
             first_row = GTK_LIST_BOX_ROW (row);
@@ -3606,8 +3598,8 @@ create_options_window (GtkWidget *widget, gpointer data)
 
     adw_dialog_present (dlg, parent);
     /* The icon picker is no longer inline — it's populated on demand
-	 * when the Identity page's "Browse…" button opens the popup, so
-	 * there's no list_icons() call here. */
+     * when the Identity page's "Browse…" button opens the popup, so
+     * there's no list_icons() call here. */
 }
 
 G_GNUC_END_IGNORE_DEPRECATIONS

@@ -122,14 +122,14 @@ inline_media_chunk_size (const struct htlc_conn *htlc)
         return HX_MEDIA_DEFAULT_CHUNK_SIZE;
     }
     /* Clamp the server-advertised chunk size to a sane ceiling so
-	 * a hostile server can't ask us to allocate absurdly large
-	 * per-chunk buffers. 60000 leaves room for the chunk header
-	 * (4 bytes) plus a few wrapper chunks (PART_INDEX / PART_FINAL
-	 * / UPLOAD_TOKEN) inside the 65535-byte wire frame.
-	 *
-	 * The spec doesn't bound CHAT_MEDIA_CHUNK_SIZE explicitly;
-	 * this clamp is documented in docs/inline-media-plan.md
-	 * "Open questions". */
+     * a hostile server can't ask us to allocate absurdly large
+     * per-chunk buffers. 60000 leaves room for the chunk header
+     * (4 bytes) plus a few wrapper chunks (PART_INDEX / PART_FINAL
+     * / UPLOAD_TOKEN) inside the 65535-byte wire frame.
+     *
+     * The spec doesn't bound CHAT_MEDIA_CHUNK_SIZE explicitly;
+     * this clamp is documented in docs/inline-media-plan.md
+     * "Open questions". */
     if (v > HX_MEDIA_DEFAULT_CHUNK_SIZE) {
         v = HX_MEDIA_DEFAULT_CHUNK_SIZE;
     }

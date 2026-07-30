@@ -76,7 +76,10 @@ fn upsert_existing_updates_in_place_same_object() {
     // The item announced its own change exactly once.
     assert_eq!(item_changed.get(), 1);
     let after = model.item(0).unwrap();
-    assert_eq!(after.clone().downcast::<HxMember>().unwrap().name(), "alicia");
+    assert_eq!(
+        after.clone().downcast::<HxMember>().unwrap().name(),
+        "alicia"
+    );
     // In-place set kept the same GObject (identity + selection survive).
     assert_eq!(before.upcast::<glib::Object>(), after);
 }

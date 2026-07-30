@@ -46,13 +46,15 @@ test_file_info_seeded (void)
         fd, &htlc, HTLC_HDR_FILE_GETINFO, /*flag=*/0, /*hc=*/1,
         (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), fname));
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        g_assert_true (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len));
+        g_assert_true (task_error_extract (hx_test_in (&htlc)->buf,
+                                           hx_test_in (&htlc)->pos, err,
+                                           sizeof (err), &err_len));
         g_test_message ("server returned task-error for "
                         "FILE_GETINFO test.txt: \"%s\" "
                         "(check Dockerfile seeds the file)",
@@ -67,7 +69,7 @@ test_file_info_seeded (void)
     guint32 got_size = 0;
     gboolean got_size_chunk = FALSE;
 
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         switch (_type) {
         case HTLS_DATA_FILE_NAME:
@@ -78,7 +80,7 @@ test_file_info_seeded (void)
             if (_len == sizeof (guint32)) {
                 guint32 v;
                 memcpy (&v, dh->data, sizeof v);
-                got_size = g_ntohl(v);
+                got_size = g_ntohl (v);
                 got_size_chunk = TRUE;
             }
             break;

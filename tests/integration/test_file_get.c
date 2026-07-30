@@ -77,13 +77,15 @@ test_file_get_round_trip (void)
         fd, &htlc, HTLC_HDR_FILE_GET, /*flag=*/0, /*hc=*/1,
         (int)HTLC_DATA_FILE_NAME, (int)strlen (fname), (guint8 *)fname));
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     if (hdr_flag (&htlc) & 1) {
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_fail_printf ("file_get refused by server: \"%s\". "
                                 "Is files/test.txt seeded in the container?",
                                 err);
@@ -96,7 +98,8 @@ test_file_get_round_trip (void)
     }
 
     struct hx_htxf_reply reply = { 0 };
-    hx_htxf_reply_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, &reply);
+    hx_htxf_reply_extract (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos,
+                           &reply);
     g_assert_cmphex (reply.ref, !=, 0);
     g_assert_cmpuint (reply.size, >, 0);
     g_assert_cmpuint (reply.size, <, 1024 * 1024); /* sanity cap */
@@ -161,12 +164,12 @@ test_file_get_round_trip (void)
     g_assert_cmpmem (content, clen, "hello world\n", 12);
 
     /* htxf_io_release closes the channel (hxnet owns the socket internally). */
-    hxnet_htxf_close ((HtxfConn *) htxf.hx);
+    hxnet_htxf_close ((HtxfConn *)htxf.hx);
 
     /* Best-effort cleanup of the temp tree (data fork + any sidecar). */
     unlink (htxf.path);
-    g_autofree char *finfo =
-        g_build_filename (tmpdir, ".finderinfo", "out.txt", NULL);
+    g_autofree char *finfo
+        = g_build_filename (tmpdir, ".finderinfo", "out.txt", NULL);
     unlink (finfo);
     g_autofree char *finfo_dir = g_build_filename (tmpdir, ".finderinfo", NULL);
     g_rmdir (finfo_dir);

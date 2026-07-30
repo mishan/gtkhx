@@ -381,12 +381,7 @@ mod tests {
         let before = signaller.ref_count();
         for _ in 0..1000 {
             unsafe {
-                emit_pointer_pair_signal(
-                    raw,
-                    sig_name,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                );
+                emit_pointer_pair_signal(raw, sig_name, std::ptr::null_mut(), std::ptr::null_mut());
             }
         }
         let after = signaller.ref_count();
@@ -434,12 +429,7 @@ mod tests {
         let sig_name = c"test-pair";
         let before = signaller.ref_count();
         unsafe {
-            emit_pointer_pair_signal(
-                raw,
-                sig_name,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
+            emit_pointer_pair_signal(raw, sig_name, std::ptr::null_mut(), std::ptr::null_mut());
         }
         let after = signaller.ref_count();
 
@@ -498,8 +488,7 @@ mod tests {
             let ptr = captured_raw as *mut glib::gobject_ffi::GObject;
             // Snapshot refcount via a borrow (no ref change).
             let snapshot = unsafe {
-                let borrow: Borrowed<glib::Object> =
-                    glib::Object::from_glib_borrow(ptr);
+                let borrow: Borrowed<glib::Object> = glib::Object::from_glib_borrow(ptr);
                 borrow.ref_count()
             };
             flag.set(snapshot);
@@ -517,12 +506,7 @@ mod tests {
 
         let sig_name = c"test-pair";
         unsafe {
-            emit_pointer_pair_signal(
-                raw,
-                sig_name,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
+            emit_pointer_pair_signal(raw, sig_name, std::ptr::null_mut(), std::ptr::null_mut());
         }
         // After the emit returns:
         //   full form: shim wrap drops → refcount = 0 → finalize.
@@ -563,12 +547,7 @@ mod tests {
 
         let before = signaller.ref_count();
         unsafe {
-            emit_pointer_pair_signal(
-                raw,
-                bad_cstr,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-            );
+            emit_pointer_pair_signal(raw, bad_cstr, std::ptr::null_mut(), std::ptr::null_mut());
         }
         let after = signaller.ref_count();
 

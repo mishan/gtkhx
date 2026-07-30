@@ -180,11 +180,11 @@ static int
 cmp_hxstr (gconstpointer a, gconstpointer b, gpointer user_data)
 {
     /* g_ptr_array_sort_with_data hands the comparator pointers to
-	 * the array slots (HxStr**), not the items themselves. Cast
-	 * and dereference one level. (My earlier `*(HxStr *const *)&a`
-	 * was taking the address of the local arg `a` and reading
-	 * back the arg's value as an HxStr* — wild pointer, crash in
-	 * g_utf8_casefold.) */
+     * the array slots (HxStr**), not the items themselves. Cast
+     * and dereference one level. (My earlier `*(HxStr *const *)&a`
+     * was taking the address of the local arg `a` and reading
+     * back the arg's value as an HxStr* — wild pointer, crash in
+     * g_utf8_casefold.) */
     HxStr *const *pa = a;
     HxStr *const *pb = b;
     const char *as = hx_str_value (*pa);
@@ -310,14 +310,14 @@ update_completions (hx_path_complete *c)
     }
 
     /* Don't fire when the entry text changed programmatically —
-	 * i.e. the panel's on_navigated handler doing
-	 * gtk_editable_set_text on every directory change. We only
-	 * want to suggest while the USER is typing. Walking up from
-	 * the window's focus widget is the reliable way to check —
-	 * gtk_widget_has_focus(entry) does NOT do the right thing,
-	 * because GtkEntry forwards focus to an internal GtkText
-	 * delegate, so when the user is editing, gtk_window_get_focus
-	 * returns the GtkText, not our entry. */
+     * i.e. the panel's on_navigated handler doing
+     * gtk_editable_set_text on every directory change. We only
+     * want to suggest while the USER is typing. Walking up from
+     * the window's focus widget is the reliable way to check —
+     * gtk_widget_has_focus(entry) does NOT do the right thing,
+     * because GtkEntry forwards focus to an internal GtkText
+     * delegate, so when the user is editing, gtk_window_get_focus
+     * returns the GtkText, not our entry. */
     {
         GtkRoot *root;
         GtkWidget *focused;
@@ -666,19 +666,19 @@ hx_path_complete_free (hx_path_complete *c)
         /* gtk_widget_remove_controller takes the ref. */
     }
     /* Ownership chain set up in hx_path_complete_new:
-	 *   gtk_filter_list_model_new (store, filter)   — consumes both
-	 *   gtk_single_selection_new (filter_model)     — consumes it
-	 *   gtk_list_view_new (selection, factory)      — consumes both
-	 *   gtk_scrolled_window_set_child (..., listview)
-	 *   gtk_popover_set_child (popover, scrolled)
-	 *   gtk_widget_set_parent (popover, entry)
-	 *
-	 * Every cached pointer in the struct (store, filter,
-	 * filter_model, selection, listview) is held alive only
-	 * transitively through the popover. Unparenting the popover
-	 * disposes the chain top-down and our cached pointers become
-	 * dangling — so we must NOT g_object_unref them. Just NULL
-	 * them and free the wrapper struct. */
+     *   gtk_filter_list_model_new (store, filter)   — consumes both
+     *   gtk_single_selection_new (filter_model)     — consumes it
+     *   gtk_list_view_new (selection, factory)      — consumes both
+     *   gtk_scrolled_window_set_child (..., listview)
+     *   gtk_popover_set_child (popover, scrolled)
+     *   gtk_widget_set_parent (popover, entry)
+     *
+     * Every cached pointer in the struct (store, filter,
+     * filter_model, selection, listview) is held alive only
+     * transitively through the popover. Unparenting the popover
+     * disposes the chain top-down and our cached pointers become
+     * dangling — so we must NOT g_object_unref them. Just NULL
+     * them and free the wrapper struct. */
     if (c->popover) {
         gtk_widget_unparent (c->popover);
         c->popover = NULL;

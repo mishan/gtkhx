@@ -20,8 +20,9 @@
 static const char *
 nth_id (DLParsedNode *leaf, guint i)
 {
-    if (leaf == NULL || leaf->panel_ids == NULL || i >= leaf->panel_ids->len)
+    if (leaf == NULL || leaf->panel_ids == NULL || i >= leaf->panel_ids->len) {
         return NULL;
+    }
     return g_ptr_array_index (leaf->panel_ids, i);
 }
 
@@ -138,10 +139,9 @@ static void
 test_default_layout (void)
 {
     /* The actual shipping default-layout expression. */
-    const char *text =
-        "h(L[news:start],"
-          "h(v(L[chat,files,news15:center],L[tasks:bottom]),"
-            "L[users:end]))";
+    const char *text = "h(L[news:start],"
+                       "h(v(L[chat,files,news15:center],L[tasks:bottom]),"
+                       "L[users:end]))";
     DLParsedNode *n = dl_parse_tree (text);
     g_assert_nonnull (n);
     g_assert_false (n->is_leaf);
@@ -180,8 +180,7 @@ test_whitespace_tolerance (void)
     /* Same expression as test_horizontal_split, with whitespace
      * sprinkled at every legal boundary. Hand-edited files should
      * parse the same way as compact serialiser output. */
-    const char *text =
-        "  h(  L[ a , b ]  ,  v(  L[ c ]  ,  L[]  )  )  ";
+    const char *text = "  h(  L[ a , b ]  ,  v(  L[ c ]  ,  L[]  )  )  ";
     DLParsedNode *n = dl_parse_tree (text);
     g_assert_nonnull (n);
     g_assert_cmpint (n->orientation, ==, DL_ORIENT_HORIZONTAL);
@@ -199,29 +198,29 @@ test_whitespace_tolerance (void)
 static void
 test_malformed_unterminated_leaf (void)
 {
-    g_assert_null (dl_parse_tree ("L[chat"));     /* no ] */
-    g_assert_null (dl_parse_tree ("L["));         /* no ] */
+    g_assert_null (dl_parse_tree ("L[chat")); /* no ] */
+    g_assert_null (dl_parse_tree ("L["));     /* no ] */
 }
 
 static void
 test_malformed_unterminated_split (void)
 {
-    g_assert_null (dl_parse_tree ("h(L[a]"));     /* no ) */
-    g_assert_null (dl_parse_tree ("h(L[a],"));    /* truncated */
+    g_assert_null (dl_parse_tree ("h(L[a]"));      /* no ) */
+    g_assert_null (dl_parse_tree ("h(L[a],"));     /* truncated */
     g_assert_null (dl_parse_tree ("h(L[a],L[b]")); /* no ) */
 }
 
 static void
 test_malformed_split_needs_two_children (void)
 {
-    g_assert_null (dl_parse_tree ("h(L[a])"));    /* only one child */
-    g_assert_null (dl_parse_tree ("h()"));        /* no children */
+    g_assert_null (dl_parse_tree ("h(L[a])")); /* only one child */
+    g_assert_null (dl_parse_tree ("h()"));     /* no children */
 }
 
 static void
 test_malformed_unknown_token (void)
 {
-    g_assert_null (dl_parse_tree ("X[chat]"));    /* not h/v/L */
+    g_assert_null (dl_parse_tree ("X[chat]")); /* not h/v/L */
     g_assert_null (dl_parse_tree ("?"));
 }
 
@@ -287,16 +286,15 @@ static void
 test_deeply_nested (void)
 {
     /* Five levels of nesting — exercises the recursion. */
-    DLParsedNode *n = dl_parse_tree (
-        "h(L[a],h(L[b],h(L[c],h(L[d],L[e]))))");
+    DLParsedNode *n = dl_parse_tree ("h(L[a],h(L[b],h(L[c],h(L[d],L[e]))))");
     g_assert_nonnull (n);
     g_assert_cmpstr (nth_id (n->child_a, 0), ==, "a");
     g_assert_cmpstr (nth_id (n->child_b->child_a, 0), ==, "b");
     g_assert_cmpstr (nth_id (n->child_b->child_b->child_a, 0), ==, "c");
-    g_assert_cmpstr (nth_id (n->child_b->child_b->child_b->child_a, 0),
-                     ==, "d");
-    g_assert_cmpstr (nth_id (n->child_b->child_b->child_b->child_b, 0),
-                     ==, "e");
+    g_assert_cmpstr (nth_id (n->child_b->child_b->child_b->child_a, 0), ==,
+                     "d");
+    g_assert_cmpstr (nth_id (n->child_b->child_b->child_b->child_b, 0), ==,
+                     "e");
     dl_parsed_node_free (n);
 }
 
@@ -307,34 +305,47 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
 
-    g_test_add_func ("/dock_layout_parse/null",                 test_null_input);
-    g_test_add_func ("/dock_layout_parse/empty_string",         test_empty_string);
-    g_test_add_func ("/dock_layout_parse/whitespace_only",      test_whitespace_only);
+    g_test_add_func ("/dock_layout_parse/null", test_null_input);
+    g_test_add_func ("/dock_layout_parse/empty_string", test_empty_string);
+    g_test_add_func ("/dock_layout_parse/whitespace_only",
+                     test_whitespace_only);
 
-    g_test_add_func ("/dock_layout_parse/leaf/empty",           test_empty_leaf);
-    g_test_add_func ("/dock_layout_parse/leaf/single_id",       test_single_id);
-    g_test_add_func ("/dock_layout_parse/leaf/multiple_ids",    test_multiple_ids);
-    g_test_add_func ("/dock_layout_parse/leaf/role",            test_leaf_with_role);
-    g_test_add_func ("/dock_layout_parse/leaf/empty_with_role", test_empty_leaf_with_role);
+    g_test_add_func ("/dock_layout_parse/leaf/empty", test_empty_leaf);
+    g_test_add_func ("/dock_layout_parse/leaf/single_id", test_single_id);
+    g_test_add_func ("/dock_layout_parse/leaf/multiple_ids", test_multiple_ids);
+    g_test_add_func ("/dock_layout_parse/leaf/role", test_leaf_with_role);
+    g_test_add_func ("/dock_layout_parse/leaf/empty_with_role",
+                     test_empty_leaf_with_role);
 
-    g_test_add_func ("/dock_layout_parse/split/horizontal",     test_horizontal_split);
-    g_test_add_func ("/dock_layout_parse/split/vertical",       test_vertical_split);
-    g_test_add_func ("/dock_layout_parse/default_layout",       test_default_layout);
+    g_test_add_func ("/dock_layout_parse/split/horizontal",
+                     test_horizontal_split);
+    g_test_add_func ("/dock_layout_parse/split/vertical", test_vertical_split);
+    g_test_add_func ("/dock_layout_parse/default_layout", test_default_layout);
 
-    g_test_add_func ("/dock_layout_parse/whitespace_tolerance", test_whitespace_tolerance);
+    g_test_add_func ("/dock_layout_parse/whitespace_tolerance",
+                     test_whitespace_tolerance);
 
-    g_test_add_func ("/dock_layout_parse/malformed/leaf_open",  test_malformed_unterminated_leaf);
-    g_test_add_func ("/dock_layout_parse/malformed/split_open", test_malformed_unterminated_split);
-    g_test_add_func ("/dock_layout_parse/malformed/one_child",  test_malformed_split_needs_two_children);
-    g_test_add_func ("/dock_layout_parse/malformed/unknown",    test_malformed_unknown_token);
-    g_test_add_func ("/dock_layout_parse/malformed/trailing",   test_malformed_trailing_garbage);
-    g_test_add_func ("/dock_layout_parse/malformed/empty_id",   test_malformed_empty_id);
-    g_test_add_func ("/dock_layout_parse/malformed/empty_role", test_malformed_empty_role);
+    g_test_add_func ("/dock_layout_parse/malformed/leaf_open",
+                     test_malformed_unterminated_leaf);
+    g_test_add_func ("/dock_layout_parse/malformed/split_open",
+                     test_malformed_unterminated_split);
+    g_test_add_func ("/dock_layout_parse/malformed/one_child",
+                     test_malformed_split_needs_two_children);
+    g_test_add_func ("/dock_layout_parse/malformed/unknown",
+                     test_malformed_unknown_token);
+    g_test_add_func ("/dock_layout_parse/malformed/trailing",
+                     test_malformed_trailing_garbage);
+    g_test_add_func ("/dock_layout_parse/malformed/empty_id",
+                     test_malformed_empty_id);
+    g_test_add_func ("/dock_layout_parse/malformed/empty_role",
+                     test_malformed_empty_role);
 
-    g_test_add_func ("/dock_layout_parse/role_whitespace",      test_role_whitespace_tolerance);
+    g_test_add_func ("/dock_layout_parse/role_whitespace",
+                     test_role_whitespace_tolerance);
 
-    g_test_add_func ("/dock_layout_parse/punct_ids",            test_panel_ids_with_punctuation);
-    g_test_add_func ("/dock_layout_parse/deeply_nested",        test_deeply_nested);
+    g_test_add_func ("/dock_layout_parse/punct_ids",
+                     test_panel_ids_with_punctuation);
+    g_test_add_func ("/dock_layout_parse/deeply_nested", test_deeply_nested);
 
     return g_test_run ();
 }

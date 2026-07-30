@@ -92,7 +92,7 @@ fn pin_replaces_old_entry_and_keeps_others() {
     let after = std::fs::read_to_string(tmp.kh()).unwrap();
     assert!(after.contains("# my known hosts")); // comment preserved
     assert!(after.contains(&format!("other.example:5600 {FP_B}"))); // unrelated kept
-    // Old fingerprint for hotline gone, new one present exactly once.
+                                                                    // Old fingerprint for hotline gone, new one present exactly once.
     assert_eq!(after.matches("hotline.example:5600").count(), 1);
     assert_eq!(
         lookup(&tmp.kh(), "hotline.example", 5600, FP_B),
@@ -159,11 +159,7 @@ fn bracketed_ipv6_entry() {
 fn later_correct_fingerprint_beats_earlier_mismatch() {
     let tmp = TmpDir::new();
     // Two hand-edited pins for the same host:port; the matching one wins.
-    std::fs::write(
-        tmp.kh(),
-        format!("host:5600 {FP_B}\nhost:5600 {FP_A}\n"),
-    )
-    .unwrap();
+    std::fs::write(tmp.kh(), format!("host:5600 {FP_B}\nhost:5600 {FP_A}\n")).unwrap();
     assert_eq!(lookup(&tmp.kh(), "host", 5600, FP_A), TrustStatus::Trusted);
 }
 
@@ -196,11 +192,11 @@ fn malformed_port_never_widens_trust() {
     // Each hand-typo'd port form must be rejected outright — never silently
     // turned into a hostname-only (any-port) wildcard pin.
     for bad in [
-        format!("bad.example:foo {FP_A}\n"),        // non-numeric
-        format!("bad.example: {FP_A}\n"),           // empty port
-        format!("bad.example:99999 {FP_A}\n"),      // out of u16 range
+        format!("bad.example:foo {FP_A}\n"),         // non-numeric
+        format!("bad.example: {FP_A}\n"),            // empty port
+        format!("bad.example:99999 {FP_A}\n"),       // out of u16 range
         format!("bad.example:5500garbage {FP_A}\n"), // digit prefix + junk
-        format!("bad.example:-1 {FP_A}\n"),         // negative
+        format!("bad.example:-1 {FP_A}\n"),          // negative
     ] {
         std::fs::write(tmp.kh(), &bad).unwrap();
         assert_eq!(

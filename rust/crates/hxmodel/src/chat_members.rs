@@ -19,8 +19,8 @@
 use std::ffi::{c_char, c_void, CStr};
 
 use gio;
-use glib;
 use gio::prelude::*;
+use glib;
 use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
 
 use crate::chat::{complete_styled, InputHistory, Member};
@@ -48,8 +48,9 @@ unsafe fn g_dup(s: &str) -> *mut c_char {
 /// caller `hx_member_model_free`s).
 #[no_mangle]
 pub extern "C" fn hx_member_model_new() -> *mut c_void {
-    let ptr: *mut glib::gobject_ffi::GObject =
-        HxMemberModel::new().upcast::<glib::Object>().into_glib_ptr();
+    let ptr: *mut glib::gobject_ffi::GObject = HxMemberModel::new()
+        .upcast::<glib::Object>()
+        .into_glib_ptr();
     ptr as *mut c_void
 }
 
@@ -142,7 +143,10 @@ pub unsafe extern "C" fn hx_member_model_set_ignore(
 /// # Safety
 /// `model` valid or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_member_model_get_ignore(model: *mut c_void, uid: u16) -> glib::ffi::gboolean {
+pub unsafe extern "C" fn hx_member_model_get_ignore(
+    model: *mut c_void,
+    uid: u16,
+) -> glib::ffi::gboolean {
     match model_ref(model) {
         Some(model) if model.get_ignore(uid) => glib::ffi::GTRUE,
         _ => glib::ffi::GFALSE,
@@ -280,7 +284,10 @@ pub unsafe extern "C" fn hx_member_model_count(model: *mut c_void) -> u32 {
 /// # Safety
 /// `model` valid or NULL.
 #[no_mangle]
-pub unsafe extern "C" fn hx_member_model_contains(model: *mut c_void, uid: u16) -> glib::ffi::gboolean {
+pub unsafe extern "C" fn hx_member_model_contains(
+    model: *mut c_void,
+    uid: u16,
+) -> glib::ffi::gboolean {
     match model_ref(model) {
         Some(model) if model.get(uid).is_some() => glib::ffi::GTRUE,
         _ => glib::ffi::GFALSE,
@@ -306,7 +313,10 @@ pub unsafe extern "C" fn hx_member_model_get_at(
     let Some(model) = model_ref(model) else {
         return glib::ffi::GFALSE;
     };
-    let Some(m) = model.item(index).and_then(|o| o.downcast::<HxMember>().ok()) else {
+    let Some(m) = model
+        .item(index)
+        .and_then(|o| o.downcast::<HxMember>().ok())
+    else {
         return glib::ffi::GFALSE;
     };
     fill_member_info(&m, &mut *out);

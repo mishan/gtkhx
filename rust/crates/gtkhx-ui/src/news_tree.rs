@@ -16,11 +16,11 @@
 
 use std::ffi::c_void;
 
-use gtk4 as gtk;
+use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
 use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
-use glib::translate::{from_glib_full, from_glib_none, IntoGlibPtr};
+use gtk4 as gtk;
 
 // NB_KIND_POST from the NB_KIND_* enum in news_browser.c (FOLDER=1,
 // CATEGORY=2, POST=3). Only POST is inspected here — the create-child-model
@@ -84,7 +84,9 @@ pub unsafe extern "C" fn gtkhx_news_build_tree_model(
     crate::ensure_gtk_init();
     let root: gio::ListModel = from_glib_full(root_model);
     let model = gtk::TreeListModel::new(
-        root, /* passthrough */ false, /* autoexpand */ false,
+        root,
+        /* passthrough */ false,
+        /* autoexpand */ false,
         create_child_model,
     );
     model.into_glib_ptr()
@@ -152,10 +154,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
         };
 
         let paintable = unsafe {
-            let p = gtkhx_news_icon_for_kind(
-                browser,
-                hx_news_node_kind(node.as_ptr().cast()),
-            );
+            let p = gtkhx_news_icon_for_kind(browser, hx_news_node_kind(node.as_ptr().cast()));
             if p.is_null() {
                 None
             } else {
@@ -177,10 +176,7 @@ pub unsafe extern "C" fn gtkhx_news_build_factory(
                 }
                 if let Some(node) = row.item() {
                     unsafe {
-                        gtkhx_news_fetch_for_expanded(
-                            browser,
-                            node.as_ptr() as *mut c_void,
-                        );
+                        gtkhx_news_fetch_for_expanded(browser, node.as_ptr() as *mut c_void);
                     }
                 }
             });

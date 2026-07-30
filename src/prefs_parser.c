@@ -32,8 +32,8 @@ prefs_parse_boolean (const char *s, unsigned char *out)
     }
 
     /* First character drives the decision. Matches the historical
-	 * options.c parser plus the Phase 5 fix to accept GKeyFile's
-	 * "true" / "false" / "yes" / "no". */
+     * options.c parser plus the Phase 5 fix to accept GKeyFile's
+     * "true" / "false" / "yes" / "no". */
     switch (*s) {
     case '0':
     case 'f':

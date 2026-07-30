@@ -200,7 +200,10 @@ mod tests {
             );
             assert_eq!(&out[0..4], b"MACR");
             // decode via the receive-side shim must recover the length
-            assert_eq!(gtkhx_ffo_fork_len(out.as_ptr(), out.len(), 1), 0x1_4000_0000);
+            assert_eq!(
+                gtkhx_ffo_fork_len(out.as_ptr(), out.len(), 1),
+                0x1_4000_0000
+            );
         }
         // short out buffer is a no-op (leaves it zeroed)
         let mut small = [0u8; 8];

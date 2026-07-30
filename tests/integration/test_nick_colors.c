@@ -96,14 +96,13 @@ send_user_change_with_color (int fd, struct htlc_conn *htlc,
                              const char *display_name, guint16 icon,
                              guint32 nick_color)
 {
-    guint16 icon_be = g_htons(icon);
-    guint32 color_be = g_htonl(nick_color);
+    guint16 icon_be = g_htons (icon);
+    guint32 color_be = g_htonl (nick_color);
     return integration_send_message (
         fd, htlc, HTLC_HDR_USER_CHANGE, /*flag=*/0, /*hc=*/3,
-        (int) HTLC_DATA_ICON, (int) sizeof (icon_be), &icon_be,
-        (int) HTLC_DATA_NAME, (int) strlen (display_name),
-        (guint8 *) display_name,
-        (int) HTLC_DATA_COLOR, (int) sizeof (color_be), &color_be);
+        (int)HTLC_DATA_ICON, (int)sizeof (icon_be), &icon_be,
+        (int)HTLC_DATA_NAME, (int)strlen (display_name), (guint8 *)display_name,
+        (int)HTLC_DATA_COLOR, (int)sizeof (color_be), &color_be);
 }
 
 /* End-to-end: login, set a unique color, ask the server for the
@@ -118,16 +117,16 @@ test_nick_color_user_list_trailer (void)
     const hx_test_server *srv = pick_nick_color_server ();
     if (!srv) {
         g_test_fail_printf ("no Colored-Nicknames-capable server in matrix "
-                     "(GTKHX_TEST_SERVERS filter excluded all).");
+                            "(GTKHX_TEST_SERVERS filter excluded all).");
         return;
     }
 
     /* Pid + random suffix so concurrent test processes can't trample
-	 * each other's records under Janus's persistent per-account
-	 * storage. Cap at 31 bytes (the on-wire HTLC_DATA_NAME limit). */
+     * each other's records under Janus's persistent per-account
+     * storage. Cap at 31 bytes (the on-wire HTLC_DATA_NAME limit). */
     char nick[32];
-    g_snprintf (nick, sizeof (nick), "NickClr-%d-%04x",
-                (int) getpid (), g_random_int () & 0xffff);
+    g_snprintf (nick, sizeof (nick), "NickClr-%d-%04x", (int)getpid (),
+                g_random_int () & 0xffff);
 
     struct htlc_conn htlc;
     int fd = integration_open_login_to_caps_or_skip (srv, &htlc, nick, 412,
@@ -137,55 +136,55 @@ test_nick_color_user_list_trailer (void)
     }
 
     /* Cross the "officially joined" boundary. AGREEMENTAGREE helper
-	 * accepts NULL `hope` and falls through to plain send. Janus
-	 * doesn't persist USER_CHANGE updates from a session until
-	 * AGREEMENTAGREE lands. */
+     * accepts NULL `hope` and falls through to plain send. Janus
+     * doesn't persist USER_CHANGE updates from a session until
+     * AGREEMENTAGREE lands. */
     g_assert_true (integration_send_agreementagree_hope (
         fd, &htlc, /*hope=*/NULL, nick, 412));
 
     /* Set our color. The spec's auto-opt-in fires on the server's
-	 * first DATA_COLOR receipt from this session. */
+     * first DATA_COLOR receipt from this session. */
     guint32 wanted = make_unique_color ();
     g_assert_true (send_user_change_with_color (fd, &htlc, nick, 412, wanted));
 
     /* Brief settle so Janus persists AGREEMENTAGREE + USER_CHANGE
-	 * before the GETLIST reads back. 200 ms is what the
-	 * chat-history tests use for the same flake-avoidance against
-	 * Janus's SQLite write queue. */
+     * before the GETLIST reads back. 200 ms is what the
+     * chat-history tests use for the same flake-avoidance against
+     * Janus's SQLite write queue. */
     g_usleep (200000);
 
     /* Ask for the user list. Zero-chunk opcode, so inline the
-	 * integration_send_message call. Capture trans BEFORE the send
-	 * — hlpack stamps htlc->trans into the header then increments,
-	 * so the pre-send value matches the wire. */
+     * integration_send_message call. Capture trans BEFORE the send
+     * — hlpack stamps htlc->trans into the header then increments,
+     * so the pre-send value matches the wire. */
     guint32 list_trans = htlc.trans;
-    g_assert_true (integration_send_message (
-        fd, &htlc, HTLC_HDR_USER_GETLIST, /*flag=*/0, /*hc=*/0));
+    g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_USER_GETLIST,
+                                             /*flag=*/0, /*hc=*/0));
 
     g_assert_true (integration_drain_until_task_trans (fd, &htlc, list_trans,
                                                        /*max_messages=*/32));
 
     /* Walk the TASK reply chunks; find our own record by name;
-	 * verify the trailer carries our color.
-	 *
-	 * Three outcomes:
-	 *   - Our record + trailer present + color matches → PASS.
-	 *   - Our record + trailer present + color mismatches → FAIL
-	 *     (production regression: parser would read wrong color).
-	 *   - Our record present but NO trailer on any record → SKIP.
-	 *     The Colored-Nicknames extension is server-side opt-in
-	 *     (Janus config.yaml: ColoredNicknames.Enabled). When
-	 *     disabled, records come back without the 4-byte trailer.
-	 *     The container image ships with it enabled; this skip
-	 *     only fires if someone runs against a server that has it
-	 *     off.
-	 *   - Our record missing entirely → FAIL (join didn't land). */
+     * verify the trailer carries our color.
+     *
+     * Three outcomes:
+     *   - Our record + trailer present + color matches → PASS.
+     *   - Our record + trailer present + color mismatches → FAIL
+     *     (production regression: parser would read wrong color).
+     *   - Our record present but NO trailer on any record → SKIP.
+     *     The Colored-Nicknames extension is server-side opt-in
+     *     (Janus config.yaml: ColoredNicknames.Enabled). When
+     *     disabled, records come back without the 4-byte trailer.
+     *     The container image ships with it enabled; this skip
+     *     only fires if someone runs against a server that has it
+     *     off.
+     *   - Our record missing entirely → FAIL (join didn't land). */
     gboolean any_record_had_trailer = FALSE;
     gboolean found_us_with_trailer = FALSE;
     gboolean found_us_at_all = FALSE;
     guint32 read_color = 0;
     int n_records = 0;
-    dh_start (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos)
+    dh_start (hx_test_in (&htlc)->buf, hx_test_in (&htlc)->pos)
     {
         if (_type != HTLS_DATA_USER_LIST) {
             continue;
@@ -199,7 +198,9 @@ test_nick_color_user_list_trailer (void)
         memcpy (&nlen_be, dh->data + 6, 2);
         guint16 uid = g_ntohs (uid_be);
         guint16 nlen = g_ntohs (nlen_be);
-        if (nlen > 31) nlen = 31;
+        if (nlen > 31) {
+            nlen = 31;
+        }
         char name[33] = { 0 };
         if (_len >= (gsize)(8 + nlen)) {
             memcpy (name, dh->data + 8, nlen);
@@ -207,8 +208,8 @@ test_nick_color_user_list_trailer (void)
         gboolean has_trailer = (_len >= (gsize)(8 + nlen + 4));
         g_test_message ("USER_LIST record #%d uid=%u nlen=%u name='%s' "
                         "len=%u trailer=%s",
-                        n_records, (unsigned) uid, (unsigned) nlen, name,
-                        (unsigned) _len, has_trailer ? "yes" : "no");
+                        n_records, (unsigned)uid, (unsigned)nlen, name,
+                        (unsigned)_len, has_trailer ? "yes" : "no");
         if (has_trailer) {
             any_record_had_trailer = TRUE;
         }
@@ -229,10 +230,11 @@ test_nick_color_user_list_trailer (void)
     g_assert_true (found_us_at_all);
 
     if (!any_record_had_trailer) {
-        g_test_fail_printf ("server didn't include the Colored-Nicknames trailer "
-                     "in any USER_LIST record — server-side extension is "
-                     "disabled (Janus: ColoredNicknames.Enabled in "
-                     "config.yaml).");
+        g_test_fail_printf (
+            "server didn't include the Colored-Nicknames trailer "
+            "in any USER_LIST record — server-side extension is "
+            "disabled (Janus: ColoredNicknames.Enabled in "
+            "config.yaml).");
         integration_release_htlc (&htlc);
         integration_close (fd);
         return;

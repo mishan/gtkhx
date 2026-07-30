@@ -181,11 +181,9 @@ impl Mark {
 /// with `chat_view.h` (38 slots, mirrored in the theme file format), so
 /// widening it for this would mean a schema change every theme has to
 /// answer.
-const SEARCH_MATCH_BG: gtk4::gdk::RGBA =
-    gtk4::gdk::RGBA::new(0.9647, 0.8275, 0.1765, 1.0);
+const SEARCH_MATCH_BG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(0.9647, 0.8275, 0.1765, 1.0);
 const SEARCH_MATCH_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(0.0, 0.0, 0.0, 1.0);
-const SEARCH_CURRENT_BG: gtk4::gdk::RGBA =
-    gtk4::gdk::RGBA::new(1.0, 0.4706, 0.0, 1.0);
+const SEARCH_CURRENT_BG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 0.4706, 0.0, 1.0);
 const SEARCH_CURRENT_FG: gtk4::gdk::RGBA = gtk4::gdk::RGBA::new(1.0, 1.0, 1.0, 1.0);
 
 /// How long the zoom badge stays fully opaque, then how long it fades.
@@ -213,7 +211,6 @@ const CODE_BOX_PAD: f32 = 4.0;
 
 /// Grab tolerance either side of the separator rule, in px.
 const SEPARATOR_GRAB: f64 = 4.0;
-
 
 /// Inset between the widget edge and the text.
 ///
@@ -512,7 +509,8 @@ mod imp {
                     *self.hadjustment.borrow_mut() = value.get().ok().flatten();
                 }
                 "vadjustment" => {
-                    self.obj().set_vadjustment_internal(value.get().ok().flatten());
+                    self.obj()
+                        .set_vadjustment_internal(value.get().ok().flatten());
                 }
                 "hscroll-policy" => {
                     if let Ok(v) = value.get() {
@@ -540,11 +538,7 @@ mod imp {
     }
 
     impl WidgetImpl for HxChatView {
-        fn measure(
-            &self,
-            orientation: gtk4::Orientation,
-            _for_size: i32,
-        ) -> (i32, i32, i32, i32) {
+        fn measure(&self, orientation: gtk4::Orientation, _for_size: i32) -> (i32, i32, i32, i32) {
             // A scrollable's natural size must not depend on its
             // content, or the scrolled window grows to fit the whole
             // scrollback and the scrollbar never appears.
@@ -658,7 +652,10 @@ impl HxChatView {
     /// flag describes neighbours rather than messages.
     pub fn set_group_gap_secs(&self, secs: i64) {
         let m = self.imp_().measure.borrow();
-        self.imp_().buffer.borrow_mut().set_group_gap_secs(secs, &*m);
+        self.imp_()
+            .buffer
+            .borrow_mut()
+            .set_group_gap_secs(secs, &*m);
         drop(m);
         self.queue_resize();
         self.queue_draw();
@@ -1032,10 +1029,7 @@ impl HxChatView {
                     &bgc,
                     &gtk4::graphene::Rect::new(x - 1.0, 0.0, 1.0, height as f32),
                 );
-                snapshot.append_color(
-                    &fg,
-                    &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32),
-                );
+                snapshot.append_color(&fg, &gtk4::graphene::Rect::new(x, 0.0, 1.0, height as f32));
             }
         }
 
@@ -1127,28 +1121,16 @@ impl HxChatView {
                     let h = (bot - top) as f32 + CODE_BOX_PAD * 2.0;
 
                     let fgc = imp.palette.borrow()[PAL_FG];
-                    let fill = gtk4::gdk::RGBA::new(
-                        fgc.red(),
-                        fgc.green(),
-                        fgc.blue(),
-                        CODE_BG_ALPHA,
-                    );
-                    let edge = gtk4::gdk::RGBA::new(
-                        fgc.red(),
-                        fgc.green(),
-                        fgc.blue(),
-                        CODE_BORDER_ALPHA,
-                    );
+                    let fill =
+                        gtk4::gdk::RGBA::new(fgc.red(), fgc.green(), fgc.blue(), CODE_BG_ALPHA);
+                    let edge =
+                        gtk4::gdk::RGBA::new(fgc.red(), fgc.green(), fgc.blue(), CODE_BORDER_ALPHA);
                     let rect = gtk4::graphene::Rect::new(x, y, w, h);
                     let rounded = gtk4::gsk::RoundedRect::from_rect(rect, 4.0);
                     snapshot.push_rounded_clip(&rounded);
                     snapshot.append_color(&fill, &rect);
                     snapshot.pop();
-                    snapshot.append_border(
-                        &rounded,
-                        &[1.0; 4],
-                        &[edge, edge, edge, edge],
-                    );
+                    snapshot.append_border(&rounded, &[1.0; 4], &[edge, edge, edge, edge]);
                 }
             }
 
@@ -1159,10 +1141,7 @@ impl HxChatView {
             // appended.
             if let Some(av) = layout.avatar {
                 let tex = unsafe {
-                    hx_chat_avatar_for_uid(
-                        self.as_ptr() as *mut gtk4::ffi::GtkWidget,
-                        av.uid,
-                    )
+                    hx_chat_avatar_for_uid(self.as_ptr() as *mut gtk4::ffi::GtkWidget, av.uid)
                 };
                 if !tex.is_null() {
                     let tex: gtk4::gdk::Texture =
@@ -1170,12 +1149,8 @@ impl HxChatView {
                     // Fit inside the slot preserving aspect, so a banner-
                     // shaped icon isn't stretched into a square.
                     let (iw, ih) = (tex.width().max(1), tex.height().max(1));
-                    let scale =
-                        (av.size as f64 / iw as f64).min(av.size as f64 / ih as f64);
-                    let (dw, dh) = (
-                        (iw as f64 * scale).max(1.0),
-                        (ih as f64 * scale).max(1.0),
-                    );
+                    let scale = (av.size as f64 / iw as f64).min(av.size as f64 / ih as f64);
+                    let (dw, dh) = ((iw as f64 * scale).max(1.0), (ih as f64 * scale).max(1.0));
                     snapshot.save();
                     snapshot.translate(&gtk4::graphene::Point::new(
                         av.x as f32,
@@ -1219,12 +1194,8 @@ impl HxChatView {
                             if let (Some(sz), Some(tex)) =
                                 (size, media.get(token).and_then(|m| m.texture()))
                             {
-                                let avail =
-                                    (content_width(alloc_w)).saturating_sub(line.x);
-                                let (dw, dh) = measure.image_size(
-                                    (sz.width, sz.height),
-                                    avail,
-                                );
+                                let avail = (content_width(alloc_w)).saturating_sub(line.x);
+                                let (dw, dh) = measure.image_size((sz.width, sz.height), avail);
                                 snapshot.save();
                                 snapshot.translate(&gtk4::graphene::Point::new(
                                     line.x as f32,
@@ -1256,17 +1227,15 @@ impl HxChatView {
                     .as_ref()
                     .map(|s| buf.row_selection(row, s))
                     .unwrap_or(RowSelection::None);
-                let hl = buf
-                    .covered_range(row, line.source, &row_sel)
-                    .and_then(|r| {
-                        let s = r.start.max(line.range.start);
-                        let e = r.end.min(line.range.end);
-                        if s < e {
-                            Some((s, e))
-                        } else {
-                            None
-                        }
-                    });
+                let hl = buf.covered_range(row, line.source, &row_sel).and_then(|r| {
+                    let s = r.start.max(line.range.start);
+                    let e = r.end.min(line.range.end);
+                    if s < e {
+                        Some((s, e))
+                    } else {
+                        None
+                    }
+                });
 
                 if trace_selection() && selection.is_some() {
                     eprintln!(
@@ -1457,22 +1426,11 @@ impl HxChatView {
             // selected.
             if style.attrs.contains(hxchat_layout::Attrs::CODE) {
                 let fgc = self.imp_().palette.borrow()[PAL_FG];
-                let tint = gtk4::gdk::RGBA::new(
-                    fgc.red(),
-                    fgc.green(),
-                    fgc.blue(),
-                    CODE_BG_ALPHA,
-                );
-                snapshot.append_color(
-                    &tint,
-                    &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
-                );
+                let tint = gtk4::gdk::RGBA::new(fgc.red(), fgc.green(), fgc.blue(), CODE_BG_ALPHA);
+                snapshot.append_color(&tint, &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32));
             }
             if let Some(bg) = band_bg {
-                snapshot.append_color(
-                    &bg,
-                    &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32),
-                );
+                snapshot.append_color(&bg, &gtk4::graphene::Rect::new(*x, y, w as f32, h as f32));
             } else if style.bg != ColorRef::Default {
                 snapshot.append_color(
                     &self.resolve(style.bg, PAL_BG),
@@ -1712,8 +1670,7 @@ impl HxChatView {
                 // selection at the press point and drop whatever a
                 // previous gesture had selected.
                 let start = *this.imp_().drag_start.borrow();
-                *this.imp_().selection.borrow_mut() =
-                    start.map(|c| Selection::new(c, c));
+                *this.imp_().selection.borrow_mut() = start.map(|c| Selection::new(c, c));
                 trace_clicks(|| "drag_update: first motion".to_string());
             }
             let (px, py) = (sx + dx, sy + dy);
@@ -1871,8 +1828,7 @@ impl HxChatView {
         });
         let root_widget: gtk4::Widget = root.clone().upcast();
         root_widget.add_controller(key.clone());
-        *imp.root_key_handler.borrow_mut() =
-            Some((glib::object::WeakRef::new(), key.upcast()));
+        *imp.root_key_handler.borrow_mut() = Some((glib::object::WeakRef::new(), key.upcast()));
         if let Some((weak, _)) = imp.root_key_handler.borrow().as_ref() {
             weak.set(Some(&root_widget));
         }
@@ -2167,7 +2123,6 @@ fn autocopy_enabled() -> bool {
     prefs::AUTOCOPY_TEXT.with(|c| c.get())
 }
 
-
 // ---- zoom (scoping §3.7) --------------------------------------------
 
 /// Zoom steps, per-mille. The browser/terminal ladder people already
@@ -2179,12 +2134,13 @@ const ZOOM_STEPS: [u32; 13] = [
 impl HxChatView {
     fn install_zoom_bindings(&self) {
         // Ctrl + scroll.
-        let scroll = gtk4::EventControllerScroll::new(
-            gtk4::EventControllerScrollFlags::VERTICAL,
-        );
+        let scroll = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
         let this = self.clone();
         scroll.connect_scroll(move |c, _dx, dy| {
-            if !c.current_event_state().contains(gtk4::gdk::ModifierType::CONTROL_MASK) {
+            if !c
+                .current_event_state()
+                .contains(gtk4::gdk::ModifierType::CONTROL_MASK)
+            {
                 // Scroll the view ourselves.
                 //
                 // Implementing GtkScrollable is not enough: that only
@@ -2344,9 +2300,7 @@ impl HxChatView {
                 // means. Handled before word-click emission so the URL
                 // handler can't also fire on a URL-shaped nick.
                 if button == gtk4::gdk::BUTTON_SECONDARY {
-                    if let Some(HoverTarget::Nick { uid, .. }) =
-                        this.hover_target_at(x, y)
-                    {
+                    if let Some(HoverTarget::Nick { uid, .. }) = this.hover_target_at(x, y) {
                         this.emit_speaker_menu(uid, x, y);
                         return;
                     }
@@ -2516,9 +2470,7 @@ impl HxChatView {
         let popover = gtk4::Popover::new();
         popover.set_has_arrow(false);
         popover.set_halign(gtk4::Align::Start);
-        popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(
-            px as i32, py as i32, 1, 1,
-        )));
+        popover.set_pointing_to(Some(&gtk4::gdk::Rectangle::new(px as i32, py as i32, 1, 1)));
 
         let vbox = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         for set in [
@@ -2941,10 +2893,7 @@ impl HxChatView {
             // caret we want is the one at the edge we are scrolling
             // towards, not one off-screen.
             let (px, py) = imp.drag_pointer.get();
-            let clamped_y = py.clamp(
-                f64::from(PAD_Y),
-                f64::from(view.height().max(0) - PAD_Y),
-            );
+            let clamped_y = py.clamp(f64::from(PAD_Y), f64::from(view.height().max(0) - PAD_Y));
             view.extend_selection_to(px, clamped_y);
             glib::ControlFlow::Continue
         });

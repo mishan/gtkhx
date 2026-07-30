@@ -7,8 +7,8 @@
 
 use std::ffi::c_char;
 
-use gtk4 as gtk;
 use gtk::prelude::*;
+use gtk4 as gtk;
 
 use crate::ffi as cffi;
 use crate::tr::tr_argv;

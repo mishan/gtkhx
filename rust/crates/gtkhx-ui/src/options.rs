@@ -115,7 +115,14 @@ fn switch_row(cfg: &str, title: &str, subtitle: Option<&str>) -> adw::SwitchRow 
 }
 
 /// AdwSpinRow bound to an INT / UINT16 pref.
-fn spin_row(cfg: &str, title: &str, subtitle: Option<&str>, min: f64, max: f64, step: f64) -> adw::SpinRow {
+fn spin_row(
+    cfg: &str,
+    title: &str,
+    subtitle: Option<&str>,
+    min: f64,
+    max: f64,
+    step: f64,
+) -> adw::SpinRow {
     let row = adw::SpinRow::with_range(min, max, step);
     row.set_title(title);
     if let Some(s) = subtitle {
@@ -434,7 +441,11 @@ fn page_general(page: &adw::PreferencesPage) {
         cfg::THEME,
         &tr("Theme"),
         &[cfg::THEME_SYSTEM, cfg::THEME_LIGHT, cfg::THEME_DARK],
-        &[theme_labels[0].as_str(), theme_labels[1].as_str(), theme_labels[2].as_str()],
+        &[
+            theme_labels[0].as_str(),
+            theme_labels[1].as_str(),
+            theme_labels[2].as_str(),
+        ],
     ));
     appearance.add(&gtkhx_theme_combo());
     page.add(&appearance);
@@ -527,8 +538,16 @@ fn page_sound(page: &adw::PreferencesPage) {
     // in the C table otherwise, so pref_type == 0 lets us omit the rows
     // (matching the C #ifdef HAVE_VOICE) rather than show them greyed.
     if pref_type(cfg::SND_VOICE_JOIN) != 0 {
-        events.add(&switch_row(cfg::SND_VOICE_JOIN, &tr("Voice chat join"), None));
-        events.add(&switch_row(cfg::SND_VOICE_LEAVE, &tr("Voice chat leave"), None));
+        events.add(&switch_row(
+            cfg::SND_VOICE_JOIN,
+            &tr("Voice chat join"),
+            None,
+        ));
+        events.add(&switch_row(
+            cfg::SND_VOICE_LEAVE,
+            &tr("Voice chat leave"),
+            None,
+        ));
     }
     page.add(&events);
 }
@@ -536,11 +555,17 @@ fn page_sound(page: &adw::PreferencesPage) {
 /// Chat → Behavior.
 fn page_chat_behavior(page: &adw::PreferencesPage) {
     let behavior = group(&tr("Behavior"));
-    behavior.add(&switch_row(cfg::SHOWJOIN, &tr("Show join / leave in chat"), None));
+    behavior.add(&switch_row(
+        cfg::SHOWJOIN,
+        &tr("Show join / leave in chat"),
+        None,
+    ));
     behavior.add(&switch_row(
         cfg::OLD_NICKCOMP,
         &tr("Old-style nick completion"),
-        Some(&tr("Match against the most recently typed prefix instead of all users")),
+        Some(&tr(
+            "Match against the most recently typed prefix instead of all users",
+        )),
     ));
     page.add(&behavior);
 
@@ -549,9 +574,21 @@ fn page_chat_behavior(page: &adw::PreferencesPage) {
         "Drag-select in chat / news / private message text to populate the \
          clipboard. Ctrl-V or middle-click pastes the selection elsewhere.",
     )));
-    autocopy.add(&switch_row(cfg::AUTOCOPY_TEXT, &tr("Automatically copy selected text"), None));
-    autocopy.add(&switch_row(cfg::AUTOCOPY_STAMP, &tr("Automatically include timestamps"), None));
-    autocopy.add(&switch_row(cfg::AUTOCOPY_COLOR, &tr("Automatically include color information"), None));
+    autocopy.add(&switch_row(
+        cfg::AUTOCOPY_TEXT,
+        &tr("Automatically copy selected text"),
+        None,
+    ));
+    autocopy.add(&switch_row(
+        cfg::AUTOCOPY_STAMP,
+        &tr("Automatically include timestamps"),
+        None,
+    ));
+    autocopy.add(&switch_row(
+        cfg::AUTOCOPY_COLOR,
+        &tr("Automatically include color information"),
+        None,
+    ));
     page.add(&autocopy);
 
     let hl = group(&tr("Highlight"));
@@ -574,7 +611,9 @@ fn page_chat_history(page: &adw::PreferencesPage) {
     hist.add(&spin_row(
         cfg::CHAT_HISTORY_INITIAL,
         &tr("Initial messages to fetch"),
-        Some(&tr("Also used as the page size for \"Load older messages\"")),
+        Some(&tr(
+            "Also used as the page size for \"Load older messages\"",
+        )),
         0.0,
         0xffff as f64,
         1.0,
@@ -590,7 +629,11 @@ fn page_chat_emoji(page: &adw::PreferencesPage) {
          Unicode go out as text shortcodes like \":joy:\" instead of \"?\", and \
          incoming shortcodes are shown as emoji on every server.",
     )));
-    emoji.add(&switch_row(cfg::EMOJI_SHORTCODES, &tr("Convert emoji to/from :shortcodes:"), None));
+    emoji.add(&switch_row(
+        cfg::EMOJI_SHORTCODES,
+        &tr("Convert emoji to/from :shortcodes:"),
+        None,
+    ));
     emoji.add(&switch_row(
         cfg::EMOJI_TYPEAHEAD,
         &tr("Suggest shortcodes as you type"),
@@ -602,16 +645,54 @@ fn page_chat_emoji(page: &adw::PreferencesPage) {
 /// Notifications → Events.
 fn page_notify_events(page: &adw::PreferencesPage) {
     let events = group(&tr("Events"));
-    events.set_description(Some(&tr("Show a desktop notification when these events happen.")));
-    events.add(&switch_row(cfg::NOTIFY_MSG, &tr("Private message"), Some(&tr("Someone sends you a 1-to-1 message"))));
-    events.add(&switch_row(cfg::NOTIFY_PCHAT_INVITE, &tr("Private chat invitation"), Some(&tr("Someone invites you to a private chat"))));
-    events.add(&switch_row(cfg::NOTIFY_CHAT_HIGHLIGHT, &tr("Mention in public chat"), Some(&tr("Your name or a highlight word appears in a chat message"))));
-    events.add(&switch_row(cfg::NOTIFY_PCHAT_HIGHLIGHT, &tr("Mention in private chat"), Some(&tr("Your name or a highlight word appears in a private chat"))));
-    events.add(&switch_row(cfg::NOTIFY_CHAT, &tr("Every public chat message"), Some(&tr("Noisy — only useful on quiet servers"))));
-    events.add(&switch_row(cfg::NOTIFY_PCHAT, &tr("Every private chat message"), None));
+    events.set_description(Some(&tr(
+        "Show a desktop notification when these events happen.",
+    )));
+    events.add(&switch_row(
+        cfg::NOTIFY_MSG,
+        &tr("Private message"),
+        Some(&tr("Someone sends you a 1-to-1 message")),
+    ));
+    events.add(&switch_row(
+        cfg::NOTIFY_PCHAT_INVITE,
+        &tr("Private chat invitation"),
+        Some(&tr("Someone invites you to a private chat")),
+    ));
+    events.add(&switch_row(
+        cfg::NOTIFY_CHAT_HIGHLIGHT,
+        &tr("Mention in public chat"),
+        Some(&tr(
+            "Your name or a highlight word appears in a chat message",
+        )),
+    ));
+    events.add(&switch_row(
+        cfg::NOTIFY_PCHAT_HIGHLIGHT,
+        &tr("Mention in private chat"),
+        Some(&tr(
+            "Your name or a highlight word appears in a private chat",
+        )),
+    ));
+    events.add(&switch_row(
+        cfg::NOTIFY_CHAT,
+        &tr("Every public chat message"),
+        Some(&tr("Noisy — only useful on quiet servers")),
+    ));
+    events.add(&switch_row(
+        cfg::NOTIFY_PCHAT,
+        &tr("Every private chat message"),
+        None,
+    ));
     events.add(&switch_row(cfg::NOTIFY_NEWS, &tr("New news post"), None));
-    events.add(&switch_row(cfg::NOTIFY_XFER, &tr("File transfer complete"), None));
-    events.add(&switch_row(cfg::NOTIFY_BROADCAST, &tr("Server broadcast"), Some(&tr("Admin-issued announcement to every user"))));
+    events.add(&switch_row(
+        cfg::NOTIFY_XFER,
+        &tr("File transfer complete"),
+        None,
+    ));
+    events.add(&switch_row(
+        cfg::NOTIFY_BROADCAST,
+        &tr("Server broadcast"),
+        Some(&tr("Admin-issued announcement to every user")),
+    ));
     page.add(&events);
 }
 

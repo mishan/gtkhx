@@ -47,7 +47,11 @@ pub fn raise_if_open(id: &str) -> bool {
 /// it isn't the visible tab.
 pub fn set_needs_attention(id: &str, state: bool) {
     let cid = crate::cs(id);
-    let g = if state { glib::ffi::GTRUE } else { glib::ffi::GFALSE };
+    let g = if state {
+        glib::ffi::GTRUE
+    } else {
+        glib::ffi::GFALSE
+    };
     unsafe { gtkhx_dock_set_needs_attention(cid.as_ptr(), g) }
 }
 

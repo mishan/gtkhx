@@ -36,18 +36,20 @@ test_news_fetch_round_trip (void)
     g_assert_true (integration_send_message (fd, &htlc, HTLC_HDR_NEWS_GETFILE,
                                              /*flag=*/0, /*hc=*/0));
 
-    g_assert_true (integration_drain_until_task_trans (
-        fd, &htlc, our_trans, 64));
+    g_assert_true (
+        integration_drain_until_task_trans (fd, &htlc, our_trans, 64));
 
     guint32 flag = hdr_flag (&htlc);
     if (flag & 1) {
         /* Some servers reject news fetch entirely (no access bit
-		 * granted). Surface the message in the test log but
-		 * don't fail — that's a server-deployment issue, not a
-		 * client/protocol bug. */
+         * granted). Surface the message in the test log but
+         * don't fail — that's a server-deployment issue, not a
+         * client/protocol bug. */
         char err[256];
         gsize err_len = 0;
-        if (task_error_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, err, sizeof (err), &err_len)) {
+        if (task_error_extract (hx_test_in (&htlc)->buf,
+                                hx_test_in (&htlc)->pos, err, sizeof (err),
+                                &err_len)) {
             g_test_message ("news fetch refused by server: \"%s\"", err);
         } else {
             g_test_message ("news fetch refused by server (no error chunk)");
@@ -58,19 +60,20 @@ test_news_fetch_round_trip (void)
     }
 
     /* Successful TASK reply — carries one HTLS_DATA_NEWS chunk
-	 * with the news body. Use the Tier 2 extractor to pull and
-	 * sanitise the body. */
+     * with the news body. Use the Tier 2 extractor to pull and
+     * sanitise the body. */
     char body[8192 + 1];
     gsize body_len = 0;
-    g_assert_true (
-        hx_news_file_extract (hx_test_in(&htlc)->buf, hx_test_in(&htlc)->pos, body, sizeof (body), &body_len));
+    g_assert_true (hx_news_file_extract (hx_test_in (&htlc)->buf,
+                                         hx_test_in (&htlc)->pos, body,
+                                         sizeof (body), &body_len));
     g_assert_cmpuint (body_len, >, 0);
 
     /* mhxd's shipped news file starts with the divider line and
-	 * 'Welcome to' / 'Horline'. Pin down 'Welcome to' as a soft
-	 * sanity check — it's stable across mhxd rebuilds and absent
-	 * from the kind of empty/stub news file you'd only get if
-	 * the seed copy went wrong. */
+     * 'Welcome to' / 'Horline'. Pin down 'Welcome to' as a soft
+     * sanity check — it's stable across mhxd rebuilds and absent
+     * from the kind of empty/stub news file you'd only get if
+     * the seed copy went wrong. */
     g_assert_nonnull (g_strstr_len (body, body_len, "Welcome to"));
 
     integration_release_htlc (&htlc);
