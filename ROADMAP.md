@@ -53,12 +53,28 @@ The one long-promised feature that has never landed. The original code shipped a
 honest single-session model plus a routing seam, so "which session" is now an explicit
 question at every call site rather than an assumption.
 
-Two decisions remain genuinely open: **when** this lands relative to the Rust port, and
-**how** per-connection panels relate to the docking layout. The second is the expensive
-one — one of the two candidate layouts forces the panel registry's key to grow a dimension
-and the layout file's grammar to grow with it.
+The network stack is already ready for it — the connection actor, the connection struct
+and the wire transaction counter are all per-instance, and the receive layer routes by
+connection. The hard stop is elsewhere: the transport bridge holds a single process-wide
+connection handle and **refuses a second simultaneous connect outright**, so nothing can
+be exercised until that moves onto the connection struct. After that the work is a set of
+signals that carry no connection identity, three flat key namespaces that collide across
+servers, and a long mechanical tail of UI code that asks "which connection?" of a global.
 
-Full survey, including the panel-scope trichotomy and the voice-exclusivity arbiter:
+Two decisions remain genuinely open: **when** this lands relative to the Rust port, and
+**how** per-connection panels relate to the docking layout.
+
+Two things are now settled. The bookmarks list becomes the **connection collection** —
+a Connection Manager under Settings → Connections — because once several servers can be
+open at once, the list of servers is configuration. And identity becomes a global default
+with per-connection overrides, resolved live so that changing the global still reaches
+every server you have not specialised; `/nick` and `/icon` change the running connection
+only and never persist. That rework is a net simplification at one connection and fixes an
+existing bug where `/nick` silently rewrites the stored global nickname, so it is worth
+doing ahead of the rest.
+
+Full survey — the blocker inventory, the panel-scope trichotomy, the voice-exclusivity
+arbiter, and the two layout models costed against the code:
 [docs/multi-connection.md](docs/multi-connection.md).
 
 ### Chat and message logging
