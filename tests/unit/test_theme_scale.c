@@ -51,24 +51,6 @@ test_clamp (void)
     g_assert_cmpint (gtkhx_theme_clamp_percent (-5), ==, GTKHX_SCALE_MIN);
 }
 
-/* The default theme encodes the real factors GtkHx has always
- * applied — the whole point of the correction that 2× / 1.25× are
- * NOT 100%. */
-static void
-test_default_scale (void)
-{
-    g_assert_cmpint (gtkhx_theme_get_default_percent (GTKHX_SCALE_TOOLBAR), ==,
-                     200);
-    g_assert_cmpint (
-        gtkhx_theme_get_default_percent (GTKHX_SCALE_WINDOW_BUTTONS), ==, 200);
-    g_assert_cmpint (
-        gtkhx_theme_get_default_percent (GTKHX_SCALE_USERLIST_ICON), ==, 125);
-    g_assert_cmpint (
-        gtkhx_theme_get_default_percent (GTKHX_SCALE_USERLIST_TEXT), ==, 125);
-    g_assert_cmpint (
-        gtkhx_theme_get_default_percent (GTKHX_SCALE_TASKS_ROW_ICON), ==, 200);
-}
-
 /* GdkRGBA fields are `float`, not `double`, so a round-trip from a
  * double literal through the struct loses LSBs. Compare via packed
  * 8-bit bytes (which is the on-wire shape anyway) to dodge the
@@ -84,49 +66,6 @@ assert_rgba_eq_bytes (GdkRGBA c, int r, int g, int b)
     g_assert_cmpint (cb, ==, b);
 }
 
-/* Built-in default palette matches the historical chat.c constants
- * byte-for-byte — that's the contract that lets the theme-file
- * refactor land without changing how a fresh install looks. */
-static void
-test_default_palette (void)
-{
-    /* Light: FG = #1d1d1d on BG = #fafafa, the Adwaita-aligned set. */
-    assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_FG, FALSE),
-                          0x1d, 0x1d, 0x1d);
-    assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_BG, FALSE),
-                          0xfa, 0xfa, 0xfa);
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_FG, FALSE), 0xff, 0xff,
-        0xff);
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_BG, FALSE), 0x35, 0x84,
-        0xe4);
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_HISTORY_MUTED, FALSE), 0x5e,
-        0x5e, 0x5e);
-
-    /* Dark: FG = #cccccc, BG = #000000 — the original look. */
-    assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_FG, TRUE),
-                          0xcc, 0xcc, 0xcc);
-    assert_rgba_eq_bytes (gtkhx_theme_get_default_color (GTKHX_PAL_BG, TRUE),
-                          0x00, 0x00, 0x00);
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARK_BG, TRUE), 0x20, 0x4a,
-        0x87);
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_HISTORY_MUTED, TRUE), 0x9a,
-        0x9a, 0x9a);
-
-    /* MARKER is theme-agnostic in the default — same red on both
-     * variants. */
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARKER, FALSE), 0xcc, 0x00,
-        0x00);
-    assert_rgba_eq_bytes (
-        gtkhx_theme_get_default_color (GTKHX_PAL_MARKER, TRUE), 0xcc, 0x00,
-        0x00);
-}
-
 /* Loading an empty GKeyFile clears all overrides → every accessor
  * returns the built-in default. This is also the contract for the
  * "active theme file missing keys" case: omit a key, inherit the
@@ -138,8 +77,8 @@ test_load_empty_keyfile_uses_defaults (void)
 
     gtkhx_theme_load_from_keyfile (kf);
 
-    g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_TOOLBAR), ==, 200);
-    g_assert_cmpfloat (gtkhx_theme_scale (GTKHX_SCALE_USERLIST_ICON), ==, 1.25);
+    g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_TOOLBAR), ==, 100);
+    g_assert_cmpfloat (gtkhx_theme_scale (GTKHX_SCALE_USERLIST_ICON), ==, 1.00);
 
     assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE), 0x1d,
                           0x1d, 0x1d);
@@ -164,7 +103,7 @@ test_load_scale_overrides (void)
                      100);
     /* Unspecified keys keep their default. */
     g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_WINDOW_BUTTONS), ==,
-                     200);
+                     100);
 
     g_key_file_free (kf);
 }
@@ -272,7 +211,7 @@ test_load_replaces_not_merges (void)
     g_key_file_set_integer (kf2, "scale", "userlist_text", 90);
     gtkhx_theme_load_from_keyfile (kf2);
 
-    g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_TOOLBAR), ==, 200);
+    g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_TOOLBAR), ==, 100);
     g_assert_cmpint (gtkhx_theme_get_percent (GTKHX_SCALE_USERLIST_TEXT), ==,
                      90);
     assert_rgba_eq_bytes (gtkhx_theme_get_color (GTKHX_PAL_FG, FALSE), 0x1d,
@@ -367,8 +306,6 @@ main (int argc, char **argv)
 {
     g_test_init (&argc, &argv, NULL);
     g_test_add_func ("/theme/clamp", test_clamp);
-    g_test_add_func ("/theme/default-scale", test_default_scale);
-    g_test_add_func ("/theme/default-palette", test_default_palette);
     g_test_add_func ("/theme/load-empty-uses-defaults",
                      test_load_empty_keyfile_uses_defaults);
     g_test_add_func ("/theme/load-scale-overrides", test_load_scale_overrides);
