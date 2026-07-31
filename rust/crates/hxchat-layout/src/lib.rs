@@ -3,7 +3,7 @@
 //! Everything between "a message arrives" and "the view knows what
 //! pixels to put where", with no GTK, no GLib and no Pango, so all of it
 //! runs under `cargo test` on display-less CI. The widget that consumes
-//! it is C2 (`hxchat-view`); see docs/chat-view-scoping.md for the whole
+//! it is C2 (`hxchat-view`); see docs/chat-view.md for the whole
 //! plan and the phasing.
 //!
 //! ```text

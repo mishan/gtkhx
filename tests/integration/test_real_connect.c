@@ -10,7 +10,7 @@
 /*
  * tests/integration/test_real_connect.c — Tier 3 coverage for the
  * production connect path: the "hxnet-owns-the-whole-lifecycle"
- * orchestrator connect (docs/rust/phase-g-migration.md).
+ * orchestrator connect (docs/rust/networking.md).
  *
  * This test drives the production hx_connect against a REAL mhxd
  * container so the whole orchestrator runs end to end:
@@ -48,7 +48,7 @@
  *       and a clear error bit — i.e. mhxd accepted the guest login AND
  *       the Option-B replay + trans-pinning round-trips correctly.
  *       This is the regression guard for the two silent-failure axes
- *       called out in docs/rust/phase-g-migration.md (trans mismatch and
+ *       called out in docs/rust/networking.md (trans mismatch and
  *       install ordering): either one would leave the replayed frame
  *       undispatched, so connect_test_rcv_count would stay 0.
  *
@@ -245,7 +245,7 @@ observer_index_of (test_observer *obs, GtkhxConnectionState state)
  * so production is unaffected; embedding here keeps the harness faithful to
  * that invariant. */
 static session test_session;
-/* htlc_conn is now a heap pointer on `session` (network-endgame.md E1), so the
+/* htlc_conn is now a heap pointer on `session` (docs/rust/network-endgame.md), so the
  * harness owns the storage explicitly and `test_session.htlc` points at it.
  * test_htlc stays the embedded VALUE so the existing `.field` / `&test_htlc`
  * uses are unchanged; the per-test memset re-zeroes it, so the sess back-pointer
@@ -321,7 +321,7 @@ test_orchestrator_login (void)
      * the server's post-login pushes (SELFINFO / user-list) dispatch
      * afterwards. A count of 0 would mean the replayed frame never
      * dispatched — the trans-mismatch / install-ordering silent
-     * failures from docs/rust/phase-g-migration.md. */
+     * failures from docs/rust/networking.md. */
     g_assert_cmpuint (connect_test_rcv_count, >=, 1);
     /* mhxd sends the plain 0x00010000 TASK opcode for every TASK
      * reply (the high-16-bit opcode-echo variant is a Heidrun-family

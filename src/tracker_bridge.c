@@ -32,7 +32,7 @@
 #include "tracker_bridge.h"
 
 /* These UI-side actions route through hx_active_session() (the
- * multi-conn M0 seam, docs/multi-connection-scoping.md) rather than
+ * multi-conn M0 seam, docs/multi-connection.md) rather than
  * &the_session directly, matching what M0 did to the pre-port tracker.c:
  * a tracker double-click / connect / status line acts on whichever
  * connection the user is focused on. Today hx_active_session() ==

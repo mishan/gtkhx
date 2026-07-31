@@ -1,6 +1,6 @@
 //! GStreamer-based voice runtime for GtkHx.
 //!
-//! Phase 8.B (per `docs/voice-chat-plan.md` §5.B) is the bare-pipeline
+//! The bare pipeline (see `docs/voice.md` "Pipeline") is the
 //! skeleton: just enough surface to prove the gstreamer-rs crates are
 //! wired, the audio devices are reachable, the build works on the
 //! Flatpak runtime, and none of the Hotline protocol code from Phase

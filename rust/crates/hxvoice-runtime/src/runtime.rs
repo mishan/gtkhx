@@ -1,6 +1,6 @@
 //! GStreamer-backed runtime that drives an `hxvoice::SessionMachine`.
 //!
-//! Built across Phase 8.C steps 2 and 3 of `docs/voice-chat-plan.md`
+//! Built across Phase 8.C steps 2 and 3 of `docs/voice.md`
 //! §5.C. The pure state machine lives in `hxvoice`; this module
 //! wires it to a `Backend` trait that production fills with FFI
 //! calls to the C side, and to a `gst::Pipeline` containing a

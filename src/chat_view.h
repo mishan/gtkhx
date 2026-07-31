@@ -55,7 +55,7 @@
  * urlcheck-function companion. A click yields a whitespace-delimited
  * word and callers demux by string prefix. Replacing them with typed
  * signals is a semantic change to three C handlers, not a mechanical
- * one — see docs/chat-view-scoping.md §3.6.
+ * one — see docs/chat-view.md "Typed interaction signals".
  */
 
 #ifndef GTKHX_CHAT_VIEW_H
@@ -86,7 +86,7 @@ G_BEGIN_DECLS
  * in-band markup.
  *
  * That makes the whole vocabulary ours to retire — see
- * docs/chat-view-scoping.md §3.8.
+ * docs/chat-view.md "The retired mIRC escape vocabulary".
  *
  * This is now the sole definition. It used to mirror xtext.h's XTEXT_*
  * constants, with G_STATIC_ASSERTs in chat_view.c checking the two

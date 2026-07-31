@@ -12,7 +12,7 @@
  * theme is named by the THEMENAME pref in gtkhxrc. Theme files are
  * the only storage for this state; gtkhx_prefs does NOT carry
  * scale_* / palette_* fields. The scoping doc
- * (docs/theming-scoping.md) and the file-format reference
+ * (docs/theming.md) and the file-format reference
  * (docs/theming-file-format.md) cover the why and the schema.
  *
  * The scale model is deliberately honest. The unscaled source art is

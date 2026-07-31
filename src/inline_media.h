@@ -128,7 +128,7 @@ inline_media_chunk_size (const struct htlc_conn *htlc)
      * / UPLOAD_TOKEN) inside the 65535-byte wire frame.
      *
      * The spec doesn't bound CHAT_MEDIA_CHUNK_SIZE explicitly;
-     * this clamp is documented in docs/inline-media-plan.md
+     * this clamp is documented in docs/inline-media.md
      * "Open questions". */
     if (v > HX_MEDIA_DEFAULT_CHUNK_SIZE) {
         v = HX_MEDIA_DEFAULT_CHUNK_SIZE;

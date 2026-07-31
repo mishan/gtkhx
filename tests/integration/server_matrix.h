@@ -21,8 +21,7 @@
  *
  * No new containers are added yet — the matrix has one entry (mhxd
  * on 127.0.0.1:5500) that matches the existing harness behaviour.
- * Phase B adds Mobius. See docs/multi-server-test-spike.md for the
- * full plan.
+ * See tests/COMPOSE.md for the container rig.
  *
  * Existing tests that call integration_connect() / integration_open*
  * keep working unchanged — those helpers route through the matrix

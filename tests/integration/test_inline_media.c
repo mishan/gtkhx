@@ -11,7 +11,7 @@
  * tests/integration/test_inline_media.c — Tier 3 coverage for the
  * fogWraith inline-media extension (Capabilities-Inline-Media.md).
  *
- * Per docs/inline-media-plan.md Phase 9.F:
+ * Per docs/inline-media.md "Server behaviour observed (Janus)":
  *
  *   cap_negotiation       — Janus echoes CAP_INLINE_MEDIA in the
  *                           LOGIN TASK reply.
@@ -241,7 +241,7 @@ encode_chunky_png (gsize min_bytes)
  * builder via FFI — the test wants to be able to inject malformed
  * shapes too (oversized payload, missing PART_FINAL, etc.) without
  * having to special-case each. The wire shape is documented in
- * docs/inline-media-plan.md and exercised by the test suite. */
+ * docs/inline-media.md and exercised by the test suite. */
 static guint32
 send_upload_media (int fd, struct htlc_conn *htlc, const guint8 *payload,
                    gsize payload_len, const char *declared_type)
@@ -450,7 +450,7 @@ send_download_media_part (int fd, struct htlc_conn *htlc, const guint8 *handle,
  * is currently the only matrix entry with HX_TEST_CAP_INLINE_MEDIA;
  * if this assertion fails we know Janus doesn't actually implement
  * the extension yet and Phase 9.F's mock-server fallback path
- * needs to be taken (see docs/inline-media-plan.md).
+ * needs to be taken (see docs/inline-media.md).
  */
 static void
 test_inline_media_cap_negotiation (void)
@@ -478,7 +478,7 @@ test_inline_media_cap_negotiation (void)
      * the inline-media bit; the server is meant to confirm it.
      * If this fails, Janus isn't yet implementing the extension
      * and the Phase 9.F path that builds a Go mock server kicks
-     * in (per docs/inline-media-plan.md). The failure mode is a
+     * in (per docs/inline-media.md). The failure mode is a
      * clean assertion, not a silent skip. */
     g_assert_cmphex ((htlc.caps & HTLC_CAP_INLINE_MEDIA), ==,
                      HTLC_CAP_INLINE_MEDIA);

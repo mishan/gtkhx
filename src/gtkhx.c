@@ -512,7 +512,7 @@ session the_session;
 
 /*
  * hx_active_session — the currently-focused session (multi-conn seam,
- * see docs/multi-connection-scoping.md phase M0). N == 1 today, so this
+ * see docs/multi-connection.md phase M0). N == 1 today, so this
  * returns the single session. When the connection tab strip lands this
  * becomes a lookup of the focused tab's session; every UI call site that
  * routes through here follows automatically.
@@ -2014,7 +2014,7 @@ hotline_client_init (int argc, char **argv)
     }
 
     /* The session's connection is a Rust-owned allocation (hxconn crate, the
-     * network-endgame.md E1c flip) the session holds for its lifetime.
+     * docs/rust/network-endgame.md) the session holds for its lifetime.
      * Allocate once; on a re-entry (should not happen in the single-session
      * world) reset the existing one to its fresh state. */
     if (!the_session.htlc) {

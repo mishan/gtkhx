@@ -175,7 +175,7 @@ struct htxf_conn {
     void *abort;
 };
 
-/* struct htlc_conn is Rust-owned (rust/crates/hxconn, the E1c flip) and
+/* struct htlc_conn is Rust-owned (gtkhx-core::conn) and
  * opaque here — only forward-declared above (line ~53). Production reaches it
  * through the hx_conn_* accessors (hxconn.h) and allocates it with
  * hx_conn_new; it never sees the fields. The C mirror of the layout, for the

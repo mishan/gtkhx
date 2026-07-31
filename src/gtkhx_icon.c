@@ -30,7 +30,7 @@
  * button_load_source → gtkhx_icon_load.
  *
  * PNG-only in v1. SVG via glycin is the planned follow-up — see
- * docs/theming-scoping.md.
+ * docs/theming.md.
  */
 #include "config.h"
 

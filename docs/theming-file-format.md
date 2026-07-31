@@ -1,22 +1,23 @@
 # Theme file format
 
-GtkHx theming state — per-area UI scales and the xtext chat palette
-— lives in **theme files**: a GKeyFile-format `.ini` per theme,
-loaded by `GtkhxTheme` at startup. The active theme is named by the
-`THEMENAME` key in `gtkhxrc`; that is the only theming knob in the
-user's prefs. Everything else is in the theme file.
+GtkHx theming state — per-area UI scales, the chat palette, the
+user-list name colours, and bundled chrome icons — lives in **theme
+files**: a GKeyFile-format `.ini` per theme, loaded by `GtkhxTheme`
+at startup. The active theme is named by the `THEMENAME` key in
+`gtkhxrc`; that is the only theming knob in the user's prefs.
+Everything else is in the theme file.
 
 This is intentional. Themes are shareable, hand-editable, and
 bundleable: drop a friend's `funky-dark.ini` into
 `$XDG_CONFIG_HOME/gtkhx/themes/`, set `THEMENAME=funky-dark`, and
 the whole client re-skins. If the scale and palette knobs lived in
 `gtkhxrc`, you could only have one "look" per user and nothing to
-trade. The scoping for this design is in
-[theming-scoping.md](theming-scoping.md).
+trade. The design rationale is in [theming.md](theming.md).
 
-A user-facing theme editor (Settings picker, color rows, "Save as")
-is **not** part of this phase. For now, edit the file directly or
-drop in someone else's.
+Settings → Appearance carries a theme **picker** (see "Picking a
+theme" below). There is no theme *editor* — no colour rows, no scale
+spin rows, no "Save as". To change a theme's contents, edit the file
+directly or drop in someone else's.
 
 ## Where theme files live
 
@@ -36,7 +37,7 @@ rejected (defensive against escaping the themes directory).
 
 ## Bundled icons
 
-A directory-form theme can override any of GtkHx's ~50 chrome icons
+A directory-form theme can override any of GtkHx's chrome icons
 by dropping a same-named PNG into `<name>/icons/`. Per-icon
 fallback: anything the bundle doesn't supply falls through to the
 built-in GResource pixmap (`/com/nasledov/gtkhx/pixmaps/<logical>.png`).
@@ -78,12 +79,14 @@ Format constraints (v1):
   button helpers. Hand-crafted larger PNGs work too.
 - **The brand logo (`gtkhx.png`)** is deliberately NOT swappable —
   it identifies the app.
-- **Hotline user icons (cicn)** are out of scope — they're
-  protocol-shaped and `cicn.c` handles them separately.
+- **Hotline user icons (cicn)** are out of scope — the icon *ID* is
+  a wire-protocol value other clients look up in their own set, so
+  remapping it would break something two clients have to agree on.
+  `cicn.c` handles them separately.
 
 SVG bundles via glycin / `hx-image-decode` (async decode, returns
 `GdkTexture` directly, decode-at-target-size for vectors) are the
-planned v2. See [theming-scoping.md](theming-scoping.md).
+planned v2. See [theming.md](theming.md).
 
 ## Picking a theme
 
@@ -123,17 +126,20 @@ point for a custom theme.
 ```ini
 # --- Metadata ----------------------------------------------------------
 [gtkhx-theme]
-# Human-readable, used by a future theme picker. Optional.
+# `name` is the display string the theme picker shows (falling back
+# to the file's basename when unset). Optional.
 name = My Theme
-description = Short tagline shown in the picker.
+# `description` is documentation only — nothing in the loader or the
+# picker reads it today. Write it for whoever opens the file next.
+description = Short tagline.
 
 # --- Per-area UI scales ------------------------------------------------
 # Integer percent against the *unscaled* source art (16×16 button
-# pixmaps; user-list icon's natural size; base font). The toolbar /
-# window-button defaults are 200% because the source pixmaps are 16
-# px and GtkHx has always drawn them at 32. Range: [50, 300] —
-# values outside the range are clamped on load. Omit a key to
-# inherit the built-in default for that area.
+# pixmaps; user-list icon's natural size; base font) — a theme owns
+# the whole factor, with no hidden multiplier stacked underneath.
+# Range: [50, 300] — values outside the range are clamped on load.
+# Omit a key to inherit the built-in fallback for that area (see the
+# table under "Scale defaults" below).
 [scale]
 toolbar        = 200    # toolbar window button icons
 window_buttons = 200    # action buttons in Users / Files / News /
@@ -143,22 +149,22 @@ userlist_text  = 125    # user-list name text
 tasks_row_icon = 200    # per-task glyph in the tasks list
 
 # --- Chat palette: light variant --------------------------------------
-# Six UI-role color slots for the xtext chat widget. mIRC palette
-# slots (0..31) are deliberately not exposed — servers send specific
-# indices and expect specific colors; remapping "red" would break
-# message intent.
+# Six UI-role color slots for the chat view. The chat palette also
+# has 32 legacy in-band slots (0..31) that a theme cannot reach;
+# they're a private vocabulary GtkHx wrote for itself, being retired,
+# and not something a theme should be asked to define.
 #
 # Format: "#RRGGBB" hex. Upper- or lower-case, optional "#"
 # prefix. Alpha is implicit 1.0 (chat surfaces are opaque). A
 # malformed value falls back to the built-in default for that slot
 # (with a runtime warning); the rest of the file still loads.
 #
-#   fg             default text foreground       (XTEXT_FG)
-#   bg             default text background       (XTEXT_BG)
-#   mark_fg        selection text foreground     (XTEXT_MARK_FG)
-#   mark_bg        selection background          (XTEXT_MARK_BG)
-#   marker         marker line                   (XTEXT_MARKER)
-#   history_muted  rendered chat-history text    (XTEXT_HISTORY_MUTED)
+#   fg             default text foreground       (GTKHX_PAL_FG)
+#   bg             default text background       (GTKHX_PAL_BG)
+#   mark_fg        selection text foreground     (GTKHX_PAL_MARK_FG)
+#   mark_bg        selection background          (GTKHX_PAL_MARK_BG)
+#   marker         marker line                   (GTKHX_PAL_MARKER)
+#   history_muted  rendered chat-history text    (GTKHX_PAL_HISTORY_MUTED)
 [palette.light]
 fg            = #1d1d1d
 bg            = #fafafa
@@ -184,6 +190,8 @@ history_muted = #9a9a9a
 # 2-bit status field (idle / admin). Without overrides, names use
 # the historical defaults in src/gtkhx.c (regular → GTK
 # foreground, idle → grey, admin → red, admin-idle → light pink).
+# A per-user RGB colour carried on the wire (the Colored-Nicknames
+# extension) still wins over both the theme slot and the default.
 # A theme that colors the listview background via `fg`/`bg` above
 # usually wants to override these too so names stay readable
 # against the themed row.
@@ -212,16 +220,37 @@ admin_idle = #871f1d
 The full built-in default is at `src/themes/default.ini` in the
 source tree — copy it as a starting point.
 
+## Scale defaults
+
+Two different things are called "the default" for a scale area, and
+they are not currently the same value:
+
+- **The built-in fallback**, compiled into `src/gtkhx_theme.c`. It
+  applies when the *active theme file omits* a `[scale]` key.
+  Toolbar 200, window buttons 200, user-list icon 125, user-list
+  text 125, tasks row icon 200 — GtkHx's historical factors,
+  expressed against the unscaled source art.
+- **The shipped `default` theme**, `src/themes/default.ini`. It sets
+  all five keys explicitly to 100, so when that theme is active the
+  built-in fallbacks above never come into play.
+
+An explicitly-written key always wins over the fallback, so a theme
+that says nothing about scales does not get the same result as a
+theme that copies `default.ini`'s `[scale]` block. Worth knowing
+before you copy that block into a new theme and wonder why your
+buttons look different from a theme that left the section out.
+
 ## Loading and reload
 
 - `gtkhx_theme_load_active()` is called from `fe_init()` before any
   widget construction so the very first measure pass gets the right
   factors. It emits `GtkhxTheme::changed`.
-- Editing `THEMENAME` in `gtkhxrc` while the app is running fires
-  the same loader and re-emits `changed`; every button, user-list
-  view, and chat xtext rescales and repaints in place. (The Theme
-  combo in Settings → Appearance still drives Adwaita's light/dark
-  mode, which is a separate axis.)
+- Changing the active theme while the app is running — through the
+  Settings picker or by editing `THEMENAME` in `gtkhxrc` — fires the
+  same loader and re-emits `changed`; every button, user-list view,
+  and chat view rescales and repaints in place. (The *Theme* combo in
+  Settings → Appearance is a different control: it drives Adwaita's
+  light / dark mode, which is a separate axis.)
 - There is no filesystem watch on the theme file itself. To pick up
   edits to the active theme without an app restart, briefly change
   `THEMENAME` to another value and back.
@@ -233,9 +262,9 @@ source tree — copy it as a starting point.
 | `THEMENAME` unset or empty | Falls back to `"default"`. |
 | `$CONFIG/themes/<name>.ini` missing | Falls back to the built-in default GResource. |
 | Theme file present but unparseable | Logs a warning, falls back to the built-in default. |
-| Scale key missing | Inherits the built-in default for that area. |
+| Scale key missing | Inherits the built-in fallback for that area (see "Scale defaults"). |
 | Scale value out of range | Clamped to `[50, 300]` on load. |
-| Scale value `≤ 0` | Treated as "unset" → inherits the default. |
+| Scale value `≤ 0` | Treated as "unset" → inherits the fallback. |
 | Palette key missing | Inherits the built-in default for that slot. |
 | Palette value malformed (bad hex) | Logs a warning, inherits the default for that slot. |
 
@@ -250,7 +279,17 @@ and the rest of the theme applies as written.
   `gtkhx_prefs.theme_name` in `src/prefs.h`.
 - Built-in default file: `src/themes/default.ini`, listed in
   `src/gtkhx.gresource.xml`.
-- Palette consumer: `src/chat.c::gtkhx_apply_theme_palette()`.
-- Scale consumers: button helpers in `src/gtkutil.c`, `src/users_view.c`'s
+- Icon resolver (the theme-bundle `icons/` lookup): `src/gtkhx_icon.{c,h}`.
+- Palette consumer: `src/chat.c::gtkhx_apply_theme_palette()`, which
+  pushes the array into the chat view via `hx_chat_view_set_palette`
+  (declared in `src/chat_view.h`; implemented in the Rust
+  `hxchat-view` crate).
+- CSS-surface consumers: `gtkhx_refresh_css` /
+  `gtkhx_refresh_userlist_css` in `src/gtkhx.c`.
+- Scale consumers: button helpers in `src/gtkutil.c`, the task-row
+  icon builder in `src/tasks.c`, and `src/users_cell.c`'s
   `measure` / `snapshot`.
-- Tests: `tests/unit/test_theme_scale.c`.
+- Tests: `tests/unit/test_theme_scale.c` (clamping, fallbacks,
+  keyfile round-trip, `changed` emission) and
+  `tests/unit/test_theme_listing.c` (discovery, sort order,
+  user-file shadowing).

@@ -1,7 +1,7 @@
 //! Inline-media extension wire protocol (fogWraith
 //! `Capabilities-Inline-Media.md`).
 //!
-//! Phase A (per `docs/inline-media-plan.md`) lands the wire-format
+//! Phase A (per `docs/inline-media.md`) lands the wire-format
 //! layer: builders for `TranUploadMedia` (750) and `TranDownloadMedia`
 //! (751) in single-shot and chunked variants, a parser for the
 //! advisory limits the server advertises in the LOGIN reply, a

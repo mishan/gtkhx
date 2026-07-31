@@ -1,7 +1,7 @@
 //! `spawn_blocking_with_idle` — the worker-pool replacement for the
 //! `pthread_create` + `g_idle_add` pair (Phase R3.2).
 //!
-//! Per `docs/rust/ROADMAP.md` §R3 work items 3–5. The C side's
+//! See `docs/rust/glib-interop.md`. The C side's
 //! pre-R3 idiom for "run blocking I/O off the main thread, post the
 //! result back" was a freshly-spawned detached pthread that called
 //! `g_idle_add` on completion. R3.2 replaces both halves: the worker

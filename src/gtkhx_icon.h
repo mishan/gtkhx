@@ -30,7 +30,7 @@
  *
  * PNG-only in v1. SVG-pack support is a planned follow-up routing
  * through the existing hx-image-decode (glycin) Rust crate — see
- * docs/theming-scoping.md.
+ * docs/theming.md.
  *
  * See docs/theming-file-format.md for the theme bundle layout.
  */

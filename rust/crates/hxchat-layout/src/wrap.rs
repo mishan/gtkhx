@@ -33,7 +33,7 @@ pub struct LayoutGeneration {
     /// geometric, but a theme may carry a font).
     pub theme: u32,
     /// Zoom level in per-mille, so the generation stays `Eq`-comparable.
-    /// See docs/chat-view-scoping.md §3.7.
+    /// See docs/chat-view.md "Layout, the height index, and scroll anchoring".
     pub zoom_permille: u32,
 }
 

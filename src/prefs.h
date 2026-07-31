@@ -170,7 +170,7 @@ struct gtkhx_prefs {
      * colors in the .ini, icons as PNGs under a bundle dir's
      * icons/ subdir. This string is
      * the *only* theming knob in gtkhxrc. See gtkhx_theme.{c,h},
-     * docs/theming-scoping.md, docs/theming-file-format.md. */
+     * docs/theming.md, docs/theming-file-format.md. */
     char *theme_name;
 
     /* GIF-icons extension (Phase 10.D): animate GIF avatars in the

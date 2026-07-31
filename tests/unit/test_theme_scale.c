@@ -6,7 +6,7 @@
  * and the change signal so a regression in any of them fails CI
  * rather than silently shipping a mis-themed UI.
  *
- * See docs/theming-scoping.md and docs/theming-file-format.md.
+ * See docs/theming.md and docs/theming-file-format.md.
  */
 #include "config.h"
 

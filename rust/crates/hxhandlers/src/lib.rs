@@ -23,7 +23,7 @@
 //! receive handlers wanted from `gtkhx-ui` was `HxConversation` and the member
 //! model. Moving `conversation` and `chat_members` into `hxmodel` removed the
 //! handler layer's dependency on `gtkhx-ui` entirely, and the merge became
-//! trivially clean. See `docs/rust/crate-consolidation-scoping.md`.
+//! trivially clean. See `docs/rust/crate-layout.md`.
 //!
 //! ## What did not change
 //!

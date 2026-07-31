@@ -21,5 +21,5 @@ crate-type = ["rlib"]
 # measurement, the one thing that genuinely needs a font stack, is
 # abstracted behind the `TextMeasure` trait (measure.rs); the widget
 # supplies a Pango-backed implementation in C2 and the tests here supply
-# a deterministic fixed-width one. See docs/chat-view-scoping.md §3.
+# a deterministic fixed-width one. See docs/chat-view.md.
 [dependencies]

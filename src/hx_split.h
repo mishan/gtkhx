@@ -10,7 +10,7 @@
 /*
  * hx_split.h — recursive split container for the dock.
  *
- * Phase 5b / docking. See docs/docking-splits.md for the design
+ * Phase 5b / docking. See docs/docking.md for the design
  * and migration history.
  *
  * An HxSplit is either:

@@ -9,7 +9,7 @@
 
 /*
  * tests/integration/test_real_tls_banner.c — Tier 3 coverage for
- * docs/tls-scoping.md Phase 2: file-mode (HTXF) banner fetch over
+ * docs/tls.md "The separate-port model": file-mode (HTXF) banner fetch over
  * TLS.
  *
  * Mirror of tests/integration/test_banner.c::test_banner_htxf_mode

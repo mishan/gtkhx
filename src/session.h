@@ -256,7 +256,7 @@ typedef struct _session {
     /* The connection this session owns. Heap-allocated (g_new0) once at
      * startup and owned by the session for its lifetime — a pointer, not an
      * embedded value, so the struct's storage can move behind an opaque Rust
-     * owner (network-endgame.md phase E1) without every `sess->htlc->` call
+     * owner (docs/rust/network-endgame.md) without every `sess->htlc->` call
      * site changing again. Never NULL after fe_init. */
     struct htlc_conn *htlc;
 
@@ -264,7 +264,7 @@ typedef struct _session {
 } session;
 
 /* Single-session world today (N == 1). The multi-connection routing
- * seam below (see docs/multi-connection-scoping.md, phase M0) replaces
+ * seam below (see docs/multi-connection.md, phase M0) replaces
  * direct `&the_session` access so the single global can later become
  * one of N sessions without re-touching call sites.
  *
@@ -281,7 +281,7 @@ extern session the_session;
  * connection, not the focused one. htlc_conn carries a back-pointer to its
  * owning session (`sess`, set at allocation), read here through the hxconn
  * accessor — no longer a container_of, which required htlc to be embedded in
- * session, nor (since the E1c flip) a direct field read of the now-opaque
+ * session, nor a direct field read of the now-opaque
  * struct. NULL in, NULL out.
  */
 static inline session *

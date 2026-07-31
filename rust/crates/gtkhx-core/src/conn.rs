@@ -1,7 +1,7 @@
 //! `hxconn` — owner of `struct htlc_conn`, the per-connection Hotline session
 //! state. Formerly a C struct defined in `protocol.h` and accessed through the
-//! thin `hxconn.c` getter/setter seam; this crate is the E1c flip
-//! (`docs/rust/network-endgame.md`): the storage and every accessor body move
+//! thin `hxconn.c` getter/setter seam; this module now owns it
+//! (`docs/rust/network-endgame.md`): the storage and every accessor body moved
 //! into Rust behind the identical `hx_conn_*` C ABI, so the call sites — which
 //! already went through the accessors — don't change.
 //!

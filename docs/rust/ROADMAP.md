@@ -1,15 +1,21 @@
 # GtkHx Rust Roadmap
 
-This document lays out a phased plan for replacing the C codebase of GtkHx with
-Rust, **incrementally and leaf-up**, while keeping a working GTK 4 + libadwaita
-binary every step of the way. It is a sibling to `ROADMAP.md` (the GTK-port and
-modernization roadmap) — start there for the broader context.
+This is the plan for replacing the C codebase of GtkHx with Rust,
+**incrementally and leaf-up**, while keeping a working GTK 4 + libadwaita
+binary every step of the way. It is a sibling to the root `ROADMAP.md` (the
+product / feature roadmap) — start there for what the client is supposed to
+*do*; this document is about what it is written in.
 
-The Rust port assumes Phases 1–4 of `ROADMAP.md` are done (they are) and that
-Phase 5 modernization will continue alongside this work where it makes sense.
 The two roadmaps share an exit criterion: **full backward compatibility with
-the Hotline 1.2 and 1.5 wire protocols is a hard requirement at every phase**.
+the Hotline 1.2 and 1.5 wire protocols is a hard requirement at every step**.
 We don't get to break the handful of legacy servers still in the wild.
+
+Companion documents in this directory:
+[`crate-layout.md`](crate-layout.md) (how the Rust crate graph is arranged and
+why), [`glib-interop.md`](glib-interop.md) (the Rust ↔ GLib ref-counting and
+async conventions), and the per-subsystem scoping notes
+([`../docking.md`](../docking.md),
+[`preview-porting.md`](preview-porting.md), and friends).
 
 ---
 
@@ -18,34 +24,41 @@ We don't get to break the handful of legacy servers still in the wild.
 Three motivations, locked in during the kickoff conversation:
 
 1. **Memory safety / robustness.** The cipher state machine, the receive-side
-   wire parser, and the file-transfer worker threads are the highest-risk C in
+   wire parser, and the file-transfer worker threads were the highest-risk C in
    the tree — manual buffer management, hand-written byte-swap macros,
-   pthread/g_idle marshalling. Rust eliminates the categories of bug that
+   pthread/`g_idle` marshalling. Rust eliminates the categories of bug that
    regularly cost time during Tier 3 debugging.
-2. **Better concurrency.** The current pthread + `g_main_context_invoke`
-   pattern works (worker threads in `network.c`, `xfers.c`, `banner.c`,
-   `preview.c`, `tracker.c` post events back to the main loop via
-   `gtkhx_post_to_main`, which is now a 3-line wrapper around
-   `g_main_context_invoke`) but is the wrong shape for the multi-connection
-   tabbed UI planned in Phase 5 — each connection still owns one global
-   `htlc_conn`. tokio (in a dedicated thread, with GLib's main context as the
-   UI side) is the modern, well-trodden pattern; the migration also lets us
-   drop the last surviving `pthread_create` call sites.
-3. **Modernization for contributors.** Rust + gtk4-rs is what a 2026 GNOME
-   contributor expects to encounter when they file an issue and want to fix
-   it. The C of 2003 is not.
+2. **Better concurrency.** The old pthread + `g_main_context_invoke` pattern
+   worked, but it was the wrong shape for the multi-connection tabbed UI: each
+   connection owned one global `htlc_conn`. tokio (in a dedicated thread, with
+   GLib's main context as the UI side) is the modern, well-trodden pattern; the
+   migration also let us drop the last `pthread_create` call sites.
+3. **Modernization for contributors.** Rust + gtk4-rs is what a GNOME
+   contributor expects to encounter when they file an issue and want to fix it.
+   The C of 2003 is not.
 
-Notably **not** a motivation: shipping a reusable `libhotline` crate for other
-clients. We may produce that as a side effect — the leaf-up extraction naturally
-yields a clean protocol crate — but we will not optimize for external consumers
-and will not freeze APIs for them. If a TUI client ever wants to depend on it,
-it can vendor the crate version we used.
+**Notably not a motivation: shipping a reusable `libhotline` crate for other
+clients.** We are producing one structurally — the leaf-up extraction naturally
+yielded a clean protocol crate in `hotline-proto` — but we do not optimize for
+external consumers and do not freeze APIs for them. If a TUI client ever wants
+it, it can vendor the version it likes.
+
+That remains the accurate description of today's intent, and it is a real
+constraint on the rest of the plan: it is why `hotline-proto` carries its C ABI
+unconditionally, why every crate is `publish = false` at `0.1.0`, and why we
+refactor `pub` signatures freely. `crate-layout.md` §5 sets out what would have
+to change to reverse it — a Cargo feature gating the C ABI, a rename away from
+the internal `hx*` prefix, a `missing_docs` pass, a semver commitment at `0.x`,
+and (for the crates that are hxd-derived and must stay GPL) an honest read of
+who the audience actually is. **If that work is ever taken up, this paragraph
+is the first thing to change** — otherwise the next person reading the roadmap
+will make choices that undo it.
 
 The leaf-up strategy comes from
 [the librsvg precedent](https://blogs.gnome.org/alatiera/category/librsvg/):
-keep a working binary throughout, push C ↔ Rust boundary outward from the leaves,
-and let the public C "API" of each replaced file become the FFI surface of the
-new Rust crate. librsvg finished the port over five years (2016 → 2021) while
+keep a working binary throughout, push the C ↔ Rust boundary outward from the
+leaves, and let the public C "API" of each replaced file become the FFI surface
+of the new Rust crate. librsvg finished its port over five years while
 remaining a shipping GNOME library the whole time. That cadence is realistic
 for us too.
 
@@ -53,1694 +66,533 @@ for us too.
 
 ## Locked-in decisions
 
-These were settled before phase planning began. Re-litigating them mid-port
-costs more than the gain.
+These were settled before planning began. Re-litigating them mid-port costs
+more than the gain. Two have since been superseded by events and are marked as
+such rather than deleted, because the reasoning is still worth knowing.
 
 1. **Build system: Meson stays primary, invokes Cargo for the Rust workspace.**
-   The Rust code lives under `rust/` as a Cargo workspace; `meson.build` calls
-   `cargo build --release` via a `custom_target`, links the produced `.a`
-   archives into the C binary, and depends on cbindgen-generated headers for
-   the C side to see Rust symbols. We accept that
+   The Rust code lives under `rust/` as a Cargo workspace; `rust/meson.build`
+   runs `cargo build --release` via a `custom_target` and links the produced
+   archive into the C binary. We accept that
    [this combination is notoriously chimeric](https://discourse.gnome.org/t/projects-with-rust-code-should-not-mix-meson-and-cargo-building/28612)
-   — librsvg, Fractal, GNOME Loupe, and every other modern GNOME-Rust app
+   — librsvg, Fractal, GNOME Loupe and every other modern GNOME-Rust app
    already pay this tax, and the patterns are well-trodden. Not using
-   `corrosion-rs` (CMake-specific). Considering `c-meson-cargo` if hand-rolling
-   the integration becomes painful.
+   `corrosion-rs` (CMake-specific).
 
-2. **FFI direction: C → Rust only, generated by cbindgen.** Rust crates expose
-   `#[no_mangle] pub extern "C"` functions and C-ABI types. cbindgen produces
-   the `.h` files at build time; the C code `#include`s them like any other
-   header. We don't use `rust-bindgen` because we don't need Rust to call into
-   GtkHx C — the dependency only flows the other way, leaf-up.
+2. **FFI direction: C → Rust only, with hand-declared `extern` blocks on the C
+   side.** Rust crates expose `#[no_mangle] pub extern "C"` functions and C ABI
+   types; the C translation unit that calls them declares the prototypes
+   itself. Signature drift surfaces at link time as an undefined symbol, which
+   is enough for opaque-pointer APIs and keeps the build simpler. We don't use
+   `rust-bindgen` because the dependency only flows one way, leaf-up.
 
-3. **UI toolkit: gtk4-rs + libadwaita-rs (when we get there).** Same widget set
-   as the current C code, so the AdwHeaderBar / AdwToast / AdwPreferencesDialog
-   choices made in Phase 5 carry across unchanged. gtk4-rs is at 0.11+ as of
-   May 2026 with active maintenance; libadwaita-rs synchronizes versions and
-   is widely used. The workspace is pinned to the 0.10 / 0.8 (gtk4-rs / libadwaita)
-   family — see `rust/Cargo.toml` for the Debian-stable rustc 1.85 floor that
-   keeps us off the 0.11 / 0.9 (MSRV 1.92) line.
+   > **Amended.** The original decision said the headers would be
+   > cbindgen-generated. In practice the generated headers were never included
+   > by C code, so the crates skipped cbindgen entirely rather than carry build
+   > machinery for an unused output. The hand-declared form is what the tree
+   > does everywhere today (see `src/hxnet_bridge.c` for a representative
+   > example) and what `rust/meson.build` documents.
+
+3. **UI toolkit: gtk4-rs + libadwaita-rs.** Same widget set as the C code, so
+   the AdwHeaderBar / AdwToast / AdwPreferencesDialog choices carry across
+   unchanged. The workspace pins the gtk-rs-core 0.21 family (glib/gio 0.21,
+   gtk4 0.10, libadwaita 0.8) — see `rust/Cargo.toml` for the Debian-stable
+   rustc floor that keeps us off the next line up.
 
 4. **Async runtime: tokio in a dedicated thread, GLib MainContext on the UI.**
-   The documented gtk-rs pattern: `tokio::runtime::Runtime` lives on a worker
-   thread, the main thread runs `glib::MainContext::default()` as the GTK
-   event loop, communication crosses via `tokio::sync::mpsc` /
-   `glib::MainContext::channel`. Heavy IO (transfers, banner fetch, news fetch)
-   runs as tokio tasks. Light async work (chat history paging, throbber state)
-   can run on the GLib executor directly via `glib::spawn_future_local`.
+   The documented gtk-rs pattern. Heavy IO (transfers, banner fetch, tracker
+   fetch) runs as tokio tasks; light async work runs on the GLib executor via
+   `glib::spawn_future_local`. Conventions, capacities and the re-entrancy
+   rules are in [`glib-interop.md`](glib-interop.md).
 
 5. **Crypto: RustCrypto crates.** `md-5`, `sha1`, `sha2`, `hmac`, `blowfish`,
-   `chacha20poly1305`. All pure-Rust, audited, MIT/Apache-2.0 licensed
-   (GPL-compatible). HAVAL — historically advertised but unused — was already
-   deleted in Phase 5; no Rust HAVAL crate needed. RC4 (`rc4` / `arcfour`)
-   was retired in `claude/remove-rc4` and is not on the migration list.
+   `chacha20poly1305`. All pure-Rust, audited, MIT/Apache-2.0 (GPL-compatible).
+   HAVAL — historically advertised but unused — was deleted before the port
+   began; RC4 was retired separately and is not on the list.
 
-6. **Custom widgets stay vendored C: xtext (HexChat's modern fork) does not
-   get rewritten.** It is 4,500 LOC of cairo + Pango + mIRC color parsing that
-   HexChat maintains and we benefit from for free. Wrapping it as a gtk-rs
-   subclass when the rest of the UI is in Rust is acceptable; rewriting it is
-   not in scope.
+6. ~~**Custom widgets stay vendored C: xtext does not get rewritten.**~~
+   **Superseded.** The original reasoning was that HexChat's xtext fork was
+   thousands of lines of cairo + Pango + mIRC colour parsing that upstream
+   maintained and we benefited from for free, so wrapping it as a gtk-rs
+   subclass was acceptable but rewriting it was not in scope.
 
-7. **`gtk_hlist_compat` dies on the way through, not separately.** The five
-   consumers each get rewritten directly against `gtk::ColumnView` /
-   `gio::ListStore` when their owning window is rewritten in Rust. We do not
-   port the compat shim itself — it disappears with its last consumer.
+   It was rewritten anyway, and the vendored widget is deleted. The chat output
+   surface is now `hxchat-layout` (a dependency-free layout engine — spans,
+   wrapping, a chunked prefix-sum height index, scroll anchoring, selection,
+   search) plus `hxchat-view` (the GTK4 widget). `src/chat_view.h` is a
+   declaration header; there is no `chat_view.c`. See
+   `docs/chat-view.md` for the case that overturned this decision and
+   `docs/chat-view-benchmark.md` for the measurements.
 
-8. **Single-connection during the port.** Same rule as `ROADMAP.md` Phase 5:
-   `MAX_CONN > 1` and the tabbed UI are deferred until the port is far enough
-   along that a multi-conn refactor lands against mostly-Rust code, not
-   half-Rust-half-C state machines. Real multi-conn is Phase R7.
+7. **`gtk_hlist_compat` dies on the way through, not separately.** *(Done.)*
+   Its consumers were each rewritten directly against `GtkColumnView` /
+   `gio::ListStore`, and the shim disappeared with its last consumer. Every
+   Rust list widget is a `GtkColumnView` / `GtkListView` / `GtkListBox` from
+   the start.
 
-9. **License stays GPL-2.0-or-later.** All Rust crates we pull in must be
-   GPL-2-compatible: MIT, Apache-2.0, BSD, LGPL. RustCrypto is dual MIT/Apache,
-   gtk-rs is MIT, tokio is MIT — clean.
+8. **Single-connection during the port.** `MAX_CONN > 1` and the tabbed UI wait
+   until the port is far enough along that a multi-conn refactor lands against
+   mostly-Rust code, not half-Rust-half-C state machines. See
+   [multi-connection](#multi-connection--tabbed-ui) below.
 
----
+9. **License stays GPL-2.0-or-later.** Every Rust crate we pull in must be
+   GPL-2-compatible: MIT, Apache-2.0, BSD, LGPL. RustCrypto is dual
+   MIT/Apache, gtk-rs is MIT, tokio is MIT — clean. The provenance side (which
+   of *our* crates could ever be relicensed) is in `crate-layout.md` §4.
 
-## Phase R0 — Build plumbing & first Rust foothold ✅
-
-**Goal:** Cargo workspace exists, Meson invokes it, one trivial Rust function
-is callable from C, CI is green. Nothing about the running binary changes
-behaviorally — this is purely about proving the integration works end-to-end
-before any real code gets ported.
-
-> **R2-closeout note:** the two crates the R0 work items below describe
-> (`hxutil` as a build-validation placeholder, `hxrand` wrapping
-> `getrandom(2)`) were both retired at the R2 closeout. `hxutil` was empty
-> and nothing depended on it; `hxrand` was a one-line wrapper that the
-> restored C `src/rand.c` (`getrandom(2)` + `/dev/urandom` fallback)
-> replaces directly. The R0 work itself stayed valuable — the Meson/Cargo
-> integration patterns it landed are what the R1 crypto crates and the R2
-> `hotline-proto` crate build on. The crates themselves just outlived
-> their usefulness.
-
-**Work items**
-
-1. Create `rust/` at the repo root as a Cargo workspace (`rust/Cargo.toml`
-   with `[workspace]`). First member: `rust/crates/hxutil/`, an empty-ish
-   crate that exists only to validate the build.
-2. Add the Meson glue. A new top-level `rust/meson.build` declares a
-   `custom_target` that runs `cargo build --release --target-dir
-   $MESON_BUILD_DIR/rust` and depends on every `.rs` file under `rust/` via
-   `depfile`. The output is one or more `.a` archives in the build dir.
-3. Pull a `cargo:rustc-link-lib` style declaration into `src/meson.build`'s
-   `executable()` call — add the produced static lib as a dependency, plus
-   the platform link-dep set (`-lpthread -ldl -lm` etc. — cargo's
-   `print-cargo-metadata` invocation gives us this list, or we hard-code it
-   for Linux first and worry about portability later).
-4. Add `cbindgen` as a build dependency of any Rust crate that exports C
-   symbols. The `build.rs` writes a header file into the build dir.
-   `src/meson.build` references it via `include_directories(meson.build_dir()
-   / 'rust' / 'include')`.
-5. Pick the trivially-portable file as the proof of concept. **`rand.c`** is
-   the natural choice — it's ~50 LOC, depends on nothing else in the tree,
-   exposes one function (`random_bytes()`), and `getrandom(2)` is what we'd
-   call anyway. Replace it with `rust/crates/hxrand/` exporting
-   `gtkhx_random_bytes(uint8_t *buf, size_t len)`. Delete `rand.c` from
-   `src/meson.build`.
-6. Wire the GitHub Actions workflow to install a stable Rust toolchain
-   (`dtolnay/rust-toolchain@stable`), cache the `~/.cargo/registry` +
-   `target/` directories, and run `cargo test --workspace` alongside the
-   existing `meson test` step. Tier 3 (the Docker matrix) needs Rust in
-   each image too.
-7. Add the rust toolchain pin: `rust-toolchain.toml` at the repo root, MSRV
-   set to whatever's current stable minus one minor (so contributors with
-   slightly-stale toolchains aren't blocked).
-
-**Gotchas**
-
-- Meson's
-  [built-in `rust` module](https://mesonbuild.com/Rust-module.html) handles
-  raw `rustc` invocations but doesn't understand Cargo. We're using
-  `custom_target` instead, which is what
-  [the gtk-rs book recommends](https://gtk-rs.org/gtk4-rs/stable/latest/book/meson.html).
-- Cargo's output path depends on the profile. Pin `--release` everywhere, or
-  pass `--profile=…` and capture the profile name in a Meson variable.
-- The CI cache needs to invalidate on `Cargo.lock` and `rust-toolchain.toml`
-  changes. Use the standard `actions/cache@v4` keys from the Rust setup
-  guides.
-- Tier 3 images may be on glibc versions that disagree with the Rust
-  toolchain's libc requirements. If this bites, switch the Tier 3 base from
-  whatever it currently is to a slightly newer Debian/Ubuntu image.
-
-**Exit criteria:** `meson compile -C build` produces a binary that calls
-`gtkhx_random_bytes()` (implemented in Rust) wherever the old `random_bytes()`
-was called from C. The binary launches, connects to mhxd, completes a login.
-CI passes Tiers 1, 2, and 3.
+10. **Crate layout: one staticlib façade; crates split on design, not link
+    graph.** `gtkhx-ffi` is the workspace's only `staticlib` and the only
+    archive on the C link line. Full rationale, plus the three constraints that
+    keep the surviving crate boundaries, in
+    [`crate-layout.md`](crate-layout.md).
 
 ---
 
-## Phase R1 — Crypto primitives → Rust ✅
+## What has already moved to Rust
 
-**Status:** Done. Shipped on `claude/phase-r1` (six commits, no squash).
-The four target crates — `hxcrypto-hash`, `hxcrypto-stream`, `hxcrypto-aead`,
-and `hxcompress` — are wired through `rust/Cargo.toml` and `rust/meson.build`,
-and each replaces its C counterpart with a thin dispatcher. `src/hmac.c` is
-deleted; `src/cipher.c`, `src/cipher_aead.c`, and `src/compress.c` survive
-only as forwarders that preserve the legacy C API for callers. The C-side
-hand-declared `extern` blocks at each FFI boundary catch signature drift at
-link time (the cbindgen-generated headers from R0 weren't actually included
-by C code; the Phase R1 crates skip cbindgen entirely to avoid the build
-machinery for an unused output).
+Roughly leaf-up, in the order it happened. Git history has the detail; this is
+the map.
 
-Notes worth carrying forward:
-
-- **Rust crate panics weren't on the bug ladder before R1 review.** The
-  initial extraction had `BlowfishOfb64State::new` / `set_key` panicking on
-  invalid key length and `gtkhx_compress_encoder_new` `.expect()`-ing on
-  zstd init failure — both turn a malformed server reply into a client
-  abort. Both fixed in R1: `Option<Self>` / `bool` from Rust, NULL from the
-  FFI, C dispatcher fails closed.
-- **AEAD ABI is asserted at compile time on both sides.** `cipher.h`'s
-  `_Static_assert(sizeof(chacha_aead_state) == 48, ...)` pairs with the
-  Rust crate's `const _: () = assert!(size_of::<AeadState>() == 48, ...)`.
-  Field reorder on either side trips a build error rather than a
-  misalignment at decrypt time.
-- **Blowfish rollback uses snapshot-state, not state-clone.** Earlier
-  drafts of the migration cloned the whole Rust BlowfishOfb64State on every
-  speculative cipher_decode (a ~4 KiB key-schedule allocation per Hotline
-  transaction). The shipped version exposes
-  `gtkhx_blowfish_ofb64_{save,restore}_state` and snapshots only the 9-byte
-  OFB feedback state into a stack buffer.
-- **Legacy `key||text` hash branches are pinned byte-for-byte.** The
-  `hxcrypto-hash` crate has three Tier 1 tests asserting the
-  hand-computed digest output of `SHA1("keytext")`, `MD5("keytext")`, and
-  `SHA256("keytext")` — so a future "consistency fix" can't quietly
-  rewrite the branch into RFC 2104 HMAC and silently break HOPE login
-  against legacy servers.
-- **License compatibility.** Every Rust dep pulled into the Phase R1
-  crates (RustCrypto family, `hkdf`, `flate2`, `lz4_flex`, `zstd`) is MIT
-  or Apache-2.0 — GPL-2.0-or-later compatible.
-
-The original goal text follows for reference.
-
-**Goal:** Every byte of crypto in the running binary comes from Rust. The
-HOPE handshake, the per-packet cipher, the HMAC challenge/response, and the
-hash primitives all live in Rust crates. C calls into them via cbindgen
-headers.
-
-This phase is the highest-value, lowest-risk Rust extraction we can do.
-Three reasons: (a) the crypto code is already isolated — `cipher.c` and
-`cipher_aead.c` deliberately avoid `hx.h` so the Tier 3 harness can link them
-without GTK; (b) the surface area is small and the inputs/outputs are
-byte arrays, not GTK widgets; (c) the integration tests (Tier 3 `test_hope_*`)
-catch regressions immediately.
-
-**Work items, in extraction order (least to most coupled)**
-
-Note: `md5.c`, `sha.c`, and `haval.c` are already gone — Phase 5 replaced them
-with `GChecksum`/`GHmac` in `hmac.c`, and HAVAL was retired entirely (no
-server advertises it, no client computes it). So R1's hash work is a smaller
-target than it would have been pre-Phase-5: port `hmac.c`'s wrappers, not
-the primitives.
-
-1. **`hash` crate: `crates/hxcrypto-hash/`.** Wraps RustCrypto's `md-5`,
-   `sha1`, `sha2`, and `hmac` crates. Exposes C functions matching `hmac.c`'s
-   `hmac_xxx()` signature (the polymorphic dispatcher keyed on the algorithm
-   name string). Delete `hmac.c`. Validate against the Tier 3 login matrix —
-   any incompatibility shows up immediately as a failed HOPE challenge.
-2. **`rng` crate: `crates/hxcrypto-rng/`.** Already mostly done in R0; flesh
-   out to cover the keystream-style consumers in `cipher.c` (the HOPE
-   identification phase generates random IVs).
-3. **Stream-cipher crate: `crates/hxcrypto-stream/`.** RustCrypto `blowfish` +
-   `arcfour`. Re-implements the OFB-64 wrapper around `blowfish_ctx` that
-   `cipher.c` currently hand-rolls. Exposes the same `cipher_encode` /
-   `cipher_decode` API the C code already calls; rekey-marker detection
-   (`cipher_check_rekey_marker`) moves into Rust too — it's pure state logic
-   over the cipher context.
-4. **AEAD crate: `crates/hxcrypto-aead/`.** RustCrypto `chacha20poly1305`.
-   Replaces `cipher_aead.c` outright (it's a thin Nettle wrapper; Rust does
-   the same thing more safely). The fogWraith HOPE-ChaCha20-Poly1305
-   integration in `network.c`/`rcv.c` is mid-port on
-   `claude/hope-chacha20-poly1305` per memory; coordinate with that branch —
-   the Rust extraction should land either before phase D of that branch (so
-   phase D writes against the Rust crate from the start) or after merge (so
-   we port a finished implementation, not a moving target).
-5. **`compress` crate: `crates/hxcompress/`.** `flate2` for gzip, `lz4_flex`
-   for LZ4, `zstd` for Zstandard. Replaces `compress.c`'s zlib/lz4/zstd
-   dispatcher. The `HAVE_*` build-time gates collapse — Rust crates are
-   either compiled in or excluded by Cargo features.
-6. **Migrate Tier 3 cipher tests.** `tests/integration/test_hope_blowfish`
-   and the chacha20 / banner sisters already link `cipher.c` directly
-   without GTK. They keep working unchanged because the C symbols are
-   still there — just implemented in Rust now. (`test_hope_rc4*` is
-   gone since RC4 was retired.)
-
-**Gotchas**
-
-- Endianness. The Hotline wire format is big-endian on every multi-byte
-  integer. RustCrypto's APIs are byte-oriented and don't care, but the C
-  code's byte-swap macros (`HN16`/`HN32`) live alongside cipher code in some
-  places. Don't accidentally drop the swap.
-- `cipher_encode` is called with an in-place buffer pointer into `htlc->out`
-  and a length. The Rust signature needs to accept `*mut u8 + usize` and
-  trust the caller — this is the FFI boundary, and we're crossing it
-  exactly because Rust's checks don't apply yet on the C side.
-- The HOPE rekey trick (random nibble in the type field's high byte triggers
-  N rounds of HMAC-stretching the cipher key) is wire-format-critical. The
-  `cipher_check_rekey_marker` function is the canonical reference. Don't
-  refactor it during the port — port it byte-for-byte, then refactor in a
-  follow-up.
-- ChaCha20-Poly1305 phase coordination: the HOPE-ChaCha branch is real work
-  that hasn't merged yet. Decide before starting R1 step 4 whether we wait
-  for it to land or land R1 first against the current state and let the
-  branch rebase.
-
-**Exit criteria:** `cipher.c`, `cipher_aead.c`, `hmac.c`, `rand.c`, `compress.c`
-all deleted from `src/meson.build`. Binary links the Rust crates as static
-libraries. Tier 3 cipher tests pass against mhxd, Badmoon (1.9 + ping), and
-Janus (ChaCha20-Poly1305). No HMAC, hash, or cipher byte-flow goes through C
-anymore.
-
----
-
-## Phase R2 — Wire protocol crate ✅
-
-**Status:** Done. The `hotline-proto` crate at
-`rust/crates/hotline-proto/` (`parse`, `build`, `wire`, `messages`,
-`sanitize`, `text`, `ffi` modules) is the receive- and send-side wire layer
-for the whole client; the C side calls into Rust through ~95
-`#[no_mangle]` FFI shims declared in `src/hotline_proto.h`. Every shipped
-receive-path extractor in `proto_helpers.c` and every shipped send-path
-opcode builder now delegates to Rust, including the shared `pack_message`
-serializer that backs `hlpack_chunks`. The **Goal** prose below is the
-original framing and stays for reference.
-
-### Shipped on `main`
-
-Receive path (extractors → Rust, dispatch in `rcv.c` stays C per design):
-
-- HTLS_HDR_USER_SELFINFO, HTLS_HDR_TASK header fields (TASK-mask dispatch fix
-  in `hx_rcv_hdr` also landed — task replies whose `type` carries the original
-  opcode in the high 16 bits now dispatch correctly).
-- HTLS_HDR_CHAT, _CHAT_SUBJECT, _CHAT_INVITE.
-- HTLS_HDR_MSG, MSG_BROADCAST.
-- HTLS_HDR_BANNER, _QUEUE, _AGREEMENT.
-- HTLS_HDR_USER_PART, _USER_CHANGE, plus the per-record USER_LIST chunk
-  parser shared by selfinfo + user_list.
-- News path: `hx_news_file_extract`, `hx_news_dirlist_parse_{categoryitem,
-  folderitem}`, `hx_news_post_walk` chunk walker, `hx_newscat_parse`,
-  `rcv_task_news_post` (GETTHREAD reply parser).
-- Task-reply parsers: `rcv_task_user_info`, `rcv_task_user_open`,
-  `file_get` / `folder_get` / `file_getinfo` / `file_put` / `folder_put` /
-  `banner_get` xfer-reply parsers.
-- Chat-history extension entry (fogWraith spec, packed-binary with TLV
-  trailer; `g_malloc + memcpy + trailing NUL` for embedded-NUL safety).
-- File-list packed-binary entry walker (`hl_filelist_walk`).
-- Tracker path: HTRK v1 reply parsers (header + fixed record + text
-  normalization), HTRK v3 pack/parse (handshake, listing-request, response
-  header, record, TLV walker), HTRK v3 meta typed readers (u8/u16/i16/u32/
-  bool + closed-vocab clamps for MATURITY and LISTING_CATEGORY).
-
-Send path (builders → Rust, `hlwrite_chunks` socket-write still C):
-
-- chat / msg / broadcast / chat-admin send opcodes; agreement_packet builder.
-- users.c, usermod.c, news.c / news15.c (both batches), files.c (both
-  batches), misc small (no-chunk + 1-chunk) opcodes.
-- xfers.c FILE_GET + FILE_PUT send opcodes.
-
-Cross-cutting:
-
-- Two ABI-pin patterns in place: `_Static_assert(sizeof(...) == N, ...)` on
-  the C side, mirrored `const _: () = { offset_of/size_of/align_of ... };`
-  on the Rust side. Covers `gtkhx_proto_history_entry` (32 bytes) and
-  `gtkhx_proto_tracker_record_fixed` (12 bytes). New cross-language
-  out-structs should adopt the same pattern.
-- `HxChunk` `#[repr(C)]` mirror of `struct hx_chunk` plus equivalent layout
-  assertions; the FFI shape lets builders return a `chunks[]` array the C
-  side hands directly to `hlwrite_chunks`.
-
-### R2 closeout
-
-Wire protocol crate complete. Final shipped scope:
-
-1. **`proto_helpers.c` wire-protocol residuals — all done.**
-   - `hl_capabilities_decode` (`claude/r2-capabilities-decode`).
-   - `hl_htxf_hdr_pack` (`claude/r2-htxf-hdr-pack`).
-   - `hl_hdr_decode` (`claude/r2-hl-hdr-decode` — full 6-output decoder +
-     body-len wire-cap math now in Rust, finishing the partial port that
-     had left `gtkhx_proto_header_trans` / `_header_in_error` as the only
-     exposed slices).
-   - `hlpack_chunks` pure serialization (`claude/r2-hlpack-chunks-pack` —
-     pure wire-format in `build::pack_message` with a safe `&[PackChunk<'_>]`
-     interface; C-side qbuf growth + `htlc->trans++` stay in C because they
-     tie to the connection lifecycle R3 owns).
-   - The variadic `hlpack(va_list)` form has exactly one production caller —
-     `hlwrite()` in `network.c`. It retires with `hlwrite` when **R3** picks
-     up the connection's send buffer.
-
-2. **`gtkhx_text_to_utf8` migration** (`claude/r2-text-utf8-delegation`).
-   `text_util.c::gtkhx_text_to_utf8` now delegates to
-   `hotline-proto::text::to_utf8_into` via the FFI; the C entry point keeps
-   its `g_free`-able heap-return contract via a worst-case `g_malloc +
-   g_realloc` pair, with a `g_utf8_validate` fast-path that skips the FFI
-   for already-UTF-8 input. R5 chat / news / msg ports will eventually drop
-   the C entry point entirely.
-
-3. **Cross-cutting hardening.** Two ABI-pin patterns now established —
-   C-side `_Static_assert(sizeof(...) == N, ...)` paired with Rust
-   `const _: () = { offset_of / size_of / align_of ... };` (covers
-   `gtkhx_proto_history_entry` 32 B, `gtkhx_proto_tracker_record_fixed`
-   12 B, `gtkhx_proto_header_decoded` 24 B). The shared `as_slice` helper
-   in `ffi.rs` enforces `len <= isize::MAX` for every receive-path FFI shim;
-   each `slice::from_raw_parts_mut` site has its own `cap <= isize::MAX`
-   guard.
-
-4. **Unit-test exit criterion** met. ~345 Rust unit tests in the
-   workspace vs. ~58 surviving C unit+proto tests; wire-format regressions
-   surface at `cargo test --workspace` before they ever reach a server.
-
-5. **Closeout housekeeping** (`claude/r2-closeout`). Dropped two crates
-   that R0 set up but R2 never grew into:
-   - `hxutil` — empty build-validation placeholder, nothing depended on it.
-   - `hxrand` — pure wrapper around `getrandom(2)`. C `src/rand.c` restored
-     (`getrandom(2)` + `/dev/urandom` fallback) and called directly until
-     its consumers (`cipher.c`, `usermod.c`) port to Rust naturally.
-
-### Handed off to other phases
-
-These were on the R2 punch list but are not R2 work:
-
-- **`network_decode.c`** (`hx_aead_pump_frames`, `hx_decode`) → **R3**. The
-  chunk/decrypt/decompress orchestration is wire-format-critical and ties
-  into the tokio connection rewrite; only callers are
-  `network.c::hx_rcv` and the Tier 3 hope tests.
-- **`rcv_task_login`** (~460 LOC post-LOGIN state machine) → **R3**. Calls
-  many parsers that are already in Rust, but its outer flow follows the
-  connection lifecycle.
-- **`proto_trace.c`** (~530 LOC, debug-only) → **deferred**. Trace emit is
-  a debug aid; nothing on the hot path depends on it.
-- **`hx_chat_split_nick_body`, `hx_highlight_match`** → **R5**. UI behaviour
-  (chat-line nick splitter + nickname highlight match) that lives in
-  `proto_helpers.c` for build-tree reasons (kept out of `gtk/gtk.h` so unit
-  tests can link them), not because it belongs to the protocol layer.
-- **`HxChatEvent` / `HxMsgEvent` boxed-type lifecycle** → **R4**. GObject
-  signal payloads — view-side plumbing emitted by `GtkhxSession`. Generalise
-  to the rest of the boxed-type family during the GtkhxSession migration.
-
-> **Note on `commands.c`:** an earlier draft of this plan named `commands.c`
-> as the message *serializer*. That is wrong. `commands.c` is the chat
-> **slash-command parser** (`/me`, `/msg`, `/clear`, …): `hx_command`,
-> `commands_tbl`, `cmd_arg`, `gen_command_hash`. It has nothing to do with
-> the wire protocol and is out of scope for R2. The actual protocol *send*
-> path is `hlwrite()` / `hlwrite_chunks()` in `network.c`, the handful of
-> `hx_send_*` helpers (`hx_send_chat` in `chat.c`, `hx_send_msg` /
-> `hx_send_broadcast` in `msg.c`, `hx_send_agreement_agree` in `network.c`),
-> and a large number of inline `hlwrite(...)` call sites scattered across
-> the UI files.
-
-This is the single largest extraction in the roadmap (~3,000 LOC C across
-`rcv.c` + `proto_helpers.c` + the `hlwrite` send path + `hotline.h`/`protocol.h`).
-It also gives the biggest maintainability win: type-safe enums for opcodes,
-exhaustive `match` on field IDs, no more `HN16(&foo, &foo)` aliasing footguns
-(see `gtkhx_selfinfo_uid_bug.md` in memory).
-
-**Work items**
-
-1. **`hotline-proto` crate: `crates/hotline-proto/`.** Two modules to start:
-   - `messages` — every `HTLC_HDR_*` / `HTLS_HDR_*` opcode as a Rust enum;
-     every `HTL[CS]_DATA_*` field tag as a typed value. `#[repr(u32)]` /
-     `#[repr(u16)]` aligns with the wire constants.
-   - `wire` — `Encoder` and `Decoder` types over `&[u8]` slices, with proper
-     length-prefixed framing. Replaces the `HN16`/`HN32`/`hl_encode` /
-     `hl_decode` macros.
-2. **Port `rcv.c`'s parsing one opcode at a time.** Each `HTLS_HDR_*` handler
-   in `rcv.c` becomes a Rust function that returns a strongly-typed event;
-   the C side keeps the dispatch table and the `GtkhxSession` signal emit.
-   Order:
-   - Start with the smallest, most self-contained: `HTLS_HDR_USER_SELFINFO`,
-     `HTLS_HDR_TASK`, the news-fetch reply.
-   - Then chat-related: `HTLS_HDR_CHAT`, chat subject, chat invitation.
-   - Then user-list events.
-   - Save file-list and news-thread for last (most complex parsing).
-3. **Port the send path similarly.** Each message-building site — the
-   `hx_send_*` helpers (`hx_send_chat`, `hx_send_msg`, `hx_send_broadcast`,
-   `hx_send_agreement_agree`) and the inline `hlwrite(...)` call sites —
-   becomes a `build_*` function in the Rust crate that returns a `Vec<u8>`;
-   the C wrapper still calls `hlwrite()` / `hlwrite_chunks()` (or the qbuf
-   path) to actually push it onto the socket. This separates "build the
-   message" from "send it" — the latter waits for R3. (`commands.c`, the
-   slash-command parser, is **not** part of this — see the note above.)
-4. **Port `proto_helpers.c` and `proto_trace.c`.** The boxed `HxChatEvent`
-   and friends become Rust types that derive `#[repr(C)]` and expose
-   `_new` / `_free` / `_copy` symbols for the GObject boxed-type integration
-   in `proto_helpers.c`. Trace output stays roughly as is; it's a debug aid,
-   not a hot path.
-5. **Move `tracker_parser.c` and `network_decode.c`** — both already
-   wire-format-pure with no GTK deps. Direct ports.
-6. **Migrate unit tests to Cargo.** The existing `tests/unit/test_*.c` for
-   hashes and the protocol bits become `#[cfg(test)] mod tests` inside each
-   crate. Tier 3 keeps its Docker matrix and is unaffected (it tests the
-   integrated binary, not the parser).
-
-**Gotchas**
-
-- `hotline.h` and `protocol.h` are 300+ macros and structs deep. Don't try to
-  generate the Rust types automatically — write them by hand once, in a way
-  that future contributors can read. The wire format is small enough that
-  this is a one-day exercise, not a tooling project.
-- The Hotline 1.9 protocol additions live alongside the 1.2/1.5 ones; the
-  crate's enum needs `#[non_exhaustive]` on the opcode enum because mhxd's
-  ChangeLog adds new ones occasionally.
-- Mac Roman ↔ UTF-8 conversion (`gtkhx_text_to_utf8` in `text_util.c` — not
-  `hl_code.c`, which is the unrelated XOR-0xff obfuscation of LOGIN/PASSWORD
-  chunks) is wire-protocol-adjacent. **Decided in the R2 foundation:** it
-  lives in `hotline-proto` (the `text` module), matching glibc's `iconv`
-  "MACINTOSH" table byte-for-byte. The legacy C `text_util.c` stays until its
-  call sites migrate with their owning windows.
-- The compressed-frame path in `rcv.c` goes
-  `dechunk → decrypt → decompress → parse`. The Rust crate should accept
-  fully-assembled message buffers; the chunk/decrypt/decompress orchestration
-  stays in `network.c` for now and moves in R3.
-
-**Exit criteria:** `rcv.c` (and the `proto_helpers.c` extractors) are reduced
-to dispatch tables and GObject signal-emit calls, and the `hlwrite` send
-sites build their payloads in Rust; the actual byte-twiddling is all in Rust.
-The unit-test count in the Rust workspace exceeds the surviving C unit-test
-count (already true on `main`). Wire-format regressions caught by `cargo test
---workspace` before they ever reach a server. The "Remaining in R2" checklist
-above is the punch list; items 5 (`rcv_task_login`) and the connection-side
-of network_decode (item 2's `hx_decode` orchestration) explicitly hand off
-to R3.
-
----
-
-## Phase R3 — Networking & async core ✅
-
-**Goal:** Replace the `pthread + g_main_context_invoke` machinery with a
-proper tokio runtime. The Hotline connection (`network.c`), file transfers
-(`htxf_*`, `xfers.c`), and HTTP banner fetch (`banner.c`) all become tokio
-tasks. UI handlers stay on the GLib main context and consume events via
-channels.
-
-**Status (current): R3 is effectively complete.** The big rock — the
-`hxnet` connection lifecycle (work items 1 + 2) — is **done and then
-some**: the orchestrator owns connect + magic + LOGIN + the HOPE
-handshake + ciphers + compression, it's the *default and only* path (the
-`GTKHX_USE_HXNET` gate and the legacy `network.c` connect/decode path
-were removed by delete-old-connect), the HTXF subchannel byte transport +
-TLS moved to Rust, and the C crypto dispatchers are deleted. The
-worker-thread / non-control-channel tail has since shipped too: the
-`xfers.c` transfer worker is a tokio task (item 4), `gtkthreads.c` is
-deleted (item 3), the HTRK tracker fetch moved into `hxnet` (item 8), and
-the URL-mode banner fetch moved to `ureq` with `libsoup` dropped (item 5).
-Central SOCKS/proxy support (item 9), the last genuinely-deferred R3 work,
-has since shipped too (S1 transport, S2 control channel, S3 tracker + HTXF
-connect moves) — all three network paths now connect through the same
-`GProxyResolver`-sourced proxy.
-(`preview.c`, item 6, was never an R3 work item — it's a
-call-out noting that those GTK-side async parses belong to R5.) The
-sub-phase table below records the build-up to the env-var-gated install;
-everything after that (default-flip, legacy removal, HTXF→Rust, crypto
-deletion) shipped in the Phase G / WAVE work tracked in
-`docs/rust/phase-g-migration.md` and the dead-C-code cleanups.
-
-**Update (June 2026): the worker-thread / non-control-channel tail has
-shipped.** What was outstanding above is now done:
-
-- **`xfers.c` transfer worker → tokio** (work item 4) — ✅ shipped. The
-  per-transfer pthread worker (the *last* `pthread_create` in the tree)
-  is now a tokio blocking-pool task with cooperative cancellation; folder
-  transfers ride the same path. `gtkthreads.c` deleted with it (item 3).
-- **Tracker network → `hxnet`** (work item 8) — ✅ shipped. The HTRK
-  fetch (connect + TLS + v3/v1 probe-fallback + parsing) moved into the
-  `hxnet` crate behind `hxnet_tracker_fetch_*`; `network.c`'s ~1100-line
-  GSocketClient state machine is gone.
-- **Banner HTTP (URL-mode) → Rust** (work item 5) — ✅ shipped. Now a
-  blocking `ureq` GET on the tokio blocking pool (`hxnet_banner_fetch_*`);
-  `libsoup` dropped as a dependency. (`ureq`, not `reqwest` — see the
-  item-5 note for the dependency-weight rationale.)
-- **`g_idle_add` / `g_timeout_add` audit** (item 7) — ✅ documented (the
-  surviving GLib timers / idles and why each stays).
-
-The exit criterion is met: **no `pthread_create` outside vendored
-`xtext`**, no `gtkthreads.c`, and every non-control-channel network path
-(HTXF, tracker, banner) now runs through `hxnet`/tokio. Central SOCKS/proxy
-support (item 9) has since shipped on top (S1 transport, S2 control
-channel, S3 tracker + HTXF connect moves), so the control channel, HTXF,
-and tracker all tunnel through a `GProxyResolver`-sourced SOCKS proxy; the
-transparent-SOCKS gap is closed. (`preview.c`, item 6, is not deferred R3
-work — it's a call-out for R5.)
-
-> **Current state of `gtkthreads.c`:** the original Phase 4-era GTK 4 port
-> kept a recursive-mutex + custom `GMainContext` poll wrapper that simulated
-> the old GTK 2/3 `gdk_threads_enter` / `_leave` contract. That bridge was
-> retired during Phase 5 modernization in favour of a strict "workers
-> never touch GTK; main thread runs all UI work" rule. `gtkthreads.c` is
-> now 39 LOC and exposes a single function: `gtkhx_post_to_main`, a thin
-> wrapper around `g_main_context_invoke` that worker threads use to queue
-> idle callbacks on the main context. R3's job here isn't to "delete the
-> custom threading bridge" (that's already gone) — it's to remove the
-> remaining `pthread_create` call sites by replacing each worker with a
-> tokio task that emits events over channels. Once the workers are gone,
-> `gtkhx_post_to_main` has no callers and `gtkthreads.c` deletes with it.
-
-This is the architectural phase. R1 and R2 are mechanical — port code, link
-it, move on. R3 is where the shape of the program actually changes, and
-where the concurrency motivation pays off.
-
-**Work items**
-
-1. ✅ **`hxnet` crate: `crates/hxnet/`.** *(Shipped — see the R3.3
-   sub-phase table below, then the Phase G default-flip + legacy removal.)*
-   Owns:
-   - The TCP connection (`tokio::net::TcpStream`).
-   - The HOPE state machine (re-use `hxcrypto-*` + `hotline-proto`).
-   - A `Connection` actor: spawns a tokio task that reads from the socket,
-     decodes frames via `hotline-proto`, and pushes them onto a
-     `tokio::sync::mpsc::Sender<HotlineEvent>`. Outbound messages arrive on
-     a paired `Receiver<HotlineCommand>`.
-   - Ping keepalive (currently every 60s in `network.c`) as a
-     `tokio::time::interval`.
-2. ✅ **Bridge to GLib main context.** *(Shipped: `crates/hxbridge/` + the
-   `src/hxnet_bridge.{c,h}` translation layer.)* A small wrapper crate
-   (`crates/hxbridge/`) spawns the tokio runtime on a dedicated thread and
-   exposes a `start_connection()` function that returns paired
-   `glib::Sender<HotlineEvent>` / `glib::Receiver<HotlineCommand>` channels
-   to the main thread. The pattern: tokio task forwards every event from its
-   internal mpsc onto the glib sender (cross-thread), the main thread's
-   `glib::MainContext` drains the receiver, the existing C signal-emit code
-   sees the events arrive. See the
-   [balena-io rust-async-interop example](https://github.com/balena-io-experimental/rust-async-interop)
-   for the canonical shape.
-3. ✅ **Retire `gtkthreads.c` with its last worker.** *(Shipped with item
-   4.)* Once `xfers.c`'s transfer worker became a tokio blocking-pool task,
-   `gtkhx_post_to_main` had no callers and `gtkthreads.c` was deleted. The
-   worker→main marshalling that remained (xfers progress) moved to
-   `gtkhx_bridge_post_to_main` / `g_idle_add`. No `pthread_create` or
-   `gtkthreads.c` remains outside vendored `xtext`.
-4. ✅ **`xfers.c` → tokio tasks.** *(Shipped — phases X1–X5; see the
-   "Files & file-transfer subsystem → Rust" section below.)* The per-transfer pthread worker
-   (the last `pthread_create` in the tree; folder transfers ride it too) is
-   now a tokio blocking-pool task spawned via
-   `gtkhx_bridge_spawn_blocking_with_idle`, with cooperative cancellation:
-   an Arc-backed `HtxfAbort` token (`hxnet_htxf_abort_*`) shuts the
-   subchannel socket down to wake a parked blocking read, which returns
-   `-1` and unwinds the (now Rust) transfer loop. (An earlier C shim
-   reclassified the wakeup to `ECANCELED`; S1 made the token the sole
-   cancellation mechanism — see the xfer-worker migration above.)
-   `pthread_cancel` / the signal-mask dance are gone; progress flows over
-   the bridge to the transfer window. Cancellation is covered by the unit
-   test `tests/unit/test_htxf_cancel.c`; Tier 3 (`test_real_htxf_connect`)
-   exercises the transfer matrix on the happy path.
-5. ✅ **`banner.c` URL-mode → Rust (`ureq`).** *(Shipped.)* The URL-mode
-   fetch moved off C/`libsoup-3` to a blocking `ureq` GET (rustls TLS,
-   8 MiB cap, timeouts) run on the tokio blocking pool — the same
-   `spawn_blocking` shape the file-mode HTXF banner uses — drained through
-   the one-shot `hxnet_banner_fetch_*` poll FFI. `libsoup` is no longer a
-   dependency; URL-mode is unconditional (the `HAVE_LIBSOUP` gate is gone).
-   **Chose `ureq` over `reqwest`** after measuring: `reqwest` (rustls-tls,
-   default-features off) pulled +64 crates — the full `hyper`/`tower` async
-   HTTP stack plus QUIC + WASM crates a one-shot image GET never uses —
-   versus `ureq`'s +31, and `ureq`'s blocking API fits the existing
-   blocking-pool worker. A flooding server is bounded by a process-wide
-   semaphore on concurrent blocking GETs. Concurrent blocking GETs can't
-   be interrupted mid-read (same constraint the HTXF banner lives with),
-   but banners are small and `banner_clear` drops stale results.
-6. ⏭ **`preview.c` async parses** (Poppler, GtkSourceView) — *deferred to
-   R5, not R3.* These are GTK-side concerns; the preview workers marshal
-   back via `g_idle_add` directly (not `gtkhx_post_to_main`). Leave them in
-   C for now; they're not on the
-   connection's hot path. Phase R5 picks them up when the corresponding
-   window moves.
-7. ✅ **Audit every `g_idle_add` / `g_timeout_add` site.** *(Done — doc
-   pass.)* Outcome: every remaining site is legitimately GLib-side and
-   stays. They fall into categories none of which are control-channel
-   network I/O (all of that moved to `hxnet`/tokio):
-   - **Vendored:** `xtext.c` scroll/selection timers — vendored widget,
-     out of scope.
-   - **GLib-native timers:** the ping keepalive (`network.c`,
-     `g_timeout_add` every 60 s) and the post-login `SELFINFO` fallback
-     (`rcv.c`, `g_timeout_add_seconds`) are exactly what a GLib timeout is
-     for — no benefit from a tokio `Interval` since they drive C/UI state.
-   - **Worker→main marshalling:** `xfers.c`, `sound.c`, `preview.c`,
-     `files_local_provider.c` use `g_idle_add` to hop a worker result onto
-     the main thread. Correct as-is; the workers are already tokio/blocking
-     and the idle is the GLib-side landing.
-   - **Main-loop drains:** the tracker (`network.c`) and banner (`banner.c`)
-     fetch drains poll their hxnet handle on a `g_timeout`. A tokio→GLib
-     channel would also work but the 50 ms drain is simple and correct.
-   - **UI debounce / deferred setup:** `toolbar.c`, `options.c`,
-     `dock_layout.c`, `files_panel.c`, `gtkhx.c` — pure GTK-side, stay.
-   - **R5-deferred:** `preview.c`'s async-parse marshalling moves with the
-     preview window in R5 (item 6).
-8. ✅ **Tracker network → `hxnet`.** *(Shipped — phases T1–T4, scoped in
-   `docs/rust/tracker-hxnet-scoping.md`.)* The HTRK fetch moved into the
-   `hxnet` crate: `tracker.rs` (per-connection v3-probe / v1 engine over
-   the hotline-proto parsers) + `tracker_fetch.rs` (serial URL walk with
-   the connect / TLS-first→plain / v3-probe→v1 fallback ladder and a
-   process-global TLS verdict cache), behind the `hxnet_tracker_fetch_*`
-   poll FFI. `network.c`'s ~1100-line `GSocketClient` state machine,
-   watchdog, and verdict cache are deleted; the thin C bridge drains
-   events on the main loop and re-emits the existing
-   `tracker-batch-begin` / `tracker-server-create` signals (so `tracker.c`
-   is untouched). TLS reuses the control-path rustls + a host:port-keyed
-   TOFU verify; the tracker now tunnels through the same `GProxyResolver`-
-   sourced SOCKS proxy as the rest (item 9, S3). Covered by the
-   socket-level Tier 3 wire tests plus a bridge-level
-   `test_tracker_fetch.c` driving the FFI against the live matrix.
-9. ✅ **Central SOCKS / proxy support in `hxnet` (`tokio-socks`).** Shipped
-   in three slices (S1 transport, S2 control channel, S3 tracker + HTXF
-   connect moves). `tokio-socks` (opt-in behind a non-default `socks`
-   Cargo feature) plugs into the single connect primitive,
-   `resolve_and_connect`, so every path that uses it tunnels through the
-   same proxy:
-   - **S1** — the `ProxyConfig` parser + the proxy branch in
-     `resolve_and_connect` (remote DNS / socks5h; the direct `proxy = None`
-     path is byte-identical to before).
-   - **S2** — the C `bridge_lookup_socks_proxy` (`GProxyResolver`, queried
-     with the `none://host:port` scheme `GSocketClient` itself uses) feeds
-     a `socks5://` URI through the three control-channel `open_*` FFIs.
-     Config is GProxyResolver-only (no env-var fallback in C — its default
-     backend already reads `all_proxy` / GNOME settings).
-   - **S3** — the tracker (`hxnet_tracker_fetch_open` gained a proxy URI)
-     and the HTXF subchannel (the connect moved fully into Rust via
-     `hxnet_htxf_connect`, retiring the C `GSocketClient` connect + the
-     fd-handoff `hxnet_htxf_open` adopted; that entry survives only for
-     socketpair tests). A shared IPv6-aware `src/host_port.{c,h}` replaced
-     the hand-rolled `host:port` splits.
-
-   Scoped in `docs/rust/socks-proxy-scoping.md`; deferred follow-ups there
-   (async `GProxyResolver` lookup for PAC/WPAD, an in-app proxy pref,
-   HTTP-CONNECT proxies).
-
-**R3 exit criteria — met.** `meson compile` produces a binary where the
-Hotline control channel, file transfers (HTXF), the HTRK tracker, and the
-URL-mode banner all run through the `hxnet`/tokio stack; there is **no
-`pthread_create` outside vendored `xtext`**, `gtkthreads.c` is gone, and
-`libsoup` is no longer a dependency. Central SOCKS/proxy support (item 9)
-shipped on top, so all of those paths tunnel through a `GProxyResolver`-
-sourced SOCKS proxy. (`preview.c`, item 6, was a call-out for R5, never an
-R3 work item.)
-
-### Work-item 1 detail: R3.3 sub-phases
-
-R3.3 is the `hxnet` work item above and is the largest of the seven. It
-broke into a planned chain of sub-phases. Status as of writing:
-
-| Sub-phase | Status | Scope |
+| Area | Where it lives now | What it replaced |
 |---|---|---|
-| R3.3.a | ✅ merged | `hxnet` crate scaffold + `Connection` actor over `AsyncRead + AsyncWrite + Unpin + Send + 'static`; `tokio::io::duplex` integration tests. |
-| R3.3.b | ✅ merged | C-callable FFI (`hxnet_connection_spawn_fd` polling form + smoke test via TCP loopback). |
-| R3.3.c | ✅ merged | `cipher` module: `BlowfishStream` (Blowfish-OFB-64) + `AeadStream` (ChaCha20-Poly1305 length-prefixed AEAD) wrap any inner `AsyncRead + AsyncWrite`. |
-| R3.3.d | ✅ shipped | `compress` module: `GzipStream` / `Lz4Stream` / `ZstdStream` (zlib via flate2 with Sync flush; LZ4F via lz4_flex; ZSTD via zstd raw API). All three use buffer-and-drain on the write side and resize-read-truncate on the inner reads to avoid per-poll allocations. Zip-bomb / DoS caps documented at each ceiling. |
-| R3.3.e-1 | ✅ shipped | Callback-driven FFI variant — adds `hxnet_connection_spawn_fd_with_callback`. Events route through `hxbridge::channel::forward_to_main`; defensive `MainContext::acquire()` so a non-owning thread can't UB across the FFI. |
-| R3.3.e-2 | ✅ shipped | `transform::compose` lays cipher + compression onto a transport in HOPE order. `Connection::spawn_boxed` accepts the resulting `Box<dyn AsyncDuplex + 'static>`. |
-| R3.3.e-3 | ✅ shipped | C-side `HxnetTransformConfig` struct + `hxnet_connection_spawn_fd_with_transforms_and_callback`. Const-asserts pin ABI on both sides; AEAD direction tags validated. |
-| R3.3.e-4a | ✅ shipped | `src/hxnet_bridge.{c,h}` translation layer: `hx_bridge_pack_header`, `hx_bridge_dispatch_frame`, `hx_bridge_dispatch_shutdown`. Marshals an `HxnetFrame` into the existing rcv state machine without re-running `hx_decode`. Tier 1 tests round-trip header bytes through production `hl_hdr_decode`. |
-| R3.3.e-4b | ✅ shipped | Bridge install / send / uninstall helpers wrapping the callback FFI. `bridge_on_event_cb` / `bridge_on_shutdown_cb` trampolines route to dispatch_*. Production `gtkhx` executable now links `rust_hxnet_dep`. |
-| R3.3.e-4c | ✅ shipped | `GTKHX_USE_HXNET` env-var-gated install (non-TLS only). `hlwrite` / `hlwrite_chunks` route through `hx_bridge_send_frame` when installed. `control_arm_write_source` no-ops when bridge installed. `hx_htlc_close` uninstalls. The install was originally hooked into `send_login` here; R3.3.e-4d (below) moved it into `rcv.c::rcv_task_login` so HOPE-negotiated cipher / compression state could be passed through. |
-| R3.3.e-4d | ✅ shipped | HOPE-over-hxnet for ChaCha20-Poly1305 and the no-cipher / no-compression path. `hx_install_hxnet_post_hope` runs after `cipher_*_init` in `rcv_task_login` (HOPE path) and on the non-HOPE login-success branch. `hx_bridge_install_with_hope_state` builds `HxnetTransformConfig` from `htlc->cipher_*_state` (ChaCha20-Poly1305 directly off `chacha_aead_state`) and `htlc->compress_*_type`. Install is deferred via `g_idle_add` until `htlc->out` drains so HOPE step-2 LOGIN bytes flush through the legacy write source before we tear it down — caught against VesperNet's Janus with ChaCha20-Poly1305. Duped fd gets `CLOEXEC`. HOPE-Blowfish ships via R3.3.e-4g (below). |
-| R3.3.e-4g | ✅ shipped | HOPE-aware Blowfish over hxnet. New `crate::hope_blowfish::HopeBlowfishStream` adapter — a frame-aware `AsyncRead+AsyncWrite` that mirrors the legacy `cipher_check_rekey_marker` + `cipher_change_decode_key` rekey protocol. Read side parses incoming 22-byte headers, inspects the type field's high byte for the rekey marker, HMAC-rotates the read schedule by that count against the session key, strips the marker. Write side mirrors with ~3/16 probability per outgoing frame. `HxnetTransformConfig` grew a `HXNET_CIPHER_HOPE_BLOWFISH` kind plus session-key / `hope_macalg` fields (struct now 304 bytes); the C bridge populates them from `htlc->sessionkey` / `htlc->macalg` and the FFI builds the new `CipherLayer::HopeBlowfish` variant. Per-direction Blowfish keys are also honored. The Tier 3 `test_hope_blowfish_hxnet` reproducer caught the actual bug: `install_check_idle` previously only waited for `htlc->out` to drain, but if `htlc->in` had leftover decrypted bytes the rcv state machine hadn't yet consumed, the cipher position vs. the wire frame boundary went out of phase by `htlc->in.pos` bytes — hxnet read mid-frame and surfaced `StreamError`. Fixed by adding an `htlc->in.pos == 0` check to the deferred install loop. (The qbuf's `.len` field is the bytes-still-needed counter — re-armed to `SIZEOF_HL_HDR` after every consumed frame — so it stays non-zero almost continuously; `.pos` is the bytes-already-buffered indicator that actually answers "is there anything mid-frame?".) |
-| R3.3.e-4e | ✅ shipped | Flipped the default: `hx_install_hxnet_post_hope` runs unless `GTKHX_USE_HXNET=0` is set. `hxnet_opt_in()` helper in `network.c` centralises the polarity. Tier 3 test now runs the install/uninstall path with the env-var unset, plus a dedicated opt-out test scopes `GTKHX_USE_HXNET=0`. |
-| R3.3.e-4f | ✅ shipped | Superseded by **Phase G + delete-old-connect** (see `docs/rust/phase-g-migration.md`). Rather than deleting *only* the non-TLS legacy loop, Phase G moved the whole connect lifecycle (incl. TLS-from-byte-zero and HOPE) into the `hxnet` orchestrator, then `delete-old-connect` WAVE 1 + WAVE 2 removed the entire legacy `GIOStream` + GPollable read/write machinery, the `control_*` helpers, the in-place `cipher`/`compress` encode call sites in `hlwrite`, and the `GTKHX_USE_HXNET` install-over-socket path from R3.3.e-4c–4e. The C crypto *modules* themselves (`hope.c` / `compress.c` / `cipher.c`) are the remaining **WAVE 3** cleanup. |
-| R3.3.e-4h | not started, on-demand | Retry/drain mechanism for `hx_bridge_send_frame` returning `HXNET_SEND_FULL`. Today's policy is "treat FULL as a fatal actor-wedge signal" — paired with `DEFAULT_COMMAND_CAPACITY = 256` it should never fire under realistic workloads. If profiling ever shows FULL hitting in practice (heavy bursts on a slow consumer), the right fix is an ordered drain idle: leave bytes in `htlc->out` on FULL, arm a `g_idle_add` retry, and queue subsequent `hlwrite` calls behind the drain so frame ordering is preserved. Until then, closing-on-FULL is correct because FULL with cap=256 means the tokio task is genuinely stuck. |
-| R3.3.e-5 | ✅ harness-coverage / live matrix follow-up | Tier 3 `test_real_connect_hxnet.c` exercises the env-var path through the fake server. Live mhxd / Janus / hlserver.com matrix runs are the follow-up. |
-| R3.3.f (Phase G + WAVE) | ✅ shipped | Beyond the env-var-gated install above: the orchestrator (`hxnet`) was made the connect **default**, then the *only* path — `GTKHX_USE_HXNET`, the legacy `network.c` async-connect/decode state machine, the `control_*` / `htlc_stream_*` helpers, and the C crypto/compress/magic dispatchers (`cipher.c`, `cipher_aead.c`, `compress.c`, `hope.c`, `network_decode.c`, `connect_magic.c`) were all deleted. The HTXF subchannel + its TLS moved to Rust (`htxf_io.c` → `hxnet_htxf_open`). Tracked in `docs/rust/phase-g-migration.md` and the dead-C-code cleanup commits. **This is the real "R3.3 done" line** — the table rows above are the historical build-up. |
+| Build plumbing | `rust/meson.build` + the Cargo workspace | — |
+| Crypto + transport compression | `hxcrypto` (hash / stream / aead / compress) | `hmac.c`, `cipher.c`, `cipher_aead.c`, `compress.c`, `md5.c`, `sha.c`, `haval.c` |
+| Wire protocol — parsers, builders, framing, Mac Roman text, dates | `hotline-proto` | the byte-twiddling half of `rcv.c` / `proto_helpers.c` / the `hlwrite` send path |
+| Connection lifecycle: connect, magic, LOGIN, HOPE, ciphers, compression, TLS | `hxnet` + `hxbridge` (tokio runtime + GLib ferry) | `network.c`'s connect/decode state machine, `hope.c`, `network_decode.c`, `connect_magic.c` |
+| HTXF file transfers — subchannel transport, the recv/send/folder byte loops, `htxf_conn` storage and lifecycle, the worker shell | `hxnet::{htxf,xfer,xfer_handle}` + `hxhandlers::xfer` | `xfers.c`, `xfers_recv.c`, `xfers_send.c`, `htxf_io.c`, `htxf_subchannel.c`, `gtkthreads.c` |
+| HFS sidecar / resource-fork I/O; FFO+FILP fork-header codec | `hxhfs`, `hxfiles-xfer` | `hfs.c` and the fiddly byte math in `xfers.c` |
+| Tracker fetch (HTRK v1 + v3, TLS, probe-fallback) | `hxnet::tracker` | `network.c`'s `GSocketClient` tracker state machine |
+| Banner fetch (URL mode over `ureq`, file mode over HTXF) | `hxnet` + `gtkhx-ui::banner` | `banner.c`, `banner_dispatch.c`, the `libsoup` dependency |
+| `GtkhxSession` GObject + its boxed signal payloads + `htlc_conn` accessors | `gtkhx-core` | `gtkhx_session.c`, the boxed types in `proto_helpers.c` / `tracker_event.c`, `hxconn.c` |
+| Receive- and send-side protocol handlers | `hxhandlers::{recv,send}` | the per-opcode handler bodies in `rcv.c` and the scattered `hlwrite` call sites |
+| Task registry + the send primitive | `hxtask` | `tasks_table.c`, the variadic `hlwrite` |
+| Client-side models: chat / membership / conversation registry, news, files | `hxmodel` | `struct chat` + `gchats`, the news GUI structs, `filelist_walker.c` |
+| Chat output surface | `hxchat-layout` + `hxchat-view` | vendored `xtext.c` |
+| Windows and dialogs | `gtkhx-ui`, module per window | see below |
+| TLS trust store (TOFU + SHA-256 pinning) | `hxtls-trust` | `tls_trust.c`, `tls_trust_dialog.c` |
+| Bookmarks (HTsc format, legacy import, cipher vocabulary) | `hxbookmarks` | `bookmarks_io.c`, `bookmark_rc4_dialog.c`, `cipher_vocab.c` |
+| Voice chat, end to end | `hxvoice` (state machine), `hxvoice-runtime` (webrtcbin), `hxvoice-model`, `hxvoice-send` | `voice.c`, `voice_panel.c`, `voice_model.c`, `voice_ptt.c` |
+| Text encoding + emoji shortcodes; Mac resource fork + cicn decode; image decode; sound playback | `hxtext`, `hxmacres`, `hx-image-decode`, `hxsound` | `text_util.c`, `macres.c`, the decode half of `cicn.c`, GSound |
 
-#### How R3.3.e-4d ended up resolving the open lifecycle questions
+**Windows and dialogs.** Every window's *shell* — its dock registration or
+top-level construction and lifecycle — is Rust. Fully content-ported: the
+Tracker; About / Agreement / User Editor; Connect and Bookmarks; the Settings
+form (all but the two custom-widget pages, which keep C draw functions); the
+TLS-trust prompt; the user list view and row; the private-message and
+private-chat tab content; the whole threaded 1.5 news browser and the flat
+1.0/1.2 news viewer; the standalone dialogs (User Info, Create Post, Broadcast,
+inline-media view, emoji picker and `:shortcode:` typeahead); and the voice UI.
+What is still C behind a Rust shell is the [inventory](#inventory--whats-still-c)
+below.
 
-- **Send-path framing.** `hlwrite` / `hlwrite_chunks` route through
-  `hx_bridge_send_frame` once the bridge is installed and the
-  packed slice is popped from `htlc->out` atomically. Send failures
-  are surfaced via `g_critical` + `hx_htlc_close` — never silently
-  drop the frame.
-- **fd ownership at the handover.** Confirmed `dup()` model. Set
-  `CLOEXEC` on the duped fd so it doesn't leak into child processes.
-- **HOPE bytes in flight.** Rather than asserting input-empty, we
-  observed that the C side's *output* queue can still hold HOPE
-  step-2 LOGIN bytes when `rcv_task_login` returns. Install is
-  deferred via a `G_PRIORITY_DEFAULT_IDLE` idle source that
-  re-arms until `htlc->out.len == 0`, letting the legacy write
-  source drain first. Counter consistency holds because any
-  encrypted server bytes that arrive in the window between
-  login-reply and install get decrypted on the legacy
-  `cipher_decode` path, which advances the live cipher state
-  object; the bridge snapshots that state at install time.
-
-### TLS over hxnet — shipped (option 1)
-
-**Shipped in Phase G.** Option 1 (the `tokio-rustls` adapter) was
-taken: `run_plaintext_tls_lifecycle` wraps the `TcpStream` in
-`tokio_rustls::client::TlsStream` from byte zero, with a WebPKI-first
-verifier that falls back to the C-side trust-on-first-use known-hosts
-store (`hx_tls_orchestrator_verify_cert`) only when WebPKI validation
-fails. SNI plumbing and the GTK trust-prompt bridge are wired. HOPE-on-TLS
-is rejected up front (redundant double-encryption). The control channel
-no longer keeps any C-side `GTlsConnection`; TLS for the **HTXF
-subchannels** likewise moved to rustls when HTXF migrated
-(`hx_tls_verify_subchannel_cert`). See `docs/rust/phase-g-migration.md`
-and `docs/tls-scoping.md`.
-
-For the record, the options that were *not* taken: (2) TLS-terminates-in-C
-with plaintext bridged over a `socketpair` — tactical stepping stone
-only; (3) a permanent split leaving TLS on the legacy `GIOStream` path —
-rejected because it would have blocked deleting the `control_*` /
-`htlc_stream_*` helpers (which delete-old-connect has since removed).
-
-**Gotchas**
-
-- **Cancellation is the hard part.** tokio tasks cancel cooperatively on
-  drop, but a transfer mid-flight may hold OS-level resources (`fd`,
-  partial-file). Make sure every task uses `tokio::select!` or `CancellationToken`
-  so the user clicking "abort transfer" cleans up properly. This is a place
-  the current C code does *not* handle well — fixing it is part of the win.
-- **Backpressure on the inbound channel.** mpsc has a bounded variant; pick a
-  buffer size that's "enough to absorb a chunky news fetch without blocking
-  the network read." 64 or 128 is probably right.
-- **GtkhxSession is still a GObject.** It survives R3 unchanged — the
-  signal-emit calls now come from the GLib-main-thread side of the bridge
-  rather than from `gtkhx_post_to_main` callbacks, but the signal taxonomy
-  doesn't shift. R4 is when GtkhxSession itself moves to Rust.
-- **Tier 3 tests** in `tests/integration/` connect via raw `mhxd`/`Janus`
-  containers; they should pass unchanged because the wire format is
-  unchanged. Use them as the regression gate for this phase.
-
-**Exit criteria:** No `pthread_create` / `g_thread_new` calls remain
-outside vendored xtext, and `gtkthreads.c` is deleted. As of this writing
-that is **one conversion away**: `xfers.c`'s transfer worker is the only
-remaining `pthread_create` and the only remaining `gtkhx_post_to_main`
-consumer (the `network.c` / `banner.c` / `tracker.c` workers are already
-gone; `preview.c` marshals via `g_idle_add` directly, so it was never a
-`gtkhx_post_to_main` consumer). Connection is already a tokio task
-(the orchestrator); transfers' byte path already is too — only the C
-worker wrapper remains. The remaining non-thread network items (banner
-URL-mode → reqwest, tracker fetch → hxnet) can land independently. The
-`MAX_CONN > 1` half-built abstraction can finally be abstracted properly
-because a connection is a struct in Rust, not a global.
-
-### Files & file-transfer subsystem → Rust ✅
-
-**Status: complete.** The whole files/transfer stack moved to Rust across a chain
-of interrelated efforts. Deleted C files: `xfers.c`, `xfers_recv.c`,
-`xfers_send.c`, `htxf_io.c`, `htxf_subchannel.c`, `hfs.c`, `gtkthreads.c`,
-`filelist_walker.c`, `cipher_aead.c`. The HTXF file-transfer path is Rust
-end-to-end; the C side keeps only the files-browser widgets (view), the
-GIO/GObject provider shells, and a thin `htxf_accessors.c` field seam. This
-section folds the former `xfers-to-rust`, `xfers-tokio`, `htxf-migration`,
-`files-migration`, and `hfs-crate` scoping docs.
-
-The crates/modules, leaf-up:
-
-| Crate / module | Owns | Replaced |
-|---|---|---|
-| `hxhfs` | HFS metadata sidecar (CAP / AppleDouble / Netatalk): type/creator, Finder-info, resource fork, comment; byte-exact sidecars | `hfs.c` |
-| `hxfiles-xfer` (`ffo`) | FFO fork-header + FILP info-block codec (legacy + large-file split, 1904↔2000 wire epoch), unit-tested headless | the fiddly byte math in `xfers.c` |
-| `hxnet::htxf` | HTXF subchannel transport: connect, preamble pack, AEAD/TLS framing, the `HtxfAbort` cancel token | `htxf_io.c`, `htxf_subchannel.c` |
-| `hxnet::xfer` | the recv/send/folder byte loops (`hxnet_xfer_file_recv_one`/`_send_one`/`folder_{recv,send}_all`) | `xfers_recv.c`, `xfers_send.c` |
-| `hxnet::xfer_handle` | `struct htxf_conn` storage + refcount/cancel lifecycle (the `hx_htxf_*` ABI) | the `htxf_conn` alloc/lifecycle in `xfers.c` |
-| `hxhandlers::xfer` | the worker **shell**: `xfers[]` registry, worker/completion dispatch, `xfer_go` wire build, construction, the last-ref destructor | the rest of `xfers.c` |
-| `hxfiles-model` / `hxfiles-entry` | file-entry model + icon/label tables, remote-listing path nav, the `HxFileEntry` GObject, FILE_LIST populate/decode | `filelist_walker.c` + the model half of `files_entry.c` / `files_remote_provider.c` |
-
-**HFS sidecar → `hxhfs`.** `hfs.c`'s CAP / AppleDouble(v2) / Netatalk(v1) sidecar
-reader/writer (resource fork + Finder info: type/creator, dates, comment) is a
-standalone crate: idiomatic `&Path`/`io::Result` native API for the Rust xfer
-loops, plus a `#[no_mangle]` shim preserving the exact `hfs.h` ABI (a `#[repr(C)]`
-`struct hfsinfo` mirror pinned by `const _: () = assert!(size_of == 224)`).
-On-disk bytes are a hard wire-compat requirement (netatalk + real Hotline clients
-read the same files), pinned by golden-byte + round-trip tests. `resource_open`
-never implicitly truncates (a resumed transfer can open + seek), and the FFI
-normalizes every "no resource fork" outcome to `-1` (dropping `hfs.c`'s
-AppleDouble "return stdin fd on open failure" quirk).
-
-**HTXF subchannel transport → `hxnet::htxf`, worker on tokio.** The crypto was
-*already* Rust (`hxcrypto-aead`; HTXF only ever arms ChaCha20-Poly1305 AEAD, no
-Blowfish), so this was transport glue, not a crypto port. The connect + preamble
-+ AEAD/TLS byte-pump moved into `hxnet::htxf`, giving the subchannel the same
-rustls path the control channel uses and deleting the `cipher_aead.c` shim. The
-transfer worker moved off its `pthread` onto the **tokio blocking pool** via
-`gtkhx_bridge_spawn_blocking_with_idle` (the `banner.c` pattern) — retiring the
-last `pthread_create` and `gtkthreads.c`. Mid-transfer progress marshals through
-`gtkhx_bridge_post_to_main`; terminal cleanup rides the bridge's completion
-callback.
-
-**Cancellation** became cooperative (blocking-pool tasks can't be force-cancelled
-like `pthread_cancel`): it rides the `HtxfAbort` token (`hxnet_htxf_abort_*`).
-`xfer_delete` / `xfers_delete_all` abort it, shutting the subchannel socket so a
-parked `hxnet_htxf_read` returns `-1`. `hxnet_htxf_abort_arm` publishes the token
-into the handle *unconditionally* (best-effort socket-arm on top), so a cancel is
-still observed via `hxnet_htxf_read`'s `is_aborted()` pre-check even when the
-socket can't be duplicated — the token being the *sole* mechanism, never leaving
-the handle unarmed is what keeps a transfer cancellable.
-
-**Byte loops → `hxnet::xfer` (W1–W3).** Single-file download
-(`hxnet_xfer_file_recv_one`) and upload (`_file_send_one`), then the folder
-mini-protocol (`_folder_{recv,send}_all`: the FILE_NEXT/FILE_SEND/FILE_RESUME
-state machine + DFS tree walk + RFLT resume + per-file size accounting,
-delegating per file to the single-file loops). The C driver hands scalars +
-callbacks in by value through `#[repr(C)] HxnetXferParams`/`HxnetFolderParams`, so
-`hxnet` stays a leaf crate referencing no C symbols. A latent bug fixed en route:
-`folder_send_all` excluded the 16-byte MACR marker from its per-file size, which
-desynced multi-file folder uploads (never caught before — folder upload had never
-run end-to-end).
-
-**`struct htxf_conn` storage/lifecycle → `hxnet::xfer_handle` (S0).** A
-`#[repr(C)]` mirror (C keeps direct field access, layout pinned at runtime by
-`test_htxf_layout`), atomic `refcount`/`canceled`/`total_pos`, the `HtxfAbort`
-token, and a registered last-unref destructor. `hx_htxf_new/_ref/_unref` replace
-`g_malloc0`/`g_atomic`/`g_free`. Key calls kept: the refcount stays
-intrusive-atomic (not `Arc` across FFI — the "N pending idles each hold a ref"
-pattern maps badly onto `Arc` over the boundary); only the three lifecycle fields
-moved behind accessors, not a full opaque type (~9 C files read `htxf->…` scalars
-directly). `test_htxf_layout` immediately caught that `compat.h` clamps
-`MAXPATHLEN` to a fixed 4095, not the host `PATH_MAX`.
-
-**Worker shell → `hxhandlers::xfer` (Y1–Y5).** The remaining `xfers.c` shell moved
-into the crate that already owned the transfer *receive* handlers (`recv/xfer.rs`),
-turning those C-ABI calls into native ones. Y1 registry (`xfers[]` → a
-`thread_local Vec<*mut HtxfHandle>`, main-thread-only so no locking); Y2
-construction + progress/completion marshaling (the completion cleanup runs at
-`G_PRIORITY_DEFAULT_IDLE`, *below* the file-update idles — a load-bearing ordering
-the completion-hang fix depended on); Y3 worker dispatch + params; Y4 `xfer_go`
-wire build (native `hotline_proto::build` + `ClientHdr` opcodes + native
-`hxtask::task_new`/`hlwrite_chunks`); Y5 the last-ref destructor + `xfers.c`
-deletion. Field access is native through `hxnet`'s `HtxfHandle` (the plain fields
-are `pub`; atomics stay behind `hx_htxf_*`) rather than a Rust→C-ABI→Rust bounce.
-Y4 also fixed hxtask's stale 3-arg `RcvTaskFn` alias (the real dispatch is 5-arg)
-and a malformed download-resume `RFLT` record — a C string-literal indentation leak
-had shoved the RFLT magic to `[26]` and the fork tags past byte 74; mhxd reads the
-offsets at fixed `[46]`/`[62]` so resume still worked against it, but the rebuilt
-`build_resume_rflt` is well-formed for spec-strict servers (guarded by a layout
-unit test + a Tier-3 `file_resume` test).
-
-**Files-browser model → `hxfiles-model` / `hxfiles-entry` (F1–F4).** The pure
-helpers (file-type→icon id, FourCC→label), the remote-listing path-navigation
-model (`RemoteListing`: current path, error flag, parent/child math), the
-`HxFileEntry` row GObject (a `glib::subclass` type exporting the old
-`hx_file_entry_*` ABI), and the FILE_LIST populate/decode
-(`gtkhx_files_populate_from_reply`: parse + Mac Roman name decode + icon/kind +
-append to a `gio::ListStore`) all moved to Rust, retiring `filelist_walker.c`. The
-store stays `GListStore` (a files listing is clear-and-rebuild, so a bespoke
-`gio::ListModel` would be redundant); the size/date formatters stay C (thin GLib
-i18n wrappers whose value is GLib's locale handling). The browser widgets, both
-provider shells, and the local GIO provider stay C — the standing view=C,
-model/IO=Rust boundary.
-
-**Non-goal recorded:** nothing beyond the `hxnet::xfer` state machine was pushed
-further into Rust — the GETFOLDER/PUTFOLDER framing lives there and was not
-re-expressed as a higher-level Rust worker (H3/F-stretch — large, high
-behavior-risk, no transport payoff). (The Mac resource-fork parser + colour-icon
-renderer, once listed here as a future port, are already Rust in the `hxmacres`
-crate — a separate, non-transfer effort.)
-
-Test net across the whole subsystem: `cargo test` for `hxhfs` (golden-byte +
-round-trip), `hxfiles-xfer` (FFO codec), `hxfiles-model`/`-entry` (tables + nav +
-headless populate), `hxnet` (loopback round-trips + the refcount/destructor
-lifecycle), `hxhandlers` (registry + resume-RFLT layout); `test_htxf_cancel` /
-`test_htxf_layout` / `test_large_file` (unit, ASan); and the Tier-3 `file_get` /
-`file_put` / `file_resume` / `folder_get` / `folder_put` / `folder_roundtrip` /
-`file_list` / `file_info` / `real_htxf_connect` / `banner` matrix vs mhxd + Janus.
+**Concurrency.** There is no `pthread_create` in the tree. Worker threads are
+tokio tasks (or blocking-pool tasks) that marshal to the main thread through
+the `hxbridge` ferry or `g_idle_add`; the GLib timers that remain are the ones
+that drive C-side state and gain nothing from a tokio `Interval` — the ping
+keepalive, the post-login SELFINFO fallback, the fetch drains, UI debounce.
 
 ---
 
-## Phase R4 — GtkhxSession in Rust ✅
+## Durable findings
 
-**Status: shipped** (R4.1 + R4.2). The `GtkhxSession` GObject is
-now the Rust `glib::subclass` crate `rust/crates/gtkhx-session/`; `src/gtkhx_session.c`
-is deleted, `src/gtkhx_session.h` stays unchanged. The crate exports the
-identical C ABI the old TU did — `gtkhx_session_get_type`,
-`gtkhx_session_get_default`, and every `gtkhx_session_emit_*` wrapper (one per
-signal) — so every C model-side emitter and view-side `gtkhx_connect_signals` /
-`on_<name>_signal` adapter compiles and links unchanged. Every signal is
-registered in `ObjectImpl::signals()` with param types transcribed exactly
-from the old `g_signal_new()` calls (registration order mirrors the old
-`SIGNAL_*` enum so signal IDs stay stable).
+Things that cost real time to learn and would cost it again.
 
-Boxed-payload signals (`chat`/`HxChatEvent`, `msg`/`HxMsgEvent`,
-`tracker-server-create`/`HxTrackerServer`) reference the **C-defined** boxed
-`GType`s through their existing `hx_*_get_type()` accessors via FFI — the
-staticlib's undefined references resolve against `proto_helpers.c` /
-`tracker_event.c` at final link (leaf-up "C resolves Rust's externs"). Emit
-marshals boxed payloads with `g_value_set_boxed`, which copies via the boxed
-type's copy func for the emit duration — byte-for-byte the lifetime the old
-`g_signal_emit` varargs collection produced for a non-static-scope boxed param.
-Emit wraps the incoming `GtkhxSession*` with `from_glib_none` (the
-re-entrancy-safe "full form" from `docs/rust/glib-interop.md`).
+### Crypto
 
-Validation: in-crate `cargo test` cases (signal-count, pointer/scalar/
-string/boxed round-trips, singleton stability, NULL-session safety); the full
-`meson` build links the `gtkhx` binary + the two integration targets
-(`real_connect`, `real_htxf_connect`) that compile against the crate; the
-Tier 1/2 unit+proto suite green; Tier 3 vs mhxd/Janus/argus/hxtrackd green for every test
-that flows events through the session (`real_connect`, `real_htxf_connect`,
-`chat_roundtrip`, `user_list_grows`, `tracker_fetch`, the HOPE/news/voice/file
-suites). Re-hosting the boxed types themselves in Rust is **R4.2** (see below).
+- **Rust crate panics are a bug class at the FFI boundary.** The first
+  extraction had constructors panicking on an invalid key length and
+  `.expect()`-ing on compressor init failure — both turn a malformed server
+  reply into a client abort. The rule since: fallible construction returns
+  `Option`/`bool` from Rust, NULL across the FFI, and the C side fails closed.
+- **A shared cipher-state struct is asserted at compile time on both sides.**
+  The AEAD state was the first: `hxcrypto`'s
+  `const _: () = assert!(size_of::<AeadState>() == …)` was paired with a
+  `_Static_assert` on the same size in the C header, so a field reorder on
+  either side tripped a build error rather than a misalignment at decrypt time.
+  (The C half went away with the C crypto dispatchers; the Rust assert and its
+  reasoning stayed, because it also documents *why* a size pin is equivalent to
+  a field-offset pin for that struct shape.) Every cross-language struct added
+  since follows the same pattern — C `_Static_assert` against Rust `size_of` /
+  `align_of` / `offset_of` consts. `tasks_bridge.c` and `inline_media_decode.c`
+  are current examples, the latter pinning enum discriminants as well as
+  layout.
+- **Blowfish rollback snapshots state; it does not clone it.** Speculative
+  `cipher_decode` needs to be able to roll the cipher back. Cloning the whole
+  Rust state meant a key-schedule-sized allocation per Hotline transaction. The
+  shipped form exposes save/restore entry points that snapshot only the OFB
+  feedback state into a stack buffer.
+- **The legacy `key||text` hash branches are pinned byte for byte.** Tier 1
+  tests assert the hand-computed digests of the concatenated form for each
+  supported hash, so a future "consistency fix" can't quietly rewrite the
+  branch into RFC 2104 HMAC and silently break HOPE login against legacy
+  servers.
 
-The original goal text follows for reference.
+### Wire protocol
 
-**Goal:** The model→view signal hub becomes a Rust `glib::subclass`-derived
-GObject. Same name (`GtkhxSession`), same signals, same boxed-type payloads.
-C code subscribing on the view side sees no difference.
+- **Endianness.** Every multi-byte integer on the Hotline wire is big-endian.
+  RustCrypto's APIs are byte-oriented and don't care, but the byte-swap macros
+  lived alongside cipher code in places. Don't drop the swap.
+- **Mac Roman ↔ UTF-8 conversion belongs to the protocol layer.** It lives in
+  `hotline-proto`'s `text` module and matches glibc's `iconv` `MACINTOSH` table
+  byte for byte. (Not to be confused with `hl_code.c`, the unrelated XOR-0xff
+  obfuscation of LOGIN/PASSWORD chunks.)
+- **The HOPE rekey marker is wire-format-critical.** A random nibble in the
+  type field's high byte triggers N rounds of HMAC-stretching the cipher key.
+  It was ported byte for byte rather than refactored on the way, and the
+  frame-aware Rust adapter mirrors the original's read-side parse and write-
+  side probability exactly. Don't tidy it.
+- **Frame the read stream by `DataSize`, not `TotalSize`.** Getting this wrong
+  desynced against a fragmenting server and surfaced as "unknown header type".
+- **`#[non_exhaustive]` on the opcode enum.** The 1.9 additions live alongside
+  the 1.2/1.5 ones and servers occasionally add more.
 
-This is a deliberately small phase because the GtkhxSession surface is well-
-defined and we want to validate the Rust GObject pattern in isolation before
-relying on it for whole windows in R5.
+### Boxed signal payloads
 
-**Work items**
+The `GtkhxSession` signals whose payloads aren't scalars — the chat event and
+its attached media, the message event, the tracker server record and its v3
+metadata, the chat-history entry, the inline-media handle table — are glib
+boxed types. They live in `gtkhx-core::boxed`, in the **same crate as the
+session GObject that emits them**.
 
-1. **`crates/gtkhx-session/`.** A `glib::subclass::ObjectImpl` implementation
-   of `GtkhxSession` with every existing signal declared in the same order
-   (so signal IDs stay stable). The 25-or-so signals — `chat`, `chat-subject`,
-   `msg`, `user-create`, `task-update`, etc. — each become a
-   `Signal::builder()` invocation in `class_init()`.
-2. **Re-host the boxed types.** `HxChatEvent`, `HxHistoryEntry`, etc., that
-   currently live in `proto_helpers.c` move into `gtkhx-session` (or stay in
-   `hotline-proto` if they're really wire-format types). The
-   `G_DEFINE_BOXED_TYPE` registration happens via `glib::Boxed` derive.
-3. **Delete `gtkhx_session.c`.** The C header stays, generated by cbindgen,
-   so consumers (`gtkhx.c`'s `gtkhx_connect_signals()`, every `emit_*` call
-   in C) compile and link without change.
-4. **Verify the C view-side handlers (`on_<name>_signal` in `gtkhx.c`)
-   still fire.** They will, because GObject signal dispatch is transparent
-   to the consumer. But: regression-test every signal.
+They spent a period in a crate of their own, and the reason is worth
+remembering because it was a link-graph artefact rather than a design one: when
+every crate produced its own `staticlib`, two archives could each bundle the
+boxed types' `_copy`/`_free` and collide at the final link, and a proto unit
+test that pulled one `_copy` would drag in the session crate's dangling
+externs. The single-façade architecture dissolved both problems — one archive,
+each `#[no_mangle]` symbol defined exactly once — and the crate merged in.
 
-**Gotchas**
+**One constraint survives and still shapes the crate.** `gtkhx-core` must stay
+free of undefined external symbols, because the Tier 2 proto tests link its
+standalone archive *alone*. That is why the per-session task registry did not
+merge in with the rest. See [`crate-layout.md`](crate-layout.md) §2b.
 
-- `glib::subclass` lifetime quirks. `Self` in `ObjectImpl::class_init` does
-  not refer to the instance; it refers to the class. Read the gtk-rs book
-  chapter before starting and copy from an existing crate (e.g.,
-  `gtksourceview-rs`'s `Buffer`) rather than designing from scratch.
-- Signal payload types. Pointer payloads (`G_TYPE_POINTER`) are still
-  raw pointers even from Rust; boxed types (`HX_TYPE_CHAT_EVENT`) are the
-  safe path. Where the current code uses `G_TYPE_POINTER` because the
-  payload is `struct htlc_conn *`, leave it as-is — htlc_conn isn't a
-  GObject and won't be one in the foreseeable future.
-- gobject-introspection. We may want to start emitting a `.gir` file so the
-  signals are introspectable for tooling. Optional; defer to Phase R5+ if
-  it doesn't fall out for free.
+The mechanics, which are the part to copy when adding a new payload type:
 
-**Exit criteria:** `gtkhx_session.c` deleted. Every signal emits from Rust;
-all view-side handlers in C consume them unchanged. Tier 3 e2e tests pass
-(chat, news, file list, transfers, tracker, login). **Met by R4.1.**
+- **Only the boxed type moved; the struct layout stays C-visible.** C producers
+  still allocate and fill the struct, and C consumers still read fields
+  directly. So each Rust type is a `#[repr(C)]` mirror with its byte layout
+  pinned on both sides — `_Static_assert(sizeof(...) == N)` in C against
+  `const _: () = assert!(size_of::<…>() == N)` (and `offset_of!` where field
+  positions matter) in Rust.
+- **Copy and free go through glib's allocator** (`g_malloc0` + `g_strndup` /
+  `g_free`), so a value made by a C `hx_*_new` and one made by a Rust `_copy`
+  release through the same path.
+- **A wide struct can be modelled opaquely.** The tracker v3 metadata carries
+  dozens of fields; rather than transcribe them, `gtkhx-core` models it as a
+  correctly-sized, correctly-aligned buffer whose copy/free fix up only its
+  owned `char *` fields **by byte offset**, with the size and every offset
+  pinned by `_Static_assert`s on the C side. The UI crate separately carries a
+  fully typed mirror of the same memory, because the tracker window needs to
+  *read* the fields. Two intentional views, both const-asserted.
 
-### R4.2 — re-host the boxed types in Rust ✅
+### Cross-thread lifecycle and cancellation
 
-R4.1 left work item 2 (re-host the boxed types) undone: the boxed payloads
-`HxChatEvent` / `HxMsgEvent` (`proto_helpers.c`) and `HxTrackerServer`
-(`tracker_event.c`) stayed C-defined, with the Rust session referencing their
-`GType`s via FFI. R4.2 moves them into Rust, **one type at a time**, into a
-new self-contained crate `rust/crates/gtkhx-boxed/`.
+The file-transfer handle is the one object genuinely shared between the GLib
+main thread and a worker, and getting it right produced three findings that
+generalize:
 
-**What moves, and what doesn't.** Only the boxed *type* moves — its `GType`
-registration and its `_copy` / `_free` value semantics. The struct layout
-**stays C-visible**: the C producers (`hx_*_new`) still `g_new0` and fill the
-struct, and C consumers still read fields directly (the parse/format logic —
-`hx_chat_event_new`, `attach_media`, the media placeholders, nick-split, emoji
-decode — is R5 chat-window work, not R4.2). So each Rust type is a `#[repr(C)]`
-mirror with its byte layout pinned on both sides: `_Static_assert(sizeof(...)
-== N)` in C against `const _: () = assert!(offset_of!(...))` in Rust — the same
-discipline R2 used for `HxChunk`. Copy/free use glib's allocator (`g_malloc0`
-+ `g_strndup` / `g_free`) so a value made by a C `hx_*_new` and one made by a
-Rust `_copy` free through the same path.
+- **An intrusive atomic refcount, not `Arc`, across the FFI.** The lifetime
+  pattern is "N pending idle callbacks each hold a reference", which maps badly
+  onto `Arc` over a C boundary. The handle keeps `AtomicI32` refcount, cancel
+  flag and byte counter as fields of a `#[repr(C)]` mirror, with a registered
+  last-unref destructor, behind explicit `ref`/`unref` entry points.
+- **Blocking-pool tasks cannot be force-cancelled.** There is no
+  `pthread_cancel` equivalent, so cancellation is cooperative: an abort token
+  shuts the subchannel socket down to wake a parked blocking read, which
+  returns an error and unwinds the loop. Critically, the token is published
+  into the handle **unconditionally**, with the socket shutdown as a
+  best-effort extra — so a cancel is still observed by the read's pre-check
+  even when the socket can't be duplicated. Never leaving the handle unarmed is
+  what keeps a transfer cancellable at all.
+- **Layout assertions find portability bugs, not just refactoring bugs.** The
+  runtime layout test for that handle immediately caught that `compat.h`
+  hard-clamps `MAXPATHLEN` to a fixed value rather than the host's `PATH_MAX`
+  — so every `#[repr(C)]` mirror of a struct containing a path buffer has to
+  use the clamped size, not the platform's.
 
-**Why a separate `gtkhx-boxed` crate, not `gtkhx-session` or `hotline-proto`.**
-Two link-graph constraints force it: (a) `hotline-proto` is deliberately
-glib-free, and these types need glib (`g_boxed_type_register_static`, `GBytes`);
-(b) putting them in `gtkhx-session` failed at link time — that crate still
-externs the *not-yet-ported* boxed `GType`s, and release-mode codegen-unit
-merging co-locates those dangling externs with the moved type's `_copy`/`_free`,
-so a proto unit test that pulls `hx_msg_event_copy` (e.g. `test_msg_event`)
-drags in `hx_tracker_server_get_type` and fails to link (it doesn't link
-`tracker_event.c`). A dedicated, self-contained crate (glib only, zero
-undefined externs) is selected as its own archive, so pulling a `_copy`/`_free`
-symbol never drags `gtkhx-session`'s C externs in. `gtkhx-session` is unchanged
-from R4.1 — it keeps externing the boxed `GType`s, which now resolve against
-`gtkhx-boxed` (for ported types) or the C side (for the rest).
+There is also a standing ordering rule that came out of a transfer-completion
+hang: the completion cleanup runs at `G_PRIORITY_DEFAULT_IDLE`, **below** the
+progress-update idles, so the updates drain before the object they describe is
+torn down.
 
-**Status:**
+### TLS integration — the option taken, and the two that weren't
 
-- **R4.2a — `HxMsgEvent` ✅.** Moved to `gtkhx-boxed` (`#[repr(C)]` 48-byte
-  mirror; `hx_msg_event_{get_type,copy,free}` exported with the original C ABI;
-  `proto_helpers.c` keeps `hx_msg_event_new` + the struct + a
-  `_Static_assert(sizeof == 48)`). In-crate cargo tests (boxed registration,
-  deep-copy, NULL-safety, `g_boxed_copy` round-trip); Tier 2 `msg_event` (now
-  calls the Rust `_copy`) + Tier 3 `msg_roundtrip` / `msg_self` /
-  `msg_to_unknown_uid` green.
-- **R4.2c — `HxChatEvent` + `HxChatMedia` ✅.** Moved to `gtkhx-boxed::chat`
-  (72-byte / 56-byte `#[repr(C)]` mirrors). The nested `HxChatMedia` copy/free
-  ported alongside as private Rust helpers (pure glib — `g_strndup` line +
-  `id`/`mime` byte copies). `proto_helpers.c` keeps `hx_chat_event_new`,
-  `hx_chat_event_attach_media`, the placeholder formatters, and
-  `hx_chat_media_free` (still used by `attach_media`) + two `_Static_assert`s.
-  In-crate cargo tests; Tier 2 `chat_event` / `inline_media` + Tier 3 chat suite green.
-- **R4.2b — `HxTrackerServer` + `HxTrackerV3Meta` ✅.** Moved to
-  `gtkhx-boxed::tracker`. `HxTrackerServer` is a 72-byte `#[repr(C)]` mirror;
-  its copy/free deep-copy the `GBytes` (`g_bytes_ref`/`_unref`) and the meta.
-  `HxTrackerV3Meta`'s copy/free moved too (required to keep the crate
-  self-contained) — but rather than transcribe its ~40 fields, it's modelled
-  as an opaque 216-byte buffer and the copy/free fix up only its **ten owned
-  `char*` fields by byte offset** (the C code did `*c = *src` then `g_strdup`
-  each). Size + those ten offsets are pinned by `_Static_assert`s in
-  `tracker_v3_meta.c`; the C producers (`hx_tracker_server_new_v1`/`_v3`,
-  `hx_tracker_v3_meta_new`) and the `hx_tracker_v3_meta_free` call sites in C
-  (the `_new` error path, `tracker_row.c`) now resolve against `gtkhx-boxed`.
-  In-crate cargo tests; Tier 2 `tracker_v3_meta` + Tier 3 tracker suite (v1/v3/
-  TLS/fetch) green.
+TLS runs through `tokio-rustls`: the connection is wrapped from byte zero, with
+a WebPKI-first verifier that falls back to the trust-on-first-use known-hosts
+store only when WebPKI validation fails. HOPE-on-TLS is rejected up front
+(redundant double encryption). HTXF subchannels use the same path.
 
-`gtkhx-session` is unchanged from R4.1 except doc comments: it keeps externing
-the three boxed `_get_type`s, which now resolve against `gtkhx-boxed`. The
-`#[cfg(not(test))] extern "C"` block and the `#[cfg(test)]` boxed stubs both
-**stay** — collapsing them into a direct Rust dependency on `gtkhx-boxed` would
-make the `gtkhx-session` `staticlib` bundle `gtkhx-boxed`'s rlib and emit the
-boxed `_get_type`/`_copy`/`_free` symbols into two archives, colliding at final
-link. The extern indirection keeps a single definition. (A future option, if
-the stubs ever chafe, is a `[dev-dependencies]` edge on `gtkhx-boxed` so only
-the test build sees the real types — production stays extern.)
+For the record, the options that were **not** taken:
 
----
+- **TLS terminates in C, plaintext bridged over a `socketpair`.** A tactical
+  stepping stone only — it would have left a permanent extra hop.
+- **A permanent split, leaving TLS on the legacy `GIOStream` path.** Rejected
+  because it would have blocked deleting the C stream helpers, which was most
+  of the value of the migration.
 
-## Phase R5 — UI windows, one at a time
+### gtk4-rs traps
 
-**Goal:** Every window in `src/*.c` whose content is not the xtext widget
-gets rewritten in Rust + gtk4-rs. The C "window create + populate + connect"
-files get replaced one at a time, in increasing order of coupling.
+Two that every window has to respect:
 
-This phase is the longest in calendar time and the most parallelizable
-across small commits. Each window port is independent; pick the smallest one
-that's bothering us in any given week.
-
-**Status: R5.1 (Tracker window) shipped** on `claude/r5-tracker-rust`. It
-established the crate structure and the gtk4-rs idioms the rest of the
-phase reuses:
-
-- **One crate for all R5 windows, `rust/crates/gtkhx-ui`, module per
-  window** — not a crate each. The windows are tightly interrelated (they
-  open each other's dialogs) and share infrastructure (the session/prefs C
-  bridge, the `tr` gettext shim, the `GtkColumnView` model-chain idiom, the
-  `gtkhx-boxed` payloads). Shared code lives at the crate root
-  (`lib.rs`, `ffi.rs`, `tr.rs`); the tracker is `src/tracker/`.
-- **Leaf-up C ABI**: each window module `#[no_mangle]`-exports the symbols
-  its deleted `src/<window>.c` used to provide, so the C callers link
-  unchanged (same shape as the R4 crates).
-- **`src/tracker_bridge.c`** — a thin, permanent C shim for the Rust UI's
-  narrow access to not-yet-ported global state (`the_session.htlc` for
-  connect, `gtkhx_prefs`, the chat logger), routed through the multi-conn
-  **M0 seam** (`hx_active_session()` for UI actions, `sess_from_htlc()`
-  model-side). Every future window reuses `gtkhx_tracker_connect_apply` /
-  `_log_info` and follows the same M0 routing — a port from a pre-M0 file
-  silently drops it otherwise.
-- **`HxTrackerRow` is a Rust `glib::subclass`**; typed `HxTrackerV3Meta`
-  `#[repr(C)]` mirror (`gtkhx-boxed` keeps it opaque) pinned by const
-  asserts against the C `_Static_assert`s.
-- **Two hard-won gtk4-rs traps** every later window must respect: (a) the
-  app inits GTK from C, so gtk4-rs's own init flag is unset — call
+- **The app initializes GTK from C, so gtk4-rs's own init flag is unset.** Call
   `gtk::set_initialized()` at each construction site or every widget/model
-  constructor aborts; (b) **never write qdata (`set_data`) onto
-  `GtkColumnView`'s internal cell/row widgets** — it corrupts GTK's cell
-  recycling and frees a live cell (first-row use-after-free surfacing as a
-  `GTK_IS_ACCESSIBLE` failure). Right-click row detection stashes the row
-  position on the cell's own label instead.
-- **Tier 3**: `tests/integration/test_tracker_signals.c` drives the
-  production `hx_tracker_list_async` → `tracker_fetch_dispatch_event` →
-  `GtkhxSession` signal path against the live matrix trackers and asserts
-  the boxed `HxTrackerServer` payloads — the window's exact input contract,
-  headless (the gtk4-rs window can't be built without a display, so a
-  window-level Tier 3 isn't feasible on the display-less CI).
+  constructor aborts.
+- **Never write qdata (`set_data`) onto `GtkColumnView`'s internal cell or row
+  widgets.** It corrupts GTK's cell recycling and frees a live cell — the
+  symptom is a first-row use-after-free surfacing as a `GTK_IS_ACCESSIBLE`
+  failure. Right-click row detection stashes the row position on the cell's own
+  label instead.
 
-**Status update — every window's dock/entry shell is now Rust.** As of the
-Files shell port, all ten "Suggested order" windows have their
-`create_*_window` / `open_*` entry point in the `gtkhx-ui` crate, plus the
-Settings form, the standalone dialogs, and the private-chat / private-message
-tabs. What moved to Rust and what stays C splits into two shapes:
+Two smaller ones worth carrying:
 
-- **Shell ports** (dock registration + lifecycle in Rust; the window's
-  *content* stays C behind a `gtkhx_<win>_build_content` seam that returns a
-  still-floating container the Rust shell hands to `dock_bridge`): **Users**
-  (R5.7), **Tasks** (R5.10), **News 1.0/1.2** (R5.11), **News browser 1.5**
-  (R5.12), **Chat** (R5.13), **Files** (R5.16). The dock-bridge pattern proved
-  out across all six docked windows; nothing needed the dynamic-panel path
-  (`gtkhx_dock_embed_dynamic` stays reserved) because private chats / PMs are
-  `AdwTabView` tabs inside the one Chat panel, not separate dock panels.
-- **Content ports** (the widget tree itself built in gtk4-rs, C kept only for
-  genuinely-C leaves — vendored xtext, wire senders, the model structs — behind
-  small accessor/setter seams): the **user list** (`HxUserListView` +
-  `HxUserRow`, R5.8/R5.9), and the **private-message** (R5.14) and
-  **private-chat** (R5.15) tab content trees.
+- **`GtkTreeListModel` decides expandable-vs-leaf once.** Attach children to a
+  node before appending the node; the child-model function fires once and the
+  verdict sticks.
+- **Templates are a per-window choice.** gtk4-rs supports
+  `gtk::CompositeTemplate`, which turns a long run of `child.set_parent()` into
+  XML. Small windows stay code-driven; big ones are worth a template.
 
-Plus the earlier standalone work: **Settings form** (R5.6, 10 of 11 pages),
-**TLS-trust prompt** (R5.4), **RC4-replacement dialog** (folded into R5.3).
+### Permanent seams, not TODOs
 
-**Status update — the standalone-dialog + voice leaf pool is drained.** After
-the shell milestone the small self-contained pieces went leaf-up, each its own
-PR: the **inline-media view dialog** (R5.17, `inline_media_dialog.rs`), the
-**Get-User-Info window** (R5.23, `user_info.rs`), the **Create-Post composer**
-(R5.24, `create_post.rs`), the **emoji picker + `:shortcode:` typeahead**
-(R5.25, `emoji.rs`), and the **Broadcast composer** (R5.26, `broadcast.rs` —
-`hx_send_broadcast` moved to Rust with it, over hotline-proto's native
-`build_broadcast_chunks`). Voice went Rust end-to-end behind the `voice`
-Cargo feature: **users_voice_col + voice_panel** (R5.18/R5.19,
-`users_voice_col.rs` / `voice_panel.rs`), the **voice model** (R5.20,
-`hxvoice-model` crate — a glib GObject port of `voice_model.c`), **PTT**
-(R5.21, `voice_ptt.rs`), and the **voice send path** (R5.22, `hxvoice-send`
-crate — the `hx_send_voice_*` wire senders over `hotline_proto::messages`).
-`src/voice_bridge.c` + `voice_ptt_keyspec.c` remain as the session/htlc + PTT
-key-spec C seams. Each port kept the exact C ABI and its unit/proto/Tier-3
-coverage green; the `text_util.c` → `hxtext` crate port (the text-encoding +
-emoji-shortcode helpers) is in flight on `claude/r5-text-util`.
+Each shell port leaves a thin C `gtkhx_<win>_build_content` (plus an optional
+`_after_embed`); each content port leaves a small accessor/setter seam
+(`hx_msgwin_*`, `hx_gchat_*`, the `HxUserListView` FFI). These are the leaf-up
+boundary. They stay until the corresponding deeper layer (model, wire, dock) is
+itself ported — they are not churn to be removed.
 
-See the **[Inventory — what's still C](#inventory--whats-still-c)** subsection
-below for the honest ledger of the many small pieces that remain.
+### The chat model's end state
 
-**Suggested order**
+The per-chat model and window were reshaped into Rust rather than ported field
+for field. The original tangle kept two lockstep per-session hashtables plus a
+god-object mixing a model back-pointer, several live widget handles, command
+history, render cursors and an inline-media table — with membership stored
+twice. That is now three separate concerns: a pure, testable
+`Conversation`/`Member` model with no GTK (nick completion and tab-cycle are
+methods on it, unit-tested without a display); a `gio::ListModel` of members
+that the user list binds to directly, as the single source of truth; and a
+per-conversation view object. The single per-conversation registry moved to
+Rust as well and is what the multi-connection design builds on. Wire compat was
+untouched throughout — this was client-side state shape only.
 
-1. ✅ **Tracker window** (`tracker.c` + `tracker_row.c`) — shipped (R5.1,
-   see status above). The smallest top-level UI: AdwHeaderBar + search
-   entry + a `GtkColumnView` over the tracker server list. Best place to
-   learn the gtk4-rs idioms because the data model is flat and the widget
-   is one we *want* `GtkColumnView` for anyway. Came in roughly break-even
-   on LOC once the one-time crate scaffolding is counted; the marginal
-   cost of later windows should trend negative.
-2. ✅ **About / Agreement / User Editor** — shipped (R5.2, on
-   `claude/r5-about-agreement-usereditor`). `about.rs` (logo + credits;
-   version embedded from meson via `option_env!("GTKHX_VERSION")`),
-   `agreement.rs` (the server-agreement window, extracted from `gtkhx.c`;
-   `gtkhx_show_agreement` is called by the `on_agreement_signal` adapter and
-   the window is handed back to `sess->agreementwin` so the disconnect
-   cleanup still closes it), and `useredit.rs` (AdwPreferencesPage with the
-   access-bit AdwSwitchRows). The User Editor kept the wire senders
-   (`hx_useredit_create/delete/open`) + the byte-order access-bit table in C
-   and reads the table via new `gtkhx_useredit_access_*` accessors; the
-   account-read reply fills the dialog through a C-callback trampoline, with
-   editor state in an id-keyed thread-local map (Copy id in the handlers →
-   no ref cycles, and a reply after close is a safe no-op). New
-   `src/gtkhx_ui_bridge.c` is the session shim for the non-tracker windows.
-   Net: three windows for +1031/−854 lines (the User Editor's UI grew
-   slightly, but usermod.c/gtkhx.c/about.c shrank a lot).
-3. ✅ **Connect dialog + Bookmarks dialog** (`connect.c` ~1.7k LOC +
-   `bookmarks.c` ~880 LOC) — shipped (R5.3, on `claude/r5-connect-dialog`).
-   `connect.rs` owns the AdwDialog form + all the service functions its C
-   callers link (bookmark SplitButton menu, direct-connect-by-name, builtin
-   bookmarks, reconnect-last cache, `hotline://` URL open/save). `bookmarks.rs`
-   owns the management dialog (the GtkPaned list + AdwPreferencesPage detail
-   form, New / Save / Delete / rename with save-rollback, RC4-migration on
-   select). Both share the cipher / compression picker vocabulary, which lives
-   in the crate-local `cipher_vocab.rs` module now — the earlier interim
-   extraction to a shared C `cipher_vocab.c` (kept so the then-still-C
-   `bookmarks.c` could index the arrays) was folded into Rust once that dialog
-   moved too, so the C `valid_ciphers[]` / `valid_compress()` / dropdown↔byte
-   translators are gone. On-disk bookmark I/O still delegates to the
-   byte-identical `hx_bookmark_*` (`bookmarks_io.c`, GTK-free, Tier-1 tested) —
-   one source of truth for the wire-compatible HTsc format — and the stable
-   cipher byte ↔ name map stays in `bookmark_cipher.c` (Rust calls it via FFI).
-   A `gtkhx_connect_apply` bridge keeps the `sess->htlc.{compressalg,cipheralg}`
-   pokes + `hx_connect` on the C side. The rare legacy pre-HTsc bookmark
-   conversion is re-implemented in Rust (reads the 3-line text file, re-saves
-   via `hx_bookmark_save`).
-4. ✅ **Settings / preferences** (`options.c`) — shipped (R5.6). 10 of 11
-   `AdwPreferencesDialog` pages built by the Rust `options` module via typed
-   pref-bridge accessors over the C `cfgvars[]` registry; the C split-view
-   framework calls each Rust page builder through its `.draw` pointer. Only
-   the two custom-widget pages (Identity icon/GIF picker, Voice GStreamer
-   device combos + PTT capture) keep their C draw functions.
-5. ✅ **Users list** (`users.c`, `users_row.c`, `users_view.c`) — shipped
-   (R5.8/R5.9). Full *content* port: `HxUserListView` (the GtkColumnView +
-   model chain + sorters + gestures) and `HxUserRow` (the row-model GObject)
-   are Rust; the custom Name cell (`users_cell.c`) and the voice-indicator
-   column (`users_voice_col.c`) stay C behind FFI. The Users *window shell*
-   is R5.7. **Still C:** the action-button handlers (`view_*_btn`), the
-   right-click user popover (`user_popup_show` + its GActions), and the
-   `user_create/delete/change/user_list` model↔view glue (see inventory).
-6. ✅ **Tasks window** (`tasks.c`) — shipped (R5.10, shell). The `GtkListBox`
-   of per-transfer `gtask` rows + progress + queue-reorder + the
-   transfer-model coupling stay C; only the dock shell moved.
-7. ✅ **News** — shipped as two shells: **News 1.0/1.2** (`news.c`, R5.11) and
-   the **News browser 1.5** (`news_browser.c`, R5.12). The 1.5 browser has
-   since been content-ported in full — `news_browser.c` is **deleted** and the
-   whole browser lives in the gtkhx-ui `news_browser` module (see N2 below).
-   The flat 1.0/1.2 viewer + in-buffer search stay C.
-8. ✅ **Chat window** (`chat.c`) — shipped (R5.13, shell). xtext output +
-   input + wire senders stay C; the `AdwTabView` that hosts the pchat/PM tabs
-   is C (`chat_tabs.c`). The pchat/PM tab *content trees* were separately
-   content-ported (R5.14 `msg.rs` / R5.15 `pchat.rs`).
-9. ✅ **Files browser** (`files_browser.c` + the `files_*.c` sub-system) —
-   shipped (R5.16, shell). The two `files_panel` GtkColumnViews, DnD
-   (`GtkDropTarget`), the providers (`files_provider.c`,
-   `files_local_provider.c`, `files_remote_provider.c`), transfer
-   integration, the Norton-style shortcut set, and the rename/mkdir/move/
-   get-info sub-dialogs all stay C — the biggest remaining *content* port.
-10. **Toolbar + main window** (`toolbar.c`, `gtkhx.c`'s window creation) —
-    **still C.** The toolbar owns the whole `PanelDock` construction every
-    docked shell registers into, so it ports late (with or after R6's
-    `main()` move). After this, `gtkhx.c` only contains `main()`.
+**What remains is the irreducible C view leaf**: `struct gtkhx_chat`, now
+opaque (defined privately in `chat.c`, reached through `hx_gchat_*`
+accessors), holding the GTK widget handles — window, scrollbar, output, input,
+subject entry, voice panel, media-attach button — plus the user-list widget,
+the view's own `cid`, and the chat-history render cursors. The two Rust *data*
+handles that were conversation state rather than view state (input history, the
+media table) moved into the model, so a private chat's typed history now
+survives closing and reopening its window. `cid` deliberately stayed in the
+view: it is the view's self-identity for its own lookup, not a redundant
+back-pointer.
 
-### Chat-model re-think (M1–M4)
-
-The per-chat model (`struct chat`) and window (`struct gtkhx_chat`) are being
-reshaped into Rust rather than field-for-field ported. The original tangle kept
-two lockstep per-session hashtables (`chats` / `gchats`) plus a
-`struct gtkhx_chat` god-object mixing a model back-pointer, seven live widget
-handles, command history, raw xtext render cursors, and an inline-media table —
-with membership stored *twice* (`chat->users` and, again, the user-list model).
-The re-think splits that into the three concerns it actually is: a pure,
-testable `Conversation` + `Member` model (membership + subject, no GTK); a
-`gio::ListModel` of members the user list binds to directly (single source of
-truth); and a per-conversation view object owning the widgets + history +
-render cursors + media table as named sub-structs. Nick completion / tab-cycle
-became methods on the pure model, unit-tested without a display. Wire compat is
-untouched — client-side state shape only. Phasing, leaf-up:
-
-- ✅ **M1 — pure model + nick completion.** `hxchat-model` crate
-  (`Member` / `MemberList` / `Conversation`) with the tested `complete_styled`
-  nick-completion; `chat.c::tab_nick_comp` calls into it.
-- ✅ **M2 — members as a `gio::ListModel` (Option A).** `hxmember-model`
-  (`HxMember` / `HxMemberModel`); each chat owns an authoritative
-  `struct chat::member_model` fed by the `users.c` fan-out and read for
-  completion. The rendered `HxUserListView` keeps its own row store; the model
-  is the data source of truth.
-- ✅ **M3 — collapse the gchat.** The readline history → Rust `InputHistory`
-  (retired `history.c`, also wired into PM inputs); the inline-media handle
-  table → Rust `MediaTable` (`gtkhx-boxed`, retired the `GHashTable` +
-  `media_next_id`); the chat-history render cursors grouped into
-  `struct hx_chat_history_render` (stays C — the `textentry*` point into
-  xtext); and the raw `gtkhx_chat->chat` back-pointer dropped (derive via
-  `chat_with_cid`).
-- ✅ **M4 — retire the two per-session tables.** *Done.* **M4a: collapsed
-  `sess->gchats` into `sess->chats`** — the model
-  (`struct chat`, always present) is the single per-conversation registry
-  entry and owns an optional `struct chat::view` (the window), killing the
-  two-tables-in-lockstep hazard. `gchat_with_cid` is now a thin wrapper over
-  `chat_with_cid(sess, cid)->view` (later the single `sess->chats` table itself
-  moved into the Rust `HxChatRegistry` — see M4b.5-b below). **M4b (membership dedup — done):** the
-  `chat->users` vs `member_model` duplication is gone. Walking the increments:
-  the write-only `chat->nusers` was deleted; `HxMemberModel` became the
-  authoritative per-chat membership store and took ownership of the `ignore`
-  flag; the user-list view and every UI path were re-keyed off the `hx_user*`
-  pointer onto `(cid, uid)`, so **the view/UI hold no `hx_user*` at all**;
-  then all C readers (`rcv.c`, `msg.c`, `commands.c`, `options.c`) moved to
-  the model read-FFI and `chat->users` was deleted — `struct hx_user` shrank
-  to a two-field signal-payload carrier `{uid, nick_color}`. The capstone
-  (M4b.5) model port made `struct chat` an opaque handle over a Rust
-  `HxConversation` (`{cid, subject, member_model, view}`), reached only
-  through the `hx_chat_*` accessors. The `sess->chats` registry itself then
-  moved into Rust too (M4b.5-b: the `HxChatRegistry` in gtkhx-session, `cid →
-  HxConversation`, which also feeds the R7 multi-conn design). ✅ **Chat-view
-  retirement (done).** The last C aggregate in the chat area, `struct
-  gtkhx_chat` (the view `HxConversation.view` points at), can't be fully
-  *deleted* while xtext stays C — its `render` cursors are raw xtext
-  `textentry*` that can't cross into Rust — so the achievable goals were to make
-  it opaque and thin the leaf, both shipped:
-  - **Opaque (phases 1–2).** `struct gtkhx_chat` and its embedded
-    `struct hx_chat_history_render` moved out of `session.h` (now just a forward
-    declaration) into private definitions in `chat.c`; the four external
-    consumers (`options.c`, `users.c`, `inline_media_attach.c`, `notify.c`)
-    route through `hx_gchat_*` accessors, mirroring the `struct chat`
-    opaque-ification. The incomplete type caught `notify.c`'s stray field access
-    at compile time.
-  - **Handle relocation (phase 3).** The two Rust *data* handles that are
-    conversation state, not view state — `chat_history` (`InputHistory`) and
-    `media_table` (`MediaTable`) — moved into `HxConversation` (created/freed in
-    `hx_conversation_new`/`_free`, reached via `hx_chat_input_history` /
-    `hx_chat_media_table`), so a pchat's typed history now survives closing +
-    reopening its window. `userlist` and `cid` deliberately stayed in the view:
-    the former is a `GtkColumnView`-backed **widget** already reachable via
-    `HxConversation.view`, the latter is the view's self-identity for its
-    `chat_with_cid` lookup (it holds no model back-pointer), not a redundant dup.
-
-  What remains is the irreducible C **view leaf** — the GTK widget handles
-  (`window` / `vscroll` / `output` / `input` / `subject` / `voice_panel` /
-  `media_attach_btn`), the `userlist` widget, `cid`, and the xtext `render`
-  cursors — a permanent seam by design, not a TODO.
-
-### Inventory — what's still C
-
-With every window's *shell* now Rust, the remaining R5 surface is (a) a set of
-small standalone dialogs, (b) the *content* still living behind the shells, and
-(c) shared UI infrastructure. This is the honest ledger of "much more that is
-still in C" as of the shell-completion milestone.
-
-**A. Standalone dialogs / windows** (self-contained — was the best next-target
-pool; the small ones are now drained, three larger items remain):
-
-- ✅ **User Info window** — shipped (R5.23, `user_info.rs`). `output_user_info`
-  moved to Rust; the request side (`hx_get_user_info` in `users.c`) is a wire
-  sender and stays C.
-- ✅ **Create Post composer** — shipped (R5.24, `create_post.rs`). `hx_post_news`
-  is the C wire sender.
-- ✅ **Broadcast composer** — shipped (R5.26, `broadcast.rs`). The
-  `hx_send_broadcast` wire sender moved to Rust with it (native
-  `build_broadcast_chunks`); the toolbar entry point is the Rust
-  `gtkhx_broadcast_dialog_open`.
-- ✅ **Inline-media view dialog** — shipped (R5.17, `inline_media_dialog.rs`).
-- ✅ **Emoji picker + `:shortcode:` typeahead** — shipped (R5.25, `emoji.rs`).
-  `hx_emoji_button_new` / `hx_emoji_typeahead_attach` resolve against the crate;
-  the chat / pchat / PM inputs still call them via FFI.
-- **Preview window** — `preview.c` (~1540 LOC): text / image / PDF / source
-  viewers + HTXF-worker marshalling. Still deferred — hinges on `sourceview5`
-  + a poppler crate aligning with the pinned gtk4 0.10 (see
-  [preview-porting-scoping.md](preview-porting-scoping.md)).
-- **System tray** — `tray.c` (~880 LOC).
-- **Files path-completion popover** — `files_complete.c` (~690 LOC).
-
-**B. Content still C inside a Rust window shell** (each is a *content* port like
-`users_view` / `msg` / `pchat` were — the big remaining category):
-
-- **Users controller glue** — `view_*_btn` action handlers, the right-click
-  `user_popup_show` popover + its `GAction`s, the `user_create/delete/change/
-  user_list` model↔view glue, the colour helpers (`user_color_gdk` /
-  `user_nick_color_gdk`), and the wire senders (`hx_kick_user`,
-  `hx_get_user_info`, `hx_change_name_icon`). Deliberately deferred — it's
-  controller/wire glue tied to the C `hx_user` / `chat` structs, not a clean
-  UI leaf (revisit when the chat model ports).
-- **Custom cells / columns** — `users_cell.c` (the snapshot-rendered Name
-  cell) stays C behind the `HxUserListView` FFI. ✅ The voice-indicator column
-  (`users_voice_col.c`) moved to Rust (R5.18/R5.19, `users_voice_col.rs`,
-  behind the `voice` Cargo feature).
-- **Tasks content** — the `gtask` row build, progress / queue-badge updates,
-  the up/down queue reorder, and `task_update` / `file_update` (transfer
-  progress) in `tasks.c`.
-- **News content** — ✅ the flat **1.0/1.2** viewer shipped Rust (`news.rs`,
-  R5.27): the Post/Reload/Find button bar, the read-only `GtkTextView`, the
-  in-buffer Find (`GtkSearchBar` + match highlight/nav + Ctrl+F), and the
-  `news-file`/`news-post` signal output (`output_news_*`, `reload_news`,
-  `open_news` keep their C ABI). Widget-ownership seam: the three handles stay
-  on the C `session` (a narrow `gtkhx_ui_bridge.c` accessor set) for
-  `gtkutil.c` setbtns + `options.c` theme-apply; the search state is Rust-side.
-  The wire senders `hx_get_news` / `hx_post_news` stay C (R2 already put the
-  `news_post` chunk builder in `hotline-proto`; a `hxnews-send` crate mirroring
-  `hxchat-send` is the optional follow-up).
-
-  The threaded **1.5 browser** (`news_browser.c`, ~2.3k LOC) was a monolithic
-  GObject/GTK window (tree model, factory, async reply matching, dialogs, one
-  shared struct) with no clean buildable sub-unit, so it was carved down
-  leaf-first into the **`hxnews-model`** crate (pure/GObject bits that unit-test
-  headless — the display-less GTK glue can't) ahead of the GTK port, then the
-  window itself moved in one port (N2l). **`news_browser.c` is now deleted** —
-  the whole browser is Rust. The N2a–N2m leaf-first build-up:
-  - ✅ **N2a** — the post-**threading layout** (`thread_parent_indices`): maps a
-    category's flat post list to each post's parent array index, encoding the
-    parentid==0 / self / missing / duplicate-id rules the C walker did inline
-    with a `GHashTable`. `catlist_thread_into` calls it; 11 unit tests.
-  - ✅ **N2b** — **`HxNewsNode`**, the per-row tree node, moved to a
-    `glib::subclass` GObject (`node.rs`) exporting the `hx_news_node_*` C ABI
-    (get_type / new + field accessors + lazy children `GListStore`).
-    `news_browser.c` dropped the C struct + `G_DEFINE_FINAL_TYPE` and reaches
-    the node through the accessors; 7 headless tests.
-  - ✅ **N2c** — the news **wire senders** moved to a dedicated `hxnews-send`
-    crate (mirrors `hxchat-send`): flat NEWS_GETFILE / NEWS_POST + the 1.5
-    DIRLIST / CATLIST / GETTHREAD / POSTTHREAD / DELETETHREAD / DELNEWSDIRCAT /
-    MAKENEWSDIR / MAKECATEGORY, over the native `hotline_proto::build` builders.
-  - ✅ **N2d** — the **category tree builder** (`hx_news_build_category_tree`):
-    the reply-threaded `HxNewsNode` tree that `catlist_thread_into` assembled
-    inline (create a node per post, thread via N2a, and the two-pass append that
-    keeps `GtkTreeListModel` from fixing a parent as a leaf before its subtree
-    exists) moved to `node.rs`. The C shim just marshals the posts into a
-    `#[repr(C)]` array; ownership stays inside Rust; 3 headless tests.
-  - ✅ **N2e** — the **create + delete dialogs** (`news_dialogs.rs`): the New
-    Folder / New Category name prompt and the delete-confirmation, as
-    `AdwAlertDialog`s over the `hxnews-send` senders. C keeps the selection logic
-    (the toolbar handlers pick the target node) and a one-line
-    `gtkhx_news_browser_refresh` bridge; Rust owns the dialog, the mkdir / mkcat
-    / delete send, and the post-send refetch. Create holds the parent node for a
-    targeted refresh; delete snapshots (kind/name/path/postid) by value to dodge
-    the use-after-clear the C already guarded against.
-  - ✅ **N2f** — the **tree view** (`news_tree.rs`): the `GtkTreeListModel`
-    child-model function (leaf-vs-expandable decision) and the `GtkListView` row
-    factory (setup / bind / unbind + lazy DIRLIST/CATLIST fetch on first expand).
-    Built the gtk-rs-idiomatic way (closures, like `users_view.rs`): two
-    builders — `gtkhx_news_build_tree_model` / `gtkhx_news_build_factory` — hand
-    the wired objects back to the ~15-line C construction that still owns
-    `root_store` / `tree_model` / `selection` (read from a dozen other spots).
-    Two small C bridges feed the factory: `gtkhx_news_icon_for_kind` and
-    `gtkhx_news_fetch_for_expanded` (keeps `fetch_dirlist` / `fetch_catlist` +
-    the pending-request tables C). The selection→content handler stays C.
-  - ✅ **N2g** — the **compose window** (`news_compose.rs`): the New Post / Reply
-    modal (subject entry, body editor, the "Replying to …" context card) over
-    `hx_news15_post_thread`. C keeps the toolbar handlers' selection logic
-    (category path, reply target, body prefetch, "Re:" prefill) and two bridges:
-    `gtkhx_news_refresh_category` (settle after a post) and
-    `gtkhx_news_node_date_string` (format the reply's date via the shared
-    `post_date_format`). `find_category_node` + `post_date_format` stay C.
-  - ✅ **N2h** — the **post rendering + breadcrumb** (`news_render.rs`): the
-    right-pane render (subject / meta / body, empty-state + "Loading…" +
-    URL-tagging) and the selection breadcrumb tree-walk. `render_selected_post`
-    and `update_breadcrumb` stay in C as thin one-line delegators that pass the
-    browser's live widgets down; the logic is Rust. Cache-miss body fetch routes
-    back through the `gtkhx_news_fetch_thread` bridge (over the static
-    `fetch_thread` + pending tables); the date reuses `gtkhx_news_node_date_string`.
-  - ✅ **N2i** — the **DIRLIST node builder** (`hx_news_build_dirlist_into`): the
-    last inline node-creation loop in a reply handler
-    (`gnews_browser_handle_dirlist`) moved to `hxnews-model` next to the category
-    builder, so the crate is now the single tested owner of all wire→node
-    construction (folder / category / post). The C handler marshals `folder_item`
-    entries into a `#[repr(C)]` array and calls it; the path-join
-    (`build_child_path`) moved to Rust too. 3 headless tests.
-
-  - ✅ **N2j — the 1.5 news *receive path*.** The three reply handlers moved
-    out of `rcv.c` into the new **`hxnews-recv`** crate (they were already
-    registered from Rust via `hxnews-send`'s `task_new`, so only the bodies
-    moved; the symbols resolve against `hxnews-recv` at the final link). Each
-    parses `htlc->in` to a Rust-owned handle and emits its `GtkhxSession` signal,
-    and the view handler feeds that handle straight to the `hxnews-model` builder
-    — the old round-trip through C GUI structs (`news_item` / `news_group` /
-    `news_folder` / `folder_item`) is gone, and those structs were deleted.
-    - **Catalog** (`rcv_task_newscat_list`): `gtkhx_proto_parse_catlist` →
-      `gnews_catalog->parsed` → `hx_news_build_category_tree_from_catlist` (shares
-      the threading core with the N2d array builder).
-    - **Dirlist** (`rcv_task_newsfolder_list`): a new whole-message
-      `parse_dirlist` in `hotline-proto` (walks the NEWSFOLDERITEM / CATEGORYITEM
-      chunks) → `gnews_folder->parsed` → `hx_news_build_dirlist_from_dirlist`
-      (shares an `append_dir_node` core with the N2i array builder). `struct
-      folder_item` / `news_folder` deleted outright.
-    - **Thread** (`rcv_task_news_post`): the existing
-      `gtkhx_proto_parse_news_thread_reply` + a `news_post_new` bridge. (The
-      `news_item` get-post stub was since retired in N2k, and the `news_post`
-      thread carrier moved to Rust in N2m.)
-
-    New `news_recv_bridge.c` exposes `htlc->in` + the `*_set_parsed` /
-    `news_post_new` shims. **No news code remains in `rcv.c`** — the only news
-    path through it is the generic `hx_rcv_task` trans-ID dispatch shared by every
-    reply type. hotline-proto + hxnews-model + hxnews-recv are unit-tested; the
-    catalog / dirlist / thread paths pass Tier 3 against the live mhxd container.
-
-  - ✅ **N2k — get-post stub retired** (`struct news_item`). `hx_news15_get_post`
-    now takes `(path, postid, mime, target)` scalars directly; the thread fetch
-    rides the target `HxNewsNode` ref (transfer-full) straight through the reply
-    task to the thread handler, so the `pending_threads` correlation table and
-    the stub struct are both gone. `struct news_item` / `news_group` /
-    `news_parts` deleted — no C news wire struct is left on the send side.
-
-  - ✅ **N2l — the browser itself** (`news_browser.c` → gtkhx-ui `news_browser`).
-    The last big rock: the ~1.5k-LOC monolith moved to Rust in one logical port.
-    A `NewsBrowser` thread-local singleton owns construction, the two-pane
-    layout, the RPC fetch flow (DIRLIST / CATLIST / GETTHREAD), the three reply
-    handlers (`gnews_browser_handle_*`, now `#[no_mangle]` Rust), refresh, the
-    toolbar, selection→content, the disconnected-state `AdwBanner`, and the
-    panel lifecycle (`open_news_browser` + the `PanelWidget::presented` hook).
-    The in-flight fetch tables (`pending_dirlists` / `pending_catlists`) became
-    Rust thread-local `HashMap`s (carrier-ptr → reffed target node). The whole
-    N2d–N2j Rust surface (`news_tree` / `news_render` / `news_compose` /
-    `news_dialogs` + the `hxnews-model` builders) is now stitched together from
-    Rust rather than C. `news_browser.c` is **deleted**; the only news code left
-    in `rcv.c` is the generic reply dispatch. A handful of C leaves stay in
-    `news_recv_bridge.c`: `htlc->in`, the live htlc version + access bitmap, the
-    post-date formatter (`hl_date_decode` + `strftime`), and the row-icon loader
-    (pixbuf → 1.5× → texture). Not headless-testable (display-less GTK); verified
-    by build + the news Tier 3 suite + a manual GUI pass.
-
-  - ✅ **N2m — the reply carriers** (`gnews_folder` / `gnews_catalog` /
-    `news_post`) moved to a Rust-owned `carrier` module in `hxnews-recv`: a
-    shared `{ path, parsed }` box for the folder / catalog fetch carriers, a
-    `{ body, target }` box for the GETTHREAD reply. The `#[no_mangle]` accessors
-    keep the exact symbol names the browser (gtkhx-ui) and senders (hxnews-send)
-    link against, and C only ever sees an opaque `void *` (`rcv.c` / `gtkhx.c`
-    pass it straight through, never dereferencing). `news_send_bridge.c` deleted
-    wholesale; the carrier + `news_post` accessors left `news_recv_bridge.c`;
-    `struct gnews_folder` / `gnews_catalog` / `news_post` / `path_hist` removed
-    from `session.h`. The dead `listing` flag (written by the senders, read by
-    nobody since the two-window UI retired) and its `mark_listing` accessors went
-    with them.
-
-  **Remaining:** the `proto_helpers.c` per-chunk parse shims
-  (`hx_newscat_parse` / `hx_news_dirlist_parse_*`) are production-dead
-  (test-only) — a small cleanup. Otherwise the 1.5 news path is fully Rust end
-  to end: the only C left is `news_recv_bridge.c`'s four leaves (`htlc->in`,
-  htlc version + access, post-date formatter, row-icon loader) and `rcv.c`'s
-  generic trans-ID dispatch.
-- **Chat content** — the xtext output widget (vendored, stays C forever) and
-  the wire senders. ✅ The `AdwTabView` tab strip moved to Rust (`chat_tabs.rs`;
-  the libpanel needs-attention flag rides a `gtkhx_dock_set_needs_attention`
-  bridge shim). ✅ The input key handler moved to Rust (`chat_input.rs`:
-  Ctrl+K / Return-to-send / Tab completion / Up-Down history via
-  `gtkhx_chat_input_attach`; the tested `tab_nick_comp` completer stays C and
-  is called from it). ✅ The incoming chat-invitation dialog moved to Rust
-  (`chat_invite.rs`); both its senders are now Rust in `hxchat-send`
-  (`hx_chat_join` + `hx_reject_chat`). See the chat-model re-think above for the
-  model side.
-- **Files content** — the whole two-panel browser: the two `files_panel`
-  GtkColumnViews, DnD, the providers (`files_provider.c`,
-  `files_local_provider.c`, `files_remote_provider.c`, `files_ops.c`,
-  `files_entry.c`, `filelist_walker.c`), transfer integration, and the
-  rename / mkdir / move / get-info sub-dialogs. The largest content port left.
-- ✅ **Voice UI** — shipped Rust end-to-end behind the `voice` feature:
-  `voice_panel.rs` (per-room Join/Leave/Mute, R5.18/R5.19), the `hxvoice-model`
-  crate (glib GObject port of `voice_model.c`, R5.20), `voice_ptt.rs` (R5.21),
-  and the `hxvoice-send` crate (the `hx_send_voice_*` wire senders, R5.22).
-  `voice_bridge.c` (session/htlc accessors) + `voice_ptt_keyspec.c` (PTT
-  key-spec vocabulary, keeps its C unit test) remain as C seams.
-
-**C. Shared UI infrastructure still C** (ports late; some may stay):
-
-- `gtkutil.c` (~1100 LOC): themed pixmap buttons, dialog helpers,
-  `init_keyaccel`, the `.gtkhx-*` style appliers — pervasive; each helper
-  migrates when its last C caller does.
-- `notify.c` (~380, desktop notifications), `gtkurl.c` (URL click handling),
-  `sound.c` (GSound), `gtkhx_theme.c` / `gtkhx_icon.c` (theming singletons),
-  `gtkhx_log.c` (chat logger).
-- `gtkhx.c` — `main()` + `GtkApplication` init + the `GtkhxSession`
-  signal→view adapters (`on_*_signal`) + `output_user_info` → **R6**.
-- `toolbar.c` + the libpanel dock infra (`hx_panel*.c`, `panel_registry.c`,
-  `hx_split.c`, `dock_layout*.c`, `dock_bridge.c`) — the dock **stays C by
-  design** (see [dock-porting-scoping.md](dock-porting-scoping.md)); the
-  toolbar ports with/after R6.
-
-**Permanent seams, not TODOs:** each shell port leaves a thin C
-`gtkhx_<win>_build_content` (+ optional `_after_embed`); each content port
-leaves a small accessor/setter seam (`hx_msgwin_*`, `hx_gchat_*`, the
-`HxUserListView` FFI). These are the leaf-up boundary and stay until the
-corresponding deeper layer (model, wire, xtext) is itself ported — they are not
-churn to be removed.
-
-**Gotchas**
-
-- ✅ **Most of these windows are docked in libpanel — one strategy for all of
-  them.** *(Shipped — `src/dock_bridge.{c,h}`, built with the Users shell
-  R5.7 and reused by Tasks / News / News browser / Chat / Files.)* Chat,
-  Users, News, News browser (1.5), Tasks, and Files are each an `HxPanel` (a
-  `PanelWidget` subclass) inside the toolbar's `PanelDock`; gtk4-rs has no
-  libpanel bindings, so (per
-  **[dock-porting-scoping.md](dock-porting-scoping.md)**) libpanel + the dock
-  infra stay C and the Rust shells register through the bridge
-  (`gtkhx_dock_raise_if_open` / `gtkhx_dock_embed` / `_embed_dynamic`) without
-  naming a libpanel type. The kind/area enums cross as small ints mirrored in
-  the crate's `dock` module; a shared `crate::dock` wrapper backs every shell.
-  `gtkhx_dock_embed_dynamic` shipped but is currently unused — pchat/PM turned
-  out to be `AdwTabView` tabs, not dynamic dock panels. **The Tracker is NOT
-  docked** — standalone top-level window.
-  - Windows that integrate the panel as their *window object* (News browser,
-    Files) point `br->window` at the content box (a widget in the panel's
-    tree once embedded) rather than the dock panel the shell owns; a
-    content-`"destroy"` teardown disconnects any session handler on the
-    embed-failure path (do **not** free the backing struct there — `destroy`
-    fires at the *start* of teardown, so child callbacks may still read it).
-- **`preview.c` is standalone too, but external-viewer-heavy.** The file
-  preview window is a `GtkWindow` (no dock), so it's free of the libpanel
-  question — but it has four viewers (text / image / PDF / source) and
-  cross-thread HTXF-worker marshaling. Its Rust port hinges on `sourceview5`
-  + a poppler crate aligning with the pinned gtk4 0.10, gated behind Cargo
-  features like the existing `HAVE_POPPLER` / `HAVE_GTKSOURCEVIEW`. See
-  **[preview-porting-scoping.md](preview-porting-scoping.md)**. Standalone
-  dialogs/windows already ported: Tracker (R5.1), About/Agreement/User Editor
-  (R5.2), Connect/Bookmarks/RC4 (R5.3), TLS-trust (R5.4).
-- ✅ **The `gtk_hlist_compat` shim is gone** (Phase 5 modernization, before
-  R5 started): its five consumers (`tracker.c`, `news15.c`, `options.c`,
-  `users.c`, `files.c`) were migrated to `GtkColumnView` directly and the
-  interim shim (and the older GtkCList fork) deleted. Every R5 list widget is
-  a `GtkColumnView` / `GtkListView` / `GtkListBox` from the start.
-- **`xtext.c` keeps existing.** We don't fight that battle. The chat window
-  port (step 9) creates a `XText`-like wrapper struct on the Rust side that
-  owns a `XText` widget and offers a safe API.
-- **Templates and `.ui` files.** gtk4-rs supports `gtk::CompositeTemplate`
-  which loads a `.ui` XML and binds named widgets to struct fields. The
-  current code is code-driven (Phase 4 pre-flight decision). For Rust we
-  *should* use templates — they reduce 200 lines of `child.set_parent()` to
-  20 lines of XML. Make this a per-window choice; tracker is small enough
-  to be code-driven, files is big enough to want a template.
-- **GObject properties everywhere.** gtk4-rs is most ergonomic when state is
-  exposed as bindable `glib::Property`s. The Rust port is the right time to
-  adopt that style — `connect_notify_local` on a property is easier to
-  reason about than the current "callback fires, update widget, update
-  prefs."
-
-**Exit criteria:** Every `.c` file in `src/` except `xtext.c` (and the
-generated cbindgen headers) is deleted. The C build target compiles roughly
-two files — `main.c` and the xtext bridge.
+**This is a permanent seam by design, not a TODO.** It closes when the chat
+window's content itself ports, not before.
 
 ---
 
-## Phase R6 — `main()` and `GtkApplication` in Rust
+## Inventory — what's still C
 
-**Goal:** Delete the last meaningful C and ship a Rust binary. `gtkhx.c`'s
-`main()`, the `GtkApplication` activate handler, the signal-connect calls,
-the GIOChannel-based fd watches — all of it moves into `crates/gtkhx-app/`.
-The build produces a single Rust binary that links `xtext` as a static lib.
+With every window's shell in Rust, the remaining surface is (A) a few
+standalone windows, (B) the *content* still living behind the shells, and (C)
+shared infrastructure. This is the honest ledger.
 
-**Work items**
+### A. Standalone windows
 
-1. `crates/gtkhx-app/` with `main.rs`. Initializes adw, builds the application
-   id `com.nasledov.gtkhx`, wires the activate handler.
-2. The `GtkApplication` becomes `AdwApplication`. The hamburger-menu GActions
+The small self-contained pool is drained; three larger items remain.
+
+- **Preview window** (`preview.c`) — text / image / PDF / source viewers plus
+  HTXF-worker marshalling. Deferred: it hinges on `sourceview5` and a poppler
+  crate aligning with the pinned gtk4 family, gated behind Cargo features the
+  way the existing `HAVE_POPPLER` / `HAVE_GTKSOURCEVIEW` gates work. See
+  [preview-porting.md](preview-porting.md). It is a plain
+  `GtkWindow` with no dock involvement, so it is free of the libpanel question.
+- **System tray** (`tray.c`).
+- **Files path-completion popover** (`files_complete.c`).
+
+### B. Content still C inside a Rust window shell
+
+Each of these is a *content* port of the same shape as the user-list, private
+message and private chat ports: build the widget tree in gtk4-rs and keep
+genuinely-C leaves behind FFI. This is the big remaining category.
+
+- **Files browser** — the largest content port left: the two `files_panel`
+  `GtkColumnView`s, drag-and-drop (`GtkDropTarget`), the three providers
+  (`files_provider.c`, `files_local_provider.c`, `files_remote_provider.c`),
+  `files_ops.c` / `files_entry.c`, transfer integration, the Norton-style
+  shortcut set, and the rename / mkdir / move sub-dialogs. The model and
+  wire halves are already Rust (`hxmodel::files`, the FILE_LIST populate and
+  decode, the Get Info dialog).
+- **Chat content** — the render and output path in `chat.c` (`xprintline*`,
+  `output_chat_from_event`, the history batch renderer, word-click handling),
+  window construction, the private-chat leaf, and the wire senders. The tab
+  strip, the input key handler and the chat-invitation dialog are already Rust,
+  as is the output widget itself. The model side is described above.
+- **Users controller glue** — the action-button handlers, the right-click user
+  popover and its `GAction`s, the `user_create` / `delete` / `change` /
+  `user_list` model↔view glue, the colour helpers, and the wire senders. The
+  list view and row are already Rust. Deliberately deferred: this is
+  controller and wire glue tied to the remaining C session structs, not a clean
+  UI leaf.
+- **Custom cells** — `users_cell.c`, the snapshot-rendered Name cell, stays C
+  behind the `HxUserListView` FFI.
+- **Tasks content** — the `gtask` row build, progress and queue-badge updates,
+  the up/down queue reorder, and the transfer-progress handlers in `tasks.c`.
+- **Private-message model + broadcast rendering** — `msg.c` keeps the `msgwin`
+  struct and its lifecycle, the input handlers, and the message / broadcast
+  render path; the tab content tree is already Rust.
+- **Inline media** — the attach / upload / download paths
+  (`inline_media*.c`). The view dialog is Rust, and the decode itself is the
+  `hx-image-decode` crate behind a thin C shim (`inline_media_decode.c`, which
+  also carries the `_Static_assert`s pinning the Rust enum discriminants).
+- **Settings** — `options.c` keeps the `cfgvars[]` registry, the change hooks
+  that re-apply prefs across live widgets, the prefs parser and the two
+  custom-widget pages (Identity icon/GIF picker, Voice device combos and PTT
+  capture). The other pages are Rust page builders called through the C
+  framework's `.draw` pointers.
+
+### C. Shared infrastructure
+
+Ports late; some of it may never need to.
+
+- `gtkutil.c` — themed pixmap buttons, dialog helpers, `init_keyaccel`, the
+  `.gtkhx-*` style appliers. Pervasive; each helper migrates when its last C
+  caller does.
+- `notify.c` (desktop notifications), `gtkurl.c` (URL click handling),
+  `sound.c` (the thin shim over `hxsound`), `gtkhx_theme.c` / `gtkhx_icon.c`
+  (theming singletons), `gtkhx_log.c` (the `hx_printf` → session-signal shim; not a
+  transcript logger).
+- The remaining model-side C: `rcv.c` (now the generic dispatch plus the
+  post-LOGIN state machine), `network.c`, `commands.c` (the slash-command
+  parser — never a wire-protocol file), `proto_helpers.c`, `proto_trace.c`
+  (debug-only, deliberately deferred), `hxnet_bridge.c`, and the small bridge
+  shims each Rust module reaches C through.
+- `gtkhx.c` — `main()`, `GtkApplication` init, and the `GtkhxSession`
+  signal→view adapters.
+- `toolbar.c` plus the libpanel dock infrastructure (`hx_panel*.c`,
+  `panel_registry.c`, `hx_split.c`, `dock_layout*.c`, `dock_bridge.c`). **The
+  dock stays C by design** — gtk4-rs has no libpanel bindings, so Rust shells
+  register through `dock_bridge.c` without ever naming a libpanel type; see
+  [../docking.md](../docking.md). The toolbar ports with or
+  after `main()`, because it owns the `PanelDock` every shell registers into.
+
+> One wrinkle worth remembering from the shell ports: windows that treat the
+> panel as their window object should point their `window` field at the content
+> box (a widget inside the panel's tree once embedded) rather than the dock
+> panel the shell owns. The content `"destroy"` teardown disconnects any
+> session handler on the embed-failure path — but must **not** free the backing
+> struct there, because `destroy` fires at the *start* of teardown and child
+> callbacks may still read it.
+
+---
+
+## `main()` and `GtkApplication` in Rust
+
+**Goal:** delete the last meaningful C and ship a Rust binary. `gtkhx.c`'s
+`main()`, the `GtkApplication` activate handler, the signal-connect calls and
+the GIOChannel-based fd watches all move into a new application crate.
+
+Work items:
+
+1. An app crate with `main.rs`: initialize adw, build the application id
+   `com.nasledov.gtkhx`, wire the activate handler.
+2. `GtkApplication` becomes `AdwApplication`. The hamburger-menu GActions
    migrate to `ActionEntry::builder()`. Style-manager (light/dark/system)
    tracking is straightforward in libadwaita-rs.
-3. Resources (the gresource bundle with icons, the AppStream metadata path,
-   etc.) load via `gio::Resource::load()` or — better — via the
-   `gtk4-macros::gresource` proc-macro for compile-time embedding.
-4. Replace Meson's `executable()` invocation with `cargo build --release
-   --bin gtkhx` + an install rule that copies the produced binary to
-   `$prefix/bin/`. Or keep the meson-driven C build for one more cycle and
-   produce a Rust staticlib that the C `main.c` calls into. Pick the lower-
-   risk option at the time.
-5. Update CI: the `meson compile` step still runs (it now mostly just runs
-   cargo plus the install rules), and we add a `cargo build` step on its
-   own to catch crate-only breakage early.
+3. Resources (the gresource bundle, the AppStream metadata path) load via
+   `gio::Resource::load()` or, better, the `gtk4-macros::gresource` proc-macro
+   for compile-time embedding.
+4. Replace Meson's `executable()` with `cargo build --release --bin gtkhx` plus
+   an install rule — or keep the meson-driven C build for one more cycle and
+   have a small C `main.c` call into a Rust staticlib. Pick the lower-risk
+   option at the time.
+5. CI adds a standalone `cargo build` step to catch crate-only breakage early.
 
-**Gotchas**
+Gotchas:
 
-- AppStream / `.desktop` / icon installation needs to keep working. These are
-  data files, not code; meson keeps installing them. The post-install
-  `gtk-update-icon-cache` / `update-desktop-database` hooks stay too.
-- The Flatpak manifest (`com.nasledov.gtkhx.yml`) needs a Rust SDK extension.
-  GNOME's `org.freedesktop.Sdk.Extension.rust-stable` is the canonical one,
-  enabled via `sdk-extensions` in the manifest and `prepend-path` for
-  `/usr/lib/sdk/rust-stable/bin`.
+- AppStream / `.desktop` / icon installation must keep working. These are data
+  files, not code; meson keeps installing them, and the post-install
+  `gtk-update-icon-cache` / `update-desktop-database` hooks stay.
+- The Flatpak manifest needs a Rust SDK extension —
+  `org.freedesktop.Sdk.Extension.rust-stable`, enabled via `sdk-extensions` and
+  `prepend-path` for `/usr/lib/sdk/rust-stable/bin`.
 - Translation: `po/`'s French strings need to keep being extracted. `xgettext`
-  understands Rust source files (with some flag fiddling); `gettext-rs`
-  provides the `gettext!` macro. Validate before R6 that the strings still
-  round-trip.
+  understands Rust with some flag fiddling; validate that the strings still
+  round-trip **before** starting, not after.
 
-**Exit criteria:** `src/` is gone or contains only `xtext.c` + headers.
-`gtkhx` is built by cargo. Everything that worked before still works:
-launches on Wayland under GTK 4 / libadwaita, connects to mhxd / Janus /
+**Exit criteria:** `src/` contains only the small C seams the inventory above
+calls permanent (the dock infrastructure, the `build_content` hooks, the bridge
+shims), `gtkhx` is built by cargo, and everything that worked before still
+works: launches on Wayland under GTK 4 / libadwaita, connects to mhxd / Janus /
 Badmoon, chat / files / news / tracker all functional, Tier 3 green.
 
 ---
 
-## Phase R7 — Multi-connection & tabbed UI
+## Multi-connection & tabbed UI
 
-**Goal:** Honor the long-deferred `MAX_CONN > 1` ask, now that the
-codebase is amenable to it. Tabs across the top of the main window
-(`AdwTabView`), one connection per tab, independent transfer queues, shared
-preferences and bookmarks.
+**Goal:** honour the long-deferred `MAX_CONN > 1` ask, now that the codebase is
+amenable to it. Tabs across the top of the main window (`AdwTabView`), one
+connection per tab, independent transfer queues, shared preferences and
+bookmarks.
 
-This is `ROADMAP.md` Phase 5's multi-conn work, finally done — but cheap
-because the R3 work made a connection a struct, the R4–R5 work made the UI
-a tree of widgets, and the R2 work made the wire format reusable across
-instances.
+This is the root `ROADMAP.md`'s multi-conn work, finally done — and cheap,
+because the networking work made a connection a struct, the UI work made the
+interface a tree of widgets, and the protocol work made the wire format
+reusable across instances. Detailed design lives in
+`docs/multi-connection.md`.
 
-**Work items**
+Work items:
 
-1. `gtkhx_app::App` owns a `Vec<ConnectionTab>` (or similar). Each tab pairs
-   an `hxnet::Connection` actor with a UI subtree (chat, users, news, files
-   for that connection).
-2. `AdwTabView` in the toolbar window holds the tabs. The "Connect" action
-   opens a new tab; closing a tab disconnects the underlying connection.
-3. The transfer window is global — transfers list all connections' in-flight
+1. The app owns a collection of connection tabs. Each pairs an `hxnet`
+   connection actor with a UI subtree (chat, users, news, files) for that
+   connection.
+2. `AdwTabView` in the toolbar window holds the tabs. "Connect" opens a new
+   tab; closing a tab disconnects the underlying connection.
+3. The transfer window stays global — it lists every connection's in-flight
    work — with a per-row tag for which connection.
 4. Bookmarks gain an "open in new tab" affordance.
 5. The connection-loss banner becomes per-tab.
 
-**Gotchas**
+Gotchas:
 
-- Each tab needs its own GtkhxSession instance, not the global singleton from
-  R4. We either reify GtkhxSession into one-per-connection now (matches the
-  long-term direction in `gtkhx_session.c`'s comment about per-chat
-  emitters), or we keep the global and add a `connection_id` field to every
-  signal payload. The former is cleaner and the right time for it is now.
-- AdwTabView's reordering / detach affordances are good but the persistence
-  story (restore tabs across launches) needs design.
+- Each tab needs its own `GtkhxSession` instance, not the global singleton. We
+  either reify the session into one-per-connection at that point, or keep the
+  global and add a connection id to every signal payload. The former is
+  cleaner, and that is the right moment for it.
+- `AdwTabView`'s reordering and detach affordances are good, but the
+  persistence story (restore tabs across launches) needs design.
 
-**Exit criteria:** Open two tabs to two different servers, chat in both at
+**Exit criteria:** open two tabs to two different servers, chat in both at
 once, transfer a file in each, see both progress, switch tabs, close one
 without disrupting the other.
+
+---
+
+## Suggested next concrete step
+
+The frontier is the **content behind the shells**, plus the remaining larger
+standalone windows. Two pools, both leaf-up:
+
+1. **Content ports** (inventory §B) — the main pool, in rough order of value:
+   the **Files** two-panel browser (biggest by a distance, and the model half
+   is already Rust so it is a view port rather than a rewrite), the **Chat**
+   render/output path and window construction, the **Tasks** `gtask` list, and
+   the `msg.c` private-message model. Each mirrors the user-list port: build
+   the tree in gtk4-rs, keep genuinely-C leaves behind FFI.
+
+2. **The larger standalone windows** (inventory §A) — **`tray.c`** and
+   **`files_complete.c`** are both self-contained and unblocked. **`preview.c`**
+   waits on the poppler / sourceview crate alignment.
+
+Deliberately deferred, and why: the **Users controller glue** waits for the
+remaining C session structs it is tied to; **`toolbar.c` and the dock infra**
+port with or after `main()`, since the toolbar owns the `PanelDock` every shell
+registers into and the dock itself stays C by design.
+
+There is also a standing cleanup item worth folding into whatever touches it:
+the crate boundaries that still talk over `extern "C"` where a Cargo dependency
+would do — see `crate-layout.md` §3 for which ones those are and which are
+irreducible.
 
 ---
 
@@ -1748,93 +600,40 @@ without disrupting the other.
 
 Keeping the "if it ever happens" pile separate from the actual plan.
 
-- **Rewriting xtext in Rust.** Possible (gtk4-rs lets us subclass
-  `GtkWidget`), and someone may want it eventually, but HexChat's vendored
-  C does the job and is community-maintained. Don't volunteer.
-- **A reusable `libhotline` crate API.** We're producing one structurally,
-  but we are not committing to API stability for outside consumers. If a
-  TUI client emerges and wants it, they can fork the version they like.
-- **Plugin system reincarnation.** The dlopen ABI stays dead. If we
-  reintroduce scripting hooks (Lua / Wasmtime), that's a fresh design
-  conversation, not a port goal.
-- **Windows / macOS / iOS targets.** The current binary is Linux-Wayland,
-  and full cross-platform support is not a committed phase. Some groundwork
-  has landed opportunistically as the Rust rewrite makes it cheap:
-  `.github/workflows/ports.yml` probes Windows (MSYS2 UCRT64) and macOS
-  builds, and the leaf crates are being kept compilable off-Linux —
-  `hx-image-decode` gained a pure-Rust `image` backend for the glycin-less
-  platforms, and `hxnet`'s raw-fd FFI surface was removed. On the latter: the
-  production connect paths (`open_plaintext` / `open_hope` /
-  `open_plaintext_tls` / `htxf_connect`) already resolve + connect **inside
-  Rust**, so no OS socket fd ever crossed the FFI in the running client; all
-  that remained was test-support — four fd-adopting entries and two
-  unconditional `std::os::unix::io` imports that broke the Windows compile —
-  and those are gone (the tests now inject via loopback / `open_tcp` /
-  `htxf_connect`). **Remaining `hxnet` follow-up:** it still depends on `glib`
-  (via `hxbridge`'s shared tokio runtime and the `g_critical!` FFI logging),
-  so it's validated through `ports.yml`'s full-app build rather than the bare
-  no-GTK `rust-portability` tripwire; decoupling that logging + runtime seam
-  behind injected callbacks would let it join the tripwire. The whole-app port
-  (the C `gtkhx.c` GIOChannel plumbing, the Linux-only `libseccomp` dep,
-  `gsound`) remains an open question for later.
-
----
-
-## Effort sketch (very rough, evenings-and-weekends scale)
-
-| Phase | Scope                                              | Rough effort |
-|-------|----------------------------------------------------|--------------|
-| R0    | Build plumbing + first Rust file                   | 1 week       |
-| R1    | Crypto primitives                                  | 2–3 weeks    |
-| R2    | Wire protocol crate                                | 4–6 weeks    |
-| R3    | Networking + tokio + bridge                        | 3–4 weeks    |
-| R4    | GtkhxSession in Rust                               | 1 week       |
-| R5    | UI windows, 10 of them                             | 8–12 weeks   |
-| R6    | main() + GtkApplication                            | 1–2 weeks    |
-| R7    | Multi-conn + tabs                                  | 2–3 weeks    |
-
-Total: roughly 5–8 calendar months of focused weekend work, more realistically
-9–18 months if interleaved with the existing Phase 5 modernization and
-chat-history work in `ROADMAP.md`. Same caveats as before: multiply for life.
-
----
-
-## Suggested next concrete step
-
-R0–R4 are done, and R5 has every window's *shell* in Rust plus the whole
-small-standalone-dialog pool (§A: User Info, Create Post, Broadcast,
-inline-media, emoji) and the voice UI (§B: voice_panel / model / PTT / send).
-The frontier now is the **content ports behind the shells** and the remaining
-larger standalone windows — draining the rest of the
-[inventory above](#inventory--whats-still-c). Two good pools of work, both
-leaf-up:
-
-1. **Content ports behind the shells** (inventory §B) — the main remaining
-   pool, larger, in rough order of value: the **Files** two-panel browser
-   content (biggest), the **Tasks** `gtask` list, the **News** viewers, and the
-   **Chat** input/senders. Each mirrors the `users_view` content port: build
-   the tree in Rust, keep genuinely-C leaves (xtext, providers, transfer
-   workers) behind FFI.
-
-2. **The larger standalone windows** (inventory §A) — **`preview.c`** (waits on
-   the poppler / sourceview crate alignment), **`tray.c`**, and
-   **`files_complete.c`**. Plus the loose `text_util.c` → `hxtext` helper port
-   already in flight on `claude/r5-text-util`.
-
-Deliberately deferred: the **Users controller glue** (`view_*_btn` /
-`user_popup_show` / model↔view) waits for the chat model; **`preview.c`** waits
-on the poppler / sourceview crate alignment; **`toolbar.c` + the dock infra**
-port with/after **R6** (`main()` + `GtkApplication`), since the toolbar owns the
-`PanelDock` every shell registers into and the dock stays C by design.
+- **A reusable `libhotline` crate API.** We're producing one structurally, but
+  we are not committing to API stability for outside consumers. See the
+  motivations section above and `crate-layout.md` §5 for what would have to
+  change.
+- **Plugin system reincarnation.** The dlopen ABI stays dead. If we reintroduce
+  scripting hooks (Lua / Wasmtime), that's a fresh design conversation, not a
+  port goal.
+- **Windows / macOS / iOS targets.** The current binary is Linux-Wayland, and
+  full cross-platform support is not a committed phase. Some groundwork has
+  landed opportunistically as the Rust rewrite makes it cheap:
+  `.github/workflows/ports.yml` probes Windows (MSYS2 UCRT64) and macOS builds,
+  and the leaf crates are being kept compilable off-Linux — `hx-image-decode`
+  gained a pure-Rust `image` backend for the glycin-less platforms, and
+  `hxnet`'s raw-fd FFI surface was removed. On the latter: the production
+  connect paths already resolve and connect **inside Rust**, so no OS socket fd
+  ever crossed the FFI in the running client; all that remained was test
+  support — a few fd-adopting entries and some unconditional
+  `std::os::unix::io` imports that broke the Windows compile — and those are
+  gone (the tests inject via loopback or the real connect entry points).
+  **Remaining `hxnet` follow-up:** it still depends on `glib` (via `hxbridge`'s
+  shared tokio runtime and the FFI logging), so it is validated through
+  `ports.yml`'s full-app build rather than the bare no-GTK portability
+  tripwire; decoupling that logging and runtime seam behind injected callbacks
+  would let it join the tripwire. The whole-app port (the C GIOChannel
+  plumbing, the Linux-only `libseccomp` dependency) remains an open question
+  for later.
 
 ---
 
 ## References
 
-- **librsvg's incremental C → Rust precedent** — five-year port, kept
-  shipping the whole time. The architectural pattern (public Rust API in a
-  library crate, public C API as a thin shim in `librsvg-c/`) is the model.
-  See Federico's
+- **librsvg's incremental C → Rust precedent** — five-year port, kept shipping
+  the whole time. The architectural pattern (public Rust API in a library
+  crate, public C API as a thin shim) is the model. See Federico's
   [Replacing C library code with Rust (GUADEC 2017)](https://viruta.org/docs/fmq-porting-c-to-rust.pdf)
   and the
   [librsvg architecture docs](https://gnome.pages.gitlab.gnome.org/librsvg/devel-docs/architecture.html).
@@ -1846,11 +645,7 @@ port with/after **R6** (`main()` + `GtkApplication`), since the toolbar owns the
   [balena-io rust-async-interop](https://github.com/balena-io-experimental/rust-async-interop)
   and the
   [Rust forum thread](https://users.rust-lang.org/t/using-gtk-rs-and-tokio/100539).
-- **cbindgen + cargo-c**: the
-  [Leapcell guide](https://leapcell.io/blog/bridging-rust-and-c-generating-c-bindings-and-headers-with-cbindgen-and-cargo-c)
-  is a good practical reference.
 - **RustCrypto coverage**: `md-5`, `sha1`, `hmac`, `blowfish`,
   `chacha20poly1305` are all in
   [RustCrypto/hashes](https://github.com/RustCrypto/hashes) /
   [RustCrypto/block-ciphers](https://github.com/RustCrypto/block-ciphers).
-  HAVAL is not, hence the decision tree in R1.

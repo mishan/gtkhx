@@ -959,7 +959,7 @@ struct cfgvar {
       NULL },
     { CFG_ICON,
       /* Identity fields (icon/name) live on the heap-allocated
-       * the_session.htlc now (network-endgame.md E1), so their addresses
+       * the_session.htlc now (docs/rust/network-endgame.md), so their addresses
        * aren't compile-time constants. The slot is bound at runtime by
        * hx_options_bind_identity() once the connection is allocated; see the
        * note there. Multi-conn reworks prefs<->identity binding — per-
@@ -1213,7 +1213,7 @@ cfgnamecmp_const (const void *key, const void *mem)
 }
 
 /* Bind the identity cfgvars (icon / nick) to the connection's storage. These
- * fields live on the heap-allocated the_session.htlc (network-endgame.md E1),
+ * fields live on the heap-allocated the_session.htlc (docs/rust/network-endgame.md),
  * so their addresses aren't compile-time constants; the static cfgvars[] table
  * leaves those two slots NULL and this wires them once the connection has been
  * allocated. Must run after the_session.htlc exists and before any prefs

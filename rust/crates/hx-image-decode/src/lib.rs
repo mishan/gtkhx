@@ -1,5 +1,5 @@
 //! Bounded image decoder for GtkHx's inline-media extension
-//! (`docs/inline-media-plan.md` Phase B/E, `docs/glycin-migration-plan.md`).
+//! (`docs/inline-media.md`, `docs/image-decoding.md`).
 //!
 //! G.1 shipped the magic-byte sniff layer; G.2 (this commit)
 //! adds the glycin-driven decode pipeline. The C side talks to us

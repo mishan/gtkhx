@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 rust-version.workspace = true
 license = "GPL-2.0-or-later"
-description = "Bounded image decoder for GtkHx — glycin-based, replaces the inline_media_decode.c pixbuf-loader path. See docs/glycin-migration-plan.md."
+description = "Bounded image decoder for GtkHx — glycin-based, replaces the inline_media_decode.c pixbuf-loader path. See docs/image-decoding.md."
 publish = false
 
 [lib]

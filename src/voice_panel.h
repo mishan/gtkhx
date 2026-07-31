@@ -4,7 +4,7 @@
  * and Mute / Unmute (toggle button). Sits above the chat output, below
  * the subject bar.
  *
- * Visibility / state rules (per docs/voice-chat-plan.md §Phase 8.D):
+ * Visibility / state rules (see docs/voice.md "Voice indicators in the user list"):
  *
  *   - htlc->caps & HTLC_CAP_VOICE unset → toolbar is hidden entirely.
  *     Most servers won't echo the cap; don't clutter the tab with a

@@ -1,8 +1,7 @@
 //! W1: the single-file HTXF download copy loop — the Rust port of C's
 //! `xfers_recv.c::file_recv_one` (+ its `rd_wr_recv` / `preview_get` helpers).
 //!
-//! First slice of the "xfer worker → Rust" migration
-//! (`docs/rust/xfer-worker-to-rust-scoping.md`). It removes the per-chunk C↔Rust
+//! The file-transfer copy loops. This removes the per-chunk C↔Rust
 //! weave for single-file byte copying: the transport read is now an in-crate
 //! `hxnet::htxf` call, the FILP/FFO codec is native `hxfiles_xfer::ffo`, and the
 //! HFS sidecar + resource-fork I/O is native `hxhfs`.

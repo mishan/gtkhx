@@ -10,7 +10,7 @@
 /*
  * Bounded image decoder for the inline-media extension (Phase 9.B).
  *
- * Layered defence per docs/inline-media-plan.md:
+ * Layered defence per docs/inline-media.md:
  *
  *   1. inline_media_sniff — magic-byte sniff. Rejects anything
  *      outside the JPEG / PNG / GIF allowlist before a single
@@ -57,7 +57,7 @@
  *
  * Drift surfaces at link time as an undefined symbol — same
  * discipline as the Phase R1 crypto crates. See
- * docs/glycin-migration-plan.md.
+ * docs/image-decoding.md.
  */
 extern guint32 hx_image_decode_sniff (const guint8 *bytes, gsize len);
 extern gboolean hx_image_decode_format_is_allowed (guint32 fmt);

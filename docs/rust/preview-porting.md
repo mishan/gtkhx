@@ -1,9 +1,9 @@
-# Porting preview.c to Rust — scoping
+# Porting preview.c to Rust
 
-**Status:** scoping / decision doc. `preview.c` came up as an R5 target after
-the TLS-trust dialog (R5.4). Unlike the dialogs, it's a large subsystem with
-external-library viewers and cross-thread worker marshaling, so it needs a
-plan before ~1.5k lines of Rust get written.
+A plan, not a description: the file preview window has not been ported yet.
+It came up as a candidate after the dialogs went across, and unlike them it is
+a large subsystem with external-library viewers and cross-thread worker
+marshaling — enough that it wanted a plan before anyone started writing.
 
 ## TL;DR
 

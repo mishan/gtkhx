@@ -14,7 +14,7 @@
  * plus the hxfiles-xfer FFO codec decls a couple of C sites still use.
  * The single-file + folder state machines themselves are all Rust; the
  * C side keeps only the refcounted htxf_conn struct + the GTK worker
- * shell. See docs/rust/xfer-worker-to-rust-scoping.md.
+ * shell. See docs/rust/ROADMAP.md.
  */
 
 #ifndef GTKHX_XFERS_RECV_H

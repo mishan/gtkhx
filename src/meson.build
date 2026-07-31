@@ -109,7 +109,7 @@ gtkhx_sources = files(
   # tracker_bridge.c is the thin session/prefs shim the Rust window calls.
   'tracker_bridge.c',
   # dock_bridge.c — generic libpanel dock-embed shim for the docked Rust
-  # window ports (Users first). See docs/rust/dock-porting-scoping.md.
+  # window ports (Users first). See docs/docking.md.
   'dock_bridge.c',
   # users_bridge.c — C content leaves (HxUserListView + action buttons +
   # voice panel) for the Rust Users window shell (gtkhx-ui `users`).

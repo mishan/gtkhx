@@ -4179,7 +4179,7 @@ pub unsafe extern "C" fn gtkhx_proto_shortcode_matches(
 // rcv.c dispatch on the 600-606 family calls the parsers.
 //
 // The builder shims are slated for retirement once Phase 8.C lands
-// the `hxvoice-runtime` crate (per docs/voice-chat-plan.md §5),
+// the `hxvoice-runtime` crate (see docs/voice.md),
 // since the runtime can call the Rust builders without an FFI hop.
 // They stay for now because Phase 8.A doesn't have the runtime
 // crate to lean on.

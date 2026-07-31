@@ -253,7 +253,7 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 }
 
 /* hx_rcv_chat (HTLS_HDR_CHAT) is a #[no_mangle] fn in the hxchat-recv crate
- * (Phase E2): it parses the body via native hotline_proto::parse::parse_chat,
+ * it parses the body via native hotline_proto::parse::parse_chat,
  * pulls the inline-media companion via native inline_media::extract_chat_media_meta
  * (dropping the line on an orphan), builds + attaches the boxed HxChatEvent via
  * the C producers, delegates the ignore-gate + emit to hx_chat_recv, and frees
@@ -577,7 +577,7 @@ extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
  * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
 /* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
- * hxchat-recv crate (rust/crates/hxchat-recv, Phase E2): it parses the frame,
+ * hxhandlers::recv::chat crate module: it parses the frame,
  * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
  * and on a real change sets the model subject + emits the "chat-subject-notice"
  * signal for the "Subject Changed to" line (view-side handler in chat.c). The
@@ -606,7 +606,8 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
  * (rust/crates/hxchat-recv) that parses the frame, resolves the public chat's
  * member model via chat_with_cid/hx_chat_member_model, and delegates the
  * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
- * by name (declared in rcv.h); no C body remains here. (network-endgame.md E2.) */
+ * by name (declared in rcv.h); no C body remains here.
+ * See docs/rust/network-endgame.md. */
 
 /* hx_rcv_user_selfinfo (HTLS_HDR_USER_SELFINFO) is a #[no_mangle] fn in the
  * hxuser-recv crate (rust/crates/hxuser-recv): it calls hx_selfinfo_parse
