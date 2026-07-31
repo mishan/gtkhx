@@ -65,11 +65,11 @@ static guint signals[N_SIGNALS];
  * always drawn at 2× their source art, and the standalone Users
  * window at 1.25×. */
 static const int default_theme_pct[GTKHX_SCALE_N_AREAS] = {
-    200, /* GTKHX_SCALE_TOOLBAR */
-    200, /* GTKHX_SCALE_WINDOW_BUTTONS */
-    125, /* GTKHX_SCALE_USERLIST_ICON */
-    125, /* GTKHX_SCALE_USERLIST_TEXT */
-    200, /* GTKHX_SCALE_TASKS_ROW_ICON — matches historical GTASK_ICON_SCALE = 2 */
+    100, /* GTKHX_SCALE_TOOLBAR */
+    100, /* GTKHX_SCALE_WINDOW_BUTTONS */
+    100, /* GTKHX_SCALE_USERLIST_ICON */
+    100, /* GTKHX_SCALE_USERLIST_TEXT */
+    100, /* GTKHX_SCALE_TASKS_ROW_ICON */
 };
 
 /* Built-in default palette. Matches the historical chat.c

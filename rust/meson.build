@@ -380,7 +380,7 @@ endif
 
 if glycin_gen == '1'
   cargo_no_default = '--no-default-features'
-  cargo_features = cargo_features + ',hxcompress/lz4,hxcompress/zstd,hx-image-decode/glycin-v2'
+  cargo_features = cargo_features + ',hx-image-decode/glycin-v2'
 else
   cargo_no_default = ''
   cargo_features = cargo_features + ',hx-image-decode/glycin-v3'
