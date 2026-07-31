@@ -26,7 +26,7 @@
 //! leak; the direct (`proxy = None`) path is byte-identical to
 //! before. Only the transport mechanic lives here — *where* the
 //! proxy config comes from (`GProxyResolver` query in C, env vars,
-//! or a pref) is S2, see `docs/rust/socks-proxy-scoping.md`.
+//! or a pref) is S2, see `docs/rust/networking.md`.
 //! HTTP-CONNECT proxies are out of scope (tokio-socks is SOCKS
 //! only); [`ProxyConfig::from_uri`] rejects `http(s)://` loudly.
 //!

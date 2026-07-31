@@ -1,6 +1,6 @@
 """Convert Rust->Rust `extern "C"` declarations into real Cargo imports.
 
-One-shot migration helper for docs/rust/crate-consolidation-scoping.md step 2.
+One-shot migration helper for docs/rust/crate-layout.md.
 Run from `rust/crates`. For each `extern "C" { ... }` block, any declaration
 whose symbol is defined by a `#[no_mangle]` fn in *another workspace crate*
 becomes a `use <crate>::<mod>::<sym>;`. Declarations that resolve to C stay in

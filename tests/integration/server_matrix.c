@@ -139,7 +139,7 @@ const hx_test_server hx_test_server_matrix[] = {
                         * (and bumps SendMedia: true on the
                         * account template) so the cap-negotiation
                         * probe finds it echoed in the LOGIN reply.
-                        * See docs/inline-media-plan.md. */
+                        * See docs/inline-media.md. */
                 | HX_TEST_CAP_INLINE_MEDIA,
     },
 };

@@ -1055,7 +1055,7 @@ test('handshake', test_integration_handshake,
 
 # real_connect — Tier 3 coverage for the production connect path:
 # the "hxnet-owns-the-whole-lifecycle" orchestrator connect
-# (docs/rust/phase-g-migration.md). Drives the production hx_connect
+# (docs/rust/networking.md). Drives the production hx_connect
 # (which now dispatches to the hxnet orchestrator unconditionally —
 # the connect-path gate was removed with delete-old-connect) against a
 # REAL mhxd container so the whole orchestrator runs end
@@ -2107,7 +2107,7 @@ test('chat_history', test_integration_chat_history,
      timeout     : 60)
 
 # inline_media — Phase 9.F Tier 3 coverage. First step per
-# docs/inline-media-plan.md: verify Janus actually implements the
+# docs/inline-media.md: verify Janus actually implements the
 # fogWraith inline-media extension by asserting the LOGIN reply
 # echoes CAP_INLINE_MEDIA and advertises at least one
 # DATA_CHAT_MEDIA_MAX_* advisory field. Filtered on

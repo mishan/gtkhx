@@ -11,7 +11,7 @@ other again after C5; this file is the only place that comparison exists.
 
 It also records two measurement failures, at length. Both produced
 complete, plausible, entirely wrong result sets, and one of them was
-within a commit of being written into `chat-view-scoping.md` as a finding
+within a commit of being written into the design doc as a finding
 that argued against the design. The failures are more instructive than
 the numbers.
 
@@ -21,8 +21,8 @@ the numbers.
 
 | | |
 |---|---|
-| **xtext** | `src/xtext.c`, HexChat's text widget vendored in Phase 2.6 (commit `e9bb312`) plus ~1,550 lines of GtkHx grafts. Line-uniform vertical layout: every coordinate derives from `fontsize × subline_count`. Wraps at append time. |
-| **hxchat** | `rust/crates/hxchat-layout` (engine) + `hxchat-view` (GTK4 widget), phases C1–C4. Pixel-based variable-height layout, retained per-row layout cache, chunked prefix-sum height index. Wraps lazily, per visible row. |
+| **xtext** | `src/xtext.c`, HexChat's text widget, vendored during the GTK 2 port, plus ~1,550 lines of GtkHx grafts. Line-uniform vertical layout: every coordinate derives from `fontsize × subline_count`. Wraps at append time. |
+| **hxchat** | `rust/crates/hxchat-layout` (engine) + `hxchat-view` (GTK4 widget). Pixel-based variable-height layout, retained per-row layout cache, chunked prefix-sum height index. Wraps lazily, per visible row. |
 
 Both were driven through the same `chat_view.h` seam, from the same
 binary, in the same window, by the same append path. `GTKHX_CHATVIEW`
@@ -80,6 +80,14 @@ Every sample from the final run. Times in ms.
 
 ## 5. What each metric means
 
+| Metric | What it captures |
+|---|---|
+| ingest | Appending N messages. **Not comparable alone** — see below. |
+| first paint | The frame that pays off whatever layout was deferred. |
+| **ingest + paint** | The honest cost of getting N messages on screen. Compare this. |
+| relayout worst / 10-frame total | Frames after a font change invalidates every cached wrap. The most informative single number. |
+| scroll frame mean / p95 | Frame time while walking the buffer a third of a page at a time. |
+
 ### Ingest + paint — 693 ms → 143 ms
 
 Time to get 20,000 messages onto the screen.
@@ -100,8 +108,9 @@ to. That is the design working, not a measurement gap.
 
 ### Relayout — worst frame 105.6 ms → 16.9 ms
 
-The load-bearing result, and the direct test of the `§3.2` claim that
-reflow should cost O(visible) rather than O(scrollback).
+The load-bearing result, and the direct test of the retained-layout claim
+(see [chat-view.md](chat-view.md), "Layout, the height index, and scroll
+anchoring") that reflow should cost O(visible) rather than O(scrollback).
 
 A font change invalidates every cached width and every wrap point in all
 20,000 messages. The phase changes the font, then samples the next ten
@@ -173,6 +182,10 @@ remembering.
 ### 6.1 Both halves measured the same backend
 
 `want_hxchat()` in `chat_view.c` accepted only `"new"` and `"hxchat"`.
+(Both are gone now: with one backend there is nothing to select, so the
+`GTKHX_CHATVIEW` switch, the `want_hxchat` predicate and the whole
+`src/chat_view.c` dispatcher went with xtext. `src/chat_view.h` is a
+declaration header today.)
 The harness passed `GTKHX_CHATVIEW=0` and `=1` — the obvious spelling for
 a boolean, and what the harness docs, the `chat_bench.c` header and the
 `chat_find.rs` module comment all said. `=1` matched nothing and fell
@@ -202,7 +215,7 @@ frame tick.
 The chat output is `hexpand`. Lowering a hexpanding widget's *minimum*
 width does not change its allocation. Nothing was re-laid-out, in either
 backend. Both reported ~16.4 ms, which is one vsync interval, and the
-scoping doc came within one commit of recording "reflow: 16.4 ms vs
+design doc came within one commit of recording "reflow: 16.4 ms vs
 15.3 ms, no real difference" together with several paragraphs
 speculating about why the O(visible) design might not be paying for
 itself.
@@ -254,5 +267,5 @@ ever better than what it replaced. That is why this file exists.
 
 ---
 
-*Harness: `src/chat_bench.c`, `tools/chatbench.sh`. Summary table also in
-`docs/chat-view-scoping.md` §6c.*
+*Harness: `src/chat_bench.c`, `tools/chatbench.sh`. The subsystem itself
+is documented in [chat-view.md](chat-view.md).*

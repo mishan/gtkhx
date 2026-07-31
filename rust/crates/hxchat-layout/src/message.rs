@@ -6,7 +6,7 @@
 //! had to be smuggled in as a magic word (`hxmedia:N`) or a magic
 //! non-breaking-space sentinel. Here a message is a value with fields.
 //!
-//! See docs/chat-view-scoping.md §3.1.
+//! See docs/chat-view.md "The message model".
 
 use crate::span::ParsedText;
 

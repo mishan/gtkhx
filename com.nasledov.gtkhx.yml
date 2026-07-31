@@ -31,7 +31,7 @@
 # src/preview.c viewers. PDFs and source files fall through to the
 # plain-text viewer if either lib is absent on the build host.
 #
-# Glycin migration (docs/glycin-migration-plan.md G.5): the
+# Glycin migration (docs/image-decoding.md G.5): the
 # Rust hx-image-decode crate consumes the `glycin` crate, which
 # at decode time spawns a sandboxed subprocess from
 # /usr/libexec/glycin-loaders/2+/ (glycin-image-rs covers the
@@ -287,7 +287,7 @@ modules:
       # host) so the Flatpak build is deterministic regardless of what
       # the build environment happens to have installed. (Native builds
       # default to auto-detect; Debian-stable packagers can also force
-      # -Dglycin_compat=1 — see docs/glycin-migration-plan.md.)
+      # -Dglycin_compat=1 — see docs/image-decoding.md.)
       - -Dglycin_compat=2
     build-options:
       env:

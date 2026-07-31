@@ -9,7 +9,7 @@
 
 /*
  * hx_split.c — recursive split container. See hx_split.h + the
- * design doc at docs/docking-splits.md.
+ * design doc at docs/docking.md.
  *
  * Implementation notes:
  *

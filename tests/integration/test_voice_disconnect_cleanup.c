@@ -23,7 +23,7 @@
  *      total — the server's cleanup-on-disconnect fired.
  *
  * This is the spec's "server cleans up if the TCP control
- * connection drops" contract from §1 of docs/voice-chat-plan.md.
+ * connection drops" contract from §1 of docs/voice.md.
  *
  * Why match on participant-count delta, not Bob's specific uid:
  * see the same note in test_voice_participants.c — Janus's

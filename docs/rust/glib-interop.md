@@ -1,21 +1,13 @@
 # Rust ↔ GLib interop — the GtkHx convention
 
-> Companion to `docs/voice-chat-plan.md` §5 (Phase R3.0) and
-> `ROADMAP.md` §R3 (this directory).
+> Companion to `docs/voice.md` §5 and `ROADMAP.md` (this
+> directory).
 >
-> **Status note (June 2026):** the Phase 8.x references throughout this
-> document were written when those phases were upcoming. All of 8.A
-> through 8.G have since shipped, so wherever this doc says "eventual"
-> or "Phase 8.B will" the actual code already exists in
-> `rust/crates/hxvoice-runtime/`. The conventions described below still
-> apply; the tense just hasn't been swept.
->
-> **R3.1 addendum:** the tokio runtime + tokio→GLib event ferry land
-> in this same `hxbridge` crate behind the `runtime` cargo feature.
-> See the [tokio runtime](#tokio-runtime-r31) and
-> [event ferry](#tokio--glib-event-ferry-r31) sections below for the
-> shipped APIs. Phase R3.2 (banner.c port) is the first planned
-> consumer that flips the feature on in the meson build.
+> The tokio runtime and the tokio→GLib event ferry live in this same
+> `hxbridge` crate, behind its `runtime` Cargo feature — which the
+> `gtkhx-ffi` façade turns on for the binary's build. See the
+> [tokio runtime](#tokio-runtime) and
+> [event ferry](#tokio--glib-event-ferry) sections below.
 
 ## The problem
 
@@ -127,7 +119,7 @@ MainContext::default().spawn_local(async move {
 });
 ```
 
-Use cases in Phase 8.B+:
+Use cases:
 
 - gstreamer-rs bus watch (`gst::Bus::add_watch`/`add_watch_local`
   wrap this internally).
@@ -137,11 +129,11 @@ Use cases in Phase 8.B+:
 Pinned by the `spawn_local_actually_polls_future` test in
 `hxbridge::tests`.
 
-## Tokio runtime (R3.1)
+## Tokio runtime
 
 The `hxbridge::runtime` module (Cargo feature `runtime`) ships
-the single, shared, dedicated-thread tokio runtime that every R3+
-worker port schedules against. Locked-in decisions are encoded in
+the single, shared, dedicated-thread tokio runtime that every Rust
+worker schedules against. Locked-in decisions are encoded in
 the module's rustdoc; the short version:
 
 - **One runtime, process-wide.** Lazily started on the first call
@@ -151,15 +143,18 @@ the module's rustdoc; the short version:
 - **Dedicated OS thread.** `tokio::runtime::Builder::new_multi_thread()
   .worker_threads(1)`. The GLib main loop owns the calling thread;
   any tokio work needs its own. `worker_threads(1)` is fine for the
-  R3 workload (socket I/O, not CPU-bound); bump it when we have
+  workload (socket I/O, not CPU-bound); bump it when we have
   evidence the single worker is saturated.
 - **No `spawn_local` on the runtime side.** Tokio's `spawn` requires
   `Send + 'static` because the multi-thread scheduler can move
   tasks across worker threads. The GLib half of the bridge is where
   `!Send` UI state lives; the tokio half stays `Send`-clean.
-- **`enable_io` + `enable_time`.** I/O is on for R3.3 (`hxnet`
-  TcpStream); time is on for the ping keepalive port (R3.2+) that
-  replaces `network.c::ping_tick` (`g_timeout_add_seconds`).
+- **`enable_io` + `enable_time`.** I/O for `hxnet`'s sockets; time so
+  `tokio::time` (sleeps, timeouts) works under the runtime. The ping
+  keepalive deliberately stayed a GLib `g_timeout_add_seconds` in
+  `network.c` — it drives C-side connection state, so a tokio
+  `Interval` would buy nothing. See the timer audit in
+  `docs/rust/ROADMAP.md`.
 
 ```rust
 use hxbridge::runtime::Runtime;
@@ -178,7 +173,7 @@ Pinned by:
 - `runtime::tests::time_is_enabled_so_sleep_works`
 - `runtime::tests::spawn_runs_on_worker_thread_not_caller`
 
-## Tokio → GLib event ferry (R3.1)
+## Tokio → GLib event ferry
 
 The `hxbridge::channel` module pairs a `tokio::task` producing
 events with a GLib-main-thread handler consuming them. Two pieces:
@@ -267,17 +262,18 @@ These patterns will be caught in review:
 - **Storing the wrapped handle past the call site.** Both wrapping
   forms are intended for local use within a single function. Storing
   the handle in a struct field or static creates a long-lived
-  Rust-side ref that needs explicit lifetime management — that's
-  Phase R4 territory (where `GtkhxSession` becomes a
-  `glib::subclass`-derived Rust GObject and Rust ownership is
-  first-class).
+  Rust-side ref that needs explicit lifetime management. Where Rust
+  genuinely owns the object, use the Rust-side type instead: the
+  `glib::subclass`-derived `GtkhxSession` in `gtkhx-core` gives you a
+  typed handle with first-class Rust ownership, no shim required.
 
-## Cross-references to the post-R2 conventions
+## Cross-references to the wire-protocol-crate conventions
 
-These were established in R2 and apply here too:
+These were established when the protocol crate landed and apply here
+too:
 
 - **`unsafe` is scoped to FFI entry points and the GValue plumbing,
-  not the safe Rust API.** `hxbridge::lib.rs` follows the R2 shape:
+  not the safe Rust API.** `hxbridge::lib.rs` follows that shape:
   the wrapping helpers (`session_from_ptr`, `session_from_ptr_full`)
   are `unsafe fn` because they take raw pointers from C; the
   `emit_pointer_pair_signal` entry is `unsafe fn` for the same
@@ -293,47 +289,22 @@ These were established in R2 and apply here too:
   `g_error` (always fatal) or `g_critical` + graceful skip. The
   convention applies to any C-side check on a path that calls into
   Rust. See `src/rcv.c::rcv_task_login` for the original convention
-  example and `src/proto_helpers.c::hl_htxf_hdr_pack` for the R2 use.
+  example and `src/proto_helpers.c::hl_htxf_hdr_pack` for a later one.
 - **C-side hand-declared `extern` blocks** for FFI symbols, not
   cbindgen-generated headers. Drift surfaces as link-time undefined
-  symbols. The `gtkhx_bridge_emit_pointer_pair_signal` declaration
-  in `src/gtkhx_session.c` follows this pattern.
-
-## Forward pointers
-
-Phases R3.0 (wrapping helpers) and R3.1 (tokio runtime + ferry) are
-the foothold. The same rules apply to:
-
-- **Phase 8.B (gstreamer-rs pipeline).** `webrtcbin` is a GObject;
-  emit calls on it go through `session_from_ptr_full` shape; bus
-  watches use `spawn_local`. The C-side runtime ownership lives in
-  `hxvoice-runtime::Runtime` (Rust-owned), not C, so the wrapping
-  shape differs slightly — but the re-entrancy rules are identical.
-- **Phase R3 proper (`hxnet` Connection actor).** The tokio↔GLib
-  bridge uses these wrapping helpers to forward events into the
-  C-side `GtkhxSession`. Same lifetime model.
-- **Phase R4 (`GtkhxSession` in Rust).** When the session moves to
-  `glib::subclass`-derived Rust, the FFI shim layer (`hxbridge`)
-  stays — C-side callers continue to use it, just the underlying
-  GObject's implementation has moved. The wrapping helpers continue
-  to work because they target `glib::Object`, which is the base
-  class for both C-defined and Rust-defined subclasses.
-- **Phase R5 (UI windows in Rust).** Rust UI code talks to
-  GtkhxSession directly without going through hxbridge — it has its
-  own typed handle from the glib::subclass derivation. hxbridge's
-  reason for existing fades away as the C-side UI shrinks.
+  symbols. `src/hxnet_bridge.c`'s `extern` declarations of the
+  `hxnet_connection_*` entry points follow this pattern.
 
 ## GStreamer runtime floor
 
-Phase 8.0 (R3.0) pulls the `gstreamer-rs` 0.24 family into
-`workspace.dependencies`. (Originally landed at 0.25 alongside the
+The workspace pins the `gstreamer-rs` 0.24 family in
+`workspace.dependencies`. (It originally landed at 0.25 alongside the
 gtk-rs 0.22 family; both were downgraded one minor when the rustc 1.92
 MSRV the 0.22 / 0.25 line carried turned out to be incompatible with
 Debian trixie's stock rustc 1.85 — see `rust-toolchain.toml` and the
 workspace `Cargo.toml` comments for the full rationale.)
 
-Phase 8.B is when consumers go live; the runtime version floor matters
-there:
+The runtime version floor:
 
 - gstreamer-rs 0.24 has a build-time floor of GStreamer 1.14 (per
   gstreamer-webrtc-sys 0.24's `system-deps` probe) but project meson
@@ -344,7 +315,7 @@ there:
   against 0.24 bindings; the bindings just don't expose any 1.26-only
   API surface to our code, and we use none of it.
 
-No GNOME-runtime bump is required for Phase 8.B with this dep tree.
+No GNOME-runtime bump is required for voice with this dep tree.
 The earlier "must bump to GNOME 48 for GStreamer 1.26" action item was
 specific to the gstreamer-rs 0.25 family and is no longer load-bearing.
 If a future voice or media feature needs a 1.26-binding-level API

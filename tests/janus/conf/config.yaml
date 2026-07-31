@@ -278,7 +278,7 @@ InlineMedia:
   # (test_integration_inline_media) finds the cap echoed back in
   # the LOGIN reply. Janus's defaults match the spec recommended
   # limits; we don't override them so the test exercises the
-  # spec-conformant configuration. See docs/inline-media-plan.md.
+  # spec-conformant configuration. See docs/inline-media.md.
   Enabled: true
 
   # Per-image ceilings. Defaults match the spec; tighten on smaller hosts.

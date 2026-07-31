@@ -1,6 +1,6 @@
 /*
  * gtkhx_theme.c — implementation of the themable-state singleton.
- * See gtkhx_theme.h, docs/theming-scoping.md, and
+ * See gtkhx_theme.h, docs/theming.md, and
  * docs/theming-file-format.md.
  *
  * Storage model: the singleton owns its loaded state. Theme files

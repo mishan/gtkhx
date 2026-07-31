@@ -1,477 +1,204 @@
 # CLAUDE.md — GtkHx working notes
 
-> Working notes for AI assistants helping with this codebase.
-> The phased plan and locked-in decisions live in **[ROADMAP.md](ROADMAP.md)** — read that first.
+> Orientation for anyone (human or AI) working in this codebase.
+> Subject-by-subject references live in **[docs/](docs/README.md)** — this file is the map,
+> not the territory. The remaining product work is in **[ROADMAP.md](ROADMAP.md)**; the
+> remaining C→Rust port work is in **[docs/rust/ROADMAP.md](docs/rust/ROADMAP.md)**.
 
 ## What this is
 
-GtkHx is a Hotline client written by Misha Nasledov in 2000–2003. Original UI is GTK+ 1.2.
-The revival project is porting it forward — GTK 2 → 3 → 4 — and modernizing the C, build
-system, and crypto along the way. **Full backward compatibility with the Hotline 1.2 and
-1.5 wire protocols is a hard requirement.** Servers are scarce and ancient; we don't get
-to break them.
+GtkHx is a Hotline client written by Misha Nasledov in 2000–2003, originally GTK+ 1.2.
+The revival ported it forward to GTK 4 + libadwaita and has been rewriting it in Rust
+crate by crate ever since.
 
-## Source layout (~36k LOC C, 83 files in `src/`)
+**Full backward compatibility with the Hotline 1.2 and 1.5 wire protocols is a hard
+requirement.** Servers are scarce and ancient; we don't get to break them. Everything
+else is negotiable.
 
-The big rocks, by line count:
+License is **GPL-2.0-or-later** ("version 2 of the License, or (at your option) any later
+version"). Misha confirmed keep-as-is — don't strip the "or later" clause without asking.
 
-| File                    | LOC  | Role                                                          |
-|-------------------------|------|---------------------------------------------------------------|
-| `src/dfa.c`             | 2550 | Regex/pattern matching engine.                                |
-| `src/options.c`         | ~1900| Settings (AdwPreferencesDialog) + GKeyFile persistence.       |
-| `src/rcv.c`             | ~1700| Hotline protocol receive path.                                |
-| `src/chat.c`            | ~1500| Chat window UI (chat-view output, GtkTextView input).         |
-| `src/files.c`           | ~1500| File browser UI (GtkColumnView).                             |
-| `src/news15.c`          | ~1300| Threaded news (1.5 protocol).                                 |
-| `src/network.c`         | ~1300| Connection / pthread worker, hlwrite, ping keepalive.         |
-| `src/users.c`           | ~1000| User list UI + right-click popup.                             |
-| `src/connect.c`         |  ~900| Connect dialog (AdwDialog) + bookmark management.             |
-| `src/gtkhx.c`           |  ~900| `main()`, GIOChannel-based fd plumbing, GtkApplication init.  |
-| `src/commands.c`        |  ~~~ | Hotline protocol send path (paired with `rcv.c`).             |
-| `src/xfers.c`           |  ~~~ | GTK file-transfer **worker shell** only: the `xfers[]` list, worker/completion dispatch, and the `hx_htxf_*` refcount/cancel lifecycle. The transfer *logic* + the `struct htxf_conn` storage are all Rust now (`hxnet::xfer` / `hxnet::xfer_handle`); see below. |
-| `src/hxnet_htxf.h`      |  ~~~ | C decls for the hxnet HTXF subchannel FFI (`hxnet_htxf_*`). |
-| `src/plugin.c`          |  ~~~ | dlopen plugin loader. **Compiled out** (`USE_PLUGIN` undef).  |
-| `src/gtkthreads.c`      |  ~~~ | GRecMutex + custom poll wrapper for worker↔main serialization.|
-| `src/debug.c/.h`        |  ~~~ | Categorised runtime logger (`GTKHX_DEBUG=cat1,cat2`).         |
-| `src/proto_trace.c/.h`  |  ~~~ | Hotline wire-protocol trace (debug category `proto`).         |
-| `src/hl_access.h`       |  ~~~ | Account-access-bit constants matching mhxd's `hl_access_bits`.|
-| `src/tracker_parser.c/.h` | ~~~ | Pure parsers for the v1 HTRK reply (header + fixed record).   |
-| `src/tracker_v3.c/.h`   |  ~~~ | Pure encoders / parsers for tracker v3 (fogWraith spec).      |
-| `src/tracker_event.c/.h`|  ~~~ | `HxTrackerServer` boxed type — payload of `tracker-server-create`. |
+## Build
 
-`src/hx.h` (655 lines) is the kitchen-sink header: session struct, output_functions, most
-typedefs. `src/hotline.h` is the wire-protocol constants/structs.
+```sh
+meson setup build && meson compile -C build
+```
 
-Other top-level dirs:
+Floors: `gtk4 >= 4.10`, `libadwaita-1 >= 1.6`, `libpanel-1 >= 1.4`, `glib >= 2.56`, and
+rustc at the workspace MSRV (pinned to Debian stable's stock toolchain — see
+`rust/Cargo.toml`). The gtk-rs binding generation is pinned to match; **that pin is
+load-bearing** and is why the dock stays C (see `docs/docking.md`).
 
-- `rust/crates/` — Rust components linked into the C binary via `hxbridge` FFI.
-  `hotline-proto` (typed wire-protocol builders/parsers: voice, inline-media,
-  chat-history, tracker-v3), `hxvoice` + `hxvoice-runtime` (voice state machine
-  and gstreamer-rs/webrtcbin runtime, see ROADMAP Phase 8), `hx-image-decode`
-  (glycin-backed decoder used by inline-media / banner / chat / theming SVG
-  path; ships **both** glycin backends — `2+` loaders via crate 3.x,
-  `1+` loaders via crate 2.x for Debian stable, selected by Meson
-  `-Dglycin_compat` which **auto-detects** the host's loader generation by
-  default (or force `2`/`1`), see `docs/glycin-migration-plan.md`), `hxnet`,
-  `hxcompress`, `hxcrypto-{hash,stream,aead}`, `hxhfs` (HFS sidecar /
-  resource-fork I/O), `hxfiles-xfer` (FFO/FILP fork-header codec). See
-  `docs/RUST-ROADMAP.md` for the migration plan.
+Meson options:
 
-  **The HTXF file-transfer path is now Rust end-to-end** (the "xfer-worker →
-  Rust" migration, W1–W3 + S0 + S1; see the xfer-worker migration section of
-  `docs/rust/ROADMAP.md`). `hxnet::htxf` owns the subchannel transport
-  (socket / TLS / AEAD framing / cancellation token / handshake preamble pack);
-  `hxnet::xfer` owns the single-file + folder copy loops (the
-  FILE_NEXT/FILE_SEND state machine, FILP/FFO codec, HFS fork I/O);
-  `hxnet::xfer_handle` owns the `struct htxf_conn` storage + cross-thread
-  lifecycle (a `#[repr(C)]` mirror behind the `hx_htxf_*` ABI: atomic
-  refcount/cancel/total_pos, the `HtxfAbort` token, and the last-unref
-  destructor). The C driver (`xfers.c`) is a thin GTK worker shell that hands
-  everything in by value through `HxnetXferParams` / `HxnetFolderParams` +
-  callbacks — `hxnet` is a leaf crate and references no C symbols. The old C
-  `xfers_recv.c` / `xfers_send.c` / `htxf_io.c` / `htxf_subchannel.c` are all
-  deleted.
-- `plugins/sample/` — example plugin. Build-disabled (`USE_PLUGIN` undef).
-- `plugins/eliza/` — toy ELIZA chatbot plugin. Build-disabled.
-- `po/` — translations. French only.
-- `sounds/` — `.wav` files for chat alerts (was `.aiff`, converted Phase 5 for libcanberra
-  compatibility).
-- `mhxd/` — full mhxd source vendored locally for cross-reading
-  (`hl_access_bits` struct, opcode tables, ChangeLog). Not built; reference only.
+| Option | Gates |
+|---|---|
+| `-Dvoice` (`auto`/`enabled`/`disabled`) | Voice chat. Needs GStreamer 1.20+. `auto` drops it silently when GStreamer is absent; `enabled` makes that a hard error. When off, the voice crates aren't built, the capability bit isn't advertised, and every voice source and call site compiles out behind `HAVE_VOICE`. |
+| `-Dglycin_compat` (`auto`/`1`/`2`) | Which glycin loader generation the image decoder targets. Auto-detects the host's generation. See `docs/image-decoding.md`. |
+| `-Dtests` | The test suite. |
+| `-Dcargo_target_dir` | Cargo target dir, for CI caching. |
 
-(Old `debian/` packaging, `gtkhx.spec`, `intl/`, `macros/` were removed in Phase 0–1.
-Re-add fresh packaging when ready to ship.)
+Optional deps, each behind a `HAVE_*` define: poppler (PDF preview), gtksourceview-5
+(source preview), ImageMagick (complex PICT decode).
 
-## Build status
+Windows and macOS build; some Unix-only pieces (the `/exec` command) compile out.
 
-**Phases 1, 2, 3, and 4 are complete. Phase 5 (post-port modernization) is active.**
-`meson.build` pins `gtk4 >= 4.6` and `libadwaita-1 >= 1.6`. `meson setup build &&
-meson compile -C build` produces a working binary.
+## The C / Rust split — read this first
 
-**Voice chat (Phase 8) is an optional build feature.** The `-Dvoice` meson
-option (`auto` / `enabled` / `disabled`, default `auto`) gates it on the
-GStreamer 1.20+ stack (`gstreamer-1.0` / `-app` / `-audio` / `-sdp` /
-`-webrtc`). `auto` compiles voice in when GStreamer is found and silently
-drops it otherwise; `enabled` makes a missing stack a hard configure error.
-When off, the `hxvoice` / `hxvoice-runtime` Rust crates aren't built (so no
-GStreamer is needed at build time at all), the GStreamer libs aren't linked,
-`HTLC_CAP_VOICE` isn't advertised at LOGIN, and every voice C source + call
-site is compiled out behind the `HAVE_VOICE` define. The gate plumbing:
-`voice_enabled` in the top-level `meson.build` → `HAVE_VOICE` in
-`src/meson.build` + `--workspace --exclude hxvoice hxvoice-runtime` in
-`rust/meson.build` → `#ifdef HAVE_VOICE` guards in `gtkhx.c`, `chat.c`,
-`toolbar.c`, `options.c`, `users_view.c`, `network.c`, `rcv.c`, `gtkutil.c`.
-The voice unit/proto/integration tests are likewise gated in
-`tests/meson.build`; CI's `build-no-voice` job builds the whole binary with
-`-Dvoice=disabled` on a GStreamer-free image to keep the path green.
+The single most important orienting fact: **this is a hybrid codebase, and the Rust half
+is now the larger half.** A mental model of "a C app with some Rust helpers" will send you
+looking for code in the wrong place.
 
-**The vendored xtext widget is gone (phase C5).** The chat output surface is
-`rust/crates/hxchat-layout` (a dependency-free layout engine: spans, wrapping,
-a chunked prefix-sum height index, scroll anchoring, selection, search) plus
-`rust/crates/hxchat-view` (the GTK4 widget). `src/chat_view.h` declares the C
-ABI; there is no `chat_view.c` — C links straight to the Rust exports. The
-replacement measured 4.9x faster on ingest and 6.3x on the worst relayout
-frame; `docs/chat-view-benchmark.md` is the record and cannot be reproduced,
-since the other half of the comparison no longer exists. Design and phasing:
-`docs/chat-view-scoping.md`.
+- **Rust owns**: the wire protocol (`hotline-proto`); the whole network stack including
+  connect lifecycle, TLS, crypto, compression, framing, file transfers, and tracker fetch
+  (`hxnet`); most receive handlers (`hxhandlers`); the session GObject and its boxed signal
+  payloads (`gtkhx-core`); the chat rendering widget (`hxchat-layout` + `hxchat-view`); and
+  a growing set of windows and dialogs (`gtkhx-ui`).
+- **C owns**: the libpanel dock and layout persistence, the toolbar, the file browser, the
+  tray, notifications, previews, theming, and the receive handlers still left in `rcv.c`.
+  Settings is a split: C keeps the `cfgvars[]` table, the change hooks and the prefs
+  parser, while most of the preference *pages* are Rust builders called through the C
+  framework's draw pointers.
+- **The seam** is a set of thin bridge files (`*_bridge.c`, `htxf_accessors.c`) plus
+  hand-declared `extern` blocks. There is no cbindgen.
 
-The `\003NN` mIRC escape vocabulary is **retired** (C6). Chat rows are built
-from `HxChatRun` arrays — `(text, palette index, attrs)` — via
-`hx_chat_view_append_runs` / `_insert_runs_before`, and the `chat-log-line`
-signal carries `(htlc, cid, name, colour, body)` rather than a pre-formatted
-string, so `INFOPREFIX` is just `"hx"` and broadcastmsg passes its sender name
-and colour as parameters (`hx_printf_named`). Nothing produces escapes and
-nothing parses them; `hxchat-layout`'s `mirc.rs` is deleted.
+`docs/rust/ROADMAP.md` holds the live inventory of what is still C and why.
 
-One dead remnant is deliberately still there and flagged in place:
-`proto_helpers.c` keeps a copy of the old prefix and checks *incoming server
-chat* against it. Nothing produces the prefix and that check only ever sees
-server-sent text, so it cannot fire — removing it means retiring two
-proto-test cases, which is its own change. Every other `\003` in the tree is
-inside a comment explaining what used to be there.
+## Source layout
 
-Markdown **renders** on incoming messages (`**bold**`, `*italic*`,
-`` `code` ``, fenced blocks, `>` quotes, `[label](url)` with a scheme
-allowlist), behind `CFG_MARKDOWN`. Sending is unaffected — markdown goes
-out literally, since the wire format has no styling concept.
+### `src/` — C, by subsystem
 
-Message rows also carry structure now: an `HxChatSpeaker` (uid + nick +
-direction), grouping of consecutive messages from one speaker, and an avatar
-gutter on group heads. See scoping §6a2 and §6b.
+| Subsystem | Files |
+|---|---|
+| **Entry point** | `gtkhx.c` (`main()`, GtkApplication, signal-handler wiring) |
+| **Dock / layout** | `hx_panel.c`, `hx_panel_frame.c`, `hx_split.c`, `panel_registry.c`, `dock_layout.c`, `dock_layout_parse.c`, `dock_bridge.c`, `toolbar.c` |
+| **Settings** | `options.c` (the `cfgvars[]` table, change hooks, GKeyFile persistence, and the framework the Rust page builders plug into), `prefs_parser.c` |
+| **Chat** | `chat.c` (window + output path), `chat_avatar.c`, `chat_history.c`, `chat_bench.c` |
+| **Files** | `files_browser.c`, `files_panel.c`, `files.c`, `files_local_provider.c`, `files_remote_provider.c`, `files_provider.c`, `files_complete.c`, `files_ops.c`, `files_entry.c` |
+| **Protocol (recv/send)** | `rcv.c` (the remaining receive handlers, the frame-dispatch switch, the transaction correlator), `commands.c`, `proto_helpers.c`, `proto_trace.c` |
+| **Network glue** | `network.c`, `hxnet_bridge.c`, `host_port.c`, `hotline_url.c` |
+| **Users / tasks** | `users.c`, `users_cell.c`, `usermod.c` (user editor wire senders), `tasks.c` |
+| **Tracker** | `tracker_parser.c`, `tracker_v3.c`, `tracker_v3_meta.c`, `tracker_event.c` |
+| **Media** | `inline_media*.c`, `gif_icons.c`, `gif_avatar.c`, `cicn.c`, `pict_embed.c`, `pict_magick.c`, `preview.c` |
+| **Theming / chrome** | `gtkhx_theme.c`, `gtkhx_icon.c`, `gtkutil.c`, `gtkurl.c` |
+| **Messaging** | `msg.c` (private-message windows, broadcast render) |
+| **Voice** (optional) | `voice_bridge.c`, `voice_ptt_keyspec.c` |
+| **Desktop integration** | `tray.c`, `notify.c`, `sound.c`, `sound_events.c` |
+| **Bridges to Rust** | `hxnet_bridge.c`, `dock_bridge.c`, `gtkhx_ui_bridge.c`, `users_bridge.c`, `tasks_bridge.c`, `tracker_bridge.c`, `chat_send_bridge.c`, `voice_bridge.c`, `htxf_accessors.c`, `inline_media_decode.c` |
+| **Infrastructure** | `debug.c`, `gtkhx_log.c`, `human_readable.c`, `uniquify_path.c`, `path_hldir.c`, `hl_code.c`, `cmd_exec.c` |
 
-The custom GtkCList fork is gone; its five list consumers (`tracker.c`, `news15.c`,
-`options.c`, `users.c`, `files.c`) now use `GtkColumnView` directly — the interim
-`gtk_hlist_compat` shim over GtkTreeView+GtkListStore has itself been removed. The GtkApplication / activate plumbing in `gtkhx.c` drives
-all window construction.
+Deliberately absent, and worth knowing so you don't go looking: `xtext.c` (replaced by the
+Rust chat view), `gtk_hlist.c` (replaced by `GtkColumnView`), `xfers.c` (transfers are
+Rust), `dfa.c`, the C crypto and compression dispatchers, the news UI files, `tracker.c`,
+`text_util.c`, `login_packet.c`, and the whole `plugins/` tree.
 
-What's runnable and reasonably polished on this branch:
+**Headers.** `hx.h` is an umbrella that pulls in the four real headers and exists so the
+older `.c` files keep building; new code should include the narrowest one that works:
 
-- Launches under GTK 4 / libadwaita on Wayland with light/dark/system theme tracking
-  via AdwStyleManager.
-- Every user-facing window uses `AdwHeaderBar` chrome consistently: toolbar, chat,
-  private chat, private message, news, news15, files, users, tasks, tracker, preview,
-  agreement, user editor, about. Settings is `AdwPreferencesDialog`; Connect, Open
-  User, broadcast, and confirmation prompts are `AdwDialog` / `AdwAlertDialog`.
-- **Ctrl+U clears the focused text input, app-wide** — a `app.clear-input`
-  GAction in `toolbar.c` walking from `gtk_window_get_focus`, so it covers
-  `GtkTextView` (the chat input) and every `GtkEditable` (entries, search
-  bars, `AdwEntryRow`) without per-widget wiring, and keeps working for
-  whatever gets added next. `chat_input.rs` intercepts the key only to
-  guarantee it fires over a focused text view, then activates the same
-  action.
-- Toolbar uses `AdwSplitButton` for Connect-with-bookmark, `AdwBanner` for connection-
-  loss notice with Reconnect, `AdwToastOverlay` for transient feedback. Hamburger menu
-  via `GMenu` + `GAction` on the application.
-- Tracker has a `GtkSearchEntry` and action buttons in the headerbar.
-- Settings icon picker is a `GtkFlowBox` grid of 56 px GtkPicture-rendered icons (was
-  a 18-px-row GtkHList).
-- Hotline protocol layer: the C send/receive dispatch (`rcv.c` / `commands.c` /
-  `hotline.h`) is unchanged; connect + magic + LOGIN + the HOPE handshake, ciphers
-  (Blowfish OFB-64 + ChaCha20-Poly1305 AEAD), and zlib compression all moved into the
-  Rust `hxnet` orchestrator + `hxcrypto-*` / `hxcompress` crates. Wire-format compat
-  with 1.2/1.5/1.9 servers is preserved there.
-- Chat / private-message text is sanitised through `gtkhx_text_to_utf8` (Mac Roman →
-  UTF-8 with U+FFFD fallback) before reaching the chat view / Pango.
-- Sound playback is in-process via GSound; no fork+exec of an external player.
+- `compat.h` — portability shims, gettext `_()`, `MAXPATHLEN`, byte-shift macros. Pure
+  preprocessor. **`MAXPATHLEN` is hard-clamped to 4095**, not the host's `PATH_MAX`; any
+  Rust `#[repr(C)]` mirror of a struct holding a `char[MAXPATHLEN]` must use 4095.
+- `protocol.h` — wire/network/connection types. GLib, no GTK.
+- `prefs.h` — preferences data.
+- `session.h` — the `session` struct and the GTK-bearing types.
 
-Phase 5+ work landed (highlights — see ROADMAP for the full list):
+Also: `hotline.h` (wire struct layouts), `hotline_proto.h` (FFI declarations for the Rust
+protocol crate), `hxconn.h` + `hxconn_layout.h` (the accessor seam over the now-opaque,
+Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there is no
+`chat_view.c`; C links straight to Rust exports), `hl_access.h` (account access bits).
 
-- `HTLC_HDR_PING` keepalive every 60 s while connected, gated on `htlc->version >= 150`
-  so 1.0/1.2 servers don't error-spam our toasts.
-- Post-login state machine waits for `HTLS_HDR_USER_SELFINFO` before firing
-  `USER_GETLIST`, with a 2 s fallback timer for old servers that don't send SELFINFO.
-- `hl_access.h` decodes the access bitmap; `news.c` skips auto-fetch when
-  `HL_ACCESS_READ_NEWS` is unset; users.c hides Kick/Ban menu and toolbar buttons when
-  `HL_ACCESS_DISCONNECT_USERS` is unset; toolbar greys out News / Post / News (1.5+)
-  buttons by version + access bits.
-- **Phase 7 TLS (separate-port model)** — all five sub-phases shipped on
-  `claude/tls-phase1-control-channel`. Control channel + HTXF subchannels (xfers
-  + banner) over `GTlsConnection`; TOFU trust DB with SHA-256 fingerprint pinning
-  and an Adwaita prompt; Connect dialog "Use TLS" `AdwSwitchRow` with port
-  auto-flip (5500↔5600) and HOPE/cipher/compress grey-out; bookmark format gained
-  a 4th flag byte (zero-pads on read for pre-TLS files). Tier 3 covers the full
-  matrix against Janus.
-- **Phase 8 voice chat (fogWraith)** — end-to-end against Janus VoiceRoom.
-  Wire protocol + session machine in Rust (`hotline-proto::voice`, `hxvoice`),
-  webrtcbin runtime in Rust (`hxvoice-runtime`, gstreamer-rs + gstreamer-webrtc-rs),
-  UI in C (`voice.{c,h}`, `voice_panel.{c,h}`, `voice_model.{c,h}`, voice indicator
-  column in users_view). DTLS-SRTP / PCMU. Capability bit 2 (`HTLC_CAP_VOICE`).
-- **RC4 retired** on `claude/remove-rc4`. Stable cipher-byte vocabulary in
-  `bookmark_cipher.{c,h}` (independent of `valid_ciphers[]` ordering); legacy
-  RC4 bookmarks trigger a replacement-picker dialog and the file is rewritten
-  in place.
-- **Packaging** — Flatpak manifest (`com.nasledov.gtkhx.yml`, GNOME 49),
-  AppStream metadata, desktop file. RPM + `debian/` removed; distro story is
-  Flatpak.
-- **Static analysis + sanitizers in CI** — `.github/workflows/analyze.yml` runs
-  GCC `-fanalyzer`, clang-tidy, and an ASan+UBSan unit/proto run on every push.
-  Findings upload as artifacts; non-blocking until categories get flipped to
-  mandatory.
+### `rust/crates/` — by role
 
-What's degraded and remaining:
+| Role | Crates |
+|---|---|
+| **Wire protocol** | `hotline-proto` — typed builders and parsers for every opcode; the biggest crate in the tree |
+| **Network** | `hxnet` (connect lifecycle, TLS, HOPE, framing, file transfers, tracker fetch), `hxcrypto`, `hxtls-trust` |
+| **Receive / send handlers** | `hxhandlers` — `recv::` and `send::` modules, one per domain |
+| **GObject layer** | `gtkhx-core` (the session signal hub, the connection struct's storage, boxed signal payloads), `hxmodel`, `hxtask` |
+| **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window), `hxchat-view` (the GTK4 chat widget), `hxchat-layout` (its layout engine — **dependency-free**: no gtk, glib, or pango) |
+| **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
+| **Media / files** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn), `hxhfs` (resource-fork sidecars), `hxfiles-xfer` (fork-header codec) |
+| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
+| **Link façade** | `gtkhx-ffi` — bundles every FFI-exporting crate into a single `libgtkhx_ffi.a`, so the binary links exactly one archive instead of a hand-ordered list. Several crates also build a standalone `staticlib` on the side, purely so the test suite can link one crate at a time. See `docs/rust/crate-layout.md`. |
 
-- ~~**Selection auto-scroll while dragging**~~: fixed in C4. xtext's timers read
-  a stale `select_end_y`; the replacement stores the drag position and consumes
-  it from a `GtkTickCallback`, frame-time based so it scrolls at the same speed
-  on a 60 Hz and a 144 Hz display.
-- **Window position restoration**: `gtk_window_get_position` is gone and Wayland
-  gives clients no portable way to set absolute position. Size restores from prefs;
-  position only restores when the compositor cooperates.
-- **`MAX_CONN > 1`**: still a half-built abstraction. The plan is tabbed UI for
-  multi-conn (see memory `gtkhx_future_ui.md`).
-- **CSS-node-insert-after warnings**: occasional `gtk_css_node_insert_after` criticals
-  during widget construction. Most call sites have been audited; remaining cases are
-  pre-existing GTK 4 noise.
+### Other directories
 
-## Model / view boundary (GtkhxSession signals)
+- `tests/` — three tiers: unit (pure functions), proto (wire fixtures), integration
+  (end-to-end against a Docker rig of mhxd / Janus / hxtrackd / Argus / a SOCKS proxy).
+  `tests/COMPOSE.md` describes the rig; `tests/run.sh` brings it up.
+- `mhxd/` — the reference server's source, vendored for cross-reading only. Not built.
+- `po/` — translations (German, Spanish, French, Portuguese). `sounds/` — chat alert `.wav`s.
+- `src/themes/` — built-in theme files, shipped as GResource.
+- `tools/` — `coverage.sh`, `analyze.sh`, `chatbench.sh`, whitespace linting.
 
-Model-side files (`rcv.c`, `network.c`, `commands.c`, `tasks.c`
-interior, `banner.c`, `xfers.c`) reach the view by emitting signals
-on `GtkhxSession` — a singleton GObject created lazily by
-`gtkhx_session_get_default()`. Direct GTK calls (`gtk_*` / `GTK_*`)
-in those files are bugs — Phase 2 cleared them out, the audit is
-one grep.
+## The model / view boundary
 
-The signal taxonomy mirrors the old `hx_output` vtable that Phase 3
-replaced:
+Model-side code (`rcv.c`, `network.c`, `commands.c`, `tasks.c`, and the Rust receive
+handlers, and the model-side interior of `tasks.c`) reaches the view by **emitting signals
+on `GtkhxSession`** — a singleton GObject
+implemented in Rust (`gtkhx-core`) exporting a stable C ABI (`gtkhx_session_get_default`,
+`gtkhx_session_emit_<name>`). Direct `gtk_*` / `GTK_*` calls in `rcv.c`, `network.c` and
+`commands.c` are bugs; the audit is one grep. (`tasks.c` is mixed — it holds both the task
+model and the task list's row widgets.)
 
-| Signal                  | Payload                                      |
-|-------------------------|----------------------------------------------|
-| `chat`                  | htlc, cid, body, len                         |
-| `chat-subject`          | htlc, cid, subj                              |
-| `chat-invitation`       | htlc, cid, inviter-name                      |
-| `msg`                   | sender-name, uid, body                       |
-| `agreement`             | session, agreement-string, len               |
-| `news-file`             | htlc, news, len                              |
-| `news-post`             | htlc, news, len                              |
-| `news-folder`           | gfnews                                       |
-| `news-catalog`          | gcnews                                       |
-| `news-thread`           | post                                         |
-| `user-create`           | htlc, chat, user, nam, icon, color           |
-| `user-delete`           | htlc, chat, user                             |
-| `user-change`           | htlc, chat, user, NEW nam/icon/color         |
-| `users-clear`           | htlc, chat                                   |
-| `user-info`             | uid, nam, info, len                          |
-| `file-info`             | path, name, creator, type, ...               |
-| `file-list`             | cfl, fh, data                                |
-| `file-update`           | session, htxf                                |
-| `xfer-queue`            | session, htxf                                |
-| `tracker-server-create` | addr (s_addr), port, nusers, nam, desc, total|
-| `task-update`           | session, task                                |
+Signals cover chat and chat history, messages, agreement, news, users, files, the transfer
+queue, tasks, tracker results, GIF icons, connection state, and login. Read
+`rust/crates/gtkhx-core/src/session.rs` for the current list and payloads rather than
+trusting a table here — it grows.
 
-Model-side emitters: since **Phase R4.1** the `GtkhxSession` GObject
-is the Rust `glib::subclass` crate `rust/crates/gtkhx-session/`
-(`src/gtkhx_session.c` deleted; `src/gtkhx_session.h` unchanged). It
-exports the same C ABI — `gtkhx_session_get_type` /
-`gtkhx_session_get_default` / the couple-dozen `gtkhx_session_emit_<name>`
-wrappers (one per signal) — so model- and view-side C is unchanged. Each `emit_*`
-builds the signal's `GValue`s in Rust and calls
-`emit_by_name_with_values`. Boxed payloads (`HxMsgEvent`, `HxChatEvent`
-+ `HxChatMedia`, `HxTrackerServer` + `HxTrackerV3Meta`) were re-hosted
-from C into the self-contained Rust crate `rust/crates/gtkhx-boxed/`
-in **R4.2** — `#[repr(C)]` mirrors exporting the old C ABI
-(`hx_*_{get_type,copy,free}`), layout pinned by `_Static_assert`s in
-`proto_helpers.c` / `tracker_event.c` / `tracker_v3_meta.c`. The C
-producers (`hx_*_new`, `attach_media`, the wire parsers) stay in C and
-keep filling the structs. gtkhx-boxed is deliberately a separate crate
-from gtkhx-session (which keeps externing the boxed `_get_type`s): a
-proto unit test pulling a `_copy`/`_free` symbol links that
-self-contained archive alone, without dragging gtkhx-session's externs
-in via codegen-unit merging, and gtkhx-session avoids bundling
-gtkhx-boxed's rlib (which would double-define the symbols). View-side
-handlers are static
-adapter functions in `gtkhx.c` (`on_<name>_signal`) that bridge the
-GObject marshaller signature to the legacy `output_*` /
-`user_create` / etc. functions in `chat.c` / `users.c` / `news*.c` /
-`tasks.c`. The connect calls all live in `gtkhx_connect_signals()`,
-fired once from `fe_init` at startup.
+View-side handlers are static adapter functions in `gtkhx.c` (`on_<name>_signal`), wired
+up once in `gtkhx_connect_signals()` from `fe_init`. Boxed payload types are `#[repr(C)]`
+mirrors in `gtkhx-core::boxed`, with layout pinned by `_Static_assert`s on the C side.
 
-The Phase 2 / Phase 3 cleanup also dropped a clutch of dead vtable
-entries (`clear`, `user_list`, `tracker_clear`) whose implementations
-were called directly by name elsewhere and never flowed through the
-dispatch. Some view-side convenience functions remain called by
-name from model files: `hx_printf` / `hx_printf_prefix` (log a line
-to chat output), `hx_clear_chat`, `tracker_clear`. They aren't
-signal-routed today.
+**When a Rust receive handler needs the view to log a notice, emit a session signal** —
+don't call a view-side C log shim over FFI. The gettext call and the preference gate belong
+in the C view handler.
 
-Worker threads marshal to main via `g_idle_add` (or `gtkhx_post_to_main`,
-xfers.c's wrapper that takes a refcount), never call GTK or emit
-signals directly. The idle callback runs on the main thread; only
-there does it call view functions or emit signals. Workers verified
-clean post-Phase-3: banner.c HTXF worker, xfers.c progress updates,
-preview.c async parses, network.c conn worker, tracker.c list worker
-all marshal correctly. `hx_printf` / `hx_printf_prefix` (which now
-emit through GtkhxSession via `gtkhx_log.c`) are called only from
-main-thread paths.
+A few view-side conveniences are still called by name from model files rather than
+signal-routed: `hx_printf` / `hx_printf_prefix`, `hx_clear_chat`.
 
-## Per-session collections (Phase 1 of MVC cleanup)
+## Per-session state
 
-Every per-session collection on `struct _session` is a `GHashTable`
-since Phase 1, replacing the intrusive doubly-linked-list patterns
-the original code used. The shape is uniform:
-`g_direct_hash + g_direct_equal + NULL key destroy + g_free-ish
-value destroy`. The lookup APIs (`task_with_trans`,
-`msgwin_with_uid`, `chat_with_cid`, `gchat_with_cid`,
-`hx_user_with_uid`) are now O(1) wrappers; iteration uses
-`GHashTableIter`. The hashtables and their factories live in:
+`session` (one instance, `the_session`) holds:
 
-| Session field    | Keyed on    | Factory           | Test                             |
-|------------------|-------------|-------------------|----------------------------------|
-| `tasks`          | `u32 trans` | `tasks_init`      | `tests/unit/test_task_hash.c`    |
-| `msg_windows`    | `u16 uid`   | `msg_windows_init`| `tests/unit/test_msgwin_hash.c`  |
-| `chats`          | `u32 cid`   | `chats_init`      | `tests/unit/test_chat_hash.c`    |
-| `gchats`         | `u32 cid`   | `gchats_init`     | `tests/unit/test_gchat_hash.c`   |
-| per-chat `users` | `u16 uid`   | `chat_new` seeds  | `tests/unit/test_hx_user_hash.c` |
+- `tasks` — `GHashTable` keyed by transaction ID. **Transaction 0 is a real key, not a
+  sentinel.**
+- `msg_windows` — `GHashTable` keyed by user ID.
+- `chats` — the Rust `HxChatRegistry` (not a `GHashTable`), keyed by chat ID, seeded with
+  the always-present public chat at cid 0.
+- `htlc` — the connection. **Heap-allocated and opaque**, reached through the `hxconn.h`
+  accessors. `sess_from_htlc()` is a real back-pointer read — not a `container_of`, and not
+  the old `&sessions[0]` fiction. `MAX_CONN` and `sessions[]` no longer exist.
 
-`chats_init` additionally seeds the always-present public chat at
-`cid=0` — `chat_with_cid(sess, 0)` is never NULL while the table
-exists. Same convention for `gchats`. `gfile_list` is a plain
-`GList` (small N + the legacy `file_samewin=false` pref allows
-duplicate paths, so a hashtable can't represent it cleanly).
+Two routing accessors, and the distinction matters for the eventual multi-connection work:
+`sess_from_htlc(htlc)` is "the session that owns this connection" — use it in model code,
+which always has the htlc for the event it is handling. `hx_active_session()` is "the
+session the user is looking at" — use it in UI code. Today N == 1 and they coincide.
 
-## Idioms and pitfalls specific to this codebase
+## Idioms and pitfalls
 
-- **Multi-connection scaffolding is a lie.** `hx.h` has `MAX_CONN`/`sessions[]`, but
-  `sess_from_htlc()` literally returns `&sessions[0]`. Don't propagate the abstraction
-  during follow-up work — collapse to explicit single-session. Real multi-conn lands
-  in Phase 5 with a tabbed UI (see memory `gtkhx_future_ui.md`).
-- **Socket watches in `gtkhx.c`.** `hxd_fd_set`/`hxd_fd_clr` are now thin wrappers
-  around `g_io_add_watch` on a `GIOChannel`. The custom-timer-wheel from the original
-  is gone; `g_timeout_add_seconds` is used everywhere now (e.g. ping keepalive,
-  post-login fallback).
-- **Threading.** `gtkthreads.c` uses a `GRecMutex` plus a custom `GMainContext` poll
-  wrapper that releases the lock during `poll()` and re-acquires it after. Worker
-  threads (network.c, xfers.c) call `gtk_threads_enter()` / `gtk_threads_leave()`
-  brackets around any GTK widget access — same single-mutex semantics the GDK lock
-  used to provide, just on a non-deprecated foundation. Per-window UI dispatch from
-  workers prefers `g_idle_add` (see preview.c) so the worker doesn't hold the lock
-  during slow GTK operations.
-- **List widgets are `GtkColumnView`.** The five former GtkHList consumers
-  (`tracker.c`, `news15.c`, `options.c`, `users.c`, `files.c`) were migrated to
-  `GtkColumnView` and the interim `gtk_hlist_compat` shim (and the older GtkCList
-  fork before it) deleted.
-- **HOPE handshake + crypto live in Rust.** Connect + magic + LOGIN + the optional
-  HOPE encryption/compression negotiation, the ciphers (Blowfish OFB-64 stream +
-  ChaCha20-Poly1305 AEAD, incl. the per-message stream rekey), the HMAC chain, and
-  zlib compression all run inside the `hxnet` orchestrator + the `hxcrypto-{hash,
-  stream,aead}` / `hxcompress` Rust crates. The C dispatchers that used to do this
-  (`cipher.c`, `cipher_aead.c`, `compress.c`, `hope.c`, `hmac.c`, `md5.c`, `sha.c`,
-  `haval.c`, `network_decode.c`) are all gone. **Don't change the negotiated wire
-  format** — only the Rust implementation underneath; 1.2/1.5/1.9 compat is a hard
-  requirement. `chacha_aead_state` (a repr(C) struct in `cipher.h`) survives as the
-  FFI bridge type for the HTXF AEAD material; `compress.h` keeps the `COMPRESS_*` ids,
-  the `compress_state` union, and the `compress_encode_bufsize` inline a Tier 1 test
-  drives.
-- **License: GPL-2.0-or-later** ("version 2 of the License, or (at your option) any
-  later version" header text). Misha confirmed keep-as-is. Don't strip the "or later"
-  clause without explicit confirmation.
-
-## Theming (theme files)
-
-`src/gtkhx_theme.{c,h}` is the `GtkhxTheme` singleton. All per-axis
-theming state — five scale areas (`GTKHX_SCALE_TOOLBAR`,
-`GTKHX_SCALE_WINDOW_BUTTONS`, `GTKHX_SCALE_USERLIST_ICON`,
-`GTKHX_SCALE_USERLIST_TEXT`, `GTKHX_SCALE_TASKS_ROW_ICON`) and six chat palette UI-role colors
-(`GTKHX_PAL_{FG,BG,MARK_FG,MARK_BG,MARKER,HISTORY_MUTED}` × light/dark) —
-lives in **theme files**: GKeyFile-format `.ini` at `$CONFIG/themes/<name>.ini`
-with the built-in default shipped as a GResource at
-`/com/nasledov/gtkhx/themes/default.ini` (source at `src/themes/default.ini`).
-The only theming key in `gtkhxrc` is `CFG_THEME_NAME` ("THEMENAME"); the
-loader picks `$CONFIG/themes/<that>.ini` first and falls back to the
-GResource. Schema reference: `docs/theming-file-format.md`.
-
-`gtkhx_theme_load_active()` runs once in `fe_init()` before any widget
-construction (so the first measure pass gets the right factors). It emits
-`GtkhxTheme::changed`. A `THEMENAME` edit re-fires it via the
-`changed_theme_name` cfgvar hook; every subscriber (button helpers, user
-list, chat view) rescales and repaints in place.
-
-Call sites multiply their raw source size by `gtkhx_theme_scale(area)`. The old
-per-call `2` literals and `TOOLBAR_ICON_SCALE` / `TASKS_ICON_SCALE` constants are
-gone — there is exactly one factor source per area, no hidden multipliers.
-Source art is the honest 100%; the default theme owns the historical 2× button
-and 1.25× user-list factors as explicit overrides.
-
-`chat.c::gtkhx_apply_theme_palette(dark)` pulls each UI-role slot via
-`gtkhx_theme_get_color(role, dark)`. The mIRC slots (0..31) stay in
-`chat.c::colors[]`. **Correction (chat-view scoping):** a mid-2026 edit to this
-note claimed they were "protocol-shaped, not theme-shaped (servers send
-specific indices)". That was invented, not researched, and is wrong — flagging
-the provenance because this file is read as ground truth by every session. The
-Hotline wire format has no text-styling
-concept at all — no colour field, no style field; chat / message / news bodies
-are plain text. The `\003NN` escape vocabulary arrived with the XChat xtext
-fork in 2000, and every such byte in a buffer was written by GtkHx itself (nick
-brackets, highlight, the info prefix, history-muted rows, media placeholders).
-Hotline's real per-user colour is a separate u32 RGB attribute on the user
-record, not in-band markup. The vocabulary is ours to retire — see
-`docs/chat-view-scoping.md` §3.8.
-
-Non-chat-view text surfaces (agreement window, news viewers, broadcast viewer,
-chat-subject entries, and the chat / PM / pchat input boxes) get the same
-theme `fg`/`bg`/`caret-color` via three CSS classes managed by
-`gtkhx_refresh_css`: `.gtkhx-text` (read-only text — applies theme colors +
-font), `.gtkhx-input` (editable inputs — colors only; font stays on GTK's
-built-in `.monospace` class to avoid the documented ascender-clip bug), and
-`.gtkhx-listview` (list-shaped surfaces — `GtkColumnView` / `GtkListView` /
-`GtkListBox`, colors only; selection keeps the system accent). The
-`.gtkhx-userlist` provider — separate because it also encodes the dedicated
-user-list font pref + per-row padding override — gains theme colors via
-`gtkhx_refresh_userlist_css`. All providers get re-emitted on
-`GtkhxTheme::changed` and on `AdwStyleManager::notify::dark`, so theme reloads
-and system-mode flips repaint immediately. Apply with `gtkhx_apply_text_style(w)`
-/ `gtkhx_apply_input_style(w)` / `gtkhx_apply_listview_style(w)`. Tagged today:
-agreement window, news / broadcast viewers, news_browser post-view (`.gtkhx-text`);
-chat / pchat / PM inputs and news_browser compose body (`.gtkhx-input`); tracker,
-tasks list, files browser panels, news_browser thread tree (`.gtkhx-listview`);
-users list (`.gtkhx-userlist`).
-
-Buttons use `gtkhx_pixmap_button` / `gtkhx_pixbuf_button` (which take a
-`GtkhxScaleArea`, subscribe to the theme `changed` signal, and auto-unsubscribe
-on finalize). The user list reads scales live in `measure`/`snapshot` — no
-per-cell state to refresh.
-
-**Settings UI is just a picker.** Settings → Appearance has a "GtkHx theme"
-`AdwComboRow` bound to `CFG_THEME_NAME`, populated by
-`gtkhx_theme_list_available()` (enumerates GResource built-ins + `$CONFIG/themes/*.ini`;
-default-first then alphabetical-by-display; user files shadow same-name
-GResources). The scale knobs / color pickers / "save as" parts of the theme
-editor are a separate later phase. For now, edit the `.ini` directly to change
-a theme's body. Built-ins: `default`, `solarized` (see
-`src/themes/` and `docs/theming-file-format.md`).
-
-`tests/unit/test_theme_scale.c` covers clamp matrix, defaults, GKeyFile
-round-trip, missing-key fallback, malformed-hex fallback, load-replaces-not-merges,
-and `changed` emission. `tests/unit/test_theme_listing.c` covers the discovery
-API (user-dir walk, GResource walk, sort order, shadowing).
-
-`src/gtkhx_icon.{c,h}` is the chrome-icon resolver. Every chrome PNG load
-(buttons + task-row glyphs + news-thread row icons) goes through
-`gtkhx_icon_load(name_or_path)`. Themes can ship as a flat `.ini` (colours +
-scales only) or as a directory bundle at `$CONFIG/themes/<name>/theme.ini`
-plus `$CONFIG/themes/<name>/icons/<logical>.png` — the resolver looks up
-user-bundle → built-in-bundle GResource → stock GResource pixmap per icon, so
-a partial bundle that ships just a few overrides keeps every other icon
-stock. There is no separate icon-pack pref: picking a theme picks the look
-end-to-end. The theme `changed` handler in `gtkhx.c` calls
-`gtkhx_icon_invalidate_cache()` so a theme switch repaints buttons via
-`button_load_source` → `gtkhx_icon_load`. Brand assets (the app logo) and
-Hotline user icons (cicn) are deliberately NOT covered. Schema reference:
-`docs/theming-file-format.md`.
-
-The compact chat-sidebar user list keeps a fixed 1.0 structural density and
-does not follow `USERLIST_*` — that carve-out is intentional, not a bug.
-
-## Coverage
-
-`tools/coverage.sh` builds with `-Db_coverage=true`, runs the test suite,
-and emits an HTML report at `coverage/index.html` via `gcovr` (or `lcov`
-fallback). Default is all tiers including Tier 3 against the Docker matrix;
-`--quick` skips Tier 3. Exclusions for vendored / soon-deleted code
-(`dfa.c`, `rand.c`) live in `.gcovr.cfg`; `xtext.c` was there until C5
-deleted it. Use it to pick the
-heaviest-uncovered file when planning what to test next. Full notes in
-`docs/coverage.md`.
+- **Threading.** Worker threads marshal to the main thread via `g_idle_add` or
+  `gtkhx_bridge_post_to_main`; they never call GTK or emit signals directly. There are no
+  raw `pthread_create` calls left — Rust work runs on the tokio blocking pool. The old
+  `gtkthreads.c` GDK-lock emulation is gone.
+- **Nothing watches the control socket from C.** The Rust orchestrator owns it and pushes
+  frames across the bridge; the old `hxd_fd_set` / `GIOChannel` registration is gone. The
+  one surviving `g_io_add_watch` is on the `/exec` output pipe, which is Unix-only. Timers
+  are `g_timeout_add_seconds` — the original's custom timer wheel is gone.
+- **List widgets are `GtkColumnView`.** No GtkCList fork, no compat shim.
+- **Don't change the negotiated wire format.** The Rust implementation underneath is fair
+  game; the bytes on the wire are not. 1.2/1.5/1.9 compat is the hard requirement.
+- **Prefer `assert!` over `debug_assert!`** in the Rust crates, even for "can't happen" wire
+  invariants — `debug_assert!` is stripped in release.
+- **Don't use `g_assert` for invariants that matter in release builds** — it compiles out
+  under `G_DISABLE_ASSERT`. Use `g_error` (always fatal) or `g_critical` plus a graceful
+  skip. The `g_assert_*` test macros are fine in tests.
+- **`g_autoptr` / `g_autofree`** are used opportunistically, not universally. `bookmarks*.c`
+  is the in-tree pattern to copy. Not worth a sweep; convert when you touch a function.
+- **`GtkTreeListModel`**: attach children to a node *before* appending the node.
+  `create_child_model` fires once and the leaf-vs-expandable verdict sticks.
+- **No phase labels in source comments.** Describe the reason, not the project-management
+  label. Phase labels are fine in commit messages and docs.
 
 ## Debug infrastructure
 
@@ -479,64 +206,67 @@ Set `GTKHX_DEBUG` to a comma-separated list of categories before launch:
 
 ```sh
 GTKHX_DEBUG=proto             # full Hotline wire trace (in/out, types, chunks)
-GTKHX_DEBUG=proto,news,login  # several at once
-GTKHX_DEBUG=all               # everything
+GTKHX_DEBUG=proto,news,voice
+GTKHX_DEBUG=all
 ```
 
-Output goes to stderr, prefixed `[<category>]`. See `src/debug.{c,h}` for the
-infrastructure and `src/proto_trace.{c,h}` for the protocol trace (the first and
-biggest consumer). Existing categories: `proto`, `news`, `login`, `msg`,
-`tracker`. Add new ones inline — `debug_log("xfer", "starting transfer %u",
-htxf->ref)` just works, no registration needed.
+Output goes to stderr, prefixed `[<category>]`. Categories in use include `proto`, `news`,
+`tracker`, `voice`, `xfer`, `files`, `media`, `icon`, `dock`, `layout`, `dnd`, `startup`,
+`name`, and `bench`. Adding one takes no registration — `debug_log ("newcat", "…")` just
+works. Infrastructure in `src/debug.{c,h}`; the wire trace in `src/proto_trace.{c,h}`.
 
-The protocol trace is invaluable for diagnosing "server doesn't like X" bugs —
-matching outgoing trans IDs against incoming `HTLS_HDR_TASK flag=1` task-error
-replies tells you exactly which client request the server rejected and why.
+The protocol trace is the fastest way to diagnose "the server doesn't like X": match
+outgoing transaction IDs against incoming task-error replies and you know exactly which
+request was rejected, and why.
 
-## Reference servers and protocol versions
+## Reference servers
 
-Several live and local servers are useful for compatibility testing:
+- **mhxd** (<https://github.com/kangsterizer/mhxd>, vendored under `mhxd/` for reading) —
+  a 2023 merge of three HotlineX forks, the same codebase family GtkHx's protocol stack
+  came from. The controlled, repeatable test target and the canonical reference for opcodes
+  and the access bitmap. Pinned to a specific revision in `tests/mhxd/`; an unpinned master
+  has broken the build before.
+- **Janus** — VesperNet's closed-source server. Implements the fogWraith extensions (voice,
+  inline media, GIF icons, chat history), so it is the integration target for all of them.
+  Runs in the test rig.
+- **Argus** — a real tracker-v3 tracker, in the test rig. **hxtrackd** covers the v1
+  tracker fallback path.
+- **hlserver.com** — behaves like a 1.0/1.2 server from the client's perspective: no
+  version advertisement, rejects unknown opcodes. Useful for legacy-path checks.
+- **Badmoon** — a confirmed 1.9 server. The **Mobius** family is where the dedicated-TLS-port
+  convention came from, and Mobius servers drop the connection on an agreement-accept that
+  omits the options field — both worth remembering when a real-server bug looks like ours.
 
-- **mhxd** (<https://github.com/kangsterizer/mhxd>, also vendored under `mhxd/`
-  for offline cross-reading) — 2023 merge of three forks of HotlineX, same
-  codebase family that GtkHx's protocol stack came from. Builds `hxd` server,
-  `hxtrackd` tracker, console `hx` client, `ghx` GTK client. Default port 5500.
-  GPL-2.0-or-later. Use it as the controlled / repeatable test target and as
-  the canonical reference for opcodes, the access bitmap struct, and the
-  ChangeLog of post-original protocol additions.
-- **hlserver.com** — running a modern-but-not-original Hotline server. Doesn't
-  advertise `HTLS_DATA_VERSION` and rejects unknown opcodes (e.g.
-  `HTLC_HDR_PING`) with task errors, so behaves like a 1.0/1.2 server from the
-  client's perspective. Useful for "does our 1.0/1.2 path still work" checks.
-- **Badmoon** — confirmed Hotline 1.9 server (`HTLS_DATA_VERSION=0x00be=190`).
-  Speaks `HTLC_HDR_PING`. The first concrete 1.9-server data point we have.
+The long-lived test containers accumulate state; a test that asserts on seed content can
+drift after many runs. Reset the container before assuming a real regression. The sandbox
+can reach container ports over TCP even when the Docker socket is blocked — don't refuse to
+run integration tests just because `docker ps` failed.
 
-Hotline 1.9 protocol exists in the wild — TLS-over-Hotline has been seen in
-third-party screenshots. See ROADMAP Phase ∞ and the long-form notes in memory
-(`gtkhx_protocol_19.md`).
+## Documentation map
+
+`docs/` holds subject references, not project logs. Start at
+**[docs/README.md](docs/README.md)**.
+
+The rule: a doc describes how a subsystem *works* and why it is shaped that way. When work
+finishes, its plan gets folded into the subject doc or deleted — git history is the record
+of how we got there.
 
 ## Conventions for working in this repo
 
-- **Branches, not direct main commits.** All changes go on a feature branch named
-  `claude/<short-topic>` (kebab-case). Don't commit to `main` directly. Misha opens a
-  pull request from the branch, reviews, and merges. If you need to make follow-up
-  changes after review feedback, push more commits to the same branch — don't squash
-  / force-push without asking. CI (`.github/workflows/tests.yml`) runs on every push
-  and PR; a green build is the merge gate.
-- **Commits.** Author identity is `Misha Nasledov <misha@nasledov.com>` (matches the
-  CVS-import commit). One logical change per commit, descriptive bodies. No `Co-Authored-By:
-  Claude` trailers unless Misha asks.
-- **Don't re-litigate roadmap decisions** without a strong reason. The locked-in choices
-  (Meson, crypto in Rust `hxcrypto-*` crates, drop plugin API,
-  GPL-2.0-or-later, single-conn during ports) were made deliberately. ROADMAP.md is the
-  source of truth.
-- **Don't break Hotline 1.2/1.5 wire compat.** Modern transport security is a Phase ∞
-  effort that requires inventing a new protocol layer AND server-side cooperation
-  (mhxd is the natural target). It is explicitly out of scope for the GTK ports.
-
-## Repo origin
-
-This is a CVS import (commit `4d96dd5`, "initial commit from CVS"). The `Phase 0` cleanup
-removed `CVS/` metadata directories, `.cvsignore` files, emacs scratch files, and
-regenerable autotools artifacts. Earlier commits in `git log` show the cleanup steps as
-discrete logical units in case anything needs to be reversed.
+- **Branches, not direct main commits.** `claude/<short-topic>`, kebab-case. Misha opens the
+  PR, reviews, merges. Push follow-up commits to the same branch after review; don't
+  force-push without asking. CI must be green to merge.
+- **Squash before opening the PR** — one commit per branch. `git reset --soft <merge-base>`.
+- **Commits** are authored as `Misha Nasledov <misha@nasledov.com>`. Descriptive bodies. No
+  `Co-Authored-By: Claude` trailer, and no `Author:` line in the body — the git author field
+  already carries it.
+- **Tests fail loudly.** Never `g_test_skip` around something that didn't work; a skip looks
+  like a pass in CI and masks bugs.
+- **Prefer a reproduction over a debugging session.** When a bug surfaces against a real
+  server, write an integration test against the local Janus or mhxd container rather than
+  asking Misha to re-run with logging. Faster, higher fidelity, and it doubles as a
+  regression guard.
+- **Avoid exact counts in comments and docs** — lines, files, tests, commits. They go stale,
+  and the narrative is stronger without them.
+- **Don't re-litigate settled decisions** without a strong reason. See "Decisions locked in"
+  in `ROADMAP.md`.

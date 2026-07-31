@@ -8,9 +8,8 @@
 //!
 //! Each handler composes pieces that are already Rust: the `hotline-proto`
 //! parser (owned handle) fed the received frame slice, the carrier stash
-//! (`news_recv_bridge.c`), and the `gtkhx-session` signal emit. The main-thread
-//! `gnews_browser_handle_*` view handler then feeds the handle to the
-//! `hxnews-model` builder and frees it. See `docs/rust/news-receive-plan.md`.
+//! and the session signal emit. The main-thread `gnews_browser_handle_*` view
+//! handler then feeds the handle to the `hxmodel` builder and frees it.
 
 use std::ffi::c_void;
 

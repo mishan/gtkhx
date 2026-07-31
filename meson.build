@@ -65,10 +65,10 @@ gtk_dep     = dependency('gtk4',      version : '>= 4.10')
 # became deprecated in 1.6 and we pick up -Werror=deprecated-declarations
 # from the build flags. 1.6 was released April 2024; widely available.
 adw_dep     = dependency('libadwaita-1', version : '>= 1.6')
-# Phase 5 / docking: libpanel-1 is GNOME Builder's docking widget
-# library — PanelDock / PanelGrid / PanelFrame / PanelWidget /
-# PanelToggleButton. Phase 0 spike (docs/docking-phase0-findings.md)
-# de-risked the dependency on Debian trixie (1.10.0) and the
+# libpanel-1 is GNOME Builder's docking widget library — PanelDock /
+# PanelGrid / PanelFrame / PanelWidget / PanelToggleButton. See
+# docs/docking.md. The dependency was de-risked against
+# Debian trixie (1.10.0) and the
 # org.gnome.Platform/49 Flatpak runtime (which ships it). Floor
 # pinned at 1.4: that's where create-frame on PanelDock/PanelGrid
 # landed (1.2) and where panel_workbench_foreach_workspace landed
@@ -100,7 +100,7 @@ threads_dep = dependency('threads')
 # both pair cleanly with gstreamer-rs 0.24. (The earlier rust pin
 # at the gstreamer-rs 0.25 family targeted 1.26 specifically; the
 # 0.24 downgrade undoes that coupling so Debian-native builds with
-# the distro's 1.24 just work.) Tracked in docs/voice-chat-plan.md
+# the distro's 1.24 just work.) Tracked in docs/voice.md
 # §5.B and docs/rust/glib-interop.md "GStreamer runtime floor".
 #
 # Plugin set:

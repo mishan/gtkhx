@@ -97,7 +97,7 @@ pub struct LoginReply {
     /// The verbatim on-wire bytes of this reply: the 22-byte header
     /// followed by `body_len` chunk bytes. Retained so the Phase G
     /// orchestrator can replay the reply to the C side as a synthetic
-    /// `Event::Frame` (`docs/rust/phase-g-migration.md`, "Option B") after
+    /// `Event::Frame` (`docs/rust/networking.md`, "Option B") after
     /// consuming it here to decide success/failure. Empty only for a
     /// default-constructed `LoginReply`; `recv_login_reply` always
     /// populates it.

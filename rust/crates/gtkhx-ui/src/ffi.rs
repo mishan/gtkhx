@@ -57,7 +57,7 @@ extern "C" {
 
     // ---- multi-conn M0 session seam (gtkhx.c / session.h) ------------
     /// The currently-focused `session *` (multi-conn M0 seam,
-    /// docs/multi-connection-scoping.md). Today == `&the_session`; UI
+    /// docs/multi-connection.md). Today == `&the_session`; UI
     /// actions route through it so they act on the focused connection.
     /// Held opaquely as `*mut c_void` (a `session *`).
     pub fn hx_active_session() -> *mut c_void;

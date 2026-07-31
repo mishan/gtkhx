@@ -12,7 +12,7 @@
 //! (`gtk4-0.10.3/src/subclass/scrollable.rs`), so the fallback of
 //! hand-rolled adjustment properties wasn't needed.
 //!
-//! See docs/chat-view-scoping.md.
+//! See docs/chat-view.md.
 
 pub mod ffi;
 pub mod links;

@@ -1,5 +1,5 @@
 //! Rust ↔ GLib bridge for GtkHx (Phases R3.0 + R3.1, see
-//! `docs/voice-chat-plan.md` §5, `docs/rust/ROADMAP.md` §R3, and
+//! `docs/voice.md`, `docs/rust/ROADMAP.md`, and
 //! `docs/rust/glib-interop.md` for the lifetime-model rationale).
 //!
 //! Phase R3.0 ships the C-owned-GObject wrapping helpers and a single

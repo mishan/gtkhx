@@ -23,7 +23,7 @@
 //! its numeric spec) so a colour code can never be mistaken for shortcode
 //! text or split a token.
 //!
-//! See `docs/emoji-shortcodes-plan.md` (phase E1).
+//! See `docs/emoji-shortcodes.md`.
 
 use crate::emoji_table::{DECODE, ENCODE, MAX_ENCODE_CHARS};
 

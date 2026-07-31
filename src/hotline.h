@@ -428,7 +428,7 @@ struct hl_user_data {
  * confirmed. All u32 BE. Clients use these for pre-flight
  * validation; the server still enforces them on every upload.
  * Absent means "use the spec recommended default." See
- * docs/inline-media-plan.md. */
+ * docs/inline-media.md. */
 #define HTLS_DATA_CHAT_MEDIA_MAX_BYTES ((guint16)0x020c)
 #define HTLS_DATA_CHAT_MEDIA_MAX_DIMENSION ((guint16)0x020d)
 #define HTLS_DATA_CHAT_MEDIA_MAX_PIXELS ((guint16)0x020e)
@@ -621,7 +621,7 @@ struct hl_user_data {
  * implements it - mhxd and Janus both discard a cicn payload and are
  * GIF-only (verified June 2026). GtkHx implements the GIF payload
  * (HTLS_DATA_ICON_GIF / 0x0300) only. See Phase 10 in ROADMAP.md and
- * docs/gif-icons-plan.md. */
+ * docs/gif-icons.md. */
 #define HTLC_HDR_ICON_GETLIST ((guint32)0x00000745) /* 1861 client->server */
 #define HTLC_HDR_ICON_SET ((guint32)0x00000746)     /* 1862 client->server */
 #define HTLC_HDR_ICON_GET ((guint32)0x00000747)     /* 1863 client->server */

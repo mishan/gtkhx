@@ -129,7 +129,7 @@ pub unsafe extern "C" fn hx_chat_invite_recv(
 
 /// `void hx_rcv_chat_invite (htlc, frame, frame_len)` — the HTLS_HDR_CHAT_INVITE
 /// primary handler (was `rcv.c`). The first receive handler whose whole body
-/// lives in Rust (network-endgame.md Phase E2): the C dispatch switch in
+/// lives in Rust (docs/rust/network-endgame.md): the C dispatch switch in
 /// `hx_dispatch_frame` calls this by name; the body parses the frame via
 /// `hotline_proto::parse` (a native Rust call — no C-ABI round-trip), resolves
 /// the public chat's member model through the chat.c lookups, and delegates the
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn hx_rcv_chat_invite(htlc: *mut c_void, frame: *const u8,
 }
 
 /// `void hx_rcv_chat_subject (htlc, frame, frame_len)` — the HTLS_HDR_CHAT_SUBJECT
-/// primary handler (was `rcv.c`, Phase E2). Parses the frame via
+/// primary handler (was `rcv.c`). Parses the frame via
 /// `hotline_proto::parse` (native), and — for a non-empty subject on a known
 /// chat — delegates the change-gate + emit to [`hx_chat_subject_recv`]. On a real
 /// change it sets the chat model subject (C collaborator) and emits the
@@ -218,7 +218,7 @@ pub unsafe extern "C" fn hx_rcv_chat_subject(
 }
 
 /// `void hx_rcv_chat (htlc, frame, frame_len)` — the HTLS_HDR_CHAT public-chat
-/// line handler (was `rcv.c`, Phase E2). Parses the body via native
+/// line handler (was `rcv.c`). Parses the body via native
 /// `hotline_proto::parse::parse_chat`; when the inline-media cap is negotiated,
 /// pulls the media companion via native `inline_media::extract_chat_media_meta`
 /// (dropping the whole line on an orphaned companion, per spec). Builds the boxed

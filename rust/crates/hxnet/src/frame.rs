@@ -62,7 +62,7 @@ impl Frame {
     /// the buffer is shorter than `HL_HDR_LEN + body_len`.
     ///
     /// This is the Phase G login-reply replay path
-    /// (`docs/rust/phase-g-migration.md`, "Option B"). The orchestrator
+    /// (`docs/rust/networking.md`, "Option B"). The orchestrator
     /// reads + parses the LOGIN reply once to decide
     /// success/failure, then re-emits the verbatim wire bytes as an
     /// `Event::Frame` so the C-side `rcv.c` dispatch (`rcv_task_login`)

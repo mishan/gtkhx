@@ -4,7 +4,7 @@
 /*
  * hxconn_layout.h — the C mirror of struct htlc_conn.
  *
- * The connection struct is Rust-owned (rust/crates/hxconn, the E1c flip):
+ * The connection struct is Rust-owned (gtkhx-core::conn):
  * production reaches it only through the opaque forward declaration in
  * protocol.h + the hx_conn_* accessors, and allocates it with hx_conn_new.
  *

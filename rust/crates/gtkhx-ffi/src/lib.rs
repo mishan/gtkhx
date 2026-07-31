@@ -19,7 +19,7 @@
 //!    dependencies, so two archives could end up defining the same
 //!    `#[no_mangle]` symbol and collide at the final link. That is exactly why
 //!    `gtkhx-boxed` had to be split out of `gtkhx-session` (see
-//!    `docs/rust/ROADMAP.md` §R4.2).
+//!    `docs/rust/crate-layout.md`).
 //!
 //! Making this the *only* `staticlib` and every other member an `rlib` fixes
 //! all three. rustc bundles the whole rlib graph into one archive, so each

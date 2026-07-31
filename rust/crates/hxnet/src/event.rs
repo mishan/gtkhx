@@ -67,10 +67,9 @@ pub enum ShutdownReason {
 /// Phase A (this PR — TCP connect in Rust) only fires `Resolving`,
 /// `Connecting`, and `Connected`. The remaining variants are
 /// defined here so the FFI ABI is stable from the start —
-/// subsequent phases (TLS, magic, login, HOPE) will start emitting
+/// subsequent stages (TLS, magic, login, HOPE) will start emitting
 /// them as their state-machine pieces land. See
-/// `docs/hxnet-connection-lifecycle-scoping.md` for the phase
-/// breakdown.
+/// `docs/rust/networking.md` for the connect lifecycle.
 ///
 /// ABI note: every variant carries an explicit `= N` discriminant
 /// that pins the integer value the C-side enum mirror must match.

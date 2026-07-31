@@ -15,7 +15,7 @@
  * Sister test to test_real_tls.c, which only exercises the connect-
  * state-machine progression (CONNECTING -> TCP_CONNECTED ->
  * HANDSHAKE_DONE) via production hx_connect. This binary goes the
- * extra mile that docs/tls-scoping.md §9 Phase 1 calls out: actually
+ * extra mile that docs/tls.md "The separate-port model" calls out: actually
  * speak the protocol over the wrapped socket end-to-end.
  *
  * Subtests:

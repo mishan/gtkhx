@@ -39,7 +39,7 @@ extern void disconnect_clicked (void);
  *                         wrapper. There's NO sidebar / area
  *                         reveal in play; do not call
  *                         panel_dock_set_reveal_* on this
- *                         pointer. See docs/docking-splits.md.
+ *                         pointer. See docs/docking.md.
  *
  *   toolbar_*_frame       The default-leaf PanelFrame for each
  *                         of the four default placement slots

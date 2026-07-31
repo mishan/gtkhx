@@ -39,7 +39,7 @@ extern void hx_orchestrator_register_login_task (struct htlc_conn *htlc);
  * transport security — it just selects an alternate password
  * encoding). `tls` is the transport-security flag: non-zero
  * wraps the control-channel socket in GTlsClientConnection from
- * byte zero (see docs/tls-scoping.md Phase 1). The default port
+ * byte zero (see docs/tls.md "The separate-port model"). The default port
  * for TLS is 5600 by Mobius/Janus convention; the caller is
  * responsible for handing that in via `port` — hx_connect
  * doesn't auto-translate. The Connect dialog (Phase 4) flips

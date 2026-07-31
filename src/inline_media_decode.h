@@ -39,7 +39,7 @@
  *
  * Animated GIF is recognised by sniff and decoded by the
  * loader, but only the first frame is rendered in v1. Animated
- * playback is v2 (per docs/inline-media-plan.md).
+ * playback is v2 (per docs/inline-media.md).
  */
 
 #ifndef HX_INLINE_MEDIA_DECODE_H

@@ -1,7 +1,7 @@
 /*
  * hxconn.h — field accessors for struct htlc_conn.
  *
- * The connection struct is Rust-owned (docs/rust/network-endgame.md, the E1c
+ * The connection struct is Rust-owned (docs/rust/network-endgame.md; the
  * flip). Its storage and every accessor body live in the Rust `hxconn` crate
  * (rust/crates/hxconn); this header is the C ABI those accessors export. C
  * reaches every field through the getters/setters below — the migration onto
@@ -112,7 +112,7 @@ extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
  * hx_conn_icon_ptr returns the raw address of the icon field: the ICON cfgvar
  * (options.c) binds the prefs read/write path to a stable guint16* and can't go
  * through a value accessor. It's the deliberate escape hatch for that one
- * pointer-based consumer; at the E1c flip the Rust hxconn owner returns a raw
+ * pointer-based consumer; the Rust owner returns a raw
  * pointer into its struct here. Everything else uses the value get/set. */
 extern guint16 hx_conn_uid (const struct htlc_conn *h);
 extern void hx_conn_set_uid (struct htlc_conn *h, guint16 v);

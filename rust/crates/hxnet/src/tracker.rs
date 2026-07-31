@@ -1,5 +1,5 @@
 //! Tracker fetch engine — Phase R3 work item 8, phase T1
-//! (`docs/rust/tracker-hxnet-scoping.md`).
+//! (`docs/rust/networking.md`).
 //!
 //! The per-connection protocol engine that drives one HTRK tracker
 //! fetch over an already-connected (optionally TLS-wrapped) byte stream.

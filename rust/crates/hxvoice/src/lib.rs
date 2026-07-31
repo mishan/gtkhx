@@ -49,7 +49,7 @@
 //!   Building the chunks is `hotline-proto`'s job, not this
 //!   crate's.
 //!
-//! See `docs/voice-chat-plan.md` §4 and §5.C for the full
+//! See `docs/voice.md` "State machine" and "Where it lives" for the full
 //! architectural rationale and the spec lifecycle replay
 //! examples this crate's tests pin.
 

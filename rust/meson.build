@@ -308,7 +308,7 @@ endif
 # gtkhx binary wants it, so the production build turns it on here.
 cargo_features = 'hxbridge/runtime,hxnet/socks'
 
-# Inline-media image decoder backend (docs/glycin-migration-plan.md).
+# Inline-media image decoder backend (docs/image-decoding.md).
 # -Dglycin_compat selects which glycin loader generation hx-image-decode
 # targets, by flipping a cargo feature on that crate:
 #
@@ -632,7 +632,7 @@ rust_hxvoice_runtime_dep = declare_dependency(
 # libglycin-2 (already on the host via the gtk4 + gnome-platform
 # install) when G.2 lands.
 #
-# See docs/glycin-migration-plan.md for the full phased plan.
+# See docs/image-decoding.md for the full phased plan.
 rust_hx_image_decode_dep = declare_dependency(
   sources : rust_build,
   link_args : [

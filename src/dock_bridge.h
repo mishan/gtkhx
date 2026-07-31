@@ -20,7 +20,7 @@
  * toolbar's dock construction) stay in C: the gtk-rs libpanel crate is
  * a whole gtk-rs generation ahead of our pinned 0.21 stack, and the dock
  * infra is the large part regardless of bindings (see
- * docs/rust/dock-porting-scoping.md, Option A). Instead, each docked
+ * docs/docking.md, Option A). Instead, each docked
  * window ported to gtk4-rs builds its *content widget tree* in Rust and
  * hands it to this bridge, which does the libpanel plumbing
  * (hx_panel_new / panel_frame_add / registry). Rust never names a

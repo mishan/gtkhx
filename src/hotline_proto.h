@@ -1366,7 +1366,7 @@ extern size_t gtkhx_proto_shortcode_matches (const uint8_t *prefix, size_t len,
  * in src/voice.{h,c}; rcv.c dispatches the 600-606 family through
  * the parsers below.
  *
- * Per docs/voice-chat-plan.md §5: the builder FFI shims are slated
+ * See docs/voice.md: the builder FFI shims are slated
  * for retirement once Phase 8.C lands the `hxvoice-runtime` crate
  * (the runtime can call the Rust builders directly). They stay for
  * Phase 8.A because there's no runtime crate to lean on yet. */

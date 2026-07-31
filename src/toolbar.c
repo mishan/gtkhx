@@ -72,7 +72,7 @@ GtkWidget *broadcast_btn;
  * exists to satisfy libpanel's PanelDropControls invariant
  * (which assert a PANEL_TYPE_DOCK ancestor at root time); from
  * the user's perspective the dock is a single recursive HxSplit
- * tree. See docs/docking-splits.md for the rationale. */
+ * tree. See docs/docking.md for the rationale. */
 GtkWidget *toolbar_dock = NULL; /* thin PanelDock wrapper */
 GtkWidget *toolbar_sidebar_frame = NULL;
 GtkWidget *toolbar_end_frame = NULL;

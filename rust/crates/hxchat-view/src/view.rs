@@ -674,7 +674,7 @@ impl HxChatView {
         self.queue_draw();
     }
 
-    /// Zoom, per-mille. See docs/chat-view-scoping.md §3.7.
+    /// Zoom, per-mille. See docs/chat-view.md "Zoom".
     pub fn set_zoom_permille(&self, zoom: u32) {
         let imp = self.imp_();
         let was = imp.measure.borrow().zoom_permille();

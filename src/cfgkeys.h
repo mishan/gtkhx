@@ -200,7 +200,7 @@
  * (with the built-in default GResource as the fallback). All scale,
  * palette, and icon-pack state lives in the theme file — this is
  * the only theming key in gtkhxrc. Empty / unset → "default". See
- * gtkhx_theme.{c,h}, docs/theming-scoping.md,
+ * gtkhx_theme.{c,h}, docs/theming.md,
  * docs/theming-file-format.md. */
 #define CFG_THEME_NAME "THEMENAME"
 
