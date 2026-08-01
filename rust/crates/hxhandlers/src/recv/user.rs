@@ -100,12 +100,30 @@ fn gbool(b: bool) -> c_int {
     b as c_int
 }
 
-/// A `CString` from wire bytes, truncated at the first interior NUL — mirroring
-/// how the old C `char*` extractor buffer terminated. Infallible (the truncated
-/// slice has no interior NUL).
-unsafe fn cstring_first_nul(bytes: &[u8]) -> std::ffi::CString {
+/// Wire text as a `CString`, decoded to UTF-8.
+///
+/// Truncated at the first interior NUL first, mirroring how the old C `char*`
+/// extractor buffer terminated, then transcoded. Infallible: the truncated
+/// slice has no interior NUL and `to_utf8` cannot fail.
+///
+/// **Every name that reaches the user list has to come through here.** Hotline
+/// nicknames are Mac Roman, and the roster path used to carry the raw bytes all
+/// the way to `pango_layout_set_text`, which drew mojibake and logged an
+/// invalid-UTF-8 warning for every repaint. Chat never had the problem because
+/// its line is decoded once when the event is built; the roster simply had no
+/// equivalent step.
+///
+/// `to_utf8` passes valid UTF-8 through untouched, so a server that speaks
+/// UTF-8 (the `CAP_TEXT_ENCODING` ones) is unaffected.
+///
+/// This also repairs self-detection. `hx_conn_name` holds the *decoded*
+/// preference nickname and is only encoded at send time, so comparing it
+/// against raw wire bytes could never match for a non-ASCII nickname — which
+/// silently broke self-uid adoption and the self-change rules for exactly the
+/// users this bug was visible to.
+unsafe fn cstring_wire_text(bytes: &[u8]) -> std::ffi::CString {
     let end = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
-    std::ffi::CString::new(&bytes[..end]).unwrap_or_default()
+    std::ffi::CString::new(hotline_proto::text::to_utf8(&bytes[..end])).unwrap_or_default()
 }
 
 /// Bytes of a NUL-terminated C string, or `None` for a NULL pointer.
@@ -294,8 +312,8 @@ pub unsafe extern "C" fn hx_rcv_user_change(htlc: *mut c_void, frame: *const u8,
         );
     }
 
-    // uc.name as a C string (first-NUL truncated, matching the old extractor).
-    let name_c = cstring_first_nul(&uc.name);
+    // uc.name as a C string, decoded from the wire's Mac Roman.
+    let name_c = cstring_wire_text(&uc.name);
 
     let emitted = hx_user_apply_recv(
         htlc,
@@ -530,7 +548,7 @@ pub unsafe extern "C" fn rcv_task_user_list(
                 let Some(rec) = parse_user_list_record(chunk.data, 31) else {
                     continue;
                 };
-                let name_c = cstring_first_nul(&rec.name);
+                let name_c = cstring_wire_text(&rec.name);
                 // "not already in this chat's membership" — recomputed per record
                 // so a stale new=1 doesn't spawn spurious creates for later users.
                 let is_new = hx_member_model_contains(model, rec.uid) == 0;
@@ -647,12 +665,16 @@ pub unsafe extern "C" fn rcv_task_user_info(
     if ui.name.is_empty() || ui.info.is_empty() {
         return;
     }
-    let name_c = cstring_first_nul(&ui.name);
-    let info_c = cstring_first_nul(&ui.info);
-    // Pass the *truncated* length, not `ui.info.len()`: `cstring_first_nul`
-    // truncates the body at the first interior NUL, so the emitted len must match
-    // `info_c`'s buffer. Passing the full wire length would let a downstream
-    // length-aware reader run past the shorter allocation.
+    // Both are wire text, so both are Mac Roman. The Get Info dialog had the
+    // same undecoded-bytes problem as the user list, just somewhere less
+    // often looked at.
+    let name_c = cstring_wire_text(&ui.name);
+    let info_c = cstring_wire_text(&ui.info);
+    // Pass the *decoded* length, not `ui.info.len()`: the value is truncated at
+    // the first interior NUL and then transcoded, so the emitted len must match
+    // `info_c`'s buffer rather than the wire's. The wire length would be wrong
+    // in both directions now — short of the decoded bytes for a Mac Roman
+    // name, and past the allocation for a NUL-truncated one.
     let info_len = info_c.as_bytes().len() as u16;
     hx_user_info_recv(uid, name_c.as_ptr(), info_c.as_ptr(), info_len);
 }

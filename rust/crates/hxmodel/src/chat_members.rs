@@ -204,10 +204,17 @@ fn fill_member_info(m: &HxMember, o: &mut HxMemberInfo) {
     o.status = m.status();
     o.nick_color = m.nick_color().unwrap_or(HX_NICK_COLOR_NONE);
     m.with_name(|n| {
-        let bytes = n.as_bytes();
         let cap = o.name.len() - 1; // reserve the NUL
-        let k = bytes.len().min(cap);
-        for (i, &b) in bytes[..k].iter().enumerate() {
+                                    // Truncate on a character boundary, not a byte one. The wire caps a
+                                    // nickname at 31 *Mac Roman* bytes, and decoding that to UTF-8 can
+                                    // treble it — so a name that fitted on the wire need not fit here, and
+                                    // a byte-wise cut would split a character and put invalid UTF-8 back
+                                    // into the join / part / rename notices this feeds.
+        let mut k = n.len().min(cap);
+        while k > 0 && !n.is_char_boundary(k) {
+            k -= 1;
+        }
+        for (i, &b) in n.as_bytes()[..k].iter().enumerate() {
             o.name[i] = b as c_char;
         }
         o.name[k] = 0;
