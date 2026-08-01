@@ -361,8 +361,16 @@ fn set_version(doc: &mut DocumentMut, version: u32) {
 type MigrationStep = fn(&mut DocumentMut, &mut Vec<Warning>);
 
 /// `STEPS[i]` brings a file from version `i + 1` to version `i + 2`, so the
-/// list is always [`CURRENT_VERSION`] − 1 long. Empty today: version 1 is the
-/// first schema, and [`read_version`] never reports anything below it.
+/// list is always [`CURRENT_VERSION`] − 1 long — empty today, because version 1
+/// is the first schema and there is nothing below it to come from.
+///
+/// **Adding the first step is the moment two things that look equivalent today
+/// stop being so.** [`read_version`] resolves a missing key to 1 and a
+/// malformed one to [`CURRENT_VERSION`]; while `CURRENT_VERSION` is 1 those are
+/// the same number, and from the bump onwards they are not. A file with no
+/// `version` key will start going through this chain, which is the intended
+/// behaviour and is pinned by a test against `read_version` itself rather than
+/// through the observable provenance.
 const STEPS: &[MigrationStep] = &[];
 
 /// Bring a document forward from `from` to [`CURRENT_VERSION`], one step at a

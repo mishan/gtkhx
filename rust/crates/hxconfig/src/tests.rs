@@ -526,11 +526,48 @@ fn a_newer_version_file_loads_read_only_until_acknowledged() {
 }
 
 #[test]
-fn a_missing_or_bogus_version_is_treated_as_current() {
-    // A hand-written file that forgot the key is far likelier than a file from
-    // a schema that never existed, and treating it as ancient would run it
-    // through every migration in the chain.
+fn the_two_bad_version_cases_resolve_differently() {
+    // Asserted against `read_version` directly rather than through
+    // `Provenance`, because CURRENT_VERSION is 1 today and both answers land
+    // on `Current`. The distinction only becomes observable at the first
+    // schema bump — which is exactly the moment getting it wrong would cost
+    // someone their settings, and far too late to discover the policy was
+    // never pinned.
+    let resolve = |s: &str| -> (u32, Vec<Warning>) {
+        let doc: toml_edit::DocumentMut = s.parse().expect("valid TOML");
+        let mut warnings = Vec::new();
+        let version = read_version(&doc, &mut warnings);
+        (version, warnings)
+    };
+
+    // Missing: the file predates the key, so it is the first schema and has to
+    // go through the migration chain. Not a defect, so not a warning.
+    let (version, warnings) = resolve("[chat]\nmarkdown = false\n");
+    assert_eq!(version, 1);
+    assert!(
+        warnings.is_empty(),
+        "a missing version is not a defect: {warnings:?}"
+    );
+
+    // Malformed: someone mistyped the version of a file that is otherwise this
+    // build's, and migrating it would do more damage than leaving it alone.
+    for bad in ["version = \"one\"\n", "version = 0\n", "version = -3\n"] {
+        let (version, warnings) = resolve(bad);
+        assert_eq!(version, CURRENT_VERSION, "for {bad:?}");
+        assert_eq!(warnings.len(), 1, "for {bad:?}");
+        assert_eq!(warnings[0].path, "version");
+        assert!(
+            matches!(warnings[0].kind, WarningKind::BadVersion(_)),
+            "for {bad:?}"
+        );
+    }
+}
+
+#[test]
+fn a_missing_or_bogus_version_still_loads() {
+    // The observable half of the above, at today's CURRENT_VERSION.
     let dir = TempDir::new("v-missing");
+
     dir.write("[chat]\nmarkdown = false\n");
     let config = Config::load(dir.path());
     assert_eq!(*config.provenance(), Provenance::Current);
@@ -545,14 +582,7 @@ fn a_missing_or_bogus_version_is_treated_as_current() {
         config.warnings()[0].kind,
         WarningKind::BadVersion(_)
     ));
-
-    dir.write("version = 0\n[chat]\nmarkdown = false\n");
-    let config = Config::load(dir.path());
-    assert_eq!(*config.provenance(), Provenance::Current);
-    assert!(matches!(
-        config.warnings()[0].kind,
-        WarningKind::BadVersion(_)
-    ));
+    assert!(!config.settings().chat.markdown);
 }
 
 #[test]

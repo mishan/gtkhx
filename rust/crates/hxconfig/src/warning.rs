@@ -48,9 +48,14 @@ pub enum WarningKind {
         found: u32,
         current: u32,
     },
-    /// The `version` key is missing or is not a positive integer. Treated as
-    /// the current version, on the grounds that a hand-written file that
-    /// forgot the key is far more likely than a file from another schema.
+    /// The `version` key is present but is not a positive integer. Treated as
+    /// the current version: someone mistyped the version of a file that is
+    /// otherwise this build's, and running it through every migration in the
+    /// chain would do more damage than leaving it alone.
+    ///
+    /// A *missing* key is not this, and is not a warning at all — it means the
+    /// file predates the key, so it is version 1 and goes through the chain
+    /// like any other version 1 file.
     BadVersion(String),
 }
 
