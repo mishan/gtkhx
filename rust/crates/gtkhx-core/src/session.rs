@@ -386,10 +386,7 @@ unsafe fn boxed_value(gtype: glib::ffi::GType, p: *mut c_void) -> glib::Value {
 /// `self_ptr` must be a valid non-NULL `GtkhxSession*`.
 unsafe fn emit(self_ptr: *mut c_void, name: &str, values: &[glib::Value]) {
     if self_ptr.is_null() {
-        glib::g_critical!(
-            "gtkhx-core",
-            "{name}: NULL session pointer; emit skipped"
-        );
+        glib::g_critical!("gtkhx-core", "{name}: NULL session pointer; emit skipped");
         return;
     }
     let obj: glib::Object =
