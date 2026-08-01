@@ -391,23 +391,32 @@ and are only asking `gtkhx_theme.c` to see a theme name.
 
 ### Change notification
 
-The `changefunc` mechanism becomes an explicit subscription: Rust applies the
-value, then dispatches to whatever needs to react. Three things to fix while
-moving it:
+A hook is one of three things, and the type says which. Every hook used to take
+a `session *`: five walked that session's live views, thirteen ignored the
+argument entirely, and two reached past it for whichever session happened to be
+focused. A parameter that most callees ignore stops being read as information,
+which is how the third group hid in the second.
 
-- **Two hooks ignore their session argument and reach for the focused session**
-  instead — the identity and nickname-colour hooks. Both send on the wire. Under
-  multi-connection that is a routing bug, and it is one of the reasons identity
-  needed to stop being a global preference at all.
-- Only about a quarter of the hooks use their session argument — the ones that
-  walk live chat views. The rest take it and ignore it, including one that never
-  touches it at all. Those are plain side-effect callbacks and should not pretend
-  otherwise.
-- ~~Load-time application is accidental~~ — **fixed in P3.** Hooks used to fire
-  only for keys whose file value *differed* from the compiled-in default, so a
-  separate hand-written function existed to re-apply the ones that were skipped.
-  Every hook now runs once after the load, which deleted both the bug and the
-  compensator.
+| Flavour | Takes | For |
+|---|---|---|
+| `PREF_HOOK_VIEW` | the session | re-applying to every live view in it — font, word wrap, scrollback, timestamps, avatars |
+| `PREF_HOOK_GLOBAL` | nothing | a process-wide side effect: the tray, the theme, the download directory, the voice devices |
+| `PREF_HOOK_CONN` | the connection | pushing the value onto a connection, which means onto the wire — the nickname, the icon, the nickname colour |
+
+**`PREF_HOOK_CONN` is the one that matters later.** Those hooks used to call
+`hx_active_session()` from inside their bodies, eight times between them, which
+is a routing bug the moment more than one connection exists — a preference
+change would go to whichever window had focus. They now take the connection as
+an argument, and exactly one function chooses it. At one connection the answer
+is still "the focused one" and nothing behaves differently; the point is that
+multi-connection has a single typed seam to change instead of a grep for
+`hx_active_session`.
+
+~~Load-time application is accidental~~ — **fixed in P3.** Hooks used to fire
+only for keys whose file value *differed* from the compiled-in default, so a
+separate hand-written function existed to re-apply the ones that were skipped.
+Every hook now runs once after the load, which deleted both the bug and the
+compensator.
 
 ---
 
@@ -592,7 +601,7 @@ Illustrative, not committed. Each step ships on its own.
 | ~~P1~~ | **Done.** `hxconfig` crate: typed schema, TOML load/save through `toml_edit`, atomic write, version check, defaults. Pure Rust, unit-tested, linked by nothing. | — |
 | ~~P2~~ | **Done.** Migration: the legacy reader for both on-disk forms, the key mapping, the one-shot import, and a round-trip test against a captured real `gtkhxrc`. Still linked by nothing. | P1 |
 | ~~P3~~ | **Done.** The C mirror and the read/write ABI. `hxconfig` owns the values from startup; the settings table, the `allocated` bit and the identity binder are deleted; the mirror is refreshed after every change. The panel-open latches went with their keys, and the two toolbar-size writes are setter calls. The by-name bridge is reimplemented on `hxconfig`, so both the C and the Rust Settings pages work unchanged. Change hooks are applied uniformly after load, which absorbed most of P4. | P2 |
-| P4 | Change notification: explicit subscriptions replacing the name → hook table. The "applied uniformly after load" half landed with P3. | P3 |
+| ~~P4~~ | **Done.** Change notification: hooks split into view / global / connection flavours, with the connection chosen once at the dispatch site. The "applied uniformly after load" half landed with P3. | P3 |
 | P5 | Identity: global default plus per-connection overrides; the connect path resolves and copies. Delivers M1's identity half. | P3, and the connection collection |
 | P6 | Port the Identity and Voice settings pages to Rust; retire the `draw` pointer framework. | P3 |
 | P7 | Drop the mirror per file as each C reader is ported. Ongoing, not a milestone. | P3 |

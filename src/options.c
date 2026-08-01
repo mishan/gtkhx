@@ -404,9 +404,8 @@ changed_xtext (session *sess)
  * already rendered keep their current form; re-parsing scrollback would
  * mean keeping every row's original source text alive forever. */
 static void
-changed_markdown (session *sess)
+changed_markdown (void)
 {
-    (void)sess;
     hx_chat_view_set_markdown (gtkhx_prefs.markdown);
 }
 
@@ -510,11 +509,10 @@ identity_copy_to_conn (struct htlc_conn *htlc)
  * old nick/icon until reconnect. The send is a no-op while the connection has
  * no socket, so this is safe to call before connect too. */
 static void
-changed_nickoricon (session *sess)
+changed_nickoricon (struct htlc_conn *htlc)
 {
-    (void)sess;
-    identity_copy_to_conn (hx_active_session ()->htlc);
-    hx_change_name_icon (hx_active_session ()->htlc);
+    identity_copy_to_conn (htlc);
+    hx_change_name_icon (htlc);
 }
 
 /* Colored-Nicknames extension — mirror the pref onto the
@@ -530,26 +528,23 @@ changed_nickoricon (session *sess)
  * inbound echo (if any) lands on top with the same value — no
  * flicker, just an idempotent rewrite. */
 static void
-changed_nick_color (session *sess)
+changed_nick_color (struct htlc_conn *htlc)
 {
-    (void)sess;
     guint32 nc = (guint32)gtkhx_prefs.nick_color;
-    hx_conn_set_nick_color (hx_active_session ()->htlc, nc);
-    hx_change_name_icon (hx_active_session ()->htlc);
+    hx_conn_set_nick_color (htlc, nc);
+    hx_change_name_icon (htlc);
 
     /* Locally re-render our own row in the public chat user list.
      * Pre-login (no uid yet, or no chat container yet) just no-ops —
      * apply_loaded_xtext_prefs stamps the loaded pref onto htlc, and
      * the SELFINFO-driven membership add for self picks it up the same
      * way it picks up the loaded nick. */
-    struct chat *pub = chat_with_cid (hx_active_session (), 0);
-    if (pub && hx_conn_uid (hx_active_session ()->htlc)) {
+    struct chat *pub = chat_with_cid (sess_from_htlc (htlc), 0);
+    if (pub && hx_conn_uid (htlc)) {
         struct hx_member_info mi;
         if (hx_member_model_get_info (hx_chat_member_model (pub),
-                                      hx_conn_uid (hx_active_session ()->htlc),
-                                      &mi)) {
-            user_change (hx_active_session ()->htlc, pub, mi.uid, nc, mi.name,
-                         mi.icon, mi.status);
+                                      hx_conn_uid (htlc), &mi)) {
+            user_change (htlc, pub, mi.uid, nc, mi.name, mi.icon, mi.status);
         }
     }
 }
@@ -593,9 +588,8 @@ changed_font (session *sess)
  * those dependency-light translation units' direct gtkhx_prefs reach so
  * their unit tests don't have to link the prefs global. */
 static void
-changed_emoji_shortcodes (session *sess)
+changed_emoji_shortcodes (void)
 {
-    (void)sess;
     gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
 }
 
@@ -603,9 +597,8 @@ changed_emoji_shortcodes (session *sess)
  * gif_avatar.c, which starts/stops its frame timer and repaints avatars
  * as either animated or a still first frame. */
 static void
-changed_animate_avatars (session *sess)
+changed_animate_avatars (void)
 {
-    (void)sess;
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
 }
 
@@ -617,21 +610,18 @@ changed_animate_avatars (session *sess)
  * drag-end picks up the new behaviour without having to recreate the
  * widget. */
 static void
-changed_autocopy_text (session *sess)
+changed_autocopy_text (void)
 {
-    (void)sess;
     hx_chat_view_set_autocopy_text (gtkhx_prefs.autocopy_text);
 }
 static void
-changed_autocopy_stamp (session *sess)
+changed_autocopy_stamp (void)
 {
-    (void)sess;
     hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
 }
 static void
-changed_autocopy_color (session *sess)
+changed_autocopy_color (void)
 {
-    (void)sess;
     hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
 }
 
@@ -678,9 +668,8 @@ changed_stampformat (session *sess)
 }
 
 static void
-changed_downloadpath (session *sess)
+changed_downloadpath (void)
 {
-    (void)sess;
     /* Empty pref value → use the user's XDG Downloads dir as
      * the natural default. Falls back further to $HOME if
      * XDG_DOWNLOAD_DIR isn't set / not a directory, then to "."
@@ -721,9 +710,8 @@ changed_downloadpath (session *sess)
 }
 
 static void
-changed_case (session *sess)
+changed_case (void)
 {
-    (void)sess;
     /* case-fold lives on gtkhx_prefs.track_case and is read
      * directly by tracker.c::tracker_rerun_search when compiling the
      * GRegex (G_REGEX_CASELESS toggled per the pref). No global regex-
@@ -739,14 +727,12 @@ changed_case (session *sess)
  * the user into a broken state. Called at startup and again whenever the
  * user picks a new value in Settings. */
 static void
-changed_theme (session *sess)
+changed_theme (void)
 {
     AdwStyleManager *sm = adw_style_manager_get_default ();
     const char *theme
         = gtkhx_prefs.theme ? gtkhx_prefs.theme : CFG_THEME_SYSTEM;
     AdwColorScheme scheme;
-
-    (void)sess;
 
     if (g_strcmp0 (theme, CFG_THEME_LIGHT) == 0) {
         scheme = ADW_COLOR_SCHEME_FORCE_LIGHT;
@@ -763,9 +749,8 @@ changed_theme (session *sess)
  * ON kicks off tray_activate_register; switching OFF unregisters
  * but leaves the module reachable for a future flip. */
 static void
-changed_tray (session *sess)
+changed_tray (void)
 {
-    (void)sess;
     gtkhx_tray_set_enabled (gtkhx_prefs.tray);
 }
 
@@ -784,9 +769,8 @@ changed_tray (session *sess)
  * on prefs change, but for now Leave + Join is the prescribed
  * dance. */
 static void
-changed_voice_input_device (session *sess)
+changed_voice_input_device (void)
 {
-    (void)sess;
     gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
 }
 
@@ -794,9 +778,8 @@ changed_voice_input_device (session *sess)
  * changed_voice_input_device but for the receive (autoaudiosink)
  * side. */
 static void
-changed_voice_output_device (session *sess)
+changed_voice_output_device (void)
 {
-    (void)sess;
     gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
 }
 #endif /* HAVE_VOICE */
@@ -807,9 +790,8 @@ changed_voice_output_device (session *sess)
  * theme "changed" signal so every subscribed button / user-list view
  * / chat xtext rescales and repaints. */
 static void
-changed_theme_name (session *sess)
+changed_theme_name (void)
 {
-    (void)sess;
     gtkhx_theme_load_active ();
 }
 
@@ -838,54 +820,127 @@ changed_theme_name (session *sess)
  * its comma-separated value into the derived `char **` beside it. The schema
  * stores a real array and the mirror projects both shapes from it, so the
  * splitting hook is gone. */
-typedef void (*pref_hook_fn) (session *);
+/* Three flavours, because a hook that takes a `session *` and never looks at
+ * it is telling the reader something false. Every hook used to take one; only
+ * five actually walk a session's live views, thirteen ignored the argument,
+ * and two reached past it for whichever session happened to be focused. That
+ * last group is the interesting one — see PREF_HOOK_CONN.
+ *
+ * PREF_HOOK_VIEW    applies to every live view in a session.
+ * PREF_HOOK_GLOBAL  a process-wide side effect; nothing session-shaped.
+ * PREF_HOOK_CONN    pushes the value onto a connection, which means onto the
+ *                   wire. Takes the connection explicitly so the "which one?"
+ *                   question is asked once, at the dispatch site, instead of
+ *                   eight times inside the bodies. Today the answer is always
+ *                   the focused connection and there is only one; when there
+ *                   is more than one, this is the seam that has to change, and
+ *                   the type makes it findable rather than a grep for
+ *                   hx_active_session.
+ */
+enum pref_hook_kind {
+    PREF_HOOK_VIEW,
+    PREF_HOOK_GLOBAL,
+    PREF_HOOK_CONN,
+};
 
 struct pref_hook {
     const char *name;
-    pref_hook_fn fn;
+    enum pref_hook_kind kind;
+    union {
+        void (*view) (session *);
+        void (*global) (void);
+        void (*conn) (struct htlc_conn *);
+    } fn;
 };
 
+#define PREF_VIEW(key, func)                                                   \
+    {                                                                          \
+        (key), PREF_HOOK_VIEW,                                                 \
+        {                                                                      \
+            .view = (func)                                                     \
+        }                                                                      \
+    }
+#define PREF_GLOBAL(key, func)                                                 \
+    {                                                                          \
+        (key), PREF_HOOK_GLOBAL,                                               \
+        {                                                                      \
+            .global = (func)                                                   \
+        }                                                                      \
+    }
+#define PREF_CONN(key, func)                                                   \
+    {                                                                          \
+        (key), PREF_HOOK_CONN,                                                 \
+        {                                                                      \
+            .conn = (func)                                                     \
+        }                                                                      \
+    }
+
 static const struct pref_hook pref_hooks[] = {
-    { CFG_ANIMATE_AVATARS, changed_animate_avatars },
-    { CFG_AUTOCOPY_COLOR, changed_autocopy_color },
-    { CFG_AUTOCOPY_STAMP, changed_autocopy_stamp },
-    { CFG_AUTOCOPY_TEXT, changed_autocopy_text },
-    { CFG_CHAT_AVATARS, changed_chat_avatars },
-    { CFG_DOWNLOAD, changed_downloadpath },
-    { CFG_EMOJI_SHORTCODES, changed_emoji_shortcodes },
-    { CFG_FONT, changed_font },
-    { CFG_ICON, changed_nickoricon },
-    { CFG_MARKDOWN, changed_markdown },
-    { CFG_NICK, changed_nickoricon },
-    { CFG_NICK_COLOR, changed_nick_color },
-    { CFG_STAMP_FORMAT, changed_stampformat },
-    { CFG_THEME, changed_theme },
-    { CFG_THEME_NAME, changed_theme_name },
-    { CFG_TIMESTAMP, changed_timestamp },
-    { CFG_TRACKER_CASE, changed_case },
-    { CFG_TRAY, changed_tray },
+    PREF_GLOBAL (CFG_ANIMATE_AVATARS, changed_animate_avatars),
+    PREF_GLOBAL (CFG_AUTOCOPY_COLOR, changed_autocopy_color),
+    PREF_GLOBAL (CFG_AUTOCOPY_STAMP, changed_autocopy_stamp),
+    PREF_GLOBAL (CFG_AUTOCOPY_TEXT, changed_autocopy_text),
+    PREF_VIEW (CFG_CHAT_AVATARS, changed_chat_avatars),
+    PREF_GLOBAL (CFG_DOWNLOAD, changed_downloadpath),
+    PREF_GLOBAL (CFG_EMOJI_SHORTCODES, changed_emoji_shortcodes),
+    PREF_VIEW (CFG_FONT, changed_font),
+    PREF_CONN (CFG_ICON, changed_nickoricon),
+    PREF_GLOBAL (CFG_MARKDOWN, changed_markdown),
+    PREF_CONN (CFG_NICK, changed_nickoricon),
+    PREF_CONN (CFG_NICK_COLOR, changed_nick_color),
+    PREF_VIEW (CFG_STAMP_FORMAT, changed_stampformat),
+    PREF_GLOBAL (CFG_THEME, changed_theme),
+    PREF_GLOBAL (CFG_THEME_NAME, changed_theme_name),
+    PREF_VIEW (CFG_TIMESTAMP, changed_timestamp),
+    PREF_GLOBAL (CFG_TRACKER_CASE, changed_case),
+    PREF_GLOBAL (CFG_TRAY, changed_tray),
 #ifdef HAVE_VOICE
     /* The device preferences persist whether or not voice is compiled in, so
      * a build without it doesn't discard a user's saved picks; only the hooks
      * that push the value into the Rust runtime are conditional. */
-    { CFG_VOICE_INPUT_DEVICE, changed_voice_input_device },
-    { CFG_VOICE_OUTPUT_DEVICE, changed_voice_output_device },
+    PREF_GLOBAL (CFG_VOICE_INPUT_DEVICE, changed_voice_input_device),
+    PREF_GLOBAL (CFG_VOICE_OUTPUT_DEVICE, changed_voice_output_device),
 #endif
-    { CFG_WORDWRAP, changed_xtext },
-    { CFG_XBUF_MAX, changed_xtext },
+    PREF_VIEW (CFG_WORDWRAP, changed_xtext),
+    PREF_VIEW (CFG_XBUF_MAX, changed_xtext),
 };
 
-static pref_hook_fn
+static const struct pref_hook *
 pref_hook_for (const char *name)
 {
     size_t i;
 
     for (i = 0; i < G_N_ELEMENTS (pref_hooks); i++) {
         if (strcmp (pref_hooks[i].name, name) == 0) {
-            return pref_hooks[i].fn;
+            return &pref_hooks[i];
         }
     }
     return NULL;
+}
+
+/* Run one hook against the session the user is looking at.
+ *
+ * The only place that decides which session and which connection a preference
+ * change applies to. At one connection `hx_active_session` and "the session
+ * that owns this connection" coincide; the distinction is in session.h and
+ * matters to multi-connection, which will have to give this function a
+ * connection rather than let it pick. */
+static void
+pref_hook_run (const struct pref_hook *hook)
+{
+    session *sess = hx_active_session ();
+
+    switch (hook->kind) {
+    case PREF_HOOK_VIEW:
+        hook->fn.view (sess);
+        break;
+    case PREF_HOOK_GLOBAL:
+        hook->fn.global ();
+        break;
+    case PREF_HOOK_CONN:
+        hook->fn.conn (sess->htlc);
+        break;
+    }
 }
 
 /* The Settings rows that are on screen right now, keyed by config name.
@@ -924,11 +979,11 @@ pref_widget_lookup (const char *name)
 static void
 pref_apply (const char *name)
 {
-    pref_hook_fn hook = pref_hook_for (name);
+    const struct pref_hook *hook = pref_hook_for (name);
 
     hx_prefs_mirror_refresh ();
     if (hook) {
-        hook (hx_active_session ());
+        pref_hook_run (hook);
     }
     hx_prefs_save_soon ();
 }
@@ -1517,7 +1572,7 @@ prefs_read (void)
      * function existed alongside to re-apply the ones where that mattered.
      * Applying uniformly deletes both the bug and the compensator. */
     for (i = 0; i < (int)G_N_ELEMENTS (pref_hooks); i++) {
-        pref_hooks[i].fn (hx_active_session ());
+        pref_hook_run (&pref_hooks[i]);
     }
 
     /* No settings file anywhere — first run. Pop Settings, as before. */
