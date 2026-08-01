@@ -402,16 +402,16 @@ struct hx_command {
 
 static struct hx_command *commands, *last_command;
 
-static struct hx_command commands_tbl[] = {
-    { "clear", cmd_clear }, { "close", cmd_close },
+static struct hx_command commands_tbl[]
+    = { { "clear", cmd_clear },   { "close", cmd_close },
 #ifdef G_OS_UNIX
-    { "exec", cmd_exec }, /* /exec — Unix-only (cmd_exec.c) */
+        { "exec", cmd_exec }, /* /exec — Unix-only (cmd_exec.c) */
 #endif
-    { "help", cmd_help },   { "icon", cmd_icon },      { "ignore", cmd_ignore },
-    { "me", cmd_me },       { "msg", cmd_msg },        { "nick", cmd_nick },
-    { "post", cmd_post },   { "quit", cmd_quit },      { "server", cmd_server },
-    { "unignore", cmd_ignore }
-};
+        { "help", cmd_help },     { "icon", cmd_icon },
+        { "ignore", cmd_ignore }, { "me", cmd_me },
+        { "msg", cmd_msg },       { "nick", cmd_nick },
+        { "post", cmd_post },     { "quit", cmd_quit },
+        { "server", cmd_server }, { "unignore", cmd_ignore } };
 
 static struct hx_command *commands
     = commands_tbl,
