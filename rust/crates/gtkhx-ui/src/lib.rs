@@ -32,6 +32,10 @@ pub mod connect;
 // gtkhx_options_rs_page_* exports (options.c's create_options_window +
 // settings_entries[] call them). Identity + Voice remain C.
 pub mod options;
+/// The Voice settings page. Feature-gated to match the page itself — see the
+/// module docs for why the preferences are not.
+#[cfg(feature = "voice")]
+mod options_voice;
 pub mod rc4_dialog;
 pub mod tls_trust_dialog;
 pub mod tracker;

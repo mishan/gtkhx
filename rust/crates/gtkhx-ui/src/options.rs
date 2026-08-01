@@ -85,7 +85,7 @@ pub(crate) fn pref_get_string(name: &str) -> String {
         s
     }
 }
-fn pref_set_string(name: &str, v: &str) {
+pub(crate) fn pref_set_string(name: &str, v: &str) {
     unsafe { gtkhx_prefs_set_string(cs(name).as_ptr(), cs(v).as_ptr()) }
 }
 
@@ -96,7 +96,7 @@ fn pref_set_string(name: &str, v: &str) {
 // back (which applies + persists) on change.
 
 /// AdwSwitchRow bound to a BOOLEAN pref.
-fn switch_row(cfg: &str, title: &str, subtitle: Option<&str>) -> adw::SwitchRow {
+pub(crate) fn switch_row(cfg: &str, title: &str, subtitle: Option<&str>) -> adw::SwitchRow {
     let row = adw::SwitchRow::new();
     row.set_title(title);
     if let Some(s) = subtitle {
@@ -212,7 +212,7 @@ fn entry_row(cfg: &str, title: &str) -> adw::EntryRow {
 
 /// AdwComboRow over a fixed value list bound to a STRING pref. `labels` are
 /// shown; the parallel `values` are what's stored. Selection maps by value.
-fn combo_row(cfg: &str, title: &str, values: &[&str], labels: &[&str]) -> adw::ComboRow {
+pub(crate) fn combo_row(cfg: &str, title: &str, values: &[&str], labels: &[&str]) -> adw::ComboRow {
     let row = adw::ComboRow::new();
     row.set_title(title);
     // Values and labels are parallel; clamp to the shorter so a selection
@@ -356,6 +356,18 @@ pub(crate) mod cfg {
     pub const SND_MSG: &str = "SOUNDMSG";
     pub const SND_NEWS: &str = "SOUNDNEWS";
     pub const SND_PART: &str = "SOUNDPART";
+    // Voice. Registered unconditionally on the C side so a build without
+    // voice doesn't discard someone's saved picks — but only the Voice page
+    // reads these names, and that page is feature-gated, so the constants are
+    // too or a voice-off build carries four it never mentions.
+    #[cfg(feature = "voice")]
+    pub const VOICE_INPUT_DEVICE: &str = "VOICEINPUTDEVICE";
+    #[cfg(feature = "voice")]
+    pub const VOICE_OUTPUT_DEVICE: &str = "VOICEOUTPUTDEVICE";
+    #[cfg(feature = "voice")]
+    pub const VOICE_PTT_ENABLED: &str = "VOICEPTTENABLED";
+    #[cfg(feature = "voice")]
+    pub const VOICE_PTT_KEY: &str = "VOICEPTTKEY";
     pub const SND_VOICE_JOIN: &str = "SOUNDVOICEJOIN";
     pub const SND_VOICE_LEAVE: &str = "SOUNDVOICELEAVE";
     // Paths / transfers
@@ -379,7 +391,7 @@ pub(crate) mod cfg {
 }
 
 /// Convenience: a titled AdwPreferencesGroup.
-fn group(title: &str) -> adw::PreferencesGroup {
+pub(crate) fn group(title: &str) -> adw::PreferencesGroup {
     let g = adw::PreferencesGroup::new();
     g.set_title(title);
     g
@@ -887,6 +899,15 @@ macro_rules! rs_page_export {
         }
     };
 }
+
+/// The Voice page lives in its own module; the macro takes an ident, so this
+/// is the local name it exports.
+#[cfg(feature = "voice")]
+fn page_voice(page: &adw::PreferencesPage) {
+    crate::options_voice::build(page);
+}
+#[cfg(feature = "voice")]
+rs_page_export!(gtkhx_options_rs_page_voice => page_voice);
 
 rs_page_export!(gtkhx_options_rs_page_general => page_general);
 rs_page_export!(gtkhx_options_rs_page_file_transfers => page_file_transfers);
