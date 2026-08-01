@@ -1,14 +1,14 @@
 //! Settings dialog pages (porting `src/options.c` — the largest window — to
 //! Rust, Phase R5.6).
 //!
-//! The pref *model* stays in C: the `cfgvars[]` registry, the `changed_*`
-//! apply hooks, gtkhxrc persistence, and the split-view `create_options_window`
-//! framework. This module builds the page *content* in Rust. Its
+//! The values and the file belong to the `hxconfig` crate; the `changed_*`
+//! apply hooks and the split-view `create_options_window` framework are still
+//! C. This module builds the page *content* in Rust. Its
 //! `gtkhx_options_rs_page_*` exports are the `settings_entries[].draw` pointers
-//! the C framework calls per page; the row builders read/write prefs through
-//! the typed by-name bridge (`gtkhx_prefs_*` in options.c), which fires the
-//! cfgvar's changefunc + persists on every write, so apply semantics match the
-//! old C rows exactly.
+//! the C framework calls per page; the row builders read/write preferences
+//! through the typed by-name bridge (`gtkhx_prefs_*` in options.c), which
+//! refreshes the C mirror, runs the key's apply hook and arms the save timer on
+//! every write, so apply semantics match the C rows exactly.
 //!
 //! 10 of 11 pages are ported and live. Identity (icon + GIF-avatar pickers)
 //! and Voice (device combos + PTT capture) keep their C draw functions for
@@ -27,8 +27,9 @@ use std::os::raw::{c_char, c_int, c_void};
 use std::rc::Rc;
 
 extern "C" {
-    // options.c pref bridge (typed by-name; a setter also fires the cfgvar
-    // changefunc + prefs_write). See src/options.h.
+    // options.c pref bridge (typed by-name; a setter also refreshes the C
+    // mirror, runs the key's apply hook and arms the save timer). See
+    // src/options.h.
     fn gtkhx_prefs_type(name: *const c_char) -> c_int;
     fn gtkhx_prefs_get_bool(name: *const c_char) -> c_int;
     fn gtkhx_prefs_set_bool(name: *const c_char, val: c_int);
@@ -44,12 +45,11 @@ extern "C" {
     fn gtkhx_theme_names_end();
 }
 
-// cfgvar type tags (src/options.c `struct cfgvar`). Kept in sync with the C
-// #defines; a row that finds a mismatched type renders insensitive.
+// Value-kind tags, as `hxconfig_type` reports them. A row that finds a
+// mismatched kind renders insensitive.
 const T_INT: c_int = 1;
 const T_BOOLEAN: c_int = 2;
 const T_STRING: c_int = 3;
-const T_STRING32: c_int = 4;
 const T_UINT16: c_int = 5;
 
 /// Entry-row apply debounce — matches the C 750 ms coalesce so typing a
@@ -138,9 +138,9 @@ fn spin_row(
     row.set_value(pref_get_int(cfg) as f64);
     let name = cfg.to_owned();
     row.connect_value_notify(move |r| {
-        // Only write when the stored int actually changes — the C handler
-        // early-returns on an unchanged value to skip a redundant changefunc
-        // run + prefs_write.
+        // Only write when the stored int actually changes — the setter
+        // short-circuits an unchanged value anyway, but checking here also
+        // skips the FFI round trip on a property that churns.
         let v = r.value() as i32;
         if v != pref_get_int(&name) {
             pref_set_int(&name, v);
@@ -149,13 +149,12 @@ fn spin_row(
     row
 }
 
-/// AdwEntryRow bound to a STRING / STRING32 pref, with the 750 ms apply
-/// debounce (a per-row timer captured in the change closure).
+/// AdwEntryRow bound to a STRING pref, with the 750 ms apply debounce (a
+/// per-row timer captured in the change closure).
 fn entry_row(cfg: &str, title: &str) -> adw::EntryRow {
     let row = adw::EntryRow::new();
     row.set_title(title);
-    let t = pref_type(cfg);
-    if t != T_STRING && t != T_STRING32 {
+    if pref_type(cfg) != T_STRING {
         row.set_sensitive(false);
         return row;
     }
@@ -283,8 +282,8 @@ fn nick_color_row(cfg: &str) -> adw::ActionRow {
             let g = (c.green() * 255.0 + 0.5) as u32;
             let bl = (c.blue() * 255.0 + 0.5) as u32;
             // Only write when the packed 0x00RRGGBB changes — the rgba property
-            // can churn (rounding) without the stored value moving; the C
-            // handler guards this to skip a redundant changefunc + prefs_write.
+            // can churn (rounding) without the stored value moving, and the C
+            // row guards the same way to skip a redundant apply.
             let packed = ((r << 16) | (g << 8) | bl) as i32;
             if packed != pref_get_int(&name) {
                 pref_set_int(&name, packed);
@@ -534,10 +533,12 @@ fn page_sound(page: &adw::PreferencesPage) {
     events.add(&switch_row(cfg::SND_MSG, &tr("Private message"), None));
     events.add(&switch_row(cfg::SND_NEWS, &tr("News post"), None));
     events.add(&switch_row(cfg::SND_PART, &tr("Leave"), None));
-    // Voice chimes only exist when voice is compiled in — the cfgvars aren't
-    // in the C table otherwise, so pref_type == 0 lets us omit the rows
-    // (matching the C #ifdef HAVE_VOICE) rather than show them greyed.
-    if pref_type(cfg::SND_VOICE_JOIN) != 0 {
+    // Voice chimes only make sense when voice is compiled in, so the rows are
+    // gated on this crate's `voice` feature — the same switch that compiles
+    // the C voice sources. Gating on whether the setting exists would never
+    // fire: the two keys are registered unconditionally, deliberately, so a
+    // no-voice build doesn't discard a user's saved toggles.
+    if cfg!(feature = "voice") {
         events.add(&switch_row(
             cfg::SND_VOICE_JOIN,
             &tr("Voice chat join"),
@@ -709,9 +710,9 @@ fn page_file_transfers(page: &adw::PreferencesPage) {
 }
 
 /// Serialise the tracker list-store back to the comma-separated CFG_TRACKER
-/// string. Writing it fires parse_tracker (the cfgvar changefunc), which
-/// re-derives gtkhx_prefs.tracker[], and persists — the same effect the C
-/// add/remove handlers got via parse_tracker_list + prefs_write.
+/// value. The schema stores a real array; the comma is a boundary format the
+/// setter splits on, and the write re-derives the C mirror's `tracker[]` and
+/// persists.
 fn persist_trackers(store: &gtk::gio::ListStore) {
     let mut parts: Vec<String> = Vec::new();
     for i in 0..store.n_items() {

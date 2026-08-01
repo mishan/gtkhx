@@ -2134,8 +2134,8 @@ enum ClipboardTarget {
 /// Process-wide prefs, mirroring the ones xtext keeps as module globals.
 ///
 /// These are genuinely process-wide rather than per-view — `options.c`
-/// sets them once from the cfgvars, and `prefs_read` applies the stamp
-/// format before any window exists — so the view crate keeps them the
+/// sets them once from the loaded settings, and `prefs_read` applies the
+/// stamp format before any window exists — so the view crate keeps them the
 /// same way. `thread_local` rather than a lock because every one of
 /// these is touched only from the GTK main thread.
 pub(crate) mod prefs {

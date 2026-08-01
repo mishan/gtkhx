@@ -1,13 +1,13 @@
 /*
  * cfgkeys.h — config-key string constants.
  *
- * The cfgvars[] table in options.c is keyed by short upper-case strings
- * ("FONT", "ICON", "THEME", ...). The same strings appear at the call
- * sites where the dialog rows are built (pref_*_row("FONT", ...)) and
- * where code reaches into the table by name (cfgvar_for_name("FONT")).
- * Repeating the literal at every site is a typo magnet and makes
- * grep-based refactors brittle: misspelling "FONT" as "FNT" compiles
- * cleanly, runs, and silently drops the pref.
+ * Preferences are addressed by short upper-case strings ("FONT", "ICON",
+ * "THEME", ...) — the keys the pre-TOML settings file used, kept as the
+ * by-name vocabulary because they are what a caller can spell without looking
+ * anything up. hxconfig resolves them to schema paths through the migration
+ * map it already had to know them all for. Repeating the literal at every site
+ * is a typo magnet and makes grep-based refactors brittle: misspelling "FONT"
+ * as "FNT" compiles cleanly, runs, and silently drops the pref.
  *
  * Centralize the keys here as #defines so:
  *   1. The compiler still folds them into a single .rodata copy.
@@ -16,14 +16,11 @@
  *   3. The full set of config keys is discoverable in one place,
  *      grouped by what they configure.
  *
- * Anything that touches a cfgvar by string name should use these
- * constants rather than hard-coding the literal. The cfgvars[] table
- * uses them as initializer values, so its alphabetic-sort invariant is
- * preserved (the literals collapse to the same bytes either way).
- *
- * Adding a new pref: define the key here, add the cfgvars[] entry, and
- * the cfgvars_assert_sorted() check at startup will catch a misordered
- * insert before bsearch does anything subtle.
+ * Adding a new preference: define the key here, add the field and its path to
+ * hxconfig's schema and field table, add the key to its migration map (or list
+ * the path in NEW_PATHS to say that defaulting is intended), and mirror it in
+ * prefs_mirror.c if C still needs to read it. hxconfig's coverage tests fail
+ * if either half is forgotten.
  */
 
 #ifndef GTKHX_CFGKEYS_H
@@ -199,8 +196,5 @@
  * gtkhx_theme.{c,h}, docs/theming.md,
  * docs/theming-file-format.md. */
 #define CFG_THEME_NAME "THEMENAME"
-
-/* GKeyFile section name for the prefs file. */
-#define CFG_KEYFILE_GROUP "gtkhx"
 
 #endif /* ndef GTKHX_CFGKEYS_H */

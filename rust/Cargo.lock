@@ -1782,6 +1782,7 @@ dependencies = [
  "hxbookmarks",
  "hxbridge",
  "hxchat-view",
+ "hxconfig",
  "hxcrypto",
  "hxfiles-xfer",
  "hxhandlers",

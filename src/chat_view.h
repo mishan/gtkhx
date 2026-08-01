@@ -147,7 +147,7 @@ void hx_chat_view_refresh (GtkWidget *view);
 void hx_chat_view_clear (GtkWidget *view);
 
 /* Drag-end auto-clipboard behaviour. Process-wide, not per-view —
- * these mirror three BOOLEAN cfgvars in Settings.
+ * these mirror three boolean settings.
  *   text  — copy to the clipboard on drag-end at all
  *   stamp — include the per-line timestamp in the copied text
  *   color — retain in-band colour codes in the copied text */

@@ -79,7 +79,7 @@ extern "C" {
     pub fn toolbar_show_toast(text: *const c_char);
 
     // ---- prefs setter (options.c) ------------------------------------
-    /// `gtkhx_prefs_set_bool(name, value)` — persists + fires the cfgvar
+    /// `gtkhx_prefs_set_bool(name, value)` — persists + fires the key's
     /// change hook (keeps the Settings switch in lockstep).
     pub fn gtkhx_prefs_set_bool(name: *const c_char, value: c_int);
 

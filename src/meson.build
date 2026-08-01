@@ -85,10 +85,10 @@ gtkhx_sources = files(
   # modules. (news_recv_bridge.c, the last C leaf, is gone.)
   'notify.c',
   'options.c',
+  'prefs_mirror.c',
   'path_hldir.c',
   'pict_embed.c',
   'pict_magick.c',
-  'prefs_parser.c',
   'preview.c',
   'proto_helpers.c',
   'proto_trace.c',

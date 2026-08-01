@@ -825,8 +825,7 @@ gtkhx_tray_init (GtkApplication *app)
     tray_app = app;
     /* Pull the initial pref straight out of gtkhx_prefs here so the
      * caller doesn't have to remember to do it. Subsequent changes
-     * arrive via gtkhx_tray_set_enabled() from the changed_tray
-     * cfgvar callback. */
+     * arrive via gtkhx_tray_set_enabled() from the changed_tray hook. */
     tray_enabled = gtkhx_prefs.tray ? TRUE : FALSE;
     if (tray_enabled) {
         tray_activate_register ();

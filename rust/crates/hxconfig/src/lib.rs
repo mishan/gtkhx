@@ -34,6 +34,7 @@
 //! ```
 
 mod atomic;
+pub mod ffi;
 mod fields;
 pub mod legacy;
 pub mod migrate;

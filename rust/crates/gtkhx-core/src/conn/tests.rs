@@ -154,17 +154,6 @@ fn media_limits_reset() {
 }
 
 #[test]
-fn icon_ptr_aliases_the_field() {
-    with_conn(|h| unsafe {
-        let p = hx_conn_icon_ptr(h);
-        *p = 999;
-        assert_eq!(hx_conn_icon(h), 999);
-        hx_conn_set_icon(h, 500);
-        assert_eq!(*p, 500);
-    });
-}
-
-#[test]
 fn has_cap_masks() {
     with_conn(|h| unsafe {
         hx_conn_set_caps(h, 0b1010);

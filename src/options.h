@@ -2,37 +2,39 @@
 #define HX_OPTIONS_H
 
 extern void create_options_window (GtkWidget *widget, gpointer data);
-/* Bind the identity cfgvars (ICON / NICK) to the connection's heap-allocated
- * storage. Call once after the_session.htlc is allocated and before any prefs
- * read/write. See the definition in options.c
- * and docs/rust/network-endgame.md. */
-extern void hx_options_bind_identity (void);
 extern void init_variables (void);
+/* Load the settings through hxconfig (importing an old gtkhxrc if there is no
+ * gtkhx.toml yet), refresh the C mirror, seed the connection's identity, and
+ * apply every change hook once. Call after the connection is allocated. */
 extern void prefs_read (void);
-extern void prefs_write (void);
+/* Persist. Writing coalesces on a short timer — hx_prefs_save_soon arms it,
+ * hx_prefs_save_now cancels any pending one and writes synchronously, which is
+ * what the quit path wants. Both are no-ops when nothing has changed since the
+ * last write. */
+extern void hx_prefs_save_soon (void);
+extern void hx_prefs_save_now (void);
 extern void reinit_gtktexts (session *sess);
-/* Set a BOOLEAN cfgvar from outside the Settings window. Looks up the
- * cfgvar by name, writes the new value, fires the cfgvar's change-
- * callback, mirrors the change into the Settings switch row if the
- * Settings window happens to be open, and persists via prefs_write().
- * Used by per-window UI (e.g. the Tracker case-sensitive toggle) so
- * those toggles stay in lockstep with Settings without each window
- * having to know about the GRegex / prefs_write plumbing. */
-extern void gtkhx_prefs_set_bool (const char *name, int value);
 
-/* Typed by-name pref accessors — the bridge the Rust settings form
- * (gtkhx-ui options.rs, Phase R5) reads/writes prefs through. A setter
- * writes the cfgvar's gtkhx_prefs field, fires its changefunc, and
- * persists via prefs_write() — same apply semantics as the old C rows.
- * gtkhx_prefs_type returns the cfgvar type tag (INT/BOOLEAN/STRING/…),
- * 0 for an unknown name. gtkhx_prefs_get_string returns a g_malloc'd
- * copy (free with g_free), never NULL. BOOLEAN writes use the existing
- * gtkhx_prefs_set_bool above. */
+/* Typed by-name accessors — the one path every preference write takes,
+ * whether it comes from a C row here, a Rust Settings page (gtkhx-ui
+ * options.rs), or a per-window toggle like the Tracker's case-sensitive
+ * button. A write that changes something refreshes the mirror, runs the key's
+ * apply hook, and arms the save timer, so apply semantics can't drift between
+ * callers.
+ *
+ * gtkhx_prefs_type returns the value-kind tag (INT / BOOLEAN / STRING /
+ * UINT16), 0 for a name the schema doesn't have. gtkhx_prefs_get_string
+ * returns a g_malloc'd copy (free with g_free), never NULL.
+ *
+ * gtkhx_prefs_set_bool additionally drives the live AdwSwitchRow when the
+ * Settings dialog happens to be showing one for that key, so a toggle flipped
+ * elsewhere stays in lockstep with what the user is looking at. */
 extern int gtkhx_prefs_type (const char *name);
 extern int gtkhx_prefs_get_bool (const char *name);
 extern int gtkhx_prefs_get_int (const char *name);
-extern void gtkhx_prefs_set_int (const char *name, int val);
 extern char *gtkhx_prefs_get_string (const char *name);
+extern void gtkhx_prefs_set_bool (const char *name, int value);
+extern void gtkhx_prefs_set_int (const char *name, int val);
 extern void gtkhx_prefs_set_string (const char *name, const char *val);
 
 #endif
