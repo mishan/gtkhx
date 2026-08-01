@@ -32,6 +32,7 @@
 #include "hl_access.h" /* hl_access_permits, HL_ACCESS_READ_NEWS */
 #include "debug.h"     /* debug_log */
 #include "gtkhx_ui_bridge.h"
+#include "panel_registry.h"
 
 void
 gtkhx_agreement_agree (session *sess)
@@ -145,14 +146,13 @@ gtkhx_session_htlc (session *sess)
 gboolean
 gtkhx_news_is_open (void)
 {
-    return gtkhx_prefs.geo.news.open ? TRUE : FALSE;
+    return hx_panel_was_constructed (HX_PANEL_ID_NEWS) ? TRUE : FALSE;
 }
 
 void
 gtkhx_news_mark_open (void)
 {
-    gtkhx_prefs.geo.news.open = 1;
-    gtkhx_prefs.geo.news.init = 1;
+    hx_panel_mark_constructed (HX_PANEL_ID_NEWS);
 }
 
 /* Mirror reload_news's pre-fetch access gate: the server told us at SELFINFO

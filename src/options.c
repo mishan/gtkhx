@@ -53,6 +53,7 @@
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_ptt_keyspec.h"
+#include "panel_registry.h"
 #endif
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
@@ -77,11 +78,11 @@ struct gtkhx_prefs gtkhx_prefs = {
     NULL, /* tracker (char **) */
     "hltracker.com", /* tracker_str */
     500,             /* xbuf_max */
-    { { 412, 312, 10, 434, 0, 1 },
-      { 412, 384, 10, 50, 0, 1 },
-      { 0, 0, 442, 0, 0, 0 },
-      { 300, 250, 442, 480, 0, 1 },
-      { 300, 400, 442, 50, 0, 1 } },
+    { { 412, 312, 10, 434 },
+      { 412, 384, 10, 50 },
+      { 0, 0, 442, 0 },
+      { 300, 250, 442, 480 },
+      { 300, 400, 442, 50 } },
     1, /* queuedl */
     1, /* showjoin */
     0, /* tray (init_variables sets default) */
@@ -93,7 +94,6 @@ struct gtkhx_prefs gtkhx_prefs = {
     0, /* old_nickcompletion */
     0, /* outrate_limit */
     0, /* inrate_limit */
-    0, /* logging */
 
     /* Emoji shortcodes — both default ON (init_variables re-asserts). */
     1, /* emoji_shortcodes */
@@ -383,7 +383,7 @@ list_icons (void)
 void
 reinit_gtktexts (session *sess)
 {
-    if (gtkhx_prefs.geo.news.open) {
+    if (hx_panel_was_constructed (HX_PANEL_ID_NEWS)) {
         gtkhx_apply_text_style (sess->news_text);
     }
     {
@@ -397,7 +397,7 @@ reinit_gtktexts (session *sess)
                     continue;
                 }
                 if (hx_chats_cid_at (sess->chats, i) == 0
-                    && !gtkhx_prefs.geo.chat.open) {
+                    && !hx_panel_was_constructed (HX_PANEL_ID_CHAT)) {
                     continue;
                 }
                 hx_chat_view_set_font (hx_gchat_output (gchat), fontname);
@@ -653,15 +653,6 @@ changed_animate_avatars (session *sess)
     (void)sess;
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
 }
-
-#if 0 /* XXX */
-static void changed_logging (session *sess)
-{
-    if(!gtkhx_prefs.logging) {
-        close_logs();
-    }
-}
-#endif
 
 /* HexChat-style xtext autocopy. Each toggle in Settings →
  * Advanced → Auto Copy Behavior calls one of the three xtext setters
@@ -967,9 +958,6 @@ struct cfgvar {
       0,
       changed_nickoricon,
       NULL },
-#if 0 /* XXX */
-    {CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
-#endif
     { CFG_MARKDOWN,
       { &gtkhx_prefs.markdown },
       BOOLEAN,
@@ -1031,10 +1019,6 @@ struct cfgvar {
       0,
       NULL,
       NULL },
-    { CFG_OPEN_CHAT, { &gtkhx_prefs.geo.chat.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OPEN_NEWS, { &gtkhx_prefs.geo.news.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OPEN_TASKS, { &gtkhx_prefs.geo.tasks.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OPEN_USERS, { &gtkhx_prefs.geo.users.init }, BOOLEAN, 0, NULL, NULL },
     { CFG_QUEUEDL, { &gtkhx_prefs.queuedl }, BOOLEAN, 0, NULL, NULL },
     { CFG_SHOWJOIN, { &gtkhx_prefs.showjoin }, BOOLEAN, 0, NULL, NULL },
     { CFG_SND_CHAT, { &hxsnd.chat }, BOOLEAN, 0, NULL, NULL },

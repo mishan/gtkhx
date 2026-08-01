@@ -123,9 +123,6 @@
 #define CFG_THEME_LIGHT "light"
 #define CFG_THEME_DARK "dark"
 
-/* Logging (currently #if-0'd out, kept here for symmetry) */
-#define CFG_LOGGING "LOGGING"
-
 /* xtext autocopy controls — Settings → Advanced → Auto Copy
  * Behavior. Three independent toggles for the drag-end clipboard
  * behaviour. See chat_view.h:hx_chat_view_set_autocopy_* for the per-field
@@ -146,24 +143,26 @@
  * implicitly matched so this list is purely additional. */
 #define CFG_HIGHLIGHT_WORDS "HIGHLIGHTWORDS"
 
-/* Window geometry — four windows × (w, h) + an OPEN flag.
- * Names match the historic gtkhxrc keys; consumers always use these
- * five base names so a global 5x5 sweep still finds every reference. */
+/* Window geometry — four windows × (w, h). Names match the historic
+ * gtkhxrc keys.
+ *
+ * The matching OPENCHAT / OPENNEWS / OPENTASKS / OPENUSERS keys are
+ * gone. They looked like user intent and were not: each defaulted to 1,
+ * each panel set its own the first time it was constructed, and nothing
+ * ever cleared one, so after first run they were 1 for everybody. No
+ * setting exposed them either. The runtime "has this panel been built"
+ * flag they shadowed now lives with the panels, in panel_registry.h. */
 #define CFG_CHAT_XSIZE "CHATXSIZE"
 #define CFG_CHAT_YSIZE "CHATYSIZE"
-#define CFG_OPEN_CHAT "OPENCHAT"
 
 #define CFG_NEWS_XSIZE "NEWSXSIZE"
 #define CFG_NEWS_YSIZE "NEWSYSIZE"
-#define CFG_OPEN_NEWS "OPENNEWS"
 
 #define CFG_TASK_XSIZE "TASKXSIZE"
 #define CFG_TASK_YSIZE "TASKYSIZE"
-#define CFG_OPEN_TASKS "OPENTASKS"
 
 #define CFG_USER_XSIZE "USERXSIZE"
 #define CFG_USER_YSIZE "USERYSIZE"
-#define CFG_OPEN_USERS "OPENUSERS"
 
 /* Toolbar window. gtkhx_prefs.geo.tool has always been written
  * via gtkhx_save_window_positions, but for years no key existed

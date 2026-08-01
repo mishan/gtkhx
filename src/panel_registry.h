@@ -86,6 +86,23 @@ typedef void (*HxPanelRegistryForeachFunc) (HxPanel *panel, gpointer user_data);
 void hx_panel_registry_foreach (HxPanelRegistryForeachFunc func,
                                 gpointer user_data);
 
+/* "Has this panel ever been constructed?"
+ *
+ * A latch: set once when a panel finishes embedding, never cleared. It
+ * used to be a one-bit field on the preferences struct, which is why
+ * that struct also carried a shadow byte beside it — a bitfield has no
+ * address for the settings table to point at. Both are gone; the flag
+ * was never a preference, and it lives here because the panels do.
+ *
+ * Deliberately NOT hx_panel_registry_lookup() != NULL, which answers the
+ * stricter "is it constructed *right now*" — the registry drops its entry
+ * when a panel is closed for good, and this does not. Every caller today
+ * is guarding a pointer that a close would invalidate, so the stricter
+ * question is arguably the one they want; switching them is a behaviour
+ * change and wants its own look, not a silent ride-along with this. */
+void hx_panel_mark_constructed (const char *id);
+gboolean hx_panel_was_constructed (const char *id);
+
 G_END_DECLS
 
 #endif /* GTKHX_PANEL_REGISTRY_H */

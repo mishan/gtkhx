@@ -35,6 +35,4 @@ extern void gtkhx_prefs_set_int (const char *name, int val);
 extern char *gtkhx_prefs_get_string (const char *name);
 extern void gtkhx_prefs_set_string (const char *name, const char *val);
 
-extern time_t start_time, total_time;
-
 #endif

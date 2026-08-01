@@ -14,8 +14,6 @@
 typedef struct {
     int xsize, ysize;
     int xpos, ypos;
-    unsigned int open : 1;
-    unsigned char init;
 } Window_Geo;
 
 struct gtkhx_prefs {
@@ -73,7 +71,6 @@ struct gtkhx_prefs {
     unsigned char old_nickcompletion;
     unsigned char outrate_limit;
     unsigned char inrate_limit;
-    unsigned char logging;
 
     /* Emoji shortcodes (phase E6), both default ON:
      *   emoji_shortcodes — convert emoji ↔ :shortcode: text. Drives the

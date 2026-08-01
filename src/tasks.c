@@ -38,6 +38,7 @@
 #include "sound.h"
 #include "toolbar.h" /* disconnect_clicked, toolbar_show_toast */
 #include "tasks.h"
+#include "panel_registry.h"
 
 /* Phase 5 task-row polish: each row is now an Adwaita-shaped
  * action-row layout — icon column on the left, then a vbox with
@@ -685,10 +686,9 @@ task_update (session *sess, struct task *tsk)
 /* tasks_destroy retired. The Tasks
  * panel is a permanent resident of the toolbar's sidebar
  * PanelFrame; the standalone GtkWindow it used to hang under is
- * gone, so there's nothing to unparent on close. The
- * gtkhx_prefs.geo.tasks.open flag still flips at panel creation
- * time so the rest of tasks.c continues to gate worker-thread
- * updates on it. */
+ * gone, so there's nothing to unparent on close. The panel still
+ * marks itself constructed at creation time, so the rest of tasks.c
+ * continues to gate worker-thread updates on that. */
 
 extern void tracker_kill_threads (void);
 static void
@@ -699,7 +699,7 @@ task_stop (GtkWidget *widget, gpointer data)
     GtkWidget *listitem;
     session *sess = data;
 
-    if (!gtkhx_prefs.geo.tasks.open) {
+    if (!hx_panel_was_constructed (HX_PANEL_ID_TASKS)) {
         return;
     }
 
@@ -845,7 +845,7 @@ task_go (GtkWidget *widget, gpointer data)
     GtkWidget *listitem;
     session *sess = data;
 
-    if (!gtkhx_prefs.geo.tasks.open) {
+    if (!hx_panel_was_constructed (HX_PANEL_ID_TASKS)) {
         return;
     }
 
@@ -952,8 +952,7 @@ gtkhx_tasks_after_embed (session *sess)
 {
     g_return_if_fail (sess != NULL);
 
-    gtkhx_prefs.geo.tasks.open = 1;
-    gtkhx_prefs.geo.tasks.init = 1;
+    hx_panel_mark_constructed (HX_PANEL_ID_TASKS);
 
     task_tasks_update (sess);
     xfer_tasks_update (sess->htlc);

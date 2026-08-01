@@ -1786,40 +1786,6 @@ xoutput_chat (session *sess, guint32 cid, char *chat, const char *tag,
     if (!gchat) {
         return;
     }
-
-#if 0
-    if(gtkhx_prefs.logging) {
-        if(!server_log) {
-            /* XXX: open it up here */
-#warning FIXME
-        }
-
-
-        if(cid == 0 && server_log) {
-            char *copy = g_strdup(chat);
-            int len = strlen(chat);
-
-            if(len > 18 && !strncmp(INFOPREFIX, copy, 18)) {
-                char *new_copy = g_strdup_printf(" [hx] %s", &copy[18]);
-                g_free(copy);
-                copy = new_copy;
-                len = strlen(copy);
-            }
-            if(gtkhx_prefs.timestamp) {
-                char *new_text = g_malloc0(len+12);
-                timecpy(new_text);
-                memcpy(new_text +11, copy, len);
-                print_log(server_log, new_text);
-                g_free(new_text);
-            }
-            else {
-                print_log(server_log, copy);
-            }
-            g_free(copy);
-        }
-    }
-#endif
-
     cr = strchr (chat, '\n');
     if (cr) {
         while (1) {
@@ -2134,8 +2100,7 @@ gtkhx_chat_after_embed (session *sess)
         g_object_set_data (G_OBJECT (panel), "sess", sess);
     }
 
-    gtkhx_prefs.geo.chat.open = 1;
-    gtkhx_prefs.geo.chat.init = 1;
+    hx_panel_mark_constructed (HX_PANEL_ID_CHAT);
 
     gchat = gchat_with_cid (sess, 0);
     if (gchat != NULL && gchat->input != NULL) {
@@ -2612,7 +2577,7 @@ hx_clear_chat (struct htlc_conn *htlc, guint32 cid, int subj)
         return;
     }
     hx_chat_view_clear (gchat->output);
-    if (gtkhx_prefs.geo.chat.open) {
+    if (hx_panel_was_constructed (HX_PANEL_ID_CHAT)) {
         if (subj) {
             gtk_editable_set_text (GTK_EDITABLE (gchat->subject), "");
         }

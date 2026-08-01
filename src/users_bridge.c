@@ -34,6 +34,7 @@
 #include "voice_panel.h"
 #endif
 #include "users_bridge.h"
+#include "panel_registry.h"
 
 static GtkWidget *
 build_view (session *sess)
@@ -171,8 +172,7 @@ gtkhx_users_bridge_after_embed (session *sess)
     /* Auto-open + size persistence are layout-restore work. For now we
      * just mark the panel open and trust libpanel's sidebar-width
      * default. */
-    gtkhx_prefs.geo.users.open = 1;
-    gtkhx_prefs.geo.users.init = 1;
+    hx_panel_mark_constructed (HX_PANEL_ID_USERS);
 
     if (connected == 1) {
         gtk_widget_set_sensitive (msgbtn, TRUE);

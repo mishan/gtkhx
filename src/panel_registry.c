@@ -80,6 +80,38 @@ hx_panel_registry_lookup (const char *id)
     return g_hash_table_lookup (get_table (), id);
 }
 
+/* The "has ever been constructed" latch. Separate table from the
+ * registry proper, because it deliberately outlives a panel close —
+ * see the note in the header for why that difference is preserved
+ * rather than quietly collapsed into a registry lookup. */
+static GHashTable *
+get_constructed (void)
+{
+    static GHashTable *table = NULL;
+    if (G_UNLIKELY (table == NULL)) {
+        /* Ids are string literals from panel_registry.h, so neither
+         * key nor value is owned here. */
+        table = g_hash_table_new (g_str_hash, g_str_equal);
+    }
+    return table;
+}
+
+void
+hx_panel_mark_constructed (const char *id)
+{
+    g_return_if_fail (id != NULL);
+
+    g_hash_table_add (get_constructed (), (gpointer)id);
+}
+
+gboolean
+hx_panel_was_constructed (const char *id)
+{
+    g_return_val_if_fail (id != NULL, FALSE);
+
+    return g_hash_table_contains (get_constructed (), id);
+}
+
 void
 hx_panel_registry_foreach (HxPanelRegistryForeachFunc func, gpointer user_data)
 {

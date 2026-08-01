@@ -995,22 +995,20 @@ fe_init (void)
     create_toolbar_window (&the_session);
     init_colors (toolbar_window);
 
-    /* Panels are eager-constructed inside create_toolbar_window;
-     * these init-bit checks just registry-lookup-hit and raise the
-     * corresponding tab, preserving the "open chat when you reconnect"
-     * prefs semantics — the panel becomes the focused tab on launch. */
-    if (gtkhx_prefs.geo.chat.init == 1) {
-        create_chat_window (toolbar_window, &the_session);
-    }
-    if (gtkhx_prefs.geo.news.init == 1) {
-        create_news_window (toolbar_window, &the_session);
-    }
-    if (gtkhx_prefs.geo.users.init == 1) {
-        create_users_window (toolbar_window, &the_session);
-    }
-    if (gtkhx_prefs.geo.tasks.init == 1) {
-        create_tasks_window (toolbar_window, &the_session);
-    }
+    /* Panels are eager-constructed inside create_toolbar_window; these
+     * calls registry-lookup-hit and raise the corresponding tab, so each
+     * panel becomes a focused tab on launch.
+     *
+     * They used to be gated on four persisted "has this panel ever been
+     * opened" keys, which sounded like user intent and were not: the keys
+     * defaulted to 1, each panel set its own on first construction, and
+     * nothing ever cleared one. Every gate was therefore true for every
+     * user after first run. Dropping the keys is behaviour-identical, and
+     * the gates go with them. */
+    create_chat_window (toolbar_window, &the_session);
+    create_news_window (toolbar_window, &the_session);
+    create_users_window (toolbar_window, &the_session);
+    create_tasks_window (toolbar_window, &the_session);
 
     reinit_gtktexts (&the_session);
 }
