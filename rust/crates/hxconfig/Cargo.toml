@@ -18,3 +18,10 @@ crate-type = ["rlib"]
 # otherwise — no glib, no gtk — so `cargo test -p hxconfig` runs headless
 # against temp dirs. Already in the workspace lockfile via toml.
 toml_edit = "0.25"
+# For one function: Mac Roman → UTF-8, needed to migrate a gtkhxrc that isn't
+# valid UTF-8. An odd-looking edge for a settings crate to have, and the
+# alternative was a second copy of the Mac Roman table — which is exactly the
+# sort of hand-mirrored duplicate that drifted in the system being replaced.
+# This crate has no dependencies of its own, so it adds nothing external and
+# keeps `cargo test -p hxconfig` headless.
+hotline-proto = { path = "../hotline-proto" }

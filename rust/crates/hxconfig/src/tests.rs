@@ -900,3 +900,741 @@ fn every_path_round_trips_a_non_default_value() {
         assert!(item.is_value(), "{p} is not a value");
     }
 }
+
+// =========================================================== migration ====
+//
+// The old `gtkhxrc` is read once, on the first run of a build that has this
+// crate, and never again. There is no second chance at getting it right, which
+// is why these lean on a real captured profile rather than only on cases I
+// thought to imagine.
+
+use crate::legacy::{self, Form};
+use crate::migrate::{self, Target};
+
+/// A real `gtkhxrc`, captured from a live profile.
+const REAL_PROFILE: &str = include_str!("../fixtures/real-profile-gtkhxrc");
+
+/// The C sources, compiled in so the coverage test can read the authoritative
+/// key list rather than a copy of it. `options.c` is too GTK-heavy to link into
+/// a test binary, which is why the C side's own sort-order test also scans it as
+/// text; this is the same trick for the same reason.
+const C_OPTIONS: &str = include_str!("../../../../src/options.c");
+const C_CFGKEYS: &str = include_str!("../../../../src/cfgkeys.h");
+
+/// Every key `cfgvars[]` actually persists, read out of the C source.
+///
+/// Derived rather than transcribed on purpose. A hand-copied list cannot do the
+/// one thing a coverage test is for: a key added to `cfgvars[]` and forgotten
+/// in both the map and the copy would pass. This fails.
+fn c_table_keys() -> Vec<String> {
+    // cfgkeys.h holds `#define CFG_FOO "FOO"`, so resolve macro -> string
+    // first; the table names the macros, not the literals.
+    let mut macros = std::collections::BTreeMap::new();
+    for line in C_CFGKEYS.lines() {
+        let Some(rest) = line.trim().strip_prefix("#define CFG_") else {
+            continue;
+        };
+        let Some((name, value)) = rest.split_once(char::is_whitespace) else {
+            continue;
+        };
+        let Some(literal) = value
+            .trim()
+            .strip_prefix('"')
+            .and_then(|v| v.split('"').next())
+        else {
+            continue;
+        };
+        macros.insert(format!("CFG_{name}"), literal.to_string());
+    }
+    assert!(macros.len() > 50, "cfgkeys.h parse looks wrong: {macros:?}");
+
+    // Take only the cfgvars[] table's own text, so the CFG_* mentions
+    // elsewhere in options.c (cfgvar_for_name calls and the like) don't count.
+    let table = C_OPTIONS
+        .split_once("cfgvars[] = {")
+        .expect("cfgvars[] table")
+        .1;
+    let table = table.split("\n};").next().expect("table end");
+
+    let mut keys = Vec::new();
+    let mut disabled = 0usize;
+    for line in table.lines() {
+        let trimmed = line.trim();
+        // Track #if blocks, so an entry inside one doesn't count. LOGGING is
+        // in an #if 0, which is why no real file has ever contained it.
+        if trimmed.starts_with("#if") {
+            disabled += 1;
+            continue;
+        }
+        if trimmed.starts_with("#endif") {
+            disabled = disabled.saturating_sub(1);
+            continue;
+        }
+        if disabled > 0 {
+            continue;
+        }
+        let Some(rest) = trimmed.strip_prefix("{ CFG_") else {
+            continue;
+        };
+        let name = format!("CFG_{}", rest.split(',').next().unwrap_or("").trim());
+        if let Some(literal) = macros.get(&name) {
+            keys.push(literal.clone());
+        }
+    }
+    keys
+}
+
+#[test]
+fn the_map_covers_every_key_the_old_table_had() {
+    // A key in the C table with no migration target is a setting that would
+    // silently vanish, in a one-shot the user never gets to redo.
+    let keys = c_table_keys();
+    assert!(
+        keys.len() > 60,
+        "only found {} keys in cfgvars[] — the parse is wrong, which would \
+         make this test pass vacuously: {keys:?}",
+        keys.len()
+    );
+
+    for key in &keys {
+        assert!(
+            migrate::target_of(key).is_some(),
+            "{key} is in cfgvars[] but has no migration target — it would \
+             silently vanish"
+        );
+    }
+
+    // LOGGING has a macro but its table entry is #if 0'd, so the writer never
+    // emitted it and no real file contains it. If the parse started counting
+    // it, the loop above would be asserting about something that cannot occur.
+    assert!(
+        !keys.iter().any(|k| k == "LOGGING"),
+        "LOGGING is #if 0'd in cfgvars[]; the #if tracking is broken"
+    );
+}
+
+#[test]
+fn every_target_is_a_path_the_schema_really_has() {
+    // Guards the other direction of the same drift: a typo'd or renamed target
+    // would migrate a value into a path nothing reads.
+    for (key, target) in migrate::MAP {
+        if let Target::Path(path) = target {
+            assert!(
+                crate::kind_of(path).is_some(),
+                "{key} maps to {path}, which the schema does not have"
+            );
+        }
+    }
+}
+
+#[test]
+fn every_schema_path_has_a_migration_source() {
+    // And the third direction: a setting added to the schema with no old key
+    // feeding it defaults for everyone who upgrades, which is sometimes right
+    // and should always be deliberate. Saying so in NEW_PATHS is the way to
+    // be deliberate about it.
+    for path in crate::PATHS {
+        let mapped = migrate::MAP
+            .iter()
+            .any(|(_, t)| matches!(t, Target::Path(p) if p == path));
+        assert!(
+            mapped || migrate::NEW_PATHS.contains(path),
+            "{path} has no old key feeding it; add one to MAP, or list it in \
+             NEW_PATHS to say the default is intended"
+        );
+    }
+}
+
+#[test]
+fn no_duplicate_keys_or_targets_in_the_map() {
+    let mut keys = std::collections::BTreeSet::new();
+    let mut targets = std::collections::BTreeSet::new();
+    for (key, target) in migrate::MAP {
+        assert!(keys.insert(*key), "{key} appears twice");
+        if let Target::Path(path) = target {
+            assert!(targets.insert(*path), "{path} is the target of two keys");
+        }
+    }
+}
+
+#[test]
+fn the_real_profile_migrates_whole() {
+    let (keys, form) = legacy::parse(REAL_PROFILE);
+    assert_eq!(form, Form::KeyFile);
+
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+    assert!(warnings.is_empty(), "{warnings:?}");
+
+    let dir = TempDir::new("real-profile");
+    std::fs::write(path(dir.path()), doc.to_string()).expect("seed");
+    let config = Config::load(dir.path());
+    assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+    let s = config.settings();
+
+    // Identity, including the two keys that had no storage of their own and
+    // aliased the live connection's wire fields.
+    assert_eq!(s.identity.nick, "misha");
+    assert_eq!(s.identity.icon, 32766);
+    assert_eq!(s.identity.nick_color, 12607947);
+
+    assert_eq!(s.appearance.color_scheme, ColorScheme::System);
+    assert_eq!(s.appearance.theme, "default");
+    assert!(s.appearance.tray);
+
+    assert_eq!(s.chat.font, "Monospace 11");
+    assert!(s.chat.word_wrap);
+    assert_eq!(s.chat.scrollback_lines, 500);
+    assert!(s.chat.timestamp);
+    // The trailing space matters and is easy to lose: GKeyFile does not escape
+    // a trailing space, but a reader that trimmed would silently jam the
+    // timestamp against the message text.
+    assert_eq!(s.chat.timestamp_format, "[%H:%M:%S] ");
+    assert!(s.chat.avatars);
+    assert!(s.chat.markdown);
+    assert!(s.chat.show_joins);
+    assert_eq!(s.chat.history_initial, 50);
+    // HIGHLIGHTWORDS= is empty, which must become an empty list rather than a
+    // list holding one empty string.
+    assert!(s.chat.highlight_words.is_empty());
+    assert!(!s.chat.legacy_nick_completion);
+    assert!(s.chat.autocopy.text);
+    assert!(s.chat.autocopy.timestamp);
+    assert!(!s.chat.autocopy.color);
+    assert!(s.chat.emoji.shortcodes && s.chat.emoji.typeahead);
+
+    assert!(s.users.animate_avatars);
+
+    // NOTIFYMSG → notify.private_message and NOTIFYXFER → notify.transfer are
+    // the renames most likely to be got wrong.
+    assert!(s.notify.private_message);
+    assert!(s.notify.transfer);
+    assert!(s.notify.broadcast && s.notify.chat && s.notify.news);
+    assert!(s.notify.private_chat && s.notify.private_chat_invite);
+    assert!(s.notify.omit_focused);
+
+    // SOUNDSON → sound.enabled, SOUNDFILE → sound.transfer,
+    // SOUNDPART → sound.leave, SOUNDMSG → sound.private_message.
+    assert!(s.sound.enabled);
+    assert!(s.sound.transfer && s.sound.leave && s.sound.private_message);
+    assert!(s.sound.voice_join && s.sound.voice_leave);
+
+    assert_eq!(s.transfers.download_dir, "/home/misha/downloads/");
+    assert!(s.transfers.queue);
+
+    assert_eq!(
+        s.trackers.addresses,
+        vec![
+            "tracker.vespernet.net".to_string(),
+            "hlserver.com".to_string(),
+            "tracker.preterhuman.net".to_string(),
+        ]
+    );
+    assert!(!s.trackers.case_sensitive);
+
+    assert_eq!(s.voice.input_device, "pipewiredevice66");
+    assert_eq!(s.voice.output_device, "");
+    assert!(s.voice.ptt_enabled);
+    assert_eq!(s.voice.ptt_key, "Pause");
+
+    // TOOLXSIZE / TOOLYSIZE are live and carry over; the other four panels'
+    // sizes are dropped.
+    assert_eq!(s.window.toolbar_width, 2807);
+    assert_eq!(s.window.toolbar_height, 1356);
+}
+
+#[test]
+fn the_real_profile_drops_exactly_what_it_should() {
+    let (keys, _) = legacy::parse(REAL_PROFILE);
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+
+    // Assert on the *paths*, not on the numbers: a bare-substring check on
+    // "782" passes today only because nothing else happens to contain it, and
+    // would fail confusingly the first time something did.
+    let resolves = |path: &str| -> bool {
+        let mut item = doc.as_item();
+        for segment in path.split('.') {
+            match item.as_table_like().and_then(|t| t.get(segment)) {
+                Some(next) => item = next,
+                None => return false,
+            }
+        }
+        item.is_value()
+    };
+
+    // Every path the schema has must be present — the profile sets every key.
+    for path in crate::PATHS {
+        assert!(
+            resolves(path),
+            "{path} is missing from the migrated document"
+        );
+    }
+
+    // And the twelve dropped keys must leave nothing behind under any name.
+    let text = doc.to_string();
+    for gone in [
+        "CHATXSIZE",
+        "CHATYSIZE",
+        "NEWSXSIZE",
+        "NEWSYSIZE",
+        "TASKXSIZE",
+        "TASKYSIZE",
+        "USERXSIZE",
+        "USERYSIZE",
+        "OPENCHAT",
+        "OPENNEWS",
+        "OPENTASKS",
+        "OPENUSERS",
+    ] {
+        assert!(!text.contains(gone), "{gone} survived:\n{text}");
+    }
+    // The four panels' sizes differ from the toolbar's, so if one had been
+    // mapped to window.* by mistake the toolbar assertions would catch it.
+    assert!(text.contains("2807") && text.contains("1356"), "{text}");
+}
+
+#[test]
+fn escapes_are_undone_the_way_the_old_writer_made_them() {
+    // g_key_file_set_string escapes exactly four things — backslash, LF, CR,
+    // and *leading* whitespace — and notably not the list separator, commas,
+    // '#', '=', brackets, tabs after the first non-space character, or
+    // trailing spaces. Anything more aggressive here would corrupt values that
+    // were never escaped in the first place.
+    let (keys, form) = legacy::parse(
+        "[gtkhx]\n\
+         DOWNLOAD=C:\\\\Users\\\\Misha\n\
+         FONT=\\sLeading Space 10\n\
+         THEMENAME=a;b,c#d=e[f]\n\
+         VOICEPTTKEY=tab\there\n",
+    );
+    assert_eq!(form, Form::KeyFile);
+    assert_eq!(keys["DOWNLOAD"], r"C:\Users\Misha");
+    assert_eq!(keys["FONT"], " Leading Space 10");
+    assert_eq!(keys["THEMENAME"], "a;b,c#d=e[f]");
+    assert_eq!(keys["VOICEPTTKEY"], "tab\there");
+}
+
+#[test]
+fn a_value_escaped_more_than_once_is_flagged_rather_than_guessed_at() {
+    // Each save/load cycle doubled every backslash, and we can undo exactly
+    // one doubling. Handing over a silently-wrong download path is the failure
+    // this whole rewrite exists to stop, so say so instead.
+    let (keys, _) = legacy::parse("[gtkhx]\nDOWNLOAD=C:\\\\\\\\Users\\\\\\\\Misha\n");
+    assert_eq!(keys["DOWNLOAD"], r"C:\\Users\\Misha", "one doubling undone");
+
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+    let w = warnings
+        .iter()
+        .find(|w| w.path == "transfers.download_dir")
+        .expect("a warning about the path");
+    assert!(matches!(w.kind, WarningKind::OverEscaped { .. }));
+    assert!(w.to_string().contains("DOWNLOAD"));
+
+    // The value is still carried across — flagged, not withheld.
+    assert!(doc.to_string().contains(r"C:\\Users\\Misha"));
+
+    // And a single escape level produces no warning at all.
+    let (keys, _) = legacy::parse("[gtkhx]\nDOWNLOAD=C:\\\\Users\n");
+    let mut warnings = Vec::new();
+    migrate::to_document(&keys, &mut warnings);
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[test]
+fn the_boolean_parser_matches_the_c_one_exactly() {
+    // Only the first byte is looked at, which is silly and is also what every
+    // existing file was written against.
+    for (input, want) in [
+        ("true", Some(true)),
+        ("false", Some(false)),
+        ("1", Some(true)),
+        ("0", Some(false)),
+        ("yes", Some(true)),
+        ("no", Some(false)),
+        ("T", Some(true)),
+        ("N", Some(false)),
+        ("tarantino", Some(true)),
+        ("nautical", Some(false)),
+        ("2", None),
+        ("", None),
+        (" true", None),
+        ("xyz", None),
+    ] {
+        assert_eq!(legacy::parse_boolean(input), want, "for {input:?}");
+    }
+}
+
+#[test]
+fn an_unusable_boolean_keeps_the_default_and_says_so() {
+    let (keys, _) = legacy::parse("[gtkhx]\nMARKDOWN=2\n");
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+
+    assert!(!doc.to_string().contains("markdown"), "{doc}");
+    let w = &warnings[0];
+    assert_eq!(w.path, "chat.markdown");
+    assert!(matches!(w.kind, WarningKind::UnmigratableValue { .. }));
+    assert!(w.to_string().contains("MARKDOWN"));
+}
+
+#[test]
+fn a_malformed_number_is_reported_rather_than_becoming_zero() {
+    // atoi turned this into 0 with no diagnostic, which for XBUF_MAX meant a
+    // scrollback of nothing.
+    let (keys, _) = legacy::parse("[gtkhx]\nXBUF_MAX=lots\n");
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+
+    assert!(!doc.to_string().contains("scrollback"), "{doc}");
+    assert_eq!(warnings[0].path, "chat.scrollback_lines");
+    assert!(matches!(
+        warnings[0].kind,
+        WarningKind::UnmigratableValue { .. }
+    ));
+}
+
+#[test]
+fn an_unknown_old_key_is_reported_but_a_dropped_one_is_not() {
+    // A key nothing ever had is worth telling the user about — it is the one
+    // case they can act on. The deliberately-dropped ones are not: the user
+    // never asked for them and can do nothing about them.
+    let (keys, _) =
+        legacy::parse("[gtkhx]\nWHAT_IS_THIS=1\nOPENCHAT=true\nCHATXSIZE=782\nFILE_SAMEWINDOW=1\n");
+    let mut warnings = Vec::new();
+    migrate::to_document(&keys, &mut warnings);
+
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert_eq!(warnings[0].path, "WHAT_IS_THIS");
+    assert!(matches!(warnings[0].kind, WarningKind::UnknownLegacyKey));
+}
+
+#[test]
+fn the_pre_keyfile_line_format_still_reads() {
+    // No group header, so GKeyFile refused it and the C reader fell through to
+    // a line parser. Only reachable via ~/.gtkhxrc now, but a profile nobody
+    // has opened in twenty years is exactly the one that needs migrating.
+    let (keys, form) = legacy::parse("NICK=bob\nFONT=Monospace 10\nTRAY=0\n");
+    assert_eq!(form, Form::Lines);
+    assert_eq!(keys["NICK"], "bob");
+    assert_eq!(keys["FONT"], "Monospace 10");
+    assert_eq!(keys["TRAY"], "0");
+}
+
+#[test]
+fn the_line_form_keeps_its_comment_convention_but_not_its_fgets_bug() {
+    // Two behaviours of the old line parser that look alike and are not.
+    //
+    // Dropping a final line with no trailing newline is a `fgets` loop
+    // mistake with nothing behind it, so reading the line can only recover a
+    // setting that was being thrown away.
+    let (keys, form) = legacy::parse("NICK=bob\nFONT=Monospace 10");
+    assert_eq!(form, Form::Lines);
+    assert_eq!(
+        keys["FONT"], "Monospace 10",
+        "the old parser dropped this line for want of a newline"
+    );
+
+    // Truncating at '#' looks like the same class of thing, but '#' was this
+    // format's only comment convention, so truncating *is* parsing it
+    // correctly. `XBUF_MAX=1000 # lines` means a thousand lines; refusing to
+    // truncate would make it an unparseable number and silently fall back to
+    // the default, which is the outcome we are trying to avoid.
+    let (keys, _) = legacy::parse("XBUF_MAX=1000 # how many\nDOWNLOAD=/home/a # notes\n");
+    assert_eq!(keys["XBUF_MAX"], "1000");
+    assert_eq!(keys["DOWNLOAD"], "/home/a");
+
+    // And a '#' before any '=' makes the whole line a comment, which is the
+    // only reason comment lines work at all.
+    let (keys, _) = legacy::parse("# NICK=notme\nNICK=bob\n");
+    assert_eq!(keys["NICK"], "bob");
+    assert_eq!(keys.len(), 1);
+
+    // None of which applies to the GKeyFile form, which has no inline
+    // comments: there, a '#' after the separator really is part of the value.
+    let (keys, form) = legacy::parse("[gtkhx]\nDOWNLOAD=/home/a#b/dl\n");
+    assert_eq!(form, Form::KeyFile);
+    assert_eq!(keys["DOWNLOAD"], "/home/a#b/dl");
+}
+
+#[test]
+fn keyfile_details_that_the_c_reader_relied_on() {
+    let (keys, _) = legacy::parse(
+        "# a comment\n\
+         [other]\n\
+         NICK=wrong\n\
+         [gtkhx]\n\
+         NICK = spaced\n\
+         FONT[de]=localised\n\
+         FONT=Monospace 10\n\
+         TRAY=1\n\
+         TRAY=0\n\
+         \n\
+         [gtkhx]\n\
+         THEMENAME=merged\n",
+    );
+    // Keys outside [gtkhx] are invisible; whitespace around '=' is trimmed;
+    // locale variants are discarded (the load flags don't keep translations);
+    // a repeated key resolves to the last one; a repeated group merges.
+    assert_eq!(keys["NICK"], "spaced");
+    assert_eq!(keys["FONT"], "Monospace 10");
+    assert_eq!(keys["TRAY"], "0");
+    assert_eq!(keys["THEMENAME"], "merged");
+    assert_eq!(keys.len(), 4);
+}
+
+#[test]
+fn a_file_with_no_gtkhx_group_falls_through_to_the_line_parser() {
+    // Which is what the C reader does when g_key_file_get_keys returns NULL.
+    let (keys, form) = legacy::parse("[somethingelse]\nNICK=bob\n");
+    assert_eq!(form, Form::Lines);
+    assert_eq!(keys["NICK"], "bob");
+}
+
+// ------------------------------------------------------- the import path --
+
+#[test]
+fn an_old_profile_is_imported_when_there_is_no_new_file() {
+    let dir = TempDir::new("import");
+    let old = dir.path().join("gtkhxrc");
+    std::fs::write(&old, REAL_PROFILE).expect("seed");
+
+    let mut config = Config::load_or_migrate(dir.path(), std::slice::from_ref(&old));
+    assert_eq!(
+        *config.provenance(),
+        Provenance::Imported {
+            form: Form::KeyFile
+        }
+    );
+    assert_eq!(config.settings().identity.nick, "misha");
+
+    // Importing does not write, so a first run that falls over doesn't leave a
+    // half-migrated file behind.
+    assert!(!path(dir.path()).exists());
+
+    config.save(dir.path()).expect("save");
+    assert_eq!(Config::load(dir.path()).settings().identity.nick, "misha");
+
+    // And the old file is left exactly where it was — if this build turns out
+    // to be a mistake, the previous one still starts up with the settings.
+    assert_eq!(
+        std::fs::read_to_string(&old).expect("still there"),
+        REAL_PROFILE
+    );
+}
+
+#[test]
+fn a_new_file_wins_over_an_old_one() {
+    let dir = TempDir::new("import-skip");
+    let old = dir.path().join("gtkhxrc");
+    std::fs::write(&old, REAL_PROFILE).expect("seed");
+    dir.write("version = 1\n[identity]\nnick = \"newer\"\n");
+
+    let config = Config::load_or_migrate(dir.path(), &[old]);
+    assert_eq!(*config.provenance(), Provenance::Current);
+    assert_eq!(config.settings().identity.nick, "newer");
+}
+
+#[test]
+fn a_corrupt_new_file_does_not_fall_back_to_the_old_one() {
+    // Silently reverting to a years-old gtkhxrc because today's file has a
+    // typo in it would be a far stranger thing to do than starting at
+    // defaults with the bad file preserved.
+    let dir = TempDir::new("import-corrupt");
+    let old = dir.path().join("gtkhxrc");
+    std::fs::write(&old, REAL_PROFILE).expect("seed");
+    dir.write("version = 1\n[identity\nnick = broken\n");
+
+    let config = Config::load_or_migrate(dir.path(), &[old]);
+    assert_eq!(*config.provenance(), Provenance::Unusable);
+    assert_eq!(config.settings().identity.nick, "");
+}
+
+#[test]
+fn legacy_paths_are_tried_in_order() {
+    let dir = TempDir::new("import-order");
+    let first = dir.path().join("gtkhxrc");
+    let second = dir.path().join("dot-gtkhxrc");
+    std::fs::write(&second, "NICK=fallback\n").expect("seed");
+
+    // Only the second exists.
+    let config = Config::load_or_migrate(dir.path(), &[first.clone(), second.clone()]);
+    assert_eq!(config.settings().identity.nick, "fallback");
+    assert_eq!(
+        *config.provenance(),
+        Provenance::Imported { form: Form::Lines }
+    );
+
+    // Now both do, and the first wins.
+    std::fs::write(&first, "[gtkhx]\nNICK=primary\n").expect("seed");
+    let config = Config::load_or_migrate(dir.path(), &[first, second]);
+    assert_eq!(config.settings().identity.nick, "primary");
+}
+
+#[test]
+fn no_old_file_at_all_is_just_defaults() {
+    let dir = TempDir::new("import-none");
+    let config = Config::load_or_migrate(dir.path(), &[dir.path().join("nope")]);
+    assert_eq!(*config.provenance(), Provenance::Fresh);
+    assert_eq!(*config.settings(), Settings::default());
+}
+
+#[test]
+fn an_empty_or_unrecognisable_old_file_is_not_an_import() {
+    let dir = TempDir::new("import-empty");
+    let empty = dir.path().join("empty");
+    let junk = dir.path().join("junk");
+    std::fs::write(&empty, "").expect("seed");
+    std::fs::write(&junk, "this file is not a gtkhxrc at all\n").expect("seed");
+
+    let config = Config::load_or_migrate(dir.path(), &[empty, junk]);
+    assert_eq!(*config.provenance(), Provenance::Fresh);
+}
+
+#[test]
+fn a_legacy_file_that_is_not_utf8_is_still_migrated() {
+    // This is the one that would have hurt. `read_to_string` rejects invalid
+    // UTF-8, and treating that as "no file" resets every setting the user had,
+    // once, with no diagnostic and no way back. The C reader handles these
+    // bytes deliberately — its STRING32 arm runs a failed UTF-8 check through
+    // Mac Roman — and the writer never validated, so they round-tripped
+    // through every save since.
+    let dir = TempDir::new("not-utf8");
+    let old = dir.path().join("gtkhxrc");
+    // 0xCA is a non-breaking space in Mac Roman, and not valid UTF-8 alone.
+    let mut bytes = b"[gtkhx]\nNICK=mi".to_vec();
+    bytes.push(0xCA);
+    bytes.extend_from_slice(b"sha\nFONT=Monospace 11\n");
+    std::fs::write(&old, &bytes).expect("seed");
+
+    let config = Config::load_or_migrate(dir.path(), std::slice::from_ref(&old));
+    assert!(
+        matches!(config.provenance(), Provenance::Imported { .. }),
+        "{:?} — the whole profile was discarded",
+        config.provenance()
+    );
+    assert_eq!(config.settings().chat.font, "Monospace 11");
+    assert_eq!(config.settings().identity.nick, "mi\u{00A0}sha");
+    assert!(config
+        .warnings()
+        .iter()
+        .any(|w| matches!(w.kind, WarningKind::NotUtf8)));
+}
+
+#[test]
+fn an_unreadable_legacy_file_is_reported_not_skipped_past() {
+    // "Exists but I can't read it" is not "absent", and quietly falling
+    // through to an older file would be the wrong answer.
+    let dir = TempDir::new("unreadable");
+    let bad = dir.path().join("is-a-directory");
+    std::fs::create_dir(&bad).expect("seed");
+    let older = dir.path().join("older");
+    std::fs::write(&older, "NICK=fallback\n").expect("seed");
+
+    let config = Config::load_or_migrate(dir.path(), &[bad, older]);
+    assert_eq!(*config.provenance(), Provenance::Fresh);
+    assert_eq!(config.settings().identity.nick, "");
+    assert!(matches!(
+        config.warnings()[0].kind,
+        WarningKind::Unreadable(_)
+    ));
+}
+
+#[test]
+fn the_first_legacy_file_that_exists_wins_even_if_it_is_empty() {
+    // The C reader tests for existence and returns unconditionally. "Your
+    // current file was empty so I used your twenty-year-old one" would be a
+    // strange thing to do unasked.
+    let dir = TempDir::new("empty-first");
+    let first = dir.path().join("gtkhxrc");
+    let second = dir.path().join("dot-gtkhxrc");
+    std::fs::write(&first, "").expect("seed");
+    std::fs::write(&second, "NICK=ancient\n").expect("seed");
+
+    let config = Config::load_or_migrate(dir.path(), &[first, second]);
+    assert_eq!(*config.provenance(), Provenance::Fresh);
+    assert_eq!(config.settings().identity.nick, "");
+}
+
+#[test]
+fn an_empty_theme_name_falls_back_to_the_default() {
+    // theme_name is NULL in C until the user picks one, and the writer emits
+    // NULL as "". C read empty as "use the built-in"; carrying "" across would
+    // leave a theme name that resolves to nothing.
+    let (keys, _) = legacy::parse("[gtkhx]\nTHEMENAME=\nVOICEOUTPUTDEVICE=\nVOICEPTTKEY=\n");
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+    assert!(warnings.is_empty(), "{warnings:?}");
+
+    let dir = TempDir::new("empty-theme");
+    std::fs::write(path(dir.path()), doc.to_string()).expect("seed");
+    let s = Config::load(dir.path());
+    assert_eq!(s.settings().appearance.theme, "default");
+
+    // But empty stays empty where it means something: the voice devices read
+    // it as "system default" and the PTT key as "not bound yet".
+    assert_eq!(s.settings().voice.output_device, "");
+    assert_eq!(s.settings().voice.ptt_key, "");
+}
+
+#[test]
+fn a_zero_toolbar_size_is_the_never_saved_sentinel_not_an_error() {
+    // The geo.tool static default is {0, 0, ...}, so a profile from before the
+    // toolbar was ever resized carries TOOLXSIZE=0. That is not the user
+    // getting something wrong, so it should not be reported as out of range.
+    let (keys, _) = legacy::parse("[gtkhx]\nTOOLXSIZE=0\nTOOLYSIZE=0\n");
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+    assert!(warnings.is_empty(), "{warnings:?}");
+
+    let dir = TempDir::new("zero-tool");
+    std::fs::write(path(dir.path()), doc.to_string()).expect("seed");
+    let config = Config::load(dir.path());
+    assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+    assert_eq!(config.settings().window.toolbar_width, 1100);
+    assert_eq!(config.settings().window.toolbar_height, 700);
+}
+
+#[test]
+fn an_over_long_nick_is_clamped_to_the_wire_field() {
+    // identity.nick becomes the connection's 32-byte name buffer. The C reader
+    // clamped on the way in, so a file the C writer produced can't exceed it —
+    // but a hand-edited or bare-lines one can, and it would otherwise surface
+    // as a wire problem at connect time rather than here.
+    let long = "a".repeat(80);
+    let (keys, _) = legacy::parse(&format!("[gtkhx]\nNICK={long}\n"));
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, &mut warnings);
+    assert!(doc.to_string().contains(&"a".repeat(31)));
+    assert!(!doc.to_string().contains(&"a".repeat(32)));
+
+    // Cut on a character boundary, or the result isn't valid UTF-8 and the
+    // document can't be written at all.
+    let wide = "é".repeat(40);
+    let (keys, _) = legacy::parse(&format!("[gtkhx]\nNICK={wide}\n"));
+    let doc = migrate::to_document(&keys, &mut Vec::new());
+    let dir = TempDir::new("wide-nick");
+    std::fs::write(path(dir.path()), doc.to_string()).expect("seed");
+    let nick = Config::load(dir.path()).settings().identity.nick.clone();
+    assert!(nick.len() <= 31, "{} bytes", nick.len());
+    assert_eq!(nick, "é".repeat(15));
+}
+
+#[test]
+fn a_migrated_file_is_laid_out_like_a_fresh_one() {
+    // An upgrading user's first gtkhx.toml should not look different from a
+    // new user's. Both come out in schema order.
+    let (keys, _) = legacy::parse(REAL_PROFILE);
+    let migrated = migrate::to_document(&keys, &mut Vec::new()).to_string();
+    let fresh = Config::defaults().to_toml();
+
+    let headers = |s: &str| -> Vec<String> {
+        s.lines()
+            .filter(|l| l.starts_with('['))
+            .map(str::to_string)
+            .collect()
+    };
+    assert_eq!(headers(&migrated), headers(&fresh));
+    assert!(migrated.starts_with("version = 1"), "{migrated}");
+}

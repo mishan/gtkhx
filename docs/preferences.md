@@ -2,9 +2,10 @@
 
 This is **mostly a plan**. The preferences system described in the first half
 exists today, and so does the `hxconfig` crate — the schema, the file format,
-the write path and the version check are built and tested. Nothing links the
-crate yet, so the running client is still the system described in the first
-half. Everything from the C mirror onwards is still design.
+the write path, the version check, and the migration from `gtkhxrc` are all
+built and tested. Nothing links the crate yet, so the running client is still
+the system described in the first half, and none of its defects are fixed in a
+shipping binary. Everything from the C mirror onwards is still design.
 
 The short version: move settings ownership to Rust, replace `gtkhxrc` with TOML,
 and let the per-connection identity model that multi-connection needs fall out of
@@ -458,13 +459,65 @@ Deliberately out of scope, each with a reason:
 One-shot, on first run of a build that has `hxconfig`, the way the legacy
 bookmark import already works:
 
-1. No `gtkhx.toml`, but a `gtkhxrc` exists → read it through the existing
-   reader (GKeyFile, with the line-format and `~/.gtkhxrc` fallbacks intact),
-   map old keys to new paths, write `gtkhx.toml`.
+1. No `gtkhx.toml`, but a `gtkhxrc` exists → read it, map old keys to new paths,
+   and hand back the result. Saving is the caller's decision, so a first run
+   that falls over doesn't leave a half-migrated file behind.
 2. Leave `gtkhxrc` in place. Do not delete, do not rename. If the new build is
    abandoned, the old one still works.
 3. Neither file → defaults, and the first-run path continues to do whatever the
    new-user experience work decides.
+
+A `gtkhx.toml` that exists but is *corrupt* deliberately does **not** fall back
+to the old file. The salvage path preserves it and the user carries on at
+defaults; silently reverting to a years-old `gtkhxrc` because today's file has a
+typo in it would be a stranger thing to do than starting fresh.
+
+The read side is reimplemented in Rust rather than borrowed from C, because the
+crate has to stay linkable-by-nothing and testable headless. That means owning
+both on-disk forms — the GKeyFile `[gtkhx]` group and the pre-GKeyFile
+`KEY=VALUE` lines — and the inverse of `g_key_file_set_string`'s escaping, which
+turns out to cover only four things: `\` → `\\`, LF, CR, and *leading*
+whitespace. Not the list separator, not commas, `#`, `=`, brackets, interior
+tabs, or trailing spaces. Anything more aggressive would corrupt values that
+were never escaped to begin with — the default timestamp format ends in a space
+and survives precisely because trailing space is not escaped.
+
+A legacy file **need not be UTF-8**, and treating that as unreadable would reset
+every setting a user had, once, with no way back. The C reader knows this — its
+`STRING32` arm validates and, on failure, runs the bytes through Mac Roman,
+because a nickname typed on a Mac-era client breaks GTK's input method
+otherwise — and `g_key_file_set_string` never validated, so those bytes have
+round-tripped through every save since. Unix paths are bytes rather than text
+too. So: try UTF-8, fall back to Mac Roman for the whole file, and say so. Mac
+Roman rather than a lossy decode because every byte maps to a defined character,
+so nothing becomes U+FFFD.
+
+**One bug in the old line parser is deliberately not reproduced**: it dropped a
+final line with no trailing newline. That is a `fgets` loop mistake with no
+rationale behind it, so reading the line can only recover a setting that was
+being thrown away.
+
+Its `#` truncation, which looks like the same class of thing, *is* reproduced —
+and only in the line form. `#` was the comment convention that format's only
+parser ever defined, so cutting there is the format being parsed correctly
+rather than a value being lost: a hand-written `XBUF_MAX=1000 # lines` means a
+thousand lines, and refusing to truncate would turn it into an unparseable
+number and silently fall back to the default. The GKeyFile form has no inline
+comments at all — `NICK=bob # hi` really is the value `bob # hi` — so it must
+not truncate, and doesn't.
+
+**The escape asymmetry can only be undone once.** Each save/load cycle doubled
+every backslash, and nothing on disk records how many cycles happened. The
+migration unescapes one level and, if the result still contains a doubled
+backslash, hands the value over *with a diagnostic naming the old key* rather
+than guessing at the rest. The realistic victim is a Windows download path.
+
+The C boolean parser is reproduced exactly, first-character semantics and all,
+so `tarantino` is true and `nautical` is false. That is silly, and it is also
+what every existing file was written and read against — including the era when
+the writer emitted `true`/`false` while the reader accepted only `0`/`1`, which
+reverted every toggle to its default on each startup. Reproducing the parser is
+what stops a migration from repeating that.
 
 The mapping is mechanical for almost everything. The cases that are not:
 
@@ -475,8 +528,14 @@ The mapping is mechanical for almost everything. The cases that are not:
 | `NICK` / `ICON` | `identity.*` | read from the connection buffers they alias today |
 | `CHATXSIZE`, `CHATYSIZE`, `NEWSXSIZE`, `NEWSYSIZE`, `TASKXSIZE`, `TASKYSIZE`, `USERXSIZE`, `USERYSIZE` | — | dropped; never read. **Not** `TOOLXSIZE`/`TOOLYSIZE`, which are live and map to `window.*` |
 | `OPENCHAT`, `OPENNEWS`, `OPENTASKS`, `OPENUSERS` | — | dropped; one-way latches, no UI, never cleared |
-| `LOGGING` | — | dropped; the feature is `#if 0` |
+| `TIME` | — | dropped; it went with `/stats` |
+| `FILE_SAMEWINDOW`, `NEWS_SAMEWINDOW` | — | dropped; retired before the current table and already ignored on load, but named so an old profile doesn't trip the unknown-key diagnostic |
 | everything else | its table | rename only |
+
+`LOGGING` is deliberately *not* in the map. It has a macro in `cfgkeys.h`, but
+its table entry has always been `#if 0`'d, so the writer never emitted it and no
+real file contains it. If one somehow does, it lands in the unknown-key
+diagnostic, which is where a key nobody recognises belongs.
 
 "Rename only" is doing some work in that last row, because the renames are not
 all mechanical — the schema expands abbreviations the old keys compressed.
@@ -493,11 +552,19 @@ tested, rather than inferred per key. `hxconfig::PATHS` is the other half of
 that test: it lists every path the schema knows, in file order, so the assertion
 can run both ways.
 
-Migration is a pure function from a key/value map to the typed struct, so it
-tests without touching a filesystem. Worth writing that test with a real
-`gtkhxrc` captured from a live profile — and worth asserting that every key in
-the old table maps somewhere or is explicitly listed as dropped, so a key added
-to one side and forgotten on the other fails the build rather than the user.
+Migration is a pure function from a key/value map to a *document*, not to the
+typed struct — so the type conversion, the range checks and the diagnostics are
+the ordinary load path doing its ordinary job, rather than a second
+implementation of them that could disagree. It tests without touching a
+filesystem, and does so against a real `gtkhxrc` captured from a live profile,
+committed as a fixture beside the crate.
+
+Coverage is asserted in three directions, so a key added to one side and
+forgotten on the other fails the test rather than the user: every key the C
+table has resolves to something here; every target is a path the schema really
+has; and every path the schema has is fed by some old key or is named in
+`NEW_PATHS` to say that defaulting is intended. The third is the one that
+catches a *new* setting silently defaulting for everyone who upgrades.
 
 ---
 
@@ -508,15 +575,16 @@ Illustrative, not committed. Each step ships on its own.
 | Step | Scope | Depends on |
 |---|---|---|
 | ~~P1~~ | **Done.** `hxconfig` crate: typed schema, TOML load/save through `toml_edit`, atomic write, version check, defaults. Pure Rust, unit-tested, linked by nothing. | — |
-| P2 | Migration: the key mapping, the one-shot import, and a round-trip test against a captured real `gtkhxrc`. Still linked by nothing. | P1 |
+| ~~P2~~ | **Done.** Migration: the legacy reader for both on-disk forms, the key mapping, the one-shot import, and a round-trip test against a captured real `gtkhxrc`. Still linked by nothing. | P1 |
 | P3 | The C mirror and the read/write ABI. `hxconfig` becomes the owner at startup; `cfgvars[]`, the `allocated` bit and the binder are deleted; the mirror is refreshed on change and pinned by `_Static_assert`. Carries the six-write-site cleanup above: the panel-open latches are dropped and their runtime flag moves out of the preferences struct, and the two toolbar-size writes become Rust setter calls. The Rust by-name bridge is reimplemented on top of `hxconfig` so the existing Settings pages keep working unchanged. | P2 |
 | P4 | Change notification: explicit subscriptions replacing `changefunc`, applied uniformly after load. | P3 |
 | P5 | Identity: global default plus per-connection overrides; the connect path resolves and copies. Delivers M1's identity half. | P3, and the connection collection |
 | P6 | Port the Identity and Voice settings pages to Rust; retire the `draw` pointer framework. | P3 |
 | P7 | Drop the mirror per file as each C reader is ported. Ongoing, not a milestone. | P3 |
 
-P1 and P2 are self-contained and land with no risk to a running build. P3 is the
-one with a real blast radius, and it is worth landing alone.
+P1 and P2 were self-contained and landed with no risk to a running build —
+nothing links the crate, so the binary is byte-identical either way. **P3 is the
+one with a real blast radius**, and it is worth landing alone.
 
 ---
 
