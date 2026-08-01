@@ -1,8 +1,10 @@
 # Preferences
 
-This is a **plan, not a record**. The preferences system described in the first
-half exists today; the design in the second half does not. It exists to make the
-trade-offs legible before anyone commits.
+This is **mostly a plan**. The preferences system described in the first half
+exists today, and so does the `hxconfig` crate — the schema, the file format,
+the write path and the version check are built and tested. Nothing links the
+crate yet, so the running client is still the system described in the first
+half. Everything from the C mirror onwards is still design.
 
 The short version: move settings ownership to Rust, replace `gtkhxrc` with TOML,
 and let the per-connection identity model that multi-connection needs fall out of
@@ -191,9 +193,6 @@ history_initial = 50
 highlight_words = ["gtkhx", "hotline"]   # also drives notification mentions
 legacy_nick_completion = false
 
-[users]
-animate_avatars = true        # GIF avatars in the user list
-
 [chat.autocopy]
 text = true
 timestamp = false
@@ -202,6 +201,9 @@ color = false
 [chat.emoji]
 shortcodes = true
 typeahead = true
+
+[users]
+animate_avatars = true        # GIF avatars in the user list
 
 [notify]
 chat = false
@@ -244,11 +246,8 @@ ptt_enabled = false
 ptt_key = ""
 
 [window]
-toolbar_width = 1024
+toolbar_width = 1100
 toolbar_height = 700
-
-[state]
-total_runtime_secs = 41233
 ```
 
 Four structural changes worth calling out:
@@ -264,13 +263,21 @@ Four structural changes worth calling out:
   open" flag, which stays runtime-only where it belongs. If "reopen the panels I
   had open" is wanted later, it is a new feature and belongs with the dock layout,
   which already tracks what is open.
-- **`[state]` is honest about not being preferences.** The uptime counter goes
-  there rather than pretending to be a setting. It is the only member today; see
-  the open questions.
+- **There is no `[state]` table.** The draft schema had one, holding the
+  cumulative-uptime counter — the one entry that was accumulated state a save
+  mutated as a side effect rather than a preference. Its only consumer was
+  `/stats`, and that command and the `TIME` key were both removed before this
+  work started, so the table has nothing to hold and doesn't exist.
 - **Dropped entirely**: the eight panel window-size keys (vestigial — written
   every save, never read), the two never-touched geometry fields, the four
   never-read rate-limit fields, and the `#if 0`'d logging key. Logging comes back
   with the feature, under `[logging]`.
+
+One value moved while transcribing this. The toolbar's saved size read back
+through a zero sentinel — the C default was `0`, and the window fell back to
+1100×700 when it saw one. Here the default *is* 1100×700, so the sentinel goes
+away and "no size saved yet" and "the size we'd use anyway" stop being different
+states.
 
 ### Versioning that is actually checked
 
@@ -284,9 +291,40 @@ that. `hxconfig` checks it:
   acknowledges. Silently rewriting a newer file at an older schema is how a user
   who tried a newer build loses settings on downgrade.
 
-Unknown keys inside a known version are preserved on save, not dropped. That
-means round-tripping a `toml::Table` alongside the typed struct, or a
-`#[serde(flatten)]` catch-all — a decision noted below.
+Unknown keys inside a known version are preserved on save, not dropped.
+
+The shipped mechanism goes further than the two options originally weighed. The
+crate holds the parsed `toml_edit` document and **edits it in place**, so a save
+preserves unknown keys, unknown *tables*, key order, formatting, and — the part
+neither `toml::Table` nor `#[serde(flatten)]` would have given — the user's
+comments, including a trailing comment on a line whose value just changed. The
+old loader passed `G_KEY_FILE_KEEP_COMMENTS` and then threw the comments away
+anyway, because the writer built a fresh `GKeyFile` from the table rather than
+mutating the loaded one. Editing in place is what actually makes hand-editing
+safe, and it is why the crate's one dependency is `toml_edit` rather than `toml`.
+
+A load-modify-save changes exactly the lines it had to, and a load-save with no
+modification is byte-identical — including for a file the client never wrote.
+That last part needs the unchanged-value check to compare *meaning* rather than
+rendered text, because TOML has more ways to spell a value than the writer
+emits: `'single quoted'`, `1_000`, `0x0066ccff`, an array across several lines
+with a comment beside each element. A textual comparison would call every one of
+those a change and normalise it on a save that never touched it. A line the user
+*does* change does come back in the writer's spelling; that is the boundary.
+
+Reading and writing both come out of a **single field table** — one list mapping
+each dotted path to the struct field behind it, expanded by a macro into a
+reader and a writer. Two hand-written parallel functions drift, and a drifted
+pair is precisely the failure the old system had between its C key macros and
+the Rust copy of them. Here, adding a field to one direction is not expressible.
+
+Loading never fails. Every failure mode degrades to defaults and records a
+diagnostic naming the path and what was wrong with it, so a malformed number is
+*reported* rather than becoming a silent zero the way `atoi` made it. One bad
+element of a list costs that element, not the list. A file that does not parse
+at all falls back to defaults — settings are reconstructible — but the next save
+moves the unreadable original aside to `gtkhx.toml.corrupt` first, because a
+hand-edited file with one typo in it is still the user's work.
 
 ### Writes
 
@@ -435,7 +473,6 @@ The mapping is mechanical for almost everything. The cases that are not:
 | `TRACKER` | `trackers.addresses` | split on comma, trim |
 | `HIGHLIGHTWORDS` | `chat.highlight_words` | same |
 | `NICK` / `ICON` | `identity.*` | read from the connection buffers they alias today |
-| `TIME` | `state.total_runtime_secs` | not a preference |
 | `CHATXSIZE`, `CHATYSIZE`, `NEWSXSIZE`, `NEWSYSIZE`, `TASKXSIZE`, `TASKYSIZE`, `USERXSIZE`, `USERYSIZE` | — | dropped; never read. **Not** `TOOLXSIZE`/`TOOLYSIZE`, which are live and map to `window.*` |
 | `OPENCHAT`, `OPENNEWS`, `OPENTASKS`, `OPENUSERS` | — | dropped; one-way latches, no UI, never cleared |
 | `LOGGING` | — | dropped; the feature is `#if 0` |
@@ -452,7 +489,9 @@ all mechanical — the schema expands abbreviations the old keys compressed.
 `appearance.color_scheme` and `appearance.theme`, which is the pair most likely
 to be transposed by someone working quickly. The implementation wants the full
 mapping written out once as a table in the migration module, where it can be
-tested, rather than inferred per key.
+tested, rather than inferred per key. `hxconfig::PATHS` is the other half of
+that test: it lists every path the schema knows, in file order, so the assertion
+can run both ways.
 
 Migration is a pure function from a key/value map to the typed struct, so it
 tests without touching a filesystem. Worth writing that test with a real
@@ -468,7 +507,7 @@ Illustrative, not committed. Each step ships on its own.
 
 | Step | Scope | Depends on |
 |---|---|---|
-| P1 | `hxconfig` crate: typed struct, TOML serde, atomic write, version check, defaults. Pure Rust, fully unit-tested, linked by nothing. | — |
+| ~~P1~~ | **Done.** `hxconfig` crate: typed schema, TOML load/save through `toml_edit`, atomic write, version check, defaults. Pure Rust, unit-tested, linked by nothing. | — |
 | P2 | Migration: the key mapping, the one-shot import, and a round-trip test against a captured real `gtkhxrc`. Still linked by nothing. | P1 |
 | P3 | The C mirror and the read/write ABI. `hxconfig` becomes the owner at startup; `cfgvars[]`, the `allocated` bit and the binder are deleted; the mirror is refreshed on change and pinned by `_Static_assert`. Carries the six-write-site cleanup above: the panel-open latches are dropped and their runtime flag moves out of the preferences struct, and the two toolbar-size writes become Rust setter calls. The Rust by-name bridge is reimplemented on top of `hxconfig` so the existing Settings pages keep working unchanged. | P2 |
 | P4 | Change notification: explicit subscriptions replacing `changefunc`, applied uniformly after load. | P3 |
@@ -481,29 +520,32 @@ one with a real blast radius, and it is worth landing alone.
 
 ---
 
+## Settled
+
+1. **Unknown-key preservation** — preserve, by editing the loaded document in
+   place. Neither of the two candidates weighed (a `toml::Table` beside the
+   typed struct, or a `#[serde(flatten)]` catch-all) would have kept comments;
+   `toml_edit` keeps those too. The cost stands: the file can accumulate junk
+   from an abandoned newer build, and that is the right trade against making
+   hand-editing safe. See "Versioning that is actually checked" above.
+2. **`[state]`** — gone, along with the `/stats` command and the `TIME` key that
+   fed it. Nothing else was ever in the table.
+
 ## Open questions
 
-1. **Unknown-key preservation.** Round-trip a `toml::Table` beside the typed
-   struct, or a `#[serde(flatten)]` catch-all, or accept the loss? Preserving is
-   the reason hand-editing becomes safe; it also means the file can accumulate
-   junk from an abandoned newer build.
-2. **Does `[state]` belong in this file at all?** The uptime counter is its only
-   member, and it has exactly one consumer: the `/stats` command, which formats
-   "has been online for N years, N days…" and **sends it to the room as a chat
-   message**. So "drop it" means removing a user-facing command that talks to
-   other people, not deleting a status line — a bigger call than it first looks.
-   Otherwise: keep it in `[state]`, or move it to its own small file so "reset my
-   settings" can delete one file cleanly.
-3. **Config directory resolution.** It is C-owned today and both Rust config
-   crates call back into C for it. `hxconfig` should probably own it, which means
-   deciding whether to keep the current hand-rolled resolution — `$GTKHX_PATH`,
-   then `$XDG_CONFIG_HOME/gtkhx`, then `$HOME/.config/gtkhx` on *all three
-   platforms* — or move to platform-native paths. Moving is a migration in
-   itself and would strand existing macOS and Windows profiles.
-4. **Should the bookmark store adopt `hxconfig`'s write helper** in the same
+1. **Config directory resolution.** It is C-owned today and both Rust config
+   crates call back into C for it; `hxconfig` takes it as a parameter, which is
+   what lets it unit-test headless, and deliberately does not decide who
+   resolves it. The question is still whether to keep the current hand-rolled
+   resolution — `$GTKHX_PATH`, then `$XDG_CONFIG_HOME/gtkhx`, then
+   `$HOME/.config/gtkhx` on *all three platforms* — or move to platform-native
+   paths. Moving is a migration in itself and would strand existing macOS and
+   Windows profiles. Needs answering by P3, not before.
+2. **Should the bookmark store adopt `hxconfig`'s write helper** in the same
    change, or separately? Its fixed temp filename and missing `fsync` are real,
-   if small.
-5. **Per-connection settings beyond identity.** Once connections are
+   if small. `hxconfig` has the hardened copy now, so this is a lift-and-share
+   rather than a rewrite.
+3. **Per-connection settings beyond identity.** Once connections are
    configuration, other things become plausibly per-connection — download
    directory, notification preferences, autojoin. Not for v1, but the schema
    should not make it awkward.

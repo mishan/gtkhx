@@ -1,0 +1,20 @@
+[package]
+rust-version.workspace = true
+name = "hxconfig"
+version = "0.1.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "GtkHx settings: typed schema, TOML persistence, versioning, migration."
+publish = false
+
+[lib]
+# rlib only. No C ABI surface yet — the mirror struct and the read/write ABI
+# arrive with the C-side flip, and nothing links this crate until then.
+crate-type = ["rlib"]
+
+[dependencies]
+# toml_edit rather than toml: it round-trips comments, key order and unknown
+# keys, which is the whole point of replacing the GKeyFile writer. std-only
+# otherwise — no glib, no gtk — so `cargo test -p hxconfig` runs headless
+# against temp dirs. Already in the workspace lockfile via toml.
+toml_edit = "0.25"

@@ -8,6 +8,11 @@ members = [
     "crates/gtkhx-ui",
     "crates/hxfiles-xfer",
     "crates/hxbookmarks",
+    # Settings: a typed schema over a versioned TOML file. Pure std +
+    # toml_edit — no glib, no gtk — so all of it runs under `cargo test` on
+    # display-less CI. Nothing links it yet: the C mirror struct and the
+    # read/write ABI arrive with the flip. See docs/preferences.md.
+    "crates/hxconfig",
     "crates/hxhfs",
     "crates/hxmacres",
     "crates/hxmodel",

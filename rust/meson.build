@@ -187,6 +187,12 @@ rust_sources = files(
   'crates/hxbookmarks/src/cipher.rs',
   'crates/hxbookmarks/src/legacy.rs',
   'crates/hxbookmarks/src/hostport.rs',
+  # hxconfig is deliberately absent from this list, not forgotten. Nothing
+  # links it yet — it has no FFI surface and gtkhx-ffi doesn't depend on it —
+  # so a stale build of it can't affect the binary, and `cargo test -p
+  # hxconfig` in CI is what actually exercises it. It joins the list when the
+  # C mirror lands and the binary starts reading from it. See
+  # docs/preferences.md.
   'crates/hxfiles-xfer/src/lib.rs',
   'crates/hxfiles-xfer/src/ffo.rs',
   'crates/hxfiles-xfer/src/ffi.rs',

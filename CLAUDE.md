@@ -118,7 +118,7 @@ Rust-owned connection struct), `chat_view.h` (the chat widget's C ABI — there 
 | **UI** | `gtkhx-ui` (gtk4-rs windows and dialogs, module per window), `hxchat-view` (the GTK4 chat widget), `hxchat-layout` (its layout engine — **dependency-free**: no gtk, glib, or pango) |
 | **Voice** (optional) | `hxvoice`, `hxvoice-model`, `hxvoice-send`, `hxvoice-runtime` (gstreamer-rs + webrtcbin) |
 | **Media / files** | `hx-image-decode` (glycin), `hxmacres` (Mac resource fork + cicn), `hxhfs` (resource-fork sidecars), `hxfiles-xfer` (fork-header codec) |
-| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
+| **Support** | `hxbridge` (Rust↔GLib interop, tokio runtime), `hxtext` (Mac Roman ↔ UTF-8), `hxbookmarks`, `hxconfig` (the settings schema and TOML file — built and tested, but nothing links it yet; the running client still reads `cfgvars[]`), `hxsound` (rodio/cpal), `feature-unify` (forces identical feature resolution across the voice-on and voice-off builds so the shared dependency graph compiles once) |
 | **Link façade** | `gtkhx-ffi` — bundles every FFI-exporting crate into a single `libgtkhx_ffi.a`, so the binary links exactly one archive instead of a hand-ordered list. Several crates also build a standalone `staticlib` on the side, purely so the test suite can link one crate at a time. See `docs/rust/crate-layout.md`. |
 
 ### Other directories
