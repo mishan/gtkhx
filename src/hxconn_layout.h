@@ -126,7 +126,7 @@ struct htlc_conn {
     /* The legacy per-direction C cipher and compression state (session key,
      * the cipher and compress union members, their keys, type and keylen
      * fields, cipher_mode, the AEAD plaintext accumulator, and the gzip
-     * counters) is gone: hxnet plus the hxcrypto and hxcompress crates own all
+     * counters) is gone: hxnet plus the hxcrypto crate own all
      * control-channel crypto and compression now, so none of it was ever
      * populated on htlc. */
     /* DATA_CAPABILITIES bitmask negotiated for this session, as
@@ -196,6 +196,6 @@ struct htlc_conn {
 
 _Static_assert (sizeof (struct htlc_conn) == 760,
                 "struct htlc_conn layout drifted from Rust HtlcConn "
-                "(rust/crates/hxconn/src/lib.rs)");
+                "(rust/crates/gtkhx-core/src/conn.rs)");
 
 #endif /* GTKHX_HXCONN_LAYOUT_H */

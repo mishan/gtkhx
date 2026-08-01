@@ -11,7 +11,7 @@
 use std::os::raw::{c_char, c_int, c_void};
 
 // The singleton `GtkhxSession` GObject and the `agreement` signal emit come
-// from the gtkhx-session crate as a normal Cargo dependency, so rustc checks
+// from the gtkhx-core crate as a normal Cargo dependency, so rustc checks
 // these signatures. They used to be a hand-written `extern "C"` block, which
 // only linked — a signature drift surfaced as a corrupt call at runtime, or
 // not at all. The `#[cfg(test)]` stubs below still shadow these in test builds.

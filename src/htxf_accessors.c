@@ -1,9 +1,9 @@
 /* Rust-facing accessor seam for struct htxf_conn — see htxf_accessors.h.
  *
  * Thin getters/setters over the still-C-owned transfer struct so the Rust
- * receive handlers (hxxfer-recv) can own the transfer logic while the struct's
+ * receive handlers (hxhandlers::recv::xfer) can own the transfer logic while the struct's
  * storage, refcount lifecycle, and cross-thread ownership stay in xfers.c. The
- * same getter/setter-seam the hxconn (htlc_conn) migration began with. */
+ * same getter/setter-seam the gtkhx-core::conn (htlc_conn) migration began with. */
 
 #include <sys/time.h>
 #include <sys/stat.h>

@@ -1,4 +1,4 @@
-//! `hxnews-send` — the news RPC senders (the Rust port of `src/news15.c`'s 1.5
+//! `hxhandlers::send::news` — the news RPC senders (the Rust port of `src/news15.c`'s 1.5
 //! threaded-news senders + `src/news.c`'s flat 1.0/1.2 `hx_get_news` /
 //! `hx_post_news`, Phase R5 N2c).
 //!
@@ -15,13 +15,13 @@
 //! gtkhx-ui news browser) link against.
 //!
 //! The `cat_list` / `fldr_list` senders take an opaque reply carrier (the
-//! Rust-owned `gnews_catalog` / `gnews_folder` in hxnews-recv); they read its
+//! Rust-owned `gnews_catalog` / `gnews_folder` in hxhandlers::recv::news); they read its
 //! request path through the `gnews_*_path` accessor. `get_post` takes its path
 //! directly.
 //!
 //! A lean crate (`glib` + the pure `hotline-proto`, no GTK) so it's
 //! `cargo test`-able: the builders run natively and the C send-path primitives
-//! are stubbed in the test module. Mirrors `hxchat-send`.
+//! are stubbed in the test module. Mirrors `hxhandlers::send::chat`.
 
 use std::ffi::{c_char, c_void, CStr};
 use std::os::raw::c_int;

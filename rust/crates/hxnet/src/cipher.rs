@@ -39,7 +39,7 @@
 //! `cipher_aead.c` implementations. The wire bytes a server sees
 //! must be indistinguishable from what a legacy GtkHx or mhxd
 //! client would emit, and the legacy client's bytes must decrypt
-//! correctly here. The hxcrypto-stream and hxcrypto-aead primitive
+//! correctly here. The hxcrypto::stream and hxcrypto::aead primitive
 //! crates these adapters delegate to are already pinned against
 //! the C implementation by Tier 1 KAT tests; this module's tests
 //! verify the AsyncRead/AsyncWrite glue doesn't introduce drift.

@@ -9,13 +9,13 @@
 //!
 //! ## Why `hxtask` is not in here, though it is the same layer
 //!
-//! ROADMAP §R4.2 gave `gtkhx-boxed` two reasons to be its own crate. The
-//! first — two staticlibs each bundling the boxed `_copy`/`_free`, colliding
-//! at the binary link — died with the `gtkhx-ffi` façade. The second did not:
-//! `gtkhx-boxed` is deliberately **glib-only with zero undefined externs**, so
-//! a Tier 2 proto test that pulls `hx_msg_event_copy` can link that archive on
-//! its own. Those tests link the standalone staticlib, not the façade, so the
-//! façade does nothing for them.
+//! The boxed payloads used to be a crate of their own, for two reasons. The
+//! first — two staticlibs each bundling the boxed `_copy`/`_free`, colliding at
+//! the binary link — died with the `gtkhx-ffi` façade, and the two merged. The
+//! second reason survives as a constraint on *this* crate: it is deliberately
+//! **glib-only with zero undefined externs**, so a Tier 2 proto test that pulls
+//! `hx_msg_event_copy` can link this archive on its own. Those tests link the
+//! standalone staticlib, not the façade, so the façade does nothing for them.
 //!
 //! `hxtask` has ten undefined C externs (`hx_session_tasks`,
 //! `hx_sess_from_htlc`, `gtask_delete_tsk`, …). Merging it here would make

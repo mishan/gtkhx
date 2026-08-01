@@ -1,4 +1,4 @@
-//! `hxnews-model` — pure, unit-tested model logic for the 1.5 threaded-news
+//! `hxmodel::news` — pure, unit-tested model logic for the 1.5 threaded-news
 //! browser (Phase R5 N2a).
 //!
 //! The browser window itself (`news_browser.c`) is a large, monolithic

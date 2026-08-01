@@ -82,7 +82,7 @@ void gtkhx_session_emit_chat_subject (GtkhxSession *self,
 
 /* chat-subject-notice — the "Subject Changed to: X" chat-output line for a real
  * subject change (the chat-subject signal above already updated the subject
- * bar). Emitted by the Rust chat-subject receive handler (hxchat-recv); the
+ * bar). Emitted by the Rust chat-subject receive handler (hxhandlers::recv::chat); the
  * view-side handler (chat.c chat_subject_notice_handler) owns the gettext +
  * INFOPREFIX. */
 void gtkhx_session_emit_chat_subject_notice (GtkhxSession *self,
@@ -254,7 +254,7 @@ void gtkhx_session_emit_chat_log_line (GtkhxSession *self,
                                        const char *body);
 
 /* user-notice — a roster notice line for chat `cid`: someone joined, parted, or
- * renamed. The Rust user-roster receive handlers (hxuser-recv) emit this; the
+ * renamed. The Rust user-roster receive handlers (hxhandlers::recv::user) emit this; the
  * view-side handler (chat.c user_notice_handler) applies the showjoin pref +
  * gettext + INFOPREFIX. `name` / `old_name` are raw C-string pointers;
  * `old_name` is NULL except for HX_USER_NOTICE_RENAME. */

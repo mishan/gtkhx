@@ -4,7 +4,7 @@
 //! A GObject so it can sit in a `gio::ListStore` the `GtkColumnView`
 //! consumes. Built from a borrowed `HxTrackerServer` event: strings are
 //! copied into Rust `String`s and the typed `HxTrackerV3Meta` is
-//! deep-copied (via `gtkhx-boxed`'s `hx_tracker_v3_meta_copy`) so the row
+//! deep-copied (via `gtkhx-core::boxed`'s `hx_tracker_v3_meta_copy`) so the row
 //! outlives the event the signal emitter frees after
 //! `tracker_server_create` returns. The owned meta is freed in `dispose`.
 //!

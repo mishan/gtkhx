@@ -1,18 +1,18 @@
 //! Typed `#[repr(C)]` mirror of `struct _HxTrackerV3Meta`
 //! (`src/tracker_v3_meta.h`).
 //!
-//! `gtkhx-boxed` also mirrors this struct, but only as an opaque
+//! `gtkhx-core::boxed` also mirrors this struct, but only as an opaque
 //! 216-byte buffer (it only needs the ten owned-string byte offsets for
 //! its `_copy`/`_free`). The tracker window needs to *read* the typed
 //! fields — Country / Caps columns, the details dialog's ~40 rows — so
 //! this crate carries the full field-by-field mirror. Layout is pinned
 //! by the const asserts below; the ten string offsets match
-//! `gtkhx-boxed`'s `META_STRING_OFFSETS`, and the total size (216) /
+//! `gtkhx-core::boxed`'s `META_STRING_OFFSETS`, and the total size (216) /
 //! alignment (8) match the `_Static_assert`s in `tracker_v3_meta.c`.
 //!
 //! The C producers (`hx_tracker_v3_meta_new`, the wire parser) still
 //! fill these structs; this crate only reads them and calls the
-//! `gtkhx-boxed` `_copy`/`_free` funcs (resolved at final link).
+//! `gtkhx-core::boxed` `_copy`/`_free` funcs (resolved at final link).
 
 use std::ffi::c_char;
 use std::mem::{align_of, offset_of, size_of};
@@ -94,7 +94,7 @@ pub struct HxTrackerV3Meta {
 }
 
 // Layout pins. Total size + alignment match tracker_v3_meta.c's
-// _Static_asserts; the ten string offsets match gtkhx-boxed's
+// _Static_asserts; the ten string offsets match gtkhx-core::boxed's
 // META_STRING_OFFSETS = [0, 8, 16, 24, 48, 56, 64, 88, 112, 152].
 const _: () = {
     assert!(size_of::<HxTrackerV3Meta>() == 216);

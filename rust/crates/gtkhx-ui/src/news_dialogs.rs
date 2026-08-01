@@ -7,7 +7,7 @@
 //! parent node (create) or a snapshot of the target's identity (delete), and
 //! we own the dialog + the wire send + the post-send refresh.
 //!
-//! The senders are the Rust `hxnews-send` ones (`hx_news15_mkdir` / `mkcat` /
+//! The senders are the Rust `hxhandlers::send::news` ones (`hx_news15_mkdir` / `mkcat` /
 //! `delete` / `delete_thread`); none has a reply handler, so we re-fetch the
 //! affected listing ourselves via `gtkhx_news_browser_refresh` once the RPC is
 //! away. Create refreshes just the parent folder (targeted, tree state mostly
@@ -35,7 +35,7 @@ use hxhandlers::send::news::{
 };
 
 extern "C" {
-    // hxnews-model C ABI — the node's Hotline path (NULL for a pathless node).
+    // hxmodel::news C ABI — the node's Hotline path (NULL for a pathless node).
     fn hx_news_node_path(node: *mut c_void) -> *const c_char;
     // gtkhx_ui_bridge.c — the active session's htlc (single-conn today).
     fn gtkhx_active_htlc() -> *mut c_void;

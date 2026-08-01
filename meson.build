@@ -271,7 +271,7 @@ endif
 
 # Phase R1: zlib, liblz4, and libzstd are no longer linked into the
 # main binary — the HOPE transport compression dispatcher moved to
-# the Rust hxcompress crate (rust/crates/hxcompress) which bundles
+# the Rust hxcrypto::compress module (rust/crates/hxcrypto/src/compress.rs) which bundles
 # flate2 + lz4_flex + zstd internally.
 
 # -----------------------------------------------------------------------------

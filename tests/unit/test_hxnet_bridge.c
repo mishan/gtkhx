@@ -199,7 +199,7 @@ hxnet_connection_hope_aead_material (struct hxnet_connection_opaque *conn)
 }
 
 /* R3.3.e-4d's hx_bridge_install_with_hope_state pulls in the
- * Blowfish OFB state-snapshot helper from hxcrypto-stream. The
+ * Blowfish OFB state-snapshot helper from hxcrypto::stream. The
  * Tier 1 test never invokes the install path, so a
  * g_assert_not_reached stub keeps the symbol satisfied without
  * dragging the staticlib in. */

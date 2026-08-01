@@ -9,7 +9,7 @@
 
 /*
  * chat_send_bridge.c — see chat_send_bridge.h. Model / caps accessors for
- * the Rust chat wire-senders (hxchat-send). Keeps the htlc_conn + struct
+ * the Rust chat wire-senders (hxhandlers::send::chat). Keeps the htlc_conn + struct
  * chat layout on the C side.
  */
 

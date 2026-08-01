@@ -493,7 +493,7 @@ extern int hx_news_post_walk (const guint8 *frame, gsize frame_len,
  * hx_newscat_parse) and their result structs (hx_news_dirlist_entry /
  * hx_newscat*) are gone — the receive path parses to owned handles via
  * hotline-proto's gtkhx_proto_parse_dirlist / _catlist, read directly by
- * hxnews-model. The per-chunk / whole-message parsers stay covered by
+ * hxmodel::news. The per-chunk / whole-message parsers stay covered by
  * hotline-proto's native cargo tests. */
 
 /*
@@ -772,7 +772,7 @@ extern gboolean hx_chat_media_parse_token (const char *word, guint *out_token);
 
 /*
  * MediaTable — the per-chat token → HxChatMedia handle table (M3;
- * gtkhx-boxed/src/media_table.rs). Replaces gchat->media_handles
+ * gtkhx-core::boxed/src/media_table.rs). Replaces gchat->media_handles
  * (GHashTable) + gchat->media_next_id: output_chat_from_event registers a
  * deep copy of the event's media under a fresh token and embeds it in the
  * placeholder; the word_click handler looks the token back up to pop the

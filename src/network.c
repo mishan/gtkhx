@@ -322,7 +322,7 @@ hx_htlc_close (struct htlc_conn *htlc, int expected)
      * the conn_addr shim that briefly replaced it) belonged here. */
 
     /* No per-direction cipher / compression state to tear down: the
-     * orchestrator (hxnet + the Rust hxcrypto-* / hxcompress crates) owns all
+     * orchestrator (hxnet + the Rust hxcrypto crate) owns all
      * control-channel crypto and compression now. The legacy C session key,
      * cipher/compress union state, and gzip counters were removed from
      * struct htlc_conn — nothing populated them. */

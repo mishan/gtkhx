@@ -9,7 +9,7 @@
 struct ifn;
 
 /*
- * The cicn decoder now lives in the Rust `hxcicn` crate: it walks the resource
+ * The cicn decoder now lives in the Rust `hxmacres::cicn` module: it walks the resource
  * and produces a packed RGBA buffer (the Mac icon mask folds into the alpha
  * channel). cicn.c is the thin GdkPixbuf wrapper around it.
  *

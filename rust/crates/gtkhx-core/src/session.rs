@@ -18,16 +18,14 @@
 //! # Boxed-type payloads
 //!
 //! Three signals carry boxed payloads — `chat` (`HxChatEvent`), `msg`
-//! (`HxMsgEvent`), and `tracker-server-create` (`HxTrackerServer`). As of
-//! Phase R4.2 those boxed types live in Rust in the sibling `gtkhx-boxed`
-//! crate; this crate references their `GType`s through the same
-//! `hx_*_get_type()` C-ABI accessors as before (now resolving against
-//! `gtkhx-boxed` instead of `proto_helpers.c` / `tracker_event.c`). We go
-//! through the extern accessors rather than a direct Rust dependency on
-//! `gtkhx-boxed` on purpose: a `staticlib` crate bundles its rlib deps,
-//! so depending on `gtkhx-boxed` here would emit the boxed `_get_type` /
-//! `_copy` / `_free` symbols into *both* archives and collide at final
-//! link. The extern keeps a single definition. The signal-emit marshaling
+//! (`HxMsgEvent`), and `tracker-server-create` (`HxTrackerServer`). Those
+//! boxed types live in the sibling [`crate::boxed`] module and are reached by
+//! a plain Rust path. They used to be a separate crate reached over the
+//! `hx_*_get_type()` C ABI, because a `staticlib` bundles its rlib deps and a
+//! Rust dependency would have emitted the boxed `_get_type` / `_copy` /
+//! `_free` symbols into two archives that collided at final link; the
+//! `gtkhx-ffi` façade removed that constraint and the two merged. The
+//! signal-emit marshaling
 //! uses `g_value_set_boxed`, which copies the payload via the boxed type's
 //! copy func for the duration of the emission — byte-for-byte the same
 //! lifetime the old `g_signal_emit(self, sig, 0, …, event)` varargs
@@ -57,9 +55,7 @@ use std::ffi::{c_char, c_int, c_void, CStr};
 use std::sync::OnceLock;
 
 // ----------------------------------------------------------------------
-// Boxed-type GType accessors (defined in the gtkhx-boxed crate as of
-// R4.2; resolved here via their C ABI — see the crate-level note on why
-// we extern rather than take a Rust dependency on gtkhx-boxed).
+// Boxed-type GType accessors, defined in the sibling `boxed` module.
 //
 // `signals()` must reference these GTypes when it registers the boxed
 // payload signals, and calling the accessor *forces* the boxed type to
@@ -77,8 +73,8 @@ use crate::boxed::tracker::hx_tracker_server_get_type;
 // Under `cargo test` there is no other archive to link against, so stub
 // the three accessors with real Rust-registered boxed types. This lets
 // the in-crate tests exercise the full registration + boxed-emit path
-// (the standalone cargo test binary can't resolve the external symbols
-// otherwise — it doesn't link gtkhx-boxed).
+// (the standalone cargo test binary would otherwise register the real
+// boxed types twice — once here and once through the C producers).
 #[cfg(test)]
 use test_boxed_stubs::{hx_chat_event_get_type, hx_msg_event_get_type, hx_tracker_server_get_type};
 
@@ -391,7 +387,7 @@ unsafe fn boxed_value(gtype: glib::ffi::GType, p: *mut c_void) -> glib::Value {
 unsafe fn emit(self_ptr: *mut c_void, name: &str, values: &[glib::Value]) {
     if self_ptr.is_null() {
         glib::g_critical!(
-            "gtkhx-session",
+            "gtkhx-core",
             "{name}: NULL session pointer; emit skipped"
         );
         return;

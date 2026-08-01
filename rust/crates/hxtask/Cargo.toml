@@ -17,7 +17,7 @@ crate-type = ["rlib"]
 # g_malloc/g_free on the send path; hotline-proto for the HxChunk (type, len,
 # data) triple the send primitive takes. No gtk. The rest of the C environment —
 # the session/htlc field accessors (tasks_bridge.c), the task-update signal emit
-# (gtkhx-session), gtask_delete_tsk (tasks.c), and the send side's frame packer /
+# (gtkhx-core), gtask_delete_tsk (tasks.c), and the send side's frame packer /
 # wire trace / hxnet bridge / status-log / close (proto_helpers.c, proto_trace.c,
 # hxnet_bridge.c, gtkhx_log.c, network.c) — is externed and resolved at the final
 # C link; cargo test provides in-crate #[cfg(test)] doubles so the suite runs

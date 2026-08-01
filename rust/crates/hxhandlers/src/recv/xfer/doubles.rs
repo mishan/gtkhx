@@ -1,6 +1,6 @@
 //! Headless `#[cfg(test)]` doubles for the C environment the receive handlers
 //! reach through — the `hx_htxf_*` accessor seam, the genuine collaborators, and
-//! the `gtkhx-session` emits. The setters record into a thread-local `FakeHtxf`;
+//! the `gtkhx-core` emits. The setters record into a thread-local `FakeHtxf`;
 //! the getters return configurable inputs; the outcome-bearing collaborators
 //! (announce/start, error deletes, banner, file-info emit) set recorder flags.
 //! `tests.rs` drives the handlers and asserts the recorded state.
@@ -81,7 +81,7 @@ pub(crate) mod test_env {
 const FAKE_PATH: &[u8] = b"/upload.bin\0";
 const FAKE_HOST: &[u8] = b"server.example\0";
 
-// ---- gtkhx-session emits + session/kickoff ----
+// ---- gtkhx-core emits + session/kickoff ----
 
 pub(crate) unsafe fn gtkhx_session_get_default() -> *mut c_void {
     std::ptr::null_mut()

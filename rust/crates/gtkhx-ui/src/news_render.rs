@@ -24,7 +24,7 @@ const NB_KIND_POST: i32 = 3;
 use hxmodel::news::node::hx_news_node_name;
 
 extern "C" {
-    // hxnews-model node accessors.
+    // hxmodel::news node accessors.
     fn hx_news_node_kind(node: *mut c_void) -> i32;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;

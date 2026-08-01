@@ -34,7 +34,7 @@ use glib::translate::{from_glib_borrow, Borrowed, IntoGlib, IntoGlibPtr};
 
 /// Default icon ids for the "caller didn't classify" case. These MUST
 /// stay in lockstep with the `ICON_*` #defines in `src/files.h` (the same
-/// two the `hxfiles-model` icon table anchors on).
+/// two the `hxmodel::files` icon table anchors on).
 const ICON_FILE: u16 = 400;
 const ICON_FOLDER: u16 = 401;
 

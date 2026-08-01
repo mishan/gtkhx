@@ -1,4 +1,4 @@
-//! `hxchat-model` — the pure, testable chat conversation model + nick
+//! `hxmodel::chat` — the pure, testable chat conversation model + nick
 //! completion (the Rust re-think of `struct chat` / `struct gtkhx_chat` — see
 //! the Chat-model re-think section of `docs/rust/ROADMAP.md`).
 //!

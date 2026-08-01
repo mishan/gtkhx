@@ -2013,7 +2013,7 @@ hotline_client_init (int argc, char **argv)
         }
     }
 
-    /* The session's connection is a Rust-owned allocation (hxconn crate, the
+    /* The session's connection is a Rust-owned allocation (gtkhx-core::conn module, the
      * docs/rust/network-endgame.md) the session holds for its lifetime.
      * Allocate once; on a re-entry (should not happen in the single-session
      * world) reset the existing one to its fresh state. */

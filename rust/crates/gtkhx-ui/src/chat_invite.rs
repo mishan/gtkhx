@@ -3,7 +3,7 @@
 //!
 //! An `AdwAlertDialog` with Decline (close / Esc) and Join (suggested +
 //! default) responses. Join sends `CHAT_JOIN`, Decline sends `CHAT_DECLINE` —
-//! both through the Rust `hxchat-send` senders (`hx_chat_join` /
+//! both through the Rust `hxhandlers::send::chat` senders (`hx_chat_join` /
 //! `hx_reject_chat`), resolved at the final C link like the other cross-crate
 //! senders. The whole invite flow (dialog + both senders) is now Rust.
 

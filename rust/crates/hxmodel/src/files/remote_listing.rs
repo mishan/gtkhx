@@ -4,7 +4,7 @@
 //!
 //! This is the model half of `src/files_remote_provider.c` (the Rust
 //! re-think of its `current_path` / `listing_error` state, mirroring the
-//! `hxchat-model` `Conversation` split): a [`RemoteListing`] owns the
+//! `hxmodel::chat` `Conversation` split): a [`RemoteListing`] owns the
 //! canonical current path and the sticky "last listing failed" flag, and
 //! computes the parent / child paths the provider used to build by hand
 //! (`remote_navigate_up`, `remote_child_path`, `reset_to_root`). No glib,

@@ -395,7 +395,7 @@ hx_news_file_extract (const guint8 *frame, gsize frame_len, char *out,
  * (the C shims that marshalled the Rust parse results into struct
  * hx_news_dirlist_entry / struct hx_newscat) are gone — the 1.5 news
  * receive path now parses to owned handles (gtkhx_proto_parse_dirlist /
- * _catlist) read directly by hxnews-model. The underlying parsers stay
+ * _catlist) read directly by hxmodel::news. The underlying parsers stay
  * covered by hotline-proto's native cargo tests. */
 
 /* Trampoline: gtkhx_proto_walk_news_post invokes a typedef'd C
@@ -857,7 +857,7 @@ hx_chat_event_new (const char *raw, gsize raw_len, guint32 cid, guint16 uid,
     return e;
 }
 
-/* Phase R4.2c: hx_chat_media_copy moved to Rust (gtkhx-boxed::chat,
+/* Phase R4.2c: hx_chat_media_copy moved to Rust (gtkhx-core::boxed::chat,
  * private media_copy helper) along with the HxChatEvent boxed copy that
  * was its only caller. hx_chat_media_free stays here because
  * hx_chat_event_attach_media (below) still calls it. */
@@ -875,19 +875,19 @@ hx_chat_media_free (HxChatMedia *m)
 
 /* Phase R4.2c: hx_chat_event_copy / hx_chat_event_free and the boxed-type
  * registration (hx_chat_event_get_type) moved to Rust —
- * rust/crates/gtkhx-boxed/src/chat.rs. The struct stays C-visible
+ * rust/crates/gtkhx-core/src/boxed/chat.rs. The struct stays C-visible
  * (hx_chat_event_new + hx_chat_event_attach_media fill it; consumers and
  * the placeholder formatters read fields), so the Rust mirrors'
  * #[repr(C)] layouts are pinned against these asserts; bump both sides
  * together if either struct changes shape. */
 _Static_assert (sizeof (HxChatEvent) == 72,
                 "HxChatEvent layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-boxed::chat");
+                "in gtkhx-core::boxed::chat");
 _Static_assert (sizeof (HxChatMedia) == 56,
                 "HxChatMedia layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-boxed::chat");
+                "in gtkhx-core::boxed::chat");
 /* Field offsets too — size alone misses reorderings / padding changes
- * that keep the total. Mirror gtkhx-boxed::chat's offset_of! asserts. */
+ * that keep the total. Mirror gtkhx-core::boxed::chat's offset_of! asserts. */
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, cid) == 0, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line) == 8, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxChatEvent, line_len) == 16, "field offset");
@@ -1121,7 +1121,7 @@ hx_chat_media_parse_token (const char *word, guint *out_token)
 }
 
 /* HxChatEvent boxed-type registration (hx_chat_event_get_type) moved to
- * Rust in R4.2c — see gtkhx-boxed::chat. */
+ * Rust in R4.2c — see gtkhx-core::boxed::chat. */
 
 /* ---- HxMsgEvent ---------------------------------------------------- */
 
@@ -1162,15 +1162,15 @@ hx_msg_event_new (guint16 uid, const char *name, gsize name_len,
 
 /* Phase R4.2a: hx_msg_event_copy / hx_msg_event_free and the boxed-type
  * registration (hx_msg_event_get_type) moved to Rust —
- * rust/crates/gtkhx-boxed/src/msg.rs. The struct stays C-visible
+ * rust/crates/gtkhx-core/src/boxed/msg.rs. The struct stays C-visible
  * (hx_msg_event_new above fills it; consumers read fields), so the Rust
  * mirror's #[repr(C)] layout is pinned against this assert; bump both
  * sides together if HxMsgEvent ever changes shape. */
 _Static_assert (sizeof (HxMsgEvent) == 48,
                 "HxMsgEvent layout must match the Rust #[repr(C)] mirror "
-                "in gtkhx-boxed::msg");
+                "in gtkhx-core::boxed::msg");
 /* Field offsets too — size alone misses reorderings / padding changes
- * that keep the total. Mirror gtkhx-boxed::msg's offset_of! asserts. */
+ * that keep the total. Mirror gtkhx-core::boxed::msg's offset_of! asserts. */
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, uid) == 0, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, name) == 8, "field offset");
 _Static_assert (G_STRUCT_OFFSET (HxMsgEvent, name_len) == 16, "field offset");

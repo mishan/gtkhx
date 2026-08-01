@@ -323,16 +323,16 @@ hx_tracker_v3_meta_new_from_bytes (GBytes *bytes, guint16 tlv_count)
 }
 
 /* Phase R4.2b: hx_tracker_v3_meta_copy / hx_tracker_v3_meta_free moved to
- * Rust — rust/crates/gtkhx-boxed/src/tracker.rs. The struct stays
+ * Rust — rust/crates/gtkhx-core/src/boxed/tracker.rs. The struct stays
  * C-visible (hx_tracker_v3_meta_new above fills it; consumers read
  * fields). The Rust free is still called from C (this file's _new error
  * path and tracker_event.c / tracker_row.c), now resolved against the
- * gtkhx-boxed staticlib. The Rust side treats this struct as an opaque
+ * gtkhx-core::boxed staticlib. The Rust side treats this struct as an opaque
  * sized buffer and fixes up the ten owned char* fields by byte offset,
  * so size + those ten offsets are pinned here. */
 _Static_assert (sizeof (HxTrackerV3Meta) == 216,
                 "HxTrackerV3Meta size must match the Rust opaque mirror "
-                "in gtkhx-boxed::tracker");
+                "in gtkhx-core::boxed::tracker");
 /* G_STRUCT_OFFSET (not <stddef.h>'s offsetof) for consistency with the
  * rest of the tree; pins the ten owned char* fields the Rust offset-
  * based copy/free fix up. */

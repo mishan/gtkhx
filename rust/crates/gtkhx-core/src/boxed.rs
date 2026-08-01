@@ -1,14 +1,14 @@
-//! Phase R4.2 — the GObject **boxed payload value-types** carried by the
-//! `GtkhxSession` signals, re-hosted from C into Rust.
+//! The GObject **boxed payload value-types** carried by the `GtkhxSession`
+//! signals.
 //!
-//! R4.1 left these as C types (`G_DEFINE_BOXED_TYPE` in `proto_helpers.c`
-//! / `tracker_event.c`) that `gtkhx-session` referenced by `GType` over
-//! FFI. R4.2 moves the boxed *type itself* — its `GType` registration
-//! and its `_copy` / `_free` value semantics — here, one type at a time:
+//! These began as C types (`G_DEFINE_BOXED_TYPE` in `proto_helpers.c` /
+//! `tracker_event.c`) that the session referenced by `GType` over FFI. The
+//! boxed *type itself* — its `GType` registration and its `_copy` / `_free`
+//! value semantics — now lives here:
 //!
-//!   - [`msg`]     — `HxMsgEvent`     (R4.2a ✅)
-//!   - [`chat`]    — `HxChatEvent` + `HxChatMedia` (R4.2c ✅)
-//!   - [`tracker`] — `HxTrackerServer` + `HxTrackerV3Meta` (R4.2b ✅)
+//!   - [`msg`]     — `HxMsgEvent`
+//!   - [`chat`]    — `HxChatEvent` + `HxChatMedia`
+//!   - [`tracker`] — `HxTrackerServer` + `HxTrackerV3Meta`
 //!   - [`history`] — `HxHistoryEntry` (chat-history; a plain value struct
 //!     carried in a `GPtrArray`, **not** a registered `GType`)
 //!
@@ -28,15 +28,15 @@
 //! value produced by a Rust `_copy` are released by the same
 //! `g_free`-based path regardless of which side created it.
 //!
-//! # Why a separate crate from `gtkhx-session`
+//! # These types must stay extern-free
 //!
-//! These types are self-contained (glib only — no undefined externs into
-//! the rest of GtkHx). Keeping them out of `gtkhx-session` (which still
-//! externs the not-yet-ported boxed `GType`s) means a C target that
-//! pulls a `_copy`/`_free` symbol — e.g. the `test_msg_event` /
-//! `test_chat_event` proto unit tests — links against *only* this
-//! self-contained archive and never drags `gtkhx-session`'s dangling C
-//! externs in via codegen-unit merging.
+//! They are self-contained — glib only, no undefined externs into the
+//! rest of GtkHx — and that is load-bearing, not incidental. A C target
+//! that pulls a `_copy`/`_free` symbol (the `test_msg_event` /
+//! `test_chat_event` proto unit tests) links the `gtkhx-core` archive
+//! directly rather than the `gtkhx-ffi` façade, so an extern added here
+//! becomes an unresolved reference in those tests. See the crate-level
+//! note in `lib.rs`.
 
 use glib::ffi::GType;
 use glib::gobject_ffi::{g_boxed_type_register_static, GBoxedCopyFunc, GBoxedFreeFunc};

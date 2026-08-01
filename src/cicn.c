@@ -16,7 +16,7 @@
  * cicn.c — the thin GdkPixbuf wrapper over the Rust cicn decoder.
  *
  * The decode itself (PixMap / BitMap / ColorTable walk, palette build, pixel
- * unpack, mask→alpha fold, and the 1px halo) moved to the `hxcicn` crate, which
+ * unpack, mask→alpha fold, and the 1px halo) moved to the `hxmacres::cicn` module, which
  * produces a packed RGBA buffer with no GTK dependency. Here we wrap that RGBA
  * into a GdkPixbuf (zero-copy: the pixbuf takes ownership of the g_malloc'd
  * buffer via a g_free destroy-notify) and keep the icon-file lookup glue.
@@ -33,7 +33,7 @@
 
 #define DEFAULT_ICON 135
 
-/* hxcicn crate: decode a cicn resource to a freshly g_malloc'd RGBA buffer +
+/* hxmacres::cicn module: decode a cicn resource to a freshly g_malloc'd RGBA buffer +
  * its dimensions, or NULL on malformed input. */
 extern guchar *hxcicn_decode (const guint8 *rsrc, gsize len, guint *out_w,
                               guint *out_h);

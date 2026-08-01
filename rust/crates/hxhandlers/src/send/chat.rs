@@ -1,4 +1,4 @@
-//! `hxchat-send` — chat wire-out senders (the Rust port of `src/chat.c`'s send
+//! `hxhandlers::send::chat` — chat wire-out senders (the Rust port of `src/chat.c`'s send
 //! path, Phase R5).
 //!
 //! Thin wrappers that emit the client-initiated chat transactions — public /

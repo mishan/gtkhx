@@ -51,7 +51,7 @@ extern void output_file_info (char *path, char *name, char *creator, char *type,
                               char *comments, const guint8 *date_modify,
                               const guint8 *date_create, guint64 size);
 
-/* Rust-owned struct cached_filelist (hxfiles-recv crate) — the opaque handle +
+/* Rust-owned struct cached_filelist (hxhandlers::recv::files module) — the opaque handle +
  * accessor facade. Allocate with hx_cfl_new, reach the fields through these, free
  * with hx_cfl_free. The FILE_LIST reply's fh accumulation + the file-list emit
  * live in the Rust rcv_task_file_list; C touches cfl only to start a listing

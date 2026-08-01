@@ -9,11 +9,11 @@
 //! transfer state only through the narrow `hx_htxf_*` accessor seam
 //! (`htxf_accessors.c`) plus genuine collaborators (`xfer_delete`,
 //! `gtask_delete_htxf`, the retry timer, `hx_preview_*`, the `resource_len` /
-//! `comment_len` / `hx_file_size` fs primitives, and the `gtkhx-session` emits).
+//! `comment_len` / `hx_file_size` fs primitives, and the `gtkhx-core` emits).
 //!
 //! `struct htxf_conn` is refcounted and touched from both the main thread and
 //! the per-transfer worker, so its storage stays C-owned for now; the accessor
-//! seam is the same getter/setter step the `hxconn` (`htlc_conn`) migration began
+//! seam is the same getter/setter step the `gtkhx-core::conn` (`htlc_conn`) migration began
 //! with. The file-info reply emits the two raw Hotline date stamps straight
 //! through the `file-info` signal — the view (`output_file_info`) formats them —
 //! so no date/locale code lives here. Once a transfer's `htxf` is ready to move,

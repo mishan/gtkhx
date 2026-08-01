@@ -31,7 +31,7 @@ const NB_KIND_POST: i32 = 3;
 use hxmodel::news::node::{hx_news_node_children, hx_news_node_ensure_children, hx_news_node_name};
 
 extern "C" {
-    // hxnews-model C ABI — node accessors (the browser externs these too).
+    // hxmodel::news C ABI — node accessors (the browser externs these too).
     fn hx_news_node_kind(node: *mut c_void) -> i32;
     // news_browser.c bridges — the browser's per-kind icon + the
     // lazy-fetch-on-expand dispatch (keeps fetch_dirlist / fetch_catlist +

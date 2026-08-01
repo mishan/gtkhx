@@ -4,7 +4,7 @@
 //! Four crates, one job. They were split when each replaced its own C file
 //! (`hmac.c`, `cipher.c`, `cipher_aead.c`, `compress.c`); all four of those
 //! are long deleted, none had a C caller left, and `hxnet` — their only
-//! consumer — was reaching past `hxcompress` to depend on `flate2`, `lz4_flex`
+//! consumer — was reaching past `hxcrypto::compress` to depend on `flate2`, `lz4_flex`
 //! and `zstd` directly, so the compression code sat in the dependency graph
 //! twice. Merging removes the duplicate and keeps one auditable crate.
 //!

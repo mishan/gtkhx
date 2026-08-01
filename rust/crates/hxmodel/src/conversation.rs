@@ -20,7 +20,7 @@ use crate::member::HxMemberModel;
 use gtkhx_core::boxed::media_table::{hx_media_table_free, hx_media_table_new};
 
 extern "C" {
-    // hxchat-model — the Rust InputHistory (input line history), C ABI.
+    // hxmodel::chat — the Rust InputHistory (input line history), C ABI.
     fn hx_input_history_new() -> *mut c_void;
     fn hx_input_history_free(hist: *mut c_void);
 }
@@ -34,11 +34,11 @@ pub struct HxConversation {
     /// Authoritative membership. Owned GObject ref (transfer-full); unref'd in
     /// `hx_conversation_free`.
     member_model: *mut c_void,
-    /// Input line history (Rust `InputHistory`, hxchat-model). Owned. Created
+    /// Input line history (Rust `InputHistory`, hxmodel::chat). Owned. Created
     /// here so it's conversation-scoped — a pchat's typed history survives
     /// closing + reopening its window (it's chat state, not view state).
     chat_history: *mut c_void,
-    /// Inline-media token table (Rust `MediaTable`, gtkhx-boxed). Owned. Tokens
+    /// Inline-media token table (Rust `MediaTable`, gtkhx-core::boxed). Owned. Tokens
     /// are monotonic, so re-rendering into a rebuilt view never collides.
     media_table: *mut c_void,
     /// The open window/view, or NULL. Non-owning: the C side (`gchat_free`)
@@ -56,7 +56,7 @@ pub extern "C" fn hx_conversation_new(cid: u32) -> *mut HxConversation {
         .into_glib_ptr();
     let member_model = mm as *mut c_void;
     // SAFETY: hx_input_history_new / hx_media_table_new are the C-ABI
-    // constructors from hxchat-model / gtkhx-boxed; each returns an owned handle.
+    // constructors from hxmodel::chat / gtkhx-core::boxed; each returns an owned handle.
     let (chat_history, media_table) = unsafe { (hx_input_history_new(), hx_media_table_new()) };
     Box::into_raw(Box::new(HxConversation {
         cid,

@@ -321,7 +321,7 @@ cargo_features = 'hxbridge/runtime,hxnet/socks'
 #       crate's default glycin-v3 — enabling both backends at once is a
 #       hard compile_error (src/compat.rs) — so we pass
 #       --no-default-features. Because that flag is workspace-wide, it
-#       also drops the *other* members' defaults; only hxcompress has
+#       also drops the *other* members' defaults; only hxcrypto::compress has
 #       load-bearing ones (lz4 + zstd), so we re-supply exactly those.
 #       Any future member that grows a default feature must be added
 #       here too.
@@ -452,7 +452,7 @@ rust_build = custom_target('rust-workspace',
 
 # HOPE crypto + transport compression (hash / stream / aead / compress).
 # One crate since the step 3 consolidation; the four former archives
-# (-lhxcrypto_hash, -lhxcrypto_stream, -lhxcrypto_aead, -lhxcompress) are
+# (-lhxcrypto_hash, -lhxcrypto_stream, -lhxcrypto_aead, -lhxcrypto::compress) are
 # now -lhxcrypto. Kept as a standalone staticlib because the Tier 1/2
 # crypto + HOPE tests link it directly, GTK-free.
 rust_hxcrypto_dep = declare_dependency(

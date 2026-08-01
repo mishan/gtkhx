@@ -1,13 +1,13 @@
 //! Tracker-specific FFI: the `HxTrackerServer` boxed-payload mirror the
 //! `tracker-server-create` signal delivers, plus the tracker network
-//! entry points and the `gtkhx-boxed` meta deep-copy/free funcs.
+//! entry points and the `gtkhx-core::boxed` meta deep-copy/free funcs.
 
 use crate::tracker::meta::HxTrackerV3Meta;
 use std::ffi::c_char;
 use std::os::raw::c_void;
 
 /// `#[repr(C)]` mirror of `struct _HxTrackerServer` (`tracker_event.h`),
-/// matching `gtkhx-boxed::tracker::HxTrackerServer` (72 bytes). We only
+/// matching `gtkhx-core::boxed::tracker::HxTrackerServer` (72 bytes). We only
 /// read it (in `tracker_server_create`); the C producers fill it.
 #[repr(C)]
 pub struct HxTrackerServer {
@@ -32,7 +32,7 @@ const _: () = {
 };
 
 extern "C" {
-    // gtkhx-boxed: deep copy / free of the typed v3 meta. A row owns a
+    // gtkhx-core::boxed: deep copy / free of the typed v3 meta. A row owns a
     // deep copy so it outlives the borrowed event.
     pub fn hx_tracker_v3_meta_copy(src: *mut HxTrackerV3Meta) -> *mut HxTrackerV3Meta;
     pub fn hx_tracker_v3_meta_free(m: *mut HxTrackerV3Meta);

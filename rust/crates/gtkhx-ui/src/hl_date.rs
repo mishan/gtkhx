@@ -10,7 +10,7 @@
 use hotline_proto::hl_date::{parse_hl_date, HlDate, MAC_TO_UNIX_EPOCH_OFFSET};
 use std::os::raw::c_void;
 
-// The post timestamp type comes from hxnews-model directly now. This module
+// The post timestamp type comes from hxmodel::news directly now. This module
 // used to carry its own `#[repr(C)]` struct mirroring `HxNewsDate` — a second
 // definition kept in sync by hand, which the old `extern "C"` declaration of
 // `hx_news_node_get_date` could not check. One definition, checked by rustc.
