@@ -2011,3 +2011,44 @@ fn the_c_abi_still_sees_a_colour_as_an_integer() {
     );
     assert_eq!(ffi::hxconfig_get_int(c("NICKCOLOR").as_ptr()), 0x00c0_65cb);
 }
+
+#[test]
+fn an_integer_colour_outside_24_bits_is_rejected() {
+    // The integer form is accepted for compatibility, but only over the range
+    // that actually means something: -1, then 0x000000..=0xffffff. Anything
+    // wider would reach the wire and then change meaning on the next save,
+    // because writing masks to 24 bits.
+    for bad in ["0x01000000", "16777216", "-2", "-16777215"] {
+        let dir = TempDir::new("colour-range");
+        dir.write(&format!("version = 1\n[identity]\nnick_color = {bad}\n"));
+
+        let config = Config::load(dir.path());
+        assert_eq!(
+            config.settings().identity.nick_color,
+            NICK_COLOR_NONE,
+            "for {bad}"
+        );
+        let w = config
+            .warnings()
+            .iter()
+            .find(|w| w.path == "identity.nick_color")
+            .unwrap_or_else(|| panic!("no diagnostic for {bad}"));
+        assert!(
+            matches!(w.kind, WarningKind::OutOfRange { .. }),
+            "for {bad}"
+        );
+    }
+
+    // The edges of the valid set are fine.
+    for (text, want) in [("-1", NICK_COLOR_NONE), ("0", 0), ("16777215", 0x00ff_ffff)] {
+        let dir = TempDir::new("colour-range-ok");
+        dir.write(&format!("version = 1\n[identity]\nnick_color = {text}\n"));
+        let config = Config::load(dir.path());
+        assert!(
+            config.warnings().is_empty(),
+            "for {text}: {:?}",
+            config.warnings()
+        );
+        assert_eq!(config.settings().identity.nick_color, want, "for {text}");
+    }
+}

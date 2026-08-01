@@ -472,8 +472,17 @@ impl<'a> Reader<'a> {
         let Some(item) = lookup(self.doc, path) else {
             return;
         };
-        if let Some(n) = item.as_integer() {
-            *out = n.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+        if item.as_integer().is_some() {
+            // Range-checked like any other integer, and the range is exactly
+            // the valid set: -1 for "no colour", then the 24 bits of
+            // 0x00RRGGBB. Accepting anything wider would let a hand-edited
+            // 0x01000000 reach the wire and then change meaning on the next
+            // save, because writing it masks to 24 bits — a value that means
+            // one thing before a save and another after is the quiet kind of
+            // wrong this crate exists to stop.
+            if let Some(v) = self.integer(path, crate::NICK_COLOR_NONE as i64, 0x00ff_ffff) {
+                *out = v as i32;
+            }
             return;
         }
         let Some(text) = item.as_str() else {
