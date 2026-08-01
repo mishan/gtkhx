@@ -892,8 +892,13 @@ impl HxChatView {
             old.disconnect(id);
         }
         if let Some(a) = &adj {
-            let this = self.clone();
+            // Weak: the view holds the adjustment, so a strong clone here
+            // would close a view → adjustment → closure → view cycle.
+            let this = self.downgrade();
             let id = a.connect_value_changed(move |adj| {
+                let Some(this) = this.upgrade() else {
+                    return;
+                };
                 let imp = this.imp_();
                 if imp.updating_adj.get() {
                     return;
@@ -1621,8 +1626,21 @@ impl HxChatView {
         let drag = gtk4::GestureDrag::new();
         drag.set_button(gtk4::gdk::BUTTON_PRIMARY);
 
-        let this = self.clone();
+        // Weak throughout this function and the two below it. Every one of
+        // these closures is owned by a controller that the view itself owns,
+        // so a strong clone closes a view → controller → closure → view cycle
+        // and the view can never reach refcount zero — it and its whole
+        // message buffer outlive the window. `gtkhx-ui`'s user list documents
+        // the same hazard at its own `connect_activate`.
+        //
+        // An upgrade failure is unreachable in practice: the controller cannot
+        // outlive the widget that owns it, so the closure cannot run after the
+        // widget is gone. Returning early is simply the honest thing to write.
+        let this = self.downgrade();
         drag.connect_drag_begin(move |g, x, y| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             let _ = g;
             // The separator wins over selection: it lives in the gutter,
             // where a stray text drag is cheap to redo but a divider you
@@ -1650,8 +1668,11 @@ impl HxChatView {
             trace_clicks(|| format!("drag_begin at ({x:.0},{y:.0})"));
         });
 
-        let this = self.clone();
+        let this = self.downgrade();
         drag.connect_drag_update(move |g, dx, dy| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             if this.imp_().moving_separator.get() {
                 if let Some((sx, _)) = g.start_point() {
                     this.drag_separator_to(sx + dx);
@@ -1679,8 +1700,11 @@ impl HxChatView {
             this.extend_selection_to(px, py);
         });
 
-        let this = self.clone();
+        let this = self.downgrade();
         drag.connect_drag_end(move |_, _, _| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             if this.imp_().moving_separator.get() {
                 this.imp_().moving_separator.set(false);
                 return;
@@ -1708,8 +1732,11 @@ impl HxChatView {
         // every text view does and what makes "click to dismiss" work.
         let click = gtk4::GestureClick::new();
         click.set_button(gtk4::gdk::BUTTON_PRIMARY);
-        let this = self.clone();
+        let this = self.downgrade();
         click.connect_released(move |_, n_press, _, _| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             // A click with no drag dismisses whatever was selected.
             //
             // The first cut had this backwards — it cleared only when
@@ -1736,8 +1763,11 @@ impl HxChatView {
         // does. Handled on `pressed` rather than `released` so the drag
         // gesture's own begin — which fires first and collapses the
         // selection to a caret — doesn't wipe the result.
-        let this = self.clone();
+        let this = self.downgrade();
         click.connect_pressed(move |_, n_press, x, y| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             trace_clicks(|| format!("pressed n_press={n_press} at ({x:.0},{y:.0})"));
             if n_press < 2 {
                 return;
@@ -1771,8 +1801,11 @@ impl HxChatView {
         // (chat-history's sentinel and inline media). Emitted on
         // release, and only when no drag happened, so selecting text
         // doesn't also activate whatever was under the press.
-        let this = self.clone();
+        let this = self.downgrade();
         click.connect_released(move |g, n_press, x, y| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             if n_press != 1 || this.has_selection() {
                 return;
             }
@@ -1792,9 +1825,9 @@ impl HxChatView {
         // runs before the focus path. It consumes the key only when this
         // view actually has a selection, so Ctrl+C in the input still
         // behaves normally the rest of the time.
-        let this = self.clone();
+        // No capture needed: the handler is handed the view as its argument.
         self.connect_root_notify(move |v| v.rebind_root_copy_shortcut());
-        this.rebind_root_copy_shortcut();
+        self.rebind_root_copy_shortcut();
     }
 
     /// (Re)install the capture-phase Ctrl+C handler on the current root.
@@ -1813,8 +1846,15 @@ impl HxChatView {
         };
         let key = gtk4::EventControllerKey::new();
         key.set_propagation_phase(gtk4::PropagationPhase::Capture);
-        let this = self.clone();
+        // Weak, even though this controller goes on the *root* rather than on
+        // the view, so it is not a self-cycle. It would still pin the view
+        // alive for as long as the window it is attached to — and the removal
+        // above only runs on a re-root.
+        let this = self.downgrade();
         key.connect_key_pressed(move |c, keyval, _, state| {
+            let Some(this) = this.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             let ctrl = state.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
             let is_c = keyval == gtk4::gdk::Key::c || keyval == gtk4::gdk::Key::C;
             if ctrl && is_c && this.has_selection() {
@@ -2135,8 +2175,11 @@ impl HxChatView {
     fn install_zoom_bindings(&self) {
         // Ctrl + scroll.
         let scroll = gtk4::EventControllerScroll::new(gtk4::EventControllerScrollFlags::VERTICAL);
-        let this = self.clone();
+        let this = self.downgrade();
         scroll.connect_scroll(move |c, _dx, dy| {
+            let Some(this) = this.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
             if !c
                 .current_event_state()
                 .contains(gtk4::gdk::ModifierType::CONTROL_MASK)
@@ -2172,18 +2215,24 @@ impl HxChatView {
             ("<Control>minus", -1),
             ("<Control>KP_Subtract", -1),
         ] {
-            let this = self.clone();
+            // Five iterations, so this loop alone was five of the leaked
+            // references.
+            let this = self.downgrade();
             let action = gtk4::CallbackAction::new(move |_, _| {
-                this.zoom_step(delta);
+                if let Some(this) = this.upgrade() {
+                    this.zoom_step(delta);
+                }
                 glib::Propagation::Stop
             });
             if let Some(trigger) = gtk4::ShortcutTrigger::parse_string(accel) {
                 controller.add_shortcut(gtk4::Shortcut::new(Some(trigger), Some(action)));
             }
         }
-        let this = self.clone();
+        let this = self.downgrade();
         let reset = gtk4::CallbackAction::new(move |_, _| {
-            this.set_zoom_permille(1000);
+            if let Some(this) = this.upgrade() {
+                this.set_zoom_permille(1000);
+            }
             glib::Propagation::Stop
         });
         if let Some(trigger) = gtk4::ShortcutTrigger::parse_string("<Control>0") {
@@ -2237,8 +2286,11 @@ impl HxChatView {
     fn install_link_handlers(&self) {
         // Hover: pointer cursor over a link, default elsewhere.
         let motion = gtk4::EventControllerMotion::new();
-        let this = self.clone();
+        let this = self.downgrade();
         motion.connect_motion(move |_, x, y| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             let on_sep = this.on_separator(x) || this.imp_().moving_separator.get();
             let target = if on_sep {
                 None
@@ -2267,8 +2319,11 @@ impl HxChatView {
                 this.set_cursor_from_name(Some(want));
             }
         });
-        let this = self.clone();
+        let this = self.downgrade();
         motion.connect_leave(move |_| {
+            let Some(this) = this.upgrade() else {
+                return;
+            };
             // Drop the hover, or an underline is left behind when the
             // pointer leaves the widget without crossing off the target.
             if this.imp_().hovered.borrow().is_some() {
@@ -2289,8 +2344,11 @@ impl HxChatView {
         for button in [gtk4::gdk::BUTTON_SECONDARY, gtk4::gdk::BUTTON_MIDDLE] {
             let click = gtk4::GestureClick::new();
             click.set_button(button);
-            let this = self.clone();
+            let this = self.downgrade();
             click.connect_pressed(move |g, _, x, y| {
+                let Some(this) = this.upgrade() else {
+                    return;
+                };
                 // word-click first: gtkurl's handler filters on
                 // secondary/middle and pops the URL menu itself, and the
                 // media handler wants the token. Emitting keeps every
@@ -2487,13 +2545,16 @@ impl HxChatView {
         // doing nothing — which is what Select All was doing.
         let copy = menu_row(&crate::tr("Copy"), self.has_selection());
         {
-            let this = self.clone();
-            // Weak: the button owns this closure and the popover owns
-            // the button, so a strong popover ref here is a cycle that
-            // outlives the unparent and leaks the view with it.
+            // Weak on both counts: the button owns this closure and the
+            // popover owns the button, so a strong ref to either the popover
+            // or the view is a cycle that outlives the unparent and leaks the
+            // view with it.
+            let this = self.downgrade();
             let weak = popover.downgrade();
             copy.connect_clicked(move |_| {
-                this.copy_selection_to(ClipboardTarget::Clipboard);
+                if let Some(this) = this.upgrade() {
+                    this.copy_selection_to(ClipboardTarget::Clipboard);
+                }
                 if let Some(p) = weak.upgrade() {
                     p.popdown();
                 }
@@ -2503,10 +2564,12 @@ impl HxChatView {
 
         let select_all = menu_row(&crate::tr("Select All"), true);
         {
-            let this = self.clone();
+            let this = self.downgrade();
             let weak = popover.downgrade();
             select_all.connect_clicked(move |_| {
-                this.select_all();
+                if let Some(this) = this.upgrade() {
+                    this.select_all();
+                }
                 if let Some(p) = weak.upgrade() {
                     p.popdown();
                 }

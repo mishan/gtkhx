@@ -368,6 +368,36 @@ agree on: whether a delimiter is live at all.
 
 ## 5. Interaction
 
+### Every controller callback captures the view weakly
+
+`constructed` installs three groups of gestures, shortcuts and motion
+handlers, and the view owns all of them. A closure that captures a strong
+clone of the view therefore closes a cycle — view owns controller owns
+closure owns view — and the view can never reach refcount zero. It is not a
+subtle leak: the whole message buffer, the media table and the Pango
+measurer go with it, once per chat window ever opened.
+
+That is what the codebase did, at eighteen sites. Seventeen were installed
+during construction (the zoom shortcut loop alone accounted for five, one
+per accelerator), and the eighteenth appeared the first time a scroll
+adjustment was attached. So a freshly built view had a refcount of 19
+before anything had happened to it.
+
+Every one of them is now `self.downgrade()` plus an `upgrade()` at the top
+of the closure, which is the idiom the user list already used and
+documented for the same reason. The upgrade cannot fail in practice — a
+controller does not outlive the widget that owns it, so the closure cannot
+run after the widget is gone — but writing the fallback is cheaper than
+arguing that it is unreachable.
+
+**The reason this survived so long is worth more than the bug.** The smoke
+test in `hxchat-view` asserts exactly this refcount, and had done since the
+widget landed. But GTK 4 has no headless backend, so the test began with an
+`if gtk4::init().is_err() { return; }` — and CI has no display. It reported
+success without executing a line of itself, on every run, for the entire
+life of the defect. CI now runs the Rust suite under `xvfb-run`, and a
+missing display is a failure rather than an early return.
+
 ### Selection
 
 Drag-select, double-click word select, triple-click line select, and

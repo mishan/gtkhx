@@ -208,13 +208,23 @@ use gtk4::glib::translate::IntoGlib;
 
 #[test]
 fn gtk_class_and_construction_smoke() {
-    if gtk4::init().is_err() {
-        eprintln!(
-            "skipped: no display, GTK could not be initialised \
-             (run this on a desktop session to exercise it)"
-        );
-        return;
-    }
+    // No display is a failure, not a skip.
+    //
+    // This used to return early with a message, which made it pass on CI
+    // without running a line of it — so it read as coverage on the dashboard
+    // while covering nothing, and the reference-cycle leak it exists to catch
+    // sat undetected until someone ran the suite on a desktop. A skip that
+    // looks like a pass is worse than no test at all; the repo has a rule
+    // about this and it applies to Rust tests as much as to the C ones.
+    //
+    // CI now supplies a display (`xvfb-run`, see .github/workflows/tests.yml),
+    // so failing here means the harness is misconfigured, which is exactly
+    // what we want to hear about.
+    assert!(
+        gtk4::init().is_ok(),
+        "GTK could not be initialised — this test needs a display. \
+         Run it under `xvfb-run -a` (with GDK_BACKEND=x11), the way CI does."
+    );
 
     let t = crate::view::HxChatView::static_type();
 
@@ -348,10 +358,21 @@ fn gtk_class_and_construction_smoke() {
         assert!(!mark.is_null(), "append_indent returned no mark");
 
         // Still alive, still a widget, still ours to sink.
+        //
+        // A count above 1 means something took a reference and never gave it
+        // back. The usual cause is a closure that captured a strong clone of
+        // the view and was then handed to an event controller the view itself
+        // owns — a cycle, so the view can never be finalized and its whole
+        // message buffer outlives the window. That is what this caught: the
+        // gesture and shortcut handlers installed in `constructed` accounted
+        // for seventeen of them, and the adjustment's value-changed handler
+        // for one more. Weak captures throughout are the fix.
         assert_eq!(
             (*as_obj).ref_count,
             1,
-            "an FFI call leaked or dropped a reference"
+            "something took a reference to the view and never released it — \
+             look for a strong self.clone() captured into a closure the view \
+             transitively owns"
         );
         assert_ne!(
             gtk4::glib::gobject_ffi::g_object_is_floating(as_obj),
@@ -368,9 +389,24 @@ fn gtk_class_and_construction_smoke() {
             "the widget was destroyed by an FFI call"
         );
 
-        // Clean up the way chat.c would.
+        // Clean up the way chat.c would — and check the view actually dies.
+        //
+        // The refcount assertion above is a proxy for the property that
+        // matters, and a proxy a future cycle could satisfy by accident (drop
+        // a reference somewhere else and the arithmetic works out again). So
+        // watch the object through a weak pointer, which GLib clears in
+        // `finalize`, and require it to have been cleared. That fails on any
+        // cycle, whatever the count happened to read.
+        let mut watch: *mut std::ffi::c_void = as_obj as *mut _;
+        gtk4::glib::gobject_ffi::g_object_add_weak_pointer(as_obj, &mut watch);
         gtk4::glib::gobject_ffi::g_object_ref_sink(as_obj);
         gtk4::glib::gobject_ffi::g_object_unref(as_obj);
+        assert!(
+            watch.is_null(),
+            "the view survived its last unref — something still holds a \
+             reference to it, so every chat view ever opened leaks along \
+             with its message buffer"
+        );
     }
 
     // --- selection + zoom (C3) -------------------------------------

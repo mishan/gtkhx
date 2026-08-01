@@ -144,8 +144,8 @@ jobs:
               # fingerprint (the build cache stays valid). mold is installed
               # in the gtkhx-ci-base image.
 
-              # All build/test deps (base + GStreamer) are pre-installed in
-              # the gtkhx-ci-base image (published from the hotline-docker
+              # All build/test deps (base + GStreamer + Xvfb) are pre-installed
+              # in the gtkhx-ci-base image (published from the hotline-docker
               # repo) — no per-run dnf install. Keep that image in sync with
               # this build if a new dep is added.
 
@@ -166,7 +166,12 @@ jobs:
               meson compile -C build-novoice
               meson test -C build-novoice --suite unit --suite proto \
                 --print-errorlogs
-              ( cd rust && cargo test --workspace \
+              # xvfb-run so the widget tests actually construct widgets rather
+              # than skipping. GDK_BACKEND=x11 pins the backend: the container
+              # has no Wayland socket, and letting GDK fall through its backend
+              # list turns a misconfigured display into a confusing failure
+              # somewhere else.
+              ( cd rust && GDK_BACKEND=x11 xvfb-run -a cargo test --workspace \
                   --exclude hxvoice --exclude hxvoice-runtime \
                   --ignore-rust-version )
 
@@ -180,7 +185,8 @@ jobs:
               meson test -C build --suite unit --suite proto \
                 --print-errorlogs
               ( cd rust \
-                && cargo test --workspace --ignore-rust-version \
+                && GDK_BACKEND=x11 xvfb-run -a cargo test --workspace \
+                     --ignore-rust-version \
                 && cargo test -p hxnet --features socks --ignore-rust-version )
               # glycin-v2 (1+ loaders) backend — compile-only lib tests.
               ( cd rust && cargo test -p hx-image-decode --lib \
