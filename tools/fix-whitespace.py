@@ -42,6 +42,13 @@ TAB_WIDTH = 4
 EXCLUDE_BASENAMES = {"Makefile", "GNUmakefile", "makefile"}
 # Suffixes to skip: GNU make fragments, and Mac resource blobs (binary).
 EXCLUDE_SUFFIXES = (".mk", ".rsrc")
+# Directories holding captured input for tests. Their bytes are the fixture —
+# tidying them is changing the thing under test. The settings-migration corpus
+# is the live example: a real gtkhxrc whose TIMESTAMPFORMAT value ends in a
+# space, which is exactly what a test asserts survives the migration, because
+# GKeyFile did not escape a trailing space and a reader that trimmed would jam
+# the timestamp against the message text.
+EXCLUDE_DIRS = ("rust/crates/hxconfig/fixtures/",)
 
 
 def tracked_files() -> list[str]:
@@ -54,6 +61,8 @@ def tracked_files() -> list[str]:
 def is_excluded(path: str) -> bool:
     base = os.path.basename(path)
     if base in EXCLUDE_BASENAMES:
+        return True
+    if path.startswith(EXCLUDE_DIRS):
         return True
     return path.endswith(EXCLUDE_SUFFIXES)
 
