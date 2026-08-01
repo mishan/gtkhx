@@ -77,12 +77,13 @@ Two wrinkles surfaced, both the kind of thing a grep for field accesses
 doesn't find:
 
 1. **Preference variables had bound to an address inside the embedded
-   struct.** The static `cfgvars[]` table pointed its ICON and NICK
-   entries at `&the_session.htlc.icon` and friends — compile-time
-   constants only while the struct is embedded. Those slots are now NULL
-   in the static table and wired at runtime by
-   `hx_options_bind_identity()`, called once right after the connection is
-   allocated and before any preference read or write.
+   struct.** The static settings table pointed its ICON and NICK entries at
+   `&the_session.htlc.icon` and friends — compile-time constants only while
+   the struct is embedded, so the two slots had to be patched at runtime once
+   the connection existed. That binder is gone with the settings table: the
+   nickname and icon are ordinary preferences with their own storage, copied
+   into the connection at load rather than aliasing it. See
+   [../preferences.md](../preferences.md).
 2. **The integration-test harness deliberately embedded its connection in
    a `session`** to keep `container_of` honest. It now owns explicit
    storage and re-arms the back-pointer after each per-test `memset`.

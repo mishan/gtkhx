@@ -70,6 +70,7 @@ use hxtask as _;
 use hx_image_decode as _;
 use hxbookmarks as _;
 use hxchat_view as _;
+use hxconfig as _;
 use hxfiles_xfer as _;
 use hxhfs as _;
 use hxmacres as _;

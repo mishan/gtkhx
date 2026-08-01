@@ -5,7 +5,6 @@
 
 extern char *server_addr;
 extern guint16 server_port;
-extern struct log *server_log;
 
 extern int connected;
 

@@ -1,13 +1,13 @@
 /*
  * cfgkeys.h — config-key string constants.
  *
- * The cfgvars[] table in options.c is keyed by short upper-case strings
- * ("FONT", "ICON", "THEME", ...). The same strings appear at the call
- * sites where the dialog rows are built (pref_*_row("FONT", ...)) and
- * where code reaches into the table by name (cfgvar_for_name("FONT")).
- * Repeating the literal at every site is a typo magnet and makes
- * grep-based refactors brittle: misspelling "FONT" as "FNT" compiles
- * cleanly, runs, and silently drops the pref.
+ * Preferences are addressed by short upper-case strings ("FONT", "ICON",
+ * "THEME", ...) — the keys the pre-TOML settings file used, kept as the
+ * by-name vocabulary because they are what a caller can spell without looking
+ * anything up. hxconfig resolves them to schema paths through the migration
+ * map it already had to know them all for. Repeating the literal at every site
+ * is a typo magnet and makes grep-based refactors brittle: misspelling "FONT"
+ * as "FNT" compiles cleanly, runs, and silently drops the pref.
  *
  * Centralize the keys here as #defines so:
  *   1. The compiler still folds them into a single .rodata copy.
@@ -16,14 +16,11 @@
  *   3. The full set of config keys is discoverable in one place,
  *      grouped by what they configure.
  *
- * Anything that touches a cfgvar by string name should use these
- * constants rather than hard-coding the literal. The cfgvars[] table
- * uses them as initializer values, so its alphabetic-sort invariant is
- * preserved (the literals collapse to the same bytes either way).
- *
- * Adding a new pref: define the key here, add the cfgvars[] entry, and
- * the cfgvars_assert_sorted() check at startup will catch a misordered
- * insert before bsearch does anything subtle.
+ * Adding a new preference: define the key here, add the field and its path to
+ * hxconfig's schema and field table, add the key to its migration map (or list
+ * the path in NEW_PATHS to say that defaulting is intended), and mirror it in
+ * prefs_mirror.c if C still needs to read it. hxconfig's coverage tests fail
+ * if either half is forgotten.
  */
 
 #ifndef GTKHX_CFGKEYS_H
@@ -123,9 +120,6 @@
 #define CFG_THEME_LIGHT "light"
 #define CFG_THEME_DARK "dark"
 
-/* Logging (currently #if-0'd out, kept here for symmetry) */
-#define CFG_LOGGING "LOGGING"
-
 /* xtext autocopy controls — Settings → Advanced → Auto Copy
  * Behavior. Three independent toggles for the drag-end clipboard
  * behaviour. See chat_view.h:hx_chat_view_set_autocopy_* for the per-field
@@ -146,24 +140,26 @@
  * implicitly matched so this list is purely additional. */
 #define CFG_HIGHLIGHT_WORDS "HIGHLIGHTWORDS"
 
-/* Window geometry — four windows × (w, h) + an OPEN flag.
- * Names match the historic gtkhxrc keys; consumers always use these
- * five base names so a global 5x5 sweep still finds every reference. */
+/* Window geometry — four windows × (w, h). Names match the historic
+ * gtkhxrc keys.
+ *
+ * The matching OPENCHAT / OPENNEWS / OPENTASKS / OPENUSERS keys are
+ * gone. They looked like user intent and were not: each defaulted to 1,
+ * each panel set its own the first time it was constructed, and nothing
+ * ever cleared one, so after first run they were 1 for everybody. No
+ * setting exposed them either. The runtime "has this panel been built"
+ * flag they shadowed now lives with the panels, in panel_registry.h. */
 #define CFG_CHAT_XSIZE "CHATXSIZE"
 #define CFG_CHAT_YSIZE "CHATYSIZE"
-#define CFG_OPEN_CHAT "OPENCHAT"
 
 #define CFG_NEWS_XSIZE "NEWSXSIZE"
 #define CFG_NEWS_YSIZE "NEWSYSIZE"
-#define CFG_OPEN_NEWS "OPENNEWS"
 
 #define CFG_TASK_XSIZE "TASKXSIZE"
 #define CFG_TASK_YSIZE "TASKYSIZE"
-#define CFG_OPEN_TASKS "OPENTASKS"
 
 #define CFG_USER_XSIZE "USERXSIZE"
 #define CFG_USER_YSIZE "USERYSIZE"
-#define CFG_OPEN_USERS "OPENUSERS"
 
 /* Toolbar window. gtkhx_prefs.geo.tool has always been written
  * via gtkhx_save_window_positions, but for years no key existed
@@ -200,8 +196,5 @@
  * gtkhx_theme.{c,h}, docs/theming.md,
  * docs/theming-file-format.md. */
 #define CFG_THEME_NAME "THEMENAME"
-
-/* GKeyFile section name for the prefs file. */
-#define CFG_KEYFILE_GROUP "gtkhx"
 
 #endif /* ndef GTKHX_CFGKEYS_H */

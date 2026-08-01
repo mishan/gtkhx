@@ -109,29 +109,24 @@ extern gboolean hx_conn_has_cap (const struct htlc_conn *h, guint64 cap);
  * USER_CHANGE echoes. (The old status-colour field `color` was write-only and
  * has been removed.)
  *
- * hx_conn_icon_ptr returns the raw address of the icon field: the ICON cfgvar
- * (options.c) binds the prefs read/write path to a stable guint16* and can't go
- * through a value accessor. It's the deliberate escape hatch for that one
- * pointer-based consumer; the Rust owner returns a raw
- * pointer into its struct here. Everything else uses the value get/set. */
+ * Both are plain value accessors. The raw-address escape hatches that used to
+ * sit beside them existed for one consumer — the settings binder that aliased
+ * the nickname and icon preferences onto this struct's storage — and went with
+ * it. Identity is copied into the connection now, never aliased. */
 extern guint16 hx_conn_uid (const struct htlc_conn *h);
 extern void hx_conn_set_uid (struct htlc_conn *h, guint16 v);
 extern guint16 hx_conn_icon (const struct htlc_conn *h);
 extern void hx_conn_set_icon (struct htlc_conn *h, guint16 v);
-extern guint16 *hx_conn_icon_ptr (struct htlc_conn *h);
 extern guint32 hx_conn_nick_color (const struct htlc_conn *h);
 extern void hx_conn_set_nick_color (struct htlc_conn *h, guint32 v);
 
 /* name: our display nick (NUL-terminated, <= 31 chars). login: our account
  * login (set at connect, not read back in production — kept as a field only so
  * the SELFINFO no-overflow test can sentinel the buffer adjacent to name).
- * hx_conn_name_buf returns the writable name buffer for the NICK cfgvar, whose
- * prefs read/write path stores a stable char* (the string counterpart of
- * hx_conn_icon_ptr); everything else reads via hx_conn_name / writes via
- * hx_conn_set_name (which truncates to the field capacity). */
+ * Read via hx_conn_name, write via hx_conn_set_name (which truncates to the
+ * field capacity). */
 extern const char *hx_conn_name (const struct htlc_conn *h);
 extern void hx_conn_set_name (struct htlc_conn *h, const char *v);
-extern char *hx_conn_name_buf (struct htlc_conn *h);
 extern void hx_conn_set_login (struct htlc_conn *h, const char *v);
 
 /* ---- Login lifecycle flags -----------------------------------------------

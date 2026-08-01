@@ -62,6 +62,24 @@ macro_rules! field_table {
         /// Just the paths, in the same order. Same expansion as `FIELDS`, so
         /// the two cannot disagree.
         pub const PATHS: &[&str] = &[ $($path),+ ];
+
+        /// The value at `path`, or `None` if the schema has no such path.
+        pub(crate) fn get_val(s: &Settings, path: &str) -> Option<Val> {
+            match path {
+                $( $path => Some(s.$($f).+.to_val()), )+
+                _ => None,
+            }
+        }
+
+        /// Set the value at `path`. Returns whether it actually changed, so a
+        /// caller can skip the work a no-op change would otherwise trigger —
+        /// a wire packet, in the nickname's case.
+        pub(crate) fn set_val(s: &mut Settings, path: &str, v: &Val) -> bool {
+            match path {
+                $( $path => s.$($f).+.set_from(v), )+
+                _ => false,
+            }
+        }
     };
 
     (@kind flag)     => { Kind::Flag };
@@ -77,6 +95,154 @@ macro_rules! field_table {
 /// The kind of value at `path`, or `None` if the schema has no such path.
 pub fn kind_of(path: &str) -> Option<Kind> {
     FIELDS.iter().find(|(p, _)| *p == path).map(|(_, k)| *k)
+}
+
+// --------------------------------------------------- by-path accessors --
+//
+// A single erased value type, so the field table can generate a getter and a
+// setter without dispatching on kind at every site. Each field type says how
+// to project itself into a `Val` and how to take one back; the macro then only
+// has to name the field.
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Val {
+    Flag(bool),
+    Int(i64),
+    Text(String),
+    List(Vec<String>),
+}
+
+pub(crate) trait FieldValue {
+    fn to_val(&self) -> Val;
+    /// Take a value, returning whether it differed from what was there.
+    fn set_from(&mut self, v: &Val) -> bool;
+}
+
+/// Assign and report whether anything moved.
+fn replace_if_changed<T: PartialEq>(slot: &mut T, new: T) -> bool {
+    if *slot == new {
+        return false;
+    }
+    *slot = new;
+    true
+}
+
+impl FieldValue for bool {
+    fn to_val(&self) -> Val {
+        Val::Flag(*self)
+    }
+    fn set_from(&mut self, v: &Val) -> bool {
+        match v {
+            Val::Flag(b) => replace_if_changed(self, *b),
+            // The old by-name setter took an int for a boolean, and the
+            // Settings pages still do. Anything non-zero is true, as C reads it.
+            Val::Int(i) => replace_if_changed(self, *i != 0),
+            _ => false,
+        }
+    }
+}
+
+/// The integer field types differ only in their range, so the conversion is
+/// one macro rather than three near-identical impls. Out-of-range input is
+/// clamped rather than rejected: this path is a program calling a setter, not
+/// a user editing a file, and there is no one to report a diagnostic to.
+macro_rules! int_field {
+    ($t:ty) => {
+        impl FieldValue for $t {
+            fn to_val(&self) -> Val {
+                Val::Int(*self as i64)
+            }
+            fn set_from(&mut self, v: &Val) -> bool {
+                let Val::Int(i) = v else {
+                    return false;
+                };
+                let clamped = (*i).clamp(<$t>::MIN as i64, <$t>::MAX as i64) as $t;
+                replace_if_changed(self, clamped)
+            }
+        }
+    };
+}
+
+int_field!(i32);
+int_field!(u32);
+int_field!(u16);
+
+impl FieldValue for String {
+    fn to_val(&self) -> Val {
+        Val::Text(self.clone())
+    }
+    fn set_from(&mut self, v: &Val) -> bool {
+        match v {
+            Val::Text(t) => replace_if_changed(self, t.clone()),
+            _ => false,
+        }
+    }
+}
+
+/// A list reads and writes as one comma-separated string across the C ABI,
+/// because that is the shape the old keys had and the Settings pages still
+/// speak. The schema stores a real array — the comma is a boundary format
+/// here, not a storage decision.
+impl FieldValue for Vec<String> {
+    fn to_val(&self) -> Val {
+        Val::List(self.clone())
+    }
+    fn set_from(&mut self, v: &Val) -> bool {
+        match v {
+            Val::List(l) => replace_if_changed(self, l.clone()),
+            Val::Text(t) => replace_if_changed(self, crate::legacy::split_list(t)),
+            _ => false,
+        }
+    }
+}
+
+impl FieldValue for ColorScheme {
+    fn to_val(&self) -> Val {
+        Val::Text(self.as_str().to_string())
+    }
+    fn set_from(&mut self, v: &Val) -> bool {
+        let Val::Text(t) = v else {
+            return false;
+        };
+        match ColorScheme::parse(t) {
+            Some(scheme) => replace_if_changed(self, scheme),
+            // An unknown name leaves the setting alone. The Settings page
+            // offers three fixed choices, so this is a caller bug rather than
+            // anything a user can reach.
+            None => false,
+        }
+    }
+}
+
+pub(crate) fn get_bool(s: &Settings, path: &str) -> bool {
+    matches!(get_val(s, path), Some(Val::Flag(true)))
+}
+
+pub(crate) fn get_int(s: &Settings, path: &str) -> i32 {
+    match get_val(s, path) {
+        Some(Val::Int(i)) => i.clamp(i32::MIN as i64, i32::MAX as i64) as i32,
+        _ => 0,
+    }
+}
+
+pub(crate) fn get_string(s: &Settings, path: &str) -> String {
+    match get_val(s, path) {
+        Some(Val::Text(t)) => t,
+        Some(Val::List(l)) => l.join(","),
+        _ => String::new(),
+    }
+}
+
+pub(crate) fn set_bool(s: &mut Settings, path: &str, v: bool) -> bool {
+    set_val(s, path, &Val::Flag(v))
+}
+
+pub(crate) fn set_int(s: &mut Settings, path: &str, v: i32) -> bool {
+    set_val(s, path, &Val::Int(v as i64))
+}
+
+pub(crate) fn set_string(s: &mut Settings, path: &str, v: &str) -> bool {
+    set_val(s, path, &Val::Text(v.to_string()))
 }
 
 field_table! {

@@ -40,6 +40,7 @@
 #include "chat.h"
 #include "tasks.h"
 #include "options.h"
+#include "cfgkeys.h"
 #ifdef HAVE_VOICE
 #include "voice_ptt.h"
 #endif
@@ -201,9 +202,10 @@ quit_confirm_response (AdwAlertDialog *dialog, const char *response,
 
 /* Debounced toolbar-resize save. notify::default-width / -height
  * fire on every pixel of a user drag — coalesce them on a 500 ms
- * idle so the prefs write runs once when the user lets go. The
- * actual save uses the existing save path: gtk_window_get_default_size
- * → gtkhx_prefs.geo.tool → prefs_write. */
+ * idle so the save runs once when the user lets go. The values go
+ * through the by-name setters because gtkhx_prefs is a read-only
+ * mirror of what Rust holds; writing the struct directly would be
+ * discarded by the next refresh. */
 static guint toolbar_size_save_idle = 0;
 
 static gboolean
@@ -219,12 +221,12 @@ on_toolbar_size_save_idle (gpointer data)
 
     gtk_window_get_default_size (GTK_WINDOW (toolbar_window), &w, &h);
     if (w > 0) {
-        gtkhx_prefs.geo.tool.xsize = w;
+        gtkhx_prefs_set_int (CFG_TOOL_XSIZE, w);
     }
     if (h > 0) {
-        gtkhx_prefs.geo.tool.ysize = h;
+        gtkhx_prefs_set_int (CFG_TOOL_YSIZE, h);
     }
-    prefs_write ();
+    hx_prefs_save_soon ();
     return G_SOURCE_REMOVE;
 }
 
@@ -235,7 +237,7 @@ on_toolbar_size_notify (GObject *object, GParamSpec *pspec, gpointer data)
     (void)pspec;
     (void)data;
     /* Debounce, not throttle: cancel + reschedule on every notify
-     * so a drag-resize burst collapses to one prefs_write 500 ms
+     * so a drag-resize burst collapses to one save 500 ms
      * after the user lets go, not one every 500 ms across the
      * drag. Same fix as dock_layout's request_save. */
     if (toolbar_size_save_idle != 0) {
@@ -1200,7 +1202,7 @@ create_toolbar_window (session *sess)
     gtk_widget_set_sensitive (disconnect_btn, FALSE);
 
     /* Close-request → close_toolbar_window, which calls hx_quit() so
-     * the prefs_write + position-save pass runs before the
+     * the settings-save + position-capture pass runs before the
      * GtkApplication unwinds the last window. */
     g_signal_connect (toolbar_window, "close-request",
                       G_CALLBACK (close_toolbar_window), 0);
@@ -1212,8 +1214,8 @@ create_toolbar_window (session *sess)
      * (or quits via a path that skips hx_quit), no capture
      * happens and the size reverts on next launch. Mirroring the
      * undocked-window approach: connect notify::default-width
-     * and -height; the handler debounces a save_geo + prefs_write
-     * on a 500 ms idle. */
+     * and -height; the handler debounces the size write on a 500 ms
+     * idle. */
     g_signal_connect (toolbar_window, "notify::default-width",
                       G_CALLBACK (on_toolbar_size_notify), NULL);
     g_signal_connect (toolbar_window, "notify::default-height",

@@ -46,6 +46,7 @@
 #include "voice_panel.h"
 #endif
 #include "inline_media_attach.h"
+#include "panel_registry.h"
 
 /* GtkAccelGroup / gtk_accel_group_new /
  * gtk_widget_add_accelerator / gtk_window_add_accel_group are gone
@@ -268,7 +269,7 @@ set_app_action_enabled (const char *name, gboolean enabled)
 void
 setbtns (session *sess, int stat)
 {
-    if (gtkhx_prefs.geo.users.open) {
+    if (hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
         gtk_widget_set_sensitive (msgbtn, stat);
         gtk_widget_set_sensitive (infobtn, stat);
         gtk_widget_set_sensitive (chatbtn, stat);
@@ -295,7 +296,7 @@ setbtns (session *sess, int stat)
             gtk_widget_set_visible (banbtn, FALSE);
         }
     }
-    if (gtkhx_prefs.geo.news.open) {
+    if (hx_panel_was_constructed (HX_PANEL_ID_NEWS)) {
         gtk_widget_set_sensitive (sess->postButton, stat);
 
         gtk_widget_set_sensitive (sess->reloadButton, stat);

@@ -1,22 +1,24 @@
 # Preferences
 
-This is **mostly a plan**. The preferences system described in the first half
-exists today, and so does the `hxconfig` crate — the schema, the file format,
-the write path, the version check, and the migration from `gtkhxrc` are all
-built and tested. Nothing links the crate yet, so the running client is still
-the system described in the first half, and none of its defects are fixed in a
-shipping binary. Everything from the C mirror onwards is still design.
+Settings live in `rust/crates/hxconfig`: the schema, the TOML file, the write
+path, the version check, and the one-shot migration from `gtkhxrc`. C reads a
+copy through `src/prefs_mirror.c` and writes only through the by-name setters in
+`src/options.c`. The steps still outstanding are P4 onwards in the
+decomposition at the end of this document.
 
-The short version: move settings ownership to Rust, replace `gtkhxrc` with TOML,
-and let the per-connection identity model that multi-connection needs fall out of
-that rather than be bolted onto the current design. See
-[multi-connection.md](multi-connection.md) for what depends on this.
+The short version of what this was for: move settings ownership to Rust,
+replace `gtkhxrc` with TOML, and let the per-connection identity model that
+multi-connection needs fall out of that rather than be bolted onto the previous
+design. See [multi-connection.md](multi-connection.md) for what depends on it.
 
 ---
 
-## How preferences work today
+## How preferences used to work
 
-One global C struct, one static table of pointers into it, and a GKeyFile on disk.
+One global C struct, one static table of pointers into it, and a GKeyFile on
+disk. It is described here because the defects below are what the current
+design is shaped around, and because a `gtkhxrc` in the wild is still read
+once, by the migration.
 
 ```c
 struct cfgvar {
@@ -57,9 +59,10 @@ key-capture dialog) rather than declarative row sequences. Rust pages reach
 preferences through a typed by-name bridge — `gtkhx_prefs_get_bool("MARKDOWN")`
 and friends — with the key strings hand-mirrored into a Rust `mod cfg`.
 
-## What's wrong with it
+## What was wrong with it
 
-Not "it's C". These are concrete defects, most of them found while scoping this.
+Not "it's C". These are concrete defects, most of them found while scoping this
+work. Each is fixed by the design below unless it says otherwise.
 
 **The on-disk format loses data.** The writer builds a fresh `GKeyFile` from the
 table rather than mutating the loaded one, so an unknown key is silently dropped
@@ -95,13 +98,14 @@ immediate null dereference — an ordering dependency the type system cannot
 express.
 
 **The Rust copy of the key names is unchecked.** The names live in a C header and
-again in a Rust `mod cfg`; the value type tags are likewise mirrored by hand. The
-C side is guarded — the same test that enforces the table's sort order also fails
-if an entry names a macro the header doesn't define — but nothing compares the
-Rust copies against C at all. One live consequence: the sound page believes the voice chime toggles vanish from the
-table in a no-voice build and gates its rows on that. They don't — the C table
-keeps them unconditionally, deliberately, so a no-voice build doesn't discard a
-user's saved toggles. So the voice chime rows render in a build with no voice.
+again in a Rust `mod cfg`; the value type tags are likewise mirrored by hand. One
+live consequence: the sound page believed the voice chime toggles vanished from
+the table in a no-voice build and gated its rows on that. They didn't — the keys
+are registered unconditionally, deliberately, so a no-voice build doesn't discard
+a user's saved toggles — so the chime rows rendered in a build with no voice.
+That row now gates on the crate's `voice` feature. The names themselves are
+still hand-mirrored; what guards them is a test that reads `cfgkeys.h` and fails
+if any key it defines has no schema path.
 
 **Some entries are not preferences.** The cumulative-uptime counter is
 accumulated state that a save mutates as a side effect. Eight window-size keys —
@@ -346,11 +350,17 @@ C files, including model-side code. Converting all of them is the right end stat
 and the wrong first move — those files are being ported to Rust anyway, and doing
 both at once means the preferences work lands inside every one of them.
 
-So: **Rust owns the values and the file; C keeps a `#[repr(C)]` mirror struct it
-may read but never write.** Rust refreshes the mirror on every change; the layout
-is pinned by `_Static_assert` on the C side. This is the same idiom the
-connection struct and the boxed signal payloads already use, so it is a pattern
-the codebase knows rather than a new mechanism.
+So: **Rust owns the values and the file; C keeps a mirror struct it may read but
+never write.**
+
+This was drafted the other way round, with Rust owning the mirror's storage as a
+`#[repr(C)]` struct and `_Static_assert`s pinning the layout on both sides — the
+idiom the connection struct and the boxed signal payloads use. What shipped
+keeps the storage in C (`src/prefs_mirror.c`) and repopulates it through by-name
+getters after every change. That buys the same two properties — one write path,
+and a hundred C read sites that keep compiling untouched — and couples the two
+languages not at all: there is no shared layout, so there is nothing to pin and
+nothing to get wrong when a field is added.
 
 What that buys: the `cfgvars[]` address table, the `allocated` ownership bit, the
 null-dereference-if-unbound hazard and the addressability constraint on every
@@ -360,23 +370,24 @@ untouched. Writes have exactly one path, through Rust.
 The mirror is deleted when its last reader is ported. Each file that moves to
 Rust drops its direct reads as it goes.
 
-**But the mirror cannot be read-only until six write sites are dealt with**, and
-this is the one thing that has to be settled before P3 is plannable. C writes
-`gtkhx_prefs` outside the settings code in five files, and four of those writes
-land on persisted state rather than runtime scratch:
+The mirror could not be read-only until six C write sites outside the settings
+code were dealt with, and four of them landed on persisted state rather than
+runtime scratch:
 
 - The chat, tasks, users and news panels each set their "is this panel open"
   runtime flag *and* its persisted shadow field when the panel is constructed.
-  **The shadow field is the storage for the four latch keys being dropped above**,
-  so once those keys are gone these four sites only touch the runtime flag, which
-  never belonged in the preferences struct in the first place. It moves out with
-  them. Four sites resolved by a deletion.
-- The toolbar's resize handler and the save-at-quit path both write the toolbar
-  window's width and height. These are genuinely persisted, genuinely written by
-  C, and there are exactly two of them. They become calls to a Rust setter.
+  The shadow field was the storage for the four latch keys dropped above, so
+  once those keys went these four sites only touched the runtime flag, which
+  never belonged in the preferences struct in the first place. It moved out with
+  them: four sites resolved by a deletion.
+- The toolbar's resize handler and the save-at-quit path both wrote the toolbar
+  window's width and height. Those are genuinely persisted and genuinely written
+  by C, and there were exactly two of them; both are `gtkhx_prefs_set_int` calls
+  now.
 
-So the read-only mirror holds, but only after that cleanup, and P3 has to carry
-it. Tests write the struct directly too, and those want the same treatment.
+A handful of unit tests still define their own `gtkhx_prefs` and write it
+directly, which is fine — they link neither the mirror nor the crate behind it,
+and are only asking `gtkhx_theme.c` to see a theme name.
 
 ### Change notification
 
@@ -387,17 +398,16 @@ moving it:
 - **Two hooks ignore their session argument and reach for the focused session**
   instead — the identity and nickname-colour hooks. Both send on the wire. Under
   multi-connection that is a routing bug, and it is one of the reasons identity
-  needs to stop being a global preference at all.
+  needed to stop being a global preference at all.
 - Only about a quarter of the hooks use their session argument — the ones that
   walk live chat views. The rest take it and ignore it, including one that never
   touches it at all. Those are plain side-effect callbacks and should not pretend
   otherwise.
-- Load-time application is currently accidental: hooks fire only for keys whose
-  file value *differs* from the compiled-in default, so a separate hand-written
-  function exists to re-apply the ones that were skipped. Applying every value
-  once after load removes that whole class of bug. (Two comments in the settings
-  code assert that loading deliberately does *not* run the hooks. They are stale —
-  it does. Worth correcting whether or not this lands.)
+- ~~Load-time application is accidental~~ — **fixed in P3.** Hooks used to fire
+  only for keys whose file value *differed* from the compiled-in default, so a
+  separate hand-written function existed to re-apply the ones that were skipped.
+  Every hook now runs once after the load, which deleted both the bug and the
+  compensator.
 
 ---
 
@@ -581,15 +591,15 @@ Illustrative, not committed. Each step ships on its own.
 |---|---|---|
 | ~~P1~~ | **Done.** `hxconfig` crate: typed schema, TOML load/save through `toml_edit`, atomic write, version check, defaults. Pure Rust, unit-tested, linked by nothing. | — |
 | ~~P2~~ | **Done.** Migration: the legacy reader for both on-disk forms, the key mapping, the one-shot import, and a round-trip test against a captured real `gtkhxrc`. Still linked by nothing. | P1 |
-| P3 | The C mirror and the read/write ABI. `hxconfig` becomes the owner at startup; `cfgvars[]`, the `allocated` bit and the binder are deleted; the mirror is refreshed on change and pinned by `_Static_assert`. Carries the six-write-site cleanup above: the panel-open latches are dropped and their runtime flag moves out of the preferences struct, and the two toolbar-size writes become Rust setter calls. The Rust by-name bridge is reimplemented on top of `hxconfig` so the existing Settings pages keep working unchanged. | P2 |
-| P4 | Change notification: explicit subscriptions replacing `changefunc`, applied uniformly after load. | P3 |
+| ~~P3~~ | **Done.** The C mirror and the read/write ABI. `hxconfig` owns the values from startup; the settings table, the `allocated` bit and the identity binder are deleted; the mirror is refreshed after every change. The panel-open latches went with their keys, and the two toolbar-size writes are setter calls. The by-name bridge is reimplemented on `hxconfig`, so both the C and the Rust Settings pages work unchanged. Change hooks are applied uniformly after load, which absorbed most of P4. | P2 |
+| P4 | Change notification: explicit subscriptions replacing the name → hook table. The "applied uniformly after load" half landed with P3. | P3 |
 | P5 | Identity: global default plus per-connection overrides; the connect path resolves and copies. Delivers M1's identity half. | P3, and the connection collection |
 | P6 | Port the Identity and Voice settings pages to Rust; retire the `draw` pointer framework. | P3 |
 | P7 | Drop the mirror per file as each C reader is ported. Ongoing, not a milestone. | P3 |
 
 P1 and P2 were self-contained and landed with no risk to a running build —
-nothing links the crate, so the binary is byte-identical either way. **P3 is the
-one with a real blast radius**, and it is worth landing alone.
+nothing linked the crate, so the binary was byte-identical either way. P3 was
+the one with a real blast radius, and landed alone.
 
 ---
 

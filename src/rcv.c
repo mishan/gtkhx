@@ -154,8 +154,8 @@ hx_post_login_fetches (struct htlc_conn *htlc)
      * the user switches servers, and reconnect-mode is what
      * happens when the user clicks Reconnect to the same one.
      *
-     * Clamp negative limit values defensively (cfgvars INT
-     * parser doesn't enforce a floor). */
+     * Clamp negative limit values defensively — the setting is a plain
+     * integer with no floor. */
     if (hx_conn_has_cap (htlc, HTLC_CAP_CHAT_HISTORY)) {
         if (hx_conn_chat_history_last_msgid (htlc) > 0) {
             /* Reconnect catch-up — AFTER=last_msgid, no limit. */

@@ -66,6 +66,7 @@
 #include "tray.h"
 #include "sound_events.h"
 #include "options.h"
+#include "cfgkeys.h"
 #include "xfers.h"
 #include "commands.h"
 #include "gtkhx.h"
@@ -608,37 +609,35 @@ gtkhx_config_dir (void)
     return cached;
 }
 
-// Capture size at quit
-static void
-save_geo (GtkWidget *w, Window_Geo *geo)
-{
-    int width, height;
-    if (!w || !gtk_widget_get_realized (w)) {
-        return;
-    }
-    gtk_window_get_default_size (GTK_WINDOW (w), &width, &height);
-    if (width > 0) {
-        geo->xsize = width;
-    }
-    if (height > 0) {
-        geo->ysize = height;
-    }
-}
-
+/* Capture the toolbar window's size at quit.
+ *
+ * Through the by-name setter rather than into gtkhx_prefs directly: that
+ * struct is a read-only mirror of what Rust holds, so a write there would be
+ * discarded by the next refresh and never reach the file. Chat / Users /
+ * Tasks / News panels live inside the toolbar window; their sizes are the dock
+ * layout's business. */
 static void
 gtkhx_save_window_positions (void)
 {
-    save_geo (toolbar_window, &gtkhx_prefs.geo.tool);
-    /* Chat / Users / Tasks / News
-     * panels live inside the toolbar window; per-panel size
-     * persistence is Phase 4 layout restore. */
+    int width = 0, height = 0;
+
+    if (!toolbar_window || !gtk_widget_get_realized (toolbar_window)) {
+        return;
+    }
+    gtk_window_get_default_size (GTK_WINDOW (toolbar_window), &width, &height);
+    if (width > 0) {
+        gtkhx_prefs_set_int (CFG_TOOL_XSIZE, width);
+    }
+    if (height > 0) {
+        gtkhx_prefs_set_int (CFG_TOOL_YSIZE, height);
+    }
 }
 
 void
 hx_quit (void)
 {
     gtkhx_save_window_positions ();
-    prefs_write ();
+    hx_prefs_save_now ();
     dock_layout_shutdown (); /* flush pending debounced save */
     xfers_delete_all ();
     tracker_kill_threads ();
@@ -995,22 +994,20 @@ fe_init (void)
     create_toolbar_window (&the_session);
     init_colors (toolbar_window);
 
-    /* Panels are eager-constructed inside create_toolbar_window;
-     * these init-bit checks just registry-lookup-hit and raise the
-     * corresponding tab, preserving the "open chat when you reconnect"
-     * prefs semantics — the panel becomes the focused tab on launch. */
-    if (gtkhx_prefs.geo.chat.init == 1) {
-        create_chat_window (toolbar_window, &the_session);
-    }
-    if (gtkhx_prefs.geo.news.init == 1) {
-        create_news_window (toolbar_window, &the_session);
-    }
-    if (gtkhx_prefs.geo.users.init == 1) {
-        create_users_window (toolbar_window, &the_session);
-    }
-    if (gtkhx_prefs.geo.tasks.init == 1) {
-        create_tasks_window (toolbar_window, &the_session);
-    }
+    /* Panels are eager-constructed inside create_toolbar_window; these
+     * calls registry-lookup-hit and raise the corresponding tab, so each
+     * panel becomes a focused tab on launch.
+     *
+     * They used to be gated on four persisted "has this panel ever been
+     * opened" keys, which sounded like user intent and were not: the keys
+     * defaulted to 1, each panel set its own on first construction, and
+     * nothing ever cleared one. Every gate was therefore true for every
+     * user after first run. Dropping the keys is behaviour-identical, and
+     * the gates go with them. */
+    create_chat_window (toolbar_window, &the_session);
+    create_news_window (toolbar_window, &the_session);
+    create_users_window (toolbar_window, &the_session);
+    create_tasks_window (toolbar_window, &the_session);
 
     reinit_gtktexts (&the_session);
 }
@@ -1136,7 +1133,7 @@ gtkhx_activate (GtkApplication *app, gpointer user_data)
     }
 
     /* StatusNotifierItem tray icon. Reads the TRAY pref at
-     * register-time; the changed_tray cfgvar callback flips it on/off
+     * register-time; the changed_tray hook flips it on/off
      * as the user toggles the Setting. */
     gtkhx_tray_init (app);
 
@@ -2019,10 +2016,6 @@ hotline_client_init (int argc, char **argv)
      * world) reset the existing one to its fresh state. */
     if (!the_session.htlc) {
         the_session.htlc = hx_conn_new ();
-        /* Bind the ICON / NICK cfgvars to this connection's storage now that
-         * it exists (their static table slots are NULL — see options.c). Must
-         * precede any prefs read/write. */
-        hx_options_bind_identity ();
     } else {
         hx_conn_reset (the_session.htlc);
     }

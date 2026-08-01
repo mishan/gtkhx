@@ -914,22 +914,24 @@ use crate::migrate::{self, Target};
 /// A real `gtkhxrc`, captured from a live profile.
 const REAL_PROFILE: &str = include_str!("../fixtures/real-profile-gtkhxrc");
 
-/// The C sources, compiled in so the coverage test can read the authoritative
-/// key list rather than a copy of it. `options.c` is too GTK-heavy to link into
-/// a test binary, which is why the C side's own sort-order test also scans it as
-/// text; this is the same trick for the same reason.
-const C_OPTIONS: &str = include_str!("../../../../src/options.c");
+/// The C key header, compiled in so the coverage test reads the authoritative
+/// list rather than a copy of it. It used to scrape the `cfgvars[]` table out
+/// of `options.c` as well; that table is gone, and the header is now the whole
+/// of the C side's vocabulary.
 const C_CFGKEYS: &str = include_str!("../../../../src/cfgkeys.h");
 
-/// Every key `cfgvars[]` actually persists, read out of the C source.
+/// Macros in `cfgkeys.h` that hold a *value* rather than a key: the three
+/// spellings `appearance.color_scheme` accepts. Named here because a scrape
+/// cannot tell them apart from a key by shape.
+const C_VALUE_MACROS: &[&str] = &["CFG_THEME_SYSTEM", "CFG_THEME_LIGHT", "CFG_THEME_DARK"];
+
+/// Every config key the C side spells, read out of `cfgkeys.h`.
 ///
 /// Derived rather than transcribed on purpose. A hand-copied list cannot do the
-/// one thing a coverage test is for: a key added to `cfgvars[]` and forgotten
-/// in both the map and the copy would pass. This fails.
-fn c_table_keys() -> Vec<String> {
-    // cfgkeys.h holds `#define CFG_FOO "FOO"`, so resolve macro -> string
-    // first; the table names the macros, not the literals.
-    let mut macros = std::collections::BTreeMap::new();
+/// one thing a coverage test is for: a key added on the C side and forgotten in
+/// both the map and the copy would pass. This fails.
+fn c_config_keys() -> Vec<String> {
+    let mut keys = Vec::new();
     for line in C_CFGKEYS.lines() {
         let Some(rest) = line.trim().strip_prefix("#define CFG_") else {
             continue;
@@ -937,6 +939,9 @@ fn c_table_keys() -> Vec<String> {
         let Some((name, value)) = rest.split_once(char::is_whitespace) else {
             continue;
         };
+        if C_VALUE_MACROS.contains(&format!("CFG_{name}").as_str()) {
+            continue;
+        }
         let Some(literal) = value
             .trim()
             .strip_prefix('"')
@@ -944,54 +949,20 @@ fn c_table_keys() -> Vec<String> {
         else {
             continue;
         };
-        macros.insert(format!("CFG_{name}"), literal.to_string());
-    }
-    assert!(macros.len() > 50, "cfgkeys.h parse looks wrong: {macros:?}");
-
-    // Take only the cfgvars[] table's own text, so the CFG_* mentions
-    // elsewhere in options.c (cfgvar_for_name calls and the like) don't count.
-    let table = C_OPTIONS
-        .split_once("cfgvars[] = {")
-        .expect("cfgvars[] table")
-        .1;
-    let table = table.split("\n};").next().expect("table end");
-
-    let mut keys = Vec::new();
-    let mut disabled = 0usize;
-    for line in table.lines() {
-        let trimmed = line.trim();
-        // Track #if blocks, so an entry inside one doesn't count. LOGGING is
-        // in an #if 0, which is why no real file has ever contained it.
-        if trimmed.starts_with("#if") {
-            disabled += 1;
-            continue;
-        }
-        if trimmed.starts_with("#endif") {
-            disabled = disabled.saturating_sub(1);
-            continue;
-        }
-        if disabled > 0 {
-            continue;
-        }
-        let Some(rest) = trimmed.strip_prefix("{ CFG_") else {
-            continue;
-        };
-        let name = format!("CFG_{}", rest.split(',').next().unwrap_or("").trim());
-        if let Some(literal) = macros.get(&name) {
-            keys.push(literal.clone());
-        }
+        keys.push(literal.to_string());
     }
     keys
 }
 
 #[test]
-fn the_map_covers_every_key_the_old_table_had() {
-    // A key in the C table with no migration target is a setting that would
-    // silently vanish, in a one-shot the user never gets to redo.
-    let keys = c_table_keys();
+fn the_map_covers_every_key_the_c_side_spells() {
+    // A key C can name with no migration target is a setting that would
+    // silently vanish, in a one-shot the user never gets to redo — and one the
+    // by-name ABI would report as unknown, leaving its Settings row dead.
+    let keys = c_config_keys();
     assert!(
         keys.len() > 60,
-        "only found {} keys in cfgvars[] — the parse is wrong, which would \
+        "only found {} keys in cfgkeys.h — the parse is wrong, which would \
          make this test pass vacuously: {keys:?}",
         keys.len()
     );
@@ -999,18 +970,9 @@ fn the_map_covers_every_key_the_old_table_had() {
     for key in &keys {
         assert!(
             migrate::target_of(key).is_some(),
-            "{key} is in cfgvars[] but has no migration target — it would \
-             silently vanish"
+            "{key} is in cfgkeys.h but has no migration target"
         );
     }
-
-    // LOGGING has a macro but its table entry is #if 0'd, so the writer never
-    // emitted it and no real file contains it. If the parse started counting
-    // it, the loop above would be asserting about something that cannot occur.
-    assert!(
-        !keys.iter().any(|k| k == "LOGGING"),
-        "LOGGING is #if 0'd in cfgvars[]; the #if tracking is broken"
-    );
 }
 
 #[test]
@@ -1691,4 +1653,229 @@ fn the_over_escape_warning_does_not_fire_on_the_line_form() {
     assert!(warnings
         .iter()
         .any(|w| matches!(w.kind, WarningKind::OverEscaped { .. })));
+}
+
+// ============================================================== the C ABI ==
+//
+// The by-name bridge is what every Settings page goes through, so a break here
+// is a settings dialog that silently does nothing. The names are the old
+// SHOUTING_CASE keys, resolved through the migration map — which means these
+// also pin that the map stays usable as a live lookup, not just a one-shot.
+
+use crate::ffi;
+use std::ffi::{c_int, CString};
+
+/// Call an FFI entry point with a C string, without leaking one per call.
+fn c(s: &str) -> CString {
+    CString::new(s).expect("no interior NUL")
+}
+
+/// Take a Rust-allocated C string back as a `String`, freeing it the way C
+/// would.
+fn take(p: *mut std::ffi::c_char) -> String {
+    if p.is_null() {
+        return String::new();
+    }
+    let out = unsafe { std::ffi::CStr::from_ptr(p) }
+        .to_string_lossy()
+        .into_owned();
+    unsafe { ffi::hxconfig_free_string(p) };
+    out
+}
+
+#[test]
+fn the_by_name_bridge_round_trips_each_type() {
+    ffi::hxconfig_load_defaults_for_test();
+
+    // Type tags match the old cfgvars[] constants, because the Settings pages
+    // switch on them: 1 INT, 2 BOOLEAN, 3 STRING, 5 UINT16.
+    assert_eq!(ffi::hxconfig_type(c("XBUF_MAX").as_ptr()), 1);
+    assert_eq!(ffi::hxconfig_type(c("MARKDOWN").as_ptr()), 2);
+    assert_eq!(ffi::hxconfig_type(c("FONT").as_ptr()), 3);
+    assert_eq!(ffi::hxconfig_type(c("ICON").as_ptr()), 5);
+    // A name nothing recognises, and one that was deliberately dropped, both
+    // read as "not a setting" rather than as a real key with a zero value.
+    assert_eq!(ffi::hxconfig_type(c("NOPE").as_ptr()), 0);
+    assert_eq!(ffi::hxconfig_type(c("OPENCHAT").as_ptr()), 0);
+
+    assert_eq!(ffi::hxconfig_get_bool(c("MARKDOWN").as_ptr()), 1);
+    assert_eq!(ffi::hxconfig_set_bool(c("MARKDOWN").as_ptr(), 0), 1);
+    assert_eq!(ffi::hxconfig_get_bool(c("MARKDOWN").as_ptr()), 0);
+    // Setting the same value again reports "nothing changed", which is what
+    // lets the caller skip the change hook — the nickname's puts a packet on
+    // the wire, so a redundant one is visible to everyone in the room.
+    assert_eq!(ffi::hxconfig_set_bool(c("MARKDOWN").as_ptr(), 0), 0);
+
+    assert_eq!(ffi::hxconfig_get_int(c("XBUF_MAX").as_ptr()), 500);
+    assert_eq!(ffi::hxconfig_set_int(c("XBUF_MAX").as_ptr(), 4096), 1);
+    assert_eq!(ffi::hxconfig_get_int(c("XBUF_MAX").as_ptr()), 4096);
+
+    assert_eq!(
+        take(ffi::hxconfig_get_string(c("FONT").as_ptr())),
+        "Monospace 10"
+    );
+    unsafe {
+        assert_eq!(
+            ffi::hxconfig_set_string(c("FONT").as_ptr(), c("Cantarell 12").as_ptr()),
+            1
+        );
+    }
+    assert_eq!(
+        take(ffi::hxconfig_get_string(c("FONT").as_ptr())),
+        "Cantarell 12"
+    );
+
+    let s = ffi::snapshot().expect("loaded");
+    assert!(!s.chat.markdown);
+    assert_eq!(s.chat.scrollback_lines, 4096);
+    assert_eq!(s.chat.font, "Cantarell 12");
+}
+
+#[test]
+fn a_list_reads_and_writes_as_one_comma_separated_string() {
+    // The old keys were comma-separated strings and the Settings entry rows
+    // still edit one. The schema stores a real array; the comma is a boundary
+    // format here, not a storage decision.
+    ffi::hxconfig_load_defaults_for_test();
+
+    assert_eq!(
+        take(ffi::hxconfig_get_string(c("TRACKER").as_ptr())),
+        "hltracker.com"
+    );
+    unsafe {
+        ffi::hxconfig_set_string(
+            c("TRACKER").as_ptr(),
+            c("a.example, b.example ,, c.example").as_ptr(),
+        );
+    }
+    assert_eq!(
+        ffi::snapshot().unwrap().trackers.addresses,
+        vec![
+            "a.example".to_string(),
+            "b.example".to_string(),
+            "c.example".to_string()
+        ],
+        "each element trimmed, empties dropped"
+    );
+    assert_eq!(
+        take(ffi::hxconfig_get_string(c("TRACKER").as_ptr())),
+        "a.example,b.example,c.example"
+    );
+
+    // And the array is reachable element-wise, which is how the mirror builds
+    // the char** the tracker fetch wants.
+    assert_eq!(ffi::hxconfig_tracker_count(), 3);
+    assert_eq!(take(ffi::hxconfig_tracker_at(1)), "b.example");
+    // Out of range in either direction is "no such address". A negative index
+    // clamped to zero would answer a nonsense question with a real-looking
+    // tracker, which is how the C caller's loop bound would go unnoticed.
+    assert!(ffi::hxconfig_tracker_at(3).is_null());
+    assert!(ffi::hxconfig_tracker_at(99).is_null());
+    assert!(ffi::hxconfig_tracker_at(-1).is_null());
+    assert!(ffi::hxconfig_tracker_at(c_int::MIN).is_null());
+}
+
+#[test]
+fn an_unknown_name_is_inert_rather_than_dangerous() {
+    // The old lookup returned NULL and the callers turned that into 0 or "",
+    // indistinguishable from a real value. That is unchanged and deliberate —
+    // but a *write* to an unknown name must not land anywhere, which is the
+    // part worth pinning.
+    ffi::hxconfig_load_defaults_for_test();
+    let before = ffi::snapshot().unwrap();
+
+    assert_eq!(ffi::hxconfig_get_bool(c("NOT_A_KEY").as_ptr()), 0);
+    assert_eq!(ffi::hxconfig_get_int(c("NOT_A_KEY").as_ptr()), 0);
+    assert_eq!(take(ffi::hxconfig_get_string(c("NOT_A_KEY").as_ptr())), "");
+    assert_eq!(ffi::hxconfig_set_bool(c("NOT_A_KEY").as_ptr(), 1), 0);
+    assert_eq!(ffi::hxconfig_set_int(c("NOT_A_KEY").as_ptr(), 7), 0);
+    unsafe {
+        assert_eq!(
+            ffi::hxconfig_set_string(c("NOT_A_KEY").as_ptr(), c("x").as_ptr()),
+            0
+        );
+    }
+
+    assert_eq!(ffi::snapshot().unwrap(), before);
+}
+
+#[test]
+fn a_null_name_does_not_crash() {
+    ffi::hxconfig_load_defaults_for_test();
+    assert_eq!(ffi::hxconfig_type(std::ptr::null()), 0);
+    assert_eq!(ffi::hxconfig_get_bool(std::ptr::null()), 0);
+    assert_eq!(take(ffi::hxconfig_get_string(std::ptr::null())), "");
+    assert_eq!(ffi::hxconfig_set_bool(std::ptr::null(), 1), 0);
+    // A NULL *value* reads as empty, which is what C passes for a cleared
+    // entry row.
+    unsafe {
+        ffi::hxconfig_set_string(c("VOICEPTTKEY").as_ptr(), std::ptr::null());
+    }
+    assert_eq!(ffi::snapshot().unwrap().voice.ptt_key, "");
+}
+
+#[test]
+fn changes_coalesce_into_one_write() {
+    // Every switch toggle used to rebuild and rewrite the whole file
+    // synchronously. Now a run of changes marks the state dirty and one flush
+    // writes it.
+    let dir = TempDir::new("ffi-flush");
+    let d = c(dir.path().to_str().unwrap());
+    unsafe {
+        ffi::hxconfig_load(d.as_ptr(), std::ptr::null(), std::ptr::null());
+    }
+    assert_eq!(ffi::hxconfig_is_first_run(), 1);
+    assert!(!path(dir.path()).exists(), "loading must not write");
+
+    ffi::hxconfig_set_bool(c("MARKDOWN").as_ptr(), 0);
+    ffi::hxconfig_set_int(c("XBUF_MAX").as_ptr(), 900);
+    assert!(!path(dir.path()).exists(), "still nothing on disk");
+
+    assert_eq!(ffi::hxconfig_flush(), 1);
+    let reloaded = Config::load(dir.path());
+    assert!(!reloaded.settings().chat.markdown);
+    assert_eq!(reloaded.settings().chat.scrollback_lines, 900);
+
+    // A flush with nothing pending is a no-op that still reports success.
+    assert_eq!(ffi::hxconfig_flush(), 1);
+}
+
+#[test]
+fn an_imported_profile_is_visible_through_the_bridge() {
+    // The whole point of the load entry point: a user upgrading gets their old
+    // settings, and C sees them through the same by-name calls.
+    let dir = TempDir::new("ffi-import");
+    let old = dir.path().join("gtkhxrc");
+    std::fs::write(&old, REAL_PROFILE).expect("seed");
+
+    let d = c(dir.path().to_str().unwrap());
+    let o = c(old.to_str().unwrap());
+    let warnings = unsafe { ffi::hxconfig_load(d.as_ptr(), o.as_ptr(), std::ptr::null()) };
+    assert_eq!(warnings, 0);
+    assert_eq!(ffi::hxconfig_is_first_run(), 0);
+
+    assert_eq!(take(ffi::hxconfig_get_string(c("NICK").as_ptr())), "misha");
+    assert_eq!(ffi::hxconfig_get_int(c("ICON").as_ptr()), 32766);
+    assert_eq!(
+        take(ffi::hxconfig_get_string(c("TIMESTAMPFORMAT").as_ptr())),
+        "[%H:%M:%S] "
+    );
+    assert_eq!(ffi::hxconfig_get_bool(c("SOUNDSON").as_ptr()), 1);
+    assert_eq!(ffi::hxconfig_get_int(c("TOOLXSIZE").as_ptr()), 2807);
+}
+
+#[test]
+fn diagnostics_are_reachable_from_c() {
+    let dir = TempDir::new("ffi-warnings");
+    dir.write("version = 1\n[chat]\nscrollback_lines = \"lots\"\n");
+
+    let d = c(dir.path().to_str().unwrap());
+    let n = unsafe { ffi::hxconfig_load(d.as_ptr(), std::ptr::null(), std::ptr::null()) };
+    assert_eq!(n, 1);
+
+    let text = take(ffi::hxconfig_warning(0));
+    assert!(text.contains("chat.scrollback_lines"), "{text}");
+    assert!(ffi::hxconfig_warning(1).is_null());
+    assert!(ffi::hxconfig_warning(-1).is_null());
+    assert!(ffi::hxconfig_warning(c_int::MIN).is_null());
 }

@@ -4,6 +4,11 @@
  * Pure data — no GTK widget pointers, no protocol types. session.h pulls
  * this in for the prefs-bearing fields, but options.c can include just
  * this header when it's only touching the prefs struct.
+ *
+ * `gtkhx_prefs` is a **read-only mirror**: the values and the file belong to
+ * the hxconfig crate, and this struct is refreshed from there after every
+ * change. A write here is discarded by the next refresh. See prefs_mirror.h
+ * for the storage and docs/preferences.md for why it is shaped this way.
  */
 
 #ifndef GTKHX_PREFS_H
@@ -14,8 +19,6 @@
 typedef struct {
     int xsize, ysize;
     int xpos, ypos;
-    unsigned int open : 1;
-    unsigned char init;
 } Window_Geo;
 
 struct gtkhx_prefs {
@@ -73,7 +76,6 @@ struct gtkhx_prefs {
     unsigned char old_nickcompletion;
     unsigned char outrate_limit;
     unsigned char inrate_limit;
-    unsigned char logging;
 
     /* Emoji shortcodes (phase E6), both default ON:
      *   emoji_shortcodes — convert emoji ↔ :shortcode: text. Drives the
@@ -127,7 +129,7 @@ struct gtkhx_prefs {
      * signed int) is the "no color set" sentinel and means
      * hx_change_name_icon omits the HTLC_DATA_COLOR chunk entirely
      * (the spec's auto-opt-in then doesn't fire). Stored as `int`
-     * to fit the cfgvars INT slot; reinterpreted as guint32 when
+     * as a signed integer; reinterpreted as guint32 when
      * stamped onto htlc->nick_color. Persisted as CFG_NICK_COLOR. */
     int nick_color;
 
@@ -154,9 +156,8 @@ struct gtkhx_prefs {
      *     enabled PTT but hasn't picked a key yet; the hook
      *     stays inactive in that combo, and the Settings row
      *     shows a "Click to set" subtitle. */
-    /* Plain unsigned char (not :1 bitfield) so cfgvars[] can take
-     * its address. The pref read/write path stores BOOLEANs into
-     * the byte verbatim — 0 or 1. */
+    /* Plain unsigned char rather than a :1 bitfield, like every other
+     * boolean here — the mirror refresh stores 0 or 1 verbatim. */
     unsigned char voice_ptt_enabled;
     char *voice_ptt_key;
 
@@ -177,8 +178,7 @@ struct gtkhx_prefs {
      * user list. Default ON. When OFF, avatars render as the still
      * first frame. Per-user pause (click an animated avatar, or the
      * right-click menu) is a separate, transient override. Persisted as
-     * CFG_ANIMATE_AVATARS. Plain unsigned char so cfgvars[] can take
-     * its address. */
+     * CFG_ANIMATE_AVATARS. */
     unsigned char animate_avatars;
 };
 

@@ -41,7 +41,7 @@
 #include "gtkutil.h"
 #include "cfgkeys.h"
 #include "gtkhx_theme.h"
-#include "prefs_parser.h"
+#include "prefs_mirror.h"
 #include "options.h"
 #include "gif_icons.h"  /* hx_icon_save / _set / _clear + GIF_ICONS_* state */
 #include "gif_avatar.h" /* gtkhx_avatar_set_animation_enabled (10.D pref) */
@@ -49,7 +49,7 @@
 #include "hotline_proto.h" /* gtkhx_proto_gif_icon_is_gif */
 #include "text_util.h"
 #include "tracker.h"
-#include "debug.h"
+#include "panel_registry.h" /* hx_panel_was_constructed */
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_ptt_keyspec.h"
@@ -63,104 +63,37 @@ GtkWidget *options_window = NULL;
 
 /* The Tracker settings page moved to Rust (gtkhx-ui options.rs); it owns its
  * own GListStore + GtkColumnView and serialises back through
- * gtkhx_prefs_set_string(CFG_TRACKER, …), whose parse_tracker changefunc
- * re-derives gtkhx_prefs.tracker[]. The former module-static store/selection/
- * view and the add/remove/parse_tracker_list helpers are gone. */
+ * gtkhx_prefs_set_string(CFG_TRACKER, …). The schema stores the addresses as a
+ * real array, so the comma-separated string and the derived char ** beside it
+ * are both projections the mirror refresh re-derives — there is no splitting
+ * hook any more. */
 
-struct gtkhx_prefs gtkhx_prefs = {
-    0,                /* num_tracker */
-    CFG_THEME_SYSTEM, /* theme: see CFG_THEME_* in cfgkeys.h */
-    "fixed",          /* font */
-    ".",              /* download_path */
-    "[%H:%M:%S] ",    /* stamp_format — strftime(3); see CFG_STAMP_FORMAT */
-    "",   /* highlight_words — empty by default; own nick is implicit */
-    NULL, /* tracker (char **) */
-    "hltracker.com", /* tracker_str */
-    500,             /* xbuf_max */
-    { { 412, 312, 10, 434, 0, 1 },
-      { 412, 384, 10, 50, 0, 1 },
-      { 0, 0, 442, 0, 0, 0 },
-      { 300, 250, 442, 480, 0, 1 },
-      { 300, 400, 442, 50, 0, 1 } },
-    1, /* queuedl */
-    1, /* showjoin */
-    0, /* tray (init_variables sets default) */
-    0, /* timestamp */
-    1, /* chat_avatars — default ON; the icons are the point of C6 */
-    1, /* markdown — default ON */
-    0, /* word_wrap */
-    1, /* track_case */
-    0, /* old_nickcompletion */
-    0, /* outrate_limit */
-    0, /* inrate_limit */
-    0, /* logging */
-
-    /* Emoji shortcodes — both default ON (init_variables re-asserts). */
-    1, /* emoji_shortcodes */
-    1, /* emoji_typeahead */
-
-    /* HexChat-style autocopy controls. Default-on for text
-     * matches every modern chat client (HexChat, Discord, Slack, etc.)
-     * and matches the Settings mockup. Stamp / color stay off — most
-     * users want a clean copy of the message body. */
-    1, /* autocopy_text */
-    0, /* autocopy_stamp */
-    0, /* autocopy_color */
-
-    /* notification toggles. Zero-initialised here;
-     * init_variables sets the user-facing defaults (mentions on,
-     * private messages on, etc.) and prefs_read overrides those
-     * from gtkhxrc. The static-init defaults are deliberately
-     * conservative (all-off) so a barebones init path doesn't
-     * spam notifications. */
-    0, /* notify_chat */
-    0, /* notify_chat_highlight */
-    0, /* notify_msg */
-    0, /* notify_pchat */
-    0, /* notify_pchat_highlight */
-    0, /* notify_pchat_invite */
-    0, /* notify_news */
-    0, /* notify_xfer */
-    0, /* notify_broadcast */
-    0, /* notify_omit_focused */
-
-    0, /* out_bps */
-    0, /* in_bps */
-
-    /* chat-history initial fetch count. 50 matches the
-     * fogWraith spec's recommended default and what Phase 1/2/3
-     * shipped with hard-coded. */
-    50, /* chat_history_initial */
-
-    /* Colored-Nicknames extension. Default -1 ==
-     * HX_NICK_COLOR_NONE (cast to signed int) so a fresh prefs file
-     * means "no color, use theme default" and hx_change_name_icon
-     * skips the optional HTLC_DATA_COLOR chunk. */
-    -1, /* nick_color */
-
-    /* Phase 8.E + 8.E follow-up: voice device + PTT defaults. NULL
-     * strings here get reallocated to "" by init_variables, which
-     * also flips the cfgvar.allocated bit so prefs_write knows the
-     * heap-owned form. Setting them NULL rather than literal "" in
-     * this static initializer keeps the string-pointer fields
-     * uniformly NULL-or-heap, avoiding the read-only-string vs.
-     * g_free hazard if any pref-write codepath ever tries to free
-     * one. */
-    NULL, /* voice_input_device */
-    NULL, /* voice_output_device */
-    0,    /* voice_ptt_enabled */
-    NULL, /* voice_ptt_key */
-
-    /* Theming: active theme name. NULL / empty falls back to the
-     * built-in "default" theme. All scale and palette state lives in
-     * the theme file ($CONFIG/themes/<name>.ini, fallback to GResource).
-     * See gtkhx_theme.{c,h} and docs/theming-file-format.md. */
-    NULL, /* theme_name */
-
-    1, /* animate_avatars — default ON (init_variables re-asserts) */
-};
-
-static void parse_tracker (session *);
+/* hxconfig's C ABI (rust/crates/hxconfig/src/ffi.rs). Hand-declared, like
+ * every other Rust seam in the tree — a signature that drifts shows up as an
+ * undefined symbol at link time rather than as a miscompile.
+ *
+ * Rust owns the values and the file. `gtkhx_prefs` is a read-only C copy whose
+ * storage lives in prefs_mirror.c and which is repopulated from here after
+ * every change, so the C sites that read a preference keep compiling
+ * untouched. Everything in this file that *writes* a preference goes through
+ * the setters below, which is what makes the file something we edit rather
+ * than regenerate. See docs/preferences.md and src/prefs_mirror.h.
+ *
+ * Names are the old SHOUTING_CASE keys from cfgkeys.h; hxconfig resolves them
+ * through its migration map to schema paths. */
+extern int hxconfig_load (const char *dir, const char *legacy,
+                          const char *legacy_home);
+extern int hxconfig_is_first_run (void);
+extern char *hxconfig_warning (int i);
+extern int hxconfig_flush (void);
+extern int hxconfig_type (const char *name);
+extern int hxconfig_get_bool (const char *name);
+extern int hxconfig_get_int (const char *name);
+extern char *hxconfig_get_string (const char *name);
+extern int hxconfig_set_bool (const char *name, int value);
+extern int hxconfig_set_int (const char *name, int value);
+extern int hxconfig_set_string (const char *name, const char *value);
+extern void hxconfig_free_string (char *s);
 
 struct icon_viewer {
     guint32 icon_high;
@@ -186,10 +119,9 @@ struct icon_viewer {
 #define ICON_PICKER_WIDE_HEIGHT 32 /* match cicn native vertical pixel count */
 
 /* forward declarations for the icon-picker FlowBox helpers.
- * The implementations live further down (after struct cfgvar and
- * cfgvar_for_name) since they touch the cfgvar lookup table; the
- * forward decls let list_icons() and settings_page_identity() —
- * both up here — wire them. */
+ * The implementations live further down, next to the live-row registry they
+ * reach into; the forward decls let list_icons() and settings_page_identity()
+ * — both up here — wire them. */
 static int icon_picker_sort_cb (GtkFlowBoxChild *a, GtkFlowBoxChild *b,
                                 gpointer data);
 static void icon_flow_child_activated (GtkFlowBox *flowbox,
@@ -383,7 +315,7 @@ list_icons (void)
 void
 reinit_gtktexts (session *sess)
 {
-    if (gtkhx_prefs.geo.news.open) {
+    if (hx_panel_was_constructed (HX_PANEL_ID_NEWS)) {
         gtkhx_apply_text_style (sess->news_text);
     }
     {
@@ -397,7 +329,7 @@ reinit_gtktexts (session *sess)
                     continue;
                 }
                 if (hx_chats_cid_at (sess->chats, i) == 0
-                    && !gtkhx_prefs.geo.chat.open) {
+                    && !hx_panel_was_constructed (HX_PANEL_ID_CHAT)) {
                     continue;
                 }
                 hx_chat_view_set_font (hx_gchat_output (gchat), fontname);
@@ -549,18 +481,39 @@ changed_timestamp (session *sess)
     }
 }
 
-/* re-enabled. The Settings nick/icon controls used to be
- * inert — changing them updated gtkhx_prefs / the session's htlc but
- * never told the server, so the user list still showed your old
- * nick/icon until reconnect. hlwrite is already a no-op when
- * htlc->fd is 0 (network.c:1448), so this is safe to call before
- * connect too: prefs_read doesn't run change-callbacks anyway, only
- * the Adw row notify handlers do, so the wire packet only fires
- * when the user actually toggles a control in Settings. */
+/* Copy the stored identity onto a connection.
+ *
+ * The nickname and icon preferences used to *be* the connection's wire name
+ * buffer and icon field — a startup binder patched their two table slots with
+ * raw interior pointers, so a write to either went straight onto the wire
+ * struct. They are ordinary settings with their own storage now, and this is
+ * the one-way copy that replaces the aliasing. An empty nickname or a zero
+ * icon means "nothing stored", so the connection keeps whatever it was given
+ * at construction. */
+static void
+identity_copy_to_conn (struct htlc_conn *htlc)
+{
+    char *nick = gtkhx_prefs_get_string (CFG_NICK);
+    int icon = gtkhx_prefs_get_int (CFG_ICON);
+
+    if (*nick) {
+        hx_conn_set_name (htlc, nick);
+    }
+    g_free (nick);
+    if (icon != 0) {
+        hx_conn_set_icon (htlc, (guint16)icon);
+    }
+}
+
+/* The Settings nick/icon controls used to be inert — changing them updated the
+ * session's htlc but never told the server, so the user list still showed your
+ * old nick/icon until reconnect. The send is a no-op while the connection has
+ * no socket, so this is safe to call before connect too. */
 static void
 changed_nickoricon (session *sess)
 {
     (void)sess;
+    identity_copy_to_conn (hx_active_session ()->htlc);
     hx_change_name_icon (hx_active_session ()->htlc);
 }
 
@@ -614,13 +567,15 @@ changed_font (session *sess)
     }
 
     if (!gtkhx_font_desc) {
-        g_warning ("Bad font \"%s\"\n",
+        /* Fall back for *this* run, but leave the stored value alone. It used
+         * to be overwritten with the fallback, which silently discarded what
+         * the user typed — so a typo became unrecoverable rather than
+         * something they could see in Settings and correct. (The write would
+         * be discarded by the next mirror refresh now anyway; the mirror is
+         * read-only to C.) */
+        g_warning ("Bad font \"%s\", using Monospace 10 for this session",
                    gtkhx_prefs.font ? gtkhx_prefs.font : "");
         gtkhx_font_desc = pango_font_description_from_string ("Monospace 10");
-        if (gtkhx_prefs.font) {
-            g_free (gtkhx_prefs.font);
-        }
-        gtkhx_prefs.font = g_strdup ("Monospace 10");
     }
 
     /* rebuild the screen-wide CSS provider so already-tagged
@@ -654,22 +609,13 @@ changed_animate_avatars (session *sess)
     gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
 }
 
-#if 0 /* XXX */
-static void changed_logging (session *sess)
-{
-    if(!gtkhx_prefs.logging) {
-        close_logs();
-    }
-}
-#endif
-
 /* HexChat-style xtext autocopy. Each toggle in Settings →
  * Advanced → Auto Copy Behavior calls one of the three xtext setters
  * to flip the corresponding facet of the drag-end clipboard handler.
- * The cfgvars own the persisted state in gtkhx_prefs.autocopy_* bytes;
- * the changefunc just propagates that to the xtext-internal `prefs`
- * struct so the next drag-end picks up the new behaviour without
- * having to recreate the widget. */
+ * The persisted state is mirrored in the gtkhx_prefs.autocopy_* bytes; the
+ * hook just propagates it to the view's own process-wide copy so the next
+ * drag-end picks up the new behaviour without having to recreate the
+ * widget. */
 static void
 changed_autocopy_text (session *sess)
 {
@@ -697,6 +643,13 @@ changed_autocopy_color (session *sess)
 static void
 changed_stampformat (session *sess)
 {
+    /* The format itself is process-wide; the per-view work below only
+     * recomputes column widths. A NULL view records the format and nothing
+     * else, which is the only thing that can happen when this runs at load —
+     * no chat view exists yet — and is where every view built later picks the
+     * format up from. */
+    hx_chat_view_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
+
     if (!sess) {
         return;
     }
@@ -739,20 +692,30 @@ changed_downloadpath (session *sess)
         const char *home = g_get_home_dir ();
         char *win_mac_dl
             = home ? g_build_filename (home, "Downloads", NULL) : NULL;
+        const char *chosen;
+
         if (xdg && g_file_test (xdg, G_FILE_TEST_IS_DIR)) {
-            gtkhx_prefs.download_path = g_strdup (xdg);
+            chosen = xdg;
         } else if (win_mac_dl && g_file_test (win_mac_dl, G_FILE_TEST_IS_DIR)) {
-            /* g_get_user_special_dir(DOWNLOAD) is NULL on Windows (KNOWNFOLDERID,
-             * not CSIDL); <home>/Downloads is the real location there and on
-             * macOS. Keep this in sync with default_root() in
-             * files_local_provider.c so the download dest and the local panel
-             * agree. */
-            gtkhx_prefs.download_path = g_strdup (win_mac_dl);
+            /* g_get_user_special_dir(DOWNLOAD) is NULL on Windows
+             * (KNOWNFOLDERID, not CSIDL); <home>/Downloads is the real
+             * location there and on macOS. Keep this in sync with
+             * default_root() in files_local_provider.c so the download dest
+             * and the local panel agree. */
+            chosen = win_mac_dl;
         } else if (home && g_file_test (home, G_FILE_TEST_IS_DIR)) {
-            gtkhx_prefs.download_path = g_strdup (home);
+            chosen = home;
         } else {
-            gtkhx_prefs.download_path = g_strdup (".");
+            chosen = ".";
         }
+
+        /* Store it rather than patching the mirror. The mirror is a copy that
+         * the next refresh overwrites, so an assignment here would take
+         * effect and then quietly vanish — leaving downloads pointed at the
+         * empty string. Going through the setter persists the resolved path
+         * and refreshes the mirror on the way. Re-entering this hook is safe:
+         * the second pass sees a non-empty value and does nothing. */
+        gtkhx_prefs_set_string (CFG_DOWNLOAD, chosen);
         g_free (win_mac_dl);
     }
 }
@@ -772,10 +735,9 @@ changed_case (session *sess)
 
 /* apply the THEME pref to libadwaita's style manager. The pref
  * is one of "system" / "light" / "dark"; anything else falls back to
- * the system default so a hand-edited gtkhxrc with a typo doesn't lock
- * the user into a broken state. Called both at startup (after prefs_read)
- * and via the cfgvar change-callback when the user picks a new value
- * in Settings. */
+ * the system default so a hand-edited file with a typo doesn't lock
+ * the user into a broken state. Called at startup and again whenever the
+ * user picks a new value in Settings. */
 static void
 changed_theme (session *sess)
 {
@@ -851,384 +813,125 @@ changed_theme_name (session *sess)
     gtkhx_theme_load_active ();
 }
 
-struct cfgvar {
-    /* name of variable as it appears in conf file */
-    const char *name;
-    /* pointer to where data should be writen */
-    /* The unionization is to avoid strong-typed nightmares with casting */
-    union {
-        void *var;
-        char **str;
-        char *str32;
-        int *integer;
-        unsigned char *uchar;
-        time_t *timet;
-        guint16 *uint16;
-    } variable;
-    /* type of variable pointed to by "variable" is stored in "type": */
-#define INT 1                            /* int* */
-#define BOOLEAN 2 /* unsigned char:1* */ /* INT1 */
-#define STRING 3                         /* string (char *) */
-#define STRING32 4
+/* The value-kind tags the by-name bridge reports, and the numbering
+ * hxconfig_type hands back. Unchanged from the tags the old address table
+ * carried, because the Settings pages — the C ones here and the Rust ones in
+ * gtkhx-ui — switch on them. There is no STRING32 any more: the only key that
+ * had it was the nickname, whose storage was the connection's 32-byte wire
+ * name buffer, and identity has its own storage now. */
+#define INT 1
+#define BOOLEAN 2
+#define STRING 3
 #define UINT16 5
-#define TIME_T 6
-    const unsigned int type : 7;
-    unsigned int allocated : 1; /* only meaningful for a string */
-    /* func to call when changed */
-    void (*changefunc) (session *);
-    GtkWidget *widget;
-} cfgvars[] = {
-    /* GIF-icons (Phase 10.D): animate avatars. Kept first to preserve
-     * the alphabetical key order ("ANIMATEAVATARS" < "AUTOCOPY…") that
-     * the bsearch in this table requires. changefunc pushes the toggle
-     * into gif_avatar.c so a live change starts/stops animation. */
-    { CFG_ANIMATE_AVATARS,
-      { &gtkhx_prefs.animate_avatars },
-      BOOLEAN,
-      0,
-      changed_animate_avatars,
-      NULL },
-    { CFG_AUTOCOPY_COLOR,
-      { &gtkhx_prefs.autocopy_color },
-      BOOLEAN,
-      0,
-      changed_autocopy_color,
-      NULL },
-    { CFG_AUTOCOPY_STAMP,
-      { &gtkhx_prefs.autocopy_stamp },
-      BOOLEAN,
-      0,
-      changed_autocopy_stamp,
-      NULL },
-    { CFG_AUTOCOPY_TEXT,
-      { &gtkhx_prefs.autocopy_text },
-      BOOLEAN,
-      0,
-      changed_autocopy_text,
-      NULL },
-    { CFG_CHAT_AVATARS,
-      { &gtkhx_prefs.chat_avatars },
-      BOOLEAN,
-      0,
-      changed_chat_avatars,
-      NULL },
-    { CFG_CHAT_HISTORY_INITIAL,
-      { &gtkhx_prefs.chat_history_initial },
-      INT,
-      0,
-      NULL,
-      NULL },
-    { CFG_CHAT_XSIZE, { &gtkhx_prefs.geo.chat.xsize }, INT, 0, NULL, NULL },
-    { CFG_CHAT_YSIZE, { &gtkhx_prefs.geo.chat.ysize }, INT, 0, NULL, NULL },
-    { CFG_DOWNLOAD,
-      { &gtkhx_prefs.download_path },
-      STRING,
-      0,
-      changed_downloadpath,
-      NULL },
-    /* Emoji shortcodes (phase E6). emoji_shortcodes drives both the
-     * legacy-server send encode and the always-on receive decode; its
-     * changefunc pushes the value to the text_util/proto_helpers toggle.
-     * emoji_typeahead drives the inline :prefix popup and is read live in
-     * emoji.c, so it needs no changefunc. */
-    { CFG_EMOJI_SHORTCODES,
-      { &gtkhx_prefs.emoji_shortcodes },
-      BOOLEAN,
-      0,
-      changed_emoji_shortcodes,
-      NULL },
-    { CFG_EMOJI_TYPEAHEAD,
-      { &gtkhx_prefs.emoji_typeahead },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    /* file_samewin pref: retired in Phase 5 with the legacy single-pane
-     * files browser. Loaded values from old gtkhxrc files are silently
-     * ignored — the cfgvars table just doesn't list the key anymore,
-     * so prefs_read passes over it. */
-    { CFG_FONT, { &gtkhx_prefs.font }, STRING, 0, changed_font, NULL },
-    { CFG_HIGHLIGHT_WORDS,
-      { &gtkhx_prefs.highlight_words },
-      STRING,
-      0,
-      NULL,
-      NULL },
-    { CFG_ICON,
-      /* Identity fields (icon/name) live on the heap-allocated
-       * the_session.htlc now (docs/rust/network-endgame.md), so their addresses
-       * aren't compile-time constants. The slot is bound at runtime by
-       * hx_options_bind_identity() once the connection is allocated; see the
-       * note there. Multi-conn reworks prefs<->identity binding — per-
-       * connection identity is an open M-phase question; for now this is the
-       * one session. */
-      { NULL },
-      UINT16,
-      0,
-      changed_nickoricon,
-      NULL },
-#if 0 /* XXX */
-    {CFG_LOGGING, {&gtkhx_prefs.logging}, BOOLEAN, 0, changed_logging, NULL},
-#endif
-    { CFG_MARKDOWN,
-      { &gtkhx_prefs.markdown },
-      BOOLEAN,
-      0,
-      changed_markdown,
-      NULL },
-    { CFG_NEWS_XSIZE, { &gtkhx_prefs.geo.news.xsize }, INT, 0, NULL, NULL },
-    { CFG_NEWS_YSIZE, { &gtkhx_prefs.geo.news.ysize }, INT, 0, NULL, NULL },
-    { CFG_NICK,
-      { NULL }, /* bound at runtime by hx_options_bind_identity — see CFG_ICON */
-      STRING32,
-      0,
-      changed_nickoricon,
-      NULL },
-    { CFG_NICK_COLOR,
-      { &gtkhx_prefs.nick_color },
-      INT,
-      0,
-      changed_nick_color,
-      NULL },
-    { CFG_NOTIFY_BROADCAST,
-      { &gtkhx_prefs.notify_broadcast },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_NOTIFY_CHAT, { &gtkhx_prefs.notify_chat }, BOOLEAN, 0, NULL, NULL },
-    { CFG_NOTIFY_CHAT_HIGHLIGHT,
-      { &gtkhx_prefs.notify_chat_highlight },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_NOTIFY_MSG, { &gtkhx_prefs.notify_msg }, BOOLEAN, 0, NULL, NULL },
-    { CFG_NOTIFY_NEWS, { &gtkhx_prefs.notify_news }, BOOLEAN, 0, NULL, NULL },
-    { CFG_NOTIFY_OMIT_FOCUSED,
-      { &gtkhx_prefs.notify_omit_focused },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_NOTIFY_PCHAT, { &gtkhx_prefs.notify_pchat }, BOOLEAN, 0, NULL, NULL },
-    { CFG_NOTIFY_PCHAT_HIGHLIGHT,
-      { &gtkhx_prefs.notify_pchat_highlight },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_NOTIFY_PCHAT_INVITE,
-      { &gtkhx_prefs.notify_pchat_invite },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_NOTIFY_XFER, { &gtkhx_prefs.notify_xfer }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OLD_NICKCOMP,
-      { &gtkhx_prefs.old_nickcompletion },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_OPEN_CHAT, { &gtkhx_prefs.geo.chat.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OPEN_NEWS, { &gtkhx_prefs.geo.news.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OPEN_TASKS, { &gtkhx_prefs.geo.tasks.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_OPEN_USERS, { &gtkhx_prefs.geo.users.init }, BOOLEAN, 0, NULL, NULL },
-    { CFG_QUEUEDL, { &gtkhx_prefs.queuedl }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SHOWJOIN, { &gtkhx_prefs.showjoin }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_CHAT, { &hxsnd.chat }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_ERROR, { &hxsnd.error }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_FILE, { &hxsnd.file }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_INVITE, { &hxsnd.invite }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_JOIN, { &hxsnd.join }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_LOGIN, { &hxsnd.login }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_MSG, { &hxsnd.msg }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_NEWS, { &hxsnd.news }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_PART, { &hxsnd.part }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SOUNDS_ON, { &hxsnd.on }, BOOLEAN, 0, NULL, NULL },
-    /* Voice join/leave sounds. Kept as pure storage regardless of
-     * HAVE_VOICE (like the CFG_VOICE_*_DEVICE prefs above) so a build
-     * without voice doesn't drop a user's saved toggles; only the
-     * Settings rows are compiled out when voice is absent. Positioned
-     * here to keep the table sorted by key string
-     * (SOUNDSON < SOUNDVOICEJOIN < SOUNDVOICELEAVE < TASKXSIZE) for
-     * the bsearch in cfgvar_for_name. */
-    { CFG_SND_VOICE_JOIN, { &hxsnd.voice_join }, BOOLEAN, 0, NULL, NULL },
-    { CFG_SND_VOICE_LEAVE, { &hxsnd.voice_leave }, BOOLEAN, 0, NULL, NULL },
-    { CFG_TASK_XSIZE, { &gtkhx_prefs.geo.tasks.xsize }, INT, 0, NULL, NULL },
-    { CFG_TASK_YSIZE, { &gtkhx_prefs.geo.tasks.ysize }, INT, 0, NULL, NULL },
-    { CFG_THEME, { &gtkhx_prefs.theme }, STRING, 0, changed_theme, NULL },
-    { CFG_THEME_NAME,
-      { &gtkhx_prefs.theme_name },
-      STRING,
-      0,
-      changed_theme_name,
-      NULL },
-    { CFG_TIMESTAMP,
-      { &gtkhx_prefs.timestamp },
-      BOOLEAN,
-      0,
-      changed_timestamp,
-      NULL },
-    { CFG_STAMP_FORMAT,
-      { &gtkhx_prefs.stamp_format },
-      STRING,
-      0,
-      changed_stampformat,
-      NULL },
-    { CFG_TOOL_XSIZE, { &gtkhx_prefs.geo.tool.xsize }, INT, 0, NULL, NULL },
-    { CFG_TOOL_YSIZE, { &gtkhx_prefs.geo.tool.ysize }, INT, 0, NULL, NULL },
-    { CFG_TRACKER,
-      { &gtkhx_prefs.tracker_str },
-      STRING,
-      0,
-      parse_tracker,
-      NULL },
-    { CFG_TRACKER_CASE,
-      { &gtkhx_prefs.track_case },
-      BOOLEAN,
-      0,
-      changed_case,
-      NULL },
-    { CFG_TRAY, { &gtkhx_prefs.tray }, BOOLEAN, 0, changed_tray, NULL },
-    { CFG_USER_XSIZE, { &gtkhx_prefs.geo.users.xsize }, INT, 0, NULL, NULL },
-    { CFG_USER_YSIZE, { &gtkhx_prefs.geo.users.ysize }, INT, 0, NULL, NULL },
-    /* The device prefs persist in gtkhxrc regardless of whether voice
-     * is compiled in (so a build without voice doesn't drop a user's
-     * saved picks). The change-callbacks push the value into the Rust
-     * runtime, so they only exist when HAVE_VOICE — otherwise the
-     * entries carry a NULL changefunc and are pure storage. */
-    { CFG_VOICE_INPUT_DEVICE,
-      { &gtkhx_prefs.voice_input_device },
-      STRING,
-      0,
-#ifdef HAVE_VOICE
-      changed_voice_input_device,
-#else
-      NULL,
-#endif
-      NULL },
-    { CFG_VOICE_OUTPUT_DEVICE,
-      { &gtkhx_prefs.voice_output_device },
-      STRING,
-      0,
-#ifdef HAVE_VOICE
-      changed_voice_output_device,
-#else
-      NULL,
-#endif
-      NULL },
-    /* Phase 8.E follow-up: push-to-talk. PTT_ENABLED is a plain
-     * BOOLEAN; PTT_KEY is a STRING that holds the canonical key
-     * spec (`gdk_keyval_name` output ± modifier prefix). Both are
-     * read at runtime-hook activation time — no changefunc, since
-     * the hook samples the live prefs on every key event. */
-    { CFG_VOICE_PTT_ENABLED,
-      { &gtkhx_prefs.voice_ptt_enabled },
-      BOOLEAN,
-      0,
-      NULL,
-      NULL },
-    { CFG_VOICE_PTT_KEY,
-      { &gtkhx_prefs.voice_ptt_key },
-      STRING,
-      0,
-      NULL,
-      NULL },
-    { CFG_WORDWRAP,
-      { &gtkhx_prefs.word_wrap },
-      BOOLEAN,
-      0,
-      changed_xtext,
-      NULL },
-    { CFG_XBUF_MAX, { &gtkhx_prefs.xbuf_max }, INT, 0, changed_xtext, NULL }
+
+/* Name → apply hook.
+ *
+ * All that survives of the old address table's `changefunc` column. A linear
+ * scan over two dozen entries is a handful of string compares against the GTK
+ * work every one of these hooks drives, so there is nothing to gain from
+ * sorting it — and nothing to get wrong, which is what the sorted table needed
+ * a fatal runtime assertion and a source-scanning unit test to guarantee.
+ *
+ * Most keys need no hook at all — they configure something that reads the
+ * mirror live, so there is nothing to push anywhere. One is worth calling out
+ * as a deliberate removal rather than an absence: CFG_TRACKER used to re-split
+ * its comma-separated value into the derived `char **` beside it. The schema
+ * stores a real array and the mirror projects both shapes from it, so the
+ * splitting hook is gone. */
+typedef void (*pref_hook_fn) (session *);
+
+struct pref_hook {
+    const char *name;
+    pref_hook_fn fn;
 };
 
-/* the parallel FOO_IDX enum that paired up with cfgvars[] is
- * gone. Every (*cfgvar_for_name(CFG_FOO)) reference is now cfgvar_for_name(CFG_FOO),
- * which bsearch-finds the entry by its config-file key. The enum was
- * a maintenance footgun: every new pref needed an entry in two places
- * in a specific order, and a missing #if-guarded entry (LOGGING_IDX)
- * could shift all the indices below it.
- *
- * cfgvars[] stays sorted alphabetically by name (the file/dialog
- * construction order doesn't depend on it), and bsearch over ~50
- * entries is ~6 string compares — negligible against the GTK widget
- * construction these calls drive. */
-static int cfgnamecmp_const (const void *key, const void *mem);
+static const struct pref_hook pref_hooks[] = {
+    { CFG_ANIMATE_AVATARS, changed_animate_avatars },
+    { CFG_AUTOCOPY_COLOR, changed_autocopy_color },
+    { CFG_AUTOCOPY_STAMP, changed_autocopy_stamp },
+    { CFG_AUTOCOPY_TEXT, changed_autocopy_text },
+    { CFG_CHAT_AVATARS, changed_chat_avatars },
+    { CFG_DOWNLOAD, changed_downloadpath },
+    { CFG_EMOJI_SHORTCODES, changed_emoji_shortcodes },
+    { CFG_FONT, changed_font },
+    { CFG_ICON, changed_nickoricon },
+    { CFG_MARKDOWN, changed_markdown },
+    { CFG_NICK, changed_nickoricon },
+    { CFG_NICK_COLOR, changed_nick_color },
+    { CFG_STAMP_FORMAT, changed_stampformat },
+    { CFG_THEME, changed_theme },
+    { CFG_THEME_NAME, changed_theme_name },
+    { CFG_TIMESTAMP, changed_timestamp },
+    { CFG_TRACKER_CASE, changed_case },
+    { CFG_TRAY, changed_tray },
+#ifdef HAVE_VOICE
+    /* The device preferences persist whether or not voice is compiled in, so
+     * a build without it doesn't discard a user's saved picks; only the hooks
+     * that push the value into the Rust runtime are conditional. */
+    { CFG_VOICE_INPUT_DEVICE, changed_voice_input_device },
+    { CFG_VOICE_OUTPUT_DEVICE, changed_voice_output_device },
+#endif
+    { CFG_WORDWRAP, changed_xtext },
+    { CFG_XBUF_MAX, changed_xtext },
+};
 
-/* Verify cfgvars[] is sorted alphabetically by name — bsearch needs
- * this and there's no compiler check. Run once at first call. */
-static void
-cfgvars_assert_sorted (void)
+static pref_hook_fn
+pref_hook_for (const char *name)
 {
-    static gboolean checked;
-    gsize i;
+    size_t i;
 
-    if (checked) {
-        return;
-    }
-    checked = TRUE;
-
-    for (i = 1; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++) {
-        if (strcmp (cfgvars[i - 1].name, cfgvars[i].name) >= 0) {
-            g_error ("cfgvars[] is not sorted: \"%s\" must come before \"%s\"",
-                     cfgvars[i].name, cfgvars[i - 1].name);
+    for (i = 0; i < G_N_ELEMENTS (pref_hooks); i++) {
+        if (strcmp (pref_hooks[i].name, name) == 0) {
+            return pref_hooks[i].fn;
         }
     }
+    return NULL;
 }
 
-static struct cfgvar *
-cfgvar_for_name (const char *name)
+/* The Settings rows that are on screen right now, keyed by config name.
+ *
+ * The old table carried a `widget` slot per entry for this, and two things
+ * still need it: gtkhx_prefs_set_bool drives the live switch row when a
+ * toggle is flipped from somewhere other than Settings (the Tracker window's
+ * case-sensitive button), and the icon picker stamps the chosen resource ID
+ * onto the Identity page's spin row. Populated by the row builders below and
+ * emptied when the dialog closes, so a lookup that finds nothing means
+ * "Settings isn't open" — exactly what a NULL widget slot used to mean.
+ *
+ * The keys are copied because callers spell a name however they like; the
+ * values are borrowed widgets owned by the dialog's tree. */
+static GHashTable *pref_widgets;
+
+static void
+pref_widget_register (const char *name, GtkWidget *row)
 {
-    struct cfgvar *r;
-
-    cfgvars_assert_sorted ();
-
-    r = bsearch (name, cfgvars, sizeof (cfgvars) / sizeof (cfgvars[0]),
-                 sizeof (cfgvars[0]), cfgnamecmp_const);
-    if (!r) {
-        /* Returning &cfgvars[0] as a fallback was actively dangerous —
-         * callers write to whatever field they expect (uchar / int /
-         * char**), and treating a STRING entry as a BOOLEAN scribbles
-         * across the str pointer and crashes on the next free(). NULL
-         * is the honest return; every caller in this file is paired
-         * with a *valid* name literal, so a NULL is a coding bug we
-         * want to surface, not paper over. */
-        g_warning ("cfgvar_for_name: unknown pref \"%s\"", name);
-        return NULL;
+    if (!pref_widgets) {
+        pref_widgets
+            = g_hash_table_new_full (g_str_hash, g_str_equal, g_free, NULL);
     }
-    return r;
+    g_hash_table_insert (pref_widgets, g_strdup (name), row);
 }
 
-static int
-cfgnamecmp_const (const void *key, const void *mem)
+static GtkWidget *
+pref_widget_lookup (const char *name)
 {
-    return strcmp ((const char *)key, ((const struct cfgvar *)mem)->name);
+    return pref_widgets ? g_hash_table_lookup (pref_widgets, name) : NULL;
 }
 
-/* Bind the identity cfgvars (icon / nick) to the connection's storage. These
- * fields live on the heap-allocated the_session.htlc (docs/rust/network-endgame.md),
- * so their addresses aren't compile-time constants; the static cfgvars[] table
- * leaves those two slots NULL and this wires them once the connection has been
- * allocated. Must run after the_session.htlc exists and before any prefs
- * read/write touches ICON / NICK. */
-void
-hx_options_bind_identity (void)
+/* Everything a successful write has to do after the value has landed in Rust:
+ * bring the C mirror back into step, run the key's apply hook, and arm the
+ * save timer. */
+static void
+pref_apply (const char *name)
 {
-    struct cfgvar *v = cfgvar_for_name (CFG_ICON);
-    if (v) {
-        v->variable.var = hx_conn_icon_ptr (the_session.htlc);
-    }
-    v = cfgvar_for_name (CFG_NICK);
-    if (v) {
-        v->variable.var = hx_conn_name_buf (the_session.htlc);
-    }
-}
+    pref_hook_fn hook = pref_hook_for (name);
 
-/* prefs_write is defined after the row helpers but called by them
- * — the prototype lives in options.h. */
+    hx_prefs_mirror_refresh ();
+    if (hook) {
+        hook (hx_active_session ());
+    }
+    hx_prefs_save_soon ();
+}
 
 /* helper to compare two flowbox children by their stored
  * resource ID so the icon picker stays sorted by ID. Forward-declared
@@ -1256,7 +959,7 @@ static void
 icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
                            gpointer data)
 {
-    struct cfgvar *v;
+    GtkWidget *row;
     guint icon;
     (void)flowbox;
     (void)data;
@@ -1266,9 +969,9 @@ icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
         return;
     }
 
-    v = cfgvar_for_name (CFG_ICON);
-    if (v && v->widget && ADW_IS_SPIN_ROW (v->widget)) {
-        adw_spin_row_set_value (ADW_SPIN_ROW (v->widget), icon);
+    row = pref_widget_lookup (CFG_ICON);
+    if (row && ADW_IS_SPIN_ROW (row)) {
+        adw_spin_row_set_value (ADW_SPIN_ROW (row), icon);
     }
     /* Picking an icon dismisses the Browse popup; the value we just
      * stamped onto the spin row drives the Identity page's inline
@@ -1278,388 +981,289 @@ icon_flow_child_activated (GtkFlowBox *flowbox, GtkFlowBoxChild *child,
     }
 }
 
-/* ------------------------------------------------------------------- *
- * AdwPreferencesRow helpers
+/* ---- Typed by-name accessors ------------------------------------
  *
- * Each helper builds an AdwPreferencesRow subclass for a cfgvars[]
- * entry, initialized from the cfgvar's current value, with a notify
- * signal wired to write back to gtkhx_prefs and call the cfgvar's
- * change-callback. Replaces the GtkCheckButton / GtkEntry /
- * GtkSpinButton plumbing the old settings_page_*() functions used to
- * build by hand.
+ * The bridge the Rust settings pages (gtkhx-ui options.rs) and the remaining
+ * per-window toggles read and write preferences through. Each one is a thin
+ * pass to hxconfig; a write that actually changes something then refreshes
+ * the mirror, runs the key's apply hook and arms the save timer, so the apply
+ * semantics are identical no matter which page did the writing.
  *
- * Wiring convention: the row owns a "cfgvar" qdata pointer (the same
- * struct cfgvar * the helper looked up). The notify callback reads
- * that, updates *v->variable.X, fires v->changefunc(hx_active_session ())
- * if non-NULL, then prefs_write() so the change persists.
- *
- * No Cancel button — AdwPreferencesWindow is live-apply. Closing the
- * window is the equivalent of "OK", and we save on every change too,
- * so a process crash mid-Settings doesn't lose the last toggle. */
+ * A setter that reports "unchanged" does no work at all. That short-circuit
+ * matters: the nickname's hook puts a USER_CHANGE on the wire. */
 
-static void
-pref_apply (struct cfgvar *v)
-{
-    if (v->changefunc) {
-        v->changefunc (hx_active_session ());
-    }
-    prefs_write ();
-}
-
-/* ---- Rust settings-form bridge ----------------------------------
- *
- * The settings *form* is moving to Rust (gtkhx-ui options.rs); the
- * cfgvar registry, the changed_* apply hooks, and the on-disk
- * persistence (prefs_write) stay here. These typed by-name accessors
- * (an extension of the existing gtkhx_prefs_set_bool family) let the
- * Rust rows read a pref's current value and write a new one — a write
- * also fires the cfgvar's changefunc + persists, exactly like the C
- * rows (on_switch_row_active / on_entry_row_text / …) did, so the apply
- * semantics can't drift. BOOLEAN writes reuse gtkhx_prefs_set_bool
- * (below). STRING writes honour the `allocated` bit; both string types
- * short-circuit an unchanged value (matching the C handlers, which skip
- * redundant changefunc runs / wire packets). */
 int
 gtkhx_prefs_type (const char *name)
 {
-    struct cfgvar *v = cfgvar_for_name (name);
-    return v ? (int)v->type : 0;
+    return hxconfig_type (name);
 }
 
 int
 gtkhx_prefs_get_bool (const char *name)
 {
-    struct cfgvar *v = cfgvar_for_name (name);
-    if (!v || v->type != BOOLEAN) {
-        return 0;
-    }
-    return *v->variable.uchar ? 1 : 0;
+    return hxconfig_get_bool (name) ? 1 : 0;
 }
 
 int
 gtkhx_prefs_get_int (const char *name)
 {
-    struct cfgvar *v = cfgvar_for_name (name);
-    if (!v) {
-        return 0;
-    }
-    switch (v->type) {
-    case INT:
-        return *v->variable.integer;
-    case UINT16:
-        return (int)*v->variable.uint16;
-    case TIME_T:
-        return (int)*v->variable.timet;
-    default:
-        return 0;
-    }
+    return hxconfig_get_int (name);
+}
+
+/* Returns a g_malloc'd copy (caller frees with g_free); never NULL.
+ *
+ * hxconfig hands back a Rust allocation, which g_free must never see, so the
+ * value is copied out and the original released through its own free. */
+char *
+gtkhx_prefs_get_string (const char *name)
+{
+    char *value = hxconfig_get_string (name);
+    char *copy = g_strdup (value != NULL ? value : "");
+
+    hxconfig_free_string (value);
+    return copy;
 }
 
 void
 gtkhx_prefs_set_int (const char *name, int val)
 {
-    struct cfgvar *v = cfgvar_for_name (name);
-    if (!v) {
-        return;
+    if (hxconfig_set_int (name, val)) {
+        pref_apply (name);
     }
-    switch (v->type) {
-    case INT:
-        *v->variable.integer = val;
-        break;
-    case UINT16:
-        *v->variable.uint16 = (guint16)val;
-        break;
-    case TIME_T:
-        *v->variable.timet = (time_t)val;
-        break;
-    default:
-        return;
-    }
-    pref_apply (v);
-}
-
-/* Returns a g_malloc'd copy (caller frees with g_free); never NULL. */
-char *
-gtkhx_prefs_get_string (const char *name)
-{
-    struct cfgvar *v = cfgvar_for_name (name);
-    if (!v) {
-        return g_strdup ("");
-    }
-    if (v->type == STRING) {
-        return g_strdup (*v->variable.str ? *v->variable.str : "");
-    }
-    if (v->type == STRING32) {
-        return g_strndup (v->variable.str32, 31);
-    }
-    return g_strdup ("");
 }
 
 void
 gtkhx_prefs_set_string (const char *name, const char *val)
 {
-    struct cfgvar *v = cfgvar_for_name (name);
-    if (!v || !val) {
-        return;
+    if (val && hxconfig_set_string (name, val)) {
+        pref_apply (name);
     }
-    if (v->type == STRING) {
-        if (*v->variable.str && strcmp (*v->variable.str, val) == 0) {
-            return;
-        }
-        if (v->allocated) {
-            g_free (*v->variable.str);
-        }
-        *v->variable.str = g_strdup (val);
-        v->allocated = 1;
-    } else if (v->type == STRING32) {
-        if (strncmp (v->variable.str32, val, 31) == 0) {
-            return;
-        }
-        strncpy (v->variable.str32, val, 31);
-        v->variable.str32[31] = '\0';
-    } else {
-        return;
-    }
-    pref_apply (v);
 }
+
+/* Flip a BOOLEAN from outside the Settings window (e.g. the Tracker window's
+ * case-sensitive toggle). When Settings happens to be showing a switch row for
+ * this key, route through the row so its visible state stays in lockstep — its
+ * notify::active handler then does the write. Otherwise write directly. */
+void
+gtkhx_prefs_set_bool (const char *name, int value)
+{
+    GtkWidget *row = pref_widget_lookup (name);
+    int new_val = value ? 1 : 0;
+
+    if (row && ADW_IS_SWITCH_ROW (row)) {
+        if (adw_switch_row_get_active (ADW_SWITCH_ROW (row))
+            != (new_val ? TRUE : FALSE)) {
+            adw_switch_row_set_active (ADW_SWITCH_ROW (row),
+                                       new_val ? TRUE : FALSE);
+        }
+        return;
+    }
+
+    if (hxconfig_set_bool (name, new_val)) {
+        pref_apply (name);
+    }
+}
+
+/* ------------------------------------------------------------------- *
+ * AdwPreferencesRow helpers
+ *
+ * Each helper builds an AdwPreferencesRow subclass bound to one config key:
+ * initialised from the key's current value, rendered insensitive if the schema
+ * doesn't have the key in the shape the row needs, and wired to write back
+ * (which applies + persists) on change.
+ *
+ * Wiring convention: the config name — always a string literal from cfgkeys.h,
+ * so it outlives every widget — is passed straight through as the signal's
+ * user data, and the row is registered in pref_widgets so anything that needs
+ * to drive it while Settings is open can find it.
+ *
+ * No Cancel button — the dialog is live-apply. Closing it is the equivalent of
+ * "OK", and each change is saved shortly after it happens, so a crash
+ * mid-Settings doesn't lose the last toggle. */
 
 static void
 on_switch_row_active (AdwSwitchRow *row, GParamSpec *pspec, gpointer data)
 {
-    struct cfgvar *v = data;
+    const char *name = data;
     (void)pspec;
-    *v->variable.uchar = adw_switch_row_get_active (row) ? 1 : 0;
-    pref_apply (v);
+
+    if (hxconfig_set_bool (name, adw_switch_row_get_active (row) ? 1 : 0)) {
+        pref_apply (name);
+    }
 }
 
 static GtkWidget *
 pref_switch_row (const char *cfgname, const char *title, const char *subtitle)
 {
-    struct cfgvar *v = cfgvar_for_name (cfgname);
     GtkWidget *row = adw_switch_row_new ();
 
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
     if (subtitle && *subtitle) {
         adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
     }
-    if (!v || v->type != BOOLEAN) {
+    if (hxconfig_type (cfgname) != BOOLEAN) {
         gtk_widget_set_sensitive (row, FALSE);
         return row;
     }
     adw_switch_row_set_active (ADW_SWITCH_ROW (row),
-                               *v->variable.uchar ? TRUE : FALSE);
-    v->widget = row;
+                               hxconfig_get_bool (cfgname) ? TRUE : FALSE);
+    pref_widget_register (cfgname, row);
     g_signal_connect (row, "notify::active", G_CALLBACK (on_switch_row_active),
-                      v);
+                      (gpointer)cfgname);
     return row;
 }
 
 /* per-row debounce for entry-row apply.
  *
- * AdwEntryRow's notify::text fires on every keystroke. For most
- * STRING / STRING32 prefs that's harmless (font name, download dir,
- * etc.) — pref_apply just runs changefunc + prefs_write. But CFG_NICK
- * has changed_nickoricon as its changefunc, which sends an
- * HTLC_HDR_USER_CHANGE on the wire. Typing a 5-letter name produced
- * 5 USER_CHANGE packets, with the server faithfully broadcasting each
- * partial-prefix as the user's name to the rest of the chat.
+ * AdwEntryRow's notify::text fires on every keystroke. For most string prefs
+ * that's harmless (font name, download dir, etc.). But CFG_NICK's hook sends
+ * an HTLC_HDR_USER_CHANGE on the wire: typing a 5-letter name produced 5
+ * USER_CHANGE packets, with the server faithfully broadcasting each partial
+ * prefix as the user's name to the rest of the chat.
  *
- * Coalesce: schedule pref_apply on a 750 ms one-shot timer per row.
- * Subsequent keystrokes cancel and re-arm the timer. The user has to
- * stop typing for 750 ms before the apply runs, by which point the
- * full intended value is in the buffer and only one wire packet goes
- * out.
+ * Coalesce: schedule the write on a 750 ms one-shot timer per row, cancelled
+ * and re-armed by each subsequent keystroke. The timer ID and the config name
+ * ride on the widget via g_object_set_data, so the row's lifetime owns them
+ * and no parallel bookkeeping is needed.
  *
- * The timer ID is stashed on the widget via g_object_set_data so we
- * don't need a parallel hash table — the row's lifetime owns it.
- *
- * close_options_bookkeeping flushes pending timers (running
- * pref_apply once for any cfgvar that still has work queued) so a
- * window close mid-keystroke doesn't lose the change. Quick toggles
- * for non-debounced rows still go straight through the regular
- * pref_apply paths in on_switch_row_active / on_spin_row_value /
- * on_combo_row_selected.
- */
+ * close_options_bookkeeping flushes pending timers so a window close
+ * mid-keystroke doesn't lose the change. */
 #define ENTRY_APPLY_DEBOUNCE_MS 750
 #define ENTRY_TIMER_KEY "gtkhx-entry-apply-timer"
+#define ENTRY_NAME_KEY "gtkhx-entry-pref-name"
+
+static void
+entry_commit (GtkWidget *row)
+{
+    const char *name = g_object_get_data (G_OBJECT (row), ENTRY_NAME_KEY);
+    const char *txt = gtk_editable_get_text (GTK_EDITABLE (row));
+
+    if (!name) {
+        return;
+    }
+    if (hxconfig_set_string (name, txt ? txt : "")) {
+        pref_apply (name);
+    }
+}
 
 static gboolean
 entry_apply_timeout_cb (gpointer data)
 {
-    struct cfgvar *v = data;
-    if (v->widget) {
-        g_object_set_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY,
-                           GUINT_TO_POINTER (0));
-    }
-    pref_apply (v);
+    GtkWidget *row = data;
+
+    g_object_set_data (G_OBJECT (row), ENTRY_TIMER_KEY, GUINT_TO_POINTER (0));
+    entry_commit (row);
     return G_SOURCE_REMOVE;
 }
 
 static void
-entry_apply_schedule (struct cfgvar *v)
+entry_apply_schedule (GtkWidget *row)
 {
-    guint old;
-    if (!v->widget) {
-        pref_apply (v);
-        return;
-    }
-    old = GPOINTER_TO_UINT (
-        g_object_get_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY));
+    guint old = GPOINTER_TO_UINT (
+        g_object_get_data (G_OBJECT (row), ENTRY_TIMER_KEY));
+    guint id;
+
     if (old) {
         g_source_remove (old);
     }
-    guint id
-        = g_timeout_add (ENTRY_APPLY_DEBOUNCE_MS, entry_apply_timeout_cb, v);
-    g_object_set_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY,
-                       GUINT_TO_POINTER (id));
+    id = g_timeout_add (ENTRY_APPLY_DEBOUNCE_MS, entry_apply_timeout_cb, row);
+    g_object_set_data (G_OBJECT (row), ENTRY_TIMER_KEY, GUINT_TO_POINTER (id));
 }
 
+/* Run a row's pending write now, if it has one. Safe on any widget — a row
+ * that isn't a debounced entry never has a timer stashed. */
 static void
-entry_apply_flush (struct cfgvar *v)
+entry_apply_flush (GtkWidget *row)
 {
     guint id;
-    if (!v->widget) {
+
+    if (!row) {
         return;
     }
-    id = GPOINTER_TO_UINT (
-        g_object_get_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY));
+    id = GPOINTER_TO_UINT (g_object_get_data (G_OBJECT (row), ENTRY_TIMER_KEY));
     if (!id) {
         return;
     }
     g_source_remove (id);
-    g_object_set_data (G_OBJECT (v->widget), ENTRY_TIMER_KEY,
-                       GUINT_TO_POINTER (0));
-    pref_apply (v);
+    g_object_set_data (G_OBJECT (row), ENTRY_TIMER_KEY, GUINT_TO_POINTER (0));
+    entry_commit (row);
 }
 
 static void
 on_entry_row_text (AdwEntryRow *row, GParamSpec *pspec, gpointer data)
 {
-    struct cfgvar *v = data;
-    const char *txt = gtk_editable_get_text (GTK_EDITABLE (row));
     (void)pspec;
-
-    if (!txt) {
-        txt = "";
-    }
-
-    switch (v->type) {
-    case STRING:
-        if (*v->variable.str && strcmp (*v->variable.str, txt) == 0) {
-            return;
-        }
-        if (v->allocated) {
-            g_free (*v->variable.str);
-        }
-        *v->variable.str = g_strdup (txt);
-        v->allocated = 1;
-        break;
-    case STRING32:
-        if (strncmp (v->variable.str32, txt, 31) == 0) {
-            return;
-        }
-        {
-            char lbl[64];
-            g_snprintf (lbl, sizeof lbl, "entry_row %s", v->name);
-            debug_log_name_write (lbl, txt, strlen (txt));
-        }
-        strncpy (v->variable.str32, txt, 31);
-        v->variable.str32[31] = '\0';
-        break;
-    default:
-        return;
-    }
-    entry_apply_schedule (v);
+    (void)data;
+    entry_apply_schedule (GTK_WIDGET (row));
 }
 
 static GtkWidget *
 pref_entry_row (const char *cfgname, const char *title)
 {
-    struct cfgvar *v = cfgvar_for_name (cfgname);
     GtkWidget *row = adw_entry_row_new ();
+    char *current;
 
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
-    if (!v || (v->type != STRING && v->type != STRING32)) {
+    if (hxconfig_type (cfgname) != STRING) {
         gtk_widget_set_sensitive (row, FALSE);
         return row;
     }
 
-    if (v->type == STRING) {
-        gtk_editable_set_text (GTK_EDITABLE (row),
-                               *v->variable.str ? *v->variable.str : "");
-    } else {
-        gtk_editable_set_text (GTK_EDITABLE (row), v->variable.str32);
-    }
+    current = gtkhx_prefs_get_string (cfgname);
+    gtk_editable_set_text (GTK_EDITABLE (row), current);
+    g_free (current);
 
-    v->widget = row;
-    g_signal_connect (row, "notify::text", G_CALLBACK (on_entry_row_text), v);
+    g_object_set_data (G_OBJECT (row), ENTRY_NAME_KEY, (gpointer)cfgname);
+    pref_widget_register (cfgname, row);
+    g_signal_connect (row, "notify::text", G_CALLBACK (on_entry_row_text),
+                      NULL);
     return row;
 }
 
 static void
 on_spin_row_value (AdwSpinRow *row, GParamSpec *pspec, gpointer data)
 {
-    struct cfgvar *v = data;
-    double val = adw_spin_row_get_value (row);
+    const char *name = data;
     (void)pspec;
 
-    switch (v->type) {
-    case INT: {
-        int n = (int)val;
-        if (n == *v->variable.integer) {
-            return;
-        }
-        *v->variable.integer = n;
-        break;
+    if (hxconfig_set_int (name, (int)adw_spin_row_get_value (row))) {
+        pref_apply (name);
     }
-    case UINT16: {
-        guint16 n = (guint16)val;
-        if (n == *v->variable.uint16) {
-            return;
-        }
-        *v->variable.uint16 = n;
-        break;
-    }
-    default:
-        return;
-    }
-    pref_apply (v);
 }
 
 static GtkWidget *
 pref_spin_row (const char *cfgname, const char *title, const char *subtitle,
                double min, double max, double step)
 {
-    struct cfgvar *v = cfgvar_for_name (cfgname);
     GtkWidget *row = adw_spin_row_new_with_range (min, max, step);
-    double initial = 0;
+    int type = hxconfig_type (cfgname);
 
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
     if (subtitle && *subtitle) {
         adw_action_row_set_subtitle (ADW_ACTION_ROW (row), subtitle);
     }
-    if (!v || (v->type != INT && v->type != UINT16)) {
+    if (type != INT && type != UINT16) {
         gtk_widget_set_sensitive (row, FALSE);
         return row;
     }
 
-    initial = (v->type == INT) ? *v->variable.integer : *v->variable.uint16;
-    adw_spin_row_set_value (ADW_SPIN_ROW (row), initial);
-    v->widget = row;
-    g_signal_connect (row, "notify::value", G_CALLBACK (on_spin_row_value), v);
+    adw_spin_row_set_value (ADW_SPIN_ROW (row), hxconfig_get_int (cfgname));
+    pref_widget_register (cfgname, row);
+    g_signal_connect (row, "notify::value", G_CALLBACK (on_spin_row_value),
+                      (gpointer)cfgname);
     return row;
 }
 
-/* Colored-Nicknames Settings row. Adds an AdwActionRow
- * with a GtkColorDialogButton suffix (the picker itself) and a
- * Clear button that resets to HX_NICK_COLOR_NONE / theme
- * default. */
+/* Colored-Nicknames Settings row. An AdwActionRow with a
+ * GtkColorDialogButton suffix (the picker itself) and a Clear button that
+ * resets to HX_NICK_COLOR_NONE / theme default. */
 
 static void
 on_nick_color_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
 {
-    struct cfgvar *v = user_data;
+    const char *name = user_data;
     const GdkRGBA *rgba;
+    int packed;
     (void)pspec;
 
     rgba = gtk_color_dialog_button_get_rgba (GTK_COLOR_DIALOG_BUTTON (obj));
@@ -1667,58 +1271,48 @@ on_nick_color_changed (GObject *obj, GParamSpec *pspec, gpointer user_data)
         return;
     }
     /* Pack as 0x00RRGGBB per fogWraith spec — high byte reserved. */
-    guint8 r = (guint8)(rgba->red * 255.0 + 0.5);
-    guint8 g = (guint8)(rgba->green * 255.0 + 0.5);
-    guint8 b = (guint8)(rgba->blue * 255.0 + 0.5);
-    int packed = (int)(((guint32)r << 16) | ((guint32)g << 8) | (guint32)b);
-    if (v && v->type == INT && *v->variable.integer != packed) {
-        *v->variable.integer = packed;
-        /* Route through pref_apply so the changefunc receives the
-         * session pointer the other rows pass and prefs_write lands
-         * on the same code path. Without this the changefunc gets
-         * NULL — currently changed_nick_color ignores its arg, but
-         * future logic could need the session. */
-        pref_apply (v);
+    packed = (int)(((guint32)(guint8)(rgba->red * 255.0 + 0.5) << 16)
+                   | ((guint32)(guint8)(rgba->green * 255.0 + 0.5) << 8)
+                   | (guint32)(guint8)(rgba->blue * 255.0 + 0.5));
+    if (hxconfig_set_int (name, packed)) {
+        pref_apply (name);
     }
 }
 
 static void
 on_nick_color_clear (GtkButton *btn, gpointer user_data)
 {
-    struct cfgvar *v = user_data;
+    const char *name = user_data;
     GtkColorDialogButton *picker
         = g_object_get_data (G_OBJECT (btn), "pref-color-picker");
-    (void)btn;
-    if (!v || v->type != INT) {
+
+    if (hxconfig_get_int (name) == -1) {
         return;
     }
-    if (*v->variable.integer == -1) {
-        return;
-    }
-    *v->variable.integer = -1;
-    /* Reset the picker swatch to black so the user gets a clear
-     * "no color is set" visual cue. We block the notify::rgba
-     * signal around the call so the synthetic set doesn't fight
-     * the clear (it would otherwise pack 0x000000 back into the
-     * pref). */
+    /* Reset the picker swatch to black so the user gets a clear "no color is
+     * set" visual cue. Block the notify::rgba signal around the call so the
+     * synthetic set doesn't fight the clear by packing 0x000000 back in. */
     if (picker) {
         GdkRGBA black = { 0, 0, 0, 1.0 };
-        g_signal_handlers_block_by_func (picker, on_nick_color_changed, v);
+        g_signal_handlers_block_by_func (picker, on_nick_color_changed,
+                                         (gpointer)name);
         gtk_color_dialog_button_set_rgba (picker, &black);
-        g_signal_handlers_unblock_by_func (picker, on_nick_color_changed, v);
+        g_signal_handlers_unblock_by_func (picker, on_nick_color_changed,
+                                           (gpointer)name);
     }
-    /* Same pref_apply routing as on_nick_color_changed, for the
-     * same reasons (consistent session-arg + persistence path). */
-    pref_apply (v);
+    if (hxconfig_set_int (name, -1)) {
+        pref_apply (name);
+    }
 }
 
 static GtkWidget *
 pref_nick_color_row (void)
 {
-    struct cfgvar *v = cfgvar_for_name (CFG_NICK_COLOR);
     GtkColorDialog *dialog;
-    GtkWidget *picker;
+    GtkWidget *picker, *clear;
     GtkWidget *row = adw_action_row_new ();
+    int current;
+
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row),
                                    _ ("Nickname color"));
     adw_action_row_set_subtitle (
@@ -1726,23 +1320,22 @@ pref_nick_color_row (void)
         _ ("Optional RGB color shown on servers that support the "
            "Colored-Nicknames extension"));
 
-    if (!v || v->type != INT) {
+    if (hxconfig_type (CFG_NICK_COLOR) != INT) {
         gtk_widget_set_sensitive (row, FALSE);
         return row;
     }
 
-    /* Picker. GtkColorDialogButton (4.10+) supersedes the
-     * deprecated GtkColorButton; presents a GtkColorDialog
-     * when the user clicks the swatch and exposes the picked
-     * colour via the `rgba` property. We don't need to keep a
-     * separate ref on the dialog — the button retains it
-     * internally for the widget's lifetime. */
+    /* GtkColorDialogButton (4.10+) supersedes the deprecated GtkColorButton;
+     * it presents a GtkColorDialog when the user clicks the swatch and exposes
+     * the picked colour via the `rgba` property. No separate ref on the dialog
+     * is needed — the button retains it for the widget's lifetime. */
     dialog = gtk_color_dialog_new ();
     gtk_color_dialog_set_title (dialog, _ ("Pick Nickname Color"));
     picker = gtk_color_dialog_button_new (dialog);
 
-    if (*v->variable.integer != -1) {
-        guint32 packed = (guint32)*v->variable.integer;
+    current = hxconfig_get_int (CFG_NICK_COLOR);
+    if (current != -1) {
+        guint32 packed = (guint32)current;
         GdkRGBA rgba
             = { ((packed >> 16) & 0xff) / 255.0, ((packed >> 8) & 0xff) / 255.0,
                 (packed & 0xff) / 255.0, 1.0 };
@@ -1750,73 +1343,65 @@ pref_nick_color_row (void)
                                           &rgba);
     }
     gtk_widget_set_valign (picker, GTK_ALIGN_CENTER);
-    /* The GtkColorButton "color-set" signal was a per-pick
-     * notification; on GtkColorDialogButton the equivalent is
-     * the notify::rgba property change — fires whenever the
-     * picked colour actually changes, which is the behaviour
-     * we want here. */
+    /* GtkColorButton's "color-set" was a per-pick notification; on
+     * GtkColorDialogButton the equivalent is the notify::rgba property change,
+     * which fires whenever the picked colour actually changes. */
     g_signal_connect (picker, "notify::rgba",
-                      G_CALLBACK (on_nick_color_changed), v);
+                      G_CALLBACK (on_nick_color_changed),
+                      (gpointer)CFG_NICK_COLOR);
 
-    GtkWidget *clear = gtk_button_new_with_label (_ ("Clear"));
+    clear = gtk_button_new_with_label (_ ("Clear"));
     gtk_widget_set_valign (clear, GTK_ALIGN_CENTER);
     g_object_set_data (G_OBJECT (clear), "pref-color-picker", picker);
-    g_signal_connect (clear, "clicked", G_CALLBACK (on_nick_color_clear), v);
+    g_signal_connect (clear, "clicked", G_CALLBACK (on_nick_color_clear),
+                      (gpointer)CFG_NICK_COLOR);
 
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), picker);
     adw_action_row_add_suffix (ADW_ACTION_ROW (row), clear);
-    v->widget = picker;
+    pref_widget_register (CFG_NICK_COLOR, picker);
     return row;
 }
 
+/* Only the Voice page builds a combo row, so the whole mechanism is behind
+ * the same gate as that page — otherwise a build without voice carries two
+ * functions nothing calls. */
+#ifdef HAVE_VOICE
 static void
 on_combo_row_selected (AdwComboRow *row, GParamSpec *pspec, gpointer data)
 {
-    struct cfgvar *v = data;
+    const char *name = data;
     GtkStringList *list;
-    guint idx;
     const char *selected;
     (void)pspec;
 
-    if (v->type != STRING) {
-        return;
-    }
-
     list = GTK_STRING_LIST (
         g_object_get_data (G_OBJECT (row), "pref-combo-values"));
-    idx = adw_combo_row_get_selected (row);
-    selected = list ? gtk_string_list_get_string (list, idx) : NULL;
+    selected = list ? gtk_string_list_get_string (
+                          list, adw_combo_row_get_selected (row))
+                    : NULL;
     if (!selected) {
         return;
     }
-
-    if (*v->variable.str && strcmp (*v->variable.str, selected) == 0) {
-        return;
+    if (hxconfig_set_string (name, selected)) {
+        pref_apply (name);
     }
-    if (v->allocated) {
-        g_free (*v->variable.str);
-    }
-    *v->variable.str = g_strdup (selected);
-    v->allocated = 1;
-    pref_apply (v);
 }
 
-/* AdwComboRow with a fixed value list. `values[]` are the strings
- * stored in the cfgvar; `labels[]` are user-visible (translatable)
- * presentation. n is the number of entries; arrays are not freed. */
+/* AdwComboRow with a fixed value list. `values[]` are the strings stored in
+ * the preference; `labels[]` are user-visible (translatable) presentation. n
+ * is the number of entries; arrays are not freed. */
 static GtkWidget *
 pref_combo_row (const char *cfgname, const char *title, const char **values,
                 const char **labels, int n)
 {
-    struct cfgvar *v = cfgvar_for_name (cfgname);
     GtkWidget *row = adw_combo_row_new ();
     GtkStringList *labels_model;
     GtkStringList *values_model;
+    char *current;
     int i, selected = 0;
-    const char *current;
 
     adw_preferences_row_set_title (ADW_PREFERENCES_ROW (row), title);
-    if (!v || v->type != STRING) {
+    if (hxconfig_type (cfgname) != STRING) {
         gtk_widget_set_sensitive (row, FALSE);
         return row;
     }
@@ -1832,29 +1417,33 @@ pref_combo_row (const char *cfgname, const char *title, const char **values,
                             g_object_unref);
     g_object_unref (labels_model);
 
-    current = *v->variable.str ? *v->variable.str : "";
+    current = gtkhx_prefs_get_string (cfgname);
     for (i = 0; i < n; i++) {
         if (strcmp (current, values[i]) == 0) {
             selected = i;
             break;
         }
     }
+    g_free (current);
     adw_combo_row_set_selected (ADW_COMBO_ROW (row), selected);
-    v->widget = row;
+    pref_widget_register (cfgname, row);
     g_signal_connect (row, "notify::selected",
-                      G_CALLBACK (on_combo_row_selected), v);
+                      G_CALLBACK (on_combo_row_selected), (gpointer)cfgname);
     return row;
 }
+#endif /* HAVE_VOICE */
 
+/* Runtime state that isn't a preference and so has no schema entry. Runs
+ * before prefs_read, which then overwrites nothing here.
+ *
+ * This used to also stamp the compiled-in defaults into the prefs struct. It
+ * doesn't any more: the defaults live in the Rust schema, and prefs_read hands
+ * them to the mirror whether or not a file exists. */
 void
-init_variables (void) /* default settings if prefs file is not found. */
+init_variables (void)
 {
-    gtkhx_prefs.font = g_strdup ("Monospace 10");
-    gtkhx_font_desc = pango_font_description_from_string (gtkhx_prefs.font);
-    (*cfgvar_for_name (CFG_FONT)).allocated = 1;
-
-    /* GdkRGBA defaults — light grey foreground on black,
-     * preserving the historic 0xcccc/0xffff fraction. */
+    /* GdkRGBA defaults — light grey foreground on black, preserving the
+     * historic 0xcccc/0xffff fraction. */
     fg_col.red = 0xcccc / 65535.0;
     fg_col.green = 0xcccc / 65535.0;
     fg_col.blue = 0xcccc / 65535.0;
@@ -1864,241 +1453,22 @@ init_variables (void) /* default settings if prefs file is not found. */
     bg_col.blue = 0.0;
     bg_col.alpha = 1.0;
 
-    changed_case (NULL);
-
-    parse_tracker (NULL);
-
-    /* Tray icon defaults to ON. The runtime is a no-op without an SNI
-     * host (e.g. stock GNOME Wayland minus AppIndicator extension),
-     * so leaving it on by default doesn't hurt environments that
-     * can't render it. */
-    gtkhx_prefs.tray = 1;
-
-    /* Notification defaults match the HexChat convention: the
-     * high-signal events (mentions, PMs, invites) are on; the
-     * noisy ones (every chat line, every news post) are off so a
-     * fresh install doesn't immediately spam the user. They can
-     * dial each event up or down individually in Settings →
-     * Notifications.
-     *
-     * notify_omit_focused defaults ON so a notification only
-     * fires when the relevant window doesn't already have the
-     * user's attention. */
-    gtkhx_prefs.notify_chat = 0;
-    gtkhx_prefs.notify_chat_highlight = 1;
-    gtkhx_prefs.notify_msg = 1;
-    gtkhx_prefs.notify_pchat = 1;
-    gtkhx_prefs.notify_pchat_highlight = 1;
-    gtkhx_prefs.notify_pchat_invite = 1;
-    gtkhx_prefs.notify_news = 0;
-    gtkhx_prefs.notify_xfer = 1;
-    gtkhx_prefs.notify_broadcast = 1;
-    gtkhx_prefs.notify_omit_focused = 1;
-
-    /* Emoji shortcodes — both on by default (Mac Roman fallback +
-     * Slack-style typeahead). */
-    gtkhx_prefs.emoji_shortcodes = 1;
-    gtkhx_prefs.emoji_typeahead = 1;
-
-    /* GIF-icons (Phase 10.D): animate avatars on by default. */
-    gtkhx_prefs.animate_avatars = 1;
-
-    /* Voice device defaults: empty string === "use system default
-     * via autoaudiosrc / autoaudiosink". The Rust runtime side
-     * normalises NULL and "" identically, so we just allocate an
-     * empty string for the prefs round-trip. cfgvar_for_name's
-     * allocated flag tells the read/write path the string is
-     * heap-owned. */
-    gtkhx_prefs.voice_input_device = g_strdup ("");
-    (*cfgvar_for_name (CFG_VOICE_INPUT_DEVICE)).allocated = 1;
-    gtkhx_prefs.voice_output_device = g_strdup ("");
-    (*cfgvar_for_name (CFG_VOICE_OUTPUT_DEVICE)).allocated = 1;
-
-    /* Push-to-talk defaults: feature off, no key. Same allocated-
-     * string convention as the device prefs so prefs_write knows
-     * the buffer is heap-owned. */
-    gtkhx_prefs.voice_ptt_enabled = 0;
-    gtkhx_prefs.voice_ptt_key = g_strdup ("");
-    (*cfgvar_for_name (CFG_VOICE_PTT_KEY)).allocated = 1;
-}
-
-static void
-prefs_allocate (char *tag, char *rest)
-{
-    struct cfgvar *result;
-    result = bsearch (tag, cfgvars, sizeof (cfgvars) / sizeof (cfgvars[0]),
-                      sizeof (cfgvars[0]), cfgnamecmp_const);
-
-    if (!result) {
-        return;
-    }
-
-    switch (result->type) {
-    case INT: {
-        int i = atoi (rest);
-        if (i == *result->variable.integer) {
-            return;
-        }
-        *result->variable.integer = i;
-        break;
-    }
-    case BOOLEAN: {
-        /* prefs_write emits booleans via
-             * g_key_file_set_boolean which writes the literal
-             * "true" / "false" — but the historical parser only
-             * accepted '0'/'1' and silently fell through on
-             * anything else, reverting every BOOLEAN pref to its
-             * struct-init default on every startup. The fix
-             * accepts both spellings, case-insensitively, plus
-             * "yes"/"no" since GKeyFile's own get_boolean does
-             * too. The parser logic now lives in prefs_parser.c
-             * so the unit tests can drive it without a GTK build. */
-        unsigned char c;
-        if (!prefs_parse_boolean (rest, &c)) {
-            return;
-        }
-        if (*result->variable.uchar == c) {
-            return;
-        }
-        *result->variable.uchar = c;
-        break;
-    }
-    case STRING:
-        if (!*result->variable.str
-            || strcmp (rest, *result->variable.str) != 0) {
-            if (result->allocated) {
-                g_free (*result->variable.str);
-            }
-            *result->variable.str = g_strdup (rest);
-            result->allocated = 1;
-            break;
-        }
-        return;
-    case TIME_T: {
-        time_t t = atol (rest);
-        if (t == *result->variable.timet) {
-            return;
-        }
-        *result->variable.timet = t;
-        break;
-    }
-    case STRING32: {
-        gsize rest_len = strlen (rest);
-        /* trace every STRING32 load so the hx_conn_name (htlc)
-             * corruption hunt has a full audit trail of what came
-             * out of gtkhxrc before any sanitisation. The label
-             * encodes the key name so we can disambiguate NICK
-             * from any future STRING32. */
-        {
-            char lbl[64];
-            g_snprintf (lbl, sizeof lbl, "prefs_load %s", result->name);
-            debug_log_name_write (lbl, rest, rest_len);
-        }
-        /* Defend against corrupt non-UTF-8 bytes in the prefs
-             * file. NICK lives in a STRING32 buffer that doubles
-             * as hx_conn_name (htlc) on the wire AND as the source for a
-             * GtkEntry in Settings. GTK's input method context
-             * asserts the surrounding text is valid UTF-8
-             * (gtk_im_context_set_surrounding_with_selection),
-             * so a NICK with non-UTF-8 bytes makes the field
-             * un-editable. Validate UTF-8 here and pipe through
-             * gtkhx_text_to_utf8 (Mac Roman → UTF-8, then
-             * g_utf8_make_valid replacement-char fallback) if
-             * the bytes aren't already valid. */
-        if (g_utf8_validate (rest, rest_len, NULL)) {
-            if (!strncmp (result->variable.str32, rest, 31)) {
-                return;
-            }
-            strncpy (result->variable.str32, rest, 31);
-            result->variable.str32[31] = '\0';
-        } else {
-            gchar *clean = gtkhx_text_to_utf8 (rest, rest_len, NULL);
-            if (!strncmp (result->variable.str32, clean, 31)) {
-                g_free (clean);
-                return;
-            }
-            strncpy (result->variable.str32, clean, 31);
-            result->variable.str32[31] = '\0';
-            g_free (clean);
-        }
-        break;
-    }
-    case UINT16: {
-        guint16 g = (guint16)atoi (rest);
-        if (g == *result->variable.uint16) {
-            return;
-        }
-        *result->variable.uint16 = g;
-        break;
-    }
-    }
-
-    if (result->changefunc) {
-        (*(result->changefunc)) (hx_active_session ());
+    /* A usable font description before the settings load runs changed_font,
+     * so anything constructed in between measures against something real. */
+    if (!gtkhx_font_desc) {
+        gtkhx_font_desc = pango_font_description_from_string ("Monospace 10");
     }
 }
 
-static void
-parse_line (char *line)
-{
-    char *rest = 0, *p;
-
-    /* Change any '#' to a null char. We aren't concerned about comments. */
-    /* But if a delimeter is found, handle that. */
-    for (p = line; *p; ++p) {
-        if (*p == '#') {
-            *p = '\0';
-            break;
-        }
-        /*else */ if (*p == '=' && !rest) {
-            /* separate to distinct strings */
-            *p = '\0';
-            rest = p + 1;
-        }
-    }
-    if (!rest) {
-        return; /* No delimeter? Forget it! */
-    }
-
-    prefs_allocate (line, rest);
-}
-
-static size_t
-read_line (FILE *prefs, char **line, size_t *len)
-{
-    size_t pos = 0;
-    while (fgets ((*line) + pos, *len - pos, prefs)) {
-        size_t chunklen = strlen ((*line) + pos);
-        pos += chunklen;
-        if (!chunklen || (*line)[pos - 1] == '\n') {
-            if (pos) {
-                (*line)[pos - 1] = '\0';
-            }
-
-            return pos;
-        }
-        *len += 256;
-        *line = g_realloc (*line, *len);
-    }
-    return 0;
-}
-
-/* prefs path resolution. Primary location is
- *   $CONFIG/gtkhxrc
- * (where $CONFIG is gtkhx_config_dir()). Fall back to the legacy
- * ~/.gtkhxrc on first run so existing users don't lose their config —
- * subsequent saves go to the new path, and the legacy file is left
- * alone for the user to clean up themselves. */
-static char *
-prefs_primary_path (void)
-{
-    return g_build_filename (gtkhx_config_dir (), "gtkhxrc", NULL);
-}
-
+/* The pre-hxconfig settings file, kept only so the one-shot import has
+ * somewhere to read from: $CONFIG/gtkhxrc first, then ~/.gtkhxrc. Neither is
+ * written any more, and the import leaves both in place — if this build gets
+ * abandoned, the old one still works. */
 static char *
 prefs_legacy_path (void)
 {
     const char *home = g_getenv ("HOME");
+
     if (!home || !*home) {
         home = g_get_home_dir ();
     }
@@ -2108,289 +1478,101 @@ prefs_legacy_path (void)
     return g_build_filename (home, ".gtkhxrc", NULL);
 }
 
-/* read a GKeyFile [gtkhx] section, feeding each entry through
- * prefs_allocate. Reuses the legacy parser's type dispatch — no
- * per-cfgvar plumbing change. Returns TRUE if the keyfile parsed
- * cleanly (whether or not the section was empty). The section name
- * ("gtkhx") lives in cfgkeys.h as CFG_KEYFILE_GROUP. */
-static gboolean
-prefs_read_keyfile (const char *path)
-{
-    GKeyFile *kf;
-    GError *err = NULL;
-    gchar **keys;
-    gsize i, n_keys;
-
-    kf = g_key_file_new ();
-    if (!g_key_file_load_from_file (kf, path, G_KEY_FILE_KEEP_COMMENTS, &err)) {
-        g_key_file_free (kf);
-        g_error_free (err);
-        return FALSE;
-    }
-
-    keys = g_key_file_get_keys (kf, CFG_KEYFILE_GROUP, &n_keys, &err);
-    if (!keys) {
-        /* No [gtkhx] section — almost certainly a legacy KEY=VALUE
-         * file we just got lucky parsing. Fall through to the
-         * line-by-line parser. */
-        g_clear_error (&err);
-        g_key_file_free (kf);
-        return FALSE;
-    }
-
-    for (i = 0; i < n_keys; i++) {
-        gchar *value
-            = g_key_file_get_value (kf, CFG_KEYFILE_GROUP, keys[i], NULL);
-        if (value) {
-            prefs_allocate (keys[i], value);
-            g_free (value);
-        }
-    }
-
-    g_strfreev (keys);
-    g_key_file_free (kf);
-    return TRUE;
-}
-
-/* Legacy KEY=VALUE line-by-line reader. Used as a fallback when the
- * file at the primary path turned out not to be a GKeyFile (because
- * it's the pre-migration format) and for reading the legacy
- * ~/.gtkhxrc on first run after upgrade. */
-static gboolean
-prefs_read_legacy_lines (const char *path)
-{
-    FILE *prefs = fopen (path, "r");
-    char *prefsline;
-    size_t prefslinelen = 256;
-
-    if (!prefs) {
-        return FALSE;
-    }
-
-    prefsline = g_malloc (prefslinelen);
-    while (read_line (prefs, &prefsline, &prefslinelen)) {
-        parse_line (prefsline);
-    }
-
-    g_free (prefsline);
-    fclose (prefs);
-    return TRUE;
-}
-
-/* prefs_read intentionally does not run cfgvar changefuncs
- * (see comment on changed_nickoricon for the reasoning around the
- * wire-packet path). Most cfgvars don't need application at load —
- * the changefunc just propagates the value to a derived runtime
- * structure that's already read directly from gtkhx_prefs.* anyway.
- *
- * The xtext autocopy_* knobs are different: xtext keeps its own
- * static `prefs` struct (xtext.c) that the drag-end code reads, and
- * we only sync gtkhx_prefs → that struct via the setters. Without an
- * explicit apply at load, the runtime values would default to 0 even
- * if the user had set them in gtkhxrc.
- *
- * Call the setters once at the end of every prefs_read path. */
-static void
-apply_loaded_xtext_prefs (void)
-{
-    /* Colored-Nicknames extension. Stamp htlc->nick_color
-     * from the loaded pref so the first hx_change_name_icon (fired
-     * at login) carries our color. Same load-vs-changefunc concern
-     * as the xtext autocopy_* knobs below: the cfgvars changefunc
-     * doesn't fire on prefs_read, so without an explicit copy here
-     * htlc->nick_color stays at network.c's HX_NICK_COLOR_NONE
-     * default and we'd silently never advertise. */
-    hx_conn_set_nick_color (hx_active_session ()->htlc,
-                            (guint32)gtkhx_prefs.nick_color);
-
-    hx_chat_view_set_autocopy_text (gtkhx_prefs.autocopy_text);
-    hx_chat_view_set_autocopy_stamp (gtkhx_prefs.autocopy_stamp);
-    hx_chat_view_set_autocopy_color (gtkhx_prefs.autocopy_color);
-    /* Same reason as the autocopy trio above: prefs_read doesn't run
-     * changefuncs, so a saved "markdown off" would be ignored until the
-     * user toggled it. */
-    hx_chat_view_set_markdown (gtkhx_prefs.markdown);
-
-    /* Same load-vs-changefunc concern: prefs_read doesn't fire
-     * changefuncs, so push the loaded emoji-shortcode toggle into the
-     * text_util/proto_helpers conversion gate explicitly. (Typeahead is
-     * read live from gtkhx_prefs in emoji.c, so it needs no push.) */
-    gtkhx_text_set_emoji_shortcodes_enabled (gtkhx_prefs.emoji_shortcodes);
-
-    /* GIF-icons (Phase 10.D): same concern — push the loaded
-     * animate-avatars toggle into gif_avatar.c so a persisted OFF takes
-     * effect at startup, not only after the user touches the setting. */
-    gtkhx_avatar_set_animation_enabled (gtkhx_prefs.animate_avatars);
-
-#ifdef HAVE_VOICE
-    /* Voice capture / playback device: same load-vs-changefunc concern.
-     * prefs_read doesn't fire changed_voice_{input,output}_device, so the
-     * loaded device names live in gtkhx_prefs but never reach the Rust
-     * runtime's DEVICE_PREFS. Without this push a saved device is shown
-     * correctly in Settings yet ignored on the first Join after launch —
-     * the send/receive bins fall back to autoaudiosrc/autoaudiosink. Push
-     * both here so a persisted pick actually takes effect at startup, not
-     * only after the user re-touches the setting. (The setters just store
-     * into a Mutex-guarded static; no GStreamer init required, so it's
-     * safe this early in fe_init.) */
-    gtkhx_voice_set_input_device (gtkhx_prefs.voice_input_device);
-    gtkhx_voice_set_output_device (gtkhx_prefs.voice_output_device);
-#endif
-
-    /* Stamp format is view-aware but the format itself is process-wide.
-     * Pass NULL for the view here — at this point no chat views exist
-     * yet (chat windows are constructed AFTER prefs_read in fe_init).
-     * The recompute-stamp-width / re-grow-indent paths inside the setter
-     * are view-conditioned, so NULL is a clean format-only update. */
-    hx_chat_view_set_stamp_format (NULL, gtkhx_prefs.stamp_format);
-}
-
 void
 prefs_read (void)
 {
-    char *path = prefs_primary_path ();
+    char *legacy = g_build_filename (gtkhx_config_dir (), "gtkhxrc", NULL);
+    char *legacy_home = prefs_legacy_path ();
+    int n_warnings;
+    int i;
 
-    /* Try the new GKeyFile format first. */
-    if (g_file_test (path, G_FILE_TEST_EXISTS)) {
-        if (!prefs_read_keyfile (path)) {
-            /* File exists but isn't a GKeyFile — must be the
-             * pre-migration KEY=VALUE format sitting at the new
-             * path. Read it via the legacy line parser; the next
-             * prefs_write will rewrite it as GKeyFile. */
-            if (!prefs_read_legacy_lines (path)) {
-                fprintf (stderr, "prefs_read: %s: %s\n", path,
-                         strerror (errno));
-                fflush (stderr);
-            }
-        }
-        g_free (path);
-        apply_loaded_xtext_prefs ();
-        return;
-    }
+    n_warnings = hxconfig_load (gtkhx_config_dir (), legacy, legacy_home);
+    g_free (legacy);
+    g_free (legacy_home);
 
-    /* New-style file doesn't exist; try the legacy ~/.gtkhxrc as a
-     * migration read so existing users don't lose their config. */
-    {
-        char *legacy = prefs_legacy_path ();
-        if (legacy) {
-            if (g_file_test (legacy, G_FILE_TEST_EXISTS)) {
-                g_message ("Migrating prefs from %s to %s on next save", legacy,
-                           path);
-                prefs_read_legacy_lines (legacy);
-                g_free (legacy);
-                g_free (path);
-                apply_loaded_xtext_prefs ();
-                return;
-            }
-            g_free (legacy);
+    /* Loading never fails. Every failure mode degrades to the default and
+     * records a diagnostic naming the path and what was wrong with it, so a
+     * malformed number is reported rather than becoming the silent zero atoi()
+     * used to make of it. */
+    for (i = 0; i < n_warnings; i++) {
+        char *w = hxconfig_warning (i);
+        if (w) {
+            g_message ("settings: %s", w);
+            hxconfig_free_string (w);
         }
     }
 
-    /* No prefs anywhere — first run; pop the prefs dialog. */
-    create_options_window (NULL, NULL);
-    apply_loaded_xtext_prefs ();
-    g_free (path);
+    hx_prefs_mirror_refresh ();
+
+    /* Seed the connection from the stored identity. This is the copy that
+     * replaces the old aliasing, and it is why /nick no longer rewrites the
+     * saved global nickname: /nick writes the connection, which nothing reads
+     * back. */
+    identity_copy_to_conn (hx_active_session ()->htlc);
+
+    /* Apply every hook, not just the ones whose stored value differs from a
+     * compiled-in default. The old loader did the latter by accident — the
+     * apply lived inside the value-changed branch — so a setting saved at its
+     * default never reached the runtime it configures, and a hand-written
+     * function existed alongside to re-apply the ones where that mattered.
+     * Applying uniformly deletes both the bug and the compensator. */
+    for (i = 0; i < (int)G_N_ELEMENTS (pref_hooks); i++) {
+        pref_hooks[i].fn (hx_active_session ());
+    }
+
+    /* No settings file anywhere — first run. Pop Settings, as before. */
+    if (hxconfig_is_first_run ()) {
+        create_options_window (NULL, NULL);
+    }
+}
+
+/* Saving coalesces on a short timer with a synchronous flush at exit, the way
+ * the dock layout already does it. Every Settings toggle used to rebuild and
+ * rewrite the whole file synchronously.
+ *
+ * The window is short on purpose: it is there to collapse a burst (a drag
+ * resize, a run of keystrokes that each already passed the row debounce), not
+ * to defer the write far enough that a crash could lose it. */
+#define PREFS_SAVE_DEBOUNCE_MS 250
+
+static guint prefs_save_timer;
+
+static void
+prefs_flush (void)
+{
+    if (!hxconfig_flush ()) {
+        g_warning ("Could not write gtkhx.toml — settings changed this "
+                   "session may not survive a restart");
+    }
+}
+
+static gboolean
+prefs_save_timeout_cb (gpointer data)
+{
+    (void)data;
+    prefs_save_timer = 0;
+    prefs_flush ();
+    return G_SOURCE_REMOVE;
 }
 
 void
-prefs_write (void)
+hx_prefs_save_soon (void)
 {
-    char *path = prefs_primary_path ();
-    GKeyFile *kf;
-    GError *err = NULL;
-    int i;
-
-    kf = g_key_file_new ();
-    g_key_file_set_comment (kf, NULL, NULL,
-                            " GtkHx preferences (GKeyFile format).\n"
-                            " Edit values under [" CFG_KEYFILE_GROUP
-                            "] or use Settings.",
-                            NULL);
-
-    for (i = 0; i != (int)(sizeof (cfgvars) / sizeof (cfgvars[0])); ++i) {
-        struct cfgvar *v = &cfgvars[i];
-        switch (v->type) {
-        case UINT16:
-            g_key_file_set_integer (kf, CFG_KEYFILE_GROUP, v->name,
-                                    (gint)*v->variable.uint16);
-            break;
-        case STRING:
-            g_key_file_set_string (kf, CFG_KEYFILE_GROUP, v->name,
-                                   *v->variable.str ? *v->variable.str : "");
-            break;
-        case INT:
-            g_key_file_set_integer (kf, CFG_KEYFILE_GROUP, v->name,
-                                    *v->variable.integer);
-            break;
-        case TIME_T:
-            g_key_file_set_int64 (kf, CFG_KEYFILE_GROUP, v->name,
-                                  (gint64)*v->variable.timet);
-            break;
-        case STRING32: {
-            /* trace the value about to be persisted. If
-             * the hx_conn_name (htlc) corruption has happened between the
-             * explicit write site and this save, the hex here
-             * shows what's actually going to disk. The gtkhxrc
-             * file is the only stable record of the corrupt
-             * state, so log the bytes here too. */
-            char lbl[64];
-            g_snprintf (lbl, sizeof lbl, "prefs_write %s", v->name);
-            debug_log_name_write (lbl, v->variable.str32,
-                                  strlen (v->variable.str32));
-            g_key_file_set_string (kf, CFG_KEYFILE_GROUP, v->name,
-                                   v->variable.str32);
-            break;
-        }
-        case BOOLEAN:
-            g_key_file_set_boolean (kf, CFG_KEYFILE_GROUP, v->name,
-                                    *v->variable.uchar ? TRUE : FALSE);
-            break;
-        }
+    if (prefs_save_timer != 0) {
+        g_source_remove (prefs_save_timer);
     }
-
-    if (!g_key_file_save_to_file (kf, path, &err)) {
-        fprintf (stderr, "prefs_write: %s: %s\n", path,
-                 err ? err->message : "unknown error");
-        fflush (stderr);
-        g_clear_error (&err);
-    }
-
-    g_key_file_free (kf);
-    g_free (path);
+    prefs_save_timer
+        = g_timeout_add (PREFS_SAVE_DEBOUNCE_MS, prefs_save_timeout_cb, NULL);
 }
 
-static void
-parse_tracker (session *sess)
+void
+hx_prefs_save_now (void)
 {
-    char *com, *trackers = gtkhx_prefs.tracker_str;
-    int i;
-
-    if (gtkhx_prefs.tracker) {
-        for (i = 0; i != gtkhx_prefs.num_tracker; ++i) {
-            g_free (gtkhx_prefs.tracker[i]);
-        }
-        g_free (gtkhx_prefs.tracker);
-        gtkhx_prefs.tracker = NULL;
+    if (prefs_save_timer != 0) {
+        g_source_remove (prefs_save_timer);
+        prefs_save_timer = 0;
     }
-    gtkhx_prefs.num_tracker = 0;
-    if (!*trackers || !*(trackers + 1)) {
-        return;
-    }
-    for (i = 0;; ++i) {
-        if (!(com = strchr (trackers, ','))) {
-            com = &trackers[strlen (trackers)];
-        }
-        gtkhx_prefs.num_tracker++;
-        gtkhx_prefs.tracker
-            = g_realloc (gtkhx_prefs.tracker, (i + 1) * sizeof (char *));
-        gtkhx_prefs.tracker[i] = g_malloc (com - trackers + 1);
-        memcpy (gtkhx_prefs.tracker[i], trackers, com - trackers);
-        gtkhx_prefs.tracker[i][com - trackers] = '\0';
-        if (!*com) {
-            break;
-        }
-        trackers = com + 1;
-    }
+    prefs_flush ();
 }
 
 /* bookkeeping that runs on every dialog teardown path. Wired to
@@ -2405,7 +1587,6 @@ parse_tracker (session *sess)
 static void
 close_options_bookkeeping (GtkWidget *widget, gpointer data)
 {
-    size_t i;
     (void)widget;
     (void)data;
     options_window = 0;
@@ -2421,60 +1602,30 @@ close_options_bookkeeping (GtkWidget *widget, gpointer data)
     /* The Tracker page (now Rust) owns its own GListStore + selection; they
      * drop with the dialog's widget tree, so there's nothing to clear here. */
 
-    /* per-cfgvar widget pointers are populated as Settings
-     * pages are constructed (pref_switch_row, pref_entry_row, etc.) and
-     * point at AdwPreferencesRow children of the dialog. Once the dialog
-     * tears down those rows are freed; any external caller that later
-     * does `if (v->widget) ...` would dereference garbage. Clear the
-     * pointers so callers like gtkhx_prefs_set_bool() can safely test
-     * v->widget for "Settings is open right now".
+    /* The rows registered in pref_widgets are children of the dialog and are
+     * about to be destroyed with it, so a later lookup would hand back a freed
+     * widget. Dropping the table is also what makes an empty lookup mean
+     * "Settings isn't open".
      *
-     * Flush any pending entry-row debounce timers first so a close
-     * mid-keystroke doesn't lose the change — entry_apply_flush runs
-     * pref_apply synchronously when there's a pending timer. */
-    for (i = 0; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++) {
-        entry_apply_flush (&cfgvars[i]);
-    }
-    for (i = 0; i < sizeof (cfgvars) / sizeof (cfgvars[0]); i++) {
-        cfgvars[i].widget = NULL;
+     * Flush any pending entry-row debounce timers first, so a close
+     * mid-keystroke doesn't lose the change. */
+    if (pref_widgets) {
+        GHashTableIter iter;
+        gpointer row;
+
+        g_hash_table_iter_init (&iter, pref_widgets);
+        while (g_hash_table_iter_next (&iter, NULL, &row)) {
+            entry_apply_flush (row);
+        }
+        g_hash_table_destroy (pref_widgets);
+        pref_widgets = NULL;
     }
 }
 
-/* Generic public BOOLEAN cfgvar setter, used by per-window UI (e.g.
- * the Tracker case-sensitive toggle) to flip a cfgvar without reaching
- * into options.c internals. If the Settings window is open, we route
- * through the AdwSwitchRow so its visible state stays in lockstep
- * (the row's notify::active handler then writes the variable + calls
- * the change-callback + persists). Otherwise we write the variable
- * directly and run the change-callback ourselves. */
-void
-gtkhx_prefs_set_bool (const char *name, int value)
-{
-    struct cfgvar *v = cfgvar_for_name (name);
-    int new_val = value ? 1 : 0;
-
-    if (!v || v->type != BOOLEAN) {
-        return;
-    }
-    if (*v->variable.uchar == new_val) {
-        return;
-    }
-
-    if (v->widget && ADW_IS_SWITCH_ROW (v->widget)) {
-        /* The notify::active handler does all the bookkeeping. */
-        adw_switch_row_set_active (ADW_SWITCH_ROW (v->widget),
-                                   new_val ? TRUE : FALSE);
-        return;
-    }
-
-    *v->variable.uchar = (unsigned char)new_val;
-    pref_apply (v);
-}
-
-/* No Interface page anymore — the new files browser is always a
- * single window. Legacy FILE_SAMEWINDOW prefs are dropped from the
- * cfgvars table; any pre-existing key in an old gtkhxrc is silently
- * ignored on load. */
+/* No Interface page anymore — the new files browser is always a single
+ * window. The retired FILE_SAMEWINDOW / NEWS_SAMEWINDOW keys are named in
+ * hxconfig's migration map only so an old profile carrying them doesn't trip
+ * the unknown-key diagnostic. */
 
 /* ---- Custom GIF avatar picker (GIF-icons extension, Phase 10.C) --- */
 
@@ -2866,11 +2017,11 @@ on_icon_browse_clicked (GtkButton *btn, gpointer data)
 
     /* Preselect + scroll to the icon currently set on the spin row. */
     {
-        struct cfgvar *v = cfgvar_for_name (CFG_ICON);
+        GtkWidget *spin = pref_widget_lookup (CFG_ICON);
         guint cur = 0;
 
-        if (v && v->widget && ADW_IS_SPIN_ROW (v->widget)) {
-            cur = (guint)adw_spin_row_get_value (ADW_SPIN_ROW (v->widget));
+        if (spin && ADW_IS_SPIN_ROW (spin)) {
+            cur = (guint)adw_spin_row_get_value (ADW_SPIN_ROW (spin));
         }
         g_idle_add (icon_picker_scroll_to_selected, GUINT_TO_POINTER (cur));
     }
@@ -3009,7 +2160,7 @@ settings_page_identity (AdwPreferencesPage *page)
  * pref_combo_row machinery. The values array stores stable
  * gst::Device::name()s; the labels array stores display_name()s; the
  * empty-string sentinel is the "use autoaudiosrc/autoaudiosink"
- * choice. cfgvar_for_name's STRING type handles persistence; the
+ * choice. The schema's string type handles persistence; the
  * change-callbacks (changed_voice_input_device /
  * changed_voice_output_device) push the new value through to the
  * Rust runtime via FFI. */
@@ -3039,26 +2190,13 @@ ptt_row_refresh_subtitle (AdwActionRow *row)
     }
 }
 
-/* Persist the captured spec into prefs + write the GKeyFile.
- *
- * Mirrors the entry-row STRING-pref update path: gate the free on
- * `v->allocated` (the static initializer leaves voice_ptt_key as
- * a read-only NULL pointer until init_variables runs, and that
- * read-only state must never be g_free'd) and set the bit after
- * the fresh g_strdup so any future write hits the heap-owned
- * branch. */
+/* Persist the captured spec. The by-name setter refreshes the mirror that
+ * ptt_row_refresh_subtitle reads back, so the row's subtitle and the stored
+ * value can't disagree. */
 static void
 ptt_save_key_spec (const char *new_spec)
 {
-    struct cfgvar *v = cfgvar_for_name (CFG_VOICE_PTT_KEY);
-    if (v && v->allocated && gtkhx_prefs.voice_ptt_key) {
-        g_free (gtkhx_prefs.voice_ptt_key);
-    }
-    gtkhx_prefs.voice_ptt_key = g_strdup (new_spec ? new_spec : "");
-    if (v) {
-        v->allocated = 1;
-    }
-    prefs_write ();
+    gtkhx_prefs_set_string (CFG_VOICE_PTT_KEY, new_spec ? new_spec : "");
 }
 
 /* Key-pressed handler installed on the capture dialog. Returns
@@ -3279,11 +2417,11 @@ settings_page_voice (AdwPreferencesPage *page)
                             (GDestroyNotify)gtkhx_voice_device_list_free);
 
     /* Push-to-talk: toggle + key capture. The toggle binds via the
-     * normal cfgvars BOOLEAN flow; the key capture is bespoke
+     * normal boolean row flow; the key capture is bespoke
      * because the row's content (subtitle = current bind, with a
      * Clear button) and its interaction (click → capture dialog,
-     * Escape → cancel, valid key → write canonical spec back to
-     * cfgvars) don't fit any of the generic pref_* row helpers. */
+     * Escape → cancel, valid key → write the canonical spec back)
+     * don't fit any of the generic pref_* row helpers. */
     settings_page_voice_ptt_group (page);
 }
 #endif /* HAVE_VOICE */

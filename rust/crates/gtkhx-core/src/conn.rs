@@ -435,17 +435,6 @@ pub unsafe extern "C" fn hx_conn_name(h: *const HtlcConn) -> *const c_char {
 pub unsafe extern "C" fn hx_conn_set_name(h: *mut HtlcConn, v: *const c_char) {
     strlcpy(&mut (*h).name, v);
 }
-/// The writable name buffer for the NICK cfgvar binding (options.c) — a stable
-/// `char *` into this connection's storage.
-///
-/// # Safety
-/// `h` must be a non-null, live `*mut HtlcConn` from `hx_conn_new`. The
-/// returned pointer is valid for the connection's lifetime.
-#[no_mangle]
-pub unsafe extern "C" fn hx_conn_name_buf(h: *mut HtlcConn) -> *mut c_char {
-    (*h).name.as_mut_ptr()
-}
-
 /// # Safety
 /// See the module note above the string accessors.
 #[no_mangle]
@@ -477,20 +466,6 @@ pub unsafe extern "C" fn hx_conn_compressalg(h: *const HtlcConn) -> *const c_cha
 #[no_mangle]
 pub unsafe extern "C" fn hx_conn_set_compressalg(h: *mut HtlcConn, v: *const c_char) {
     set_zeroed_str(&mut (*h).compressalg, v);
-}
-
-// ---- Icon (value + pointer escape hatch) ----------------------------------
-
-/// The raw address of the icon field for the ICON cfgvar binding (options.c),
-/// which needs a stable `guint16 *`. Deliberate escape hatch — the pointer is
-/// into this connection's storage (stable under `Box`), valid for its lifetime.
-///
-/// # Safety
-/// `h` must be a non-null, live `*mut HtlcConn` from `hx_conn_new`; the
-/// returned pointer is valid for the connection's lifetime.
-#[no_mangle]
-pub unsafe extern "C" fn hx_conn_icon_ptr(h: *mut HtlcConn) -> *mut u16 {
-    &mut (*h).icon as *mut u16
 }
 
 // ---- Opaque pointers (sess back-pointer, HOPE AEAD handle) ----------------

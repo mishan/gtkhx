@@ -11,9 +11,9 @@
  * voice_ptt — window-scoped push-to-talk hook.
  *
  * Reads `gtkhx_prefs.voice_ptt_enabled` and `gtkhx_prefs.voice_ptt_key`
- * on every key event; no setter API (the prefs widget writes back to
- * the prefs struct directly via the existing cfgvars BOOLEAN/STRING
- * machinery, so the hook just samples). The hook is dormant when:
+ * on every key event; no setter API (the Settings rows write through the
+ * by-name setters and the mirror is refreshed from there, so the hook just
+ * samples). The hook is dormant when:
  *
  *   - PTT is disabled in prefs, OR
  *   - PTT is enabled but no key is captured (empty CFG_VOICE_PTT_KEY), OR

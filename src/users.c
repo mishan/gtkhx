@@ -50,6 +50,7 @@
 #include "voice_runtime.h" /* gtkhx_voice_runtime_set_user_volume — slider */
 #endif
 #include "gif_avatar.h" /* gtkhx_avatar_is_animated / _is_paused / _set_paused */
+#include "panel_registry.h"
 
 /* Every userlist call site is HxUserListView-backed; selection
  * comes from the view's GtkSingleSelection, right-click pops via
@@ -1011,7 +1012,7 @@ users_clear (struct htlc_conn *htlc, struct chat *chat)
         hx_chat_set_subject (chat, NULL, 0);
     }
 
-    if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
+    if (!sess->users_view || !hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
         return;
     }
 
@@ -1130,7 +1131,7 @@ user_create (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
      * position; the row computes its own foreground via
      * user_nick_color_gdk from the `color` arg. */
     (void)htlc;
-    if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
+    if (!sess->users_view || !hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
         return;
     }
     hx_user_list_view_add (sess->users_view, uid, nam, icon, color, nick_color);
@@ -1156,7 +1157,7 @@ user_delete (struct htlc_conn *htlc, struct chat *chat, guint16 uid)
     }
 
     /* hx_chat_cid (chat) == 0 — standalone Users window. */
-    if (!sess->users_view || !gtkhx_prefs.geo.users.open) {
+    if (!sess->users_view || !hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
         return;
     }
     hx_user_list_view_remove (sess->users_view, uid);
@@ -1218,7 +1219,7 @@ user_change (struct htlc_conn *htlc, struct chat *chat, guint16 uid,
         }
     }
 
-    if (sess->users_view && gtkhx_prefs.geo.users.open) {
+    if (sess->users_view && hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
         /* HxUserListView's update is an in-place state mutation
          * (HxUserRow::set_state fires "changed", the sort model
          * re-orders, the column-view cell re-snapshots). The row
@@ -1266,7 +1267,7 @@ users_refresh_avatar (guint16 uid)
         }
     }
 
-    if (sess->users_view && gtkhx_prefs.geo.users.open) {
+    if (sess->users_view && hx_panel_was_constructed (HX_PANEL_ID_USERS)) {
         hx_user_list_view_refresh_avatar (sess->users_view, uid);
     }
 }
