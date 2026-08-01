@@ -695,7 +695,7 @@ font = 'Cantarell 12'
 scrollback_lines = 1_000
 
 [identity]
-nick_color = 0x0066ccff
+icon = 0x1f4
 ",
     );
 
@@ -703,14 +703,14 @@ nick_color = 0x0066ccff
     assert!(config.warnings().is_empty(), "{:?}", config.warnings());
     assert_eq!(config.settings().chat.font, "Cantarell 12");
     assert_eq!(config.settings().chat.scrollback_lines, 1000);
-    assert_eq!(config.settings().identity.nick_color, 0x0066_ccff);
+    assert_eq!(config.settings().identity.icon, 500);
 
     // Untouched, each keeps the form the user wrote.
     config.save(dir.path()).expect("save");
     let text = dir.read();
     assert!(text.contains("'Cantarell 12'"), "{text}");
     assert!(text.contains("1_000"), "{text}");
-    assert!(text.contains("0x0066ccff"), "{text}");
+    assert!(text.contains("0x1f4"), "{text}");
 
     // Changed, they come back in the writer's spelling — and still round-trip.
     let mut config = Config::load(dir.path());
@@ -1878,4 +1878,177 @@ fn diagnostics_are_reachable_from_c() {
     assert!(ffi::hxconfig_warning(1).is_null());
     assert!(ffi::hxconfig_warning(-1).is_null());
     assert!(ffi::hxconfig_warning(c_int::MIN).is_null());
+}
+
+// ------------------------------------------------------- the nick colour --
+
+#[test]
+fn a_colour_is_written_the_way_a_person_writes_one() {
+    // 12607947 tells a reader nothing and cannot be hand-edited with any
+    // confidence. The value is still an integer in memory and on the wire —
+    // only the file spells it #rrggbb.
+    let dir = TempDir::new("colour-write");
+    let mut config = Config::defaults();
+    config.settings_mut().identity.nick_color = 0x00c0_65cb;
+    config.save(dir.path()).expect("save");
+
+    assert!(
+        dir.read().contains(r##"nick_color = "#c065cb""##),
+        "{}",
+        dir.read()
+    );
+    assert_eq!(
+        Config::load(dir.path()).settings().identity.nick_color,
+        0x00c0_65cb
+    );
+
+    // No colour is the empty string, matching the rest of the schema, where an
+    // empty nickname means unset and an empty voice device means the default.
+    let mut config = Config::defaults();
+    assert_eq!(config.settings().identity.nick_color, NICK_COLOR_NONE);
+    config.save(dir.path()).expect("save");
+    assert!(
+        dir.read().contains(r##"nick_color = """##),
+        "{}",
+        dir.read()
+    );
+    assert_eq!(
+        Config::load(dir.path()).settings().identity.nick_color,
+        NICK_COLOR_NONE
+    );
+}
+
+#[test]
+fn a_colour_is_read_the_way_a_person_might_have_written_one() {
+    for (text, want) in [
+        ("#c065cb", 0x00c0_65cb),
+        ("#C065CB", 0x00c0_65cb),
+        ("c065cb", 0x00c0_65cb),
+        // The three-digit CSS shorthand is what most people reach for.
+        ("#abc", 0x00aa_bbcc),
+        ("abc", 0x00aa_bbcc),
+        ("  #c065cb  ", 0x00c0_65cb),
+        ("", NICK_COLOR_NONE),
+        ("none", NICK_COLOR_NONE),
+        ("None", NICK_COLOR_NONE),
+    ] {
+        assert_eq!(parse_nick_color(text), Some(want), "for {text:?}");
+    }
+
+    for bad in ["#12345", "#gg0000", "red", "#1234567", "0x00c065cb"] {
+        assert_eq!(parse_nick_color(bad), None, "for {bad:?}");
+    }
+
+    // Every accepted spelling reaches the setting itself, not just the parser.
+    let dir = TempDir::new("colour-read");
+    dir.write("version = 1\n[identity]\nnick_color = \"#ABC\"\n");
+    let config = Config::load(dir.path());
+    assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+    assert_eq!(config.settings().identity.nick_color, 0x00aa_bbcc);
+}
+
+#[test]
+fn a_bare_integer_colour_still_reads_and_heals_on_save() {
+    // What the key held before, and what someone reaching for a decimal would
+    // write. Accepting both on read and writing one means a file fixes itself
+    // on the next save rather than needing a schema version to carry the
+    // change.
+    let dir = TempDir::new("colour-legacy");
+    dir.write("version = 1\n[identity]\nnick_color = 12607947\n");
+
+    let mut config = Config::load(dir.path());
+    assert!(config.warnings().is_empty(), "{:?}", config.warnings());
+    assert_eq!(config.settings().identity.nick_color, 12607947);
+
+    config.settings_mut().chat.timestamp = true;
+    config.save(dir.path()).expect("save");
+    assert!(
+        dir.read().contains(r##"nick_color = "#c061cb""##),
+        "{}",
+        dir.read()
+    );
+}
+
+#[test]
+fn a_value_that_is_not_a_colour_is_diagnosed() {
+    let dir = TempDir::new("colour-bad");
+    dir.write("version = 1\n[identity]\nnick_color = \"puce\"\n");
+
+    let config = Config::load(dir.path());
+    assert_eq!(config.settings().identity.nick_color, NICK_COLOR_NONE);
+    let w = &config.warnings()[0];
+    assert_eq!(w.path, "identity.nick_color");
+    assert!(matches!(w.kind, WarningKind::UnknownValue { .. }));
+    assert!(w.to_string().contains("#rrggbb"), "{w}");
+}
+
+#[test]
+fn the_migration_converts_the_old_decimal_colour() {
+    // The real profile carries NICKCOLOR=12607947.
+    let (keys, form) = legacy::parse(REAL_PROFILE);
+    let doc = migrate::to_document(&keys, form, &mut Vec::new());
+    assert!(
+        doc.to_string().contains(r##"nick_color = "#c061cb""##),
+        "{doc}"
+    );
+    assert!(!doc.to_string().contains("12607947"), "{doc}");
+}
+
+#[test]
+fn the_c_abi_still_sees_a_colour_as_an_integer() {
+    // The Settings colour picker and the C mirror both deal in 0x00RRGGBB
+    // ints; only the file spells it in hex. So the type tag stays INT and the
+    // int accessors keep working.
+    ffi::hxconfig_load_defaults_for_test();
+    assert_eq!(ffi::hxconfig_type(c("NICKCOLOR").as_ptr()), 1);
+    assert_eq!(
+        ffi::hxconfig_get_int(c("NICKCOLOR").as_ptr()),
+        NICK_COLOR_NONE
+    );
+    assert_eq!(
+        ffi::hxconfig_set_int(c("NICKCOLOR").as_ptr(), 0x00c0_65cb),
+        1
+    );
+    assert_eq!(ffi::hxconfig_get_int(c("NICKCOLOR").as_ptr()), 0x00c0_65cb);
+}
+
+#[test]
+fn an_integer_colour_outside_24_bits_is_rejected() {
+    // The integer form is accepted for compatibility, but only over the range
+    // that actually means something: -1, then 0x000000..=0xffffff. Anything
+    // wider would reach the wire and then change meaning on the next save,
+    // because writing masks to 24 bits.
+    for bad in ["0x01000000", "16777216", "-2", "-16777215"] {
+        let dir = TempDir::new("colour-range");
+        dir.write(&format!("version = 1\n[identity]\nnick_color = {bad}\n"));
+
+        let config = Config::load(dir.path());
+        assert_eq!(
+            config.settings().identity.nick_color,
+            NICK_COLOR_NONE,
+            "for {bad}"
+        );
+        let w = config
+            .warnings()
+            .iter()
+            .find(|w| w.path == "identity.nick_color")
+            .unwrap_or_else(|| panic!("no diagnostic for {bad}"));
+        assert!(
+            matches!(w.kind, WarningKind::OutOfRange { .. }),
+            "for {bad}"
+        );
+    }
+
+    // The edges of the valid set are fine.
+    for (text, want) in [("-1", NICK_COLOR_NONE), ("0", 0), ("16777215", 0x00ff_ffff)] {
+        let dir = TempDir::new("colour-range-ok");
+        dir.write(&format!("version = 1\n[identity]\nnick_color = {text}\n"));
+        let config = Config::load(dir.path());
+        assert!(
+            config.warnings().is_empty(),
+            "for {text}: {:?}",
+            config.warnings()
+        );
+        assert_eq!(config.settings().identity.nick_color, want, "for {text}");
+    }
 }

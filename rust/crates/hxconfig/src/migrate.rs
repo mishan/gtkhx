@@ -255,9 +255,12 @@ fn convert(kind: Kind, path: &str, raw: &str) -> Option<Value> {
             };
             return Some(Value::from(fallback as i64));
         }
-        Kind::Signed | Kind::Unsigned | Kind::Extent | Kind::Id16 => {
-            Value::from(raw.trim().parse::<i64>().ok()?)
-        }
+        Kind::Unsigned | Kind::Extent | Kind::Id16 => Value::from(raw.trim().parse::<i64>().ok()?),
+        // NICKCOLOR was a bare decimal. Convert on the way across rather than
+        // carrying the unreadable form into a file people are meant to edit.
+        Kind::Color => Value::from(crate::schema::format_nick_color(
+            raw.trim().parse::<i32>().ok()?,
+        )),
         // The nickname is the connection's 32-byte wire name field, and the C
         // reader clamped it on the way in. A file the C writer produced cannot
         // exceed that, but a hand-edited or bare-lines one can, and an

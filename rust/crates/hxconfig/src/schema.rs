@@ -79,6 +79,49 @@ pub struct Identity {
 /// as a signed int, which is what the `NICKCOLOR` key has always stored.
 pub const NICK_COLOR_NONE: i32 = -1;
 
+/// Render a nickname colour the way a person writes one.
+///
+/// The value is `0x00RRGGBB` in memory and on the wire, and was a bare decimal
+/// on disk — `12607947`, which tells a reader nothing and cannot be edited by
+/// hand with any confidence. It is written as `#rrggbb` instead. The empty
+/// string means no colour, matching the rest of the schema, where an empty
+/// nickname means "unset" and an empty voice device means "system default".
+pub fn format_nick_color(value: i32) -> String {
+    if value == NICK_COLOR_NONE {
+        return String::new();
+    }
+    format!("#{:06x}", (value as u32) & 0x00ff_ffff)
+}
+
+/// Read a nickname colour as a person might have written one.
+///
+/// Accepts `#rrggbb`, `#rgb`, either without the `#`, in any case, and the
+/// words for "no colour". Deliberately liberal: this is a value someone types
+/// into a text file from memory of some other program's conventions, and the
+/// three-digit CSS shorthand in particular is what most people reach for.
+///
+/// `None` means the text isn't a colour at all, which the caller reports
+/// rather than guessing at.
+pub fn parse_nick_color(text: &str) -> Option<i32> {
+    let text = text.trim();
+    if text.is_empty() || text.eq_ignore_ascii_case("none") {
+        return Some(NICK_COLOR_NONE);
+    }
+    let digits = text.strip_prefix('#').unwrap_or(text);
+    if !digits.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let expanded = match digits.len() {
+        // #rgb is shorthand for #rrggbb, as everywhere else that spells
+        // colours this way.
+        3 => digits.chars().flat_map(|c| [c, c]).collect(),
+        6 => digits.to_string(),
+        _ => return None,
+    };
+    let value = u32::from_str_radix(&expanded, 16).ok()?;
+    Some((value & 0x00ff_ffff) as i32)
+}
+
 impl Default for Identity {
     fn default() -> Self {
         Identity {

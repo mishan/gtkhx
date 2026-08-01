@@ -176,10 +176,12 @@ pub extern "C" fn hxconfig_type(name: *const c_char) -> c_int {
         return 0;
     };
     match kind_of(path) {
-        Some(Kind::Signed) | Some(Kind::Unsigned) | Some(Kind::Extent) => 1, /* INT */
-        Some(Kind::Flag) => 2,                                               /* BOOLEAN */
-        Some(Kind::Text) | Some(Kind::Scheme) | Some(Kind::List) => 3,       /* STRING */
-        Some(Kind::Id16) => 5,                                               /* UINT16 */
+        // A colour is an integer everywhere but the file, where it is
+        // #rrggbb — the Settings picker and the C mirror both deal in ints.
+        Some(Kind::Unsigned) | Some(Kind::Extent) | Some(Kind::Color) => 1, /* INT */
+        Some(Kind::Flag) => 2,                                              /* BOOLEAN */
+        Some(Kind::Text) | Some(Kind::Scheme) | Some(Kind::List) => 3,      /* STRING */
+        Some(Kind::Id16) => 5,                                              /* UINT16 */
         None => 0,
     }
 }
