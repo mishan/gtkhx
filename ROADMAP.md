@@ -77,6 +77,21 @@ Full survey — the blocker inventory, the panel-scope trichotomy, the voice-exc
 arbiter, and the two layout models costed against the code:
 [docs/multi-connection.md](docs/multi-connection.md).
 
+### Settings in Rust, and a TOML config file
+
+The preferences system is a static table of pointers into a global C struct, persisted
+as a GKeyFile with SHOUTING_CASE keys. It loses unknown keys and user comments on every
+save, grows an escape level on any value containing a backslash, turns malformed numbers
+into zero without a diagnostic, and has no round-trip test at all. Two of its entries
+don't have storage of their own — they alias the live connection's wire fields, which is
+why `/nick` currently rewrites your saved global nickname.
+
+The plan is a Rust `hxconfig` crate owning a versioned TOML file, with C keeping a
+read-only mirror struct until its last reader is ported. Connections stay in their own
+file: it holds plaintext passwords, and it deliberately refuses to save when corrupt
+where settings should fall back to defaults. Full design, including the migration and
+the per-connection identity model it delivers: [docs/preferences.md](docs/preferences.md).
+
 ### Chat and message logging
 
 Still pending, and further from done than it looks. The original `log.c` was deleted rather
