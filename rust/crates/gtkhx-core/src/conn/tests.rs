@@ -168,3 +168,39 @@ fn layout_is_pinned() {
     assert_eq!(std::mem::size_of::<HtlcConn>(), HXCONN_SIZEOF);
     assert_eq!(std::mem::align_of::<HtlcConn>(), 8);
 }
+
+#[test]
+fn a_long_name_is_cut_on_a_character_boundary() {
+    // The wire name field is 32 bytes. A byte-wise cut at 31 splits a
+    // multi-byte character in half and puts an invalid sequence on the wire,
+    // where it lands in every other client's user list.
+    let conn = hx_conn_new();
+
+    // 16 two-byte characters = 32 bytes: one too many for the field, and the
+    // naive cut falls exactly between the halves of the 16th.
+    let long = "é".repeat(16);
+    let c = std::ffi::CString::new(long).unwrap();
+    unsafe { hx_conn_set_name(conn, c.as_ptr()) };
+    let got = unsafe { std::ffi::CStr::from_ptr(hx_conn_name(conn)) }
+        .to_str()
+        .expect("a truncated name must still be valid UTF-8");
+    assert_eq!(got, "é".repeat(15), "{} bytes", got.len());
+
+    // A three-byte character straddling the limit from a different offset.
+    let mixed = format!("{}{}", "a".repeat(30), "→");
+    let c = std::ffi::CString::new(mixed).unwrap();
+    unsafe { hx_conn_set_name(conn, c.as_ptr()) };
+    let got = unsafe { std::ffi::CStr::from_ptr(hx_conn_name(conn)) }
+        .to_str()
+        .expect("valid UTF-8");
+    assert_eq!(got, "a".repeat(30));
+
+    // And a name that fits is untouched, including one that exactly fills it.
+    let exact = "a".repeat(31);
+    let c = std::ffi::CString::new(exact.clone()).unwrap();
+    unsafe { hx_conn_set_name(conn, c.as_ptr()) };
+    let got = unsafe { std::ffi::CStr::from_ptr(hx_conn_name(conn)) };
+    assert_eq!(got.to_str().unwrap(), exact);
+
+    unsafe { hx_conn_free(conn) };
+}

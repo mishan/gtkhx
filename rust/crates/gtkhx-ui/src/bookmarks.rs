@@ -46,6 +46,7 @@ struct BmWidgets {
     port_row: adw::EntryRow,
     login_row: adw::EntryRow,
     pass_row: adw::PasswordEntryRow,
+    nick_row: adw::EntryRow,
     hope_row: adw::SwitchRow,
     tls_row: adw::SwitchRow,
     cipher_row: adw::ComboRow,
@@ -129,6 +130,22 @@ fn bm_delete(name: &str) -> Result<(), String> {
     bookmark_store::delete(name)
 }
 
+/// Put the inherited nickname in the row's title, so an empty field reads as
+/// "you will appear as this" rather than as nothing.
+///
+/// `AdwEntryRow` has no placeholder — the title *is* the placeholder, floating
+/// up out of the way once there is text — so the default has to go there to be
+/// visible without hovering. Re-set on every form load, because the global can
+/// change underneath: Settings and this dialog can both be open at once.
+fn set_nick_title(row: &adw::EntryRow) {
+    let global = crate::options::pref_get_string(crate::options::cfg::NICK);
+    if global.is_empty() {
+        row.set_title(&tr("Nickname on this server"));
+    } else {
+        row.set_title(&format!("{} ({global})", tr("Nickname on this server")));
+    }
+}
+
 /// Build a [`Bookmark`] from the current form and persist it under `name`.
 /// Returns the save error message on failure.
 fn save_form_as(w: &BmWidgets, name: &str) -> Result<(), String> {
@@ -138,6 +155,18 @@ fn save_form_as(w: &BmWidgets, name: &str) -> Result<(), String> {
         port: w.port_row.text().to_string(),
         login: w.login_row.text().to_string(),
         password: w.pass_row.text().to_string(),
+        // Empty means inherit, so it is stored as absent rather than as an
+        // empty string — the file then says nothing at all about this
+        // bookmark's nickname, which is what makes deleting the line the way
+        // to go back to the default.
+        nick: Some(w.nick_row.text().to_string()).filter(|t| !t.is_empty()),
+        // No override UI for the icon yet: 0 is a real (blank) icon so it
+        // cannot double as "unset", and the picker is still the C settings
+        // page. The stored value is preserved rather than dropped.
+        icon: bookmark_store::find(name)
+            .ok()
+            .flatten()
+            .and_then(|b| b.icon),
         hope: w.hope_row.is_active(),
         // Cipher: dropdown index → stable bookmark byte.
         cipher: cipher_vocab::dropdown_to_cipher_byte(w.cipher_row.selected()),
@@ -171,6 +200,8 @@ fn form_from_bookmark(w: &BmWidgets, d: &Bookmark) {
     w.port_row.set_text(&d.port);
     w.login_row.set_text(&d.login);
     w.pass_row.set_text(&d.password);
+    w.nick_row.set_text(d.nick.as_deref().unwrap_or(""));
+    set_nick_title(&w.nick_row);
     w.hope_row.set_active(d.hope);
     w.tls_row.set_active(d.tls);
     // Cipher uses the stable bookmark vocabulary; translate to the live
@@ -730,6 +761,18 @@ fn build_window() {
     pass_row.set_title(&tr("Password"));
     group.add(&pass_row);
 
+    // Beside the account credentials, because both answer "who am I here" —
+    // the login is who the server authenticates, this is who everyone sees.
+    //
+    // Empty means inherit. There is no tri-state entry row, so the global
+    // shows through as placeholder text: an empty field reading "Misha" is
+    // legible as "you will appear as Misha", and typing anything replaces it
+    // for this server only. Clearing the field goes back to inheriting, which
+    // is why the placeholder has to track the global rather than be set once.
+    let nick_row = adw::EntryRow::new();
+    set_nick_title(&nick_row);
+    group.add(&nick_row);
+
     // TLS first — toggling it greys out HOPE + cipher + compress (and
     // forces HOPE off underneath), and flips the default port 5500 ⇄ 5600,
     // the same coupling the Connect dialog enforces (see sync_sensitivity /
@@ -791,6 +834,7 @@ fn build_window() {
         port_row,
         login_row,
         pass_row,
+        nick_row,
         hope_row,
         tls_row,
         cipher_row,

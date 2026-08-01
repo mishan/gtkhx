@@ -480,28 +480,81 @@ changed_timestamp (session *sess)
     }
 }
 
-/* Copy the stored identity onto a connection.
+/* The identity a connection should present, resolved and copied.
  *
  * The nickname and icon preferences used to *be* the connection's wire name
  * buffer and icon field — a startup binder patched their two table slots with
  * raw interior pointers, so a write to either went straight onto the wire
  * struct. They are ordinary settings with their own storage now, and this is
- * the one-way copy that replaces the aliasing. An empty nickname or a zero
- * icon means "nothing stored", so the connection keeps whatever it was given
- * at construction. */
+ * the one-way copy that replaces the aliasing.
+ *
+ * Resolution is `override ?? global ?? startup`, three deep because each level
+ * answers a different question:
+ *
+ *   override  what this connection is configured to show, if anything
+ *   global    what everything unspecialised shows
+ *   startup   what a profile that has never set a nickname shows: $USER,
+ *             stamped onto the connection before the settings file is read.
+ *             Kept here so a reconnect can restore it — otherwise a /nick
+ *             would survive one, which is exactly what this is meant to undo.
+ *
+ * Copied, never aliased: `/nick` changes the running connection and nothing
+ * else, and the next connect puts the configured identity back "as if the
+ * command had never been typed". */
+static char *pending_nick;
+static int pending_icon = -1;
+static char *startup_nick;
+
+void
+hx_identity_set_startup_default (const char *nick)
+{
+    g_free (startup_nick);
+    startup_nick = g_strdup (nick != NULL ? nick : "");
+}
+
+void
+hx_identity_set_pending_override (const char *nick, int icon)
+{
+    g_free (pending_nick);
+    pending_nick = (nick != NULL && *nick) ? g_strdup (nick) : NULL;
+    /* Negative means "no override". Zero cannot: it is a real, blank icon
+     * that someone can legitimately choose. */
+    pending_icon = icon;
+}
+
+void
+hx_identity_apply (struct htlc_conn *htlc)
+{
+    char *global_nick = gtkhx_prefs_get_string (CFG_NICK);
+    const char *nick = pending_nick;
+
+    if (nick == NULL) {
+        nick = *global_nick ? global_nick : startup_nick;
+    }
+    if (nick != NULL && *nick) {
+        hx_conn_set_name (htlc, nick);
+    }
+    g_free (global_nick);
+
+    /* Set unconditionally. This used to skip a zero, treating it as "nothing
+     * stored" — but zero is a real (blank) icon and the Settings spin row
+     * offers it, so choosing it silently did nothing. */
+    hx_conn_set_icon (htlc, (guint16)(pending_icon >= 0
+                                          ? pending_icon
+                                          : gtkhx_prefs_get_int (CFG_ICON)));
+
+    /* One connect, one override. Anything that wants it again says so again,
+     * so a bookmark's nickname can't leak onto a later /server or a tracker
+     * double-click. */
+    g_clear_pointer (&pending_nick, g_free);
+    pending_icon = -1;
+}
+
+/* The load-time and Settings-edit path, which has no override in play. */
 static void
 identity_copy_to_conn (struct htlc_conn *htlc)
 {
-    char *nick = gtkhx_prefs_get_string (CFG_NICK);
-    int icon = gtkhx_prefs_get_int (CFG_ICON);
-
-    if (*nick) {
-        hx_conn_set_name (htlc, nick);
-    }
-    g_free (nick);
-    if (icon != 0) {
-        hx_conn_set_icon (htlc, (guint16)icon);
-    }
+    hx_identity_apply (htlc);
 }
 
 /* The Settings nick/icon controls used to be inert — changing them updated the
