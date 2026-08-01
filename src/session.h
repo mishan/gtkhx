@@ -84,7 +84,7 @@ struct msgwin {
      * idle state. */
     GtkWidget *info_image;
     GtkWidget *info_label;
-    /* PM input line history — a Rust InputHistory (hxchat-model), like
+    /* PM input line history — a Rust InputHistory (hxmodel::chat), like
      * gtkhx_chat::chat_history. Owns the Up-arrow draft internally. */
     void *history;
 };
@@ -107,7 +107,7 @@ struct ifn {
 };
 
 /* The Rust cid → conversation registry backing session->chats (defined in the
- * gtkhx-session crate; full FFI in chat.h). Opaque here — session.h only needs
+ * gtkhx-core crate; full FFI in chat.h). Opaque here — session.h only needs
  * the pointer type for the struct field below. gnu11 permits this redundant
  * typedef alongside the identical one in chat.h. */
 typedef struct HxChatRegistry HxChatRegistry;
@@ -133,11 +133,11 @@ struct date_time {
 /* The 1.5 news reply carriers (news_post + gnews_folder / gnews_catalog) and
  * their retired predecessors (news_item / news_group / news_parts /
  * folder_item / news_folder) are all gone from C. The fetch carriers are
- * Rust-owned in hxnews-recv's `carrier` module: the browser gets an opaque
+ * Rust-owned in hxhandlers::recv::news's `carrier` module: the browser gets an opaque
  * handle, the sender reads its path, the receive handler stashes a Rust-owned
  * hotline-proto parse handle (DirList / CatList), and the tree is built by
  * hx_news_build_dirlist_from_dirlist / hx_news_build_category_tree_from_catlist
- * (hxnews-model). No C GUI struct in the
+ * (hxmodel::news). No C GUI struct in the
  * middle. */
 
 /* ---- User-list / chat membership ---------------------------------- */
@@ -250,7 +250,7 @@ typedef struct _session {
      * Lookup via chat_with_cid; the registry's destroy callback
      * (chat_free in chat.c) tears down each conversation's view then the
      * conversation handle when it is removed. It's the Rust HxChatRegistry
-     * (gtkhx-session crate — see chat.h), not a GHashTable. */
+     * (gtkhx-core crate — see chat.h), not a GHashTable. */
     HxChatRegistry *chats;
 
     /* The connection this session owns. Heap-allocated (g_new0) once at
@@ -279,7 +279,7 @@ extern session the_session;
  * Model-side code (rcv.c, network.c, …) already holds the htlc for a
  * received event and must route by it: an event belongs to a specific
  * connection, not the focused one. htlc_conn carries a back-pointer to its
- * owning session (`sess`, set at allocation), read here through the hxconn
+ * owning session (`sess`, set at allocation), read here through the gtkhx-core::conn
  * accessor — no longer a container_of, which required htlc to be embedded in
  * session, nor a direct field read of the now-opaque
  * struct. NULL in, NULL out.
@@ -323,11 +323,11 @@ extern void hx_quit (void);
 
 /* ---- File browser cache ------------------------------------------- */
 
-/* struct cached_filelist is now owned by the Rust hxfiles-recv crate (the
+/* struct cached_filelist is now owned by the Rust hxhandlers::recv::files module (the
  * hx_cfl_* accessor facade in files.h). C holds it opaquely — allocate via
  * hx_cfl_new, reach the path / fh buffer / completing / filter_argv through the
  * accessors, free via hx_cfl_free. The fh buffer accumulation for a FILE_LIST
- * reply happens natively in Rust; the view (hxfiles-entry populate) still walks
+ * reply happens natively in Rust; the view (hxmodel::files_entry populate) still walks
  * the same byte layout via hx_cfl_fh / hx_cfl_fhlen. */
 struct cached_filelist;
 

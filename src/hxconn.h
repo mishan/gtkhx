@@ -2,8 +2,8 @@
  * hxconn.h — field accessors for struct htlc_conn.
  *
  * The connection struct is Rust-owned (docs/rust/network-endgame.md; the
- * flip). Its storage and every accessor body live in the Rust `hxconn` crate
- * (rust/crates/hxconn); this header is the C ABI those accessors export. C
+ * flip). Its storage and every accessor body live in the Rust `gtkhx-core::conn` module
+ * (rust/crates/gtkhx-core/src/conn.rs); this header is the C ABI those accessors export. C
  * reaches every field through the getters/setters below — the migration onto
  * this seam ran group-by-group before the flip, so the call sites didn't change
  * when the bodies moved to Rust.

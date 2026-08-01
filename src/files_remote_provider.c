@@ -37,8 +37,8 @@
 #include <stdbool.h>
 
 /* Path-navigation model — the current path + sticky listing-error flag,
- * plus the parent/child path math. Implemented in the hxfiles-model Rust
- * crate (rust/crates/hxfiles-model/src/remote_listing.rs); this provider
+ * plus the parent/child path math. Implemented in the hxmodel::files Rust
+ * crate (rust/crates/hxmodel/src/files/remote_listing.rs); this provider
  * holds one opaque handle and keeps only the GListStore, the FILE_LIST
  * RPC send, the no-reply watchdog, and the rcv-dispatch plumbing.
  *
@@ -61,7 +61,7 @@ extern void gtkhx_files_string_free (char *s);
 
 /* Clear `store` and repopulate it from a FILE_LIST reply (`fh` = the
  * accumulated chunk bytes, `fhlen` long) — the whole walk + per-entry
- * decode + HxFileEntry construction, in the hxfiles-entry Rust crate.
+ * decode + HxFileEntry construction, in the hxmodel::files_entry Rust crate.
  * `fh` is gconstpointer so the caller's struct hl_filelist_hdr* passes
  * without a cast; the Rust side reads it as raw bytes. NULL/empty clears. */
 extern void gtkhx_files_populate_from_reply (GListStore *store,
@@ -301,7 +301,7 @@ remote_send_file_list (HxRemoteFilesProvider *self, const char *path)
  *
  * The whole wire→model binding — walk each chunk, decode the name
  * (Mac Roman → UTF-8), dir flag, icon id, and kind label, build an
- * HxFileEntry, and append it — lives in the hxfiles-entry Rust crate
+ * HxFileEntry, and append it — lives in the hxmodel::files_entry Rust crate
  * (gtkhx_files_populate_from_reply). It clears the store first, so
  * one call fully refreshes the listing. NULL/empty fh just clears. */
 static void

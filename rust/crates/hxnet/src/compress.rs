@@ -641,7 +641,7 @@ const LZ4_REDECODE_MIN_GROWTH: usize = 1024;
 
 /// `Read` adapter over a `&[u8]` slice that returns
 /// `WouldBlock` (rather than `Ok(0)`) when the buffer is
-/// exhausted. Mirrors hxcompress's `Lz4InputBuf` pattern.
+/// exhausted. Mirrors hxcrypto::compress's `Lz4InputBuf` pattern.
 ///
 /// Why this matters: `lz4_flex::frame::FrameDecoder` calls
 /// `read` on its inner reader until it has enough bytes to
@@ -1096,7 +1096,7 @@ impl<S: AsyncRead + Unpin> AsyncRead for ZstdStream<S> {
         // `this.read_decoder.run(...)`) but without the trait
         // in scope rustc errors with E0599 "no method named
         // `run` found for `Decoder<'_>`". Same load-bearing-
-        // trait-import pattern as hxcompress's lib.rs.
+        // trait-import pattern as hxcrypto::compress's lib.rs.
         use zstd::stream::raw::Operation;
         let this = self.get_mut();
 

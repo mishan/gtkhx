@@ -76,7 +76,7 @@ guint8 dir_char = '/';
  * (plus filename, for the drop-box heuristic on folders). Public so the
  * files browser's remote provider can drive it off the parsed wire chunks.
  *
- * The mapping logic moved to the hxfiles-model Rust crate in Phase F1
+ * The mapping logic moved to the hxmodel::files Rust crate in Phase F1
  * (see docs/rust/ROADMAP.md); this is a thin wrapper over
  * its FFI export. */
 extern guint16 gtkhx_files_icon_of_ftype_and_name (const char *ftype,
@@ -101,7 +101,7 @@ icon_of_fh (struct hl_filelist_hdr *fh)
 
 /* FourCC → human label.
  *
- * The type→label table moved to the hxfiles-model Rust crate in Phase F1
+ * The type→label table moved to the hxmodel::files Rust crate in Phase F1
  * (gtkhx_files_kind_label_for; see docs/rust/ROADMAP.md).
  * This C wrapper keeps the parts that need glib/gettext: the runtime
  * `_()` translation of the (static, English) label, the null-type
@@ -151,7 +151,7 @@ kind_of_ftype (const char *ftype, gboolean *is_static_out)
 }
 
 /* Recursive folder-listing / GET_R engine for one FILE_LIST entry, invoked by
- * the Rust rcv_task_file_list (hxfiles-recv) when cfl is in a recursive mode
+ * the Rust rcv_task_file_list (hxhandlers::recv::files) when cfl is in a recursive mode
  * (completing > 1). Lifted from the old C rcv_task_file_list; it reads the
  * now-Rust-owned cfl through the hx_cfl_* accessors. The folder-vs-file decision
  * is made in the Rust handler (via hotline_proto's FTYPE_FLDR) and passed as

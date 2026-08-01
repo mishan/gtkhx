@@ -1,7 +1,7 @@
 //! `hxmodel` — GtkHx's client-side model layer.
 //!
-//! One crate per domain concept was five crates (`hxchat-model`,
-//! `hxmember-model`, `hxnews-model`, `hxfiles-model`, `hxfiles-entry`) that
+//! One crate per domain concept was five crates (`hxmodel::chat`,
+//! `hxmodel::member`, `hxmodel::news`, `hxmodel::files`, `hxmodel::files_entry`) that
 //! shared their dependencies, their consumers, and their reason to exist. Two
 //! of the five pairs were a pure model and its `gio::ListModel` wrapper —
 //! one concept split across a crate boundary for no benefit. They are modules
@@ -32,7 +32,7 @@
 //! consolidation, because the chat-model re-think (ROADMAP M4b.5) landed them
 //! there. They are model, not view — they hold no widgets, and their being in
 //! the UI crate forced the receive-side handlers to depend on `gtkhx-ui`,
-//! which is what created the `gtkhx-ui -> hxchat-send -> hxuser-recv` cycle
+//! which is what created the `gtkhx-ui -> hxhandlers::send::chat -> hxhandlers::recv::user` cycle
 //! that blocked both the extern-to-Cargo conversion and the `hxhandlers`
 //! merge.
 //!

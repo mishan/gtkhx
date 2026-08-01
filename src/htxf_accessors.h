@@ -10,10 +10,10 @@
  * storage is allocated + freed Rust-side (hx_htxf_new / hx_htxf_free, in hxnet's
  * xfer_handle module). It's refcounted, held in the C xfers[] array, and mutated
  * by both the main thread and the tokio transfer worker. These getters/setters
- * are the generic field seam the Rust receive handlers (hxxfer-recv) reach it
+ * are the generic field seam the Rust receive handlers (hxhandlers::recv::xfer) reach it
  * through — so the transfer *logic* (parse, gates, stamping sequence, error
  * policy, upload-size math) lives in Rust while the struct stays in C. This is
- * the same getter/setter-seam step the hxconn (htlc_conn) migration started
+ * the same getter/setter-seam step the gtkhx-core::conn (htlc_conn) migration started
  * with. */
 
 struct htxf_conn;

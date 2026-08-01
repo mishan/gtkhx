@@ -232,16 +232,16 @@ hx_tracker_server_new_v3 (guint8 addr_type, const guint8 *address,
 
 /* Phase R4.2b: hx_tracker_server_copy / hx_tracker_server_free and the
  * boxed-type registration (hx_tracker_server_get_type) moved to Rust —
- * rust/crates/gtkhx-boxed/src/tracker.rs. The struct stays C-visible
+ * rust/crates/gtkhx-core/src/boxed/tracker.rs. The struct stays C-visible
  * (hx_tracker_server_new_v1/_v3 above fill it; consumers read fields),
  * so the Rust #[repr(C)] mirror's layout is pinned against this assert.
  * The Rust copy/free deep-copy the GBytes (ref/unref) and the
  * HxTrackerV3Meta (whose copy/free also moved). */
 _Static_assert (sizeof (HxTrackerServer) == 72,
                 "HxTrackerServer layout must match the Rust #[repr(C)] "
-                "mirror in gtkhx-boxed::tracker");
+                "mirror in gtkhx-core::boxed::tracker");
 /* Field offsets too — a size-only pin misses field reorderings /
- * padding changes that keep the total size. Mirror gtkhx-boxed::tracker's
+ * padding changes that keep the total size. Mirror gtkhx-core::boxed::tracker's
  * offset_of! asserts exactly. */
 _Static_assert (G_STRUCT_OFFSET (HxTrackerServer, addr_type) == 0,
                 "field offset");

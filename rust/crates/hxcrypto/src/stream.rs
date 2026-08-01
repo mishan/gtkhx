@@ -5,7 +5,7 @@
 //! in claude/remove-rc4 (insecure stream cipher; advertising it under
 //! a "Secure (HOPE)" label gave users a false sense of security).
 //! ChaCha20-Poly1305 is the strongest negotiated path and lives in
-//! the sister `hxcrypto-aead` crate.
+//! the sister `hxcrypto::aead` module.
 //!
 //! The C code retains a thin dispatcher in src/cipher.c that extracts
 //! fields from `htlc_conn` and calls these Rust functions; all actual

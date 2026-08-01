@@ -1,4 +1,4 @@
-//! Accessor round-trips + layout sanity for `hxconn`. The byte-exact C-ABI
+//! Accessor round-trips + layout sanity for `gtkhx-core::conn`. The byte-exact C-ABI
 //! layout pin lives in `hxconn_layout.h`'s `_Static_assert`s (checked at the C
 //! build); these are the Rust-side behaviour checks.
 

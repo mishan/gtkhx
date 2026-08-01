@@ -362,7 +362,7 @@ gtkhx_apply_theme_palette (gboolean dark)
 }
 
 /* hx_send_chat / hx_chat_user / hx_invite_user / hx_chat_join / hx_part_chat
- * / hx_change_subject moved to the hxchat-send Rust crate (the port of
+ * / hx_change_subject moved to the hxhandlers::send::chat Rust crate (the port of
  * chat.c's send path, over hotline-proto's native chat builders). chat.h keeps
  * the C ABI decls; the per-htlc cap + chat-model lookups the senders need are
  * in chat_send_bridge.c. */
@@ -1858,7 +1858,7 @@ chat_log_line_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
 
 /* Nick completion. The C tab_nick_comp / tab_nick_comp_next / nick_comp_chng /
  * public_chat_users_sorted machinery (~250 lines of raw-buffer + GSList work)
- * moved to Rust: the tested hxchat-model::complete over the
+ * moved to Rust: the tested hxmodel::chat::complete over the
  * authoritative membership model for the chat the input belongs to (each
  * struct chat's member_model), reached via hx_nick_complete. The Rust version
  * also fixes two latent C bugs the old code had — Tab-cycling that computed the
@@ -2295,7 +2295,7 @@ output_chat_subject (struct htlc_conn *htlc, guint32 cid, char *buf)
 /* View-side handler for the "chat-subject-notice" signal — the "Subject Changed
  * to: <subject>" chat-output line for a real subject change (the chat-subject
  * signal already updated the subject bar). The Rust chat-subject receive handler
- * (hxchat-recv, hx_rcv_chat_subject) emits it; the gettext + INFOPREFIX live
+ * (hxhandlers::recv::chat, hx_rcv_chat_subject) emits it; the gettext + INFOPREFIX live
  * here on the view side, same as every other model→view notification. Connected
  * in gtkhx_connect_signals at startup. */
 void
@@ -2307,7 +2307,7 @@ chat_subject_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
 }
 
 /* View-side handler for the "user-notice" signal — the roster notice lines
- * (join / parts / rename) the Rust user-roster receive handlers (hxuser-recv)
+ * (join / parts / rename) the Rust user-roster receive handlers (hxhandlers::recv::user)
  * emit. The gettext + INFOPREFIX formatting and the showjoin-pref gate live
  * here on the view side, same as every other model→view notification; the model
  * just says "user X joined chat C". `old_name` is NULL except for a rename.
@@ -2342,7 +2342,7 @@ user_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc, guint cid,
 
 /* hx_reject_chat + output_chat_invitation (the incoming chat-invitation
  * dialog) moved to Rust: gtkhx-ui/src/chat_invite.rs presents the AdwAlertDialog
- * and routes Join/Decline to the hxchat-send senders (hx_chat_join /
+ * and routes Join/Decline to the hxhandlers::send::chat senders (hx_chat_join /
  * hx_reject_chat). */
 
 /* pchat_update_trans was a configure-event handler that

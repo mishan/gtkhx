@@ -253,7 +253,7 @@ extern int task_inerror (struct htlc_conn *htlc, const guint8 *frame,
 
 /* ---- Crypto helpers (implementations in Rust crates) ---- */
 
-/* hmac_xxx() is implemented in Rust (rust/crates/hxcrypto-hash);
+/* hmac_xxx() is implemented in Rust (rust/crates/hxcrypto::hash);
  * the C symbol is gtkhx_hmac_xxx. This static inline keeps the
  * legacy call sites compiling without renaming and translates the
  * void * key/text args to the u8 * the Rust FFI takes. The shim

@@ -11,7 +11,7 @@ Delete once the migration is finished.
 """
 import re, collections, glob, sys
 
-# Was gtkhx-ui -> hxchat-send -> hxuser-recv -> gtkhx-ui. Dissolved in step 3 by
+# Was gtkhx-ui -> hxhandlers::send::chat -> hxhandlers::recv::user -> gtkhx-ui. Dissolved in step 3 by
 # moving conversation.rs + chat_members.rs (model code that had ended up in the
 # UI crate) into hxmodel, so nothing in the handler layer depends on gtkhx-ui
 # any more. Kept as an empty set because the cycle check is the thing to re-run
@@ -25,13 +25,13 @@ CYCLIC: set = set()
 # it would force a std::mem::transmute of the fn pointer at every caller, which
 # is strictly worse than the extern block it replaces.
 #
-# hx_tracker_v3_meta_{copy,free} are the other deliberate case: gtkhx-boxed
+# hx_tracker_v3_meta_{copy,free} are the other deliberate case: gtkhx-core::boxed
 # models HxTrackerV3Meta as an opaque 216-byte buffer while gtkhx-ui keeps a
 # typed #[repr(C)] mirror (ROADMAP R5.1), so the two crates describe the same
 # memory with different Rust types on purpose. The C boundary is what lets both
 # views coexist; importing would just move the cast to every call site.
 #
-# hx_rcv_user_change is one of those rcv_task_* callbacks: hxchat-send hands it
+# hx_rcv_user_change is one of those rcv_task_* callbacks: hxhandlers::send::chat hands it
 # to task_new already cast to the 3-arg shape, so importing its real (wider)
 # signature just moves the cast.
 SKIP_SYMS = {'task_new', 'hx_rcv_user_change',

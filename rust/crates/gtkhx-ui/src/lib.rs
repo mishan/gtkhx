@@ -89,7 +89,7 @@ pub mod chat_tabs;
 // Exports gtkhx_chat_input_attach; keeps tab_nick_comp in C.
 pub mod chat_input;
 // The incoming chat-invitation dialog (was output_chat_invitation +
-// chat_invite_response). Join/Decline via the hxchat-send Rust senders.
+// chat_invite_response). Join/Decline via the hxhandlers::send::chat Rust senders.
 pub mod chat_invite;
 // The C ABI over the session-owned HxMemberModel +
 // the M1 nick completion (hx_member_model_* / hx_nick_complete).
@@ -130,7 +130,7 @@ pub mod file_info;
 pub mod create_post;
 // the 1.5 news-browser create (new folder / category) + delete
 // confirmation dialogs (were news_browser.c's open_create_dialog +
-// on_delete_clicked bodies). AdwAlertDialogs over the hxnews-send senders;
+// on_delete_clicked bodies). AdwAlertDialogs over the hxhandlers::send::news senders;
 // C keeps the selection logic + the refresh bridge. Exports
 // gtkhx_news_create_dialog_open / gtkhx_news_delete_dialog_open.
 pub mod news_dialogs;
@@ -141,7 +141,7 @@ pub mod news_dialogs;
 pub mod news_tree;
 // the 1.5 news-browser compose window (New Post / Reply), was
 // news_browser.c's open_compose_window + build_reply_context_panel. Modal
-// GtkWindow over hxnews-send's post_thread sender. Exports
+// GtkWindow over hxhandlers::send::news's post_thread sender. Exports
 // gtkhx_news_compose_open.
 pub mod news_compose;
 // the 1.5 news-browser right-pane post rendering + selection

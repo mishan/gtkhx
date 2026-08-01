@@ -50,7 +50,7 @@ extern "C" {
     /// Deliberately ignores the server-supplied name — our local prefs nick is
     /// authoritative. C helper in proto_helpers.c.
     fn hx_selfinfo_parse(htlc: *mut c_void, frame: *const u8, frame_len: usize) -> u32;
-    /// Set our own "logged in" flag on the connection (hxconn). SELFINFO is the
+    /// Set our own "logged in" flag on the connection (gtkhx-core::conn). SELFINFO is the
     /// canonical login-complete signal; the agreement Agree button reads this.
     fn hx_conn_set_logged_in(htlc: *mut c_void, v: c_int);
     /// `struct chat *chat_with_cid (sess, cid)` — the chat with this id, or NULL.
@@ -71,7 +71,7 @@ extern "C" {
     fn hx_chat_subject_emit(htlc: *mut c_void, cid: u32, subject: *const c_char);
     /// GLib `g_free` — release the `guint16 *` uid task parameter.
     fn g_free(p: *mut c_void);
-    /// hxconn accessors for our own identity bookkeeping.
+    /// gtkhx-core::conn accessors for our own identity bookkeeping.
     fn hx_conn_uid(htlc: *mut c_void) -> u16;
     fn hx_conn_set_uid(htlc: *mut c_void, v: u16);
     fn hx_conn_icon(htlc: *mut c_void) -> u16;

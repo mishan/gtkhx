@@ -1,4 +1,4 @@
-//! `hxcicn` — a Macintosh `cicn` colour-icon decoder, ported from `src/cicn.c`.
+//! `hxmacres::cicn` — a Macintosh `cicn` colour-icon decoder, ported from `src/cicn.c`.
 //!
 //! A `cicn` resource is a classic Mac colour icon: a `PixMap` header, a mask
 //! `BitMap`, an icon `BitMap`, then the mask bits, the bitmap bits, a per-icon

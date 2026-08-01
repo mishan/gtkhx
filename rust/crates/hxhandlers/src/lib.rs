@@ -15,7 +15,7 @@
 //! ## Why this could not happen sooner
 //!
 //! The merge was blocked by a dependency cycle, not by the code:
-//! `gtkhx-ui → hxchat-send → hxuser-recv → gtkhx-ui`. Folding the ten crates
+//! `gtkhx-ui → hxhandlers::send::chat → hxhandlers::recv::user → gtkhx-ui`. Folding the ten crates
 //! together would only have traded a 3-node cycle for a 2-node one
 //! (`gtkhx-ui ↔ hxhandlers`), which Cargo rejects just as firmly.
 //!

@@ -12,7 +12,7 @@ gtkhx_sources = files(
   # the Bookmarks dialog joined the Connect dialog in Rust (R5.3).
   'chat.c',
   # chat_send_bridge.c — model/caps shims for the Rust chat wire-senders
-  # (hxchat-send crate; the hx_send_chat / hx_chat_* senders moved out of
+  # (hxhandlers::send::chat module; the hx_send_chat / hx_chat_* senders moved out of
   # chat.c). Links via the gtkhx-ffi façade archive.
   'chat_send_bridge.c',
   'chat_history.c',
@@ -33,7 +33,7 @@ gtkhx_sources = files(
   # (cipher_vocab.rs), as is the Bookmarks dialog (bookmarks.rs).
   'debug.c',
   # filelist_walker.c retired — the FILE_LIST walk + per-entry decode moved
-  # into the hxfiles-entry Rust crate (gtkhx_files_populate_from_reply).
+  # into the hxmodel::files_entry Rust crate (gtkhx_files_populate_from_reply).
   'files.c',
   'files_browser.c',
   'files_complete.c',
@@ -49,7 +49,7 @@ gtkhx_sources = files(
   'gtkhx_icon.c',
   'gtkhx_log.c',
   # gtkhx_session.c removed in Phase R4 — GtkhxSession is now the Rust
-  # glib::subclass crate `gtkhx-session` (rust_gtkhx_session_dep below).
+  # glib::subclass crate `gtkhx-core` (rust_gtkhx_session_dep below).
   'gtkhx_theme.c',
   'hx_panel.c',
   'hx_panel_frame.c',
@@ -61,7 +61,7 @@ gtkhx_sources = files(
   # now the Rust hxhfs crate (rust_hxhfs_dep below); hfs.h keeps the struct /
   # macro / C-ABI decls its callers include.
   # history.c (GNU readline command-line history) retired — the chat + PM input
-  # line history is now the Rust InputHistory (hxchat-model), reached via
+  # line history is now the Rust InputHistory (hxmodel::chat), reached via
   # hx_input_history_* in chat_members.rs.
   'host_port.c',
   'hotline_url.c',
@@ -76,11 +76,11 @@ gtkhx_sources = files(
   'network.c',
   'hxnet_bridge.c',
   # hxconn.c retired — struct htlc_conn's accessors + lifecycle are the Rust
-  # hxconn crate now (rust_hxconn_dep below); the layout is pinned by the
+  # gtkhx-core::conn module now (rust_hxconn_dep below); the layout is pinned by the
   # _Static_assert in protocol.h against Rust's HtlcConn.
   # news.c + news15.c + news_browser.c + news_send_bridge.c all retired — the
-  # The 1.5 news domain is fully Rust: wire senders in hxnews-send, reply
-  # handlers + carriers in hxnews-recv, the browser UI + post-date formatting +
+  # The 1.5 news domain is fully Rust: wire senders in hxhandlers::send::news, reply
+  # handlers + carriers in hxhandlers::recv::news, the browser UI + post-date formatting +
   # row-icon loading in the gtkhx-ui `news_browser` / `news_render` / `hl_date`
   # modules. (news_recv_bridge.c, the last C leaf, is gone.)
   'notify.c',
@@ -223,7 +223,7 @@ gtkhx_resources = gnome.compile_resources(
 # This replaces a 37-entry hand-ordered list. Static archives resolve
 # left-to-right, so every crate had to sit ahead of the crates providing its
 # externs, and each entry carried a comment justifying its position
-# ("must precede gtkhx-boxed", "consumer before provider", ...). Adding a
+# ("must precede gtkhx-core::boxed", "consumer before provider", ...). Adding a
 # crate now means adding a dependency in gtkhx-ffi/Cargo.toml — nothing here.
 #
 # Voice needs no special case either: the voice crates enter the archive via

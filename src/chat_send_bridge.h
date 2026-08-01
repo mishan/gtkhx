@@ -7,7 +7,7 @@ G_BEGIN_DECLS
 
 /*
  * chat_send_bridge.c — the narrow C seam the Rust chat wire-senders
- * (hxchat-send crate, the Phase R5 port of chat.c's send path) reach
+ * (hxhandlers::send::chat module, the Phase R5 port of chat.c's send path) reach
  * through for the two things they can't do from Rust: read the
  * per-connection HTLC_CAP_TEXT_ENCODING bit off the opaque htlc_conn,
  * and look up / create the per-session `struct chat` a JOIN/PART needs.

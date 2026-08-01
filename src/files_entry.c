@@ -12,8 +12,8 @@
  * row.
  *
  * The HxFileEntry GObject itself (its state, construction, get_type, and
- * the six field getters) now lives in the Rust hxfiles-entry crate
- * (rust/crates/hxfiles-entry/src/lib.rs), which exports the same
+ * the six field getters) now lives in the Rust hxmodel::files_entry module
+ * (rust/crates/hxmodel/src/files_entry.rs), which exports the same
  * hx_file_entry_* C ABI declared in files_entry.h. These two formatters
  * stay in C: they are thin g_format_size_full / g_dngettext / GDateTime
  * i18n wrappers whose whole value is GLib's locale handling, and they

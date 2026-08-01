@@ -4,7 +4,7 @@
 //!
 //! A modal `GtkWindow` transient over the toolbar window: subject entry, body
 //! `GtkTextView`, and (for a reply) a "Replying to …" context card above the
-//! form. Post sends `hx_news15_post_thread` (the Rust `hxnews-send` sender) and
+//! form. Post sends `hx_news15_post_thread` (the Rust `hxhandlers::send::news` sender) and
 //! refreshes the containing category; Cancel / close just destroys.
 //!
 //! The C side keeps the selection logic (the toolbar handlers pick the category
@@ -29,7 +29,7 @@ use hxhandlers::send::news::hx_news15_post_thread;
 use hxmodel::news::node::hx_news_node_name;
 
 extern "C" {
-    // hxnews-model node accessors (for the reply-context card).
+    // hxmodel::news node accessors (for the reply-context card).
     fn hx_news_node_kind(node: *mut c_void) -> i32;
     fn hx_news_node_postid(node: *mut c_void) -> u32;
     fn hx_news_node_sender(node: *mut c_void) -> *const c_char;

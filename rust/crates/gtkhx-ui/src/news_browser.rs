@@ -35,7 +35,7 @@ use crate::tr::tr;
 /// Stable panel id — matches `HX_PANEL_ID_NEWS15` (`panel_registry.h`).
 const HX_ID_NEWS15: &str = "news15";
 
-/// Node kinds (mirror the `NB_KIND_*` enum in the hxnews-model crate).
+/// Node kinds (mirror the `NB_KIND_*` enum in the hxmodel::news module).
 const NB_KIND_FOLDER: i32 = 1;
 const NB_KIND_CATEGORY: i32 = 2;
 const NB_KIND_POST: i32 = 3;
@@ -78,7 +78,7 @@ extern "C" {
     fn hx_news_node_body(node: *mut c_void) -> *const c_char;
     fn hx_news_node_set_body(node: *mut c_void, s: *const c_char);
 
-    // ---- hxconn: read the active connection's version / access bits directly
+    // ---- gtkhx-core::conn: read the active connection's version / access bits directly
     // (over gtkhx_active_htlc), rather than through news-specific C wrappers ----
     fn hx_conn_version(htlc: *mut c_void) -> u16;
     // ---- news_recv_bridge.c: session / carrier / leaf helpers ----

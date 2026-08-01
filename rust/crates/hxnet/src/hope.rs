@@ -333,7 +333,7 @@ pub fn hmac_password(
             format!("MAC alg label not UTF-8: {e}"),
         )
     })?;
-    // hxcrypto-hash's hmac_xxx writes into a fixed 32-byte
+    // hxcrypto::hash's hmac_xxx writes into a fixed 32-byte
     // buffer and returns the digest length.
     let mut md = [0u8; 32];
     let len = hxcrypto::hash::hmac_xxx(&mut md, password, sessionkey, alg_str);

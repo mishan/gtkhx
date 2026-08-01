@@ -1,14 +1,14 @@
-//! `hxfiles-recv` — the FILE_LIST receive handler (`rcv_task_file_list`, ported
+//! `hxhandlers::recv::files` — the FILE_LIST receive handler (`rcv_task_file_list`, ported
 //! from `rcv.c`) plus the Rust home of `struct cached_filelist` (`cfl`).
 //!
 //! `cfl` used to be a `protocol.h` struct that `rcv.c` filled and the files
-//! browser's remote provider consumed. It is now owned here (the hxconn
+//! browser's remote provider consumed. It is now owned here (the gtkhx-core::conn
 //! playbook): an opaque handle behind the `hx_cfl_*` accessor facade, holding the
 //! path, the accumulated `fh` buffer (a `Vec<u8>`), the `completing` mode, and the
 //! borrowed `filter_argv`. Because the buffer lives in Rust, the FILE_LIST reply's
 //! chunk accumulation is native — [`CachedFileList::append_entry`] grows `fh` with
 //! the exact 4-byte-aligned, patched-length record layout the view's
-//! `hxfiles-entry` populate walks — and the handler emits the `file-list` signal
+//! `hxmodel::files_entry` populate walks — and the handler emits the `file-list` signal
 //! directly (the old C `cfl_print` is gone).
 //!
 //! The one thing the handler still calls out to C for is the recursive engine:
@@ -33,7 +33,7 @@ pub struct CachedFileList {
     /// Remote directory path (owned; the old `char *path`).
     path: Option<std::ffi::CString>,
     /// Accumulated FILE_LIST records — the old `struct hl_filelist_hdr *fh` raw
-    /// buffer, byte-for-byte, so `hxfiles-entry`'s `parse_file_list_entry` walk is
+    /// buffer, byte-for-byte, so `hxmodel::files_entry`'s `parse_file_list_entry` walk is
     /// unchanged. Grown by [`Self::append_entry`].
     fh: Vec<u8>,
     /// Recursive-listing mode (`COMPLETE_*`, 2 bits on the wire struct).

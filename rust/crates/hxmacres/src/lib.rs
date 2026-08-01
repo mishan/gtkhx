@@ -18,7 +18,7 @@
 //!
 //! The [`cicn`] module decodes the one resource type GtkHx actually renders —
 //! Mac colour icons — from the bytes this walker hands back. It was the
-//! separate `hxcicn` crate until the step-3 consolidation; a `cicn` is a
+//! separate `hxmacres::cicn` module until the step-3 consolidation; a `cicn` is a
 //! resource-fork resource, so decoding it belongs here rather than in a crate
 //! of its own. Its C ABI (`hxcicn_decode`) is unchanged.
 

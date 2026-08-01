@@ -16,7 +16,7 @@
 //! thing that crosses the FFI is the opaque `*mut c_void` handle (C never
 //! dereferences it — `rcv.c` / `gtkhx.c` pass it straight through). The
 //! `#[no_mangle]` accessors keep the exact symbol names the browser (gtkhx-ui)
-//! and the senders (hxnews-send) already link against.
+//! and the senders (hxhandlers::send::news) already link against.
 
 use std::ffi::{c_char, c_void, CStr, CString};
 

@@ -252,14 +252,14 @@ task_inerror (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     return gtkhx_proto_header_in_error (frame, frame_len) ? 1 : 0;
 }
 
-/* hx_rcv_chat (HTLS_HDR_CHAT) is a #[no_mangle] fn in the hxchat-recv crate
+/* hx_rcv_chat (HTLS_HDR_CHAT) is a #[no_mangle] fn in the hxhandlers::recv::chat module
  * it parses the body via native hotline_proto::parse::parse_chat,
  * pulls the inline-media companion via native inline_media::extract_chat_media_meta
  * (dropping the line on an orphan), builds + attaches the boxed HxChatEvent via
  * the C producers, delegates the ignore-gate + emit to hx_chat_recv, and frees
  * the event. The dispatch switch below calls it by name (declared in rcv.h). */
 
-/* Private-message ignore-gate + msg emit — Rust hxmsg-recv crate. hx_msg_recv
+/* Private-message ignore-gate + msg emit — Rust hxhandlers::recv::msg module. hx_msg_recv
  * returns HX_MSG_DROPPED (ignored), HX_MSG_EMITTED (private message, boxed msg
  * signal fired), or HX_MSG_BROADCAST (C renders it via broadcastmsg). */
 #define HX_MSG_DROPPED 0
@@ -301,7 +301,7 @@ hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 
     /* For a private message, build the boxed HxMsgEvent here — it needs the
      * self-PM display-name resolution + hx_conn_name (htlc). The broadcast branch has no
-     * boxed event. The Rust hxmsg-recv crate owns the shared ignore-gate + the
+     * boxed event. The Rust hxhandlers::recv::msg module owns the shared ignore-gate + the
      * PM emit; it returns which branch so we run broadcastmsg + preserve the
      * ignored-message early-out (no last_msg_nick update). */
     HxMsgEvent *ev = NULL;
@@ -363,7 +363,7 @@ hx_rcv_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 }
 
-/* Agreement show-vs-auto-agree decision + emit — Rust hxagreement-recv crate.
+/* Agreement show-vs-auto-agree decision + emit — Rust hxhandlers::recv::agreement module.
  * Returns HX_AGREEMENT_ACT_AUTO_AGREE (C sends AGREEMENTAGREE) or
  * HX_AGREEMENT_ACT_SHOWN (the agreement signal fired; the view pops the
  * Agree window). */
@@ -418,7 +418,7 @@ hx_rcv_agreement_file (struct htlc_conn *htlc, const guint8 *frame,
 }
 
 /* hx_rcv_news_post (HTLS_HDR_NEWS_POST, the flat 1.0/1.2 news push) is a
- * #[no_mangle] fn in the hxnews-recv crate (rust/crates/hxnews-recv): it walks
+ * #[no_mangle] fn in the hxhandlers::recv::news module (rust/crates/hxhandlers/src/recv/news.rs): it walks
  * the HTLS_DATA_NEWS chunks natively (hotline_proto::parse::news_post_chunks)
  * and emits one news-post line per chunk via hx_news_post_recv. The dispatch
  * switch below calls it by name (declared in rcv.h); no C body remains here. */
@@ -547,8 +547,8 @@ hx_rcv_task (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     }
 }
 
-/* User-roster apply routing lives in the Rust hxuser-recv crate
- * (rust/crates/hxuser-recv). hx_user_apply_recv is shared by the Rust live
+/* User-roster apply routing lives in the Rust hxhandlers::recv::user module
+ * (rust/crates/hxhandlers/src/recv/user.rs). hx_user_apply_recv is shared by the Rust live
  * USER_CHANGE broadcast handler and the bulk USER_LIST load below —
  * `incremental` tells the two apart. */
 extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
@@ -556,13 +556,13 @@ extern int hx_user_apply_recv (struct htlc_conn *htlc, void *chat,
                                guint32 nick_color, const char *name,
                                guint16 icon, guint16 color, int is_new,
                                int skip_self_create, int incremental);
-/* USER_INFO reply emit — Rust hxuser-recv crate. (The SELFINFO self-updated
- * emit is now internal to hxuser-recv's hx_rcv_user_selfinfo.) */
+/* USER_INFO reply emit — Rust hxhandlers::recv::user module. (The SELFINFO self-updated
+ * emit is now internal to hxhandlers::recv::user's hx_rcv_user_selfinfo.) */
 extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
                                guint16 len);
 
 /* hx_rcv_user_change (HTLS_HDR_USER_CHANGE) is a #[no_mangle] fn in the
- * hxuser-recv crate (rust/crates/hxuser-recv): it parses the frame natively,
+ * hxhandlers::recv::user module (rust/crates/hxhandlers/src/recv/user.rs): it parses the frame natively,
  * resolves the chat, runs the native user_change::resolve plan (self-detection,
  * new-vs-change, colour/nick-colour preserve, rename-notice), routes the apply
  * through the shared hx_user_apply_recv, and does the join / rename logging
@@ -570,14 +570,14 @@ extern void hx_user_info_recv (guint16 uid, const char *name, const char *info,
  * The dispatch switch below calls it by name (declared in rcv.h); no C body
  * remains here. */
 
-/* hx_rcv_user_part (HTLS_HDR_USER_PART) is a #[no_mangle] fn in the hxuser-recv
+/* hx_rcv_user_part (HTLS_HDR_USER_PART) is a #[no_mangle] fn in the hxhandlers::recv::user
  * crate: it parses the frame natively, resolves the chat, snapshots the leaving
  * member's name, and delegates the membership-gated user-delete emit to
  * hx_user_part_recv, then logs the showjoin-gated "parts" line. The dispatch
  * switch below calls it by name (declared in rcv.h); no C body remains here. */
 
 /* hx_rcv_chat_subject (HTLS_HDR_CHAT_SUBJECT) is a #[no_mangle] fn in the
- * hxhandlers::recv::chat crate module: it parses the frame,
+ * hxhandlers::recv::chat module module: it parses the frame,
  * resolves the chat, delegates the change-gate + emit to hx_chat_subject_recv,
  * and on a real change sets the model subject + emits the "chat-subject-notice"
  * signal for the "Subject Changed to" line (view-side handler in chat.c). The
@@ -602,15 +602,15 @@ hx_rcv_banner (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
 }
 
 /* hx_rcv_chat_invite (HTLS_HDR_CHAT_INVITE) is the first receive handler whose
- * whole body lives in Rust: it's now a #[no_mangle] fn in the hxchat-recv crate
- * (rust/crates/hxchat-recv) that parses the frame, resolves the public chat's
+ * whole body lives in Rust: it's now a #[no_mangle] fn in the hxhandlers::recv::chat module
+ * (rust/crates/hxhandlers/src/recv/chat.rs) that parses the frame, resolves the public chat's
  * member model via chat_with_cid/hx_chat_member_model, and delegates the
  * ignore-gate + emit to hx_chat_invite_recv. The dispatch switch below calls it
  * by name (declared in rcv.h); no C body remains here.
  * See docs/rust/network-endgame.md. */
 
 /* hx_rcv_user_selfinfo (HTLS_HDR_USER_SELFINFO) is a #[no_mangle] fn in the
- * hxuser-recv crate (rust/crates/hxuser-recv): it calls hx_selfinfo_parse
+ * hxhandlers::recv::user module (rust/crates/hxhandlers/src/recv/user.rs): it calls hx_selfinfo_parse
  * (proto_helpers.c chunk walker → htlc access/uid/icon), flips the logged-in
  * flag (SELFINFO is the canonical login-complete signal the agreement Agree
  * button reads), and emits self-updated via hx_selfinfo_recv so the view
@@ -640,7 +640,7 @@ hx_rcv_dump (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len)
     close (fd);
 }
 
-/* Shared file-transfer reply tail — Rust hxxfer-recv crate. Emits the transfer's
+/* Shared file-transfer reply tail — Rust hxhandlers::recv::xfer module. Emits the transfer's
  * queue position to the tasks view, then (when queue == 0) starts the byte
  * stream via xfer_ready_write. Called by all five xfer reply handlers once
  * they've stamped ref/size/queue onto htxf. */
@@ -1209,24 +1209,24 @@ rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
     }
 }
 
-/* rcv_task_newscat_list moved to the hxnews-recv Rust crate — it parses the
+/* rcv_task_newscat_list moved to the hxhandlers::recv::news Rust crate — it parses the
  * CATLIST chunk to an owned handle, stashes it on the gnews_catalog carrier, and
- * emits news-catalog, with no intermediate news_item / news_group. hxnews-send's
- * task_new still registers it; the symbol now resolves against hxnews-recv. */
+ * emits news-catalog, with no intermediate news_item / news_group. hxhandlers::send::news's
+ * task_new still registers it; the symbol now resolves against hxhandlers::recv::news. */
 
-/* rcv_task_newsfolder_list moved to the hxnews-recv Rust crate — it parses the
+/* rcv_task_newsfolder_list moved to the hxhandlers::recv::news Rust crate — it parses the
  * NEWSDIRLIST chunks (the dh_start walk + per-chunk parsers) into an owned
  * DirList handle via gtkhx_proto_parse_dirlist, stashes it on the gnews_folder
  * carrier, and emits news-folder, with no intermediate folder_item / news_folder.
- * hxnews-send's task_new still registers it; the symbol now resolves against
- * hxnews-recv. */
+ * hxhandlers::send::news's task_new still registers it; the symbol now resolves against
+ * hxhandlers::recv::news. */
 
-/* rcv_task_news_post moved to the hxnews-recv Rust crate — it parses the
+/* rcv_task_news_post moved to the hxhandlers::recv::news Rust crate — it parses the
  * GETTHREAD NEWSDATA body (gtkhx_proto_parse_news_thread_reply), bails on a
  * TASK_ERROR / body-less reply, then builds the news_post carrier via
- * news_post_new (news_recv_bridge.c) and emits news-thread. hxnews-send's
+ * news_post_new (news_recv_bridge.c) and emits news-thread. hxhandlers::send::news's
  * get_post sender still registers it; the symbol now resolves against
- * hxnews-recv. With this, no news code remains in rcv.c. */
+ * hxhandlers::recv::news. With this, no news code remains in rcv.c. */
 
 /* rcv_task_news_users / rcv_task_user_list / rcv_task_user_list_switch /
  * rcv_task_user_info moved to the hxhandlers Rust crate (recv/user.rs): they
@@ -1489,10 +1489,10 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
 }
 
 /* rcv_task_news_file (the flat NEWS_FILE task reply — the whole 1.0/1.2 news
- * document) is a #[no_mangle] fn in the hxnews-recv crate: it parses the first
+ * document) is a #[no_mangle] fn in the hxhandlers::recv::news module: it parses the first
  * HTLS_DATA_NEWS chunk natively (hotline_proto::parse::parse_news_file) and
  * publishes it via hx_news_file_recv, emitting an empty document on a chunk-less
- * reply. hxnews-send registers it as the reply callback (declared in rcv.h); no
+ * reply. hxhandlers::send::news registers it as the reply callback (declared in rcv.h); no
  * C body — and no news_buf/news_len scratch — remains here. */
 
 /* GIF-icons extension (fogWraith GIF-Icons.md). The ICON_GET / ICON_GETLIST
@@ -1504,7 +1504,7 @@ rcv_task_login (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
  * via RCV_TASK_FN(); the symbols resolve against the Rust crate at link. */
 
 /* ICON_CHANGE (1864) server broadcast: UID only. Parse + gif-icon-changed emit
- * live in the Rust hxicon-recv crate (rust/crates/hxicon-recv). */
+ * live in the Rust hxhandlers::recv::icon module (rust/crates/hxhandlers/src/recv/icon.rs). */
 extern void hx_icon_change_recv (struct htlc_conn *htlc, const guint8 *buf,
                                  gsize len);
 

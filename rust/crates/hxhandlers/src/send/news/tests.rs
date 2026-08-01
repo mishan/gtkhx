@@ -4,7 +4,7 @@
 //! table, the write primitive, the rcv handlers, and the `news_send_bridge`
 //! accessors — are stubbed here (recording what the wrapper handed to
 //! `hlwrite_chunks` / `task_new`) so the cargo-test build links no C. Mirrors
-//! hxchat-send's test shape.
+//! hxhandlers::send::chat's test shape.
 
 use super::*;
 use std::cell::{Cell, RefCell};

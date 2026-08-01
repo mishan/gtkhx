@@ -16,7 +16,7 @@
 test_deps = [
   glib_dep,
   gtk_dep,
-  # struct htlc_conn's accessors + lifecycle live in the Rust hxconn crate
+  # struct htlc_conn's accessors + lifecycle live in the Rust gtkhx-core::conn module
   # (the E1c flip). Every test target that touches an hx_conn_* symbol resolves
   # it here; the linker drops the archive for targets that don't. Base bundle so
   # both the test_deps and proto_test_deps (= test_deps + [...]) targets get it.
@@ -24,7 +24,7 @@ test_deps = [
 ]
 
 # All crypto primitives (hash, stream cipher, AEAD, compression) live in
-# the Rust hxcrypto-* / hxcompress crates since Phase R1, and the C
+# the Rust hxcrypto crate, and the C
 # dispatchers that wrapped them (cipher.c, cipher_aead.c, hope.c) plus the
 # nettle-using tests are gone — so neither the tests nor protocol.h /
 # compress.h pull in any C cipher library. No nettle dependency here.
@@ -41,7 +41,7 @@ proto_test_deps = test_deps + [
   # (real_connect, real_htxf_connect) need the staticlib. Same "linker
   # drops unused members" caveat for tests that don't reference it.
   rust_hxbridge_dep,
-  # Phase R4: GtkhxSession moved to the Rust `gtkhx-session` crate, so
+  # Phase R4: GtkhxSession moved to the Rust `gtkhx-core` crate, so
   # the gtkhx_session_get_default + gtkhx_session_emit_* symbols the
   # real_connect / real_htxf_connect targets used to get from
   # gtkhx_session.c now come from this staticlib. Its undefined
@@ -53,11 +53,11 @@ proto_test_deps = test_deps + [
   # Phase R4.2: the boxed payload value-types (HxMsgEvent, HxChatEvent +
   # HxChatMedia, HxTrackerServer + HxTrackerV3Meta) moved out of
   # proto_helpers.c / tracker_event.c / tracker_v3_meta.c into the
-  # self-contained gtkhx-boxed crate. Proto tests that link those
+  # self-contained gtkhx-core::boxed module. Proto tests that link those
   # producers and exercise the boxed copy/free (e.g. test_msg_event /
   # test_chat_event call hx_*_event_copy/_free; the tracker tests'
   # meta_free call sites) resolve them against this archive. It's
-  # self-contained, so pulling those symbols never drags gtkhx-session's
+  # self-contained, so pulling those symbols never drags gtkhx-core's
   # C externs in.
   rust_gtkhx_core_dep,
   # Phase R5: src/text_util.c was ported to the hxtext Rust crate, so the
@@ -133,7 +133,7 @@ test('text_sanitisers', test_text_sanitisers,
      suite : 'unit')
 
 # hmac — the HOPE handshake's MAC dispatcher. Phase R1 moved the
-# implementation to Rust (rust/crates/hxcrypto-hash); protocol.h
+# implementation to Rust (rust/crates/hxcrypto::hash); protocol.h
 # now exposes hmac_xxx as a static inline that delegates to
 # gtkhx_hmac_xxx. This binary still tests the dispatch glue + the
 # RFC 2104 / RFC 2202 canonical vectors + the legacy unprefixed
@@ -834,7 +834,7 @@ test('chat_event', test_chat_event,
      suite : 'proto')
 
 # (filelist_walker retired — the FILE_LIST walk + per-entry decode moved
-# into the hxfiles-entry Rust crate's gtkhx_files_populate_from_reply,
+# into the hxmodel::files_entry Rust crate's gtkhx_files_populate_from_reply,
 # tested headless there; the underlying wire parse is covered by
 # hotline-proto's parse_file_list_entry unit tests.)
 

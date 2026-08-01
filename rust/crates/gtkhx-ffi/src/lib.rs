@@ -18,8 +18,8 @@
 //! 3. Merging two crates was blocked outright: a `staticlib` bundles its rlib
 //!    dependencies, so two archives could end up defining the same
 //!    `#[no_mangle]` symbol and collide at the final link. That is exactly why
-//!    `gtkhx-boxed` had to be split out of `gtkhx-session` (see
-//!    `docs/rust/crate-layout.md`).
+//!    the boxed payload types were split into a crate of their own, away from
+//!    the session that used them (see `docs/rust/crate-layout.md`).
 //!
 //! Making this the *only* `staticlib` and every other member an `rlib` fixes
 //! all three. rustc bundles the whole rlib graph into one archive, so each

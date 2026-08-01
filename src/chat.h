@@ -14,13 +14,13 @@ extern void chat_delete (session *sess, struct chat *chat);
 extern struct chat *chat_with_cid (session *sess, guint32 cid);
 
 /* The per-session cid → conversation registry (was a GHashTable), now the Rust
- * HxChatRegistry in the gtkhx-session crate (rust/crates/gtkhx-session/src/
+ * HxChatRegistry in the gtkhx-core crate (rust/crates/gtkhx-core/src/
  * chat_registry.rs). Opaque here; sess->chats holds one. chats_init creates it
  * with chat_free as the destroy callback; chat_new / _delete / _with_cid wrap
  * insert / remove / lookup. Disconnect teardown and the palette push walk it
  * with hx_chats_count + hx_chats_get_at, plus hx_chats_cid_at where the cid is
  * needed without reaching the (gtkhx-ui) conversation accessors. It lives in
- * gtkhx-session — the crate the headless wire-level tests link — so network.c's
+ * gtkhx-core — the crate the headless wire-level tests link — so network.c's
  * teardown resolves these symbols without pulling in the UI crate. */
 typedef struct HxChatRegistry HxChatRegistry;
 typedef void (*HxChatDestroyFn) (void *chat);
@@ -217,14 +217,14 @@ extern void gtkhx_apply_theme_palette (gboolean dark);
 
 /* View-side handler for the "chat-subject-notice" signal — the "Subject Changed
  * to: <subject>" chat line emitted by the Rust chat-subject receive handler
- * (hxchat-recv, hx_rcv_chat_subject). Applies gettext + INFOPREFIX. Connected in
+ * (hxhandlers::recv::chat, hx_rcv_chat_subject). Applies gettext + INFOPREFIX. Connected in
  * gtkhx_connect_signals. */
 extern void chat_subject_notice_handler (GtkhxSession *emitter,
                                          struct htlc_conn *htlc, guint cid,
                                          gpointer subject, gpointer user_data);
 
 /* View-side handler for the "user-notice" signal (roster join / parts / rename
- * lines emitted by the Rust hxuser-recv handlers). Applies the showjoin pref +
+ * lines emitted by the Rust hxhandlers::recv::user handlers). Applies the showjoin pref +
  * gettext + INFOPREFIX. Connected in gtkhx_connect_signals. */
 extern void user_notice_handler (GtkhxSession *emitter, struct htlc_conn *htlc,
                                  guint cid, guint kind, gpointer name,

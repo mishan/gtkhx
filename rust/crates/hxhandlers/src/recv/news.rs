@@ -1,6 +1,6 @@
-//! `hxnews-recv` — the 1.5 threaded-news receive handlers.
+//! `hxhandlers::recv::news` — the 1.5 threaded-news receive handlers.
 //!
-//! These are the `rcv_task_*` reply callbacks the `hxnews-send` senders already
+//! These are the `rcv_task_*` reply callbacks the `hxhandlers::send::news` senders already
 //! register via `task_new` (they were externed out of `rcv.c` and passed as
 //! function pointers; only their bodies were still C). Moving the bodies here
 //! leaves **no news code in `rcv.c`** — the generic trans-ID dispatcher

@@ -78,9 +78,9 @@ extern void rcv_task_user_open (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len, struct uesp_fn *uespfn);
 extern void rcv_task_msg (struct htlc_conn *htlc, const guint8 *frame,
                           gsize frame_len, char *msg_buf);
-/* rcv_task_newscat_list moved to the hxnews-recv Rust crate as a 3-arg
+/* rcv_task_newscat_list moved to the hxhandlers::recv::news Rust crate as a 3-arg
  * rcv_task_fn (htlc, ptr, data). No C caller references them by name — the
- * hxnews-send cat_list / fldr_list / get_post senders register them via
+ * hxhandlers::send::news cat_list / fldr_list / get_post senders register them via
  * task_new — so the old 2-arg prototypes are gone rather than left to drift
  * from the real ABI. */
 extern void rcv_task_login (struct htlc_conn *htlc, const guint8 *frame,
@@ -142,14 +142,14 @@ extern void rcv_task_kick (struct htlc_conn *htlc, const guint8 *frame,
                            gsize frame_len);
 extern void rcv_task_user_info (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len, guint16 *_uid, int text);
-/* rcv_task_file_list moved to the hxfiles-recv Rust crate, which also owns struct
+/* rcv_task_file_list moved to the hxhandlers::recv::files Rust crate, which also owns struct
  * cached_filelist (the hx_cfl_* accessor facade in files.h). It walks the
  * FILE_LIST chunks natively and accumulates them into the Rust-owned cfl. */
 extern void rcv_task_file_list (struct htlc_conn *htlc, const guint8 *frame,
                                 gsize frame_len, struct cached_filelist *cfl,
                                 void *data);
 /* rcv_task_file_getinfo / _file_get / _file_put / _folder_get / _folder_put (and
- * rcv_task_banner_get in banner.h) moved to the hxxfer-recv Rust crate: each
+ * rcv_task_banner_get in banner.h) moved to the hxhandlers::recv::xfer Rust crate: each
  * parses its reply natively (hotline_proto::parse::*) and reaches the C-owned
  * htxf state through the hx_htxf_* accessor seam (htxf_accessors.c). The
  * prototypes stay because the C senders (xfers.c, files.c, banner.c) register the
