@@ -89,8 +89,13 @@ why `/nick` currently rewrites your saved global nickname.
 The plan is a Rust `hxconfig` crate owning a versioned TOML file, with C keeping a
 read-only mirror struct until its last reader is ported. Connections stay in their own
 file: it holds plaintext passwords, and it deliberately refuses to save when corrupt
-where settings should fall back to defaults. Full design, including the migration and
-the per-connection identity model it delivers: [docs/preferences.md](docs/preferences.md).
+where settings should fall back to defaults.
+
+The crate exists — schema, file format, atomic write, version check, all tested — and
+nothing links it yet, so none of the defects above are fixed in a running client. What
+remains is the migration from `gtkhxrc`, and then the flip: `hxconfig` becomes the owner
+at startup and `cfgvars[]` goes. Full design, including the per-connection identity model
+it delivers: [docs/preferences.md](docs/preferences.md).
 
 ### Chat and message logging
 
