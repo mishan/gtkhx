@@ -96,6 +96,22 @@ unsafe fn strlcpy(dst: &mut [c_char], src: *const c_char) {
         dst[i] = c;
         i += 1;
     }
+
+    // If the copy stopped mid-character, drop the partial bytes.
+    //
+    // The wire name field is 32 bytes, so a nickname long enough to fill it
+    // used to be cut at byte 31 wherever that landed — splitting a multi-byte
+    // character in half and putting an invalid sequence on the wire, where it
+    // reaches every other client's user list. The cut is inside a character
+    // exactly when the next source byte is a continuation byte (0b10xxxxxx);
+    // a string that ended on its own is already whole, and its NUL is not.
+    if (*src.add(i) as u8) & 0xc0 == 0x80 {
+        while i > 0 && (dst[i - 1] as u8) & 0xc0 == 0x80 {
+            i -= 1;
+        }
+        // Then the lead byte of the character that didn't fit.
+        i = i.saturating_sub(1);
+    }
     dst[i] = 0;
 }
 

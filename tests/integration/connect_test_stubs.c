@@ -70,6 +70,27 @@ struct gtkhx_prefs gtkhx_prefs;
 char last_msg_nick[32];
 char *g_user_colors[4];
 
+/* ---- identity resolution ------------------------------------- */
+/*
+ * hx_connect_via_orchestrator resolves the connection's nickname and icon
+ * before connecting. That lives in options.c, which these binaries
+ * deliberately don't link — it drags in the whole Settings dialog and with it
+ * GTK and Adwaita.
+ *
+ * A no-op is the right stub rather than a lie: the tests set the name and icon
+ * on the connection themselves when they care, and the real function would
+ * overwrite that with whatever a settings file happened to hold. What is not
+ * covered here is the resolution itself; that is exercised by the hxconfig and
+ * hxbookmarks unit tests plus the Settings path.
+ */
+void hx_identity_apply (struct htlc_conn *htlc);
+
+void
+hx_identity_apply (struct htlc_conn *htlc)
+{
+    (void)htlc;
+}
+
 /* ---- INFOPREFIX ---------------------------------------------- */
 
 const char *INFOPREFIX = "[hx] ";

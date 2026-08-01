@@ -2024,6 +2024,11 @@ hotline_client_init (int argc, char **argv)
     hx_conn_set_sess (the_session.htlc, &the_session);
     hx_conn_set_icon (the_session.htlc, 500);
     hx_conn_set_name (the_session.htlc, user ? user : "GtkHx User");
+    /* Remember it: this is the identity a profile that has never set a
+     * nickname presents, and a reconnect has to be able to restore it after a
+     * /nick. Recorded here rather than recomputed later so there is one
+     * definition of what $USER falls back to. */
+    hx_identity_set_startup_default (user ? user : "GtkHx User");
 
     gen_command_hash ();
 

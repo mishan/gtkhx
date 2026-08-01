@@ -3,7 +3,7 @@
 Settings live in `rust/crates/hxconfig`: the schema, the TOML file, the write
 path, the version check, and the one-shot migration from `gtkhxrc`. C reads a
 copy through `src/prefs_mirror.c` and writes only through the by-name setters in
-`src/options.c`. The steps still outstanding are P4 onwards in the
+`src/options.c`. The steps still outstanding are P6 onwards in the
 decomposition at the end of this document.
 
 The short version of what this was for: move settings ownership to Rust,
@@ -454,8 +454,44 @@ The new model, decided in [multi-connection.md](multi-connection.md):
 - `/nick` and `/icon` change the live connection only and never persist.
 
 The binder is deleted. That is the whole of M1's identity half, and it is a net
-simplification at one connection — which is why it can land before any of the
+simplification at one connection — which is why it landed before any of the
 multi-connection work.
+
+**Where the resolution happens, and why there.** Inside the connect preamble in
+`network.c`, beside where the login is already stamped. Eight things reach
+`hx_connect` — the Connect dialog, a bookmark, a `hotline://` URL,
+reconnect-last, a tracker double-click, `/server`, the `--server` CLI bootstrap
+— and only that preamble is on all eight paths. Resolving in the Rust connect
+dialog would have been the tidier data flow, since a bookmark is already in hand
+there, but the tracker, `/server` and the CLI never pass through it.
+
+An override reaches the preamble as a one-shot armed immediately before the
+connect, consumed when applied. One connect, one override: a bookmark's
+nickname cannot leak onto a later `/server`.
+
+**This is also what makes `/nick` a runtime command rather than a sticky one.**
+It changed the connection and nothing reset it, so the name survived a
+reconnect — which contradicted "as if the command had never been typed" even
+after the binder was gone. Every connect now re-resolves, so it doesn't.
+
+The chain is three deep, and each level answers a different question: the
+override is what this connection is configured to show, the global is what
+everything unspecialised shows, and the startup value is what a profile that
+has never set a nickname shows — `$USER`, stamped before the settings file is
+read and remembered so a reconnect can restore it.
+
+**Icon zero is a real icon.** The copy used to skip a zero icon as "nothing
+stored", so choosing the blank icon in Settings silently did nothing. It is set
+unconditionally now, and the per-connection override is an `Option` rather than
+a sentinel for the same reason.
+
+**The UI is one row, and only for the nickname.** `AdwEntryRow` has no
+placeholder — the title *is* the placeholder — so the inherited value goes in
+the title, and an empty field reads as "you will appear as this". Clearing it
+goes back to inheriting, because empty is stored as absent rather than as an
+empty string. The icon override is storage-only for now: zero is a legal icon
+so it cannot double as "unset" in a spin row, and the picker is still the C
+settings page.
 
 ---
 
@@ -611,7 +647,7 @@ Illustrative, not committed. Each step ships on its own.
 | ~~P2~~ | **Done.** Migration: the legacy reader for both on-disk forms, the key mapping, the one-shot import, and a round-trip test against a captured real `gtkhxrc`. Still linked by nothing. | P1 |
 | ~~P3~~ | **Done.** The C mirror and the read/write ABI. `hxconfig` owns the values from startup; the settings table, the `allocated` bit and the identity binder are deleted; the mirror is refreshed after every change. The panel-open latches went with their keys, and the two toolbar-size writes are setter calls. The by-name bridge is reimplemented on `hxconfig`, so both the C and the Rust Settings pages work unchanged. Change hooks are applied uniformly after load, which absorbed most of P4. | P2 |
 | ~~P4~~ | **Done.** Change notification: hooks split into view / global / connection flavours, with the connection chosen once at the dispatch site. The "applied uniformly after load" half landed with P3. | P3 |
-| P5 | Identity: global default plus per-connection overrides; the connect path resolves and copies. Delivers M1's identity half. | P3, and the connection collection |
+| ~~P5~~ | **Done.** Identity: global default plus per-connection overrides, resolved and copied in the connect preamble. Delivers M1's identity half. | P3 |
 | P6 | Port the Identity and Voice settings pages to Rust; retire the `draw` pointer framework. | P3 |
 | P7 | Drop the mirror per file as each C reader is ported. Ongoing, not a milestone. | P3 |
 

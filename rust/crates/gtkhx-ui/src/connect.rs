@@ -47,6 +47,15 @@ struct HotlineUrlParts {
 
 extern "C" {
     // gtkhx_ui_bridge.c — set sess->htlc.{compressalg,cipheralg} + hx_connect.
+    /// Arm a one-shot per-connection identity for the next connect. The C
+    /// side resolves `override ?? global ?? startup` inside the connect
+    /// preamble, which is the one point every entry path passes through —
+    /// including the tracker and `/server`, which never come through here.
+    ///
+    /// A NULL or empty nick and a negative icon each mean "no override".
+    /// Zero cannot: zero is a real, blank icon.
+    fn hx_identity_set_pending_override(nick: *const c_char, icon: c_int);
+
     fn gtkhx_connect_apply(
         sess: *mut c_void,
         server: *const c_char,
@@ -673,6 +682,7 @@ pub unsafe extern "C" fn create_connect_window(_btn: *mut cffi::GtkWidget, data:
 /// Read the current form into a [`Bookmark`] and persist it to the TOML store.
 fn save_bookmark_from_form(name: &str) {
     let w = widgets();
+    let existing = bookmark_store::find(name).ok().flatten();
     let bm = Bookmark {
         name: name.to_string(),
         server: w
@@ -701,6 +711,11 @@ fn save_bookmark_from_form(name: &str) {
             w.cipher.as_ref().map(|c| c.selected()).unwrap_or(0),
         ),
         tls: w.tls.as_ref().map(|t| t.is_active()).unwrap_or(false),
+        // The Connect dialog has no identity-override rows, so a save from
+        // here must not silently clear one an existing entry already has.
+        // Carry both across rather than defaulting them away.
+        nick: existing.as_ref().and_then(|b| b.nick.clone()),
+        icon: existing.as_ref().and_then(|b| b.icon),
     };
 
     match bookmark_store::upsert(bm) {
@@ -814,6 +829,17 @@ pub unsafe extern "C" fn connect_open_bookmark_by_name(name: *const c_char) {
     let Some(cipher_byte) = rc4_migrate(&name, bm.hope, bm.cipher) else {
         return;
     };
+    // A bookmark is the only thing that carries an override; every other way
+    // in is a transient and gets the global. Armed immediately before the
+    // connect so it cannot leak onto a later one.
+    let override_nick = bm.nick.clone().unwrap_or_default();
+    unsafe {
+        hx_identity_set_pending_override(
+            cs(&override_nick).as_ptr(),
+            bm.icon.map(|i| i as c_int).unwrap_or(-1),
+        );
+    }
+
     let sess = cffi::hx_active_session();
     connect_with_args(
         sess,

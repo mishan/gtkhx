@@ -13,6 +13,23 @@ extern void prefs_read (void);
  * last write. */
 extern void hx_prefs_save_soon (void);
 extern void hx_prefs_save_now (void);
+
+/* Identity, resolved `override ?? global ?? startup` and copied onto a
+ * connection. See the block comment in options.c for what each level answers.
+ *
+ * hx_identity_set_pending_override arms a one-shot override for the next
+ * connect — a bookmark's per-connection nickname and icon. A NULL or empty
+ * nick and a negative icon each mean "no override" (zero cannot mean it: zero
+ * is a real, blank icon). hx_identity_apply consumes it, so a connect that
+ * doesn't arm one gets the global, which is also what puts a /nick-dirtied
+ * name back on reconnect.
+ *
+ * hx_identity_set_startup_default records what the connection was stamped
+ * with before any settings file was read, so that reconnect restore works for
+ * a profile that has never set a nickname. */
+extern void hx_identity_set_pending_override (const char *nick, int icon);
+extern void hx_identity_apply (struct htlc_conn *htlc);
+extern void hx_identity_set_startup_default (const char *nick);
 extern void reinit_gtktexts (session *sess);
 
 /* Typed by-name accessors — the one path every preference write takes,

@@ -47,6 +47,7 @@
 #include "proto_trace.h"
 #include "tls_trust.h"
 #include "inline_media.h"
+#include "options.h" /* hx_identity_apply */
 #include "gif_icons.h"
 #include "toolbar.h"
 #include "tracker.h"
@@ -520,6 +521,14 @@ hx_connect_via_orchestrator (struct htlc_conn *htlc, const char *serverstr,
      * GTlsConnection path, which reads htlc->tls. */
     hx_conn_set_tls (htlc, tls ? 1 : 0);
     hx_conn_set_login (htlc, login ? login : "");
+
+    /* Resolve the identity for this connection, here rather than in any of the
+     * eight callers, because this is the one point all of them pass through —
+     * including the tracker double-click, /server and the --server CLI
+     * bootstrap, which never touch the Rust connect dialog. It also means a
+     * name left dirty by /nick is put back on every reconnect, which is what
+     * makes that command a runtime thing rather than a sticky one. */
+    hx_identity_apply (htlc);
 
     /* Seed htlc->ip_addr from the server string so the post-login
      * "<addr>: login successful" line in rcv_task_login isn't "?".

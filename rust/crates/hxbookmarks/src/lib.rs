@@ -56,6 +56,29 @@ pub struct Bookmark {
     /// TLS over the server's dedicated TLS port.
     #[serde(default)]
     pub tls: bool,
+
+    /// Show a different nickname on this server than the global default.
+    ///
+    /// `None` means inherit, and is the normal case — the connect path
+    /// resolves `override ?? global` once and copies the answer into the
+    /// connection, so nothing aliases anything and `/nick` can change the
+    /// running connection without touching what is stored.
+    ///
+    /// `skip_serializing_if` is load-bearing rather than tidiness: `toml` 1.x
+    /// refuses to serialize a `None` in a struct field, so without it every
+    /// bookmark that inherits would fail to save. It also means the file says
+    /// nothing at all about an inherited value, which is what makes deleting
+    /// the line the way to go back to the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nick: Option<String>,
+
+    /// Show a different icon on this server. `None` means inherit.
+    ///
+    /// Distinct from an icon of `0`, which is a real (blank) icon someone can
+    /// legitimately choose — which is the whole reason this is an `Option`
+    /// rather than a sentinel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub icon: Option<u16>,
 }
 
 fn default_version() -> u32 {
@@ -292,6 +315,8 @@ mod tests {
             compress: 2,
             cipher: cipher::CHACHA20_POLY1305,
             tls: true,
+            nick: None,
+            icon: None,
         });
         store.upsert(bm("S2", "b.example"));
 
@@ -396,5 +421,104 @@ mod tests {
         assert!(!dir.join("bookmarks.toml.tmp").exists());
         let back = load_or_bootstrap(&dir, &[]).unwrap();
         assert_eq!(back.find("X").unwrap().server, "x.example");
+    }
+}
+
+#[cfg(test)]
+mod override_tests {
+    use super::*;
+
+    fn plain() -> Bookmark {
+        Bookmark {
+            name: "Server".into(),
+            server: "example.com".into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn an_inherited_identity_is_absent_from_the_file() {
+        // Not an empty string: the file should say nothing at all about a
+        // bookmark that inherits, so deleting the line is how someone goes
+        // back to the default. It is also what `skip_serializing_if` is for —
+        // toml 1.x refuses to serialize a None outright, so without it every
+        // inheriting bookmark would fail to save.
+        let mut store = Store::default();
+        store.upsert(plain());
+        let text = toml::to_string_pretty(&store).expect("serialize");
+
+        assert!(!text.contains("nick"), "{text}");
+        assert!(!text.contains("icon"), "{text}");
+
+        let back: Store = toml::from_str(&text).expect("parse");
+        assert_eq!(back.find("Server").unwrap().nick, None);
+        assert_eq!(back.find("Server").unwrap().icon, None);
+    }
+
+    #[test]
+    fn an_override_round_trips() {
+        let mut store = Store::default();
+        store.upsert(Bookmark {
+            nick: Some("someone else".into()),
+            icon: Some(410),
+            ..plain()
+        });
+        let text = toml::to_string_pretty(&store).expect("serialize");
+        let back: Store = toml::from_str(&text).expect("parse");
+
+        let bm = back.find("Server").expect("found");
+        assert_eq!(bm.nick.as_deref(), Some("someone else"));
+        assert_eq!(bm.icon, Some(410));
+    }
+
+    #[test]
+    fn icon_zero_is_an_override_not_an_absence() {
+        // Zero is a real, blank icon someone can choose. Storing it as a
+        // sentinel for "inherit" is the bug this Option exists to avoid, and
+        // the one the global path had for years.
+        let mut store = Store::default();
+        store.upsert(Bookmark {
+            icon: Some(0),
+            ..plain()
+        });
+        let text = toml::to_string_pretty(&store).expect("serialize");
+        assert!(text.contains("icon = 0"), "{text}");
+
+        let back: Store = toml::from_str(&text).expect("parse");
+        assert_eq!(back.find("Server").unwrap().icon, Some(0));
+    }
+
+    #[test]
+    fn a_file_written_before_overrides_still_loads() {
+        // Additive plus serde(default), so no schema bump was needed — this
+        // pins that, since bumping without a migration chain would be worse
+        // than leaving the version alone.
+        let text = "version = 1\n\n[[bookmarks]]\nname = \"Old\"\nserver = \"a.example\"\n";
+        let store: Store = toml::from_str(text).expect("parse");
+        let bm = store.find("Old").expect("found");
+        assert_eq!(bm.nick, None);
+        assert_eq!(bm.icon, None);
+    }
+
+    #[test]
+    fn the_legacy_format_carries_no_override() {
+        // 460 fixed bytes with four flag bytes and nowhere to put one. The
+        // export is interop with clients that have no concept of a
+        // per-connection nickname, so an override is dropped rather than
+        // smuggled into the reserved space.
+        let bm = Bookmark {
+            nick: Some("someone else".into()),
+            icon: Some(410),
+            ..plain()
+        };
+        let bytes = legacy::write(&bm);
+        assert_eq!(bytes.len(), 460);
+
+        let mut back = legacy::parse(&bytes).expect("parse");
+        back.name = bm.name.clone();
+        assert_eq!(back.nick, None);
+        assert_eq!(back.icon, None);
+        // Everything the format *does* carry still round-trips.
+        assert_eq!(back.server, bm.server);
     }
 }

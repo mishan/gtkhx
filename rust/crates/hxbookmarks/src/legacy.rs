@@ -65,6 +65,14 @@ pub fn parse(bytes: &[u8]) -> Option<Bookmark> {
         compress,
         cipher,
         tls: tls != 0,
+        // The format is a fixed 460 bytes with four flag bytes and no room for
+        // more, so an imported bookmark inherits the global identity. That is
+        // the right answer as well as the only available one: this format is
+        // interop with clients that have no concept of a per-connection
+        // nickname, and `write` correspondingly drops an override rather than
+        // inventing a field the other side would not understand.
+        nick: None,
+        icon: None,
     })
 }
 
@@ -175,6 +183,8 @@ mod tests {
             compress: 1,
             cipher: cipher::BLOWFISH,
             tls: false,
+            nick: None,
+            icon: None,
         }
     }
 

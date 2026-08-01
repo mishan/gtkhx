@@ -74,7 +74,7 @@ fn pref_get_int(name: &str) -> i32 {
 fn pref_set_int(name: &str, v: i32) {
     unsafe { gtkhx_prefs_set_int(cs(name).as_ptr(), v) }
 }
-fn pref_get_string(name: &str) -> String {
+pub(crate) fn pref_get_string(name: &str) -> String {
     unsafe {
         let p = gtkhx_prefs_get_string(cs(name).as_ptr());
         if p.is_null() {
@@ -316,7 +316,10 @@ fn nick_color_row(cfg: &str) -> adw::ActionRow {
 
 // ---- config keys (mirror src/cfgkeys.h) --------------------------------
 
-mod cfg {
+pub(crate) mod cfg {
+    /// The global default nickname. Read by the bookmark form, which shows it
+    /// as the inherited value behind a per-connection override.
+    pub const NICK: &str = "NICK";
     // Chat output / appearance
     pub const TIMESTAMP: &str = "TIMESTAMP";
     pub const CHAT_AVATARS: &str = "CHATAVATARS";
