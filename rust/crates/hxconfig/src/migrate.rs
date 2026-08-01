@@ -146,7 +146,11 @@ pub fn target_of(key: &str) -> Option<Target> {
 /// range checks, enum validation and the rest happen when the document is read
 /// back through the ordinary load path, so there is exactly one place that
 /// decides what a valid setting is.
-pub fn to_document(legacy: &LegacyKeys, warnings: &mut Vec<Warning>) -> DocumentMut {
+pub fn to_document(
+    legacy: &LegacyKeys,
+    form: legacy::Form,
+    warnings: &mut Vec<Warning>,
+) -> DocumentMut {
     let mut doc = DocumentMut::new();
     doc["version"] = Item::Value(Value::from(crate::CURRENT_VERSION as i64));
 
@@ -161,7 +165,16 @@ pub fn to_document(legacy: &LegacyKeys, warnings: &mut Vec<Warning>) -> Document
         // The escape asymmetry doubled backslashes once per save, and we can
         // only undo one doubling. Say so rather than hand over a path that is
         // quietly wrong; the download path on Windows is the realistic victim.
-        if matches!(kind, Kind::Text | Kind::List) && legacy::looks_over_escaped(raw) {
+        //
+        // Only for the GKeyFile form. The line form was never written through
+        // `g_key_file_set_string`, so nothing escaped it and nothing unescapes
+        // it — a doubled backslash there is just a doubled backslash, and
+        // warning about it would explain a bug that cannot have happened to
+        // that file.
+        if form == legacy::Form::KeyFile
+            && matches!(kind, Kind::Text | Kind::List)
+            && legacy::looks_over_escaped(raw)
+        {
             warnings.push(Warning {
                 path: path.to_string(),
                 kind: WarningKind::OverEscaped {

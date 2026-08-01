@@ -151,9 +151,17 @@ fn parse_lines(text: &str) -> LegacyKeys {
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        // atoi ignored trailing whitespace, so `1000 # lines` reached the C
-        // code as `1000 ` and parsed. Trim so it still does.
-        keys.insert(key.to_string(), value.trim_end().to_string());
+        // Verbatim, including any trailing whitespace: the C parser NUL'd the
+        // line at the `#` and handed the rest straight to `g_strdup`, and a
+        // trailing space can be the whole point of a value — the default
+        // timestamp format is `[%H:%M:%S] ` and a reader that trimmed would
+        // jam the timestamp against the message text.
+        //
+        // `XBUF_MAX=1000 # lines` therefore arrives as `1000 `, exactly as it
+        // reached `atoi`. Tolerating that is the integer conversion's job, and
+        // it already trims; doing it here would trade a real bug for a
+        // cosmetic one.
+        keys.insert(key.to_string(), value.to_string());
     }
     keys
 }

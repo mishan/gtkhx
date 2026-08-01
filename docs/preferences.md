@@ -512,6 +512,11 @@ migration unescapes one level and, if the result still contains a doubled
 backslash, hands the value over *with a diagnostic naming the old key* rather
 than guessing at the rest. The realistic victim is a Windows download path.
 
+That diagnostic is scoped to the GKeyFile form. Nothing ever wrote the line
+form through `g_key_file_set_string`, so nothing escaped it and nothing
+unescapes it; a doubled backslash there is a UNC path, and warning about it
+would explain a bug that cannot have happened to that file.
+
 The C boolean parser is reproduced exactly, first-character semantics and all,
 so `tarantino` is true and `nautical` is false. That is silly, and it is also
 what every existing file was written and read against — including the era when

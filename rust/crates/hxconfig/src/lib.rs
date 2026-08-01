@@ -276,7 +276,7 @@ impl Config {
             if keys.is_empty() {
                 return Config { warnings, ..config };
             }
-            let doc = migrate::to_document(&keys, &mut warnings);
+            let doc = migrate::to_document(&keys, form, &mut warnings);
             return Config::from_document(doc, Provenance::Imported { form }, warnings);
         }
 

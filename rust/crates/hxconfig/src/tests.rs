@@ -1063,7 +1063,7 @@ fn the_real_profile_migrates_whole() {
     assert_eq!(form, Form::KeyFile);
 
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let dir = TempDir::new("real-profile");
@@ -1145,9 +1145,9 @@ fn the_real_profile_migrates_whole() {
 
 #[test]
 fn the_real_profile_drops_exactly_what_it_should() {
-    let (keys, _) = legacy::parse(REAL_PROFILE);
+    let (keys, form) = legacy::parse(REAL_PROFILE);
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
 
     // Assert on the *paths*, not on the numbers: a bare-substring check on
     // "782" passes today only because nothing else happens to contain it, and
@@ -1220,11 +1220,11 @@ fn a_value_escaped_more_than_once_is_flagged_rather_than_guessed_at() {
     // Each save/load cycle doubled every backslash, and we can undo exactly
     // one doubling. Handing over a silently-wrong download path is the failure
     // this whole rewrite exists to stop, so say so instead.
-    let (keys, _) = legacy::parse("[gtkhx]\nDOWNLOAD=C:\\\\\\\\Users\\\\\\\\Misha\n");
+    let (keys, form) = legacy::parse("[gtkhx]\nDOWNLOAD=C:\\\\\\\\Users\\\\\\\\Misha\n");
     assert_eq!(keys["DOWNLOAD"], r"C:\\Users\\Misha", "one doubling undone");
 
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
     let w = warnings
         .iter()
         .find(|w| w.path == "transfers.download_dir")
@@ -1236,9 +1236,9 @@ fn a_value_escaped_more_than_once_is_flagged_rather_than_guessed_at() {
     assert!(doc.to_string().contains(r"C:\\Users\\Misha"));
 
     // And a single escape level produces no warning at all.
-    let (keys, _) = legacy::parse("[gtkhx]\nDOWNLOAD=C:\\\\Users\n");
+    let (keys, form) = legacy::parse("[gtkhx]\nDOWNLOAD=C:\\\\Users\n");
     let mut warnings = Vec::new();
-    migrate::to_document(&keys, &mut warnings);
+    migrate::to_document(&keys, form, &mut warnings);
     assert!(warnings.is_empty(), "{warnings:?}");
 }
 
@@ -1268,9 +1268,9 @@ fn the_boolean_parser_matches_the_c_one_exactly() {
 
 #[test]
 fn an_unusable_boolean_keeps_the_default_and_says_so() {
-    let (keys, _) = legacy::parse("[gtkhx]\nMARKDOWN=2\n");
+    let (keys, form) = legacy::parse("[gtkhx]\nMARKDOWN=2\n");
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
 
     assert!(!doc.to_string().contains("markdown"), "{doc}");
     let w = &warnings[0];
@@ -1283,9 +1283,9 @@ fn an_unusable_boolean_keeps_the_default_and_says_so() {
 fn a_malformed_number_is_reported_rather_than_becoming_zero() {
     // atoi turned this into 0 with no diagnostic, which for XBUF_MAX meant a
     // scrollback of nothing.
-    let (keys, _) = legacy::parse("[gtkhx]\nXBUF_MAX=lots\n");
+    let (keys, form) = legacy::parse("[gtkhx]\nXBUF_MAX=lots\n");
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
 
     assert!(!doc.to_string().contains("scrollback"), "{doc}");
     assert_eq!(warnings[0].path, "chat.scrollback_lines");
@@ -1300,10 +1300,10 @@ fn an_unknown_old_key_is_reported_but_a_dropped_one_is_not() {
     // A key nothing ever had is worth telling the user about — it is the one
     // case they can act on. The deliberately-dropped ones are not: the user
     // never asked for them and can do nothing about them.
-    let (keys, _) =
+    let (keys, form) =
         legacy::parse("[gtkhx]\nWHAT_IS_THIS=1\nOPENCHAT=true\nCHATXSIZE=782\nFILE_SAMEWINDOW=1\n");
     let mut warnings = Vec::new();
-    migrate::to_document(&keys, &mut warnings);
+    migrate::to_document(&keys, form, &mut warnings);
 
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert_eq!(warnings[0].path, "WHAT_IS_THIS");
@@ -1341,9 +1341,17 @@ fn the_line_form_keeps_its_comment_convention_but_not_its_fgets_bug() {
     // correctly. `XBUF_MAX=1000 # lines` means a thousand lines; refusing to
     // truncate would make it an unparseable number and silently fall back to
     // the default, which is the outcome we are trying to avoid.
-    let (keys, _) = legacy::parse("XBUF_MAX=1000 # how many\nDOWNLOAD=/home/a # notes\n");
-    assert_eq!(keys["XBUF_MAX"], "1000");
-    assert_eq!(keys["DOWNLOAD"], "/home/a");
+    let (keys, form) = legacy::parse("XBUF_MAX=1000 # how many\nDOWNLOAD=/home/a # notes\n");
+    // Verbatim, trailing space and all — the C parser NUL'd at the '#' and
+    // handed the rest to g_strdup. Tolerating that space is the integer
+    // conversion's job, not the parser's; trimming here would destroy a
+    // trailing space that some values need. See the next test.
+    assert_eq!(keys["XBUF_MAX"], "1000 ");
+    assert_eq!(keys["DOWNLOAD"], "/home/a ");
+
+    // And it does still parse as a thousand.
+    let doc = migrate::to_document(&keys, form, &mut Vec::new());
+    assert!(doc.to_string().contains("scrollback_lines = 1000"), "{doc}");
 
     // And a '#' before any '=' makes the whole line a comment, which is the
     // only reason comment lines work at all.
@@ -1562,9 +1570,9 @@ fn an_empty_theme_name_falls_back_to_the_default() {
     // theme_name is NULL in C until the user picks one, and the writer emits
     // NULL as "". C read empty as "use the built-in"; carrying "" across would
     // leave a theme name that resolves to nothing.
-    let (keys, _) = legacy::parse("[gtkhx]\nTHEMENAME=\nVOICEOUTPUTDEVICE=\nVOICEPTTKEY=\n");
+    let (keys, form) = legacy::parse("[gtkhx]\nTHEMENAME=\nVOICEOUTPUTDEVICE=\nVOICEPTTKEY=\n");
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let dir = TempDir::new("empty-theme");
@@ -1583,9 +1591,9 @@ fn a_zero_toolbar_size_is_the_never_saved_sentinel_not_an_error() {
     // The geo.tool static default is {0, 0, ...}, so a profile from before the
     // toolbar was ever resized carries TOOLXSIZE=0. That is not the user
     // getting something wrong, so it should not be reported as out of range.
-    let (keys, _) = legacy::parse("[gtkhx]\nTOOLXSIZE=0\nTOOLYSIZE=0\n");
+    let (keys, form) = legacy::parse("[gtkhx]\nTOOLXSIZE=0\nTOOLYSIZE=0\n");
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
     assert!(warnings.is_empty(), "{warnings:?}");
 
     let dir = TempDir::new("zero-tool");
@@ -1603,17 +1611,17 @@ fn an_over_long_nick_is_clamped_to_the_wire_field() {
     // but a hand-edited or bare-lines one can, and it would otherwise surface
     // as a wire problem at connect time rather than here.
     let long = "a".repeat(80);
-    let (keys, _) = legacy::parse(&format!("[gtkhx]\nNICK={long}\n"));
+    let (keys, form) = legacy::parse(&format!("[gtkhx]\nNICK={long}\n"));
     let mut warnings = Vec::new();
-    let doc = migrate::to_document(&keys, &mut warnings);
+    let doc = migrate::to_document(&keys, form, &mut warnings);
     assert!(doc.to_string().contains(&"a".repeat(31)));
     assert!(!doc.to_string().contains(&"a".repeat(32)));
 
     // Cut on a character boundary, or the result isn't valid UTF-8 and the
     // document can't be written at all.
     let wide = "é".repeat(40);
-    let (keys, _) = legacy::parse(&format!("[gtkhx]\nNICK={wide}\n"));
-    let doc = migrate::to_document(&keys, &mut Vec::new());
+    let (keys, form) = legacy::parse(&format!("[gtkhx]\nNICK={wide}\n"));
+    let doc = migrate::to_document(&keys, form, &mut Vec::new());
     let dir = TempDir::new("wide-nick");
     std::fs::write(path(dir.path()), doc.to_string()).expect("seed");
     let nick = Config::load(dir.path()).settings().identity.nick.clone();
@@ -1625,8 +1633,8 @@ fn an_over_long_nick_is_clamped_to_the_wire_field() {
 fn a_migrated_file_is_laid_out_like_a_fresh_one() {
     // An upgrading user's first gtkhx.toml should not look different from a
     // new user's. Both come out in schema order.
-    let (keys, _) = legacy::parse(REAL_PROFILE);
-    let migrated = migrate::to_document(&keys, &mut Vec::new()).to_string();
+    let (keys, form) = legacy::parse(REAL_PROFILE);
+    let migrated = migrate::to_document(&keys, form, &mut Vec::new()).to_string();
     let fresh = Config::defaults().to_toml();
 
     let headers = |s: &str| -> Vec<String> {
@@ -1637,4 +1645,50 @@ fn a_migrated_file_is_laid_out_like_a_fresh_one() {
     };
     assert_eq!(headers(&migrated), headers(&fresh));
     assert!(migrated.starts_with("version = 1"), "{migrated}");
+}
+
+#[test]
+fn a_meaningful_trailing_space_survives_the_line_form() {
+    // The line parser must not trim. The default timestamp format ends in a
+    // space, and a reader that trimmed would jam the timestamp against the
+    // message text — the exact quiet corruption this rewrite exists to end.
+    // The C parser passed the value straight to g_strdup, so verbatim is both
+    // correct and faithful.
+    let (keys, form) = legacy::parse("TIMESTAMPFORMAT=[%H:%M:%S] \nNICK=bob\n");
+    assert_eq!(form, Form::Lines);
+    assert_eq!(keys["TIMESTAMPFORMAT"], "[%H:%M:%S] ");
+
+    let doc = migrate::to_document(&keys, form, &mut Vec::new());
+    let dir = TempDir::new("line-trailing-space");
+    std::fs::write(path(dir.path()), doc.to_string()).expect("seed");
+    assert_eq!(
+        Config::load(dir.path()).settings().chat.timestamp_format,
+        "[%H:%M:%S] "
+    );
+}
+
+#[test]
+fn the_over_escape_warning_does_not_fire_on_the_line_form() {
+    // Nothing ever wrote the line form through g_key_file_set_string, so
+    // nothing escaped it and nothing unescapes it. A doubled backslash there
+    // is just a doubled backslash — a UNC path, most likely — and warning
+    // about it would explain a bug that cannot have happened to that file.
+    let (keys, form) = legacy::parse(r"DOWNLOAD=\\server\share");
+    assert_eq!(form, Form::Lines);
+    assert_eq!(keys["DOWNLOAD"], r"\\server\share");
+
+    let mut warnings = Vec::new();
+    let doc = migrate::to_document(&keys, form, &mut warnings);
+    assert!(warnings.is_empty(), "{warnings:?}");
+    assert!(doc.to_string().contains(r"\\server\share"));
+
+    // The same bytes in the GKeyFile form *do* warn, because there the
+    // asymmetry is real and one round of unescaping has already run.
+    let (keys, form) = legacy::parse("[gtkhx]\nDOWNLOAD=\\\\\\\\server\\\\share\n");
+    assert_eq!(form, Form::KeyFile);
+    let mut warnings = Vec::new();
+    migrate::to_document(&keys, form, &mut warnings);
+    assert!(warnings
+        .iter()
+        .any(|w| matches!(w.kind, WarningKind::OverEscaped { .. })));
 }
