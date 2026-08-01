@@ -15,6 +15,7 @@
   - Fixed bugs in preferences along the way
 - Hotline Protocol
   - Fixed old bug with resumable file transfers
+  - Ensure that multi-byte names > 32 bytes get truncated at a character boundary
 - Sound
   - Replaced libcanberra with rodio for notification sound playback
 - User Interface
@@ -28,6 +29,7 @@
     - Chat history can be searched via Ctrl-F
   - Ctrl-U now works to clear any input in the app
   - [Enter] in the Connect dialog now connects
+  - Handle character conversion on user list and user info
 
 ## 1.2.2
 
