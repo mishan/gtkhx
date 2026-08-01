@@ -690,3 +690,42 @@ fn user_info_dropped_when_info_empty() {
     };
     assert_eq!(test_env::take(), None);
 }
+
+// ---- Mac Roman nicknames ---------------------------------------------------
+
+#[test]
+fn a_nickname_is_decoded_from_mac_roman() {
+    // Hotline nicknames are Mac Roman on the wire. The roster path used to
+    // carry the raw bytes all the way to pango_layout_set_text, which drew
+    // mojibake and logged an invalid-UTF-8 warning on every repaint.
+    //
+    // 0xD5 is a right single quote in Mac Roman and is not valid UTF-8 alone,
+    // so it stands in for the whole class.
+    let wire = b"Jo\xd5s";
+    let got = unsafe { super::cstring_wire_text(wire) };
+    let text = got.to_str().expect("decoded names must be valid UTF-8");
+    assert_eq!(text, "Jo\u{2019}s");
+}
+
+#[test]
+fn a_utf8_nickname_passes_through_untouched() {
+    // Servers that advertise CAP_TEXT_ENCODING send UTF-8, and double-decoding
+    // one would be its own mojibake bug.
+    let wire = "Jo\u{2019}s".as_bytes();
+    let got = unsafe { super::cstring_wire_text(wire) };
+    assert_eq!(got.to_str().unwrap(), "Jo\u{2019}s");
+}
+
+#[test]
+fn a_nickname_still_truncates_at_an_interior_nul() {
+    // The old extractor terminated there, and a server that pads a fixed-width
+    // field with NULs would otherwise show them as trailing characters.
+    let got = unsafe { super::cstring_wire_text(b"bob\0\0\0") };
+    assert_eq!(got.to_str().unwrap(), "bob");
+}
+
+#[test]
+fn an_empty_name_is_empty_rather_than_a_failure() {
+    let got = unsafe { super::cstring_wire_text(b"") };
+    assert_eq!(got.to_str().unwrap(), "");
+}

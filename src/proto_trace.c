@@ -527,3 +527,64 @@ proto_trace_recv_hdr (guint32 type, guint32 trans, guint32 flag, guint32 len)
     debug_log (CAT, "← trans=%u type=%s (0x%06x) flag=%u len=%u", trans,
                proto_hdr_name (type), type, flag, len);
 }
+
+void
+proto_trace_recv_chunks (const guint8 *frame, gsize frame_len)
+{
+    const guint8 *p;
+    const guint8 *end;
+    guint16 count;
+
+    if (!debug_category_enabled (CAT) || frame == NULL) {
+        return;
+    }
+    /* The frame begins with the 2-byte chunk count, then that many
+     * (type, len, data) records. Anything shorter is a header with no body —
+     * a bare task ack, say — and has nothing to print. */
+    if (frame_len < sizeof (guint16)) {
+        return;
+    }
+    end = frame + frame_len;
+    count = (guint16)((frame[0] << 8) | frame[1]);
+    p = frame + sizeof (guint16);
+
+    for (guint16 i = 0; i < count; i++) {
+        guint16 type, len;
+        char *prev;
+
+        /* Every read is bounds-checked against the frame rather than trusted
+         * from the count: this is attacker-controlled input arriving before
+         * login, and a debug aid that can be made to walk off the end of a
+         * buffer is worse than no debug aid. A truncated frame simply stops
+         * printing. */
+        if ((gsize)(end - p) < 4) {
+            debug_log (CAT, "  <truncated after %u of %u chunks>", i, count);
+            return;
+        }
+        type = (guint16)((p[0] << 8) | p[1]);
+        len = (guint16)((p[2] << 8) | p[3]);
+        p += 4;
+        if ((gsize)(end - p) < len) {
+            debug_log (CAT, "  <chunk %u claims %u bytes, %zu remain>", i, len,
+                       (gsize)(end - p));
+            return;
+        }
+
+        /* Never print a credential. The pre-login frames replayed through this
+         * path carry them, and a trace someone pastes into a bug report should
+         * not be a password disclosure. The Rust handshake tracer redacts the
+         * same two. */
+        if (type == HTLC_DATA_LOGIN || type == HTLC_DATA_PASSWORD) {
+            debug_log (CAT, "  chunk type=%s (0x%04x) len=%u <redacted>",
+                       proto_data_name (type), type, len);
+            p += len;
+            continue;
+        }
+
+        prev = data_preview (p, len);
+        debug_log (CAT, "  chunk type=%s (0x%04x) len=%u %s",
+                   proto_data_name (type), type, len, prev);
+        g_free (prev);
+        p += len;
+    }
+}

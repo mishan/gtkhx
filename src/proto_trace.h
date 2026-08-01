@@ -48,6 +48,15 @@ extern void proto_trace_send_end (void);
 
 /* Incoming — called from hx_rcv_hdr after the header is decoded but
  * before dispatch. Logs the header line. */
+/* proto_trace_recv_chunks prints one line per data chunk in a received
+ * frame. Takes the frame as an explicit slice — the old version walked a
+ * persistent htlc->in buffer, which the Rust orchestrator retired, and it was
+ * deleted along with it. That left incoming frames tracing their header and
+ * nothing else, so the whole reason to turn the category on (seeing what a
+ * server actually sent) quietly stopped working. LOGIN and PASSWORD chunk
+ * bodies are redacted. */
+extern void proto_trace_recv_chunks (const guint8 *frame, gsize frame_len);
+
 extern void proto_trace_recv_hdr (guint32 type, guint32 trans, guint32 flag,
                                   guint32 len);
 
