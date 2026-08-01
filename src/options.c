@@ -49,10 +49,10 @@
 #include "hotline_proto.h" /* gtkhx_proto_gif_icon_is_gif */
 #include "text_util.h"
 #include "tracker.h"
+#include "panel_registry.h" /* hx_panel_was_constructed */
 #ifdef HAVE_VOICE
 #include "voice_runtime.h"
 #include "voice_ptt_keyspec.h"
-#include "panel_registry.h"
 #endif
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
@@ -1362,6 +1362,10 @@ pref_nick_color_row (void)
     return row;
 }
 
+/* Only the Voice page builds a combo row, so the whole mechanism is behind
+ * the same gate as that page — otherwise a build without voice carries two
+ * functions nothing calls. */
+#ifdef HAVE_VOICE
 static void
 on_combo_row_selected (AdwComboRow *row, GParamSpec *pspec, gpointer data)
 {
@@ -1427,6 +1431,7 @@ pref_combo_row (const char *cfgname, const char *title, const char **values,
                       G_CALLBACK (on_combo_row_selected), (gpointer)cfgname);
     return row;
 }
+#endif /* HAVE_VOICE */
 
 /* Runtime state that isn't a preference and so has no schema entry. Runs
  * before prefs_read, which then overwrites nothing here.
