@@ -5,8 +5,10 @@ connected to several Hotline servers at once. It is a **plan, not a record**:
 almost none of it is built. It exists to make the trade-offs legible before
 anyone commits, and to record the decisions that are deliberately still open.
 
-Companion reading: `docs/docking.md` (the dock the UI would extend), and the
-Rust roadmap, which parks this work at the end of the C→Rust window port.
+Companion reading: [docking.md](docking.md) (the dock the UI would extend),
+[preferences.md](preferences.md) (which owns the connection collection and the
+identity model M1 depends on), and the Rust roadmap, which parks this work at the
+end of the C→Rust window port.
 
 ---
 
@@ -351,6 +353,9 @@ regardless; and the bound pointer aims into an allocation that is deliberately
 never freed today, which becomes a use-after-free the moment connections can be
 destroyed.
 
+This is the half of M1 that the preferences rewrite delivers; the sequencing and
+the rest of the config design are in [preferences.md](preferences.md).
+
 Decoupling identity storage from connection storage removes all four. Nick and
 icon become ordinary preference fields; the connect path resolves the effective
 identity and copies it into the connection; the binder is deleted outright.
@@ -649,7 +654,7 @@ Illustrative, not committed. If the middle path on Axis 1 is chosen:
 | Phase | Scope | Depends on |
 |-------|-------|-----------|
 | M0 | Session-routing seam: `sess_from_htlc()` and `hx_active_session()` replace direct global access. Model code routes received events by connection; UI code routes by focused session. No behaviour change at N == 1. | — |
-| M1 | Connection collection: bookmarks become Settings → Connections; identity decoupled from connection storage and resolved as override-else-global at connect; the preferences binder deleted. Stands alone and improves N == 1. | — |
+| M1 | Connection collection: bookmarks become Settings → Connections; identity decoupled from connection storage and resolved as override-else-global at connect; the preferences binder deleted. Rides on the preferences rewrite — see [preferences.md](preferences.md). Stands alone and improves N == 1. | — |
 | M2 | Transport bridge handle moves onto the connection; the send primitive takes a connection. Two connections can coexist. | — |
 | M3 | Connection identity on the untagged signals; the two discard-the-htlc handlers fixed; connection tags on the flat cid/uid indexes and notification ids. | M2 |
 | M4 | Reify the connection/session as a heap object behind a collection and factory; connection tab strip; pick layout Model A or B; per-Chat-panel tab view; per-connection factory replaces eager panel construction. | M1, M3 |
