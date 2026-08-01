@@ -271,13 +271,7 @@ pub extern "C" fn hxconfig_tracker_count() -> c_int {
 #[no_mangle]
 pub extern "C" fn hxconfig_tracker_at(i: c_int) -> *mut c_char {
     with(std::ptr::null_mut(), |s| {
-        match s
-            .config
-            .settings()
-            .trackers
-            .addresses
-            .get(i.max(0) as usize)
-        {
+        match index(i).and_then(|i| s.config.settings().trackers.addresses.get(i)) {
             Some(a) => into_raw(a.clone()),
             None => std::ptr::null_mut(),
         }

@@ -1663,7 +1663,7 @@ fn the_over_escape_warning_does_not_fire_on_the_line_form() {
 // also pin that the map stays usable as a live lookup, not just a one-shot.
 
 use crate::ffi;
-use std::ffi::CString;
+use std::ffi::{c_int, CString};
 
 /// Call an FFI entry point with a C string, without leaking one per call.
 fn c(s: &str) -> CString {
@@ -1766,7 +1766,13 @@ fn a_list_reads_and_writes_as_one_comma_separated_string() {
     // the char** the tracker fetch wants.
     assert_eq!(ffi::hxconfig_tracker_count(), 3);
     assert_eq!(take(ffi::hxconfig_tracker_at(1)), "b.example");
+    // Out of range in either direction is "no such address". A negative index
+    // clamped to zero would answer a nonsense question with a real-looking
+    // tracker, which is how the C caller's loop bound would go unnoticed.
+    assert!(ffi::hxconfig_tracker_at(3).is_null());
     assert!(ffi::hxconfig_tracker_at(99).is_null());
+    assert!(ffi::hxconfig_tracker_at(-1).is_null());
+    assert!(ffi::hxconfig_tracker_at(c_int::MIN).is_null());
 }
 
 #[test]
@@ -1871,4 +1877,5 @@ fn diagnostics_are_reachable_from_c() {
     assert!(text.contains("chat.scrollback_lines"), "{text}");
     assert!(ffi::hxconfig_warning(1).is_null());
     assert!(ffi::hxconfig_warning(-1).is_null());
+    assert!(ffi::hxconfig_warning(c_int::MIN).is_null());
 }
