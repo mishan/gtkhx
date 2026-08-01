@@ -9,6 +9,10 @@
   - GtkHx is now available for macOS and Windows
 - Code Modernization
   - GtkHx is now mostly Rust code
+- Config
+  - The settings file (gtkhxrc) is now gtkhx.toml
+  - GtkHx will migrate the old gtkhxrc if one is present and no gtkhx.toml exists
+  - Fixed bugs in preferences along the way
 - Hotline Protocol
   - Fixed old bug with resumable file transfers
 - Sound
