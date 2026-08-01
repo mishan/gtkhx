@@ -23,14 +23,15 @@ use toml_edit::{Array, DocumentMut, Item, Table, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Flag,
-    /// A signed integer. `identity.nick_color` is the only one, and it needs
-    /// the sign for its "no colour" sentinel.
-    Signed,
     Unsigned,
     /// An unsigned integer floored at 1 — a window dimension.
     Extent,
     /// An unsigned integer that fits in 16 bits: a Hotline icon ID.
     Id16,
+    /// A colour. `0x00RRGGBB` in memory, `#rrggbb` on disk — the value is an
+    /// integer everywhere except the file, where a bare decimal was
+    /// unreadable and uneditable.
+    Color,
     Text,
     /// An array of strings.
     List,
@@ -83,10 +84,10 @@ macro_rules! field_table {
     };
 
     (@kind flag)     => { Kind::Flag };
-    (@kind signed)   => { Kind::Signed };
     (@kind unsigned) => { Kind::Unsigned };
     (@kind extent)   => { Kind::Extent };
     (@kind id16)     => { Kind::Id16 };
+    (@kind color)    => { Kind::Color };
     (@kind text)     => { Kind::Text };
     (@kind list)     => { Kind::List };
     (@kind scheme)   => { Kind::Scheme };
@@ -248,7 +249,7 @@ pub(crate) fn set_string(s: &mut Settings, path: &str, v: &str) -> bool {
 field_table! {
     "identity.nick"                 => text,     identity.nick;
     "identity.icon"                 => id16,     identity.icon;
-    "identity.nick_color"           => signed,   identity.nick_color;
+    "identity.nick_color"           => color,    identity.nick_color;
 
     "appearance.color_scheme"       => scheme,   appearance.color_scheme;
     "appearance.theme"              => text,     appearance.theme;
@@ -449,12 +450,6 @@ impl<'a> Reader<'a> {
         Some(v)
     }
 
-    fn signed(&mut self, path: &str, out: &mut i32) {
-        if let Some(v) = self.integer(path, i32::MIN as i64, i32::MAX as i64) {
-            *out = v as i32;
-        }
-    }
-
     fn unsigned(&mut self, path: &str, out: &mut u32) {
         if let Some(v) = self.integer(path, 0, u32::MAX as i64) {
             *out = v as u32;
@@ -464,6 +459,36 @@ impl<'a> Reader<'a> {
     fn id16(&mut self, path: &str, out: &mut u16) {
         if let Some(v) = self.integer(path, 0, u16::MAX as i64) {
             *out = v as u16;
+        }
+    }
+
+    /// A nickname colour, written `#rrggbb`.
+    ///
+    /// An integer is still accepted, because that is what the key held before
+    /// and what someone reaching for a decimal would write. Reading both and
+    /// writing one means a file heals itself on the next save rather than
+    /// needing a schema version to carry the change.
+    fn color(&mut self, path: &str, out: &mut i32) {
+        let Some(item) = lookup(self.doc, path) else {
+            return;
+        };
+        if let Some(n) = item.as_integer() {
+            *out = n.clamp(i32::MIN as i64, i32::MAX as i64) as i32;
+            return;
+        }
+        let Some(text) = item.as_str() else {
+            self.wrong_type(path, "colour like \"#rrggbb\"", item);
+            return;
+        };
+        match crate::schema::parse_nick_color(text) {
+            Some(v) => *out = v,
+            None => self.warnings.push(Warning {
+                path: path.to_string(),
+                kind: WarningKind::UnknownValue {
+                    value: text.to_string(),
+                    allowed: COLOR_FORMS,
+                },
+            }),
         }
     }
 
@@ -527,6 +552,9 @@ impl<'a> Reader<'a> {
 }
 
 // ---------------------------------------------------------------- writing --
+
+/// What a colour may be spelled as, for the diagnostic when it isn't one.
+const COLOR_FORMS: &[&str] = &["#rrggbb", "#rgb", "none", "\"\" for no colour"];
 
 /// Do these two values mean the same thing, whatever they look like?
 ///
@@ -621,10 +649,6 @@ impl<'a> Writer<'a> {
         self.put(path, Value::from(v));
     }
 
-    fn signed(&mut self, path: &str, v: &i32) {
-        self.put(path, Value::from(*v as i64));
-    }
-
     fn unsigned(&mut self, path: &str, v: &u32) {
         self.put(path, Value::from(*v as i64));
     }
@@ -635,6 +659,10 @@ impl<'a> Writer<'a> {
 
     fn extent(&mut self, path: &str, v: &u32) {
         self.put(path, Value::from(*v as i64));
+    }
+
+    fn color(&mut self, path: &str, v: &i32) {
+        self.put(path, Value::from(crate::schema::format_nick_color(*v)));
     }
 
     fn list(&mut self, path: &str, v: &[String]) {

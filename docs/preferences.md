@@ -178,7 +178,7 @@ version = 1
 [identity]
 nick = "Misha"
 icon = 500
-nick_color = -1              # -1 = none
+nick_color = "#c061cb"       # "" for none
 
 [appearance]
 color_scheme = "system"      # system | light | dark
@@ -254,6 +254,15 @@ ptt_key = ""
 toolbar_width = 1100
 toolbar_height = 700
 ```
+
+- **The nickname colour is written `#rrggbb`.** It was a bare decimal —
+  `12607947` — which tells a reader nothing and cannot be hand-edited with any
+  confidence. It is an integer everywhere else, in memory and on the wire; only
+  the file spells it in hex, and the empty string means no colour, matching
+  the schema's other "empty means unset" values. Reading accepts `#rgb`, either
+  form without the `#`, any case, and a bare integer, so a file written before
+  this or by someone reaching for a decimal still loads and heals itself on the
+  next save.
 
 Four structural changes worth calling out:
 
