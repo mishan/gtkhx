@@ -57,6 +57,31 @@ pub enum WarningKind {
     /// file predates the key, so it is version 1 and goes through the chain
     /// like any other version 1 file.
     BadVersion(String),
+
+    // ---- migrating an old gtkhxrc ----------------------------------------
+    /// A key in the old file that no version of the settings table ever had.
+    /// Hand-written, or from a fork. Reported rather than dropped in silence,
+    /// because it is the one case where the user has something to act on.
+    /// `path` holds the old key name.
+    UnknownLegacyKey,
+    /// An old value that could not be made into the type its new home wants.
+    /// The setting keeps its default. The old reader turned an unparseable
+    /// number into zero here, with no diagnostic at all.
+    UnmigratableValue {
+        key: String,
+        value: String,
+    },
+    /// A migrated string still contains a doubled backslash after one round of
+    /// unescaping, so the old writer/reader escape asymmetry ran more than
+    /// once over it. How many times is unknowable, so the value is handed over
+    /// as-is and flagged rather than guessed at.
+    OverEscaped {
+        key: String,
+    },
+    /// The old file was not valid UTF-8 and was read as Mac Roman instead.
+    /// Not a failure — it is what the C reader did with a nickname that failed
+    /// the same check — but the user should know their text was reinterpreted.
+    NotUtf8,
 }
 
 impl fmt::Display for Warning {
@@ -91,6 +116,26 @@ impl fmt::Display for Warning {
                     "version {found} is not a positive integer; assuming current"
                 )
             }
+            WarningKind::UnknownLegacyKey => {
+                write!(f, "no setting by this name; not migrated")
+            }
+            WarningKind::UnmigratableValue { key, value } => write!(
+                f,
+                "{key}={value:?} in the old gtkhxrc is not a value this setting \
+                 can take; keeping the default"
+            ),
+            WarningKind::OverEscaped { key } => write!(
+                f,
+                "migrated from {key} and still contains a doubled backslash, so \
+                 the old escaping bug may have run over it more than once — \
+                 check the value. (A Windows UNC path legitimately looks like \
+                 this, in which case it is already correct.)"
+            ),
+            WarningKind::NotUtf8 => write!(
+                f,
+                "is not UTF-8; read as Mac Roman, which is what the old client \
+                 assumed for a nickname that failed the same check"
+            ),
         }
     }
 }

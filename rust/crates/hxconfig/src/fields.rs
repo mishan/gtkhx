@@ -14,6 +14,30 @@ use crate::schema::{ColorScheme, Settings};
 use crate::warning::{Warning, WarningKind};
 use toml_edit::{Array, DocumentMut, Item, Table, Value};
 
+/// What sort of value a path holds.
+///
+/// The migration needs this to turn an old `gtkhxrc` string into a TOML value
+/// of the right type, and deriving it from the field table rather than
+/// restating it is the point — a second copy of "which keys are booleans" is
+/// exactly the kind of hand-mirrored list that drifted in the old system.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Flag,
+    /// A signed integer. `identity.nick_color` is the only one, and it needs
+    /// the sign for its "no colour" sentinel.
+    Signed,
+    Unsigned,
+    /// An unsigned integer floored at 1 — a window dimension.
+    Extent,
+    /// An unsigned integer that fits in 16 bits: a Hotline icon ID.
+    Id16,
+    Text,
+    /// An array of strings.
+    List,
+    /// One of a fixed set of names.
+    Scheme,
+}
+
 macro_rules! field_table {
     ($($path:literal => $kind:ident, $($f:ident).+);+ $(;)?) => {
         /// Overlay whatever the document supplies onto `s`, leaving each
@@ -27,10 +51,32 @@ macro_rules! field_table {
             $( w.$kind($path, &s.$($f).+); )+
         }
 
-        /// Every path the schema knows, in file order. Exposed so a test can
-        /// assert the migration map covers all of them once that lands.
+        /// Every path the schema knows and the kind of value it holds, in file
+        /// order. The migration's coverage test asserts against this both
+        /// ways: every old key maps to a path that exists here, and every path
+        /// here is reachable from some old key or explicitly accounted for.
+        pub const FIELDS: &[(&str, Kind)] = &[
+            $(($path, field_table!(@kind $kind))),+
+        ];
+
+        /// Just the paths, in the same order. Same expansion as `FIELDS`, so
+        /// the two cannot disagree.
         pub const PATHS: &[&str] = &[ $($path),+ ];
     };
+
+    (@kind flag)     => { Kind::Flag };
+    (@kind signed)   => { Kind::Signed };
+    (@kind unsigned) => { Kind::Unsigned };
+    (@kind extent)   => { Kind::Extent };
+    (@kind id16)     => { Kind::Id16 };
+    (@kind text)     => { Kind::Text };
+    (@kind list)     => { Kind::List };
+    (@kind scheme)   => { Kind::Scheme };
+}
+
+/// The kind of value at `path`, or `None` if the schema has no such path.
+pub fn kind_of(path: &str) -> Option<Kind> {
+    FIELDS.iter().find(|(p, _)| *p == path).map(|(_, k)| *k)
 }
 
 field_table! {

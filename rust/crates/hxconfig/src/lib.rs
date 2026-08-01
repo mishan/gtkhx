@@ -35,13 +35,15 @@
 
 mod atomic;
 mod fields;
+pub mod legacy;
+pub mod migrate;
 pub mod schema;
 mod warning;
 
 #[cfg(test)]
 mod tests;
 
-pub use fields::PATHS;
+pub use fields::{kind_of, Kind, FIELDS, PATHS};
 pub use schema::*;
 pub use warning::{Warning, WarningKind};
 
@@ -87,6 +89,9 @@ pub enum Provenance {
     /// defaults; the next save moves the bad file aside (see
     /// [`SALVAGE_SUFFIX`]) before writing.
     Unusable,
+    /// There was no `gtkhx.toml`, and the settings came from an old `gtkhxrc`
+    /// instead. Nothing is on disk in the new format until the caller saves.
+    Imported { form: legacy::Form },
 }
 
 /// A loaded settings file: the typed values, the document they came from, and
@@ -153,7 +158,7 @@ impl Config {
         let provenance = match found.cmp(&CURRENT_VERSION) {
             std::cmp::Ordering::Equal => Provenance::Current,
             std::cmp::Ordering::Less => {
-                migrate(&mut doc, found, &mut warnings);
+                migrate_schema_version(&mut doc, found, &mut warnings);
                 Provenance::Migrated { from: found }
             }
             std::cmp::Ordering::Greater => {
@@ -168,8 +173,22 @@ impl Config {
             }
         };
 
-        // Start from the defaults and overlay whatever the file supplies, so a
-        // key the file omits keeps its default rather than becoming zero.
+        Config::from_document(doc, provenance, warnings)
+    }
+
+    /// Read a document into typed settings.
+    ///
+    /// Shared by the load path and the migration, which is the point: a
+    /// migrated file gets the same type conversion, range checks and
+    /// diagnostics as one read off disk, rather than a second implementation
+    /// of them that could disagree.
+    fn from_document(
+        doc: DocumentMut,
+        provenance: Provenance,
+        mut warnings: Vec<Warning>,
+    ) -> Config {
+        // Start from the defaults and overlay whatever the document supplies,
+        // so a key it omits keeps its default rather than becoming zero.
         let mut settings = Settings::default();
         let mut reader = fields::Reader::new(&doc, &mut warnings);
         reader.check_table_prefixes();
@@ -192,6 +211,76 @@ impl Config {
             warnings: Vec::new(),
             newer_acknowledged: false,
         }
+    }
+
+    /// Load `gtkhx.toml`, importing an old `gtkhxrc` if there isn't one yet.
+    ///
+    /// `legacy_paths` are tried in order and the first that exists wins — the
+    /// caller supplies `$CONFIG/gtkhxrc` then `$HOME/.gtkhxrc`, matching where
+    /// the C reader looks.
+    ///
+    /// **The old file is left exactly where it is.** Not deleted, not renamed,
+    /// not rewritten. If this build turns out to be a mistake, the previous one
+    /// still starts up with the user's settings intact — which is also how the
+    /// legacy bookmark import behaves, and for the same reason.
+    ///
+    /// Importing does not save. The caller decides when to write, so a failed
+    /// first run doesn't leave a half-migrated file behind.
+    pub fn load_or_migrate(config_dir: &Path, legacy_paths: &[PathBuf]) -> Config {
+        let config = Config::load(config_dir);
+        // Anything other than "no file at all" means the new format is already
+        // in charge. A file that exists but is corrupt deliberately does *not*
+        // fall back to the old one: the salvage path preserves it and the user
+        // carries on at defaults, and silently reverting to a years-old
+        // gtkhxrc would be a far stranger thing to do.
+        if config.provenance != Provenance::Fresh {
+            return config;
+        }
+
+        for file in legacy_paths {
+            // Bytes, not a string: a legacy file need not be UTF-8, and
+            // `read_to_string` would reject the whole thing. Treating that as
+            // "no file" would silently reset every setting the user had, once,
+            // with no way back. See `legacy::decode`.
+            let bytes = match std::fs::read(file) {
+                Ok(bytes) => bytes,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(e) => {
+                    // Exists but can't be read — permissions, a directory in
+                    // its place. That is not the same as absent, and falling
+                    // through to an older file would be the wrong answer, so
+                    // stop here and say why.
+                    return Config {
+                        warnings: vec![Warning {
+                            path: file.display().to_string(),
+                            kind: WarningKind::Unreadable(e.to_string()),
+                        }],
+                        ..config
+                    };
+                }
+            };
+
+            // The first file that *exists* decides, even if it turns out to
+            // hold nothing. The C reader works the same way, and "your current
+            // file was empty so I used your twenty-year-old one" would be a
+            // strange thing to do unasked.
+            let mut warnings = Vec::new();
+            let (text, not_utf8) = legacy::decode(&bytes);
+            if not_utf8 {
+                warnings.push(Warning {
+                    path: file.display().to_string(),
+                    kind: WarningKind::NotUtf8,
+                });
+            }
+            let (keys, form) = legacy::parse(&text);
+            if keys.is_empty() {
+                return Config { warnings, ..config };
+            }
+            let doc = migrate::to_document(&keys, form, &mut warnings);
+            return Config::from_document(doc, Provenance::Imported { form }, warnings);
+        }
+
+        config
     }
 
     /// Compiled-in defaults, backed by an empty document. Useful for tests and
@@ -375,7 +464,11 @@ const STEPS: &[MigrationStep] = &[];
 
 /// Bring a document forward from `from` to [`CURRENT_VERSION`], one step at a
 /// time.
-fn migrate(doc: &mut DocumentMut, from: u32, warnings: &mut Vec<Warning>) {
+///
+/// Not to be confused with the [`migrate`] module, which converts an old
+/// `gtkhxrc` into this format. This one moves an already-TOML file between
+/// schema versions.
+fn migrate_schema_version(doc: &mut DocumentMut, from: u32, warnings: &mut Vec<Warning>) {
     for step in STEPS.iter().skip(from.saturating_sub(1) as usize) {
         step(doc, warnings);
     }

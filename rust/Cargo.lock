@@ -1994,6 +1994,7 @@ dependencies = [
 name = "hxconfig"
 version = "0.1.0"
 dependencies = [
+ "hotline-proto",
  "toml_edit",
 ]
 
