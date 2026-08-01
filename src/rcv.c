@@ -1100,6 +1100,11 @@ hx_dispatch_frame (struct htlc_conn *htlc, const guint8 *frame, gsize frame_len,
      * that raw value. */
     proto_trace_recv_hdr (type, trans, flag,
                           body_len + (guint32)sizeof (guint16));
+    /* Here rather than in any handler: this sits upstream of the routing
+     * switch, so every incoming frame is traced whether its handler ended up
+     * in C or in Rust. The chunks used to be printed by the legacy control
+     * reader, which went with the old connect path. */
+    proto_trace_recv_chunks (frame, frame_len);
 
     void (*handler) (struct htlc_conn *, const guint8 *, gsize) = NULL;
     switch (hx_recv_route (type)) {

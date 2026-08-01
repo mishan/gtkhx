@@ -360,6 +360,41 @@ test_hdr_unknown_buffer_is_overwritten_on_next_call (void)
     g_assert_cmpstr (first, ==, "0x222222");
 }
 
+/* proto_trace_recv_chunks walks a frame straight off the wire, including
+ * pre-login frames from a server that has not authenticated anything yet. A
+ * debug aid that can be made to read past its buffer is worse than no debug
+ * aid, so the bounds checks are the part worth pinning — the printing itself
+ * is only reachable with GTKHX_DEBUG=proto set, and these run without it, so
+ * what this really asserts is "does not crash or read out of bounds".
+ *
+ * Run under the sanitizers in CI, where an over-read is a failure rather than
+ * a silent success. */
+static void
+test_recv_chunks_malformed (void)
+{
+    /* A count with no chunks behind it. */
+    const guint8 lying_count[] = { 0x00, 0x7f };
+    proto_trace_recv_chunks (lying_count, sizeof (lying_count));
+
+    /* A chunk header that runs off the end. */
+    const guint8 short_header[] = { 0x00, 0x01, 0x01, 0x2c, 0x00 };
+    proto_trace_recv_chunks (short_header, sizeof (short_header));
+
+    /* A length longer than the bytes that follow it. */
+    const guint8 long_len[] = { 0x00, 0x01, 0x01, 0x2c, 0xff, 0xff, 0x41 };
+    proto_trace_recv_chunks (long_len, sizeof (long_len));
+
+    /* Shorter than the count field, and empty. */
+    const guint8 stub[] = { 0x00 };
+    proto_trace_recv_chunks (stub, sizeof (stub));
+    proto_trace_recv_chunks (stub, 0);
+    proto_trace_recv_chunks (NULL, 0);
+
+    /* And a well-formed one, for the happy path. */
+    const guint8 ok[] = { 0x00, 0x01, 0x01, 0x2c, 0x00, 0x03, 'b', 'o', 'b' };
+    proto_trace_recv_chunks (ok, sizeof (ok));
+}
+
 int
 main (int argc, char **argv)
 {
@@ -425,6 +460,9 @@ main (int argc, char **argv)
     g_test_add_func ("/proto_names/data_voice_muted", test_data_voice_muted);
     g_test_add_func ("/proto_names/data_voice_participants",
                      test_data_voice_participants);
+
+    g_test_add_func ("/proto_trace/recv_chunks_survives_malformed_frames",
+                     test_recv_chunks_malformed);
 
     return g_test_run ();
 }
