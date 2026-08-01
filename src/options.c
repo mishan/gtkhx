@@ -57,9 +57,6 @@
 
 G_GNUC_BEGIN_IGNORE_DEPRECATIONS
 
-time_t start_time;
-time_t total_time;
-
 static struct icon_viewer *iv;
 
 GtkWidget *options_window = NULL;
@@ -1068,7 +1065,6 @@ struct cfgvar {
       0,
       changed_theme_name,
       NULL },
-    { CFG_TIME, { &total_time }, TIME_T, 0, NULL, NULL },
     { CFG_TIMESTAMP,
       { &gtkhx_prefs.timestamp },
       BOOLEAN,
@@ -1924,8 +1920,6 @@ init_variables (void) /* default settings if prefs file is not found. */
     gtkhx_prefs.voice_ptt_enabled = 0;
     gtkhx_prefs.voice_ptt_key = g_strdup ("");
     (*cfgvar_for_name (CFG_VOICE_PTT_KEY)).allocated = 1;
-
-    start_time = time (NULL);
 }
 
 static void
@@ -2304,12 +2298,7 @@ prefs_write (void)
     char *path = prefs_primary_path ();
     GKeyFile *kf;
     GError *err = NULL;
-    time_t now;
     int i;
-
-    now = time (NULL);
-    total_time += (now - start_time);
-    start_time = now;
 
     kf = g_key_file_new ();
     g_key_file_set_comment (kf, NULL, NULL,

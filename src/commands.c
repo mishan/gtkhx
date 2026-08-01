@@ -91,34 +91,10 @@ chrexpand (char *str, int len)
 
 COMMAND (help)
 {
-    /* XXX: this needs to be maintained ... */
-
     hx_printf_prefix (htlc, cid, INFOPREFIX, "Commands: \n");
     hx_printf (htlc, cid, "clear   close     exec    help\n");
     hx_printf (htlc, cid, "icon    ignore    me      news\n");
     hx_printf (htlc, cid, "nick    post      quit    server\n");
-}
-
-COMMAND (stats)
-{
-    char stat_str[256];
-    int years, days, hours, mins;
-    time_t secs = total_time + (time (NULL) - start_time);
-
-    years = secs / (60 * 60 * 24 * 365);
-    secs %= (60 * 60 * 24 * 365);
-    days = secs / (60 * 60 * 24);
-    secs %= (60 * 60 * 24);
-    hours = secs / (60 * 60);
-    secs %= (60 * 60);
-    mins = secs / 60;
-    secs %= 60;
-
-    g_snprintf (stat_str, sizeof (stat_str),
-                "has been online for %d years, %d days, %02d hours, "
-                "%02d mins, %02lu secs.",
-                years, days, hours, mins, secs);
-    hx_send_chat (htlc, stat_str, cid, 1);
 }
 
 COMMAND (nick)
@@ -434,7 +410,7 @@ static struct hx_command commands_tbl[] = {
     { "help", cmd_help },   { "icon", cmd_icon },      { "ignore", cmd_ignore },
     { "me", cmd_me },       { "msg", cmd_msg },        { "nick", cmd_nick },
     { "post", cmd_post },   { "quit", cmd_quit },      { "server", cmd_server },
-    { "stats", cmd_stats }, { "unignore", cmd_ignore }
+    { "unignore", cmd_ignore }
 };
 
 static struct hx_command *commands

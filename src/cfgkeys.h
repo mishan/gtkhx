@@ -146,9 +146,6 @@
  * implicitly matched so this list is purely additional. */
 #define CFG_HIGHLIGHT_WORDS "HIGHLIGHTWORDS"
 
-/* Timer / startup bookkeeping */
-#define CFG_TIME "TIME"
-
 /* Window geometry — four windows × (w, h) + an OPEN flag.
  * Names match the historic gtkhxrc keys; consumers always use these
  * five base names so a global 5x5 sweep still finds every reference. */
