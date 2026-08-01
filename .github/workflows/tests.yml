@@ -144,26 +144,10 @@ jobs:
               # fingerprint (the build cache stays valid). mold is installed
               # in the gtkhx-ci-base image.
 
-              # All build/test deps (base + GStreamer) are pre-installed in
-              # the gtkhx-ci-base image (published from the hotline-docker
+              # All build/test deps (base + GStreamer + Xvfb) are pre-installed
+              # in the gtkhx-ci-base image (published from the hotline-docker
               # repo) — no per-run dnf install. Keep that image in sync with
               # this build if a new dep is added.
-
-              # ...with one exception, and it should not stay one. The Rust
-              # widget tests need a display: GTK 4 has no headless backend and
-              # gtk4-rs asserts an initialised GTK inside the generated
-              # class_init, so anything that constructs a widget needs a real
-              # GdkDisplay. Lacking one, those tests used to return early and
-              # report success — which hid a reference-cycle leak in the chat
-              # view for as long as it existed, because nobody runs the suite
-              # on a desktop very often and CI said green.
-              #
-              # Xvfb is the cheapest way to make them run for real. Move this
-              # into gtkhx-ci-base and delete these two lines; it is here only
-              # to keep the change that needs it self-contained.
-              command -v Xvfb >/dev/null 2>&1 \
-                || dnf install -y --setopt=install_weak_deps=False \
-                     xorg-x11-server-Xvfb
 
               # Fedora rust ignores rust-toolchain.toml; assert the MSRV floor
               # up front so a Fedora rust regression fails loudly here.
